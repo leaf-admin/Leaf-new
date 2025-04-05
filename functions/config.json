@@ -1,0 +1,19 @@
+{
+	"app_name": "Leaf",
+	"app_description": "O novo jeito de ir e vir",
+	"app_identifier": "com.leaf.app",
+	"ios_app_version": "1.0.0",
+	"android_app_version": "100",
+	"firebaseProjectId": "leaf-reactnative",
+	"googleApiKeys": {
+		"ios": "AIzaSyByUEms15YpjPAbP4KF07b21kQuOuexI44",
+		"android": "AIzaSyByUEms15YpjPAbP4KF07b21kQuOuexI44",
+		"web": "AIzaSyByUEms15YpjPAbP4KF07b21kQuOuexI44",
+		"server": "AIzaSyByUEms15YpjPAbP4KF07b21kQuOuexI44"
+	},
+	"expo_owner": "leaf-app",
+	"expo_slug": "leafapp-reactnative",
+	"expo_project_id": "91dfdce0-9705-4fde-8417-747273ab7cc2",
+	"admin_email": "admin@leaf.app.br",
+	"purchase_code": "7d06f1aa-604e-43ab-9025-48b6793cf461"
+}

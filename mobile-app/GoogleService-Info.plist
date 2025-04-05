@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CLIENT_ID</key>
+	<string>106504629884-u4akt2328ioo8k2j5gfskf5amqlp12hc.apps.googleusercontent.com</string>
+	<key>REVERSED_CLIENT_ID</key>
+	<string>com.googleusercontent.apps.106504629884-u4akt2328ioo8k2j5gfskf5amqlp12hc</string>
+	<key>API_KEY</key>
+	<string>AIzaSyDhY2L7TRG4l3xjINayyih-Md5ZMACp-0I</string>
+	<key>GCM_SENDER_ID</key>
+	<string>106504629884</string>
+	<key>PLIST_VERSION</key>
+	<string>1</string>
+	<key>BUNDLE_ID</key>
+	<string>com.leaf.app</string>
+	<key>PROJECT_ID</key>
+	<string>leaf-reactnative</string>
+	<key>STORAGE_BUCKET</key>
+	<string>leaf-reactnative.firebasestorage.app</string>
+	<key>IS_ADS_ENABLED</key>
+	<false></false>
+	<key>IS_ANALYTICS_ENABLED</key>
+	<false></false>
+	<key>IS_APPINVITE_ENABLED</key>
+	<true></true>
+	<key>IS_GCM_ENABLED</key>
+	<true></true>
+	<key>IS_SIGNIN_ENABLED</key>
+	<true></true>
+	<key>GOOGLE_APP_ID</key>
+	<string>1:106504629884:ios:b3416a421de28022a1a3f9</string>
+	<key>DATABASE_URL</key>
+	<string>https://leaf-reactnative-default-rtdb.firebaseio.com</string>
+</dict>
+</plist>
