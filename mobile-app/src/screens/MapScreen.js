@@ -238,6 +238,7 @@ export default function MapScreen(props) {
     const {
         fetchAddressfromCoords,
         fetchDrivers,
+        fetchNearbyDrivers,
         updateTripPickup,
         updateTripDrop,
         updatSelPointType,
@@ -1404,112 +1405,140 @@ export default function MapScreen(props) {
 
     const getDrivers = async () => {
         if (tripdata.pickup) {
-            let availableDrivers = [];
-            let arr = {};
-            let startLoc = tripdata.pickup.lat + ',' + tripdata.pickup.lng;
+            try {
+                console.log('🚗 Buscando motoristas próximos...');
+                
+                // Usar nova função otimizada com Redis
+                const nearbyDrivers = await dispatch(fetchNearbyDrivers(
+                    tripdata.pickup.lat, 
+                    tripdata.pickup.lng, 
+                    (settings && settings.driverRadius) ? settings.driverRadius : 10,
+                    { appType: 'app' }
+                ));
 
-            let distArr = [];
-            let allDrivers = [];
-            for (let i = 0; i < drivers.length; i++) {
-                let driver = { ...drivers[i] };
-                let distance = GetDistance(tripdata.pickup.lat, tripdata.pickup.lng, driver.location.lat, driver.location.lng);
-                if (settings.convert_to_mile) {
-                    distance = distance / 1.609344;
-                }
-                if (distance < ((settings && settings.driverRadius) ? settings.driverRadius : 10)) {
-                    driver["distance"] = distance;
-                    allDrivers.push(driver);
-                }
-            }
+                console.log('📍 Motoristas encontrados:', nearbyDrivers.length);
 
-            const sortedDrivers = settings.useDistanceMatrix ? allDrivers.slice(0, 25) : allDrivers;
+                if (nearbyDrivers && nearbyDrivers.length > 0) {
+                    let availableDrivers = [];
+                    let arr = {};
+                    let startLoc = tripdata.pickup.lat + ',' + tripdata.pickup.lng;
+                    let distArr = [];
 
-            if (sortedDrivers.length > 0) {
-                let driverDest = "";
-                for (let i = 0; i < sortedDrivers.length; i++) {
-                    let driver = { ...sortedDrivers[i] };
-                    driverDest = driverDest + driver.location.lat + "," + driver.location.lng
-                    if (i < (sortedDrivers.length - 1)) {
-                        driverDest = driverDest + '|';
-                    }
-                }
+                    // Usar motoristas já ordenados por distância do Redis/Firebase
+                    const sortedDrivers = settings.useDistanceMatrix ? nearbyDrivers.slice(0, 25) : nearbyDrivers;
 
-                if (settings.useDistanceMatrix) {
-                    distArr = await getDistanceMatrix(startLoc, driverDest);
-                } else {
-                    for (let i = 0; i < sortedDrivers.length; i++) {
-                        distArr.push({ timein_text: ((sortedDrivers[i].distance * 2) + 1).toFixed(0) + ' min', found: true })
-                    }
-                }
-
-
-                for (let i = 0; i < sortedDrivers.length; i++) {
-                    let driver = { ...sortedDrivers[i] };
-                    if (distArr[i].found && cars) {
-                        driver.arriveTime = distArr[i];
-                        for (let i = 0; i < cars.length; i++) {
-                            if (cars[i].name == driver.carType) {
-                                driver.carImage = cars[i].image;
+                    if (sortedDrivers.length > 0) {
+                        // Preparar destinos para Distance Matrix (se necessário)
+                        let driverDest = "";
+                        for (let i = 0; i < sortedDrivers.length; i++) {
+                            let driver = { ...sortedDrivers[i] };
+                            driverDest = driverDest + driver.location.lat + "," + driver.location.lng;
+                            if (i < (sortedDrivers.length - 1)) {
+                                driverDest = driverDest + '|';
                             }
                         }
-                        let carType = driver.carType;
-                        if(carType && carType.length>0){
-                            if (arr[carType] && arr[carType].sortedDrivers) {
-                                arr[carType].sortedDrivers.push(driver);
-                                if (arr[carType].minDistance > driver.distance) {
-                                    arr[carType].minDistance = driver.distance;
-                                    arr[carType].minTime = driver.arriveTime.timein_text;
-                                }
-                            } else {
-                                arr[carType] = {};
-                                arr[carType].sortedDrivers = [];
-                                arr[carType].sortedDrivers.push(driver);
-                                arr[carType].minDistance = driver.distance;
-                                arr[carType].minTime = driver.arriveTime.timein_text;
+
+                        // Obter tempos de chegada
+                        if (settings.useDistanceMatrix) {
+                            distArr = await getDistanceMatrix(startLoc, driverDest);
+                        } else {
+                            // Usar distância já calculada pelo Redis/Firebase
+                            for (let i = 0; i < sortedDrivers.length; i++) {
+                                const driver = sortedDrivers[i];
+                                const timeEstimate = driver.distance ? 
+                                    ((driver.distance * 2) + 1).toFixed(0) + ' min' : 
+                                    '5 min';
+                                distArr.push({ timein_text: timeEstimate, found: true });
                             }
-                        } else{
-                            let carTypes = allCarTypes;
-                            for(let i=0;i<carTypes.length; i++){
-                                let carType =carTypes[i];
-                                if (arr[carType]  ) {
-                                    arr[carType].sortedDrivers.push(driver);
-                                    if (arr[carType].minDistance > driver.distance) {
+                        }
+
+                        // Processar motoristas
+                        for (let i = 0; i < sortedDrivers.length; i++) {
+                            let driver = { ...sortedDrivers[i] };
+                            if (distArr[i] && distArr[i].found && cars) {
+                                driver.arriveTime = distArr[i];
+                                
+                                // Adicionar imagem do carro
+                                for (let j = 0; j < cars.length; j++) {
+                                    if (cars[j].name == driver.carType) {
+                                        driver.carImage = cars[j].image;
+                                        break;
+                                    }
+                                }
+
+                                // Organizar por tipo de carro
+                                let carType = driver.carType;
+                                if (carType && carType.length > 0) {
+                                    if (arr[carType] && arr[carType].sortedDrivers) {
+                                        arr[carType].sortedDrivers.push(driver);
+                                        if (arr[carType].minDistance > driver.distance) {
+                                            arr[carType].minDistance = driver.distance;
+                                            arr[carType].minTime = driver.arriveTime.timein_text;
+                                        }
+                                    } else {
+                                        arr[carType] = {};
+                                        arr[carType].sortedDrivers = [];
+                                        arr[carType].sortedDrivers.push(driver);
                                         arr[carType].minDistance = driver.distance;
                                         arr[carType].minTime = driver.arriveTime.timein_text;
                                     }
                                 } else {
-                                    arr[carType] = {};
-                                    arr[carType].sortedDrivers = [];
-                                    arr[carType].sortedDrivers.push(driver);
-                                    arr[carType].minDistance = driver.distance;
-                                    arr[carType].minTime = driver.arriveTime.timein_text;
+                                    // Fallback para todos os tipos de carro
+                                    let carTypes = allCarTypes;
+                                    for (let j = 0; j < carTypes.length; j++) {
+                                        let carType = carTypes[j];
+                                        if (arr[carType]) {
+                                            arr[carType].sortedDrivers.push(driver);
+                                            if (arr[carType].minDistance > driver.distance) {
+                                                arr[carType].minDistance = driver.distance;
+                                                arr[carType].minTime = driver.arriveTime.timein_text;
+                                            }
+                                        } else {
+                                            arr[carType] = {};
+                                            arr[carType].sortedDrivers = [];
+                                            arr[carType].sortedDrivers.push(driver);
+                                            arr[carType].minDistance = driver.distance;
+                                            arr[carType].minTime = driver.arriveTime.timein_text;
+                                        }
+                                    }
                                 }
+                                availableDrivers.push(driver);
                             }
                         }
-                        availableDrivers.push(driver);
                     }
-                }
-            }
 
-            let carWiseArr = [];
-            if (cars) {
-                for (let i = 0; i < cars.length; i++) {
-                    let temp = { ...cars[i] };
-                    if (arr[cars[i].name]) {
-                        temp['nearbyData'] = arr[cars[i].name].drivers;
-                        temp['minTime'] = arr[cars[i].name].minTime;
-                        temp['available'] = true;
-                    } else {
-                        temp['minTime'] = '';
-                        temp['available'] = false;
+                    // Atualizar tipos de carro disponíveis
+                    let carWiseArr = [];
+                    if (cars) {
+                        for (let i = 0; i < cars.length; i++) {
+                            let temp = { ...cars[i] };
+                            if (arr[cars[i].name]) {
+                                temp['nearbyData'] = arr[cars[i].name].sortedDrivers;
+                                temp['minTime'] = arr[cars[i].name].minTime;
+                                temp['available'] = true;
+                            } else {
+                                temp['minTime'] = '';
+                                temp['available'] = false;
+                            }
+                            temp['active'] = (tripdata.carType && (tripdata.carType.name == cars[i].name)) ? true : false;
+                            carWiseArr.push(temp);
+                        }
                     }
-                    temp['active'] = (tripdata.carType && (tripdata.carType.name == cars[i].name)) ? true : false;
-                    carWiseArr.push(temp);
-                }
-            }
 
-            setFreeCars(availableDrivers);
-            setAllCarTypes(carWiseArr);
+                    setFreeCars(availableDrivers);
+                    setAllCarTypes(carWiseArr);
+                    
+                    console.log('✅ Motoristas processados:', availableDrivers.length);
+                } else {
+                    console.log('⚠️ Nenhum motorista encontrado na área');
+                    setFreeCars([]);
+                    resetCars();
+                }
+            } catch (error) {
+                console.error('❌ Erro ao buscar motoristas:', error);
+                setFreeCars([]);
+                resetCars();
+            }
         }
     }
     

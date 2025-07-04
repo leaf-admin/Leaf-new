@@ -17,30 +17,32 @@ import {
   FETCH_ALL_DRIVERS_FAILED
 } from "../store/types";
 import { firebase } from '../config/configureFirebase';
-import { ref, get } from 'firebase/database';
+import { get, set, push, remove, update, onValue, off, signOut, ref } from 'firebase/database';
 import { waitForFirebaseInit } from '../utils/firebaseUtils';
 import store from '../store/store';
 import getUserData from '../utils/getUserData';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { uploadBytesResumable, getDownloadURL } from 'firebase/storage';
+import { GetDistance } from '../other/GeoFunctions';
+import { initializeRedis, USE_REDIS_LOCATION } from '../config/redisConfig';
+import { redisLocationService } from '../services/redisLocationService';
 
 export const fetchUsers = () => (dispatch) => {
   const usersRef = ref(firebase.database, 'users');
 
   dispatch({
-    type: FETCH_ALL_DRIVERS,
+    type: FETCH_ALL_USERS,
     payload: null
   });
-  onValue(usersRef, async snapshot => {
+
+  onValue(usersRef, snapshot => {
     if (snapshot.val()) {
-      const locationdata = await get(firebase.allLocationsRef);
-      const locations = locationdata.val();
       const data = snapshot.val();
-      const arr = Object.keys(data)
-      .filter(i => data[i].usertype!='admin')
-      .map(i => {
-        data[i].id = i;
-        data[i].location = locations && locations[i] ? locations[i] : null;
-        return data[i];
+      const arr = Object.keys(data).map(i => {
+        return {
+          id: i,
+          ...data[i]
+        };
       });
       dispatch({
         type: FETCH_ALL_USERS_SUCCESS,
@@ -55,38 +57,36 @@ export const fetchUsers = () => (dispatch) => {
   });
 };
 
-
 export const fetchUsersOnce = () => (dispatch) => {
   const usersRef = ref(firebase.database, 'users');
 
   dispatch({
-    type: FETCH_ALL_USERS_STATIC,
+    type: FETCH_ALL_USERS,
     payload: null
   });
-  onValue(usersRef, async snapshot => {
+
+  onValue(usersRef, snapshot => {
     if (snapshot.val()) {
-      const locationdata = await get(firebase.allLocationsRef);
-      const locations = locationdata.val();
       const data = snapshot.val();
-      const arr = Object.keys(data)
-      .map(i => {
-        data[i].id = i;
-        data[i].location = locations && locations[i] ? locations[i] : null;
-        return data[i];
+      const arr = Object.keys(data).map(i => {
+        return {
+          id: i,
+          ...data[i]
+        };
       });
       dispatch({
-        type: FETCH_ALL_USERS_STATIC_SUCCESS,
+        type: FETCH_ALL_USERS_SUCCESS,
         payload: arr
-      })
+      });
     } else {
       dispatch({
-        type: FETCH_ALL_USERS_STATIC_FAILED,
+        type: FETCH_ALL_USERS_FAILED,
         payload: "No users available."
       });
     }
-  },{onlyOnce: true});
-  
+  }, { onlyOnce: true });
 };
+
 export const clearFetchDrivers = () => (dispatch) => {
   const {
     driversRef,
@@ -359,7 +359,7 @@ export const fetchUserCancelReasons = () => async (dispatch) => {
     await waitForFirebaseInit();
     console.log('fetchUserCancelReasons - Firebase Database inicializado');
 
-    const cancelReasonsRef = ref(firebase.database, 'cancel_reason');
+    const cancelReasonsRef = get(firebase.database, 'cancel_reason');
     console.log('fetchUserCancelReasons - Caminho acessado:', cancelReasonsRef.toString());
 
     // Desligar listener existente antes de criar um novo (se houver)
@@ -397,7 +397,7 @@ export const fetchUserCancelReasons = () => async (dispatch) => {
     });
     // Em caso de erro, garantir que nenhum listener fique ativo
      if (firebase.database) {
-         const cancelReasonsRef = ref(firebase.database, 'cancel_reason');
+         const cancelReasonsRef = get(firebase.database, 'cancel_reason');
          off(cancelReasonsRef);
      }
   }
@@ -415,7 +415,7 @@ export const unsubscribeCancelReasons = () => (dispatch, getState) => {
     // Como alternativa, podemos desligar pela referência direta se o listener não for salvo no estado
     if (firebase.database) {
         console.log('Tentando desligar listener de motivos de cancelamento pela referência');
-        const cancelReasonsRef = ref(firebase.database, 'cancel_reason');
+        const cancelReasonsRef = get(firebase.database, 'cancel_reason');
         off(cancelReasonsRef);
     } else {
         console.warn('Firebase Database não disponível para desligar listener de motivos de cancelamento');
@@ -441,7 +441,7 @@ export const fetchUserPaymentMethods = () => async (dispatch) => {
 
     console.log('fetchUserPaymentMethods - Iniciando busca com:', { uid, usertype: userInfo.usertype });
 
-    const methodsRef = ref(firebase.database, `payment_methods/${uid}`);
+    const methodsRef = get(firebase.database, `payment_methods/${uid}`);
     
     onValue(methodsRef, (snapshot) => {
       if (snapshot.val()) {
@@ -478,7 +478,7 @@ export const fetchUserPromos = () => async (dispatch) => {
     await waitForFirebaseInit();
     console.log('fetchUserPromos - Firebase Database inicializado');
 
-    const promosRef = ref(firebase.database, 'promos');
+    const promosRef = get(firebase.database, 'promos');
     console.log('fetchUserPromos - Caminho acessado:', promosRef.toString());
 
     // Desligar listener existente antes de criar um novo (se houver)
@@ -516,7 +516,7 @@ export const fetchUserPromos = () => async (dispatch) => {
     });
     // Em caso de erro, garantir que nenhum listener fique ativo
      if (firebase.database) {
-         const promosRef = ref(firebase.database, 'promos');
+         const promosRef = get(firebase.database, 'promos');
          off(promosRef);
      }
   }
@@ -534,7 +534,7 @@ export const unsubscribePromos = () => (dispatch, getState) => {
      // Como alternativa, podemos desligar pela referência direta se o listener não for salvo no estado
     if (firebase.database) {
         console.log('Tentando desligar listener de promoções pela referência');
-        const promosRef = ref(firebase.database, 'promos');
+        const promosRef = get(firebase.database, 'promos');
         off(promosRef);
     } else {
         console.warn('Firebase Database não disponível para desligar listener de promoções');
@@ -549,7 +549,7 @@ export const fetchAllUsers = () => async (dispatch) => {
             return;
         }
 
-        const usersRef = ref(firebase.database, 'users');
+        const usersRef = get(firebase.database, 'users');
         onValue(usersRef, (snapshot) => {
             const data = snapshot.val();
             dispatch({ type: 'FETCH_ALL_USERS_SUCCESS', payload: data || {} });
@@ -563,7 +563,7 @@ export const fetchAllUsers = () => async (dispatch) => {
 // === Função temporária de diagnóstico ===
 export const testReadBookingsSimple = () => async () => {
   try {
-    const snapshot = await get(ref(firebase.database, 'bookings'));
+    const snapshot = await get(get(firebase.database, 'bookings'));
     if (snapshot.exists()) {
       console.log('testReadBookingsSimple - Sucesso:', snapshot.val());
     } else {
@@ -621,7 +621,7 @@ export const fetchBookings = () => async (dispatch) => {
     console.log('fetchBookings - Iniciando busca com:', { uid, usertype: userInfo.usertype });
     
     // Usar o caminho correto para bookings
-    const bookingsRef = ref(firebase.database, `bookings/${uid}`);
+    const bookingsRef = get(firebase.database, `bookings/${uid}`);
     console.log('fetchBookings - Caminho acessado:', bookingsRef.toString());
 
     onValue(bookingsRef, (snapshot) => {
@@ -663,7 +663,7 @@ export const getUser = async (uid) => {
       return null;
     }
 
-    const userRef = firebase.singleUserRef(uid);
+    const userRef = get(firebase.database, `users/${uid}`);
     const snapshot = await new Promise((resolve) => {
       const unsubscribe = userRef.on('value', (snap) => {
         unsubscribe();
@@ -683,5 +683,166 @@ export const getUser = async (uid) => {
   } catch (error) {
     console.error('getUser - Erro ao buscar dados do usuário:', error);
     return null;
+  }
+};
+
+// Nova função otimizada para buscar motoristas próximos usando Redis
+export const fetchNearbyDrivers = (lat, lng, radius = 5, options = {}) => async (dispatch) => {
+  const {
+    driversRef,
+    allLocationsRef,
+    settingsRef,
+  } = firebase;
+
+  const settingsdata = await get(settingsRef);
+  const settings = settingsdata.val();
+
+  dispatch({
+    type: FETCH_ALL_USERS,
+    payload: null
+  });
+
+  try {
+    // 1. Tentar buscar no Redis primeiro (mais rápido)
+    if (USE_REDIS_LOCATION) {
+      try {
+        await initializeRedis();
+        const redisDrivers = await redisLocationService.getNearbyDrivers(lat, lng, radius);
+        
+        if (redisDrivers && redisDrivers.length > 0) {
+          console.log('📍 Motoristas encontrados via Redis:', redisDrivers.length);
+          
+          // Buscar dados completos dos motoristas no Firebase
+          const driverIds = redisDrivers.map(driver => driver.uid);
+          const driversData = await Promise.all(
+            driverIds.map(async (driverId) => {
+              try {
+                const driverRef = ref(firebase.database, `users/${driverId}`);
+                const driverSnapshot = await get(driverRef);
+                const driverData = driverSnapshot.val();
+                
+                if (driverData && 
+                    driverData.approved === true && 
+                    driverData.driverActiveStatus === true &&
+                    ((driverData.licenseImage && settings.license_image_required) || !settings.license_image_required) &&
+                    (((driverData.carApproved && settings.carType_required) || !settings.carType_required)) &&
+                    ((driverData.term && settings.term_required) || !settings.term_required)) {
+                  
+                  const redisDriver = redisDrivers.find(rd => rd.uid === driverId);
+                  return {
+                    id: driverId,
+                    location: redisDriver.coordinates,
+                    distance: redisDriver.distance,
+                    carType: driverData.carType || null,
+                    vehicleNumber: driverData.vehicleNumber || null,
+                    fleetadmin: driverData.fleetadmin || null,
+                    firstName: driverData.firstName,
+                    lastName: driverData.lastName,
+                    queue: driverData.queue,
+                    source: 'redis'
+                  };
+                }
+                return null;
+              } catch (error) {
+                console.error('❌ Erro ao buscar dados do motorista:', driverId, error);
+                return null;
+              }
+            })
+          );
+
+          const validDrivers = driversData.filter(driver => driver !== null);
+          
+          if (validDrivers.length > 0) {
+            dispatch({
+              type: FETCH_ALL_DRIVERS_SUCCESS,
+              payload: validDrivers
+            });
+            return validDrivers;
+          }
+        }
+      } catch (redisError) {
+        console.error('❌ Erro ao buscar motoristas no Redis:', redisError);
+        // Continua para fallback do Firebase
+      }
+    }
+
+    // 2. Fallback para Firebase (método atual)
+    console.log('📍 Usando fallback Firebase para buscar motoristas');
+    return new Promise((resolve) => {
+      onValue(driversRef, snapshot => {
+        if (snapshot.val()) {
+          onValue(allLocationsRef, locres => {
+            const locations = locres.val();
+            const data = snapshot.val();
+            
+            // Filtrar motoristas aprovados e ativos
+            const allDrivers = Object.keys(data)
+              .filter(i => data && data[i].approved == true && data[i].driverActiveStatus == true && 
+                          locations && locations[i] && 
+                          ((data[i].licenseImage && settings.license_image_required) || !settings.license_image_required) &&
+                          (((data[i].carApproved && settings.carType_required) || !settings.carType_required)) &&
+                          ((data[i].term && settings.term_required) || !settings.term_required))
+              .map(i => {
+                const driverLocation = locations && locations[i] ? locations[i] : null;
+                let distance = null;
+                
+                // Calcular distância se localização disponível
+                if (driverLocation && lat && lng) {
+                  distance = GetDistance(lat, lng, driverLocation.lat, driverLocation.lng);
+                  if (settings.convert_to_mile) {
+                    distance = distance / 1.609344;
+                  }
+                }
+
+                return {
+                  id: i,
+                  location: driverLocation,
+                  distance: distance,
+                  carType: data[i].carType ? data[i].carType : null,
+                  vehicleNumber: data[i].vehicleNumber ? data[i].vehicleNumber : null,
+                  fleetadmin: data[i].fleetadmin ? data[i].fleetadmin : null,
+                  firstName: data[i].firstName,
+                  lastName: data[i].lastName,
+                  queue: data[i].queue,
+                  source: 'firebase'
+                };
+              });
+
+            // Filtrar por raio se especificado
+            const nearbyDrivers = radius ? 
+              allDrivers.filter(driver => driver.distance && driver.distance <= radius) :
+              allDrivers;
+
+            // Ordenar por distância
+            const sortedDrivers = nearbyDrivers.sort((a, b) => {
+              if (!a.distance) return 1;
+              if (!b.distance) return -1;
+              return a.distance - b.distance;
+            });
+
+            dispatch({
+              type: FETCH_ALL_DRIVERS_SUCCESS,
+              payload: sortedDrivers
+            });
+            
+            resolve(sortedDrivers);
+          }, options.appType === 'app' ? {onlyOnce: true} : settings && settings.realtime_drivers ? null : {onlyOnce: true});
+        } else {
+          dispatch({
+            type: FETCH_ALL_DRIVERS_FAILED,
+            payload: "No users available."
+          });
+          resolve([]);
+        }
+      }, options.appType === 'app' ? {onlyOnce: true} : settings && settings.realtime_drivers ? null : {onlyOnce: true});
+    });
+
+  } catch (error) {
+    console.error('❌ Erro ao buscar motoristas próximos:', error);
+    dispatch({
+      type: FETCH_ALL_DRIVERS_FAILED,
+      payload: error.message
+    });
+    return [];
   }
 };
