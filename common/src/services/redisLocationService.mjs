@@ -1,16 +1,28 @@
 import { createClient } from 'redis';
+import { FEATURE_FLAGS } from '../config/redisConfig.mjs';
 
 class RedisLocationService {
     constructor() {
         this.client = null;
         this.isConnected = false;
-        this.subscribers = new Map();
+        this.connectionPromise = null;
     }
 
     async connect() {
+        if (this.isConnected) return;
+        
+        if (this.connectionPromise) {
+            return this.connectionPromise;
+        }
+
+        this.connectionPromise = this._connect();
+        return this.connectionPromise;
+    }
+
+    async _connect() {
         try {
             this.client = createClient({
-                url: process.env.REDIS_URL || 'redis://localhost:6379',
+                url: 'redis://localhost:6379',
                 socket: {
                     reconnectStrategy: (retries) => {
                         if (retries > 10) {
@@ -23,31 +35,37 @@ class RedisLocationService {
             });
 
             this.client.on('error', (err) => {
-                console.error('Redis Client Error:', err);
+                console.error('Redis Location Service Error:', err);
                 this.isConnected = false;
             });
 
             this.client.on('connect', () => {
-                console.log('Redis connected successfully');
+                console.log('Redis Location Service connected');
                 this.isConnected = true;
             });
 
             this.client.on('ready', () => {
-                console.log('Redis client ready');
+                console.log('Redis Location Service ready');
             });
 
             await this.client.connect();
-            return true;
+            console.log('Redis Location Service connection established');
         } catch (error) {
-            console.error('Failed to connect to Redis:', error);
-            return false;
+            console.error('Failed to connect to Redis Location Service:', error);
+            this.isConnected = false;
+            throw error;
         }
     }
 
     async disconnect() {
-        if (this.client) {
-            await this.client.disconnect();
-            this.isConnected = false;
+        if (this.client && this.isConnected) {
+            try {
+                await this.client.quit();
+                this.isConnected = false;
+                console.log('Redis Location Service disconnected');
+            } catch (error) {
+                console.error('Error disconnecting Redis Location Service:', error);
+            }
         }
     }
 
@@ -62,38 +80,36 @@ class RedisLocationService {
         }
 
         try {
-            // Salva no hash de localizações usando argumentos separados
-            await this.client.hSet(`locations:${uid}`, 
-                'lat', String(location.lat),
-                'lng', String(location.lng),
-                'updated', String(Date.now()),
-                'error', String(location.error || false)
-            );
-            
-            // Define TTL de 5 minutos
-            await this.client.expire(`locations:${uid}`, 300);
-
-            // Publica atualização para subscribers
             const locationData = {
-                lat: location.lat,
-                lng: location.lng,
-                updated: Date.now(),
-                error: location.error || false
+                uid,
+                latitude: location.latitude,
+                longitude: location.longitude,
+                timestamp: Date.now(),
+                accuracy: location.accuracy || 0,
+                speed: location.speed || 0,
+                heading: location.heading || 0
             };
-            await this.client.publish(`location:${uid}`, JSON.stringify(locationData));
 
-            // Atualiza set de usuários online
-            if (!location.error) {
-                await this.client.sAdd('users:online', uid);
-                await this.client.sRem('users:offline', uid);
-            } else {
-                await this.client.sAdd('users:offline', uid);
-                await this.client.sRem('users:online', uid);
-            }
+            // Salvar no hash de localizações
+            await this.client.hSet(`user_locations`, uid, JSON.stringify(locationData));
+            
+            // Adicionar ao set de usuários ativos (com TTL de 30 minutos)
+            await this.client.sAdd('active_users', uid);
+            await this.client.expire('active_users', 1800);
 
+            // Salvar coordenadas para busca geográfica (compatível com Redis Windows)
+            const coordinateKey = `coordinates:${uid}`;
+            await this.client.hSet(coordinateKey, 
+                'latitude', String(location.latitude),
+                'longitude', String(location.longitude),
+                'timestamp', String(location.timestamp)
+            );
+            await this.client.expire(coordinateKey, 1800); // 30 minutos
+
+            console.log(`User location saved: ${uid}`);
             return true;
         } catch (error) {
-            console.error('Error saving user location:', error);
+            console.error('Error saving user location to Redis:', error);
             throw error;
         }
     }
@@ -108,77 +124,13 @@ class RedisLocationService {
         }
 
         try {
-            const location = await this.client.hGetAll(`locations:${uid}`);
-            
-            if (!location || Object.keys(location).length === 0) {
-                return null;
+            const locationData = await this.client.hGet('user_locations', uid);
+            if (locationData) {
+                return JSON.parse(locationData);
             }
-
-            return {
-                lat: parseFloat(location.lat),
-                lng: parseFloat(location.lng),
-                updated: parseInt(location.updated),
-                error: location.error === 'true'
-            };
+            return null;
         } catch (error) {
-            console.error('Error getting user location:', error);
-            throw error;
-        }
-    }
-
-    /**
-     * Obtém localizações de múltiplos usuários
-     * @param {Array} uids - Array de IDs de usuários
-     */
-    async getMultipleUserLocations(uids) {
-        if (!this.isConnected) {
-            throw new Error('Redis not connected');
-        }
-
-        try {
-            const pipeline = this.client.multi();
-            
-            uids.forEach(uid => {
-                pipeline.hGetAll(`locations:${uid}`);
-            });
-
-            const results = await pipeline.exec();
-            const locations = {};
-
-            results.forEach((result, index) => {
-                const uid = uids[index];
-                const location = result[1]; // result[1] contains the actual data
-
-                if (location && Object.keys(location).length > 0) {
-                    locations[uid] = {
-                        lat: parseFloat(location.lat),
-                        lng: parseFloat(location.lng),
-                        updated: parseInt(location.updated),
-                        error: location.error === 'true'
-                    };
-                }
-            });
-
-            return locations;
-        } catch (error) {
-            console.error('Error getting multiple user locations:', error);
-            throw error;
-        }
-    }
-
-    /**
-     * Obtém todos os usuários online
-     */
-    async getOnlineUsers() {
-        if (!this.isConnected) {
-            throw new Error('Redis not connected');
-        }
-
-        try {
-            const onlineUsers = await this.client.sMembers('users:online');
-            return onlineUsers;
-        } catch (error) {
-            console.error('Error getting online users:', error);
+            console.error('Error getting user location from Redis:', error);
             throw error;
         }
     }
@@ -195,117 +147,111 @@ class RedisLocationService {
         }
 
         try {
-            const onlineUsers = await this.getOnlineUsers();
-            const driverLocations = await this.getMultipleUserLocations(onlineUsers);
-            
-            const nearbyDrivers = [];
-
-            for (const [uid, location] of Object.entries(driverLocations)) {
-                if (!location.error) {
-                    const distance = this.calculateDistance(lat, lng, location.lat, location.lng);
-                    if (distance <= radius) {
-                        nearbyDrivers.push({
-                            uid,
-                            location,
-                            distance
-                        });
-                    }
-                }
-            }
-
-            // Ordena por distância
-            return nearbyDrivers.sort((a, b) => a.distance - b.distance);
-        } catch (error) {
-            console.error('Error getting nearby drivers:', error);
-            throw error;
-        }
-    }
-
-    /**
-     * Calcula distância entre dois pontos (fórmula de Haversine)
-     */
-    calculateDistance(lat1, lng1, lat2, lng2) {
-        const R = 6371; // Raio da Terra em km
-        const dLat = this.toRadians(lat2 - lat1);
-        const dLng = this.toRadians(lng2 - lng1);
-        
-        const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-                  Math.cos(this.toRadians(lat1)) * Math.cos(this.toRadians(lat2)) *
-                  Math.sin(dLng / 2) * Math.sin(dLng / 2);
-        
-        const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-        return R * c;
-    }
-
-    toRadians(degrees) {
-        return degrees * (Math.PI / 180);
-    }
-
-    /**
-     * Inscreve para receber atualizações de localização
-     * @param {string} uid - ID do usuário
-     * @param {Function} callback - Função chamada quando há atualização
-     */
-    async subscribeToLocation(uid, callback) {
-        if (!this.isConnected) {
-            throw new Error('Redis not connected');
-        }
-
-        try {
-            const subscriber = this.client.duplicate();
-            await subscriber.connect();
-            
-            await subscriber.subscribe(`location:${uid}`, (message) => {
-                try {
-                    const location = JSON.parse(message);
-                    callback(location);
-                } catch (error) {
-                    console.error('Error parsing location message:', error);
-                }
+            // Buscar usuários próximos usando GEO commands
+            const nearbyUsers = await this.client.geoRadius('user_coordinates', {
+                longitude: lng,
+                latitude: lat
+            }, radius, 'km', {
+                WITHCOORD: true,
+                WITHDIST: true
             });
 
-            this.subscribers.set(uid, subscriber);
-            return subscriber;
+            // Filtrar apenas motoristas ativos
+            const activeUsers = await this.client.sMembers('active_users');
+            const activeUserSet = new Set(activeUsers);
+
+            const nearbyDrivers = nearbyUsers
+                .filter(user => activeUserSet.has(user.member))
+                .map(user => ({
+                    uid: user.member,
+                    distance: parseFloat(user.dist),
+                    coordinates: {
+                        latitude: user.coordinates.latitude,
+                        longitude: user.coordinates.longitude
+                    }
+                }))
+                .sort((a, b) => a.distance - b.distance);
+
+            return nearbyDrivers;
         } catch (error) {
-            console.error('Error subscribing to location:', error);
+            console.error('Error getting nearby drivers from Redis:', error);
             throw error;
         }
     }
 
     /**
-     * Cancela inscrição de localização
+     * Remover usuário da lista de ativos
      * @param {string} uid - ID do usuário
      */
-    async unsubscribeFromLocation(uid) {
-        const subscriber = this.subscribers.get(uid);
-        if (subscriber) {
-            await subscriber.unsubscribe(`location:${uid}`);
-            await subscriber.disconnect();
-            this.subscribers.delete(uid);
-        }
-    }
-
-    /**
-     * Limpa localizações antigas
-     */
-    async cleanupOldLocations() {
+    async removeActiveUser(uid) {
         if (!this.isConnected) {
             throw new Error('Redis not connected');
         }
 
         try {
-            const onlineUsers = await this.getOnlineUsers();
-            const cutoffTime = Date.now() - (10 * 60 * 1000); // 10 minutos atrás
+            await this.client.sRem('active_users', uid);
+            await this.client.hDel('user_locations', uid);
+            await this.client.zRem('user_coordinates', uid);
+            console.log(`User removed from active list: ${uid}`);
+        } catch (error) {
+            console.error('Error removing active user from Redis:', error);
+            throw error;
+        }
+    }
 
-            for (const uid of onlineUsers) {
-                const location = await this.getUserLocation(uid);
-                if (location && location.updated < cutoffTime) {
-                    await this.client.sRem('users:online', uid);
-                    await this.client.sAdd('users:offline', uid);
+    /**
+     * Obter todos os usuários ativos
+     */
+    async getActiveUsers() {
+        if (!this.isConnected) {
+            throw new Error('Redis not connected');
+        }
+
+        try {
+            const activeUsers = await this.client.sMembers('active_users');
+            return activeUsers;
+        } catch (error) {
+            console.error('Error getting active users from Redis:', error);
+            throw error;
+        }
+    }
+
+    /**
+     * Limpar dados antigos (manutenção)
+     */
+    async cleanupOldData() {
+        if (!this.isConnected) {
+            throw new Error('Redis not connected');
+        }
+
+        try {
+            const now = Date.now();
+            const cutoff = now - (30 * 60 * 1000); // 30 minutos atrás
+
+            const allLocations = await this.client.hGetAll('user_locations');
+            const toRemove = [];
+
+            for (const [uid, locationData] of Object.entries(allLocations)) {
+                try {
+                    const location = JSON.parse(locationData);
+                    if (location.timestamp < cutoff) {
+                        toRemove.push(uid);
+                    }
+                } catch (parseError) {
+                    console.error('Error parsing location data:', parseError);
+                    toRemove.push(uid);
                 }
             }
+
+            if (toRemove.length > 0) {
+                await this.client.hDel('user_locations', ...toRemove);
+                await this.client.sRem('active_users', ...toRemove);
+                await this.client.zRem('user_coordinates', ...toRemove);
+                console.log(`Cleaned up ${toRemove.length} old location records`);
+            }
         } catch (error) {
-            console.error('Error cleaning up old locations:', error);
+            console.error('Error cleaning up old data:', error);
+            throw error;
         }
     }
 }

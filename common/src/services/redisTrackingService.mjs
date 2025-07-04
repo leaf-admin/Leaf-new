@@ -1,16 +1,29 @@
 import { createClient } from 'redis';
+import { FEATURE_FLAGS } from '../config/redisConfig.mjs';
 
 class RedisTrackingService {
     constructor() {
         this.client = null;
         this.isConnected = false;
+        this.connectionPromise = null;
         this.subscribers = new Map();
     }
 
     async connect() {
+        if (this.isConnected) return;
+        
+        if (this.connectionPromise) {
+            return this.connectionPromise;
+        }
+
+        this.connectionPromise = this._connect();
+        return this.connectionPromise;
+    }
+
+    async _connect() {
         try {
             this.client = createClient({
-                url: process.env.REDIS_URL || 'redis://localhost:6379',
+                url: 'redis://localhost:6379',
                 socket: {
                     reconnectStrategy: (retries) => {
                         if (retries > 10) {
@@ -23,27 +36,37 @@ class RedisTrackingService {
             });
 
             this.client.on('error', (err) => {
-                console.error('Redis Tracking Client Error:', err);
+                console.error('Redis Tracking Service Error:', err);
                 this.isConnected = false;
             });
 
             this.client.on('connect', () => {
-                console.log('Redis Tracking connected successfully');
+                console.log('Redis Tracking Service connected');
                 this.isConnected = true;
             });
 
+            this.client.on('ready', () => {
+                console.log('Redis Tracking Service ready');
+            });
+
             await this.client.connect();
-            return true;
+            console.log('Redis Tracking Service connection established');
         } catch (error) {
-            console.error('Failed to connect to Redis Tracking:', error);
-            return false;
+            console.error('Failed to connect to Redis Tracking Service:', error);
+            this.isConnected = false;
+            throw error;
         }
     }
 
     async disconnect() {
-        if (this.client) {
-            await this.client.disconnect();
-            this.isConnected = false;
+        if (this.client && this.isConnected) {
+            try {
+                await this.client.quit();
+                this.isConnected = false;
+                console.log('Redis Tracking Service disconnected');
+            } catch (error) {
+                console.error('Error disconnecting Redis Tracking Service:', error);
+            }
         }
     }
 
@@ -58,45 +81,37 @@ class RedisTrackingService {
         }
 
         try {
-            const trackingData = {
-                lat: String(location.lat),
-                lng: String(location.lng),
-                status: String(location.status),
-                timestamp: String(location.at || Date.now()),
-                speed: location.speed ? String(location.speed) : '',
-                heading: location.heading ? String(location.heading) : ''
+            const trackingPoint = {
+                bookingId,
+                latitude: location.latitude,
+                longitude: location.longitude,
+                timestamp: Date.now(),
+                accuracy: location.accuracy || 0,
+                speed: location.speed || 0,
+                heading: location.heading || 0,
+                altitude: location.altitude || 0
             };
 
-            // Usa lista para tracking em tempo real (compatível com Redis Windows)
-            const listKey = `tracking:${bookingId}`;
-            const trackingEntry = JSON.stringify(trackingData);
+            // Adicionar à lista de tracking da viagem
+            await this.client.lPush(`tracking:${bookingId}`, JSON.stringify(trackingPoint));
             
-            // Adiciona à lista
-            await this.client.lPush(listKey, trackingEntry);
-            
-            // Mantém apenas os últimos 100 pontos
-            await this.client.lTrim(listKey, 0, 99);
+            // Manter apenas os últimos 100 pontos por viagem
+            await this.client.lTrim(`tracking:${bookingId}`, 0, 99);
 
-            // Publica atualização para subscribers
-            await this.client.publish(`tracking:${bookingId}`, JSON.stringify({
-                id: Date.now().toString(),
-                data: trackingData
-            }));
+            // Definir TTL de 24 horas para dados de tracking
+            await this.client.expire(`tracking:${bookingId}`, 86400);
 
-            // Salva último ponto em hash para acesso rápido
-            await this.client.hSet(`tracking:last:${bookingId}`,
-                'lat', trackingData.lat,
-                'lng', trackingData.lng,
-                'status', trackingData.status,
-                'timestamp', trackingData.timestamp,
-                'speed', trackingData.speed,
-                'heading', trackingData.heading
-            );
-            await this.client.expire(`tracking:last:${bookingId}`, 3600); // 1 hora
+            // Salvar último ponto separadamente para acesso rápido
+            await this.client.hSet(`last_tracking`, bookingId, JSON.stringify(trackingPoint));
+            await this.client.expire(`last_tracking`, 86400);
 
-            return Date.now().toString();
+            // Publicar atualização para subscribers
+            await this.client.publish(`tracking:${bookingId}`, JSON.stringify(trackingPoint));
+
+            console.log(`Tracking point added: ${bookingId}`);
+            return true;
         } catch (error) {
-            console.error('Error adding tracking point:', error);
+            console.error('Error adding tracking point to Redis:', error);
             throw error;
         }
     }
@@ -111,22 +126,13 @@ class RedisTrackingService {
         }
 
         try {
-            const lastPoint = await this.client.hGetAll(`tracking:last:${bookingId}`);
-            
-            if (!lastPoint || Object.keys(lastPoint).length === 0) {
-                return null;
+            const lastPoint = await this.client.hGet('last_tracking', bookingId);
+            if (lastPoint) {
+                return JSON.parse(lastPoint);
             }
-
-            return {
-                lat: parseFloat(lastPoint.lat),
-                lng: parseFloat(lastPoint.lng),
-                status: lastPoint.status,
-                timestamp: parseInt(lastPoint.timestamp),
-                speed: lastPoint.speed ? parseFloat(lastPoint.speed) : null,
-                heading: lastPoint.heading ? parseFloat(lastPoint.heading) : null
-            };
+            return null;
         } catch (error) {
-            console.error('Error getting last tracking point:', error);
+            console.error('Error getting last tracking point from Redis:', error);
             throw error;
         }
     }
@@ -142,23 +148,10 @@ class RedisTrackingService {
         }
 
         try {
-            const listKey = `tracking:${bookingId}`;
-            const entries = await this.client.lRange(listKey, 0, limit - 1);
-            
-            return entries.map((entry, index) => {
-                const data = JSON.parse(entry);
-                return {
-                    id: `${bookingId}-${index}`,
-                    lat: parseFloat(data.lat),
-                    lng: parseFloat(data.lng),
-                    status: data.status,
-                    timestamp: parseInt(data.timestamp),
-                    speed: data.speed ? parseFloat(data.speed) : null,
-                    heading: data.heading ? parseFloat(data.heading) : null
-                };
-            }).reverse(); // Inverte para ordem cronológica
+            const trackingData = await this.client.lRange(`tracking:${bookingId}`, 0, limit - 1);
+            return trackingData.map(point => JSON.parse(point)).reverse();
         } catch (error) {
-            console.error('Error getting tracking history:', error);
+            console.error('Error getting tracking history from Redis:', error);
             throw error;
         }
     }
@@ -210,22 +203,22 @@ class RedisTrackingService {
                 const point2 = history[i + 1];
                 
                 const distance = this.calculateDistance(
-                    point1.lat, point1.lng,
-                    point2.lat, point2.lng
+                    point1.latitude, point1.longitude,
+                    point2.latitude, point2.longitude
                 );
                 
                 totalDistance += distance;
                 points.push({
-                    lat: point1.lat,
-                    lng: point1.lng,
+                    latitude: point1.latitude,
+                    longitude: point1.longitude,
                     timestamp: point1.timestamp
                 });
             }
 
             // Adiciona o último ponto
             points.push({
-                lat: history[history.length - 1].lat,
-                lng: history[history.length - 1].lng,
+                latitude: history[history.length - 1].latitude,
+                longitude: history[history.length - 1].longitude,
                 timestamp: history[history.length - 1].timestamp
             });
 
@@ -276,14 +269,15 @@ class RedisTrackingService {
             
             await subscriber.subscribe(`tracking:${bookingId}`, (message) => {
                 try {
-                    const trackingData = JSON.parse(message);
-                    callback(trackingData);
+                    const trackingPoint = JSON.parse(message);
+                    callback(trackingPoint);
                 } catch (error) {
                     console.error('Error parsing tracking message:', error);
                 }
             });
 
             this.subscribers.set(bookingId, subscriber);
+            console.log(`Subscribed to tracking: ${bookingId}`);
             return subscriber;
         } catch (error) {
             console.error('Error subscribing to tracking:', error);
@@ -298,9 +292,14 @@ class RedisTrackingService {
     async unsubscribeFromTracking(bookingId) {
         const subscriber = this.subscribers.get(bookingId);
         if (subscriber) {
-            await subscriber.unsubscribe(`tracking:${bookingId}`);
-            await subscriber.disconnect();
-            this.subscribers.delete(bookingId);
+            try {
+                await subscriber.unsubscribe(`tracking:${bookingId}`);
+                await subscriber.quit();
+                this.subscribers.delete(bookingId);
+                console.log(`Unsubscribed from tracking: ${bookingId}`);
+            } catch (error) {
+                console.error('Error unsubscribing from tracking:', error);
+            }
         }
     }
 
@@ -313,24 +312,10 @@ class RedisTrackingService {
         }
 
         try {
-            const keys = await this.client.keys('tracking:last:*');
-            const activeBookings = [];
-
-            for (const key of keys) {
-                const bookingId = key.replace('tracking:last:', '');
-                const lastPoint = await this.getLastTrackingPoint(bookingId);
-                
-                if (lastPoint && (Date.now() - lastPoint.timestamp) < 300000) { // 5 minutos
-                    activeBookings.push({
-                        bookingId,
-                        lastPoint
-                    });
-                }
-            }
-
+            const activeBookings = await this.client.hKeys('last_tracking');
             return activeBookings;
         } catch (error) {
-            console.error('Error getting active bookings:', error);
+            console.error('Error getting active bookings from Redis:', error);
             throw error;
         }
     }
@@ -345,43 +330,95 @@ class RedisTrackingService {
         }
 
         try {
-            const cutoffTime = Date.now() - (maxAge * 60 * 60 * 1000);
-            const keys = await this.client.keys('tracking:*');
-            
-            for (const key of keys) {
-                if (key.includes('tracking:last:')) {
-                    const lastPoint = await this.client.hGetAll(key);
-                    if (lastPoint.timestamp && parseInt(lastPoint.timestamp) < cutoffTime) {
-                        await this.client.del(key);
+            const now = Date.now();
+            const cutoff = now - (maxAge * 60 * 60 * 1000); // 24 horas atrás
+
+            const allLastTracking = await this.client.hGetAll('last_tracking');
+            const toRemove = [];
+
+            for (const [bookingId, trackingData] of Object.entries(allLastTracking)) {
+                try {
+                    const tracking = JSON.parse(trackingData);
+                    if (tracking.timestamp < cutoff) {
+                        toRemove.push(bookingId);
                     }
+                } catch (parseError) {
+                    console.error('Error parsing tracking data:', parseError);
+                    toRemove.push(bookingId);
                 }
             }
+
+            if (toRemove.length > 0) {
+                // Remover dados de tracking antigos
+                for (const bookingId of toRemove) {
+                    await this.client.del(`tracking:${bookingId}`);
+                }
+                
+                await this.client.hDel('last_tracking', ...toRemove);
+                console.log(`Cleaned up ${toRemove.length} old tracking records`);
+            }
         } catch (error) {
-            console.error('Error cleaning up old tracking:', error);
+            console.error('Error cleaning up old tracking data:', error);
+            throw error;
         }
     }
 
     /**
      * Obtém estatísticas de tracking
      */
-    async getTrackingStats() {
+    async getTrackingStats(bookingId) {
         if (!this.isConnected) {
             throw new Error('Redis not connected');
         }
 
         try {
-            const activeBookings = await this.getActiveBookings();
-            const totalStreams = await this.client.keys('tracking:*');
+            const history = await this.getTrackingHistory(bookingId, 100);
             
+            if (history.length === 0) {
+                return null;
+            }
+
+            const totalDistance = this.calculateTotalDistance(history);
+            const avgSpeed = this.calculateAverageSpeed(history);
+            const duration = history.length > 1 ? 
+                history[history.length - 1].timestamp - history[0].timestamp : 0;
+
             return {
-                activeBookings: activeBookings.length,
-                totalStreams: totalStreams.length,
-                timestamp: Date.now()
+                totalPoints: history.length,
+                totalDistance: totalDistance,
+                averageSpeed: avgSpeed,
+                duration: duration,
+                startTime: history[0].timestamp,
+                endTime: history[history.length - 1].timestamp
             };
         } catch (error) {
-            console.error('Error getting tracking stats:', error);
+            console.error('Error getting tracking stats from Redis:', error);
             throw error;
         }
+    }
+
+    // Calcular distância total
+    calculateTotalDistance(trackingPoints) {
+        let totalDistance = 0;
+        
+        for (let i = 1; i < trackingPoints.length; i++) {
+            const prev = trackingPoints[i - 1];
+            const curr = trackingPoints[i];
+            totalDistance += this.calculateDistance(
+                prev.latitude, prev.longitude,
+                curr.latitude, curr.longitude
+            );
+        }
+        
+        return totalDistance;
+    }
+
+    // Calcular velocidade média
+    calculateAverageSpeed(trackingPoints) {
+        if (trackingPoints.length < 2) return 0;
+        
+        const totalSpeed = trackingPoints.reduce((sum, point) => sum + (point.speed || 0), 0);
+        return totalSpeed / trackingPoints.length;
     }
 }
 

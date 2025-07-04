@@ -29,6 +29,7 @@
     "node-fetch": "2.6.7",
     "nodemailer": "^6.7.5",
     "paystack": "^2.0.1",
+    "redis": "^4.6.10",
     "regularusedfunctions": "2.4.0",
     "request": "^2.88.2",
     "square": "^17.2.0",

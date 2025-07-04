@@ -1465,3 +1465,12 @@ exports.create_custom_token = onRequest(async (request, response) => {
         });
     }
 });
+
+// ===== APIs REDIS =====
+// Importar APIs Redis
+const redisApis = require('./redis-api');
+
+// Exportar todas as APIs Redis
+Object.keys(redisApis).forEach(apiName => {
+    exports[apiName] = redisApis[apiName];
+});
