@@ -2,6 +2,7 @@
   "name": "exicubeapps",
   "version": "4.6.0",
   "description": "Exicube App Solutions",
+  "type": "module",
   "scripts": {
     "app": "yarn workspace mobile-app start",
     "app:publish": "cd mobile-app && eas update",
@@ -41,6 +42,7 @@
     "react": "18.3.1",
     "react-native": "0.76.9",
     "react-native-masked-text": "^1.13.0",
+    "redis": "^5.5.6",
     "xml2json": "^0.12.0"
   },
   "resolutions": {
