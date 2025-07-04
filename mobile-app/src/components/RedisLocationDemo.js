@@ -57,7 +57,7 @@ export const RedisLocationDemo = () => {
     const handleStartLocationTracking = () => {
         startLocationTracking({
             accuracy: 'high',
-            timeInterval: 5000, // 5 segundos
+            timeInterval: 2000, // 2 segundos
             distanceInterval: 5 // 5 metros
         });
     };
@@ -72,7 +72,7 @@ export const RedisLocationDemo = () => {
             auth.profile.uid, // driverId
             'demo-passenger-456', // passengerId
             {
-                interval: 5000, // 5 segundos
+                interval: 2000, // 2 segundos
                 distanceThreshold: 0.005 // 5 metros
             }
         );
