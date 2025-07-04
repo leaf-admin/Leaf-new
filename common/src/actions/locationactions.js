@@ -8,20 +8,19 @@ import {
 import store from '../store/store';
 import { firebase } from '../config/configureFirebase';
 import { push, onValue, query, limitToLast, off, set } from 'firebase/database';
-import redisLocationService from '../services/redisLocationService';
-import redisTrackingService from '../services/redisTrackingService';
-import { MIGRATION_FLAGS } from '../config/redisConfig';
-import firestorePersistenceService from '../services/firestorePersistenceService.js';
+import { Platform } from 'react-native';
+import { GetDistance } from '../other/GeoFunctions';
+import { initializeRedis, USE_REDIS_LOCATION } from '../config/redisConfig';
+import { redisLocationService } from '../services/redisLocationService';
+import { redisTrackingService } from '../services/redisTrackingService';
 
 // Feature flags para estratégia híbrida
-const USE_REDIS_LOCATION = MIGRATION_FLAGS.ENABLE_REDIS && MIGRATION_FLAGS.REDIS_PRIMARY;
-const USE_REDIS_TRACKING = MIGRATION_FLAGS.ENABLE_REDIS && MIGRATION_FLAGS.REDIS_PRIMARY;
-const FIREBASE_FALLBACK = MIGRATION_FLAGS.FIREBASE_FALLBACK;
-const FIRESTORE_PERSISTENCE = MIGRATION_FLAGS.FIRESTORE_PERSISTENCE;
+const USE_REDIS_TRACKING = USE_REDIS_LOCATION && Platform.OS === 'web';
+const FIREBASE_FALLBACK = true; // Sempre usar Firebase como fallback
 
 // Inicializar serviços Redis se habilitados
 let redisInitialized = false;
-const initializeRedis = async () => {
+const initializeRedisServices = async () => {
     if (!redisInitialized && (USE_REDIS_LOCATION || USE_REDIS_TRACKING)) {
         try {
             await redisLocationService.initialize();
@@ -38,7 +37,7 @@ export const saveTracking = async (bookingId, location) => {
     try {
         // Redis (primário) - se habilitado
         if (USE_REDIS_TRACKING) {
-            await initializeRedis();
+            await initializeRedisServices();
             try {
                 await redisTrackingService.updateTripLocation(
                     bookingId, 
@@ -112,7 +111,7 @@ export const fetchBookingLocations = (bookingId) => async (dispatch) => {
 
     // Redis (novo) - se habilitado
     if (USE_REDIS_TRACKING) {
-        await initializeRedis();
+        await initializeRedisServices();
         try {
             const lastPoint = await redisTrackingService.getLastTrackingPoint(bookingId);
             if (lastPoint) {
@@ -152,7 +151,7 @@ export const saveUserLocation = async (location) => {
 
         // Redis (primário) - se habilitado
         if (USE_REDIS_LOCATION) {
-            await initializeRedis();
+            await initializeRedisServices();
             try {
                 await redisLocationService.updateUserLocation(
                     uid, 
@@ -190,7 +189,7 @@ export const saveUserLocation = async (location) => {
 // Nova função para obter localização do usuário (com fallback)
 export const getUserLocation = async (uid) => {
     if (USE_REDIS_LOCATION) {
-        await initializeRedis();
+        await initializeRedisServices();
         try {
             const location = await redisLocationService.getUserLocation(uid);
             if (location) {
@@ -207,7 +206,7 @@ export const getUserLocation = async (uid) => {
     }
 
     // Fallback para Firebase
-    if (DUAL_WRITE) {
+    if (USE_REDIS_LOCATION) {
         try {
             const { userLocationRef } = firebase;
             const snapshot = await get(userLocationRef(uid));
@@ -223,7 +222,7 @@ export const getUserLocation = async (uid) => {
 // Nova função para obter motoristas próximos
 export const getNearbyDrivers = async (lat, lng, radius = 5) => {
     if (USE_REDIS_LOCATION) {
-        await initializeRedis();
+        await initializeRedisServices();
         try {
             const drivers = await redisLocationService.findNearbyUsers(lat, lng, radius);
             console.log('📍 Nearby drivers from Redis:', drivers.length);
@@ -240,13 +239,13 @@ export const getNearbyDrivers = async (lat, lng, radius = 5) => {
 // Nova função para iniciar tracking de viagem
 export const startTripTracking = async (tripId, driverId, passengerId, initialLocation) => {
     if (USE_REDIS_TRACKING) {
-        await initializeRedis();
+        await initializeRedisServices();
         try {
             await redisTrackingService.startTripTracking(tripId, driverId, passengerId, initialLocation);
             console.log('🚗 Trip tracking started in Redis:', tripId);
         } catch (redisError) {
             console.error('❌ Redis trip tracking start failed:', redisError);
-            if (!DUAL_WRITE) {
+            if (!USE_REDIS_LOCATION) {
                 throw redisError;
             }
         }
@@ -256,13 +255,13 @@ export const startTripTracking = async (tripId, driverId, passengerId, initialLo
 // Nova função para finalizar tracking de viagem
 export const endTripTracking = async (tripId, endLocation) => {
     if (USE_REDIS_TRACKING) {
-        await initializeRedis();
+        await initializeRedisServices();
         try {
             await redisTrackingService.endTripTracking(tripId, endLocation);
             console.log('✅ Trip tracking ended in Redis:', tripId);
         } catch (redisError) {
             console.error('❌ Redis trip tracking end failed:', redisError);
-            if (!DUAL_WRITE) {
+            if (!USE_REDIS_LOCATION) {
                 throw redisError;
             }
         }
@@ -272,7 +271,7 @@ export const endTripTracking = async (tripId, endLocation) => {
 // Nova função para obter dados da viagem
 export const getTripData = async (tripId) => {
     if (USE_REDIS_TRACKING) {
-        await initializeRedis();
+        await initializeRedisServices();
         try {
             const tripData = await redisTrackingService.getTripData(tripId);
             if (tripData) {
@@ -288,7 +287,7 @@ export const getTripData = async (tripId) => {
 
 // Nova função para obter histórico de viagens do usuário (Firestore)
 export const getUserTripHistory = async (userId, userType = 'passenger', limit = 50) => {
-    if (FIRESTORE_PERSISTENCE) {
+    if (USE_REDIS_LOCATION) {
         try {
             const history = await firestorePersistenceService.getUserTripHistory(userId, userType, limit);
             console.log('📊 Trip history from Firestore:', history.length, 'trips');
@@ -302,7 +301,7 @@ export const getUserTripHistory = async (userId, userType = 'passenger', limit =
 
 // Nova função para obter estatísticas de viagens (Firestore)
 export const getTripStatistics = async (userId, userType = 'passenger', period = 'month') => {
-    if (FIRESTORE_PERSISTENCE) {
+    if (USE_REDIS_LOCATION) {
         try {
             const stats = await firestorePersistenceService.getTripStatistics(userId, userType, period);
             console.log('📊 Trip statistics from Firestore:', stats);
@@ -316,7 +315,7 @@ export const getTripStatistics = async (userId, userType = 'passenger', period =
 
 // Nova função para persistir dados de viagem (Firestore)
 export const persistTripData = async (tripId, tripData) => {
-    if (FIRESTORE_PERSISTENCE) {
+    if (USE_REDIS_LOCATION) {
         try {
             await firestorePersistenceService.persistTripData(tripId, tripData);
             console.log('💾 Trip data persisted to Firestore:', tripId);
