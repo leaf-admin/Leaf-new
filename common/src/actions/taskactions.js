@@ -9,19 +9,18 @@ import store from "../store/store";
 import { updateProfile } from "./authactions";
 import { RequestPushMsg } from "../other/NotificationFunctions";
 import { firebase } from '../config/configureFirebase';
-import { onValue, runTransaction, get, off, push } from "firebase/database";
 import {driverQueue} from '../other/sharedFunctions';
 
 export const fetchTasks = () => (dispatch) => {
   const { auth, tasksRef } = firebase;
 
   const uid = auth.currentUser.uid;
-  off(tasksRef());
+  tasksRef().off();
   dispatch({
     type: FETCH_TASKS,
     payload: null,
   });
-  onValue(tasksRef(), (snapshot) => {
+  tasksRef().on('value', (snapshot) => {
     if (snapshot.val()) {
       let data = snapshot.val();
       const arr = Object.keys(data)
@@ -50,10 +49,10 @@ export const acceptTask = (task) => (dispatch) => {
 
   const uid = auth.currentUser.uid;
 
-  onValue(singleUserRef(uid), (snapshot) => {
+  singleUserRef(uid).on('value', (snapshot) => {
     let profile = snapshot.val();
 
-    runTransaction(singleBookingRef(task.id),(booking) => {
+    singleBookingRef(task.id).transaction((booking) => {
       let fleetCommission_fee= profile?.fleetadmin ? ((parseFloat(booking?.estimate) - parseFloat(booking?.convenience_fees)) * parseFloat(booking?.fleet_admin_comission) / 100).toFixed(2):0;
       let driver_fee = parseFloat(parseFloat(booking?.estimate) - (parseFloat(booking?.convenience_fees) + parseFloat(fleetCommission_fee) )).toFixed(2);
         if (booking && booking.requestedDrivers) {
@@ -76,52 +75,50 @@ export const acceptTask = (task) => (dispatch) => {
           booking.driverEstimates = null;
           return booking;
         }
-      })
-      .then(() => {
-        get(singleBookingRef(task.id))
-          .then((snapshot) => {
-            if (!snapshot.exists()) {
-              return;
-            } else {
-              let requestedDrivers =
-                snapshot.val() && snapshot.val().requestedDrivers;
-              let driverId = snapshot.val() && snapshot.val().driver;
+      }).then(() => {
+        singleBookingRef(task.id).get().then((snapshot) => {
+          if (!snapshot.exists()) {
+            return;
+          } else {
+            let requestedDrivers =
+              snapshot.val() && snapshot.val().requestedDrivers;
+            let driverId = snapshot.val() && snapshot.val().driver;
 
-              if (requestedDrivers == undefined && driverId === uid) {
-                updateProfile({ queue: driverQueue ? false : true })(dispatch);
-                RequestPushMsg(task.customer_token, {
-                  title:
-                    store.getState().languagedata.defaultLanguage
-                      .notification_title,
-                  msg:
-                   profile.firstName +
-                    store.getState().languagedata.defaultLanguage
-                      .accept_booking_request,
-                  screen: "BookedCab",
-                  params: { bookingId: task.id },
-                });
+            if (requestedDrivers == undefined && driverId === uid) {
+              updateProfile({ queue: driverQueue ? false : true })(dispatch);
+              RequestPushMsg(task.customer_token, {
+                title:
+                  store.getState().languagedata.defaultLanguage
+                    .notification_title,
+                msg:
+                 profile.firstName +
+                  store.getState().languagedata.defaultLanguage
+                    .accept_booking_request,
+                screen: "BookedCab",
+                params: { bookingId: task.id },
+              });
 
-                const driverLocation = store.getState().gpsdata.location;
+              const driverLocation = store.getState().gpsdata.location;
 
-                push(trackingRef(task.id), {
-                  at: new Date().getTime(),
-                  status: "ACCEPTED",
-                  lat: driverLocation.lat,
-                  lng: driverLocation.lng,
-                });
+              trackingRef(task.id).push({
+                at: new Date().getTime(),
+                status: "ACCEPTED",
+                lat: driverLocation.lat,
+                lng: driverLocation.lng,
+              });
 
-                dispatch({
-                  type: ACCEPT_TASK,
-                  payload: { task: task },
-                });
-              }
+              dispatch({
+                type: ACCEPT_TASK,
+                payload: { task: task },
+              });
             }
-          })
-          .catch((error) => {
-            console.error(error);
-          });
+          }
+        })
+        .catch((error) => {
+          console.error(error);
+        });
       });
-  },{onlyOnce:true});
+  });
 };
 
 export const cancelTask = (bookingId) => (dispatch) => {
@@ -129,7 +126,7 @@ export const cancelTask = (bookingId) => (dispatch) => {
 
   const uid = auth.currentUser.uid;
 
-  runTransaction(singleBookingRef(bookingId), (booking) => {
+  singleBookingRef(bookingId).transaction((booking) => {
       if (booking && booking.requestedDrivers) {
         if (
           booking.requestedDrivers !== null &&

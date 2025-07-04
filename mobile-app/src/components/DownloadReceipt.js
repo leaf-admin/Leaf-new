@@ -3,7 +3,7 @@ import { View, Alert, StyleSheet, Text, TouchableOpacity, I18nManager } from 're
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
 import { MAIN_COLOR } from '../common/sharedFunctions';
-import i18n from 'i18n-js';
+import i18n from '../i18n';
 import { colors } from '../common/theme';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 const DownloadReceipt = ({ booking, settings }) => {

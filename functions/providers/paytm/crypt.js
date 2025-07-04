@@ -1,4 +1,4 @@
-"use strict";
+'use strict';
 
 var crypto = require('crypto');
 var util = require('util');
@@ -60,7 +60,7 @@ var crypt = {
     crypto.randomBytes(((length * 3.0) / 4.0), (err, buf) => {
       var salt;
       if (!err) {
-        salt = buf.toString("base64");
+        salt = buf.toString('base64');
       }
       //salt=Math.floor(Math.random()*8999)+1000;
       cb(err, salt);

@@ -4,7 +4,6 @@ import {
   FETCH_BOOKING__DISCOUNT_FAILED,
 } from "../store/types";
 import { firebase } from '../config/configureFirebase';
-import { get, onValue } from "firebase/database";
 
 export const fetchEarningsReport = () => async (dispatch) => {
 

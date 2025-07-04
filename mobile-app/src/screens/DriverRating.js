@@ -18,7 +18,7 @@ import { Button } from 'react-native-elements';
 import StarRating from 'react-native-star-rating-widget';
 import { colors } from '../common/theme';
 var { width } = Dimensions.get('window');
-import i18n from 'i18n-js';
+import i18n from '../i18n';
 import { useDispatch, useSelector } from 'react-redux';
 import { api } from 'common';
 import { MAIN_COLOR,SECONDORY_COLOR } from '../common/sharedFunctions';

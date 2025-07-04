@@ -1,7 +1,7 @@
 const admin = require('firebase-admin');
 
 module.exports.UpdateBooking = (bookingData,order_id,transaction_id,gateway) => {
-    admin.database().ref("settings").once("value", async settingsdata => {
+    admin.database().ref('settings').once('value', async settingsdata => {
         let settings = settingsdata.val();
         let curChanges = {
             status: bookingData.booking_from_web && !settings.prepaid? 'COMPLETE': settings.prepaid ? 'NEW' :'PAID',

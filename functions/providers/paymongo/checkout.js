@@ -7,41 +7,41 @@ const request = require('request');
 module.exports.render_checkout = async function (request, response) {
     const config = (await admin.database().ref('payment_settings/paymongo').once('value')).val();
 
-    const API_URL = "https://api.paymongo.com/v1/checkout_sessions";
+    const API_URL = 'https://api.paymongo.com/v1/checkout_sessions';
     const secret_key = config.secret_key;
 
-    const allowed = ["PHP"];
+    const allowed = ['PHP'];
 
     const refr = request.get('Referrer');
-    const server_url = refr ? ((refr.includes('bookings') || refr.includes('addbookings') || refr.includes('userwallet'))? refr.substring(0, refr.length - refr.split("/")[refr.split("/").length - 1].length) : refr) : request.protocol + "://" + request.get('host') + "/";
+    const server_url = refr ? ((refr.includes('bookings') || refr.includes('addbookings') || refr.includes('userwallet'))? refr.substring(0, refr.length - refr.split('/')[refr.split('/').length - 1].length) : refr) : request.protocol + '://' + request.get('host') + '/';
 
     const order_id = request.body.order_id;
     
     const data = {
-        "data": {
-          "attributes": {
-            "billing": {
-                "name": request.body.first_name + " " + request.body.last_name,
-                "email": request.body.email,
-                "phone": request.body.mobile_no
+        'data': {
+          'attributes': {
+            'billing': {
+                'name': request.body.first_name + ' ' + request.body.last_name,
+                'email': request.body.email,
+                'phone': request.body.mobile_no
             },
-            "send_email_receipt": true,
-            "show_description": false,
-            "show_line_items": true,
-            "reference_number": order_id,
-            "line_items": [
+            'send_email_receipt': true,
+            'show_description': false,
+            'show_line_items': true,
+            'reference_number': order_id,
+            'line_items': [
               {
-                "currency": allowed.includes(request.body.currency) ? request.body.currency : 'PHP',
-                "amount": parseFloat(request.body.amount) * 100 ,
-                "name": "Payment",
-                "quantity": 1
+                'currency': allowed.includes(request.body.currency) ? request.body.currency : 'PHP',
+                'amount': parseFloat(request.body.amount) * 100 ,
+                'name': 'Payment',
+                'quantity': 1
               }
             ],
-            "cancel_url": server_url + 'cancel',
-            "payment_method_types": [
-              "billease","card","dob","dob_ubp","gcash","grab_pay","paymaya"
+            'cancel_url': server_url + 'cancel',
+            'payment_method_types': [
+              'billease','card','dob','dob_ubp','gcash','grab_pay','paymaya'
             ],
-            "success_url": server_url + 'paymongo-process?order_id=' + order_id,
+            'success_url': server_url + 'paymongo-process?order_id=' + order_id,
           }
         }
     }
@@ -104,7 +104,7 @@ module.exports.process_checkout = async function (req, res) {
                                 UpdateBooking(bookingData,order_id,transaction_id,'paymongo');
                                 res.redirect(`/success?order_id=${order_id}&amount=${amount}&transaction_id=${transaction_id}`);
                             }else{
-                                if(order_id.startsWith("wallet")){
+                                if(order_id.startsWith('wallet')){
                                     addToWallet(order_id.substr(7,order_id.length - 12), amount, order_id, transaction_id);
                                     res.redirect(`/success?order_id=${order_id}&amount=${amount}&transaction_id=${transaction_id}`);
                                 }else{

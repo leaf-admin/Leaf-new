@@ -15,5 +15,6 @@
 	"expo_slug": "leafapp-reactnative",
 	"expo_project_id": "91dfdce0-9705-4fde-8417-747273ab7cc2",
 	"admin_email": "admin@leaf.app.br",
-	"purchase_code": "7d06f1aa-604e-43ab-9025-48b6793cf461"
+	"purchase_code": "7d06f1aa-604e-43ab-9025-48b6793cf461",
+	"customMobileOTP": false
 }

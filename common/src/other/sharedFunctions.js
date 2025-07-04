@@ -3,15 +3,27 @@ import { FareCalculator } from "../other/FareCalculator";
 import { GetDistance, GetTripDistance } from "../other/GeoFunctions";
 import { fetchAddressfromCoords } from '../other/GoogleAPIFunctions'; 
 import store from '../store/store';
-import { onValue, child, push, query, update, get, orderByKey } from "firebase/database";
 
 export const formatBookingObject = async (bookingData, settings) => {
   const c = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'
   const reference = [...Array(6)].map(_ => c[~~(Math.random()*c.length)]).join('');
   const { config } = firebase;
+  
+  // Fallback para config se não estiver disponível
+  const safeConfig = config || {
+    projectId: "leaf-reactnative",
+    appId: "1:106504629884:web:ada50a78fcf7bf3ea1a3f9",
+    databaseURL: "https://leaf-reactnative-default-rtdb.firebaseio.com",
+    storageBucket: "leaf-reactnative.firebasestorage.app",
+    apiKey: "AIzaSyChYseG1IcmffYHHVYT7MqtLlzfdWKE_fc",
+    authDomain: "leaf-reactnative.firebaseapp.com",
+    messagingSenderId: "106504629884",
+    measurementId: "G-22368DBCY9"
+  };
+  
   let today;
   try{
-      let res =  await fetch(`https://${config.projectId}.web.app/getservertime`, { method: 'GET', headers: {'Content-Type': 'application/json'}});
+      let res =  await fetch(`https://${safeConfig.projectId}.web.app/getservertime`, { method: 'GET', headers: {'Content-Type': 'application/json'}});
       const json = await res.json();
       if(json.time){
         today = json.time;
@@ -193,3 +205,9 @@ export const updateDriverQueue = (booking) => {
 };
 
 export const driverQueue= false;
+
+// Função utilitária para gerar código de indicação/referralId
+export function generateReferralId() {
+    const c = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+    return [...Array(6)].map(_ => c[~~(Math.random()*c.length)]).join('');
+}

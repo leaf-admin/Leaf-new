@@ -1,8 +1,8 @@
-import React, { useEffect, useState } from 'react';
-import {Navigate} from 'react-router-dom';
-import { useSelector } from "react-redux";
+import React, { useState, useEffect } from 'react';
+import { Navigate } from 'react-router-dom';
+import CircularLoading from '../components/CircularLoading';
 import ResponsiveDrawer from '../components/ResponsiveDrawer';
-import CircularLoading from "../components/CircularLoading";
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 function matchUser(permit, usertype){
     let permitions = permit? permit.split(',') : [];
@@ -14,26 +14,38 @@ function matchUser(permit, usertype){
     return permitted;
 }
 
-function ProtectedRoute({ permit,children }) {
-    const auth = useSelector(state => state.auth);
-    const [checkedAuth,setCheckedAuth] = useState(false);
+function ProtectedRoute({ permit, children }) {
+    const [authState, setAuthState] = useState({ profile: null, error: null });
+    const [checkedAuth, setCheckedAuth] = useState(false);
 
-    useEffect(()=>{
-        if(auth.profile && auth.profile.uid){
-            setCheckedAuth(true);
-        }
-        if(auth.error && auth.error.msg && !auth.profile){
-            setCheckedAuth(true);
-        }
-    },[auth.profile,auth.error])
+    useEffect(() => {
+        const checkAuth = async () => {
+            try {
+                const userData = await AsyncStorage.getItem('@user_data');
+                if (userData) {
+                    const profile = JSON.parse(userData);
+                    setAuthState({ profile });
+                }
+                setCheckedAuth(true);
+            } catch (error) {
+                console.error('Erro ao verificar autenticação:', error);
+                setAuthState({ error: { flag: true, msg: error } });
+                setCheckedAuth(true);
+            }
+        };
 
-    return(
-        checkedAuth?
-            auth.profile && auth.profile.uid?
-                matchUser(permit,auth.profile.usertype) ? <ResponsiveDrawer>{children}</ResponsiveDrawer>:<Navigate to="/login" />
-            :<Navigate to="/login" /> 
-        :<CircularLoading/>
-    )
+        checkAuth();
+    }, []);
+
+    return (
+        checkedAuth ?
+            authState.profile && authState.profile.uid ?
+                matchUser(permit, authState.profile.usertype) ? 
+                    <ResponsiveDrawer>{children}</ResponsiveDrawer> 
+                    : <Navigate to="/login" />
+                : <Navigate to="/login" />
+            : <CircularLoading />
+    );
 }
 
 export default ProtectedRoute;

@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { View, StyleSheet, Image, TouchableWithoutFeedback, Text, Alert, TouchableOpacity, Dimensions } from 'react-native';
-import i18n from 'i18n-js';
+import i18n from '../i18n';
 import { colors } from '../common/theme';
 import PaymentWebView from '../components/PaymentWebView';
 import { ScrollView } from 'react-native-gesture-handler';

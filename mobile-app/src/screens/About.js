@@ -9,7 +9,7 @@ import {
     Animated,
     Dimensions
 } from 'react-native';
-import i18n from 'i18n-js';
+import i18n from '../i18n';
 import { useSelector } from "react-redux";
 import { MaterialIcons, Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { fonts } from '../common/font';

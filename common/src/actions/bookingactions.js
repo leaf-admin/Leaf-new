@@ -8,7 +8,11 @@ import { RequestPushMsg } from '../other/NotificationFunctions';
 import store from '../store/store';
 import { firebase } from '../config/configureFirebase';
 import { formatBookingObject } from '../other/sharedFunctions';
-import { get, onValue, push } from "firebase/database";
+import { Alert } from 'react-native';
+import { Platform } from 'react-native';
+import { api } from '../index';
+import { CommonActions } from '@react-navigation/native';
+import { getDistance } from '../utils/firebaseUtils';
 
 export const clearBooking = () => (dispatch) => {
     dispatch({
@@ -16,6 +20,64 @@ export const clearBooking = () => (dispatch) => {
         payload: null,
     });
 }
+
+export const setBooking = (booking) => (dispatch) => {
+    dispatch({
+        type: 'SET_BOOKING',
+        payload: booking
+    });
+};
+
+export const updateBooking = (booking) => (dispatch) => {
+    dispatch({
+        type: 'UPDATE_BOOKING',
+        payload: booking
+    });
+};
+
+export const fetchBooking = (bookingId) => (dispatch) => {
+    const { database } = firebase;
+    const bookingRef = database.ref(`bookings/${bookingId}`);
+
+    bookingRef.on('value', (snapshot) => {
+        if (snapshot.exists()) {
+            const booking = formatBookingObject(snapshot.val());
+            dispatch({
+                type: 'SET_BOOKING',
+                payload: booking
+            });
+        }
+    });
+
+    return () => bookingRef.off();
+};
+
+export const createBooking = (bookingData) => async (dispatch) => {
+    try {
+        const { database } = firebase;
+        const newBookingRef = database.ref('bookings').push();
+        const bookingId = newBookingRef.key;
+
+        const booking = {
+            ...bookingData,
+            id: bookingId,
+            status: 'NEW',
+            createdAt: Date.now()
+        };
+
+        await newBookingRef.set(booking);
+
+        dispatch({
+            type: 'SET_BOOKING',
+            payload: booking
+        });
+
+        return booking;
+    } catch (error) {
+        console.error('Error creating booking:', error);
+        throw error;
+    }
+};
 
 export const addBooking = (bookingData) => async (dispatch) => {
 

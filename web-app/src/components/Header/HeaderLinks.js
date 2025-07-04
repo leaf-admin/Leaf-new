@@ -17,13 +17,14 @@ import ArrowDropDownIcon from '@mui/icons-material/ArrowDropDown';
 import {Typography} from "@mui/material";
 import { FONT_FAMILY } from "common/sharedFunctions.js";
 import { colors } from "components/Theme/WebTheme.js";
+import AsyncStorage from '@react-native-async-storage/async-storage';
 const useStyles = makeStyles(styles);
 
 export default function HeaderLinks(props) {
   const classes = useStyles();
-  const auth = useSelector(state => state.auth);
-  const settings = useSelector(state => state.settingsdata.settings);
-  const languagedata = useSelector(state => state.languagedata);
+  const [authState, setAuthState] = useState({ profile: null });
+  const [settings, setSettings] = useState(null);
+  const [languagedata, setLanguagedata] = useState(null);
   const { i18n,t } = useTranslation();
   const [loggedIn, setLoggedIn] = useState(false);
   const navigate = useNavigate();
@@ -40,6 +41,34 @@ export default function HeaderLinks(props) {
   };
 
   useEffect(()=>{
+    const loadInitialState = async () => {
+      try {
+        const userData = await AsyncStorage.getItem('@user_data');
+        const settingsData = await AsyncStorage.getItem('@settings');
+        const langData = await AsyncStorage.getItem('@language_data');
+        
+        if (userData) {
+          const profile = JSON.parse(userData);
+          setAuthState({ profile });
+          setLoggedIn(!!profile.uid);
+        }
+        if (settingsData) {
+          setSettings(JSON.parse(settingsData));
+        }
+        if (langData) {
+          const lang = JSON.parse(langData);
+          setLanguagedata(lang);
+          setMultiLanguage(lang.langlist);
+        }
+      } catch (error) {
+        console.error('Erro ao carregar estado inicial:', error);
+      }
+    };
+
+    loadInitialState();
+  }, []);
+
+  useEffect(()=>{
     if(languagedata.langlist){
       for (const key of Object.keys(languagedata.langlist)) {
         if(languagedata.langlist[key].langLocale === i18n.language){
@@ -54,12 +83,12 @@ export default function HeaderLinks(props) {
   
 
   useEffect(()=>{
-    if(auth.profile && auth.profile.uid){
+    if(authState.profile && authState.profile.uid){
       setLoggedIn(true);
     }else{
       setLoggedIn(false);
     }
-  },[auth.profile]);
+  },[authState.profile]);
   
   const [isActive, setIsActive] = useState(false);
 

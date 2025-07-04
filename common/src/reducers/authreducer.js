@@ -3,6 +3,7 @@ import {
     FETCH_USER_SUCCESS,
     FETCH_USER_FAILED,
     USER_SIGN_IN,
+    USER_SIGN_IN_SUCCESS,
     USER_SIGN_IN_FAILED,
     USER_SIGN_OUT,
     CLEAR_LOGIN_ERROR,
@@ -27,10 +28,14 @@ const INITIAL_STATE = {
         flag: false,
         msg: null
     },
-    verificationId:null
+    uid: null
 }
 
-export const authreducer = (state = INITIAL_STATE, action) => {
+export default (state = INITIAL_STATE, action) => {
+    console.log('=== AUTH REDUCER ===');
+    console.log('Action:', action.type);
+    console.log('Payload:', action.payload);
+
     switch (action.type) {
         case FETCH_USER:
             return {
@@ -41,12 +46,12 @@ export const authreducer = (state = INITIAL_STATE, action) => {
             return {
                 ...state,
                 profile: action.payload,
+                uid: action.payload ? action.payload.uid : null,
                 loading: false,
                 error: {
                     flag: false,
                     msg: null
-                },
-                verificationId:null
+                }
             };
         case FETCH_USER_FAILED:
             return {
@@ -55,18 +60,30 @@ export const authreducer = (state = INITIAL_STATE, action) => {
                 error: {
                     flag: true,
                     msg: action.payload
-                },
-                profile: null
+                }
             };
         case USER_SIGN_IN:
             return {
                 ...state,
-                loading: true
+                loading: true,
+                error: {
+                    flag: false,
+                    msg: null
+                }
+            };
+        case USER_SIGN_IN_SUCCESS:
+            return {
+                ...state,
+                uid: action.payload ? action.payload.uid : null,
+                loading: false,
+                error: {
+                    flag: false,
+                    msg: null
+                }
             };
         case USER_SIGN_IN_FAILED:
             return {
                 ...state,
-                profile: null,
                 loading: false,
                 error: {
                     flag: true,
@@ -80,12 +97,10 @@ export const authreducer = (state = INITIAL_STATE, action) => {
         case CLEAR_LOGIN_ERROR:
             return {
                 ...state,
-                verificationId:null,
                 error: {
                     flag: false,
                     msg: null
-                },
-                loading:false
+                }
             };
         case REQUEST_OTP:
             return {
@@ -95,17 +110,19 @@ export const authreducer = (state = INITIAL_STATE, action) => {
             return {
                 ...state,
                 loading: false,
-                verificationId:action.payload
+                error: {
+                    flag: false,
+                    msg: null
+                }
             };
         case REQUEST_OTP_FAILED:
             return {
                 ...state,
                 loading: false,
-                verificationId:null,
                 error: {
                     flag: true,
                     msg: action.payload
-                },
+                }
             };
         case REQUEST_EMAIL_TOKEN:
             return {
@@ -131,7 +148,7 @@ export const authreducer = (state = INITIAL_STATE, action) => {
             return {
                 ...state,
                 loading: false,
-                walletHistory:action.payload
+                walletHistory: action.payload
             };
         case SEND_RESET_EMAIL:
             return {
@@ -145,7 +162,7 @@ export const authreducer = (state = INITIAL_STATE, action) => {
                 error: {
                     flag: true,
                     msg: action.payload
-                },
+                }
             };
         default:
             return state;

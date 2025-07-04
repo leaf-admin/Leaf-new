@@ -5,7 +5,6 @@ import {
   EDIT_WITHDRAWS
 } from "../store/types";
 import { firebase } from '../config/configureFirebase';
-import { onValue, child, update } from "firebase/database";
 
 export const fetchWithdraws = () => (dispatch) => {
 
@@ -17,7 +16,7 @@ export const fetchWithdraws = () => (dispatch) => {
     type: FETCH_WITHDRAWS,
     payload: null
   });
- onValue(withdrawRef, snapshot => {
+  onValue(withdrawRef, snapshot => {
     if (snapshot.val()) {
       const data = snapshot.val();
       const arr = Object.keys(data).map(i => {

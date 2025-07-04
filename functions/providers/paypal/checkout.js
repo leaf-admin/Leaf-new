@@ -12,7 +12,7 @@ module.exports.render_checkout = async function(request, response){
     var amount = request.body.amount;
     var currency = request.body.currency;
     const refr = request.get('Referrer');
-    const server_url = refr ? ((refr.includes('bookings') || refr.includes('addbookings') || refr.includes('userwallet'))? refr.substring(0, refr.length - refr.split("/")[refr.split("/").length - 1].length) : refr) : request.protocol + "://" + request.get('host') + "/";
+    const server_url = refr ? ((refr.includes('bookings') || refr.includes('addbookings') || refr.includes('userwallet'))? refr.substring(0, refr.length - refr.split('/')[refr.split('/').length - 1].length) : refr) : request.protocol + '://' + request.get('host') + '/';
     response.send(templateLib.getTemplate(server_url,paypal_client_id,order_id,amount,currency));
 };
 
@@ -46,7 +46,7 @@ module.exports.process_checkout = async function (req, res) {
                       UpdateBooking(bookingData,order_id,transaction_id,'paypal');
                       res.redirect(`/success?order_id=${order_id}&amount=${amount}&transaction_id=${transaction_id}`);
                   }else{
-                      if(order_id.startsWith("wallet")){
+                      if(order_id.startsWith('wallet')){
                         addToWallet(order_id.substr(7,order_id.length - 12), amount, order_id, transaction_id);
                         res.redirect(`/success?order_id=${order_id}&amount=${amount}&transaction_id=${transaction_id}`);
                       }else{

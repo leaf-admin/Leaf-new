@@ -6,7 +6,6 @@ import {
   } from "../store/types";
   import { firebase } from '../config/configureFirebase';
   import store from '../store/store';
-  import { onValue, push, set } from "firebase/database";
   
   export const fetchComplain = () => (dispatch) => {
  

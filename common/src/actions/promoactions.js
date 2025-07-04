@@ -5,36 +5,90 @@ import {
   EDIT_PROMOS
 } from "../store/types";
 import { firebase } from '../config/configureFirebase';
-import { onValue, push, set, remove } from "firebase/database";
+import { getUserId } from '../utils/authUtils';
+import { getAuth } from 'firebase/auth';
 
-export const fetchPromos = () => (dispatch) => {
-
-  const {
-    promoRef
-  } = firebase;
-
-  dispatch({
-    type: FETCH_PROMOS,
-    payload: null
+const waitForFirebaseInit = async () => {
+  return new Promise((resolve) => {
+    const checkFirebase = () => {
+      if (firebase && firebase.database) {
+        const db = getDatabase();
+        if (db) {
+          resolve(true);
+        } else {
+          setTimeout(checkFirebase, 100);
+        }
+      } else {
+        setTimeout(checkFirebase, 100);
+      }
+    };
+    checkFirebase();
   });
-  onValue(promoRef, snapshot => {
-    if (snapshot.val()) {
-      const data = snapshot.val();
-      const arr = Object.keys(data).map(i => {
-        data[i].id = i;
-        return data[i]
-      });
-      dispatch({
-        type: FETCH_PROMOS_SUCCESS,
-        payload: arr
-      });
-    } else {
+};
+
+export const fetchPromos = () => async (dispatch) => {
+  try {
+    dispatch({
+      type: FETCH_PROMOS,
+      payload: null
+    });
+
+    // Aguardar inicialização do Firebase
+    await waitForFirebaseInit();
+    console.log('fetchPromos - Firebase Database inicializado');
+
+    const authInstance = getAuth();
+    const currentUser = authInstance.currentUser;
+    
+    if (!currentUser) {
+      console.error('fetchPromos - Usuário não autenticado');
       dispatch({
         type: FETCH_PROMOS_FAILED,
-        payload: "No promos available."
+        payload: 'Usuário não autenticado'
       });
+      return;
     }
-  });
+
+    const token = await currentUser.getIdToken();
+    console.log('fetchPromos - Token obtido:', token ? 'Sim' : 'Não');
+
+    const {
+      promoRef
+    } = firebase;
+
+    console.log('fetchPromos - Iniciando busca para UID:', currentUser.uid);
+
+    onValue(promoRef, snapshot => {
+      if (snapshot.val()) {
+        const data = snapshot.val();
+        const arr = Object.keys(data).map(i => {
+          data[i].id = i;
+          return data[i]
+        });
+        dispatch({
+          type: FETCH_PROMOS_SUCCESS,
+          payload: arr
+        });
+      } else {
+        dispatch({
+          type: FETCH_PROMOS_FAILED,
+          payload: "No promos available."
+        });
+      }
+    }, (error) => {
+      console.error('fetchPromos - Erro ao buscar dados:', error);
+      dispatch({
+        type: FETCH_PROMOS_FAILED,
+        payload: error.message || 'Erro ao buscar promoções'
+      });
+    });
+  } catch (error) {
+    console.error('fetchPromos - Erro:', error);
+    dispatch({
+      type: FETCH_PROMOS_FAILED,
+      payload: error.message || 'Erro ao buscar promoções'
+    });
+  }
 };
 
 export const editPromo = (promo, method) => (dispatch) => {

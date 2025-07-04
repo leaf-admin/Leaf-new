@@ -21,9 +21,8 @@ import Button from '../components/Button';
 import RNPickerSelect from '../components/RNPickerSelect';
 import * as ImagePicker from 'expo-image-picker';
 import { Feather } from '@expo/vector-icons';
-import { api } from 'common';
 import ActionSheet from "react-native-actions-sheet";
-import i18n from 'i18n-js';
+import i18n from '../i18n';
 import { Ionicons } from '@expo/vector-icons';
 import Footer from '../components/Footer';
 import { FormIcon, MAIN_COLOR } from '../common/sharedFunctions';
@@ -35,11 +34,6 @@ export default function CarEditScreen(props) {
     const { t } = i18n;
     const isRTL = i18n.locale.indexOf('he') === 0 || i18n.locale.indexOf('ar') === 0;
     const dispatch = useDispatch();
-    const {
-        updateUserCar,
-        updateUserCarWithImage,
-        editCar
-    } = api;
     const carlistdata = useSelector(state => state.carlistdata);
     const cartypes = useSelector(state => state.cartypes.cars);
     const settings = useSelector(state => state.settingsdata.settings);

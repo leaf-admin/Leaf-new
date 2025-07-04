@@ -5,7 +5,6 @@ import {
 } from "../store/types";
 import store from '../store/store';
 import { firebase } from '../config/configureFirebase';
-import { get, onValue } from "firebase/database";
 
 export const fetchFleetAdminEarnings = () => async (dispatch) => {
 

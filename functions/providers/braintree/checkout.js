@@ -1,4 +1,4 @@
-const braintree = require("braintree");
+const braintree = require('braintree');
 const templateLib = require('./template');
 const admin = require('firebase-admin');
 const addToWallet = require('../../common').addToWallet;
@@ -20,11 +20,11 @@ module.exports.render_checkout = async function(request, response){
     gateway.clientToken.generate({
     }, (err, res) => {
         if (err) {
-            response.send({ "error": err });
+            response.send({ 'error': err });
         } else if (res) {
             response.send(templateLib.getTemplate(res.clientToken,order_id,amount,currency));
         } else {
-            response.send({ "error": "Some other error" });
+            response.send({ 'error': 'Some other error' });
         }
     });
 };
@@ -59,7 +59,7 @@ module.exports.process_checkout = async function(request, response){
                           UpdateBooking(bookingData,order_id,transaction_id,'braintree');
                           response.redirect(`/success?order_id=${order_id}&amount=${amount}&transaction_id=${transaction_id}`);
                       }else{
-                          if(order_id.startsWith("wallet")){
+                          if(order_id.startsWith('wallet')){
                                 addToWallet(order_id.substr(7,order_id.length - 12), amount, order_id, transaction_id);
                                 response.redirect(`/success?order_id=${order_id}&amount=${amount}&transaction_id=${transaction_id}`);
                           }else{

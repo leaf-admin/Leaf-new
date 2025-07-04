@@ -17,7 +17,7 @@ import {
   ScrollView,
   Platform
 } from 'react-native';
-import i18n from 'i18n-js';
+import i18n from '../i18n';
 import { api } from 'common';
 import { useSelector, useDispatch } from 'react-redux';
 import Footer from '../components/Footer'

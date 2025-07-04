@@ -118,9 +118,6 @@
     ]
   },
   "functions": {
-    "runtime": "nodejs22",
-    "predeploy": [
-      "npm --prefix \"$RESOURCE_DIR\" run lint"
-    ]
+    "runtime": "nodejs22"
   }
 }

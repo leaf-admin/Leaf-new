@@ -17,16 +17,14 @@ import {
   FETCH_ALL_DRIVERS_FAILED
 } from "../store/types";
 import { firebase } from '../config/configureFirebase';
-import { onValue, set, push, update, off, get, remove } from "firebase/database";
-import { uploadBytesResumable, getDownloadURL } from "firebase/storage";
-import { signOut } from "firebase/auth";
+import { ref, get } from 'firebase/database';
+import { waitForFirebaseInit } from '../utils/firebaseUtils';
+import store from '../store/store';
+import getUserData from '../utils/getUserData';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 export const fetchUsers = () => (dispatch) => {
-
-  const {
-    usersRef,
-    allLocationsRef
-  } = firebase;
+  const usersRef = ref(firebase.database, 'users');
 
   dispatch({
     type: FETCH_ALL_DRIVERS,
@@ -34,7 +32,7 @@ export const fetchUsers = () => (dispatch) => {
   });
   onValue(usersRef, async snapshot => {
     if (snapshot.val()) {
-      const locationdata = await get(allLocationsRef);
+      const locationdata = await get(firebase.allLocationsRef);
       const locations = locationdata.val();
       const data = snapshot.val();
       const arr = Object.keys(data)
@@ -59,11 +57,7 @@ export const fetchUsers = () => (dispatch) => {
 
 
 export const fetchUsersOnce = () => (dispatch) => {
-
-  const {
-    usersRef,
-    allLocationsRef
-  } = firebase;
+  const usersRef = ref(firebase.database, 'users');
 
   dispatch({
     type: FETCH_ALL_USERS_STATIC,
@@ -71,7 +65,7 @@ export const fetchUsersOnce = () => (dispatch) => {
   });
   onValue(usersRef, async snapshot => {
     if (snapshot.val()) {
-      const locationdata = await get(allLocationsRef);
+      const locationdata = await get(firebase.allLocationsRef);
       const locations = locationdata.val();
       const data = snapshot.val();
       const arr = Object.keys(data)
@@ -103,7 +97,6 @@ export const clearFetchDrivers = () => (dispatch) => {
 }
 
 export const fetchDrivers = (appType) => async(dispatch) => {
-
   const {
     driversRef,
     allLocationsRef,
@@ -178,7 +171,6 @@ export const addUser = (userdata) => (dispatch) => {
 }
 
 export const editUser = (id, user) => (dispatch) => {
-
   const {
     singleUserRef
   } = firebase;
@@ -206,7 +198,6 @@ export const updateUserCar = (id, data) => (dispatch) => {
 }
 
 export const updateLicenseImage = (uid, imageBlob, imageType) => async (dispatch) => {
-
   const {
     singleUserRef,
     driverDocsRef,
@@ -238,7 +229,6 @@ export const updateLicenseImage = (uid, imageBlob, imageType) => async (dispatch
 };
 
 export const deleteUser = (uid) => (dispatch) => {
-
   const {
     auth,
     walletHistoryRef,
@@ -296,3 +286,402 @@ export const deleteUser = (uid) => (dispatch) => {
     });
   },{onlyOnce:true});
 }
+
+export const fetchUserBookings = () => async (dispatch) => {
+  try {
+    await waitForFirebaseInit();
+    console.log('fetchUserBookings - Firebase Database inicializado');
+
+    const uid = await getUserId();
+    if (!uid) {
+      console.error('fetchUserBookings - UID não encontrado');
+      return;
+    }
+
+    const userInfo = store.getState().auth.profile;
+    if (!userInfo || !userInfo.usertype) {
+      console.error('fetchUserBookings - Tipo de usuário não encontrado');
+      return;
+    }
+
+    console.log('fetchUserBookings - Caminho completo:', firebase.bookingListRef(uid, userInfo.usertype).toString());
+    
+    onValue(firebase.bookingListRef(uid, userInfo.usertype), (snapshot) => {
+      if (snapshot.val()) {
+        const data = snapshot.val();
+        dispatch({
+          type: 'FETCH_USER_BOOKINGS_SUCCESS',
+          payload: data
+        });
+      } else {
+        dispatch({
+          type: 'FETCH_USER_BOOKINGS_FAILED',
+          payload: 'Nenhuma reserva encontrada'
+        });
+      }
+    }, (error) => {
+      console.error('fetchUserBookings - Erro ao buscar dados:', error);
+      dispatch({
+        type: 'FETCH_USER_BOOKINGS_FAILED',
+        payload: error.message || 'Erro ao buscar reservas'
+      });
+    });
+  } catch (error) {
+    console.error('fetchUserBookings - Erro:', error);
+    dispatch({
+      type: 'FETCH_USER_BOOKINGS_FAILED',
+      payload: error.message || 'Erro ao buscar reservas'
+    });
+  }
+};
+
+// Utilitário para aguardar até que o currentUser esteja disponível
+const waitForAuth = async (maxTries = 30, interval = 200) => {
+  const authInstance = getAuth();
+  let tries = 0;
+  while (!authInstance.currentUser && tries < maxTries) {
+    console.log(`[waitForAuth] Tentativa ${tries + 1}: currentUser ainda null`);
+    await new Promise(res => setTimeout(res, interval));
+    tries++;
+  }
+  if (authInstance.currentUser) {
+    console.log('[waitForAuth] currentUser disponível:', authInstance.currentUser.uid);
+    return authInstance.currentUser;
+  } else {
+    console.warn('[waitForAuth] currentUser permaneceu null após várias tentativas');
+    return null;
+  }
+};
+
+export const fetchUserCancelReasons = () => async (dispatch) => {
+  console.log('=== NOVA VERSAO fetchUserCancelReasons ===');
+  try {
+    await waitForFirebaseInit();
+    console.log('fetchUserCancelReasons - Firebase Database inicializado');
+
+    const cancelReasonsRef = ref(firebase.database, 'cancel_reason');
+    console.log('fetchUserCancelReasons - Caminho acessado:', cancelReasonsRef.toString());
+
+    // Desligar listener existente antes de criar um novo (se houver)
+    off(cancelReasonsRef);
+
+    const listener = onValue(cancelReasonsRef, (snapshot) => {
+      if (snapshot.val()) {
+        const data = snapshot.val();
+        dispatch({
+          type: 'FETCH_CANCEL_REASONS_SUCCESS',
+          payload: data
+        });
+      } else {
+        dispatch({
+          type: 'FETCH_CANCEL_REASONS_FAILED',
+          payload: 'Nenhum motivo de cancelamento encontrado'
+        });
+      }
+    }, (error) => {
+      console.error('fetchUserCancelReasons - Erro ao buscar dados:', error);
+      dispatch({
+        type: 'FETCH_CANCEL_REASONS_FAILED',
+        payload: error.message
+      });
+    });
+
+    // Retornar o método de desligamento do listener
+    return listener;
+
+  } catch (error) {
+    console.error('fetchUserCancelReasons - Erro:', error);
+    dispatch({
+      type: 'FETCH_CANCEL_REASONS_FAILED',
+      payload: error.message
+    });
+    // Em caso de erro, garantir que nenhum listener fique ativo
+     if (firebase.database) {
+         const cancelReasonsRef = ref(firebase.database, 'cancel_reason');
+         off(cancelReasonsRef);
+     }
+  }
+};
+
+// Nova action para desligar o listener de motivos de cancelamento
+export const unsubscribeCancelReasons = () => (dispatch, getState) => {
+    const state = getState();
+    // Assumindo que o listener é salvo em algum lugar do estado Redux (precisará de ajuste no reducer)
+    // const listener = state.algumReducer.cancelReasonsListener;
+    // if (listener && typeof listener === 'function') {
+    //     console.log('Desligando listener de motivos de cancelamento');
+    //     listener();
+    // }
+    // Como alternativa, podemos desligar pela referência direta se o listener não for salvo no estado
+    if (firebase.database) {
+        console.log('Tentando desligar listener de motivos de cancelamento pela referência');
+        const cancelReasonsRef = ref(firebase.database, 'cancel_reason');
+        off(cancelReasonsRef);
+    } else {
+        console.warn('Firebase Database não disponível para desligar listener de motivos de cancelamento');
+    }
+};
+
+export const fetchUserPaymentMethods = () => async (dispatch) => {
+  try {
+    await waitForFirebaseInit();
+    console.log('fetchUserPaymentMethods - Firebase Database inicializado');
+
+    const uid = await getUserId();
+    if (!uid) {
+      console.error('fetchUserPaymentMethods - UID não encontrado');
+      return;
+    }
+
+    const userInfo = store.getState().auth.profile;
+    if (!userInfo || !userInfo.usertype) {
+      console.error('fetchUserPaymentMethods - Tipo de usuário não encontrado');
+      return;
+    }
+
+    console.log('fetchUserPaymentMethods - Iniciando busca com:', { uid, usertype: userInfo.usertype });
+
+    const methodsRef = ref(firebase.database, `payment_methods/${uid}`);
+    
+    onValue(methodsRef, (snapshot) => {
+      if (snapshot.val()) {
+        const data = snapshot.val();
+        dispatch({
+          type: 'FETCH_USER_PAYMENT_METHODS_SUCCESS',
+          payload: data
+        });
+      } else {
+        dispatch({
+          type: 'FETCH_USER_PAYMENT_METHODS_FAILED',
+          payload: 'Nenhum método de pagamento encontrado'
+        });
+      }
+    }, (error) => {
+      console.error('fetchUserPaymentMethods - Erro ao buscar dados:', error);
+      dispatch({
+        type: 'FETCH_USER_PAYMENT_METHODS_FAILED',
+        payload: error.message || 'Erro ao buscar métodos de pagamento'
+      });
+    });
+  } catch (error) {
+    console.error('fetchUserPaymentMethods - Erro:', error);
+    dispatch({
+      type: 'FETCH_USER_PAYMENT_METHODS_FAILED',
+      payload: error.message || 'Erro ao buscar métodos de pagamento'
+    });
+  }
+};
+
+export const fetchUserPromos = () => async (dispatch) => {
+  console.log('=== NOVA VERSAO fetchUserPromos ===');
+  try {
+    await waitForFirebaseInit();
+    console.log('fetchUserPromos - Firebase Database inicializado');
+
+    const promosRef = ref(firebase.database, 'promos');
+    console.log('fetchUserPromos - Caminho acessado:', promosRef.toString());
+
+    // Desligar listener existente antes de criar um novo (se houver)
+    off(promosRef);
+
+    const listener = onValue(promosRef, (snapshot) => {
+      if (snapshot.val()) {
+        const data = snapshot.val();
+        dispatch({
+          type: 'FETCH_PROMOS_SUCCESS',
+          payload: data
+        });
+      } else {
+        dispatch({
+          type: 'FETCH_PROMOS_FAILED',
+          payload: 'Nenhuma promoção encontrada'
+        });
+      }
+    }, (error) => {
+      console.error('fetchUserPromos - Erro ao buscar dados:', error);
+      dispatch({
+        type: 'FETCH_PROMOS_FAILED',
+        payload: error.message
+      });
+    });
+
+    // Retornar o método de desligamento do listener
+    return listener;
+
+  } catch (error) {
+    console.error('fetchUserPromos - Erro:', error);
+    dispatch({
+      type: 'FETCH_PROMOS_FAILED',
+      payload: error.message
+    });
+    // Em caso de erro, garantir que nenhum listener fique ativo
+     if (firebase.database) {
+         const promosRef = ref(firebase.database, 'promos');
+         off(promosRef);
+     }
+  }
+};
+
+// Nova action para desligar o listener de promoções
+export const unsubscribePromos = () => (dispatch, getState) => {
+    const state = getState();
+    // Assumindo que o listener é salvo em algum lugar do estado Redux (precisará de ajuste no reducer)
+    // const listener = state.algumReducer.promosListener;
+    // if (listener && typeof listener === 'function') {
+    //     console.log('Desligando listener de promoções');
+    //     listener();
+    // }
+     // Como alternativa, podemos desligar pela referência direta se o listener não for salvo no estado
+    if (firebase.database) {
+        console.log('Tentando desligar listener de promoções pela referência');
+        const promosRef = ref(firebase.database, 'promos');
+        off(promosRef);
+    } else {
+        console.warn('Firebase Database não disponível para desligar listener de promoções');
+    }
+};
+
+export const fetchAllUsers = () => async (dispatch) => {
+    try {
+        const uid = await getUserId();
+        if (!uid) {
+            console.error('fetchAllUsers - UID não encontrado');
+            return;
+        }
+
+        const usersRef = ref(firebase.database, 'users');
+        onValue(usersRef, (snapshot) => {
+            const data = snapshot.val();
+            dispatch({ type: 'FETCH_ALL_USERS_SUCCESS', payload: data || {} });
+        });
+    } catch (error) {
+        console.error('fetchAllUsers - Erro:', error);
+        dispatch({ type: 'FETCH_ALL_USERS_FAILURE', payload: error.message });
+    }
+};
+
+// === Função temporária de diagnóstico ===
+export const testReadBookingsSimple = () => async () => {
+  try {
+    const snapshot = await get(ref(firebase.database, 'bookings'));
+    if (snapshot.exists()) {
+      console.log('testReadBookingsSimple - Sucesso:', snapshot.val());
+    } else {
+      console.log('testReadBookingsSimple - Nó vazio');
+    }
+  } catch (error) {
+    console.error('testReadBookingsSimple - Erro:', error);
+  }
+};
+
+export const fetchBookings = () => async (dispatch) => {
+  console.log('=== LOG RASTREADOR fetchBookings (usersactions) ===');
+  try {
+    await waitForFirebaseInit();
+    console.log('fetchBookings - Firebase Database inicializado');
+
+    // Tentar obter UID do AsyncStorage primeiro
+    const storedUid = await AsyncStorage.getItem('@auth_uid');
+    const storedUserData = await AsyncStorage.getItem('@user_data');
+    let uid = null;
+    let userInfo = null;
+
+    if (storedUid && storedUserData) {
+      uid = storedUid;
+      userInfo = JSON.parse(storedUserData);
+      console.log('fetchBookings - Usando UID do AsyncStorage:', uid);
+    } else {
+      // Se não tiver no AsyncStorage, tentar do Firebase Auth
+      const currentUser = await waitForAuth();
+      if (currentUser) {
+        uid = currentUser.uid;
+        userInfo = store.getState().auth.profile;
+        console.log('fetchBookings - Usando UID do Firebase Auth:', uid);
+      }
+    }
+
+    if (!uid) {
+      console.error('fetchBookings - UID não encontrado');
+      dispatch({
+        type: 'FETCH_BOOKINGS_FAILED',
+        payload: 'Usuário não autenticado'
+      });
+      return;
+    }
+
+    if (!userInfo || !userInfo.usertype) {
+      console.error('fetchBookings - Tipo de usuário não encontrado');
+      dispatch({
+        type: 'FETCH_BOOKINGS_FAILED',
+        payload: 'Tipo de usuário não encontrado'
+      });
+      return;
+    }
+
+    console.log('fetchBookings - Iniciando busca com:', { uid, usertype: userInfo.usertype });
+    
+    // Usar o caminho correto para bookings
+    const bookingsRef = ref(firebase.database, `bookings/${uid}`);
+    console.log('fetchBookings - Caminho acessado:', bookingsRef.toString());
+
+    onValue(bookingsRef, (snapshot) => {
+      if (snapshot.val()) {
+        const data = snapshot.val();
+        dispatch({
+          type: 'FETCH_BOOKINGS_SUCCESS',
+          payload: data
+        });
+      } else {
+        dispatch({
+          type: 'FETCH_BOOKINGS_FAILED',
+          payload: 'Nenhuma reserva encontrada'
+        });
+      }
+    }, (error) => {
+      console.error('fetchBookings - Erro ao buscar dados:', error);
+      dispatch({
+        type: 'FETCH_BOOKINGS_FAILED',
+        payload: error.message
+      });
+    });
+  } catch (error) {
+    console.error('fetchBookings - Erro:', error);
+    dispatch({
+      type: 'FETCH_BOOKINGS_FAILED',
+      payload: error.message
+    });
+  }
+};
+
+// Função para buscar dados de um usuário específico
+export const getUser = async (uid) => {
+  try {
+    console.log('getUser - Buscando dados do usuário:', uid);
+    
+    if (!uid) {
+      console.error('getUser - UID não fornecido');
+      return null;
+    }
+
+    const userRef = firebase.singleUserRef(uid);
+    const snapshot = await new Promise((resolve) => {
+      const unsubscribe = userRef.on('value', (snap) => {
+        unsubscribe();
+        resolve(snap);
+      });
+    });
+
+    if (snapshot.val()) {
+      const userData = snapshot.val();
+      userData.uid = uid;
+      console.log('getUser - Dados do usuário encontrados:', userData);
+      return userData;
+    } else {
+      console.log('getUser - Usuário não encontrado no banco de dados');
+      return null;
+    }
+  } catch (error) {
+    console.error('getUser - Erro ao buscar dados do usuário:', error);
+    return null;
+  }
+};

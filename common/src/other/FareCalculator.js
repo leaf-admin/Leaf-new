@@ -1,28 +1,79 @@
-export const FareCalculator = (distance,time,rateDetails,instructionData, decimal)=>{  
+import { GetDistance } from './GeoFunctions';
+import { calculateTollFees } from './TollCalculator';
 
-    let baseCalculated =  (parseFloat(rateDetails.rate_per_unit_distance) * parseFloat(distance)) + (parseFloat(rateDetails.rate_per_hour) * (parseFloat(time) / 3600));
-    if(rateDetails.base_fare>0){
-        baseCalculated = baseCalculated + rateDetails.base_fare;
+// Função para calcular a tarifa base
+function calculateBaseFare(distance, time, rateDetails) {
+    console.log('[calculateBaseFare] rateDetails:', rateDetails);
+    console.log('[calculateBaseFare] rateDetails.base_fare:', rateDetails?.base_fare);
+    
+    const baseFare = parseFloat(rateDetails?.base_fare) || 0;
+    const ratePerKm = parseFloat(rateDetails?.rate_per_unit_distance) || 0;
+    const ratePerHour = parseFloat(rateDetails?.rate_per_hour) || 0;
+    
+    const distanceFare = distance * ratePerKm;
+    const timeFare = (time / 3600) * ratePerHour; // Converter segundos para horas
+    
+    return baseFare + distanceFare + timeFare;
+}
+
+// Função para calcular a taxa de conveniência
+function calculateConvenienceFee(totalFare, rateDetails) {
+    const feeType = rateDetails?.convenience_fee_type;
+    const feeRate = parseFloat(rateDetails?.convenience_fees) || 0;
+    
+    if (feeType === 'percentage') {
+        return (totalFare * feeRate) / 100;
+    } else {
+        return feeRate; // flat rate
     }
-    if(instructionData && instructionData.parcelTypeSelected){
-        baseCalculated = baseCalculated + instructionData.parcelTypeSelected.amount;
+}
+
+// Função para arredondar para o número de casas decimais especificado
+function roundToDecimal(value, decimalPrecision = 2) {
+    const precision = Math.pow(10, decimalPrecision);
+    return Math.round(value * precision) / precision;
+}
+
+export function FareCalculator(
+    distance, time, rateDetails, instructionData, decimalPrecision, routePoints, vehicleType = 'car', externalTollFee = null
+) {
+    console.log('Iniciando cálculo de tarifa com os seguintes parâmetros:');
+    console.log('- Distância:', distance);
+    console.log('- Tempo:', time);
+    console.log('- Tipo de veículo:', vehicleType);
+    console.log('- Pontos da rota:', routePoints ? routePoints.length : 0);
+
+    // Cálculo da tarifa base
+    const baseFare = calculateBaseFare(distance, time, rateDetails);
+    console.log('Tarifa base calculada:', baseFare);
+
+    // Cálculo do pedágio
+    let tollFee = 0;
+    if (externalTollFee !== null && !isNaN(externalTollFee)) {
+        tollFee = externalTollFee;
+        console.log('Valor do pedágio recebido externamente:', tollFee);
+    } else if (routePoints && routePoints.length > 0) {
+        tollFee = calculateTollFees(routePoints, vehicleType);
+        console.log('Valor do pedágio calculado:', tollFee);
     }
-    if(instructionData && instructionData.optionSelected){
-        baseCalculated = baseCalculated + instructionData.optionSelected.amount;
-    }
-    let total = baseCalculated > parseFloat(rateDetails.min_fare) ? baseCalculated : parseFloat(rateDetails.min_fare);
-    let convenienceFee = 0;
-    if(rateDetails.convenience_fee_type && rateDetails.convenience_fee_type == 'flat'){
-        convenienceFee = rateDetails.convenience_fees;
-    }else{
-        convenienceFee = (total*parseFloat(rateDetails.convenience_fees)/100);
-    }
-    let grand = total + convenienceFee;
+
+    // Soma do pedágio à tarifa base
+    const totalFare = baseFare + tollFee;
+    console.log('Valor total (base + pedágio):', totalFare);
+
+    // Cálculo da taxa de conveniência
+    const convenienceFee = calculateConvenienceFee(totalFare, rateDetails);
+    console.log('Taxa de conveniência:', convenienceFee);
+
+    // Valor final
+    const grandTotal = totalFare + convenienceFee;
+    console.log('Valor final da corrida:', grandTotal);
 
     return {
-        totalCost:parseFloat(total.toFixed(decimal)),
-        grandTotal:parseFloat(grand.toFixed(decimal)),
-        convenience_fees:parseFloat(convenienceFee.toFixed(decimal))
-    }
-     
+        baseFare: roundToDecimal(baseFare, decimalPrecision),
+        tollFee: roundToDecimal(tollFee, decimalPrecision),
+        totalFare: roundToDecimal(totalFare, decimalPrecision),
+        convenienceFee: roundToDecimal(convenienceFee, decimalPrecision),
+        grandTotal: roundToDecimal(grandTotal, decimalPrecision)
+    };
 }

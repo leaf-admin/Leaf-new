@@ -1,7 +1,7 @@
-const crypto = require("crypto");
+const crypto = require('crypto');
 const admin = require('firebase-admin');
 const templateLib = require('./template');
-const axios = require("axios");
+const axios = require('axios');
 const addToWallet = require('../../common').addToWallet;
 const UpdateBooking = require('../../common/sharedFunctions').UpdateBooking;
 
@@ -9,27 +9,27 @@ const generateSignature = async (data) => {
     const config = (await admin.database().ref('payment_settings/payfast').once('value')).val();
     const passPhrase = config.passPhrase;
 
-    let pfOutput = "";
+    let pfOutput = '';
     for (let key in data) {
         if (Object.prototype.hasOwnProperty.call(data, key)) {
-            if (data[key] !== "") {
-                pfOutput += `${key}=${encodeURIComponent(data[key].trim()).replace(/%20/g, "+")}&`
+            if (data[key] !== '') {
+                pfOutput += `${key}=${encodeURIComponent(data[key].trim()).replace(/%20/g, '+')}&`
             }
         }
     }
     let getString = pfOutput.slice(0, -1);
-    if (passPhrase !== "") {
-        getString +=`&passphrase=${encodeURIComponent(passPhrase.trim()).replace(/%20/g, "+")}`;
+    if (passPhrase !== '') {
+        getString +=`&passphrase=${encodeURIComponent(passPhrase.trim()).replace(/%20/g, '+')}`;
     }
-    return crypto.createHash("md5").update(getString).digest("hex");
+    return crypto.createHash('md5').update(getString).digest('hex');
 };
 
 const pfValidSignature = (pfData, pfParamObject, pfPassphrase = null) => {
     let tempParamString = '';
     if (pfPassphrase !== null) {
-        pfParamObject +=`&passphrase=${encodeURIComponent(pfPassphrase.trim()).replace(/%20/g, "+")}`;
+        pfParamObject +=`&passphrase=${encodeURIComponent(pfPassphrase.trim()).replace(/%20/g, '+')}`;
     }
-    const signature = crypto.createHash("md5").update(pfParamObject).digest("hex");
+    const signature = crypto.createHash('md5').update(pfParamObject).digest('hex');
     return pfData['signature'] === signature;
 };
 
@@ -55,21 +55,21 @@ module.exports.render_checkout = async function (request, response) {
     const testingMode = config.testingMode;
     const PAYFAST_MEWRCHANT_ID = config.PAYFAST_MEWRCHANT_ID;
     const PAYFAST_MERCHANT_KEY = config.PAYFAST_MERCHANT_KEY;
-    const PAYFAST_CHECKOUT_URL = "https://" + (testingMode ? "sandbox.payfast.co.za" : "www.payfast.co.za") + "/eng/process";
+    const PAYFAST_CHECKOUT_URL = 'https://' + (testingMode ? 'sandbox.payfast.co.za' : 'www.payfast.co.za') + '/eng/process';
 
     const refr = request.get('Referrer');
-    const server_url = refr ? ((refr.includes('bookings') || refr.includes('addbookings') || refr.includes('userwallet'))? refr.substring(0, refr.length - refr.split("/")[refr.split("/").length - 1].length) : refr) : request.protocol + "://" + request.get('host') + "/";
+    const server_url = refr ? ((refr.includes('bookings') || refr.includes('addbookings') || refr.includes('userwallet'))? refr.substring(0, refr.length - refr.split('/')[refr.split('/').length - 1].length) : refr) : request.protocol + '://' + request.get('host') + '/';
     const myData = [];
-    myData["merchant_id"] = PAYFAST_MEWRCHANT_ID;
-    myData["merchant_key"] = PAYFAST_MERCHANT_KEY;
-    myData["return_url"] = server_url + `success?order_id=${request.body.order_id}&amount=${request.body.amount}`;
-    myData["cancel_url"] = server_url + 'cancel';
-    myData["notify_url"] = server_url + 'payfast-process';
-    myData["email_address"] = request.body.email;
-    myData["m_payment_id"] = request.body.order_id;
-    myData["amount"] = request.body.amount;
-    myData["item_name"] = request.body.order_id;
-    myData["signature"] = await generateSignature(myData);
+    myData['merchant_id'] = PAYFAST_MEWRCHANT_ID;
+    myData['merchant_key'] = PAYFAST_MERCHANT_KEY;
+    myData['return_url'] = server_url + `success?order_id=${request.body.order_id}&amount=${request.body.amount}`;
+    myData['cancel_url'] = server_url + 'cancel';
+    myData['notify_url'] = server_url + 'payfast-process';
+    myData['email_address'] = request.body.email;
+    myData['m_payment_id'] = request.body.order_id;
+    myData['amount'] = request.body.amount;
+    myData['item_name'] = request.body.order_id;
+    myData['signature'] = await generateSignature(myData);
     response.send(templateLib.getTemplate(
         PAYFAST_CHECKOUT_URL, myData
     ));
@@ -80,14 +80,14 @@ module.exports.process_checkout = async function (req, res) {
     const testingMode = config.testingMode;
     const passPhrase = config.passPhrase && config.passPhrase.length>0 ? config.passPhrase : null;
 
-    const pfHost = testingMode ? "sandbox.payfast.co.za" : "www.payfast.co.za";
+    const pfHost = testingMode ? 'sandbox.payfast.co.za' : 'www.payfast.co.za';
 
     const pfData = JSON.parse(JSON.stringify(req.body));
 
-    let pfParamString = "";
+    let pfParamString = '';
     for (let key in pfData) {
-        if (Object.prototype.hasOwnProperty.call(pfData, key) && key !== "signature") {
-            pfParamString += `${key}=${encodeURIComponent(pfData[key].trim()).replace(/%20/g, "+")}&`;
+        if (Object.prototype.hasOwnProperty.call(pfData, key) && key !== 'signature') {
+            pfParamString += `${key}=${encodeURIComponent(pfData[key].trim()).replace(/%20/g, '+')}&`;
         }
     }
 
@@ -106,7 +106,7 @@ module.exports.process_checkout = async function (req, res) {
                 const bookingData = snapshot.val();
                 UpdateBooking(bookingData,order_id,transaction_id,'payfast');
             }else{
-                if(order_id.startsWith("wallet")){
+                if(order_id.startsWith('wallet')){
                   addToWallet(order_id.substr(7,order_id.length - 12), amount, order_id, transaction_id);
                 }
             }

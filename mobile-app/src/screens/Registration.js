@@ -1,8 +1,8 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Registration } from '../components';
-import { StyleSheet, View, Alert } from 'react-native';
+import { StyleSheet, View, Animated, Text } from 'react-native';
 import { useSelector,useDispatch } from 'react-redux';
-import i18n from 'i18n-js';
+import i18n from '../i18n';
 import { api } from 'common';
 
 export default function RegistrationPage(props) {
@@ -13,89 +13,88 @@ export default function RegistrationPage(props) {
     editreferral
   } = api;
   const [loading, setLoading] = useState(false);
+  const [snackbar, setSnackbar] = useState({ visible: false, message: '', type: 'error' });
+  const snackbarAnim = useRef(new Animated.Value(0)).current;
   const useduserReferral = useSelector(state => state.usedreferralid.usedreferral);
   const { t } = i18n;
+  const settings = props.route.params?.settings || useSelector(state => state.settingsdata.settings);
+  const dispatch = useDispatch();
 
-    const dispatch = useDispatch()
-    const clickRegister = async (regData) => {
+  // Função para exibir snackbar
+  const showSnackbar = (message, type = 'error') => {
+    setSnackbar({ visible: true, message, type });
+    Animated.timing(snackbarAnim, {
+      toValue: 1,
+      duration: 250,
+      useNativeDriver: true,
+    }).start(() => {
+      setTimeout(() => {
+        Animated.timing(snackbarAnim, {
+          toValue: 0,
+          duration: 250,
+          useNativeDriver: true,
+        }).start(() => setSnackbar({ ...snackbar, visible: false }));
+      }, 3000);
+    });
+  };
+
+  const clickRegister = async (regData) => {
     setLoading(true);
-    checkUserExists(regData).then((res)=>{
+    checkUserExists(regData).then((res) => {
       if(res.users && res.users.length>0){
         setLoading(false);
-        Alert.alert(t('alert'),t('user_exists'));
+        showSnackbar(t('user_exists'), 'error');
       }
       else if(res.error){
         setLoading(false);
-        Alert.alert(t('alert'),t('email_or_mobile_issue'));
+        showSnackbar(t('email_or_mobile_issue'), 'error');
       }
       else{
         if (regData.referralId && regData.referralId.length > 0) {
-          
           validateReferer(regData.referralId).then((referralInfo)=>{
             const referrals = useduserReferral ?? [];
             for (let i = 0; i < referrals.length; i++) {
                 if(referrals[i].email===regData.email){
-                    Alert.alert(t("referral_email_used"))
+                    showSnackbar(t("referral_email_used"), 'error');
                     setLoading(false)
                     return
                 }else if(referrals[i].phone===regData.mobile){
-                    Alert.alert(t("referral_number_used"))
+                    showSnackbar(t("referral_number_used"), 'error');
                     setLoading(false)
                     return
                 }
-               
-               
             }
             if (referralInfo.uid) {
-                            mainSignUp({...regData, signupViaReferral: referralInfo.uid}).then((res)=>{
-                             
-                            dispatch(editreferral({email:regData.email,phone:regData.mobile},"Add"))
+              mainSignUp({...regData, signupViaReferral: referralInfo.uid}).then((res)=>{
+                dispatch(editreferral({email:regData.email,phone:regData.mobile},"Add"))
                 setLoading(false);
                 if(res.uid){
-                  Alert.alert(
-                    t('alert'),
-                    t('account_create_successfully'),
-                    [
-                        {
-                            text: t('ok'), 
-                            onPress: () => {
-                             props. navigation.goBack();
-                            }
-                        },
-                    ],
-                    { cancelable: false },
-                  );
+                  showSnackbar(t('account_create_successfully'), 'success');
+                  setTimeout(() => {
+                    props.navigation.goBack();
+                  }, 1200);
                 }else{
-                  Alert.alert(t('alert'),t('reg_error'));
+                  showSnackbar(t('reg_error'), 'error');
                 }
               })
             }else{
               setLoading(false);
-              Alert.alert(t('alert'),t('referer_not_found'))
+              showSnackbar(t('referer_not_found'), 'error');
             }
-          }).catch((error)=>{
+          }).catch(() => {
             setLoading(false);
-            Alert.alert(t('alert'),t('referer_not_found'))
+            showSnackbar(t('referer_not_found'), 'error');
           });
         } else {
           mainSignUp(regData).then((res)=>{
-                        setLoading(false);
+            setLoading(false);
             if(res.uid){
-                            Alert.alert(
-                  t('alert'),
-                  t('account_create_successfully'),
-                  [
-                      {
-                          text: t('ok'), 
-                          onPress: () => {
-                            props.navigation.goBack();
-                          }
-                      },
-                  ],
-                  { cancelable: false },
-              );
+              showSnackbar(t('account_create_successfully'), 'success');
+              setTimeout(() => {
+                props.navigation.goBack();
+              }, 1200);
             }else{
-              Alert.alert(t('alert'),t('reg_error'));
+              showSnackbar(t('reg_error'), 'error');
             }
           })
         }
@@ -109,12 +108,53 @@ export default function RegistrationPage(props) {
         onPressRegister={(regData) => clickRegister(regData)}
         onPressBack={() => { props.navigation.goBack() }}
         loading={loading}
-        >
-      </Registration>
+      />
+      {/* Snackbar animado */}
+      <Animated.View
+        pointerEvents={snackbar.visible ? 'auto' : 'none'}
+        style={[
+          styles.snackbar,
+          snackbar.type === 'error' ? styles.snackbarError : styles.snackbarSuccess,
+          {
+            opacity: snackbarAnim,
+            transform: [{ translateY: snackbarAnim.interpolate({ inputRange: [0, 1], outputRange: [60, 0] }) }],
+          },
+        ]}
+      >
+        <Text style={styles.snackbarText}>{snackbar.message}</Text>
+      </Animated.View>
     </View>
   );
 }
 const styles = StyleSheet.create({
   containerView: { flex: 1 },
   textContainer: { textAlign: "center" },
+  snackbar: {
+    position: 'absolute',
+    left: 24,
+    right: 24,
+    bottom: 32,
+    borderRadius: 8,
+    paddingVertical: 16,
+    paddingHorizontal: 24,
+    alignItems: 'center',
+    zIndex: 1000,
+    elevation: 10,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.15,
+    shadowRadius: 8,
+  },
+  snackbarError: {
+    backgroundColor: '#D32F2F',
+  },
+  snackbarSuccess: {
+    backgroundColor: '#388E3C',
+  },
+  snackbarText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '500',
+    textAlign: 'center',
+  },
 });

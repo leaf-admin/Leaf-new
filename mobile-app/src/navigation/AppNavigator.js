@@ -1,11 +1,12 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { NavigationContainer, useNavigationContainerRef } from '@react-navigation/native';
-import { createStackNavigator } from '@react-navigation/stack';
+import { createStackNavigator, CardStyleInterpolators } from '@react-navigation/stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import {
     Dimensions,
     Platform,
 } from 'react-native';
+import DeviceInfo from 'react-native-device-info';
 import {
     DriverRating,
     ProfileScreen,
@@ -30,11 +31,16 @@ import {
     SettingsScreen,
     CarsScreen,
     CarEditScreen,
+    WelcomeScreen,
 } from '../screens';
+import DriverDocumentsScreen from '../screens/DriverDocumentsScreen';
 import Complain from '../screens/Complain';
+import OTPScreen from '../screens/OTPScreen';
+import UserInfoScreen from '../screens/UserInfoScreen';
+import AppCommon from '../screens/AppCommon';
 var { height, width } = Dimensions.get('window');
 import { useSelector } from "react-redux";
-import i18n from 'i18n-js';
+import i18n from '../i18n';
 import * as Notifications from 'expo-notifications';
 import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../common/theme';
@@ -42,7 +48,8 @@ import { Icon } from "react-native-elements";
 import { MAIN_COLOR } from '../common/sharedFunctions';
 import { CommonActions } from '@react-navigation/native';
 import { fonts } from '../common/font';
-import DeviceInfo from 'react-native-device-info';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 const hasNotch = DeviceInfo.hasNotch();
 
@@ -50,12 +57,51 @@ const Stack = createStackNavigator();
 const Tab = createBottomTabNavigator();
 
 export default function AppContainer() {
+    console.log("AppNavigator - Iniciando renderização");
+    
     const { t } = i18n;
     const isRTL = i18n.locale.indexOf('he') === 0 || i18n.locale.indexOf('ar') === 0;
-    const auth = useSelector(state => state.auth);
+    const [authState, setAuthState] = useState({ profile: null });
     const responseListener = useRef();
     const navigationRef = useNavigationContainerRef();
     const activeBookings = useSelector(state => state.bookinglistdata.active);
+    const [initialRoute, setInitialRoute] = React.useState(null);
+    const [isLoading, setIsLoading] = React.useState(true);
+    const insets = useSafeAreaInsets();
+
+    // Carregar estado de autenticação do AsyncStorage
+    useEffect(() => {
+        const loadAuthState = async () => {
+            try {
+                setIsLoading(true);
+                const userData = await AsyncStorage.getItem('@user_data');
+                if (userData) {
+                    const profile = JSON.parse(userData);
+                    setAuthState({ profile });
+                    
+                    // Set initial route based on user type
+                    if (profile.usertype === 'customer') {
+                        setInitialRoute('Map');
+                    } else if (profile.usertype === 'driver') {
+                        setInitialRoute('DriverTrips');
+                    }
+                }
+            } catch (error) {
+                console.error('Erro ao carregar estado de autenticação:', error);
+            } finally {
+                setIsLoading(false);
+            }
+        };
+
+        loadAuthState();
+    }, []);
+
+    console.log("AppNavigator - Estado de autenticação:", {
+        hasProfile: !!authState.profile,
+        userType: authState.profile?.usertype,
+        initialRoute,
+        isLoading
+    });
 
     useEffect(() => {
       responseListener.current = Notifications.addNotificationResponseReceivedListener(response => {
@@ -76,7 +122,7 @@ export default function AppContainer() {
     
     const screenOptions = {
         headerStyle: {
-          backgroundColor: MAIN_COLOR,
+          backgroundColor: '#41D274',
           transform: [{ scaleX: isRTL ? -1 : 1 }]
         },
         headerTintColor: colors.TRANSPARENT,
@@ -99,39 +145,38 @@ export default function AppContainer() {
     const TabRoot = () => {
         return (
             <Tab.Navigator
-                screenOptions={({ route }) => ({
-                    animationEnabled: Platform.OS == 'android'? false : true,
-                    tabBarIcon: ({ focused, color, size }) => {
-                        let iconName;
-                        if (route.name === 'Map' || route.name === 'DriverTrips') {
-                            iconName = focused
-                              ? 'home'
-                              : 'home-outline';
-                        } else if (route.name === 'RideList') {
-                            iconName = focused ? 'list-circle' : 'list-circle-outline';
-                        } else if (route.name === 'Wallet') {
-                            iconName = focused ? 'wallet' : 'wallet-outline';
-                        } else if (route.name === 'Settings') {
-                            iconName = focused ? 'settings' : 'settings-outline';
-                        }
-                        return <Ionicons name={iconName} size={size} color={color} />;
+                initialRouteName={initialRoute}
+                screenOptions={{
+                    tabBarStyle: {
+                        backgroundColor: 'rgba(30,30,30,0.92)',
+                        borderTopLeftRadius: 0,
+                        borderTopRightRadius: 0,
+                        borderTopWidth: 0,
+                        elevation: 10,
+                        shadowColor: '#000',
+                        shadowOffset: { width: 0, height: -2 },
+                        shadowOpacity: 0.15,
+                        shadowRadius: 8,
+                        paddingBottom: 48,
+                        zIndex: 9999,
                     },
-                    tabBarActiveTintColor: MAIN_COLOR,
-                    tabBarInactiveTintColor: colors.HEADER,
-                    tabBarBadge: route.name == 'RideList' && activeBookings && activeBookings.length > 0 ? activeBookings.length :null,
-                    tabBarBadgeStyle:{transform: [{ scaleX: isRTL ? -1 : 1 }]},
-                    tabBarIndicatorStyle: {
-                        borderBottomColor: '#C2D5A8',
-                        borderBottomWidth: 2,
-                      },
-                    // tabBarStyle: { height: hasNotch ? 80:55,transform:isRTL? [{scaleX: -1}] :[{scaleX: 1}]},
-                    tabBarLabelStyle:{ fontSize: 14,fontFamily:fonts.Light,transform:isRTL? [{scaleX: -1}] :[{scaleX: 1}]},
-                })}
+                    tabBarShowLabel: false,
+                    tabBarActiveTintColor: '#fff',
+                    tabBarInactiveTintColor: '#b0b0b0',
+                    tabBarIconStyle: { marginTop: 6, fontSize: 28 },
+                }}
             >
-                {auth.profile && auth.profile.usertype && auth.profile.usertype == 'customer' ?
+                {authState.profile && authState.profile.usertype && authState.profile.usertype == 'customer' ?
                     <Tab.Screen name="Map" 
                         component={MapScreen} 
-                        options={{title: t('home'),headerShown: false}}
+                        options={{
+                            title: t('home'),
+                            headerShown: false,
+                            tabBarStyle: { display: 'none' },
+                            tabBarIcon: ({ color, size }) => (
+                                <Ionicons name="home-outline" color={color} size={size} />
+                            ),
+                        }}
                         listeners={({navigation,route})=>({
                             tabPress: e => {
                                 e.preventDefault()
@@ -145,11 +190,17 @@ export default function AppContainer() {
                         })}
                     />
                 : null}
-                {auth.profile && auth.profile.usertype && auth.profile.usertype == 'driver' ?
+                {authState.profile && authState.profile.usertype && authState.profile.usertype == 'driver' ?
                     <Tab.Screen 
                         name="DriverTrips" 
                         component={DriverTrips} 
-                        options={{ title: t('task_list'),...screenOptions }}
+                        options={{ 
+                            title: t('task_list'),
+                            ...screenOptions,
+                            tabBarIcon: ({ color, size }) => (
+                                <Ionicons name="list-circle-outline" color={color} size={size} />
+                            ),
+                        }}
                         listeners={({navigation,route})=>({
                             tabPress: e => {
                                 e.preventDefault()
@@ -165,7 +216,13 @@ export default function AppContainer() {
                 : null}
                 <Tab.Screen name="RideList"
                     component={RideListPage} 
-                    options={{ title: t('ride_list_title'),...screenOptions }}
+                    options={{ 
+                        title: t('ride_list_title'),
+                        ...screenOptions,
+                        tabBarIcon: ({ color, size }) => (
+                            <Ionicons name="list-circle-outline" color={color} size={size} />
+                        ),
+                    }}
                     listeners={({navigation,route})=>({
                         tabPress: e => {
                             e.preventDefault()
@@ -180,7 +237,13 @@ export default function AppContainer() {
                 />
                 <Tab.Screen name="Wallet" 
                     component={WalletDetails} 
-                    options={{ title: t('my_wallet_tile'),...screenOptions }}
+                    options={{ 
+                        title: t('my_wallet_tile'),
+                        ...screenOptions,
+                        tabBarIcon: ({ color, size }) => (
+                            <Ionicons name="wallet-outline" color={color} size={size} />
+                        ),
+                    }}
                     listeners={({navigation,route})=>({
                         tabPress: e => {
                             e.preventDefault()
@@ -195,7 +258,13 @@ export default function AppContainer() {
                 />
                 <Tab.Screen name="Settings" 
                     component={SettingsScreen} 
-                    options={{ title: t('settings_title') ,...screenOptions}}
+                    options={{ 
+                        title: t('settings_title'),
+                        ...screenOptions,
+                        tabBarIcon: ({ color, size }) => (
+                            <Ionicons name="settings-outline" color={color} size={size} />
+                        ),
+                    }}
                     listeners={({navigation,route})=>({
                         tabPress: e => {
                             e.preventDefault()
@@ -212,42 +281,58 @@ export default function AppContainer() {
         );
     }
 
+    if (isLoading) {
+        return null; // Or a loading screen if you have one
+    }
+
     return (
         <NavigationContainer ref={navigationRef}>
-            <Stack.Navigator
-                screenOptions={{
-                    animationTypeForReplace: 'pop',
-                    animationEnabled:   Platform.OS == 'android'? false: true,
-                }}
-            >
-                {auth.profile && auth.profile.uid ?
-                    <Stack.Group>
-                        <Stack.Screen name="TabRoot" component={TabRoot}  options={{headerShown: false,}}/>
-                        <Stack.Screen name="Profile" component={ProfileScreen} options={{ title: t('profile_setting_menu'),...screenOptions}}/>
-                        <Stack.Screen name="editUser" component={EditProfilePage} options={{ title: t('update_profile_title'),...screenOptions }}/>
-                        <Stack.Screen name="Search" component={SearchScreen} options={{ title: t('search'),...screenOptions }}/>
-                        <Stack.Screen name="DriverRating" component={DriverRating} options={{ title: t('rate_ride'),headerLeft: ()=> null,...screenOptions }}/>
-                        <Stack.Screen name="PaymentDetails" component={PaymentDetails} options={{ title: t('payment'),...screenOptions }}/>
-                        <Stack.Screen name="BookedCab" component={BookedCabScreen} options={{headerShown: false }}/>
-                        <Stack.Screen name="RideDetails" component={RideDetails} options={{ title: t('ride_details_page_title'),...screenOptions }}/>
-                        <Stack.Screen name="onlineChat" component={OnlineChat} options={{ title: t('chat_title'),...screenOptions }}/>
-                        <Stack.Screen name="addMoney" component={AddMoneyScreen} options={{ title: t('add_money'),...screenOptions }}/>
-                        <Stack.Screen name="paymentMethod" component={SelectGatewayPage} options={{ title: t('payment'),...screenOptions }}/>
-                        <Stack.Screen name="withdrawMoney" component={WithdrawMoneyScreen} options={{ title: t('withdraw_money'),...screenOptions }}/>
-                        <Stack.Screen name="About" component={AboutPage} options={{ title: t('about_us_menu'),...screenOptions }}/>
-                        <Stack.Screen name="Complain" component={Complain} options={{ title: t('complain'),...screenOptions }}/>
-                        <Stack.Screen name="MyEarning" component={DriverIncomeScreen} options={{ title: t('incomeText'),...screenOptions }}/>
-                        <Stack.Screen name="Notifications" component={NotificationsPage} options={{ title: t('push_notification_title'),...screenOptions }}/>
-                        <Stack.Screen name="Cars" component={CarsScreen} options={{ title: t('cars'),...screenOptions  }}/>
-                        <Stack.Screen name="CarEdit" component={CarEditScreen} options={{ title: t('editcar'),...screenOptions  }}/>
-                    </Stack.Group>
-                    :
-                    <Stack.Group screenOptions={{ headerShown: false }}>
-                        <Stack.Screen name="Login" component={LoginScreen}/>
-                        <Stack.Screen name="Register" component={RegistrationPage}/>
-                    </Stack.Group>
-                }
-            </Stack.Navigator>
+            <AppCommon>
+                <Stack.Navigator
+                    initialRouteName={initialRoute ? "TabRoot" : "Welcome"}
+                    screenOptions={({ route }) => ({
+                        animationTypeForReplace: 'pop',
+                        animationEnabled: true,
+                        cardStyleInterpolator: CardStyleInterpolators.forHorizontalIOS,
+                        transitionSpec: {
+                            open: { animation: 'timing', config: { duration: 300 } },
+                            close: { animation: 'timing', config: { duration: 300 } },
+                        },
+                    })}
+                >
+                    {authState.profile && authState.profile.uid ?
+                        <Stack.Group>
+                            <Stack.Screen name="TabRoot" component={TabRoot}  options={{headerShown: false,}}/>
+                            <Stack.Screen name="Profile" component={ProfileScreen} options={{ title: t('profile_setting_menu'),...screenOptions}}/>
+                            <Stack.Screen name="editUser" component={EditProfilePage} options={{ title: t('update_profile_title'),...screenOptions }}/>
+                            <Stack.Screen name="Search" component={SearchScreen} options={{ title: t('search'),...screenOptions }}/>
+                            <Stack.Screen name="DriverRating" component={DriverRating} options={{ title: t('rate_ride'),headerLeft: ()=> null,...screenOptions }}/>
+                            <Stack.Screen name="PaymentDetails" component={PaymentDetails} options={{ title: t('payment'),...screenOptions }}/>
+                            <Stack.Screen name="BookedCab" component={BookedCabScreen} options={{headerShown: false }}/>
+                            <Stack.Screen name="RideDetails" component={RideDetails} options={{ title: t('ride_details_page_title'),...screenOptions }}/>
+                            <Stack.Screen name="onlineChat" component={OnlineChat} options={{ title: t('chat_title'),...screenOptions }}/>
+                            <Stack.Screen name="addMoney" component={AddMoneyScreen} options={{ title: t('add_money'),...screenOptions }}/>
+                            <Stack.Screen name="selectGateway" component={SelectGatewayPage} options={{ title: t('select_gateway'),...screenOptions }}/>
+                            <Stack.Screen name="withdrawMoney" component={WithdrawMoneyScreen} options={{ title: t('withdraw_money'),...screenOptions }}/>
+                            <Stack.Screen name="driverIncome" component={DriverIncomeScreen} options={{ title: t('driver_income'),...screenOptions }}/>
+                            <Stack.Screen name="notifications" component={NotificationsPage} options={{ title: t('notifications'),...screenOptions }}/>
+                            <Stack.Screen name="cars" component={CarsScreen} options={{ title: t('cars'),...screenOptions }}/>
+                            <Stack.Screen name="carEdit" component={CarEditScreen} options={{ title: t('car_edit'),...screenOptions }}/>
+                            <Stack.Screen name="complain" component={Complain} options={{ title: t('complain'),...screenOptions }}/>
+                            <Stack.Screen name="about" component={AboutPage} options={{ title: t('about'),...screenOptions }}/>
+                            <Stack.Screen name="driverDocuments" component={DriverDocumentsScreen} options={{ title: t('driver_documents'),...screenOptions }}/>
+                        </Stack.Group>
+                    : null}
+                    <Stack.Screen name="Welcome" component={WelcomeScreen} options={{headerShown: false}}/>
+                    <Stack.Screen name="Login" component={LoginScreen} options={{
+                        headerShown: false,
+                        cardStyleInterpolator: CardStyleInterpolators.forFadeFromBottomAndroid,
+                    }}/>
+                    <Stack.Screen name="Registration" component={RegistrationPage} options={{headerShown: false}}/>
+                    <Stack.Screen name="OTP" component={OTPScreen} options={{headerShown: false}}/>
+                    <Stack.Screen name="UserInfo" component={UserInfoScreen} options={{headerShown: false}}/>
+                </Stack.Navigator>
+            </AppCommon>
         </NavigationContainer>
     );
 }

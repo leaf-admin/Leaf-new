@@ -10,22 +10,16 @@ import {
     Alert,
     FlatList
 } from 'react-native';
-import i18n from 'i18n-js';
+import i18n from '../i18n';
 import { Button } from 'react-native-elements'
 import { useSelector, useDispatch } from "react-redux";
 var { width } = Dimensions.get('window');
 import moment from 'moment/min/moment-with-locales';
-import { api } from 'common';
 import { MAIN_COLOR } from "../common/sharedFunctions";
 import {SECONDORY_COLOR } from "../common/sharedFunctions";
 import { fonts } from '../common/font';
 
 export default function Complain() {
-
-    const {
-        editComplain
-    } = api;
-
     const dispatch = useDispatch();
     const { t } = i18n;
     const isRTL = i18n.locale.indexOf('he') === 0 || i18n.locale.indexOf('ar') === 0;

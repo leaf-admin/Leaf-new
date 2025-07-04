@@ -9,42 +9,7 @@ import {
 } from "../store/types";
 import { RequestPushMsg } from '../other/NotificationFunctions';
 import { firebase } from '../config/configureFirebase';
-import { onValue, set, push, remove } from "firebase/database";
 import store from '../store/store';
-
-export const fetchUserNotifications = () => (dispatch) => {
-
-  const {
-    auth,
-    userNotificationsRef
-  } = firebase;
-
-  dispatch({
-    type: FETCH_NOTIFICATIONS,
-    payload: null
-  });
-
-  const uid = auth.currentUser.uid;
-
-  onValue(userNotificationsRef(uid), snapshot => {
-    const data = snapshot.val(); 
-    if(data){
-      const arr = Object.keys(data).map(i => {
-        data[i].id = i
-        return data[i]
-      });
-      dispatch({
-        type: FETCH_NOTIFICATIONS_SUCCESS,
-        payload: arr.reverse()
-      });
-    } else {
-      dispatch({
-        type: FETCH_NOTIFICATIONS_FAILED,
-        payload: "No data available."
-      });
-    }
-  });
-};
 
 export const fetchNotifications = () => (dispatch) => {
 
@@ -102,13 +67,25 @@ export const sendNotification = (notification) => async (dispatch) => {
     config
   } = firebase;
 
+  // Fallback para config se não estiver disponível
+  const safeConfig = config || {
+    projectId: "leaf-reactnative",
+    appId: "1:106504629884:web:ada50a78fcf7bf3ea1a3f9",
+    databaseURL: "https://leaf-reactnative-default-rtdb.firebaseio.com",
+    storageBucket: "leaf-reactnative.firebasestorage.app",
+    apiKey: "AIzaSyChYseG1IcmffYHHVYT7MqtLlzfdWKE_fc",
+    authDomain: "leaf-reactnative.firebaseapp.com",
+    messagingSenderId: "106504629884",
+    measurementId: "G-22368DBCY9"
+  };
+
   dispatch({
     type: SEND_NOTIFICATION,
     payload: notification
   });
 
   const settings = store.getState().settingsdata.settings;
-  let host = window && window.location && settings.CompanyWebsite === window.location.origin? window.location.origin : `https://${config.projectId}.web.app`
+  let host = window && window.location && settings.CompanyWebsite === window.location.origin? window.location.origin : `https://${safeConfig.projectId}.web.app`
   let url = `${host}/send_notification`;
 
   fetch(url, {

@@ -8,7 +8,6 @@ import {
 import store from '../store/store';
 import { firebase } from '../config/configureFirebase';
 import { RequestPushMsg } from '../other/NotificationFunctions';
-import { onValue, push, off, child } from "firebase/database";
 
 export const fetchChatMessages = (bookingId) => (dispatch) => {
 

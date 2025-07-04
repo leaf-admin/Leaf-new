@@ -12,7 +12,7 @@ import {
 } from "react-native";
 import { Avatar, Button } from "react-native-elements";
 import { colors } from "../common/theme";
-import i18n from 'i18n-js';
+import i18n from '../i18n';
 import { useSelector } from 'react-redux';
 import { fonts } from '../common/font';
 import { getLangKey } from "common/src/other/getLangKey";

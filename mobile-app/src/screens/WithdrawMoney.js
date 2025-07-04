@@ -8,7 +8,7 @@ import {
 } from 'react-native';
 import { Header, Button } from 'react-native-elements';
 import { colors } from '../common/theme';
-import i18n from 'i18n-js';
+import i18n from '../i18n';
 import { useSelector,useDispatch } from 'react-redux';
 import { api } from 'common';
 import { MAIN_COLOR } from '../common/sharedFunctions';
@@ -19,7 +19,7 @@ export default function WithdrawMoneyScreen(props) {
     withdrawBalance,
   } = api;
   const dispatch = useDispatch();
-  const settings = useSelector(state => state.settingsdata.settings);
+  const settings = useSelector(state => state.settingsdata.settings) || {};
   const {userdata} = props.route.params;
   const [state, setState] = useState({
     userdata: userdata,
@@ -54,15 +54,15 @@ export default function WithdrawMoneyScreen(props) {
     <View style={styles.mainView}>
       
       <View style={styles.bodyContainer}>
-      {settings.swipe_symbol===false?
-        <Text style={[styles.walletbalText,{textAlign: isRTL ? 'right': 'left'}]}>{t('Balance')} - <Text style={styles.ballance}>{settings.symbol}{state.userdata ? parseFloat(state.userdata.walletBalance).toFixed(settings.decimal) : ''}</Text></Text>
+      {settings?.swipe_symbol === false ?
+        <Text style={[styles.walletbalText,{textAlign: isRTL ? 'right': 'left'}]}>{t('Balance')} - <Text style={styles.ballance}>{settings?.symbol || ''}{state.userdata ? parseFloat(state.userdata.walletBalance).toFixed(settings?.decimal || 2) : ''}</Text></Text>
         :
-        <Text style={[styles.walletbalText,{textAlign: isRTL ? 'right': 'left'}]}>{t('Balance')} - <Text style={styles.ballance}>{state.userdata ? parseFloat(state.userdata.walletBalance).toFixed(settings.decimal) : ''}{settings.symbol}</Text></Text>
+        <Text style={[styles.walletbalText,{textAlign: isRTL ? 'right': 'left'}]}>{t('Balance')} - <Text style={styles.ballance}>{state.userdata ? parseFloat(state.userdata.walletBalance).toFixed(settings?.decimal || 2) : ''}{settings?.symbol || ''}</Text></Text>
       }
 
         <TextInput
           style={[styles.inputTextStyle,{textAlign: isRTL ? 'right': 'left'}]}
-          placeholder={t('amount') + " (" + settings.symbol + ")"}
+          placeholder={t('amount') + " (" + settings?.symbol || '' + ")"}
           keyboardType={'number-pad'}
           onChangeText={(text) => setState({ ...state,amount: text })}
           value={state.amount}

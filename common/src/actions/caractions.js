@@ -6,8 +6,6 @@ import {
   } from "../store/types";
   import store from '../store/store';
   import { firebase } from '../config/configureFirebase';
-  import { onValue, update, set, child, remove, push } from "firebase/database";
-  import { uploadBytesResumable, getDownloadURL } from "firebase/storage";
   
   export const fetchCars = () => (dispatch) => {
   
@@ -22,7 +20,7 @@ import {
 
     const userInfo = store.getState().auth.profile;
 
-    onValue(carsRef(userInfo.uid, userInfo.usertype), snapshot => {
+    carsRef(userInfo.uid, userInfo.usertype).on('value', snapshot => {
       if (snapshot.val()) {
         let data = snapshot.val();
         const arr = Object.keys(data).map(i => {
@@ -54,24 +52,24 @@ import {
       payload: { method, car }
     });
     if (method === 'Add') {
-        push(carAddRef, car);
+        carAddRef.push(car);
     } else if (method === 'Delete') {
-        remove(carEditRef(car.id));
+        carEditRef(car.id).remove();
     } else if (method === 'UpdateImage') {
-      await uploadBytesResumable(carImage(car.id),car.car_image);
-      let image = await getDownloadURL(carImage(car.id));
+      await carImage(car.id).put(car.car_image);
+      let image = await carImage(car.id).getDownloadURL();
       let data = car;
       data.car_image = image;
-      set(carEditRef(car.id), data);
+      carEditRef(car.id).update(data);
       if(car.active && car.driver){
-        update(singleUserRef(car.driver), {
+        singleUserRef(car.driver).update({
           updateAt: new Date().getTime(),
           car_image: image
         });
       }   
     }
      else {
-        set(carEditRef(car.id),car);
+        carEditRef(car.id).update(car);
     }
   }
 
@@ -83,14 +81,14 @@ import {
       carImage
     } = firebase;
 
-    var carId = push(carAddRef).key;
+    var carId = carAddRef.push().key;
 
-    uploadBytesResumable(carImage(carId),blob).then(() => {
+    carImage(carId).put(blob).then(() => {
       blob.close()
-      return getDownloadURL(carImage(carId))
+      return carImage(carId).getDownloadURL()
     }).then((url) => {
       newData.car_image = url;
-      set(child(carAddRef, carId),newData )
+      carAddRef.child(carId).update(newData )
       if(newData.active){
         let updateData = {
           carType: newData.carType,
@@ -102,7 +100,7 @@ import {
           carApproved: newData.approved,
           updateAt: new Date().getTime()
         };
-        update(singleUserRef(auth.currentUser.uid),updateData);
+        singleUserRef(auth.currentUser.uid).update(updateData);
       }
     })
   };

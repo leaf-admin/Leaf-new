@@ -7,7 +7,6 @@ import {
 } from "../store/types";
 import store from '../store/store';
 import { firebase } from '../config/configureFirebase';
-import { query, onValue, set, off, push, limitToLast } from "firebase/database";
 
 export const saveTracking = (bookingId, location) => {
     const {

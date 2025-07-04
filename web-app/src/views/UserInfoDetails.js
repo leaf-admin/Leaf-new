@@ -1,7 +1,7 @@
 import React, { useState, useEffect, } from "react";
 import { Grid, Card, Avatar, } from "@mui/material";
-import { useNavigate,useLocation } from "react-router-dom";
-import { useSelector, useDispatch } from "react-redux";
+import { useNavigate, useLocation } from "react-router-dom";
+import { useDispatch } from "react-redux";
 import CircularLoading from "../components/CircularLoading";
 import { useTranslation } from "react-i18next";
 import { SECONDORY_COLOR, FONT_FAMILY } from "../common/sharedFunctions";
@@ -9,49 +9,72 @@ import { api } from "common";
 import Userinfo from "../components/Userinfo";
 import { colors } from "components/Theme/WebTheme";
 import GoBackButton from "components/GoBackButton";
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 function UserInfoDetails(props) {
-    const {data} = props;
+    const { data } = props;
     const { t, i18n } = useTranslation();
     const isRTL = i18n.dir();
     const navigate = useNavigate();
     const { fetchUsersOnce, } = api;
     const dispatch = useDispatch();
-    const settings = useSelector((state) => state.settingsdata.settings);
-    const staticusers = useSelector((state) => state.usersdata.staticusers);
+    const [settings, setSettings] = useState(null);
+    const [staticUsers, setStaticUsers] = useState(null);
     const [loading, setLoading] = useState(true);
     const [fleetAdminsObj, setFleetAdminsObj] = useState();
     const [role, setRole] = useState(null);
-    const auth = useSelector(state => state.auth);
-    const {state} = useLocation()
+    const [authState, setAuthState] = useState({ profile: null });
+    const { state } = useLocation();
 
     const isEqual = (obj1, obj2) => JSON.stringify(obj1) === JSON.stringify(obj2);
 
     useEffect(() => {
-        if (auth.profile && auth.profile.usertype) {
-          setRole(auth.profile.usertype);
-        }
-      }, [auth.profile]);
+        const loadInitialState = async () => {
+            try {
+                const userData = await AsyncStorage.getItem('@user_data');
+                const settingsData = await AsyncStorage.getItem('@settings');
+                const staticUsersData = await AsyncStorage.getItem('@static_users');
+                
+                if (userData) {
+                    const profile = JSON.parse(userData);
+                    setAuthState({ profile });
+                    if (profile.usertype) {
+                        setRole(profile.usertype);
+                    }
+                }
+                if (settingsData) {
+                    setSettings(JSON.parse(settingsData));
+                }
+                if (staticUsersData) {
+                    setStaticUsers(JSON.parse(staticUsersData));
+                }
+            } catch (error) {
+                console.error('Erro ao carregar estado inicial:', error);
+            }
+        };
+
+        loadInitialState();
+    }, []);
 
     useEffect(() => {
-        if (staticusers) {
-          if (role === 'admin' || role === 'fleetadmin') {
-            let arr = staticusers.filter(user => user.usertype === 'fleetadmin');
-            let obj = {};
+        if (staticUsers) {
+            if (role === 'admin' || role === 'fleetadmin') {
+                let arr = staticUsers.filter(user => user.usertype === 'fleetadmin');
+                let obj = {};
     
-            for (let i = 0; i < arr.length; i++) {
-              let user = arr[i];
+                for (let i = 0; i < arr.length; i++) {
+                    let user = arr[i];
     
-              obj[user.id] = user.firstName + ' ' + user.lastName;
+                    obj[user.id] = user.firstName + ' ' + user.lastName;
+                }
+    
+    
+                if (!isEqual(obj, fleetAdminsObj)) {
+                    setFleetAdminsObj(obj);
+                }
             }
-    
-    
-            if (!isEqual(obj, fleetAdminsObj)) {
-              setFleetAdminsObj(obj);
-            }
-          }
         }
-      }, [staticusers, role, fleetAdminsObj]);
+    }, [staticUsers, role, fleetAdminsObj]);
 
     useEffect(()=>{
         if(data){

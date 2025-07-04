@@ -1,10 +1,10 @@
-const fetch = require("node-fetch");
+const fetch = require('node-fetch');
 const admin = require('firebase-admin');
 
 const RequestPushMsg = async (token, data) => {
 
     const savePushMsg = (token, data) => {
-        admin.database().ref('/users').orderByChild("pushToken").equalTo(token).once("value", (udata) => {
+        admin.database().ref('/users').orderByChild('pushToken').equalTo(token).once('value', (udata) => {
             let users = udata.val();
             if (users) {
                 for (let ukey in users) {
@@ -29,13 +29,13 @@ const RequestPushMsg = async (token, data) => {
     }
 
     const body = {
-        "to": token,
-        "title": data.title,
-        "body": data.msg,
-        "data": data,
-        "priority": "high",
-        "_displayInForeground": true,
-        "sound": "default",
+        'to': token,
+        'title': data.title,
+        'body': data.msg,
+        'data': data,
+        'priority': 'high',
+        '_displayInForeground': true,
+        'sound': 'default',
     };
 
     let response = await fetch('https://exp.host/--/api/v2/push/send?useFcmV1=true', {
@@ -59,7 +59,7 @@ const RequestPushMsg = async (token, data) => {
 module.exports.RequestPushMsg = RequestPushMsg;
 
 const addToWallet = async (uid,amount,description,transaction_id) =>{
-    let snapshot =  await admin.database().ref("users/" + uid).once("value");
+    let snapshot =  await admin.database().ref('users/' + uid).once('value');
     if (snapshot.val()) {
         const pushToken = snapshot.val().pushToken;
         let walletBalance = parseFloat(snapshot.val().walletBalance);
@@ -71,10 +71,10 @@ const addToWallet = async (uid,amount,description,transaction_id) =>{
             txRef: description,
             transaction_id: transaction_id? transaction_id : ''
         }
-        await admin.database().ref("users/" + uid + "/walletBalance").set(walletBalance);
-        await admin.database().ref("walletHistory/" + uid).push(details);
+        await admin.database().ref('users/' + uid + '/walletBalance').set(walletBalance);
+        await admin.database().ref('walletHistory/' + uid).push(details);
         if(pushToken){
-            const language = Object.values((await admin.database().ref("languages").orderByChild("default").equalTo(true).once('value')).val())[0].keyValuePairs;
+            const language = Object.values((await admin.database().ref('languages').orderByChild('default').equalTo(true).once('value')).val())[0].keyValuePairs;
             RequestPushMsg(
                 pushToken, 
                 {
@@ -93,7 +93,7 @@ const addToWallet = async (uid,amount,description,transaction_id) =>{
 module.exports.addToWallet = addToWallet;
 
 const deductFromWallet = async (uid,amount,description) =>{
-    let snapshot =  await admin.database().ref("users/" + uid).once("value");
+    let snapshot =  await admin.database().ref('users/' + uid).once('value');
     if (snapshot.val()) {
         const pushToken = snapshot.val().pushToken;
         let walletBalance = parseFloat(snapshot.val().walletBalance);
@@ -105,10 +105,10 @@ const deductFromWallet = async (uid,amount,description) =>{
             txRef: description,
             transaction_id: description
         }
-        await admin.database().ref("users/" + uid + "/walletBalance").set(walletBalance);
-        await admin.database().ref("walletHistory/" + uid).push(details);
+        await admin.database().ref('users/' + uid + '/walletBalance').set(walletBalance);
+        await admin.database().ref('walletHistory/' + uid).push(details);
         if(pushToken){
-            const language = Object.values((await admin.database().ref("languages").orderByChild("default").equalTo(true).once('value')).val())[0].keyValuePairs;
+            const language = Object.values((await admin.database().ref('languages').orderByChild('default').equalTo(true).once('value')).val())[0].keyValuePairs;
             RequestPushMsg(
                 pushToken, 
                 {

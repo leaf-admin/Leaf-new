@@ -14,10 +14,10 @@ module.exports.render_checkout = async function(request, response){
         access_token: access_token
     });
 
-    const allowed = ["ARS", "BRL", "CLP", "COP", "MXN", "PEN", "UYU", "VEF"];
+    const allowed = ['ARS', 'BRL', 'CLP', 'COP', 'MXN', 'PEN', 'UYU', 'VEF'];
 
     const refr = request.get('Referrer');
-    const server_url = refr ? ((refr.includes('bookings') || refr.includes('addbookings') || refr.includes('userwallet'))? refr.substring(0, refr.length - refr.split("/")[refr.split("/").length - 1].length) : refr) : request.protocol + "://" + request.get('host') + "/";
+    const server_url = refr ? ((refr.includes('bookings') || refr.includes('addbookings') || refr.includes('userwallet'))? refr.substring(0, refr.length - refr.split('/')[refr.split('/').length - 1].length) : refr) : request.protocol + '://' + request.get('host') + '/';
 
     const preference = {
         items: [
@@ -29,10 +29,10 @@ module.exports.render_checkout = async function(request, response){
           }
         ],
         back_urls: {
-            "success": server_url + 'mercadopago-process',
-            "failure": server_url + 'cancel'
+            'success': server_url + 'mercadopago-process',
+            'failure': server_url + 'cancel'
         },
-        auto_return: "approved",
+        auto_return: 'approved',
       };
       
     mercadopago.preferences.create(preference)
@@ -75,7 +75,7 @@ module.exports.process_checkout = async (req, res)  => {
                 UpdateBooking(bookingData,order_id,transaction_id,'mercadopago');
                 res.redirect(`/success?order_id=${order_id}&amount=${amount}&transaction_id=${transaction_id}`);
             }else{
-                if(order_id.startsWith("wallet")){
+                if(order_id.startsWith('wallet')){
                   addToWallet(order_id.substr(7,order_id.length - 12), amount, order_id, transaction_id);
                   res.redirect(`/success?order_id=${order_id}&amount=${amount}&transaction_id=${transaction_id}`);
                 }else{

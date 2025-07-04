@@ -67,3 +67,33 @@ export const colors = {
   YELLOW: "#FFDE59 ",
   FOOTERTOP: "#969696",
 }
+
+export const lightTheme = {
+    background: '#FFFFFF',
+    card: '#FFFFFF',
+    text: '#000000',
+    textSecondary: '#666666',
+    border: '#E0E0E0',
+    icon: '#000000',
+    divider: '#E0E0E0',
+    inputBg: '#F5F5F5',
+    inputBorder: '#E0E0E0',
+    placeholder: '#999999',
+    dropdown: '#FFFFFF',
+    leafGreen: '#41D274'
+};
+
+export const darkTheme = {
+    background: '#1A1A1A',
+    card: '#2A2A2A',
+    text: '#FFFFFF',
+    textSecondary: '#AAAAAA',
+    border: '#333333',
+    icon: '#FFFFFF',
+    divider: '#333333',
+    inputBg: '#2A2A2A',
+    inputBorder: '#333333',
+    placeholder: '#666666',
+    dropdown: '#2A2A2A',
+    leafGreen: '#41D274'
+};

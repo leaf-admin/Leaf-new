@@ -7,12 +7,12 @@ const fetch = require('node-fetch');
 module.exports.render_checkout = async function (request, response) {
     const config = (await admin.database().ref('payment_settings/iyzico').once('value')).val();
 
-    const API_URL = config.testing? "https://sandbox-api.iyzipay.com": "https://api.iyzipay.com";
+    const API_URL = config.testing? 'https://sandbox-api.iyzipay.com': 'https://api.iyzipay.com';
 
-    const allowed = ["TRY"];
+    const allowed = ['TRY'];
 
     const refr = request.get('Referrer');
-    const server_url = refr ? ((refr.includes('bookings') || refr.includes('addbookings') || refr.includes('userwallet'))? refr.substring(0, refr.length - refr.split("/")[refr.split("/").length - 1].length) : refr) : request.protocol + "://" + request.get('host') + "/";
+    const server_url = refr ? ((refr.includes('bookings') || refr.includes('addbookings') || refr.includes('userwallet'))? refr.substring(0, refr.length - refr.split('/')[refr.split('/').length - 1].length) : refr) : request.protocol + '://' + request.get('host') + '/';
 
     var iyzipay = new Iyzipay({
         apiKey: config.apiKey,
@@ -22,24 +22,24 @@ module.exports.render_checkout = async function (request, response) {
 
     var ip = request.headers['x-forwarded-for'] || request.socket.remoteAddress;
 
-    if(ip.includes(",")){
-        ip = ip.split(",")[0];
+    if(ip.includes(',')){
+        ip = ip.split(',')[0];
     }
 
-    var address = "No Address";
-    var city = "No City";
-    var country = "No Country";
+    var address = 'No Address';
+    var city = 'No City';
+    var country = 'No Country';
 
     if (/^(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$/.test(ip)) {  
         try {
-            const res = await fetch("http://ip-api.com/json/" + ip, {
+            const res = await fetch('http://ip-api.com/json/' + ip, {
                 method: 'GET',
                 headers: {
                     'Content-Type': 'application/json',
                 }
             });
             const json = await res.json();
-            address = json.city + ", "  + json.regionName  +  ", "  + json.country;
+            address = json.city + ', '  + json.regionName  +  ', '  + json.country;
             city = json.city;
             country = json.country;
         } catch (error){
@@ -49,39 +49,39 @@ module.exports.render_checkout = async function (request, response) {
     }  
 
     var body = {
-        "locale": "tr",
-        "conversationId": request.body.order_id,
-        "price": request.body.amount,
-        "buyer": {
-            "id": request.body.cust_id,
-            "name": request.body.first_name,
-            "surname": request.body.last_name,
-            "identityNumber": request.body.cust_id,
-            "email": request.body.email,
-            "gsmNumber": request.body.mobile_no,
-            "registrationAddress": address,
-            "city": city,
-            "country": country,
-            "ip": ip
+        'locale': 'tr',
+        'conversationId': request.body.order_id,
+        'price': request.body.amount,
+        'buyer': {
+            'id': request.body.cust_id,
+            'name': request.body.first_name,
+            'surname': request.body.last_name,
+            'identityNumber': request.body.cust_id,
+            'email': request.body.email,
+            'gsmNumber': request.body.mobile_no,
+            'registrationAddress': address,
+            'city': city,
+            'country': country,
+            'ip': ip
         },
-        "billingAddress": {
-            "address": address,
-            "contactName": request.body.first_name + " " + request.body.last_name,
-            "city": city,
-            "country": country
+        'billingAddress': {
+            'address': address,
+            'contactName': request.body.first_name + ' ' + request.body.last_name,
+            'city': city,
+            'country': country
         },
-        "basketItems": [
+        'basketItems': [
             {
-                "id": request.body.order_id,
-                "price": request.body.amount,
-                "name": "Cab Booking",
-                "category1": "Taxi",
-                "itemType": "VIRTUAL"
+                'id': request.body.order_id,
+                'price': request.body.amount,
+                'name': 'Cab Booking',
+                'category1': 'Taxi',
+                'itemType': 'VIRTUAL'
             }
         ],
-        "callbackUrl": server_url + "iyzico-process?order_id=" + request.body.order_id,
-        "currency": allowed.includes(request.body.currency) ? request.body.currency : 'TRY',
-        "paidPrice": request.body.amount,
+        'callbackUrl': server_url + 'iyzico-process?order_id=' + request.body.order_id,
+        'currency': allowed.includes(request.body.currency) ? request.body.currency : 'TRY',
+        'paidPrice': request.body.amount,
     };
     
     iyzipay.checkoutFormInitialize.create(body, (error, result) => {
@@ -89,7 +89,7 @@ module.exports.render_checkout = async function (request, response) {
             console.log(error);
             response.redirect('/cancel');
         }
-        if(result && result.status && result.status === "success"){
+        if(result && result.status && result.status === 'success'){
             admin.database().ref('/iyzico/' +  request.body.order_id).set(result.token)
             response.redirect(result.paymentPageUrl);
         } else {
@@ -101,7 +101,7 @@ module.exports.render_checkout = async function (request, response) {
 module.exports.process_checkout = async function (request, response) {
     const config = (await admin.database().ref('payment_settings/iyzico').once('value')).val();
 
-    const API_URL = config.testing? "https://sandbox-api.iyzipay.com": "https://api.iyzipay.com";
+    const API_URL = config.testing? 'https://sandbox-api.iyzipay.com': 'https://api.iyzipay.com';
 
     var iyzipay = new Iyzipay({
         apiKey: config.apiKey,
@@ -130,7 +130,7 @@ module.exports.process_checkout = async function (request, response) {
                                 UpdateBooking(bookingData,order_id,transaction_id,'iyzico');
                                 response.redirect(`/success?order_id=${order_id}&amount=${amount}&transaction_id=${transaction_id}`);
                             }else{
-                                if(order_id.startsWith("wallet")){
+                                if(order_id.startsWith('wallet')){
                                     addToWallet(order_id.substr(7,order_id.length - 12), amount, order_id, transaction_id);
                                     response.redirect(`/success?order_id=${order_id}&amount=${amount}&transaction_id=${transaction_id}`);
                                 }else{

@@ -15,8 +15,11 @@ const translate = require('@iamtraction/google-translate');
 const appcat = require('./appcat.js');
 const { getDatabase } = require('firebase-admin/database');
 const { getAuth } = require('firebase-admin/auth');
-const functions = require("firebase-functions/v2");
-const {setGlobalOptions} = require("firebase-functions/v2");
+const functions = require('firebase-functions/v2');
+const {setGlobalOptions} = require('firebase-functions/v2');
+const express = require('express');
+const cors = require('cors');
+const app = express();
 
 admin.initializeApp();
 
@@ -25,27 +28,27 @@ const databaseURL = admin.app().options.databaseURL;
 setGlobalOptions({ region: databaseURL.split('.').length===4?databaseURL.split('.')[1]:'us-central1'});
 
 var methods = [
-    "braintree",
-    "culqi",
-    "flutterwave",
-    "liqpay",
-    "mercadopago",
-    "payfast",
-    "paypal",   
-    "paystack",
-    "paytm",
-    "payulatam",
-    "securepay",
-    "stripe",
-    "squareup",
-    "wipay",
-    "razorpay",
-    "paymongo",
-    "iyzico",
-    "slickpay",
-    "test",
-    "xendit",
-     "tap"
+    'braintree',
+    'culqi',
+    'flutterwave',
+    'liqpay',
+    'mercadopago',
+    'payfast',
+    'paypal',   
+    'paystack',
+    'paytm',
+    'payulatam',
+    'securepay',
+    'stripe',
+    'squareup',
+    'wipay',
+    'razorpay',
+    'paymongo',
+    'iyzico',
+    'slickpay',
+    'test',
+    'xendit',
+     'tap'
 ];
 
 for (let i = 0; i < methods.length; i++) {
@@ -53,10 +56,10 @@ for (let i = 0; i < methods.length; i++) {
 }
 
 exports.get_providers = onRequest(async(request, response) => {
-    response.set("Access-Control-Allow-Origin", "*");
-    response.set("Access-Control-Allow-Headers", "Content-Type");
+    response.set('Access-Control-Allow-Origin', '*');
+    response.set('Access-Control-Allow-Headers', 'Content-Type');
     const db = getDatabase()
-    db.ref('/payment_settings').once("value", (psettings) => {
+    db.ref('/payment_settings').once('value', (psettings) => {
         if(psettings.val()){
             let arr = [];
             let obj = psettings.val();
@@ -77,20 +80,20 @@ exports.get_providers = onRequest(async(request, response) => {
 });
 
 exports.googleapi = onRequest(async (request, response) => {
-    response.set("Access-Control-Allow-Origin", "*");
-    response.set("Access-Control-Allow-Headers", "Content-Type");
+    response.set('Access-Control-Allow-Origin', '*');
+    response.set('Access-Control-Allow-Headers', 'Content-Type');
     const db = getDatabase()
-    let settingdata = await db.ref('settings').once("value");
+    let settingdata = await db.ref('settings').once('value');
     let settings = settingdata.val();
     if(settings.blockIps){
         var ip = request.headers['x-forwarded-for'] || request.socket.remoteAddress;
-        if(ip.includes(",")){
-            ip = ip.split(",")[0];
+        if(ip.includes(',')){
+            ip = ip.split(',')[0];
         }
-        if(ip.includes(".")){
-            ip = ip.replaceAll(".", "-");
+        if(ip.includes('.')){
+            ip = ip.replaceAll('.', '-');
         }
-        let blockdata = await db.ref('blocklist').once("value");
+        let blockdata = await db.ref('blocklist').once('value');
         let blocklist = blockdata.val();
         if(blocklist && blocklist[ip]){
             response.send({success: false});
@@ -105,7 +108,7 @@ exports.googleapi = onRequest(async (request, response) => {
 
 exports.success = onRequest(async (request, response) => {
     const db = getDatabase()
-    const language = Object.values((await db.ref("languages").orderByChild("default").equalTo(true).once('value')).val())[0].keyValuePairs;
+    const language = Object.values((await db.ref('languages').orderByChild('default').equalTo(true).once('value')).val())[0].keyValuePairs;
     var amount_line = request.query.amount ? `<h3>${language.payment_of}<strong>${request.query.amount}</strong>${language.was_successful}</h3>` : '';
     var order_line = request.query.order_id ? `<h5>${language.order_no}${request.query.order_id}</h5>` : '';
     var transaction_line = request.query.transaction_id ? `<h6>${language.transaction_id}${request.query.transaction_id}</h6>` : '';
@@ -136,7 +139,7 @@ exports.success = onRequest(async (request, response) => {
                     <h4>${language.payment_thanks}</h4>
                 </div>
             </div>
-            <script type="text/JavaScript">setTimeout("location.href = '${request.query.order_id && request.query.order_id.startsWith('wallet')?"/userwallet":"/bookings"}';",5000);</script>
+            <script type="text/JavaScript">setTimeout("location.href = '${request.query.order_id && request.query.order_id.startsWith('wallet')?'/userwallet':'/bookings'}';",5000);</script>
         </body>
         </html>
     `);
@@ -144,7 +147,7 @@ exports.success = onRequest(async (request, response) => {
 
 exports.cancel = onRequest(async(request, response) => {
     const db = getDatabase()
-    const language = Object.values((await db.ref("languages").orderByChild("default").equalTo(true).once('value')).val())[0].keyValuePairs;
+    const language = Object.values((await db.ref('languages').orderByChild('default').equalTo(true).once('value')).val())[0].keyValuePairs;
     response.send(`
         <!DOCTYPE HTML>
         <html>
@@ -182,7 +185,7 @@ exports.updateBooking = onValueUpdated(
         const db = getDatabase();
         let oldrow = event.data.before.val();
         let booking = event.data.after.val();
-        const langSnap = await db.ref("languages").orderByChild("default").equalTo(true).once('value');
+        const langSnap = await db.ref('languages').orderByChild('default').equalTo(true).once('value');
         const language = Object.values(langSnap.val())[0].keyValuePairs;
         booking.key = event.params.bookingId;
 
@@ -192,7 +195,7 @@ exports.updateBooking = onValueUpdated(
                preRequestedDrivers: {}
             })
             Object.keys(booking.preRequestedDrivers).map(async (key)=>{
-                const snapshot = await db.ref("users/" + key).once('value');
+                const snapshot = await db.ref('users/' + key).once('value');
                 let driver = snapshot.val();
                 if(driver.pushToken){
                     RequestPushMsg(
@@ -209,13 +212,13 @@ exports.updateBooking = onValueUpdated(
 
         if (oldrow.status !== booking.status && booking.status === 'CANCELLED') {
             if (booking.customer_paid && parseFloat(booking.customer_paid) > 0 && booking.payment_mode!=='cash') {
-                addToWallet(booking.customer, parseFloat(booking.customer_paid), "Admin Credit", null);
+                addToWallet(booking.customer, parseFloat(booking.customer_paid), 'Admin Credit', null);
             }
-            if (booking.booking_from_web && booking.payment_mode!=='cash' && appcat && appcat === "bidcab") {
-                addToWallet(booking.customer, parseFloat(booking.payableAmount), "Admin Credit", null)
+            if (booking.booking_from_web && booking.payment_mode!=='cash' && appcat && appcat === 'bidcab') {
+                addToWallet(booking.customer, parseFloat(booking.payableAmount), 'Admin Credit', null)
             }
             if (oldrow.status === 'ACCEPTED' && booking.cancelledBy === 'customer') {
-                db.ref("tracking/" + booking.key).orderByChild("status").equalTo("ACCEPTED").once("value", (sdata) => {
+                db.ref('tracking/' + booking.key).orderByChild('status').equalTo('ACCEPTED').once('value', (sdata) => {
                     let items = sdata.val();
                     if (items) {
                         let accTime;
@@ -227,7 +230,7 @@ exports.updateBooking = onValueUpdated(
                         let date2 = new Date(accTime);
                         let diffTime = date1 - date2;
                         let diffMins = diffTime / (1000 * 60);
-                        db.ref("cartypes").once("value", async (cardata) => {
+                        db.ref('cartypes').once('value', async (cardata) => {
                             const cars = cardata.val();
                             let cancelSlab = null;
                             for (let ckey in cars) {
@@ -244,9 +247,9 @@ exports.updateBooking = onValueUpdated(
                                 }
                             }
                             if (deductValue > 0) {
-                                await db.ref("bookings/" + booking.key + "/cancellationFee").set(deductValue);
+                                await db.ref('bookings/' + booking.key + '/cancellationFee').set(deductValue);
                                 deductFromWallet(booking.customer, deductValue, 'Cancellation Fee');
-                                addToWallet(booking.driver, deductValue, "Cancellation Fee", null);
+                                addToWallet(booking.driver, deductValue, 'Cancellation Fee', null);
                             }
                         })
                         
@@ -255,14 +258,14 @@ exports.updateBooking = onValueUpdated(
             }
         }
         if (booking.status === 'COMPLETE' && booking.tipamount &&booking.tipamount>0) {
-            addToWallet(booking.driver, booking.tipamount, "Tip", booking.id);
-            deductFromWallet(booking.customer, booking.tipamount, "Tip");
+            addToWallet(booking.driver, booking.tipamount, 'Tip', booking.id);
+            deductFromWallet(booking.customer, booking.tipamount, 'Tip');
         } 
         if (booking.status === 'COMPLETE') {
-            const language = Object.values((await db.ref("languages").orderByChild("default").equalTo(true).once('value')).val())[0].keyValuePairs;
-            let detailsData = await db.ref("smtpdata").once("value");
+            const language = Object.values((await db.ref('languages').orderByChild('default').equalTo(true).once('value')).val())[0].keyValuePairs;
+            let detailsData = await db.ref('smtpdata').once('value');
             let details = detailsData.val();
-            let settingdata = await db.ref('settings').once("value");
+            let settingdata = await db.ref('settings').once('value');
             let settings = settingdata.val();
             if(details){
                 try{
@@ -433,9 +436,9 @@ exports.updateBooking = onValueUpdated(
                 (oldrow.status === 'NEW' && booking.status === 'ACCEPTED' && oldrow.selectedBid && !booking.selectedBid && booking.prepaid)
             )
         ) {
-            const snapshot = await db.ref("users/" + booking.customer).once('value');
+            const snapshot = await db.ref('users/' + booking.customer).once('value');
             let profile = snapshot.val();
-            const settingdata = await db.ref('settings').once("value");
+            const settingdata = await db.ref('settings').once('value');
             let settings = settingdata.val();
             let walletBal = parseFloat(profile.walletBalance) - parseFloat(parseFloat(booking.trip_cost) - parseFloat(booking.discount));
             let tDate = new Date();
@@ -445,9 +448,9 @@ exports.updateBooking = onValueUpdated(
                 date: tDate.getTime(),
                 txRef: booking.id
             }
-            await db.ref("users/" + booking.customer).update({walletBalance: parseFloat(parseFloat(walletBal).toFixed(settings.decimal))})
-            await db.ref("walletHistory/" + booking.customer).push(details);
-            const langSnap = await db.ref("languages").orderByChild("default").equalTo(true).once('value');
+            await db.ref('users/' + booking.customer).update({walletBalance: parseFloat(parseFloat(walletBal).toFixed(settings.decimal))})
+            await db.ref('walletHistory/' + booking.customer).push(details);
+            const langSnap = await db.ref('languages').orderByChild('default').equalTo(true).once('value');
             const language = Object.values(langSnap.val())[0].keyValuePairs;
             if(profile.pushToken){
                 RequestPushMsg(
@@ -456,7 +459,7 @@ exports.updateBooking = onValueUpdated(
                         title: language.notification_title,
                         msg: language.wallet_updated,
                         screen: 'Wallet',
-                        ios:  profile.userPlatform === "IOS"? true: false
+                        ios:  profile.userPlatform === 'IOS'? true: false
                     }
                 );
             }
@@ -466,9 +469,9 @@ exports.updateBooking = onValueUpdated(
            (oldrow.status === 'PENDING' && booking.status === 'COMPLETE') ||
            (oldrow.status === 'REACHED' && booking.status === 'COMPLETE')
         ){
-            const snapshotDriver = await db.ref("users/" + booking.driver).once('value');
+            const snapshotDriver = await db.ref('users/' + booking.driver).once('value');
             let profileDriver = snapshotDriver.val();
-            const settingdata = await db.ref('settings').once("value");
+            const settingdata = await db.ref('settings').once('value');
             let settings = settingdata.val();
             let driverWalletBal = parseFloat(profileDriver.walletBalance);
             if(booking.payment_mode ==='cash' && booking.cashPaymentAmount && parseFloat(booking.cashPaymentAmount)> 0){
@@ -478,11 +481,11 @@ exports.updateBooking = onValueUpdated(
                     date: new Date().getTime(),
                     txRef: booking.id
                 }
-                await db.ref("walletHistory/" + booking.driver).push(details);
+                await db.ref('walletHistory/' + booking.driver).push(details);
                 driverWalletBal = driverWalletBal - parseFloat(booking.cashPaymentAmount);
             }
             if(booking.fleetadmin && booking.fleetadmin.length>0 && booking.fleetCommission &&  booking.fleetCommission>0){
-                const snapshotFleet = await db.ref("users/" + booking.fleetadmin).once('value');
+                const snapshotFleet = await db.ref('users/' + booking.fleetadmin).once('value');
                 let profileFleet = snapshotFleet.val();
                 let fleetWalletBal = parseFloat(profileFleet.walletBalance);
                 fleetWalletBal = fleetWalletBal + parseFloat( booking.fleetCommission);
@@ -492,8 +495,8 @@ exports.updateBooking = onValueUpdated(
                     date: new Date().getTime(),
                     txRef: booking.id
                 }
-                await db.ref("walletHistory/" + booking.fleetadmin).push(detailsFleet);
-                await db.ref("users/" + booking.fleetadmin).update({walletBalance: parseFloat(parseFloat(fleetWalletBal).toFixed(settings.decimal))})
+                await db.ref('walletHistory/' + booking.fleetadmin).push(detailsFleet);
+                await db.ref('users/' + booking.fleetadmin).update({walletBalance: parseFloat(parseFloat(fleetWalletBal).toFixed(settings.decimal))})
             }
             driverWalletBal = driverWalletBal + parseFloat(booking.driver_share);
             let driverDetails = {
@@ -502,9 +505,9 @@ exports.updateBooking = onValueUpdated(
                 date: new Date().getTime(),
                 txRef: booking.id
             }
-            await db.ref("users/" + booking.driver).update({walletBalance: parseFloat(parseFloat(driverWalletBal).toFixed(settings.decimal))})
-            await db.ref("walletHistory/" + booking.driver).push(driverDetails);
-            const langSnap = await db.ref("languages").orderByChild("default").equalTo(true).once('value');
+            await db.ref('users/' + booking.driver).update({walletBalance: parseFloat(parseFloat(driverWalletBal).toFixed(settings.decimal))})
+            await db.ref('walletHistory/' + booking.driver).push(driverDetails);
+            const langSnap = await db.ref('languages').orderByChild('default').equalTo(true).once('value');
             const language = Object.values(langSnap.val())[0].keyValuePairs;
             if(profileDriver.pushToken){
                 RequestPushMsg(
@@ -513,7 +516,7 @@ exports.updateBooking = onValueUpdated(
                         title: language.notification_title,
                         msg: language.wallet_updated,
                         screen: 'Wallet',
-                        ios:  profileDriver.userPlatform === "IOS"? true: false
+                        ios:  profileDriver.userPlatform === 'IOS'? true: false
                     }
                 );
             }
@@ -532,9 +535,9 @@ exports.withdrawCreate = onValueCreated(
       let amount = withdrawInfo.amount;
   
       const db = getDatabase();
-      const userData = await db.ref("users/" + uid).once('value');
+      const userData = await db.ref('users/' + uid).once('value');
       let profile = userData.val();
-      const settingdata = await db.ref('settings').once("value");
+      const settingdata = await db.ref('settings').once('value');
       let settings = settingdata.val();
       let walletBal = parseFloat(profile.walletBalance) - parseFloat(amount);
   
@@ -547,10 +550,10 @@ exports.withdrawCreate = onValueCreated(
         transaction_id: wid
       };
       
-      await db.ref("users/" + uid).update({ walletBalance: parseFloat(parseFloat(walletBal).toFixed(settings.decimal)) });
-      await db.ref("walletHistory/" + uid).push(details);
+      await db.ref('users/' + uid).update({ walletBalance: parseFloat(parseFloat(walletBal).toFixed(settings.decimal)) });
+      await db.ref('walletHistory/' + uid).push(details);
   
-      const langSnap = await db.ref("languages").orderByChild("default").equalTo(true).once('value');
+      const langSnap = await db.ref('languages').orderByChild('default').equalTo(true).once('value');
       const language = Object.values(langSnap.val())[0].keyValuePairs;
       
       if (profile.pushToken) {
@@ -569,12 +572,12 @@ exports.withdrawCreate = onValueCreated(
 
   exports.bookingScheduler = onSchedule('every 1 minutes', async (event) => {
     const db = getDatabase();
-    const settingdata = await db.ref('settings').once("value");
+    const settingdata = await db.ref('settings').once('value');
     let settings = settingdata.val();
 
     if(settings.blockIps){
         const day = new Date().getFullYear() + '-' + new Date().getMonth() + '-' + new Date().getDate();
-        const ipData =  await db.ref('ipList').child(day).once("value");
+        const ipData =  await db.ref('ipList').child(day).once('value');
         const iplist = ipData.val();
         const limit = settings.blockIpCount? settings.blockIpCount: 100;
         for(let ip of Object.keys(iplist)){
@@ -584,7 +587,7 @@ exports.withdrawCreate = onValueCreated(
         }
     }
 
-    db.ref('/bookings').orderByChild("status").equalTo('NEW').once("value", (snapshot) => {
+    db.ref('/bookings').orderByChild('status').equalTo('NEW').once('value', (snapshot) => {
         let bookings = snapshot.val();
         if (bookings) {
             for (let key in bookings) {
@@ -595,16 +598,16 @@ exports.withdrawCreate = onValueCreated(
                 let diffTime = date2 - date1;
                 let diffMins = diffTime / (1000 * 60);
                 if ((diffMins > 0 && diffMins < 15 && booking.bookLater && !booking.requestedDrivers) || diffMins < -1) {
-                    db.ref('/users').orderByChild("queue").equalTo(false).once("value", async (ddata) => {
+                    db.ref('/users').orderByChild('queue').equalTo(false).once('value', async (ddata) => {
                         let drivers = ddata.val();
                         if (drivers) {
-                            const langSnap = await db.ref("languages").orderByChild("default").equalTo(true).once('value');
+                            const langSnap = await db.ref('languages').orderByChild('default').equalTo(true).once('value');
                             const language = Object.values(langSnap.val())[0].keyValuePairs;
                             for (let dkey in drivers) {
                                 let driver = drivers[dkey];
                                 driver.key = dkey;
                                 if(!(booking.requestedDrivers && booking.requestedDrivers[dkey])){
-                                    db.ref("locations/" + dkey).once("value", driverlocdata => {
+                                    db.ref('locations/' + dkey).once('value', driverlocdata => {
                                         let location = driverlocdata.val();
                                         if (driver.usertype === 'driver' && driver.approved === true && driver.driverActiveStatus === true && location && ((driver.carApproved ===true && settings.carType_required) || !settings.carType_required) && ((driver.term === true && settings.term_required) || !settings.term_required) && ((driver.licenseImage && settings.license_image_required) || !settings.license_image_required )) {
                                             let originalDistance = getDistance(booking.pickup.lat, booking.pickup.lng, location.lat, location.lng);
@@ -640,7 +643,7 @@ exports.withdrawCreate = onValueCreated(
                     });
                 }
                 if (diffMins < -30) {
-                    db.ref("bookings/" + booking.key + "/requestedDrivers").remove();
+                    db.ref('bookings/' + booking.key + '/requestedDrivers').remove();
                     db.ref('bookings/' + booking.key).update({
                         status: 'CANCELLED',
                         reason: 'RIDE AUTO CANCELLED. NO RESPONSE',
@@ -660,7 +663,7 @@ exports.withdrawCreate = onValueCreated(
 
 exports.userDelete = onValueDeleted(
     {
-        ref: "/users/{uid}",
+        ref: '/users/{uid}',
     },
     async (event) => {
         try {
@@ -674,7 +677,7 @@ exports.userDelete = onValueDeleted(
 
   exports.userCreate = onValueCreated(
     {
-      ref: "/users/{uid}",
+      ref: '/users/{uid}',
     },
     async (event) => {
       try {
@@ -690,41 +693,41 @@ exports.userDelete = onValueDeleted(
         }
         try {
           await getAuth().getUser(uid);
-          console.log("User already exists with UID:", uid);
+          console.log('User already exists with UID:', uid);
         } catch (error) {
-          if (uid === "admin0001") {
-            userCred.password = "Admin@123";
+          if (uid === 'admin0001') {
+            userCred.password = 'Admin@123';
           }
           await getAuth().createUser(userCred);
-          console.log("User successfully created with UID:", uid);
+          console.log('User successfully created with UID:', uid);
         }
       } catch (error) {
-        console.error("Error handling user creation:", error);
+        console.error('Error handling user creation:', error);
       }
     }
   );
 
   exports.send_notification = functions.https.onRequest(async (req, res) => {
     try {
-      const settingDataSnapshot = await admin.database().ref("settings").once("value");
+      const settingDataSnapshot = await admin.database().ref('settings').once('value');
       const settings = settingDataSnapshot.val();
       const allowedOrigins = ['https://' + config.firebaseProjectId + '.web.app', settings.CompanyWebsite];
   
       const origin = req.headers.origin;
       if (allowedOrigins.includes(origin)) {
-        res.set("Access-Control-Allow-Origin", origin);
+        res.set('Access-Control-Allow-Origin', origin);
       }
-      res.set("Access-Control-Allow-Headers", "Content-Type");
+      res.set('Access-Control-Allow-Headers', 'Content-Type');
   
       const notification = req.body.notification;
   
       if (notification) {
         const snapshot = await admin
           .database()
-          .ref("users")
-          .orderByChild("usertype")
+          .ref('users')
+          .orderByChild('usertype')
           .equalTo(notification.usertype)
-          .once("value");
+          .once('value');
         const usersSnap = snapshot.val();
   
         if (usersSnap) {
@@ -733,12 +736,12 @@ exports.userDelete = onValueDeleted(
             .filter(
               (usr) =>
                 usr.pushToken &&
-                usr.pushToken !== "web" &&
-                usr.pushToken !== "token_error" &&
-                usr.pushToken !== "init" &&
+                usr.pushToken !== 'web' &&
+                usr.pushToken !== 'token_error' &&
+                usr.pushToken !== 'init' &&
                 usr.pushToken !== null &&
                 usr.usertype === notification.usertype &&
-                (usr.userPlatform === notification.devicetype || notification.devicetype === "All")
+                (usr.userPlatform === notification.devicetype || notification.devicetype === 'All')
             )
             .map((usr) => usr.pushToken);
   
@@ -752,12 +755,12 @@ exports.userDelete = onValueDeleted(
                   msg: notification.body,
                 };
                 // eslint-disable-next-line no-await-in-loop
-                await admin.database().ref("packets").push({
+                await admin.database().ref('packets').push({
                   chunk,
                   data,
                 });
               }
-              res.send({ success: true, message: "Notifications queued in packets." });
+              res.send({ success: true, message: 'Notifications queued in packets.' });
             } else {
               let processed = 0;
               for (let i = 0; i < tokens.length; i += chunkSize) {
@@ -778,7 +781,7 @@ exports.userDelete = onValueDeleted(
                   console.error(error);
                   processed += chunk.length;
                   if (processed === tokens.length) {
-                    res.send({ success: false, error: "Some notifications failed." });
+                    res.send({ success: false, error: 'Some notifications failed.' });
                   }
                 }
               }
@@ -812,24 +815,24 @@ exports.userDelete = onValueDeleted(
       }
     } catch (error) {
       console.error(error);
-      res.status(500).send({ error: "Internal server error." });
+      res.status(500).send({ error: 'Internal server error.' });
     }
   });
 
 
   exports.check_user_exists = onRequest( async(request, response) => {
     const db = getDatabase();
-    let settingdata = await db.ref('settings').once("value");
+    let settingdata = await db.ref('settings').once('value');
     let settings = settingdata.val();
     const allowedOrigins = ['https://' + config.firebaseProjectId + '.web.app', settings.CompanyWebsite, 'http://localhost:3000'];
     const origin = request.headers.origin;
     if (allowedOrigins.includes(origin)) {
-        response.set("Access-Control-Allow-Origin", origin);
-        response.set("Access-Control-Allow-Headers", "Content-Type, Authorization");
+        response.set('Access-Control-Allow-Origin', origin);
+        response.set('Access-Control-Allow-Headers', 'Content-Type, Authorization');
     }
     if (request.method === 'OPTIONS') {
-        response.set("Access-Control-Allow-Methods", "POST");
-        response.set("Access-Control-Max-Age", "3600");
+        response.set('Access-Control-Allow-Methods', 'POST');
+        response.set('Access-Control-Max-Age', '3600');
         response.status(204).send('');
         return;
     }
@@ -858,7 +861,7 @@ exports.userDelete = onValueDeleted(
                 response.send({ error: error });
             }
         } else {
-            response.send({ error: "Email or Mobile not found." });
+            response.send({ error: 'Email or Mobile not found.' });
         }
     }else{
         response.send({ error: 'Unauthorized api call' });
@@ -869,9 +872,9 @@ exports.userDelete = onValueDeleted(
 exports.validate_referrer = onRequest(async (request, response) => {
     const db = getDatabase();
     let referralId = request.body.referralId;
-    response.set("Access-Control-Allow-Origin", "*");
-    response.set("Access-Control-Allow-Headers", "Content-Type");
-    const snapshot = await db.ref("users").once('value');
+    response.set('Access-Control-Allow-Origin', '*');
+    response.set('Access-Control-Allow-Headers', 'Content-Type');
+    const snapshot = await db.ref('users').once('value');
     let value = snapshot.val();
     if(value){
         let arr = Object.keys(value);
@@ -887,56 +890,233 @@ exports.validate_referrer = onRequest(async (request, response) => {
     }
 });
 
-exports.user_signup = onRequest(async (request, response) => {
-    response.set("Access-Control-Allow-Origin", "*");
-    response.set("Access-Control-Allow-Headers", "Content-Type");
+exports.test_function = functions.https.onRequest(async (req, res) => {
+    console.log('=== TESTE DE FUNÇÃO ===');
+    console.log('Data e hora:', new Date().toISOString());
+    console.log('Headers:', JSON.stringify(req.headers, null, 2));
+    console.log('Body:', JSON.stringify(req.body, null, 2));
+    
+    try {
+        // Testar autenticação
+        const auth = admin.auth();
+        console.log('Auth inicializado com sucesso');
+        
+        // Testar database
+        const db = admin.database();
+        console.log('Database inicializado com sucesso');
+        
+        res.status(200).json({
+            status: 'success',
+            message: 'Function está funcionando corretamente',
+            timestamp: new Date().toISOString()
+        });
+    } catch (error) {
+        console.error('Erro no teste:', error);
+        res.status(500).json({
+            status: 'error',
+            message: error.message,
+            timestamp: new Date().toISOString()
+        });
+    }
+});
 
-    const userDetails = request.body.regData;
-    const db = getDatabase();
-    const auth = getAuth();
+exports.user_signup = onRequest(async (req, res) => {
+    const requestId = Date.now() + '-' + Math.floor(Math.random() * 10000);
+    const log = (msg, data = null) => {
+        const logData = {
+            requestId,
+            timestamp: new Date().toISOString(),
+            message: msg,
+            data: data
+        };
+        console.error(JSON.stringify(logData));
+    };
 
-    let settingData = await db.ref('settings').once("value");
-    let settings = settingData.val();
+    log('=== INÍCIO DO CADASTRO ===');
+    log('Request details', {
+        method: req.method,
+        headers: req.headers,
+        contentType: req.headers['content-type'],
+        body: req.body
+    });
+
+    // Verificar Content-Type
+    if (!req.headers['content-type'] || !req.headers['content-type'].includes('application/json')) {
+        log('ERRO: Content-Type inválido', { received: req.headers['content-type'] });
+        return res.status(400).json({ 
+            error: 'Content-Type deve ser application/json',
+            received: req.headers['content-type']
+        });
+    }
 
     try {
-        const regData = await rgf.valSignupData(config, userDetails, settings);
+        // Verificar inicialização do Firebase Admin
+        if (!admin.apps.length) {
+            log('ERRO: Firebase Admin não inicializado');
+            return res.status(500).json({ error: 'Erro de configuração do servidor' });
+        }
 
-        if (regData.error) {
-            response.send(regData);
-        } else {
-            const userRecord = await auth.createUser({
-                email: userDetails.email,
-                phoneNumber: userDetails.mobile,
-                password: userDetails.password,
-                emailVerified: true
+        // Extrair e validar dados
+        let data;
+        try {
+            data = req.body.regData || req.body;
+            log('Dados recebidos', { ...data, password: '***' });
+        } catch (parseError) {
+            log('ERRO ao processar dados', { error: parseError.message });
+            return res.status(400).json({ 
+                error: 'Erro ao processar dados da requisição',
+                details: parseError.message
+            });
+        }
+
+        if (!data) {
+            log('ERRO: Dados não recebidos');
+            return res.status(400).json({ error: 'Dados não recebidos' });
+        }
+
+        // Validação dos campos obrigatórios
+        const requiredFields = ['email', 'password', 'mobile', 'firstName', 'lastName'];
+        const missingFields = requiredFields.filter(field => !data[field]);
+        
+        if (missingFields.length > 0) {
+            log('ERRO: Campos obrigatórios faltando', { missingFields });
+            return res.status(400).json({ 
+                error: 'Campos obrigatórios faltando',
+                fields: missingFields
+            });
+        }
+
+        // Validar formato do email
+        const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+        if (!emailRegex.test(data.email)) {
+            log('ERRO: Email inválido', { email: data.email });
+            return res.status(400).json({ error: 'Email inválido' });
+        }
+
+        // Validar formato do número de telefone
+        const phoneRegex = /^\+?[1-9]\d{1,14}$/;
+        if (!phoneRegex.test(data.mobile)) {
+            log('ERRO: Número de telefone inválido', { mobile: data.mobile });
+            return res.status(400).json({ error: 'Número de telefone inválido' });
+        }
+
+        // Validar senha
+        if (data.password.length < 6) {
+            log('ERRO: Senha muito curta');
+            return res.status(400).json({ error: 'A senha deve ter pelo menos 6 caracteres' });
+        }
+
+        // Buscar usuário existente pelo número de telefone
+        let userRecord;
+        try {
+            log('Buscando usuário pelo número de telefone');
+            userRecord = await admin.auth().getUserByPhoneNumber(data.mobile);
+            log('Usuário encontrado', { uid: userRecord.uid });
+        } catch (error) {
+            log('ERRO: Usuário não encontrado pelo número de telefone', {
+                error: error.message,
+                code: error.code
+            });
+            return res.status(200).json({ 
+                error: 'Usuário não encontrado. Por favor, valide seu número de telefone primeiro.',
+                details: error.message
+            });
+        }
+
+        // Atualizar dados do usuário existente
+        try {
+            log('Atualizando dados do usuário');
+            userRecord = await admin.auth().updateUser(userRecord.uid, {
+                email: data.email,
+                password: data.password,
+                displayName: `${data.firstName} ${data.lastName}`,
+                emailVerified: false
+            });
+            log('Usuário atualizado com sucesso', { uid: userRecord.uid });
+        } catch (updateError) {
+            log('ERRO ao atualizar usuário', {
+                error: updateError.message,
+                code: updateError.code,
+                stack: updateError.stack
             });
 
-            if (userRecord && userRecord.uid) {
-                await db.ref('users/' + userRecord.uid).set(regData);
-                if (userDetails.signupViaReferral && settings.bonus > 0) {
-                    await addToWallet(userDetails.signupViaReferral, settings.bonus, "Admin Credit", null);
-                    await addToWallet(userRecord.uid, settings.bonus, "Admin Credit", null);
-                }
-                response.send({ uid: userRecord.uid });
-            } else {
-                response.send({ error: "User Not Created" });
+            let errorMessage = 'Erro ao atualizar usuário';
+            if (updateError.code === 'auth/email-already-exists') {
+                errorMessage = 'Este email já está em uso';
+            } else if (updateError.code === 'auth/invalid-email') {
+                errorMessage = 'Email inválido';
+            } else if (updateError.code === 'auth/weak-password') {
+                errorMessage = 'A senha é muito fraca';
             }
+
+            return res.status(200).json({ 
+                error: errorMessage,
+                details: updateError.message,
+                code: updateError.code
+            });
         }
+
+        // Preparar dados para o Database
+        const userData = {
+            email: data.email,
+            mobile: data.mobile,
+            firstName: data.firstName,
+            lastName: data.lastName,
+            usertype: data.usertype || 'customer',
+            verifyId: data.verifyId,
+            created: admin.database.ServerValue.TIMESTAMP,
+            walletBalance: 0,
+            rating: 5,
+            approved: true
+        };
+
+        // Salvar no Database
+        log('Iniciando salvamento no Database');
+        try {
+            await admin.database().ref(`users/${userRecord.uid}`).set(userData);
+            log('Dados salvos no Database com sucesso');
+        } catch (dbError) {
+            log('ERRO ao salvar no Database', {
+                error: dbError.message,
+                code: dbError.code,
+                stack: dbError.stack
+            });
+            
+            return res.status(200).json({ 
+                error: 'Erro ao salvar dados do usuário',
+                details: dbError.message
+            });
+        }
+
+        log('Cadastro concluído com sucesso');
+        return res.status(200).json({ 
+            success: true, 
+            uid: userRecord.uid
+        });
+
     } catch (error) {
-        response.send({ error: "User Not Created" });
+        log('ERRO GERAL não tratado', {
+            error: error.message,
+            code: error.code,
+            stack: error.stack
+        });
+        return res.status(200).json({ 
+            error: 'Erro interno do servidor',
+            details: error.message
+        });
     }
 });
 
 exports.update_user_email = onRequest(async (request, response) => {
     const db = getDatabase();
-    let settingdata = await db.ref('settings').once("value");
+    let settingdata = await db.ref('settings').once('value');
     let settings = settingdata.val();
     const allowedOrigins = ['https://' + config.firebaseProjectId + '.web.app', settings.CompanyWebsite];
     const origin = request.headers.origin;
     if (allowedOrigins.includes(origin)) {
-        response.set("Access-Control-Allow-Origin", origin);
+        response.set('Access-Control-Allow-Origin', origin);
     }
-    response.set("Access-Control-Allow-Headers", "Content-Type");
+    response.set('Access-Control-Allow-Headers', 'Content-Type');
     const user = await rgf.validateBasicAuth(request.headers.authorization, config);
     if(user){
         const uid = request.body.uid;
@@ -954,15 +1134,15 @@ exports.update_user_email = onRequest(async (request, response) => {
                 if(request.body.lastName){
                     updateData['lastName'] = request.body.lastName;
                 }
-                db.ref("users/" + uid).update(updateData);
+                db.ref('users/' + uid).update(updateData);
                 response.send({ success: true, user: userRecord });
                 return true;
             })
             .catch((error) => {
-                response.send({ error: "Error updating user" });
+                response.send({ error: 'Error updating user' });
             });
         }else{ 
-            response.send({ error: "Request email not found" });
+            response.send({ error: 'Request email not found' });
         }
     }else{
         response.send({ error: 'Unauthorized api call' });
@@ -970,8 +1150,8 @@ exports.update_user_email = onRequest(async (request, response) => {
 });
 
 exports.gettranslation = onRequest((request, response) => {
-    response.set("Access-Control-Allow-Origin", "*");
-    response.set("Access-Control-Allow-Headers", "Content-Type");
+    response.set('Access-Control-Allow-Origin', '*');
+    response.set('Access-Control-Allow-Headers', 'Content-Type');
     translate(request.query.str, { from: request.query.from, to: request.query.to  })
         .then(res => {
             response.send({text:res.text})
@@ -983,14 +1163,14 @@ exports.gettranslation = onRequest((request, response) => {
 });  
 
 exports.getservertime = onRequest((request, response) => {
-    response.set("Access-Control-Allow-Origin", "*");
-    response.set("Access-Control-Allow-Headers", "Content-Type");
+    response.set('Access-Control-Allow-Origin', '*');
+    response.set('Access-Control-Allow-Headers', 'Content-Type');
     response.send({time: new Date().getTime()})
 }); 
 
 exports.checksmtpdetails = onRequest(async(request, response) => {
-    response.set("Access-Control-Allow-Origin", "*");
-    response.set("Access-Control-Allow-Headers", "Content-Type");
+    response.set('Access-Control-Allow-Origin', '*');
+    response.set('Access-Control-Allow-Headers', 'Content-Type');
 
     try {
         const smtpDetails = request.body.smtpDetails;
@@ -1001,8 +1181,8 @@ exports.checksmtpdetails = onRequest(async(request, response) => {
         const mailOptions = {
             from: fromEmail,
             to: fromEmail, 
-            subject: "Test Mail", 
-            text: "Hi, this is a test email.", 
+            subject: 'Test Mail', 
+            text: 'Hi, this is a test email.', 
             html: `
             <!DOCTYPE html>
             <html>
@@ -1017,7 +1197,7 @@ exports.checksmtpdetails = onRequest(async(request, response) => {
 
         transporter.sendMail(mailOptions)
             .then((res) => {
-                admin.database().ref("smtpdata").set({
+                admin.database().ref('smtpdata').set({
                     fromEmail:fromEmail,
                     smtpDetails: smtpDetails
                 })
@@ -1034,14 +1214,14 @@ exports.checksmtpdetails = onRequest(async(request, response) => {
 
 exports.check_auth_exists = onRequest(async (request, response) => {
     const db = getDatabase()
-    let settingdata = await db.ref('settings').once("value");
+    let settingdata = await db.ref('settings').once('value');
     let settings = settingdata.val();
     const allowedOrigins = ['https://' + config.firebaseProjectId + '.web.app', settings.CompanyWebsite];
     const origin = request.headers.origin;
     if (allowedOrigins.includes(origin)) {
-        response.set("Access-Control-Allow-Origin", origin);
+        response.set('Access-Control-Allow-Origin', origin);
     }
-    response.set("Access-Control-Allow-Headers", "Content-Type");
+    response.set('Access-Control-Allow-Headers', 'Content-Type');
     let data = JSON.parse(request.body.data);
     const userData = await rgf.formatUserProfile(request, config, data);
     if(userData.uid){
@@ -1053,16 +1233,16 @@ exports.check_auth_exists = onRequest(async (request, response) => {
 
 exports.request_mobile_otp = onRequest(async (request, response) => {
     const db = getDatabase();
-    response.set("Access-Control-Allow-Origin", "*");
-    response.set("Access-Control-Allow-Headers", "Content-Type");
+    response.set('Access-Control-Allow-Origin', '*');
+    response.set('Access-Control-Allow-Headers', 'Content-Type');
     const mobile = request.body.mobile;
     const timestamp = new Date().getTime();
     const otp = Math.floor(100000 + Math.random() * 900000);
-    const langSnap = await db.ref("languages").orderByChild("default").equalTo(true).once('value');
+    const langSnap = await db.ref('languages').orderByChild('default').equalTo(true).once('value');
     const language = Object.values(langSnap.val())[0].keyValuePairs;
     if(language){
         try{ 
-            const mobileList = await db.ref("/otp_auth_requests").orderByChild("mobile").equalTo(mobile).once('value');
+            const mobileList = await db.ref('/otp_auth_requests').orderByChild('mobile').equalTo(mobile).once('value');
             const listData = mobileList.val();
             const info = Object.keys(listData? listData: {});
             if(info){
@@ -1076,7 +1256,7 @@ exports.request_mobile_otp = onRequest(async (request, response) => {
             //Ignore if no previous record.
         }
 
-        let smsConfigData = await db.ref('smsConfig').once("value");
+        let smsConfigData = await db.ref('smsConfig').once('value');
         let smsConfig = smsConfigData.val();
 
         const data = {
@@ -1085,27 +1265,27 @@ exports.request_mobile_otp = onRequest(async (request, response) => {
             otp: otp
         };
         let resMsg = await rgf.callMsgApi(config, smsConfig, data);
-        await db.ref(`/otp_auth_requests`).push(data);
-        response.send({"success" : true})
+        await db.ref('/otp_auth_requests').push(data);
+        response.send({'success' : true})
 
     }else{
-        response.send({ error: "Setup error" });
+        response.send({ error: 'Setup error' });
     } 
 });
 
 exports.verify_mobile_otp = onRequest(async (request, response) => {
     const db = getDatabase()
-    let settingdata = await db.ref('settings').once("value");
+    let settingdata = await db.ref('settings').once('value');
     let settings = settingdata.val();
     const allowedOrigins = ['https://' + config.firebaseProjectId + '.web.app', settings.CompanyWebsite];
     const origin = request.headers.origin;
     if (allowedOrigins.includes(origin)) {
-        response.set("Access-Control-Allow-Origin", origin);
+        response.set('Access-Control-Allow-Origin', origin);
     }
-    response.set("Access-Control-Allow-Headers", "Content-Type");
+    response.set('Access-Control-Allow-Headers', 'Content-Type');
     const mobile = request.body.mobile;
     const otp = request.body.otp;
-    const mobileList = await db.ref("/otp_auth_requests").orderByChild("mobile").equalTo(mobile).once('value');
+    const mobileList = await db.ref('/otp_auth_requests').orderByChild('mobile').equalTo(mobile).once('value');
     const listData = mobileList.val();
     if(listData){
         let check = await rgf.otpCheck(config, mobile, listData);
@@ -1128,36 +1308,36 @@ exports.verify_mobile_otp = onRequest(async (request, response) => {
                         response.send({ token: customToken });  
                     } catch (error){
                         console.log(error);
-                        response.send({ error: "Error creating custom token" });
+                        response.send({ error: 'Error creating custom token' });
                     }
                 } else {
                     check.data['count'] = check.data.count? check.data.count + 1: 1;
                     await db.ref(`/otp_auth_requests/${check.key}`).update(check.data);
-                    response.send({ error: "OTP mismatch" });
+                    response.send({ error: 'OTP mismatch' });
                 }
             }else{
-                response.send({ error: "Request mobile not found" });
+                response.send({ error: 'Request mobile not found' });
             }
         }
     }else{ 
-        response.send({ error: "Request mobile not found" });
+        response.send({ error: 'Request mobile not found' });
     }
 });
 
 exports.update_auth_mobile = onRequest(async (request, response) => {
     const db = getDatabase();
-    let settingdata = await db.ref('settings').once("value");
+    let settingdata = await db.ref('settings').once('value');
     let settings = settingdata.val();
     const allowedOrigins = ['https://' + config.firebaseProjectId + '.web.app', settings.CompanyWebsite];
     const origin = request.headers.origin;
     if (allowedOrigins.includes(origin)) {
-        response.set("Access-Control-Allow-Origin", origin);
+        response.set('Access-Control-Allow-Origin', origin);
     }
-    response.set("Access-Control-Allow-Headers", "Content-Type");
+    response.set('Access-Control-Allow-Headers', 'Content-Type');
     const uid = request.body.uid;
     const mobile = request.body.mobile;
     const otp = request.body.otp;
-    const mobileList = await db.ref("/otp_auth_requests").orderByChild("mobile").equalTo(mobile).once('value');
+    const mobileList = await db.ref('/otp_auth_requests').orderByChild('mobile').equalTo(mobile).once('value');
     const listData = mobileList.val();
     if(listData){
         let check = await rgf.otpCheck(config, mobile, listData);
@@ -1175,18 +1355,113 @@ exports.update_auth_mobile = onRequest(async (request, response) => {
                         return true;
                     })
                     .catch((error) => {
-                        response.send({ error: "Error updating user" });
+                        response.send({ error: 'Error updating user' });
                     });
                 } else {
                     check.data['count'] = check.data.count? check.data.count + 1: 1;
                     await db.ref(`/otp_auth_requests/${check.key}`).update(check.data);
-                    response.send({ error: "OTP mismatch" });
+                    response.send({ error: 'OTP mismatch' });
                 }
             }else{
-                response.send({ error: "Request mobile not found" });
+                response.send({ error: 'Request mobile not found' });
             }
         }
     }else{ 
-        response.send({ error: "Request mobile not found" });
+        response.send({ error: 'Request mobile not found' });
+    }
+});
+
+exports['updateuserdata'] = onRequest({
+    cors: true,
+    maxInstances: 5,
+    minInstances: 0,
+    region: 'us-central1',
+    invoker: 'public'
+}, async (request, response) => {
+    try {
+        const db = getDatabase();
+        const { uid, userData } = request.body;
+
+        if (!uid || !userData) {
+            response.status(400).send({ success: false, message: 'Missing required fields' });
+            return;
+        }
+
+        await db.ref(`users/${uid}`).update(userData);
+        
+        response.status(200).send({ 
+            success: true, 
+            message: 'User data updated successfully' 
+        });
+    } catch (error) {
+        console.error('Error updating user data:', error);
+        response.status(500).send({ 
+            success: false, 
+            message: 'Error updating user data',
+            error: error.message 
+        });
+    }
+});
+
+exports.create_custom_token = onRequest(async (request, response) => {
+    const requestId = Date.now() + '-' + Math.floor(Math.random() * 10000);
+    const log = (msg, data = null) => {
+        const logData = {
+            requestId,
+            timestamp: new Date().toISOString(),
+            message: msg,
+            data: data
+        };
+        console.error(JSON.stringify(logData));
+    };
+
+    // Configurar headers CORS
+    response.set('Access-Control-Allow-Origin', '*');
+    response.set('Access-Control-Allow-Headers', 'Content-Type');
+    response.set('Content-Type', 'application/json');
+
+    log('=== INÍCIO DA CRIAÇÃO DE TOKEN ===');
+    log('Request details', {
+        method: request.method,
+        headers: request.headers,
+        contentType: request.headers['content-type'],
+        body: request.body
+    });
+
+    // Verificar Content-Type
+    if (!request.headers['content-type'] || !request.headers['content-type'].includes('application/json')) {
+        log('ERRO: Content-Type inválido', { received: request.headers['content-type'] });
+        return response.status(400).json({ 
+            error: 'Content-Type deve ser application/json',
+            received: request.headers['content-type']
+        });
+    }
+
+    try {
+        const { uid } = request.body;
+        
+        if (!uid) {
+            log('ERRO: UID não fornecido');
+            return response.status(400).json({ 
+                error: 'UID é obrigatório'
+            });
+        }
+
+        log('Criando token customizado para UID:', uid);
+        const customToken = await admin.auth().createCustomToken(uid);
+        
+        log('Token criado com sucesso');
+        return response.status(200).json({ token: customToken });
+    } catch (error) {
+        log('ERRO ao criar token', {
+            error: error.message,
+            code: error.code,
+            stack: error.stack
+        });
+        
+        return response.status(500).json({ 
+            error: 'Erro ao criar token customizado',
+            details: error.message
+        });
     }
 });

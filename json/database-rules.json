@@ -65,7 +65,9 @@
             ".read": "auth != null",
             ".write": "root.child('users').child(auth.uid).child('usertype').val() === 'admin' || root.child('users').child(auth.uid).child('usertype').val() === 'fleetadmin'",
             "$uid": {
-                ".write": "auth != null && auth.uid===$uid",
+                ".read": "auth != null && auth.uid === $uid",
+                ".write": "auth != null && auth.uid === $uid",
+                ".validate": "!data.exists() || data.child('uid').val() === auth.uid",
                 "$usernode": {
                     ".write": "$usernode==='approved' || $usernode==='rating' || $usernode==='driverActiveStatus' || $usernode==='queue' || $usernode==='savedAddresses'"
                 }

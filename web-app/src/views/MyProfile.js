@@ -24,6 +24,7 @@ import CircularProgress from '@mui/material/CircularProgress';
 import Grid from '@mui/material/Grid';
 import { colors } from '../components/Theme/WebTheme';
 import {MAIN_COLOR, FONT_FAMILY} from "../common/sharedFunctions"
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const useStyles = makeStyles(theme => ({
   '@global': {
@@ -224,18 +225,17 @@ const MyProfile = () => {
     requestMobileOtp,
     updateAuthMobile
   } = api;
-  const auth = useSelector(state => state.auth);
   const dispatch = useDispatch();
   const classes = useStyles();
   const [commonAlert, setCommonAlert] = useState({ open: false, msg: '' });
-  const languagedata = useSelector(state => state.languagedata);
+  const [languageData, setLanguageData] = useState(null);
   const [langSelection, setLangSelection] = useState(0);
   const [multiLanguage, setMultiLanguage] = useState();
   const fileInputRef = useRef();
   const [selectedImage, setSelectedImage] = useState(null);
   const [loading, setLoading] = useState(false);
-  const settings = useSelector(state => state.settingsdata.settings);
-
+  const [settings, setSettings] = useState(null);
+  const [authState, setAuthState] = useState({ profile: null });
 
   const [data, setData] = useState({
     firstName: '',
@@ -252,27 +252,61 @@ const MyProfile = () => {
   const [confirmCodeFunction, setConfirmCodeFunction] = useState();
 
   useEffect(() => {
-    if (languagedata.langlist) {
-      let arr = Object.keys(languagedata.langlist);
+    const loadInitialState = async () => {
+      try {
+        const userData = await AsyncStorage.getItem('@user_data');
+        const settingsData = await AsyncStorage.getItem('@settings');
+        const langData = await AsyncStorage.getItem('@language_data');
+        
+        if (userData) {
+          const profile = JSON.parse(userData);
+          setAuthState({ profile });
+          setData({
+            firstName: profile.firstName || '',
+            lastName: profile.lastName || '',
+            email: profile.email || '',
+            mobile: profile.mobile || '',
+            usertype: profile.usertype || '',
+            verifyId: profile.verifyId || ''
+          });
+        }
+        if (settingsData) {
+          setSettings(JSON.parse(settingsData));
+        }
+        if (langData) {
+          const lang = JSON.parse(langData);
+          setLanguageData(lang);
+          setMultiLanguage(lang.langlist);
+        }
+      } catch (error) {
+        console.error('Erro ao carregar estado inicial:', error);
+      }
+    };
+
+    loadInitialState();
+  }, []);
+
+  useEffect(() => {
+    if (languageData && languageData.langlist) {
+      let arr = Object.keys(languageData.langlist);
       for (let i = 0; i < arr.length; i++) {
-        if (auth.profile && auth.profile.lang && auth.profile.lang.langLocale && auth.profile.lang.langLocale === languagedata.langlist[arr[i]].langLocale) {
+        if (authState.profile && authState.profile.lang && authState.profile.lang.langLocale && authState.profile.lang.langLocale === languageData.langlist[arr[i]].langLocale) {
           setLangSelection(i);
         }
       }
-      setMultiLanguage(languagedata.langlist);
     }
-  }, [languagedata.langlist, auth.profile, setMultiLanguage, setLangSelection]);
+  }, [languageData.langlist, authState.profile, setMultiLanguage, setLangSelection]);
 
   useEffect(() => {
-    if (auth.profile && auth.profile.uid) {
+    if (authState.profile && authState.profile.uid) {
       setData({
-        firstName: auth.profile.firstName,
-        lastName: auth.profile.lastName,
-        email: auth.profile.email,
-        mobile: auth.profile.mobile,
-        usertype: auth.profile.usertype,
-        profile_image: auth.profile.profile_image ? auth.profile.profile_image : '',
-        verifyId: auth.profile.verifyId ? auth.profile.verifyId : ''
+        firstName: authState.profile.firstName,
+        lastName: authState.profile.lastName,
+        email: authState.profile.email,
+        mobile: authState.profile.mobile,
+        usertype: authState.profile.usertype,
+        profile_image: authState.profile.profile_image ? authState.profile.profile_image : '',
+        verifyId: authState.profile.verifyId ? authState.profile.verifyId : ''
       });
       if (updateCalled) {
         setLoading(false);
@@ -281,7 +315,7 @@ const MyProfile = () => {
       }
     }
 
-  }, [auth.profile, t, updateCalled]);
+  }, [authState.profile, t, updateCalled]);
 
   const updateData = (e) => {
     setData({ ...data, [e.target.name]: e.target.value });
@@ -289,8 +323,8 @@ const MyProfile = () => {
 
   const completeSubmit = () => {
     setUpdateCalled(true);
-    let arr = Object.keys(languagedata.langlist);
-    localStorage.setItem('lang', JSON.stringify({langLocale: multiLanguage[arr[langSelection]].langLocale, dateLocale: multiLanguage[arr[langSelection]].dateLocale}));
+    let arr = Object.keys(languageData.langlist);
+    AsyncStorage.setItem('@language_data', JSON.stringify({langLocale: multiLanguage[arr[langSelection]].langLocale, dateLocale: multiLanguage[arr[langSelection]].dateLocale}));
 
     dispatch(updateProfile({
       firstName: data.firstName,
@@ -315,11 +349,11 @@ const MyProfile = () => {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (data.email !== auth.profile.email && data.mobile !== auth.profile.mobile) {
+    if (data.email !== authState.profile.email && data.mobile !== authState.profile.mobile) {
       setCommonAlert({ open: true, msg: t('update_any') })
     } else {
       if (data.firstName && data.firstName.length > 0 && data.lastName && data.lastName.length > 0) {
-        if (data.email !== auth.profile.email) {
+        if (data.email !== authState.profile.email) {
           const re = /^(([^<>()[\]\\.,;:\s@"]+(\.[^<>()[\]\\.,;:\s@"]+)*)|(".+"))@((\[[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}])|(([a-zA-Z\-0-9]+\.)+[a-zA-Z]{2,}))$/
           if (re.test(data.email)) {
             setLoading(true);
@@ -332,7 +366,7 @@ const MyProfile = () => {
                 setLoading(false);
                 alert(t('email_or_mobile_issue'));
               } else {
-                data['uid'] = auth.profile.uid;
+                data['uid'] = authState.profile.uid;
                 dispatch(updateProfileWithEmail(data));
                 setLoading(false);
                 setCommonAlert({ open: true, msg: t('profile_updated') });
@@ -341,7 +375,7 @@ const MyProfile = () => {
           } else {
             setCommonAlert({ open: true, msg: t('proper_email') })
           }
-        } else if (data.mobile !== auth.profile.mobile) {
+        } else if (data.mobile !== authState.profile.mobile) {
           if (data.mobile && data.mobile.length > 6) {
             setLoading(true);
             checkUserExists({ mobile: data.mobile }).then(async (res) => {
@@ -363,7 +397,7 @@ const MyProfile = () => {
                     'size': 'invisible'
                   });
 
-                  if (auth.profile.mobile && auth.profile.mobile.length > 6) {
+                  if (authState.profile.mobile && authState.profile.mobile.length > 6) {
                     await unlink(authRef().currentUser, "phone");
                   }
 
@@ -444,7 +478,7 @@ const MyProfile = () => {
     setSelectedImage(e.target.files[0]);
   }
   return (
-    auth.loading ? <CircularLoading /> :
+    authState.loading ? <CircularLoading /> :
       <Container component="main" maxWidth="xs">
         <CssBaseline />
         <div id="sign-in-button" />
@@ -544,7 +578,7 @@ const MyProfile = () => {
                 value={data.usertype}
                 disabled={true}
               />
-              {((settings && settings.imageIdApproval) || (data && data.verifyId)) && auth.profile.usertype !== 'admin' ?
+              {((settings && settings.imageIdApproval) || (data && data.verifyId)) && authState.profile.usertype !== 'admin' ?
                 <TextField
                   className={isRTL === "rtl" ? classes.rootRtl : classes.textField}
                   variant="outlined"

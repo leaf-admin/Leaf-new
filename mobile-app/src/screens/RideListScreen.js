@@ -6,7 +6,7 @@ import {
     Alert
 } from 'react-native';
 import { colors } from '../common/theme';
-import i18n from 'i18n-js';
+import i18n from '../i18n';
 import { useSelector } from 'react-redux';
 export default function RideListPage(props) {
     const bookings = useSelector(state => state.bookinglistdata.bookings);

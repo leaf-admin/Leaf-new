@@ -1,7 +1,6 @@
 import { configureStore } from '@reduxjs/toolkit';
-import thunk from "redux-thunk";
 
-import { authreducer }  from "../reducers/authreducer";
+import authreducer from "../reducers/authreducer";
 import { cartypesreducer} from "../reducers/cartypesreducer";
 import { bookingslistreducer } from "../reducers/bookingslistreducer";
 import { estimatereducer } from "../reducers/estimatereducer";
@@ -61,7 +60,14 @@ const rootReducer = {
   fleetadminearningdata: fleetadminearningreducer,
 };
 
-export default configureStore({
-  middleware: [thunk],
-  reducer: rootReducer
+const store = configureStore({
+  reducer: rootReducer,
+  middleware: (getDefaultMiddleware) =>
+    getDefaultMiddleware({
+      serializableCheck: false,
+      immutableCheck: false,
+    }),
 });
+
+export { store };
+export default store;

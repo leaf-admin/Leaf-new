@@ -28,18 +28,18 @@ module.exports.render_checkout =async function (request, response) {
     var signature = md5(transaction_unique_key);
 
     const refr = request.get('Referrer');
-    const server_url = refr ? ((refr.includes('bookings') || refr.includes('addbookings') || refr.includes('userwallet'))? refr.substring(0, refr.length - refr.split("/")[refr.split("/").length - 1].length) : refr) : request.protocol + "://" + request.get('host') + "/";
+    const server_url = refr ? ((refr.includes('bookings') || refr.includes('addbookings') || refr.includes('userwallet'))? refr.substring(0, refr.length - refr.split('/')[refr.split('/').length - 1].length) : refr) : request.protocol + '://' + request.get('host') + '/';
 
     response.send(templateLib.getTemplate(
         keys,
         orderDetails,
         signature,
-        server_url + "payulatam-process"
+        server_url + 'payulatam-process'
     ));
 };
 
 module.exports.process_checkout = async function (request, response) {
-    if (request.query.transactionState === "4") {
+    if (request.query.transactionState === '4') {
         const order_id = request.query.referenceCode;
         const transaction_id = request.query.transactionId;
         const amount = request.query.TX_VALUE;
@@ -49,7 +49,7 @@ module.exports.process_checkout = async function (request, response) {
               UpdateBooking(bookingData,order_id,transaction_id,'payulatam');
               response.redirect(`/success?order_id=${order_id}&amount=${amount}&transaction_id=${transaction_id}`);
           }else{
-              if(order_id.startsWith("wallet")){
+              if(order_id.startsWith('wallet')){
                 addToWallet(order_id.substr(7,order_id.length - 12), amount, order_id, transaction_id);
                 response.redirect(`/success?order_id=${order_id}&amount=${amount}&transaction_id=${transaction_id}`);
               }else{

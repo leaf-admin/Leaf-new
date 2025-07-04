@@ -1,8 +1,8 @@
-const templateLib = require("./template");
-const admin = require("firebase-admin");
-const addToWallet = require("../../common").addToWallet;
-const UpdateBooking = require("../../common").UpdateBooking;
-const { v4: uuidv4 } = require("uuid");
+const templateLib = require('./template');
+const admin = require('firebase-admin');
+const addToWallet = require('../../common').addToWallet;
+const UpdateBooking = require('../../common').UpdateBooking;
+const { v4: uuidv4 } = require('uuid');
 const { Client, Environment } = require('square');
 
 module.exports.render_checkout = async function (request, response) {
@@ -14,7 +14,7 @@ module.exports.render_checkout = async function (request, response) {
   const amount = request.body.amount;
   const currency = request.body.currency;
   const refr = request.get('Referrer');
-  const server_url = refr ? ((refr.includes('bookings') || refr.includes('addbookings') || refr.includes('userwallet'))? refr.substring(0, refr.length - refr.split("/")[refr.split("/").length - 1].length) : refr) : request.protocol + "://" + request.get('host') + "/";
+  const server_url = refr ? ((refr.includes('bookings') || refr.includes('addbookings') || refr.includes('userwallet'))? refr.substring(0, refr.length - refr.split('/')[refr.split('/').length - 1].length) : refr) : request.protocol + '://' + request.get('host') + '/';
 
   response.send(
     templateLib.getTemplate(APPLICATION_ID, LOCATION_ID, order_id, amount, currency, server_url, config.testing )
@@ -39,7 +39,7 @@ module.exports.add_card = async (req, res) => {
     idempotencyKey: idempotency_key,
     amountMoney: {
       amount: parseFloat(req.body.amount),
-      currency: "AUD",
+      currency: 'AUD',
     },
     sourceId: req.body.sourceId,
     autocomplete: true,
@@ -78,7 +78,7 @@ module.exports.process_checkout = async function(req, res){
           UpdateBooking(bookingData,order_id,transaction_id,'squareup');
           res.redirect(`/success?order_id=${order_id}&amount=${amount}&transaction_id=${transaction_id}`);
       }else{
-          if(order_id.startsWith("wallet")){
+          if(order_id.startsWith('wallet')){
               addToWallet(order_id.substr(7,order_id.length - 12), amount, order_id, transaction_id);
               res.redirect(`/success?order_id=${order_id}&amount=${amount}&transaction_id=${transaction_id}`);
           }

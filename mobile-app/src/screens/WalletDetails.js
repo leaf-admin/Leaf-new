@@ -1,176 +1,166 @@
-import React, { useEffect, useState } from 'react';
-import { WTransactionHistory } from '../components';
-import {
-  StyleSheet,
-  View,
-  Text,
-  Dimensions,
-  Alert
-} from 'react-native';
-import { colors } from '../common/theme';
-var { height } = Dimensions.get('window');
-import i18n from 'i18n-js';
-import { useSelector } from 'react-redux';
-import { TouchableOpacity } from 'react-native-gesture-handler';
-import { CommonActions } from '@react-navigation/native';
-import { MAIN_COLOR,SECONDORY_COLOR } from '../common/sharedFunctions';
+import React, { useState, useEffect } from 'react';
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Platform, StatusBar } from 'react-native';
+import { Icon } from 'react-native-elements';
+import { useSelector, useDispatch } from 'react-redux';
+import { useTheme } from '@react-navigation/native';
+import { MAIN_COLOR, SECONDORY_COLOR } from '../common/sharedFunctions';
 import { fonts } from '../common/font';
-
+import { colors } from '../common/theme';
+import i18n from '../i18n';
+import WTransactionHistory from '../components/WalletTransactionHistory';
+import { fetchWalletHistory } from 'common/src/actions/walletactions';
 
 export default function WalletDetails(props) {
+    const { t } = i18n;
+    const theme = useTheme();
+    const dispatch = useDispatch();
+    const [isDarkMode, setIsDarkMode] = useState(theme.dark);
+    const auth = useSelector(state => state.auth);
+    const walletHistory = useSelector(state => state.walletdata.walletHistory);
+    const settings = useSelector(state => state.settingsdata.settings);
 
-  const auth = useSelector(state => state.auth);
-  const walletHistory = useSelector(state => state.auth.walletHistory);
-  const settings = useSelector(state => state.settingsdata.settings);
-  const providers = useSelector(state => state.paymentmethods.providers);
-  const [profile, setProfile] = useState();
-  const { t } = i18n;
-  const isRTL = i18n.locale.indexOf('he') === 0 || i18n.locale.indexOf('ar') === 0;
+    useEffect(() => {
+        dispatch(fetchWalletHistory(auth.profile.uid));
+    }, []);
 
-  useEffect(() => {
-    if (auth.profile && auth.profile.uid) {
-      setProfile(auth.profile);
-    } else {
-      setProfile(null);
-    }
-  }, [auth.profile]);
-
-  const doReacharge = () => {
-    if (!(profile.mobile && profile.mobile.length > 6 && profile.email && profile.firstName)) {
-      Alert.alert(t('alert'), t('profile_incomplete'));
-      props.navigation.dispatch(CommonActions.reset({ index: 0, routes:[{ name: 'Profile', params: { fromPage: 'Wallet'}}]}));
-    } else {
-      if (providers) {
-        props.navigation.push('addMoney', { userdata: profile, providers: providers });
-      } else {
-        Alert.alert(t('alert'), t('provider_not_found'))
-      }
-    }
-  }
-
-  const doWithdraw = () => {
-    if (!(profile.mobile && profile.mobile.length > 6) && profile.email && profile.firstName) {
-      Alert.alert(t('alert'), t('profile_incomplete'));
-      props.navigation.dispatch(CommonActions.reset({ index: 0, routes:[{ name: 'Profile', params: { fromPage: 'Wallet'}}]}));
-    } else {
-      if (parseFloat(profile.walletBalance) > 0) {
-        props.navigation.push('withdrawMoney', { userdata: profile });
-      } else {
-        Alert.alert(t('alert'), t('wallet_bal_low'))
-      }
-    }
-  }
-
-
-  return (
-    <View style={styles.mainView}>
-      <View style={styles.Vew}>
-
-        <View style={[styles.View6, {backgroundColor: MAIN_COLOR }]}>
-          {settings.swipe_symbol === false ?
-            <Text style={{ textAlign: 'center', fontSize: 30, fontFamily:fonts.Medium, color: colors.WHITE }}>{settings.symbol}{profile && profile.hasOwnProperty('walletBalance') ? parseFloat(profile.walletBalance).toFixed(settings.decimal) : ''}</Text>
-            :
-            <Text style={{ textAlign: 'center', fontSize: 30, fontFamily:fonts.Medium, color: colors.WHITE }}>{profile && profile.hasOwnProperty('walletBalance') ? parseFloat(profile.walletBalance).toFixed(settings.decimal) : ''}{settings.symbol}</Text>
-          }
-          {profile && (profile.usertype == 'driver' || (profile.usertype == 'customer' && settings && settings.RiderWithDraw)) ?
-          <View style={{flexDirection:isRTL?'row-reverse':'row',justifyContent:'space-around',marginVertical:15,width:'100%',height:50}}>
-            <View style={[styles.Vew1,{backgroundColor:colors.GREEN}]}>
-              <TouchableOpacity onPress={doReacharge} style={styles.vew7}>
-                <Text style={[styles.txt,{color:colors.WHITE}]}>{t('add_money').toUpperCase()}</Text>
-              </TouchableOpacity>
+    return (
+        <View style={[styles.container, { backgroundColor: theme.colors.background }]}>
+            <StatusBar hidden={true} />
+            
+            {/* Header */}
+            <View style={[styles.header, { backgroundColor: theme.colors.card }]}>
+                <TouchableOpacity 
+                    style={[styles.headerButton, { backgroundColor: theme.colors.card }]}
+                    onPress={() => props.navigation.goBack()}
+                >
+                    <Icon name="arrow-back" type="material" color={theme.colors.text} size={24} />
+                </TouchableOpacity>
+                
+                <Text style={[styles.headerTitle, { color: theme.colors.text, fontFamily: fonts.Bold }]}>
+                    {t('my_wallet_tile')}
+                </Text>
+                
+                <View style={styles.headerRightContainer}>
+                    <TouchableOpacity 
+                        style={[styles.headerButton, { backgroundColor: theme.colors.card }]}
+                        onPress={() => setIsDarkMode(!isDarkMode)}
+                    >
+                        <Icon 
+                            name={isDarkMode ? "light-mode" : "dark-mode"} 
+                            type="material" 
+                            color={theme.colors.text} 
+                            size={24} 
+                        />
+                    </TouchableOpacity>
+                </View>
             </View>
-            <View style={[styles.Vew1,{backgroundColor:colors.RED}]}>
-              <TouchableOpacity onPress={doWithdraw} style={styles.vew7}>
-                <Text style={[styles.txt,{color:colors.WHITE}]}>{t('withdraw')}</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-           :
-          <View style={{flexDirection:'row',justifyContent:'center',marginVertical:15,width:'100%',height:50}}>
-            <View style={[styles.Vew1,{backgroundColor:colors.GREEN}]}>
-              <TouchableOpacity onPress={doReacharge} style={styles.vew7}>
-                <Text style={[styles.txt,{color:colors.WHITE}]}>{t('add_money')}</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-        } 
+
+            <ScrollView style={styles.scrollView}>
+                {/* Balance Card */}
+                <View style={[styles.balanceCard, { backgroundColor: theme.colors.card }]}>
+                    <Text style={[styles.balanceLabel, { color: theme.colors.text, fontFamily: fonts.Regular }]}>
+                        {t('wallet_balance')}
+                    </Text>
+                    <Text style={[styles.balanceAmount, { color: theme.colors.text, fontFamily: fonts.Bold }]}>
+                        R$ {parseFloat(auth.profile.walletBalance).toFixed(2)}
+                    </Text>
+                    
+                    <TouchableOpacity 
+                        style={[styles.addMoneyButton, { backgroundColor: MAIN_COLOR }]}
+                        onPress={() => props.navigation.navigate('addMoney')}
+                    >
+                        <Icon name="add" type="material" color="#FFFFFF" size={24} />
+                        <Text style={[styles.addMoneyText, { fontFamily: fonts.Bold }]}>
+                            {t('add_money')}
+                        </Text>
+                    </TouchableOpacity>
+                </View>
+
+                {/* Transaction History */}
+                <View style={styles.transactionsContainer}>
+                    <Text style={[styles.transactionsTitle, { color: theme.colors.text, fontFamily: fonts.Bold }]}>
+                        {t('transaction_history')}
+                    </Text>
+                    <WTransactionHistory 
+                        walletHistory={walletHistory} 
+                        role={auth.profile.usertype}
+                        settings={settings}
+                    />
+                </View>
+            </ScrollView>
         </View>
-      </View>
-    
-      <View style={styles.Vew4}>
-        <Text style={[styles.View5, { textAlign: isRTL ? "right" : "left" }]}>{t('transaction_history_title')}</Text>
-        <WTransactionHistory walletHistory={walletHistory ? walletHistory : []} role={auth.profile && auth.profile.usertype? auth.profile.usertype:null}/>
-      </View>
-
-    </View>
-
-  );
-
+    );
 }
 
 const styles = StyleSheet.create({
-  mainView: {
-    flex: 1,
-    backgroundColor: colors.WHITE,
-  },
-  Vew4: {
-    flex: 1,
-    marginTop: 5,
-    borderTopRightRadius: 20,
-    borderTopLeftRadius: 20,
-    padding: 5,
-    backgroundColor: colors.WHITE
-  },
-  Vew1: {
-    height:50,
-    minWidth:150,
-    borderRadius:10,
-    backgroundColor: colors.WHITE,
-    shadowColor: "#000",
-    shadowOffset: {
-      width: 0,
-      height: 5,
+    container: {
+        flex: 1,
     },
-    shadowOpacity: 0.2,
-    shadowRadius: 3,
-    elevation: 3
-  },
-  Vew: {
-    width: '100%',
-    height: 'auto',
-    backgroundColor: colors.WHITE,
-  },
-  View5: {
-    paddingHorizontal: 10,
-    fontSize: 18,
-    fontFamily:fonts.Medium,
-    marginTop: 10
-  },
-  View6: {
-    width: '100%',
-    alignSelf: 'flex-end',
-    justifyContent: 'center',
-    shadowColor: "#000",
-    shadowOffset: {
-      width: 0,
-      height: 4,
+    header: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        paddingHorizontal: 16,
+        paddingTop: Platform.OS === 'ios' ? 50 : 40,
+        paddingBottom: 16,
+        borderBottomWidth: 1,
+        borderBottomColor: 'rgba(0,0,0,0.1)',
     },
-    shadowOpacity: 0.4,
-    shadowRadius: 2,
-    elevation: 6,
-    borderBottomRightRadius: 20,
-    borderBottomLeftRadius: 20
-  },
-  txt: { 
-    textAlign: 'center',
-    fontSize: 18,
-    color: colors.HEADER,
-    fontFamily:fonts.Bold
-  },
-  vew7:{
-    height:'100%',
-    width:'100%',
-    justifyContent:'center',
-    paddingHorizontal:5
-  }
+    headerButton: {
+        width: 40,
+        height: 40,
+        borderRadius: 20,
+        justifyContent: 'center',
+        alignItems: 'center',
+    },
+    headerTitle: {
+        fontSize: 20,
+    },
+    headerRightContainer: {
+        flexDirection: 'row',
+        alignItems: 'center',
+    },
+    scrollView: {
+        flex: 1,
+    },
+    balanceCard: {
+        margin: 16,
+        padding: 20,
+        borderRadius: 12,
+        shadowColor: '#000',
+        shadowOffset: {
+            width: 0,
+            height: 2,
+        },
+        shadowOpacity: 0.1,
+        shadowRadius: 4,
+        elevation: 3,
+    },
+    balanceLabel: {
+        fontSize: 16,
+        marginBottom: 8,
+    },
+    balanceAmount: {
+        fontSize: 32,
+        marginBottom: 16,
+    },
+    addMoneyButton: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        padding: 12,
+        borderRadius: 8,
+    },
+    addMoneyText: {
+        color: '#FFFFFF',
+        fontSize: 16,
+        marginLeft: 8,
+    },
+    transactionsContainer: {
+        padding: 16,
+    },
+    transactionsTitle: {
+        fontSize: 18,
+        marginBottom: 16,
+    }
 });

@@ -14,7 +14,7 @@ import { Icon, Button, Input } from 'react-native-elements';
 import MapView, { PROVIDER_GOOGLE, Marker, Polyline } from 'react-native-maps';
 import { colors } from '../common/theme';
 var { width, height } = Dimensions.get('window');
-import i18n from 'i18n-js';
+import i18n from '../i18n';
 import RadioForm from 'react-native-simple-radio-button';
 import OtherPerson from './OtherPerson';
 import { fonts } from '../common/font';
@@ -31,6 +31,28 @@ export default function TaxiModal(props) {
     const { settings, tripdata, estimate, bookingModalStatus, onPressCancel, bookNow, payment_mode, setPaymentMode, radioProps, profileData, setProfileData, auth, bookModelLoading, instructionData, setInstructionData, otherPerson, setOtherPerson  } = props;
 
     const mapRef = useRef(null);
+
+    const hasProfile = auth && auth.profile;
+    const hasFirstName = hasProfile && auth.profile.firstName;
+    const hasLastName = hasProfile && auth.profile.lastName;
+    const hasEmail = hasProfile && auth.profile.email;
+    const hasSettings = settings !== null;
+    const hasSwipeSymbol = hasSettings && settings.swipe_symbol;
+    const hasStripeKey = hasSettings && settings.stripe_key;
+    const hasStripeSecret = hasSettings && settings.stripe_secret;
+    const hasStripeEnabled = hasSettings && settings.stripe_enabled;
+    const hasPaypalKey = hasSettings && settings.paypal_key;
+    const hasPaypalSecret = hasSettings && settings.paypal_secret;
+    const hasPaypalEnabled = hasSettings && settings.paypal_enabled;
+    const hasPaystackKey = hasSettings && settings.paystack_key;
+    const hasPaystackSecret = hasSettings && settings.paystack_secret;
+    const hasPaystackEnabled = hasSettings && settings.paystack_enabled;
+    const hasRazorpayKey = hasSettings && settings.razorpay_key;
+    const hasRazorpaySecret = hasSettings && settings.razorpay_secret;
+    const hasRazorpayEnabled = hasSettings && settings.razorpay_enabled;
+    const hasFlutterwaveKey = hasSettings && settings.flutterwave_key;
+    const hasFlutterwaveSecret = hasSettings && settings.flutterwave_secret;
+    const hasFlutterwaveEnabled = hasSettings && settings.flutterwave_enabled;
 
     const runFitCoords = () => {
         mapRef.current.fitToCoordinates([{ latitude: tripdata.pickup.lat, longitude: tripdata.pickup.lng }, { latitude: tripdata.drop.lat, longitude: tripdata.drop.lng }], {
@@ -153,12 +175,12 @@ export default function TaxiModal(props) {
                             />
                         </TouchableOpacity>
                     </View>
-                    <ScrollView style={{ height: (auth && auth.profile && auth.profile.firstName && auth.profile.lastName && auth.profile.email ? 250 : (auth.profile.firstName && auth.profile.lastName) ? 350 : auth.profile.email ? 350 : 400) + (otherPerson ? 75 : 10)}} showsVerticalScrollIndicator={false}>
-                        {auth && auth.profile && !(auth.profile.firstName && auth.profile.lastName && auth.profile.email) ?
+                    <ScrollView style={{ height: (hasProfile && hasFirstName && hasLastName && hasEmail ? 250 : (hasFirstName && hasLastName) ? 350 : hasEmail ? 350 : 400) + (otherPerson ? 75 : 10)}} showsVerticalScrollIndicator={false}>
+                        {hasProfile && !(hasFirstName && hasLastName && hasEmail) ?
                             <View style={styles.vew}>
                                 <Text style={{ textAlign: 'center', fontFamily:fonts.Bold }}>{t('no_details_error')}</Text>
                                 <View style={{ flexDirection: 'row', width: '100%' }}>
-                                    {auth && auth.profile && !auth.profile.firstName ?
+                                    {hasProfile && !hasFirstName ?
                                         <View style={{ width: '50%' }}>
                                             <Input
                                                 editable={true}
@@ -173,7 +195,7 @@ export default function TaxiModal(props) {
                                             />
                                         </View>
                                         : null}
-                                    {auth && auth.profile && !auth.profile.lastName ?
+                                    {hasProfile && !hasLastName ?
                                         <View style={{ width: '50%' }}>
                                             <Input
                                                 editable={true}
@@ -189,7 +211,7 @@ export default function TaxiModal(props) {
                                         </View>
                                         : null}
                                 </View>
-                                {auth && auth.profile && !auth.profile.email ?
+                                {hasProfile && !hasEmail ?
                                     <Input
                                         editable={true}
                                         underlineColorAndroid={colors.TRANSPARENT}
@@ -238,7 +260,7 @@ export default function TaxiModal(props) {
                                     </View>
 
                                     <View style={styles.iconContainer}>
-                                        {settings.swipe_symbol === false ?
+                                        {hasSettings && hasSwipeSymbol && hasStripeKey && hasStripeSecret && hasStripeEnabled ?
                                             <Text style={styles.priceText}> {settings ? settings.symbol : null} {estimate ? estimate.estimateFare : null}</Text>
                                             :
                                             <Text style={styles.priceText}> {estimate ? estimate.estimateFare : null} {settings ? settings.symbol : null}</Text>
@@ -366,14 +388,46 @@ const styles = StyleSheet.create({
     },
     offerContainer: { height: 30, width: width, justifyContent: 'center', borderBottomColor:MAIN_COLOR, borderBottomWidth: Platform.OS == 'ios' ? 1 : 0 },
     offerText: { alignSelf: 'center', fontSize: 14, fontFamily:fonts.Regular },
-    priceDetailsContainer: { backgroundColor: colors.WHITE, flexDirection: 'row', position: 'relative', zIndex: 1, },
-    priceDetailsLeft: { flex: 19, height: 90 },
-    priceDetailsMiddle: { flex: 2, height: 50, width: 1, alignItems: 'center' },
-    priceDetails: { flex: 1, flexDirection: 'row' },
-    totalFareContainer: { flex: 8, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', },
-    totalFareText: { color: colors.MAP_TEXT, fontFamily:fonts.Bold, fontSize: 15, marginLeft: 40 },
-    infoIcon: { flex: 2, alignItems: 'center', justifyContent: 'center' },
-    priceText: { alignSelf: 'center', color: colors.BUTTON, fontFamily: fonts.Bold, fontSize: 20 },
+    priceDetailsContainer: { 
+        backgroundColor: colors.WHITE, 
+        flexDirection: 'row', 
+        position: 'relative', 
+        zIndex: 1,
+        justifyContent: 'space-between',
+        paddingHorizontal: 20
+    },
+    priceDetailsLeft: { 
+        flex: 1, 
+        height: 90,
+        paddingTop: 15
+    },
+    priceDetails: { 
+        flex: 1, 
+        flexDirection: 'row',
+        alignItems: 'flex-start'
+    },
+    totalFareContainer: { 
+        flex: 1, 
+        flexDirection: 'row', 
+        alignItems: 'center'
+    },
+    totalFareText: { 
+        color: colors.MAP_TEXT, 
+        fontFamily: fonts.Bold, 
+        fontSize: 15,
+        textAlign: 'center'
+    },
+    infoIcon: { 
+        marginLeft: 5,
+        alignItems: 'center'
+    },
+    priceText: { 
+        color: colors.BUTTON, 
+        fontFamily: fonts.Bold, 
+        fontSize: 20,
+        textAlign: 'center',
+        marginTop: -5
+    },
     triangle: {
         width: 0,
         height: 0,

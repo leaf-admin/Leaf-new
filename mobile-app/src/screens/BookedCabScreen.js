@@ -21,11 +21,10 @@ import StarRating from 'react-native-star-rating-widget';
 import RadioForm from 'react-native-simple-radio-button';
 import { colors } from '../common/theme';
 var { width, height } = Dimensions.get('window');
-import i18n from 'i18n-js';
+import i18n from '../i18n';
 import { useSelector, useDispatch } from 'react-redux';
 import * as DecodePolyLine from '@mapbox/polyline';
 import carImageIcon from '../../assets/images/track_Car.png';
-import { api } from 'common';
 import * as ImagePicker from 'expo-image-picker';
 import moment from 'moment/min/moment-with-locales';
 import { CommonActions } from '@react-navigation/native';
@@ -38,15 +37,6 @@ import DeviceInfo from 'react-native-device-info';
 const hasNotch = DeviceInfo.hasNotch();
 
 export default function BookedCabScreen(props) {
-    const {
-        fetchBookingLocations,
-        stopLocationFetch,
-        updateBookingImage,
-        cancelBooking,
-        updateBooking,
-        getDirectionsApi,
-        editSos
-    } = api;
     const dispatch = useDispatch();
     const { bookingId } = props.route.params;
     const latitudeDelta = 0.0922;

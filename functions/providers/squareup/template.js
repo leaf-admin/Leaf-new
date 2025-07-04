@@ -13,7 +13,7 @@ function getTemplate(
         <meta http-equiv="X-UA-Compatible" content="IE=edge" />
         <meta name="viewport" content="width=device-width, initial-scale=1" />
         <title>Test Payment Checkout</title>
-        <script type="text/javascript" src="https://${testing? "sandbox.": ""}web.squarecdn.com/v1/square.js"></script>
+        <script type="text/javascript" src="https://${testing? 'sandbox.': ''}web.squarecdn.com/v1/square.js"></script>
         <script>
             const appId = '${APPLICATION_ID}';
             const locationId = '${LOCATION_ID}';

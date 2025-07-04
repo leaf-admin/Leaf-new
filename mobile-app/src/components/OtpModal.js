@@ -4,7 +4,7 @@ import { Icon } from "react-native-elements";
 import { colors } from "../common/theme";
 import { fonts } from '../common/font';
 
-import i18n from 'i18n-js';
+import i18n from '../i18n';
 export default function OtpModal(props) {
 
     const { requestmodalclose, modalvisable, otp, onMatch } = props;

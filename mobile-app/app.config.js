@@ -32,7 +32,10 @@ export default {
     extra: {
         eas: {
           projectId: AppConfig.expo_project_id
-        }
+        },
+        privacyPolicyUrl: AppConfig.privacy_policy_url,
+        termsOfServiceUrl: AppConfig.terms_of_service_url,
+        supportEmail: AppConfig.support_email
     },
     assetBundlePatterns: [
         "**/*"

@@ -12,7 +12,7 @@ import {
 import { Icon, Button, Input } from 'react-native-elements'
 import { colors } from '../common/theme';
 import ActionSheet from "react-native-actions-sheet";
-import i18n from 'i18n-js';
+import i18n from '../i18n';
 var { height } = Dimensions.get('window');
 import { useSelector, useDispatch } from 'react-redux';
 import { api, FirebaseContext } from 'common';

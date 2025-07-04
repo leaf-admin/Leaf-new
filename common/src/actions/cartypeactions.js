@@ -6,8 +6,8 @@ import {
 } from "../store/types";
 import store from '../store/store';
 import { firebase } from '../config/configureFirebase';
-import { onValue, set ,remove, push } from "firebase/database";
-import { uploadBytesResumable, getDownloadURL } from "firebase/storage";
+import { onValue, push, remove, set, uploadBytesResumable, getDownloadURL } from 'firebase/database';
+import { ref } from 'firebase/storage';
 
 export const fetchCarTypes = () => (dispatch) => {
 
@@ -64,3 +64,35 @@ export const editCarType = (cartype, method) => async (dispatch) => {
     set(carTypesEditRef(cartype.id), cartype);
   }
 }
+
+// Função para buscar tipos de carro de forma síncrona
+export const getCarTypes = async () => {
+  try {
+    console.log('getCarTypes - Buscando tipos de carro...');
+    
+    const carTypesRef = firebase.carTypesRef;
+    const snapshot = await new Promise((resolve) => {
+      const unsubscribe = onValue(carTypesRef, (snap) => {
+        unsubscribe();
+        resolve(snap);
+      });
+    });
+
+    if (snapshot.val()) {
+      let data = snapshot.val();
+      const arr = Object.keys(data).map(i => {
+        data[i].id = i;
+        return data[i]
+      });
+      
+      console.log('getCarTypes - Tipos de carro encontrados:', arr);
+      return arr;
+    } else {
+      console.log('getCarTypes - Nenhum tipo de carro encontrado');
+      return null;
+    }
+  } catch (error) {
+    console.warn('getCarTypes - Erro ao buscar tipos de carro:', error);
+    return null;
+  }
+};

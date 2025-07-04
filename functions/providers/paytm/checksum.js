@@ -1,4 +1,4 @@
-"use strict";
+'use strict';
 
 var crypt = require('./crypt');
 var util = require('util');
@@ -11,15 +11,15 @@ function paramsToString(params, mandatoryflag) {
   var tempKeys = Object.keys(params);
   tempKeys.sort();
   tempKeys.forEach((key) => {
-  var n = params[key].includes("REFUND"); 
-   var m = params[key].includes("|");  
+  var n = params[key].includes('REFUND'); 
+   var m = params[key].includes('|');  
         if(n === true )
         {
-          params[key] = "";
+          params[key] = '';
         }
           if(m === true)
         {
-          params[key] = "";
+          params[key] = '';
         }  
     if (key !== 'CHECKSUMHASH' ) {
       if (params[key] === 'null') params[key] = '';
@@ -64,7 +64,7 @@ function verifychecksum(params, key, checksumhash) {
   var data = paramsToString(params, false);
 
   //TODO: after PG fix on thier side remove below two lines
-  if (typeof checksumhash !== "undefined") {
+  if (typeof checksumhash !== 'undefined') {
     checksumhash = checksumhash.replace('\n', '');
     checksumhash = checksumhash.replace('\r', '');
     var temp = decodeURIComponent(checksumhash);
@@ -75,11 +75,11 @@ function verifychecksum(params, key, checksumhash) {
     if (hash === sha256) {
       return true;
     } else {
-      util.log("checksum is wrong");
+      util.log('checksum is wrong');
       return false;
     }
   } else {
-    util.log("checksum not found");
+    util.log('checksum not found');
     return false;
   }
 }
@@ -93,7 +93,7 @@ function verifychecksumbystring(params, key,checksumhash) {
     if (hash === sha256) {
       return true;
     } else {
-      util.log("checksum is wrong");
+      util.log('checksum is wrong');
       return false;
     }
   } 
@@ -117,10 +117,10 @@ function paramsToStringrefund(params, mandatoryflag) {
   var tempKeys = Object.keys(params);
   tempKeys.sort();
   tempKeys.forEach((key) => {
-   var m = params[key].includes("|");  
+   var m = params[key].includes('|');  
           if(m === true)
         {
-          params[key] = "";
+          params[key] = '';
         }  
     if (key !== 'CHECKSUMHASH' ) {
       if (params[key] === 'null') params[key] = '';

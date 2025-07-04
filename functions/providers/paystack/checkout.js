@@ -9,34 +9,34 @@ module.exports.render_checkout = async function (request, response) {
     const config = (await admin.database().ref('payment_settings/paystack').once('value')).val();
     const PAYSTACK_SECRET_KEY = config.PAYSTACK_SECRET_KEY;
 
-    const allowed = ["GHS", "NGN", "ZAR", "KES"];
+    const allowed = ['GHS', 'NGN', 'ZAR', 'KES'];
 
     const c = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'
     const randomKey = [...Array(4)].map(_ => c[~~(Math.random()*c.length)]).join(''); 
 
     const refr = request.get('Referrer');
-    const server_url = refr ? ((refr.includes('bookings') || refr.includes('addbookings') || refr.includes('userwallet'))? refr.substring(0, refr.length - refr.split("/")[refr.split("/").length - 1].length) : refr) : request.protocol + "://" + request.get('host') + "/";
+    const server_url = refr ? ((refr.includes('bookings') || refr.includes('addbookings') || refr.includes('userwallet'))? refr.substring(0, refr.length - refr.split('/')[refr.split('/').length - 1].length) : refr) : request.protocol + '://' + request.get('host') + '/';
 
-    let order_id = "";
-    if(request.body.order_id.startsWith("wallet")){
-        const idParts = request.body.order_id.split("-");
+    let order_id = '';
+    if(request.body.order_id.startsWith('wallet')){
+        const idParts = request.body.order_id.split('-');
         for(let i = 0; i<idParts.length - 1; i++){
-            order_id = order_id + idParts[i] + "-";
+            order_id = order_id + idParts[i] + '-';
         }
         order_id = order_id + randomKey;
     }else{
-        order_id = request.body.order_id + "-" + randomKey;
+        order_id = request.body.order_id + '-' + randomKey;
     }
 
     const data = {
-        "amount": parseFloat(request.body.amount).toFixed(2) * 100,
-        "email": request.body.email,
-        "currency": allowed.includes(request.body.currency) ? request.body.currency : 'NGN',
-        "reference": order_id,
-        "callback_url": server_url + "paystack-process"  
+        'amount': parseFloat(request.body.amount).toFixed(2) * 100,
+        'email': request.body.email,
+        'currency': allowed.includes(request.body.currency) ? request.body.currency : 'NGN',
+        'reference': order_id,
+        'callback_url': server_url + 'paystack-process'  
     };
 
-    fetch("https://api.paystack.co/transaction/initialize", {
+    fetch('https://api.paystack.co/transaction/initialize', {
         method: 'POST',
         headers: {
             'Authorization': 'Bearer ' + PAYSTACK_SECRET_KEY,
@@ -79,13 +79,13 @@ module.exports.process_checkout = async function (req, res) {
         if (response.body.length > 1) {
             const json = JSON.parse(response.body);
             if(json.status && json.data.status==='success'){
-                let order_id = "";
-                if(json.data.reference.startsWith("wallet")){
+                let order_id = '';
+                if(json.data.reference.startsWith('wallet')){
                     order_id = json.data.reference;
                 } else {
-                    const idParts = json.data.reference.split("-");
+                    const idParts = json.data.reference.split('-');
                     for(let i = 0; i<idParts.length - 1; i++){
-                        order_id = order_id + idParts[i] + (i<(idParts.length-2)? "-":"");
+                        order_id = order_id + idParts[i] + (i<(idParts.length-2)? '-':'');
                     }
                 }
                 const transaction_id = req.query.trxref;
@@ -96,7 +96,7 @@ module.exports.process_checkout = async function (req, res) {
                       UpdateBooking(bookingData,order_id,transaction_id,'paystack');
                       res.redirect(`/success?order_id=${order_id}&amount=${amount}&transaction_id=${transaction_id}`);
                   }else{
-                    if(order_id.startsWith("wallet")){
+                    if(order_id.startsWith('wallet')){
                     addToWallet(order_id.substr(7,order_id.length - 12), amount, order_id, transaction_id);
                     res.redirect(`/success?order_id=${order_id}&amount=${amount}&transaction_id=${transaction_id}`);
                     }else{

@@ -11,17 +11,17 @@ module.exports.render_checkout = async function (request, response) {
     const private_key = config.private_key;
 
     const refr = request.get('Referrer');
-    const server_url = refr ? ((refr.includes('bookings') || refr.includes('addbookings') || refr.includes('userwallet'))? refr.substring(0, refr.length - refr.split("/")[refr.split("/").length - 1].length) : refr) : request.protocol + "://" + request.get('host') + "/";
+    const server_url = refr ? ((refr.includes('bookings') || refr.includes('addbookings') || refr.includes('userwallet'))? refr.substring(0, refr.length - refr.split('/')[refr.split('/').length - 1].length) : refr) : request.protocol + '://' + request.get('host') + '/';
 
     let json_string = {
-        "public_key":public_key,
-        "version":"3",
-        "action":"pay",
-        "amount":request.body.amount,
-        "currency":request.body.currency,
-        "description":"Payment Desription",
-        "order_id": request.body.order_id,
-        "server_url":server_url
+        'public_key':public_key,
+        'version':'3',
+        'action':'pay',
+        'amount':request.body.amount,
+        'currency':request.body.currency,
+        'description':'Payment Desription',
+        'order_id': request.body.order_id,
+        'server_url':server_url
     };
     
     let base64data =Buffer.from(JSON.stringify(json_string)).toString('base64');
@@ -42,10 +42,10 @@ module.exports.process_checkout = async function (request, response) {
     
     var LiqPay = require('liqpay');
     var liqpay = new LiqPay(public_key, private_key);
-    liqpay.api("request", {
-        "action"   : "status",
-        "version"  : "3",
-        "order_id" : request.query.order_id
+    liqpay.api('request', {
+        'action'   : 'status',
+        'version'  : '3',
+        'order_id' : request.query.order_id
     }).then((json)=>{
         if(json && json.status === 'success'){
             const order_id = request.query.order_id;
@@ -57,7 +57,7 @@ module.exports.process_checkout = async function (request, response) {
                   UpdateBooking(bookingData,order_id,transaction_id,'liqpay');
                   response.redirect(`/success?order_id=${order_id}&amount=${amount}&transaction_id=${transaction_id}`);
               }else{
-                  if(order_id.startsWith("wallet")){
+                  if(order_id.startsWith('wallet')){
                         addToWallet(order_id.substr(7,order_id.length - 12), amount, order_id, transaction_id);
                       response.redirect(`/success?order_id=${order_id}&amount=${amount}&transaction_id=${transaction_id}`);
                   }else{

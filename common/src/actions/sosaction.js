@@ -5,7 +5,6 @@ import {
     EDIT_SOS
   } from "../store/types";
   import { firebase } from '../config/configureFirebase';
-  import { onValue, push, set } from "firebase/database";
 
   export const fetchSos = () => (dispatch) => {
   

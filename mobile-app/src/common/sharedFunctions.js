@@ -2,7 +2,7 @@ import { React } from 'react';
 import { View, Text, TouchableOpacity, Image, Dimensions  } from 'react-native';
 import { colors } from './theme';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
-import i18n from 'i18n-js';
+import i18n from '../i18n';
 import { api } from 'common';
 import TaxiModal from '../components/TaxiModal';
 var { height, width } = Dimensions.get('window');
@@ -233,6 +233,8 @@ export const prepareEstimateObject =  async (tripdata, instructionData) => {
     const {
         getDirectionsApi
     } = api;
+    // Log de entrada
+    console.log('prepareEstimateObject tripdata:', JSON.stringify(tripdata));
     try {
         const startLoc = tripdata.pickup.lat + ',' + tripdata.pickup.lng;
         const destLoc = tripdata.drop.lat + ',' + tripdata.drop.lng;
@@ -252,15 +254,26 @@ export const prepareEstimateObject =  async (tripdata, instructionData) => {
         } else {
             routeDetails = await getDirectionsApi(startLoc, destLoc, null);
         }
+        // Adicionar log detalhado do routeDetails para inspecionar campos de pedágio
+        console.log('prepareEstimateObject - routeDetails:', JSON.stringify(routeDetails, null, 2));
+
+        // Se vier duration_in_traffic, sobrescreve o time_in_secs
+        if (routeDetails.duration_in_traffic) {
+            routeDetails.time_in_secs = routeDetails.duration_in_traffic;
+        }
+
         const estimateObject = {
             pickup: { coords: { lat: tripdata.pickup.lat, lng: tripdata.pickup.lng }, description: tripdata.pickup.add },
             drop: { coords: { lat: tripdata.drop.lat, lng: tripdata.drop.lng }, description: tripdata.drop.add, waypointsStr: waypoints != '' ? waypoints : null, waypoints: waypoints != '' ? tripdata.drop.waypoints : null },
             carDetails: tripdata.carType,
             routeDetails: routeDetails
         };
+        // Log de saída
+        console.log('prepareEstimateObject retorno:', JSON.stringify(estimateObject));
         return { estimateObject };
-    } catch (err) {
-        return { error: true, msg : t('not_available')}
+    } catch (e) {
+        console.log('prepareEstimateObject erro:', e);
+        return { error: e };
     }
 }
 
@@ -291,4 +304,43 @@ export const RateView = (props) => {
             }
         </View>
     )
+}
+
+// Função de cálculo de tarifa (FareCalculator) para uso no app mobile
+export const FareCalculator = (distance, time, rateDetails, instructionData, decimal, routePoints, vehicleType = 'car', externalTollFee = null) => {  
+    console.log('[FareCalculator] rateDetails recebido:', rateDetails);
+    console.log('[FareCalculator] rateDetails.base_fare:', rateDetails?.base_fare);
+    
+    let baseCalculated =  (parseFloat(rateDetails?.rate_per_unit_distance || 0) * parseFloat(distance || 0)) + (parseFloat(rateDetails?.rate_per_hour || 0) * (parseFloat(time || 0) / 3600));
+    if(rateDetails?.base_fare && rateDetails.base_fare > 0){
+        baseCalculated = baseCalculated + rateDetails.base_fare;
+    }
+    if(instructionData && instructionData.parcelTypeSelected){
+        baseCalculated = baseCalculated + instructionData.parcelTypeSelected.amount;
+    }
+    if(instructionData && instructionData.optionSelected){
+        baseCalculated = baseCalculated + instructionData.optionSelected.amount;
+    }
+    let total = baseCalculated > parseFloat(rateDetails?.min_fare || 0) ? baseCalculated : parseFloat(rateDetails?.min_fare || 0);
+    
+    // Adiciona o valor do pedágio ao total
+    if (externalTollFee !== null && !isNaN(externalTollFee)) {
+        total += parseFloat(externalTollFee);
+        console.log('Valor do pedágio adicionado ao total:', externalTollFee);
+    }
+    
+    let convenienceFee = 0;
+    if(rateDetails?.convenience_fee_type && rateDetails.convenience_fee_type == 'flat'){
+        convenienceFee = rateDetails?.convenience_fees || 0;
+    }else{
+        convenienceFee = (total*parseFloat(rateDetails?.convenience_fees || 0)/100);
+    }
+    let grand = total + convenienceFee;
+
+    return {
+        totalCost: parseFloat(total.toFixed(decimal)),
+        grandTotal: parseFloat(grand.toFixed(decimal)),
+        convenience_fees: parseFloat(convenienceFee.toFixed(decimal)),
+        tollFee: externalTollFee !== null ? parseFloat(externalTollFee.toFixed(decimal)) : 0
+    }
 }

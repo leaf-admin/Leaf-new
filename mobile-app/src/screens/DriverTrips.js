@@ -3,7 +3,7 @@ import { Text, View, StyleSheet, Dimensions, FlatList, Modal, TouchableHighlight
 import { Button, Icon } from 'react-native-elements';
 import MapView, { Polyline, PROVIDER_GOOGLE, Marker } from 'react-native-maps';
 import { colors } from '../common/theme';
-import i18n from 'i18n-js';
+import i18n from '../i18n';
 import { useDispatch, useSelector } from 'react-redux';
 import { api } from 'common';
 import { Alert } from 'react-native';
@@ -31,7 +31,7 @@ export default function DriverTrips(props) {
     } = api;
     const dispatch = useDispatch();
     const tasks = useSelector(state => state.taskdata.tasks);
-    const settings = useSelector(state => state.settingsdata.settings);
+    const settings = useSelector(state => state.settingsdata.settings) || {};
     const auth = useSelector(state => state.auth);
     const bookinglistdata = useSelector(state => state.bookinglistdata);
     const [modalVisible, setModalVisible] = useState(false);
@@ -93,13 +93,12 @@ export default function DriverTrips(props) {
                             mnTrans = mnTrans + parseFloat(driver_share);
                         }
                         totTrans = totTrans + parseFloat(driver_share);
-
                     }
                 }
             }
-            setTotalEarning(totTrans.toFixed(settings.decimal));
-            setToday(tdTrans.toFixed(settings.decimal));
-            setThisMonth(mnTrans.toFixed(settings.decimal));
+            setTotalEarning(totTrans.toFixed(settings?.decimal || 2));
+            setToday(tdTrans.toFixed(settings?.decimal || 2));
+            setThisMonth(mnTrans.toFixed(settings?.decimal || 2));
             setBookingCount(count);
             setActiveBookings(
                 bookinglistdata.bookings.filter(booking =>
@@ -119,31 +118,31 @@ export default function DriverTrips(props) {
 
     const onPressAccept = (item, price) => {
         let wallet_balance = parseFloat(auth.profile.walletBalance);
-        if ((settings && settings.imageIdApproval && auth.profile.verifyId && auth.profile.verifyIdImage) || (settings && !settings.imageIdApproval)) {
-            if (!settings.negativeBalance && !settings.disable_cash && (wallet_balance <= 0 || (wallet_balance > 0 && wallet_balance < item.convenience_fees)) && item.payment_mode === 'cash') {
+        if ((settings?.imageIdApproval && auth.profile.verifyId && auth.profile.verifyIdImage) || (!settings?.imageIdApproval)) {
+            if (!settings?.negativeBalance && !settings?.disable_cash && (wallet_balance <= 0 || (wallet_balance > 0 && wallet_balance < item.convenience_fees)) && item.payment_mode === 'cash') {
                 Alert.alert(
                     t('alert'),
                     t('wallet_balance_low')
                 );
-            } else if (settings.negativeBalance && settings.driverThreshold && settings.driverThreshold >= wallet_balance) {
+            } else if (settings?.negativeBalance && settings?.driverThreshold && settings?.driverThreshold >= wallet_balance) {
                 Alert.alert(
                     t('alert'),
                     t('wallet_balance_threshold_reached')
                 );
             } else if (appConsts.acceptWithAmount || item.deliveryWithBid) {
-                if (item && item.customer_offer && !settings.coustomerBidPrice && !parseFloat(price)) {
+                if (item && item.customer_offer && !settings?.coustomerBidPrice && !parseFloat(price)) {
                     price = item.customer_offer;
                 }
                 if (parseFloat(price) > 0) {
                     const profile = auth.profile;
                     let convenience_fees = item.commission_type == 'flat' ? parseFloat(item.commission_rate) : (parseFloat(price) * parseFloat(item.commission_rate) / 100);
                     let fleetCommissione_fees = profile.fleetadmin ? ((parseFloat(price) - parseFloat(convenience_fees)) * parseFloat(item.fleet_admin_comission) / 100).toFixed(2) : 0;
-                    if (wallet_balance < convenience_fees && !settings.negativeBalance) {
+                    if (wallet_balance < convenience_fees && !settings?.negativeBalance) {
                         Alert.alert(
                             t('alert'),
                             t('wallet_balance_low')
                         );
-                    } else if (settings.negativeBalance && settings.driverThreshold && settings.driverThreshold >= wallet_balance) {
+                    } else if (settings?.negativeBalance && settings?.driverThreshold && settings?.driverThreshold >= wallet_balance) {
                         Alert.alert(
                             t('alert'),
                             t('wallet_balance_threshold_reached')
@@ -216,7 +215,7 @@ export default function DriverTrips(props) {
     };
 
     const onChangeFunction = () => {
-        if (auth.profile.queue) {
+        if (auth.profile && auth.profile.queue) {
             Alert.alert(t('alert'), t('active_booking_right_now'));
         } else {
             if (gps.error) {
@@ -226,20 +225,20 @@ export default function DriverTrips(props) {
                 if (res === true) dispatch(fetchTasks());
                 const isDriverActive = auth.profile.driverActiveStatus;
                 const action = isDriverActive ? 'off' : 'on';
-                if (action === 'on' && settings.license_image_required && !auth.profile.licenseImage) {
+                if (action === 'on' && settings && settings.license_image_required && !auth.profile.licenseImage) {
                     Alert.alert(t('alert'), t('upload_driving_license'));
                     return;
                 }
-                if (action === 'on' && settings.term_required && !auth.profile.term) {
+                if (action === 'on' && settings && settings.term_required && !auth.profile.term) {
                     Alert.alert(t('alert'), t('term_condition'));
                     return;
                 }
-                if (action === 'on' && settings.imageIdApproval && !auth.profile.verifyIdImage) {
+                if (action === 'on' && settings && settings.imageIdApproval && !auth.profile.verifyIdImage) {
                     Alert.alert(t('alert'), t('upload_id_details'));
                     return;
                 }
                 if (action === 'on') {
-                    if (settings.carType_required) {
+                    if (settings && settings.carType_required) {
                         if (!auth.profile.carType) {
                             Alert.alert(t('alert'), t("no_car_assign_text"));
                             return;
@@ -253,7 +252,7 @@ export default function DriverTrips(props) {
                             return;
                         }
                     } else {
-                        if (settings.driver_approval && !auth.profile.approved) {
+                        if (settings && settings.driver_approval && !auth.profile.approved) {
                             Alert.alert(t('alert'), t("admin_contact"));
                             return;
                         }
@@ -360,6 +359,14 @@ export default function DriverTrips(props) {
     const windoWidth = Dimensions.get("window").width
     const windoHight = Dimensions.get("window").height
    
+    // Adicionar verificações de segurança
+    const isProfileApproved = auth && auth.profile && auth.profile.approved === true;
+    const hasCarType = auth && auth.profile && auth.profile.carType;
+    const isCarApproved = auth && auth.profile && auth.profile.carApproved;
+    const hasLicenseImage = auth && auth.profile && auth.profile.licenseImage;
+    const hasVerifyIdImage = auth && auth.profile && auth.profile.verifyIdImage;
+    const hasTerm = auth && auth.profile && auth.profile.term;
+   
     return (
         <View style={styles.mainViewStyle}>
             <KeyboardAvoidingView behavior={Platform.OS == "ios" ? "padding" : (__DEV__ ? null : "padding")}>
@@ -408,11 +415,11 @@ export default function DriverTrips(props) {
                                         <Text style={{ fontFamily: fonts.Regular }}>{t('loading')}</Text>
                                     </View>
                             }
-                            {gps.error || (!auth.profile.carType && settings.carType_required) || (!auth.profile.carApproved && settings.carType_required) || (!auth.profile.licenseImage && settings.license_image_required) || (!auth.profile.approved && settings.driver_approval) || !checks.driverActiveStatus || (settings && settings.imageIdApproval && !auth.profile.verifyIdImage) || (!auth.profile.term && settings.term_required) ?
+                            {gps.error || (!hasCarType && settings && settings.carType_required) || (!isCarApproved && settings && settings.carType_required) || (!hasLicenseImage && settings && settings.license_image_required) || (!isProfileApproved && settings && settings.driver_approval) || !checks.driverActiveStatus || (settings && settings.imageIdApproval && !hasVerifyIdImage) || (!hasTerm && settings && settings.term_required) ?
                                 <View style={{
                                     top: 0, left: 0, position: 'absolute', width: width - 20, margin: 10, borderRadius: 8, flexDirection: 'column', alignItems: 'center', backgroundColor: colors.new,
                                     shadowColor: colors.BLACK, shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.75, shadowRadius: 4, elevation: 5,
-                                    minHeight: 10 + (gps.error ? 70 : 0) + (!checks.driverActiveStatus ? 70 : 0) + (!auth.profile.carType && settings.carType_required ? 70 : 0) + (!auth.profile.carApproved && settings.carType_required ? 70 : 0) + (!auth.profile.approved && settings.driver_approval ? 70 : 0) + (!auth.profile.licenseImage && settings.license_image_required ? 70 : 0) + (settings && settings.imageIdApproval && !auth.profile.verifyIdImage ? 70 : 0) + (!auth.profile.term && settings.term_required ? 70 : 0)
+                                    minHeight: 10 + (gps.error ? 70 : 0) + (!checks.driverActiveStatus ? 70 : 0) + (!hasCarType && settings && settings.carType_required ? 70 : 0) + (!isCarApproved && settings && settings.carType_required ? 70 : 0) + (!isProfileApproved && settings && settings.driver_approval ? 70 : 0) + (!hasLicenseImage && settings && settings.license_image_required ? 70 : 0) + (settings && settings.imageIdApproval && !hasVerifyIdImage ? 70 : 0) + (!hasTerm && settings && settings.term_required ? 70 : 0)
                                 }}>
                                     {gps.error ?
                                         <View style={[styles.alrt, { flexDirection: isRTL ? 'row-reverse' : 'row', }]}>
@@ -423,7 +430,7 @@ export default function DriverTrips(props) {
                                             <Button onPress={changePermission} title={t('fix').toUpperCase()} titleStyle={styles.checkButtonTitle} buttonStyle={styles.checkButtonStyle} />
                                         </View>
                                         : null}
-                                    {!auth.profile.carType && settings.carType_required ?
+                                    {!hasCarType && settings && settings.carType_required ?
                                         <View style={[styles.alrt, { flexDirection: isRTL ? 'row-reverse' : 'row' }]}>
                                             <View style={[styles.alrt1, { flexDirection: isRTL ? 'row-reverse' : 'row' }]}>
                                                 <Icon name="alert-circle" type="ionicon" color={colors.RED} size={18} />
@@ -433,7 +440,7 @@ export default function DriverTrips(props) {
                                                 title={t('cars')} titleStyle={styles.checkButtonTitle} buttonStyle={styles.checkButtonStyle} />
                                         </View>
                                         : null}
-                                    {!auth.profile.carApproved && settings.carType_required ?
+                                    {!isCarApproved && settings && settings.carType_required ?
                                         <View style={[styles.alrt, { flexDirection: isRTL ? 'row-reverse' : 'row' }]}>
                                             <View style={[styles.alrt1, { flexDirection: isRTL ? 'row-reverse' : 'row' }]}>
                                                 <Icon name="alert-circle" type="ionicon" color={colors.RED} size={16} />
@@ -441,7 +448,7 @@ export default function DriverTrips(props) {
                                             </View>
                                         </View>
                                         : null}
-                                    {!auth.profile.licenseImage && settings.license_image_required ?
+                                    {!hasLicenseImage && settings && settings.license_image_required ?
                                         <View style={[styles.alrt, { flexDirection: isRTL ? 'row-reverse' : 'row' }]}>
                                             <View style={[styles.alrt1, { flexDirection: isRTL ? 'row-reverse' : 'row' }]}>
                                                 <Icon name="alert-circle" type="ionicon" color={colors.RED} size={16} />
@@ -450,7 +457,7 @@ export default function DriverTrips(props) {
                                             <Button onPress={navEditUser} title={t('profile')} titleStyle={styles.checkButtonTitle} buttonStyle={styles.checkButtonStyle} />
                                         </View>
                                         : null}
-                                    {!auth.profile.approved && settings.driver_approval ?
+                                    {!isProfileApproved && settings && settings.driver_approval ?
                                         <View style={[styles.alrt, { flexDirection: isRTL ? 'row-reverse' : 'row' }]}>
                                             <View style={[styles.alrt1, { flexDirection: isRTL ? 'row-reverse' : 'row', width: "100%" }]}>
                                                 <Icon name="alert-circle" type="ionicon" color={colors.RED} size={18} />
@@ -467,7 +474,7 @@ export default function DriverTrips(props) {
                                             <Button onPress={onChangeFunction} title={t('make_active').toUpperCase()} titleStyle={styles.checkButtonTitle} buttonStyle={styles.checkButtonStyle} />
                                         </View>
                                         : null}
-                                    {settings && settings.imageIdApproval && !auth.profile.verifyIdImage ?
+                                    {settings && settings.imageIdApproval && !hasVerifyIdImage ?
                                         <View style={[styles.alrt, { flexDirection: isRTL ? 'row-reverse' : 'row' }]}>
                                             <View style={[styles.alrt1, { flexDirection: isRTL ? 'row-reverse' : 'row', padding: 2 }]}>
                                                 <Icon name="alert-circle" type="ionicon" color={colors.RED} size={18} />
@@ -476,7 +483,7 @@ export default function DriverTrips(props) {
                                             <Button onPress={navEditUser} title={t('profile')} titleStyle={styles.checkButtonTitle} buttonStyle={[styles.checkButtonStyle, { width: 90 }]} />
                                         </View>
                                         : null}
-                                    {!auth.profile.term && settings.term_required ?
+                                    {!hasTerm && settings && settings.term_required ?
                                         <View style={[styles.alrt, { flexDirection: isRTL ? 'row-reverse' : 'row' }]}>
                                             <TouchableOpacity onPress={onTermLink} style={[styles.alrt1, { flexDirection: isRTL ? 'row-reverse' : 'row', width: width - 180, height: 50 }]}>
                                                 <Icon name="document-text" type="ionicon" color={colors.RED} size={18} />

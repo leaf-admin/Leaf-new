@@ -9,7 +9,7 @@ import {
   Keyboard
 } from "react-native";
 import { colors } from "../common/theme";
-import i18n from 'i18n-js';
+import i18n from '../i18n';
 const { height, width } = Dimensions.get('window');
 import { useSelector, useDispatch } from 'react-redux';
 import { api } from 'common';

@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { View, Text, FlatList, StyleSheet, Dimensions, Animated } from 'react-native';
 import { colors } from '../common/theme';
-import i18n from 'i18n-js';
+import i18n from '../i18n';
 import { useSelector } from 'react-redux';
 import SegmentedControlTab from 'react-native-segmented-control-tab';
 import { MAIN_COLOR } from '../common/sharedFunctions';

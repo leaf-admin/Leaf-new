@@ -7,7 +7,7 @@ import {
 } from 'react-native';
 import { TouchableOpacity as OldTouch } from 'react-native';
 import { colors } from '../common/theme';
-import i18n from 'i18n-js';
+import i18n from '../i18n';
 import RadioForm, { RadioButton, RadioButtonInput, RadioButtonLabel } from 'react-native-simple-radio-button';
 import { SECONDORY_COLOR, MAIN_COLOR } from '../common/sharedFunctions';
 import { fonts } from '../common/font';

@@ -12,7 +12,7 @@ module.exports.render_checkout = async function(request, response){
     const stripe_public_key = config.stripe_public_key;
 
     const refr = request.get('Referrer');
-    const server_url = refr ? ((refr.includes('bookings') || refr.includes('addbookings') || refr.includes('userwallet'))? refr.substring(0, refr.length - refr.split("/")[refr.split("/").length - 1].length) : refr) : request.protocol + "://" + request.get('host') + "/";
+    const server_url = refr ? ((refr.includes('bookings') || refr.includes('addbookings') || refr.includes('userwallet'))? refr.substring(0, refr.length - refr.split('/')[refr.split('/').length - 1].length) : refr) : request.protocol + '://' + request.get('host') + '/';
 
     var order_id = request.body.order_id;
     var amount = request.body.amount;
@@ -43,13 +43,13 @@ module.exports.render_checkout = async function(request, response){
         session_data,
         (err, session) => {
             if (err) {
-                response.send({ "error": err });
+                response.send({ 'error': err });
             } else if (session) {    
                 response.send(
                     templateLib.getTemplate(stripe_public_key, session.id)
                 );               
             } else {
-                response.send({ "error": "Some other problem" })
+                response.send({ 'error': 'Some other problem' })
             }
         }
     );
@@ -75,7 +75,7 @@ module.exports.process_checkout = async function(request, response){
                       UpdateBooking(bookingData,order_id,transaction_id,'stripe');
                       response.redirect(`/success?order_id=${order_id}&amount=${amount}&transaction_id=${transaction_id}`);
                   }else{
-                      if(order_id.startsWith("wallet")){
+                      if(order_id.startsWith('wallet')){
                             addToWallet(order_id.substr(7,order_id.length - 12), amount, order_id, transaction_id);  
                           response.redirect(`/success?order_id=${order_id}&amount=${amount}&transaction_id=${transaction_id}`);
                       }else{

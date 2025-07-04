@@ -5,7 +5,6 @@ import {
     EDIT_SMSCONFIG
   } from "../store/types";
   import { firebase } from '../config/configureFirebase';
-  import { onValue, set } from "firebase/database";
 
   export const fetchSMSConfig = () => (dispatch) => {
 

@@ -1,6 +1,7 @@
 export const fonts={
-    Bold:'Roboto-Bold',
-    Regular:'Roboto-Regular',
-    Medium:'Roboto-Medium',
-    Light:'Roboto-Light'
+    Bold:'Poppins-Bold',
+    Regular:'Poppins-Regular',
+    Medium:'Poppins-Medium',
+    Light:'Poppins-Light',
+    SemiBold:'Poppins-SemiBold'
 }

@@ -12,13 +12,14 @@ import {
     Platform,
     Share,
     TextInput,
-    KeyboardAvoidingView
+    KeyboardAvoidingView,
+    StatusBar
 } from 'react-native';
-import { Icon, Input } from 'react-native-elements'
+import { Icon } from 'react-native-elements'
 import ActionSheet from "react-native-actions-sheet";
 import { colors } from '../common/theme';
 import * as ImagePicker from 'expo-image-picker';
-import i18n from 'i18n-js';
+import i18n from '../i18n';
 var { width, height } = Dimensions.get('window');
 import { useSelector, useDispatch } from 'react-redux';
 import { api, FirebaseContext } from 'common';
@@ -27,16 +28,20 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import RNPickerSelect from '../components/RNPickerSelect';
 import moment from 'moment/min/moment-with-locales';
 import { MaterialIcons, Ionicons, Entypo, MaterialCommunityIcons, Feather, AntDesign } from '@expo/vector-icons';
-import { MAIN_COLOR } from '../common/sharedFunctions';
+import { MAIN_COLOR, SECONDORY_COLOR } from '../common/sharedFunctions';
 import Dialog from "react-native-dialog";
 import { FontAwesome5 } from '@expo/vector-icons';
 import rnauth from '@react-native-firebase/auth';
 import { fonts } from '../common/font';
 import { getLangKey } from 'common/src/other/getLangKey';
+import { useTheme } from '@react-navigation/native';
+import { updateUserProfile } from 'common/src/actions/authactions';
 
 export default function ProfileScreen(props) {
     const { authRef, mobileAuthCredential, updatePhoneNumber } = useContext(FirebaseContext);
     const { t } = i18n;
+    const theme = useTheme();
+    const dispatch = useDispatch();
     const [isRTL, setIsRTL] = useState();
     const {
         updateProfileImage,
@@ -48,7 +53,6 @@ export default function ProfileScreen(props) {
         updateAuthMobile,
         countries
     } = api;
-    const dispatch = useDispatch();
     const auth = useSelector(state => state.auth);
     const settings = useSelector(state => state.settingsdata.settings);
     const [profileData, setProfileData] = useState(null);
@@ -61,7 +65,7 @@ export default function ProfileScreen(props) {
     const [countrycodeFocus, setCountryCodeFocus] = useState(false)
     const [countryCode, setCountryCode] = useState();
     const [userMobile, setUserMobile] = useState('');
-
+    const [isDarkMode, setIsDarkMode] = useState(theme.dark);
     const fromPage = props.route.params && props.route.params.fromPage ? props.route.params.fromPage : null;
 
     const formatCountries = useMemo(() => {
@@ -381,14 +385,8 @@ export default function ProfileScreen(props) {
                     completeSubmit();
                 } else {
                     setOtp('');
-                    setUserMobile("")
-                    setLoading(false);
-                    setEmailLoading(false)
-                    if (res.error === 'Error updating user') {
-                        Alert.alert(t('alert'), t('user_exists'));
-                    } else {
-                        Alert.alert(t('alert'), t('otp_validate_error'));
-                    }
+                    setOtpCalled(true);
+                    Alert.alert(t('alert'), t('otp_validate_error'));
                 }
             } else {
                 const credential = await mobileAuthCredential(
@@ -450,630 +448,269 @@ export default function ProfileScreen(props) {
         });
     }, [props.navigation]);
 
+    const handleEditProfile = () => {
+        props.navigation.navigate('editUser', { fromPage: 'Profile' });
+    }
+
+    const handleVerifyId = () => {
+        if (settings && settings.imageIdApproval) {
+            props.navigation.navigate('editUser', { fromPage: 'Profile' });
+        }
+    }
+
+    const handleConvertToDriver = () => {
+        Alert.alert(
+            t('convert_to_driver'),
+            t('convert_to_driver_confirmation'),
+            [
+                {
+                    text: t('cancel'),
+                    style: 'cancel'
+                },
+                {
+                    text: t('continue'),
+                    onPress: () => {
+                        props.navigation.navigate('DriverDocuments');
+                    }
+                }
+            ]
+        );
+    };
 
     return (
-        <View style={styles.mainView}>
-            <View style={{ backgroundColor: MAIN_COLOR }}>
-                <View style={styles.vew1}>
-                    <View style={styles.imageViewStyle} >
-                        {loader ?
-                            <View style={[styles.loadingcontainer, styles.horizontal]}>
-                                <ActivityIndicator size="large" color={colors.INDICATOR_BLUE} />
-                            </View>
-                            : <TouchableOpacity onPress={showActionSheet}>
-                                <Image source={profileData && profileData.profile_image ? { uri: profileData.profile_image } : require('../../assets/images/profilePic.png')} style={{ width: 95, height: 95, alignSelf: 'center', borderRadius: 95 / 2 }} />
-                            </TouchableOpacity>
-                        }
-
-                    </View>
-                    <View style={{ flexDirection: isRTL ? 'row-reverse' : 'row', marginHorizontal: 20, paddingRight: 15, }}>
-                        {editName ?
-                            <View style={[isRTL ? { flexDirection: 'row-reverse', width: '100%' } : { flexDirection: 'row', marginLeft: 0, width: '100%', height: 50 }]}>
-                                <Input
-                                    editable={true}
-                                    underlineColorAndroid={colors.TRANSPARENT}
-                                    placeholder={t('first_name_placeholder')}
-                                    placeholderTextColor={colors.PROFILE_PLACEHOLDER_TEXT}
-                                    value={profileData && profileData.firstName ? profileData.firstName : ""}
-                                    keyboardType={'email-address'}
-                                    inputStyle={[styles.inputTextStyle, isRTL ? { textAlign: 'right', fontSize: 13, } : { textAlign: 'left', fontSize: 13 }]}
-                                    onChangeText={(text) => { setProfileData({ ...profileData, firstName: text }) }}
-                                    secureTextEntry={false}
-                                    errorStyle={styles.errorMessageStyle}
-                                    inputContainerStyle={styles.inputContainerStyle}
-                                    containerStyle={{ width: "50%" }}
-                                />
-                                <Input
-                                    editable={true}
-                                    underlineColorAndroid={colors.TRANSPARENT}
-                                    placeholder={t('last_name_placeholder')}
-                                    placeholderTextColor={colors.PROFILE_PLACEHOLDER_TEXT}
-                                    value={profileData && profileData.lastName ? profileData.lastName : ""}
-                                    keyboardType={'email-address'}
-                                    inputStyle={[styles.inputTextStyle, isRTL ? { textAlign: 'right', fontSize: 13 } : { textAlign: 'left', fontSize: 13 }]}
-                                    onChangeText={(text) => { setProfileData({ ...profileData, lastName: text }) }}
-                                    secureTextEntry={false}
-                                    errorStyle={styles.errorMessageStyle}
-                                    inputContainerStyle={styles.inputContainerStyle}
-                                    containerStyle={isRTL ? { marginLeft: 0, width: "50%" } : { marginRight: 0, width: "50%" }}
-                                />
-                            </View>
-                            :
-                            <View style={{ width: '100%' }}>
-                                {isRTL ?
-                                    <Text numberOfLines={1} style={[styles.textPropStyle, [isRTL ? { marginRight: 35 } : { marginLeft: 40 }]]} >{auth.profile && (auth.profile.firstName && auth.profile.lastName) ? auth.profile.lastName.toUpperCase() + " " + auth.profile.firstName.toUpperCase() : t('no_name')}</Text>
-                                    :
-                                    <Text numberOfLines={1} style={[styles.textPropStyle, [isRTL ? { marginRight: 35 } : { marginLeft: 40 }]]} >{auth.profile && (auth.profile.firstName && auth.profile.lastName) ? auth.profile.firstName.toUpperCase() + " " + auth.profile.lastName.toUpperCase() : t('no_name')}</Text>
-                                }
-                            </View>
-                        }
-                        {editName ?
-                            <View style={{ marginTop: -18,paddingLeft:isRTL?15:0, }}>
-                                <Entypo name="cross" size={24} color={colors.RED} onPress={() => cancle(0)} />
-                                <MaterialIcons onPress={saveName} name="check" size={24} style={{ marginTop: 10 }} color={colors.SKY} />
-                            </View>
-                            :
-                            <TouchableOpacity onPress={() => setEditName(true)}  style={[{marginLeft:isRTL?20:0}]}>
-                                <Feather name="edit-3" size={22} color={colors.CONVERTDRIVER_TEXT} style={{ marginTop: 10 }} />
-                            </TouchableOpacity>
-                        }
-                    </View>
+        <View style={[styles.container, { backgroundColor: theme.colors.background }]}>
+            <StatusBar hidden={true} />
+            
+            {/* Header */}
+            <View style={[styles.header, { backgroundColor: theme.colors.card }]}>
+                <TouchableOpacity 
+                    style={[styles.headerButton, { backgroundColor: theme.colors.card }]}
+                    onPress={onPressBack}
+                >
+                    <Icon name="arrow-back" type="material" color={theme.colors.text} size={24} />
+                </TouchableOpacity>
+                
+                <Text style={[styles.headerTitle, { color: theme.colors.text, fontFamily: fonts.Bold }]}>Perfil</Text>
+                
+                <View style={styles.headerRightContainer}>
+                    <TouchableOpacity 
+                        style={[styles.headerButton, { backgroundColor: theme.colors.card }]}
+                        onPress={() => setIsDarkMode(!isDarkMode)}
+                    >
+                        <Icon 
+                            name={isDarkMode ? "light-mode" : "dark-mode"} 
+                            type="material" 
+                            color={theme.colors.text} 
+                            size={24} 
+                        />
+                    </TouchableOpacity>
                 </View>
             </View>
 
-            <ScrollView showsVerticalScrollIndicator={false} style={styles.scrollStyle}>
-                {
-                    uploadImage()
-                }
-                <View style={styles.newViewStyle}>
-
-                    <View style={[styles.myViewStyle, { flexDirection: isRTL ? 'row-reverse' : 'row', height: editEmail ? 74 : 64 }]}>
-                        <View style={styles.iconViewStyle}>
-                            <Entypo name="email" size={25} color={colors.PROFILE_PLACEHOLDER_CONTENT} />
-                        </View>
-                        <View style={[styles.flexView1, [isRTL ? { marginRight: 15, width: width - 70 } : { width: width - 70 }]]}>
-                            <Text style={[styles.text1, isRTL ? { textAlign: 'right' } : { textAlign: 'left' }]}>{t('email_placeholder')}</Text>
-                            <View style={{ flexDirection: isRTL ? 'row-reverse' : 'row', justifyContent: 'space-between', paddingRight: 15, }}>
-                                {editEmail ?
-                                    <View style={{ width: width - 140 }}>
-                                        <TextInput
-                                            style={[styles.text2, { borderBottomColor: colors.BUTTON, borderBottomWidth: 1, height: editEmail ? 40 : null }]}
-                                            placeholder={t('email_placeholder')}
-                                            placeholderTextColor={colors.PROFILE_PLACEHOLDER_TEXT}
-                                            value={profileData && profileData.email ? profileData.email : ''}
-                                            keyboardType={'email-address'}
-                                            onChangeText={(text) => { setProfileData({ ...profileData, email: text }) }}
-                                            secureTextEntry={false}
-                                            blurOnSubmit={true}
-                                            errorStyle={styles.errorMessageStyle}
-                                            inputContainerStyle={[styles.inputContainerStyle, { height: 50 }]}
-                                            autoCapitalize='none'
-                                        />
-                                    </View>
-                                    :
-                                    <View style={{ marginTop: 1, width: width - 140, }}>
-                                        <Text style={[styles.text2, isRTL ? { textAlign: 'right' } : { textAlign: 'left' }]} numberOfLines={1}>{profileData && profileData.email ? profileData.email : t('email_placeholder')}</Text>
-                                    </View>
-                                }
-
-                                {editEmail ?
-                                    <View style={[{marginLeft:isRTL?15:0,width:'auto'}]}>
-                                        {emailLoading ?
-                                            <ActivityIndicator color={colors.BLACK} size='small' />
-                                            :
-                                            <View style={{ marginTop: -18, }}>
-                                                <Entypo name="cross" size={24} color={colors.RED} onPress={() => cancle(1)} />
-                                                <MaterialIcons onPress={() => saveProfile(1)} name="check" size={24} style={{ marginTop: 10 }} color={colors.SKY} />
-                                            </View>
-                                        }
-                                    </View>
-                                    :
-                                    <TouchableOpacity onPress={() => setEditEmail(true)} style={[{marginLeft:isRTL?20:10}]}>
-                                        <Feather name="edit-3" size={22} color={colors.CONVERTDRIVER_TEXT} />
-                                    </TouchableOpacity>
-                                }
-                            </View>
-                        </View>
-                    </View>
-
-                    <View style={[styles.myViewStyle, { flexDirection: isRTL ? 'row-reverse' : 'row', height: editMobile ? 74 : 64 }]}>
-                        <View style={[styles.iconViewStyle, { flexDirection: isRTL ? 'row-reverse' : 'row' }]}>
-                            <Icon
-                                name='phone-call'
-                                type='feather'
-                                size={25}
-                                color={colors.PROFILE_PLACEHOLDER_CONTENT}
+            <ScrollView style={styles.scrollView}>
+                {/* Profile Info Card */}
+                <View style={[styles.profileCard, { backgroundColor: theme.colors.card }]}>
+                    <View style={styles.profileHeader}>
+                        <View style={styles.avatarContainer}>
+                            <Icon 
+                                name="person" 
+                                type="material" 
+                                color={theme.colors.text} 
+                                size={40} 
                             />
-
                         </View>
-                        <View style={[styles.flexView1, { marginVertical:2 },[isRTL ? { marginRight: 15, width: width - 70 } : { width: width - 70 }]]}>
-                            
-                            <View style={{ flexDirection: isRTL ? 'row-reverse' : 'row', justifyContent: 'space-between', alignItems:"center", paddingRight: 15, marginVertical:3}}>
-                                {editMobile ?
-                                    <View style={{ width: width - 140, flexDirection: isRTL ? 'row-reverse' : 'row', alignItems:"center", justifyContent:"space-between" }}>
-
-                                        <View style={{ width: "35%", height:"100%", flexDirection: "column", justifyContent:"space-around" }}>
-                                            <Text style={[styles.text1, isRTL ? { textAlign: 'right' } : { textAlign: 'left' }, {fontSize:12}]}>{t('select_country')}</Text>
-                                            <TouchableOpacity activeOpacity={0.5} style={[styles.RnpickerBox, { flexDirection: isRTL ? 'row-reverse' : "row",               justifyContent:'space-between', }]} 
-                                                disabled={settings.AllowCountrySelection}
-                                                >
-                                                <View style={{ overflow: "hidden", height: '100%', width: "100%",}} >
-                                                    <RNPickerSelect
-                                                        numberOfLines={1}
-                                                        pickerRef={pickerRef2}
-                                                        onFocus={() => setCountryCodeFocus(!countrycodeFocus)}
-                                                        onBlur={() => setCountryCodeFocus(!countrycodeFocus)}
-                                                        key={countryCode}
-                                                        placeholder={{ label: t('select_country'), value: t('select_country') }}
-                                                        value={countryCode}
-                                                        textInputProps={{
-                                                            maxLength: 40,
-                                                            styles: {
-                                                                overflow: 'hidden',
-                                                                textOverflow: 'ellipsis',
-                                                            }
-                                                        }}
-
-                                                        useNativeAndroidPickerStyle={false}
-                                                        style={{
-                                                            inputIOS: [styles.pickerStyle, { textAlign: isRTL ? 'right' : 'left', alignSelf: isRTL ? 'flex-end' : 'flex-start' }, (countrycodeFocus === true) ? styles.pickerFocus
-                                                                : styles.pickerStyle],
-                                                            placeholder: {
-                                                                color: colors.PLACEHOLDER_COLOR
-                                                            },
-                                                            inputAndroid: [styles.pickerStyle, { textAlign: isRTL ? 'right' : 'left', alignSelf: isRTL ? 'flex-end' : 'flex-start' }, (countrycodeFocus === true) ? styles.pickerFocus
-                                                                : styles.pickerStyle]
-                                                        }}
-                                                        onTap={() => {
-                                                                if(settings){
-                                                                    if(settings.AllowCountrySelection){
-
-                                                                        pickerRef2.current.focus() 
-                                                                    }
-                                                                }    
-                                                                
-                                                                
-                                                        }}
-                                                        onValueChange={(text) => { upDateCountry(text); }}
-                                                        items={formatCountries}
-                                                        disabled={settings.AllowCountrySelection ? false : true}
-                                                        Icon={() => { return <Ionicons name="arrow-down" size={18} color={colors.CONVERTDRIVER_TEXT} style={[isRTL ? { marginLeft: -(width - 80) } : { marginRight: Platform.OS == "ios" ? -8 : 8  }, {margin:5}]} />; }}
-                                                    />
-
-                                                </View>
-                                            </TouchableOpacity>
-                                        </View>
-
-                                        <View style={{ width: "60%", height:"100%", flexDirection: "column", justifyContent:"space-around",  }}>
-                                            <Text style={[styles.text1, isRTL ? { textAlign: 'right' } : { textAlign: 'left' }, {fontSize:12}]}>{t('mobile')}</Text>
-                                            <TextInput
-                                                style={[
-                                                    styles.text2, 
-                                                    { borderBottomColor: colors.BUTTON, borderBottomWidth: 1, width:"100%" }, 
-                                                    isRTL ? { textAlign: 'right', fontSize: 16 } : { textAlign: 'left', fontSize: 16 }
-                                                ]}
-                                                placeholder={t('mobile')}
-                                                placeholderTextColor={colors.PROFILE_PLACEHOLDER_TEXT}
-                                                value={userMobile?.replace(`+${countryCode.replace(/[^0-9]/g, '')}`, '')}
-                                                keyboardType={'phone-pad'}
-                                                onChangeText={(text) => {
-                                                    let extNum = countryCode.replace(/[^0-9]/g, '');
-                                                    setUserMobile(`+${extNum}${text}`)
-                                                    setProfileData({ ...profileData, mobile: `+${extNum}${text}` });
-                                                }}
-                                                secureTextEntry={false}
-                                                errorStyle={styles.errorMessageStyle}
-                                                inputContainerStyle={[styles.inputContainerStyle, { height: 50 }]}
-                                            />
-                                        </View>
-                                    </View>
-                                    :
-                                    <View style={{ width: width - 140, marginVertical: 1 }}>
-                                        <Text style={[styles.text1, isRTL ? { textAlign: 'right' } : { textAlign: 'left' }]}>{t('mobile')}</Text>
-                                        <Text style={[styles.text2, isRTL ? { textAlign: 'right' } : { textAlign: 'left' }, {}]} >{auth?.profile?.mobile ? auth.profile.mobile : t('mobile')}</Text>
-                                    </View>
-                                }
-                                {editMobile ?
-                                    <TouchableOpacity onPress={() => saveProfile(2)} style={[{marginLeft:isRTL?15:0}]}>
-                                        {mobileLoading ?
-                                            <ActivityIndicator color={colors.BLACK} size='small' />
-                                            :
-                                            <View style={{  }}>
-                                                <Entypo name="cross" size={24} color={colors.RED} onPress={() => cancle(2)} />
-                                                <MaterialIcons onPress={() => saveProfile(2)} name="check" size={24} style={{ marginTop: 10 }} color={colors.SKY} />
-                                            </View>
-                                        }
-                                    </TouchableOpacity>
-                                    :
-                                    <TouchableOpacity onPress={() => setEditMobile(true)}  style={[{marginLeft:isRTL?20:0}]}>
-                                        <Feather name="edit-3" size={22} color={colors.CONVERTDRIVER_TEXT} />
-                                    </TouchableOpacity>
-                                }
-                            </View>
+                        <View style={styles.profileInfo}>
+                            <Text style={[styles.profileName, { color: theme.colors.text, fontFamily: fonts.Bold }]}>
+                                {auth.profile.firstName} {auth.profile.lastName}
+                            </Text>
+                            <Text style={[styles.profileEmail, { color: theme.colors.text, fontFamily: fonts.Regular }]}>
+                                {auth.profile.email}
+                            </Text>
                         </View>
                     </View>
 
-                    {langSelection && languagedata && languagedata.langlist && languagedata.langlist.length > 1 ?
-                        <View style={[styles.myViewStyle, { flexDirection: isRTL ? 'row-reverse' : 'row' }]}>
-                            <View style={styles.iconViewStyle}>
-                                <Ionicons name="language-sharp" size={25} color={colors.SECONDARY} />
-                            </View>
-                            <View style={[styles.flexView1, { alignSelf: isRTL ? 'flex-end' : 'flex-start', }]}>
-                                <Text style={[styles.text1, [isRTL ? { textAlign: 'right', marginRight: 15 } : { textAlign: 'left', marginRight: 15 }]]}>{t('lang')}</Text>
-                                {langSelection ?
-                                    <RNPickerSelect
-                                        pickerRef={pickerRef1}
-                                        placeholder={{}}
-                                        value={langSelection}
-                                        useNativeAndroidPickerStyle={false}
-                                        style={{
-                                            inputIOS: [styles.pickerStyle, [isRTL ? { marginRight: 0, textAlign: 'right' } : { marginLeft: 15, textAlign: 'left' }]],
-                                            inputAndroid: [styles.pickerStyle1, [isRTL ? { marginRight: 0, textAlign: 'right' } : { marginLeft: 10, textAlign: 'left' }]],
-                                            placeholder: {
-                                                color: colors.SECONDARY
-                                            }
-                                        }}
-                                        onTap={() => { pickerRef1.current.focus() }}
-                                        onValueChange={
-                                            (text) => {
-                                                let defl = null;
-                                                for (const value of Object.values(languagedata.langlist)) {
-                                                    if (value.langLocale == text) {
-                                                        defl = value;
-                                                    }
-                                                }
-                                                setLangSelection(text);
-                                                i18n.locale = text;
-                                                moment.locale(defl.dateLocale);
-                                                setIsRTL(text == 'he' || text == 'ar')
-                                                AsyncStorage.setItem('lang', JSON.stringify({ langLocale: text, dateLocale: defl.dateLocale }));
-                                                dispatch(updateProfile({ lang: { langLocale: text, dateLocale: defl.dateLocale } }));
-                                            }
-                                        }
-                                        label={"Language"}
-                                        items={Object.values(languagedata.langlist).map(function (value) { return { label: value.langName, value: value.langLocale }; })}
-                                        Icon={() => { return <Ionicons name="arrow-down" size={20} color="black" style={[isRTL ? { marginLeft: -(width - 80) } : { marginRight: Platform.OS == "ios" ? -8 : 10 }]} />; }}
-                                    />
-                                    : null}
-                            </View>
-                        </View>
-                        : null}
-
-                    {profileData && profileData.referralId ?
-                        <View style={[styles.myViewStyle, { flexDirection: isRTL ? 'row-reverse' : 'row' }]}>
-                            <View style={[styles.iconViewStyle, { flexDirection: isRTL ? 'row-reverse' : 'row', }]}>
-                                <Icon
-                                    name='award'
-                                    type='feather'
-                                    color={colors.PROFILE_PLACEHOLDER_CONTENT}
-                                    size={25}
-                                />
-                            </View>
-                            <View style={[styles.flexView1, [isRTL ? { marginRight: 15 } : null]]}>
-                                <Text style={styles.text1}>{t('referralId')}</Text>
-                                <Text style={[styles.text2, isRTL ? { textAlign: 'right' } : { textAlign: 'left' }]} >{profileData.referralId}</Text>
-                            </View>
-                            <TouchableOpacity
-                                style={[isRTL ? { marginRight: 10, marginTop: 15 } : { marginLeft: 10, marginTop: 15 }]}
-                                onPress={() => {
-                                    settings.bonus > 0 ?
-                                        Share.share({
-                                            message: t('share_msg') + settings.code + ' ' + settings.bonus + ".\n" + t('code_colon') + auth.profile.referralId + "\n" + t('app_link') + (Platform.OS == "ios" ? settings.AppleStoreLink : settings.PlayStoreLink)
-                                        })
-                                        :
-                                        Share.share({
-                                            message: t('share_msg_no_bonus') + "\n" + t('app_link') + (Platform.OS == "ios" ? settings.AppleStoreLink : settings.PlayStoreLink)
-                                        })
-                                }}
-                            >
-                                <Icon
-                                    name={Platform.OS == 'android' ? 'share-social' : 'share'}
-                                    type='ionicon'
-                                    color={colors.INDICATOR_BLUE}
-                                />
-                            </TouchableOpacity>
-                        </View>
-                        : null}
-                    {profileData && profileData.usertype == 'driver' ?
-                        <View style={[styles.myViewStyle, { flexDirection: isRTL ? 'row-reverse' : 'row' }]}>
-                            <View style={[styles.iconViewStyle, { flexDirection: isRTL ? 'row-reverse' : 'row', }]}>
-                                <Ionicons name="car-sport-outline" size={25} color={colors.PROFILE_PLACEHOLDER_CONTENT} />
-                            </View>
-                            <View style={[styles.flexView1, [isRTL ? { marginRight: 15 } : null]]}>
-                                <Text style={styles.text1}>{t('car_type')}</Text>
-                                <Text style={styles.text2}>{profileData.carType && t(getLangKey(profileData.carType))}</Text>
-                            </View>
-                        </View>
-                        : null}
-                    {profileData && profileData.usertype == 'driver' ?
-                        <View style={[styles.myViewStyle, { flexDirection: isRTL ? 'row-reverse' : 'row' }]}>
-                            <View style={[styles.iconViewStyle, { flexDirection: isRTL ? 'row-reverse' : 'row', }]}>
-                                <MaterialCommunityIcons name="star-shooting-outline" size={25} color={colors.PROFILE_PLACEHOLDER_CONTENT} />
-                            </View>
-                            <View style={[styles.flexView1, [isRTL ? { marginRight: 15 } : null]]}>
-                                <Text style={[styles.text1, isRTL ? { textAlign: 'right' } : { textAlign: 'left' }]}>{t('you_rated_text')}</Text>
-                                <View style={[{ flex: 1 }, isRTL ? { alignSelf: 'flex-end', flexDirection: 'row-reverse' } : { alignSelf: 'flex-start', flexDirection: 'row' }]}>
-                                    <Text style={[styles.text2, isRTL ? { color: colors.ProfileDetails_Primary } : { left: 10, color: colors.ProfileDetails_Primary }]}>{profileData && profileData.usertype && profileData.rating ? profileData.rating : 0}</Text>
-                                    <StarRating
-                                        maxStars={5}
-                                        starSize={15}
-                                        enableHalfStar={true}
-                                        color={colors.STAR}
-                                        emptyColor={colors.STAR}
-                                        rating={profileData && profileData.usertype && profileData.rating ? parseFloat(profileData.rating) : 0}
-                                        style={[styles.contStyle, isRTL ? { marginRight: 10, transform: [{ scaleX: -1 }] } : { marginLeft: 10 }]}
-                                        onChange={() => {
-                                            //console.log('hello')
-                                        }}
-                                    />
-                                </View>
-                            </View>
-                        </View>
-                        : null}
+                    <TouchableOpacity 
+                        style={[styles.editButton, { backgroundColor: MAIN_COLOR }]}
+                        onPress={handleEditProfile}
+                    >
+                        <Icon name="edit" type="material" color="#FFFFFF" size={20} />
+                        <Text style={[styles.editButtonText, { fontFamily: fonts.Bold }]}>
+                            {t('edit_profile')}
+                        </Text>
+                    </TouchableOpacity>
                 </View>
 
-                <TouchableOpacity onPress={deleteAccount} style={styles.vew2}>
-                    {dloading ?
-                        <ActivityIndicator color={colors.WHITE} size='small' />
-                        :
-                        <Text style={[styles.emailStyle, { color: colors.WHITE, paddingHorizontal: 10 }]}>{t('delete_account_lebel')}</Text>
-                    }
-                </TouchableOpacity>
-                <Dialog.Container visible={otpCalled}>
-                    <Dialog.Description style={{ color: colors.HEADER, fontWeight: 'bold' }}>{auth.profile && profileData && (auth.profile.mobile != profileData.mobile) ? t('check_mobile') : t('check_email')}</Dialog.Description>
-                    <Dialog.Input placeholder={t('otp_here')} placeholderTextColor={colors.HEADER} keyboardType='numeric' onChangeText={(otp) => setOtp(otp)} style={{ color: colors.HEADER, textAlign: isRTL ? 'right' : 'left' }}></Dialog.Input>
-                    <Dialog.Button label={t('cancel')} onPress={handleClose} style={{ marginRight: 15, color: colors.HEADER }} />
-                    <Dialog.Button label={t('ok')} onPress={handleVerify} style={{ marginRight: 10, color: colors.SKY }} />
-                </Dialog.Container>
+                {/* Profile Details */}
+                <View style={styles.detailsContainer}>
+                    <View style={[styles.detailItem, { backgroundColor: theme.colors.card }]}>
+                        <Icon name="phone" type="material" color={theme.colors.text} size={24} />
+                        <View style={styles.detailContent}>
+                            <Text style={[styles.detailLabel, { color: theme.colors.text, fontFamily: fonts.Regular }]}>
+                                {t('phone')}
+                            </Text>
+                            <Text style={[styles.detailValue, { color: theme.colors.text, fontFamily: fonts.Bold }]}>
+                                {auth.profile.mobile || t('not_set')}
+                            </Text>
+                        </View>
+                    </View>
+
+                    {settings && settings.imageIdApproval && (
+                        <TouchableOpacity 
+                            style={[styles.detailItem, { backgroundColor: theme.colors.card }]}
+                            onPress={handleVerifyId}
+                        >
+                            <Icon 
+                                name={auth.profile.verifyId ? "verified-user" : "person-outline"} 
+                                type="material" 
+                                color={auth.profile.verifyId ? MAIN_COLOR : theme.colors.text} 
+                                size={24} 
+                            />
+                            <View style={styles.detailContent}>
+                                <Text style={[styles.detailLabel, { color: theme.colors.text, fontFamily: fonts.Regular }]}>
+                                    {t('verify_id')}
+                                </Text>
+                                <Text style={[styles.detailValue, { 
+                                    color: auth.profile.verifyId ? MAIN_COLOR : theme.colors.text,
+                                    fontFamily: fonts.Bold 
+                                }]}>
+                                    {auth.profile.verifyId ? t('verified') : t('not_verified')}
+                                </Text>
+                            </View>
+                            <Icon name="chevron-right" type="material" color={theme.colors.text} size={24} />
+                        </TouchableOpacity>
+                    )}
+                </View>
+
+                {/* Convert to Driver Button - Only show for customers */}
+                {auth.profile && auth.profile.usertype === 'customer' && (
+                    <TouchableOpacity
+                        style={styles.convertToDriverButton}
+                        onPress={handleConvertToDriver}
+                    >
+                        <Text style={styles.convertToDriverText}>
+                            {t('convert_to_driver')}
+                        </Text>
+                    </TouchableOpacity>
+                )}
             </ScrollView>
         </View>
     );
 }
 
 const styles = StyleSheet.create({
-    headerTitleStyle: {
-        color: colors.HEADER,
-        fontFamily: 'Roboto-Bold',
-        fontSize: 20
-    },
-    logo: {
+    container: {
         flex: 1,
-        position: 'absolute',
-        top: 110,
-        width: '100%',
-        justifyContent: "flex-end",
-        alignItems: 'center'
     },
-    footer: {
-        flex: 1,
-        position: 'absolute',
-        bottom: 0,
-        height: 150,
-        width: '100%',
+    header: {
         flexDirection: 'row',
-        justifyContent: 'space-around',
-        alignItems: 'center'
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        paddingHorizontal: 16,
+        paddingTop: Platform.OS === 'ios' ? 50 : 40,
+        paddingBottom: 16,
+        borderBottomWidth: 1,
+        borderBottomColor: 'rgba(0,0,0,0.1)',
     },
-    vew2: {
-        flexDirection: 'row',
+    headerButton: {
+        width: 40,
         height: 40,
-        minWidth: 150,
+        borderRadius: 20,
+        justifyContent: 'center',
+        alignItems: 'center',
+    },
+    headerTitle: {
+        fontSize: 20,
+    },
+    headerRightContainer: {
+        flexDirection: 'row',
+        alignItems: 'center',
+    },
+    scrollView: {
+        flex: 1,
+    },
+    profileCard: {
+        margin: 16,
+        padding: 20,
+        borderRadius: 12,
+        shadowColor: '#000',
+        shadowOffset: {
+            width: 0,
+            height: 2,
+        },
+        shadowOpacity: 0.1,
+        shadowRadius: 4,
+        elevation: 3,
+    },
+    profileHeader: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        marginBottom: 20,
+    },
+    avatarContainer: {
+        width: 60,
+        height: 60,
+        borderRadius: 30,
+        backgroundColor: 'rgba(0,0,0,0.1)',
+        justifyContent: 'center',
+        alignItems: 'center',
+        marginRight: 16,
+    },
+    profileInfo: {
+        flex: 1,
+    },
+    profileName: {
+        fontSize: 20,
+        marginBottom: 4,
+    },
+    profileEmail: {
+        fontSize: 14,
+        opacity: 0.7,
+    },
+    editButton: {
+        flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'center',
-        alignSelf: 'center',
-        backgroundColor: colors.LIGHT_RED,
-        borderRadius: 10,
-        marginVertical: 15
+        padding: 12,
+        borderRadius: 8,
     },
-    scrollStyle: {
-        height: height,
-        backgroundColor: colors.WHITE
-    },
-    scrollViewStyle: {
-        width: width,
-        height: 50,
-        marginVertical: 10,
-        backgroundColor: colors.BACKGROUND_PRIMARY,
-        flexDirection: 'row',
-        alignItems: 'center',
-        justifyContent: 'space-between'
-    },
-    profStyle: {
-        fontSize: 18,
-        fontWeight: 'bold',
-        color: colors.PROFILE_PLACEHOLDER_CONTENT,
-        fontFamily:fonts.Bold
-    },
-    bonusAmount: {
-        right: 20,
+    editButtonText: {
+        color: '#FFFFFF',
         fontSize: 16,
-        fontFamily:fonts.Bold
+        marginLeft: 8,
     },
-    viewStyle: {
+    detailsContainer: {
+        padding: 16,
+    },
+    detailItem: {
+        flexDirection: 'row',
         alignItems: 'center',
-        height: '15%'
+        padding: 16,
+        borderRadius: 12,
+        marginBottom: 12,
     },
-    vew1: {
-        backgroundColor: colors.WHITE,
-        width: '100%',
-        marginTop: 50,
-        borderTopLeftRadius: 40,
-        borderTopRightRadius: 40,
-        alignItems: 'center'
+    detailContent: {
+        flex: 1,
+        marginLeft: 16,
     },
-    imageViewStyle: {
-        backgroundColor: colors.WHITE,
-        shadowColor: "#000",
-        shadowOffset: {
-            width: 0,
-            height: 5,
-        },
-        shadowOpacity: 0.2,
-        shadowRadius: 3,
-        elevation: 3,
-        width: 100,
-        height: 100,
-        alignSelf: 'center',
-        borderRadius: 100 / 2,
-        marginTop: -45,
-        overflow: 'hidden',
-        justifyContent: 'center'
+    detailLabel: {
+        fontSize: 14,
+        opacity: 0.7,
+        marginBottom: 4,
     },
-    textPropStyle: {
-        fontSize: 21,
-        color: colors.BUTTON,
+    detailValue: {
+        fontSize: 16,
+    },
+    convertToDriverButton: {
+        backgroundColor: MAIN_COLOR,
+        padding: 15,
+        borderRadius: 8,
+        marginHorizontal: 20,
+        marginTop: 20,
+        alignItems: 'center',
+    },
+    convertToDriverText: {
+        color: colors.WHITE,
+        fontSize: 16,
         fontFamily: fonts.Bold,
-        textTransform: 'uppercase',
-        textAlign: 'center',
-        marginTop: 10
-    },
-    newViewStyle: {
-        flex: 1,
-        marginTop: 10,
-        marginHorizontal: 10,
-    },
-    myViewStyle: {
-        flex: 1,
-        borderBottomColor: colors.BORDER_TEXT,
-        backgroundColor: colors.WHITE,
-        shadowColor: "#000",
-        shadowOffset: {
-            width: 0,
-            height: 4,
-        },
-        shadowOpacity: 0.2,
-        shadowRadius: 3,
-        elevation: 2,
-        marginBottom: 10,
-        height: 64,
-        borderRadius: 15,
-        width: '100%',
-    },
-    iconViewStyle: {
-        alignSelf: 'center',
-        padding: 10,
-        width: 50
-    },
-    emailStyle: {
-        fontSize: 17,
-        color: colors.BLACK,
-        fontFamily:fonts.Bold,
-        textAlign: 'center',
-        marginVertical: 5
-    },
-    emailAdressStyle: {
-        fontSize: 15,
-        color: colors.PROFILE_PLACEHOLDER_CONTENT,
-        fontFamily:fonts.Regular
-    },
-    mainIconView: {
-        flex: 1,
-        left: 20,
-        marginRight: 40,
-        borderBottomColor: colors.BUTTON,
-        borderBottomWidth: 1
-    },
-    text1: {
-        fontSize: 17,
-        color: colors.PROFILE_PLACEHOLDER_CONTENT,
-        fontFamily: fonts.Bold
-    },
-    text2: {
-        fontSize: 15,
-        color: colors.PROFILE_PLACEHOLDER_CONTENT,
-        fontFamily:fonts.Regular,
-        // backgroundColor:'red',
-
-    },
-    textIconStyle: {
-        width: width,
-        height: 50,
-        backgroundColor: colors.BACKGROUND_PRIMARY,
-        flexDirection: 'row',
-        alignItems: 'center',
-        justifyContent: 'space-between'
-    },
-    textIconStyle2: {
-        width: width,
-        height: 50,
-        marginTop: 10,
-        backgroundColor: colors.BACKGROUND_PRIMARY,
-        flexDirection: 'row',
-        alignItems: 'center',
-        justifyContent: 'space-between'
-    },
-    mainView: {
-        flex: 1,
-        backgroundColor: colors.WHITE,
-    },
-    flexView1: {
-        // padding: 3,
-    },
-
-    flexView3: {
-        marginTop: 10,
-        marginBottom: 10
-    },
-    loadingcontainer: {
-        flex: 1,
-        justifyContent: 'center'
-    },
-    horizontal: {
-        flexDirection: 'row',
-        justifyContent: 'space-around',
-        padding: 10
-    },
-    contStyle: {
-        width: 90,
-    },
-    pickerStyle: {
-        color: colors.BLACK,
-        width: width - 100,
-        fontSize: 15,
-        height: 30,
-        fontWeight: 'bold',
-        padding:2
-
-    },
-    pickerStyle1: {
-        color: colors.HEADER,
-        width: width - 80,
-        fontSize: 15,
-        height: 30,
-        fontFamily:fonts.Bold
-    },
-    vew: {
-        width: '40%',
-        height: 65
-    },
-    errorMessageStyle: {
-        fontSize: 12,
-        fontFamily:fonts.Bold,
-        marginLeft: 0
-    },
-    containerStyle: {
-        flexDirection: 'column',
-
-    },
-    inputContainerStyle: {
-        width: "100%",
-    },
-    inputTextStyle: {
-        color: colors.HEADER,
-        fontSize: 13,
-        height: 32,
-        fontFamily:fonts.Regular
-    },
-    RnpickerBox: {
-        width: "100%",
-        height:"50%",
-        overflow: 'hidden',
-        flexDirection: 'row',
-        borderWidth: 1,
-        borderColor: colors.CONVERTDRIVER_TEXT,
-        borderRadius: 10,
-        alignItems: 'center',
-        marginRight:5,
-        paddingHorizontal:5
     },
 });

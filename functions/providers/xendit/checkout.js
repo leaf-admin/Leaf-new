@@ -8,27 +8,27 @@ module.exports.render_checkout = async function (request, response) {
     const config = (await admin.database().ref('payment_settings/xendit').once('value')).val();
     const secret_key = config.secret_key;
     const authToken = Buffer.from(secret_key + ':').toString('base64');
-    const allowed = ["IDR"];
-    const API_URL = "https://api.xendit.co/v2/invoices"; 
+    const allowed = ['IDR'];
+    const API_URL = 'https://api.xendit.co/v2/invoices'; 
     const refr = request.get('Referrer');
-    const server_url = refr ? ((refr.includes('bookings') || refr.includes('addbookings') || refr.includes('userwallet'))? refr.substring(0, refr.length - refr.split("/")[refr.split("/").length - 1].length) : refr) : request.protocol + "://" + request.get('host') + "/";
+    const server_url = refr ? ((refr.includes('bookings') || refr.includes('addbookings') || refr.includes('userwallet'))? refr.substring(0, refr.length - refr.split('/')[refr.split('/').length - 1].length) : refr) : request.protocol + '://' + request.get('host') + '/';
 
     const order_id = request.body.order_id;
     const data = {
-        "external_id": order_id,
-        "description": "Invoice " + "#" + order_id,
-        "amount": (parseFloat(request.body.amount)* 1000).toFixed(2),
-        "currency": allowed.includes(request.body.currency) ? request.body.currency : 'IDR',
-        "customer": {
-            "given_names": request.body.first_name,
-            "surname": request.body.last_name,
-            "email": request.body.email,
-            "mobile_number": request.body.mobile_no
+        'external_id': order_id,
+        'description': 'Invoice ' + '#' + order_id,
+        'amount': (parseFloat(request.body.amount)* 1000).toFixed(2),
+        'currency': allowed.includes(request.body.currency) ? request.body.currency : 'IDR',
+        'customer': {
+            'given_names': request.body.first_name,
+            'surname': request.body.last_name,
+            'email': request.body.email,
+            'mobile_number': request.body.mobile_no
         },
-        "customer_notification_preference": {
-            "invoice_paid": ["email", "whatsapp"]
+        'customer_notification_preference': {
+            'invoice_paid': ['email', 'whatsapp']
         },
-        "success_redirect_url": server_url + "xendit-process?order_id=" + request.body.order_id,
+        'success_redirect_url': server_url + 'xendit-process?order_id=' + request.body.order_id,
     }
     fetch(API_URL, {
         method: 'POST',
@@ -88,7 +88,7 @@ module.exports.process_checkout = async function (req, res) {
                                 res.redirect(`/success?order_id=${order_id}&amount=${amount}&transaction_id=${transaction_id}`);
                                 admin.database().ref('xendit').child(order_id).remove();
                             }else{
-                                if(order_id.startsWith("wallet")){
+                                if(order_id.startsWith('wallet')){
                                     addToWallet(order_id.substr(7,order_id.length - 12), amount, order_id, transaction_id);
                                     res.redirect(`/success?order_id=${order_id}&amount=${amount}&transaction_id=${transaction_id}`);
                                     admin.database().ref('xendit').child(order_id).remove();

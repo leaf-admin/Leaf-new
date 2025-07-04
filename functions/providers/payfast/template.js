@@ -5,7 +5,7 @@ function getTemplate(
     for (let key in myData) {
         if (Object.prototype.hasOwnProperty.call(myData, key)){
             value = myData[key];
-            if (value !== "") {
+            if (value !== '') {
                 htmlForm +=`<input name="${key}" type="hidden" value="${value.trim()}" />`;
             }
         }

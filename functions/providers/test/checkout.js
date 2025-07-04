@@ -24,7 +24,7 @@ module.exports.process_checkout = function(req, res){
             UpdateBooking(bookingData,order_id,transaction_id,'test');
             res.redirect(`/success?order_id=${order_id}&amount=${amount}&transaction_id=${transaction_id}`);
         }else{
-            if(order_id.startsWith("wallet")){
+            if(order_id.startsWith('wallet')){
                 addToWallet(order_id.substr(7,order_id.length - 12), amount, order_id, transaction_id);
                 res.redirect(`/success?order_id=${order_id}&amount=${amount}&transaction_id=${transaction_id}`);
             }else{

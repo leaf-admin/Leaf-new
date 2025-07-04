@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { View, Text, Dimensions, FlatList, StyleSheet } from 'react-native';
 import { Icon } from 'react-native-elements'
 import { colors } from '../common/theme';
-import i18n from 'i18n-js';
+import i18n from '../i18n';
 import { useSelector } from 'react-redux';
 import moment from 'moment/min/moment-with-locales';
 import SegmentedControlTab from 'react-native-segmented-control-tab';

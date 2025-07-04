@@ -1,10 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
-import { api, store } from 'common';
-import { useSelector, useDispatch } from 'react-redux';
 import * as TaskManager from 'expo-task-manager';
-import * as Location from 'expo-location';
-import { Alert, Platform } from 'react-native';
-import i18n from 'i18n-js';
+import { Alert, Platform, View, ActivityIndicator } from 'react-native';
+import i18n from './src/i18n';
 import { colors } from './src/common/theme';
 import GetPushToken from './src/components/GetPushToken';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -15,51 +12,120 @@ import {
 import * as Notifications from 'expo-notifications';
 import * as SplashScreen from 'expo-splash-screen';
 import { Audio, InterruptionModeAndroid, InterruptionModeIOS } from 'expo-av';
+import auth from '@react-native-firebase/auth';
+import { api } from 'common';
+
+// Configurar moment.js para português
+moment.locale('pt-br');
 
 const LOCATION_TASK_NAME = 'background-location-task';
 
 TaskManager.defineTask(LOCATION_TASK_NAME, ({ data: { locations }, error }) => {
   if (error) {
-    console.log(error);
     return;
   }
   if (locations.length > 0) {
     let location = locations[locations.length - 1];
     if (location.coords) {
-      store.dispatch({
-        type: 'UPDATE_GPS_LOCATION',
-        payload: {
-          lat: location.coords.latitude,
-          lng: location.coords.longitude
-        }
-      });
+      // Salvar localização no AsyncStorage em vez do Redux
+      AsyncStorage.setItem('@last_location', JSON.stringify({
+        lat: location.coords.latitude,
+        lng: location.coords.longitude
+      }));
     }
   }
 });
 
 export default function AppCommon({ children }) {
-
   const { t } = i18n;
-  const dispatch = useDispatch();
-  const gps = useSelector(state => state.gpsdata);
-  const activeBooking = useSelector(state => state.bookinglistdata.tracked);
-  const lastLocation = useSelector(state => state.locationdata.coords);
-  const auth = useSelector(state => state.auth);
-  const settings = useSelector(state => state.settingsdata.settings);
+  const [gps, setGps] = useState(null);
+  const [activeBooking, setActiveBooking] = useState(null);
+  const [lastLocation, setLastLocation] = useState(null);
+  const [settings, setSettings] = useState(null);
   const watcher = useRef();
   const locationOn = useRef(false);
-  const languagedata = useSelector(state => state.languagedata);
+  const [languagedata, setLanguagedata] = useState({ langlist: null });
   const initialFunctionsNotCalled = useRef(true);
   const authStillNotResponded = useRef(true);
   const authState = useRef('loading');
   const locationLoading = useRef(true);
   const fetchingToken = useRef(true);
   const langCalled = useRef();
-  const tasks = useSelector(state => state.taskdata.tasks);
+  const [tasks, setTasks] = useState([]);
   const [sound, setSound] = useState();
   const [playedSounds, setPlayedSounds] = useState([]);
   const [deviceId,setDeviceId] = useState();
   const [playing, setPlaying] = useState();
+  const [isAuthReady, setIsAuthReady] = useState(false);
+  const [firebaseUser, setFirebaseUser] = useState(null);
+  const [isFirebaseInitialized, setIsFirebaseInitialized] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
+
+  // Verificar inicialização do Firebase
+  useEffect(() => {
+    let isMounted = true;
+    const checkFirebaseInit = async () => {
+      try {
+        if (!auth()) {
+          if (isMounted) {
+            setTimeout(checkFirebaseInit, 100);
+          }
+          return;
+        }
+
+        if (isMounted) {
+          setIsFirebaseInitialized(true);
+          setIsLoading(false);
+        }
+      } catch (error) {
+        if (isMounted) {
+          setTimeout(checkFirebaseInit, 100);
+        }
+      }
+    };
+
+    checkFirebaseInit();
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
+  // Só iniciar o listener de auth quando o Firebase estiver inicializado
+  useEffect(() => {
+    if (!isFirebaseInitialized) return;
+
+    let isMounted = true;
+    const unsubscribe = auth().onAuthStateChanged(async (user) => {
+      if (!isMounted) return;
+      
+      setFirebaseUser(user);
+      setIsAuthReady(true);
+      
+      try {
+        // Se não tiver usuário no Firebase Auth, mas tiver UID no AsyncStorage
+        if (!user) {
+          const storedUid = await AsyncStorage.getItem('@auth_uid');
+          if (storedUid) {
+            // Usar o UID do AsyncStorage para autenticação
+            const userData = await AsyncStorage.getItem('@user_data');
+            if (userData) {
+              const parsedData = JSON.parse(userData);
+            }
+          }
+        } else {
+          if (user.uid) {
+            // Não fazer chamadas automáticas aqui
+          }
+        }
+      } catch (error) {
+      }
+    });
+
+    return () => {
+      isMounted = false;
+      unsubscribe();
+    };
+  }, [isFirebaseInitialized]);
 
   const loadSound = async () => {
     Audio.setAudioModeAsync({
@@ -94,10 +160,10 @@ export default function AppCommon({ children }) {
 
   useEffect(() => {
     if (api) {
-        dispatch(api.fetchSettings());
-        dispatch(api.fetchLanguages());
-        dispatch(api.fetchCarTypes());
-        langCalled.current = true;
+      api.fetchSettings();
+      api.fetchLanguages();
+      api.fetchCarTypes();
+      langCalled.current = true;
     }
   }, [api]);
 
@@ -111,26 +177,33 @@ export default function AppCommon({ children }) {
           defl = value;
         }
       }
-      i18n.translations = obj;
-      i18n.fallbacks = true;
-      AsyncStorage.getItem('lang', (err, result) => {
-        if (result) {
-          i18n.locale = JSON.parse(result)['langLocale'];
-          moment.locale(JSON.parse(result)['dateLocale']);
-        } else {
-          i18n.locale = defl.langLocale;
-          moment.locale(defl.dateLocale);
-        }
-      });
-      dispatch(api.fetchUser());
+      
+      // Manter português como padrão
+      i18n.locale = 'pt-BR';
+      i18n.defaultLocale = 'pt-BR';
+      moment.locale('pt-br');
     }
-  }, [languagedata.langlist,langCalled.current]);
+  }, [languagedata.langlist, langCalled.current]);
 
   useEffect(() => {
-    if (auth.profile && auth.profile.usertype && auth.profile.usertype == 'driver' && tasks && tasks.length > 0) {
+    if (languagedata.langlist && langCalled.current) {
+      api.fetchUser();
+    }
+  }, [languagedata.langlist, langCalled.current]);
+
+  // Adicione um log para o estado de autenticação
+  useEffect(() => {
+  }, [authState.current]);
+
+  // Adicione um log para as configurações
+  useEffect(() => {
+  }, [settings]);
+
+  useEffect(() => {
+    if (authState.current && authState.current.usertype && authState.current.usertype == 'driver' && tasks && tasks.length > 0) {
       notifyBooking();
     }
-  }, [auth.profile, tasks]);
+  }, [authState.current, tasks]);
 
   _onPlaybackStatusUpdate = playbackStatus => {
     if (!playbackStatus.isLoaded) {
@@ -169,15 +242,15 @@ export default function AppCommon({ children }) {
   }
 
   useEffect(() => {
-    if (gps.location && gps.location.lat && gps.location.lng) {
+    if (gps && gps.location && gps.location.lat && gps.location.lng) {
       locationLoading.current = false;
-      if (auth.profile && auth.profile.usertype && auth.profile.usertype == 'driver' ) {
+      if (authState.current && authState.current.usertype && authState.current.usertype == 'driver' ) {
         api.saveUserLocation({
           lat: gps.location.lat,
           lng: gps.location.lng
         });
       }
-      if (activeBooking && auth.profile && auth.profile.usertype && auth.profile.usertype == 'driver') {
+      if (activeBooking && authState.current && authState.current.usertype && authState.current.usertype == 'driver') {
         if (lastLocation && (activeBooking.status == 'ACCEPTED' || activeBooking.status == 'STARTED')) {
           let diff = api.GetDistance(lastLocation.lat, lastLocation.lng, gps.location.lat, gps.location.lng);
           if (diff > 0.010 && activeBooking.driverDeviceId === deviceId) {
@@ -202,7 +275,7 @@ export default function AppCommon({ children }) {
           if (diff < 0.02) {
             let bookingData = activeBooking;
             bookingData.status = 'ARRIVED';
-            store.dispatch(api.updateBooking(bookingData));
+            api.updateBooking(bookingData);
             api.saveTracking(activeBooking.id, {
               at: new Date().getTime(),
               status: 'ARRIVED',
@@ -213,13 +286,13 @@ export default function AppCommon({ children }) {
         }
       }
     }
-  }, [gps.location]);
+  }, [gps]);
 
   useEffect(() => {
-    if (auth.profile
-      && auth.profile.usertype
-      && auth.profile.usertype == 'driver'
-      && auth.profile.driverActiveStatus
+    if (authState.current
+      && authState.current.usertype
+      && authState.current.usertype == 'driver'
+      && authState.current.driverActiveStatus
     ) {
       if (!locationOn.current) {
         locationOn.current = true;
@@ -248,38 +321,35 @@ export default function AppCommon({ children }) {
         }
       }
     }
-    if (auth.profile
-      && auth.profile.usertype
-      && auth.profile.usertype == 'driver'
-      && auth.profile.driverActiveStatus == false
+    if (authState.current
+      && authState.current.usertype
+      && authState.current.usertype == 'driver'
+      && authState.current.driverActiveStatus == false
     ) {
       if (locationOn.current) {
         locationOn.current = false;
         StopBackgroundLocation();
       } else {
-        store.dispatch({
-          type: 'UPDATE_GPS_LOCATION',
-          payload: {
-            error:true
-          }
+        api.saveUserLocation({
+          error:true
         });
         locationLoading.current = false;
       }
     }
-    if (auth.profile
-      && auth.profile.usertype
-      && auth.profile.usertype == 'customer'
+    if (authState.current
+      && authState.current.usertype
+      && authState.current.usertype == 'customer'
     ) {
       if (!locationOn.current) {
         locationOn.current = true;
         GetOneTimeLocation();
       }
     }
-  }, [auth.profile]);
+  }, [authState.current]);
 
   const saveToken = async () => {
     let token = await GetPushToken();
-    if((auth.profile && auth.profile.pushToken && auth.profile.pushToken != token) || !(auth.profile && auth.profile.pushToken) ){
+    if((authState.current && authState.current.pushToken && authState.current.pushToken != token) || !(authState.current && authState.current.pushToken) ){
       api.updatePushToken(
         token ? token : 'token_error',
         Platform.OS == 'ios' ? 'IOS' : 'ANDROID'
@@ -294,30 +364,21 @@ export default function AppCommon({ children }) {
         let tempWatcher = await Location.watchPositionAsync({
           accuracy: Location.Accuracy.Balanced
         }, location => {
-          store.dispatch({
-            type: 'UPDATE_GPS_LOCATION',
-            payload: {
-              lat: location.coords.latitude,
-              lng: location.coords.longitude
-            }
+          api.saveUserLocation({
+            lat: location.coords.latitude,
+            lng: location.coords.longitude
           });
           tempWatcher.remove();
         })
       } catch (error) {
-        store.dispatch({
-          type: 'UPDATE_GPS_LOCATION',
-          payload: {
-            error:true
-          }
+        api.saveUserLocation({
+          error:true
         });
         locationLoading.current = false;
       }
     } else {
-      store.dispatch({
-        type: 'UPDATE_GPS_LOCATION',
-        payload: {
-          error:true
-        }
+      api.saveUserLocation({
+        error:true
       });
       locationLoading.current = false;
     }
@@ -328,12 +389,9 @@ export default function AppCommon({ children }) {
     let tempWatcher = await Location.watchPositionAsync({
       accuracy: Location.Accuracy.Balanced
     }, location => {
-      store.dispatch({
-        type: 'UPDATE_GPS_LOCATION',
-        payload: {
-          lat: location.coords.latitude,
-          lng: location.coords.longitude
-        }
+      api.saveUserLocation({
+        lat: location.coords.latitude,
+        lng: location.coords.longitude
       });
       tempWatcher.remove();
     })
@@ -355,11 +413,8 @@ export default function AppCommon({ children }) {
           if (__DEV__) {
             StartForegroundGeolocation();
           } else {
-            store.dispatch({
-              type: 'UPDATE_GPS_LOCATION',
-              payload: {
-                error:true
-              }
+            api.saveUserLocation({
+              error:true
             });
             locationLoading.current = false;
           }
@@ -368,21 +423,15 @@ export default function AppCommon({ children }) {
         if (__DEV__) {
           StartForegroundGeolocation();
         } else {
-          store.dispatch({
-            type: 'UPDATE_GPS_LOCATION',
-            payload: {
-              error:true
-            }
+          api.saveUserLocation({
+            error:true
           });
           locationLoading.current = false;
         }
       }
     } else {
-      store.dispatch({
-        type: 'UPDATE_GPS_LOCATION',
-        payload: {
-          error:true
-        }
+      api.saveUserLocation({
+        error:true
       });
       locationLoading.current = false;
     }
@@ -393,12 +442,9 @@ export default function AppCommon({ children }) {
       accuracy: Location.Accuracy.High,
       activityType: Location.ActivityType.AutomotiveNavigation,
     }, location => {
-      store.dispatch({
-        type: 'UPDATE_GPS_LOCATION',
-        payload: {
-          lat: location.coords.latitude,
-          lng: location.coords.longitude
-        }
+      api.saveUserLocation({
+        lat: location.coords.latitude,
+        lng: location.coords.longitude
       });
     });
   }
@@ -421,79 +467,67 @@ export default function AppCommon({ children }) {
         }
       });
     } catch (error) {
-      console.log(error);
     }
   }
 
   useEffect(() => {
-    if (auth.profile && languagedata && languagedata.langlist && settings && initialFunctionsNotCalled.current) {
+    if (authState.current && languagedata && languagedata.langlist && settings && initialFunctionsNotCalled.current) {
       authStillNotResponded.current = false;
-      if (auth.profile.usertype) {
-        authState.current= auth.profile.usertype;
-        if (auth.profile.lang) {
-          const lang = auth.profile.lang;
+      if (authState.current.usertype) {
+        authState.current = authState.current.usertype;
+        if (authState.current.lang) {
+          const lang = authState.current.lang;
           i18n.locale = lang['langLocale'];
           moment.locale(lang['dateLocale']);
         }
-        let role = auth.profile.usertype;
+        let role = authState.current.usertype;
           saveToken();
           fetchingToken.current = false;
           if (role === 'customer') {
-            dispatch(api.fetchDrivers('app'));
-            dispatch(api.fetchBookings());
-            dispatch(api.fetchCancelReasons());
-            dispatch(api.fetchPaymentMethods());
-            dispatch(api.fetchPromos());
-            dispatch(api.fetchUserNotifications());
-            dispatch(api.fetchAddresses());
-            dispatch(api.fetchWalletHistory());
-            dispatch(api.fetchComplain());
+            api.fetchDrivers('app');
             initialFunctionsNotCalled.current = false;
           } else if (role === 'driver') {
-            dispatch(api.fetchBookings());
-            dispatch(api.fetchPaymentMethods());
-            dispatch(api.fetchTasks());
-            dispatch(api.fetchUserNotifications());
-            dispatch(api.fetchCars());
-            dispatch(api.fetchWalletHistory());
-            dispatch(api.fetchPromos());
-            dispatch(api.fetchCancelReasons());
-            dispatch(api.fetchComplain());
+            api.fetchTasks();
+            api.fetchCars();
             initialFunctionsNotCalled.current = false;
           }
           else {
             Alert.alert(t('alert'), t('not_valid_user_type'));
-            dispatch(api.signOff());
+            api.signOff();
           }
       } else {
         Alert.alert(t('alert'), t('user_issue_contact_admin'));
-        dispatch(api.signOff());
+        api.signOff();
       }
     }
-  }, [auth.profile, languagedata, languagedata.langlist, settings]);
+  }, [authState.current, languagedata, languagedata.langlist, settings]);
 
 
   useEffect(() => {
-    if (api && languagedata && languagedata.langlist && auth.error && auth.error.msg && !auth.profile && settings) {
+    if (api && languagedata && languagedata.langlist && authState.current && authState.current.error && authState.current.error.flag && !authState.current && settings) {
       locationLoading.current = false;
-      authState.current= 'failed';
+      authState.current = 'failed';
       authStillNotResponded.current = false;
       initialFunctionsNotCalled.current = true;
       fetchingToken.current = false;
       StopBackgroundLocation();
-      dispatch(api.clearLoginError());
+      api.clearLoginError();
     }
-    dispatch(api.fetchusedreferral())
-  }, [auth.error, auth.error.msg, languagedata && languagedata.langlist, settings]);
-
-  if (authStillNotResponded.current || !(languagedata && languagedata.langlist) || !settings || authState.current == 'loading') {
-    return <AuthLoadingScreen />;
-  }
+    api.fetchusedreferral()
+  }, [authState.current, authState.current?.error, authState.current?.error?.flag, languagedata && languagedata.langlist, settings]);
 
   const hideSplash = async () => {
     await SplashScreen.hideAsync();
   };
   hideSplash();
+
+  if (isLoading || !isFirebaseInitialized) {
+    return (
+      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+        <ActivityIndicator size="large" color={colors.SKY} />
+      </View>
+    );
+  }
 
   return children;
 }

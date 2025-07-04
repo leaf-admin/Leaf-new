@@ -5,8 +5,8 @@ import {
     EDIT_LANGUAGE
 } from "../store/types";
 import { firebase } from '../config/configureFirebase';
-import { onValue, set, push, remove, update } from "firebase/database";
 import { getLangKey } from "../other/getLangKey";
+import { onValue, push, remove, set, update } from 'firebase/database';
 
 export const fetchLanguages = () => (dispatch) => {
 
@@ -71,6 +71,18 @@ export const convertLanguage = async (word, userLangLocale)=>{
         config,
     } = firebase;
     
+    // Fallback para config se não estiver disponível
+    const safeConfig = config || {
+        projectId: "leaf-reactnative",
+        appId: "1:106504629884:web:ada50a78fcf7bf3ea1a3f9",
+        databaseURL: "https://leaf-reactnative-default-rtdb.firebaseio.com",
+        storageBucket: "leaf-reactnative.firebasestorage.app",
+        apiKey: "AIzaSyChYseG1IcmffYHHVYT7MqtLlzfdWKE_fc",
+        authDomain: "leaf-reactnative.firebaseapp.com",
+        messagingSenderId: "106504629884",
+        measurementId: "G-22368DBCY9"
+    };
+    
     let langKey = getLangKey(word);
 
     onValue(languagesRef, async (snapshot) => {
@@ -99,7 +111,7 @@ export const convertLanguage = async (word, userLangLocale)=>{
                     if(langLocaleArr[j].langLocale === defLangLocale){
                         update(langEditRef(langLocaleArr[j].id),{[langKey]:word})
                     }else{
-                        const response = await fetch(`https://us-central1-${config.projectId}.cloudfunctions.net/gettranslation?str=${word}&from=${defLangLocale}&to=${langLocaleArr[j].langLocale}`, {
+                        const response = await fetch(`https://us-central1-${safeConfig.projectId}.cloudfunctions.net/gettranslation?str=${word}&from=${defLangLocale}&to=${langLocaleArr[j].langLocale}`, {
                             method: 'GET',
                             headers: {
                               'Content-Type': 'application/json'
@@ -119,3 +131,44 @@ export const convertLanguage = async (word, userLangLocale)=>{
     }, {onlyOnce: true});
 
 }
+
+// Função para buscar idiomas de forma síncrona
+export const getLanguages = async () => {
+    try {
+        console.log('getLanguages - Buscando idiomas...');
+        
+        const languagesRef = firebase.languagesRef;
+        const snapshot = await new Promise((resolve) => {
+            const unsubscribe = onValue(languagesRef, (snap) => {
+                unsubscribe();
+                resolve(snap);
+            });
+        });
+
+        if (snapshot.val()) {
+            const data = snapshot.val();
+            let defLang = null;
+            const arr = Object.keys(data).map(i => {
+                data[i].id = i;
+                if(data[i].default){
+                    defLang = data[i].keyValuePairs;
+                }
+                return data[i]
+            });
+            
+            const result = {
+                defaultLanguage: defLang,
+                langlist: arr
+            };
+            
+            console.log('getLanguages - Idiomas encontrados:', result);
+            return result;
+        } else {
+            console.log('getLanguages - Nenhum idioma encontrado');
+            return null;
+        }
+    } catch (error) {
+        console.warn('getLanguages - Erro ao buscar idiomas:', error);
+        return null;
+    }
+};

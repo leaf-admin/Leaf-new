@@ -6,20 +6,23 @@ import {
   } from "../store/types";
   import store from '../store/store';
   import { firebase } from '../config/configureFirebase';
-  import { onValue, remove, push, off } from "firebase/database";
   
   export const fetchAddresses = () => (dispatch) => {
-  
-    const {
-      addressEditRef
-    } = firebase;
+    const { addressEditRef } = firebase;
     dispatch({
       type: FETCH_ADDRESSES,
       payload: null
     });
     const userInfo = store.getState().auth.profile;
-    off(addressEditRef(userInfo.uid));
-    onValue(addressEditRef(userInfo.uid), snapshot => {
+    if (!userInfo || !userInfo.uid) {
+      dispatch({
+        type: FETCH_ADDRESSES_FAILED,
+        payload: 'Usuário não autenticado ou sem UID.'
+      });
+      return;
+    }
+    firebase.off(addressEditRef(userInfo.uid));
+    firebase.onValue(addressEditRef(userInfo.uid), snapshot => {
       if (snapshot.val()) {
         let data = snapshot.val();
         const arr = Object.keys(data).map(i => {
@@ -49,8 +52,8 @@ import {
       payload: { method, address }
     });
     if (method === 'Add') {
-      push(addressEditRef(uid), address);
+      firebase.push(addressEditRef(uid), address);
     } else if (method === 'Delete') {
-      remove(addressRef(uid, address.id));
+      firebase.remove(addressRef(uid, address.id));
     }
   }

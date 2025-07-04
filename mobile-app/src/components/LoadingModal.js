@@ -6,7 +6,7 @@ import {
     Image
   } from 'react-native';
 import { colors } from '../common/theme';
-import i18n from 'i18n-js';
+import i18n from '../i18n';
 import { fonts } from '../common/font';
 
 export function LoadingModal(props){

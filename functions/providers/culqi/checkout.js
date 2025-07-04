@@ -25,10 +25,10 @@ module.exports.process_checkout = async (req, res)  => {
   const SECURE_KEY = config.SECURE_KEY;
   
   var body = {
-    "amount": req.query.amount,
-    "currency_code": req.query.currency,
-    "email": req.query.email,
-    "source_id": req.query.token
+    'amount': req.query.amount,
+    'currency_code': req.query.currency,
+    'email': req.query.email,
+    'source_id': req.query.token
   }
 
   var options = {
@@ -58,7 +58,7 @@ module.exports.process_checkout = async (req, res)  => {
               UpdateBooking(bookingData,order_id,transaction_id,'calqi');
               res.redirect(`/success?order_id=${order_id}&amount=${amount}&transaction_id=${transaction_id}`);
           }else{
-              if(order_id.startsWith("wallet")){
+              if(order_id.startsWith('wallet')){
                 addToWallet(order_id.substr(7,order_id.length - 12), amount, order_id, transaction_id);
                 res.redirect(`/success?order_id=${order_id}&amount=${amount}&transaction_id=${transaction_id}`);
               }else{

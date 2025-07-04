@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
     View,
     Text,
@@ -10,11 +10,13 @@ import {
     Alert,
     TouchableOpacity,
     TextInput,
-    SafeAreaView
+    SafeAreaView,
+    Animated,
+    ActivityIndicator
 } from 'react-native';
 import { colors } from '../common/theme';
 var { height,width } = Dimensions.get('window');
-import i18n from 'i18n-js';
+import i18n from '../i18n';
 import RadioForm from 'react-native-simple-radio-button';
 import RNPickerSelect from './RNPickerSelect';
 import { useSelector,useDispatch } from 'react-redux';
@@ -88,6 +90,25 @@ export default function Registration(props) {
         
     }, [settings]);
 
+    const [snackbar, setSnackbar] = useState({ visible: false, message: '', type: 'error' });
+    const snackbarAnim = useRef(new Animated.Value(0)).current;
+
+    const showSnackbar = (message, type = 'error') => {
+        setSnackbar({ visible: true, message, type });
+        Animated.timing(snackbarAnim, {
+            toValue: 1,
+            duration: 250,
+            useNativeDriver: true,
+        }).start(() => {
+            setTimeout(() => {
+                Animated.timing(snackbarAnim, {
+                    toValue: 0,
+                    duration: 250,
+                    useNativeDriver: true,
+                }).start(() => setSnackbar({ ...snackbar, visible: false }));
+            }, 3000);
+        });
+    };
 
     const checkPasswordValidity = value => {
         if (value != confirmpassword) {
@@ -134,22 +155,19 @@ export default function Registration(props) {
                     if (mobileWithoutCountry && mobileWithoutCountry.length > 6) {
                         const userData = { ...state };
                         if (userData.usertype == 'customer') delete userData.carType;
-                        
-                            onPressRegister(userData);
-                        
+                        onPressRegister(userData);
                     } else {
-                        Alert.alert(t('alert'), t('mobile_no_blank_error'));
+                        showSnackbar(t('mobile_no_blank_error'), 'error');
                     }
                 } else {
-                    Alert.alert(t('alert'), validatePassword);
+                    showSnackbar(validatePassword, 'error');
                 }
             } else {
-                Alert.alert(t('alert'), t('proper_input_name'));
+                showSnackbar(t('proper_input_name'), 'error');
             }
         } else {
-            Alert.alert(t('alert'), t('proper_email'));
+            showSnackbar(t('proper_email'), 'error');
         }
-
     }
 
     const upDateCountry = (text) => {
@@ -162,6 +180,24 @@ export default function Registration(props) {
 
     // const lCom = { icon: 'ios-arrow-back', type: 'ionicon', color: colors.WHITE, size: 35, component: TouchableWithoutFeedback, onPress: props.onPressBack };
     // const rCom = { icon: 'ios-arrow-forward', type: 'ionicon', color: colors.WHITE, size: 35, component: TouchableWithoutFeedback, onPress: props.onPressBack };
+
+    // Funções de validação em tempo real
+    const validateEmail = (email) => {
+        const re = /^(([^<>()\[\]\\.,;:\s@"]+(\.[^<>()\[\]\\.,;:\s@"]+)*)|(".+"))@((\[[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}])|(([a-zA-Z\-0-9]+\.)+[a-zA-Z]{2,}))$/;
+        return re.test(email);
+    };
+    const validateName = (name) => /\S/.test(name) && name.length > 0;
+    const validateMobile = (mobile) => mobile && mobile.length > 6;
+    const validatePassword = (password) => !checkPasswordValidity(password);
+    const validateConfirmPassword = (password, confirm) => password === confirm && !!confirm;
+
+    const allFieldsValid =
+        validateName(state.firstName) &&
+        validateName(state.lastName) &&
+        validateEmail(state.email) &&
+        validateMobile(mobileWithoutCountry) &&
+        validatePassword(state.password) &&
+        validateConfirmPassword(state.password, confirmpassword);
 
     return (
         <View style={{ flex: 1, }}>
@@ -269,18 +305,13 @@ export default function Registration(props) {
                                                         : styles.pickerStyle]
                                                 }}
                                                 onTap={() => {
-                                                        if(settings){
-                                                            if(settings.AllowCountrySelection){
-
-                                                                pickerRef1.current.focus() 
-                                                            }
-                                                        }    
-                                                     
-                                                     
+                                                    if (settings && settings.AllowCountrySelection) {
+                                                        pickerRef1.current.focus();
+                                                    }
                                                 }}
                                                 onValueChange={(text) => { upDateCountry(text); }}
                                                 items={formatCountries}
-                                                disabled={settings.AllowCountrySelection ? false : true}
+                                                disabled={settings && settings.AllowCountrySelection ? false : true}
                                             />
 
                                         </View>
@@ -371,6 +402,30 @@ export default function Registration(props) {
                     </KeyboardAvoidingView>
                 </View>
             </SafeAreaView>
+            {/* Overlay de loading animado */}
+            {props.loading && (
+                <Animated.View style={[styles.loadingOverlay, { opacity: props.loading ? 1 : 0 }]}
+                    pointerEvents={props.loading ? 'auto' : 'none'}>
+                    <View style={styles.loadingContent}>
+                        <ActivityIndicator size="large" color="#fff" />
+                        <Text style={styles.loadingText}>Carregando...</Text>
+                    </View>
+                </Animated.View>
+            )}
+            {/* Snackbar animado */}
+            <Animated.View
+                pointerEvents={snackbar.visible ? 'auto' : 'none'}
+                style={[
+                    styles.snackbar,
+                    snackbar.type === 'error' ? styles.snackbarError : styles.snackbarSuccess,
+                    {
+                        opacity: snackbarAnim,
+                        transform: [{ translateY: snackbarAnim.interpolate({ inputRange: [0, 1], outputRange: [60, 0] }) }],
+                    },
+                ]}
+            >
+                <Text style={styles.snackbarText}>{snackbar.message}</Text>
+            </Animated.View>
         </View>
     );
 };
@@ -647,7 +702,122 @@ const styles = StyleSheet.create({
         color: colors.ProfileDetails_Text,
         fontFamily:fonts.Bold,
         fontSize: 13
-    }
+    },
+    loadingOverlay: {
+        position: 'absolute',
+        top: 0,
+        left: 0,
+        right: 0,
+        bottom: 0,
+        backgroundColor: 'rgba(0,0,0,0.45)',
+        justifyContent: 'center',
+        alignItems: 'center',
+        zIndex: 999,
+    },
+    loadingContent: {
+        backgroundColor: 'rgba(30,30,30,0.85)',
+        borderRadius: 16,
+        padding: 32,
+        alignItems: 'center',
+    },
+    loadingText: {
+        color: '#fff',
+        marginTop: 16,
+        fontSize: 16,
+        fontWeight: '500',
+    },
+    snackbar: {
+        position: 'absolute',
+        left: 24,
+        right: 24,
+        bottom: 32,
+        borderRadius: 8,
+        paddingVertical: 16,
+        paddingHorizontal: 24,
+        alignItems: 'center',
+        zIndex: 1000,
+        elevation: 10,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.15,
+        shadowRadius: 8,
+    },
+    snackbarError: {
+        backgroundColor: '#D32F2F',
+    },
+    snackbarSuccess: {
+        backgroundColor: '#388E3C',
+    },
+    snackbarText: {
+        color: '#fff',
+        fontSize: 16,
+        fontWeight: '500',
+        textAlign: 'center',
+    },
+    formFieldsContainer: {
+        paddingHorizontal: 24,
+        marginTop: 16,
+    },
+    input: {
+        backgroundColor: '#FFFFFF',
+        borderRadius: 8,
+        paddingVertical: 16,
+        paddingHorizontal: 24,
+        borderWidth: 1,
+        borderColor: '#DDDDDD',
+        fontSize: 16,
+        marginBottom: 8,
+    },
+    inputFocused: {
+        borderColor: '#41D274',
+        shadowColor: '#41D274',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.15,
+        shadowRadius: 4,
+    },
+    inputError: {
+        borderColor: '#D32F2F',
+    },
+    errorText: {
+        color: '#D32F2F',
+        fontSize: 13,
+        marginBottom: 4,
+        marginLeft: 4,
+    },
+    eyeIcon: {
+        position: 'absolute',
+        right: 16,
+        top: 16,
+        zIndex: 10,
+    },
+    inputRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        position: 'relative',
+    },
+    registerButton: {
+        backgroundColor: MAIN_COLOR,
+        borderRadius: 8,
+        paddingVertical: 16,
+        alignItems: 'center',
+        marginTop: 16,
+        minHeight: 48,
+        justifyContent: 'center',
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.10,
+        shadowRadius: 4,
+        elevation: 2,
+        width: '100%',
+    },
+    buttonDisabled: {
+        backgroundColor: '#B0B0B0',
+    },
+    buttonTitle: {
+        color: '#FFFFFF',
+        fontSize: 18,
+        fontWeight: '600',
+    },
 });
 
 

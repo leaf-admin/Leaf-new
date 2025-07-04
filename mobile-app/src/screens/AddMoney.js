@@ -10,7 +10,7 @@ import {
 } from 'react-native';
 import { colors } from '../common/theme';
 
-import i18n from 'i18n-js';
+import i18n from '../i18n';
 import { TouchableOpacity } from 'react-native-gesture-handler';
 import { useSelector } from 'react-redux';
 import { MAIN_COLOR } from '../common/sharedFunctions';

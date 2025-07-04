@@ -6,7 +6,7 @@ import {
     Text,
     Dimensions
 } from 'react-native';
-import i18n from 'i18n-js';
+import i18n from '../i18n';
 import { useSelector } from 'react-redux';
 import { MAIN_COLOR } from '../common/sharedFunctions';
 var { width, height } = Dimensions.get('window');

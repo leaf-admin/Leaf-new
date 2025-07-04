@@ -11,82 +11,102 @@ import {
 import { RequestPushMsg } from '../other/NotificationFunctions';
 import { firebase } from '../config/configureFirebase';
 import store from '../store/store';
-import { onValue, get, update, push } from "firebase/database";
 
 export const fetchPaymentMethods = () => (dispatch) => {
+  const {
+    config,
+    paymentSettingsRef
+  } = firebase;
 
-    const {
-      config,
-      paymentSettingsRef
-    } = firebase;
-  
-    dispatch({
-      type: FETCH_PAYMENT_METHODS,
-      payload: null
-    });
-
-    const usertype = store.getState().auth.profile.usertype;
-
-    if(usertype == 'admin'){
-        onValue(paymentSettingsRef, snapshot => {
-            const data = snapshot.val(); 
-            if(data){
-              dispatch({
-                type: FETCH_PAYMENT_METHODS_SUCCESS,
-                payload: data
-              });
-            } else {
-              dispatch({
-                type: FETCH_PAYMENT_METHODS_FAILED,
-                payload: store.getState().languagedata.defaultLanguage.no_provider_found,
-              });
-            }
-          });
-    } else { 
-        const settings = store.getState().settingsdata.settings;
-        let host = window && window.location && settings.CompanyWebsite === window.location.origin? window.location.origin : `https://${config.projectId}.web.app`
-        let url = `${host}/get_providers`;
-        fetch(url, {
-            method: 'GET',
-            headers: {
-                'Content-Type': 'application/json',
-            },
-        })
-            .then((response) => response.json())
-            .then((responseJson) => {
-                if (responseJson.length > 0) {
-                    dispatch({
-                        type: FETCH_PAYMENT_METHODS_SUCCESS,
-                        payload: responseJson,
-                    });
-                }else{
-                    dispatch({
-                        type: FETCH_PAYMENT_METHODS_FAILED,
-                        payload: store.getState().languagedata.defaultLanguage.no_provider_found,
-                    });
-                }
-            })
-            .catch((error) => {
-                dispatch({
-                    type: FETCH_PAYMENT_METHODS_FAILED,
-                    payload: store.getState().languagedata.defaultLanguage.provider_fetch_error + ": " + error.toString(),
-                });
-            });
-    }
+  // Fallback para config se não estiver disponível
+  const safeConfig = config || {
+    projectId: "leaf-reactnative",
+    appId: "1:106504629884:web:ada50a78fcf7bf3ea1a3f9",
+    databaseURL: "https://leaf-reactnative-default-rtdb.firebaseio.com",
+    storageBucket: "leaf-reactnative.firebasestorage.app",
+    apiKey: "AIzaSyChYseG1IcmffYHHVYT7MqtLlzfdWKE_fc",
+    authDomain: "leaf-reactnative.firebaseapp.com",
+    messagingSenderId: "106504629884",
+    measurementId: "G-22368DBCY9"
   };
 
-  export const editPaymentMethods = (data) => (dispatch) => {
-    const {
-        paymentSettingsRef
-    } = firebase;
-    dispatch({
-      type: UPDATE_PAYMENT_METHOD,
-      payload: data 
-    });
-    update(paymentSettingsRef, data);
-  }
-  
+  const profile = store.getState().auth.profile;
+  console.log('=== NOVA VERSAO fetchPaymentMethods ===', { profile });
 
+  if (!profile || !profile.usertype) {
+    console.warn('fetchPaymentMethods - Usuário não autenticado ou sem usertype. Não será feita busca de métodos de pagamento.');
+    dispatch({
+      type: FETCH_PAYMENT_METHODS_FAILED,
+      payload: 'Usuário não autenticado ou sem tipo.'
+    });
+    return;
+  }
+
+  dispatch({
+    type: FETCH_PAYMENT_METHODS,
+    payload: null
+  });
+
+  const usertype = profile.usertype;
+
+  if(usertype == 'admin'){
+      onValue(paymentSettingsRef, snapshot => {
+          const data = snapshot.val(); 
+          if(data){
+            dispatch({
+              type: FETCH_PAYMENT_METHODS_SUCCESS,
+              payload: data
+            });
+          } else {
+            dispatch({
+              type: FETCH_PAYMENT_METHODS_FAILED,
+              payload: store.getState().languagedata.defaultLanguage.no_provider_found,
+            });
+          }
+        });
+  } else { 
+      const settings = store.getState().settingsdata.settings;
+      let host = window && window.location && settings.CompanyWebsite === window.location.origin? window.location.origin : `https://${safeConfig.projectId}.web.app`
+      let url = `${host}/get_providers`;
+      fetch(url, {
+          method: 'GET',
+          headers: {
+              'Content-Type': 'application/json',
+          },
+      })
+          .then((response) => response.json())
+          .then((responseJson) => {
+              if (responseJson.length > 0) {
+                  dispatch({
+                      type: FETCH_PAYMENT_METHODS_SUCCESS,
+                      payload: responseJson,
+                  });
+              }else{
+                  dispatch({
+                      type: FETCH_PAYMENT_METHODS_FAILED,
+                      payload: store.getState().languagedata.defaultLanguage.no_provider_found,
+                  });
+              }
+          })
+          .catch((error) => {
+              dispatch({
+                  type: FETCH_PAYMENT_METHODS_FAILED,
+                  payload: store.getState().languagedata.defaultLanguage.provider_fetch_error + ": " + error.toString(),
+              });
+          });
+  }
+};
+
+export const editPaymentMethods = (data) => (dispatch) => {
+  const {
+      paymentSettingsRef
+  } = firebase;
+  dispatch({
+    type: UPDATE_PAYMENT_METHOD,
+    payload: data 
+  });
+  update(paymentSettingsRef, data);
+}
 
 export const clearMessage = () => (dispatch) => {
     dispatch({
@@ -94,7 +114,6 @@ export const clearMessage = () => (dispatch) => {
         payload: null,
     });    
 };
-
 
 export const addToWallet = (uid, amount) => async (dispatch) => {
     const {
@@ -154,7 +173,6 @@ export const addToWallet = (uid, amount) => async (dispatch) => {
         }
     }, {onlyOnce: true});
 };
-
 
 export const withdrawBalance = (profile, amount) => async (dispatch) => {
 

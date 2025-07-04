@@ -1,6 +1,5 @@
 import {FETCH_REFERRAL_ID,EDIT_REFERRAL_ID,FETCH_REFERRAL_ID_SUCCESS,FETCH_REFERRAL_ID_FAILED} from "../store/types"
 import {firebase} from "../config/configureFirebase";
-import { onValue,push,set } from "firebase/database";
 
 
 

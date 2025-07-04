@@ -23,3 +23,8 @@ mobile-app/dist
 android/
 ios/
 AccessKey.*
+node_modules/
+android/build/
+ios/build/
+.expo/
+.expo-shared/
