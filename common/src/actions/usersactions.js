@@ -26,6 +26,7 @@ import { uploadBytesResumable, getDownloadURL } from 'firebase/storage';
 import { GetDistance } from '../other/GeoFunctions';
 import { initializeRedis, USE_REDIS_LOCATION } from '../config/redisConfig';
 import { redisLocationService } from '../services/redisLocationService';
+import { Platform } from 'react-native';
 
 export const fetchUsers = () => (dispatch) => {
   const usersRef = ref(firebase.database, 'users');
@@ -703,8 +704,8 @@ export const fetchNearbyDrivers = (lat, lng, radius = 5, options = {}) => async 
   });
 
   try {
-    // 1. Tentar buscar no Redis primeiro (mais rápido)
-    if (USE_REDIS_LOCATION) {
+    // 1. Tentar buscar no Redis primeiro (apenas no web)
+    if (USE_REDIS_LOCATION && Platform.OS === 'web') {
       try {
         await initializeRedis();
         const redisDrivers = await redisLocationService.getNearbyDrivers(lat, lng, radius);
@@ -767,7 +768,7 @@ export const fetchNearbyDrivers = (lat, lng, radius = 5, options = {}) => async 
     }
 
     // 2. Fallback para Firebase (método atual)
-    console.log('📍 Usando fallback Firebase para buscar motoristas');
+    console.log('📍 Usando Firebase para buscar motoristas (fallback)');
     return new Promise((resolve) => {
       onValue(driversRef, snapshot => {
         if (snapshot.val()) {
