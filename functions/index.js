@@ -21,6 +21,9 @@ const express = require('express');
 const cors = require('cors');
 const app = express();
 
+// Redis APIs
+const redisApis = require('./redis-api');
+
 admin.initializeApp();
 
 const databaseURL = admin.app().options.databaseURL;
@@ -1467,9 +1470,6 @@ exports.create_custom_token = onRequest(async (request, response) => {
 });
 
 // ===== APIs REDIS =====
-// Importar APIs Redis
-const redisApis = require('./redis-api');
-
 // Exportar todas as APIs Redis
 Object.keys(redisApis).forEach(apiName => {
     exports[apiName] = redisApis[apiName];

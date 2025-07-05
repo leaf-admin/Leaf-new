@@ -57,577 +57,323 @@ const authenticateUser = async (req) => {
     }
 };
 
-// API 1: Salvar localização do usuário
-exports.save_user_location = onRequest(async (req, res) => {
-    res.set('Access-Control-Allow-Origin', '*');
-    res.set('Access-Control-Allow-Methods', 'POST, OPTIONS');
-    res.set('Access-Control-Allow-Headers', 'Content-Type, Authorization');
-
-    if (req.method === 'OPTIONS') {
-        res.status(200).send();
-        return;
-    }
-
+// API para salvar localização do usuário
+exports.saveUserLocation = onRequest(async (req, res) => {
     try {
-        // Autenticar usuário
-        const user = await authenticateUser(req);
-        
-        // Validar dados
-        const { lat, lng, timestamp } = req.body;
-        if (!lat || !lng) {
-            return res.status(400).json({
-                success: false,
-                error: 'Latitude e longitude são obrigatórios'
-            });
+        // Verificar autenticação
+        const authHeader = req.headers.authorization;
+        if (!authHeader) {
+            return res.status(401).json({ error: 'Token não fornecido' });
         }
 
-        // Conectar Redis
+        const token = authHeader.split('Bearer ')[1];
+        const decodedToken = await admin.auth().verifyIdToken(token);
+        const uid = decodedToken.uid;
+
+        const { lat, lng, timestamp } = req.body;
+        
+        if (!lat || !lng) {
+            return res.status(400).json({ error: 'Latitude e longitude são obrigatórios' });
+        }
+
         const client = await initializeRedis();
         if (!client) {
-            return res.status(500).json({
-                success: false,
-                error: 'Redis não disponível'
-            });
+            return res.status(500).json({ error: 'Redis não disponível' });
         }
 
-        // Salvar localização
-        const locationData = {
-            uid: user.uid,
-            lat: parseFloat(lat),
-            lng: parseFloat(lng),
-            timestamp: timestamp || Date.now(),
-            updatedAt: new Date().toISOString()
-        };
-
-        await client.hSet(`user:location:${user.uid}`, locationData);
-        await client.expire(`user:location:${user.uid}`, 1800); // 30 minutos TTL
-
-        // Adicionar à lista de usuários online
-        await client.sAdd('users:online', user.uid);
-
-        console.log(`📍 Localização salva para usuário ${user.uid}`);
-
-        res.json({
-            success: true,
-            message: 'Localização salva com sucesso',
-            data: locationData
+        // Salvar localização no Redis
+        const locationKey = `locations:${uid}`;
+        await client.hSet(locationKey, {
+            lat: lat.toString(),
+            lng: lng.toString(),
+            timestamp: timestamp || Date.now().toString(),
+            updated_at: Date.now().toString()
         });
 
+        // Adicionar ao set de usuários online
+        await client.sAdd('users:online', uid);
+
+        // Salvar também no Firebase como fallback
+        await admin.database().ref(`locations/${uid}`).set({
+            lat,
+            lng,
+            timestamp: timestamp || Date.now(),
+            updated_at: Date.now()
+        });
+
+        res.json({ success: true, message: 'Localização salva com sucesso' });
     } catch (error) {
         console.error('❌ Erro ao salvar localização:', error);
-        res.status(500).json({
-            success: false,
-            error: error.message
-        });
+        res.status(500).json({ error: 'Erro interno do servidor' });
     }
 });
 
-// API 2: Obter localização do usuário
-exports.get_user_location = onRequest(async (req, res) => {
-    res.set('Access-Control-Allow-Origin', '*');
-    res.set('Access-Control-Allow-Methods', 'GET, OPTIONS');
-    res.set('Access-Control-Allow-Headers', 'Content-Type, Authorization');
-
-    if (req.method === 'OPTIONS') {
-        res.status(200).send();
-        return;
-    }
-
+// API para buscar motoristas próximos
+exports.getNearbyDrivers = onRequest(async (req, res) => {
     try {
-        // Autenticar usuário
-        const user = await authenticateUser(req);
+        const { lat, lng, radius = 5000, limit = 10 } = req.query;
         
-        // Conectar Redis
-        const client = await initializeRedis();
-        if (!client) {
-            return res.status(500).json({
-                success: false,
-                error: 'Redis não disponível'
-            });
+        if (!lat || !lng) {
+            return res.status(400).json({ error: 'Latitude e longitude são obrigatórios' });
         }
 
-        // Obter localização
-        const locationData = await client.hGetAll(`user:location:${user.uid}`);
+        const client = await initializeRedis();
+        if (!client) {
+            // Fallback para Firebase
+            return getNearbyDriversFromFirebase(lat, lng, radius, limit, res);
+        }
+
+        // Buscar motoristas online no Redis
+        const onlineDrivers = await client.sMembers('users:online');
+        const drivers = [];
+
+        for (const driverId of onlineDrivers) {
+            const locationKey = `locations:${driverId}`;
+            const location = await client.hGetAll(locationKey);
+            
+            if (location.lat && location.lng) {
+                const distance = calculateDistance(
+                    parseFloat(lat), 
+                    parseFloat(lng), 
+                    parseFloat(location.lat), 
+                    parseFloat(location.lng)
+                );
+
+                if (distance <= radius) {
+                    drivers.push({
+                        uid: driverId,
+                        lat: parseFloat(location.lat),
+                        lng: parseFloat(location.lng),
+                        distance: Math.round(distance),
+                        timestamp: parseInt(location.timestamp)
+                    });
+                }
+            }
+        }
+
+        // Ordenar por distância e limitar resultados
+        drivers.sort((a, b) => a.distance - b.distance);
+        const limitedDrivers = drivers.slice(0, limit);
+
+        res.json({ 
+            success: true, 
+            drivers: limitedDrivers,
+            total: drivers.length,
+            source: 'redis'
+        });
+    } catch (error) {
+        console.error('❌ Erro ao buscar motoristas próximos:', error);
+        res.status(500).json({ error: 'Erro interno do servidor' });
+    }
+});
+
+// API para obter localização de um usuário
+exports.getUserLocation = onRequest(async (req, res) => {
+    try {
+        const { uid } = req.params;
         
-        if (!locationData || Object.keys(locationData).length === 0) {
-            return res.json({
-                success: true,
-                data: null,
-                message: 'Localização não encontrada'
-            });
+        if (!uid) {
+            return res.status(400).json({ error: 'UID é obrigatório' });
+        }
+
+        const client = await initializeRedis();
+        if (!client) {
+            // Fallback para Firebase
+            return getUserLocationFromFirebase(uid, res);
+        }
+
+        const locationKey = `locations:${uid}`;
+        const location = await client.hGetAll(locationKey);
+
+        if (!location.lat || !location.lng) {
+            return res.status(404).json({ error: 'Localização não encontrada' });
         }
 
         res.json({
             success: true,
-            data: {
-                lat: parseFloat(locationData.lat),
-                lng: parseFloat(locationData.lng),
-                timestamp: parseInt(locationData.timestamp),
-                updatedAt: locationData.updatedAt
-            }
+            location: {
+                uid,
+                lat: parseFloat(location.lat),
+                lng: parseFloat(location.lng),
+                timestamp: parseInt(location.timestamp),
+                updated_at: parseInt(location.updated_at)
+            },
+            source: 'redis'
         });
-
     } catch (error) {
         console.error('❌ Erro ao obter localização:', error);
-        res.status(500).json({
-            success: false,
-            error: error.message
-        });
+        res.status(500).json({ error: 'Erro interno do servidor' });
     }
 });
 
-// API 3: Buscar usuários próximos
-exports.get_nearby_users = onRequest(async (req, res) => {
-    res.set('Access-Control-Allow-Origin', '*');
-    res.set('Access-Control-Allow-Methods', 'GET, OPTIONS');
-    res.set('Access-Control-Allow-Methods', 'Content-Type, Authorization');
-
-    if (req.method === 'OPTIONS') {
-        res.status(200).send();
-        return;
-    }
-
+// API para atualizar status do motorista
+exports.updateDriverStatus = onRequest(async (req, res) => {
     try {
-        // Autenticar usuário
-        const user = await authenticateUser(req);
-        
-        // Validar parâmetros
-        const { lat, lng, radius = 5, limit = 10, userType } = req.query;
-        if (!lat || !lng) {
-            return res.status(400).json({
-                success: false,
-                error: 'Latitude e longitude são obrigatórios'
-            });
+        const authHeader = req.headers.authorization;
+        if (!authHeader) {
+            return res.status(401).json({ error: 'Token não fornecido' });
         }
 
-        // Conectar Redis
+        const token = authHeader.split('Bearer ')[1];
+        const decodedToken = await admin.auth().verifyIdToken(token);
+        const uid = decodedToken.uid;
+
+        const { status, isOnline } = req.body;
+        
         const client = await initializeRedis();
         if (!client) {
-            return res.status(500).json({
-                success: false,
-                error: 'Redis não disponível'
-            });
+            return res.status(500).json({ error: 'Redis não disponível' });
         }
 
-        // Buscar usuários próximos usando GEO
-        try {
-            const nearbyUsers = await client.geoRadius(
-                'locations:geo',
-                parseFloat(lng),
-                parseFloat(lat),
-                parseFloat(radius),
-                'km',
-                'WITHCOORD',
-                'WITHDIST',
-                'COUNT',
-                parseInt(limit)
-            );
+        const statusKey = `driver:status:${uid}`;
+        await client.hSet(statusKey, {
+            status: status || 'available',
+            isOnline: isOnline ? 'true' : 'false',
+            updated_at: Date.now().toString()
+        });
 
-            const users = [];
-            for (const userData of nearbyUsers) {
-                const [userId, coordinates, distance] = userData;
-                
-                // Filtrar por tipo de usuário se especificado
-                if (userType) {
-                    const userInfo = await client.hGetAll(`user:${userId}`);
-                    if (userInfo.usertype !== userType) {
-                        continue;
-                    }
-                }
+        // Atualizar sets de usuários online/offline
+        if (isOnline) {
+            await client.sAdd('users:online', uid);
+            await client.sRem('users:offline', uid);
+        } else {
+            await client.sRem('users:online', uid);
+            await client.sAdd('users:offline', uid);
+        }
 
-                users.push({
-                    uid: userId,
-                    lat: coordinates[1],
-                    lng: coordinates[0],
-                    distance: parseFloat(distance)
-                });
+        // Salvar também no Firebase
+        await admin.database().ref(`drivers/${uid}/status`).set({
+            status: status || 'available',
+            isOnline: isOnline || false,
+            updated_at: Date.now()
+        });
+
+        res.json({ success: true, message: 'Status atualizado com sucesso' });
+    } catch (error) {
+        console.error('❌ Erro ao atualizar status:', error);
+        res.status(500).json({ error: 'Erro interno do servidor' });
+    }
+});
+
+// API para obter estatísticas do Redis
+exports.getRedisStats = onRequest(async (req, res) => {
+    try {
+        const client = await initializeRedis();
+        if (!client) {
+            return res.status(500).json({ error: 'Redis não disponível' });
+        }
+
+        const stats = await client.info();
+        const onlineUsers = await client.sCard('users:online');
+        const offlineUsers = await client.sCard('users:offline');
+
+        res.json({
+            success: true,
+            stats: {
+                online_users: onlineUsers,
+                offline_users: offlineUsers,
+                total_users: onlineUsers + offlineUsers,
+                redis_info: stats
             }
+        });
+    } catch (error) {
+        console.error('❌ Erro ao obter estatísticas:', error);
+        res.status(500).json({ error: 'Erro interno do servidor' });
+    }
+});
 
-            res.json({
-                success: true,
-                data: users,
-                count: users.length
-            });
+// Funções auxiliares para fallback do Firebase
+async function getNearbyDriversFromFirebase(lat, lng, radius, limit, res) {
+    try {
+        const snapshot = await admin.database().ref('locations').once('value');
+        const locations = snapshot.val();
+        const drivers = [];
 
-        } catch (geoError) {
-            // Fallback para busca sem GEO
-            console.log('⚠️ Comandos GEO não disponíveis, usando fallback');
-            
-            const allUsers = await client.sMembers('users:online');
-            const users = [];
-
-            for (const userId of allUsers.slice(0, parseInt(limit))) {
-                const locationData = await client.hGetAll(`user:location:${userId}`);
-                
-                if (locationData && locationData.lat && locationData.lng) {
+        if (locations) {
+            Object.keys(locations).forEach(uid => {
+                const location = locations[uid];
+                if (location.lat && location.lng) {
                     const distance = calculateDistance(
-                        parseFloat(lat), parseFloat(lng),
-                        parseFloat(locationData.lat), parseFloat(locationData.lng)
+                        parseFloat(lat),
+                        parseFloat(lng),
+                        location.lat,
+                        location.lng
                     );
 
-                    if (distance <= parseFloat(radius)) {
-                        users.push({
-                            uid: userId,
-                            lat: parseFloat(locationData.lat),
-                            lng: parseFloat(locationData.lng),
-                            distance: distance
+                    if (distance <= radius) {
+                        drivers.push({
+                            uid,
+                            lat: location.lat,
+                            lng: location.lng,
+                            distance: Math.round(distance),
+                            timestamp: location.timestamp
                         });
                     }
                 }
-            }
-
-            // Ordenar por distância
-            users.sort((a, b) => a.distance - b.distance);
-
-            res.json({
-                success: true,
-                data: users.slice(0, parseInt(limit)),
-                count: users.length
             });
         }
 
-    } catch (error) {
-        console.error('❌ Erro ao buscar usuários próximos:', error);
-        res.status(500).json({
-            success: false,
-            error: error.message
-        });
-    }
-});
-
-// API 4: Iniciar tracking de viagem
-exports.start_trip_tracking = onRequest(async (req, res) => {
-    res.set('Access-Control-Allow-Origin', '*');
-    res.set('Access-Control-Allow-Methods', 'POST, OPTIONS');
-    res.set('Access-Control-Allow-Headers', 'Content-Type, Authorization');
-
-    if (req.method === 'OPTIONS') {
-        res.status(200).send();
-        return;
-    }
-
-    try {
-        // Autenticar usuário
-        const user = await authenticateUser(req);
-        
-        // Validar dados
-        const { tripId, driverId, passengerId, initialLocation } = req.body;
-        if (!tripId || !driverId || !passengerId || !initialLocation) {
-            return res.status(400).json({
-                success: false,
-                error: 'tripId, driverId, passengerId e initialLocation são obrigatórios'
-            });
-        }
-
-        // Conectar Redis
-        const client = await initializeRedis();
-        if (!client) {
-            return res.status(500).json({
-                success: false,
-                error: 'Redis não disponível'
-            });
-        }
-
-        // Iniciar tracking
-        const tripData = {
-            tripId,
-            driverId,
-            passengerId,
-            status: 'active',
-            startTime: Date.now(),
-            startLocation: JSON.stringify(initialLocation),
-            currentLocation: JSON.stringify(initialLocation),
-            path: JSON.stringify([initialLocation]),
-            updatedAt: new Date().toISOString()
-        };
-
-        await client.hSet(`trip:${tripId}`, tripData);
-        await client.sAdd('active_trips', tripId);
-        await client.expire(`trip:${tripId}`, 86400); // 24 horas TTL
-
-        console.log(`🚗 Tracking iniciado para viagem ${tripId}`);
+        drivers.sort((a, b) => a.distance - b.distance);
+        const limitedDrivers = drivers.slice(0, limit);
 
         res.json({
             success: true,
-            message: 'Tracking iniciado com sucesso',
-            data: { tripId, status: 'active' }
+            drivers: limitedDrivers,
+            total: drivers.length,
+            source: 'firebase'
         });
-
     } catch (error) {
-        console.error('❌ Erro ao iniciar tracking:', error);
-        res.status(500).json({
-            success: false,
-            error: error.message
-        });
+        console.error('❌ Erro no fallback Firebase:', error);
+        res.status(500).json({ error: 'Erro interno do servidor' });
     }
-});
+}
 
-// API 5: Atualizar localização da viagem
-exports.update_trip_location = onRequest(async (req, res) => {
-    res.set('Access-Control-Allow-Origin', '*');
-    res.set('Access-Control-Allow-Methods', 'POST, OPTIONS');
-    res.set('Access-Control-Allow-Headers', 'Content-Type, Authorization');
-
-    if (req.method === 'OPTIONS') {
-        res.status(200).send();
-        return;
-    }
-
+async function getUserLocationFromFirebase(uid, res) {
     try {
-        // Autenticar usuário
-        const user = await authenticateUser(req);
-        
-        // Validar dados
-        const { tripId, lat, lng, timestamp } = req.body;
-        if (!tripId || !lat || !lng) {
-            return res.status(400).json({
-                success: false,
-                error: 'tripId, lat e lng são obrigatórios'
-            });
+        const snapshot = await admin.database().ref(`locations/${uid}`).once('value');
+        const location = snapshot.val();
+
+        if (!location) {
+            return res.status(404).json({ error: 'Localização não encontrada' });
         }
-
-        // Conectar Redis
-        const client = await initializeRedis();
-        if (!client) {
-            return res.status(500).json({
-                success: false,
-                error: 'Redis não disponível'
-            });
-        }
-
-        // Atualizar localização
-        const location = { lat: parseFloat(lat), lng: parseFloat(lng) };
-        
-        await client.hSet(`trip:${tripId}`, {
-            currentLocation: JSON.stringify(location),
-            updatedAt: new Date().toISOString()
-        });
-
-        // Adicionar ao histórico
-        const pathKey = `trip_path:${tripId}`;
-        await client.lPush(pathKey, JSON.stringify({
-            ...location,
-            timestamp: timestamp || Date.now()
-        }));
-        
-        await client.lTrim(pathKey, 0, 99); // Manter apenas 100 pontos
-        await client.expire(pathKey, 86400);
-
-        console.log(`📍 Localização da viagem ${tripId} atualizada`);
 
         res.json({
             success: true,
-            message: 'Localização atualizada com sucesso',
-            data: { tripId, location }
+            location: {
+                uid,
+                lat: location.lat,
+                lng: location.lng,
+                timestamp: location.timestamp,
+                updated_at: location.updated_at
+            },
+            source: 'firebase'
         });
-
     } catch (error) {
-        console.error('❌ Erro ao atualizar localização da viagem:', error);
-        res.status(500).json({
-            success: false,
-            error: error.message
-        });
+        console.error('❌ Erro no fallback Firebase:', error);
+        res.status(500).json({ error: 'Erro interno do servidor' });
     }
-});
+}
 
-// API 6: Finalizar tracking de viagem
-exports.end_trip_tracking = onRequest(async (req, res) => {
-    res.set('Access-Control-Allow-Origin', '*');
-    res.set('Access-Control-Allow-Methods', 'POST, OPTIONS');
-    res.set('Access-Control-Allow-Headers', 'Content-Type, Authorization');
-
-    if (req.method === 'OPTIONS') {
-        res.status(200).send();
-        return;
-    }
-
-    try {
-        // Autenticar usuário
-        const user = await authenticateUser(req);
-        
-        // Validar dados
-        const { tripId, endLocation } = req.body;
-        if (!tripId) {
-            return res.status(400).json({
-                success: false,
-                error: 'tripId é obrigatório'
-            });
-        }
-
-        // Conectar Redis
-        const client = await initializeRedis();
-        if (!client) {
-            return res.status(500).json({
-                success: false,
-                error: 'Redis não disponível'
-            });
-        }
-
-        // Finalizar tracking
-        const endTime = Date.now();
-        
-        await client.hSet(`trip:${tripId}`, {
-            status: 'completed',
-            endTime: endTime.toString(),
-            endLocation: JSON.stringify(endLocation || {}),
-            updatedAt: new Date().toISOString()
-        });
-
-        await client.sRem('active_trips', tripId);
-        await client.sAdd('completed_trips', tripId);
-
-        console.log(`✅ Tracking finalizado para viagem ${tripId}`);
-
-        res.json({
-            success: true,
-            message: 'Tracking finalizado com sucesso',
-            data: { tripId, status: 'completed' }
-        });
-
-    } catch (error) {
-        console.error('❌ Erro ao finalizar tracking:', error);
-        res.status(500).json({
-            success: false,
-            error: error.message
-        });
-    }
-});
-
-// API 7: Obter dados da viagem
-exports.get_trip_data = onRequest(async (req, res) => {
-    res.set('Access-Control-Allow-Origin', '*');
-    res.set('Access-Control-Allow-Methods', 'GET, OPTIONS');
-    res.set('Access-Control-Allow-Headers', 'Content-Type, Authorization');
-
-    if (req.method === 'OPTIONS') {
-        res.status(200).send();
-        return;
-    }
-
-    try {
-        // Autenticar usuário
-        const user = await authenticateUser(req);
-        
-        // Validar parâmetros
-        const { tripId } = req.query;
-        if (!tripId) {
-            return res.status(400).json({
-                success: false,
-                error: 'tripId é obrigatório'
-            });
-        }
-
-        // Conectar Redis
-        const client = await initializeRedis();
-        if (!client) {
-            return res.status(500).json({
-                success: false,
-                error: 'Redis não disponível'
-            });
-        }
-
-        // Obter dados da viagem
-        const tripData = await client.hGetAll(`trip:${tripId}`);
-        
-        if (!tripData || Object.keys(tripData).length === 0) {
-            return res.json({
-                success: true,
-                data: null,
-                message: 'Viagem não encontrada'
-            });
-        }
-
-        // Obter histórico de localizações
-        const pathKey = `trip_path:${tripId}`;
-        const pathData = await client.lRange(pathKey, 0, 49); // Últimos 50 pontos
-        const path = pathData.map(point => JSON.parse(point)).reverse();
-
-        const responseData = {
-            tripId: tripData.tripId,
-            driverId: tripData.driverId,
-            passengerId: tripData.passengerId,
-            status: tripData.status,
-            startTime: parseInt(tripData.startTime),
-            startLocation: JSON.parse(tripData.startLocation),
-            currentLocation: JSON.parse(tripData.currentLocation),
-            endLocation: tripData.endLocation ? JSON.parse(tripData.endLocation) : null,
-            endTime: tripData.endTime ? parseInt(tripData.endTime) : null,
-            path: path,
-            updatedAt: tripData.updatedAt
-        };
-
-        res.json({
-            success: true,
-            data: responseData
-        });
-
-    } catch (error) {
-        console.error('❌ Erro ao obter dados da viagem:', error);
-        res.status(500).json({
-            success: false,
-            error: error.message
-        });
-    }
-});
-
-// API 8: Estatísticas do Redis
-exports.get_redis_stats = onRequest(async (req, res) => {
-    res.set('Access-Control-Allow-Origin', '*');
-    res.set('Access-Control-Allow-Methods', 'GET, OPTIONS');
-    res.set('Access-Control-Allow-Headers', 'Content-Type, Authorization');
-
-    if (req.method === 'OPTIONS') {
-        res.status(200).send();
-        return;
-    }
-
-    try {
-        // Autenticar usuário
-        const user = await authenticateUser(req);
-        
-        // Conectar Redis
-        const client = await initializeRedis();
-        if (!client) {
-            return res.status(500).json({
-                success: false,
-                error: 'Redis não disponível'
-            });
-        }
-
-        // Obter estatísticas
-        const stats = await client.info();
-        const activeTrips = await client.sCard('active_trips');
-        const completedTrips = await client.sCard('completed_trips');
-        const onlineUsers = await client.sCard('users:online');
-
-        res.json({
-            success: true,
-            data: {
-                redisInfo: stats,
-                activeTrips,
-                completedTrips,
-                onlineUsers,
-                isConnected
-            }
-        });
-
-    } catch (error) {
-        console.error('❌ Erro ao obter estatísticas:', error);
-        res.status(500).json({
-            success: false,
-            error: error.message
-        });
-    }
-});
-
-// Função auxiliar para calcular distância
+// Função para calcular distância entre dois pontos (fórmula de Haversine)
 function calculateDistance(lat1, lng1, lat2, lng2) {
-    const R = 6371; // Raio da Terra em km
-    const dLat = (lat2 - lat1) * Math.PI / 180;
-    const dLng = (lng2 - lng1) * Math.PI / 180;
-    const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
-              Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
-              Math.sin(dLng/2) * Math.sin(dLng/2);
-    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
-    return R * c;
-} 
+    const R = 6371e3; // Raio da Terra em metros
+    const φ1 = lat1 * Math.PI / 180;
+    const φ2 = lat2 * Math.PI / 180;
+    const Δφ = (lat2 - lat1) * Math.PI / 180;
+    const Δλ = (lng2 - lng1) * Math.PI / 180;
+
+    const a = Math.sin(Δφ / 2) * Math.sin(Δφ / 2) +
+              Math.cos(φ1) * Math.cos(φ2) *
+              Math.sin(Δλ / 2) * Math.sin(Δλ / 2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+
+    return R * c; // Distância em metros
+}
+
+module.exports = {
+    saveUserLocation: exports.saveUserLocation,
+    getNearbyDrivers: exports.getNearbyDrivers,
+    getUserLocation: exports.getUserLocation,
+    updateDriverStatus: exports.updateDriverStatus,
+    getRedisStats: exports.getRedisStats
+}; 

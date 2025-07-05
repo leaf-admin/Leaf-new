@@ -5,13 +5,15 @@ import {
     StyleSheet,
     TouchableOpacity,
     Alert,
-    ScrollView
+    ScrollView,
+    ActivityIndicator
 } from 'react-native';
 import { useLocationWithRedis } from '../hooks/useLocationWithRedis';
 import { useTripTracking } from '../hooks/useTripTracking';
 import { useSelector } from 'react-redux';
 import { colors } from '../common/theme';
 import { Ionicons } from '@expo/vector-icons';
+import redisApiService from '../services/RedisApiService';
 
 export const RedisLocationDemo = () => {
     const auth = useSelector(state => state.authdata);
@@ -25,7 +27,16 @@ export const RedisLocationDemo = () => {
         startLocationTracking,
         stopLocationTracking,
         getUserLocationData,
-        hasLocationChanged
+        hasLocationChanged,
+        redisAvailable,
+        updateLocation,
+        fetchNearbyDrivers,
+        getUserLocationById,
+        updateDriverStatus,
+        getStats,
+        startAutoTracking,
+        stopAutoTracking,
+        updateTripStatus
     } = useLocationWithRedis();
 
     const [demoTripId] = useState('demo-trip-123');
@@ -33,12 +44,15 @@ export const RedisLocationDemo = () => {
         tripData,
         isTracking,
         error: trackingError,
-        startAutoTracking,
-        stopAutoTracking,
-        updateTripStatus
+        startAutoTracking: useTripTrackingStartAutoTracking,
+        stopAutoTracking: useTripTrackingStopAutoTracking,
+        updateTripStatus: useTripTrackingUpdateTripStatus
     } = useTripTracking(demoTripId);
 
     const [userLocationData, setUserLocationData] = useState(null);
+    const [nearbyDrivers, setNearbyDrivers] = useState([]);
+    const [stats, setStats] = useState(null);
+    const [apiLoading, setApiLoading] = useState(false);
 
     // Carregar localização do usuário ao montar
     useEffect(() => {
@@ -46,6 +60,20 @@ export const RedisLocationDemo = () => {
             loadUserLocation();
         }
     }, [auth.profile]);
+
+    // Inicializar serviço
+    useEffect(() => {
+        const initService = async () => {
+            try {
+                await redisApiService.initialize();
+                console.log('✅ Redis API Service inicializado');
+            } catch (error) {
+                console.error('❌ Erro ao inicializar Redis API Service:', error);
+            }
+        };
+
+        initService();
+    }, []);
 
     const loadUserLocation = async () => {
         if (auth.profile && auth.profile.uid) {
@@ -79,7 +107,87 @@ export const RedisLocationDemo = () => {
     };
 
     const handleUpdateTripStatus = (status) => {
-        updateTripStatus(status);
+        useTripTrackingUpdateTripStatus(status);
+    };
+
+    const handleStartTracking = async () => {
+        try {
+            setIsTracking(true);
+            await startLocationTracking();
+            Alert.alert('Sucesso', 'Tracking de localização iniciado');
+        } catch (error) {
+            Alert.alert('Erro', 'Falha ao iniciar tracking: ' + error.message);
+            setIsTracking(false);
+        }
+    };
+
+    const handleStopTracking = () => {
+        stopLocationTracking();
+        setIsTracking(false);
+        Alert.alert('Sucesso', 'Tracking de localização parado');
+    };
+
+    const handleFindNearbyDrivers = async () => {
+        if (!location) {
+            Alert.alert('Erro', 'Localização não disponível');
+            return;
+        }
+
+        try {
+            setApiLoading(true);
+            const drivers = await fetchNearbyDrivers(
+                location.lat,
+                location.lng,
+                5000, // 5km
+                10
+            );
+            setNearbyDrivers(drivers);
+            Alert.alert('Sucesso', `Encontrados ${drivers.length} motoristas próximos`);
+        } catch (error) {
+            Alert.alert('Erro', 'Falha ao buscar motoristas: ' + error.message);
+        } finally {
+            setApiLoading(false);
+        }
+    };
+
+    const handleGetStats = async () => {
+        try {
+            setApiLoading(true);
+            const statsData = await getStats();
+            setStats(statsData);
+            Alert.alert('Sucesso', 'Estatísticas obtidas com sucesso');
+        } catch (error) {
+            Alert.alert('Erro', 'Falha ao obter estatísticas: ' + error.message);
+        } finally {
+            setApiLoading(false);
+        }
+    };
+
+    const handleUpdateDriverStatus = async () => {
+        try {
+            setApiLoading(true);
+            await updateDriverStatus('available', true);
+            Alert.alert('Sucesso', 'Status do motorista atualizado');
+        } catch (error) {
+            Alert.alert('Erro', 'Falha ao atualizar status: ' + error.message);
+        } finally {
+            setApiLoading(false);
+        }
+    };
+
+    const handleTestApiHealth = async () => {
+        try {
+            setApiLoading(true);
+            const isHealthy = await redisApiService.checkServiceHealth();
+            Alert.alert(
+                'Status da API',
+                isHealthy ? 'API Redis funcionando' : 'API Redis não disponível'
+            );
+        } catch (error) {
+            Alert.alert('Erro', 'Falha ao verificar saúde da API: ' + error.message);
+        } finally {
+            setApiLoading(false);
+        }
     };
 
     const formatLocation = (loc) => {
@@ -224,7 +332,7 @@ export const RedisLocationDemo = () => {
                 <View style={styles.buttonRow}>
                     <TouchableOpacity
                         style={[styles.button, isTracking ? styles.dangerButton : styles.successButton]}
-                        onPress={isTracking ? stopAutoTracking : handleStartTripTracking}
+                        onPress={isTracking ? useTripTrackingStopAutoTracking : handleStartTripTracking}
                     >
                         <Text style={styles.buttonText}>
                             {isTracking ? '🛑 Parar Viagem' : '🚀 Iniciar Viagem'}
@@ -285,6 +393,105 @@ export const RedisLocationDemo = () => {
                     <Text style={[styles.value, { color: colors.GREEN }]}>~5ms (Redis GEO)</Text>
                 </View>
             </View>
+
+            {/* APIs Redis */}
+            <View style={styles.section}>
+                <Text style={styles.sectionTitle}>APIs Redis</Text>
+                
+                <View style={styles.buttonRow}>
+                    <TouchableOpacity
+                        style={[styles.button, styles.successButton]}
+                        onPress={handleFindNearbyDrivers}
+                        disabled={apiLoading || !location}
+                    >
+                        {apiLoading ? (
+                            <ActivityIndicator color="#fff" size="small" />
+                        ) : (
+                            <Text style={styles.buttonText}>Buscar Motoristas</Text>
+                        )}
+                    </TouchableOpacity>
+
+                    <TouchableOpacity
+                        style={[styles.button, styles.infoButton]}
+                        onPress={handleGetStats}
+                        disabled={apiLoading}
+                    >
+                        {apiLoading ? (
+                            <ActivityIndicator color="#fff" size="small" />
+                        ) : (
+                            <Text style={styles.buttonText}>Estatísticas</Text>
+                        )}
+                    </TouchableOpacity>
+                </View>
+
+                <View style={styles.buttonRow}>
+                    <TouchableOpacity
+                        style={[styles.button, styles.warningButton]}
+                        onPress={handleUpdateDriverStatus}
+                        disabled={apiLoading}
+                    >
+                        {apiLoading ? (
+                            <ActivityIndicator color="#fff" size="small" />
+                        ) : (
+                            <Text style={styles.buttonText}>Atualizar Status</Text>
+                        )}
+                    </TouchableOpacity>
+
+                    <TouchableOpacity
+                        style={[styles.button, styles.infoButton]}
+                        onPress={handleTestApiHealth}
+                        disabled={apiLoading}
+                    >
+                        {apiLoading ? (
+                            <ActivityIndicator color="#fff" size="small" />
+                        ) : (
+                            <Text style={styles.buttonText}>Testar API</Text>
+                        )}
+                    </TouchableOpacity>
+                </View>
+            </View>
+
+            {/* Resultados */}
+            {nearbyDrivers.length > 0 && (
+                <View style={styles.section}>
+                    <Text style={styles.sectionTitle}>Motoristas Próximos ({nearbyDrivers.length})</Text>
+                    {nearbyDrivers.map((driver, index) => (
+                        <View key={index} style={styles.driverItem}>
+                            <Text style={styles.driverText}>
+                                ID: {driver.uid}
+                            </Text>
+                            <Text style={styles.driverText}>
+                                Distância: {driver.distance}m
+                            </Text>
+                            <Text style={styles.driverText}>
+                                Posição: {driver.lat.toFixed(4)}, {driver.lng.toFixed(4)}
+                            </Text>
+                        </View>
+                    ))}
+                </View>
+            )}
+
+            {stats && (
+                <View style={styles.section}>
+                    <Text style={styles.sectionTitle}>Estatísticas</Text>
+                    <View style={styles.statusRow}>
+                        <Text style={styles.label}>Usuários Online:</Text>
+                        <Text style={styles.value}>{stats.online_users}</Text>
+                    </View>
+                    <View style={styles.statusRow}>
+                        <Text style={styles.label}>Usuários Offline:</Text>
+                        <Text style={styles.value}>{stats.offline_users}</Text>
+                    </View>
+                    <View style={styles.statusRow}>
+                        <Text style={styles.label}>Total:</Text>
+                        <Text style={styles.value}>{stats.total_users}</Text>
+                    </View>
+                    <View style={styles.statusRow}>
+                        <Text style={styles.label}>Fonte:</Text>
+                        <Text style={styles.value}>{stats.source}</Text>
+                    </View>
+                </View>
+            )}
         </ScrollView>
     );
 };
@@ -405,5 +612,16 @@ const styles = StyleSheet.create({
         color: '#fff',
         fontSize: 12,
         fontWeight: '600',
+    },
+    driverItem: {
+        backgroundColor: '#f8f9fa',
+        padding: 12,
+        borderRadius: 8,
+        marginBottom: 8,
+    },
+    driverText: {
+        fontSize: 12,
+        color: '#666',
+        marginBottom: 2,
     },
 }); 
