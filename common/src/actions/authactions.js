@@ -17,6 +17,9 @@ import {
 
 import store from '../store/store';
 import { firebase } from '../config/configureFirebase';
+import { api } from '../api';
+import { AUTH_LOADING, AUTH_LOADED, AUTH_ERROR } from '../store/types';
+import { getAuth } from '@react-native-firebase/auth';
 // Removendo imports do Firebase Web SDK
 // import { onValue, update, set, off } from "firebase/database";
 // import { onAuthStateChanged, signInWithCredential, signInWithPopup, signOut, sendPasswordResetEmail, signInWithEmailAndPassword, signInWithCustomToken } from "firebase/auth";

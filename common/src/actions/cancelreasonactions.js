@@ -5,9 +5,11 @@ import {
   EDIT_CANCELLATION_REASON
 } from "../store/types";
 import { firebase } from '../config/configureFirebase';
-import store from '../store/store';
+import { api } from '../api';
+import { store } from '../store/store';
 import { getUserId } from '../utils/authUtils';
-import { getAuth } from 'firebase/auth';
+import { getAuth } from '@react-native-firebase/auth';
+import { CANCELREASON_LOADING, CANCELREASON_LOADED, CANCELREASON_ERROR } from '../store/types';
 
 const waitForFirebaseInit = async () => {
   return new Promise((resolve) => {

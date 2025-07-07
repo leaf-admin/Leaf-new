@@ -1,5 +1,10 @@
-// Firebase configuration for React Native environment only
-// This file uses only @react-native-firebase packages to avoid Node.js module conflicts
+// Firebase configuration for Web environment only
+// This file uses Firebase Web SDK
+
+import { initializeApp } from 'firebase/app';
+import { getAuth } from 'firebase/auth';
+import { getDatabase } from 'firebase/database';
+import { getStorage } from 'firebase/storage';
 
 let firebase = {
     app: null,
@@ -8,7 +13,7 @@ let firebase = {
     storage: null,
 }
 
-// Define createFullStructure function before using it
+// Define createFullStructure function
 const createFullStructure = (app, db, auth, storage, config) => {
     return {
         app: app,
@@ -93,17 +98,30 @@ const createFullStructure = (app, db, auth, storage, config) => {
     }
 }
 
-// Initialize Firebase for React Native environment only
+// Initialize Firebase for Web environment
 try {
-    const auth = require('@react-native-firebase/auth').default();
-    const database = require('@react-native-firebase/database').default();
-    const storage = require('@react-native-firebase/storage').default();
+    // Default config for web
+    const defaultConfig = {
+        projectId: "leaf-reactnative",
+        appId: "1:106504629884:web:ada50a78fcf7bf3ea1a3f9",
+        databaseURL: "https://leaf-reactnative-default-rtdb.firebaseio.com",
+        storageBucket: "leaf-reactnative.firebasestorage.app",
+        apiKey: "AIzaSyChYseG1IcmffYHHVYT7MqtLlzfdWKE_fc",
+        authDomain: "leaf-reactnative.firebaseapp.com",
+        messagingSenderId: "106504629884",
+        measurementId: "G-22368DBCY9"
+    };
 
-    firebase = createFullStructure(null, database, auth, storage, null);
+    const app = initializeApp(defaultConfig);
+    const auth = getAuth(app);
+    const database = getDatabase(app);
+    const storage = getStorage(app);
+
+    firebase = createFullStructure(app, database, auth, storage, defaultConfig);
 } catch (error) {
-    console.error('Failed to initialize React Native Firebase:', error);
+    console.error('Failed to initialize Web Firebase:', error);
 }
 
 export {
     firebase
-}
+} 

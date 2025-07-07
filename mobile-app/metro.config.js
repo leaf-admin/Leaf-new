@@ -23,4 +23,28 @@ config.resolver.alias = {
   '@json': path.join(__dirname, '..', 'json'),
 };
 
+// Configurar resolução de módulos adicionais
+config.resolver.nodeModulesPaths = [
+  path.resolve(__dirname, 'node_modules'),
+  path.resolve(__dirname, '..', 'node_modules'),
+];
+
+// Resolver apenas os problemas essenciais do Firebase
+config.resolver.alias = {
+  ...config.resolver.alias,
+  'idb': false,
+  'fs': false,
+  'net': false,
+  'tls': false,
+  'child_process': false,
+  'http': false,
+  'https': false,
+  'zlib': false,
+  'domain': false,
+  'punycode': false,
+  'tty': false,
+  'vm': false,
+  'worker_threads': false,
+};
+
 module.exports = config;

@@ -6,9 +6,12 @@ import {
   CLEAR_SETTINGS_ERROR
 } from "../store/types";
 
-import store from '../store/store';
 import { firebase } from '../config/configureFirebase';
-import { onValue, set } from 'firebase/database';
+import { api } from '../api';
+import { store } from '../store/store';
+import { SETTINGS_LOADING, SETTINGS_LOADED, SETTINGS_ERROR } from '../store/types';
+import { getAuth } from '@react-native-firebase/auth';
+import { onValue, set } from '@react-native-firebase/database';
 
 export const fetchSettings= () => (dispatch) => {
 

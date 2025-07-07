@@ -1,6 +1,6 @@
 import i18n from 'i18n-js';
-import translationsEn from '@json/language-en.json';
-import translationsPtBr from '@json/language-pt-br.json';
+import translationsEn from '../assets/translations/language-en.json';
+import translationsPtBr from '../assets/translations/language-pt-br.json';
 
 console.log('i18n - Carregando traduções...');
 console.log('i18n - Traduções PT-BR:', Object.keys(translationsPtBr).length, 'chaves');

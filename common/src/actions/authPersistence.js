@@ -1,7 +1,9 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { firebase } from '../config/configureFirebase';
-import { signInWithCustomToken, setPersistence, browserLocalPersistence, inMemoryPersistence } from 'firebase/auth';
-import store from '../store/store';
+import { api } from '../api';
+import { store } from '../store/store';
+import { getAuth } from '@react-native-firebase/auth';
+import { signInWithCustomToken, setPersistence, browserLocalPersistence, inMemoryPersistence } from '@react-native-firebase/auth';
 
 const AUTH_UID_KEY = '@auth_uid';
 

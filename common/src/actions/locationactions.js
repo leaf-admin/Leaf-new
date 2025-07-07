@@ -5,9 +5,12 @@ import {
     STOP_LOCATION_FETCH,
     STORE_ADRESSES
 } from "../store/types";
-import store from '../store/store';
 import { firebase } from '../config/configureFirebase';
-import { push, onValue, query, limitToLast, off, set } from 'firebase/database';
+import { api } from '../api';
+import store from '../store/store';
+import { LOCATION_LOADING, LOCATION_LOADED, LOCATION_ERROR } from '../store/types';
+import { getAuth } from '@react-native-firebase/auth';
+import { push, onValue, query, limitToLast, off, set } from '@react-native-firebase/database';
 import { Platform } from 'react-native';
 import { GetDistance } from '../other/GeoFunctions';
 

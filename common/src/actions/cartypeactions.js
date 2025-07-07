@@ -4,10 +4,13 @@ import {
   FETCH_CAR_TYPES_FAILED,
   EDIT_CAR_TYPE
 } from "../store/types";
-import store from '../store/store';
 import { firebase } from '../config/configureFirebase';
-import { onValue, push, remove, set, uploadBytesResumable, getDownloadURL } from 'firebase/database';
-import { ref } from 'firebase/storage';
+import { api } from '../api';
+import store from '../store/store';
+import { CARTYPE_LOADING, CARTYPE_LOADED, CARTYPE_ERROR } from '../store/types';
+import { getAuth } from '@react-native-firebase/auth';
+import { onValue, push, remove, set, uploadBytesResumable, getDownloadURL } from '@react-native-firebase/database';
+import { ref } from '@react-native-firebase/storage';
 
 export const fetchCarTypes = () => (dispatch) => {
 

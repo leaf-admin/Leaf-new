@@ -33,7 +33,6 @@ import { GoogleSignin } from '@react-native-google-signin/google-signin';
 import { TextInputMask } from 'react-native-masked-text';
 import { useSelector, useDispatch } from 'react-redux';
 import { checkUserExists } from 'common/src/actions/authactions';
-import { RecaptchaVerifier, signInWithPhoneNumber } from 'firebase/auth';
 import { useAuth } from '../hooks/useAuth';
 var { width,height } = Dimensions.get('window');
 import ClientIds from '../../config/ClientIds';

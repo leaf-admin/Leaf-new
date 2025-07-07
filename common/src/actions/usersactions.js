@@ -17,12 +17,15 @@ import {
   FETCH_ALL_DRIVERS_FAILED
 } from "../store/types";
 import { firebase } from '../config/configureFirebase';
-import { get, set, push, remove, update, onValue, off, signOut, ref } from 'firebase/database';
+import { api } from '../api';
+import { store } from '../store/store';
+import { USERS_LOADING, USERS_LOADED, USERS_ERROR } from '../store/types';
+import { getAuth } from '@react-native-firebase/auth';
+import { get, set, push, remove, update, onValue, off, signOut, ref } from '@react-native-firebase/database';
 import { waitForFirebaseInit } from '../utils/firebaseUtils';
-import store from '../store/store';
 import getUserData from '../utils/getUserData';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { uploadBytesResumable, getDownloadURL } from 'firebase/storage';
+import { uploadBytesResumable, getDownloadURL } from '@react-native-firebase/storage';
 import { GetDistance } from '../other/GeoFunctions';
 import { Platform } from 'react-native';
 

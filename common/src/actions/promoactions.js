@@ -5,8 +5,11 @@ import {
   EDIT_PROMOS
 } from "../store/types";
 import { firebase } from '../config/configureFirebase';
+import { api } from '../api';
+import { store } from '../store/store';
+import { PROMO_LOADING, PROMO_LOADED, PROMO_ERROR } from '../store/types';
+import { getAuth } from '@react-native-firebase/auth';
 import { getUserId } from '../utils/authUtils';
-import { getAuth } from 'firebase/auth';
 
 const waitForFirebaseInit = async () => {
   return new Promise((resolve) => {

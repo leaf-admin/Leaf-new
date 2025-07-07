@@ -5,8 +5,12 @@ import {
     EDIT_LANGUAGE
 } from "../store/types";
 import { firebase } from '../config/configureFirebase';
+import { api } from '../api';
+import { store } from '../store/store';
+import { LANGUAGE_LOADING, LANGUAGE_LOADED, LANGUAGE_ERROR } from '../store/types';
+import { getAuth } from '@react-native-firebase/auth';
+import { onValue, push, remove, set, update } from '@react-native-firebase/database';
 import { getLangKey } from "../other/getLangKey";
-import { onValue, push, remove, set, update } from 'firebase/database';
 
 export const fetchLanguages = () => (dispatch) => {
 
