@@ -6,7 +6,7 @@ import i18n from '../i18n';
 import { useSelector } from 'react-redux';
 import moment from 'moment/min/moment-with-locales';
 import SegmentedControlTab from 'react-native-segmented-control-tab';
-import { MAIN_COLOR,SECONDORY_COLOR } from '../common/sharedFunctions';
+import { MAIN_COLOR, SECONDORY_COLOR } from '../common/sharedFunctions';
 import { fonts } from '../common/font';
 var { height, width } = Dimensions.get('window');
 

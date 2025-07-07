@@ -21,9 +21,9 @@ var { width } = Dimensions.get('window');
 import i18n from '../i18n';
 import { useDispatch, useSelector } from 'react-redux';
 import { api } from 'common';
-import { MAIN_COLOR,SECONDORY_COLOR } from '../common/sharedFunctions';
+import { MAIN_COLOR, SECONDORY_COLOR } from '../common/sharedFunctions';
 import DownloadReceipt from '../components/DownloadReceipt';
-import { fonts } from '../common/font'
+import { fonts } from '../common/font';
 
 export default function DriverRating(props) {
     const { updateBooking } = api;

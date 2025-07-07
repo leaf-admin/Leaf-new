@@ -500,4 +500,257 @@ node test-load.js
 - Logs: Console do React Native
 - Redis: `docker-compose logs redis`
 - Firebase: `firebase functions:log`
-- Performance: `node test-load.js` 
+- Performance: `node test-load.js`
+
+# 🚀 Guia de Testes de Build Mobile
+
+Este guia explica como usar os testes automatizados para verificar se o app vai carregar corretamente no dispositivo móvel antes de fazer build.
+
+## 📋 Testes Disponíveis
+
+### 1. Teste Completo de Build Mobile
+**Arquivo:** `test-mobile-build.js` / `test-mobile-build.bat`
+
+Verifica:
+- ✅ Configuração do Metro
+- ✅ Dependências no package.json
+- ✅ Imports problemáticos em todos os arquivos
+- ✅ Compatibilidade com React Native
+- ✅ Teste de bundling simulado
+
+### 2. Teste Específico de Imports Redis
+**Arquivo:** `test-redis-imports.js` / `test-redis-imports.bat`
+
+Verifica:
+- ✅ Imports diretos do @redis/client
+- ✅ Imports do redis/ioredis
+- ✅ Referências Redis em strings
+- ✅ Configurações Redis
+
+### 3. Teste Completo (Todos os Testes)
+**Arquivo:** `test-all-mobile.bat`
+
+Executa todos os testes em sequência.
+
+## 🚀 Como Usar
+
+### Opção 1: Script Batch (Recomendado)
+```bash
+# Teste completo (recomendado)
+test-all-mobile.bat
+
+# Ou testes individuais
+test-mobile-build.bat
+test-redis-imports.bat
+```
+
+### Opção 2: Script PowerShell
+```powershell
+# Teste completo
+.\test-all-mobile.ps1
+
+# Ou testes individuais
+.\test-mobile-build.ps1
+```
+
+### Opção 3: Node.js Direto
+```bash
+# Teste completo de build
+node test-mobile-build.js
+
+# Teste específico de Redis
+node test-redis-imports.js
+```
+
+## 📊 Interpretando os Resultados
+
+### ✅ SUCESSO
+```
+🎉 SUCESSO! App deve carregar corretamente no dispositivo móvel!
+✅ Nenhum problema de importação encontrado
+✅ Configuração do Metro está correta
+✅ Dependências estão compatíveis
+```
+
+**Próximos passos:**
+1. `cd mobile-app`
+2. `npx expo start`
+3. Teste no dispositivo/emulador
+
+### ❌ FALHA
+```
+🚨 PROBLEMAS DETECTADOS!
+❌ Corrija os erros antes de fazer build
+```
+
+**Problemas comuns e soluções:**
+
+#### 1. Imports Redis Encontrados
+```
+❌ Importação de módulo Node.js incompatível: @redis/client
+```
+
+**Solução:** Remova imports diretos do Redis e use a API Redis via HTTP endpoints.
+
+#### 2. Dependências Problemáticas
+```
+❌ Dependências problemáticas encontradas: @redis/client, redis
+```
+
+**Solução:** Remova dependências Redis do package.json do mobile-app.
+
+#### 3. Configuração Metro Problemática
+```
+❌ metro.config.js contém configuração problemática
+```
+
+**Solução:** Verifique se o metro.config.js não tem referências a módulos Node.js.
+
+## 🔧 Configuração dos Testes
+
+### Arquivos Verificados
+- `mobile-app/` - App React Native
+- `common/` - Código compartilhado
+- `functions/` - Firebase Functions
+
+### Extensões Verificadas
+- `.js`
+- `.jsx`
+- `.ts`
+- `.tsx`
+
+### Diretórios Ignorados
+- `node_modules/`
+- `.git/`
+- `.expo/`
+- `build/`
+- `dist/`
+- `coverage/`
+
+## 🚨 Problemas Conhecidos Detectados
+
+### Módulos Node.js Incompatíveis
+- `@redis/client`
+- `redis`
+- `ioredis`
+- `node:crypto`
+- `node:fs`
+- `node:path`
+- `node:os`
+- `node:util`
+- `node:events`
+- `node:stream`
+- `node:buffer`
+- `node:url`
+- `node:querystring`
+- `node:punycode`
+- `node:string_decoder`
+- `node:tty`
+- `node:vm`
+- `node:domain`
+- `node:constants`
+- `node:timers`
+
+### Módulos React Native Incompatíveis
+- `fs`
+- `path`
+- `os`
+- `crypto`
+- `stream`
+- `buffer`
+- `util`
+- `events`
+- `url`
+- `querystring`
+- `punycode`
+- `string_decoder`
+- `tty`
+- `vm`
+- `domain`
+- `constants`
+- `timers`
+
+## 💡 Dicas de Uso
+
+### 1. Execute Antes de Cada Build
+```bash
+test-all-mobile.bat
+```
+
+### 2. Execute Após Mudanças no Código
+```bash
+test-redis-imports.bat
+```
+
+### 3. Execute Para Debugging
+```bash
+node test-mobile-build.js
+```
+
+### 4. Integração com CI/CD
+```bash
+# Exit code 0 = sucesso, 1 = falha
+node test-all-mobile.js
+if %ERRORLEVEL% NEQ 0 (
+    echo "Testes falharam - não fazer build"
+    exit 1
+)
+```
+
+## 🔍 Troubleshooting
+
+### Erro: "Arquivo não encontrado"
+- Verifique se os diretórios `mobile-app/` e `common/` existem
+- Verifique se os arquivos não foram movidos
+
+### Erro: "Erro ao ler arquivo"
+- Verifique permissões de arquivo
+- Verifique se o arquivo não está corrompido
+
+### Erro: "Timeout na verificação de dependências"
+- Verifique conexão com internet
+- Verifique se o npm/yarn está funcionando
+
+### Erro: "Dependências problemáticas"
+- Remova dependências Redis do package.json
+- Execute `npm install` novamente
+
+## 📝 Logs e Relatórios
+
+Os testes geram logs detalhados com:
+- ✅ Arquivos verificados com sucesso
+- ❌ Erros encontrados
+- ⚠️ Avisos
+- 📊 Estatísticas de tempo e arquivos
+
+### Exemplo de Relatório
+```
+==================================================
+📊 RELATÓRIO FINAL
+==================================================
+⏱️  Duração: 2345ms
+📁 Arquivos verificados: 156
+✅ Sucessos: 154
+❌ Erros: 2
+⚠️  Avisos: 0
+```
+
+## 🎯 Benefícios
+
+1. **Economia de Tempo:** Detecta problemas antes do build
+2. **Prevenção de Crashes:** Identifica imports incompatíveis
+3. **Debugging Rápido:** Localiza problemas específicos
+4. **Confiança:** Garante que o app vai carregar
+5. **Automação:** Pode ser integrado ao CI/CD
+
+## 🔄 Atualizações
+
+Para atualizar os testes:
+1. Edite os arquivos `.js` correspondentes
+2. Adicione novos padrões de detecção se necessário
+3. Teste as mudanças localmente
+4. Commit as alterações
+
+---
+
+**💡 Dica:** Execute `test-all-mobile.bat` sempre antes de fazer build para garantir que o app vai carregar corretamente no dispositivo móvel! 

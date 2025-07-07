@@ -1,6 +1,6 @@
 import React from 'react';
 import { View, Text, ScrollView, StyleSheet } from 'react-native';
-import { colors } from '../common/theme';
+import { colors } from './theme';
 
 export const PrivacyPolicy = () => {
   return (

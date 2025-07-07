@@ -7,7 +7,7 @@ import { api } from 'common';
 import { FirebaseContext } from 'common/src/config/configureFirebase';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useTheme } from '@react-navigation/native';
-import { fonts } from "../common/font";
+import { fonts } from '../common/font';
 import { logOut, updateProfileImage } from 'common/src/actions/authactions';
 import { colors, lightTheme } from '../common/theme';
 import { FontAwesome, Ionicons, MaterialIcons, MaterialCommunityIcons, Entypo } from '@expo/vector-icons';

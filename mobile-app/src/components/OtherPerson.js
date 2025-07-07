@@ -6,8 +6,8 @@ import {
     Text
 } from 'react-native';
 import { colors } from '../common/theme';
-import { Input, CheckBox } from 'react-native-elements';
 import { fonts } from '../common/font';
+import { Input, CheckBox } from 'react-native-elements';
 import i18n from '../i18n';
 var { width, height } = Dimensions.get('window');
 export const MAIN_COLOR = colors.BLACK;

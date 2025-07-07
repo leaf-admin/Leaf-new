@@ -1,7 +1,7 @@
 import React from "react";
 import { Modal, View, StyleSheet, TextInput } from "react-native";
 import { Icon } from "react-native-elements";
-import { colors } from "../common/theme";
+import { colors } from '../common/theme';
 import { fonts } from '../common/font';
 
 import i18n from '../i18n';

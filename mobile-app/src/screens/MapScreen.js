@@ -48,6 +48,9 @@ import { GoogleMapApiConfig } from '../../config/GoogleMapApiConfig';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import splashImg from '../../assets/images/splash.png';
 import BottomMenu from '../components/BottomMenu';
+import OptionModal from '../components/OptionModal';
+import GoogleMapApiConfig from '../../config/GoogleMapApiConfig';
+import TollUtils from '../../../common/src/other/TollUtils';
 
 const hasNotch = DeviceInfo.hasNotch();
 
