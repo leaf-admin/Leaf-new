@@ -2,120 +2,123 @@ import { Platform } from 'react-native';
 
 class RedisLocationService {
     constructor() {
-        this.client = null;
-        this.isInitialized = false;
-        this.isConnected = false;
+        this.isAvailable = Platform.OS === 'web';
+        this.baseUrl = 'http://192.168.0.39:5001/leaf-app-91dfdce0/us-central1';
     }
 
+    // Inicializar serviço
     async initialize() {
-        if (this.isInitialized) return;
-
-        try {
-            // Verificar se estamos no React Native
-            if (Platform.OS !== 'web') {
-                console.log('📱 React Native detectado - usando fallback para Firebase');
-                this.isInitialized = true;
-                return;
+        if (Platform.OS === 'web') {
+            try {
+                console.log('🌐 Web detectado - Redis Location Service via API disponível');
+                return true;
+            } catch (error) {
+                console.error('❌ Erro ao inicializar Redis Location Service:', error);
+                return false;
             }
-
-            // Apenas no web, tentar conectar ao Redis
-            if (typeof window !== 'undefined') {
-                // Implementação web seria aqui
-                console.log('🌐 Web detectado - Redis disponível');
-            }
-
-            this.isInitialized = true;
-        } catch (error) {
-            console.error('❌ Erro ao inicializar Redis Location Service:', error);
-            this.isInitialized = true; // Marcar como inicializado para evitar loops
-        }
-    }
-
-    async connect() {
-        if (Platform.OS !== 'web') {
+        } else {
             console.log('📱 Redis não disponível no React Native - usando Firebase');
             return false;
         }
+    }
 
+    // Método genérico para fazer requisições
+    async makeRequest(endpoint, method = 'GET', data = null) {
         try {
-            // Implementação web seria aqui
-            this.isConnected = true;
-            return true;
+            const url = `${this.baseUrl}${endpoint}`;
+            const options = {
+                method,
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+            };
+
+            if (data && method !== 'GET') {
+                options.body = JSON.stringify(data);
+            }
+
+            const response = await fetch(url, options);
+            
+            if (!response.ok) {
+                throw new Error(`HTTP error! status: ${response.status}`);
+            }
+
+            return await response.json();
         } catch (error) {
-            console.error('❌ Erro ao conectar Redis:', error);
-            return false;
+            console.error(`❌ Redis Location API Error (${endpoint}):`, error);
+            throw error;
         }
     }
 
-    async saveUserLocation(userId, locationData) {
-        if (Platform.OS !== 'web') {
-            console.log('📱 Salvando localização via Firebase (fallback)');
-            // Aqui você pode implementar o save no Firebase
-            return true;
+    // Atualizar localização do usuário
+    async updateUserLocation(userId, lat, lng, timestamp = Date.now()) {
+        if (!this.isAvailable) {
+            console.log('⚠️ Redis não disponível, pulando atualização de localização');
+            return null;
         }
 
         try {
-            // Implementação Redis seria aqui
-            console.log('📍 Localização salva no Redis');
-            return true;
+            const result = await this.makeRequest('/update_user_location', 'POST', {
+                userId,
+                latitude: lat,
+                longitude: lng,
+                timestamp
+            });
+            
+            console.log('📍 Localização salva via Redis API');
+            return result;
         } catch (error) {
-            console.error('❌ Erro ao salvar localização:', error);
-            return false;
+            console.error('❌ Erro ao salvar localização via Redis API:', error);
+            return null;
         }
     }
 
+    // Obter localização do usuário
     async getUserLocation(userId) {
-        if (Platform.OS !== 'web') {
-            console.log('📱 Buscando localização via Firebase (fallback)');
-            // Aqui você pode implementar a busca no Firebase
+        if (!this.isAvailable) {
+            console.log('⚠️ Redis não disponível, não é possível obter localização');
             return null;
         }
 
         try {
-            // Implementação Redis seria aqui
-            return null;
+            const result = await this.makeRequest(`/get_user_location/${userId}`, 'GET');
+            return result.location || null;
         } catch (error) {
-            console.error('❌ Erro ao buscar localização:', error);
+            console.error('❌ Erro ao obter localização via Redis API:', error);
             return null;
         }
     }
 
+    // Buscar usuários próximos
+    async findNearbyUsers(lat, lng, radius = 5) {
+        if (!this.isAvailable) {
+            console.log('⚠️ Redis não disponível, não é possível buscar usuários próximos');
+            return [];
+        }
+
+        try {
+            const result = await this.makeRequest('/get_nearby_drivers', 'POST', {
+                latitude: lat,
+                longitude: lng,
+                radius
+            });
+            
+            return result.drivers || [];
+        } catch (error) {
+            console.error('❌ Erro ao buscar usuários próximos via Redis API:', error);
+            return [];
+        }
+    }
+
+    // Buscar motoristas próximos (alias para findNearbyUsers)
     async getNearbyDrivers(lat, lng, radius = 5) {
-        if (Platform.OS !== 'web') {
-            console.log('📱 Buscando motoristas via Firebase (fallback)');
-            // Retornar array vazio para usar fallback no Firebase
-            return [];
-        }
-
-        try {
-            // Implementação Redis seria aqui
-            return [];
-        } catch (error) {
-            console.error('❌ Erro ao buscar motoristas próximos:', error);
-            return [];
-        }
-    }
-
-    async getOnlineUsers() {
-        if (Platform.OS !== 'web') {
-            console.log('📱 Buscando usuários online via Firebase (fallback)');
-            return [];
-        }
-
-        try {
-            // Implementação Redis seria aqui
-            return [];
-        } catch (error) {
-            console.error('❌ Erro ao buscar usuários online:', error);
-            return [];
-        }
+        return this.findNearbyUsers(lat, lng, radius);
     }
 
     // Método para verificar se o Redis está disponível
     isRedisAvailable() {
-        return Platform.OS === 'web' && this.isConnected;
+        return this.isAvailable;
     }
 }
 
-// Exportar instância singleton
 export const redisLocationService = new RedisLocationService(); 

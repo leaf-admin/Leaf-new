@@ -24,8 +24,6 @@ import getUserData from '../utils/getUserData';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { uploadBytesResumable, getDownloadURL } from 'firebase/storage';
 import { GetDistance } from '../other/GeoFunctions';
-import { initializeRedis, USE_REDIS_LOCATION } from '../config/redisConfig';
-import { redisLocationService } from '../services/redisLocationService';
 import { Platform } from 'react-native';
 
 export const fetchUsers = () => (dispatch) => {
@@ -687,7 +685,7 @@ export const getUser = async (uid) => {
   }
 };
 
-// Nova função otimizada para buscar motoristas próximos usando Redis
+// Função simplificada para buscar motoristas próximos (apenas Firebase)
 export const fetchNearbyDrivers = (lat, lng, radius = 5, options = {}) => async (dispatch) => {
   const {
     driversRef,
@@ -704,71 +702,7 @@ export const fetchNearbyDrivers = (lat, lng, radius = 5, options = {}) => async 
   });
 
   try {
-    // 1. Tentar buscar no Redis primeiro (apenas no web)
-    if (USE_REDIS_LOCATION && Platform.OS === 'web') {
-      try {
-        await initializeRedis();
-        const redisDrivers = await redisLocationService.getNearbyDrivers(lat, lng, radius);
-        
-        if (redisDrivers && redisDrivers.length > 0) {
-          console.log('📍 Motoristas encontrados via Redis:', redisDrivers.length);
-          
-          // Buscar dados completos dos motoristas no Firebase
-          const driverIds = redisDrivers.map(driver => driver.uid);
-          const driversData = await Promise.all(
-            driverIds.map(async (driverId) => {
-              try {
-                const driverRef = ref(firebase.database, `users/${driverId}`);
-                const driverSnapshot = await get(driverRef);
-                const driverData = driverSnapshot.val();
-                
-                if (driverData && 
-                    driverData.approved === true && 
-                    driverData.driverActiveStatus === true &&
-                    ((driverData.licenseImage && settings.license_image_required) || !settings.license_image_required) &&
-                    (((driverData.carApproved && settings.carType_required) || !settings.carType_required)) &&
-                    ((driverData.term && settings.term_required) || !settings.term_required)) {
-                  
-                  const redisDriver = redisDrivers.find(rd => rd.uid === driverId);
-                  return {
-                    id: driverId,
-                    location: redisDriver.coordinates,
-                    distance: redisDriver.distance,
-                    carType: driverData.carType || null,
-                    vehicleNumber: driverData.vehicleNumber || null,
-                    fleetadmin: driverData.fleetadmin || null,
-                    firstName: driverData.firstName,
-                    lastName: driverData.lastName,
-                    queue: driverData.queue,
-                    source: 'redis'
-                  };
-                }
-                return null;
-              } catch (error) {
-                console.error('❌ Erro ao buscar dados do motorista:', driverId, error);
-                return null;
-              }
-            })
-          );
-
-          const validDrivers = driversData.filter(driver => driver !== null);
-          
-          if (validDrivers.length > 0) {
-            dispatch({
-              type: FETCH_ALL_DRIVERS_SUCCESS,
-              payload: validDrivers
-            });
-            return validDrivers;
-          }
-        }
-      } catch (redisError) {
-        console.error('❌ Erro ao buscar motoristas no Redis:', redisError);
-        // Continua para fallback do Firebase
-      }
-    }
-
-    // 2. Fallback para Firebase (método atual)
-    console.log('📍 Usando Firebase para buscar motoristas (fallback)');
+    console.log('📍 Usando Firebase para buscar motoristas');
     return new Promise((resolve) => {
       onValue(driversRef, snapshot => {
         if (snapshot.val()) {

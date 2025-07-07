@@ -1,194 +1,210 @@
-import auth from '@react-native-firebase/auth';
+// RedisApiService.js - Serviço para acessar Redis via webhooks/API
 import { Platform } from 'react-native';
 
-// Configuração da API
-const API_BASE_URL = __DEV__ 
-    ? 'http://localhost:5001/your-project/us-central1'  // Desenvolvimento
-    : 'https://us-central1-your-project.cloudfunctions.net'; // Produção
+// Configuração da API base
+const API_BASE_URL = 'http://192.168.0.39:5001/leaf-app-91dfdce0/us-central1'; // Ajuste conforme necessário
 
 class RedisApiService {
     constructor() {
         this.baseUrl = API_BASE_URL;
-        this.isInitialized = false;
+        this.isAvailable = Platform.OS === 'web'; // Apenas web por enquanto
     }
 
-    // Obter token de autenticação
-    async getAuthToken() {
+    // Método genérico para fazer requisições
+    async makeRequest(endpoint, method = 'GET', data = null) {
         try {
-            const user = auth().currentUser;
-            if (!user) {
-                throw new Error('Usuário não autenticado');
-            }
-            return await user.getIdToken();
-        } catch (error) {
-            console.error('❌ Erro ao obter token:', error);
-            throw error;
-        }
-    }
-
-    // Fazer requisição autenticada
-    async makeAuthenticatedRequest(endpoint, options = {}) {
-        try {
-            const token = await this.getAuthToken();
-            
-            const response = await fetch(`${this.baseUrl}${endpoint}`, {
-                ...options,
+            const url = `${this.baseUrl}${endpoint}`;
+            const options = {
+                method,
                 headers: {
                     'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${token}`,
-                    ...options.headers,
                 },
-            });
+            };
 
+            if (data && method !== 'GET') {
+                options.body = JSON.stringify(data);
+            }
+
+            const response = await fetch(url, options);
+            
             if (!response.ok) {
-                const errorData = await response.json().catch(() => ({}));
-                throw new Error(errorData.error || `HTTP ${response.status}`);
+                throw new Error(`HTTP error! status: ${response.status}`);
             }
 
             return await response.json();
         } catch (error) {
-            console.error(`❌ Erro na requisição ${endpoint}:`, error);
+            console.error(`❌ Redis API Error (${endpoint}):`, error);
             throw error;
         }
     }
 
-    // Salvar localização do usuário
-    async saveUserLocation(lat, lng, timestamp = null) {
-        try {
-            console.log('📍 Salvando localização via API:', { lat, lng, timestamp });
-            
-            const response = await this.makeAuthenticatedRequest('/saveUserLocation', {
-                method: 'POST',
-                body: JSON.stringify({
-                    lat: parseFloat(lat),
-                    lng: parseFloat(lng),
-                    timestamp: timestamp || Date.now()
-                })
-            });
+    // Atualizar localização do usuário
+    async updateUserLocation(userId, lat, lng, timestamp = Date.now()) {
+        if (!this.isAvailable) {
+            console.log('📱 Redis API não disponível no React Native');
+            return null;
+        }
 
-            console.log('✅ Localização salva com sucesso via API');
-            return response;
+        try {
+            const result = await this.makeRequest('/update_user_location', 'POST', {
+                userId,
+                latitude: lat,
+                longitude: lng,
+                timestamp
+            });
+            
+            console.log('📍 Localização atualizada via Redis API:', userId);
+            return result;
         } catch (error) {
-            console.error('❌ Erro ao salvar localização via API:', error);
-            throw error;
+            console.error('❌ Erro ao atualizar localização via Redis API:', error);
+            return null;
         }
     }
 
     // Buscar motoristas próximos
-    async getNearbyDrivers(lat, lng, radius = 5000, limit = 10) {
+    async getNearbyDrivers(lat, lng, radius = 5) {
+        if (!this.isAvailable) {
+            console.log('📱 Redis API não disponível no React Native');
+            return [];
+        }
+
         try {
-            console.log('🔍 Buscando motoristas próximos via API:', { lat, lng, radius, limit });
+            const result = await this.makeRequest('/get_nearby_drivers', 'POST', {
+                latitude: lat,
+                longitude: lng,
+                radius
+            });
             
-            const params = new URLSearchParams({
-                lat: lat.toString(),
-                lng: lng.toString(),
-                radius: radius.toString(),
-                limit: limit.toString()
-            });
-
-            const response = await this.makeAuthenticatedRequest(`/getNearbyDrivers?${params}`, {
-                method: 'GET'
-            });
-
-            console.log(`✅ Encontrados ${response.drivers?.length || 0} motoristas via API (${response.source})`);
-            return response;
+            console.log('📍 Motoristas próximos via Redis API:', result.drivers?.length || 0);
+            return result.drivers || [];
         } catch (error) {
-            console.error('❌ Erro ao buscar motoristas via API:', error);
-            throw error;
+            console.error('❌ Erro ao buscar motoristas próximos via Redis API:', error);
+            return [];
         }
     }
 
-    // Obter localização de um usuário específico
-    async getUserLocation(uid) {
-        try {
-            console.log('📍 Obtendo localização do usuário via API:', uid);
-            
-            const response = await this.makeAuthenticatedRequest(`/getUserLocation/${uid}`, {
-                method: 'GET'
-            });
+    // Iniciar tracking de viagem
+    async startTripTracking(tripId, driverId, passengerId, initialLocation) {
+        if (!this.isAvailable) {
+            console.log('📱 Redis API não disponível no React Native');
+            return null;
+        }
 
-            console.log('✅ Localização obtida com sucesso via API');
-            return response;
+        try {
+            const result = await this.makeRequest('/start_trip_tracking', 'POST', {
+                tripId,
+                driverId,
+                passengerId,
+                initialLocation
+            });
+            
+            console.log('🚗 Tracking iniciado via Redis API:', tripId);
+            return result;
         } catch (error) {
-            console.error('❌ Erro ao obter localização via API:', error);
-            throw error;
+            console.error('❌ Erro ao iniciar tracking via Redis API:', error);
+            return null;
         }
     }
 
-    // Atualizar status do motorista
-    async updateDriverStatus(status, isOnline) {
-        try {
-            console.log('🔄 Atualizando status do motorista via API:', { status, isOnline });
-            
-            const response = await this.makeAuthenticatedRequest('/updateDriverStatus', {
-                method: 'POST',
-                body: JSON.stringify({
-                    status: status || 'available',
-                    isOnline: isOnline || false
-                })
-            });
+    // Atualizar localização da viagem
+    async updateTripLocation(tripId, lat, lng, timestamp = Date.now()) {
+        if (!this.isAvailable) {
+            console.log('📱 Redis API não disponível no React Native');
+            return null;
+        }
 
-            console.log('✅ Status atualizado com sucesso via API');
-            return response;
+        try {
+            const result = await this.makeRequest('/update_trip_location', 'POST', {
+                tripId,
+                latitude: lat,
+                longitude: lng,
+                timestamp
+            });
+            
+            console.log('📍 Localização da viagem atualizada via Redis API:', tripId);
+            return result;
         } catch (error) {
-            console.error('❌ Erro ao atualizar status via API:', error);
-            throw error;
+            console.error('❌ Erro ao atualizar localização da viagem via Redis API:', error);
+            return null;
+        }
+    }
+
+    // Finalizar tracking de viagem
+    async endTripTracking(tripId, endLocation) {
+        if (!this.isAvailable) {
+            console.log('📱 Redis API não disponível no React Native');
+            return null;
+        }
+
+        try {
+            const result = await this.makeRequest('/end_trip_tracking', 'POST', {
+                tripId,
+                endLocation
+            });
+            
+            console.log('✅ Tracking finalizado via Redis API:', tripId);
+            return result;
+        } catch (error) {
+            console.error('❌ Erro ao finalizar tracking via Redis API:', error);
+            return null;
+        }
+    }
+
+    // Obter dados da viagem
+    async getTripData(tripId) {
+        if (!this.isAvailable) {
+            console.log('📱 Redis API não disponível no React Native');
+            return null;
+        }
+
+        try {
+            const result = await this.makeRequest(`/get_trip_data/${tripId}`, 'GET');
+            
+            console.log('📍 Dados da viagem obtidos via Redis API:', tripId);
+            return result.tripData || null;
+        } catch (error) {
+            console.error('❌ Erro ao obter dados da viagem via Redis API:', error);
+            return null;
         }
     }
 
     // Obter estatísticas do Redis
     async getRedisStats() {
-        try {
-            console.log('📊 Obtendo estatísticas do Redis via API');
-            
-            const response = await this.makeAuthenticatedRequest('/getRedisStats', {
-                method: 'GET'
-            });
+        if (!this.isAvailable) {
+            console.log('📱 Redis API não disponível no React Native');
+            return null;
+        }
 
-            console.log('✅ Estatísticas obtidas com sucesso via API');
-            return response;
+        try {
+            const result = await this.makeRequest('/get_redis_stats', 'GET');
+            
+            console.log('📊 Estatísticas do Redis obtidas via API');
+            return result.stats || null;
         } catch (error) {
-            console.error('❌ Erro ao obter estatísticas via API:', error);
-            throw error;
+            console.error('❌ Erro ao obter estatísticas do Redis via API:', error);
+            return null;
         }
     }
 
     // Verificar se o serviço está disponível
-    async checkServiceHealth() {
-        try {
-            const response = await this.makeAuthenticatedRequest('/getRedisStats', {
-                method: 'GET'
-            });
-            return response.success;
-        } catch (error) {
-            console.log('⚠️ Serviço Redis API não disponível:', error.message);
-            return false;
-        }
+    isServiceAvailable() {
+        return this.isAvailable;
     }
 
-    // Inicializar o serviço
-    async initialize() {
-        if (this.isInitialized) return;
+    // Testar conexão com a API
+    async testConnection() {
+        if (!this.isAvailable) {
+            return { available: false, reason: 'React Native não suportado' };
+        }
 
         try {
-            console.log('🚀 Inicializando Redis API Service');
-            
-            // Verificar se estamos no React Native
-            if (Platform.OS !== 'web') {
-                console.log('📱 Redis API Service inicializado para React Native');
-            } else {
-                console.log('🌐 Redis API Service inicializado para Web');
-            }
-
-            this.isInitialized = true;
+            const result = await this.makeRequest('/health', 'GET');
+            return { available: true, data: result };
         } catch (error) {
-            console.error('❌ Erro ao inicializar Redis API Service:', error);
-            this.isInitialized = true; // Marcar como inicializado para evitar loops
+            return { available: false, reason: error.message };
         }
     }
 }
 
 // Instância singleton
-const redisApiService = new RedisApiService();
-
-export default redisApiService; 
+export const redisApiService = new RedisApiService(); 
