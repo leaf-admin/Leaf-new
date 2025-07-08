@@ -24,6 +24,15 @@ export default function UserInfoScreen({ navigation, route }) {
     const cpfRef = useRef(null);
     const passwordRef = useRef(null);
     const emailRef = useRef(null);
+    const [userType, setUserType] = React.useState(route?.params?.userType || null);
+
+    React.useEffect(() => {
+        if (!userType) {
+            AsyncStorage.getItem('@user_type').then(type => {
+                if (type) setUserType(type);
+            });
+        }
+    }, []);
 
     useEffect(() => {
         setCpf(""); // Garante que o campo CPF sempre inicie vazio ao montar a tela
@@ -206,6 +215,11 @@ export default function UserInfoScreen({ navigation, route }) {
         } finally {
             setIsLoading(false);
         }
+    };
+
+    // Ao avançar para OTP:
+    const handleSendOTP = (phone) => {
+        navigation.navigate('OTP', { phone, userType });
     };
 
     return (

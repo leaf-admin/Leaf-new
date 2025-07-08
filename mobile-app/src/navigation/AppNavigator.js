@@ -32,12 +32,14 @@ import {
     CarsScreen,
     CarEditScreen,
     WelcomeScreen,
+    CompleteRegistrationScreen,
 } from '../screens';
 import DriverDocumentsScreen from '../screens/DriverDocumentsScreen';
 import Complain from '../screens/Complain';
 import OTPScreen from '../screens/OTPScreen';
 import UserInfoScreen from '../screens/UserInfoScreen';
 import AppCommon from '../screens/AppCommon';
+import ProfileSelectionScreen from '../screens/ProfileSelectionScreen';
 var { height, width } = Dimensions.get('window');
 import { useSelector } from "react-redux";
 import i18n from '../i18n';
@@ -287,20 +289,17 @@ export default function AppContainer() {
 
     return (
         <NavigationContainer ref={navigationRef}>
-            <AppCommon>
-                <Stack.Navigator
-                    initialRouteName={initialRoute ? "TabRoot" : "Welcome"}
-                    screenOptions={({ route }) => ({
-                        animationTypeForReplace: 'pop',
-                        animationEnabled: true,
-                        cardStyleInterpolator: CardStyleInterpolators.forHorizontalIOS,
-                        transitionSpec: {
-                            open: { animation: 'timing', config: { duration: 300 } },
-                            close: { animation: 'timing', config: { duration: 300 } },
-                        },
-                    })}
-                >
-                    {authState.profile && authState.profile.uid ?
+            <Stack.Navigator
+                initialRouteName={initialRoute || 'Welcome'}
+                screenOptions={screenOptions}
+            >
+                <Stack.Screen name="Welcome" component={WelcomeScreen} options={{ headerShown: false }} />
+                <Stack.Screen name="ProfileSelection" component={ProfileSelectionScreen} options={{ headerShown: false }} />
+                <Stack.Screen name="Login" component={LoginScreen} options={{ headerShown: false }} />
+                <Stack.Screen name="PhoneScreen" component={UserInfoScreen} options={{ headerShown: false }} />
+                <Stack.Screen name="OTP" component={OTPScreen} options={{ headerShown: false }} />
+                <Stack.Screen name="CompleteRegistration" component={CompleteRegistrationScreen} options={{ headerShown: false }} />
+                {authState.profile && authState.profile.uid ?
                         <Stack.Group>
                             <Stack.Screen name="TabRoot" component={TabRoot}  options={{headerShown: false,}}/>
                             <Stack.Screen name="Profile" component={ProfileScreen} options={{ title: t('profile_setting_menu'),...screenOptions}}/>
@@ -323,16 +322,7 @@ export default function AppContainer() {
                             <Stack.Screen name="driverDocuments" component={DriverDocumentsScreen} options={{ title: t('driver_documents'),...screenOptions }}/>
                         </Stack.Group>
                     : null}
-                    <Stack.Screen name="Welcome" component={WelcomeScreen} options={{headerShown: false}}/>
-                    <Stack.Screen name="Login" component={LoginScreen} options={{
-                        headerShown: false,
-                        cardStyleInterpolator: CardStyleInterpolators.forFadeFromBottomAndroid,
-                    }}/>
-                    <Stack.Screen name="Registration" component={RegistrationPage} options={{headerShown: false}}/>
-                    <Stack.Screen name="OTP" component={OTPScreen} options={{headerShown: false}}/>
-                    <Stack.Screen name="UserInfo" component={UserInfoScreen} options={{headerShown: false}}/>
-                </Stack.Navigator>
-            </AppCommon>
+            </Stack.Navigator>
         </NavigationContainer>
     );
 }

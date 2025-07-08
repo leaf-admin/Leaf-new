@@ -63,7 +63,7 @@ export default function WelcomeScreen({ navigation }) {
         useNativeDriver: true,
       })
     ]).start(() => {
-      navigation.navigate('Login');
+      navigation.navigate('ProfileSelection');
       setButtonDisabled(false);
       buttonAnim.setValue(1);
     });

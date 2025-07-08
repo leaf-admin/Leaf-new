@@ -10,12 +10,14 @@ import {
 import { TextInputMask } from 'react-native-masked-text';
 import { Ionicons } from '@expo/vector-icons';
 import rnauth from '@react-native-firebase/auth';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 export default function OTPScreen({ navigation, route }) {
     const [otp, setOtp] = useState("");
     const [timer, setTimer] = useState(59);
     const [canResend, setCanResend] = useState(false);
     const { phone, verificationId } = route.params || {};
+    const [userType, setUserType] = React.useState(route?.params?.userType || null);
 
     // Guardar referência do timer para poder limpar manualmente
     const timerRef = useRef();
@@ -36,6 +38,14 @@ export default function OTPScreen({ navigation, route }) {
             }
         };
     }, [timer]);
+
+    useEffect(() => {
+        if (!userType) {
+            AsyncStorage.getItem('@user_type').then(type => {
+                if (type) setUserType(type);
+            });
+        }
+    }, []);
 
     const handleContinue = async () => {
         if (!otp || otp.replace(/\D/g, '').length !== 6) {
@@ -125,6 +135,11 @@ export default function OTPScreen({ navigation, route }) {
             }
         };
     }, []);
+
+    // Ao avançar para cadastro final:
+    const handleCompleteRegistration = (otpData) => {
+        navigation.navigate('CompleteRegistration', { ...otpData, userType });
+    };
 
     return (
         <View style={styles.containerCustom}>
