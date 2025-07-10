@@ -59,8 +59,6 @@ const Stack = createStackNavigator();
 const Tab = createBottomTabNavigator();
 
 export default function AppContainer() {
-    console.log("AppNavigator - Iniciando renderização");
-    
     const { t } = i18n;
     const isRTL = i18n.locale.indexOf('he') === 0 || i18n.locale.indexOf('ar') === 0;
     const [authState, setAuthState] = useState({ profile: null });
@@ -75,35 +73,41 @@ export default function AppContainer() {
     useEffect(() => {
         const loadAuthState = async () => {
             try {
+                console.log("AppNavigator - Iniciando carregamento do estado de autenticação");
                 setIsLoading(true);
                 const userData = await AsyncStorage.getItem('@user_data');
+                console.log("AppNavigator - Dados do usuário carregados:", !!userData);
+                
                 if (userData) {
                     const profile = JSON.parse(userData);
+                    console.log("AppNavigator - Perfil carregado:", {
+                        uid: profile.uid,
+                        usertype: profile.usertype,
+                        email: profile.email
+                    });
                     setAuthState({ profile });
                     
                     // Set initial route based on user type
                     if (profile.usertype === 'customer') {
                         setInitialRoute('Map');
+                        console.log("AppNavigator - Definindo rota inicial para Map (customer)");
                     } else if (profile.usertype === 'driver') {
                         setInitialRoute('DriverTrips');
+                        console.log("AppNavigator - Definindo rota inicial para DriverTrips (driver)");
                     }
+                } else {
+                    console.log("AppNavigator - Nenhum usuário autenticado encontrado");
                 }
             } catch (error) {
-                console.error('Erro ao carregar estado de autenticação:', error);
+                console.error('AppNavigator - Erro ao carregar estado de autenticação:', error);
             } finally {
+                console.log("AppNavigator - Finalizando carregamento do estado de autenticação");
                 setIsLoading(false);
             }
         };
 
         loadAuthState();
     }, []);
-
-    console.log("AppNavigator - Estado de autenticação:", {
-        hasProfile: !!authState.profile,
-        userType: authState.profile?.usertype,
-        initialRoute,
-        isLoading
-    });
 
     useEffect(() => {
       responseListener.current = Notifications.addNotificationResponseReceivedListener(response => {
@@ -283,45 +287,59 @@ export default function AppContainer() {
         );
     }
 
+    console.log("AppNavigator - Renderizando com estado:", {
+        isLoading,
+        hasProfile: !!authState.profile,
+        userType: authState.profile?.usertype,
+        initialRoute
+    });
+
     if (isLoading) {
-        return null; // Or a loading screen if you have one
+        console.log("AppNavigator - Renderizando WelcomeScreen (loading)");
+        return <WelcomeScreen />;
     }
 
+    if (!authState.profile || !authState.profile.uid) {
+        console.log("AppNavigator - Renderizando fluxo de onboarding (usuário não autenticado)");
+        // Usuário não autenticado: fluxo de onboarding CORRIGIDO
+        return (
+            <NavigationContainer ref={navigationRef}>
+                <Stack.Navigator initialRouteName="Welcome" screenOptions={screenOptions}>
+                    <Stack.Screen name="Welcome" component={WelcomeScreen} options={{ headerShown: false }} />
+                    <Stack.Screen name="ProfileSelection" component={ProfileSelectionScreen} options={{ headerShown: false }} />
+                    <Stack.Screen name="PhoneScreen" component={UserInfoScreen} options={{ headerShown: false }} />
+                    <Stack.Screen name="OTP" component={OTPScreen} options={{ headerShown: false }} />
+                    <Stack.Screen name="CompleteRegistration" component={CompleteRegistrationScreen} options={{ headerShown: false }} />
+                    <Stack.Screen name="Login" component={LoginScreen} options={{ headerShown: false }} />
+                </Stack.Navigator>
+            </NavigationContainer>
+        );
+    }
+
+    console.log("AppNavigator - Renderizando fluxo principal (usuário autenticado)");
+    // Usuário autenticado: fluxo principal
     return (
         <NavigationContainer ref={navigationRef}>
-            <Stack.Navigator
-                initialRouteName={initialRoute || 'Welcome'}
-                screenOptions={screenOptions}
-            >
-                <Stack.Screen name="Welcome" component={WelcomeScreen} options={{ headerShown: false }} />
-                <Stack.Screen name="ProfileSelection" component={ProfileSelectionScreen} options={{ headerShown: false }} />
-                <Stack.Screen name="Login" component={LoginScreen} options={{ headerShown: false }} />
-                <Stack.Screen name="PhoneScreen" component={UserInfoScreen} options={{ headerShown: false }} />
-                <Stack.Screen name="OTP" component={OTPScreen} options={{ headerShown: false }} />
-                <Stack.Screen name="CompleteRegistration" component={CompleteRegistrationScreen} options={{ headerShown: false }} />
-                {authState.profile && authState.profile.uid ?
-                        <Stack.Group>
-                            <Stack.Screen name="TabRoot" component={TabRoot}  options={{headerShown: false,}}/>
-                            <Stack.Screen name="Profile" component={ProfileScreen} options={{ title: t('profile_setting_menu'),...screenOptions}}/>
-                            <Stack.Screen name="editUser" component={EditProfilePage} options={{ title: t('update_profile_title'),...screenOptions }}/>
-                            <Stack.Screen name="Search" component={SearchScreen} options={{ title: t('search'),...screenOptions }}/>
-                            <Stack.Screen name="DriverRating" component={DriverRating} options={{ title: t('rate_ride'),headerLeft: ()=> null,...screenOptions }}/>
-                            <Stack.Screen name="PaymentDetails" component={PaymentDetails} options={{ title: t('payment'),...screenOptions }}/>
-                            <Stack.Screen name="BookedCab" component={BookedCabScreen} options={{headerShown: false }}/>
-                            <Stack.Screen name="RideDetails" component={RideDetails} options={{ title: t('ride_details_page_title'),...screenOptions }}/>
-                            <Stack.Screen name="onlineChat" component={OnlineChat} options={{ title: t('chat_title'),...screenOptions }}/>
-                            <Stack.Screen name="addMoney" component={AddMoneyScreen} options={{ title: t('add_money'),...screenOptions }}/>
-                            <Stack.Screen name="selectGateway" component={SelectGatewayPage} options={{ title: t('select_gateway'),...screenOptions }}/>
-                            <Stack.Screen name="withdrawMoney" component={WithdrawMoneyScreen} options={{ title: t('withdraw_money'),...screenOptions }}/>
-                            <Stack.Screen name="driverIncome" component={DriverIncomeScreen} options={{ title: t('driver_income'),...screenOptions }}/>
-                            <Stack.Screen name="notifications" component={NotificationsPage} options={{ title: t('notifications'),...screenOptions }}/>
-                            <Stack.Screen name="cars" component={CarsScreen} options={{ title: t('cars'),...screenOptions }}/>
-                            <Stack.Screen name="carEdit" component={CarEditScreen} options={{ title: t('car_edit'),...screenOptions }}/>
-                            <Stack.Screen name="complain" component={Complain} options={{ title: t('complain'),...screenOptions }}/>
-                            <Stack.Screen name="about" component={AboutPage} options={{ title: t('about'),...screenOptions }}/>
-                            <Stack.Screen name="driverDocuments" component={DriverDocumentsScreen} options={{ title: t('driver_documents'),...screenOptions }}/>
-                        </Stack.Group>
-                    : null}
+            <Stack.Navigator initialRouteName={initialRoute || 'TabRoot'} screenOptions={screenOptions}>
+                <Stack.Screen name="TabRoot" component={TabRoot} options={{ headerShown: false }} />
+                <Stack.Screen name="Profile" component={ProfileScreen} options={{ title: t('profile_setting_menu'),...screenOptions}}/>
+                <Stack.Screen name="editUser" component={EditProfilePage} options={{ title: t('update_profile_title'),...screenOptions }}/>
+                <Stack.Screen name="Search" component={SearchScreen} options={{ title: t('search'),...screenOptions }}/>
+                <Stack.Screen name="DriverRating" component={DriverRating} options={{ title: t('rate_ride'),headerLeft: ()=> null,...screenOptions }}/>
+                <Stack.Screen name="PaymentDetails" component={PaymentDetails} options={{ title: t('payment'),...screenOptions }}/>
+                <Stack.Screen name="BookedCab" component={BookedCabScreen} options={{headerShown: false }}/>
+                <Stack.Screen name="RideDetails" component={RideDetails} options={{ title: t('ride_details_page_title'),...screenOptions }}/>
+                <Stack.Screen name="onlineChat" component={OnlineChat} options={{ title: t('chat_title'),...screenOptions }}/>
+                <Stack.Screen name="addMoney" component={AddMoneyScreen} options={{ title: t('add_money'),...screenOptions }}/>
+                <Stack.Screen name="selectGateway" component={SelectGatewayPage} options={{ title: t('select_gateway'),...screenOptions }}/>
+                <Stack.Screen name="withdrawMoney" component={WithdrawMoneyScreen} options={{ title: t('withdraw_money'),...screenOptions }}/>
+                <Stack.Screen name="driverIncome" component={DriverIncomeScreen} options={{ title: t('driver_income'),...screenOptions }}/>
+                <Stack.Screen name="notifications" component={NotificationsPage} options={{ title: t('notifications'),...screenOptions }}/>
+                <Stack.Screen name="cars" component={CarsScreen} options={{ title: t('cars'),...screenOptions }}/>
+                <Stack.Screen name="carEdit" component={CarEditScreen} options={{ title: t('car_edit'),...screenOptions }}/>
+                <Stack.Screen name="complain" component={Complain} options={{ title: t('complain'),...screenOptions }}/>
+                <Stack.Screen name="about" component={AboutPage} options={{ title: t('about'),...screenOptions }}/>
+                <Stack.Screen name="driverDocuments" component={DriverDocumentsScreen} options={{ title: t('driver_documents'),...screenOptions }}/>
             </Stack.Navigator>
         </NavigationContainer>
     );

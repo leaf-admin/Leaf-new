@@ -23,6 +23,7 @@ import SettingsScreen from './SettingsScreen';
 import CarsScreen from './CarsScreen';
 import CarEditScreen from './CarEditScreen';
 import WelcomeScreen from './WelcomeScreen';
+import CompleteRegistrationScreen from './CompleteRegistrationScreen';
 
 export {
     RegistrationPage,
@@ -49,5 +50,6 @@ export {
     SettingsScreen,
     CarsScreen,
     CarEditScreen,
-    WelcomeScreen
+    WelcomeScreen,
+    CompleteRegistrationScreen,
 };

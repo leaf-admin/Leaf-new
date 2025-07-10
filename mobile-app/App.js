@@ -23,6 +23,7 @@ import firebase from '@react-native-firebase/app';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import './src/i18n'; // Initialize i18n with translations
 
+
 SplashScreen.preventAutoHideAsync();
 
 Notifications.setNotificationHandler({
@@ -38,6 +39,8 @@ export default function App() {
   const [isFirebaseInitialized, setIsFirebaseInitialized] = useState(false);
 
   useEffect(() => {
+    console.log("App.js - Iniciando aplicação");
+    
     const ReactNative = require('react-native');
     try {
         ReactNative.I18nManager.allowRTL(false);
@@ -55,6 +58,18 @@ export default function App() {
 
     onLoad();
   }, []);
+
+  useEffect(() => {
+    if (assetsLoaded && isFirebaseInitialized) {
+      console.log("App.js - Renderizando AppContainer principal");
+    }
+  }, [assetsLoaded, isFirebaseInitialized]);
+
+  useEffect(() => {
+    if (assetsLoaded && isFirebaseInitialized) {
+      SplashScreen.hideAsync();
+    }
+  }, [assetsLoaded, isFirebaseInitialized]);
 
   const _loadResourcesAsync = async () => {
     try {

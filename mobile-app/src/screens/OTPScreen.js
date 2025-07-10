@@ -11,6 +11,7 @@ import { TextInputMask } from 'react-native-masked-text';
 import { Ionicons } from '@expo/vector-icons';
 import rnauth from '@react-native-firebase/auth';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import OnboardingLayout from '../components/OnboardingLayout';
 
 export default function OTPScreen({ navigation, route }) {
     const [otp, setOtp] = useState("");
@@ -83,12 +84,13 @@ export default function OTPScreen({ navigation, route }) {
                 routes: [{ 
                     name: 'UserInfo',
                     params: { 
-                        phone, 
+                        phone: userCredential.user.phoneNumber,
                         userCredential: {
                             uid: userCredential.user.uid,
                             phoneNumber: userCredential.user.phoneNumber,
                             isNewUser: true
-                        }
+                        },
+                        userType: route.params?.userType // garantir propagação
                     }
                 }]
             });
@@ -141,49 +143,48 @@ export default function OTPScreen({ navigation, route }) {
         navigation.navigate('CompleteRegistration', { ...otpData, userType });
     };
 
+    // Barra de progresso customizada
+    const progressBar = (
+      <View style={{ flexDirection: 'row', justifyContent: 'center', alignItems: 'center', marginBottom: 0 }}>
+        <View style={{ width: 12, height: 12, borderRadius: 6, backgroundColor: '#1A330E', marginHorizontal: 4 }} />
+        <View style={{ width: 12, height: 12, borderRadius: 6, backgroundColor: '#1A330E', marginHorizontal: 4 }} />
+        <View style={{ width: 12, height: 12, borderRadius: 6, backgroundColor: '#B0B0B0', marginHorizontal: 4 }} />
+        <View style={{ width: 12, height: 12, borderRadius: 6, backgroundColor: '#B0B0B0', marginHorizontal: 4 }} />
+      </View>
+    );
+
     return (
-        <View style={styles.containerCustom}>
-            <StatusBar backgroundColor="#1A330E" barStyle="light-content" />
-            <TouchableOpacity style={styles.backButton} onPress={() => navigation.goBack()}>
-                <Ionicons name="chevron-back" size={32} color="#1A330E" />
-            </TouchableOpacity>
-            <View style={{ flex: 1, justifyContent: 'center', marginTop: 150 }}>
-                <View style={{ width: '100%' }}>
-                    <Text style={[styles.titleCustom, { marginBottom: 16, marginTop: 0 }]}>Insira abaixo o código recebido por SMS</Text>
-                </View>
-                <View style={[styles.inputRow, { marginTop: 0 }]}>
-                    <TextInputMask
-                        type={'custom'}
-                        options={{ mask: '9 9 9 9 9 9' }}
-                        value={otp}
-                        onChangeText={setOtp}
-                        style={[styles.otpInput, { textAlign: 'left' }]}
-                        placeholder="_ _ _ _ _ _"
-                        placeholderTextColor="#B0B0B0"
-                        keyboardType="number-pad"
-                        maxLength={11}
-                    />
-                </View>
-            </View>
-            <View style={{ flex: 1, width: '100%', justifyContent: 'flex-end', alignItems: 'center' }}>
-                <TouchableOpacity
-                    style={styles.buttonCustom}
-                    onPress={handleContinue}
-                >
-                    <Text style={styles.buttonTextCustom}>Continuar</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                    style={[styles.resendButton, { opacity: canResend ? 1 : 0.5 }]}
-                    onPress={handleResend}
-                    disabled={!canResend}
-                >
-                    <Text style={styles.resendButtonText}>
-                        {canResend ? 'Reenviar' : `Reenviar (${timer}s)`}
-                    </Text>
-                </TouchableOpacity>
-                <View style={{ height: 30 }} />
-            </View>
+      <OnboardingLayout
+        progress={progressBar}
+        onContinue={handleContinue}
+        continueLabel="Continuar"
+        continueDisabled={!otp || otp.replace(/\D/g, '').length !== 6}
+      >
+        {/* Conteúdo principal da tela (instruções, input de código, botão de reenviar) */}
+        <Text style={[styles.titleCustom, { marginBottom: 16, marginTop: 0 }]}>Insira abaixo o código recebido por SMS</Text>
+        <View style={[styles.inputRow, { marginTop: 0 }]}> 
+          <TextInputMask
+            type={'custom'}
+            options={{ mask: '9 9 9 9 9 9' }}
+            value={otp}
+            onChangeText={setOtp}
+            style={[styles.otpInput, { textAlign: 'left' }]}
+            placeholder="_ _ _ _ _ _"
+            placeholderTextColor="#B0B0B0"
+            keyboardType="number-pad"
+            maxLength={11}
+          />
         </View>
+        <TouchableOpacity
+          style={[styles.resendButton, { opacity: canResend ? 1 : 0.5, marginTop: 24 }]}
+          onPress={handleResend}
+          disabled={!canResend}
+        >
+          <Text style={styles.resendButtonText}>
+            {canResend ? 'Reenviar' : `Reenviar (${timer}s)`}
+          </Text>
+        </TouchableOpacity>
+      </OnboardingLayout>
     );
 }
 

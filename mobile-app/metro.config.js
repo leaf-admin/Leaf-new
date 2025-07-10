@@ -45,6 +45,7 @@ config.resolver.alias = {
   'tty': false,
   'vm': false,
   'worker_threads': false,
+  'use-sync-external-store/shim': 'use-sync-external-store/shim/with-selector',
 };
 
 module.exports = config;

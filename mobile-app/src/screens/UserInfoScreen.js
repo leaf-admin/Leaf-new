@@ -1,445 +1,196 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { StyleSheet, View, Text, TouchableOpacity, StatusBar, TextInput, Alert, KeyboardAvoidingView, Platform, ScrollView } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
-import { TextInputMask } from 'react-native-masked-text';
-import { api } from 'common';
-import auth from '@react-native-firebase/auth';
-import { FirebaseConfig } from '../../config/FirebaseConfig';
-import { CommonActions } from '@react-navigation/native';
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import { useDispatch } from 'react-redux';
-import { generateReferralId } from 'common/src/other/sharedFunctions';
+import React, { useState } from 'react';
+import { StyleSheet, View, Text, TouchableOpacity, TextInput, Alert } from 'react-native';
+import { useNavigation, useRoute } from '@react-navigation/native';
+import OnboardingLayout from '../components/OnboardingLayout';
 
-export default function UserInfoScreen({ navigation, route }) {
-    const dispatch = useDispatch();
-    const [firstName, setFirstName] = useState('');
-    const [lastName, setLastName] = useState('');
-    const [cpf, setCpf] = useState('');
-    const [password, setPassword] = useState('');
-    const [email, setEmail] = useState('');
+const LEAF_GREEN = '#1A330E';
+const LEAF_GRAY = '#B0B0B0';
+
+export default function UserInfoScreen() {
+    const navigation = useNavigation();
+    const route = useRoute();
+    const [phone, setPhone] = useState('');
     const [isLoading, setIsLoading] = useState(false);
-    const [loadingProgress, setLoadingProgress] = useState(0);
-    const firstNameRef = useRef(null);
-    const lastNameRef = useRef(null);
-    const cpfRef = useRef(null);
-    const passwordRef = useRef(null);
-    const emailRef = useRef(null);
-    const [userType, setUserType] = React.useState(route?.params?.userType || null);
+    
+    // Pegar o tipo de usuário dos parâmetros ou do AsyncStorage
+    const userType = route.params?.userType || 'passenger';
 
-    React.useEffect(() => {
-        if (!userType) {
-            AsyncStorage.getItem('@user_type').then(type => {
-                if (type) setUserType(type);
-            });
-        }
-    }, []);
-
-    useEffect(() => {
-        setCpf(""); // Garante que o campo CPF sempre inicie vazio ao montar a tela
-    }, []);
-
-    const allFieldsValid =
-        firstName &&
-        lastName &&
-        cpf.replace(/\D/g, '').length === 11 &&
-        password &&
-        email;
-
-    const handleContinue = async () => {
-        console.log('=== INICIANDO CADASTRO ===');
-        const startTime = Date.now();
-        console.log('UserCredential:', route.params?.userCredential);
-        console.log('Phone:', route.params?.phone);
+    // Função para formatar o telefone no padrão brasileiro
+    const formatPhoneNumber = (text) => {
+        // Remove tudo que não é número
+        const numbers = text.replace(/\D/g, '');
         
-        if (!firstName || !lastName || cpf.replace(/\D/g, '').length !== 11 || !password || !email) {
-            console.log('Checked fields:', {
-                firstName: !firstName ? 'vazio' : 'ok',
-                lastName: !lastName ? 'vazio' : 'ok',
-                cpf: cpf.replace(/\D/g, '').length !== 11 ? 'inválido' : 'ok',
-                password: !password ? 'vazio' : 'ok',
-                email: !email ? 'vazio' : 'ok'
-            });
-            Alert.alert('Atenção', 'Preencha todos os campos corretamente.');
+        // Aplica a máscara XX XXXXX-XXXX
+        if (numbers.length <= 2) {
+            return numbers;
+        } else if (numbers.length <= 7) {
+            return `${numbers.slice(0, 2)} ${numbers.slice(2)}`;
+        } else {
+            return `${numbers.slice(0, 2)} ${numbers.slice(2, 7)}-${numbers.slice(7, 11)}`;
+        }
+    };
+
+    const handlePhoneChange = (text) => {
+        const formatted = formatPhoneNumber(text);
+        setPhone(formatted);
+    };
+
+    const handleSendOTP = async () => {
+        // Validar se tem pelo menos DDD + número (10 dígitos)
+        const phoneDigits = phone.replace(/\D/g, '');
+        if (!phone || phoneDigits.length < 10) {
+            Alert.alert('Atenção', 'Digite um número de telefone válido com DDD.');
             return;
         }
 
         try {
             setIsLoading(true);
-            console.log('1. Preparando dados para cadastro');
-            const referralId = generateReferralId();
-            const regData = {
-                firstName,
-                lastName,
-                email,
-                mobile: route.params?.phone,
-                password,
-                verifyId: cpf,
-                usertype: 'customer',
-                uid: route.params?.userCredential?.uid,
-                referralId
-            };
             
-            console.log('2. Dados preparados:', { ...regData, password: '***' });
-            console.log('3. Chamando updateuserdata...');
-            console.log('Dados sendo enviados para updateuserdata:', {
-                uid: regData.uid,
-                userData: {
-                    email: regData.email,
-                    mobile: regData.mobile,
-                    firstName: regData.firstName,
-                    lastName: regData.lastName,
-                    usertype: regData.usertype,
-                    verifyId: regData.verifyId,
-                    created: Date.now(),
-                    walletBalance: 0,
-                    rating: 5,
-                    approved: true,
-                    referralId: regData.referralId
-                }
+            // Aqui você implementaria a lógica de envio do OTP
+            // Por enquanto, vamos simular o envio
+            console.log('Enviando OTP para: +55', phone);
+            console.log('Tipo de usuário:', userType);
+            
+            // Simular delay de envio
+            await new Promise(resolve => setTimeout(resolve, 1000));
+            
+            // Navegar para a tela de OTP com o telefone completo (+55 + número)
+            navigation.navigate('OTP', { 
+                phone: '+55' + phoneDigits,
+                userType: userType 
             });
             
-            const response = await fetch(`https://us-central1-${FirebaseConfig.projectId}.cloudfunctions.net/updateuserdata`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({
-                    uid: regData.uid,
-                    userData: {
-                        email: regData.email,
-                        mobile: regData.mobile,
-                        firstName: regData.firstName,
-                        lastName: regData.lastName,
-                        usertype: regData.usertype,
-                        verifyId: regData.verifyId,
-                        created: Date.now(),
-                        walletBalance: 0,
-                        rating: 5,
-                        approved: true,
-                        referralId: regData.referralId
-                    }
-                })
-            });
-
-            const res = await response.json();
-            console.log('4. Resposta do updateuserdata:', res);
-
-            if (res.success) {
-                // Salvar dados no AsyncStorage
-                try {
-                    // Salvar o UID separadamente
-                    await AsyncStorage.setItem('@auth_uid', regData.uid);
-                    console.log('UID salvo no AsyncStorage:', regData.uid);
-
-                    // Salvar os dados completos do usuário
-                    await AsyncStorage.setItem('@user_data', JSON.stringify({
-                        uid: regData.uid,
-                        email: regData.email,
-                        mobile: regData.mobile,
-                        firstName: regData.firstName,
-                        lastName: regData.lastName,
-                        usertype: regData.usertype,
-                        verifyId: regData.verifyId,
-                        created: Date.now(),
-                        walletBalance: 0,
-                        rating: 5,
-                        approved: true,
-                        referralId: regData.referralId
-                    }));
-                    console.log('Dados salvos no AsyncStorage com sucesso');
-                } catch (error) {
-                    console.error('Erro ao salvar dados no AsyncStorage:', error);
-                }
-                
-                try {
-                    // Criar usuário usando user_signup
-                    console.log('5. Criando usuário com user_signup...');
-                    const userSignupResponse = await fetch(`https://us-central1-${FirebaseConfig.projectId}.cloudfunctions.net/user_signup`, {
-                        method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json',
-                        },
-                        body: JSON.stringify({
-                            regData: {
-                                email: regData.email,
-                                password: regData.password,
-                                mobile: regData.mobile,
-                                firstName: regData.firstName,
-                                lastName: regData.lastName,
-                                usertype: regData.usertype,
-                                verifyId: regData.verifyId,
-                                uid: regData.uid,
-                                referralId: regData.referralId
-                            }
-                        })
-                    });
-
-                    const userSignupRes = await userSignupResponse.json();
-                    console.log('6. Resposta do user_signup:', userSignupRes);
-
-                    if (userSignupRes.success && regData.uid) {
-                        // Salvar dados no AsyncStorage
-                        await AsyncStorage.setItem('@auth_uid', regData.uid);
-                        await AsyncStorage.setItem('@user_data', JSON.stringify({
-                            uid: regData.uid,
-                            email: regData.email,
-                            mobile: regData.mobile,
-                            firstName: regData.firstName,
-                            lastName: regData.lastName,
-                            usertype: regData.usertype,
-                            verifyId: regData.verifyId,
-                            created: Date.now(),
-                            walletBalance: 0,
-                            rating: 5,
-                            approved: true,
-                            referralId: regData.referralId
-                        }));
-
-                        // Redirecionar para a tela de loading principal
-                        navigation.replace('AuthLoadingScreen');
-                    }
-                } catch (error) {
-                    console.error('❌ Erro na autenticação:', error);
-                    Alert.alert('Erro', 'Não foi possível completar o cadastro. Por favor, tente novamente.');
-                    navigation.replace('Login');
-                }
-            } else {
-                console.error('❌ Erro no cadastro:', res);
-                Alert.alert('Erro', res.error || 'Não foi possível concluir o cadastro.');
-            }
         } catch (error) {
-            console.error('❌ Erro durante o cadastro:', error);
-            console.error('Mensagem do erro:', error.message);
-            console.error('Stack do erro:', error.stack);
-            Alert.alert('Erro', error.message || 'Não foi possível concluir o cadastro.');
+            console.error('Erro ao enviar OTP:', error);
+            Alert.alert('Erro', 'Não foi possível enviar o código de verificação.');
         } finally {
             setIsLoading(false);
         }
     };
 
-    // Ao avançar para OTP:
-    const handleSendOTP = (phone) => {
-        navigation.navigate('OTP', { phone, userType });
-    };
+    // Barra de progresso customizada
+    const progressBar = (
+        <View style={styles.progressBarContainer}>
+            <View style={styles.progressDot} />
+            <View style={[styles.progressDot, styles.progressActive]} />
+            <View style={styles.progressDot} />
+            <View style={styles.progressDot} />
+        </View>
+    );
+
+    const isPhoneValid = phone.replace(/\D/g, '').length >= 10;
 
     return (
-        <View style={{ flex: 1, backgroundColor: '#F5F5F5', paddingHorizontal: 24 }}>
-            <StatusBar backgroundColor="#1A330E" barStyle="light-content" />
-            <TouchableOpacity style={styles.backButton} onPress={() => navigation.goBack()}>
-                <Ionicons name="chevron-back" size={32} color="#1A330E" />
-            </TouchableOpacity>
-            <View style={styles.titleContainerStatic}>
-                <Text style={styles.titleCustom}>Complete seus dados</Text>
-            </View>
-            <KeyboardAvoidingView
-                behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-                style={{ flex: 1, width: '100%' }}
-                keyboardVerticalOffset={Platform.OS === 'ios' ? 64 : 0}
-                enabled
-            >
-                <ScrollView
-                    contentContainerStyle={{ 
-                        flexGrow: 1,
-                        paddingTop: 0, 
-                        paddingBottom: 40 
-                    }}
-                    keyboardShouldPersistTaps="handled"
-                    showsVerticalScrollIndicator={false}
-                    keyboardDismissMode="none"
-                >
-                    <View style={{ width: '100%', marginTop: 0 }}>
-                        <View style={[styles.inputRow, { marginTop: 0 }]}> 
-                            <TextInput
-                                ref={firstNameRef}
-                                value={firstName}
-                                onChangeText={setFirstName}
-                                style={styles.input}
-                                placeholder="Nome"
-                                placeholderTextColor="#B0B0B0"
-                                autoCapitalize="words"
-                                keyboardType="default"
-                                returnKeyType="next"
-                                blurOnSubmit={false}
-                                onSubmitEditing={() => lastNameRef.current?.focus()}
-                            />
-                        </View>
-                        <View style={styles.inputRow}>
-                            <TextInput
-                                ref={lastNameRef}
-                                value={lastName}
-                                onChangeText={setLastName}
-                                style={styles.input}
-                                placeholder="Sobrenome"
-                                placeholderTextColor="#B0B0B0"
-                                autoCapitalize="words"
-                                keyboardType="default"
-                                returnKeyType="next"
-                                blurOnSubmit={false}
-                                onSubmitEditing={() => cpfRef.current?.focus()}
-                            />
-                        </View>
-                        <View style={styles.inputRow}>
-                            <TextInputMask
-                                ref={cpfRef}
-                                type={'cpf'}
-                                placeholder={'CPF'}
-                                value={cpf}
-                                onChangeText={text => setCpf(text)}
-                                keyboardType="number-pad"
-                                returnKeyType="next"
-                                maxLength={14}
-                                style={styles.input}
-                                placeholderTextColor="#B0B0B0"
-                                blurOnSubmit={false}
-                                onSubmitEditing={() => passwordRef.current?.focus()}
-                            />
-                        </View>
-                        <View style={styles.inputRow}>
-                            <TextInput
-                                ref={passwordRef}
-                                value={password}
-                                onChangeText={setPassword}
-                                style={styles.input}
-                                placeholder="Crie uma senha"
-                                placeholderTextColor="#B0B0B0"
-                                secureTextEntry
-                                keyboardType="default"
-                                returnKeyType="next"
-                                blurOnSubmit={false}
-                                onSubmitEditing={() => emailRef.current?.focus()}
-                            />
-                        </View>
-                        <View style={styles.inputRow}>
-                            <TextInput
-                                ref={emailRef}
-                                value={email}
-                                onChangeText={setEmail}
-                                style={styles.input}
-                                placeholder="Email"
-                                placeholderTextColor="#B0B0B0"
-                                keyboardType="email-address"
-                                autoCapitalize="none"
-                                returnKeyType="done"
-                                onSubmitEditing={handleContinue}
-                            />
-                        </View>
+        <OnboardingLayout
+            progress={progressBar}
+            onContinue={handleSendOTP}
+            continueLabel="Enviar código"
+            continueDisabled={!isPhoneValid || isLoading}
+        >
+            <View style={styles.container}>
+                <Text style={styles.title}>
+                    {userType === 'driver' ? 'Cadastro de Parceiro' : 'Cadastro de Passageiro'}
+                </Text>
+                <Text style={styles.subtitle}>
+                    Digite seu número de telefone para receber um código de verificação
+                </Text>
+                
+                <View style={styles.phoneContainer}>
+                    <Text style={styles.phoneLabel}>Número de telefone</Text>
+                    <View style={styles.phoneInputContainer}>
+                        <Text style={styles.countryCode}>+55</Text>
+                        <TextInput
+                            value={phone}
+                            onChangeText={handlePhoneChange}
+                            style={styles.phoneInput}
+                            placeholder="11 99999-9999"
+                            placeholderTextColor={LEAF_GRAY}
+                            keyboardType="phone-pad"
+                            maxLength={14} // XX XXXXX-XXXX = 14 caracteres
+                            autoFocus
+                        />
                     </View>
-                </ScrollView>
-                <View style={{ width: '100%', justifyContent: 'flex-end', alignItems: 'center', marginBottom: 10 }}>
-                    <TouchableOpacity
-                        style={allFieldsValid ? styles.buttonCustom : [styles.buttonCustom, styles.buttonNext]}
-                        onPress={() => {
-                            if (!allFieldsValid) {
-                                // Descobre o primeiro campo inválido e foca nele
-                                if (!firstName) {
-                                    firstNameRef.current?.focus();
-                                    return;
-                                }
-                                if (!lastName) {
-                                    lastNameRef.current?.focus();
-                                    return;
-                                }
-                                if (cpf.replace(/\D/g, '').length !== 11) {
-                                    cpfRef.current?.focus();
-                                    return;
-                                }
-                                if (!password) {
-                                    passwordRef.current?.focus();
-                                    return;
-                                }
-                                if (!email) {
-                                    emailRef.current?.focus();
-                                    return;
-                                }
-                            } else {
-                                handleContinue();
-                            }
-                        }}
-                    >
-                        <Text style={allFieldsValid ? styles.buttonTextCustom : styles.buttonTextNext}>
-                            {allFieldsValid ? 'Começar' : 'Próximo'}
-                        </Text>
-                    </TouchableOpacity>
-                    <View style={{ height: 30 }} />
                 </View>
-            </KeyboardAvoidingView>
-        </View>
+                
+                <Text style={styles.infoText}>
+                    Enviaremos um código de verificação por SMS para este número
+                </Text>
+            </View>
+        </OnboardingLayout>
     );
 }
 
 const styles = StyleSheet.create({
-    containerCustom: {
+    container: {
         flex: 1,
-        backgroundColor: '#F5F5F5',
         alignItems: 'center',
-        justifyContent: 'center',
         paddingHorizontal: 24,
+        paddingTop: 48,
     },
-    backButton: {
-        position: 'absolute',
-        top: 50,
-        left: 16,
-        zIndex: 10,
-    },
-    titleCustom: {
-        color: '#1A330E',
-        fontSize: 32,
+    title: {
+        fontSize: 24,
         fontWeight: 'bold',
-        marginBottom: 32,
-        marginTop: 100,
-        textAlign: 'left',
-        alignSelf: 'flex-start',
-        marginLeft: 0,
-        paddingRight: 24,
+        color: LEAF_GREEN,
+        marginBottom: 8,
+        textAlign: 'center',
     },
-    inputRow: {
+    subtitle: {
+        fontSize: 16,
+        color: LEAF_GRAY,
+        marginBottom: 32,
+        textAlign: 'center',
+        lineHeight: 22,
+    },
+    phoneContainer: {
+        width: '100%',
+        marginBottom: 24,
+    },
+    phoneLabel: {
+        fontSize: 16,
+        fontWeight: '600',
+        color: LEAF_GREEN,
+        marginBottom: 8,
+    },
+    phoneInputContainer: {
         flexDirection: 'row',
         alignItems: 'center',
-        marginBottom: 8,
-        width: '100%',
-        justifyContent: 'center',
+        borderBottomWidth: 2,
+        borderBottomColor: LEAF_GRAY,
+        paddingVertical: 12,
+        paddingHorizontal: 0,
     },
-    input: {
+    countryCode: {
+        fontSize: 18,
+        color: LEAF_GREEN,
+        marginRight: 8,
+    },
+    phoneInput: {
+        fontSize: 18,
+        color: LEAF_GREEN,
         flex: 1,
-        color: '#1A330E',
-        fontSize: 26,
-        borderBottomWidth: 0,
-        backgroundColor: '#F5F5F5',
-        paddingVertical: 8,
+        paddingVertical: 0,
+        paddingHorizontal: 0,
     },
-    buttonCustom: {
-        backgroundColor: '#2A4A1E',
-        borderRadius: 8,
-        paddingVertical: 16,
-        width: 215,
+    infoText: {
+        fontSize: 14,
+        color: LEAF_GRAY,
+        textAlign: 'center',
+        lineHeight: 20,
+    },
+    progressBarContainer: {
+        flexDirection: 'row',
+        justifyContent: 'center',
         alignItems: 'center',
-        alignSelf: 'center',
-        marginBottom: 16,
+        marginBottom: 0,
     },
-    buttonTextCustom: {
-        color: '#F5F5F5',
-        fontSize: 18,
-        fontWeight: 'bold',
-        textAlign: 'center',
+    progressDot: {
+        width: 12,
+        height: 12,
+        borderRadius: 6,
+        backgroundColor: LEAF_GRAY,
+        marginHorizontal: 4,
     },
-    titleContainerStatic: {
-        width: '100%',
-        alignItems: 'flex-start',
-        marginTop: 60,
-        marginBottom: 16,
-        paddingRight: 24,
-        zIndex: 2,
-        backgroundColor: '#F5F5F5',
-    },
-    buttonNext: {
-        backgroundColor: '#FFF',
-        borderWidth: 2,
-        borderColor: '#2A4A1E',
-    },
-    buttonTextNext: {
-        color: '#2A4A1E',
-        fontSize: 18,
-        fontWeight: 'bold',
-        textAlign: 'center',
+    progressActive: {
+        backgroundColor: LEAF_GREEN,
     },
 }); 

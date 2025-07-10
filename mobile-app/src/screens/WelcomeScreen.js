@@ -23,6 +23,10 @@ export default function WelcomeScreen({ navigation }) {
   const fadeInAnim = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
+    console.log("WelcomeScreen - Componente montado");
+  }, []);
+
+  useEffect(() => {
     let idx = 0;
     const interval = setInterval(() => {
       // Fade out
@@ -46,14 +50,18 @@ export default function WelcomeScreen({ navigation }) {
   }, []);
 
   useEffect(() => {
+    console.log("WelcomeScreen - Iniciando animação de fade in");
     Animated.timing(fadeInAnim, {
       toValue: 1,
       duration: 600,
       useNativeDriver: true,
-    }).start();
+    }).start(() => {
+      console.log("WelcomeScreen - Animação de fade in concluída");
+    });
   }, []);
 
   const handleStart = () => {
+    console.log("WelcomeScreen - Botão Start pressionado");
     if (buttonDisabled) return;
     setButtonDisabled(true);
     Animated.parallel([
@@ -63,6 +71,7 @@ export default function WelcomeScreen({ navigation }) {
         useNativeDriver: true,
       })
     ]).start(() => {
+      console.log("WelcomeScreen - Navegando para ProfileSelection");
       navigation.navigate('ProfileSelection');
       setButtonDisabled(false);
       buttonAnim.setValue(1);
@@ -70,12 +79,12 @@ export default function WelcomeScreen({ navigation }) {
   };
 
   return (
-    <Animated.View style={{ flex: 1, width: '100%', opacity: fadeInAnim, backgroundColor: '#F5F5F5', justifyContent: 'center', alignItems: 'center' }}>
+    <View style={{ flex: 1, width: '100%', backgroundColor: '#F5F5F5', justifyContent: 'center', alignItems: 'center' }}>
       <StatusBar backgroundColor="#1A330E" barStyle="light-content" />
       <View style={styles.logoWrapper}>
-        <Animated.Text style={[styles.welcomeText, { opacity: fadeAnim }]}> 
+        <Text style={styles.welcomeText}> 
           {currentText}
-        </Animated.Text>
+        </Text>
         <Image
           source={require('../../assets/images/customcolor_logo_customcolor_background.png')}
           style={styles.logo}
@@ -83,19 +92,9 @@ export default function WelcomeScreen({ navigation }) {
         />
       </View>
       <TouchableOpacity style={styles.startButton} onPress={handleStart} disabled={buttonDisabled}>
-        <Animated.View style={{
-          position: 'relative',
-          height: 24,
-          justifyContent: 'center',
-          alignItems: 'center',
-          opacity: buttonAnim,
-          transform: [{ scale: buttonAnim }],
-          width: '100%'
-        }}>
-          <Animated.Text style={[styles.startButtonText, { opacity: fadeAnim, position: 'absolute', width: '100%' }]}>{currentBtn}</Animated.Text>
-        </Animated.View>
+        <Text style={styles.startButtonText}>{currentBtn}</Text>
       </TouchableOpacity>
-    </Animated.View>
+    </View>
   );
 }
 

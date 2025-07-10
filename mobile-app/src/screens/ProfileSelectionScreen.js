@@ -1,22 +1,21 @@
 import React, { useState } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, SafeAreaView } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { colors } from '../common/theme';
-import { MaterialCommunityIcons, FontAwesome5 } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import OnboardingLayout from '../components/OnboardingLayout';
+
+const LEAF_GREEN = '#1A330E';
+const LEAF_GRAY = '#B0B0B0';
 
 const options = [
   {
     key: 'passenger',
     title: 'Quero viajar',
-    description: 'Sou passageiro e quero solicitar corridas.',
-    icon: <MaterialCommunityIcons name="car" size={32} color={colors.GREEN} />,
   },
   {
     key: 'driver',
     title: 'Quero ser parceiro',
-    description: 'Sou motorista e quero oferecer corridas.',
-    icon: <FontAwesome5 name="user-tie" size={32} color={colors.BIDTAXIPRIMARY} />,
   },
 ];
 
@@ -26,121 +25,105 @@ export default function ProfileSelectionScreen() {
 
   const handleContinue = async () => {
     if (selected) {
+      // Salvar o tipo de usuário escolhido
       await AsyncStorage.setItem('@user_type', selected);
+      
+      // Navegar diretamente para a tela de telefone
       navigation.navigate('PhoneScreen', { userType: selected });
     }
   };
 
+  // Barra de progresso customizada
+  const progressBar = (
+    <View style={styles.progressBarContainer}>
+      <View style={[styles.progressDot, styles.progressActive]} />
+      <View style={styles.progressDot} />
+      <View style={styles.progressDot} />
+      <View style={styles.progressDot} />
+    </View>
+  );
+
   return (
-    <SafeAreaView style={styles.safeArea}>
+    <OnboardingLayout
+      progress={progressBar}
+      onContinue={handleContinue}
+      continueLabel="Continuar"
+      continueDisabled={!selected}
+    >
       <View style={styles.container}>
         <Text style={styles.title}>Escolha o tipo de conta</Text>
-        <Text style={styles.subtitle}>Vamos personalizar sua experiência na plataforma.</Text>
-        <View style={styles.optionsContainer}>
-          {options.map(opt => (
-            <TouchableOpacity
-              key={opt.key}
-              style={[styles.option, selected === opt.key && styles.optionSelected]}
-              onPress={() => setSelected(opt.key)}
-              activeOpacity={0.8}
-            >
-              <View style={styles.icon}>{opt.icon}</View>
-              <View style={styles.texts}>
-                <Text style={styles.optionTitle}>{opt.title}</Text>
-                <Text style={styles.optionDesc}>{opt.description}</Text>
-              </View>
-              {selected === opt.key && (
-                <MaterialCommunityIcons name="check-circle" size={28} color={colors.BIDTAXIPRIMARY} style={styles.checkIcon} />
-              )}
-            </TouchableOpacity>
-          ))}
+        <View style={styles.optionsWrapper}>
+          {options.map(opt => {
+            const isSelected = selected === opt.key;
+            const color = isSelected ? LEAF_GREEN : LEAF_GRAY;
+            return (
+              <TouchableOpacity
+                key={opt.key}
+                style={[styles.optionButton, isSelected && styles.optionButtonSelected]}
+                onPress={() => setSelected(opt.key)}
+                activeOpacity={0.8}
+              >
+                <Text style={[styles.optionTitle, { color }]}>{opt.title}</Text>
+              </TouchableOpacity>
+            );
+          })}
         </View>
-        {/* Barra de progresso */}
-        <View style={styles.progressBarContainer}>
-          <View style={[styles.progressDot, styles.progressActive]} />
-          <View style={styles.progressDot} />
-          <View style={styles.progressDot} />
-          <View style={styles.progressDot} />
-        </View>
-        <TouchableOpacity
-          style={[styles.continueBtn, !selected && styles.continueBtnDisabled]}
-          onPress={handleContinue}
-          disabled={!selected}
-        >
-          <Text style={styles.continueText}>Continuar</Text>
-        </TouchableOpacity>
       </View>
-    </SafeAreaView>
+    </OnboardingLayout>
   );
 }
 
 const styles = StyleSheet.create({
-  safeArea: {
-    flex: 1,
-    backgroundColor: colors.BACKGROUND_PRIMARY,
-  },
   container: {
+    flex: 1,
+    justifyContent: 'flex-start',
+    alignItems: 'center',
+    width: '100%',
+    paddingTop: 48,
+    paddingBottom: 0,
+  },
+  title: {
+    fontSize: 22,
+    fontWeight: '700',
+    color: LEAF_GREEN,
+    marginBottom: 40,
+    textAlign: 'center',
+    letterSpacing: 0.2,
+  },
+  optionsWrapper: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    padding: 24,
-    backgroundColor: colors.BACKGROUND_PRIMARY,
-  },
-  title: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    color: colors.BIDTAXIPRIMARY,
-    marginBottom: 8,
-    textAlign: 'center',
-  },
-  subtitle: {
-    fontSize: 16,
-    color: colors.GREY,
-    marginBottom: 32,
-    textAlign: 'center',
-  },
-  optionsContainer: {
     width: '100%',
-    marginBottom: 32,
+    gap: 16,
+    paddingHorizontal: 32,
   },
-  option: {
-    flexDirection: 'row',
+  optionButton: {
     alignItems: 'center',
-    borderWidth: 2,
-    borderColor: colors.BORDER_BACKGROUND,
+    justifyContent: 'center',
+    width: '100%',
+    paddingVertical: 20,
+    paddingHorizontal: 24,
     borderRadius: 12,
-    padding: 16,
-    marginBottom: 16,
-    backgroundColor: colors.WHITE,
+    borderWidth: 2,
+    borderColor: LEAF_GRAY,
+    backgroundColor: 'transparent',
   },
-  optionSelected: {
-    borderColor: colors.BIDTAXIPRIMARY,
-    backgroundColor: '#f0f7f5',
-  },
-  icon: {
-    marginRight: 16,
-  },
-  texts: {
-    flex: 1,
+  optionButtonSelected: {
+    borderColor: LEAF_GREEN,
+    backgroundColor: LEAF_GREEN + '10',
   },
   optionTitle: {
     fontSize: 18,
     fontWeight: 'bold',
-    color: colors.BIDTAXIPRIMARY,
-  },
-  optionDesc: {
-    fontSize: 14,
-    color: colors.GREY,
-    marginTop: 2,
-  },
-  checkIcon: {
-    marginLeft: 8,
+    textAlign: 'center',
+    letterSpacing: 0.2,
   },
   progressBarContainer: {
     flexDirection: 'row',
     justifyContent: 'center',
     alignItems: 'center',
-    marginBottom: 32,
+    marginBottom: 0,
   },
   progressDot: {
     width: 12,
@@ -151,20 +134,5 @@ const styles = StyleSheet.create({
   },
   progressActive: {
     backgroundColor: colors.BIDTAXIPRIMARY,
-  },
-  continueBtn: {
-    width: '100%',
-    backgroundColor: colors.BIDTAXIPRIMARY,
-    paddingVertical: 16,
-    borderRadius: 8,
-    alignItems: 'center',
-  },
-  continueBtnDisabled: {
-    backgroundColor: colors.BORDER_BACKGROUND,
-  },
-  continueText: {
-    color: colors.WHITE,
-    fontSize: 18,
-    fontWeight: 'bold',
   },
 }); 
