@@ -1,57 +1,54 @@
 @echo off
-chcp 65001 >nul
-echo.
 echo ========================================
-echo 🚀 TESTE COMPLETO DE BUILD MOBILE
+echo Teste de Carga Completo - Leaf Backend
 echo ========================================
-echo.
-echo Executando todos os testes...
 echo.
 
+echo Escolha o tipo de teste:
 echo.
-echo 🔍 1. Teste de Imports Redis...
-node test-redis-imports.cjs
-if %ERRORLEVEL% NEQ 0 (
+echo 1. Teste Leve (100 drivers)
+echo 2. Teste Médio (500 drivers)  
+echo 3. Teste Pesado (1000 drivers)
+echo 4. Teste Muito Pesado (2500 drivers)
+echo 5. Teste Personalizado
+echo 6. Sair
+echo.
+
+set /p choice="Digite sua escolha (1-6): "
+
+if "%choice%"=="1" (
     echo.
-    echo ❌ TESTE DE IMPORTS REDIS FALHOU!
-    echo Corrija os imports Redis antes de continuar.
+    echo Iniciando teste leve com 100 drivers...
+    node test-redis-load.cjs 100
+) else if "%choice%"=="2" (
+    echo.
+    echo Iniciando teste médio com 500 drivers...
+    node test-redis-load.cjs 500
+) else if "%choice%"=="3" (
+    echo.
+    echo Iniciando teste pesado com 1000 drivers...
+    node test-redis-load.cjs 1000
+) else if "%choice%"=="4" (
+    echo.
+    echo Iniciando teste muito pesado com 2500 drivers...
+    echo ATENÇÃO: Este teste pode demorar e consumir muitos recursos!
+    pause
+    node test-redis-load.cjs 2500
+) else if "%choice%"=="5" (
+    echo.
+    set /p custom_count="Digite o número de drivers: "
+    echo.
+    echo Iniciando teste personalizado com %custom_count% drivers...
+    node test-redis-load.cjs %custom_count%
+) else if "%choice%"=="6" (
+    echo Saindo...
+    exit /b 0
+) else (
+    echo Opção inválida!
     pause
     exit /b 1
 )
 
 echo.
-echo ✅ Teste de Imports Redis PASSOU!
-echo.
-
-echo.
-echo 🚀 2. Teste Completo de Build Mobile...
-node test-mobile-build.cjs
-if %ERRORLEVEL% NEQ 0 (
-    echo.
-    echo ❌ TESTE DE BUILD MOBILE FALHOU!
-    echo Corrija os problemas antes de fazer build.
-    pause
-    exit /b 1
-)
-
-echo.
-echo ✅ Teste Completo de Build Mobile PASSOU!
-echo.
-
-echo.
-echo ========================================
-echo 🎉 TODOS OS TESTES PASSARAM!
-echo ========================================
-echo.
-echo ✅ Nenhum import Redis encontrado
-echo ✅ Configuração do Metro está correta
-echo ✅ Dependências estão compatíveis
-echo ✅ App deve carregar corretamente no dispositivo móvel
-echo.
-echo Próximos passos:
-echo 1. Execute: cd mobile-app
-echo 2. Execute: npx expo start
-echo 3. Teste no dispositivo/emulador
-echo.
-
+echo Teste concluído!
 pause 

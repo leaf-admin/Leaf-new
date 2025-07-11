@@ -4,14 +4,15 @@ import {
     View,
     Text,
     TouchableOpacity,
-    StatusBar,
     Alert
 } from "react-native";
 import { TextInputMask } from 'react-native-masked-text';
-import { Ionicons } from '@expo/vector-icons';
 import rnauth from '@react-native-firebase/auth';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import OnboardingLayout from '../components/OnboardingLayout';
+
+const LEAF_GREEN = '#1A330E';
+const LEAF_GRAY = '#B0B0B0';
 
 export default function OTPScreen({ navigation, route }) {
     const [otp, setOtp] = useState("");
@@ -50,7 +51,7 @@ export default function OTPScreen({ navigation, route }) {
 
     const handleContinue = async () => {
         if (!otp || otp.replace(/\D/g, '').length !== 6) {
-            alert('Digite o código de 6 dígitos recebido por SMS.');
+            Alert.alert('Atenção', 'Digite o código de 6 dígitos recebido por SMS.');
             return;
         }
 
@@ -123,7 +124,7 @@ export default function OTPScreen({ navigation, route }) {
             }
         } catch (error) {
             console.error('Erro ao reenviar código:', error);
-            alert('Erro ao reenviar código. Tente novamente.');
+            Alert.alert('Erro', 'Erro ao reenviar código. Tente novamente.');
             setCanResend(true);
         }
     };
@@ -138,121 +139,137 @@ export default function OTPScreen({ navigation, route }) {
         };
     }, []);
 
-    // Ao avançar para cadastro final:
-    const handleCompleteRegistration = (otpData) => {
-        navigation.navigate('CompleteRegistration', { ...otpData, userType });
-    };
-
     // Barra de progresso customizada
     const progressBar = (
-      <View style={{ flexDirection: 'row', justifyContent: 'center', alignItems: 'center', marginBottom: 0 }}>
-        <View style={{ width: 12, height: 12, borderRadius: 6, backgroundColor: '#1A330E', marginHorizontal: 4 }} />
-        <View style={{ width: 12, height: 12, borderRadius: 6, backgroundColor: '#1A330E', marginHorizontal: 4 }} />
-        <View style={{ width: 12, height: 12, borderRadius: 6, backgroundColor: '#B0B0B0', marginHorizontal: 4 }} />
-        <View style={{ width: 12, height: 12, borderRadius: 6, backgroundColor: '#B0B0B0', marginHorizontal: 4 }} />
-      </View>
+        <View style={styles.progressBarContainer}>
+            <View style={styles.progressDot} />
+            <View style={styles.progressDot} />
+            <View style={[styles.progressDot, styles.progressActive]} />
+            <View style={styles.progressDot} />
+        </View>
     );
 
+    const isOtpValid = otp.replace(/\D/g, '').length === 6;
+
     return (
-      <OnboardingLayout
-        progress={progressBar}
-        onContinue={handleContinue}
-        continueLabel="Continuar"
-        continueDisabled={!otp || otp.replace(/\D/g, '').length !== 6}
-      >
-        {/* Conteúdo principal da tela (instruções, input de código, botão de reenviar) */}
-        <Text style={[styles.titleCustom, { marginBottom: 16, marginTop: 0 }]}>Insira abaixo o código recebido por SMS</Text>
-        <View style={[styles.inputRow, { marginTop: 0 }]}> 
-          <TextInputMask
-            type={'custom'}
-            options={{ mask: '9 9 9 9 9 9' }}
-            value={otp}
-            onChangeText={setOtp}
-            style={[styles.otpInput, { textAlign: 'left' }]}
-            placeholder="_ _ _ _ _ _"
-            placeholderTextColor="#B0B0B0"
-            keyboardType="number-pad"
-            maxLength={11}
-          />
-        </View>
-        <TouchableOpacity
-          style={[styles.resendButton, { opacity: canResend ? 1 : 0.5, marginTop: 24 }]}
-          onPress={handleResend}
-          disabled={!canResend}
+        <OnboardingLayout
+            progress={progressBar}
+            onContinue={handleContinue}
+            continueLabel="Verificar código"
+            continueDisabled={!isOtpValid}
         >
-          <Text style={styles.resendButtonText}>
-            {canResend ? 'Reenviar' : `Reenviar (${timer}s)`}
-          </Text>
-        </TouchableOpacity>
-      </OnboardingLayout>
+            <View style={styles.container}>
+                <Text style={styles.title}>
+                    {userType === 'driver' ? 'Verificação de Parceiro' : 'Verificação de Passageiro'}
+                </Text>
+                <Text style={styles.subtitle}>
+                    Digite o código de 6 dígitos enviado para seu telefone
+                </Text>
+                
+                <View style={styles.otpContainer}>
+                    <Text style={styles.otpLabel}>Código de verificação</Text>
+                    <TextInputMask
+                        type={'custom'}
+                        options={{ mask: '9 9 9 9 9 9' }}
+                        value={otp}
+                        onChangeText={setOtp}
+                        style={styles.otpInput}
+                        placeholder="_ _ _ _ _ _"
+                        placeholderTextColor={LEAF_GRAY}
+                        keyboardType="number-pad"
+                        maxLength={11}
+                        autoFocus
+                    />
+                </View>
+                
+                <TouchableOpacity
+                    style={[styles.resendButton, { opacity: canResend ? 1 : 0.5 }]}
+                    onPress={handleResend}
+                    disabled={!canResend}
+                >
+                    <Text style={styles.resendButtonText}>
+                        {canResend ? 'Reenviar código' : `Reenviar em ${timer}s`}
+                    </Text>
+                </TouchableOpacity>
+                
+                <Text style={styles.infoText}>
+                    Não recebeu o código? Verifique se o número está correto
+                </Text>
+            </View>
+        </OnboardingLayout>
     );
 }
 
 const styles = StyleSheet.create({
-    containerCustom: {
+    container: {
         flex: 1,
-        backgroundColor: '#F5F5F5',
         alignItems: 'center',
-        justifyContent: 'center',
         paddingHorizontal: 24,
+        paddingTop: 48,
     },
-    backButton: {
-        position: 'absolute',
-        top: 50,
-        left: 16,
-        zIndex: 10,
-    },
-    titleCustom: {
-        color: '#1A330E',
-        fontSize: 32,
+    title: {
+        fontSize: 24,
         fontWeight: 'bold',
-        marginBottom: 32,
-        marginTop: 100,
-        textAlign: 'left',
-        alignSelf: 'flex-start',
-        marginLeft: 0,
-        paddingRight: 24,
-    },
-    inputRow: {
-        flexDirection: 'row',
-        alignItems: 'center',
+        color: LEAF_GREEN,
         marginBottom: 8,
+        textAlign: 'center',
+    },
+    subtitle: {
+        fontSize: 16,
+        color: LEAF_GRAY,
+        marginBottom: 32,
+        textAlign: 'center',
+        lineHeight: 22,
+    },
+    otpContainer: {
         width: '100%',
-        justifyContent: 'center',
+        marginBottom: 32,
+    },
+    otpLabel: {
+        fontSize: 16,
+        fontWeight: '600',
+        color: LEAF_GREEN,
+        marginBottom: 8,
     },
     otpInput: {
-        flex: 1,
-        color: '#1A330E',
-        fontSize: 32,
-        borderBottomWidth: 0,
-        backgroundColor: '#F5F5F5',
-        paddingVertical: 8,
-        letterSpacing: 16,
+        fontSize: 24,
+        color: LEAF_GREEN,
+        borderBottomWidth: 2,
+        borderBottomColor: LEAF_GRAY,
+        paddingVertical: 12,
+        paddingHorizontal: 0,
         textAlign: 'center',
-    },
-    buttonCustom: {
-        backgroundColor: '#2A4A1E',
-        borderRadius: 8,
-        paddingVertical: 16,
-        width: 215,
-        alignItems: 'center',
-        alignSelf: 'center',
-        marginBottom: 16,
-    },
-    buttonTextCustom: {
-        color: '#F5F5F5',
-        fontSize: 18,
-        fontWeight: 'bold',
-        textAlign: 'center',
+        letterSpacing: 8,
     },
     resendButton: {
-        marginTop: 0,
-        marginBottom: 8,
+        marginBottom: 24,
     },
     resendButtonText: {
-        color: '#1A330E',
         fontSize: 16,
-        fontWeight: 'bold',
+        color: LEAF_GREEN,
+        fontWeight: '600',
         textAlign: 'center',
+    },
+    infoText: {
+        fontSize: 14,
+        color: LEAF_GRAY,
+        textAlign: 'center',
+        lineHeight: 20,
+    },
+    progressBarContainer: {
+        flexDirection: 'row',
+        justifyContent: 'center',
+        alignItems: 'center',
+        marginBottom: 0,
+    },
+    progressDot: {
+        width: 12,
+        height: 12,
+        borderRadius: 6,
+        backgroundColor: LEAF_GRAY,
+        marginHorizontal: 4,
+    },
+    progressActive: {
+        backgroundColor: LEAF_GREEN,
     },
 }); 

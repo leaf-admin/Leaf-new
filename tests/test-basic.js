@@ -1,32 +1,78 @@
-console.log('🧪 Teste Básico - Verificando Ambiente\n');
+// test-basic.js
+// Teste básico para verificar se o servidor Redis está funcionando
 
-// Teste 1: Verificar Node.js
-console.log('1️⃣ Node.js version:', process.version);
+const { io } = require('socket.io-client');
 
-// Teste 2: Verificar se podemos fazer require básico
-try {
-    const path = require('path');
-    console.log('2️⃣ Módulo path carregado:', path.resolve('.'));
-} catch (error) {
-    console.error('❌ Erro ao carregar path:', error.message);
-}
+const SERVER_URL = 'http://localhost:3001';
 
-// Teste 3: Verificar se o arquivo existe
-try {
-    const fs = require('fs');
-    const configPath = './common/src/config/redisConfig.js';
-    const exists = fs.existsSync(configPath);
-    console.log('3️⃣ Arquivo de config existe:', exists);
-} catch (error) {
-    console.error('❌ Erro ao verificar arquivo:', error.message);
-}
+console.log('🔍 Teste básico de conectividade com o servidor Redis');
+console.log(`📡 Conectando ao servidor: ${SERVER_URL}`);
 
-// Teste 4: Tentar carregar Redis diretamente
-try {
-    const redis = require('redis');
-    console.log('4️⃣ Redis carregado com sucesso');
-} catch (error) {
-    console.error('❌ Erro ao carregar Redis:', error.message);
-}
+const socket = io(SERVER_URL, {
+    transports: ['websocket'],
+    timeout: 5000
+});
 
-console.log('\n🎉 Teste básico finalizado!'); 
+let testCompleted = false;
+
+// Evento de conexão
+socket.on('connect', () => {
+    console.log('✅ Conectado ao servidor!');
+    
+    // Testar autenticação
+    console.log('🔐 Testando autenticação...');
+    socket.emit('authenticate', { uid: 'test_driver_1' });
+});
+
+// Evento de desconexão
+socket.on('disconnect', () => {
+    console.log('❌ Desconectado do servidor');
+    if (!testCompleted) {
+        process.exit(1);
+    }
+});
+
+// Evento de erro
+socket.on('connect_error', (error) => {
+    console.log('❌ Erro de conexão:', error.message);
+    process.exit(1);
+});
+
+// Resposta de autenticação
+socket.on('authenticated', (data) => {
+    console.log('✅ Autenticação bem-sucedida!');
+    
+    // Testar atualização de localização
+    console.log('📍 Testando atualização de localização...');
+    const location = {
+        lat: -23.5505,
+        lng: -46.6333
+    };
+    
+    socket.emit('updateLocation', location);
+});
+
+// Resposta de atualização de localização
+socket.on('locationUpdated', (response) => {
+    if (response && response.success) {
+        console.log('✅ Atualização de localização bem-sucedida!');
+    } else {
+        console.log('❌ Erro na atualização de localização:', response?.error || 'Erro desconhecido');
+    }
+    
+    testCompleted = true;
+    console.log('\n🎉 Teste básico concluído com sucesso!');
+    console.log('✅ Servidor Redis está funcionando corretamente');
+    
+    socket.disconnect();
+    process.exit(0);
+});
+
+// Timeout de segurança
+setTimeout(() => {
+    if (!testCompleted) {
+        console.log('⏰ Timeout: Servidor não respondeu em tempo hábil');
+        socket.disconnect();
+        process.exit(1);
+    }
+}, 10000); 

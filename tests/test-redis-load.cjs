@@ -17,6 +17,12 @@ let successCount = 0;
 let failCount = 0;
 let latencies = [];
 
+// Controle de estado
+let connectedDrivers = 0;
+let authenticatedDrivers = 0;
+let locationUpdatesStarted = false;
+let allDriversReady = false;
+
 // Função para gerar coordenadas aleatórias (São Paulo)
 function getRandomLocation() {
     // Coordenadas aproximadas de São Paulo
@@ -30,6 +36,16 @@ function getRandomLocation() {
     return { lat, lng };
 }
 
+// Função para verificar se todos os drivers estão prontos
+function checkAllDriversReady() {
+    if (authenticatedDrivers === DRIVER_COUNT && !allDriversReady) {
+        allDriversReady = true;
+        console.log(`\n🎉 TODOS OS ${DRIVER_COUNT} MOTORISTAS CONECTADOS E AUTENTICADOS!`);
+        console.log(`🚀 Iniciando atualizações de localização...\n`);
+        locationUpdatesStarted = true;
+    }
+}
+
 // Função para simular um motorista
 function simulateDriver(driverId) {
     const socket = io(SERVER_URL, {
@@ -37,12 +53,30 @@ function simulateDriver(driverId) {
         timeout: 5000
     });
 
-    // Autenticar o motorista
-    socket.emit('authenticate', { uid: `driver_${driverId}` });
+    let locationInterval = null;
+
+    // Evento de conexão
+    socket.on('connect', () => {
+        connectedDrivers++;
+        console.log(`🔌 Driver ${driverId} conectado (${connectedDrivers}/${DRIVER_COUNT})`);
+        
+        // Autenticar o motorista
+        socket.emit('authenticate', { uid: `driver_${driverId}` });
+    });
+
+    // Evento de desconexão
+    socket.on('disconnect', () => {
+        connectedDrivers--;
+        console.log(`🔌 Driver ${driverId} desconectado (${connectedDrivers}/${DRIVER_COUNT})`);
+    });
 
     // Escutar resposta de autenticação
     socket.on('authenticated', (data) => {
-        console.log(`🔐 Driver ${driverId} autenticado`);
+        authenticatedDrivers++;
+        console.log(`🔐 Driver ${driverId} autenticado (${authenticatedDrivers}/${DRIVER_COUNT})`);
+        
+        // Verificar se todos estão prontos
+        checkAllDriversReady();
     });
 
     // Escutar resposta de atualização de localização
@@ -56,24 +90,41 @@ function simulateDriver(driverId) {
         }
     });
 
-    // Atualizar localização periodicamente
-    const interval = setInterval(() => {
-        const startTime = Date.now();
-        const location = getRandomLocation();
+    // Função para iniciar atualizações de localização
+    function startLocationUpdates() {
+        if (locationInterval) return; // Já está rodando
         
-        socket.emit('updateLocation', location);
-        
-        // Registrar latência (aproximada)
-        setTimeout(() => {
-            const latency = Date.now() - startTime;
-            latencies.push(latency);
-        }, 50); // Pequeno delay para simular latência de rede
-        
-    }, UPDATE_INTERVAL);
+        locationInterval = setInterval(() => {
+            if (!locationUpdatesStarted) return; // Aguardar todos estarem prontos
+            
+            const startTime = Date.now();
+            const location = getRandomLocation();
+            
+            socket.emit('updateLocation', location);
+            
+            // Registrar latência (aproximada)
+            setTimeout(() => {
+                const latency = Date.now() - startTime;
+                latencies.push(latency);
+            }, 50); // Pequeno delay para simular latência de rede
+            
+        }, UPDATE_INTERVAL);
+    }
+
+    // Iniciar atualizações quando todos estiverem prontos
+    const readyCheckInterval = setInterval(() => {
+        if (locationUpdatesStarted) {
+            startLocationUpdates();
+            clearInterval(readyCheckInterval);
+        }
+    }, 100);
 
     // Retornar função para limpar
     return () => {
-        clearInterval(interval);
+        if (locationInterval) {
+            clearInterval(locationInterval);
+        }
+        clearInterval(readyCheckInterval);
         socket.disconnect();
     };
 }
@@ -98,11 +149,14 @@ function calculateStats() {
     console.log(`   Sucessos: ${successCount}`);
     console.log(`   Falhas: ${failCount}`);
     console.log(`   Taxa de sucesso: ${((successCount / (successCount + failCount)) * 100).toFixed(2)}%`);
+    console.log(`   Drivers conectados: ${connectedDrivers}/${DRIVER_COUNT}`);
+    console.log(`   Drivers autenticados: ${authenticatedDrivers}/${DRIVER_COUNT}`);
 }
 
 // Função principal async
 async function runTest() {
     console.log(`🔄 Iniciando simulação de ${DRIVER_COUNT} motoristas...`);
+    console.log(`⏳ Aguardando todos os motoristas se conectarem e autenticarem...\n`);
     
     const cleanupFunctions = [];
     
@@ -117,10 +171,10 @@ async function runTest() {
         }
     }
     
-    console.log(`✅ ${DRIVER_COUNT} motoristas conectados`);
+    console.log(`✅ ${DRIVER_COUNT} motoristas criados, aguardando conexões...`);
     
-    // Executar por 30 segundos
-    setTimeout(() => {
+    // Executar por 60 segundos após todos estarem prontos
+    const testTimeout = setTimeout(() => {
         console.log('\n🛑 Finalizando teste...');
         
         // Limpar todos os motoristas
@@ -130,15 +184,17 @@ async function runTest() {
         calculateStats();
         
         process.exit(0);
-    }, 30000);
-}
+    }, 60000); // 60 segundos de teste após todos estarem prontos
 
-// Capturar Ctrl+C
-process.on('SIGINT', () => {
-    console.log('\n🛑 Teste interrompido pelo usuário');
-    calculateStats();
-    process.exit(0);
-});
+    // Capturar Ctrl+C
+    process.on('SIGINT', () => {
+        console.log('\n🛑 Teste interrompido pelo usuário');
+        clearTimeout(testTimeout);
+        cleanupFunctions.forEach(cleanup => cleanup());
+        calculateStats();
+        process.exit(0);
+    });
+}
 
 // Iniciar o teste
 runTest().catch(err => {
