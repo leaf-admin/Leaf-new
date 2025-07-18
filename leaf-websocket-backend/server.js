@@ -20,6 +20,85 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
+// Rota de teste para verificar se o servidor está rodando
+app.get('/', (req, res) => {
+    res.json({ 
+        status: 'running', 
+        message: 'Leaf WebSocket Backend está rodando!',
+        timestamp: new Date().toISOString(),
+        port: PORT
+    });
+});
+
+// Rota de health check
+app.get('/health', (req, res) => {
+    res.json({ 
+        status: 'healthy', 
+        timestamp: new Date().toISOString() 
+    });
+});
+
+// API para buscar motoristas próximos (do Redis)
+app.get('/api/drivers/nearby', async (req, res) => {
+    try {
+        const { lat, lng, radius = 5000, limit = 10 } = req.query;
+        
+        if (!lat || !lng) {
+            return res.status(400).json({ error: 'Latitude e longitude são obrigatórios' });
+        }
+
+        const results = await redis.georadius(
+            GEO_KEY,
+            parseFloat(lng),
+            parseFloat(lat),
+            parseInt(radius),
+            'm',
+            'WITHDIST',
+            'WITHCOORD',
+            'COUNT',
+            parseInt(limit)
+        );
+
+        const drivers = results.map(([uid, distance, [lng, lat]]) => ({
+            uid,
+            distance: parseFloat(distance),
+            lat: parseFloat(lat),
+            lng: parseFloat(lng),
+        }));
+
+        res.json({ drivers, count: drivers.length });
+        
+    } catch (error) {
+        console.error('❌ Erro ao buscar motoristas próximos:', error);
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// API para obter localização de um motorista específico
+app.get('/api/drivers/:uid/location', async (req, res) => {
+    try {
+        const { uid } = req.params;
+        
+        const driverInfo = await redis.hget(STATUS_KEY, uid);
+        if (!driverInfo) {
+            return res.status(404).json({ error: 'Motorista não encontrado' });
+        }
+
+        const driverData = JSON.parse(driverInfo);
+        res.json({
+            uid,
+            lat: driverData.lat,
+            lng: driverData.lng,
+            status: driverData.status,
+            lastUpdate: driverData.lastUpdate
+        });
+        
+    } catch (error) {
+        console.error('❌ Erro ao obter localização:', error);
+        res.status(500).json({ error: error.message });
+    }
+});
+
 // Criar servidor HTTP
 const server = http.createServer(app);
 
@@ -75,7 +154,7 @@ io.on('connection', (socket) => {
         if (!userId) return;
         const { lat, lng } = data;
         try {
-            // Salvar apenas no Redis (sem sincronizar com Firebase)
+            // 1. Salvar no Redis (primário - tempo real)
             await redis.geoadd(GEO_KEY, lng, lat, userId);
             await redis.hset(STATUS_KEY, userId, JSON.stringify({
                 status: 'available',
@@ -83,6 +162,19 @@ io.on('connection', (socket) => {
                 lat,
                 lng,
             }));
+
+            // 2. Sincronizar com Realtime Database (backup/compatibilidade)
+            try {
+                await firebaseConfig.syncToRealtimeDB(`locations/${userId}`, {
+                    lat,
+                    lng,
+                    lastUpdate: Date.now(),
+                    status: 'available'
+                });
+                console.log(`✅ Localização sincronizada com Realtime DB: ${userId}`);
+            } catch (firebaseError) {
+                console.error(`❌ Erro ao sincronizar com Realtime DB: ${firebaseError.message}`);
+            }
 
             socket.emit('locationUpdated', { success: true, lat, lng });
         } catch (err) {
