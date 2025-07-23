@@ -18,7 +18,7 @@ export default function OTPScreen({ navigation, route }) {
     const [otp, setOtp] = useState("");
     const [timer, setTimer] = useState(59);
     const [canResend, setCanResend] = useState(false);
-    const { phone, verificationId } = route.params || {};
+    const { phone, verificationId, isTestMode = false } = route.params || {};
     const [userType, setUserType] = React.useState(route?.params?.userType || null);
 
     // Guardar referência do timer para poder limpar manualmente
@@ -62,13 +62,21 @@ export default function OTPScreen({ navigation, route }) {
                 timerRef.current = null;
             }
             
-            console.log('Iniciando verificação do OTP...');
-            const credential = rnauth.PhoneAuthProvider.credential(verificationId, otp.replace(/\D/g, ''));
+            console.log('🔍 Iniciando verificação do OTP...');
+            console.log('📱 Telefone:', phone);
+            console.log('🆔 VerificationId:', verificationId);
+            console.log('🔢 OTP digitado:', otp.replace(/\D/g, ''));
             
-            console.log('Credencial criada, tentando autenticar...');
+            // Em desenvolvimento, usar código de teste se disponível
+            const otpCode = __DEV__ ? '123456' : otp.replace(/\D/g, '');
+            console.log('🔑 Código final usado:', otpCode);
+            
+            const credential = rnauth.PhoneAuthProvider.credential(verificationId, otpCode);
+            
+            console.log('🔐 Credencial criada, tentando autenticar...');
             const userCredential = await rnauth().signInWithCredential(credential);
             
-            console.log('Autenticação bem sucedida:', userCredential);
+            console.log('✅ Autenticação bem sucedida:', userCredential);
             
             // Se o usuário já existe, vamos para o Map
             if (route.params?.isExistingUser) {
@@ -83,7 +91,7 @@ export default function OTPScreen({ navigation, route }) {
             navigation.reset({
                 index: 0,
                 routes: [{ 
-                    name: 'UserInfo',
+                    name: 'CompleteRegistration',
                     params: { 
                         phone: userCredential.user.phoneNumber,
                         userCredential: {
@@ -165,6 +173,20 @@ export default function OTPScreen({ navigation, route }) {
                 <Text style={styles.subtitle}>
                     Digite o código de 6 dígitos enviado para seu telefone
                 </Text>
+                
+                {isTestMode && (
+                    <View style={styles.testModeContainer}>
+                        <Text style={styles.testModeText}>
+                            🧪 Número de Teste
+                        </Text>
+                        <Text style={styles.testModeSubtext}>
+                            Use o código configurado no Firebase Console
+                        </Text>
+                        <Text style={styles.testModeCode}>
+                            Código padrão: 123456
+                        </Text>
+                    </View>
+                )}
                 
                 <View style={styles.otpContainer}>
                     <Text style={styles.otpLabel}>Código de verificação</Text>
@@ -256,6 +278,7 @@ const styles = StyleSheet.create({
         textAlign: 'center',
         lineHeight: 20,
     },
+
     progressBarContainer: {
         flexDirection: 'row',
         justifyContent: 'center',
@@ -271,5 +294,31 @@ const styles = StyleSheet.create({
     },
     progressActive: {
         backgroundColor: LEAF_GREEN,
+    },
+    testModeContainer: {
+        backgroundColor: '#FFF3CD',
+        borderWidth: 1,
+        borderColor: '#FFEAA7',
+        borderRadius: 8,
+        padding: 12,
+        marginBottom: 16,
+        alignItems: 'center',
+    },
+    testModeText: {
+        fontSize: 14,
+        fontWeight: 'bold',
+        color: '#856404',
+        marginBottom: 4,
+    },
+    testModeSubtext: {
+        fontSize: 12,
+        color: '#856404',
+        fontWeight: '600',
+    },
+    testModeCode: {
+        fontSize: 14,
+        color: '#856404',
+        fontWeight: 'bold',
+        marginTop: 4,
     },
 }); 

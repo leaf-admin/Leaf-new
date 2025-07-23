@@ -1,5 +1,5 @@
 import {  createTheme } from '@mui/material/styles';
-import { FONT_FAMILY } from 'common/sharedFunctions';
+import { FONT_FAMILY } from '../common/sharedFunctions';
 
 const theme = createTheme({
   components: {

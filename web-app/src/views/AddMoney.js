@@ -4,7 +4,7 @@ import { useSelector, useDispatch } from "react-redux";
 import AlertDialog from '../components/AlertDialog';
 import { makeStyles } from '@mui/styles';
 import UsersCombo from '../components/UsersCombo';
-import { api } from 'common';
+import { api } from '../api';
 import { useTranslation } from "react-i18next";
 import {colors} from '../components/Theme/WebTheme';
 import Button from "components/CustomButtons/Button.js";

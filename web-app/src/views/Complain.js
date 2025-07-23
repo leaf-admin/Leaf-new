@@ -3,7 +3,7 @@ import { downloadCsv } from '../common/sharedFunctions';
 import MaterialTable from "material-table";
 import { useSelector, useDispatch } from "react-redux";
 import CircularLoading from "../components/CircularLoading";
-import { api } from 'common';
+import { api } from '../api';
 import { useTranslation } from "react-i18next";
 import { colors } from '../components/Theme/WebTheme';
 import moment from 'moment/min/moment-with-locales';

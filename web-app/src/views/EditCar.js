@@ -7,7 +7,7 @@ import Select from "@mui/material/Select";
 import { useNavigate } from "react-router-dom";
 import { useSelector, useDispatch } from "react-redux";
 import { Typography, TextField, Button, Grid, Card, useMediaQuery } from "@mui/material";
-import { api } from "common";
+import { api } from "../api";
 import { useTranslation } from "react-i18next";
 import { useParams,useLocation } from "react-router-dom";
 import CircularLoading from "components/CircularLoading";

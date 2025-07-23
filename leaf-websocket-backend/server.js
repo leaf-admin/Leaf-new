@@ -8,6 +8,16 @@ require('dotenv').config();
 // Firebase integration
 const firebaseConfig = require('./firebase-config');
 
+// Importar sistemas de monitoramento
+const LatencyMonitor = require('./metrics/latency-monitor');
+const DockerMonitor = require('./monitoring/docker-monitor');
+const SmartSyncAlertSystem = require('./monitoring/smart-sync-alert-system');
+
+// Instanciar sistemas de monitoramento
+const latencyMonitor = new LatencyMonitor();
+const dockerMonitor = new DockerMonitor();
+const smartSyncAlertSystem = new SmartSyncAlertSystem();
+
 // Inicializar Firebase
 firebaseConfig.initializeFirebase();
 
@@ -36,6 +46,57 @@ app.get('/health', (req, res) => {
         status: 'healthy', 
         timestamp: new Date().toISOString() 
     });
+});
+
+// Rota de métricas e monitoramento
+app.get('/metrics', async (req, res) => {
+    try {
+        const latencyReport = await latencyMonitor.getLatencyReport();
+        const dockerReport = dockerMonitor.getFullReport();
+        const syncReport = smartSyncAlertSystem.getAlertsReport();
+        
+        res.json({
+            timestamp: new Date().toISOString(),
+            container: dockerReport.container,
+            redis: dockerReport.redis,
+            system: dockerReport.system,
+            host: dockerReport.host,
+            alerts: [...dockerReport.alerts, ...syncReport.alerts],
+            summary: {
+                status: dockerReport.summary.status,
+                totalAlerts: dockerReport.summary.totalAlerts + syncReport.activeAlerts,
+                criticalAlerts: dockerReport.summary.criticalAlerts,
+                errorAlerts: dockerReport.summary.errorAlerts,
+                warningAlerts: dockerReport.summary.warningAlerts,
+                uptime: dockerReport.container.uptime,
+                activeConnections: syncReport.activeConnections,
+                monitoringActive: true
+            }
+        });
+    } catch (error) {
+        console.error('❌ Erro ao obter métricas:', error);
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// Rota de métricas em tempo real
+app.get('/metrics/realtime', (req, res) => {
+    try {
+        const realtimeMetrics = latencyMonitor.getRealTimeMetrics();
+        const dockerMetrics = dockerMonitor.metrics;
+        
+        res.json({
+            timestamp: new Date().toISOString(),
+            latency: realtimeMetrics,
+            resources: dockerMetrics,
+            container: dockerMetrics.container,
+            redis: dockerMetrics.redis,
+            system: dockerMetrics.system
+        });
+    } catch (error) {
+        console.error('❌ Erro ao obter métricas em tempo real:', error);
+        res.status(500).json({ error: error.message });
+    }
 });
 
 // API para buscar motoristas próximos (do Redis)
@@ -102,19 +163,60 @@ app.get('/api/drivers/:uid/location', async (req, res) => {
 // Criar servidor HTTP
 const server = http.createServer(app);
 
-// Configurar Socket.io
+// Configurar Socket.io com otimizações para alta concorrência
 const io = new Server(server, {
     cors: {
         origin: "*",
         methods: ["GET", "POST"]
     },
-    transports: ['websocket', 'polling']
+    transports: ['websocket', 'polling'],
+    // Otimizações para alta concorrência
+    maxHttpBufferSize: 1e6, // 1MB
+    pingTimeout: 60000, // 60 segundos
+    pingInterval: 25000, // 25 segundos
+    upgradeTimeout: 10000, // 10 segundos
+    allowUpgrades: true,
+    // Configurações de concorrência
+    connectTimeout: 45000, // 45 segundos para conexão
+    // Pool de conexões
+    transports: ['websocket', 'polling'],
+    // Rate limiting
+    allowRequest: (req, callback) => {
+        // Permitir todas as conexões (pode ser ajustado para rate limiting)
+        callback(null, true);
+    }
 });
 
-// Cliente Redis (ioredis)
+// Cliente Redis (ioredis) com otimizações para alta concorrência
 const redis = new Redis({
     host: 'localhost', // Docker Desktop expõe para localhost
     port: 6379,
+    // Otimizações para alta concorrência
+    maxRetriesPerRequest: 3,
+    retryDelayOnFailover: 100,
+    enableReadyCheck: true,
+    maxLoadingTimeout: 10000,
+    // Pool de conexões
+    lazyConnect: true,
+    // Timeouts
+    connectTimeout: 10000,
+    commandTimeout: 5000,
+    // Configurações de performance
+    keepAlive: 30000,
+    family: 4,
+    // Configurações de concorrência
+    maxRetriesPerRequest: 3,
+    retryDelayOnFailover: 100,
+    // Configurações de memória
+    maxLoadingTimeout: 10000,
+    // Configurações de rede
+    connectTimeout: 10000,
+    commandTimeout: 5000,
+    // Configurações de pool
+    lazyConnect: true,
+    // Configurações de keep-alive
+    keepAlive: 30000,
+    family: 4
 });
 
 const GEO_KEY = 'drivers:geo';
@@ -153,59 +255,132 @@ io.on('connection', (socket) => {
     socket.on('updateLocation', async (data) => {
         if (!userId) return;
         const { lat, lng } = data;
+        
+        // Monitorar latência da operação
+        const operationId = latencyMonitor.startOperation('updateLocation', userId);
+        
         try {
             // 1. Salvar no Redis (primário - tempo real)
-            await redis.geoadd(GEO_KEY, lng, lat, userId);
-            await redis.hset(STATUS_KEY, userId, JSON.stringify({
-                status: 'available',
-                lastUpdate: Date.now(),
-                lat,
-                lng,
-            }));
+            await latencyMonitor.monitorRedisLatency('geoadd', () => 
+                redis.geoadd(GEO_KEY, lng, lat, userId)
+            );
+            
+            await latencyMonitor.monitorRedisLatency('hset', () => 
+                redis.hset(STATUS_KEY, userId, JSON.stringify({
+                    status: 'available',
+                    lastUpdate: Date.now(),
+                    lat,
+                    lng,
+                }))
+            );
 
             // 2. Sincronizar com Realtime Database (backup/compatibilidade)
             try {
-                await firebaseConfig.syncToRealtimeDB(`locations/${userId}`, {
-                    lat,
-                    lng,
-                    lastUpdate: Date.now(),
-                    status: 'available'
-                });
+                await latencyMonitor.monitorFirebaseLatency('syncToRealtimeDB', () =>
+                    firebaseConfig.syncToRealtimeDB(`locations/${userId}`, {
+                        lat,
+                        lng,
+                        lastUpdate: Date.now(),
+                        status: 'available'
+                    })
+                );
                 console.log(`✅ Localização sincronizada com Realtime DB: ${userId}`);
             } catch (firebaseError) {
                 console.error(`❌ Erro ao sincronizar com Realtime DB: ${firebaseError.message}`);
+                smartSyncAlertSystem.recordSyncFailure('firebase', 'updateLocation', firebaseError, {
+                    operation: 'syncToRealtimeDB',
+                    path: `locations/${userId}`,
+                    data: { lat, lng, lastUpdate: Date.now(), status: 'available' }
+                });
             }
 
+            latencyMonitor.endOperation(operationId, true);
             socket.emit('locationUpdated', { success: true, lat, lng });
         } catch (err) {
+            latencyMonitor.endOperation(operationId, false, err.message);
+            smartSyncAlertSystem.recordSyncFailure('redis', 'updateLocation', err, {
+                operation: 'geoadd',
+                key: GEO_KEY,
+                value: { lng, lat, member: userId }
+            });
             socket.emit('locationUpdated', { success: false, error: err.message });
         }
     });
 
     // Buscar motoristas próximos
     socket.on('findNearbyDrivers', async (data) => {
+        console.log('🔍 Recebido findNearbyDrivers:', data);
         const { lat, lng, radius = 5000, limit = 10 } = data;
+        
+        // Monitorar latência da operação
+        const operationId = latencyMonitor.startOperation('findNearbyDrivers', userId);
+        
         try {
-            const results = await redis.georadius(
-                GEO_KEY,
-                lng,
-                lat,
-                radius,
-                'm',
-                'WITHDIST',
-                'WITHCOORD',
-                'COUNT',
-                limit
+            console.log(`🔍 Buscando motoristas próximos: lat=${lat}, lng=${lng}, radius=${radius}, limit=${limit}`);
+            
+            // Verificar se há dados no Redis
+            const totalDrivers = await latencyMonitor.monitorRedisLatency('zcard', () =>
+                redis.zcard(GEO_KEY)
             );
+            console.log(`📊 Total de motoristas no Redis: ${totalDrivers}`);
+            
+            if (totalDrivers === 0) {
+                console.log('⚠️ Nenhum motorista encontrado no Redis');
+                latencyMonitor.endOperation(operationId, true);
+                socket.emit('nearbyDrivers', { 
+                    success: true, 
+                    drivers: [], 
+                    message: 'Nenhum motorista disponível' 
+                });
+                return;
+            }
+            
+            const results = await latencyMonitor.monitorRedisLatency('georadius', () =>
+                redis.georadius(
+                    GEO_KEY,
+                    lng,
+                    lat,
+                    radius,
+                    'm',
+                    'WITHDIST',
+                    'WITHCOORD',
+                    'COUNT',
+                    limit
+                )
+            );
+            
+            console.log(`🔍 Resultados brutos do Redis:`, results);
+            
             const drivers = results.map(([uid, distance, [lng, lat]]) => ({
                 uid,
                 distance: parseFloat(distance),
                 lat: parseFloat(lat),
                 lng: parseFloat(lng),
             }));
-            socket.emit('nearbyDrivers', { drivers });
+            
+            console.log(`✅ Motoristas encontrados: ${drivers.length}`);
+            
+            latencyMonitor.endOperation(operationId, true);
+            socket.emit('nearbyDrivers', { 
+                success: true, 
+                drivers,
+                total: drivers.length,
+                searchRadius: radius
+            });
+            
         } catch (err) {
-            socket.emit('nearbyDrivers', { drivers: [], error: err.message });
+            console.error('❌ Erro ao buscar motoristas próximos:', err);
+            latencyMonitor.endOperation(operationId, false, err.message);
+            smartSyncAlertSystem.recordSyncFailure('redis', 'findNearbyDrivers', err, {
+                operation: 'georadius',
+                key: GEO_KEY,
+                value: { lng, lat, radius, limit }
+            });
+            socket.emit('nearbyDrivers', { 
+                success: false, 
+                drivers: [], 
+                error: err.message 
+            });
         }
     });
 
@@ -265,7 +440,19 @@ io.on('connection', (socket) => {
             console.log('❌ Usuário não autenticado');
             return;
         }
-        const { tripId, tripData } = data;
+        
+        // Extrair dados com valores padrão para evitar erros
+        const { 
+            tripId, 
+            driverId = userId,
+            status = 'completed',
+            distance = 0,
+            fare = 0,
+            startTime = Date.now() - 3600000, // 1 hora atrás como padrão
+            endTime = Date.now(),
+            startLocation = { lat: 0, lng: 0 },
+            endLocation = { lat: 0, lng: 0 }
+        } = data;
         
         try {
             console.log('📊 Obtendo dados do Redis...');
@@ -274,21 +461,21 @@ io.on('connection', (socket) => {
             const driverData = driverInfo ? JSON.parse(driverInfo) : {};
             console.log('📊 Dados do motorista:', driverData);
             
-            // Dados consolidados da viagem
+            // Dados consolidados da viagem com validação
             const consolidatedTripData = {
-                tripId,
-                driverId: userId,
-                startTime: tripData.startTime,
-                endTime: Date.now(),
-                startLocation: tripData.startLocation,
-                endLocation: tripData.endLocation,
-                distance: tripData.distance,
-                fare: tripData.fare,
-                status: 'completed',
+                tripId: tripId || `trip_${Date.now()}`,
+                driverId: driverId,
+                startTime: startTime,
+                endTime: endTime,
+                startLocation: startLocation,
+                endLocation: endLocation,
+                distance: distance,
+                fare: fare,
+                status: status,
                 completedAt: new Date().toISOString(),
                 driverLocation: {
-                    lat: driverData.lat,
-                    lng: driverData.lng
+                    lat: driverData.lat || 0,
+                    lng: driverData.lng || 0
                 }
             };
             console.log('📊 Dados consolidados:', consolidatedTripData);
@@ -296,9 +483,9 @@ io.on('connection', (socket) => {
             // Sincronizar apenas dados consolidados com Firebase
             console.log('🔥 Sincronizando com Firebase...');
             try {
-                await firebaseConfig.syncTripData(tripId, consolidatedTripData);
+                await firebaseConfig.syncTripData(consolidatedTripData.tripId, consolidatedTripData);
                 console.log('✅ Dados de viagem consolidados sincronizados com Firebase');
-                socket.emit('tripFinished', { success: true, tripId });
+                socket.emit('tripFinished', { success: true, tripId: consolidatedTripData.tripId });
             } catch (firebaseError) {
                 console.error('❌ Erro ao sincronizar viagem com Firebase:', firebaseError.message);
                 console.error('❌ Stack trace:', firebaseError.stack);
@@ -314,29 +501,42 @@ io.on('connection', (socket) => {
 
     // Cancelar corrida - sincronizar dados consolidados
     socket.on('cancelTrip', async (data) => {
-        if (!userId) return;
-        const { tripId, reason } = data;
+        console.log('❌ Recebido cancelTrip:', data);
+        if (!userId) {
+            console.log('❌ Usuário não autenticado');
+            return;
+        }
+        
+        // Extrair dados com valores padrão para evitar erros
+        const { 
+            tripId, 
+            driverId = userId,
+            reason = 'driver_unavailable'
+        } = data;
         
         try {
             const cancelData = {
-                tripId,
-                driverId: userId,
+                tripId: tripId || `cancel_trip_${Date.now()}`,
+                driverId: driverId,
                 status: 'cancelled',
                 cancelledAt: new Date().toISOString(),
-                reason: reason || 'driver_cancelled'
+                reason: reason
             };
+
+            console.log('📊 Dados de cancelamento:', cancelData);
 
             // Sincronizar apenas dados consolidados
             try {
-                await firebaseConfig.syncTripData(tripId, cancelData);
+                await firebaseConfig.syncTripData(cancelData.tripId, cancelData);
                 console.log('✅ Dados de cancelamento sincronizados com Firebase');
-                socket.emit('tripCancelled', { success: true, tripId });
+                socket.emit('tripCancelled', { success: true, tripId: cancelData.tripId });
             } catch (firebaseError) {
                 console.error('❌ Erro ao sincronizar cancelamento:', firebaseError.message);
                 socket.emit('tripCancelled', { success: false, error: firebaseError.message });
             }
 
         } catch (err) {
+            console.error('❌ Erro geral no cancelTrip:', err.message);
             socket.emit('tripCancelled', { success: false, error: err.message });
         }
     });

@@ -38,6 +38,7 @@ import DriverDocumentsScreen from '../screens/DriverDocumentsScreen';
 import Complain from '../screens/Complain';
 import OTPScreen from '../screens/OTPScreen';
 import UserInfoScreen from '../screens/UserInfoScreen';
+// CNHUploadScreen e CRLVUploadScreen foram removidos - usar DriverDocumentsScreen
 import AppCommon from '../screens/AppCommon';
 import ProfileSelectionScreen from '../screens/ProfileSelectionScreen';
 var { height, width } = Dimensions.get('window');
@@ -196,30 +197,6 @@ export default function AppContainer() {
                         })}
                     />
                 : null}
-                {authState.profile && authState.profile.usertype && authState.profile.usertype == 'driver' ?
-                    <Tab.Screen 
-                        name="DriverTrips" 
-                        component={DriverTrips} 
-                        options={{ 
-                            title: t('task_list'),
-                            ...screenOptions,
-                            tabBarIcon: ({ color, size }) => (
-                                <Ionicons name="list-circle-outline" color={color} size={size} />
-                            ),
-                        }}
-                        listeners={({navigation,route})=>({
-                            tabPress: e => {
-                                e.preventDefault()
-                                navigation.dispatch(
-                                    CommonActions.reset({
-                                        index: 0,
-                                        routes: [{name: route.name}]
-                                    })
-                                )
-                            },
-                        })}
-                    />
-                : null}
                 <Tab.Screen name="RideList"
                     component={RideListPage} 
                     options={{ 
@@ -309,6 +286,8 @@ export default function AppContainer() {
                     <Stack.Screen name="ProfileSelection" component={ProfileSelectionScreen} options={{ headerShown: false }} />
                     <Stack.Screen name="PhoneScreen" component={UserInfoScreen} options={{ headerShown: false }} />
                     <Stack.Screen name="OTP" component={OTPScreen} options={{ headerShown: false }} />
+                    <Stack.Screen name="CNHUploadScreen" component={DriverDocumentsScreen} options={{ headerShown: false }} />
+                    <Stack.Screen name="CRLVUploadScreen" component={DriverDocumentsScreen} options={{ headerShown: false }} />
                     <Stack.Screen name="CompleteRegistration" component={CompleteRegistrationScreen} options={{ headerShown: false }} />
                     <Stack.Screen name="Login" component={LoginScreen} options={{ headerShown: false }} />
                 </Stack.Navigator>
@@ -321,7 +300,12 @@ export default function AppContainer() {
     return (
         <NavigationContainer ref={navigationRef}>
             <Stack.Navigator initialRouteName={initialRoute || 'TabRoot'} screenOptions={screenOptions}>
-                <Stack.Screen name="TabRoot" component={TabRoot} options={{ headerShown: false }} />
+                {authState.profile && authState.profile.usertype === 'driver' ? (
+                    <Stack.Screen name="DriverTrips" component={DriverTrips} options={{ headerShown: false }} />
+                ) : (
+                    <Stack.Screen name="TabRoot" component={TabRoot} options={{ headerShown: false }} />
+                )}
+                {/* Demais telas */}
                 <Stack.Screen name="Profile" component={ProfileScreen} options={{ title: t('profile_setting_menu'),...screenOptions}}/>
                 <Stack.Screen name="editUser" component={EditProfilePage} options={{ title: t('update_profile_title'),...screenOptions }}/>
                 <Stack.Screen name="Search" component={SearchScreen} options={{ title: t('search'),...screenOptions }}/>

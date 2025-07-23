@@ -5,7 +5,7 @@ import { Autocomplete, Typography } from '@mui/material';
 import { makeStyles } from '@mui/styles';
 import { useTranslation } from "react-i18next";
 import Box from '@mui/material/Box';
-import { FONT_FAMILY,MAIN_COLOR } from 'common/sharedFunctions';
+import { FONT_FAMILY,MAIN_COLOR } from '../common/sharedFunctions';
 
 const useStyles = makeStyles({
   option: {

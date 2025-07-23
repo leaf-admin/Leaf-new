@@ -7,7 +7,7 @@ import { colors } from "../components/Theme/WebTheme";
 import CircularLoading from "../components/CircularLoading";
 import FileUploadIcon from "@mui/icons-material/FileUpload";
 import AlertDialog from "../components/AlertDialog";
-import { api } from "common";
+import { api } from "../api";
 import { MAIN_COLOR, SECONDORY_COLOR, FONT_FAMILY } from "../common/sharedFunctions";
 import { makeStyles } from "@mui/styles";
 import GoBackButton from "components/GoBackButton";

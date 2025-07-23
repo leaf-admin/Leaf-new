@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from "react";
 import MaterialTable from "material-table";
 import { useSelector, useDispatch } from "react-redux";
 import CircularLoading from "../components/CircularLoading";
-import { api } from "common";
+import { api } from "../api";
 import PhotoSizeSelectSmallIcon from "@mui/icons-material/PhotoSizeSelectSmall";
 import { makeStyles } from "@mui/styles";
 import FitnessCenterIcon from "@mui/icons-material/FitnessCenter";

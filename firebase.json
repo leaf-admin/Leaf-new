@@ -2,6 +2,9 @@
   "database": {
     "rules": "./json/database-rules.json"
   },
+  "firestore": {
+    "rules": "./firestore.rules"
+  },
   "storage": {
     "rules": "./json/storage.rules"
   },
@@ -85,6 +88,11 @@
       { "source": "/slickpay-process", "function": "slickpay-process" },
       { "source": "/tap-link", "function": "tap-link" },
       { "source": "/tap-process", "function": "tap-process" },
+      { "source": "/woovi-create-charge", "function": "woovi_create_charge" },
+      { "source": "/woovi-check-status", "function": "woovi_check_status" },
+      { "source": "/woovi-webhook", "function": "woovi_webhook" },
+      { "source": "/woovi-list-charges", "function": "woovi_list_charges" },
+      { "source": "/woovi-test-connection", "function": "woovi_test_connection" },
       { "source": "/getservertime", "function": "getservertime" },
       { "source": "/update_user_email", "function": "update_user_email" },
       { "source": "/checksmtpdetails", "function": "checksmtpdetails"},

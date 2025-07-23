@@ -15,9 +15,9 @@ import { useTranslation } from "react-i18next";
 import Chart from 'react-apexcharts';
 import Grid from '@mui/material/Grid';
 import Card from '@mui/material/Card';
-import { api } from 'common';
+import { api } from '../api';
 import { colors } from 'components/Theme/WebTheme';
-import { FONT_FAMILY } from 'common/sharedFunctions';
+import { FONT_FAMILY } from '../common/sharedFunctions';
 const Dashboard = () => {
     const [mylocation, setMylocation] = useState(null);
     const [locations, setLocations] = useState([]);

@@ -1,8 +1,8 @@
 import React from 'react';
 import { Button, Typography } from '@mui/material';
 import { useTranslation } from 'react-i18next';
-import { FONT_FAMILY } from 'common/sharedFunctions';
-import { MAIN_COLOR } from 'common/sharedFunctions';
+import { FONT_FAMILY } from '../common/sharedFunctions';
+import { MAIN_COLOR } from '../common/sharedFunctions';
 
 const GoBackButton = ({ isRTL, onClick, style }) => {
     const { t } = useTranslation();

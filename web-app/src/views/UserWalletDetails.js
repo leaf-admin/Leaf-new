@@ -7,7 +7,7 @@ import moment from "moment/min/moment-with-locales";
 import { colors } from "../components/Theme/WebTheme";
 import { useNavigate,useLocation } from "react-router-dom";
 import { FONT_FAMILY, MAIN_COLOR, SECONDORY_COLOR } from "../common/sharedFunctions";
-import { api } from "common";
+import { api } from "../api";
 import { ThemeProvider } from '@mui/material/styles';
 import theme from "styles/tableStyle";
 import TableStyle from '../components/Table/Style';

@@ -12,8 +12,15 @@ import { useTranslation } from "react-i18next";
 import { useSelector } from "react-redux";
 import Box from '@mui/material/Box';
 import { MAIN_COLOR, FONT_FAMILY } from "../common/sharedFunctions";
-import { api } from 'common';
-import uuid from 'react-native-uuid';
+import { api } from '../api';
+// Simple UUID generator for web
+const generateUUID = () => {
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+    const r = Math.random() * 16 | 0;
+    const v = c === 'x' ? r : (r & 0x3 | 0x8);
+    return v.toString(16);
+  });
+};
 
 
 const useStyles = makeStyles((theme) => ({
@@ -58,8 +65,8 @@ export default function GoogleMapsAutoComplete(props) {
   const [UUID, setUUID] = useState();
 
   useEffect(()=>{
-    const uuidv4 = uuid.v4()
-    setUUID(uuidv4);
+    const newUUID = generateUUID()
+    setUUID(newUUID);
     return () => {
       setUUID(null);
     };

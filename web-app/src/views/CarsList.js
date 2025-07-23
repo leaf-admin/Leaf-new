@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from "react";
 import MaterialTable from "material-table";
 import { useSelector, useDispatch } from "react-redux";
 import CircularLoading from "../components/CircularLoading";
-import { api } from "common";
+import { api } from "../api";
 import { makeStyles } from "@mui/styles";
 import { useTranslation } from "react-i18next";
 import { Modal, Grid, Typography } from "@mui/material";

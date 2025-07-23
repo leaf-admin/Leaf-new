@@ -1,50 +1,34 @@
 {
-    "build": {
-      "development": {
-        "channel":"development",
-        "autoIncrement": false,
-        "developmentClient": true,
-        "distribution": "internal"
-      },
-      "simulator": {
-        "channel":"simulator",
-        "autoIncrement": false,
-        "developmentClient": true,
-        "ios":{
-          "simulator": true
-        },
-        "distribution": "internal"
-      },
-      "preview": {
-        "channel":"preview",
-        "autoIncrement": false,
-        "android": {
-          "buildType": "apk"
-        },
-        "ios":{
-          "simulator": true
-        },
-        "distribution": "internal"
-      },
-      "production": {
-        "channel":"production",
-        "autoIncrement": false,
-        "android": {
-          "buildType": "app-bundle"
-        }
+  "cli": {
+    "version": ">= 5.9.1"
+  },
+  "build": {
+    "development": {
+      "developmentClient": true,
+      "distribution": "internal",
+      "env": {
+        "NPM_CONFIG_WORKSPACE": "true"
       }
     },
-    "submit": {
-      "production": {
-        "android": {
-          "serviceAccountKeyPath": "../serviceaccount.json",
-          "track": "internal"
-        }
+    "preview": {
+      "distribution": "internal",
+      "android": {
+        "buildType": "apk"
+      },
+      "env": {
+        "NPM_CONFIG_WORKSPACE": "true"
       }
     },
-    "cli": {
-      "version": ">= 0.50.0",
-      "requireCommit": true,
-      "appVersionSource": "local"
+    "production": {
+      "android": {
+        "buildType": "app-bundle"
+      },
+      "env": {
+        "NPM_CONFIG_WORKSPACE": "true"
+      }
     }
+  },
+  "submit": {
+    "production": {}
+  }
 }

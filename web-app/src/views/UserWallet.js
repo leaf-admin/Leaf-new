@@ -13,7 +13,7 @@ import {
 } from '@mui/material';
 import { makeStyles } from '@mui/styles';
 import { useSelector, useDispatch } from "react-redux";
-import { api } from 'common';
+import { api } from '../api';
 import { useTranslation } from "react-i18next";
 import moment from 'moment/min/moment-with-locales';
 import WalletCard from '../components/WalletCard';

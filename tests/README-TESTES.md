@@ -1,20 +1,76 @@
-# Testes de Carga - Leaf Redis Backend
+# Testes e Scripts - Leaf Backend
 
-Este diretório contém scripts para testar a performance e funcionalidade do backend Redis da aplicação Leaf.
+Este diretório contém todos os testes automatizados, scripts de carga, integração, autenticação, WebSocket, Firebase, mobile, além de utilitários e scripts de setup para o backend Leaf.
 
-## Pré-requisitos
+## Índice de Pastas
 
-1. **Servidor Redis rodando**: Certifique-se de que o servidor Redis está rodando em `localhost:3001`
-2. **Node.js**: Versão 14 ou superior
-3. **Dependências**: Execute `npm install` no diretório raiz
+- [redis/](./redis) — Testes e scripts focados em Redis (API, carga, integração, diagnóstico)
+- [load/](./load) — Testes de carga e performance
+- [integration/](./integration) — Testes de integração, arquitetura, consistência e cenários completos
+- [websocket/](./websocket) — Testes de WebSocket e comunicação em tempo real
+- [auth/](./auth) — Testes de autenticação e fluxo de login
+- [firebase/](./firebase) — Testes de permissões, integração e consistência com Firebase
+- [mobile/](./mobile) — Testes e scripts voltados para o app mobile
+- [scripts/](./scripts) — Scripts utilitários e de diagnóstico
+- [setup/](./setup) — Scripts de configuração e inicialização
 
-## Scripts Disponíveis
+---
 
-### 1. Teste Básico de Conectividade
+## Exemplos de Arquivos em Cada Categoria
+
+### redis/
+- test-redis-api.bat, test-redis-api.cjs, test-redis-quick.bat, test-redis-load.cjs, test-redis-imports.cjs, diagnose-redis.bat, run-all-redis-tests.bat, redis-manager.bat, test-redis-apis.js, test-redis.cjs, start-redis.bat, test-redis.mjs
+
+### load/
+- test-50-drivers-simultaneous.cjs, test-concurrent-connection-optimized.cjs, test-load-performance.cjs, test-quick-load.bat, test-quick-load.cjs, test-load-performance.bat, test-load.js
+
+### integration/
+- test-monitoring-system.cjs, test-backend-with-retry.cjs, test-failure-analysis.cjs, test-finish-trip-fix.cjs, test-realtime-sync.bat, test-realtime-sync.cjs, test-correct-architecture.cjs, test-correct-architecture.bat, test-location-sync.bat, test-location-sync-real.cjs, test-leaf-production.cjs, test-leaf-production.bat, test-realistic-integration.bat, test-realistic-integration.cjs, test-config-realistic.cjs, test-driver-integration-realistic.cjs, test-basic.bat, test-basic.js, test-architecture.js, test-nearby-drivers.js, test-config-only.mjs, test-basic.mjs, test-simple.cjs, test-hybrid-strategy.cjs, test-complete-integration.cjs, test-location-actions.cjs, test-dual-write-simple.mjs, test-imports.mjs, test-simple.mjs, test-dual-write.mjs
+
+### websocket/
+- test-websocket-only.bat, test-websocket-only.cjs, test-websocket-simple.cjs, test-server.js
+
+### auth/
+- test-auth-email.bat, test-auth-email.cjs, test-simple-auth.bat, test-simple-auth.cjs
+
+### firebase/
+- test-firebase-permissions.cjs, test-firebase-project.js, test-firebase-only.js, test-firestore.mjs
+
+### mobile/
+- test-driver-system-realistic.bat, test-all-mobile.bat, test-metro-config.cjs, test-mobile-build.bat, test-mobile-build.ps1, test-mobile-build.cjs
+
+### scripts/
+- check-status.ps1, fix-backend-step1.ps1, commit-redis-implementation.bat
+
+### setup/
+- quick-start-redis.bat, setup-redis-docker.ps1, setup-redis.ps1
+
+---
+
+## Como Executar
+
+Cada subpasta contém um README ou instruções nos próprios arquivos de script. Para a maioria dos testes, basta rodar o script correspondente via terminal (Windows ou Node.js).
+
+**Exemplo:**
 ```bash
-# Windows
-test-basic.bat
+cd tests/redis
+./test-redis-quick.bat 100
+```
 
+---
+
+## Observações
+
+- Os testes de carga podem exigir muitos recursos do sistema.
+- Sempre verifique as dependências e pré-requisitos de cada script.
+- Para integração contínua, utilize os scripts de integração e carga.
+- Scripts utilitários e de setup ajudam a preparar o ambiente para os testes.
+
+---
+
+## Histórico
+
+Este README foi atualizado para refletir a nova organização dos testes e scripts, facilitando a navegação e manutenção do projeto. 
 # Linux/Mac
 node test-basic.js
 ```
@@ -93,6 +149,118 @@ node test-redis-load.cjs [numero_de_drivers]
 ...
 
 📊 Estatísticas de Latência:
+   Média: 45.23ms
+   Mínima: 12ms
+   Máxima: 234ms
+   95º percentil: 89ms
+   Sucessos: 2847
+   Falhas: 3
+   Taxa de sucesso: 99.89%
+   Drivers conectados: 1000/1000
+   Drivers autenticados: 1000/1000
+```
+
+## Troubleshooting
+
+### Erro: "Servidor não respondeu"
+- Verifique se o servidor Redis está rodando em `localhost:3001`
+- Execute `test-basic.bat` primeiro para verificar conectividade
+
+### Erro: "Timeout"
+- O servidor pode estar sobrecarregado
+- Reduza o número de drivers no teste
+- Verifique os logs do servidor
+
+### Performance Ruim
+- Verifique se o Redis está configurado corretamente
+- Monitore o uso de CPU e memória
+- Considere ajustar as configurações do servidor
+
+## Configurações Avançadas
+
+### Modificar Intervalo de Atualização
+No arquivo `test-redis-load.cjs`, altere:
+```javascript
+const UPDATE_INTERVAL = 1000; // 1 segundo entre atualizações
+```
+
+### Modificar Duração do Teste
+No arquivo `test-redis-load.cjs`, altere:
+```javascript
+}, 60000); // 60 segundos de teste após todos estarem prontos
+```
+
+### Modificar Coordenadas
+No arquivo `test-redis-load.cjs`, altere:
+```javascript
+const baseLat = -23.5505; // Latitude de São Paulo
+const baseLng = -46.6333; // Longitude de São Paulo
+const radius = 0.01;      // Raio em graus (~1km)
+```
+
+## Próximos Passos
+
+1. Execute `test-basic.bat` para verificar conectividade
+2. Execute `test-redis-quick.bat 100` para teste leve
+3. Execute `test-all-mobile.bat` para menu completo
+4. Monitore os logs do servidor durante os testes
+5. Analise as estatísticas para otimizações 
+   Média: 45.23ms
+   Mínima: 12ms
+   Máxima: 234ms
+   95º percentil: 89ms
+   Sucessos: 2847
+   Falhas: 3
+   Taxa de sucesso: 99.89%
+   Drivers conectados: 1000/1000
+   Drivers autenticados: 1000/1000
+```
+
+## Troubleshooting
+
+### Erro: "Servidor não respondeu"
+- Verifique se o servidor Redis está rodando em `localhost:3001`
+- Execute `test-basic.bat` primeiro para verificar conectividade
+
+### Erro: "Timeout"
+- O servidor pode estar sobrecarregado
+- Reduza o número de drivers no teste
+- Verifique os logs do servidor
+
+### Performance Ruim
+- Verifique se o Redis está configurado corretamente
+- Monitore o uso de CPU e memória
+- Considere ajustar as configurações do servidor
+
+## Configurações Avançadas
+
+### Modificar Intervalo de Atualização
+No arquivo `test-redis-load.cjs`, altere:
+```javascript
+const UPDATE_INTERVAL = 1000; // 1 segundo entre atualizações
+```
+
+### Modificar Duração do Teste
+No arquivo `test-redis-load.cjs`, altere:
+```javascript
+}, 60000); // 60 segundos de teste após todos estarem prontos
+```
+
+### Modificar Coordenadas
+No arquivo `test-redis-load.cjs`, altere:
+```javascript
+const baseLat = -23.5505; // Latitude de São Paulo
+const baseLng = -46.6333; // Longitude de São Paulo
+const radius = 0.01;      // Raio em graus (~1km)
+```
+
+## Próximos Passos
+
+1. Execute `test-basic.bat` para verificar conectividade
+2. Execute `test-redis-quick.bat 100` para teste leve
+3. Execute `test-all-mobile.bat` para menu completo
+4. Monitore os logs do servidor durante os testes
+5. Analise as estatísticas para otimizações 
    Média: 45.23ms
    Mínima: 12ms
    Máxima: 234ms

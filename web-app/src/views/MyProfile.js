@@ -8,7 +8,7 @@ import Typography from '@mui/material/Typography';
 import Container from '@mui/material/Container';
 import { makeStyles } from '@mui/styles';
 import AlertDialog from '../components/AlertDialog';
-import { FirebaseContext, api } from 'common';
+import { FirebaseContext, api } from '../api';
 import { useTranslation } from "react-i18next";
 import moment from 'moment/min/moment-with-locales';
 import CardContent from '@mui/material/CardContent';

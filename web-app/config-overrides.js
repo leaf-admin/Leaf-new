@@ -8,7 +8,6 @@ module.exports = function (config, env) {
       babelInclude([
         /* transpile (converting to es5) code in src/ and shared component library */
         path.resolve('src'),
-        path.resolve('../common'),
         path.resolve('../node_modules/@react-native-async-storage/async-storage')
       ]),
       addBabelPlugin('@babel/plugin-proposal-nullish-coalescing-operator'),

@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from "react";
 import CircularLoading from "../components/CircularLoading";
 import { useDispatch } from "react-redux";
-import { api } from "common";
+import { api } from "../api";
 import i18n from "i18next";
 import { useTranslation } from "react-i18next";
 import moment from "moment/min/moment-with-locales";

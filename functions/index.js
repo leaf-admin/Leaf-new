@@ -51,7 +51,8 @@ var methods = [
     'slickpay',
     'test',
     'xendit',
-     'tap'
+    'tap',
+    'woovi'
 ];
 
 for (let i = 0; i < methods.length; i++) {
@@ -1474,3 +1475,51 @@ exports.create_custom_token = onRequest(async (request, response) => {
 Object.keys(redisApis).forEach(apiName => {
     exports[apiName] = redisApis[apiName];
 });
+
+// ===== WOOVI PIX ROUTES =====
+const wooviRoutes = require('./providers/woovi');
+
+// Rota para criar cobrança PIX
+exports.woovi_create_charge = onRequest({
+    cors: true,
+    maxInstances: 10,
+    minInstances: 0,
+    region: 'us-central1',
+    invoker: 'public'
+}, wooviRoutes.createPixCharge);
+
+// Rota para consultar status da cobrança
+exports.woovi_check_status = onRequest({
+    cors: true,
+    maxInstances: 10,
+    minInstances: 0,
+    region: 'us-central1',
+    invoker: 'public'
+}, wooviRoutes.checkChargeStatus);
+
+// Rota para processar webhook da Woovi
+exports.woovi_webhook = onRequest({
+    cors: true,
+    maxInstances: 10,
+    minInstances: 0,
+    region: 'us-central1',
+    invoker: 'public'
+}, wooviRoutes.processWebhook);
+
+// Rota para listar cobranças
+exports.woovi_list_charges = onRequest({
+    cors: true,
+    maxInstances: 10,
+    minInstances: 0,
+    region: 'us-central1',
+    invoker: 'public'
+}, wooviRoutes.listCharges);
+
+// Rota para testar conexão
+exports.woovi_test_connection = onRequest({
+    cors: true,
+    maxInstances: 5,
+    minInstances: 0,
+    region: 'us-central1',
+    invoker: 'public'
+}, wooviRoutes.testConnection);

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { api } from 'common';
+import { api } from '../api';
 import { useTranslation } from "react-i18next";
 import langlocales from '../lists/langlocales';
 import datelocales from '../lists/datelocales';

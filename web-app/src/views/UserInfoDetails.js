@@ -5,7 +5,7 @@ import { useDispatch } from "react-redux";
 import CircularLoading from "../components/CircularLoading";
 import { useTranslation } from "react-i18next";
 import { SECONDORY_COLOR, FONT_FAMILY } from "../common/sharedFunctions";
-import { api } from "common";
+import { api } from "../api";
 import Userinfo from "../components/Userinfo";
 import { colors } from "components/Theme/WebTheme";
 import GoBackButton from "components/GoBackButton";

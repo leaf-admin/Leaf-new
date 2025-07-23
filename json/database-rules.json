@@ -87,6 +87,10 @@
                 ".write": "auth != null && auth.uid===$uid"
             }
         },
+        "test_permissions": {
+            ".read": "auth != null",
+            ".write": "auth != null"
+        },
         "walletHistory":{
             ".read": "auth != null",
             ".write": "auth != null"
@@ -154,6 +158,6 @@
         "usedreferral": {
             ".read" : "true",
             ".write" : "true"
-          }
+        }
     }
 }

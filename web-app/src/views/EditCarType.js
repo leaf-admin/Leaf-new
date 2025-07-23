@@ -6,7 +6,7 @@ import MenuItem from "@mui/material/MenuItem";
 import Select from "@mui/material/Select";
 import { useSelector, useDispatch } from "react-redux";
 import { Typography, TextField, Button, Grid, Card } from "@mui/material";
-import { api } from "common";
+import { api } from "../api";
 import { useTranslation } from "react-i18next";
 import { useNavigate,useLocation } from "react-router-dom";
 import CircularLoading from "components/CircularLoading";

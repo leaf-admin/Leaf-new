@@ -21,7 +21,7 @@ import CarIcon from '@mui/icons-material/DirectionsCar';
 import ExitIcon from '@mui/icons-material/ExitToApp';
 import OfferIcon from '@mui/icons-material/LocalOffer';
 import NotifyIcon from '@mui/icons-material/NotificationsActive';
-import { api } from 'common';
+import { api } from '../api';
 import { colors } from '../components/Theme/WebTheme';
 import { useTranslation } from "react-i18next";
 import AccountCircleIcon from '@mui/icons-material/AccountCircle';

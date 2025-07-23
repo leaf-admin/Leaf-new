@@ -8,15 +8,15 @@ import CircularLoading from "../components/CircularLoading";
 import FormControlLabel from '@mui/material/FormControlLabel';
 import Switch from '@mui/material/Switch';
 import Grid from '@mui/material/Grid';
-import { api } from 'common';
+import { api } from '../api';
 import { useTranslation } from "react-i18next";
 import CountryListSelect from '../components/CountryListSelect';
 import { colors } from '../components/Theme/WebTheme';
 import Button from "components/CustomButtons/Button.js";
-import { PanicSettings, BookingImageSettings , DeliveryFlow, CustomerBidSettings} from 'common/sharedFunctions';
-import { DispatchSettings } from 'common/sharedFunctions';
-import { showEst, calcEst } from 'common/sharedFunctions';
-import { optionsRequired } from 'common/sharedFunctions';
+import { PanicSettings, BookingImageSettings , DeliveryFlow, CustomerBidSettings} from '../common/sharedFunctions';
+import { DispatchSettings } from '../common/sharedFunctions';
+import { showEst, calcEst } from '../common/sharedFunctions';
+import { optionsRequired } from '../common/sharedFunctions';
 import {MAIN_COLOR, SECONDORY_COLOR, FONT_FAMILY } from "../common/sharedFunctions"
 
 const useStyles = makeStyles(theme => ({

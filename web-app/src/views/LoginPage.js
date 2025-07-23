@@ -19,7 +19,7 @@ import { useSelector, useDispatch } from "react-redux";
 import AccountBoxIcon from '@mui/icons-material/AccountBox';
 import AlertDialog from '../components/AlertDialog';
 import CountrySelect from '../components/CountrySelect';
-import { FirebaseContext, api } from 'common';
+import { FirebaseContext, api } from '../api';
 import { useTranslation } from "react-i18next";
 import CircularProgress from '@mui/material/CircularProgress';
 import { useNavigate } from 'react-router-dom';

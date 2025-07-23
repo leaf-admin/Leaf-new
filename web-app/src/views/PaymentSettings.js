@@ -11,7 +11,7 @@ import Button from "components/CustomButtons/Button.js";
 import FormControlLabel from '@mui/material/FormControlLabel';
 import Switch from '@mui/material/Switch';
 import TextField from '@mui/material/TextField';
-import { api } from 'common';
+import { api } from '../api';
 import { colors } from '../components/Theme/WebTheme';
 import { Typography } from '@mui/material';
 

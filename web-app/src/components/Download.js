@@ -4,7 +4,7 @@ import HandsOnMobile from '../assets/img/handsonmobile.jpg';
 import useStyles from '../styles/styles';
 import { useSelector } from 'react-redux';
 import { useTranslation } from "react-i18next";
-import { FONT_FAMILY } from 'common/sharedFunctions';
+import { FONT_FAMILY } from '../common/sharedFunctions';
 
 const DownloadApp = () => {
   const classes = useStyles();

@@ -10,7 +10,7 @@ import Button from '@mui/material/Button';
 import FormControlLabel from '@mui/material/FormControlLabel';
 import { useSelector } from "react-redux";
 import { useTranslation } from "react-i18next";
-import { FONT_FAMILY } from 'common/sharedFunctions';
+import { FONT_FAMILY } from '../common/sharedFunctions';
 
 export default function ConfirmationDialogRaw(props) {
   const { onClose, value: valueProp, open, ...other } = props;

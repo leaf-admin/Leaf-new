@@ -7,7 +7,7 @@ import DialogContentText from '@mui/material/DialogContentText';
 import DialogTitle from '@mui/material/DialogTitle';
 import { useTranslation } from "react-i18next";
 import { colors } from '../components/Theme/WebTheme';
-import { FONT_FAMILY } from 'common/sharedFunctions';
+import { FONT_FAMILY } from '../common/sharedFunctions';
 
 export default function AlertDialog(props) {
   const { t } = useTranslation();

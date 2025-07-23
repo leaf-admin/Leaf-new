@@ -14,7 +14,7 @@ import {
   Select,
   MenuItem,
 } from "@mui/material";
-import { api } from "common";
+import { api } from "../api";
 import PersonAddIcon from "@mui/icons-material/PersonAdd";
 import UsersCombo from "../components/UsersCombo";
 import { makeStyles } from "@mui/styles";
