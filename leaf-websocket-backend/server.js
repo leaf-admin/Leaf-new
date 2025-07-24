@@ -160,6 +160,9 @@ app.get('/api/drivers/:uid/location', async (req, res) => {
     }
 });
 
+const wooviWebhook = require('./routes/wooviWebhook');
+app.use('/api', wooviWebhook);
+
 // Criar servidor HTTP
 const server = http.createServer(app);
 

@@ -84,8 +84,8 @@ export default function DriverTrips(props) {
                             name="white-balance-sunny"
                             size={20}
                             color={'#fff'}
-                        />
-                    </View>
+                />
+            </View>
                     <View style={{ flex: 1 }} />
                     {/* Lua (direita) */}
                     <View style={[styles.themeSwitchIconBubble, {
@@ -109,7 +109,7 @@ export default function DriverTrips(props) {
         <View style={styles.header}>
             <TouchableOpacity 
                 style={styles.headerButton}
-                onPress={() => props.navigation.openDrawer && props.navigation.openDrawer()}
+                onPress={() => props.navigation.navigate('ProfileScreen')}
             >
                 <Icon name="menu" type="material" color={theme.icon} size={24} />
             </TouchableOpacity>
@@ -121,8 +121,8 @@ export default function DriverTrips(props) {
                     <Icon name="notifications" type="material" color={theme.icon} size={24} />
                 </TouchableOpacity>
                 <ThemeSwitch value={isDarkMode} onValueChange={setIsDarkMode} />
-            </View>
-        </View>
+                                            </View>
+                                        </View>
     );
 
     // Adicione os estilos do mapa do MapScreen
@@ -154,7 +154,7 @@ export default function DriverTrips(props) {
     // Componente flutuante de ganhos do dia
     function EarningsBox({ value }) {
         const [show, setShow] = useState(true);
-        return (
+                                            return (
             <View style={styles.earningsBox}>
                 <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', width: '100%' }}>
                     <Text style={styles.earningsValueCentered}>
@@ -164,9 +164,11 @@ export default function DriverTrips(props) {
                         <Ionicons name={show ? 'eye' : 'eye-off'} size={22} color="#1A330E" />
                     </TouchableOpacity>
                 </View>
-            </View>
+                                </View>
         );
     }
+
+
 
     return (
         <View style={styles.container}>
@@ -184,10 +186,12 @@ export default function DriverTrips(props) {
             {/* Header flutuante */}
             <View style={styles.headerFloating} pointerEvents="box-none">
                 <Header />
-            </View>
+                            </View>
             {/* Earnings flutuante */}
             <View style={styles.earningsFloating} pointerEvents="box-none">
-                <EarningsBox value={auth?.profile?.earningsToday || 0} />
+                <TouchableOpacity onPress={() => props.navigation.navigate('EarningsReportScreen', { from: 'map' })} activeOpacity={0.8}>
+                    <EarningsBox value={auth?.profile?.earningsToday || 0} />
+                </TouchableOpacity>
             </View>
             {/* Botão inferior flutuante */}
             <View style={styles.bottomButtonFloating} pointerEvents="box-none">
@@ -204,6 +208,7 @@ export default function DriverTrips(props) {
                     </View>
                 )}
             </View>
+
         </View>
     );
 }
@@ -226,4 +231,5 @@ const styles = StyleSheet.create({
     earningsValue: { color: '#1A330E', fontSize: 18, fontWeight: 'bold', marginRight: 6 },
     earningsEye: { position: 'absolute', right: 12, top: '50%', transform: [{ translateY: -11 }] },
     earningsValueCentered: { color: '#1A330E', fontSize: 18, fontWeight: 'bold', textAlign: 'center', width: '100%' },
+
 });

@@ -33,7 +33,11 @@ import {
     CarEditScreen,
     WelcomeScreen,
     CompleteRegistrationScreen,
+    EditProfileScreen,
+    MyVehiclesScreen,
+    AddVehicleScreen,
 } from '../screens';
+import EarningsReportScreen from '../screens/EarningsReportScreen';
 import DriverDocumentsScreen from '../screens/DriverDocumentsScreen';
 import Complain from '../screens/Complain';
 import OTPScreen from '../screens/OTPScreen';
@@ -307,6 +311,11 @@ export default function AppContainer() {
                 )}
                 {/* Demais telas */}
                 <Stack.Screen name="Profile" component={ProfileScreen} options={{ title: t('profile_setting_menu'),...screenOptions}}/>
+                <Stack.Screen name="ProfileScreen" component={ProfileScreen} options={{ headerShown: false }}/>
+                <Stack.Screen name="EditProfileScreen" component={EditProfileScreen} options={{ headerShown: false }}/>
+                <Stack.Screen name="MyVehiclesScreen" component={MyVehiclesScreen} options={{ headerShown: false }}/>
+                <Stack.Screen name="AddVehicleScreen" component={AddVehicleScreen} options={{ headerShown: false }}/>
+                <Stack.Screen name="EarningsReportScreen" component={EarningsReportScreen} options={{ headerShown: false }}/>
                 <Stack.Screen name="editUser" component={EditProfilePage} options={{ title: t('update_profile_title'),...screenOptions }}/>
                 <Stack.Screen name="Search" component={SearchScreen} options={{ title: t('search'),...screenOptions }}/>
                 <Stack.Screen name="DriverRating" component={DriverRating} options={{ title: t('rate_ride'),headerLeft: ()=> null,...screenOptions }}/>

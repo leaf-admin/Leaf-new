@@ -25,6 +25,10 @@ import CarEditScreen from './CarEditScreen';
 import WelcomeScreen from './WelcomeScreen';
 import CompleteRegistrationScreen from './CompleteRegistrationScreen';
 import AuthScreen from './AuthScreen';
+import EditProfileScreen from './EditProfileScreen';
+import MyVehiclesScreen from './MyVehiclesScreen';
+import AddVehicleScreen from './AddVehicleScreen';
+import EarningsReportScreen from './EarningsReportScreen';
 
 export {
     RegistrationPage,
@@ -53,5 +57,9 @@ export {
     CarEditScreen,
     WelcomeScreen,
     CompleteRegistrationScreen,
-    AuthScreen
+    AuthScreen,
+    EditProfileScreen,
+    MyVehiclesScreen,
+    AddVehicleScreen,
+    EarningsReportScreen
 };

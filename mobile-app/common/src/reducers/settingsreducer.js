@@ -9,6 +9,7 @@ import {
 const INITIAL_STATE = {
   settings: null,
   loading: false,
+  isDarkMode: false,
   error: {
     flag: false,
     msg: null
@@ -47,6 +48,11 @@ export const settingsreducer = (state = INITIAL_STATE, action) => {
               flag:false,
               msg:null
           }            
+      };
+    case 'TOGGLE_DARK_MODE':
+      return {
+        ...state,
+        isDarkMode: !state.isDarkMode
       };
     default:
       return state;

@@ -84,7 +84,9 @@ export const formatBookingObject = async (bookingData, settings) => {
       tripInstructions: bookingData.tripInstructions? bookingData.tripInstructions: null,
       trip_cost: bookingData.estimate.estimateFare,
       convenience_fees: bookingData.estimate.convenience_fees,
-      driver_share: (parseFloat(bookingData.estimate.estimateFare) - parseFloat(bookingData.estimate.convenience_fees)).toFixed(settings.decimal),
+      // Novo cálculo: Valor para o motorista = Tarifa total - Custo operacional fixo (R$ 1,55)
+      // Pedágios serão pagos diretamente pelo motorista, não são descontados do valor
+      driver_share: (parseFloat(bookingData.estimate.estimateFare) - 1.55).toFixed(settings.decimal),
       fleet_admin_comission: bookingData.carDetails.fleet_admin_fee ? bookingData.carDetails.fleet_admin_fee : null,
       paymentPacket: bookingData.paymentPacket? bookingData.paymentPacket : null,
       preRequestedDrivers: bookingData.preRequestedDrivers?  bookingData.preRequestedDrivers: null,
@@ -192,7 +194,9 @@ export const addActualsToBooking = async (booking, address, driverLocation) => {
     ? ((parseFloat(booking?.trip_cost) - parseFloat(booking?.convenience_fees)) 
        * parseFloat(booking?.fleet_admin_comission) / 100).toFixed(2) 
     : 0;
-    let driver_fee = parseFloat(parseFloat(booking?.trip_cost) - (parseFloat(booking?.convenience_fees) + parseFloat(fleetCommission_fee) )).toFixed(2);
+    // Novo cálculo: Valor para o motorista = Tarifa total - Custo operacional fixo (R$ 1,55)
+    // Pedágios serão pagos diretamente pelo motorista, não são descontados do valor
+    let driver_fee = parseFloat(parseFloat(booking?.trip_cost) - 1.55).toFixed(2);
     booking.fleetCommission = fleetCommission_fee ? fleetCommission_fee : "0";
     booking.driver_share = driver_fee? driver_fee : "0";
     

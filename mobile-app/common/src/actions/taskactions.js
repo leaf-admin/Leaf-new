@@ -54,7 +54,9 @@ export const acceptTask = (task) => (dispatch) => {
 
     singleBookingRef(task.id).transaction((booking) => {
       let fleetCommission_fee= profile?.fleetadmin ? ((parseFloat(booking?.estimate) - parseFloat(booking?.convenience_fees)) * parseFloat(booking?.fleet_admin_comission) / 100).toFixed(2):0;
-      let driver_fee = parseFloat(parseFloat(booking?.estimate) - (parseFloat(booking?.convenience_fees) + parseFloat(fleetCommission_fee) )).toFixed(2);
+      // Novo cálculo: Valor para o motorista = Tarifa total - Custo operacional fixo (R$ 1,55)
+      // Pedágios serão pagos diretamente pelo motorista, não são descontados do valor
+      let driver_fee = parseFloat(parseFloat(booking?.estimate) - 1.55).toFixed(2);
         if (booking && booking.requestedDrivers) {
           booking.driver = uid;
           booking.driver_image = profile.profile_image ? profile.profile_image : "";
