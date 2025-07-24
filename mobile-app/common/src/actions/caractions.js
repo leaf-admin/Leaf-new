@@ -10,7 +10,7 @@ import {
   export const fetchCars = () => (dispatch) => {
   
     const {
-        carsRef
+        vehiclesRef
     } = firebase;
   
     dispatch({
@@ -20,7 +20,8 @@ import {
 
     const userInfo = store.getState().auth.profile;
 
-    carsRef(userInfo.uid, userInfo.usertype).on('value', snapshot => {
+    // Buscar todos os veículos onde driver == userInfo.uid
+    vehiclesRef().orderByChild('driver').equalTo(userInfo.uid).on('value', snapshot => {
       if (snapshot.val()) {
         let data = snapshot.val();
         const arr = Object.keys(data).map(i => {
@@ -43,24 +44,26 @@ import {
   export const editCar = (car, method) => async (dispatch) => {
     const {
       singleUserRef,
-      carAddRef, 
-      carEditRef,
-      carImage
+      vehicleAddRef, 
+      vehicleEditRef,
+      vehicleImage
     } = firebase;
     dispatch({
       type: EDIT_CAR,
       payload: { method, car }
     });
     if (method === 'Add') {
-        carAddRef.push(car);
+        // Garante que o campo driver está presente
+        const carWithDriver = { ...car, driver: car.driver || store.getState().auth.profile.uid };
+        vehicleAddRef.push(carWithDriver);
     } else if (method === 'Delete') {
-        carEditRef(car.id).remove();
+        vehicleEditRef(car.id).remove();
     } else if (method === 'UpdateImage') {
-      await carImage(car.id).put(car.car_image);
-      let image = await carImage(car.id).getDownloadURL();
+      await vehicleImage(car.id).put(car.car_image);
+      let image = await vehicleImage(car.id).getDownloadURL();
       let data = car;
       data.car_image = image;
-      carEditRef(car.id).update(data);
+      vehicleEditRef(car.id).update(data);
       if(car.active && car.driver){
         singleUserRef(car.driver).update({
           updateAt: new Date().getTime(),
@@ -69,26 +72,38 @@ import {
       }   
     }
      else {
-        carEditRef(car.id).update(car);
+        vehicleEditRef(car.id).update(car);
     }
   }
 
-  export const updateUserCarWithImage = (newData, blob) => (dispatch) => {
+  // Atualizar updateUserCarWithImage para aceitar crlvBlob
+  export const updateUserCarWithImage = (newData, blob, crlvBlob) => (dispatch) => {
     const {
       auth,
-      carAddRef,
+      vehicleAddRef,
       singleUserRef,
-      carImage
+      vehicleImage
     } = firebase;
 
-    var carId = carAddRef.push().key;
+    var carId = vehicleAddRef.push().key;
 
-    carImage(carId).put(blob).then(() => {
-      blob.close()
-      return carImage(carId).getDownloadURL()
-    }).then((url) => {
-      newData.car_image = url;
-      carAddRef.child(carId).update(newData )
+    // Upload da imagem do carro
+    const uploadCarImage = () => vehicleImage(carId).put(blob).then(() => {
+      blob.close();
+      return vehicleImage(carId).getDownloadURL();
+    });
+
+    // Upload da imagem do CRLV
+    const uploadCrlvImage = () => crlvBlob ? vehicleImage(`${carId}_crlv`).put(crlvBlob).then(() => {
+      crlvBlob.close && crlvBlob.close();
+      return vehicleImage(`${carId}_crlv`).getDownloadURL();
+    }) : Promise.resolve(null);
+
+    Promise.all([uploadCarImage(), uploadCrlvImage()]).then(([carUrl, crlvUrl]) => {
+      newData.car_image = carUrl;
+      newData.crlv_image = crlvUrl;
+      newData.driver = newData.driver || auth.currentUser.uid;
+      vehicleAddRef.child(carId).update(newData)
       if(newData.active){
         let updateData = {
           carType: newData.carType,
@@ -96,7 +111,8 @@ import {
           vehicleMake: newData.vehicleMake,
           vehicleModel: newData.vehicleModel,
           other_info: newData.other_info,
-          car_image:url,
+          car_image: carUrl,
+          crlv_image: crlvUrl,
           carApproved: newData.approved,
           updateAt: new Date().getTime()
         };

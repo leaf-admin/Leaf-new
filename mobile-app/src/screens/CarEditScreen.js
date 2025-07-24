@@ -31,6 +31,340 @@ import { getLangKey } from 'common/src/other/getLangKey';
 var { height, width } = Dimensions.get('window');
 
 export default function CarEditScreen(props) {
+    // [1] Lista de modelos Leaf Elite
+    const eliteList = [
+      { brand: 'Nissan', model: 'Kicks' },
+      { brand: 'Toyota', model: 'Corolla' },
+      { brand: 'Hyundai', model: 'Creta' },
+      { brand: 'Volkswagen', model: 'T-Cross' },
+      { brand: 'BYD', model: 'Dolphin' },
+      { brand: 'Citroen', model: 'C4 Cactus' },
+      { brand: 'Chevrolet', model: 'Tracker' },
+      { brand: 'Volkswagen', model: 'Nivus' },
+      { brand: 'Nissan', model: 'Sentra' },
+      { brand: 'Renault', model: 'Captur' },
+      { brand: 'Chevrolet', model: 'Cruze' },
+      { brand: 'Renault', model: 'Duster' },
+      { brand: 'Jeep', model: 'Renegade' },
+      { brand: 'Honda', model: 'HR-V' },
+      { brand: 'Honda', model: 'Civic' },
+      { brand: 'Kia', model: 'Cerato' },
+      { brand: 'Chery', model: 'Arrizo 5' },
+      { brand: 'Fiat', model: 'Fastback' },
+      { brand: 'Volkswagen', model: 'Jetta' },
+      { brand: 'Mitsubishi', model: 'Lancer' },
+      { brand: 'Toyota', model: 'Prius' },
+      { brand: 'Jeep', model: 'Compass' },
+      { brand: 'Chery', model: 'Tiggo 5X' },
+      { brand: 'Chery', model: 'Arrizo 6' },
+      { brand: 'Toyota', model: 'Corolla Cross' },
+      { brand: 'Hyundai', model: 'ix35' },
+      { brand: 'BYD', model: 'D1' },
+      { brand: 'Chery', model: 'Tiggo' },
+      { brand: 'JAC Motors', model: 'T40' },
+      { brand: 'Citroen', model: 'C4 Lounge' },
+      { brand: 'Nissan', model: 'LEAF' },
+      { brand: 'Citroen', model: 'C4L' },
+      { brand: 'Hyundai', model: 'Tucson' },
+      { brand: 'Ford', model: 'Fusion' },
+      { brand: 'Hyundai', model: 'Elantra' },
+      { brand: 'Mitsubishi', model: 'ASX' },
+      { brand: 'Renault', model: 'Kardian' },
+      { brand: 'Toyota', model: 'Corolla Cross Hybrid' },
+      { brand: 'Peugeot', model: '3008' },
+      { brand: 'Chery', model: 'Tiggo 7' },
+      { brand: 'Chery', model: 'Tiggo 3X' },
+      { brand: 'JAC Motors', model: 'E-JS4' },
+      { brand: 'Kia', model: 'Sportage' },
+      { brand: 'Audi', model: 'A3' },
+      { brand: 'Mitsubishi', model: 'Outlander' },
+      { brand: 'BYD', model: 'Yuan Plus' },
+      { brand: 'Volkswagen', model: 'Taos' },
+      { brand: 'BYD', model: 'KING DM-i' },
+      { brand: 'JAC Motors', model: 'T50' },
+      { brand: 'Volkswagen', model: 'Tiguan' },
+      { brand: 'Volkswagen', model: 'Golf' },
+      { brand: 'JAC Motors', model: 'EJ7' },
+      { brand: 'Toyota', model: 'Corolla Altis Hybrid' },
+      { brand: 'Audi', model: 'Q3' },
+      { brand: 'BYD', model: 'Song Plus' },
+      { brand: 'Toyota', model: 'RAV4' },
+      { brand: 'Toyota', model: 'Corolla Altis' },
+      { brand: 'Peugeot', model: 'E-208' },
+      { brand: 'Chery', model: 'Tiggo 8' },
+      { brand: 'Chevrolet', model: 'Equinox' },
+      { brand: 'Chery', model: 'Tiggo 3' },
+      { brand: 'Hyundai', model: 'Ioniq' },
+      { brand: 'Chery', model: 'Tiggo 5' },
+      { brand: 'Hyundai', model: 'i30' },
+      { brand: 'Hyundai', model: 'Ioniq Plug-in Hybrid' },
+      { brand: 'Kia', model: 'Soul' },
+      { brand: 'Mitsubishi', model: 'Eclipse Cross' },
+      { brand: 'Kia', model: 'Stonic' },
+      { brand: 'Chevrolet', model: 'Bolt' },
+      { brand: 'Toyota', model: 'Corolla Hybrid' },
+      { brand: 'BYD', model: 'Song Pro' },
+      { brand: 'Hyundai', model: 'Kona Hybrid' },
+      { brand: 'JAC Motors', model: 'T60 Plus' },
+      { brand: 'Mercedes-Benz', model: 'C 180' },
+      { brand: 'Chery', model: 'Arrizo 5e' },
+      { brand: 'Peugeot', model: 'E-2008' },
+      { brand: 'Jeep', model: 'Commander' },
+      { brand: 'Haval', model: 'H6' },
+      { brand: 'Volkswagen', model: 'Passat' },
+      { brand: 'JAC', model: 'T60' },
+      { brand: 'BMW', model: 'X1' },
+      { brand: 'Audi', model: 'A4' },
+      { brand: 'Fiat', model: 'Freemont' },
+      { brand: 'Citroen', model: 'C4 Picasso' },
+      { brand: 'Suzuki', model: 'S-Cross' },
+      { brand: 'Dodge', model: 'Journey' },
+      { brand: 'BMW', model: '320i' },
+      { brand: 'Mercedes-Benz', model: 'GLA-Class' },
+      { brand: 'BYD', model: 'Seal' },
+      { brand: 'Volkswagen', model: 'Jetta Clasico' },
+      { brand: 'Volvo', model: 'XC40' },
+      { brand: 'Volvo', model: 'S60' },
+      { brand: 'Mercedes-Benz', model: 'C 250' },
+      { brand: 'Hyundai', model: 'Kona' },
+      { brand: 'Toyota', model: 'Camry' },
+      { brand: 'Kia', model: 'Sorento' },
+      { brand: 'Citroen', model: 'Grand Picasso' },
+      { brand: 'Honda', model: 'Accord' },
+      { brand: 'Hyundai', model: 'Santa Fe' },
+      { brand: 'Renault', model: 'Megane E-Tech' },
+      { brand: 'BMW', model: 'M3' },
+      { brand: 'Chevrolet', model: 'Trailblazer' },
+      { brand: 'Chevrolet', model: 'Captiva' },
+      { brand: 'Toyota', model: 'Hilux SW4' },
+      { brand: 'Mercedes-Benz', model: 'C 200' },
+      { brand: 'BMW', model: '3-Series 330e' },
+      { brand: 'Nissan', model: 'LEAF EV' },
+      { brand: 'Kia', model: 'E-Niro' },
+      { brand: 'Toyota', model: 'Prius+' },
+      { brand: 'Hyundai', model: 'Azera' },
+      { brand: 'Mercedes-Benz', model: 'A-Class' },
+      { brand: 'Mercedes-Benz', model: 'C-Class' },
+      { brand: 'Honda', model: 'ZR-V' },
+      { brand: 'Volvo', model: 'V60' },
+      { brand: 'Mitsubishi', model: 'Pajero' },
+      { brand: 'Subaru', model: 'Forester' },
+      { brand: 'Mitsubishi', model: 'Outlander Sport' },
+      { brand: 'Land Rover', model: 'Discovery Sport' },
+      { brand: 'Audi', model: 'Q5' },
+      { brand: 'Volvo', model: 'EX30' },
+      { brand: 'Lexus', model: 'ES' },
+      { brand: 'Kia', model: 'Optima' },
+      { brand: 'Mercedes-Benz', model: 'CLA-Class' },
+      { brand: 'BMW', model: '3-series' },
+      { brand: 'Land Rover', model: 'Range Rover Evoque' },
+      { brand: 'BMW', model: 'X2' },
+      { brand: 'Volvo', model: 'XC60' },
+      { brand: 'Lexus', model: 'UX Hybrid' },
+      { brand: 'Mitsubishi', model: 'Pajero Sport' },
+      { brand: 'Mercedes-Benz', model: 'E250' },
+      { brand: 'Kia', model: 'Carnival' },
+      { brand: 'Hyundai', model: 'Sonata' },
+      { brand: 'Hyundai', model: 'Veracruz' },
+      { brand: 'Mercedes-Benz', model: 'B200' },
+      { brand: 'Ford', model: 'Bronco' },
+      { brand: 'Porsche', model: 'Macan' },
+      { brand: 'Volkswagen', model: 'CC' },
+      { brand: 'Volvo', model: 'XC90' },
+      { brand: 'Alfa Romeo', model: '159' },
+      { brand: 'Alfa Romeo', model: '166' },
+      { brand: 'Alfa Romeo', model: '939' },
+      { brand: 'Alfa Romeo', model: 'Giulietta' },
+      { brand: 'Alfa Romeo', model: 'GTV' },
+      { brand: 'Aston Martin', model: 'DBS' },
+      { brand: 'Audi', model: '100' },
+      { brand: 'Audi', model: 'A3 Limousine' },
+      { brand: 'Audi', model: 'A3 Sportback' },
+      { brand: 'Audi', model: 'A4 Avant' },
+      { brand: 'Audi', model: 'A5' },
+      { brand: 'Audi', model: 'A5 Avant' },
+      { brand: 'Audi', model: 'A6' },
+      { brand: 'Audi', model: 'A6 Avant' },
+      { brand: 'Audi', model: 'A7' },
+      { brand: 'Audi', model: 'A8' },
+      { brand: 'Audi', model: 'e-tron' },
+      { brand: 'Audi', model: 'e-tron Sportback' },
+      { brand: 'Audi', model: 'Q6' },
+      { brand: 'Audi', model: 'Q7' },
+      { brand: 'Audi', model: 'Q8' },
+      { brand: 'Audi', model: 'RS 3' },
+      { brand: 'Audi', model: 'RS 4' },
+      { brand: 'Audi', model: 'RS 6' },
+      { brand: 'Audi', model: 'S3' },
+      { brand: 'Audi', model: 'S4 Avant' },
+      { brand: 'Audi', model: 'S5 Sportback' },
+      { brand: 'Audi', model: 'S6' },
+      { brand: 'Audi', model: 'S7' },
+      { brand: 'Audi', model: 'SQ5' },
+      { brand: 'Audi', model: 'TT' },
+      { brand: 'Audi', model: 'TTS' },
+      { brand: 'BMW', model: '1-series' },
+      { brand: 'BMW', model: '2-Series 225xe' },
+      { brand: 'BMW', model: '2-series Active Tourer' },
+      { brand: 'BMW', model: '2-series Gran Tourer' },
+      { brand: 'BMW', model: '3-series Gran Turismo' },
+      { brand: 'BMW', model: '316i' },
+      { brand: 'BMW', model: '4-series' },
+      { brand: 'BMW', model: '4-series Gran Coupe' },
+      { brand: 'BMW', model: '5-series' },
+      { brand: 'BMW', model: '5-Series 530e' },
+      { brand: 'BMW', model: '5-series Gran Turismo' },
+      { brand: 'BMW', model: '6-series' },
+      { brand: 'BMW', model: '6-series Gran Coupe' },
+      { brand: 'BMW', model: '7-series' },
+      { brand: 'BMW', model: '7-Series 745e' },
+      { brand: 'BMW', model: 'ActiveHybrid 5' },
+      { brand: 'BMW', model: 'M5' },
+      { brand: 'BMW', model: 'X3' },
+      { brand: 'BMW', model: 'X4' },
+      { brand: 'BMW', model: 'X5' },
+      { brand: 'BMW', model: 'X6' },
+      { brand: 'BMW', model: 'X7' },
+      { brand: 'BYD', model: 'e5' },
+      { brand: 'BYD', model: 'e6' },
+      { brand: 'BYD', model: 'Tang' },
+      { brand: 'Cadillac', model: 'DeVille' },
+      { brand: 'Cadillac', model: 'Eldorado' },
+      { brand: 'Cadillac', model: 'Escalade' },
+      { brand: 'Cadillac', model: 'Seville' },
+      { brand: 'Champion', model: 'Defender' },
+      { brand: "Chang'an Suzuki", model: 'S-Cross' },
+      { brand: 'Chery', model: 'A5' },
+      { brand: 'Chery', model: 'A6' },
+      { brand: 'Chery', model: 'Arrizo 3' },
+      { brand: 'Chery', model: 'Arrizo 7' },
+      { brand: 'Chery', model: 'Arrizo M7' },
+      { brand: 'Chery', model: 'Grand Tiggo' },
+      { brand: 'Chery', model: 'Tiggo 4' },
+      { brand: 'Chevrolet', model: 'Grand Vitara' },
+      { brand: 'Chevrolet', model: 'Malibu' },
+      { brand: 'Chrysler', model: '300' },
+      { brand: 'Chrysler', model: 'Town and Country' },
+      { brand: 'Citroen', model: 'DS5' },
+      { brand: 'Demak', model: 'Civic' },
+      { brand: 'Dodge', model: 'Caravan' },
+      { brand: 'Dodge', model: 'Grand Caravan' },
+      { brand: 'Hawtai', model: 'Santa Fe' },
+      { brand: 'Holden', model: 'Cruze' },
+      { brand: 'Holden', model: 'Equinox' },
+      { brand: 'Holden', model: 'Malibu' },
+      { brand: 'Holden', model: 'Trailblazer' },
+      { brand: 'Hyundai', model: 'Genesis' },
+      { brand: 'Hyundai', model: 'IONIQ 5' },
+      { brand: 'Hyundai', model: 'IONIQ 6' },
+      { brand: 'Hyundai', model: 'IONIQ Electric' },
+      { brand: 'Hyundai', model: 'Kona Electric' },
+      { brand: 'Hyundai', model: 'Santa Fe Sport' },
+      { brand: 'JAC Motors', model: 'A-Class' },
+      { brand: 'JAC Motors', model: 'HFC' },
+      { brand: 'JAC Motors', model: 'iEV 40' },
+      { brand: 'JAC Motors', model: 'J3 Turin' },
+      { brand: 'JAC Motors', model: 'J4' },
+      { brand: 'JAC Motors', model: 'T8' },
+      { brand: 'Jaguar', model: 'E-PACE' },
+      { brand: 'Jaguar', model: 'XE' },
+      { brand: 'Jaguar', model: 'XF' },
+      { brand: 'Jaguar', model: 'XJ' },
+      { brand: 'Jeep', model: 'Cherokee' },
+      { brand: 'Jeep', model: 'Grand Cherokee' },
+      { brand: 'Jeep', model: 'Wrangler' },
+      { brand: 'Joylong', model: 'A6' },
+      { brand: 'Keyton', model: 'V60' },
+      { brand: 'Kia', model: 'Cadenza' },
+      { brand: 'Kia', model: 'Mohave' },
+      { brand: 'Land Rover', model: 'Defender' },
+      { brand: 'Land Rover', model: 'Discovery' },
+      { brand: 'Land Rover', model: 'LR2' },
+      { brand: 'Land Rover', model: 'LR3' },
+      { brand: 'Land Rover', model: 'LR4' },
+      { brand: 'Land Rover', model: 'Range Rover' },
+      { brand: 'Land Rover', model: 'Range Rover Sport' },
+      { brand: 'Land Rover', model: 'Range Rover Velar' },
+      { brand: 'Land Rover', model: 'Range Rover Vogue' },
+      { brand: 'Landwind', model: 'X2' },
+      { brand: 'Landwind', model: 'X5' },
+      { brand: 'Landwind', model: 'X6' },
+      { brand: 'Landwind', model: 'X7' },
+      { brand: 'Lexus', model: 'NX' },
+      { brand: 'Lexus', model: 'RX' },
+      { brand: 'Lifan', model: 'X7' },
+      { brand: 'Maruti Suzuki', model: 'Grand Vitara' },
+      { brand: 'Maruti Suzuki', model: 'S-Cross' },
+      { brand: 'Mercedes-Benz', model: 'B-Class' },
+      { brand: 'Mercedes-Benz', model: 'E 220' },
+      { brand: 'Mercedes-Benz', model: 'E-Class' },
+      { brand: 'Mercedes-Benz', model: 'E-Class Wagon' },
+      { brand: 'Mercedes-Benz', model: 'GLE-Class' },
+      { brand: 'Mercedes-Benz', model: 'M-Class' },
+      { brand: 'Mercedes-Benz', model: 'ML Class' },
+      { brand: 'Mercedes-Benz', model: 'S-Class' },
+      { brand: 'Mitsubishi', model: 'Airtrek' },
+      { brand: 'Mitsubishi', model: 'Pajero Full' },
+      { brand: 'Nissan', model: 'Altima' },
+      { brand: 'Nissan', model: 'Pathfinder' },
+      { brand: 'Peugeot', model: '5008' },
+      { brand: 'Porsche', model: 'Cayenne' },
+      { brand: 'Shineray', model: 'X7' },
+      { brand: 'Ssangyong', model: 'Korando' },
+      { brand: 'Ssangyong', model: 'XLV' },
+      { brand: 'Subaru', model: 'Impreza' },
+      { brand: 'Subaru', model: 'XV Crosstrek' },
+      { brand: 'Suzuki', model: 'Grand Vitara' },
+      { brand: 'Toyota', model: 'Camry Hybrid' },
+      { brand: 'Toyota', model: 'Corolla Ceres' },
+      { brand: 'Toyota', model: 'Corolla EX' },
+      { brand: 'Toyota', model: 'Sienna' },
+      { brand: 'Toyota', model: 'SW4' },
+      { brand: 'Volkswagen', model: 'Jetta GLI' },
+      { brand: 'Volkswagen', model: 'Jetta SportWagen' },
+      { brand: 'Volkswagen', model: 'Touareg' },
+      { brand: 'Volkswagen', model: 'Virtus' }, // ano mínimo 2025
+      { brand: 'Volvo', model: 'S40' },
+      { brand: 'Volvo', model: 'S70' },
+      { brand: 'Volvo', model: 'S80' },
+      { brand: 'Volvo', model: 'S90' },
+      { brand: 'Volvo', model: 'V40' },
+      { brand: 'Volvo', model: 'V50' },
+      { brand: 'Volvo', model: 'V70' },
+      { brand: 'Volvo', model: 'XC70' },
+      { brand: 'Zotye', model: '5008' },
+      { brand: 'Citroen', model: 'Basalt' },
+    ];
+
+    const eliteColors = ['preto', 'chumbo', 'prata', 'cinza', 'azul marinho', 'marrom', 'branco'];
+
+    // [2] Função para classificar o tipo
+    function classifyCarType(brand, model, year, color) {
+      // Exceção: Virtus só Elite se ano >= 2025
+      if (brand.trim().toLowerCase() === 'volkswagen' && model.trim().toLowerCase() === 'virtus') {
+        if (parseInt(year) >= 2025 && eliteColors.includes(color.trim().toLowerCase())) return 'Leaf Elite';
+        else return 'Leaf Plus';
+      }
+      // Busca na lista Elite
+      const isElite = eliteList.some(item => item.brand.trim().toLowerCase() === brand.trim().toLowerCase() && item.model.trim().toLowerCase() === model.trim().toLowerCase());
+      if (isElite && parseInt(year) >= 2016 && eliteColors.includes(color.trim().toLowerCase())) return 'Leaf Elite';
+      if (parseInt(year) >= 2015) return 'Leaf Plus';
+      return null; // Não atende ao mínimo
+    }
+
+    // [3] Estado para carType
+    const [carType, setCarType] = useState('');
+
+    // [4] Atualizar carType automaticamente
+    useEffect(() => {
+      if (state.vehicleMake && state.vehicleModel && year && color) {
+        const tipo = classifyCarType(state.vehicleMake, state.vehicleModel, year, color);
+        setCarType(tipo || '');
+      } else {
+        setCarType('');
+      }
+    }, [state.vehicleMake, state.vehicleModel, year, color]);
+
     const { t } = i18n;
     const isRTL = i18n.locale.indexOf('he') === 0 || i18n.locale.indexOf('ar') === 0;
     const dispatch = useDispatch();
@@ -44,6 +378,12 @@ export default function CarEditScreen(props) {
     const actionSheetRef = useRef(null);
     const [cars, setCars] = useState({});
     const [updateCalled, setUpdateCalled] = useState(false);
+    // [1] Novo estado para ano e CRLV
+    const [year, setYear] = useState(car && car.year ? car.year : '');
+    const [crlvImage, setCrlvImage] = useState(car && car.crlv_image ? car.crlv_image : null);
+    const [crlvBlob, setCrlvBlob] = useState();
+    // [1] Novo estado para cor do carro
+    const [color, setColor] = useState(car && car.color ? car.color : '');
 
     const car = props.route.params && props.route.params.car ? props.route.params.car : null;
 
@@ -167,46 +507,77 @@ export default function CarEditScreen(props) {
         setCapturedImage(null);
     }
 
-    const onSave = () => {
-        if (state.carType && state.carType.length > 1 && state.vehicleNumber && state.vehicleNumber.length > 1 && state.vehicleMake && state.vehicleMake.length > 1 && state.vehicleModel && state.vehicleModel.length > 1) {
-            if (blob) {
-                setLoading(true);
-                setUpdateCalled(true);
-                let activeCar = null;
-                let newData = { ...state };
-                for (let i = 0; i < cars.length; i++) {
-                    if (cars[i].active) {
-                        activeCar = cars[i];
-                        break;
-                    }
-                }
-                if (activeCar && state.active) {
-                    activeCar.active = false;
-                    dispatch(editCar(activeCar, "Update"));
-                } else if (activeCar && !newData.active) {
-                    newData.active = false;
-                } else {
-                    newData.active = true;
-                }
-                newData['createdAt'] = new Date().getTime();
-                newData['driver'] = auth.profile.uid;
-                newData['fleetadmin'] = auth.profile && auth.profile.fleetadmin ? auth.profile.fleetadmin : null;
-                if (!settings.carApproval) {
-                    newData['approved'] = true;
-                } else {
-                    newData['approved'] = false;
-                }
-                dispatch(updateUserCarWithImage(newData, blob));
-            }
-            else {
-                Alert.alert(t('alert'), t('proper_input_image'));
+    // [2] Função para upload do CRLV
+    const showCrlvActionSheet = async () => {
+        let permisions = await ImagePicker.requestMediaLibraryPermissionsAsync();
+        if (permisions.status === 'granted') {
+            let result = await ImagePicker.launchImageLibraryAsync({ allowsEditing: true, aspect: [4, 3] });
+            if (!result.canceled) {
+                setCrlvImage(result.assets[0].uri);
+                const blob = await new Promise((resolve, reject) => {
+                    const xhr = new XMLHttpRequest();
+                    xhr.onload = function () { resolve(xhr.response); };
+                    xhr.onerror = function () { Alert.alert(t('alert'), t('image_upload_error')); };
+                    xhr.responseType = 'blob';
+                    xhr.open('GET', result.assets[0].uri, true);
+                    xhr.send(null);
+                });
+                setCrlvBlob(blob);
             }
         } else {
-            Alert.alert(t('alert'), t('no_details_error'));
+            Alert.alert(t('alert'), t('camera_permission_error'));
         }
-        // console.log(capturedImage)
+    };
 
-    }
+    // [3] Validação no onSave
+    const onSave = () => {
+        if (!state.vehicleMake || !state.vehicleModel || !year || !color) {
+            Alert.alert(t('alert'), t('no_details_error'));
+            return;
+        }
+        if (!carType) {
+            Alert.alert(t('alert'), 'Ano mínimo para cadastro: 2015 para Leaf Plus, 2016 para Leaf Elite. Verifique também a cor.');
+            return;
+        }
+        if (!blob) {
+            Alert.alert(t('alert'), t('proper_input_image'));
+            return;
+        }
+        if (!crlvBlob) {
+            Alert.alert(t('alert'), 'Envie a imagem do documento CRLV do veículo');
+            return;
+        }
+        setLoading(true);
+        setUpdateCalled(true);
+        let activeCar = null;
+        let newData = { ...state };
+        newData.driver = auth.profile.uid;
+        newData.year = year;
+        newData.color = color;
+        newData.carType = carType;
+        for (let i = 0; i < cars.length; i++) {
+            if (cars[i].active) {
+                activeCar = cars[i];
+                break;
+            }
+        }
+        if (activeCar && state.active) {
+            activeCar.active = false;
+            dispatch(editCar(activeCar, "Update"));
+        } else if (activeCar && !newData.active) {
+            newData.active = false;
+        } else {
+            newData.active = true;
+        }
+        newData['createdAt'] = new Date().getTime();
+        newData['fleetadmin'] = auth.profile && auth.profile.fleetadmin ? auth.profile.fleetadmin : null;
+        if (!settings.carApproval) {
+            newData['approved'] = true;
+        } else {
+            newData['approved'] = false;
+        }
+        dispatch(updateUserCarWithImage({ ...newData, crlv_image: null }, blob, crlvBlob));
+    };
 
     const makeActive = () => {
         setLoading(true);
@@ -384,6 +755,43 @@ export default function CarEditScreen(props) {
                                         onChangeText={(text) => { setState({ ...state, other_info: text }) }}
                                     />
                                 </View>
+                                <View style={[styles.textInputContainerStyle, { flexDirection: isRTL ? 'row-reverse' : 'row' }]}> 
+                                    <TextInput
+                                        editable={car && car.id ? false : true}
+                                        placeholder={'Ano do veículo (ex: 2020)'}
+                                        value={year}
+                                        keyboardType="numeric"
+                                        maxLength={4}
+                                        textAlign={isRTL ? 'right' : 'left'}
+                                        style={[styles.inPutFieldStyle, styles.fontBoldStyle, { paddingRight: isRTL ? 15 : 0 }]}
+                                        placeholderTextColor={colors.PLACEHOLDER_COLOR}
+                                        onChangeText={(text) => { setYear(text.replace(/[^0-9]/g, '')) }}
+                                    />
+                                </View>
+                                <View style={[styles.textInputContainerStyle, { flexDirection: isRTL ? 'row-reverse' : 'row', alignItems: 'center' }]}> 
+                                    <TouchableOpacity style={{ flex: 1, flexDirection: 'row', alignItems: 'center' }} onPress={showCrlvActionSheet} disabled={car && car.id ? true : false}>
+                                        <Text style={[styles.fontBoldStyle, { color: crlvImage ? MAIN_COLOR : colors.PLACEHOLDER_COLOR }]}>
+                                            {crlvImage ? 'Documento CRLV enviado' : 'Enviar documento CRLV'}
+                                        </Text>
+                                        {crlvImage && <Ionicons name="checkmark-circle" size={22} color={MAIN_COLOR} style={{ marginLeft: 8 }} />}
+                                    </TouchableOpacity>
+                                </View>
+                                <View style={[styles.textInputContainerStyle, { flexDirection: isRTL ? 'row-reverse' : 'row' }]}> 
+                                    <TextInput
+                                        editable={car && car.id ? false : true}
+                                        placeholder={'Cor do veículo'}
+                                        value={color}
+                                        textAlign={isRTL ? 'right' : 'left'}
+                                        style={[styles.inPutFieldStyle, styles.fontBoldStyle, { paddingRight: isRTL ? 15 : 0 }]}
+                                        placeholderTextColor={colors.PLACEHOLDER_COLOR}
+                                        onChangeText={(text) => { setColor(text) }}
+                                    />
+                                </View>
+                                <View style={[styles.textInputContainerStyle, { flexDirection: isRTL ? 'row-reverse' : 'row', alignItems: 'center' }]}> 
+  <Text style={[styles.fontBoldStyle, { color: carType === 'Leaf Elite' ? MAIN_COLOR : (carType === 'Leaf Plus' ? colors.HEADER : colors.RED), fontSize: 16 }]}> 
+    {carType ? `Tipo: ${carType}` : 'Preencha todos os dados para classificar o tipo'}
+  </Text>
+</View>
                                 <View style={styles.buttonContainer}>
                                     {!car ?
 

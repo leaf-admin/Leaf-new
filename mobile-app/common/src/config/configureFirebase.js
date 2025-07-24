@@ -73,15 +73,10 @@ const createFullStructure = (app, db, auth, storage, config) => {
         walletHistoryRef: (uid) => db.ref("walletHistory/" + uid),
         userNotificationsRef: (uid) => db.ref("userNotifications/"+ uid),
         userRatingsRef: (uid) => db.ref("userRatings/"+ uid),
-        carsRef: (uid, role) => role == 'driver' ? 
-            db.ref('cars').orderByChild('driver').equalTo(uid)
-            : (role == 'fleetadmin' ? 
-                db.ref('cars').orderByChild('fleetadmin').equalTo(uid)
-                : db.ref('cars')
-            ),
-        carAddRef: db.ref("cars"),
-        carEditRef: (id) => db.ref("cars/"+ id),
-        carImage: (id) => storage.ref(`cars/${id}`),
+        vehiclesRef: () => db.ref('vehicles'),
+        vehicleAddRef: db.ref('vehicles'),
+        vehicleEditRef: (id) => db.ref('vehicles/' + id),
+        vehicleImage: (id) => storage.ref(`vehicles/${id}`),
         allLocationsRef: db.ref("locations"),
         userLocationRef: (uid) => db.ref("locations/"+ uid),
         sosRef: db.ref('sos'),
