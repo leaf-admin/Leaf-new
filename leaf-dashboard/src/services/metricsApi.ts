@@ -27,6 +27,81 @@ class MetricsApiService {
     }
   }
 
+  // Buscar estatísticas de usuários (customers e drivers)
+  async getUserStats(): Promise<{
+    stats: {
+      totalCustomers: number;
+      customersOnline: number;
+      totalDrivers: number;
+      driversOnline: number;
+      totalUsers: number;
+      onlineUsers: number;
+    };
+  }> {
+    try {
+      const response = await fetch(`${this.baseUrl}/stats/users`);
+      
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+      
+      const data = await response.json();
+      return data;
+    } catch (error) {
+      // eslint-disable-next-line no-console
+      console.error('Erro ao buscar estatísticas de usuários:', error);
+      throw error;
+    }
+  }
+
+  // Buscar métricas financeiras
+  async getFinancialStats(): Promise<{
+    financial: {
+      // Métricas Gerais
+      totalRevenue: number;
+      totalCosts: number;
+      totalProfit: number;
+      totalTrips: number;
+      averageTripValue: number;
+      
+      // Métricas de Hoje
+      todayRevenue: number;
+      todayTrips: number;
+      todayProfit: number;
+      todayAverageTrip: number;
+      
+      // Métricas Mensais
+      monthlyRevenue: number;
+      monthlyTrips: number;
+      monthlyProfit: number;
+      monthlyAverageTrip: number;
+      
+      // Percentuais
+      profitMargin: string;
+      costPercentage: string;
+      
+      // Crescimento
+      revenueGrowth: string;
+      profitGrowth: string;
+      tripsGrowth: string;
+    };
+  }> {
+    try {
+      const response = await fetch(`${this.baseUrl}/stats/financial`);
+      
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+      
+      const data = await response.json();
+      return data;
+    } catch (error) {
+      // eslint-disable-next-line no-console
+      console.error('Erro ao buscar métricas financeiras:', error);
+      throw error;
+    }
+  }
+
   // Buscar métricas em tempo real
   async getRealTimeMetrics(): Promise<RealTimeReport> {
     try {

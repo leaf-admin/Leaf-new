@@ -1,0 +1,11 @@
+# Cursor Rules for Leaf Dashboard
+
+# Ignore CSS linting errors
+- Ignore TypeScript errors in CSS files
+- Ignore unknown at-rule warnings for @tailwind and @apply
+- Treat CSS files as valid CSS, not TypeScript
+
+# Project-specific rules
+- This is a React TypeScript project with Tailwind CSS
+- CSS files contain valid Tailwind directives
+- Focus on TypeScript/JavaScript files for linting 

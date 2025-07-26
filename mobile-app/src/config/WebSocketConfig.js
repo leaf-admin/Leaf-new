@@ -1,17 +1,18 @@
 import { Platform } from 'react-native';
+import { getWebSocketUrl } from './ApiConfig';
 
 // Configurações do WebSocket
 const WEBSOCKET_CONFIG = {
-  // Para desenvolvimento local (emulador Android/iOS)
+  // URLs agora vêm da configuração centralizada
   LOCAL: {
     ANDROID_EMULATOR: 'http://10.0.2.2:3001', // Android Emulator
     IOS_SIMULATOR: 'http://localhost:3001', // iOS Simulator
-    DEVICE: 'http://192.168.0.39:3001', // Dispositivo físico - IP configurado
+    DEVICE: getWebSocketUrl(), // Usa configuração centralizada
   },
   
   // Para produção
   PRODUCTION: {
-    URL: 'https://your-backend-domain.com',
+    URL: 'https://api.leafapp.com', // URL de produção
   },
   
   // Configurações de conexão

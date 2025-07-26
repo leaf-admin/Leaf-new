@@ -1,7 +1,8 @@
 import store from './store/store';
 import {
     FirebaseContext,
-    FirebaseProvider
+    FirebaseProvider,
+    firebase
 } from './config/configureFirebase';
 import * as authactions from './actions/authactions';
 import * as bookingactions from './actions/bookingactions';
@@ -74,6 +75,7 @@ const api =  {
 export {
     FirebaseContext,
     FirebaseProvider,
+    firebase,
     store,
     api
 }

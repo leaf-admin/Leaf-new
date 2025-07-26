@@ -79,6 +79,164 @@ app.get('/metrics', async (req, res) => {
     }
 });
 
+// Simulação de dados de usuários
+let simulatedCustomers = 150;
+let simulatedDrivers = 45;
+let simulatedCustomersOnline = 54;
+let simulatedDriversOnline = 11;
+
+// Simulação de dados financeiros
+let simulatedFinancialData = {
+  totalRevenue: 15420.50,
+  totalCosts: 8234.75,
+  totalProfit: 7185.75,
+  totalTrips: 342,
+  averageTripValue: 45.09,
+  todayRevenue: 1245.80,
+  todayTrips: 28,
+  todayProfit: 567.30,
+  monthlyRevenue: 15420.50,
+  monthlyTrips: 342,
+  monthlyProfit: 7185.75
+};
+
+// Atualiza os dados simulados a cada 5 segundos
+setInterval(() => {
+  simulatedCustomers = Math.floor(Math.random() * 100) + 100; // 100-199
+  simulatedDrivers = Math.floor(Math.random() * 30) + 30;     // 30-59
+  simulatedCustomersOnline = Math.floor(Math.random() * 50) + 10; // 10-59
+  simulatedDriversOnline = Math.floor(Math.random() * 20) + 5;   // 5-24
+  
+  // Atualizar dados financeiros simulados
+  const revenueVariation = (Math.random() - 0.5) * 200; // ±100
+  const tripsVariation = Math.floor((Math.random() - 0.5) * 10); // ±5
+  
+  simulatedFinancialData.totalRevenue += revenueVariation;
+  simulatedFinancialData.totalTrips += tripsVariation;
+  simulatedFinancialData.totalCosts = simulatedFinancialData.totalRevenue * 0.534; // 53.4% de custos
+  simulatedFinancialData.totalProfit = simulatedFinancialData.totalRevenue - simulatedFinancialData.totalCosts;
+  simulatedFinancialData.averageTripValue = simulatedFinancialData.totalRevenue / simulatedFinancialData.totalTrips;
+  
+  // Dados de hoje (simulação)
+  simulatedFinancialData.todayRevenue = Math.floor(Math.random() * 500) + 1000; // 1000-1500
+  simulatedFinancialData.todayTrips = Math.floor(Math.random() * 20) + 20; // 20-40
+  simulatedFinancialData.todayProfit = simulatedFinancialData.todayRevenue * 0.466; // 46.6% de lucro
+  
+  // Dados mensais
+  simulatedFinancialData.monthlyRevenue = simulatedFinancialData.totalRevenue;
+  simulatedFinancialData.monthlyTrips = simulatedFinancialData.totalTrips;
+  simulatedFinancialData.monthlyProfit = simulatedFinancialData.totalProfit;
+}, 5000);
+
+// Cache para estatísticas do Redis (evitar chamadas repetitivas)
+let redisStatsCache = {
+    totalUsers: 0,
+    onlineUsers: 0,
+    lastUpdate: 0
+};
+
+// Nova rota para obter estatísticas de customers e drivers
+app.get('/stats/users', async (req, res) => {
+    try {
+        const now = Date.now();
+        
+        // Usar cache se a última atualização foi há menos de 10 segundos
+        if (now - redisStatsCache.lastUpdate < 10000) {
+            res.json({
+                timestamp: new Date().toISOString(),
+                stats: {
+                    totalCustomers: simulatedCustomers,
+                    customersOnline: simulatedCustomersOnline,
+                    totalDrivers: simulatedDrivers,
+                    driversOnline: simulatedDriversOnline,
+                    totalUsers: redisStatsCache.totalUsers,
+                    onlineUsers: redisStatsCache.onlineUsers,
+                },
+            });
+            return;
+        }
+
+        // Chamar a função Firebase para obter estatísticas reais do Redis
+        const firebaseFunctionUrl = 'http://127.0.0.1:5001/leaf-reactnative/us-central1/get_redis_stats';
+        const firebaseResponse = await fetch(firebaseFunctionUrl);
+        const firebaseData = await firebaseResponse.json();
+
+        // Atualizar cache
+        redisStatsCache = {
+            totalUsers: firebaseData.totalUsers || 0,
+            onlineUsers: firebaseData.onlineUsers || 0,
+            lastUpdate: now
+        };
+
+        res.json({
+            timestamp: new Date().toISOString(),
+            stats: {
+                totalCustomers: simulatedCustomers,
+                customersOnline: simulatedCustomersOnline,
+                totalDrivers: simulatedDrivers,
+                driversOnline: simulatedDriversOnline,
+                totalUsers: redisStatsCache.totalUsers,
+                onlineUsers: redisStatsCache.onlineUsers,
+            },
+        });
+    } catch (error) {
+        console.error('Erro ao buscar estatísticas de usuários:', error);
+        // Em caso de erro, usar dados do cache ou valores padrão
+        res.json({
+            timestamp: new Date().toISOString(),
+            stats: {
+                totalCustomers: simulatedCustomers,
+                customersOnline: simulatedCustomersOnline,
+                totalDrivers: simulatedDrivers,
+                driversOnline: simulatedDriversOnline,
+                totalUsers: redisStatsCache.totalUsers,
+                onlineUsers: redisStatsCache.onlineUsers,
+            },
+        });
+    }
+});
+
+// Nova rota para métricas financeiras
+app.get('/stats/financial', async (req, res) => {
+    try {
+        res.json({
+            timestamp: new Date().toISOString(),
+            financial: {
+                // Métricas Gerais
+                totalRevenue: simulatedFinancialData.totalRevenue,
+                totalCosts: simulatedFinancialData.totalCosts,
+                totalProfit: simulatedFinancialData.totalProfit,
+                totalTrips: simulatedFinancialData.totalTrips,
+                averageTripValue: simulatedFinancialData.averageTripValue,
+                
+                // Métricas de Hoje
+                todayRevenue: simulatedFinancialData.todayRevenue,
+                todayTrips: simulatedFinancialData.todayTrips,
+                todayProfit: simulatedFinancialData.todayProfit,
+                todayAverageTrip: simulatedFinancialData.todayRevenue / simulatedFinancialData.todayTrips,
+                
+                // Métricas Mensais
+                monthlyRevenue: simulatedFinancialData.monthlyRevenue,
+                monthlyTrips: simulatedFinancialData.monthlyTrips,
+                monthlyProfit: simulatedFinancialData.monthlyProfit,
+                monthlyAverageTrip: simulatedFinancialData.monthlyRevenue / simulatedFinancialData.monthlyTrips,
+                
+                // Percentuais
+                profitMargin: ((simulatedFinancialData.totalProfit / simulatedFinancialData.totalRevenue) * 100).toFixed(2),
+                costPercentage: ((simulatedFinancialData.totalCosts / simulatedFinancialData.totalRevenue) * 100).toFixed(2),
+                
+                // Crescimento (simulado)
+                revenueGrowth: '+12.5%',
+                profitGrowth: '+8.3%',
+                tripsGrowth: '+15.2%'
+            },
+        });
+    } catch (error) {
+        console.error('Erro ao buscar métricas financeiras:', error);
+        res.status(500).json({ error: 'Erro ao buscar métricas financeiras' });
+    }
+});
+
 // Rota de métricas em tempo real
 app.get('/metrics/realtime', (req, res) => {
     try {

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useContext } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
     View,
     Text,
@@ -15,14 +15,14 @@ import ActionSheet from "react-native-actions-sheet";
 import i18n from '../i18n';
 var { height } = Dimensions.get('window');
 import { useSelector, useDispatch } from 'react-redux';
-import { api, FirebaseContext } from 'common';
+import { api, firebase } from 'common';
 import * as ImagePicker from 'expo-image-picker';
 import { MaterialCommunityIcons, Entypo } from '@expo/vector-icons';
 import { FontAwesome5 } from '@expo/vector-icons';
 import { fonts } from '../common/font';
 
 export default function EditProfilePage(props) {
-    const { config } = useContext(FirebaseContext);
+    const { config } = firebase;
     const {
         updateProfile
     } = api;

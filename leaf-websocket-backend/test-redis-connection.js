@@ -56,16 +56,16 @@ async function testRedisConnection() {
     
     try {
         console.log('\n2. Testando Redis via Docker container...');
-        const { stdout } = await execAsync('docker exec redis-taxi-app redis-cli ping');
+        const { stdout } = await execAsync('docker exec redis-leaf redis-cli ping');
         console.log(`✅ Ping via Docker: ${stdout.trim()}`);
         
-        const { stdout: info } = await execAsync('docker exec redis-taxi-app redis-cli info');
+        const { stdout: info } = await execAsync('docker exec redis-leaf redis-cli info');
         console.log('✅ Info via Docker obtido');
         
-        const { stdout: memory } = await execAsync('docker exec redis-taxi-app redis-cli info memory');
+        const { stdout: memory } = await execAsync('docker exec redis-leaf redis-cli info memory');
         console.log('✅ Memory info via Docker obtido');
         
-        const { stdout: stats } = await execAsync('docker exec redis-taxi-app redis-cli info stats');
+        const { stdout: stats } = await execAsync('docker exec redis-leaf redis-cli info stats');
         console.log('✅ Stats via Docker obtido');
         
     } catch (error) {
@@ -95,16 +95,16 @@ const { promisify } = require('util');
     
     try {
         console.log('\n2. Testando Redis via Docker container...');
-        const { stdout } = await execAsync('docker exec redis-taxi-app redis-cli ping');
+        const { stdout } = await execAsync('docker exec redis-leaf redis-cli ping');
         console.log(`✅ Ping via Docker: ${stdout.trim()}`);
         
-        const { stdout: info } = await execAsync('docker exec redis-taxi-app redis-cli info');
+        const { stdout: info } = await execAsync('docker exec redis-leaf redis-cli info');
         console.log('✅ Info via Docker obtido');
         
-        const { stdout: memory } = await execAsync('docker exec redis-taxi-app redis-cli info memory');
+        const { stdout: memory } = await execAsync('docker exec redis-leaf redis-cli info memory');
         console.log('✅ Memory info via Docker obtido');
         
-        const { stdout: stats } = await execAsync('docker exec redis-taxi-app redis-cli info stats');
+        const { stdout: stats } = await execAsync('docker exec redis-leaf redis-cli info stats');
         console.log('✅ Stats via Docker obtido');
         
     } catch (error) {

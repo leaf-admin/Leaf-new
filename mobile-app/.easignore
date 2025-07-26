@@ -1,73 +1,10 @@
-# Dependencies
+# EAS Ignore - Configuração para resolver conflitos Expo/Prebuild
+/android
+/ios
 node_modules/
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-
-# Expo
-.expo/
-dist/
-web-build/
-
-# Native
-*.orig.*
-*.jks
-*.p8
-*.p12
-*.key
-*.mobileprovision
-
-# Metro
-.metro-health-check*
-
-# Debug
-npm-debug.*
-yarn-debug.*
-yarn-error.*
-
-# macOS
-.DS_Store
-*.pem
-
-# local env files
-.env*.local
-
-# typescript
-*.tsbuildinfo
-
-# IDE
-.vscode/
-.idea/
-
-# Temporary files
 *.log
-*.tmp
-*.temp
-
-# Test files
-__tests__/
-*.test.js
-*.test.ts
-*.spec.js
-*.spec.ts
-
-# Documentation
-docs/
-*.md
-!README.md
-
-# Git
-.git/
-.gitignore
-
-# Other
-*.swp
-*.swo
-*~
-
-# Web app files (not needed for mobile)
-../web-app/
-../leaf-dashboard/
-../leaf-websocket-backend/
-../tests/
-../DOCUMENTATION/ 
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local 

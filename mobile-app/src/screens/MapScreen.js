@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useRef, useContext, useMemo, useCallback } from 'react';
+import React, { useEffect, useState, useRef, useMemo, useCallback } from 'react';
 import {
     StyleSheet,
     View,
@@ -263,10 +263,10 @@ export default function MapScreen(props) {
     // Verificar se o FirebaseContext está disponível antes de usar
     let config = null;
     try {
-        const firebaseContext = useContext(FirebaseContext);
-        config = firebaseContext?.config;
+        // Usar firebase diretamente ao invés de useContext
+        config = firebase?.config;
     } catch (error) {
-        console.warn('FirebaseContext não disponível:', error);
+        console.warn('Firebase config não disponível:', error);
     }
     
     // Fallback para config se não estiver disponível

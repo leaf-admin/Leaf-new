@@ -32,10 +32,10 @@ if %errorlevel% neq 0 (
     echo ❌ Redis nao esta rodando!
     echo.
     echo Verificando se container existe...
-    docker ps -a | findstr redis-taxi-app >nul
+    docker ps -a | findstr redis-leaf >nul
     if %errorlevel% equ 0 (
         echo ✅ Container existe, tentando iniciar...
-        docker start redis-taxi-app
+        docker start redis-leaf
         timeout /t 5 /nobreak >nul
     ) else (
         echo ❌ Container nao existe, iniciando Redis...
@@ -58,7 +58,7 @@ if %errorlevel% neq 0 (
 
 echo.
 echo Testando conectividade basica...
-docker exec redis-taxi-app redis-cli ping
+docker exec redis-leaf redis-cli ping
 if %errorlevel% equ 0 (
     echo ✅ Conectividade OK
 ) else (
@@ -70,7 +70,7 @@ if %errorlevel% equ 0 (
     docker ps -a | findstr redis
     echo.
     echo Logs do Redis:
-    docker logs redis-taxi-app 2>&1 | findstr -i error
+    docker logs redis-leaf 2>&1 | findstr -i error
     echo.
     echo Solucoes possiveis:
     echo 1. Reiniciar Redis: docker-compose restart redis
@@ -82,10 +82,10 @@ if %errorlevel% equ 0 (
 
 echo.
 echo Testando comandos GEO...
-docker exec redis-taxi-app redis-cli GEOADD test_geo 13.361389 38.115556 "Palermo" 15.087269 37.502669 "Catania"
+docker exec redis-leaf redis-cli GEOADD test_geo 13.361389 38.115556 "Palermo" 15.087269 37.502669 "Catania"
 if %errorlevel% equ 0 (
     echo ✅ GEO commands funcionando
-    docker exec redis-taxi-app redis-cli DEL test_geo
+    docker exec redis-leaf redis-cli DEL test_geo
 ) else (
     echo ⚠️ GEO commands nao disponiveis (usando fallback)
 )

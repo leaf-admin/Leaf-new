@@ -7,7 +7,7 @@ class DockerMonitor {
     constructor() {
         this.metrics = {
             container: {
-                name: 'redis-taxi-app',
+                name: 'redis-leaf',
                 status: 'unknown',
                 cpu: 0,
                 memory: {
@@ -48,7 +48,7 @@ class DockerMonitor {
         
         this.alerts = [];
         this.monitoringInterval = null;
-        this.containerName = 'redis-taxi-app'; // Container Redis que existe
+        this.containerName = 'redis-leaf'; // Container Redis que existe
         
         this.startMonitoring();
     }
@@ -214,7 +214,7 @@ class DockerMonitor {
             const startTime = Date.now();
             
             // Tentar diferentes nomes de container Redis
-            let redisContainerName = 'redis-taxi-app';
+            let redisContainerName = 'redis-leaf';
             let stdout = '';
             
             try {

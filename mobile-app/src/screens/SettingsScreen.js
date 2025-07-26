@@ -1,10 +1,9 @@
-import React, { useState, useEffect, useContext } from "react";
+import React, { useState, useEffect } from "react";
 import { StyleSheet, View, Text, TouchableOpacity, Alert, StatusBar, ScrollView, Image, Platform, Clipboard } from "react-native";
 import { Icon } from "react-native-elements";
 import i18n from '../i18n';
 import { useSelector, useDispatch } from "react-redux";
 import { api } from 'common';
-import { FirebaseContext } from 'common/src/config/configureFirebase';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useTheme } from '@react-navigation/native';
 import { fonts } from '../common/font';

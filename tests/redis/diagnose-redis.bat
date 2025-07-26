@@ -88,7 +88,7 @@ if %errorlevel% equ 0 (
 
 echo.
 echo 8. Testando conectividade...
-docker exec redis-taxi-app redis-cli ping
+docker exec redis-leaf redis-cli ping
 if %errorlevel% equ 0 (
     echo ✅ Conectividade OK
 ) else (
@@ -103,16 +103,16 @@ if %errorlevel% equ 0 (
 echo.
 echo 9. Testando comandos basicos...
 echo Testando SET/GET...
-docker exec redis-taxi-app redis-cli SET test "Hello Redis"
-docker exec redis-taxi-app redis-cli GET test
-docker exec redis-taxi-app redis-cli DEL test
+docker exec redis-leaf redis-cli SET test "Hello Redis"
+docker exec redis-leaf redis-cli GET test
+docker exec redis-leaf redis-cli DEL test
 
 echo.
 echo Testando GEO commands...
-docker exec redis-taxi-app redis-cli GEOADD test_geo 13.361389 38.115556 "Palermo"
+docker exec redis-leaf redis-cli GEOADD test_geo 13.361389 38.115556 "Palermo"
 if %errorlevel% equ 0 (
     echo ✅ GEO commands funcionando
-    docker exec redis-taxi-app redis-cli DEL test_geo
+    docker exec redis-leaf redis-cli DEL test_geo
 ) else (
     echo ⚠️ GEO commands nao disponiveis (usando fallback)
 )

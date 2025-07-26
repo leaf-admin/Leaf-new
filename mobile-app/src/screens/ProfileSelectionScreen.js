@@ -62,7 +62,7 @@ export default function ProfileSelectionScreen() {
       await AsyncStorage.setItem('@user_type', selected);
       
       // Navegar diretamente para a tela de telefone
-      navigation.navigate('PhoneScreen', { userType: selected });
+      navigation.navigate('PhoneInput', { userType: selected });
     }
   };
 

@@ -25,9 +25,15 @@
     }
   },
   "include": [
-    "src"
+    "src/**/*.ts",
+    "src/**/*.tsx",
+    "src/**/*.js",
+    "src/**/*.jsx"
   ],
   "exclude": [
-    "node_modules"
+    "node_modules",
+    "src/**/*.css",
+    "src/**/*.scss",
+    "src/**/*.less"
   ]
 } 

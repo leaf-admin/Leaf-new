@@ -384,38 +384,45 @@ export default function UserInfoScreen() {
             console.log('📱 Enviando OTP para:', fullPhoneNumber);
             console.log('👤 Tipo de usuário:', userType);
             
-            // Enviar OTP via Firebase Auth
+            // Enviar OTP via Firebase Auth - usando nova API
             const auth = rnauth();
             console.log('🔧 Firebase config:', auth.app?.options);
+            
+            // Verificar se é número de teste
+            const testNumbers = ['+5521999814802', '+5521999999999']; // Adicione números de teste aqui
+            const isTestNumber = testNumbers.includes(fullPhoneNumber);
+            
+            if (isTestNumber) {
+                console.log('🧪 Número de teste detectado, usando código fixo');
+                navigation.navigate('OTP', { 
+                    phone: fullPhoneNumber,
+                    verificationId: 'test-verification-id',
+                    userType: userType,
+                    isTestMode: true
+                });
+                return;
+            }
+            
             const confirmation = await auth.verifyPhoneNumber(fullPhoneNumber);
             
             console.log('✅ OTP enviado com sucesso!');
             console.log('🆔 VerificationId:', confirmation.verificationId);
             console.log('📋 Confirmation completo:', JSON.stringify(confirmation, null, 2));
             
-            // Verificar se é número de teste ou timeout
-            if (confirmation.state === 'timeout' || confirmation.state === 'sent') {
-                console.log('🧪 Número de teste detectado ou timeout');
-                console.log('📱 Estado:', confirmation.state);
-                
-                // Para números de teste, não mostrar alerta, apenas navegar
-                navigation.navigate('OTP', { 
-                    phone: fullPhoneNumber,
-                    verificationId: confirmation.verificationId,
-                    userType: userType,
-                    isTestMode: true
-                });
-            } else {
-            // Navegar para a tela de OTP com o telefone completo e verificationId
+            // Navegar para a tela de OTP
             navigation.navigate('OTP', { 
                 phone: fullPhoneNumber,
                 verificationId: confirmation.verificationId,
                 userType: userType 
             });
-            }
             
         } catch (error) {
-            console.error('Erro ao enviar OTP:', error);
+            console.error('❌ Erro ao enviar OTP:', error);
+            console.error('🔍 Error details:', {
+                code: error.code,
+                message: error.message,
+                stack: error.stack
+            });
             
             let errorMessage = 'Não foi possível enviar o código de verificação.';
             
@@ -426,6 +433,10 @@ export default function UserInfoScreen() {
                 errorMessage = 'Muitas tentativas. Tente novamente em alguns minutos.';
             } else if (error.code === 'auth/quota-exceeded') {
                 errorMessage = 'Limite de SMS excedido. Tente novamente mais tarde.';
+            } else if (error.code === 'auth/operation-not-allowed') {
+                errorMessage = 'Autenticação por telefone não está habilitada.';
+            } else if (error.code === 'auth/captcha-check-failed') {
+                errorMessage = 'Falha na verificação de segurança.';
             }
             
             Alert.alert('Erro', errorMessage);

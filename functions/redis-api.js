@@ -73,8 +73,17 @@ exports.update_user_location = onRequest(async (req, res) => {
             return res.status(500).json({ error: 'Redis não disponível' });
         }
 
-        // Salvar localização no Redis
+        // Salvar localização no Redis com GEOADD (Geospatial)
         const locationKey = `locations:${userId}`;
+        
+        // 1. Adicionar ao set geospatial para queries de proximidade
+        await client.geoAdd('user_locations', {
+            longitude: parseFloat(longitude),
+            latitude: parseFloat(latitude),
+            member: userId
+        });
+        
+        // 2. Salvar dados detalhados no hash
         await client.hSet(locationKey, {
             lat: latitude.toString(),
             lng: longitude.toString(),
@@ -82,7 +91,7 @@ exports.update_user_location = onRequest(async (req, res) => {
             updated_at: Date.now().toString()
         });
 
-        // Adicionar ao set de usuários online
+        // 3. Adicionar ao set de usuários online
         await client.sAdd('users:online', userId);
 
         // Salvar também no Firebase como fallback
@@ -119,44 +128,43 @@ exports.get_nearby_drivers = onRequest(async (req, res) => {
             return getNearbyDriversFromFirebase(latitude, longitude, radius, res);
         }
 
-        // Buscar motoristas online no Redis
-        const onlineDrivers = await client.sMembers('users:online');
+        // Buscar motoristas próximos usando Redis Geospatial (GEORADIUS)
+        const nearbyDrivers = await client.geoRadius('user_locations', {
+            longitude: parseFloat(longitude),
+            latitude: parseFloat(latitude),
+            radius: radius,
+            unit: 'm', // metros
+            withCoord: true,
+            withDist: true
+        });
+
         const drivers = [];
 
-        for (const driverId of onlineDrivers) {
-            const locationKey = `locations:${driverId}`;
-            const location = await client.hGetAll(locationKey);
+        for (const driver of nearbyDrivers) {
+            // Buscar dados adicionais do motorista
+            const driverKey = `locations:${driver.member}`;
+            const driverData = await client.hGetAll(driverKey);
             
-            if (location.lat && location.lng) {
-                const distance = calculateDistance(
-                    parseFloat(latitude), 
-                    parseFloat(longitude), 
-                    parseFloat(location.lat), 
-                    parseFloat(location.lng)
-                );
-
-                if (distance <= radius) {
-                    drivers.push({
-                        uid: driverId,
-                        coordinates: {
-                            lat: parseFloat(location.lat),
-                            lng: parseFloat(location.lng)
-                        },
-                        distance: Math.round(distance),
-                        timestamp: parseInt(location.timestamp)
-                    });
-                }
-            }
+            drivers.push({
+                uid: driver.member,
+                coordinates: {
+                    lat: driver.coordinates.latitude,
+                    lng: driver.coordinates.longitude
+                },
+                distance: Math.round(driver.dist), // Distância em metros
+                timestamp: parseInt(driverData.timestamp || Date.now()),
+                updated_at: parseInt(driverData.updated_at || Date.now())
+            });
         }
 
-        // Ordenar por distância
-        drivers.sort((a, b) => a.distance - b.distance);
+        // Ordenar por distância (já vem ordenado do GEORADIUS)
+        // drivers.sort((a, b) => a.distance - b.distance);
 
         res.json({ 
             success: true, 
             drivers: drivers,
             total: drivers.length,
-            source: 'redis'
+            source: 'redis_geospatial'
         });
     } catch (error) {
         console.error('❌ Erro ao buscar motoristas próximos:', error);
@@ -725,6 +733,65 @@ function calculateDistance(lat1, lng1, lat2, lng2) {
     return R * c; // Distância em metros
 }
 
+// ===== ENDPOINT DE SINCRONIZAÇÃO FIREBASE =====
+
+// API para sincronização com Firebase (backup)
+exports.firebase_sync = onRequest(async (req, res) => {
+    try {
+        const { type, userId, data, timestamp } = req.body;
+        
+        if (!type || !userId || !data) {
+            return res.status(400).json({ error: 'type, userId e data são obrigatórios' });
+        }
+
+        const db = admin.database();
+        
+        switch (type) {
+            case 'location':
+                await db.ref(`locations/${userId}`).set({
+                    lat: data.lat,
+                    lng: data.lng,
+                    timestamp: timestamp || Date.now(),
+                    updated_at: Date.now()
+                });
+                break;
+                
+            case 'trip':
+                await db.ref(`trips/${data.tripId}`).set({
+                    ...data,
+                    timestamp: timestamp || Date.now(),
+                    updated_at: Date.now()
+                });
+                break;
+                
+            case 'driver_status':
+                await db.ref(`driver_status/${userId}`).set({
+                    status: data.status,
+                    timestamp: timestamp || Date.now(),
+                    updated_at: Date.now()
+                });
+                break;
+                
+            default:
+                return res.status(400).json({ error: 'Tipo de sincronização inválido' });
+        }
+
+        console.log(`🔥 Firebase sync: ${type} para ${userId}`);
+        
+        res.json({ 
+            success: true, 
+            message: 'Dados sincronizados com Firebase',
+            type,
+            userId,
+            timestamp
+        });
+        
+    } catch (error) {
+        console.error('❌ Erro na sincronização Firebase:', error);
+        res.status(500).json({ error: 'Erro interno do servidor' });
+    }
+});
+
 module.exports = {
     update_user_location: exports.update_user_location,
     get_nearby_drivers: exports.get_nearby_drivers,
@@ -738,5 +805,6 @@ module.exports = {
     get_active_trips: exports.get_active_trips,
     unsubscribe_tracking: exports.unsubscribe_tracking,
     get_redis_stats: exports.get_redis_stats,
+    firebase_sync: exports.firebase_sync,
     health: exports.health
 }; 

@@ -13,11 +13,11 @@ if %errorlevel% neq 0 (
 )
 
 echo Parando container Redis existente (se houver)...
-docker stop redis-taxi-app >nul 2>&1
-docker rm redis-taxi-app >nul 2>&1
+docker stop redis-leaf >nul 2>&1
+docker rm redis-leaf >nul 2>&1
 
-echo Criando novo container Redis...
-docker run -d --name redis-taxi-app -p 6379:6379 --restart unless-stopped redis:7-alpine
+echo Criando novo container Redis otimizado...
+docker run -d --name redis-leaf -p 6379:6379 --memory=512m --cpus=1.0 --restart=unless-stopped -v /home/izaak-dias/Downloads/1.\ leaf/main/Sourcecode/redis-config/redis-optimized.conf:/usr/local/etc/redis/redis.conf redis:7-alpine redis-server /usr/local/etc/redis/redis.conf
 
 if %errorlevel% equ 0 (
     echo.
@@ -29,9 +29,9 @@ if %errorlevel% equ 0 (
     echo Para testar: node test-redis.js
     echo.
     echo Comandos uteis:
-    echo - Parar Redis: docker stop redis-taxi-app
-    echo - Iniciar Redis: docker start redis-taxi-app
-    echo - Remover Redis: docker rm -f redis-taxi-app
+    echo - Parar Redis: docker stop redis-leaf
+    echo - Iniciar Redis: docker start redis-leaf
+    echo - Remover Redis: docker rm -f redis-leaf
     echo.
 ) else (
     echo ERRO: Falha ao criar container Redis
@@ -43,7 +43,7 @@ echo Aguardando Redis inicializar...
 timeout /t 3 /nobreak >nul
 
 echo Testando conexao...
-docker exec redis-taxi-app redis-cli ping
+docker exec redis-leaf redis-cli ping
 if %errorlevel% equ 0 (
     echo Redis esta respondendo corretamente!
 ) else (

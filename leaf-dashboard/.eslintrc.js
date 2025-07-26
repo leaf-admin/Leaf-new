@@ -11,5 +11,13 @@ module.exports = {
     react: {
       version: 'detect'
     }
-  }
+  },
+  ignorePatterns: [
+    '*.css',
+    '*.scss',
+    '*.less',
+    'build/',
+    'dist/',
+    'node_modules/'
+  ]
 }; 

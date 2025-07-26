@@ -45,6 +45,9 @@ import UserInfoScreen from '../screens/UserInfoScreen';
 // CNHUploadScreen e CRLVUploadScreen foram removidos - usar DriverDocumentsScreen
 import AppCommon from '../screens/AppCommon';
 import ProfileSelectionScreen from '../screens/ProfileSelectionScreen';
+import PhoneInputScreen from '../screens/PhoneInputScreen';
+import PersonalDataScreen from '../screens/PersonalDataScreen';
+import DriverTermsScreen from '../screens/DriverTermsScreen';
 var { height, width } = Dimensions.get('window');
 import { useSelector } from "react-redux";
 import i18n from '../i18n';
@@ -285,13 +288,14 @@ export default function AppContainer() {
         // Usuário não autenticado: fluxo de onboarding CORRIGIDO
         return (
             <NavigationContainer ref={navigationRef}>
-                <Stack.Navigator initialRouteName="Welcome" screenOptions={screenOptions}>
-                    <Stack.Screen name="Welcome" component={WelcomeScreen} options={{ headerShown: false }} />
+                <Stack.Navigator initialRouteName="Splash" screenOptions={screenOptions}>
+                    <Stack.Screen name="Splash" component={SplashScreen} options={{ headerShown: false }} />
                     <Stack.Screen name="ProfileSelection" component={ProfileSelectionScreen} options={{ headerShown: false }} />
-                    <Stack.Screen name="PhoneScreen" component={UserInfoScreen} options={{ headerShown: false }} />
+                    <Stack.Screen name="PhoneInput" component={PhoneInputScreen} options={{ headerShown: false }} />
+                    <Stack.Screen name="PersonalData" component={PersonalDataScreen} options={{ headerShown: false }} />
+                    <Stack.Screen name="DriverTerms" component={DriverTermsScreen} options={{ headerShown: false }} />
                     <Stack.Screen name="OTP" component={OTPScreen} options={{ headerShown: false }} />
-                    <Stack.Screen name="CNHUploadScreen" component={DriverDocumentsScreen} options={{ headerShown: false }} />
-                    <Stack.Screen name="CRLVUploadScreen" component={DriverDocumentsScreen} options={{ headerShown: false }} />
+                                            <Stack.Screen name="CNHUpload" component={DriverDocumentsScreen} options={{ headerShown: false }} />
                     <Stack.Screen name="CompleteRegistration" component={CompleteRegistrationScreen} options={{ headerShown: false }} />
                     <Stack.Screen name="Login" component={LoginScreen} options={{ headerShown: false }} />
                 </Stack.Navigator>
