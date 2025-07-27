@@ -2,7 +2,7 @@
 // Mock para testes Node.js
 
 // Importar configuração centralizada
-const { API_URLS, API_CONFIG } = require('../config/ApiConfig.js');
+const { API_URLS, API_CONFIG } = require('../config/ApiConfig.cjs');
 
 const getApiUrl = (endpoint) => `${API_URLS.redisApi}${endpoint}`;
 const handleError = (error, showAlert = false) => ({ error: error.message, showAlert });
@@ -334,6 +334,6 @@ class RedisApiService {
     }
 }
 
-// Instância singleton
+// Exportar classe e instância singleton
 const redisApiService = new RedisApiService();
-module.exports = { redisApiService }; 
+module.exports = { redisApiService, RedisApiService }; 

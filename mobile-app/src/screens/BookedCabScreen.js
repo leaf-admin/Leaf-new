@@ -33,6 +33,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { fonts } from '../common/font';
 import { getLangKey } from 'common/src/other/getLangKey';
 import DeviceInfo from 'react-native-device-info';
+import navigationService from '../services/NavigationService';
 
 const hasNotch = DeviceInfo.hasNotch();
 
@@ -383,36 +384,60 @@ export default function BookedCabScreen(props) {
         }
     }
 
-    const startNavigation = () => {
-        let url = 'https://www.google.com/maps/dir/?api=1&travelmode=driving';
-        if (curBooking.status == 'ACCEPTED') {
-            url = url + '&destination=' + curBooking.pickup.lat + "," + curBooking.pickup.lng;
-            Linking.openURL(url);
-        }
-        else if (curBooking.status == 'STARTED') {
-            if (curBooking.waypoints && curBooking.waypoints.length && curBooking.waypoints.length > 0) {
-                let abc = url + '&destination=' + curBooking.drop.lat + "," + curBooking.drop.lng + '&waypoints=';
-                if (curBooking.waypoints.length > 1) {
-                    for (let i = 0; i < curBooking.waypoints.length; i++) {
-                        let obj = curBooking.waypoints[i];
-                        if (i < curBooking.waypoints.length - 1) {
-                            abc = abc + obj.lat + ',' + obj.lng + '%7C'
-                        } else {
-                            abc = abc + obj.lat + ',' + obj.lng
-
-                        }
-                    }
-                    Linking.openURL(abc);
-                } else {
-                    url = url + '&destination=' + curBooking.drop.lat + "," + curBooking.drop.lng + '&waypoints=' + curBooking.waypoints[0].lat + "," + curBooking.waypoints[0].lng;
-                    Linking.openURL(url);
-                }
-            } else {
-                url = url + '&destination=' + curBooking.drop.lat + "," + curBooking.drop.lng;
-                Linking.openURL(url);
+    const startNavigation = async () => {
+        try {
+            // Inicializar NavigationService se necessário
+            if (!navigationService.isInitialized) {
+                await navigationService.initialize();
             }
-        } else {
-            Alert.alert(t('alert'), t('navigation_available'));
+
+            let origin, destination;
+
+            if (curBooking.status == 'ACCEPTED') {
+                // Navegar para o ponto de coleta
+                origin = lastLocation || { lat: 0, lng: 0 };
+                destination = curBooking.pickup;
+            } else if (curBooking.status == 'STARTED') {
+                // Navegar para o destino
+                origin = lastLocation || { lat: 0, lng: 0 };
+                destination = curBooking.drop;
+            } else {
+                Alert.alert(t('alert'), t('navigation_available'));
+                return;
+            }
+
+            console.log('🚗 BookedCabScreen - Iniciando navegação híbrida:', {
+                status: curBooking.status,
+                origin: origin,
+                destination: destination
+            });
+
+            // Calcular rota com trânsito (1x por corrida)
+            const routeData = await navigationService.calculateRouteWithTraffic(origin, destination);
+
+            // Mostrar preview da rota
+            const preview = await navigationService.showRoutePreview(routeData);
+
+            // Abrir navegação externa com fallback inteligente
+            const result = await navigationService.openExternalNavigation(origin, destination, routeData);
+
+            if (result.success) {
+                console.log(`✅ BookedCabScreen - Navegação aberta no ${result.name}`);
+                
+                // Mostrar feedback ao usuário
+                Alert.alert(
+                    'Navegação Iniciada',
+                    `Navegação aberta no ${result.name}. Você pode voltar ao app Leaf a qualquer momento.`,
+                    [{ text: 'OK' }]
+                );
+            } else {
+                console.error('❌ BookedCabScreen - Erro na navegação:', result.error);
+                Alert.alert('Erro', 'Não foi possível abrir a navegação. Tente novamente.');
+            }
+
+        } catch (error) {
+            console.error('❌ BookedCabScreen - Erro ao iniciar navegação:', error);
+            Alert.alert('Erro', 'Erro ao iniciar navegação. Tente novamente.');
         }
     }
 

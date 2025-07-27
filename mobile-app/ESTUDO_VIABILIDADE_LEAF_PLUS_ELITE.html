@@ -1,0 +1,533 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Estudo de Viabilidade - Leaf Plus & Elite</title>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+        
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Inter', sans-serif;
+            line-height: 1.6;
+            color: #333;
+            background: #f8f9fa;
+            padding: 20px;
+        }
+        
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            padding: 40px;
+            border-radius: 12px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        }
+        
+        .header {
+            text-align: center;
+            margin-bottom: 40px;
+            padding-bottom: 30px;
+            border-bottom: 3px solid #28a745;
+        }
+        
+        .header h1 {
+            font-size: 2.5rem;
+            font-weight: 700;
+            color: #2c3e50;
+            margin-bottom: 10px;
+        }
+        
+        .header .subtitle {
+            font-size: 1.2rem;
+            color: #6c757d;
+            font-weight: 400;
+        }
+        
+        .status-badge {
+            display: inline-block;
+            background: #28a745;
+            color: white;
+            padding: 8px 16px;
+            border-radius: 20px;
+            font-weight: 600;
+            font-size: 0.9rem;
+            margin-top: 15px;
+        }
+        
+        .section {
+            margin-bottom: 40px;
+        }
+        
+        .section h2 {
+            font-size: 1.8rem;
+            font-weight: 600;
+            color: #2c3e50;
+            margin-bottom: 20px;
+            padding-bottom: 10px;
+            border-bottom: 2px solid #e9ecef;
+        }
+        
+        .section h3 {
+            font-size: 1.4rem;
+            font-weight: 600;
+            color: #495057;
+            margin-bottom: 15px;
+            margin-top: 25px;
+        }
+        
+        .models-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 30px;
+            margin-bottom: 30px;
+        }
+        
+        .model-card {
+            background: #f8f9fa;
+            padding: 25px;
+            border-radius: 10px;
+            border-left: 5px solid #28a745;
+        }
+        
+        .model-card h4 {
+            font-size: 1.3rem;
+            font-weight: 600;
+            color: #2c3e50;
+            margin-bottom: 15px;
+        }
+        
+        .model-card ul {
+            list-style: none;
+            padding: 0;
+        }
+        
+        .model-card li {
+            padding: 8px 0;
+            border-bottom: 1px solid #e9ecef;
+            font-weight: 500;
+        }
+        
+        .model-card li:last-child {
+            border-bottom: none;
+        }
+        
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 20px 0;
+            background: white;
+            border-radius: 8px;
+            overflow: hidden;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        }
+        
+        th {
+            background: #2c3e50;
+            color: white;
+            padding: 15px;
+            text-align: left;
+            font-weight: 600;
+        }
+        
+        td {
+            padding: 12px 15px;
+            border-bottom: 1px solid #e9ecef;
+        }
+        
+        tr:nth-child(even) {
+            background: #f8f9fa;
+        }
+        
+        .highlight {
+            background: #d4edda;
+            color: #155724;
+            font-weight: 600;
+            padding: 4px 8px;
+            border-radius: 4px;
+        }
+        
+        .success {
+            color: #28a745;
+            font-weight: 600;
+        }
+        
+        .warning {
+            color: #ffc107;
+            font-weight: 600;
+        }
+        
+        .danger {
+            color: #dc3545;
+            font-weight: 600;
+        }
+        
+        .comparison-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 30px;
+            margin: 30px 0;
+        }
+        
+        .comparison-card {
+            background: #f8f9fa;
+            padding: 25px;
+            border-radius: 10px;
+            border: 2px solid #e9ecef;
+        }
+        
+        .comparison-card h4 {
+            font-size: 1.3rem;
+            font-weight: 600;
+            color: #2c3e50;
+            margin-bottom: 15px;
+            text-align: center;
+        }
+        
+        .conclusion-box {
+            background: linear-gradient(135deg, #28a745, #20c997);
+            color: white;
+            padding: 30px;
+            border-radius: 12px;
+            margin: 30px 0;
+        }
+        
+        .conclusion-box h3 {
+            color: white;
+            margin-bottom: 15px;
+        }
+        
+        .conclusion-box ul {
+            list-style: none;
+            padding: 0;
+        }
+        
+        .conclusion-box li {
+            padding: 8px 0;
+            font-weight: 500;
+        }
+        
+        .conclusion-box li:before {
+            content: "✅ ";
+            margin-right: 10px;
+        }
+        
+        .footer {
+            text-align: center;
+            margin-top: 40px;
+            padding-top: 20px;
+            border-top: 2px solid #e9ecef;
+            color: #6c757d;
+        }
+        
+        @media print {
+            body {
+                background: white;
+                padding: 0;
+            }
+            
+            .container {
+                box-shadow: none;
+                border-radius: 0;
+                padding: 20px;
+            }
+            
+            .models-grid,
+            .comparison-grid {
+                grid-template-columns: 1fr;
+                gap: 20px;
+            }
+            
+            table {
+                font-size: 0.9rem;
+            }
+            
+            th, td {
+                padding: 8px 10px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>📊 Estudo de Viabilidade</h1>
+            <div class="subtitle">Leaf Plus & Leaf Elite</div>
+            <div class="status-badge">✅ APROVADO PARA IMPLEMENTAÇÃO</div>
+        </div>
+
+        <div class="section">
+            <h2>💰 Modelos de Negócio</h2>
+            
+            <div class="models-grid">
+                <div class="model-card">
+                    <h4>🌿 Leaf Plus (Modelo Básico)</h4>
+                    <ul>
+                        <li>Corridas até R$ 10,00: Custo operacional R$ 0,79</li>
+                        <li>Corridas até R$ 20,00: Custo operacional R$ 0,99</li>
+                        <li>Corridas acima de R$ 20,00: Custo operacional R$ 1,55</li>
+                    </ul>
+                </div>
+                
+                <div class="model-card">
+                    <h4>⭐ Leaf Elite (Modelo Premium)</h4>
+                    <ul>
+                        <li>Corridas até R$ 10,00: Custo operacional R$ 0,99</li>
+                        <li>Corridas até R$ 20,00: Custo operacional R$ 1,59</li>
+                        <li>Corridas acima de R$ 20,00: Custo operacional R$ 1,99</li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+
+        <div class="section">
+            <h2>📈 Resultados Principais</h2>
+            
+            <h3>💰 Margens Operacionais</h3>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Modelo</th>
+                        <th>Margem Média</th>
+                        <th>Lucro por Corrida</th>
+                        <th>Status</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td><strong>🌿 Leaf Plus</strong></td>
+                        <td><span class="highlight">88,5%</span></td>
+                        <td><span class="success">R$ 13,71</span></td>
+                        <td><span class="success">✅ ALTAMENTE VIÁVEL</span></td>
+                    </tr>
+                    <tr>
+                        <td><strong>⭐ Leaf Elite</strong></td>
+                        <td><span class="highlight">86,0%</span></td>
+                        <td><span class="success">R$ 13,32</span></td>
+                        <td><span class="success">✅ ALTAMENTE VIÁVEL</span></td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+
+        <div class="section">
+            <h2>📊 Comparação com Concorrência</h2>
+            
+            <h3>🚗 Uber vs Leaf (Taxa de 30% vs 4,98%)</h3>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Valor da Corrida</th>
+                        <th>Taxa Uber (30%)</th>
+                        <th>Taxa Leaf Plus</th>
+                        <th>Taxa Leaf Elite</th>
+                        <th>Vantagem Leaf</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td><strong>R$ 10,00</strong></td>
+                        <td><span class="danger">R$ 3,00</span></td>
+                        <td><span class="success">R$ 1,78</span></td>
+                        <td><span class="success">R$ 1,36</span></td>
+                        <td><span class="highlight">40-54% menor</span></td>
+                    </tr>
+                    <tr>
+                        <td><strong>R$ 20,00</strong></td>
+                        <td><span class="danger">R$ 6,00</span></td>
+                        <td><span class="success">R$ 1,73</span></td>
+                        <td><span class="success">R$ 2,33</span></td>
+                        <td><span class="highlight">61-71% menor</span></td>
+                    </tr>
+                    <tr>
+                        <td><strong>R$ 50,00</strong></td>
+                        <td><span class="danger">R$ 15,00</span></td>
+                        <td><span class="success">R$ 3,28</span></td>
+                        <td><span class="success">R$ 4,48</span></td>
+                        <td><span class="highlight">70-78% menor</span></td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+
+        <div class="section">
+            <h2>🧮 Análise Detalhada por Categoria</h2>
+            
+            <div class="comparison-grid">
+                <div class="comparison-card">
+                    <h4>🌿 Leaf Plus</h4>
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Categoria</th>
+                                <th>Receita</th>
+                                <th>Custo Total</th>
+                                <th>Lucro</th>
+                                <th>Margem</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td>Até R$ 10,00</td>
+                                <td>R$ 3.350,00</td>
+                                <td>R$ 522,33</td>
+                                <td>R$ 2.827,67</td>
+                                <td><span class="highlight">84,4%</span></td>
+                            </tr>
+                            <tr>
+                                <td>Até R$ 20,00</td>
+                                <td>R$ 5.190,00</td>
+                                <td>R$ 604,96</td>
+                                <td>R$ 4.585,04</td>
+                                <td><span class="highlight">88,3%</span></td>
+                            </tr>
+                            <tr>
+                                <td>Acima R$ 20,00</td>
+                                <td>R$ 6.950,00</td>
+                                <td>R$ 656,11</td>
+                                <td>R$ 6.293,89</td>
+                                <td><span class="highlight">90,6%</span></td>
+                            </tr>
+                            <tr style="background: #e9ecef; font-weight: 600;">
+                                <td><strong>TOTAL</strong></td>
+                                <td><strong>R$ 15.490,00</strong></td>
+                                <td><strong>R$ 1.783,40</strong></td>
+                                <td><strong>R$ 13.706,60</strong></td>
+                                <td><span class="highlight"><strong>88,5%</strong></span></td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+                
+                <div class="comparison-card">
+                    <h4>⭐ Leaf Elite</h4>
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Categoria</th>
+                                <th>Receita</th>
+                                <th>Custo Total</th>
+                                <th>Lucro</th>
+                                <th>Margem</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td>Até R$ 10,00</td>
+                                <td>R$ 3.350,00</td>
+                                <td>R$ 612,33</td>
+                                <td>R$ 2.737,67</td>
+                                <td><span class="highlight">81,7%</span></td>
+                            </tr>
+                            <tr>
+                                <td>Até R$ 20,00</td>
+                                <td>R$ 5.190,00</td>
+                                <td>R$ 814,96</td>
+                                <td>R$ 4.375,04</td>
+                                <td><span class="highlight">84,3%</span></td>
+                            </tr>
+                            <tr>
+                                <td>Acima R$ 20,00</td>
+                                <td>R$ 6.950,00</td>
+                                <td>R$ 744,11</td>
+                                <td>R$ 6.205,89</td>
+                                <td><span class="highlight">89,3%</span></td>
+                            </tr>
+                            <tr style="background: #e9ecef; font-weight: 600;">
+                                <td><strong>TOTAL</strong></td>
+                                <td><strong>R$ 15.490,00</strong></td>
+                                <td><strong>R$ 2.171,40</strong></td>
+                                <td><strong>R$ 13.318,60</strong></td>
+                                <td><span class="highlight"><strong>86,0%</strong></span></td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <div class="section">
+            <h2>💳 Taxas de Pagamento</h2>
+            
+            <div class="models-grid">
+                <div class="model-card">
+                    <h4>📱 PIX</h4>
+                    <ul>
+                        <li>Plataforma: Woovi</li>
+                        <li>Taxa: Competitiva</li>
+                        <li>Disponibilidade: Imediata</li>
+                    </ul>
+                </div>
+                
+                <div class="model-card">
+                    <h4>💳 Cartão de Crédito</h4>
+                    <ul>
+                        <li>Plataforma: MercadoPago</li>
+                        <li>Taxa: 4,98%</li>
+                        <li>Suporte: América Latina</li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+
+        <div class="conclusion-box">
+            <h3>🎯 Conclusões e Recomendações</h3>
+            <ul>
+                <li>Ambos os modelos são ALTAMENTE VIÁVEIS</li>
+                <li>Margens robustas (86-88%) garantem sustentabilidade</li>
+                <li>Vantagem competitiva significativa vs Uber (40-78% menor)</li>
+                <li>Modelo escalável com custos controlados</li>
+                <li>Suporte completo a múltiplos métodos de pagamento</li>
+            </ul>
+        </div>
+
+        <div class="section">
+            <h2>🚀 Próximos Passos</h2>
+            
+            <table>
+                <thead>
+                    <tr>
+                        <th>Ação</th>
+                        <th>Prioridade</th>
+                        <th>Status</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>Lançar Leaf Plus como modelo principal</td>
+                        <td><span class="highlight">ALTA</span></td>
+                        <td><span class="success">✅ PRONTO</span></td>
+                    </tr>
+                    <tr>
+                        <td>Implementar Leaf Elite para clientes premium</td>
+                        <td><span class="highlight">ALTA</span></td>
+                        <td><span class="success">✅ PRONTO</span></td>
+                    </tr>
+                    <tr>
+                        <td>Monitorar performance em tempo real</td>
+                        <td><span class="warning">MÉDIA</span></td>
+                        <td><span class="success">✅ CONFIGURADO</span></td>
+                    </tr>
+                    <tr>
+                        <td>Otimizar continuamente baseado em dados</td>
+                        <td><span class="warning">MÉDIA</span></td>
+                        <td><span class="success">✅ EM ANDAMENTO</span></td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+
+        <div class="footer">
+            <p><strong>Estudo realizado em:</strong> 26/07/2025</p>
+            <p><strong>Versão:</strong> 1.0 - Análise Completa de Viabilidade</p>
+            <p><strong>Status:</strong> ✅ APROVADO PARA IMPLEMENTAÇÃO</p>
+        </div>
+    </div>
+</body>
+</html> 

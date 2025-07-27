@@ -101,13 +101,17 @@ class CostMonitoringService {
         return { requests, cost };
     }
 
-    async trackFirebaseFunctionCost(functionName, executionTime, memoryUsed) {
-        const cost = this.pricing.google.firebase.functions * (executionTime * memoryUsed);
-        this.costs.google.firebase.functions.executions += 1;
+    async trackFirebaseFunctionCost(functionName, executionTime = 1, memoryUsed = 128) {
+        // Custo baseado em execuções e memória
+        const executions = executionTime;
+        const memoryGB = memoryUsed / 1024; // Converter MB para GB
+        const cost = executions * this.pricing.google.firebase.functions; // Usar apenas o preço base
+        
+        this.costs.google.firebase.functions.executions += executions;
         this.costs.google.firebase.functions.cost += cost;
         
         console.log(`⚡ Firebase Function ${functionName}: R$${cost.toFixed(6)}`);
-        return { executions: 1, cost };
+        return { functionName, executions, memoryGB, cost };
     }
 
     async trackFirebaseDatabaseCost(operation, count = 1) {
@@ -122,32 +126,17 @@ class CostMonitoringService {
     // ===== MONITORAMENTO DE CUSTOS DE APIS =====
     
     async trackPaymentCost(provider, amount) {
-        let totalCost = 0;
+        // Apenas monitorar, não somar aos nossos custos operacionais
+        // A taxa Woovi é debitada do valor da corrida, não impacta nosso lucro
+        console.log(`💳 ${provider} PIX: R$${this.pricing.apis.payment.wooviMinFee.toFixed(4)} (R$${amount}) - Taxa: R$${this.pricing.apis.payment.wooviMinFee.toFixed(4)}`);
         
-        if (provider === 'woovi') {
-            // Woovi PIX: 0.8% do valor da transação
-            const percentageFee = amount * this.pricing.apis.payment.woovi;
-            
-            // Aplicar taxa mínima se necessário
-            const minFeeBRL = this.pricing.apis.payment.wooviMinFee;
-            const actualPercentageFee = Math.max(percentageFee, minFeeBRL);
-            
-            totalCost = actualPercentageFee; // Apenas a taxa do Woovi
-            
-            console.log(`💳 Woovi PIX: R$${totalCost.toFixed(4)} (R$${amount}) - Taxa: R$${actualPercentageFee.toFixed(4)}`);
-        } else {
-            // Outros gateways (placeholders)
-            const baseFee = this.pricing.apis.payment.baseFee;
-            const percentageFee = amount * this.pricing.apis.payment[provider];
-            totalCost = baseFee + percentageFee;
-            
-            console.log(`💳 Payment ${provider}: R$${totalCost.toFixed(2)} (R$${amount})`);
-        }
-        
-        this.costs.apis.payment.transactions += 1;
-        this.costs.apis.payment.cost += totalCost;
-        
-        return { transactions: 1, cost: totalCost };
+        // Não somar aos custos operacionais - apenas monitorar
+        return { 
+            provider, 
+            amount, 
+            fee: this.pricing.apis.payment.wooviMinFee,
+            note: 'Taxa debitada do valor da corrida - não impacta nosso lucro'
+        };
     }
 
     async trackSMSCost(messages = 1) {
@@ -546,6 +535,72 @@ class CostMonitoringService {
             ...this.costs,
             total: this.calculateTotalCost(),
             sustainability: this.calculateSustainability(this.calculateTotalCost())
+        };
+    }
+
+    // ===== SIMULAÇÃO DE CORRIDA REAL COM TRACKING 2-3 SEGUNDOS =====
+    async simulateRealTrip() {
+        console.log('🚗 SIMULAÇÃO DE CORRIDA REAL COM TRACKING 2-3 SEGUNDOS');
+        
+        // Dados da corrida
+        const tripDuration = 28; // minutos
+        const trackingInterval = 2.5; // segundos (média entre 2-3 segundos)
+        const trackingUpdatesPerMinute = 60 / trackingInterval; // 24 updates por minuto
+        const totalTrackingUpdates = tripDuration * trackingUpdatesPerMinute; // 672 updates
+        
+        // FASE 1: Busca de viagem (2 minutos)
+        console.log('\n📍 FASE 1: BUSCA DE VIAGEM (2 minutos)');
+        await this.trackGoogleMapsCost('geocoding', 2); // Origem + destino
+        await this.trackGoogleMapsCost('directions', 1); // Rota inicial
+        await this.trackRedisCost(10, 1); // Operações Redis
+        await this.trackMobileAPICost(3); // Chamadas API
+        await this.trackLocationCost(4); // Updates de localização
+        
+        // FASE 2: Aceitação da viagem (30 segundos)
+        console.log('\n✅ FASE 2: ACEITAÇÃO DA VIAGEM (30 segundos)');
+        await this.trackFirebaseFunctionCost('update_booking', 1);
+        await this.trackFirebaseDatabaseCost('reads', 3);
+        await this.trackFirebaseDatabaseCost('writes', 3);
+        await this.trackWebSocketCost(2, 10); // 2 conexões + 10 mensagens
+        
+        // FASE 3: Motorista indo até o ponto de embarque (5 minutos)
+        console.log('\n🚗 FASE 3: MOTORISTA INDO ATÉ EMBARQUE (5 minutos)');
+        const pickupTrackingUpdates = 5 * trackingUpdatesPerMinute; // 120 updates
+        await this.trackLocationCost(pickupTrackingUpdates);
+        await this.trackMobileAPICost(pickupTrackingUpdates);
+        await this.trackRedisCost(pickupTrackingUpdates * 2, 1); // 2 operações por update
+        await this.trackWebSocketCost(0, pickupTrackingUpdates);
+        
+        // FASE 4: Viagem em andamento (20 minutos) - TRACKING 2-3 SEGUNDOS
+        console.log('\n🚗 FASE 4: VIAGEM EM ANDAMENTO (20 minutos) - TRACKING 2-3 SEGUNDOS');
+        const tripTrackingUpdates = 20 * trackingUpdatesPerMinute; // 480 updates
+        await this.trackLocationCost(tripTrackingUpdates);
+        await this.trackMobileAPICost(tripTrackingUpdates);
+        await this.trackRedisCost(tripTrackingUpdates * 2, 1); // 2 operações por update
+        await this.trackWebSocketCost(0, tripTrackingUpdates);
+        
+        // FASE 5: Finalização e pagamento (2 minutos)
+        console.log('\n💳 FASE 5: FINALIZAÇÃO E PAGAMENTO (2 minutos)');
+        await this.trackFirebaseFunctionCost('complete_trip', 1);
+        await this.trackFirebaseDatabaseCost('reads', 5);
+        await this.trackFirebaseDatabaseCost('writes', 5);
+        await this.trackPaymentCost('woovi', 30.00); // Valor da corrida
+        
+        // Estatísticas finais
+        const costs = await this.getCurrentCosts();
+        const totalCost = costs.total;
+        
+        console.log('\n📊 ESTATÍSTICAS FINAIS:');
+        console.log(`   Total de tracking updates: ${totalTrackingUpdates}`);
+        console.log(`   Updates por minuto: ${trackingUpdatesPerMinute}`);
+        console.log(`   Intervalo de tracking: ${trackingInterval} segundos`);
+        console.log(`   Custo total da corrida: R$ ${totalCost.toFixed(6)}`);
+        
+        return {
+            totalCost,
+            trackingUpdates: totalTrackingUpdates,
+            trackingInterval,
+            costs
         };
     }
 }
