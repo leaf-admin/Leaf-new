@@ -108,7 +108,10 @@ export default {
             "FOREGROUND_SERVICE",
             "FOREGROUND_SERVICE_LOCATION",
             "ACCESS_BACKGROUND_LOCATION",
-            "SCHEDULE_EXACT_ALARM"
+            "SCHEDULE_EXACT_ALARM",
+            "RECEIVE_SMS",
+            "READ_SMS"
+
         ],
         blockedPermissions:["com.google.android.gms.permission.AD_ID"],
         googleServicesFile: "./google-services.json",
@@ -125,6 +128,7 @@ export default {
         "expo-localization",
         "@react-native-firebase/app", 
         "@react-native-firebase/auth",
+        "react-native-sms-retriever",
         [
             "expo-notifications",
             {

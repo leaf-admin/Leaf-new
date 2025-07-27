@@ -18,7 +18,7 @@ import {
     SearchScreen,
     EditProfilePage,
     AboutPage,
-    OnlineChat,
+    // OnlineChat, // Temporariamente comentado
     WalletDetails,
     AddMoneyScreen,
     SelectGatewayPage,
@@ -48,6 +48,7 @@ import ProfileSelectionScreen from '../screens/ProfileSelectionScreen';
 import PhoneInputScreen from '../screens/PhoneInputScreen';
 import PersonalDataScreen from '../screens/PersonalDataScreen';
 import DriverTermsScreen from '../screens/DriverTermsScreen';
+import SplashScreen from '../screens/SplashScreen';
 var { height, width } = Dimensions.get('window');
 import { useSelector } from "react-redux";
 import i18n from '../i18n';
@@ -60,6 +61,7 @@ import { CommonActions } from '@react-navigation/native';
 import { fonts } from '../common/font';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { validateUserProfile, clearAuthData } from '../utils/authUtils';
 
 const hasNotch = DeviceInfo.hasNotch();
 
@@ -77,39 +79,49 @@ export default function AppContainer() {
     const [isLoading, setIsLoading] = React.useState(true);
     const insets = useSafeAreaInsets();
 
-    // Carregar estado de autenticação do AsyncStorage
+    // Carregar estado de autenticação com validação segura
     useEffect(() => {
         const loadAuthState = async () => {
             try {
-                console.log("AppNavigator - Iniciando carregamento do estado de autenticação");
+                console.log("AppNavigator - Iniciando validação segura do estado de autenticação");
                 setIsLoading(true);
-                const userData = await AsyncStorage.getItem('@user_data');
-                console.log("AppNavigator - Dados do usuário carregados:", !!userData);
                 
-                if (userData) {
-                    const profile = JSON.parse(userData);
-                    console.log("AppNavigator - Perfil carregado:", {
-                        uid: profile.uid,
-                        usertype: profile.usertype,
-                        email: profile.email
+                // Usar a nova função de validação segura
+                const validation = await validateUserProfile();
+                console.log("AppNavigator - Resultado da validação:", validation);
+                
+                if (validation.isValid) {
+                    console.log("AppNavigator - Perfil válido encontrado:", {
+                        uid: validation.profile.uid,
+                        usertype: validation.profile.usertype,
+                        email: validation.profile.email
                     });
-                    setAuthState({ profile });
+                    
+                    setAuthState({ profile: validation.profile });
                     
                     // Set initial route based on user type
-                    if (profile.usertype === 'customer') {
+                    if (validation.profile.usertype === 'customer') {
                         setInitialRoute('Map');
                         console.log("AppNavigator - Definindo rota inicial para Map (customer)");
-                    } else if (profile.usertype === 'driver') {
+                    } else if (validation.profile.usertype === 'driver') {
                         setInitialRoute('DriverTrips');
                         console.log("AppNavigator - Definindo rota inicial para DriverTrips (driver)");
                     }
                 } else {
-                    console.log("AppNavigator - Nenhum usuário autenticado encontrado");
+                    console.log("AppNavigator - Perfil inválido ou não encontrado:", validation.reason);
+                    setAuthState({ profile: null });
+                    
+                    // Se o perfil está incompleto, mostrar dados para completar
+                    if (validation.reason === 'incomplete_profile' && validation.profile) {
+                        console.log("AppNavigator - Perfil incompleto, mantendo dados para completar");
+                        setAuthState({ profile: validation.profile });
+                    }
                 }
             } catch (error) {
-                console.error('AppNavigator - Erro ao carregar estado de autenticação:', error);
+                console.error('AppNavigator - Erro na validação de autenticação:', error);
+                setAuthState({ profile: null });
             } finally {
-                console.log("AppNavigator - Finalizando carregamento do estado de autenticação");
+                console.log("AppNavigator - Finalizando validação de autenticação");
                 setIsLoading(false);
             }
         };
@@ -275,7 +287,13 @@ export default function AppContainer() {
         isLoading,
         hasProfile: !!authState.profile,
         userType: authState.profile?.usertype,
-        initialRoute
+        initialRoute,
+        profileComplete: authState.profile ? (
+            authState.profile.firstName && 
+            authState.profile.lastName && 
+            authState.profile.email && 
+            authState.profile.phoneNumber
+        ) : false
     });
 
     if (isLoading) {
@@ -326,7 +344,7 @@ export default function AppContainer() {
                 <Stack.Screen name="PaymentDetails" component={PaymentDetails} options={{ title: t('payment'),...screenOptions }}/>
                 <Stack.Screen name="BookedCab" component={BookedCabScreen} options={{headerShown: false }}/>
                 <Stack.Screen name="RideDetails" component={RideDetails} options={{ title: t('ride_details_page_title'),...screenOptions }}/>
-                <Stack.Screen name="onlineChat" component={OnlineChat} options={{ title: t('chat_title'),...screenOptions }}/>
+                {/* <Stack.Screen name="onlineChat" component={OnlineChat} options={{ title: t('chat_title'),...screenOptions }}/> */}
                 <Stack.Screen name="addMoney" component={AddMoneyScreen} options={{ title: t('add_money'),...screenOptions }}/>
                 <Stack.Screen name="selectGateway" component={SelectGatewayPage} options={{ title: t('select_gateway'),...screenOptions }}/>
                 <Stack.Screen name="withdrawMoney" component={WithdrawMoneyScreen} options={{ title: t('withdraw_money'),...screenOptions }}/>

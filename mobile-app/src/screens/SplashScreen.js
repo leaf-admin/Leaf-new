@@ -11,7 +11,7 @@ export default function SplashScreen({ navigation }) {
         duration: 600,
         useNativeDriver: true,
       }).start(() => {
-        navigation.replace('WelcomeScreen');
+        navigation.replace('ProfileSelection');
       });
     }, 4400); // 4400ms visível + 600ms fade out = 5000ms total
     return () => clearTimeout(timer);

@@ -29,6 +29,7 @@ import EditProfileScreen from './EditProfileScreen';
 import MyVehiclesScreen from './MyVehiclesScreen';
 import AddVehicleScreen from './AddVehicleScreen';
 import EarningsReportScreen from './EarningsReportScreen';
+import OTPScreen from './OTPScreen';
 
 export {
     RegistrationPage,
@@ -61,5 +62,6 @@ export {
     EditProfileScreen,
     MyVehiclesScreen,
     AddVehicleScreen,
-    EarningsReportScreen
+    EarningsReportScreen,
+    OTPScreen
 };

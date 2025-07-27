@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { 
   View, 
   Text, 
@@ -9,13 +9,14 @@ import {
   ActivityIndicator,
   ScrollView,
   Dimensions,
-  Platform
+  Platform,
+  Animated
 } from 'react-native';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import DateTimePicker from '@react-native-community/datetimepicker';
+// import DateTimePicker from '@react-native-community/datetimepicker';
 
-const { width } = Dimensions.get('window');
+const { width, height } = Dimensions.get('window');
 
 const LEAF_GREEN = '#1A330E';
 const WHITE = '#FFFFFF';
@@ -45,6 +46,27 @@ export default function PersonalDataScreen() {
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   
   const { phone, userType, isNewUser } = route.params;
+
+  // Animações
+  const fadeAnim = useRef(new Animated.Value(0)).current;
+  const cardAnim = useRef(new Animated.Value(0)).current;
+
+  React.useEffect(() => {
+    // Animação de entrada
+    Animated.parallel([
+      Animated.timing(fadeAnim, {
+        toValue: 1,
+        duration: 800,
+        useNativeDriver: true,
+      }),
+      Animated.spring(cardAnim, {
+        toValue: 1,
+        tension: 80,
+        friction: 7,
+        useNativeDriver: true,
+      })
+    ]).start();
+  }, []);
 
   // Função para formatar CPF
   const formatCPF = (text) => {
@@ -112,44 +134,52 @@ export default function PersonalDataScreen() {
   };
 
   const handleSubmit = async () => {
-    const errors = validateForm();
-    
-    if (errors.length > 0) {
-      Alert.alert('Erro de Validação', errors.join('\n'));
+    if (!formData.cpf.trim() || !formData.birthDate) {
+      Alert.alert("Dados Obrigatórios", "Por favor, preencha CPF e data de nascimento.");
+      return;
+    }
+
+    // Validar CPF (formato básico)
+    const cleanCpf = formData.cpf.replace(/\D/g, '');
+    if (cleanCpf.length !== 11) {
+      Alert.alert("CPF Inválido", "Por favor, insira um CPF válido.");
       return;
     }
 
     setIsLoading(true);
     
     try {
-      console.log("PersonalDataScreen - Salvando dados pessoais");
+      console.log("PersonalDataScreen - Dados:", { cpf: cleanCpf, birthDate: formData.birthDate, userType });
       
-      // Simular salvamento na API
-      await new Promise(resolve => setTimeout(resolve, 2000));
+      // Buscar dados temporários
+      const tempDataString = await AsyncStorage.getItem('@temp_user_data');
+      const tempData = tempDataString ? JSON.parse(tempDataString) : {};
       
-      // Salvar dados temporariamente
-      const userData = {
-        phone,
-        userType,
-        ...formData,
+      // Combinar dados
+      const userData = { 
+        ...tempData,
+        cpf: cleanCpf,
         birthDate: formData.birthDate.toISOString(),
-        createdAt: new Date().toISOString()
+        profileComplete: true
       };
       
-      await AsyncStorage.setItem('@temp_user_data', JSON.stringify(userData));
+      // Salvar dados completos
+      await AsyncStorage.setItem('@user_data', JSON.stringify(userData));
       
-      console.log("PersonalDataScreen - Dados salvos, navegando para próximo passo");
+      // Limpar dados temporários
+      await AsyncStorage.removeItem('@temp_user_data');
       
+      console.log("PersonalDataScreen - Usuário cadastrado:", userData);
+      
+      // Navegar para próxima tela
       if (userType === 'driver') {
-        // Para motoristas, ir para termos de serviço
-        navigation.navigate('DriverTerms', { userData });
+        navigation.navigate('DriverTerms');
       } else {
-        // Para passageiros, ir direto para o app
-        navigation.navigate('CompleteRegistration', { userData });
+        navigation.navigate('WelcomeScreen');
       }
       
     } catch (error) {
-      console.error("PersonalDataScreen - Erro ao salvar dados:", error);
+      console.error("PersonalDataScreen - Erro:", error);
       Alert.alert("Erro", "Não foi possível salvar os dados. Tente novamente.");
     } finally {
       setIsLoading(false);
@@ -157,279 +187,322 @@ export default function PersonalDataScreen() {
   };
 
   return (
-    <ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
+    <View style={styles.container}>
+      {/* Header - FORA DO BOTTOM SHEET */}
       <View style={styles.header}>
-        <Text style={styles.title}>Dados Pessoais</Text>
-        <Text style={styles.subtitle}>Complete seu cadastro</Text>
+        {/* Círculo de progresso */}
+        <View style={styles.progressContainer}>
+          <View style={styles.progressCircle}>
+            <Text style={styles.progressText}>3</Text>
+          </View>
+        </View>
+        
+        {/* Contagem de progresso */}
+        <Text style={styles.progressCount}>Passo 3 de 4</Text>
+        
+        {/* Nome da tela */}
+        <Text style={styles.screenTitle}>Dados pessoais</Text>
       </View>
 
-      <View style={styles.form}>
-        {/* Nome */}
-        <View style={styles.inputGroup}>
-          <Text style={styles.label}>Nome *</Text>
-          <TextInput
-            style={styles.input}
-            value={formData.firstName}
-            onChangeText={(value) => handleInputChange('firstName', value)}
-            placeholder="Digite seu nome"
-            placeholderTextColor={GRAY}
-            autoCapitalize="words"
-          />
-        </View>
-
-        {/* Sobrenome */}
-        <View style={styles.inputGroup}>
-          <Text style={styles.label}>Sobrenome *</Text>
-          <TextInput
-            style={styles.input}
-            value={formData.lastName}
-            onChangeText={(value) => handleInputChange('lastName', value)}
-            placeholder="Digite seu sobrenome"
-            placeholderTextColor={GRAY}
-            autoCapitalize="words"
-          />
-        </View>
-
-        {/* CPF */}
-        <View style={styles.inputGroup}>
-          <Text style={styles.label}>CPF *</Text>
-          <TextInput
-            style={styles.input}
-            value={formData.cpf}
-            onChangeText={(value) => handleInputChange('cpf', value)}
-            placeholder="000.000.000-00"
-            placeholderTextColor={GRAY}
-            keyboardType="numeric"
-            maxLength={14}
-          />
-        </View>
-
-        {/* Data de Nascimento */}
-        <View style={styles.inputGroup}>
-          <Text style={styles.label}>Data de Nascimento *</Text>
-          <TouchableOpacity 
-            style={styles.dateInput}
-            onPress={showDatePickerModal}
-          >
-            <Text style={[
-              styles.dateText, 
-              !formData.birthDate && styles.placeholderText
-            ]}>
-              {formData.birthDate ? formatDate(formData.birthDate) : 'Selecione a data'}
-            </Text>
-            <Text style={styles.calendarIcon}>📅</Text>
-          </TouchableOpacity>
-        </View>
-
-        {/* Email */}
-        <View style={styles.inputGroup}>
-          <Text style={styles.label}>Email *</Text>
-          <TextInput
-            style={styles.input}
-            value={formData.email}
-            onChangeText={(value) => handleInputChange('email', value)}
-            placeholder="seu@email.com"
-            placeholderTextColor={GRAY}
-            keyboardType="email-address"
-            autoCapitalize="none"
-          />
-        </View>
-
-        {/* Senha */}
-        <View style={styles.inputGroup}>
-          <Text style={styles.label}>Senha *</Text>
-          <View style={styles.passwordContainer}>
+      {/* BOTTOM SHEET ULTRA FLAT */}
+      <Animated.View 
+        style={[
+          styles.bottomSheet,
+          {
+            opacity: fadeAnim,
+            transform: [
+              { 
+                translateY: cardAnim.interpolate({
+                  inputRange: [0, 1],
+                  outputRange: [height, 0]
+                })
+              },
+              { 
+                scale: cardAnim.interpolate({
+                  inputRange: [0, 1],
+                  outputRange: [0.9, 1]
+                })
+              }
+            ]
+          }
+        ]}
+      >
+        {/* Handle do bottom sheet */}
+        <View style={styles.handle} />
+        
+        {/* Conteúdo do formulário */}
+        <ScrollView 
+          style={styles.formContainer}
+          showsVerticalScrollIndicator={false}
+          contentContainerStyle={styles.formContent}
+        >
+          {/* CPF */}
+          <View style={styles.inputGroup}>
+            <Text style={styles.label}>CPF *</Text>
             <TextInput
-              style={styles.passwordInput}
-              value={formData.password}
-              onChangeText={(value) => handleInputChange('password', value)}
-              placeholder="Mínimo 6 caracteres"
+              style={styles.input}
+              value={formData.cpf}
+              onChangeText={(value) => handleInputChange('cpf', value)}
+              placeholder="000.000.000-00"
               placeholderTextColor={GRAY}
-              secureTextEntry={!showPassword}
-              autoCapitalize="none"
+              keyboardType="numeric"
+              maxLength={14}
             />
+          </View>
+
+          {/* Data de Nascimento */}
+          <View style={styles.inputGroup}>
+            <Text style={styles.label}>Data de Nascimento *</Text>
             <TouchableOpacity 
-              style={styles.eyeButton}
-              onPress={() => setShowPassword(!showPassword)}
+              style={styles.dateInput}
+              onPress={showDatePickerModal}
             >
-              <Text style={styles.eyeIcon}>{showPassword ? '👁️' : '👁️‍🗨️'}</Text>
+              <Text style={[
+                styles.dateText, 
+                !formData.birthDate && styles.placeholderText
+              ]}>
+                {formData.birthDate ? formatDate(formData.birthDate) : 'Selecione a data'}
+              </Text>
+              <Text style={styles.calendarIcon}>📅</Text>
             </TouchableOpacity>
           </View>
-        </View>
-
-        {/* Confirmar Senha */}
-        <View style={styles.inputGroup}>
-          <Text style={styles.label}>Confirmar Senha *</Text>
-          <View style={styles.passwordContainer}>
-            <TextInput
-              style={styles.passwordInput}
-              value={formData.confirmPassword}
-              onChangeText={(value) => handleInputChange('confirmPassword', value)}
-              placeholder="Digite a senha novamente"
-              placeholderTextColor={GRAY}
-              secureTextEntry={!showConfirmPassword}
-              autoCapitalize="none"
-            />
-            <TouchableOpacity 
-              style={styles.eyeButton}
-              onPress={() => setShowConfirmPassword(!showConfirmPassword)}
-            >
-              <Text style={styles.eyeIcon}>{showConfirmPassword ? '👁️' : '👁️‍🗨️'}</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
+        </ScrollView>
 
         {/* Botão Continuar */}
-        <TouchableOpacity 
-          style={[
-            styles.submitButton, 
-            isLoading && styles.submitButtonDisabled
-          ]}
-          onPress={handleSubmit}
-          disabled={isLoading}
-        >
-          {isLoading ? (
-            <ActivityIndicator size="small" color={WHITE} />
-          ) : (
-            <Text style={styles.submitButtonText}>Continuar</Text>
-          )}
-        </TouchableOpacity>
-      </View>
+        <View style={styles.footer}>
+          <TouchableOpacity 
+            style={[
+              styles.submitButton, 
+              isLoading && styles.submitButtonDisabled
+            ]}
+            onPress={handleSubmit}
+            disabled={isLoading}
+          >
+            {isLoading ? (
+              <ActivityIndicator size="small" color={WHITE} />
+            ) : (
+              <Text style={styles.submitButtonText}>Continuar</Text>
+            )}
+          </TouchableOpacity>
+        </View>
+      </Animated.View>
 
       {/* Date Picker Modal */}
       {showDatePicker && (
-        <DateTimePicker
-          value={formData.birthDate || new Date()}
-          mode="date"
-          display="default"
-          onChange={handleDateChange}
-          maximumDate={new Date()}
-          minimumDate={new Date(1900, 0, 1)}
-        />
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <Text style={styles.modalTitle}>Selecione a data de nascimento</Text>
+            <Text style={styles.modalSubtitle}>
+              Esta informação é necessária para verificar sua idade
+            </Text>
+            <TouchableOpacity 
+              style={styles.modalButton}
+              onPress={() => setShowDatePicker(false)}
+            >
+              <Text style={styles.modalButtonText}>OK</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
       )}
-    </ScrollView>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: WHITE,
-  },
-  
-  header: {
-    paddingTop: 60,
-    paddingHorizontal: 30,
-    paddingBottom: 30,
     backgroundColor: LEAF_GREEN,
   },
   
-  title: {
-    fontSize: 28,
+  // Header - FORA DO BOTTOM SHEET
+  header: {
+    alignItems: 'center',
+    paddingTop: 60,
+    paddingBottom: 20,
+    zIndex: 1,
+  },
+  progressContainer: {
+    marginBottom: 16,
+  },
+  progressCircle: {
+    width: 60,
+    height: 60,
+    borderRadius: 30,
+    backgroundColor: WHITE,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  progressText: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    color: LEAF_GREEN,
+  },
+  progressCount: {
+    fontSize: 16,
+    color: WHITE,
+    marginBottom: 8,
+    fontWeight: '500',
+  },
+  screenTitle: {
+    fontSize: 24,
     fontWeight: 'bold',
     color: WHITE,
     textAlign: 'center',
-    marginBottom: 10,
   },
   
-  subtitle: {
-    fontSize: 16,
-    color: WHITE,
-    textAlign: 'center',
-    opacity: 0.8,
+  // BOTTOM SHEET ULTRA FLAT
+  bottomSheet: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    height: height * 0.65,
+    backgroundColor: '#E8F5E8',
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    padding: 24,
   },
   
-  form: {
-    padding: 30,
+  // Handle do bottom sheet
+  handle: {
+    width: 40,
+    height: 4,
+    backgroundColor: '#C0C0C0',
+    borderRadius: 2,
+    alignSelf: 'center',
+    marginBottom: 24,
   },
   
+  // Formulário
+  formContainer: {
+    flex: 1,
+  },
+  formContent: {
+    paddingBottom: 24,
+  },
+  
+  // Grupos de input
   inputGroup: {
-    marginBottom: 25,
+    marginBottom: 20,
   },
-  
   label: {
-    fontSize: 16,
-    fontWeight: 'bold',
-    color: BLACK,
+    fontSize: 14,
+    fontWeight: '600',
+    color: LEAF_GREEN,
     marginBottom: 8,
   },
-  
   input: {
-    borderWidth: 1,
-    borderColor: LIGHT_GRAY,
-    borderRadius: 8,
-    paddingHorizontal: 15,
+    backgroundColor: WHITE,
+    borderRadius: 12,
+    paddingHorizontal: 16,
     paddingVertical: 12,
     fontSize: 16,
     color: BLACK,
-    backgroundColor: WHITE,
   },
   
+  // Data de nascimento
   dateInput: {
-    borderWidth: 1,
-    borderColor: LIGHT_GRAY,
-    borderRadius: 8,
-    paddingHorizontal: 15,
-    paddingVertical: 12,
     backgroundColor: WHITE,
+    borderRadius: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
     flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
+    justifyContent: 'space-between',
   },
-  
   dateText: {
     fontSize: 16,
     color: BLACK,
   },
-  
   placeholderText: {
     color: GRAY,
   },
-  
   calendarIcon: {
     fontSize: 20,
   },
   
+  // Senha
   passwordContainer: {
-    flexDirection: 'row',
-    borderWidth: 1,
-    borderColor: LIGHT_GRAY,
-    borderRadius: 8,
     backgroundColor: WHITE,
+    borderRadius: 12,
+    flexDirection: 'row',
     alignItems: 'center',
   },
-  
   passwordInput: {
     flex: 1,
-    paddingHorizontal: 15,
+    paddingHorizontal: 16,
     paddingVertical: 12,
     fontSize: 16,
     color: BLACK,
   },
-  
   eyeButton: {
-    paddingHorizontal: 15,
+    paddingHorizontal: 16,
     paddingVertical: 12,
   },
-  
   eyeIcon: {
     fontSize: 20,
   },
   
+  // Footer
+  footer: {
+    marginTop: 'auto',
+  },
   submitButton: {
     backgroundColor: LEAF_GREEN,
-    paddingVertical: 15,
-    borderRadius: 25,
+    borderRadius: 12,
+    paddingVertical: 16,
     alignItems: 'center',
-    marginTop: 20,
   },
-  
   submitButtonDisabled: {
-    backgroundColor: LIGHT_GRAY,
+    backgroundColor: '#C0C0C0',
+  },
+  submitButtonText: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: WHITE,
   },
   
-  submitButtonText: {
+  // Modal
+  modalOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 1000,
+  },
+  modalContent: {
+    backgroundColor: WHITE,
+    borderRadius: 16,
+    padding: 24,
+    marginHorizontal: 32,
+    alignItems: 'center',
+  },
+  modalTitle: {
     fontSize: 18,
+    fontWeight: 'bold',
+    color: BLACK,
+    marginBottom: 8,
+    textAlign: 'center',
+  },
+  modalSubtitle: {
+    fontSize: 14,
+    color: GRAY,
+    marginBottom: 24,
+    textAlign: 'center',
+    lineHeight: 20,
+  },
+  modalButton: {
+    backgroundColor: LEAF_GREEN,
+    borderRadius: 12,
+    paddingHorizontal: 32,
+    paddingVertical: 12,
+  },
+  modalButtonText: {
+    fontSize: 16,
     fontWeight: 'bold',
     color: WHITE,
   },

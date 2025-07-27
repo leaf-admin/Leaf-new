@@ -1,5 +1,5 @@
 import React,{useState, useEffect, useCallback} from "react";
-import { Bubble, GiftedChat, Send } from 'react-native-gifted-chat';
+// import { Bubble, GiftedChat, Send } from 'react-native-gifted-chat';
 import {
   View,
   KeyboardAvoidingView,
