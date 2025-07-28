@@ -2,12 +2,20 @@ const { onRequest } = require('firebase-functions/v2/https');
 const admin = require('firebase-admin');
 const redis = require('redis');
 
-// Configuração Redis
+// Configuração Redis Cloud
 const REDIS_CONFIG = {
     host: process.env.REDIS_HOST || 'localhost',
     port: process.env.REDIS_PORT || 6379,
     password: process.env.REDIS_PASSWORD || null,
-    db: process.env.REDIS_DB || 0
+    db: process.env.REDIS_DB || 0,
+    // Configuração TLS para Redis Cloud
+    tls: process.env.REDIS_TLS === 'true' ? {} : undefined,
+    // Configurações de timeout
+    connectTimeout: 10000,
+    commandTimeout: 5000,
+    // Configurações de retry
+    retryDelayOnFailover: 100,
+    maxRetriesPerRequest: 3
 };
 
 // Cliente Redis singleton
@@ -21,6 +29,11 @@ const initializeRedis = async () => {
     }
 
     try {
+        console.log('🔗 Tentando conectar ao Redis...');
+        console.log('📍 Host:', REDIS_CONFIG.host);
+        console.log('🔌 Porta:', REDIS_CONFIG.port);
+        console.log('🔐 TLS:', REDIS_CONFIG.tls ? 'Habilitado' : 'Desabilitado');
+        
         redisClient = redis.createClient(REDIS_CONFIG);
         
         redisClient.on('connect', () => {
@@ -28,8 +41,17 @@ const initializeRedis = async () => {
             isConnected = true;
         });
 
+        redisClient.on('ready', () => {
+            console.log('🚀 Redis pronto para uso');
+        });
+
         redisClient.on('error', (err) => {
             console.error('❌ Erro Redis (API):', err);
+            isConnected = false;
+        });
+
+        redisClient.on('end', () => {
+            console.log('🔌 Conexão Redis encerrada');
             isConnected = false;
         });
 
@@ -37,6 +59,13 @@ const initializeRedis = async () => {
         return redisClient;
     } catch (error) {
         console.error('❌ Erro ao conectar Redis (API):', error);
+        console.error('🔍 Detalhes do erro:', {
+            message: error.message,
+            code: error.code,
+            syscall: error.syscall,
+            address: error.address,
+            port: error.port
+        });
         return null;
     }
 };
@@ -57,10 +86,19 @@ const authenticateUser = async (req) => {
     }
 };
 
+// Configuração CORS
+const corsConfig = {
+    cors: true,
+    maxInstances: 10,
+    minInstances: 0,
+    region: 'us-central1',
+    invoker: 'public'
+};
+
 // ===== ENDPOINTS DE LOCALIZAÇÃO =====
 
 // API para atualizar localização do usuário
-exports.update_user_location = onRequest(async (req, res) => {
+exports.update_user_location = onRequest(corsConfig, async (req, res) => {
     try {
         const { userId, latitude, longitude, timestamp } = req.body;
         
@@ -102,10 +140,13 @@ exports.update_user_location = onRequest(async (req, res) => {
             updated_at: Date.now()
         });
 
-        res.json({ 
-            success: true, 
+        res.json({
+            success: true,
             message: 'Localização atualizada com sucesso',
-            data: { userId, latitude, longitude, timestamp }
+            userId: userId,
+            coordinates: { lat: latitude, lng: longitude },
+            timestamp: timestamp || Date.now(),
+            source: 'redis'
         });
     } catch (error) {
         console.error('❌ Erro ao atualizar localização:', error);
@@ -114,9 +155,9 @@ exports.update_user_location = onRequest(async (req, res) => {
 });
 
 // API para buscar motoristas próximos
-exports.get_nearby_drivers = onRequest(async (req, res) => {
+exports.get_nearby_drivers = onRequest(corsConfig, async (req, res) => {
     try {
-        const { latitude, longitude, radius = 5000 } = req.body;
+        const { latitude, longitude, radius = 5 } = req.body;
         
         if (!latitude || !longitude) {
             return res.status(400).json({ error: 'latitude e longitude são obrigatórios' });
@@ -124,47 +165,46 @@ exports.get_nearby_drivers = onRequest(async (req, res) => {
 
         const client = await initializeRedis();
         if (!client) {
-            // Fallback para Firebase
+            console.log('⚠️ Redis não disponível, usando Firebase fallback');
             return getNearbyDriversFromFirebase(latitude, longitude, radius, res);
         }
 
-        // Buscar motoristas próximos usando Redis Geospatial (GEORADIUS)
-        const nearbyDrivers = await client.geoRadius('user_locations', {
+        // Buscar usuários próximos usando GEORADIUS
+        const nearbyUsers = await client.geoRadius('user_locations', {
             longitude: parseFloat(longitude),
             latitude: parseFloat(latitude),
             radius: radius,
-            unit: 'm', // metros
-            withCoord: true,
-            withDist: true
+            unit: 'km'
         });
 
         const drivers = [];
-
-        for (const driver of nearbyDrivers) {
-            // Buscar dados adicionais do motorista
-            const driverKey = `locations:${driver.member}`;
-            const driverData = await client.hGetAll(driverKey);
-            
-            drivers.push({
-                uid: driver.member,
-                coordinates: {
-                    lat: driver.coordinates.latitude,
-                    lng: driver.coordinates.longitude
-                },
-                distance: Math.round(driver.dist), // Distância em metros
-                timestamp: parseInt(driverData.timestamp || Date.now()),
-                updated_at: parseInt(driverData.updated_at || Date.now())
-            });
+        for (const userId of nearbyUsers) {
+            const locationData = await client.hGetAll(`locations:${userId}`);
+            if (locationData.lat && locationData.lng) {
+                const distance = calculateDistance(
+                    latitude, longitude,
+                    parseFloat(locationData.lat), parseFloat(locationData.lng)
+                );
+                
+                drivers.push({
+                    uid: userId,
+                    coordinates: { 
+                        lat: parseFloat(locationData.lat), 
+                        lng: parseFloat(locationData.lng) 
+                    },
+                    distance: Math.round(distance),
+                    timestamp: parseInt(locationData.timestamp)
+                });
+            }
         }
 
-        // Ordenar por distância (já vem ordenado do GEORADIUS)
-        // drivers.sort((a, b) => a.distance - b.distance);
+        drivers.sort((a, b) => a.distance - b.distance);
 
-        res.json({ 
-            success: true, 
+        res.json({
+            success: true,
             drivers: drivers,
             total: drivers.length,
-            source: 'redis_geospatial'
+            source: 'redis'
         });
     } catch (error) {
         console.error('❌ Erro ao buscar motoristas próximos:', error);
@@ -172,10 +212,10 @@ exports.get_nearby_drivers = onRequest(async (req, res) => {
     }
 });
 
-// API para obter localização de um usuário
-exports.get_user_location = onRequest(async (req, res) => {
+// API para obter localização do usuário
+exports.get_user_location = onRequest(corsConfig, async (req, res) => {
     try {
-        const { userId } = req.params;
+        const { userId } = req.body;
         
         if (!userId) {
             return res.status(400).json({ error: 'userId é obrigatório' });
@@ -183,26 +223,24 @@ exports.get_user_location = onRequest(async (req, res) => {
 
         const client = await initializeRedis();
         if (!client) {
-            // Fallback para Firebase
+            console.log('⚠️ Redis não disponível, usando Firebase fallback');
             return getUserLocationFromFirebase(userId, res);
         }
 
-        const locationKey = `locations:${userId}`;
-        const location = await client.hGetAll(locationKey);
-
-        if (!location.lat || !location.lng) {
+        const locationData = await client.hGetAll(`locations:${userId}`);
+        
+        if (!locationData.lat || !locationData.lng) {
             return res.status(404).json({ error: 'Localização não encontrada' });
         }
 
         res.json({
             success: true,
-            location: {
-                uid: userId,
-                latitude: parseFloat(location.lat),
-                longitude: parseFloat(location.lng),
-                timestamp: parseInt(location.timestamp),
-                updated_at: parseInt(location.updated_at)
+            userId: userId,
+            coordinates: { 
+                lat: parseFloat(locationData.lat), 
+                lng: parseFloat(locationData.lng) 
             },
+            timestamp: parseInt(locationData.timestamp),
             source: 'redis'
         });
     } catch (error) {
@@ -214,7 +252,7 @@ exports.get_user_location = onRequest(async (req, res) => {
 // ===== ENDPOINTS DE TRACKING =====
 
 // API para iniciar tracking de viagem
-exports.start_trip_tracking = onRequest(async (req, res) => {
+exports.start_trip_tracking = onRequest(corsConfig, async (req, res) => {
     try {
         const { tripId, driverId, passengerId, initialLocation } = req.body;
         
@@ -227,40 +265,31 @@ exports.start_trip_tracking = onRequest(async (req, res) => {
             return res.status(500).json({ error: 'Redis não disponível' });
         }
 
-        const tripKey = `trip:${tripId}`;
-        const startTime = Date.now();
-
-        // Salvar dados da viagem no Redis
-        await client.hSet(tripKey, {
+        const tripData = {
             tripId,
             driverId,
             passengerId,
+            startTime: Date.now(),
+            startLocation: initialLocation,
             status: 'active',
-            startTime: startTime.toString(),
-            startLocation: JSON.stringify(initialLocation),
-            currentLocation: JSON.stringify(initialLocation),
-            updated_at: Date.now().toString()
-        });
+            updates: []
+        };
 
+        // Salvar dados da viagem
+        await client.hSet(`trip:${tripId}`, tripData);
+        
         // Adicionar à lista de viagens ativas
         await client.sAdd('active_trips', tripId);
 
         // Salvar também no Firebase como fallback
-        await admin.database().ref(`trips/${tripId}`).set({
-            tripId,
-            driverId,
-            passengerId,
-            status: 'active',
-            startTime,
-            startLocation: initialLocation,
-            currentLocation: initialLocation,
-            updated_at: Date.now()
-        });
+        await admin.database().ref(`trips/${tripId}`).set(tripData);
 
-        res.json({ 
-            success: true, 
-            message: 'Tracking iniciado com sucesso',
-            data: { tripId, startTime }
+        res.json({
+            success: true,
+            tripId: tripId,
+            status: 'active',
+            startTime: tripData.startTime,
+            source: 'redis'
         });
     } catch (error) {
         console.error('❌ Erro ao iniciar tracking:', error);
@@ -269,9 +298,9 @@ exports.start_trip_tracking = onRequest(async (req, res) => {
 });
 
 // API para atualizar localização da viagem
-exports.update_trip_location = onRequest(async (req, res) => {
+exports.update_trip_location = onRequest(corsConfig, async (req, res) => {
     try {
-        const { tripId, latitude, longitude, timestamp } = req.body;
+        const { tripId, latitude, longitude, timestamp = Date.now() } = req.body;
         
         if (!tripId || !latitude || !longitude) {
             return res.status(400).json({ error: 'tripId, latitude e longitude são obrigatórios' });
@@ -282,34 +311,26 @@ exports.update_trip_location = onRequest(async (req, res) => {
             return res.status(500).json({ error: 'Redis não disponível' });
         }
 
-        const tripKey = `trip:${tripId}`;
-        const pathKey = `trip_path:${tripId}`;
-        const location = { latitude: parseFloat(latitude), longitude: parseFloat(longitude) };
+        const locationUpdate = {
+            lat: latitude,
+            lng: longitude,
+            timestamp: timestamp
+        };
 
+        // Adicionar à lista de atualizações da viagem
+        await client.lPush(`trip_path:${tripId}`, JSON.stringify(locationUpdate));
+        
         // Atualizar localização atual da viagem
-        await client.hSet(tripKey, {
-            currentLocation: JSON.stringify(location),
-            updated_at: Date.now().toString()
+        await client.hSet(`trip:${tripId}`, {
+            currentLocation: JSON.stringify(locationUpdate),
+            lastUpdate: timestamp
         });
 
-        // Adicionar ao histórico de localizações
-        await client.lPush(pathKey, JSON.stringify({
-            ...location,
-            timestamp: timestamp || Date.now()
-        }));
-
-        // Manter apenas os últimos 100 pontos
-        await client.lTrim(pathKey, 0, 99);
-        await client.expire(pathKey, 86400); // Expira em 24 horas
-
-        // Salvar também no Firebase como fallback
-        await admin.database().ref(`trips/${tripId}/currentLocation`).set(location);
-        await admin.database().ref(`trips/${tripId}/updated_at`).set(Date.now());
-
-        res.json({ 
-            success: true, 
-            message: 'Localização da viagem atualizada',
-            data: { tripId, location, timestamp }
+        res.json({
+            success: true,
+            tripId: tripId,
+            location: locationUpdate,
+            source: 'redis'
         });
     } catch (error) {
         console.error('❌ Erro ao atualizar localização da viagem:', error);
@@ -318,12 +339,12 @@ exports.update_trip_location = onRequest(async (req, res) => {
 });
 
 // API para finalizar tracking de viagem
-exports.end_trip_tracking = onRequest(async (req, res) => {
+exports.end_trip_tracking = onRequest(corsConfig, async (req, res) => {
     try {
         const { tripId, endLocation } = req.body;
         
-        if (!tripId) {
-            return res.status(400).json({ error: 'tripId é obrigatório' });
+        if (!tripId || !endLocation) {
+            return res.status(400).json({ error: 'tripId e endLocation são obrigatórios' });
         }
 
         const client = await initializeRedis();
@@ -331,35 +352,37 @@ exports.end_trip_tracking = onRequest(async (req, res) => {
             return res.status(500).json({ error: 'Redis não disponível' });
         }
 
-        const tripKey = `trip:${tripId}`;
-        const endTime = Date.now();
+        const tripData = await client.hGetAll(`trip:${tripId}`);
+        
+        if (!tripData.tripId) {
+            return res.status(404).json({ error: 'Viagem não encontrada' });
+        }
+
+        const updatedTripData = {
+            ...tripData,
+            endTime: Date.now(),
+            endLocation: endLocation,
+            status: 'completed',
+            duration: Date.now() - parseInt(tripData.startTime)
+        };
 
         // Atualizar dados da viagem
-        await client.hSet(tripKey, {
-            status: 'completed',
-            endTime: endTime.toString(),
-            endLocation: JSON.stringify(endLocation || {}),
-            updated_at: Date.now().toString()
-        });
-
-        // Remover da lista de viagens ativas
+        await client.hSet(`trip:${tripId}`, updatedTripData);
+        
+        // Mover de ativa para finalizada
         await client.sRem('active_trips', tripId);
-
-        // Adicionar à lista de viagens completadas
         await client.sAdd('completed_trips', tripId);
 
         // Salvar também no Firebase como fallback
-        await admin.database().ref(`trips/${tripId}`).update({
-            status: 'completed',
-            endTime,
-            endLocation: endLocation || {},
-            updated_at: Date.now()
-        });
+        await admin.database().ref(`trips/${tripId}`).set(updatedTripData);
 
-        res.json({ 
-            success: true, 
-            message: 'Tracking finalizado com sucesso',
-            data: { tripId, endTime }
+        res.json({
+            success: true,
+            tripId: tripId,
+            status: 'completed',
+            endTime: updatedTripData.endTime,
+            duration: updatedTripData.duration,
+            source: 'redis'
         });
     } catch (error) {
         console.error('❌ Erro ao finalizar tracking:', error);
@@ -368,9 +391,9 @@ exports.end_trip_tracking = onRequest(async (req, res) => {
 });
 
 // API para obter dados da viagem
-exports.get_trip_data = onRequest(async (req, res) => {
+exports.get_trip_data = onRequest(corsConfig, async (req, res) => {
     try {
-        const { tripId } = req.params;
+        const { tripId } = req.body;
         
         if (!tripId) {
             return res.status(400).json({ error: 'tripId é obrigatório' });
@@ -378,37 +401,24 @@ exports.get_trip_data = onRequest(async (req, res) => {
 
         const client = await initializeRedis();
         if (!client) {
-            // Fallback para Firebase
+            console.log('⚠️ Redis não disponível, usando Firebase fallback');
             return getTripDataFromFirebase(tripId, res);
         }
 
-        const tripKey = `trip:${tripId}`;
-        const tripData = await client.hGetAll(tripKey);
-
+        const tripData = await client.hGetAll(`trip:${tripId}`);
+        
         if (!tripData.tripId) {
             return res.status(404).json({ error: 'Viagem não encontrada' });
         }
 
-        // Obter último ponto de tracking
-        const pathKey = `trip_path:${tripId}`;
-        const lastPoint = await client.lIndex(pathKey, 0);
-        const lastPointData = lastPoint ? JSON.parse(lastPoint) : null;
+        // Obter histórico de localizações
+        const pathData = await client.lRange(`trip_path:${tripId}`, 0, -1);
+        const path = pathData.map(point => JSON.parse(point));
 
         res.json({
             success: true,
-            tripData: {
-                tripId: tripData.tripId,
-                driverId: tripData.driverId,
-                passengerId: tripData.passengerId,
-                status: tripData.status,
-                startTime: parseInt(tripData.startTime),
-                endTime: tripData.endTime ? parseInt(tripData.endTime) : null,
-                startLocation: JSON.parse(tripData.startLocation),
-                currentLocation: JSON.parse(tripData.currentLocation),
-                endLocation: tripData.endLocation ? JSON.parse(tripData.endLocation) : null,
-                updated_at: parseInt(tripData.updated_at)
-            },
-            lastPoint: lastPointData,
+            tripData: tripData,
+            path: path,
             source: 'redis'
         });
     } catch (error) {
@@ -418,7 +428,7 @@ exports.get_trip_data = onRequest(async (req, res) => {
 });
 
 // API para cancelar tracking de viagem
-exports.cancel_trip_tracking = onRequest(async (req, res) => {
+exports.cancel_trip_tracking = onRequest(corsConfig, async (req, res) => {
     try {
         const { tripId } = req.body;
         
@@ -466,9 +476,9 @@ exports.cancel_trip_tracking = onRequest(async (req, res) => {
 });
 
 // API para obter histórico de tracking
-exports.get_trip_history = onRequest(async (req, res) => {
+exports.get_trip_history = onRequest(corsConfig, async (req, res) => {
     try {
-        const { tripId } = req.params;
+        const { tripId } = req.body;
         const { limit = 50 } = req.query;
         
         if (!tripId) {
@@ -498,9 +508,9 @@ exports.get_trip_history = onRequest(async (req, res) => {
 });
 
 // API para obter viagens ativas
-exports.get_active_trips = onRequest(async (req, res) => {
+exports.get_active_trips = onRequest(corsConfig, async (req, res) => {
     try {
-        const { userId } = req.params;
+        const { userId } = req.body;
         
         if (!userId) {
             return res.status(400).json({ error: 'userId é obrigatório' });
@@ -545,7 +555,7 @@ exports.get_active_trips = onRequest(async (req, res) => {
 });
 
 // API para desinscrever de tracking
-exports.unsubscribe_tracking = onRequest(async (req, res) => {
+exports.unsubscribe_tracking = onRequest(corsConfig, async (req, res) => {
     try {
         const { tripId } = req.body;
         
@@ -575,7 +585,7 @@ exports.unsubscribe_tracking = onRequest(async (req, res) => {
 // ===== ENDPOINTS DE ESTATÍSTICAS =====
 
 // API para obter estatísticas do Redis
-exports.get_redis_stats = onRequest(async (req, res) => {
+exports.get_redis_stats = onRequest(corsConfig, async (req, res) => {
     try {
         const client = await initializeRedis();
         if (!client) {
@@ -604,7 +614,7 @@ exports.get_redis_stats = onRequest(async (req, res) => {
 });
 
 // API de health check
-exports.health = onRequest(async (req, res) => {
+exports.health = onRequest(corsConfig, async (req, res) => {
     try {
         const client = await initializeRedis();
         const redisStatus = client ? 'connected' : 'disconnected';
@@ -736,7 +746,7 @@ function calculateDistance(lat1, lng1, lat2, lng2) {
 // ===== ENDPOINT DE SINCRONIZAÇÃO FIREBASE =====
 
 // API para sincronização com Firebase (backup)
-exports.firebase_sync = onRequest(async (req, res) => {
+exports.firebase_sync = onRequest(corsConfig, async (req, res) => {
     try {
         const { type, userId, data, timestamp } = req.body;
         

@@ -4,28 +4,42 @@ import { Platform } from 'react-native';
 // Configurações por ambiente
 const ENV = {
   development: {
-    webSocketBackend: {
-      web: 'http://192.168.0.39:5001',
-      mobile: 'http://192.168.0.37:5001'
+    // 🏠 SELF-HOSTED VPS (Hostinger)
+    selfHostedApi: {
+      web: 'http://147.93.66.253:3000',
+      mobile: 'http://147.93.66.253:3000'
     },
+    selfHostedWebSocket: {
+      web: 'ws://147.93.66.253:3001',
+      mobile: 'ws://147.93.66.253:3001'
+    },
+    // 🔄 FALLBACK - Firebase Functions (se necessário)
     firebaseFunctions: {
-      web: 'http://192.168.0.39:5001/leaf-app-91dfdce0/us-central1',
-      mobile: 'http://192.168.0.37:5001/leaf-app-91dfdce0/us-central1'
+      web: 'https://us-central1-leaf-app-91dfdce0.cloudfunctions.net',
+      mobile: 'https://us-central1-leaf-app-91dfdce0.cloudfunctions.net'
     },
+    // 📊 Dashboard local
     dashboard: {
       web: 'http://192.168.0.39:3000',
       mobile: 'http://192.168.0.37:3000'
     }
   },
   production: {
-    webSocketBackend: {
-      web: 'https://api.leafapp.com',
-      mobile: 'https://api.leafapp.com'
+    // 🏠 SELF-HOSTED VPS (Hostinger) - PRODUÇÃO
+    selfHostedApi: {
+      web: 'http://147.93.66.253:3000',
+      mobile: 'http://147.93.66.253:3000'
     },
+    selfHostedWebSocket: {
+      web: 'ws://147.93.66.253:3001',
+      mobile: 'ws://147.93.66.253:3001'
+    },
+    // 🔄 FALLBACK - Firebase Functions
     firebaseFunctions: {
       web: 'https://us-central1-leaf-app-91dfdce0.cloudfunctions.net',
       mobile: 'https://us-central1-leaf-app-91dfdce0.cloudfunctions.net'
     },
+    // 📊 Dashboard
     dashboard: {
       web: 'https://dashboard.leafapp.com',
       mobile: 'https://dashboard.leafapp.com'
@@ -46,9 +60,16 @@ const getConfig = () => {
   const platform = Platform.OS;
   
   return {
-    webSocketBackend: ENV[env].webSocketBackend[platform] || ENV[env].webSocketBackend.web,
+    // 🏠 SELF-HOSTED VPS (PRINCIPAL)
+    selfHostedApi: ENV[env].selfHostedApi[platform] || ENV[env].selfHostedApi.web,
+    selfHostedWebSocket: ENV[env].selfHostedWebSocket[platform] || ENV[env].selfHostedWebSocket.web,
+    
+    // 🔄 FALLBACK - Firebase Functions
     firebaseFunctions: ENV[env].firebaseFunctions[platform] || ENV[env].firebaseFunctions.web,
+    
+    // 📊 Dashboard
     dashboard: ENV[env].dashboard[platform] || ENV[env].dashboard.web,
+    
     environment: env,
     platform
   };
@@ -59,17 +80,29 @@ const config = getConfig();
 
 // URLs específicas para serviços
 export const API_URLS = {
-  // Redis API via Firebase Functions
-  redisApi: config.firebaseFunctions,
+  // 🏠 SELF-HOSTED API (PRINCIPAL)
+  selfHostedApi: config.selfHostedApi,
   
-  // WebSocket Backend
-  webSocketBackend: config.webSocketBackend,
+  // 🔌 SELF-HOSTED WEBSOCKET
+  selfHostedWebSocket: config.selfHostedWebSocket,
   
-  // Dashboard
+  // 🔄 FALLBACK - Firebase Functions
+  firebaseFunctions: config.firebaseFunctions,
+  
+  // 📊 Dashboard
   dashboard: config.dashboard,
   
-  // Endpoints específicos
-  endpoints: {
+  // Endpoints específicos - SELF-HOSTED
+  selfHostedEndpoints: {
+    updateUserLocation: '/api/update_user_location',
+    updateDriverLocation: '/api/update_driver_location',
+    getNearbyDrivers: '/api/nearby_drivers',
+    getStats: '/api/stats',
+    health: '/api/health'
+  },
+  
+  // Endpoints específicos - FIREBASE (fallback)
+  firebaseEndpoints: {
     updateUserLocation: '/update_user_location',
     getNearbyDrivers: '/get_nearby_drivers',
     startTripTracking: '/start_trip_tracking',
@@ -87,17 +120,27 @@ export const API_CONFIG = {
   ...config,
   timeout: 10000, // 10 segundos
   retryAttempts: 3,
-  retryDelay: 1000 // 1 segundo
+  retryDelay: 1000, // 1 segundo
+  
+  // 🔄 Estratégia de fallback
+  useSelfHosted: true, // Usar VPS como principal
+  useFirebaseFallback: true, // Usar Firebase como fallback
+  maxRetries: 3
 };
 
-// Função para obter URL completa
-export const getApiUrl = (endpoint) => {
-  return `${API_URLS.redisApi}${endpoint}`;
+// Função para obter URL completa - SELF-HOSTED
+export const getSelfHostedApiUrl = (endpoint) => {
+  return `${API_URLS.selfHostedApi}${endpoint}`;
 };
 
-// Função para obter URL do WebSocket
-export const getWebSocketUrl = () => {
-  return API_URLS.webSocketBackend;
+// Função para obter URL completa - FIREBASE (fallback)
+export const getFirebaseApiUrl = (endpoint) => {
+  return `${API_URLS.firebaseFunctions}${endpoint}`;
+};
+
+// Função para obter URL do WebSocket - SELF-HOSTED
+export const getSelfHostedWebSocketUrl = () => {
+  return API_URLS.selfHostedWebSocket;
 };
 
 // Função para obter URL do Dashboard
@@ -105,10 +148,29 @@ export const getDashboardUrl = () => {
   return API_URLS.dashboard;
 };
 
+// 🔄 Função inteligente para escolher API
+export const getApiUrl = (endpoint, useFallback = false) => {
+  if (useFallback) {
+    return getFirebaseApiUrl(API_URLS.firebaseEndpoints[endpoint] || endpoint);
+  }
+  return getSelfHostedApiUrl(API_URLS.selfHostedEndpoints[endpoint] || endpoint);
+};
+
+// 🔄 Função inteligente para escolher WebSocket
+export const getWebSocketUrl = (useFallback = false) => {
+  if (useFallback) {
+    return API_URLS.firebaseFunctions; // Fallback para Firebase
+  }
+  return getSelfHostedWebSocketUrl();
+};
+
 export default {
   API_URLS,
   API_CONFIG,
   getApiUrl,
+  getSelfHostedApiUrl,
+  getFirebaseApiUrl,
   getWebSocketUrl,
+  getSelfHostedWebSocketUrl,
   getDashboardUrl
 }; 

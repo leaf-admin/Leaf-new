@@ -1,120 +1,36 @@
-# 📁 SCRIPTS - Índice de Arquivos
+# 🔧 **SCRIPTS DO PROJETO LEAF**
 
-**Pasta:** `/scripts`  
-**Descrição:** Scripts de automação, configuração e utilitários do projeto
+## 🗂️ **ÍNDICE DE SCRIPTS**
 
----
+### **🚀 Deploy e Configuração**
+- [deploy/](./deploy/) - Scripts de deploy e configuração
+  - [setup-ssh-key.sh](./deploy/setup-ssh-key.sh) - Configuração SSH
+  - [deploy-to-hostinger.sh](./deploy/deploy-to-hostinger.sh) - Deploy para Hostinger
+  - [setup-hostinger-leaf.sh](./deploy/setup-hostinger-leaf.sh) - Setup Leaf na Hostinger
+  - [fix-redis-config.sh](./deploy/fix-redis-config.sh) - Correção Redis
+  - [fix-api-issues.sh](./deploy/fix-api-issues.sh) - Correção APIs
+  - [add-trip-tracking-apis.sh](./deploy/add-trip-tracking-apis.sh) - APIs de tracking
+  - [test-simple-apis.sh](./deploy/test-simple-apis.sh) - Teste APIs simples
+  - [setup-self-hosted.sh](./deploy/setup-self-hosted.sh) - Setup self-hosted
+  - [setup-redis-cloud.sh](./deploy/setup-redis-cloud.sh) - Setup Redis Cloud
+  - [fix-all-apis.sh](./deploy/fix-all-apis.sh) - Correção geral APIs
 
-## 🚀 **Scripts de Deploy e Produção**
+### **🧪 Testes**
+- [testing/](./testing/) - Scripts de teste
+  - [test-mobile-integration.cjs](./testing/test-mobile-integration.cjs) - Teste integração mobile
+  - [test-self-hosted-api.cjs](./testing/test-self-hosted-api.cjs) - Teste API self-hosted
 
-### **Deploy**
-- `deploy-production.bat` - Script de deploy para produção (Windows)
-- `deploy-production.ps1` - Script de deploy para produção (PowerShell)
-- `check-production-status.bat` - Verificar status da produção
+### **📊 Monitoramento**
+- [monitoring/](./monitoring/) - Scripts de monitoramento
+  - [start-all-services.sh](./start-all-services.sh) - Iniciar todos os serviços
+  - [stop-all-services.sh](./stop-all-services.sh) - Parar todos os serviços
 
-### **Serviços**
-- `start-all-services.sh` - Iniciar todos os serviços do projeto
-- `start-all-services.bat` - Iniciar todos os serviços (Windows)
-- `stop-all-services.sh` - Parar todos os serviços
-
----
-
-## 🔧 **Scripts de Correção e Manutenção**
-
-### **Correção de Duplicatas**
-- `fix-js-duplicates.cjs` - Corrigir arquivos JavaScript duplicados
-- `fix-duplicates.ps1` - Corrigir duplicatas (PowerShell)
-- `fix-all-duplicates.ps1` - Corrigir todas as duplicatas
-
----
-
-## 📊 **Scripts de Teste e Monitoramento**
-
-### **Testes Simples**
-- `test-server-simple.cjs` - Teste simples do servidor
-- `test-metrics-simple.cjs` - Teste simples de métricas
+### **🖨️ Utilitários**
+- [abrir_diagrama_backend.sh](./abrir_diagrama_backend.sh) - Abrir diagrama backend
+- [abrir_estudo_viabilidade.sh](./abrir_estudo_viabilidade.sh) - Abrir estudo viabilidade
 
 ---
 
-## ⚙️ **Arquivos de Configuração**
-
-### **Docker**
-- `docker-compose.yml` - Configuração do Docker Compose
-
-### **Redis**
-- `redis-config.env` - Variáveis de ambiente do Redis
-- `redis-checkpoint-before-optimization.json` - Checkpoint do Redis antes da otimização
-
----
-
-## 📋 **Como Usar**
-
-### **Executar Scripts:**
-```bash
-# Linux/Mac
-./scripts/start-all-services.sh
-
-# Windows
-scripts\start-all-services.bat
-
-# PowerShell
-.\scripts\deploy-production.ps1
-```
-
-### **Corrigir Duplicatas:**
-```bash
-# Node.js
-node scripts/fix-js-duplicates.cjs
-
-# PowerShell
-.\scripts\fix-all-duplicates.ps1
-```
-
-### **Testes:**
-```bash
-# Teste simples
-node scripts/test-server-simple.cjs
-node scripts/test-metrics-simple.cjs
-```
-
----
-
-## 🔍 **Estrutura da Pasta**
-
-```
-scripts/
-├── README.md                           # Este arquivo
-├── deploy-production.bat               # Deploy produção (Windows)
-├── deploy-production.ps1               # Deploy produção (PowerShell)
-├── check-production-status.bat         # Status produção
-├── start-all-services.sh               # Iniciar serviços
-├── start-all-services.bat              # Iniciar serviços (Windows)
-├── stop-all-services.sh                # Parar serviços
-├── fix-js-duplicates.cjs               # Corrigir duplicatas JS
-├── fix-duplicates.ps1                  # Corrigir duplicatas
-├── fix-all-duplicates.ps1              # Corrigir todas duplicatas
-├── test-server-simple.cjs              # Teste servidor
-├── test-metrics-simple.cjs             # Teste métricas
-├── docker-compose.yml                  # Config Docker
-├── redis-config.env                    # Config Redis
-└── redis-checkpoint-before-optimization.json # Checkpoint Redis
-```
-
----
-
-## ⚠️ **Observações**
-
-- **Scripts .bat:** Para Windows
-- **Scripts .sh:** Para Linux/Mac
-- **Scripts .ps1:** Para PowerShell
-- **Scripts .cjs:** Para Node.js
-
-### **Permissões (Linux/Mac):**
-```bash
-chmod +x scripts/*.sh
-```
-
-### **Dependências:**
-- Node.js para scripts .cjs
-- PowerShell para scripts .ps1
-- Docker para docker-compose.yml 
+## 📅 **ÚLTIMA ATUALIZAÇÃO**
+**Data:** 28 de Julho de 2025  
+**Status:** ✅ Scripts organizados e funcionais 

@@ -179,8 +179,109 @@ class ErrorHandler {
 
   // Tratar erro de autenticação
   handleAuthenticationError() {
-    // TODO: Implementar redirecionamento para login
     console.log('🔐 Redirecionando para login...');
+    
+    try {
+      // Importar navigation dinamicamente para evitar dependências circulares
+      const { CommonActions } = require('@react-navigation/native');
+      
+      // Limpar dados de autenticação
+      this.clearAuthData();
+      
+      // Redirecionar para tela de login
+      if (global.navigationRef && global.navigationRef.current) {
+        global.navigationRef.current.dispatch(
+          CommonActions.reset({
+            index: 0,
+            routes: [
+              { name: 'Login' }
+            ],
+          })
+        );
+      } else {
+        // Fallback: mostrar alerta e sugerir reiniciar app
+        Alert.alert(
+          'Sessão Expirada',
+          'Sua sessão expirou. Por favor, faça login novamente.',
+          [
+            {
+              text: 'OK',
+              onPress: () => {
+                // Tentar navegar para login se possível
+                this.attemptLoginNavigation();
+              }
+            }
+          ]
+        );
+      }
+      
+      console.log('✅ Redirecionamento para login concluído');
+      
+    } catch (error) {
+      console.error('❌ Erro ao redirecionar para login:', error);
+      
+      // Fallback final: mostrar alerta
+      Alert.alert(
+        'Erro de Autenticação',
+        'Ocorreu um erro de autenticação. Por favor, reinicie o aplicativo.',
+        [
+          {
+            text: 'OK',
+            onPress: () => {
+              // Aqui poderia ter lógica para reiniciar o app
+              console.log('🔄 Sugerindo reinicialização do app');
+            }
+          }
+        ]
+      );
+    }
+  }
+
+  // Limpar dados de autenticação
+  clearAuthData() {
+    try {
+      // Limpar dados do AsyncStorage
+      const AsyncStorage = require('@react-native-async-storage/async-storage');
+      
+      const keysToRemove = [
+        'userToken',
+        'userData',
+        'authState',
+        'refreshToken'
+      ];
+      
+      keysToRemove.forEach(key => {
+        AsyncStorage.removeItem(key).catch(err => {
+          console.log(`⚠️ Erro ao remover ${key}:`, err);
+        });
+      });
+      
+      // Limpar dados do Redux se disponível
+      if (global.store) {
+        global.store.dispatch({ type: 'LOGOUT' });
+      }
+      
+      console.log('🧹 Dados de autenticação limpos');
+      
+    } catch (error) {
+      console.error('❌ Erro ao limpar dados de auth:', error);
+    }
+  }
+
+  // Tentar navegação para login
+  attemptLoginNavigation() {
+    try {
+      // Verificar se temos acesso ao navigation
+      if (global.navigationRef && global.navigationRef.current) {
+        global.navigationRef.current.navigate('Login');
+      } else {
+        // Tentar importar e usar navigation
+        const { NavigationContainer } = require('@react-navigation/native');
+        console.log('📱 Tentando navegação alternativa...');
+      }
+    } catch (error) {
+      console.error('❌ Erro na navegação alternativa:', error);
+    }
   }
 
   // Obter estatísticas de erros
