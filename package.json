@@ -29,6 +29,7 @@
   "author": "Exicube App Solutions (OPC) Private Limited",
   "private": true,
   "dependencies": {
+    "axios": "^1.11.0",
     "concurrently": "7.0.0",
     "crypto-js": "^4.1.1",
     "exicube-cli": "1.9.0",
@@ -44,6 +45,7 @@
     "react-native-masked-text": "^1.13.0",
     "redis": "^5.5.6",
     "socket.io-client": "^4.8.1",
+    "ws": "^8.18.3",
     "xml2json": "^0.12.0"
   },
   "resolutions": {
