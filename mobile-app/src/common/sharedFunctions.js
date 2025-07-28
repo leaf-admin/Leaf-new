@@ -321,7 +321,17 @@ export const FareCalculator = (distance, time, rateDetails, instructionData, dec
     if(instructionData && instructionData.optionSelected){
         baseCalculated = baseCalculated + instructionData.optionSelected.amount;
     }
-    let total = baseCalculated > parseFloat(rateDetails?.min_fare || 0) ? baseCalculated : parseFloat(rateDetails?.min_fare || 0);
+    // Importar validador de tarifa mínima
+    const { getFinalFareValue } = require('../utils/minimumFareValidator');
+    
+    // Aplicar valor mínimo global de R$ 8,50 (ajuste automático)
+    const fareResult = getFinalFareValue(baseCalculated);
+    let total = fareResult.finalValue;
+    
+    // Log se foi ajustado
+    if (fareResult.wasAdjusted) {
+        console.log(`Tarifa ajustada para valor mínimo: R$ ${fareResult.originalValue.toFixed(2)} → R$ ${fareResult.finalValue.toFixed(2)}`);
+    }
     
     // Adiciona o valor do pedágio ao total
     if (externalTollFee !== null && !isNaN(externalTollFee)) {

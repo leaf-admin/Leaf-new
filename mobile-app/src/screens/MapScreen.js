@@ -182,7 +182,7 @@ const fallbackCarTypes = [
   {
     name: 'Leaf Plus',
     image: 'https://cdn.pixabay.com/photo/2017/06/03/08/11/car-2368193_640.png',
-    min_fare: 8,
+            min_fare: 8.50,
     base_fare: 2.98,
     rate_per_hour: 15,
     rate_per_unit_distance: 1.22,
@@ -196,7 +196,7 @@ const fallbackCarTypes = [
   {
     name: 'Leaf Elite',
     image: 'https://cdn.pixabay.com/photo/2022/01/23/18/20/car-6961567_640.png',
-    min_fare: 10.11,
+            min_fare: 8.50,
     base_fare: 5.32,
     rate_per_hour: 17.4,
     rate_per_unit_distance: 2.18,

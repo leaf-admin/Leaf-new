@@ -15,6 +15,7 @@ import { useNavigation } from '@react-navigation/native';
 import { useDispatch, useSelector } from 'react-redux';
 import { createPixCharge, checkPaymentStatus } from '../services/paymentService';
 import { updateTripStatus } from '../actions/tripActions';
+import { formatMinimumFare, getFinalFareValue } from '../utils/minimumFareValidator';
 
 const { width } = Dimensions.get('window');
 
@@ -39,6 +40,7 @@ const PixPaymentScreen = ({ route }) => {
     try {
       setLoading(true);
       
+      // O valor já foi ajustado automaticamente no cálculo
       const response = await createPixCharge({
         value: tripData.value,
         correlationID: `trip_${Date.now()}_${tripData.id}`,
@@ -171,10 +173,22 @@ const PixPaymentScreen = ({ route }) => {
   return (
     <View style={styles.container}>
       {/* Header */}
-      <View style={styles.header}>
-        <Text style={styles.title}>Pagamento PIX</Text>
-        <Text style={styles.subtitle}>Escaneie o QR Code para pagar</Text>
-      </View>
+              <View style={styles.header}>
+          <Text style={styles.title}>Pagamento PIX</Text>
+          <Text style={styles.subtitle}>Escaneie o QR Code para pagar</Text>
+          <Text style={styles.minimumFare}>Valor mínimo: {formatMinimumFare()}</Text>
+          {(() => {
+            const fareInfo = getFinalFareValue(tripData.value);
+            if (fareInfo.wasAdjusted) {
+              return (
+                <Text style={styles.adjustedFare}>
+                  Valor ajustado automaticamente para o mínimo
+                </Text>
+              );
+            }
+            return null;
+          })()}
+        </View>
 
       {/* Informações da Corrida */}
       <View style={styles.tripInfo}>
@@ -254,6 +268,19 @@ const styles = StyleSheet.create({
   subtitle: {
     fontSize: 16,
     color: '#666',
+    marginBottom: 5,
+  },
+  minimumFare: {
+    fontSize: 14,
+    color: '#999',
+    fontStyle: 'italic',
+    marginBottom: 5,
+  },
+  adjustedFare: {
+    fontSize: 12,
+    color: '#ff6b35',
+    fontStyle: 'italic',
+    marginBottom: 10,
   },
   tripInfo: {
     backgroundColor: '#fff',
