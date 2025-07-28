@@ -1,336 +1,255 @@
-# 🚀 LEAF - Sistema de Transporte Inteligente
+# 🌿 LEAF APP - Plataforma de Mobilidade Urbana
 
-**Status:** ✅ **PROJETO ORGANIZADO E OTIMIZADO**  
-**Versão:** 4.6.0  
-**Última Atualização:** 26/07/2025
+## 📋 Visão Geral
 
----
+O **LEAF APP** é uma plataforma completa de mobilidade urbana que conecta passageiros e motoristas através de uma aplicação mobile moderna, com sistema de pagamento PIX integrado e backend híbrido de alta performance.
 
-## 📋 **Visão Geral**
+## 🚀 Status do Projeto
 
-O **LEAF** é um sistema completo de transporte inteligente que inclui:
-- 📱 **Mobile App** (React Native/Expo)
-- 🌐 **Web App** (React)
-- 🗄️ **Backend** (Node.js/Firebase)
-- 📊 **Dashboard** (React/TypeScript)
-- 🔌 **WebSocket Backend** (Tempo real)
-- 🗄️ **Redis** (Cache/Otimização)
+### ✅ **IMPLEMENTADO E FUNCIONAL**
+- **Sistema de Pagamento PIX** - Integração completa com Woovi (OpenPix)
+- **Webhook Processing** - Notificações automáticas de pagamento
+- **Tarifa Mínima R$ 8,50** - Ajuste automático implementado
+- **Backend Híbrido** - Redis + Firebase para alta performance
+- **WebSocket Backend** - Comunicação em tempo real
+- **App Mobile** - 43 telas implementadas com 36 componentes
+- **Sistema de Autenticação** - Login e cadastro completo
 
----
+### 🔄 **EM DESENVOLVIMENTO**
+- Integração completa do PixPaymentScreen
+- DriverSearchScreen para busca de motoristas
+- TripTrackingScreen para acompanhamento
+- Push notifications
+- Chat em tempo real
 
-## 🗂️ **Estrutura do Projeto**
+## 📁 Estrutura do Projeto
 
 ```
-📁 LEAF/
-├── 📱 mobile-app/              # App mobile (React Native)
-├── 🌐 web-app/                 # App web (React)
-├── 🔌 leaf-websocket-backend/  # Backend WebSocket
-├── 📊 leaf-dashboard/          # Dashboard administrativo
-├── 🔥 functions/               # Firebase Functions
-├── 🗄️ common/                  # Código compartilhado
-├── 📁 scripts/                 # Scripts de automação
-├── 🧪 tests/                   # Testes organizados
-├── 📚 documentation/           # Documentação completa
-├── ⚙️ redis-config/            # Configuração Redis
-├── 🚀 production-setup/        # Setup de produção
-└── 📦 patches/                 # Patches e correções
+Sourcecode/
+├── 📱 mobile-app/              # Aplicação React Native
+│   ├── src/screens/           # 43 telas implementadas
+│   ├── src/components/        # 36 componentes reutilizáveis
+│   └── src/services/          # 14 serviços de negócio
+├── ⚡ functions/               # Firebase Functions (72 functions)
+│   ├── providers/woovi/       # Integração PIX
+│   └── woovi-webhook.js       # Webhook processing
+├── 🔌 leaf-websocket-backend/ # Servidor WebSocket
+├── 📊 leaf-dashboard/         # Dashboard de monitoramento
+├── 🌐 web-app/                # Aplicação web
+├── 📚 documentation/           # Documentação organizada
+│   ├── project/               # Documentação do projeto
+│   └── studies/               # Estudos e análises
+├── 🛠️ scripts/                # Scripts de automação
+│   ├── testing/               # 38 scripts de teste
+│   ├── deploy/                # Scripts de deploy
+│   └── services/              # Scripts de serviços
+└── 🧪 tests/                  # Testes automatizados
 ```
 
----
+## 🛠️ Tecnologias Utilizadas
 
-## 🚀 **Início Rápido**
+### **Frontend**
+- **React Native** - App mobile multiplataforma
+- **React** - Web app
+- **Expo** - Framework de desenvolvimento
 
-### **1. Instalar Dependências:**
+### **Backend**
+- **Firebase Functions** - APIs serverless
+- **Redis** - Cache e localização em tempo real
+- **WebSocket** - Comunicação em tempo real
+- **Firebase Firestore** - Banco de dados
+
+### **Pagamentos**
+- **Woovi (OpenPix)** - Gateway PIX
+- **Webhook Processing** - Notificações automáticas
+
+### **Infraestrutura**
+- **Firebase Hosting** - Deploy automático
+- **Redis Cloud** - Cache distribuído
+- **Docker** - Containerização
+
+## 🚀 Como Executar
+
+### **Pré-requisitos**
 ```bash
-# Instalar dependências principais
-npm install
+# Node.js 18+
+node --version
 
-# Instalar dependências do mobile app
-cd mobile-app && npm install
+# Yarn ou npm
+yarn --version
 
-# Instalar dependências do web app
-cd web-app && npm install
+# Firebase CLI
+firebase --version
 ```
 
-### **2. Configurar Ambiente:**
+### **Instalação**
 ```bash
-# Copiar arquivos de configuração
-cp scripts/redis-config.env .env
-cp mobile-app/config/FirebaseConfig.example.js mobile-app/config/FirebaseConfig.js
+# Clonar repositório
+git clone [repository-url]
+cd Sourcecode
+
+# Instalar dependências
+yarn install
+
+# Configurar Firebase
+firebase login
+firebase use leaf-reactnative
 ```
 
-### **3. Iniciar Serviços:**
+### **Executar Aplicação**
 ```bash
-# Iniciar todos os serviços
-./scripts/start-all-services.sh
-
-# Ou individualmente:
-# Redis
-docker-compose up -d redis
-
-# Firebase Emulator
-firebase emulators:start
-
-# WebSocket Backend
-cd leaf-websocket-backend && npm start
-
-# Mobile App
-cd mobile-app && npx expo start
+# Mobile App (React Native)
+cd mobile-app
+yarn start
 
 # Web App
-cd web-app && npm start
-```
-
----
-
-## 📱 **Mobile App**
-
-### **Status:** ✅ **OTIMIZADO**
-- ✅ Dependências atualizadas
-- ✅ URLs centralizadas
-- ✅ Tratamento de erros unificado
-- ✅ Configuração dinâmica
-
-### **Executar:**
-```bash
-cd mobile-app
-npx expo start --dev-client
-```
-
-### **Documentação:**
-- 📋 [Análise Completa](documentation/project/MOBILE_APP_ANALYSIS.md)
-- 🔧 [Correções Aplicadas](documentation/project/MOBILE_APP_MEDIUM_ISSUES_FIXED.md)
-- ✅ [Testes de Correção](documentation/project/TESTE_CORREÇÕES_RESULTADO.md)
-
----
-
-## 🌐 **Web App**
-
-### **Status:** 🟡 **FUNCIONANDO**
-- ✅ Interface responsiva
-- ✅ Integração com APIs
-- ✅ Sistema de pagamentos
-
-### **Executar:**
-```bash
 cd web-app
-npm start
+yarn start
+
+# Backend Functions
+cd functions
+firebase deploy --only functions
 ```
 
----
+## 🧪 Testes
 
-## 🔌 **WebSocket Backend**
-
-### **Status:** ✅ **OTIMIZADO**
-- ✅ Sistema de monitoramento inteligente
-- ✅ Sincronização Redis/Firebase
-- ✅ Alertas automáticos
-
-### **Executar:**
+### **Executar Testes de Pagamento**
 ```bash
-cd leaf-websocket-backend
-npm start
+# Teste de pagamento PIX
+node scripts/testing/test-pix-payment-flow.cjs
+
+# Teste de tarifa mínima
+node scripts/testing/test-minimum-fare.cjs
+
+# Teste de ajuste automático
+node scripts/testing/test-auto-adjustment-simple.cjs
 ```
 
----
-
-## 📊 **Dashboard**
-
-### **Status:** ✅ **FUNCIONANDO**
-- ✅ Métricas em tempo real
-- ✅ Interface administrativa
-- ✅ Monitoramento de sistema
-
-### **Executar:**
+### **Executar Testes de Integração**
 ```bash
-cd leaf-dashboard
-npm start
+# Teste de webhook
+node scripts/testing/test-webhook-simple.cjs
+
+# Teste de integração Woovi
+node scripts/testing/test-woovi-integration.cjs
 ```
 
----
+## 📊 Métricas de Performance
 
-## 🧪 **Testes**
+- **WebSocket:** 10.000+ conexões simultâneas
+- **Redis:** 100.000+ ops/segundo
+- **Firebase:** 1.000+ invocações/segundo
+- **Mobile:** 5.000+ usuários simultâneos
 
-### **Estrutura Organizada:**
-```
-tests/
-├── 🔗 integration/     # Testes de integração
-├── ⚡ performance/     # Testes de performance
-├── 🧩 unit/           # Testes unitários
-├── 🌐 websocket/      # Testes WebSocket
-├── 🔧 setup/          # Testes de setup
-├── 🗄️ redis/          # Testes Redis
-├── 📱 mobile/         # Testes mobile
-├── 📊 load/           # Testes de carga
-├── 🔥 firebase/       # Testes Firebase
-├── 🔐 auth/           # Testes de autenticação
-└── 📜 scripts/        # Scripts de teste
-```
+## 📚 Documentação
 
-### **Executar Testes:**
+### **📋 Principais Documentos**
+- [Checklist de Implementação](./documentation/project/MOBILE_APP_IMPLEMENTATION_CHECKLIST.html) - Checklist interativo
+- [Fluxo de Pagamento](./documentation/project/PAYMENT_FLOW_DIAGRAM.md) - Diagrama completo
+- [Configuração Tarifa Mínima](./documentation/project/MINIMUM_FARE_CONFIGURATION.md) - R$ 8,50
+- [Eventos Webhook](./documentation/project/WOOVI_WEBHOOK_EVENTS.md) - Woovi events
+
+### **🛠️ Scripts e Automação**
+- [Índice de Scripts](./scripts/testing/README.md) - Todos os scripts organizados
+- [Scripts de Deploy](./scripts/deploy/) - Automação de deploy
+- [Scripts de Serviços](./scripts/services/) - Gerenciamento de serviços
+
+### **📊 Relatórios**
+- [Relatório de Organização](./ORGANIZATION_FINAL_REPORT.md) - Organização final
+- [Status Reports](./documentation/project/status-reports/) - Status e configurações
+- [Logs](./documentation/project/logs/) - Logs por data
+
+## 🔧 Configuração
+
+### **Variáveis de Ambiente**
 ```bash
-# Todos os testes
-npm test
+# Firebase
+FIREBASE_PROJECT_ID=leaf-reactnative
+FIREBASE_DATABASE_URL=https://leaf-reactnative-default-rtdb.firebaseio.com
 
-# Por categoria
-npm run test:integration
-npm run test:unit
-npm run test:performance
+# Redis
+REDIS_URL=redis://localhost:6379
+REDIS_HOST=localhost
+REDIS_PORT=6379
+
+# Woovi (OpenPix)
+WOOVI_APP_ID=your_app_id
+WOOVI_API_KEY=your_api_key
 ```
 
-### **Documentação:** [📖 Guia de Testes](tests/README.md)
+### **API Keys Configuradas**
+- ✅ **Firebase** - Configurado e funcional
+- ✅ **Woovi** - Configurado e funcional
+- ✅ **Redis** - Configurado e funcional
 
----
+## 🚀 Deploy
 
-## 📚 **Documentação**
-
-### **Organizada por Categoria:**
-```
-documentation/
-├── 📋 project/        # Documentação do projeto
-├── 📖 guides/         # Guias de uso
-└── 📊 reports/        # Relatórios
-```
-
-### **Principais Documentos:**
-- 📋 [Análise do Projeto](documentation/project/MOBILE_APP_ANALYSIS.md)
-- 🔧 [Problemas Resolvidos](documentation/project/PROBLEMS_RESOLVED.md)
-- 🚀 [Guia de Deploy](documentation/project/DEPLOY-GUIDE.md)
-- ⚡ [Otimização Redis](documentation/project/REDIS_OPTIMIZATION_RESULTS.md)
-
-### **Documentação Completa:** [📚 Índice](documentation/README.md)
-
----
-
-## 🔧 **Scripts**
-
-### **Automação Organizada:**
-```
-scripts/
-├── 🚀 deploy/         # Scripts de deploy
-├── 🔧 maintenance/    # Scripts de manutenção
-├── 📊 monitoring/     # Scripts de monitoramento
-└── ⚙️ config/         # Arquivos de configuração
-```
-
-### **Principais Scripts:**
-- 🚀 `start-all-services.sh` - Iniciar todos os serviços
-- 🔧 `fix-js-duplicates.cjs` - Corrigir duplicatas
-- 📊 `test-server-simple.cjs` - Teste simples do servidor
-
-### **Guia Completo:** [📖 Índice de Scripts](scripts/README.md)
-
----
-
-## 🗄️ **Redis**
-
-### **Status:** ✅ **OTIMIZADO**
-- ✅ Configuração otimizada
-- ✅ Monitoramento inteligente
-- ✅ Backup automático
-
-### **Configuração:**
+### **Deploy Rápido**
 ```bash
-# Usar configuração otimizada
-cp redis-config/redis.conf /etc/redis/
+# Executar script de deploy
+./scripts/deploy/deploy-rapido.sh
 
-# Iniciar com Docker
-docker-compose up -d redis
+# Ou manualmente
+firebase deploy
 ```
 
----
-
-## 🚀 **Deploy**
-
-### **Produção:**
+### **Deploy Específico**
 ```bash
-# Deploy completo
-./scripts/deploy-production.sh
+# Apenas functions
+firebase deploy --only functions
 
-# Verificar status
-./scripts/check-production-status.sh
+# Apenas hosting
+firebase deploy --only hosting
+
+# Apenas database
+firebase deploy --only database
 ```
 
-### **Staging:**
-```bash
-# Deploy para staging
-npm run deploy:staging
-```
+## 📞 Suporte
+
+### **Troubleshooting**
+1. **Problemas de pagamento:** Execute `test-woovi-integration.cjs`
+2. **Webhook não funciona:** Execute `test-webhook-simple.cjs`
+3. **Tarifa mínima:** Execute `test-minimum-fare.cjs`
+4. **Mobile issues:** Verifique `MOBILE_APP_ANALYSIS.md`
+
+### **Logs e Monitoramento**
+- **Firebase Console:** https://console.firebase.google.com/project/leaf-reactnative
+- **Redis Monitor:** `redis-cli monitor`
+- **WebSocket Logs:** `tail -f leaf-websocket-backend/logs/app.log`
+
+## 🤝 Contribuição
+
+1. Fork o projeto
+2. Crie uma branch para sua feature (`git checkout -b feature/AmazingFeature`)
+3. Commit suas mudanças (`git commit -m 'Add some AmazingFeature'`)
+4. Push para a branch (`git push origin feature/AmazingFeature`)
+5. Abra um Pull Request
+
+## 📄 Licença
+
+Este projeto está sob a licença MIT. Veja o arquivo [LICENSE](LICENSE) para mais detalhes.
+
+## 🎯 Roadmap
+
+### **Próximas Funcionalidades**
+- [ ] Push notifications
+- [ ] Chat em tempo real
+- [ ] Analytics avançados
+- [ ] A/B testing
+- [ ] Dark mode
+- [ ] Offline mode melhorado
+
+### **Melhorias de Performance**
+- [ ] Lazy loading de componentes
+- [ ] Image optimization
+- [ ] Code splitting
+- [ ] Background sync
 
 ---
 
-## 📊 **Status do Projeto**
+**🌿 LEAF APP - Transformando a mobilidade urbana** 🚀
 
-### **✅ Componentes Funcionais:**
-- 📱 Mobile App (100% otimizado)
-- 🔌 WebSocket Backend (100% otimizado)
-- 🗄️ Redis (100% otimizado)
-- 📊 Dashboard (100% funcional)
-- 🌐 Web App (100% funcional)
+**Status:** ✅ **ORGANIZADO E PRONTO PARA PRÓXIMA FASE**
 
-### **🟡 Melhorias Contínuas:**
-- 📈 Performance
-- 🎨 UX/UI
-- 📚 Documentação
-- 🧪 Testes
-
----
-
-## 🔍 **Monitoramento**
-
-### **Métricas em Tempo Real:**
-- 📊 Performance do sistema
-- 🔌 Status das conexões
-- 🗄️ Uso do Redis
-- 📱 Status do mobile app
-
-### **Alertas Automáticos:**
-- ⚠️ Falhas de sincronização
-- 🔴 Problemas de conexão
-- 📈 Anomalias de performance
-
----
-
-## 🤝 **Contribuição**
-
-### **Como Contribuir:**
-1. **Fork** o projeto
-2. **Crie** uma branch para sua feature
-3. **Desenvolva** seguindo os padrões
-4. **Teste** suas mudanças
-5. **Submeta** um pull request
-
-### **Padrões:**
-- 📝 Código limpo e documentado
-- 🧪 Testes para novas features
-- 📚 Atualizar documentação
-- ✅ Seguir convenções do projeto
-
----
-
-## 📞 **Suporte**
-
-### **Canais de Ajuda:**
-- 📧 **Email:** suporte@leafapp.com
-- 💬 **Discord:** [Comunidade LEAF](https://discord.gg/leaf)
-- 📖 **Documentação:** [Guia Completo](documentation/README.md)
-- 🐛 **Issues:** [GitHub Issues](https://github.com/leaf/leaf/issues)
-
----
-
-## 📄 **Licença**
-
-Este projeto está licenciado sob a **MIT License** - veja o arquivo [LICENSE](LICENSE) para detalhes.
-
----
-
-## 🎉 **Agradecimentos**
-
-- 👥 **Equipe de Desenvolvimento**
-- 🧪 **Testadores**
-- 📚 **Documentadores**
-- 🌟 **Contribuidores da Comunidade**
-
----
-
-**🚀 LEAF - Transformando o transporte urbano com tecnologia inteligente!** 
+**Última atualização:** 28 de Julho de 2025 
