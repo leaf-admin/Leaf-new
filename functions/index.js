@@ -1478,6 +1478,7 @@ Object.keys(redisApis).forEach(apiName => {
 
 // ===== WOOVI PIX ROUTES =====
 const wooviRoutes = require('./providers/woovi');
+const wooviWebhook = require('./woovi-webhook');
 
 // Rota para criar cobrança PIX
 exports.woovi_create_charge = onRequest({
@@ -1504,7 +1505,7 @@ exports.woovi_webhook = onRequest({
     minInstances: 0,
     region: 'us-central1',
     invoker: 'public'
-}, wooviRoutes.processWebhook);
+}, wooviWebhook.wooviWebhook);
 
 // Rota para listar cobranças
 exports.woovi_list_charges = onRequest({
