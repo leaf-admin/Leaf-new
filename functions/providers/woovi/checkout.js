@@ -5,12 +5,13 @@ class WooviPixProvider {
     constructor() {
         this.baseURL = process.env.WOOVI_BASE_URL || 'https://api.openpix.com.br';
         this.appId = process.env.WOOVI_APP_ID;
+        this.apiKey = process.env.WOOVI_API_KEY;
     }
 
-    // Autenticação via AppID (conforme documentação oficial)
+    // Autenticação via Token de Autorização (conforme configuração real)
     getAuthHeaders() {
         return {
-            'AppId': this.appId,
+            'Authorization': `Bearer ${this.apiKey}`,
             'Content-Type': 'application/json'
         };
     }
@@ -98,7 +99,8 @@ class WooviPixProvider {
 
             return {
                 success: true,
-                data: response.data
+                data: response.data,
+                charges: response.data.charges || []
             };
 
         } catch (error) {
@@ -112,66 +114,62 @@ class WooviPixProvider {
 
     // Validar webhook (OpenPix usa AppID para validação)
     validateWebhook(signature, timestamp, body) {
-        // OpenPix usa AppID para autenticação, não assinatura HMAC
-        // A validação é feita automaticamente pelo Firebase Functions
-        return true;
+        try {
+            // OpenPix usa AppID para autenticação, não assinatura HMAC
+            // Para produção, implementar validação específica se necessário
+            return true;
+        } catch (error) {
+            console.error('Erro ao validar webhook:', error);
+            return false;
+        }
     }
 
     // Processar webhook
     processWebhook(webhookData) {
         try {
-            const { event, charge } = webhookData;
-
-            switch (event) {
-                case 'charge.confirmed':
-                    return {
-                        success: true,
-                        event: 'payment_confirmed',
-                        chargeId: charge.correlationID,
-                        value: charge.value,
-                        customerId: charge.identifier,
-                        timestamp: new Date().toISOString()
-                    };
-
-                case 'charge.expired':
-                    return {
-                        success: true,
-                        event: 'payment_expired',
-                        chargeId: charge.correlationID,
-                        customerId: charge.identifier,
-                        timestamp: new Date().toISOString()
-                    };
-
-                case 'charge.overdue':
-                    return {
-                        success: true,
-                        event: 'payment_overdue',
-                        chargeId: charge.correlationID,
-                        customerId: charge.identifier,
-                        timestamp: new Date().toISOString()
-                    };
-
-                default:
-                    return {
-                        success: false,
-                        error: 'Evento não reconhecido'
-                    };
+            const { event, data } = webhookData;
+            
+            if (event === 'charge.confirmed') {
+                return {
+                    success: true,
+                    status: 'confirmed',
+                    chargeId: data.correlationID,
+                    amount: data.value,
+                    paidAt: data.paidAt,
+                    provider: 'woovi'
+                };
             }
+
+            if (event === 'charge.expired') {
+                return {
+                    success: true,
+                    status: 'expired',
+                    chargeId: data.correlationID,
+                    provider: 'woovi'
+                };
+            }
+
+            return {
+                success: false,
+                error: 'Evento não reconhecido',
+                provider: 'woovi'
+            };
 
         } catch (error) {
             console.error('Erro ao processar webhook:', error);
             return {
                 success: false,
-                error: error.message
+                error: error.message,
+                provider: 'woovi'
             };
         }
     }
 
-    // Criar cobrança com QR Code personalizado
+    // Criar cobrança PIX customizada
     async createCustomPixCharge(chargeData) {
         try {
             const endpoint = '/api/v1/charge';
-            const body = JSON.stringify({
+            const body = {
                 correlationID: chargeData.correlationID || `leaf_${Date.now()}`,
                 value: chargeData.value,
                 comment: chargeData.comment || 'Pagamento LEAF App',
@@ -187,46 +185,35 @@ class WooviPixProvider {
                         value: chargeData.bookingId || ''
                     },
                     {
-                        key: 'driver_id',
-                        value: chargeData.driverId || ''
-                    },
-                    {
                         key: 'service_type',
                         value: 'ride_sharing'
                     },
                     {
                         key: 'app_version',
-                        value: '4.6.0'
+                        value: '1.0.0'
                     }
                 ]
-            });
+            };
 
             const response = await axios.post(`${this.baseURL}${endpoint}`, body, {
                 headers: this.getAuthHeaders()
             });
 
-            // Gerar QR Code personalizado
-            const qrCodeData = {
-                pixCode: response.data.pixQrCode,
-                pixCopyPaste: response.data.pixCopyPaste,
-                chargeId: response.data.correlationID,
-                value: chargeData.value,
-                expiresAt: new Date(Date.now() + (chargeData.expiresIn || 3600) * 1000),
-                customerName: chargeData.customerName,
-                bookingId: chargeData.bookingId
-            };
-
             return {
                 success: true,
                 data: response.data,
-                qrCode: qrCodeData
+                pixCode: response.data.pixQrCode,
+                pixCopyPaste: response.data.pixCopyPaste,
+                chargeId: response.data.correlationID,
+                provider: 'woovi'
             };
 
         } catch (error) {
-            console.error('Erro ao criar cobrança PIX personalizada:', error.response?.data || error.message);
+            console.error('Erro ao criar cobrança PIX customizada:', error.response?.data || error.message);
             return {
                 success: false,
-                error: error.response?.data?.message || error.message
+                error: error.response?.data?.message || error.message,
+                provider: 'woovi'
             };
         }
     }
