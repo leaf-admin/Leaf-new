@@ -5,14 +5,14 @@ import { getWebSocketUrl } from './ApiConfig';
 const WEBSOCKET_CONFIG = {
   // URLs agora vêm da configuração centralizada
   LOCAL: {
-    ANDROID_EMULATOR: 'ws://147.93.66.253:3001', // VPS como principal
-    IOS_SIMULATOR: 'ws://147.93.66.253:3001', // VPS como principal
+    ANDROID_EMULATOR: 'wss://216.238.107.59.nip.io', // Vultr como principal
+    IOS_SIMULATOR: 'wss://216.238.107.59.nip.io', // Vultr como principal
     DEVICE: getWebSocketUrl(), // Usa configuração centralizada (VPS)
   },
   
   // Para produção
   PRODUCTION: {
-    URL: 'ws://147.93.66.253:3001', // VPS como principal
+    URL: 'wss://216.238.107.59.nip.io', // Vultr como principal
   },
   
   // Configurações de conexão

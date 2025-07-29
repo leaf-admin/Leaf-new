@@ -41,3 +41,5 @@
 2025-07-29 03:15:50 [ERROR]: WebSocket health check falhou {"error":"socket hang up"}
 2025-07-29 03:20:50 [ERROR]: API health check falhou {"error":"fetch failed"}
 2025-07-29 03:21:20 [ERROR]: WebSocket health check falhou {"error":"socket hang up"}
+2025-07-29 03:26:20 [ERROR]: API health check falhou {"error":"fetch failed"}
+2025-07-29 03:26:50 [ERROR]: WebSocket health check falhou {"error":"socket hang up"}

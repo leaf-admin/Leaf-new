@@ -4,14 +4,14 @@ import { Platform } from 'react-native';
 // Configurações por ambiente
 const ENV = {
   development: {
-    // 🏠 SELF-HOSTED VPS (Hostinger) - PRINCIPAL
+    // 🏠 SELF-HOSTED VPS (Vultr) - PRINCIPAL
     selfHostedApi: {
-      web: 'http://147.93.66.253:3000',
-      mobile: 'http://147.93.66.253:3000'
+      web: 'https://216.238.107.59.nip.io',
+      mobile: 'https://216.238.107.59.nip.io'
     },
     selfHostedWebSocket: {
-      web: 'ws://147.93.66.253:3001',
-      mobile: 'ws://147.93.66.253:3001'
+      web: 'wss://216.238.107.59.nip.io',
+      mobile: 'wss://216.238.107.59.nip.io'
     },
     // 🔄 FALLBACK - Firebase Functions (se necessário)
     firebaseFunctions: {
@@ -25,14 +25,14 @@ const ENV = {
     }
   },
   production: {
-    // 🏠 SELF-HOSTED VPS (Hostinger) - PRODUÇÃO
+    // 🏠 SELF-HOSTED VPS (Vultr) - PRODUÇÃO
     selfHostedApi: {
-      web: 'http://147.93.66.253:3000',
-      mobile: 'http://147.93.66.253:3000'
+      web: 'https://216.238.107.59.nip.io',
+      mobile: 'https://216.238.107.59.nip.io'
     },
     selfHostedWebSocket: {
-      web: 'ws://147.93.66.253:3001',
-      mobile: 'ws://147.93.66.253:3001'
+      web: 'wss://216.238.107.59.nip.io',
+      mobile: 'wss://216.238.107.59.nip.io'
     },
     // 🔄 FALLBACK - Firebase Functions
     firebaseFunctions: {
