@@ -522,6 +522,18 @@ app.get('/api/drivers/:uid/location', async (req, res) => {
 const wooviWebhook = require('./routes/wooviWebhook');
 app.use('/api', wooviWebhook);
 
+// Importar rotas de autenticação
+const { router: authRoutes } = require('./routes/auth')
+
+// Importar rotas do dashboard
+const dashboardRoutes = require('./routes/dashboard')
+
+// Adicionar rotas de autenticação
+app.use('/auth', authRoutes)
+
+// Adicionar rotas do dashboard
+app.use('/dashboard', dashboardRoutes)
+
 // Criar servidor HTTP
 const server = http.createServer(app);
 
