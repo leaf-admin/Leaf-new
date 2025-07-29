@@ -10,6 +10,7 @@ import { fonts } from './font';
 import { useState } from 'react';
 import {Tooltip,Icon } from 'react-native-elements';
 import { getLangKey } from 'common/src/other/getLangKey';
+import { firebase } from '../firebase';
 
 export const MAIN_COLOR = colors.TAXIPRIMARY;
 export const SECONDORY_COLOR = colors.TAXISECONDORY;
@@ -354,3 +355,35 @@ export const FareCalculator = (distance, time, rateDetails, instructionData, dec
         tollFee: externalTollFee !== null ? parseFloat(externalTollFee.toFixed(decimal)) : 0
     }
 }
+
+export const addActualsToBooking = async (booking, uid) => {
+  const { auth, singleUserRef, singleBookingRef } = firebase;
+  const snapshot = await singleUserRef(uid).once('value');
+  let profile = snapshot.val();
+  const settingdata = await singleBookingRef('settings').once('value');
+  let settings = settingdata.val();
+  const langSnap = await singleBookingRef('languages').orderByChild('default').equalTo(true).once('value');
+  const language = Object.values(langSnap.val())[0].keyValuePairs;
+  const fleetCommission_fee = profile?.fleetadmin ? ((parseFloat(booking?.estimate) - parseFloat(booking?.convenience_fees)) * parseFloat(booking?.fleet_admin_comission) / 100).toFixed(2) : 0;
+  
+  // Nova estrutura de cobrança operacional baseada no valor da corrida
+  const rideValue = parseFloat(booking?.estimate);
+  let operationalFee = 0;
+  
+  if (rideValue < 10.00) {
+    operationalFee = 0.79; // Corridas < R$ 10,00
+  } else if (rideValue <= 20.00) {
+    operationalFee = 0.99; // Corridas R$ 10,00 - R$ 20,00
+  } else {
+    operationalFee = 1.49; // Corridas > R$ 20,00
+  }
+  
+  // Novo cálculo: Valor para o motorista = Tarifa total - Taxa operacional
+  // Pedágios serão pagos diretamente pelo motorista, não são descontados do valor
+  let driver_fee = parseFloat(parseFloat(booking?.estimate) - operationalFee).toFixed(2);
+  booking.fleetCommission = fleetCommission_fee ? fleetCommission_fee : "0";
+  booking.driver_share = driver_fee ? driver_fee : "0";
+  booking.operational_fee = operationalFee.toFixed(2); // Adicionar taxa operacional ao booking
+  
+  return booking;
+};
