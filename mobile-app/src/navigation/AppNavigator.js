@@ -69,6 +69,7 @@ import PhoneInputScreen from '../screens/PhoneInputScreen';
 import PersonalDataScreen from '../screens/PersonalDataScreen';
 import DriverTermsScreen from '../screens/DriverTermsScreen';
 import SplashScreen from '../screens/SplashScreen';
+import ToggleTestScreen from '../screens/ToggleTestScreen';
 var { height, width } = Dimensions.get('window');
 import { useSelector } from "react-redux";
 import i18n from '../i18n';
@@ -399,6 +400,7 @@ export default function AppContainer() {
                 <Stack.Screen name="About" component={AboutScreen} options={{ headerShown: false }} />
                 <Stack.Screen name="Feedback" component={FeedbackScreen} options={{ headerShown: false }} />
                 <Stack.Screen name="Legal" component={LegalScreen} options={{ headerShown: false }} />
+                <Stack.Screen name="ToggleTest" component={ToggleTestScreen} options={{ headerShown: false }} />
             </Stack.Navigator>
         </NavigationContainer>
     );

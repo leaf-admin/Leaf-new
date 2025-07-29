@@ -50,6 +50,7 @@ import splashImg from '../../assets/images/splash.png';
 import BottomMenu from '../components/BottomMenu';
 import PixPaymentBottomSheet from '../components/PixPaymentBottomSheet';
 import DriverSearchBottomSheet from '../components/DriverSearchBottomSheet';
+import ProfileToggle from '../components/ProfileToggle';
 
 const hasNotch = DeviceInfo.hasNotch();
 
@@ -2346,6 +2347,15 @@ const onMapSelectComplete = () => {
                     >
                         <Icon name="notifications" type="material" color={theme.icon} size={24} />
                     </TouchableOpacity>
+                    <ProfileToggle 
+                        userId="current_user"
+                        onModeChange={(newMode, profileData) => {
+                            console.log('Toggle mode changed to:', newMode);
+                            // Aqui podemos adicionar lógica adicional quando o modo muda
+                        }}
+                        style="discrete"
+                        size="small"
+                    />
                     <ThemeSwitch value={isDarkMode} onValueChange={setIsDarkMode} />
                 </View>
             </View>
@@ -2427,17 +2437,32 @@ const onMapSelectComplete = () => {
                     elevation: 5,
                 }}
                 onPress={() => {
-                    const testTripData = {
-                        id: Date.now(),
-                        value: 15.50,
-                        destination: 'Shopping Center',
-                        pickup: 'Rua das Flores, 123',
-                        drop: 'Av. Principal, 456'
-                    };
-                    startPixPayment(testTripData);
+                    // Teste PIX temporário
                 }}
             >
                 <Icon name="payment" type="material" color="#fff" size={24} />
+            </TouchableOpacity>
+
+            {/* Botão de teste do Toggle - TEMPORÁRIO */}
+            <TouchableOpacity
+                style={{
+                    position: 'absolute',
+                    bottom: 180,
+                    right: 20,
+                    backgroundColor: '#3498db',
+                    padding: 15,
+                    borderRadius: 25,
+                    shadowColor: '#000',
+                    shadowOffset: { width: 0, height: 2 },
+                    shadowOpacity: 0.25,
+                    shadowRadius: 3.84,
+                    elevation: 5,
+                }}
+                onPress={() => {
+                    props.navigation.navigate('ToggleTest');
+                }}
+            >
+                <Icon name="swap-horiz" type="material" color="#fff" size={24} />
             </TouchableOpacity>
 
             {showLoadingOverlay && (

@@ -35,7 +35,7 @@
     "exicube-cli": "1.9.0",
     "expo": "^52.0.46",
     "firebase-tools": "^13.0.1",
-    "fs-extra": "^10.0.0",
+    "fs-extra": "^10.1.0",
     "lru-cache": "^10.2.0",
     "node-fetch": "^2.7.0",
     "open": "^8.4.0",
