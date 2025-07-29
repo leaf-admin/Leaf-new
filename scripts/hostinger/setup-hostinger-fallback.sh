@@ -17,7 +17,7 @@ fi
 # Configurações
 APP_USER="leaf"
 APP_DIR="/home/$APP_USER"
-PRIMARY_IP="VULTR_IP"  # Será substituído pelo IP da Vultr
+PRIMARY_IP="216.238.107.59"  # Vultr como servidor principal
 
 echo "📦 Atualizando sistema..."
 apt update && apt upgrade -y
@@ -179,7 +179,7 @@ RATE_LIMIT_MAX=100
 
 # Fallback Configuration
 FALLBACK_MODE=true
-PRIMARY_SERVER=VULTR_IP
+PRIMARY_SERVER=216.238.107.59
 FAILOVER_ENABLED=true
 BACKUP_ONLY=true
 EOF
@@ -259,7 +259,7 @@ cat > /usr/local/bin/fallback-monitor.sh << 'EOF'
 # Monitoramento para servidor de fallback
 LOG_FILE="/var/log/leaf-app/fallback-monitor.log"
 ALERT_EMAIL="admin@leafapp.com"
-PRIMARY_IP="VULTR_IP"
+PRIMARY_IP="216.238.107.59"
 
 # Função de logging
 log_message() {
