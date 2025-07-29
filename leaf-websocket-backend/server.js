@@ -528,11 +528,17 @@ const { router: authRoutes } = require('./routes/auth')
 // Importar rotas do dashboard
 const dashboardRoutes = require('./routes/dashboard')
 
+// Importar rotas de usuário
+const userRoutes = require('./routes/user')
+
 // Adicionar rotas de autenticação
 app.use('/auth', authRoutes)
 
 // Adicionar rotas do dashboard
 app.use('/dashboard', dashboardRoutes)
+
+// Adicionar rotas de usuário
+app.use('/user', userRoutes)
 
 // Criar servidor HTTP
 const server = http.createServer(app);
