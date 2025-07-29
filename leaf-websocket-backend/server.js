@@ -3,6 +3,7 @@ const http = require('http');
 const { Server } = require('socket.io');
 const Redis = require('ioredis');
 const cors = require('cors');
+const helmet = require('helmet');
 require('dotenv').config();
 
 // Firebase integration
@@ -13,10 +14,19 @@ const LatencyMonitor = require('./metrics/latency-monitor');
 const DockerMonitor = require('./monitoring/docker-monitor');
 const SmartSyncAlertSystem = require('./monitoring/smart-sync-alert-system');
 
+// Importar logging e segurança
+const { logger, logWebSocket, logRedis, logSecurity, logPerformance } = require('./utils/logger');
+const wafMiddleware = require('./middleware/waf');
+const { applyRateLimit } = require('./middleware/rateLimiter');
+const HealthChecker = require('./utils/healthChecker');
+const RedisTunnel = require('./utils/redisTunnel');
+
 // Instanciar sistemas de monitoramento
 const latencyMonitor = new LatencyMonitor();
 const dockerMonitor = new DockerMonitor();
 const smartSyncAlertSystem = new SmartSyncAlertSystem();
+const healthChecker = new HealthChecker();
+const redisTunnel = new RedisTunnel();
 
 // Inicializar Firebase
 firebaseConfig.initializeFirebase();
@@ -27,11 +37,62 @@ const REDIS_URL = process.env.REDIS_URL || 'redis://localhost:6379';
 
 // Inicializar Express
 const app = express();
-app.use(cors());
-app.use(express.json());
+
+// Middleware de segurança
+app.use(helmet({
+  contentSecurityPolicy: {
+    directives: {
+      defaultSrc: ["'self'"],
+      styleSrc: ["'self'", "'unsafe-inline'"],
+      scriptSrc: ["'self'"],
+      imgSrc: ["'self'", "data:", "https:"],
+      connectSrc: ["'self'", "ws:", "wss:"]
+    }
+  },
+  hsts: {
+    maxAge: 31536000,
+    includeSubDomains: true,
+    preload: true
+  }
+}));
+
+app.use(cors({
+  origin: process.env.ALLOWED_ORIGINS?.split(',') || ['http://localhost:3000', 'http://localhost:8081'],
+  credentials: true
+}));
+
+app.use(express.json({ limit: '10mb' }));
+app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+
+// Middleware de logging
+app.use((req, res, next) => {
+  const start = Date.now();
+  
+  res.on('finish', () => {
+    const duration = Date.now() - start;
+    logPerformance('HTTP Request', duration, {
+      method: req.method,
+      url: req.url,
+      statusCode: res.statusCode,
+      ip: req.ip,
+      userAgent: req.headers['user-agent']?.substring(0, 100)
+    });
+  });
+  
+  next();
+});
+
+// Middleware de WAF e Rate Limiting
+app.use(wafMiddleware);
+app.use(applyRateLimit);
 
 // Rota de teste para verificar se o servidor está rodando
 app.get('/', (req, res) => {
+    logger.info('Health check realizado', {
+        ip: req.ip,
+        userAgent: req.headers['user-agent']
+    });
+    
     res.json({ 
         status: 'running', 
         message: 'Leaf WebSocket Backend está rodando!',
@@ -42,10 +103,150 @@ app.get('/', (req, res) => {
 
 // Rota de health check
 app.get('/health', (req, res) => {
+    logger.info('Health check detalhado realizado', {
+        ip: req.ip,
+        timestamp: new Date().toISOString()
+    });
+    
     res.json({ 
         status: 'healthy', 
         timestamp: new Date().toISOString() 
     });
+});
+
+// Rota de health check detalhado
+app.get('/health/detailed', async (req, res) => {
+    try {
+        const status = healthChecker.getStatus();
+        const summary = healthChecker.getSummary();
+        
+        res.json({
+            summary,
+            details: status,
+            timestamp: new Date().toISOString()
+        });
+    } catch (error) {
+        logger.error('Erro ao obter health check detalhado', {
+            error: error.message,
+            timestamp: new Date().toISOString()
+        });
+        
+        res.status(500).json({
+            error: 'Erro interno do servidor',
+            timestamp: new Date().toISOString()
+        });
+    }
+});
+
+// Rota para executar health checks manualmente
+app.post('/health/run', async (req, res) => {
+    try {
+        const result = await healthChecker.runAllChecks();
+        const status = healthChecker.getStatus();
+        const summary = healthChecker.getSummary();
+        
+        res.json({
+            success: result,
+            summary,
+            details: status,
+            timestamp: new Date().toISOString()
+        });
+    } catch (error) {
+        logger.error('Erro ao executar health checks', {
+            error: error.message,
+            timestamp: new Date().toISOString()
+        });
+        
+        res.status(500).json({
+            error: 'Erro interno do servidor',
+            timestamp: new Date().toISOString()
+        });
+    }
+});
+
+// Rotas para túnel Redis
+app.get('/tunnel/status', (req, res) => {
+    try {
+        const status = redisTunnel.getStatus();
+        res.json(status);
+    } catch (error) {
+        logger.error('Erro ao obter status do túnel', {
+            error: error.message,
+            timestamp: new Date().toISOString()
+        });
+        
+        res.status(500).json({
+            error: 'Erro interno do servidor',
+            timestamp: new Date().toISOString()
+        });
+    }
+});
+
+app.post('/tunnel/start', async (req, res) => {
+    try {
+        await redisTunnel.startNgrokTunnel();
+        
+        // Aguardar um pouco para o túnel ser criado
+        setTimeout(() => {
+            const status = redisTunnel.getStatus();
+            res.json({
+                success: true,
+                status,
+                message: 'Túnel Redis iniciado'
+            });
+        }, 3000);
+        
+    } catch (error) {
+        logger.error('Erro ao iniciar túnel Redis', {
+            error: error.message,
+            timestamp: new Date().toISOString()
+        });
+        
+        res.status(500).json({
+            error: 'Erro interno do servidor',
+            timestamp: new Date().toISOString()
+        });
+    }
+});
+
+app.post('/tunnel/stop', (req, res) => {
+    try {
+        redisTunnel.stopTunnel();
+        
+        res.json({
+            success: true,
+            message: 'Túnel Redis parado'
+        });
+        
+    } catch (error) {
+        logger.error('Erro ao parar túnel Redis', {
+            error: error.message,
+            timestamp: new Date().toISOString()
+        });
+        
+        res.status(500).json({
+            error: 'Erro interno do servidor',
+            timestamp: new Date().toISOString()
+        });
+    }
+});
+
+app.post('/tunnel/test', async (req, res) => {
+    try {
+        const result = await redisTunnel.testTunnel();
+        res.json(result);
+        
+    } catch (error) {
+        logger.error('Erro ao testar túnel Redis', {
+            error: error.message,
+            timestamp: new Date().toISOString()
+        });
+        
+        res.status(500).json({
+            error: 'Erro interno do servidor',
+            timestamp: new Date().toISOString()
+        });
+    }
 });
 
 // Rota de métricas e monitoramento
@@ -380,6 +581,38 @@ const redis = new Redis({
     family: 4
 });
 
+// Eventos do Redis com logging
+redis.on('connect', () => {
+    logRedis('info', 'Conectado ao Redis com sucesso', {
+        host: 'localhost',
+        port: 6379,
+        timestamp: new Date().toISOString()
+    });
+    console.log('✅ Conectado ao Redis');
+});
+
+redis.on('error', (err) => {
+    logRedis('error', 'Erro na conexão com Redis', {
+        error: err.message,
+        host: 'localhost',
+        port: 6379,
+        timestamp: new Date().toISOString()
+    });
+    console.error('❌ Erro na conexão com Redis:', err);
+});
+
+redis.on('ready', () => {
+    logRedis('info', 'Redis pronto para uso', {
+        timestamp: new Date().toISOString()
+    });
+});
+
+redis.on('close', () => {
+    logRedis('warn', 'Conexão com Redis fechada', {
+        timestamp: new Date().toISOString()
+    });
+});
+
 const GEO_KEY = 'drivers:geo';
 const STATUS_KEY = 'drivers:status';
 
@@ -402,6 +635,14 @@ function calculateDistance(lat1, lng1, lat2, lng2) {
 // Gerenciar conexões Socket.io
 io.on('connection', (socket) => {
     let userId = null;
+    
+    logWebSocket('info', 'Cliente conectado', {
+        socketId: socket.id,
+        ip: socket.handshake.address,
+        userAgent: socket.handshake.headers['user-agent'],
+        timestamp: new Date().toISOString()
+    });
+    
     console.log('🔌 Cliente conectado:', socket.id);
 
     // Autenticação
@@ -409,6 +650,14 @@ io.on('connection', (socket) => {
         userId = data.uid;
         socket.data.userId = userId;
         socket.emit('authenticated', { success: true, uid: userId });
+        
+        logWebSocket('info', 'Usuário autenticado', {
+            socketId: socket.id,
+            userId: userId,
+            ip: socket.handshake.address,
+            timestamp: new Date().toISOString()
+        });
+        
         console.log('🔐 Usuário autenticado:', userId);
     });
 
@@ -416,6 +665,14 @@ io.on('connection', (socket) => {
     socket.on('updateLocation', async (data) => {
         if (!userId) return;
         const { lat, lng } = data;
+        
+        logWebSocket('info', 'Atualização de localização iniciada', {
+            socketId: socket.id,
+            userId: userId,
+            lat: lat,
+            lng: lng,
+            timestamp: new Date().toISOString()
+        });
         
         // Monitorar latência da operação
         const operationId = latencyMonitor.startOperation('updateLocation', userId);
@@ -704,13 +961,30 @@ io.on('connection', (socket) => {
 
     // Desconexão
     socket.on('disconnect', () => {
+        logWebSocket('info', 'Cliente desconectado', {
+            socketId: socket.id,
+            userId: userId,
+            ip: socket.handshake.address,
+            timestamp: new Date().toISOString()
+        });
+        
         console.log('🔌 Cliente desconectado:', socket.id, userId);
     });
 });
 
 // Inicializar servidor
 server.listen(PORT, () => {
+    logger.info('Servidor WebSocket iniciado com sucesso', {
+        port: PORT,
+        timestamp: new Date().toISOString(),
+        environment: process.env.NODE_ENV || 'development'
+    });
+    
+    // Iniciar health checks periódicos
+    healthChecker.startPeriodicChecks();
+    
     console.log(`🚀 Servidor WebSocket rodando na porta ${PORT}`);
     console.log(`🔗 URL: http://localhost:${PORT}`);
     console.log('✅ Pronto para receber conexões!');
+    console.log('🏥 Health checks iniciados automaticamente');
 });

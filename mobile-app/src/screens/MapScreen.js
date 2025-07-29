@@ -48,6 +48,8 @@ import { GoogleMapApiConfig } from '../../config/GoogleMapApiConfig';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import splashImg from '../../assets/images/splash.png';
 import BottomMenu from '../components/BottomMenu';
+import PixPaymentBottomSheet from '../components/PixPaymentBottomSheet';
+import DriverSearchBottomSheet from '../components/DriverSearchBottomSheet';
 
 const hasNotch = DeviceInfo.hasNotch();
 
@@ -332,6 +334,12 @@ export default function MapScreen(props) {
     const [bookingModalStatus, setBookingModalStatus] = useState(false);
     const [bookLoading, setBookLoading] = useState(false);
     const [bookLaterLoading, setBookLaterLoading] = useState(false);
+    
+    // Estados dos Bottom Sheets
+    const [showPixPayment, setShowPixPayment] = useState(false);
+    const [showDriverSearch, setShowDriverSearch] = useState(false);
+    const [tripData, setTripData] = useState(null);
+    const [selectedDriver, setSelectedDriver] = useState(null);
     const [initDate, setInitDate] = useState(new Date());
 
     const instructionInitData = {
@@ -1624,6 +1632,33 @@ export default function MapScreen(props) {
         }
     }
 
+    // Funções de callback dos Bottom Sheets
+    const handlePaymentSuccess = (paymentData) => {
+        console.log('Pagamento PIX confirmado:', paymentData);
+        setShowPixPayment(false);
+        setShowDriverSearch(true);
+        // Aqui você pode adicionar lógica para iniciar a busca de motoristas
+    };
+
+    const handlePaymentFailed = (error) => {
+        console.error('Erro no pagamento PIX:', error);
+        setShowPixPayment(false);
+        Alert.alert('Erro', 'Falha no pagamento PIX. Tente novamente.');
+    };
+
+    const handleDriverSelected = (driver) => {
+        console.log('Motorista selecionado:', driver);
+        setSelectedDriver(driver);
+        setShowDriverSearch(false);
+        // Aqui você pode adicionar lógica para iniciar a viagem
+        Alert.alert('Sucesso', `Motorista ${driver.name} selecionado!`);
+    };
+
+    const startPixPayment = (tripInfo) => {
+        setTripData(tripInfo);
+        setShowPixPayment(true);
+    };
+
 
     const onPressBookLater = () => {
         setCheckType(false);
@@ -2376,6 +2411,35 @@ const onMapSelectComplete = () => {
                 {BookButton}
             </View>
 
+            {/* Botão de teste PIX - TEMPORÁRIO */}
+            <TouchableOpacity
+                style={{
+                    position: 'absolute',
+                    bottom: 120,
+                    right: 20,
+                    backgroundColor: '#2E8B57',
+                    padding: 15,
+                    borderRadius: 25,
+                    shadowColor: '#000',
+                    shadowOffset: { width: 0, height: 2 },
+                    shadowOpacity: 0.25,
+                    shadowRadius: 3.84,
+                    elevation: 5,
+                }}
+                onPress={() => {
+                    const testTripData = {
+                        id: Date.now(),
+                        value: 15.50,
+                        destination: 'Shopping Center',
+                        pickup: 'Rua das Flores, 123',
+                        drop: 'Av. Principal, 456'
+                    };
+                    startPixPayment(testTripData);
+                }}
+            >
+                <Icon name="payment" type="material" color="#fff" size={24} />
+            </TouchableOpacity>
+
             {showLoadingOverlay && (
                 <View style={{
                     position: 'absolute',
@@ -2391,6 +2455,23 @@ const onMapSelectComplete = () => {
             )}
             {/* Menu inferior moderno, só aparece quando o mapa está pronto e não há destino definido */}
             <BottomMenu visible={mapReady && mapLayout && (!tripdata.pickup || !tripdata.drop || !tripdata.drop.add)} />
+            
+            {/* Bottom Sheets */}
+            <PixPaymentBottomSheet
+                isVisible={showPixPayment}
+                tripData={tripData}
+                onClose={() => setShowPixPayment(false)}
+                onPaymentSuccess={handlePaymentSuccess}
+                onPaymentFailed={handlePaymentFailed}
+            />
+
+            <DriverSearchBottomSheet
+                isVisible={showDriverSearch}
+                onClose={() => setShowDriverSearch(false)}
+                onDriverSelected={handleDriverSelected}
+                userLocation={region}
+                destination={tripData?.destination}
+            />
         </View>
     );
 }

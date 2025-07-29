@@ -6,6 +6,11 @@ import PromoComp from './promoComponent';
 import WTransactionHistory from './WalletTransactionHistory';
 import OtpModal from './OtpModal';
 import DriverEarningRidelist from './DriverEarningRidelist';
+import BottomSheetWrapper from './BottomSheetWrapper';
+import PixPaymentBottomSheet from './PixPaymentBottomSheet';
+import DriverSearchBottomSheet from './DriverSearchBottomSheet';
+import DriverSearchCard from './DriverSearchCard';
+
 export {
     Background,
     Button,
@@ -14,5 +19,9 @@ export {
     PromoComp,
     WTransactionHistory,
     OtpModal,
-    DriverEarningRidelist
+    DriverEarningRidelist,
+    BottomSheetWrapper,
+    PixPaymentBottomSheet,
+    DriverSearchBottomSheet,
+    DriverSearchCard
 };

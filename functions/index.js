@@ -24,6 +24,9 @@ const app = express();
 // Redis APIs
 const redisApis = require('./redis-api');
 
+// BaaS System
+const baasSystem = require('./woovi-baas');
+
 admin.initializeApp();
 
 const databaseURL = admin.app().options.databaseURL;
@@ -1524,3 +1527,11 @@ exports.woovi_test_connection = onRequest({
     region: 'us-central1',
     invoker: 'public'
 }, wooviRoutes.testConnection);
+
+// ===== BaaS SYSTEM EXPORTS =====
+// Exportar todas as funções BaaS
+Object.keys(baasSystem).forEach(functionName => {
+    if (functionName !== 'LEAF_BAAS_CONFIG' && functionName !== 'WOOVI_CONFIG') {
+        exports[`baas_${functionName}`] = baasSystem[functionName];
+    }
+});

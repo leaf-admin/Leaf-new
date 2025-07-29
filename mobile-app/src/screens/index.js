@@ -31,6 +31,15 @@ import AddVehicleScreen from './AddVehicleScreen';
 import EarningsReportScreen from './EarningsReportScreen';
 import OTPScreen from './OTPScreen';
 
+// Novas telas implementadas
+import SupportScreen from './SupportScreen';
+import NotificationCenterScreen from './NotificationCenterScreen';
+import HelpScreen from './HelpScreen';
+import PrivacyPolicyScreen from './PrivacyPolicyScreen';
+import AboutScreen from './AboutScreen';
+import FeedbackScreen from './FeedbackScreen';
+import LegalScreen from './LegalScreen';
+
 export {
     RegistrationPage,
     AuthLoadingScreen,
@@ -63,5 +72,13 @@ export {
     MyVehiclesScreen,
     AddVehicleScreen,
     EarningsReportScreen,
-    OTPScreen
+    OTPScreen,
+    // Novas telas exportadas
+    SupportScreen,
+    NotificationCenterScreen,
+    HelpScreen,
+    PrivacyPolicyScreen,
+    AboutScreen,
+    FeedbackScreen,
+    LegalScreen
 };

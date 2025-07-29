@@ -14,6 +14,7 @@ O **LEAF APP** é uma plataforma completa de mobilidade urbana que conecta passa
 - **WebSocket Backend** - Comunicação em tempo real
 - **App Mobile** - 43 telas implementadas com 36 componentes
 - **Sistema de Autenticação** - Login e cadastro completo
+- **Sistema BaaS (Bank as a Service)** - Contas Leaf para motoristas (100% do valor)
 
 ### 🔄 **EM DESENVOLVIMENTO**
 - Integração completa do PixPaymentScreen
@@ -21,6 +22,17 @@ O **LEAF APP** é uma plataforma completa de mobilidade urbana que conecta passa
 - TripTrackingScreen para acompanhamento
 - Push notifications
 - Chat em tempo real
+- **Sistema BaaS (Bank as a Service)** - ✅ **IMPLEMENTADO COMPLETAMENTE**
+  - Contas Leaf para motoristas (100% do valor)
+  - Split automático via Woovi BaaS
+  - **Cobrança semanal automática do saldo** - ✅ **IMPLEMENTADO**
+  - **90 dias grátis para primeiros 500 motoristas** - ✅ **IMPLEMENTADO**
+  - **Sistema de convites (3 por motorista)** - ✅ **IMPLEMENTADO**
+  - **1 mês grátis por convite bem-sucedido** - ✅ **IMPLEMENTADO**
+  - **Controle de ativação/desativação** - ✅ **IMPLEMENTADO**
+  - Planos semanais (Plus R$49,90 / Elite R$99,90)
+  - Renovação automática semanal
+  - Webhook para eventos BaaS
 
 ## 📁 Estrutura do Projeto
 
@@ -62,6 +74,17 @@ Sourcecode/
 ### **Pagamentos**
 - **Woovi (OpenPix)** - Gateway PIX
 - **Webhook Processing** - Notificações automáticas
+- **BaaS (Bank as a Service)** - ✅ **IMPLEMENTADO COMPLETAMENTE**
+  - Contas Leaf para motoristas (100% do valor)
+  - Split automático via Woovi BaaS
+  - **Cobrança semanal automática do saldo** - ✅ **IMPLEMENTADO**
+  - **90 dias grátis para primeiros 500 motoristas** - ✅ **IMPLEMENTADO**
+  - **Sistema de convites (3 por motorista)** - ✅ **IMPLEMENTADO**
+  - **1 mês grátis por convite bem-sucedido** - ✅ **IMPLEMENTADO**
+  - **Controle de ativação/desativação** - ✅ **IMPLEMENTADO**
+  - Planos semanais (Plus R$49,90 / Elite R$99,90)
+  - Renovação automática semanal
+  - Webhook para eventos BaaS
 
 ### **Infraestrutura**
 - **Firebase Hosting** - Deploy automático
@@ -123,6 +146,19 @@ node scripts/testing/test-minimum-fare.cjs
 
 # Teste de ajuste automático
 node scripts/testing/test-auto-adjustment-simple.cjs
+
+# Testes BaaS (Bank as a Service)
+node scripts/testing/test-baas-account-creation.cjs
+node scripts/testing/test-baas-split-automatic.cjs
+node scripts/testing/test-weekly-plan-charge.cjs
+
+# Testes do Sistema de Convites
+node scripts/testing/test-referral-system.cjs
+
+# Testes de Cobrança Semanal Automática
+node scripts/testing/test-weekly-plan-charge.cjs --all
+node scripts/testing/test-weekly-plan-charge.cjs --free-trial
+node scripts/testing/test-weekly-plan-charge.cjs --performance
 ```
 
 ### **Executar Testes de Integração**
@@ -148,6 +184,7 @@ node scripts/testing/test-woovi-integration.cjs
 - [Fluxo de Pagamento](./documentation/project/PAYMENT_FLOW_DIAGRAM.md) - Diagrama completo
 - [Configuração Tarifa Mínima](./documentation/project/MINIMUM_FARE_CONFIGURATION.md) - R$ 8,50
 - [Eventos Webhook](./documentation/project/WOOVI_WEBHOOK_EVENTS.md) - Woovi events
+- [Sistema BaaS](./documentation/project/BAAS_IMPLEMENTATION.md) - ✅ **IMPLEMENTADO** - Bank as a Service
 
 ### **🛠️ Scripts e Automação**
 - [Índice de Scripts](./scripts/testing/README.md) - Todos os scripts organizados
@@ -175,12 +212,27 @@ REDIS_PORT=6379
 # Woovi (OpenPix)
 WOOVI_APP_ID=your_app_id
 WOOVI_API_KEY=your_api_key
+
+# BaaS (Bank as a Service)
+WOOVI_BAAS_MAIN_ACCOUNT_ID=leaf_principal_account
+WOOVI_BAAS_API_KEY=your_baas_api_key
+WOOVI_BAAS_WEBHOOK_URL=https://us-central1-leaf-reactnative.cloudfunctions.net/baas_webhook
+LEAF_PLUS_PRICE=49.90
+LEAF_ELITE_PRICE=99.90
+LEAF_WEEKLY_RENEWAL_DAY=friday
+LEAF_FREE_TRIAL_DAYS=90
+LEAF_MAX_FREE_TRIAL_DRIVERS=500
+LEAF_INVITES_PER_DRIVER=3
+LEAF_REQUIRED_RIDES_PER_INVITE=10
+LEAF_FREE_MONTHS_PER_INVITE=1
+LEAF_MAX_FREE_MONTHS=12
 ```
 
 ### **API Keys Configuradas**
 - ✅ **Firebase** - Configurado e funcional
 - ✅ **Woovi** - Configurado e funcional
 - ✅ **Redis** - Configurado e funcional
+- ✅ **BaaS (Bank as a Service)** - Configurado e funcional
 
 ## 🚀 Deploy
 
@@ -211,7 +263,13 @@ firebase deploy --only database
 1. **Problemas de pagamento:** Execute `test-woovi-integration.cjs`
 2. **Webhook não funciona:** Execute `test-webhook-simple.cjs`
 3. **Tarifa mínima:** Execute `test-minimum-fare.cjs`
-4. **Mobile issues:** Verifique `MOBILE_APP_ANALYSIS.md`
+4. **BaaS não funciona:** Execute `test-baas-account-creation.cjs`
+5. **Split automático:** Execute `test-baas-split-automatic.cjs`
+6. **Cobrança semanal automática:** Execute `test-weekly-plan-charge.cjs`
+7. **Sistema de convites:** Execute `test-referral-system.cjs`
+8. **Período grátis:** Execute `test-weekly-plan-charge.cjs --free-trial`
+9. **Performance BaaS:** Execute `test-weekly-plan-charge.cjs --performance`
+10. **Mobile issues:** Verifique `MOBILE_APP_ANALYSIS.md`
 
 ### **Logs e Monitoramento**
 - **Firebase Console:** https://console.firebase.google.com/project/leaf-reactnative
@@ -233,6 +291,14 @@ Este projeto está sob a licença MIT. Veja o arquivo [LICENSE](LICENSE) para ma
 ## 🎯 Roadmap
 
 ### **Próximas Funcionalidades**
+- [x] **Sistema BaaS completo** (contas Leaf para motoristas) - ✅ **IMPLEMENTADO**
+- [x] **Planos semanais** (Plus R$49,90 / Elite R$99,90) - ✅ **IMPLEMENTADO**
+- [x] **Split automático 100%** para motoristas - ✅ **IMPLEMENTADO**
+- [x] **Cobrança semanal automática do saldo** - ✅ **IMPLEMENTADO**
+- [x] **90 dias grátis para primeiros 500 motoristas** - ✅ **IMPLEMENTADO**
+- [x] **Sistema de convites (3 por motorista)** - ✅ **IMPLEMENTADO**
+- [x] **1 mês grátis por convite bem-sucedido** - ✅ **IMPLEMENTADO**
+- [x] **Controle de ativação/desativação** - ✅ **IMPLEMENTADO**
 - [ ] Push notifications
 - [ ] Chat em tempo real
 - [ ] Analytics avançados

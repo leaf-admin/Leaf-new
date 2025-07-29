@@ -5,14 +5,14 @@ import { getWebSocketUrl } from './ApiConfig';
 const WEBSOCKET_CONFIG = {
   // URLs agora vêm da configuração centralizada
   LOCAL: {
-    ANDROID_EMULATOR: 'http://10.0.2.2:3001', // Android Emulator
-    IOS_SIMULATOR: 'http://localhost:3001', // iOS Simulator
-    DEVICE: getWebSocketUrl(), // Usa configuração centralizada
+    ANDROID_EMULATOR: 'ws://147.93.66.253:3001', // VPS como principal
+    IOS_SIMULATOR: 'ws://147.93.66.253:3001', // VPS como principal
+    DEVICE: getWebSocketUrl(), // Usa configuração centralizada (VPS)
   },
   
   // Para produção
   PRODUCTION: {
-    URL: 'https://api.leafapp.com', // URL de produção
+    URL: 'ws://147.93.66.253:3001', // VPS como principal
   },
   
   // Configurações de conexão
@@ -42,18 +42,10 @@ const WEBSOCKET_CONFIG = {
 // Determinar URL baseada na plataforma e ambiente
 const getWebSocketURL = () => {
   if (__DEV__) {
-    // Desenvolvimento
-    if (Platform.OS === 'android') {
-      // Verificar se está rodando no emulador ou dispositivo físico
-      // Para dispositivo físico, você precisa alterar o IP abaixo
-      return WEBSOCKET_CONFIG.LOCAL.ANDROID_EMULATOR;
-    } else if (Platform.OS === 'ios') {
-      return WEBSOCKET_CONFIG.LOCAL.IOS_SIMULATOR;
-    }
-    // Fallback para dispositivo físico
+    // Desenvolvimento - sempre usar VPS
     return WEBSOCKET_CONFIG.LOCAL.DEVICE;
   } else {
-    // Produção
+    // Produção - usar VPS
     return WEBSOCKET_CONFIG.PRODUCTION.URL;
   }
 };
@@ -92,8 +84,7 @@ const getDriverSearchConfig = () => {
 // Função para obter IP da máquina local (para desenvolvimento)
 const getLocalIP = async () => {
   try {
-    // Esta função pode ser implementada para detectar automaticamente o IP
-    // Por enquanto, retorna o IP configurado
+    // Sempre retornar VPS como principal
     return WEBSOCKET_CONFIG.LOCAL.DEVICE;
   } catch (error) {
     console.error('Erro ao obter IP local:', error);
@@ -101,61 +92,61 @@ const getLocalIP = async () => {
   }
 };
 
-// Função para validar configurações
+// Validação de configuração
 const validateConfig = () => {
-  const url = getWebSocketURL();
-  const issues = [];
-
-  if (__DEV__) {
-    if (url.includes('192.168.1.100')) {
-      issues.push('⚠️ Altere o IP em WebSocketConfig.js para o IP da sua máquina');
-    }
+  const errors = [];
+  
+  if (!WEBSOCKET_CONFIG.LOCAL.DEVICE) {
+    errors.push('URL do WebSocket não configurada');
   }
-
-  if (url.includes('your-backend-domain.com')) {
-    issues.push('⚠️ Configure o domínio de produção em WebSocketConfig.js');
+  
+  if (WEBSOCKET_CONFIG.CONNECTION.TIMEOUT < 5000) {
+    errors.push('Timeout muito baixo para WebSocket');
   }
-
+  
+  if (WEBSOCKET_CONFIG.LOCATION.UPDATE_INTERVAL < 1000) {
+    errors.push('Intervalo de atualização de localização muito baixo');
+  }
+  
   return {
-    isValid: issues.length === 0,
-    issues,
-    url,
+    isValid: errors.length === 0,
+    errors
   };
 };
 
-export default {
-  getWebSocketURL,
-  getConnectionOptions,
-  getLocationConfig,
-  getDriverSearchConfig,
-  getLocalIP,
-  validateConfig,
-  config: WEBSOCKET_CONFIG,
+// Configuração de debug
+const DEBUG_CONFIG = {
+  logConnectionEvents: __DEV__,
+  logLocationUpdates: __DEV__,
+  logDriverSearch: __DEV__,
+  showNetworkErrors: __DEV__,
+  enableMockData: false
 };
 
-// Função para obter configuração baseada no ambiente
+// Configuração de monitoramento
+const MONITORING_CONFIG = {
+  enableHealthCheck: true,
+  healthCheckInterval: 30000, // 30 segundos
+  enableMetrics: true,
+  metricsInterval: 60000, // 1 minuto
+  enableAlerts: true
+};
+
+// Exportar configuração completa
 export const getWebSocketConfig = () => {
-    return __DEV__ ? getConnectionOptions() : getConnectionOptions();
+  return {
+    url: getWebSocketURL(),
+    connection: getConnectionOptions(),
+    location: getLocationConfig(),
+    driverSearch: getDriverSearchConfig(),
+    debug: DEBUG_CONFIG,
+    monitoring: MONITORING_CONFIG,
+    validation: validateConfig()
+  };
 };
 
-// Função para obter URL do WebSocket
-export const getWebSocketUrl = () => {
-    return getWebSocketURL();
-};
+// Exportar funções específicas
+export const getWebSocketUrl = () => getWebSocketURL();
 
-// Instruções para configurar o IP:
-/*
-1. No Windows, abra o CMD e digite: ipconfig
-2. Procure por "IPv4 Address" na sua rede Wi-Fi
-3. Copie o IP (exemplo: 192.168.1.100)
-4. Substitua no arquivo acima na linha: url: 'http://SEU_IP:3001'
-
-Exemplo:
-- Seu IP é 192.168.1.50
-- Mude para: url: 'http://192.168.1.50:3001'
-
-IMPORTANTE:
-- Use o IP da sua máquina, não localhost
-- O app no dispositivo físico não consegue acessar localhost do PC
-- Certifique-se que o backend está rodando na porta 3001
-*/ 
+// Configuração padrão
+export default getWebSocketConfig(); 

@@ -1,0 +1,4 @@
+2025-07-29 01:24:52 [ERROR]: WebSocket health check falhou {"error":"socket hang up"}
+2025-07-29 01:25:47 [ERROR]: Teste de erro {"test":"error"}
+2025-07-29 01:25:47 [ERROR]: API health check falhou {"error":"fetch failed"}
+2025-07-29 01:25:47 [ERROR]: WebSocket health check falhou {"error":"connect ECONNREFUSED 127.0.0.1:3001"}

@@ -4,7 +4,7 @@ import { Platform } from 'react-native';
 // Configurações por ambiente
 const ENV = {
   development: {
-    // 🏠 SELF-HOSTED VPS (Hostinger)
+    // 🏠 SELF-HOSTED VPS (Hostinger) - PRINCIPAL
     selfHostedApi: {
       web: 'http://147.93.66.253:3000',
       mobile: 'http://147.93.66.253:3000'
@@ -98,47 +98,39 @@ export const API_URLS = {
     updateDriverLocation: '/api/update_driver_location',
     getNearbyDrivers: '/api/nearby_drivers',
     getStats: '/api/stats',
-    health: '/api/health'
+    health: '/api/health',
+    startTripTracking: '/api/start_trip_tracking',
+    updateTripLocation: '/api/update_trip_location',
+    endTripTracking: '/api/end_trip_tracking',
+    getTripData: '/api/get_trip_data',
+    getRedisStats: '/api/get_redis_stats'
   },
   
-  // Endpoints específicos - FIREBASE (fallback)
+  // Endpoints específicos - Firebase Functions (FALLBACK)
   firebaseEndpoints: {
     updateUserLocation: '/update_user_location',
+    updateDriverLocation: '/update_driver_location',
     getNearbyDrivers: '/get_nearby_drivers',
+    getStats: '/get_redis_stats',
+    health: '/health',
     startTripTracking: '/start_trip_tracking',
     updateTripLocation: '/update_trip_location',
     endTripTracking: '/end_trip_tracking',
-    getTripData: '/get_trip_data',
-    getRedisStats: '/get_redis_stats',
-    firebaseSync: '/firebase_sync',
-    health: '/health'
+    getTripData: '/get_trip_data'
   }
 };
 
-// Configuração geral
-export const API_CONFIG = {
-  ...config,
-  timeout: 10000, // 10 segundos
-  retryAttempts: 3,
-  retryDelay: 1000, // 1 segundo
-  
-  // 🔄 Estratégia de fallback
-  useSelfHosted: true, // Usar VPS como principal
-  useFirebaseFallback: true, // Usar Firebase como fallback
-  maxRetries: 3
-};
-
-// Função para obter URL completa - SELF-HOSTED
+// Função para obter URL da API Self-Hosted
 export const getSelfHostedApiUrl = (endpoint) => {
   return `${API_URLS.selfHostedApi}${endpoint}`;
 };
 
-// Função para obter URL completa - FIREBASE (fallback)
+// Função para obter URL da API Firebase (fallback)
 export const getFirebaseApiUrl = (endpoint) => {
   return `${API_URLS.firebaseFunctions}${endpoint}`;
 };
 
-// Função para obter URL do WebSocket - SELF-HOSTED
+// Função para obter URL do WebSocket Self-Hosted
 export const getSelfHostedWebSocketUrl = () => {
   return API_URLS.selfHostedWebSocket;
 };
@@ -148,7 +140,7 @@ export const getDashboardUrl = () => {
   return API_URLS.dashboard;
 };
 
-// 🔄 Função inteligente para escolher API
+// Função principal para obter URL da API (usa Self-Hosted como principal)
 export const getApiUrl = (endpoint, useFallback = false) => {
   if (useFallback) {
     return getFirebaseApiUrl(API_URLS.firebaseEndpoints[endpoint] || endpoint);
@@ -156,21 +148,57 @@ export const getApiUrl = (endpoint, useFallback = false) => {
   return getSelfHostedApiUrl(API_URLS.selfHostedEndpoints[endpoint] || endpoint);
 };
 
-// 🔄 Função inteligente para escolher WebSocket
+// Função principal para obter URL do WebSocket (usa Self-Hosted como principal)
 export const getWebSocketUrl = (useFallback = false) => {
   if (useFallback) {
-    return API_URLS.firebaseFunctions; // Fallback para Firebase
+    // Para fallback, usar Firebase Functions com WebSocket
+    return API_URLS.firebaseFunctions;
   }
   return getSelfHostedWebSocketUrl();
 };
 
+// Configuração de ambiente
+export const ENVIRONMENT = {
+  isDevelopment: __DEV__,
+  isProduction: !__DEV__,
+  platform: Platform.OS,
+  environment: getEnvironment()
+};
+
+// Configuração de debug
+export const DEBUG_CONFIG = {
+  logApiCalls: __DEV__,
+  logWebSocketEvents: __DEV__,
+  showNetworkErrors: __DEV__,
+  enableMockData: false
+};
+
+// Configuração de timeout
+export const TIMEOUT_CONFIG = {
+  apiRequest: 30000, // 30 segundos
+  webSocketConnection: 20000, // 20 segundos
+  locationUpdate: 5000, // 5 segundos
+  driverSearch: 10000 // 10 segundos
+};
+
+// Configuração de retry
+export const RETRY_CONFIG = {
+  maxRetries: 3,
+  retryDelay: 1000, // 1 segundo
+  exponentialBackoff: true
+};
+
+// Exportar configuração completa
 export default {
   API_URLS,
-  API_CONFIG,
   getApiUrl,
+  getWebSocketUrl,
   getSelfHostedApiUrl,
   getFirebaseApiUrl,
-  getWebSocketUrl,
   getSelfHostedWebSocketUrl,
-  getDashboardUrl
+  getDashboardUrl,
+  ENVIRONMENT,
+  DEBUG_CONFIG,
+  TIMEOUT_CONFIG,
+  RETRY_CONFIG
 }; 

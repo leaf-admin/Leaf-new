@@ -1,0 +1,11 @@
+2025-07-29 01:24:21 [INFO]: Servidor WebSocket iniciado com sucesso {"port":3001,"environment":"development"}
+2025-07-29 01:24:21 [INFO]: Health checks periódicos iniciados {"interval":30000}
+2025-07-29 01:24:51 [INFO]: Performance: Redis Health Check {"duration":"31ms","operation":"Redis Health Check","status":"healthy"}
+2025-07-29 01:24:52 [ERROR]: WebSocket health check falhou {"error":"socket hang up"}
+2025-07-29 01:25:47 [INFO]: Teste de logging estruturado {"test":"logging"}
+2025-07-29 01:25:47 [WARN]: Teste de warning {"test":"warning"}
+2025-07-29 01:25:47 [ERROR]: Teste de erro {"test":"error"}
+2025-07-29 01:25:47 [ERROR]: API health check falhou {"error":"fetch failed"}
+2025-07-29 01:25:47 [ERROR]: WebSocket health check falhou {"error":"connect ECONNREFUSED 127.0.0.1:3001"}
+2025-07-29 01:25:47 [INFO]: Performance: Redis Health Check {"duration":"46ms","operation":"Redis Health Check","status":"healthy"}
+2025-07-29 01:25:47 [WARN]: Alguns health checks falharam {"results":[{"check":"redis","status":"fulfilled","value":true},{"check":"api","status":"fulfilled","value":false},{"check":"websocket","status":"fulfilled","value":false},{"check":"system","status":"fulfilled","value":true},{"check":"external","status":"fulfilled","value":true}]}
