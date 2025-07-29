@@ -36,6 +36,26 @@ import {
     EditProfileScreen,
     MyVehiclesScreen,
     AddVehicleScreen,
+    // Novas telas implementadas
+    SupportScreen,
+    NotificationCenterScreen,
+    HelpScreen,
+    PrivacyPolicyScreen,
+    AboutScreen,
+    FeedbackScreen,
+    LegalScreen,
+    // Telas críticas do fluxo principal
+    DriverSearchScreen,
+    TripTrackingScreen,
+    PaymentSuccessScreen,
+    PaymentFailedScreen,
+    CancellationScreen,
+    ChatScreen,
+    PlanSelectionScreen,
+    WeeklyPaymentScreen,
+    DriverDashboardScreen,
+    BaaSAccountScreen,
+    DriverBalanceScreen,
 } from '../screens';
 import EarningsReportScreen from '../screens/EarningsReportScreen';
 import DriverDocumentsScreen from '../screens/DriverDocumentsScreen';
@@ -355,6 +375,30 @@ export default function AppContainer() {
                 <Stack.Screen name="complain" component={Complain} options={{ title: t('complain'),...screenOptions }}/>
                 <Stack.Screen name="about" component={AboutPage} options={{ title: t('about'),...screenOptions }}/>
                 <Stack.Screen name="driverDocuments" component={DriverDocumentsScreen} options={{ title: t('driver_documents'),...screenOptions }}/>
+                
+                {/* Telas críticas do fluxo principal */}
+                <Stack.Screen name="DriverSearch" component={DriverSearchScreen} options={{ headerShown: false }} />
+                <Stack.Screen name="TripTracking" component={TripTrackingScreen} options={{ headerShown: false }} />
+                <Stack.Screen name="PaymentSuccess" component={PaymentSuccessScreen} options={{ headerShown: false }} />
+                <Stack.Screen name="PaymentFailed" component={PaymentFailedScreen} options={{ headerShown: false }} />
+                <Stack.Screen name="Cancellation" component={CancellationScreen} options={{ headerShown: false }} />
+                <Stack.Screen name="Chat" component={ChatScreen} options={{ headerShown: false }} />
+                
+                {/* Telas do sistema BaaS */}
+                <Stack.Screen name="PlanSelection" component={PlanSelectionScreen} options={{ headerShown: false }} />
+                <Stack.Screen name="WeeklyPayment" component={WeeklyPaymentScreen} options={{ headerShown: false }} />
+                <Stack.Screen name="DriverDashboard" component={DriverDashboardScreen} options={{ headerShown: false }} />
+                <Stack.Screen name="BaaSAccount" component={BaaSAccountScreen} options={{ headerShown: false }} />
+                <Stack.Screen name="DriverBalance" component={DriverBalanceScreen} options={{ title: t('driver_balance'), headerShown: true }} />
+                
+                {/* Telas de suporte e utilidades */}
+                <Stack.Screen name="Support" component={SupportScreen} options={{ headerShown: false }} />
+                <Stack.Screen name="NotificationCenter" component={NotificationCenterScreen} options={{ headerShown: false }} />
+                <Stack.Screen name="Help" component={HelpScreen} options={{ headerShown: false }} />
+                <Stack.Screen name="PrivacyPolicy" component={PrivacyPolicyScreen} options={{ headerShown: false }} />
+                <Stack.Screen name="About" component={AboutScreen} options={{ headerShown: false }} />
+                <Stack.Screen name="Feedback" component={FeedbackScreen} options={{ headerShown: false }} />
+                <Stack.Screen name="Legal" component={LegalScreen} options={{ headerShown: false }} />
             </Stack.Navigator>
         </NavigationContainer>
     );
