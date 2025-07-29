@@ -3,16 +3,16 @@ import { getWebSocketUrl } from './ApiConfig';
 
 // Configurações do WebSocket
 const WEBSOCKET_CONFIG = {
-  // URLs agora vêm da configuração centralizada
-  LOCAL: {
-    ANDROID_EMULATOR: 'wss://216.238.107.59.nip.io', // Vultr como principal
-    IOS_SIMULATOR: 'wss://216.238.107.59.nip.io', // Vultr como principal
-    DEVICE: getWebSocketUrl(), // Usa configuração centralizada (VPS)
+  // 🏠 SELF-HOSTED VPS (Vultr) - PRINCIPAL
+  PRODUCTION: {
+    URL: 'wss://socket.leaf.app.br', // Vultr como principal
   },
   
-  // Para produção
-  PRODUCTION: {
-    URL: 'wss://216.238.107.59.nip.io', // Vultr como principal
+  // 🏠 SELF-HOSTED VPS (Vultr) - LOCAL
+  LOCAL: {
+    ANDROID_EMULATOR: 'wss://socket.leaf.app.br', // Vultr como principal
+    IOS_SIMULATOR: 'wss://socket.leaf.app.br', // Vultr como principal
+    DEVICE: getWebSocketUrl(), // Usa configuração centralizada (VPS)
   },
   
   // Configurações de conexão

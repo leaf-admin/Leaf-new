@@ -6,12 +6,12 @@ const ENV = {
   development: {
     // 🏠 SELF-HOSTED VPS (Vultr) - PRINCIPAL
     selfHostedApi: {
-      web: 'https://216.238.107.59.nip.io',
-      mobile: 'https://216.238.107.59.nip.io'
+      web: 'https://api.leaf.app.br',
+      mobile: 'https://api.leaf.app.br'
     },
     selfHostedWebSocket: {
-      web: 'wss://216.238.107.59.nip.io',
-      mobile: 'wss://216.238.107.59.nip.io'
+      web: 'wss://socket.leaf.app.br',
+      mobile: 'wss://socket.leaf.app.br'
     },
     // 🔄 FALLBACK - Firebase Functions (se necessário)
     firebaseFunctions: {
@@ -27,12 +27,12 @@ const ENV = {
   production: {
     // 🏠 SELF-HOSTED VPS (Vultr) - PRODUÇÃO
     selfHostedApi: {
-      web: 'https://216.238.107.59.nip.io',
-      mobile: 'https://216.238.107.59.nip.io'
+      web: 'https://api.leaf.app.br',
+      mobile: 'https://api.leaf.app.br'
     },
     selfHostedWebSocket: {
-      web: 'wss://216.238.107.59.nip.io',
-      mobile: 'wss://216.238.107.59.nip.io'
+      web: 'wss://socket.leaf.app.br',
+      mobile: 'wss://socket.leaf.app.br'
     },
     // 🔄 FALLBACK - Firebase Functions
     firebaseFunctions: {
