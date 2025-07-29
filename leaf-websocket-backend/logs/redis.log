@@ -101,3 +101,7 @@
 2025-07-29 03:37:20 [WARN]: Alguns health checks falharam {"results":[{"check":"redis","status":"fulfilled","value":true},{"check":"api","status":"fulfilled","value":false},{"check":"websocket","status":"fulfilled","value":false},{"check":"system","status":"fulfilled","value":true},{"check":"external","status":"fulfilled","value":true}]}
 2025-07-29 03:37:49 [INFO]: Performance: Redis Health Check {"duration":"3ms","operation":"Redis Health Check","status":"healthy"}
 2025-07-29 03:37:50 [ERROR]: WebSocket health check falhou {"error":"socket hang up"}
+2025-07-29 03:42:50 [ERROR]: API health check falhou {"error":"fetch failed"}
+2025-07-29 03:42:50 [WARN]: Alguns health checks falharam {"results":[{"check":"redis","status":"fulfilled","value":true},{"check":"api","status":"fulfilled","value":false},{"check":"websocket","status":"fulfilled","value":false},{"check":"system","status":"fulfilled","value":true},{"check":"external","status":"fulfilled","value":true}]}
+2025-07-29 03:43:19 [INFO]: Performance: Redis Health Check {"duration":"2ms","operation":"Redis Health Check","status":"healthy"}
+2025-07-29 03:43:20 [ERROR]: WebSocket health check falhou {"error":"socket hang up"}
