@@ -1,332 +1,279 @@
 #!/bin/bash
 
-# Disaster Recovery Plan
-# Data: 29/07/2025
-# Status: ✅ DISASTER RECOVERY
+# 🚀 SCRIPT DE DISASTER RECOVERY
+# Data: 29 de Julho de 2025
+# Autor: Leaf App Team
+
+set -e
+
+echo "🛡️ CONFIGURANDO DISASTER RECOVERY..."
+
+# Verificar se está rodando como root
+if [ "$EUID" -ne 0 ]; then
+    echo "❌ Este script deve ser executado como root (sudo)"
+    exit 1
+fi
 
 # Configurações
 BACKUP_DIR="/home/leaf/backups"
-RESTORE_DIR="/home/leaf/restore"
-LOG_FILE="/var/log/disaster-recovery.log"
-CONTACT_EMAIL="admin@leafapp.com"
+DR_SCRIPT="/usr/local/bin/disaster-recovery.sh"
+PRIMARY_IP="147.93.66.253"
+BACKUP_IP="BACKUP_VPS_IP"
 
-# Cores para output
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-NC='\033[0m'
+# Criar diretórios de backup
+echo "📁 Criando diretórios de backup..."
+mkdir -p $BACKUP_DIR/{redis,app,config,logs}
+chown -R leaf:leaf $BACKUP_DIR
+
+# Criar script de disaster recovery
+echo "🔧 Criando script de disaster recovery..."
+cat > $DR_SCRIPT << 'EOF'
+#!/bin/bash
+
+# Disaster Recovery Script
+# Data: 29 de Julho de 2025
+
+set -e
+
+BACKUP_DIR="/home/leaf/backups"
+PRIMARY_IP="147.93.66.253"
+BACKUP_IP="BACKUP_VPS_IP"
 
 # Função de logging
 log_message() {
-    echo -e "${GREEN}[$(date '+%Y-%m-%d %H:%M:%S')] $1${NC}" | tee -a $LOG_FILE
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1"
 }
 
-log_error() {
-    echo -e "${RED}[$(date '+%Y-%m-%d %H:%M:%S')] ERROR: $1${NC}" | tee -a $LOG_FILE
-}
-
-log_warning() {
-    echo -e "${YELLOW}[$(date '+%Y-%m-%d %H:%M:%S')] WARNING: $1${NC}" | tee -a $LOG_FILE
-}
-
-# Função de notificação
-send_notification() {
-    local subject="$1"
-    local message="$2"
-    
-    # Email notification
-    if command -v mail &> /dev/null; then
-        echo "$message" | mail -s "$subject" $CONTACT_EMAIL
-    fi
-    
-    # Log notification
-    log_message "NOTIFICATION: $subject - $message"
-}
-
-# Verificar se script está rodando como root
-check_root() {
-    if [[ $EUID -ne 0 ]]; then
-        log_error "Este script deve ser executado como root"
-        exit 1
-    fi
-}
-
-# Backup completo do sistema
-create_full_backup() {
-    log_message "=== INICIANDO BACKUP COMPLETO DO SISTEMA ==="
-    
-    local timestamp=$(date '+%Y%m%d_%H%M%S')
-    local backup_name="full_backup_$timestamp"
-    local backup_path="$BACKUP_DIR/$backup_name"
-    
-    mkdir -p $backup_path
+# Função de backup completo
+full_backup() {
+    log_message "🔄 Iniciando backup completo..."
     
     # Backup do Redis
-    log_message "Backup do Redis..."
-    redis-cli SAVE
-    cp /var/lib/redis/dump.rdb "$backup_path/redis_dump.rdb"
+    log_message "📦 Backup do Redis..."
+    redis-cli BGSAVE
+    sleep 5
+    cp /var/lib/redis/dump.rdb $BACKUP_DIR/redis/redis-$(date +%Y%m%d-%H%M%S).rdb
+    
+    # Backup da aplicação
+    log_message "📦 Backup da aplicação..."
+    tar -czf $BACKUP_DIR/app/app-$(date +%Y%m%d-%H%M%S).tar.gz /home/leaf/leaf-websocket-backend/
     
     # Backup das configurações
-    log_message "Backup das configurações..."
-    cp -r /etc/nginx "$backup_path/nginx_config"
-    cp -r /etc/letsencrypt "$backup_path/ssl_certs"
-    cp -r /home/leaf/leaf-websocket-backend "$backup_path/app_code"
+    log_message "📦 Backup das configurações..."
+    tar -czf $BACKUP_DIR/config/config-$(date +%Y%m%d-%H%M%S).tar.gz /etc/nginx/ /etc/systemd/system/leaf-backup.service
     
     # Backup dos logs
-    log_message "Backup dos logs..."
-    cp -r /var/log "$backup_path/logs"
+    log_message "📦 Backup dos logs..."
+    tar -czf $BACKUP_DIR/logs/logs-$(date +%Y%m%d-%H%M%S).tar.gz /var/log/leaf-app/ /home/leaf/leaf-websocket-backend/logs/
     
-    # Backup das configurações do sistema
-    log_message "Backup das configurações do sistema..."
-    cp /etc/hosts "$backup_path/hosts"
-    cp /etc/resolv.conf "$backup_path/resolv.conf"
-    ufw status > "$backup_path/ufw_status.txt"
+    # Limpar backups antigos (manter últimos 7 dias)
+    find $BACKUP_DIR -name "*.rdb" -mtime +7 -delete
+    find $BACKUP_DIR -name "*.tar.gz" -mtime +7 -delete
     
-    # Comprimir backup
-    log_message "Comprimindo backup..."
-    tar -czf "$backup_path.tar.gz" -C $BACKUP_DIR $backup_name
-    rm -rf $backup_path
-    
-    log_message "Backup completo criado: $backup_path.tar.gz"
-    send_notification "Backup Completo" "Backup criado: $backup_path.tar.gz"
+    log_message "✅ Backup completo finalizado"
 }
 
-# Restaurar sistema do backup
-restore_from_backup() {
-    local backup_file="$1"
+# Função de verificação de integridade
+check_integrity() {
+    log_message "🔍 Verificando integridade dos backups..."
     
-    if [ ! -f "$backup_file" ]; then
-        log_error "Arquivo de backup não encontrado: $backup_file"
+    # Verificar se arquivos de backup existem
+    if [ ! -f "$BACKUP_DIR/redis/redis-$(date +%Y%m%d)*.rdb" ]; then
+        log_message "❌ Backup do Redis não encontrado"
+        return 1
+    fi
+    
+    if [ ! -f "$BACKUP_DIR/app/app-$(date +%Y%m%d)*.tar.gz" ]; then
+        log_message "❌ Backup da aplicação não encontrado"
+        return 1
+    fi
+    
+    # Verificar integridade dos arquivos
+    for file in $BACKUP_DIR/*/*.tar.gz; do
+        if [ -f "$file" ]; then
+            if ! tar -tzf "$file" > /dev/null 2>&1; then
+                log_message "❌ Arquivo corrompido: $file"
+                return 1
+            fi
+        fi
+    done
+    
+    log_message "✅ Integridade dos backups verificada"
+    return 0
+}
+
+# Função de restauração
+restore_from_backup() {
+    local backup_date=$1
+    
+    if [ -z "$backup_date" ]; then
+        log_message "❌ Data do backup não especificada"
+        echo "Uso: $0 restore YYYYMMDD-HHMMSS"
         exit 1
     fi
     
-    log_message "=== INICIANDO RESTAURAÇÃO DO SISTEMA ==="
-    
-    # Criar diretório de restauração
-    mkdir -p $RESTORE_DIR
-    cd $RESTORE_DIR
-    
-    # Extrair backup
-    log_message "Extraindo backup..."
-    tar -xzf "$backup_file"
+    log_message "🔄 Iniciando restauração do backup $backup_date..."
     
     # Parar serviços
-    log_message "Parando serviços..."
-    systemctl stop nginx
+    systemctl stop leaf-backup
     systemctl stop redis-server
     
     # Restaurar Redis
-    log_message "Restaurando Redis..."
-    cp redis_dump.rdb /var/lib/redis/dump.rdb
-    chown redis:redis /var/lib/redis/dump.rdb
-    
-    # Restaurar configurações do Nginx
-    log_message "Restaurando Nginx..."
-    cp -r nginx_config/* /etc/nginx/
-    
-    # Restaurar certificados SSL
-    log_message "Restaurando certificados SSL..."
-    cp -r ssl_certs/* /etc/letsencrypt/
-    
-    # Restaurar código da aplicação
-    log_message "Restaurando código da aplicação..."
-    cp -r app_code/* /home/leaf/leaf-websocket-backend/
-    
-    # Restaurar logs
-    log_message "Restaurando logs..."
-    cp -r logs/* /var/log/
-    
-    # Restaurar configurações do sistema
-    log_message "Restaurando configurações do sistema..."
-    cp hosts /etc/hosts
-    cp resolv.conf /etc/resolv.conf
-    
-    # Reiniciar serviços
-    log_message "Reiniciando serviços..."
-    systemctl start redis-server
-    systemctl start nginx
-    
-    # Verificar serviços
-    log_message "Verificando serviços..."
-    if systemctl is-active --quiet redis-server && systemctl is-active --quiet nginx; then
-        log_message "Restauração concluída com sucesso"
-        send_notification "Restauração Concluída" "Sistema restaurado do backup: $backup_file"
+    log_message "📦 Restaurando Redis..."
+    redis_backup="$BACKUP_DIR/redis/redis-$backup_date.rdb"
+    if [ -f "$redis_backup" ]; then
+        cp "$redis_backup" /var/lib/redis/dump.rdb
+        chown redis:redis /var/lib/redis/dump.rdb
     else
-        log_error "Falha na restauração dos serviços"
-        exit 1
-    fi
-}
-
-# Verificar integridade do sistema
-check_system_integrity() {
-    log_message "=== VERIFICANDO INTEGRIDADE DO SISTEMA ==="
-    
-    local issues=0
-    
-    # Verificar serviços críticos
-    log_message "Verificando serviços críticos..."
-    
-    if ! systemctl is-active --quiet redis-server; then
-        log_error "Redis não está rodando"
-        issues=$((issues + 1))
-    fi
-    
-    if ! systemctl is-active --quiet nginx; then
-        log_error "Nginx não está rodando"
-        issues=$((issues + 1))
-    fi
-    
-    # Verificar conectividade
-    log_message "Verificando conectividade..."
-    
-    if ! ping -c 1 8.8.8.8 > /dev/null 2>&1; then
-        log_error "Sem conectividade com internet"
-        issues=$((issues + 1))
-    fi
-    
-    # Verificar espaço em disco
-    log_message "Verificando espaço em disco..."
-    
-    local disk_usage=$(df / | awk 'NR==2 {print $5}' | cut -d'%' -f1)
-    if [ $disk_usage -gt 90 ]; then
-        log_warning "Uso de disco alto: ${disk_usage}%"
-        issues=$((issues + 1))
-    fi
-    
-    # Verificar memória
-    log_message "Verificando memória..."
-    
-    local mem_usage=$(free | awk 'NR==2{printf "%.0f", $3*100/$2}')
-    if [ $mem_usage -gt 90 ]; then
-        log_warning "Uso de memória alto: ${mem_usage}%"
-        issues=$((issues + 1))
-    fi
-    
-    # Verificar certificados SSL
-    log_message "Verificando certificados SSL..."
-    
-    if [ ! -f "/etc/letsencrypt/live/leafapp.com/fullchain.pem" ]; then
-        log_error "Certificado SSL não encontrado"
-        issues=$((issues + 1))
-    fi
-    
-    if [ $issues -eq 0 ]; then
-        log_message "✅ Sistema íntegro - nenhum problema encontrado"
-        return 0
-    else
-        log_warning "⚠️ $issues problema(s) encontrado(s)"
+        log_message "❌ Backup do Redis não encontrado: $redis_backup"
         return 1
     fi
-}
-
-# Procedimento de emergência
-emergency_procedure() {
-    log_message "=== PROCEDIMENTO DE EMERGÊNCIA ==="
     
-    # 1. Parar todos os serviços
-    log_message "1. Parando todos os serviços..."
-    systemctl stop nginx
-    systemctl stop redis-server
-    pkill -f "node.*server.js"
-    
-    # 2. Verificar hardware
-    log_message "2. Verificando hardware..."
-    dmesg | tail -20 > /tmp/hardware_check.log
-    
-    # 3. Verificar logs de erro
-    log_message "3. Verificando logs de erro..."
-    journalctl -p err --since "1 hour ago" > /tmp/error_logs.log
-    
-    # 4. Tentar reiniciar serviços
-    log_message "4. Tentando reiniciar serviços..."
-    systemctl start redis-server
-    systemctl start nginx
-    
-    # 5. Verificar se funcionou
-    if systemctl is-active --quiet redis-server && systemctl is-active --quiet nginx; then
-        log_message "✅ Serviços reiniciados com sucesso"
-        send_notification "Emergência Resolvida" "Serviços reiniciados automaticamente"
+    # Restaurar aplicação
+    log_message "📦 Restaurando aplicação..."
+    app_backup="$BACKUP_DIR/app/app-$backup_date.tar.gz"
+    if [ -f "$app_backup" ]; then
+        tar -xzf "$app_backup" -C /
     else
-        log_error "❌ Falha ao reiniciar serviços"
-        send_notification "EMERGÊNCIA CRÍTICA" "Serviços não conseguem ser reiniciados"
-    fi
-}
-
-# Plano de recuperação automática
-auto_recovery() {
-    log_message "=== RECUPERAÇÃO AUTOMÁTICA ==="
-    
-    # Verificar integridade
-    if check_system_integrity; then
-        log_message "Sistema está funcionando normalmente"
-        return 0
+        log_message "❌ Backup da aplicação não encontrado: $app_backup"
+        return 1
     fi
     
-    # Tentar recuperação automática
-    log_message "Tentando recuperação automática..."
+    # Restaurar configurações
+    log_message "📦 Restaurando configurações..."
+    config_backup="$BACKUP_DIR/config/config-$backup_date.tar.gz"
+    if [ -f "$config_backup" ]; then
+        tar -xzf "$config_backup" -C /
+    fi
     
     # Reiniciar serviços
-    systemctl restart redis-server
-    systemctl restart nginx
+    systemctl start redis-server
+    systemctl start leaf-backup
     
-    # Aguardar um pouco
-    sleep 10
+    log_message "✅ Restauração finalizada"
+}
+
+# Função de failover
+failover() {
+    log_message "🚨 Iniciando failover..."
     
-    # Verificar novamente
-    if check_system_integrity; then
-        log_message "✅ Recuperação automática bem-sucedida"
-        send_notification "Recuperação Automática" "Sistema recuperado automaticamente"
-        return 0
-    else
-        log_error "❌ Recuperação automática falhou"
-        send_notification "RECUPERAÇÃO FALHOU" "Intervenção manual necessária"
+    # Verificar se VPS principal está down
+    if ping -c 3 $PRIMARY_IP > /dev/null 2>&1; then
+        log_message "⚠️ VPS principal ainda está respondendo"
         return 1
+    fi
+    
+    log_message "🔴 VPS principal está down, ativando backup..."
+    
+    # Ativar modo backup
+    echo "BACKUP_MODE=true" >> /home/leaf/leaf-websocket-backend/config.env
+    
+    # Reiniciar aplicação
+    systemctl restart leaf-backup
+    
+    # Notificar administrador
+    echo "🚨 FAILOVER ATIVADO - VPS Principal Down" | mail -s "Leaf App - Failover Ativado" admin@leafapp.com
+    
+    log_message "✅ Failover ativado com sucesso"
+}
+
+# Função de monitoramento
+monitor_primary() {
+    log_message "👁️ Monitorando VPS principal..."
+    
+    if ! ping -c 1 $PRIMARY_IP > /dev/null 2>&1; then
+        log_message "🚨 VPS principal não responde!"
+        failover
+    else
+        log_message "✅ VPS principal funcionando normalmente"
     fi
 }
 
 # Função principal
 main() {
-    local action="$1"
-    local backup_file="$2"
-    
-    # Verificações
-    check_root
-    
-    case $action in
+    case "$1" in
         "backup")
-            create_full_backup
+            full_backup
+            check_integrity
             ;;
         "restore")
-            if [ -z "$backup_file" ]; then
-                log_error "Especifique o arquivo de backup para restauração"
-                echo "Uso: $0 restore <arquivo_backup>"
-                exit 1
-            fi
-            restore_from_backup "$backup_file"
+            restore_from_backup "$2"
             ;;
         "check")
-            check_system_integrity
+            check_integrity
             ;;
-        "emergency")
-            emergency_procedure
+        "failover")
+            failover
             ;;
-        "auto-recovery")
-            auto_recovery
+        "monitor")
+            monitor_primary
             ;;
         *)
-            echo "Uso: $0 {backup|restore|check|emergency|auto-recovery}"
-            echo ""
-            echo "Comandos:"
-            echo "  backup          - Criar backup completo do sistema"
-            echo "  restore <file>  - Restaurar sistema do backup"
-            echo "  check           - Verificar integridade do sistema"
-            echo "  emergency       - Procedimento de emergência"
-            echo "  auto-recovery   - Tentar recuperação automática"
+            echo "Uso: $0 {backup|restore|check|failover|monitor}"
+            echo "  backup   - Fazer backup completo"
+            echo "  restore  - Restaurar de backup (especificar data)"
+            echo "  check    - Verificar integridade dos backups"
+            echo "  failover - Ativar failover manualmente"
+            echo "  monitor  - Monitorar VPS principal"
             exit 1
             ;;
     esac
 }
 
 # Executar função principal
-main "$@" 
+main "$@"
+EOF
+
+chmod +x $DR_SCRIPT
+
+# Criar serviço de monitoramento
+echo "🔧 Criando serviço de monitoramento..."
+cat > /etc/systemd/system/dr-monitor.service << 'EOF'
+[Unit]
+Description=Disaster Recovery Monitor
+After=network.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/disaster-recovery.sh monitor
+User=root
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+# Criar timer para monitoramento
+cat > /etc/systemd/system/dr-monitor.timer << 'EOF'
+[Unit]
+Description=Run DR Monitor every 5 minutes
+Requires=dr-monitor.service
+
+[Timer]
+OnCalendar=*:0/5
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+EOF
+
+# Habilitar serviços
+systemctl daemon-reload
+systemctl enable dr-monitor.timer
+systemctl start dr-monitor.timer
+
+# Configurar backup automático
+echo "🔄 Configurando backup automático..."
+echo "0 2 * * * /usr/local/bin/disaster-recovery.sh backup" | crontab -
+
+# Testar backup
+echo "🧪 Testando backup..."
+$DR_SCRIPT backup
+
+echo "✅ DISASTER RECOVERY CONFIGURADO COM SUCESSO!"
+echo "📊 Monitoramento: systemctl status dr-monitor.timer"
+echo "🔄 Backup automático: 02:00 diariamente"
+echo "🔧 Comandos disponíveis:"
+echo "  - $DR_SCRIPT backup"
+echo "  - $DR_SCRIPT restore YYYYMMDD-HHMMSS"
+echo "  - $DR_SCRIPT check"
+echo "  - $DR_SCRIPT failover" 
