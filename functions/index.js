@@ -5,6 +5,8 @@ const { onSchedule } = require('firebase-functions/v2/scheduler');
 const admin = require('firebase-admin');
 const nodemailer = require('nodemailer');
 const rgf = require('regularusedfunctions');
+// const routeCacheService = require('./route-cache-service');
+// const priceRouteCacheService = require('./price-route-cache');
 const RequestPushMsg = require('./common').RequestPushMsg;
 const addToWallet = require('./common').addToWallet;
 const deductFromWallet = require('./common').deductFromWallet;
@@ -109,6 +111,68 @@ exports.googleapi = onRequest(async (request, response) => {
         const day = new Date().getFullYear() + '-' + new Date().getMonth() + '-' + new Date().getDate();
         db.ref('ipList').child(day).child(ip).set(admin.database.ServerValue.increment(1));
     }
+    
+    // Verificar se é um request de directions para aplicar cache
+    const requestBody = request.body;
+    if (requestBody && requestBody.calltype === 'direction') {
+        console.log('🗺️ Google API: Request de directions detectado, aplicando cache...');
+        
+        try {
+            // Verificar se é para estimativa de preço (com cache de 2 minutos)
+            const isPriceEstimate = requestBody.price_estimate === true;
+            const carType = requestBody.car_type || 'standard';
+            
+            if (isPriceEstimate) {
+                console.log('💰 Google API: Request de estimativa de preço detectado, aplicando cache de 2 minutos...');
+                
+                // Usar cache de preços para estimativas
+                const originalApiCall = async (startLoc, destLoc, waypoints) => {
+                    return await rgf.apiCallGoogle(request, settings, config);
+                };
+                
+                const cachedResult = await priceRouteCacheService.getDirectionsWithPriceCache(
+                    requestBody.start,
+                    requestBody.dest,
+                    requestBody.waypoints,
+                    carType,
+                    originalApiCall
+                );
+                
+                // Retornar dados com informações do cache
+                const responseData = {
+                    ...cachedResult.routeData,
+                    priceData: cachedResult.priceData,
+                    cacheInfo: {
+                        cacheHit: cachedResult.cacheHit,
+                        timeRemaining: cachedResult.timeRemaining,
+                        validUntil: new Date(Date.now() + cachedResult.timeRemaining).toISOString()
+                    }
+                };
+                
+                response.send(responseData);
+                return;
+            } else {
+                // Usar cache de rotas para outras requests de directions
+                const originalApiCall = async (startLoc, destLoc, waypoints) => {
+                    return await rgf.apiCallGoogle(request, settings, config);
+                };
+                
+                const cachedResult = await routeCacheService.getDirectionsWithCache(
+                    requestBody.start,
+                    requestBody.dest,
+                    requestBody.waypoints,
+                    originalApiCall
+                );
+                
+                response.send(cachedResult);
+                return;
+            }
+        } catch (error) {
+            console.error('❌ Erro no cache de rotas/preços, usando API original:', error);
+        }
+    }
+    
+    // Para outros tipos de requests, usar API original
     let json = await rgf.apiCallGoogle(request, settings, config);
     response.send(json);
 });
@@ -1469,6 +1533,48 @@ exports.create_custom_token = onRequest(async (request, response) => {
         return response.status(500).json({ 
             error: 'Erro ao criar token customizado',
             details: error.message
+        });
+    }
+});
+
+// Adicionar endpoint para estatísticas do cache
+exports.routeCacheStats = onRequest(async (request, response) => {
+    response.set('Access-Control-Allow-Origin', '*');
+    response.set('Access-Control-Allow-Headers', 'Content-Type');
+    
+    try {
+        const stats = await routeCacheService.getCacheStats();
+        response.json({
+            success: true,
+            stats: stats,
+            message: 'Estatísticas do cache de rotas obtidas com sucesso'
+        });
+    } catch (error) {
+        console.error('❌ Erro ao obter estatísticas do cache:', error);
+        response.status(500).json({
+            success: false,
+            error: 'Erro interno do servidor'
+        });
+    }
+});
+
+// Adicionar endpoint para estatísticas do cache de preços
+exports.priceCacheStats = onRequest(async (request, response) => {
+    response.set('Access-Control-Allow-Origin', '*');
+    response.set('Access-Control-Allow-Headers', 'Content-Type');
+    
+    try {
+        const stats = await priceRouteCacheService.getPriceCacheStats();
+        response.json({
+            success: true,
+            stats: stats,
+            message: 'Estatísticas do cache de preços obtidas com sucesso'
+        });
+    } catch (error) {
+        console.error('❌ Erro ao obter estatísticas do cache de preços:', error);
+        response.status(500).json({
+            success: false,
+            error: 'Erro interno do servidor'
         });
     }
 });

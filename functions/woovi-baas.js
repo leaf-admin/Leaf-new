@@ -1,4 +1,5 @@
 const admin = require('firebase-admin');
+const functions = require('firebase-functions');
 const axios = require('axios');
 
 // Configuração do BaaS
@@ -930,7 +931,7 @@ async function transferToLeafAccount(accountId, amount) {
 /**
  * Criar conta Leaf para motorista
  */
-exports.createLeafAccount = admin.https.onCall(async (data, context) => {
+exports.createLeafAccount = functions.https.onCall(async (data, context) => {
   try {
     const { driverData } = data;
     
@@ -985,12 +986,12 @@ exports.createLeafAccount = admin.https.onCall(async (data, context) => {
 /**
  * Processar split automático de pagamento
  */
-exports.processPaymentSplit = admin.https.onRequest(async (req, res) => {
+exports.processPaymentSplit = functions.https.onRequest(async (req, res) => {
   try {
     const { paymentData } = req.body;
     
     // Processar split automático
-    const splitResult = await processPaymentSplit(paymentData);
+    const splitResult = await processAutomaticSplit(paymentData);
     
     // Atualizar dados da corrida
     await admin.firestore().collection('trips').doc(paymentData.trip_id).update({
@@ -1034,7 +1035,7 @@ exports.processPaymentSplit = admin.https.onRequest(async (req, res) => {
 /**
  * Cobrança semanal automática
  */
-exports.processWeeklyBilling = admin.https.onCall(async (data, context) => {
+exports.processWeeklyBilling = functions.https.onCall(async (data, context) => {
   try {
     const { billingData } = data;
     
@@ -1064,7 +1065,7 @@ exports.processWeeklyBilling = admin.https.onCall(async (data, context) => {
 /**
  * Cobrança semanal automática (scheduled function)
  */
-exports.weeklyBillingScheduler = admin.pubsub.schedule('0 0 * * 5').onRun(async (context) => {
+exports.weeklyBillingScheduler = functions.pubsub.schedule('0 0 * * 5').onRun(async (context) => {
   try {
     console.log('Iniciando cobrança semanal automática');
     
@@ -1141,7 +1142,7 @@ exports.weeklyBillingScheduler = admin.pubsub.schedule('0 0 * * 5').onRun(async 
 /**
  * Criar convite para motorista
  */
-exports.createDriverInvite = admin.https.onCall(async (data, context) => {
+exports.createDriverInvite = functions.https.onCall(async (data, context) => {
   try {
     const { inviteData } = data;
     
@@ -1167,7 +1168,7 @@ exports.createDriverInvite = admin.https.onCall(async (data, context) => {
 /**
  * Processar convite de motorista
  */
-exports.processDriverInvite = admin.https.onCall(async (data, context) => {
+exports.processDriverInvite = functions.https.onCall(async (data, context) => {
   try {
     const { inviteData } = data;
     
@@ -1193,7 +1194,7 @@ exports.processDriverInvite = admin.https.onCall(async (data, context) => {
 /**
  * Ativar/desativar cobrança semanal
  */
-exports.toggleWeeklyBilling = admin.https.onCall(async (data, context) => {
+exports.toggleWeeklyBilling = functions.https.onCall(async (data, context) => {
   try {
     const { enabled } = data;
     
@@ -1227,7 +1228,7 @@ exports.toggleWeeklyBilling = admin.https.onCall(async (data, context) => {
 /**
  * Obter dados da conta Leaf
  */
-exports.getLeafAccountData = admin.https.onCall(async (data, context) => {
+exports.getLeafAccountData = functions.https.onCall(async (data, context) => {
   try {
     const { accountId } = data;
     
@@ -1254,7 +1255,7 @@ exports.getLeafAccountData = admin.https.onCall(async (data, context) => {
 /**
  * Webhook para eventos BaaS
  */
-exports.baasWebhook = admin.https.onRequest(async (req, res) => {
+exports.baasWebhook = functions.https.onRequest(async (req, res) => {
   try {
     const { event, data } = req.body;
     
@@ -1368,7 +1369,7 @@ async function handleAccountCreation(data) {
 /**
  * Verificar status online do motorista
  */
-exports.checkDriverOnlineStatus = admin.https.onCall(async (data, context) => {
+exports.checkDriverOnlineStatus = functions.https.onCall(async (data, context) => {
   try {
     const { driverId } = data;
     
@@ -1391,7 +1392,7 @@ exports.checkDriverOnlineStatus = admin.https.onCall(async (data, context) => {
 /**
  * Gerar QR Code para regularização de saldo
  */
-exports.generateBalanceQRCode = admin.https.onCall(async (data, context) => {
+exports.generateBalanceQRCode = functions.https.onCall(async (data, context) => {
   try {
     const { driverId, amount } = data;
     
@@ -1414,7 +1415,7 @@ exports.generateBalanceQRCode = admin.https.onCall(async (data, context) => {
 /**
  * Processar regularização de saldo via webhook
  */
-exports.processBalanceRegularization = admin.https.onCall(async (data, context) => {
+exports.processBalanceRegularization = functions.https.onCall(async (data, context) => {
   try {
     const { paymentData } = data;
     

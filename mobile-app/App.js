@@ -19,6 +19,7 @@ import * as SplashScreen from 'expo-splash-screen';
 import firebase from '@react-native-firebase/app';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import './src/i18n';
+import notificationService from './src/services/NotificationService';
 
 SplashScreen.preventAutoHideAsync();
 
@@ -47,6 +48,9 @@ export default function App() {
 
     // Carregar recursos
     _loadResourcesAsync();
+    
+    // Inicializar serviço de notificações
+    _initializeNotificationService();
   }, []);
 
   useEffect(() => {
@@ -74,6 +78,20 @@ export default function App() {
       console.error("App.js - Erro ao carregar recursos:", error);
       // Mesmo com erro, continuar
       setAssetsLoaded(true);
+    }
+  };
+
+  const _initializeNotificationService = async () => {
+    try {
+      console.log("App.js - Inicializando serviço de notificações...");
+      const success = await notificationService.initialize();
+      if (success) {
+        console.log("App.js - Serviço de notificações inicializado com sucesso");
+      } else {
+        console.log("App.js - Falha ao inicializar serviço de notificações");
+      }
+    } catch (error) {
+      console.error("App.js - Erro ao inicializar notificações:", error);
     }
   };
 

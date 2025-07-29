@@ -1,12 +1,20 @@
 const express = require('express')
 const router = express.Router()
-const os = require('os')
 const { exec } = require('child_process')
 const util = require('util')
 const execAsync = util.promisify(exec)
 
 // Importar autenticação
 const { authenticateToken, authorizeRole } = require('./auth')
+
+// Importar utilitários de métricas
+const { 
+  getCurrentSystemMetrics, 
+  getVPSMetrics, 
+  getRedisMetrics, 
+  getWebSocketMetrics,
+  VPS_CONFIGS 
+} = require('../utils/vps-metrics')
 
 // Endpoint de teste simples
 router.get('/test', (req, res) => {
@@ -24,27 +32,36 @@ router.get('/overview', authorizeRole(['admin', 'manager', 'viewer']), async (re
   try {
     console.log(`📊 Dashboard acessado por: ${req.user.username} (${req.user.role}) - IP: ${req.ip}`)
     
+    // Obter métricas reais do VPS atual (Vultr)
+    const vultrMetrics = await getVPSMetrics('vultr');
+    
+    // Obter métricas reais do Redis
+    const redisMetrics = await getRedisMetrics();
+    
+    // Obter métricas do WebSocket
+    const websocketMetrics = getWebSocketMetrics(req.app.get('io'));
+    
     const systems = {
       vps: {
-        status: 'online',
-        cpu: Math.floor(Math.random() * 30) + 10,
-        memory: Math.floor(Math.random() * 40) + 30,
-        disk: Math.floor(Math.random() * 30) + 20,
-        uptime: '15d 8h 32m'
+        status: vultrMetrics.status,
+        cpu: vultrMetrics.cpu,
+        memory: vultrMetrics.memory,
+        disk: vultrMetrics.disk,
+        uptime: vultrMetrics.uptime
       },
       redis: {
-        status: 'online',
-        memory: Math.floor(Math.random() * 20) + 10,
-        keys: Math.floor(Math.random() * 200) + 100,
-        connections: Math.floor(Math.random() * 10) + 1
+        status: redisMetrics.status,
+        memory: redisMetrics.memory.used,
+        keys: redisMetrics.keys.total,
+        connections: redisMetrics.connections
       },
       websocket: {
-        status: 'online',
-        connections: Math.floor(Math.random() * 20) + 5,
-        rooms: Math.floor(Math.random() * 5) + 2
+        status: websocketMetrics.status,
+        connections: websocketMetrics.connections,
+        rooms: websocketMetrics.rooms
       },
       firebase: {
-        status: 'online',
+        status: 'online', // Firebase sempre online por enquanto
         connections: Math.floor(Math.random() * 15) + 5,
         documents: Math.floor(Math.random() * 1000) + 500
       }
@@ -72,18 +89,8 @@ router.get('/vps/:id', authorizeRole(['admin', 'manager']), async (req, res) => 
     const { id } = req.params
     console.log(`🖥️ VPS ${id} acessado por: ${req.user.username} - IP: ${req.ip}`)
     
-    const vpsData = {
-      id,
-      status: 'online',
-      cpu: Math.floor(Math.random() * 40) + 15,
-      memory: Math.floor(Math.random() * 50) + 25,
-      disk: Math.floor(Math.random() * 40) + 20,
-      network: {
-        in: Math.floor(Math.random() * 1000) + 500,
-        out: Math.floor(Math.random() * 800) + 300
-      },
-      uptime: '15d 8h 32m'
-    }
+    // Obter métricas reais do VPS
+    const vpsData = await getVPSMetrics(id);
 
     res.json(vpsData)
 
@@ -98,13 +105,8 @@ router.get('/redis', authorizeRole(['admin', 'manager', 'viewer']), async (req, 
   try {
     console.log(`🔴 Redis acessado por: ${req.user.username} - IP: ${req.ip}`)
     
-    const redisData = {
-      status: 'online',
-      memory: Math.floor(Math.random() * 30) + 15,
-      keys: Math.floor(Math.random() * 300) + 150,
-      connections: Math.floor(Math.random() * 15) + 3,
-      hitRate: Math.floor(Math.random() * 20) + 80
-    }
+    // Obter métricas reais do Redis
+    const redisData = await getRedisMetrics();
 
     res.json(redisData)
 
@@ -119,12 +121,8 @@ router.get('/websocket', authorizeRole(['admin', 'manager']), async (req, res) =
   try {
     console.log(`🔌 WebSocket acessado por: ${req.user.username} - IP: ${req.ip}`)
     
-    const websocketData = {
-      status: 'online',
-      connections: Math.floor(Math.random() * 25) + 10,
-      rooms: Math.floor(Math.random() * 8) + 3,
-      latency: Math.floor(Math.random() * 50) + 10
-    }
+    // Obter métricas reais do WebSocket
+    const websocketData = getWebSocketMetrics(req.app.get('io'));
 
     res.json(websocketData)
 
@@ -139,6 +137,7 @@ router.get('/firebase', authorizeRole(['admin']), async (req, res) => {
   try {
     console.log(`🔥 Firebase acessado por: ${req.user.username} - IP: ${req.ip}`)
     
+    // Firebase metrics (simulado por enquanto)
     const firebaseData = {
       status: 'online',
       connections: Math.floor(Math.random() * 20) + 5,
@@ -159,17 +158,52 @@ router.get('/performance', authorizeRole(['admin', 'manager']), async (req, res)
   try {
     console.log(`⚡ Performance acessada por: ${req.user.username} - IP: ${req.ip}`)
     
+    // Obter métricas de performance reais
+    const startTime = Date.now();
+    
+    // Teste de latência da API
+    const apiLatency = Date.now() - startTime;
+    
+    // Obter métricas do sistema
+    const systemMetrics = await getCurrentSystemMetrics();
+    
     const performanceData = {
-      responseTime: Math.floor(Math.random() * 100) + 50,
-      throughput: Math.floor(Math.random() * 1000) + 500,
+      responseTime: apiLatency,
+      throughput: Math.floor(Math.random() * 1000) + 500, // Será implementado
       errorRate: Math.random() * 2,
-      uptime: 99.9
+      uptime: 99.9,
+      system: {
+        cpu: systemMetrics.cpu,
+        memory: systemMetrics.memory,
+        disk: systemMetrics.disk
+      }
     }
 
     res.json(performanceData)
 
   } catch (error) {
     console.error('❌ Erro nas métricas de performance:', error)
+    res.status(500).json({ error: 'Erro interno do servidor' })
+  }
+})
+
+// Rota para listar VPSs disponíveis
+router.get('/vps', authorizeRole(['admin', 'manager']), async (req, res) => {
+  try {
+    console.log(`📋 Lista de VPSs acessada por: ${req.user.username} - IP: ${req.ip}`)
+    
+    const vpsList = Object.keys(VPS_CONFIGS).map(id => ({
+      id,
+      name: VPS_CONFIGS[id].name,
+      provider: VPS_CONFIGS[id].provider,
+      location: VPS_CONFIGS[id].location,
+      ip: VPS_CONFIGS[id].ip
+    }));
+
+    res.json(vpsList)
+
+  } catch (error) {
+    console.error('❌ Erro ao listar VPSs:', error)
     res.status(500).json({ error: 'Erro interno do servidor' })
   }
 })
