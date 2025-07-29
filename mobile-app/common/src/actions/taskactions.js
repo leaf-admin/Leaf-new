@@ -53,73 +53,46 @@ export const acceptTask = (task) => (dispatch) => {
     let profile = snapshot.val();
 
     singleBookingRef(task.id).transaction((booking) => {
-      let fleetCommission_fee= profile?.fleetadmin ? ((parseFloat(booking?.estimate) - parseFloat(booking?.convenience_fees)) * parseFloat(booking?.fleet_admin_comission) / 100).toFixed(2):0;
-      // Novo cálculo: Valor para o motorista = Tarifa total - Custo operacional fixo (R$ 1,55)
+      let fleetCommission_fee = profile?.fleetadmin ? ((parseFloat(booking?.estimate) - parseFloat(booking?.convenience_fees)) * parseFloat(booking?.fleet_admin_comission) / 100).toFixed(2) : 0;
+      
+      // Nova estrutura de cobrança operacional baseada no valor da corrida
+      const rideValue = parseFloat(booking?.estimate);
+      let operationalFee = 0;
+      
+      if (rideValue < 10.00) {
+        operationalFee = 0.79; // Corridas < R$ 10,00
+      } else if (rideValue <= 20.00) {
+        operationalFee = 0.99; // Corridas R$ 10,00 - R$ 20,00
+      } else {
+        operationalFee = 1.49; // Corridas > R$ 20,00
+      }
+      
+      // Novo cálculo: Valor para o motorista = Tarifa total - Taxa operacional
       // Pedágios serão pagos diretamente pelo motorista, não são descontados do valor
-      let driver_fee = parseFloat(parseFloat(booking?.estimate) - 1.55).toFixed(2);
-        if (booking && booking.requestedDrivers) {
-          booking.driver = uid;
-          booking.driver_image = profile.profile_image ? profile.profile_image : "";
-          booking.car_image =  profile.car_image ? profile.car_image : "";
-          booking.driver_name = profile.firstName + " " + profile.lastName;
-          booking.driver_contact = profile.mobile;
-          booking.driver_token = profile.pushToken ? profile.pushToken : '';
-          booking.vehicle_number = profile.vehicleNumber ? profile.vehicleNumber : "";
-          booking.vehicleModel = profile.vehicleModel ? profile.vehicleModel : "";
-          booking.vehicleMake = profile.vehicleMake ? profile.vehicleMake : "";
-          booking.driverRating = profile.rating ? profile.rating : "0";
-          booking.fleetCommission= fleetCommission_fee? fleetCommission_fee : "0"
-          booking.fleetadmin = profile.fleetadmin ? profile.fleetadmin : "";
-          booking.status = "ACCEPTED";
-          booking.driver_share = driver_fee? driver_fee : "0";
-          booking.driverDeviceId = task.driverDeviceId? task.driverDeviceId: null;
-          booking.requestedDrivers = null;
-          booking.driverEstimates = null;
-          return booking;
-        }
-      }).then(() => {
-        singleBookingRef(task.id).get().then((snapshot) => {
-          if (!snapshot.exists()) {
-            return;
-          } else {
-            let requestedDrivers =
-              snapshot.val() && snapshot.val().requestedDrivers;
-            let driverId = snapshot.val() && snapshot.val().driver;
-
-            if (requestedDrivers == undefined && driverId === uid) {
-              updateProfile({ queue: driverQueue ? false : true })(dispatch);
-              RequestPushMsg(task.customer_token, {
-                title:
-                  store.getState().languagedata.defaultLanguage
-                    .notification_title,
-                msg:
-                 profile.firstName +
-                  store.getState().languagedata.defaultLanguage
-                    .accept_booking_request,
-                screen: "BookedCab",
-                params: { bookingId: task.id },
-              });
-
-              const driverLocation = store.getState().gpsdata.location;
-
-              trackingRef(task.id).push({
-                at: new Date().getTime(),
-                status: "ACCEPTED",
-                lat: driverLocation.lat,
-                lng: driverLocation.lng,
-              });
-
-              dispatch({
-                type: ACCEPT_TASK,
-                payload: { task: task },
-              });
-            }
-          }
-        })
-        .catch((error) => {
-          console.error(error);
-        });
-      });
+      let driver_fee = parseFloat(parseFloat(booking?.estimate) - operationalFee).toFixed(2);
+      
+      if (booking && booking.requestedDrivers) {
+        booking.driver = uid;
+        booking.driver_image = profile.profile_image ? profile.profile_image : "";
+        booking.car_image = profile.car_image ? profile.car_image : "";
+        booking.driver_name = profile.firstName + " " + profile.lastName;
+        booking.driver_contact = profile.mobile;
+        booking.driver_token = profile.pushToken ? profile.pushToken : '';
+        booking.vehicle_number = profile.vehicleNumber ? profile.vehicleNumber : "";
+        booking.vehicleModel = profile.vehicleModel ? profile.vehicleModel : "";
+        booking.vehicleMake = profile.vehicleMake ? profile.vehicleMake : "";
+        booking.driverRating = profile.rating ? profile.rating : "0";
+        booking.fleetCommission = fleetCommission_fee ? fleetCommission_fee : "0";
+        booking.fleetadmin = profile.fleetadmin ? profile.fleetadmin : "";
+        booking.status = "ACCEPTED";
+        booking.driver_share = driver_fee ? driver_fee : "0";
+        booking.operational_fee = operationalFee.toFixed(2); // Adicionar taxa operacional ao booking
+        booking.driverDeviceId = task.driverDeviceId ? task.driverDeviceId : null;
+        booking.requestedDrivers = null;
+        booking.driverEstimates = null;
+        return booking;
+      }
+    });
   });
 };
 
