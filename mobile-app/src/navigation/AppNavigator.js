@@ -5,6 +5,8 @@ import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import {
     Dimensions,
     Platform,
+    View,
+    ActivityIndicator,
 } from 'react-native';
 import DeviceInfo from 'react-native-device-info';
 import {
@@ -31,7 +33,6 @@ import {
     SettingsScreen,
     CarsScreen,
     CarEditScreen,
-    WelcomeScreen,
     CompleteRegistrationScreen,
     EditProfileScreen,
     MyVehiclesScreen,
@@ -318,8 +319,12 @@ export default function AppContainer() {
     });
 
     if (isLoading) {
-        console.log("AppNavigator - Renderizando WelcomeScreen (loading)");
-        return <WelcomeScreen />;
+        console.log("AppNavigator - Renderizando loading simples");
+        return (
+            <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#1A330E' }}>
+                <ActivityIndicator size="large" color="#FFFFFF" />
+            </View>
+        );
     }
 
     if (!authState.profile || !authState.profile.uid) {
