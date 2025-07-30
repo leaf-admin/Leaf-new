@@ -5,6 +5,8 @@ import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import {
     Dimensions,
     Platform,
+    View,
+    ActivityIndicator,
 } from 'react-native';
 import DeviceInfo from 'react-native-device-info';
 import {
@@ -31,7 +33,6 @@ import {
     SettingsScreen,
     CarsScreen,
     CarEditScreen,
-    WelcomeScreen,
     CompleteRegistrationScreen,
     EditProfileScreen,
     MyVehiclesScreen,
@@ -69,16 +70,17 @@ import PhoneInputScreen from '../screens/PhoneInputScreen';
 import PersonalDataScreen from '../screens/PersonalDataScreen';
 import DriverTermsScreen from '../screens/DriverTermsScreen';
 import SplashScreen from '../screens/SplashScreen';
+import ToggleTestScreen from '../screens/ToggleTestScreen';
 var { height, width } = Dimensions.get('window');
 import { useSelector } from "react-redux";
 import i18n from '../i18n';
 import * as Notifications from 'expo-notifications';
 import { Ionicons } from '@expo/vector-icons';
-import { colors } from '../common/theme';
+import { colors } from '../common-local/theme';
 import { Icon } from "react-native-elements";
-import { MAIN_COLOR } from '../common/sharedFunctions';
+import { MAIN_COLOR } from '../common-local/sharedFunctions';
 import { CommonActions } from '@react-navigation/native';
-import { fonts } from '../common/font';
+import { fonts } from '../common-local/font';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { validateUserProfile, clearAuthData } from '../utils/authUtils';
@@ -317,8 +319,12 @@ export default function AppContainer() {
     });
 
     if (isLoading) {
-        console.log("AppNavigator - Renderizando WelcomeScreen (loading)");
-        return <WelcomeScreen />;
+        console.log("AppNavigator - Renderizando loading simples");
+        return (
+            <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#1A330E' }}>
+                <ActivityIndicator size="large" color="#FFFFFF" />
+            </View>
+        );
     }
 
     if (!authState.profile || !authState.profile.uid) {
@@ -399,6 +405,7 @@ export default function AppContainer() {
                 <Stack.Screen name="About" component={AboutScreen} options={{ headerShown: false }} />
                 <Stack.Screen name="Feedback" component={FeedbackScreen} options={{ headerShown: false }} />
                 <Stack.Screen name="Legal" component={LegalScreen} options={{ headerShown: false }} />
+                <Stack.Screen name="ToggleTest" component={ToggleTestScreen} options={{ headerShown: false }} />
             </Stack.Navigator>
         </NavigationContainer>
     );
