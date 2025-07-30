@@ -10,7 +10,9 @@ import {
   Dimensions,
   Platform,
   Animated,
-  Image
+  Image,
+  KeyboardAvoidingView,
+  Keyboard
 } from 'react-native';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -35,6 +37,7 @@ export default function PhoneInputScreen() {
   const [name, setName] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [termsAccepted, setTermsAccepted] = useState(false);
+  const [isKeyboardVisible, setIsKeyboardVisible] = useState(false);
   
   const userType = route.params?.userType || 'passenger';
 
@@ -57,6 +60,19 @@ export default function PhoneInputScreen() {
         useNativeDriver: true,
       })
     ]).start();
+
+    // Listeners do teclado
+    const keyboardDidShowListener = Keyboard.addListener('keyboardDidShow', () => {
+      setIsKeyboardVisible(true);
+    });
+    const keyboardDidHideListener = Keyboard.addListener('keyboardDidHide', () => {
+      setIsKeyboardVisible(false);
+    });
+
+    return () => {
+      keyboardDidShowListener.remove();
+      keyboardDidHideListener.remove();
+    };
   }, []);
 
   // Função para formatar o telefone no padrão brasileiro
@@ -190,18 +206,23 @@ export default function PhoneInputScreen() {
   };
 
   return (
-    <View style={styles.container}>
+    <KeyboardAvoidingView 
+      style={styles.container}
+      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+    >
       {/* Background com cor estática */}
       <View style={styles.backgroundContainer} />
       
-      {/* Logo da Leaf no topo */}
-      <View style={styles.logoContainer}>
-        <Image 
-          source={require('../../assets/images/leaftransparentbg.png')}
-          style={styles.logo}
-          resizeMode="contain"
-        />
-      </View>
+      {/* Logo da Leaf no topo - só mostra quando teclado não está visível */}
+      {!isKeyboardVisible && (
+        <View style={styles.logoContainer}>
+          <Image 
+            source={require('../../assets/images/leaftransparentbg.png')}
+            style={styles.logo}
+            resizeMode="contain"
+          />
+        </View>
+      )}
 
       {/* BOTTOM SHEET ULTRA FLAT */}
       <Animated.View 
@@ -302,7 +323,7 @@ export default function PhoneInputScreen() {
           </TouchableOpacity>
         </View>
       </Animated.View>
-    </View>
+    </KeyboardAvoidingView>
   );
 }
 
