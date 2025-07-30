@@ -9,7 +9,8 @@ import {
   ActivityIndicator,
   Dimensions,
   Platform,
-  Animated
+  Animated,
+  Image
 } from 'react-native';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -215,20 +216,16 @@ export default function PhoneInputScreen() {
 
   return (
     <View style={styles.container}>
-      {/* Header - FORA DO BOTTOM SHEET */}
-      <View style={styles.header}>
-        {/* Círculo de progresso */}
-        <View style={styles.progressContainer}>
-          <View style={styles.progressCircle}>
-            <Text style={styles.progressText}>2</Text>
-          </View>
-        </View>
-        
-        {/* Contagem de progresso */}
-        <Text style={styles.progressCount}>Passo 2 de 4</Text>
-        
-        {/* Nome da tela */}
-        <Text style={styles.screenTitle}>Insira seu telefone</Text>
+      {/* Background com cor estática */}
+      <View style={styles.backgroundContainer} />
+      
+      {/* Logo da Leaf no topo */}
+      <View style={styles.logoContainer}>
+        <Image 
+          source={require('../../assets/images/leaftransparentbg.png')}
+          style={styles.logo}
+          resizeMode="contain"
+        />
       </View>
 
       {/* BOTTOM SHEET ULTRA FLAT */}
@@ -351,40 +348,40 @@ const styles = StyleSheet.create({
     backgroundColor: LEAF_GREEN,
   },
   
-  // Header - FORA DO BOTTOM SHEET
-  header: {
+  // Background com cor estática
+  backgroundContainer: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: '#1A330E', // Cor estática para o fundo
+    width: width,
+    height: height,
+  },
+  
+  // Logo da Leaf
+  logoContainer: {
+    position: 'absolute',
+    top: 60,
+    left: 0,
+    right: 0,
     alignItems: 'center',
-    paddingTop: 60,
-    paddingBottom: 20,
     zIndex: 1,
   },
-  progressContainer: {
-    marginBottom: 16,
-  },
-  progressCircle: {
-    width: 60,
-    height: 60,
-    borderRadius: 30,
-    backgroundColor: WHITE,
+  
+  // Header - IDÊNTICO AO DA TELA ANTERIOR
+  header: {
+    position: 'absolute',
+    top: 60,
+    left: 0,
+    right: 0,
     alignItems: 'center',
-    justifyContent: 'center',
+    zIndex: 1,
   },
-  progressText: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    color: LEAF_GREEN,
-  },
-  progressCount: {
-    fontSize: 16,
-    color: WHITE,
-    marginBottom: 8,
-    fontWeight: '500',
-  },
-  screenTitle: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    color: WHITE,
-    textAlign: 'center',
+  logo: {
+    width: 389,
+    height: 194,
   },
   
   // BOTTOM SHEET ULTRA FLAT
@@ -394,26 +391,33 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     height: height * 0.65,
-    backgroundColor: '#E8F5E8',
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
-    padding: 24,
+    backgroundColor: WHITE,
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    padding: 32,
+    paddingBottom: 40,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: -4 },
+    shadowOpacity: 0.1,
+    shadowRadius: 12,
+    elevation: 8,
   },
   
   // Handle do bottom sheet
   handle: {
     width: 40,
-    height: 4,
-    backgroundColor: '#C0C0C0',
-    borderRadius: 2,
+    height: 6,
+    backgroundColor: '#E5E7EB',
+    borderRadius: 3,
     alignSelf: 'center',
-    marginBottom: 24,
+    marginBottom: 20,
   },
   
   // Formulário
   formContainer: {
     flex: 1,
     marginBottom: 24,
+    paddingTop: 20,
   },
   
   // Campo de nome
