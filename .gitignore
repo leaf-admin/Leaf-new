@@ -40,4 +40,4 @@ leaf-reactnative-firebase-adminsdk-fbsvc-94a09a2472.json
 !tsconfig.json
 !babel.config.js
 !metro.config.js
-!eas.json
+!eas.json*.apk
