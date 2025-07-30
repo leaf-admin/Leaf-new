@@ -35,7 +35,6 @@ export default function PhoneInputScreen() {
   const [name, setName] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [termsAccepted, setTermsAccepted] = useState(false);
-  const [isDetectingPhone, setIsDetectingPhone] = useState(false);
   
   const userType = route.params?.userType || 'passenger';
 
@@ -78,30 +77,6 @@ export default function PhoneInputScreen() {
   const handlePhoneChange = (text) => {
     const formatted = formatPhoneNumber(text);
     setPhone(formatted);
-  };
-
-  // Função para detectar automaticamente o número do telefone
-  const detectPhoneNumber = async () => {
-    setIsDetectingPhone(true);
-    
-    try {
-      // Simular detecção de telefone (em produção, usar APIs nativas)
-      console.log("PhoneInputScreen - Detectando número do telefone...");
-      
-      // Aguardar um pouco para simular a detecção
-      await new Promise(resolve => setTimeout(resolve, 2000));
-      
-      // Para demonstração, usar um número fictício
-      const detectedNumber = "21 99999-9999";
-      setPhone(detectedNumber);
-      
-      console.log("PhoneInputScreen - Número detectado:", detectedNumber);
-    } catch (error) {
-      console.error("PhoneInputScreen - Erro ao detectar telefone:", error);
-      Alert.alert("Erro", "Não foi possível detectar o número do telefone automaticamente.");
-    } finally {
-      setIsDetectingPhone(false);
-    }
   };
 
   const validatePhone = () => {
@@ -290,18 +265,7 @@ export default function PhoneInputScreen() {
             />
           </View>
 
-          {/* Botão de Detectar Telefone */}
-          <TouchableOpacity 
-            style={styles.detectButton}
-            onPress={detectPhoneNumber}
-            disabled={isDetectingPhone}
-          >
-            {isDetectingPhone ? (
-              <ActivityIndicator size="small" color={LEAF_GREEN} />
-            ) : (
-              <Text style={styles.detectButtonText}>Detectar automaticamente</Text>
-            )}
-          </TouchableOpacity>
+
 
           {/* Checkbox de Termos */}
           <View style={styles.termsContainer}>
@@ -468,20 +432,6 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: BLACK,
     paddingVertical: 8,
-  },
-  
-  // Botão detectar
-  detectButton: {
-    backgroundColor: WHITE,
-    borderRadius: 12,
-    paddingVertical: 12,
-    alignItems: 'center',
-    marginBottom: 24,
-  },
-  detectButtonText: {
-    fontSize: 14,
-    color: LEAF_GREEN,
-    fontWeight: '500',
   },
   
   // Termos
