@@ -11,11 +11,11 @@ import {
   Alert
 } from "react-native";
 import { Avatar, Button } from "react-native-elements";
-import { colors } from '../common/theme';
+import { colors } from '../common-local/theme';
 import i18n from '../i18n';
 import { useSelector } from 'react-redux';
-import { fonts } from '../common/font';
-import { getLangKey } from "common/src/other/getLangKey";
+import { fonts } from '../common-local/font';
+import { getLangKey } from "../common-local/other/getLangKey";
 var { width, height } = Dimensions.get('window');
 
 export default function PromoComp(props) {

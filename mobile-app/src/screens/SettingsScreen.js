@@ -3,12 +3,12 @@ import { StyleSheet, View, Text, TouchableOpacity, Alert, StatusBar, ScrollView,
 import { Icon } from "react-native-elements";
 import i18n from '../i18n';
 import { useSelector, useDispatch } from "react-redux";
-import { api } from 'common';
+import { api } from '../common-local';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useTheme } from '@react-navigation/native';
-import { fonts } from '../common/font';
-import { logOut, updateProfileImage } from 'common/src/actions/authactions';
-import { colors, lightTheme } from '../common/theme';
+import { fonts } from '../common-local/font';
+import { logOut, updateProfileImage } from '../common-local/actions/authactions';
+import { colors, lightTheme } from '../common-local/theme';
 import { FontAwesome, Ionicons, MaterialIcons, MaterialCommunityIcons, Entypo } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 

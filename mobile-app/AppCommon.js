@@ -13,7 +13,7 @@ import * as Notifications from 'expo-notifications';
 import * as SplashScreen from 'expo-splash-screen';
 import { Audio, InterruptionModeAndroid, InterruptionModeIOS } from 'expo-av';
 import auth from '@react-native-firebase/auth';
-import { api } from 'common';
+import { api } from './src/common-local';
 
 // Configurar moment.js para português
 moment.locale('pt-br');

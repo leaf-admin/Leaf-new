@@ -376,27 +376,69 @@ async function getDriverCount() {
 }
 
 /**
- * Processar split automático - 100% para motorista
+ * Processar split automático com múltiplas contas
  * @param {Object} paymentData - Dados do pagamento
  * @returns {Object} Resultado do split
  */
 async function processAutomaticSplit(paymentData) {
   try {
-    console.log('Processando split automático para pagamento:', paymentData.charge_id);
+    console.log('Processando split automático múltiplo para pagamento:', paymentData.charge_id);
     
+    const rideValue = paymentData.value;
+    const tripId = paymentData.trip_id;
+    const driverId = paymentData.driver_id;
+    
+    // Calcular valores para cada conta
+    const operationalFee = calculateOperationalFee(rideValue); // R$ 1,49 para corridas > R$ 20
+    const wooviFee = 0.50; // Taxa fixa da Woovi
+    const cityTax = rideValue * 0.015; // 1,5% da prefeitura do Rio de Janeiro
+    const driverAmount = rideValue - operationalFee - wooviFee - cityTax; // Saldo para motorista
+    
+    console.log(`💰 Split Breakdown - Corrida R$ ${rideValue.toFixed(2)}:`);
+    console.log(`   🏢 Taxa Operacional: R$ ${operationalFee.toFixed(2)}`);
+    console.log(`   💳 Taxa Woovi: R$ ${wooviFee.toFixed(2)}`);
+    console.log(`   🏛️ Taxa Prefeitura: R$ ${cityTax.toFixed(2)}`);
+    console.log(`   🚗 Motorista: R$ ${driverAmount.toFixed(2)}`);
+    
+    // Estrutura de split múltiplo
     const splitData = {
       main_charge_id: paymentData.charge_id,
       splits: [
+        // 1. Taxa Operacional -> Conta Leaf Operacional
+        {
+          account_id: process.env.LEAF_OPERATIONAL_ACCOUNT_ID || 'leaf_operational_account',
+          amount: operationalFee,
+          description: `Taxa Operacional - Corrida ${tripId}`,
+          percentage: (operationalFee / rideValue) * 100
+        },
+        
+        // 2. Taxa Woovi -> Conta Leaf Woovi
+        {
+          account_id: process.env.LEAF_WOOVI_ACCOUNT_ID || 'leaf_woovi_account',
+          amount: wooviFee,
+          description: `Taxa Woovi - Corrida ${tripId}`,
+          percentage: (wooviFee / rideValue) * 100
+        },
+        
+        // 3. Taxa Prefeitura -> Conta Leaf Prefeitura (reserva)
+        {
+          account_id: process.env.LEAF_CITY_TAX_ACCOUNT_ID || 'leaf_city_tax_account',
+          amount: cityTax,
+          description: `Taxa Prefeitura RJ - Corrida ${tripId}`,
+          percentage: (cityTax / rideValue) * 100
+        },
+        
+        // 4. Saldo para Motorista -> Conta Leaf do Motorista
         {
           account_id: paymentData.driver.leaf_account_id,
-          percentage: 100, // 100% para motorista
-          amount: paymentData.value, // Valor total
-          description: `Corrida ${paymentData.trip_id} - 100% para motorista`
+          amount: driverAmount,
+          description: `Pagamento Motorista - Corrida ${tripId}`,
+          percentage: (driverAmount / rideValue) * 100
         }
-        // Sem split para Leaf - taxa é semanal
       ]
     };
     
+    // Processar split via API Woovi
     const response = await axios.post(`${WOOVI_CONFIG.baseURL}/api/v1/split`, splitData, {
       headers: {
         'Authorization': WOOVI_CONFIG.apiKey,
@@ -404,11 +446,75 @@ async function processAutomaticSplit(paymentData) {
       }
     });
     
-    console.log('Split automático processado com sucesso:', response.data);
-    return response.data;
+    // Log detalhado da transação
+    await logTransaction({
+      type: 'RIDE_PAYMENT_SPLIT',
+      trip_id: tripId,
+      driver_id: driverId,
+      ride_value: rideValue,
+      splits: {
+        operational_fee: operationalFee,
+        woovi_fee: wooviFee,
+        city_tax: cityTax,
+        driver_amount: driverAmount
+      },
+      accounts: {
+        operational_account: process.env.LEAF_OPERATIONAL_ACCOUNT_ID,
+        woovi_account: process.env.LEAF_WOOVI_ACCOUNT_ID,
+        city_tax_account: process.env.LEAF_CITY_TAX_ACCOUNT_ID,
+        driver_account: paymentData.driver.leaf_account_id
+      },
+      created_at: admin.firestore.FieldValue.serverTimestamp()
+    });
+    
+    // Notificar motorista sobre o pagamento
+    await sendDriverNotification(driverId, {
+      type: 'payment_received',
+      amount: driverAmount,
+      trip_id: tripId,
+      breakdown: {
+        total: rideValue,
+        operational_fee: operationalFee,
+        woovi_fee: wooviFee,
+        city_tax: cityTax,
+        driver_amount: driverAmount
+      }
+    });
+    
+    console.log('✅ Split múltiplo processado com sucesso:', {
+      charge_id: paymentData.charge_id,
+      total: rideValue,
+      driver_amount: driverAmount,
+      operational_fee: operationalFee,
+      woovi_fee: wooviFee,
+      city_tax: cityTax
+    });
+    
+    return {
+      success: true,
+      split_id: response.data.id,
+      breakdown: {
+        total: rideValue,
+        operational_fee: operationalFee,
+        woovi_fee: wooviFee,
+        city_tax: cityTax,
+        driver_amount: driverAmount
+      }
+    };
+    
   } catch (error) {
-    console.error('Erro no split automático:', error.response?.data || error.message);
-    throw new Error('Falha no processamento do split');
+    console.error('❌ Erro no split múltiplo:', error.response?.data || error.message);
+    
+    // Log do erro
+    await logTransaction({
+      type: 'RIDE_PAYMENT_SPLIT_ERROR',
+      trip_id: paymentData.trip_id,
+      driver_id: paymentData.driver_id,
+      error: error.message,
+      created_at: admin.firestore.FieldValue.serverTimestamp()
+    });
+    
+    throw new Error('Falha no processamento do split múltiplo');
   }
 }
 
@@ -926,6 +1032,135 @@ async function transferToLeafAccount(accountId, amount) {
   }
 }
 
+/**
+ * Criar contas específicas para cada tipo de taxa
+ * @returns {Object} Resultado da criação das contas
+ */
+async function createLeafTaxAccounts() {
+  try {
+    console.log('🏦 Criando contas específicas para taxas Leaf...');
+    
+    const accounts = [
+      {
+        name: 'Leaf App - Conta Operacional',
+        id: process.env.LEAF_OPERATIONAL_ACCOUNT_ID || 'leaf_operational_account',
+        description: 'Conta para taxas operacionais (R$ 1,49 por corrida)',
+        type: 'operational'
+      },
+      {
+        name: 'Leaf App - Conta Woovi',
+        id: process.env.LEAF_WOOVI_ACCOUNT_ID || 'leaf_woovi_account',
+        description: 'Conta para taxas da Woovi (R$ 0,50 por corrida)',
+        type: 'payment_gateway'
+      },
+      {
+        name: 'Leaf App - Conta Prefeitura RJ',
+        id: process.env.LEAF_CITY_TAX_ACCOUNT_ID || 'leaf_city_tax_account',
+        description: 'Conta para taxas da prefeitura (1,5% por corrida)',
+        type: 'city_tax'
+      }
+    ];
+    
+    const createdAccounts = [];
+    
+    for (const account of accounts) {
+      try {
+        const response = await axios.post(`${WOOVI_CONFIG.baseURL}/api/v1/subaccount`, {
+          name: account.name,
+          document: process.env.LEAF_CNPJ || '12345678000199',
+          email: process.env.LEAF_EMAIL || 'financeiro@leaf.app.br',
+          phone: process.env.LEAF_PHONE || '+5521999999999',
+          split_percentage: 0, // Não recebe splits automáticos
+          auto_transfer: false, // Não transfere automaticamente
+          description: account.description
+        }, {
+          headers: {
+            'Authorization': WOOVI_CONFIG.apiKey,
+            'Content-Type': 'application/json'
+          }
+        });
+        
+        console.log(`✅ Conta ${account.type} criada:`, response.data.id);
+        createdAccounts.push({
+          type: account.type,
+          id: response.data.id,
+          name: account.name
+        });
+        
+        // Salvar no Firestore
+        await admin.firestore().collection('leaf_accounts').doc(account.type).set({
+          account_id: response.data.id,
+          name: account.name,
+          description: account.description,
+          type: account.type,
+          created_at: admin.firestore.FieldValue.serverTimestamp()
+        });
+        
+      } catch (error) {
+        if (error.response?.status === 409) {
+          console.log(`ℹ️ Conta ${account.type} já existe`);
+        } else {
+          console.error(`❌ Erro ao criar conta ${account.type}:`, error.response?.data || error.message);
+        }
+      }
+    }
+    
+    console.log('🏦 Contas de taxas criadas/verificadas:', createdAccounts);
+    return {
+      success: true,
+      accounts: createdAccounts
+    };
+    
+  } catch (error) {
+    console.error('❌ Erro ao criar contas de taxas:', error);
+    throw new Error('Falha na criação das contas de taxas');
+  }
+}
+
+/**
+ * Obter saldo de todas as contas de taxas
+ * @returns {Object} Saldos das contas
+ */
+async function getLeafTaxAccountsBalance() {
+  try {
+    const accounts = [
+      { type: 'operational', id: process.env.LEAF_OPERATIONAL_ACCOUNT_ID || 'leaf_operational_account' },
+      { type: 'woovi', id: process.env.LEAF_WOOVI_ACCOUNT_ID || 'leaf_woovi_account' },
+      { type: 'city_tax', id: process.env.LEAF_CITY_TAX_ACCOUNT_ID || 'leaf_city_tax_account' }
+    ];
+    
+    const balances = {};
+    
+    for (const account of accounts) {
+      try {
+        const balanceResponse = await getLeafAccountBalance(account.id);
+        balances[account.type] = {
+          account_id: account.id,
+          balance: balanceResponse.balance || 0,
+          currency: 'BRL'
+        };
+      } catch (error) {
+        console.error(`❌ Erro ao obter saldo da conta ${account.type}:`, error);
+        balances[account.type] = {
+          account_id: account.id,
+          balance: 0,
+          error: error.message
+        };
+      }
+    }
+    
+    return {
+      success: true,
+      balances,
+      total: Object.values(balances).reduce((sum, acc) => sum + (acc.balance || 0), 0)
+    };
+    
+  } catch (error) {
+    console.error('❌ Erro ao obter saldos das contas de taxas:', error);
+    throw new Error('Falha ao obter saldos das contas de taxas');
+  }
+}
+
 // Firebase Functions
 
 /**
@@ -1432,6 +1667,74 @@ exports.processBalanceRegularization = functions.https.onCall(async (data, conte
   } catch (error) {
     console.error('Erro ao processar regularização:', error);
     throw new Error('Falha ao processar regularização de saldo');
+  }
+});
+
+/**
+ * Criar contas específicas para taxas
+ */
+exports.createLeafTaxAccounts = functions.https.onCall(async (data, context) => {
+  try {
+    console.log('🏦 Criando contas específicas para taxas...');
+    
+    // Criar contas de taxas
+    const result = await createLeafTaxAccounts();
+    
+    return { 
+      success: true, 
+      result,
+      message: 'Contas de taxas criadas com sucesso'
+    };
+  } catch (error) {
+    console.error('Erro ao criar contas de taxas:', error);
+    throw new Error('Falha ao criar contas de taxas');
+  }
+});
+
+/**
+ * Obter saldo de todas as contas de taxas
+ */
+exports.getLeafTaxAccountsBalance = functions.https.onCall(async (data, context) => {
+  try {
+    console.log('💰 Obtendo saldos das contas de taxas...');
+    
+    // Obter saldos
+    const result = await getLeafTaxAccountsBalance();
+    
+    return { 
+      success: true, 
+      result,
+      message: 'Saldos obtidos com sucesso'
+    };
+  } catch (error) {
+    console.error('Erro ao obter saldos das contas de taxas:', error);
+    throw new Error('Falha ao obter saldos das contas de taxas');
+  }
+});
+
+/**
+ * Processar split múltiplo para corrida
+ */
+exports.processMultipleSplit = functions.https.onCall(async (data, context) => {
+  try {
+    const { paymentData } = data;
+    
+    // Validar dados do pagamento
+    if (!paymentData.charge_id || !paymentData.value || !paymentData.driver_id) {
+      throw new Error('Dados obrigatórios não fornecidos');
+    }
+    
+    // Processar split múltiplo
+    const result = await processAutomaticSplit(paymentData);
+    
+    return { 
+      success: true, 
+      result,
+      message: 'Split múltiplo processado com sucesso'
+    };
+  } catch (error) {
+    console.error('Erro ao processar split múltiplo:', error);
+    throw new Error('Falha ao processar split múltiplo');
   }
 });
 

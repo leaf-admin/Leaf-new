@@ -11,13 +11,13 @@ import {
     StatusBar
 } from 'react-native';
 import { Icon } from 'react-native-elements';
-import { colors } from '../common/theme';
+import { colors } from '../common-local/theme';
 import i18n from '../i18n';
 import { useSelector, useDispatch } from 'react-redux';
-import { api } from 'common';
+import { api } from '../common-local';
 import moment from 'moment/min/moment-with-locales';
-import { MAIN_COLOR } from '../common/sharedFunctions';
-import { fonts } from '../common/font';
+import { MAIN_COLOR } from '../common-local/sharedFunctions';
+import { fonts } from '../common-local/font';
 
 export default function Notifications(props) {
     const { t } = i18n;

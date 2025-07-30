@@ -1,15 +1,42 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
+import ChangePasswordModal from './ChangePasswordModal';
 
 const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const { user, logout } = useAuth();
+  const { user, logout, changePassword, isLoading, error, clearError } = useAuth();
   const location = useLocation();
   const navigate = useNavigate();
+  
+  const [showChangePasswordModal, setShowChangePasswordModal] = useState(false);
+
+  // Verificar se deve mostrar o modal de troca de senha
+  useEffect(() => {
+    if (user && user.firstAccess && !user.passwordChanged) {
+      setShowChangePasswordModal(true);
+    }
+  }, [user]);
 
   const handleLogout = () => {
     logout();
     navigate('/login');
+  };
+
+  const handleChangePassword = async (currentPassword: string, newPassword: string) => {
+    const success = await changePassword(currentPassword, newPassword);
+    if (success) {
+      setShowChangePasswordModal(false);
+      clearError();
+    }
+  };
+
+  const handleCloseChangePasswordModal = () => {
+    // Não permitir fechar o modal no primeiro acesso
+    if (user?.firstAccess && !user?.passwordChanged) {
+      return;
+    }
+    setShowChangePasswordModal(false);
+    clearError();
   };
 
   const isActive = (path: string) => {
@@ -26,6 +53,11 @@ const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
               <h1 className="text-xl font-semibold text-gray-900">
                 Leaf Dashboard
               </h1>
+              {user?.firstAccess && !user?.passwordChanged && (
+                <div className="ml-4 px-2 py-1 bg-yellow-100 text-yellow-800 text-xs rounded-full">
+                  🔐 Primeiro acesso
+                </div>
+              )}
             </div>
             
             <div className="flex items-center space-x-4">
@@ -114,6 +146,15 @@ const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
       <main className="max-w-7xl mx-auto py-6 sm:px-6 lg:px-8">
         {children}
       </main>
+
+      {/* Modal de Troca de Senha */}
+      <ChangePasswordModal
+        isOpen={showChangePasswordModal}
+        onClose={handleCloseChangePasswordModal}
+        onSubmit={handleChangePassword}
+        isLoading={isLoading}
+        error={error}
+      />
     </div>
   );
 };

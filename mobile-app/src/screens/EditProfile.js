@@ -10,16 +10,16 @@ import {
     Image,
 } from 'react-native';
 import { Icon, Button, Input } from 'react-native-elements'
-import { colors } from '../common/theme';
+import { colors } from '../common-local/theme';
 import ActionSheet from "react-native-actions-sheet";
 import i18n from '../i18n';
 var { height } = Dimensions.get('window');
 import { useSelector, useDispatch } from 'react-redux';
-import { api, firebase } from 'common';
+import { api, firebase } from '../common-local';
 import * as ImagePicker from 'expo-image-picker';
 import { MaterialCommunityIcons, Entypo } from '@expo/vector-icons';
 import { FontAwesome5 } from '@expo/vector-icons';
-import { fonts } from '../common/font';
+import { fonts } from '../common-local/font';
 
 export default function EditProfilePage(props) {
     const { config } = firebase;

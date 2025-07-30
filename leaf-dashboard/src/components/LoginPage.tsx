@@ -13,7 +13,19 @@ const LoginPage: React.FC = () => {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    await login(credentials);
+    try {
+      // Simular login - substituir por chamada real da API
+      const mockToken = 'mock-jwt-token';
+      const mockUser = {
+        id: 1,
+        username: credentials.username,
+        role: 'admin',
+        name: 'Administrador'
+      };
+      await login(mockToken, mockUser);
+    } catch (err) {
+      console.error('Erro no login:', err);
+    }
   };
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {

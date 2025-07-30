@@ -3,7 +3,7 @@ import * as Notifications from 'expo-notifications';
 import * as Device from 'expo-device';
 import { Platform } from 'react-native';
 import { AppConfig } from '../../config/AppConfig';
-import { api } from 'common';
+import { api } from '../common-local';
 
 class NotificationService {
     constructor() {

@@ -20,6 +20,7 @@ config.resolver.alias = {
   '@utils': __dirname + '/src/utils',
   '@config': __dirname + '/src/config',
   '@common': __dirname + '/common',
+  '@common-local': __dirname + '/src/common-local',
   '@json': path.join(__dirname, '..', 'json'),
 };
 

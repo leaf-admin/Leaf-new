@@ -10,7 +10,7 @@ import {
     Vibration
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { fonts } from '../common/font';
+import { fonts } from '../common-local/font';
 import { useResponsiveLayout } from './ResponsiveLayout';
 
 const ButtonVariants = {

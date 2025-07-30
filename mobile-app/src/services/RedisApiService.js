@@ -14,8 +14,8 @@ const getApiUrl = (endpoint, useFallback = false) => {
 const handleError = (error, showAlert = false) => ({ error: error.message, showAlert });
 const logError = (error) => console.error('Error logged:', error);
 
-const LocalCacheService = require('./LocalCacheService.js');
-const SyncService = require('./SyncService.js');
+const LocalCacheService = require('./LocalCacheService');
+const SyncService = require('./SyncService');
 
 class RedisApiService {
     constructor() {

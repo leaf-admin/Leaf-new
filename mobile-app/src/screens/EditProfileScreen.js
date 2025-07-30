@@ -14,9 +14,9 @@ import {
 import { Icon } from 'react-native-elements';
 import { Ionicons } from '@expo/vector-icons';
 import { useSelector, useDispatch } from 'react-redux';
-import { colors } from '../common/theme';
-import { fonts } from '../common/font';
-import { MAIN_COLOR } from '../common/sharedFunctions';
+import { colors } from '../common-local/theme';
+import { fonts } from '../common-local/font';
+import { MAIN_COLOR } from '../common-local/sharedFunctions';
 import * as ImagePicker from 'expo-image-picker';
 
 const { width, height } = Dimensions.get('window');

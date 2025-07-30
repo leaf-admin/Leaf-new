@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { View, Text, Modal, StyleSheet, TouchableOpacity, Dimensions } from 'react-native';
-import { colors } from '../common/theme';
-import { MAIN_COLOR } from '../common/sharedFunctions';
+import { colors } from '../common-local/theme';
+import { MAIN_COLOR } from '../common-local/sharedFunctions';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import i18n from '../i18n';
 

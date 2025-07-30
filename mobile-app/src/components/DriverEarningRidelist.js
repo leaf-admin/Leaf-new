@@ -1,13 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import { View, Text, FlatList, StyleSheet, Dimensions, Animated } from 'react-native';
-import { colors } from '../common/theme';
+import { colors } from '../common-local/theme';
 import i18n from '../i18n';
 import { useSelector } from 'react-redux';
 import SegmentedControlTab from 'react-native-segmented-control-tab';
-import { MAIN_COLOR } from '../common/sharedFunctions';
+import { MAIN_COLOR } from '../common-local/sharedFunctions';
 var { width, height } = Dimensions.get('window');
 import moment from 'moment/min/moment-with-locales';
-import { fonts } from '../common/font';
+import { fonts } from '../common-local/font';
 import { Ionicons, AntDesign, Feather, MaterialCommunityIcons } from '@expo/vector-icons';
 
 export default function DriverEarningRidelist(props) {

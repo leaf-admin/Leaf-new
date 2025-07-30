@@ -13,7 +13,7 @@ import {
 import { Icon } from 'react-native-elements';
 import MapView, { PROVIDER_GOOGLE, Marker, Polyline } from 'react-native-maps';
 import BottomSheetWrapper from '../components/BottomSheetWrapper';
-import { colors } from '../common/theme';
+import { colors } from '../common-local/theme';
 
 const { width, height } = Dimensions.get('window');
 

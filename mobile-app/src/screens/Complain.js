@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { colors } from '../common/theme';
+import { colors } from '../common-local/theme';
 import {
     StyleSheet,
     View,
@@ -17,7 +17,7 @@ var { width } = Dimensions.get('window');
 import moment from 'moment/min/moment-with-locales';
 import { MAIN_COLOR } from "../common/sharedFunctions";
 import {SECONDORY_COLOR } from "../common/sharedFunctions";
-import { fonts } from '../common/font';
+import { fonts } from '../common-local/font';
 
 export default function Complain() {
     const dispatch = useDispatch();

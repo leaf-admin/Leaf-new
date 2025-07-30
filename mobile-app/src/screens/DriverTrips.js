@@ -4,7 +4,7 @@ import MapView, { PROVIDER_GOOGLE } from 'react-native-maps';
 import { Icon } from 'react-native-elements';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { Ionicons } from '@expo/vector-icons';
-import { colors, darkTheme, lightTheme } from '../common/theme';
+import { colors, darkTheme, lightTheme } from '../common-local/theme';
 import { useDispatch, useSelector } from 'react-redux';
 import * as Location from 'expo-location';
 

@@ -14,17 +14,17 @@ import {
     Animated,
     ActivityIndicator
 } from 'react-native';
-import { colors } from '../common/theme';
+import { colors } from '../common-local/theme';
 var { height,width } = Dimensions.get('window');
 import i18n from '../i18n';
 import RadioForm from 'react-native-simple-radio-button';
 import RNPickerSelect from './RNPickerSelect';
 import { useSelector,useDispatch } from 'react-redux';
-import { api } from 'common';
+import { api } from '../common-local';
 import { Feather, AntDesign } from '@expo/vector-icons';
-import { MAIN_COLOR } from '../common/sharedFunctions';
+import { MAIN_COLOR } from '../common-local/sharedFunctions';
 import Button from './Button';
-import { fonts } from '../common/font';
+import { fonts } from '../common-local/font';
 import DeviceInfo from 'react-native-device-info';
 
 const hasNotch = DeviceInfo.hasNotch();

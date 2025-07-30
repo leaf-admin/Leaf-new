@@ -1,13 +1,13 @@
 import React, { useState, useEffect } from 'react'
 import { View, Text, Image, StyleSheet, Dimensions, ScrollView, TouchableWithoutFeedback, TouchableOpacity, Alert } from 'react-native'
-import { colors } from '../common/theme'
+import { colors } from '../common-local/theme'
 import { useSelector, useDispatch } from 'react-redux';
 import i18n from '../i18n';
 import { Entypo, MaterialCommunityIcons, MaterialIcons} from '@expo/vector-icons';
-import { MAIN_COLOR, SECONDORY_COLOR } from '../common/sharedFunctions';
+import { MAIN_COLOR, SECONDORY_COLOR } from '../common-local/sharedFunctions';
 import { FontAwesome5 } from '@expo/vector-icons';
-import { fonts } from '../common/font';
-import { getLangKey } from 'common/src/other/getLangKey';
+import { fonts } from '../common-local/font';
+import { getLangKey } from '../common-local/other/getLangKey';
 const { height, width } = Dimensions.get("window");
 
 export default function CarsScreen(props) {

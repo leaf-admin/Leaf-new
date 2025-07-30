@@ -57,7 +57,12 @@ app.use(helmet({
 }));
 
 app.use(cors({
-  origin: process.env.ALLOWED_ORIGINS?.split(',') || ['http://localhost:3000', 'http://localhost:8081'],
+  origin: process.env.ALLOWED_ORIGINS?.split(',') || [
+    'http://localhost:3000', 
+    'http://localhost:8081',
+    'https://dashboard.leaf.app.br',
+    'https://api.leaf.app.br'
+  ],
   credentials: true
 }));
 

@@ -5,7 +5,7 @@ import {
     View,
     Alert
 } from 'react-native';
-import { colors } from '../common/theme';
+import { colors } from '../common-local/theme';
 import i18n from '../i18n';
 import { useSelector } from 'react-redux';
 export default function RideListPage(props) {

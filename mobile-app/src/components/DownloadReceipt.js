@@ -2,8 +2,8 @@ import React from 'react';
 import { View, Alert, StyleSheet, Text, TouchableOpacity, I18nManager } from 'react-native';
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
-import { colors } from '../common/theme';
-import { MAIN_COLOR } from '../common/sharedFunctions';
+import { colors } from '../common-local/theme';
+import { MAIN_COLOR } from '../common-local/sharedFunctions';
 import i18n from '../i18n';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 const DownloadReceipt = ({ booking, settings }) => {

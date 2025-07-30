@@ -19,7 +19,7 @@ import MapView, { Polyline, PROVIDER_GOOGLE, Marker, AnimatedRegion } from 'reac
 import { OtpModal } from '../components';
 import StarRating from 'react-native-star-rating-widget';
 import RadioForm from 'react-native-simple-radio-button';
-import { colors } from '../common/theme';
+import { colors } from '../common-local/theme';
 var { width, height } = Dimensions.get('window');
 import i18n from '../i18n';
 import { useSelector, useDispatch } from 'react-redux';
@@ -28,10 +28,10 @@ import carImageIcon from '../../assets/images/track_Car.png';
 import * as ImagePicker from 'expo-image-picker';
 import moment from 'moment/min/moment-with-locales';
 import { CommonActions } from '@react-navigation/native';
-import { appConsts, MAIN_COLOR, SECONDORY_COLOR } from '../common/sharedFunctions';
+import { appConsts, MAIN_COLOR, SECONDORY_COLOR } from '../common-local/sharedFunctions';
 import { Ionicons } from '@expo/vector-icons';
-import { fonts } from '../common/font';
-import { getLangKey } from 'common/src/other/getLangKey';
+import { fonts } from '../common-local/font';
+import { getLangKey } from '../common-local/other/getLangKey';
 import DeviceInfo from 'react-native-device-info';
 import navigationService from '../services/NavigationService';
 

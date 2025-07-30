@@ -1,15 +1,15 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { StyleSheet, View, Text, TouchableOpacity, StatusBar, TextInput, Alert, KeyboardAvoidingView, Platform, ScrollView } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { TextInputMask } from 'react-native-masked-text';
-import { api } from 'common';
+// import { TextInputMask } from 'react-native-masked-text';
+import { api } from '../common-local';
 import auth from '@react-native-firebase/auth';
 import { FirebaseConfig } from '../../config/FirebaseConfig';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as TaskManager from 'expo-task-manager';
 import * as Location from 'expo-location';
 import i18n from '../i18n';
-import { colors } from '../common/theme';
+import { colors } from '../common-local/theme';
 import GetPushToken from '../components/GetPushToken';
 import moment from 'moment/min/moment-with-locales';
 import {
@@ -18,7 +18,7 @@ import {
 import * as Notifications from 'expo-notifications';
 import * as SplashScreen from 'expo-splash-screen';
 import { Audio, InterruptionModeAndroid, InterruptionModeIOS } from 'expo-av';
-import { getUserId, getUserData, saveUserData } from 'common/src/utils/authUtils';
+import { getUserId, getUserData, saveUserData } from '../common-local/utils/authUtils';
 
 const LOCATION_TASK_NAME = 'background-location-task';
 

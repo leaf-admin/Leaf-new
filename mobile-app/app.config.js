@@ -111,7 +111,6 @@ export default {
             "SCHEDULE_EXACT_ALARM",
             "RECEIVE_SMS",
             "READ_SMS"
-
         ],
         blockedPermissions:["com.google.android.gms.permission.AD_ID"],
         googleServicesFile: "./google-services.json",
@@ -135,14 +134,6 @@ export default {
                     "./assets/sounds/horn.wav",
                     "./assets/sounds/repeat.wav"
                 ]
-            }
-        ],
-        [
-            "expo-build-properties",
-            {
-              "ios": {
-                "useFrameworks": "static"
-              },
             }
         ],
         [

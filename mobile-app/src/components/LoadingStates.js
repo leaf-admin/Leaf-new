@@ -8,7 +8,7 @@ import {
     ActivityIndicator
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { fonts } from '../common/font';
+import { fonts } from '../common-local/font';
 
 const { width, height } = Dimensions.get('window');
 

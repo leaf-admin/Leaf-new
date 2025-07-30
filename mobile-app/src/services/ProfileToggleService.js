@@ -1,6 +1,6 @@
 // ProfileToggleService.js - Serviço para toggle entre passageiro e motorista
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { api } from 'common';
+import { api } from '../common-local';
 
 class ProfileToggleService {
   constructor() {

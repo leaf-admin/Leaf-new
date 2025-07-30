@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useSelector } from 'react-redux';
-import { getUserTripHistory, getTripStatistics } from 'common/src/actions/locationactions';
+import { getUserTripHistory, getTripStatistics } from '../common-local/actions/locationactions';
 
 export const useTripHistory = (userType = 'passenger') => {
     const auth = useSelector(state => state.authdata);

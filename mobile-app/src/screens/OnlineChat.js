@@ -12,7 +12,7 @@ import { colors } from "../common/theme";
 import i18n from '../i18n';
 const { height, width } = Dimensions.get('window');
 import { useSelector, useDispatch } from 'react-redux';
-import { api } from 'common';
+import { api } from '../common-local';
 import { FontAwesome, MaterialCommunityIcons, Entypo } from '@expo/vector-icons';
 import DeviceInfo from 'react-native-device-info';
 

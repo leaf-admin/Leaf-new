@@ -17,8 +17,8 @@ import {
 import { Icon } from 'react-native-elements';
 import { Ionicons } from '@expo/vector-icons';
 import { useSelector, useDispatch } from 'react-redux';
-import { colors } from '../common/theme';
-import { fonts } from '../common/font';
+import { colors } from '../common-local/theme';
+import { fonts } from '../common-local/font';
 import ThemeSwitch from '../components/ThemeSwitch';
 
 const MAIN_COLOR = colors.TAXIPRIMARY;

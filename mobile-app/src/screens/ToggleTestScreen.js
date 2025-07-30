@@ -22,7 +22,7 @@ import {
   loadProfileData,
   loadPermissions,
   updateCacheStats,
-} from '../../common/src/reducers/profileToggleReducer';
+} from '../common-local/reducers/profileToggleReducer';
 
 const ToggleTestScreen = ({ navigation }) => {
   const dispatch = useDispatch();

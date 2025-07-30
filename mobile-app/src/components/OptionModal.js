@@ -6,12 +6,12 @@ import {
     Modal
 } from 'react-native';
 import { TouchableOpacity as OldTouch } from 'react-native';
-import { colors } from '../common/theme';
+import { colors } from '../common-local/theme';
 import i18n from '../i18n';
 import RadioForm, { RadioButton, RadioButtonInput, RadioButtonLabel } from 'react-native-simple-radio-button';
-import { SECONDORY_COLOR, MAIN_COLOR } from '../common/sharedFunctions';
-import { fonts } from '../common/font';
-import { getLangKey } from 'common/src/other/getLangKey';
+import { SECONDORY_COLOR, MAIN_COLOR } from '../common-local/sharedFunctions';
+import { fonts } from '../common-local/font';
+import { getLangKey } from '../common-local/other/getLangKey';
 
 export function OptionModal(props) {
     const { t } = i18n;

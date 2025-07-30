@@ -16,14 +16,14 @@ import {
 } from 'react-native';
 import { Button } from 'react-native-elements';
 import StarRating from 'react-native-star-rating-widget';
-import { colors } from '../common/theme';
+import { colors } from '../common-local/theme';
 var { width } = Dimensions.get('window');
 import i18n from '../i18n';
 import { useDispatch, useSelector } from 'react-redux';
-import { api } from 'common';
-import { MAIN_COLOR, SECONDORY_COLOR } from '../common/sharedFunctions';
+import { api } from '../common-local';
+import { MAIN_COLOR, SECONDORY_COLOR } from '../common-local/sharedFunctions';
 import DownloadReceipt from '../components/DownloadReceipt';
-import { fonts } from '../common/font';
+import { fonts } from '../common-local/font';
 
 export default function DriverRating(props) {
     const { updateBooking } = api;

@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useRef } from 'react';
-import { colors } from '../common/theme';
+import { colors } from '../common-local/theme';
 import { useSelector, useDispatch } from 'react-redux';
 import {
     View,
@@ -25,9 +25,9 @@ import ActionSheet from "react-native-actions-sheet";
 import i18n from '../i18n';
 import { Ionicons } from '@expo/vector-icons';
 import Footer from '../components/Footer';
-import { FormIcon, MAIN_COLOR } from '../common/sharedFunctions';
+import { FormIcon, MAIN_COLOR } from '../common-local/sharedFunctions';
 import {fonts}from "../common/font"
-import { getLangKey } from 'common/src/other/getLangKey';
+import { getLangKey } from '../common-local/other/getLangKey';
 var { height, width } = Dimensions.get('window');
 
 export default function CarEditScreen(props) {
