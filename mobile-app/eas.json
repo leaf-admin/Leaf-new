@@ -14,13 +14,13 @@
     "preview": {
       "distribution": "internal",
       "android": {
-        "buildType": "apk"
+        "buildType": "aab"
       },
       "channel": "preview"
     },
     "production": {
       "android": {
-        "buildType": "apk"
+        "buildType": "aab"
       },
       "channel": "production"
     }
