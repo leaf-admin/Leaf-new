@@ -64,13 +64,13 @@ export default function PhoneInputScreen() {
     // Remove tudo que não é número
     const numbers = text.replace(/\D/g, '');
     
-    // Aplica a máscara XX XXXXX-XXXX
+    // Aplica a máscara (XX) XXXXX-XXXX
     if (numbers.length <= 2) {
       return numbers;
     } else if (numbers.length <= 7) {
-      return `${numbers.slice(0, 2)} ${numbers.slice(2)}`;
+      return `(${numbers.slice(0, 2)}) ${numbers.slice(2)}`;
     } else {
-      return `${numbers.slice(0, 2)} ${numbers.slice(2, 7)}-${numbers.slice(7, 11)}`;
+      return `(${numbers.slice(0, 2)}) ${numbers.slice(2, 7)}-${numbers.slice(7, 11)}`;
     }
   };
 
@@ -258,7 +258,7 @@ export default function PhoneInputScreen() {
               style={styles.phoneInput}
               value={phone}
               onChangeText={handlePhoneChange}
-              placeholder="123 4567 8901"
+              placeholder="(21) 99999-9999"
               placeholderTextColor={GRAY}
               keyboardType="phone-pad"
               maxLength={15}
@@ -391,6 +391,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 12,
     marginBottom: 16,
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
   },
   nameInput: {
     fontSize: 16,
@@ -407,6 +409,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 12,
     marginBottom: 16,
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
   },
   countrySelector: {
     flexDirection: 'row',
