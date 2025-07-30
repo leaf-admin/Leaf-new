@@ -1,7 +1,7 @@
 import { View, Text, TouchableOpacity } from 'react-native'
 import React from 'react'
 import { useState } from 'react'
-import { fonts } from '../common/font';
+import { fonts } from '../common-local/font';
 
 const Radioform = () => {
 

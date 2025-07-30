@@ -14,7 +14,7 @@ import {
 } from 'react-native';
 import { Icon } from 'react-native-elements';
 import { useSelector } from 'react-redux';
-import { api } from 'common';
+import { api } from '../common-local';
 import QRCode from 'react-native-qrcode-svg';
 
 const { width, height } = Dimensions.get('window');

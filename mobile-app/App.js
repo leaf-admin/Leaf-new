@@ -10,8 +10,8 @@ import {
   LogBox,
 } from "react-native";
 import { Provider } from "react-redux";
-import { store } from 'common';
-import { FirebaseProvider } from 'common/src/config/configureFirebase';
+import { store } from './src/common-local';
+import { FirebaseProvider } from './src/common-local/config/configureFirebase';
 import { FirebaseConfig } from './config/FirebaseConfig';
 import { colors } from './src/common/theme';
 import AsyncStorage from '@react-native-async-storage/async-storage';

@@ -1,11 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { View, Text, FlatList, StyleSheet, TouchableOpacity, Image, Dimensions, Modal, Linking, Alert, Animated, TouchableWithoutFeedback,Platform } from 'react-native';
-import { colors } from '../common/theme';
+import { colors } from '../common-local/theme';
 import i18n from '../i18n';
 import { useSelector } from 'react-redux';
 import SegmentedControlTab from 'react-native-segmented-control-tab';
 import moment from 'moment/min/moment-with-locales';
-import { MAIN_COLOR, SECONDORY_COLOR, appConsts } from '../common/sharedFunctions';
+import { MAIN_COLOR, SECONDORY_COLOR, appConsts } from '../common-local/sharedFunctions';
 var { width, height } = Dimensions.get('window');
 import { Ionicons, Entypo, Fontisto, AntDesign, Octicons, Feather, MaterialCommunityIcons } from '@expo/vector-icons';
 import { Avatar } from 'react-native-elements';
@@ -13,8 +13,8 @@ import StarRating from 'react-native-star-rating-widget';
 import Button from './Button';
 import RNPickerSelect from './RNPickerSelect';
 import Emptylist from './Emptylist';
-import { fonts } from '../common/font';
-import { getLangKey } from 'common/src/other/getLangKey';
+import { fonts } from '../common-local/font';
+import { getLangKey } from '../common-local/other/getLangKey';
 import MapView, { Marker, Polyline } from 'react-native-maps';
 
 export default function RideList(props) {

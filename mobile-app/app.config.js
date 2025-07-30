@@ -62,6 +62,21 @@ export default {
             "NSCameraUsageDescription": "This app uses the camera to take your profile picture.",
             "NSPhotoLibraryUsageDescription": "This app uses Photo Library for uploading your profile picture.",
             "ITSAppUsesNonExemptEncryption":false,
+            "NSAppTransportSecurity": {
+                "NSAllowsArbitraryLoads": false,
+                "NSExceptionDomains": {
+                    "leaf.app.br": {
+                        "NSExceptionAllowsInsecureHTTPLoads": false,
+                        "NSExceptionMinimumTLSVersion": "TLSv1.2",
+                        "NSExceptionRequiresForwardSecrecy": true
+                    },
+                    "api.leaf.app.br": {
+                        "NSExceptionAllowsInsecureHTTPLoads": false,
+                        "NSExceptionMinimumTLSVersion": "TLSv1.2",
+                        "NSExceptionRequiresForwardSecrecy": true
+                    }
+                }
+            },
             "UIBackgroundModes": [
                 "location",
                 "fetch",
@@ -108,10 +123,7 @@ export default {
             "FOREGROUND_SERVICE",
             "FOREGROUND_SERVICE_LOCATION",
             "ACCESS_BACKGROUND_LOCATION",
-            "SCHEDULE_EXACT_ALARM",
-            "RECEIVE_SMS",
-            "READ_SMS"
-
+            "SCHEDULE_EXACT_ALARM"
         ],
         blockedPermissions:["com.google.android.gms.permission.AD_ID"],
         googleServicesFile: "./google-services.json",
@@ -135,14 +147,6 @@ export default {
                     "./assets/sounds/horn.wav",
                     "./assets/sounds/repeat.wav"
                 ]
-            }
-        ],
-        [
-            "expo-build-properties",
-            {
-              "ios": {
-                "useFrameworks": "static"
-              },
             }
         ],
         [

@@ -11,12 +11,12 @@ import {
     Dimensions
 } from 'react-native';
 import { Icon } from 'react-native-elements';
-import { colors } from '../common/theme';
+import { colors } from '../common-local/theme';
 import i18n from '../i18n';
 import { useSelector, useDispatch } from 'react-redux';
-import { api } from 'common';
-import { MAIN_COLOR } from '../common/sharedFunctions';
-import { fonts } from '../common/font';
+import { api } from '../common-local';
+import { MAIN_COLOR } from '../common-local/sharedFunctions';
+import { fonts } from '../common-local/font';
 import { PromoComp } from "../components";
 
 export default function PaymentDetails(props) {

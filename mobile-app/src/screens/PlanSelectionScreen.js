@@ -12,7 +12,7 @@ import {
 } from 'react-native';
 import { Icon } from 'react-native-elements';
 import { useSelector } from 'react-redux';
-import { api } from 'common';
+import { api } from '../common-local';
 
 const { width } = Dimensions.get('window');
 

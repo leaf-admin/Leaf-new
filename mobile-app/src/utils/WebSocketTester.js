@@ -231,7 +231,7 @@ class WebSocketTester {
       console.log(`📝 Atualize WebSocketConfig.js com: http://${ip}:3001`);
     } else {
       console.log('❌ Não foi possível descobrir o IP automaticamente');
-      console.log('📝 Configure manualmente o IP em WebSocketConfig.js');
+      console.log('📝 Configure manualmente o IP em WebSocketConfig');
     }
     
     return ip;

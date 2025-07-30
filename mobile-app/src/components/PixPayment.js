@@ -8,8 +8,8 @@ import {
     Alert
 } from 'react-native';
 import QRCode from 'react-native-qrcode-svg';
-import { colors } from '../common/theme';
-import { fonts } from '../common/font';
+import { colors } from '../common-local/theme';
+import { fonts } from '../common-local/font';
 import WooviService from '../services/WooviService';
 import i18n from '../i18n';
 

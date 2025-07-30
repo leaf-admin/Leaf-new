@@ -1,4 +1,4 @@
-import api from './api';
+import api from '../common-local/api';
 import { useState, useEffect } from 'react';
 
 // Configurações do chat

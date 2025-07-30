@@ -3,12 +3,12 @@ import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Platform, StatusB
 import { Icon } from 'react-native-elements';
 import { useSelector, useDispatch } from 'react-redux';
 import { useTheme } from '@react-navigation/native';
-import { MAIN_COLOR, SECONDORY_COLOR } from '../common/sharedFunctions';
-import { fonts } from '../common/font';
-import { colors } from '../common/theme';
+import { MAIN_COLOR, SECONDORY_COLOR } from '../common-local/sharedFunctions';
+import { fonts } from '../common-local/font';
+import { colors } from '../common-local/theme';
 import i18n from '../i18n';
 import WTransactionHistory from '../components/WalletTransactionHistory';
-import { fetchWalletHistory } from 'common/src/actions/walletactions';
+import { fetchWalletHistory } from '../common-local/actions/walletactions';
 
 export default function WalletDetails(props) {
     const { t } = i18n;

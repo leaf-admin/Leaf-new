@@ -5,7 +5,7 @@ import {
     TouchableOpacity,
     ActivityIndicator
 } from 'react-native';
-import { colors } from '../common/theme';
+import { colors } from '../common-local/theme';
 
 export const MAIN_COLOR = colors.BLACK;
 

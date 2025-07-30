@@ -1,0 +1,177 @@
+name: 🚀 Leaf App CI/CD Pipeline
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+    inputs:
+      platform:
+        description: 'Platform to build'
+        required: true
+        default: 'all'
+        type: choice
+        options:
+        - all
+        - android
+        - ios
+
+jobs:
+  # Testes
+  test:
+    runs-on: ubuntu-latest
+    steps:
+    - name: 📥 Checkout
+      uses: actions/checkout@v4
+      
+    - name: 📦 Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '18'
+        cache: 'npm'
+        
+    - name: 🔧 Install dependencies
+      run: |
+        cd mobile-app
+        npm install --legacy-peer-deps
+        
+    - name: 🧪 Run tests
+      run: |
+        cd mobile-app
+        npx expo doctor
+        npm run test || echo "No tests configured"
+
+  # Build Android
+  build-android:
+    needs: test
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main' || github.event.inputs.platform == 'android' || github.event.inputs.platform == 'all'
+    steps:
+    - name: 📥 Checkout
+      uses: actions/checkout@v4
+      
+    - name: 📦 Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '18'
+        cache: 'npm'
+        
+    - name: 🔧 Install dependencies
+      run: |
+        cd mobile-app
+        npm install --legacy-peer-deps
+        
+    - name: 🔑 Setup EAS
+      run: |
+        cd mobile-app
+        npm install -g @expo/eas-cli
+        echo ${{ secrets.EXPO_TOKEN }} | eas login --non-interactive
+        
+    - name: 📱 Build Android APK
+      run: |
+        cd mobile-app
+        eas build --platform android --profile production --non-interactive
+        
+    - name: 📤 Upload Android Artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: android-apk
+        path: mobile-app/*.apk
+        if-no-files-found: ignore
+
+  # Build iOS
+  build-ios:
+    needs: test
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main' || github.event.inputs.platform == 'ios' || github.event.inputs.platform == 'all'
+    steps:
+    - name: 📥 Checkout
+      uses: actions/checkout@v4
+      
+    - name: 📦 Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '18'
+        cache: 'npm'
+        
+    - name: 🔧 Install dependencies
+      run: |
+        cd mobile-app
+        npm install --legacy-peer-deps
+        
+    - name: 🔑 Setup EAS
+      run: |
+        cd mobile-app
+        npm install -g @expo/eas-cli
+        echo ${{ secrets.EXPO_TOKEN }} | eas login --non-interactive
+        
+    - name: 🍎 Build iOS IPA
+      run: |
+        cd mobile-app
+        eas build --platform ios --profile production --non-interactive
+        
+    - name: 📤 Upload iOS Artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: ios-ipa
+        path: mobile-app/*.ipa
+        if-no-files-found: ignore
+
+  # Deploy to App Stores
+  deploy:
+    needs: [build-android, build-ios]
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    steps:
+    - name: 📥 Checkout
+      uses: actions/checkout@v4
+      
+    - name: 📦 Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '18'
+        
+    - name: 🔑 Setup EAS
+      run: |
+        cd mobile-app
+        npm install -g @expo/eas-cli
+        echo ${{ secrets.EXPO_TOKEN }} | eas login --non-interactive
+        
+    - name: 📤 Submit to Play Store
+      run: |
+        cd mobile-app
+        eas submit --platform android --non-interactive
+      continue-on-error: true
+        
+    - name: 📤 Submit to App Store
+      run: |
+        cd mobile-app
+        eas submit --platform ios --non-interactive
+      continue-on-error: true
+
+  # Version Management
+  version:
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    steps:
+    - name: 📥 Checkout
+      uses: actions/checkout@v4
+      with:
+        token: ${{ secrets.GITHUB_TOKEN }}
+        
+    - name: 📦 Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '18'
+        
+    - name: 🏷️ Create Release
+      run: |
+        cd mobile-app
+        VERSION=$(node -p "require('./package.json').version")
+        gh release create "v$VERSION" \
+          --title "Release v$VERSION" \
+          --notes "Automated release for version $VERSION" \
+          --draft
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} 

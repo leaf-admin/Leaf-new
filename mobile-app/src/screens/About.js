@@ -1,5 +1,5 @@
 import React, { useState, useEffect} from 'react';
-import { colors } from '../common/theme';
+import { colors } from '../common-local/theme';
 import {
     StyleSheet,
     View,
@@ -12,7 +12,7 @@ import {
 import i18n from '../i18n';
 import { useSelector } from "react-redux";
 import { MaterialIcons, Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
-import { fonts } from '../common/font';
+import { fonts } from '../common-local/font';
 var { width} = Dimensions.get('window');
 
 export default function AboutPage(props) {

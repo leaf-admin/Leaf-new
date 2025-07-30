@@ -57,7 +57,12 @@ app.use(helmet({
 }));
 
 app.use(cors({
-  origin: process.env.ALLOWED_ORIGINS?.split(',') || ['http://localhost:3000', 'http://localhost:8081'],
+  origin: process.env.ALLOWED_ORIGINS?.split(',') || [
+    'http://localhost:3000', 
+    'http://localhost:8081',
+    'https://dashboard.leaf.app.br',
+    'https://api.leaf.app.br'
+  ],
   credentials: true
 }));
 
@@ -528,11 +533,17 @@ const { router: authRoutes } = require('./routes/auth')
 // Importar rotas do dashboard
 const dashboardRoutes = require('./routes/dashboard')
 
+// Importar rotas de usuário
+const userRoutes = require('./routes/user')
+
 // Adicionar rotas de autenticação
 app.use('/auth', authRoutes)
 
 // Adicionar rotas do dashboard
 app.use('/dashboard', dashboardRoutes)
+
+// Adicionar rotas de usuário
+app.use('/user', userRoutes)
 
 // Criar servidor HTTP
 const server = http.createServer(app);

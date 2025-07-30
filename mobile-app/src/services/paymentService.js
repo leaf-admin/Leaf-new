@@ -1,4 +1,4 @@
-import api from './api';
+import api from '../common-local/api';
 
 // Configurações do Woovi
 const WOOVI_CONFIG = {

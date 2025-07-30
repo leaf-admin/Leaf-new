@@ -1,8 +1,8 @@
 // HybridMapsService.js - Serviço híbrido Google Maps + OpenStreetMap para otimização de custos
 // Integrado com Redis e Firebase
-const { costMonitoringService } = require('./CostMonitoringService.js');
-const apiKeys = require('../../config/api-keys.js');
-const { RedisApiService } = require('./RedisApiService.js');
+const { costMonitoringService } = require('./CostMonitoringService');
+const apiKeys = require('../../config/api-keys');
+const { RedisApiService } = require('./RedisApiService');
 
 class HybridMapsService {
     constructor() {

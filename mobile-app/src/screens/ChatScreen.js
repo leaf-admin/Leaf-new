@@ -12,7 +12,7 @@ import { GiftedChat, Bubble, InputToolbar, Composer, Send } from 'react-native-g
 import { Icon } from 'react-native-elements';
 import { TouchableOpacity } from 'react-native-gesture-handler';
 import { useSelector } from 'react-redux';
-import { api } from 'common';
+import { api } from '../common-local';
 
 const ChatScreen = ({ navigation, route }) => {
   const { tripId, driverInfo, passengerInfo } = route.params || {};

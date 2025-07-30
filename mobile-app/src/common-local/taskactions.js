@@ -1,0 +1,138 @@
+import {
+  FETCH_TASKS,
+  FETCH_TASKS_SUCCESS,
+  FETCH_TASKS_FAILED,
+  ACCEPT_TASK,
+  CANCEL_TASK,
+} from "../store/types";
+import store from "../store/store";
+import { updateProfile } from "./authactions";
+import { RequestPushMsg } from "../other/NotificationFunctions";
+import { firebase } from '../config/configureFirebase';
+import {driverQueue} from '../other/sharedFunctions';
+
+export const fetchTasks = () => (dispatch) => {
+  const { auth, tasksRef } = firebase;
+
+  const uid = auth.currentUser.uid;
+  tasksRef().off();
+  dispatch({
+    type: FETCH_TASKS,
+    payload: null,
+  });
+  tasksRef().on('value', (snapshot) => {
+    if (snapshot.val()) {
+      let data = snapshot.val();
+      const arr = Object.keys(data)
+        .filter(
+          (i) => data[i].requestedDrivers && data[i].requestedDrivers[uid]
+        )
+        .map((i) => {
+          data[i].id = i;
+          return data[i];
+        });
+      dispatch({
+        type: FETCH_TASKS_SUCCESS,
+        payload: arr,
+      });
+    } else {
+      dispatch({
+        type: FETCH_TASKS_FAILED,
+        payload: store.getState().languagedata.defaultLanguage.no_tasks,
+      });
+    }
+  });
+};
+
+export const acceptTask = (task) => (dispatch) => {
+  const { auth, trackingRef, singleUserRef, singleBookingRef } = firebase;
+
+  const uid = auth.currentUser.uid;
+
+  singleUserRef(uid).on('value', (snapshot) => {
+    let profile = snapshot.val();
+
+    singleBookingRef(task.id).transaction((booking) => {
+      let fleetCommission_fee = profile?.fleetadmin ? ((parseFloat(booking?.estimate) - parseFloat(booking?.convenience_fees)) * parseFloat(booking?.fleet_admin_comission) / 100).toFixed(2) : 0;
+      
+      // Nova estrutura de cobrança operacional baseada no valor da corrida
+      const rideValue = parseFloat(booking?.estimate);
+      let operationalFee = 0;
+      
+      if (rideValue < 10.00) {
+        operationalFee = 0.79; // Corridas < R$ 10,00
+      } else if (rideValue <= 20.00) {
+        operationalFee = 0.99; // Corridas R$ 10,00 - R$ 20,00
+      } else {
+        operationalFee = 1.49; // Corridas > R$ 20,00
+      }
+      
+      // Novo cálculo: Valor para o motorista = Tarifa total - Taxa operacional
+      // Pedágios serão pagos diretamente pelo motorista, não são descontados do valor
+      let driver_fee = parseFloat(parseFloat(booking?.estimate) - operationalFee).toFixed(2);
+      
+      if (booking && booking.requestedDrivers) {
+        booking.driver = uid;
+        booking.driver_image = profile.profile_image ? profile.profile_image : "";
+        booking.car_image = profile.car_image ? profile.car_image : "";
+        booking.driver_name = profile.firstName + " " + profile.lastName;
+        booking.driver_contact = profile.mobile;
+        booking.driver_token = profile.pushToken ? profile.pushToken : '';
+        booking.vehicle_number = profile.vehicleNumber ? profile.vehicleNumber : "";
+        booking.vehicleModel = profile.vehicleModel ? profile.vehicleModel : "";
+        booking.vehicleMake = profile.vehicleMake ? profile.vehicleMake : "";
+        booking.driverRating = profile.rating ? profile.rating : "0";
+        booking.fleetCommission = fleetCommission_fee ? fleetCommission_fee : "0";
+        booking.fleetadmin = profile.fleetadmin ? profile.fleetadmin : "";
+        booking.status = "ACCEPTED";
+        booking.driver_share = driver_fee ? driver_fee : "0";
+        booking.operational_fee = operationalFee.toFixed(2); // Adicionar taxa operacional ao booking
+        booking.driverDeviceId = task.driverDeviceId ? task.driverDeviceId : null;
+        booking.requestedDrivers = null;
+        booking.driverEstimates = null;
+        return booking;
+      }
+    });
+  });
+};
+
+export const cancelTask = (bookingId) => (dispatch) => {
+  const { auth, singleBookingRef } = firebase;
+
+  const uid = auth.currentUser.uid;
+
+  singleBookingRef(bookingId).transaction((booking) => {
+      if (booking && booking.requestedDrivers) {
+        if (
+          booking.requestedDrivers !== null &&
+          Object.keys(booking.requestedDrivers).length === 1
+        ) {
+          booking.status = "NEW";
+          booking.requestedDrivers = null;
+          booking.driverEstimates = null;
+          RequestPushMsg(booking.customer_token, {
+            title:
+              store.getState().languagedata.defaultLanguage.notification_title,
+            msg:
+              store.getState().languagedata.defaultLanguage.booking_cancelled +
+              bookingId,
+            screen: "BookedCab",
+            params: { bookingId: bookingId },
+          });
+          dispatch({
+            type: CANCEL_TASK,
+            payload: { uid: uid, bookingId: bookingId },
+          });
+        }else{
+          delete booking.requestedDrivers[uid];
+        }
+        if(booking.driverOffers && booking.driverOffers[uid]){
+          delete booking.driverOffers[uid];
+        }
+        if(booking.selectedBid && booking.selectedBid.driver === uid){
+          delete booking.selectedBid;
+        }
+        return booking;
+      }
+    });
+};

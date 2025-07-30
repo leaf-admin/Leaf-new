@@ -2,8 +2,8 @@ import React from 'react';
 import {
     View,
 } from 'react-native';
-import { colors } from '../common/theme';
-import { MAIN_COLOR } from '../common/sharedFunctions';
+import { colors } from '../common-local/theme';
+import { MAIN_COLOR } from '../common-local/sharedFunctions';
 
 export default function Footer(props) {
     return (

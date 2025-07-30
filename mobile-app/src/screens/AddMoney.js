@@ -8,14 +8,14 @@ import {
   TextInput,
   FlatList
 } from 'react-native';
-import { colors } from '../common/theme';
+import { colors } from '../common-local/theme';
 
 import i18n from '../i18n';
 import { TouchableOpacity } from 'react-native-gesture-handler';
 import { useSelector } from 'react-redux';
-import { MAIN_COLOR } from '../common/sharedFunctions';
-import { SECONDORY_COLOR } from '../common/sharedFunctions';
-import { fonts } from '../common/font';
+import { MAIN_COLOR } from '../common-local/sharedFunctions';
+import { SECONDORY_COLOR } from '../common-local/sharedFunctions';
+import { fonts } from '../common-local/font';
 
 export default function AddMoneyScreen(props) {
 

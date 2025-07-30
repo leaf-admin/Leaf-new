@@ -1,7 +1,7 @@
 // LocationService.js - Serviço de localização otimizado com cache híbrido
 // Mock para testes Node.js
-const { redisApiService } = require('./RedisApiService.js');
-const LocalCacheService = require('./LocalCacheService.js');
+const { redisApiService } = require('./RedisApiService');
+const LocalCacheService = require('./LocalCacheService');
 const handleError = (error, showAlert = false) => ({ error: error.message, showAlert });
 
 class LocationService {

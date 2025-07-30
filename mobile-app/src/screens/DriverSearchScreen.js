@@ -13,7 +13,7 @@ import {
 import { Icon } from 'react-native-elements';
 import BottomSheet from '@gorhom/bottom-sheet';
 import { useSelector, useDispatch } from 'react-redux';
-import { api } from 'common';
+import { api } from '../common-local';
 
 const DriverSearchScreen = ({ navigation, route }) => {
   const { tripData, onDriverSelect } = route.params || {};

@@ -9,7 +9,7 @@ import {
     Platform
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { fonts } from '../common/font';
+import { fonts } from '../common-local/font';
 
 const { width } = Dimensions.get('window');
 

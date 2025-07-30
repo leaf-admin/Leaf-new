@@ -5,7 +5,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 const { width, height } = Dimensions.get('window');
 
 const translations = [
-  { welcome: 'BEM VINDO A', start: 'Começar', subtitle: 'Sua jornada começa aqui' },
+  { welcome: 'BEM VINDO A', start: 'Começar', subtitle: 'Sua jornada começa aqui - DEV MODE' },
   { welcome: 'WELCOME TO', start: 'Start', subtitle: 'Your journey starts here' },
   { welcome: 'BIENVENIDO A', start: 'Comenzar', subtitle: 'Tu viaje comienza aquí' },
   { welcome: 'BIENVENUE À', start: 'Commencer', subtitle: 'Votre voyage commence ici' },

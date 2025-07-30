@@ -18,31 +18,31 @@ import {
 } from 'react-native';
 import { TouchableOpacity } from 'react-native-gesture-handler';
 import { Icon } from 'react-native-elements';
-import { colors, darkTheme, lightTheme } from '../common/theme';
+import { colors, darkTheme, lightTheme } from '../common-local/theme';
 import * as Location from 'expo-location';
 var { height, width } = Dimensions.get('window');
 import i18n from '../i18n';
 import DatePicker from 'react-native-date-picker';
 import { useSelector, useDispatch } from 'react-redux';
-import { api, FirebaseContext } from 'common';
+import { api, FirebaseContext } from '../common-local';
 import { OptionModal } from '../components/OptionModal';
-import BookingModal, { appConsts, prepareEstimateObject } from '../common/sharedFunctions';
+import BookingModal, { appConsts, prepareEstimateObject } from '../common-local/sharedFunctions';
 import MapView, { PROVIDER_GOOGLE, Marker, Polyline } from 'react-native-maps';
 import { CommonActions } from '@react-navigation/native';
-import { MAIN_COLOR, CarHorizontal, CarVertical, validateBookingObj, SECONDORY_COLOR } from '../common/sharedFunctions';
+import { MAIN_COLOR, CarHorizontal, CarVertical, validateBookingObj, SECONDORY_COLOR } from '../common-local/sharedFunctions';
 import { startActivityAsync, ActivityAction } from 'expo-intent-launcher';
 import Button from '../components/Button';
 import { fonts } from "../common/font";
 import DeviceInfo from 'react-native-device-info';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useTranslation } from 'react-i18next';
-import { fetchPlacesAutocomplete, fetchCoordsfromPlace } from '../common/sharedFunctions';
+import { fetchPlacesAutocomplete, fetchCoordsfromPlace } from '../common-local/sharedFunctions';
 import uuid from 'react-native-uuid';
-import { FareCalculator } from '../common/sharedFunctions';
+import { FareCalculator } from '../common-local/sharedFunctions';
 import database from '@react-native-firebase/database';
 import * as DecodePolyLine from '@mapbox/polyline';
-import { tollData } from '../../../common/src/actions/estimateactions.js'; // ajuste o caminho se necessário
-import { calcularPedagiosPorPolyline } from '../../../common/src/other/TollUtils';
+import { tollData } from '../common-local/actions/estimateactions'; // ajuste o caminho se necessário
+import { calcularPedagiosPorPolyline } from '../common-local/other/TollUtils';
 import * as SplashScreen from 'expo-splash-screen';
 import { GoogleMapApiConfig } from '../../config/GoogleMapApiConfig';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
@@ -50,6 +50,7 @@ import splashImg from '../../assets/images/splash.png';
 import BottomMenu from '../components/BottomMenu';
 import PixPaymentBottomSheet from '../components/PixPaymentBottomSheet';
 import DriverSearchBottomSheet from '../components/DriverSearchBottomSheet';
+import ProfileToggle from '../components/ProfileToggle';
 
 const hasNotch = DeviceInfo.hasNotch();
 
@@ -2346,6 +2347,15 @@ const onMapSelectComplete = () => {
                     >
                         <Icon name="notifications" type="material" color={theme.icon} size={24} />
                     </TouchableOpacity>
+                    <ProfileToggle 
+                        userId="current_user"
+                        onModeChange={(newMode, profileData) => {
+                            console.log('Toggle mode changed to:', newMode);
+                            // Aqui podemos adicionar lógica adicional quando o modo muda
+                        }}
+                        style="discrete"
+                        size="small"
+                    />
                     <ThemeSwitch value={isDarkMode} onValueChange={setIsDarkMode} />
                 </View>
             </View>
@@ -2427,17 +2437,32 @@ const onMapSelectComplete = () => {
                     elevation: 5,
                 }}
                 onPress={() => {
-                    const testTripData = {
-                        id: Date.now(),
-                        value: 15.50,
-                        destination: 'Shopping Center',
-                        pickup: 'Rua das Flores, 123',
-                        drop: 'Av. Principal, 456'
-                    };
-                    startPixPayment(testTripData);
+                    // Teste PIX temporário
                 }}
             >
                 <Icon name="payment" type="material" color="#fff" size={24} />
+            </TouchableOpacity>
+
+            {/* Botão de teste do Toggle - TEMPORÁRIO */}
+            <TouchableOpacity
+                style={{
+                    position: 'absolute',
+                    bottom: 180,
+                    right: 20,
+                    backgroundColor: '#3498db',
+                    padding: 15,
+                    borderRadius: 25,
+                    shadowColor: '#000',
+                    shadowOffset: { width: 0, height: 2 },
+                    shadowOpacity: 0.25,
+                    shadowRadius: 3.84,
+                    elevation: 5,
+                }}
+                onPress={() => {
+                    props.navigation.navigate('ToggleTest');
+                }}
+            >
+                <Icon name="swap-horiz" type="material" color="#fff" size={24} />
             </TouchableOpacity>
 
             {showLoadingOverlay && (

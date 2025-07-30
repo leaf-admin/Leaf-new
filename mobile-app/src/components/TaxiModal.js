@@ -12,12 +12,12 @@ import {
 } from 'react-native';
 import { Icon, Button, Input } from 'react-native-elements';
 import MapView, { PROVIDER_GOOGLE, Marker, Polyline } from 'react-native-maps';
-import { colors } from '../common/theme';
+import { colors } from '../common-local/theme';
 var { width, height } = Dimensions.get('window');
 import i18n from '../i18n';
 import RadioForm from 'react-native-simple-radio-button';
 import OtherPerson from './OtherPerson';
-import { fonts } from '../common/font';
+import { fonts } from '../common-local/font';
 import DeviceInfo from 'react-native-device-info';
 
 const hasNotch = DeviceInfo.hasNotch();

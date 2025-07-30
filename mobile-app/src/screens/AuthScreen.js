@@ -15,8 +15,8 @@ import {
 import { useNavigation } from '@react-navigation/native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { api } from 'common';
-import { firebase } from 'common/src/config/configureFirebase';
+import { api } from '../common-local';
+import { firebase } from '../common-local/config/configureFirebase';
 
 
 const LEAF_GREEN = '#1A330E';

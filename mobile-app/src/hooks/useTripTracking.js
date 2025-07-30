@@ -5,7 +5,7 @@ import {
     startTripTracking, 
     endTripTracking, 
     getTripData 
-} from 'common/src/actions/locationactions';
+} from '../common-local/actions/locationactions';
 
 export const useTripTracking = (tripId) => {
     const dispatch = useDispatch();

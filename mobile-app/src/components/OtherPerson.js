@@ -5,8 +5,8 @@ import {
     Dimensions,
     Text
 } from 'react-native';
-import { colors } from '../common/theme';
-import { fonts } from '../common/font';
+import { colors } from '../common-local/theme';
+import { fonts } from '../common-local/font';
 import { Input, CheckBox } from 'react-native-elements';
 import i18n from '../i18n';
 var { width, height } = Dimensions.get('window');

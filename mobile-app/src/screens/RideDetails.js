@@ -18,20 +18,20 @@ import {
 import MapView, { Polyline, PROVIDER_GOOGLE, Marker } from 'react-native-maps';
 import { Avatar } from 'react-native-elements';
 import * as DecodePolyLine from '@mapbox/polyline';
-import { colors } from '../common/theme';
+import { colors } from '../common-local/theme';
 import i18n from '../i18n';
 import StarRating from 'react-native-star-rating-widget';
 import { useSelector, useDispatch } from 'react-redux';
 import { Ionicons, Entypo, Fontisto, AntDesign, Octicons, Feather, MaterialCommunityIcons } from '@expo/vector-icons';
-import { appConsts, MAIN_COLOR } from '../common/sharedFunctions';
+import { appConsts, MAIN_COLOR } from '../common-local/sharedFunctions';
 import moment from 'moment/min/moment-with-locales';
 var { width, height } = Dimensions.get('window');
 import Button from '../components/Button';
-import { fonts } from '../common/font';
+import { fonts } from '../common-local/font';
 import DownloadReceipt from '../components/DownloadReceipt';
-import { getLangKey } from 'common/src/other/getLangKey';
+import { getLangKey } from '../common-local/other/getLangKey';
 import { Icon } from 'react-native-elements';
-import { api } from 'common';
+import { api } from '../common-local';
 
 export default function RideDetails(props) {
     const { t } = i18n;

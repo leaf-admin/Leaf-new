@@ -14,21 +14,27 @@ const users = [
     username: 'admin',
     password: '$2a$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi', // password
     role: 'admin',
-    name: 'Administrador'
+    name: 'Administrador',
+    passwordChanged: false, // Flag para controlar se a senha foi alterada
+    firstAccess: true // Flag para primeiro acesso
   },
   {
     id: 2,
     username: 'manager',
     password: '$2a$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi', // password
     role: 'manager',
-    name: 'Gerente'
+    name: 'Gerente',
+    passwordChanged: false,
+    firstAccess: true
   },
   {
     id: 3,
     username: 'viewer',
     password: '$2a$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi', // password
     role: 'viewer',
-    name: 'Visualizador'
+    name: 'Visualizador',
+    passwordChanged: false,
+    firstAccess: true
   }
 ];
 
@@ -92,14 +98,16 @@ router.post('/login', async (req, res) => {
         id: user.id, 
         username: user.username, 
         role: user.role,
-        name: user.name
+        name: user.name,
+        passwordChanged: user.passwordChanged,
+        firstAccess: user.firstAccess
       },
       JWT_SECRET,
       { expiresIn: JWT_EXPIRES_IN }
     );
 
     // Log de login
-    console.log(`🔐 Login realizado: ${username} (${user.role}) - IP: ${req.ip}`);
+    console.log(`🔐 Login realizado: ${username} (${user.role}) - IP: ${req.ip} - Primeiro acesso: ${user.firstAccess}`);
 
     res.json({
       token,
@@ -107,12 +115,83 @@ router.post('/login', async (req, res) => {
         id: user.id,
         username: user.username,
         role: user.role,
-        name: user.name
+        name: user.name,
+        passwordChanged: user.passwordChanged,
+        firstAccess: user.firstAccess
       }
     });
 
   } catch (error) {
     console.error('❌ Erro no login:', error);
+    res.status(500).json({ error: 'Erro interno do servidor' });
+  }
+});
+
+// Rota para trocar senha (primeiro acesso)
+router.post('/change-password', authenticateToken, async (req, res) => {
+  try {
+    const { currentPassword, newPassword } = req.body;
+
+    if (!currentPassword || !newPassword) {
+      return res.status(400).json({ error: 'Senha atual e nova senha são obrigatórias' });
+    }
+
+    if (newPassword.length < 6) {
+      return res.status(400).json({ error: 'A nova senha deve ter pelo menos 6 caracteres' });
+    }
+
+    // Buscar usuário
+    const user = users.find(u => u.id === req.user.id);
+    if (!user) {
+      return res.status(404).json({ error: 'Usuário não encontrado' });
+    }
+
+    // Verificar senha atual
+    const validCurrentPassword = await bcrypt.compare(currentPassword, user.password);
+    if (!validCurrentPassword) {
+      return res.status(401).json({ error: 'Senha atual incorreta' });
+    }
+
+    // Criptografar nova senha
+    const saltRounds = 10;
+    const hashedNewPassword = await bcrypt.hash(newPassword, saltRounds);
+
+    // Atualizar senha e flags
+    user.password = hashedNewPassword;
+    user.passwordChanged = true;
+    user.firstAccess = false;
+
+    // Gerar novo token
+    const newToken = jwt.sign(
+      { 
+        id: user.id, 
+        username: user.username, 
+        role: user.role,
+        name: user.name,
+        passwordChanged: user.passwordChanged,
+        firstAccess: user.firstAccess
+      },
+      JWT_SECRET,
+      { expiresIn: JWT_EXPIRES_IN }
+    );
+
+    console.log(`🔐 Senha alterada: ${user.username} - IP: ${req.ip}`);
+
+    res.json({
+      message: 'Senha alterada com sucesso!',
+      token: newToken,
+      user: {
+        id: user.id,
+        username: user.username,
+        role: user.role,
+        name: user.name,
+        passwordChanged: user.passwordChanged,
+        firstAccess: user.firstAccess
+      }
+    });
+
+  } catch (error) {
+    console.error('❌ Erro ao alterar senha:', error);
     res.status(500).json({ error: 'Erro interno do servidor' });
   }
 });
@@ -125,7 +204,9 @@ router.get('/verify', authenticateToken, (req, res) => {
       id: req.user.id,
       username: req.user.username,
       role: req.user.role,
-      name: req.user.name
+      name: req.user.name,
+      passwordChanged: req.user.passwordChanged,
+      firstAccess: req.user.firstAccess
     }
   });
 });
@@ -142,7 +223,9 @@ router.get('/users', authenticateToken, authorizeRole(['admin']), (req, res) => 
     id: user.id,
     username: user.username,
     role: user.role,
-    name: user.name
+    name: user.name,
+    passwordChanged: user.passwordChanged,
+    firstAccess: user.firstAccess
   }));
   
   res.json(safeUsers);

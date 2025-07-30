@@ -1,3 +1,5 @@
+/// <reference types="vite/client" />
+
 import { io, Socket } from 'socket.io-client'
 
 // Configuração do WebSocket

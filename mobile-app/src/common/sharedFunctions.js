@@ -3,13 +3,13 @@ import { View, Text, TouchableOpacity, Image, Dimensions  } from 'react-native';
 import { colors } from './theme';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import i18n from '../i18n';
-import { api } from 'common';
+import { api } from '../common-local';
 import TaxiModal from '../components/TaxiModal';
 var { height, width } = Dimensions.get('window');
 import { fonts } from './font';
 import { useState } from 'react';
 import {Tooltip,Icon } from 'react-native-elements';
-import { getLangKey } from 'common/src/other/getLangKey';
+import { getLangKey } from '../common-local/other/getLangKey';
 import { firebase } from '../firebase';
 
 export const MAIN_COLOR = colors.TAXIPRIMARY;
