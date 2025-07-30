@@ -37,25 +37,17 @@ export default function ProfileSelectionScreen() {
   const navigation = useNavigation();
   const [selected, setSelected] = useState(null);
   const [termsAccepted, setTermsAccepted] = useState(false);
-  const fadeAnim = useRef(new Animated.Value(0)).current;
   const cardAnim = useRef(new Animated.Value(0)).current;
   const descriptionAnim = useRef(new Animated.Value(0)).current;
 
   React.useEffect(() => {
-    // Animação de entrada
-    Animated.parallel([
-      Animated.timing(fadeAnim, {
-        toValue: 1,
-        duration: 800,
-        useNativeDriver: true,
-      }),
-      Animated.spring(cardAnim, {
-        toValue: 1,
-        tension: 80,
-        friction: 7,
-        useNativeDriver: true,
-      })
-    ]).start();
+    // Animação simples: deslize de baixo para cima sem bounce
+    Animated.spring(cardAnim, {
+      toValue: 1,
+      tension: 100,
+      friction: 12,
+      useNativeDriver: true,
+    }).start();
   }, []);
 
   const handleOptionPress = (optionKey) => {
@@ -89,12 +81,8 @@ export default function ProfileSelectionScreen() {
 
   return (
     <View style={styles.container}>
-      {/* Background com splash.png */}
-      <Image 
-        source={require('../../assets/images/splash.png')}
-        style={styles.backgroundImage}
-        resizeMode="cover"
-      />
+      {/* Background com cor estática */}
+      <View style={styles.backgroundContainer} />
       
       {/* Logo da Leaf no topo */}
       <View style={styles.logoContainer}>
@@ -110,18 +98,11 @@ export default function ProfileSelectionScreen() {
         style={[
           styles.bottomSheet,
           {
-            opacity: fadeAnim,
             transform: [
               { 
                 translateY: cardAnim.interpolate({
                   inputRange: [0, 1],
                   outputRange: [height, 0]
-                })
-              },
-              { 
-                scale: cardAnim.interpolate({
-                  inputRange: [0, 1],
-                  outputRange: [0.9, 1]
                 })
               }
             ]
@@ -222,13 +203,14 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   
-  // Background com splash.png
-  backgroundImage: {
+  // Background com cor estática
+  backgroundContainer: {
     position: 'absolute',
     top: 0,
     left: 0,
     right: 0,
     bottom: 0,
+    backgroundColor: '#1A330E', // Cor estática para o fundo
     width: width,
     height: height,
   },
