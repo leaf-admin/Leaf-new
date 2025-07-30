@@ -41,11 +41,11 @@ export default function ProfileSelectionScreen() {
   const descriptionAnim = useRef(new Animated.Value(0)).current;
 
   React.useEffect(() => {
-    // Animação simples: deslize de baixo para cima
+    // Animação simples: deslize de baixo para cima sem bounce
     Animated.spring(cardAnim, {
       toValue: 1,
-      tension: 80,
-      friction: 8,
+      tension: 100,
+      friction: 12,
       useNativeDriver: true,
     }).start();
   }, []);
