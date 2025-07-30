@@ -1,14 +1,12 @@
 import auth from '@react-native-firebase/auth';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import whatsAppOTPService from './WhatsAppOTPService';
 
 /**
- * Serviço Híbrido OTP - Combina SMS Firebase e WhatsApp
+ * Serviço OTP Simplificado - Usa apenas SMS Firebase
  * 
  * Estratégia:
- * 1. Tenta SMS primeiro (mais rápido)
- * 2. Se falhar, tenta WhatsApp (mais confiável)
- * 3. Se ambos falharem, retorna erro
+ * 1. Envia SMS via Firebase Auth
+ * 2. Retorna verificationId para verificação
  * 
  * Configuração automática baseada em:
  * - Plano Firebase (Spark vs Blaze)
@@ -20,15 +18,12 @@ class HybridOTPService {
   constructor() {
     this.config = {
       // Estratégia de envio
-      strategy: 'sms_first', // 'sms_first', 'whatsapp_first', 'cost_optimized'
+      strategy: 'sms_only', // Simplificado para apenas SMS
       
       // Configurações Firebase
       firebasePlan: 'blaze', // 'spark' ou 'blaze'
       smsFreeLimit: 10000, // Limite gratuito do plano Spark
       smsCost: 0.01, // Custo por SMS no plano Blaze
-      
-      // Configurações WhatsApp
-      whatsappCost: 0.0139, // Custo por mensagem WhatsApp
       
       // Configurações de retry
       maxRetries: 2,
@@ -42,9 +37,7 @@ class HybridOTPService {
     this.isInitialized = false;
     this.stats = {
       smsSent: 0,
-      whatsappSent: 0,
       smsSuccess: 0,
-      whatsappSuccess: 0,
       totalFailures: 0,
       lastReset: new Date().toISOString(),
     };
@@ -57,16 +50,18 @@ class HybridOTPService {
     try {
       console.log('🔧 HybridOTPService - Inicializando...');
       
+      // Testar se o Firebase Auth está funcionando
+      try {
+        console.log('🔧 HybridOTPService - Testando Firebase Auth...');
+        const authInstance = auth();
+        console.log('✅ HybridOTPService - Firebase Auth disponível');
+      } catch (firebaseError) {
+        console.error('❌ HybridOTPService - Firebase Auth não disponível:', firebaseError);
+        throw new Error('Firebase Auth não está configurado corretamente');
+      }
+      
       // Carregar configurações
       await this.loadConfig();
-      
-      // Inicializar WhatsApp service
-      try {
-        await whatsAppOTPService.initialize();
-        console.log('✅ HybridOTPService - WhatsApp inicializado');
-      } catch (error) {
-        console.warn('⚠️ HybridOTPService - WhatsApp não disponível:', error.message);
-      }
       
       // Determinar estratégia baseada no plano Firebase
       await this.determineStrategy();
@@ -88,7 +83,12 @@ class HybridOTPService {
       const storedConfig = await AsyncStorage.getItem('@hybrid_otp_config');
       if (storedConfig) {
         const parsedConfig = JSON.parse(storedConfig);
-        this.config = { ...this.config, ...parsedConfig };
+        // Garantir que attemptCache seja sempre um Map válido
+        this.config = { 
+          ...this.config, 
+          ...parsedConfig,
+          attemptCache: new Map() // Sempre recriar o Map
+        };
       }
       
       const storedStats = await AsyncStorage.getItem('@hybrid_otp_stats');
@@ -106,7 +106,11 @@ class HybridOTPService {
    */
   async saveConfig() {
     try {
-      await AsyncStorage.setItem('@hybrid_otp_config', JSON.stringify(this.config));
+      // Criar uma cópia do config sem o Map (que não é serializável)
+      const configToSave = { ...this.config };
+      delete configToSave.attemptCache; // Remover o Map antes de salvar
+      
+      await AsyncStorage.setItem('@hybrid_otp_config', JSON.stringify(configToSave));
       await AsyncStorage.setItem('@hybrid_otp_stats', JSON.stringify(this.stats));
     } catch (error) {
       console.warn('⚠️ HybridOTPService - Erro ao salvar configurações:', error);
@@ -120,26 +124,20 @@ class HybridOTPService {
     try {
       // Se for plano Spark e ainda não atingiu o limite gratuito
       if (this.config.firebasePlan === 'spark' && this.stats.smsSent < this.config.smsFreeLimit) {
-        this.config.strategy = 'sms_first';
-        console.log('📊 HybridOTPService - Estratégia: SMS primeiro (gratuito)');
+        this.config.strategy = 'sms_only';
+        console.log('📊 HybridOTPService - Estratégia: SMS apenas (gratuito)');
       }
       // Se for plano Blaze ou atingiu limite gratuito
       else if (this.config.firebasePlan === 'blaze' || this.stats.smsSent >= this.config.smsFreeLimit) {
-        // WhatsApp é mais barato que SMS pago
-        if (this.config.whatsappCost < this.config.smsCost) {
-          this.config.strategy = 'whatsapp_first';
-          console.log('📊 HybridOTPService - Estratégia: WhatsApp primeiro (mais barato)');
-        } else {
-          this.config.strategy = 'sms_first';
-          console.log('📊 HybridOTPService - Estratégia: SMS primeiro (mais barato)');
-        }
+        this.config.strategy = 'sms_only';
+        console.log('📊 HybridOTPService - Estratégia: SMS apenas (mais barato)');
       }
       
       await this.saveConfig();
       
     } catch (error) {
       console.warn('⚠️ HybridOTPService - Erro ao determinar estratégia:', error);
-      this.config.strategy = 'sms_first'; // Fallback
+      this.config.strategy = 'sms_only'; // Fallback
     }
   }
 
@@ -152,13 +150,11 @@ class HybridOTPService {
         await this.initialize();
       }
       
-      const otp = otpCode || this.generateOTP();
       const formattedPhone = this.formatPhoneNumber(phoneNumber);
       
       console.log('📱 HybridOTPService - Enviando OTP:', {
         phone: formattedPhone,
-        strategy: this.config.strategy,
-        otp: otp
+        strategy: this.config.strategy
       });
       
       // Verificar cache de tentativas
@@ -166,22 +162,8 @@ class HybridOTPService {
         throw new Error('Muitas tentativas. Tente novamente em alguns minutos.');
       }
       
-      let result;
-      
-      // Executar estratégia
-      switch (this.config.strategy) {
-        case 'sms_first':
-          result = await this.sendSMSFirst(formattedPhone, otp);
-          break;
-        case 'whatsapp_first':
-          result = await this.sendWhatsAppFirst(formattedPhone, otp);
-          break;
-        case 'cost_optimized':
-          result = await this.sendCostOptimized(formattedPhone, otp);
-          break;
-        default:
-          result = await this.sendSMSFirst(formattedPhone, otp);
-      }
+      // Usar apenas Firebase SMS por enquanto
+      const result = await this.sendSMS(formattedPhone);
       
       // Registrar tentativa
       this.recordAttempt(formattedPhone);
@@ -203,113 +185,36 @@ class HybridOTPService {
         success: false,
         error: error.message,
         timestamp: new Date().toISOString(),
-        provider: 'hybrid'
+        provider: 'sms'
       };
-    }
-  }
-
-  /**
-   * Estratégia: SMS primeiro, WhatsApp como fallback
-   */
-  async sendSMSFirst(phoneNumber, otp) {
-    try {
-      console.log('📤 HybridOTPService - Tentando SMS primeiro...');
-      
-      // Tentar SMS
-      const smsResult = await this.sendSMS(phoneNumber, otp);
-      
-      if (smsResult.success) {
-        this.stats.smsSent++;
-        this.stats.smsSuccess++;
-        return smsResult;
-      }
-      
-      console.log('⚠️ HybridOTPService - SMS falhou, tentando WhatsApp...');
-      
-      // Fallback para WhatsApp
-      const whatsappResult = await this.sendWhatsApp(phoneNumber, otp);
-      
-      if (whatsappResult.success) {
-        this.stats.whatsappSent++;
-        this.stats.whatsappSuccess++;
-        return whatsappResult;
-      }
-      
-      // Ambos falharam
-      throw new Error('SMS e WhatsApp falharam');
-      
-    } catch (error) {
-      throw error;
-    }
-  }
-
-  /**
-   * Estratégia: WhatsApp primeiro, SMS como fallback
-   */
-  async sendWhatsAppFirst(phoneNumber, otp) {
-    try {
-      console.log('📤 HybridOTPService - Tentando WhatsApp primeiro...');
-      
-      // Tentar WhatsApp
-      const whatsappResult = await this.sendWhatsApp(phoneNumber, otp);
-      
-      if (whatsappResult.success) {
-        this.stats.whatsappSent++;
-        this.stats.whatsappSuccess++;
-        return whatsappResult;
-      }
-      
-      console.log('⚠️ HybridOTPService - WhatsApp falhou, tentando SMS...');
-      
-      // Fallback para SMS
-      const smsResult = await this.sendSMS(phoneNumber, otp);
-      
-      if (smsResult.success) {
-        this.stats.smsSent++;
-        this.stats.smsSuccess++;
-        return smsResult;
-      }
-      
-      // Ambos falharam
-      throw new Error('WhatsApp e SMS falharam');
-      
-    } catch (error) {
-      throw error;
-    }
-  }
-
-  /**
-   * Estratégia: Otimizada por custo
-   */
-  async sendCostOptimized(phoneNumber, otp) {
-    try {
-      // Determinar qual é mais barato
-      const smsCost = this.getSMSCost();
-      const whatsappCost = this.config.whatsappCost;
-      
-      if (smsCost <= whatsappCost) {
-        return await this.sendSMSFirst(phoneNumber, otp);
-      } else {
-        return await this.sendWhatsAppFirst(phoneNumber, otp);
-      }
-      
-    } catch (error) {
-      throw error;
     }
   }
 
   /**
    * Envia SMS via Firebase
    */
-  async sendSMS(phoneNumber, otp) {
+  async sendSMS(phoneNumber) {
     try {
       console.log('📱 HybridOTPService - Enviando SMS via Firebase...');
+      console.log('📱 HybridOTPService - Número:', phoneNumber);
       
-      const confirmation = await auth().verifyPhoneNumber(phoneNumber);
+      // Verificar se o Firebase Auth está disponível
+      if (!auth) {
+        throw new Error('Firebase Auth não está disponível');
+      }
+      
+      // Formatar o número para o padrão internacional
+      const formattedPhone = phoneNumber.startsWith('+') ? phoneNumber : `+${phoneNumber}`;
+      console.log('📱 HybridOTPService - Número formatado:', formattedPhone);
+      
+      // Enviar código de verificação
+      const confirmation = await auth().verifyPhoneNumber(formattedPhone);
+      
+      console.log('✅ HybridOTPService - SMS enviado com sucesso');
+      console.log('✅ HybridOTPService - Verification ID:', confirmation.verificationId);
       
       return {
         success: true,
-        otp: otp,
         verificationId: confirmation.verificationId,
         timestamp: new Date().toISOString(),
         provider: 'sms',
@@ -318,42 +223,15 @@ class HybridOTPService {
       
     } catch (error) {
       console.error('❌ HybridOTPService - Erro no SMS:', error);
+      console.error('❌ HybridOTPService - Código do erro:', error.code);
+      console.error('❌ HybridOTPService - Mensagem do erro:', error.message);
       
       return {
         success: false,
         error: error.message,
+        errorCode: error.code,
         timestamp: new Date().toISOString(),
         provider: 'sms'
-      };
-    }
-  }
-
-  /**
-   * Envia WhatsApp
-   */
-  async sendWhatsApp(phoneNumber, otp) {
-    try {
-      console.log('📱 HybridOTPService - Enviando WhatsApp...');
-      
-      const result = await whatsAppOTPService.sendOTP(phoneNumber, otp);
-      
-      if (result.success) {
-        return {
-          ...result,
-          cost: this.config.whatsappCost
-        };
-      }
-      
-      return result;
-      
-    } catch (error) {
-      console.error('❌ HybridOTPService - Erro no WhatsApp:', error);
-      
-      return {
-        success: false,
-        error: error.message,
-        timestamp: new Date().toISOString(),
-        provider: 'whatsapp'
       };
     }
   }
@@ -432,9 +310,6 @@ class HybridOTPService {
       if (result.provider === 'sms') {
         this.stats.smsSent++;
         this.stats.smsSuccess++;
-      } else if (result.provider === 'whatsapp') {
-        this.stats.whatsappSent++;
-        this.stats.whatsappSuccess++;
       }
     } else {
       this.stats.totalFailures++;
@@ -447,8 +322,8 @@ class HybridOTPService {
    * Obtém estatísticas do serviço
    */
   getStats() {
-    const totalSent = this.stats.smsSent + this.stats.whatsappSent;
-    const totalSuccess = this.stats.smsSuccess + this.stats.whatsappSuccess;
+    const totalSent = this.stats.smsSent;
+    const totalSuccess = this.stats.smsSuccess;
     const successRate = totalSent > 0 ? (totalSuccess / totalSent) * 100 : 0;
     
     return {
@@ -468,8 +343,7 @@ class HybridOTPService {
    */
   calculateEstimatedCost() {
     const smsCost = this.stats.smsSent * this.getSMSCost();
-    const whatsappCost = this.stats.whatsappSent * this.config.whatsappCost;
-    return (smsCost + whatsappCost).toFixed(4);
+    return smsCost.toFixed(4);
   }
 
   /**
@@ -501,9 +375,7 @@ class HybridOTPService {
   async resetStats() {
     this.stats = {
       smsSent: 0,
-      whatsappSent: 0,
       smsSuccess: 0,
-      whatsappSuccess: 0,
       totalFailures: 0,
       lastReset: new Date().toISOString(),
     };
