@@ -50,6 +50,16 @@ class HybridOTPService {
     try {
       console.log('🔧 HybridOTPService - Inicializando...');
       
+      // Testar se o Firebase Auth está funcionando
+      try {
+        console.log('🔧 HybridOTPService - Testando Firebase Auth...');
+        const authInstance = auth();
+        console.log('✅ HybridOTPService - Firebase Auth disponível');
+      } catch (firebaseError) {
+        console.error('❌ HybridOTPService - Firebase Auth não disponível:', firebaseError);
+        throw new Error('Firebase Auth não está configurado corretamente');
+      }
+      
       // Carregar configurações
       await this.loadConfig();
       
@@ -186,8 +196,22 @@ class HybridOTPService {
   async sendSMS(phoneNumber) {
     try {
       console.log('📱 HybridOTPService - Enviando SMS via Firebase...');
+      console.log('📱 HybridOTPService - Número:', phoneNumber);
       
-      const confirmation = await auth().verifyPhoneNumber(phoneNumber);
+      // Verificar se o Firebase Auth está disponível
+      if (!auth) {
+        throw new Error('Firebase Auth não está disponível');
+      }
+      
+      // Formatar o número para o padrão internacional
+      const formattedPhone = phoneNumber.startsWith('+') ? phoneNumber : `+${phoneNumber}`;
+      console.log('📱 HybridOTPService - Número formatado:', formattedPhone);
+      
+      // Enviar código de verificação
+      const confirmation = await auth().verifyPhoneNumber(formattedPhone);
+      
+      console.log('✅ HybridOTPService - SMS enviado com sucesso');
+      console.log('✅ HybridOTPService - Verification ID:', confirmation.verificationId);
       
       return {
         success: true,
@@ -199,10 +223,13 @@ class HybridOTPService {
       
     } catch (error) {
       console.error('❌ HybridOTPService - Erro no SMS:', error);
+      console.error('❌ HybridOTPService - Código do erro:', error.code);
+      console.error('❌ HybridOTPService - Mensagem do erro:', error.message);
       
       return {
         success: false,
         error: error.message,
+        errorCode: error.code,
         timestamp: new Date().toISOString(),
         provider: 'sms'
       };
