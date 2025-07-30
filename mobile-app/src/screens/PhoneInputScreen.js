@@ -9,7 +9,10 @@ import {
   ActivityIndicator,
   Dimensions,
   Platform,
-  Animated
+  Animated,
+  Image,
+  KeyboardAvoidingView,
+  Keyboard
 } from 'react-native';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -34,7 +37,7 @@ export default function PhoneInputScreen() {
   const [name, setName] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [termsAccepted, setTermsAccepted] = useState(false);
-  const [isDetectingPhone, setIsDetectingPhone] = useState(false);
+  const [isKeyboardVisible, setIsKeyboardVisible] = useState(false);
   
   const userType = route.params?.userType || 'passenger';
 
@@ -57,6 +60,19 @@ export default function PhoneInputScreen() {
         useNativeDriver: true,
       })
     ]).start();
+
+    // Listeners do teclado
+    const keyboardDidShowListener = Keyboard.addListener('keyboardDidShow', () => {
+      setIsKeyboardVisible(true);
+    });
+    const keyboardDidHideListener = Keyboard.addListener('keyboardDidHide', () => {
+      setIsKeyboardVisible(false);
+    });
+
+    return () => {
+      keyboardDidShowListener.remove();
+      keyboardDidHideListener.remove();
+    };
   }, []);
 
   // Função para formatar o telefone no padrão brasileiro
@@ -64,43 +80,19 @@ export default function PhoneInputScreen() {
     // Remove tudo que não é número
     const numbers = text.replace(/\D/g, '');
     
-    // Aplica a máscara XX XXXXX-XXXX
+    // Aplica a máscara (XX) XXXXX-XXXX
     if (numbers.length <= 2) {
       return numbers;
     } else if (numbers.length <= 7) {
-      return `${numbers.slice(0, 2)} ${numbers.slice(2)}`;
+      return `(${numbers.slice(0, 2)}) ${numbers.slice(2)}`;
     } else {
-      return `${numbers.slice(0, 2)} ${numbers.slice(2, 7)}-${numbers.slice(7, 11)}`;
+      return `(${numbers.slice(0, 2)}) ${numbers.slice(2, 7)}-${numbers.slice(7, 11)}`;
     }
   };
 
   const handlePhoneChange = (text) => {
     const formatted = formatPhoneNumber(text);
     setPhone(formatted);
-  };
-
-  // Função para detectar automaticamente o número do telefone
-  const detectPhoneNumber = async () => {
-    setIsDetectingPhone(true);
-    
-    try {
-      // Simular detecção de telefone (em produção, usar APIs nativas)
-      console.log("PhoneInputScreen - Detectando número do telefone...");
-      
-      // Aguardar um pouco para simular a detecção
-      await new Promise(resolve => setTimeout(resolve, 2000));
-      
-      // Para demonstração, usar um número fictício
-      const detectedNumber = "21 99999-9999";
-      setPhone(detectedNumber);
-      
-      console.log("PhoneInputScreen - Número detectado:", detectedNumber);
-    } catch (error) {
-      console.error("PhoneInputScreen - Erro ao detectar telefone:", error);
-      Alert.alert("Erro", "Não foi possível detectar o número do telefone automaticamente.");
-    } finally {
-      setIsDetectingPhone(false);
-    }
   };
 
   const validatePhone = () => {
@@ -214,22 +206,23 @@ export default function PhoneInputScreen() {
   };
 
   return (
-    <View style={styles.container}>
-      {/* Header - FORA DO BOTTOM SHEET */}
-      <View style={styles.header}>
-        {/* Círculo de progresso */}
-        <View style={styles.progressContainer}>
-          <View style={styles.progressCircle}>
-            <Text style={styles.progressText}>2</Text>
-          </View>
+    <KeyboardAvoidingView 
+      style={styles.container}
+      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+    >
+      {/* Background com cor estática */}
+      <View style={styles.backgroundContainer} />
+      
+      {/* Logo da Leaf no topo - só mostra quando teclado não está visível */}
+      {!isKeyboardVisible && (
+        <View style={styles.logoContainer}>
+          <Image 
+            source={require('../../assets/images/leaftransparentbg.png')}
+            style={styles.logo}
+            resizeMode="contain"
+          />
         </View>
-        
-        {/* Contagem de progresso */}
-        <Text style={styles.progressCount}>Passo 2 de 4</Text>
-        
-        {/* Nome da tela */}
-        <Text style={styles.screenTitle}>Insira seu telefone</Text>
-      </View>
+      )}
 
       {/* BOTTOM SHEET ULTRA FLAT */}
       <Animated.View 
@@ -286,25 +279,14 @@ export default function PhoneInputScreen() {
               style={styles.phoneInput}
               value={phone}
               onChangeText={handlePhoneChange}
-              placeholder="123 4567 8901"
+              placeholder="(21) 99999-9999"
               placeholderTextColor={GRAY}
               keyboardType="phone-pad"
               maxLength={15}
             />
           </View>
 
-          {/* Botão de Detectar Telefone */}
-          <TouchableOpacity 
-            style={styles.detectButton}
-            onPress={detectPhoneNumber}
-            disabled={isDetectingPhone}
-          >
-            {isDetectingPhone ? (
-              <ActivityIndicator size="small" color={LEAF_GREEN} />
-            ) : (
-              <Text style={styles.detectButtonText}>Detectar automaticamente</Text>
-            )}
-          </TouchableOpacity>
+
 
           {/* Checkbox de Termos */}
           <View style={styles.termsContainer}>
@@ -341,7 +323,7 @@ export default function PhoneInputScreen() {
           </TouchableOpacity>
         </View>
       </Animated.View>
-    </View>
+    </KeyboardAvoidingView>
   );
 }
 
@@ -351,40 +333,40 @@ const styles = StyleSheet.create({
     backgroundColor: LEAF_GREEN,
   },
   
-  // Header - FORA DO BOTTOM SHEET
-  header: {
+  // Background com cor estática
+  backgroundContainer: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: '#1A330E', // Cor estática para o fundo
+    width: width,
+    height: height,
+  },
+  
+  // Logo da Leaf
+  logoContainer: {
+    position: 'absolute',
+    top: 60,
+    left: 0,
+    right: 0,
     alignItems: 'center',
-    paddingTop: 60,
-    paddingBottom: 20,
     zIndex: 1,
   },
-  progressContainer: {
-    marginBottom: 16,
-  },
-  progressCircle: {
-    width: 60,
-    height: 60,
-    borderRadius: 30,
-    backgroundColor: WHITE,
+  
+  // Header - IDÊNTICO AO DA TELA ANTERIOR
+  header: {
+    position: 'absolute',
+    top: 60,
+    left: 0,
+    right: 0,
     alignItems: 'center',
-    justifyContent: 'center',
+    zIndex: 1,
   },
-  progressText: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    color: LEAF_GREEN,
-  },
-  progressCount: {
-    fontSize: 16,
-    color: WHITE,
-    marginBottom: 8,
-    fontWeight: '500',
-  },
-  screenTitle: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    color: WHITE,
-    textAlign: 'center',
+  logo: {
+    width: 389,
+    height: 194,
   },
   
   // BOTTOM SHEET ULTRA FLAT
@@ -394,26 +376,33 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     height: height * 0.65,
-    backgroundColor: '#E8F5E8',
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
-    padding: 24,
+    backgroundColor: WHITE,
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    padding: 32,
+    paddingBottom: 40,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: -4 },
+    shadowOpacity: 0.1,
+    shadowRadius: 12,
+    elevation: 8,
   },
   
   // Handle do bottom sheet
   handle: {
     width: 40,
-    height: 4,
-    backgroundColor: '#C0C0C0',
-    borderRadius: 2,
+    height: 6,
+    backgroundColor: '#E5E7EB',
+    borderRadius: 3,
     alignSelf: 'center',
-    marginBottom: 24,
+    marginBottom: 20,
   },
   
   // Formulário
   formContainer: {
     flex: 1,
     marginBottom: 24,
+    paddingTop: 20,
   },
   
   // Campo de nome
@@ -423,6 +412,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 12,
     marginBottom: 16,
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
   },
   nameInput: {
     fontSize: 16,
@@ -439,6 +430,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 12,
     marginBottom: 16,
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
   },
   countrySelector: {
     flexDirection: 'row',
@@ -464,20 +457,6 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: BLACK,
     paddingVertical: 8,
-  },
-  
-  // Botão detectar
-  detectButton: {
-    backgroundColor: WHITE,
-    borderRadius: 12,
-    paddingVertical: 12,
-    alignItems: 'center',
-    marginBottom: 24,
-  },
-  detectButtonText: {
-    fontSize: 14,
-    color: LEAF_GREEN,
-    fontWeight: '500',
   },
   
   // Termos
