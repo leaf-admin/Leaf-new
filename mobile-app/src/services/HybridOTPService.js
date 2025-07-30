@@ -73,7 +73,12 @@ class HybridOTPService {
       const storedConfig = await AsyncStorage.getItem('@hybrid_otp_config');
       if (storedConfig) {
         const parsedConfig = JSON.parse(storedConfig);
-        this.config = { ...this.config, ...parsedConfig };
+        // Garantir que attemptCache seja sempre um Map válido
+        this.config = { 
+          ...this.config, 
+          ...parsedConfig,
+          attemptCache: new Map() // Sempre recriar o Map
+        };
       }
       
       const storedStats = await AsyncStorage.getItem('@hybrid_otp_stats');
@@ -91,7 +96,11 @@ class HybridOTPService {
    */
   async saveConfig() {
     try {
-      await AsyncStorage.setItem('@hybrid_otp_config', JSON.stringify(this.config));
+      // Criar uma cópia do config sem o Map (que não é serializável)
+      const configToSave = { ...this.config };
+      delete configToSave.attemptCache; // Remover o Map antes de salvar
+      
+      await AsyncStorage.setItem('@hybrid_otp_config', JSON.stringify(configToSave));
       await AsyncStorage.setItem('@hybrid_otp_stats', JSON.stringify(this.stats));
     } catch (error) {
       console.warn('⚠️ HybridOTPService - Erro ao salvar configurações:', error);
