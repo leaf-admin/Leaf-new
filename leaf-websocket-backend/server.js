@@ -21,6 +21,9 @@ const PromoService = require('./services/promo-service');
 // Driver Approval integration
 const DriverApprovalService = require('./services/driver-approval-service');
 
+// Sync integration
+const SyncService = require('./services/sync-service');
+
 // Importar sistemas de monitoramento
 const LatencyMonitor = require('./metrics/latency-monitor');
 const DockerMonitor = require('./monitoring/docker-monitor');
@@ -81,6 +84,16 @@ try {
     console.log('✅ Driver Approval Service inicializado');
 } catch (error) {
     console.error('❌ Erro ao inicializar Driver Approval Service:', error);
+}
+
+// Inicializar Sync Service
+let syncService = null;
+try {
+    syncService = new SyncService();
+    syncService.initialize();
+    console.log('✅ Sync Service inicializado');
+} catch (error) {
+    console.error('❌ Erro ao inicializar Sync Service:', error);
 }
 
 // Função para obter socket por userId
