@@ -185,6 +185,104 @@ class MetricsApiService {
       return false;
     }
   }
+
+  // ===== MÉTODOS DE APROVAÇÃO DE MOTORISTAS =====
+
+  // Buscar aprovações de motoristas
+  async getDriverApprovals(status: string = 'pending', page: number = 0, limit: number = 20): Promise<{
+    result: {
+      approvals: any[];
+      total: number;
+      page: number;
+      limit: number;
+      hasMore: boolean;
+    };
+  }> {
+    try {
+      const response = await fetch(`${this.baseUrl}/driver-approvals?status=${status}&page=${page}&limit=${limit}`);
+      
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+      
+      const data = await response.json();
+      return data;
+    } catch (error) {
+      console.error('Erro ao buscar aprovações de motoristas:', error);
+      throw error;
+    }
+  }
+
+  // Buscar estatísticas de aprovação
+  async getDriverApprovalStats(): Promise<{
+    stats: {
+      totalApprovals: number;
+      pendingApprovals: number;
+      approvedDrivers: number;
+      rejectedDrivers: number;
+      approvalRate: number;
+    };
+  }> {
+    try {
+      const response = await fetch(`${this.baseUrl}/driver-approval-stats`);
+      
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+      
+      const data = await response.json();
+      return data;
+    } catch (error) {
+      console.error('Erro ao buscar estatísticas de aprovação:', error);
+      throw error;
+    }
+  }
+
+  // Aprovar motorista
+  async approveDriver(approvalId: string): Promise<{ success: boolean; result: any }> {
+    try {
+      const response = await fetch(`${this.baseUrl}/driver-approve`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ approvalId }),
+      });
+      
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+      
+      const data = await response.json();
+      return data;
+    } catch (error) {
+      console.error('Erro ao aprovar motorista:', error);
+      throw error;
+    }
+  }
+
+  // Rejeitar motorista
+  async rejectDriver(approvalId: string, reason: string): Promise<{ success: boolean; result: any }> {
+    try {
+      const response = await fetch(`${this.baseUrl}/driver-reject`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ approvalId, reason }),
+      });
+      
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+      
+      const data = await response.json();
+      return data;
+    } catch (error) {
+      console.error('Erro ao rejeitar motorista:', error);
+      throw error;
+    }
+  }
 }
 
 // Instância singleton

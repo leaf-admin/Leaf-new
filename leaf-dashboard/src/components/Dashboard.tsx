@@ -62,6 +62,13 @@ const Dashboard: React.FC = () => {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [isDarkMode, setIsDarkMode] = useState(false);
+  
+  // Estados para aprovação de motoristas
+  const [driverApprovals, setDriverApprovals] = useState<any[]>([]);
+  const [driverApprovalStats, setDriverApprovalStats] = useState<any>(null);
+  const [driverApprovalFilter, setDriverApprovalFilter] = useState<'pending' | 'approved' | 'rejected'>('pending');
+  const [rejectModal, setRejectModal] = useState<{ show: boolean; approvalId: string | null }>({ show: false, approvalId: null });
+  const [rejectReason, setRejectReason] = useState('');
 
   // Alternar tema escuro/claro
   const toggleTheme = () => {
@@ -114,12 +121,83 @@ const Dashboard: React.FC = () => {
     }
   };
 
+  // ===== FUNÇÕES DE APROVAÇÃO DE MOTORISTAS =====
+  
+  // Buscar aprovações de motoristas
+  const fetchDriverApprovals = async () => {
+    try {
+      const data = await metricsApi.getDriverApprovals(driverApprovalFilter);
+      setDriverApprovals(data.result?.approvals || []);
+    } catch (err) {
+      console.error('Erro ao buscar aprovações de motoristas:', err);
+    }
+  };
+
+  // Buscar estatísticas de aprovação
+  const fetchDriverApprovalStats = async () => {
+    try {
+      const data = await metricsApi.getDriverApprovalStats();
+      setDriverApprovalStats(data.stats);
+    } catch (err) {
+      console.error('Erro ao buscar estatísticas de aprovação:', err);
+    }
+  };
+
+  // Aprovar motorista
+  const handleApproveDriver = async (approvalId: string) => {
+    try {
+      await metricsApi.approveDriver(approvalId);
+      
+      // Recarregar dados
+      await fetchDriverApprovals();
+      await fetchDriverApprovalStats();
+      
+      // Mostrar notificação de sucesso
+      alert('Motorista aprovado com sucesso!');
+    } catch (err) {
+      console.error('Erro ao aprovar motorista:', err);
+      alert('Erro ao aprovar motorista. Tente novamente.');
+    }
+  };
+
+  // Rejeitar motorista
+  const handleRejectDriver = async () => {
+    if (!rejectModal.approvalId || !rejectReason.trim()) {
+      alert('Por favor, informe o motivo da rejeição.');
+      return;
+    }
+
+    try {
+      await metricsApi.rejectDriver(rejectModal.approvalId, rejectReason);
+      
+      // Fechar modal
+      setRejectModal({ show: false, approvalId: null });
+      setRejectReason('');
+      
+      // Recarregar dados
+      await fetchDriverApprovals();
+      await fetchDriverApprovalStats();
+      
+      // Mostrar notificação de sucesso
+      alert('Motorista rejeitado com sucesso!');
+    } catch (err) {
+      console.error('Erro ao rejeitar motorista:', err);
+      alert('Erro ao rejeitar motorista. Tente novamente.');
+    }
+  };
+
   // Carregar métricas iniciais
   useEffect(() => {
     fetchMetrics();
     fetchUserStats();
     fetchFinancialStats();
+    fetchDriverApprovalStats();
   }, []);
+
+  // Carregar aprovações quando o filtro mudar
+  useEffect(() => {
+    fetchDriverApprovals();
+  }, [driverApprovalFilter]);
 
   // Atualizar métricas periodicamente
   useEffect(() => {
@@ -797,6 +875,247 @@ const Dashboard: React.FC = () => {
                 </div>
               </div>
             </div>
+
+            {/* 🚗 APROVAÇÃO DE MOTORISTAS - SUPERPANEL */}
+            <div className="bg-white/70 dark:bg-gray-800/70 rounded-2xl shadow-xl backdrop-blur-sm border border-gray-200/50 dark:border-gray-700/50 p-6">
+              <div className="flex items-center justify-between mb-6">
+                <div className="flex items-center space-x-3">
+                  <div className="p-2 bg-gradient-to-br from-green-500 to-emerald-600 rounded-lg">
+                    <Car className="h-5 w-5 text-white" />
+                  </div>
+                  <h3 className="text-lg font-bold text-gray-900 dark:text-white">
+                    Aprovação de Motoristas
+                  </h3>
+                </div>
+                <div className="flex space-x-2">
+                  <button 
+                    onClick={() => setDriverApprovalFilter('pending')}
+                    className={`px-3 py-1 rounded-lg text-sm font-medium transition-colors ${
+                      driverApprovalFilter === 'pending' 
+                        ? 'bg-green-500 text-white' 
+                        : 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300'
+                    }`}
+                  >
+                    Pendentes
+                  </button>
+                  <button 
+                    onClick={() => setDriverApprovalFilter('approved')}
+                    className={`px-3 py-1 rounded-lg text-sm font-medium transition-colors ${
+                      driverApprovalFilter === 'approved' 
+                        ? 'bg-blue-500 text-white' 
+                        : 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300'
+                    }`}
+                  >
+                    Aprovados
+                  </button>
+                  <button 
+                    onClick={() => setDriverApprovalFilter('rejected')}
+                    className={`px-3 py-1 rounded-lg text-sm font-medium transition-colors ${
+                      driverApprovalFilter === 'rejected' 
+                        ? 'bg-red-500 text-white' 
+                        : 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300'
+                    }`}
+                  >
+                    Rejeitados
+                  </button>
+                </div>
+              </div>
+
+              {/* Estatísticas Rápidas */}
+              <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
+                <div className="bg-gradient-to-br from-yellow-50 to-yellow-100 dark:from-yellow-900/20 dark:to-yellow-800/20 rounded-xl p-4 border border-yellow-200 dark:border-yellow-700/50">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-sm font-medium text-yellow-800 dark:text-yellow-200">Pendentes</p>
+                      <p className="text-2xl font-bold text-yellow-900 dark:text-yellow-100">
+                        {driverApprovalStats?.pendingApprovals || 0}
+                      </p>
+                    </div>
+                    <div className="p-2 bg-yellow-500 rounded-lg">
+                      <Clock className="h-5 w-5 text-white" />
+                    </div>
+                  </div>
+                </div>
+
+                <div className="bg-gradient-to-br from-green-50 to-green-100 dark:from-green-900/20 dark:to-green-800/20 rounded-xl p-4 border border-green-200 dark:border-green-700/50">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-sm font-medium text-green-800 dark:text-green-200">Aprovados</p>
+                      <p className="text-2xl font-bold text-green-900 dark:text-green-100">
+                        {driverApprovalStats?.approvedDrivers || 0}
+                      </p>
+                    </div>
+                    <div className="p-2 bg-green-500 rounded-lg">
+                      <UserCheck className="h-5 w-5 text-white" />
+                    </div>
+                  </div>
+                </div>
+
+                <div className="bg-gradient-to-br from-red-50 to-red-100 dark:from-red-900/20 dark:to-red-800/20 rounded-xl p-4 border border-red-200 dark:border-red-700/50">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-sm font-medium text-red-800 dark:text-red-200">Rejeitados</p>
+                      <p className="text-2xl font-bold text-red-900 dark:text-red-100">
+                        {driverApprovalStats?.rejectedDrivers || 0}
+                      </p>
+                    </div>
+                    <div className="p-2 bg-red-500 rounded-lg">
+                      <AlertTriangle className="h-5 w-5 text-white" />
+                    </div>
+                  </div>
+                </div>
+
+                <div className="bg-gradient-to-br from-blue-50 to-blue-100 dark:from-blue-900/20 dark:to-blue-800/20 rounded-xl p-4 border border-blue-200 dark:border-blue-700/50">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-sm font-medium text-blue-800 dark:text-blue-200">Taxa Aprovação</p>
+                      <p className="text-2xl font-bold text-blue-900 dark:text-blue-100">
+                        {driverApprovalStats?.approvalRate || 0}%
+                      </p>
+                    </div>
+                    <div className="p-2 bg-blue-500 rounded-lg">
+                      <Percent className="h-5 w-5 text-white" />
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Lista de Aprovações */}
+              <div className="space-y-4">
+                {driverApprovals.length > 0 ? (
+                  driverApprovals.map((approval) => (
+                    <div key={approval.id} className="bg-gray-50/50 dark:bg-gray-700/50 rounded-xl p-4 border border-gray-200/50 dark:border-gray-600/50">
+                      <div className="flex items-center justify-between mb-3">
+                        <div className="flex items-center space-x-3">
+                          <div className="w-10 h-10 bg-gradient-to-br from-blue-500 to-purple-600 rounded-full flex items-center justify-center">
+                            <span className="text-white font-bold text-sm">
+                              {approval.driver.name.charAt(0).toUpperCase()}
+                            </span>
+                          </div>
+                          <div>
+                            <h4 className="font-semibold text-gray-900 dark:text-white">
+                              {approval.driver.name}
+                            </h4>
+                            <p className="text-sm text-gray-600 dark:text-gray-400">
+                              {approval.driver.email}
+                            </p>
+                          </div>
+                        </div>
+                        <div className="flex items-center space-x-2">
+                          <span className={`px-2 py-1 rounded-full text-xs font-medium ${
+                            approval.status === 'pending' 
+                              ? 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/20 dark:text-yellow-200'
+                              : approval.status === 'approved'
+                              ? 'bg-green-100 text-green-800 dark:bg-green-900/20 dark:text-green-200'
+                              : 'bg-red-100 text-red-800 dark:bg-red-900/20 dark:text-red-200'
+                          }`}>
+                            {approval.status === 'pending' ? 'Pendente' :
+                             approval.status === 'approved' ? 'Aprovado' : 'Rejeitado'}
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Informações do Veículo */}
+                      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-3">
+                        <div className="text-sm">
+                          <span className="text-gray-600 dark:text-gray-400">Veículo:</span>
+                          <p className="font-medium text-gray-900 dark:text-white">
+                            {approval.vehicle.make} {approval.vehicle.model}
+                          </p>
+                        </div>
+                        <div className="text-sm">
+                          <span className="text-gray-600 dark:text-gray-400">Ano:</span>
+                          <p className="font-medium text-gray-900 dark:text-white">
+                            {approval.vehicle.year}
+                          </p>
+                        </div>
+                        <div className="text-sm">
+                          <span className="text-gray-600 dark:text-gray-400">Placa:</span>
+                          <p className="font-medium text-gray-900 dark:text-white">
+                            {approval.vehicle.plate}
+                          </p>
+                        </div>
+                        <div className="text-sm">
+                          <span className="text-gray-600 dark:text-gray-400">Documentos:</span>
+                          <p className="font-medium text-gray-900 dark:text-white">
+                            {approval.documents.length}/{approval.approvalCriteria.documentCheck.required.length}
+                          </p>
+                        </div>
+                      </div>
+
+                      {/* Critérios de Aprovação */}
+                      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
+                        <div className="flex items-center space-x-2">
+                          <div className={`w-3 h-3 rounded-full ${
+                            approval.approvalCriteria.ageCheck.isValid ? 'bg-green-500' : 'bg-red-500'
+                          }`}></div>
+                          <span className="text-sm text-gray-600 dark:text-gray-400">
+                            Idade: {approval.approvalCriteria.ageCheck.age} anos
+                          </span>
+                        </div>
+                        <div className="flex items-center space-x-2">
+                          <div className={`w-3 h-3 rounded-full ${
+                            approval.approvalCriteria.licenseCheck.isValid ? 'bg-green-500' : 'bg-red-500'
+                          }`}></div>
+                          <span className="text-sm text-gray-600 dark:text-gray-400">
+                            Licença: {approval.approvalCriteria.licenseCheck.yearsHeld} anos
+                          </span>
+                        </div>
+                        <div className="flex items-center space-x-2">
+                          <div className={`w-3 h-3 rounded-full ${
+                            approval.approvalCriteria.vehicleCheck.isValid ? 'bg-green-500' : 'bg-red-500'
+                          }`}></div>
+                          <span className="text-sm text-gray-600 dark:text-gray-400">
+                            Veículo: {approval.approvalCriteria.vehicleCheck.year}
+                          </span>
+                        </div>
+                        <div className="flex items-center space-x-2">
+                          <div className={`w-3 h-3 rounded-full ${
+                            approval.approvalCriteria.documentCheck.isComplete ? 'bg-green-500' : 'bg-red-500'
+                          }`}></div>
+                          <span className="text-sm text-gray-600 dark:text-gray-400">
+                            Documentos: {approval.approvalCriteria.documentCheck.isComplete ? 'Completo' : 'Incompleto'}
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Ações */}
+                      {approval.status === 'pending' && (
+                        <div className="flex space-x-2">
+                          <button
+                            onClick={() => handleApproveDriver(approval.id)}
+                            className="px-4 py-2 bg-green-500 hover:bg-green-600 text-white rounded-lg font-medium transition-colors flex items-center space-x-2"
+                          >
+                            <UserCheck className="h-4 w-4" />
+                            <span>Aprovar</span>
+                          </button>
+                          <button
+                            onClick={() => setRejectModal({ show: true, approvalId: approval.id })}
+                            className="px-4 py-2 bg-red-500 hover:bg-red-600 text-white rounded-lg font-medium transition-colors flex items-center space-x-2"
+                          >
+                            <AlertTriangle className="h-4 w-4" />
+                            <span>Rejeitar</span>
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  ))
+                ) : (
+                  <div className="text-center py-8">
+                    <Car className="h-12 w-12 text-gray-400 mx-auto mb-4" />
+                    <p className="text-gray-500 dark:text-gray-400 font-medium">
+                      Nenhuma aprovação {driverApprovalFilter === 'pending' ? 'pendente' : 
+                                       driverApprovalFilter === 'approved' ? 'aprovada' : 'rejeitada'}
+                    </p>
+                    <p className="text-sm text-gray-400 dark:text-gray-500 mt-1">
+                      {driverApprovalFilter === 'pending' ? 'Todos os motoristas foram processados' :
+                       driverApprovalFilter === 'approved' ? 'Nenhum motorista foi aprovado ainda' :
+                       'Nenhum motorista foi rejeitado ainda'}
+                    </p>
+                  </div>
+                )}
+              </div>
+            </div>
           </div>
         ) : (
           <div className="text-center py-12">
@@ -808,6 +1127,49 @@ const Dashboard: React.FC = () => {
           </div>
         )}
       </main>
+
+      {/* Modal de Rejeição */}
+      {rejectModal.show && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white dark:bg-gray-800 rounded-2xl p-6 max-w-md w-full mx-4">
+            <div className="flex items-center space-x-3 mb-4">
+              <div className="p-2 bg-red-500 rounded-lg">
+                <AlertTriangle className="h-5 w-5 text-white" />
+              </div>
+              <h3 className="text-lg font-bold text-gray-900 dark:text-white">
+                Rejeitar Motorista
+              </h3>
+            </div>
+            
+            <p className="text-gray-600 dark:text-gray-400 mb-4">
+              Por favor, informe o motivo da rejeição. Esta informação será registrada no histórico.
+            </p>
+            
+            <textarea
+              value={rejectReason}
+              onChange={(e) => setRejectReason(e.target.value)}
+              placeholder="Ex: Documentos incompletos, idade insuficiente, veículo não adequado..."
+              className="w-full p-3 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white resize-none"
+              rows={4}
+            />
+            
+            <div className="flex space-x-3 mt-6">
+              <button
+                onClick={() => setRejectModal({ show: false, approvalId: null })}
+                className="flex-1 px-4 py-2 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={handleRejectDriver}
+                className="flex-1 px-4 py-2 bg-red-500 hover:bg-red-600 text-white rounded-lg font-medium transition-colors"
+              >
+                Rejeitar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
