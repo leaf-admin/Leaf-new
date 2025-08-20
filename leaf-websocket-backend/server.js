@@ -2865,10 +2865,31 @@ io.on('connection', (socket) => {
     });
 });
 
-// Inicializar servidor
-server.listen(PORT, () => {
-    logger.info('Servidor WebSocket iniciado com sucesso', {
+// Inicializar servidor HTTP
+app.listen(PORT, () => {
+    logger.info('Servidor HTTP iniciado com sucesso', {
         port: PORT,
+        timestamp: new Date().toISOString(),
+        environment: process.env.NODE_ENV || 'development'
+    });
+    
+    console.log(`🌐 Servidor HTTP rodando na porta ${PORT}`);
+    console.log(`🔗 URL: http://localhost:${PORT}`);
+    console.log('✅ Endpoints HTTP disponíveis:');
+    console.log('   - GET  /health');
+    console.log('   - GET  /metrics');
+    console.log('   - GET  /stats/users');
+    console.log('   - GET  /stats/financial');
+    console.log('   - GET  /metrics/realtime');
+    console.log('   - GET  /driver-approvals');
+    console.log('   - POST /driver-approve');
+    console.log('   - POST /driver-reject');
+});
+
+// Inicializar servidor WebSocket
+server.listen(PORT + 1, () => {
+    logger.info('Servidor WebSocket iniciado com sucesso', {
+        port: PORT + 1,
         timestamp: new Date().toISOString(),
         environment: process.env.NODE_ENV || 'development'
     });
@@ -2876,8 +2897,8 @@ server.listen(PORT, () => {
     // Iniciar health checks periódicos
     healthChecker.startPeriodicChecks();
     
-    console.log(`🚀 Servidor WebSocket rodando na porta ${PORT}`);
-    console.log(`🔗 URL: http://localhost:${PORT}`);
-    console.log('✅ Pronto para receber conexões!');
+    console.log(`🚀 Servidor WebSocket rodando na porta ${PORT + 1}`);
+    console.log(`🔗 URL: ws://localhost:${PORT + 1}`);
+    console.log('✅ Pronto para receber conexões WebSocket!');
     console.log('🏥 Health checks iniciados automaticamente');
 });

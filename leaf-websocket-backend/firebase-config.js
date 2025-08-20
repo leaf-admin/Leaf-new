@@ -16,7 +16,7 @@ function initializeFirebase() {
         }
 
         // Caminho para o arquivo de credenciais
-        const serviceAccountPath = path.join(__dirname, '..', 'leaf-reactnative-firebase-adminsdk-fbsvc-456a95e2fc.json');
+        const serviceAccountPath = path.join(__dirname, 'leaf-reactnative-firebase-adminsdk-fbsvc-456a95e2fc.json');
         
         // Inicializar app
         firebaseApp = admin.initializeApp({
