@@ -1,6 +1,7 @@
 const admin = require('firebase-admin');
 const Redis = require('ioredis');
 const { logger } = require('../utils/logger');
+const path = require('path');
 
 class FCMService {
     constructor() {
@@ -15,9 +16,20 @@ class FCMService {
         try {
             // Verificar se Firebase Admin já foi inicializado
             if (!admin.apps.length) {
-                logger.warn('Firebase Admin não inicializado. FCM será limitado.');
-                this.isInitialized = false;
-                return;
+                // Inicializar Firebase Admin se não estiver
+                const serviceAccountPath = path.join(__dirname, '..', '..', 'mobile-app', 'config', 'leaf-reactnative-firebase-adminsdk-fbsvc-456a95e2fc.json');
+                
+                try {
+                    admin.initializeApp({
+                        credential: admin.credential.cert(serviceAccountPath),
+                        databaseURL: process.env.FIREBASE_DATABASE_URL || 'https://leaf-reactnative-default-rtdb.firebaseio.com'
+                    });
+                    logger.info('✅ Firebase Admin inicializado pelo FCM Service');
+                } catch (initError) {
+                    logger.error('❌ Erro ao inicializar Firebase Admin:', initError);
+                    this.isInitialized = false;
+                    return;
+                }
             }
 
             this.isInitialized = true;

@@ -1,9 +1,7 @@
 // Configurações FCM para o projeto Leaf
 export const FCMConfig = {
-    // Chave do servidor FCM (obtida do console Firebase)
-    // ⚠️ IMPORTANTE: Esta chave deve ser mantida segura e não deve ser commitada no repositório
-    // Em produção, use variáveis de ambiente ou um sistema de gerenciamento de segredos
-    SERVER_KEY: process.env.FCM_SERVER_KEY || 'YOUR_FCM_SERVER_KEY_HERE',
+    // Caminho para o arquivo de service account existente
+    SERVICE_ACCOUNT_PATH: './config/leaf-reactnative-firebase-adminsdk-fbsvc-456a95e2fc.json',
     
     // ID do projeto Firebase
     PROJECT_ID: 'leaf-reactnative',
@@ -127,8 +125,8 @@ export const FCMConfig = {
 export const validateFCMConfig = () => {
     const errors = [];
     
-    if (!FCMConfig.SERVER_KEY || FCMConfig.SERVER_KEY === 'YOUR_FCM_SERVER_KEY_HERE') {
-        errors.push('FCM_SERVER_KEY não configurada');
+    if (!FCMConfig.SERVICE_ACCOUNT_PATH) {
+        errors.push('SERVICE_ACCOUNT_PATH não configurado');
     }
     
     if (!FCMConfig.PROJECT_ID) {
