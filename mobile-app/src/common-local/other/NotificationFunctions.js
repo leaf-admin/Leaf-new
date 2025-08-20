@@ -1,5 +1,5 @@
 import { firebase } from '../config/configureFirebase';
-import store from '../store/store';
+import store from '../store';
 
 export const RequestPushMsg = (token, data) => {
     const {

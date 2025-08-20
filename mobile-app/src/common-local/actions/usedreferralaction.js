@@ -1,4 +1,4 @@
-import {FETCH_REFERRAL_ID,EDIT_REFERRAL_ID,FETCH_REFERRAL_ID_SUCCESS,FETCH_REFERRAL_ID_FAILED} from "../store/types"
+import {FETCH_REFERRAL_ID,EDIT_REFERRAL_ID,FETCH_REFERRAL_ID_SUCCESS,FETCH_REFERRAL_ID_FAILED} from "../types.js"
 import {firebase} from "../config/configureFirebase";
 
 

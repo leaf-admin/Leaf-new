@@ -2,7 +2,7 @@ import {
   FETCH_SMTP,
   FETCH_SMTP_SUCCESS,
   FETCH_SMTP_FAILED
-} from "../store/types";
+} from "../types.js";
 
 const INITIAL_STATE = {
   smtpDetails: null,

@@ -18,7 +18,7 @@ import {
     SEND_RESET_EMAIL,
     SEND_RESET_EMAIL_SUCCESS,
     SEND_RESET_EMAIL_FAILED
-} from "../store/types";
+} from "../types.js";
 
 const INITIAL_STATE = {
     profile: null,

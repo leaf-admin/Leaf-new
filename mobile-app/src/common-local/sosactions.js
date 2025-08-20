@@ -1,5 +1,5 @@
 
-import { REQUEST_SOS, CANCEL_SOS, FETCH_SOS_LIST } from "../store/types";
+import { REQUEST_SOS, CANCEL_SOS, FETCH_SOS_LIST } from "../types";
 
 export const requestSOS = (uid, sosData) => ({
   type: REQUEST_SOS,

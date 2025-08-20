@@ -97,3 +97,10 @@ export const darkTheme = {
     dropdown: '#2A2A2A',
     leafGreen: '#41D274'
 };
+
+// Hook para usar o tema
+export const useTheme = () => {
+  // Por enquanto, retorna o tema claro como padrão
+  // TODO: Implementar lógica de tema dinâmico baseada no estado do app
+  return lightTheme;
+};

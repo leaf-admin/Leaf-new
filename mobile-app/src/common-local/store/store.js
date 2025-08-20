@@ -1,6 +1,6 @@
 import { configureStore } from '@reduxjs/toolkit';
 
-import authreducer from "../reducers/authreducer";
+import authreducer from "../reducers/authreducer.js";
 import { cartypesreducer} from "../reducers/cartypesreducer";
 import { bookingslistreducer } from "../reducers/bookingslistreducer";
 import { estimatereducer } from "../reducers/estimatereducer";

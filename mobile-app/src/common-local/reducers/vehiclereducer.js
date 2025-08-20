@@ -13,7 +13,7 @@ import {
     DELETE_VEHICLE_FAILED,
     SET_VEHICLE_LOADING,
     CLEAR_VEHICLE_ERRORS,
-} from '../store/types';
+} from '../types';
 
 const INITIAL_STATE = {
     vehicles: [],

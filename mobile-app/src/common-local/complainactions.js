@@ -3,7 +3,7 @@ import {
     FETCH_COMPLAIN_SUCCESS,
     FETCH_COMPLAIN_FAILED,
     EDIT_COMPLAIN
-  } from "../store/types";
+  } from "../types";
   import { firebase } from '../config/configureFirebase';
   import store from '../store/store';
   

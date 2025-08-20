@@ -6,7 +6,11 @@ const config = getDefaultConfig(__dirname);
 // Configurar resolução automática de extensões
 config.resolver.platforms = ['ios', 'android', 'native', 'web'];
 config.resolver.sourceExts = ['js', 'jsx', 'ts', 'tsx', 'json'];
-config.resolver.assetExts = ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'ttf', 'woff', 'woff2'];
+config.resolver.assetExts = ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'ttf', 'woff', 'woff2', 'json', 'lottie'];
+
+// Forçar resolução de arquivos JSON
+config.resolver.resolverMainFields = ['react-native', 'browser', 'main'];
+config.resolver.enableGlobalPackages = true;
 
 // Configurar resolução de módulos
 config.resolver.resolverMainFields = ['react-native', 'browser', 'main'];

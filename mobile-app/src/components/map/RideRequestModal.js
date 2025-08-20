@@ -1,7 +1,7 @@
 import React from 'react';
 import { View, Text, StyleSheet, Modal, TouchableOpacity } from 'react-native';
-import { Icon } from 'react-native-elements';
-import { fonts } from '../../common/font';
+import { Ionicons } from '@expo/vector-icons';
+import { fonts } from '../../common-local/font';
 import { MAIN_COLOR, SECONDORY_COLOR } from '../../common-local/sharedFunctions';
 
 export default function RideRequestModal({ isVisible, rideDetails, onAccept, onDecline }) {
@@ -23,12 +23,12 @@ export default function RideRequestModal({ isVisible, rideDetails, onAccept, onD
                     <Text style={styles.title}>Nova Solicitação de Corrida</Text>
                     
                     <View style={styles.detailRow}>
-                        <Icon name="my-location" type="material" color="#888" size={20} containerStyle={styles.icon} />
+                        <Ionicons name="location" color="#888" size={20} style={styles.icon} />
                         <Text style={styles.addressText} numberOfLines={2}>{pickup?.add}</Text>
                     </View>
                     
                     <View style={styles.detailRow}>
-                        <Icon name="location-on" type="material" color="#888" size={20} containerStyle={styles.icon} />
+                        <Ionicons name="location" color="#888" size={20} style={styles.icon} />
                         <Text style={styles.addressText} numberOfLines={2}>{drop?.add}</Text>
                     </View>
                     

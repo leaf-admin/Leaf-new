@@ -15,7 +15,7 @@ import {
   FETCH_ALL_DRIVERS,
   FETCH_ALL_DRIVERS_SUCCESS,
   FETCH_ALL_DRIVERS_FAILED
-} from "../store/types";
+} from "../types.js";
 import { firebase } from '../config/configureFirebase';
 import { api } from '../api';
 import { store } from '../store/store';

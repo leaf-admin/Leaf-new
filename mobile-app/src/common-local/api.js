@@ -1,6 +1,7 @@
 import { firebase } from './config/configureFirebase';
 
 export const api = {
+    // Funções existentes
     fetchBookings: () => async (dispatch) => {
         const { database } = firebase;
         const bookingsRef = database.ref('bookings');
@@ -65,5 +66,26 @@ export const api = {
         });
 
         return () => promosRef.off();
+    },
+
+    // Funções necessárias para o PassengerUI
+    getEstimate: () => async (dispatch) => {
+        // TODO: Implementar lógica de estimativa
+        console.log('getEstimate chamado');
+    },
+
+    addBooking: () => async (dispatch) => {
+        // TODO: Implementar lógica de adicionar booking
+        console.log('addBooking chamado');
+    },
+
+    clearBooking: () => async (dispatch) => {
+        // TODO: Implementar lógica de limpar booking
+        console.log('clearBooking chamado');
+    },
+
+    clearEstimate: () => async (dispatch) => {
+        // TODO: Implementar lógica de limpar estimativa
+        console.log('clearEstimate chamado');
     }
 }; 

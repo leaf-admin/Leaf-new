@@ -3,7 +3,7 @@ import {
     FETCH_LANGUAGE_SUCCESS,
     FETCH_LANGUAGE_FAILED,
     EDIT_LANGUAGE
-} from "../store/types";
+} from "../types";
 import { firebase } from '../config/configureFirebase';
 import { api } from '../api';
 import { store } from '../store/store';

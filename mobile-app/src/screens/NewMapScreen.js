@@ -1,268 +1,590 @@
-import React, { useState, useEffect, useRef } from 'react';
-import {
-    View,
-    StyleSheet,
-    Dimensions,
-    TouchableOpacity,
-    Alert,
-    Platform
-} from 'react-native';
-import { Icon } from 'react-native-elements';
-import MapView, { Marker, Polyline } from 'react-native-maps';
-import { useDispatch, useSelector } from 'react-redux';
+import React, { useState, useRef, useEffect } from 'react';
+import { View, StyleSheet, Image, TouchableOpacity, Text, Alert, Dimensions } from 'react-native';
+import MapView, { PROVIDER_GOOGLE, Marker, Polyline } from 'react-native-maps';
+import { useSelector, useDispatch } from 'react-redux';
+import { Ionicons } from '@expo/vector-icons';
 import * as Location from 'expo-location';
-import { useTheme } from '../common-local/theme';
+
 import PassengerUI from '../components/map/PassengerUI';
 import DriverUI from '../components/map/DriverUI';
-import DecodePolyLine from '@mapbox/polyline';
+import PassengerEnRouteUI from '../components/map/PassengerEnRouteUI';
+import DriverEnRouteUI from '../components/map/DriverEnRouteUI';
+import DriverStartTripUI from '../components/map/DriverStartTripUI';
+import PassengerWaitingUI from '../components/map/PassengerWaitingUI';
+import DriverOnTripUI from '../components/map/DriverOnTripUI';
+import PassengerOnTripUI from '../components/map/PassengerOnTripUI';
+import RatingUI from '../components/map/RatingUI';
+import WebSocketManager from '../services/WebSocketManager';
+import { darkTheme, lightTheme } from '../common-local/theme';
+import { clearBooking } from '../common-local/actions/bookingactions';
+import polyline from '@mapbox/polyline';
+import carIcon from '../../assets/images/track_Car.png';
 
 const { width, height } = Dimensions.get('window');
 
-export default function NewMapScreen({ navigation }) {
-    const dispatch = useDispatch();
-    const theme = useTheme();
-    const auth = useSelector(state => state.auth);
-    const tripdata = useSelector(state => state.tripdata);
-    const booking = useSelector(state => state.bookingdata);
+// Estilos de mapa para modo claro e escuro
+const lightMapStyle = [
+    {
+        "elementType": "geometry",
+        "stylers": [{"color": "#f5f5f5"}]
+    },
+    {
+        "elementType": "labels.icon",
+        "stylers": [{"visibility": "off"}]
+    },
+    {
+        "elementType": "labels.text.fill",
+        "stylers": [{"color": "#616161"}]
+    },
+    {
+        "elementType": "labels.text.stroke",
+        "stylers": [{"color": "#f5f5f5"}]
+    },
+    {
+        "featureType": "administrative.land_parcel",
+        "elementType": "labels.text.fill",
+        "stylers": [{"color": "#bdbdbd"}]
+    },
+    {
+        "featureType": "poi",
+        "elementType": "geometry",
+        "stylers": [{"color": "#eeeeee"}]
+    },
+    {
+        "featureType": "poi",
+        "elementType": "labels.text.fill",
+        "stylers": [{"color": "#757575"}]
+    },
+    {
+        "featureType": "poi.park",
+        "elementType": "geometry",
+        "stylers": [{"color": "#e5e5e5"}]
+    },
+    {
+        "featureType": "poi.park",
+        "elementType": "labels.text.fill",
+        "stylers": [{"color": "#9e9e9e"}]
+    },
+    {
+        "featureType": "road",
+        "elementType": "geometry",
+        "stylers": [{"color": "#ffffff"}]
+    },
+    {
+        "featureType": "road.arterial",
+        "elementType": "labels.text.fill",
+        "stylers": [{"color": "#757575"}]
+    },
+    {
+        "featureType": "road.highway",
+        "elementType": "geometry",
+        "stylers": [{"color": "#dadada"}]
+    },
+    {
+        "featureType": "road.highway",
+        "elementType": "labels.text.fill",
+        "stylers": [{"color": "#616161"}]
+    },
+    {
+        "featureType": "road.local",
+        "elementType": "labels.text.fill",
+        "stylers": [{"color": "#9e9e9e"}]
+    },
+    {
+        "featureType": "transit.line",
+        "elementType": "geometry",
+        "stylers": [{"color": "#e5e5e5"}]
+    },
+    {
+        "featureType": "transit.station",
+        "elementType": "geometry",
+        "stylers": [{"color": "#eeeeee"}]
+    },
+    {
+        "featureType": "water",
+        "elementType": "geometry",
+        "stylers": [{"color": "#c9c9c9"}]
+    },
+    {
+        "featureType": "water",
+        "elementType": "labels.text.fill",
+        "stylers": [{"color": "#9e9e9e"}]
+    }
+];
 
-    // Estados
+const darkMapStyle = [
+    {
+        "elementType": "geometry",
+        "stylers": [{"color": "#212121"}]
+    },
+    {
+        "elementType": "labels.icon",
+        "stylers": [{"visibility": "off"}]
+    },
+    {
+        "elementType": "labels.text.fill",
+        "stylers": [{"color": "#757575"}]
+    },
+    {
+        "elementType": "labels.text.stroke",
+        "stylers": [{"color": "#212121"}]
+    },
+    {
+        "featureType": "administrative",
+        "elementType": "geometry",
+        "stylers": [{"color": "#757575"}]
+    },
+    {
+        "featureType": "administrative.country",
+        "elementType": "labels.text.stroke",
+        "stylers": [{"color": "#4b4b4b"}]
+    },
+    {
+        "featureType": "administrative.land_parcel",
+        "stylers": [{"visibility": "off"}]
+    },
+    {
+        "featureType": "administrative.locality",
+        "elementType": "labels.text.fill",
+        "stylers": [{"color": "#bdbdbd"}]
+    },
+    {
+        "featureType": "poi",
+        "elementType": "labels.text.fill",
+        "stylers": [{"color": "#757575"}]
+    },
+    {
+        "featureType": "poi.park",
+        "elementType": "geometry",
+        "stylers": [{"color": "#181818"}]
+    },
+    {
+        "featureType": "poi.park",
+        "elementType": "labels.text.fill",
+        "stylers": [{"color": "#616161"}]
+    },
+    {
+        "featureType": "poi.park",
+        "elementType": "labels.text.stroke",
+        "stylers": [{"color": "#1b1b1b"}]
+    },
+    {
+        "featureType": "road",
+        "elementType": "geometry.fill",
+        "stylers": [{"color": "#2c2c2c"}]
+    },
+    {
+        "featureType": "road",
+        "elementType": "labels.text.fill",
+        "stylers": [{"color": "#8a8a8a"}]
+    },
+    {
+        "featureType": "road.arterial",
+        "elementType": "geometry",
+        "stylers": [{"color": "#373737"}]
+    },
+    {
+        "featureType": "road.highway",
+        "elementType": "geometry",
+        "stylers": [{"color": "#3c3c3c"}]
+    },
+    {
+        "featureType": "road.highway.controlled_access",
+        "elementType": "geometry",
+        "stylers": [{"color": "#4e4e4e"}]
+    },
+    {
+        "featureType": "road.local",
+        "elementType": "labels.text.fill",
+        "stylers": [{"color": "#c0c0c0"}]
+    },
+    {
+        "featureType": "transit",
+        "elementType": "labels.text.fill",
+        "stylers": [{"color": "#757575"}]
+    },
+    {
+        "featureType": "water",
+        "elementType": "geometry",
+        "stylers": [{"color": "#000000"}]
+    },
+    {
+        "featureType": "water",
+        "elementType": "labels.text.fill",
+        "stylers": [{"color": "#3d3d3d"}]
+    }
+];
+
+export default function NewMapScreen(props) {
+    const mapRef = useRef(null);
+    const [routePolyline, setRoutePolyline] = useState(null);
+    const [driverLocation, setDriverLocation] = useState(null);
     const [isDarkMode, setIsDarkMode] = useState(false);
     const [currentLocation, setCurrentLocation] = useState(null);
     const [pickupAddress, setPickupAddress] = useState('');
-    const [routePolyline, setRoutePolyline] = useState([]);
-    const [mapRef, setMapRef] = useState(null);
+    
+    // Estados para cards de valores (baseado no MapScreen.js antigo)
+    const [allCarTypes, setAllCarTypes] = useState([]);
+    const [selectedCarType, setSelectedCarType] = useState(null);
+    const [carEstimates, setCarEstimates] = useState({});
+    const [filteredCarTypes, setFilteredCarTypes] = useState([]);
+    
+    const dispatch = useDispatch();
 
-    // Refs
-    const locationSubscription = useRef(null);
+    const auth = useSelector(state => state.auth);
+    const booking = useSelector(state => state.bookingdata.booking);
+    const gps = useSelector(state => state.gpsdata);
+    const tripdata = useSelector(state => state.tripdata);
+    const settings = useSelector(state => state.settingsdata);
+    const cartypes = useSelector(state => state.cartypes);
 
-    // Debug: verificar perfil do usuário
-    useEffect(() => {
-        console.log('🔍 NewMapScreen - Debug renderUI:', {
-            authProfile: auth?.profile,
-            userType: auth?.profile?.usertype || auth?.profile?.userType,
-            profileKeys: auth?.profile ? Object.keys(auth.profile) : 'No profile'
-        });
-    }, [auth]);
+    // Tema baseado no estado
+    const theme = isDarkMode ? darkTheme : lightTheme;
 
-    // Função para alternar tema
-    const toggleTheme = () => {
-        setIsDarkMode(!isDarkMode);
-        console.log('🌙 Tema alternado para:', !isDarkMode ? 'escuro' : 'claro');
+    // Cores padrão para o mapa
+    const mapColors = {
+        primary: theme.leafGreen || '#41D274',
+        background: theme.background || '#FFFFFF',
+        surface: theme.card || '#FFFFFF',
+        text: theme.text || '#000000'
     };
 
-    // Função para obter localização atual
+    // Obter localização atual e endereço
+    useEffect(() => {
+        getCurrentLocation();
+    }, []);
+
     const getCurrentLocation = async () => {
         try {
-            console.log('📍 Solicitando permissão de localização...');
-            
-            const { status } = await Location.requestForegroundPermissionsAsync();
+            // Verificar permissões
+            let { status } = await Location.requestForegroundPermissionsAsync();
             if (status !== 'granted') {
-                Alert.alert('Permissão Negada', 'Precisamos da sua localização para funcionar corretamente.');
+                Alert.alert('Permissão negada', 'Precisamos da sua localização para funcionar.');
                 return;
             }
 
-            console.log('📍 Obtendo localização atual...');
-            const location = await Location.getCurrentPositionAsync({
+            // Obter localização atual
+            let location = await Location.getCurrentPositionAsync({
                 accuracy: Location.Accuracy.High,
-                timeout: 10000,
-                maximumAge: 60000
+                maximumAge: 10000,
+                timeout: 15000,
             });
 
-            const newLocation = {
-                lat: location.coords.latitude,
-                lng: location.coords.longitude,
-                accuracy: location.coords.accuracy
-            };
+            const { latitude, longitude } = location.coords;
+            setCurrentLocation({ lat: latitude, lng: longitude });
 
-            setCurrentLocation(newLocation);
-            console.log('✅ Localização atual obtida:', newLocation);
-
-            // Obter endereço da localização
+            // Obter endereço reverso mais detalhado
             try {
-                const addressResult = await Location.reverseGeocodeAsync({
-                    latitude: newLocation.lat,
-                    longitude: newLocation.lng
+                const addressResponse = await Location.reverseGeocodeAsync({
+                    latitude,
+                    longitude
                 });
 
-                if (addressResult && addressResult.length > 0) {
-                    const address = addressResult[0];
-                    const formattedAddress = address.formattedAddress || 
-                        [address.street, address.streetNumber, address.district, address.city, address.region]
-                            .filter(Boolean)
-                            .join(', ');
+                if (addressResponse.length > 0) {
+                    const address = addressResponse[0];
                     
-                    setPickupAddress(formattedAddress);
-                    console.log('📍 Endereço obtido:', formattedAddress);
+                    // Usar o formattedAddress completo se disponível
+                    if (address.formattedAddress) {
+                        setPickupAddress(address.formattedAddress);
+                        console.log('📍 Endereço de embarque detalhado (formattedAddress):', address.formattedAddress);
+                        console.log('📍 Dados completos do endereço:', address);
+                    } else {
+                        // Construir endereço mais detalhado como fallback
+                        let fullAddress = '';
+                        
+                        // Adicionar número da rua se disponível
+                        if (address.streetNumber) {
+                            fullAddress += `${address.streetNumber} `;
+                        }
+                        
+                        // Adicionar nome da rua
+                        if (address.street) {
+                            fullAddress += `${address.street}`;
+                        }
+                        
+                        // Adicionar bairro se disponível
+                        if (address.district && address.district !== address.street) {
+                            fullAddress += `, ${address.district}`;
+                        }
+                        
+                        // Adicionar cidade
+                        if (address.city) {
+                            fullAddress += `, ${address.city}`;
+                        }
+                        
+                        // Adicionar estado
+                        if (address.region) {
+                            fullAddress += `, ${address.region}`;
+                        }
+                        
+                        // Se não conseguiu construir endereço detalhado, usar o padrão
+                        if (!fullAddress.trim()) {
+                            fullAddress = [
+                                address.street,
+                                address.district,
+                                address.city,
+                                address.region
+                            ].filter(Boolean).join(', ');
+                        }
+                        
+                        setPickupAddress(fullAddress);
+                        console.log('📍 Endereço de embarque detalhado (fallback):', fullAddress);
+                        console.log('📍 Dados completos do endereço:', address);
+                    }
                 }
             } catch (addressError) {
-                console.warn('⚠️ Não foi possível obter endereço:', addressError);
-                setPickupAddress('Localização atual');
+                console.warn('⚠️ Erro ao obter endereço detalhado:', addressError);
+                
+                // Fallback: tentar usar Google Places API para obter endereço mais preciso
+                try {
+                    const googleAddress = await getAddressFromGooglePlaces(latitude, longitude);
+                    if (googleAddress) {
+                        setPickupAddress(googleAddress);
+                        console.log('📍 Endereço do Google Places:', googleAddress);
+                    } else {
+                        setPickupAddress('Localização atual');
+                    }
+                } catch (googleError) {
+                    console.warn('⚠️ Erro ao obter endereço do Google Places:', googleError);
+                    setPickupAddress('Localização atual');
+                }
             }
 
         } catch (error) {
             console.error('❌ Erro ao obter localização:', error);
-            Alert.alert('Erro', 'Não foi possível obter sua localização. Verifique as permissões.');
+            Alert.alert('Erro', 'Não foi possível obter sua localização.');
         }
     };
 
-    // Função para centralizar no usuário
+    // Função para obter endereço mais preciso do Google Places
+    const getAddressFromGooglePlaces = async (latitude, longitude) => {
+        try {
+            // Usar a API do Google Places para obter endereço mais preciso
+            const response = await fetch(
+                `https://maps.googleapis.com/maps/api/geocode/json?latlng=${latitude},${longitude}&key=YOUR_GOOGLE_API_KEY&language=pt-BR&result_type=street_address|route`
+            );
+            
+            const data = await response.json();
+            
+            if (data.results && data.results.length > 0) {
+                const result = data.results[0];
+                return result.formatted_address;
+            }
+            
+            return null;
+        } catch (error) {
+            console.warn('⚠️ Erro na API do Google Places:', error);
+            return null;
+        }
+    };
+
+    // useEffect para desenhar as rotas
+    useEffect(() => {
+        let polylinePoints = null;
+
+        // Rota do motorista até o passageiro
+        if (booking && booking.status === 'ACCEPTED' && booking.driver_to_pickup_polyline) {
+            polylinePoints = booking.driver_to_pickup_polyline;
+        }
+
+        // Rota principal da viagem
+        if (booking && booking.status === 'STARTED' && booking.trip_polyline) {
+            polylinePoints = booking.trip_polyline;
+        }
+
+        if (polylinePoints) {
+            const points = polyline.decode(polylinePoints);
+            const coords = points.map(point => ({
+                latitude: point[0],
+                longitude: point[1]
+            }));
+            setRoutePolyline(coords);
+
+            // Ajustar o mapa para mostrar toda a rota
+            if (mapRef.current && coords.length > 1) {
+                mapRef.current.fitToCoordinates(coords, {
+                    edgePadding: { top: 50, right: 50, bottom: 250, left: 50 },
+                    animated: true,
+                });
+            }
+        }
+    }, [booking?.driver_to_pickup_polyline, booking?.trip_polyline]);
+    
+    // Efeito para calcular polyline quando dados de rota são atualizados
+    useEffect(() => {
+        // Usar o estado local do Redux que já está sendo monitorado
+        if (auth.profile?.usertype === 'customer') {
+            // O PassengerUI já está calculando rotas e atualizando o Redux
+            // A polyline será atualizada automaticamente quando os dados chegarem
+            console.log('🗺️ Monitorando atualizações de rota para passageiro...');
+        }
+    }, [auth.profile?.usertype]);
+
+    const handleSubmitRating = (ratingData) => {
+        const webSocketManager = WebSocketManager.getInstance();
+        const userType = auth.profile?.usertype;
+        
+        webSocketManager.emit('submit_rating', { 
+            bookingId: booking.key,
+            ratingData: ratingData,
+            ratedBy: userType,
+        });
+
+        dispatch(clearBooking());
+    };
+
+    const toggleTheme = () => {
+        setIsDarkMode(!isDarkMode);
+    };
+
     const centerOnUser = () => {
-        if (mapRef && currentLocation) {
-            mapRef.animateToRegion({
+        if (mapRef.current && currentLocation) {
+            mapRef.current.animateToRegion({
                 latitude: currentLocation.lat,
                 longitude: currentLocation.lng,
                 latitudeDelta: 0.01,
                 longitudeDelta: 0.01,
             }, 1000);
-            console.log('🎯 Mapa centralizado no usuário');
         }
     };
 
-    // Função para alternar tipo de mapa
-    const toggleMapType = () => {
-        console.log('🗺️ Alternando tipo de mapa...');
+    // Funções para cards de valores (baseado no MapScreen.js antigo)
+    const getEstimateForCar = (car) => {
+        if (!car || !carEstimates[car.name]) {
+            return { fare: car?.min_fare || 0 };
+        }
+        return carEstimates[car.name];
     };
 
-    // Função para alternar tráfego
-    const toggleTraffic = () => {
-        console.log('🚦 Alternando tráfego...');
-    };
-
-    // Obter localização inicial
+    // Efeito para carregar tipos de carro
     useEffect(() => {
-        getCurrentLocation();
+        if (cartypes && cartypes.length > 0) {
+            setAllCarTypes(cartypes);
+            setFilteredCarTypes(cartypes);
+        }
+    }, [cartypes]);
 
-        // Configurar listener de localização em tempo real
-        if (Platform.OS === 'ios') {
-            locationSubscription.current = Location.watchPositionAsync(
-                {
-                    accuracy: Location.Accuracy.High,
-                    timeInterval: 10000,
-                    distanceInterval: 10,
-                },
-                (location) => {
-                    const newLocation = {
-                        lat: location.coords.latitude,
-                        lng: location.coords.longitude,
-                        accuracy: location.coords.accuracy
-                    };
-                    setCurrentLocation(newLocation);
-                }
+    // Efeito para filtrar tipos de carro baseado na distância
+    useEffect(() => {
+        if (allCarTypes.length > 0 && tripdata.pickup && tripdata.drop && tripdata.drop.add) {
+            // Filtrar apenas carros disponíveis para a distância da viagem
+            const filtered = allCarTypes.filter(car => {
+                if (!car.max_distance) return true;
+                // Aqui você pode adicionar lógica para filtrar por distância se necessário
+                return true;
+            });
+            setFilteredCarTypes(filtered);
+        }
+    }, [allCarTypes, tripdata.pickup, tripdata.drop]);
+
+    const renderUI = () => {
+        const userType = auth.profile?.usertype;
+        const bookingStatus = booking?.status;
+
+        console.log('NewMapScreen - Debug renderUI:', {
+            userType: userType,
+            authProfile: auth.profile,
+            authProfileKeys: auth.profile ? Object.keys(auth.profile) : null,
+            usertype: auth.profile?.usertype,
+            userType: auth.profile?.userType,
+            bookingStatus: bookingStatus
+        });
+
+        if (bookingStatus === 'COMPLETE') {
+            const userToRate = {
+                name: userType === 'customer' ? booking.driver_name : booking.customer_name
+            };
+            return <RatingUI userToRate={userToRate} onSubmit={handleSubmitRating} />;
+        }
+        
+        if (bookingStatus === 'STARTED') {
+            if (userType === 'customer') {
+                return <PassengerOnTripUI booking={booking} />;
+            }
+            if (userType === 'driver') {
+                return <DriverOnTripUI booking={booking} />;
+            }
+        }
+        
+        if (bookingStatus === 'ACCEPTED' || bookingStatus === 'REACHED') {
+            if (userType === 'customer') {
+                return <PassengerEnRouteUI 
+                            booking={booking} 
+                            onDriverLocationUpdate={setDriverLocation} 
+                       />;
+            }
+            if (userType === 'driver') {
+                return bookingStatus === 'ACCEPTED' ? 
+                    <DriverEnRouteUI booking={booking} onArrived={() => {}} /> : 
+                    <DriverStartTripUI booking={booking} />;
+            }
+        }
+
+        // UI Padrão de busca - passar endereço de embarque
+        if (userType === 'customer') {
+            console.log('🔍 NewMapScreen - Passando props para PassengerUI:', {
+                hasSetRoutePolyline: !!setRoutePolyline,
+                setRoutePolylineType: typeof setRoutePolyline,
+                hasRoutePolyline: !!routePolyline,
+                hasTheme: !!theme,
+                hasPickupAddress: !!pickupAddress,
+                hasCurrentLocation: !!currentLocation
+            });
+            
+            console.log('🔍 Verificando componentes:', {
+                PassengerUI: typeof PassengerUI,
+                DriverUI: typeof DriverUI,
+                RatingUI: typeof RatingUI
+            });
+            
+            return (
+                <PassengerUI 
+                    mapRef={mapRef} 
+                    routePolyline={routePolyline} 
+                    setRoutePolyline={setRoutePolyline} 
+                    theme={theme} 
+                    isDarkMode={isDarkMode}
+                    toggleTheme={toggleTheme}
+                    pickupAddress={pickupAddress}
+                    currentLocation={currentLocation}
+                    {...props} 
+                />
             );
         }
-
-        return () => {
-            if (locationSubscription.current) {
-                locationSubscription.current.remove();
-            }
-        };
-    }, []);
-
-    // Monitorar mudanças na polyline da rota
-    useEffect(() => {
-        if (booking?.driver_to_pickup_polyline) {
-            try {
-                const points = DecodePolyLine.decode(booking.driver_to_pickup_polyline);
-                const coords = points.map(point => ({
-                    latitude: point[0],
-                    longitude: point[1]
-                }));
-                setRoutePolyline(coords);
-                console.log('✅ Polyline driver_to_pickup atualizada:', coords.length, 'pontos');
-            } catch (error) {
-                console.error('❌ Erro ao decodificar polyline driver_to_pickup:', error);
-            }
-        } else if (booking?.trip_polyline) {
-            try {
-                const points = DecodePolyLine.decode(booking.trip_polyline);
-                const coords = points.map(point => ({
-                    latitude: point[0],
-                    longitude: point[1]
-                }));
-                setRoutePolyline(coords);
-                console.log('✅ Polyline trip atualizada:', coords.length, 'pontos');
-            } catch (error) {
-                console.error('❌ Erro ao decodificar polyline trip:', error);
-            }
-        } else if (tripdata?.pickup?.routeData?.polyline) {
-            try {
-                const points = DecodePolyLine.decode(tripdata.pickup.routeData.polyline);
-                const coords = points.map(point => ({
-                    latitude: point[0],
-                    longitude: point[1]
-                }));
-                setRoutePolyline(coords);
-                console.log('✅ Polyline pickup routeData atualizada:', coords.length, 'pontos');
-            } catch (error) {
-                console.error('❌ Erro ao decodificar polyline pickup routeData:', error);
-            }
-        } else if (tripdata?.drop?.routeData?.polyline) {
-            try {
-                const points = DecodePolyLine.decode(tripdata.drop.routeData.polyline);
-                const coords = points.map(point => ({
-                    latitude: point[0],
-                    longitude: point[1]
-                }));
-                setRoutePolyline(coords);
-                console.log('✅ Polyline drop routeData atualizada:', coords.length, 'pontos');
-            } catch (error) {
-                console.error('❌ Erro ao decodificar polyline drop routeData:', error);
-            }
-        }
-    }, [
-        booking?.driver_to_pickup_polyline,
-        booking?.trip_polyline,
-        tripdata?.pickup?.routeData?.polyline,
-        tripdata?.drop?.routeData?.polyline
-    ]);
-
-    // Determinar qual UI renderizar baseado no tipo de usuário
-    const renderUI = () => {
-        const userType = auth?.profile?.usertype || auth?.profile?.userType;
-        
-        console.log('🎭 Renderizando UI para userType:', userType);
-        
         if (userType === 'driver') {
             return (
-                <DriverUI
-                    theme={theme}
+                <DriverUI 
+                    {...props} 
+                    mapRef={mapRef} 
+                    theme={theme} 
                     isDarkMode={isDarkMode}
-                    toggleTheme={toggleTheme}
-                    currentLocation={currentLocation}
-                    pickupAddress={pickupAddress}
-                />
-            );
-        } else {
-            return (
-                <PassengerUI
-                    theme={theme}
-                    isDarkMode={isDarkMode}
-                    toggleTheme={toggleTheme}
-                    currentLocation={currentLocation}
-                    pickupAddress={pickupAddress}
                 />
             );
         }
+        
+        // Fallback para quando não há userType definido
+        console.log('⚠️ renderUI: userType não definido, retornando fallback');
+        return (
+            <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+                <Text>Carregando...</Text>
+            </View>
+        );
     };
 
-    // Cores do mapa baseadas no tema
-    const mapColors = {
-        primary: theme.leafGreen || '#4CAF50',
-        background: theme.background || '#FFFFFF',
-        surface: theme.card || '#F5F5F5',
-        text: theme.text || '#000000'
-    };
-
-    // Estilos do mapa baseados no tema
-    const customMapStyle = isDarkMode ? darkMapStyle : lightMapStyle;
+    const initialRegion = currentLocation ? {
+        latitude: currentLocation.lat,
+        longitude: currentLocation.lng,
+        latitudeDelta: 0.01,
+        longitudeDelta: 0.01,
+    } : null;
 
     return (
-        <View style={[styles.container, { backgroundColor: mapColors.background }]}>
-            {/* Mapa */}
+        <View style={styles.container}>
             <MapView
-                ref={setMapRef}
-                style={styles.map}
-                customMapStyle={customMapStyle}
+                ref={mapRef}
+                style={StyleSheet.absoluteFillObject}
+                provider={PROVIDER_GOOGLE}
+                initialRegion={initialRegion}
                 showsUserLocation={true}
                 showsMyLocationButton={false}
                 showsCompass={true}
@@ -270,529 +592,219 @@ export default function NewMapScreen({ navigation }) {
                 showsTraffic={false}
                 showsBuildings={true}
                 showsIndoors={true}
-                showsIndoorLevelPicker={true}
-                showsPointsOfInterest={true}
-                showsMapToolbar={false}
-                initialRegion={{
-                    latitude: currentLocation?.lat || -22.9068,
-                    longitude: currentLocation?.lng || -43.1729,
-                    latitudeDelta: 0.01,
-                    longitudeDelta: 0.01,
-                }}
-                onMapReady={() => {
-                    console.log('🗺️ Mapa carregado e pronto');
-                }}
+                loadingEnabled={true}
+                loadingIndicatorColor={mapColors.primary}
+                loadingBackgroundColor={mapColors.background}
+                customMapStyle={isDarkMode ? darkMapStyle : lightMapStyle}
             >
-                {/* Marcador do usuário */}
-                {currentLocation && (
-                    <Marker
-                        coordinate={{
-                            latitude: currentLocation.lat,
-                            longitude: currentLocation.lng
-                        }}
-                        title="Sua localização"
-                        description={pickupAddress || 'Localização atual'}
-                        anchor={{ x: 0.5, y: 0.5 }}
-                    >
-                        <View style={styles.userMarker}>
-                            <Icon 
-                                name="my-location" 
-                                type="material" 
-                                color={mapColors.primary} 
-                                size={24} 
-                            />
-                        </View>
-                    </Marker>
-                )}
-
-                {/* Marcador de pickup */}
-                {tripdata?.pickup?.lat && (
-                    <Marker
-                        coordinate={{
-                            latitude: tripdata.pickup.lat,
-                            longitude: tripdata.pickup.lng
-                        }}
-                        title="Local de partida"
-                        description={tripdata.pickup.address}
-                        anchor={{ x: 0.5, y: 1.0 }}
-                    >
-                        <View style={[styles.pickupMarker, { backgroundColor: mapColors.primary }]}>
-                            <Icon 
-                                name="location-on" 
-                                type="material" 
-                                color="#FFFFFF" 
-                                size={20} 
-                            />
-                        </View>
-                    </Marker>
-                )}
-
-                {/* Marcador de destino */}
-                {tripdata?.drop?.lat && (
-                    <Marker
-                        coordinate={{
-                            latitude: tripdata.drop.lat,
-                            longitude: tripdata.drop.lng
-                        }}
-                        title="Destino"
-                        description={tripdata.drop.address}
-                        anchor={{ x: 0.5, y: 1.0 }}
-                    >
-                        <View style={[styles.dropMarker, { backgroundColor: '#FF5722' }]}>
-                            <Icon 
-                                name="location-on" 
-                                type="material" 
-                                color="#FFFFFF" 
-                                size={20} 
-                            />
-                        </View>
-                    </Marker>
-                )}
-
-                {/* Polyline da rota */}
-                {routePolyline.length > 0 && (
+                {routePolyline && (
                     <Polyline
                         coordinates={routePolyline}
                         strokeColor={mapColors.primary}
                         strokeWidth={4}
-                        lineCap="round"
-                        lineJoin="round"
-                        geodesic={true}
+                        lineDashPattern={[1]}
                     />
                 )}
+                
+                {driverLocation && (
+                    <Marker
+                        coordinate={{
+                            latitude: driverLocation.lat,
+                            longitude: driverLocation.lng,
+                        }}
+                        anchor={{ x: 0.5, y: 0.5 }}
+                    >
+                        <Image
+                            source={carIcon}
+                            style={{ height: 40, width: 40, resizeMode: 'contain' }}
+                        />
+                    </Marker>
+                )}
             </MapView>
-
-            {/* Controles do mapa */}
+            
+            {/* Botões de controle do mapa */}
             <View style={styles.mapControls}>
-                <TouchableOpacity
+                {/* Botão de centralizar no usuário */}
+                <TouchableOpacity 
                     style={[styles.controlButton, { backgroundColor: mapColors.surface }]}
                     onPress={centerOnUser}
-                    activeOpacity={0.8}
                 >
-                    <Icon 
-                        name="my-location" 
-                        type="material" 
-                        color={mapColors.primary} 
+                    <Ionicons 
+                        name="locate" 
                         size={24} 
-                    />
-                </TouchableOpacity>
-
-                <TouchableOpacity
-                    style={[styles.controlButton, { backgroundColor: mapColors.surface }]}
-                    onPress={toggleMapType}
-                    activeOpacity={0.8}
-                >
-                    <Icon 
-                        name="layers" 
-                        type="material" 
-                        color={mapColors.primary} 
-                        size={24} 
-                    />
-                </TouchableOpacity>
-
-                <TouchableOpacity
-                    style={[styles.controlButton, { backgroundColor: mapColors.surface }]}
-                    onPress={toggleTraffic}
-                    activeOpacity={0.8}
-                >
-                    <Icon 
-                        name="traffic" 
-                        type="material" 
-                        color={mapColors.primary} 
-                        size={24} 
+                        color={mapColors.text} 
                     />
                 </TouchableOpacity>
             </View>
+            
+            {/* UI sobreposta */}
+            <View style={StyleSheet.absoluteFillObject} pointerEvents="box-none">
+                {(() => {
+                    const ui = renderUI();
+                    console.log('🔍 renderUI retornou:', ui);
+                    console.log('🔍 Tipo do retorno:', typeof ui);
+                    return ui;
+                })()}
+            </View>
 
-            {/* UI específica do usuário */}
-            {renderUI()}
+            {/* Cards de opções de carro */}
+            {filteredCarTypes && filteredCarTypes.length > 0 && tripdata.pickup && tripdata.drop && tripdata.drop.add && (
+                <View style={styles.carOptionsContainer}>
+                    <View style={[styles.carOptionsMainCard, { backgroundColor: theme.card }]}>
+                        {filteredCarTypes.map((car, index) => (
+                            <TouchableOpacity
+                                key={car.id || index}
+                                style={[
+                                    styles.carCard,
+                                    selectedCarType === car.name && styles.selectedCarCard
+                                ]}
+                                onPress={() => setSelectedCarType(car.name)}
+                            >
+                                <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                                    <Image
+                                        source={{ uri: car.image }}
+                                        style={styles.carImage}
+                                    />
+                                    <View style={styles.carInfo}>
+                                        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                                            <Text style={styles.carNameValue}>{car.name}</Text>
+                                            <Text style={styles.priceNameValue}>
+                                                {carEstimates[car.name]?.estimateFare ? 
+                                                    `${settings.currency}${carEstimates[car.name].estimateFare.toFixed(settings.decimal)}` : 
+                                                    `${settings.currency}${car.min_fare.toFixed(settings.decimal)}`
+                                                }
+                                            </Text>
+                                        </View>
+                                        <View style={styles.carDetailsRow}>
+                                            <Text style={styles.carSubInfo}>{car.extra_info}</Text>
+                                        </View>
+                                    </View>
+                                </View>
+                            </TouchableOpacity>
+                        ))}
+                    </View>
+                </View>
+            )}
+
+            {/* Botão de agendamento */}
+            {selectedCarType && tripdata.pickup && tripdata.drop && tripdata.drop.add && (
+                <View style={styles.bookButtonContainer}>
+                    <TouchableOpacity
+                        style={styles.bookButton}
+                        onPress={() => {
+                            // Implementar lógica de agendamento
+                            console.log('Agendando viagem para:', selectedCarType);
+                        }}
+                    >
+                        <Text style={styles.bookButtonText}>
+                            Agendar Agora
+                        </Text>
+                        <Text style={styles.bookButtonSubtext}>
+                            {(() => {
+                                const selectedCar = filteredCarTypes.find(car => car.name === selectedCarType);
+                                const estimate = getEstimateForCar(selectedCar);
+                                return estimate.fare ? `${settings.currency}${estimate.fare}` : 'Preço sob consulta';
+                            })()}
+                        </Text>
+                    </TouchableOpacity>
+                </View>
+            )}
         </View>
     );
 }
-
-// Estilos do mapa para modo claro
-const lightMapStyle = [
-    {
-        "elementType": "geometry",
-        "stylers": [
-            {
-                "color": "#f5f5f5"
-            }
-        ]
-    },
-    {
-        "elementType": "labels.icon",
-        "stylers": [
-            {
-                "visibility": "off"
-            }
-        ]
-    },
-    {
-        "elementType": "labels.text.fill",
-        "stylers": [
-            {
-                "color": "#616161"
-            }
-        ]
-    },
-    {
-        "elementType": "labels.text.stroke",
-        "stylers": [
-            {
-                "color": "#f5f5f5"
-            }
-        ]
-    },
-    {
-        "featureType": "administrative.land_parcel",
-        "elementType": "labels.text.fill",
-        "stylers": [
-            {
-                "color": "#bdbdbd"
-            }
-        ]
-    },
-    {
-        "featureType": "poi",
-        "elementType": "geometry",
-        "stylers": [
-            {
-                "color": "#eeeeee"
-            }
-        ]
-    },
-    {
-        "featureType": "poi",
-        "elementType": "labels.text.fill",
-        "stylers": [
-            {
-                "color": "#757575"
-            }
-        ]
-    },
-    {
-        "featureType": "poi.park",
-        "elementType": "geometry",
-        "stylers": [
-            {
-                "color": "#e5e5e5"
-            }
-        ]
-    },
-    {
-        "featureType": "poi.park",
-        "elementType": "labels.text.fill",
-        "stylers": [
-            {
-                "color": "#9e9e9e"
-            }
-        ]
-    },
-    {
-        "featureType": "road",
-        "elementType": "geometry",
-        "stylers": [
-            {
-                "color": "#ffffff"
-            }
-        ]
-    },
-    {
-        "featureType": "road.arterial",
-        "elementType": "labels.text.fill",
-        "stylers": [
-            {
-                "color": "#757575"
-            }
-        ]
-    },
-    {
-        "featureType": "road.highway",
-        "elementType": "geometry",
-        "stylers": [
-            {
-                "color": "#dadada"
-            }
-        ]
-    },
-    {
-        "featureType": "road.highway",
-        "elementType": "labels.text.fill",
-        "stylers": [
-            {
-                "color": "#616161"
-            }
-        ]
-    },
-    {
-        "featureType": "road.local",
-        "elementType": "labels.text.fill",
-        "stylers": [
-            {
-                "color": "#9e9e9e"
-            }
-        ]
-    },
-    {
-        "featureType": "transit.line",
-        "elementType": "geometry",
-        "stylers": [
-            {
-                "color": "#e5e5e5"
-            }
-        ]
-    },
-    {
-        "featureType": "transit.station",
-        "elementType": "geometry",
-        "stylers": [
-            {
-                "color": "#eeeeee"
-            }
-        ]
-    },
-    {
-        "featureType": "water",
-        "elementType": "geometry",
-        "stylers": [
-            {
-                "color": "#c9c9c9"
-            }
-        ]
-    },
-    {
-        "featureType": "water",
-        "elementType": "labels.text.fill",
-        "stylers": [
-            {
-                "color": "#9e9e9e"
-            }
-        ]
-    }
-];
-
-// Estilos do mapa para modo escuro
-const darkMapStyle = [
-    {
-        "elementType": "geometry",
-        "stylers": [
-            {
-                "color": "#212121"
-            }
-        ]
-    },
-    {
-        "elementType": "labels.icon",
-        "stylers": [
-            {
-                "visibility": "off"
-            }
-        ]
-    },
-    {
-        "elementType": "labels.text.fill",
-        "stylers": [
-            {
-                "color": "#757575"
-            }
-        ]
-    },
-    {
-        "elementType": "labels.text.stroke",
-        "stylers": [
-            {
-                "color": "#212121"
-            }
-        ]
-    },
-    {
-        "featureType": "administrative",
-        "elementType": "geometry",
-        "stylers": [
-            {
-                "color": "#757575"
-            }
-        ]
-    },
-    {
-        "featureType": "poi",
-        "elementType": "geometry",
-        "stylers": [
-            {
-                "color": "#212121"
-            }
-        ]
-    },
-    {
-        "featureType": "poi",
-        "elementType": "labels.text.fill",
-        "stylers": [
-            {
-                "color": "#757575"
-            }
-        ]
-    },
-    {
-        "featureType": "poi.park",
-        "elementType": "geometry",
-        "stylers": [
-            {
-                "color": "#1b1b1b"
-            }
-        ]
-    },
-    {
-        "featureType": "poi.park",
-        "elementType": "labels.text.fill",
-        "stylers": [
-            {
-                "color": "#6b6b6b"
-            }
-        ]
-    },
-    {
-        "featureType": "road",
-        "elementType": "geometry",
-        "stylers": [
-            {
-                "color": "#424242"
-            }
-        ]
-    },
-    {
-        "featureType": "road.arterial",
-        "elementType": "geometry",
-        "stylers": [
-            {
-                "color": "#373737"
-            }
-        ]
-    },
-    {
-        "featureType": "road.highway",
-        "elementType": "geometry",
-        "stylers": [
-            {
-                "color": "#3c3c3c"
-            }
-        ]
-    },
-    {
-        "featureType": "road.highway",
-        "elementType": "geometry.stroke",
-        "stylers": [
-            {
-                "color": "#4a4a4a"
-            }
-        ]
-    },
-    {
-        "featureType": "road.highway",
-        "elementType": "labels.text.fill",
-        "stylers": [
-            {
-                "color": "#9e9e9e"
-            }
-        ]
-    },
-    {
-        "featureType": "road.local",
-        "elementType": "geometry",
-        "stylers": [
-            {
-                "color": "#616161"
-            }
-        ]
-    },
-    {
-        "featureType": "road.local",
-        "elementType": "labels.text.fill",
-        "stylers": [
-            {
-                "color": "#9e9e9e"
-            }
-        ]
-    },
-    {
-        "featureType": "transit",
-        "elementType": "geometry",
-        "stylers": [
-            {
-                "color": "#2f2f2f"
-            }
-        ]
-    },
-    {
-        "featureType": "transit.line",
-        "elementType": "geometry",
-        "stylers": [
-            {
-                "color": "#757575"
-            }
-        ]
-    },
-    {
-        "featureType": "transit.station",
-        "elementType": "geometry",
-        "stylers": [
-            {
-                "color": "#212121"
-            }
-        ]
-    },
-    {
-        "featureType": "water",
-        "elementType": "geometry",
-        "stylers": [
-            {
-                "color": "#000000"
-            }
-        ]
-    },
-    {
-        "featureType": "water",
-        "elementType": "labels.text.fill",
-        "stylers": [
-            {
-                "color": "#3d3d3d"
-            }
-        ]
-    }
-];
 
 const styles = StyleSheet.create({
     container: {
         flex: 1,
     },
-    map: {
-        width: width,
-        height: height,
-    },
     mapControls: {
         position: 'absolute',
+        top: 100,
         right: 20,
-        top: 120,
-        gap: 12,
+        zIndex: 1000,
     },
     controlButton: {
-        width: 48,
-        height: 48,
-        borderRadius: 24,
+        width: 50,
+        height: 50,
+        borderRadius: 25,
         justifyContent: 'center',
         alignItems: 'center',
+        marginBottom: 10,
         shadowColor: '#000',
         shadowOffset: { width: 0, height: 2 },
         shadowOpacity: 0.25,
         shadowRadius: 3.84,
         elevation: 5,
     },
-    userMarker: {
-        width: 40,
-        height: 40,
-        borderRadius: 20,
+    // Estilos para cards de valores (baseado no MapScreen.js antigo)
+    carOptionsContainer: {
+        position: 'absolute',
+        bottom: 120,
+        left: 20,
+        right: 20,
+        zIndex: 1000,
+    },
+    carOptionsMainCard: {
         backgroundColor: '#FFFFFF',
-        justifyContent: 'center',
+        borderRadius: 15,
+        padding: 15,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.25,
+        shadowRadius: 3.84,
+        elevation: 5,
+    },
+    carCard: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        padding: 15,
+        marginBottom: 10,
+        borderRadius: 10,
+        backgroundColor: '#F8F9FA',
+        borderWidth: 2,
+        borderColor: 'transparent',
+    },
+    selectedCarCard: {
+        borderColor: '#41D274',
+        backgroundColor: '#E8F5E8',
+    },
+    carImage: {
+        width: 50,
+        height: 50,
+        borderRadius: 25,
+        marginRight: 15,
+    },
+    carInfo: {
+        flex: 1,
+    },
+    carNameValue: {
+        fontSize: 16,
+        fontWeight: 'bold',
+        color: '#000000',
+    },
+    priceNameValue: {
+        fontSize: 16,
+        fontWeight: 'bold',
+        color: '#41D274',
+    },
+    carDetailsRow: {
+        marginTop: 5,
+    },
+    carSubInfo: {
+        fontSize: 14,
+        color: '#666666',
+    },
+    bookButtonContainer: {
+        position: 'absolute',
+        bottom: 20,
+        left: 20,
+        right: 20,
+        zIndex: 1000,
+    },
+    bookButton: {
+        backgroundColor: '#41D274',
+        borderRadius: 25,
+        padding: 20,
         alignItems: 'center',
         shadowColor: '#000',
         shadowOffset: { width: 0, height: 2 },
@@ -800,28 +812,15 @@ const styles = StyleSheet.create({
         shadowRadius: 3.84,
         elevation: 5,
     },
-    pickupMarker: {
-        width: 32,
-        height: 32,
-        borderRadius: 16,
-        justifyContent: 'center',
-        alignItems: 'center',
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.25,
-        shadowRadius: 3.84,
-        elevation: 5,
+    bookButtonText: {
+        color: '#FFFFFF',
+        fontSize: 18,
+        fontWeight: 'bold',
     },
-    dropMarker: {
-        width: 32,
-        height: 32,
-        borderRadius: 16,
-        justifyContent: 'center',
-        alignItems: 'center',
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.25,
-        shadowRadius: 3.84,
-        elevation: 5,
+    bookButtonSubtext: {
+        color: '#FFFFFF',
+        fontSize: 14,
+        marginTop: 5,
+        opacity: 0.9,
     },
 }); 

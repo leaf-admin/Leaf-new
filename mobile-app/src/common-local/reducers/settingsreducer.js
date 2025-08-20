@@ -4,7 +4,7 @@ import {
   FETCH_SETTINGS_FAILED,
   EDIT_SETTINGS,
   CLEAR_SETTINGS_ERROR
-} from "../store/types";
+} from "../types.js";
 
 const INITIAL_STATE = {
   settings: null,

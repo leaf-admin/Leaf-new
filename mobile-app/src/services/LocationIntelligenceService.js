@@ -1,326 +1,325 @@
+/**
+ * LocationIntelligenceService.js
+ * Serviço de Location Intelligence para o mobile app
+ */
+
+import { Alert } from 'react-native';
+
 class LocationIntelligenceService {
-    constructor() {
-        this.vultrUrl = 'http://216.238.107.59:3001';
-        this.hostingerUrl = 'https://leaf-app.web.app'; // Placeholder
-        this.timeout = 1000; // 1 segundo
-    }
+  constructor() {
+    // URLs dos serviços
+    this.vultrUrl = 'http://216.238.107.59:3001';
+    this.hostingerUrl = 'https://seu-dominio-hostinger.com'; // TODO: Configurar
+    
+    // Timeout mais agressivo para não atrasar o Google Places
+    this.timeout = 2000; // 2 segundos máximo
+    
+    console.log('🧠 Location Intelligence Service (Mobile) inicializado');
+  }
 
-    static getInstance() {
-        if (!LocationIntelligenceService.instance) {
-            LocationIntelligenceService.instance = new LocationIntelligenceService();
+  /**
+   * Resolve localização usando estratégia híbrida
+   */
+  async resolveLocation(query, coordinates = null, context = 'passenger') {
+    try {
+      console.log(`🔍 Resolvendo localização: "${query}" (${context})`);
+
+      // 1. Tentar Vultr primeiro (mais rápido)
+      try {
+        const vultrResult = await this.resolveFromVultr(query, coordinates, context);
+        if (vultrResult) {
+          console.log('✅ Resolvido via Vultr');
+          return vultrResult;
         }
-        return LocationIntelligenceService.instance;
-    }
+      } catch (error) {
+        console.warn('⚠️ Vultr falhou, tentando Hostinger:', error.message);
+      }
 
-    // Função para fazer requisições HTTP com timeout
-    async makeRequest(url, options = {}) {
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), this.timeout);
-
-        try {
-            const response = await fetch(url, {
-                ...options,
-                signal: controller.signal,
-                headers: {
-                    'Content-Type': 'application/json',
-                    ...options.headers
-                }
-            });
-
-            clearTimeout(timeoutId);
-
-            if (!response.ok) {
-                throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-            }
-
-            return await response.json();
-        } catch (error) {
-            clearTimeout(timeoutId);
-            
-            if (error.name === 'AbortError') {
-                throw new Error('Timeout: Requisição demorou muito para responder');
-            }
-            
-            throw error;
+      // 2. Tentar Hostinger como fallback
+      try {
+        const hostingerResult = await this.resolveFromHostinger(query, coordinates, context);
+        if (hostingerResult) {
+          console.log('✅ Resolvido via Hostinger');
+          return hostingerResult;
         }
+      } catch (error) {
+        console.warn('⚠️ Hostinger falhou:', error.message);
+      }
+
+      console.log('❌ Localização não encontrada em nenhuma fonte');
+      return null;
+
+    } catch (error) {
+      console.error('❌ Erro ao resolver localização:', error);
+      throw error;
     }
+  }
 
-    // Resolver localização
-    async resolveLocation(query) {
-        try {
-            console.log('🧠 Resolvendo localização:', query);
-            
-            const response = await this.makeRequest(
-                `${this.vultrUrl}/api/location/resolve`,
-                {
-                    method: 'POST',
-                    body: JSON.stringify({ query })
-                }
-            );
+  /**
+   * Resolve localização via Vultr
+   */
+  async resolveFromVultr(query, coordinates, context) {
+    try {
+      const params = new URLSearchParams();
+      
+      if (query) params.append('query', query);
+      if (coordinates?.lat) params.append('lat', coordinates.lat);
+      if (coordinates?.lng) params.append('lng', coordinates.lng);
+      if (context) params.append('context', context);
 
-            console.log('✅ Localização resolvida:', response);
-            return response;
-        } catch (error) {
-            console.error('❌ Erro ao resolver localização:', error);
-            
-            // Fallback para Hostinger se Vultr falhar
-            try {
-                console.log('🔄 Tentando fallback para Hostinger...');
-                const fallbackResponse = await this.makeRequest(
-                    `${this.hostingerUrl}/api/location/resolve`,
-                    {
-                        method: 'POST',
-                        body: JSON.stringify({ query })
-                    }
-                );
-                
-                console.log('✅ Fallback bem-sucedido:', fallbackResponse);
-                return fallbackResponse;
-            } catch (fallbackError) {
-                console.error('❌ Fallback também falhou:', fallbackError);
-                throw new Error('Não foi possível resolver a localização');
-            }
+      const response = await fetch(`${this.vultrUrl}/api/location/resolve?${params}`, {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        timeout: this.timeout,
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
+
+      const data = await response.json();
+      
+      if (data.success && data.data) {
+        return data.data;
+      }
+      
+      return null;
+    } catch (error) {
+      console.error('❌ Erro ao resolver via Vultr:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Resolve localização via Hostinger (fallback)
+   */
+  async resolveFromHostinger(query, coordinates, context) {
+    try {
+      // TODO: Implementar integração com Hostinger
+      // Por enquanto, retorna null para forçar Google Places
+      console.log('🔄 Hostinger não implementado ainda');
+      return null;
+    } catch (error) {
+      console.error('❌ Erro ao resolver via Hostinger:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Busca sugestões inteligentes
+   */
+  async getSmartSuggestions(query, context = 'passenger') {
+    try {
+      if (!query || query.length < 2) {
+        return [];
+      }
+
+      console.log(`🔍 Buscando sugestões para: "${query}"`);
+
+      // 1. Tentar Vultr primeiro (com timeout agressivo de 2s)
+      try {
+        console.log('🚀 Tentando Vultr (timeout: 2s)...');
+        const vultrSuggestions = await this.getSuggestionsFromVultr(query, context);
+        if (vultrSuggestions && vultrSuggestions.length > 0) {
+          console.log('✅ Sugestões obtidas via Vultr:', vultrSuggestions.length);
+          return vultrSuggestions;
         }
+        console.log('⚠️ Vultr retornou vazio');
+      } catch (error) {
+        console.warn('⚠️ Vultr falhou para sugestões:', error.message);
+      }
+
+      // 2. Fallback imediato para Google Places (sem esperar Hostinger)
+      console.log('🔄 Vultr falhou, retornando vazio para forçar Google Places');
+      return [];
+
+    } catch (error) {
+      console.error('❌ Erro ao buscar sugestões:', error);
+      return [];
+    }
+  }
+
+  /**
+   * Busca sugestões via Vultr
+   */
+  async getSuggestionsFromVultr(query, context) {
+    try {
+      const params = new URLSearchParams({
+        query: query,
+        context: context || 'passenger'
+      });
+
+      const url = `${this.vultrUrl}/api/location/suggestions?${params}`;
+      console.log('🌐 Chamando API Vultr:', url);
+
+      // Criar AbortController para timeout mais agressivo
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), this.timeout);
+
+      const response = await fetch(url, {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        signal: controller.signal,
+      });
+
+      clearTimeout(timeoutId);
+      console.log('📡 Response status:', response.status);
+      console.log('📡 Response ok:', response.ok);
+
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
+
+      const data = await response.json();
+      console.log('📡 Response data:', data);
+      
+      if (data.success && data.data) {
+        console.log('✅ Dados retornados com sucesso:', data.data.length, 'itens');
+        return data.data;
+      }
+      
+      console.log('⚠️ Resposta sem dados válidos:', data);
+      return [];
+    } catch (error) {
+      if (error.name === 'AbortError') {
+        console.warn('⏰ Timeout ao buscar sugestões via Vultr (2s)');
+      } else {
+        console.error('❌ Erro ao buscar sugestões via Vultr:', error);
+      }
+      throw error;
+    }
+  }
+
+  /**
+   * Busca sugestões via Hostinger
+   */
+  async getSuggestionsFromHostinger(query, context) {
+    try {
+      // TODO: Implementar integração com Hostinger
+      console.log('🔄 Hostinger não implementado ainda');
+      return [];
+    } catch (error) {
+      console.error('❌ Erro ao buscar sugestões via Hostinger:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Obtém estatísticas do serviço
+   */
+  async getStats() {
+    try {
+      const response = await fetch(`${this.vultrUrl}/api/location/stats`, {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        timeout: this.timeout,
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
+
+      const data = await response.json();
+      
+      if (data.success && data.data) {
+        return data.data;
+      }
+      
+      return null;
+    } catch (error) {
+      console.error('❌ Erro ao obter estatísticas:', error);
+      return null;
+    }
+  }
+
+  /**
+   * Limpa cache do serviço
+   */
+  async clearCache() {
+    try {
+      const response = await fetch(`${this.vultrUrl}/api/location/cache/clear`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        timeout: this.timeout,
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
+
+      const data = await response.json();
+      
+      if (data.success) {
+        console.log('🗑️ Cache limpo com sucesso');
+        return data.data.cleared;
+      }
+      
+      return 0;
+    } catch (error) {
+      console.error('❌ Erro ao limpar cache:', error);
+      return 0;
+    }
+  }
+
+  /**
+   * Testa conectividade com os serviços
+   */
+  async testConnectivity() {
+    const results = {
+      vultr: false,
+      hostinger: false,
+      timestamp: new Date().toISOString()
+    };
+
+    // Testar Vultr
+    try {
+      const response = await fetch(`${this.vultrUrl}/health`, {
+        method: 'GET',
+        timeout: 5000,
+      });
+      results.vultr = response.ok;
+      console.log('✅ Vultr conectado:', response.ok);
+    } catch (error) {
+      console.log('❌ Vultr não conectado:', error.message);
     }
 
-    // Obter sugestões inteligentes
-    async getSmartSuggestions(query) {
-        try {
-            console.log('🧠 Obtendo sugestões inteligentes:', query);
-            
-            const response = await this.makeRequest(
-                `${this.vultrUrl}/api/location/suggestions`,
-                {
-                    method: 'POST',
-                    body: JSON.stringify({ query })
-                }
-            );
-
-            console.log('✅ Sugestões obtidas:', response);
-            return response.suggestions || [];
-        } catch (error) {
-            console.error('❌ Erro ao obter sugestões:', error);
-            
-            // Fallback para Hostinger
-            try {
-                console.log('🔄 Tentando fallback para Hostinger...');
-                const fallbackResponse = await this.makeRequest(
-                    `${this.hostingerUrl}/api/location/suggestions`,
-                    {
-                        method: 'POST',
-                        body: JSON.stringify({ query })
-                    }
-                );
-                
-                console.log('✅ Fallback bem-sucedido:', fallbackResponse);
-                return fallbackResponse.suggestions || [];
-            } catch (fallbackError) {
-                console.error('❌ Fallback também falhou:', fallbackError);
-                
-                // Fallback local com sugestões básicas
-                console.log('🔄 Usando fallback local...');
-                return this.getLocalFallbackSuggestions(query);
-            }
-        }
+    // Testar Hostinger
+    try {
+      // TODO: Implementar teste de conectividade com Hostinger
+      results.hostinger = false;
+      console.log('⚠️ Hostinger não testado ainda');
+    } catch (error) {
+      console.log('❌ Hostinger não conectado:', error.message);
     }
 
-    // Obter sugestões do Redis
-    async getSuggestionsFromRedis(query) {
-        try {
-            console.log('🔴 Buscando no Redis:', query);
-            
-            const response = await this.makeRequest(
-                `${this.vultrUrl}/api/location/suggestions/redis`,
-                {
-                    method: 'POST',
-                    body: JSON.stringify({ query })
-                }
-            );
+    return results;
+  }
 
-            if (response.success && response.suggestions && response.suggestions.length > 0) {
-                console.log('✅ Sugestões do Redis:', response.suggestions.length);
-                return response.suggestions;
-            }
-            
-            console.log('❌ Redis vazio ou falhou');
-            return null;
-        } catch (error) {
-            console.error('❌ Erro ao buscar no Redis:', error);
-            return null;
-        }
-    }
-
-    // Obter sugestões do Firebase
-    async getSuggestionsFromFirebase(query) {
-        try {
-            console.log('🔥 Buscando no Firebase:', query);
-            
-            const response = await this.makeRequest(
-                `${this.vultrUrl}/api/location/suggestions/firebase`,
-                {
-                    method: 'POST',
-                    body: JSON.stringify({ query })
-                }
-            );
-
-            if (response.success && response.suggestions && response.suggestions.length > 0) {
-                console.log('✅ Sugestões do Firebase:', response.suggestions.length);
-                return response.suggestions;
-            }
-            
-            console.log('❌ Firebase vazio ou falhou');
-            return null;
-        } catch (error) {
-            console.error('❌ Erro ao buscar no Firebase:', error);
-            return null;
-        }
-    }
-
-    // Salvar sugestões no cache
-    async cacheSuggestions(query, suggestions, source) {
-        try {
-            console.log('💾 Salvando no cache:', query, source, suggestions.length);
-            
-            const response = await this.makeRequest(
-                `${this.vultrUrl}/api/location/cache`,
-                {
-                    method: 'POST',
-                    body: JSON.stringify({
-                        query,
-                        suggestions,
-                        source,
-                        timestamp: Date.now()
-                    })
-                }
-            );
-
-            if (response.success) {
-                console.log('✅ Sugestões salvas no cache');
-                return true;
-            } else {
-                console.warn('⚠️ Falha ao salvar no cache:', response.message);
-                return false;
-            }
-        } catch (error) {
-            console.error('❌ Erro ao salvar no cache:', error);
-            return false;
-        }
-    }
-
-    // Testar conectividade
-    async testConnectivity() {
-        const results = {
-            vultr: false,
-            hostinger: false
-        };
-
-        try {
-            // Testar Vultr
-            const vultrResponse = await this.makeRequest(
-                `${this.vultrUrl}/api/location/stats`,
-                { method: 'GET' }
-            );
-            results.vultr = vultrResponse.success || false;
-            console.log('✅ Vultr conectado:', results.vultr);
-        } catch (error) {
-            console.log('❌ Vultr não conectado:', error.message);
-        }
-
-        try {
-            // Testar Hostinger
-            const hostingerResponse = await this.makeRequest(
-                `${this.hostingerUrl}/api/location/stats`,
-                { method: 'GET' }
-            );
-            results.hostinger = hostingerResponse.success || false;
-            console.log('✅ Hostinger conectado:', results.hostinger);
-        } catch (error) {
-            console.log('❌ Hostinger não conectado:', error.message);
-        }
-
-        return results;
-    }
-
-    // Obter estatísticas
-    async getStats() {
-        try {
-            console.log('📊 Obtendo estatísticas...');
-            
-            const response = await this.makeRequest(
-                `${this.vultrUrl}/api/location/stats`,
-                { method: 'GET' }
-            );
-
-            console.log('✅ Estatísticas obtidas:', response);
-            return response;
-        } catch (error) {
-            console.error('❌ Erro ao obter estatísticas:', error);
-            
-            // Fallback para Hostinger
-            try {
-                const fallbackResponse = await this.makeRequest(
-                    `${this.hostingerUrl}/api/location/stats`,
-                    { method: 'GET' }
-                );
-                
-                return fallbackResponse;
-            } catch (fallbackError) {
-                console.error('❌ Fallback também falhou:', fallbackError);
-                return {
-                    success: false,
-                    message: 'Não foi possível obter estatísticas',
-                    redisKeys: 0,
-                    firebaseDocs: 0,
-                    totalQueries: 0
-                };
-            }
-        }
-    }
-
-    // Limpar cache
-    async clearCache() {
-        try {
-            console.log('🗑️ Limpando cache...');
-            
-            const response = await this.makeRequest(
-                `${this.vultrUrl}/api/location/cache/clear`,
-                { method: 'POST' }
-            );
-
-            console.log('✅ Cache limpo:', response);
-            return response;
-        } catch (error) {
-            console.error('❌ Erro ao limpar cache:', error);
-            throw error;
-        }
-    }
-
-    // Fallback local com sugestões básicas
-    getLocalFallbackSuggestions(query) {
-        console.log('🏠 Usando sugestões locais para:', query);
-        
-        // Sugestões básicas baseadas no query
-        const suggestions = [
-            {
-                id: 'local_1',
-                address: `${query}, Centro`,
-                description: `${query}, Centro, Rio de Janeiro`,
-                lat: -22.9068,
-                lng: -43.1729,
-                source: 'local_fallback'
-            },
-            {
-                id: 'local_2',
-                address: `${query}, Copacabana`,
-                description: `${query}, Copacabana, Rio de Janeiro`,
-                lat: -22.9707,
-                lng: -43.1824,
-                source: 'local_fallback'
-            }
-        ];
-
-        return suggestions;
-    }
+  /**
+   * Obtém informações de conectividade
+   */
+  getConnectivityInfo() {
+    return {
+      vultr: {
+        url: this.vultrUrl,
+        status: 'active',
+        description: 'Servidor principal (Vultr)'
+      },
+      hostinger: {
+        url: this.hostingerUrl,
+        status: 'pending',
+        description: 'Servidor de fallback (Hostinger)'
+      }
+    };
+  }
 }
 
 export default LocationIntelligenceService; 

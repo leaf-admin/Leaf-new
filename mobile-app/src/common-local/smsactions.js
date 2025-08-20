@@ -3,7 +3,7 @@ import {
     FETCH_SMSCONFIG_SUCCESS,
     FETCH_SMSCONFIG_FAILED,
     EDIT_SMSCONFIG
-  } from "../store/types";
+  } from "../types";
   import { firebase } from '../config/configureFirebase';
 
   export const fetchSMSConfig = () => (dispatch) => {

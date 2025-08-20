@@ -4,7 +4,7 @@ import {
     FETCH_TASKS_FAILED,
     ACCEPT_TASK,
     CANCEL_TASK,
-} from "../store/types";
+} from "../types.js";
 
 const INITIAL_STATE = {
     tasks: null,

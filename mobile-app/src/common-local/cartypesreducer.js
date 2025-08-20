@@ -3,7 +3,7 @@ import {
   FETCH_CAR_TYPES_SUCCESS,
   FETCH_CAR_TYPES_FAILED,
   EDIT_CAR_TYPE
-} from "../store/types";
+} from "../types.js";
 
 const INITIAL_STATE = {
   cars: null,

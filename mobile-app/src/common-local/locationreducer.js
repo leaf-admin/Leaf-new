@@ -4,7 +4,7 @@ import {
     FETCH_BOOKING_LOCATION_FAILED,
     STOP_LOCATION_FETCH,
     STORE_ADRESSES
-} from "../store/types";
+} from "../types";
 
 const INITIAL_STATE = {
     coords: null,

@@ -3,7 +3,7 @@ import {
   FETCH_WITHDRAWS_SUCCESS,
   FETCH_WITHDRAWS_FAILED,
   EDIT_WITHDRAWS
-  } from "../store/types";
+  } from "../types.js";
   
   export const INITIAL_STATE = {
     withdraws:null,

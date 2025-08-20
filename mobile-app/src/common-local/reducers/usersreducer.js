@@ -9,7 +9,7 @@ import {
     FETCH_ALL_DRIVERS,
     FETCH_ALL_DRIVERS_SUCCESS,
     FETCH_ALL_DRIVERS_FAILED
-  } from "../store/types";
+  } from "../types.js";
   
   export const INITIAL_STATE = {
     users:null,

@@ -3,16 +3,13 @@ import {
     CONFIRM_BOOKING_SUCCESS,
     CONFIRM_BOOKING_FAILED,
     CLEAR_BOOKING
-} from "../store/types";
+} from "../types.js";
 import { RequestPushMsg } from '../other/NotificationFunctions';
-import store from '../store/store';
+import store from '../store';
 import { firebase } from '../config/configureFirebase';
 import { formatBookingObject } from '../other/sharedFunctions';
 import { Alert } from 'react-native';
-import { Platform } from 'react-native';
-import { api } from '../index';
-import { CommonActions } from '@react-navigation/native';
-import { getDistance } from '../utils/firebaseUtils';
+import { get } from '@react-native-firebase/database';
 
 export const clearBooking = () => (dispatch) => {
     dispatch({

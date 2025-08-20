@@ -30,6 +30,86 @@ import { getUserId, getUserData, saveUserId, saveUserData, clearAuthData } from 
 import { configureAuthPersistence, checkPersistedAuth, saveAuthSession, clearAuthSession } from './authPersistence';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
+export const registerUser = (userData) => async (dispatch) => {
+  const { auth, singleUserRef } = firebase;
+  try {
+    const currentUser = auth.currentUser;
+    if (!currentUser) {
+      throw new Error("Usuário não autenticado. O processo de OTP pode ter falhado.");
+    }
+
+    const uid = currentUser.uid;
+    console.log('registerUser - Dados recebidos:', userData);
+    console.log('registerUser - Usuário atual:', currentUser);
+
+    // Extrair dados com fallbacks seguros
+    const { name, userType, usertype, cpf, phone, mobile, email } = userData;
+    
+    // Usar usertype ou userType (ambos são aceitos)
+    const finalUserType = usertype || userType;
+    
+    // Usar phone ou mobile (ambos são aceitos)
+    const finalPhone = phone || mobile;
+
+    console.log('registerUser - Dados extraídos:', {
+      name, userType, usertype, finalUserType,
+      cpf, phone, mobile, finalPhone, email
+    });
+
+    if (!finalUserType) {
+      throw new Error("Tipo de usuário não definido. Deve ser 'customer' ou 'driver'.");
+    }
+
+    if (!name) {
+      throw new Error("Nome não fornecido.");
+    }
+
+    // Garante que o nome seja separado em firstName e lastName
+    const nameParts = name ? name.split(' ') : [''];
+    const firstName = nameParts[0];
+    const lastName = nameParts.slice(1).join(' ');
+
+    const profileData = {
+      firstName: firstName,
+      lastName: lastName,
+      usertype: finalUserType,  // Campo que a NewMapScreen espera
+      userType: finalUserType,  // Manter compatibilidade se necessário
+      email: email,
+      cpf: cpf,
+      mobile: finalPhone,
+      createdAt: new Date().toISOString(),
+      approved: finalUserType === 'driver' ? false : true,
+      driverActiveStatus: finalUserType === 'driver' ? false : false,
+      queue: false,
+      profile_image: null,
+      referralId: `leaf${Math.floor(1000 + Math.random() * 9000)}`,
+      walletBalance: 0,
+    };
+
+    console.log('registerUser - Dados do perfil a serem salvos:', profileData);
+
+    // Salva os dados do perfil no Realtime Database
+    await singleUserRef(uid).set(profileData);
+    
+    console.log('registerUser - Perfil salvo com sucesso no banco');
+    
+    // Atualiza o Redux com o perfil completo
+    dispatch({
+      type: FETCH_USER_SUCCESS,
+      payload: { ...profileData, uid }
+    });
+
+    console.log('registerUser - Redux atualizado com sucesso');
+
+  } catch (error) {
+    console.error("Erro ao registrar usuário no banco de dados:", error);
+    dispatch({
+      type: FETCH_USER_FAILED,
+      payload: { code: 'db-error', message: error.message }
+    });
+  }
+};
+
 // Constante para a chave do AsyncStorage
 const AUTH_UID_KEY = '@auth_uid';
 

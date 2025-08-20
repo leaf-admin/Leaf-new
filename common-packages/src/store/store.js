@@ -29,6 +29,7 @@ import { complainreducer } from '../reducers/complainreducer';
 import { usedreferralreducer } from "../reducers/usedreferralreducer";
 import { fleetadminearningreducer } from "../reducers/fleetadminearningreducer";
 import vehicleReducer from "../reducers/vehiclereducer";
+import ratingreducer from "../reducers/ratingreducer";
 
 const rootReducer = {
   auth: authreducer,
@@ -60,6 +61,7 @@ const rootReducer = {
   usedreferralid:usedreferralreducer,
   fleetadminearningdata: fleetadminearningreducer,
   vehicledata: vehicleReducer,
+  ratings: ratingreducer,
 };
 
 const store = configureStore({

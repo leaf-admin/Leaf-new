@@ -26,13 +26,14 @@ import DatePicker from 'react-native-date-picker';
 import { useSelector, useDispatch } from 'react-redux';
 import { api, FirebaseContext } from '../common-local';
 import { OptionModal } from '../components/OptionModal';
-import BookingModal, { appConsts, prepareEstimateObject } from '../common-local/sharedFunctions';
+import BookingModal, { appConsts } from '../common-local/sharedFunctions';
+import { prepareEstimateObject } from '../common/sharedFunctions';
 import MapView, { PROVIDER_GOOGLE, Marker, Polyline } from 'react-native-maps';
 import { CommonActions } from '@react-navigation/native';
 import { MAIN_COLOR, CarHorizontal, CarVertical, validateBookingObj, SECONDORY_COLOR } from '../common-local/sharedFunctions';
 import { startActivityAsync, ActivityAction } from 'expo-intent-launcher';
 import Button from '../components/Button';
-import { fonts } from "../common/font";
+import { fonts } from "../common-local/font";
 import DeviceInfo from 'react-native-device-info';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useTranslation } from 'react-i18next';
@@ -47,10 +48,10 @@ import * as SplashScreen from 'expo-splash-screen';
 import { GoogleMapApiConfig } from '../../config/GoogleMapApiConfig';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import splashImg from '../../assets/images/splash.png';
-import BottomMenu from '../components/BottomMenu';
+
 import PixPaymentBottomSheet from '../components/PixPaymentBottomSheet';
 import DriverSearchBottomSheet from '../components/DriverSearchBottomSheet';
-import ProfileToggle from '../components/ProfileToggle';
+
 
 const hasNotch = DeviceInfo.hasNotch();
 
@@ -906,40 +907,93 @@ export default function MapScreen(props) {
     // Atualizar estimativas para ambos os tipos ao selecionar pickup e drop
     useEffect(() => {
         const fetchEstimates = async () => {
+            console.log('🔄 fetchEstimates iniciado');
+            console.log('📍 tripdata.pickup:', tripdata.pickup);
+            console.log('📍 tripdata.drop:', tripdata.drop);
+            console.log('🚗 filteredCarTypes:', filteredCarTypes);
+            
             if (tripdata.pickup && tripdata.drop) {
                 let estimates = {};
                 let firstPolyline = null;
+                
                 for (const car of filteredCarTypes) {
+                    console.log(`🚗 Processando carro: ${car.name}`);
                     const tripdataForCar = {
                         pickup: tripdata.pickup,
                         drop: tripdata.drop,
                         carType: { ...car }
                     };
-                    const estimateObj = await prepareEstimateObject(tripdataForCar, instructionData);
-                    if (!estimateObj.error && estimateObj.estimateObject && estimateObj.estimateObject.carDetails) {
-                        estimates[car.name] = {
-                            ...estimateObj.estimateObject,
-                            estimateFare: estimateObj.estimateObject.routeDetails && estimateObj.estimateObject.routeDetails.fare ? estimateObj.estimateObject.routeDetails.fare : null,
-                            estimateTime: estimateObj.estimateObject.routeDetails && estimateObj.estimateObject.routeDetails.time_in_secs ? estimateObj.estimateObject.routeDetails.time_in_secs : null
-                        };
-                        // Pega a primeira polyline válida
-                        if (!firstPolyline && estimateObj.estimateObject.routeDetails && estimateObj.estimateObject.routeDetails.polylinePoints) {
-                            const points = DecodePolyLine.decode(estimateObj.estimateObject.routeDetails.polylinePoints);
-                            const coordsArr = points.map(point => ({ latitude: point[0], longitude: point[1] }));
-                            firstPolyline = coordsArr;
+                    
+                    try {
+                        console.log(`📞 Chamando prepareEstimateObject para ${car.name}`);
+                        const estimateObj = await prepareEstimateObject(tripdataForCar, instructionData);
+                        console.log(`✅ prepareEstimateObject retorno para ${car.name}:`, estimateObj);
+                        
+                        if (!estimateObj.error && estimateObj.estimateObject && estimateObj.estimateObject.carDetails) {
+                            // Calcular tarifa usando FareCalculator
+                            let estimateFare = null;
+                            let estimateTime = null;
+                            
+                            if (estimateObj.estimateObject.routeDetails) {
+                                const routeDetails = estimateObj.estimateObject.routeDetails;
+                                const distance = routeDetails.distance_in_km || 0;
+                                const time = routeDetails.time_in_secs || 0;
+                                
+                                // Importar FareCalculator dinamicamente
+                                const { FareCalculator } = require('../common/sharedFunctions');
+                                const fareResult = FareCalculator(
+                                    distance, 
+                                    time, 
+                                    car, 
+                                    instructionData, 
+                                    2, // decimal
+                                    null, // routePoints
+                                    'car', // vehicleType
+                                    null // externalTollFee
+                                );
+                                
+                                estimateFare = fareResult.grandTotal;
+                                estimateTime = time;
+                                
+                                console.log(`💰 Tarifa calculada para ${car.name}:`, fareResult);
+                            }
+                            
+                            estimates[car.name] = {
+                                ...estimateObj.estimateObject,
+                                estimateFare: estimateFare,
+                                estimateTime: estimateTime
+                            };
+                            
+                            // Pega a primeira polyline válida
+                            if (!firstPolyline && estimateObj.estimateObject.routeDetails && estimateObj.estimateObject.routeDetails.polylinePoints) {
+                                console.log(`🗺️ Decodificando polyline para ${car.name}`);
+                                const points = DecodePolyLine.decode(estimateObj.estimateObject.routeDetails.polylinePoints);
+                                const coordsArr = points.map(point => ({ latitude: point[0], longitude: point[1] }));
+                                firstPolyline = coordsArr;
+                                console.log(`✅ Polyline decodificada:`, coordsArr.length, 'pontos');
+                            }
+                        } else {
+                            console.log(`❌ Erro no estimateObj para ${car.name}:`, estimateObj);
+                            estimates[car.name] = null;
                         }
-                    } else {
+                    } catch (error) {
+                        console.error(`💥 Erro ao processar ${car.name}:`, error);
                         estimates[car.name] = null;
                     }
                 }
+                
+                console.log('📊 Estimates finais:', estimates);
                 setCarEstimates(estimates);
+                
                 if (firstPolyline) {
                     setRoutePolyline(firstPolyline);
-                    console.log('Polyline gerada:', firstPolyline);
+                    console.log('✅ Polyline gerada e definida:', firstPolyline.length, 'pontos');
                 } else {
                     setRoutePolyline([]);
-                    console.log('Polyline vazia!');
+                    console.log('⚠️ Polyline vazia - nenhuma rota válida encontrada');
                 }
+            } else {
+                console.log('⚠️ tripdata.pickup ou tripdata.drop não disponível');
             }
         };
         fetchEstimates();
@@ -2347,15 +2401,6 @@ const onMapSelectComplete = () => {
                     >
                         <Icon name="notifications" type="material" color={theme.icon} size={24} />
                     </TouchableOpacity>
-                    <ProfileToggle 
-                        userId="current_user"
-                        onModeChange={(newMode, profileData) => {
-                            console.log('Toggle mode changed to:', newMode);
-                            // Aqui podemos adicionar lógica adicional quando o modo muda
-                        }}
-                        style="discrete"
-                        size="small"
-                    />
                     <ThemeSwitch value={isDarkMode} onValueChange={setIsDarkMode} />
                 </View>
             </View>
@@ -2478,8 +2523,7 @@ const onMapSelectComplete = () => {
                     <ActivityIndicator size="large" color="#fff" style={{ zIndex: 2, marginTop: 170 }} />
                 </View>
             )}
-            {/* Menu inferior moderno, só aparece quando o mapa está pronto e não há destino definido */}
-            <BottomMenu visible={mapReady && mapLayout && (!tripdata.pickup || !tripdata.drop || !tripdata.drop.add)} />
+
             
             {/* Bottom Sheets */}
             <PixPaymentBottomSheet

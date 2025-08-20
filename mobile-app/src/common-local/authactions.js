@@ -13,7 +13,7 @@ import {
   SEND_RESET_EMAIL,
   SEND_RESET_EMAIL_FAILED,
   USER_SIGN_IN_SUCCESS
-} from "../store/types";
+} from "../types";
 
 import store from '../store/store';
 import { firebase } from '../config/configureFirebase';

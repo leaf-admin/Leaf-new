@@ -1,412 +1,224 @@
-import React, { useEffect, useRef, useState } from 'react';
-import { NavigationContainer, useNavigationContainerRef } from '@react-navigation/native';
-import { createStackNavigator, CardStyleInterpolators } from '@react-navigation/stack';
-import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
-import {
-    Dimensions,
-    Platform,
-    View,
-    ActivityIndicator,
-} from 'react-native';
-import DeviceInfo from 'react-native-device-info';
-import {
-    DriverRating,
-    ProfileScreen,
-    PaymentDetails,
-    RideListPage,
-    MapScreen,
-    BookedCabScreen,
-    RideDetails,
-    SearchScreen,
-    EditProfilePage,
-    AboutPage,
-    // OnlineChat, // Temporariamente comentado
-    WalletDetails,
-    AddMoneyScreen,
-    SelectGatewayPage,
-    LoginScreen,
-    DriverTrips,
-    WithdrawMoneyScreen,
-    DriverIncomeScreen,
-    RegistrationPage,
-    Notifications as NotificationsPage,
-    SettingsScreen,
-    CarsScreen,
-    CarEditScreen,
-    CompleteRegistrationScreen,
-    EditProfileScreen,
-    MyVehiclesScreen,
-    AddVehicleScreen,
-    // Novas telas implementadas
-    SupportScreen,
-    NotificationCenterScreen,
-    HelpScreen,
-    PrivacyPolicyScreen,
-    AboutScreen,
-    FeedbackScreen,
-    LegalScreen,
-    // Telas críticas do fluxo principal
-    DriverSearchScreen,
-    TripTrackingScreen,
-    PaymentSuccessScreen,
-    PaymentFailedScreen,
-    CancellationScreen,
-    ChatScreen,
-    PlanSelectionScreen,
-    WeeklyPaymentScreen,
-    DriverDashboardScreen,
-    BaaSAccountScreen,
-    DriverBalanceScreen,
-} from '../screens';
-import EarningsReportScreen from '../screens/EarningsReportScreen';
-import DriverDocumentsScreen from '../screens/DriverDocumentsScreen';
-import Complain from '../screens/Complain';
-import OTPScreen from '../screens/OTPScreen';
-import UserInfoScreen from '../screens/UserInfoScreen';
-// CNHUploadScreen e CRLVUploadScreen foram removidos - usar DriverDocumentsScreen
-import AppCommon from '../screens/AppCommon';
-import ProfileSelectionScreen from '../screens/ProfileSelectionScreen';
-import PhoneInputScreen from '../screens/PhoneInputScreen';
-import PersonalDataScreen from '../screens/PersonalDataScreen';
-import DriverTermsScreen from '../screens/DriverTermsScreen';
-import SplashScreen from '../screens/SplashScreen';
-import ToggleTestScreen from '../screens/ToggleTestScreen';
-var { height, width } = Dimensions.get('window');
-import { useSelector } from "react-redux";
-import i18n from '../i18n';
-import * as Notifications from 'expo-notifications';
-import { Ionicons } from '@expo/vector-icons';
-import { colors } from '../common-local/theme';
-import { Icon } from "react-native-elements";
-import { MAIN_COLOR } from '../common-local/sharedFunctions';
-import { CommonActions } from '@react-navigation/native';
-import { fonts } from '../common-local/font';
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { validateUserProfile, clearAuthData } from '../utils/authUtils';
+import React, { useEffect, useState } from 'react';
+import { NavigationContainer } from '@react-navigation/native';
+import { createStackNavigator } from '@react-navigation/stack';
 
-const hasNotch = DeviceInfo.hasNotch();
+import { useSelector, useDispatch } from 'react-redux';
+
+import { View, Text, ActivityIndicator } from 'react-native';
+
+// Telas de Autenticação
+import LoginScreen from '../screens/LoginScreen';
+import OTPScreen from '../screens/OTPScreen';
+import Registration from '../screens/Registration';
+import PhoneInputScreen from '../screens/PhoneInputScreen';
+import ProfileSelectionScreen from '../screens/ProfileSelectionScreen';
+import CompleteRegistrationScreen from '../screens/CompleteRegistrationScreen';
+import DriverTermsScreen from '../screens/DriverTermsScreen';
+
+// Telas Principais
+import NewMapScreen from '../screens/NewMapScreen';
+import ProfileScreen from '../screens/ProfileScreen';
+import SettingsScreen from '../screens/SettingsScreen';
+import SearchScreen from '../screens/SearchScreen';
+import RideListScreen from '../screens/RideListScreen';
+import ChatScreen from '../screens/ChatScreen';
+import Notifications from '../screens/Notifications';
+import SupportScreen from '../screens/SupportScreen';
+import HelpScreen from '../screens/HelpScreen';
+import AboutScreen from '../screens/AboutScreen';
+import LegalScreen from '../screens/LegalScreen';
+import PrivacyPolicyScreen from '../screens/PrivacyPolicyScreen';
+
+// Telas de Motorista
+import DriverDashboardScreen from '../screens/DriverDashboardScreen';
+import DriverBalanceScreen from '../screens/DriverBalanceScreen';
+import DriverTrips from '../screens/DriverTrips';
+import DriverRating from '../screens/DriverRating';
+import DriverDocumentsScreen from '../screens/DriverDocumentsScreen';
+import DriverSearchScreen from '../screens/DriverSearchScreen';
+import DriverIncomeScreen from '../screens/DriverIncomeScreen';
+import WeeklyPaymentScreen from '../screens/WeeklyPaymentScreen';
+import EarningsReportScreen from '../screens/EarningsReportScreen';
+
+// Telas de Pagamento
+import PaymentSuccessScreen from '../screens/PaymentSuccessScreen';
+import PaymentFailedScreen from '../screens/PaymentFailedScreen';
+import SelectGatewayScreen from '../screens/SelectGatewayScreen';
+import PaymentDetails from '../screens/PaymentDetails';
+import AddMoney from '../screens/AddMoney';
+import WithdrawMoney from '../screens/WithdrawMoney';
+import WalletDetails from '../screens/WalletDetails';
+
+// Telas de Perfil e Configuração
+import EditProfile from '../screens/EditProfile';
+import PersonalDataScreen from '../screens/PersonalDataScreen';
+import UserInfoScreen from '../screens/UserInfoScreen';
+import AddVehicleScreen from '../screens/AddVehicleScreen';
+import MyVehiclesScreen from '../screens/MyVehiclesScreen';
+import CarEditScreen from '../screens/CarEditScreen';
+import CarsScreen from '../screens/CarsScreen';
+
+// Telas de Viagem
+import BookedCabScreen from '../screens/BookedCabScreen';
+import TripTrackingScreen from '../screens/TripTrackingScreen';
+import RideDetails from '../screens/RideDetails';
+import CancellationScreen from '../screens/CancellationScreen';
+import FeedbackScreen from '../screens/FeedbackScreen';
+import Complain from '../screens/Complain';
+
+// Telas de Onboarding
+import SplashScreen from '../screens/SplashScreen';
+import WelcomeScreen from '../screens/WelcomeScreen';
+import AuthLoadingScreen from '../screens/AuthLoadingScreen';
+import FreeTrialScreen from '../screens/FreeTrialScreen';
+import PlanSelectionScreen from '../screens/PlanSelectionScreen';
+import ReferralScreen from '../screens/ReferralScreen';
+import BaaSAccountScreen from '../screens/BaaSAccountScreen';
+
+// Telas de Teste
+import ProfileToggleTestScreen from '../screens/ProfileToggleTestScreen';
+import ToggleTestScreen from '../screens/ToggleTestScreen';
+
+// Componentes
+import { LoadingScreen } from '../components/LoadingStates';
 
 const Stack = createStackNavigator();
-const Tab = createBottomTabNavigator();
 
-export default function AppContainer() {
-    const { t } = i18n;
-    const isRTL = i18n.locale.indexOf('he') === 0 || i18n.locale.indexOf('ar') === 0;
-    const [authState, setAuthState] = useState({ profile: null });
-    const responseListener = useRef();
-    const navigationRef = useNavigationContainerRef();
-    const activeBookings = useSelector(state => state.bookinglistdata.active);
-    const [initialRoute, setInitialRoute] = React.useState(null);
-    const [isLoading, setIsLoading] = React.useState(true);
-    const insets = useSafeAreaInsets();
+// Navegação direta sem menu inferior
 
-    // Carregar estado de autenticação com validação segura
-    useEffect(() => {
-        const loadAuthState = async () => {
-            try {
-                console.log("AppNavigator - Iniciando validação segura do estado de autenticação");
-                setIsLoading(true);
-                
-                // Usar a nova função de validação segura
-                const validation = await validateUserProfile();
-                console.log("AppNavigator - Resultado da validação:", validation);
-                
-                if (validation.isValid) {
-                    console.log("AppNavigator - Perfil válido encontrado:", {
-                        uid: validation.profile.uid,
-                        usertype: validation.profile.usertype,
-                        email: validation.profile.email
-                    });
-                    
-                    setAuthState({ profile: validation.profile });
-                    
-                    // Set initial route based on user type
-                    if (validation.profile.usertype === 'customer') {
-                        setInitialRoute('Map');
-                        console.log("AppNavigator - Definindo rota inicial para Map (customer)");
-                    } else if (validation.profile.usertype === 'driver') {
-                        setInitialRoute('DriverTrips');
-                        console.log("AppNavigator - Definindo rota inicial para DriverTrips (driver)");
-                    }
-                } else {
-                    console.log("AppNavigator - Perfil inválido ou não encontrado:", validation.reason);
-                    setAuthState({ profile: null });
-                    
-                    // Se o perfil está incompleto, mostrar dados para completar
-                    if (validation.reason === 'incomplete_profile' && validation.profile) {
-                        console.log("AppNavigator - Perfil incompleto, mantendo dados para completar");
-                        setAuthState({ profile: validation.profile });
-                    }
-                }
-            } catch (error) {
-                console.error('AppNavigator - Erro na validação de autenticação:', error);
-                setAuthState({ profile: null });
-            } finally {
-                console.log("AppNavigator - Finalizando validação de autenticação");
-                setIsLoading(false);
-            }
-        };
+// Navegação principal do app
+function MainNavigator() {
+  const auth = useSelector(state => state.auth);
+  const [isLoading, setIsLoading] = useState(true);
+  const [authCompleted, setAuthCompleted] = useState(false);
 
-        loadAuthState();
-    }, []);
+  useEffect(() => {
+    // Simular tempo de carregamento inicial
+    const timer = setTimeout(() => {
+      setIsLoading(false);
+    }, 1000);
 
-    useEffect(() => {
-      responseListener.current = Notifications.addNotificationResponseReceivedListener(response => {
-          if (response && response.notification && response.notification.request && response.notification.request.content && response.notification.request.content.data){
-            const nData = response.notification.request.content.data;
-            if (nData.screen) {
-              if (nData.params) {
-                navigationRef.navigate(nData.screen, nData.params);
-              } else {
-                navigationRef.navigate(nData.screen);
-              }
-            } else {
-              navigationRef.navigate("TabRoot");
-            }
-          }
-        });
-    }, []);
-    
-    const screenOptions = {
-        headerStyle: {
-          backgroundColor: '#41D274',
-          transform: [{ scaleX: isRTL ? -1 : 1 }]
-        },
-        headerTintColor: colors.TRANSPARENT,
-        headerTitleAlign: 'center',
-        headerTitleStyle: {
-            fontFamily:fonts.Bold,
-          color:'white',
-          transform: [{ scaleX: isRTL ? -1 : 1 }]
-        },
-        headerBackImage: () => 
-        <Icon
-            name={isRTL?'arrow-right':'arrow-left'}
-            type='font-awesome'
-            color={colors.WHITE}
-            size={25}
-            style={{margin:10, transform: [{ scaleX: isRTL ? -1 : 1 }]}}
-        /> 
-    };
-    
-    const TabRoot = () => {
-        return (
-            <Tab.Navigator
-                initialRouteName={initialRoute}
-                screenOptions={{
-                    tabBarStyle: {
-                        backgroundColor: 'rgba(30,30,30,0.92)',
-                        borderTopLeftRadius: 0,
-                        borderTopRightRadius: 0,
-                        borderTopWidth: 0,
-                        elevation: 10,
-                        shadowColor: '#000',
-                        shadowOffset: { width: 0, height: -2 },
-                        shadowOpacity: 0.15,
-                        shadowRadius: 8,
-                        paddingBottom: 48,
-                        zIndex: 9999,
-                    },
-                    tabBarShowLabel: false,
-                    tabBarActiveTintColor: '#fff',
-                    tabBarInactiveTintColor: '#b0b0b0',
-                    tabBarIconStyle: { marginTop: 6, fontSize: 28 },
-                }}
-            >
-                {authState.profile && authState.profile.usertype && authState.profile.usertype == 'customer' ?
-                    <Tab.Screen name="Map" 
-                        component={MapScreen} 
-                        options={{
-                            title: t('home'),
-                            headerShown: false,
-                            tabBarStyle: { display: 'none' },
-                            tabBarIcon: ({ color, size }) => (
-                                <Ionicons name="home-outline" color={color} size={size} />
-                            ),
-                        }}
-                        listeners={({navigation,route})=>({
-                            tabPress: e => {
-                                e.preventDefault()
-                                navigation.dispatch(
-                                    CommonActions.reset({
-                                        index: 0,
-                                        routes: [{name: route.name}]
-                                    })
-                                )
-                            },
-                        })}
-                    />
-                : null}
-                <Tab.Screen name="RideList"
-                    component={RideListPage} 
-                    options={{ 
-                        title: t('ride_list_title'),
-                        ...screenOptions,
-                        tabBarIcon: ({ color, size }) => (
-                            <Ionicons name="list-circle-outline" color={color} size={size} />
-                        ),
-                    }}
-                    listeners={({navigation,route})=>({
-                        tabPress: e => {
-                            e.preventDefault()
-                            navigation.dispatch(
-                                CommonActions.reset({
-                                    index: 0,
-                                    routes: [{name: route.name}]
-                                })
-                            )
-                        },
-                    })}
-                />
-                <Tab.Screen name="Wallet" 
-                    component={WalletDetails} 
-                    options={{ 
-                        title: t('my_wallet_tile'),
-                        ...screenOptions,
-                        tabBarIcon: ({ color, size }) => (
-                            <Ionicons name="wallet-outline" color={color} size={size} />
-                        ),
-                    }}
-                    listeners={({navigation,route})=>({
-                        tabPress: e => {
-                            e.preventDefault()
-                            navigation.dispatch(
-                                CommonActions.reset({
-                                    index: 0,
-                                    routes: [{name: route.name}]
-                                })
-                            )
-                        },
-                    })}
-                />
-                <Tab.Screen name="Settings" 
-                    component={SettingsScreen} 
-                    options={{ 
-                        title: t('settings_title'),
-                        ...screenOptions,
-                        tabBarIcon: ({ color, size }) => (
-                            <Ionicons name="settings-outline" color={color} size={size} />
-                        ),
-                    }}
-                    listeners={({navigation,route})=>({
-                        tabPress: e => {
-                            e.preventDefault()
-                            navigation.dispatch(
-                                CommonActions.reset({
-                                    index: 0,
-                                    routes: [{name: route.name}]
-                                })
-                            )
-                        },
-                    })}
-                />
-            </Tab.Navigator>
-        );
-    }
+    return () => clearTimeout(timer);
+  }, []);
 
-    console.log("AppNavigator - Renderizando com estado:", {
-        isLoading,
-        hasProfile: !!authState.profile,
-        userType: authState.profile?.usertype,
-        initialRoute,
-        profileComplete: authState.profile ? (
-            authState.profile.firstName && 
-            authState.profile.lastName && 
-            authState.profile.email && 
-            authState.profile.phoneNumber
-        ) : false
-    });
+  // Se ainda está carregando, mostrar tela de loading
+  if (isLoading) {
+    return <LoadingScreen />;
+  }
 
-    if (isLoading) {
-        console.log("AppNavigator - Renderizando loading simples");
-        return (
-            <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#1A330E' }}>
-                <ActivityIndicator size="large" color="#FFFFFF" />
-            </View>
-        );
-    }
+  // Se a autenticação foi completada, mostrar navegação principal
+  if (authCompleted) {
+    // Resetar o estado para futuras sessões
+    setAuthCompleted(false);
+  }
 
-    if (!authState.profile || !authState.profile.uid) {
-        console.log("AppNavigator - Renderizando fluxo de onboarding (usuário não autenticado)");
-        // Usuário não autenticado: fluxo de onboarding CORRIGIDO
-        return (
-            <NavigationContainer ref={navigationRef}>
-                <Stack.Navigator initialRouteName="Splash" screenOptions={screenOptions}>
-                    <Stack.Screen name="Splash" component={SplashScreen} options={{ headerShown: false }} />
-                    <Stack.Screen name="ProfileSelection" component={ProfileSelectionScreen} options={{ headerShown: false }} />
-                    <Stack.Screen name="PhoneInput" component={PhoneInputScreen} options={{ headerShown: false }} />
-                    <Stack.Screen name="PersonalData" component={PersonalDataScreen} options={{ headerShown: false }} />
-                    <Stack.Screen name="DriverTerms" component={DriverTermsScreen} options={{ headerShown: false }} />
-                    <Stack.Screen name="OTP" component={OTPScreen} options={{ headerShown: false }} />
-                                            <Stack.Screen name="CNHUpload" component={DriverDocumentsScreen} options={{ headerShown: false }} />
-                    <Stack.Screen name="CompleteRegistration" component={CompleteRegistrationScreen} options={{ headerShown: false }} />
-                    <Stack.Screen name="Login" component={LoginScreen} options={{ headerShown: false }} />
-                </Stack.Navigator>
-            </NavigationContainer>
-        );
-    }
-
-    console.log("AppNavigator - Renderizando fluxo principal (usuário autenticado)");
-    // Usuário autenticado: fluxo principal
+  // Se não há usuário autenticado, mostrar SplashScreen
+  if (!auth.profile) {
     return (
-        <NavigationContainer ref={navigationRef}>
-            <Stack.Navigator initialRouteName={initialRoute || 'TabRoot'} screenOptions={screenOptions}>
-                {authState.profile && authState.profile.usertype === 'driver' ? (
-                    <Stack.Screen name="DriverTrips" component={DriverTrips} options={{ headerShown: false }} />
-                ) : (
-                    <Stack.Screen name="TabRoot" component={TabRoot} options={{ headerShown: false }} />
-                )}
-                {/* Demais telas */}
-                <Stack.Screen name="Profile" component={ProfileScreen} options={{ title: t('profile_setting_menu'),...screenOptions}}/>
-                <Stack.Screen name="ProfileScreen" component={ProfileScreen} options={{ headerShown: false }}/>
-                <Stack.Screen name="EditProfileScreen" component={EditProfileScreen} options={{ headerShown: false }}/>
-                <Stack.Screen name="MyVehiclesScreen" component={MyVehiclesScreen} options={{ headerShown: false }}/>
-                <Stack.Screen name="AddVehicleScreen" component={AddVehicleScreen} options={{ headerShown: false }}/>
-                <Stack.Screen name="EarningsReportScreen" component={EarningsReportScreen} options={{ headerShown: false }}/>
-                <Stack.Screen name="editUser" component={EditProfilePage} options={{ title: t('update_profile_title'),...screenOptions }}/>
-                <Stack.Screen name="Search" component={SearchScreen} options={{ title: t('search'),...screenOptions }}/>
-                <Stack.Screen name="DriverRating" component={DriverRating} options={{ title: t('rate_ride'),headerLeft: ()=> null,...screenOptions }}/>
-                <Stack.Screen name="PaymentDetails" component={PaymentDetails} options={{ title: t('payment'),...screenOptions }}/>
-                <Stack.Screen name="BookedCab" component={BookedCabScreen} options={{headerShown: false }}/>
-                <Stack.Screen name="RideDetails" component={RideDetails} options={{ title: t('ride_details_page_title'),...screenOptions }}/>
-                {/* <Stack.Screen name="onlineChat" component={OnlineChat} options={{ title: t('chat_title'),...screenOptions }}/> */}
-                <Stack.Screen name="addMoney" component={AddMoneyScreen} options={{ title: t('add_money'),...screenOptions }}/>
-                <Stack.Screen name="selectGateway" component={SelectGatewayPage} options={{ title: t('select_gateway'),...screenOptions }}/>
-                <Stack.Screen name="withdrawMoney" component={WithdrawMoneyScreen} options={{ title: t('withdraw_money'),...screenOptions }}/>
-                <Stack.Screen name="driverIncome" component={DriverIncomeScreen} options={{ title: t('driver_income'),...screenOptions }}/>
-                <Stack.Screen name="notifications" component={NotificationsPage} options={{ title: t('notifications'),...screenOptions }}/>
-                <Stack.Screen name="cars" component={CarsScreen} options={{ title: t('cars'),...screenOptions }}/>
-                <Stack.Screen name="carEdit" component={CarEditScreen} options={{ title: t('car_edit'),...screenOptions }}/>
-                <Stack.Screen name="complain" component={Complain} options={{ title: t('complain'),...screenOptions }}/>
-                <Stack.Screen name="about" component={AboutPage} options={{ title: t('about'),...screenOptions }}/>
-                <Stack.Screen name="driverDocuments" component={DriverDocumentsScreen} options={{ title: t('driver_documents'),...screenOptions }}/>
-                
-                {/* Telas críticas do fluxo principal */}
-                <Stack.Screen name="DriverSearch" component={DriverSearchScreen} options={{ headerShown: false }} />
-                <Stack.Screen name="TripTracking" component={TripTrackingScreen} options={{ headerShown: false }} />
-                <Stack.Screen name="PaymentSuccess" component={PaymentSuccessScreen} options={{ headerShown: false }} />
-                <Stack.Screen name="PaymentFailed" component={PaymentFailedScreen} options={{ headerShown: false }} />
-                <Stack.Screen name="Cancellation" component={CancellationScreen} options={{ headerShown: false }} />
-                <Stack.Screen name="Chat" component={ChatScreen} options={{ headerShown: false }} />
-                
-                {/* Telas do sistema BaaS */}
-                <Stack.Screen name="PlanSelection" component={PlanSelectionScreen} options={{ headerShown: false }} />
-                <Stack.Screen name="WeeklyPayment" component={WeeklyPaymentScreen} options={{ headerShown: false }} />
-                <Stack.Screen name="DriverDashboard" component={DriverDashboardScreen} options={{ headerShown: false }} />
-                <Stack.Screen name="BaaSAccount" component={BaaSAccountScreen} options={{ headerShown: false }} />
-                <Stack.Screen name="DriverBalance" component={DriverBalanceScreen} options={{ title: t('driver_balance'), headerShown: true }} />
-                
-                {/* Telas de suporte e utilidades */}
-                <Stack.Screen name="Support" component={SupportScreen} options={{ headerShown: false }} />
-                <Stack.Screen name="NotificationCenter" component={NotificationCenterScreen} options={{ headerShown: false }} />
-                <Stack.Screen name="Help" component={HelpScreen} options={{ headerShown: false }} />
-                <Stack.Screen name="PrivacyPolicy" component={PrivacyPolicyScreen} options={{ headerShown: false }} />
-                <Stack.Screen name="About" component={AboutScreen} options={{ headerShown: false }} />
-                <Stack.Screen name="Feedback" component={FeedbackScreen} options={{ headerShown: false }} />
-                <Stack.Screen name="Legal" component={LegalScreen} options={{ headerShown: false }} />
-                <Stack.Screen name="ToggleTest" component={ToggleTestScreen} options={{ headerShown: false }} />
-            </Stack.Navigator>
-        </NavigationContainer>
+      <Stack.Navigator screenOptions={{ headerShown: false }}>
+        <Stack.Screen 
+          name="Splash" 
+          component={SplashScreen}
+          options={{ headerShown: false }}
+          listeners={{
+            focus: () => {
+              // Resetar o estado quando a SplashScreen receber foco
+              setAuthCompleted(false);
+            }
+          }}
+        />
+      </Stack.Navigator>
     );
+  }
+
+  // Se há usuário autenticado, mostrar navegação principal baseada no tipo
+  const userType = auth.profile.usertype;
+
+  return (
+    <Stack.Navigator screenOptions={{ headerShown: false }}>
+      {/* Tela principal baseada no tipo de usuário */}
+      {userType === 'customer' ? (
+        <Stack.Screen name="Map" component={NewMapScreen} />
+      ) : userType === 'driver' ? (
+        <Stack.Screen name="Map" component={NewMapScreen} />
+      ) : (
+        // Fallback para usuários sem tipo definido
+        <Stack.Screen name="Map" component={NewMapScreen} />
+      )}
+
+      {/* Telas compartilhadas */}
+      <Stack.Screen name="Search" component={SearchScreen} />
+      <Stack.Screen name="Chat" component={ChatScreen} />
+      <Stack.Screen name="Notifications" component={Notifications} />
+      <Stack.Screen name="Settings" component={SettingsScreen} />
+      <Stack.Screen name="Help" component={HelpScreen} />
+      <Stack.Screen name="About" component={AboutScreen} />
+      <Stack.Screen name="Legal" component={LegalScreen} />
+      <Stack.Screen name="PrivacyPolicy" component={PrivacyPolicyScreen} />
+      
+      {/* Telas do menu inferior (agora acessíveis via menu sanduíche) */}
+      <Stack.Screen name="Rides" component={RideListScreen} />
+      <Stack.Screen name="Profile" component={ProfileScreen} />
+      <Stack.Screen name="Support" component={SupportScreen} />
+      <Stack.Screen name="Dashboard" component={DriverDashboardScreen} />
+      <Stack.Screen name="Trips" component={DriverTrips} />
+      
+      {/* Telas de perfil */}
+      <Stack.Screen name="EditProfile" component={EditProfile} />
+      <Stack.Screen name="PersonalData" component={PersonalDataScreen} />
+      <Stack.Screen name="UserInfo" component={UserInfoScreen} />
+      
+      {/* Telas de veículos */}
+      <Stack.Screen name="AddVehicle" component={AddVehicleScreen} />
+      <Stack.Screen name="MyVehicles" component={MyVehiclesScreen} />
+      <Stack.Screen name="CarEdit" component={CarEditScreen} />
+      <Stack.Screen name="Cars" component={CarsScreen} />
+      
+      {/* Telas de viagem */}
+      <Stack.Screen name="BookedCab" component={BookedCabScreen} />
+      <Stack.Screen name="TripTracking" component={TripTrackingScreen} />
+      <Stack.Screen name="RideDetails" component={RideDetails} />
+      <Stack.Screen name="Cancellation" component={CancellationScreen} />
+      <Stack.Screen name="Feedback" component={FeedbackScreen} />
+      <Stack.Screen name="Complain" component={Complain} />
+      
+      {/* Telas de pagamento */}
+      <Stack.Screen name="PaymentSuccess" component={PaymentSuccessScreen} />
+      <Stack.Screen name="PaymentFailed" component={PaymentFailedScreen} />
+      <Stack.Screen name="SelectGateway" component={SelectGatewayScreen} />
+      <Stack.Screen name="PaymentDetails" component={PaymentDetails} />
+      <Stack.Screen name="AddMoney" component={AddMoney} />
+      <Stack.Screen name="WithdrawMoney" component={WithdrawMoney} />
+      <Stack.Screen name="WalletDetails" component={WalletDetails} />
+      
+      {/* Telas específicas de motorista */}
+      {userType === 'driver' && (
+        <>
+          <Stack.Screen name="DriverBalance" component={DriverBalanceScreen} />
+          <Stack.Screen name="DriverRating" component={DriverRating} />
+          <Stack.Screen name="DriverDocuments" component={DriverDocumentsScreen} />
+          <Stack.Screen name="DriverSearch" component={DriverSearchScreen} />
+          <Stack.Screen name="DriverIncome" component={DriverIncomeScreen} />
+          <Stack.Screen name="WeeklyPayment" component={WeeklyPaymentScreen} />
+          <Stack.Screen name="EarningsReport" component={EarningsReportScreen} />
+        </>
+      )}
+      
+      {/* Telas de onboarding pós-login */}
+      <Stack.Screen name="Referral" component={ReferralScreen} />
+      <Stack.Screen name="BaaSAccount" component={BaaSAccountScreen} />
+      
+      {/* Telas de teste */}
+      <Stack.Screen name="ProfileToggleTest" component={ProfileToggleTestScreen} />
+      <Stack.Screen name="ToggleTest" component={ToggleTestScreen} />
+    </Stack.Navigator>
+  );
+}
+
+export default function AppNavigator() {
+  return (
+    <NavigationContainer>
+      <MainNavigator />
+    </NavigationContainer>
+  );
 }

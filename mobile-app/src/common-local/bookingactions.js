@@ -3,7 +3,7 @@ import {
     CONFIRM_BOOKING_SUCCESS,
     CONFIRM_BOOKING_FAILED,
     CLEAR_BOOKING
-} from "../store/types";
+} from "../types.js";
 import { RequestPushMsg } from '../other/NotificationFunctions';
 import store from '../store/store';
 import { firebase } from '../config/configureFirebase';

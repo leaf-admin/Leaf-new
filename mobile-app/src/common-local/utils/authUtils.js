@@ -1,5 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import store from '../store/store';
+import store from '../store';
 import { firebase } from '../config/configureFirebase';
 
 // Constantes para as chaves do AsyncStorage

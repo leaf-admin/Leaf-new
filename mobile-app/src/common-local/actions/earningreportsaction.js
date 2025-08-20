@@ -2,7 +2,7 @@ import {
   FETCH_BOOKING_DISCOUNT,
   FETCH_BOOKING__DISCOUNT_SUCCESS,
   FETCH_BOOKING__DISCOUNT_FAILED,
-} from "../store/types";
+} from "../types";
 import { firebase } from '../config/configureFirebase';
 
 export const fetchEarningsReport = () => async (dispatch) => {

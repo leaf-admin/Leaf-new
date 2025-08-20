@@ -4,7 +4,7 @@ import {
   FETCH_BOOKINGS_FAILED,
   UPDATE_BOOKING,
   CANCEL_BOOKING
-} from "../store/types";
+} from "../types.js";
 
 const INITIAL_STATE = {
   bookings: null,

@@ -2,7 +2,7 @@ import {
   FETCH_FLEETADMIN_EARNING,
   FETCH_FLEETADMIN_EARNING_SUCCESS,
   FETCH_FLEETADMIN_EARNING_FAILED,
-} from "../store/types";
+} from "../types";
 import store from '../store/store';
 import { firebase } from '../config/configureFirebase';
 

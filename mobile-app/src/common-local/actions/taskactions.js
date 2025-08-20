@@ -4,8 +4,8 @@ import {
   FETCH_TASKS_FAILED,
   ACCEPT_TASK,
   CANCEL_TASK,
-} from "../store/types";
-import store from "../store/store";
+} from "../types.js";
+import store from "../store";
 import { updateProfile } from "./authactions";
 import { RequestPushMsg } from "../other/NotificationFunctions";
 import { firebase } from '../config/configureFirebase';

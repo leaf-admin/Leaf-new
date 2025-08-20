@@ -1,31 +1,27 @@
-import i18n from 'i18n-js';
-import translationsEn from '../assets/translations/language-en.json';
-import translationsPtBr from '../assets/translations/language-pt-br.json';
+import i18n from 'i18next';
+import { initReactI18next } from 'react-i18next';
+import { ptBR } from './locales/pt_BR';
 
-console.log('i18n - Carregando traduções...');
-console.log('i18n - Traduções PT-BR:', Object.keys(translationsPtBr).length, 'chaves');
-console.log('i18n - Traduções EN:', Object.keys(translationsEn).length, 'chaves');
-
-// Configure i18n
-i18n.translations = {
-  'pt-BR': translationsPtBr,
-  'pt': translationsPtBr,
-  'pt-br': translationsPtBr,
-  'en': translationsEn,
-  'en-US': translationsEn,
-  default: translationsPtBr
+const resources = {
+  'pt-BR': ptBR,
 };
 
-i18n.fallbacks = true;
-i18n.defaultLocale = 'pt-BR';
+i18n
+  .use(initReactI18next)
+  .init({
+    resources,
+    lng: 'pt-BR', // Fixar em português brasileiro
+    fallbackLng: 'pt-BR',
+    compatibilityJSON: 'v3',
+    interpolation: {
+      escapeValue: false,
+    },
+    react: {
+      useSuspense: false,
+    },
+  });
+
+// Garantir que o locale está definido
 i18n.locale = 'pt-BR';
-
-console.log('i18n - Configuração finalizada. Locale:', i18n.locale);
-
-// Missing translation handler
-i18n.missingTranslation = (scope, options) => {
-  console.warn(`Missing translation for key: ${scope}`);
-  return `Missing: ${scope}`;
-};
 
 export default i18n; 

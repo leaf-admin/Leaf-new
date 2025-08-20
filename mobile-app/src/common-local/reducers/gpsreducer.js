@@ -1,6 +1,6 @@
 import {
     UPDATE_GPS_LOCATION,
-  } from "../store/types";
+  } from "../types.js";
   
   const INITIAL_STATE = {
     location: null,

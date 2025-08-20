@@ -3,7 +3,7 @@ import {
   FETCH_CAR_TYPES_SUCCESS,
   FETCH_CAR_TYPES_FAILED,
   EDIT_CAR_TYPE
-} from "../store/types";
+} from "../types";
 import { firebase } from '../config/configureFirebase';
 import { api } from '../api';
 import store from '../store/store';

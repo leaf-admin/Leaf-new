@@ -1,5 +1,5 @@
 import base64 from 'react-native-base64';
-import { firebase } from '../config/configureFirebase';
+import { firebase } from './config/configureFirebase';
 import AccessKey from './AccessKey';
 
 // Fallback para config se não estiver disponível

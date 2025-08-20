@@ -4,7 +4,7 @@ import {
     UPDATE_TRIP_CAR,
     UPDATE_SELECTED_POINT_TYPE,
     CLEAR_TRIP_POINTS
-} from "../store/types";
+} from "../types";
 
 const INITIAL_STATE = {
     pickup: null,

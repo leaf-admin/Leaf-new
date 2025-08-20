@@ -2,7 +2,7 @@ import {
     FETCH_NOTIFICATIONS,
     FETCH_NOTIFICATIONS_SUCCESS,
     FETCH_NOTIFICATIONS_FAILED,
-  } from "../store/types";
+  } from "../types";
   
   export const INITIAL_STATE = {
     notifications: null,

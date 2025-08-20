@@ -8,7 +8,7 @@ import {
   ImageBackground,
   Keyboard
 } from "react-native";
-import { colors } from "../common/theme";
+import { colors } from "../common-local/theme";
 import i18n from '../i18n';
 const { height, width } = Dimensions.get('window');
 import { useSelector, useDispatch } from 'react-redux';

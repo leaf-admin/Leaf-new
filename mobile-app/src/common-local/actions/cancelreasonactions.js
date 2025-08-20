@@ -3,7 +3,7 @@ import {
   FETCH_CANCEL_REASONS_SUCCESS,
   FETCH_CANCEL_REASONS_FAILED,
   EDIT_CANCELLATION_REASON
-} from "../store/types";
+} from "../types.js";
 import { firebase } from '../config/configureFirebase';
 import { api } from '../api';
 import { store } from '../store/store';

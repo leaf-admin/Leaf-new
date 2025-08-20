@@ -26,7 +26,7 @@ import i18n from '../i18n';
 import { Ionicons } from '@expo/vector-icons';
 import Footer from '../components/Footer';
 import { FormIcon, MAIN_COLOR } from '../common-local/sharedFunctions';
-import {fonts}from "../common/font"
+import {fonts}from "../common-local/font"
 import { getLangKey } from '../common-local/other/getLangKey';
 var { height, width } = Dimensions.get('window');
 

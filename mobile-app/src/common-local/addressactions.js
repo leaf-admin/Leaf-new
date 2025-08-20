@@ -3,7 +3,7 @@ import {
     FETCH_ADDRESSES_SUCCESS,
     FETCH_ADDRESSES_FAILED,
     EDIT_ADDRESS
-  } from "../store/types";
+  } from "../types";
   import store from '../store/store';
   import { firebase } from '../config/configureFirebase';
   

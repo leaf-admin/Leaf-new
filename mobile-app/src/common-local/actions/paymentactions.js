@@ -7,7 +7,7 @@ import {
     UPDATE_WALLET_BALANCE_FAILED,
     CLEAR_PAYMENT_MESSAGES,
     UPDATE_PAYMENT_METHOD
-} from "../store/types";
+} from "../types.js";
 import { RequestPushMsg } from '../other/NotificationFunctions';
 import { firebase } from '../config/configureFirebase';
 import store from '../store/store';

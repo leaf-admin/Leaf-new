@@ -3,7 +3,7 @@ import {
   FETCH_WITHDRAWS_SUCCESS,
   FETCH_WITHDRAWS_FAILED,
   EDIT_WITHDRAWS
-} from "../store/types";
+} from "../types";
 import { firebase } from '../config/configureFirebase';
 
 export const fetchWithdraws = () => (dispatch) => {

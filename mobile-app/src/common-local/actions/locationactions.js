@@ -4,7 +4,7 @@ import {
     FETCH_BOOKING_LOCATION_FAILED,
     STOP_LOCATION_FETCH,
     STORE_ADRESSES
-} from "../store/types";
+} from "../types.js";
 import { firebase } from '../config/configureFirebase';
 import { api } from '../api';
 import store from '../store/store';

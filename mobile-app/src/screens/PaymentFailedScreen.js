@@ -94,10 +94,23 @@ const PaymentFailedScreen = ({ navigation, route }) => {
       <View style={styles.content}>
         {/* Animação de Erro */}
         <View style={styles.animationContainer}>
+          {/* LOTTIE ANIMATION - COMENTADO PARA INVESTIGAÇÃO
           <LottieView
             source={require('../../assets/animations/payment-error.json')}
             autoPlay
             loop={false}
+            onError={(error) => console.log('Lottie error:', error)}
+            style={styles.animation}
+            resizeMode="contain"
+          />
+          */}
+          
+          {/* FALLBACK: Ícone estático */}
+          <Icon 
+            name="error" 
+            type="material" 
+            color="#E74C3C" 
+            size={120} 
             style={styles.animation}
           />
         </View>

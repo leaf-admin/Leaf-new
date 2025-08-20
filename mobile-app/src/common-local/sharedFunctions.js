@@ -1,8 +1,11 @@
 import { firebase } from "./config/configureFirebase";
 import { FareCalculator } from "./other/FareCalculator";
 import { GetDistance, GetTripDistance } from "./other/GeoFunctions";
-import { fetchAddressfromCoords } from './other/GoogleAPIFunctions'; 
+import { fetchAddressfromCoords, fetchPlacesAutocomplete, fetchCoordsfromPlace } from './other/GoogleAPIFunctions'; 
 import store from './store/store';
+
+// Constantes
+export const MAIN_COLOR = '#41D274';
 
 export const formatBookingObject = async (bookingData, settings) => {
   const c = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'
@@ -215,3 +218,15 @@ export function generateReferralId() {
     const c = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
     return [...Array(6)].map(_ => c[~~(Math.random()*c.length)]).join('');
 }
+
+// Função para preparar objeto de estimativa
+export const prepareEstimateObject = (estimateData, carType) => {
+  return {
+    estimateFare: estimateData.estimateFare || '0.00',
+    estimateDistance: estimateData.estimateDistance || '0.0',
+    estimateTime: estimateData.estimateTime || '0',
+    carType: carType || 'standard',
+    convenience_fees: estimateData.convenience_fees || '0.00',
+    totalFare: estimateData.totalFare || estimateData.estimateFare || '0.00'
+  };
+};

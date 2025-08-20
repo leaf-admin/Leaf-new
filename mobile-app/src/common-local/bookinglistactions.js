@@ -4,7 +4,7 @@ import {
   FETCH_BOOKINGS_FAILED,
   UPDATE_BOOKING,
   CANCEL_BOOKING
-} from "../store/types";
+} from "../types.js";
 import { fetchBookingLocations } from '../actions/locationactions';
 import { RequestPushMsg } from '../other/NotificationFunctions';
 import store from '../store/store';

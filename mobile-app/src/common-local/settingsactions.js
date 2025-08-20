@@ -4,7 +4,7 @@ import {
   FETCH_SETTINGS_FAILED,
   EDIT_SETTINGS,
   CLEAR_SETTINGS_ERROR
-} from "../store/types";
+} from "../types";
 
 import { firebase } from '../config/configureFirebase';
 import { api } from '../api';

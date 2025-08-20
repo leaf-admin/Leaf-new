@@ -6,7 +6,7 @@ import {
   SEND_NOTIFICATION,
   SEND_NOTIFICATION_SUCCESS,
   SEND_NOTIFICATION_FAILED,
-} from "../store/types";
+} from "../types";
 import { RequestPushMsg } from '../other/NotificationFunctions';
 import { firebase } from '../config/configureFirebase';
 import store from '../store/store';

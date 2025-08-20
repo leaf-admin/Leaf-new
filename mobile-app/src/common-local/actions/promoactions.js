@@ -3,7 +3,7 @@ import {
   FETCH_PROMOS_SUCCESS,
   FETCH_PROMOS_FAILED,
   EDIT_PROMOS
-} from "../store/types";
+} from "../types.js";
 import { firebase } from '../config/configureFirebase';
 import { api } from '../api';
 import { store } from '../store/store';

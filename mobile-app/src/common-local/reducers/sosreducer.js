@@ -3,7 +3,7 @@ import {
     FETCH_SOS_SUCCESS,
     FETCH_SOS_FAILED,
     EDIT_SOS
-    } from "../store/types";
+    } from "../types.js";
     
     export const INITIAL_STATE = {
       sos:null,

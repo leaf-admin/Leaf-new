@@ -4,7 +4,7 @@ import {
     FETCH_MESSAGES_FAILED,
     SEND_MESSAGE,
     STOP_FETCH_MESSAGES
-} from "../store/types";
+} from "../types.js";
 
 const INITIAL_STATE = {
     messages: [],

@@ -49,10 +49,23 @@ const PaymentSuccessScreen = ({ navigation, route }) => {
       <View style={styles.content}>
         {/* Animação de Sucesso */}
         <View style={styles.animationContainer}>
+          {/* LOTTIE ANIMATION - COMENTADO PARA INVESTIGAÇÃO
           <LottieView
             source={require('../../assets/animations/payment-success.json')}
             autoPlay
             loop={false}
+            style={styles.animation}
+            onError={(error) => console.log('Lottie success error:', error)}
+            resizeMode="contain"
+          />
+          */}
+          
+          {/* FALLBACK: Ícone estático */}
+          <Icon 
+            name="check-circle" 
+            type="material" 
+            color="#2E8B57" 
+            size={120} 
             style={styles.animation}
           />
         </View>

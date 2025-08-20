@@ -7,7 +7,7 @@ import {
     UPDATE_WALLET_BALANCE_FAILED,
     CLEAR_PAYMENT_MESSAGES,
     UPDATE_PAYMENT_METHOD
-} from "../store/types";
+} from "../types";
 
 export const INITIAL_STATE = {
     providers: null, 

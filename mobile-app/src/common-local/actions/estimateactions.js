@@ -3,7 +3,7 @@ import {
   FETCH_ESTIMATE_SUCCESS,
   FETCH_ESTIMATE_FAILED,
   CLEAR_ESTIMATE
-} from "../store/types";
+} from "../types.js";
 import Polyline from '@mapbox/polyline';
 import { firebase } from '../config/configureFirebase';
 import { FareCalculator } from '../other/FareCalculator';

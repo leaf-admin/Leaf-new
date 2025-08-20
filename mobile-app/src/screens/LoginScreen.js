@@ -35,9 +35,9 @@ import { checkUserExists } from '../common-local/actions/authactions';
 import { useAuth } from '../hooks/useAuth';
 var { width,height } = Dimensions.get('window');
 import ClientIds from '../../config/ClientIds';
-import { MAIN_COLOR } from "../common/sharedFunctions";
+import { MAIN_COLOR } from "../common-local/sharedFunctions";
 import { Button } from "../components";
-import { fonts } from "../common/font";
+import { fonts } from "../common-local/font";
 import auth from '@react-native-firebase/auth';
 import { ActivityIndicator } from 'react-native';
 

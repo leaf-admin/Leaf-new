@@ -3,7 +3,7 @@ import {
     FETCH_LANGUAGE_SUCCESS,
     FETCH_LANGUAGE_FAILED,
     EDIT_LANGUAGE
-  } from "../store/types";
+  } from "../types.js";
   
   export const INITIAL_STATE = {
     langlist:null,

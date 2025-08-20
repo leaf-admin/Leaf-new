@@ -2,7 +2,7 @@ import {
   FETCH_BOOKING_DISCOUNT,
   FETCH_BOOKING__DISCOUNT_SUCCESS,
   FETCH_BOOKING__DISCOUNT_FAILED,
-  } from "../store/types";
+  } from "../types";
   
   export const INITIAL_STATE = {
     Earningreportss:null,

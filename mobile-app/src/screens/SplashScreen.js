@@ -1,54 +1,81 @@
-import React, { useEffect, useRef } from 'react';
-import { View, Image, StyleSheet, StatusBar, Animated } from 'react-native';
+import React, { useEffect, useState } from 'react';
+import { View, StyleSheet, Image, Dimensions } from 'react-native';
+import { useSelector } from 'react-redux';
+import AuthFlow from '../components/auth/AuthFlow';
 
-export default function SplashScreen({ navigation }) {
-  const fadeAnim = useRef(new Animated.Value(1)).current;
+const { width, height } = Dimensions.get('window');
+
+const SplashScreen = ({ navigation }) => {
+  const [showAuth, setShowAuth] = useState(false);
+  const auth = useSelector(state => state.auth);
 
   useEffect(() => {
+    // Mostrar o fluxo de autenticação após 2 segundos
     const timer = setTimeout(() => {
-      Animated.timing(fadeAnim, {
-        toValue: 0,
-        duration: 600,
-        useNativeDriver: true,
-      }).start(() => {
-        navigation.replace('ProfileSelection');
-      });
-    }, 4400); // 4400ms visível + 600ms fade out = 5000ms total
+      setShowAuth(true);
+    }, 2000);
+
     return () => clearTimeout(timer);
-  }, [navigation, fadeAnim]);
+  }, []);
+
+  // Se o usuário já está autenticado, não mostrar o fluxo de auth
+  useEffect(() => {
+    if (auth.profile && auth.profile.uid) {
+      setShowAuth(false);
+    }
+  }, [auth.profile]);
+
+  const handleAuthComplete = (authData) => {
+    setShowAuth(false);
+    // Aqui você pode implementar a lógica para salvar os dados de autenticação
+    // e navegar para a tela principal
+    console.log('Autenticação completada:', authData);
+    
+    // Por enquanto, vamos simular uma autenticação bem-sucedida
+    // Em um app real, você salvaria os dados no Redux/AsyncStorage
+    // e navegaria para a tela principal
+  };
 
   return (
-    <Animated.View style={[styles.container, { opacity: fadeAnim }]}> 
-      <StatusBar backgroundColor="#1A330E" barStyle="light-content" />
-      <View style={styles.logoWrapper}>
+    <View style={styles.container}>
+      {/* Logo centralizada */}
+      <View style={styles.logoContainer}>
         <Image
-          source={require('../../assets/images/fg2.png')}
+          source={require('../../assets/images/logo1024x1024.png')}
           style={styles.logo}
           resizeMode="contain"
         />
       </View>
-    </Animated.View>
+
+
+
+      {/* Fluxo de autenticação (só se não estiver autenticado) */}
+      {!auth.profile && (
+        <AuthFlow
+          visible={showAuth}
+          onComplete={handleAuthComplete}
+          onClose={() => setShowAuth(false)}
+        />
+      )}
+    </View>
   );
-}
+};
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#1A330E',
+    backgroundColor: '#1A330E', // Verde da Leaf (cor correta)
     justifyContent: 'center',
     alignItems: 'center',
   },
-  logoWrapper: {
-    flex: 1,
-    justifyContent: 'center',
+  logoContainer: {
     alignItems: 'center',
-    width: '100%',
-    position: 'relative',
+    justifyContent: 'center',
   },
   logo: {
-    width: 215,
-    height: 215,
-    alignSelf: 'center',
-    marginTop: 0,
+    width: 120,
+    height: 120,
   },
-}); 
+});
+
+export default SplashScreen;

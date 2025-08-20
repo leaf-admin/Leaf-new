@@ -216,6 +216,20 @@ export const ButtonLoadingState = ({
     </View>
 );
 
+// Loading Screen para o AppNavigator
+export const LoadingScreen = () => (
+    <View style={styles.loadingScreenContainer}>
+        <View style={styles.loadingScreenContent}>
+            <View style={styles.logoContainer}>
+                <Ionicons name="leaf" size={80} color="#41D274" />
+            </View>
+            <Text style={styles.loadingScreenTitle}>Leaf</Text>
+            <Text style={styles.loadingScreenSubtitle}>Carregando...</Text>
+            <ActivityIndicator size="large" color="#41D274" style={styles.loadingScreenSpinner} />
+        </View>
+    </View>
+);
+
 const styles = StyleSheet.create({
     skeleton: {
         backgroundColor: '#E5E7EB',
@@ -349,5 +363,34 @@ const styles = StyleSheet.create({
         fontSize: 16,
         fontFamily: fonts.Medium,
         color: '#FFFFFF',
+    },
+    loadingScreenContainer: {
+        flex: 1,
+        backgroundColor: '#FFFFFF',
+        justifyContent: 'center',
+        alignItems: 'center',
+    },
+    loadingScreenContent: {
+        alignItems: 'center',
+        padding: 40,
+    },
+    logoContainer: {
+        marginBottom: 20,
+    },
+    loadingScreenTitle: {
+        fontSize: 32,
+        fontWeight: '700',
+        color: '#41D274',
+        marginBottom: 8,
+        fontFamily: fonts.Bold,
+    },
+    loadingScreenSubtitle: {
+        fontSize: 16,
+        color: '#666',
+        marginBottom: 30,
+        fontFamily: fonts.Medium,
+    },
+    loadingScreenSpinner: {
+        marginTop: 20,
     },
 }); 

@@ -1,4 +1,4 @@
-import { FETCH_WALLET_HISTORY, FETCH_WALLET_HISTORY_SUCCESS, FETCH_WALLET_HISTORY_FAIL } from '../types';
+import { FETCH_WALLET_HISTORY, FETCH_WALLET_HISTORY_SUCCESS, FETCH_WALLET_HISTORY_FAIL } from '../types.js';
 import { database } from '../config/configureFirebase';
 
 export const fetchWalletHistory = (userId) => async (dispatch) => {

@@ -1,16 +1,14 @@
-import { React } from 'react';
 import { View, Text, TouchableOpacity, Image, Dimensions  } from 'react-native';
-import { colors } from './theme';
+import { colors } from '../common-local/theme';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
-import i18n from '../i18n';
+import i18n from '../i18n/index';
 import { api } from '../common-local';
 import TaxiModal from '../components/TaxiModal';
 var { height, width } = Dimensions.get('window');
-import { fonts } from './font';
-import { useState } from 'react';
+import { fonts } from '../common-local/font';
 import {Tooltip,Icon } from 'react-native-elements';
 import { getLangKey } from '../common-local/other/getLangKey';
-import { firebase } from '../firebase';
+import { firebase } from '../common-local/config/configureFirebase';
 
 export const MAIN_COLOR = colors.TAXIPRIMARY;
 export const SECONDORY_COLOR = colors.TAXISECONDORY;
@@ -42,7 +40,9 @@ export const CarHorizontal = (props) => {
     const { t } = i18n;
     const isRTL = i18n.locale.indexOf('he') === 0 || i18n.locale.indexOf('ar') === 0;
     const {onPress, carData, settings, styles} = props;
-    const [open, setOpen] = useState(false);
+    // Removido useState pois este arquivo não é um componente React
+    let open = false;
+    const setOpen = (value) => { open = value; };
 
     const truncateText = (text, maxLength) => {
         if (text.length > maxLength) {
