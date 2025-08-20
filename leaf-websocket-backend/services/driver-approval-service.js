@@ -1,4 +1,5 @@
 const Redis = require('ioredis');
+const admin = require('firebase-admin');
 const { logger } = require('../utils/logger');
 
 const APPROVAL_CONFIG = {
@@ -198,12 +199,16 @@ class DriverApprovalService {
         throw new Error('Não atende aos critérios de aprovação');
       }
       
+      // Atualizar no Redis
       await this.updateApprovalStatus(
         approvalId, 
         APPROVAL_CONFIG.statuses.APPROVED, 
         adminId, 
         reason
       );
+      
+      // Atualizar no Firebase
+      await this.updateDriverStatusInFirebase(approval.driverId, 'approved', adminId, reason);
       
       logger.info(`✅ Motorista ${approval.driverId} aprovado`);
       return true;
@@ -218,12 +223,19 @@ class DriverApprovalService {
     try {
       if (!reason) throw new Error('Motivo da rejeição é obrigatório');
       
+      const approval = await this.getApprovalRequest(approvalId);
+      if (!approval) throw new Error('Aprovação não encontrada');
+      
+      // Atualizar no Redis
       await this.updateApprovalStatus(
         approvalId, 
         APPROVAL_CONFIG.statuses.REJECTED, 
         adminId, 
         reason
       );
+      
+      // Atualizar no Firebase
+      await this.updateDriverStatusInFirebase(approval.driverId, 'rejected', adminId, reason);
       
       logger.info(`❌ Motorista rejeitado: ${reason}`);
       return true;
@@ -328,6 +340,229 @@ class DriverApprovalService {
       logger.error('❌ Erro ao obter estatísticas:', error);
       return {};
     }
+  }
+
+  // ===== MÉTODOS DE INTEGRAÇÃO FIREBASE =====
+
+  // Buscar usuários motoristas do Firebase
+  async fetchDriversFromFirebase() {
+    try {
+      const driversRef = admin.firestore().collection('users');
+      const snapshot = await driversRef
+        .where('userType', '==', 'driver')
+        .where('status', '==', 'pending_approval')
+        .get();
+
+      const drivers = [];
+      snapshot.forEach(doc => {
+        drivers.push({
+          id: doc.id,
+          ...doc.data()
+        });
+      });
+
+      return drivers;
+    } catch (error) {
+      logger.error('❌ Erro ao buscar motoristas do Firebase:', error);
+      return [];
+    }
+  }
+
+  // Buscar documentos do motorista do Firebase Storage
+  async fetchDriverDocumentsFromFirebase(driverId) {
+    try {
+      const documentsRef = admin.firestore().collection('driverDocuments');
+      const snapshot = await documentsRef
+        .where('driverId', '==', driverId)
+        .get();
+
+      const documents = [];
+      snapshot.forEach(doc => {
+        documents.push({
+          id: doc.id,
+          ...doc.data()
+        });
+      });
+
+      return documents;
+    } catch (error) {
+      logger.error('❌ Erro ao buscar documentos do motorista:', error);
+      return [];
+    }
+  }
+
+  // Buscar dados completos do motorista
+  async fetchDriverDataFromFirebase(driverId) {
+    try {
+      const userRef = admin.firestore().collection('users').doc(driverId);
+      const userDoc = await userRef.get();
+
+      if (!userDoc.exists) {
+        throw new Error('Motorista não encontrado');
+      }
+
+      const userData = userDoc.data();
+
+      // Buscar documentos
+      const documents = await this.fetchDriverDocumentsFromFirebase(driverId);
+
+      // Buscar dados do veículo
+      const vehicleRef = admin.firestore().collection('driverVehicles').doc(driverId);
+      const vehicleDoc = await vehicleRef.get();
+      const vehicleData = vehicleDoc.exists ? vehicleDoc.data() : {};
+
+      return {
+        ...userData,
+        documents,
+        vehicle: vehicleData
+      };
+    } catch (error) {
+      logger.error('❌ Erro ao buscar dados do motorista:', error);
+      return null;
+    }
+  }
+
+  // Atualizar status do motorista no Firebase
+  async updateDriverStatusInFirebase(driverId, status, adminId, reason = '') {
+    try {
+      const batch = admin.firestore().batch();
+
+      // Atualizar status do usuário
+      const userRef = admin.firestore().collection('users').doc(driverId);
+      batch.update(userRef, {
+        status: status,
+        approvedAt: status === 'approved' ? admin.firestore.FieldValue.serverTimestamp() : null,
+        rejectedAt: status === 'rejected' ? admin.firestore.FieldValue.serverTimestamp() : null,
+        approvedBy: adminId,
+        rejectionReason: status === 'rejected' ? reason : null,
+        lastUpdated: admin.firestore.FieldValue.serverTimestamp()
+      });
+
+      // Adicionar ao histórico de aprovações
+      const approvalHistoryRef = admin.firestore().collection('approvalHistory').doc();
+      batch.set(approvalHistoryRef, {
+        driverId,
+        adminId,
+        status,
+        reason,
+        timestamp: admin.firestore.FieldValue.serverTimestamp(),
+        documents: await this.fetchDriverDocumentsFromFirebase(driverId)
+      });
+
+      // Se aprovado, ativar conta
+      if (status === 'approved') {
+        const authUser = await admin.auth().getUser(driverId);
+        if (authUser) {
+          await admin.auth().setCustomUserClaims(driverId, {
+            approved: true,
+            role: 'driver'
+          });
+        }
+      }
+
+      await batch.commit();
+      logger.info(`✅ Status do motorista ${driverId} atualizado para ${status} no Firebase`);
+      return true;
+    } catch (error) {
+      logger.error('❌ Erro ao atualizar status do motorista no Firebase:', error);
+      throw error;
+    }
+  }
+
+  // Buscar documentos do Firebase Storage
+  async getDocumentDownloadURL(documentId) {
+    try {
+      const bucket = admin.storage().bucket();
+      const file = bucket.file(`driver-documents/${documentId}`);
+      
+      const [url] = await file.getSignedUrl({
+        action: 'read',
+        expires: Date.now() + 15 * 60 * 1000 // 15 minutos
+      });
+
+      return url;
+    } catch (error) {
+      logger.error('❌ Erro ao gerar URL de download:', error);
+      return null;
+    }
+  }
+
+  // Verificar documento no Firebase
+  async verifyDocumentInFirebase(documentId, verified, adminId, notes = '') {
+    try {
+      const docRef = admin.firestore().collection('driverDocuments').doc(documentId);
+      await docRef.update({
+        verified,
+        verifiedBy: adminId,
+        verifiedAt: admin.firestore.FieldValue.serverTimestamp(),
+        verificationNotes: notes
+      });
+
+      logger.info(`✅ Documento ${documentId} verificado: ${verified}`);
+      return true;
+    } catch (error) {
+      logger.error('❌ Erro ao verificar documento:', error);
+      throw error;
+    }
+  }
+
+  // Sincronizar dados do Firebase com Redis
+  async syncFirebaseData() {
+    try {
+      logger.info('🔄 Iniciando sincronização com Firebase...');
+      
+      // Buscar motoristas pendentes do Firebase
+      const firebaseDrivers = await this.fetchDriversFromFirebase();
+      
+      for (const driver of firebaseDrivers) {
+        // Buscar dados completos
+        const driverData = await this.fetchDriverDataFromFirebase(driver.id);
+        if (!driverData) continue;
+        
+        // Verificar se já existe no Redis
+        const existingApproval = await this.redis.get(`driver_approval_index:${driver.id}`);
+        
+        if (!existingApproval) {
+          // Criar nova solicitação de aprovação
+          await this.createApprovalRequest({
+            driverId: driver.id,
+            name: driverData.name || driverData.displayName,
+            email: driverData.email,
+            phone: driverData.phoneNumber,
+            dateOfBirth: driverData.dateOfBirth,
+            address: driverData.address,
+            vehicle: driverData.vehicle || {},
+            documents: driverData.documents || [],
+            license: driverData.license || {}
+          });
+          
+          logger.info(`✅ Motorista ${driver.id} sincronizado do Firebase`);
+        }
+      }
+      
+      logger.info(`✅ Sincronização concluída: ${firebaseDrivers.length} motoristas processados`);
+      return firebaseDrivers.length;
+      
+    } catch (error) {
+      logger.error('❌ Erro na sincronização com Firebase:', error);
+      throw error;
+    }
+  }
+
+  // Métodos simulados para Firebase (implementar conforme necessário)
+  async fetchPromosFromFirebase(filters, page, limit) {
+    // TODO: Implementar busca real no Firebase
+    return [];
+  }
+
+  async fetchPromoByCodeFromFirebase(code) {
+    // TODO: Implementar busca real no Firebase
+    return null;
+  }
+
+  async fetchPromoByIdFromFirebase(promoId) {
+    // TODO: Implementar busca real no Firebase
+    return null;
   }
 
   destroy() {
