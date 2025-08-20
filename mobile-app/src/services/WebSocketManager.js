@@ -354,6 +354,136 @@ class WebSocketManager {
             });
         });
     }
+
+    // ===== MÉTODOS DE CHAT =====
+
+    // Criar ou buscar chat
+    async createChat(chatData) {
+        if (!this.socket?.connected) {
+            throw new Error('WebSocket não conectado');
+        }
+        
+        return new Promise((resolve, reject) => {
+            const timeout = setTimeout(() => {
+                reject(new Error('Create chat timeout'));
+            }, 10000);
+            
+            this.socket.emit('create_chat', chatData);
+            this.socket.once('chat_created', (data) => {
+                clearTimeout(timeout);
+                if (data.success) {
+                    resolve(data);
+                } else {
+                    reject(new Error(data.error || 'Create chat failed'));
+                }
+            });
+        });
+    }
+
+    // Enviar mensagem
+    async sendMessage(messageData) {
+        if (!this.socket?.connected) {
+            throw new Error('WebSocket não conectado');
+        }
+        
+        return new Promise((resolve, reject) => {
+            const timeout = setTimeout(() => {
+                reject(new Error('Send message timeout'));
+            }, 10000);
+            
+            this.socket.emit('send_message', messageData);
+            this.socket.once('message_sent', (data) => {
+                clearTimeout(timeout);
+                if (data.success) {
+                    resolve(data);
+                } else {
+                    reject(new Error(data.error || 'Send message failed'));
+                }
+            });
+        });
+    }
+
+    // Carregar mensagens do chat
+    async loadChatMessages(chatId, page = 0, limit = 20) {
+        if (!this.socket?.connected) {
+            throw new Error('WebSocket não conectado');
+        }
+        
+        return new Promise((resolve, reject) => {
+            const timeout = setTimeout(() => {
+                reject(new Error('Load messages timeout'));
+            }, 10000);
+            
+            this.socket.emit('load_messages', { chatId, page, limit });
+            this.socket.once('messages_loaded', (data) => {
+                clearTimeout(timeout);
+                if (data.success) {
+                    resolve(data);
+                } else {
+                    reject(new Error(data.error || 'Load messages failed'));
+                }
+            });
+        });
+    }
+
+    // Marcar mensagens como lidas
+    async markMessagesAsRead(chatId, messageIds) {
+        if (!this.socket?.connected) {
+            throw new Error('WebSocket não conectado');
+        }
+        
+        return new Promise((resolve, reject) => {
+            const timeout = setTimeout(() => {
+                reject(new Error('Mark messages read timeout'));
+            }, 10000);
+            
+            this.socket.emit('mark_messages_read', { chatId, messageIds });
+            this.socket.once('messages_marked_read', (data) => {
+                clearTimeout(timeout);
+                if (data.success) {
+                    resolve(data);
+                } else {
+                    reject(new Error(data.error || 'Mark messages read failed'));
+                }
+            });
+        });
+    }
+
+    // Definir status de digitação
+    async setTypingStatus(chatId, isTyping) {
+        if (!this.socket?.connected) {
+            return;
+        }
+
+        if (isTyping) {
+            this.socket.emit('typing_start', { chatId });
+        } else {
+            this.socket.emit('typing_stop', { chatId });
+        }
+    }
+
+    // Buscar chats do usuário
+    async getUserChats(limit = 20) {
+        if (!this.socket?.connected) {
+            throw new Error('WebSocket não conectado');
+        }
+        
+        return new Promise((resolve, reject) => {
+            const timeout = setTimeout(() => {
+                reject(new Error('Get user chats timeout'));
+            }, 10000);
+            
+            this.socket.emit('get_user_chats', { limit });
+            this.socket.once('user_chats_loaded', (data) => {
+                clearTimeout(timeout);
+                if (data.success) {
+                    resolve(data);
+                } else {
+                    reject(new Error(data.error || 'Get user chats failed'));
+                }
+            });
+        });
+    }
 }
 
 export default WebSocketManager; 

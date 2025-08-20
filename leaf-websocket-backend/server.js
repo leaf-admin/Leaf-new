@@ -12,6 +12,9 @@ const firebaseConfig = require('./firebase-config');
 // FCM integration
 const FCMService = require('./services/fcm-service');
 
+// Chat integration
+const ChatService = require('./services/chat-service');
+
 // Importar sistemas de monitoramento
 const LatencyMonitor = require('./metrics/latency-monitor');
 const DockerMonitor = require('./monitoring/docker-monitor');
@@ -33,6 +36,43 @@ const redisTunnel = new RedisTunnel();
 
 // Inicializar Firebase
 firebaseConfig.initializeFirebase();
+
+// Inicializar FCM Service
+let fcmService = null;
+try {
+    fcmService = new FCMService();
+    fcmService.initialize();
+    console.log('✅ FCM Service inicializado');
+} catch (error) {
+    console.error('❌ Erro ao inicializar FCM Service:', error);
+}
+
+// Inicializar Chat Service
+let chatService = null;
+try {
+    chatService = new ChatService();
+    chatService.initialize();
+    console.log('✅ Chat Service inicializado');
+} catch (error) {
+    console.error('❌ Erro ao inicializar Chat Service:', error);
+}
+
+// Função para obter socket por userId
+async function getSocketByUserId(userId) {
+    try {
+        // Buscar socket ativo do usuário
+        const userSocket = await redis.get(`user_socket:${userId}`);
+        if (userSocket) {
+            const socketId = JSON.parse(userSocket);
+            const socket = io.sockets.sockets.get(socketId);
+            return socket;
+        }
+        return null;
+    } catch (error) {
+        console.error('Erro ao buscar socket por userId:', error);
+        return null;
+    }
+}
 
 // Configurações
 const PORT = process.env.PORT || 3001;
@@ -1909,6 +1949,276 @@ io.on('connection', (socket) => {
         } catch (err) {
             console.error('❌ Erro ao verificar se usuário já avaliou:', err.message);
             socket.emit('hasUserRatedTripError', { 
+                success: false, 
+                error: err.message 
+            });
+        }
+    });
+
+    // ===== EVENTOS DE CHAT =====
+    
+    // Criar ou buscar chat
+    socket.on('create_chat', async (data) => {
+        console.log('💬 Recebido create_chat:', data);
+        if (!userId) {
+            console.log('❌ Usuário não autenticado');
+            return;
+        }
+
+        const { tripId, driverId, passengerId } = data;
+
+        try {
+            if (!chatService) {
+                throw new Error('Chat Service não disponível');
+            }
+
+            const chatResult = await chatService.createChat({
+                tripId,
+                driverId,
+                passengerId
+            });
+
+            socket.emit('chat_created', { 
+                success: true, 
+                chat: chatResult 
+            });
+
+            console.log(`✅ Chat criado/buscado:`, chatResult.chatId);
+
+        } catch (err) {
+            console.error('❌ Erro ao criar/buscar chat:', err.message);
+            socket.emit('chat_created_error', { 
+                success: false, 
+                error: err.message 
+            });
+        }
+    });
+
+    // Enviar mensagem
+    socket.on('send_message', async (data) => {
+        console.log('💬 Recebido send_message:', data);
+        if (!userId) {
+            console.log('❌ Usuário não autenticado');
+            return;
+        }
+
+        const { chatId, text, timestamp } = data;
+
+        try {
+            if (!chatService) {
+                throw new Error('Chat Service não disponível');
+            }
+
+            const result = await chatService.sendMessage({
+                chatId,
+                text,
+                userId,
+                timestamp
+            });
+
+            // Enviar para todos os usuários do chat
+            const otherUsers = result.otherUsers;
+            for (const otherUserId of otherUsers) {
+                const otherSocket = await getSocketByUserId(otherUserId);
+                if (otherSocket) {
+                    otherSocket.emit('new_message', {
+                        chatId,
+                        message: result.message
+                    });
+                }
+            }
+
+            // Confirmar envio para o remetente
+            socket.emit('message_sent', { 
+                success: true, 
+                message: result.message 
+            });
+
+            console.log(`✅ Mensagem enviada no chat ${chatId}:`, result.message._id);
+
+        } catch (err) {
+            console.error('❌ Erro ao enviar mensagem:', err.message);
+            socket.emit('message_sent_error', { 
+                success: false, 
+                error: err.message 
+            });
+        }
+    });
+
+    // Carregar mensagens do chat
+    socket.on('load_messages', async (data) => {
+        console.log('💬 Recebido load_messages:', data);
+        if (!userId) {
+            console.log('❌ Usuário não autenticado');
+            return;
+        }
+
+        const { chatId, page = 0, limit = 20 } = data;
+
+        try {
+            if (!chatService) {
+                throw new Error('Chat Service não disponível');
+            }
+
+            const messages = await chatService.loadChatMessages(chatId, page, limit);
+
+            socket.emit('messages_loaded', { 
+                success: true, 
+                chatId,
+                messages,
+                page,
+                hasMore: messages.length === limit
+            });
+
+            console.log(`✅ Mensagens carregadas do chat ${chatId}:`, messages.length);
+
+        } catch (err) {
+            console.error('❌ Erro ao carregar mensagens:', err.message);
+            socket.emit('messages_loaded_error', { 
+                success: false, 
+                error: err.message 
+            });
+        }
+    });
+
+    // Marcar mensagens como lidas
+    socket.on('mark_messages_read', async (data) => {
+        console.log('💬 Recebido mark_messages_read:', data);
+        if (!userId) {
+            console.log('❌ Usuário não autenticado');
+            return;
+        }
+
+        const { chatId, messageIds } = data;
+
+        try {
+            if (!chatService) {
+                throw new Error('Chat Service não disponível');
+            }
+
+            await chatService.markMessagesAsRead(chatId, userId, messageIds);
+
+            socket.emit('messages_marked_read', { 
+                success: true, 
+                chatId,
+                messageIds 
+            });
+
+            console.log(`✅ Mensagens marcadas como lidas no chat ${chatId}`);
+
+        } catch (err) {
+            console.error('❌ Erro ao marcar mensagens como lidas:', err.message);
+            socket.emit('messages_marked_read_error', { 
+                success: false, 
+                error: err.message 
+            });
+        }
+    });
+
+    // Indicador de digitação
+    socket.on('typing_start', async (data) => {
+        console.log('💬 Recebido typing_start:', data);
+        if (!userId) {
+            console.log('❌ Usuário não autenticado');
+            return;
+        }
+
+        const { chatId } = data;
+
+        try {
+            if (!chatService) {
+                throw new Error('Chat Service não disponível');
+            }
+
+            await chatService.setTypingStatus(chatId, userId, true);
+
+            // Notificar outros usuários do chat
+            const chat = await chatService.getChat(chatId);
+            if (chat) {
+                const otherUsers = [chat.driverId, chat.passengerId].filter(id => id !== userId);
+                
+                for (const otherUserId of otherUsers) {
+                    const otherSocket = await getSocketByUserId(otherUserId);
+                    if (otherSocket) {
+                        otherSocket.emit('user_typing', {
+                            chatId,
+                            userId,
+                            isTyping: true
+                        });
+                    }
+                }
+            }
+
+        } catch (err) {
+            console.error('❌ Erro ao definir status de digitação:', err.message);
+        }
+    });
+
+    socket.on('typing_stop', async (data) => {
+        console.log('💬 Recebido typing_stop:', data);
+        if (!userId) {
+            console.log('❌ Usuário não autenticado');
+            return;
+        }
+
+        const { chatId } = data;
+
+        try {
+            if (!chatService) {
+                throw new Error('Chat Service não disponível');
+            }
+
+            await chatService.setTypingStatus(chatId, userId, false);
+
+            // Notificar outros usuários do chat
+            const chat = await chatService.getChat(chatId);
+            if (chat) {
+                const otherUsers = [chat.driverId, chat.passengerId].filter(id => id !== userId);
+                
+                for (const otherUserId of otherUsers) {
+                    const otherSocket = await getSocketByUserId(otherUserId);
+                    if (otherSocket) {
+                        otherSocket.emit('user_typing', {
+                            chatId,
+                            userId,
+                            isTyping: false
+                        });
+                    }
+                }
+            }
+
+        } catch (err) {
+            console.error('❌ Erro ao parar status de digitação:', err.message);
+        }
+    });
+
+    // Buscar chats do usuário
+    socket.on('get_user_chats', async (data) => {
+        console.log('💬 Recebido get_user_chats:', data);
+        if (!userId) {
+            console.log('❌ Usuário não autenticado');
+            return;
+        }
+
+        const { limit = 20 } = data;
+
+        try {
+            if (!chatService) {
+                throw new Error('Chat Service não disponível');
+            }
+
+            const chats = await chatService.getUserChats(userId, limit);
+
+            socket.emit('user_chats_loaded', { 
+                success: true, 
+                chats 
+            });
+
+            console.log(`✅ Chats do usuário ${userId} carregados:`, chats.length);
+
+        } catch (err) {
+            console.error('❌ Erro ao carregar chats do usuário:', err.message);
+            socket.emit('user_chats_loaded_error', { 
                 success: false, 
                 error: err.message 
             });
