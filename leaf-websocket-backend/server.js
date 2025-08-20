@@ -24,6 +24,9 @@ const DriverApprovalService = require('./services/driver-approval-service');
 // Sync integration
 const SyncService = require('./services/sync-service');
 
+// Metrics integration
+const MetricsService = require('./services/metrics-service');
+
 // Importar sistemas de monitoramento
 const LatencyMonitor = require('./metrics/latency-monitor');
 const DockerMonitor = require('./monitoring/docker-monitor');
@@ -94,6 +97,16 @@ try {
     console.log('✅ Sync Service inicializado');
 } catch (error) {
     console.error('❌ Erro ao inicializar Sync Service:', error);
+}
+
+// Inicializar Metrics Service
+let metricsService = null;
+try {
+    metricsService = new MetricsService();
+    metricsService.initialize();
+    console.log('✅ Metrics Service inicializado');
+} catch (error) {
+    console.error('❌ Erro ao inicializar Metrics Service:', error);
 }
 
 // Função para obter socket por userId
@@ -220,6 +233,243 @@ app.get('/health/detailed', async (req, res) => {
         
         res.status(500).json({
             error: 'Erro interno do servidor',
+            timestamp: new Date().toISOString()
+        });
+    }
+});
+
+// ===== ROTAS DE MÉTRICAS =====
+
+// Rota principal de métricas
+app.get('/metrics', async (req, res) => {
+    try {
+        if (!metricsService) {
+            throw new Error('Metrics Service não disponível');
+        }
+
+        const metrics = await metricsService.getGeneralMetrics();
+        
+        res.json(metrics);
+    } catch (error) {
+        logger.error('Erro ao obter métricas gerais', {
+            error: error.message,
+            timestamp: new Date().toISOString()
+        });
+        
+        res.status(500).json({
+            error: 'Erro ao obter métricas',
+            message: error.message,
+            timestamp: new Date().toISOString()
+        });
+    }
+});
+
+// Rota de estatísticas de usuários
+app.get('/stats/users', async (req, res) => {
+    try {
+        if (!metricsService) {
+            throw new Error('Metrics Service não disponível');
+        }
+
+        const stats = await metricsService.getUserStats();
+        
+        res.json({
+            stats
+        });
+    } catch (error) {
+        logger.error('Erro ao obter estatísticas de usuários', {
+            error: error.message,
+            timestamp: new Date().toISOString()
+        });
+        
+        res.status(500).json({
+            error: 'Erro ao obter estatísticas de usuários',
+            message: error.message,
+            timestamp: new Date().toISOString()
+        });
+    }
+});
+
+// Rota de estatísticas financeiras
+app.get('/stats/financial', async (req, res) => {
+    try {
+        if (!metricsService) {
+            throw new Error('Metrics Service não disponível');
+        }
+
+        const stats = await metricsService.getFinancialStats();
+        
+        res.json({
+            financial: stats
+        });
+    } catch (error) {
+        logger.error('Erro ao obter estatísticas financeiras', {
+            error: error.message,
+            timestamp: new Date().toISOString()
+        });
+        
+        res.status(500).json({
+            error: 'Erro ao obter estatísticas financeiras',
+            message: error.message,
+            timestamp: new Date().toISOString()
+        });
+    }
+});
+
+// Rota de métricas em tempo real
+app.get('/metrics/realtime', async (req, res) => {
+    try {
+        if (!metricsService) {
+            throw new Error('Metrics Service não disponível');
+        }
+
+        const metrics = await metricsService.getRealTimeMetrics();
+        
+        res.json(metrics);
+    } catch (error) {
+        logger.error('Erro ao obter métricas em tempo real', {
+            error: error.message,
+            timestamp: new Date().toISOString()
+        });
+        
+        res.status(500).json({
+            error: 'Erro ao obter métricas em tempo real',
+            message: error.message,
+            timestamp: new Date().toISOString()
+        });
+    }
+});
+
+// ===== ROTAS DE APROVAÇÃO DE MOTORISTAS =====
+
+// Rota para buscar aprovações de motoristas
+app.get('/driver-approvals', async (req, res) => {
+    try {
+        if (!driverApprovalService) {
+            throw new Error('Driver Approval Service não disponível');
+        }
+
+        const { status = 'pending', page = 0, limit = 20 } = req.query;
+        
+        const approvals = await driverApprovalService.getApprovalsByStatus(status, parseInt(page), parseInt(limit));
+        const total = await driverApprovalService.getApprovalCountByStatus(status);
+        
+        res.json({
+            result: {
+                approvals,
+                total,
+                page: parseInt(page),
+                limit: parseInt(limit),
+                hasMore: approvals.length === parseInt(limit)
+            }
+        });
+    } catch (error) {
+        logger.error('Erro ao buscar aprovações de motoristas', {
+            error: error.message,
+            timestamp: new Date().toISOString()
+        });
+        
+        res.status(500).json({
+            error: 'Erro ao buscar aprovações',
+            message: error.message,
+            timestamp: new Date().toISOString()
+        });
+    }
+});
+
+// Rota para estatísticas de aprovação
+app.get('/driver-approval-stats', async (req, res) => {
+    try {
+        if (!driverApprovalService) {
+            throw new Error('Driver Approval Service não disponível');
+        }
+
+        const stats = await driverApprovalService.getServiceStats();
+        
+        res.json({
+            stats
+        });
+    } catch (error) {
+        logger.error('Erro ao obter estatísticas de aprovação', {
+            error: error.message,
+            timestamp: new Date().toISOString()
+        });
+        
+        res.status(500).json({
+            error: 'Erro ao obter estatísticas de aprovação',
+            message: error.message,
+            timestamp: new Date().toISOString()
+        });
+    }
+});
+
+// Rota para aprovar motorista
+app.post('/driver-approve', async (req, res) => {
+    try {
+        if (!driverApprovalService) {
+            throw new Error('Driver Approval Service não disponível');
+        }
+
+        const { approvalId } = req.body;
+        const adminId = req.headers['x-admin-id'] || 'system'; // Em produção, usar autenticação real
+        
+        if (!approvalId) {
+            throw new Error('ID da aprovação é obrigatório');
+        }
+
+        const result = await driverApprovalService.approveDriver(approvalId, adminId);
+        
+        res.json({
+            success: true,
+            result
+        });
+    } catch (error) {
+        logger.error('Erro ao aprovar motorista', {
+            error: error.message,
+            timestamp: new Date().toISOString()
+        });
+        
+        res.status(500).json({
+            success: false,
+            error: error.message,
+            timestamp: new Date().toISOString()
+        });
+    }
+});
+
+// Rota para rejeitar motorista
+app.post('/driver-reject', async (req, res) => {
+    try {
+        if (!driverApprovalService) {
+            throw new Error('Driver Approval Service não disponível');
+        }
+
+        const { approvalId, reason } = req.body;
+        const adminId = req.headers['x-admin-id'] || 'system'; // Em produção, usar autenticação real
+        
+        if (!approvalId) {
+            throw new Error('ID da aprovação é obrigatório');
+        }
+        
+        if (!reason) {
+            throw new Error('Motivo da rejeição é obrigatório');
+        }
+
+        const result = await driverApprovalService.rejectDriver(approvalId, adminId, reason);
+        
+        res.json({
+            success: true,
+            result
+        });
+    } catch (error) {
+        logger.error('Erro ao rejeitar motorista', {
+            error: error.message,
+            timestamp: new Date().toISOString()
+        });
+        
+        res.status(500).json({
+            success: false,
+            error: error.message,
             timestamp: new Date().toISOString()
         });
     }
