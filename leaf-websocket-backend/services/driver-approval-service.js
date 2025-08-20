@@ -1,6 +1,7 @@
 const Redis = require('ioredis');
 const admin = require('firebase-admin');
 const { logger } = require('../utils/logger');
+const DriverNotificationService = require('./driver-notification-service');
 
 const APPROVAL_CONFIG = {
   statuses: {
@@ -34,11 +35,13 @@ class DriverApprovalService {
   constructor() {
     this.redis = new Redis(process.env.REDIS_URL || 'redis://localhost:6379');
     this.isInitialized = false;
+    this.notificationService = new DriverNotificationService();
   }
 
   async initialize() {
     try {
       await this.redis.ping();
+      await this.notificationService.initialize();
       this.isInitialized = true;
       logger.info('✅ Driver Approval Service inicializado');
     } catch (error) {
@@ -210,6 +213,9 @@ class DriverApprovalService {
       // Atualizar no Firebase
       await this.updateDriverStatusInFirebase(approval.driverId, 'approved', adminId, reason);
       
+      // Enviar notificação
+      await this.notificationService.sendApprovalNotification(approval.driverId, 'approved', reason);
+      
       logger.info(`✅ Motorista ${approval.driverId} aprovado`);
       return true;
       
@@ -236,6 +242,9 @@ class DriverApprovalService {
       
       // Atualizar no Firebase
       await this.updateDriverStatusInFirebase(approval.driverId, 'rejected', adminId, reason);
+      
+      // Enviar notificação
+      await this.notificationService.sendApprovalNotification(approval.driverId, 'rejected', reason);
       
       logger.info(`❌ Motorista rejeitado: ${reason}`);
       return true;
