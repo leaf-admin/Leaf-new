@@ -146,116 +146,7 @@ async function getSocketByUserId(userId) {
 }
 
 // Configurações
-const PORT = process.env.PORT || 3001;
 const REDIS_URL = process.env.REDIS_URL || 'redis://localhost:6379';
-
-// Inicializar Express
-const app = express();
-
-// Middleware de segurança
-app.use(helmet({
-  contentSecurityPolicy: {
-    directives: {
-      defaultSrc: ["'self'"],
-      styleSrc: ["'self'", "'unsafe-inline'"],
-      scriptSrc: ["'self'"],
-      imgSrc: ["'self'", "data:", "https:"],
-      connectSrc: ["'self'", "ws:", "wss:"]
-    }
-  },
-  hsts: {
-    maxAge: 31536000,
-    includeSubDomains: true,
-    preload: true
-  }
-}));
-
-app.use(cors({
-  origin: process.env.ALLOWED_ORIGINS?.split(',') || [
-    'http://localhost:3000', 
-    'http://localhost:8081',
-    'https://dashboard.leaf.app.br',
-    'https://api.leaf.app.br'
-  ],
-  credentials: true
-}));
-
-app.use(express.json({ limit: '10mb' }));
-app.use(express.urlencoded({ extended: true, limit: '10mb' }));
-
-// Middleware de logging
-app.use((req, res, next) => {
-  const start = Date.now();
-  
-  res.on('finish', () => {
-    const duration = Date.now() - start;
-    logPerformance('HTTP Request', duration, {
-      method: req.method,
-      url: req.url,
-      statusCode: res.statusCode,
-      ip: req.ip,
-      userAgent: req.headers['user-agent']?.substring(0, 100)
-    });
-  });
-  
-  next();
-});
-
-// Middleware de WAF e Rate Limiting
-app.use(wafMiddleware);
-app.use(applyRateLimit);
-
-// Rota de teste para verificar se o servidor está rodando
-app.get('/', (req, res) => {
-    logger.info('Health check realizado', {
-        ip: req.ip,
-        userAgent: req.headers['user-agent']
-    });
-    
-    res.json({ 
-        status: 'running', 
-        message: 'Leaf WebSocket Backend está rodando!',
-        timestamp: new Date().toISOString(),
-        port: PORT
-    });
-});
-
-// Rota de health check
-app.get('/health', (req, res) => {
-    logger.info('Health check detalhado realizado', {
-        ip: req.ip,
-        timestamp: new Date().toISOString()
-    });
-    
-    res.json({ 
-        status: 'healthy', 
-        timestamp: new Date().toISOString() 
-    });
-});
-
-// Rota de health check detalhado
-app.get('/health/detailed', async (req, res) => {
-    try {
-        const status = healthChecker.getStatus();
-        const summary = healthChecker.getSummary();
-        
-        res.json({
-            summary,
-            details: status,
-            timestamp: new Date().toISOString()
-        });
-    } catch (error) {
-        logger.error('Erro ao obter health check detalhado', {
-            error: error.message,
-            timestamp: new Date().toISOString()
-        });
-        
-        res.status(500).json({
-            error: 'Erro interno do servidor',
-            timestamp: new Date().toISOString()
-        });
-    }
-});
 
 // ===== ROTAS DE MÉTRICAS =====
 
@@ -896,32 +787,14 @@ app.use('/dashboard', dashboardRoutes)
 // Adicionar rotas de usuário
 app.use('/user', userRoutes)
 
-// Criar servidor HTTP
-const server = http.createServer(app);
-
 // Configurar Socket.io com otimizações para alta concorrência
-const io = new Server(server, {
-    cors: {
-        origin: "*",
-        methods: ["GET", "POST"]
-    },
-    transports: ['websocket', 'polling'],
-    // Otimizações para alta concorrência
-    maxHttpBufferSize: 1e6, // 1MB
-    pingTimeout: 60000, // 60 segundos
-    pingInterval: 25000, // 25 segundos
-    upgradeTimeout: 10000, // 10 segundos
-    allowUpgrades: true,
-    // Configurações de concorrência
-    connectTimeout: 45000, // 45 segundos para conexão
-    // Pool de conexões
-    transports: ['websocket', 'polling'],
-    // Rate limiting
-    allowRequest: (req, callback) => {
-        // Permitir todas as conexões (pode ser ajustado para rate limiting)
-        callback(null, true);
-    }
-});
+io.engine.transports = ['websocket', 'polling'];
+io.engine.maxHttpBufferSize = 1e6; // 1MB
+io.engine.pingTimeout = 60000; // 60 segundos
+io.engine.pingInterval = 25000; // 25 segundos
+io.engine.upgradeTimeout = 10000; // 10 segundos
+io.engine.allowUpgrades = true;
+io.engine.connectTimeout = 45000; // 45 segundos para conexão
 
 // Cliente Redis (ioredis) com otimizações para alta concorrência
 const redis = new Redis({

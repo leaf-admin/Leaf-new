@@ -57,3 +57,32 @@
 2025-08-20 12:39:26 [ERROR]: WebSocket health check falhou {"error":"WebSocket was closed before the connection was established"}
 2025-08-20 12:44:23 [ERROR]: API health check falhou {"error":"fetch failed"}
 2025-08-20 12:44:56 [ERROR]: WebSocket health check falhou {"error":"WebSocket was closed before the connection was established"}
+2025-08-20 12:53:30 [ERROR]: API health check falhou {"error":"HTTP 404"}
+2025-08-20 12:53:31 [ERROR]: WebSocket health check falhou {"error":"socket hang up"}
+2025-08-20 12:54:00 [ERROR]: API health check falhou {"error":"HTTP 404"}
+2025-08-20 12:54:01 [ERROR]: WebSocket health check falhou {"error":"socket hang up"}
+2025-08-20 12:54:30 [ERROR]: API health check falhou {"error":"HTTP 404"}
+2025-08-20 12:54:31 [ERROR]: WebSocket health check falhou {"error":"socket hang up"}
+2025-08-20 12:55:00 [ERROR]: API health check falhou {"error":"HTTP 404"}
+2025-08-20 12:55:01 [ERROR]: WebSocket health check falhou {"error":"socket hang up"}
+2025-08-20 12:55:30 [ERROR]: API health check falhou {"error":"HTTP 404"}
+2025-08-20 12:55:31 [ERROR]: WebSocket health check falhou {"error":"socket hang up"}
+2025-08-20 12:56:00 [ERROR]: API health check falhou {"error":"HTTP 404"}
+2025-08-20 12:56:01 [ERROR]: WebSocket health check falhou {"error":"socket hang up"}
+2025-08-20 12:56:30 [ERROR]: API health check falhou {"error":"HTTP 404"}
+2025-08-20 12:56:31 [ERROR]: WebSocket health check falhou {"error":"socket hang up"}
+2025-08-20 12:57:00 [ERROR]: API health check falhou {"error":"HTTP 404"}
+2025-08-20 12:57:01 [ERROR]: WebSocket health check falhou {"error":"socket hang up"}
+2025-08-20 12:57:30 [ERROR]: API health check falhou {"error":"HTTP 404"}
+2025-08-20 12:57:31 [ERROR]: WebSocket health check falhou {"error":"socket hang up"}
+2025-08-20 12:58:00 [ERROR]: API health check falhou {"error":"HTTP 404"}
+2025-08-20 12:58:01 [ERROR]: WebSocket health check falhou {"error":"socket hang up"}
+2025-08-20 12:58:30 [ERROR]: API health check falhou {"error":"HTTP 404"}
+2025-08-20 12:58:31 [ERROR]: WebSocket health check falhou {"error":"socket hang up"}
+2025-08-20 12:59:00 [ERROR]: API health check falhou {"error":"HTTP 404"}
+2025-08-20 12:59:01 [ERROR]: WebSocket health check falhou {"error":"socket hang up"}
+2025-08-20 12:59:30 [ERROR]: API health check falhou {"error":"HTTP 404"}
+2025-08-20 12:59:31 [ERROR]: WebSocket health check falhou {"error":"socket hang up"}
+2025-08-20 13:00:00 [ERROR]: API health check falhou {"error":"HTTP 404"}
+2025-08-20 13:00:01 [ERROR]: WebSocket health check falhou {"error":"socket hang up"}
+2025-08-20 13:00:30 [ERROR]: API health check falhou {"error":"HTTP 404"}

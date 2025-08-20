@@ -199,3 +199,85 @@
 2025-08-20 12:48:23 [INFO]:    - Documentos: 0
 2025-08-20 12:48:23 [INFO]:    - Status: 0
 2025-08-20 12:48:23 [INFO]:    - Notificações: 0
+2025-08-20 12:52:45 [INFO]: ✅ FCM Service inicializado com sucesso
+2025-08-20 12:52:45 [INFO]: Servidor HTTP + WebSocket iniciado com sucesso {"port":3001,"environment":"development"}
+2025-08-20 12:52:45 [INFO]: Health checks periódicos iniciados {"interval":30000}
+2025-08-20 12:52:45 [INFO]: ✅ Promo Service inicializado com sucesso
+2025-08-20 12:53:00 [INFO]: ✅ FCM Service inicializado com sucesso
+2025-08-20 12:53:00 [INFO]: Servidor HTTP + WebSocket iniciado com sucesso {"port":3001,"environment":"development"}
+2025-08-20 12:53:00 [INFO]: Health checks periódicos iniciados {"interval":30000}
+2025-08-20 12:53:00 [INFO]: ✅ Chat Service inicializado com sucesso
+2025-08-20 12:53:00 [INFO]: ✅ Driver Notification Service inicializado
+2025-08-20 12:53:00 [INFO]: ✅ Driver Approval Service inicializado
+2025-08-20 12:53:00 [INFO]: ✅ Promo Service inicializado com sucesso
+2025-08-20 12:53:00 [INFO]: 🔄 Sincronização automática iniciada a cada 300 segundos
+2025-08-20 12:53:00 [INFO]: ✅ Sync Service inicializado
+2025-08-20 12:53:00 [INFO]: ✅ Metrics Service inicializado
+2025-08-20 12:53:30 [INFO]: Performance: Redis Health Check {"duration":"34ms","operation":"Redis Health Check","status":"healthy"}
+2025-08-20 12:53:30 [ERROR]: API health check falhou {"error":"HTTP 404"}
+2025-08-20 12:53:31 [ERROR]: WebSocket health check falhou {"error":"socket hang up"}
+2025-08-20 12:53:31 [WARN]: Alguns health checks falharam {"results":[{"check":"redis","status":"fulfilled","value":true},{"check":"api","status":"fulfilled","value":false},{"check":"websocket","status":"fulfilled","value":false},{"check":"system","status":"fulfilled","value":true},{"check":"external","status":"fulfilled","value":true}]}
+2025-08-20 12:54:00 [INFO]: Performance: Redis Health Check {"duration":"3ms","operation":"Redis Health Check","status":"healthy"}
+2025-08-20 12:54:00 [ERROR]: API health check falhou {"error":"HTTP 404"}
+2025-08-20 12:54:01 [ERROR]: WebSocket health check falhou {"error":"socket hang up"}
+2025-08-20 12:54:01 [WARN]: Alguns health checks falharam {"results":[{"check":"redis","status":"fulfilled","value":true},{"check":"api","status":"fulfilled","value":false},{"check":"websocket","status":"fulfilled","value":false},{"check":"system","status":"fulfilled","value":true},{"check":"external","status":"fulfilled","value":true}]}
+2025-08-20 12:54:30 [INFO]: Performance: Redis Health Check {"duration":"3ms","operation":"Redis Health Check","status":"healthy"}
+2025-08-20 12:54:30 [ERROR]: API health check falhou {"error":"HTTP 404"}
+2025-08-20 12:54:31 [ERROR]: WebSocket health check falhou {"error":"socket hang up"}
+2025-08-20 12:54:31 [WARN]: Alguns health checks falharam {"results":[{"check":"redis","status":"fulfilled","value":true},{"check":"api","status":"fulfilled","value":false},{"check":"websocket","status":"fulfilled","value":false},{"check":"system","status":"fulfilled","value":true},{"check":"external","status":"fulfilled","value":true}]}
+2025-08-20 12:55:00 [INFO]: Performance: Redis Health Check {"duration":"2ms","operation":"Redis Health Check","status":"healthy"}
+2025-08-20 12:55:00 [ERROR]: API health check falhou {"error":"HTTP 404"}
+2025-08-20 12:55:01 [ERROR]: WebSocket health check falhou {"error":"socket hang up"}
+2025-08-20 12:55:01 [WARN]: Alguns health checks falharam {"results":[{"check":"redis","status":"fulfilled","value":true},{"check":"api","status":"fulfilled","value":false},{"check":"websocket","status":"fulfilled","value":false},{"check":"system","status":"fulfilled","value":true},{"check":"external","status":"fulfilled","value":true}]}
+2025-08-20 12:55:30 [INFO]: Performance: Redis Health Check {"duration":"3ms","operation":"Redis Health Check","status":"healthy"}
+2025-08-20 12:55:30 [ERROR]: API health check falhou {"error":"HTTP 404"}
+2025-08-20 12:55:31 [ERROR]: WebSocket health check falhou {"error":"socket hang up"}
+2025-08-20 12:55:31 [WARN]: Alguns health checks falharam {"results":[{"check":"redis","status":"fulfilled","value":true},{"check":"api","status":"fulfilled","value":false},{"check":"websocket","status":"fulfilled","value":false},{"check":"system","status":"fulfilled","value":true},{"check":"external","status":"fulfilled","value":true}]}
+2025-08-20 12:56:00 [INFO]: Performance: Redis Health Check {"duration":"2ms","operation":"Redis Health Check","status":"healthy"}
+2025-08-20 12:56:00 [ERROR]: API health check falhou {"error":"HTTP 404"}
+2025-08-20 12:56:01 [ERROR]: WebSocket health check falhou {"error":"socket hang up"}
+2025-08-20 12:56:01 [WARN]: Alguns health checks falharam {"results":[{"check":"redis","status":"fulfilled","value":true},{"check":"api","status":"fulfilled","value":false},{"check":"websocket","status":"fulfilled","value":false},{"check":"system","status":"fulfilled","value":true},{"check":"external","status":"fulfilled","value":true}]}
+2025-08-20 12:56:30 [INFO]: Performance: Redis Health Check {"duration":"3ms","operation":"Redis Health Check","status":"healthy"}
+2025-08-20 12:56:30 [ERROR]: API health check falhou {"error":"HTTP 404"}
+2025-08-20 12:56:31 [ERROR]: WebSocket health check falhou {"error":"socket hang up"}
+2025-08-20 12:56:31 [WARN]: Alguns health checks falharam {"results":[{"check":"redis","status":"fulfilled","value":true},{"check":"api","status":"fulfilled","value":false},{"check":"websocket","status":"fulfilled","value":false},{"check":"system","status":"fulfilled","value":true},{"check":"external","status":"fulfilled","value":true}]}
+2025-08-20 12:57:00 [INFO]: Performance: Redis Health Check {"duration":"2ms","operation":"Redis Health Check","status":"healthy"}
+2025-08-20 12:57:00 [ERROR]: API health check falhou {"error":"HTTP 404"}
+2025-08-20 12:57:01 [ERROR]: WebSocket health check falhou {"error":"socket hang up"}
+2025-08-20 12:57:01 [WARN]: Alguns health checks falharam {"results":[{"check":"redis","status":"fulfilled","value":true},{"check":"api","status":"fulfilled","value":false},{"check":"websocket","status":"fulfilled","value":false},{"check":"system","status":"fulfilled","value":true},{"check":"external","status":"fulfilled","value":true}]}
+2025-08-20 12:57:30 [INFO]: Performance: Redis Health Check {"duration":"2ms","operation":"Redis Health Check","status":"healthy"}
+2025-08-20 12:57:30 [ERROR]: API health check falhou {"error":"HTTP 404"}
+2025-08-20 12:57:31 [ERROR]: WebSocket health check falhou {"error":"socket hang up"}
+2025-08-20 12:57:31 [WARN]: Alguns health checks falharam {"results":[{"check":"redis","status":"fulfilled","value":true},{"check":"api","status":"fulfilled","value":false},{"check":"websocket","status":"fulfilled","value":false},{"check":"system","status":"fulfilled","value":true},{"check":"external","status":"fulfilled","value":true}]}
+2025-08-20 12:58:00 [INFO]: Performance: Redis Health Check {"duration":"2ms","operation":"Redis Health Check","status":"healthy"}
+2025-08-20 12:58:00 [ERROR]: API health check falhou {"error":"HTTP 404"}
+2025-08-20 12:58:00 [INFO]: 🔄 Iniciando sincronização completa...
+2025-08-20 12:58:01 [ERROR]: WebSocket health check falhou {"error":"socket hang up"}
+2025-08-20 12:58:01 [WARN]: Alguns health checks falharam {"results":[{"check":"redis","status":"fulfilled","value":true},{"check":"api","status":"fulfilled","value":false},{"check":"websocket","status":"fulfilled","value":false},{"check":"system","status":"fulfilled","value":true},{"check":"external","status":"fulfilled","value":true}]}
+2025-08-20 12:58:02 [INFO]: ✅ 0 motoristas sincronizados
+2025-08-20 12:58:02 [INFO]: ✅ 0 documentos sincronizados
+2025-08-20 12:58:02 [INFO]: ✅ 0 status sincronizados
+2025-08-20 12:58:03 [INFO]: ✅ 0 notificações sincronizadas
+2025-08-20 12:58:03 [INFO]: ✅ Sincronização completa concluída em 2443ms:
+2025-08-20 12:58:03 [INFO]:    - Motoristas: 0
+2025-08-20 12:58:03 [INFO]:    - Documentos: 0
+2025-08-20 12:58:03 [INFO]:    - Status: 0
+2025-08-20 12:58:03 [INFO]:    - Notificações: 0
+2025-08-20 12:58:30 [INFO]: Performance: Redis Health Check {"duration":"2ms","operation":"Redis Health Check","status":"healthy"}
+2025-08-20 12:58:30 [ERROR]: API health check falhou {"error":"HTTP 404"}
+2025-08-20 12:58:31 [ERROR]: WebSocket health check falhou {"error":"socket hang up"}
+2025-08-20 12:58:31 [WARN]: Alguns health checks falharam {"results":[{"check":"redis","status":"fulfilled","value":true},{"check":"api","status":"fulfilled","value":false},{"check":"websocket","status":"fulfilled","value":false},{"check":"system","status":"fulfilled","value":true},{"check":"external","status":"fulfilled","value":true}]}
+2025-08-20 12:59:00 [INFO]: Performance: Redis Health Check {"duration":"2ms","operation":"Redis Health Check","status":"healthy"}
+2025-08-20 12:59:00 [ERROR]: API health check falhou {"error":"HTTP 404"}
+2025-08-20 12:59:01 [ERROR]: WebSocket health check falhou {"error":"socket hang up"}
+2025-08-20 12:59:01 [WARN]: Alguns health checks falharam {"results":[{"check":"redis","status":"fulfilled","value":true},{"check":"api","status":"fulfilled","value":false},{"check":"websocket","status":"fulfilled","value":false},{"check":"system","status":"fulfilled","value":true},{"check":"external","status":"fulfilled","value":true}]}
+2025-08-20 12:59:30 [INFO]: Performance: Redis Health Check {"duration":"2ms","operation":"Redis Health Check","status":"healthy"}
+2025-08-20 12:59:30 [ERROR]: API health check falhou {"error":"HTTP 404"}
+2025-08-20 12:59:31 [ERROR]: WebSocket health check falhou {"error":"socket hang up"}
+2025-08-20 12:59:31 [WARN]: Alguns health checks falharam {"results":[{"check":"redis","status":"fulfilled","value":true},{"check":"api","status":"fulfilled","value":false},{"check":"websocket","status":"fulfilled","value":false},{"check":"system","status":"fulfilled","value":true},{"check":"external","status":"fulfilled","value":true}]}
+2025-08-20 13:00:00 [INFO]: Performance: Redis Health Check {"duration":"2ms","operation":"Redis Health Check","status":"healthy"}
+2025-08-20 13:00:00 [ERROR]: API health check falhou {"error":"HTTP 404"}
+2025-08-20 13:00:01 [ERROR]: WebSocket health check falhou {"error":"socket hang up"}
+2025-08-20 13:00:01 [WARN]: Alguns health checks falharam {"results":[{"check":"redis","status":"fulfilled","value":true},{"check":"api","status":"fulfilled","value":false},{"check":"websocket","status":"fulfilled","value":false},{"check":"system","status":"fulfilled","value":true},{"check":"external","status":"fulfilled","value":true}]}
+2025-08-20 13:00:30 [INFO]: Performance: Redis Health Check {"duration":"2ms","operation":"Redis Health Check","status":"healthy"}
+2025-08-20 13:00:30 [ERROR]: API health check falhou {"error":"HTTP 404"}
