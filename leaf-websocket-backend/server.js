@@ -18,6 +18,9 @@ const ChatService = require('./services/chat-service');
 // Promo integration
 const PromoService = require('./services/promo-service');
 
+// Driver Approval integration
+const DriverApprovalService = require('./services/driver-approval-service');
+
 // Importar sistemas de monitoramento
 const LatencyMonitor = require('./metrics/latency-monitor');
 const DockerMonitor = require('./monitoring/docker-monitor');
@@ -68,6 +71,16 @@ try {
     console.log('✅ Promo Service inicializado');
 } catch (error) {
     console.error('❌ Erro ao inicializar Promo Service:', error);
+}
+
+// Inicializar Driver Approval Service
+let driverApprovalService = null;
+try {
+    driverApprovalService = new DriverApprovalService();
+    driverApprovalService.initialize();
+    console.log('✅ Driver Approval Service inicializado');
+} catch (error) {
+    console.error('❌ Erro ao inicializar Driver Approval Service:', error);
 }
 
 // Função para obter socket por userId
@@ -2374,38 +2387,207 @@ io.on('connection', (socket) => {
         }
     });
 
-    // Buscar promoção por código
-    socket.on('get_promo_by_code', async (data) => {
-        console.log('🎁 Recebido get_promo_by_code:', data);
-        if (!userId) {
-            console.log('❌ Usuário não autenticado');
-            return;
-        }
+          // Buscar promoção por código
+      socket.on('get_promo_by_code', async (data) => {
+          console.log('🎁 Recebido get_promo_by_code:', data);
+          if (!userId) {
+              console.log('❌ Usuário não autenticado');
+              return;
+          }
 
-        const { code } = data;
+          const { code } = data;
 
-        try {
-            if (!promoService) {
-                throw new Error('Promo Service não disponível');
-            }
+          try {
+              if (!promoService) {
+                  throw new Error('Promo Service não disponível');
+              }
 
-            const promo = await promoService.getPromoByCode(code);
+              const promo = await promoService.getPromoByCode(code);
 
-            socket.emit('promo_by_code_loaded', { 
-                success: true, 
-                promo 
-            });
+              socket.emit('promo_by_code_loaded', { 
+                  success: true, 
+                  promo 
+              });
 
-            console.log(`✅ Promoção por código ${code} carregada`);
+              console.log(`✅ Promoção por código ${code} carregada`);
 
-        } catch (err) {
-            console.error('❌ Erro ao buscar promoção por código:', err.message);
-            socket.emit('promo_by_code_loaded_error', { 
-                success: false, 
-                error: err.message 
-            });
-        }
-    });
+          } catch (err) {
+              console.error('❌ Erro ao buscar promoção por código:', err.message);
+              socket.emit('promo_by_code_loaded_error', { 
+                  success: false, 
+                  error: err.message 
+              });
+          }
+      });
+
+      // ===== EVENTOS DE APROVAÇÃO DE MOTORISTAS =====
+      
+      // Criar solicitação de aprovação
+      socket.on('create_driver_approval', async (data) => {
+          console.log('🚗 Recebido create_driver_approval:', data);
+          if (!userId) {
+              console.log('❌ Usuário não autenticado');
+              return;
+          }
+
+          const { driverData } = data;
+
+          try {
+              if (!driverApprovalService) {
+                  throw new Error('Driver Approval Service não disponível');
+              }
+
+              const approval = await driverApprovalService.createApprovalRequest(driverData);
+
+              socket.emit('driver_approval_created', { 
+                  success: true, 
+                  approval 
+              });
+
+              console.log(`✅ Solicitação de aprovação criada para motorista ${driverData.driverId}`);
+
+          } catch (err) {
+              console.error('❌ Erro ao criar solicitação de aprovação:', err.message);
+              socket.emit('driver_approval_created_error', { 
+                  success: false, 
+                  error: err.message 
+              });
+          }
+      });
+
+      // Buscar aprovações por status
+      socket.on('get_driver_approvals', async (data) => {
+          console.log('🚗 Recebido get_driver_approvals:', data);
+          if (!userId) {
+              console.log('❌ Usuário não autenticado');
+              return;
+          }
+
+          const { status = 'pending', page = 0, limit = 20 } = data;
+
+          try {
+              if (!driverApprovalService) {
+                  throw new Error('Driver Approval Service não disponível');
+              }
+
+              const result = await driverApprovalService.getApprovalsByStatus(status, page, limit);
+
+              socket.emit('driver_approvals_loaded', { 
+                  success: true, 
+                  result 
+              });
+
+              console.log(`✅ Aprovações de motoristas carregadas: ${result.approvals.length}`);
+
+          } catch (err) {
+              console.error('❌ Erro ao carregar aprovações:', err.message);
+              socket.emit('driver_approvals_loaded_error', { 
+                  success: false, 
+                  error: err.message 
+              });
+          }
+      });
+
+      // Aprovar motorista
+      socket.on('approve_driver', async (data) => {
+          console.log('🚗 Recebido approve_driver:', data);
+          if (!userId) {
+              console.log('❌ Usuário não autenticado');
+              return;
+          }
+
+          const { approvalId, reason = '' } = data;
+
+          try {
+              if (!driverApprovalService) {
+                  throw new Error('Driver Approval Service não disponível');
+              }
+
+              const result = await driverApprovalService.approveDriver(approvalId, userId, reason);
+
+              socket.emit('driver_approved', { 
+                  success: true, 
+                  result 
+              });
+
+              console.log(`✅ Motorista aprovado: ${approvalId}`);
+
+          } catch (err) {
+              console.error('❌ Erro ao aprovar motorista:', err.message);
+              socket.emit('driver_approved_error', { 
+                  success: false, 
+                  error: err.message 
+              });
+          }
+      });
+
+      // Rejeitar motorista
+      socket.on('reject_driver', async (data) => {
+          console.log('🚗 Recebido reject_driver:', data);
+          if (!userId) {
+              console.log('❌ Usuário não autenticado');
+              return;
+          }
+
+          const { approvalId, reason } = data;
+
+          try {
+              if (!driverApprovalService) {
+                  throw new Error('Driver Approval Service não disponível');
+              }
+
+              if (!reason) {
+                  throw new Error('Motivo da rejeição é obrigatório');
+              }
+
+              const result = await driverApprovalService.rejectDriver(approvalId, userId, reason);
+
+              socket.emit('driver_rejected', { 
+                  success: true, 
+                  result 
+              });
+
+              console.log(`❌ Motorista rejeitado: ${approvalId} - ${reason}`);
+
+          } catch (err) {
+              console.error('❌ Erro ao rejeitar motorista:', err.message);
+              socket.emit('driver_rejected_error', { 
+                  success: false, 
+                  error: err.message 
+              });
+          }
+      });
+
+      // Buscar estatísticas de aprovação
+      socket.on('get_driver_approval_stats', async (data) => {
+          console.log('🚗 Recebido get_driver_approval_stats:', data);
+          if (!userId) {
+              console.log('❌ Usuário não autenticado');
+              return;
+          }
+
+          try {
+              if (!driverApprovalService) {
+                  throw new Error('Driver Approval Service não disponível');
+              }
+
+              const stats = await driverApprovalService.getServiceStats();
+
+              socket.emit('driver_approval_stats_loaded', { 
+                  success: true, 
+                  stats 
+              });
+
+              console.log(`✅ Estatísticas de aprovação carregadas`);
+
+          } catch (err) {
+              console.error('❌ Erro ao carregar estatísticas:', err.message);
+              socket.emit('driver_approval_stats_loaded_error', { 
+                  success: false, 
+                  error: err.message 
+              });
+          }
+      });
 
     // Desconexão
     socket.on('disconnect', () => {
