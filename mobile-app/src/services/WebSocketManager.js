@@ -484,6 +484,123 @@ class WebSocketManager {
             });
         });
     }
+
+    // ===== MÉTODOS DE PROMOÇÕES =====
+
+    // Buscar promoções disponíveis
+    async getPromos(filters = {}, page = 0, limit = 20) {
+        if (!this.socket?.connected) {
+            throw new Error('WebSocket não conectado');
+        }
+        
+        return new Promise((resolve, reject) => {
+            const timeout = setTimeout(() => {
+                reject(new Error('Get promos timeout'));
+            }, 10000);
+            
+            this.socket.emit('get_promos', { filters, page, limit });
+            this.socket.once('promos_loaded', (data) => {
+                clearTimeout(timeout);
+                if (data.success) {
+                    resolve(data);
+                } else {
+                    reject(new Error(data.error));
+                }
+            });
+        });
+    }
+
+    // Buscar promoções do usuário
+    async getUserPromos(filters = {}) {
+        if (!this.socket?.connected) {
+            throw new Error('WebSocket não conectado');
+        }
+        
+        return new Promise((resolve, reject) => {
+            const timeout = setTimeout(() => {
+                reject(new Error('Get user promos timeout'));
+            }, 10000);
+            
+            this.socket.emit('get_user_promos', { filters });
+            this.socket.once('user_promos_loaded', (data) => {
+                clearTimeout(timeout);
+                if (data.success) {
+                    resolve(data);
+                } else {
+                    reject(new Error(data.error));
+                }
+            });
+        });
+    }
+
+    // Validar código promocional
+    async validatePromoCode(code, orderValue = 0) {
+        if (!this.socket?.connected) {
+            throw new Error('WebSocket não conectado');
+        }
+        
+        return new Promise((resolve, reject) => {
+            const timeout = setTimeout(() => {
+                reject(new Error('Validate promo code timeout'));
+            }, 10000);
+            
+            this.socket.emit('validate_promo_code', { code, orderValue });
+            this.socket.once('promo_code_validated', (data) => {
+                clearTimeout(timeout);
+                if (data.success) {
+                    resolve(data);
+                } else {
+                    reject(new Error(data.error));
+                }
+            });
+        });
+    }
+
+    // Aplicar promoção
+    async applyPromo(promoId, orderData) {
+        if (!this.socket?.connected) {
+            throw new Error('WebSocket não conectado');
+        }
+        
+        return new Promise((resolve, reject) => {
+            const timeout = setTimeout(() => {
+                reject(new Error('Apply promo timeout'));
+            }, 10000);
+            
+            this.socket.emit('apply_promo', { promoId, orderData });
+            this.socket.once('promo_applied', (data) => {
+                clearTimeout(timeout);
+                if (data.success) {
+                    resolve(data);
+                } else {
+                    reject(new Error(data.error));
+                }
+            });
+        });
+    }
+
+    // Buscar promoção por código
+    async getPromoByCode(code) {
+        if (!this.socket?.connected) {
+            throw new Error('WebSocket não conectado');
+        }
+        
+        return new Promise((resolve, reject) => {
+            const timeout = setTimeout(() => {
+                reject(new Error('Get promo by code timeout'));
+            }, 10000);
+            
+            this.socket.emit('get_promo_by_code', { code });
+            this.socket.once('promo_by_code_loaded', (data) => {
+                clearTimeout(timeout);
+                if (data.success) {
+                    resolve(data);
+                } else {
+                    reject(new Error(data.error));
+                }
+            });
+        });
+    }
 }
 
 export default WebSocketManager; 

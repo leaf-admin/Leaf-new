@@ -15,6 +15,9 @@ const FCMService = require('./services/fcm-service');
 // Chat integration
 const ChatService = require('./services/chat-service');
 
+// Promo integration
+const PromoService = require('./services/promo-service');
+
 // Importar sistemas de monitoramento
 const LatencyMonitor = require('./metrics/latency-monitor');
 const DockerMonitor = require('./monitoring/docker-monitor');
@@ -55,6 +58,16 @@ try {
     console.log('✅ Chat Service inicializado');
 } catch (error) {
     console.error('❌ Erro ao inicializar Chat Service:', error);
+}
+
+// Inicializar Promo Service
+let promoService = null;
+try {
+    promoService = new PromoService();
+    promoService.initialize();
+    console.log('✅ Promo Service inicializado');
+} catch (error) {
+    console.error('❌ Erro ao inicializar Promo Service:', error);
 }
 
 // Função para obter socket por userId
@@ -2219,6 +2232,175 @@ io.on('connection', (socket) => {
         } catch (err) {
             console.error('❌ Erro ao carregar chats do usuário:', err.message);
             socket.emit('user_chats_loaded_error', { 
+                success: false, 
+                error: err.message 
+            });
+        }
+    });
+
+    // ===== EVENTOS DE PROMOÇÕES =====
+    
+    // Buscar promoções disponíveis
+    socket.on('get_promos', async (data) => {
+        console.log('🎁 Recebido get_promos:', data);
+        if (!userId) {
+            console.log('❌ Usuário não autenticado');
+            return;
+        }
+
+        const { filters = {}, page = 0, limit = 20 } = data;
+
+        try {
+            if (!promoService) {
+                throw new Error('Promo Service não disponível');
+            }
+
+            const promos = await promoService.getPromos(filters, page, limit);
+
+            socket.emit('promos_loaded', { 
+                success: true, 
+                promos,
+                page,
+                hasMore: promos.length === limit
+            });
+
+            console.log(`✅ Promoções carregadas para usuário ${userId}:`, promos.length);
+
+        } catch (err) {
+            console.error('❌ Erro ao carregar promoções:', err.message);
+            socket.emit('promos_loaded_error', { 
+                success: false, 
+                error: err.message 
+            });
+        }
+    });
+
+    // Buscar promoções do usuário
+    socket.on('get_user_promos', async (data) => {
+        console.log('🎁 Recebido get_user_promos:', data);
+        if (!userId) {
+            console.log('❌ Usuário não autenticado');
+            return;
+        }
+
+        const { filters = {} } = data;
+
+        try {
+            if (!promoService) {
+                throw new Error('Promo Service não disponível');
+            }
+
+            const userPromos = await promoService.getUserPromos(userId, filters);
+
+            socket.emit('user_promos_loaded', { 
+                success: true, 
+                promos: userPromos
+            });
+
+            console.log(`✅ Promoções do usuário ${userId} carregadas:`, userPromos.length);
+
+        } catch (err) {
+            console.error('❌ Erro ao carregar promoções do usuário:', err.message);
+            socket.emit('user_promos_loaded_error', { 
+                success: false, 
+                error: err.message 
+            });
+        }
+    });
+
+    // Validar código promocional
+    socket.on('validate_promo_code', async (data) => {
+        console.log('🎁 Recebido validate_promo_code:', data);
+        if (!userId) {
+            console.log('❌ Usuário não autenticado');
+            return;
+        }
+
+        const { code, orderValue = 0 } = data;
+
+        try {
+            if (!promoService) {
+                throw new Error('Promo Service não disponível');
+            }
+
+            const validation = await promoService.validatePromoCode(code, userId, orderValue);
+
+            socket.emit('promo_code_validated', { 
+                success: true, 
+                validation 
+            });
+
+            console.log(`✅ Código promocional ${code} validado para usuário ${userId}`);
+
+        } catch (err) {
+            console.error('❌ Erro ao validar código promocional:', err.message);
+            socket.emit('promo_code_validated_error', { 
+                success: false, 
+                error: err.message 
+            });
+        }
+    });
+
+    // Aplicar promoção
+    socket.on('apply_promo', async (data) => {
+        console.log('🎁 Recebido apply_promo:', data);
+        if (!userId) {
+            console.log('❌ Usuário não autenticado');
+            return;
+        }
+
+        const { promoId, orderData } = data;
+
+        try {
+            if (!promoService) {
+                throw new Error('Promo Service não disponível');
+            }
+
+            const result = await promoService.applyPromo(promoId, userId, orderData);
+
+            socket.emit('promo_applied', { 
+                success: true, 
+                result 
+            });
+
+            console.log(`✅ Promoção ${promoId} aplicada para usuário ${userId}`);
+
+        } catch (err) {
+            console.error('❌ Erro ao aplicar promoção:', err.message);
+            socket.emit('promo_applied_error', { 
+                success: false, 
+                error: err.message 
+            });
+        }
+    });
+
+    // Buscar promoção por código
+    socket.on('get_promo_by_code', async (data) => {
+        console.log('🎁 Recebido get_promo_by_code:', data);
+        if (!userId) {
+            console.log('❌ Usuário não autenticado');
+            return;
+        }
+
+        const { code } = data;
+
+        try {
+            if (!promoService) {
+                throw new Error('Promo Service não disponível');
+            }
+
+            const promo = await promoService.getPromoByCode(code);
+
+            socket.emit('promo_by_code_loaded', { 
+                success: true, 
+                promo 
+            });
+
+            console.log(`✅ Promoção por código ${code} carregada`);
+
+        } catch (err) {
+            console.error('❌ Erro ao buscar promoção por código:', err.message);
+            socket.emit('promo_by_code_loaded_error', { 
                 success: false, 
                 error: err.message 
             });
