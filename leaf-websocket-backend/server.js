@@ -6,6 +6,25 @@ const cors = require('cors');
 const helmet = require('helmet');
 require('dotenv').config();
 
+// Criar aplicação Express
+const app = express();
+const server = http.createServer(app);
+const io = new Server(server, {
+    cors: {
+        origin: "*",
+        methods: ["GET", "POST"]
+    }
+});
+
+// Configuração da porta
+const PORT = process.env.PORT || 3001;
+
+// Middleware básico
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
+app.use(cors());
+app.use(helmet());
+
 // Firebase integration
 const firebaseConfig = require('./firebase-config');
 
@@ -2865,16 +2884,20 @@ io.on('connection', (socket) => {
     });
 });
 
-// Inicializar servidor HTTP
-app.listen(PORT, () => {
-    logger.info('Servidor HTTP iniciado com sucesso', {
+// Inicializar servidor HTTP + WebSocket na mesma porta
+server.listen(PORT, () => {
+    logger.info('Servidor HTTP + WebSocket iniciado com sucesso', {
         port: PORT,
         timestamp: new Date().toISOString(),
         environment: process.env.NODE_ENV || 'development'
     });
     
-    console.log(`🌐 Servidor HTTP rodando na porta ${PORT}`);
+    // Iniciar health checks periódicos
+    healthChecker.startPeriodicChecks();
+    
+    console.log(`🌐 Servidor HTTP + WebSocket rodando na porta ${PORT}`);
     console.log(`🔗 URL: http://localhost:${PORT}`);
+    console.log(`🔌 WebSocket: ws://localhost:${PORT}`);
     console.log('✅ Endpoints HTTP disponíveis:');
     console.log('   - GET  /health');
     console.log('   - GET  /metrics');
@@ -2884,21 +2907,6 @@ app.listen(PORT, () => {
     console.log('   - GET  /driver-approvals');
     console.log('   - POST /driver-approve');
     console.log('   - POST /driver-reject');
-});
-
-// Inicializar servidor WebSocket
-server.listen(PORT + 1, () => {
-    logger.info('Servidor WebSocket iniciado com sucesso', {
-        port: PORT + 1,
-        timestamp: new Date().toISOString(),
-        environment: process.env.NODE_ENV || 'development'
-    });
-    
-    // Iniciar health checks periódicos
-    healthChecker.startPeriodicChecks();
-    
-    console.log(`🚀 Servidor WebSocket rodando na porta ${PORT + 1}`);
-    console.log(`🔗 URL: ws://localhost:${PORT + 1}`);
-    console.log('✅ Pronto para receber conexões WebSocket!');
+    console.log('✅ Pronto para receber conexões HTTP e WebSocket!');
     console.log('🏥 Health checks iniciados automaticamente');
 });

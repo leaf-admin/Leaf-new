@@ -148,3 +148,54 @@
 2025-08-20 12:31:07 [INFO]: ✅ Metrics Service inicializado
 2025-08-20 12:31:37 [INFO]: Performance: Redis Health Check {"duration":"34ms","operation":"Redis Health Check","status":"healthy"}
 2025-08-20 12:31:42 [ERROR]: WebSocket health check falhou {"error":"WebSocket was closed before the connection was established"}
+2025-08-20 12:33:21 [INFO]: ✅ FCM Service inicializado com sucesso
+2025-08-20 12:33:21 [INFO]: Servidor HTTP iniciado com sucesso {"port":3001,"environment":"development"}
+2025-08-20 12:33:21 [INFO]: Servidor WebSocket iniciado com sucesso {"port":3002,"environment":"development"}
+2025-08-20 12:33:21 [INFO]: Health checks periódicos iniciados {"interval":30000}
+2025-08-20 12:33:21 [INFO]: ✅ Promo Service inicializado com sucesso
+2025-08-20 12:33:21 [INFO]: ✅ Driver Notification Service inicializado
+2025-08-20 12:33:21 [INFO]: ✅ Driver Approval Service inicializado
+2025-08-20 12:33:21 [INFO]: ✅ Chat Service inicializado com sucesso
+2025-08-20 12:33:21 [INFO]: 🔄 Sincronização automática iniciada a cada 300 segundos
+2025-08-20 12:33:21 [INFO]: ✅ Sync Service inicializado
+2025-08-20 12:33:21 [INFO]: ✅ Metrics Service inicializado
+2025-08-20 12:33:51 [INFO]: Performance: Redis Health Check {"duration":"33ms","operation":"Redis Health Check","status":"healthy"}
+2025-08-20 12:33:56 [ERROR]: WebSocket health check falhou {"error":"WebSocket was closed before the connection was established"}
+2025-08-20 12:38:21 [INFO]: 🔄 Iniciando sincronização completa...
+2025-08-20 12:38:23 [INFO]: ✅ 0 motoristas sincronizados
+2025-08-20 12:38:23 [INFO]: ✅ 0 documentos sincronizados
+2025-08-20 12:38:24 [INFO]: ✅ 0 status sincronizados
+2025-08-20 12:38:24 [INFO]: ✅ 0 notificações sincronizadas
+2025-08-20 12:38:24 [INFO]: ✅ Sincronização completa concluída em 2803ms:
+2025-08-20 12:38:24 [INFO]:    - Motoristas: 0
+2025-08-20 12:38:24 [INFO]:    - Documentos: 0
+2025-08-20 12:38:24 [INFO]:    - Status: 0
+2025-08-20 12:38:24 [INFO]:    - Notificações: 0
+2025-08-20 12:38:53 [ERROR]: API health check falhou {"error":"fetch failed"}
+2025-08-20 12:38:53 [WARN]: Alguns health checks falharam {"results":[{"check":"redis","status":"fulfilled","value":true},{"check":"api","status":"fulfilled","value":false},{"check":"websocket","status":"fulfilled","value":false},{"check":"system","status":"fulfilled","value":true},{"check":"external","status":"fulfilled","value":true}]}
+2025-08-20 12:39:21 [INFO]: Performance: Redis Health Check {"duration":"2ms","operation":"Redis Health Check","status":"healthy"}
+2025-08-20 12:39:26 [ERROR]: WebSocket health check falhou {"error":"WebSocket was closed before the connection was established"}
+2025-08-20 12:43:21 [INFO]: 🔄 Iniciando sincronização completa...
+2025-08-20 12:43:23 [INFO]: ✅ 0 motoristas sincronizados
+2025-08-20 12:43:23 [INFO]: ✅ 0 documentos sincronizados
+2025-08-20 12:43:24 [INFO]: ✅ 0 status sincronizados
+2025-08-20 12:43:24 [INFO]: ✅ 0 notificações sincronizadas
+2025-08-20 12:43:24 [INFO]: ✅ Sincronização completa concluída em 2701ms:
+2025-08-20 12:43:24 [INFO]:    - Motoristas: 0
+2025-08-20 12:43:24 [INFO]:    - Documentos: 0
+2025-08-20 12:43:24 [INFO]:    - Status: 0
+2025-08-20 12:43:24 [INFO]:    - Notificações: 0
+2025-08-20 12:44:23 [ERROR]: API health check falhou {"error":"fetch failed"}
+2025-08-20 12:44:23 [WARN]: Alguns health checks falharam {"results":[{"check":"redis","status":"fulfilled","value":true},{"check":"api","status":"fulfilled","value":false},{"check":"websocket","status":"fulfilled","value":false},{"check":"system","status":"fulfilled","value":true},{"check":"external","status":"fulfilled","value":true}]}
+2025-08-20 12:44:51 [INFO]: Performance: Redis Health Check {"duration":"3ms","operation":"Redis Health Check","status":"healthy"}
+2025-08-20 12:44:56 [ERROR]: WebSocket health check falhou {"error":"WebSocket was closed before the connection was established"}
+2025-08-20 12:48:21 [INFO]: 🔄 Iniciando sincronização completa...
+2025-08-20 12:48:22 [INFO]: ✅ 0 motoristas sincronizados
+2025-08-20 12:48:22 [INFO]: ✅ 0 documentos sincronizados
+2025-08-20 12:48:23 [INFO]: ✅ 0 status sincronizados
+2025-08-20 12:48:23 [INFO]: ✅ 0 notificações sincronizadas
+2025-08-20 12:48:23 [INFO]: ✅ Sincronização completa concluída em 1855ms:
+2025-08-20 12:48:23 [INFO]:    - Motoristas: 0
+2025-08-20 12:48:23 [INFO]:    - Documentos: 0
+2025-08-20 12:48:23 [INFO]:    - Status: 0
+2025-08-20 12:48:23 [INFO]:    - Notificações: 0

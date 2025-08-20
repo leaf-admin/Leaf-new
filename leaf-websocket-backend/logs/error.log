@@ -52,3 +52,8 @@
 2025-08-20 12:25:26 [ERROR]: WebSocket health check falhou {"error":"socket hang up"}
 2025-08-20 12:26:13 [ERROR]: WebSocket health check falhou {"error":"socket hang up"}
 2025-08-20 12:31:42 [ERROR]: WebSocket health check falhou {"error":"WebSocket was closed before the connection was established"}
+2025-08-20 12:33:56 [ERROR]: WebSocket health check falhou {"error":"WebSocket was closed before the connection was established"}
+2025-08-20 12:38:53 [ERROR]: API health check falhou {"error":"fetch failed"}
+2025-08-20 12:39:26 [ERROR]: WebSocket health check falhou {"error":"WebSocket was closed before the connection was established"}
+2025-08-20 12:44:23 [ERROR]: API health check falhou {"error":"fetch failed"}
+2025-08-20 12:44:56 [ERROR]: WebSocket health check falhou {"error":"WebSocket was closed before the connection was established"}
