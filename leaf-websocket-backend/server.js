@@ -9,6 +9,9 @@ require('dotenv').config();
 // Firebase integration
 const firebaseConfig = require('./firebase-config');
 
+// FCM integration
+const FCMService = require('./services/fcm-service');
+
 // Importar sistemas de monitoramento
 const LatencyMonitor = require('./metrics/latency-monitor');
 const DockerMonitor = require('./monitoring/docker-monitor');

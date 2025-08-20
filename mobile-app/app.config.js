@@ -133,22 +133,23 @@ export default {
             }
         }
     },
-    plugins: [
-        "expo-asset",
-        "expo-font",
-        "expo-apple-authentication",
-        "expo-localization",
-        "@react-native-firebase/app", 
-        "@react-native-firebase/auth",
-        [
-            "expo-notifications",
-            {
-                sounds: [
-                    "./assets/sounds/horn.wav",
-                    "./assets/sounds/repeat.wav"
-                ]
-            }
-        ],
+            plugins: [
+            "expo-asset",
+            "expo-font",
+            "expo-apple-authentication",
+            "expo-localization",
+            "@react-native-firebase/app", 
+            "@react-native-firebase/auth",
+            "@react-native-firebase/messaging",
+            [
+                "expo-notifications",
+                {
+                    sounds: [
+                        "./assets/sounds/horn.wav",
+                        "./assets/sounds/repeat.wav"
+                    ]
+                }
+            ],
         [
             "expo-image-picker",
             {
