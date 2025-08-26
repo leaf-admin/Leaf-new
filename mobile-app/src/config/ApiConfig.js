@@ -6,12 +6,12 @@ const ENV = {
   development: {
     // 🏠 SELF-HOSTED VPS (Vultr) - PRINCIPAL
     selfHostedApi: {
-      web: 'https://api.leaf.app.br',
-      mobile: 'https://api.leaf.app.br'
+      web: 'http://216.238.107.59:3005',
+      mobile: 'http://216.238.107.59:3005'
     },
     selfHostedWebSocket: {
-      web: 'wss://socket.leaf.app.br',
-      mobile: 'wss://socket.leaf.app.br'
+      web: 'http://216.238.107.59:3005',
+      mobile: 'http://216.238.107.59:3005'
     },
     // 🔄 FALLBACK - Firebase Functions (se necessário)
     firebaseFunctions: {
@@ -31,8 +31,8 @@ const ENV = {
       mobile: 'https://api.leaf.app.br'
     },
     selfHostedWebSocket: {
-      web: 'wss://socket.leaf.app.br',
-      mobile: 'wss://socket.leaf.app.br'
+      web: 'https://socket.leaf.app.br',
+      mobile: 'https://socket.leaf.app.br'
     },
     // 🔄 FALLBACK - Firebase Functions
     firebaseFunctions: {

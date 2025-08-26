@@ -1,7 +1,7 @@
 import io from 'socket.io-client';
 
-// URL do WebSocket - usar localhost para desenvolvimento
-const WEBSOCKET_URL = __DEV__ ? 'http://localhost:3001' : 'https://seu-backend-producao.com';
+// URL do WebSocket - usar VPS Vultr otimizada
+const WEBSOCKET_URL = __DEV__ ? 'http://216.238.107.59:3005' : 'https://socket.leaf.app.br';
 
 class WebSocketManager {
     static instance = null;

@@ -10,9 +10,9 @@ const WEBSOCKET_CONFIG = {
   
   // 🏠 SELF-HOSTED VPS (Vultr) - LOCAL
   LOCAL: {
-    ANDROID_EMULATOR: 'wss://socket.leaf.app.br', // Vultr como principal
-    IOS_SIMULATOR: 'wss://socket.leaf.app.br', // Vultr como principal
-    DEVICE: getWebSocketUrl(), // Usa configuração centralizada (VPS)
+    ANDROID_EMULATOR: 'http://216.238.107.59:3005', // VPS Vultr otimizada
+    IOS_SIMULATOR: 'http://216.238.107.59:3005', // VPS Vultr otimizada
+    DEVICE: 'http://216.238.107.59:3005', // VPS Vultr otimizada
   },
   
   // Configurações de conexão
