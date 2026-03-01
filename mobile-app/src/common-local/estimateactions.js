@@ -1,3 +1,4 @@
+import Logger from '../utils/Logger';
 import {
   FETCH_ESTIMATE,
   FETCH_ESTIMATE_SUCCESS,
@@ -5,9 +6,10 @@ import {
   CLEAR_ESTIMATE
 } from "../types";
 import Polyline from '@mapbox/polyline';
-import { firebase } from '../config/configureFirebase';
+import { firebase } from './config/configureFirebase';
 import { FareCalculator } from '../other/FareCalculator';
 import { calcularPedagiosPorPolyline } from '../other/TollUtils';
+
 
 // Estrutura de dados para segmentos de rodovia e pedágios
 export const roadSegments = {
@@ -89,9 +91,9 @@ function isTollOnRoute(routePoints, tollLocation, tolerance = 1) {
       lng: tollLocation.longitude || tollLocation.lng
     };
     const dist = distanceToSegment(toll, v, w);
-    // console.log(`Distância do pedágio (${toll.lat},${toll.lng}) ao segmento [(${v.lat},${v.lng})-(${w.lat},${w.lng})]: ${dist} km`);
+    // Logger.log(`Distância do pedágio (${toll.lat},${toll.lng}) ao segmento [(${v.lat},${v.lng})-(${w.lat},${w.lng})]: ${dist} km`);
     if (dist <= tolerance) {
-      // console.log(`Pedágio detectado no segmento entre (${v.lat},${v.lng}) e (${w.lat},${w.lng}) a ${dist} km`);
+      // Logger.log(`Pedágio detectado no segmento entre (${v.lat},${v.lng}) e (${w.lat},${w.lng}) a ${dist} km`);
       return true;
     }
   }
@@ -101,7 +103,7 @@ function isTollOnRoute(routePoints, tollLocation, tolerance = 1) {
 // Função para encontrar pedágios na rota usando a abordagem robusta
 function findTollsInRoute(routePoints) {
   if (!routePoints || routePoints.length === 0) {
-    console.log('Nenhum ponto de rota fornecido');
+    Logger.log('Nenhum ponto de rota fornecido');
     return [];
   }
   const foundTolls = new Set();
@@ -116,35 +118,35 @@ function findTollsInRoute(routePoints) {
       });
     });
   });
-  console.log(`Total de pedágios encontrados: ${tollsInRoute.length}`);
+  Logger.log(`Total de pedágios encontrados: ${tollsInRoute.length}`);
   return tollsInRoute;
 }
 
 // Função para calcular o valor total dos pedágios
 export function calculateTollFees(routePoints, vehicleType = 'car') {
   if (!routePoints || routePoints.length === 0) {
-    console.log('Nenhum ponto de rota fornecido para cálculo de pedágio');
+    Logger.log('Nenhum ponto de rota fornecido para cálculo de pedágio');
     return 0;
   }
 
-  console.log(`Calculando pedágio para ${routePoints.length} pontos de rota`);
+  Logger.log(`Calculando pedágio para ${routePoints.length} pontos de rota`);
   
   const tolls = findTollsInRoute(routePoints);
   if (tolls.length === 0) {
-    console.log('Nenhum pedágio encontrado na rota');
+    Logger.log('Nenhum pedágio encontrado na rota');
     return 0;
   }
 
   const isWeekend = [0, 6].includes(new Date().getDay());
-  console.log(`Dia da semana: ${isWeekend ? 'Fim de semana' : 'Dia útil'}`);
+  Logger.log(`Dia da semana: ${isWeekend ? 'Fim de semana' : 'Dia útil'}`);
 
   const totalTollFee = tolls.reduce((total, toll) => {
     const fee = isWeekend ? toll.fees[vehicleType].weekend : toll.fees[vehicleType].weekday;
-    console.log(`Pedágio ${toll.name}: R$ ${fee}`);
+    Logger.log(`Pedágio ${toll.name}: R$ ${fee}`);
     return total + fee;
   }, 0);
 
-  console.log(`Valor total do pedágio: R$ ${totalTollFee}`);
+  Logger.log(`Valor total do pedágio: R$ ${totalTollFee}`);
   return totalTollFee;
 }
 
@@ -430,14 +432,14 @@ export const getEstimate = (bookingData) => async (dispatch) => {
       let distance = settings.convert_to_mile? (res.distance_in_km / 1.609344) : res.distance_in_km;
 
       // --- LOGS DE DEBUG ---
-      console.log('--- INÍCIO DO getEstimate ---');
-      console.log('PolylinePoints:', res.polylinePoints);
-      console.log('TollData:', tollData);
+      Logger.log('--- INÍCIO DO getEstimate ---');
+      Logger.log('PolylinePoints:', res.polylinePoints);
+      Logger.log('TollData:', tollData);
 
       // Cálculo de pedágio SEM depender da flag do Google
       const { pedagiosCruzados, valorTotal } = calcularPedagiosPorPolyline(res.polylinePoints, tollData, 2); // tolerância 2km
-      console.log('Pedágios cruzados:', pedagiosCruzados);
-      console.log('Valor total:', valorTotal);
+      Logger.log('Pedágios cruzados:', pedagiosCruzados);
+      Logger.log('Valor total:', valorTotal);
       let valorPedagio = valorTotal;
 
       let { totalCost, grandTotal, convenience_fees } = FareCalculator(

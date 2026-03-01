@@ -1,8 +1,10 @@
+import Logger from '../utils/Logger';
 // HybridMapsService.js - Serviço híbrido Google Maps + OpenStreetMap para otimização de custos
 // Integrado com Redis e Firebase
 const { costMonitoringService } = require('./CostMonitoringService');
 const apiKeys = require('../../config/api-keys');
 const { RedisApiService } = require('./RedisApiService');
+
 
 class HybridMapsService {
     constructor() {
@@ -93,7 +95,7 @@ class HybridMapsService {
             places: ['google'] // Apenas Google (dados ricos)
         };
         
-        console.log('🗺️ HybridMapsService integrado com Redis e Firebase');
+        Logger.log('🗺️ HybridMapsService integrado com Redis e Firebase');
     }
 
     // ===== RATE LIMITING INTELLIGENTE =====
@@ -116,7 +118,7 @@ class HybridMapsService {
                 throw new Error('OSM_RATE_LIMIT_WAIT_TOO_LONG');
             }
             
-            console.log(`⏳ Rate limiting OSM: aguardando ${waitTime}ms`);
+            Logger.log(`⏳ Rate limiting OSM: aguardando ${waitTime}ms`);
             this.stats.osmRateLimited++;
             
             // Aguardar o tempo necessário
@@ -138,7 +140,7 @@ class HybridMapsService {
             
         } catch (error) {
             if (error.message.includes('OSM_RATE_LIMIT')) {
-                console.warn(`⚠️ OSM Rate limit atingido, usando fallback: ${error.message}`);
+                Logger.warn(`⚠️ OSM Rate limit atingido, usando fallback: ${error.message}`);
                 this.stats.osmFallbacks++;
                 
                 // Usar fallback (Google Maps)
@@ -148,7 +150,7 @@ class HybridMapsService {
             }
             
             // Outro tipo de erro, tentar fallback
-            console.warn(`⚠️ OSM falhou, usando fallback: ${error.message}`);
+            Logger.warn(`⚠️ OSM falhou, usando fallback: ${error.message}`);
             this.stats.osmFallbacks++;
             
             const fallbackResult = await fallbackOperation();
@@ -165,11 +167,11 @@ class HybridMapsService {
             // Verificar cache no Redis primeiro
             const cached = await this.redisApi.localCache.get(cacheKey);
             if (cached && Date.now() - cached.timestamp < this.cacheTTL) {
-                console.log(`🗺️ Geocoding cache hit (Redis): ${address}`);
+                Logger.log(`🗺️ Geocoding cache hit (Redis): ${address}`);
                 return cached.data;
             }
         } catch (error) {
-            console.log('⚠️ Cache Redis não disponível, continuando...');
+            Logger.log('⚠️ Cache Redis não disponível, continuando...');
         }
 
         // Usar Google Maps para geocoding (melhor precisão)
@@ -182,13 +184,13 @@ class HybridMapsService {
                 timestamp: Date.now()
             });
         } catch (error) {
-            console.log('⚠️ Erro ao salvar no cache Redis:', error.message);
+            Logger.log('⚠️ Erro ao salvar no cache Redis:', error.message);
         }
 
         // Monitorar custo
         await this.costMonitoring.trackGoogleMapsCost('geocoding', 1);
         
-        console.log(`🗺️ Google Geocoding: ${address} → ${result.lat}, ${result.lng}`);
+        Logger.log(`🗺️ Google Geocoding: ${address} → ${result.lat}, ${result.lng}`);
         return result;
     }
 
@@ -199,12 +201,12 @@ class HybridMapsService {
             
             // Verificar se o provedor está disponível
             if (!provider || !provider.apiKey) {
-                console.log(`⚠️ Provedor ${providerName} não configurado, tentando próximo...`);
+                Logger.log(`⚠️ Provedor ${providerName} não configurado, tentando próximo...`);
                 continue;
             }
             
             try {
-                console.log(`🔄 Tentando ${providerName}...`);
+                Logger.log(`🔄 Tentando ${providerName}...`);
                 
                 let result;
                 switch (operation) {
@@ -240,11 +242,11 @@ class HybridMapsService {
                     }
                 }
                 
-                console.log(`✅ ${providerName} ${operation} bem-sucedido`);
+                Logger.log(`✅ ${providerName} ${operation} bem-sucedido`);
                 return { ...result, provider: providerName };
                 
             } catch (error) {
-                console.warn(`❌ ${providerName} ${operation} falhou: ${error.message}`);
+                Logger.warn(`❌ ${providerName} ${operation} falhou: ${error.message}`);
                 continue;
             }
         }
@@ -260,11 +262,11 @@ class HybridMapsService {
             // Verificar cache no Redis primeiro
             const cached = await this.redisApi.localCache.get(cacheKey);
             if (cached && Date.now() - cached.timestamp < this.cacheTTL) {
-                console.log(`🗺️ Directions cache hit (Redis): ${origin} → ${destination}`);
+                Logger.log(`🗺️ Directions cache hit (Redis): ${origin} → ${destination}`);
                 return cached.data;
             }
         } catch (error) {
-            console.log('⚠️ Cache Redis não disponível, continuando...');
+            Logger.log('⚠️ Cache Redis não disponível, continuando...');
         }
 
         // Tentar provedores em ordem de prioridade
@@ -281,7 +283,7 @@ class HybridMapsService {
                 timestamp: Date.now()
             });
         } catch (error) {
-            console.log('⚠️ Erro ao salvar no cache Redis:', error.message);
+            Logger.log('⚠️ Erro ao salvar no cache Redis:', error.message);
         }
 
         return result;
@@ -295,11 +297,11 @@ class HybridMapsService {
             // Verificar cache no Redis primeiro
             const cached = await this.redisApi.localCache.get(cacheKey);
             if (cached && Date.now() - cached.timestamp < this.cacheTTL) {
-                console.log(`🗺️ Places cache hit (Redis): ${query}`);
+                Logger.log(`🗺️ Places cache hit (Redis): ${query}`);
                 return cached.data;
             }
         } catch (error) {
-            console.log('⚠️ Cache Redis não disponível, continuando...');
+            Logger.log('⚠️ Cache Redis não disponível, continuando...');
         }
 
         try {
@@ -313,17 +315,17 @@ class HybridMapsService {
                     timestamp: Date.now()
                 });
             } catch (error) {
-                console.log('⚠️ Erro ao salvar no cache Redis:', error.message);
+                Logger.log('⚠️ Erro ao salvar no cache Redis:', error.message);
             }
 
             // Monitorar custo
             await this.costMonitoring.trackGoogleMapsCost('places', 1);
             
-            console.log(`🗺️ Google Places: ${query} → ${result.length} resultados`);
+            Logger.log(`🗺️ Google Places: ${query} → ${result.length} resultados`);
             return result;
             
         } catch (error) {
-            console.error(`❌ Google Places failed: ${error.message}`);
+            Logger.error(`❌ Google Places failed: ${error.message}`);
             return [];
         }
     }
@@ -336,11 +338,11 @@ class HybridMapsService {
             // Verificar cache no Redis primeiro
             const cached = await this.redisApi.localCache.get(cacheKey);
             if (cached && Date.now() - cached.timestamp < this.cacheTTL) {
-                console.log(`🗺️ Reverse geocoding cache hit (Redis): ${lat}, ${lng}`);
+                Logger.log(`🗺️ Reverse geocoding cache hit (Redis): ${lat}, ${lng}`);
                 return cached.data;
             }
         } catch (error) {
-            console.log('⚠️ Cache Redis não disponível, continuando...');
+            Logger.log('⚠️ Cache Redis não disponível, continuando...');
         }
 
         // Tentar provedores em ordem de prioridade
@@ -356,7 +358,7 @@ class HybridMapsService {
                 timestamp: Date.now()
             });
         } catch (error) {
-            console.log('⚠️ Erro ao salvar no cache Redis:', error.message);
+            Logger.log('⚠️ Erro ao salvar no cache Redis:', error.message);
         }
 
         return result;
@@ -543,9 +545,9 @@ class HybridMapsService {
     async clearCache() {
         try {
             await this.redisApi.localCache.clearAll();
-            console.log('🗺️ Cache de mapas limpo (Redis)');
+            Logger.log('🗺️ Cache de mapas limpo (Redis)');
         } catch (error) {
-            console.log('⚠️ Erro ao limpar cache Redis:', error.message);
+            Logger.log('⚠️ Erro ao limpar cache Redis:', error.message);
         }
     }
 
@@ -558,7 +560,7 @@ class HybridMapsService {
                 redisConnected: true
             };
         } catch (error) {
-            console.log('⚠️ Erro ao obter estatísticas do cache Redis:', error.message);
+            Logger.log('⚠️ Erro ao obter estatísticas do cache Redis:', error.message);
             return {
                 size: 0,
                 keys: [],
@@ -608,7 +610,7 @@ class HybridMapsService {
             this.rateLimiter.osm.fallbackThreshold = Math.max(1, newConfig.fallbackThreshold);
         }
         
-        console.log('⚙️ Rate limiting configurado:', this.rateLimiter.osm);
+        Logger.log('⚙️ Rate limiting configurado:', this.rateLimiter.osm);
     }
 
     // ===== RESET DE ESTATÍSTICAS =====
@@ -621,7 +623,7 @@ class HybridMapsService {
             queueOverflows: 0,
             averageWaitTime: 0
         };
-        console.log('📊 Estatísticas de rate limiting resetadas');
+        Logger.log('📊 Estatísticas de rate limiting resetadas');
     }
 
     // ===== ANÁLISE DE CUSTOS COM PROVEDORES COMERCIAIS =====

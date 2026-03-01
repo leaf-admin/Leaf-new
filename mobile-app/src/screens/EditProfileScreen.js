@@ -1,3 +1,4 @@
+import Logger from '../utils/Logger';
 import React, { useState, useEffect } from 'react';
 import {
     View,
@@ -10,26 +11,46 @@ import {
     Image,
     Alert,
     TextInput,
+    Modal,
+    ActivityIndicator,
 } from 'react-native';
 import { Icon } from 'react-native-elements';
 import { Ionicons } from '@expo/vector-icons';
 import { useSelector, useDispatch } from 'react-redux';
 import { colors } from '../common-local/theme';
 import { fonts } from '../common-local/font';
+import { cardTypography } from '../common-local/typography';
 import { MAIN_COLOR } from '../common-local/sharedFunctions';
 import * as ImagePicker from 'expo-image-picker';
+import { useTranslation } from '../components/i18n/LanguageProvider';
+import { api } from '../common-local';
 
 const { width, height } = Dimensions.get('window');
 
 export default function EditProfileScreen({ navigation }) {
+    const { t } = useTranslation();
     const auth = useSelector(state => state.auth);
     const dispatch = useDispatch();
     const [isDarkMode, setIsDarkMode] = useState(false);
-    const [isEditingEmail, setIsEditingEmail] = useState(false);
-    const [isEditingPhone, setIsEditingPhone] = useState(false);
-    const [newEmail, setNewEmail] = useState('');
-    const [newPhone, setNewPhone] = useState('');
     const [isLoading, setIsLoading] = useState(false);
+    
+    // Estados para edição de email
+    const [isEditingEmail, setIsEditingEmail] = useState(false);
+    const [newEmail, setNewEmail] = useState('');
+    const [currentPasswordForEmail, setCurrentPasswordForEmail] = useState('');
+    const [showEmailModal, setShowEmailModal] = useState(false);
+    
+    // Estados para redefinição de senha
+    const [showPasswordModal, setShowPasswordModal] = useState(false);
+    const [currentPassword, setCurrentPassword] = useState('');
+    const [newPassword, setNewPassword] = useState('');
+    const [confirmPassword, setConfirmPassword] = useState('');
+    const [showSupportPasswordOption, setShowSupportPasswordOption] = useState(false);
+
+    // Determinar tipo de usuário
+    const userType = auth?.profile?.usertype || auth?.profile?.userType;
+    const isDriver = userType === 'driver';
+    const isPassenger = userType === 'customer' || !isDriver;
 
     // Dados do perfil
     const profileData = {
@@ -38,52 +59,42 @@ export default function EditProfileScreen({ navigation }) {
         email: auth?.profile?.email || '',
         mobile: auth?.profile?.mobile || '',
         profile_image: auth?.profile?.profile_image || null,
-        // Campos que podem existir mas não são editáveis
         birthDate: auth?.profile?.birthDate || '',
         cpf: auth?.profile?.cpf || '',
-        usertype: auth?.profile?.usertype || '',
+        usertype: userType || '',
         approved: auth?.profile?.approved || false,
     };
 
-    // Componente para alternar entre modo claro/escuro
-    function ThemeSwitch({ value, onValueChange }) {
-        return (
-            <TouchableOpacity 
-                style={styles.themeSwitchTouchable}
-                onPress={() => onValueChange(!value)}
-            >
-                <View style={styles.themeSwitchTrack}>
-                    <View style={styles.themeSwitchIconBubble}>
-                        <Ionicons 
-                            name={value ? 'moon' : 'sunny'} 
-                            size={16} 
-                            color={value ? '#fff' : '#FFD700'} 
-                        />
-                    </View>
-                </View>
-            </TouchableOpacity>
-        );
-    }
+    // Se for motorista, redirecionar para EditProfile antigo
+    useEffect(() => {
+        if (isDriver) {
+            navigation.replace('EditProfile');
+        }
+    }, [isDriver]);
 
     // Header com botão voltar e título
     const Header = () => (
         <View style={[styles.header, { backgroundColor: isDarkMode ? '#1a1a1a' : '#fff' }]}>
             <TouchableOpacity 
-                style={[styles.headerButton, { backgroundColor: isDarkMode ? '#333' : '#f8f8f8' }]}
+                style={[
+                    styles.headerButton, 
+                    { 
+                        backgroundColor: isDarkMode ? '#2d2d2d' : '#e8e8e8',
+                        borderWidth: 1,
+                        borderColor: isDarkMode ? '#404040' : '#d0d0d0',
+                    }
+                ]}
                 onPress={() => navigation.goBack()}
+                activeOpacity={0.7}
             >
-                <Icon name="arrow-back" type="material" color={isDarkMode ? '#fff' : colors.BLACK} size={24} />
+                <Ionicons 
+                    name="arrow-back" 
+                    color={isDarkMode ? '#fff' : '#1a1a1a'} 
+                    size={22} 
+                />
             </TouchableOpacity>
             <Text style={[styles.headerTitle, { color: isDarkMode ? '#fff' : colors.BLACK }]}>Editar Perfil</Text>
-            <View style={styles.headerRightContainer}>
-                <TouchableOpacity 
-                    style={[styles.headerButton, { backgroundColor: isDarkMode ? '#333' : '#f8f8f8' }]}
-                    onPress={() => navigation.navigate('Notifications')}
-                >
-                    <Icon name="notifications" type="material" color={isDarkMode ? '#fff' : colors.BLACK} size={24} />
-                </TouchableOpacity>
-                <ThemeSwitch value={isDarkMode} onValueChange={setIsDarkMode} />
-            </View>
+            <View style={styles.headerRightContainer} />
         </View>
     );
 
@@ -98,143 +109,219 @@ export default function EditProfileScreen({ navigation }) {
             });
 
             if (!result.canceled) {
-                // Aqui você implementaria o upload da imagem
-                console.log('Imagem selecionada:', result.assets[0].uri);
-                Alert.alert('Sucesso', 'Foto de perfil atualizada!');
+                // TODO: Implementar upload da imagem
+                Logger.log('Imagem selecionada:', result.assets[0].uri);
+                Alert.alert('Sucesso', 'Foto atualizada com sucesso!');
             }
         } catch (error) {
-            Alert.alert('Erro', 'Não foi possível selecionar a imagem');
+            Alert.alert('Erro', 'Erro ao selecionar imagem');
         }
     };
 
-    // Função para alterar e-mail
-    const handleEmailChange = () => {
+    // Função para validar email
+    const validateEmail = (email) => {
+        const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+        return emailRegex.test(email);
+    };
+
+    // Função para iniciar alteração de email
+    const handleStartEmailChange = () => {
+        setNewEmail('');
+        setCurrentPasswordForEmail('');
+        setShowEmailModal(true);
+    };
+
+    // Função para confirmar alteração de email
+    const handleConfirmEmailChange = async () => {
         if (!newEmail.trim()) {
-            Alert.alert('Erro', 'Digite um e-mail válido');
+            Alert.alert('Erro', 'Por favor, digite um e-mail válido');
             return;
         }
 
-        Alert.alert(
-            'Confirmar Alteração',
-            `Deseja alterar o e-mail para ${newEmail}?\n\nUm código de confirmação será enviado para o e-mail atual.`,
-            [
-                { text: 'Cancelar', style: 'cancel' },
-                { 
-                    text: 'Confirmar', 
-                    onPress: () => {
-                        setIsLoading(true);
-                        // Aqui você implementaria o envio do código de confirmação
-                        setTimeout(() => {
-                            setIsLoading(false);
-                            Alert.alert('Código Enviado', 'Verifique seu e-mail atual para o código de confirmação');
-                            setIsEditingEmail(false);
-                        }, 2000);
-                    }
-                }
-            ]
-        );
-    };
-
-    // Função para alterar telefone
-    const handlePhoneChange = () => {
-        if (!newPhone.trim()) {
-            Alert.alert('Erro', 'Digite um telefone válido');
+        if (!validateEmail(newEmail)) {
+            Alert.alert('Erro', 'Por favor, digite um e-mail válido');
             return;
         }
 
-        Alert.alert(
-            'Confirmar Alteração',
-            `Deseja alterar o telefone para ${newPhone}?\n\nUm código SMS será enviado para o telefone atual.`,
-            [
-                { text: 'Cancelar', style: 'cancel' },
-                { 
-                    text: 'Confirmar', 
-                    onPress: () => {
-                        setIsLoading(true);
-                        // Aqui você implementaria o envio do SMS
-                        setTimeout(() => {
-                            setIsLoading(false);
-                            Alert.alert('SMS Enviado', 'Verifique seu telefone atual para o código de confirmação');
-                            setIsEditingPhone(false);
-                        }, 2000);
-                    }
-                }
-            ]
-        );
+        if (!currentPasswordForEmail.trim()) {
+            Alert.alert('Erro', 'Por favor, digite sua senha atual');
+            return;
+        }
+
+        if (newEmail.toLowerCase() === profileData.email.toLowerCase()) {
+            Alert.alert('Erro', 'O novo e-mail deve ser diferente do atual');
+            return;
+        }
+
+        setIsLoading(true);
+        try {
+            // TODO: Implementar verificação de senha e envio de email de confirmação
+            // await api.verifyPassword(currentPasswordForEmail);
+            // await api.sendEmailConfirmation(newEmail);
+            
+            // Simulação
+            await new Promise(resolve => setTimeout(resolve, 2000));
+            
+            Alert.alert(
+                'E-mail de confirmação enviado',
+                'Enviamos um e-mail de confirmação para o novo endereço. Por favor, verifique sua caixa de entrada e clique no link para confirmar a alteração.',
+                [{ text: 'OK', onPress: () => {
+                    setShowEmailModal(false);
+                    setIsEditingEmail(false);
+                    setNewEmail('');
+                    setCurrentPasswordForEmail('');
+                }}]
+            );
+        } catch (error) {
+            Alert.alert('Erro', error.message || 'Erro ao processar alteração de e-mail');
+        } finally {
+            setIsLoading(false);
+        }
     };
 
-    // Função para redefinir senha
-    const handleResetPassword = () => {
-        Alert.alert(
-            'Redefinir Senha',
-            'Um e-mail será enviado com instruções para redefinir sua senha.',
-            [
-                { text: 'Cancelar', style: 'cancel' },
-                { 
-                    text: 'Enviar', 
-                    onPress: () => {
-                        setIsLoading(true);
-                        // Aqui você implementaria o envio do e-mail de redefinição
-                        setTimeout(() => {
-                            setIsLoading(false);
-                            Alert.alert('E-mail Enviado', 'Verifique sua caixa de entrada para redefinir a senha');
-                        }, 2000);
-                    }
-                }
-            ]
-        );
+    // Função para iniciar redefinição de senha
+    const handleStartPasswordReset = () => {
+        setCurrentPassword('');
+        setNewPassword('');
+        setConfirmPassword('');
+        setShowSupportPasswordOption(false);
+        setShowPasswordModal(true);
+    };
+
+    // Função para confirmar redefinição de senha
+    const handleConfirmPasswordReset = async () => {
+        if (showSupportPasswordOption) {
+            // Redefinição via suporte
+            Alert.alert(
+                'Contatar Suporte',
+                'Para redefinir sua senha via suporte, entre em contato com nossa equipe através do menu "Ajuda" ou "Suporte". Nossa equipe irá verificar sua identidade e realizar a redefinição.',
+                [{ text: 'OK', onPress: () => {
+                    setShowPasswordModal(false);
+                    navigation.navigate('Support');
+                }}]
+            );
+            return;
+        }
+
+        // Redefinição com senha atual
+        if (!currentPassword.trim()) {
+            Alert.alert('Erro', 'Por favor, digite sua senha atual');
+            return;
+        }
+
+        if (!newPassword.trim()) {
+            Alert.alert('Erro', 'Por favor, digite a nova senha');
+            return;
+        }
+
+        if (newPassword.length < 6) {
+            Alert.alert('Erro', 'A senha deve ter pelo menos 6 caracteres');
+            return;
+        }
+
+        if (newPassword !== confirmPassword) {
+            Alert.alert('Erro', 'As senhas não coincidem');
+            return;
+        }
+
+        if (currentPassword === newPassword) {
+            Alert.alert('Erro', 'A nova senha deve ser diferente da atual');
+            return;
+        }
+
+        setIsLoading(true);
+        try {
+            // TODO: Implementar verificação de senha atual e atualização
+            // await api.verifyPassword(currentPassword);
+            // await api.updatePassword(newPassword);
+            
+            // Simulação
+            await new Promise(resolve => setTimeout(resolve, 2000));
+            
+            Alert.alert(
+                'Senha alterada',
+                'Sua senha foi alterada com sucesso!',
+                [{ text: 'OK', onPress: () => {
+                    setShowPasswordModal(false);
+                    setCurrentPassword('');
+                    setNewPassword('');
+                    setConfirmPassword('');
+                }}]
+            );
+        } catch (error) {
+            Alert.alert('Erro', error.message || 'Erro ao alterar senha. Verifique se a senha atual está correta.');
+        } finally {
+            setIsLoading(false);
+        }
     };
 
     // Campo de informação (não editável)
-    const InfoField = ({ label, value, icon }) => (
+    const InfoField = ({ label, value, icon, locked = false }) => (
         <View style={[styles.fieldContainer, { borderBottomColor: isDarkMode ? '#333' : '#f0f0f0' }]}>
             <View style={styles.fieldHeader}>
                 <Ionicons name={icon} size={20} color={isDarkMode ? '#ccc' : colors.GRAY} />
-                <Text style={[styles.fieldLabel, { color: isDarkMode ? '#ccc' : colors.GRAY }]}>{label}</Text>
+                <Text style={[cardTypography.subtitle, styles.fieldLabel, { color: isDarkMode ? '#ccc' : colors.GRAY }]}>{label}</Text>
+                {locked && (
+                    <Ionicons name="lock-closed" size={14} color={isDarkMode ? '#666' : '#999'} style={{ marginLeft: 6 }} />
+                )}
             </View>
-            <Text style={[styles.fieldValue, { color: isDarkMode ? '#fff' : colors.BLACK }]}>{value || 'Não informado'}</Text>
+            <View style={styles.valueContainer}>
+                <Text style={[cardTypography.title, styles.fieldValue, { color: isDarkMode ? '#fff' : colors.BLACK }]}>{value || 'Não informado'}</Text>
+                {locked && (
+                    <TouchableOpacity 
+                        onPress={() => {
+                            Alert.alert(
+                                'Alteração não permitida',
+                                'Para alterar este campo, entre em contato com nossa equipe de suporte através do menu "Ajuda" ou "Suporte".',
+                                [{ text: 'OK' }]
+                            );
+                        }}
+                    >
+                        <Ionicons name="information-circle-outline" size={18} color={isDarkMode ? '#999' : '#666'} />
+                    </TouchableOpacity>
+                )}
+            </View>
         </View>
     );
 
-    // Campo editável
-    const EditableField = ({ label, value, icon, isEditing, onEdit, onSave, onCancel, placeholder, onChangeText }) => (
+    // Campo editável (email)
+    const EditableEmailField = () => (
         <View style={[styles.fieldContainer, { borderBottomColor: isDarkMode ? '#333' : '#f0f0f0' }]}>
             <View style={styles.fieldHeader}>
-                <Ionicons name={icon} size={20} color={isDarkMode ? '#ccc' : colors.GRAY} />
-                <Text style={[styles.fieldLabel, { color: isDarkMode ? '#ccc' : colors.GRAY }]}>{label}</Text>
+                <Ionicons name="mail" size={20} color={isDarkMode ? '#ccc' : colors.GRAY} />
+                <Text style={[cardTypography.subtitle, styles.fieldLabel, { color: isDarkMode ? '#ccc' : colors.GRAY }]}>E-mail</Text>
             </View>
-            
-            {isEditing ? (
-                <View style={styles.editContainer}>
-                    <TextInput
-                        style={[styles.textInput, { 
-                            color: isDarkMode ? '#fff' : colors.BLACK,
-                            backgroundColor: isDarkMode ? '#444' : '#fff'
-                        }]}
-                        value={onChangeText ? onChangeText : value}
-                        placeholder={placeholder}
-                        placeholderTextColor={isDarkMode ? '#999' : '#999'}
-                        onChangeText={onChangeText}
-                    />
-                    <View style={styles.editButtons}>
-                        <TouchableOpacity style={styles.saveButton} onPress={onSave}>
-                            <Text style={styles.saveButtonText}>Salvar</Text>
-                        </TouchableOpacity>
-                        <TouchableOpacity style={styles.cancelButton} onPress={onCancel}>
-                            <Text style={styles.cancelButtonText}>Cancelar</Text>
-                        </TouchableOpacity>
-                    </View>
-                </View>
-            ) : (
-                <View style={styles.valueContainer}>
-                    <Text style={[styles.fieldValue, { color: isDarkMode ? '#fff' : colors.BLACK }]}>{value || 'Não informado'}</Text>
-                    <TouchableOpacity style={styles.editButton} onPress={onEdit}>
-                        <Ionicons name="pencil" size={16} color={MAIN_COLOR} />
-                    </TouchableOpacity>
-                </View>
-            )}
+            <View style={styles.valueContainer}>
+                <Text style={[cardTypography.title, styles.fieldValue, { color: isDarkMode ? '#fff' : colors.BLACK }]}>{profileData.email || 'Não informado'}</Text>
+                <TouchableOpacity style={styles.editButton} onPress={handleStartEmailChange}>
+                    <Ionicons name="pencil" size={16} color={MAIN_COLOR} />
+                </TouchableOpacity>
+            </View>
         </View>
     );
+
+    // Campo de senha
+    const PasswordField = () => (
+        <TouchableOpacity 
+            style={[styles.fieldContainer, { borderBottomColor: isDarkMode ? '#333' : '#f0f0f0' }]}
+            onPress={handleStartPasswordReset}
+        >
+            <View style={styles.fieldHeader}>
+                <Ionicons name="lock-closed" size={20} color={isDarkMode ? '#ccc' : colors.GRAY} />
+                <Text style={[cardTypography.subtitle, styles.fieldLabel, { color: isDarkMode ? '#ccc' : colors.GRAY }]}>Senha</Text>
+            </View>
+            <View style={styles.valueContainer}>
+                <Text style={[cardTypography.title, styles.fieldValue, { color: isDarkMode ? '#fff' : colors.BLACK }]}>••••••••</Text>
+                <TouchableOpacity style={styles.editButton}>
+                    <Ionicons name="refresh" size={16} color={MAIN_COLOR} />
+                </TouchableOpacity>
+            </View>
+        </TouchableOpacity>
+    );
+
+    if (isDriver) {
+        return null; // Será redirecionado pelo useEffect
+    }
 
     return (
         <View style={[styles.container, { backgroundColor: isDarkMode ? '#1a1a1a' : '#fff' }]}>
@@ -255,76 +342,243 @@ export default function EditProfileScreen({ navigation }) {
                             <Ionicons name="camera" size={20} color="#fff" />
                         </View>
                     </TouchableOpacity>
-                    <Text style={[styles.editImageText, { color: isDarkMode ? '#ccc' : colors.GRAY }]}>Toque para alterar</Text>
+                    <Text style={[cardTypography.subtitle, styles.editImageText, { color: isDarkMode ? '#ccc' : colors.GRAY }]}>Toque para alterar</Text>
                 </View>
 
-                {/* Campos Não Editáveis */}
+                {/* Informações Básicas - Não Editáveis */}
                 <View style={styles.section}>
-                    <InfoField label="Nome" value={`${profileData.firstName} ${profileData.lastName}`} icon="person" />
-                    {profileData.birthDate && <InfoField label="Data de Nascimento" value={profileData.birthDate} icon="calendar" />}
-                    {profileData.cpf && <InfoField label="CPF" value={profileData.cpf} icon="card" />}
+                    <Text style={[cardTypography.title, styles.sectionTitle, { color: isDarkMode ? '#fff' : colors.BLACK }]}>Informações Básicas</Text>
+                    <InfoField 
+                        label="Nome" 
+                        value={profileData.firstName} 
+                        icon="person" 
+                        locked={true}
+                    />
+                    <InfoField 
+                        label="Sobrenome" 
+                        value={profileData.lastName} 
+                        icon="person-outline" 
+                        locked={true}
+                    />
+                    <InfoField 
+                        label="Telefone" 
+                        value={profileData.mobile} 
+                        icon="call" 
+                        locked={true}
+                    />
                 </View>
 
                 {/* Campos Editáveis */}
                 <View style={styles.section}>
-                    
-                    <EditableField
-                        label="E-mail"
-                        value={profileData.email}
-                        icon="mail"
-                        isEditing={isEditingEmail}
-                        onEdit={() => setIsEditingEmail(true)}
-                        onSave={handleEmailChange}
-                        onCancel={() => {
-                            setIsEditingEmail(false);
-                            setNewEmail('');
-                        }}
-                        placeholder="Digite o novo e-mail"
-                        onChangeText={setNewEmail}
-                    />
-
-                    <EditableField
-                        label="Telefone"
-                        value={profileData.mobile}
-                        icon="call"
-                        isEditing={isEditingPhone}
-                        onEdit={() => setIsEditingPhone(true)}
-                        onSave={handlePhoneChange}
-                        onCancel={() => {
-                            setIsEditingPhone(false);
-                            setNewPhone('');
-                        }}
-                        placeholder="Digite o novo telefone"
-                        onChangeText={setNewPhone}
-                    />
+                    <Text style={[cardTypography.title, styles.sectionTitle, { color: isDarkMode ? '#fff' : colors.BLACK }]}>Contato</Text>
+                    <EditableEmailField />
                 </View>
 
                 {/* Segurança */}
                 <View style={styles.section}>
-                    
-                    <TouchableOpacity 
-                        style={[styles.securityField, { borderBottomColor: isDarkMode ? '#333' : '#f0f0f0' }]}
-                        onPress={handleResetPassword}
-                    >
-                        <View style={styles.fieldHeader}>
-                            <Ionicons name="lock-closed" size={20} color={isDarkMode ? '#ccc' : colors.GRAY} />
-                            <Text style={[styles.fieldLabel, { color: isDarkMode ? '#ccc' : colors.GRAY }]}>Senha</Text>
-                        </View>
-                        <View style={styles.valueContainer}>
-                            <Text style={[styles.fieldValue, { color: isDarkMode ? '#fff' : colors.BLACK }]}>••••••••</Text>
-                            <TouchableOpacity style={styles.editButton}>
-                                <Ionicons name="refresh" size={16} color={MAIN_COLOR} />
-                            </TouchableOpacity>
-                        </View>
-                    </TouchableOpacity>
+                    <Text style={[cardTypography.title, styles.sectionTitle, { color: isDarkMode ? '#fff' : colors.BLACK }]}>Segurança</Text>
+                    <PasswordField />
                 </View>
 
-                {/* Informações da Conta */}
-                <View style={styles.section}>
-                    <InfoField label="Tipo de Conta" value="Motorista" icon="person-circle" />
-                    <InfoField label="Status" value={profileData.approved ? 'Aprovado' : 'Pendente'} icon="checkmark-circle" />
-                </View>
+                {/* Informações Adicionais */}
+                {(profileData.birthDate || profileData.cpf) && (
+                    <View style={styles.section}>
+                        <Text style={[cardTypography.title, styles.sectionTitle, { color: isDarkMode ? '#fff' : colors.BLACK }]}>Informações Adicionais</Text>
+                        {profileData.birthDate && (
+                            <InfoField label="Data de Nascimento" value={profileData.birthDate} icon="calendar" />
+                        )}
+                        {profileData.cpf && (
+                            <InfoField label="CPF" value={profileData.cpf} icon="card" />
+                        )}
+                    </View>
+                )}
             </ScrollView>
+
+            {/* Modal para alteração de email */}
+            <Modal
+                visible={showEmailModal}
+                transparent={true}
+                animationType="slide"
+                onRequestClose={() => setShowEmailModal(false)}
+            >
+                <View style={styles.modalOverlay}>
+                    <View style={[styles.modalContent, { backgroundColor: isDarkMode ? '#2a2a2a' : '#fff' }]}>
+                        <View style={styles.modalHeader}>
+                            <Text style={[cardTypography.title, styles.modalTitle, { color: isDarkMode ? '#fff' : colors.BLACK }]}>Alterar E-mail</Text>
+                            <TouchableOpacity onPress={() => setShowEmailModal(false)}>
+                                <Ionicons name="close" size={24} color={isDarkMode ? '#fff' : colors.BLACK} />
+                            </TouchableOpacity>
+                        </View>
+                        
+                        <Text style={[cardTypography.subtitle, styles.modalDescription, { color: isDarkMode ? '#ccc' : colors.GRAY }]}>
+                            Para alterar seu e-mail, precisamos confirmar sua identidade e enviar um e-mail de confirmação para o novo endereço.
+                        </Text>
+
+                        <TextInput
+                            style={[styles.modalInput, { 
+                                color: isDarkMode ? '#fff' : colors.BLACK,
+                                backgroundColor: isDarkMode ? '#333' : '#f8f8f8'
+                            }]}
+                            placeholder="Novo e-mail"
+                            placeholderTextColor={isDarkMode ? '#999' : '#999'}
+                            value={newEmail}
+                            onChangeText={setNewEmail}
+                            keyboardType="email-address"
+                            autoCapitalize="none"
+                        />
+
+                        <TextInput
+                            style={[styles.modalInput, { 
+                                color: isDarkMode ? '#fff' : colors.BLACK,
+                                backgroundColor: isDarkMode ? '#333' : '#f8f8f8'
+                            }]}
+                            placeholder="Senha atual"
+                            placeholderTextColor={isDarkMode ? '#999' : '#999'}
+                            value={currentPasswordForEmail}
+                            onChangeText={setCurrentPasswordForEmail}
+                            secureTextEntry
+                        />
+
+                        <View style={styles.modalButtons}>
+                            <TouchableOpacity 
+                                style={[styles.modalButton, styles.modalButtonCancel]}
+                                onPress={() => {
+                                    setShowEmailModal(false);
+                                    setNewEmail('');
+                                    setCurrentPasswordForEmail('');
+                                }}
+                            >
+                                <Text style={[cardTypography.subtitle, styles.modalButtonTextCancel]}>Cancelar</Text>
+                            </TouchableOpacity>
+                            <TouchableOpacity 
+                                style={[styles.modalButton, styles.modalButtonConfirm]}
+                                onPress={handleConfirmEmailChange}
+                                disabled={isLoading}
+                            >
+                                {isLoading ? (
+                                    <ActivityIndicator color="#fff" />
+                                ) : (
+                                    <Text style={[cardTypography.title, styles.modalButtonTextConfirm]}>Confirmar</Text>
+                                )}
+                            </TouchableOpacity>
+                        </View>
+                    </View>
+                </View>
+            </Modal>
+
+            {/* Modal para redefinição de senha */}
+            <Modal
+                visible={showPasswordModal}
+                transparent={true}
+                animationType="slide"
+                onRequestClose={() => setShowPasswordModal(false)}
+            >
+                <View style={styles.modalOverlay}>
+                    <View style={[styles.modalContent, { backgroundColor: isDarkMode ? '#2a2a2a' : '#fff' }]}>
+                        <View style={styles.modalHeader}>
+                            <Text style={[cardTypography.title, styles.modalTitle, { color: isDarkMode ? '#fff' : colors.BLACK }]}>Redefinir Senha</Text>
+                            <TouchableOpacity onPress={() => setShowPasswordModal(false)}>
+                                <Ionicons name="close" size={24} color={isDarkMode ? '#fff' : colors.BLACK} />
+                            </TouchableOpacity>
+                        </View>
+                        
+                        {!showSupportPasswordOption ? (
+                            <>
+                                <Text style={[cardTypography.subtitle, styles.modalDescription, { color: isDarkMode ? '#ccc' : colors.GRAY }]}>
+                                    Digite sua senha atual e a nova senha para redefinir.
+                                </Text>
+
+                                <TextInput
+                                    style={[styles.modalInput, { 
+                                        color: isDarkMode ? '#fff' : colors.BLACK,
+                                        backgroundColor: isDarkMode ? '#333' : '#f8f8f8'
+                                    }]}
+                                    placeholder="Senha atual"
+                                    placeholderTextColor={isDarkMode ? '#999' : '#999'}
+                                    value={currentPassword}
+                                    onChangeText={setCurrentPassword}
+                                    secureTextEntry
+                                />
+
+                                <TextInput
+                                    style={[styles.modalInput, { 
+                                        color: isDarkMode ? '#fff' : colors.BLACK,
+                                        backgroundColor: isDarkMode ? '#333' : '#f8f8f8'
+                                    }]}
+                                    placeholder="Nova senha (mínimo 6 caracteres)"
+                                    placeholderTextColor={isDarkMode ? '#999' : '#999'}
+                                    value={newPassword}
+                                    onChangeText={setNewPassword}
+                                    secureTextEntry
+                                />
+
+                                <TextInput
+                                    style={[styles.modalInput, { 
+                                        color: isDarkMode ? '#fff' : colors.BLACK,
+                                        backgroundColor: isDarkMode ? '#333' : '#f8f8f8'
+                                    }]}
+                                    placeholder="Confirmar nova senha"
+                                    placeholderTextColor={isDarkMode ? '#999' : '#999'}
+                                    value={confirmPassword}
+                                    onChangeText={setConfirmPassword}
+                                    secureTextEntry
+                                />
+
+                                <TouchableOpacity 
+                                    style={styles.supportLink}
+                                    onPress={() => setShowSupportPasswordOption(true)}
+                                >
+                                    <Text style={[cardTypography.subtitle, styles.supportLinkText, { color: MAIN_COLOR }]}>
+                                        Esqueci minha senha / Contatar suporte
+                                    </Text>
+                                </TouchableOpacity>
+                            </>
+                        ) : (
+                            <>
+                                <Text style={[cardTypography.subtitle, styles.modalDescription, { color: isDarkMode ? '#ccc' : colors.GRAY }]}>
+                                    Para redefinir sua senha via suporte, nossa equipe irá verificar sua identidade e realizar a redefinição de forma segura.
+                                </Text>
+                                <TouchableOpacity 
+                                    style={styles.supportLink}
+                                    onPress={() => setShowSupportPasswordOption(false)}
+                                >
+                                    <Text style={[cardTypography.subtitle, styles.supportLinkText, { color: MAIN_COLOR }]}>
+                                        Voltar para redefinição com senha atual
+                                    </Text>
+                                </TouchableOpacity>
+                            </>
+                        )}
+
+                        <View style={styles.modalButtons}>
+                            <TouchableOpacity 
+                                style={[styles.modalButton, styles.modalButtonCancel]}
+                                onPress={() => {
+                                    setShowPasswordModal(false);
+                                    setCurrentPassword('');
+                                    setNewPassword('');
+                                    setConfirmPassword('');
+                                    setShowSupportPasswordOption(false);
+                                }}
+                            >
+                                <Text style={[cardTypography.subtitle, styles.modalButtonTextCancel]}>Cancelar</Text>
+                            </TouchableOpacity>
+                            <TouchableOpacity 
+                                style={[styles.modalButton, styles.modalButtonConfirm]}
+                                onPress={handleConfirmPasswordReset}
+                                disabled={isLoading}
+                            >
+                                {isLoading ? (
+                                    <ActivityIndicator color="#fff" />
+                                ) : (
+                                    <Text style={[cardTypography.title, styles.modalButtonTextConfirm]}>
+                                        {showSupportPasswordOption ? 'Contatar Suporte' : 'Confirmar'}
+                                    </Text>
+                                )}
+                            </TouchableOpacity>
+                        </View>
+                    </View>
+                </View>
+            </Modal>
         </View>
     );
 }
@@ -347,6 +601,14 @@ const styles = StyleSheet.create({
         borderRadius: 20,
         justifyContent: 'center',
         alignItems: 'center',
+        shadowColor: '#000',
+        shadowOffset: {
+            width: 0,
+            height: 1,
+        },
+        shadowOpacity: 0.1,
+        shadowRadius: 2,
+        elevation: 2,
     },
     headerTitle: {
         fontSize: 18,
@@ -354,37 +616,7 @@ const styles = StyleSheet.create({
         fontFamily: fonts.Bold,
     },
     headerRightContainer: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: 12,
-    },
-    themeSwitchTouchable: {
-        width: 72,
-        height: 40,
-        borderRadius: 20,
-        justifyContent: 'center',
-        alignItems: 'center',
-    },
-    themeSwitchTrack: {
-        width: 72,
-        height: 40,
-        borderRadius: 20,
-        borderWidth: 1.5,
-        flexDirection: 'row',
-        alignItems: 'center',
-        position: 'relative',
-        justifyContent: 'space-between',
-        paddingHorizontal: 6,
-        backgroundColor: '#fff',
-        borderColor: '#ddd',
-    },
-    themeSwitchIconBubble: {
-        width: 28,
-        height: 28,
-        borderRadius: 14,
-        justifyContent: 'center',
-        alignItems: 'center',
-        backgroundColor: '#111',
+        width: 40,
     },
     content: {
         flex: 1,
@@ -413,17 +645,14 @@ const styles = StyleSheet.create({
         alignItems: 'center',
     },
     editImageText: {
-        fontSize: 14,
-        fontFamily: fonts.Regular,
+        // Usa cardTypography.subtitle via style prop
     },
     section: {
-        marginBottom: 15,
+        marginBottom: 20,
     },
     sectionTitle: {
-        fontSize: 18,
-        fontWeight: 'bold',
-        fontFamily: fonts.Bold,
-        marginBottom: 15,
+        // Usa cardTypography.title via style prop
+        marginBottom: 12,
     },
     fieldContainer: {
         paddingVertical: 12,
@@ -438,13 +667,11 @@ const styles = StyleSheet.create({
         marginBottom: 4,
     },
     fieldLabel: {
-        fontSize: 13,
-        fontFamily: fonts.Regular,
+        // Usa cardTypography.subtitle via style prop
         marginLeft: 8,
     },
     fieldValue: {
-        fontSize: 15,
-        fontFamily: fonts.Regular,
+        // Usa cardTypography.title via style prop
     },
     valueContainer: {
         flexDirection: 'row',
@@ -454,10 +681,33 @@ const styles = StyleSheet.create({
     editButton: {
         padding: 4,
     },
-    editContainer: {
-        marginTop: 8,
+    modalOverlay: {
+        flex: 1,
+        backgroundColor: 'rgba(0, 0, 0, 0.5)',
+        justifyContent: 'center',
+        alignItems: 'center',
     },
-    textInput: {
+    modalContent: {
+        width: width * 0.9,
+        borderRadius: 16,
+        padding: 20,
+        maxHeight: height * 0.8,
+    },
+    modalHeader: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        marginBottom: 16,
+    },
+    modalTitle: {
+        // Usa cardTypography.title via style prop
+    },
+    modalDescription: {
+        // Usa cardTypography.subtitle via style prop
+        marginBottom: 16,
+        lineHeight: 20,
+    },
+    modalInput: {
         borderWidth: 1,
         borderColor: '#ddd',
         borderRadius: 8,
@@ -466,41 +716,40 @@ const styles = StyleSheet.create({
         fontFamily: fonts.Regular,
         marginBottom: 12,
     },
-    editButtons: {
+    modalButtons: {
         flexDirection: 'row',
-        gap: 10,
+        gap: 12,
+        marginTop: 8,
     },
-    saveButton: {
-        backgroundColor: MAIN_COLOR,
-        paddingVertical: 8,
-        paddingHorizontal: 16,
-        borderRadius: 8,
+    modalButton: {
         flex: 1,
+        paddingVertical: 12,
+        borderRadius: 8,
         alignItems: 'center',
     },
-    saveButtonText: {
-        color: '#fff',
-        fontSize: 14,
+    modalButtonCancel: {
+        backgroundColor: '#f0f0f0',
+    },
+    modalButtonConfirm: {
+        backgroundColor: MAIN_COLOR,
+    },
+    modalButtonTextCancel: {
+        color: colors.BLACK,
+        fontSize: 16,
         fontFamily: fonts.Bold,
     },
-    cancelButton: {
-        backgroundColor: '#f0f0f0',
-        paddingVertical: 8,
-        paddingHorizontal: 16,
-        borderRadius: 8,
-        flex: 1,
-        alignItems: 'center',
+    modalButtonTextConfirm: {
+        color: '#fff',
+        fontSize: 16,
+        fontFamily: fonts.Bold,
     },
-    cancelButtonText: {
-        color: colors.BLACK,
+    supportLink: {
+        marginTop: 8,
+        marginBottom: 12,
+    },
+    supportLinkText: {
         fontSize: 14,
         fontFamily: fonts.Regular,
+        textDecorationLine: 'underline',
     },
-    securityField: {
-        paddingVertical: 12,
-        paddingHorizontal: 0,
-        marginBottom: 4,
-        borderBottomWidth: 0.5,
-        borderBottomColor: '#f0f0f0',
-    },
-}); 
+});

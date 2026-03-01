@@ -1,4 +1,6 @@
+import Logger from '../utils/Logger';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+
 
 /**
  * WhatsApp OTP Service usando Meta Business API
@@ -45,7 +47,7 @@ class WhatsAppOTPService {
    */
   async initialize() {
     try {
-      console.log('🔧 WhatsAppOTPService - Inicializando...');
+      Logger.log('🔧 WhatsAppOTPService - Inicializando...');
       
       // Carregar configurações do AsyncStorage (se existirem)
       await this.loadConfigFromStorage();
@@ -63,10 +65,10 @@ class WhatsAppOTPService {
       await this.testConnection();
       
       this.isInitialized = true;
-      console.log('✅ WhatsAppOTPService - Inicializado com sucesso');
+      Logger.log('✅ WhatsAppOTPService - Inicializado com sucesso');
       
     } catch (error) {
-      console.error('❌ WhatsAppOTPService - Erro na inicialização:', error);
+      Logger.error('❌ WhatsAppOTPService - Erro na inicialização:', error);
       this.lastError = error;
       this.isInitialized = false;
       throw error;
@@ -82,10 +84,10 @@ class WhatsAppOTPService {
       if (storedConfig) {
         const parsedConfig = JSON.parse(storedConfig);
         this.config = { ...this.config, ...parsedConfig };
-        console.log('📱 WhatsAppOTPService - Configurações carregadas do storage');
+        Logger.log('📱 WhatsAppOTPService - Configurações carregadas do storage');
       }
     } catch (error) {
-      console.warn('⚠️ WhatsAppOTPService - Erro ao carregar configurações:', error);
+      Logger.warn('⚠️ WhatsAppOTPService - Erro ao carregar configurações:', error);
     }
   }
 
@@ -101,9 +103,9 @@ class WhatsAppOTPService {
         templateName: this.config.templateName,
       };
       await AsyncStorage.setItem('@whatsapp_otp_config', JSON.stringify(configToSave));
-      console.log('💾 WhatsAppOTPService - Configurações salvas no storage');
+      Logger.log('💾 WhatsAppOTPService - Configurações salvas no storage');
     } catch (error) {
-      console.warn('⚠️ WhatsAppOTPService - Erro ao salvar configurações:', error);
+      Logger.warn('⚠️ WhatsAppOTPService - Erro ao salvar configurações:', error);
     }
   }
 
@@ -112,7 +114,7 @@ class WhatsAppOTPService {
    */
   async testConnection() {
     try {
-      console.log('🔍 WhatsAppOTPService - Testando conexão...');
+      Logger.log('🔍 WhatsAppOTPService - Testando conexão...');
       
       const response = await fetch(`${this.config.baseUrl}/${this.config.phoneNumberId}`, {
         method: 'GET',
@@ -129,10 +131,10 @@ class WhatsAppOTPService {
       }
       
       const data = await response.json();
-      console.log('✅ WhatsAppOTPService - Conexão testada com sucesso:', data);
+      Logger.log('✅ WhatsAppOTPService - Conexão testada com sucesso:', data);
       
     } catch (error) {
-      console.error('❌ WhatsAppOTPService - Erro no teste de conexão:', error);
+      Logger.error('❌ WhatsAppOTPService - Erro no teste de conexão:', error);
       throw error;
     }
   }
@@ -156,7 +158,7 @@ class WhatsAppOTPService {
       const otp = otpCode || this.generateOTP();
       const formattedPhone = this.formatPhoneNumber(phoneNumber);
       
-      console.log('📱 WhatsAppOTPService - Enviando OTP:', {
+      Logger.log('📱 WhatsAppOTPService - Enviando OTP:', {
         phone: formattedPhone,
         otp: otp,
         template: this.config.templateName
@@ -186,12 +188,12 @@ class WhatsAppOTPService {
         }
       };
       
-      console.log('📤 WhatsAppOTPService - Payload:', JSON.stringify(messagePayload, null, 2));
+      Logger.log('📤 WhatsAppOTPService - Payload:', JSON.stringify(messagePayload, null, 2));
       
       // Enviar mensagem com retry
       const response = await this.sendMessageWithRetry(messagePayload);
       
-      console.log('✅ WhatsAppOTPService - OTP enviado com sucesso:', response);
+      Logger.log('✅ WhatsAppOTPService - OTP enviado com sucesso:', response);
       
       return {
         success: true,
@@ -202,7 +204,7 @@ class WhatsAppOTPService {
       };
       
     } catch (error) {
-      console.error('❌ WhatsAppOTPService - Erro ao enviar OTP:', error);
+      Logger.error('❌ WhatsAppOTPService - Erro ao enviar OTP:', error);
       
       return {
         success: false,
@@ -218,7 +220,7 @@ class WhatsAppOTPService {
    */
   async sendMessageWithRetry(payload, attempt = 1) {
     try {
-      console.log(`🔄 WhatsAppOTPService - Tentativa ${attempt}/${this.config.maxRetries}`);
+      Logger.log(`🔄 WhatsAppOTPService - Tentativa ${attempt}/${this.config.maxRetries}`);
       
       const response = await fetch(this.config.messagesUrl, {
         method: 'POST',
@@ -233,14 +235,14 @@ class WhatsAppOTPService {
       const responseData = await response.json();
       
       if (!response.ok) {
-        console.error('❌ WhatsAppOTPService - Erro na API:', {
+        Logger.error('❌ WhatsAppOTPService - Erro na API:', {
           status: response.status,
           data: responseData
         });
         
         // Verificar se é um erro que pode ser retryado
         if (this.isRetryableError(response.status, responseData) && attempt < this.config.maxRetries) {
-          console.log(`⏳ WhatsAppOTPService - Aguardando ${this.config.retryDelay}ms antes do retry...`);
+          Logger.log(`⏳ WhatsAppOTPService - Aguardando ${this.config.retryDelay}ms antes do retry...`);
           await this.delay(this.config.retryDelay);
           return this.sendMessageWithRetry(payload, attempt + 1);
         }
@@ -251,10 +253,10 @@ class WhatsAppOTPService {
       return responseData;
       
     } catch (error) {
-      console.error(`❌ WhatsAppOTPService - Erro na tentativa ${attempt}:`, error);
+      Logger.error(`❌ WhatsAppOTPService - Erro na tentativa ${attempt}:`, error);
       
       if (attempt < this.config.maxRetries) {
-        console.log(`⏳ WhatsAppOTPService - Aguardando ${this.config.retryDelay}ms antes do retry...`);
+        Logger.log(`⏳ WhatsAppOTPService - Aguardando ${this.config.retryDelay}ms antes do retry...`);
         await this.delay(this.config.retryDelay);
         return this.sendMessageWithRetry(payload, attempt + 1);
       }
@@ -323,12 +325,12 @@ class WhatsAppOTPService {
       });
       
       const data = await response.json();
-      console.log('📊 WhatsAppOTPService - Status da mensagem:', data);
+      Logger.log('📊 WhatsAppOTPService - Status da mensagem:', data);
       
       return data;
       
     } catch (error) {
-      console.error('❌ WhatsAppOTPService - Erro ao verificar status:', error);
+      Logger.error('❌ WhatsAppOTPService - Erro ao verificar status:', error);
       throw error;
     }
   }
@@ -338,7 +340,7 @@ class WhatsAppOTPService {
    */
   async configure(newConfig) {
     try {
-      console.log('⚙️ WhatsAppOTPService - Configurando...');
+      Logger.log('⚙️ WhatsAppOTPService - Configurando...');
       
       this.config = { ...this.config, ...newConfig };
       
@@ -348,10 +350,10 @@ class WhatsAppOTPService {
       // Reinicializar
       await this.initialize();
       
-      console.log('✅ WhatsAppOTPService - Configurado com sucesso');
+      Logger.log('✅ WhatsAppOTPService - Configurado com sucesso');
       
     } catch (error) {
-      console.error('❌ WhatsAppOTPService - Erro na configuração:', error);
+      Logger.error('❌ WhatsAppOTPService - Erro na configuração:', error);
       throw error;
     }
   }

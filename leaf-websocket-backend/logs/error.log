@@ -1,88 +1,454 @@
-2025-07-29 01:24:52 [ERROR]: WebSocket health check falhou {"error":"socket hang up"}
-2025-07-29 01:25:47 [ERROR]: Teste de erro {"test":"error"}
-2025-07-29 01:25:47 [ERROR]: API health check falhou {"error":"fetch failed"}
-2025-07-29 01:25:47 [ERROR]: WebSocket health check falhou {"error":"connect ECONNREFUSED 127.0.0.1:3001"}
-2025-07-29 01:36:50 [ERROR]: WebSocket health check falhou {"error":"socket hang up"}
-2025-07-29 01:41:50 [ERROR]: API health check falhou {"error":"fetch failed"}
-2025-07-29 01:42:20 [ERROR]: WebSocket health check falhou {"error":"socket hang up"}
-2025-07-29 01:47:20 [ERROR]: API health check falhou {"error":"fetch failed"}
-2025-07-29 01:47:50 [ERROR]: WebSocket health check falhou {"error":"socket hang up"}
-2025-07-29 01:52:50 [ERROR]: API health check falhou {"error":"fetch failed"}
-2025-07-29 01:53:20 [ERROR]: WebSocket health check falhou {"error":"socket hang up"}
-2025-07-29 01:58:20 [ERROR]: API health check falhou {"error":"fetch failed"}
-2025-07-29 01:58:50 [ERROR]: WebSocket health check falhou {"error":"socket hang up"}
-2025-07-29 02:03:50 [ERROR]: API health check falhou {"error":"fetch failed"}
-2025-07-29 02:04:20 [ERROR]: WebSocket health check falhou {"error":"socket hang up"}
-2025-07-29 02:09:20 [ERROR]: API health check falhou {"error":"fetch failed"}
-2025-07-29 02:09:50 [ERROR]: WebSocket health check falhou {"error":"socket hang up"}
-2025-07-29 02:14:50 [ERROR]: API health check falhou {"error":"fetch failed"}
-2025-07-29 02:15:20 [ERROR]: WebSocket health check falhou {"error":"socket hang up"}
-2025-07-29 02:20:20 [ERROR]: API health check falhou {"error":"fetch failed"}
-2025-07-29 02:20:50 [ERROR]: WebSocket health check falhou {"error":"socket hang up"}
-2025-07-29 02:25:50 [ERROR]: API health check falhou {"error":"fetch failed"}
-2025-07-29 02:26:20 [ERROR]: WebSocket health check falhou {"error":"socket hang up"}
-2025-07-29 02:31:20 [ERROR]: API health check falhou {"error":"fetch failed"}
-2025-07-29 02:31:50 [ERROR]: WebSocket health check falhou {"error":"socket hang up"}
-2025-07-29 02:36:50 [ERROR]: API health check falhou {"error":"fetch failed"}
-2025-07-29 02:37:20 [ERROR]: WebSocket health check falhou {"error":"socket hang up"}
-2025-07-29 02:42:20 [ERROR]: API health check falhou {"error":"fetch failed"}
-2025-07-29 02:42:50 [ERROR]: WebSocket health check falhou {"error":"socket hang up"}
-2025-07-29 02:47:50 [ERROR]: API health check falhou {"error":"fetch failed"}
-2025-07-29 02:48:20 [ERROR]: WebSocket health check falhou {"error":"socket hang up"}
-2025-07-29 02:53:20 [ERROR]: API health check falhou {"error":"fetch failed"}
-2025-07-29 02:53:50 [ERROR]: WebSocket health check falhou {"error":"socket hang up"}
-2025-07-29 02:58:50 [ERROR]: API health check falhou {"error":"fetch failed"}
-2025-07-29 02:59:20 [ERROR]: WebSocket health check falhou {"error":"socket hang up"}
-2025-07-29 03:04:20 [ERROR]: API health check falhou {"error":"fetch failed"}
-2025-07-29 03:04:50 [ERROR]: WebSocket health check falhou {"error":"socket hang up"}
-2025-07-29 03:09:50 [ERROR]: API health check falhou {"error":"fetch failed"}
-2025-07-29 03:10:20 [ERROR]: WebSocket health check falhou {"error":"socket hang up"}
-2025-07-29 03:15:20 [ERROR]: API health check falhou {"error":"fetch failed"}
-2025-07-29 03:15:50 [ERROR]: WebSocket health check falhou {"error":"socket hang up"}
-2025-07-29 03:20:50 [ERROR]: API health check falhou {"error":"fetch failed"}
-2025-07-29 03:21:20 [ERROR]: WebSocket health check falhou {"error":"socket hang up"}
-2025-07-29 03:26:20 [ERROR]: API health check falhou {"error":"fetch failed"}
-2025-07-29 03:26:50 [ERROR]: WebSocket health check falhou {"error":"socket hang up"}
-2025-07-29 03:31:50 [ERROR]: API health check falhou {"error":"fetch failed"}
-2025-07-29 03:32:20 [ERROR]: WebSocket health check falhou {"error":"socket hang up"}
-2025-07-29 03:37:20 [ERROR]: API health check falhou {"error":"fetch failed"}
-2025-07-29 03:37:50 [ERROR]: WebSocket health check falhou {"error":"socket hang up"}
-2025-07-29 03:42:50 [ERROR]: API health check falhou {"error":"fetch failed"}
-2025-07-29 03:43:20 [ERROR]: WebSocket health check falhou {"error":"socket hang up"}
-2025-08-20 12:25:26 [ERROR]: WebSocket health check falhou {"error":"socket hang up"}
-2025-08-20 12:26:13 [ERROR]: WebSocket health check falhou {"error":"socket hang up"}
-2025-08-20 12:31:42 [ERROR]: WebSocket health check falhou {"error":"WebSocket was closed before the connection was established"}
-2025-08-20 12:33:56 [ERROR]: WebSocket health check falhou {"error":"WebSocket was closed before the connection was established"}
-2025-08-20 12:38:53 [ERROR]: API health check falhou {"error":"fetch failed"}
-2025-08-20 12:39:26 [ERROR]: WebSocket health check falhou {"error":"WebSocket was closed before the connection was established"}
-2025-08-20 12:44:23 [ERROR]: API health check falhou {"error":"fetch failed"}
-2025-08-20 12:44:56 [ERROR]: WebSocket health check falhou {"error":"WebSocket was closed before the connection was established"}
-2025-08-20 12:53:30 [ERROR]: API health check falhou {"error":"HTTP 404"}
-2025-08-20 12:53:31 [ERROR]: WebSocket health check falhou {"error":"socket hang up"}
-2025-08-20 12:54:00 [ERROR]: API health check falhou {"error":"HTTP 404"}
-2025-08-20 12:54:01 [ERROR]: WebSocket health check falhou {"error":"socket hang up"}
-2025-08-20 12:54:30 [ERROR]: API health check falhou {"error":"HTTP 404"}
-2025-08-20 12:54:31 [ERROR]: WebSocket health check falhou {"error":"socket hang up"}
-2025-08-20 12:55:00 [ERROR]: API health check falhou {"error":"HTTP 404"}
-2025-08-20 12:55:01 [ERROR]: WebSocket health check falhou {"error":"socket hang up"}
-2025-08-20 12:55:30 [ERROR]: API health check falhou {"error":"HTTP 404"}
-2025-08-20 12:55:31 [ERROR]: WebSocket health check falhou {"error":"socket hang up"}
-2025-08-20 12:56:00 [ERROR]: API health check falhou {"error":"HTTP 404"}
-2025-08-20 12:56:01 [ERROR]: WebSocket health check falhou {"error":"socket hang up"}
-2025-08-20 12:56:30 [ERROR]: API health check falhou {"error":"HTTP 404"}
-2025-08-20 12:56:31 [ERROR]: WebSocket health check falhou {"error":"socket hang up"}
-2025-08-20 12:57:00 [ERROR]: API health check falhou {"error":"HTTP 404"}
-2025-08-20 12:57:01 [ERROR]: WebSocket health check falhou {"error":"socket hang up"}
-2025-08-20 12:57:30 [ERROR]: API health check falhou {"error":"HTTP 404"}
-2025-08-20 12:57:31 [ERROR]: WebSocket health check falhou {"error":"socket hang up"}
-2025-08-20 12:58:00 [ERROR]: API health check falhou {"error":"HTTP 404"}
-2025-08-20 12:58:01 [ERROR]: WebSocket health check falhou {"error":"socket hang up"}
-2025-08-20 12:58:30 [ERROR]: API health check falhou {"error":"HTTP 404"}
-2025-08-20 12:58:31 [ERROR]: WebSocket health check falhou {"error":"socket hang up"}
-2025-08-20 12:59:00 [ERROR]: API health check falhou {"error":"HTTP 404"}
-2025-08-20 12:59:01 [ERROR]: WebSocket health check falhou {"error":"socket hang up"}
-2025-08-20 12:59:30 [ERROR]: API health check falhou {"error":"HTTP 404"}
-2025-08-20 12:59:31 [ERROR]: WebSocket health check falhou {"error":"socket hang up"}
-2025-08-20 13:00:00 [ERROR]: API health check falhou {"error":"HTTP 404"}
-2025-08-20 13:00:01 [ERROR]: WebSocket health check falhou {"error":"socket hang up"}
-2025-08-20 13:00:30 [ERROR]: API health check falhou {"error":"HTTP 404"}
+2026-01-12 00:09:12 [ERROR]   Test error
+2026-01-12 00:13:26 [ERROR]   Cannot read properties of null (reading 'substring')
+2026-01-12 00:29:13 [ERROR]   ❌ Erro ao inicializar Firebase Admin: Cannot read properties of undefined (reading 'cert')
+2026-01-12 00:29:13 [ERROR]   ❌ Erro ao inicializar Firebase Admin: Cannot read properties of undefined (reading 'cert')
+2026-02-23 16:39:16 [ERROR]   connect ECONNREFUSED 127.0.0.1:6379
+2026-02-23 16:39:16 [ERROR]   ❌ Erro no subscriber Redis: connect ECONNREFUSED 127.0.0.1:6379
+2026-02-23 16:39:16 [ERROR]   ❌ Erro no subscriber Redis: connect ECONNREFUSED 127.0.0.1:6379
+2026-02-23 16:39:16 [ERROR]   ❌ Erro no subscriber Redis: connect ECONNREFUSED 127.0.0.1:6379
+2026-02-23 16:39:16 [ERROR]   ❌ Erro no subscriber Redis: connect ECONNREFUSED 127.0.0.1:6379
+2026-02-23 16:39:16 [ERROR]   ❌ Erro no subscriber Redis: connect ECONNREFUSED 127.0.0.1:6379
+2026-02-23 16:39:17 [ERROR]   ❌ Erro no subscriber Redis: connect ECONNREFUSED 127.0.0.1:6379
+2026-02-23 16:39:17 [ERROR]   ❌ Erro no subscriber Redis: connect ECONNREFUSED 127.0.0.1:6379
+2026-02-23 16:39:17 [ERROR]   ❌ Erro ao inicializar Places Cache Service: Reached the max retries per request limit (which is 3). Refer to "maxRetriesPerRequest" option for details.
+2026-02-23 16:39:17 [ERROR]   ❌ [RedisScan] Erro ao escanear chaves com padrão booking_search:*: Reached the max retries per request limit (which is 3). Refer to "maxRetriesPerRequest" option for details.
+2026-02-23 16:39:17 [ERROR]   ❌ [QueueWorker] Erro ao buscar regiões ativas: Reached the max retries per request limit (which is 3). Refer to "maxRetriesPerRequest" option for details.
+2026-02-23 16:39:17 [ERROR]   ❌ [DriverPoolMonitor] Erro ao buscar motoristas disponíveis: Reached the max retries per request limit (which is 3). Refer to "maxRetriesPerRequest" option for details.
+2026-02-23 16:39:17 [ERROR]   ❌ [RedisScan] Erro ao escanear chaves com padrão connection:*: Reached the max retries per request limit (which is 3). Refer to "maxRetriesPerRequest" option for details.
+2026-02-23 16:39:17 [ERROR]   ❌ [RadiusExpansionManager] Erro ao buscar corridas em SEARCHING: Reached the max retries per request limit (which is 3). Refer to "maxRetriesPerRequest" option for details.
+2026-02-23 16:39:17 [ERROR]   ❌ [ConnectionCleanupService] Erro ao limpar conexões órfãs: Reached the max retries per request limit (which is 3). Refer to "maxRetriesPerRequest" option for details.
+2026-02-23 16:39:17 [ERROR]   ❌ Erro no subscriber Redis: connect ECONNREFUSED 127.0.0.1:6379
+2026-02-23 16:39:18 [ERROR]   ❌ Erro no subscriber Redis: connect ECONNREFUSED 127.0.0.1:6379
+2026-02-23 16:39:18 [ERROR]   ❌ Erro no subscriber Redis: connect ECONNREFUSED 127.0.0.1:6379
+2026-02-23 16:39:19 [ERROR]   ❌ Erro no subscriber Redis: connect ECONNREFUSED 127.0.0.1:6379
+2026-02-23 16:39:19 [ERROR]   ❌ Erro no subscriber Redis: connect ECONNREFUSED 127.0.0.1:6379
+2026-02-23 16:39:20 [ERROR]   ❌ Erro no subscriber Redis: connect ECONNREFUSED 127.0.0.1:6379
+2026-02-23 16:39:20 [ERROR]   ❌ Erro no subscriber Redis: connect ECONNREFUSED 127.0.0.1:6379
+2026-02-23 16:39:21 [ERROR]   ❌ Erro no subscriber Redis: connect ECONNREFUSED 127.0.0.1:6379
+2026-02-23 16:39:21 [ERROR]   ❌ [RedisScan] Erro ao escanear chaves com padrão connections:ip:*: Reached the max retries per request limit (which is 3). Refer to "maxRetriesPerRequest" option for details.
+2026-02-23 16:39:21 [ERROR]   ❌ [QueueWorker] Erro ao buscar regiões ativas: Reached the max retries per request limit (which is 3). Refer to "maxRetriesPerRequest" option for details.
+2026-02-23 16:39:21 [ERROR]   ❌ [DriverPoolMonitor] Erro ao buscar motoristas disponíveis: Reached the max retries per request limit (which is 3). Refer to "maxRetriesPerRequest" option for details.
+2026-02-23 16:39:21 [ERROR]   ❌ [ConnectionCleanupService] Erro ao limpar registros órfãos: Reached the max retries per request limit (which is 3). Refer to "maxRetriesPerRequest" option for details.
+2026-02-23 16:39:22 [ERROR]   ❌ Erro no subscriber Redis: connect ECONNREFUSED 127.0.0.1:6379
+2026-02-23 16:39:23 [ERROR]   ❌ Erro no subscriber Redis: connect ECONNREFUSED 127.0.0.1:6379
+2026-02-23 16:39:24 [ERROR]   ❌ Erro no subscriber Redis: connect ECONNREFUSED 127.0.0.1:6379
+2026-02-23 16:39:24 [ERROR]   ❌ Erro no subscriber Redis: connect ECONNREFUSED 127.0.0.1:6379
+2026-02-23 16:39:25 [ERROR]   ❌ Erro no subscriber Redis: connect ECONNREFUSED 127.0.0.1:6379
+2026-02-23 16:39:26 [ERROR]   ❌ Erro no subscriber Redis: connect ECONNREFUSED 127.0.0.1:6379
+2026-02-23 16:39:27 [ERROR]   ❌ [QueueWorker] Erro ao buscar regiões ativas: Command timed out
+2026-02-23 16:39:27 [ERROR]   ❌ [QueueWorker] Erro ao buscar regiões ativas: Connection is closed.
+2026-02-23 16:39:27 [ERROR]   ❌ [RedisScan] Erro ao escanear chaves com padrão booking_search:*: Connection is closed.
+2026-02-23 16:39:27 [ERROR]   ❌ [DriverPoolMonitor] Erro ao buscar motoristas disponíveis: Connection is closed.
+2026-02-23 16:39:27 [ERROR]   ❌ [RadiusExpansionManager] Erro ao buscar corridas em SEARCHING: Connection is closed.
+2026-02-23 16:39:28 [ERROR]   ❌ Erro no subscriber Redis: connect ECONNREFUSED 127.0.0.1:6379
+2026-02-23 16:39:28 [ERROR]   ❌ [QueueWorker] Erro ao buscar regiões ativas: Connection is closed.
+2026-02-23 16:39:29 [ERROR]   ❌ Erro no subscriber Redis: connect ECONNREFUSED 127.0.0.1:6379
+2026-02-23 16:39:30 [ERROR]   ❌ Erro no subscriber Redis: connect ECONNREFUSED 127.0.0.1:6379
+2026-02-23 16:39:31 [ERROR]   ❌ [DriverPoolMonitor] Erro ao buscar motoristas disponíveis: Connection is closed.
+2026-02-23 16:39:31 [ERROR]   ❌ [QueueWorker] Erro ao buscar regiões ativas: Connection is closed.
+2026-02-23 16:39:31 [ERROR]   ❌ Erro no subscriber Redis: connect ECONNREFUSED 127.0.0.1:6379
+2026-02-23 16:39:32 [ERROR]   ❌ Erro no subscriber Redis: connect ECONNREFUSED 127.0.0.1:6379
+2026-02-23 16:39:34 [ERROR]   ❌ Erro no subscriber Redis: connect ECONNREFUSED 127.0.0.1:6379
+2026-02-23 16:39:34 [ERROR]   ❌ [QueueWorker] Erro ao buscar regiões ativas: Connection is closed.
+2026-02-23 16:39:35 [ERROR]   ❌ Erro no subscriber Redis: connect ECONNREFUSED 127.0.0.1:6379
+2026-02-23 16:39:36 [ERROR]   ❌ [RedisScan] Erro ao escanear chaves com padrão booking_search:*: Connection is closed.
+2026-02-23 16:39:36 [ERROR]   ❌ [RadiusExpansionManager] Erro ao buscar corridas em SEARCHING: Connection is closed.
+2026-02-23 16:39:36 [ERROR]   ❌ [DriverPoolMonitor] Erro ao buscar motoristas disponíveis: Connection is closed.
+2026-02-23 16:39:36 [ERROR]   ❌ Erro no subscriber Redis: connect ECONNREFUSED 127.0.0.1:6379
+2026-02-23 16:39:37 [ERROR]   ❌ [QueueWorker] Erro ao buscar regiões ativas: Connection is closed.
+2026-02-23 16:39:38 [ERROR]   ❌ Erro no subscriber Redis: connect ECONNREFUSED 127.0.0.1:6379
+2026-02-23 16:39:39 [ERROR]   ❌ Erro no subscriber Redis: connect ECONNREFUSED 127.0.0.1:6379
+2026-02-23 16:39:40 [ERROR]   ❌ [QueueWorker] Erro ao buscar regiões ativas: Connection is closed.
+2026-02-23 16:39:41 [ERROR]   ❌ [DriverPoolMonitor] Erro ao buscar motoristas disponíveis: Connection is closed.
+2026-02-23 16:39:41 [ERROR]   ❌ Erro no subscriber Redis: connect ECONNREFUSED 127.0.0.1:6379
+2026-02-23 16:39:42 [ERROR]   ❌ Erro no subscriber Redis: connect ECONNREFUSED 127.0.0.1:6379
+2026-02-23 16:39:43 [ERROR]   ❌ [QueueWorker] Erro ao buscar regiões ativas: Connection is closed.
+2026-02-23 16:39:44 [ERROR]   ❌ Erro no subscriber Redis: connect ECONNREFUSED 127.0.0.1:6379
+2026-02-23 16:39:46 [ERROR]   ❌ [RedisScan] Erro ao escanear chaves com padrão booking_search:*: Connection is closed.
+2026-02-23 16:39:46 [ERROR]   ❌ [RadiusExpansionManager] Erro ao buscar corridas em SEARCHING: Connection is closed.
+2026-02-23 16:39:46 [ERROR]   ❌ [DriverPoolMonitor] Erro ao buscar motoristas disponíveis: Connection is closed.
+2026-02-23 16:39:46 [ERROR]   ❌ [QueueWorker] Erro ao buscar regiões ativas: Connection is closed.
+2026-02-23 16:39:46 [ERROR]   ❌ Erro no subscriber Redis: connect ECONNREFUSED 127.0.0.1:6379
+2026-02-23 16:39:48 [ERROR]   ❌ Erro no subscriber Redis: connect ECONNREFUSED 127.0.0.1:6379
+2026-02-23 16:39:49 [ERROR]   ❌ [QueueWorker] Erro ao buscar regiões ativas: Connection is closed.
+2026-02-23 16:39:49 [ERROR]   ❌ Erro no subscriber Redis: connect ECONNREFUSED 127.0.0.1:6379
+2026-02-23 16:39:51 [ERROR]   ❌ [DriverPoolMonitor] Erro ao buscar motoristas disponíveis: Connection is closed.
+2026-02-23 16:39:51 [ERROR]   ❌ Erro no subscriber Redis: connect ECONNREFUSED 127.0.0.1:6379
+2026-02-23 16:39:52 [ERROR]   ❌ [QueueWorker] Erro ao buscar regiões ativas: Connection is closed.
+2026-02-23 16:39:53 [ERROR]   ❌ Erro no subscriber Redis: connect ECONNREFUSED 127.0.0.1:6379
+2026-02-23 16:39:55 [ERROR]   ❌ [QueueWorker] Erro ao buscar regiões ativas: Connection is closed.
+2026-02-23 16:39:55 [ERROR]   ❌ Erro no subscriber Redis: connect ECONNREFUSED 127.0.0.1:6379
+2026-02-23 16:39:56 [ERROR]   ❌ [RedisScan] Erro ao escanear chaves com padrão booking_search:*: Connection is closed.
+2026-02-23 16:39:56 [ERROR]   ❌ [RadiusExpansionManager] Erro ao buscar corridas em SEARCHING: Connection is closed.
+2026-02-23 16:39:56 [ERROR]   ❌ [DriverPoolMonitor] Erro ao buscar motoristas disponíveis: Connection is closed.
+2026-02-23 16:40:08 [ERROR]   connect ECONNREFUSED 127.0.0.1:6379
+2026-02-23 16:40:08 [ERROR]   ❌ Erro no subscriber Redis: connect ECONNREFUSED 127.0.0.1:6379
+2026-02-23 16:40:08 [ERROR]   ❌ Erro no subscriber Redis: connect ECONNREFUSED 127.0.0.1:6379
+2026-02-23 16:40:08 [ERROR]   ❌ Erro no subscriber Redis: connect ECONNREFUSED 127.0.0.1:6379
+2026-02-23 16:40:08 [ERROR]   ❌ Erro no subscriber Redis: connect ECONNREFUSED 127.0.0.1:6379
+2026-02-23 16:40:08 [ERROR]   ❌ Erro no subscriber Redis: connect ECONNREFUSED 127.0.0.1:6379
+2026-02-23 16:40:09 [ERROR]   ❌ Erro no subscriber Redis: connect ECONNREFUSED 127.0.0.1:6379
+2026-02-23 16:40:09 [ERROR]   ❌ Erro no subscriber Redis: connect ECONNREFUSED 127.0.0.1:6379
+2026-02-23 16:40:09 [ERROR]   ❌ Erro ao inicializar Places Cache Service: Reached the max retries per request limit (which is 3). Refer to "maxRetriesPerRequest" option for details.
+2026-02-23 16:40:09 [ERROR]   ❌ [RedisScan] Erro ao escanear chaves com padrão booking_search:*: Reached the max retries per request limit (which is 3). Refer to "maxRetriesPerRequest" option for details.
+2026-02-23 16:40:09 [ERROR]   ❌ [QueueWorker] Erro ao buscar regiões ativas: Reached the max retries per request limit (which is 3). Refer to "maxRetriesPerRequest" option for details.
+2026-02-23 16:40:09 [ERROR]   ❌ [DriverPoolMonitor] Erro ao buscar motoristas disponíveis: Reached the max retries per request limit (which is 3). Refer to "maxRetriesPerRequest" option for details.
+2026-02-23 16:40:09 [ERROR]   ❌ [RedisScan] Erro ao escanear chaves com padrão connection:*: Reached the max retries per request limit (which is 3). Refer to "maxRetriesPerRequest" option for details.
+2026-02-23 16:40:09 [ERROR]   ❌ [RadiusExpansionManager] Erro ao buscar corridas em SEARCHING: Reached the max retries per request limit (which is 3). Refer to "maxRetriesPerRequest" option for details.
+2026-02-23 16:40:09 [ERROR]   ❌ [ConnectionCleanupService] Erro ao limpar conexões órfãs: Reached the max retries per request limit (which is 3). Refer to "maxRetriesPerRequest" option for details.
+2026-02-23 16:40:09 [ERROR]   ❌ Erro no subscriber Redis: connect ECONNREFUSED 127.0.0.1:6379
+2026-02-23 16:40:10 [ERROR]   ❌ Erro no subscriber Redis: connect ECONNREFUSED 127.0.0.1:6379
+2026-02-23 16:40:10 [ERROR]   ❌ Erro no subscriber Redis: connect ECONNREFUSED 127.0.0.1:6379
+2026-02-23 16:40:11 [ERROR]   ❌ Erro no subscriber Redis: connect ECONNREFUSED 127.0.0.1:6379
+2026-02-23 16:40:11 [ERROR]   ❌ Erro no subscriber Redis: connect ECONNREFUSED 127.0.0.1:6379
+2026-02-23 16:40:12 [ERROR]   ❌ Erro no subscriber Redis: connect ECONNREFUSED 127.0.0.1:6379
+2026-02-23 16:40:13 [ERROR]   ❌ Erro no subscriber Redis: connect ECONNREFUSED 127.0.0.1:6379
+2026-02-23 16:40:13 [ERROR]   ❌ Erro no subscriber Redis: connect ECONNREFUSED 127.0.0.1:6379
+2026-02-23 16:40:14 [ERROR]   ❌ [RedisScan] Erro ao escanear chaves com padrão connections:ip:*: Reached the max retries per request limit (which is 3). Refer to "maxRetriesPerRequest" option for details.
+2026-02-23 16:40:14 [ERROR]   ❌ [QueueWorker] Erro ao buscar regiões ativas: Reached the max retries per request limit (which is 3). Refer to "maxRetriesPerRequest" option for details.
+2026-02-23 16:40:14 [ERROR]   ❌ [DriverPoolMonitor] Erro ao buscar motoristas disponíveis: Reached the max retries per request limit (which is 3). Refer to "maxRetriesPerRequest" option for details.
+2026-02-23 16:40:14 [ERROR]   ❌ [ConnectionCleanupService] Erro ao limpar registros órfãos: Reached the max retries per request limit (which is 3). Refer to "maxRetriesPerRequest" option for details.
+2026-02-23 16:40:14 [ERROR]   ❌ Erro no subscriber Redis: connect ECONNREFUSED 127.0.0.1:6379
+2026-02-23 16:40:15 [ERROR]   ❌ Erro no subscriber Redis: connect ECONNREFUSED 127.0.0.1:6379
+2026-02-23 16:40:16 [ERROR]   ❌ Erro no subscriber Redis: connect ECONNREFUSED 127.0.0.1:6379
+2026-02-23 16:40:17 [ERROR]   ❌ Erro no subscriber Redis: connect ECONNREFUSED 127.0.0.1:6379
+2026-02-23 16:40:18 [ERROR]   ❌ Erro no subscriber Redis: connect ECONNREFUSED 127.0.0.1:6379
+2026-02-23 16:40:19 [ERROR]   ❌ Erro no subscriber Redis: connect ECONNREFUSED 127.0.0.1:6379
+2026-02-23 16:40:19 [ERROR]   ❌ [QueueWorker] Erro ao buscar regiões ativas: Command timed out
+2026-02-23 16:40:19 [ERROR]   ❌ [QueueWorker] Erro ao buscar regiões ativas: Connection is closed.
+2026-02-23 16:40:19 [ERROR]   ❌ [RedisScan] Erro ao escanear chaves com padrão booking_search:*: Connection is closed.
+2026-02-23 16:40:19 [ERROR]   ❌ [DriverPoolMonitor] Erro ao buscar motoristas disponíveis: Connection is closed.
+2026-02-23 16:40:19 [ERROR]   ❌ [RadiusExpansionManager] Erro ao buscar corridas em SEARCHING: Connection is closed.
+2026-02-23 16:40:20 [ERROR]   ❌ Erro no subscriber Redis: connect ECONNREFUSED 127.0.0.1:6379
+2026-02-23 16:40:20 [ERROR]   ❌ [QueueWorker] Erro ao buscar regiões ativas: Connection is closed.
+2026-02-23 16:40:21 [ERROR]   ❌ Erro no subscriber Redis: connect ECONNREFUSED 127.0.0.1:6379
+2026-02-23 16:40:22 [ERROR]   ❌ Erro no subscriber Redis: connect ECONNREFUSED 127.0.0.1:6379
+2026-02-23 16:40:23 [ERROR]   ❌ [DriverPoolMonitor] Erro ao buscar motoristas disponíveis: Connection is closed.
+2026-02-23 16:40:23 [ERROR]   ❌ [QueueWorker] Erro ao buscar regiões ativas: Connection is closed.
+2026-02-23 16:40:23 [ERROR]   ❌ Erro no subscriber Redis: connect ECONNREFUSED 127.0.0.1:6379
+2026-02-23 16:40:24 [ERROR]   ❌ Erro no subscriber Redis: connect ECONNREFUSED 127.0.0.1:6379
+2026-02-23 16:40:26 [ERROR]   ❌ Erro no subscriber Redis: connect ECONNREFUSED 127.0.0.1:6379
+2026-02-23 16:40:26 [ERROR]   ❌ [QueueWorker] Erro ao buscar regiões ativas: Connection is closed.
+2026-02-23 16:40:27 [ERROR]   ❌ Erro no subscriber Redis: connect ECONNREFUSED 127.0.0.1:6379
+2026-02-23 16:40:28 [ERROR]   ❌ [RedisScan] Erro ao escanear chaves com padrão booking_search:*: Connection is closed.
+2026-02-23 16:40:28 [ERROR]   ❌ [RadiusExpansionManager] Erro ao buscar corridas em SEARCHING: Connection is closed.
+2026-02-23 16:40:28 [ERROR]   ❌ [DriverPoolMonitor] Erro ao buscar motoristas disponíveis: Connection is closed.
+2026-02-23 16:40:28 [ERROR]   ❌ Erro no subscriber Redis: connect ECONNREFUSED 127.0.0.1:6379
+2026-02-23 16:40:29 [ERROR]   ❌ [QueueWorker] Erro ao buscar regiões ativas: Connection is closed.
+2026-02-23 16:40:30 [ERROR]   ❌ Erro no subscriber Redis: connect ECONNREFUSED 127.0.0.1:6379
+2026-02-23 16:40:31 [ERROR]   ❌ Erro no subscriber Redis: connect ECONNREFUSED 127.0.0.1:6379
+2026-02-23 16:40:32 [ERROR]   ❌ [QueueWorker] Erro ao buscar regiões ativas: Connection is closed.
+2026-02-23 16:40:33 [ERROR]   ❌ [DriverPoolMonitor] Erro ao buscar motoristas disponíveis: Connection is closed.
+2026-02-23 16:40:33 [ERROR]   ❌ Erro no subscriber Redis: connect ECONNREFUSED 127.0.0.1:6379
+2026-02-23 16:40:35 [ERROR]   ❌ Erro no subscriber Redis: connect ECONNREFUSED 127.0.0.1:6379
+2026-02-23 16:40:35 [ERROR]   ❌ [QueueWorker] Erro ao buscar regiões ativas: Connection is closed.
+2026-02-23 16:40:36 [ERROR]   ❌ Erro no subscriber Redis: connect ECONNREFUSED 127.0.0.1:6379
+2026-02-23 16:40:38 [ERROR]   ❌ [RedisScan] Erro ao escanear chaves com padrão booking_search:*: Connection is closed.
+2026-02-23 16:40:38 [ERROR]   ❌ [RadiusExpansionManager] Erro ao buscar corridas em SEARCHING: Connection is closed.
+2026-02-23 16:40:38 [ERROR]   ❌ [DriverPoolMonitor] Erro ao buscar motoristas disponíveis: Connection is closed.
+2026-02-23 16:40:38 [ERROR]   ❌ [QueueWorker] Erro ao buscar regiões ativas: Connection is closed.
+2026-02-23 16:40:38 [ERROR]   ❌ Erro no subscriber Redis: connect ECONNREFUSED 127.0.0.1:6379
+2026-02-23 16:40:40 [ERROR]   ❌ Erro no subscriber Redis: connect ECONNREFUSED 127.0.0.1:6379
+2026-02-23 16:40:41 [ERROR]   ❌ [QueueWorker] Erro ao buscar regiões ativas: Connection is closed.
+2026-02-23 16:40:42 [ERROR]   ❌ Erro no subscriber Redis: connect ECONNREFUSED 127.0.0.1:6379
+2026-02-23 16:40:43 [ERROR]   ❌ [DriverPoolMonitor] Erro ao buscar motoristas disponíveis: Connection is closed.
+2026-02-23 16:40:43 [ERROR]   ❌ Erro no subscriber Redis: connect ECONNREFUSED 127.0.0.1:6379
+2026-02-23 16:40:44 [ERROR]   ❌ [QueueWorker] Erro ao buscar regiões ativas: Connection is closed.
+2026-02-23 16:40:45 [ERROR]   ❌ Erro no subscriber Redis: connect ECONNREFUSED 127.0.0.1:6379
+2026-02-23 16:40:47 [ERROR]   ❌ [QueueWorker] Erro ao buscar regiões ativas: Connection is closed.
+2026-02-23 16:40:47 [ERROR]   ❌ Erro no subscriber Redis: connect ECONNREFUSED 127.0.0.1:6379
+2026-02-23 16:40:48 [ERROR]   ❌ [RedisScan] Erro ao escanear chaves com padrão booking_search:*: Connection is closed.
+2026-02-23 16:40:48 [ERROR]   ❌ [RadiusExpansionManager] Erro ao buscar corridas em SEARCHING: Connection is closed.
+2026-02-23 16:40:48 [ERROR]   ❌ [DriverPoolMonitor] Erro ao buscar motoristas disponíveis: Connection is closed.
+2026-02-23 16:40:49 [ERROR]   ❌ Erro no subscriber Redis: connect ECONNREFUSED 127.0.0.1:6379
+2026-02-23 16:40:50 [ERROR]   ❌ [QueueWorker] Erro ao buscar regiões ativas: Connection is closed.
+2026-02-23 16:40:51 [ERROR]   ❌ Erro no subscriber Redis: connect ECONNREFUSED 127.0.0.1:6379
+2026-02-23 16:40:53 [ERROR]   ❌ [DriverPoolMonitor] Erro ao buscar motoristas disponíveis: Connection is closed.
+2026-02-23 16:40:53 [ERROR]   ❌ [QueueWorker] Erro ao buscar regiões ativas: Connection is closed.
+2026-02-23 16:40:53 [ERROR]   ❌ Erro no subscriber Redis: connect ECONNREFUSED 127.0.0.1:6379
+2026-02-23 16:40:55 [ERROR]   ❌ Erro no subscriber Redis: connect ECONNREFUSED 127.0.0.1:6379
+2026-02-23 16:40:56 [ERROR]   ❌ [QueueWorker] Erro ao buscar regiões ativas: Connection is closed.
+2026-02-23 16:40:57 [ERROR]   ❌ Erro no subscriber Redis: connect ECONNREFUSED 127.0.0.1:6379
+2026-02-23 16:40:58 [ERROR]   ❌ [RedisScan] Erro ao escanear chaves com padrão booking_search:*: Connection is closed.
+2026-02-23 16:40:58 [ERROR]   ❌ [RadiusExpansionManager] Erro ao buscar corridas em SEARCHING: Connection is closed.
+2026-02-23 16:40:58 [ERROR]   ❌ [DriverPoolMonitor] Erro ao buscar motoristas disponíveis: Connection is closed.
+2026-02-23 16:40:59 [ERROR]   ❌ [QueueWorker] Erro ao buscar regiões ativas: Connection is closed.
+2026-02-23 16:40:59 [ERROR]   ❌ Erro no subscriber Redis: connect ECONNREFUSED 127.0.0.1:6379
+2026-02-23 16:41:01 [ERROR]   ❌ Erro no subscriber Redis: connect ECONNREFUSED 127.0.0.1:6379
+2026-02-23 16:41:02 [ERROR]   ❌ [QueueWorker] Erro ao buscar regiões ativas: Connection is closed.
+2026-02-23 16:41:03 [ERROR]   ❌ [DriverPoolMonitor] Erro ao buscar motoristas disponíveis: Connection is closed.
+2026-02-23 16:41:03 [ERROR]   ❌ Erro no subscriber Redis: connect ECONNREFUSED 127.0.0.1:6379
+2026-02-23 16:41:05 [ERROR]   ❌ [QueueWorker] Erro ao buscar regiões ativas: Connection is closed.
+2026-02-23 16:41:05 [ERROR]   ❌ Erro no subscriber Redis: connect ECONNREFUSED 127.0.0.1:6379
+2026-02-23 16:41:07 [ERROR]   ❌ Erro no subscriber Redis: connect ECONNREFUSED 127.0.0.1:6379
+2026-02-23 16:41:08 [ERROR]   Erro no job de limpeza
+2026-02-23 16:41:08 [ERROR]   ❌ Erro ao reconectar Redis: Connection is closed.
+2026-02-23 16:41:08 [ERROR]   ❌ [RedisScan] Erro ao escanear chaves com padrão connection:*: Connection is closed.
+2026-02-23 16:41:08 [ERROR]   ❌ [ConnectionCleanupService] Erro ao limpar conexões órfãs: Connection is closed.
+2026-02-23 16:41:08 [ERROR]   ❌ [RedisScan] Erro ao escanear chaves com padrão connections:ip:*: Connection is closed.
+2026-02-23 16:41:08 [ERROR]   ❌ [ConnectionCleanupService] Erro ao limpar registros órfãos: Connection is closed.
+2026-02-23 16:41:08 [ERROR]   ❌ [RedisScan] Erro ao escanear chaves com padrão booking_search:*: Connection is closed.
+2026-02-23 16:41:08 [ERROR]   ❌ [RadiusExpansionManager] Erro ao buscar corridas em SEARCHING: Connection is closed.
+2026-02-23 16:41:08 [ERROR]   ❌ [DriverPoolMonitor] Erro ao buscar motoristas disponíveis: Connection is closed.
+2026-02-23 16:41:08 [ERROR]   ❌ [QueueWorker] Erro ao buscar regiões ativas: Connection is closed.
+2026-02-23 16:41:09 [ERROR]   ❌ Erro no subscriber Redis: connect ECONNREFUSED 127.0.0.1:6379
+2026-02-23 16:41:11 [ERROR]   ❌ [QueueWorker] Erro ao buscar regiões ativas: Connection is closed.
+2026-02-23 16:41:11 [ERROR]   ❌ Erro no subscriber Redis: connect ECONNREFUSED 127.0.0.1:6379
+2026-02-23 16:41:13 [ERROR]   ❌ [DriverPoolMonitor] Erro ao buscar motoristas disponíveis: Connection is closed.
+2026-02-23 16:41:13 [ERROR]   ❌ Erro no subscriber Redis: connect ECONNREFUSED 127.0.0.1:6379
+2026-02-23 16:41:14 [ERROR]   ❌ [QueueWorker] Erro ao buscar regiões ativas: Connection is closed.
+2026-02-23 16:41:15 [ERROR]   ❌ Erro no subscriber Redis: connect ECONNREFUSED 127.0.0.1:6379
+2026-02-23 16:41:17 [ERROR]   ❌ [QueueWorker] Erro ao buscar regiões ativas: Connection is closed.
+2026-02-23 16:41:17 [ERROR]   ❌ Erro no subscriber Redis: connect ECONNREFUSED 127.0.0.1:6379
+2026-02-23 16:41:18 [ERROR]   ❌ [RedisScan] Erro ao escanear chaves com padrão booking_search:*: Connection is closed.
+2026-02-23 16:41:18 [ERROR]   ❌ [RadiusExpansionManager] Erro ao buscar corridas em SEARCHING: Connection is closed.
+2026-02-23 16:41:18 [ERROR]   ❌ [DriverPoolMonitor] Erro ao buscar motoristas disponíveis: Connection is closed.
+2026-02-23 16:41:19 [ERROR]   ❌ Erro no subscriber Redis: connect ECONNREFUSED 127.0.0.1:6379
+2026-02-23 16:41:20 [ERROR]   ❌ [QueueWorker] Erro ao buscar regiões ativas: Connection is closed.
+2026-02-23 16:41:21 [ERROR]   ❌ Erro no subscriber Redis: connect ECONNREFUSED 127.0.0.1:6379
+2026-02-23 16:41:23 [ERROR]   ❌ [DriverPoolMonitor] Erro ao buscar motoristas disponíveis: Connection is closed.
+2026-02-23 16:41:23 [ERROR]   ❌ [QueueWorker] Erro ao buscar regiões ativas: Connection is closed.
+2026-02-23 16:41:23 [ERROR]   ❌ Erro no subscriber Redis: connect ECONNREFUSED 127.0.0.1:6379
+2026-02-23 16:41:25 [ERROR]   ❌ Erro no subscriber Redis: connect ECONNREFUSED 127.0.0.1:6379
+2026-02-23 16:41:26 [ERROR]   ❌ [QueueWorker] Erro ao buscar regiões ativas: Connection is closed.
+2026-02-23 16:41:27 [ERROR]   ❌ Erro no subscriber Redis: connect ECONNREFUSED 127.0.0.1:6379
+2026-02-23 16:41:28 [ERROR]   ❌ [RedisScan] Erro ao escanear chaves com padrão booking_search:*: Connection is closed.
+2026-02-23 16:41:28 [ERROR]   ❌ [RadiusExpansionManager] Erro ao buscar corridas em SEARCHING: Connection is closed.
+2026-02-23 16:41:28 [ERROR]   ❌ [DriverPoolMonitor] Erro ao buscar motoristas disponíveis: Connection is closed.
+2026-02-23 16:41:29 [ERROR]   ❌ [QueueWorker] Erro ao buscar regiões ativas: Connection is closed.
+2026-02-23 16:41:29 [ERROR]   ❌ Erro no subscriber Redis: connect ECONNREFUSED 127.0.0.1:6379
+2026-02-23 16:41:31 [ERROR]   ❌ Erro no subscriber Redis: connect ECONNREFUSED 127.0.0.1:6379
+2026-02-23 16:41:32 [ERROR]   ❌ [QueueWorker] Erro ao buscar regiões ativas: Connection is closed.
+2026-02-23 16:41:33 [ERROR]   ❌ [DriverPoolMonitor] Erro ao buscar motoristas disponíveis: Connection is closed.
+2026-02-23 16:41:33 [ERROR]   ❌ Erro no subscriber Redis: connect ECONNREFUSED 127.0.0.1:6379
+2026-02-23 16:41:35 [ERROR]   ❌ [QueueWorker] Erro ao buscar regiões ativas: Connection is closed.
+2026-02-23 16:41:35 [ERROR]   ❌ Erro no subscriber Redis: connect ECONNREFUSED 127.0.0.1:6379
+2026-02-23 16:41:37 [ERROR]   ❌ Erro no subscriber Redis: connect ECONNREFUSED 127.0.0.1:6379
+2026-02-23 16:41:38 [ERROR]   ❌ [RedisScan] Erro ao escanear chaves com padrão booking_search:*: Connection is closed.
+2026-02-23 16:41:38 [ERROR]   ❌ [RadiusExpansionManager] Erro ao buscar corridas em SEARCHING: Connection is closed.
+2026-02-23 16:41:38 [ERROR]   ❌ [DriverPoolMonitor] Erro ao buscar motoristas disponíveis: Connection is closed.
+2026-02-23 16:41:38 [ERROR]   ❌ [QueueWorker] Erro ao buscar regiões ativas: Connection is closed.
+2026-02-23 16:41:39 [ERROR]   ❌ Erro no subscriber Redis: connect ECONNREFUSED 127.0.0.1:6379
+2026-02-23 16:41:41 [ERROR]   ❌ [QueueWorker] Erro ao buscar regiões ativas: Connection is closed.
+2026-02-23 16:41:42 [ERROR]   ❌ Erro no subscriber Redis: connect ECONNREFUSED 127.0.0.1:6379
+2026-02-23 16:41:43 [ERROR]   ❌ [DriverPoolMonitor] Erro ao buscar motoristas disponíveis: Connection is closed.
+2026-02-23 16:41:44 [ERROR]   ❌ Erro no subscriber Redis: connect ECONNREFUSED 127.0.0.1:6379
+2026-02-23 16:41:44 [ERROR]   ❌ [QueueWorker] Erro ao buscar regiões ativas: Connection is closed.
+2026-02-23 16:41:46 [ERROR]   ❌ Erro no subscriber Redis: connect ECONNREFUSED 127.0.0.1:6379
+2026-02-23 16:41:47 [ERROR]   ❌ [QueueWorker] Erro ao buscar regiões ativas: Connection is closed.
+2026-02-23 16:41:48 [ERROR]   ❌ Erro no subscriber Redis: connect ECONNREFUSED 127.0.0.1:6379
+2026-02-23 16:41:48 [ERROR]   ❌ [RedisScan] Erro ao escanear chaves com padrão booking_search:*: Connection is closed.
+2026-02-23 16:41:48 [ERROR]   ❌ [RadiusExpansionManager] Erro ao buscar corridas em SEARCHING: Connection is closed.
+2026-02-23 16:41:48 [ERROR]   ❌ [DriverPoolMonitor] Erro ao buscar motoristas disponíveis: Connection is closed.
+2026-02-23 16:41:50 [ERROR]   ❌ Erro no subscriber Redis: connect ECONNREFUSED 127.0.0.1:6379
+2026-02-23 16:41:50 [ERROR]   ❌ [QueueWorker] Erro ao buscar regiões ativas: Connection is closed.
+2026-02-23 16:41:52 [ERROR]   ❌ Erro no subscriber Redis: connect ECONNREFUSED 127.0.0.1:6379
+2026-02-23 16:41:53 [ERROR]   ❌ [DriverPoolMonitor] Erro ao buscar motoristas disponíveis: Connection is closed.
+2026-02-23 16:41:53 [ERROR]   ❌ [QueueWorker] Erro ao buscar regiões ativas: Connection is closed.
+2026-02-23 16:41:54 [ERROR]   ❌ Erro no subscriber Redis: connect ECONNREFUSED 127.0.0.1:6379
+2026-02-23 16:41:56 [ERROR]   ❌ Erro no subscriber Redis: connect ECONNREFUSED 127.0.0.1:6379
+2026-02-23 16:41:56 [ERROR]   ❌ [QueueWorker] Erro ao buscar regiões ativas: Connection is closed.
+2026-02-23 16:41:58 [ERROR]   ❌ Erro no subscriber Redis: connect ECONNREFUSED 127.0.0.1:6379
+2026-02-23 16:41:58 [ERROR]   ❌ [RedisScan] Erro ao escanear chaves com padrão booking_search:*: Connection is closed.
+2026-02-23 16:41:58 [ERROR]   ❌ [RadiusExpansionManager] Erro ao buscar corridas em SEARCHING: Connection is closed.
+2026-02-23 16:41:58 [ERROR]   ❌ [DriverPoolMonitor] Erro ao buscar motoristas disponíveis: Connection is closed.
+2026-02-23 16:41:59 [ERROR]   ❌ [QueueWorker] Erro ao buscar regiões ativas: Connection is closed.
+2026-02-23 16:42:00 [ERROR]   ❌ Erro no subscriber Redis: connect ECONNREFUSED 127.0.0.1:6379
+2026-02-23 16:42:02 [ERROR]   ❌ Erro no subscriber Redis: connect ECONNREFUSED 127.0.0.1:6379
+2026-02-23 16:42:02 [ERROR]   ❌ [QueueWorker] Erro ao buscar regiões ativas: Connection is closed.
+2026-02-23 16:42:03 [ERROR]   ❌ [DriverPoolMonitor] Erro ao buscar motoristas disponíveis: Connection is closed.
+2026-02-23 16:42:04 [ERROR]   ❌ Erro no subscriber Redis: connect ECONNREFUSED 127.0.0.1:6379
+2026-02-23 16:42:05 [ERROR]   ❌ [QueueWorker] Erro ao buscar regiões ativas: Connection is closed.
+2026-02-23 16:42:06 [ERROR]   ❌ Erro no subscriber Redis: connect ECONNREFUSED 127.0.0.1:6379
+2026-02-23 16:42:08 [ERROR]   ❌ Erro no subscriber Redis: connect ECONNREFUSED 127.0.0.1:6379
+2026-02-23 16:42:08 [ERROR]   Erro no job de limpeza
+2026-02-23 16:42:08 [ERROR]   ❌ Erro ao reconectar Redis: Connection is closed.
+2026-02-23 16:42:08 [ERROR]   ❌ [RedisScan] Erro ao escanear chaves com padrão connection:*: Connection is closed.
+2026-02-23 16:42:08 [ERROR]   ❌ [ConnectionCleanupService] Erro ao limpar conexões órfãs: Connection is closed.
+2026-02-23 16:42:08 [ERROR]   ❌ [RedisScan] Erro ao escanear chaves com padrão connections:ip:*: Connection is closed.
+2026-02-23 16:42:08 [ERROR]   ❌ [ConnectionCleanupService] Erro ao limpar registros órfãos: Connection is closed.
+2026-02-23 16:42:08 [ERROR]   ❌ [RedisScan] Erro ao escanear chaves com padrão booking_search:*: Connection is closed.
+2026-02-23 16:42:08 [ERROR]   ❌ [RadiusExpansionManager] Erro ao buscar corridas em SEARCHING: Connection is closed.
+2026-02-23 16:42:08 [ERROR]   ❌ [DriverPoolMonitor] Erro ao buscar motoristas disponíveis: Connection is closed.
+2026-02-23 16:42:08 [ERROR]   ❌ [QueueWorker] Erro ao buscar regiões ativas: Connection is closed.
+2026-02-23 16:42:10 [ERROR]   ❌ Erro no subscriber Redis: connect ECONNREFUSED 127.0.0.1:6379
+2026-02-23 16:42:11 [ERROR]   ❌ [QueueWorker] Erro ao buscar regiões ativas: Connection is closed.
+2026-02-23 16:42:12 [ERROR]   ❌ Erro no subscriber Redis: connect ECONNREFUSED 127.0.0.1:6379
+2026-02-23 16:42:13 [ERROR]   ❌ [DriverPoolMonitor] Erro ao buscar motoristas disponíveis: Connection is closed.
+2026-02-23 16:42:14 [ERROR]   ❌ Erro no subscriber Redis: connect ECONNREFUSED 127.0.0.1:6379
+2026-02-23 16:42:14 [ERROR]   ❌ [QueueWorker] Erro ao buscar regiões ativas: Connection is closed.
+2026-02-23 16:42:16 [ERROR]   ❌ Erro no subscriber Redis: connect ECONNREFUSED 127.0.0.1:6379
+2026-02-23 16:42:17 [ERROR]   ❌ [QueueWorker] Erro ao buscar regiões ativas: Connection is closed.
+2026-02-23 16:42:18 [ERROR]   ❌ Erro no subscriber Redis: connect ECONNREFUSED 127.0.0.1:6379
+2026-02-23 16:42:18 [ERROR]   ❌ [RedisScan] Erro ao escanear chaves com padrão booking_search:*: Connection is closed.
+2026-02-23 16:42:18 [ERROR]   ❌ [RadiusExpansionManager] Erro ao buscar corridas em SEARCHING: Connection is closed.
+2026-02-23 16:42:18 [ERROR]   ❌ [DriverPoolMonitor] Erro ao buscar motoristas disponíveis: Connection is closed.
+2026-02-23 16:42:20 [ERROR]   ❌ Erro no subscriber Redis: connect ECONNREFUSED 127.0.0.1:6379
+2026-02-23 16:42:20 [ERROR]   ❌ [QueueWorker] Erro ao buscar regiões ativas: Connection is closed.
+2026-02-23 16:42:22 [ERROR]   ❌ Erro no subscriber Redis: connect ECONNREFUSED 127.0.0.1:6379
+2026-02-23 16:42:23 [ERROR]   ❌ [DriverPoolMonitor] Erro ao buscar motoristas disponíveis: Connection is closed.
+2026-02-23 16:42:23 [ERROR]   ❌ [QueueWorker] Erro ao buscar regiões ativas: Connection is closed.
+2026-02-23 16:42:24 [ERROR]   ❌ Erro no subscriber Redis: connect ECONNREFUSED 127.0.0.1:6379
+2026-02-23 16:42:26 [ERROR]   ❌ Erro no subscriber Redis: connect ECONNREFUSED 127.0.0.1:6379
+2026-02-23 16:42:26 [ERROR]   ❌ [QueueWorker] Erro ao buscar regiões ativas: Connection is closed.
+2026-02-23 16:42:28 [ERROR]   ❌ Erro no subscriber Redis: connect ECONNREFUSED 127.0.0.1:6379
+2026-02-23 16:42:28 [ERROR]   ❌ [RedisScan] Erro ao escanear chaves com padrão booking_search:*: Connection is closed.
+2026-02-23 16:42:28 [ERROR]   ❌ [RadiusExpansionManager] Erro ao buscar corridas em SEARCHING: Connection is closed.
+2026-02-23 16:42:28 [ERROR]   ❌ [DriverPoolMonitor] Erro ao buscar motoristas disponíveis: Connection is closed.
+2026-02-23 16:42:29 [ERROR]   ❌ [QueueWorker] Erro ao buscar regiões ativas: Connection is closed.
+2026-02-23 16:42:30 [ERROR]   ❌ Erro no subscriber Redis: connect ECONNREFUSED 127.0.0.1:6379
+2026-02-23 16:42:32 [ERROR]   ❌ Erro no subscriber Redis: connect ECONNREFUSED 127.0.0.1:6379
+2026-02-23 16:42:32 [ERROR]   ❌ [QueueWorker] Erro ao buscar regiões ativas: Connection is closed.
+2026-02-23 16:42:33 [ERROR]   ❌ [DriverPoolMonitor] Erro ao buscar motoristas disponíveis: Connection is closed.
+2026-02-23 16:42:34 [ERROR]   ❌ Erro no subscriber Redis: connect ECONNREFUSED 127.0.0.1:6379
+2026-02-23 16:42:35 [ERROR]   ❌ [QueueWorker] Erro ao buscar regiões ativas: Connection is closed.
+2026-02-23 16:42:36 [ERROR]   ❌ Erro no subscriber Redis: connect ECONNREFUSED 127.0.0.1:6379
+2026-02-23 16:42:38 [ERROR]   ❌ Erro no subscriber Redis: connect ECONNREFUSED 127.0.0.1:6379
+2026-02-23 16:42:38 [ERROR]   ❌ [RedisScan] Erro ao escanear chaves com padrão booking_search:*: Connection is closed.
+2026-02-23 16:42:38 [ERROR]   ❌ [RadiusExpansionManager] Erro ao buscar corridas em SEARCHING: Connection is closed.
+2026-02-23 16:42:38 [ERROR]   ❌ [DriverPoolMonitor] Erro ao buscar motoristas disponíveis: Connection is closed.
+2026-02-23 16:42:38 [ERROR]   ❌ [QueueWorker] Erro ao buscar regiões ativas: Connection is closed.
+2026-02-23 16:42:40 [ERROR]   ❌ Erro no subscriber Redis: connect ECONNREFUSED 127.0.0.1:6379
+2026-02-23 16:42:41 [ERROR]   ❌ [QueueWorker] Erro ao buscar regiões ativas: Connection is closed.
+2026-02-23 16:42:42 [ERROR]   ❌ Erro no subscriber Redis: connect ECONNREFUSED 127.0.0.1:6379
+2026-02-23 16:42:43 [ERROR]   ❌ [DriverPoolMonitor] Erro ao buscar motoristas disponíveis: Connection is closed.
+2026-02-23 16:42:44 [ERROR]   ❌ Erro no subscriber Redis: connect ECONNREFUSED 127.0.0.1:6379
+2026-02-23 16:42:44 [ERROR]   ❌ [QueueWorker] Erro ao buscar regiões ativas: Connection is closed.
+2026-02-23 16:42:46 [ERROR]   ❌ Erro no subscriber Redis: connect ECONNREFUSED 127.0.0.1:6379
+2026-02-23 16:42:47 [ERROR]   ❌ [QueueWorker] Erro ao buscar regiões ativas: Connection is closed.
+2026-02-23 16:42:48 [ERROR]   ❌ Erro no subscriber Redis: connect ECONNREFUSED 127.0.0.1:6379
+2026-02-23 16:42:48 [ERROR]   ❌ [RedisScan] Erro ao escanear chaves com padrão booking_search:*: Connection is closed.
+2026-02-23 16:42:48 [ERROR]   ❌ [RadiusExpansionManager] Erro ao buscar corridas em SEARCHING: Connection is closed.
+2026-02-23 16:42:48 [ERROR]   ❌ [DriverPoolMonitor] Erro ao buscar motoristas disponíveis: Connection is closed.
+2026-02-23 16:42:50 [ERROR]   ❌ Erro no subscriber Redis: connect ECONNREFUSED 127.0.0.1:6379
+2026-02-23 16:42:50 [ERROR]   ❌ [QueueWorker] Erro ao buscar regiões ativas: Connection is closed.
+2026-02-23 16:42:52 [ERROR]   ❌ Erro no subscriber Redis: connect ECONNREFUSED 127.0.0.1:6379
+2026-02-23 16:42:53 [ERROR]   ❌ [DriverPoolMonitor] Erro ao buscar motoristas disponíveis: Connection is closed.
+2026-02-23 16:42:53 [ERROR]   ❌ [QueueWorker] Erro ao buscar regiões ativas: Connection is closed.
+2026-02-23 16:42:54 [ERROR]   ❌ Erro no subscriber Redis: connect ECONNREFUSED 127.0.0.1:6379
+2026-02-23 16:42:56 [ERROR]   ❌ Erro no subscriber Redis: connect ECONNREFUSED 127.0.0.1:6379
+2026-02-23 16:42:56 [ERROR]   ❌ [QueueWorker] Erro ao buscar regiões ativas: Connection is closed.
+2026-02-23 16:42:58 [ERROR]   ❌ Erro no subscriber Redis: connect ECONNREFUSED 127.0.0.1:6379
+2026-02-23 16:42:58 [ERROR]   ❌ [RedisScan] Erro ao escanear chaves com padrão booking_search:*: Connection is closed.
+2026-02-23 16:42:58 [ERROR]   ❌ [RadiusExpansionManager] Erro ao buscar corridas em SEARCHING: Connection is closed.
+2026-02-23 16:42:58 [ERROR]   ❌ [DriverPoolMonitor] Erro ao buscar motoristas disponíveis: Connection is closed.
+2026-02-23 16:42:59 [ERROR]   ❌ [QueueWorker] Erro ao buscar regiões ativas: Connection is closed.
+2026-02-23 16:43:00 [ERROR]   ❌ Erro no subscriber Redis: connect ECONNREFUSED 127.0.0.1:6379
+2026-02-23 16:43:02 [ERROR]   ❌ Erro no subscriber Redis: connect ECONNREFUSED 127.0.0.1:6379
+2026-02-23 16:43:02 [ERROR]   ❌ [QueueWorker] Erro ao buscar regiões ativas: Connection is closed.
+2026-02-23 16:43:03 [ERROR]   ❌ [DriverPoolMonitor] Erro ao buscar motoristas disponíveis: Connection is closed.
+2026-02-23 16:43:04 [ERROR]   ❌ Erro no subscriber Redis: connect ECONNREFUSED 127.0.0.1:6379
+2026-02-23 17:00:55 [ERROR] [traceId:com-1771876855451-bbc85b3d]  RequestRideCommand falhou {"customerId":"bench_customer_0","command":"RequestRideCommand"}
+2026-02-23 17:05:06 [ERROR] [traceId:com-1771877106617-a646e5f6]  RequestRideCommand falhou {"customerId":"bench_customer_0","command":"RequestRideCommand"}
+2026-02-24 00:00:00 [ERROR]   ❌ Erro ao processar cobranças diárias: firebaseConfig.getRealtimeDB(...).ref is not a function
+2026-02-24 18:55:00 [ERROR]   Test error
+2026-02-24 18:55:00 [ERROR]   Cannot read properties of null (reading 'substring')
+2026-02-24 18:55:09 [ERROR]   ❌ Erro ao destruir FCM Service: this.redis.disconnect is not a function
+2026-02-25 10:50:07 [ERROR]   Cannot read properties of null (reading 'substring')
+2026-02-25 10:50:07 [ERROR]   Test error
+2026-02-25 10:50:07 [ERROR]   ❌ Erro ao destruir FCM Service: this.redis.disconnect is not a function
+2026-02-25 10:57:11 [ERROR]   ❌ Erro ao destruir FCM Service: this.redis.disconnect is not a function
+2026-02-25 10:57:11 [ERROR]   Test error
+2026-02-25 10:57:11 [ERROR]   Cannot read properties of null (reading 'substring')
+2026-02-25 11:44:04 [ERROR] [traceId:req-1772030632714-114ad6e9]  notifyDrivers falhou {"bookingId":"booking_1772030641432_test_customer_001","listener":"notifyDrivers"}
+2026-02-25 11:44:04 [ERROR] [traceId:req-1772030632714-114ad6e9]  metrics is not defined
+2026-02-25 11:44:04 [ERROR] [traceId:req-1772030632714-114ad6e9]  Erro ao criar corrida {"eventType":"createBooking"}
+2026-02-25 11:44:04 [ERROR] [traceId:req-1772030632714-114ad6e9]  firestore.collection is not a function
+2026-02-25 11:44:04 [ERROR] [traceId:req-1772030632714-114ad6e9]  ❌ Erro ao buscar e notificar motoristas para booking_1772030641432_test_customer_001: logger is not defined
+2026-02-25 11:44:04 [ERROR] [traceId:req-1772030632714-114ad6e9]  Erro ao criar corrida {"eventType":"createBooking"}
+2026-02-25 11:44:04 [ERROR] [traceId:req-1772030632714-114ad6e9]  firestore.collection is not a function
+2026-02-25 11:44:04 [ERROR] [traceId:req-1772030632714-114ad6e9]  ❌ [ResponseHandler] Erro ao enviar próxima corrida para test_driver_001: logger is not defined
+2026-02-25 11:44:05 [ERROR] [traceId:req-1772030632714-114ad6e9]  notifyDrivers falhou {"bookingId":"booking_1772030641432_test_customer_001","listener":"notifyDrivers"}
+2026-02-25 11:44:05 [ERROR] [traceId:req-1772030632714-114ad6e9]  metrics is not defined
+2026-02-25 11:44:07 [ERROR] [traceId:req-1772030632714-114ad6e9]  ❌ Erro ao buscar e notificar motoristas para booking_1772030644478_test_customer_001: logger is not defined
+2026-02-25 11:44:07 [ERROR] [traceId:req-1772030632714-114ad6e9]  notifyDrivers falhou {"bookingId":"booking_1772030641432_test_customer_001","listener":"notifyDrivers"}
+2026-02-25 11:44:07 [ERROR] [traceId:req-1772030632714-114ad6e9]  metrics is not defined
+2026-02-25 11:44:09 [ERROR] [traceId:req-1772030632714-114ad6e9]  ❌ Erro ao buscar e notificar motoristas para booking_1772030641432_test_customer_001: logger is not defined
+2026-02-25 11:44:09 [ERROR] [traceId:req-1772030632714-114ad6e9]  ❌ Erro ao buscar e notificar motoristas para booking_1772030641432_test_customer_001: logger is not defined
+2026-02-25 11:44:09 [ERROR] [traceId:req-1772030632714-114ad6e9]  ❌ Erro ao buscar e notificar motoristas para booking_1772030641432_test_customer_001: logger is not defined
+2026-02-25 11:44:09 [ERROR] [traceId:req-1772030632714-114ad6e9]  ❌ Erro ao buscar e notificar motoristas para booking_1772030641432_test_customer_001: logger is not defined
+2026-02-25 11:44:09 [ERROR] [traceId:req-1772030632714-114ad6e9]  ❌ Erro ao buscar e notificar motoristas para booking_1772030641432_test_customer_001: logger is not defined
+2026-02-25 11:44:12 [ERROR] [traceId:req-1772030632714-114ad6e9]  ❌ Erro ao buscar e notificar motoristas para booking_1772030644478_test_customer_001: logger is not defined
+2026-02-25 11:44:12 [ERROR] [traceId:req-1772030632714-114ad6e9]  ❌ Erro ao buscar e notificar motoristas para booking_1772030644478_test_customer_001: logger is not defined
+2026-02-25 11:44:12 [ERROR] [traceId:req-1772030632714-114ad6e9]  ❌ Erro ao buscar e notificar motoristas para booking_1772030644478_test_customer_001: logger is not defined
+2026-02-25 11:44:12 [ERROR] [traceId:req-1772030632714-114ad6e9]  ❌ Erro ao buscar e notificar motoristas para booking_1772030644478_test_customer_001: logger is not defined
+2026-02-25 11:44:12 [ERROR] [traceId:req-1772030632714-114ad6e9]  ❌ Erro ao buscar e notificar motoristas para booking_1772030644478_test_customer_001: logger is not defined
+2026-02-25 11:44:12 [ERROR] [traceId:req-1772030632714-114ad6e9]  notifyDrivers falhou {"bookingId":"booking_1772030641432_test_customer_001","listener":"notifyDrivers"}
+2026-02-25 11:44:12 [ERROR] [traceId:req-1772030632714-114ad6e9]  metrics is not defined
+2026-02-25 11:44:12 [ERROR] [traceId:req-1772030632714-114ad6e9]  Evento movido para DLQ {"eventType":"ride.requested"}
+2026-02-25 11:44:12 [ERROR] [traceId:req-1772030632714-114ad6e9]  notifyDrivers falhou {"bookingId":"booking_1772030644478_test_customer_001","listener":"notifyDrivers"}
+2026-02-25 11:44:12 [ERROR] [traceId:req-1772030632714-114ad6e9]  metrics is not defined
+2026-02-25 11:44:13 [ERROR] [traceId:req-1772030632714-114ad6e9]  notifyDrivers falhou {"bookingId":"booking_1772030644478_test_customer_001","listener":"notifyDrivers"}
+2026-02-25 11:44:13 [ERROR] [traceId:req-1772030632714-114ad6e9]  metrics is not defined
+2026-02-25 11:44:15 [ERROR] [traceId:req-1772030632714-114ad6e9]  notifyDrivers falhou {"bookingId":"booking_1772030644478_test_customer_001","listener":"notifyDrivers"}
+2026-02-25 11:44:15 [ERROR] [traceId:req-1772030632714-114ad6e9]  metrics is not defined
+2026-02-25 11:44:20 [ERROR] [traceId:req-1772030632714-114ad6e9]  notifyDrivers falhou {"bookingId":"booking_1772030644478_test_customer_001","listener":"notifyDrivers"}
+2026-02-25 11:44:20 [ERROR] [traceId:req-1772030632714-114ad6e9]  metrics is not defined
+2026-02-25 11:44:20 [ERROR] [traceId:req-1772030632714-114ad6e9]  Evento movido para DLQ {"eventType":"ride.requested"}
+2026-02-25 11:47:20 [ERROR] [traceId:req-1772030827601-a2ed77ff]  Erro ao criar corrida {"eventType":"createBooking"}
+2026-02-25 11:47:20 [ERROR] [traceId:req-1772030827601-a2ed77ff]  firestore.collection is not a function
+2026-02-25 11:47:20 [ERROR] [traceId:req-1772030827601-a2ed77ff]  ❌ Erro ao buscar e notificar motoristas para booking_1772030836197_test_customer_001: logger is not defined
+2026-02-25 11:47:20 [ERROR] [traceId:req-1772030827601-a2ed77ff]  ❌ [ResponseHandler] Erro ao enviar próxima corrida para test_driver_001: logger is not defined
+2026-02-25 11:47:20 [ERROR] [traceId:req-1772030827601-a2ed77ff]  Erro ao criar corrida {"eventType":"createBooking"}
+2026-02-25 11:47:20 [ERROR] [traceId:req-1772030827601-a2ed77ff]  firestore.collection is not a function
+2026-02-25 11:47:20 [ERROR] [traceId:req-1772030827601-a2ed77ff]  ❌ Erro ao buscar e notificar motoristas para booking_1772030840358_test_customer_001: logger is not defined
+2026-02-25 11:47:25 [ERROR] [traceId:req-1772030827601-a2ed77ff]  ❌ Erro ao buscar e notificar motoristas para booking_1772030836197_test_customer_001: logger is not defined
+2026-02-25 11:47:25 [ERROR] [traceId:req-1772030827601-a2ed77ff]  ❌ Erro ao buscar e notificar motoristas para booking_1772030840358_test_customer_001: logger is not defined
+2026-02-25 11:47:28 [ERROR] [traceId:req-1772030827601-a2ed77ff]  ❌ Erro ao buscar e notificar motoristas para booking_1772030836197_test_customer_001: logger is not defined
+2026-02-25 11:47:28 [ERROR] [traceId:req-1772030827601-a2ed77ff]  ❌ Erro ao buscar e notificar motoristas para booking_1772030840358_test_customer_001: logger is not defined
+2026-02-25 11:47:30 [ERROR] [traceId:req-1772030827601-a2ed77ff]  ❌ Erro ao buscar e notificar motoristas para booking_1772030836197_test_customer_001: logger is not defined
+2026-02-25 11:47:30 [ERROR] [traceId:req-1772030827601-a2ed77ff]  ❌ Erro ao buscar e notificar motoristas para booking_1772030840358_test_customer_001: logger is not defined
+2026-02-25 11:47:36 [ERROR] [traceId:req-1772030827601-a2ed77ff]  ❌ Erro ao buscar e notificar motoristas para booking_1772030836197_test_customer_001: logger is not defined
+2026-02-25 11:47:36 [ERROR] [traceId:req-1772030827601-a2ed77ff]  ❌ Erro ao buscar e notificar motoristas para booking_1772030840358_test_customer_001: logger is not defined
+2026-02-25 11:47:40 [ERROR] [traceId:req-1772030827601-a2ed77ff]  ❌ Erro ao buscar e notificar motoristas para booking_1772030836197_test_customer_001: logger is not defined
+2026-02-25 11:47:42 [ERROR] [traceId:req-1772030827601-a2ed77ff]  ❌ Erro ao buscar e notificar motoristas para booking_1772030840358_test_customer_001: logger is not defined
+2026-02-25 11:49:17 [ERROR] [traceId:req-1772030827601-a2ed77ff]  ❌ [RadiusExpansionManager] Erro ao expandir corrida booking_1772030836197_test_customer_001 para 5km: logger is not defined
+2026-02-25 11:49:21 [ERROR] [traceId:req-1772030827601-a2ed77ff]  ❌ [RadiusExpansionManager] Erro ao expandir corrida booking_1772030644478_test_customer_001 para 5km: logger is not defined
+2026-02-25 11:49:58 [ERROR] [traceId:req-1772030827601-a2ed77ff]  ❌ [RadiusExpansionManager] Erro ao expandir corrida booking_1772030840358_test_customer_001 para 5km: logger is not defined
+2026-02-25 11:51:03 [ERROR] [traceId:req-1772031051632-a8788893]  Erro ao criar corrida {"eventType":"createBooking"}
+2026-02-25 11:51:03 [ERROR] [traceId:req-1772031051632-a8788893]  firestore.collection is not a function
+2026-02-25 11:51:03 [ERROR] [traceId:req-1772031051632-a8788893]  Erro ao criar corrida {"eventType":"createBooking"}
+2026-02-25 11:51:03 [ERROR] [traceId:req-1772031051632-a8788893]  firestore.collection is not a function
+2026-02-25 12:05:08 [ERROR] [traceId:req-1772031896374-f7b5cdc3]  Erro ao criar corrida {"eventType":"createBooking"}
+2026-02-25 12:05:08 [ERROR] [traceId:req-1772031896374-f7b5cdc3]  AUDITORIA ERROR: createBooking por test_customer_001
+2026-02-25 12:05:15 [ERROR] [traceId:req-1772031896374-f7b5cdc3]  Erro ao criar corrida {"eventType":"createBooking"}
+2026-02-25 12:05:16 [ERROR] [traceId:req-1772031896374-f7b5cdc3]  AUDITORIA ERROR: createBooking por test_customer_001
+2026-02-25 12:06:52 [ERROR] [traceId:req-1772031896374-f7b5cdc3]  Erro ao criar corrida {"eventType":"createBooking"}
+2026-02-25 12:06:52 [ERROR] [traceId:req-1772031896374-f7b5cdc3]  ❌ Transição inválida: SEARCHING → SEARCHING (booking: booking_1772032009197_test_customer_001)
+2026-02-25 12:06:52 [ERROR] [traceId:req-1772031896374-f7b5cdc3]  ❌ Erro ao atualizar estado da corrida booking_1772032009197_test_customer_001: Transição inválida: SEARCHING → SEARCHING
+2026-02-25 12:06:52 [ERROR] [traceId:req-1772031896374-f7b5cdc3]  ❌ Erro ao processar corrida booking_1772032009197_test_customer_001: Transição inválida: SEARCHING → SEARCHING
+2026-02-25 12:06:52 [ERROR] [traceId:req-1772031896374-f7b5cdc3]  AUDITORIA ERROR: createBooking por test_customer_001
+2026-02-25 12:06:59 [ERROR] [traceId:req-1772031896374-f7b5cdc3]  Erro ao criar corrida {"eventType":"createBooking"}
+2026-02-25 12:06:59 [ERROR] [traceId:req-1772031896374-f7b5cdc3]  AUDITORIA ERROR: createBooking por test_customer_001
+2026-02-25 12:08:23 [ERROR] [traceId:req-1772031896374-f7b5cdc3]  Erro ao criar corrida {"eventType":"createBooking"}
+2026-02-25 12:08:24 [ERROR] [traceId:req-1772031896374-f7b5cdc3]  AUDITORIA ERROR: createBooking por test_customer_001
+2026-02-25 12:08:30 [ERROR] [traceId:req-1772031896374-f7b5cdc3]  Erro ao criar corrida {"eventType":"createBooking"}
+2026-02-25 12:08:30 [ERROR] [traceId:req-1772031896374-f7b5cdc3]  AUDITORIA ERROR: createBooking por test_customer_001
+2026-02-25 12:29:17 [ERROR] [traceId:req-1772033344594-d551eec1]  Erro ao criar corrida {"eventType":"createBooking"}
+2026-02-25 12:29:17 [ERROR] [traceId:req-1772033344594-d551eec1]  AUDITORIA ERROR: createBooking por test_customer_001
+2026-02-25 12:29:24 [ERROR] [traceId:req-1772033344594-d551eec1]  Erro ao criar corrida {"eventType":"createBooking"}
+2026-02-25 12:29:24 [ERROR] [traceId:req-1772033344594-d551eec1]  ❌ Transição inválida: SEARCHING → SEARCHING (booking: booking_1772033360567_test_customer_001)
+2026-02-25 12:29:24 [ERROR] [traceId:req-1772033344594-d551eec1]  ❌ Erro ao atualizar estado da corrida booking_1772033360567_test_customer_001: Transição inválida: SEARCHING → SEARCHING
+2026-02-25 12:29:24 [ERROR] [traceId:req-1772033344594-d551eec1]  ❌ Erro ao processar corrida booking_1772033360567_test_customer_001: Transição inválida: SEARCHING → SEARCHING
+2026-02-25 12:29:24 [ERROR] [traceId:req-1772033344594-d551eec1]  AUDITORIA ERROR: createBooking por test_customer_001
+2026-02-25 12:31:45 [ERROR] [traceId:req-1772033493387-93a26138]  Erro ao criar corrida {"eventType":"createBooking"}
+2026-02-25 12:31:45 [ERROR] [traceId:req-1772033493387-93a26138]  AUDITORIA ERROR: createBooking por test_customer_001
+2026-02-25 12:31:52 [ERROR] [traceId:req-1772033493387-93a26138]  Erro ao criar corrida {"eventType":"createBooking"}
+2026-02-25 12:31:53 [ERROR] [traceId:req-1772033493387-93a26138]  AUDITORIA ERROR: createBooking por test_customer_001
+2026-02-25 15:00:53 [ERROR] [traceId:req-1772042441584-36008248]  Erro ao criar corrida {"eventType":"createBooking"}
+2026-02-25 15:00:53 [ERROR] [traceId:req-1772042441584-36008248]  ❌ Transição inválida: SEARCHING → SEARCHING (booking: booking_1772042450525_test_customer_001)
+2026-02-25 15:00:53 [ERROR] [traceId:req-1772042441584-36008248]  ❌ Erro ao atualizar estado da corrida booking_1772042450525_test_customer_001: Transição inválida: SEARCHING → SEARCHING
+2026-02-25 15:00:53 [ERROR] [traceId:req-1772042441584-36008248]  ❌ Erro ao processar corrida booking_1772042450525_test_customer_001: Transição inválida: SEARCHING → SEARCHING
+2026-02-25 15:00:53 [ERROR] [traceId:req-1772042441584-36008248]  AUDITORIA ERROR: createBooking por test_customer_001
+2026-02-25 15:01:00 [ERROR] [traceId:req-1772042441584-36008248]  Erro ao criar corrida {"eventType":"createBooking"}
+2026-02-25 15:01:00 [ERROR] [traceId:req-1772042441584-36008248]  ❌ Transição inválida: SEARCHING → SEARCHING (booking: booking_1772042456878_test_customer_001)
+2026-02-25 15:01:00 [ERROR] [traceId:req-1772042441584-36008248]  ❌ Erro ao atualizar estado da corrida booking_1772042456878_test_customer_001: Transição inválida: SEARCHING → SEARCHING
+2026-02-25 15:01:00 [ERROR] [traceId:req-1772042441584-36008248]  ❌ Erro ao processar corrida booking_1772042456878_test_customer_001: Transição inválida: SEARCHING → SEARCHING
+2026-02-25 15:01:00 [ERROR] [traceId:req-1772042441584-36008248]  AUDITORIA ERROR: createBooking por test_customer_001
+2026-02-25 15:05:08 [ERROR] [traceId:req-1772042688639-09e952a4]  Erro ao aceitar corrida {"driverId":"test_driver_001","eventType":"acceptRide"}
+2026-02-25 15:05:28 [ERROR] [traceId:req-1772042688639-09e952a4]  Erro ao aceitar corrida {"driverId":"test_driver_001","eventType":"acceptRide"}
+2026-02-25 15:10:08 [ERROR] [traceId:req-1772042986875-a0fa3490]  Erro ao aceitar corrida {"driverId":"test_driver_001","eventType":"acceptRide"}
+2026-02-25 15:10:16 [ERROR] [traceId:req-1772042986862-146f8d5a]  ❌ Transição inválida: SEARCHING → SEARCHING (booking: booking_1772043011924_test_customer_001)
+2026-02-25 15:10:16 [ERROR] [traceId:req-1772042986862-146f8d5a]  ❌ Erro ao atualizar estado da corrida booking_1772043011924_test_customer_001: Transição inválida: SEARCHING → SEARCHING
+2026-02-25 15:10:16 [ERROR] [traceId:req-1772042986862-146f8d5a]  ❌ Erro ao processar corrida booking_1772043011924_test_customer_001: Transição inválida: SEARCHING → SEARCHING
+2026-02-25 15:10:32 [ERROR] [traceId:req-1772042986875-a0fa3490]  Erro ao aceitar corrida {"driverId":"test_driver_001","eventType":"acceptRide"}

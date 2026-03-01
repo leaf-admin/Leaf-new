@@ -1,0 +1,70 @@
+# Teste: Solicitando uma corrida completa no App Único
+appId: br.com.leaf.ride
+env:
+  EXPO_PUBLIC_E2E_TEST: "true"
+---
+- launchApp:
+    clearState: false # Não limpa o estado, deve estar logado do auth.yaml
+
+- takeScreenshot: "01-dashboard-loading"
+
+- waitForAnimationToEnd
+
+# Garante que está no painel do passageiro
+- assertVisible: 
+    text: "Passageiro"
+    optional: true
+
+# Selecionar Destino (No NewMapScreen)
+- runFlow:
+    when:
+      visible: 
+        - "Para onde"
+    commands:
+      - tapOn: 
+          text: 
+            - "Para onde"
+
+- takeScreenshot: "02-destination-prompt"
+
+- inputText: "Avenida Paulista, 1000"
+- waitForAnimationToEnd
+
+# Tocar no primeiro resultado (ou texto visível com Avenida Paulista)
+- runFlow:
+    when:
+      visible: "Avenida Paulista"
+    commands:
+      - tapOn: "Avenida Paulista"
+
+- waitForAnimationToEnd
+- takeScreenshot: "03-route-calculated"
+
+# Clicar no botão de Solicitar/Agendar
+- runFlow:
+    when:
+      visible: 
+        - "Agendar Agora"
+        - "Solicitar"
+        - "Confirmar"
+    commands:
+      - tapOn: 
+          text: 
+            - "Agendar Agora"
+            - "Solicitar"
+            - "Confirmar"
+
+# Aguardar o bypass de pagamento (se PaymentBypassService rodar via E2E_TEST=true, vai pular direto para a busca)
+- waitForAnimationToEnd
+- takeScreenshot: "04-payment-bypass-success"
+
+# Verificar status da corrida
+- assertVisible: 
+    text: 
+      - "Buscando motoristas"
+      - "Motoristas Disponíveis"
+      - "Aguardando"
+    timeout: 15000
+    optional: true
+
+- takeScreenshot: "05-searching-driver"

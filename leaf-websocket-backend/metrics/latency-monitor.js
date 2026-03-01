@@ -16,7 +16,7 @@ class LatencyMonitor {
         };
         
         this.redis = new Redis({
-            host: 'localhost',
+            host: 'redis-master',
             port: 6379,
             lazyConnect: true
         });

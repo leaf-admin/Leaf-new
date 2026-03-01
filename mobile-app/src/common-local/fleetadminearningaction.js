@@ -4,7 +4,7 @@ import {
   FETCH_FLEETADMIN_EARNING_FAILED,
 } from "../types";
 import store from '../store/store';
-import { firebase } from '../config/configureFirebase';
+import { firebase } from './config/configureFirebase';
 
 export const fetchFleetAdminEarnings = () => async (dispatch) => {
 

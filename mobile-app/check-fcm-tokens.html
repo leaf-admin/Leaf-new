@@ -1,0 +1,393 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>🔍 Verificar Tokens FCM - Leaf App</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: #333;
+            min-height: 100vh;
+        }
+        .container {
+            background: white;
+            border-radius: 15px;
+            padding: 30px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+        }
+        h1 {
+            color: #2c3e50;
+            text-align: center;
+            margin-bottom: 30px;
+            font-size: 2.5em;
+        }
+        .section {
+            margin: 20px 0;
+            padding: 20px;
+            border: 1px solid #e0e0e0;
+            border-radius: 10px;
+            background: #f8f9fa;
+        }
+        .section h2 {
+            color: #34495e;
+            margin-top: 0;
+        }
+        button {
+            background: linear-gradient(45deg, #667eea, #764ba2);
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 16px;
+            margin: 10px 5px;
+            transition: transform 0.2s;
+        }
+        button:hover {
+            transform: translateY(-2px);
+        }
+        button:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+            transform: none;
+        }
+        .result {
+            background: #e8f5e8;
+            border: 1px solid #4caf50;
+            border-radius: 8px;
+            padding: 15px;
+            margin: 10px 0;
+            font-family: monospace;
+            white-space: pre-wrap;
+        }
+        .error {
+            background: #ffebee;
+            border: 1px solid #f44336;
+            color: #c62828;
+        }
+        .warning {
+            background: #fff3e0;
+            border: 1px solid #ff9800;
+            color: #e65100;
+        }
+        .token {
+            background: #f0f0f0;
+            padding: 10px;
+            border-radius: 5px;
+            font-family: monospace;
+            word-break: break-all;
+            margin: 5px 0;
+        }
+        .stats {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin: 20px 0;
+        }
+        .stat-card {
+            background: white;
+            padding: 20px;
+            border-radius: 10px;
+            text-align: center;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        .stat-number {
+            font-size: 2em;
+            font-weight: bold;
+            color: #667eea;
+        }
+        .stat-label {
+            color: #666;
+            margin-top: 5px;
+        }
+        .loading {
+            text-align: center;
+            color: #666;
+            font-style: italic;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🔍 Verificar Tokens FCM - Leaf App</h1>
+        
+        <div class="section">
+            <h2>📊 Status do Sistema</h2>
+            <div id="systemStatus" class="loading">Verificando status do sistema...</div>
+        </div>
+
+        <div class="section">
+            <h2>🔑 Buscar Tokens FCM</h2>
+            <p>Este script busca tokens FCM reais dos usuários no Firebase Realtime Database.</p>
+            
+            <button onclick="checkSystemStatus()">🔍 Verificar Status do Sistema</button>
+            <button onclick="findFCMTokens()">🔑 Buscar Tokens FCM</button>
+            <button onclick="testNotifications()">🧪 Testar Notificações</button>
+            <button onclick="clearResults()">🗑️ Limpar Resultados</button>
+        </div>
+
+        <div class="section">
+            <h2>📈 Estatísticas</h2>
+            <div id="stats" class="stats">
+                <div class="stat-card">
+                    <div class="stat-number" id="totalUsers">-</div>
+                    <div class="stat-label">Total de Usuários</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-number" id="drivers">-</div>
+                    <div class="stat-label">Motoristas</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-number" id="customers">-</div>
+                    <div class="stat-label">Passageiros</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-number" id="withTokens">-</div>
+                    <div class="stat-label">Com Tokens FCM</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="section">
+            <h2>📋 Resultados</h2>
+            <div id="results"></div>
+        </div>
+    </div>
+
+    <!-- Firebase SDK -->
+    <script src="https://www.gstatic.com/firebasejs/9.0.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.0.0/firebase-database-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.0.0/firebase-auth-compat.js"></script>
+
+    <script>
+        // Configuração do Firebase
+        const firebaseConfig = {
+            apiKey: "AIzaSyChYseG1IcmffYHHVYT7MqtLlzfdWKE_fc",
+            authDomain: "leaf-reactnative.firebaseapp.com",
+            databaseURL: "https://leaf-reactnative-default-rtdb.firebaseio.com",
+            projectId: "leaf-reactnative",
+            storageBucket: "leaf-reactnative.firebasestorage.app",
+            messagingSenderId: "106504629884",
+            appId: "1:106504629884:web:1f2700ae07e0b04ca1a3f9",
+            measurementId: "G-597C3FLGKG"
+        };
+
+        // Inicializar Firebase
+        firebase.initializeApp(firebaseConfig);
+        const database = firebase.database();
+        const auth = firebase.auth();
+
+        let currentUser = null;
+        let fcmTokens = [];
+
+        // Verificar status do sistema
+        async function checkSystemStatus() {
+            const statusDiv = document.getElementById('systemStatus');
+            statusDiv.innerHTML = '<div class="loading">Verificando status do sistema...</div>';
+
+            try {
+                // Verificar backend Vultr
+                const backendResponse = await fetch('http://216.238.107.59:3001/api/health');
+                const backendData = await backendResponse.json();
+
+                // Verificar Firebase
+                const testRef = database.ref('users');
+                const snapshot = await testRef.limitToFirst(1).once('value');
+
+                statusDiv.innerHTML = `
+                    <div class="result">
+✅ Sistema funcionando perfeitamente!
+
+🌐 Backend Vultr: ${backendData.status} (uptime: ${Math.round(backendData.uptime / 3600)}h)
+🔥 Firebase: Conectado e funcionando
+📊 Usuários no banco: ${snapshot.exists() ? 'Disponíveis' : 'Nenhum encontrado'}
+                    </div>
+                `;
+
+            } catch (error) {
+                statusDiv.innerHTML = `
+                    <div class="result error">
+❌ Erro ao verificar sistema: ${error.message}
+                    </div>
+                `;
+            }
+        }
+
+        // Buscar tokens FCM
+        async function findFCMTokens() {
+            const resultsDiv = document.getElementById('results');
+            resultsDiv.innerHTML = '<div class="loading">Buscando tokens FCM...</div>';
+
+            try {
+                // Fazer login como admin (se necessário)
+                if (!currentUser) {
+                    await loginAsAdmin();
+                }
+
+                // Buscar usuários
+                const usersRef = database.ref('users');
+                const snapshot = await usersRef.once('value');
+                const users = snapshot.val();
+
+                if (!users) {
+                    resultsDiv.innerHTML = '<div class="result warning">⚠️ Nenhum usuário encontrado no banco de dados</div>';
+                    return;
+                }
+
+                // Filtrar usuários com tokens
+                fcmTokens = [];
+                Object.keys(users).forEach(uid => {
+                    const user = users[uid];
+                    if (user.pushToken || user.fcmToken) {
+                        fcmTokens.push({
+                            uid: uid,
+                            name: (user.firstName || '') + ' ' + (user.lastName || ''),
+                            email: user.email || 'N/A',
+                            usertype: user.usertype || 'N/A',
+                            pushToken: user.pushToken,
+                            fcmToken: user.fcmToken,
+                            platform: user.platform || user.userPlatform || 'N/A',
+                            lastSeen: user.lastSeen || 'N/A'
+                        });
+                    }
+                });
+
+                // Atualizar estatísticas
+                updateStats(users, fcmTokens);
+
+                // Mostrar resultados
+                displayFCMTokens();
+
+            } catch (error) {
+                resultsDiv.innerHTML = `
+                    <div class="result error">
+❌ Erro ao buscar tokens FCM: ${error.message}
+                    </div>
+                `;
+            }
+        }
+
+        // Fazer login como admin
+        async function loginAsAdmin() {
+            try {
+                const userCredential = await auth.signInWithEmailAndPassword('admin@leaf.com', 'admin123');
+                currentUser = userCredential.user;
+                console.log('✅ Login como admin realizado:', currentUser.email);
+            } catch (error) {
+                console.log('⚠️ Erro no login admin, tentando sem autenticação:', error.message);
+                // Continuar sem autenticação se necessário
+            }
+        }
+
+        // Atualizar estatísticas
+        function updateStats(users, tokens) {
+            const totalUsers = Object.keys(users).length;
+            const drivers = Object.values(users).filter(u => u.usertype === 'driver').length;
+            const customers = Object.values(users).filter(u => u.usertype === 'customer').length;
+            const withTokens = tokens.length;
+
+            document.getElementById('totalUsers').textContent = totalUsers;
+            document.getElementById('drivers').textContent = drivers;
+            document.getElementById('customers').textContent = customers;
+            document.getElementById('withTokens').textContent = withTokens;
+        }
+
+        // Exibir tokens FCM encontrados
+        function displayFCMTokens() {
+            const resultsDiv = document.getElementById('results');
+            
+            if (fcmTokens.length === 0) {
+                resultsDiv.innerHTML = '<div class="result warning">⚠️ Nenhum token FCM encontrado</div>';
+                return;
+            }
+
+            let html = `
+                <div class="result">
+✅ Encontrados ${fcmTokens.length} usuários com tokens FCM:
+
+            `;
+
+            fcmTokens.forEach((user, index) => {
+                const token = user.fcmToken || user.pushToken;
+                html += `
+                    <div style="margin: 15px 0; padding: 15px; border: 1px solid #ddd; border-radius: 8px;">
+                        <strong>${index + 1}. ${user.name} (${user.usertype})</strong><br>
+                        <small>Email: ${user.email}</small><br>
+                        <small>Platform: ${user.platform}</small><br>
+                        <small>Last Seen: ${user.lastSeen}</small><br>
+                        <div class="token">Token: ${token ? token.substring(0, 80) + '...' : 'N/A'}</div>
+                    </div>
+                `;
+            });
+
+            html += '</div>';
+            resultsDiv.innerHTML = html;
+        }
+
+        // Testar notificações
+        async function testNotifications() {
+            if (fcmTokens.length === 0) {
+                document.getElementById('results').innerHTML = '<div class="result warning">⚠️ Busque tokens FCM primeiro</div>';
+                return;
+            }
+
+            const resultsDiv = document.getElementById('results');
+            resultsDiv.innerHTML = '<div class="loading">Testando notificações...</div>';
+
+            try {
+                // Simular teste de notificações
+                const testResults = [];
+                
+                for (const user of fcmTokens.slice(0, 3)) { // Testar apenas os primeiros 3
+                    const token = user.fcmToken || user.pushToken;
+                    if (token) {
+                        // Simular envio de notificação
+                        testResults.push({
+                            user: user,
+                            success: true,
+                            message: 'Notificação simulada enviada com sucesso'
+                        });
+                    }
+                }
+
+                // Mostrar resultados
+                let html = '<div class="result">🧪 Resultados dos Testes de Notificação:<br><br>';
+                
+                testResults.forEach((result, index) => {
+                    const status = result.success ? '✅' : '❌';
+                    html += `${status} ${result.user.name}: ${result.message}<br>`;
+                });
+
+                html += '</div>';
+                resultsDiv.innerHTML = html;
+
+            } catch (error) {
+                resultsDiv.innerHTML = `
+                    <div class="result error">
+❌ Erro ao testar notificações: ${error.message}
+                    </div>
+                `;
+            }
+        }
+
+        // Limpar resultados
+        function clearResults() {
+            document.getElementById('results').innerHTML = '';
+            document.getElementById('systemStatus').innerHTML = '<div class="loading">Verificando status do sistema...</div>';
+            fcmTokens = [];
+        }
+
+        // Inicializar quando a página carregar
+        window.onload = function() {
+            checkSystemStatus();
+        };
+    </script>
+</body>
+</html>
+
+

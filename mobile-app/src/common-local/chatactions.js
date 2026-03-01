@@ -6,7 +6,7 @@ import {
     STOP_FETCH_MESSAGES
 } from "../types";
 import store from '../store/store';
-import { firebase } from '../config/configureFirebase';
+import { firebase } from './config/configureFirebase';
 import { RequestPushMsg } from '../other/NotificationFunctions';
 
 export const fetchChatMessages = (bookingId) => (dispatch) => {

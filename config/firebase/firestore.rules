@@ -1,0 +1,211 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // ============================================
+    // REGRAS PARA ADMINISTRADORES DO DASHBOARD
+    // ============================================
+    
+    // Coleção adminUsers - Gestão de administradores
+    match /adminUsers/{userId} {
+      // Leitura: apenas o próprio usuário ou admins com claim
+      allow read: if request.auth != null && 
+                     (request.auth.uid == userId || 
+                      (request.auth.token.admin == true && 
+                       request.auth.token.role in ['admin', 'super-admin']));
+      
+      // Escrita: apenas o próprio usuário ou super-admins
+      allow create: if request.auth != null && 
+                       (request.auth.uid == userId || 
+                        request.auth.token.role == 'super-admin');
+      
+      allow update: if request.auth != null && 
+                       (request.auth.uid == userId || 
+                        request.auth.token.role == 'super-admin');
+      
+      allow delete: if request.auth != null && 
+                       request.auth.token.role == 'super-admin';
+    }
+    
+    // ============================================
+    // REGRAS PARA DADOS DE USUÁRIOS
+    // ============================================
+    
+    match /users/{userId} {
+      // Leitura: apenas admins ou o próprio usuário
+      allow read: if request.auth != null && 
+                     (request.auth.uid == userId || 
+                      (request.auth.token.admin == true && 
+                       request.auth.token.role in ['admin', 'super-admin']));
+      
+      // Escrita: apenas admins
+      allow write: if request.auth != null && 
+                     request.auth.token.admin == true && 
+                     request.auth.token.role in ['admin', 'super-admin'];
+    }
+    
+    // ============================================
+    // REGRAS PARA CORRIDAS/VIAGENS
+    // ============================================
+    
+    match /rides/{rideId} {
+      allow read: if request.auth != null && 
+                     request.auth.token.admin == true && 
+                     request.auth.token.role in ['admin', 'super-admin'];
+      
+      allow write: if request.auth != null && 
+                     request.auth.token.admin == true && 
+                     request.auth.token.role in ['admin', 'super-admin'];
+    }
+    
+    match /trips/{tripId} {
+      allow read: if request.auth != null && 
+                     request.auth.token.admin == true && 
+                     request.auth.token.role in ['admin', 'super-admin'];
+      
+      allow write: if request.auth != null && 
+                     request.auth.token.admin == true && 
+                     request.auth.token.role in ['admin', 'super-admin'];
+    }
+    
+    // ============================================
+    // REGRAS PARA MOTORISTAS
+    // ============================================
+    
+    // ============================================
+    // REGRAS PARA VEÍCULOS
+    // ============================================
+
+    match /vehicles/{vehicleId} {
+      // Leitura: usuários autenticados podem ler veículos
+      allow read: if request.auth != null;
+
+      // Escrita: usuários autenticados podem gerenciar seus próprios veículos
+      allow write: if request.auth != null;
+    }
+
+    match /drivers/{driverId} {
+      allow read: if request.auth != null &&
+                     request.auth.token.admin == true &&
+                     request.auth.token.role in ['admin', 'super-admin'];
+
+      allow write: if request.auth != null &&
+                     request.auth.token.admin == true &&
+                     request.auth.token.role in ['admin', 'super-admin'];
+    }
+
+    match /driver_status/{driverId} {
+      allow read: if request.auth != null &&
+                     request.auth.token.admin == true &&
+                     request.auth.token.role in ['admin', 'super-admin'];
+
+      allow write: if request.auth != null &&
+                     request.auth.token.admin == true &&
+                     request.auth.token.role in ['admin', 'super-admin'];
+    }
+    
+    // ============================================
+    // REGRAS PARA PAGAMENTOS
+    // ============================================
+    
+    match /ride_payments/{paymentId} {
+      allow read: if request.auth != null && 
+                     request.auth.token.admin == true && 
+                     request.auth.token.role in ['admin', 'super-admin'];
+      
+      allow write: if request.auth != null && 
+                     request.auth.token.admin == true && 
+                     request.auth.token.role == 'super-admin';
+    }
+    
+    // ============================================
+    // REGRAS PARA PROMOÇÕES
+    // ============================================
+    
+    match /promotions/{promotionId} {
+      allow read: if request.auth != null && 
+                     request.auth.token.admin == true && 
+                     request.auth.token.role in ['admin', 'super-admin'];
+      
+      allow write: if request.auth != null && 
+                     request.auth.token.admin == true && 
+                     request.auth.token.role in ['admin', 'super-admin'];
+    }
+    
+    // ============================================
+    // REGRAS PARA SUPORTE/TICKETS
+    // ============================================
+    
+    match /support_tickets/{ticketId} {
+      allow read: if request.auth != null && 
+                     (request.auth.token.admin == true || 
+                      request.auth.uid == resource.data.userId);
+      
+      allow write: if request.auth != null && 
+                     (request.auth.token.admin == true || 
+                      request.auth.uid == resource.data.userId);
+    }
+    
+    // ============================================
+    // REGRAS PARA WAITLIST
+    // ============================================
+    
+    match /waitlist/{entryId} {
+      allow read: if request.auth != null && 
+                     request.auth.token.admin == true && 
+                     request.auth.token.role in ['admin', 'super-admin'];
+      
+      allow write: if request.auth != null && 
+                     request.auth.token.admin == true && 
+                     request.auth.token.role in ['admin', 'super-admin'];
+    }
+    
+    // ============================================
+    // REGRAS PARA MÉTRICAS E ESTATÍSTICAS
+    // ============================================
+    
+    match /metrics/{metricId} {
+      allow read: if request.auth != null && 
+                     request.auth.token.admin == true && 
+                     request.auth.token.role in ['admin', 'super-admin'];
+      
+      allow write: if request.auth != null && 
+                     request.auth.token.admin == true && 
+                     request.auth.token.role == 'super-admin';
+    }
+    
+    // ============================================
+    // REGRAS PARA LOCALIZAÇÕES
+    // ============================================
+    
+    match /user_locations/{userId} {
+      allow read: if request.auth != null && 
+                     request.auth.token.admin == true && 
+                     request.auth.token.role in ['admin', 'super-admin'];
+      
+      allow write: if false; // Apenas backend pode escrever
+    }
+    
+    // ============================================
+    // REGRAS PARA DADOS DE VIAGEM (TRIP_DATA)
+    // ============================================
+    // Permite que usuários autenticados salvem seus próprios dados de viagem
+    match /trip_data/{tripId} {
+      // Leitura: qualquer usuário autenticado pode ler dados de viagem
+      // (para compatibilidade com usuários normais)
+      allow read: if request.auth != null;
+
+      // Escrita: qualquer usuário autenticado pode escrever dados de viagem
+      // (para compatibilidade com usuários normais)
+      allow write: if request.auth != null;
+    }
+    
+    // ============================================
+    // REGRA PADRÃO: NEGAR TUDO
+    // ============================================
+    // Qualquer coleção não especificada acima será negada por padrão
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

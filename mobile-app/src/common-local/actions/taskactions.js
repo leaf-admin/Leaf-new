@@ -1,3 +1,4 @@
+import Logger from '../../utils/Logger';
 import {
   FETCH_TASKS,
   FETCH_TASKS_SUCCESS,
@@ -54,9 +55,25 @@ export const acceptTask = (task) => (dispatch) => {
 
     singleBookingRef(task.id).transaction((booking) => {
       let fleetCommission_fee= profile?.fleetadmin ? ((parseFloat(booking?.estimate) - parseFloat(booking?.convenience_fees)) * parseFloat(booking?.fleet_admin_comission) / 100).toFixed(2):0;
-      // Novo cálculo: Valor para o motorista = Tarifa total - Custo operacional fixo (R$ 1,55)
+      
+      // Nova estrutura de cobrança operacional baseada no valor da corrida (3 faixas)
+      const rideValue = parseFloat(booking?.estimate);
+      let operationalFee = 0;
+      
+      if (rideValue <= 10.00) {
+        operationalFee = 0.79; // Corridas até R$ 10,00
+      } else if (rideValue <= 25.00) {
+        operationalFee = 0.99; // Corridas acima de R$ 10,00 e abaixo de R$ 25,00
+      } else {
+        operationalFee = 1.49; // Corridas acima de R$ 25,00
+      }
+      
+      // Taxa Woovi: 0,8% com mínimo de R$ 0,50
+      const wooviFee = Math.max(rideValue * 0.008, 0.50);
+      
+      // Cálculo: Valor para o motorista = Tarifa total - Taxa operacional - Taxa Woovi
       // Pedágios serão pagos diretamente pelo motorista, não são descontados do valor
-      let driver_fee = parseFloat(parseFloat(booking?.estimate) - 1.55).toFixed(2);
+      let driver_fee = parseFloat(parseFloat(booking?.estimate) - operationalFee - wooviFee).toFixed(2);
         if (booking && booking.requestedDrivers) {
           booking.driver = uid;
           booking.driver_image = profile.profile_image ? profile.profile_image : "";
@@ -117,7 +134,7 @@ export const acceptTask = (task) => (dispatch) => {
           }
         })
         .catch((error) => {
-          console.error(error);
+          Logger.error(error);
         });
       });
   });

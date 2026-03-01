@@ -1,4 +1,6 @@
+import Logger from '../utils/Logger';
 import { store } from '../common-local/store';
+
 
 class FCMSenderService {
     constructor() {
@@ -14,12 +16,12 @@ class FCMSenderService {
             
             if (FCMNotificationService.isServiceInitialized()) {
                 this.isConfigured = true;
-                console.log('🔑 Serviço FCM configurado');
+                Logger.log('🔑 Serviço FCM configurado');
             } else {
-                console.log('⚠️ Serviço FCM não inicializado');
+                Logger.log('⚠️ Serviço FCM não inicializado');
             }
         } catch (error) {
-            console.error('❌ Erro ao configurar FCM:', error);
+            Logger.error('❌ Erro ao configurar FCM:', error);
         }
     }
 
@@ -39,7 +41,7 @@ class FCMSenderService {
             const fcmToken = await this.getUserFCMToken(userId);
             
             if (!fcmToken) {
-                console.log(`⚠️ Usuário ${userId} não possui token FCM`);
+                Logger.log(`⚠️ Usuário ${userId} não possui token FCM`);
                 return { success: false, error: 'Token FCM não encontrado' };
             }
 
@@ -47,13 +49,13 @@ class FCMSenderService {
             const result = await this.sendToToken(fcmToken, notification);
             
             if (result.success) {
-                console.log(`✅ Notificação enviada para usuário ${userId}`);
+                Logger.log(`✅ Notificação enviada para usuário ${userId}`);
             }
 
             return result;
 
         } catch (error) {
-            console.error('❌ Erro ao enviar notificação para usuário:', error);
+            Logger.error('❌ Erro ao enviar notificação para usuário:', error);
             return { success: false, error: error.message };
         }
     }
@@ -73,7 +75,7 @@ class FCMSenderService {
             }
 
             const successCount = results.filter(r => r.result.success).length;
-            console.log(`📤 Notificações enviadas: ${successCount}/${userIds.length} com sucesso`);
+            Logger.log(`📤 Notificações enviadas: ${successCount}/${userIds.length} com sucesso`);
 
             return {
                 success: true,
@@ -86,7 +88,7 @@ class FCMSenderService {
             };
 
         } catch (error) {
-            console.error('❌ Erro ao enviar notificações para múltiplos usuários:', error);
+            Logger.error('❌ Erro ao enviar notificações para múltiplos usuários:', error);
             return { success: false, error: error.message };
         }
     }
@@ -100,7 +102,7 @@ class FCMSenderService {
 
             // Como estamos no mobile app, vamos usar notificações locais
             // ou enviar via WebSocket para o backend processar
-            console.log('📱 Enviando notificação local:', notification);
+            Logger.log('📱 Enviando notificação local:', notification);
             
             // TODO: Implementar notificação local usando react-native-push-notification
             // ou enviar via WebSocket para o backend processar via FCM
@@ -108,7 +110,7 @@ class FCMSenderService {
             return { success: true, messageId: 'local_notification' };
 
         } catch (error) {
-            console.error('❌ Erro ao enviar notificação para token:', error);
+            Logger.error('❌ Erro ao enviar notificação para token:', error);
             return { success: false, error: error.message };
         }
     }
@@ -150,14 +152,14 @@ class FCMSenderService {
             const result = await response.json();
 
             if (response.ok && result.success === 1) {
-                console.log(`✅ Notificação enviada para tópico: ${topic}`);
+                Logger.log(`✅ Notificação enviada para tópico: ${topic}`);
                 return { success: true, messageId: result.message_id };
             } else {
                 throw new Error('Falha ao enviar notificação para tópico');
             }
 
         } catch (error) {
-            console.error('❌ Erro ao enviar notificação para tópico:', error);
+            Logger.error('❌ Erro ao enviar notificação para tópico:', error);
             return { success: false, error: error.message };
         }
     }
@@ -169,7 +171,7 @@ class FCMSenderService {
             return await this.sendToUser(userId, notification);
 
         } catch (error) {
-            console.error('❌ Erro ao enviar notificação de viagem:', error);
+            Logger.error('❌ Erro ao enviar notificação de viagem:', error);
             return { success: false, error: error.message };
         }
     }
@@ -267,7 +269,7 @@ class FCMSenderService {
             return await this.sendToUser(userId, notification);
 
         } catch (error) {
-            console.error('❌ Erro ao enviar notificação de avaliação:', error);
+            Logger.error('❌ Erro ao enviar notificação de avaliação:', error);
             return { success: false, error: error.message };
         }
     }
@@ -293,7 +295,7 @@ class FCMSenderService {
             return await this.sendToUser(userId, notification);
 
         } catch (error) {
-            console.error('❌ Erro ao enviar notificação de pagamento:', error);
+            Logger.error('❌ Erro ao enviar notificação de pagamento:', error);
             return { success: false, error: error.message };
         }
     }
@@ -320,7 +322,7 @@ class FCMSenderService {
             return await this.sendToUsers(userIds, notification);
 
         } catch (error) {
-            console.error('❌ Erro ao enviar notificação de promoção:', error);
+            Logger.error('❌ Erro ao enviar notificação de promoção:', error);
             return { success: false, error: error.message };
         }
     }
@@ -347,7 +349,7 @@ class FCMSenderService {
             return await this.sendToUsers(userIds, notification);
 
         } catch (error) {
-            console.error('❌ Erro ao enviar notificação de manutenção:', error);
+            Logger.error('❌ Erro ao enviar notificação de manutenção:', error);
             return { success: false, error: error.message };
         }
     }
@@ -373,7 +375,7 @@ class FCMSenderService {
             return null;
 
         } catch (error) {
-            console.error('❌ Erro ao obter token FCM do usuário:', error);
+            Logger.error('❌ Erro ao obter token FCM do usuário:', error);
             return null;
         }
     }
@@ -402,7 +404,7 @@ class FCMSenderService {
     // Limpar configuração
     clearConfiguration() {
         this.isConfigured = false;
-        console.log('🔑 Configuração FCM limpa');
+        Logger.log('🔑 Configuração FCM limpa');
     }
 }
 

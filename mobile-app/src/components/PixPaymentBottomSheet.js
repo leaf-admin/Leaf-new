@@ -1,9 +1,12 @@
+import Logger from '../utils/Logger';
 import React, { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, Alert } from 'react-native';
 import { QRCode } from 'react-native-qrcode-svg';
 import BottomSheetWrapper from './BottomSheetWrapper';
 import { createPixCharge, checkPaymentStatus } from '../services/paymentService';
 import { getFinalFareValue } from '../utils/minimumFareValidator';
+import { useTranslation } from './i18n/LanguageProvider';
+
 
 const PixPaymentBottomSheet = ({ 
   tripData, 
@@ -12,6 +15,7 @@ const PixPaymentBottomSheet = ({
   onPaymentSuccess,
   onPaymentFailed 
 }) => {
+  const { t } = useTranslation();
   const [qrCodeData, setQrCodeData] = useState(null);
   const [paymentStatus, setPaymentStatus] = useState('pending');
   const [countdown, setCountdown] = useState(300); // 5 minutos
@@ -56,8 +60,8 @@ const PixPaymentBottomSheet = ({
       // Iniciar monitoramento
       startPaymentMonitoring();
     } catch (error) {
-      console.error('Erro ao inicializar pagamento:', error);
-      Alert.alert('Erro', 'Falha ao gerar pagamento PIX');
+      Logger.error('Erro ao inicializar pagamento:', error);
+      Alert.alert(t('messages.error'), t('payment.pixGenerationFailed'));
       onPaymentFailed(error);
     }
   };
@@ -79,7 +83,7 @@ const PixPaymentBottomSheet = ({
           onPaymentFailed(new Error('Pagamento expirado'));
         }
       } catch (error) {
-        console.error('Erro ao verificar status:', error);
+        Logger.error('Erro ao verificar status:', error);
       }
     }, 2000); // Verificar a cada 2 segundos
 

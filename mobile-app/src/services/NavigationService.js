@@ -1,6 +1,8 @@
+import Logger from '../utils/Logger';
 import { Linking, Platform, Alert } from 'react-native';
 import * as IntentLauncher from 'expo-intent-launcher';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+
 
 /**
  * NavigationService - Navegação Híbrida (Backend + App Externo)
@@ -71,7 +73,7 @@ class NavigationService {
    */
   async initialize() {
     try {
-      console.log('🔧 NavigationService - Inicializando...');
+      Logger.log('🔧 NavigationService - Inicializando...');
       
       // Carregar preferências do usuário
       await this.loadUserPreferences();
@@ -80,10 +82,10 @@ class NavigationService {
       await this.loadStats();
       
       this.isInitialized = true;
-      console.log('✅ NavigationService - Inicializado com sucesso');
+      Logger.log('✅ NavigationService - Inicializado com sucesso');
       
     } catch (error) {
-      console.error('❌ NavigationService - Erro na inicialização:', error);
+      Logger.error('❌ NavigationService - Erro na inicialização:', error);
       throw error;
     }
   }
@@ -98,7 +100,7 @@ class NavigationService {
         this.config.userPreferences = { ...this.config.userPreferences, ...JSON.parse(preferences) };
       }
     } catch (error) {
-      console.warn('⚠️ NavigationService - Erro ao carregar preferências:', error);
+      Logger.warn('⚠️ NavigationService - Erro ao carregar preferências:', error);
     }
   }
 
@@ -109,7 +111,7 @@ class NavigationService {
     try {
       await AsyncStorage.setItem('@navigation_preferences', JSON.stringify(this.config.userPreferences));
     } catch (error) {
-      console.warn('⚠️ NavigationService - Erro ao salvar preferências:', error);
+      Logger.warn('⚠️ NavigationService - Erro ao salvar preferências:', error);
     }
   }
 
@@ -123,7 +125,7 @@ class NavigationService {
         this.stats = { ...this.stats, ...JSON.parse(stats) };
       }
     } catch (error) {
-      console.warn('⚠️ NavigationService - Erro ao carregar estatísticas:', error);
+      Logger.warn('⚠️ NavigationService - Erro ao carregar estatísticas:', error);
     }
   }
 
@@ -134,7 +136,7 @@ class NavigationService {
     try {
       await AsyncStorage.setItem('@navigation_stats', JSON.stringify(this.stats));
     } catch (error) {
-      console.warn('⚠️ NavigationService - Erro ao salvar estatísticas:', error);
+      Logger.warn('⚠️ NavigationService - Erro ao salvar estatísticas:', error);
     }
   }
 
@@ -142,7 +144,7 @@ class NavigationService {
    * Calcula rota com trânsito (1x por corrida)
    */
   async calculateRouteWithTraffic(origin, destination) {
-    console.log('🗺️ NavigationService - Calculando rota com trânsito...');
+    Logger.log('🗺️ NavigationService - Calculando rota com trânsito...');
     
     try {
       // Em produção, seria uma chamada para o backend
@@ -162,7 +164,7 @@ class NavigationService {
       };
       
     } catch (error) {
-      console.error('❌ NavigationService - Erro ao calcular rota:', error);
+      Logger.error('❌ NavigationService - Erro ao calcular rota:', error);
       throw error;
     }
   }
@@ -171,7 +173,7 @@ class NavigationService {
    * Mostra preview da rota no app
    */
   async showRoutePreview(routeData) {
-    console.log('📱 NavigationService - Mostrando preview da rota...');
+    Logger.log('📱 NavigationService - Mostrando preview da rota...');
     
     return {
       preview: true,
@@ -186,7 +188,7 @@ class NavigationService {
    * Abre navegação externa com fallback inteligente
    */
   async openExternalNavigation(origin, destination, routeData, options = {}) {
-    console.log('🚀 NavigationService - Abrindo navegação externa...');
+    Logger.log('🚀 NavigationService - Abrindo navegação externa...');
     
     try {
       const { lat: oLat, lng: oLng } = origin;
@@ -227,7 +229,7 @@ class NavigationService {
       throw new Error('Nenhum app de navegação disponível');
       
     } catch (error) {
-      console.error('❌ NavigationService - Erro ao abrir navegação:', error);
+      Logger.error('❌ NavigationService - Erro ao abrir navegação:', error);
       this._updateStats('unknown', false);
       return { app: null, success: false, error: error.message };
     }
@@ -244,7 +246,7 @@ class NavigationService {
     
     try {
       const url = this._buildNavigationUrl(appName, origin, destination);
-      console.log(`📱 NavigationService - Tentando abrir ${app.name}: ${url}`);
+      Logger.log(`📱 NavigationService - Tentando abrir ${app.name}: ${url}`);
       
       const supported = await Linking.canOpenURL(url);
       if (!supported) {
@@ -253,11 +255,11 @@ class NavigationService {
       
       await Linking.openURL(url);
       
-      console.log(`✅ NavigationService - ${app.name} aberto com sucesso`);
+      Logger.log(`✅ NavigationService - ${app.name} aberto com sucesso`);
       return { app: appName, success: true, name: app.name };
       
     } catch (error) {
-      console.error(`❌ NavigationService - Erro ao abrir ${app.name}:`, error);
+      Logger.error(`❌ NavigationService - Erro ao abrir ${app.name}:`, error);
       return { success: false, error: error.message };
     }
   }
@@ -273,14 +275,14 @@ class NavigationService {
       // Usar Google Maps web como fallback
       const url = `https://www.google.com/maps/dir/?api=1&origin=${oLat},${oLng}&destination=${dLat},${dLng}&travelmode=driving`;
       
-      console.log('🌐 NavigationService - Abrindo navegação no browser:', url);
+      Logger.log('🌐 NavigationService - Abrindo navegação no browser:', url);
       
       await Linking.openURL(url);
       
       return { app: 'browser', success: true, name: 'Google Maps Web' };
       
     } catch (error) {
-      console.error('❌ NavigationService - Erro ao abrir browser:', error);
+      Logger.error('❌ NavigationService - Erro ao abrir browser:', error);
       return { success: false, error: error.message };
     }
   }
@@ -339,7 +341,7 @@ class NavigationService {
    * Monitora progresso da viagem via GPS
    */
   async monitorTripProgress(currentLocation, destination, routeData) {
-    console.log('📍 NavigationService - Monitorando progresso...');
+    Logger.log('📍 NavigationService - Monitorando progresso...');
     
     try {
       const distanceToDestination = this._calculateDistance(currentLocation, destination);
@@ -355,7 +357,7 @@ class NavigationService {
       };
       
     } catch (error) {
-      console.error('❌ NavigationService - Erro ao monitorar progresso:', error);
+      Logger.error('❌ NavigationService - Erro ao monitorar progresso:', error);
       throw error;
     }
   }
@@ -367,7 +369,7 @@ class NavigationService {
     if (this.config.navigationApps[appName]) {
       this.config.userPreferences.preferredApp = appName;
       await this.saveUserPreferences();
-      console.log(`✅ NavigationService - App preferido definido: ${appName}`);
+      Logger.log(`✅ NavigationService - App preferido definido: ${appName}`);
     } else {
       throw new Error('App não suportado');
     }
@@ -423,7 +425,7 @@ class NavigationService {
     };
     
     await this.saveStats();
-    console.log('🔄 NavigationService - Estatísticas resetadas');
+    Logger.log('🔄 NavigationService - Estatísticas resetadas');
   }
 
   // Métodos privados para cálculos

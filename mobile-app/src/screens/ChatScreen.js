@@ -1,3 +1,4 @@
+import Logger from '../utils/Logger';
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
@@ -13,6 +14,8 @@ import { Icon } from 'react-native-elements';
 import { TouchableOpacity } from 'react-native-gesture-handler';
 import { useSelector } from 'react-redux';
 import { api } from '../common-local';
+import WebSocketManager from '../services/WebSocketManager';
+
 
 const ChatScreen = ({ navigation, route }) => {
   const { tripId, driverInfo, passengerInfo } = route.params || {};
@@ -24,6 +27,7 @@ const ChatScreen = ({ navigation, route }) => {
   const auth = useSelector(state => state.auth);
   const currentUser = auth.profile;
   const isDriver = currentUser?.userType === 'driver';
+  const wsManager = WebSocketManager.getInstance();
 
   // Inicializar chat
   useEffect(() => {
@@ -34,22 +38,63 @@ const ChatScreen = ({ navigation, route }) => {
     try {
       setIsLoading(true);
       
-      // Criar ou buscar chat existente
-      const chatData = await createOrGetChat();
-      setChatId(chatData.chatId);
+      // Conectar WebSocket se não estiver conectado
+      if (!wsManager.isConnected()) {
+        await wsManager.connect();
+      }
       
-      // Carregar mensagens
-      await loadMessages(chatData.chatId);
+      // USAR NOVO EVENTO: createChat via WebSocket
+      const chatData = await wsManager.createChat({
+        tripId: tripId,
+        participants: [driverInfo?.id, passengerInfo?.id],
+        type: 'trip_chat'
+      });
       
-      // Conectar WebSocket
-      connectWebSocket(chatData.chatId);
+      if (chatData.success) {
+        setChatId(chatData.chatId);
+        Logger.log(`✅ Chat criado: ${chatData.chatId}`);
+        
+        // Configurar listeners para mensagens em tempo real
+        setupChatListeners(chatData.chatId);
+        
+        // Carregar mensagens existentes
+        await loadMessages(chatData.chatId);
+      }
       
     } catch (error) {
-      console.error('Erro ao inicializar chat:', error);
+      Logger.error('Erro ao inicializar chat:', error);
       Alert.alert('Erro', 'Não foi possível carregar o chat');
     } finally {
       setIsLoading(false);
     }
+  };
+
+  const setupChatListeners = (chatId) => {
+    // Listener para novas mensagens em tempo real
+    wsManager.on('messageSent', (data) => {
+      if (data.success && data.chatId === chatId) {
+        const newMessage = {
+          _id: data.messageId,
+          text: data.text,
+          createdAt: new Date(data.timestamp),
+          user: {
+            _id: data.senderId,
+            name: data.senderId === currentUser.id ? 'Você' : (isDriver ? passengerInfo?.name : driverInfo?.name),
+            avatar: data.senderId === currentUser.id ? currentUser.avatar : (isDriver ? passengerInfo?.avatar : driverInfo?.avatar)
+          }
+        };
+        
+        setMessages(prev => [newMessage, ...prev]);
+        Logger.log('💬 Nova mensagem recebida em tempo real');
+      }
+    });
+
+    // Listener para status de digitação
+    wsManager.on('typingStatus', (data) => {
+      if (data.chatId === chatId && data.userId !== currentUser.id) {
+        setIsTyping(data.isTyping);
+      }
+    });
   };
 
   const createOrGetChat = async () => {
@@ -96,14 +141,14 @@ const ChatScreen = ({ navigation, route }) => {
       
       setMessages(formattedMessages);
     } catch (error) {
-      console.error('Erro ao carregar mensagens:', error);
+      Logger.error('Erro ao carregar mensagens:', error);
     }
   };
 
   const connectWebSocket = (chatId) => {
     // Implementar conexão WebSocket para mensagens em tempo real
     // Esta é uma simulação - você implementaria com seu WebSocket backend
-    console.log('Conectando WebSocket para chat:', chatId);
+    Logger.log('Conectando WebSocket para chat:', chatId);
   };
 
   const onSend = useCallback(async (newMessages = []) => {
@@ -119,24 +164,50 @@ const ChatScreen = ({ navigation, route }) => {
       await sendMessage(message);
       
     } catch (error) {
-      console.error('Erro ao enviar mensagem:', error);
+      Logger.error('Erro ao enviar mensagem:', error);
       Alert.alert('Erro', 'Não foi possível enviar a mensagem');
     }
   }, []);
 
   const sendMessage = async (message) => {
-    const messageData = {
-      chatId,
-      text: message.text,
-      user: {
-        _id: currentUser.id,
-        name: currentUser.name,
-        avatar: currentUser.photo
-      },
-      createdAt: new Date().toISOString()
-    };
-    
-    await api.sendChatMessage(messageData);
+    try {
+      // USAR NOVO EVENTO: sendMessage via WebSocket
+      const result = await wsManager.sendMessage({
+        chatId: chatId,
+        text: message.text,
+        senderId: currentUser.id,
+        timestamp: new Date().toISOString(),
+        messageType: 'text'
+      });
+      
+      if (result.success) {
+        Logger.log(`✅ Mensagem enviada via WebSocket: ${result.messageId}`);
+      }
+      
+    } catch (error) {
+      Logger.error('Erro ao enviar mensagem via WebSocket:', error);
+      
+      // Fallback para API REST
+      try {
+        const messageData = {
+          chatId,
+          text: message.text,
+          user: {
+            _id: currentUser.id,
+            name: currentUser.name,
+            avatar: currentUser.photo
+          },
+          createdAt: new Date().toISOString()
+        };
+        
+        await api.sendChatMessage(messageData);
+        Logger.log('✅ Fallback para API REST funcionou');
+        
+      } catch (fallbackError) {
+        Logger.error('Erro no fallback:', fallbackError);
+        throw fallbackError;
+      }
+    }
   };
 
   const renderBubble = (props) => (

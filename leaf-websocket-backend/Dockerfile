@@ -1,46 +1,39 @@
-# Dockerfile para Leaf WebSocket Backend
-# Suporte para megacidades (1M+ usuários simultâneos)
-
+# Dockerfile otimizado para produção
 FROM node:18-alpine
-
-# Configurações de performance
-ENV NODE_ENV=production
-ENV NODE_OPTIONS="--max-old-space-size=4096"
-ENV UV_THREADPOOL_SIZE=64
 
 # Instalar dependências do sistema
 RUN apk add --no-cache \
     curl \
-    htop \
-    && rm -rf /var/cache/apk/*
+    bash \
+    postgresql-client
 
-# Criar usuário não-root para segurança
-RUN addgroup -g 1001 -S nodejs && \
-    adduser -S nodejs -u 1001
-
-# Definir diretório de trabalho
+# Criar diretório da aplicação
 WORKDIR /app
 
-# Copiar package files
+# Copiar package.json e package-lock.json
 COPY package*.json ./
 
-# Instalar dependências com cache otimizado
-RUN npm ci --only=production --cache=/tmp/.npm && \
-    npm cache clean --force && \
-    rm -rf /tmp/.npm
+# Instalar dependências de produção
+RUN npm ci && npm cache clean --force
 
 # Copiar código da aplicação
 COPY . .
 
-# Configurar permissões
-RUN chown -R nodejs:nodejs /app
-USER nodejs
+# Criar usuário não-root
+RUN addgroup -g 1001 -S nodejs && \
+    adduser -S leaf -u 1001
+
+# Mudar propriedade dos arquivos
+RUN chown -R leaf:nodejs /app
+
+# Mudar para usuário não-root
+USER leaf
 
 # Expor porta
 EXPOSE 3001
 
 # Health check
-HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
     CMD curl -f http://localhost:3001/health || exit 1
 
 # Comando de inicialização

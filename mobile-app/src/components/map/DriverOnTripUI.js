@@ -1,3 +1,4 @@
+import Logger from '../../utils/Logger';
 import React, { useState, useEffect } from 'react';
 import {
   View,
@@ -9,6 +10,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useTranslation } from 'react-i18next';
+
 
 export default function DriverOnTripUI({ booking, onFinishTrip }) {
   const { t } = useTranslation();
@@ -50,7 +52,7 @@ export default function DriverOnTripUI({ booking, onFinishTrip }) {
   const handleContactPassenger = () => {
     if (booking?.customer_phone) {
       // Implementar chamada ou chat
-      console.log('Contatar passageiro:', booking.customer_phone);
+      Logger.log('Contatar passageiro:', booking.customer_phone);
     }
   };
 
@@ -123,12 +125,12 @@ export default function DriverOnTripUI({ booking, onFinishTrip }) {
           <Text style={styles.actionButtonText}>{t('call_passenger')}</Text>
         </TouchableOpacity>
 
-        <TouchableOpacity style={styles.actionButton} onPress={() => console.log('Chat')}>
+        <TouchableOpacity style={styles.actionButton} onPress={() => Logger.log('Chat')}>
           <Ionicons name="chatbubble" size={24} color="#41D274" />
           <Text style={styles.actionButtonText}>{t('message')}</Text>
         </TouchableOpacity>
 
-        <TouchableOpacity style={styles.actionButton} onPress={() => console.log('Navegação')}>
+        <TouchableOpacity style={styles.actionButton} onPress={() => Logger.log('Navegação')}>
           <Ionicons name="navigate" size={24} color="#41D274" />
           <Text style={styles.actionButtonText}>{t('navigate')}</Text>
         </TouchableOpacity>

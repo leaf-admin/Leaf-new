@@ -1,3 +1,4 @@
+import Logger from '../utils/Logger';
 import React, { useState, useEffect } from 'react';
 import {
   View,
@@ -15,6 +16,7 @@ import {
 import { Icon } from 'react-native-elements';
 import { useSelector } from 'react-redux';
 import { api } from '../common-local';
+
 
 const PrivacyPolicyScreen = ({ navigation, route }) => {
   const [selectedSection, setSelectedSection] = useState('overview');
@@ -53,7 +55,7 @@ const PrivacyPolicyScreen = ({ navigation, route }) => {
       setPrivacySettings(response.data.settings || privacySettings);
       
     } catch (error) {
-      console.error('Erro ao carregar configurações de privacidade:', error);
+      Logger.error('Erro ao carregar configurações de privacidade:', error);
     } finally {
       setIsLoading(false);
     }
@@ -72,7 +74,7 @@ const PrivacyPolicyScreen = ({ navigation, route }) => {
       }));
       
     } catch (error) {
-      console.error('Erro ao atualizar configuração:', error);
+      Logger.error('Erro ao atualizar configuração:', error);
       Alert.alert('Erro', 'Não foi possível atualizar a configuração');
     }
   };
@@ -107,7 +109,7 @@ const PrivacyPolicyScreen = ({ navigation, route }) => {
       await api.post(`/api/privacy/download-data/${currentUser.id}`);
       
     } catch (error) {
-      console.error('Erro ao solicitar download:', error);
+      Logger.error('Erro ao solicitar download:', error);
       Alert.alert('Erro', 'Não foi possível solicitar o download dos dados');
     }
   };
@@ -134,7 +136,7 @@ const PrivacyPolicyScreen = ({ navigation, route }) => {
       );
       
     } catch (error) {
-      console.error('Erro ao excluir dados:', error);
+      Logger.error('Erro ao excluir dados:', error);
       Alert.alert('Erro', 'Não foi possível excluir os dados');
     }
   };

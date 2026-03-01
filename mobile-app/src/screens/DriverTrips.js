@@ -1,235 +1,1277 @@
+import Logger from '../utils/Logger';
 import React, { useEffect, useState, useRef } from 'react';
-import { Text, View, StyleSheet, Dimensions, StatusBar, TouchableOpacity } from 'react-native';
-import MapView, { PROVIDER_GOOGLE } from 'react-native-maps';
-import { Icon } from 'react-native-elements';
-import { MaterialCommunityIcons } from '@expo/vector-icons';
-import { Ionicons } from '@expo/vector-icons';
-import { colors, darkTheme, lightTheme } from '../common-local/theme';
+import { Text, View, StyleSheet, Dimensions, FlatList, Modal, TouchableHighlight, Switch, Image, Platform, Linking, TouchableOpacity, KeyboardAvoidingView, StatusBar } from 'react-native';
+import { Button, Icon } from 'react-native-elements';
+import MapView, { Polyline, PROVIDER_GOOGLE, Marker } from 'react-native-maps';
+import { colors } from '../common/theme';
+import i18n from '../i18n';
 import { useDispatch, useSelector } from 'react-redux';
-import * as Location from 'expo-location';
-
+import { api } from '../common-local/api';
+import { Alert } from 'react-native';
+import moment from 'moment/min/moment-with-locales';
+import carImageIcon from '../../assets/images/track_Car.png';
 var { width, height } = Dimensions.get('window');
+import { CommonActions } from '@react-navigation/native';
+import { ExtraInfo, RateView, appConsts, MAIN_COLOR, SECONDORY_COLOR } from '../common/sharedFunctions';
+import * as Location from 'expo-location';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { startActivityAsync, ActivityAction } from 'expo-intent-launcher';
+import { Ionicons } from '@expo/vector-icons';
+import { fonts } from '../common/font';
+import MaterialIcons from '@expo/vector-icons/MaterialIcons';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+
 
 export default function DriverTrips(props) {
+    const {
+        acceptTask,
+        cancelTask,
+        updateProfile,
+        updateBooking,
+        fetchTasks,
+        RequestPushMsg
+    } = api;
     const dispatch = useDispatch();
+    const tasks = useSelector(state => state.taskdata.tasks);
+    const settings = useSelector(state => state.settingsdata.settings) || {};
     const auth = useSelector(state => state.auth);
-    const gps = useSelector(state => state.gpsdata);
+    const bookinglistdata = useSelector(state => state.bookinglistdata);
+    const [modalVisible, setModalVisible] = useState(false);
+    const [selectedItem, setSelectedItem] = useState(null);
+    const [activeBookings, setActiveBookings] = useState([]);
     const [region, setRegion] = useState(null);
-    const [isDarkMode, setIsDarkMode] = useState(false);
-    const theme = isDarkMode ? darkTheme : lightTheme;
-    const isProfileApproved = auth && auth.profile && auth.profile.usertype === 'driver' ? auth.profile.approved === true : true;
-    const [driverOnline, setDriverOnline] = useState(auth?.profile?.driverActiveStatus || false);
-    const mapRef = useRef();
-
-    useEffect(() => {
-        const loadInitialLocation = async () => {
-            try {
-                let { status } = await Location.requestForegroundPermissionsAsync();
-                if (status !== 'granted') {
-                    return;
-                }
-                let location = await Location.getCurrentPositionAsync({
-                    accuracy: Location.Accuracy.Balanced
-                });
-                setRegion({
-                    latitude: location.coords.latitude,
-                    longitude: location.coords.longitude,
-                    latitudeDelta: 0.01,
-                    longitudeDelta: 0.01
-                });
-                dispatch({
-                    type: 'UPDATE_GPS_LOCATION',
-                    payload: {
-                        lat: location.coords.latitude,
-                        lng: location.coords.longitude
-                    }
-                });
-            } catch (error) {
-                // Silenciar erro
+    const gps = useSelector(state => state.gpsdata);
+    const latitudeDelta = 0.0922;
+    const longitudeDelta = 0.0421;
+    // Função de tradução segura com fallback
+    const t = (key) => {
+        try {
+            if (i18n && typeof i18n.t === 'function') {
+                return i18n.t(key);
+            } else if (i18n && i18n[key]) {
+                return i18n[key];
             }
-        };
-        if (!region) {
-            loadInitialLocation();
+            // Fallback para chaves comuns
+            const commonTranslations = {
+                'on_duty': 'Em serviço',
+                'where_are_you': 'Onde você está',
+                'rider_not_here': 'Aguardando passageiro',
+                'service_off': 'Serviço desativado',
+                'location_permission_error': 'Erro de permissão de localização',
+                'loading': 'Carregando...',
+                'pickup_location': 'Local de embarque',
+                'drop_location': 'Local de destino',
+                'go_to_booking': 'Ir para reserva',
+                'ignore_text': 'Ignorar',
+                'accept': 'Aceitar',
+                'today_text': 'Hoje',
+                'rides': 'viagens',
+                'alert': 'Alerta',
+                'alert_text': 'Alerta',
+                'ignore_job_title': 'Tem certeza que deseja ignorar esta corrida?',
+                'cancel': 'Cancelar',
+                'ok': 'OK',
+                'modal_close': 'Fechar',
+                'always_on': 'GPS sempre ativado',
+                'fix': 'Corrigir',
+                'no_car_assign_text': 'Nenhum carro atribuído',
+                'cars': 'Carros',
+                'carApproved_by_admin': 'Carro aprovado pelo administrador',
+                'upload_driving_license': 'Enviar CNH',
+                'profile': 'Perfil',
+                'admin_contact': 'Entre em contato com o administrador',
+                'driver_active': 'Motorista ativo',
+                'make_active': 'Ativar',
+                'upload_id_details': 'Enviar detalhes de ID',
+                'term_condition': 'Termos e condições',
+                'km': 'km',
+                'mile': 'milhas',
+                'mins': 'min',
+            };
+            return commonTranslations[key] || key;
+        } catch (error) {
+            Logger.error('Erro na função t:', error);
+            return key;
         }
+    };
+    
+    const isRTL = (i18n && i18n.locale && typeof i18n.locale === 'string') 
+        ? (i18n.locale.indexOf('he') === 0 || i18n.locale.indexOf('ar') === 0)
+        : false;
+    const [amount, setAmount] = useState({});
+    const pageActive = useRef();
+    const [deviceId, setDeviceId] = useState();
+    const [totalEarning, setTotalEarning] = useState(0);
+    const [today, setToday] = useState(0);
+    const [thisMonth, setThisMonth] = useState(0);
+    const [bookingCount, setBookingCount] = useState(0);
+    const [isLoading, setIsLoading] = useState(false);
+    const insets = useSafeAreaInsets();
+    useEffect(() => {
+        AsyncStorage.getItem('deviceId', (err, result) => {
+            if (result) {
+                setDeviceId(result);
+            }
+        });
     }, []);
 
-    useEffect(() => {
-        if (region && mapRef.current) {
-            mapRef.current.animateToRegion(region, 800);
-        }
-    }, [region]);
 
-    // Handler do botão online/offline
-    const handleToggleOnline = () => {
-        setDriverOnline(!driverOnline);
-        dispatch({ type: 'UPDATE_PROFILE', payload: { driverActiveStatus: !driverOnline } });
+    const [checks, setChecks] = useState({
+        driverActiveStatus: true
+    });
+
+    useEffect(() => {
+        if (auth?.profile) {
+            setChecks(prevChecks => ({
+                ...prevChecks,
+                driverActiveStatus: auth.profile.driverActiveStatus ? true : false
+            }));
+        }
+    }, [auth?.profile?.driverActiveStatus])
+
+    // Processar bookings apenas quando realmente mudarem
+    const bookingsRef = useRef(null);
+    const lastBookingsLength = useRef(0);
+    
+    useEffect(() => {
+        const bookings = bookinglistdata?.bookings;
+        const bookingsLength = bookings?.length || 0;
+        const decimalValue = settings?.decimal || 2;
+        
+        // Só processar se realmente mudou
+        if (bookingsLength === lastBookingsLength.current && bookingsRef.current === bookings) {
+            return;
+        }
+        
+        lastBookingsLength.current = bookingsLength;
+        bookingsRef.current = bookings;
+        
+        if (bookings && bookingsLength > 0) {
+            let today = new Date();
+            let tdTrans = 0;
+            let mnTrans = 0;
+            let totTrans = 0;
+            let count = 0;
+            
+            for (let i = 0; i < bookings.length; i++) {
+                if (bookings[i].status === 'PAID' || bookings[i].status === 'COMPLETE') {
+                    const { tripdate, driver_share } = bookings[i];
+                    if (tripdate && driver_share != undefined) {
+                        let tDate = new Date(tripdate);
+                        if (tDate.getDate() === today.getDate() && tDate.getMonth() === today.getMonth()) {
+                            tdTrans = tdTrans + parseFloat(driver_share);
+                            count = count + 1;
+                        }
+                        if (tDate.getMonth() === today.getMonth() && tDate.getFullYear() === today.getFullYear()) {
+                            mnTrans = mnTrans + parseFloat(driver_share);
+                        }
+                        totTrans = totTrans + parseFloat(driver_share);
+                    }
+                }
+            }
+            
+            setTotalEarning(parseFloat(totTrans.toFixed(decimalValue)));
+            setToday(parseFloat(tdTrans.toFixed(decimalValue)));
+            setThisMonth(parseFloat(mnTrans.toFixed(decimalValue)));
+            setBookingCount(count);
+            
+            const active = bookings.filter(booking =>
+                booking.status == 'ACCEPTED' ||
+                booking.status == 'ARRIVED' ||
+                booking.status == 'STARTED' ||
+                booking.status == 'REACHED'
+            );
+            setActiveBookings(active);
+        } else {
+            // Sem dados, mas mostrar estrutura
+            setTotalEarning(0);
+            setToday(0);
+            setThisMonth(0);
+            setBookingCount(0);
+            setActiveBookings([]);
+        }
+    }, [bookinglistdata?.bookings, settings?.decimal])
+
+    const onPressAccept = (item, price) => {
+        let wallet_balance = parseFloat(auth.profile.walletBalance);
+        if ((settings?.imageIdApproval && auth.profile.verifyId && auth.profile.verifyIdImage) || (!settings?.imageIdApproval)) {
+            if (!settings?.negativeBalance && !settings?.disable_cash && (wallet_balance <= 0 || (wallet_balance > 0 && wallet_balance < item.convenience_fees)) && item.payment_mode === 'cash') {
+                Alert.alert(
+                    t('alert'),
+                    t('wallet_balance_low')
+                );
+            } else if (settings?.negativeBalance && settings?.driverThreshold && settings?.driverThreshold >= wallet_balance) {
+                Alert.alert(
+                    t('alert'),
+                    t('wallet_balance_threshold_reached')
+                );
+            } else if (appConsts.acceptWithAmount || item.deliveryWithBid) {
+                if (item && item.customer_offer && !settings?.coustomerBidPrice && !parseFloat(price)) {
+                    price = item.customer_offer;
+                }
+                if (parseFloat(price) > 0) {
+                    const profile = auth.profile;
+                    let convenience_fees = item.commission_type == 'flat' ? parseFloat(item.commission_rate) : (parseFloat(price) * parseFloat(item.commission_rate) / 100);
+                    let fleetCommissione_fees = profile.fleetadmin ? ((parseFloat(price) - parseFloat(convenience_fees)) * parseFloat(item.fleet_admin_comission) / 100).toFixed(2) : 0;
+                    if (wallet_balance < convenience_fees && !settings?.negativeBalance) {
+                        Alert.alert(
+                            t('alert'),
+                            t('wallet_balance_low')
+                        );
+                    } else if (settings?.negativeBalance && settings?.driverThreshold && settings?.driverThreshold >= wallet_balance) {
+                        Alert.alert(
+                            t('alert'),
+                            t('wallet_balance_threshold_reached')
+                        );
+                    } else {
+                        let obj = {};
+                        obj.driver = auth.profile.uid;
+                        obj.driver_image = profile.profile_image ? profile.profile_image : "";
+                        obj.car_image = profile.car_image ? profile.car_image : "";
+                        obj.driver_name = profile.firstName + ' ' + profile.lastName;
+                        obj.driver_contact = profile.mobile;
+                        obj.driver_token = profile.pushToken ? profile.pushToken : '';
+                        obj.vehicle_number = profile.vehicleNumber ? profile.vehicleNumber : "";
+                        obj.vehicleModel = profile.vehicleModel ? profile.vehicleModel : "";
+                        obj.vehicleMake = profile.vehicleMake ? profile.vehicleMake : "";
+                        obj.driverRating = profile.rating ? profile.rating : "0";
+                        obj.fleetadmin = profile.fleetadmin ? profile.fleetadmin : '';
+                        obj.fleetCommission = fleetCommissione_fees ? fleetCommissione_fees : null;
+                        obj.bidPrice = price;
+                        obj.trip_cost = parseFloat(price).toFixed(2);
+                        obj.convenience_fees = convenience_fees.toFixed(2);
+                        obj.driver_share = parseFloat(parseFloat(price) - parseFloat(fleetCommissione_fees) - parseFloat(convenience_fees)).toFixed(2);
+                        obj.car_image = profile.car_image ? profile.car_image : "";
+                        obj.driverDeviceId = deviceId;
+                        if (!item.driverOffers) {
+                            item.driverOffers = {};
+                        }
+                        item.driverOffers[auth.profile.uid] = obj;
+                        let allAmts = { ...amount };
+                        allAmts[item.id] = 0;
+                        setAmount(allAmts);
+                        dispatch(updateBooking(item));
+                        if (item.customer_token) {
+                            RequestPushMsg(
+                                item.customer_token,
+                                {
+                                    title: t('notification_title'),
+                                    msg: t('start_accept_bid'),
+                                    screen: 'BookedCab',
+                                    params: { bookingId: item.id }
+                                }
+                            )
+                        }
+                    }
+                } else {
+                    Alert.alert(t('alert'), t('no_details_error'));
+                }
+            } else {
+                item['driverDeviceId'] = deviceId;
+                item['vehicle_number'] = auth.profile.vehicleNumber ? auth.profile.vehicleNumber : "";
+                dispatch(acceptTask(item));
+                setSelectedItem(null);
+                setModalVisible(null);
+                setTimeout(() => {
+                    props.navigation.dispatch(CommonActions.reset({ index: 0, routes: [{ name: 'BookedCab', params: { bookingId: item.id } }] }));
+                }, 3000)
+            }
+        } else {
+            Alert.alert(t('alert'), t('verifyid_error'));
+        }
+    };
+    const onPressIgnore = (id) => {
+        dispatch(cancelTask(id));
+        setSelectedItem(null);
+        setModalVisible(null)
     };
 
-    // ThemeSwitch customizado (sol/lua)
-    function ThemeSwitch({ value, onValueChange }) {
-        return (
-            <TouchableOpacity
-                style={styles.themeSwitchTouchable}
-                onPress={() => onValueChange(!value)}
-                activeOpacity={0.8}
-            >
-                <View style={[styles.themeSwitchTrack, { backgroundColor: value ? '#111' : '#fff', borderColor: value ? '#111' : '#ddd' }]}> 
-                    {/* Sol (esquerda) */}
-                    <View style={[styles.themeSwitchIconBubble, {
-                        backgroundColor: value ? '#111' : '#111',
-                        opacity: value ? 0.4 : 1,
-                    }]}
-                    >
-                        <MaterialCommunityIcons
-                            name="white-balance-sunny"
-                            size={20}
-                            color={'#fff'}
-                />
-            </View>
-                    <View style={{ flex: 1 }} />
-                    {/* Lua (direita) */}
-                    <View style={[styles.themeSwitchIconBubble, {
-                        backgroundColor: value ? '#fff' : '#fff',
-                        opacity: value ? 1 : 0.4,
-                    }]}
-                    >
-                        <MaterialCommunityIcons
-                            name="weather-night"
-                            size={20}
-                            color={'#111'}
-                        />
-                    </View>
-                </View>
-            </TouchableOpacity>
-        );
+    const goToBooking = (id) => {
+        props.navigation.dispatch(CommonActions.reset({ index: 0, routes: [{ name: 'BookedCab', params: { bookingId: id } }] }));
+    };
+
+    const onChangeFunction = () => {
+        if (auth.profile && auth.profile.queue) {
+            Alert.alert(t('alert'), t('active_booking_right_now'));
+        } else {
+            if (gps.error) {
+                Alert.alert(t('alert'), t('always_on'));
+            } else {
+                let res = !auth.profile.driverActiveStatus;
+                if (res === true) dispatch(fetchTasks());
+                const isDriverActive = auth.profile.driverActiveStatus;
+                const action = isDriverActive ? 'off' : 'on';
+                if (action === 'on' && settings && settings.license_image_required && !auth.profile.licenseImage) {
+                    Alert.alert(t('alert'), t('upload_driving_license'));
+                    return;
+                }
+                if (action === 'on' && settings && settings.term_required && !auth.profile.term) {
+                    Alert.alert(t('alert'), t('term_condition'));
+                    return;
+                }
+                if (action === 'on' && settings && settings.imageIdApproval && !auth.profile.verifyIdImage) {
+                    Alert.alert(t('alert'), t('upload_id_details'));
+                    return;
+                }
+                if (action === 'on') {
+                    if (settings && settings.carType_required) {
+                        if (!auth.profile.carType) {
+                            Alert.alert(t('alert'), t("no_car_assign_text"));
+                            return;
+                        }
+                        if (settings.carApproval && !auth.profile.carApproved) {
+                            Alert.alert(t('alert'), t("carApproved_by_admin"));
+                            return;
+                        }
+                        if (settings.driver_approval && !auth.profile.approved) {
+                            Alert.alert(t('alert'), t("admin_contact"));
+                            return;
+                        }
+                    } else {
+                        if (settings && settings.driver_approval && !auth.profile.approved) {
+                            Alert.alert(t('alert'), t("admin_contact"));
+                            return;
+                        }
+                    }
+                }
+                dispatch(updateProfile({ driverActiveStatus: !isDriverActive }));
+            }
+        }
+    };
+
+    const onTermAccept = () => {
+        if (!auth.profile.term || auth.profile.term === false) {
+            dispatch(updateProfile({ term: true }));
+            dispatch(fetchTasks());
+        }
     }
 
-    // Header flutuante igual ao MapScreen
+    const onTermLink = async () => {
+        Linking.openURL(settings.CompanyTermCondition).catch(err => Logger.error("Couldn't load page", err));
+    }
+    useEffect(() => {
+        if (gps.location) {
+            if (gps.location.lat && gps.location.lng) {
+                setRegion({
+                    latitude: gps.location.lat,
+                    longitude: gps.location.lng,
+                    latitudeDelta: latitudeDelta,
+                    longitudeDelta: longitudeDelta
+                });
+            }
+        }
+    }, [gps.location]);
+
+    useEffect(() => {
+        if (gps.error) {
+            dispatch(updateProfile({ driverActiveStatus: false }));
+            setChecks({ ...checks, driverActiveStatus: false });
+        }
+    }, [gps.error]);
+
+
+    const navEditUser = () => {
+        props.navigation.dispatch(CommonActions.reset({ index: 0, routes: [{ name: 'editUser', params: { fromPage: 'DriverTrips' } }] }));
+    }
+
+    // Header com botão voltar e título (seguindo padrão das outras telas)
+    const isDarkMode = useSelector(state => state.settingsdata?.isDarkMode) || false;
+    
     const Header = () => (
-        <View style={styles.header}>
+        <View style={[styles.headerCustom, { backgroundColor: isDarkMode ? '#1a1a1a' : '#fff' }]}>
             <TouchableOpacity 
-                style={styles.headerButton}
-                onPress={() => props.navigation.navigate('ProfileScreen')}
+                style={[
+                    styles.headerButtonCustom, 
+                    { 
+                        backgroundColor: isDarkMode ? '#2d2d2d' : '#e8e8e8',
+                        borderWidth: 1,
+                        borderColor: isDarkMode ? '#404040' : '#d0d0d0',
+                    }
+                ]}
+                onPress={() => props.navigation.goBack()}
+                activeOpacity={0.7}
             >
-                <Icon name="menu" type="material" color={theme.icon} size={24} />
+                <Ionicons name="chevron-back" size={22} color={isDarkMode ? '#fff' : '#1a1a1a'} />
             </TouchableOpacity>
-            <View style={styles.headerRightContainer}>
-                <TouchableOpacity 
-                    style={styles.headerButton}
-                    onPress={() => props.navigation.navigate && props.navigation.navigate('Notifications')}
-                >
-                    <Icon name="notifications" type="material" color={theme.icon} size={24} />
-                </TouchableOpacity>
-                <ThemeSwitch value={isDarkMode} onValueChange={setIsDarkMode} />
-                                            </View>
-                                        </View>
-    );
-
-    // Adicione os estilos do mapa do MapScreen
-    const mapStyleDark = [
-      { elementType: 'geometry', stylers: [{ color: '#232323' }] },
-      { elementType: 'labels.text.stroke', stylers: [{ color: '#232323' }] },
-      { elementType: 'labels.text.fill', stylers: [{ color: '#bdbdbd' }] },
-      { featureType: 'administrative', elementType: 'geometry', stylers: [{ color: '#757575' }] },
-      { featureType: 'poi', elementType: 'geometry', stylers: [{ color: '#424242' }] },
-      { featureType: 'road', elementType: 'geometry', stylers: [{ color: '#383838' }] },
-      { featureType: 'road', elementType: 'geometry.stroke', stylers: [{ color: '#212121' }] },
-      { featureType: 'road', elementType: 'labels.text.fill', stylers: [{ color: '#8a8a8a' }] },
-      { featureType: 'transit', elementType: 'geometry', stylers: [{ color: '#2f2f2f' }] },
-      { featureType: 'water', elementType: 'geometry', stylers: [{ color: '#181818' }] }
-    ];
-    const mapStyleLight = [
-      { elementType: 'geometry', stylers: [{ color: '#f2f2f2' }] },
-      { elementType: 'labels.text.stroke', stylers: [{ color: '#f2f2f2' }] },
-      { elementType: 'labels.text.fill', stylers: [{ color: '#232323' }] },
-      { featureType: 'administrative', elementType: 'geometry', stylers: [{ color: '#cccccc' }] },
-      { featureType: 'poi', elementType: 'geometry', stylers: [{ color: '#e0e0e0' }] },
-      { featureType: 'road', elementType: 'geometry', stylers: [{ color: '#e6e6e6' }] },
-      { featureType: 'road', elementType: 'geometry.stroke', stylers: [{ color: '#cccccc' }] },
-      { featureType: 'road', elementType: 'labels.text.fill', stylers: [{ color: '#8a8a8a' }] },
-      { featureType: 'transit', elementType: 'geometry', stylers: [{ color: '#e0e0e0' }] },
-      { featureType: 'water', elementType: 'geometry', stylers: [{ color: '#d6d6d6' }] }
-    ];
-
-    // Componente flutuante de ganhos do dia
-    function EarningsBox({ value }) {
-        const [show, setShow] = useState(true);
-                                            return (
-            <View style={styles.earningsBox}>
-                <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', width: '100%' }}>
-                    <Text style={styles.earningsValueCentered}>
-                        {show ? `R$ ${value.toFixed(2).replace('.', ',')}` : '••••'}
-                    </Text>
-                    <TouchableOpacity style={styles.earningsEye} onPress={() => setShow(!show)}>
-                        <Ionicons name={show ? 'eye' : 'eye-off'} size={22} color="#1A330E" />
-                    </TouchableOpacity>
-                </View>
-                                </View>
-        );
-    }
-
-
-
-    return (
-        <View style={styles.container}>
-            <StatusBar hidden={true} />
-            <MapView
-                ref={mapRef}
-                provider={PROVIDER_GOOGLE}
-                style={StyleSheet.absoluteFillObject}
-                showsUserLocation={true}
-                loadingEnabled
-                showsMyLocationButton={false}
-                initialRegion={region || { latitude: -23.55052, longitude: -46.633308, latitudeDelta: 0.01, longitudeDelta: 0.01 }}
-                customMapStyle={isDarkMode ? mapStyleDark : mapStyleLight}
-            />
-            {/* Header flutuante */}
-            <View style={styles.headerFloating} pointerEvents="box-none">
-                <Header />
-                            </View>
-            {/* Earnings flutuante */}
-            <View style={styles.earningsFloating} pointerEvents="box-none">
-                <TouchableOpacity onPress={() => props.navigation.navigate('EarningsReportScreen', { from: 'map' })} activeOpacity={0.8}>
-                    <EarningsBox value={auth?.profile?.earningsToday || 0} />
-                </TouchableOpacity>
-            </View>
-            {/* Botão inferior flutuante */}
-            <View style={styles.bottomButtonFloating} pointerEvents="box-none">
-                {isProfileApproved ? (
-                    <TouchableOpacity
-                        style={[styles.onlineButton, { backgroundColor: driverOnline ? '#1A330E' : '#B0B0B0' }]}
-                        onPress={handleToggleOnline}
-                    >
-                        <Text style={styles.onlineButtonText}>{driverOnline ? 'Ficar Offline' : 'Ficar Online'}</Text>
-                    </TouchableOpacity>
-                ) : (
-                    <View style={[styles.onlineButton, { backgroundColor: '#B0B0B0' }]}> 
-                        <Text style={styles.onlineButtonText}>Aguardando aprovação</Text>
-                    </View>
-                )}
-            </View>
-
+            <Text style={[styles.headerTitleCustom, { color: isDarkMode ? '#fff' : colors.BLACK }]}>
+                Histórico de viagens
+            </Text>
+            <View style={styles.headerRightContainerCustom} />
         </View>
     );
+
+    // Esconder header do navigation
+    React.useEffect(() => {
+        props.navigation.setOptions({
+            headerShown: false,
+        });
+    }, [props.navigation]);
+
+    useEffect(() => {
+        const unsubscribe = props.navigation.addListener('focus', () => {
+            pageActive.current = true;
+        });
+        return unsubscribe;
+    }, [props.navigation, pageActive.current]);
+
+    useEffect(() => {
+        const unsubscribe = props.navigation.addListener('blur', () => {
+            pageActive.current = false;
+        });
+        return unsubscribe;
+    }, [props.navigation, pageActive.current]);
+
+    useEffect(() => {
+        pageActive.current = true;
+        return () => {
+            pageActive.current = false;
+        };
+    }, []);
+
+    const changePermission = async () => {
+        let permResp = await Location.requestForegroundPermissionsAsync();
+        if (permResp.status == 'granted') {
+            let { status } = await Location.requestBackgroundPermissionsAsync();
+            if (status === 'granted') {
+                dispatch(updateProfile({ driverActiveStatus: true }));
+                setChecks({ ...checks, driverActiveStatus: true });
+            }
+        }
+        else {
+            if (Platform.OS == 'ios') {
+                Linking.openSettings()
+            } else {
+                startActivityAsync(ActivityAction.LOCATION_SOURCE_SETTINGS);
+            }
+        }
+    }
+    const windoWidth = Dimensions.get("window").width
+    const windoHight = Dimensions.get("window").height
+   
+    // Adicionar verificações de segurança
+    const isProfileApproved = auth && auth.profile && auth.profile.approved === true;
+    const hasCarType = auth && auth.profile && auth.profile.carType;
+    const isCarApproved = auth && auth.profile && auth.profile.carApproved;
+    const hasLicenseImage = auth && auth.profile && auth.profile.licenseImage;
+    const hasVerifyIdImage = auth && auth.profile && auth.profile.verifyIdImage;
+    const hasTerm = auth && auth.profile && auth.profile.term;
+   
+    return (
+        <View style={styles.mainViewStyle}>
+            <StatusBar barStyle={isDarkMode ? "light-content" : "dark-content"} backgroundColor={isDarkMode ? '#1a1a1a' : '#fff'} />
+            <Header />
+            <KeyboardAvoidingView behavior={Platform.OS == "ios" ? "padding" : (__DEV__ ? null : "padding")}>
+                <View style={{height:'80%'}}>
+                <FlatList
+                    data={auth.profile && auth.profile.uid && auth.profile.driverActiveStatus ?
+                        (appConsts && appConsts.showBookingOptions ? tasks ? tasks : activeBookings : auth.profile.queue ? activeBookings : tasks) : []}
+                    keyExtractor={(item, index) => index.toString()}
+                    ListEmptyComponent={
+                        <View style={{ height: '100%', width: width, overflow: 'hidden' }}>
+                            {region && region.latitude && pageActive.current && auth?.profile ? (
+                                <MapView
+                                    region={{
+                    <UrlTile
+                        urlTemplate="https://a.tile.openstreetmap.org/{z}/{x}/{y}.png"
+                        maximumZ={19}
+                        flipY={false}
+                    />
+                                        latitude: region.latitude,
+                                        longitude: region.longitude,
+                                        latitudeDelta: latitudeDelta,
+                                        longitudeDelta: longitudeDelta
+                                    }}
+                                    minZoomLevel={3}
+                                    provider={PROVIDER_GOOGLE}
+                                    style={{ minHeight: height - 60, height: height - (Platform.OS == 'android' ? 15 : 60), width: width }}
+                                >
+                                    <Marker
+                                        coordinate={{ latitude: region.latitude, longitude: region.longitude }}
+                                        pinColor={colors.HEADER}
+                                    >
+                                        <View style={{ alignItems: 'center' }}>
+                                            <View style={{ alignItems: 'center', backgroundColor: '#fff', opacity: 0.8, borderColor: '#000', borderWidth: 1, borderRadius: 10, paddingVertical: 10, paddingHorizontal: 5, marginBottom: 5 }}>
+                                                <Text style={{ fontFamily: fonts.Bold, color: colors.BUTTON_ORANGE }}>{t('where_are_you')}</Text>
+                                                <Text style={{ fontFamily: fonts.Bold, color: colors.BUTTON_ORANGE }}>{auth.profile?.driverActiveStatus ? t('rider_not_here') : t('service_off')}</Text>
+                                            </View>
+                                            <Image
+                                                source={carImageIcon}
+                                                style={{ height: 40, width: 40 }}
+                                            />
+                                        </View>
+                                    </Marker>
+                                </MapView>
+                            ) : gps?.error ? (
+                                <View style={{ alignItems: 'center', justifyContent: 'center', height: height, width: width }}>
+                                    <Ionicons name="location-outline" size={48} color={colors.RED} style={{ marginBottom: 16 }} />
+                                    <Text style={{ fontFamily: fonts.Bold, fontSize: 18, color: colors.BLACK, marginBottom: 8 }}>{t('location_permission_error')}</Text>
+                                    <Text style={{ fontFamily: fonts.Regular, fontSize: 14, color: colors.GRAY, textAlign: 'center', paddingHorizontal: 20 }}>
+                                        É necessário permitir o acesso à localização para visualizar o mapa
+                                    </Text>
+                                </View>
+                            ) : (
+                                <View style={{ alignItems: 'center', justifyContent: 'center', height: height, width: width }}>
+                                    {isLoading ? (
+                                        <>
+                                            <Text style={{ fontFamily: fonts.Regular, fontSize: 16, color: colors.BLACK }}>{t('loading')}</Text>
+                                        </>
+                                    ) : (
+                                        <>
+                                            <Ionicons name="time-outline" size={64} color={colors.GRAY} style={{ marginBottom: 16, opacity: 0.5 }} />
+                                            <Text style={{ fontFamily: fonts.Bold, fontSize: 20, color: colors.BLACK, marginBottom: 8 }}>
+                                                Nenhuma viagem encontrada
+                                            </Text>
+                                            <Text style={{ fontFamily: fonts.Regular, fontSize: 14, color: colors.GRAY, textAlign: 'center', paddingHorizontal: 40 }}>
+                                                Quando você aceitar corridas, elas aparecerão aqui no histórico
+                                            </Text>
+                                        </>
+                                    )}
+                                </View>
+                            )}
+                            {gps.error || (!hasCarType && settings && settings.carType_required) || (!isCarApproved && settings && settings.carType_required) || (!hasLicenseImage && settings && settings.license_image_required) || (!isProfileApproved && settings && settings.driver_approval) || (settings && settings.imageIdApproval && !hasVerifyIdImage) || (!hasTerm && settings && settings.term_required) ?
+                                <View style={{
+                                    top: 0, left: 0, position: 'absolute', width: width - 20, margin: 10, borderRadius: 8, flexDirection: 'column', alignItems: 'center', backgroundColor: colors.new,
+                                    shadowColor: colors.BLACK, shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.75, shadowRadius: 4, elevation: 5,
+                                    minHeight: 10 + (gps.error ? 70 : 0) + (!hasCarType && settings && settings.carType_required ? 70 : 0) + (!isCarApproved && settings && settings.carType_required ? 70 : 0) + (!isProfileApproved && settings && settings.driver_approval ? 70 : 0) + (!hasLicenseImage && settings && settings.license_image_required ? 70 : 0) + (settings && settings.imageIdApproval && !hasVerifyIdImage ? 70 : 0) + (!hasTerm && settings && settings.term_required ? 70 : 0)
+                                }}>
+                                    {gps.error ?
+                                        <View style={[styles.alrt, { flexDirection: isRTL ? 'row-reverse' : 'row', }]}>
+                                            <View style={[styles.alrt1, { flexDirection: isRTL ? 'row-reverse' : 'row', }]}>
+                                                <Icon name="alert-circle" type="ionicon" color={colors.RED} size={18} />
+                                                <Text style={{ fontSize: 14, fontFamily: fonts.Bold, color: colors.BLACK, marginLeft: 3 }}>{t('always_on')}</Text>
+                                            </View>
+                                            <Button onPress={changePermission} title={t('fix').toUpperCase()} titleStyle={styles.checkButtonTitle} buttonStyle={styles.checkButtonStyle} />
+                                        </View>
+                                        : null}
+                                    {!hasCarType && settings && settings.carType_required ?
+                                        <View style={[styles.alrt, { flexDirection: isRTL ? 'row-reverse' : 'row' }]}>
+                                            <View style={[styles.alrt1, { flexDirection: isRTL ? 'row-reverse' : 'row' }]}>
+                                                <Icon name="alert-circle" type="ionicon" color={colors.RED} size={18} />
+                                                <Text style={{ fontSize: 14, fontFamily: fonts.Bold, color: colors.BLACK, marginLeft: 3 }}>{t('no_car_assign_text')}</Text>
+                                            </View>
+                                            <Button onPress={() => props.navigation.dispatch(CommonActions.reset({ index: 0, routes: [{ name: 'Cars', params: { fromPage: 'DriverTrips' } }] }))}
+                                                title={t('cars')} titleStyle={styles.checkButtonTitle} buttonStyle={styles.checkButtonStyle} />
+                                        </View>
+                                        : null}
+                                    {!isCarApproved && settings && settings.carType_required ?
+                                        <View style={[styles.alrt, { flexDirection: isRTL ? 'row-reverse' : 'row' }]}>
+                                            <View style={[styles.alrt1, { flexDirection: isRTL ? 'row-reverse' : 'row' }]}>
+                                                <Icon name="alert-circle" type="ionicon" color={colors.RED} size={16} />
+                                                <Text style={{ fontSize: 14, fontFamily: fonts.Bold, color: colors.BLACK, marginLeft: 3 }}>{t('carApproved_by_admin')}</Text>
+                                            </View>
+                                        </View>
+                                        : null}
+                                    {!hasLicenseImage && settings && settings.license_image_required ?
+                                        <View style={[styles.alrt, { flexDirection: isRTL ? 'row-reverse' : 'row' }]}>
+                                            <View style={[styles.alrt1, { flexDirection: isRTL ? 'row-reverse' : 'row' }]}>
+                                                <Icon name="alert-circle" type="ionicon" color={colors.RED} size={16} />
+                                                <Text style={{ fontSize: 14, fontFamily: fonts.Bold, color: colors.BLACK, marginLeft: 3 }}>{t('upload_driving_license')}</Text>
+                                            </View>
+                                            <Button onPress={navEditUser} title={t('profile')} titleStyle={styles.checkButtonTitle} buttonStyle={styles.checkButtonStyle} />
+                                        </View>
+                                        : null}
+                                    {!isProfileApproved && settings && settings.driver_approval ?
+                                        <View style={[styles.alrt, { flexDirection: isRTL ? 'row-reverse' : 'row' }]}>
+                                            <View style={[styles.alrt1, { flexDirection: isRTL ? 'row-reverse' : 'row', width: "100%" }]}>
+                                                <Icon name="alert-circle" type="ionicon" color={colors.RED} size={18} />
+                                                <Text style={{ fontSize: 14, fontFamily: fonts.Bold, color: colors.BLACK, marginLeft: 3 }}>{t('admin_contact')}</Text>
+                                            </View>
+                                        </View>
+                                        : null}
+                                    {settings && settings.imageIdApproval && !hasVerifyIdImage ?
+                                        <View style={[styles.alrt, { flexDirection: isRTL ? 'row-reverse' : 'row' }]}>
+                                            <View style={[styles.alrt1, { flexDirection: isRTL ? 'row-reverse' : 'row', padding: 2 }]}>
+                                                <Icon name="alert-circle" type="ionicon" color={colors.RED} size={18} />
+                                                <Text style={{ fontSize: 14, fontFamily: fonts.Bold, color: colors.BLACK, marginLeft: 3 }}>{t('upload_id_details')}</Text>
+                                            </View>
+                                            <Button onPress={navEditUser} title={t('profile')} titleStyle={styles.checkButtonTitle} buttonStyle={[styles.checkButtonStyle, { width: 90 }]} />
+                                        </View>
+                                        : null}
+                                    {!hasTerm && settings && settings.term_required ?
+                                        <View style={[styles.alrt, { flexDirection: isRTL ? 'row-reverse' : 'row' }]}>
+                                            <TouchableOpacity onPress={onTermLink} style={[styles.alrt1, { flexDirection: isRTL ? 'row-reverse' : 'row', width: width - 180, height: 50 }]}>
+                                                <Icon name="document-text" type="ionicon" color={colors.RED} size={18} />
+                                                <Text style={{ fontSize: 14, fontFamily: fonts.Bold, color: colors.SKY, marginLeft: 3, textDecorationLine: 'underline' }}>{t('term_condition')}</Text>
+                                            </TouchableOpacity>
+                                            <Button onPress={onTermAccept} title={t('accept')} titleStyle={styles.checkButtonTitle} buttonStyle={styles.checkButtonStyle} />
+                                        </View>
+                                        : null}
+                                </View>
+                                : null}
+                            
+                        </View>
+                    }
+                    renderItem={({ item, index }) => {
+                        return (
+                            <KeyboardAvoidingView behavior="position" style={styles.listItemView}>
+                                {/* <View style={styles.listItemView}> */}
+                                <View style={[styles.mapcontainer, activeBookings && activeBookings.length >= 1 ? { height: height - 500 } : null]}>
+                                    <MapView style={styles.map}
+                                        provider={PROVIDER_GOOGLE}
+                    <UrlTile
+                        urlTemplate="https://a.tile.openstreetmap.org/{z}/{x}/{y}.png"
+                        maximumZ={19}
+                        flipY={false}
+                    />
+                                        minZoomLevel={3}
+                                        initialRegion={{
+                                            latitude: item.pickup.lat,
+                                            longitude: item.pickup.lng,
+                                            latitudeDelta: activeBookings && activeBookings.length >= 1 ? 0.0922 : 0.0822,
+                                            longitudeDelta: activeBookings && activeBookings.length >= 1 ? 0.0421 : 0.0321
+                                        }}
+                                    >
+                                        <Marker
+                                            coordinate={{ latitude: item.pickup.lat, longitude: item.pickup.lng }}
+                                            title={item.pickup.add}
+                                            description={t('pickup_location')}>
+                                            <Image source={require("../../assets/images/green_pin.png")} style={{ height: 35, width: 35 }} />
+                                        </Marker>
+
+                                        <Marker
+                                            coordinate={{ latitude: item.drop.lat, longitude: item.drop.lng }}
+                                            title={item.drop.add}
+                                            description={t('drop_location')}>
+                                            <Image source={require("../../assets/images/rsz_2red_pin.png")} style={{ height: 35, width: 35 }} />
+                                        </Marker>
+                                        {item.waypoints && item.waypoints.length > 0 ? item.waypoints.map((point, index) => {
+                                            return (
+                                                <Marker
+                                                    coordinate={{ latitude: point.lat, longitude: point.lng }}
+                                                    title={point.add}
+                                                    key={index}
+                                                >
+                                                    <Image source={require("../../assets/images/rsz_2red_pin.png")} style={{ height: 35, width: 35 }} />
+                                                </Marker>
+                                            )
+                                        })
+                                            : null}
+                                        {item.coords ?
+                                            <Polyline
+                                                coordinates={item.coords}
+                                                strokeWidth={4}
+                                                strokeColor={colors.INDICATOR_BLUE}
+                                            />
+                                            : null}
+                                    </MapView>
+                                </View>
+                                <View style={styles.mapDetails}>
+                                    <View style={styles.dateView}>
+                                        <View>
+                                            <Text style={styles.listDate}>{moment(item.tripdate).format('lll')}</Text>
+                                        </View>
+                                        <RateView
+                                            uid={auth.profile.uid}
+                                            settings={settings}
+                                            item={item}
+                                            styles={styles}
+                                        />
+                                        <View style={[styles.estimateView, { flexDirection: isRTL ? 'row-reverse' : 'row' }]}>
+                                            <Text style={styles.listEstimate}>{item.estimateDistance ? parseFloat(item.estimateDistance).toFixed(settings.decimal) : 0} {settings.convert_to_mile ? t('mile') : t('km')}</Text>
+                                            <Text style={styles.listEstimate}>{item.estimateTime ? parseFloat(item.estimateTime / 60).toFixed(0) : 0} {t('mins')}</Text>
+                                        </View>
+                                    </View>
+                                    <View style={[styles.addressViewStyle, isRTL ? {} : {}]}>
+                                        <View style={{ flexDirection: isRTL ? 'row-reverse' : 'row', alignItems: 'center', marginBottom: 8, width: '100%' }}>
+                                            <View style={styles.locationStyle}>
+                                                <Ionicons name="location-sharp" size={24} color="white" />
+                                            </View>
+                                            <Text style={[styles.addressViewTextStyle, isRTL ? { marginRight: 8 } : { marginLeft: 8 }, { textAlign: isRTL ? 'right' : 'left' }]}>{item.pickup.add}</Text>
+                                        </View>
+                                        {item.waypoints && item.waypoints.length > 0 ? item.waypoints.map((point, index) => {
+                                            return (
+                                                <View key={"key" + index} style={{ marginBottom: 8, flexDirection: isRTL ? 'row-reverse' : 'row', alignItems: 'center' }}>
+                                                    <View style={styles.locationStyle}>
+                                                        <Ionicons name="location-sharp" size={24} color="white" />
+                                                    </View>
+                                                    <Text style={[styles.addressViewTextStyle, isRTL ? { marginRight: 8 } : { marginLeft: 8 }, { textAlign: isRTL ? 'right' : 'left' }]}>{point.add}</Text>
+                                                </View>
+                                            )
+                                        })
+                                            : null}
+                                        <View style={{ flexDirection: isRTL ? 'row-reverse' : 'row', alignItems: 'center' }}>
+                                            <View style={styles.locationStyle}>
+                                                <Ionicons name="location-sharp" size={24} color="white" />
+                                            </View>
+                                            <Text style={[styles.addressViewTextStyle, isRTL ? { marginRight: 8 } : { marginLeft: 8 }, { textAlign: isRTL ? 'right' : 'left' }]}>{item.drop.add}</Text>
+                                        </View>
+                                    </View>
+                                    <ExtraInfo
+                                        item={item}
+                                        uid={auth.profile.uid}
+                                        amount={amount}
+                                        setAmount={setAmount}
+                                        styles={styles}
+                                        onPressAccept={onPressAccept}
+                                        settings={settings}
+                                    />
+                                    {item && item.status != 'NEW' ?
+                                        <View style={styles.detailsBtnView}>
+                                            <View style={{ flex: 1 }}>
+                                                <Button
+                                                    onPress={() => {
+                                                        goToBooking(item.id);
+                                                    }}
+                                                    title={t('go_to_booking')}
+                                                    titleStyle={styles.titleStyles}
+                                                    buttonStyle={{
+                                                        backgroundColor: colors.DRIVER_TRIPS_BUTTON,
+                                                        width: 150,
+                                                        minHeight: 50,
+                                                        padding: 2,
+                                                        borderColor: colors.TRANSPARENT,
+                                                        borderWidth: 0,
+                                                        borderRadius: 10,
+                                                    }}
+                                                    containerStyle={{
+                                                        flex: 1,
+                                                        alignSelf: 'center',
+                                                        paddingRight: 14
+                                                    }}
+                                                />
+                                            </View>
+                                        </View>
+                                        :
+                                        <View style={[styles.detailsBtnView, { flexDirection: isRTL ? 'row-reverse' : 'row' }]}>
+                                            <View style={{ flex: 1 }}>
+                                                <Button
+                                                    onPress={() => {
+                                                        setModalVisible(true);
+                                                        setSelectedItem(item);
+                                                    }}
+                                                    title={t('ignore_text')}
+                                                    titleStyle={styles.titleStyles}
+                                                    buttonStyle={[styles.btn, { backgroundColor: colors.LIGHT_RED, width: 150 }]}
+                                                    containerStyle={{
+                                                        flex: 1,
+                                                        alignSelf: isRTL ? 'flex-start' : 'flex-end',
+                                                        paddingRight: isRTL ? 0 : 14,
+                                                        paddingLeft: isRTL ? 14 : 0
+
+                                                    }}
+                                                />
+                                            </View>
+                                            {item.deliveryWithBid && !(item.driverOffers && item.driverOffers[auth.profile.uid]) ?
+                                                <View style={styles.viewFlex1}>
+                                                    <Button
+                                                        title={t('accept')}
+                                                        titleStyle={styles.titleStyles}
+                                                        onPress={() => {
+                                                            onPressAccept(item, amount[item.id])
+                                                        }}
+                                                        buttonStyle={[styles.btn, { backgroundColor: colors.DRIVER_TRIPS_BUTTON, width: 150 }]}
+                                                        containerStyle={{
+                                                            flex: 1,
+                                                            alignSelf: isRTL ? 'flex-end' : 'flex-start',
+                                                            paddingRight: isRTL ? 14 : 0,
+                                                            paddingLeft: isRTL ? 0 : 14
+                                                        }}
+                                                    />
+                                                </View>
+                                                :
+                                                !item.deliveryWithBid && (!appConsts.acceptWithAmount || (appConsts.acceptWithAmount && !(item.driverOffers && item.driverOffers[auth.profile.uid]))) ?
+                                                    <View style={styles.viewFlex1}>
+                                                        <Button
+                                                            title={t('accept')}
+                                                            titleStyle={styles.titleStyles}
+                                                            onPress={() => {
+                                                                onPressAccept(item, amount[item.id])
+                                                            }}
+                                                            buttonStyle={[styles.btn, { backgroundColor: colors.DRIVER_TRIPS_BUTTON, width: 150 }]}
+                                                            containerStyle={{
+                                                                flex: 1,
+                                                                alignSelf: isRTL ? 'flex-end' : 'flex-start',
+                                                                paddingRight: isRTL ? 14 : 0,
+                                                                paddingLeft: isRTL ? 0 : 14
+                                                            }}
+                                                        />
+                                                    </View>
+                                                    : null}
+                                        </View>
+                                    }
+                                </View>
+
+                            </KeyboardAvoidingView>
+                        )
+                    }
+                    }
+                />
+                </View>
+                <View style={styles.report}>
+                                <View style={{ flexDirection: isRTL ? 'row-reverse' : 'row', justifyContent: 'space-between', width: '80%', alignSelf: 'center', marginVertical:10}}>
+                                    <Text style={{ color: MAIN_COLOR, fontSize:windoHight > 1000? 30: 20, fontWeight: 'bold' }}>{t('today_text')}</Text>
+                                    <MaterialIcons
+                                        name="keyboard-arrow-right"
+                                        size={windoHight > 1000? 45:28}
+                                        color={MAIN_COLOR}
+                                        onPress={() => {
+                                            props.navigation.navigate("MyEarning");
+                                        }}
+                                    />
+                                </View>
+                                <View style={{ flexDirection: isRTL ? 'row-reverse' : 'row', justifyContent: 'space-between', width: '80%', alignSelf: 'center', marginTop: 5 }}>
+                                    <View style={{ flexDirection: isRTL ? 'row-reverse' : 'row', alignItems: 'center' }}>
+                                        <Text style={{ color: MAIN_COLOR, fontSize: windoHight > 1000? 30:20, fontWeight: 'bold' }}>{bookingCount}</Text>
+                                        <Text style={{ color: MAIN_COLOR, fontSize: windoHight > 1000? 26:18, marginHorizontal: 3 }}>{t('rides')}</Text>
+                                    </View>
+                                    {settings.swipe_symbol === false ?
+                                        <Text style={{ color: MAIN_COLOR, fontSize: windoHight > 1000? 30: 20, fontWeight: 'bold' }}>
+                                            {settings.symbol}{today ? parseFloat(today).toFixed(settings.decimal) : '0'}
+                                        </Text>
+                                        :
+                                        <Text style={{ color: MAIN_COLOR, fontSize:  windoHight > 1000? 30: 20, fontWeight: 'bold' }}>
+                                            {today ? parseFloat(today).toFixed(settings.decimal) : '0'}{settings.symbol}
+                                        </Text>
+                                    }
+                                </View>
+                            </View> 
+                
+            </KeyboardAvoidingView>
+
+            <View style={styles.modalPage}>
+                <Modal
+                    animationType="slide"
+                    transparent={true}
+                    visible={modalVisible}
+                    onRequestClose={() => {
+                        Alert.alert(t('modal_close'));
+                    }}>
+                    <View style={styles.modalMain}>
+                        <View style={styles.modalContainer}>
+                            <View style={styles.modalHeading}>
+                                <Text style={styles.alertStyle}>{t('alert_text')}</Text>
+                            </View>
+                            <View style={styles.modalBody}>
+                                <Text style={{ fontSize: 16, fontFamily: fonts.Regular }}>{t('ignore_job_title')}</Text>
+                            </View>
+                            <View style={[styles.modalFooter, { flexDirection: isRTL ? 'row-reverse' : 'row' }]}>
+                                <TouchableHighlight
+                                    style={isRTL ? [styles.btnStyle] : [styles.btnStyle, styles.clickText]}
+                                    onPress={() => {
+                                        setModalVisible(!modalVisible);
+                                        setSelectedItem(null);
+                                    }}>
+                                    <Text style={styles.cancelTextStyle}>{t('cancel')}</Text>
+                                </TouchableHighlight>
+                                <TouchableHighlight
+                                    style={isRTL ? [styles.btnStyle, styles.clickText] : [styles.btnStyle]}
+                                    onPress={() => {
+                                        onPressIgnore(selectedItem.id)
+                                    }}>
+                                    <Text style={styles.okStyle}>{t('ok')}</Text>
+                                </TouchableHighlight>
+                            </View>
+                        </View>
+                    </View>
+                </Modal>
+            </View>
+        </View>
+    )
 }
 
 const styles = StyleSheet.create({
-    container: { flex: 1, backgroundColor: 'transparent' },
-    headerFloating: { position: 'absolute', top: 75, left: 0, right: 0, zIndex: 1000, paddingHorizontal: 20 },
-    bottomButtonFloating: { position: 'absolute', bottom: 82, left: 0, right: 0, alignItems: 'center', zIndex: 1000 },
-    header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: 'transparent' },
-    headerButton: { width: 40, height: 40, borderRadius: 20, backgroundColor: '#fff', justifyContent: 'center', alignItems: 'center', shadowColor: colors.BLACK, shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.25, shadowRadius: 3.84, elevation: 5, marginHorizontal: 4 },
-    headerRightContainer: { flexDirection: 'row', alignItems: 'center', gap: 12 },
-    onlineButton: { paddingVertical: 6, paddingHorizontal: 17, borderRadius: 24, alignItems: 'center', justifyContent: 'center', minWidth: 200 },
-    onlineButtonText: { color: '#f5f1f1', fontSize: 18, fontWeight: 'bold' },
-    themeSwitchTouchable: { width: 72, height: 40, borderRadius: 20, justifyContent: 'center', alignItems: 'center', marginLeft: 0, marginRight: 0 },
-    themeSwitchTrack: { width: 72, height: 40, borderRadius: 20, borderWidth: 1.5, flexDirection: 'row', alignItems: 'center', position: 'relative', justifyContent: 'space-between', paddingHorizontal: 6, backgroundColor: '#fff', borderColor: '#ddd' },
-    themeSwitchIconBubble: { width: 28, height: 28, borderRadius: 14, justifyContent: 'center', alignItems: 'center', backgroundColor: '#111' },
-    earningsFloating: { position: 'absolute', top: 131, left: 0, right: 0, alignItems: 'center', zIndex: 999 },
-    earningsBox: { flexDirection: 'row', justifyContent: 'center', alignItems: 'center', backgroundColor: '#fff', borderRadius: 24, paddingVertical: 6, paddingHorizontal: 17, minWidth: 200, maxWidth: 200, width: 200, height: 40, shadowColor: colors.BLACK, shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.15, shadowRadius: 3.84, elevation: 3, borderWidth: 1, borderColor: '#eee', position: 'relative' },
-    earningsLabel: { color: '#1A330E', fontSize: 13, fontWeight: '600', marginBottom: 0 },
-    earningsValue: { color: '#1A330E', fontSize: 18, fontWeight: 'bold', marginRight: 6 },
-    earningsEye: { position: 'absolute', right: 12, top: '50%', transform: [{ translateY: -11 }] },
-    earningsValueCentered: { color: '#1A330E', fontSize: 18, fontWeight: 'bold', textAlign: 'center', width: '100%' },
+    alrt: {
+        width: width - 40,
+        minHeight: 60,
+        marginTop: 10,
+        padding: 5,
+        borderWidth: 1,
+        borderColor: colors.BORDER_BACKGROUND,
+        borderRadius: 5,
+        justifyContent: 'space-between',
+        alignItems: 'center',
+    },
+    report: {
+        height:'30%',
+        width: '100%',
+        alignSelf: 'center',
+        borderTopRightRadius: 15,
+        borderTopLeftRadius: 15, 
+        backgroundColor: colors.WHITE,
+        marginTop:-10,
+        shadowColor: 'black',
+        shadowOffset: { width: 0, height: -4 },
+        shadowOpacity: Platform.OS == 'ios' ? 0.1 : 0.8,
+        shadowRadius: 3,
+        elevation: Platform.OS == 'ios' ? 2 : 8,
+    },
+    locationStyle: {
+        height: 35,
+        width: 35,
+        backgroundColor: MAIN_COLOR,
+        justifyContent: 'center',
+        borderRadius: 25,
+        alignItems: 'center',
+        shadowColor: "#000",
+        shadowOffset: {
+            width: 0,
+            height: 4,
+        },
+        shadowOpacity: 0.5,
+        shadowRadius: 5,
+        elevation: 2,
+
+    },
+    alrt1: {
+        justifyContent: 'flex-start',
+        alignItems: 'center',
+        height: '100%',
+        width: "65%",
+
+    },
+    headerStyle: {
+        backgroundColor: colors.HEADER,
+        borderBottomWidth: 0
+    },
+    headerInnerStyle: {
+        marginLeft: 10,
+        marginRight: 10
+    },
+    btn: {
+        width: 110,
+        borderRadius: 10,
+        height: 55,
+    },
+    headerTitleStyle: {
+        color: colors.WHITE,
+        fontFamily: fonts.Bold,
+        fontSize: 20,
+        marginTop: 3
+    },
+    mapcontainer: {
+        width: width,
+        height: 180,
+        borderColor: colors.HEADER,
+        justifyContent: 'center',
+        alignItems: 'center',
+    },
+    mapDetails: {
+        backgroundColor: colors.WHITE,
+        flex: 1,
+        flexDirection: 'column',
+        shadowColor: "#000",
+        shadowOffset: {
+            width: 0,
+            height: 4,
+        },
+        shadowOpacity: 0.2,
+        shadowRadius: 3,
+        elevation: 3,
+        width: '98%',
+        alignSelf: 'center',
+        borderRadius: 10,
+        marginTop: -10,
+    },
+    map: {
+        flex: 1,
+        ...StyleSheet.absoluteFillObject,
+        overflow: 'hidden'
+    },
+    triangle: {
+        width: 0,
+        height: 0,
+        backgroundColor: colors.TRANSPARENT,
+        borderStyle: 'solid',
+        borderLeftWidth: 9,
+        borderRightWidth: 9,
+        borderBottomWidth: 10,
+        borderLeftColor: colors.TRANSPARENT,
+        borderRightColor: colors.TRANSPARENT,
+        borderBottomColor: colors.BOX_BG,
+        transform: [
+            { rotate: '180deg' }
+        ]
+    },
+    signInTextStyle: {
+        fontFamily: 'Roboto-Bold',
+        fontWeight: "700",
+        color: colors.WHITE
+    },
+    listItemView: {
+        flex: 1,
+        width: '100%',
+        marginBottom: 10,
+        flexDirection: 'column',
+    },
+    dateView: {
+        backgroundColor: SECONDORY_COLOR,
+        shadowColor: "#000",
+        shadowOffset: {
+            width: 0,
+            height: 3,
+        },
+        shadowOpacity: 0.2,
+        shadowRadius: 3,
+        elevation: 2,
+        borderTopRightRadius: 10,
+        borderTopLeftRadius: 10,
+        marginBottom: 10,
+    },
+    listDate: {
+        fontSize: 20,
+        fontFamily: fonts.Bold,
+        paddingLeft: 10,
+        color: colors.BLACK,
+        alignSelf: 'center',
+        marginTop: 5
+    },
+    estimateView: {
+        flex: 1.1,
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-around',
+        marginBottom: 10
+    },
+    listEstimate: {
+        fontSize: 20,
+        color: colors.BLACK,
+        fontFamily: fonts.Regular
+    },
+    addressViewStyle: {
+        width: '97%',
+        marginHorizontal: 5,
+    },
+    no_driver_style: {
+        color: colors.DRIVER_TRIPS_TEXT,
+        fontSize: 18,
+    },
+    addressViewTextStyle: {
+        color: colors.BLACK,
+        fontSize: 15,
+        flex: 1,
+        fontFamily: fonts.Regular
+    },
+    greenDot: {
+        backgroundColor: colors.GREEN_DOT,
+        width: 10,
+        height: 10,
+        borderRadius: 50
+    },
+    redDot: {
+        backgroundColor: colors.RED,
+        width: 10,
+        height: 10,
+        borderRadius: 50
+    },
+    detailsBtnView: {
+        flex: 2,
+        justifyContent: 'space-between',
+        width: width,
+        marginTop: 20,
+        marginBottom: 20
+    },
+
+    modalPage: {
+        flex: 1,
+        flexDirection: 'row',
+        justifyContent: 'center',
+        alignItems: 'center'
+    },
+    modalMain: {
+        flex: 1,
+        backgroundColor: colors.BACKGROUND,
+        justifyContent: 'center',
+        alignItems: 'center'
+    },
+    modalContainer: {
+        width: '80%',
+        backgroundColor: colors.WHITE,
+        borderRadius: 10,
+        flexDirection: 'column',
+        justifyContent: 'center',
+        alignItems: 'center',
+        paddingTop: 15,
+        flex: 1,
+        maxHeight: 180
+    },
+    modalHeading: {
+        flexDirection: 'row',
+        justifyContent: 'center',
+        alignItems: 'center'
+    },
+    modalBody: {
+        flex: 2,
+        flexDirection: 'row',
+        justifyContent: 'center',
+        alignItems: 'center'
+    },
+    modalFooter: {
+        flex: 1,
+        flexDirection: 'row',
+        justifyContent: 'center',
+        borderTopColor: colors.FOOTERTOP,
+        borderTopWidth: 1,
+        width: '100%',
+    },
+    btnStyle: {
+        flex: 1,
+        justifyContent: 'center',
+        alignItems: 'center',
+    },
+    mainViewStyle: {
+        flex: 1,
+    },
+    headerCustom: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        paddingHorizontal: 20,
+        paddingTop: 45,
+        paddingBottom: 16,
+    },
+    headerButtonCustom: {
+        width: 40,
+        height: 40,
+        borderRadius: 20,
+        justifyContent: 'center',
+        alignItems: 'center',
+        shadowColor: '#000',
+        shadowOffset: {
+            width: 0,
+            height: 1,
+        },
+        shadowOpacity: 0.1,
+        shadowRadius: 2,
+        elevation: 2,
+    },
+    headerTitleCustom: {
+        fontSize: 18,
+        fontWeight: 'bold',
+        fontFamily: fonts.Bold,
+    },
+    headerRightContainerCustom: {
+        width: 40,
+    },
+    myButtonStyle: {
+        backgroundColor: colors.RED,
+        width: height / 6,
+        padding: 2,
+        borderColor: colors.TRANSPARENT,
+        borderWidth: 0,
+        borderRadius: 5,
+    },
+    alertStyle: {
+        fontFamily: fonts.Bold,
+        fontSize: 18,
+        width: '100%',
+        textAlign: 'center'
+    },
+    cancelTextStyle: {
+        color: colors.INDICATOR_BLUE,
+        fontSize: 18,
+        fontFamily: fonts.Bold,
+        width: "100%",
+        textAlign: 'center'
+    },
+    okStyle: {
+        color: colors.INDICATOR_BLUE,
+        fontSize: 18,
+        fontFamily: fonts.Bold
+    },
+    viewFlex1: {
+        flex: 1
+    },
+    clickText: {
+        borderRightColor: colors.DRIVER_TRIPS_TEXT,
+        borderRightWidth: 1
+    },
+    titleStyles: {
+        width: "100%",
+        alignSelf: 'center',
+        fontFamily: fonts.Bold
+    },
+    rateViewStyle: {
+        alignItems: 'center',
+        flex: 2,
+        marginBottom: 0
+    },
+    rateViewTextStyle: {
+        fontSize: 25,
+        fontFamily: fonts.Bold,
+        textAlign: "center"
+    },
+    textContainerStyle: {
+        marginHorizontal: 15,
+        marginTop: 10
+    },
+    deliveryOption: {
+        justifyContent: 'space-around',
+        borderTopWidth: 0.5,
+        borderBottomWidth: 0.5,
+        marginTop: 10,
+        padding: 6
+    },
+    textContainerStyle2: {
+        flexDirection: 'column',
+        alignItems: "flex-start",
+        marginLeft: 35,
+        marginRight: 35,
+        marginTop: 10
+    },
+    textHeading: {
+        fontSize: 15,
+        fontFamily: fonts.Regular
+    },
+    textContent: {
+        fontSize: 15,
+        marginLeft: 3,
+        fontFamily: fonts.Bold
+    },
+    textContent2: {
+        marginTop: 4,
+        color: colors.DRIVER_TRIPS_TEXT,
+        fontSize: 15
+    },
+    box: {
+        height: 45,
+        backgroundColor: colors.WHITE,
+        marginTop: 10,
+        marginLeft: 20,
+        marginRight: 20,
+        borderWidth: 1,
+        borderColor: colors.BLACK,
+        justifyContent: 'center',
+        borderRadius: 10
+    },
+    labelStyle: {
+        fontFamily: fonts.Regular,
+        fontSize: 13,
+        color: colors.BLACK,
+        marginTop: 15,
+        alignSelf: 'center'
+    },
+    dateTextStyle: {
+        marginLeft: 14,
+        fontFamily: fonts.Regular,
+        fontSize: 14,
+        color: colors.BLACK
+    },
+    checkButtonStyle: {
+        backgroundColor: colors.GREEN,
+        width: 110,
+        minHeight: 40,
+        borderColor: colors.TRANSPARENT,
+        borderWidth: 0,
+        borderRadius: 5
+    },
+    checkButtonTitle: {
+        fontFamily: fonts.Bold,
+        fontSize: 12,
+        color: colors.WHITE
+    },
+    priceView: {
+        display: "flex",
+        justifyContent: "center",
+        alignItems: "center"
+    },
+    priceViewHeading: {
+        fontSize: 18,
+        fontFamily: fonts.Regular
+    },
+    priceViewContent: {
+        fontSize: 18,
+        marginLeft: 3,
+        fontFamily: fonts.Bold
+    },
 
 });

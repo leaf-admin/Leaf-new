@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Icon } from 'react-native-elements';
-import { colors } from '../common-local/theme';
+import { colors } from '../common/theme';
 import {
   View,
   Text,
@@ -18,17 +18,17 @@ import {
   Platform
 } from 'react-native';
 import i18n from '../i18n';
-import { api } from '../common-local';
+import { api } from '../../common';
 import { useSelector, useDispatch } from 'react-redux';
 import Footer from '../components/Footer'
-import { checkSearchPhrase, appConsts } from '../common-local/sharedFunctions';
-import { MAIN_COLOR } from '../common-local/sharedFunctions';
+import { checkSearchPhrase, appConsts } from '../common/sharedFunctions';
+import { MAIN_COLOR } from '../common/sharedFunctions';
 var { width,height } = Dimensions.get('window');
 import {  StackActions } from '@react-navigation/native';
 import { Entypo, MaterialIcons, AntDesign, FontAwesome, MaterialCommunityIcons } from '@expo/vector-icons';
 import { Button } from 'react-native-elements';
 import uuid from 'react-native-uuid';
-import { fonts } from '../common-local/font';
+import { fonts } from '../common/font';
 import DeviceInfo from 'react-native-device-info';
 
 const hasNotch = DeviceInfo.hasNotch();

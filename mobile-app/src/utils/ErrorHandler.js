@@ -1,5 +1,8 @@
+import Logger from './Logger';
 // ErrorHandler.js - Sistema centralizado de tratamento de erros
 import { Alert } from 'react-native';
+import languageManager from '../locales';
+
 
 // Tipos de erro
 export const ERROR_TYPES = {
@@ -36,22 +39,22 @@ export const ERROR_CODES = {
   STORAGE_PERMISSION_DENIED: 'STORAGE_PERMISSION_DENIED'
 };
 
-// Mensagens de erro amigáveis
+// Mensagens de erro amigáveis usando i18n
 const ERROR_MESSAGES = {
-  [ERROR_CODES.NETWORK_TIMEOUT]: 'Conexão lenta. Verifique sua internet.',
-  [ERROR_CODES.NETWORK_UNREACHABLE]: 'Sem conexão com a internet.',
-  [ERROR_CODES.CONNECTION_REFUSED]: 'Servidor indisponível. Tente novamente.',
-  [ERROR_CODES.UNAUTHORIZED]: 'Sessão expirada. Faça login novamente.',
-  [ERROR_CODES.FORBIDDEN]: 'Acesso negado.',
-  [ERROR_CODES.TOKEN_EXPIRED]: 'Token expirado. Faça login novamente.',
-  [ERROR_CODES.INVALID_INPUT]: 'Dados inválidos. Verifique as informações.',
-  [ERROR_CODES.MISSING_REQUIRED_FIELD]: 'Campo obrigatório não preenchido.',
-  [ERROR_CODES.INTERNAL_SERVER_ERROR]: 'Erro interno do servidor.',
-  [ERROR_CODES.SERVICE_UNAVAILABLE]: 'Serviço temporariamente indisponível.',
-  [ERROR_CODES.LOCATION_PERMISSION_DENIED]: 'Permissão de localização negada.',
-  [ERROR_CODES.CAMERA_PERMISSION_DENIED]: 'Permissão da câmera negada.',
-  [ERROR_CODES.STORAGE_PERMISSION_DENIED]: 'Permissão de armazenamento negada.',
-  DEFAULT: 'Ocorreu um erro inesperado. Tente novamente.'
+  [ERROR_CODES.NETWORK_TIMEOUT]: 'errors.networkTimeout',
+  [ERROR_CODES.NETWORK_UNREACHABLE]: 'errors.networkUnreachable',
+  [ERROR_CODES.CONNECTION_REFUSED]: 'errors.connectionRefused',
+  [ERROR_CODES.UNAUTHORIZED]: 'errors.unauthorized',
+  [ERROR_CODES.FORBIDDEN]: 'errors.forbidden',
+  [ERROR_CODES.TOKEN_EXPIRED]: 'errors.tokenExpired',
+  [ERROR_CODES.INVALID_INPUT]: 'errors.invalidInput',
+  [ERROR_CODES.MISSING_REQUIRED_FIELD]: 'errors.missingRequiredField',
+  [ERROR_CODES.INTERNAL_SERVER_ERROR]: 'errors.internalServerError',
+  [ERROR_CODES.SERVICE_UNAVAILABLE]: 'errors.serviceUnavailable',
+  [ERROR_CODES.LOCATION_PERMISSION_DENIED]: 'errors.locationPermissionDenied',
+  [ERROR_CODES.CAMERA_PERMISSION_DENIED]: 'errors.cameraPermissionDenied',
+  [ERROR_CODES.STORAGE_PERMISSION_DENIED]: 'errors.storagePermissionDenied',
+  DEFAULT: 'errors.default'
 };
 
 // Classe principal de tratamento de erros
@@ -99,12 +102,16 @@ class ErrorHandler {
     return errorInfo;
   }
 
-  // Obter mensagem amigável
+  // Obter mensagem amigável usando i18n
   getFriendlyMessage(errorInfo) {
+    let messageKey = ERROR_MESSAGES.DEFAULT;
+    
     if (errorInfo.code && ERROR_MESSAGES[errorInfo.code]) {
-      return ERROR_MESSAGES[errorInfo.code];
+      messageKey = ERROR_MESSAGES[errorInfo.code];
     }
-    return ERROR_MESSAGES.DEFAULT;
+    
+    // Usar languageManager para traduzir
+    return languageManager.t(messageKey);
   }
 
   // Registrar erro no log
@@ -118,7 +125,7 @@ class ErrorHandler {
 
     // Log para desenvolvimento
     if (__DEV__) {
-      console.error('🔴 ErrorHandler:', {
+      Logger.error('🔴 ErrorHandler:', {
         type: errorInfo.type,
         code: errorInfo.code,
         message: errorInfo.message,
@@ -179,7 +186,7 @@ class ErrorHandler {
 
   // Tratar erro de autenticação
   handleAuthenticationError() {
-    console.log('🔐 Redirecionando para login...');
+    Logger.log('🔐 Redirecionando para login...');
     
     try {
       // Importar navigation dinamicamente para evitar dependências circulares
@@ -215,10 +222,10 @@ class ErrorHandler {
         );
       }
       
-      console.log('✅ Redirecionamento para login concluído');
+      Logger.log('✅ Redirecionamento para login concluído');
       
     } catch (error) {
-      console.error('❌ Erro ao redirecionar para login:', error);
+      Logger.error('❌ Erro ao redirecionar para login:', error);
       
       // Fallback final: mostrar alerta
       Alert.alert(
@@ -229,7 +236,7 @@ class ErrorHandler {
             text: 'OK',
             onPress: () => {
               // Aqui poderia ter lógica para reiniciar o app
-              console.log('🔄 Sugerindo reinicialização do app');
+              Logger.log('🔄 Sugerindo reinicialização do app');
             }
           }
         ]
@@ -252,7 +259,7 @@ class ErrorHandler {
       
       keysToRemove.forEach(key => {
         AsyncStorage.removeItem(key).catch(err => {
-          console.log(`⚠️ Erro ao remover ${key}:`, err);
+          Logger.log(`⚠️ Erro ao remover ${key}:`, err);
         });
       });
       
@@ -261,10 +268,10 @@ class ErrorHandler {
         global.store.dispatch({ type: 'LOGOUT' });
       }
       
-      console.log('🧹 Dados de autenticação limpos');
+      Logger.log('🧹 Dados de autenticação limpos');
       
     } catch (error) {
-      console.error('❌ Erro ao limpar dados de auth:', error);
+      Logger.error('❌ Erro ao limpar dados de auth:', error);
     }
   }
 
@@ -277,10 +284,10 @@ class ErrorHandler {
       } else {
         // Tentar importar e usar navigation
         const { NavigationContainer } = require('@react-navigation/native');
-        console.log('📱 Tentando navegação alternativa...');
+        Logger.log('📱 Tentando navegação alternativa...');
       }
     } catch (error) {
-      console.error('❌ Erro na navegação alternativa:', error);
+      Logger.error('❌ Erro na navegação alternativa:', error);
     }
   }
 

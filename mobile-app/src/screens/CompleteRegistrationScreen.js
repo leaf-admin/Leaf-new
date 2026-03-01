@@ -1,390 +1,417 @@
-import React, { useState, useEffect } from 'react';
-import {
-  View,
-  Text,
-  StyleSheet,
-  TouchableOpacity,
-  ScrollView,
-  Alert,
-  Dimensions
-} from 'react-native';
+import React, { useState } from 'react';
+import { View, Text, TextInput, TouchableOpacity, StyleSheet, SafeAreaView, ScrollView, Platform, Alert } from 'react-native';
 import { useNavigation, useRoute } from '@react-navigation/native';
-import AsyncStorage from '@react-native-async-storage/async-storage';
-
-const { width, height } = Dimensions.get('window');
+import { colors } from '../common/theme';
+import * as ImagePicker from 'expo-image-picker';
+import { MaterialCommunityIcons } from '@expo/vector-icons';
+import OnboardingLayout from '../components/OnboardingLayout';
 
 const LEAF_GREEN = '#1A330E';
-const WHITE = '#FFFFFF';
-const BLACK = '#000000';
-const GRAY = '#666666';
-const LIGHT_GRAY = '#F5F5F5';
-const DARK_GRAY = '#333333';
+const LEAF_GRAY = '#B0B0B0';
+
+const cities = [
+  'São Paulo', 'Rio de Janeiro', 'Belo Horizonte', 'Brasília', 'Salvador', 'Curitiba', 'Porto Alegre', 'Recife', 'Fortaleza', 'Manaus'
+];
 
 export default function CompleteRegistrationScreen() {
   const navigation = useNavigation();
   const route = useRoute();
+  const userType = route?.params?.userType || 'passenger';
+
+  // Campos comuns
+  const [name, setName] = useState('');
+  const [email, setEmail] = useState('');
+  const [termsAccepted, setTermsAccepted] = useState(false);
+
+  // Campos motorista
+  const [cpf, setCpf] = useState('');
+  const [city, setCity] = useState('');
+  const [pix, setPix] = useState('');
   
-  const [isLoading, setIsLoading] = useState(false);
-  const [userData, setUserData] = useState(null);
-  
-  const { userData: routeUserData } = route.params;
+  // Dados dos documentos (vêm das telas anteriores)
+  const userData = route?.params?.userData || {};
 
-  useEffect(() => {
-    loadUserData();
-  }, []);
+  const [loading, setLoading] = useState(false);
 
-  const loadUserData = async () => {
-    try {
-      const storedData = await AsyncStorage.getItem('@temp_user_data');
-      const data = storedData ? JSON.parse(storedData) : routeUserData;
-      setUserData(data);
-      console.log('CompleteRegistrationScreen - Dados carregados:', data);
-    } catch (error) {
-      console.error('CompleteRegistrationScreen - Erro ao carregar dados:', error);
-    }
-  };
-
-  const handleCompleteRegistration = async () => {
-    setIsLoading(true);
+  // Função para formatar CPF no padrão xxx.xxx.xxx-xx
+  const formatCPF = (text) => {
+    // Remove tudo que não é número
+    const numbers = text.replace(/\D/g, '');
     
-    try {
-      console.log('CompleteRegistrationScreen - Finalizando cadastro');
-      
-      // Simular processo de finalização
-      await new Promise(resolve => setTimeout(resolve, 3000));
-      
-      // Salvar dados finais
-      const finalUserData = {
-        ...userData,
-        registrationCompleted: true,
-        registrationCompletedAt: new Date().toISOString(),
-        status: userData.userType === 'driver' ? 'pending_approval' : 'active'
-      };
-      
-      await AsyncStorage.setItem('@user_data', JSON.stringify(finalUserData));
-      await AsyncStorage.removeItem('@temp_user_data');
-      
-      console.log('CompleteRegistrationScreen - Cadastro finalizado com sucesso');
-      
-      // Mostrar mensagem de sucesso
-      Alert.alert(
-        'Cadastro Concluído!',
-        userData.userType === 'driver' 
-          ? 'Seu cadastro foi enviado para análise. Você receberá uma notificação quando for aprovado.'
-          : 'Seu cadastro foi concluído com sucesso! Bem-vindo à 99.',
-        [
-          {
-            text: 'OK',
-            onPress: () => {
-              // Navegar para a tela principal
-              navigation.reset({
-                index: 0,
-                routes: [{ name: 'MainApp' }],
-              });
-            }
-          }
-        ]
-      );
-      
-    } catch (error) {
-      console.error('CompleteRegistrationScreen - Erro ao finalizar cadastro:', error);
-      Alert.alert('Erro', 'Não foi possível finalizar o cadastro. Tente novamente.');
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  const getRegistrationInfo = () => {
-    if (!userData) return null;
-    
-    if (userData.userType === 'passenger') {
-      return {
-        title: 'Cadastro Concluído!',
-        subtitle: 'Bem-vindo à 99',
-        icon: '🎉',
-        message: 'Seu cadastro como passageiro foi concluído com sucesso. Agora você pode solicitar corridas e aproveitar todos os benefícios da plataforma.',
-        nextSteps: [
-          'Solicite sua primeira corrida',
-          'Adicione métodos de pagamento',
-          'Configure suas preferências',
-          'Convide amigos e ganhe descontos'
-        ]
-      };
+    // Aplica a máscara xxx.xxx.xxx-xx
+    if (numbers.length <= 3) {
+      return numbers;
+    } else if (numbers.length <= 6) {
+      return `${numbers.slice(0, 3)}.${numbers.slice(3)}`;
+    } else if (numbers.length <= 9) {
+      return `${numbers.slice(0, 3)}.${numbers.slice(3, 6)}.${numbers.slice(6)}`;
     } else {
-      return {
-        title: 'Cadastro Enviado!',
-        subtitle: 'Aguardando Aprovação',
-        icon: '📋',
-        message: 'Seu cadastro como motorista parceiro foi enviado para análise. Nossa equipe irá revisar seus documentos e entrará em contato em breve.',
-        nextSteps: [
-          'Aguarde a análise dos documentos',
-          'Você receberá uma notificação',
-          'Após aprovação, poderá começar a dirigir',
-          'Configure seu perfil e veículo'
-        ]
-      };
+      return `${numbers.slice(0, 3)}.${numbers.slice(3, 6)}.${numbers.slice(6, 9)}-${numbers.slice(9, 11)}`;
     }
   };
 
-  const registrationInfo = getRegistrationInfo();
+  // Função para validar CPF
+  const validateCPF = (cpf) => {
+    // Remove caracteres não numéricos
+    const numbers = cpf.replace(/\D/g, '');
+    
+    // Verifica se tem 11 dígitos
+    if (numbers.length !== 11) {
+      return false;
+    }
+    
+    // Verifica se todos os dígitos são iguais
+    if (/^(\d)\1{10}$/.test(numbers)) {
+      return false;
+    }
+    
+    // Validação do primeiro dígito verificador
+    let sum = 0;
+    for (let i = 0; i < 9; i++) {
+      sum += parseInt(numbers[i]) * (10 - i);
+    }
+    let remainder = (sum * 10) % 11;
+    if (remainder === 10 || remainder === 11) remainder = 0;
+    if (remainder !== parseInt(numbers[9])) {
+      return false;
+    }
+    
+    // Validação do segundo dígito verificador
+    sum = 0;
+    for (let i = 0; i < 10; i++) {
+      sum += parseInt(numbers[i]) * (11 - i);
+    }
+    remainder = (sum * 10) % 11;
+    if (remainder === 10 || remainder === 11) remainder = 0;
+    if (remainder !== parseInt(numbers[10])) {
+      return false;
+    }
+    
+    return true;
+  };
 
-  if (!registrationInfo) {
-    return (
-      <View style={styles.container}>
-        <View style={styles.loadingContainer}>
-          <Text style={styles.loadingText}>Carregando...</Text>
-        </View>
-      </View>
-    );
-  }
+
+
+  const validate = () => {
+    if (!name.trim()) return 'Preencha o nome completo';
+    if (userType === 'driver') {
+      if (!cpf.trim()) return 'Preencha o CPF';
+      if (!validateCPF(cpf)) return 'CPF inválido. Verifique os números digitados.';
+      if (!userData.cnhImage) return 'Envie a foto da CNH';
+      if (!userData.crlvImage) return 'Envie a foto do CRLV';
+      if (!city) return 'Selecione a cidade de atuação';
+      if (!pix.trim()) return 'Informe a conta bancária ou chave Pix';
+    }
+    if (!termsAccepted) return 'É necessário aceitar os termos e políticas';
+    return null;
+  };
+
+  const handleSubmit = () => {
+    const error = validate();
+    if (error) {
+      Alert.alert('Atenção', error);
+      return;
+    }
+    setLoading(true);
+    // Aqui você pode enviar os dados para o backend
+    setTimeout(() => {
+      setLoading(false);
+      if (userType === 'driver') {
+        Alert.alert('Cadastro enviado', 'Aguarde a aprovação da sua conta.');
+      } else {
+        Alert.alert('Cadastro concluído', 'Bem-vindo à Leaf!');
+      }
+      navigation.reset({ index: 0, routes: [{ name: 'WelcomeScreen' }] });
+    }, 1200);
+  };
+
+  // Barra de progresso customizada
+  const progressBar = (
+    <View style={styles.progressBarContainer}>
+      <View style={styles.progressDot} />
+      <View style={styles.progressDot} />
+      <View style={styles.progressDot} />
+      <View style={[styles.progressDot, styles.progressActive]} />
+    </View>
+  );
+
+  const isFormValid = name.trim() && termsAccepted && 
+    (userType === 'passenger' || (cpf.trim() && validateCPF(cpf) && userData.cnhImage && userData.crlvImage && city && pix.trim()));
 
   return (
-    <View style={styles.container}>
-      <View style={styles.header}>
-        <Text style={styles.title}>{registrationInfo.title}</Text>
-        <Text style={styles.subtitle}>{registrationInfo.subtitle}</Text>
-      </View>
-
-      <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
-        <View style={styles.successContainer}>
-          <View style={styles.iconContainer}>
-            <Text style={styles.icon}>{registrationInfo.icon}</Text>
-          </View>
-          
-          <Text style={styles.message}>{registrationInfo.message}</Text>
-          
-          <View style={styles.nextStepsContainer}>
-            <Text style={styles.nextStepsTitle}>Próximos Passos:</Text>
-            {registrationInfo.nextSteps.map((step, index) => (
-              <View key={index} style={styles.stepItem}>
-                <Text style={styles.stepNumber}>{index + 1}</Text>
-                <Text style={styles.stepText}>{step}</Text>
-              </View>
-            ))}
-          </View>
-          
-                     {userData?.userType === 'driver' && (
-             <View style={styles.driverInfoContainer}>
-               <Text style={styles.driverInfoTitle}>Documentos Enviados:</Text>
-               <View style={styles.documentItem}>
-                 <Text style={styles.documentIcon}>✅</Text>
-                 <Text style={styles.documentText}>CNH - Carteira Nacional de Habilitação</Text>
-               </View>
-               <View style={styles.documentItem}>
-                 <Text style={styles.documentIcon}>✅</Text>
-                 <Text style={styles.documentText}>Dados Pessoais</Text>
-               </View>
-               <View style={styles.documentItem}>
-                 <Text style={styles.documentIcon}>⏳</Text>
-                 <Text style={styles.documentText}>CRLV - Será cadastrado dentro do app</Text>
-               </View>
-             </View>
-           )}
-        </View>
-      </ScrollView>
-
-      <View style={styles.footer}>
-        <TouchableOpacity
-          style={styles.completeButton}
-          onPress={handleCompleteRegistration}
-          disabled={isLoading}
-        >
-          <Text style={styles.completeButtonText}>
-            {isLoading ? 'Finalizando...' : 'Finalizar Cadastro'}
-          </Text>
-        </TouchableOpacity>
+    <OnboardingLayout
+      progress={progressBar}
+      onContinue={handleSubmit}
+      continueLabel={loading ? "Processando..." : "Finalizar cadastro"}
+      continueDisabled={!isFormValid || loading}
+    >
+      <View style={styles.container}>
+        <Text style={styles.title}>
+          {userType === 'driver' ? 'Complete seu cadastro de Parceiro' : 'Complete seu cadastro de Passageiro'}
+        </Text>
+        <Text style={styles.subtitle}>
+          Preencha os dados abaixo para finalizar seu cadastro
+        </Text>
         
-        <TouchableOpacity
-          style={styles.supportButton}
-          onPress={() => Alert.alert('Suporte', 'Entre em contato conosco através do chat ou email: suporte@99.com')}
-        >
-          <Text style={styles.supportButtonText}>Preciso de Ajuda</Text>
-        </TouchableOpacity>
+        <ScrollView style={styles.scrollView} showsVerticalScrollIndicator={false}>
+          <View style={styles.form}>
+            <View style={styles.inputGroup}>
+              <Text style={styles.label}>Nome completo *</Text>
+              <TextInput
+                style={styles.input}
+                value={name}
+                onChangeText={setName}
+                placeholder="Seu nome completo"
+                placeholderTextColor={LEAF_GRAY}
+                autoCapitalize="words"
+              />
+            </View>
+
+            {userType === 'passenger' && (
+              <View style={styles.inputGroup}>
+                <Text style={styles.label}>E-mail (opcional)</Text>
+                <TextInput
+                  style={styles.input}
+                  value={email}
+                  onChangeText={setEmail}
+                  placeholder="Seu e-mail"
+                  placeholderTextColor={LEAF_GRAY}
+                  keyboardType="email-address"
+                  autoCapitalize="none"
+                />
+              </View>
+            )}
+
+            {userType === 'driver' && (
+              <>
+                <View style={styles.inputGroup}>
+                  <Text style={styles.label}>CPF *</Text>
+                  <TextInput
+                    style={[
+                      styles.input,
+                      cpf.trim() && !validateCPF(cpf) && styles.inputError
+                    ]}
+                    value={cpf}
+                    onChangeText={(text) => setCpf(formatCPF(text))}
+                    placeholder="000.000.000-00"
+                    placeholderTextColor={LEAF_GRAY}
+                    keyboardType="numeric"
+                    maxLength={14}
+                  />
+                  {cpf.trim() && !validateCPF(cpf) && (
+                    <Text style={styles.errorText}>CPF inválido</Text>
+                  )}
+                </View>
+
+                {/* Status dos documentos */}
+                <View style={styles.documentsContainer}>
+                  <Text style={styles.documentsTitle}>📄 Documentos obrigatórios:</Text>
+                  
+                  <TouchableOpacity 
+                    style={styles.documentItem}
+                    onPress={() => navigation.navigate('CNHUploadScreen', { userType, userData })}
+                  >
+                    <MaterialCommunityIcons 
+                      name={userData.cnhImage ? "check-circle" : "camera"} 
+                      size={24} 
+                      color={userData.cnhImage ? "#4CAF50" : LEAF_GREEN} 
+                    />
+                    <Text style={[
+                      styles.documentText,
+                      { color: userData.cnhImage ? "#4CAF50" : LEAF_GREEN }
+                    ]}>
+                      CNH {userData.cnhImage ? "✓ Enviada" : "📷 Enviar foto"}
+                    </Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity 
+                    style={styles.documentItem}
+                    onPress={() => navigation.navigate('CRLVUploadScreen', { userType, userData })}
+                  >
+                    <MaterialCommunityIcons 
+                      name={userData.crlvImage ? "check-circle" : "camera"} 
+                      size={24} 
+                      color={userData.crlvImage ? "#4CAF50" : LEAF_GREEN} 
+                    />
+                    <Text style={[
+                      styles.documentText,
+                      { color: userData.crlvImage ? "#4CAF50" : LEAF_GREEN }
+                    ]}>
+                      CRLV {userData.crlvImage ? "✓ Enviado" : "📷 Enviar foto"}
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+
+                <View style={styles.inputGroup}>
+                  <Text style={styles.label}>Cidade de atuação *</Text>
+                  <TextInput
+                    style={styles.input}
+                    value={city}
+                    onChangeText={setCity}
+                    placeholder="Selecione sua cidade"
+                    placeholderTextColor={LEAF_GRAY}
+                  />
+                </View>
+
+                <View style={styles.inputGroup}>
+                  <Text style={styles.label}>Conta bancária ou chave Pix *</Text>
+                  <TextInput
+                    style={styles.input}
+                    value={pix}
+                    onChangeText={setPix}
+                    placeholder="Chave Pix ou dados bancários"
+                    placeholderTextColor={LEAF_GRAY}
+                    autoCapitalize="none"
+                  />
+                </View>
+              </>
+            )}
+
+            <View style={styles.termsContainer}>
+              <TouchableOpacity style={styles.termsRow} onPress={() => setTermsAccepted(!termsAccepted)}>
+                <MaterialCommunityIcons
+                  name={termsAccepted ? 'checkbox-marked' : 'checkbox-blank-outline'}
+                  size={24}
+                  color={LEAF_GREEN}
+                />
+                <Text style={styles.termsText}>
+                  Aceito os <Text style={styles.termsLink}>termos e políticas</Text> de privacidade
+                </Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </ScrollView>
       </View>
-    </View>
+    </OnboardingLayout>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: WHITE,
-  },
-  
-  header: {
-    backgroundColor: LEAF_GREEN,
-    padding: 30,
     alignItems: 'center',
+    paddingHorizontal: 24,
+    paddingTop: 48,
   },
-  
   title: {
     fontSize: 24,
     fontWeight: 'bold',
-    color: WHITE,
+    color: LEAF_GREEN,
+    marginBottom: 8,
     textAlign: 'center',
-    marginBottom: 5,
   },
-  
   subtitle: {
     fontSize: 16,
-    color: WHITE,
-    opacity: 0.9,
+    color: LEAF_GRAY,
+    marginBottom: 32,
     textAlign: 'center',
+    lineHeight: 22,
   },
-  
-  content: {
+  scrollView: {
     flex: 1,
-    padding: 20,
-  },
-  
-  loadingContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  
-  loadingText: {
-    fontSize: 16,
-    color: GRAY,
-  },
-  
-  successContainer: {
-    alignItems: 'center',
-    paddingVertical: 20,
-  },
-  
-  iconContainer: {
-    width: 100,
-    height: 100,
-    borderRadius: 50,
-    backgroundColor: '#E8F5E8',
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginBottom: 30,
-  },
-  
-  icon: {
-    fontSize: 50,
-  },
-  
-  message: {
-    fontSize: 16,
-    color: GRAY,
-    textAlign: 'center',
-    lineHeight: 24,
-    marginBottom: 30,
-    paddingHorizontal: 20,
-  },
-  
-  nextStepsContainer: {
-    backgroundColor: LIGHT_GRAY,
-    borderRadius: 15,
-    padding: 20,
     width: '100%',
+  },
+  form: {
+    width: '100%',
+  },
+  inputGroup: {
     marginBottom: 20,
   },
-  
-  nextStepsTitle: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: DARK_GRAY,
-    marginBottom: 15,
-    textAlign: 'center',
+  label: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: LEAF_GREEN,
+    marginBottom: 8,
   },
-  
-  stepItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
+  input: {
+    fontSize: 16,
+    color: LEAF_GREEN,
+    borderBottomWidth: 2,
+    borderBottomColor: LEAF_GRAY,
+    paddingVertical: 12,
+    paddingHorizontal: 0,
+  },
+  inputError: {
+    borderBottomColor: '#FF4444',
+  },
+  errorText: {
+    fontSize: 12,
+    color: '#FF4444',
+    marginTop: 4,
+  },
+  documentsContainer: {
+    width: '100%',
+    backgroundColor: '#F8F8F8',
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 20,
+  },
+  documentsTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: LEAF_GREEN,
     marginBottom: 12,
   },
-  
-  stepNumber: {
-    width: 24,
-    height: 24,
-    borderRadius: 12,
-    backgroundColor: LEAF_GREEN,
-    color: WHITE,
-    fontSize: 12,
-    fontWeight: 'bold',
-    textAlign: 'center',
-    lineHeight: 24,
-    marginRight: 12,
-  },
-  
-  stepText: {
-    flex: 1,
-    fontSize: 14,
-    color: DARK_GRAY,
-    lineHeight: 20,
-  },
-  
-  driverInfoContainer: {
-    backgroundColor: WHITE,
-    borderWidth: 1,
-    borderColor: LIGHT_GRAY,
-    borderRadius: 15,
-    padding: 20,
-    width: '100%',
-  },
-  
-  driverInfoTitle: {
-    fontSize: 16,
-    fontWeight: 'bold',
-    color: DARK_GRAY,
-    marginBottom: 15,
-    textAlign: 'center',
-  },
-  
   documentItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 10,
+    paddingVertical: 12,
+    paddingHorizontal: 8,
+    borderRadius: 8,
+    marginBottom: 8,
+    backgroundColor: 'white',
   },
-  
-  documentIcon: {
-    fontSize: 16,
-    marginRight: 10,
-  },
-  
   documentText: {
-    flex: 1,
-    fontSize: 14,
-    color: GRAY,
-  },
-  
-  footer: {
-    padding: 20,
-    backgroundColor: WHITE,
-    borderTopWidth: 1,
-    borderTopColor: LIGHT_GRAY,
-  },
-  
-  completeButton: {
-    backgroundColor: LEAF_GREEN,
-    paddingVertical: 15,
-    borderRadius: 25,
-    alignItems: 'center',
-    marginBottom: 15,
-  },
-  
-  completeButtonText: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: WHITE,
-  },
-  
-  supportButton: {
-    backgroundColor: WHITE,
-    borderWidth: 1,
-    borderColor: LEAF_GREEN,
-    paddingVertical: 15,
-    borderRadius: 25,
-    alignItems: 'center',
-  },
-  
-  supportButtonText: {
     fontSize: 16,
-    fontWeight: 'bold',
+    fontWeight: '500',
+    marginLeft: 12,
+  },
+  uploadBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderBottomWidth: 2,
+    borderBottomColor: LEAF_GRAY,
+    paddingVertical: 12,
+    paddingHorizontal: 0,
+  },
+  uploadText: {
+    fontSize: 16,
     color: LEAF_GREEN,
+    marginLeft: 8,
+  },
+  termsContainer: {
+    marginTop: 24,
+    marginBottom: 32,
+  },
+  termsRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+  },
+  termsText: {
+    fontSize: 14,
+    color: LEAF_GRAY,
+    marginLeft: 8,
+    flex: 1,
+    lineHeight: 20,
+  },
+  termsLink: {
+    color: LEAF_GREEN,
+    fontWeight: '600',
+  },
+  progressBarContainer: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 0,
+  },
+  progressDot: {
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+    backgroundColor: LEAF_GRAY,
+    marginHorizontal: 4,
+  },
+  progressActive: {
+    backgroundColor: LEAF_GREEN,
   },
 }); 

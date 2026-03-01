@@ -1,3 +1,4 @@
+import Logger from '../utils/Logger';
 import React from 'react';
 import {
   View,
@@ -99,7 +100,7 @@ const PaymentFailedScreen = ({ navigation, route }) => {
             source={require('../../assets/animations/payment-error.json')}
             autoPlay
             loop={false}
-            onError={(error) => console.log('Lottie error:', error)}
+            onError={(error) => Logger.log('Lottie error:', error)}
             style={styles.animation}
             resizeMode="contain"
           />

@@ -1,3 +1,4 @@
+import Logger from '../../utils/Logger';
 import {
     FETCH_BOOKING_LOCATION,
     FETCH_BOOKING_LOCATION_SUCCESS,
@@ -14,6 +15,7 @@ import { push, onValue, query, limitToLast, off, set } from '@react-native-fireb
 import { Platform } from 'react-native';
 import { GetDistance } from '../other/GeoFunctions';
 
+
 // Feature flags para estratégia híbrida
 const USE_REDIS_TRACKING = false; // Redis desabilitado
 const FIREBASE_FALLBACK = true; // Sempre usar Firebase como fallback
@@ -24,7 +26,7 @@ export const saveTracking = async (bookingId, location) => {
         const { trackingRef } = firebase;
         await push(trackingRef(bookingId), location);
     } catch (error) {
-        console.error('❌ Error saving tracking:', error);
+        Logger.error('❌ Error saving tracking:', error);
         throw error;
     }
 };
@@ -83,7 +85,7 @@ export const saveUserLocation = async (location) => {
         // Usar apenas Firebase
         await set(userLocationRef(uid), location);
     } catch (error) {
-        console.error('❌ Error saving user location:', error);
+        Logger.error('❌ Error saving user location:', error);
         throw error;
     }
 };

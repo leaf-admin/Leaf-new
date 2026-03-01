@@ -1,3 +1,4 @@
+import Logger from '../utils/Logger';
 import {
     CONFIRM_BOOKING,
     CONFIRM_BOOKING_SUCCESS,
@@ -6,7 +7,7 @@ import {
 } from "../types.js";
 import { RequestPushMsg } from '../other/NotificationFunctions';
 import store from '../store/store';
-import { firebase } from '../config/configureFirebase';
+import { firebase } from './config/configureFirebase';
 import { formatBookingObject } from '../other/sharedFunctions';
 import { Alert } from 'react-native';
 import { Platform } from 'react-native';
@@ -74,7 +75,7 @@ export const createBooking = (bookingData) => async (dispatch) => {
 
         return booking;
     } catch (error) {
-        console.error('Error creating booking:', error);
+        Logger.error('Error creating booking:', error);
         throw error;
     }
 };

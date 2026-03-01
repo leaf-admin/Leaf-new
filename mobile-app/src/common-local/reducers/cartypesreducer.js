@@ -1,3 +1,4 @@
+import Logger from '../../utils/Logger';
 import {
   FETCH_CAR_TYPES,
   FETCH_CAR_TYPES_SUCCESS,
@@ -22,6 +23,10 @@ export const cartypesreducer = (state = INITIAL_STATE, action) => {
         loading: true
       };
     case FETCH_CAR_TYPES_SUCCESS:
+      Logger.log('🚗 cartypesreducer - FETCH_CAR_TYPES_SUCCESS:', {
+        payloadLength: action.payload?.length || 0,
+        payload: action.payload
+      });
       return {
         ...state,
         cars: action.payload,

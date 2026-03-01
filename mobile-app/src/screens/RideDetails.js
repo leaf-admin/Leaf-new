@@ -1,3 +1,4 @@
+import Logger from '../utils/Logger';
 import React, { useState, useEffect, useRef } from 'react';
 import {
     StyleSheet,
@@ -18,20 +19,21 @@ import {
 import MapView, { Polyline, PROVIDER_GOOGLE, Marker } from 'react-native-maps';
 import { Avatar } from 'react-native-elements';
 import * as DecodePolyLine from '@mapbox/polyline';
-import { colors } from '../common-local/theme';
+import { colors } from '../common/theme';
 import i18n from '../i18n';
 import StarRating from 'react-native-star-rating-widget';
 import { useSelector, useDispatch } from 'react-redux';
 import { Ionicons, Entypo, Fontisto, AntDesign, Octicons, Feather, MaterialCommunityIcons } from '@expo/vector-icons';
-import { appConsts, MAIN_COLOR } from '../common-local/sharedFunctions';
+import { appConsts, MAIN_COLOR } from '../common/sharedFunctions';
 import moment from 'moment/min/moment-with-locales';
 var { width, height } = Dimensions.get('window');
 import Button from '../components/Button';
-import { fonts } from '../common-local/font';
+import { fonts } from '../common/font';
 import DownloadReceipt from '../components/DownloadReceipt';
 import { getLangKey } from '../common-local/other/getLangKey';
 import { Icon } from 'react-native-elements';
-import { api } from '../common-local';
+import { api } from '../../common';
+
 
 export default function RideDetails(props) {
     const { t } = i18n;
@@ -64,7 +66,7 @@ export default function RideDetails(props) {
                 setRideDetails(response);
             }
         } catch (error) {
-            console.error('Erro ao carregar detalhes da corrida:', error);
+            Logger.error('Erro ao carregar detalhes da corrida:', error);
         } finally {
             setLoading(false);
         }
@@ -76,7 +78,7 @@ export default function RideDetails(props) {
             await cancelRide(rideDetails.id);
             props.navigation.goBack();
         } catch (error) {
-            console.error('Erro ao cancelar corrida:', error);
+            Logger.error('Erro ao cancelar corrida:', error);
         } finally {
             setLoading(false);
         }

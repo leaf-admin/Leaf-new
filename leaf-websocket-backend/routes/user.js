@@ -2,6 +2,7 @@
 const express = require('express');
 const router = express.Router();
 const admin = require('firebase-admin');
+const { logStructured, logError } = require('../utils/logger');
 
 // ===== MIDDLEWARE DE AUTENTICAÇÃO =====
 const authenticateUser = async (req, res, next) => {
@@ -24,7 +25,7 @@ const authenticateUser = async (req, res, next) => {
     
     next();
   } catch (error) {
-    console.error('❌ Erro na autenticação:', error);
+    logError(error, '❌ Erro na autenticação:', { service: 'user-routes' });
     return res.status(401).json({
       success: false,
       message: 'Token inválido'
@@ -52,7 +53,7 @@ router.post('/mode', authenticateUser, async (req, res) => {
     }
 
     // Atualizar modo no banco (mock para teste)
-    console.log(`🔄 User Mode: Atualizando modo de ${userId} para ${mode}`);
+    logStructured('info', `🔄 User Mode: Atualizando modo de ${userId} para ${mode}`, { service: 'user-routes' });
     
     // Em produção, salvar no Firebase/Redis
     // await admin.firestore().collection('users').doc(userId).update({
@@ -66,7 +67,7 @@ router.post('/mode', authenticateUser, async (req, res) => {
       data: { userId, mode }
     });
   } catch (error) {
-    console.error('❌ Erro ao atualizar modo:', error);
+    logError(error, '❌ Erro ao atualizar modo:', { service: 'user-routes' });
     res.status(500).json({
       success: false,
       message: 'Erro interno do servidor'
@@ -94,7 +95,7 @@ router.get('/profile/:mode', authenticateUser, async (req, res) => {
       });
     }
 
-    console.log(`📊 User Profile: Carregando dados de ${mode} para ${userId}`);
+    logStructured('info', `📊 User Profile: Carregando dados de ${mode} para ${userId}`, { service: 'user-routes' });
 
     // Mock data para teste
     const profileData = getMockProfileData(mode, userId);
@@ -104,7 +105,7 @@ router.get('/profile/:mode', authenticateUser, async (req, res) => {
       profile: profileData
     });
   } catch (error) {
-    console.error('❌ Erro ao carregar perfil:', error);
+    logError(error, '❌ Erro ao carregar perfil:', { service: 'user-routes' });
     res.status(500).json({
       success: false,
       message: 'Erro interno do servidor'
@@ -117,7 +118,7 @@ router.get('/permissions/:userId', authenticateUser, async (req, res) => {
   try {
     const { userId } = req.params;
     
-    console.log(`🔐 User Permissions: Verificando permissões para ${userId}`);
+    logStructured('info', `🔐 User Permissions: Verificando permissões para ${userId}`, { service: 'user-routes' });
 
     // Mock permissions para teste
     const permissions = {
@@ -132,7 +133,7 @@ router.get('/permissions/:userId', authenticateUser, async (req, res) => {
       permissions
     });
   } catch (error) {
-    console.error('❌ Erro ao verificar permissões:', error);
+    logError(error, '❌ Erro ao verificar permissões:', { service: 'user-routes' });
     res.status(500).json({
       success: false,
       message: 'Erro interno do servidor'
@@ -145,7 +146,7 @@ router.get('/cache/stats', authenticateUser, async (req, res) => {
   try {
     const { userId } = req.query;
     
-    console.log(`📊 Cache Stats: Obtendo estatísticas para ${userId}`);
+    logStructured('info', `📊 Cache Stats: Obtendo estatísticas para ${userId}`, { service: 'user-routes' });
 
     // Mock cache stats para teste
     const stats = {
@@ -159,7 +160,7 @@ router.get('/cache/stats', authenticateUser, async (req, res) => {
       stats
     });
   } catch (error) {
-    console.error('❌ Erro ao obter cache stats:', error);
+    logError(error, '❌ Erro ao obter cache stats:', { service: 'user-routes' });
     res.status(500).json({
       success: false,
       message: 'Erro interno do servidor'

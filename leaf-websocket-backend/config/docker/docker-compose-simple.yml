@@ -1,0 +1,114 @@
+version: '3.8'
+
+services:
+  # ===== REDIS =====
+  redis:
+    image: redis:7-alpine
+    container_name: leaf-redis-simple
+    ports:
+      - "6380:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    networks:
+      - leaf-network
+
+  # ===== POSTGRESQL =====
+  postgres:
+    image: postgres:15-alpine
+    container_name: leaf-postgres-simple
+    ports:
+      - "5433:5432"
+    environment:
+      POSTGRES_DB: leaf_db
+      POSTGRES_USER: leaf_user
+      POSTGRES_PASSWORD: leaf_password
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U leaf_user -d leaf_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    networks:
+      - leaf-network
+
+  # ===== WEBSOCKET SERVER 1 =====
+  websocket-1:
+    build: .
+    container_name: leaf-websocket-1-simple
+    ports:
+      - "3001:3001"
+    environment:
+      - NODE_ENV=production
+      - REDIS_URL=redis://redis:6379
+      - POSTGRES_URL=postgresql://leaf_user:leaf_password@postgres:5432/leaf_db
+      - PORT=3001
+    depends_on:
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - leaf-network
+
+  # ===== WEBSOCKET SERVER 2 =====
+  websocket-2:
+    build: .
+    container_name: leaf-websocket-2-simple
+    ports:
+      - "3002:3001"
+    environment:
+      - NODE_ENV=production
+      - REDIS_URL=redis://redis:6379
+      - POSTGRES_URL=postgresql://leaf_user:leaf_password@postgres:5432/leaf_db
+      - PORT=3001
+    depends_on:
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - leaf-network
+
+  # ===== NGINX LOAD BALANCER =====
+  nginx:
+    image: nginx:alpine
+    container_name: leaf-nginx-simple
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx-simple.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - websocket-1
+      - websocket-2
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - leaf-network
+
+volumes:
+  redis_data:
+  postgres_data:
+
+networks:
+  leaf-network:
+    driver: bridge

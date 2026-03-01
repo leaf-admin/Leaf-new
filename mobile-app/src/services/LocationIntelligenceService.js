@@ -1,3 +1,4 @@
+import Logger from '../utils/Logger';
 /**
  * LocationIntelligenceService.js
  * Serviço de Location Intelligence para o mobile app
@@ -5,16 +6,17 @@
 
 import { Alert } from 'react-native';
 
+
 class LocationIntelligenceService {
   constructor() {
     // URLs dos serviços
-    this.vultrUrl = 'http://216.238.107.59:3001';
+    this.vultrUrl = 'https://api.leaf.app.br';
     this.hostingerUrl = 'https://seu-dominio-hostinger.com'; // TODO: Configurar
     
     // Timeout mais agressivo para não atrasar o Google Places
     this.timeout = 2000; // 2 segundos máximo
     
-    console.log('🧠 Location Intelligence Service (Mobile) inicializado');
+    Logger.log('🧠 Location Intelligence Service (Mobile) inicializado');
   }
 
   /**
@@ -22,35 +24,35 @@ class LocationIntelligenceService {
    */
   async resolveLocation(query, coordinates = null, context = 'passenger') {
     try {
-      console.log(`🔍 Resolvendo localização: "${query}" (${context})`);
+      Logger.log(`🔍 Resolvendo localização: "${query}" (${context})`);
 
       // 1. Tentar Vultr primeiro (mais rápido)
       try {
         const vultrResult = await this.resolveFromVultr(query, coordinates, context);
         if (vultrResult) {
-          console.log('✅ Resolvido via Vultr');
+          Logger.log('✅ Resolvido via Vultr');
           return vultrResult;
         }
       } catch (error) {
-        console.warn('⚠️ Vultr falhou, tentando Hostinger:', error.message);
+        Logger.warn('⚠️ Vultr falhou, tentando Hostinger:', error.message);
       }
 
       // 2. Tentar Hostinger como fallback
       try {
         const hostingerResult = await this.resolveFromHostinger(query, coordinates, context);
         if (hostingerResult) {
-          console.log('✅ Resolvido via Hostinger');
+          Logger.log('✅ Resolvido via Hostinger');
           return hostingerResult;
         }
       } catch (error) {
-        console.warn('⚠️ Hostinger falhou:', error.message);
+        Logger.warn('⚠️ Hostinger falhou:', error.message);
       }
 
-      console.log('❌ Localização não encontrada em nenhuma fonte');
+      Logger.log('❌ Localização não encontrada em nenhuma fonte');
       return null;
 
     } catch (error) {
-      console.error('❌ Erro ao resolver localização:', error);
+      Logger.error('❌ Erro ao resolver localização:', error);
       throw error;
     }
   }
@@ -87,7 +89,7 @@ class LocationIntelligenceService {
       
       return null;
     } catch (error) {
-      console.error('❌ Erro ao resolver via Vultr:', error);
+      Logger.error('❌ Erro ao resolver via Vultr:', error);
       throw error;
     }
   }
@@ -99,10 +101,10 @@ class LocationIntelligenceService {
     try {
       // TODO: Implementar integração com Hostinger
       // Por enquanto, retorna null para forçar Google Places
-      console.log('🔄 Hostinger não implementado ainda');
+      Logger.log('🔄 Hostinger não implementado ainda');
       return null;
     } catch (error) {
-      console.error('❌ Erro ao resolver via Hostinger:', error);
+      Logger.error('❌ Erro ao resolver via Hostinger:', error);
       throw error;
     }
   }
@@ -116,27 +118,27 @@ class LocationIntelligenceService {
         return [];
       }
 
-      console.log(`🔍 Buscando sugestões para: "${query}"`);
+      Logger.log(`🔍 Buscando sugestões para: "${query}"`);
 
       // 1. Tentar Vultr primeiro (com timeout agressivo de 2s)
       try {
-        console.log('🚀 Tentando Vultr (timeout: 2s)...');
+        Logger.log('🚀 Tentando Vultr (timeout: 2s)...');
         const vultrSuggestions = await this.getSuggestionsFromVultr(query, context);
         if (vultrSuggestions && vultrSuggestions.length > 0) {
-          console.log('✅ Sugestões obtidas via Vultr:', vultrSuggestions.length);
+          Logger.log('✅ Sugestões obtidas via Vultr:', vultrSuggestions.length);
           return vultrSuggestions;
         }
-        console.log('⚠️ Vultr retornou vazio');
+        Logger.log('⚠️ Vultr retornou vazio');
       } catch (error) {
-        console.warn('⚠️ Vultr falhou para sugestões:', error.message);
+        Logger.warn('⚠️ Vultr falhou para sugestões:', error.message);
       }
 
       // 2. Fallback imediato para Google Places (sem esperar Hostinger)
-      console.log('🔄 Vultr falhou, retornando vazio para forçar Google Places');
+      Logger.log('🔄 Vultr falhou, retornando vazio para forçar Google Places');
       return [];
 
     } catch (error) {
-      console.error('❌ Erro ao buscar sugestões:', error);
+      Logger.error('❌ Erro ao buscar sugestões:', error);
       return [];
     }
   }
@@ -152,7 +154,7 @@ class LocationIntelligenceService {
       });
 
       const url = `${this.vultrUrl}/api/location/suggestions?${params}`;
-      console.log('🌐 Chamando API Vultr:', url);
+      Logger.log('🌐 Chamando API Vultr:', url);
 
       // Criar AbortController para timeout mais agressivo
       const controller = new AbortController();
@@ -167,28 +169,28 @@ class LocationIntelligenceService {
       });
 
       clearTimeout(timeoutId);
-      console.log('📡 Response status:', response.status);
-      console.log('📡 Response ok:', response.ok);
+      Logger.log('📡 Response status:', response.status);
+      Logger.log('📡 Response ok:', response.ok);
 
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}: ${response.statusText}`);
       }
 
       const data = await response.json();
-      console.log('📡 Response data:', data);
+      Logger.log('📡 Response data:', data);
       
       if (data.success && data.data) {
-        console.log('✅ Dados retornados com sucesso:', data.data.length, 'itens');
+        Logger.log('✅ Dados retornados com sucesso:', data.data.length, 'itens');
         return data.data;
       }
       
-      console.log('⚠️ Resposta sem dados válidos:', data);
+      Logger.log('⚠️ Resposta sem dados válidos:', data);
       return [];
     } catch (error) {
       if (error.name === 'AbortError') {
-        console.warn('⏰ Timeout ao buscar sugestões via Vultr (2s)');
+        Logger.warn('⏰ Timeout ao buscar sugestões via Vultr (2s)');
       } else {
-        console.error('❌ Erro ao buscar sugestões via Vultr:', error);
+        Logger.error('❌ Erro ao buscar sugestões via Vultr:', error);
       }
       throw error;
     }
@@ -200,10 +202,10 @@ class LocationIntelligenceService {
   async getSuggestionsFromHostinger(query, context) {
     try {
       // TODO: Implementar integração com Hostinger
-      console.log('🔄 Hostinger não implementado ainda');
+      Logger.log('🔄 Hostinger não implementado ainda');
       return [];
     } catch (error) {
-      console.error('❌ Erro ao buscar sugestões via Hostinger:', error);
+      Logger.error('❌ Erro ao buscar sugestões via Hostinger:', error);
       throw error;
     }
   }
@@ -233,7 +235,7 @@ class LocationIntelligenceService {
       
       return null;
     } catch (error) {
-      console.error('❌ Erro ao obter estatísticas:', error);
+      Logger.error('❌ Erro ao obter estatísticas:', error);
       return null;
     }
   }
@@ -258,13 +260,13 @@ class LocationIntelligenceService {
       const data = await response.json();
       
       if (data.success) {
-        console.log('🗑️ Cache limpo com sucesso');
+        Logger.log('🗑️ Cache limpo com sucesso');
         return data.data.cleared;
       }
       
       return 0;
     } catch (error) {
-      console.error('❌ Erro ao limpar cache:', error);
+      Logger.error('❌ Erro ao limpar cache:', error);
       return 0;
     }
   }
@@ -286,18 +288,18 @@ class LocationIntelligenceService {
         timeout: 5000,
       });
       results.vultr = response.ok;
-      console.log('✅ Vultr conectado:', response.ok);
+      Logger.log('✅ Vultr conectado:', response.ok);
     } catch (error) {
-      console.log('❌ Vultr não conectado:', error.message);
+      Logger.log('❌ Vultr não conectado:', error.message);
     }
 
     // Testar Hostinger
     try {
       // TODO: Implementar teste de conectividade com Hostinger
       results.hostinger = false;
-      console.log('⚠️ Hostinger não testado ainda');
+      Logger.log('⚠️ Hostinger não testado ainda');
     } catch (error) {
-      console.log('❌ Hostinger não conectado:', error.message);
+      Logger.log('❌ Hostinger não conectado:', error.message);
     }
 
     return results;
@@ -319,6 +321,111 @@ class LocationIntelligenceService {
         description: 'Servidor de fallback (Hostinger)'
       }
     };
+  }
+
+  /**
+   * Obtém sugestões do cache Redis
+   */
+  async getSuggestionsFromRedis(query) {
+    try {
+      Logger.log('🔍 Buscando sugestões no Redis:', query);
+      
+      const response = await fetch(`${this.vultrUrl}/api/location/suggestions/redis?query=${encodeURIComponent(query)}`, {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        timeout: this.timeout,
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
+
+      const data = await response.json();
+      
+      if (data.success && data.data) {
+        Logger.log('✅ Sugestões do Redis:', data.data.length);
+        return data.data;
+      }
+      
+      return [];
+    } catch (error) {
+      Logger.warn('⚠️ Redis não disponível:', error.message);
+      return [];
+    }
+  }
+
+  /**
+   * Obtém sugestões do cache Firebase
+   */
+  async getSuggestionsFromFirebase(query) {
+    try {
+      Logger.log('🔍 Buscando sugestões no Firebase:', query);
+      
+      const response = await fetch(`${this.vultrUrl}/api/location/suggestions/firebase?query=${encodeURIComponent(query)}`, {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        timeout: this.timeout,
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
+
+      const data = await response.json();
+      
+      if (data.success && data.data) {
+        Logger.log('✅ Sugestões do Firebase:', data.data.length);
+        return data.data;
+      }
+      
+      return [];
+    } catch (error) {
+      Logger.warn('⚠️ Firebase não disponível:', error.message);
+      return [];
+    }
+  }
+
+  /**
+   * Salva sugestões no cache
+   */
+  async cacheSuggestions(query, suggestions, source = 'google_places') {
+    try {
+      Logger.log('💾 Salvando sugestões no cache:', query, suggestions.length);
+      
+      const response = await fetch(`${this.vultrUrl}/api/location/cache/save`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          query,
+          suggestions,
+          source,
+          timestamp: new Date().toISOString()
+        }),
+        timeout: this.timeout,
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
+
+      const data = await response.json();
+      
+      if (data.success) {
+        Logger.log('✅ Sugestões salvas no cache');
+        return true;
+      }
+      
+      return false;
+    } catch (error) {
+      Logger.warn('⚠️ Falha ao salvar no cache:', error.message);
+      return false;
+    }
   }
 }
 

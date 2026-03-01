@@ -1,0 +1,52 @@
+# Teste: Solicitar Corrida (Fluxo Completo)
+appId: br.com.leaf.ride
+---
+# Login como customer
+- runFlow: "../helpers/login.yaml"
+
+# Solicitar corrida
+- tapOn: 
+    text: "Solicitar Corrida"
+    timeout: 3000
+- assertVisible: 
+    id: "map-view"
+    timeout: 5000
+
+# Preencher origem
+- tapOn: 
+    id: "origin-input"
+    timeout: 2000
+- inputText: "Rua das Flores, 123, São Paulo"
+- tapOn: 
+    text: "Confirmar"
+    timeout: 2000
+
+# Preencher destino
+- tapOn: 
+    id: "destination-input"
+    timeout: 2000
+- inputText: "Avenida Paulista, 1000, São Paulo"
+- tapOn: 
+    text: "Confirmar"
+    timeout: 2000
+
+# Confirmar corrida
+- tapOn: 
+    text: "Confirmar Corrida"
+    timeout: 3000
+- assertVisible: 
+    text: "Aguardando Motorista"
+    timeout: 5000
+
+
+
+
+
+
+
+
+
+
+
+
+

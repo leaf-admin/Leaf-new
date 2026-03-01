@@ -45,7 +45,7 @@ export default {
           },
         supportsTablet: true,
         usesAppleSignIn: true,
-        bundleIdentifier: "com.leaf.app",
+        bundleIdentifier: "br.com.leaf.ride",
         infoPlist: {
             "NSLocationAlwaysUsageDescription": "This app uses the always location access in the background for improved pickups and dropoffs, customer support and safety purpose.",
             "NSLocationAlwaysAndWhenInUseUsageDescription": "This app uses the always location access in the background for improved pickups and dropoffs, customer support and safety purpose.",
@@ -63,7 +63,7 @@ export default {
         buildNumber: "1"
     },
     android: {
-        package: "com.leaf.app",
+        package: "br.com.leaf.ride",
         versionCode: 1,
         permissions: [
             "CAMERA",

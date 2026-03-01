@@ -3,17 +3,9 @@ const path = require('path');
 
 const config = getDefaultConfig(__dirname);
 
-// Configurar resolução automática de extensões
-config.resolver.platforms = ['ios', 'android', 'native', 'web'];
-config.resolver.sourceExts = ['js', 'jsx', 'ts', 'tsx', 'json'];
-config.resolver.assetExts = ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'ttf', 'woff', 'woff2', 'json', 'lottie'];
-
-// Forçar resolução de arquivos JSON
-config.resolver.resolverMainFields = ['react-native', 'browser', 'main'];
-config.resolver.enableGlobalPackages = true;
-
-// Configurar resolução de módulos
-config.resolver.resolverMainFields = ['react-native', 'browser', 'main'];
+// Usar extensões padrão do Expo + algumas extras necessárias
+config.resolver.sourceExts.push('cjs');
+config.resolver.assetExts.push('lottie');
 
 // Configurar aliases para facilitar imports
 config.resolver.alias = {
@@ -26,6 +18,7 @@ config.resolver.alias = {
   '@common': __dirname + '/common',
   '@common-local': __dirname + '/src/common-local',
   '@json': path.join(__dirname, '..', 'json'),
+  '@common-packages': path.join(__dirname, '..', 'common-packages'),
 };
 
 // Configurar resolução de módulos adicionais
@@ -51,6 +44,18 @@ config.resolver.alias = {
   'vm': false,
   'worker_threads': false,
   'use-sync-external-store/shim': 'use-sync-external-store/shim/with-selector',
+};
+
+// Configuração específica para H3
+config.resolver.platforms = ['ios', 'android', 'native', 'web'];
+config.resolver.sourceExts.push('js', 'jsx', 'ts', 'tsx', 'json');
+
+// Configurar transformações para bibliotecas específicas
+config.transformer.minifierConfig = {
+  keep_fnames: true,
+  mangle: {
+    keep_fnames: true,
+  },
 };
 
 module.exports = config;

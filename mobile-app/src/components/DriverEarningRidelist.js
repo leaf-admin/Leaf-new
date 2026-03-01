@@ -1,18 +1,18 @@
 import React, { useState, useEffect } from 'react';
 import { View, Text, FlatList, StyleSheet, Dimensions, Animated } from 'react-native';
-import { colors } from '../common-local/theme';
+import { colors } from '../common/theme';
 import i18n from '../i18n';
 import { useSelector } from 'react-redux';
 import SegmentedControlTab from 'react-native-segmented-control-tab';
-import { MAIN_COLOR } from '../common-local/sharedFunctions';
+import { MAIN_COLOR } from '../common/sharedFunctions';
 var { width, height } = Dimensions.get('window');
 import moment from 'moment/min/moment-with-locales';
-import { fonts } from '../common-local/font';
+import { fonts } from '../common/font';
 import { Ionicons, AntDesign, Feather, MaterialCommunityIcons } from '@expo/vector-icons';
 
 export default function DriverEarningRidelist(props) {
     const { t } = i18n;
-    const isRTL = i18n.locale.indexOf('he') === 0 || i18n.locale.indexOf('ar') === 0;
+    const isRTL = i18n.locale && (i18n.locale.indexOf('he') === 0 || i18n.locale.indexOf('ar') === 0);
     const settings = useSelector(state => state.settingsdata.settings);
     const [tabIndex, setTabIndex] = useState(props.tabIndex);
     const auth = useSelector(state => state.auth);

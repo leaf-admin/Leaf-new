@@ -1,3 +1,4 @@
+import Logger from '../utils/Logger';
 import React, { useState, useEffect } from 'react';
 import {
     View,
@@ -22,6 +23,11 @@ import { fonts } from '../common-local/font';
 import { MAIN_COLOR } from '../common-local/sharedFunctions';
 import database from '@react-native-firebase/database';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useFocusEffect } from '@react-navigation/native';
+import * as Linking from 'expo-linking';
+import VehicleService from '../services/VehicleService';
+import VehicleNotificationService from '../services/VehicleNotificationService';
+
 
 const { width, height } = Dimensions.get('window');
 
@@ -39,8 +45,15 @@ export default function MyVehiclesScreen({ navigation }) {
             <TouchableOpacity 
                 style={styles.themeSwitchTouchable}
                 onPress={() => onValueChange(!value)}
+                activeOpacity={0.7}
             >
-                <View style={styles.themeSwitchTrack}>
+                <View style={[
+                    styles.themeSwitchTrack,
+                    { 
+                        backgroundColor: value ? '#2d2d2d' : '#e8e8e8',
+                        borderColor: value ? '#404040' : '#d0d0d0',
+                    }
+                ]}>
                     <View style={styles.themeSwitchIconBubble}>
                         <Ionicons 
                             name={value ? 'moon' : 'sunny'} 
@@ -57,18 +70,42 @@ export default function MyVehiclesScreen({ navigation }) {
     const Header = () => (
         <View style={[styles.header, { backgroundColor: isDarkMode ? '#1a1a1a' : '#fff' }]}>
             <TouchableOpacity 
-                style={[styles.headerButton, { backgroundColor: isDarkMode ? '#333' : '#f8f8f8' }]}
+                style={[
+                    styles.headerButton, 
+                    { 
+                        backgroundColor: isDarkMode ? '#2d2d2d' : '#e8e8e8',
+                        borderWidth: 1,
+                        borderColor: isDarkMode ? '#404040' : '#d0d0d0',
+                    }
+                ]}
                 onPress={() => navigation.goBack()}
+                activeOpacity={0.7}
             >
-                <Icon name="arrow-back" type="material" color={isDarkMode ? '#fff' : colors.BLACK} size={24} />
+                <Ionicons 
+                    name="arrow-back" 
+                    color={isDarkMode ? '#fff' : '#1a1a1a'} 
+                    size={22} 
+                />
             </TouchableOpacity>
             <Text style={[styles.headerTitle, { color: isDarkMode ? '#fff' : colors.BLACK }]}>Meus Veículos</Text>
             <View style={styles.headerRightContainer}>
                 <TouchableOpacity 
-                    style={[styles.headerButton, { backgroundColor: isDarkMode ? '#333' : '#f8f8f8' }]}
+                    style={[
+                        styles.headerButton, 
+                        { 
+                            backgroundColor: isDarkMode ? '#2d2d2d' : '#e8e8e8',
+                            borderWidth: 1,
+                            borderColor: isDarkMode ? '#404040' : '#d0d0d0',
+                        }
+                    ]}
                     onPress={() => navigation.navigate('Notifications')}
+                    activeOpacity={0.7}
                 >
-                    <Icon name="notifications" type="material" color={isDarkMode ? '#fff' : colors.BLACK} size={24} />
+                    <Ionicons 
+                        name="notifications-outline" 
+                        color={isDarkMode ? '#fff' : '#1a1a1a'} 
+                        size={22} 
+                    />
                 </TouchableOpacity>
                 <ThemeSwitch value={isDarkMode} onValueChange={setIsDarkMode} />
             </View>
@@ -79,35 +116,34 @@ export default function MyVehiclesScreen({ navigation }) {
     const loadVehicles = async () => {
         setLoading(true);
         try {
-            // Aqui você implementaria a busca dos veículos do usuário
-            // Por enquanto, vamos simular dados
-            const mockVehicles = [
-                {
-                    id: '1',
-                    brand: 'Toyota',
-                    model: 'Corolla',
-                    year: '2020',
-                    plate: 'ABC-1234',
-                    status: 'approved', // 'pending', 'rejected', 'approved', 'needs_info'
-                    crlvImage: null,
-                    createdAt: new Date().toISOString(),
-                    isActive: true,
-                },
-                {
-                    id: '2',
-                    brand: 'Honda',
-                    model: 'Civic',
-                    year: '2019',
-                    plate: 'XYZ-5678',
-                    status: 'pending',
-                    crlvImage: null,
-                    createdAt: new Date().toISOString(),
-                    isActive: false,
-                }
-            ];
+            const user = auth.profile;
+            if (!user || !user.uid) {
+                throw new Error('Usuário não autenticado');
+            }
+
+            // Buscar veículos completos do usuário
+            const completeVehicles = await VehicleService.getUserVehiclesComplete(user.uid);
             
-            setVehicles(mockVehicles);
+            // Transformar para o formato esperado pela interface
+            const formattedVehicles = completeVehicles.map(item => ({
+                id: item.userVehicle.id,
+                vehicleId: item.vehicle.id,
+                brand: item.vehicle.brand,
+                model: item.vehicle.model,
+                year: item.vehicle.year.toString(),
+                plate: item.vehicle.plate,
+                status: item.userVehicle.status,
+                isActive: item.userVehicle.isActive,
+                createdAt: item.userVehicle.createdAt,
+                documents: item.userVehicle.documents,
+                possessionDate: item.userVehicle.possessionDate,
+                approvedAt: item.userVehicle.approvedAt,
+                rejectionReason: item.userVehicle.rejectionReason
+            }));
+            
+            setVehicles(formattedVehicles);
         } catch (error) {
+            Logger.error('Erro ao carregar veículos:', error);
             Alert.alert('Erro', 'Não foi possível carregar os veículos');
         } finally {
             setLoading(false);
@@ -116,26 +152,32 @@ export default function MyVehiclesScreen({ navigation }) {
 
     // Função para obter o status do veículo
     const getVehicleStatus = (status) => {
-        switch (status) {
-            case 'approved':
-                return { text: 'Pronto para dirigir', color: '#4CAF50', icon: 'checkmark-circle' };
-            case 'pending':
-                return { text: 'Em análise', color: '#FF9800', icon: 'time' };
-            case 'rejected':
-                return { text: 'Veículo recusado', color: '#F44336', icon: 'close-circle' };
-            case 'needs_info':
-                return { text: 'Verificar pendências', color: '#2196F3', icon: 'information-circle' };
-            default:
-                return { text: 'Status desconhecido', color: '#9E9E9E', icon: 'help-circle' };
-        }
+        return VehicleService.getVehicleStatusInfo(status);
     };
 
     // Substitua o toggleVehicleStatus para garantir apenas um ativo
-    const selectActiveVehicle = (vehicleId) => {
-        setVehicles(prev => prev.map(v =>
-            v.id === vehicleId ? { ...v, isActive: true } : { ...v, isActive: false }
-        ));
-        // Aqui você pode disparar uma action para atualizar o backend se necessário
+    const selectActiveVehicle = async (vehicleId) => {
+        try {
+            const user = auth.profile;
+            if (!user || !user.uid) {
+                throw new Error('Usuário não autenticado');
+            }
+
+            // Atualizar no backend
+            const success = await VehicleService.setActiveVehicle(user.uid, vehicleId);
+            
+            if (success) {
+                // Atualizar estado local
+                setVehicles(prev => prev.map(v =>
+                    v.vehicleId === vehicleId ? { ...v, isActive: true } : { ...v, isActive: false }
+                ));
+            } else {
+                Alert.alert('Erro', 'Não foi possível definir o veículo ativo');
+            }
+        } catch (error) {
+            Logger.error('Erro ao definir veículo ativo:', error);
+            Alert.alert('Erro', 'Não foi possível definir o veículo ativo');
+        }
     };
 
     // Função para remover veículo
@@ -148,9 +190,26 @@ export default function MyVehiclesScreen({ navigation }) {
                 { 
                     text: 'Remover', 
                     style: 'destructive',
-                    onPress: () => {
-                        // Aqui você implementaria a remoção do veículo
-                        setVehicles(prev => prev.filter(v => v.id !== vehicleId));
+                    onPress: async () => {
+                        try {
+                            const user = auth.profile;
+                            if (!user || !user.uid) {
+                                throw new Error('Usuário não autenticado');
+                            }
+
+                            const success = await VehicleService.removeUserVehicle(user.uid, vehicleId);
+                            
+                            if (success) {
+                                // Atualizar estado local
+                                setVehicles(prev => prev.filter(v => v.vehicleId !== vehicleId));
+                                Alert.alert('Sucesso', 'Veículo removido com sucesso');
+                            } else {
+                                Alert.alert('Erro', 'Não foi possível remover o veículo');
+                            }
+                        } catch (error) {
+                            Logger.error('Erro ao remover veículo:', error);
+                            Alert.alert('Erro', 'Não foi possível remover o veículo');
+                        }
                     }
                 }
             ]
@@ -159,7 +218,7 @@ export default function MyVehiclesScreen({ navigation }) {
 
     // Função para confirmar seleção do veículo ativo
     const confirmActiveVehicle = async () => {
-        const selected = vehicles.find(v => v.isActive && v.status === 'approved');
+        const selected = vehicles.find(v => v.isActive && v.status === 'active');
         if (!selected) return;
         Alert.alert(
             'Confirmar veículo principal',
@@ -171,22 +230,24 @@ export default function MyVehiclesScreen({ navigation }) {
                     style: 'default',
                     onPress: async () => {
                         try {
-                            // Atualiza no backend: define isActive=true para o selecionado, false para os outros do mesmo driver
-                            const driverUid = auth.profile?.uid;
-                            if (!driverUid) throw new Error('Usuário não autenticado');
-                            // Busca todos os veículos do driver
-                            const snapshot = await database().ref('vehicles').orderByChild('driver').equalTo(driverUid).once('value');
-                            const updates = {};
-                            snapshot.forEach(child => {
-                                updates[`/vehicles/${child.key}/isActive`] = (child.key === selected.id);
-                            });
-                            await database().ref().update(updates);
-                            if (Platform.OS === 'android') {
-                                ToastAndroid.show('Veículo principal atualizado com sucesso!', ToastAndroid.LONG);
+                            const user = auth.profile;
+                            if (!user || !user.uid) {
+                                throw new Error('Usuário não autenticado');
+                            }
+
+                            const success = await VehicleService.setActiveVehicle(user.uid, selected.vehicleId);
+                            
+                            if (success) {
+                                if (Platform.OS === 'android') {
+                                    ToastAndroid.show('Veículo principal atualizado com sucesso!', ToastAndroid.LONG);
+                                } else {
+                                    Alert.alert('Sucesso', 'Veículo principal atualizado com sucesso!');
+                                }
                             } else {
-                                Alert.alert('Sucesso', 'Veículo principal atualizado com sucesso!');
+                                Alert.alert('Erro', 'Não foi possível atualizar o veículo principal. Tente novamente.');
                             }
                         } catch (err) {
+                            Logger.error('Erro ao confirmar veículo ativo:', err);
                             Alert.alert('Erro', 'Não foi possível atualizar o veículo principal. Tente novamente.');
                         }
                     }
@@ -195,9 +256,32 @@ export default function MyVehiclesScreen({ navigation }) {
         );
     };
 
+    // Função para visualizar documento do CRLV
+    const viewDocument = async (documentUrl) => {
+        if (!documentUrl) {
+            Alert.alert('Erro', 'Documento não disponível');
+            return;
+        }
+
+        try {
+            // Tentar abrir o PDF no navegador ou visualizador padrão
+            const canOpen = await Linking.canOpenURL(documentUrl);
+            if (canOpen) {
+                await Linking.openURL(documentUrl);
+            } else {
+                Alert.alert('Erro', 'Não foi possível abrir o documento. Por favor, verifique se o arquivo está disponível.');
+            }
+        } catch (error) {
+            Logger.error('Erro ao abrir documento:', error);
+            Alert.alert('Erro', 'Não foi possível abrir o documento. Tente novamente.');
+        }
+    };
+
     // Componente de veículo
     const VehicleCard = ({ vehicle }) => {
         const status = getVehicleStatus(vehicle.status);
+        const hasDocument = vehicle.documents && vehicle.documents.crlv;
+        
         return (
             <View style={[styles.vehicleCard, { backgroundColor: isDarkMode ? '#333' : '#f8f8f8' }]}> 
                 <View style={styles.vehicleHeader}>
@@ -210,10 +294,10 @@ export default function MyVehiclesScreen({ navigation }) {
                         </Text>
                     </View>
                     <View style={styles.vehicleActions}>
-                        {vehicle.status === 'approved' && (
+                        {vehicle.status === 'active' && (
                             <TouchableOpacity
                                 style={{ marginRight: 8 }}
-                                onPress={() => selectActiveVehicle(vehicle.id)}
+                                onPress={() => selectActiveVehicle(vehicle.vehicleId)}
                             >
                                 <Ionicons
                                     name={vehicle.isActive ? 'radio-button-on' : 'radio-button-off'}
@@ -224,7 +308,7 @@ export default function MyVehiclesScreen({ navigation }) {
                         )}
                         <TouchableOpacity
                             style={styles.removeButton}
-                            onPress={() => removeVehicle(vehicle.id)}
+                            onPress={() => removeVehicle(vehicle.vehicleId)}
                         >
                             <Ionicons name="trash" size={20} color="#F44336" />
                         </TouchableOpacity>
@@ -234,13 +318,23 @@ export default function MyVehiclesScreen({ navigation }) {
                     <Ionicons name={status.icon} size={16} color={status.color} />
                     <Text style={[styles.statusText, { color: status.color }]}>{status.text}</Text>
                 </View>
-                {vehicle.status === 'needs_info' && (
+                {hasDocument && (
                     <TouchableOpacity
-                        style={[styles.infoButton, { backgroundColor: status.color }]}
-                        onPress={() => navigation.navigate('VehicleDetails', { vehicle })}
+                        style={[styles.documentButton, { backgroundColor: isDarkMode ? '#2d2d2d' : '#e8e8e8' }]}
+                        onPress={() => viewDocument(vehicle.documents.crlv)}
                     >
-                        <Text style={styles.infoButtonText}>Ver detalhes</Text>
+                        <Ionicons name="document-text" size={20} color={MAIN_COLOR} />
+                        <Text style={[styles.documentButtonText, { color: isDarkMode ? '#fff' : colors.BLACK }]}>
+                            Ver CRLV (PDF)
+                        </Text>
                     </TouchableOpacity>
+                )}
+                {vehicle.status === 'rejected' && vehicle.rejectionReason && (
+                    <View style={styles.rejectionContainer}>
+                        <Text style={[styles.rejectionText, { color: isDarkMode ? '#ccc' : colors.GRAY }]}>
+                            Motivo: {vehicle.rejectionReason}
+                        </Text>
+                    </View>
                 )}
             </View>
         );
@@ -259,8 +353,36 @@ export default function MyVehiclesScreen({ navigation }) {
         </View>
     );
 
+    // Recarregar veículos quando a tela receber foco (ex: após cadastrar novo veículo)
+    useFocusEffect(
+        React.useCallback(() => {
+            loadVehicles();
+        }, [])
+    );
+
     useEffect(() => {
-        loadVehicles();
+        // Inicializar notificações de veículos
+        const initializeNotifications = async () => {
+            try {
+                // ✅ Verificar se usuário está autenticado antes de inicializar
+                const auth = require('@react-native-firebase/auth').default;
+                const currentUser = auth().currentUser;
+                
+                if (!currentUser) {
+                    Logger.log('ℹ️ [MyVehiclesScreen] Usuário não autenticado, pulando inicialização de notificações');
+                    return;
+                }
+                
+                if (!VehicleNotificationService.isServiceInitialized()) {
+                    await VehicleNotificationService.initialize();
+                }
+            } catch (error) {
+                // ✅ Não mostrar erro crítico, apenas log informativo
+                Logger.log('ℹ️ [MyVehiclesScreen] Notificações de veículos não disponíveis:', error.message);
+            }
+        };
+        
+        initializeNotifications();
     }, []);
 
     return (
@@ -275,7 +397,7 @@ export default function MyVehiclesScreen({ navigation }) {
                     {/* Botão Adicionar Veículo */}
                     <TouchableOpacity 
                         style={[styles.addButton, { backgroundColor: MAIN_COLOR }]}
-                        onPress={() => navigation.navigate('AddVehicleScreen')}
+                        onPress={() => navigation.navigate('AddVehicle')}
                     >
                         <Ionicons name="add" size={24} color="#fff" />
                         <Text style={styles.addButtonText}>Adicionar novo veículo</Text>
@@ -325,9 +447,9 @@ export default function MyVehiclesScreen({ navigation }) {
                             alignItems: 'center',
                             width: '100%',
                             height: 52,
-                            opacity: vehicles.some(v => v.isActive && v.status === 'approved') ? 1 : 0.5
+                            opacity: vehicles.some(v => v.isActive && v.status === 'active') ? 1 : 0.5
                         }}
-                        disabled={!vehicles.some(v => v.isActive && v.status === 'approved')}
+                        disabled={!vehicles.some(v => v.isActive && v.status === 'active')}
                         onPress={confirmActiveVehicle}
                     >
                         <Text style={{ color: '#fff', fontFamily: fonts.Bold, fontSize: 18 }}>Confirmar</Text>
@@ -356,6 +478,14 @@ const styles = StyleSheet.create({
         borderRadius: 20,
         justifyContent: 'center',
         alignItems: 'center',
+        shadowColor: '#000',
+        shadowOffset: {
+            width: 0,
+            height: 1,
+        },
+        shadowOpacity: 0.1,
+        shadowRadius: 2,
+        elevation: 2,
     },
     headerTitle: {
         fontSize: 18,
@@ -384,8 +514,14 @@ const styles = StyleSheet.create({
         position: 'relative',
         justifyContent: 'space-between',
         paddingHorizontal: 6,
-        backgroundColor: '#fff',
-        borderColor: '#ddd',
+        shadowColor: '#000',
+        shadowOffset: {
+            width: 0,
+            height: 1,
+        },
+        shadowOpacity: 0.1,
+        shadowRadius: 2,
+        elevation: 2,
     },
     themeSwitchIconBubble: {
         width: 28,
@@ -515,5 +651,30 @@ const styles = StyleSheet.create({
     loadingText: {
         fontSize: 16,
         fontFamily: fonts.Regular,
+    },
+    rejectionContainer: {
+        marginTop: 8,
+        padding: 8,
+        backgroundColor: '#ffebee',
+        borderRadius: 8,
+    },
+    rejectionText: {
+        fontSize: 12,
+        fontFamily: fonts.Regular,
+        fontStyle: 'italic',
+    },
+    documentButton: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        paddingVertical: 12,
+        paddingHorizontal: 16,
+        borderRadius: 8,
+        marginTop: 12,
+        gap: 8,
+    },
+    documentButtonText: {
+        fontSize: 14,
+        fontFamily: fonts.Medium,
     },
 }); 

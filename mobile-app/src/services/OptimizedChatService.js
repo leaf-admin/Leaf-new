@@ -1,5 +1,7 @@
+import Logger from '../utils/Logger';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { store } from '../common-local/store';
+
 
 // Configurações do chat otimizado
 const CHAT_CONFIG = {
@@ -38,10 +40,10 @@ class OptimizedChatService {
       this.processRetryQueue();
       
       this.isInitialized = true;
-      console.log('✅ Chat Service inicializado com sucesso');
+      Logger.log('✅ Chat Service inicializado com sucesso');
       
     } catch (error) {
-      console.error('❌ Erro ao inicializar Chat Service:', error);
+      Logger.error('❌ Erro ao inicializar Chat Service:', error);
       throw error;
     }
   }
@@ -105,7 +107,7 @@ class OptimizedChatService {
       return { chatId, exists: false };
       
     } catch (error) {
-      console.error('Erro ao criar/buscar chat:', error);
+      Logger.error('Erro ao criar/buscar chat:', error);
       throw error;
     }
   }
@@ -151,7 +153,7 @@ class OptimizedChatService {
       return message;
       
     } catch (error) {
-      console.error('Erro ao enviar mensagem:', error);
+      Logger.error('Erro ao enviar mensagem:', error);
       throw error;
     }
   }
@@ -187,13 +189,13 @@ class OptimizedChatService {
       return messages;
       
     } catch (error) {
-      console.error('Erro ao carregar mensagens:', error);
+      Logger.error('Erro ao carregar mensagens:', error);
       
       // Tentar carregar do storage local
       try {
         return await this.loadMessagesFromLocalStorage(chatId, page, limit);
       } catch (localError) {
-        console.error('Erro ao carregar do storage local:', localError);
+        Logger.error('Erro ao carregar do storage local:', localError);
         return [];
       }
     }
@@ -224,7 +226,7 @@ class OptimizedChatService {
       }
       
     } catch (error) {
-      console.error('Erro ao marcar mensagens como lidas:', error);
+      Logger.error('Erro ao marcar mensagens como lidas:', error);
     }
   }
 
@@ -249,7 +251,7 @@ class OptimizedChatService {
       }
       
     } catch (error) {
-      console.error('Erro ao definir status de digitação:', error);
+      Logger.error('Erro ao definir status de digitação:', error);
     }
   }
 
@@ -294,7 +296,7 @@ class OptimizedChatService {
       return;
     }
     
-    console.log(`🔄 Processando ${this.retryQueue.length} mensagens na fila de retry`);
+    Logger.log(`🔄 Processando ${this.retryQueue.length} mensagens na fila de retry`);
     
     for (const queuedMessage of this.retryQueue) {
       try {
@@ -315,7 +317,7 @@ class OptimizedChatService {
         }
         
       } catch (error) {
-        console.error('Erro ao processar mensagem da fila de retry:', error);
+        Logger.error('Erro ao processar mensagem da fila de retry:', error);
         
         // Incrementar contador de tentativas
         queuedMessage.message.retryCount++;
@@ -344,7 +346,7 @@ class OptimizedChatService {
   // Adicionar à fila de retry
   addToRetryQueue(chatId, message) {
     this.retryQueue.push({ chatId, message });
-    console.log(`📝 Mensagem adicionada à fila de retry: ${message._id}`);
+    Logger.log(`📝 Mensagem adicionada à fila de retry: ${message._id}`);
   }
 
   // Handlers de eventos WebSocket
@@ -362,7 +364,7 @@ class OptimizedChatService {
       this.notifyMessageReceived(chatId, message);
       
     } catch (error) {
-      console.error('Erro ao processar nova mensagem:', error);
+      Logger.error('Erro ao processar nova mensagem:', error);
     }
   }
 
@@ -380,7 +382,7 @@ class OptimizedChatService {
       this.notifyTypingStatusChanged(chatId, userId, isTyping);
       
     } catch (error) {
-      console.error('Erro ao processar status de digitação:', error);
+      Logger.error('Erro ao processar status de digitação:', error);
     }
   }
 
@@ -449,7 +451,7 @@ class OptimizedChatService {
       const key = `chat_${chatData.chatId}`;
       await AsyncStorage.setItem(key, JSON.stringify(chatData));
     } catch (error) {
-      console.error('Erro ao salvar chat localmente:', error);
+      Logger.error('Erro ao salvar chat localmente:', error);
     }
   }
 
@@ -468,7 +470,7 @@ class OptimizedChatService {
       await AsyncStorage.setItem(key, JSON.stringify(existingMessages));
       
     } catch (error) {
-      console.error('Erro ao salvar mensagem localmente:', error);
+      Logger.error('Erro ao salvar mensagem localmente:', error);
     }
   }
 
@@ -477,7 +479,7 @@ class OptimizedChatService {
       const key = `chat_messages_${chatId}`;
       await AsyncStorage.setItem(key, JSON.stringify(messages));
     } catch (error) {
-      console.error('Erro ao salvar mensagens localmente:', error);
+      Logger.error('Erro ao salvar mensagens localmente:', error);
     }
   }
 
@@ -487,7 +489,7 @@ class OptimizedChatService {
       const data = await AsyncStorage.getItem(key);
       return data ? JSON.parse(data) : [];
     } catch (error) {
-      console.error('Erro ao buscar mensagens do storage local:', error);
+      Logger.error('Erro ao buscar mensagens do storage local:', error);
       return [];
     }
   }
@@ -500,7 +502,7 @@ class OptimizedChatService {
       
       return messages.slice(startIndex, endIndex);
     } catch (error) {
-      console.error('Erro ao carregar mensagens do storage local:', error);
+      Logger.error('Erro ao carregar mensagens do storage local:', error);
       return [];
     }
   }
@@ -516,7 +518,7 @@ class OptimizedChatService {
         await AsyncStorage.setItem(key, JSON.stringify(chat));
       }
     } catch (error) {
-      console.error('Erro ao atualizar timestamp do chat:', error);
+      Logger.error('Erro ao atualizar timestamp do chat:', error);
     }
   }
 
@@ -543,10 +545,10 @@ class OptimizedChatService {
         }
       }
       
-      console.log('🧹 Cache limpo com sucesso');
+      Logger.log('🧹 Cache limpo com sucesso');
       
     } catch (error) {
-      console.error('Erro ao limpar cache:', error);
+      Logger.error('Erro ao limpar cache:', error);
     }
   }
 
@@ -567,7 +569,7 @@ class OptimizedChatService {
     this.typingUsers.clear();
     this.retryQueue = [];
     this.isInitialized = false;
-    console.log('🗑️ Chat Service destruído');
+    Logger.log('🗑️ Chat Service destruído');
   }
 }
 

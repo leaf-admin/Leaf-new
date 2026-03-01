@@ -1,3 +1,4 @@
+import Logger from '../utils/Logger';
 import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
@@ -11,23 +12,29 @@ import {
   StatusBar
 } from 'react-native';
 import { Icon } from 'react-native-elements';
-import BottomSheet from '@gorhom/bottom-sheet';
+// Temporariamente removido: import BottomSheet from '@gorhom/bottom-sheet';
 import { useSelector, useDispatch } from 'react-redux';
 import { api } from '../common-local';
+import { useTranslation } from '../components/i18n/LanguageProvider';
+import WebSocketManager from '../services/WebSocketManager';
+
 
 const DriverSearchScreen = ({ navigation, route }) => {
+  const { t } = useTranslation();
   const { tripData, onDriverSelect } = route.params || {};
   const [drivers, setDrivers] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
   const [searchRadius, setSearchRadius] = useState(5000); // 5km
   const [selectedDriver, setSelectedDriver] = useState(null);
   const [searchTime, setSearchTime] = useState(0);
+  const [searchId, setSearchId] = useState(null);
   
   const bottomSheetRef = useRef(null);
   const snapPoints = React.useMemo(() => ['25%', '50%', '75%'], []);
   
   const auth = useSelector(state => state.auth);
   const dispatch = useDispatch();
+  const wsManager = WebSocketManager.getInstance();
 
   useEffect(() => {
     startDriverSearch();
@@ -35,26 +42,123 @@ const DriverSearchScreen = ({ navigation, route }) => {
       setSearchTime(prev => prev + 1);
     }, 1000);
     
-    return () => clearInterval(interval);
+    return () => {
+      clearInterval(interval);
+      // Cancelar busca ao sair da tela
+      if (searchId) {
+        cancelDriverSearch();
+      }
+    };
   }, []);
 
   const startDriverSearch = async () => {
     try {
       setIsLoading(true);
       
-      // Buscar motoristas próximos
-      const nearbyDrivers = await searchNearbyDrivers();
-      setDrivers(nearbyDrivers);
+      // Conectar WebSocket se não estiver conectado
+      if (!wsManager.isConnected()) {
+        await wsManager.connect();
+      }
       
-      // Conectar WebSocket para atualizações em tempo real
-      connectDriverUpdates();
+      // USAR NOVO EVENTO: searchDrivers via WebSocket
+      const result = await wsManager.searchDrivers(
+        tripData.pickup,           // pickupLocation
+        tripData.destination,     // destinationLocation
+        'standard',               // rideType
+        tripData.value,           // estimatedFare
+        { 
+          vehicleType: tripData.vehicleType || 'car',
+          radius: searchRadius 
+        }                        // preferences
+      );
+      
+      if (result.success) {
+        setDrivers(result.drivers);
+        setSearchId(result.searchId || `search_${Date.now()}`);
+        Logger.log(`✅ ${result.drivers.length} motoristas encontrados via WebSocket`);
+        
+        // Configurar listeners para atualizações em tempo real
+        setupWebSocketListeners();
+      }
       
     } catch (error) {
-      console.error('Erro ao buscar motoristas:', error);
-      Alert.alert('Erro', 'Não foi possível buscar motoristas próximos');
+      Logger.error('Erro ao buscar motoristas via WebSocket:', error);
+      
+      // Fallback para API REST se WebSocket falhar
+      try {
+        const nearbyDrivers = await searchNearbyDrivers();
+        setDrivers(nearbyDrivers);
+        Logger.log('✅ Fallback para API REST funcionou');
+      } catch (fallbackError) {
+        Logger.error('Erro no fallback:', fallbackError);
+        Alert.alert(t('messages.error'), t('driverSearch.searchError'));
+      }
     } finally {
       setIsLoading(false);
     }
+  };
+
+  const setupWebSocketListeners = () => {
+    // Listener para novos motoristas em tempo real
+    wsManager.on('driversFound', (data) => {
+      if (data.success && data.drivers) {
+        setDrivers(prevDrivers => {
+          // Atualizar lista de motoristas
+          const updatedDrivers = [...prevDrivers, ...data.drivers];
+          return updatedDrivers;
+        });
+        Logger.log('🔄 Lista de motoristas atualizada em tempo real');
+      }
+    });
+
+    // Listener para mudanças de status dos motoristas
+    wsManager.on('driverStatusChanged', (data) => {
+      setDrivers(prevDrivers => 
+        prevDrivers.map(driver => 
+          driver.id === data.driverId 
+            ? { ...driver, status: data.status, isOnline: data.isOnline }
+            : driver
+        )
+      );
+    });
+
+    // Listener para atualizações de localização dos motoristas
+    wsManager.on('driverLocationUpdated', (data) => {
+      setDrivers(prevDrivers => 
+        prevDrivers.map(driver => 
+          driver.id === data.driverId 
+            ? { 
+                ...driver, 
+                location: data.location,
+                distance: calculateDistance(tripData.pickup, data.location)
+              }
+            : driver
+        )
+      );
+    });
+  };
+
+  const cancelDriverSearch = async () => {
+    try {
+      if (searchId) {
+        await wsManager.cancelDriverSearch(searchId, 'Cancelado pelo usuário');
+        Logger.log('✅ Busca de motoristas cancelada');
+      }
+    } catch (error) {
+      Logger.error('Erro ao cancelar busca:', error);
+    }
+  };
+
+  const calculateDistance = (point1, point2) => {
+    // Função simples para calcular distância (em km)
+    const R = 6371; // Raio da Terra em km
+    const dLat = (point2.lat - point1.lat) * Math.PI / 180;
+    const dLon = (point2.lng - point1.lng) * Math.PI / 180;
+    const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
+              Math.cos(point1.lat * Math.PI / 180) * Math.cos(point2.lat * Math.PI / 180) *
+              Math.sin(dLon/2) * Math.sin(dLon/2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+    return R * c;
   };
 
   const searchNearbyDrivers = async () => {
@@ -69,20 +173,19 @@ const DriverSearchScreen = ({ navigation, route }) => {
       
       return response.data.drivers || [];
     } catch (error) {
-      console.error('Erro na busca de motoristas:', error);
+      Logger.error('Erro na busca de motoristas:', error);
       return [];
     }
-  };
-
-  const connectDriverUpdates = () => {
-    // Implementar WebSocket para atualizações em tempo real
-    // Esta é uma simulação - você implementaria com seu WebSocket backend
-    console.log('Conectando WebSocket para atualizações de motoristas');
   };
 
   const handleDriverSelect = async (driver) => {
     try {
       setSelectedDriver(driver);
+      
+      // USAR NOVO EVENTO: cancelDriverSearch antes de selecionar
+      if (searchId) {
+        await wsManager.cancelDriverSearch(searchId, 'Motorista selecionado');
+      }
       
       // Notificar motorista sobre a corrida
       await notifyDriver(driver.id, tripData);
@@ -100,14 +203,14 @@ const DriverSearchScreen = ({ navigation, route }) => {
       } else {
         // Motorista recusou
         setSelectedDriver(null);
-        Alert.alert('Motorista Indisponível', 'Este motorista não está disponível. Buscando outros...');
+        Alert.alert(t('driverSearch.unavailable'), t('driverSearch.unavailableMessage'));
         startDriverSearch();
       }
       
     } catch (error) {
-      console.error('Erro ao selecionar motorista:', error);
+      Logger.error('Erro ao selecionar motorista:', error);
       setSelectedDriver(null);
-      Alert.alert('Erro', 'Não foi possível selecionar este motorista');
+      Alert.alert(t('messages.error'), t('driverSearch.selectionError'));
     }
   };
 
@@ -121,7 +224,7 @@ const DriverSearchScreen = ({ navigation, route }) => {
         estimatedTime: tripData.estimatedTime
       });
     } catch (error) {
-      console.error('Erro ao notificar motorista:', error);
+      Logger.error('Erro ao notificar motorista:', error);
       throw error;
     }
   };
@@ -227,7 +330,7 @@ const DriverSearchScreen = ({ navigation, route }) => {
       <Icon name="search" type="material" color="#ccc" size={64} />
       <Text style={styles.emptyTitle}>Nenhum motorista encontrado</Text>
       <Text style={styles.emptySubtitle}>
-        Estamos procurando motoristas próximos...
+        No momento, não há motoristas disponíveis nesta região. Tente novamente em alguns instantes ou verifique outras áreas próximas.
       </Text>
       <Text style={styles.searchTime}>
         Tempo de busca: {Math.floor(searchTime / 60)}:{(searchTime % 60).toString().padStart(2, '0')}

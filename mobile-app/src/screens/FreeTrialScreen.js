@@ -1,3 +1,4 @@
+import Logger from '../utils/Logger';
 import React, { useState, useEffect } from 'react';
 import {
   View,
@@ -14,10 +15,12 @@ import {
 import { Icon } from 'react-native-elements';
 import { useSelector } from 'react-redux';
 import { api } from '../common-local';
+import { useTranslation } from '../components/i18n/LanguageProvider';
 
 const { width } = Dimensions.get('window');
 
 const FreeTrialScreen = ({ navigation, route }) => {
+  const { t } = useTranslation();
   const [trialData, setTrialData] = useState({
     is_first_500: false,
     free_trial_start: null,
@@ -68,8 +71,8 @@ const FreeTrialScreen = ({ navigation, route }) => {
       }
       
     } catch (error) {
-      console.error('Erro ao carregar dados do período grátis:', error);
-      Alert.alert('Erro', 'Não foi possível carregar os dados do período grátis');
+      Logger.error('Erro ao carregar dados do período grátis:', error);
+      Alert.alert(t('messages.error'), t('freeTrial.loadError'));
     } finally {
       setIsLoading(false);
     }

@@ -1,23 +1,30 @@
 const admin = require('firebase-admin');
 const path = require('path');
+const circuitBreakerService = require('./services/circuit-breaker-service');
+const { logStructured } = require('./utils/logger');
+const traceContext = require('./utils/trace-context');
 
 // Configuração do Firebase Admin SDK
 let firebaseApp = null;
 let firestore = null;
 let realtimeDB = null;
+let storage = null;
 
 // Inicializar Firebase Admin SDK
 function initializeFirebase() {
     try {
         // Verificar se já foi inicializado
         if (firebaseApp) {
-            console.log('✅ Firebase já inicializado');
+            logStructured('info', 'Firebase já inicializado', {
+                service: 'firebase',
+                operation: 'initialize'
+            });
             return firebaseApp;
         }
 
         // Caminho para o arquivo de credenciais
         const serviceAccountPath = path.join(__dirname, 'leaf-reactnative-firebase-adminsdk-fbsvc-456a95e2fc.json');
-        
+
         // Inicializar app
         firebaseApp = admin.initializeApp({
             credential: admin.credential.cert(serviceAccountPath),
@@ -26,18 +33,39 @@ function initializeFirebase() {
 
         // Inicializar Firestore
         firestore = admin.firestore();
-        
+
         // Inicializar Realtime Database
         realtimeDB = admin.database();
 
-        console.log('✅ Firebase Admin SDK inicializado');
-        console.log('📊 Firestore conectado');
-        console.log('⚡ Realtime Database conectado');
+        // Inicializar Storage
+        storage = admin.storage();
+
+        logStructured('info', 'Firebase Admin SDK inicializado', {
+            service: 'firebase',
+            operation: 'initialize'
+        });
+        logStructured('info', 'Firestore conectado', {
+            service: 'firebase',
+            operation: 'firestore_connect'
+        });
+        logStructured('info', 'Realtime Database conectado', {
+            service: 'firebase',
+            operation: 'realtime_connect'
+        });
+        logStructured('info', 'Storage conectado', {
+            service: 'firebase',
+            operation: 'storage_connect'
+        });
 
         return firebaseApp;
 
     } catch (error) {
-        console.error('❌ Erro ao inicializar Firebase:', error);
+        logStructured('error', 'Erro ao inicializar Firebase', {
+            service: 'firebase',
+            operation: 'initialize',
+            error: error.message,
+            stack: error.stack
+        });
         return null;
     }
 }
@@ -47,6 +75,13 @@ function getFirestore() {
     if (!firestore) {
         initializeFirebase();
     }
+    if (!firestore) {
+        logStructured('warn', 'Firestore não disponível', {
+            service: 'firebase',
+            operation: 'getFirestore'
+        });
+        return null;
+    }
     return firestore;
 }
 
@@ -55,38 +90,76 @@ function getRealtimeDB() {
     if (!realtimeDB) {
         initializeFirebase();
     }
+    if (!realtimeDB) {
+        logStructured('warn', 'Realtime Database não disponível', {
+            service: 'firebase',
+            operation: 'getRealtimeDB'
+        });
+        return null;
+    }
     return realtimeDB;
 }
 
-// Sincronizar dados do Redis para Firestore
-async function syncToFirestore(collection, documentId, data) {
-    try {
-        if (!firestore) {
-            console.warn('⚠️ Firestore não disponível');
-            return false;
-        }
-
-        const docRef = firestore.collection(collection).doc(documentId);
-        await docRef.set({
-            ...data,
-            synced_at: admin.firestore.FieldValue.serverTimestamp(),
-            source: 'redis-backend'
-        }, { merge: true });
-
-        console.log(`✅ Dados sincronizados para Firestore: ${collection}/${documentId}`);
-        return true;
-
-    } catch (error) {
-        console.error('❌ Erro ao sincronizar para Firestore:', error);
-        return false;
+// Obter instância do Storage
+function getStorage() {
+    if (!storage) {
+        initializeFirebase();
     }
+    return storage;
+}
+
+// Sincronizar dados do Redis para Firestore (com circuit breaker)
+async function syncToFirestore(collection, documentId, data) {
+    return await circuitBreakerService.execute(
+        'firebase_firestore_sync',
+        async () => {
+            const firestoreInstance = await getFirestore();
+            if (!firestoreInstance) {
+                throw new Error('Firestore não disponível');
+            }
+
+            const docRef = firestoreInstance.collection(collection).doc(documentId);
+            await docRef.set({
+                ...data,
+                synced_at: admin.firestore.FieldValue.serverTimestamp(),
+                source: 'redis-backend'
+            }, { merge: true });
+
+            logStructured('info', 'Dados sincronizados para Firestore', {
+                service: 'firebase',
+                operation: 'syncToFirestore',
+                collection,
+                documentId
+            });
+            return true;
+        },
+        async () => {
+            // Fallback: retornar false se circuit breaker aberto
+            logStructured('warn', 'Sync Firestore bloqueado', {
+                service: 'firebase',
+                operation: 'syncToFirestore',
+                collection,
+                documentId,
+                circuitBreaker: 'open'
+            });
+            return false;
+        },
+        {
+            failureThreshold: 5,
+            timeout: 60000
+        }
+    );
 }
 
 // Sincronizar dados do Redis para Realtime Database
 async function syncToRealtimeDB(path, data) {
     try {
         if (!realtimeDB) {
-            console.warn('⚠️ Realtime Database não disponível');
+            logStructured('warn', 'Realtime Database não disponível', {
+                service: 'firebase',
+                operation: 'syncToRealtimeDB',
+                path: path
+            });
             return false;
         }
 
@@ -97,11 +170,20 @@ async function syncToRealtimeDB(path, data) {
             source: 'redis-backend'
         });
 
-        console.log(`✅ Dados sincronizados para Realtime DB: ${path}`);
+        logStructured('info', 'Dados sincronizados para Realtime DB', {
+            service: 'firebase',
+            operation: 'syncToRealtimeDB',
+            path
+        });
         return true;
 
     } catch (error) {
-        console.error('❌ Erro ao sincronizar para Realtime DB:', error);
+        logStructured('error', 'Erro ao sincronizar para Realtime DB', {
+            service: 'firebase',
+            operation: 'syncToRealtimeDB',
+            path,
+            error: error.message
+        });
         return false;
     }
 }
@@ -109,7 +191,7 @@ async function syncToRealtimeDB(path, data) {
 // Sincronizar localização para ambos os bancos
 async function syncLocation(uid, locationData) {
     const promises = [];
-    
+
     // Sincronizar para Firestore
     promises.push(syncToFirestore('user_locations', uid, {
         ...locationData,
@@ -123,7 +205,7 @@ async function syncLocation(uid, locationData) {
     }));
 
     const results = await Promise.allSettled(promises);
-    
+
     const firestoreSuccess = results[0].status === 'fulfilled' && results[0].value;
     const realtimeSuccess = results[1].status === 'fulfilled' && results[1].value;
 
@@ -133,7 +215,7 @@ async function syncLocation(uid, locationData) {
 // Sincronizar status do motorista
 async function syncDriverStatus(uid, statusData) {
     const promises = [];
-    
+
     // Sincronizar para Firestore
     promises.push(syncToFirestore('driver_status', uid, {
         ...statusData,
@@ -147,7 +229,7 @@ async function syncDriverStatus(uid, statusData) {
     }));
 
     const results = await Promise.allSettled(promises);
-    
+
     const firestoreSuccess = results[0].status === 'fulfilled' && results[0].value;
     const realtimeSuccess = results[1].status === 'fulfilled' && results[1].value;
 
@@ -158,7 +240,11 @@ async function syncDriverStatus(uid, statusData) {
 async function syncTripData(tripId, tripData) {
     try {
         if (!firestore) {
-            console.warn('⚠️ Firestore não disponível');
+            logStructured('warn', 'Firestore não disponível', {
+                service: 'firebase',
+                operation: 'syncTripData',
+                tripId: tripId
+            });
             return false;
         }
 
@@ -169,43 +255,70 @@ async function syncTripData(tripId, tripData) {
             source: 'redis-backend'
         }, { merge: true });
 
-        console.log(`✅ Dados de viagem sincronizados: ${tripId}`);
+        logStructured('info', 'Dados de viagem sincronizados', {
+            service: 'firebase',
+            operation: 'syncTripData',
+            tripId
+        });
         return true;
 
     } catch (error) {
-        console.error('❌ Erro ao sincronizar dados de viagem:', error);
+        logStructured('error', 'Erro ao sincronizar dados de viagem', {
+            service: 'firebase',
+            operation: 'syncTripData',
+            tripId,
+            error: error.message
+        });
         return false;
     }
 }
 
-// Obter dados do Firestore
+// Obter dados do Firestore (com circuit breaker)
 async function getFromFirestore(collection, documentId) {
-    try {
-        if (!firestore) {
-            console.warn('⚠️ Firestore não disponível');
+    return await circuitBreakerService.execute(
+        'firebase_firestore_get',
+        async () => {
+            const firestoreInstance = await getFirestore();
+            if (!firestoreInstance) {
+                throw new Error('Firestore não disponível');
+            }
+
+            const docRef = firestoreInstance.collection(collection).doc(documentId);
+            const doc = await docRef.get();
+
+            if (doc.exists) {
+                return doc.data();
+            }
+
             return null;
+        },
+        async () => {
+            // Fallback: retornar null se circuit breaker aberto
+            logStructured('warn', 'Get Firestore bloqueado', {
+                service: 'firebase',
+                operation: 'getFromFirestore',
+                collection,
+                documentId,
+                circuitBreaker: 'open'
+            });
+            return null;
+        },
+        {
+            failureThreshold: 5,
+            timeout: 60000
         }
-
-        const docRef = firestore.collection(collection).doc(documentId);
-        const doc = await docRef.get();
-
-        if (doc.exists) {
-            return doc.data();
-        }
-
-        return null;
-
-    } catch (error) {
-        console.error('❌ Erro ao obter dados do Firestore:', error);
-        return null;
-    }
+    );
 }
 
 // Obter dados do Realtime Database
 async function getFromRealtimeDB(path) {
     try {
         if (!realtimeDB) {
-            console.warn('⚠️ Realtime Database não disponível');
+            logStructured('warn', 'Realtime Database não disponível', {
+                service: 'firebase',
+                operation: 'getFromRealtimeDB',
+                path: path
+            });
             return null;
         }
 
@@ -219,7 +332,12 @@ async function getFromRealtimeDB(path) {
         return null;
 
     } catch (error) {
-        console.error('❌ Erro ao obter dados do Realtime DB:', error);
+        logStructured('error', 'Erro ao obter dados do Realtime DB', {
+            service: 'firebase',
+            operation: 'getFromRealtimeDB',
+            path,
+            error: error.message
+        });
         return null;
     }
 }
@@ -228,6 +346,7 @@ module.exports = {
     initializeFirebase,
     getFirestore,
     getRealtimeDB,
+    getStorage,
     syncToFirestore,
     syncToRealtimeDB,
     syncLocation,

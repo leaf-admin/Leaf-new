@@ -1,0 +1,210 @@
+# Docker Compose - Alta Disponibilidade e Auto-Escalabilidade
+# LEAF WebSocket Backend
+# 
+# Arquitetura:
+# - 3 instâncias WebSocket (redundância)
+# - Redis Master + Replica (failover)
+# - Nginx Load Balancer (distribuição de carga)
+#
+# Uso:
+#   docker-compose -f config/docker/docker-compose-ha.yml up -d
+
+version: '3.8'
+
+services:
+  # ===== REDIS - MASTER + REPLICA =====
+  redis-master:
+    image: redis:7-alpine
+    container_name: leaf-redis-master
+    command: |
+      redis-server 
+      --appendonly yes 
+      --maxmemory 2gb 
+      --maxmemory-policy allkeys-lru 
+      --save 900 1 
+      --save 300 10 
+      --save 60 10000
+      --tcp-keepalive 300
+      --timeout 0
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-master-data:/data
+    networks:
+      - leaf-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
+
+  redis-replica:
+    image: redis:7-alpine
+    container_name: leaf-redis-replica
+    command: |
+      redis-server 
+      --slaveof redis-master 6379 
+      --maxmemory 2gb 
+      --maxmemory-policy allkeys-lru
+      --appendonly yes
+    ports:
+      - "6380:6379"
+    volumes:
+      - redis-replica-data:/data
+    networks:
+      - leaf-network
+    restart: unless-stopped
+    depends_on:
+      redis-master:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
+
+  # ===== WEBSOCKET INSTANCES =====
+  websocket-1:
+    build: .
+    container_name: leaf-websocket-1
+    environment:
+      - NODE_ENV=production
+      - PORT=3001
+      - INSTANCE_ID=websocket_1
+      - CLUSTER_MODE=true
+      - REDIS_URL=redis://redis-master:6379
+      - REDIS_REPLICA_URL=redis://redis-replica:6379
+      - SOCKET_IO_ADAPTER=redis
+      - SERVER_NAME=LEAF-Production-01
+    ports:
+      - "3001:3001"
+    networks:
+      - leaf-network
+    restart: unless-stopped
+    depends_on:
+      redis-master:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: '1.0'
+        reservations:
+          memory: 512M
+          cpus: '0.5'
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3001/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 40s
+
+  websocket-2:
+    build: .
+    container_name: leaf-websocket-2
+    environment:
+      - NODE_ENV=production
+      - PORT=3001
+      - INSTANCE_ID=websocket_2
+      - CLUSTER_MODE=true
+      - REDIS_URL=redis://redis-master:6379
+      - REDIS_REPLICA_URL=redis://redis-replica:6379
+      - SOCKET_IO_ADAPTER=redis
+      - SERVER_NAME=LEAF-Production-02
+    ports:
+      - "3002:3001"
+    networks:
+      - leaf-network
+    restart: unless-stopped
+    depends_on:
+      redis-master:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: '1.0'
+        reservations:
+          memory: 512M
+          cpus: '0.5'
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3001/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 40s
+
+  websocket-3:
+    build: .
+    container_name: leaf-websocket-3
+    environment:
+      - NODE_ENV=production
+      - PORT=3001
+      - INSTANCE_ID=websocket_3
+      - CLUSTER_MODE=true
+      - REDIS_URL=redis://redis-master:6379
+      - REDIS_REPLICA_URL=redis://redis-replica:6379
+      - SOCKET_IO_ADAPTER=redis
+      - SERVER_NAME=LEAF-Production-03
+    ports:
+      - "3003:3001"
+    networks:
+      - leaf-network
+    restart: unless-stopped
+    depends_on:
+      redis-master:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: '1.0'
+        reservations:
+          memory: 512M
+          cpus: '0.5'
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3001/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 40s
+
+  # ===== NGINX LOAD BALANCER =====
+  nginx:
+    image: nginx:alpine
+    container_name: leaf-nginx-lb
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./config/nginx/nginx-ha.conf:/etc/nginx/nginx.conf:ro
+      - ./ssl:/etc/nginx/ssl:ro
+    networks:
+      - leaf-network
+    restart: unless-stopped
+    depends_on:
+      - websocket-1
+      - websocket-2
+      - websocket-3
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+volumes:
+  redis-master-data:
+    driver: local
+  redis-replica-data:
+    driver: local
+
+networks:
+  leaf-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
+

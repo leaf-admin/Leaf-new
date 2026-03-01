@@ -1,3 +1,4 @@
+import Logger from '../utils/Logger';
 import React from 'react';
 import {
   View,
@@ -55,7 +56,7 @@ const PaymentSuccessScreen = ({ navigation, route }) => {
             autoPlay
             loop={false}
             style={styles.animation}
-            onError={(error) => console.log('Lottie success error:', error)}
+            onError={(error) => Logger.log('Lottie success error:', error)}
             resizeMode="contain"
           />
           */}

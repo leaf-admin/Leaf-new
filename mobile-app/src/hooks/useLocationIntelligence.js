@@ -1,3 +1,4 @@
+import Logger from '../utils/Logger';
 /**
  * useLocationIntelligence.js
  * Hook para gerenciar Location Intelligence Service
@@ -5,6 +6,7 @@
 
 import { useState, useCallback, useRef } from 'react';
 import LocationIntelligenceService from '../services/LocationIntelligenceService';
+
 
 export const useLocationIntelligence = () => {
   const [isLoading, setIsLoading] = useState(false);
@@ -22,7 +24,7 @@ export const useLocationIntelligence = () => {
   const initializeService = useCallback(() => {
     if (!serviceRef.current) {
       serviceRef.current = new LocationIntelligenceService();
-      console.log('🧠 Location Intelligence Service inicializado via hook');
+      Logger.log('🧠 Location Intelligence Service inicializado via hook');
     }
     return serviceRef.current;
   }, []);
@@ -38,7 +40,7 @@ export const useLocationIntelligence = () => {
 
       if (result) {
         setLastResult(result);
-        console.log('✅ Localização resolvida:', result);
+        Logger.log('✅ Localização resolvida:', result);
         return result;
       } else {
         setError('Localização não encontrada');
@@ -47,7 +49,7 @@ export const useLocationIntelligence = () => {
     } catch (err) {
       const errorMessage = err.message || 'Erro ao resolver localização';
       setError(errorMessage);
-      console.error('❌ Erro no resolveLocation:', err);
+      Logger.error('❌ Erro no resolveLocation:', err);
       return null;
     } finally {
       setIsLoading(false);
@@ -67,12 +69,12 @@ export const useLocationIntelligence = () => {
       const service = initializeService();
       const suggestions = await service.getSmartSuggestions(query, context);
 
-      console.log('✅ Sugestões obtidas:', suggestions.length);
+      Logger.log('✅ Sugestões obtidas:', suggestions.length);
       return suggestions;
     } catch (err) {
       const errorMessage = err.message || 'Erro ao buscar sugestões';
       setError(errorMessage);
-      console.error('❌ Erro no getSuggestions:', err);
+      Logger.error('❌ Erro no getSuggestions:', err);
       return [];
     } finally {
       setIsLoading(false);
@@ -89,12 +91,12 @@ export const useLocationIntelligence = () => {
       const results = await service.testConnectivity();
 
       setConnectivity(results);
-      console.log('✅ Conectividade testada:', results);
+      Logger.log('✅ Conectividade testada:', results);
       return results;
     } catch (err) {
       const errorMessage = err.message || 'Erro ao testar conectividade';
       setError(errorMessage);
-      console.error('❌ Erro no testConnectivity:', err);
+      Logger.error('❌ Erro no testConnectivity:', err);
       return null;
     } finally {
       setIsLoading(false);
@@ -111,7 +113,7 @@ export const useLocationIntelligence = () => {
       const stats = await service.getStats();
 
       if (stats) {
-        console.log('✅ Estatísticas obtidas:', stats);
+        Logger.log('✅ Estatísticas obtidas:', stats);
         return stats;
       } else {
         setError('Não foi possível obter estatísticas');
@@ -120,7 +122,7 @@ export const useLocationIntelligence = () => {
     } catch (err) {
       const errorMessage = err.message || 'Erro ao obter estatísticas';
       setError(errorMessage);
-      console.error('❌ Erro no getStats:', err);
+      Logger.error('❌ Erro no getStats:', err);
       return null;
     } finally {
       setIsLoading(false);
@@ -136,12 +138,12 @@ export const useLocationIntelligence = () => {
       const service = initializeService();
       const cleared = await service.clearCache();
 
-      console.log('✅ Cache limpo:', cleared, 'chaves removidas');
+      Logger.log('✅ Cache limpo:', cleared, 'chaves removidas');
       return cleared;
     } catch (err) {
       const errorMessage = err.message || 'Erro ao limpar cache';
       setError(errorMessage);
-      console.error('❌ Erro no clearCache:', err);
+      Logger.error('❌ Erro no clearCache:', err);
       return 0;
     } finally {
       setIsLoading(false);

@@ -62,7 +62,7 @@ export const shouldUseRedis = () => {
 
 // Configuração para uso via API
 export const REDIS_API_CONFIG = {
-    baseUrl: 'http://192.168.0.39:5001/leaf-app-91dfdce0/us-central1',
+    baseUrl: 'http://localhost:3001',
     useRedis: Platform.OS === 'web',
     timeout: 5000,
 };

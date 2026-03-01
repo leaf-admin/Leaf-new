@@ -6,7 +6,7 @@ import {
   ImageBackground,
   ActivityIndicator,
 } from 'react-native';
-import { colors } from '../common-local/theme';
+import { colors } from '../common/theme';
 
 export default function AuthLoadingScreen(props) {
   return (

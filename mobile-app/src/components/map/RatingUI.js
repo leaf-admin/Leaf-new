@@ -1,3 +1,4 @@
+import Logger from '../../utils/Logger';
 import React, { useState } from 'react';
 import {
   View,
@@ -9,11 +10,10 @@ import {
   Alert
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-// import { useTranslation } from 'react-i18next';
+import { useTranslation } from '../i18n/LanguageProvider';
 
 export default function RatingUI({ userToRate, onSubmit }) {
-  // Função de tradução temporária
-  const t = (key) => key;
+  const { t } = useTranslation();
   const [rating, setRating] = useState(0);
   const [comment, setComment] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -24,7 +24,7 @@ export default function RatingUI({ userToRate, onSubmit }) {
 
   const handleSubmit = async () => {
     if (rating === 0) {
-      Alert.alert(t('error'), t('please_select_rating'));
+      Alert.alert(t('messages.error'), t('rating.pleaseSelectRating'));
       return;
     }
 
@@ -42,10 +42,10 @@ export default function RatingUI({ userToRate, onSubmit }) {
         await onSubmit(ratingData);
       }
 
-      Alert.alert(t('success'), t('rating_submitted_successfully'));
+      Alert.alert(t('messages.success'), t('rating.submittedSuccessfully'));
     } catch (error) {
-      console.error('Erro ao enviar avaliação:', error);
-      Alert.alert(t('error'), t('error_submitting_rating'));
+      Logger.error('Erro ao enviar avaliação:', error);
+      Alert.alert(t('messages.error'), t('rating.submitError'));
     } finally {
       setIsSubmitting(false);
     }

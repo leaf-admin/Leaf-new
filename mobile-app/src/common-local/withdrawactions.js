@@ -4,7 +4,7 @@ import {
   FETCH_WITHDRAWS_FAILED,
   EDIT_WITHDRAWS
 } from "../types";
-import { firebase } from '../config/configureFirebase';
+import { firebase } from './config/configureFirebase';
 
 export const fetchWithdraws = () => (dispatch) => {
 

@@ -1,6 +1,6 @@
 import React, { useCallback, useMemo, useRef } from 'react';
 import { View, StyleSheet } from 'react-native';
-import BottomSheet, { BottomSheetView, BottomSheetBackdrop } from '@gorhom/bottom-sheet';
+// Temporariamente removido: import BottomSheet, { BottomSheetView, BottomSheetBackdrop } from '@gorhom/bottom-sheet';
 
 const BottomSheetWrapper = ({ 
   children, 

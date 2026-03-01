@@ -1,230 +1,136 @@
+import Logger from '../utils/Logger';
 import React, { useEffect, useRef, useState } from 'react';
-import { View, Text, Image, StyleSheet, StatusBar, Animated, TouchableOpacity, Dimensions, ActivityIndicator } from 'react-native';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { View, Text, Image, StyleSheet, StatusBar, Animated, TouchableOpacity } from 'react-native';
 
-const { width, height } = Dimensions.get('window');
 
 const translations = [
-  { welcome: 'BEM VINDO A', start: 'Começar', subtitle: 'Sua jornada começa aqui - DEV MODE' },
-  { welcome: 'WELCOME TO', start: 'Start', subtitle: 'Your journey starts here' },
-  { welcome: 'BIENVENIDO A', start: 'Comenzar', subtitle: 'Tu viaje comienza aquí' },
-  { welcome: 'BIENVENUE À', start: 'Commencer', subtitle: 'Votre voyage commence ici' },
-  { welcome: 'WILLKOMMEN BEI', start: 'Starten', subtitle: 'Ihre Reise beginnt hier' },
-  { welcome: 'BENVENUTO A', start: 'Inizia', subtitle: 'Il tuo viaggio inizia qui' },
-  { welcome: 'ようこそ', start: '開始', subtitle: 'あなたの旅がここから始まります' },
-  { welcome: '欢迎', start: '开始', subtitle: '您的旅程从这里开始' },
-  { welcome: 'أهلاً بك في', start: 'ابدأ', subtitle: 'رحلتك تبدأ من هنا' },
-  { welcome: 'BIENVENUE À', start: 'Commencer', subtitle: 'Votre voyage commence ici' },
+  { welcome: 'BEM VINDO A', start: 'Começar' },
+  { welcome: 'WELCOME TO', start: 'Start' },
+  { welcome: 'BIENVENIDO A', start: 'Comenzar' },
+  { welcome: 'BIENVENUE À', start: 'Commencer' },
+  { welcome: 'WILLKOMMEN BEI', start: 'Starten' },
+  { welcome: 'BENVENUTO A', start: 'Inizia' },
+  { welcome: 'ようこそ', start: '開始' },
+  { welcome: '欢迎', start: '开始' },
+  { welcome: 'أهلاً بك في', start: 'ابدأ' },
+  { welcome: 'BIENVENUE À', start: 'Commencer' },
 ];
 
 export default function WelcomeScreen({ navigation }) {
   const [currentText, setCurrentText] = useState(translations[0].welcome);
   const [currentBtn, setCurrentBtn] = useState(translations[0].start);
-  const [currentSubtitle, setCurrentSubtitle] = useState(translations[0].subtitle);
-  const [isLoading, setIsLoading] = useState(false);
-  const [buttonDisabled, setButtonDisabled] = useState(false);
+  const [currentIndex, setCurrentIndex] = useState(0);
   
-  // Animações
-  const fadeAnim = useRef(new Animated.Value(1)).current;
-  const buttonAnim = useRef(new Animated.Value(1)).current;
+  // Animações separadas para texto e botão
+  const welcomeFadeAnim = useRef(new Animated.Value(1)).current;
+  const buttonFadeAnim = useRef(new Animated.Value(1)).current;
+  
+  // Animação de entrada inicial
   const fadeInAnim = useRef(new Animated.Value(0)).current;
-  const logoScaleAnim = useRef(new Animated.Value(0.8)).current;
-  const subtitleAnim = useRef(new Animated.Value(0)).current;
+  
+  const [buttonDisabled, setButtonDisabled] = useState(false);
+  const buttonAnim = useRef(new Animated.Value(1)).current;
 
   useEffect(() => {
-    console.log("WelcomeScreen - Componente montado");
-    startInitialAnimations();
-  }, []);
-
-  const startInitialAnimations = () => {
-    // Animação de entrada do logo
-    Animated.sequence([
-      Animated.timing(logoScaleAnim, {
-        toValue: 1,
-        duration: 800,
-        useNativeDriver: true,
-      }),
-      Animated.timing(subtitleAnim, {
-        toValue: 1,
-        duration: 600,
-        useNativeDriver: true,
-      })
-    ]).start();
-
-    // Fade in geral
+    Logger.log("WelcomeScreen - Componente montado");
+    
+    // Animação de entrada inicial
     Animated.timing(fadeInAnim, {
       toValue: 1,
       duration: 1000,
       useNativeDriver: true,
-    }).start();
-  };
+    }).start(() => {
+      Logger.log("WelcomeScreen - Animação de entrada concluída");
+    });
+  }, []);
 
   useEffect(() => {
     let idx = 0;
     const interval = setInterval(() => {
-      // Fade out
-      Animated.timing(fadeAnim, {
-        toValue: 0,
-        duration: 400,
-        useNativeDriver: true,
-      }).start(() => {
+      // Fade out simultâneo para texto e botão
+      Animated.parallel([
+        Animated.timing(welcomeFadeAnim, {
+          toValue: 0,
+          duration: 500,
+          useNativeDriver: true,
+        }),
+        Animated.timing(buttonFadeAnim, {
+          toValue: 0,
+          duration: 500,
+          useNativeDriver: true,
+        })
+      ]).start(() => {
+        // Atualiza os textos
         idx = (idx + 1) % translations.length;
+        setCurrentIndex(idx);
         setCurrentText(translations[idx].welcome);
         setCurrentBtn(translations[idx].start);
-        setCurrentSubtitle(translations[idx].subtitle);
-        // Fade in
-        Animated.timing(fadeAnim, {
-          toValue: 1,
-          duration: 400,
-          useNativeDriver: true,
-        }).start();
+        
+        // Fade in simultâneo para texto e botão
+        Animated.parallel([
+          Animated.timing(welcomeFadeAnim, {
+            toValue: 1,
+            duration: 500,
+            useNativeDriver: true,
+          }),
+          Animated.timing(buttonFadeAnim, {
+            toValue: 1,
+            duration: 500,
+            useNativeDriver: true,
+          })
+        ]).start();
       });
-    }, 4000); // Aumentado para 4 segundos
+    }, 4000); // 4 segundos para cada mudança
+    
     return () => clearInterval(interval);
   }, []);
 
-  const handleStart = async () => {
-    console.log("WelcomeScreen - Botão Start pressionado");
-    if (buttonDisabled || isLoading) return;
-    
+  const handleStart = () => {
+    Logger.log("WelcomeScreen - Botão Start pressionado");
+    if (buttonDisabled) return;
     setButtonDisabled(true);
-    setIsLoading(true);
-    
-    // Animação do botão
-    Animated.sequence([
+    Animated.parallel([
       Animated.timing(buttonAnim, {
-        toValue: 0.95,
-        duration: 100,
-        useNativeDriver: true,
-      }),
-      Animated.timing(buttonAnim, {
-        toValue: 1,
-        duration: 100,
+        toValue: 0,
+        duration: 400,
         useNativeDriver: true,
       })
-    ]).start();
-
-    // Simular carregamento
-    setTimeout(() => {
-      console.log("WelcomeScreen - Navegando para ProfileSelection");
-      navigation.navigate('ProfileSelection');
+    ]).start(() => {
+      Logger.log("WelcomeScreen - Navegando para ProfileSelection");
+      navigation.navigate('ProfileSelectionScreen');
       setButtonDisabled(false);
-      setIsLoading(false);
-    }, 500);
-  };
-
-  const clearStorage = async () => {
-    try {
-      setIsLoading(true);
-      await AsyncStorage.removeItem('@user_data');
-      console.log('Dados do usuário removidos com sucesso!');
-      alert('Storage limpo! Reinicie o app.');
-    } catch (error) {
-      console.error('Erro ao remover dados do usuário:', error);
-      alert('Erro ao limpar storage');
-    } finally {
-      setIsLoading(false);
-    }
+      buttonAnim.setValue(1);
+    });
   };
 
   return (
-    <View style={styles.container}>
+    <Animated.View style={[
+      { flex: 1, width: '100%', backgroundColor: '#F5F5F5', justifyContent: 'center', alignItems: 'center' },
+      { opacity: fadeInAnim }
+    ]}>
       <StatusBar backgroundColor="#1A330E" barStyle="light-content" />
-      
-      {/* Background com gradiente sutil */}
-      <View style={styles.backgroundGradient} />
-      
-      {/* Conteúdo principal */}
-      <Animated.View 
-        style={[
-          styles.content,
-          {
-            opacity: fadeInAnim,
-            transform: [{ scale: logoScaleAnim }]
-          }
-        ]}
-      >
-        {/* Logo e texto de boas-vindas */}
-        <View style={styles.logoWrapper}>
-          <Animated.Text 
-            style={[
-              styles.welcomeText,
-              { opacity: fadeAnim }
-            ]}
-          > 
-            {currentText}
-          </Animated.Text>
-          
-          <Image
-            source={require('../../assets/images/customcolor_logo_customcolor_background.png')}
-            style={[
-              styles.logo,
-              { 
-                width: width * 0.6,
-                height: width * 0.6
-              }
-            ]}
-            resizeMode="contain"
-          />
-          
-          <Animated.Text 
-            style={[
-              styles.subtitle,
-              { 
-                opacity: subtitleAnim,
-                fontSize: 16
-              }
-            ]}
-          >
-            {currentSubtitle}
-          </Animated.Text>
-        </View>
-
-        {/* Botões */}
-        <View style={styles.buttonContainer}>
-          <TouchableOpacity
-            style={[
-              styles.startButton,
-              buttonDisabled && styles.buttonDisabled
-            ]}
-            onPress={handleStart}
-            disabled={buttonDisabled || isLoading}
-            activeOpacity={0.8}
-          >
-            {isLoading ? (
-              <ActivityIndicator color="#FFFFFF" size="small" />
-            ) : (
-              <Text style={styles.startButtonText}>{currentBtn}</Text>
-            )}
-          </TouchableOpacity>
-          
-          {/* Botão temporário para limpar storage */}
-          <TouchableOpacity
-            style={[
-              styles.clearButton,
-              buttonDisabled && styles.buttonDisabled
-            ]}
-            onPress={clearStorage}
-            disabled={buttonDisabled || isLoading}
-            activeOpacity={0.8}
-          >
-            {isLoading ? (
-              <ActivityIndicator color="#FFFFFF" size="small" />
-            ) : (
-              <Text style={styles.clearButtonText}>Limpar Storage</Text>
-            )}
-          </TouchableOpacity>
-        </View>
-      </Animated.View>
-
-      {/* Loading overlay */}
-      {isLoading && (
-        <View style={styles.loadingOverlay}>
-          <ActivityIndicator size="large" color="#10B981" />
-          <Text style={styles.loadingText}>Carregando...</Text>
-        </View>
-      )}
-    </View>
+      <View style={styles.logoWrapper}>
+        <Animated.Text style={[
+          styles.welcomeText,
+          { opacity: welcomeFadeAnim }
+        ]}> 
+          {currentText}
+        </Animated.Text>
+        <Image
+          source={require('../../assets/images/customcolor_logo_customcolor_background.png')}
+          style={styles.logo}
+          resizeMode="contain"
+        />
+      </View>
+      <TouchableOpacity style={styles.startButton} onPress={handleStart} disabled={buttonDisabled}>
+        <Animated.Text style={[
+          styles.startButtonText,
+          { opacity: buttonFadeAnim }
+        ]}>
+          {currentBtn}
+        </Animated.Text>
+      </TouchableOpacity>
+    </Animated.View>
   );
 }
 
@@ -232,102 +138,64 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#F5F5F5',
-    justifyContent: 'center',
+    justifyContent: 'flex-start',
     alignItems: 'center',
-  },
-  backgroundGradient: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    backgroundColor: 'rgba(26, 51, 14, 0.05)', // Verde sutil
-  },
-  content: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingHorizontal: 20,
   },
   logoWrapper: {
+    justifyContent: 'center',
     alignItems: 'center',
-    marginBottom: 60,
+    width: '100%',
+    position: 'relative',
+    flexDirection: 'column',
   },
   welcomeText: {
-    fontSize: 24,
-    fontWeight: 'bold',
     color: '#1A330E',
-    marginBottom: 20,
+    fontSize: 28,
+    fontWeight: 'bold',
     textAlign: 'center',
-    letterSpacing: 1,
-  },
-  logo: {
-    marginBottom: 20,
-  },
-  subtitle: {
-    fontSize: 16,
-    color: '#666',
-    textAlign: 'center',
-    marginTop: 10,
-    fontStyle: 'italic',
-  },
-  buttonContainer: {
+    letterSpacing: 2,
     width: '100%',
-    maxWidth: 300,
-    paddingHorizontal: 20,
-  },
-  startButton: {
-    backgroundColor: '#10B981',
-    height: 56,
-    borderRadius: 28,
-    justifyContent: 'center',
-    alignItems: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.15,
-    shadowRadius: 8,
-    elevation: 8,
-  },
-  clearButton: {
-    backgroundColor: '#FF4444',
-    height: 48,
-    borderRadius: 24,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginTop: 16,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 4,
-  },
-  startButtonText: {
-    color: '#FFFFFF',
-    fontSize: 18,
-    fontWeight: 'bold',
-  },
-  clearButtonText: {
-    color: '#FFFFFF',
-    fontSize: 16,
-    fontWeight: 'bold',
-  },
-  buttonDisabled: {
-    opacity: 0.6,
-  },
-  loadingOverlay: {
     position: 'absolute',
-    top: 0,
     left: 0,
     right: 0,
-    bottom: 0,
-    backgroundColor: 'rgba(0, 0, 0, 0.3)',
-    justifyContent: 'center',
-    alignItems: 'center',
+    top: '50%',
+    transform: [{ translateY: -80 }],
+    zIndex: 10,
   },
-  loadingText: {
-    color: '#FFFFFF',
-    fontSize: 16,
-    marginTop: 12,
-    fontWeight: '500',
+  logo: {
+    width: 215,
+    height: 215,
+    alignSelf: 'center',
+    marginTop: 0,
+  },
+  startButton: {
+    backgroundColor: '#2A4A1E',
+    borderRadius: 8,
+    paddingVertical: 16,
+    width: 215,
+    alignItems: 'center',
+    position: 'absolute',
+    bottom: 30,
+    alignSelf: 'center',
+  },
+  startButtonText: {
+    color: '#F5F5F5',
+    fontSize: 18,
+    fontWeight: 'bold',
+    textAlign: 'center',
+  },
+  card: {
+    backgroundColor: '#1A330E',
+    borderRadius: 16,
+    padding: 24,
+    width: 255,
+    alignItems: 'center',
+    marginTop: 32,
+    alignSelf: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.08,
+    shadowRadius: 8,
+    elevation: 2,
   },
 }); 

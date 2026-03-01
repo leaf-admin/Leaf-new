@@ -1,3 +1,4 @@
+import Logger from '../utils/Logger';
 import React, { useState, useEffect } from 'react';
 import {
   View,
@@ -15,8 +16,11 @@ import {
 import { Icon } from 'react-native-elements';
 import { useSelector } from 'react-redux';
 import { api } from '../common-local';
+import { useTranslation } from '../components/i18n/LanguageProvider';
+
 
 const FeedbackScreen = ({ navigation, route }) => {
+  const { t } = useTranslation();
   const [selectedCategory, setSelectedCategory] = useState('general');
   const [rating, setRating] = useState(0);
   const [feedback, setFeedback] = useState('');
@@ -56,7 +60,7 @@ const FeedbackScreen = ({ navigation, route }) => {
       setPreviousFeedback(response.data.feedback || []);
       
     } catch (error) {
-      console.error('Erro ao carregar feedback anterior:', error);
+      Logger.error('Erro ao carregar feedback anterior:', error);
     } finally {
       setIsLoading(false);
     }
@@ -68,12 +72,12 @@ const FeedbackScreen = ({ navigation, route }) => {
 
   const handleSubmitFeedback = async () => {
     if (!feedback.trim()) {
-      Alert.alert('Erro', 'Por favor, descreva seu feedback');
+      Alert.alert(t('messages.error'), t('feedback.describeFeedback'));
       return;
     }
 
     if (rating === 0) {
-      Alert.alert('Erro', 'Por favor, selecione uma avaliação');
+      Alert.alert(t('messages.error'), t('feedback.selectRating'));
       return;
     }
 
@@ -91,9 +95,9 @@ const FeedbackScreen = ({ navigation, route }) => {
       await api.post('/api/feedback', feedbackData);
       
       Alert.alert(
-        'Feedback Enviado',
-        'Obrigado pelo seu feedback! Nossa equipe irá analisá-lo.',
-        [{ text: 'OK', onPress: () => {
+        t('feedback.submitted'),
+        t('feedback.submittedMessage'),
+        [{ text: t('messages.confirm'), onPress: () => {
           setFeedback('');
           setRating(0);
           loadPreviousFeedback();
@@ -101,8 +105,8 @@ const FeedbackScreen = ({ navigation, route }) => {
       );
       
     } catch (error) {
-      console.error('Erro ao enviar feedback:', error);
-      Alert.alert('Erro', 'Não foi possível enviar o feedback');
+      Logger.error('Erro ao enviar feedback:', error);
+      Alert.alert(t('messages.error'), t('feedback.submitError'));
     } finally {
       setIsSubmitting(false);
     }

@@ -1,13 +1,16 @@
+import Logger from '../../utils/Logger';
 import {
   FETCH_ESTIMATE,
   FETCH_ESTIMATE_SUCCESS,
   FETCH_ESTIMATE_FAILED,
+  SET_ESTIMATE,
   CLEAR_ESTIMATE
 } from "../types.js";
 import Polyline from '@mapbox/polyline';
 import { firebase } from '../config/configureFirebase';
 import { FareCalculator } from '../other/FareCalculator';
 import { calcularPedagiosPorPolyline } from '../other/TollUtils';
+
 
 // Estrutura de dados para segmentos de rodovia e pedágios
 export const roadSegments = {
@@ -81,17 +84,17 @@ function isTollOnRoute(routePoints, tollLocation, tolerance = 1) {
       lng: routePoints[i].longitude || routePoints[i].lng
     };
     const w = {
-      lat: routePoints[i+1].latitude || routePoints[i+1].lat,
-      lng: routePoints[i+1].longitude || routePoints[i+1].lng
+      lat: routePoints[i + 1].latitude || routePoints[i + 1].lat,
+      lng: routePoints[i + 1].longitude || routePoints[i + 1].lng
     };
     const toll = {
       lat: tollLocation.latitude || tollLocation.lat,
       lng: tollLocation.longitude || tollLocation.lng
     };
     const dist = distanceToSegment(toll, v, w);
-    // console.log(`Distância do pedágio (${toll.lat},${toll.lng}) ao segmento [(${v.lat},${v.lng})-(${w.lat},${w.lng})]: ${dist} km`);
+    // Logger.log(`Distância do pedágio (${toll.lat},${toll.lng}) ao segmento [(${v.lat},${v.lng})-(${w.lat},${w.lng})]: ${dist} km`);
     if (dist <= tolerance) {
-      // console.log(`Pedágio detectado no segmento entre (${v.lat},${v.lng}) e (${w.lat},${w.lng}) a ${dist} km`);
+      // Logger.log(`Pedágio detectado no segmento entre (${v.lat},${v.lng}) e (${w.lat},${w.lng}) a ${dist} km`);
       return true;
     }
   }
@@ -101,7 +104,7 @@ function isTollOnRoute(routePoints, tollLocation, tolerance = 1) {
 // Função para encontrar pedágios na rota usando a abordagem robusta
 function findTollsInRoute(routePoints) {
   if (!routePoints || routePoints.length === 0) {
-    console.log('Nenhum ponto de rota fornecido');
+    Logger.log('Nenhum ponto de rota fornecido');
     return [];
   }
   const foundTolls = new Set();
@@ -116,35 +119,35 @@ function findTollsInRoute(routePoints) {
       });
     });
   });
-  console.log(`Total de pedágios encontrados: ${tollsInRoute.length}`);
+  Logger.log(`Total de pedágios encontrados: ${tollsInRoute.length}`);
   return tollsInRoute;
 }
 
 // Função para calcular o valor total dos pedágios
 export function calculateTollFees(routePoints, vehicleType = 'car') {
   if (!routePoints || routePoints.length === 0) {
-    console.log('Nenhum ponto de rota fornecido para cálculo de pedágio');
+    Logger.log('Nenhum ponto de rota fornecido para cálculo de pedágio');
     return 0;
   }
 
-  console.log(`Calculando pedágio para ${routePoints.length} pontos de rota`);
-  
+  Logger.log(`Calculando pedágio para ${routePoints.length} pontos de rota`);
+
   const tolls = findTollsInRoute(routePoints);
   if (tolls.length === 0) {
-    console.log('Nenhum pedágio encontrado na rota');
+    Logger.log('Nenhum pedágio encontrado na rota');
     return 0;
   }
 
   const isWeekend = [0, 6].includes(new Date().getDay());
-  console.log(`Dia da semana: ${isWeekend ? 'Fim de semana' : 'Dia útil'}`);
+  Logger.log(`Dia da semana: ${isWeekend ? 'Fim de semana' : 'Dia útil'}`);
 
   const totalTollFee = tolls.reduce((total, toll) => {
     const fee = isWeekend ? toll.fees[vehicleType].weekend : toll.fees[vehicleType].weekday;
-    console.log(`Pedágio ${toll.name}: R$ ${fee}`);
+    Logger.log(`Pedágio ${toll.name}: R$ ${fee}`);
     return total + fee;
   }, 0);
 
-  console.log(`Valor total do pedágio: R$ ${totalTollFee}`);
+  Logger.log(`Valor total do pedágio: R$ ${totalTollFee}`);
   return totalTollFee;
 }
 
@@ -406,51 +409,51 @@ export const tollData = [
 
 export const getEstimate = (bookingData) => async (dispatch) => {
   const {
-      settingsRef
+    settingsRef
   } = firebase;
 
   dispatch({
     type: FETCH_ESTIMATE,
     payload: bookingData,
   });
-          
+
   let res = bookingData.routeDetails;
 
-  if(res){
+  if (res) {
     let points = Polyline.decode(res.polylinePoints);
     let waypoints = points.map((point) => {
-        return {
-            latitude: point[0],
-            longitude: point[1]
-        }
+      return {
+        latitude: point[0],
+        longitude: point[1]
+      }
     });
-    
+
     settingsRef.on('value', settingdata => {
       let settings = settingdata.val();
-      let distance = settings.convert_to_mile? (res.distance_in_km / 1.609344) : res.distance_in_km;
+      let distance = settings.convert_to_mile ? (res.distance_in_km / 1.609344) : res.distance_in_km;
 
       // --- LOGS DE DEBUG ---
-      console.log('--- INÍCIO DO getEstimate ---');
-      console.log('PolylinePoints:', res.polylinePoints);
-      console.log('TollData:', tollData);
+      Logger.log('--- INÍCIO DO getEstimate ---');
+      Logger.log('PolylinePoints:', res.polylinePoints);
+      Logger.log('TollData:', tollData);
 
       // Cálculo de pedágio SEM depender da flag do Google
       const { pedagiosCruzados, valorTotal } = calcularPedagiosPorPolyline(res.polylinePoints, tollData, 2); // tolerância 2km
-      console.log('Pedágios cruzados:', pedagiosCruzados);
-      console.log('Valor total:', valorTotal);
+      Logger.log('Pedágios cruzados:', pedagiosCruzados);
+      Logger.log('Valor total:', valorTotal);
       let valorPedagio = valorTotal;
 
-      let { totalCost, grandTotal, convenience_fees } = FareCalculator(
-        distance, 
-        res.time_in_secs, 
-        bookingData.carDetails, 
-        bookingData.instructionData, 
+      let { totalCost, grandTotal, convenienceFee, tollFee } = FareCalculator(
+        distance,
+        res.time_in_secs,
+        bookingData.carDetails,
+        bookingData.instructionData,
         settings.decimal,
         waypoints,
         bookingData.carType || 'car',
         valorPedagio
       );
-     
+
       dispatch({
         type: FETCH_ESTIMATE_SUCCESS,
         payload: {
@@ -462,12 +465,13 @@ export const getEstimate = (bookingData) => async (dispatch) => {
           fareCost: totalCost ? parseFloat(totalCost).toFixed(settings.decimal) : 0,
           estimateFare: grandTotal ? parseFloat(grandTotal).toFixed(settings.decimal) : 0,
           estimateTime: res.time_in_secs,
-          convenience_fees: convenience_fees ? parseFloat(convenience_fees).toFixed(settings.decimal) : 0,
+          convenience_fees: convenienceFee ? parseFloat(convenienceFee).toFixed(settings.decimal) : 0,
+          tollFee: tollFee ? parseFloat(tollFee).toFixed(settings.decimal) : 0,
           waypoints: waypoints
         },
       });
     });
-  }else{
+  } else {
     dispatch({
       type: FETCH_ESTIMATE_FAILED,
       payload: "No Route Found",
@@ -475,9 +479,16 @@ export const getEstimate = (bookingData) => async (dispatch) => {
   }
 }
 
+export const setEstimate = (estimateData) => (dispatch) => {
+  dispatch({
+    type: SET_ESTIMATE,
+    payload: estimateData,
+  });
+}
+
 export const clearEstimate = () => (dispatch) => {
-    dispatch({
-        type: CLEAR_ESTIMATE,
-        payload: null,
-    });    
+  dispatch({
+    type: CLEAR_ESTIMATE,
+    payload: null,
+  });
 }

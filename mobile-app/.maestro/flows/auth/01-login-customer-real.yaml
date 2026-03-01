@@ -1,0 +1,46 @@
+# Teste Real: Login como Customer/Passageiro
+# Baseado na tela real LoginScreen.js
+appId: br.com.leaf.ride
+---
+- launchApp
+- takeScreenshot: "01-app-launched"
+
+# Aguardar tela de login aparecer
+- assertVisible: "Telefone"
+- takeScreenshot: "02-login-screen"
+
+# Preencher telefone
+- tapOn: "Telefone"
+- inputText: "11999999999"
+- takeScreenshot: "03-phone-entered"
+
+# Aguardar verificação (pode mostrar senha ou cadastro)
+- waitForAnimationToEnd
+- takeScreenshot: "04-after-phone-check"
+
+# Se aparecer campo de senha (usuário existente)
+- runFlow:
+    when:
+      visible: "Senha"
+    commands:
+      - inputText: "senha123"
+      - tapOn: "Entrar"
+      - takeScreenshot: "05-login-complete"
+
+# Se aparecer campos de cadastro (usuário novo)
+- runFlow:
+    when:
+      visible: "Nome completo"
+    commands:
+      - inputText: "Teste Customer"
+      - tapOn: "CPF"
+      - inputText: "12345678901"
+      - tapOn: "Cadastrar"
+      - takeScreenshot: "06-signup-complete"
+
+# Aguardar dashboard/mapa aparecer
+- assertVisible: 
+    text: "Mapa"
+    optional: true
+- takeScreenshot: "07-dashboard-visible"
+

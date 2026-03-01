@@ -1,3 +1,4 @@
+import Logger from '../utils/Logger';
 import React, { useState, useRef } from 'react';
 import { 
   View, 
@@ -14,6 +15,7 @@ import {
 } from 'react-native';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+
 // import DateTimePicker from '@react-native-community/datetimepicker';
 
 const { width, height } = Dimensions.get('window');
@@ -149,7 +151,7 @@ export default function PersonalDataScreen() {
     setIsLoading(true);
     
     try {
-      console.log("PersonalDataScreen - Dados:", { cpf: cleanCpf, birthDate: formData.birthDate, userType });
+      Logger.log("PersonalDataScreen - Dados:", { cpf: cleanCpf, birthDate: formData.birthDate, userType });
       
       // Buscar dados temporários
       const tempDataString = await AsyncStorage.getItem('@temp_user_data');
@@ -169,7 +171,7 @@ export default function PersonalDataScreen() {
       // Limpar dados temporários
       await AsyncStorage.removeItem('@temp_user_data');
       
-      console.log("PersonalDataScreen - Usuário cadastrado:", userData);
+      Logger.log("PersonalDataScreen - Usuário cadastrado:", userData);
       
       // Navegar para próxima tela
       if (userType === 'driver') {
@@ -179,7 +181,7 @@ export default function PersonalDataScreen() {
       }
       
     } catch (error) {
-      console.error("PersonalDataScreen - Erro:", error);
+      Logger.error("PersonalDataScreen - Erro:", error);
       Alert.alert("Erro", "Não foi possível salvar os dados. Tente novamente.");
     } finally {
       setIsLoading(false);

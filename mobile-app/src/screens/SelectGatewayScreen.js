@@ -1,11 +1,11 @@
 import React, { useEffect, useState } from 'react';
 import { View, StyleSheet, Image, TouchableWithoutFeedback, Text, Alert, TouchableOpacity, Dimensions } from 'react-native';
 import i18n from '../i18n';
-import { colors } from '../common-local/theme';
+import { colors } from '../common/theme';
 import PaymentWebView from '../components/PaymentWebView';
 import { ScrollView } from 'react-native-gesture-handler';
 import { useDispatch, useSelector } from 'react-redux';
-import { api } from '../common-local';
+import { api } from '../../common';
 import { FirebaseConfig } from '../../config/FirebaseConfig';
 import { CommonActions } from '@react-navigation/native';
 

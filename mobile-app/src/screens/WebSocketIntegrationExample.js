@@ -1,3 +1,4 @@
+import Logger from '../utils/Logger';
 import React, { useState, useEffect } from 'react';
 import {
   View,
@@ -10,6 +11,7 @@ import {
 } from 'react-native';
 import useWebSocket from '../hooks/useWebSocket';
 import webSocketTester from '../utils/WebSocketTester';
+
 
 const WebSocketIntegrationExample = () => {
   const [isTesting, setIsTesting] = useState(false);
@@ -34,9 +36,9 @@ const WebSocketIntegrationExample = () => {
     const initializeWebSocket = async () => {
       try {
         await connect('driver123');
-        console.log('WebSocket inicializado');
+        Logger.log('WebSocket inicializado');
       } catch (error) {
-        console.error('Erro ao inicializar WebSocket:', error);
+        Logger.error('Erro ao inicializar WebSocket:', error);
         Alert.alert('Erro', 'Falha ao conectar com o servidor');
       }
     };
@@ -54,7 +56,7 @@ const WebSocketIntegrationExample = () => {
     if (connectionStatus.isAuthenticated) {
       // Simular localização de São Paulo
       startLocationUpdates(-23.5505, -46.6333, 3000); // 3 segundos
-      console.log('📍 Atualizações de localização iniciadas');
+      Logger.log('📍 Atualizações de localização iniciadas');
     }
 
     return () => {
@@ -72,7 +74,7 @@ const WebSocketIntegrationExample = () => {
       const results = webSocketTester.getResults();
       setTestResults(results);
     } catch (error) {
-      console.error('Erro nos testes:', error);
+      Logger.error('Erro nos testes:', error);
     } finally {
       setIsTesting(false);
     }

@@ -1,5 +1,5 @@
 import React,{useState, useEffect, useCallback} from "react";
-// import { Bubble, GiftedChat, Send } from 'react-native-gifted-chat';
+import { Bubble, GiftedChat, Send } from 'react-native-gifted-chat';
 import {
   View,
   KeyboardAvoidingView,
@@ -8,11 +8,11 @@ import {
   ImageBackground,
   Keyboard
 } from "react-native";
-import { colors } from "../common-local/theme";
+import { colors } from "../common/theme";
 import i18n from '../i18n';
 const { height, width } = Dimensions.get('window');
 import { useSelector, useDispatch } from 'react-redux';
-import { api } from '../common-local';
+import { api } from '../../common';
 import { FontAwesome, MaterialCommunityIcons, Entypo } from '@expo/vector-icons';
 import DeviceInfo from 'react-native-device-info';
 

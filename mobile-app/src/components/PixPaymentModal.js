@@ -1,3 +1,4 @@
+import Logger from '../utils/Logger';
 import React, { useState, useEffect } from 'react';
 import {
     View,
@@ -12,6 +13,7 @@ import {
 } from 'react-native';
 import QRCode from 'react-native-qrcode-svg';
 import { Ionicons } from '@expo/vector-icons';
+import { useTranslation } from './i18n/LanguageProvider';
 
 const { width } = Dimensions.get('window');
 
@@ -24,6 +26,7 @@ const PixPaymentModal = ({
     bookingId, 
     driverId 
 }) => {
+    const { t } = useTranslation();
     const [qrCodeData, setQrCodeData] = useState(null);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState(null);
@@ -83,7 +86,7 @@ const PixPaymentModal = ({
             }
         } catch (error) {
             setError('Erro de conexão. Tente novamente.');
-            console.error('Erro ao criar PIX:', error);
+            Logger.error('Erro ao criar PIX:', error);
         } finally {
             setLoading(false);
         }
@@ -92,7 +95,7 @@ const PixPaymentModal = ({
     const copyPixCode = () => {
         if (qrCodeData?.pixCopyPaste) {
             // Aqui você pode usar uma biblioteca de clipboard
-            Alert.alert('PIX Copiado', 'Código PIX copiado para a área de transferência!');
+            Alert.alert(t('payment.pixCopied'), t('payment.pixCopiedMessage'));
         }
     };
 

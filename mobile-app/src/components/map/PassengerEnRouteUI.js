@@ -1,3 +1,4 @@
+import Logger from '../../utils/Logger';
 import React, { useState, useEffect } from 'react';
 import {
   View,
@@ -10,6 +11,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useSelector } from 'react-redux';
+
 // import { useTranslation } from 'react-i18next';
 
 const { width } = Dimensions.get('window');
@@ -33,7 +35,7 @@ export default function PassengerEnRouteUI({ booking, onDriverLocationUpdate }) 
       t('cancel_ride_confirmation'),
       [
         { text: t('no'), style: 'cancel' },
-        { text: t('yes'), onPress: () => console.log('Corrida cancelada') }
+        { text: t('yes'), onPress: () => Logger.log('Corrida cancelada') }
       ]
     );
   };
@@ -41,7 +43,7 @@ export default function PassengerEnRouteUI({ booking, onDriverLocationUpdate }) 
   const handleContactDriver = () => {
     if (booking?.driver_phone) {
       // Implementar chamada ou chat
-      console.log('Contatar motorista:', booking.driver_phone);
+      Logger.log('Contatar motorista:', booking.driver_phone);
     }
   };
 
@@ -105,12 +107,12 @@ export default function PassengerEnRouteUI({ booking, onDriverLocationUpdate }) 
           <Text style={styles.actionButtonText}>{t('call_driver')}</Text>
         </TouchableOpacity>
 
-        <TouchableOpacity style={styles.actionButton} onPress={() => console.log('Chat')}>
+        <TouchableOpacity style={styles.actionButton} onPress={() => Logger.log('Chat')}>
           <Ionicons name="chatbubble" size={24} color="#41D274" />
           <Text style={styles.actionButtonText}>{t('message')}</Text>
         </TouchableOpacity>
 
-        <TouchableOpacity style={styles.actionButton} onPress={() => console.log('Compartilhar')}>
+        <TouchableOpacity style={styles.actionButton} onPress={() => Logger.log('Compartilhar')}>
           <Ionicons name="share" size={24} color="#41D274" />
           <Text style={styles.actionButtonText}>{t('share')}</Text>
         </TouchableOpacity>

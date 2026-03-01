@@ -1,3 +1,4 @@
+import Logger from '../utils/Logger';
 import React, { useState, useEffect } from 'react';
 import {
   View,
@@ -27,8 +28,10 @@ const LegalScreen = ({ navigation, route }) => {
   const [isLoading, setIsLoading] = useState(true);
   const [expandedSection, setExpandedSection] = useState(null);
   
+  // ✅ CRÍTICO: LegalScreen deve funcionar SEM login
+  // Não usar auth para bloquear acesso
   const auth = useSelector(state => state.auth);
-  const currentUser = auth.profile;
+  // currentUser pode ser null - tela funciona sem login
 
   const sections = [
     { id: 'terms', label: 'Termos de Uso', icon: 'description' },
@@ -46,11 +49,21 @@ const LegalScreen = ({ navigation, route }) => {
     try {
       setIsLoading(true);
       
+      // ✅ Tentar carregar do backend, mas não falhar se não conseguir
+      try {
       const response = await api.get('/api/legal/content');
+        if (response.data) {
       setLegalData(response.data);
+        }
+      } catch (apiError) {
+        // ✅ CRÍTICO: Erro ao carregar do backend não deve quebrar a tela
+        // O conteúdo hardcoded será usado como fallback
+        Logger.warn('⚠️ Erro ao carregar dados legais do backend. Usando conteúdo padrão.');
+      }
       
     } catch (error) {
-      console.error('Erro ao carregar dados legais:', error);
+      Logger.error('Erro ao carregar dados legais:', error);
+      // ✅ Sempre mostrar conteúdo mesmo se falhar
     } finally {
       setIsLoading(false);
     }

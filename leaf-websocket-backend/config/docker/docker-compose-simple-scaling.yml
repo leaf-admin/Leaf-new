@@ -1,0 +1,81 @@
+# Docker Compose Simplificado para Auto-Scaling - Leaf System
+# Apenas WebSocket instances (Redis já rodando separadamente)
+
+version: '3.8'
+
+services:
+  # WebSocket Instance 2 (Auto-scaling)
+  websocket-2:
+    build: .
+    container_name: leaf-websocket-2
+    environment:
+      - NODE_ENV=production
+      - PORT=3002
+      - INSTANCE_ID=websocket_2
+      - CLUSTER_MODE=true
+      - REDIS_HOST=127.0.0.1
+      - REDIS_PORT=6379
+      - REDIS_URL=redis://127.0.0.1:6379
+    ports:
+      - "3002:3002"
+    network_mode: host
+    restart: "no"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3002/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # WebSocket Instance 3 (Auto-scaling)
+  websocket-3:
+    build: .
+    container_name: leaf-websocket-3
+    environment:
+      - NODE_ENV=production
+      - PORT=3003
+      - INSTANCE_ID=websocket_3
+      - CLUSTER_MODE=true
+      - REDIS_HOST=127.0.0.1
+      - REDIS_PORT=6379
+      - REDIS_URL=redis://127.0.0.1:6379
+    ports:
+      - "3003:3003"
+    network_mode: host
+    restart: "no"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3003/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # WebSocket Instance 4 (Auto-scaling)
+  websocket-4:
+    build: .
+    container_name: leaf-websocket-4
+    environment:
+      - NODE_ENV=production
+      - PORT=3004
+      - INSTANCE_ID=websocket_4
+      - CLUSTER_MODE=true
+      - REDIS_HOST=127.0.0.1
+      - REDIS_PORT=6379
+      - REDIS_URL=redis://127.0.0.1:6379
+    ports:
+      - "3004:3004"
+    network_mode: host
+    restart: "no"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3004/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+
+
+
+
+
+

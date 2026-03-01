@@ -1,3 +1,4 @@
+import Logger from '../../utils/Logger';
 import {
     CONFIRM_BOOKING,
     CONFIRM_BOOKING_SUCCESS,
@@ -71,7 +72,7 @@ export const createBooking = (bookingData) => async (dispatch) => {
 
         return booking;
     } catch (error) {
-        console.error('Error creating booking:', error);
+        Logger.error('Error creating booking:', error);
         throw error;
     }
 };

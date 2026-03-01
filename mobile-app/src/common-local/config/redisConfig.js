@@ -1,4 +1,6 @@
+import Logger from '../../utils/Logger';
 import { Platform } from 'react-native';
+
 
 // Flags de migração
 export const MIGRATION_FLAGS = {
@@ -19,14 +21,14 @@ export const initializeRedis = async () => {
     if (Platform.OS === 'web') {
         try {
             // No web, usar API em vez de acesso direto
-            console.log('🌐 Redis inicializado via API (web)');
+            Logger.log('🌐 Redis inicializado via API (web)');
             return true;
         } catch (error) {
-            console.error('❌ Erro ao inicializar Redis:', error);
+            Logger.error('❌ Erro ao inicializar Redis:', error);
             return false;
         }
     } else {
-        console.log('📱 React Native detectado - Redis não disponível');
+        Logger.log('📱 React Native detectado - Redis não disponível');
         return false;
     }
 };
@@ -41,11 +43,11 @@ export const getRedisClient = async () => {
                 isAvailable: true
             };
         } catch (error) {
-            console.error('❌ Erro ao obter cliente Redis:', error);
+            Logger.error('❌ Erro ao obter cliente Redis:', error);
             return null;
         }
     } else {
-        console.log('📱 Redis não disponível no React Native');
+        Logger.log('📱 Redis não disponível no React Native');
         return null;
     }
 };
@@ -62,7 +64,7 @@ export const shouldUseRedis = () => {
 
 // Configuração para uso via API
 export const REDIS_API_CONFIG = {
-    baseUrl: 'http://192.168.0.39:5001/leaf-app-91dfdce0/us-central1',
+    baseUrl: 'http://localhost:3001/leaf-app-91dfdce0/us-central1',
     useRedis: Platform.OS === 'web',
     timeout: 5000,
 };

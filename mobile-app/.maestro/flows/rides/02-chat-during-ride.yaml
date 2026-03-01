@@ -1,0 +1,44 @@
+# Teste: Chat Durante Corrida
+appId: br.com.leaf.ride
+---
+# Assumindo que há uma corrida ativa
+# (Este teste deve ser executado após uma corrida ser aceita)
+
+- launchApp
+- assertVisible: 
+    id: "active-ride-container"
+    timeout: 5000
+
+# Abrir chat
+- tapOn: 
+    id: "chat-button"
+    timeout: 2000
+- assertVisible: 
+    id: "chat-screen"
+    timeout: 3000
+
+# Enviar mensagem
+- tapOn: 
+    id: "message-input"
+- inputText: "Olá, estou chegando!"
+- tapOn: 
+    id: "send-button"
+    timeout: 2000
+
+# Verificar mensagem enviada
+- assertVisible: 
+    text: "Olá, estou chegando!"
+    timeout: 3000
+
+
+
+
+
+
+
+
+
+
+
+
+

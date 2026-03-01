@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { colors } from '../common-local/theme';
+import { colors } from '../common/theme';
 import {
     StyleSheet,
     View,
@@ -8,10 +8,10 @@ import {
 } from 'react-native';
 import i18n from '../i18n';
 import { useSelector } from 'react-redux';
-import { MAIN_COLOR } from '../common-local/sharedFunctions';
+import { MAIN_COLOR } from '../common/sharedFunctions';
 var { width, height } = Dimensions.get('window');
 import { DriverEarningRidelist } from '../components';
-import { fonts } from '../common-local/font';
+import { fonts } from '../common/font';
 
 export default function DriverIncomeScreen(props) {
 

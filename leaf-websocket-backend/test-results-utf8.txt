@@ -1,0 +1,4378 @@
+﻿
+> leaf-websocket-backend@1.0.0 test:integration
+> npx jest --config config/jest.integration.config.js
+
+  console.warn
+    Starting the MongoMemoryServer Instance failed, enable debug log for more information. Error:
+     Md5CheckFailedError: MD5 check failed! Binary MD5 is "d9b5d065b5da0218ba511da39dfdee61", Checkfile MD5 is "896333eea778fa3f7726df71d1b1e9b7"
+        at MongoBinaryDownload.makeMD5check (C:\Users\izaak\OneDrive\Desktop\leaf-project\leaf-websocket-backend\node_modules\mongodb-memory-server-core\src\util\MongoBinaryDownload.ts:183:13)
+        at MongoBinaryDownload.startDownload (C:\Users\izaak\OneDrive\Desktop\leaf-project\leaf-websocket-backend\node_modules\mongodb-memory-server-core\src\util\MongoBinaryDownload.ts:149:5)
+        at MongoBinaryDownload.getMongodPath (C:\Users\izaak\OneDrive\Desktop\leaf-project\leaf-websocket-backend\node_modules\mongodb-memory-server-core\src\util\MongoBinaryDownload.ts:114:28)
+        at Function.download (C:\Users\izaak\OneDrive\Desktop\leaf-project\leaf-websocket-backend\node_modules\mongodb-memory-server-core\src\util\MongoBinary.ts:47:49)
+        at Function.getPath (C:\Users\izaak\OneDrive\Desktop\leaf-project\leaf-websocket-backend\node_modules\mongodb-memory-server-core\src\util\MongoBinary.ts:132:22)
+        at MongoInstance.start (C:\Users\izaak\OneDrive\Desktop\leaf-project\leaf-websocket-backend\node_modules\mongodb-memory-server-core\src\util\MongoInstance.ts:366:22)
+        at Function.create (C:\Users\izaak\OneDrive\Desktop\leaf-project\leaf-websocket-backend\node_modules\mongodb-memory-server-core\src\util\MongoInstance.ts:294:5)
+        at MongoMemoryServer._startUpInstance (C:\Users\izaak\OneDrive\Desktop\leaf-project\leaf-websocket-backend\node_modules\mongodb-memory-server-core\src\MongoMemoryServer.ts:530:22)
+        at MongoMemoryServer.start (C:\Users\izaak\OneDrive\Desktop\leaf-project\leaf-websocket-backend\node_modules\mongodb-memory-server-core\src\MongoMemoryServer.ts:350:5)
+        at Function.create (C:\Users\izaak\OneDrive\Desktop\leaf-project\leaf-websocket-backend\node_modules\mongodb-memory-server-core\src\MongoMemoryServer.ts:317:5)
+        at Object.<anonymous> (C:\Users\izaak\OneDrive\Desktop\leaf-project\leaf-websocket-backend\tests\integration\config\test-setup.js:25:17) {
+      binarymd5: 'd9b5d065b5da0218ba511da39dfdee61',
+      checkfilemd5: '896333eea778fa3f7726df71d1b1e9b7'
+    }
+
+    [0m [90m 23 |[39m beforeAll([36masync[39m () [33m=>[39m {
+     [90m 24 |[39m   [90m// Iniciar MongoDB em memória para testes[39m
+    [31m[1m>[22m[39m[90m 25 |[39m   mongoServer [33m=[39m [36mawait[39m [33mMongoMemoryServer[39m[33m.[39mcreate()[33m;[39m
+     [90m    |[39m                 [31m[1m^[22m[39m
+     [90m 26 |[39m   [36mconst[39m mongoUri [33m=[39m mongoServer[33m.[39mgetUri()[33m;[39m
+     [90m 27 |[39m
+     [90m 28 |[39m   [90m// Configurar Redis para testes[39m[0m
+
+      at node_modules/mongodb-memory-server-core/src/MongoMemoryServer.ts:359:17
+      at MongoMemoryServer.start (node_modules/mongodb-memory-server-core/src/MongoMemoryServer.ts:350:5)
+      at Function.create (node_modules/mongodb-memory-server-core/src/MongoMemoryServer.ts:317:5)
+      at Object.<anonymous> (tests/integration/config/test-setup.js:25:17)
+
+node.exe : FAIL tests/i
+ntegration/websocket/co
+nnection.integration.te
+st.js (7.683 s)
+No linha:1 caractere:1
++ & "C:\nvm4w\nodejs/no
+de.exe" "C:\nvm4w\nodej
+s/node_modules/npm/bin/
+np ...
++ ~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~
+~~
+    + CategoryInfo     
+         : 
+NotSpecified:     
+(FAIL tests/inte...s   
+ t.js (7.683 s):Strin  
+  g) [], RemoteExcepti 
+   on
+    + 
+FullyQualifiedErro    
+rId : NativeCommandE   
+ rror
+ 
+  WebSocket Connection 
+Integration
+    Connection 
+Establishment
+      × should 
+establish WebSocket 
+connection (5 ms)
+      × should handle 
+connection with 
+authentication
+      × should handle 
+invalid connection 
+parameters (1 ms)
+    Basic Communication
+      × should receive 
+pong on ping
+      × should handle 
+echo messages
+      × should handle 
+unknown events 
+gracefully (1 ms)
+    Driver Operations
+      × should handle 
+driver online status
+      × should handle 
+driver location 
+updates (1 ms)
+      × should handle 
+driver offline status
+    Passenger 
+Operations
+      × should handle 
+ride requests (1 ms)
+      × should handle 
+passenger location 
+updates
+    Ride Operations
+      × should handle 
+ride acceptance
+      × should handle 
+ride rejection
+      × should handle 
+ride completion (1 ms)
+    Real-time Features
+      × should receive 
+nearby drivers updates
+      × should handle 
+chat messages
+      × should receive 
+ride status updates
+    Connection Recovery
+      × should handle 
+disconnection and 
+reconnection
+      × should 
+preserve session after 
+reconnection
+    Error Handling
+      × should handle 
+invalid JSON gracefully
+      × should handle 
+oversized messages
+
+  ● WebSocket 
+Connection Integration 
+› Connection 
+Establishment › should 
+establish WebSocket 
+connection
+
+    MD5 check failed! 
+Binary MD5 is "d9b5d065
+b5da0218ba511da39dfdee6
+1", Checkfile MD5 is "8
+96333eea778fa3f7726df71
+d1b1e9b7"
+
+    [0m [90m 23 
+|[39m beforeAll([36ma
+sync[39m () 
+[33m=>[39m {
+     [90m 24 |[39m   
+[90m// Iniciar 
+MongoDB em memória 
+para testes[39m
+    [31m[1m>[22m[39
+m[90m 25 |[39m   
+mongoServer 
+[33m=[39m 
+[36mawait[39m [33mMo
+ngoMemoryServer[39m[3
+3m.[39mcreate()[33m;
+[39m
+     [90m    |[39m   
+              
+[31m[1m^[22m[39m
+     [90m 26 |[39m   
+[36mconst[39m 
+mongoUri [33m=[39m mo
+ngoServer[33m.[39mget
+Uri()[33m;[39m
+     [90m 27 |[39m
+     [90m 28 |[39m   
+[90m// Configurar 
+Redis para 
+testes[39m[0m
+
+      at MongoBinaryDow
+nload.makeMD5check (nod
+e_modules/mongodb-memor
+y-server-core/src/util/
+MongoBinaryDownload.ts:
+183:13)
+      at MongoBinaryDow
+nload.startDownload (no
+de_modules/mongodb-memo
+ry-server-core/src/util
+/MongoBinaryDownload.ts
+:149:5)
+      at MongoBinaryDow
+nload.getMongodPath (no
+de_modules/mongodb-memo
+ry-server-core/src/util
+/MongoBinaryDownload.ts
+:114:28)
+      at 
+Function.download (node
+_modules/mongodb-memory
+-server-core/src/util/M
+ongoBinary.ts:47:49)
+      at 
+Function.getPath (node_
+modules/mongodb-memory-
+server-core/src/util/Mo
+ngoBinary.ts:132:22)
+      at 
+MongoInstance.start (no
+de_modules/mongodb-memo
+ry-server-core/src/util
+/MongoInstance.ts:366:2
+2)
+      at 
+Function.create (node_m
+odules/mongodb-memory-s
+erver-core/src/util/Mon
+goInstance.ts:294:5)
+      at MongoMemorySer
+ver._startUpInstance (n
+ode_modules/mongodb-mem
+ory-server-core/src/Mon
+goMemoryServer.ts:530:2
+2)
+      at MongoMemorySer
+ver.start (node_modules
+/mongodb-memory-server-
+core/src/MongoMemorySer
+ver.ts:350:5)
+      at 
+Function.create (node_m
+odules/mongodb-memory-s
+erver-core/src/MongoMem
+oryServer.ts:317:5)
+      at 
+Object.<anonymous> (tes
+ts/integration/config/t
+est-setup.js:25:17)
+
+  ● WebSocket 
+Connection Integration 
+› Connection 
+Establishment › should 
+establish WebSocket 
+connection
+
+    TypeError: 
+startTestServer is not 
+a function
+
+    [0m [90m 10 
+|[39m
+     [90m 11 |[39m   
+beforeAll([36masync[3
+9m () [33m=>[39m {
+    [31m[1m>[22m[39
+m[90m 12 |[39m     
+server [33m=[39m 
+[36mawait[39m startTe
+stServer([35m3004[39m
+)[33m;[39m
+     [90m    |[39m   
+                 
+[31m[1m^[22m[39m
+     [90m 13 |[39m   
+}[33m,[39m [35m30000
+[39m)[33m;[39m
+     [90m 14 |[39m
+     [90m 15 |[39m   
+afterAll([36masync[39
+m () [33m=>[39m {[0m
+
+      at 
+Object.<anonymous> (tes
+ts/integration/websocke
+t/connection.integratio
+n.test.js:12:20)
+
+  ● WebSocket 
+Connection Integration 
+› Connection 
+Establishment › should 
+handle connection with 
+authentication
+
+    MD5 check failed! 
+Binary MD5 is "d9b5d065
+b5da0218ba511da39dfdee6
+1", Checkfile MD5 is "8
+96333eea778fa3f7726df71
+d1b1e9b7"
+
+    [0m [90m 23 
+|[39m beforeAll([36ma
+sync[39m () 
+[33m=>[39m {
+     [90m 24 |[39m   
+[90m// Iniciar 
+MongoDB em memória 
+para testes[39m
+    [31m[1m>[22m[39
+m[90m 25 |[39m   
+mongoServer 
+[33m=[39m 
+[36mawait[39m [33mMo
+ngoMemoryServer[39m[3
+3m.[39mcreate()[33m;
+[39m
+     [90m    |[39m   
+              
+[31m[1m^[22m[39m
+     [90m 26 |[39m   
+[36mconst[39m 
+mongoUri [33m=[39m mo
+ngoServer[33m.[39mget
+Uri()[33m;[39m
+     [90m 27 |[39m
+     [90m 28 |[39m   
+[90m// Configurar 
+Redis para 
+testes[39m[0m
+
+      at MongoBinaryDow
+nload.makeMD5check (nod
+e_modules/mongodb-memor
+y-server-core/src/util/
+MongoBinaryDownload.ts:
+183:13)
+      at MongoBinaryDow
+nload.startDownload (no
+de_modules/mongodb-memo
+ry-server-core/src/util
+/MongoBinaryDownload.ts
+:149:5)
+      at MongoBinaryDow
+nload.getMongodPath (no
+de_modules/mongodb-memo
+ry-server-core/src/util
+/MongoBinaryDownload.ts
+:114:28)
+      at 
+Function.download (node
+_modules/mongodb-memory
+-server-core/src/util/M
+ongoBinary.ts:47:49)
+      at 
+Function.getPath (node_
+modules/mongodb-memory-
+server-core/src/util/Mo
+ngoBinary.ts:132:22)
+      at 
+MongoInstance.start (no
+de_modules/mongodb-memo
+ry-server-core/src/util
+/MongoInstance.ts:366:2
+2)
+      at 
+Function.create (node_m
+odules/mongodb-memory-s
+erver-core/src/util/Mon
+goInstance.ts:294:5)
+      at MongoMemorySer
+ver._startUpInstance (n
+ode_modules/mongodb-mem
+ory-server-core/src/Mon
+goMemoryServer.ts:530:2
+2)
+      at MongoMemorySer
+ver.start (node_modules
+/mongodb-memory-server-
+core/src/MongoMemorySer
+ver.ts:350:5)
+      at 
+Function.create (node_m
+odules/mongodb-memory-s
+erver-core/src/MongoMem
+oryServer.ts:317:5)
+      at 
+Object.<anonymous> (tes
+ts/integration/config/t
+est-setup.js:25:17)
+
+  ● WebSocket 
+Connection Integration 
+› Connection 
+Establishment › should 
+handle connection with 
+authentication
+
+    TypeError: 
+startTestServer is not 
+a function
+
+    [0m [90m 10 
+|[39m
+     [90m 11 |[39m   
+beforeAll([36masync[3
+9m () [33m=>[39m {
+    [31m[1m>[22m[39
+m[90m 12 |[39m     
+server [33m=[39m 
+[36mawait[39m startTe
+stServer([35m3004[39m
+)[33m;[39m
+     [90m    |[39m   
+                 
+[31m[1m^[22m[39m
+     [90m 13 |[39m   
+}[33m,[39m [35m30000
+[39m)[33m;[39m
+     [90m 14 |[39m
+     [90m 15 |[39m   
+afterAll([36masync[39
+m () [33m=>[39m {[0m
+
+      at 
+Object.<anonymous> (tes
+ts/integration/websocke
+t/connection.integratio
+n.test.js:12:20)
+
+  ● WebSocket 
+Connection Integration 
+› Connection 
+Establishment › should 
+handle invalid 
+connection parameters
+
+    MD5 check failed! 
+Binary MD5 is "d9b5d065
+b5da0218ba511da39dfdee6
+1", Checkfile MD5 is "8
+96333eea778fa3f7726df71
+d1b1e9b7"
+
+    [0m [90m 23 
+|[39m beforeAll([36ma
+sync[39m () 
+[33m=>[39m {
+     [90m 24 |[39m   
+[90m// Iniciar 
+MongoDB em memória 
+para testes[39m
+    [31m[1m>[22m[39
+m[90m 25 |[39m   
+mongoServer 
+[33m=[39m 
+[36mawait[39m [33mMo
+ngoMemoryServer[39m[3
+3m.[39mcreate()[33m;
+[39m
+     [90m    |[39m   
+              
+[31m[1m^[22m[39m
+     [90m 26 |[39m   
+[36mconst[39m 
+mongoUri [33m=[39m mo
+ngoServer[33m.[39mget
+Uri()[33m;[39m
+     [90m 27 |[39m
+     [90m 28 |[39m   
+[90m// Configurar 
+Redis para 
+testes[39m[0m
+
+      at MongoBinaryDow
+nload.makeMD5check (nod
+e_modules/mongodb-memor
+y-server-core/src/util/
+MongoBinaryDownload.ts:
+183:13)
+      at MongoBinaryDow
+nload.startDownload (no
+de_modules/mongodb-memo
+ry-server-core/src/util
+/MongoBinaryDownload.ts
+:149:5)
+      at MongoBinaryDow
+nload.getMongodPath (no
+de_modules/mongodb-memo
+ry-server-core/src/util
+/MongoBinaryDownload.ts
+:114:28)
+      at 
+Function.download (node
+_modules/mongodb-memory
+-server-core/src/util/M
+ongoBinary.ts:47:49)
+      at 
+Function.getPath (node_
+modules/mongodb-memory-
+server-core/src/util/Mo
+ngoBinary.ts:132:22)
+      at 
+MongoInstance.start (no
+de_modules/mongodb-memo
+ry-server-core/src/util
+/MongoInstance.ts:366:2
+2)
+      at 
+Function.create (node_m
+odules/mongodb-memory-s
+erver-core/src/util/Mon
+goInstance.ts:294:5)
+      at MongoMemorySer
+ver._startUpInstance (n
+ode_modules/mongodb-mem
+ory-server-core/src/Mon
+goMemoryServer.ts:530:2
+2)
+      at MongoMemorySer
+ver.start (node_modules
+/mongodb-memory-server-
+core/src/MongoMemorySer
+ver.ts:350:5)
+      at 
+Function.create (node_m
+odules/mongodb-memory-s
+erver-core/src/MongoMem
+oryServer.ts:317:5)
+      at 
+Object.<anonymous> (tes
+ts/integration/config/t
+est-setup.js:25:17)
+
+  ● WebSocket 
+Connection Integration 
+› Connection 
+Establishment › should 
+handle invalid 
+connection parameters
+
+    TypeError: 
+startTestServer is not 
+a function
+
+    [0m [90m 10 
+|[39m
+     [90m 11 |[39m   
+beforeAll([36masync[3
+9m () [33m=>[39m {
+    [31m[1m>[22m[39
+m[90m 12 |[39m     
+server [33m=[39m 
+[36mawait[39m startTe
+stServer([35m3004[39m
+)[33m;[39m
+     [90m    |[39m   
+                 
+[31m[1m^[22m[39m
+     [90m 13 |[39m   
+}[33m,[39m [35m30000
+[39m)[33m;[39m
+     [90m 14 |[39m
+     [90m 15 |[39m   
+afterAll([36masync[39
+m () [33m=>[39m {[0m
+
+      at 
+Object.<anonymous> (tes
+ts/integration/websocke
+t/connection.integratio
+n.test.js:12:20)
+
+  ● WebSocket 
+Connection Integration 
+› Basic Communication 
+› should receive pong 
+on ping
+
+    MD5 check failed! 
+Binary MD5 is "d9b5d065
+b5da0218ba511da39dfdee6
+1", Checkfile MD5 is "8
+96333eea778fa3f7726df71
+d1b1e9b7"
+
+    [0m [90m 23 
+|[39m beforeAll([36ma
+sync[39m () 
+[33m=>[39m {
+     [90m 24 |[39m   
+[90m// Iniciar 
+MongoDB em memória 
+para testes[39m
+    [31m[1m>[22m[39
+m[90m 25 |[39m   
+mongoServer 
+[33m=[39m 
+[36mawait[39m [33mMo
+ngoMemoryServer[39m[3
+3m.[39mcreate()[33m;
+[39m
+     [90m    |[39m   
+              
+[31m[1m^[22m[39m
+     [90m 26 |[39m   
+[36mconst[39m 
+mongoUri [33m=[39m mo
+ngoServer[33m.[39mget
+Uri()[33m;[39m
+     [90m 27 |[39m
+     [90m 28 |[39m   
+[90m// Configurar 
+Redis para 
+testes[39m[0m
+
+      at MongoBinaryDow
+nload.makeMD5check (nod
+e_modules/mongodb-memor
+y-server-core/src/util/
+MongoBinaryDownload.ts:
+183:13)
+      at MongoBinaryDow
+nload.startDownload (no
+de_modules/mongodb-memo
+ry-server-core/src/util
+/MongoBinaryDownload.ts
+:149:5)
+      at MongoBinaryDow
+nload.getMongodPath (no
+de_modules/mongodb-memo
+ry-server-core/src/util
+/MongoBinaryDownload.ts
+:114:28)
+      at 
+Function.download (node
+_modules/mongodb-memory
+-server-core/src/util/M
+ongoBinary.ts:47:49)
+      at 
+Function.getPath (node_
+modules/mongodb-memory-
+server-core/src/util/Mo
+ngoBinary.ts:132:22)
+      at 
+MongoInstance.start (no
+de_modules/mongodb-memo
+ry-server-core/src/util
+/MongoInstance.ts:366:2
+2)
+      at 
+Function.create (node_m
+odules/mongodb-memory-s
+erver-core/src/util/Mon
+goInstance.ts:294:5)
+      at MongoMemorySer
+ver._startUpInstance (n
+ode_modules/mongodb-mem
+ory-server-core/src/Mon
+goMemoryServer.ts:530:2
+2)
+      at MongoMemorySer
+ver.start (node_modules
+/mongodb-memory-server-
+core/src/MongoMemorySer
+ver.ts:350:5)
+      at 
+Function.create (node_m
+odules/mongodb-memory-s
+erver-core/src/MongoMem
+oryServer.ts:317:5)
+      at 
+Object.<anonymous> (tes
+ts/integration/config/t
+est-setup.js:25:17)
+
+  ● WebSocket 
+Connection Integration 
+› Basic Communication 
+› should receive pong 
+on ping
+
+    TypeError: 
+startTestServer is not 
+a function
+
+    [0m [90m 10 
+|[39m
+     [90m 11 |[39m   
+beforeAll([36masync[3
+9m () [33m=>[39m {
+    [31m[1m>[22m[39
+m[90m 12 |[39m     
+server [33m=[39m 
+[36mawait[39m startTe
+stServer([35m3004[39m
+)[33m;[39m
+     [90m    |[39m   
+                 
+[31m[1m^[22m[39m
+     [90m 13 |[39m   
+}[33m,[39m [35m30000
+[39m)[33m;[39m
+     [90m 14 |[39m
+     [90m 15 |[39m   
+afterAll([36masync[39
+m () [33m=>[39m {[0m
+
+      at 
+Object.<anonymous> (tes
+ts/integration/websocke
+t/connection.integratio
+n.test.js:12:20)
+
+  ● WebSocket 
+Connection Integration 
+› Basic Communication 
+› should handle echo 
+messages
+
+    MD5 check failed! 
+Binary MD5 is "d9b5d065
+b5da0218ba511da39dfdee6
+1", Checkfile MD5 is "8
+96333eea778fa3f7726df71
+d1b1e9b7"
+
+    [0m [90m 23 
+|[39m beforeAll([36ma
+sync[39m () 
+[33m=>[39m {
+     [90m 24 |[39m   
+[90m// Iniciar 
+MongoDB em memória 
+para testes[39m
+    [31m[1m>[22m[39
+m[90m 25 |[39m   
+mongoServer 
+[33m=[39m 
+[36mawait[39m [33mMo
+ngoMemoryServer[39m[3
+3m.[39mcreate()[33m;
+[39m
+     [90m    |[39m   
+              
+[31m[1m^[22m[39m
+     [90m 26 |[39m   
+[36mconst[39m 
+mongoUri [33m=[39m mo
+ngoServer[33m.[39mget
+Uri()[33m;[39m
+     [90m 27 |[39m
+     [90m 28 |[39m   
+[90m// Configurar 
+Redis para 
+testes[39m[0m
+
+      at MongoBinaryDow
+nload.makeMD5check (nod
+e_modules/mongodb-memor
+y-server-core/src/util/
+MongoBinaryDownload.ts:
+183:13)
+      at MongoBinaryDow
+nload.startDownload (no
+de_modules/mongodb-memo
+ry-server-core/src/util
+/MongoBinaryDownload.ts
+:149:5)
+      at MongoBinaryDow
+nload.getMongodPath (no
+de_modules/mongodb-memo
+ry-server-core/src/util
+/MongoBinaryDownload.ts
+:114:28)
+      at 
+Function.download (node
+_modules/mongodb-memory
+-server-core/src/util/M
+ongoBinary.ts:47:49)
+      at 
+Function.getPath (node_
+modules/mongodb-memory-
+server-core/src/util/Mo
+ngoBinary.ts:132:22)
+      at 
+MongoInstance.start (no
+de_modules/mongodb-memo
+ry-server-core/src/util
+/MongoInstance.ts:366:2
+2)
+      at 
+Function.create (node_m
+odules/mongodb-memory-s
+erver-core/src/util/Mon
+goInstance.ts:294:5)
+      at MongoMemorySer
+ver._startUpInstance (n
+ode_modules/mongodb-mem
+ory-server-core/src/Mon
+goMemoryServer.ts:530:2
+2)
+      at MongoMemorySer
+ver.start (node_modules
+/mongodb-memory-server-
+core/src/MongoMemorySer
+ver.ts:350:5)
+      at 
+Function.create (node_m
+odules/mongodb-memory-s
+erver-core/src/MongoMem
+oryServer.ts:317:5)
+      at 
+Object.<anonymous> (tes
+ts/integration/config/t
+est-setup.js:25:17)
+
+  ● WebSocket 
+Connection Integration 
+› Basic Communication 
+› should handle echo 
+messages
+
+    TypeError: 
+startTestServer is not 
+a function
+
+    [0m [90m 10 
+|[39m
+     [90m 11 |[39m   
+beforeAll([36masync[3
+9m () [33m=>[39m {
+    [31m[1m>[22m[39
+m[90m 12 |[39m     
+server [33m=[39m 
+[36mawait[39m startTe
+stServer([35m3004[39m
+)[33m;[39m
+     [90m    |[39m   
+                 
+[31m[1m^[22m[39m
+     [90m 13 |[39m   
+}[33m,[39m [35m30000
+[39m)[33m;[39m
+     [90m 14 |[39m
+     [90m 15 |[39m   
+afterAll([36masync[39
+m () [33m=>[39m {[0m
+
+      at 
+Object.<anonymous> (tes
+ts/integration/websocke
+t/connection.integratio
+n.test.js:12:20)
+
+  ● WebSocket 
+Connection Integration 
+› Basic Communication 
+› should handle 
+unknown events 
+gracefully
+
+    MD5 check failed! 
+Binary MD5 is "d9b5d065
+b5da0218ba511da39dfdee6
+1", Checkfile MD5 is "8
+96333eea778fa3f7726df71
+d1b1e9b7"
+
+    [0m [90m 23 
+|[39m beforeAll([36ma
+sync[39m () 
+[33m=>[39m {
+     [90m 24 |[39m   
+[90m// Iniciar 
+MongoDB em memória 
+para testes[39m
+    [31m[1m>[22m[39
+m[90m 25 |[39m   
+mongoServer 
+[33m=[39m 
+[36mawait[39m [33mMo
+ngoMemoryServer[39m[3
+3m.[39mcreate()[33m;
+[39m
+     [90m    |[39m   
+              
+[31m[1m^[22m[39m
+     [90m 26 |[39m   
+[36mconst[39m 
+mongoUri [33m=[39m mo
+ngoServer[33m.[39mget
+Uri()[33m;[39m
+     [90m 27 |[39m
+     [90m 28 |[39m   
+[90m// Configurar 
+Redis para 
+testes[39m[0m
+
+      at MongoBinaryDow
+nload.makeMD5check (nod
+e_modules/mongodb-memor
+y-server-core/src/util/
+MongoBinaryDownload.ts:
+183:13)
+      at MongoBinaryDow
+nload.startDownload (no
+de_modules/mongodb-memo
+ry-server-core/src/util
+/MongoBinaryDownload.ts
+:149:5)
+      at MongoBinaryDow
+nload.getMongodPath (no
+de_modules/mongodb-memo
+ry-server-core/src/util
+/MongoBinaryDownload.ts
+:114:28)
+      at 
+Function.download (node
+_modules/mongodb-memory
+-server-core/src/util/M
+ongoBinary.ts:47:49)
+      at 
+Function.getPath (node_
+modules/mongodb-memory-
+server-core/src/util/Mo
+ngoBinary.ts:132:22)
+      at 
+MongoInstance.start (no
+de_modules/mongodb-memo
+ry-server-core/src/util
+/MongoInstance.ts:366:2
+2)
+      at 
+Function.create (node_m
+odules/mongodb-memory-s
+erver-core/src/util/Mon
+goInstance.ts:294:5)
+      at MongoMemorySer
+ver._startUpInstance (n
+ode_modules/mongodb-mem
+ory-server-core/src/Mon
+goMemoryServer.ts:530:2
+2)
+      at MongoMemorySer
+ver.start (node_modules
+/mongodb-memory-server-
+core/src/MongoMemorySer
+ver.ts:350:5)
+      at 
+Function.create (node_m
+odules/mongodb-memory-s
+erver-core/src/MongoMem
+oryServer.ts:317:5)
+      at 
+Object.<anonymous> (tes
+ts/integration/config/t
+est-setup.js:25:17)
+
+  ● WebSocket 
+Connection Integration 
+› Basic Communication 
+› should handle 
+unknown events 
+gracefully
+
+    TypeError: 
+startTestServer is not 
+a function
+
+    [0m [90m 10 
+|[39m
+     [90m 11 |[39m   
+beforeAll([36masync[3
+9m () [33m=>[39m {
+    [31m[1m>[22m[39
+m[90m 12 |[39m     
+server [33m=[39m 
+[36mawait[39m startTe
+stServer([35m3004[39m
+)[33m;[39m
+     [90m    |[39m   
+                 
+[31m[1m^[22m[39m
+     [90m 13 |[39m   
+}[33m,[39m [35m30000
+[39m)[33m;[39m
+     [90m 14 |[39m
+     [90m 15 |[39m   
+afterAll([36masync[39
+m () [33m=>[39m {[0m
+
+      at 
+Object.<anonymous> (tes
+ts/integration/websocke
+t/connection.integratio
+n.test.js:12:20)
+
+  ● WebSocket 
+Connection Integration 
+› Driver Operations › 
+should handle driver 
+online status
+
+    MD5 check failed! 
+Binary MD5 is "d9b5d065
+b5da0218ba511da39dfdee6
+1", Checkfile MD5 is "8
+96333eea778fa3f7726df71
+d1b1e9b7"
+
+    [0m [90m 23 
+|[39m beforeAll([36ma
+sync[39m () 
+[33m=>[39m {
+     [90m 24 |[39m   
+[90m// Iniciar 
+MongoDB em memória 
+para testes[39m
+    [31m[1m>[22m[39
+m[90m 25 |[39m   
+mongoServer 
+[33m=[39m 
+[36mawait[39m [33mMo
+ngoMemoryServer[39m[3
+3m.[39mcreate()[33m;
+[39m
+     [90m    |[39m   
+              
+[31m[1m^[22m[39m
+     [90m 26 |[39m   
+[36mconst[39m 
+mongoUri [33m=[39m mo
+ngoServer[33m.[39mget
+Uri()[33m;[39m
+     [90m 27 |[39m
+     [90m 28 |[39m   
+[90m// Configurar 
+Redis para 
+testes[39m[0m
+
+      at MongoBinaryDow
+nload.makeMD5check (nod
+e_modules/mongodb-memor
+y-server-core/src/util/
+MongoBinaryDownload.ts:
+183:13)
+      at MongoBinaryDow
+nload.startDownload (no
+de_modules/mongodb-memo
+ry-server-core/src/util
+/MongoBinaryDownload.ts
+:149:5)
+      at MongoBinaryDow
+nload.getMongodPath (no
+de_modules/mongodb-memo
+ry-server-core/src/util
+/MongoBinaryDownload.ts
+:114:28)
+      at 
+Function.download (node
+_modules/mongodb-memory
+-server-core/src/util/M
+ongoBinary.ts:47:49)
+      at 
+Function.getPath (node_
+modules/mongodb-memory-
+server-core/src/util/Mo
+ngoBinary.ts:132:22)
+      at 
+MongoInstance.start (no
+de_modules/mongodb-memo
+ry-server-core/src/util
+/MongoInstance.ts:366:2
+2)
+      at 
+Function.create (node_m
+odules/mongodb-memory-s
+erver-core/src/util/Mon
+goInstance.ts:294:5)
+      at MongoMemorySer
+ver._startUpInstance (n
+ode_modules/mongodb-mem
+ory-server-core/src/Mon
+goMemoryServer.ts:530:2
+2)
+      at MongoMemorySer
+ver.start (node_modules
+/mongodb-memory-server-
+core/src/MongoMemorySer
+ver.ts:350:5)
+      at 
+Function.create (node_m
+odules/mongodb-memory-s
+erver-core/src/MongoMem
+oryServer.ts:317:5)
+      at 
+Object.<anonymous> (tes
+ts/integration/config/t
+est-setup.js:25:17)
+
+  ● WebSocket 
+Connection Integration 
+› Driver Operations › 
+should handle driver 
+online status
+
+    TypeError: 
+startTestServer is not 
+a function
+
+    [0m [90m 10 
+|[39m
+     [90m 11 |[39m   
+beforeAll([36masync[3
+9m () [33m=>[39m {
+    [31m[1m>[22m[39
+m[90m 12 |[39m     
+server [33m=[39m 
+[36mawait[39m startTe
+stServer([35m3004[39m
+)[33m;[39m
+     [90m    |[39m   
+                 
+[31m[1m^[22m[39m
+     [90m 13 |[39m   
+}[33m,[39m [35m30000
+[39m)[33m;[39m
+     [90m 14 |[39m
+     [90m 15 |[39m   
+afterAll([36masync[39
+m () [33m=>[39m {[0m
+
+      at 
+Object.<anonymous> (tes
+ts/integration/websocke
+t/connection.integratio
+n.test.js:12:20)
+
+  ● WebSocket 
+Connection Integration 
+› Driver Operations › 
+should handle driver 
+location updates
+
+    MD5 check failed! 
+Binary MD5 is "d9b5d065
+b5da0218ba511da39dfdee6
+1", Checkfile MD5 is "8
+96333eea778fa3f7726df71
+d1b1e9b7"
+
+    [0m [90m 23 
+|[39m beforeAll([36ma
+sync[39m () 
+[33m=>[39m {
+     [90m 24 |[39m   
+[90m// Iniciar 
+MongoDB em memória 
+para testes[39m
+    [31m[1m>[22m[39
+m[90m 25 |[39m   
+mongoServer 
+[33m=[39m 
+[36mawait[39m [33mMo
+ngoMemoryServer[39m[3
+3m.[39mcreate()[33m;
+[39m
+     [90m    |[39m   
+              
+[31m[1m^[22m[39m
+     [90m 26 |[39m   
+[36mconst[39m 
+mongoUri [33m=[39m mo
+ngoServer[33m.[39mget
+Uri()[33m;[39m
+     [90m 27 |[39m
+     [90m 28 |[39m   
+[90m// Configurar 
+Redis para 
+testes[39m[0m
+
+      at MongoBinaryDow
+nload.makeMD5check (nod
+e_modules/mongodb-memor
+y-server-core/src/util/
+MongoBinaryDownload.ts:
+183:13)
+      at MongoBinaryDow
+nload.startDownload (no
+de_modules/mongodb-memo
+ry-server-core/src/util
+/MongoBinaryDownload.ts
+:149:5)
+      at MongoBinaryDow
+nload.getMongodPath (no
+de_modules/mongodb-memo
+ry-server-core/src/util
+/MongoBinaryDownload.ts
+:114:28)
+      at 
+Function.download (node
+_modules/mongodb-memory
+-server-core/src/util/M
+ongoBinary.ts:47:49)
+      at 
+Function.getPath (node_
+modules/mongodb-memory-
+server-core/src/util/Mo
+ngoBinary.ts:132:22)
+      at 
+MongoInstance.start (no
+de_modules/mongodb-memo
+ry-server-core/src/util
+/MongoInstance.ts:366:2
+2)
+      at 
+Function.create (node_m
+odules/mongodb-memory-s
+erver-core/src/util/Mon
+goInstance.ts:294:5)
+      at MongoMemorySer
+ver._startUpInstance (n
+ode_modules/mongodb-mem
+ory-server-core/src/Mon
+goMemoryServer.ts:530:2
+2)
+      at MongoMemorySer
+ver.start (node_modules
+/mongodb-memory-server-
+core/src/MongoMemorySer
+ver.ts:350:5)
+      at 
+Function.create (node_m
+odules/mongodb-memory-s
+erver-core/src/MongoMem
+oryServer.ts:317:5)
+      at 
+Object.<anonymous> (tes
+ts/integration/config/t
+est-setup.js:25:17)
+
+  ● WebSocket 
+Connection Integration 
+› Driver Operations › 
+should handle driver 
+location updates
+
+    TypeError: 
+startTestServer is not 
+a function
+
+    [0m [90m 10 
+|[39m
+     [90m 11 |[39m   
+beforeAll([36masync[3
+9m () [33m=>[39m {
+    [31m[1m>[22m[39
+m[90m 12 |[39m     
+server [33m=[39m 
+[36mawait[39m startTe
+stServer([35m3004[39m
+)[33m;[39m
+     [90m    |[39m   
+                 
+[31m[1m^[22m[39m
+     [90m 13 |[39m   
+}[33m,[39m [35m30000
+[39m)[33m;[39m
+     [90m 14 |[39m
+     [90m 15 |[39m   
+afterAll([36masync[39
+m () [33m=>[39m {[0m
+
+      at 
+Object.<anonymous> (tes
+ts/integration/websocke
+t/connection.integratio
+n.test.js:12:20)
+
+  ● WebSocket 
+Connection Integration 
+› Driver Operations › 
+should handle driver 
+offline status
+
+    MD5 check failed! 
+Binary MD5 is "d9b5d065
+b5da0218ba511da39dfdee6
+1", Checkfile MD5 is "8
+96333eea778fa3f7726df71
+d1b1e9b7"
+
+    [0m [90m 23 
+|[39m beforeAll([36ma
+sync[39m () 
+[33m=>[39m {
+     [90m 24 |[39m   
+[90m// Iniciar 
+MongoDB em memória 
+para testes[39m
+    [31m[1m>[22m[39
+m[90m 25 |[39m   
+mongoServer 
+[33m=[39m 
+[36mawait[39m [33mMo
+ngoMemoryServer[39m[3
+3m.[39mcreate()[33m;
+[39m
+     [90m    |[39m   
+              
+[31m[1m^[22m[39m
+     [90m 26 |[39m   
+[36mconst[39m 
+mongoUri [33m=[39m mo
+ngoServer[33m.[39mget
+Uri()[33m;[39m
+     [90m 27 |[39m
+     [90m 28 |[39m   
+[90m// Configurar 
+Redis para 
+testes[39m[0m
+
+      at MongoBinaryDow
+nload.makeMD5check (nod
+e_modules/mongodb-memor
+y-server-core/src/util/
+MongoBinaryDownload.ts:
+183:13)
+      at MongoBinaryDow
+nload.startDownload (no
+de_modules/mongodb-memo
+ry-server-core/src/util
+/MongoBinaryDownload.ts
+:149:5)
+      at MongoBinaryDow
+nload.getMongodPath (no
+de_modules/mongodb-memo
+ry-server-core/src/util
+/MongoBinaryDownload.ts
+:114:28)
+      at 
+Function.download (node
+_modules/mongodb-memory
+-server-core/src/util/M
+ongoBinary.ts:47:49)
+      at 
+Function.getPath (node_
+modules/mongodb-memory-
+server-core/src/util/Mo
+ngoBinary.ts:132:22)
+      at 
+MongoInstance.start (no
+de_modules/mongodb-memo
+ry-server-core/src/util
+/MongoInstance.ts:366:2
+2)
+      at 
+Function.create (node_m
+odules/mongodb-memory-s
+erver-core/src/util/Mon
+goInstance.ts:294:5)
+      at MongoMemorySer
+ver._startUpInstance (n
+ode_modules/mongodb-mem
+ory-server-core/src/Mon
+goMemoryServer.ts:530:2
+2)
+      at MongoMemorySer
+ver.start (node_modules
+/mongodb-memory-server-
+core/src/MongoMemorySer
+ver.ts:350:5)
+      at 
+Function.create (node_m
+odules/mongodb-memory-s
+erver-core/src/MongoMem
+oryServer.ts:317:5)
+      at 
+Object.<anonymous> (tes
+ts/integration/config/t
+est-setup.js:25:17)
+
+  ● WebSocket 
+Connection Integration 
+› Driver Operations › 
+should handle driver 
+offline status
+
+    TypeError: 
+startTestServer is not 
+a function
+
+    [0m [90m 10 
+|[39m
+     [90m 11 |[39m   
+beforeAll([36masync[3
+9m () [33m=>[39m {
+    [31m[1m>[22m[39
+m[90m 12 |[39m     
+server [33m=[39m 
+[36mawait[39m startTe
+stServer([35m3004[39m
+)[33m;[39m
+     [90m    |[39m   
+                 
+[31m[1m^[22m[39m
+     [90m 13 |[39m   
+}[33m,[39m [35m30000
+[39m)[33m;[39m
+     [90m 14 |[39m
+     [90m 15 |[39m   
+afterAll([36masync[39
+m () [33m=>[39m {[0m
+
+      at 
+Object.<anonymous> (tes
+ts/integration/websocke
+t/connection.integratio
+n.test.js:12:20)
+
+  ● WebSocket 
+Connection Integration 
+› Passenger Operations 
+› should handle ride 
+requests
+
+    MD5 check failed! 
+Binary MD5 is "d9b5d065
+b5da0218ba511da39dfdee6
+1", Checkfile MD5 is "8
+96333eea778fa3f7726df71
+d1b1e9b7"
+
+    [0m [90m 23 
+|[39m beforeAll([36ma
+sync[39m () 
+[33m=>[39m {
+     [90m 24 |[39m   
+[90m// Iniciar 
+MongoDB em memória 
+para testes[39m
+    [31m[1m>[22m[39
+m[90m 25 |[39m   
+mongoServer 
+[33m=[39m 
+[36mawait[39m [33mMo
+ngoMemoryServer[39m[3
+3m.[39mcreate()[33m;
+[39m
+     [90m    |[39m   
+              
+[31m[1m^[22m[39m
+     [90m 26 |[39m   
+[36mconst[39m 
+mongoUri [33m=[39m mo
+ngoServer[33m.[39mget
+Uri()[33m;[39m
+     [90m 27 |[39m
+     [90m 28 |[39m   
+[90m// Configurar 
+Redis para 
+testes[39m[0m
+
+      at MongoBinaryDow
+nload.makeMD5check (nod
+e_modules/mongodb-memor
+y-server-core/src/util/
+MongoBinaryDownload.ts:
+183:13)
+      at MongoBinaryDow
+nload.startDownload (no
+de_modules/mongodb-memo
+ry-server-core/src/util
+/MongoBinaryDownload.ts
+:149:5)
+      at MongoBinaryDow
+nload.getMongodPath (no
+de_modules/mongodb-memo
+ry-server-core/src/util
+/MongoBinaryDownload.ts
+:114:28)
+      at 
+Function.download (node
+_modules/mongodb-memory
+-server-core/src/util/M
+ongoBinary.ts:47:49)
+      at 
+Function.getPath (node_
+modules/mongodb-memory-
+server-core/src/util/Mo
+ngoBinary.ts:132:22)
+      at 
+MongoInstance.start (no
+de_modules/mongodb-memo
+ry-server-core/src/util
+/MongoInstance.ts:366:2
+2)
+      at 
+Function.create (node_m
+odules/mongodb-memory-s
+erver-core/src/util/Mon
+goInstance.ts:294:5)
+      at MongoMemorySer
+ver._startUpInstance (n
+ode_modules/mongodb-mem
+ory-server-core/src/Mon
+goMemoryServer.ts:530:2
+2)
+      at MongoMemorySer
+ver.start (node_modules
+/mongodb-memory-server-
+core/src/MongoMemorySer
+ver.ts:350:5)
+      at 
+Function.create (node_m
+odules/mongodb-memory-s
+erver-core/src/MongoMem
+oryServer.ts:317:5)
+      at 
+Object.<anonymous> (tes
+ts/integration/config/t
+est-setup.js:25:17)
+
+  ● WebSocket 
+Connection Integration 
+› Passenger Operations 
+› should handle ride 
+requests
+
+    TypeError: 
+startTestServer is not 
+a function
+
+    [0m [90m 10 
+|[39m
+     [90m 11 |[39m   
+beforeAll([36masync[3
+9m () [33m=>[39m {
+    [31m[1m>[22m[39
+m[90m 12 |[39m     
+server [33m=[39m 
+[36mawait[39m startTe
+stServer([35m3004[39m
+)[33m;[39m
+     [90m    |[39m   
+                 
+[31m[1m^[22m[39m
+     [90m 13 |[39m   
+}[33m,[39m [35m30000
+[39m)[33m;[39m
+     [90m 14 |[39m
+     [90m 15 |[39m   
+afterAll([36masync[39
+m () [33m=>[39m {[0m
+
+      at 
+Object.<anonymous> (tes
+ts/integration/websocke
+t/connection.integratio
+n.test.js:12:20)
+
+  ● WebSocket 
+Connection Integration 
+› Passenger Operations 
+› should handle 
+passenger location 
+updates
+
+    MD5 check failed! 
+Binary MD5 is "d9b5d065
+b5da0218ba511da39dfdee6
+1", Checkfile MD5 is "8
+96333eea778fa3f7726df71
+d1b1e9b7"
+
+    [0m [90m 23 
+|[39m beforeAll([36ma
+sync[39m () 
+[33m=>[39m {
+     [90m 24 |[39m   
+[90m// Iniciar 
+MongoDB em memória 
+para testes[39m
+    [31m[1m>[22m[39
+m[90m 25 |[39m   
+mongoServer 
+[33m=[39m 
+[36mawait[39m [33mMo
+ngoMemoryServer[39m[3
+3m.[39mcreate()[33m;
+[39m
+     [90m    |[39m   
+              
+[31m[1m^[22m[39m
+     [90m 26 |[39m   
+[36mconst[39m 
+mongoUri [33m=[39m mo
+ngoServer[33m.[39mget
+Uri()[33m;[39m
+     [90m 27 |[39m
+     [90m 28 |[39m   
+[90m// Configurar 
+Redis para 
+testes[39m[0m
+
+      at MongoBinaryDow
+nload.makeMD5check (nod
+e_modules/mongodb-memor
+y-server-core/src/util/
+MongoBinaryDownload.ts:
+183:13)
+      at MongoBinaryDow
+nload.startDownload (no
+de_modules/mongodb-memo
+ry-server-core/src/util
+/MongoBinaryDownload.ts
+:149:5)
+      at MongoBinaryDow
+nload.getMongodPath (no
+de_modules/mongodb-memo
+ry-server-core/src/util
+/MongoBinaryDownload.ts
+:114:28)
+      at 
+Function.download (node
+_modules/mongodb-memory
+-server-core/src/util/M
+ongoBinary.ts:47:49)
+      at 
+Function.getPath (node_
+modules/mongodb-memory-
+server-core/src/util/Mo
+ngoBinary.ts:132:22)
+      at 
+MongoInstance.start (no
+de_modules/mongodb-memo
+ry-server-core/src/util
+/MongoInstance.ts:366:2
+2)
+      at 
+Function.create (node_m
+odules/mongodb-memory-s
+erver-core/src/util/Mon
+goInstance.ts:294:5)
+      at MongoMemorySer
+ver._startUpInstance (n
+ode_modules/mongodb-mem
+ory-server-core/src/Mon
+goMemoryServer.ts:530:2
+2)
+      at MongoMemorySer
+ver.start (node_modules
+/mongodb-memory-server-
+core/src/MongoMemorySer
+ver.ts:350:5)
+      at 
+Function.create (node_m
+odules/mongodb-memory-s
+erver-core/src/MongoMem
+oryServer.ts:317:5)
+      at 
+Object.<anonymous> (tes
+ts/integration/config/t
+est-setup.js:25:17)
+
+  ● WebSocket 
+Connection Integration 
+› Passenger Operations 
+› should handle 
+passenger location 
+updates
+
+    TypeError: 
+startTestServer is not 
+a function
+
+    [0m [90m 10 
+|[39m
+     [90m 11 |[39m   
+beforeAll([36masync[3
+9m () [33m=>[39m {
+    [31m[1m>[22m[39
+m[90m 12 |[39m     
+server [33m=[39m 
+[36mawait[39m startTe
+stServer([35m3004[39m
+)[33m;[39m
+     [90m    |[39m   
+                 
+[31m[1m^[22m[39m
+     [90m 13 |[39m   
+}[33m,[39m [35m30000
+[39m)[33m;[39m
+     [90m 14 |[39m
+     [90m 15 |[39m   
+afterAll([36masync[39
+m () [33m=>[39m {[0m
+
+      at 
+Object.<anonymous> (tes
+ts/integration/websocke
+t/connection.integratio
+n.test.js:12:20)
+
+  ● WebSocket 
+Connection Integration 
+› Ride Operations › 
+should handle ride 
+acceptance
+
+    MD5 check failed! 
+Binary MD5 is "d9b5d065
+b5da0218ba511da39dfdee6
+1", Checkfile MD5 is "8
+96333eea778fa3f7726df71
+d1b1e9b7"
+
+    [0m [90m 23 
+|[39m beforeAll([36ma
+sync[39m () 
+[33m=>[39m {
+     [90m 24 |[39m   
+[90m// Iniciar 
+MongoDB em memória 
+para testes[39m
+    [31m[1m>[22m[39
+m[90m 25 |[39m   
+mongoServer 
+[33m=[39m 
+[36mawait[39m [33mMo
+ngoMemoryServer[39m[3
+3m.[39mcreate()[33m;
+[39m
+     [90m    |[39m   
+              
+[31m[1m^[22m[39m
+     [90m 26 |[39m   
+[36mconst[39m 
+mongoUri [33m=[39m mo
+ngoServer[33m.[39mget
+Uri()[33m;[39m
+     [90m 27 |[39m
+     [90m 28 |[39m   
+[90m// Configurar 
+Redis para 
+testes[39m[0m
+
+      at MongoBinaryDow
+nload.makeMD5check (nod
+e_modules/mongodb-memor
+y-server-core/src/util/
+MongoBinaryDownload.ts:
+183:13)
+      at MongoBinaryDow
+nload.startDownload (no
+de_modules/mongodb-memo
+ry-server-core/src/util
+/MongoBinaryDownload.ts
+:149:5)
+      at MongoBinaryDow
+nload.getMongodPath (no
+de_modules/mongodb-memo
+ry-server-core/src/util
+/MongoBinaryDownload.ts
+:114:28)
+      at 
+Function.download (node
+_modules/mongodb-memory
+-server-core/src/util/M
+ongoBinary.ts:47:49)
+      at 
+Function.getPath (node_
+modules/mongodb-memory-
+server-core/src/util/Mo
+ngoBinary.ts:132:22)
+      at 
+MongoInstance.start (no
+de_modules/mongodb-memo
+ry-server-core/src/util
+/MongoInstance.ts:366:2
+2)
+      at 
+Function.create (node_m
+odules/mongodb-memory-s
+erver-core/src/util/Mon
+goInstance.ts:294:5)
+      at MongoMemorySer
+ver._startUpInstance (n
+ode_modules/mongodb-mem
+ory-server-core/src/Mon
+goMemoryServer.ts:530:2
+2)
+      at MongoMemorySer
+ver.start (node_modules
+/mongodb-memory-server-
+core/src/MongoMemorySer
+ver.ts:350:5)
+      at 
+Function.create (node_m
+odules/mongodb-memory-s
+erver-core/src/MongoMem
+oryServer.ts:317:5)
+      at 
+Object.<anonymous> (tes
+ts/integration/config/t
+est-setup.js:25:17)
+
+  ● WebSocket 
+Connection Integration 
+› Ride Operations › 
+should handle ride 
+acceptance
+
+    TypeError: 
+startTestServer is not 
+a function
+
+    [0m [90m 10 
+|[39m
+     [90m 11 |[39m   
+beforeAll([36masync[3
+9m () [33m=>[39m {
+    [31m[1m>[22m[39
+m[90m 12 |[39m     
+server [33m=[39m 
+[36mawait[39m startTe
+stServer([35m3004[39m
+)[33m;[39m
+     [90m    |[39m   
+                 
+[31m[1m^[22m[39m
+     [90m 13 |[39m   
+}[33m,[39m [35m30000
+[39m)[33m;[39m
+     [90m 14 |[39m
+     [90m 15 |[39m   
+afterAll([36masync[39
+m () [33m=>[39m {[0m
+
+      at 
+Object.<anonymous> (tes
+ts/integration/websocke
+t/connection.integratio
+n.test.js:12:20)
+
+  ● WebSocket 
+Connection Integration 
+› Ride Operations › 
+should handle ride 
+rejection
+
+    MD5 check failed! 
+Binary MD5 is "d9b5d065
+b5da0218ba511da39dfdee6
+1", Checkfile MD5 is "8
+96333eea778fa3f7726df71
+d1b1e9b7"
+
+    [0m [90m 23 
+|[39m beforeAll([36ma
+sync[39m () 
+[33m=>[39m {
+     [90m 24 |[39m   
+[90m// Iniciar 
+MongoDB em memória 
+para testes[39m
+    [31m[1m>[22m[39
+m[90m 25 |[39m   
+mongoServer 
+[33m=[39m 
+[36mawait[39m [33mMo
+ngoMemoryServer[39m[3
+3m.[39mcreate()[33m;
+[39m
+     [90m    |[39m   
+              
+[31m[1m^[22m[39m
+     [90m 26 |[39m   
+[36mconst[39m 
+mongoUri [33m=[39m mo
+ngoServer[33m.[39mget
+Uri()[33m;[39m
+     [90m 27 |[39m
+     [90m 28 |[39m   
+[90m// Configurar 
+Redis para 
+testes[39m[0m
+
+      at MongoBinaryDow
+nload.makeMD5check (nod
+e_modules/mongodb-memor
+y-server-core/src/util/
+MongoBinaryDownload.ts:
+183:13)
+      at MongoBinaryDow
+nload.startDownload (no
+de_modules/mongodb-memo
+ry-server-core/src/util
+/MongoBinaryDownload.ts
+:149:5)
+      at MongoBinaryDow
+nload.getMongodPath (no
+de_modules/mongodb-memo
+ry-server-core/src/util
+/MongoBinaryDownload.ts
+:114:28)
+      at 
+Function.download (node
+_modules/mongodb-memory
+-server-core/src/util/M
+ongoBinary.ts:47:49)
+      at 
+Function.getPath (node_
+modules/mongodb-memory-
+server-core/src/util/Mo
+ngoBinary.ts:132:22)
+      at 
+MongoInstance.start (no
+de_modules/mongodb-memo
+ry-server-core/src/util
+/MongoInstance.ts:366:2
+2)
+      at 
+Function.create (node_m
+odules/mongodb-memory-s
+erver-core/src/util/Mon
+goInstance.ts:294:5)
+      at MongoMemorySer
+ver._startUpInstance (n
+ode_modules/mongodb-mem
+ory-server-core/src/Mon
+goMemoryServer.ts:530:2
+2)
+      at MongoMemorySer
+ver.start (node_modules
+/mongodb-memory-server-
+core/src/MongoMemorySer
+ver.ts:350:5)
+      at 
+Function.create (node_m
+odules/mongodb-memory-s
+erver-core/src/MongoMem
+oryServer.ts:317:5)
+      at 
+Object.<anonymous> (tes
+ts/integration/config/t
+est-setup.js:25:17)
+
+  ● WebSocket 
+Connection Integration 
+› Ride Operations › 
+should handle ride 
+rejection
+
+    TypeError: 
+startTestServer is not 
+a function
+
+    [0m [90m 10 
+|[39m
+     [90m 11 |[39m   
+beforeAll([36masync[3
+9m () [33m=>[39m {
+    [31m[1m>[22m[39
+m[90m 12 |[39m     
+server [33m=[39m 
+[36mawait[39m startTe
+stServer([35m3004[39m
+)[33m;[39m
+     [90m    |[39m   
+                 
+[31m[1m^[22m[39m
+     [90m 13 |[39m   
+}[33m,[39m [35m30000
+[39m)[33m;[39m
+     [90m 14 |[39m
+     [90m 15 |[39m   
+afterAll([36masync[39
+m () [33m=>[39m {[0m
+
+      at 
+Object.<anonymous> (tes
+ts/integration/websocke
+t/connection.integratio
+n.test.js:12:20)
+
+  ● WebSocket 
+Connection Integration 
+› Ride Operations › 
+should handle ride 
+completion
+
+    MD5 check failed! 
+Binary MD5 is "d9b5d065
+b5da0218ba511da39dfdee6
+1", Checkfile MD5 is "8
+96333eea778fa3f7726df71
+d1b1e9b7"
+
+    [0m [90m 23 
+|[39m beforeAll([36ma
+sync[39m () 
+[33m=>[39m {
+     [90m 24 |[39m   
+[90m// Iniciar 
+MongoDB em memória 
+para testes[39m
+    [31m[1m>[22m[39
+m[90m 25 |[39m   
+mongoServer 
+[33m=[39m 
+[36mawait[39m [33mMo
+ngoMemoryServer[39m[3
+3m.[39mcreate()[33m;
+[39m
+     [90m    |[39m   
+              
+[31m[1m^[22m[39m
+     [90m 26 |[39m   
+[36mconst[39m 
+mongoUri [33m=[39m mo
+ngoServer[33m.[39mget
+Uri()[33m;[39m
+     [90m 27 |[39m
+     [90m 28 |[39m   
+[90m// Configurar 
+Redis para 
+testes[39m[0m
+
+      at MongoBinaryDow
+nload.makeMD5check (nod
+e_modules/mongodb-memor
+y-server-core/src/util/
+MongoBinaryDownload.ts:
+183:13)
+      at MongoBinaryDow
+nload.startDownload (no
+de_modules/mongodb-memo
+ry-server-core/src/util
+/MongoBinaryDownload.ts
+:149:5)
+      at MongoBinaryDow
+nload.getMongodPath (no
+de_modules/mongodb-memo
+ry-server-core/src/util
+/MongoBinaryDownload.ts
+:114:28)
+      at 
+Function.download (node
+_modules/mongodb-memory
+-server-core/src/util/M
+ongoBinary.ts:47:49)
+      at 
+Function.getPath (node_
+modules/mongodb-memory-
+server-core/src/util/Mo
+ngoBinary.ts:132:22)
+      at 
+MongoInstance.start (no
+de_modules/mongodb-memo
+ry-server-core/src/util
+/MongoInstance.ts:366:2
+2)
+      at 
+Function.create (node_m
+odules/mongodb-memory-s
+erver-core/src/util/Mon
+goInstance.ts:294:5)
+      at MongoMemorySer
+ver._startUpInstance (n
+ode_modules/mongodb-mem
+ory-server-core/src/Mon
+goMemoryServer.ts:530:2
+2)
+      at MongoMemorySer
+ver.start (node_modules
+/mongodb-memory-server-
+core/src/MongoMemorySer
+ver.ts:350:5)
+      at 
+Function.create (node_m
+odules/mongodb-memory-s
+erver-core/src/MongoMem
+oryServer.ts:317:5)
+      at 
+Object.<anonymous> (tes
+ts/integration/config/t
+est-setup.js:25:17)
+
+  ● WebSocket 
+Connection Integration 
+› Ride Operations › 
+should handle ride 
+completion
+
+    TypeError: 
+startTestServer is not 
+a function
+
+    [0m [90m 10 
+|[39m
+     [90m 11 |[39m   
+beforeAll([36masync[3
+9m () [33m=>[39m {
+    [31m[1m>[22m[39
+m[90m 12 |[39m     
+server [33m=[39m 
+[36mawait[39m startTe
+stServer([35m3004[39m
+)[33m;[39m
+     [90m    |[39m   
+                 
+[31m[1m^[22m[39m
+     [90m 13 |[39m   
+}[33m,[39m [35m30000
+[39m)[33m;[39m
+     [90m 14 |[39m
+     [90m 15 |[39m   
+afterAll([36masync[39
+m () [33m=>[39m {[0m
+
+      at 
+Object.<anonymous> (tes
+ts/integration/websocke
+t/connection.integratio
+n.test.js:12:20)
+
+  ● WebSocket 
+Connection Integration 
+› Real-time Features › 
+should receive nearby 
+drivers updates
+
+    MD5 check failed! 
+Binary MD5 is "d9b5d065
+b5da0218ba511da39dfdee6
+1", Checkfile MD5 is "8
+96333eea778fa3f7726df71
+d1b1e9b7"
+
+    [0m [90m 23 
+|[39m beforeAll([36ma
+sync[39m () 
+[33m=>[39m {
+     [90m 24 |[39m   
+[90m// Iniciar 
+MongoDB em memória 
+para testes[39m
+    [31m[1m>[22m[39
+m[90m 25 |[39m   
+mongoServer 
+[33m=[39m 
+[36mawait[39m [33mMo
+ngoMemoryServer[39m[3
+3m.[39mcreate()[33m;
+[39m
+     [90m    |[39m   
+              
+[31m[1m^[22m[39m
+     [90m 26 |[39m   
+[36mconst[39m 
+mongoUri [33m=[39m mo
+ngoServer[33m.[39mget
+Uri()[33m;[39m
+     [90m 27 |[39m
+     [90m 28 |[39m   
+[90m// Configurar 
+Redis para 
+testes[39m[0m
+
+      at MongoBinaryDow
+nload.makeMD5check (nod
+e_modules/mongodb-memor
+y-server-core/src/util/
+MongoBinaryDownload.ts:
+183:13)
+      at MongoBinaryDow
+nload.startDownload (no
+de_modules/mongodb-memo
+ry-server-core/src/util
+/MongoBinaryDownload.ts
+:149:5)
+      at MongoBinaryDow
+nload.getMongodPath (no
+de_modules/mongodb-memo
+ry-server-core/src/util
+/MongoBinaryDownload.ts
+:114:28)
+      at 
+Function.download (node
+_modules/mongodb-memory
+-server-core/src/util/M
+ongoBinary.ts:47:49)
+      at 
+Function.getPath (node_
+modules/mongodb-memory-
+server-core/src/util/Mo
+ngoBinary.ts:132:22)
+      at 
+MongoInstance.start (no
+de_modules/mongodb-memo
+ry-server-core/src/util
+/MongoInstance.ts:366:2
+2)
+      at 
+Function.create (node_m
+odules/mongodb-memory-s
+erver-core/src/util/Mon
+goInstance.ts:294:5)
+      at MongoMemorySer
+ver._startUpInstance (n
+ode_modules/mongodb-mem
+ory-server-core/src/Mon
+goMemoryServer.ts:530:2
+2)
+      at MongoMemorySer
+ver.start (node_modules
+/mongodb-memory-server-
+core/src/MongoMemorySer
+ver.ts:350:5)
+      at 
+Function.create (node_m
+odules/mongodb-memory-s
+erver-core/src/MongoMem
+oryServer.ts:317:5)
+      at 
+Object.<anonymous> (tes
+ts/integration/config/t
+est-setup.js:25:17)
+
+  ● WebSocket 
+Connection Integration 
+› Real-time Features › 
+should receive nearby 
+drivers updates
+
+    TypeError: 
+startTestServer is not 
+a function
+
+    [0m [90m 10 
+|[39m
+     [90m 11 |[39m   
+beforeAll([36masync[3
+9m () [33m=>[39m {
+    [31m[1m>[22m[39
+m[90m 12 |[39m     
+server [33m=[39m 
+[36mawait[39m startTe
+stServer([35m3004[39m
+)[33m;[39m
+     [90m    |[39m   
+                 
+[31m[1m^[22m[39m
+     [90m 13 |[39m   
+}[33m,[39m [35m30000
+[39m)[33m;[39m
+     [90m 14 |[39m
+     [90m 15 |[39m   
+afterAll([36masync[39
+m () [33m=>[39m {[0m
+
+      at 
+Object.<anonymous> (tes
+ts/integration/websocke
+t/connection.integratio
+n.test.js:12:20)
+
+  ● WebSocket 
+Connection Integration 
+› Real-time Features › 
+should handle chat 
+messages
+
+    MD5 check failed! 
+Binary MD5 is "d9b5d065
+b5da0218ba511da39dfdee6
+1", Checkfile MD5 is "8
+96333eea778fa3f7726df71
+d1b1e9b7"
+
+    [0m [90m 23 
+|[39m beforeAll([36ma
+sync[39m () 
+[33m=>[39m {
+     [90m 24 |[39m   
+[90m// Iniciar 
+MongoDB em memória 
+para testes[39m
+    [31m[1m>[22m[39
+m[90m 25 |[39m   
+mongoServer 
+[33m=[39m 
+[36mawait[39m [33mMo
+ngoMemoryServer[39m[3
+3m.[39mcreate()[33m;
+[39m
+     [90m    |[39m   
+              
+[31m[1m^[22m[39m
+     [90m 26 |[39m   
+[36mconst[39m 
+mongoUri [33m=[39m mo
+ngoServer[33m.[39mget
+Uri()[33m;[39m
+     [90m 27 |[39m
+     [90m 28 |[39m   
+[90m// Configurar 
+Redis para 
+testes[39m[0m
+
+      at MongoBinaryDow
+nload.makeMD5check (nod
+e_modules/mongodb-memor
+y-server-core/src/util/
+MongoBinaryDownload.ts:
+183:13)
+      at MongoBinaryDow
+nload.startDownload (no
+de_modules/mongodb-memo
+ry-server-core/src/util
+/MongoBinaryDownload.ts
+:149:5)
+      at MongoBinaryDow
+nload.getMongodPath (no
+de_modules/mongodb-memo
+ry-server-core/src/util
+/MongoBinaryDownload.ts
+:114:28)
+      at 
+Function.download (node
+_modules/mongodb-memory
+-server-core/src/util/M
+ongoBinary.ts:47:49)
+      at 
+Function.getPath (node_
+modules/mongodb-memory-
+server-core/src/util/Mo
+ngoBinary.ts:132:22)
+      at 
+MongoInstance.start (no
+de_modules/mongodb-memo
+ry-server-core/src/util
+/MongoInstance.ts:366:2
+2)
+      at 
+Function.create (node_m
+odules/mongodb-memory-s
+erver-core/src/util/Mon
+goInstance.ts:294:5)
+      at MongoMemorySer
+ver._startUpInstance (n
+ode_modules/mongodb-mem
+ory-server-core/src/Mon
+goMemoryServer.ts:530:2
+2)
+      at MongoMemorySer
+ver.start (node_modules
+/mongodb-memory-server-
+core/src/MongoMemorySer
+ver.ts:350:5)
+      at 
+Function.create (node_m
+odules/mongodb-memory-s
+erver-core/src/MongoMem
+oryServer.ts:317:5)
+      at 
+Object.<anonymous> (tes
+ts/integration/config/t
+est-setup.js:25:17)
+
+  ● WebSocket 
+Connection Integration 
+› Real-time Features › 
+should handle chat 
+messages
+
+    TypeError: 
+startTestServer is not 
+a function
+
+    [0m [90m 10 
+|[39m
+     [90m 11 |[39m   
+beforeAll([36masync[3
+9m () [33m=>[39m {
+    [31m[1m>[22m[39
+m[90m 12 |[39m     
+server [33m=[39m 
+[36mawait[39m startTe
+stServer([35m3004[39m
+)[33m;[39m
+     [90m    |[39m   
+                 
+[31m[1m^[22m[39m
+     [90m 13 |[39m   
+}[33m,[39m [35m30000
+[39m)[33m;[39m
+     [90m 14 |[39m
+     [90m 15 |[39m   
+afterAll([36masync[39
+m () [33m=>[39m {[0m
+
+      at 
+Object.<anonymous> (tes
+ts/integration/websocke
+t/connection.integratio
+n.test.js:12:20)
+
+  ● WebSocket 
+Connection Integration 
+› Real-time Features › 
+should receive ride 
+status updates
+
+    MD5 check failed! 
+Binary MD5 is "d9b5d065
+b5da0218ba511da39dfdee6
+1", Checkfile MD5 is "8
+96333eea778fa3f7726df71
+d1b1e9b7"
+
+    [0m [90m 23 
+|[39m beforeAll([36ma
+sync[39m () 
+[33m=>[39m {
+     [90m 24 |[39m   
+[90m// Iniciar 
+MongoDB em memória 
+para testes[39m
+    [31m[1m>[22m[39
+m[90m 25 |[39m   
+mongoServer 
+[33m=[39m 
+[36mawait[39m [33mMo
+ngoMemoryServer[39m[3
+3m.[39mcreate()[33m;
+[39m
+     [90m    |[39m   
+              
+[31m[1m^[22m[39m
+     [90m 26 |[39m   
+[36mconst[39m 
+mongoUri [33m=[39m mo
+ngoServer[33m.[39mget
+Uri()[33m;[39m
+     [90m 27 |[39m
+     [90m 28 |[39m   
+[90m// Configurar 
+Redis para 
+testes[39m[0m
+
+      at MongoBinaryDow
+nload.makeMD5check (nod
+e_modules/mongodb-memor
+y-server-core/src/util/
+MongoBinaryDownload.ts:
+183:13)
+      at MongoBinaryDow
+nload.startDownload (no
+de_modules/mongodb-memo
+ry-server-core/src/util
+/MongoBinaryDownload.ts
+:149:5)
+      at MongoBinaryDow
+nload.getMongodPath (no
+de_modules/mongodb-memo
+ry-server-core/src/util
+/MongoBinaryDownload.ts
+:114:28)
+      at 
+Function.download (node
+_modules/mongodb-memory
+-server-core/src/util/M
+ongoBinary.ts:47:49)
+      at 
+Function.getPath (node_
+modules/mongodb-memory-
+server-core/src/util/Mo
+ngoBinary.ts:132:22)
+      at 
+MongoInstance.start (no
+de_modules/mongodb-memo
+ry-server-core/src/util
+/MongoInstance.ts:366:2
+2)
+      at 
+Function.create (node_m
+odules/mongodb-memory-s
+erver-core/src/util/Mon
+goInstance.ts:294:5)
+      at MongoMemorySer
+ver._startUpInstance (n
+ode_modules/mongodb-mem
+ory-server-core/src/Mon
+goMemoryServer.ts:530:2
+2)
+      at MongoMemorySer
+ver.start (node_modules
+/mongodb-memory-server-
+core/src/MongoMemorySer
+ver.ts:350:5)
+      at 
+Function.create (node_m
+odules/mongodb-memory-s
+erver-core/src/MongoMem
+oryServer.ts:317:5)
+      at 
+Object.<anonymous> (tes
+ts/integration/config/t
+est-setup.js:25:17)
+
+  ● WebSocket 
+Connection Integration 
+› Real-time Features › 
+should receive ride 
+status updates
+
+    TypeError: 
+startTestServer is not 
+a function
+
+    [0m [90m 10 
+|[39m
+     [90m 11 |[39m   
+beforeAll([36masync[3
+9m () [33m=>[39m {
+    [31m[1m>[22m[39
+m[90m 12 |[39m     
+server [33m=[39m 
+[36mawait[39m startTe
+stServer([35m3004[39m
+)[33m;[39m
+     [90m    |[39m   
+                 
+[31m[1m^[22m[39m
+     [90m 13 |[39m   
+}[33m,[39m [35m30000
+[39m)[33m;[39m
+     [90m 14 |[39m
+     [90m 15 |[39m   
+afterAll([36masync[39
+m () [33m=>[39m {[0m
+
+      at 
+Object.<anonymous> (tes
+ts/integration/websocke
+t/connection.integratio
+n.test.js:12:20)
+
+  ● WebSocket 
+Connection Integration 
+› Connection Recovery 
+› should handle 
+disconnection and 
+reconnection
+
+    MD5 check failed! 
+Binary MD5 is "d9b5d065
+b5da0218ba511da39dfdee6
+1", Checkfile MD5 is "8
+96333eea778fa3f7726df71
+d1b1e9b7"
+
+    [0m [90m 23 
+|[39m beforeAll([36ma
+sync[39m () 
+[33m=>[39m {
+     [90m 24 |[39m   
+[90m// Iniciar 
+MongoDB em memória 
+para testes[39m
+    [31m[1m>[22m[39
+m[90m 25 |[39m   
+mongoServer 
+[33m=[39m 
+[36mawait[39m [33mMo
+ngoMemoryServer[39m[3
+3m.[39mcreate()[33m;
+[39m
+     [90m    |[39m   
+              
+[31m[1m^[22m[39m
+     [90m 26 |[39m   
+[36mconst[39m 
+mongoUri [33m=[39m mo
+ngoServer[33m.[39mget
+Uri()[33m;[39m
+     [90m 27 |[39m
+     [90m 28 |[39m   
+[90m// Configurar 
+Redis para 
+testes[39m[0m
+
+      at MongoBinaryDow
+nload.makeMD5check (nod
+e_modules/mongodb-memor
+y-server-core/src/util/
+MongoBinaryDownload.ts:
+183:13)
+      at MongoBinaryDow
+nload.startDownload (no
+de_modules/mongodb-memo
+ry-server-core/src/util
+/MongoBinaryDownload.ts
+:149:5)
+      at MongoBinaryDow
+nload.getMongodPath (no
+de_modules/mongodb-memo
+ry-server-core/src/util
+/MongoBinaryDownload.ts
+:114:28)
+      at 
+Function.download (node
+_modules/mongodb-memory
+-server-core/src/util/M
+ongoBinary.ts:47:49)
+      at 
+Function.getPath (node_
+modules/mongodb-memory-
+server-core/src/util/Mo
+ngoBinary.ts:132:22)
+      at 
+MongoInstance.start (no
+de_modules/mongodb-memo
+ry-server-core/src/util
+/MongoInstance.ts:366:2
+2)
+      at 
+Function.create (node_m
+odules/mongodb-memory-s
+erver-core/src/util/Mon
+goInstance.ts:294:5)
+      at MongoMemorySer
+ver._startUpInstance (n
+ode_modules/mongodb-mem
+ory-server-core/src/Mon
+goMemoryServer.ts:530:2
+2)
+      at MongoMemorySer
+ver.start (node_modules
+/mongodb-memory-server-
+core/src/MongoMemorySer
+ver.ts:350:5)
+      at 
+Function.create (node_m
+odules/mongodb-memory-s
+erver-core/src/MongoMem
+oryServer.ts:317:5)
+      at 
+Object.<anonymous> (tes
+ts/integration/config/t
+est-setup.js:25:17)
+
+  ● WebSocket 
+Connection Integration 
+› Connection Recovery 
+› should handle 
+disconnection and 
+reconnection
+
+    TypeError: 
+startTestServer is not 
+a function
+
+    [0m [90m 10 
+|[39m
+     [90m 11 |[39m   
+beforeAll([36masync[3
+9m () [33m=>[39m {
+    [31m[1m>[22m[39
+m[90m 12 |[39m     
+server [33m=[39m 
+[36mawait[39m startTe
+stServer([35m3004[39m
+)[33m;[39m
+     [90m    |[39m   
+                 
+[31m[1m^[22m[39m
+     [90m 13 |[39m   
+}[33m,[39m [35m30000
+[39m)[33m;[39m
+     [90m 14 |[39m
+     [90m 15 |[39m   
+afterAll([36masync[39
+m () [33m=>[39m {[0m
+
+      at 
+Object.<anonymous> (tes
+ts/integration/websocke
+t/connection.integratio
+n.test.js:12:20)
+
+  ● WebSocket 
+Connection Integration 
+› Connection Recovery 
+› should preserve 
+session after 
+reconnection
+
+    MD5 check failed! 
+Binary MD5 is "d9b5d065
+b5da0218ba511da39dfdee6
+1", Checkfile MD5 is "8
+96333eea778fa3f7726df71
+d1b1e9b7"
+
+    [0m [90m 23 
+|[39m beforeAll([36ma
+sync[39m () 
+[33m=>[39m {
+     [90m 24 |[39m   
+[90m// Iniciar 
+MongoDB em memória 
+para testes[39m
+    [31m[1m>[22m[39
+m[90m 25 |[39m   
+mongoServer 
+[33m=[39m 
+[36mawait[39m [33mMo
+ngoMemoryServer[39m[3
+3m.[39mcreate()[33m;
+[39m
+     [90m    |[39m   
+              
+[31m[1m^[22m[39m
+     [90m 26 |[39m   
+[36mconst[39m 
+mongoUri [33m=[39m mo
+ngoServer[33m.[39mget
+Uri()[33m;[39m
+     [90m 27 |[39m
+     [90m 28 |[39m   
+[90m// Configurar 
+Redis para 
+testes[39m[0m
+
+      at MongoBinaryDow
+nload.makeMD5check (nod
+e_modules/mongodb-memor
+y-server-core/src/util/
+MongoBinaryDownload.ts:
+183:13)
+      at MongoBinaryDow
+nload.startDownload (no
+de_modules/mongodb-memo
+ry-server-core/src/util
+/MongoBinaryDownload.ts
+:149:5)
+      at MongoBinaryDow
+nload.getMongodPath (no
+de_modules/mongodb-memo
+ry-server-core/src/util
+/MongoBinaryDownload.ts
+:114:28)
+      at 
+Function.download (node
+_modules/mongodb-memory
+-server-core/src/util/M
+ongoBinary.ts:47:49)
+      at 
+Function.getPath (node_
+modules/mongodb-memory-
+server-core/src/util/Mo
+ngoBinary.ts:132:22)
+      at 
+MongoInstance.start (no
+de_modules/mongodb-memo
+ry-server-core/src/util
+/MongoInstance.ts:366:2
+2)
+      at 
+Function.create (node_m
+odules/mongodb-memory-s
+erver-core/src/util/Mon
+goInstance.ts:294:5)
+      at MongoMemorySer
+ver._startUpInstance (n
+ode_modules/mongodb-mem
+ory-server-core/src/Mon
+goMemoryServer.ts:530:2
+2)
+      at MongoMemorySer
+ver.start (node_modules
+/mongodb-memory-server-
+core/src/MongoMemorySer
+ver.ts:350:5)
+      at 
+Function.create (node_m
+odules/mongodb-memory-s
+erver-core/src/MongoMem
+oryServer.ts:317:5)
+      at 
+Object.<anonymous> (tes
+ts/integration/config/t
+est-setup.js:25:17)
+
+  ● WebSocket 
+Connection Integration 
+› Connection Recovery 
+› should preserve 
+session after 
+reconnection
+
+    TypeError: 
+startTestServer is not 
+a function
+
+    [0m [90m 10 
+|[39m
+     [90m 11 |[39m   
+beforeAll([36masync[3
+9m () [33m=>[39m {
+    [31m[1m>[22m[39
+m[90m 12 |[39m     
+server [33m=[39m 
+[36mawait[39m startTe
+stServer([35m3004[39m
+)[33m;[39m
+     [90m    |[39m   
+                 
+[31m[1m^[22m[39m
+     [90m 13 |[39m   
+}[33m,[39m [35m30000
+[39m)[33m;[39m
+     [90m 14 |[39m
+     [90m 15 |[39m   
+afterAll([36masync[39
+m () [33m=>[39m {[0m
+
+      at 
+Object.<anonymous> (tes
+ts/integration/websocke
+t/connection.integratio
+n.test.js:12:20)
+
+  ● WebSocket 
+Connection Integration 
+› Error Handling › 
+should handle invalid 
+JSON gracefully
+
+    MD5 check failed! 
+Binary MD5 is "d9b5d065
+b5da0218ba511da39dfdee6
+1", Checkfile MD5 is "8
+96333eea778fa3f7726df71
+d1b1e9b7"
+
+    [0m [90m 23 
+|[39m beforeAll([36ma
+sync[39m () 
+[33m=>[39m {
+     [90m 24 |[39m   
+[90m// Iniciar 
+MongoDB em memória 
+para testes[39m
+    [31m[1m>[22m[39
+m[90m 25 |[39m   
+mongoServer 
+[33m=[39m 
+[36mawait[39m [33mMo
+ngoMemoryServer[39m[3
+3m.[39mcreate()[33m;
+[39m
+     [90m    |[39m   
+              
+[31m[1m^[22m[39m
+     [90m 26 |[39m   
+[36mconst[39m 
+mongoUri [33m=[39m mo
+ngoServer[33m.[39mget
+Uri()[33m;[39m
+     [90m 27 |[39m
+     [90m 28 |[39m   
+[90m// Configurar 
+Redis para 
+testes[39m[0m
+
+      at MongoBinaryDow
+nload.makeMD5check (nod
+e_modules/mongodb-memor
+y-server-core/src/util/
+MongoBinaryDownload.ts:
+183:13)
+      at MongoBinaryDow
+nload.startDownload (no
+de_modules/mongodb-memo
+ry-server-core/src/util
+/MongoBinaryDownload.ts
+:149:5)
+      at MongoBinaryDow
+nload.getMongodPath (no
+de_modules/mongodb-memo
+ry-server-core/src/util
+/MongoBinaryDownload.ts
+:114:28)
+      at 
+Function.download (node
+_modules/mongodb-memory
+-server-core/src/util/M
+ongoBinary.ts:47:49)
+      at 
+Function.getPath (node_
+modules/mongodb-memory-
+server-core/src/util/Mo
+ngoBinary.ts:132:22)
+      at 
+MongoInstance.start (no
+de_modules/mongodb-memo
+ry-server-core/src/util
+/MongoInstance.ts:366:2
+2)
+      at 
+Function.create (node_m
+odules/mongodb-memory-s
+erver-core/src/util/Mon
+goInstance.ts:294:5)
+      at MongoMemorySer
+ver._startUpInstance (n
+ode_modules/mongodb-mem
+ory-server-core/src/Mon
+goMemoryServer.ts:530:2
+2)
+      at MongoMemorySer
+ver.start (node_modules
+/mongodb-memory-server-
+core/src/MongoMemorySer
+ver.ts:350:5)
+      at 
+Function.create (node_m
+odules/mongodb-memory-s
+erver-core/src/MongoMem
+oryServer.ts:317:5)
+      at 
+Object.<anonymous> (tes
+ts/integration/config/t
+est-setup.js:25:17)
+
+  ● WebSocket 
+Connection Integration 
+› Error Handling › 
+should handle invalid 
+JSON gracefully
+
+    TypeError: 
+startTestServer is not 
+a function
+
+    [0m [90m 10 
+|[39m
+     [90m 11 |[39m   
+beforeAll([36masync[3
+9m () [33m=>[39m {
+    [31m[1m>[22m[39
+m[90m 12 |[39m     
+server [33m=[39m 
+[36mawait[39m startTe
+stServer([35m3004[39m
+)[33m;[39m
+     [90m    |[39m   
+                 
+[31m[1m^[22m[39m
+     [90m 13 |[39m   
+}[33m,[39m [35m30000
+[39m)[33m;[39m
+     [90m 14 |[39m
+     [90m 15 |[39m   
+afterAll([36masync[39
+m () [33m=>[39m {[0m
+
+      at 
+Object.<anonymous> (tes
+ts/integration/websocke
+t/connection.integratio
+n.test.js:12:20)
+
+  ● WebSocket 
+Connection Integration 
+› Error Handling › 
+should handle 
+oversized messages
+
+    MD5 check failed! 
+Binary MD5 is "d9b5d065
+b5da0218ba511da39dfdee6
+1", Checkfile MD5 is "8
+96333eea778fa3f7726df71
+d1b1e9b7"
+
+    [0m [90m 23 
+|[39m beforeAll([36ma
+sync[39m () 
+[33m=>[39m {
+     [90m 24 |[39m   
+[90m// Iniciar 
+MongoDB em memória 
+para testes[39m
+    [31m[1m>[22m[39
+m[90m 25 |[39m   
+mongoServer 
+[33m=[39m 
+[36mawait[39m [33mMo
+ngoMemoryServer[39m[3
+3m.[39mcreate()[33m;
+[39m
+     [90m    |[39m   
+              
+[31m[1m^[22m[39m
+     [90m 26 |[39m   
+[36mconst[39m 
+mongoUri [33m=[39m mo
+ngoServer[33m.[39mget
+Uri()[33m;[39m
+     [90m 27 |[39m
+     [90m 28 |[39m   
+[90m// Configurar 
+Redis para 
+testes[39m[0m
+
+      at MongoBinaryDow
+nload.makeMD5check (nod
+e_modules/mongodb-memor
+y-server-core/src/util/
+MongoBinaryDownload.ts:
+183:13)
+      at MongoBinaryDow
+nload.startDownload (no
+de_modules/mongodb-memo
+ry-server-core/src/util
+/MongoBinaryDownload.ts
+:149:5)
+      at MongoBinaryDow
+nload.getMongodPath (no
+de_modules/mongodb-memo
+ry-server-core/src/util
+/MongoBinaryDownload.ts
+:114:28)
+      at 
+Function.download (node
+_modules/mongodb-memory
+-server-core/src/util/M
+ongoBinary.ts:47:49)
+      at 
+Function.getPath (node_
+modules/mongodb-memory-
+server-core/src/util/Mo
+ngoBinary.ts:132:22)
+      at 
+MongoInstance.start (no
+de_modules/mongodb-memo
+ry-server-core/src/util
+/MongoInstance.ts:366:2
+2)
+      at 
+Function.create (node_m
+odules/mongodb-memory-s
+erver-core/src/util/Mon
+goInstance.ts:294:5)
+      at MongoMemorySer
+ver._startUpInstance (n
+ode_modules/mongodb-mem
+ory-server-core/src/Mon
+goMemoryServer.ts:530:2
+2)
+      at MongoMemorySer
+ver.start (node_modules
+/mongodb-memory-server-
+core/src/MongoMemorySer
+ver.ts:350:5)
+      at 
+Function.create (node_m
+odules/mongodb-memory-s
+erver-core/src/MongoMem
+oryServer.ts:317:5)
+      at 
+Object.<anonymous> (tes
+ts/integration/config/t
+est-setup.js:25:17)
+
+  ● WebSocket 
+Connection Integration 
+› Error Handling › 
+should handle 
+oversized messages
+
+    TypeError: 
+startTestServer is not 
+a function
+
+    [0m [90m 10 
+|[39m
+     [90m 11 |[39m   
+beforeAll([36masync[3
+9m () [33m=>[39m {
+    [31m[1m>[22m[39
+m[90m 12 |[39m     
+server [33m=[39m 
+[36mawait[39m startTe
+stServer([35m3004[39m
+)[33m;[39m
+     [90m    |[39m   
+                 
+[31m[1m^[22m[39m
+     [90m 13 |[39m   
+}[33m,[39m [35m30000
+[39m)[33m;[39m
+     [90m 14 |[39m
+     [90m 15 |[39m   
+afterAll([36masync[39
+m () [33m=>[39m {[0m
+
+      at 
+Object.<anonymous> (tes
+ts/integration/websocke
+t/connection.integratio
+n.test.js:12:20)
+
+FAIL tests/integration/
+api/health-api.integrat
+ion.test.js (30.592 s)
+  ● Health Check API 
+Integration › GET 
+/api/health › should 
+return health status
+
+    thrown: "Exceeded 
+timeout of 30000 ms 
+for a hook.
+    Add a timeout 
+value to this test to 
+increase the timeout, 
+if this is a 
+long-running test. See 
+https://jestjs.io/docs/
+api#testname-fn-timeout
+."
+
+    [0m [90m 21 
+|[39m
+     [90m 22 |[39m 
+[90m// Setup antes de 
+todos os testes[39m
+    [31m[1m>[22m[39
+m[90m 23 |[39m before
+All([36masync[39m () 
+[33m=>[39m {
+     [90m    |[39m 
+[31m[1m^[22m[39m
+     [90m 24 |[39m   
+[90m// Iniciar 
+MongoDB em memória 
+para testes[39m
+     [90m 25 |[39m   
+mongoServer 
+[33m=[39m 
+[36mawait[39m [33mMo
+ngoMemoryServer[39m[3
+3m.[39mcreate()[33m;
+[39m
+     [90m 26 |[39m   
+[36mconst[39m 
+mongoUri [33m=[39m mo
+ngoServer[33m.[39mget
+Uri()[33m;[39m[0m
+
+      at 
+Object.<anonymous> (tes
+ts/integration/config/t
+est-setup.js:23:1)
+
+  ● Health Check API 
+Integration › GET 
+/api/health › should 
+return health status
+
+    ENOENT: no such 
+file or directory, 
+rename 'C:\Users\izaak\
+.cache\mongodb-binaries
+\mongodb-windows-x86_64
+-8.2.1.zip.downloading'
+ -> 'C:\Users\izaak\.ca
+che\mongodb-binaries\mo
+ngodb-windows-x86_64-8.
+2.1.zip'
+
+      at WriteStream.<a
+nonymous> (node_modules
+/mongodb-memory-server-
+core/src/util/MongoBina
+ryDownload.ts:603:11)
+
+  ● Health Check API 
+Integration › GET 
+/api/health › should 
+return health status
+
+    TypeError: 
+startTestServer is not 
+a function
+
+    [0m [90m  9 
+|[39m
+     [90m 10 |[39m   
+beforeAll([36masync[3
+9m () [33m=>[39m {
+    [31m[1m>[22m[39
+m[90m 11 |[39m     
+server [33m=[39m 
+[36mawait[39m startTe
+stServer([35m3003[39m
+)[33m;[39m
+     [90m    |[39m   
+                 
+[31m[1m^[22m[39m
+     [90m 12 |[39m   
+}[33m,[39m [35m30000
+[39m)[33m;[39m
+     [90m 13 |[39m
+     [90m 14 |[39m   
+afterAll([36masync[39
+m () [33m=>[39m {[0m
+
+      at 
+Object.<anonymous> (tes
+ts/integration/api/heal
+th-api.integration.test
+.js:11:20)
+
+  ● Health Check API 
+Integration › GET 
+/api/health › should 
+return health status
+
+    ENOENT: no such 
+file or directory, 
+rename 'C:\Users\izaak\
+.cache\mongodb-binaries
+\mongodb-windows-x86_64
+-8.2.1.zip.downloading'
+ -> 'C:\Users\izaak\.ca
+che\mongodb-binaries\mo
+ngodb-windows-x86_64-8.
+2.1.zip'
+
+      at WriteStream.<a
+nonymous> (node_modules
+/mongodb-memory-server-
+core/src/util/MongoBina
+ryDownload.ts:603:11)
+
+  ● Health Check API 
+Integration › GET 
+/api/health › should 
+include service 
+information
+
+    thrown: "Exceeded 
+timeout of 30000 ms 
+for a hook.
+    Add a timeout 
+value to this test to 
+increase the timeout, 
+if this is a 
+long-running test. See 
+https://jestjs.io/docs/
+api#testname-fn-timeout
+."
+
+    [0m [90m 21 
+|[39m
+     [90m 22 |[39m 
+[90m// Setup antes de 
+todos os testes[39m
+    [31m[1m>[22m[39
+m[90m 23 |[39m before
+All([36masync[39m () 
+[33m=>[39m {
+     [90m    |[39m 
+[31m[1m^[22m[39m
+     [90m 24 |[39m   
+[90m// Iniciar 
+MongoDB em memória 
+para testes[39m
+     [90m 25 |[39m   
+mongoServer 
+[33m=[39m 
+[36mawait[39m [33mMo
+ngoMemoryServer[39m[3
+3m.[39mcreate()[33m;
+[39m
+     [90m 26 |[39m   
+[36mconst[39m 
+mongoUri [33m=[39m mo
+ngoServer[33m.[39mget
+Uri()[33m;[39m[0m
+
+      at 
+Object.<anonymous> (tes
+ts/integration/config/t
+est-setup.js:23:1)
+
+  ● Health Check API 
+Integration › GET 
+/api/health › should 
+include service 
+information
+
+    ENOENT: no such 
+file or directory, 
+rename 'C:\Users\izaak\
+.cache\mongodb-binaries
+\mongodb-windows-x86_64
+-8.2.1.zip.downloading'
+ -> 'C:\Users\izaak\.ca
+che\mongodb-binaries\mo
+ngodb-windows-x86_64-8.
+2.1.zip'
+
+      at WriteStream.<a
+nonymous> (node_modules
+/mongodb-memory-server-
+core/src/util/MongoBina
+ryDownload.ts:603:11)
+
+  ● Health Check API 
+Integration › GET 
+/api/health › should 
+include service 
+information
+
+    TypeError: 
+startTestServer is not 
+a function
+
+    [0m [90m  9 
+|[39m
+     [90m 10 |[39m   
+beforeAll([36masync[3
+9m () [33m=>[39m {
+    [31m[1m>[22m[39
+m[90m 11 |[39m     
+server [33m=[39m 
+[36mawait[39m startTe
+stServer([35m3003[39m
+)[33m;[39m
+     [90m    |[39m   
+                 
+[31m[1m^[22m[39m
+     [90m 12 |[39m   
+}[33m,[39m [35m30000
+[39m)[33m;[39m
+     [90m 13 |[39m
+     [90m 14 |[39m   
+afterAll([36masync[39
+m () [33m=>[39m {[0m
+
+      at 
+Object.<anonymous> (tes
+ts/integration/api/heal
+th-api.integration.test
+.js:11:20)
+
+  ● Health Check API 
+Integration › GET 
+/api/health › should 
+include service 
+information
+
+    ENOENT: no such 
+file or directory, 
+rename 'C:\Users\izaak\
+.cache\mongodb-binaries
+\mongodb-windows-x86_64
+-8.2.1.zip.downloading'
+ -> 'C:\Users\izaak\.ca
+che\mongodb-binaries\mo
+ngodb-windows-x86_64-8.
+2.1.zip'
+
+      at WriteStream.<a
+nonymous> (node_modules
+/mongodb-memory-server-
+core/src/util/MongoBina
+ryDownload.ts:603:11)
+
+  ● Health Check API 
+Integration › GET 
+/api/health › should 
+include uptime 
+information
+
+    thrown: "Exceeded 
+timeout of 30000 ms 
+for a hook.
+    Add a timeout 
+value to this test to 
+increase the timeout, 
+if this is a 
+long-running test. See 
+https://jestjs.io/docs/
+api#testname-fn-timeout
+."
+
+    [0m [90m 21 
+|[39m
+     [90m 22 |[39m 
+[90m// Setup antes de 
+todos os testes[39m
+    [31m[1m>[22m[39
+m[90m 23 |[39m before
+All([36masync[39m () 
+[33m=>[39m {
+     [90m    |[39m 
+[31m[1m^[22m[39m
+     [90m 24 |[39m   
+[90m// Iniciar 
+MongoDB em memória 
+para testes[39m
+     [90m 25 |[39m   
+mongoServer 
+[33m=[39m 
+[36mawait[39m [33mMo
+ngoMemoryServer[39m[3
+3m.[39mcreate()[33m;
+[39m
+     [90m 26 |[39m   
+[36mconst[39m 
+mongoUri [33m=[39m mo
+ngoServer[33m.[39mget
+Uri()[33m;[39m[0m
+
+      at 
+Object.<anonymous> (tes
+ts/integration/config/t
+est-setup.js:23:1)
+
+  ● Health Check API 
+Integration › GET 
+/api/health › should 
+include uptime 
+information
+
+    ENOENT: no such 
+file or directory, 
+rename 'C:\Users\izaak\
+.cache\mongodb-binaries
+\mongodb-windows-x86_64
+-8.2.1.zip.downloading'
+ -> 'C:\Users\izaak\.ca
+che\mongodb-binaries\mo
+ngodb-windows-x86_64-8.
+2.1.zip'
+
+      at WriteStream.<a
+nonymous> (node_modules
+/mongodb-memory-server-
+core/src/util/MongoBina
+ryDownload.ts:603:11)
+
+  ● Health Check API 
+Integration › GET 
+/api/health › should 
+include uptime 
+information
+
+    TypeError: 
+startTestServer is not 
+a function
+
+    [0m [90m  9 
+|[39m
+     [90m 10 |[39m   
+beforeAll([36masync[3
+9m () [33m=>[39m {
+    [31m[1m>[22m[39
+m[90m 11 |[39m     
+server [33m=[39m 
+[36mawait[39m startTe
+stServer([35m3003[39m
+)[33m;[39m
+     [90m    |[39m   
+                 
+[31m[1m^[22m[39m
+     [90m 12 |[39m   
+}[33m,[39m [35m30000
+[39m)[33m;[39m
+     [90m 13 |[39m
+     [90m 14 |[39m   
+afterAll([36masync[39
+m () [33m=>[39m {[0m
+
+      at 
+Object.<anonymous> (tes
+ts/integration/api/heal
+th-api.integration.test
+.js:11:20)
+
+  ● Health Check API 
+Integration › GET 
+/api/health › should 
+include uptime 
+information
+
+    ENOENT: no such 
+file or directory, 
+rename 'C:\Users\izaak\
+.cache\mongodb-binaries
+\mongodb-windows-x86_64
+-8.2.1.zip.downloading'
+ -> 'C:\Users\izaak\.ca
+che\mongodb-binaries\mo
+ngodb-windows-x86_64-8.
+2.1.zip'
+
+      at WriteStream.<a
+nonymous> (node_modules
+/mongodb-memory-server-
+core/src/util/MongoBina
+ryDownload.ts:603:11)
+
+  ● Health Check API 
+Integration › GET 
+/api/health › should 
+have correct content 
+type
+
+    thrown: "Exceeded 
+timeout of 30000 ms 
+for a hook.
+    Add a timeout 
+value to this test to 
+increase the timeout, 
+if this is a 
+long-running test. See 
+https://jestjs.io/docs/
+api#testname-fn-timeout
+."
+
+    [0m [90m 21 
+|[39m
+     [90m 22 |[39m 
+[90m// Setup antes de 
+todos os testes[39m
+    [31m[1m>[22m[39
+m[90m 23 |[39m before
+All([36masync[39m () 
+[33m=>[39m {
+     [90m    |[39m 
+[31m[1m^[22m[39m
+     [90m 24 |[39m   
+[90m// Iniciar 
+MongoDB em memória 
+para testes[39m
+     [90m 25 |[39m   
+mongoServer 
+[33m=[39m 
+[36mawait[39m [33mMo
+ngoMemoryServer[39m[3
+3m.[39mcreate()[33m;
+[39m
+     [90m 26 |[39m   
+[36mconst[39m 
+mongoUri [33m=[39m mo
+ngoServer[33m.[39mget
+Uri()[33m;[39m[0m
+
+      at 
+Object.<anonymous> (tes
+ts/integration/config/t
+est-setup.js:23:1)
+
+  ● Health Check API 
+Integration › GET 
+/api/health › should 
+have correct content 
+type
+
+    ENOENT: no such 
+file or directory, 
+rename 'C:\Users\izaak\
+.cache\mongodb-binaries
+\mongodb-windows-x86_64
+-8.2.1.zip.downloading'
+ -> 'C:\Users\izaak\.ca
+che\mongodb-binaries\mo
+ngodb-windows-x86_64-8.
+2.1.zip'
+
+      at WriteStream.<a
+nonymous> (node_modules
+/mongodb-memory-server-
+core/src/util/MongoBina
+ryDownload.ts:603:11)
+
+  ● Health Check API 
+Integration › GET 
+/api/health › should 
+have correct content 
+type
+
+    TypeError: 
+startTestServer is not 
+a function
+
+    [0m [90m  9 
+|[39m
+     [90m 10 |[39m   
+beforeAll([36masync[3
+9m () [33m=>[39m {
+    [31m[1m>[22m[39
+m[90m 11 |[39m     
+server [33m=[39m 
+[36mawait[39m startTe
+stServer([35m3003[39m
+)[33m;[39m
+     [90m    |[39m   
+                 
+[31m[1m^[22m[39m
+     [90m 12 |[39m   
+}[33m,[39m [35m30000
+[39m)[33m;[39m
+     [90m 13 |[39m
+     [90m 14 |[39m   
+afterAll([36masync[39
+m () [33m=>[39m {[0m
+
+      at 
+Object.<anonymous> (tes
+ts/integration/api/heal
+th-api.integration.test
+.js:11:20)
+
+  ● Health Check API 
+Integration › GET 
+/api/health › should 
+have correct content 
+type
+
+    ENOENT: no such 
+file or directory, 
+rename 'C:\Users\izaak\
+.cache\mongodb-binaries
+\mongodb-windows-x86_64
+-8.2.1.zip.downloading'
+ -> 'C:\Users\izaak\.ca
+che\mongodb-binaries\mo
+ngodb-windows-x86_64-8.
+2.1.zip'
+
+      at WriteStream.<a
+nonymous> (node_modules
+/mongodb-memory-server-
+core/src/util/MongoBina
+ryDownload.ts:603:11)
+
+  ● Health Check API 
+Integration › GET 
+/api/stats › should 
+return system 
+statistics
+
+    thrown: "Exceeded 
+timeout of 30000 ms 
+for a hook.
+    Add a timeout 
+value to this test to 
+increase the timeout, 
+if this is a 
+long-running test. See 
+https://jestjs.io/docs/
+api#testname-fn-timeout
+."
+
+    [0m [90m 21 
+|[39m
+     [90m 22 |[39m 
+[90m// Setup antes de 
+todos os testes[39m
+    [31m[1m>[22m[39
+m[90m 23 |[39m before
+All([36masync[39m () 
+[33m=>[39m {
+     [90m    |[39m 
+[31m[1m^[22m[39m
+     [90m 24 |[39m   
+[90m// Iniciar 
+MongoDB em memória 
+para testes[39m
+     [90m 25 |[39m   
+mongoServer 
+[33m=[39m 
+[36mawait[39m [33mMo
+ngoMemoryServer[39m[3
+3m.[39mcreate()[33m;
+[39m
+     [90m 26 |[39m   
+[36mconst[39m 
+mongoUri [33m=[39m mo
+ngoServer[33m.[39mget
+Uri()[33m;[39m[0m
+
+      at 
+Object.<anonymous> (tes
+ts/integration/config/t
+est-setup.js:23:1)
+
+  ● Health Check API 
+Integration › GET 
+/api/stats › should 
+return system 
+statistics
+
+    ENOENT: no such 
+file or directory, 
+rename 'C:\Users\izaak\
+.cache\mongodb-binaries
+\mongodb-windows-x86_64
+-8.2.1.zip.downloading'
+ -> 'C:\Users\izaak\.ca
+che\mongodb-binaries\mo
+ngodb-windows-x86_64-8.
+2.1.zip'
+
+      at WriteStream.<a
+nonymous> (node_modules
+/mongodb-memory-server-
+core/src/util/MongoBina
+ryDownload.ts:603:11)
+
+  ● Health Check API 
+Integration › GET 
+/api/stats › should 
+return system 
+statistics
+
+    TypeError: 
+startTestServer is not 
+a function
+
+    [0m [90m  9 
+|[39m
+     [90m 10 |[39m   
+beforeAll([36masync[3
+9m () [33m=>[39m {
+    [31m[1m>[22m[39
+m[90m 11 |[39m     
+server [33m=[39m 
+[36mawait[39m startTe
+stServer([35m3003[39m
+)[33m;[39m
+     [90m    |[39m   
+                 
+[31m[1m^[22m[39m
+     [90m 12 |[39m   
+}[33m,[39m [35m30000
+[39m)[33m;[39m
+     [90m 13 |[39m
+     [90m 14 |[39m   
+afterAll([36masync[39
+m () [33m=>[39m {[0m
+
+      at 
+Object.<anonymous> (tes
+ts/integration/api/heal
+th-api.integration.test
+.js:11:20)
+
+  ● Health Check API 
+Integration › GET 
+/api/stats › should 
+return system 
+statistics
+
+    ENOENT: no such 
+file or directory, 
+rename 'C:\Users\izaak\
+.cache\mongodb-binaries
+\mongodb-windows-x86_64
+-8.2.1.zip.downloading'
+ -> 'C:\Users\izaak\.ca
+che\mongodb-binaries\mo
+ngodb-windows-x86_64-8.
+2.1.zip'
+
+      at WriteStream.<a
+nonymous> (node_modules
+/mongodb-memory-server-
+core/src/util/MongoBina
+ryDownload.ts:603:11)
+
+  ● Health Check API 
+Integration › GET 
+/api/stats › should 
+include Redis 
+statistics
+
+    thrown: "Exceeded 
+timeout of 30000 ms 
+for a hook.
+    Add a timeout 
+value to this test to 
+increase the timeout, 
+if this is a 
+long-running test. See 
+https://jestjs.io/docs/
+api#testname-fn-timeout
+."
+
+    [0m [90m 21 
+|[39m
+     [90m 22 |[39m 
+[90m// Setup antes de 
+todos os testes[39m
+    [31m[1m>[22m[39
+m[90m 23 |[39m before
+All([36masync[39m () 
+[33m=>[39m {
+     [90m    |[39m 
+[31m[1m^[22m[39m
+     [90m 24 |[39m   
+[90m// Iniciar 
+MongoDB em memória 
+para testes[39m
+     [90m 25 |[39m   
+mongoServer 
+[33m=[39m 
+[36mawait[39m [33mMo
+ngoMemoryServer[39m[3
+3m.[39mcreate()[33m;
+[39m
+     [90m 26 |[39m   
+[36mconst[39m 
+mongoUri [33m=[39m mo
+ngoServer[33m.[39mget
+Uri()[33m;[39m[0m
+
+      at 
+Object.<anonymous> (tes
+ts/integration/config/t
+est-setup.js:23:1)
+
+  ● Health Check API 
+Integration › GET 
+/api/stats › should 
+include Redis 
+statistics
+
+    ENOENT: no such 
+file or directory, 
+rename 'C:\Users\izaak\
+.cache\mongodb-binaries
+\mongodb-windows-x86_64
+-8.2.1.zip.downloading'
+ -> 'C:\Users\izaak\.ca
+che\mongodb-binaries\mo
+ngodb-windows-x86_64-8.
+2.1.zip'
+
+      at WriteStream.<a
+nonymous> (node_modules
+/mongodb-memory-server-
+core/src/util/MongoBina
+ryDownload.ts:603:11)
+
+  ● Health Check API 
+Integration › GET 
+/api/stats › should 
+include Redis 
+statistics
+
+    TypeError: 
+startTestServer is not 
+a function
+
+    [0m [90m  9 
+|[39m
+     [90m 10 |[39m   
+beforeAll([36masync[3
+9m () [33m=>[39m {
+    [31m[1m>[22m[39
+m[90m 11 |[39m     
+server [33m=[39m 
+[36mawait[39m startTe
+stServer([35m3003[39m
+)[33m;[39m
+     [90m    |[39m   
+                 
+[31m[1m^[22m[39m
+     [90m 12 |[39m   
+}[33m,[39m [35m30000
+[39m)[33m;[39m
+     [90m 13 |[39m
+     [90m 14 |[39m   
+afterAll([36masync[39
+m () [33m=>[39m {[0m
+
+      at 
+Object.<anonymous> (tes
+ts/integration/api/heal
+th-api.integration.test
+.js:11:20)
+
+  ● Health Check API 
+Integration › GET 
+/api/stats › should 
+include Redis 
+statistics
+
+    ENOENT: no such 
+file or directory, 
+rename 'C:\Users\izaak\
+.cache\mongodb-binaries
+\mongodb-windows-x86_64
+-8.2.1.zip.downloading'
+ -> 'C:\Users\izaak\.ca
+che\mongodb-binaries\mo
+ngodb-windows-x86_64-8.
+2.1.zip'
+
+      at WriteStream.<a
+nonymous> (node_modules
+/mongodb-memory-server-
+core/src/util/MongoBina
+ryDownload.ts:603:11)
+
+  ● Health Check API 
+Integration › GET 
+/api/stats › should 
+include memory 
+statistics
+
+    thrown: "Exceeded 
+timeout of 30000 ms 
+for a hook.
+    Add a timeout 
+value to this test to 
+increase the timeout, 
+if this is a 
+long-running test. See 
+https://jestjs.io/docs/
+api#testname-fn-timeout
+."
+
+    [0m [90m 21 
+|[39m
+     [90m 22 |[39m 
+[90m// Setup antes de 
+todos os testes[39m
+    [31m[1m>[22m[39
+m[90m 23 |[39m before
+All([36masync[39m () 
+[33m=>[39m {
+     [90m    |[39m 
+[31m[1m^[22m[39m
+     [90m 24 |[39m   
+[90m// Iniciar 
+MongoDB em memória 
+para testes[39m
+     [90m 25 |[39m   
+mongoServer 
+[33m=[39m 
+[36mawait[39m [33mMo
+ngoMemoryServer[39m[3
+3m.[39mcreate()[33m;
+[39m
+     [90m 26 |[39m   
+[36mconst[39m 
+mongoUri [33m=[39m mo
+ngoServer[33m.[39mget
+Uri()[33m;[39m[0m
+
+      at 
+Object.<anonymous> (tes
+ts/integration/config/t
+est-setup.js:23:1)
+
+  ● Health Check API 
+Integration › GET 
+/api/stats › should 
+include memory 
+statistics
+
+    ENOENT: no such 
+file or directory, 
+rename 'C:\Users\izaak\
+.cache\mongodb-binaries
+\mongodb-windows-x86_64
+-8.2.1.zip.downloading'
+ -> 'C:\Users\izaak\.ca
+che\mongodb-binaries\mo
+ngodb-windows-x86_64-8.
+2.1.zip'
+
+      at WriteStream.<a
+nonymous> (node_modules
+/mongodb-memory-server-
+core/src/util/MongoBina
+ryDownload.ts:603:11)
+
+  ● Health Check API 
+Integration › GET 
+/api/stats › should 
+include memory 
+statistics
+
+    TypeError: 
+startTestServer is not 
+a function
+
+    [0m [90m  9 
+|[39m
+     [90m 10 |[39m   
+beforeAll([36masync[3
+9m () [33m=>[39m {
+    [31m[1m>[22m[39
+m[90m 11 |[39m     
+server [33m=[39m 
+[36mawait[39m startTe
+stServer([35m3003[39m
+)[33m;[39m
+     [90m    |[39m   
+                 
+[31m[1m^[22m[39m
+     [90m 12 |[39m   
+}[33m,[39m [35m30000
+[39m)[33m;[39m
+     [90m 13 |[39m
+     [90m 14 |[39m   
+afterAll([36masync[39
+m () [33m=>[39m {[0m
+
+      at 
+Object.<anonymous> (tes
+ts/integration/api/heal
+th-api.integration.test
+.js:11:20)
+
+  ● Health Check API 
+Integration › GET 
+/api/stats › should 
+include memory 
+statistics
+
+    ENOENT: no such 
+file or directory, 
+rename 'C:\Users\izaak\
+.cache\mongodb-binaries
+\mongodb-windows-x86_64
+-8.2.1.zip.downloading'
+ -> 'C:\Users\izaak\.ca
+che\mongodb-binaries\mo
+ngodb-windows-x86_64-8.
+2.1.zip'
+
+      at WriteStream.<a
+nonymous> (node_modules
+/mongodb-memory-server-
+core/src/util/MongoBina
+ryDownload.ts:603:11)
+
+  ● Health Check API 
+Integration › GET 
+/api/get_redis_stats › 
+should return detailed 
+Redis statistics
+
+    thrown: "Exceeded 
+timeout of 30000 ms 
+for a hook.
+    Add a timeout 
+value to this test to 
+increase the timeout, 
+if this is a 
+long-running test. See 
+https://jestjs.io/docs/
+api#testname-fn-timeout
+."
+
+    [0m [90m 21 
+|[39m
+     [90m 22 |[39m 
+[90m// Setup antes de 
+todos os testes[39m
+    [31m[1m>[22m[39
+m[90m 23 |[39m before
+All([36masync[39m () 
+[33m=>[39m {
+     [90m    |[39m 
+[31m[1m^[22m[39m
+     [90m 24 |[39m   
+[90m// Iniciar 
+MongoDB em memória 
+para testes[39m
+     [90m 25 |[39m   
+mongoServer 
+[33m=[39m 
+[36mawait[39m [33mMo
+ngoMemoryServer[39m[3
+3m.[39mcreate()[33m;
+[39m
+     [90m 26 |[39m   
+[36mconst[39m 
+mongoUri [33m=[39m mo
+ngoServer[33m.[39mget
+Uri()[33m;[39m[0m
+
+      at 
+Object.<anonymous> (tes
+ts/integration/config/t
+est-setup.js:23:1)
+
+  ● Health Check API 
+Integration › GET 
+/api/get_redis_stats › 
+should return detailed 
+Redis statistics
+
+    ENOENT: no such 
+file or directory, 
+rename 'C:\Users\izaak\
+.cache\mongodb-binaries
+\mongodb-windows-x86_64
+-8.2.1.zip.downloading'
+ -> 'C:\Users\izaak\.ca
+che\mongodb-binaries\mo
+ngodb-windows-x86_64-8.
+2.1.zip'
+
+      at WriteStream.<a
+nonymous> (node_modules
+/mongodb-memory-server-
+core/src/util/MongoBina
+ryDownload.ts:603:11)
+
+  ● Health Check API 
+Integration › GET 
+/api/get_redis_stats › 
+should return detailed 
+Redis statistics
+
+    TypeError: 
+startTestServer is not 
+a function
+
+    [0m [90m  9 
+|[39m
+     [90m 10 |[39m   
+beforeAll([36masync[3
+9m () [33m=>[39m {
+    [31m[1m>[22m[39
+m[90m 11 |[39m     
+server [33m=[39m 
+[36mawait[39m startTe
+stServer([35m3003[39m
+)[33m;[39m
+     [90m    |[39m   
+                 
+[31m[1m^[22m[39m
+     [90m 12 |[39m   
+}[33m,[39m [35m30000
+[39m)[33m;[39m
+     [90m 13 |[39m
+     [90m 14 |[39m   
+afterAll([36masync[39
+m () [33m=>[39m {[0m
+
+      at 
+Object.<anonymous> (tes
+ts/integration/api/heal
+th-api.integration.test
+.js:11:20)
+
+  ● Health Check API 
+Integration › GET 
+/api/get_redis_stats › 
+should return detailed 
+Redis statistics
+
+    ENOENT: no such 
+file or directory, 
+rename 'C:\Users\izaak\
+.cache\mongodb-binaries
+\mongodb-windows-x86_64
+-8.2.1.zip.downloading'
+ -> 'C:\Users\izaak\.ca
+che\mongodb-binaries\mo
+ngodb-windows-x86_64-8.
+2.1.zip'
+
+      at WriteStream.<a
+nonymous> (node_modules
+/mongodb-memory-server-
+core/src/util/MongoBina
+ryDownload.ts:603:11)
+
+  ● Health Check API 
+Integration › GET 
+/api/get_redis_stats › 
+should handle Redis 
+connection errors 
+gracefully
+
+    thrown: "Exceeded 
+timeout of 30000 ms 
+for a hook.
+    Add a timeout 
+value to this test to 
+increase the timeout, 
+if this is a 
+long-running test. See 
+https://jestjs.io/docs/
+api#testname-fn-timeout
+."
+
+    [0m [90m 21 
+|[39m
+     [90m 22 |[39m 
+[90m// Setup antes de 
+todos os testes[39m
+    [31m[1m>[22m[39
+m[90m 23 |[39m before
+All([36masync[39m () 
+[33m=>[39m {
+     [90m    |[39m 
+[31m[1m^[22m[39m
+     [90m 24 |[39m   
+[90m// Iniciar 
+MongoDB em memória 
+para testes[39m
+     [90m 25 |[39m   
+mongoServer 
+[33m=[39m 
+[36mawait[39m [33mMo
+ngoMemoryServer[39m[3
+3m.[39mcreate()[33m;
+[39m
+     [90m 26 |[39m   
+[36mconst[39m 
+mongoUri [33m=[39m mo
+ngoServer[33m.[39mget
+Uri()[33m;[39m[0m
+
+      at 
+Object.<anonymous> (tes
+ts/integration/config/t
+est-setup.js:23:1)
+
+  ● Health Check API 
+Integration › GET 
+/api/get_redis_stats › 
+should handle Redis 
+connection errors 
+gracefully
+
+    ENOENT: no such 
+file or directory, 
+rename 'C:\Users\izaak\
+.cache\mongodb-binaries
+\mongodb-windows-x86_64
+-8.2.1.zip.downloading'
+ -> 'C:\Users\izaak\.ca
+che\mongodb-binaries\mo
+ngodb-windows-x86_64-8.
+2.1.zip'
+
+      at WriteStream.<a
+nonymous> (node_modules
+/mongodb-memory-server-
+core/src/util/MongoBina
+ryDownload.ts:603:11)
+
+  ● Health Check API 
+Integration › GET 
+/api/get_redis_stats › 
+should handle Redis 
+connection errors 
+gracefully
+
+    TypeError: 
+startTestServer is not 
+a function
+
+    [0m [90m  9 
+|[39m
+     [90m 10 |[39m   
+beforeAll([36masync[3
+9m () [33m=>[39m {
+    [31m[1m>[22m[39
+m[90m 11 |[39m     
+server [33m=[39m 
+[36mawait[39m startTe
+stServer([35m3003[39m
+)[33m;[39m
+     [90m    |[39m   
+                 
+[31m[1m^[22m[39m
+     [90m 12 |[39m   
+}[33m,[39m [35m30000
+[39m)[33m;[39m
+     [90m 13 |[39m
+     [90m 14 |[39m   
+afterAll([36masync[39
+m () [33m=>[39m {[0m
+
+      at 
+Object.<anonymous> (tes
+ts/integration/api/heal
+th-api.integration.test
+.js:11:20)
+
+  ● Health Check API 
+Integration › GET 
+/api/get_redis_stats › 
+should handle Redis 
+connection errors 
+gracefully
+
+    ENOENT: no such 
+file or directory, 
+rename 'C:\Users\izaak\
+.cache\mongodb-binaries
+\mongodb-windows-x86_64
+-8.2.1.zip.downloading'
+ -> 'C:\Users\izaak\.ca
+che\mongodb-binaries\mo
+ngodb-windows-x86_64-8.
+2.1.zip'
+
+      at WriteStream.<a
+nonymous> (node_modules
+/mongodb-memory-server-
+core/src/util/MongoBina
+ryDownload.ts:603:11)
+
+
+  ● Test suite failed 
+to run
+
+    ENOENT: no such 
+file or directory, 
+rename 'C:\Users\izaak\
+.cache\mongodb-binaries
+\mongodb-windows-x86_64
+-8.2.1.zip.downloading'
+ -> 'C:\Users\izaak\.ca
+che\mongodb-binaries\mo
+ngodb-windows-x86_64-8.
+2.1.zip'
+
+      at WriteStream.<a
+nonymous> (node_modules
+/mongodb-memory-server-
+core/src/util/MongoBina
+ryDownload.ts:603:11)
+
+  ● Test suite failed 
+to run
+
+    ENOENT: no such 
+file or directory, 
+rename 'C:\Users\izaak\
+.cache\mongodb-binaries
+\mongodb-windows-x86_64
+-8.2.1.zip.downloading'
+ -> 'C:\Users\izaak\.ca
+che\mongodb-binaries\mo
+ngodb-windows-x86_64-8.
+2.1.zip'
+
+      at WriteStream.<a
+nonymous> (node_modules
+/mongodb-memory-server-
+core/src/util/MongoBina
+ryDownload.ts:603:11)
+
+----------|---------|----------|---------|---------|-------------------
+File      | % Stmts | % Branch | % Funcs | % Lines | Uncovered Line #s 
+----------|---------|----------|---------|---------|-------------------
+All files |       0 |        0 |       0 |       0 |                   
+----------|---------|----------|---------|---------|-------------------
+Test Suites: 2 failed, 
+2 total
+Tests:       30 
+failed, 30 total
+Snapshots:   0 total
+Time:        30.825 s, 
+estimated 38 s
+Ran all test suites.
+Force exiting Jest: 
+Have you considered 
+using 
+`--detectOpenHandles` 
+to detect async 
+operations that kept 
+running after all 
+tests finished?

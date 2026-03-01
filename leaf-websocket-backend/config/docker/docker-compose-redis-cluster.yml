@@ -1,0 +1,217 @@
+# Docker Compose para Redis Cluster Otimizado - VPS Vultr 8GB
+# Suporte para 500k+ usuários simultâneos
+
+version: '3.8'
+
+services:
+  # Redis Master - Escritas e leituras primárias
+  redis-master:
+    image: redis:7-alpine
+    container_name: leaf-redis-master
+    command: |
+      redis-server 
+      --appendonly yes 
+      --maxmemory 2gb 
+      --maxmemory-policy allkeys-lru 
+      --save 900 1 
+      --save 300 10 
+      --save 60 10000
+      --tcp-keepalive 300
+      --timeout 0
+      --databases 16
+      --rdbcompression yes
+      --rdbchecksum yes
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-master-data:/data
+      - ./redis-config:/usr/local/etc/redis
+    networks:
+      - leaf-network
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 2.5G
+          cpus: '1.0'
+        reservations:
+          memory: 2G
+          cpus: '0.5'
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 30s
+
+  # Redis Replica 1 - Leituras distribuídas
+  redis-replica-1:
+    image: redis:7-alpine
+    container_name: leaf-redis-replica-1
+    command: |
+      redis-server 
+      --replicaof redis-master 6379 
+      --maxmemory 1gb 
+      --maxmemory-policy allkeys-lru
+      --replica-read-only yes
+      --replica-serve-stale-data yes
+      --replica-priority 90
+    ports:
+      - "6380:6379"
+    volumes:
+      - redis-replica-1-data:/data
+    networks:
+      - leaf-network
+    restart: unless-stopped
+    depends_on:
+      redis-master:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          memory: 1.2G
+          cpus: '0.5'
+        reservations:
+          memory: 1G
+          cpus: '0.25'
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 15s
+      timeout: 3s
+      retries: 3
+
+  # Redis Replica 2 - Leituras distribuídas + Backup
+  redis-replica-2:
+    image: redis:7-alpine
+    container_name: leaf-redis-replica-2
+    command: |
+      redis-server 
+      --replicaof redis-master 6379 
+      --maxmemory 1gb 
+      --maxmemory-policy allkeys-lru
+      --replica-read-only yes
+      --replica-serve-stale-data yes
+      --replica-priority 100
+    ports:
+      - "6381:6379"
+    volumes:
+      - redis-replica-2-data:/data
+    networks:
+      - leaf-network
+    restart: unless-stopped
+    depends_on:
+      redis-master:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          memory: 1.2G
+          cpus: '0.5'
+        reservations:
+          memory: 1G
+          cpus: '0.25'
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 15s
+      timeout: 3s
+      retries: 3
+
+  # Redis Sentinel 1 - Monitoramento e Failover
+  redis-sentinel-1:
+    image: redis:7-alpine
+    container_name: leaf-redis-sentinel-1
+    command: |
+      sh -c "
+      echo 'port 26379' > /etc/redis-sentinel.conf &&
+      echo 'sentinel monitor leaf-master redis-master 6379 2' >> /etc/redis-sentinel.conf &&
+      echo 'sentinel down-after-milliseconds leaf-master 5000' >> /etc/redis-sentinel.conf &&
+      echo 'sentinel failover-timeout leaf-master 10000' >> /etc/redis-sentinel.conf &&
+      echo 'sentinel parallel-syncs leaf-master 1' >> /etc/redis-sentinel.conf &&
+      redis-sentinel /etc/redis-sentinel.conf
+      "
+    ports:
+      - "26379:26379"
+    networks:
+      - leaf-network
+    restart: unless-stopped
+    depends_on:
+      - redis-master
+    deploy:
+      resources:
+        limits:
+          memory: 100M
+          cpus: '0.1'
+
+  # Redis Sentinel 2
+  redis-sentinel-2:
+    image: redis:7-alpine
+    container_name: leaf-redis-sentinel-2
+    command: |
+      sh -c "
+      echo 'port 26379' > /etc/redis-sentinel.conf &&
+      echo 'sentinel monitor leaf-master redis-master 6379 2' >> /etc/redis-sentinel.conf &&
+      echo 'sentinel down-after-milliseconds leaf-master 5000' >> /etc/redis-sentinel.conf &&
+      echo 'sentinel failover-timeout leaf-master 10000' >> /etc/redis-sentinel.conf &&
+      echo 'sentinel parallel-syncs leaf-master 1' >> /etc/redis-sentinel.conf &&
+      redis-sentinel /etc/redis-sentinel.conf
+      "
+    ports:
+      - "26380:26379"
+    networks:
+      - leaf-network
+    restart: unless-stopped
+    depends_on:
+      - redis-master
+    deploy:
+      resources:
+        limits:
+          memory: 100M
+          cpus: '0.1'
+
+  # Redis Sentinel 3
+  redis-sentinel-3:
+    image: redis:7-alpine
+    container_name: leaf-redis-sentinel-3
+    command: |
+      sh -c "
+      echo 'port 26379' > /etc/redis-sentinel.conf &&
+      echo 'sentinel monitor leaf-master redis-master 6379 2' >> /etc/redis-sentinel.conf &&
+      echo 'sentinel down-after-milliseconds leaf-master 5000' >> /etc/redis-sentinel.conf &&
+      echo 'sentinel failover-timeout leaf-master 10000' >> /etc/redis-sentinel.conf &&
+      echo 'sentinel parallel-syncs leaf-master 1' >> /etc/redis-sentinel.conf &&
+      redis-sentinel /etc/redis-sentinel.conf
+      "
+    ports:
+      - "26381:26379"
+    networks:
+      - leaf-network
+    restart: unless-stopped
+    depends_on:
+      - redis-master
+    deploy:
+      resources:
+        limits:
+          memory: 100M
+          cpus: '0.1'
+
+volumes:
+  redis-master-data:
+    driver: local
+  redis-replica-1-data:
+    driver: local
+  redis-replica-2-data:
+    driver: local
+
+networks:
+  leaf-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
+
+
+
+
+
+
+

@@ -1,4 +1,5 @@
-import React, { useState, useEffect } from 'react';
+import Logger from '../../utils/Logger';
+import React, { useState, useEffect, memo, useCallback, useMemo } from 'react';
 import {
     View,
     Text,
@@ -12,10 +13,22 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useDispatch } from 'react-redux';
+// Função de tradução temporária para evitar erro de provider
+const t = (key) => {
+    const translations = {
+        'messages.attention': 'Atenção',
+        'rating.fillRequiredFields': 'Por favor, preencha todos os campos obrigatórios',
+        'messages.success': 'Sucesso',
+        'rating.submittedSuccessfully': 'Avaliação enviada com sucesso!',
+        'messages.error': 'Erro',
+        'rating.submitError': 'Erro ao enviar avaliação. Tente novamente.'
+    };
+    return translations[key] || key;
+};
 
 const { width, height } = Dimensions.get('window');
 
-export default function RatingModal({ 
+const RatingModal = memo(function RatingModal({ 
     visible, 
     onClose, 
     userType, // 'passenger' ou 'driver'
@@ -30,8 +43,8 @@ export default function RatingModal({
     const [comment, setComment] = useState('');
     const [suggestion, setSuggestion] = useState('');
     
-    // Opções baseadas no tipo de usuário e avaliação
-    const getRatingOptions = () => {
+    // Opções baseadas no tipo de usuário e avaliação (memoizado)
+    const getRatingOptions = useMemo(() => {
         if (rating >= 5) {
             return userType === 'passenger' 
                 ? ['Veículo limpo', 'Ótimo trajeto', 'Ambiente agradável', 'Direção segura']
@@ -42,14 +55,14 @@ export default function RatingModal({
                 : ['Embarque impreciso', 'Falta de cordialidade', 'Instruções confusas', 'Falta de respeito'];
         }
         return [];
-    };
+    }, [rating, userType]);
     
-    // Título baseado na avaliação
-    const getRatingTitle = () => {
+    // Título baseado na avaliação (memoizado)
+    const getRatingTitle = useMemo(() => {
         if (rating >= 5) return 'O que você mais gostou?';
         if (rating >= 3) return 'O que poderia ser melhor?';
         return 'O que poderia ser melhor?';
-    };
+    }, [rating]);
     
     // Verificar se campos obrigatórios estão preenchidos
     const isFormValid = () => {
@@ -66,16 +79,16 @@ export default function RatingModal({
         setSuggestion('');
     };
     
-    // Fechar modal
-    const handleClose = () => {
+    // Fechar modal (memoizado)
+    const handleClose = useCallback(() => {
         resetForm();
         onClose();
-    };
+    }, [onClose]);
     
-    // Submeter avaliação
-    const handleSubmit = async () => {
+    // Submeter avaliação (memoizado)
+    const handleSubmit = useCallback(async () => {
         if (!isFormValid()) {
-            Alert.alert('Atenção', 'Por favor, preencha todos os campos obrigatórios.');
+            Alert.alert(t('messages.attention'), t('rating.fillRequiredFields'));
             return;
         }
         
@@ -100,25 +113,25 @@ export default function RatingModal({
             resetForm();
             onClose();
             
-            Alert.alert('Sucesso', 'Avaliação enviada com sucesso!');
+            Alert.alert(t('messages.success'), t('rating.submittedSuccessfully'));
             
         } catch (error) {
-            console.error('❌ Erro ao enviar avaliação:', error);
-            Alert.alert('Erro', 'Não foi possível enviar a avaliação. Tente novamente.');
+            Logger.error('❌ Erro ao enviar avaliação:', error);
+            Alert.alert(t('messages.error'), t('rating.submitError'));
         }
-    };
+    }, [rating, selectedOptions, comment, suggestion, userType, tripData, onSubmit, onClose]);
     
-    // Toggle opção selecionada
-    const toggleOption = (option) => {
+    // Toggle opção selecionada (memoizado)
+    const toggleOption = useCallback((option) => {
         setSelectedOptions(prev => 
             prev.includes(option) 
                 ? prev.filter(item => item !== option)
                 : [...prev, option]
         );
-    };
+    }, []);
     
-    // Renderizar estrelas
-    const renderStars = () => {
+    // Renderizar estrelas (memoizado)
+    const renderStars = useCallback(() => {
         const stars = [];
         for (let i = 1; i <= 5; i++) {
             stars.push(
@@ -137,18 +150,17 @@ export default function RatingModal({
             );
         }
         return stars;
-    };
+    }, [rating]);
     
-    // Renderizar opções de avaliação
-    const renderRatingOptions = () => {
-        const options = getRatingOptions();
-        if (options.length === 0) return null;
+    // Renderizar opções de avaliação (memoizado)
+    const renderRatingOptions = useCallback(() => {
+        if (getRatingOptions.length === 0) return null;
         
         return (
             <View style={styles.optionsContainer}>
-                <Text style={styles.optionsTitle}>{getRatingTitle()}</Text>
+                <Text style={styles.optionsTitle}>{getRatingTitle}</Text>
                 <View style={styles.optionsGrid}>
-                    {options.map((option, index) => (
+                    {getRatingOptions.map((option, index) => (
                         <TouchableOpacity
                             key={index}
                             style={[
@@ -169,10 +181,10 @@ export default function RatingModal({
                 </View>
             </View>
         );
-    };
+    }, [getRatingOptions, getRatingTitle, selectedOptions, toggleOption]);
     
-    // Renderizar campos de texto
-    const renderTextFields = () => {
+    // Renderizar campos de texto (memoizado)
+    const renderTextFields = useCallback(() => {
         return (
             <View style={styles.textFieldsContainer}>
                 {/* Campo de elogio para 5 estrelas */}
@@ -215,7 +227,7 @@ export default function RatingModal({
                 )}
             </View>
         );
-    };
+    }, [rating, comment, suggestion]);
     
     return (
         <Modal
@@ -284,7 +296,7 @@ export default function RatingModal({
             </View>
         </Modal>
     );
-}
+});
 
 const styles = StyleSheet.create({
     modalOverlay: {
@@ -431,3 +443,5 @@ const styles = StyleSheet.create({
         fontWeight: 'bold',
     },
 });
+
+export default RatingModal;

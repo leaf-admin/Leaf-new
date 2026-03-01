@@ -1,3 +1,4 @@
+import Logger from '../utils/Logger';
 import React, { useState, useEffect } from 'react';
 import {
   View,
@@ -16,10 +17,13 @@ import {
 import { Icon } from 'react-native-elements';
 import { useSelector } from 'react-redux';
 import { api } from '../common-local';
+import { useTranslation } from '../components/i18n/LanguageProvider';
+
 
 const { width } = Dimensions.get('window');
 
 const ReferralScreen = ({ navigation, route }) => {
+  const { t } = useTranslation();
   const [referralData, setReferralData] = useState({
     used_invites: 0,
     max_invites: 3,
@@ -55,8 +59,8 @@ const ReferralScreen = ({ navigation, route }) => {
       setInvites(invitesResponse.data.invites || []);
       
     } catch (error) {
-      console.error('Erro ao carregar dados de convites:', error);
-      Alert.alert('Erro', 'Não foi possível carregar os dados de convites');
+      Logger.error('Erro ao carregar dados de convites:', error);
+      Alert.alert(t('messages.error'), t('referral.loadError'));
     } finally {
       setIsLoading(false);
     }
@@ -64,12 +68,12 @@ const ReferralScreen = ({ navigation, route }) => {
 
   const handleCreateInvite = async () => {
     if (!inviteeEmail && !inviteePhone) {
-      Alert.alert('Erro', 'Informe o email ou telefone do convidado');
+      Alert.alert(t('messages.error'), t('referral.enterEmailOrPhone'));
       return;
     }
 
     if (referralData.used_invites >= referralData.max_invites) {
-      Alert.alert('Limite Atingido', 'Você já usou todos os seus convites disponíveis');
+      Alert.alert(t('referral.limitReached'), t('referral.limitReachedMessage'));
       return;
     }
 
@@ -98,17 +102,17 @@ const ReferralScreen = ({ navigation, route }) => {
       setInviteePhone('');
       
       Alert.alert(
-        'Convite Criado!',
-        `Convite criado com sucesso!\nCódigo: ${newInvite.invite_code}`,
+        t('referral.inviteCreated'),
+        t('referral.inviteCreatedMessage', { code: newInvite.invite_code }),
         [
-          { text: 'Compartilhar', onPress: () => shareInvite(newInvite) },
-          { text: 'OK' }
+          { text: t('referral.share'), onPress: () => shareInvite(newInvite) },
+          { text: t('messages.confirm') }
         ]
       );
       
     } catch (error) {
-      console.error('Erro ao criar convite:', error);
-      Alert.alert('Erro', 'Não foi possível criar o convite');
+      Logger.error('Erro ao criar convite:', error);
+      Alert.alert(t('messages.error'), t('referral.createError'));
     } finally {
       setIsCreatingInvite(false);
     }
@@ -130,13 +134,13 @@ const ReferralScreen = ({ navigation, route }) => {
         title: 'Convite Leaf App'
       });
     } catch (error) {
-      console.error('Erro ao compartilhar convite:', error);
+      Logger.error('Erro ao compartilhar convite:', error);
     }
   };
 
   const handleAcceptInvite = async () => {
     if (!inviteCode.trim()) {
-      Alert.alert('Erro', 'Informe o código do convite');
+      Alert.alert(t('messages.error'), t('referral.enterCode'));
       return;
     }
 
@@ -150,15 +154,14 @@ const ReferralScreen = ({ navigation, route }) => {
       });
       
       Alert.alert(
-        'Convite Aceito!',
-        `Parabéns! Você ganhou ${response.data.free_months} mês(es) grátis!\n\n` +
-        `Seu convidador também ganhou ${response.data.free_months} mês(es) grátis.`,
-        [{ text: 'OK', onPress: () => navigation.goBack() }]
+        t('referral.inviteAccepted'),
+        t('referral.inviteAcceptedMessage', { months: response.data.free_months }),
+        [{ text: t('messages.confirm'), onPress: () => navigation.goBack() }]
       );
       
     } catch (error) {
-      console.error('Erro ao aceitar convite:', error);
-      Alert.alert('Erro', 'Não foi possível aceitar o convite. Verifique se o código está correto.');
+      Logger.error('Erro ao aceitar convite:', error);
+      Alert.alert(t('messages.error'), t('referral.acceptError'));
     } finally {
       setIsLoading(false);
     }

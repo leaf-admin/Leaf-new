@@ -1,21 +1,24 @@
 import React, { useState } from 'react';
-import { View, Text, TextInput, TouchableOpacity, StyleSheet, Alert, ActivityIndicator } from 'react-native';
-import { fonts } from '../../../common-local/font';
-import auth from '@react-native-firebase/auth';
+import { View, Text, TextInput, TouchableOpacity, Alert, StyleSheet } from 'react-native';
+import { auth } from '../../../firebase';
+import { isReviewAccount, getReviewAccountInfo } from '../../../config/reviewAccounts';
+import { saveStepData } from '../../../utils/secureOnboardingStorage';
+import Logger from '../../../utils/Logger';
+import UserAuthService from '../../../services/UserAuthService';
+import { Constants } from 'expo-constants';
 
-// Cores e fontes baseadas no seu design
 const colors = {
-    black: '#000000',
-    grey80: '#333333', // Cinza 80% aproximado
-    greyPlaceholder: '#BDBDBD',
-    leafGreen: '#1A330E',
+    primary: '#003002',
     white: '#FFFFFF',
     lightGrey: '#F5F5F5'
 };
 
-const PhoneInputStep = ({ onSwitchToRegister, onVerificationSent }) => {
+const PhoneInputStep = ({ onSwitchToRegister, onVerificationSent, onUserExists }) => {
     const [phoneNumber, setPhoneNumber] = useState('');
     const [loading, setLoading] = useState(false);
+    const [checking, setChecking] = useState(false);
+
+    const IS_REVIEW_ENV = Constants.expoConfig?.extra?.isReview === true;
 
     const handleContinue = async () => {
         if (phoneNumber.length < 10) {
@@ -24,64 +27,156 @@ const PhoneInputStep = ({ onSwitchToRegister, onVerificationSent }) => {
         }
 
         setLoading(true);
+        setChecking(true);
+
         try {
             const fullPhoneNumber = `+55${phoneNumber}`;
-            const confirmation = await auth().signInWithPhoneNumber(fullPhoneNumber, true);
-            
-            // Sucesso! Notifica o componente pai para avançar.
-            if (onVerificationSent) {
-                onVerificationSent(confirmation, fullPhoneNumber); // Passar o telefone também
+
+            // ✅ BYPASS PARA CONTAS DE REVIEW
+            // IMPORTANTE: Bypass só funciona se IS_REVIEW_ENV for true
+            if (isReviewAccount(phoneNumber)) {
+                // ✅ Verificar se bypass está habilitado
+                if (!IS_REVIEW_ENV && !__DEV__) {
+                    Logger.warn('🚫 Bypass de OTP bloqueado: ambiente de produção detectado');
+                    // Continuar com fluxo normal de OTP
+                } else {
+                    const reviewAccount = getReviewAccountInfo(phoneNumber);
+                    Logger.log('🔐 REVIEW ACCESS: Conta de review detectada - pulando OTP', {
+                        phoneNumber,
+                        userType: reviewAccount?.userType,
+                        isReviewEnv: IS_REVIEW_ENV,
+                        isDev: __DEV__
+                    });
+
+                    const reviewUser = {
+                        uid: `review-${reviewAccount.userType}-${Date.now()}`,
+                        phoneNumber: fullPhoneNumber,
+                        isReviewAccount: true,
+                        userType: reviewAccount.userType,
+                        authMethod: 'review_access'
+                    };
+
+                    await saveStepData('phone_validation', {
+                        phoneNumber: fullPhoneNumber,
+                        isReviewAccount: true,
+                        userType: reviewAccount.userType,
+                        authMethod: 'review_access'
+                    });
+
+                    if (onVerificationSent) {
+                        const reviewConfirmation = {
+                            verificationId: 'review-access-' + Date.now(),
+                            isReviewAccount: true,
+                            reviewUser: reviewUser,
+                            confirm: async (otpCode) => {
+                                // Aceitar OTP fixo 000000 para contas de review
+                                if (otpCode === '000000') {
+                                    Logger.log('✅ OTP fixo 000000 aceito para conta de review.');
+                                    return { user: reviewUser };
+                                }
+                                throw new Error('Código OTP inválido para conta de review.');
+                            }
+                        };
+                        // ✅ Passar skipOTP=true apenas se bypass estiver habilitado
+                        onVerificationSent(reviewConfirmation, fullPhoneNumber, false, IS_REVIEW_ENV || __DEV__);
+                    }
+
+                    setLoading(false);
+                    setChecking(false);
+                    return;
+                }
+            }
+
+            // 📱 ENVIAR OTP PARA CADASTRO NORMAL
+            Logger.log('📱 Enviando OTP via Custom API...');
+
+            // Usando API Local em vez de Firebase Auth para envio do OTP
+            const { api } = require('../../../common-local/api');
+            const response = await api.post('/custom-otp/request-otp', {
+                phone: fullPhoneNumber
+            });
+
+            if (response.data && response.data.success) {
+                const confirmation = {
+                    verificationId: response.data.verificationId,
+                    isCustomOtp: true
+                };
+
+                // Sucesso! Notifica o componente pai para avançar.
+                if (onVerificationSent) {
+                    onVerificationSent(confirmation, fullPhoneNumber, false);
+                }
+            } else {
+                throw new Error(response.data?.error || 'Erro ao enviar OTP');
             }
         } catch (error) {
-            Alert.alert('Erro de Autenticação', 'Não foi possível verificar o número. Verifique se ele está correto e tente novamente.');
-            console.error("Erro no signInWithPhoneNumber:", error);
+            Logger.error("Erro no handleContinue:", error);
+
+            // ✅ Mensagens de erro específicas e humanas
+            let errorTitle = 'Erro de Autenticação';
+            let errorMessage = 'Não foi possível verificar o número. Verifique se ele está correto e tente novamente.';
+
+            if (error.message) {
+                if (error.message.includes('Muitas tentativas') || error.message.includes('rate limit')) {
+                    errorTitle = 'Limite de Tentativas';
+                    errorMessage = 'Você excedeu o limite de tentativas. Por favor, aguarde alguns minutos antes de tentar novamente.';
+                } else if (error.message.includes('invalid') || error.message.includes('inválido')) {
+                    errorMessage = 'Número de telefone inválido. Verifique se o número está correto e tente novamente.';
+                } else if (error.message.includes('network') || error.message.includes('rede') || error.message.includes('connection')) {
+                    errorMessage = 'Erro de conexão. Verifique sua internet e tente novamente.';
+                } else if (error.message.includes('quota') || error.message.includes('cota')) {
+                    errorMessage = 'Limite de SMS atingido. Tente novamente mais tarde.';
+                } else if (error.message.includes('timeout')) {
+                    errorMessage = 'Tempo limite excedido. Verifique sua conexão e tente novamente.';
+                } else {
+                    errorMessage = `Erro: ${error.message}`;
+                }
+            }
+
+            Alert.alert(errorTitle, errorMessage);
         } finally {
             setLoading(false);
-        }
-    };
-
-    const handleSwitchToRegister = () => {
-        // Salvar o telefone antes de mudar para o fluxo de registro
-        if (phoneNumber.length >= 10) {
-            const fullPhoneNumber = `+55${phoneNumber}`;
-            onSwitchToRegister(fullPhoneNumber); // Passar o telefone
-        } else {
-            onSwitchToRegister(); // Sem telefone se não foi preenchido
+            setChecking(false);
         }
     };
 
     return (
         <View style={styles.container}>
-            <Text style={styles.title}>Insira seu telefone para começar</Text>
-            <View style={styles.subtitleContainer}>
-                <Text style={styles.subtitleText}>ou </Text>
-                <TouchableOpacity onPress={handleSwitchToRegister}>
-                    <Text style={styles.link}>Cadastre-se</Text>
-                </TouchableOpacity>
-            </View>
+            <Text style={styles.title}>Bem-vindo ao Leaf</Text>
+            <Text style={styles.subtitle}>Digite seu número de telefone para continuar</Text>
 
             <View style={styles.inputContainer}>
-                 <TouchableOpacity style={styles.countrySelector}>
-                    <Text style={styles.flag}>🇧🇷</Text>
+                <TouchableOpacity style={styles.countrySelector}>
                     <Text style={styles.countryCode}>+55</Text>
                 </TouchableOpacity>
+
                 <TextInput
                     style={styles.input}
-                    placeholder="(21) 99999-9999"
-                    placeholderTextColor={colors.greyPlaceholder}
+                    placeholder="Número de telefone"
                     keyboardType="phone-pad"
                     value={phoneNumber}
                     onChangeText={setPhoneNumber}
                     maxLength={11}
+                    editable={!loading && !checking}
                 />
             </View>
 
-            <TouchableOpacity style={styles.button} onPress={handleContinue} disabled={loading}>
-                {loading ? (
-                    <ActivityIndicator color={colors.white} />
-                ) : (
-                    <Text style={styles.buttonText}>Continuar</Text>
-                )}
+            <TouchableOpacity
+                style={[styles.continueButton, (loading || checking) && styles.continueButtonDisabled]}
+                onPress={handleContinue}
+                disabled={loading || checking}
+            >
+                <Text style={[styles.continueButtonText, (loading || checking) && styles.continueButtonTextDisabled]}>
+                    {loading ? 'Enviando...' : checking ? 'Verificando...' : 'Continuar'}
+                </Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+                style={styles.registerButton}
+                onPress={onSwitchToRegister}
+                disabled={loading || checking}
+            >
+                <Text style={styles.registerText}>Não tem conta? Cadastre-se</Text>
             </TouchableOpacity>
         </View>
     );
@@ -89,70 +184,74 @@ const PhoneInputStep = ({ onSwitchToRegister, onVerificationSent }) => {
 
 const styles = StyleSheet.create({
     container: {
-        width: '100%',
+        flex: 1,
+        padding: 20,
+        justifyContent: 'center',
+        backgroundColor: colors.white,
     },
     title: {
         fontSize: 24,
-        color: colors.black,
-        fontFamily: fonts.Bold,
-        textAlign: 'left',
-        marginBottom: 8,
+        fontWeight: 'bold',
+        textAlign: 'center',
+        marginBottom: 10,
+        color: colors.primary,
     },
-    subtitleContainer: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        marginBottom: 32,
-    },
-    subtitleText: {
-        fontSize: 17,
-        color: colors.black,
-        fontFamily: fonts.Medium,
-    },
-    link: {
-        color: colors.leafGreen,
-        textDecorationLine: 'underline',
-        fontFamily: fonts.Medium,
+    subtitle: {
+        fontSize: 16,
+        textAlign: 'center',
+        marginBottom: 30,
+        color: '#666',
     },
     inputContainer: {
         flexDirection: 'row',
-        alignItems: 'center',
-        backgroundColor: colors.lightGrey,
+        borderWidth: 1,
+        borderColor: '#ddd',
         borderRadius: 8,
-        paddingHorizontal: 12,
-        marginBottom: 24,
+        marginBottom: 20,
+        backgroundColor: colors.lightGrey,
     },
     countrySelector: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        marginRight: 8,
-    },
-    flag: {
-        fontSize: 24,
+        paddingHorizontal: 15,
+        justifyContent: 'center',
+        borderRightWidth: 1,
+        borderRightColor: '#ddd',
     },
     countryCode: {
-        fontSize: 17,
-        fontFamily: fonts.Medium,
-        color: colors.black,
-        marginHorizontal: 8,
+        fontSize: 16,
+        color: colors.primary,
+        fontWeight: 'bold',
     },
     input: {
         flex: 1,
-        fontSize: 17,
-        fontFamily: fonts.Medium,
-        color: colors.black,
-        paddingVertical: 16,
+        padding: 15,
+        fontSize: 16,
     },
-    button: {
-        backgroundColor: colors.leafGreen,
+    continueButton: {
+        backgroundColor: colors.primary,
+        padding: 15,
         borderRadius: 8,
-        paddingVertical: 16,
         alignItems: 'center',
+        marginBottom: 15,
     },
-    buttonText: {
+    continueButtonDisabled: {
+        backgroundColor: '#ccc',
+    },
+    continueButtonText: {
         color: colors.white,
-        fontSize: 17,
-        fontFamily: fonts.Bold,
+        fontSize: 16,
+        fontWeight: 'bold',
+    },
+    continueButtonTextDisabled: {
+        color: '#999',
+    },
+    registerButton: {
+        alignItems: 'center',
+        padding: 10,
+    },
+    registerText: {
+        color: colors.primary,
+        fontSize: 14,
     },
 });
 
-export default PhoneInputStep; 
+export default PhoneInputStep;

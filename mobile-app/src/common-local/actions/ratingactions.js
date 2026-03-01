@@ -1,3 +1,4 @@
+import Logger from '../../utils/Logger';
 // Action Types
 export const ADD_RATING = 'ADD_RATING';
 export const UPDATE_RATING = 'UPDATE_RATING';
@@ -45,6 +46,7 @@ export const submitRating = (ratingData) => async (dispatch) => {
         
         // Importar RatingService
         const RatingService = require('../../services/RatingService').default;
+
         
         // Enviar avaliação
         const result = await RatingService.submitRating(ratingData);
@@ -58,7 +60,7 @@ export const submitRating = (ratingData) => async (dispatch) => {
         }
         
     } catch (error) {
-        console.error('❌ Erro ao submeter avaliação:', error);
+        Logger.error('❌ Erro ao submeter avaliação:', error);
         dispatch(setRatingError(error.message));
         return { success: false, error: error.message };
     } finally {
@@ -89,7 +91,7 @@ export const loadRatings = () => async (dispatch) => {
         dispatch(setRatings(uniqueRatings));
         
     } catch (error) {
-        console.error('❌ Erro ao carregar avaliações:', error);
+        Logger.error('❌ Erro ao carregar avaliações:', error);
         dispatch(setRatingError(error.message));
     } finally {
         dispatch(setRatingLoading(false));
@@ -108,25 +110,11 @@ export const sendPendingRatings = () => async (dispatch) => {
         dispatch(loadRatings());
         
     } catch (error) {
-        console.error('❌ Erro ao enviar avaliações pendentes:', error);
+        Logger.error('❌ Erro ao enviar avaliações pendentes:', error);
     }
 };
 
-export const getTripRatings = (tripId) => async (dispatch) => {
-    try {
-        // Importar RatingService
-        const RatingService = require('../../services/RatingService').default;
-        
-        // Obter avaliações da viagem
-        const tripRatings = await RatingService.getTripRatings(tripId);
-        
-        return tripRatings;
-        
-    } catch (error) {
-        console.error('❌ Erro ao obter avaliações da viagem:', error);
-        return [];
-    }
-};
+
 
 export const hasUserRatedTrip = (tripId, userType) => async (dispatch) => {
     try {
@@ -139,7 +127,7 @@ export const hasUserRatedTrip = (tripId, userType) => async (dispatch) => {
         return hasRated;
         
     } catch (error) {
-        console.error('❌ Erro ao verificar se usuário já avaliou:', error);
+        Logger.error('❌ Erro ao verificar se usuário já avaliou:', error);
         return false;
     }
 };
@@ -160,7 +148,7 @@ export const getUserRatings = (targetUserId, userType) => async (dispatch) => {
         return result;
         
     } catch (error) {
-        console.error('❌ Erro ao obter avaliações do usuário:', error);
+        Logger.error('❌ Erro ao obter avaliações do usuário:', error);
         dispatch(setRatingError(error.message));
         return {
             ratings: [],
@@ -189,7 +177,7 @@ export const getTripRatings = (tripId) => async (dispatch) => {
         return ratings;
         
     } catch (error) {
-        console.error('❌ Erro ao obter avaliações da viagem:', error);
+        Logger.error('❌ Erro ao obter avaliações da viagem:', error);
         dispatch(setRatingError(error.message));
         return [];
     } finally {

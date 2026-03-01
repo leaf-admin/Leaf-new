@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Leaf | Cidades</title>
+    <meta name="description" content="Saiba onde a Leaf está presente, como funciona a expansão por cidades e o plano para atender todo o estado do Rio de Janeiro.">
+    <link rel="stylesheet" href="assets/referencia-files/9ca74aa1db20946c.css">
+    <link rel="stylesheet" href="assets/referencia-files/34cf33828ed8ca32.css">
+    <link rel="stylesheet" href="assets/referencia-files/b51ac5fdeaf57928.css">
+    <link rel="stylesheet" href="assets/referencia-files/cb74a29fa9526037.css">
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: 'DiDiSans','Montserrat',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
+            background: #f3f6f3;
+            color: #1a1a1a;
+            line-height: 1.6;
+        }
+        header {
+            position: fixed;
+            top: 0; left: 0; right: 0;
+            background: #003002;
+            height: 90px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0 48px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.2);
+            z-index: 1000;
+        }
+        .logo img { height: 40px; }
+        nav ul {
+            list-style: none;
+            display: flex;
+            gap: 1.5rem;
+            align-items: center;
+        }
+        nav a {
+            color: white;
+            text-decoration: none;
+            font-weight: 600;
+        }
+        .nav-cta {
+            background: white;
+            color: #003002;
+            padding: 0.6rem 1.2rem;
+            border-radius: 24px;
+        }
+        .hero {
+            text-align: center;
+            padding: 150px 24px 60px;
+            background: white;
+        }
+        .hero h1 {
+            font-size: 2.8rem;
+            color: #003002;
+            margin-bottom: 1rem;
+            font-weight: 800;
+        }
+        .hero p {
+            max-width: 820px;
+            margin: 0 auto;
+            font-size: 1.15rem;
+            color: #555;
+        }
+        .content {
+            max-width: 1100px;
+            margin: 0 auto;
+            padding: 60px 24px 120px;
+            display: flex;
+            flex-direction: column;
+            gap: 2.5rem;
+        }
+        .card {
+            background: white;
+            border-radius: 24px;
+            padding: 2.5rem;
+            box-shadow: 0 14px 32px rgba(0,0,0,0.08);
+            border: 1px solid rgba(0,48,2,0.05);
+        }
+        .card h2 {
+            font-size: 1.6rem;
+            color: #003002;
+            margin-bottom: 1rem;
+            font-weight: 700;
+        }
+        .card h3 {
+            font-size: 1.2rem;
+            color: #1a1a1a;
+            margin-top: 1.5rem;
+        }
+        .card ul {
+            margin-left: 1.5rem;
+            margin-top: 0.5rem;
+            color: #444;
+        }
+        .cities-list {
+            columns: 2;
+            column-gap: 2rem;
+            list-style: none;
+            margin-top: 1rem;
+        }
+        .cities-list li {
+            margin-bottom: 0.4rem;
+        }
+        @media (max-width: 768px) {
+            header { flex-direction: column; gap: .75rem; height: auto; padding: 16px 24px; }
+            nav ul { flex-wrap: wrap; justify-content: center; gap: 0.75rem; }
+            .hero { padding-top: 120px; }
+            .hero h1 { font-size: 2rem; }
+            .card { padding: 1.75rem; }
+            .cities-list { columns: 1; }
+        }
+        footer {
+            background: #003002;
+            color: white;
+            text-align: center;
+            padding: 40px 24px;
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <a class="logo" href="index.html">
+            <img src="assets/logo-leaf.jpg" alt="Leaf">
+        </a>
+        <nav>
+            <ul>
+                <li><a href="index.html#motorista">Motoristas</a></li>
+                <li><a href="index.html#features">Como funciona</a></li>
+                <li><a href="index.html#ajuda">Ajuda</a></li>
+                <li><a class="nav-cta" href="index.html#download">Baixe o app</a></li>
+            </ul>
+        </nav>
+    </header>
+
+    <section class="hero">
+        <h1>Cidades</h1>
+        <p>Mobilidade que nasce local para crescer com o Brasil. A Leaf inicia sua jornada no estado do Rio de Janeiro com expansão responsável, conectada e construída junto da comunidade.</p>
+    </section>
+
+    <section class="content">
+        <article class="card">
+            <h2>Mobilidade que nasce local para crescer com o Brasil</h2>
+            <p>A Leaf é uma startup de mobilidade criada para transformar a forma como as pessoas se deslocam nas cidades brasileiras. Nossa expansão começa onde a mobilidade precisa ser mais eficiente, equilibrada e acessível — e se desenvolve ouvindo a comunidade, entendendo a realidade local e construindo soluções que façam sentido para cada região.</p>
+            <p>Estamos iniciando nossa operação no estado do Rio de Janeiro com um plano claro: crescer de forma responsável, estruturada e conectada com as necessidades de cada município.</p>
+        </article>
+
+        <article class="card">
+            <h2>Duque de Caxias — Nosso ponto de partida</h2>
+            <p>Duque de Caxias será a primeira cidade a receber o Beta da Leaf, com lançamento marcado para 01/12/2025.</p>
+            <p>Escolhemos Caxias porque representa exatamente o tipo de mobilidade que queremos transformar: cidades grandes, populares, intensas e com fluxo real de trabalhadores, estudantes e famílias que dependem do transporte diário.</p>
+            <p>Nossa atuação em Caxias será baseada em:</p>
+            <ul>
+                <li>parceria próxima com motoristas</li>
+                <li>presença ativa da comunidade</li>
+                <li>testes rápidos, ajustes constantes e evolução contínua</li>
+                <li>acompanhamento direto dos indicadores de mobilidade</li>
+                <li>modelo transparente e simples para passageiros</li>
+            </ul>
+            <p>A Leaf começa em Caxias porque é com as pessoas de Caxias que queremos construir o capítulo inicial da nossa história.</p>
+        </article>
+
+        <article class="card">
+            <h2>Principais Municípios da Expansão Inicial</h2>
+            <p>Depois de Duque de Caxias, a Leaf avança para a Região Metropolitana do Rio, começando pelas cidades com maior volume de deslocamento diário e maior potencial de impacto positivo. Essas cidades receberão a plataforma oficialmente na fase pós-Beta:</p>
+            <h3>Rio de Janeiro</h3>
+            <p>Capital do estado, onde concentração de rotas, diversidade de perfis e volume de deslocamento representam uma das maiores oportunidades de melhoria na mobilidade urbana brasileira.</p>
+            <h3>Niterói</h3>
+            <p>Cidade conectada, estruturada e com alta demanda por corridas, especialmente em horários de pico e rotas intermunicipais.</p>
+            <h3>São Gonçalo</h3>
+            <p>Um dos maiores polos de deslocamento diário da região. O foco da Leaf será oferecer simplicidade, previsibilidade e um modelo mais equilibrado para motoristas e passageiros.</p>
+            <h3>Nova Iguaçu</h3>
+            <p>Centro econômico da Baixada, com grande fluxo de mobilidade e forte presença de trabalhadores que dependem de aplicativos no dia a dia.</p>
+        </article>
+
+        <article class="card">
+            <h2>As 92 cidades onde a Leaf vai atuar junto da comunidade</h2>
+            <p>Nosso plano contempla atender as 92 cidades do estado do Rio de Janeiro, construindo uma plataforma de mobilidade regional forte, conectada e eficiente.</p>
+            <p>Aba / Lista expandida (92 municípios):</p>
+            <ul class="cities-list">
+                <li>Angra dos Reis</li><li>Aperibé</li><li>Araruama</li><li>Areal</li><li>Armação dos Búzios</li><li>Arraial do Cabo</li><li>Barra do Piraí</li><li>Barra Mansa</li><li>Belford Roxo</li><li>Bom Jardim</li><li>Bom Jesus do Itabapoana</li><li>Cabo Frio</li><li>Cachoeiras de Macacu</li><li>Cambuci</li><li>Campos dos Goytacazes</li><li>Cantagalo</li><li>Carapebus</li><li>Carmo</li><li>Casimiro de Abreu</li><li>Comendador Levy Gasparian</li><li>Conceição de Macabu</li><li>Cordeiro</li><li>Duas Barras</li><li>Duque de Caxias</li><li>Engenheiro Paulo de Frontin</li><li>Guapimirim</li><li>Iguaba Grande</li><li>Itaboraí</li><li>Itaguaí</li><li>Italva</li><li>Itaocara</li><li>Itaperuna</li><li>Itatiaia</li><li>Japeri</li><li>Laje do Muriaé</li><li>Macaé</li><li>Macuco</li><li>Magé</li><li>Mangaratiba</li><li>Maricá</li><li>Mendes</li><li>Mesquita</li><li>Miguel Pereira</li><li>Miracema</li><li>Natividade</li><li>Nilópolis</li><li>Niterói</li><li>Nova Iguaçu</li><li>Nova Friburgo</li><li>Paracambi</li><li>Paraíba do Sul</li><li>Paraty</li><li>Paty do Alferes</li><li>Petrópolis</li><li>Pinheiral</li><li>Piraí</li><li>Porciúncula</li><li>Porto Real</li><li>Quatis</li><li>Queimados</li><li>Quissamã</li><li>Resende</li><li>Rio de Janeiro</li><li>Rio Bonito</li><li>Rio Claro</li><li>Rio das Flores</li><li>Rio das Ostras</li><li>Santa Maria Madalena</li><li>Santo Antônio de Pádua</li><li>São Fidélis</li><li>São Francisco de Itabapoana</li><li>São Gonçalo</li><li>São João da Barra</li><li>São João de Meriti</li><li>São José de Ubá</li><li>São José do Vale do Rio Preto</li><li>São Pedro da Aldeia</li><li>São Sebastião do Alto</li><li>Sapucaia</li><li>Saquarema</li><li>Seropédica</li><li>Silva Jardim</li><li>Sumidouro</li><li>Tanguá</li><li>Teresópolis</li><li>Trajano de Moraes</li><li>Três Rios</li><li>Valença</li><li>Varre-Sai</li><li>Vassouras</li><li>Volta Redonda</li>
+            </ul>
+        </article>
+
+        <article class="card">
+            <h2>Como funcionará a expansão por município</h2>
+            <p>A entrada da Leaf em cada cidade seguirá três etapas:</p>
+            <h3>1. Diagnóstico local</h3>
+            <p>Entendimento da mobilidade real do município, fluxo diário, rotas críticas, horários de pico e necessidades da população.</p>
+            <h3>2. Ativação com motoristas</h3>
+            <p>Recrutamento, preparo, capacitação operacional e alinhamento com o modelo de parceria Leaf.</p>
+            <h3>3. Lançamento progressivo</h3>
+            <p>Operação iniciada com monitoramento em tempo real, ajustes rápidos e suporte dedicado para garantir uma experiência estável e previsível.</p>
+        </article>
+
+        <article class="card">
+            <h2>Cidades como parte da estratégia</h2>
+            <p>A Leaf não expande de forma genérica. Cada cidade é tratada como um ecossistema próprio — com características, rotas, demandas e realidades específicas.</p>
+            <p>Nosso trabalho é adaptar a plataforma para que ela funcione de forma natural dentro do contexto de cada região, mantendo simplicidade, transparência e parceria como pilares.</p>
+        </article>
+
+        <article class="card">
+            <h2>O futuro da mobilidade no estado do Rio começa aqui</h2>
+            <p>A jornada da Leaf inicia em Duque de Caxias, se fortalece na Região Metropolitana e se expande para todas as cidades do estado. É um projeto de longo prazo, construído com responsabilidade, tecnologia própria e proximidade com quem realmente utiliza a plataforma.</p>
+            <p>A Leaf está entrando para transformar — mas principalmente, para ouvir, aprender e evoluir junto das pessoas que fazem a mobilidade acontecer.</p>
+        </article>
+    </section>
+
+    <footer>
+        <p>&copy; 2025 Leaf App. Todos os direitos reservados.</p>
+    </footer>
+</body>
+</html>

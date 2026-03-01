@@ -19,8 +19,8 @@ import {
 import MaterialButtonDark from "../components/MaterialButtonDark";
 import { TouchableOpacity } from "react-native-gesture-handler";
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { api } from '../common-local';
-import { colors } from '../common-local/theme';
+import { api } from '../common-local/api';
+import { colors } from '../common/theme';
 import RNPickerSelect from '../components/RNPickerSelect';
 import * as AppleAuthentication from 'expo-apple-authentication';
 import * as Crypto from "expo-crypto";
@@ -29,45 +29,47 @@ import { Feather, Ionicons, FontAwesome5 } from '@expo/vector-icons';
 import moment from 'moment/min/moment-with-locales';
 import rnauth from '@react-native-firebase/auth';
 import { GoogleSignin } from '@react-native-google-signin/google-signin';
-// import { TextInputMask } from 'react-native-masked-text'; // Removido - dependência não existe
+import { TextInputMask } from 'react-native-masked-text';
 import { useSelector, useDispatch } from 'react-redux';
 import { checkUserExists } from '../common-local/actions/authactions';
 import { useAuth } from '../hooks/useAuth';
 var { width,height } = Dimensions.get('window');
 import ClientIds from '../../config/ClientIds';
-import { MAIN_COLOR } from "../common-local/sharedFunctions";
+import { MAIN_COLOR } from "../common/sharedFunctions";
 import { Button } from "../components";
-import { fonts } from "../common-local/font";
+import { fonts } from "../common/font";
 import auth from '@react-native-firebase/auth';
 import { ActivityIndicator } from 'react-native';
+import { useTranslation } from '../components/i18n/LanguageProvider';
 
 GoogleSignin.configure(ClientIds);
 
 const errorMessages = {
-    'auth/invalid-email': 'E-mail inválido. Verifique e tente novamente.',
-    'auth/user-not-found': 'Usuário não encontrado. Verifique o número ou cadastre-se.',
-    'auth/wrong-password': 'Senha incorreta. Tente novamente.',
-    'auth/too-many-requests': 'Muitas tentativas. Aguarde alguns minutos e tente novamente.',
-    'auth/network-request-failed': 'Sem conexão. Verifique sua internet.',
-    'auth/invalid-verification-code': 'Código de verificação inválido.',
-    'auth/invalid-phone-number': 'Número de telefone inválido.',
-    'auth/user-disabled': 'Usuário desativado. Contate o suporte.',
-    'default': 'Ocorreu um erro. Tente novamente.'
+    'auth/invalid-email': 'errors.invalidEmail',
+    'auth/user-not-found': 'errors.userNotFound',
+    'auth/wrong-password': 'errors.wrongPassword',
+    'auth/too-many-requests': 'errors.tooManyRequests',
+    'auth/network-request-failed': 'errors.networkError',
+    'auth/invalid-verification-code': 'errors.invalidVerificationCode',
+    'auth/invalid-phone-number': 'errors.invalidPhoneNumber',
+    'auth/user-disabled': 'errors.userDisabled',
+    'default': 'errors.default'
 };
 
-function getFriendlyErrorMessage(error) {
-    if (!error) return errorMessages['default'];
-    if (typeof error === 'string' && errorMessages[error]) return errorMessages[error];
-    if (typeof error === 'object' && error.code && errorMessages[error.code]) return errorMessages[error.code];
+function getFriendlyErrorMessage(error, t) {
+    if (!error) return t(errorMessages['default']);
+    if (typeof error === 'string' && errorMessages[error]) return t(errorMessages[error]);
+    if (typeof error === 'object' && error.code && errorMessages[error.code]) return t(errorMessages[error.code]);
     if (typeof error === 'object' && error.message) {
         // Tenta mapear por código no message
         const codeMatch = error.message.match(/auth\/[a-zA-Z0-9\-]+/);
-        if (codeMatch && errorMessages[codeMatch[0]]) return errorMessages[codeMatch[0]];
+        if (codeMatch && errorMessages[codeMatch[0]]) return t(errorMessages[codeMatch[0]]);
     }
-    return errorMessages['default'];
+    return t(errorMessages['default']);
 }
 
 export default function LoginScreen({ navigation, route }) {
+  const { t } = useTranslation();
   const [phone, setPhone] = useState('');
   const [isExistingUser, setIsExistingUser] = useState(null); // null = não checado, true = existe, false = não existe
   const [loading, setLoading] = useState(false);
@@ -101,7 +103,7 @@ export default function LoginScreen({ navigation, route }) {
       await auth().signInWithEmailAndPassword(`${phone}@leaf.com`, password);
       navigation.replace('AuthLoadingScreen');
     } catch (e) {
-      setError('Telefone ou senha inválidos.');
+      setError(getFriendlyErrorMessage(e, t));
     } finally {
       setLoading(false);
     }
@@ -121,7 +123,7 @@ export default function LoginScreen({ navigation, route }) {
         navigation.replace('AuthLoadingScreen');
       }
     } catch (e) {
-      setError('Erro ao criar conta.');
+      setError(getFriendlyErrorMessage(e, t));
     } finally {
       setLoading(false);
     }
@@ -129,7 +131,7 @@ export default function LoginScreen({ navigation, route }) {
 
   return (
     <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#F5F5F5', padding: 24 }}>
-      <Text style={{ fontSize: 24, fontWeight: 'bold', color: '#1A330E', marginBottom: 24 }}>Informe seu celular</Text>
+      <Text style={{ fontSize: 24, fontWeight: 'bold', color: '#1A330E', marginBottom: 24 }}>{t('auth.phoneNumber')}</Text>
       <TextInput
         style={{ width: '100%', fontSize: 20, borderBottomWidth: 1, borderColor: '#B0B0B0', marginBottom: 24, color: '#1A330E', padding: 8 }}
         placeholder="(99) 99999-9999"

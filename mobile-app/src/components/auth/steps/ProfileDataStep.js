@@ -1,6 +1,9 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo, useCallback } from 'react';
 import { View, Text, TextInput, TouchableOpacity, StyleSheet, Alert, ScrollView } from 'react-native';
 import { fonts } from '../../../common-local/font';
+import { Ionicons } from '@expo/vector-icons';
+import { saveStepData } from '../../../utils/secureOnboardingStorage';
+import ContinueButton from '../common/ContinueButton';
 
 // Cores baseadas no design
 const colors = {
@@ -13,15 +16,12 @@ const colors = {
     error: '#FF3B30'
 };
 
-const ProfileDataStep = ({ onSubmitted, onBack }) => {
+const ProfileDataStep = ({ onSubmitted, onBack, initialData = {} }) => {
     const [profileData, setProfileData] = useState({
-        firstName: '',
-        lastName: '',
-        email: '',
-        dateOfBirth: '',
-        gender: '',
-        documentType: '',
-        documentNumber: ''
+        firstName: initialData.firstName || '',
+        lastName: initialData.lastName || '',
+        dateOfBirth: initialData.dateOfBirth || '',
+        gender: initialData.gender || ''
     });
 
     const [errors, setErrors] = useState({});
@@ -38,12 +38,6 @@ const ProfileDataStep = ({ onSubmitted, onBack }) => {
             newErrors.lastName = 'Sobrenome é obrigatório';
         }
 
-        if (!profileData.email.trim()) {
-            newErrors.email = 'Email é obrigatório';
-        } else if (!/\S+@\S+\.\S+/.test(profileData.email)) {
-            newErrors.email = 'Email inválido';
-        }
-
         if (!profileData.dateOfBirth) {
             newErrors.dateOfBirth = 'Data de nascimento é obrigatória';
         }
@@ -52,17 +46,17 @@ const ProfileDataStep = ({ onSubmitted, onBack }) => {
             newErrors.gender = 'Gênero é obrigatório';
         }
 
-        if (!profileData.documentType) {
-            newErrors.documentType = 'Tipo de documento é obrigatório';
-        }
-
-        if (!profileData.documentNumber.trim()) {
-            newErrors.documentNumber = 'Número do documento é obrigatório';
-        }
-
         setErrors(newErrors);
         return Object.keys(newErrors).length === 0;
     };
+
+    // Função para verificar se o formulário está válido
+    const isFormValid = useMemo(() => {
+        return profileData.firstName.trim() && 
+               profileData.lastName.trim() && 
+               profileData.dateOfBirth && 
+               profileData.gender;
+    }, [profileData.firstName, profileData.lastName, profileData.dateOfBirth, profileData.gender]);
 
     // Função para lidar com o envio dos dados
     const handleSubmit = () => {
@@ -72,19 +66,43 @@ const ProfileDataStep = ({ onSubmitted, onBack }) => {
     };
 
     // Função para atualizar um campo
-    const updateField = (field, value) => {
-        setProfileData(prev => ({ ...prev, [field]: value }));
+    const updateField = useCallback(async (field, value) => {
+        const newData = { ...profileData, [field]: value };
+        setProfileData(newData);
+        
+        // Salvar automaticamente no AsyncStorage
+        await saveStepData('profile_data', newData);
+        
         // Limpar erro do campo quando o usuário começar a digitar
         if (errors[field]) {
             setErrors(prev => ({ ...prev, [field]: '' }));
         }
+    }, [profileData, errors]);
+
+    // Função para formatar data de nascimento
+    const formatDateOfBirth = (value) => {
+        const numbers = value.replace(/\D/g, '');
+        if (numbers.length <= 2) return numbers;
+        if (numbers.length <= 4) return `${numbers.slice(0, 2)}/${numbers.slice(2)}`;
+        if (numbers.length <= 6) return `${numbers.slice(0, 2)}/${numbers.slice(2, 4)}/${numbers.slice(4)}`;
+        return `${numbers.slice(0, 2)}/${numbers.slice(2, 4)}/${numbers.slice(4, 8)}`;
+    };
+
+    const handleDateOfBirthChange = (value) => {
+        const formatted = formatDateOfBirth(value);
+        updateField('dateOfBirth', formatted);
     };
 
     return (
         <ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
-            <Text style={styles.title}>Dados do Perfil</Text>
+            <View style={styles.header}>
+                <TouchableOpacity style={styles.backButton} onPress={onBack}>
+                    <Ionicons name="arrow-back" size={24} color={colors.leafGreen} />
+                </TouchableOpacity>
+                <Text style={styles.title}>Dados Pessoais</Text>
+            </View>
             <Text style={styles.subtitle}>
-                Preencha seus dados pessoais para continuar
+                Preencha seus dados pessoais básicos
             </Text>
 
             {/* Nome e Sobrenome */}
@@ -114,31 +132,17 @@ const ProfileDataStep = ({ onSubmitted, onBack }) => {
                 </View>
             </View>
 
-            {/* Email */}
-            <View style={styles.fieldContainer}>
-                <Text style={styles.label}>Email *</Text>
-                <TextInput
-                    style={[styles.input, errors.email && styles.inputError]}
-                    value={profileData.email}
-                    onChangeText={(value) => updateField('email', value)}
-                    placeholder="seu@email.com"
-                    placeholderTextColor={colors.greyPlaceholder}
-                    keyboardType="email-address"
-                    autoCapitalize="none"
-                />
-                {errors.email && <Text style={styles.errorText}>{errors.email}</Text>}
-            </View>
-
             {/* Data de Nascimento */}
             <View style={styles.fieldContainer}>
                 <Text style={styles.label}>Data de Nascimento *</Text>
                 <TextInput
                     style={[styles.input, errors.dateOfBirth && styles.inputError]}
                     value={profileData.dateOfBirth}
-                    onChangeText={(value) => updateField('dateOfBirth', value)}
+                    onChangeText={handleDateOfBirthChange}
                     placeholder="DD/MM/AAAA"
                     placeholderTextColor={colors.greyPlaceholder}
                     keyboardType="numeric"
+                    maxLength={10}
                 />
                 {errors.dateOfBirth && <Text style={styles.errorText}>{errors.dateOfBirth}</Text>}
             </View>
@@ -147,7 +151,7 @@ const ProfileDataStep = ({ onSubmitted, onBack }) => {
             <View style={styles.fieldContainer}>
                 <Text style={styles.label}>Gênero *</Text>
                 <View style={styles.radioContainer}>
-                    {['Masculino', 'Feminino', 'Outro'].map((gender) => (
+                    {['Masculino', 'Feminino'].map((gender) => (
                         <TouchableOpacity
                             key={gender}
                             style={[
@@ -168,55 +172,12 @@ const ProfileDataStep = ({ onSubmitted, onBack }) => {
                 {errors.gender && <Text style={styles.errorText}>{errors.gender}</Text>}
             </View>
 
-            {/* Tipo de Documento */}
-            <View style={styles.fieldContainer}>
-                <Text style={styles.label}>Tipo de Documento *</Text>
-                <View style={styles.radioContainer}>
-                    {['CPF', 'RG', 'CNH'].map((docType) => (
-                        <TouchableOpacity
-                            key={docType}
-                            style={[
-                                styles.radioButton,
-                                profileData.documentType === docType && styles.radioButtonSelected
-                            ]}
-                            onPress={() => updateField('documentType', docType)}
-                        >
-                            <Text style={[
-                                styles.radioText,
-                                profileData.documentType === docType && styles.radioTextSelected
-                            ]}>
-                                {docType}
-                            </Text>
-                        </TouchableOpacity>
-                    ))}
-                </View>
-                {errors.documentType && <Text style={styles.errorText}>{errors.documentType}</Text>}
-            </View>
-
-            {/* Número do Documento */}
-            <View style={styles.fieldContainer}>
-                <Text style={styles.label}>Número do Documento *</Text>
-                <TextInput
-                    style={[styles.input, errors.documentNumber && styles.inputError]}
-                    value={profileData.documentNumber}
-                    onChangeText={(value) => updateField('documentNumber', value)}
-                    placeholder="000.000.000-00"
-                    placeholderTextColor={colors.greyPlaceholder}
-                    keyboardType="numeric"
-                />
-                {errors.documentNumber && <Text style={styles.errorText}>{errors.documentNumber}</Text>}
-            </View>
-
-            {/* Botões */}
-            <View style={styles.buttonContainer}>
-                <TouchableOpacity style={styles.backButton} onPress={onBack}>
-                    <Text style={styles.backButtonText}>Voltar</Text>
-                </TouchableOpacity>
-
-                <TouchableOpacity style={styles.submitButton} onPress={handleSubmit}>
-                    <Text style={styles.submitButtonText}>Continuar</Text>
-                </TouchableOpacity>
-            </View>
+            {/* Botão Continuar */}
+            <ContinueButton
+                onPress={handleSubmit}
+                disabled={!isFormValid}
+                text="Continuar"
+            />
         </ScrollView>
     );
 };
@@ -226,12 +187,20 @@ const styles = StyleSheet.create({
         flex: 1,
         paddingVertical: 20,
     },
+    header: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        marginBottom: 16,
+    },
+    backButton: {
+        padding: 8,
+        marginRight: 12,
+    },
     title: {
         fontSize: 24,
         color: colors.black,
         fontFamily: fonts.Bold,
         textAlign: 'left',
-        marginBottom: 8,
     },
     subtitle: {
         fontSize: 17,
@@ -303,36 +272,7 @@ const styles = StyleSheet.create({
     radioTextSelected: {
         color: colors.white,
     },
-    buttonContainer: {
-        flexDirection: 'row',
-        justifyContent: 'space-between',
-        marginTop: 32,
-    },
-    backButton: {
-        flex: 1,
-        alignItems: 'center',
-        paddingVertical: 16,
-        marginRight: 8,
-    },
-    backButtonText: {
-        color: colors.leafGreen,
-        fontSize: 17,
-        fontFamily: fonts.Medium,
-        textDecorationLine: 'underline',
-    },
-    submitButton: {
-        flex: 2,
-        backgroundColor: colors.leafGreen,
-        borderRadius: 8,
-        paddingVertical: 16,
-        alignItems: 'center',
-        marginLeft: 8,
-    },
-    submitButtonText: {
-        color: colors.white,
-        fontSize: 17,
-        fontFamily: fonts.Bold,
-    },
+
 });
 
 export default ProfileDataStep;

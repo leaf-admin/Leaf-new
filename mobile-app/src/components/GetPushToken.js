@@ -1,6 +1,6 @@
 import * as Notifications from 'expo-notifications';
 import { Platform } from 'react-native';
-import { colors } from '../common-local/theme';
+import { colors } from '../common/theme';
 import * as Device from 'expo-device';
 import { AppConfig } from '../../config/AppConfig';
 

@@ -1,6 +1,8 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { View, Text, TextInput, TouchableOpacity, StyleSheet, Alert, ScrollView } from 'react-native';
 import { fonts } from '../../../common-local/font';
+import { Ionicons } from '@expo/vector-icons';
+import ContinueButton from '../common/ContinueButton';
 
 // Cores baseadas no design
 const colors = {
@@ -14,17 +16,28 @@ const colors = {
     success: '#34C759'
 };
 
-const CredentialsStep = ({ onCreated, onBack }) => {
+const CredentialsStep = ({ onCreated, onBack, initialData = {} }) => {
     const [credentials, setCredentials] = useState({
-        password: '',
-        confirmPassword: '',
-        acceptTerms: false,
-        acceptMarketing: false
+        password: initialData.password || '',
+        confirmPassword: initialData.confirmPassword || '',
+        acceptTerms: initialData.acceptTerms || false,
+        acceptMarketing: initialData.acceptMarketing || false
     });
 
     const [showPassword, setShowPassword] = useState(false);
     const [showConfirmPassword, setShowConfirmPassword] = useState(false);
     const [errors, setErrors] = useState({});
+
+    // Função para verificar se o formulário está válido
+    const isFormValid = useMemo(() => {
+        return credentials.password && 
+               credentials.confirmPassword && 
+               credentials.password === credentials.confirmPassword &&
+               credentials.password.length >= 8 &&
+               /(?=.*[a-z])(?=.*[A-Z])(?=.*\d)/.test(credentials.password) &&
+               credentials.acceptTerms &&
+               credentials.acceptMarketing;
+    }, [credentials]);
 
     // Validação dos campos
     const validateFields = () => {
@@ -46,6 +59,10 @@ const CredentialsStep = ({ onCreated, onBack }) => {
 
         if (!credentials.acceptTerms) {
             newErrors.terms = 'Você deve aceitar os termos de uso';
+        }
+
+        if (!credentials.acceptMarketing) {
+            newErrors.marketing = 'Você deve aceitar os termos legais para parceiros';
         }
 
         setErrors(newErrors);
@@ -79,11 +96,17 @@ const CredentialsStep = ({ onCreated, onBack }) => {
     };
 
     return (
-        <ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
-            <Text style={styles.title}>Criar Conta</Text>
-            <Text style={styles.subtitle}>
-                Crie uma senha segura para sua conta
-            </Text>
+        <ScrollView 
+            style={styles.container} 
+            showsVerticalScrollIndicator={false}
+            contentContainerStyle={styles.scrollContent}
+        >
+            <View style={styles.header}>
+                <TouchableOpacity style={styles.backButton} onPress={onBack}>
+                    <Ionicons name="arrow-back" size={24} color={colors.leafGreen} />
+                </TouchableOpacity>
+                <Text style={styles.title}>Crie uma senha</Text>
+            </View>
 
             {/* Senha */}
             <View style={styles.fieldContainer}>
@@ -111,37 +134,48 @@ const CredentialsStep = ({ onCreated, onBack }) => {
                 
                 {/* Requisitos da senha */}
                 <View style={styles.requirementsContainer}>
-                    <Text style={styles.requirementsTitle}>A senha deve conter:</Text>
                     <View style={styles.requirementItem}>
-                        <Text style={[
-                            styles.requirementText,
-                            credentials.password.length >= 8 && styles.requirementMet
-                        ]}>
+                        <Text style={styles.requirementText}>
                             • Pelo menos 8 caracteres
                         </Text>
+                        <Text style={[
+                            styles.requirementIcon,
+                            credentials.password.length >= 8 ? styles.requirementMet : styles.requirementNotMet
+                        ]}>
+                            {credentials.password.length >= 8 ? '✓' : '✗'}
+                        </Text>
                     </View>
                     <View style={styles.requirementItem}>
-                        <Text style={[
-                            styles.requirementText,
-                            /(?=.*[a-z])/.test(credentials.password) && styles.requirementMet
-                        ]}>
+                        <Text style={styles.requirementText}>
                             • Uma letra minúscula
                         </Text>
-                    </View>
-                    <View style={styles.requirementItem}>
                         <Text style={[
-                            styles.requirementText,
-                            /(?=.*[A-Z])/.test(credentials.password) && styles.requirementMet
+                            styles.requirementIcon,
+                            /(?=.*[a-z])/.test(credentials.password) ? styles.requirementMet : styles.requirementNotMet
                         ]}>
-                            • Uma letra maiúscula
+                            {/(?=.*[a-z])/.test(credentials.password) ? '✓' : '✗'}
                         </Text>
                     </View>
                     <View style={styles.requirementItem}>
+                        <Text style={styles.requirementText}>
+                            • Uma letra maiúscula
+                        </Text>
                         <Text style={[
-                            styles.requirementText,
-                            /(?=.*\d)/.test(credentials.password) && styles.requirementMet
+                            styles.requirementIcon,
+                            /(?=.*[A-Z])/.test(credentials.password) ? styles.requirementMet : styles.requirementNotMet
                         ]}>
+                            {/(?=.*[A-Z])/.test(credentials.password) ? '✓' : '✗'}
+                        </Text>
+                    </View>
+                    <View style={styles.requirementItem}>
+                        <Text style={styles.requirementText}>
                             • Um número
+                        </Text>
+                        <Text style={[
+                            styles.requirementIcon,
+                            /(?=.*\d)/.test(credentials.password) ? styles.requirementMet : styles.requirementNotMet
+                        ]}>
+                            {/(?=.*\d)/.test(credentials.password) ? '✓' : '✗'}
                         </Text>
                     </View>
                 </View>
@@ -207,21 +241,18 @@ const CredentialsStep = ({ onCreated, onBack }) => {
                         {credentials.acceptMarketing && <Text style={styles.checkmark}>✓</Text>}
                     </View>
                     <Text style={styles.checkboxText}>
-                        Aceito receber notificações sobre promoções e novidades
+                        Aceitar termos legais para parceiros *
                     </Text>
                 </TouchableOpacity>
+                {errors.marketing && <Text style={styles.errorText}>{errors.marketing}</Text>}
             </View>
 
-            {/* Botões */}
-            <View style={styles.buttonContainer}>
-                <TouchableOpacity style={styles.backButton} onPress={onBack}>
-                    <Text style={styles.backButtonText}>Voltar</Text>
-                </TouchableOpacity>
-
-                <TouchableOpacity style={styles.createButton} onPress={handleCreateCredentials}>
-                    <Text style={styles.createButtonText}>Criar Conta</Text>
-                </TouchableOpacity>
-            </View>
+            {/* Botão Continuar */}
+            <ContinueButton
+                onPress={handleCreateCredentials}
+                disabled={!isFormValid}
+                text="Continuar"
+            />
         </ScrollView>
     );
 };
@@ -229,24 +260,32 @@ const CredentialsStep = ({ onCreated, onBack }) => {
 const styles = StyleSheet.create({
     container: {
         flex: 1,
-        paddingVertical: 20,
+        paddingVertical: 5, // Reduzido de 20 para 5 (subindo 15px)
+    },
+    scrollContent: {
+        flexGrow: 1,
+        paddingBottom: 20, // Adicionado padding bottom para o botão
+    },
+    header: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        marginBottom: 16,
+        paddingHorizontal: 24,
+        marginTop: -10, // Adicionado margem negativa para subir mais
+    },
+    backButton: {
+        padding: 8,
+        marginRight: 12,
     },
     title: {
         fontSize: 24,
         color: colors.black,
         fontFamily: fonts.Bold,
         textAlign: 'left',
-        marginBottom: 8,
-    },
-    subtitle: {
-        fontSize: 17,
-        color: colors.grey80,
-        fontFamily: fonts.Medium,
-        marginBottom: 32,
-        lineHeight: 22,
     },
     fieldContainer: {
-        marginBottom: 24,
+        marginBottom: 20, // Reduzido de 24 para 20 (subindo 4px)
+        paddingHorizontal: 24,
     },
     label: {
         fontSize: 16,
@@ -287,7 +326,7 @@ const styles = StyleSheet.create({
         marginTop: 4,
     },
     requirementsContainer: {
-        marginTop: 12,
+        marginTop: 10, // Reduzido de 12 para 10 (subindo 2px)
         padding: 12,
         backgroundColor: colors.lightGrey,
         borderRadius: 8,
@@ -299,6 +338,9 @@ const styles = StyleSheet.create({
         marginBottom: 8,
     },
     requirementItem: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center',
         marginBottom: 4,
     },
     requirementText: {
@@ -306,8 +348,16 @@ const styles = StyleSheet.create({
         color: colors.greyPlaceholder,
         fontFamily: fonts.Regular,
     },
+    requirementIcon: {
+        fontSize: 18,
+        marginLeft: 8,
+    },
     requirementMet: {
         color: colors.success,
+        fontFamily: fonts.Medium,
+    },
+    requirementNotMet: {
+        color: colors.error,
         fontFamily: fonts.Medium,
     },
     checkboxContainer: {
@@ -337,45 +387,16 @@ const styles = StyleSheet.create({
     },
     checkboxText: {
         flex: 1,
-        fontSize: 16,
+        fontSize: 14,
         color: colors.black,
         fontFamily: fonts.Medium,
-        lineHeight: 22,
+        lineHeight: 20,
     },
     linkText: {
         color: colors.leafGreen,
         textDecorationLine: 'underline',
     },
-    buttonContainer: {
-        flexDirection: 'row',
-        justifyContent: 'space-between',
-        marginTop: 32,
-    },
-    backButton: {
-        flex: 1,
-        alignItems: 'center',
-        paddingVertical: 16,
-        marginRight: 8,
-    },
-    backButtonText: {
-        color: colors.leafGreen,
-        fontSize: 17,
-        fontFamily: fonts.Medium,
-        textDecorationLine: 'underline',
-    },
-    createButton: {
-        flex: 2,
-        backgroundColor: colors.leafGreen,
-        borderRadius: 8,
-        paddingVertical: 16,
-        alignItems: 'center',
-        marginLeft: 8,
-    },
-    createButtonText: {
-        color: colors.white,
-        fontSize: 17,
-        fontFamily: fonts.Bold,
-    },
+
 });
 
 export default CredentialsStep; 

@@ -1,3 +1,4 @@
+import Logger from '../utils/Logger';
 // Firebase configuration for React Native environment only
 // This file uses only @react-native-firebase packages to avoid Node.js module conflicts
 
@@ -96,7 +97,7 @@ try {
 
     firebase = createFullStructure(null, database, auth, storage, null);
 } catch (error) {
-    console.error('Failed to initialize React Native Firebase:', error);
+    Logger.error('Failed to initialize React Native Firebase:', error);
 }
 
 export {

@@ -1,0 +1,68 @@
+name: EAS Build Mobile App
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'mobile-app/**'
+  workflow_dispatch:
+    inputs:
+      platform:
+        description: 'Plataforma para compilar (android, ios, all)'
+        required: true
+        default: 'android'
+        type: choice
+        options:
+          - android
+          - ios
+          - all
+      profile:
+        description: 'Perfil de Build'
+        required: true
+        default: 'production'
+        type: choice
+        options:
+          - production
+          - preview
+          - development
+
+jobs:
+  build:
+    name: Build via Expo Application Services (EAS)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ./mobile-app
+
+    steps:
+      - name: 🏗 Setup repository
+        uses: actions/checkout@v4
+
+      - name: 🏗 Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: './mobile-app/package-lock.json'
+
+      - name: 🏗 Setup Expo and EAS
+        uses: expo/expo-github-action@v8
+        with:
+          eas-version: latest
+          token: ${{ secrets.EXPO_TOKEN }}
+
+      - name: 📦 Install dependencies
+        run: npm ci
+
+      - name: 🚀 Build with EAS
+        env:
+          # Variáveis de compilação injetadas a partir do github secrets
+          EXPO_PUBLIC_API_URL: ${{ secrets.EXPO_PUBLIC_API_URL }}
+        run: |
+          # Determinar plataforma (do evento ou do input manual)
+          PLATFORM=${{ github.event.inputs.platform || 'android' }}
+          PROFILE=${{ github.event.inputs.profile || 'production' }}
+          
+          echo "Disparando Build na nuvem (Plataforma: $PLATFORM, Perfil: $PROFILE)..."
+          eas build --platform $PLATFORM --profile $PROFILE --non-interactive

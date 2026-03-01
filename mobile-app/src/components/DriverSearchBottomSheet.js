@@ -1,3 +1,4 @@
+import Logger from '../utils/Logger';
 import React, { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, FlatList, ActivityIndicator } from 'react-native';
 import BottomSheetWrapper from './BottomSheetWrapper';
@@ -27,7 +28,7 @@ const DriverSearchBottomSheet = ({
       const nearbyDrivers = await searchNearbyDrivers(userLocation, searchRadius);
       setDrivers(nearbyDrivers);
     } catch (error) {
-      console.error('Erro na busca de motoristas:', error);
+      Logger.error('Erro na busca de motoristas:', error);
     } finally {
       setLoading(false);
     }

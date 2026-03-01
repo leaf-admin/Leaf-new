@@ -1,20 +1,20 @@
 import React, { useEffect, useState } from 'react';
 import { View, Text, Dimensions, FlatList, StyleSheet } from 'react-native';
 import { Icon } from 'react-native-elements'
-import { colors } from '../common-local/theme';
+import { colors } from '../common/theme';
 import i18n from '../i18n';
 import { useSelector } from 'react-redux';
 import moment from 'moment/min/moment-with-locales';
 import SegmentedControlTab from 'react-native-segmented-control-tab';
-import { MAIN_COLOR, SECONDORY_COLOR } from '../common-local/sharedFunctions';
-import { fonts } from '../common-local/font';
+import { MAIN_COLOR, SECONDORY_COLOR } from '../common/sharedFunctions';
+import { fonts } from '../common/font';
 var { height, width } = Dimensions.get('window');
 
 export default function  WTransactionHistory(props) {
     const [data,setData] = useState(null);
     const settings = useSelector(state => state.settingsdata.settings);
     const { t } = i18n;
-    const isRTL = i18n.locale.indexOf('he') === 0 || i18n.locale.indexOf('ar') === 0;
+    const isRTL = i18n.locale && (i18n.locale.indexOf('he') === 0 || i18n.locale.indexOf('ar') === 0);
     const [tabIndex, setTabIndex] = useState(0);
 
     useEffect(()=>{

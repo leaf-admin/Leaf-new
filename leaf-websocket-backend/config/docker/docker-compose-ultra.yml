@@ -1,0 +1,280 @@
+# Docker Compose Ultra-Otimizado - Leaf System
+# Configurado para 500k+ usuários simultâneos
+
+version: '3.8'
+
+services:
+  # Redis Cluster Master
+  redis-master:
+    image: redis:7-alpine
+    container_name: leaf-redis-master-ultra
+    command: |
+      redis-server 
+      --appendonly yes 
+      --maxmemory 4gb 
+      --maxmemory-policy allkeys-lru 
+      --save 900 1 
+      --save 300 10 
+      --save 60 10000
+      --tcp-keepalive 300
+      --timeout 0
+      --databases 16
+      --rdbcompression yes
+      --rdbchecksum yes
+      --maxclients 10000
+      --tcp-backlog 511
+      --hz 10
+    ports:
+      - "6380:6379"
+    volumes:
+      - redis-master-data:/data
+    networks:
+      - leaf-network
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 4.5G
+          cpus: '2.0'
+        reservations:
+          memory: 4G
+          cpus: '1.0'
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 3
+      start_period: 30s
+
+  # Redis Cluster Replica 1
+  redis-replica-1:
+    image: redis:7-alpine
+    container_name: leaf-redis-replica-1
+    command: |
+      redis-server 
+      --replicaof redis-master 6379
+      --appendonly yes 
+      --maxmemory 2gb 
+      --maxmemory-policy allkeys-lru
+      --tcp-keepalive 300
+      --timeout 0
+      --maxclients 5000
+    networks:
+      - leaf-network
+    restart: unless-stopped
+    depends_on:
+      - redis-master
+    deploy:
+      resources:
+        limits:
+          memory: 2.5G
+          cpus: '1.0'
+        reservations:
+          memory: 2G
+          cpus: '0.5'
+
+  # Redis Cluster Replica 2
+  redis-replica-2:
+    image: redis:7-alpine
+    container_name: leaf-redis-replica-2
+    command: |
+      redis-server 
+      --replicaof redis-master 6379
+      --appendonly yes 
+      --maxmemory 2gb 
+      --maxmemory-policy allkeys-lru
+      --tcp-keepalive 300
+      --timeout 0
+      --maxclients 5000
+    networks:
+      - leaf-network
+    restart: unless-stopped
+    depends_on:
+      - redis-master
+    deploy:
+      resources:
+        limits:
+          memory: 2.5G
+          cpus: '1.0'
+        reservations:
+          memory: 2G
+          cpus: '0.5'
+
+  # Ultra WebSocket Instance 1
+  websocket-ultra-1:
+    build: .
+    container_name: leaf-websocket-ultra-1
+    environment:
+      - NODE_ENV=production
+      - PORT=3001
+      - INSTANCE_ID=ultra_1
+      - CLUSTER_MODE=true
+      - REDIS_HOST=redis-master
+      - REDIS_PORT=6379
+      - REDIS_URL=redis://redis-master:6379
+      - LOG_LEVEL=warn
+      - MAX_CONNECTIONS=125000
+      - WORKERS=8
+    networks:
+      - leaf-network
+    restart: unless-stopped
+    depends_on:
+      - redis-master
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+          cpus: '1.0'
+        reservations:
+          memory: 1G
+          cpus: '0.5'
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3001/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
+
+  # Ultra WebSocket Instance 2
+  websocket-ultra-2:
+    build: .
+    container_name: leaf-websocket-ultra-2
+    environment:
+      - NODE_ENV=production
+      - PORT=3002
+      - INSTANCE_ID=ultra_2
+      - CLUSTER_MODE=true
+      - REDIS_HOST=redis-master
+      - REDIS_PORT=6379
+      - REDIS_URL=redis://redis-master:6379
+      - LOG_LEVEL=warn
+      - MAX_CONNECTIONS=125000
+      - WORKERS=8
+    networks:
+      - leaf-network
+    restart: unless-stopped
+    depends_on:
+      - redis-master
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+          cpus: '1.0'
+        reservations:
+          memory: 1G
+          cpus: '0.5'
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3002/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
+
+  # Ultra WebSocket Instance 3
+  websocket-ultra-3:
+    build: .
+    container_name: leaf-websocket-ultra-3
+    environment:
+      - NODE_ENV=production
+      - PORT=3003
+      - INSTANCE_ID=ultra_3
+      - CLUSTER_MODE=true
+      - REDIS_HOST=redis-master
+      - REDIS_PORT=6379
+      - REDIS_URL=redis://redis-master:6379
+      - LOG_LEVEL=warn
+      - MAX_CONNECTIONS=125000
+      - WORKERS=8
+    networks:
+      - leaf-network
+    restart: unless-stopped
+    depends_on:
+      - redis-master
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+          cpus: '1.0'
+        reservations:
+          memory: 1G
+          cpus: '0.5'
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3003/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
+
+  # Ultra WebSocket Instance 4
+  websocket-ultra-4:
+    build: .
+    container_name: leaf-websocket-ultra-4
+    environment:
+      - NODE_ENV=production
+      - PORT=3004
+      - INSTANCE_ID=ultra_4
+      - CLUSTER_MODE=true
+      - REDIS_HOST=redis-master
+      - REDIS_PORT=6379
+      - REDIS_URL=redis://redis-master:6379
+      - LOG_LEVEL=warn
+      - MAX_CONNECTIONS=125000
+      - WORKERS=8
+    networks:
+      - leaf-network
+    restart: unless-stopped
+    depends_on:
+      - redis-master
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+          cpus: '1.0'
+        reservations:
+          memory: 1G
+          cpus: '0.5'
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3004/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
+
+  # Ultra Nginx Load Balancer
+  nginx-ultra:
+    image: nginx:alpine
+    container_name: leaf-nginx-ultra
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx-ultra.conf:/etc/nginx/conf.d/default.conf
+    networks:
+      - leaf-network
+    restart: unless-stopped
+    depends_on:
+      - websocket-ultra-1
+      - websocket-ultra-2
+      - websocket-ultra-3
+      - websocket-ultra-4
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: '0.5'
+        reservations:
+          memory: 256M
+          cpus: '0.25'
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost/nginx-status"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+volumes:
+  redis-master-data:
+    driver: local
+
+networks:
+  leaf-network:
+    driver: bridge

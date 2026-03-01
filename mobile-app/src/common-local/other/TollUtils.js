@@ -1,4 +1,6 @@
+import Logger from '../../utils/Logger';
 import Polyline from '@mapbox/polyline';
+
 
 // Função para decodificar polyline em waypoints { latitude, longitude }
 export function decodePolyline(routePolyline) {
@@ -108,7 +110,7 @@ function sentidoCorresponde(pedagio, waypoints) {
   
   // Determina o sentido da viagem em relação ao pedágio
   const sentidoViagem = determinarSentidoEmRelacaoAoPonto(waypoints, pontoReferencia);
-  console.log(`Sentido da viagem em relação ao pedágio ${pedagio['Praça de Pedágio']}:`, sentidoViagem);
+  Logger.log(`Sentido da viagem em relação ao pedágio ${pedagio['Praça de Pedágio']}:`, sentidoViagem);
   
   // Mapeamento de sentidos para direções específicas
   const direcoes = {
@@ -124,7 +126,7 @@ function sentidoCorresponde(pedagio, waypoints) {
     pedagio.Sentido.toLowerCase().includes(sentido.toLowerCase())
   );
   
-  console.log(`Pedágio ${pedagio['Praça de Pedágio']} - Sentido: ${pedagio.Sentido}, Viagem: ${sentidoViagem}, Corresponde: ${corresponde}`);
+  Logger.log(`Pedágio ${pedagio['Praça de Pedágio']} - Sentido: ${pedagio.Sentido}, Viagem: ${sentidoViagem}, Corresponde: ${corresponde}`);
   return corresponde;
 }
 
@@ -143,7 +145,7 @@ export function pedagiosNaRota(waypoints, pedagios, toleranciaKm = 0.5) {
         const distStart = distanceToSegment({ latitude: pedagio.start.lat, longitude: pedagio.start.lng }, v, w);
         const distEnd = distanceToSegment({ latitude: pedagio.end.lat, longitude: pedagio.end.lng }, v, w);
         if ((distStart <= toleranciaKm || distEnd <= toleranciaKm) && sentidoCorresponde(pedagio, waypoints)) {
-          console.log(`Pedágio segmento cruzado: ${nomePedagio} | Sentido: ${pedagio.Sentido || 'N/A'} | Valor: ${valorPedagio}`);
+          Logger.log(`Pedágio segmento cruzado: ${nomePedagio} | Sentido: ${pedagio.Sentido || 'N/A'} | Valor: ${valorPedagio}`);
           return true;
         }
       }
@@ -154,7 +156,7 @@ export function pedagiosNaRota(waypoints, pedagios, toleranciaKm = 0.5) {
         const proximo = waypoints[i + 1];
         const dist = haversineDistance(ponto, { latitude: parseFloat(pedagio.Latitude), longitude: parseFloat(pedagio.Longitude) });
         if (dist <= toleranciaKm && sentidoCorresponde(pedagio, waypoints)) {
-          console.log(`Pedágio ponto cruzado: ${nomePedagio} | Sentido: ${pedagio.Sentido || 'N/A'} | Valor: ${valorPedagio}`);
+          Logger.log(`Pedágio ponto cruzado: ${nomePedagio} | Sentido: ${pedagio.Sentido || 'N/A'} | Valor: ${valorPedagio}`);
           return true;
         }
       }

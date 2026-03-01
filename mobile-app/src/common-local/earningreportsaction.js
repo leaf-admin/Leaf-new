@@ -3,7 +3,7 @@ import {
   FETCH_BOOKING__DISCOUNT_SUCCESS,
   FETCH_BOOKING__DISCOUNT_FAILED,
 } from "../types.js";
-import { firebase } from '../config/configureFirebase';
+import { firebase } from './config/configureFirebase';
 
 export const fetchEarningsReport = () => async (dispatch) => {
 

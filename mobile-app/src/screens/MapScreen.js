@@ -1,4 +1,5 @@
-import React, { useEffect, useState, useRef, useMemo, useCallback } from 'react';
+import Logger from '../utils/Logger';
+import React, { useEffect, useState, useRef, useMemo, useCallback, useContext } from 'react';
 import {
     StyleSheet,
     View,
@@ -28,9 +29,7 @@ import { api, FirebaseContext } from '../common-local';
 import { OptionModal } from '../components/OptionModal';
 import BookingModal, { appConsts } from '../common-local/sharedFunctions';
 import { prepareEstimateObject } from '../common/sharedFunctions';
-import MapView, { PROVIDER_GOOGLE, Marker, Polyline } from 'react-native-maps';
-import { CommonActions } from '@react-navigation/native';
-import { MAIN_COLOR, CarHorizontal, CarVertical, validateBookingObj, SECONDORY_COLOR } from '../common-local/sharedFunctions';
+import MapView, { PROVIDER_GOOGLE, Marker, Polyline, UrlTile } from 'react-native-maps';
 import { startActivityAsync, ActivityAction } from 'expo-intent-launcher';
 import Button from '../components/Button';
 import { fonts } from "../common-local/font";
@@ -51,191 +50,201 @@ import splashImg from '../../assets/images/splash.png';
 
 import PixPaymentBottomSheet from '../components/PixPaymentBottomSheet';
 import DriverSearchBottomSheet from '../components/DriverSearchBottomSheet';
+import { SkeletonLoader, CarSkeletonCard, LoadingSpinner, ProgressBar } from '../components/LoadingStates';
+import { useResponsiveLayout, ResponsiveGrid } from '../components/ResponsiveLayout';
 
 
 const hasNotch = DeviceInfo.hasNotch();
 
+// ✅ REGIÃO PADRÃO: Rio de Janeiro (usado como fallback até obter localização real)
+const DEFAULT_REGION = {
+    latitude: -22.9068,
+    longitude: -43.1729,
+    latitudeDelta: 0.0922,
+    longitudeDelta: 0.0421,
+};
+
 // Adicionar constante com o estilo personalizado do mapa
 const mapStyle = [
-  { elementType: 'geometry', stylers: [{ color: '#232323' }] },
-  { elementType: 'labels.text.stroke', stylers: [{ color: '#232323' }] },
-  { elementType: 'labels.text.fill', stylers: [{ color: '#bdbdbd' }] },
-  {
-    featureType: 'administrative',
-    elementType: 'geometry',
-    stylers: [{ color: '#757575' }]
-  },
-  {
-    featureType: 'poi',
-    elementType: 'geometry',
-    stylers: [{ color: '#424242' }]
-  },
-  {
-    featureType: 'road',
-    elementType: 'geometry',
-    stylers: [{ color: '#383838' }]
-  },
-  {
-    featureType: 'road',
-    elementType: 'geometry.stroke',
-    stylers: [{ color: '#212121' }]
-  },
-  {
-    featureType: 'road',
-    elementType: 'labels.text.fill',
-    stylers: [{ color: '#8a8a8a' }]
-  },
-  {
-    featureType: 'transit',
-    elementType: 'geometry',
-    stylers: [{ color: '#2f2f2f' }]
-  },
-  {
-    featureType: 'water',
-    elementType: 'geometry',
-    stylers: [{ color: '#181818' }]
-  }
+    { elementType: 'geometry', stylers: [{ color: '#232323' }] },
+    { elementType: 'labels.text.stroke', stylers: [{ color: '#232323' }] },
+    { elementType: 'labels.text.fill', stylers: [{ color: '#bdbdbd' }] },
+    {
+        featureType: 'administrative',
+        elementType: 'geometry',
+        stylers: [{ color: '#757575' }]
+    },
+    {
+        featureType: 'poi',
+        elementType: 'geometry',
+        stylers: [{ color: '#424242' }]
+    },
+    {
+        featureType: 'road',
+        elementType: 'geometry',
+        stylers: [{ color: '#383838' }]
+    },
+    {
+        featureType: 'road',
+        elementType: 'geometry.stroke',
+        stylers: [{ color: '#212121' }]
+    },
+    {
+        featureType: 'road',
+        elementType: 'labels.text.fill',
+        stylers: [{ color: '#8a8a8a' }]
+    },
+    {
+        featureType: 'transit',
+        elementType: 'geometry',
+        stylers: [{ color: '#2f2f2f' }]
+    },
+    {
+        featureType: 'water',
+        elementType: 'geometry',
+        stylers: [{ color: '#181818' }]
+    }
 ];
 
 // Estilo do mapa escuro
 const mapStyleDark = [
-  { elementType: 'geometry', stylers: [{ color: '#232323' }] },
-  { elementType: 'labels.text.stroke', stylers: [{ color: '#232323' }] },
-  { elementType: 'labels.text.fill', stylers: [{ color: '#bdbdbd' }] },
-  {
-    featureType: 'administrative',
-    elementType: 'geometry',
-    stylers: [{ color: '#757575' }]
-  },
-  {
-    featureType: 'poi',
-    elementType: 'geometry',
-    stylers: [{ color: '#424242' }]
-  },
-  {
-    featureType: 'road',
-    elementType: 'geometry',
-    stylers: [{ color: '#383838' }]
-  },
-  {
-    featureType: 'road',
-    elementType: 'geometry.stroke',
-    stylers: [{ color: '#212121' }]
-  },
-  {
-    featureType: 'road',
-    elementType: 'labels.text.fill',
-    stylers: [{ color: '#8a8a8a' }]
-  },
-  {
-    featureType: 'transit',
-    elementType: 'geometry',
-    stylers: [{ color: '#2f2f2f' }]
-  },
-  {
-    featureType: 'water',
-    elementType: 'geometry',
-    stylers: [{ color: '#181818' }]
-  }
+    { elementType: 'geometry', stylers: [{ color: '#232323' }] },
+    { elementType: 'labels.text.stroke', stylers: [{ color: '#232323' }] },
+    { elementType: 'labels.text.fill', stylers: [{ color: '#bdbdbd' }] },
+    {
+        featureType: 'administrative',
+        elementType: 'geometry',
+        stylers: [{ color: '#757575' }]
+    },
+    {
+        featureType: 'poi',
+        elementType: 'geometry',
+        stylers: [{ color: '#424242' }]
+    },
+    {
+        featureType: 'road',
+        elementType: 'geometry',
+        stylers: [{ color: '#383838' }]
+    },
+    {
+        featureType: 'road',
+        elementType: 'geometry.stroke',
+        stylers: [{ color: '#212121' }]
+    },
+    {
+        featureType: 'road',
+        elementType: 'labels.text.fill',
+        stylers: [{ color: '#8a8a8a' }]
+    },
+    {
+        featureType: 'transit',
+        elementType: 'geometry',
+        stylers: [{ color: '#2f2f2f' }]
+    },
+    {
+        featureType: 'water',
+        elementType: 'geometry',
+        stylers: [{ color: '#181818' }]
+    }
 ];
 
 // Estilo do mapa claro (cinza 20%)
 const mapStyleLight = [
-  { elementType: 'geometry', stylers: [{ color: '#f2f2f2' }] },
-  { elementType: 'labels.text.stroke', stylers: [{ color: '#f2f2f2' }] },
-  { elementType: 'labels.text.fill', stylers: [{ color: '#232323' }] },
-  {
-    featureType: 'administrative',
-    elementType: 'geometry',
-    stylers: [{ color: '#cccccc' }]
-  },
-  {
-    featureType: 'poi',
-    elementType: 'geometry',
-    stylers: [{ color: '#e0e0e0' }]
-  },
-  {
-    featureType: 'road',
-    elementType: 'geometry',
-    stylers: [{ color: '#e6e6e6' }]
-  },
-  {
-    featureType: 'road',
-    elementType: 'geometry.stroke',
-    stylers: [{ color: '#cccccc' }]
-  },
-  {
-    featureType: 'road',
-    elementType: 'labels.text.fill',
-    stylers: [{ color: '#8a8a8a' }]
-  },
-  {
-    featureType: 'transit',
-    elementType: 'geometry',
-    stylers: [{ color: '#e0e0e0' }]
-  },
-  {
-    featureType: 'water',
-    elementType: 'geometry',
-    stylers: [{ color: '#d6d6d6' }]
-  }
+    { elementType: 'geometry', stylers: [{ color: '#f2f2f2' }] },
+    { elementType: 'labels.text.stroke', stylers: [{ color: '#f2f2f2' }] },
+    { elementType: 'labels.text.fill', stylers: [{ color: '#232323' }] },
+    {
+        featureType: 'administrative',
+        elementType: 'geometry',
+        stylers: [{ color: '#cccccc' }]
+    },
+    {
+        featureType: 'poi',
+        elementType: 'geometry',
+        stylers: [{ color: '#e0e0e0' }]
+    },
+    {
+        featureType: 'road',
+        elementType: 'geometry',
+        stylers: [{ color: '#e6e6e6' }]
+    },
+    {
+        featureType: 'road',
+        elementType: 'geometry.stroke',
+        stylers: [{ color: '#cccccc' }]
+    },
+    {
+        featureType: 'road',
+        elementType: 'labels.text.fill',
+        stylers: [{ color: '#8a8a8a' }]
+    },
+    {
+        featureType: 'transit',
+        elementType: 'geometry',
+        stylers: [{ color: '#e0e0e0' }]
+    },
+    {
+        featureType: 'water',
+        elementType: 'geometry',
+        stylers: [{ color: '#d6d6d6' }]
+    }
 ];
 
 // Fallback local para tipos de carro (atualizado manualmente conforme solicitado)
 const fallbackCarTypes = [
-  {
-    name: 'Leaf Plus',
-    image: 'https://cdn.pixabay.com/photo/2017/06/03/08/11/car-2368193_640.png',
-            min_fare: 8.50,
-    base_fare: 2.98,
-    rate_per_hour: 15,
-    rate_per_unit_distance: 1.22,
-    convenience_fee_type: 'flat',
-    convenience_fees: 0,
-    extra_info: 'Capacity: 3, Type: Taxi',
-    fleet_admin_fee: 1.55,
-    pos: 5,
-    id: 'type1'
-  },
-  {
-    name: 'Leaf Elite',
-    image: 'https://cdn.pixabay.com/photo/2022/01/23/18/20/car-6961567_640.png',
-            min_fare: 8.50,
-    base_fare: 5.32,
-    rate_per_hour: 17.4,
-    rate_per_unit_distance: 2.18,
-    convenience_fee_type: 'flat',
-    convenience_fees: 0,
-    extra_info: 'Capacity: 4, Type: Sedan',
-    fleet_admin_fee: 3.2,
-    pos: 10,
-    id: 'type3'
-  }
+    {
+        name: 'Leaf Plus',
+        image: 'https://cdn.pixabay.com/photo/2017/06/03/08/11/car-2368193_640.png',
+        min_fare: 8.50,
+        base_fare: 3.13,
+        rate_per_hour: 16.20,
+        rate_per_unit_distance: 1.42,
+        convenience_fee_type: 'flat',
+        convenience_fees: 0,
+        extra_info: 'Capacity: 3, Type: Taxi',
+        fleet_admin_fee: 1.55,
+        pos: 5,
+        id: 'type1'
+    },
+    {
+        name: 'Leaf Elite',
+        image: 'https://cdn.pixabay.com/photo/2022/01/23/18/20/car-6961567_640.png',
+        min_fare: 11.50,
+        base_fare: 5.59,
+        rate_per_hour: 18.00,
+        rate_per_unit_distance: 2.29,
+        convenience_fee_type: 'flat',
+        convenience_fees: 0,
+        extra_info: 'Capacity: 4, Type: Sedan',
+        fleet_admin_fee: 3.2,
+        pos: 10,
+        id: 'type3'
+    }
 ];
 
 // Função utilitária para extrair rua e número
 function getStreetAndNumber(address) {
-  if (!address) return '';
-  const match = address.match(/^([^,\-]*\d+)[,\-]?/);
-  if (match) return match[1].trim();
-  return address.split(',')[0].trim();
+    if (!address) return '';
+    const match = address.match(/^([^,\-]*\d+)[,\-]?/);
+    if (match) return match[1].trim();
+    return address.split(',')[0].trim();
 }
 
 // Função para buscar o nome do local pelo place_id
 async function fetchPlaceName(placeId) {
-  const apiKey = Platform.OS === 'ios' ? GoogleMapApiConfig.ios : GoogleMapApiConfig.android;
-  try {
-    const response = await fetch(
-      `https://maps.googleapis.com/maps/api/place/details/json?placeid=${placeId}&key=${apiKey}`
-    );
-    const data = await response.json();
-    if (data.result && data.result.name) {
-      return data.result.name;
+    const apiKey = Platform.OS === 'ios' ? GoogleMapApiConfig.ios : GoogleMapApiConfig.android;
+    try {
+        const response = await fetch(
+            `https://maps.googleapis.com/maps/api/place/details/json?placeid=${placeId}&key=${apiKey}`
+        );
+        const data = await response.json();
+        if (data.result && data.result.name) {
+            return data.result.name;
+        }
+        return null;
+    } catch (e) {
+        return null;
     }
-    return null;
-  } catch (e) {
-    return null;
-  }
 }
 
 export default function MapScreen(props) {
@@ -263,17 +272,30 @@ export default function MapScreen(props) {
         fetchCoordsfromPlace
     } = api;
     const dispatch = useDispatch();
-    
+
     // Verificar se o FirebaseContext está disponível antes de usar
     let config = null;
     try {
-        // Usar firebase diretamente ao invés de useContext
-        config = firebase?.config;
+        // Tentar usar FirebaseContext primeiro
+        if (FirebaseContext) {
+            const context = useContext(FirebaseContext);
+            config = context?.config;
+        }
     } catch (error) {
-        console.warn('Firebase config não disponível:', error);
+        Logger.warn('FirebaseContext não disponível:', error);
     }
-    
-    // Fallback para config se não estiver disponível
+
+    // Fallback: usar firebase diretamente
+    if (!config) {
+        try {
+            const { firebase } = require('../firebase');
+            config = firebase?.config;
+        } catch (error) {
+            Logger.warn('Firebase não disponível:', error);
+        }
+    }
+
+    // Fallback final para config se não estiver disponível
     if (!config) {
         config = {
             projectId: "leaf-reactnative",
@@ -286,9 +308,12 @@ export default function MapScreen(props) {
             measurementId: "G-22368DBCY9"
         };
     }
-    
+
     const { t } = useTranslation();
     const isRTL = i18n.locale.indexOf('he') === 0 || i18n.locale.indexOf('ar') === 0;
+
+    // Responsive layout hook
+    const { config: responsiveConfig, isTablet, isMobile } = useResponsiveLayout();
 
     const auth = useSelector(state => state.auth);
     const settingsdata = useSelector(state => state.settingsdata.settings);
@@ -312,12 +337,12 @@ export default function MapScreen(props) {
     const [allCarTypes, setAllCarTypes] = useState(fallbackCarTypes);
 
     const cartypesRedux = useSelector(state => state.cartypes);
-    console.log('allCarTypes:', allCarTypes);
-    console.log('cartypesRedux:', cartypesRedux);
+    Logger.log('allCarTypes:', allCarTypes);
+    Logger.log('cartypesRedux:', cartypesRedux);
 
     const filteredCarTypes = useMemo(() => {
         if (!allCarTypes || allCarTypes.length === 0) return [];
-        
+
         return allCarTypes
             .filter(car => car && car.name)
             .sort((a, b) => (a.pos || 0) - (b.pos || 0))
@@ -335,8 +360,16 @@ export default function MapScreen(props) {
     const [bookingDate, setBookingDate] = useState(null);
     const [bookingModalStatus, setBookingModalStatus] = useState(false);
     const [bookLoading, setBookLoading] = useState(false);
+
+    // Loading states
+    const [isLoadingLocation, setIsLoadingLocation] = useState(false);
+    const [isSearchingDrivers, setIsSearchingDrivers] = useState(false);
+    const [isCalculatingRoute, setIsCalculatingRoute] = useState(false);
+    const [isProcessingPayment, setIsProcessingPayment] = useState(false);
+    const [isLoadingCarOptions, setIsLoadingCarOptions] = useState(false);
+    const [isLoadingEstimate, setIsLoadingEstimate] = useState(false);
     const [bookLaterLoading, setBookLaterLoading] = useState(false);
-    
+
     // Estados dos Bottom Sheets
     const [showPixPayment, setShowPixPayment] = useState(false);
     const [showDriverSearch, setShowDriverSearch] = useState(false);
@@ -385,13 +418,13 @@ export default function MapScreen(props) {
 
     const [profileData, setProfileData] = useState({
         firstName: auth && auth.profile && auth.profile.firstName ? auth.profile.firstName : "",
-        lastName:  auth && auth.profile && auth.profile.lastName ? auth.profile.lastName : "",
+        lastName: auth && auth.profile && auth.profile.lastName ? auth.profile.lastName : "",
         email: auth && auth.profile && auth.profile.email ? auth.profile.email : "",
     });
-    const[bookingOnWait,setBookingOnWait] = useState();
+    const [bookingOnWait, setBookingOnWait] = useState();
 
     const addresses = useSelector(state => state.locationdata.addresses);
-    
+
     const [searchModalVisible, setSearchModalVisible] = useState(false);
     const [currentSelection, setCurrentSelection] = useState(null);
     const [searchText, setSearchText] = useState('');
@@ -475,14 +508,14 @@ export default function MapScreen(props) {
             right: 0,
             flexDirection: 'row',
             justifyContent: 'space-between',
-            padding: 20,
+            padding: responsiveConfig.padding,
             paddingTop: 0,
             zIndex: 1000,
         },
         headerButton: {
-            width: 40,
-            height: 40,
-            borderRadius: 20,
+            width: isTablet ? 48 : 40,
+            height: isTablet ? 48 : 40,
+            borderRadius: isTablet ? 24 : 20,
             backgroundColor: theme.card,
             justifyContent: 'center',
             alignItems: 'center',
@@ -863,7 +896,7 @@ export default function MapScreen(props) {
                 onPress={() => onValueChange(!value)}
                 activeOpacity={0.8}
             >
-                <View style={[styles.themeSwitchTrack, { backgroundColor: value ? '#111' : '#fff', borderColor: value ? '#111' : '#ddd' }]}> 
+                <View style={[styles.themeSwitchTrack, { backgroundColor: value ? '#111' : '#fff', borderColor: value ? '#111' : '#ddd' }]}>
                     {/* Sol (esquerda) */}
                     <View style={[styles.themeSwitchIconBubble, {
                         backgroundColor: value ? '#111' : '#111',
@@ -907,112 +940,112 @@ export default function MapScreen(props) {
     // Atualizar estimativas para ambos os tipos ao selecionar pickup e drop
     useEffect(() => {
         const fetchEstimates = async () => {
-            console.log('🔄 fetchEstimates iniciado');
-            console.log('📍 tripdata.pickup:', tripdata.pickup);
-            console.log('📍 tripdata.drop:', tripdata.drop);
-            console.log('🚗 filteredCarTypes:', filteredCarTypes);
-            
+            Logger.log('🔄 fetchEstimates iniciado');
+            Logger.log('📍 tripdata.pickup:', tripdata.pickup);
+            Logger.log('📍 tripdata.drop:', tripdata.drop);
+            Logger.log('🚗 filteredCarTypes:', filteredCarTypes);
+
             if (tripdata.pickup && tripdata.drop) {
                 let estimates = {};
                 let firstPolyline = null;
-                
+
                 for (const car of filteredCarTypes) {
-                    console.log(`🚗 Processando carro: ${car.name}`);
+                    Logger.log(`🚗 Processando carro: ${car.name}`);
                     const tripdataForCar = {
                         pickup: tripdata.pickup,
                         drop: tripdata.drop,
                         carType: { ...car }
                     };
-                    
+
                     try {
-                        console.log(`📞 Chamando prepareEstimateObject para ${car.name}`);
+                        Logger.log(`📞 Chamando prepareEstimateObject para ${car.name}`);
                         const estimateObj = await prepareEstimateObject(tripdataForCar, instructionData);
-                        console.log(`✅ prepareEstimateObject retorno para ${car.name}:`, estimateObj);
-                        
+                        Logger.log(`✅ prepareEstimateObject retorno para ${car.name}:`, estimateObj);
+
                         if (!estimateObj.error && estimateObj.estimateObject && estimateObj.estimateObject.carDetails) {
                             // Calcular tarifa usando FareCalculator
                             let estimateFare = null;
                             let estimateTime = null;
-                            
+
                             if (estimateObj.estimateObject.routeDetails) {
                                 const routeDetails = estimateObj.estimateObject.routeDetails;
                                 const distance = routeDetails.distance_in_km || 0;
                                 const time = routeDetails.time_in_secs || 0;
-                                
+
                                 // Importar FareCalculator dinamicamente
                                 const { FareCalculator } = require('../common/sharedFunctions');
                                 const fareResult = FareCalculator(
-                                    distance, 
-                                    time, 
-                                    car, 
-                                    instructionData, 
+                                    distance,
+                                    time,
+                                    car,
+                                    instructionData,
                                     2, // decimal
                                     null, // routePoints
                                     'car', // vehicleType
                                     null // externalTollFee
                                 );
-                                
+
                                 estimateFare = fareResult.grandTotal;
                                 estimateTime = time;
-                                
-                                console.log(`💰 Tarifa calculada para ${car.name}:`, fareResult);
+
+                                Logger.log(`💰 Tarifa calculada para ${car.name}:`, fareResult);
                             }
-                            
+
                             estimates[car.name] = {
                                 ...estimateObj.estimateObject,
                                 estimateFare: estimateFare,
                                 estimateTime: estimateTime
                             };
-                            
+
                             // Pega a primeira polyline válida
                             if (!firstPolyline && estimateObj.estimateObject.routeDetails && estimateObj.estimateObject.routeDetails.polylinePoints) {
-                                console.log(`🗺️ Decodificando polyline para ${car.name}`);
+                                Logger.log(`🗺️ Decodificando polyline para ${car.name}`);
                                 const points = DecodePolyLine.decode(estimateObj.estimateObject.routeDetails.polylinePoints);
                                 const coordsArr = points.map(point => ({ latitude: point[0], longitude: point[1] }));
                                 firstPolyline = coordsArr;
-                                console.log(`✅ Polyline decodificada:`, coordsArr.length, 'pontos');
+                                Logger.log(`✅ Polyline decodificada:`, coordsArr.length, 'pontos');
                             }
                         } else {
-                            console.log(`❌ Erro no estimateObj para ${car.name}:`, estimateObj);
+                            Logger.log(`❌ Erro no estimateObj para ${car.name}:`, estimateObj);
                             estimates[car.name] = null;
                         }
                     } catch (error) {
-                        console.error(`💥 Erro ao processar ${car.name}:`, error);
+                        Logger.error(`💥 Erro ao processar ${car.name}:`, error);
                         estimates[car.name] = null;
                     }
                 }
-                
-                console.log('📊 Estimates finais:', estimates);
+
+                Logger.log('📊 Estimates finais:', estimates);
                 setCarEstimates(estimates);
-                
+
                 if (firstPolyline) {
                     setRoutePolyline(firstPolyline);
-                    console.log('✅ Polyline gerada e definida:', firstPolyline.length, 'pontos');
+                    Logger.log('✅ Polyline gerada e definida:', firstPolyline.length, 'pontos');
                 } else {
                     setRoutePolyline([]);
-                    console.log('⚠️ Polyline vazia - nenhuma rota válida encontrada');
+                    Logger.log('⚠️ Polyline vazia - nenhuma rota válida encontrada');
                 }
             } else {
-                console.log('⚠️ tripdata.pickup ou tripdata.drop não disponível');
+                Logger.log('⚠️ tripdata.pickup ou tripdata.drop não disponível');
             }
         };
         fetchEstimates();
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [tripdata.pickup, tripdata.drop, allCarTypes]);
 
-    console.log('filteredCarTypes:', filteredCarTypes);
-    console.log('carEstimates:', carEstimates);
+    Logger.log('filteredCarTypes:', filteredCarTypes);
+    Logger.log('carEstimates:', carEstimates);
 
     // Exibir o card apenas se houver pelo menos uma estimativa válida
     const hasValidEstimate = useMemo(() => {
-        return carEstimates && Object.keys(carEstimates).length > 0 && 
-               tripdata.pickup && tripdata.pickup.add && 
-               tripdata.drop && tripdata.drop.add;
+        return carEstimates && Object.keys(carEstimates).length > 0 &&
+            tripdata.pickup && tripdata.pickup.add &&
+            tripdata.drop && tripdata.drop.add;
     }, [carEstimates, tripdata.pickup, tripdata.drop]);
 
     const getEstimateForCar = useCallback((car) => {
         if (!car || !tripdata.pickup || !tripdata.drop) return { fare: '0', time: '0', tollFee: 0 };
-        
+
         try {
             const estimate = carEstimates[car.name];
             if (estimate && estimate.estimateFare) {
@@ -1022,11 +1055,11 @@ export default function MapScreen(props) {
                     tollFee: estimate.tollFee || 0
                 };
             }
-            
+
             // Fallback para cálculo local se necessário
             return { fare: '0', time: '0', tollFee: 0 };
         } catch (error) {
-            console.error('Erro ao calcular estimativa:', error);
+            Logger.error('Erro ao calcular estimativa:', error);
             return { fare: '0', time: '0', tollFee: 0 };
         }
     }, [carEstimates, tripdata.pickup, tripdata.drop]);
@@ -1044,7 +1077,12 @@ export default function MapScreen(props) {
             try {
                 let { status } = await Location.requestForegroundPermissionsAsync();
                 if (status !== 'granted') {
+                    // ✅ CRÍTICO: Se permissão negada, usar região padrão para garantir que o mapa renderize
+                    Logger.warn('⚠️ Permissão de localização negada, usando região padrão');
+                    // ✅ SEMPRE definir região padrão (nunca crashar)
+                    setRegion(DEFAULT_REGION);
                     setLocationRejected(true);
+                    pageActive.current = true;
                     return;
                 }
 
@@ -1061,7 +1099,7 @@ export default function MapScreen(props) {
 
                 setRegion(initialRegion);
                 pageActive.current = true;
-                
+
                 dispatch({
                     type: 'UPDATE_GPS_LOCATION',
                     payload: {
@@ -1083,8 +1121,12 @@ export default function MapScreen(props) {
                     );
                 }
             } catch (error) {
-                console.error('Error getting location:', error);
+                // ✅ CRÍTICO: Sempre ter fallback - nunca crashar
+                Logger.error('Error getting location:', error);
+                // ✅ Em caso de erro, usar região padrão para garantir que o mapa renderize
+                setRegion(DEFAULT_REGION);
                 setLocationRejected(true);
+                pageActive.current = true;
             }
         };
 
@@ -1093,20 +1135,20 @@ export default function MapScreen(props) {
             pageActive.current = false;
         };
     }, []);
-    
+
     useEffect(() => {
         if (auth.profile) {
-            setTimeout(()=>{
+            setTimeout(() => {
                 setTerm(true)
-            },2000);
+            }, 2000);
             setCheckTerm(auth.profile.term ? true : false)
-            if(bookingOnWait){
+            if (bookingOnWait) {
                 finaliseBooking(bookingOnWait);
                 setBookingOnWait(null);
                 setBookModelLoading(false);
             }
         }
-    }, [auth.profile,bookingOnWait])
+    }, [auth.profile, bookingOnWait])
 
     const isTermRequired = settings && settings.term_required === true;
     const isProfileApproved = auth && auth.profile && auth.profile.usertype === 'driver' ? auth.profile.approved === true : true;
@@ -1116,26 +1158,26 @@ export default function MapScreen(props) {
             setSettings(settingsdata);
         }
     }, [settingsdata]);
-    
+
     useEffect(() => {
         if (usersdata.drivers) {
             const freeDrivers = usersdata.drivers.filter(d => !d.queue)
-          let arr = [];
-          for (let i = 0; i < freeDrivers.length; i++) {
-            let driver = freeDrivers[i];
-            if (!driver.carType) {
-              let carTypes = allCarTypes;
-              for (let i = 0; i < carTypes.length; i++) {
-                let temp = { ...driver, carType: carTypes[i].name };
-                arr.push(temp);
-              }
-            } else {
-              arr.push(driver);
+            let arr = [];
+            for (let i = 0; i < freeDrivers.length; i++) {
+                let driver = freeDrivers[i];
+                if (!driver.carType) {
+                    let carTypes = allCarTypes;
+                    for (let i = 0; i < carTypes.length; i++) {
+                        let temp = { ...driver, carType: carTypes[i].name };
+                        arr.push(temp);
+                    }
+                } else {
+                    arr.push(driver);
+                }
             }
-          }
-          setDrivers(arr);
+            setDrivers(arr);
         }
-      }, [usersdata.drivers]);
+    }, [usersdata.drivers]);
 
     useEffect(() => {
         if (auth.profile && auth.profile.uid) {
@@ -1185,9 +1227,9 @@ export default function MapScreen(props) {
             setBookLaterLoading(false);
         }
         if (estimatedata.estimate && settings && !settings.coustomerBidPrice) {
-            let  price = estimatedata.estimate.estimateFare;
-            let ammount =  settings.coustomerBidPriceType === 'flat' ? parseFloat(price- settings.bidprice).toFixed(settings.decimal) : parseFloat(price - parseFloat(price*(settings.bidprice/100))).toFixed(settings.decimal);
-            if(ammount && ammount > 0){setMinimumPrice(ammount)}
+            let price = estimatedata.estimate.estimateFare;
+            let ammount = settings.coustomerBidPriceType === 'flat' ? parseFloat(price - settings.bidprice).toFixed(settings.decimal) : parseFloat(price - parseFloat(price * (settings.bidprice / 100))).toFixed(settings.decimal);
+            if (ammount && ammount > 0) { setMinimumPrice(ammount) }
         }
         if (estimatedata.error && estimatedata.error.flag) {
             setBookLoading(false);
@@ -1303,7 +1345,7 @@ export default function MapScreen(props) {
                 duration: 300,
                 useNativeDriver: false
             }).start();
-            
+
             // Carregar categorias de carros e preços
             handleGetEstimate();
             getDrivers();
@@ -1357,83 +1399,83 @@ export default function MapScreen(props) {
     }
 
 
-  const setAddresses = async (pos, res, source) => {
-    if (res) {
-      if (tripdata.selected == "pickup") {
-        dispatch(
-          updateTripPickup({
-            lat: pos.latitude,
-            lng: pos.longitude,
-            add: res,
-            source: source,
-          })
-        );
-        if (source == "init") {
-          dispatch(
-            updateTripDrop({
-              lat: pos.latitude,
-              lng: pos.longitude,
-              add: null,
-              source: source,
-            })
-          );
+    const setAddresses = async (pos, res, source) => {
+        if (res) {
+            if (tripdata.selected == "pickup") {
+                dispatch(
+                    updateTripPickup({
+                        lat: pos.latitude,
+                        lng: pos.longitude,
+                        add: res,
+                        source: source,
+                    })
+                );
+                if (source == "init") {
+                    dispatch(
+                        updateTripDrop({
+                            lat: pos.latitude,
+                            lng: pos.longitude,
+                            add: null,
+                            source: source,
+                        })
+                    );
+                }
+            } else {
+                dispatch(
+                    updateTripDrop({
+                        lat: pos.latitude,
+                        lng: pos.longitude,
+                        add: res,
+                        source: source,
+                    })
+                );
+            }
         }
-      } else {
-        dispatch(
-          updateTripDrop({
-            lat: pos.latitude,
-            lng: pos.longitude,
-            add: res,
-            source: source,
-          })
-        );
-      }
-    }
-  };
+    };
 
-  const updateAddresses = async (pos, source) => {
-    let latlng = pos.latitude + "," + pos.longitude;
-    if (!pos.latitude) return;
-    let res='';
-    let  found = false;
-    let savedAddresses = [];
+    const updateAddresses = async (pos, source) => {
+        let latlng = pos.latitude + "," + pos.longitude;
+        if (!pos.latitude) return;
+        let res = '';
+        let found = false;
+        let savedAddresses = [];
 
-    try {
-      const value = addresses;
-      if (value !== null) {
-        savedAddresses = JSON.parse(value);
-        for(let i =0; i<savedAddresses.length; i++){
-          let distance = GetDistance(pos.latitude, pos.longitude, savedAddresses[i].lat, savedAddresses[i].lng);
-          if(distance<0.25){
-            res=savedAddresses[i].description;
-            found = true;
-            break;
-          }
+        try {
+            const value = addresses;
+            if (value !== null) {
+                savedAddresses = JSON.parse(value);
+                for (let i = 0; i < savedAddresses.length; i++) {
+                    let distance = GetDistance(pos.latitude, pos.longitude, savedAddresses[i].lat, savedAddresses[i].lng);
+                    if (distance < 0.25) {
+                        res = savedAddresses[i].description;
+                        found = true;
+                        break;
+                    }
+                }
+            }
+        } catch (error) {
+            found = false;
         }
-      }
-    } catch (error) {
-      found = false;
-    }
 
-    if(found){
-      setAddresses(pos, res, source);
-    } else{
-      fetchAddressfromCoords(latlng).then((add) => {  
-        if (add) {
-          savedAddresses.push({
-            lat: pos.latitude,
-            lng: pos.longitude,
-            description: add
-          });
-          storeAddresses(savedAddresses);
-          setAddresses(pos, add, source);
+        if (found) {
+            setAddresses(pos, res, source);
+        } else {
+            fetchAddressfromCoords(latlng).then((add) => {
+                if (add) {
+                    savedAddresses.push({
+                        lat: pos.latitude,
+                        lng: pos.longitude,
+                        description: add
+                    });
+                    storeAddresses(savedAddresses);
+                    setAddresses(pos, add, source);
+                }
+            });
         }
-      });
-    }
-  };
+    };
 
     const onRegionChangeComplete = (newregion, gesture) => {
-        if((tripdata.pickup && tripdata.pickup.source =='mapSelect') || (tripdata.drop && tripdata.drop.source =='mapSelect')){
+        if ((tripdata.pickup && tripdata.pickup.source == 'mapSelect') || (tripdata.drop && tripdata.drop.source == 'mapSelect')) {
             if (gesture && gesture.isGesture) {
                 updateAddresses({
                     latitude: newregion.latitude,
@@ -1469,17 +1511,17 @@ export default function MapScreen(props) {
     const getDrivers = async () => {
         if (tripdata.pickup) {
             try {
-                console.log('🚗 Buscando motoristas próximos...');
-                
+                Logger.log('🚗 Buscando motoristas próximos...');
+
                 // Usar nova função otimizada com Redis
                 const nearbyDrivers = await dispatch(fetchNearbyDrivers(
-                    tripdata.pickup.lat, 
-                    tripdata.pickup.lng, 
+                    tripdata.pickup.lat,
+                    tripdata.pickup.lng,
                     (settings && settings.driverRadius) ? settings.driverRadius : 10,
                     { appType: 'app' }
                 ));
 
-                console.log('📍 Motoristas encontrados:', nearbyDrivers.length);
+                Logger.log('📍 Motoristas encontrados:', nearbyDrivers.length);
 
                 if (nearbyDrivers && nearbyDrivers.length > 0) {
                     let availableDrivers = [];
@@ -1508,8 +1550,8 @@ export default function MapScreen(props) {
                             // Usar distância já calculada pelo Redis/Firebase
                             for (let i = 0; i < sortedDrivers.length; i++) {
                                 const driver = sortedDrivers[i];
-                                const timeEstimate = driver.distance ? 
-                                    ((driver.distance * 2) + 1).toFixed(0) + ' min' : 
+                                const timeEstimate = driver.distance ?
+                                    ((driver.distance * 2) + 1).toFixed(0) + ' min' :
                                     '5 min';
                                 distArr.push({ timein_text: timeEstimate, found: true });
                             }
@@ -1520,7 +1562,7 @@ export default function MapScreen(props) {
                             let driver = { ...sortedDrivers[i] };
                             if (distArr[i] && distArr[i].found && cars) {
                                 driver.arriveTime = distArr[i];
-                                
+
                                 // Adicionar imagem do carro
                                 for (let j = 0; j < cars.length; j++) {
                                     if (cars[j].name == driver.carType) {
@@ -1590,21 +1632,21 @@ export default function MapScreen(props) {
 
                     setFreeCars(availableDrivers);
                     setAllCarTypes(carWiseArr);
-                    
-                    console.log('✅ Motoristas processados:', availableDrivers.length);
+
+                    Logger.log('✅ Motoristas processados:', availableDrivers.length);
                 } else {
-                    console.log('⚠️ Nenhum motorista encontrado na área');
+                    Logger.log('⚠️ Nenhum motorista encontrado na área');
                     setFreeCars([]);
                     resetCars();
                 }
             } catch (error) {
-                console.error('❌ Erro ao buscar motoristas:', error);
+                Logger.error('❌ Erro ao buscar motoristas:', error);
                 setFreeCars([]);
                 resetCars();
             }
         }
     }
-    
+
     const tapAddress = (selection) => {
         setSearchModalVisible(true);
         setCurrentSelection(selection);
@@ -1618,61 +1660,62 @@ export default function MapScreen(props) {
             setBookLoading(true);
             if (!(profile.mobile && profile.mobile.length > 6)) {
                 Alert.alert(t('alert'), t('mobile_need_update'));
-                props.navigation.dispatch(CommonActions.reset({ index: 0, routes: [{ name: 'Profile', params: { fromPage: 'Map'} }] }));
+                props.navigation.dispatch(CommonActions.reset({ index: 0, routes: [{ name: 'Profile', params: { fromPage: 'Map' } }] }));
                 setBookLoading(false);
             } else {
                 if ((settings && settings.imageIdApproval && auth.profile.verifyId && auth.profile.verifyIdImage) || (settings && !settings.imageIdApproval)) {
-                 if(auth.profile.approved){
-                    if (tripdata.pickup && tripdata.drop && tripdata.drop.add) {
-                        if (!tripdata.carType) {
-                            setBookLoading(false);
-                            Alert.alert(t('alert'), t('car_type_blank_error'))
-                        } else {
-                            let driver_available = false;
-                            for (let i = 0; i < allCarTypes.length; i++) {
-                                let car = allCarTypes[i];
-                                if (car.name == tripdata.carType.name && car.minTime) {
-                                    driver_available = true;
-                                    break;
-                                }
-                            }
-                            if (driver_available) {
-                                setBookingDate(null);
-                                setBookingType(false);
-                                if (appConsts.hasOptions  &&
-                                    (tripdata?.carType?.options?.length > 0 || tripdata?.carType?.parcelTypes?.length > 0)) {
-                                    setOptionModalStatus(true);
-                                    setBookLaterLoading(false);
-                                } else {
-                                    let result = await prepareEstimateObject(tripdata, instructionData);
-                                    if (result.error) {
-                                        setBookLoading(false);
-                                        Alert.alert(t('alert'), result.msg);
-                                    } else {
-                                        dispatch(getEstimate((await result).estimateObject));
+                    if (auth.profile.approved) {
+                        if (tripdata.pickup && tripdata.drop && tripdata.drop.add) {
+                            if (!tripdata.carType) {
+                                setBookLoading(false);
+                                Alert.alert(t('alert'), t('car_type_blank_error'))
+                            } else {
+                                let driver_available = false;
+                                for (let i = 0; i < allCarTypes.length; i++) {
+                                    let car = allCarTypes[i];
+                                    if (car.name == tripdata.carType.name && car.minTime) {
+                                        driver_available = true;
+                                        break;
                                     }
                                 }
-                            } else {
-                                Alert.alert(t('alert'), t('no_driver_found_alert_messege'));
-                                setBookLoading(false);
+                                if (driver_available) {
+                                    setBookingDate(null);
+                                    setBookingType(false);
+                                    if (appConsts.hasOptions &&
+                                        (tripdata?.carType?.options?.length > 0 || tripdata?.carType?.parcelTypes?.length > 0)) {
+                                        setOptionModalStatus(true);
+                                        setBookLaterLoading(false);
+                                    } else {
+                                        let result = await prepareEstimateObject(tripdata, instructionData);
+                                        if (result.error) {
+                                            setBookLoading(false);
+                                            Alert.alert(t('alert'), result.msg);
+                                        } else {
+                                            dispatch(getEstimate((await result).estimateObject));
+                                        }
+                                    }
+                                } else {
+                                    Alert.alert(t('alert'), t('no_driver_found_alert_messege'));
+                                    setBookLoading(false);
+                                }
                             }
+                        } else {
+                            Alert.alert(t('alert'), t('drop_location_blank_error'));
+                            setBookLoading(false);
                         }
                     } else {
-                        Alert.alert(t('alert'), t('drop_location_blank_error'));
+                        Alert.alert(t('alert'), t('admin_contact'));
                         setBookLoading(false);
                     }
-                 }else{
-                    Alert.alert(t('alert'), t('admin_contact'));
-                    setBookLoading(false);
-                 }
                 } else {
                     Alert.alert(
                         t('alert'),
                         t('verifyid_error'),
                         [
                             { text: t('cancel'), onPress: () => { setBookLoading(true) }, style: 'cancel' },
-                            { text: t('ok'), onPress: () =>   
-                                props.navigation.dispatch(CommonActions.reset({index: 0, routes:[{ name: 'editUser', params: { fromPage: 'Map'} }]})) 
+                            {
+                                text: t('ok'), onPress: () =>
+                                    props.navigation.dispatch(CommonActions.reset({ index: 0, routes: [{ name: 'editUser', params: { fromPage: 'Map' } }] }))
                             }
                         ],
                         { cancelable: false }
@@ -1689,20 +1732,24 @@ export default function MapScreen(props) {
 
     // Funções de callback dos Bottom Sheets
     const handlePaymentSuccess = (paymentData) => {
-        console.log('Pagamento PIX confirmado:', paymentData);
+        Logger.log('Pagamento PIX confirmado:', paymentData);
         setShowPixPayment(false);
         setShowDriverSearch(true);
         // Aqui você pode adicionar lógica para iniciar a busca de motoristas
     };
 
     const handlePaymentFailed = (error) => {
-        console.error('Erro no pagamento PIX:', error);
+        Logger.error('Erro no pagamento PIX:', error);
         setShowPixPayment(false);
-        Alert.alert('Erro', 'Falha no pagamento PIX. Tente novamente.');
+        Alert.alert(
+            'Falha no pagamento',
+            'Não foi possível processar o pagamento PIX. Por favor, verifique sua conexão e tente novamente.',
+            [{ text: 'OK' }]
+        );
     };
 
     const handleDriverSelected = (driver) => {
-        console.log('Motorista selecionado:', driver);
+        Logger.log('Motorista selecionado:', driver);
         setSelectedDriver(driver);
         setShowDriverSearch(false);
         // Aqui você pode adicionar lógica para iniciar a viagem
@@ -1720,31 +1767,32 @@ export default function MapScreen(props) {
         if (parseFloat(profile.walletBalance) >= 0) {
             if (!(profile.mobile && profile.mobile.length > 6)) {
                 Alert.alert(t('alert'), t('mobile_need_update'));
-                props.navigation.dispatch(CommonActions.reset({ index: 0, routes: [{ name: 'Profile', params: { fromPage: 'Map'} }] }));
+                props.navigation.dispatch(CommonActions.reset({ index: 0, routes: [{ name: 'Profile', params: { fromPage: 'Map' } }] }));
             } else {
                 if ((settings && settings.imageIdApproval && auth.profile.verifyId && auth.profile.verifyIdImage) || (settings && !settings.imageIdApproval)) {
-                  if(auth.profile.approved){
-                    if (tripdata.pickup && tripdata.drop && tripdata.drop.add) {
-                        if (tripdata.carType) {
-                            setInitDate(new Date());
-                            setDatePickerOpen(true);
+                    if (auth.profile.approved) {
+                        if (tripdata.pickup && tripdata.drop && tripdata.drop.add) {
+                            if (tripdata.carType) {
+                                setInitDate(new Date());
+                                setDatePickerOpen(true);
+                            } else {
+                                Alert.alert(t('alert'), t('car_type_blank_error'))
+                            }
                         } else {
-                            Alert.alert(t('alert'), t('car_type_blank_error'))
+                            Alert.alert(t('alert'), t('drop_location_blank_error'))
                         }
                     } else {
-                        Alert.alert(t('alert'), t('drop_location_blank_error'))
+                        Alert.alert(t('alert'), t('admin_contact'))
                     }
-                  }else{
-                    Alert.alert(t('alert'), t('admin_contact'))
-                  }
                 } else {
                     Alert.alert(
                         t('alert'),
                         t('verifyid_error'),
                         [
                             { text: t('cancel'), onPress: () => { }, style: 'cancel' },
-                            { text: t('ok'), onPress: () =>   
-                                props.navigation.dispatch(CommonActions.reset({index: 0, routes:[{ name: 'editUser', params: { fromPage: 'Map'} }]})) 
+                            {
+                                text: t('ok'), onPress: () =>
+                                    props.navigation.dispatch(CommonActions.reset({ index: 0, routes: [{ name: 'editUser', params: { fromPage: 'Map' } }] }))
                             }
                         ],
                         { cancelable: false }
@@ -1761,60 +1809,60 @@ export default function MapScreen(props) {
 
     const hideDatePicker = () => {
         setDatePickerOpen(false);
-      };
+    };
 
-      const handleDateConfirm = (date) => {
+    const handleDateConfirm = (date) => {
         setInitDate(date);
         setDatePickerOpen(false);
-            setBookLaterLoading(true);
-            setTimeout(async () => {
-                let date1;
-                try{
-                    // Usar um fallback se config não estiver disponível
-                    const projectId = config?.projectId || 'leaf-reactnative';
-                    let res =  await fetch(`https://${projectId}.web.app/getservertime`, { method: 'GET', headers: {'Content-Type': 'application/json'}});
-                    const json = await res.json();
-                    if(json.time){
-                        date1 = json.time;
-                    } else{
-                        date1 = new Date().getTime();
-                    }
-                }catch (err){
+        setBookLaterLoading(true);
+        setTimeout(async () => {
+            let date1;
+            try {
+                // Usar um fallback se config não estiver disponível
+                const projectId = config?.projectId || 'leaf-reactnative';
+                let res = await fetch(`https://${projectId}.web.app/getservertime`, { method: 'GET', headers: { 'Content-Type': 'application/json' } });
+                const json = await res.json();
+                if (json.time) {
+                    date1 = json.time;
+                } else {
                     date1 = new Date().getTime();
                 }
-                
-                const date2 = new Date(date);
-                const diffTime = date2 - date1;
-                const diffMins =  diffTime / (1000 * 60);
+            } catch (err) {
+                date1 = new Date().getTime();
+            }
 
-                if (diffMins < 15) {
+            const date2 = new Date(date);
+            const diffTime = date2 - date1;
+            const diffMins = diffTime / (1000 * 60);
+
+            if (diffMins < 15) {
+                setBookLaterLoading(false);
+                Alert.alert(
+                    t('alert'),
+                    t('past_booking_error'),
+                    [
+                        { text: t('ok'), onPress: () => { } }
+                    ],
+                    { cancelable: true }
+                );
+            } else {
+                setBookingDate(date);
+                setBookingType(true);
+                if (appConsts.hasOptions) {
+                    setOptionModalStatus(true);
                     setBookLaterLoading(false);
-                    Alert.alert(
-                        t('alert'),
-                        t('past_booking_error'),
-                        [
-                            { text: t('ok'), onPress: () => { } }
-                        ],
-                        { cancelable: true }
-                    );
                 } else {
-                    setBookingDate(date);
-                    setBookingType(true);
-                    if (appConsts.hasOptions) {
-                        setOptionModalStatus(true);
-                        setBookLaterLoading(false);
+                    let result = await prepareEstimateObject(tripdata, instructionData);
+                    if (result.error) {
+                        setBookLoading(false);
+                        Alert.alert(t('alert'), result.msg);
                     } else {
-                        let result = await prepareEstimateObject(tripdata, instructionData);
-                        if (result.error) {
-                            setBookLoading(false);
-                            Alert.alert(t('alert'), result.msg);
-                        } else {
-                            dispatch(getEstimate((await result).estimateObject));
-                        }
+                        dispatch(getEstimate((await result).estimateObject));
                     }
                 }
-            }, 1000);
-        
+            }
+        }, 1000);
+
     };
 
 
@@ -1886,7 +1934,7 @@ export default function MapScreen(props) {
             setBookModelLoading(true);
             const selectedCar = filteredCarTypes.find(car => car.name === selectedCarType);
             if (!selectedCar) {
-                console.error('Carro selecionado não encontrado');
+                Logger.error('Carro selecionado não encontrado');
                 return;
             }
 
@@ -1898,7 +1946,7 @@ export default function MapScreen(props) {
 
             await finaliseBooking(bookingData);
         } catch (error) {
-            console.error('Erro ao agendar:', error);
+            Logger.error('Erro ao agendar:', error);
         } finally {
             setBookModelLoading(false);
         }
@@ -1941,31 +1989,31 @@ export default function MapScreen(props) {
     const changePermission = async () => {
         let { status } = await Location.requestForegroundPermissionsAsync();
         if (status != 'granted') {
-     if(Platform.OS == 'ios'){
+            if (Platform.OS == 'ios') {
                 Linking.openSettings()
-            } else{
+            } else {
                 startActivityAsync(ActivityAction.LOCATION_SOURCE_SETTINGS);
             }
-         } 
+        }
     }
-    const onTermAccept =  () => {        
-        if(checkTerm == false){
-           dispatch(updateProfile({term: true}));
-       }
-   }
-    const  onTermLink  = async () => {
-        Linking.openURL(settings.CompanyTermCondition).catch(err => console.error("Couldn't load page", err));
-   }
+    const onTermAccept = () => {
+        if (checkTerm == false) {
+            dispatch(updateProfile({ term: true }));
+        }
+    }
+    const onTermLink = async () => {
+        Linking.openURL(settings.CompanyTermCondition).catch(err => Logger.error("Couldn't load page", err));
+    }
 
-const onMapSelectComplete = () => {
-    if((tripdata.pickup && tripdata.pickup.source =='mapSelect') || (tripdata.drop && tripdata.drop.source =='mapSelect')){
-       if(tripdata.selected === 'pickup'){
-           dispatch(updateTripPickup({...tripdata.pickup, source:"region-change"}))
-       } else{
-           dispatch(updateTripDrop({...tripdata.drop, source:"region-change"}))
-       }
+    const onMapSelectComplete = () => {
+        if ((tripdata.pickup && tripdata.pickup.source == 'mapSelect') || (tripdata.drop && tripdata.drop.source == 'mapSelect')) {
+            if (tripdata.selected === 'pickup') {
+                dispatch(updateTripPickup({ ...tripdata.pickup, source: "region-change" }))
+            } else {
+                dispatch(updateTripDrop({ ...tripdata.drop, source: "region-change" }))
+            }
+        }
     }
-  }
 
     const handleSearch = useCallback(async (text) => {
         if (!text || text.length < 3) {
@@ -1977,7 +2025,7 @@ const onMapSelectComplete = () => {
             const results = await fetchPlacesAutocomplete(text);
             setSearchResults(results || []);
         } catch (error) {
-            console.error('Erro na busca:', error);
+            Logger.error('Erro na busca:', error);
             setSearchResults([]);
         }
     }, []);
@@ -2001,7 +2049,7 @@ const onMapSelectComplete = () => {
                 }
             }
         } catch (error) {
-            console.error('Erro ao selecionar endereço:', error);
+            Logger.error('Erro ao selecionar endereço:', error);
         }
     }, [activeField]);
 
@@ -2013,7 +2061,7 @@ const onMapSelectComplete = () => {
                     setAddressHistory(JSON.parse(history));
                 }
             } catch (error) {
-                console.error('Error loading address history:', error);
+                Logger.error('Error loading address history:', error);
             }
         };
         loadAddressHistory();
@@ -2025,25 +2073,25 @@ const onMapSelectComplete = () => {
             setAddressHistory(newHistory);
             await AsyncStorage.setItem('addressHistory', JSON.stringify(newHistory));
         } catch (error) {
-            console.error('Error saving address to history:', error);
+            Logger.error('Error saving address to history:', error);
         }
     };
 
     // Memoizar marcadores dos carros
     const CarMarkers = useMemo(() => {
         if (!freeCars || freeCars.length === 0) return null;
-        
+
         return freeCars.map((item, index) => (
             <Marker.Animated
-                coordinate={{ 
-                    latitude: item.location ? item.location.lat : 0.00, 
-                    longitude: item.location ? item.location.lng : 0.00 
+                coordinate={{
+                    latitude: item.location ? item.location.lat : 0.00,
+                    longitude: item.location ? item.location.lng : 0.00
                 }}
                 key={`car-${index}`}
             >
                 <Image
-                    source={settings && settings.carType_required && item.carImage ? 
-                        {uri: item.carImage} : 
+                    source={settings && settings.carType_required && item.carImage ?
+                        { uri: item.carImage } :
                         require('../../assets/images/microBlackCar.png')
                     }
                     style={{ height: 48, width: 48, resizeMode: 'contain' }}
@@ -2055,7 +2103,7 @@ const onMapSelectComplete = () => {
     // Memoizar marcadores de origem e destino
     const RouteMarkers = useMemo(() => {
         const markers = [];
-        
+
         if (tripdata.pickup && tripdata.pickup.lat && tripdata.pickup.lng) {
             markers.push(
                 <Marker
@@ -2067,7 +2115,7 @@ const onMapSelectComplete = () => {
                 </Marker>
             );
         }
-        
+
         if (tripdata.drop && tripdata.drop.lat && tripdata.drop.lng) {
             markers.push(
                 <Marker
@@ -2079,14 +2127,14 @@ const onMapSelectComplete = () => {
                 </Marker>
             );
         }
-        
+
         return markers;
     }, [tripdata.pickup, tripdata.drop, isDarkMode]);
 
     // Memoizar polyline da rota
     const RoutePolyline = useMemo(() => {
         if (!routePolyline || routePolyline.length < 2) return null;
-        
+
         return (
             <Polyline
                 coordinates={routePolyline}
@@ -2105,11 +2153,11 @@ const onMapSelectComplete = () => {
             <View style={styles.dropdownContainerModern}>
                 <View style={[styles.dropdownContentModern, { backgroundColor: theme.dropdown }]}>
                     <View style={styles.searchContainerModern}>
-                        <Icon 
-                            name="search" 
-                            type="material" 
-                            color={theme.icon} 
-                            size={20} 
+                        <Icon
+                            name="search"
+                            type="material"
+                            color={theme.icon}
+                            size={20}
                             style={styles.searchIconModern}
                         />
                         <TextInput
@@ -2121,7 +2169,7 @@ const onMapSelectComplete = () => {
                             autoFocus={true}
                         />
                         {searchText.length > 0 && (
-                            <TouchableOpacity 
+                            <TouchableOpacity
                                 onPress={() => {
                                     setSearchText('');
                                     setSearchResults([]);
@@ -2147,11 +2195,11 @@ const onMapSelectComplete = () => {
                                         setIsDropdownVisible(false);
                                     }}
                                 >
-                                    <Icon 
-                                        name="history" 
-                                        type="material" 
-                                        color={theme.icon} 
-                                        size={20} 
+                                    <Icon
+                                        name="history"
+                                        type="material"
+                                        color={theme.icon}
+                                        size={20}
                                         style={styles.historyIconModern}
                                     />
                                     <Text style={[styles.historyTextModern, { color: theme.text }]} numberOfLines={2}>
@@ -2174,11 +2222,11 @@ const onMapSelectComplete = () => {
                                         setIsDropdownVisible(false);
                                     }}
                                 >
-                                    <Icon 
-                                        name="location-on" 
-                                        type="material" 
-                                        color={theme.icon} 
-                                        size={20} 
+                                    <Icon
+                                        name="location-on"
+                                        type="material"
+                                        color={theme.icon}
+                                        size={20}
                                         style={styles.resultIconModern}
                                     />
                                     <Text style={[styles.resultTextModern, { color: theme.text }]} numberOfLines={2}>
@@ -2216,12 +2264,12 @@ const onMapSelectComplete = () => {
                         }}
                     >
                         <Icon name="my-location" type="material" color={theme.icon} size={22} containerStyle={styles.addressIcon} />
-                        <Text 
+                        <Text
                             style={
-                                tripdata.pickup && (tripdata.pickup.placeName || getStreetAndNumber(tripdata.pickup.add)) ? 
-                                [styles.addressText, { color: theme.text }] : 
-                                [styles.addressPlaceholder, { color: theme.placeholder }]
-                            } 
+                                tripdata.pickup && (tripdata.pickup.placeName || getStreetAndNumber(tripdata.pickup.add)) ?
+                                    [styles.addressText, { color: theme.text }] :
+                                    [styles.addressPlaceholder, { color: theme.placeholder }]
+                            }
                             numberOfLines={2}
                         >
                             {tripdata.pickup && (tripdata.pickup.placeName || getStreetAndNumber(tripdata.pickup.add)) || 'Escolha o ponto de partida'}
@@ -2239,12 +2287,12 @@ const onMapSelectComplete = () => {
                         }}
                     >
                         <Icon name="location-on" type="material" color={theme.icon} size={22} containerStyle={styles.addressIcon} />
-                        <Text 
+                        <Text
                             style={
-                                tripdata.drop && (tripdata.drop.placeName || getStreetAndNumber(tripdata.drop.add)) ? 
-                                [styles.addressText, { color: theme.text }] : 
-                                [styles.addressPlaceholder, { color: theme.placeholder }]
-                            } 
+                                tripdata.drop && (tripdata.drop.placeName || getStreetAndNumber(tripdata.drop.add)) ?
+                                    [styles.addressText, { color: theme.text }] :
+                                    [styles.addressPlaceholder, { color: theme.placeholder }]
+                            }
                             numberOfLines={2}
                         >
                             {tripdata.drop && (tripdata.drop.placeName || getStreetAndNumber(tripdata.drop.add)) || 'Escolha o destino'}
@@ -2257,67 +2305,92 @@ const onMapSelectComplete = () => {
 
     // Componente para opções de carro
     const CarOptionsCard = useMemo(() => {
-        if (!filteredCarTypes || filteredCarTypes.length === 0) return null;
         if (!tripdata.pickup || !tripdata.drop || !tripdata.drop.add) return null;
-        
+
         return (
             <View style={styles.carOptionsContainer}>
                 <View style={[styles.carOptionsMainCard, { backgroundColor: theme.card }]}>
-                    {filteredCarTypes.map((car, index) => (
-                        <TouchableOpacity
-                            key={car.id || index}
-                            style={[
-                                styles.carCard,
-                                selectedCarType === car.name && styles.selectedCarCard
-                            ]}
-                            onPress={() => setSelectedCarType(car.name)}
-                        >
-                            <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                                <Image
-                                    source={{ uri: car.image }}
-                                    style={styles.carImage}
-                                />
-                                <View style={styles.carInfo}>
-                                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-                                        <Text style={styles.carNameValue}>{car.name}</Text>
-                                        <Text style={styles.priceNameValue}>
-                                            {carEstimates[car.name]?.estimateFare ? 
-                                                `${settings.currency}${carEstimates[car.name].estimateFare.toFixed(settings.decimal)}` : 
-                                                `${settings.currency}${car.min_fare.toFixed(settings.decimal)}`
-                                            }
-                                        </Text>
-                                    </View>
-                                    <View style={styles.carDetailsRow}>
-                                        <Text style={styles.carSubInfo}>{car.extra_info}</Text>
+                    {isLoadingCarOptions ? (
+                        // Skeleton loading para opções de carro
+                        <>
+                            <CarSkeletonCard />
+                            <CarSkeletonCard />
+                            <CarSkeletonCard />
+                        </>
+                    ) : filteredCarTypes && filteredCarTypes.length > 0 ? (
+                        filteredCarTypes.map((car, index) => (
+                            <TouchableOpacity
+                                key={car.id || index}
+                                style={[
+                                    styles.carCard,
+                                    selectedCarType === car.name && styles.selectedCarCard
+                                ]}
+                                onPress={() => setSelectedCarType(car.name)}
+                            >
+                                <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                                    <Image
+                                        source={{ uri: car.image }}
+                                        style={styles.carImage}
+                                    />
+                                    <View style={styles.carInfo}>
+                                        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                                            <Text style={styles.carNameValue}>{car.name}</Text>
+                                            <Text style={styles.priceNameValue}>
+                                                {carEstimates[car.name]?.estimateFare ?
+                                                    `${settings.currency}${carEstimates[car.name].estimateFare.toFixed(settings.decimal)}` :
+                                                    `${settings.currency}${car.min_fare.toFixed(settings.decimal)}`
+                                                }
+                                            </Text>
+                                        </View>
+                                        <View style={styles.carDetailsRow}>
+                                            <Text style={styles.carSubInfo}>{car.extra_info}</Text>
+                                        </View>
                                     </View>
                                 </View>
-                            </View>
-                        </TouchableOpacity>
-                    ))}
+                            </TouchableOpacity>
+                        ))
+                    ) : null}
                 </View>
             </View>
         );
-    }, [filteredCarTypes, selectedCarType, carEstimates, settings, theme, tripdata.pickup, tripdata.drop]);
+    }, [filteredCarTypes, selectedCarType, carEstimates, settings, theme, tripdata.pickup, tripdata.drop, isLoadingCarOptions]);
 
     // Componente para o botão de agendamento
     const BookButton = useMemo(() => {
         if (!selectedCarType || !tripdata.pickup || !tripdata.drop || !tripdata.drop.add) return null;
-        
+
         const selectedCar = filteredCarTypes.find(car => car.name === selectedCarType);
         const estimate = getEstimateForCar(selectedCar);
-        
+
+        const getButtonText = () => {
+            if (isLoadingEstimate) return 'Calculando preço...';
+            if (isSearchingDrivers) return 'Buscando motoristas...';
+            if (isProcessingPayment) return 'Processando pagamento...';
+            if (bookModelLoading) return 'Aguarde...';
+            return 'Agendar Agora';
+        };
+
+        const isButtonDisabled = bookModelLoading || isLoadingEstimate || isSearchingDrivers || isProcessingPayment;
+
         return (
             <View style={styles.bookButtonContainer}>
                 <TouchableOpacity
                     style={[
                         styles.bookButton,
-                        bookModelLoading && styles.bookButtonDisabled
+                        isButtonDisabled && styles.bookButtonDisabled
                     ]}
                     onPress={bookNow}
-                    disabled={bookModelLoading}
+                    disabled={isButtonDisabled}
                 >
+                    {isButtonDisabled && (
+                        <ActivityIndicator
+                            size="small"
+                            color="#fff"
+                            style={{ marginRight: 8 }}
+                        />
+                    )}
                     <Text style={styles.bookButtonText}>
-                        {bookModelLoading ? 'Aguarde...' : 'Agendar Agora'}
+                        {getButtonText()}
                     </Text>
                     <Text style={styles.bookButtonSubtext}>
                         {estimate.fare ? `${settings.currency}${estimate.fare}` : 'Preço sob consulta'}
@@ -2325,13 +2398,13 @@ const onMapSelectComplete = () => {
                 </TouchableOpacity>
             </View>
         );
-    }, [selectedCarType, filteredCarTypes, getEstimateForCar, bookModelLoading, settings, bookNow, tripdata.pickup, tripdata.drop]);
+    }, [selectedCarType, filteredCarTypes, getEstimateForCar, bookModelLoading, isLoadingEstimate, isSearchingDrivers, isProcessingPayment, settings, bookNow, tripdata.pickup, tripdata.drop]);
 
     // Otimizar useEffects
     useEffect(() => {
         // Configurar listener para atualizações em tempo real dos tipos de carro
         const carTypesRef = database().ref('car_types');
-        
+
         const handleCarTypesUpdate = (snapshot) => {
             const carTypesData = snapshot.val();
             if (carTypesData) {
@@ -2341,7 +2414,7 @@ const onMapSelectComplete = () => {
         };
 
         carTypesRef.on('value', handleCarTypesUpdate);
-        
+
         return () => {
             carTypesRef.off('value', handleCarTypesUpdate);
         };
@@ -2384,18 +2457,18 @@ const onMapSelectComplete = () => {
     return (
         <View style={styles.container}>
             <StatusBar hidden={true} />
-            
+
             {/* Header */}
             <View style={styles.header}>
-                <TouchableOpacity 
+                <TouchableOpacity
                     style={[styles.headerButton, { backgroundColor: theme.card }]}
                     onPress={() => props.navigation.navigate('Settings')}
                 >
                     <Icon name="menu" type="material" color={theme.icon} size={24} />
                 </TouchableOpacity>
-                
+
                 <View style={styles.headerRightContainer}>
-                    <TouchableOpacity 
+                    <TouchableOpacity
                         style={[styles.headerButton, { backgroundColor: theme.card }]}
                         onPress={() => props.navigation.navigate('Notifications')}
                     >
@@ -2412,7 +2485,7 @@ const onMapSelectComplete = () => {
 
             {/* Mapa */}
             <View style={styles.mapcontainer} onLayout={e => setMapTop(e.nativeEvent.layout.y)}>
-                {region && region.latitude && pageActive.current ? (
+                {(region || DEFAULT_REGION) && (region?.latitude || DEFAULT_REGION.latitude) && pageActive.current ? (
                     <MapView
                         ref={mapRef}
                         provider={PROVIDER_GOOGLE}
@@ -2420,9 +2493,17 @@ const onMapSelectComplete = () => {
                         showsUserLocation={true}
                         loadingEnabled
                         showsMyLocationButton={false}
-                        initialRegion={region}
-                        onRegionChangeComplete={onRegionChangeComplete}
-                        onPanDrag={() => setDragging(30)}
+                        initialRegion={region || DEFAULT_REGION}
+                        onRegionChangeComplete={(region) => {
+                            if (isEditing) {
+                                setRegion(region);
+                            }
+                        }}
+                        onPanDrag={() => {
+                            if (!isEditing) {
+                                setIsEditing(true);
+                            }
+                        }}
                         minZoomLevel={11}
                         maxZoomLevel={20}
                         customMapStyle={isDarkMode ? mapStyleDark : mapStyleLight}
@@ -2440,6 +2521,11 @@ const onMapSelectComplete = () => {
                         onMapReady={() => setMapReady(true)}
                         onLayout={() => setMapLayout(true)}
                     >
+                        <UrlTile
+                            urlTemplate="https://a.tile.openstreetmap.org/{z}/{x}/{y}.png"
+                            maximumZ={19}
+                            flipY={false}
+                        />
                         {CarMarkers}
                         {RouteMarkers}
                         {RoutePolyline}
@@ -2466,50 +2552,6 @@ const onMapSelectComplete = () => {
                 {BookButton}
             </View>
 
-            {/* Botão de teste PIX - TEMPORÁRIO */}
-            <TouchableOpacity
-                style={{
-                    position: 'absolute',
-                    bottom: 120,
-                    right: 20,
-                    backgroundColor: '#2E8B57',
-                    padding: 15,
-                    borderRadius: 25,
-                    shadowColor: '#000',
-                    shadowOffset: { width: 0, height: 2 },
-                    shadowOpacity: 0.25,
-                    shadowRadius: 3.84,
-                    elevation: 5,
-                }}
-                onPress={() => {
-                    // Teste PIX temporário
-                }}
-            >
-                <Icon name="payment" type="material" color="#fff" size={24} />
-            </TouchableOpacity>
-
-            {/* Botão de teste do Toggle - TEMPORÁRIO */}
-            <TouchableOpacity
-                style={{
-                    position: 'absolute',
-                    bottom: 180,
-                    right: 20,
-                    backgroundColor: '#3498db',
-                    padding: 15,
-                    borderRadius: 25,
-                    shadowColor: '#000',
-                    shadowOffset: { width: 0, height: 2 },
-                    shadowOpacity: 0.25,
-                    shadowRadius: 3.84,
-                    elevation: 5,
-                }}
-                onPress={() => {
-                    props.navigation.navigate('ToggleTest');
-                }}
-            >
-                <Icon name="swap-horiz" type="material" color="#fff" size={24} />
-            </TouchableOpacity>
-
             {showLoadingOverlay && (
                 <View style={{
                     position: 'absolute',
@@ -2524,7 +2566,7 @@ const onMapSelectComplete = () => {
                 </View>
             )}
 
-            
+
             {/* Bottom Sheets */}
             <PixPaymentBottomSheet
                 isVisible={showPixPayment}

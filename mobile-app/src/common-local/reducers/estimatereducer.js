@@ -2,6 +2,7 @@ import {
   FETCH_ESTIMATE,
   FETCH_ESTIMATE_SUCCESS,
   FETCH_ESTIMATE_FAILED,
+  SET_ESTIMATE,
   CLEAR_ESTIMATE
 } from "../types.js";
 
@@ -35,6 +36,16 @@ export const estimatereducer = (state = INITIAL_STATE, action) => {
         error: {
           flag: true,
           msg: action.payload
+        }
+      };
+    case SET_ESTIMATE:
+      return {
+        ...state,
+        estimate: action.payload,
+        loading: false,
+        error: {
+          flag: false,
+          msg: null
         }
       };
     case CLEAR_ESTIMATE:

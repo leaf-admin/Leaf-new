@@ -1,5 +1,7 @@
+import Logger from '../utils/Logger';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { store } from '../common-local/store';
+
 
 // Configurações do serviço de promoções
 const PROMO_CONFIG = {
@@ -35,10 +37,10 @@ class OptimizedPromoService {
       this.processRetryQueue();
       
       this.isInitialized = true;
-      console.log('✅ Promo Service inicializado com sucesso');
+      Logger.log('✅ Promo Service inicializado com sucesso');
       
     } catch (error) {
-      console.error('❌ Erro ao inicializar Promo Service:', error);
+      Logger.error('❌ Erro ao inicializar Promo Service:', error);
       throw error;
     }
   }
@@ -52,7 +54,7 @@ class OptimizedPromoService {
       if (this.promoCache.has(cacheKey)) {
         const cached = this.promoCache.get(cacheKey);
         if (Date.now() - cached.timestamp < PROMO_CONFIG.cacheExpiry) {
-          console.log('✅ Promoções carregadas do cache local');
+          Logger.log('✅ Promoções carregadas do cache local');
           return cached.data;
         }
       }
@@ -72,13 +74,13 @@ class OptimizedPromoService {
       return promos;
       
     } catch (error) {
-      console.error('❌ Erro ao buscar promoções:', error);
+      Logger.error('❌ Erro ao buscar promoções:', error);
       
       // Tentar carregar do cache local
       try {
         return await this.loadPromosFromLocalStorage(filters, page, limit);
       } catch (localError) {
-        console.error('❌ Erro ao carregar do cache local:', localError);
+        Logger.error('❌ Erro ao carregar do cache local:', localError);
         return [];
       }
     }
@@ -112,7 +114,7 @@ class OptimizedPromoService {
       return userPromos;
       
     } catch (error) {
-      console.error('❌ Erro ao buscar promoções do usuário:', error);
+      Logger.error('❌ Erro ao buscar promoções do usuário:', error);
       return [];
     }
   }
@@ -142,7 +144,7 @@ class OptimizedPromoService {
       return validation;
       
     } catch (error) {
-      console.error('❌ Erro ao validar código promocional:', error);
+      Logger.error('❌ Erro ao validar código promocional:', error);
       return { valid: false, error: 'Erro ao validar código' };
     }
   }
@@ -159,7 +161,7 @@ class OptimizedPromoService {
       return result;
       
     } catch (error) {
-      console.error('❌ Erro ao aplicar promoção:', error);
+      Logger.error('❌ Erro ao aplicar promoção:', error);
       
       // Adicionar à fila de retry
       this.addToRetryQueue('apply_promo', { promoId, orderData });
@@ -198,7 +200,7 @@ class OptimizedPromoService {
       return promo;
       
     } catch (error) {
-      console.error('❌ Erro ao buscar promoção por código:', error);
+      Logger.error('❌ Erro ao buscar promoção por código:', error);
       return null;
     }
   }
@@ -333,10 +335,10 @@ class OptimizedPromoService {
         for (const [key, value] of Object.entries(parsed)) {
           this.promoCache.set(key, value);
         }
-        console.log('✅ Cache local de promoções carregado');
+        Logger.log('✅ Cache local de promoções carregado');
       }
     } catch (error) {
-      console.error('❌ Erro ao carregar cache local:', error);
+      Logger.error('❌ Erro ao carregar cache local:', error);
     }
   }
 
@@ -349,7 +351,7 @@ class OptimizedPromoService {
       
       await AsyncStorage.setItem('promo_cache', JSON.stringify(cacheData));
     } catch (error) {
-      console.error('❌ Erro ao salvar promoções no storage local:', error);
+      Logger.error('❌ Erro ao salvar promoções no storage local:', error);
     }
   }
 
@@ -362,7 +364,7 @@ class OptimizedPromoService {
       
       await this.savePromosToLocalStorage();
     } catch (error) {
-      console.error('❌ Erro ao salvar promoção no storage local:', error);
+      Logger.error('❌ Erro ao salvar promoção no storage local:', error);
     }
   }
 
@@ -377,7 +379,7 @@ class OptimizedPromoService {
       
       return [];
     } catch (error) {
-      console.error('❌ Erro ao carregar promoções do storage local:', error);
+      Logger.error('❌ Erro ao carregar promoções do storage local:', error);
       return [];
     }
   }
@@ -390,9 +392,9 @@ class OptimizedPromoService {
       // Limpar AsyncStorage
       await AsyncStorage.removeItem('promo_cache');
       
-      console.log('🗑️ Cache de promoções invalidado');
+      Logger.log('🗑️ Cache de promoções invalidado');
     } catch (error) {
-      console.error('❌ Erro ao invalidar cache:', error);
+      Logger.error('❌ Erro ao invalidar cache:', error);
     }
   }
 
@@ -419,11 +421,11 @@ class OptimizedPromoService {
       }
       
       if (expiredKeys.length > 0) {
-        console.log(`🧹 ${expiredKeys.length} itens expirados removidos do cache`);
+        Logger.log(`🧹 ${expiredKeys.length} itens expirados removidos do cache`);
       }
       
     } catch (error) {
-      console.error('❌ Erro na limpeza de cache:', error);
+      Logger.error('❌ Erro na limpeza de cache:', error);
     }
   }
 
@@ -436,7 +438,7 @@ class OptimizedPromoService {
       attempts: 0
     });
     
-    console.log(`📝 Ação ${action} adicionada à fila de retry`);
+    Logger.log(`📝 Ação ${action} adicionada à fila de retry`);
   }
 
   async processRetryQueue() {
@@ -444,12 +446,12 @@ class OptimizedPromoService {
       return;
     }
     
-    console.log(`🔄 Processando ${this.retryQueue.length} ações na fila de retry`);
+    Logger.log(`🔄 Processando ${this.retryQueue.length} ações na fila de retry`);
     
     for (const queuedAction of this.retryQueue) {
       try {
         if (queuedAction.attempts >= PROMO_CONFIG.retryAttempts) {
-          console.log(`❌ Ação ${queuedAction.action} falhou após ${queuedAction.attempts} tentativas`);
+          Logger.log(`❌ Ação ${queuedAction.action} falhou após ${queuedAction.attempts} tentativas`);
           
           // Remover da fila
           const index = this.retryQueue.indexOf(queuedAction);
@@ -470,7 +472,7 @@ class OptimizedPromoService {
             );
             break;
           default:
-            console.warn(`⚠️ Ação desconhecida: ${queuedAction.action}`);
+            Logger.warn(`⚠️ Ação desconhecida: ${queuedAction.action}`);
             continue;
         }
         
@@ -480,10 +482,10 @@ class OptimizedPromoService {
           this.retryQueue.splice(index, 1);
         }
         
-        console.log(`✅ Ação ${queuedAction.action} executada com sucesso na tentativa ${queuedAction.attempts + 1}`);
+        Logger.log(`✅ Ação ${queuedAction.action} executada com sucesso na tentativa ${queuedAction.attempts + 1}`);
         
       } catch (error) {
-        console.error(`❌ Erro ao executar ação ${queuedAction.action}:`, error);
+        Logger.error(`❌ Erro ao executar ação ${queuedAction.action}:`, error);
         
         // Incrementar tentativas
         queuedAction.attempts++;
@@ -511,7 +513,7 @@ class OptimizedPromoService {
     this.retryQueue = [];
     this.isInitialized = false;
     
-    console.log('🗑️ Promo Service destruído');
+    Logger.log('🗑️ Promo Service destruído');
   }
 }
 

@@ -1,0 +1,97 @@
+version: '3.8'
+
+services:
+  # ===== REDIS =====
+  redis:
+    image: redis:7-alpine
+    container_name: leaf-redis-local
+    command: redis-server --appendonly yes --maxmemory 2gb --maxmemory-policy allkeys-lru --requirepass leaf_redis_2024
+    ports:
+      - "6380:6379"  # Usar porta 6380 localmente para evitar conflito
+    volumes:
+      - redis_data_local:/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "leaf_redis_2024", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    networks:
+      - leaf-network-local
+
+  # ===== WEBSOCKET SERVER =====
+  websocket:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: leaf-websocket-local
+    ports:
+      - "3001:3001"
+    environment:
+      # Ambiente
+      - NODE_ENV=development
+      - PORT=3001
+      - HOST=0.0.0.0
+      
+      # Redis - Configuração para Docker
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REDIS_PASSWORD=leaf_redis_2024
+      - REDIS_DB=0
+      - REDIS_URL=redis://:leaf_redis_2024@redis:6379/0
+      
+      # Firebase (usar arquivo local)
+      - FIREBASE_PROJECT_ID=${FIREBASE_PROJECT_ID:-leaf-app-91dfdce0}
+      - FIREBASE_DATABASE_URL=${FIREBASE_DATABASE_URL:-https://leaf-reactnative-default-rtdb.firebaseio.com}
+      - GOOGLE_APPLICATION_CREDENTIALS=/app/firebase-credentials.json
+      
+      # Woovi (sandbox para testes)
+      - WOOVI_WEBHOOK_URL=${WOOVI_WEBHOOK_URL:-http://localhost:3001/api/woovi/webhook}
+      - SERVER_URL=${SERVER_URL:-http://localhost:3001}
+      - WOOVI_API_TOKEN=${WOOVI_API_TOKEN}
+      - WOOVI_CLIENT_ID=${WOOVI_CLIENT_ID}
+      - WOOVI_CLIENT_SECRET=${WOOVI_CLIENT_SECRET}
+      - WOOVI_BASE_URL=${WOOVI_BASE_URL:-https://api-sandbox.woovi.com}
+      
+      # API Keys (opcional para testes locais)
+      - GOOGLE_MAPS_API_KEY=${GOOGLE_MAPS_API_KEY}
+      - MAPBOX_API_KEY=${MAPBOX_API_KEY}
+      - LOCATIONIQ_API_KEY=${LOCATIONIQ_API_KEY}
+      
+      # Segurança
+      - CORS_ORIGIN=*
+      - JWT_SECRET=${JWT_SECRET:-leaf_jwt_secret_dev_2024}
+      
+      # Monitoramento
+      - LOG_LEVEL=${LOG_LEVEL:-debug}
+      - ENABLE_METRICS=${ENABLE_METRICS:-true}
+      
+    volumes:
+      # Firebase credentials (montar arquivo JSON se existir)
+      - ./firebase-credentials.json:/app/firebase-credentials.json:ro
+      # Logs
+      - ./logs:/app/logs
+      # Código (para desenvolvimento - hot reload)
+      - .:/app
+      - /app/node_modules  # Excluir node_modules do volume
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    networks:
+      - leaf-network-local
+
+volumes:
+  redis_data_local:
+    driver: local
+
+networks:
+  leaf-network-local:
+    driver: bridge
+

@@ -43,7 +43,7 @@ export const ptBR = {
   driver_is_on_the_way: 'Motorista a caminho',
   no_drivers_found_alert_title: 'Nenhum Motorista Encontrado',
   no_driver_found_alert_messege: 'Não há motoristas disponíveis no momento. Tente novamente.',
-  choose_pickup_location: 'Escolher local de embarque',
+  choose_pickup_location: 'Local de partida',
   choose_drop_location: 'Escolher local de destino',
   enter_pickup_location: 'Digite o local de embarque',
   enter_drop_location: 'Digite o local de destino',

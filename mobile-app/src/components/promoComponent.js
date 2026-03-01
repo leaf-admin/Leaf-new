@@ -11,10 +11,10 @@ import {
   Alert
 } from "react-native";
 import { Avatar, Button } from "react-native-elements";
-import { colors } from '../common-local/theme';
+import { colors } from '../common/theme';
 import i18n from '../i18n';
 import { useSelector } from 'react-redux';
-import { fonts } from '../common-local/font';
+import { fonts } from '../common/font';
 import { getLangKey } from "../common-local/other/getLangKey";
 var { width, height } = Dimensions.get('window');
 
@@ -29,7 +29,7 @@ export default function PromoComp(props) {
   }
 
   const { t } = i18n;
-  const isRTL = i18n.locale.indexOf('he') === 0 || i18n.locale.indexOf('ar') === 0;
+  const isRTL = i18n.locale && (i18n.locale.indexOf('he') === 0 || i18n.locale.indexOf('ar') === 0);
 
   const [state, setState] = useState('');
 

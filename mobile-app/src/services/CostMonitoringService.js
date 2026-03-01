@@ -1,3 +1,4 @@
+import Logger from '../utils/Logger';
 // CostMonitoringService.js - Monitoramento de custos em tempo real
 // Mock para testes Node.js
 const AsyncStorage = {
@@ -87,7 +88,7 @@ class CostMonitoringService {
         this.userCosts = new Map(); // Custo por usuário
         this.dailyCosts = new Map(); // Custo por dia
         
-        console.log('💰 CostMonitoringService inicializado');
+        Logger.log('💰 CostMonitoringService inicializado');
     }
 
     // ===== MONITORAMENTO DE CUSTOS GOOGLE =====
@@ -97,7 +98,7 @@ class CostMonitoringService {
         this.costs.google.maps.requests += requests;
         this.costs.google.maps.cost += cost;
         
-        console.log(`🗺️ Google Maps ${operation}: ${requests} requests, R$${cost.toFixed(6)}`);
+        Logger.log(`🗺️ Google Maps ${operation}: ${requests} requests, R$${cost.toFixed(6)}`);
         return { requests, cost };
     }
 
@@ -110,7 +111,7 @@ class CostMonitoringService {
         this.costs.google.firebase.functions.executions += executions;
         this.costs.google.firebase.functions.cost += cost;
         
-        console.log(`⚡ Firebase Function ${functionName}: R$${cost.toFixed(6)}`);
+        Logger.log(`⚡ Firebase Function ${functionName}: R$${cost.toFixed(6)}`);
         return { functionName, executions, memoryGB, cost };
     }
 
@@ -119,7 +120,7 @@ class CostMonitoringService {
         this.costs.google.firebase.database[operation + 's'] += count;
         this.costs.google.firebase.database.cost += cost;
         
-        console.log(`🔥 Firebase DB ${operation}: ${count} operations, R$${cost.toFixed(6)}`);
+        Logger.log(`🔥 Firebase DB ${operation}: ${count} operations, R$${cost.toFixed(6)}`);
         return { operations: count, cost };
     }
 
@@ -128,7 +129,7 @@ class CostMonitoringService {
     async trackPaymentCost(provider, amount) {
         // Apenas monitorar, não somar aos nossos custos operacionais
         // A taxa Woovi é debitada do valor da corrida, não impacta nosso lucro
-        console.log(`💳 ${provider} PIX: R$${this.pricing.apis.payment.wooviMinFee.toFixed(4)} (R$${amount}) - Taxa: R$${this.pricing.apis.payment.wooviMinFee.toFixed(4)}`);
+        Logger.log(`💳 ${provider} PIX: R$${this.pricing.apis.payment.wooviMinFee.toFixed(4)} (R$${amount}) - Taxa: R$${this.pricing.apis.payment.wooviMinFee.toFixed(4)}`);
         
         // Não somar aos custos operacionais - apenas monitorar
         return { 
@@ -144,7 +145,7 @@ class CostMonitoringService {
         this.costs.apis.sms.messages += messages;
         this.costs.apis.sms.cost += cost;
         
-        console.log(`📱 SMS: ${messages} messages, R$${cost.toFixed(4)}`);
+        Logger.log(`📱 SMS: ${messages} messages, R$${cost.toFixed(4)}`);
         return { messages, cost };
     }
 
@@ -159,7 +160,7 @@ class CostMonitoringService {
         this.costs.infrastructure.redis.connections += connections;
         this.costs.infrastructure.redis.cost += totalCost;
         
-        console.log(`🔴 Redis: ${operations} ops, ${connections} conns, R$${totalCost.toFixed(6)}`);
+        Logger.log(`🔴 Redis: ${operations} ops, ${connections} conns, R$${totalCost.toFixed(6)}`);
         return { operations, connections, cost: totalCost };
     }
 
@@ -172,7 +173,7 @@ class CostMonitoringService {
         this.costs.infrastructure.websocket.messages += messages;
         this.costs.infrastructure.websocket.cost += totalCost;
         
-        console.log(`🔌 WebSocket: ${connections} conns, ${messages} msgs, R$${totalCost.toFixed(6)}`);
+        Logger.log(`🔌 WebSocket: ${connections} conns, ${messages} msgs, R$${totalCost.toFixed(6)}`);
         return { connections, messages, cost: totalCost };
     }
 
@@ -187,7 +188,7 @@ class CostMonitoringService {
         this.costs.mobile.apiCalls.data += dataSize;
         this.costs.mobile.apiCalls.cost += totalCost;
         
-        console.log(`📱 Mobile API: ${calls} calls, ${dataSize} bytes, R$${totalCost.toFixed(6)}`);
+        Logger.log(`📱 Mobile API: ${calls} calls, ${dataSize} bytes, R$${totalCost.toFixed(6)}`);
         return { calls, dataSize, cost: totalCost };
     }
 
@@ -196,7 +197,7 @@ class CostMonitoringService {
         this.costs.mobile.location.updates += updates;
         this.costs.mobile.location.cost += cost;
         
-        console.log(`📍 Location: ${updates} updates, R$${cost.toFixed(6)}`);
+        Logger.log(`📍 Location: ${updates} updates, R$${cost.toFixed(6)}`);
         return { updates, cost };
     }
 
@@ -243,7 +244,7 @@ class CostMonitoringService {
         };
         
         this.tripCosts.set(tripId, tripCost);
-        console.log(`🚗 Iniciando monitoramento de custos para viagem ${tripId}`);
+        Logger.log(`🚗 Iniciando monitoramento de custos para viagem ${tripId}`);
         return tripCost;
     }
 
@@ -252,7 +253,7 @@ class CostMonitoringService {
         if (tripCost) {
             tripCost.costs[category][subcategory] += cost;
             tripCost.total += cost;
-            console.log(`💰 Viagem ${tripId}: +$${cost.toFixed(6)} (${category}.${subcategory})`);
+            Logger.log(`💰 Viagem ${tripId}: +$${cost.toFixed(6)} (${category}.${subcategory})`);
         }
     }
 
@@ -262,10 +263,10 @@ class CostMonitoringService {
             tripCost.endTime = Date.now();
             tripCost.duration = tripCost.endTime - tripCost.startTime;
             
-            console.log(`🏁 Viagem ${tripId} finalizada:`);
-            console.log(`   ⏱️  Duração: ${tripCost.duration}ms`);
-            console.log(`   💰 Custo total: $${tripCost.total.toFixed(6)}`);
-            console.log(`   📊 Detalhes:`, tripCost.costs);
+            Logger.log(`🏁 Viagem ${tripId} finalizada:`);
+            Logger.log(`   ⏱️  Duração: ${tripCost.duration}ms`);
+            Logger.log(`   💰 Custo total: $${tripCost.total.toFixed(6)}`);
+            Logger.log(`   📊 Detalhes:`, tripCost.costs);
             
             // Salvar no histórico
             await this.saveTripCost(tripCost);
@@ -297,7 +298,7 @@ class CostMonitoringService {
         userCost.totalCost += cost;
         userCost.lastActivity = Date.now();
         
-        console.log(`👤 Usuário ${userId}: +$${cost.toFixed(6)} (${category}.${subcategory})`);
+        Logger.log(`👤 Usuário ${userId}: +$${cost.toFixed(6)} (${category}.${subcategory})`);
         return userCost;
     }
 
@@ -325,7 +326,7 @@ class CostMonitoringService {
         dailyCost.costs[category][subcategory] += cost;
         dailyCost.totalCost += cost;
         
-        console.log(`📅 ${today}: +$${cost.toFixed(6)} (${category}.${subcategory})`);
+        Logger.log(`📅 ${today}: +$${cost.toFixed(6)} (${category}.${subcategory})`);
         return dailyCost;
     }
 
@@ -480,9 +481,9 @@ class CostMonitoringService {
         try {
             const key = `trip_cost_${tripCost.tripId}`;
             await AsyncStorage.setItem(key, JSON.stringify(tripCost));
-            console.log(`💾 Custo da viagem ${tripCost.tripId} salvo`);
+            Logger.log(`💾 Custo da viagem ${tripCost.tripId} salvo`);
         } catch (error) {
-            console.error('❌ Erro ao salvar custo da viagem:', error);
+            Logger.error('❌ Erro ao salvar custo da viagem:', error);
         }
     }
 
@@ -492,7 +493,7 @@ class CostMonitoringService {
             const data = await AsyncStorage.getItem(key);
             return data ? JSON.parse(data) : null;
         } catch (error) {
-            console.error('❌ Erro ao carregar custo da viagem:', error);
+            Logger.error('❌ Erro ao carregar custo da viagem:', error);
             return null;
         }
     }
@@ -527,7 +528,7 @@ class CostMonitoringService {
             }
         };
         
-        console.log('🔄 Custos resetados');
+        Logger.log('🔄 Custos resetados');
     }
 
     async getCurrentCosts() {
@@ -540,7 +541,7 @@ class CostMonitoringService {
 
     // ===== SIMULAÇÃO DE CORRIDA REAL COM TRACKING 2-3 SEGUNDOS =====
     async simulateRealTrip() {
-        console.log('🚗 SIMULAÇÃO DE CORRIDA REAL COM TRACKING 2-3 SEGUNDOS');
+        Logger.log('🚗 SIMULAÇÃO DE CORRIDA REAL COM TRACKING 2-3 SEGUNDOS');
         
         // Dados da corrida
         const tripDuration = 28; // minutos
@@ -549,7 +550,7 @@ class CostMonitoringService {
         const totalTrackingUpdates = tripDuration * trackingUpdatesPerMinute; // 672 updates
         
         // FASE 1: Busca de viagem (2 minutos)
-        console.log('\n📍 FASE 1: BUSCA DE VIAGEM (2 minutos)');
+        Logger.log('\n📍 FASE 1: BUSCA DE VIAGEM (2 minutos)');
         await this.trackGoogleMapsCost('geocoding', 2); // Origem + destino
         await this.trackGoogleMapsCost('directions', 1); // Rota inicial
         await this.trackRedisCost(10, 1); // Operações Redis
@@ -557,14 +558,14 @@ class CostMonitoringService {
         await this.trackLocationCost(4); // Updates de localização
         
         // FASE 2: Aceitação da viagem (30 segundos)
-        console.log('\n✅ FASE 2: ACEITAÇÃO DA VIAGEM (30 segundos)');
+        Logger.log('\n✅ FASE 2: ACEITAÇÃO DA VIAGEM (30 segundos)');
         await this.trackFirebaseFunctionCost('update_booking', 1);
         await this.trackFirebaseDatabaseCost('reads', 3);
         await this.trackFirebaseDatabaseCost('writes', 3);
         await this.trackWebSocketCost(2, 10); // 2 conexões + 10 mensagens
         
         // FASE 3: Motorista indo até o ponto de embarque (5 minutos)
-        console.log('\n🚗 FASE 3: MOTORISTA INDO ATÉ EMBARQUE (5 minutos)');
+        Logger.log('\n🚗 FASE 3: MOTORISTA INDO ATÉ EMBARQUE (5 minutos)');
         const pickupTrackingUpdates = 5 * trackingUpdatesPerMinute; // 120 updates
         await this.trackLocationCost(pickupTrackingUpdates);
         await this.trackMobileAPICost(pickupTrackingUpdates);
@@ -572,7 +573,7 @@ class CostMonitoringService {
         await this.trackWebSocketCost(0, pickupTrackingUpdates);
         
         // FASE 4: Viagem em andamento (20 minutos) - TRACKING 2-3 SEGUNDOS
-        console.log('\n🚗 FASE 4: VIAGEM EM ANDAMENTO (20 minutos) - TRACKING 2-3 SEGUNDOS');
+        Logger.log('\n🚗 FASE 4: VIAGEM EM ANDAMENTO (20 minutos) - TRACKING 2-3 SEGUNDOS');
         const tripTrackingUpdates = 20 * trackingUpdatesPerMinute; // 480 updates
         await this.trackLocationCost(tripTrackingUpdates);
         await this.trackMobileAPICost(tripTrackingUpdates);
@@ -580,7 +581,7 @@ class CostMonitoringService {
         await this.trackWebSocketCost(0, tripTrackingUpdates);
         
         // FASE 5: Finalização e pagamento (2 minutos)
-        console.log('\n💳 FASE 5: FINALIZAÇÃO E PAGAMENTO (2 minutos)');
+        Logger.log('\n💳 FASE 5: FINALIZAÇÃO E PAGAMENTO (2 minutos)');
         await this.trackFirebaseFunctionCost('complete_trip', 1);
         await this.trackFirebaseDatabaseCost('reads', 5);
         await this.trackFirebaseDatabaseCost('writes', 5);
@@ -590,11 +591,11 @@ class CostMonitoringService {
         const costs = await this.getCurrentCosts();
         const totalCost = costs.total;
         
-        console.log('\n📊 ESTATÍSTICAS FINAIS:');
-        console.log(`   Total de tracking updates: ${totalTrackingUpdates}`);
-        console.log(`   Updates por minuto: ${trackingUpdatesPerMinute}`);
-        console.log(`   Intervalo de tracking: ${trackingInterval} segundos`);
-        console.log(`   Custo total da corrida: R$ ${totalCost.toFixed(6)}`);
+        Logger.log('\n📊 ESTATÍSTICAS FINAIS:');
+        Logger.log(`   Total de tracking updates: ${totalTrackingUpdates}`);
+        Logger.log(`   Updates por minuto: ${trackingUpdatesPerMinute}`);
+        Logger.log(`   Intervalo de tracking: ${trackingInterval} segundos`);
+        Logger.log(`   Custo total da corrida: R$ ${totalCost.toFixed(6)}`);
         
         return {
             totalCost,

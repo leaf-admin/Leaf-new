@@ -1,3 +1,4 @@
+import Logger from '../utils/Logger';
 // ProfileToggle.js - Componente de toggle discreto (estilo Nubank)
 import React, { useState, useEffect } from 'react';
 import {
@@ -10,6 +11,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import profileToggleService from '../services/ProfileToggleService';
+
 
 const ProfileToggle = ({ 
   userId, 
@@ -31,7 +33,7 @@ const ProfileToggle = ({
       const mode = await profileToggleService.getCurrentMode();
       setCurrentMode(mode);
     } catch (error) {
-      console.error('❌ Erro ao carregar modo atual:', error);
+      Logger.error('❌ Erro ao carregar modo atual:', error);
     }
   };
 
@@ -107,7 +109,7 @@ const ProfileToggle = ({
         );
       }
     } catch (error) {
-      console.error('❌ Erro no toggle:', error);
+      Logger.error('❌ Erro no toggle:', error);
       Alert.alert(
         'Erro',
         'Erro ao alternar modo. Tente novamente.',

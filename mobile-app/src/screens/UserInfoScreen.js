@@ -1,3 +1,4 @@
+import Logger from '../utils/Logger';
 import React, { useState, useEffect } from 'react';
 import { StyleSheet, View, Text, TouchableOpacity, TextInput, Alert, ActivityIndicator, Platform, PermissionsAndroid } from 'react-native';
 import { useNavigation, useRoute } from '@react-navigation/native';
@@ -5,12 +6,15 @@ import OnboardingLayout from '../components/OnboardingLayout';
 import * as Device from 'expo-device';
 import DeviceInfo from 'react-native-device-info';
 import rnauth from '@react-native-firebase/auth';
-// testPhoneDetection removido - arquivo não existe
+import { useTranslation } from '../components/i18n/LanguageProvider';
+
+// import testPhoneDetection from '../../test-phone-detection';
 
 const LEAF_GREEN = '#1A330E';
 const LEAF_GRAY = '#B0B0B0';
 
 export default function UserInfoScreen() {
+    const { t } = useTranslation();
     const navigation = useNavigation();
     const route = useRoute();
     const [phone, setPhone] = useState('');
@@ -71,16 +75,16 @@ export default function UserInfoScreen() {
                         throw new Error('Permissão negada');
                     }
                 } catch (error) {
-                    console.log('Erro ao solicitar permissão:', error);
+                    Logger.log('Erro ao solicitar permissão:', error);
                 }
             }
             
             // MÉTODO 1: getPhoneNumber do DeviceInfo (PRINCIPAL)
             try {
-                console.log('🔍 MÉTODO 1 - Tentando DeviceInfo.getPhoneNumber...');
+                Logger.log('🔍 MÉTODO 1 - Tentando DeviceInfo.getPhoneNumber...');
                 if (typeof DeviceInfo.getPhoneNumber === 'function') {
                     const phoneNumber = await DeviceInfo.getPhoneNumber();
-                    console.log('📱 PhoneNumber do DeviceInfo:', phoneNumber);
+                    Logger.log('📱 PhoneNumber do DeviceInfo:', phoneNumber);
                     
                     if (phoneNumber && 
                         phoneNumber !== 'unknown' && 
@@ -88,17 +92,17 @@ export default function UserInfoScreen() {
                         phoneNumber !== 'undefined' &&
                         phoneNumber.length > 0) {
                         detectedNumber = phoneNumber;
-                        console.log('✅ Número detectado via DeviceInfo:', detectedNumber);
+                        Logger.log('✅ Número detectado via DeviceInfo:', detectedNumber);
                     }
                 }
             } catch (error) {
-                console.log('❌ Erro no MÉTODO 1:', error);
+                Logger.log('❌ Erro no MÉTODO 1:', error);
             }
             
             // MÉTODO 2: Tentar outras APIs do DeviceInfo
             if (!detectedNumber) {
                 try {
-                    console.log('🔍 MÉTODO 2 - Verificando outras APIs do DeviceInfo...');
+                    Logger.log('🔍 MÉTODO 2 - Verificando outras APIs do DeviceInfo...');
                     
                     // Tentar obter informações do dispositivo
                     const deviceId = await DeviceInfo.getUniqueId();
@@ -107,7 +111,7 @@ export default function UserInfoScreen() {
                     const systemVersion = await DeviceInfo.getSystemVersion();
                     const carrier = await DeviceInfo.getCarrier();
                     
-                    console.log('📱 Device Info:', { deviceId, brand, model, systemVersion, carrier });
+                    Logger.log('📱 Device Info:', { deviceId, brand, model, systemVersion, carrier });
                     
                     // Verificar se há outras APIs disponíveis
                     const availableMethods = Object.getOwnPropertyNames(DeviceInfo);
@@ -117,17 +121,17 @@ export default function UserInfoScreen() {
                         name.includes('Carrier') ||
                         name.includes('Telephony')
                     );
-                    console.log('📱 APIs de telefone disponíveis:', phoneMethods);
+                    Logger.log('📱 APIs de telefone disponíveis:', phoneMethods);
                     
                 } catch (error) {
-                    console.log('❌ Erro no MÉTODO 2:', error);
+                    Logger.log('❌ Erro no MÉTODO 2:', error);
                 }
             }
             
             // MÉTODO 3: Tentar outras APIs do DeviceInfo
             if (!detectedNumber) {
                 try {
-                    console.log('🔍 MÉTODO 3 - Verificando outras APIs do DeviceInfo...');
+                    Logger.log('🔍 MÉTODO 3 - Verificando outras APIs do DeviceInfo...');
                     
                     // Tentar obter informações do dispositivo
                     const deviceId = await DeviceInfo.getUniqueId();
@@ -136,7 +140,7 @@ export default function UserInfoScreen() {
                     const systemVersion = await DeviceInfo.getSystemVersion();
                     const carrier = await DeviceInfo.getCarrier();
                     
-                    console.log('📱 Device Info:', { deviceId, brand, model, systemVersion, carrier });
+                    Logger.log('📱 Device Info:', { deviceId, brand, model, systemVersion, carrier });
                     
                     // Verificar se há outras APIs disponíveis
                     const availableMethods = Object.getOwnPropertyNames(DeviceInfo);
@@ -146,21 +150,21 @@ export default function UserInfoScreen() {
                         name.includes('Carrier') ||
                         name.includes('Telephony')
                     );
-                    console.log('📱 APIs de telefone disponíveis:', phoneMethods);
+                    Logger.log('📱 APIs de telefone disponíveis:', phoneMethods);
                     
                 } catch (error) {
-                    console.log('❌ Erro no MÉTODO 3:', error);
+                    Logger.log('❌ Erro no MÉTODO 3:', error);
                 }
             }
             
             // MÉTODO 4: Tentar APIs nativas do React Native
             if (!detectedNumber && Platform.OS === 'android') {
                 try {
-                    console.log('🔍 MÉTODO 4 - Verificando NativeModules...');
+                    Logger.log('🔍 MÉTODO 4 - Verificando NativeModules...');
                     
                     // Tentar usar APIs nativas do Android
                     const { NativeModules } = require('react-native');
-                    console.log('📱 NativeModules disponíveis:', Object.keys(NativeModules));
+                    Logger.log('📱 NativeModules disponíveis:', Object.keys(NativeModules));
                     
                     // Verificar se há módulos relacionados a telefone
                     const phoneModules = Object.keys(NativeModules).filter(name => 
@@ -169,21 +173,21 @@ export default function UserInfoScreen() {
                         name.toLowerCase().includes('telephony') ||
                         name.toLowerCase().includes('carrier')
                     );
-                    console.log('📱 Módulos de telefone:', phoneModules);
+                    Logger.log('📱 Módulos de telefone:', phoneModules);
                     
                 } catch (error) {
-                    console.log('❌ Erro no MÉTODO 4:', error);
+                    Logger.log('❌ Erro no MÉTODO 4:', error);
                 }
             }
             
             // MÉTODO 3: Tentar APIs nativas do React Native
             if (!detectedNumber && Platform.OS === 'android') {
                 try {
-                    console.log('🔍 MÉTODO 3 - Verificando NativeModules...');
+                    Logger.log('🔍 MÉTODO 3 - Verificando NativeModules...');
                     
                     // Tentar usar APIs nativas do Android
                     const { NativeModules } = require('react-native');
-                    console.log('📱 NativeModules disponíveis:', Object.keys(NativeModules));
+                    Logger.log('📱 NativeModules disponíveis:', Object.keys(NativeModules));
                     
                     // Verificar se há módulos relacionados a telefone
                     const phoneModules = Object.keys(NativeModules).filter(name => 
@@ -192,49 +196,49 @@ export default function UserInfoScreen() {
                         name.toLowerCase().includes('telephony') ||
                         name.toLowerCase().includes('carrier')
                     );
-                    console.log('📱 Módulos de telefone:', phoneModules);
+                    Logger.log('📱 Módulos de telefone:', phoneModules);
                     
                 } catch (error) {
-                    console.log('❌ Erro no MÉTODO 3:', error);
+                    Logger.log('❌ Erro no MÉTODO 3:', error);
                 }
             }
             
             // MÉTODO 4: Tentar usar expo-device
             if (!detectedNumber) {
                 try {
-                    console.log('🔍 MÉTODO 4 - Verificando Expo Device...');
-                    console.log('📱 Device.isDevice:', Device.isDevice);
-                    console.log('📱 Device.brand:', Device.brand);
-                    console.log('📱 Device.manufacturer:', Device.manufacturer);
-                    console.log('📱 Device.modelName:', Device.modelName);
-                    console.log('📱 Device.osVersion:', Device.osVersion);
+                    Logger.log('🔍 MÉTODO 4 - Verificando Expo Device...');
+                    Logger.log('📱 Device.isDevice:', Device.isDevice);
+                    Logger.log('📱 Device.brand:', Device.brand);
+                    Logger.log('📱 Device.manufacturer:', Device.manufacturer);
+                    Logger.log('📱 Device.modelName:', Device.modelName);
+                    Logger.log('📱 Device.osVersion:', Device.osVersion);
                     
                 } catch (error) {
-                    console.log('❌ Erro no MÉTODO 4:', error);
+                    Logger.log('❌ Erro no MÉTODO 4:', error);
                 }
             }
             
             // MÉTODO 5: Tentar APIs nativas do Android (última tentativa)
             if (!detectedNumber && Platform.OS === 'android') {
                 try {
-                    console.log('🔍 MÉTODO 5 - Tentando APIs nativas do Android...');
+                    Logger.log('🔍 MÉTODO 5 - Tentando APIs nativas do Android...');
                     
                     // Tentar usar TelephonyManager via NativeModules
                     const { NativeModules } = require('react-native');
                     
                     // Verificar se há módulos específicos para telefone
                     if (NativeModules.TelephonyModule) {
-                        console.log('📱 TelephonyModule encontrado');
+                        Logger.log('📱 TelephonyModule encontrado');
                         const phoneNumber = await NativeModules.TelephonyModule.getPhoneNumber();
                         if (phoneNumber) {
                             detectedNumber = phoneNumber;
-                            console.log('✅ Número detectado via TelephonyModule:', detectedNumber);
+                            Logger.log('✅ Número detectado via TelephonyModule:', detectedNumber);
                         }
                     }
                     
                     // Tentar outros módulos nativos
                     const nativeModules = Object.keys(NativeModules);
-                    console.log('📱 Todos os NativeModules:', nativeModules);
+                    Logger.log('📱 Todos os NativeModules:', nativeModules);
                     
                     // Procurar por módulos que possam ter informações de telefone
                     for (const moduleName of nativeModules) {
@@ -243,7 +247,7 @@ export default function UserInfoScreen() {
                             try {
                                 const result = await module.getPhoneNumber();
                                 if (result && result !== 'unknown') {
-                                    console.log(`🎯 Número encontrado via ${moduleName}:`, result);
+                                    Logger.log(`🎯 Número encontrado via ${moduleName}:`, result);
                                     detectedNumber = result;
                                     break;
                                 }
@@ -254,14 +258,14 @@ export default function UserInfoScreen() {
                     }
                     
                 } catch (error) {
-                    console.log('❌ Erro no MÉTODO 5:', error);
+                    Logger.log('❌ Erro no MÉTODO 5:', error);
                 }
             }
             
             // MÉTODO 6: Simulação inteligente (fallback)
             if (!detectedNumber) {
                 try {
-                    console.log('🔍 MÉTODO 6 - Simulação inteligente...');
+                    Logger.log('🔍 MÉTODO 6 - Simulação inteligente...');
                     
                     // Tentar obter informações do dispositivo para simular um número realista
                     const brand = await DeviceInfo.getBrand();
@@ -280,8 +284,8 @@ export default function UserInfoScreen() {
                     
                     const simulatedNumber = `${ddd.toString().padStart(2, '0')} ${numero.toString().slice(0, 5)}-${numero.toString().slice(5)}`;
                     
-                    console.log('📱 Dispositivo:', { brand, model, deviceId });
-                    console.log('📱 Número simulado:', simulatedNumber);
+                    Logger.log('📱 Dispositivo:', { brand, model, deviceId });
+                    Logger.log('📱 Número simulado:', simulatedNumber);
                     
                     // Perguntar se o usuário quer usar o número simulado
                     Alert.alert(
@@ -292,7 +296,7 @@ export default function UserInfoScreen() {
                                 text: 'Usar para teste', 
                                 onPress: () => {
                                     setPhone(simulatedNumber);
-                                    console.log('✅ Usando número simulado:', simulatedNumber);
+                                    Logger.log('✅ Usando número simulado:', simulatedNumber);
                                 }
                             },
                             { 
@@ -305,7 +309,7 @@ export default function UserInfoScreen() {
                     return; // Não continuar com o erro
                     
                 } catch (error) {
-                    console.log('❌ Erro no MÉTODO 6:', error);
+                    Logger.log('❌ Erro no MÉTODO 6:', error);
                 }
             }
             
@@ -343,7 +347,7 @@ export default function UserInfoScreen() {
             }
             
         } catch (error) {
-            console.error('Erro ao detectar número:', error);
+            Logger.error('Erro ao detectar número:', error);
             
             if (error.message === 'Emulador detectado') {
                 Alert.alert(
@@ -373,7 +377,7 @@ export default function UserInfoScreen() {
         // Validar se tem pelo menos DDD + número (10 dígitos)
         const phoneDigits = phone.replace(/\D/g, '');
         if (!phone || phoneDigits.length < 10) {
-            Alert.alert('Atenção', 'Digite um número de telefone válido com DDD.');
+            Alert.alert(t('messages.attention'), t('userInfo.validPhoneNumber'));
             return;
         }
 
@@ -381,35 +385,17 @@ export default function UserInfoScreen() {
             setIsLoading(true);
             
             const fullPhoneNumber = '+55' + phoneDigits;
-            console.log('📱 Enviando OTP para:', fullPhoneNumber);
-            console.log('👤 Tipo de usuário:', userType);
+            Logger.log('Enviando OTP para:', fullPhoneNumber);
+            Logger.log('Tipo de usuário:', userType);
             
-            // Enviar OTP via Firebase Auth - usando nova API
+            // Enviar OTP via Firebase Auth
             const auth = rnauth();
-            console.log('🔧 Firebase config:', auth.app?.options);
-            
-            // Verificar se é número de teste
-            const testNumbers = ['+5521999814802', '+5521999999999']; // Adicione números de teste aqui
-            const isTestNumber = testNumbers.includes(fullPhoneNumber);
-            
-            if (isTestNumber) {
-                console.log('🧪 Número de teste detectado, usando código fixo');
-                navigation.navigate('OTP', { 
-                    phone: fullPhoneNumber,
-                    verificationId: 'test-verification-id',
-                    userType: userType,
-                    isTestMode: true
-                });
-                return;
-            }
-            
             const confirmation = await auth.verifyPhoneNumber(fullPhoneNumber);
             
-            console.log('✅ OTP enviado com sucesso!');
-            console.log('🆔 VerificationId:', confirmation.verificationId);
-            console.log('📋 Confirmation completo:', JSON.stringify(confirmation, null, 2));
+            Logger.log('OTP enviado com sucesso, verificationId:', confirmation.verificationId);
+            Logger.log('Confirmation completo:', confirmation);
             
-            // Navegar para a tela de OTP
+            // Navegar para a tela de OTP com o telefone completo e verificationId
             navigation.navigate('OTP', { 
                 phone: fullPhoneNumber,
                 verificationId: confirmation.verificationId,
@@ -417,12 +403,7 @@ export default function UserInfoScreen() {
             });
             
         } catch (error) {
-            console.error('❌ Erro ao enviar OTP:', error);
-            console.error('🔍 Error details:', {
-                code: error.code,
-                message: error.message,
-                stack: error.stack
-            });
+            Logger.error('Erro ao enviar OTP:', error);
             
             let errorMessage = 'Não foi possível enviar o código de verificação.';
             
@@ -433,13 +414,9 @@ export default function UserInfoScreen() {
                 errorMessage = 'Muitas tentativas. Tente novamente em alguns minutos.';
             } else if (error.code === 'auth/quota-exceeded') {
                 errorMessage = 'Limite de SMS excedido. Tente novamente mais tarde.';
-            } else if (error.code === 'auth/operation-not-allowed') {
-                errorMessage = 'Autenticação por telefone não está habilitada.';
-            } else if (error.code === 'auth/captcha-check-failed') {
-                errorMessage = 'Falha na verificação de segurança.';
             }
             
-            Alert.alert('Erro', errorMessage);
+            Alert.alert(t('messages.error'), errorMessage);
         } finally {
             setIsLoading(false);
         }
@@ -507,7 +484,12 @@ export default function UserInfoScreen() {
                     Enviaremos um código de verificação por SMS para este número
                 </Text>
                 
-                {/* Botão de teste removido - funcionalidade não disponível */}
+                <TouchableOpacity 
+                    style={styles.testButton}
+                    onPress={testPhoneDetection}
+                >
+                    <Text style={styles.testButtonText}>🧪 Testar Detecção</Text>
+                </TouchableOpacity>
                 
                 {isDetectingPhone && (
                     <View style={styles.detectingContainer}>

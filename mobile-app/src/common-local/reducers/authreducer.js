@@ -1,3 +1,4 @@
+import Logger from '../../utils/Logger';
 import {
     FETCH_USER,
     FETCH_USER_SUCCESS,
@@ -32,9 +33,10 @@ const INITIAL_STATE = {
 }
 
 export default (state = INITIAL_STATE, action) => {
-    console.log('=== AUTH REDUCER ===');
-    console.log('Action:', action.type);
-    console.log('Payload:', action.payload);
+    // ✅ Removido console.log para evitar problemas durante atualização do store
+    // Logger.log('=== AUTH REDUCER ===');
+    // Logger.log('Action:', action.type);
+    // Logger.log('Payload:', action.payload);
 
     switch (action.type) {
         case FETCH_USER:

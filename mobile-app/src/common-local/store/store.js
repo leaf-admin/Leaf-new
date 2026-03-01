@@ -28,7 +28,8 @@ import { sosreducer } from '../reducers/sosreducer';
 import { complainreducer } from '../reducers/complainreducer';
 import { usedreferralreducer } from "../reducers/usedreferralreducer";
 import { fleetadminearningreducer } from "../reducers/fleetadminearningreducer";
-import vehicleReducer from "../reducers/vehiclereducer";
+import vehicleReducer from "../reducers/vehiclereducer.js";
+import onboardingReducer from "../../../common/common-packages/src/reducers/onboardingReducer";
 
 const rootReducer = {
   auth: authreducer,
@@ -60,6 +61,7 @@ const rootReducer = {
   usedreferralid:usedreferralreducer,
   fleetadminearningdata: fleetadminearningreducer,
   vehicledata: vehicleReducer,
+  onboarding: onboardingReducer,
 };
 
 const store = configureStore({

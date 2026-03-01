@@ -2,6 +2,7 @@ const os = require('os');
 const { exec } = require('child_process');
 const util = require('util');
 const execAsync = util.promisify(exec);
+const { logStructured, logError } = require('./logger');
 
 // Configurações dos VPSs
 const VPS_CONFIGS = {
@@ -57,7 +58,10 @@ async function getCurrentSystemMetrics() {
         networkOut = parseInt(parts[9] || 0);
       }
     } catch (error) {
-      console.log('⚠️ Não foi possível obter estatísticas de rede detalhadas');
+      logStructured('warn', 'Não foi possível obter estatísticas de rede detalhadas', {
+        service: 'vps-metrics',
+        operation: 'getNetworkStats'
+      });
     }
 
     return {
@@ -75,7 +79,10 @@ async function getCurrentSystemMetrics() {
       cores: os.cpus().length
     };
   } catch (error) {
-    console.error('❌ Erro ao obter métricas do sistema:', error);
+    logError(error, 'Erro ao obter métricas do sistema', {
+      service: 'vps-metrics',
+      operation: 'getCurrentSystemMetrics'
+    });
     throw error;
   }
 }
@@ -136,7 +143,12 @@ async function getVPSMetrics(vpsId) {
           }
         };
       } catch (sshError) {
-        console.log(`⚠️ Não foi possível conectar ao VPS ${vpsId} via SSH:`, sshError.message);
+        logStructured('warn', 'Não foi possível conectar ao VPS via SSH', {
+          service: 'vps-metrics',
+          operation: 'getVPSMetrics',
+          vpsId,
+          error: sshError.message
+        });
         
         // Retornar dados básicos se SSH falhar
         return {
@@ -161,7 +173,11 @@ async function getVPSMetrics(vpsId) {
 
     throw new Error(`VPS ${vpsId} não suportado`);
   } catch (error) {
-    console.error(`❌ Erro ao obter métricas do VPS ${vpsId}:`, error);
+    logError(error, 'Erro ao obter métricas do VPS', {
+      service: 'vps-metrics',
+      operation: 'getVPSMetrics',
+      vpsId
+    });
     throw error;
   }
 }
@@ -198,7 +214,10 @@ async function getRedisMetrics() {
       hitRate: parseFloat(metrics.keyspace_hits || '0') / (parseFloat(metrics.keyspace_hits || '0') + parseFloat(metrics.keyspace_misses || '0')) * 100
     };
   } catch (error) {
-    console.error('❌ Erro ao obter métricas do Redis:', error);
+    logError(error, 'Erro ao obter métricas do Redis', {
+      service: 'vps-metrics',
+      operation: 'getRedisMetrics'
+    });
     return {
       status: 'offline',
       memory: { used: 0, peak: 0, total: 0 },

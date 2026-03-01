@@ -1,0 +1,733 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Excluir Conta | Leaf App</title>
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <link rel="canonical" href="https://leaf.app.br/excluir-conta/">
+    
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            line-height: 1.6;
+            color: #1a1a1a;
+            background: #f8f9fa;
+        }
+        
+        header {
+            background: #003002;
+            color: white;
+            padding: 2rem 0;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+        }
+        
+        .header-content {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 0 24px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+        
+        .logo {
+            cursor: pointer;
+        }
+        
+        .logo a {
+            display: inline-block;
+            text-decoration: none;
+        }
+        
+        .logo img {
+            height: 43px;
+            width: auto;
+            transition: opacity 0.3s;
+        }
+        
+        .logo:hover img {
+            opacity: 0.8;
+        }
+        
+        .back-link {
+            color: white;
+            text-decoration: none;
+            font-weight: 600;
+            padding: 0.5rem 1rem;
+            border-radius: 8px;
+            transition: background 0.3s;
+        }
+        
+        .back-link:hover {
+            background: rgba(255,255,255,0.1);
+        }
+        
+        .container {
+            max-width: 700px;
+            margin: 0 auto;
+            padding: 3rem 24px;
+        }
+        
+        .card {
+            background: white;
+            border-radius: 16px;
+            box-shadow: 0 2px 12px rgba(0,0,0,0.08);
+            padding: 3rem;
+            margin-bottom: 2rem;
+        }
+        
+        h1 {
+            font-size: 2.5rem;
+            font-weight: 700;
+            color: #003002;
+            margin-bottom: 1rem;
+        }
+        
+        .warning-box {
+            background: #fff3cd;
+            border: 2px solid #ffc107;
+            border-radius: 12px;
+            padding: 1.5rem;
+            margin-bottom: 2rem;
+        }
+        
+        .warning-box h3 {
+            color: #856404;
+            font-size: 1.2rem;
+            margin-bottom: 0.5rem;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+        
+        .warning-box p {
+            color: #856404;
+            margin: 0;
+        }
+        
+        .form-group {
+            margin-bottom: 1.5rem;
+        }
+        
+        label {
+            display: block;
+            font-weight: 600;
+            color: #1a1a1a;
+            margin-bottom: 0.5rem;
+            font-size: 1rem;
+        }
+        
+        .required {
+            color: #dc2626;
+        }
+        
+        .radio-group {
+            display: flex;
+            flex-direction: column;
+            gap: 0.75rem;
+            margin-top: 0.5rem;
+        }
+        
+        .radio-option {
+            display: flex;
+            align-items: center;
+            padding: 1rem;
+            border: 2px solid #e0e0e0;
+            border-radius: 12px;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+        
+        .radio-option:hover {
+            border-color: #003002;
+            background: #f8f9fa;
+        }
+        
+        .radio-option input[type="radio"] {
+            width: 20px;
+            height: 20px;
+            margin-right: 1rem;
+            cursor: pointer;
+        }
+        
+        .radio-option label {
+            margin: 0;
+            cursor: pointer;
+            flex: 1;
+        }
+        
+        input[type="text"],
+        input[type="password"],
+        textarea {
+            width: 100%;
+            padding: 1rem 1.25rem;
+            border: 2px solid #e0e0e0;
+            border-radius: 12px;
+            font-size: 1rem;
+            outline: none;
+            transition: all 0.3s;
+            font-family: inherit;
+        }
+        
+        input[type="text"]:focus,
+        input[type="password"]:focus,
+        textarea:focus {
+            border-color: #003002;
+            border-width: 2px;
+        }
+        
+        textarea {
+            resize: vertical;
+            min-height: 120px;
+        }
+        
+        .char-count {
+            font-size: 0.85rem;
+            color: #666;
+            margin-top: 0.25rem;
+            text-align: right;
+        }
+        
+        .btn {
+            padding: 1rem 2rem;
+            border-radius: 26px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s;
+            border: none;
+            font-size: 1rem;
+            width: 100%;
+            margin-top: 1rem;
+        }
+        
+        .btn-danger {
+            background: #dc2626;
+            color: white;
+        }
+        
+        .btn-danger:hover {
+            background: #b91c1c;
+            transform: translateY(-2px);
+            box-shadow: 0 8px 24px rgba(220, 38, 38, 0.3);
+        }
+        
+        .btn-danger:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+            transform: none;
+        }
+        
+        .btn-secondary {
+            background: transparent;
+            color: #1a1a1a;
+            border: 2px solid #1a1a1a;
+            margin-top: 1rem;
+        }
+        
+        .btn-secondary:hover {
+            background: #1a1a1a;
+            color: white;
+        }
+        
+        .confirmation-box {
+            background: #fee2e2;
+            border: 2px solid #dc2626;
+            border-radius: 12px;
+            padding: 1.5rem;
+            margin-bottom: 2rem;
+            display: none;
+        }
+        
+        .confirmation-box.show {
+            display: block;
+        }
+        
+        .error-message {
+            background: #fee2e2;
+            border: 2px solid #dc2626;
+            border-radius: 12px;
+            padding: 1rem;
+            margin-bottom: 1rem;
+            color: #991b1b;
+            display: none;
+        }
+        
+        .error-message.show {
+            display: block;
+        }
+        
+        .success-message {
+            background: #d1fae5;
+            border: 2px solid #10b981;
+            border-radius: 12px;
+            padding: 1.5rem;
+            margin-bottom: 2rem;
+            display: none;
+        }
+        
+        .success-message.show {
+            display: block;
+        }
+        
+        @media (max-width: 768px) {
+            h1 {
+                font-size: 2rem;
+            }
+            
+            .card {
+                padding: 2rem 1.5rem;
+            }
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <div class="header-content">
+            <div class="logo">
+                <a href="/">
+                    <img src="/assets/logo-leaf.jpg" alt="LEAF">
+                </a>
+            </div>
+            <a href="/" class="back-link">← Voltar</a>
+        </div>
+    </header>
+
+    <div class="container">
+        <div class="card">
+            <h1>Excluir Minha Conta</h1>
+            
+            <div class="warning-box">
+                <h3>⚠️ Atenção</h3>
+                <p>Esta ação é <strong>irreversível</strong>. Ao excluir sua conta, todos os seus dados serão permanentemente removidos, incluindo histórico de viagens, dados pessoais e informações de pagamento. Esta ação não pode ser desfeita.</p>
+            </div>
+
+            <form id="delete-account-form">
+                <!-- Motivo da exclusão -->
+                <div class="form-group">
+                    <label for="reason">Motivo da exclusão <span class="required">*</span></label>
+                    <div class="radio-group">
+                        <div class="radio-option">
+                            <input type="radio" id="reason1" name="reason" value="nao-uso-mais" required>
+                            <label for="reason1">Não uso mais o aplicativo</label>
+                        </div>
+                        <div class="radio-option">
+                            <input type="radio" id="reason2" name="reason" value="problemas-tecnicos" required>
+                            <label for="reason2">Problemas técnicos</label>
+                        </div>
+                        <div class="radio-option">
+                            <input type="radio" id="reason3" name="reason" value="preco-taxas" required>
+                            <label for="reason3">Preço/Taxas</label>
+                        </div>
+                        <div class="radio-option">
+                            <input type="radio" id="reason4" name="reason" value="atendimento" required>
+                            <label for="reason4">Atendimento ao cliente</label>
+                        </div>
+                        <div class="radio-option">
+                            <input type="radio" id="reason5" name="reason" value="privacidade-seguranca" required>
+                            <label for="reason5">Privacidade/Segurança</label>
+                        </div>
+                        <div class="radio-option">
+                            <input type="radio" id="reason6" name="reason" value="outro" required>
+                            <label for="reason6">Outro motivo</label>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Informações adicionais -->
+                <div class="form-group">
+                    <label for="additional-info">Informações adicionais (opcional)</label>
+                    <textarea 
+                        id="additional-info" 
+                        name="additionalInfo" 
+                        placeholder="Conte-nos mais sobre o motivo da exclusão. Sua opinião é importante para melhorarmos nossos serviços."
+                        maxlength="500"
+                    ></textarea>
+                    <div class="char-count"><span id="char-count">0</span>/500 caracteres</div>
+                </div>
+
+                <!-- Confirmação final -->
+                <div class="form-group" style="margin-top: 2.5rem; padding-top: 2rem; border-top: 2px solid #e0e0e0;">
+                    <div style="margin-bottom: 1.5rem;">
+                        <label style="display: flex; align-items: center; gap: 0.75rem; cursor: pointer; font-weight: 600; font-size: 1.1rem; color: #1a1a1a;">
+                            <input 
+                                type="checkbox" 
+                                id="confirm-deletion" 
+                                name="confirmDeletion"
+                                required
+                                style="width: 24px; height: 24px; cursor: pointer;"
+                            />
+                            <span>Confirmo que desejo excluir minha conta</span>
+                        </label>
+                        <p style="color: #666; font-size: 0.9rem; margin-top: 0.5rem; margin-left: 2rem;">Esta ação é irreversível e todos os seus dados serão permanentemente excluídos.</p>
+                    </div>
+
+                    <div style="background: #f8f9fa; padding: 1.5rem; border-radius: 12px; border-left: 4px solid #003002;">
+                        <h3 style="font-size: 1.2rem; font-weight: 600; color: #003002; margin-bottom: 1rem;">Confirmação de Identidade</h3>
+                        <p style="color: #666; font-size: 0.95rem; margin-bottom: 1.5rem;">Para confirmar a exclusão, informe seus dados de acesso:</p>
+                        
+                        <div class="form-group" style="margin-bottom: 1rem;">
+                            <label for="user-email">Email ou Telefone <span class="required">*</span></label>
+                            <input 
+                                type="text" 
+                                id="user-email" 
+                                name="userEmail" 
+                                placeholder="seu@email.com ou (11) 99999-9999"
+                                required
+                            />
+                            <small style="color: #666; display: block; margin-top: 0.25rem;">Digite o email ou telefone cadastrado na sua conta</small>
+                        </div>
+
+                        <div class="form-group" style="margin-bottom: 0;">
+                            <label for="user-password">Senha <span class="required">*</span></label>
+                            <input 
+                                type="password" 
+                                id="user-password" 
+                                name="userPassword" 
+                                placeholder="Digite sua senha"
+                                required
+                            />
+                            <small style="color: #666; display: block; margin-top: 0.25rem;">Digite a senha do seu aplicativo Leaf</small>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Mensagem de erro -->
+                <div id="error-message" class="error-message"></div>
+
+                <!-- Confirmação final -->
+                <div id="confirmation-box" class="confirmation-box">
+                    <h3>⚠️ Confirmação Final</h3>
+                    <p><strong>Você tem certeza que deseja excluir sua conta?</strong></p>
+                    <p>Esta ação é permanente e não pode ser desfeita. Todos os seus dados serão excluídos permanentemente.</p>
+                    <p><strong>Telefone confirmado:</strong> <span id="confirmed-phone"></span></p>
+                    <p><strong>Motivo:</strong> <span id="confirmed-reason"></span></p>
+                </div>
+
+                <!-- Botões -->
+                <button type="submit" id="delete-btn" class="btn btn-danger">
+                    Excluir Conta Permanentemente
+                </button>
+                
+                <a href="/" class="btn btn-secondary" style="text-decoration: none; text-align: center; display: block;">
+                    Cancelar
+                </a>
+            </form>
+
+            <!-- Mensagem de sucesso -->
+            <div id="success-message" class="success-message">
+                <h3>✅ Conta Excluída com Sucesso</h3>
+                <p>Sua conta foi excluída permanentemente. Todos os seus dados foram removidos do nosso sistema.</p>
+                <p>Obrigado por ter usado o Leaf App.</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Firebase SDK - Carregamento assíncrono -->
+    <script>
+        // Carregar Firebase SDK de forma assíncrona
+        (function() {
+            const scripts = [
+                'https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js',
+                'https://www.gstatic.com/firebasejs/10.7.1/firebase-auth-compat.js'
+            ];
+            
+            function loadScript(src) {
+                return new Promise((resolve, reject) => {
+                    const script = document.createElement('script');
+                    script.src = src;
+                    script.async = true;
+                    script.defer = true;
+                    script.crossOrigin = 'anonymous';
+                    script.onload = resolve;
+                    script.onerror = reject;
+                    document.head.appendChild(script);
+                });
+            }
+            
+            loadScript(scripts[0])
+                .then(() => loadScript(scripts[1]))
+                .then(() => console.log('✅ Firebase SDK carregado'))
+                .catch(() => console.warn('⚠️ Firebase SDK não carregado, página continuará funcionando'));
+        })();
+    </script>
+    
+    <script>
+        // Configuração do Firebase
+        const firebaseConfig = {
+            apiKey: "AIzaSyChYseG1IcmffYHHVYT7MqtLlzfdWKE_fc",
+            authDomain: "leaf-reactnative.firebaseapp.com",
+            projectId: "leaf-reactnative",
+            storageBucket: "leaf-reactnative.firebasestorage.app",
+            messagingSenderId: "106504629884",
+            appId: "1:106504629884:web:ada50a78fcf7bf3ea1a3f9",
+            databaseURL: "https://leaf-reactnative-default-rtdb.firebaseio.com",
+            measurementId: "G-22368DBCY9"
+        };
+
+        let auth = null;
+        let firebaseReady = false;
+        let authToken = null;
+        let isAuthenticated = false;
+        
+        function waitForFirebase() {
+            return new Promise((resolve) => {
+                if (typeof firebase !== 'undefined' && firebase.app) {
+                    try {
+                        if (!firebase.apps || firebase.apps.length === 0) {
+                            firebase.initializeApp(firebaseConfig);
+                        }
+                        auth = firebase.auth();
+                        firebaseReady = true;
+                        resolve();
+                    } catch (error) {
+                        if (firebase.apps && firebase.apps.length > 0) {
+                            auth = firebase.auth();
+                            firebaseReady = true;
+                        }
+                        resolve();
+                    }
+                } else {
+                    setTimeout(() => waitForFirebase().then(resolve), 100);
+                    setTimeout(() => resolve(), 5000);
+                }
+            });
+        }
+
+        // Contador de caracteres
+        document.addEventListener('DOMContentLoaded', function() {
+            const textarea = document.getElementById('additional-info');
+            const charCount = document.getElementById('char-count');
+            if (textarea && charCount) {
+                textarea.addEventListener('input', function() {
+                    charCount.textContent = this.value.length;
+                });
+            }
+
+            // Formatação de telefone
+            const userEmailInput = document.getElementById('user-email');
+            if (userEmailInput) {
+                userEmailInput.addEventListener('input', function(e) {
+                    const value = e.target.value;
+                    if (/^\d+$/.test(value.replace(/\D/g, ''))) {
+                        let phoneValue = value.replace(/\D/g, '');
+                        if (phoneValue.length <= 11) {
+                            if (phoneValue.length <= 10) {
+                                phoneValue = phoneValue.replace(/(\d{2})(\d{4})(\d{0,4})/, '($1) $2-$3');
+                            } else {
+                                phoneValue = phoneValue.replace(/(\d{2})(\d{5})(\d{0,4})/, '($1) $2-$3');
+                            }
+                            e.target.value = phoneValue;
+                        }
+                    }
+                });
+            }
+
+            // Aguardar Firebase (não bloqueia página)
+            waitForFirebase();
+        });
+
+        const reasonLabels = {
+            'nao-uso-mais': 'Não uso mais o aplicativo',
+            'problemas-tecnicos': 'Problemas técnicos',
+            'preco-taxas': 'Preço/Taxas',
+            'atendimento': 'Atendimento ao cliente',
+            'privacidade-seguranca': 'Privacidade/Segurança',
+            'outro': 'Outro motivo'
+        };
+
+        const form = document.getElementById('delete-account-form');
+        const confirmationBox = document.getElementById('confirmation-box');
+        const deleteBtn = document.getElementById('delete-btn');
+        const errorMessage = document.getElementById('error-message');
+        const successMessage = document.getElementById('success-message');
+        
+        let isConfirming = false;
+
+        form.addEventListener('submit', async function(e) {
+            e.preventDefault();
+            
+            const formData = new FormData(form);
+            const reason = formData.get('reason');
+            const additionalInfo = formData.get('additionalInfo');
+            const confirmDeletion = document.getElementById('confirm-deletion').checked;
+            const userEmailOrPhone = formData.get('userEmail').trim();
+            const userPassword = formData.get('userPassword');
+
+            // Validações
+            if (!reason) {
+                showError('Por favor, selecione um motivo para a exclusão.');
+                return;
+            }
+
+            if (!confirmDeletion) {
+                showError('Você precisa confirmar que deseja excluir sua conta marcando a opção de confirmação.');
+                return;
+            }
+
+            if (!userEmailOrPhone) {
+                showError('Por favor, digite seu email ou telefone.');
+                return;
+            }
+
+            if (!userPassword || userPassword.length < 6) {
+                showError('Por favor, digite sua senha corretamente.');
+                return;
+            }
+
+            // Primeiro, fazer autenticação com Firebase
+            deleteBtn.disabled = true;
+            deleteBtn.textContent = 'Autenticando...';
+            errorMessage.classList.remove('show');
+
+            try {
+                // Aguardar Firebase estar pronto
+                if (!firebaseReady) {
+                    await waitForFirebase();
+                }
+                
+                if (!auth) {
+                    throw new Error('Serviço de autenticação não disponível. Por favor, recarregue a página.');
+                }
+                
+                // Detectar se é email ou telefone
+                const isEmail = userEmailOrPhone.includes('@');
+                let userCredential;
+                
+                if (isEmail) {
+                    userCredential = await auth.signInWithEmailAndPassword(userEmailOrPhone, userPassword);
+                } else {
+                    throw new Error('Por favor, use seu email para autenticação.');
+                }
+                
+                // Obter token após login bem-sucedido
+                authToken = await userCredential.user.getIdToken(true);
+                isAuthenticated = true;
+                localStorage.setItem('leaf_auth_token', authToken);
+                
+                // Buscar telefone do usuário (opcional)
+                const phone = userEmailOrPhone;
+
+                // Primeira submissão - mostrar confirmação
+                if (!isConfirming) {
+                    isConfirming = true;
+                    
+                    document.getElementById('confirmed-phone').textContent = phone || userEmailOrPhone;
+                    document.getElementById('confirmed-reason').textContent = reasonLabels[reason];
+                    
+                    confirmationBox.classList.add('show');
+                    confirmationBox.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+                    
+                    deleteBtn.disabled = false;
+                    deleteBtn.textContent = 'Confirmar Exclusão Permanentemente';
+                    errorMessage.classList.remove('show');
+                    
+                    return;
+                }
+
+                // Segunda submissão - excluir conta
+                deleteBtn.textContent = 'Excluindo conta...';
+
+                try {
+                    const response = await fetch('/api/account/delete', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'Authorization': `Bearer ${authToken}`
+                        },
+                        credentials: 'include',
+                        body: JSON.stringify({
+                            reason: reason,
+                            additionalInfo: additionalInfo,
+                            phone: phone || userEmailOrPhone,
+                            password: userPassword
+                        })
+                    });
+
+                    const result = await response.json();
+
+                    if (response.status === 401 || response.status === 403) {
+                        showError('Sua sessão expirou. Por favor, faça login novamente.');
+                        isAuthenticated = false;
+                        authToken = null;
+                        localStorage.removeItem('leaf_auth_token');
+                    } else if (response.ok && result.success) {
+                        form.style.display = 'none';
+                        confirmationBox.classList.remove('show');
+                        successMessage.classList.add('show');
+                        successMessage.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                        
+                        authToken = null;
+                        localStorage.removeItem('leaf_auth_token');
+                    } else {
+                        showError(result.message || 'Erro ao excluir conta. Verifique suas credenciais e tente novamente.');
+                        deleteBtn.disabled = false;
+                        deleteBtn.textContent = 'Confirmar Exclusão Permanentemente';
+                    }
+                } catch (error) {
+                    console.error('Erro ao excluir conta:', error);
+                    showError('Erro ao conectar com o servidor. Verifique sua conexão e tente novamente.');
+                    deleteBtn.disabled = false;
+                    deleteBtn.textContent = 'Confirmar Exclusão Permanentemente';
+                    isConfirming = false;
+                    confirmationBox.classList.remove('show');
+                }
+
+            } catch (error) {
+                console.error('Erro na autenticação:', error);
+                
+                let errorMsg = 'Erro ao processar exclusão. ';
+                
+                if (error.code) {
+                    switch (error.code) {
+                        case 'auth/user-not-found':
+                            errorMsg = 'Email não encontrado. Verifique suas credenciais.';
+                            break;
+                        case 'auth/wrong-password':
+                            errorMsg = 'Senha incorreta. Verifique sua senha e tente novamente.';
+                            break;
+                        case 'auth/invalid-email':
+                            errorMsg = 'Email inválido. Verifique o email digitado.';
+                            break;
+                        default:
+                            errorMsg += error.message || 'Verifique sua conexão e tente novamente.';
+                    }
+                } else {
+                    errorMsg += error.message || 'Verifique sua conexão e tente novamente.';
+                }
+                
+                showError(errorMsg);
+                deleteBtn.disabled = false;
+                deleteBtn.textContent = 'Excluir Conta Permanentemente';
+                isConfirming = false;
+                confirmationBox.classList.remove('show');
+            }
+        });
+
+        function showError(message) {
+            errorMessage.textContent = message;
+            errorMessage.classList.add('show');
+            errorMessage.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        }
+
+        // Resetar confirmação ao mudar campos
+        const inputs = form.querySelectorAll('input, textarea');
+        inputs.forEach(input => {
+            input.addEventListener('change', function() {
+                if (isConfirming) {
+                    isConfirming = false;
+                    confirmationBox.classList.remove('show');
+                    deleteBtn.textContent = 'Excluir Conta Permanentemente';
+                }
+            });
+        });
+    </script>
+</body>
+</html>
+

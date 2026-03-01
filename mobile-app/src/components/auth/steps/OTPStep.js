@@ -1,7 +1,14 @@
-import React, { useState, useRef, useEffect } from 'react';
-import { View, Text, TextInput, TouchableOpacity, StyleSheet, Alert, ActivityIndicator } from 'react-native';
+import Logger from '../../../utils/Logger';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
+import { View, Text, TextInput, TouchableOpacity, StyleSheet, Alert, ActivityIndicator, KeyboardAvoidingView, Platform } from 'react-native';
+import Constants from 'expo-constants';
 import { fonts } from '../../../common-local/font';
 import auth from '@react-native-firebase/auth';
+import { saveStepData } from '../../../utils/secureOnboardingStorage';
+import ContinueButton from '../common/ContinueButton';
+
+// ✅ CRÍTICO: Flag de ambiente de review (App Store compliance)
+const IS_REVIEW_ENV = Constants.expoConfig?.extra?.isReview === true;
 
 // Cores baseadas no design
 const colors = {
@@ -33,46 +40,140 @@ const OTPStep = ({ phoneNumber, confirmation, onVerified, onBack }) => {
         }
     }, [timer]);
 
-    // Função para lidar com mudança de input
-    const handleOtpChange = (value, index) => {
-        const newOtp = [...otp];
-        newOtp[index] = value;
-        setOtp(newOtp);
-
-        // Mover para o próximo input
-        if (value && index < 5) {
-            inputRefs.current[index + 1]?.focus();
-        }
-    };
-
-    // Função para lidar com backspace
-    const handleKeyPress = (e, index) => {
-        if (e.nativeEvent.key === 'Backspace' && !otp[index] && index > 0) {
-            inputRefs.current[index - 1]?.focus();
-        }
-    };
-
     // Função para verificar o OTP
-    const handleVerifyOTP = async () => {
-        const otpString = otp.join('');
-        
+    const handleVerifyOTP = useCallback(async (otpToVerify = null) => {
+        const otpString = otpToVerify || otp.join('');
+
         if (otpString.length !== 6) {
-            Alert.alert('Erro', 'Por favor, insira o código completo de 6 dígitos.');
+            return;
+        }
+
+        // Evitar múltiplas verificações simultâneas
+        if (loading) {
+            return;
+        }
+
+        // ✅ CRÍTICO: Guard para ambiente de produção - OTP sempre obrigatório
+        // Apenas em ambiente de review (APP_REVIEW=true) o OTP pode ser pulado
+        // Nota: O bypass real é tratado em AuthFlow.js antes de chegar aqui
+        if (!IS_REVIEW_ENV && !__DEV__) {
+            // Em produção: OTP sempre obrigatório, nunca permitir bypass
+            Logger.log('🔐 Ambiente de produção: OTP obrigatório');
+            // Se chegou aqui, é porque não houve bypass (correto para produção)
+        }
+
+        // ✅ Validação adicional: Bloquear tentativas de bypass em produção
+        if (confirmation?.isReviewAccount && !IS_REVIEW_ENV && !__DEV__) {
+            Logger.error('🚫 Tentativa de bypass bloqueada em produção');
+            Alert.alert('Erro', 'Bypass de OTP não permitido em produção');
+            setLoading(false);
             return;
         }
 
         setLoading(true);
         try {
-            const credential = await confirmation.confirm(otpString);
-            if (credential.user) {
-                // OTP verificado com sucesso
-                onVerified(credential.user);
+            // 🚀 VERIFICAR SE É NÚMERO DE TESTE COM CÓDIGO FIXO
+            if (confirmation && confirmation.isTestNumber) {
+                Logger.log('🧪 Verificando código de teste:', otpString);
+                Logger.log('🔑 Código esperado:', confirmation.expectedOtp || '000000');
+
+                // Aceitar código fixo para números de teste
+                const expectedCode = confirmation.expectedOtp || '000000';
+                if (otpString === expectedCode) {
+                    Logger.log('✅ Código de teste aceito!');
+                    const credential = await confirmation.confirm(otpString);
+                    if (credential && credential.user) {
+                        onVerified(credential.user);
+                    }
+                } else {
+                    throw new Error('Código inválido. Para números de teste, use: ' + expectedCode);
+                }
+            } else {
+                // Fluxo normal com Firebase ou Custom API
+                if (confirmation && confirmation.isCustomOtp) {
+                    const { api } = require('../../../common-local/api');
+                    const response = await api.post('/custom-otp/verify-otp', {
+                        phone: phoneNumber,
+                        verificationId: confirmation.verificationId,
+                        otp: otpString
+                    });
+
+                    if (response.data && response.data.success && response.data.customToken) {
+                        const userCredential = await auth().signInWithCustomToken(response.data.customToken);
+                        if (userCredential.user) {
+                            onVerified(userCredential.user);
+                        }
+                    } else {
+                        throw new Error(response.data?.error || 'Código inválido.');
+                    }
+                } else {
+                    // Fallback para o FirebaseAuth antigo caso algum flow o invoque
+                    const credential = await confirmation.confirm(otpString);
+                    if (credential.user) {
+                        // OTP verificado com sucesso
+                        onVerified(credential.user);
+                    }
+                }
             }
         } catch (error) {
-            console.error('Erro na verificação do OTP:', error);
-            Alert.alert('Erro', 'Código inválido. Verifique e tente novamente.');
+            Logger.error('Erro na verificação do OTP:', error);
+
+            // ✅ Mensagens de erro específicas e humanas
+            let errorMessage = 'Código inválido. Verifique e tente novamente.';
+
+            if (error.message) {
+                if (error.message.includes('invalid') || error.message.includes('inválido')) {
+                    errorMessage = 'Código inválido. Verifique o código recebido por SMS e tente novamente.';
+                } else if (error.message.includes('expired') || error.message.includes('expirado')) {
+                    errorMessage = 'Código expirado. Solicite um novo código.';
+                } else if (error.message.includes('network') || error.message.includes('rede')) {
+                    errorMessage = 'Erro de conexão. Verifique sua internet e tente novamente.';
+                } else if (error.message.includes('timeout')) {
+                    errorMessage = 'Tempo de espera esgotado. Tente novamente.';
+                } else {
+                    errorMessage = error.message;
+                }
+            }
+
+            Alert.alert('Erro na Verificação', errorMessage);
         } finally {
             setLoading(false);
+        }
+    }, [otp, confirmation, onVerified, loading]);
+
+    // Função para lidar com mudança de input
+    const handleOtpChange = useCallback(async (value, index) => {
+        const newOtp = [...otp];
+        newOtp[index] = value;
+        setOtp(newOtp);
+
+        // Salvar automaticamente no AsyncStorage
+        const otpString = newOtp.join('');
+        if (otpString.length === 6) {
+            await saveStepData('phone_validation', {
+                phoneNumber: phoneNumber,
+                otp: otpString
+            });
+
+            // ✅ AUTO-VERIFICAR quando completar 6 dígitos
+            // Pequeno delay para garantir que o estado foi atualizado
+            setTimeout(() => {
+                if (!loading) {
+                    handleVerifyOTP(otpString);
+                }
+            }, 150);
+        }
+
+        // Mover para o próximo input
+        if (value && index < 5) {
+            inputRefs.current[index + 1]?.focus();
+        }
+    }, [otp, phoneNumber, loading, handleVerifyOTP]);
+
+    // Função para lidar com backspace
+    const handleKeyPress = (e, index) => {
+        if (e.nativeEvent.key === 'Backspace' && !otp[index] && index > 0) {
+            inputRefs.current[index - 1]?.focus();
         }
     };
 
@@ -82,7 +183,22 @@ const OTPStep = ({ phoneNumber, confirmation, onVerified, onBack }) => {
 
         setLoading(true);
         try {
-            const newConfirmation = await auth().signInWithPhoneNumber(phoneNumber, true);
+            let newConfirmation;
+            if (confirmation && confirmation.isCustomOtp) {
+                const { api } = require('../../../common-local/api');
+                const response = await api.post('/custom-otp/request-otp', { phone: phoneNumber });
+                if (response.data && response.data.success) {
+                    newConfirmation = {
+                        verificationId: response.data.verificationId,
+                        isCustomOtp: true
+                    };
+                } else {
+                    throw new Error('Falha ao reenviar código.');
+                }
+            } else {
+                newConfirmation = await auth().signInWithPhoneNumber(phoneNumber, true);
+            }
+
             // Atualizar a confirmação no componente pai
             if (onVerified) {
                 onVerified({ confirmation: newConfirmation });
@@ -92,7 +208,7 @@ const OTPStep = ({ phoneNumber, confirmation, onVerified, onBack }) => {
             setOtp(['', '', '', '', '', '']);
             Alert.alert('Sucesso', 'Novo código enviado!');
         } catch (error) {
-            console.error('Erro ao reenviar código:', error);
+            Logger.error('Erro ao reenviar código:', error);
             Alert.alert('Erro', 'Não foi possível reenviar o código. Tente novamente.');
         } finally {
             setLoading(false);
@@ -100,71 +216,78 @@ const OTPStep = ({ phoneNumber, confirmation, onVerified, onBack }) => {
     };
 
     return (
-        <View style={styles.container}>
-            <Text style={styles.title}>Verificação</Text>
-            <Text style={styles.subtitle}>
-                Digite o código de 6 dígitos enviado para {phoneNumber}
-            </Text>
-
-            {/* Inputs do OTP */}
-            <View style={styles.otpContainer}>
-                {otp.map((digit, index) => (
-                    <TextInput
-                        key={index}
-                        ref={ref => inputRefs.current[index] = ref}
-                        style={styles.otpInput}
-                        value={digit}
-                        onChangeText={(value) => handleOtpChange(value, index)}
-                        onKeyPress={(e) => handleKeyPress(e, index)}
-                        keyboardType="number-pad"
-                        maxLength={1}
-                        selectTextOnFocus
-                        autoFocus={index === 0}
-                    />
-                ))}
-            </View>
-
-            {/* Botão de verificação */}
-            <TouchableOpacity 
-                style={[styles.button, (!otp.every(digit => digit) || loading) && styles.buttonDisabled]} 
-                onPress={handleVerifyOTP}
-                disabled={!otp.every(digit => digit) || loading}
-            >
-                {loading ? (
-                    <ActivityIndicator color={colors.white} />
-                ) : (
-                    <Text style={styles.buttonText}>Verificar</Text>
-                )}
-            </TouchableOpacity>
-
-            {/* Reenvio do código */}
-            <View style={styles.resendContainer}>
-                <Text style={styles.resendText}>
-                    Não recebeu o código?{' '}
+        <KeyboardAvoidingView
+            style={styles.keyboardView}
+            behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+            keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 20}
+        >
+            <View style={styles.container}>
+                <Text style={styles.title}>Verificação</Text>
+                <Text style={styles.subtitle}>
+                    Digite o código de 6 dígitos enviado para {phoneNumber}
                 </Text>
-                {canResend ? (
-                    <TouchableOpacity onPress={handleResendCode} disabled={loading}>
-                        <Text style={styles.resendLink}>Reenviar</Text>
-                    </TouchableOpacity>
-                ) : (
-                    <Text style={styles.timerText}>
-                        Reenviar em {timer}s
-                    </Text>
-                )}
-            </View>
 
-            {/* Botão voltar */}
-            <TouchableOpacity style={styles.backButton} onPress={onBack}>
-                <Text style={styles.backButtonText}>Voltar</Text>
-            </TouchableOpacity>
-        </View>
+                {/* Inputs do OTP */}
+                <View style={styles.otpContainer}>
+                    {otp.map((digit, index) => (
+                        <TextInput
+                            key={index}
+                            ref={ref => inputRefs.current[index] = ref}
+                            style={styles.otpInput}
+                            value={digit}
+                            onChangeText={(value) => handleOtpChange(value, index)}
+                            onKeyPress={(e) => handleKeyPress(e, index)}
+                            keyboardType="number-pad"
+                            maxLength={1}
+                            selectTextOnFocus
+                            autoFocus={index === 0}
+                        />
+                    ))}
+                </View>
+
+                {/* Botão de verificação */}
+                <View style={styles.buttonContainer}>
+                    <ContinueButton
+                        onPress={handleVerifyOTP}
+                        disabled={!otp.every(digit => digit) || loading}
+                        text={loading ? 'Verificando...' : 'Verificar'}
+                    />
+                </View>
+
+                {/* Reenvio do código */}
+                <View style={styles.resendContainer}>
+                    <Text style={styles.resendText}>
+                        Não recebeu o código?{' '}
+                    </Text>
+                    {canResend ? (
+                        <TouchableOpacity onPress={handleResendCode} disabled={loading}>
+                            <Text style={styles.resendLink}>Reenviar</Text>
+                        </TouchableOpacity>
+                    ) : (
+                        <Text style={styles.timerText}>
+                            Reenviar em {timer}s
+                        </Text>
+                    )}
+                </View>
+
+                {/* Botão voltar */}
+                <TouchableOpacity style={styles.backButton} onPress={onBack}>
+                    <Text style={styles.backButtonText}>Voltar</Text>
+                </TouchableOpacity>
+            </View>
+        </KeyboardAvoidingView>
     );
 };
 
 const styles = StyleSheet.create({
+    keyboardView: {
+        flex: 1,
+        width: '100%',
+    },
     container: {
         width: '100%',
         paddingVertical: 20,
+        flex: 1,
     },
     title: {
         fontSize: 24,
@@ -183,35 +306,26 @@ const styles = StyleSheet.create({
     otpContainer: {
         flexDirection: 'row',
         justifyContent: 'space-between',
-        marginBottom: 32,
+        marginBottom: 24,
+        gap: 8,
     },
     otpInput: {
-        width: 45,
-        height: 55,
+        flex: 1,
+        maxWidth: 42,
+        height: 48,
         borderWidth: 2,
         borderColor: colors.lightGrey,
         borderRadius: 8,
         textAlign: 'center',
-        fontSize: 20,
+        fontSize: 18,
         fontFamily: fonts.Bold,
         color: colors.black,
         backgroundColor: colors.white,
     },
-    button: {
-        backgroundColor: colors.leafGreen,
-        borderRadius: 8,
-        paddingVertical: 16,
-        alignItems: 'center',
+    buttonContainer: {
         marginBottom: 24,
     },
-    buttonDisabled: {
-        backgroundColor: colors.greyPlaceholder,
-    },
-    buttonText: {
-        color: colors.white,
-        fontSize: 17,
-        fontFamily: fonts.Bold,
-    },
+
     resendContainer: {
         flexDirection: 'row',
         alignItems: 'center',

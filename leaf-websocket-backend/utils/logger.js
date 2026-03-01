@@ -1,5 +1,6 @@
 const winston = require('winston');
 const path = require('path');
+const traceContext = require('./trace-context');
 
 // Configuração de cores para diferentes níveis
 const colors = {
@@ -12,18 +13,46 @@ const colors = {
 
 winston.addColors(colors);
 
-// Formato personalizado para logs
+// Formato personalizado para logs estruturados (padrão Uber/99)
 const logFormat = winston.format.combine(
   winston.format.timestamp({
     format: 'YYYY-MM-DD HH:mm:ss'
   }),
   winston.format.errors({ stack: true }),
-  winston.format.json(),
-  winston.format.printf(({ timestamp, level, message, ...meta }) => {
-    let log = `${timestamp} [${level.toUpperCase()}]: ${message}`;
+  winston.format((info) => {
+    // Adicionar traceId automaticamente se não estiver presente
+    if (!info.traceId) {
+      const currentTraceId = traceContext.getCurrentTraceId();
+      if (currentTraceId) {
+        info.traceId = currentTraceId;
+      }
+    }
     
-    if (Object.keys(meta).length > 0) {
-      log += ` ${JSON.stringify(meta)}`;
+    // Estruturar log no formato JSON (para parsing)
+    info.service = info.service || 'leaf-websocket-backend';
+    info.timestamp = info.timestamp || Date.now();
+    
+    return info;
+  })(),
+  winston.format.json(),
+  winston.format.printf(({ timestamp, level, message, traceId, service, latency_ms, ...meta }) => {
+    // Formato legível para console
+    const traceStr = traceId ? `[traceId:${traceId}]` : '';
+    const latencyStr = latency_ms ? `[${latency_ms}ms]` : '';
+    let log = `${timestamp} [${level.toUpperCase()}] ${traceStr} ${latencyStr} ${message}`;
+    
+    // Adicionar metadados relevantes (sem payload completo)
+    const relevantMeta = {};
+    if (meta.rideId) relevantMeta.rideId = meta.rideId;
+    if (meta.bookingId) relevantMeta.bookingId = meta.bookingId;
+    if (meta.driverId) relevantMeta.driverId = meta.driverId;
+    if (meta.customerId) relevantMeta.customerId = meta.customerId;
+    if (meta.eventType) relevantMeta.eventType = meta.eventType;
+    if (meta.command) relevantMeta.command = meta.command;
+    if (meta.listener) relevantMeta.listener = meta.listener;
+    
+    if (Object.keys(relevantMeta).length > 0) {
+      log += ` ${JSON.stringify(relevantMeta)}`;
     }
     
     return log;
@@ -155,8 +184,10 @@ const logWebSocket = (level, message, meta = {}) => {
 };
 
 const logRedis = (level, message, meta = {}) => {
+  const traceId = traceContext.getCurrentTraceId();
   redisLogger.log(level, message, {
     service: 'redis',
+    traceId,
     ...meta
   });
 };
@@ -168,21 +199,74 @@ const logSecurity = (level, message, meta = {}) => {
   });
 };
 
-// Função para log de performance
+// Função para log de performance (com traceId e latency)
 const logPerformance = (operation, duration, meta = {}) => {
+  const traceId = traceContext.getCurrentTraceId();
   logger.info(`Performance: ${operation}`, {
     duration: `${duration}ms`,
+    latency_ms: duration,
     operation,
+    traceId,
     ...meta
   });
 };
 
 // Função para log de erro com contexto
 const logError = (error, context = {}) => {
+  const traceId = traceContext.getCurrentTraceId();
   logger.error(error.message, {
     stack: error.stack,
     context,
+    traceId,
     timestamp: new Date().toISOString()
+  });
+};
+
+// Função para log estruturado (padrão Uber/99)
+const logStructured = (level, message, meta = {}) => {
+  const traceId = traceContext.getCurrentTraceId();
+  const structuredMeta = {
+    traceId,
+    service: 'leaf-websocket-backend',
+    timestamp: Date.now(),
+    ...meta
+  };
+  
+  logger.log(level, message, structuredMeta);
+};
+
+// Função para log de command
+const logCommand = (commandName, success, latency, meta = {}) => {
+  const traceId = traceContext.getCurrentTraceId();
+  logger.info(`Command: ${commandName}`, {
+    command: commandName,
+    success: success,
+    latency_ms: latency,
+    traceId,
+    ...meta
+  });
+};
+
+// Função para log de event
+const logEvent = (eventType, action, meta = {}) => {
+  const traceId = traceContext.getCurrentTraceId();
+  logger.info(`Event: ${eventType} - ${action}`, {
+    eventType,
+    action,
+    traceId,
+    ...meta
+  });
+};
+
+// Função para log de listener
+const logListener = (listenerName, result, latency, meta = {}) => {
+  const traceId = traceContext.getCurrentTraceId();
+  logger.info(`Listener: ${listenerName}`, {
+    listener: listenerName,
+    success: result !== false,
+    latency_ms: latency,
+    traceId,
+    ...meta
   });
 };
 
@@ -195,5 +279,9 @@ module.exports = {
   logRedis,
   logSecurity,
   logPerformance,
-  logError
+  logError,
+  logStructured,
+  logCommand,
+  logEvent,
+  logListener
 }; 

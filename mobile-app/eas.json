@@ -1,9 +1,31 @@
 {
   "cli": {
-    "version": ">= 5.9.1"
+    "version": ">= 5.9.1",
+    "appVersionSource": "local"
   },
   "build": {
     "development": {
+      "developmentClient": true,
+      "distribution": "internal",
+      "android": {
+        "buildType": "apk",
+        "image": "latest"
+      },
+      "channel": "development"
+    },
+    "development-review": {
+      "developmentClient": true,
+      "distribution": "internal",
+      "env": {
+        "APP_REVIEW": "true"
+      },
+      "android": {
+        "buildType": "apk",
+        "image": "latest"
+      },
+      "channel": "development"
+    },
+    "development-client": {
       "developmentClient": true,
       "distribution": "internal",
       "android": {
@@ -12,17 +34,74 @@
       "channel": "development"
     },
     "preview": {
+      "node": "20.19.4",
       "distribution": "internal",
+      "env": {
+        "NPM_CONFIG_LEGACY_PEER_DEPS": "true"
+      },
       "android": {
-        "buildType": "aab"
+        "buildType": "apk"
+      },
+      "ios": {
+        "image": "macos-sonoma-14.6-xcode-16.0",
+        "buildConfiguration": "Release",
+        "simulator": false
       },
       "channel": "preview"
     },
-    "production": {
+    "release-test": {
+      "node": "20.19.4",
+      "distribution": "internal",
       "android": {
-        "buildType": "aab"
+        "buildType": "apk",
+        "image": "latest"
       },
       "channel": "production"
+    },
+    "production": {
+  "node": "20.19.4",
+  "ios": {
+    "image": "macos-sonoma-14.6-xcode-16.1",
+    "buildConfiguration": "Release"
+  },
+  "channel": "production"
+  },
+    "production-apk": {
+      "node": "20.19.4",
+      "distribution": "internal",
+      "android": {
+        "buildType": "apk",
+        "image": "latest"
+      },
+      "channel": "production"
+    },
+    "production-review": {
+      "node": "20.19.4",
+      "distribution": "internal",
+      "env": {
+        "APP_REVIEW": "true"
+      },
+      "android": {
+        "buildType": "apk",
+        "image": "latest"
+      },
+      "ios": {
+        "image": "macos-sonoma-14.6-xcode-16.1",
+        "buildConfiguration": "Release"
+      },
+      "channel": "production"
+    },
+    "development-review-final": {
+      "developmentClient": true,
+      "distribution": "internal",
+      "env": {
+        "APP_REVIEW": "true"
+      },
+      "android": {
+        "buildType": "apk",
+        "image": "latest"
+      },
+      "channel": "development"
     }
   },
   "submit": {

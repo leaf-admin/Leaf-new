@@ -4,7 +4,7 @@ import {
     FETCH_SOS_FAILED,
     EDIT_SOS
   } from "../types";
-  import { firebase } from '../config/configureFirebase';
+  import { firebase } from './config/configureFirebase';
 
   export const fetchSos = () => (dispatch) => {
   

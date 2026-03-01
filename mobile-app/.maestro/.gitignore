@@ -1,0 +1,21 @@
+# Screenshots e logs de testes
+screenshots/
+*.log
+results.xml
+
+# Arquivos temporários
+*.tmp
+*.cache
+
+
+
+
+
+
+
+
+
+
+
+
+

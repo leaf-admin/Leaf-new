@@ -1,0 +1,423 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Baixe o app Leaf | Cadastre-se como Motorista ou Solicite uma viagem</title>
+    <meta name="description" content="Viaje de maneira rápida, simples e segura. Ou se preferir, seja um motorista parceiro Leaf e aumente seus ganhos. Confira nossos benefícios!">
+    
+    <!-- CSS Files -->
+    <link rel="stylesheet" href="assets/referencia-files/9ca74aa1db20946c.css">
+    <link rel="stylesheet" href="assets/referencia-files/34cf33828ed8ca32.css">
+    <link rel="stylesheet" href="assets/referencia-files/b51ac5fdeaf57928.css">
+    <link rel="stylesheet" href="assets/referencia-files/cb74a29fa9526037.css">
+    
+    <style>
+        /* Reset básico */
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'DiDiSans', 'Montserrat', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            line-height: 1.6;
+            color: #1a1a1a;
+        }
+        
+        /* Header */
+        header {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 72px;
+            background: white;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            z-index: 999;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0 60px;
+        }
+        
+        .logo img {
+            height: 48px;
+        }
+        
+        /* Hero Section */
+        .hero {
+            padding-top: 120px;
+            padding-bottom: 80px;
+            background: linear-gradient(135deg, #4CAF50 0%, #45a049 100%);
+            color: white;
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+        }
+        
+        .hero-content {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 0 24px;
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 4rem;
+            align-items: center;
+        }
+        
+        .hero h1 {
+            font-size: 4rem;
+            font-weight: 700;
+            line-height: 1.2;
+            margin-bottom: 1.5rem;
+        }
+        
+        .hero .highlight {
+            font-size: 5rem;
+            font-weight: 800;
+            display: block;
+            margin: 1rem 0;
+        }
+        
+        .hero p {
+            font-size: 1.5rem;
+            margin-bottom: 2rem;
+            opacity: 0.95;
+        }
+        
+        .cta-buttons {
+            display: flex;
+            gap: 1rem;
+            flex-wrap: wrap;
+        }
+        
+        .btn {
+            padding: 1rem 2rem;
+            border-radius: 26px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s;
+            border: none;
+            font-size: 1rem;
+        }
+        
+        .btn-primary {
+            background: white;
+            color: #1a1a1a;
+        }
+        
+        .btn-primary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 24px rgba(0,0,0,0.2);
+        }
+        
+        .btn-secondary {
+            background: transparent;
+            color: white;
+            border: 2px solid white;
+        }
+        
+        .btn-secondary:hover {
+            background: white;
+            color: #1a1a1a;
+        }
+        
+        /* Features Section */
+        .features {
+            padding: 80px 24px;
+            background: #f8f9fa;
+        }
+        
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        
+        .section-title {
+            text-align: center;
+            font-size: 3rem;
+            font-weight: 700;
+            margin-bottom: 4rem;
+            color: #1a1a1a;
+        }
+        
+        .features-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 2rem;
+        }
+        
+        .feature-card {
+            background: white;
+            padding: 2rem;
+            border-radius: 16px;
+            box-shadow: 0 2px 12px rgba(0,0,0,0.08);
+            text-align: center;
+            transition: all 0.3s;
+        }
+        
+        .feature-card:hover {
+            transform: translateY(-8px);
+            box-shadow: 0 8px 24px rgba(0,0,0,0.12);
+        }
+        
+        .feature-icon {
+            font-size: 3rem;
+            margin-bottom: 1rem;
+        }
+        
+        .feature-card h3 {
+            font-size: 1.5rem;
+            font-weight: 700;
+            margin-bottom: 1rem;
+            color: #1a1a1a;
+        }
+        
+        .feature-card p {
+            color: #666;
+            font-size: 1rem;
+        }
+        
+        /* Driver CTA */
+        .driver-cta {
+            padding: 80px 24px;
+            background: #f8f9fa;
+            color: #1a1a1a;
+            text-align: center;
+        }
+        
+        .driver-cta h2 {
+            font-size: 3rem;
+            font-weight: 700;
+            margin-bottom: 1.5rem;
+        }
+        
+        .driver-cta p {
+            font-size: 1.25rem;
+            margin-bottom: 2rem;
+            color: #666;
+        }
+        
+        /* Footer */
+        footer {
+            background: #4CAF50;
+            color: #1a1a1a;
+            padding: 60px 24px 40px;
+        }
+        
+        .footer-content {
+            max-width: 1200px;
+            margin: 0 auto;
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 3rem;
+        }
+        
+        .footer-section h3 {
+            font-weight: 700;
+            margin-bottom: 1rem;
+            font-size: 1.125rem;
+            border-bottom: 2px solid #1a1a1a;
+            padding-bottom: 0.5rem;
+        }
+        
+        .footer-section ul {
+            list-style: none;
+        }
+        
+        .footer-section ul li {
+            margin-bottom: 0.75rem;
+        }
+        
+        .footer-section ul li a {
+            color: #1a1a1a;
+            text-decoration: none;
+            transition: opacity 0.3s;
+        }
+        
+        .footer-section ul li a:hover {
+            opacity: 0.7;
+        }
+        
+        .footer-bottom {
+            text-align: center;
+            margin-top: 3rem;
+            padding-top: 2rem;
+            border-top: 1px solid rgba(26,26,26,0.2);
+        }
+        
+        /* Responsive */
+        @media (max-width: 768px) {
+            header {
+                padding: 0 24px;
+            }
+            
+            .hero h1 {
+                font-size: 2rem;
+            }
+            
+            .hero .highlight {
+                font-size: 2.5rem;
+            }
+            
+            .hero-content {
+                grid-template-columns: 1fr;
+            }
+            
+            .section-title {
+                font-size: 2rem;
+            }
+            
+            .driver-cta h2 {
+                font-size: 2rem;
+            }
+        }
+    </style>
+</head>
+<body>
+    <!-- Header -->
+    <header>
+        <div class="logo">
+            <img src="assets/logo.svg" alt="Leaf">
+        </div>
+        <nav>
+            <a href="#motorista" style="color: #1a1a1a; text-decoration: none; font-weight: 600;">Motorista</a>
+        </nav>
+    </header>
+
+    <!-- Hero Section -->
+    <section class="hero">
+        <div class="hero-content">
+            <div>
+                <h1>
+                    <span class="highlight">TAXA ZERO</span>
+                    pra quem dirige,
+                    <br>CONFORTO máximo
+                    <br>pra quem viaja
+                </h1>
+                <p>Viaje de maneira rápida, simples e segura. Ou se preferir, seja um motorista parceiro Leaf e aumente seus ganhos.</p>
+                <div class="cta-buttons">
+                    <a href="#download" class="btn btn-primary">📱 Baixar App</a>
+                    <a href="#motorista" class="btn btn-secondary">🚗 Seja Motorista</a>
+                </div>
+            </div>
+            <div>
+                <img src="assets/logo.png" alt="Leaf App" style="width: 100%; max-width: 600px; margin: 0 auto; display: block;">
+            </div>
+        </div>
+    </section>
+
+    <!-- Features Section -->
+    <section class="features">
+        <div class="container">
+            <h2 class="section-title">Por que escolher a Leaf?</h2>
+            <div class="features-grid">
+                <div class="feature-card">
+                    <div class="feature-icon">⚡</div>
+                    <h3>Mais certeza nos ganhos</h3>
+                    <p>O valor que você vê na tela ao receber uma corrida agora é exatamente o que você vai receber ao final, sem variações.</p>
+                </div>
+                <div class="feature-card">
+                    <div class="feature-icon">🛡️</div>
+                    <h3>Proteção anticalote</h3>
+                    <p>Para evitar prejuízos na sua rotina, a Leaf paga a você o valor da corrida caso o passageiro não faça o pagamento. Reembolso sujeito a análise. Limitado a R$50,00.</p>
+                </div>
+                <div class="feature-card">
+                    <div class="feature-icon">💰</div>
+                    <h3>Taxa de cancelamento</h3>
+                    <p>Receba 100% da taxa com o valor integral no saldo da sua carteira. A taxa de cancelamento é proporcional ao tempo e distância que você percorre.</p>
+                </div>
+                <div class="feature-card">
+                    <div class="feature-icon">📊</div>
+                    <h3>Tarifa base dinâmica</h3>
+                    <p>O valor da tarifa base poderá mudar de acordo com a distância entre o motorista e o ponto de embarque do passageiro.</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Driver CTA -->
+    <section class="driver-cta" id="motorista">
+        <div class="container">
+            <h2>Seja motorista parceiro Leaf e aumente a sua renda</h2>
+            <p>Você vai poder contar com os planos de incentivo da Leaf para garantir seus ganhos.</p>
+            <a href="#download" class="btn btn-primary">Quero ser motorista</a>
+        </div>
+    </section>
+
+    <!-- Download Section -->
+    <section class="features" id="download" style="background: #1a1a1a; color: white; padding: 80px 24px;">
+        <div class="container">
+            <h2 class="section-title" style="color: white;">Baixe o app e viaje de maneira rápida, simples e segura</h2>
+            <div style="text-align: center; margin-top: 2rem;">
+                <a href="#" class="btn btn-primary">📱 Baixar na App Store</a>
+                <a href="#" class="btn btn-primary">📱 Baixar na Google Play</a>
+            </div>
+        </div>
+    </section>
+
+    <!-- Footer -->
+    <footer>
+        <div class="footer-content">
+            <div class="footer-section">
+                <h3>Sobre</h3>
+                <ul>
+                    <li><a href="#">Quem Somos</a></li>
+                    <li><a href="#">Newsroom</a></li>
+                    <li><a href="#">Blog</a></li>
+                    <li><a href="#">Cidades</a></li>
+                    <li><a href="#">Trabalhe com a gente</a></li>
+                </ul>
+            </div>
+            <div class="footer-section">
+                <h3>Categorias</h3>
+                <ul>
+                    <li><a href="#">Motorista</a></li>
+                    <li><a href="#">Passageiro</a></li>
+                    <li><a href="#">Empresas</a></li>
+                </ul>
+            </div>
+            <div class="footer-section">
+                <h3>Soluções</h3>
+                <ul>
+                    <li><a href="#">Segurança</a></li>
+                    <li><a href="#">Ajuda</a></li>
+                    <li><a href="#">Benefícios</a></li>
+                </ul>
+            </div>
+            <div class="footer-section">
+                <h3>Suporte</h3>
+                <ul>
+                    <li><a href="#">Central de Ajuda</a></li>
+                    <li><a href="#">Termos de Uso</a></li>
+                    <li><a href="#">Política de Privacidade</a></li>
+                </ul>
+            </div>
+        </div>
+        <div class="footer-bottom">
+            <p>&copy; 2025 Leaf App. Todos os direitos reservados.</p>
+        </div>
+    </footer>
+
+    <script>
+        // Smooth scroll
+        document.querySelectorAll('a[href^="#"]').forEach(anchor => {
+            anchor.addEventListener('click', function (e) {
+                e.preventDefault();
+                const target = document.querySelector(this.getAttribute('href'));
+                if (target) {
+                    target.scrollIntoView({
+                        behavior: 'smooth',
+                        block: 'start'
+                    });
+                }
+            });
+        });
+    </script>
+</body>
+</html>
+
+
+

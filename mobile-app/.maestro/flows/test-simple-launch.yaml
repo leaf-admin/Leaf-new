@@ -1,0 +1,11 @@
+# Teste Simples: Apenas abrir o app
+appId: br.com.leaf.ride
+---
+- launchApp
+- takeScreenshot: "01-app-opened"
+- waitForAnimationToEnd: 3000
+- takeScreenshot: "02-app-loaded"
+- assertVisible: 
+    text: "Telefone"
+    optional: true
+

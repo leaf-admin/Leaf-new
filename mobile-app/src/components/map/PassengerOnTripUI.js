@@ -1,3 +1,4 @@
+import Logger from '../../utils/Logger';
 import React, { useState, useEffect } from 'react';
 import {
   View,
@@ -9,6 +10,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useTranslation } from 'react-i18next';
+
 
 export default function PassengerOnTripUI({ booking }) {
   const { t } = useTranslation();
@@ -35,7 +37,7 @@ export default function PassengerOnTripUI({ booking }) {
       t('emergency_help'),
       [
         { text: t('cancel'), style: 'cancel' },
-        { text: t('call_emergency'), onPress: () => console.log('Chamada de emergência') }
+        { text: t('call_emergency'), onPress: () => Logger.log('Chamada de emergência') }
       ]
     );
   };
@@ -103,12 +105,12 @@ export default function PassengerOnTripUI({ booking }) {
 
       {/* Botões de ação */}
       <View style={styles.actionButtons}>
-        <TouchableOpacity style={styles.actionButton} onPress={() => console.log('Chat')}>
+        <TouchableOpacity style={styles.actionButton} onPress={() => Logger.log('Chat')}>
           <Ionicons name="chatbubble" size={24} color="#41D274" />
           <Text style={styles.actionButtonText}>{t('message')}</Text>
         </TouchableOpacity>
 
-        <TouchableOpacity style={styles.actionButton} onPress={() => console.log('Compartilhar')}>
+        <TouchableOpacity style={styles.actionButton} onPress={() => Logger.log('Compartilhar')}>
           <Ionicons name="share" size={24} color="#41D274" />
           <Text style={styles.actionButtonText}>{t('share')}</Text>
         </TouchableOpacity>

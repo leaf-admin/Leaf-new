@@ -1,0 +1,542 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Política de Privacidade - Leaf</title>
+    <meta name="description" content="Política de Privacidade da Leaf - Como protegemos e utilizamos seus dados pessoais de forma segura e transparente.">
+    
+    <!-- Favicon -->
+    <link rel="icon" type="image/x-icon" href="/favicon.ico">
+    
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            line-height: 1.7;
+            color: #333;
+            background: #f8f9fa;
+        }
+        
+        .header {
+            background: linear-gradient(135deg, #2c5530 0%, #4a7c59 100%);
+            color: white;
+            padding: 60px 0 40px 0;
+            text-align: center;
+            position: relative;
+            overflow: hidden;
+        }
+        
+        .header::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0,0,0,0.1);
+            z-index: 1;
+        }
+        
+        .header-content {
+            position: relative;
+            z-index: 2;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 0 20px;
+        }
+        
+        .header h1 {
+            font-size: 2.5rem;
+            margin-bottom: 15px;
+            font-weight: 700;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
+        }
+        
+        .header .subtitle {
+            font-size: 1.2rem;
+            opacity: 0.9;
+            margin-bottom: 10px;
+        }
+        
+        .last-updated {
+            background: rgba(255,255,255,0.2);
+            padding: 10px 20px;
+            border-radius: 25px;
+            display: inline-block;
+            font-size: 0.95rem;
+            margin-top: 20px;
+        }
+        
+        .container {
+            max-width: 900px;
+            margin: 0 auto;
+            padding: 0 20px;
+        }
+        
+        .content {
+            background: white;
+            margin: -20px auto 60px auto;
+            padding: 50px;
+            border-radius: 15px;
+            box-shadow: 0 10px 30px rgba(44, 85, 48, 0.1);
+            position: relative;
+            z-index: 2;
+        }
+        
+        .intro-text {
+            background: #f0f8f1;
+            padding: 25px;
+            border-radius: 10px;
+            border-left: 5px solid #4a7c59;
+            margin-bottom: 40px;
+            font-size: 1.1rem;
+        }
+        
+        .company-info {
+            background: #e8f4ea;
+            padding: 20px;
+            border-radius: 8px;
+            margin-bottom: 30px;
+            border: 1px solid #d4edda;
+        }
+        
+        .company-info strong {
+            color: #2c5530;
+        }
+        
+        .section {
+            margin-bottom: 40px;
+        }
+        
+        .section h2 {
+            color: #2c5530;
+            font-size: 1.8rem;
+            margin-bottom: 20px;
+            padding-bottom: 10px;
+            border-bottom: 3px solid #4a7c59;
+            position: relative;
+        }
+        
+        .section h2::before {
+            content: '';
+            position: absolute;
+            bottom: -3px;
+            left: 0;
+            width: 50px;
+            height: 3px;
+            background: #2c5530;
+        }
+        
+        .section h3 {
+            color: #4a7c59;
+            font-size: 1.4rem;
+            margin: 25px 0 15px 0;
+            font-weight: 600;
+        }
+        
+        .section p {
+            margin-bottom: 15px;
+            font-size: 1.05rem;
+            text-align: justify;
+        }
+        
+        .data-list {
+            background: #f8f9fa;
+            padding: 20px;
+            border-radius: 8px;
+            margin: 20px 0;
+            border-left: 4px solid #4a7c59;
+        }
+        
+        .data-list ul {
+            list-style: none;
+            padding-left: 0;
+        }
+        
+        .data-list li {
+            margin-bottom: 10px;
+            padding-left: 25px;
+            position: relative;
+        }
+        
+        .data-list li::before {
+            content: '🔹';
+            position: absolute;
+            left: 0;
+            color: #4a7c59;
+        }
+        
+        .highlight-box {
+            background: linear-gradient(135deg, #2c5530 0%, #4a7c59 100%);
+            color: white;
+            padding: 25px;
+            border-radius: 10px;
+            margin: 30px 0;
+            text-align: center;
+        }
+        
+        .highlight-box h3 {
+            color: white;
+            margin-bottom: 15px;
+        }
+        
+        .rights-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 20px;
+            margin: 25px 0;
+        }
+        
+        .right-item {
+            background: #f8f9fa;
+            padding: 20px;
+            border-radius: 8px;
+            border-left: 4px solid #4a7c59;
+            transition: transform 0.2s ease, box-shadow 0.2s ease;
+        }
+        
+        .right-item:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(44, 85, 48, 0.15);
+        }
+        
+        .right-item h4 {
+            color: #2c5530;
+            margin-bottom: 10px;
+            font-size: 1.1rem;
+        }
+        
+        .contact-box {
+            background: linear-gradient(135deg, #4a7c59 0%, #2c5530 100%);
+            color: white;
+            padding: 30px;
+            border-radius: 15px;
+            text-align: center;
+            margin: 40px 0;
+        }
+        
+        .contact-box h3 {
+            color: white;
+            margin-bottom: 15px;
+        }
+        
+        .contact-box a {
+            color: #a8d4ae;
+            text-decoration: none;
+            font-weight: 600;
+            font-size: 1.1rem;
+        }
+        
+        .contact-box a:hover {
+            color: white;
+            text-decoration: underline;
+        }
+        
+        .footer {
+            background: #2c5530;
+            color: white;
+            padding: 40px 0;
+            text-align: center;
+        }
+        
+        .footer a {
+            color: #a8d4ae;
+            text-decoration: none;
+        }
+        
+        .footer a:hover {
+            color: white;
+            text-decoration: underline;
+        }
+        
+        .breadcrumb {
+            background: white;
+            padding: 15px 0;
+            border-bottom: 1px solid #e9ecef;
+        }
+        
+        .breadcrumb a {
+            color: #4a7c59;
+            text-decoration: none;
+            margin-right: 10px;
+        }
+        
+        .breadcrumb a:hover {
+            text-decoration: underline;
+        }
+        
+        .breadcrumb span {
+            color: #666;
+            margin: 0 10px;
+        }
+        
+        @media (max-width: 768px) {
+            .header h1 {
+                font-size: 2rem;
+            }
+            
+            .content {
+                padding: 30px 20px;
+                margin: -15px 15px 40px 15px;
+            }
+            
+            .rights-grid {
+                grid-template-columns: 1fr;
+            }
+            
+            .section h2 {
+                font-size: 1.5rem;
+            }
+        }
+        
+        /* Scroll suave */
+        html {
+            scroll-behavior: smooth;
+        }
+        
+        /* Estilo para âncoras */
+        .section:target {
+            background: #f0f8f1;
+            padding: 20px;
+            border-radius: 8px;
+            margin: 20px 0;
+            transition: background 0.3s ease;
+        }
+    </style>
+</head>
+<body>
+    <!-- Breadcrumb -->
+    <nav class="breadcrumb">
+        <div class="container">
+            <a href="/">🍃 Leaf</a>
+            <span>›</span>
+            <span>Política de Privacidade</span>
+        </div>
+    </nav>
+
+    <!-- Header -->
+    <header class="header">
+        <div class="header-content">
+            <h1>🔒 Política de Privacidade</h1>
+            <p class="subtitle">Transparência e proteção dos seus dados pessoais</p>
+            <div class="last-updated">
+                📅 Última atualização: 09 de setembro de 2025
+            </div>
+        </div>
+    </header>
+
+    <!-- Content -->
+    <div class="container">
+        <div class="content">
+            <!-- Introdução -->
+            <div class="intro-text">
+                <strong>🍃 A LEAF respeita a sua privacidade</strong> e se compromete a proteger os dados pessoais de usuários e motoristas que utilizam nossa plataforma. Esta Política de Privacidade explica como coletamos, utilizamos, armazenamos e compartilhamos suas informações.
+                <br><br>
+                <strong>Ao utilizar o aplicativo LEAF, você concorda com as práticas descritas neste documento.</strong>
+            </div>
+
+            <!-- Informações da empresa -->
+            <div class="company-info">
+                <strong>📋 Dados da Empresa:</strong><br>
+                <strong>LEAF</strong>, de titularidade da <strong>Freedom Tecnologia e Serviços LTDA</strong><br>
+                <strong>CNPJ:</strong> 54.027.374/0001-20
+            </div>
+
+            <!-- Seção 1: Dados que coletamos -->
+            <section class="section" id="dados-coletados">
+                <h2>1. Dados que coletamos</h2>
+                <p>Coletamos informações necessárias para o funcionamento e segurança dos serviços, incluindo:</p>
+
+                <h3>1.1. Dados fornecidos pelo usuário</h3>
+                <div class="data-list">
+                    <ul>
+                        <li>Nome completo, CPF, RG, data de nascimento, foto de perfil</li>
+                        <li>Endereço de e-mail e número de telefone</li>
+                        <li>Dados de pagamento e cobrança (cartão de crédito, Pix, outros meios)</li>
+                    </ul>
+                </div>
+
+                <h3>1.2. Dados fornecidos pelos motoristas</h3>
+                <div class="data-list">
+                    <ul>
+                        <li>CNH, CRLV e outras informações de cadastro exigidas por lei</li>
+                        <li>Dados bancários para repasse de valores</li>
+                        <li>Informações sobre o veículo (placa, modelo, cor, ano)</li>
+                    </ul>
+                </div>
+
+                <h3>1.3. Dados coletados automaticamente</h3>
+                <div class="data-list">
+                    <ul>
+                        <li>Geolocalização em tempo real (para o funcionamento das corridas)</li>
+                        <li>Histórico de viagens, rotas e interações dentro do app</li>
+                        <li>Dados técnicos: modelo do dispositivo, sistema operacional, identificadores únicos, endereço IP e logs de acesso</li>
+                    </ul>
+                </div>
+            </section>
+
+            <!-- Seção 2: Como utilizamos -->
+            <section class="section" id="como-utilizamos">
+                <h2>2. Como utilizamos os dados</h2>
+                <p>Utilizamos seus dados para:</p>
+                <div class="data-list">
+                    <ul>
+                        <li>Viabilizar a intermediação de corridas entre passageiros e motoristas</li>
+                        <li>Processar pagamentos e repasses</li>
+                        <li>Garantir segurança e prevenção a fraudes</li>
+                        <li>Cumprir obrigações legais e regulatórias</li>
+                        <li>Melhorar a experiência do usuário, incluindo suporte e personalização de serviços</li>
+                    </ul>
+                </div>
+            </section>
+
+            <!-- Seção 3: Compartilhamento -->
+            <section class="section" id="compartilhamento">
+                <h2>3. Compartilhamento de informações</h2>
+                <p>Podemos compartilhar seus dados:</p>
+                
+                <div class="data-list">
+                    <ul>
+                        <li><strong>Com motoristas:</strong> quando um passageiro solicita corrida, compartilhamos dados mínimos necessários (nome, localização de embarque e destino)</li>
+                        <li><strong>Com passageiros:</strong> motorista recebe informações relevantes (nome do passageiro, local de embarque)</li>
+                        <li><strong>Com autoridades públicas:</strong> quando exigido por lei ou decisão judicial</li>
+                        <li><strong>Com parceiros:</strong> de serviços de pagamento, suporte e tecnologia</li>
+                    </ul>
+                </div>
+
+                <div class="highlight-box">
+                    <h3>🛡️ Compromisso importante</h3>
+                    <p><strong>Não vendemos dados pessoais a terceiros.</strong></p>
+                </div>
+            </section>
+
+            <!-- Seção 4: Armazenamento -->
+            <section class="section" id="armazenamento">
+                <h2>4. Armazenamento e segurança</h2>
+                <p>Seus dados são armazenados em servidores com padrões elevados de segurança, podendo estar localizados no Brasil ou em outros países.</p>
+                <p>Adotamos medidas técnicas e administrativas para proteger suas informações contra acessos não autorizados, perdas, alterações ou divulgações indevidas.</p>
+            </section>
+
+            <!-- Seção 5: Direitos LGPD -->
+            <section class="section" id="direitos-lgpd">
+                <h2>5. Direitos dos titulares de dados (LGPD)</h2>
+                <p>Você tem direito a:</p>
+
+                <div class="rights-grid">
+                    <div class="right-item">
+                        <h4>🔍 Confirmação</h4>
+                        <p>Confirmar a existência de tratamento de dados</p>
+                    </div>
+                    <div class="right-item">
+                        <h4>👁️ Acesso</h4>
+                        <p>Acessar, corrigir ou atualizar informações pessoais</p>
+                    </div>
+                    <div class="right-item">
+                        <h4>🗑️ Exclusão</h4>
+                        <p>Solicitar anonimização, bloqueio ou exclusão de dados desnecessários</p>
+                    </div>
+                    <div class="right-item">
+                        <h4>❌ Revogação</h4>
+                        <p>Revogar consentimento e solicitar portabilidade dos dados</p>
+                    </div>
+                    <div class="right-item">
+                        <h4>📤 Portabilidade</h4>
+                        <p>Solicitar seus dados em formato estruturado</p>
+                    </div>
+                    <div class="right-item">
+                        <h4>🚫 Exclusão da conta</h4>
+                        <p>Solicitar exclusão completa, respeitando prazos legais</p>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Contato -->
+            <div class="contact-box">
+                <h3>📧 Entre em contato conosco</h3>
+                <p>Para exercer seus direitos ou esclarecer dúvidas sobre esta política:</p>
+                <a href="mailto:privacidade@leaf.app.br">privacidade@leaf.app.br</a>
+            </div>
+        </div>
+    </div>
+
+    <!-- Footer -->
+    <footer class="footer">
+        <div class="container">
+            <p><strong>🍃 Leaf</strong> - Transporte Inteligente e Seguro</p>
+            <p>
+                <a href="/">Voltar ao site</a> | 
+                <a href="mailto:privacidade@leaf.app.br">Contato sobre Privacidade</a> | 
+                <a href="mailto:contato@leaf.app.br">Suporte Geral</a>
+            </p>
+            <p style="margin-top: 20px; opacity: 0.8; font-size: 0.9rem;">
+                © 2024 Freedom Tecnologia e Serviços LTDA. Todos os direitos reservados.<br>
+                Esta política está em conformidade com a Lei Geral de Proteção de Dados (LGPD) - Lei nº 13.709/2018.
+            </p>
+        </div>
+    </footer>
+
+    <script>
+        // Smooth scroll para links internos
+        document.querySelectorAll('a[href^="#"]').forEach(anchor => {
+            anchor.addEventListener('click', function (e) {
+                e.preventDefault();
+                const target = document.querySelector(this.getAttribute('href'));
+                if (target) {
+                    target.scrollIntoView({
+                        behavior: 'smooth',
+                        block: 'start'
+                    });
+                }
+            });
+        });
+
+        // Highlight da seção quando acessada via âncora
+        const highlightSection = () => {
+            const hash = window.location.hash;
+            if (hash) {
+                const section = document.querySelector(hash);
+                if (section) {
+                    section.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                }
+            }
+        };
+
+        // Executar ao carregar a página
+        window.addEventListener('load', highlightSection);
+        window.addEventListener('hashchange', highlightSection);
+
+        // Animação suave para elementos que entram na tela
+        const observerOptions = {
+            threshold: 0.1,
+            rootMargin: '0px 0px -50px 0px'
+        };
+
+        const observer = new IntersectionObserver((entries) => {
+            entries.forEach(entry => {
+                if (entry.isIntersecting) {
+                    entry.target.style.opacity = '1';
+                    entry.target.style.transform = 'translateY(0)';
+                }
+            });
+        }, observerOptions);
+
+        // Observar elementos que devem animar
+        document.querySelectorAll('.section, .right-item').forEach(element => {
+            element.style.opacity = '0';
+            element.style.transform = 'translateY(20px)';
+            element.style.transition = 'opacity 0.6s ease, transform 0.6s ease';
+            observer.observe(element);
+        });
+    </script>
+</body>
+</html>
+
+
+
+

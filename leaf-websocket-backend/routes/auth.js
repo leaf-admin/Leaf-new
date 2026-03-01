@@ -1,6 +1,7 @@
 const express = require('express');
 const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
+const { logStructured, logError } = require('../utils/logger');
 const router = express.Router();
 
 // Configurações
@@ -107,7 +108,7 @@ router.post('/login', async (req, res) => {
     );
 
     // Log de login
-    console.log(`🔐 Login realizado: ${username} (${user.role}) - IP: ${req.ip} - Primeiro acesso: ${user.firstAccess}`);
+    logStructured('info', `🔐 Login realizado: ${username} (${user.role}) - IP: ${req.ip} - Primeiro acesso: ${user.firstAccess}`, { service: 'auth-routes' });
 
     res.json({
       token,
@@ -122,7 +123,7 @@ router.post('/login', async (req, res) => {
     });
 
   } catch (error) {
-    console.error('❌ Erro no login:', error);
+    logError(error, '❌ Erro no login:', { service: 'auth-routes' });
     res.status(500).json({ error: 'Erro interno do servidor' });
   }
 });
@@ -175,7 +176,7 @@ router.post('/change-password', authenticateToken, async (req, res) => {
       { expiresIn: JWT_EXPIRES_IN }
     );
 
-    console.log(`🔐 Senha alterada: ${user.username} - IP: ${req.ip}`);
+    logStructured('info', `🔐 Senha alterada: ${user.username} - IP: ${req.ip}`, { service: 'auth-routes' });
 
     res.json({
       message: 'Senha alterada com sucesso!',
@@ -191,7 +192,7 @@ router.post('/change-password', authenticateToken, async (req, res) => {
     });
 
   } catch (error) {
-    console.error('❌ Erro ao alterar senha:', error);
+    logError(error, '❌ Erro ao alterar senha:', { service: 'auth-routes' });
     res.status(500).json({ error: 'Erro interno do servidor' });
   }
 });
@@ -213,7 +214,7 @@ router.get('/verify', authenticateToken, (req, res) => {
 
 // Rota de logout (opcional, pois o token expira no cliente)
 router.post('/logout', authenticateToken, (req, res) => {
-  console.log(`🔓 Logout: ${req.user.username} - IP: ${req.ip}`);
+  logStructured('info', `🔓 Logout: ${req.user.username} - IP: ${req.ip}`, { service: 'auth-routes' });
   res.json({ message: 'Logout realizado com sucesso' });
 });
 

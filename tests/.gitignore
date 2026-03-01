@@ -1,0 +1,21 @@
+# Relatórios de teste
+reports/
+*.json
+
+# Logs
+*.log
+npm-debug.log*
+
+# Node modules
+node_modules/
+
+# Arquivos temporários
+.tmp/
+temp/
+
+# Arquivos de configuração local
+.env
+.env.local
+
+
+

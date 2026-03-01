@@ -1,0 +1,19 @@
+# Configuração do Maestro para o Projeto Leaf
+appId: br.com.leaf.ride
+
+# Timeouts padrão (em milissegundos)
+defaultTimeout: 10000
+
+# Nota: Para usar dispositivo específico, use variável de ambiente ANDROID_SERIAL
+# Exemplo: export ANDROID_SERIAL=8DZLY9XSJZLVDAX8
+
+# Configurações de screenshots
+screenshots:
+  enabled: true
+  directory: .maestro/screenshots
+
+# Configurações de relatórios
+reports:
+  format: junit
+  output: .maestro/results.xml
+

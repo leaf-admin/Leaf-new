@@ -1,3 +1,4 @@
+import Logger from '../utils/Logger';
 import React, { useState, useEffect } from 'react';
 import {
   View,
@@ -15,10 +16,13 @@ import { Icon } from 'react-native-elements';
 import QRCode from 'react-native-qrcode-svg';
 import { useSelector } from 'react-redux';
 import { api } from '../common-local';
+import { useTranslation } from '../components/i18n/LanguageProvider';
+
 
 const { width } = Dimensions.get('window');
 
 const WeeklyPaymentScreen = ({ navigation, route }) => {
+  const { t } = useTranslation();
   const { plan, charge } = route.params || {};
   const [paymentStatus, setPaymentStatus] = useState('pending');
   const [qrCodeData, setQrCodeData] = useState('');
@@ -47,8 +51,8 @@ const WeeklyPaymentScreen = ({ navigation, route }) => {
       startPaymentMonitoring(pixCharge.id);
       
     } catch (error) {
-      console.error('Erro ao inicializar pagamento:', error);
-      Alert.alert('Erro', 'Não foi possível gerar o pagamento');
+      Logger.error('Erro ao inicializar pagamento:', error);
+      Alert.alert(t('messages.error'), t('weeklyPayment.generateError'));
     } finally {
       setIsLoading(false);
     }
@@ -66,7 +70,7 @@ const WeeklyPaymentScreen = ({ navigation, route }) => {
       
       return response.data;
     } catch (error) {
-      console.error('Erro ao criar cobrança PIX:', error);
+      Logger.error('Erro ao criar cobrança PIX:', error);
       throw error;
     }
   };
@@ -85,7 +89,7 @@ const WeeklyPaymentScreen = ({ navigation, route }) => {
           handlePaymentExpired();
         }
       } catch (error) {
-        console.error('Erro ao verificar status:', error);
+        Logger.error('Erro ao verificar status:', error);
       }
     }, 5000); // Verificar a cada 5 segundos
     
@@ -100,7 +104,7 @@ const WeeklyPaymentScreen = ({ navigation, route }) => {
       const response = await api.get(`/api/payments/status/${chargeId}`);
       return response.data.status;
     } catch (error) {
-      console.error('Erro ao verificar status:', error);
+      Logger.error('Erro ao verificar status:', error);
       return 'pending';
     }
   };
@@ -136,11 +140,11 @@ const WeeklyPaymentScreen = ({ navigation, route }) => {
   const handlePaymentExpired = () => {
     setPaymentStatus('expired');
     Alert.alert(
-      'Pagamento Expirado',
-      'O tempo para pagamento expirou. Deseja gerar um novo pagamento?',
+      t('weeklyPayment.expired'),
+      t('weeklyPayment.expiredMessage'),
       [
-        { text: 'Cancelar', onPress: () => navigation.goBack() },
-        { text: 'Tentar Novamente', onPress: initializePayment }
+        { text: t('messages.cancel'), onPress: () => navigation.goBack() },
+        { text: t('messages.retry'), onPress: initializePayment }
       ]
     );
   };
@@ -153,7 +157,7 @@ const WeeklyPaymentScreen = ({ navigation, route }) => {
         paymentId: paymentData.id
       });
     } catch (error) {
-      console.error('Erro ao ativar plano:', error);
+      Logger.error('Erro ao ativar plano:', error);
     }
   };
 
@@ -165,14 +169,14 @@ const WeeklyPaymentScreen = ({ navigation, route }) => {
 
   const handleCopyPixCode = () => {
     // Implementar cópia do código PIX
-    Alert.alert('Código PIX Copiado', 'Código copiado para a área de transferência');
+    Alert.alert(t('payment.pixCopied'), t('payment.pixCopiedMessage'));
   };
 
   const handleManualPayment = () => {
     Alert.alert(
-      'Pagamento Manual',
-      'Para pagar manualmente, use o código PIX acima no seu app bancário.',
-      [{ text: 'OK' }]
+      t('weeklyPayment.manualPayment'),
+      t('weeklyPayment.manualPaymentMessage'),
+      [{ text: t('messages.confirm') }]
     );
   };
 

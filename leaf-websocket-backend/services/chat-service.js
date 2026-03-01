@@ -1,415 +1,211 @@
-const Redis = require('ioredis');
-const { logger } = require('../utils/logger');
+/**
+ * CHAT SERVICE
+ * 
+ * Serviço para gerenciar funcionalidades de chat em tempo real:
+ * - Criação de chats
+ * - Envio de mensagens
+ * - Notificações em tempo real
+ * - Integração com persistência
+ * 
+ * Este serviço centraliza toda a lógica de chat, facilitando
+ * manutenção e escalabilidade futura.
+ */
 
-// Configurações do chat
-const CHAT_CONFIG = {
-  maxMessages: 100, // Máximo de mensagens por chat
-  messageTTL: 30 * 24 * 60 * 60, // 30 dias em segundos
-  typingTimeout: 10, // 10 segundos para indicador de digitação
-  maxChatsPerUser: 50, // Máximo de chats por usuário
-  cleanupInterval: 60 * 60 * 1000 // 1 hora para limpeza automática
-};
+const chatPersistenceService = require('./chat-persistence-service');
+const { logStructured, logError } = require('../utils/logger');
 
 class ChatService {
-  constructor() {
-    this.redis = new Redis(process.env.REDIS_URL || 'redis://localhost:6379');
-    this.typingUsers = new Map();
-    this.isInitialized = false;
-    this.cleanupInterval = null;
-  }
-
-  // Inicializar o serviço
-  async initialize() {
-    try {
-      // Testar conexão Redis
-      await this.redis.ping();
-      
-      // Configurar limpeza automática
-      this.setupAutoCleanup();
-      
-      this.isInitialized = true;
-      logger.info('✅ Chat Service inicializado com sucesso');
-      
-    } catch (error) {
-      logger.error('❌ Erro ao inicializar Chat Service:', error);
-      throw error;
+    constructor(io, rateLimiterService) {
+        this.io = io;
+        this.rateLimiterService = rateLimiterService;
+        this.chatPersistence = chatPersistenceService;
     }
-  }
 
-  // Criar novo chat
-  async createChat(chatData) {
-    try {
-      const { chatId, tripId, driverId, passengerId } = chatData;
-      
-      // Verificar se chat já existe
-      const exists = await this.redis.exists(`chat:${chatId}`);
-      if (exists) {
-        logger.warn(`Chat ${chatId} já existe`);
-        return await this.getChat(chatId);
-      }
-      
-      // Criar estrutura do chat
-      const chat = {
-        chatId,
-        tripId,
-        driverId,
-        passengerId,
-        status: 'active',
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-        messageCount: 0,
-        lastMessage: null
-      };
-      
-      // Salvar no Redis
-      await this.redis.hset(`chat:${chatId}`, chat);
-      
-      // Adicionar aos chats do usuário
-      await this.redis.sadd(`user_chats:${driverId}`, chatId);
-      await this.redis.sadd(`user_chats:${passengerId}`, chatId);
-      
-      // Definir TTL
-      await this.redis.expire(`chat:${chatId}`, CHAT_CONFIG.messageTTL);
-      await this.redis.expire(`user_chats:${driverId}`, CHAT_CONFIG.messageTTL);
-      await this.redis.expire(`user_chats:${passengerId}`, CHAT_CONFIG.messageTTL);
-      
-      logger.info(`✅ Chat ${chatId} criado com sucesso`);
-      return chat;
-      
-    } catch (error) {
-      logger.error('❌ Erro ao criar chat:', error);
-      throw error;
-    }
-  }
-
-  // Buscar chat existente
-  async getChat(chatId) {
-    try {
-      const chatData = await this.redis.hgetall(`chat:${chatId}`);
-      
-      if (!chatData || Object.keys(chatData).length === 0) {
-        return null;
-      }
-      
-      return chatData;
-      
-    } catch (error) {
-      logger.error('❌ Erro ao buscar chat:', error);
-      return null;
-    }
-  }
-
-  // Enviar mensagem
-  async sendMessage(messageData) {
-    try {
-      const { chatId, text, userId, timestamp } = messageData;
-      
-      // Verificar se chat existe
-      const chat = await this.getChat(chatId);
-      if (!chat) {
-        throw new Error(`Chat ${chatId} não encontrado`);
-      }
-      
-      // Criar mensagem
-      const message = {
-        _id: this.generateMessageId(),
-        chatId,
-        text,
-        userId,
-        timestamp: timestamp || new Date().toISOString(),
-        status: 'sent',
-        readBy: [userId] // Remetente já leu
-      };
-      
-      // Salvar mensagem
-      await this.redis.lpush(`chat_messages:${chatId}`, JSON.stringify(message));
-      
-      // Manter limite de mensagens
-      await this.redis.ltrim(`chat_messages:${chatId}`, 0, CHAT_CONFIG.maxMessages - 1);
-      
-      // Atualizar chat
-      await this.redis.hset(`chat:${chatId}`, {
-        updatedAt: new Date().toISOString(),
-        messageCount: await this.redis.llen(`chat_messages:${chatId}`),
-        lastMessage: JSON.stringify(message)
-      });
-      
-      // Definir TTL para mensagens
-      await this.redis.expire(`chat_messages:${chatId}`, CHAT_CONFIG.messageTTL);
-      
-      // Notificar outros usuários
-      const otherUsers = [chat.driverId, chat.passengerId].filter(id => id !== userId);
-      
-      logger.info(`✅ Mensagem enviada no chat ${chatId}: ${message._id}`);
-      
-      return {
-        message,
-        chat,
-        otherUsers
-      };
-      
-    } catch (error) {
-      logger.error('❌ Erro ao enviar mensagem:', error);
-      throw error;
-    }
-  }
-
-  // Carregar mensagens do chat
-  async loadChatMessages(chatId, page = 0, limit = 20) {
-    try {
-      const start = page * limit;
-      const end = start + limit - 1;
-      
-      // Buscar mensagens do Redis
-      const messageStrings = await this.redis.lrange(`chat_messages:${chatId}`, start, end);
-      
-      // Converter para objetos
-      const messages = messageStrings
-        .map(msgStr => {
-          try {
-            return JSON.parse(msgStr);
-          } catch (e) {
-            logger.warn(`Mensagem inválida no chat ${chatId}:`, msgStr);
-            return null;
-          }
-        })
-        .filter(msg => msg !== null);
-      
-      return messages;
-      
-    } catch (error) {
-      logger.error('❌ Erro ao carregar mensagens:', error);
-      return [];
-    }
-  }
-
-  // Marcar mensagens como lidas
-  async markMessagesAsRead(chatId, userId, messageIds) {
-    try {
-      if (!messageIds || messageIds.length === 0) return;
-      
-      const messages = await this.loadChatMessages(chatId, 0, 1000);
-      let updated = false;
-      
-      for (const message of messages) {
-        if (messageIds.includes(message._id) && message.userId !== userId) {
-          if (!message.readBy) message.readBy = [];
-          
-          if (!message.readBy.includes(userId)) {
-            message.readBy.push(userId);
-            updated = true;
+    /**
+     * Criar chat
+     * @param {Socket} socket - Socket do cliente
+     * @param {Object} data - Dados do chat
+     */
+    async createChat(socket, data) {
+        try {
+            logStructured('info', 'Chat criado', { service: 'chat-service', ...data });
             
-            // Atualizar no Redis
-            const messageIndex = await this.redis.lpos(`chat_messages:${chatId}`, JSON.stringify({
-              ...message,
-              readBy: message.readBy.filter(id => id !== userId)
-            }));
+            const chatId = `chat_${Date.now()}`;
             
-            if (messageIndex !== null) {
-              await this.redis.lset(`chat_messages:${chatId}`, messageIndex, JSON.stringify(message));
+            socket.emit('chatCreated', {
+                success: true,
+                chatId,
+                message: 'Chat criado com sucesso'
+            });
+
+        } catch (error) {
+            logError(error, 'Erro ao criar chat', { service: 'chat-service' });
+            socket.emit('chatError', { error: 'Erro interno do servidor' });
+        }
+    }
+
+    /**
+     * Enviar mensagem
+     * @param {Socket} socket - Socket do cliente
+     * @param {Object} data - Dados da mensagem
+     */
+    async sendMessage(socket, data) {
+        try {
+            // Rate Limiting
+            const senderId = data.senderId || socket.userId || socket.id;
+            const rateLimitCheck = await this.rateLimiterService.checkRateLimit(senderId, 'sendMessage');
+            
+            if (!rateLimitCheck.allowed) {
+                socket.emit('messageError', {
+                    error: 'Muitas requisições',
+                    message: `Você excedeu o limite de ${rateLimitCheck.limit} mensagens por minuto. Tente novamente em ${Math.ceil((rateLimitCheck.resetAt - Date.now()) / 1000)} segundos.`,
+                    code: 'RATE_LIMIT_EXCEEDED',
+                    limit: rateLimitCheck.limit,
+                    remaining: rateLimitCheck.remaining,
+                    resetAt: rateLimitCheck.resetAt
+                });
+                logStructured('warn', 'sendMessage bloqueado [AUDITORIA]', { service: 'chat-service', senderId, limit: rateLimitCheck.limit });
+                return;
             }
-          }
+            
+            logStructured('info', 'Mensagem enviada', { service: 'chat-service', chatId: data.chatId, senderId: data.senderId });
+            
+            const { bookingId, rideId, message, receiverId, senderType } = data;
+            
+            if (!message || !senderId) {
+                socket.emit('messageError', { error: 'Mensagem e senderId são obrigatórios' });
+                return;
+            }
+
+            const conversationId = bookingId || rideId;
+            
+            if (!conversationId) {
+                socket.emit('messageError', { error: 'bookingId ou rideId é obrigatório' });
+                return;
+            }
+
+            // Salvar mensagem no Firestore com TTL de 30 dias
+            try {
+                const saveResult = await this.chatPersistence.saveMessage({
+                    bookingId: bookingId || conversationId,
+                    rideId: rideId || conversationId,
+                    senderId: senderId,
+                    receiverId: receiverId || null,
+                    message: message,
+                    senderType: senderType || (socket.userType === 'driver' ? 'driver' : 'passenger'),
+                    timestamp: new Date().toISOString()
+                });
+
+                if (!saveResult.success) {
+                    logError(new Error(saveResult.error), 'Erro ao salvar mensagem no Firestore', { service: 'chat-service', chatId: data.chatId });
+                    // Não bloquear envio se persistência falhar, mas logar erro
+                }
+            } catch (persistError) {
+                logError(persistError, 'Erro ao persistir mensagem', { service: 'chat-service', chatId: data.chatId });
+                // Não bloquear envio se persistência falhar
+            }
+
+            // Gerar ID da mensagem
+            const messageId = `msg_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+            
+            // Buscar dados do booking para notificar o outro participante
+            const bookingData = this.io.activeBookings?.get(conversationId);
+            const customerId = bookingData?.customerId;
+            const driverId = bookingData?.driverId;
+            
+            // Determinar receiverId se não fornecido
+            let finalReceiverId = receiverId;
+            if (!finalReceiverId) {
+                if (senderId === customerId) {
+                    finalReceiverId = driverId;
+                } else if (senderId === driverId) {
+                    finalReceiverId = customerId;
+                }
+            }
+
+            // Notificar o remetente
+            socket.emit('messageSent', {
+                success: true,
+                messageId: messageId,
+                message: 'Mensagem enviada com sucesso',
+                timestamp: new Date().toISOString()
+            });
+
+            // Notificar o receptor se estiver conectado
+            if (finalReceiverId && this.io.connectedUsers) {
+                const receiverSocket = this.io.connectedUsers.get(finalReceiverId);
+                if (receiverSocket) {
+                    receiverSocket.emit('newMessage', {
+                        success: true,
+                        messageId: messageId,
+                        bookingId: conversationId,
+                        senderId: senderId,
+                        message: message,
+                        senderType: senderType || (socket.userType === 'driver' ? 'driver' : 'passenger'),
+                        timestamp: new Date().toISOString()
+                    });
+                    logStructured('info', 'Mensagem enviada para receptor', { service: 'chat-service', receiverId: finalReceiverId, chatId: data.chatId });
+                }
+            }
+            
+        } catch (error) {
+            logError(error, 'Erro ao enviar mensagem', { service: 'chat-service' });
+            socket.emit('messageError', { error: 'Erro interno do servidor' });
         }
-      }
-      
-      if (updated) {
-        logger.info(`✅ Mensagens marcadas como lidas no chat ${chatId} por ${userId}`);
-      }
-      
-    } catch (error) {
-      logger.error('❌ Erro ao marcar mensagens como lidas:', error);
     }
-  }
 
-  // Indicador de digitação
-  async setTypingStatus(chatId, userId, isTyping) {
-    try {
-      const key = `typing:${chatId}:${userId}`;
-      
-      if (isTyping) {
-        // Definir status de digitação
-        await this.redis.setex(key, CHAT_CONFIG.typingTimeout, '1');
-        
-        // Adicionar ao mapa local
-        this.typingUsers.set(`${chatId}_${userId}`, Date.now());
-        
-      } else {
-        // Remover status de digitação
-        await this.redis.del(key);
-        this.typingUsers.delete(`${chatId}_${userId}`);
-      }
-      
-    } catch (error) {
-      logger.error('❌ Erro ao definir status de digitação:', error);
-    }
-  }
-
-  // Verificar usuários digitando
-  async getTypingUsers(chatId) {
-    try {
-      const typingUsers = [];
-      
-      // Verificar no Redis
-      const keys = await this.redis.keys(`typing:${chatId}:*`);
-      
-      for (const key of keys) {
-        const userId = key.split(':')[2];
-        const ttl = await this.redis.ttl(key);
-        
-        if (ttl > 0) {
-          typingUsers.push(userId);
-        } else {
-          // Remover chave expirada
-          await this.redis.del(key);
+    /**
+     * Buscar histórico de mensagens (para uso em rotas HTTP)
+     * @param {string} conversationId - ID da conversa
+     * @param {number} limit - Limite de mensagens
+     * @returns {Promise<Object>} Histórico de mensagens
+     */
+    async getMessageHistory(conversationId, limit = 50) {
+        try {
+            return await this.chatPersistence.getMessages(conversationId, limit);
+        } catch (error) {
+            logError(error, 'Erro ao buscar histórico de mensagens', { service: 'chat-service', chatId });
+            return {
+                success: false,
+                error: error.message
+            };
         }
-      }
-      
-      return typingUsers;
-      
-    } catch (error) {
-      logger.error('❌ Erro ao verificar usuários digitando:', error);
-      return [];
     }
-  }
 
-  // Buscar chats do usuário
-  async getUserChats(userId, limit = 20) {
-    try {
-      const chatIds = await this.redis.smembers(`user_chats:${userId}`);
-      const chats = [];
-      
-      for (const chatId of chatIds.slice(0, limit)) {
-        const chat = await this.getChat(chatId);
-        if (chat) {
-          chats.push(chat);
+    /**
+     * Marcar mensagem como lida
+     * @param {string} messageId - ID da mensagem
+     * @param {string} userId - ID do usuário que leu
+     * @returns {Promise<Object>} Resultado da operação
+     */
+    async markAsRead(messageId, userId) {
+        try {
+            return await this.chatPersistence.markMessageAsRead(messageId, userId);
+        } catch (error) {
+            logError(error, 'Erro ao marcar mensagem como lida', { service: 'chat-service', chatId, messageId });
+            return {
+                success: false,
+                error: error.message
+            };
         }
-      }
-      
-      // Ordenar por última mensagem
-      chats.sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt));
-      
-      return chats;
-      
-    } catch (error) {
-      logger.error('❌ Erro ao buscar chats do usuário:', error);
-      return [];
     }
-  }
 
-  // Deletar chat
-  async deleteChat(chatId) {
-    try {
-      const chat = await this.getChat(chatId);
-      if (!chat) return false;
-      
-      // Remover mensagens
-      await this.redis.del(`chat_messages:${chatId}`);
-      
-      // Remover chat
-      await this.redis.del(`chat:${chatId}`);
-      
-      // Remover dos usuários
-      await this.redis.srem(`user_chats:${chat.driverId}`, chatId);
-      await this.redis.srem(`user_chats:${chat.passengerId}`, chatId);
-      
-      // Remover indicadores de digitação
-      const typingKeys = await this.redis.keys(`typing:${chatId}:*`);
-      if (typingKeys.length > 0) {
-        await this.redis.del(...typingKeys);
-      }
-      
-      logger.info(`🗑️ Chat ${chatId} deletado com sucesso`);
-      return true;
-      
-    } catch (error) {
-      logger.error('❌ Erro ao deletar chat:', error);
-      return false;
+    /**
+     * Configurar handlers WebSocket para um socket
+     * @param {Socket} socket - Socket do cliente
+     */
+    setupHandlers(socket) {
+        // Criar chat
+        socket.on('createChat', async (data) => {
+            await this.createChat(socket, data);
+        });
+
+        // Enviar mensagem
+        socket.on('sendMessage', async (data) => {
+            await this.sendMessage(socket, data);
+        });
     }
-  }
-
-  // Configurar limpeza automática
-  setupAutoCleanup() {
-    this.cleanupInterval = setInterval(async () => {
-      try {
-        await this.cleanupOldData();
-      } catch (error) {
-        logger.error('❌ Erro na limpeza automática:', error);
-      }
-    }, CHAT_CONFIG.cleanupInterval);
-  }
-
-  // Limpar dados antigos
-  async cleanupOldData() {
-    try {
-      const now = Date.now();
-      const cutoff = now - (CHAT_CONFIG.messageTTL * 1000);
-      
-      // Limpar usuários digitando antigos
-      for (const [key, timestamp] of this.typingUsers.entries()) {
-        if (now - timestamp > CHAT_CONFIG.typingTimeout * 1000) {
-          this.typingUsers.delete(key);
-        }
-      }
-      
-      // Limpar chats inativos
-      const allChats = await this.redis.keys('chat:*');
-      
-      for (const chatKey of allChats) {
-        const chatId = chatKey.split(':')[1];
-        const chat = await this.getChat(chatId);
-        
-        if (chat && new Date(chat.updatedAt).getTime() < cutoff) {
-          await this.deleteChat(chatId);
-        }
-      }
-      
-      logger.info('🧹 Limpeza automática concluída');
-      
-    } catch (error) {
-      logger.error('❌ Erro na limpeza de dados antigos:', error);
-    }
-  }
-
-  // Gerar ID único para mensagem
-  generateMessageId() {
-    return `msg_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-  }
-
-  // Obter estatísticas do serviço
-  async getServiceStats() {
-    try {
-      const stats = {
-        totalChats: await this.redis.dbsize(),
-        totalMessages: 0,
-        activeUsers: this.typingUsers.size,
-        uptime: process.uptime()
-      };
-      
-      // Contar mensagens totais
-      const chatKeys = await this.redis.keys('chat_messages:*');
-      for (const key of chatKeys) {
-        stats.totalMessages += await this.redis.llen(key);
-      }
-      
-      return stats;
-      
-    } catch (error) {
-      logger.error('❌ Erro ao obter estatísticas:', error);
-      return {};
-    }
-  }
-
-  // Destruir serviço
-  destroy() {
-    if (this.cleanupInterval) {
-      clearInterval(this.cleanupInterval);
-    }
-    
-    this.typingUsers.clear();
-    this.isInitialized = false;
-    
-    logger.info('🗑️ Chat Service destruído');
-  }
 }
 
 module.exports = ChatService;
+

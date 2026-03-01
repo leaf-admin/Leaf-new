@@ -1,0 +1,454 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Leaf - Transporte Inteligente</title>
+    <meta name="description" content="Leaf - A revolução no transporte urbano. Conectamos passageiros e motoristas de forma segura e eficiente.">
+    
+    <!-- Favicon -->
+    <link rel="icon" type="image/x-icon" href="/favicon.ico">
+    
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            background: #f8f9fa;
+        }
+        
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 0 20px;
+        }
+        
+        .hero {
+            background: linear-gradient(135deg, #2c5530 0%, #4a7c59 100%);
+            color: white;
+            padding: 100px 0;
+            text-align: center;
+            position: relative;
+            overflow: hidden;
+        }
+        
+        .hero::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0,0,0,0.2);
+            z-index: 1;
+        }
+        
+        .hero-content {
+            position: relative;
+            z-index: 2;
+        }
+        
+        .hero h1 {
+            font-size: 3.5rem;
+            margin-bottom: 20px;
+            font-weight: 700;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
+        }
+        
+        .hero p {
+            font-size: 1.3rem;
+            margin-bottom: 40px;
+            max-width: 600px;
+            margin-left: auto;
+            margin-right: auto;
+            opacity: 0.95;
+        }
+        
+        .cta-buttons {
+            display: flex;
+            gap: 20px;
+            justify-content: center;
+            flex-wrap: wrap;
+            margin-top: 40px;
+        }
+        
+        .btn {
+            display: inline-block;
+            padding: 15px 30px;
+            border-radius: 50px;
+            text-decoration: none;
+            font-weight: 600;
+            transition: all 0.3s ease;
+            font-size: 1.1rem;
+            border: 2px solid transparent;
+        }
+        
+        .btn-primary {
+            background: #fff;
+            color: #2c5530;
+            border-color: #fff;
+        }
+        
+        .btn-primary:hover {
+            background: transparent;
+            color: #fff;
+            border-color: #fff;
+            transform: translateY(-2px);
+        }
+        
+        .btn-secondary {
+            background: transparent;
+            color: #fff;
+            border-color: #fff;
+        }
+        
+        .btn-secondary:hover {
+            background: #fff;
+            color: #2c5530;
+            transform: translateY(-2px);
+        }
+        
+        .features {
+            padding: 80px 0;
+            background: #fff;
+        }
+        
+        .features-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 40px;
+            margin-top: 60px;
+        }
+        
+        .feature-card {
+            text-align: center;
+            padding: 40px 20px;
+            border-radius: 15px;
+            background: #f8f9fa;
+            transition: transform 0.3s ease, box-shadow 0.3s ease;
+            border: 1px solid #e9ecef;
+        }
+        
+        .feature-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 15px 35px rgba(44, 85, 48, 0.1);
+        }
+        
+        .feature-icon {
+            font-size: 3rem;
+            margin-bottom: 20px;
+            display: block;
+        }
+        
+        .feature-card h3 {
+            font-size: 1.5rem;
+            margin-bottom: 15px;
+            color: #2c5530;
+        }
+        
+        .section-title {
+            text-align: center;
+            font-size: 2.5rem;
+            margin-bottom: 20px;
+            color: #2c5530;
+        }
+        
+        .section-subtitle {
+            text-align: center;
+            font-size: 1.2rem;
+            color: #666;
+            max-width: 600px;
+            margin: 0 auto;
+        }
+        
+        .stats {
+            background: #2c5530;
+            color: white;
+            padding: 60px 0;
+        }
+        
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 40px;
+            text-align: center;
+        }
+        
+        .stat-item h3 {
+            font-size: 3rem;
+            margin-bottom: 10px;
+            font-weight: 700;
+        }
+        
+        .stat-item p {
+            font-size: 1.1rem;
+            opacity: 0.9;
+        }
+        
+        .footer {
+            background: #1a1a1a;
+            color: white;
+            padding: 60px 0 30px 0;
+        }
+        
+        .footer-content {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 40px;
+            margin-bottom: 40px;
+        }
+        
+        .footer h4 {
+            margin-bottom: 20px;
+            color: #4a7c59;
+        }
+        
+        .footer ul {
+            list-style: none;
+        }
+        
+        .footer li {
+            margin-bottom: 10px;
+        }
+        
+        .footer a {
+            color: #ccc;
+            text-decoration: none;
+            transition: color 0.3s ease;
+        }
+        
+        .footer a:hover {
+            color: #4a7c59;
+        }
+        
+        .footer-bottom {
+            border-top: 1px solid #333;
+            padding-top: 30px;
+            text-align: center;
+            color: #999;
+        }
+        
+        .coming-soon {
+            background: #fff3cd;
+            border: 1px solid #ffeaa7;
+            color: #856404;
+            padding: 15px;
+            border-radius: 8px;
+            text-align: center;
+            margin: 20px 0;
+            font-weight: 500;
+        }
+        
+        @media (max-width: 768px) {
+            .hero h1 {
+                font-size: 2.5rem;
+            }
+            
+            .hero p {
+                font-size: 1.1rem;
+            }
+            
+            .cta-buttons {
+                flex-direction: column;
+                align-items: center;
+            }
+            
+            .features-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+<body>
+    <!-- Hero Section -->
+    <section class="hero">
+        <div class="container">
+            <div class="hero-content">
+                <h1>🍃 Leaf</h1>
+                <p>A revolução no transporte urbano. Conectamos passageiros e motoristas de forma segura, eficiente e sustentável.</p>
+                
+                <div class="coming-soon">
+                    <strong>🚧 Em Desenvolvimento</strong> - Aplicativo em fase final de testes. Em breve na Play Store e App Store!
+                </div>
+                
+                <div class="cta-buttons">
+                    <a href="#motoristas" class="btn btn-primary">Seja um Motorista</a>
+                    <a href="#passageiros" class="btn btn-secondary">Para Passageiros</a>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Features Section -->
+    <section id="features" class="features">
+        <div class="container">
+            <h2 class="section-title">Por que escolher a Leaf?</h2>
+            <p class="section-subtitle">Tecnologia de ponta para uma experiência de transporte superior</p>
+            
+            <div class="features-grid">
+                <div class="feature-card">
+                    <span class="feature-icon">🛡️</span>
+                    <h3>Segurança Total</h3>
+                    <p>Verificação rigorosa de motoristas, rastreamento em tempo real e sistema de avaliações confiável.</p>
+                </div>
+                
+                <div class="feature-card">
+                    <span class="feature-icon">⚡</span>
+                    <h3>Rapidez e Eficiência</h3>
+                    <p>Algoritmo inteligente de localização garante que você encontre uma corrida em segundos.</p>
+                </div>
+                
+                <div class="feature-card">
+                    <span class="feature-icon">💰</span>
+                    <h3>Preços Justos</h3>
+                    <p>Tarifas transparentes e competitivas, sem surpresas no final da viagem.</p>
+                </div>
+                
+                <div class="feature-card">
+                    <span class="feature-icon">🌱</span>
+                    <h3>Sustentável</h3>
+                    <p>Incentivamos o compartilhamento de viagens para reduzir o impacto ambiental.</p>
+                </div>
+                
+                <div class="feature-card">
+                    <span class="feature-icon">📱</span>
+                    <h3>App Intuitivo</h3>
+                    <p>Interface simples e moderna, fácil de usar para todas as idades.</p>
+                </div>
+                
+                <div class="feature-card">
+                    <span class="feature-icon">🎯</span>
+                    <h3>Suporte 24/7</h3>
+                    <p>Equipe dedicada para ajudar você a qualquer hora do dia ou da noite.</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Stats Section -->
+    <section class="stats">
+        <div class="container">
+            <div class="stats-grid">
+                <div class="stat-item">
+                    <h3>Em Breve</h3>
+                    <p>Motoristas Cadastrados</p>
+                </div>
+                <div class="stat-item">
+                    <h3>Em Breve</h3>
+                    <p>Cidades Atendidas</p>
+                </div>
+                <div class="stat-item">
+                    <h3>Em Breve</h3>
+                    <p>Viagens Realizadas</p>
+                </div>
+                <div class="stat-item">
+                    <h3>100%</h3>
+                    <p>Compromisso com Qualidade</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Footer -->
+    <footer class="footer">
+        <div class="container">
+            <div class="footer-content">
+                <div>
+                    <h4>🍃 Leaf</h4>
+                    <p>Transformando o transporte urbano com tecnologia e sustentabilidade.</p>
+                </div>
+                
+                <div id="passageiros">
+                    <h4>Para Passageiros</h4>
+                    <ul>
+                        <li><a href="#features">Vantagens</a></li>
+                        <li><a href="#">Download do App (Em Breve)</a></li>
+                        <li><a href="#">Como Funciona</a></li>
+                        <li><a href="#">Segurança</a></li>
+                    </ul>
+                </div>
+                
+                <div id="motoristas">
+                    <h4>Para Motoristas</h4>
+                    <ul>
+                        <li><a href="#">Cadastre-se (Em Breve)</a></li>
+                        <li><a href="#">Requisitos</a></li>
+                        <li><a href="#">Ganhos</a></li>
+                        <li><a href="#">Suporte</a></li>
+                    </ul>
+                </div>
+                
+                <div>
+                    <h4>Empresa</h4>
+                    <ul>
+                        <li><a href="#">Sobre Nós</a></li>
+                        <li><a href="#">Contato</a></li>
+                        <li><a href="#">Carreiras</a></li>
+                        <li><a href="#">Imprensa</a></li>
+                    </ul>
+                </div>
+                
+                <div>
+                    <h4>Legal</h4>
+                    <ul>
+                        <li><a href="/privacidade">Política de Privacidade</a></li>
+                        <li><a href="#">Termos de Uso</a></li>
+                        <li><a href="#">LGPD</a></li>
+                        <li><a href="mailto:privacidade@leaf.app.br">Contato - Privacidade</a></li>
+                    </ul>
+                </div>
+            </div>
+            
+            <div class="footer-bottom">
+                <p>&copy; 2024 Leaf Transport. Todos os direitos reservados.</p>
+                <p>🚧 Site em desenvolvimento - Aplicativo em fase final de testes</p>
+            </div>
+        </div>
+    </footer>
+
+    <script>
+        // Smooth scroll para links internos
+        document.querySelectorAll('a[href^="#"]').forEach(anchor => {
+            anchor.addEventListener('click', function (e) {
+                e.preventDefault();
+                const target = document.querySelector(this.getAttribute('href'));
+                if (target) {
+                    target.scrollIntoView({
+                        behavior: 'smooth',
+                        block: 'start'
+                    });
+                }
+            });
+        });
+
+        // Animação de entrada para as feature cards
+        const observerOptions = {
+            threshold: 0.1,
+            rootMargin: '0px 0px -50px 0px'
+        };
+
+        const observer = new IntersectionObserver((entries) => {
+            entries.forEach(entry => {
+                if (entry.isIntersecting) {
+                    entry.target.style.opacity = '1';
+                    entry.target.style.transform = 'translateY(0)';
+                }
+            });
+        }, observerOptions);
+
+        // Observar as feature cards
+        document.querySelectorAll('.feature-card').forEach(card => {
+            card.style.opacity = '0';
+            card.style.transform = 'translateY(20px)';
+            card.style.transition = 'opacity 0.6s ease, transform 0.6s ease';
+            observer.observe(card);
+        });
+    </script>
+</body>
+</html>

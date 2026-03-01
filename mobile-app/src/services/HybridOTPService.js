@@ -1,5 +1,7 @@
+import Logger from '../utils/Logger';
 import auth from '@react-native-firebase/auth';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+
 
 /**
  * Serviço OTP Simplificado - Usa apenas SMS Firebase
@@ -48,15 +50,15 @@ class HybridOTPService {
    */
   async initialize() {
     try {
-      console.log('🔧 HybridOTPService - Inicializando...');
+      Logger.log('🔧 HybridOTPService - Inicializando...');
       
       // Testar se o Firebase Auth está funcionando
       try {
-        console.log('🔧 HybridOTPService - Testando Firebase Auth...');
+        Logger.log('🔧 HybridOTPService - Testando Firebase Auth...');
         const authInstance = auth();
-        console.log('✅ HybridOTPService - Firebase Auth disponível');
+        Logger.log('✅ HybridOTPService - Firebase Auth disponível');
       } catch (firebaseError) {
-        console.error('❌ HybridOTPService - Firebase Auth não disponível:', firebaseError);
+        Logger.error('❌ HybridOTPService - Firebase Auth não disponível:', firebaseError);
         throw new Error('Firebase Auth não está configurado corretamente');
       }
       
@@ -67,10 +69,10 @@ class HybridOTPService {
       await this.determineStrategy();
       
       this.isInitialized = true;
-      console.log('✅ HybridOTPService - Inicializado com sucesso');
+      Logger.log('✅ HybridOTPService - Inicializado com sucesso');
       
     } catch (error) {
-      console.error('❌ HybridOTPService - Erro na inicialização:', error);
+      Logger.error('❌ HybridOTPService - Erro na inicialização:', error);
       throw error;
     }
   }
@@ -97,7 +99,7 @@ class HybridOTPService {
       }
       
     } catch (error) {
-      console.warn('⚠️ HybridOTPService - Erro ao carregar configurações:', error);
+      Logger.warn('⚠️ HybridOTPService - Erro ao carregar configurações:', error);
     }
   }
 
@@ -113,7 +115,7 @@ class HybridOTPService {
       await AsyncStorage.setItem('@hybrid_otp_config', JSON.stringify(configToSave));
       await AsyncStorage.setItem('@hybrid_otp_stats', JSON.stringify(this.stats));
     } catch (error) {
-      console.warn('⚠️ HybridOTPService - Erro ao salvar configurações:', error);
+      Logger.warn('⚠️ HybridOTPService - Erro ao salvar configurações:', error);
     }
   }
 
@@ -125,18 +127,18 @@ class HybridOTPService {
       // Se for plano Spark e ainda não atingiu o limite gratuito
       if (this.config.firebasePlan === 'spark' && this.stats.smsSent < this.config.smsFreeLimit) {
         this.config.strategy = 'sms_only';
-        console.log('📊 HybridOTPService - Estratégia: SMS apenas (gratuito)');
+        Logger.log('📊 HybridOTPService - Estratégia: SMS apenas (gratuito)');
       }
       // Se for plano Blaze ou atingiu limite gratuito
       else if (this.config.firebasePlan === 'blaze' || this.stats.smsSent >= this.config.smsFreeLimit) {
         this.config.strategy = 'sms_only';
-        console.log('📊 HybridOTPService - Estratégia: SMS apenas (mais barato)');
+        Logger.log('📊 HybridOTPService - Estratégia: SMS apenas (mais barato)');
       }
       
       await this.saveConfig();
       
     } catch (error) {
-      console.warn('⚠️ HybridOTPService - Erro ao determinar estratégia:', error);
+      Logger.warn('⚠️ HybridOTPService - Erro ao determinar estratégia:', error);
       this.config.strategy = 'sms_only'; // Fallback
     }
   }
@@ -152,7 +154,7 @@ class HybridOTPService {
       
       const formattedPhone = this.formatPhoneNumber(phoneNumber);
       
-      console.log('📱 HybridOTPService - Enviando OTP:', {
+      Logger.log('📱 HybridOTPService - Enviando OTP:', {
         phone: formattedPhone,
         strategy: this.config.strategy
       });
@@ -171,12 +173,12 @@ class HybridOTPService {
       // Atualizar estatísticas
       this.updateStats(result);
       
-      console.log('✅ HybridOTPService - OTP enviado:', result);
+      Logger.log('✅ HybridOTPService - OTP enviado:', result);
       
       return result;
       
     } catch (error) {
-      console.error('❌ HybridOTPService - Erro ao enviar OTP:', error);
+      Logger.error('❌ HybridOTPService - Erro ao enviar OTP:', error);
       
       this.stats.totalFailures++;
       await this.saveConfig();
@@ -195,8 +197,8 @@ class HybridOTPService {
    */
   async sendSMS(phoneNumber) {
     try {
-      console.log('📱 HybridOTPService - Enviando SMS via Firebase...');
-      console.log('📱 HybridOTPService - Número:', phoneNumber);
+      Logger.log('📱 HybridOTPService - Enviando SMS via Firebase...');
+      Logger.log('📱 HybridOTPService - Número:', phoneNumber);
       
       // Verificar se o Firebase Auth está disponível
       if (!auth) {
@@ -205,13 +207,13 @@ class HybridOTPService {
       
       // Formatar o número para o padrão internacional
       const formattedPhone = phoneNumber.startsWith('+') ? phoneNumber : `+${phoneNumber}`;
-      console.log('📱 HybridOTPService - Número formatado:', formattedPhone);
+      Logger.log('📱 HybridOTPService - Número formatado:', formattedPhone);
       
       // Enviar código de verificação
       const confirmation = await auth().verifyPhoneNumber(formattedPhone);
       
-      console.log('✅ HybridOTPService - SMS enviado com sucesso');
-      console.log('✅ HybridOTPService - Verification ID:', confirmation.verificationId);
+      Logger.log('✅ HybridOTPService - SMS enviado com sucesso');
+      Logger.log('✅ HybridOTPService - Verification ID:', confirmation.verificationId);
       
       return {
         success: true,
@@ -222,9 +224,9 @@ class HybridOTPService {
       };
       
     } catch (error) {
-      console.error('❌ HybridOTPService - Erro no SMS:', error);
-      console.error('❌ HybridOTPService - Código do erro:', error.code);
-      console.error('❌ HybridOTPService - Mensagem do erro:', error.message);
+      Logger.error('❌ HybridOTPService - Erro no SMS:', error);
+      Logger.error('❌ HybridOTPService - Código do erro:', error.code);
+      Logger.error('❌ HybridOTPService - Mensagem do erro:', error.message);
       
       return {
         success: false,
@@ -351,7 +353,7 @@ class HybridOTPService {
    */
   async configure(newConfig) {
     try {
-      console.log('⚙️ HybridOTPService - Configurando...');
+      Logger.log('⚙️ HybridOTPService - Configurando...');
       
       this.config = { ...this.config, ...newConfig };
       
@@ -361,10 +363,10 @@ class HybridOTPService {
       // Salvar configurações
       await this.saveConfig();
       
-      console.log('✅ HybridOTPService - Configurado com sucesso');
+      Logger.log('✅ HybridOTPService - Configurado com sucesso');
       
     } catch (error) {
-      console.error('❌ HybridOTPService - Erro na configuração:', error);
+      Logger.error('❌ HybridOTPService - Erro na configuração:', error);
       throw error;
     }
   }
@@ -383,7 +385,7 @@ class HybridOTPService {
     this.config.attemptCache.clear();
     
     await this.saveConfig();
-    console.log('🔄 HybridOTPService - Estatísticas resetadas');
+    Logger.log('🔄 HybridOTPService - Estatísticas resetadas');
   }
 }
 

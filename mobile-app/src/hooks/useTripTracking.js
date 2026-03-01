@@ -1,11 +1,13 @@
+import Logger from '../utils/Logger';
 import { useState, useEffect, useRef } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
 import { 
+
     saveTracking, 
     startTripTracking, 
     endTripTracking, 
     getTripData 
-} from '../common-local/actions/locationactions';
+} from '../common-local/src/actions/locationactions';
 
 export const useTripTracking = (tripId) => {
     const dispatch = useDispatch();
@@ -30,13 +32,13 @@ export const useTripTracking = (tripId) => {
             await startTripTracking(tripId, driverId, passengerId, initialLocation);
             
             setIsTracking(true);
-            console.log('🚗 Trip tracking started:', tripId);
+            Logger.log('🚗 Trip tracking started:', tripId);
 
             // Carregar dados da viagem
             await loadTripData();
 
         } catch (error) {
-            console.error('❌ Error starting trip tracking:', error);
+            Logger.error('❌ Error starting trip tracking:', error);
             setError(error);
         }
     };
@@ -56,10 +58,10 @@ export const useTripTracking = (tripId) => {
             await endTripTracking(tripId, endLocation);
             
             setIsTracking(false);
-            console.log('✅ Trip tracking stopped:', tripId);
+            Logger.log('✅ Trip tracking stopped:', tripId);
 
         } catch (error) {
-            console.error('❌ Error stopping trip tracking:', error);
+            Logger.error('❌ Error stopping trip tracking:', error);
             setError(error);
         }
     };
@@ -80,10 +82,10 @@ export const useTripTracking = (tripId) => {
             await saveTracking(tripId, trackingData);
             
             lastTrackingPoint.current = trackingData;
-            console.log('📍 Tracking point saved:', tripId);
+            Logger.log('📍 Tracking point saved:', tripId);
 
         } catch (error) {
-            console.error('❌ Error saving tracking point:', error);
+            Logger.error('❌ Error saving tracking point:', error);
             setError(error);
         }
     };
@@ -96,10 +98,10 @@ export const useTripTracking = (tripId) => {
             const data = await getTripData(tripId);
             if (data) {
                 setTripData(data);
-                console.log('📍 Trip data loaded:', data);
+                Logger.log('📍 Trip data loaded:', data);
             }
         } catch (error) {
-            console.error('❌ Error loading trip data:', error);
+            Logger.error('❌ Error loading trip data:', error);
             setError(error);
         }
     };
@@ -119,7 +121,7 @@ export const useTripTracking = (tripId) => {
         } : null);
 
         if (!startLocation) {
-            console.error('❌ No initial location available');
+            Logger.error('❌ No initial location available');
             return;
         }
 
@@ -140,7 +142,7 @@ export const useTripTracking = (tripId) => {
             }
         }, interval);
 
-        console.log('🚗 Auto tracking started with interval:', interval);
+        Logger.log('🚗 Auto tracking started with interval:', interval);
     };
 
     // Função para parar tracking automático
@@ -152,7 +154,7 @@ export const useTripTracking = (tripId) => {
         } : null);
 
         stopTracking(finalLocation);
-        console.log('🛑 Auto tracking stopped');
+        Logger.log('🛑 Auto tracking stopped');
     };
 
     // Função para atualizar status da viagem
@@ -165,10 +167,10 @@ export const useTripTracking = (tripId) => {
 
             if (trackingLocation) {
                 await saveTrackingPoint(trackingLocation, status);
-                console.log('📍 Trip status updated:', status);
+                Logger.log('📍 Trip status updated:', status);
             }
         } catch (error) {
-            console.error('❌ Error updating trip status:', error);
+            Logger.error('❌ Error updating trip status:', error);
             setError(error);
         }
     };
