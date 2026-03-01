@@ -1,0 +1,25 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  # Configuração de alertas
+  external_labels:
+    cluster: 'leaf-production'
+    environment: 'development'
+
+# Carregar regras de alertas
+rule_files:
+  - '/etc/prometheus/alert-rules.yml'
+
+scrape_configs:
+  # Leaf Backend - Métricas Prometheus
+  - job_name: 'leaf-backend'
+    scrape_interval: 15s
+    static_configs:
+      # No Linux, usar network_mode: host ou IP do gateway
+      # Alternativa: usar host.docker.internal se disponível ou 172.17.0.1 (gateway padrão Docker)
+      - targets: ['host.docker.internal:3001']
+        labels:
+          service: 'leaf-websocket-backend'
+          environment: 'development'
+    metrics_path: '/api/metrics/prometheus'
+

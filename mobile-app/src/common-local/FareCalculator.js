@@ -1,10 +1,12 @@
+import Logger from '../utils/Logger';
 import { GetDistance } from './GeoFunctions';
 import { calculateTollFees } from './TollCalculator';
 
+
 // Função para calcular a tarifa base
 function calculateBaseFare(distance, time, rateDetails) {
-    console.log('[calculateBaseFare] rateDetails:', rateDetails);
-    console.log('[calculateBaseFare] rateDetails.base_fare:', rateDetails?.base_fare);
+    Logger.log('[calculateBaseFare] rateDetails:', rateDetails);
+    Logger.log('[calculateBaseFare] rateDetails.base_fare:', rateDetails?.base_fare);
     
     const baseFare = parseFloat(rateDetails?.base_fare) || 0;
     const ratePerKm = parseFloat(rateDetails?.rate_per_unit_distance) || 0;
@@ -37,37 +39,37 @@ function roundToDecimal(value, decimalPrecision = 2) {
 export function FareCalculator(
     distance, time, rateDetails, instructionData, decimalPrecision, routePoints, vehicleType = 'car', externalTollFee = null
 ) {
-    console.log('Iniciando cálculo de tarifa com os seguintes parâmetros:');
-    console.log('- Distância:', distance);
-    console.log('- Tempo:', time);
-    console.log('- Tipo de veículo:', vehicleType);
-    console.log('- Pontos da rota:', routePoints ? routePoints.length : 0);
+    Logger.log('Iniciando cálculo de tarifa com os seguintes parâmetros:');
+    Logger.log('- Distância:', distance);
+    Logger.log('- Tempo:', time);
+    Logger.log('- Tipo de veículo:', vehicleType);
+    Logger.log('- Pontos da rota:', routePoints ? routePoints.length : 0);
 
     // Cálculo da tarifa base
     const baseFare = calculateBaseFare(distance, time, rateDetails);
-    console.log('Tarifa base calculada:', baseFare);
+    Logger.log('Tarifa base calculada:', baseFare);
 
     // Cálculo do pedágio
     let tollFee = 0;
     if (externalTollFee !== null && !isNaN(externalTollFee)) {
         tollFee = externalTollFee;
-        console.log('Valor do pedágio recebido externamente:', tollFee);
+        Logger.log('Valor do pedágio recebido externamente:', tollFee);
     } else if (routePoints && routePoints.length > 0) {
         tollFee = calculateTollFees(routePoints, vehicleType);
-        console.log('Valor do pedágio calculado:', tollFee);
+        Logger.log('Valor do pedágio calculado:', tollFee);
     }
 
     // Soma do pedágio à tarifa base
     const totalFare = baseFare + tollFee;
-    console.log('Valor total (base + pedágio):', totalFare);
+    Logger.log('Valor total (base + pedágio):', totalFare);
 
     // Cálculo da taxa de conveniência
     const convenienceFee = calculateConvenienceFee(totalFare, rateDetails);
-    console.log('Taxa de conveniência:', convenienceFee);
+    Logger.log('Taxa de conveniência:', convenienceFee);
 
     // Valor final
     const grandTotal = totalFare + convenienceFee;
-    console.log('Valor final da corrida:', grandTotal);
+    Logger.log('Valor final da corrida:', grandTotal);
 
     return {
         baseFare: roundToDecimal(baseFare, decimalPrecision),

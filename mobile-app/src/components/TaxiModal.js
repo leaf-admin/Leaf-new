@@ -11,13 +11,13 @@ import {
     ScrollView
 } from 'react-native';
 import { Icon, Button, Input } from 'react-native-elements';
-import MapView, { PROVIDER_GOOGLE, Marker, Polyline } from 'react-native-maps';
-import { colors } from '../common-local/theme';
+import MapView, { PROVIDER_GOOGLE, Marker, Polyline, UrlTile } from 'react-native-maps';
+import { colors } from '../common/theme';
 var { width, height } = Dimensions.get('window');
 import i18n from '../i18n';
 import RadioForm from 'react-native-simple-radio-button';
 import OtherPerson from './OtherPerson';
-import { fonts } from '../common-local/font';
+import { fonts } from '../common/font';
 import DeviceInfo from 'react-native-device-info';
 
 const hasNotch = DeviceInfo.hasNotch();
@@ -27,7 +27,7 @@ export const SECONDORY_COLOR = colors.TAXISECONDORY;
 
 export default function TaxiModal(props) {
     const { t } = i18n;
-    const isRTL = i18n.locale.indexOf('he') === 0 || i18n.locale.indexOf('ar') === 0;
+    const isRTL = i18n.locale && (i18n.locale.indexOf('he') === 0 || i18n.locale.indexOf('ar') === 0);
     const { settings, tripdata, estimate, bookingModalStatus, onPressCancel, bookNow, payment_mode, setPaymentMode, radioProps, profileData, setProfileData, auth, bookModelLoading, instructionData, setInstructionData, otherPerson, setOtherPerson  } = props;
 
     const mapRef = useRef(null);
@@ -77,6 +77,11 @@ export default function TaxiModal(props) {
                         {tripdata && tripdata.pickup && tripdata.drop ?
                             <MapView
                                 ref={mapRef}
+                    <UrlTile
+                        urlTemplate="https://a.tile.openstreetmap.org/{z}/{x}/{y}.png"
+                        maximumZ={19}
+                        flipY={false}
+                    />
                                 style={styles.map}
                                 provider={PROVIDER_GOOGLE}
                                 initialRegion={{

@@ -1,3 +1,4 @@
+import Logger from '../../utils/Logger';
 import {
   FETCH_CAR_TYPES,
   FETCH_CAR_TYPES_SUCCESS,
@@ -12,28 +13,46 @@ import { getAuth } from '@react-native-firebase/auth';
 import { onValue, push, remove, set, uploadBytesResumable, getDownloadURL } from '@react-native-firebase/database';
 import { ref } from '@react-native-firebase/storage';
 
+
 export const fetchCarTypes = () => (dispatch) => {
+  Logger.log('🚗 fetchCarTypes - Iniciando...');
+  Logger.log('🚗 fetchCarTypes - firebase:', firebase);
+  Logger.log('🚗 fetchCarTypes - carTypesRef:', firebase?.carTypesRef);
 
   const {
     carTypesRef
   } = firebase;
 
+  if (!carTypesRef) {
+    Logger.error('❌ fetchCarTypes - carTypesRef não disponível!');
+    return;
+  }
+
   dispatch({
     type: FETCH_CAR_TYPES,
     payload: null
   });
+  
+  Logger.log('🚗 fetchCarTypes - Configurando listener onValue...');
   onValue(carTypesRef, snapshot => {
+    Logger.log('🚗 fetchCarTypes - onValue callback executado:', {
+      hasData: !!snapshot.val(),
+      dataKeys: snapshot.val() ? Object.keys(snapshot.val()) : null
+    });
+    
     if (snapshot.val()) {
       let data = snapshot.val();
       const arr = Object.keys(data).map(i => {
         data[i].id = i;
         return data[i]
       });
+      Logger.log('🚗 fetchCarTypes - Dados processados:', arr.length, 'carros');
       dispatch({
         type: FETCH_CAR_TYPES_SUCCESS,
         payload: arr
       });
     } else {
+      Logger.log('⚠️ fetchCarTypes - Nenhum dado encontrado');
       dispatch({
         type: FETCH_CAR_TYPES_FAILED,
         payload: store.getState().languagedata.defaultLanguage.no_cars
@@ -71,7 +90,7 @@ export const editCarType = (cartype, method) => async (dispatch) => {
 // Função para buscar tipos de carro de forma síncrona
 export const getCarTypes = async () => {
   try {
-    console.log('getCarTypes - Buscando tipos de carro...');
+    Logger.log('getCarTypes - Buscando tipos de carro...');
     
     const carTypesRef = firebase.carTypesRef;
     const snapshot = await new Promise((resolve) => {
@@ -88,14 +107,14 @@ export const getCarTypes = async () => {
         return data[i]
       });
       
-      console.log('getCarTypes - Tipos de carro encontrados:', arr);
+      Logger.log('getCarTypes - Tipos de carro encontrados:', arr);
       return arr;
     } else {
-      console.log('getCarTypes - Nenhum tipo de carro encontrado');
+      Logger.log('getCarTypes - Nenhum tipo de carro encontrado');
       return null;
     }
   } catch (error) {
-    console.warn('getCarTypes - Erro ao buscar tipos de carro:', error);
+    Logger.warn('getCarTypes - Erro ao buscar tipos de carro:', error);
     return null;
   }
 };

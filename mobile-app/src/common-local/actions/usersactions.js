@@ -1,3 +1,4 @@
+import Logger from '../../utils/Logger';
 import {
   FETCH_ALL_USERS,
   FETCH_ALL_USERS_SUCCESS,
@@ -28,6 +29,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { uploadBytesResumable, getDownloadURL } from '@react-native-firebase/storage';
 import { GetDistance } from '../other/GeoFunctions';
 import { Platform } from 'react-native';
+
 
 export const fetchUsers = () => (dispatch) => {
   const usersRef = ref(firebase.database, 'users');
@@ -292,21 +294,21 @@ export const deleteUser = (uid) => (dispatch) => {
 export const fetchUserBookings = () => async (dispatch) => {
   try {
     await waitForFirebaseInit();
-    console.log('fetchUserBookings - Firebase Database inicializado');
+    Logger.log('fetchUserBookings - Firebase Database inicializado');
 
     const uid = await getUserId();
     if (!uid) {
-      console.error('fetchUserBookings - UID não encontrado');
+      Logger.error('fetchUserBookings - UID não encontrado');
       return;
     }
 
     const userInfo = store.getState().auth.profile;
     if (!userInfo || !userInfo.usertype) {
-      console.error('fetchUserBookings - Tipo de usuário não encontrado');
+      Logger.error('fetchUserBookings - Tipo de usuário não encontrado');
       return;
     }
 
-    console.log('fetchUserBookings - Caminho completo:', firebase.bookingListRef(uid, userInfo.usertype).toString());
+    Logger.log('fetchUserBookings - Caminho completo:', firebase.bookingListRef(uid, userInfo.usertype).toString());
     
     onValue(firebase.bookingListRef(uid, userInfo.usertype), (snapshot) => {
       if (snapshot.val()) {
@@ -322,14 +324,14 @@ export const fetchUserBookings = () => async (dispatch) => {
         });
       }
     }, (error) => {
-      console.error('fetchUserBookings - Erro ao buscar dados:', error);
+      Logger.error('fetchUserBookings - Erro ao buscar dados:', error);
       dispatch({
         type: 'FETCH_USER_BOOKINGS_FAILED',
         payload: error.message || 'Erro ao buscar reservas'
       });
     });
   } catch (error) {
-    console.error('fetchUserBookings - Erro:', error);
+    Logger.error('fetchUserBookings - Erro:', error);
     dispatch({
       type: 'FETCH_USER_BOOKINGS_FAILED',
       payload: error.message || 'Erro ao buscar reservas'
@@ -342,27 +344,27 @@ const waitForAuth = async (maxTries = 30, interval = 200) => {
   const authInstance = getAuth();
   let tries = 0;
   while (!authInstance.currentUser && tries < maxTries) {
-    console.log(`[waitForAuth] Tentativa ${tries + 1}: currentUser ainda null`);
+    Logger.log(`[waitForAuth] Tentativa ${tries + 1}: currentUser ainda null`);
     await new Promise(res => setTimeout(res, interval));
     tries++;
   }
   if (authInstance.currentUser) {
-    console.log('[waitForAuth] currentUser disponível:', authInstance.currentUser.uid);
+    Logger.log('[waitForAuth] currentUser disponível:', authInstance.currentUser.uid);
     return authInstance.currentUser;
   } else {
-    console.warn('[waitForAuth] currentUser permaneceu null após várias tentativas');
+    Logger.warn('[waitForAuth] currentUser permaneceu null após várias tentativas');
     return null;
   }
 };
 
 export const fetchUserCancelReasons = () => async (dispatch) => {
-  console.log('=== NOVA VERSAO fetchUserCancelReasons ===');
+  Logger.log('=== NOVA VERSAO fetchUserCancelReasons ===');
   try {
     await waitForFirebaseInit();
-    console.log('fetchUserCancelReasons - Firebase Database inicializado');
+    Logger.log('fetchUserCancelReasons - Firebase Database inicializado');
 
     const cancelReasonsRef = get(firebase.database, 'cancel_reason');
-    console.log('fetchUserCancelReasons - Caminho acessado:', cancelReasonsRef.toString());
+    Logger.log('fetchUserCancelReasons - Caminho acessado:', cancelReasonsRef.toString());
 
     // Desligar listener existente antes de criar um novo (se houver)
     off(cancelReasonsRef);
@@ -381,7 +383,7 @@ export const fetchUserCancelReasons = () => async (dispatch) => {
         });
       }
     }, (error) => {
-      console.error('fetchUserCancelReasons - Erro ao buscar dados:', error);
+      Logger.error('fetchUserCancelReasons - Erro ao buscar dados:', error);
       dispatch({
         type: 'FETCH_CANCEL_REASONS_FAILED',
         payload: error.message
@@ -392,7 +394,7 @@ export const fetchUserCancelReasons = () => async (dispatch) => {
     return listener;
 
   } catch (error) {
-    console.error('fetchUserCancelReasons - Erro:', error);
+    Logger.error('fetchUserCancelReasons - Erro:', error);
     dispatch({
       type: 'FETCH_CANCEL_REASONS_FAILED',
       payload: error.message
@@ -411,37 +413,37 @@ export const unsubscribeCancelReasons = () => (dispatch, getState) => {
     // Assumindo que o listener é salvo em algum lugar do estado Redux (precisará de ajuste no reducer)
     // const listener = state.algumReducer.cancelReasonsListener;
     // if (listener && typeof listener === 'function') {
-    //     console.log('Desligando listener de motivos de cancelamento');
+    //     Logger.log('Desligando listener de motivos de cancelamento');
     //     listener();
     // }
     // Como alternativa, podemos desligar pela referência direta se o listener não for salvo no estado
     if (firebase.database) {
-        console.log('Tentando desligar listener de motivos de cancelamento pela referência');
+        Logger.log('Tentando desligar listener de motivos de cancelamento pela referência');
         const cancelReasonsRef = get(firebase.database, 'cancel_reason');
         off(cancelReasonsRef);
     } else {
-        console.warn('Firebase Database não disponível para desligar listener de motivos de cancelamento');
+        Logger.warn('Firebase Database não disponível para desligar listener de motivos de cancelamento');
     }
 };
 
 export const fetchUserPaymentMethods = () => async (dispatch) => {
   try {
     await waitForFirebaseInit();
-    console.log('fetchUserPaymentMethods - Firebase Database inicializado');
+    Logger.log('fetchUserPaymentMethods - Firebase Database inicializado');
 
     const uid = await getUserId();
     if (!uid) {
-      console.error('fetchUserPaymentMethods - UID não encontrado');
+      Logger.error('fetchUserPaymentMethods - UID não encontrado');
       return;
     }
 
     const userInfo = store.getState().auth.profile;
     if (!userInfo || !userInfo.usertype) {
-      console.error('fetchUserPaymentMethods - Tipo de usuário não encontrado');
+      Logger.error('fetchUserPaymentMethods - Tipo de usuário não encontrado');
       return;
     }
 
-    console.log('fetchUserPaymentMethods - Iniciando busca com:', { uid, usertype: userInfo.usertype });
+    Logger.log('fetchUserPaymentMethods - Iniciando busca com:', { uid, usertype: userInfo.usertype });
 
     const methodsRef = get(firebase.database, `payment_methods/${uid}`);
     
@@ -459,14 +461,14 @@ export const fetchUserPaymentMethods = () => async (dispatch) => {
         });
       }
     }, (error) => {
-      console.error('fetchUserPaymentMethods - Erro ao buscar dados:', error);
+      Logger.error('fetchUserPaymentMethods - Erro ao buscar dados:', error);
       dispatch({
         type: 'FETCH_USER_PAYMENT_METHODS_FAILED',
         payload: error.message || 'Erro ao buscar métodos de pagamento'
       });
     });
   } catch (error) {
-    console.error('fetchUserPaymentMethods - Erro:', error);
+    Logger.error('fetchUserPaymentMethods - Erro:', error);
     dispatch({
       type: 'FETCH_USER_PAYMENT_METHODS_FAILED',
       payload: error.message || 'Erro ao buscar métodos de pagamento'
@@ -475,13 +477,13 @@ export const fetchUserPaymentMethods = () => async (dispatch) => {
 };
 
 export const fetchUserPromos = () => async (dispatch) => {
-  console.log('=== NOVA VERSAO fetchUserPromos ===');
+  Logger.log('=== NOVA VERSAO fetchUserPromos ===');
   try {
     await waitForFirebaseInit();
-    console.log('fetchUserPromos - Firebase Database inicializado');
+    Logger.log('fetchUserPromos - Firebase Database inicializado');
 
     const promosRef = get(firebase.database, 'promos');
-    console.log('fetchUserPromos - Caminho acessado:', promosRef.toString());
+    Logger.log('fetchUserPromos - Caminho acessado:', promosRef.toString());
 
     // Desligar listener existente antes de criar um novo (se houver)
     off(promosRef);
@@ -500,7 +502,7 @@ export const fetchUserPromos = () => async (dispatch) => {
         });
       }
     }, (error) => {
-      console.error('fetchUserPromos - Erro ao buscar dados:', error);
+      Logger.error('fetchUserPromos - Erro ao buscar dados:', error);
       dispatch({
         type: 'FETCH_PROMOS_FAILED',
         payload: error.message
@@ -511,7 +513,7 @@ export const fetchUserPromos = () => async (dispatch) => {
     return listener;
 
   } catch (error) {
-    console.error('fetchUserPromos - Erro:', error);
+    Logger.error('fetchUserPromos - Erro:', error);
     dispatch({
       type: 'FETCH_PROMOS_FAILED',
       payload: error.message
@@ -530,16 +532,16 @@ export const unsubscribePromos = () => (dispatch, getState) => {
     // Assumindo que o listener é salvo em algum lugar do estado Redux (precisará de ajuste no reducer)
     // const listener = state.algumReducer.promosListener;
     // if (listener && typeof listener === 'function') {
-    //     console.log('Desligando listener de promoções');
+    //     Logger.log('Desligando listener de promoções');
     //     listener();
     // }
      // Como alternativa, podemos desligar pela referência direta se o listener não for salvo no estado
     if (firebase.database) {
-        console.log('Tentando desligar listener de promoções pela referência');
+        Logger.log('Tentando desligar listener de promoções pela referência');
         const promosRef = get(firebase.database, 'promos');
         off(promosRef);
     } else {
-        console.warn('Firebase Database não disponível para desligar listener de promoções');
+        Logger.warn('Firebase Database não disponível para desligar listener de promoções');
     }
 };
 
@@ -547,7 +549,7 @@ export const fetchAllUsers = () => async (dispatch) => {
     try {
         const uid = await getUserId();
         if (!uid) {
-            console.error('fetchAllUsers - UID não encontrado');
+            Logger.error('fetchAllUsers - UID não encontrado');
             return;
         }
 
@@ -557,7 +559,7 @@ export const fetchAllUsers = () => async (dispatch) => {
             dispatch({ type: 'FETCH_ALL_USERS_SUCCESS', payload: data || {} });
         });
     } catch (error) {
-        console.error('fetchAllUsers - Erro:', error);
+        Logger.error('fetchAllUsers - Erro:', error);
         dispatch({ type: 'FETCH_ALL_USERS_FAILURE', payload: error.message });
     }
 };
@@ -567,20 +569,20 @@ export const testReadBookingsSimple = () => async () => {
   try {
     const snapshot = await get(get(firebase.database, 'bookings'));
     if (snapshot.exists()) {
-      console.log('testReadBookingsSimple - Sucesso:', snapshot.val());
+      Logger.log('testReadBookingsSimple - Sucesso:', snapshot.val());
     } else {
-      console.log('testReadBookingsSimple - Nó vazio');
+      Logger.log('testReadBookingsSimple - Nó vazio');
     }
   } catch (error) {
-    console.error('testReadBookingsSimple - Erro:', error);
+    Logger.error('testReadBookingsSimple - Erro:', error);
   }
 };
 
 export const fetchBookings = () => async (dispatch) => {
-  console.log('=== LOG RASTREADOR fetchBookings (usersactions) ===');
+  Logger.log('=== LOG RASTREADOR fetchBookings (usersactions) ===');
   try {
     await waitForFirebaseInit();
-    console.log('fetchBookings - Firebase Database inicializado');
+    Logger.log('fetchBookings - Firebase Database inicializado');
 
     // Tentar obter UID do AsyncStorage primeiro
     const storedUid = await AsyncStorage.getItem('@auth_uid');
@@ -591,19 +593,19 @@ export const fetchBookings = () => async (dispatch) => {
     if (storedUid && storedUserData) {
       uid = storedUid;
       userInfo = JSON.parse(storedUserData);
-      console.log('fetchBookings - Usando UID do AsyncStorage:', uid);
+      Logger.log('fetchBookings - Usando UID do AsyncStorage:', uid);
     } else {
       // Se não tiver no AsyncStorage, tentar do Firebase Auth
       const currentUser = await waitForAuth();
       if (currentUser) {
         uid = currentUser.uid;
         userInfo = store.getState().auth.profile;
-        console.log('fetchBookings - Usando UID do Firebase Auth:', uid);
+        Logger.log('fetchBookings - Usando UID do Firebase Auth:', uid);
       }
     }
 
     if (!uid) {
-      console.error('fetchBookings - UID não encontrado');
+      Logger.error('fetchBookings - UID não encontrado');
       dispatch({
         type: 'FETCH_BOOKINGS_FAILED',
         payload: 'Usuário não autenticado'
@@ -612,7 +614,7 @@ export const fetchBookings = () => async (dispatch) => {
     }
 
     if (!userInfo || !userInfo.usertype) {
-      console.error('fetchBookings - Tipo de usuário não encontrado');
+      Logger.error('fetchBookings - Tipo de usuário não encontrado');
       dispatch({
         type: 'FETCH_BOOKINGS_FAILED',
         payload: 'Tipo de usuário não encontrado'
@@ -620,11 +622,11 @@ export const fetchBookings = () => async (dispatch) => {
       return;
     }
 
-    console.log('fetchBookings - Iniciando busca com:', { uid, usertype: userInfo.usertype });
+    Logger.log('fetchBookings - Iniciando busca com:', { uid, usertype: userInfo.usertype });
     
     // Usar o caminho correto para bookings
     const bookingsRef = get(firebase.database, `bookings/${uid}`);
-    console.log('fetchBookings - Caminho acessado:', bookingsRef.toString());
+    Logger.log('fetchBookings - Caminho acessado:', bookingsRef.toString());
 
     onValue(bookingsRef, (snapshot) => {
       if (snapshot.val()) {
@@ -640,14 +642,14 @@ export const fetchBookings = () => async (dispatch) => {
         });
       }
     }, (error) => {
-      console.error('fetchBookings - Erro ao buscar dados:', error);
+      Logger.error('fetchBookings - Erro ao buscar dados:', error);
       dispatch({
         type: 'FETCH_BOOKINGS_FAILED',
         payload: error.message
       });
     });
   } catch (error) {
-    console.error('fetchBookings - Erro:', error);
+    Logger.error('fetchBookings - Erro:', error);
     dispatch({
       type: 'FETCH_BOOKINGS_FAILED',
       payload: error.message
@@ -658,10 +660,10 @@ export const fetchBookings = () => async (dispatch) => {
 // Função para buscar dados de um usuário específico
 export const getUser = async (uid) => {
   try {
-    console.log('getUser - Buscando dados do usuário:', uid);
+    Logger.log('getUser - Buscando dados do usuário:', uid);
     
     if (!uid) {
-      console.error('getUser - UID não fornecido');
+      Logger.error('getUser - UID não fornecido');
       return null;
     }
 
@@ -676,14 +678,14 @@ export const getUser = async (uid) => {
     if (snapshot.val()) {
       const userData = snapshot.val();
       userData.uid = uid;
-      console.log('getUser - Dados do usuário encontrados:', userData);
+      Logger.log('getUser - Dados do usuário encontrados:', userData);
       return userData;
     } else {
-      console.log('getUser - Usuário não encontrado no banco de dados');
+      Logger.log('getUser - Usuário não encontrado no banco de dados');
       return null;
     }
   } catch (error) {
-    console.error('getUser - Erro ao buscar dados do usuário:', error);
+    Logger.error('getUser - Erro ao buscar dados do usuário:', error);
     return null;
   }
 };
@@ -705,7 +707,7 @@ export const fetchNearbyDrivers = (lat, lng, radius = 5, options = {}) => async 
   });
 
   try {
-    console.log('📍 Usando Firebase para buscar motoristas');
+    Logger.log('📍 Usando Firebase para buscar motoristas');
     return new Promise((resolve) => {
       onValue(driversRef, snapshot => {
         if (snapshot.val()) {
@@ -776,7 +778,7 @@ export const fetchNearbyDrivers = (lat, lng, radius = 5, options = {}) => async 
     });
 
   } catch (error) {
-    console.error('❌ Erro ao buscar motoristas próximos:', error);
+    Logger.error('❌ Erro ao buscar motoristas próximos:', error);
     dispatch({
       type: FETCH_ALL_DRIVERS_FAILED,
       payload: error.message

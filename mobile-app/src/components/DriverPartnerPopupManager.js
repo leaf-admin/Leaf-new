@@ -1,9 +1,11 @@
+import Logger from '../utils/Logger';
 import React, { useState, useEffect } from 'react';
 import { View, Text, Modal, StyleSheet, TouchableOpacity, Dimensions } from 'react-native';
-import { colors } from '../common-local/theme';
-import { MAIN_COLOR } from '../common-local/sharedFunctions';
+import { colors } from '../common/theme';
+import { MAIN_COLOR } from '../common/sharedFunctions';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import i18n from '../i18n';
+
 
 const { width } = Dimensions.get('window');
 
@@ -28,7 +30,7 @@ export default function DriverPartnerPopupManager() {
                 }, 1000);
             }
         } catch (error) {
-            console.error('Erro ao verificar estado do popup:', error);
+            Logger.error('Erro ao verificar estado do popup:', error);
         }
     };
 
@@ -38,7 +40,7 @@ export default function DriverPartnerPopupManager() {
             await AsyncStorage.setItem(POPUP_STORAGE_KEY, 'true');
             setIsVisible(false);
         } catch (error) {
-            console.error('Erro ao salvar preferência:', error);
+            Logger.error('Erro ao salvar preferência:', error);
         }
     };
 

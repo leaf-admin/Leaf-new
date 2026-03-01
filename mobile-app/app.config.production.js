@@ -16,7 +16,7 @@ export default {
     ],
     ios: {
       supportsTablet: true,
-      bundleIdentifier: "com.leaf.app",
+      bundleIdentifier: "br.com.leaf.ride",
       buildNumber: "1"
     },
     android: {
@@ -24,7 +24,7 @@ export default {
         foregroundImage: "./assets/adaptive-icon.png",
         backgroundColor: "#FFFFFF"
       },
-      package: "com.leaf.app",
+      package: "br.com.leaf.ride",
       versionCode: 1
     },
     web: {

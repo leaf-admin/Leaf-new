@@ -1,3 +1,4 @@
+import Logger from '../utils/Logger';
 import React, { useState, useEffect } from 'react';
 import {
   View,
@@ -11,6 +12,8 @@ import {
 } from 'react-native';
 import { Icon } from 'react-native-elements';
 import navigationService from '../services/NavigationService';
+import { useTranslation } from './i18n/LanguageProvider';
+
 
 /**
  * Componente para seleção de app de navegação preferido
@@ -18,6 +21,7 @@ import navigationService from '../services/NavigationService';
  */
 
 const NavigationAppSelector = ({ visible, onClose, onAppSelected }) => {
+  const { t } = useTranslation();
   const [availableApps, setAvailableApps] = useState([]);
   const [loading, setLoading] = useState(false);
 
@@ -87,7 +91,7 @@ const NavigationAppSelector = ({ visible, onClose, onAppSelected }) => {
       setAvailableApps(apps);
       
     } catch (error) {
-      console.error('❌ NavigationAppSelector - Erro ao verificar apps:', error);
+      Logger.error('❌ NavigationAppSelector - Erro ao verificar apps:', error);
       // Fallback para apps básicos
       setAvailableApps([
         {
@@ -135,14 +139,14 @@ const NavigationAppSelector = ({ visible, onClose, onAppSelected }) => {
       
       // Mostrar confirmação
       Alert.alert(
-        'App Definido',
-        `${app.name} foi definido como seu app de navegação preferido.`,
-        [{ text: 'OK' }]
+        t('navigation.appDefined'),
+        t('navigation.appDefinedMessage', { appName: app.name }),
+        [{ text: t('messages.confirm') }]
       );
       
     } catch (error) {
-      console.error('❌ NavigationAppSelector - Erro ao selecionar app:', error);
-      Alert.alert('Erro', 'Não foi possível definir o app preferido.');
+      Logger.error('❌ NavigationAppSelector - Erro ao selecionar app:', error);
+      Alert.alert(t('messages.error'), t('navigation.appDefinitionFailed'));
     }
   };
 

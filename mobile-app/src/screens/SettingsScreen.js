@@ -1,82 +1,58 @@
-import React, { useState, useEffect } from "react";
-import { StyleSheet, View, Text, TouchableOpacity, Alert, StatusBar, ScrollView, Image, Platform, Clipboard } from "react-native";
-import { Icon } from "react-native-elements";
-import i18n from '../i18n';
-import { useSelector, useDispatch } from "react-redux";
-import { api } from '../common-local';
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import { useTheme } from '@react-navigation/native';
+import Logger from '../utils/Logger';
+import React, { useState, useEffect } from 'react';
+import {
+    View,
+    Text,
+    StyleSheet,
+    ScrollView,
+    TouchableOpacity,
+    StatusBar,
+    Platform,
+    Image,
+    Alert,
+    ActivityIndicator,
+    Switch,
+} from 'react-native';
+import { Icon } from 'react-native-elements';
+import { Ionicons } from '@expo/vector-icons';
+import { useSelector, useDispatch } from 'react-redux';
+import { colors } from '../common-local/theme';
 import { fonts } from '../common-local/font';
-import { logOut, updateProfileImage } from '../common-local/actions/authactions';
-import { colors, lightTheme } from '../common-local/theme';
-import { FontAwesome, Ionicons, MaterialIcons, MaterialCommunityIcons, Entypo } from '@expo/vector-icons';
+import { cardTypography } from '../common-local/typography';
+import { MAIN_COLOR } from '../common-local/sharedFunctions';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { logOut } from '../common-local/actions/authactions';
 import * as ImagePicker from 'expo-image-picker';
+import { updateProfileImage } from '../common-local/actions/authactions';
 
-export default function SettingsScreen(props) {
-    const { t } = i18n;
+
+const { width } = require('react-native').Dimensions.get('window');
+
+export default function SettingsScreen({ navigation }) {
     const dispatch = useDispatch();
+    const auth = useSelector(state => state.auth);
+    const [isDarkMode, setIsDarkMode] = useState(false);
     const [userData, setUserData] = useState(null);
-    const [userSince, setUserSince] = useState(null);
-    const theme = useTheme()?.colors ? useTheme() : { colors: lightTheme };
+    const [isLoading, setIsLoading] = useState(true);
 
     useEffect(() => {
-        props.navigation.setOptions({ headerShown: false });
-        (async () => {
+        loadUserData();
+    }, []);
+
+    const loadUserData = async () => {
+        try {
+            setIsLoading(true);
             const storedUserData = await AsyncStorage.getItem('@user_data');
             if (storedUserData) {
                 const data = JSON.parse(storedUserData);
-                let createdAt = data?.createdAt;
-                if (createdAt) {
-                    // Suporta timestamp ou string ISO
-                    let dateObj = new Date(createdAt);
-                    if (!isNaN(dateObj.getTime())) {
-                        setUserSince(dateObj);
-                    }
-                }
                 setUserData(data);
-            } else {
-                Alert.alert(
-                    'Sessão Expirada',
-                    'Sua sessão expirou. Por favor, faça login novamente.',
-                    [
-                        { text: 'OK', onPress: () => props.navigation.navigate('Login') }
-                    ]
-                );
             }
-        })();
-    }, []);
-
-    const menuList = [
-        { name: 'Configurações do Perfil', navigationName: 'Profile', icon: 'account-cog-outline', type: 'material-community' },
-        { name: 'Documentos', navigationName: 'editUser', icon: 'description', type: 'materialIcons' },
-        { name: 'Ganhos', navigationName: 'MyEarning', icon: 'attach-money', type: 'materialIcons' },
-        { name: 'Veículos', navigationName: 'Cars', icon: 'car-cog', type: 'material-community' },
-        { name: 'Indique e Ganhe', navigationName: 'Refer', icon: 'cash-outline', type: 'ionicon' },
-        { name: 'SOS', navigationName: 'Sos', icon: 'radio-outline', type: 'ionicon' },
-        { name: 'Notificações', navigationName: 'Notifications', icon: 'notifications-outline', type: 'ionicon' },
-        { name: 'Reclamações', navigationName: 'Complain', icon: 'chatbox-ellipses-outline', type: 'ionicon' },
-        { name: 'Sobre', navigationName: 'About', icon: 'info', type: 'entypo' },
-        { name: 'Sair', icon: 'logout', navigationName: 'Logout', type: 'antdesign' }
-    ];
-
-    // Filtrar menuList conforme o tipo de usuário
-    const iconMap = {
-        'account-cog-outline': 'user-cog',
-        'cash-outline': 'money-bill',
-        'radio-outline': 'car',
-        'notifications-outline': 'bell',
-        'chatbox-ellipses-outline': 'comments',
-        'logout': 'sign-out',
-    };
-    const filteredMenuList = menuList.filter(item => {
-        if (['editUser', 'MyEarning', 'Cars'].includes(item.navigationName)) {
-            return userData?.usertype === 'driver';
+        } catch (error) {
+            Logger.error('Erro ao carregar dados do usuário:', error);
+        } finally {
+            setIsLoading(false);
         }
-        return true;
-    }).map(item => ({
-        ...item,
-        icon: iconMap[item.icon] || item.icon
-    }));
+    };
 
     const handleLogout = () => {
         Alert.alert(
@@ -89,182 +65,196 @@ export default function SettingsScreen(props) {
         );
     };
 
-    // Função para abrir a galeria e atualizar a foto do perfil
     const handleCameraPress = async () => {
         try {
-            console.log('[Camera] Solicitando permissão para galeria...');
             const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
             if (status !== 'granted') {
                 Alert.alert('Permissão negada', 'É necessário permitir acesso à galeria para alterar a foto.');
                 return;
             }
-            console.log('[Camera] Permissão concedida. Abrindo galeria...');
+            
             let result = await ImagePicker.launchImageLibraryAsync({
                 mediaTypes: ImagePicker.MediaTypeOptions.Images,
                 allowsEditing: true,
                 aspect: [1, 1],
                 quality: 0.7,
             });
-            console.log('[Galeria] Resultado:', result);
-            if (!result) {
-                Alert.alert('Erro', 'A galeria não retornou resultado.');
-                return;
-            }
-            if (result.canceled) {
-                Alert.alert('Cancelado', 'A seleção de imagem foi cancelada.');
-                return;
-            }
-            if (!result.assets || !result.assets.length) {
-                Alert.alert('Erro', 'Nenhuma imagem foi selecionada.');
-                return;
-            }
-            const image = result.assets[0];
-            if (image.uri) {
-                let response;
-                try {
-                    console.log('[Upload] Iniciando fetch da URI:', image.uri);
-                    response = await fetch(image.uri);
-                    console.log('[Upload] response do fetch:', response);
-                } catch (fetchErr) {
-                    console.error('[Upload] Erro no fetch da URI:', fetchErr);
-                    Alert.alert('Erro', 'Não foi possível acessar a imagem selecionada.');
-                    return;
-                }
-                let blob;
-                try {
-                    blob = await response.blob();
-                    console.log('[Upload] Blob obtido:', blob);
-                } catch (blobErr) {
-                    console.error('[Upload] Erro ao converter para Blob:', blobErr);
-                    Alert.alert('Erro', 'Não foi possível processar a imagem selecionada.');
-                    return;
-                }
-                try {
-                    console.log('[Upload] Chamando updateProfileImage...');
-                    const result = await updateProfileImage(blob, image.uri);
-                    console.log('[Upload] updateProfileImage concluído com sucesso!');
-                    
-                    // Atualizar o estado com a URL de download
-                    if (result && result.url) {
-                        setUserData({ ...userData, profile_image: result.url });
-                    }
-                    
-                    Alert.alert('Sucesso', 'Foto de perfil atualizada com sucesso!');
-                } catch (e) {
-                    console.error('[Upload] Erro ao atualizar foto de perfil:', e);
-                    
-                    // Tratar erro de autenticação especificamente
-                    if (e.message.includes('sessão expirou') || e.message.includes('login novamente')) {
-                        Alert.alert(
-                            'Sessão Expirada', 
-                            'Sua sessão expirou. É necessário fazer login novamente para atualizar a foto de perfil.',
-                            [
-                                { text: 'OK', onPress: () => {
-                                    // Redirecionar para tela de login
-                                    props.navigation.navigate('Login');
-                                }}
-                            ]
-                        );
-                    } else {
+
+            if (!result.canceled && result.assets && result.assets.length > 0) {
+                const image = result.assets[0];
+                if (image.uri) {
+                    try {
+                        const response = await fetch(image.uri);
+                        const blob = await response.blob();
+                        const result = await updateProfileImage(blob, image.uri);
+                        
+                        if (result && result.url) {
+                            setUserData({ ...userData, profile_image: result.url });
+                        }
+                        
+                        Alert.alert('Sucesso', 'Foto de perfil atualizada com sucesso!');
+                    } catch (e) {
+                        Logger.error('Erro ao atualizar foto:', e);
                         Alert.alert('Erro', `Não foi possível atualizar a foto: ${e.message}`);
                     }
                 }
             }
         } catch (err) {
-            console.error('[Camera/Galeria] Erro global:', err);
-            Alert.alert('Erro global', String(err));
+            Logger.error('Erro ao selecionar imagem:', err);
+            Alert.alert('Erro', String(err));
         }
     };
 
-    // Função para copiar o referralId
-    const handleCopyReferral = () => {
-        if (userData?.referralId) {
-            Clipboard.setString(userData.referralId);
-            Alert.alert('Código copiado!', 'Seu código de indicação foi copiado para a área de transferência.');
-        }
-    };
+    const userType = auth?.profile?.usertype || auth?.profile?.userType;
+    const isDriver = userType === 'driver';
 
-    // Lista de opções do menu atualizada
-    const menuOptions = [
-        { label: 'Começar a dirigir', isMain: true, onPress: () => props.navigation.navigate('ConvertToDriver') },
-        { label: 'Minhas viagens', icon: <MaterialIcons name="history" size={22} color="#222" />, onPress: () => props.navigation.navigate('RideListPage') },
-        { label: 'Carteira', icon: <MaterialCommunityIcons name="wallet" size={22} color="#222" />, onPress: () => props.navigation.navigate('WalletDetails') },
-        { separator: true },
-        { label: 'Log Out', icon: <MaterialCommunityIcons name="logout" size={22} color="#D32F2F" />, onPress: handleLogout, isLogout: true },
+    const menuItems = [
+        ...(isDriver ? [
+            { id: 'profile', title: 'Editar Perfil', icon: 'person-outline', screen: 'EditProfile' },
+            { id: 'documents', title: 'Documentos', icon: 'document-text-outline', screen: 'DriverDocuments' },
+            { id: 'earnings', title: 'Relatório de Ganhos', icon: 'cash-outline', screen: 'MyEarning' },
+            { id: 'vehicles', title: 'Meus Veículos', icon: 'car-outline', screen: 'Cars' },
+        ] : [
+            { id: 'profile', title: 'Editar Perfil', icon: 'person-outline', screen: 'EditProfileScreen' },
+        ]),
+        { id: 'trips', title: 'Histórico de Viagens', icon: 'time-outline', screen: 'RideListScreen' },
+        { id: 'messages', title: 'Mensagens', icon: 'chatbubbles-outline', screen: 'Messages' },
+        { id: 'settings', title: 'Configurações', icon: 'settings-outline', screen: 'Settings' },
+        { id: 'help', title: 'Ajuda', icon: 'help-circle-outline', screen: 'Help' },
+        { id: 'ride-flow-test', title: '🧪 Testar Fluxo de Corrida', icon: 'car-sport-outline', screen: 'RideFlowTest' },
     ];
 
-    return (
-        <View style={[styles.container, { backgroundColor: '#f5f1f1' }]}> 
-            <StatusBar barStyle={Platform.OS === 'ios' ? 'dark-content' : 'default'} backgroundColor={'#f5f1f1'} />
-            {/* Header */}
-            <View style={styles.headerRowProfile}>
-                <TouchableOpacity onPress={() => props.navigation.goBack()} style={styles.headerIconBtn}>
-                    <Ionicons name="arrow-back" size={26} color="#222" />
-                </TouchableOpacity>
-                <Text style={styles.headerTitleProfile}>My Profile</Text>
-                <TouchableOpacity style={styles.headerIconBtn}>
-                    <Ionicons name="settings-outline" size={24} color="#222" />
+    const Header = () => (
+        <View style={[styles.header, { backgroundColor: isDarkMode ? '#1a1a1a' : '#fff' }]}>
+            <TouchableOpacity 
+                style={[
+                    styles.headerButton, 
+                    { 
+                        backgroundColor: isDarkMode ? '#2d2d2d' : '#e8e8e8',
+                        borderWidth: 1,
+                        borderColor: isDarkMode ? '#404040' : '#d0d0d0',
+                    }
+                ]}
+                onPress={() => navigation.goBack()}
+                activeOpacity={0.7}
+            >
+                <Ionicons 
+                    name="arrow-back" 
+                    color={isDarkMode ? '#fff' : '#1a1a1a'} 
+                    size={22} 
+                />
+            </TouchableOpacity>
+            <Text style={[styles.headerTitle, { color: isDarkMode ? '#fff' : colors.BLACK }]}>
+                Configurações
+            </Text>
+            <View style={styles.headerRightContainer} />
+        </View>
+    );
+
+    const ProfileSection = () => (
+        <View style={[styles.profileSection, { backgroundColor: isDarkMode ? '#2a2a2a' : '#fff' }]}>
+            <View style={styles.profileImageWrapper}>
+                {userData?.profile_image ? (
+                    <Image
+                        source={{ uri: userData.profile_image }}
+                        style={styles.profileImage}
+                    />
+                ) : (
+                    <View style={styles.profileImageFallback}>
+                        <Text style={styles.profileImageInitials}>
+                            {(userData?.firstName?.[0] || '').toUpperCase()}
+                            {(userData?.lastName?.[0] || '').toUpperCase()}
+                        </Text>
+                    </View>
+                )}
+                <TouchableOpacity style={styles.cameraIcon} onPress={handleCameraPress}>
+                    <Ionicons name="camera" size={18} color="#fff" />
                 </TouchableOpacity>
             </View>
-            <ScrollView contentContainerStyle={styles.scrollContentProfile} showsVerticalScrollIndicator={false}>
-                {/* Foto, nome, e-mail, botão */}
-                <View style={styles.profileBlockProfile}>
-                    <View style={styles.profileImageSection}>
-                        <View style={styles.profileImageWrapperProfile}>
-                            {userData?.profile_image ? (
-                                <Image
-                                    source={{ uri: userData.profile_image }}
-                                    style={styles.profileImageProfile}
-                                />
-                            ) : (
-                                <View style={styles.profileImageFallbackProfile}>
-                                    <Text style={styles.profileImageInitialsProfile}>
-                                        {(userData?.firstName?.[0] || '').toUpperCase()}
-                                        {(userData?.lastName?.[0] || '').toUpperCase()}
-                                    </Text>
-                                </View>
-                            )}
-                            <TouchableOpacity style={styles.cameraIconProfile} onPress={handleCameraPress}>
-                                <Ionicons name="camera" size={20} color="#fff" />
-                            </TouchableOpacity>
-                        </View>
-                    </View>
-                    <Text style={styles.profileNameProfile}>{userData?.firstName} {userData?.lastName}</Text>
-                    <Text style={styles.profileEmailProfile}>{userData?.email}</Text>
-                    <TouchableOpacity style={styles.editProfileBtn} onPress={() => props.navigation.navigate('Profile')}>
-                        <Text style={styles.editProfileBtnText}>Edit Profile</Text>
-                    </TouchableOpacity>
+            <Text style={[styles.profileName, { color: isDarkMode ? '#fff' : colors.BLACK }]}>
+                {userData?.firstName} {userData?.lastName}
+            </Text>
+            <Text style={[cardTypography.subtitle, styles.profileEmail, { color: isDarkMode ? '#999' : colors.GRAY }]}>
+                {userData?.email}
+            </Text>
+            <TouchableOpacity 
+                style={styles.editProfileButton}
+                onPress={() => navigation.navigate(isDriver ? 'EditProfile' : 'EditProfileScreen')}
+            >
+                <Text style={[cardTypography.title, styles.editProfileButtonText]}>Editar Perfil</Text>
+            </TouchableOpacity>
+        </View>
+    );
+
+    const MenuItem = ({ item }) => (
+        <TouchableOpacity
+            style={[styles.menuItem, { backgroundColor: isDarkMode ? '#2a2a2a' : '#fff' }]}
+            onPress={() => navigation.navigate(item.screen)}
+            activeOpacity={0.7}
+        >
+            <View style={[styles.menuIconContainer, { backgroundColor: isDarkMode ? '#333' : '#f8f8f8' }]}>
+                <Ionicons 
+                    name={item.icon} 
+                    size={22} 
+                    color={isDarkMode ? '#fff' : MAIN_COLOR} 
+                />
+            </View>
+            <Text style={[cardTypography.title, styles.menuText, { color: isDarkMode ? '#fff' : colors.BLACK }]}>
+                {item.title}
+            </Text>
+            <Ionicons 
+                name="chevron-forward" 
+                size={20} 
+                color={isDarkMode ? '#666' : colors.GRAY} 
+            />
+        </TouchableOpacity>
+    );
+
+    const LogoutButton = () => (
+        <TouchableOpacity
+            style={styles.logoutButton}
+            onPress={handleLogout}
+            activeOpacity={0.7}
+        >
+            <Ionicons name="log-out-outline" size={22} color="#FF3B30" />
+            <Text style={[cardTypography.title, styles.logoutText]}>Logout</Text>
+        </TouchableOpacity>
+    );
+
+    if (isLoading) {
+        return (
+            <View style={[styles.container, { backgroundColor: isDarkMode ? '#1a1a1a' : '#f5f5f5' }]}>
+                <Header />
+                <View style={styles.loadingContainer}>
+                    <ActivityIndicator size="large" color={MAIN_COLOR} />
                 </View>
-                {/* Lista de opções */}
-                <View style={styles.menuListProfile}>
-                    {menuOptions.map((item, idx) =>
-                        item.separator ? (
-                            <View key={idx} style={styles.menuSeparatorProfile} />
-                        ) : item.isMain ? (
-                            <TouchableOpacity
-                                key={item.label}
-                                style={styles.mainMenuBtn}
-                                onPress={item.onPress}
-                                activeOpacity={0.8}
-                            >
-                                <Text style={styles.mainMenuBtnText}>{item.label}</Text>
-                            </TouchableOpacity>
-                        ) : (
-                            <TouchableOpacity
-                                key={item.label}
-                                style={[styles.menuItemProfile, item.isLogout && styles.menuItemLogoutProfile]}
-                                onPress={item.onPress}
-                                activeOpacity={0.7}
-                            >
-                                <View style={styles.menuIconProfile}>{item.icon}</View>
-                                <Text style={[styles.menuTextProfile, item.isLogout && styles.menuTextLogoutProfile]}>{item.label}</Text>
-                                <Entypo name="chevron-right" size={20} color={item.isLogout ? '#D32F2F' : '#B0B0B0'} style={{ marginLeft: 'auto' }} />
-                            </TouchableOpacity>
-                        )
-                    )}
+            </View>
+        );
+    }
+
+    return (
+        <View style={[styles.container, { backgroundColor: isDarkMode ? '#1a1a1a' : '#f5f5f5' }]}>
+            <StatusBar barStyle={isDarkMode ? "light-content" : "dark-content"} backgroundColor={isDarkMode ? '#1a1a1a' : '#fff'} />
+            
+            <Header />
+            
+            <ScrollView
+                style={styles.content}
+                showsVerticalScrollIndicator={false}
+            >
+                <ProfileSection />
+                
+                <View style={styles.menuContainer}>
+                    {menuItems.map((item) => (
+                        <MenuItem key={item.id} item={item} />
+                    ))}
                 </View>
-                {/* Versão do app */}
-                <Text style={styles.appVersionProfile}>App version 003</Text>
+
+                <LogoutButton />
+
+                <Text style={[cardTypography.subtitle, styles.appVersion, { color: isDarkMode ? '#666' : colors.GRAY }]}>
+                    Versão 1.0.0
+                </Text>
             </ScrollView>
         </View>
     );
@@ -273,397 +263,167 @@ export default function SettingsScreen(props) {
 const styles = StyleSheet.create({
     container: {
         flex: 1,
-        backgroundColor: '#fff',
     },
-    title: {
-        fontFamily: fonts.Bold,
-        fontSize: 22,
-        color: '#111',
-        textAlign: 'center',
-        marginTop: 36,
-        marginBottom: 8,
-        letterSpacing: 0.1,
-    },
-    profileHeader: {
+    header: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
         alignItems: 'center',
-        marginTop: 24,
-        marginBottom: 32,
+        paddingHorizontal: 20,
+        paddingTop: Platform.OS === 'ios' ? 50 : 24,
+        paddingBottom: 16,
+        borderBottomWidth: 0.5,
+        borderBottomColor: '#f0f0f0',
     },
-    profileImageWrapper: {
-        width: 150,
-        height: 150,
-        borderRadius: 75,
-        backgroundColor: '#f3f3f3',
+    headerButton: {
+        width: 40,
+        height: 40,
+        borderRadius: 20,
         justifyContent: 'center',
         alignItems: 'center',
-        marginBottom: 8,
+        shadowColor: '#000',
+        shadowOffset: {
+            width: 0,
+            height: 1,
+        },
+        shadowOpacity: 0.1,
+        shadowRadius: 2,
+        elevation: 2,
+    },
+    headerTitle: {
+        fontSize: 18,
+        fontWeight: 'bold',
+        fontFamily: fonts.Bold,
+    },
+    headerRightContainer: {
+        width: 40,
+    },
+    content: {
+        flex: 1,
+    },
+    loadingContainer: {
+        flex: 1,
+        justifyContent: 'center',
+        alignItems: 'center',
+        paddingVertical: 40,
+    },
+    profileSection: {
+        alignItems: 'center',
+        paddingVertical: 24,
+        marginTop: 16,
+        marginHorizontal: 16,
+        borderRadius: 16,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.1,
+        shadowRadius: 4,
+        elevation: 3,
+    },
+    profileImageWrapper: {
         position: 'relative',
+        marginBottom: 12,
     },
     profileImage: {
-        width: 140,
-        height: 140,
-        borderRadius: 70,
+        width: 100,
+        height: 100,
+        borderRadius: 50,
     },
     profileImageFallback: {
-        width: 140,
-        height: 140,
-        borderRadius: 70,
-        backgroundColor: '#eaeaea',
+        width: 100,
+        height: 100,
+        borderRadius: 50,
+        backgroundColor: '#e0e0e0',
         justifyContent: 'center',
         alignItems: 'center',
     },
     profileImageInitials: {
-        color: '#7C8288',
         fontSize: 32,
         fontFamily: fonts.Bold,
+        color: '#999',
+    },
+    cameraIcon: {
+        position: 'absolute',
+        right: 0,
+        bottom: 0,
+        backgroundColor: MAIN_COLOR,
+        borderRadius: 16,
+        padding: 6,
+        borderWidth: 2,
+        borderColor: '#fff',
     },
     profileName: {
-        fontSize: 28,
+        fontSize: 20,
         fontFamily: fonts.Bold,
-        color: theme => theme?.colors?.text || '#111',
-        textAlign: 'center',
-        maxWidth: 320,
-        marginBottom: 6,
-    },
-    profileStatusRow: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        justifyContent: 'center',
-        marginBottom: 4,
-        gap: 4,
-    },
-    profileStatus: {
-        fontSize: 16,
-        fontFamily: fonts.Regular,
-        color: '#1a330e',
-        textAlign: 'center',
-        marginRight: 8,
-    },
-    profileRating: {
-        fontSize: 16,
-        fontFamily: fonts.Bold,
-        color: '#1a330e',
-        marginLeft: 0,
-        marginRight: 2,
-    },
-    profileStarIcon: {
-        marginLeft: 0,
-        marginTop: 1,
-    },
-    profileSince: {
-        fontSize: 14,
-        fontFamily: fonts.Regular,
-        color: '#666',
-        textAlign: 'center',
-        marginBottom: 0,
-    },
-    infoCard: {
-        backgroundColor: '#fff',
-        borderRadius: 16,
-        paddingVertical: 18,
-        paddingHorizontal: 24,
-        marginHorizontal: 32,
-        marginBottom: 24,
-        alignItems: 'center',
-        shadowColor: 'transparent',
-        elevation: 0,
-    },
-    infoValue: {
-        fontSize: 16,
-        color: '#222',
-        fontFamily: fonts.Regular,
-        marginBottom: 2,
-        textAlign: 'center',
-    },
-    menuCardContainer: {
         marginTop: 8,
-        marginBottom: 32,
-        paddingHorizontal: 0,
+        marginBottom: 4,
+    },
+    profileEmail: {
+        // Usa cardTypography.subtitle via style prop
+        marginBottom: 16,
+    },
+    editProfileButton: {
+        backgroundColor: MAIN_COLOR,
+        paddingHorizontal: 24,
+        paddingVertical: 10,
+        borderRadius: 20,
+    },
+    editProfileButtonText: {
+        color: '#fff',
+        // Usa cardTypography.title via style prop
+    },
+    menuContainer: {
+        marginTop: 16,
+        marginHorizontal: 16,
+        borderRadius: 16,
+        overflow: 'hidden',
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.1,
+        shadowRadius: 4,
+        elevation: 3,
     },
     menuItem: {
         flexDirection: 'row',
         alignItems: 'center',
-        backgroundColor: 'transparent',
-        paddingVertical: 18,
-        paddingHorizontal: 24,
-        borderRadius: 16,
-        marginBottom: 2,
-        marginHorizontal: 16,
-        elevation: 0,
-    },
-    menuIconWrapper: {
-        width: 32,
-        alignItems: 'center',
-        justifyContent: 'center',
-        marginRight: 16,
-    },
-    menuText: {
-        fontSize: 17,
-        fontFamily: fonts.Medium,
-        color: '#222',
-        letterSpacing: 0.1,
-    },
-    menuTextLogout: {
-        color: '#D32F2F',
-        fontFamily: fonts.Bold,
-    },
-    cameraIconWrapper: {
-        position: 'absolute',
-        bottom: 8,
-        alignSelf: 'center',
-        backgroundColor: '#1a330e',
-        borderRadius: 16,
-        padding: 5,
-        borderWidth: 2,
-        borderColor: '#fff',
-        zIndex: 2,
-    },
-    headerRow: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        paddingHorizontal: 16,
-        paddingTop: Platform.OS === 'ios' ? 48 : 24,
-        paddingBottom: 8,
-        backgroundColor: '#f5f1f1',
-    },
-    closeButton: {
-        width: 40,
-        height: 40,
-        alignItems: 'center',
-        justifyContent: 'center',
-    },
-    headerTitle: {
-        fontSize: 20,
-        fontFamily: fonts.Bold,
-        color: '#1a330e',
-        textAlign: 'center',
-    },
-    referralBox: {
-        backgroundColor: '#fff',
-        borderRadius: 12,
-        paddingVertical: 10,
-        paddingHorizontal: 18,
-        marginTop: 18,
-        marginBottom: 8,
-        alignSelf: 'center',
-        alignItems: 'center',
-        shadowColor: '#000',
-        shadowOpacity: 0.04,
-        shadowRadius: 4,
-        elevation: 1,
-    },
-    referralLabel: {
-        fontSize: 13,
-        color: '#888',
-        fontFamily: fonts.Regular,
-        marginBottom: 2,
-    },
-    referralId: {
-        fontSize: 20,
-        fontFamily: fonts.Bold,
-        color: '#1a330e',
-        letterSpacing: 2,
-    },
-    partnerButton: {
-        backgroundColor: '#1a330e',
-        borderRadius: 16,
         paddingVertical: 16,
-        paddingHorizontal: 32,
-        alignSelf: 'center',
-        marginTop: 10,
-        marginBottom: 18,
-        shadowColor: '#000',
-        shadowOpacity: 0.06,
-        shadowRadius: 6,
-        elevation: 2,
-    },
-    partnerButtonText: {
-        color: '#fff',
-        fontSize: 18,
-        fontFamily: fonts.Bold,
-        letterSpacing: 0.5,
-    },
-    headerRowProfile: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        paddingHorizontal: 18,
-        paddingTop: Platform.OS === 'ios' ? 48 : 24,
-        paddingBottom: 8,
-        backgroundColor: '#f5f1f1',
-    },
-    headerIconBtn: {
-        width: 40,
-        height: 40,
-        alignItems: 'center',
-        justifyContent: 'center',
-    },
-    headerTitleProfile: {
-        fontSize: 18,
-        fontFamily: fonts.Bold,
-        color: '#222',
-        textAlign: 'center',
-    },
-    profileImageSection: {
-        alignItems: 'center',
-        marginTop: 18,
-        marginBottom: 8,
-    },
-    profileImageWrapperProfile: {
-        width: 90,
-        height: 90,
-        borderRadius: 45,
-        backgroundColor: '#eaeaea',
-        justifyContent: 'center',
-        alignItems: 'center',
-        position: 'relative',
-    },
-    profileImageProfile: {
-        width: 86,
-        height: 86,
-        borderRadius: 43,
-    },
-    profileImageFallbackProfile: {
-        width: 86,
-        height: 86,
-        borderRadius: 43,
-        backgroundColor: '#d6d6d6',
-        justifyContent: 'center',
-        alignItems: 'center',
-    },
-    profileImageInitialsProfile: {
-        fontSize: 28,
-        fontFamily: fonts.Bold,
-        color: '#888',
-    },
-    cameraIconProfile: {
-        position: 'absolute',
-        right: 0,
-        bottom: 0,
-        backgroundColor: '#1a330e',
-        borderRadius: 14,
-        padding: 5,
-        borderWidth: 2,
-        borderColor: '#fff',
-        zIndex: 2,
-    },
-    profileNameProfile: {
-        fontSize: 19,
-        fontFamily: fonts.Bold,
-        color: '#222',
-        textAlign: 'center',
-        marginTop: 10,
-        marginBottom: 2,
-        letterSpacing: 0.1,
-    },
-    profileEmailProfile: {
-        fontSize: 14,
-        fontFamily: fonts.Regular,
-        color: '#888',
-        textAlign: 'center',
-        marginBottom: 10,
-        marginTop: 0,
-    },
-    editProfileBtn: {
-        backgroundColor: '#41D274',
-        borderRadius: 8,
-        paddingVertical: 9,
-        paddingHorizontal: 28,
-        alignSelf: 'center',
-        marginBottom: 6,
-        marginTop: 2,
-        shadowColor: '#000',
-        shadowOpacity: 0.04,
-        shadowRadius: 2,
-        elevation: 1,
-    },
-    editProfileBtnText: {
-        color: '#fff',
-        fontSize: 15,
-        fontFamily: fonts.Bold,
-        textAlign: 'center',
-        letterSpacing: 0.1,
-    },
-    menuListProfile: {
-        backgroundColor: '#fff',
-        borderRadius: 18,
-        marginHorizontal: 16,
-        marginBottom: 18,
-        paddingVertical: 2,
-        paddingHorizontal: 0,
-        shadowColor: '#000',
-        shadowOpacity: 0.04,
-        shadowRadius: 4,
-        elevation: 1,
-    },
-    menuItemProfile: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        paddingVertical: 15,
-        paddingHorizontal: 18,
-        borderBottomWidth: 1,
+        paddingHorizontal: 16,
+        borderBottomWidth: 0.5,
         borderBottomColor: '#f0f0f0',
     },
-    menuItemLogoutProfile: {
-        borderBottomWidth: 0,
+    menuIconContainer: {
+        width: 40,
+        height: 40,
+        borderRadius: 20,
+        justifyContent: 'center',
+        alignItems: 'center',
+        marginRight: 12,
     },
-    menuIconProfile: {
-        width: 32,
+    menuText: {
+        flex: 1,
+        // Usa cardTypography.title via style prop
+    },
+    logoutButton: {
+        flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'center',
-        marginRight: 16,
+        marginTop: 24,
+        marginBottom: 16,
+        marginHorizontal: 16,
+        paddingVertical: 16,
+        borderRadius: 16,
+        backgroundColor: '#fff',
+        borderWidth: 1,
+        borderColor: '#FF3B30',
     },
-    menuTextProfile: {
+    logoutText: {
+        color: '#FF3B30',
         fontSize: 16,
+        fontFamily: fonts.Bold,
+        marginLeft: 8,
+    },
+    appVersion: {
+        textAlign: 'center',
+        fontSize: 12,
         fontFamily: fonts.Regular,
-        color: '#222',
-    },
-    menuTextLogoutProfile: {
-        color: '#D32F2F',
-        fontFamily: fonts.Bold,
-    },
-    menuSeparatorProfile: {
-        height: 1,
-        backgroundColor: '#f0f0f0',
-        marginHorizontal: 18,
-    },
-    appVersionProfile: {
-        color: '#bbb',
-        fontSize: 13,
-        textAlign: 'center',
-        marginTop: 18,
-        marginBottom: 8,
-    },
-    mainMenuBtn: {
-        backgroundColor: '#41D274',
-        borderRadius: 12,
-        paddingVertical: 14,
-        paddingHorizontal: 32,
-        alignSelf: 'center',
-        marginVertical: 12,
-        marginHorizontal: 18,
-        shadowColor: '#000',
-        shadowOpacity: 0.06,
-        shadowRadius: 6,
-        elevation: 2,
-    },
-    mainMenuBtnText: {
-        color: '#fff',
-        fontSize: 17,
-        fontFamily: fonts.Bold,
-        textAlign: 'center',
-        letterSpacing: 0.5,
-    },
-    scrollContentProfile: {
-        flexGrow: 1,
-        justifyContent: 'flex-start',
-        paddingBottom: 18,
-    },
-    profileBlockProfile: {
-        alignItems: 'center',
-        marginTop: 18,
-        marginBottom: 18,
-        paddingHorizontal: 8,
+        marginBottom: 24,
     },
 });

@@ -1,3 +1,4 @@
+import Logger from '../utils/Logger';
 import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
@@ -11,9 +12,13 @@ import {
   Image
 } from 'react-native';
 import { Icon } from 'react-native-elements';
-import MapView, { PROVIDER_GOOGLE, Marker, Polyline } from 'react-native-maps';
+import MapView, { PROVIDER_GOOGLE, Marker, Polyline, UrlTile } from 'react-native-maps';
 import BottomSheetWrapper from '../components/BottomSheetWrapper';
 import { colors } from '../common-local/theme';
+import WebSocketManager from '../services/WebSocketManager';
+import useWebSocketListeners from '../hooks/useWebSocketListeners';
+import { useSelector } from 'react-redux';
+
 
 const { width, height } = Dimensions.get('window');
 
@@ -42,6 +47,60 @@ const TripTrackingScreen = ({ navigation, route }) => {
     latitude: -23.5705,
     longitude: -46.6533,
     address: 'Shopping Center, São Paulo'
+  });
+
+  // ===== INTEGRAÇÃO WEBSOCKET =====
+  const auth = useSelector(state => state.auth);
+  const wsManager = WebSocketManager.getInstance();
+  const currentUser = auth.profile;
+  const userType = currentUser?.userType || currentUser?.usertype;
+
+  // Configurar listeners WebSocket para tracking de viagem
+  useWebSocketListeners('TripTracking', {
+    onDriverLocationUpdated: (data) => {
+      Logger.log('📍 TripTracking - Localização do motorista atualizada:', data);
+      // Atualizar posição do motorista em tempo real
+      setDriverLocation({
+        latitude: data.lat,
+        longitude: data.lng,
+        heading: data.heading,
+        speed: data.speed
+      });
+      
+      // Centralizar mapa na nova posição
+      if (mapRef.current) {
+        mapRef.current.animateToRegion({
+          latitude: data.lat,
+          longitude: data.lng,
+          latitudeDelta: 0.01,
+          longitudeDelta: 0.01,
+        }, 1000);
+      }
+    },
+    onTripStarted: (data) => {
+      Logger.log('🚀 TripTracking - Viagem iniciada:', data);
+      setTripStatus('em_andamento');
+      // Atualizar UI para mostrar viagem em andamento
+    },
+    onTripCompleted: (data) => {
+      Logger.log('🏁 TripTracking - Viagem finalizada:', data);
+      setTripStatus('finalizada');
+      // Navegar para tela de avaliação
+    },
+    onRideCancelled: (data) => {
+      Logger.log('❌ TripTracking - Viagem cancelada:', data);
+      setTripStatus('cancelada');
+      // Mostrar mensagem de cancelamento
+    },
+    onConnect: () => {
+      Logger.log('📍 TripTracking - WebSocket conectado');
+    },
+    onDisconnect: (reason) => {
+      Logger.log('📍 TripTracking - WebSocket desconectado:', reason);
+    },
+    onConnectError: (error) => {
+      Logger.error('📍 TripTracking - Erro de conexão WebSocket:', error);
+    }
   });
 
   // Simular atualização da posição do motorista
@@ -107,7 +166,7 @@ const TripTrackingScreen = ({ navigation, route }) => {
       `Deseja ligar para ${driverInfo.name}?`,
       [
         { text: 'Cancelar', style: 'cancel' },
-        { text: 'Ligar', onPress: () => console.log('Ligando...') }
+        { text: 'Ligar', onPress: () => Logger.log('Ligando...') }
       ]
     );
   };
@@ -154,6 +213,11 @@ const TripTrackingScreen = ({ navigation, route }) => {
       {/* Mapa */}
       <MapView
         ref={mapRef}
+                    <UrlTile
+                        urlTemplate="https://a.tile.openstreetmap.org/{z}/{x}/{y}.png"
+                        maximumZ={19}
+                        flipY={false}
+                    />
         provider={PROVIDER_GOOGLE}
         style={styles.map}
         initialRegion={{

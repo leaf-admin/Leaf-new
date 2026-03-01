@@ -1,0 +1,56 @@
+# Teste Maestro: Screenshots para App Stores
+# Este teste navega pelas principais telas do app e gera screenshots
+appId: br.com.leaf.ride
+---
+# 1. Tela de Login (Splash/Welcome)
+- launchApp
+- takeScreenshot: screenshots-for-stores/login-screen
+
+# 2. Tela de entrada de telefone
+- tapOn: "Digite seu telefone"
+- takeScreenshot: screenshots-for-stores/phone-input
+
+# 3. Dashboard principal (após login simulado)
+- runFlow: "../helpers/login.yaml"
+- takeScreenshot: screenshots-for-stores/dashboard-main
+
+# 4. Tela de solicitar corrida
+- tapOn: "Solicitar Corrida"
+- takeScreenshot: screenshots-for-stores/ride-request
+
+# 5. Tela de confirmação de corrida (se disponível)
+- assertVisible:
+    text: "Confirmar Corrida"
+    optional: true
+- takeScreenshot: screenshots-for-stores/ride-confirmation
+
+# 6. Tela de corrida em andamento
+- tapOn:
+    text: "Corrida Aceita"
+    optional: true
+- takeScreenshot: screenshots-for-stores/ride-active
+
+# 7. Tela de perfil/motorista
+- tapOn:
+    id: "profile-tab"
+    optional: true
+- takeScreenshot: screenshots-for-stores/profile-screen
+
+# 8. Tela de histórico
+- tapOn:
+    text: "Histórico"
+    optional: true
+- takeScreenshot: screenshots-for-stores/history-screen
+
+# 9. Tela de configurações
+- tapOn:
+    text: "Configurações"
+    optional: true
+- takeScreenshot: screenshots-for-stores/settings-screen
+
+# 10. Tela de pagamento
+- tapOn:
+    text: "Pagamento"
+    optional: true
+- takeScreenshot: screenshots-for-stores/payment-screen
+

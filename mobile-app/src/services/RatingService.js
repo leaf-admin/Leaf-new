@@ -1,6 +1,8 @@
+import Logger from '../utils/Logger';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import WebSocketManager from './WebSocketManager';
 import { store } from '../common-local/store';
+
 
 class RatingService {
     constructor() {
@@ -10,7 +12,7 @@ class RatingService {
     // Enviar avaliação via WebSocket
     async submitRating(ratingData) {
         try {
-            console.log('⭐ Enviando avaliação:', ratingData);
+            Logger.log('⭐ Enviando avaliação:', ratingData);
             
             // Conectar ao WebSocket se necessário
             if (!this.webSocketManager.isConnected()) {
@@ -21,7 +23,7 @@ class RatingService {
             const result = await this.webSocketManager.submitRating(ratingData);
             
             if (result.success) {
-                console.log('✅ Avaliação enviada com sucesso');
+                Logger.log('✅ Avaliação enviada com sucesso');
                 
                 // Salvar localmente
                 await this.saveRatingLocally(ratingData);
@@ -35,7 +37,7 @@ class RatingService {
             }
             
         } catch (error) {
-            console.error('❌ Erro ao enviar avaliação:', error);
+            Logger.error('❌ Erro ao enviar avaliação:', error);
             
             // Salvar localmente para envio posterior
             await this.saveRatingLocally(ratingData);
@@ -55,10 +57,10 @@ class RatingService {
             });
             
             await AsyncStorage.setItem('localRatings', JSON.stringify(ratings));
-            console.log('💾 Avaliação salva localmente');
+            Logger.log('💾 Avaliação salva localmente');
             
         } catch (error) {
-            console.error('❌ Erro ao salvar avaliação localmente:', error);
+            Logger.error('❌ Erro ao salvar avaliação localmente:', error);
         }
     }
 
@@ -68,7 +70,7 @@ class RatingService {
             const ratings = await AsyncStorage.getItem('localRatings');
             return ratings ? JSON.parse(ratings) : [];
         } catch (error) {
-            console.error('❌ Erro ao obter avaliações locais:', error);
+            Logger.error('❌ Erro ao obter avaliações locais:', error);
             return [];
         }
     }
@@ -81,7 +83,7 @@ class RatingService {
             
             if (pendingRatings.length === 0) return;
             
-            console.log(`📤 Enviando ${pendingRatings.length} avaliações pendentes...`);
+            Logger.log(`📤 Enviando ${pendingRatings.length} avaliações pendentes...`);
             
             for (const rating of pendingRatings) {
                 try {
@@ -92,12 +94,12 @@ class RatingService {
                     await this.saveLocalRatings(ratings);
                     
                 } catch (error) {
-                    console.error(`❌ Erro ao enviar avaliação pendente:`, error);
+                    Logger.error(`❌ Erro ao enviar avaliação pendente:`, error);
                 }
             }
             
         } catch (error) {
-            console.error('❌ Erro ao enviar avaliações pendentes:', error);
+            Logger.error('❌ Erro ao enviar avaliações pendentes:', error);
         }
     }
 
@@ -106,7 +108,7 @@ class RatingService {
         try {
             await AsyncStorage.setItem('localRatings', JSON.stringify(ratings));
         } catch (error) {
-            console.error('❌ Erro ao salvar avaliações locais:', error);
+            Logger.error('❌ Erro ao salvar avaliações locais:', error);
         }
     }
 
@@ -122,7 +124,7 @@ class RatingService {
             dispatch(addRating(ratingData));
             
         } catch (error) {
-            console.error('❌ Erro ao atualizar Redux store:', error);
+            Logger.error('❌ Erro ao atualizar Redux store:', error);
         }
     }
 
@@ -153,14 +155,14 @@ class RatingService {
             return localRatings.filter(r => r.tripId === tripId);
             
         } catch (error) {
-            console.error('❌ Erro ao obter avaliações da viagem:', error);
+            Logger.error('❌ Erro ao obter avaliações da viagem:', error);
             
             // Fallback para dados locais
             try {
                 const localRatings = await this.getLocalRatings();
                 return localRatings.filter(r => r.tripId === tripId);
             } catch (localError) {
-                console.error('❌ Erro ao obter avaliações locais:', localError);
+                Logger.error('❌ Erro ao obter avaliações locais:', localError);
                 return [];
             }
         }
@@ -208,7 +210,7 @@ class RatingService {
             const ratings = await this.getTripRatings(tripId);
             return ratings.some(r => r.userType === userType);
         } catch (error) {
-            console.error('❌ Erro ao verificar se usuário já avaliou:', error);
+            Logger.error('❌ Erro ao verificar se usuário já avaliou:', error);
             return false;
         }
     }
@@ -248,7 +250,7 @@ class RatingService {
             };
             
         } catch (error) {
-            console.error('❌ Erro ao obter avaliações do usuário:', error);
+            Logger.error('❌ Erro ao obter avaliações do usuário:', error);
             return {
                 ratings: [],
                 total: 0,
@@ -264,7 +266,7 @@ class RatingService {
             const ratings = await this.getLocalRatings();
             return ratings.filter(r => r.status === 'pending');
         } catch (error) {
-            console.error('❌ Erro ao obter avaliações pendentes:', error);
+            Logger.error('❌ Erro ao obter avaliações pendentes:', error);
             return [];
         }
     }
@@ -283,11 +285,11 @@ class RatingService {
             
             if (recentRatings.length !== ratings.length) {
                 await this.saveLocalRatings(recentRatings);
-                console.log(`🧹 Limpeza: ${ratings.length - recentRatings.length} avaliações antigas removidas`);
+                Logger.log(`🧹 Limpeza: ${ratings.length - recentRatings.length} avaliações antigas removidas`);
             }
             
         } catch (error) {
-            console.error('❌ Erro ao limpar avaliações antigas:', error);
+            Logger.error('❌ Erro ao limpar avaliações antigas:', error);
         }
     }
 }

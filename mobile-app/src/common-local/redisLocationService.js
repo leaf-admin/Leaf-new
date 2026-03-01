@@ -1,23 +1,25 @@
+import Logger from '../utils/Logger';
 import { Platform } from 'react-native';
+
 
 class RedisLocationService {
     constructor() {
         this.isAvailable = Platform.OS === 'web';
-        this.baseUrl = 'http://192.168.0.39:5001/leaf-app-91dfdce0/us-central1';
+        this.baseUrl = 'https://api.leaf.app.br';
     }
 
     // Inicializar serviço
     async initialize() {
         if (Platform.OS === 'web') {
             try {
-                console.log('🌐 Web detectado - Redis Location Service via API disponível');
+                Logger.log('🌐 Web detectado - Redis Location Service via API disponível');
                 return true;
             } catch (error) {
-                console.error('❌ Erro ao inicializar Redis Location Service:', error);
+                Logger.error('❌ Erro ao inicializar Redis Location Service:', error);
                 return false;
             }
         } else {
-            console.log('📱 Redis não disponível no React Native - usando Firebase');
+            Logger.log('📱 Redis não disponível no React Native - usando Firebase');
             return false;
         }
     }
@@ -45,7 +47,7 @@ class RedisLocationService {
 
             return await response.json();
         } catch (error) {
-            console.error(`❌ Redis Location API Error (${endpoint}):`, error);
+            Logger.error(`❌ Redis Location API Error (${endpoint}):`, error);
             throw error;
         }
     }
@@ -53,7 +55,7 @@ class RedisLocationService {
     // Atualizar localização do usuário
     async updateUserLocation(userId, lat, lng, timestamp = Date.now()) {
         if (!this.isAvailable) {
-            console.log('⚠️ Redis não disponível, pulando atualização de localização');
+            Logger.log('⚠️ Redis não disponível, pulando atualização de localização');
             return null;
         }
 
@@ -65,10 +67,10 @@ class RedisLocationService {
                 timestamp
             });
             
-            console.log('📍 Localização salva via Redis API');
+            Logger.log('📍 Localização salva via Redis API');
             return result;
         } catch (error) {
-            console.error('❌ Erro ao salvar localização via Redis API:', error);
+            Logger.error('❌ Erro ao salvar localização via Redis API:', error);
             return null;
         }
     }
@@ -76,7 +78,7 @@ class RedisLocationService {
     // Obter localização do usuário
     async getUserLocation(userId) {
         if (!this.isAvailable) {
-            console.log('⚠️ Redis não disponível, não é possível obter localização');
+            Logger.log('⚠️ Redis não disponível, não é possível obter localização');
             return null;
         }
 
@@ -84,7 +86,7 @@ class RedisLocationService {
             const result = await this.makeRequest(`/get_user_location/${userId}`, 'GET');
             return result.location || null;
         } catch (error) {
-            console.error('❌ Erro ao obter localização via Redis API:', error);
+            Logger.error('❌ Erro ao obter localização via Redis API:', error);
             return null;
         }
     }
@@ -92,7 +94,7 @@ class RedisLocationService {
     // Buscar usuários próximos
     async findNearbyUsers(lat, lng, radius = 5) {
         if (!this.isAvailable) {
-            console.log('⚠️ Redis não disponível, não é possível buscar usuários próximos');
+            Logger.log('⚠️ Redis não disponível, não é possível buscar usuários próximos');
             return [];
         }
 
@@ -105,7 +107,7 @@ class RedisLocationService {
             
             return result.drivers || [];
         } catch (error) {
-            console.error('❌ Erro ao buscar usuários próximos via Redis API:', error);
+            Logger.error('❌ Erro ao buscar usuários próximos via Redis API:', error);
             return [];
         }
     }

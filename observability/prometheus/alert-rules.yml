@@ -1,0 +1,201 @@
+groups:
+  - name: leaf_infrastructure
+    interval: 30s
+    rules:
+      # CPU Alert
+      - alert: HighCPUUsage
+        expr: rate(process_cpu_user_seconds_total[5m]) + rate(process_cpu_system_seconds_total[5m]) > 0.70
+        for: 5m
+        labels:
+          severity: warning
+          service: leaf-backend
+        annotations:
+          summary: "CPU usage is high"
+          description: "CPU usage is above 70% for more than 5 minutes. Current value: {{ $value }}"
+
+      - alert: CriticalCPUUsage
+        expr: rate(process_cpu_user_seconds_total[5m]) + rate(process_cpu_system_seconds_total[5m]) > 0.85
+        for: 2m
+        labels:
+          severity: critical
+          service: leaf-backend
+        annotations:
+          summary: "CPU usage is critical"
+          description: "CPU usage is above 85% for more than 2 minutes. Current value: {{ $value }}"
+
+      # Memory Alert
+      - alert: HighMemoryUsage
+        expr: (process_resident_memory_bytes / (1024 * 1024 * 1024)) > 2.5
+        for: 5m
+        labels:
+          severity: warning
+          service: leaf-backend
+        annotations:
+          summary: "Memory usage is high"
+          description: "Memory usage is above 2.5GB for more than 5 minutes. Current value: {{ $value }}GB"
+
+      - alert: CriticalMemoryUsage
+        expr: (process_resident_memory_bytes / (1024 * 1024 * 1024)) > 3.0
+        for: 2m
+        labels:
+          severity: critical
+          service: leaf-backend
+        annotations:
+          summary: "Memory usage is critical"
+          description: "Memory usage is above 3.0GB for more than 2 minutes. Current value: {{ $value }}GB"
+
+      # WebSocket Connections Alert
+      - alert: HighWebSocketConnections
+        expr: leaf_websocket_connections_total > 7000
+        for: 5m
+        labels:
+          severity: warning
+          service: leaf-backend
+        annotations:
+          summary: "WebSocket connections are high"
+          description: "WebSocket connections are above 7000 for more than 5 minutes. Current value: {{ $value }}"
+
+      - alert: CriticalWebSocketConnections
+        expr: leaf_websocket_connections_total > 8000
+        for: 2m
+        labels:
+          severity: critical
+          service: leaf-backend
+        annotations:
+          summary: "WebSocket connections are critical"
+          description: "WebSocket connections are above 8000 for more than 2 minutes. Current value: {{ $value }}"
+
+      # Redis Latency Alert
+      - alert: HighRedisLatency
+        expr: histogram_quantile(0.95, rate(leaf_redis_duration_seconds_bucket[5m])) > 0.3
+        for: 5m
+        labels:
+          severity: warning
+          service: redis
+        annotations:
+          summary: "Redis latency is high"
+          description: "Redis P95 latency is above 300ms for more than 5 minutes. Current value: {{ $value }}s"
+
+      - alert: CriticalRedisLatency
+        expr: histogram_quantile(0.95, rate(leaf_redis_duration_seconds_bucket[5m])) > 0.5
+        for: 2m
+        labels:
+          severity: critical
+          service: redis
+        annotations:
+          summary: "Redis latency is critical"
+          description: "Redis P95 latency is above 500ms for more than 2 minutes. Current value: {{ $value }}s"
+
+      # Redis Errors Alert
+      - alert: HighRedisErrorRate
+        expr: rate(leaf_redis_errors_total[5m]) > 10
+        for: 5m
+        labels:
+          severity: warning
+          service: redis
+        annotations:
+          summary: "Redis error rate is high"
+          description: "Redis error rate is above 10 errors/sec for more than 5 minutes. Current value: {{ $value }}"
+
+      # Event Backlog Alert
+      - alert: HighEventBacklog
+        expr: leaf_event_backlog > 1000
+        for: 5m
+        labels:
+          severity: warning
+          service: leaf-backend
+        annotations:
+          summary: "Event backlog is high"
+          description: "Event backlog is above 1000 events for more than 5 minutes. Current value: {{ $value }}"
+
+      - alert: CriticalEventBacklog
+        expr: leaf_event_backlog > 5000
+        for: 2m
+        labels:
+          severity: critical
+          service: leaf-backend
+        annotations:
+          summary: "Event backlog is critical"
+          description: "Event backlog is above 5000 events for more than 2 minutes. Current value: {{ $value }}"
+
+  - name: leaf_business
+    interval: 30s
+    rules:
+      # Command Failure Rate Alert
+      - alert: HighCommandFailureRate
+        expr: rate(leaf_commands_total{status="failed"}[5m]) / rate(leaf_commands_total[5m]) > 0.01
+        for: 5m
+        labels:
+          severity: warning
+          service: leaf-backend
+        annotations:
+          summary: "Command failure rate is high"
+          description: "Command failure rate is above 1% for more than 5 minutes. Current value: {{ $value | humanizePercentage }}"
+
+      - alert: CriticalCommandFailureRate
+        expr: rate(leaf_commands_total{status="failed"}[5m]) / rate(leaf_commands_total[5m]) > 0.05
+        for: 2m
+        labels:
+          severity: critical
+          service: leaf-backend
+        annotations:
+          summary: "Command failure rate is critical"
+          description: "Command failure rate is above 5% for more than 2 minutes. Current value: {{ $value | humanizePercentage }}"
+
+      # Payment Failure Alert
+      - alert: PaymentProcessingFailure
+        expr: rate(leaf_commands_total{command="CompleteTrip",status="failed"}[5m]) > 0.1
+        for: 5m
+        labels:
+          severity: critical
+          service: payment
+        annotations:
+          summary: "Payment processing failures detected"
+          description: "Payment processing failures are above 0.1/sec for more than 5 minutes. Current value: {{ $value }}"
+
+      # Listener Lag Alert
+      - alert: HighListenerLag
+        expr: leaf_listener_lag_seconds > 30
+        for: 5m
+        labels:
+          severity: warning
+          service: leaf-backend
+        annotations:
+          summary: "Listener lag is high"
+          description: "Listener lag is above 30 seconds for more than 5 minutes. Current value: {{ $value }}s"
+
+      - alert: CriticalListenerLag
+        expr: leaf_listener_lag_seconds > 60
+        for: 2m
+        labels:
+          severity: critical
+          service: leaf-backend
+        annotations:
+          summary: "Listener lag is critical"
+          description: "Listener lag is above 60 seconds for more than 2 minutes. Current value: {{ $value }}s"
+
+  - name: leaf_availability
+    interval: 30s
+    rules:
+      # Service Down Alert
+      - alert: ServiceDown
+        expr: up{job="leaf-backend"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          service: leaf-backend
+        annotations:
+          summary: "Service is down"
+          description: "Leaf backend service is down for more than 1 minute"
+
+      # High Error Rate Alert
+      - alert: HighErrorRate
+        expr: rate(leaf_commands_total{status="failed"}[5m]) > 5
+        for: 5m
+        labels:
+          severity: warning
+          service: leaf-backend
+        annotations:
+          summary: "Error rate is high"
+          description: "Error rate is above 5 errors/sec for more than 5 minutes. Current value: {{ $value }}"
+

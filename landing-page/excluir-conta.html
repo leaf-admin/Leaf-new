@@ -1,0 +1,973 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Excluir Conta | Leaf App</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            line-height: 1.6;
+            color: #1a1a1a;
+            background: #f8f9fa;
+        }
+        
+        header {
+            background: #003002;
+            color: white;
+            padding: 2rem 0;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+        }
+        
+        .header-content {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 0 24px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+        
+        .logo {
+            cursor: pointer;
+        }
+        
+        .logo a {
+            display: inline-block;
+            text-decoration: none;
+        }
+        
+        .logo img {
+            height: 43px;
+            width: auto;
+            transition: opacity 0.3s;
+        }
+        
+        .logo:hover img {
+            opacity: 0.8;
+        }
+        
+        .back-link {
+            color: white;
+            text-decoration: none;
+            font-weight: 600;
+            padding: 0.5rem 1rem;
+            border-radius: 8px;
+            transition: background 0.3s;
+        }
+        
+        .back-link:hover {
+            background: rgba(255,255,255,0.1);
+        }
+        
+        .container {
+            max-width: 700px;
+            margin: 0 auto;
+            padding: 3rem 24px;
+        }
+        
+        .card {
+            background: white;
+            border-radius: 16px;
+            box-shadow: 0 2px 12px rgba(0,0,0,0.08);
+            padding: 3rem;
+            margin-bottom: 2rem;
+        }
+        
+        h1 {
+            font-size: 2.5rem;
+            font-weight: 700;
+            color: #003002;
+            margin-bottom: 1rem;
+        }
+        
+        .warning-box {
+            background: #fff3cd;
+            border: 2px solid #ffc107;
+            border-radius: 12px;
+            padding: 1.5rem;
+            margin-bottom: 2rem;
+        }
+        
+        .warning-box h3 {
+            color: #856404;
+            font-size: 1.2rem;
+            margin-bottom: 0.5rem;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+        
+        .warning-box p {
+            color: #856404;
+            margin: 0;
+        }
+        
+        .form-group {
+            margin-bottom: 1.5rem;
+        }
+        
+        label {
+            display: block;
+            font-weight: 600;
+            color: #1a1a1a;
+            margin-bottom: 0.5rem;
+            font-size: 1rem;
+        }
+        
+        .required {
+            color: #dc2626;
+        }
+        
+        .radio-group {
+            display: flex;
+            flex-direction: column;
+            gap: 0.75rem;
+            margin-top: 0.5rem;
+        }
+        
+        .radio-option {
+            display: flex;
+            align-items: center;
+            padding: 1rem;
+            border: 2px solid #e0e0e0;
+            border-radius: 12px;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+        
+        .radio-option:hover {
+            border-color: #003002;
+            background: #f8f9fa;
+        }
+        
+        .radio-option input[type="radio"] {
+            width: 20px;
+            height: 20px;
+            margin-right: 1rem;
+            cursor: pointer;
+        }
+        
+        .radio-option input[type="radio"]:checked + label {
+            color: #003002;
+            font-weight: 600;
+        }
+        
+        .radio-option label {
+            margin: 0;
+            cursor: pointer;
+            flex: 1;
+        }
+        
+        input[type="text"],
+        input[type="tel"],
+        input[type="password"],
+        textarea {
+            width: 100%;
+            padding: 1rem 1.25rem;
+            border: 2px solid #e0e0e0;
+            border-radius: 12px;
+            font-size: 1rem;
+            outline: none;
+            transition: all 0.3s;
+            font-family: inherit;
+        }
+        
+        input[type="text"]:focus,
+        input[type="tel"]:focus,
+        input[type="password"]:focus,
+        textarea:focus {
+            border-color: #003002;
+            border-width: 2px;
+        }
+        
+        textarea {
+            resize: vertical;
+            min-height: 120px;
+        }
+        
+        .char-count {
+            font-size: 0.85rem;
+            color: #666;
+            margin-top: 0.25rem;
+            text-align: right;
+        }
+        
+        .btn {
+            padding: 1rem 2rem;
+            border-radius: 26px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s;
+            border: none;
+            font-size: 1rem;
+            width: 100%;
+            margin-top: 1rem;
+        }
+        
+        .btn-danger {
+            background: #dc2626;
+            color: white;
+        }
+        
+        .btn-danger:hover {
+            background: #b91c1c;
+            transform: translateY(-2px);
+            box-shadow: 0 8px 24px rgba(220, 38, 38, 0.3);
+        }
+        
+        .btn-danger:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+            transform: none;
+        }
+        
+        .btn-secondary {
+            background: transparent;
+            color: #1a1a1a;
+            border: 2px solid #1a1a1a;
+            margin-top: 1rem;
+        }
+        
+        .btn-secondary:hover {
+            background: #1a1a1a;
+            color: white;
+        }
+        
+        .confirmation-box {
+            background: #fee2e2;
+            border: 2px solid #dc2626;
+            border-radius: 12px;
+            padding: 1.5rem;
+            margin-bottom: 2rem;
+            display: none;
+        }
+        
+        .confirmation-box.show {
+            display: block;
+        }
+        
+        .confirmation-box h3 {
+            color: #991b1b;
+            font-size: 1.2rem;
+            margin-bottom: 0.5rem;
+        }
+        
+        .confirmation-box p {
+            color: #991b1b;
+            margin: 0.5rem 0;
+        }
+        
+        .success-message {
+            background: #d1fae5;
+            border: 2px solid #10b981;
+            border-radius: 12px;
+            padding: 1.5rem;
+            margin-bottom: 2rem;
+            display: none;
+        }
+        
+        .success-message.show {
+            display: block;
+        }
+        
+        .success-message h3 {
+            color: #065f46;
+            font-size: 1.2rem;
+            margin-bottom: 0.5rem;
+        }
+        
+        .error-message {
+            background: #fee2e2;
+            border: 2px solid #dc2626;
+            border-radius: 12px;
+            padding: 1rem;
+            margin-bottom: 1rem;
+            color: #991b1b;
+            display: none;
+        }
+        
+        .error-message.show {
+            display: block;
+        }
+        
+        .login-required {
+            background: white;
+            border-radius: 16px;
+            box-shadow: 0 2px 12px rgba(0,0,0,0.08);
+            padding: 3rem;
+            text-align: center;
+        }
+        
+        .login-required h2 {
+            color: #003002;
+            font-size: 2rem;
+            margin-bottom: 1rem;
+        }
+        
+        .login-required p {
+            color: #666;
+            margin-bottom: 2rem;
+            font-size: 1.1rem;
+        }
+        
+        .login-btn {
+            display: inline-block;
+            background: #003002;
+            color: white;
+            padding: 1rem 2rem;
+            border-radius: 26px;
+            text-decoration: none;
+            font-weight: 600;
+            font-size: 1rem;
+            transition: all 0.3s;
+        }
+        
+        .login-btn:hover {
+            background: #004003;
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(0,48,2,0.3);
+        }
+        
+        @media (max-width: 768px) {
+            h1 {
+                font-size: 2rem;
+            }
+            
+            .card {
+                padding: 2rem 1.5rem;
+            }
+            
+            .radio-option {
+                padding: 0.75rem;
+            }
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <div class="header-content">
+            <div class="logo">
+                <a href="index.html">
+                    <img src="assets/logo-leaf.jpg" alt="LEAF">
+                </a>
+            </div>
+            <a href="index.html" class="back-link">← Voltar</a>
+        </div>
+    </header>
+
+    <div class="container">
+        <!-- Formulário de exclusão -->
+        <div id="delete-form-container" class="card">
+            <h1>Excluir Minha Conta</h1>
+            
+            <div class="warning-box">
+                <h3>⚠️ Atenção</h3>
+                <p>Esta ação é <strong>irreversível</strong>. Ao excluir sua conta, todos os seus dados serão permanentemente removidos, incluindo histórico de viagens, dados pessoais e informações de pagamento. Esta ação não pode ser desfeita.</p>
+            </div>
+
+            <form id="delete-account-form">
+                <!-- Motivo da exclusão -->
+                <div class="form-group">
+                    <label for="reason">Motivo da exclusão <span class="required">*</span></label>
+                    <div class="radio-group">
+                        <div class="radio-option">
+                            <input type="radio" id="reason1" name="reason" value="nao-uso-mais" required>
+                            <label for="reason1">Não uso mais o aplicativo</label>
+                        </div>
+                        <div class="radio-option">
+                            <input type="radio" id="reason2" name="reason" value="problemas-tecnicos" required>
+                            <label for="reason2">Problemas técnicos</label>
+                        </div>
+                        <div class="radio-option">
+                            <input type="radio" id="reason3" name="reason" value="preco-taxas" required>
+                            <label for="reason3">Preço/Taxas</label>
+                        </div>
+                        <div class="radio-option">
+                            <input type="radio" id="reason4" name="reason" value="atendimento" required>
+                            <label for="reason4">Atendimento ao cliente</label>
+                        </div>
+                        <div class="radio-option">
+                            <input type="radio" id="reason5" name="reason" value="privacidade-seguranca" required>
+                            <label for="reason5">Privacidade/Segurança</label>
+                        </div>
+                        <div class="radio-option">
+                            <input type="radio" id="reason6" name="reason" value="outro" required>
+                            <label for="reason6">Outro motivo</label>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Informações adicionais -->
+                <div class="form-group">
+                    <label for="additional-info">Informações adicionais (opcional)</label>
+                    <textarea 
+                        id="additional-info" 
+                        name="additionalInfo" 
+                        placeholder="Conte-nos mais sobre o motivo da exclusão. Sua opinião é importante para melhorarmos nossos serviços."
+                        maxlength="500"
+                    ></textarea>
+                    <div class="char-count"><span id="char-count">0</span>/500 caracteres</div>
+                </div>
+
+                <!-- Confirmação final -->
+                <div class="form-group" style="margin-top: 2.5rem; padding-top: 2rem; border-top: 2px solid #e0e0e0;">
+                    <div style="margin-bottom: 1.5rem;">
+                        <label style="display: flex; align-items: center; gap: 0.75rem; cursor: pointer; font-weight: 600; font-size: 1.1rem; color: #1a1a1a;">
+                            <input 
+                                type="checkbox" 
+                                id="confirm-deletion" 
+                                name="confirmDeletion"
+                                required
+                                style="width: 24px; height: 24px; cursor: pointer;"
+                            />
+                            <span>Confirmo que desejo excluir minha conta</span>
+                        </label>
+                        <p style="color: #666; font-size: 0.9rem; margin-top: 0.5rem; margin-left: 2rem;">Esta ação é irreversível e todos os seus dados serão permanentemente excluídos.</p>
+                    </div>
+
+                    <div style="background: #f8f9fa; padding: 1.5rem; border-radius: 12px; border-left: 4px solid #003002;">
+                        <h3 style="font-size: 1.2rem; font-weight: 600; color: #003002; margin-bottom: 1rem;">Confirmação de Identidade</h3>
+                        <p style="color: #666; font-size: 0.95rem; margin-bottom: 1.5rem;">Para confirmar a exclusão, informe seus dados de acesso:</p>
+                        
+                        <div class="form-group" style="margin-bottom: 1rem;">
+                            <label for="user-email">Email ou Telefone <span class="required">*</span></label>
+                            <input 
+                                type="text" 
+                                id="user-email" 
+                                name="userEmail" 
+                                placeholder="seu@email.com ou (11) 99999-9999"
+                                required
+                            />
+                            <small style="color: #666; display: block; margin-top: 0.25rem;">Digite o email ou telefone cadastrado na sua conta</small>
+                        </div>
+
+                        <div class="form-group" style="margin-bottom: 0;">
+                            <label for="user-password">Senha <span class="required">*</span></label>
+                            <input 
+                                type="password" 
+                                id="user-password" 
+                                name="userPassword" 
+                                placeholder="Digite sua senha"
+                                required
+                            />
+                            <small style="color: #666; display: block; margin-top: 0.25rem;">Digite a senha do seu aplicativo Leaf</small>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Mensagem de erro -->
+                <div id="error-message" class="error-message"></div>
+
+                <!-- Confirmação final -->
+                <div id="confirmation-box" class="confirmation-box">
+                    <h3>⚠️ Confirmação Final</h3>
+                    <p><strong>Você tem certeza que deseja excluir sua conta?</strong></p>
+                    <p>Esta ação é permanente e não pode ser desfeita. Todos os seus dados serão excluídos permanentemente.</p>
+                    <p><strong>Telefone confirmado:</strong> <span id="confirmed-phone"></span></p>
+                    <p><strong>Motivo:</strong> <span id="confirmed-reason"></span></p>
+                </div>
+
+                <!-- Botões -->
+                <button type="submit" id="delete-btn" class="btn btn-danger" disabled>
+                    Excluir Conta Permanentemente
+                </button>
+                
+                <a href="index.html" class="btn btn-secondary" style="text-decoration: none; text-align: center; display: block;">
+                    Cancelar
+                </a>
+            </form>
+
+            <!-- Mensagem de sucesso -->
+            <div id="success-message" class="success-message">
+                <h3>✅ Conta Excluída com Sucesso</h3>
+                <p>Sua conta foi excluída permanentemente. Todos os seus dados foram removidos do nosso sistema.</p>
+                <p>Obrigado por ter usado o Leaf App.</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Firebase SDK - Carregamento assíncrono para evitar bloqueios -->
+    <script>
+        // Carregar Firebase SDK de forma assíncrona para evitar bloqueios CSP
+        (function() {
+            const scripts = [
+                'https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js',
+                'https://www.gstatic.com/firebasejs/10.7.1/firebase-auth-compat.js'
+            ];
+            
+            function loadScript(src) {
+                return new Promise((resolve, reject) => {
+                    const script = document.createElement('script');
+                    script.src = src;
+                    script.async = true;
+                    script.defer = true;
+                    script.crossOrigin = 'anonymous';
+                    script.onload = resolve;
+                    script.onerror = reject;
+                    document.head.appendChild(script);
+                });
+            }
+            
+            // Carregar scripts em sequência
+            loadScript(scripts[0])
+                .then(() => loadScript(scripts[1]))
+                .then(() => {
+                    console.log('✅ Firebase SDK carregado');
+                })
+                .catch((error) => {
+                    console.error('❌ Erro ao carregar Firebase SDK:', error);
+                    // Continuar mesmo se Firebase não carregar (para permitir visualização da página)
+                });
+        })();
+    </script>
+    
+    <script>
+        // ============================================
+        // CONFIGURAÇÃO DO FIREBASE
+        // ============================================
+        
+        // Configuração do Firebase
+        const firebaseConfig = {
+            apiKey: "AIzaSyChYseG1IcmffYHHVYT7MqtLlzfdWKE_fc",
+            authDomain: "leaf-reactnative.firebaseapp.com",
+            projectId: "leaf-reactnative",
+            storageBucket: "leaf-reactnative.firebasestorage.app",
+            messagingSenderId: "106504629884",
+            appId: "1:106504629884:web:ada50a78fcf7bf3ea1a3f9",
+            databaseURL: "https://leaf-reactnative-default-rtdb.firebaseio.com",
+            measurementId: "G-22368DBCY9"
+        };
+
+        // Inicializar Firebase (aguardar carregamento)
+        let auth = null;
+        let firebaseReady = false;
+        
+        // Aguardar Firebase SDK carregar
+        function waitForFirebase() {
+            return new Promise((resolve, reject) => {
+                if (typeof firebase !== 'undefined' && firebase.app) {
+                    try {
+                        firebase.initializeApp(firebaseConfig);
+                        auth = firebase.auth();
+                        firebaseReady = true;
+                        resolve();
+                    } catch (error) {
+                        // Firebase já inicializado ou erro
+                        if (firebase.apps && firebase.apps.length > 0) {
+                            auth = firebase.auth();
+                            firebaseReady = true;
+                            resolve();
+                        } else {
+                            console.warn('Firebase já inicializado ou erro:', error);
+                            resolve(); // Continuar mesmo sem Firebase (página ainda funciona)
+                        }
+                    }
+                } else {
+                    // Tentar novamente após 100ms
+                    setTimeout(() => {
+                        waitForFirebase().then(resolve).catch(reject);
+                    }, 100);
+                    
+                    // Timeout após 5 segundos
+                    setTimeout(() => {
+                        console.warn('Firebase SDK não carregou a tempo, continuando sem autenticação automática');
+                        resolve(); // Continuar sem Firebase
+                    }, 5000);
+                }
+            });
+        }
+
+        // ============================================
+        // VERIFICAÇÃO DE AUTENTICAÇÃO
+        // ============================================
+        
+        let authToken = null;
+        let isAuthenticated = false;
+        
+        /**
+         * Verificar se usuário está autenticado e obter token
+         */
+        async function checkAuthentication() {
+            try {
+                // Verificar se há token armazenado
+                const urlParams = new URLSearchParams(window.location.search);
+                const tokenParam = urlParams.get('token');
+                const storedToken = localStorage.getItem('leaf_auth_token') || 
+                                   sessionStorage.getItem('leaf_auth_token');
+                
+                authToken = tokenParam || storedToken;
+                
+                // Verificar se há usuário logado no Firebase
+                const currentUser = auth.currentUser;
+                
+                if (currentUser) {
+                    // Obter token do Firebase
+                    try {
+                        authToken = await currentUser.getIdToken(true);
+                        isAuthenticated = true;
+                        localStorage.setItem('leaf_auth_token', authToken);
+                    } catch (tokenError) {
+                        console.error('Erro ao obter token:', tokenError);
+                    }
+                } else if (authToken) {
+                    // Validar token com backend
+                    try {
+                        const response = await fetch('/api/auth/verify', {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json',
+                                'Authorization': `Bearer ${authToken}`
+                            }
+                        });
+                        
+                        if (response.ok) {
+                            isAuthenticated = true;
+                        } else {
+                            // Token inválido, limpar
+                            authToken = null;
+                            localStorage.removeItem('leaf_auth_token');
+                            sessionStorage.removeItem('leaf_auth_token');
+                        }
+                    } catch (error) {
+                        console.error('Erro ao validar token:', error);
+                        authToken = null;
+                    }
+                }
+                
+                // Verificar estado de autenticação do Firebase (apenas se Firebase estiver carregado)
+                if (auth) {
+                    auth.onAuthStateChanged((user) => {
+                        if (user) {
+                            user.getIdToken().then((token) => {
+                                authToken = token;
+                                isAuthenticated = true;
+                                localStorage.setItem('leaf_auth_token', token);
+                            }).catch(() => {
+                                // Ignorar erro de token se Firebase não estiver totalmente carregado
+                            });
+                        }
+                    });
+                }
+                
+                // Mostrar interface baseado na autenticação
+                if (isAuthenticated && authToken) {
+                    showDeleteForm();
+                } else {
+                    showLoginForm();
+                }
+                
+            } catch (error) {
+                console.error('Erro ao verificar autenticação:', error);
+                showLoginForm();
+            }
+        }
+
+        // Verificar autenticação ao carregar página (apenas para token existente)
+        document.addEventListener('DOMContentLoaded', function() {
+            // SEMPRE mostrar o formulário imediatamente (sem bloqueio de acesso)
+            const deleteForm = document.getElementById('delete-form-container');
+            if (deleteForm) {
+                deleteForm.style.display = 'block';
+            }
+            
+            // Log para debug
+            console.log('✅ Página carregada. Formulário visível.');
+            
+            // Tentar carregar Firebase em background (não bloqueia)
+            waitForFirebase().then(() => {
+                // Verificar se há token existente (opcional)
+                const storedToken = localStorage.getItem('leaf_auth_token');
+                if (storedToken) {
+                    checkAuthentication().catch(() => {
+                        // Ignorar erros de autenticação
+                    });
+                }
+            }).catch(() => {
+                // Ignorar erros de Firebase - página funciona sem ele
+            });
+        });
+        
+        // ============================================
+        // FUNCIONALIDADES DO FORMULÁRIO
+        // ============================================
+        
+        // Contador de caracteres
+        const textarea = document.getElementById('additional-info');
+        const charCount = document.getElementById('char-count');
+        
+        if (textarea && charCount) {
+            textarea.addEventListener('input', function() {
+                charCount.textContent = this.value.length;
+            });
+        }
+
+        // Mapeamento de motivos
+        const reasonLabels = {
+            'nao-uso-mais': 'Não uso mais o aplicativo',
+            'problemas-tecnicos': 'Problemas técnicos',
+            'preco-taxas': 'Preço/Taxas',
+            'atendimento': 'Atendimento ao cliente',
+            'privacidade-seguranca': 'Privacidade/Segurança',
+            'outro': 'Outro motivo'
+        };
+
+        // Formatação de telefone (se houver campo de telefone)
+        const userEmailInput = document.getElementById('user-email');
+        if (userEmailInput) {
+            userEmailInput.addEventListener('input', function(e) {
+                // Se o usuário digitar apenas números, formatar como telefone
+                const value = e.target.value;
+                if (/^\d+$/.test(value.replace(/\D/g, ''))) {
+                    let phoneValue = value.replace(/\D/g, '');
+                    if (phoneValue.length <= 11) {
+                        if (phoneValue.length <= 10) {
+                            phoneValue = phoneValue.replace(/(\d{2})(\d{4})(\d{0,4})/, '($1) $2-$3');
+                        } else {
+                            phoneValue = phoneValue.replace(/(\d{2})(\d{5})(\d{0,4})/, '($1) $2-$3');
+                        }
+                        e.target.value = phoneValue;
+                    }
+                }
+            });
+        }
+
+        // Validação e confirmação
+        const form = document.getElementById('delete-account-form');
+        const confirmationBox = document.getElementById('confirmation-box');
+        const deleteBtn = document.getElementById('delete-btn');
+        const errorMessage = document.getElementById('error-message');
+        const successMessage = document.getElementById('success-message');
+        
+        let isConfirming = false;
+
+        form.addEventListener('submit', async function(e) {
+            e.preventDefault();
+            
+            const formData = new FormData(form);
+            const reason = formData.get('reason');
+            const additionalInfo = formData.get('additionalInfo');
+            const confirmDeletion = document.getElementById('confirm-deletion').checked;
+            const userEmailOrPhone = formData.get('userEmail').trim();
+            const userPassword = formData.get('userPassword');
+
+            // Validações
+            if (!reason) {
+                showError('Por favor, selecione um motivo para a exclusão.');
+                return;
+            }
+
+            if (!confirmDeletion) {
+                showError('Você precisa confirmar que deseja excluir sua conta marcando a opção de confirmação.');
+                return;
+            }
+
+            if (!userEmailOrPhone) {
+                showError('Por favor, digite seu email ou telefone.');
+                return;
+            }
+
+            if (!userPassword || userPassword.length < 6) {
+                showError('Por favor, digite sua senha corretamente.');
+                return;
+            }
+
+            // Primeiro, fazer autenticação com Firebase
+            deleteBtn.disabled = true;
+            deleteBtn.textContent = 'Autenticando...';
+            errorMessage.classList.remove('show');
+
+            try {
+                // Aguardar Firebase estar pronto
+                if (!firebaseReady) {
+                    await waitForFirebase();
+                }
+                
+                if (!auth) {
+                    throw new Error('Serviço de autenticação não disponível. Por favor, recarregue a página.');
+                }
+                
+                // Detectar se é email ou telefone
+                const isEmail = userEmailOrPhone.includes('@');
+                let userCredential;
+                
+                if (isEmail) {
+                    // Login com email e senha
+                    userCredential = await auth.signInWithEmailAndPassword(userEmailOrPhone, userPassword);
+                } else {
+                    // Login com telefone - buscar email no backend ou tentar outro método
+                    // Por enquanto, vamos mostrar erro se for telefone
+                    throw new Error('Por favor, use seu email para autenticação. Login com telefone será suportado em breve.');
+                }
+                
+                // Obter token após login bem-sucedido
+                authToken = await userCredential.user.getIdToken(true);
+                isAuthenticated = true;
+                localStorage.setItem('leaf_auth_token', authToken);
+                
+                // Buscar telefone do usuário autenticado
+                const userDoc = await fetch(`/api/user/${userCredential.user.uid}`, {
+                    headers: {
+                        'Authorization': `Bearer ${authToken}`
+                    }
+                }).then(res => res.ok ? res.json() : null);
+                
+                const phone = userDoc?.phone || userDoc?.phoneNumber || '';
+                
+                // Se não conseguiu buscar telefone, tentar extrair do email fornecido
+                // ou pedir ao usuário (mas já estamos autenticados então podemos prosseguir)
+                if (!phone) {
+                    // Podemos tentar buscar de outra forma ou usar o email como fallback
+                    console.warn('Telefone não encontrado, usando dados do Firebase');
+                }
+
+                // Continuar com o fluxo de exclusão
+                deleteBtn.textContent = 'Processando exclusão...';
+
+            // Primeira submissão - mostrar confirmação
+            if (!isConfirming) {
+                isConfirming = true;
+                
+                // Preencher dados de confirmação
+                document.getElementById('confirmed-phone').textContent = phone || userEmailOrPhone;
+                document.getElementById('confirmed-reason').textContent = reasonLabels[reason];
+                
+                // Mostrar box de confirmação
+                confirmationBox.classList.add('show');
+                confirmationBox.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+                
+                // Habilitar botão de exclusão
+                deleteBtn.disabled = false;
+                deleteBtn.textContent = 'Confirmar Exclusão Permanentemente';
+                
+                // Esconder mensagem de erro
+                errorMessage.classList.remove('show');
+                
+                return;
+            }
+
+            // Segunda submissão - excluir conta
+            deleteBtn.textContent = 'Excluindo conta...';
+            errorMessage.classList.remove('show');
+
+            // Verificar autenticação antes de enviar
+            if (!isAuthenticated || !authToken) {
+                showError('Você precisa estar autenticado para excluir sua conta. Por favor, faça login novamente.');
+                // Redirecionar para login ou recarregar verificação
+                setTimeout(() => {
+                    checkAuthentication();
+                }, 2000);
+                return;
+            }
+
+            try {
+                // Enviar dados para o backend COM TOKEN DE AUTENTICAÇÃO
+                const response = await fetch('/api/account/delete', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${authToken}` // Token JWT ou sessão
+                    },
+                    credentials: 'include', // Incluir cookies se usar sessão
+                    body: JSON.stringify({
+                        reason: reason,
+                        additionalInfo: additionalInfo,
+                        phone: phone || userEmailOrPhone,
+                        password: userPassword
+                    })
+                });
+
+                const result = await response.json();
+
+                if (response.status === 401 || response.status === 403) {
+                    // Não autenticado ou sem permissão
+                    showError('Sua sessão expirou ou você não tem permissão. Por favor, faça login novamente.');
+                    isAuthenticated = false;
+                    authToken = null;
+                    localStorage.removeItem('leaf_auth_token');
+                    sessionStorage.removeItem('leaf_auth_token');
+                    setTimeout(() => {
+                        checkAuthentication();
+                    }, 2000);
+                } else if (response.ok && result.success) {
+                    // Sucesso - mostrar mensagem
+                    form.style.display = 'none';
+                    confirmationBox.classList.remove('show');
+                    successMessage.classList.add('show');
+                    successMessage.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                    
+                    // Limpar autenticação após exclusão
+                    authToken = null;
+                    localStorage.removeItem('leaf_auth_token');
+                    sessionStorage.removeItem('leaf_auth_token');
+                } else {
+                    // Erro do servidor
+                    showError(result.message || 'Erro ao excluir conta. Verifique suas credenciais e tente novamente.');
+                    deleteBtn.disabled = false;
+                    deleteBtn.textContent = 'Confirmar Exclusão Permanentemente';
+                }
+            } catch (error) {
+                console.error('Erro ao excluir conta:', error);
+                
+                let errorMsg = 'Erro ao processar exclusão. ';
+                
+                if (error.code) {
+                    switch (error.code) {
+                        case 'auth/user-not-found':
+                            errorMsg = 'Email não encontrado. Verifique suas credenciais.';
+                            break;
+                        case 'auth/wrong-password':
+                            errorMsg = 'Senha incorreta. Verifique sua senha e tente novamente.';
+                            break;
+                        case 'auth/invalid-email':
+                            errorMsg = 'Email inválido. Verifique o email digitado.';
+                            break;
+                        case 'auth/user-disabled':
+                            errorMsg = 'Esta conta foi desabilitada. Entre em contato com o suporte.';
+                            break;
+                        case 'auth/too-many-requests':
+                            errorMsg = 'Muitas tentativas. Tente novamente mais tarde.';
+                            break;
+                        default:
+                            errorMsg += error.message || 'Verifique sua conexão e tente novamente.';
+                    }
+                } else {
+                    errorMsg += error.message || 'Verifique sua conexão e tente novamente.';
+                }
+                
+                showError(errorMsg);
+                deleteBtn.disabled = false;
+                deleteBtn.textContent = 'Excluir Conta Permanentemente';
+                isConfirming = false;
+                confirmationBox.classList.remove('show');
+            }
+        });
+
+        function showError(message) {
+            errorMessage.textContent = message;
+            errorMessage.classList.add('show');
+            errorMessage.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        }
+
+        // Resetar confirmação ao mudar campos
+        const inputs = form.querySelectorAll('input, textarea');
+        inputs.forEach(input => {
+            input.addEventListener('change', function() {
+                if (isConfirming) {
+                    isConfirming = false;
+                    confirmationBox.classList.remove('show');
+                    deleteBtn.disabled = true;
+                    deleteBtn.textContent = 'Excluir Conta Permanentemente';
+                }
+            });
+        });
+    </script>
+</body>
+</html>
+

@@ -1,4 +1,6 @@
+import Logger from './Logger';
 import { Platform } from 'react-native';
+
 
 // Função para obter o IP da máquina local
 export const getLocalIP = async () => {
@@ -22,7 +24,7 @@ export const getLocalIP = async () => {
     // Fallback para produção ou quando não conseguimos detectar
     return '192.168.1.100'; // IP padrão - ALTERE PARA SEU IP
   } catch (error) {
-    console.error('Erro ao obter IP local:', error);
+    Logger.error('Erro ao obter IP local:', error);
     return '192.168.1.100'; // IP padrão - ALTERE PARA SEU IP
   }
 };
@@ -47,7 +49,7 @@ export const testServerConnection = async (url, timeout = 5000) => {
     clearTimeout(timeoutId);
     return response.ok;
   } catch (error) {
-    console.error('Erro ao testar conexão:', error);
+    Logger.error('Erro ao testar conexão:', error);
     return false;
   }
 };
@@ -75,16 +77,16 @@ export const discoverLocalIP = async (port = 3001) => {
   
   for (const ip of commonIPs) {
     const url = `http://${ip}:${port}`;
-    console.log(`Testando conexão com: ${url}`);
+    Logger.log(`Testando conexão com: ${url}`);
     
     const isConnected = await testServerConnection(url, 2000);
     if (isConnected) {
-      console.log(`✅ IP descoberto: ${ip}`);
+      Logger.log(`✅ IP descoberto: ${ip}`);
       return ip;
     }
   }
   
-  console.log('❌ Nenhum IP válido encontrado');
+  Logger.log('❌ Nenhum IP válido encontrado');
   return null;
 };
 

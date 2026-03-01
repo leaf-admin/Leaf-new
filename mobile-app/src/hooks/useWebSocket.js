@@ -1,6 +1,6 @@
+import Logger from '../utils/Logger';
 import { useState, useEffect, useCallback, useRef } from 'react';
-import webSocketService from '../services/WebSocketService';
-
+import webSocketManager from '../services/WebSocketManager';
 const useWebSocket = (userId = null) => {
   const [connectionStatus, setConnectionStatus] = useState({
     isConnected: false,
@@ -22,22 +22,39 @@ const useWebSocket = (userId = null) => {
   // Conectar ao WebSocket
   const connect = useCallback(async (user = userId) => {
     if (connectionStatus.isConnecting || connectionStatus.isConnected) {
-      console.log('WebSocket já está conectando ou conectado');
+      Logger.log('WebSocket já está conectando ou conectado');
       return;
     }
 
     setConnectionStatus(prev => ({ ...prev, isConnecting: true, error: null }));
 
     try {
-      await webSocketService.connect(user);
-      setConnectionStatus(prev => ({ 
-        ...prev, 
-        isConnecting: false, 
-        isConnected: true,
-        error: null 
-      }));
+      await webSocketManager.connect();
+      // Wait for socket to be ready and available
+      const maxRetries = 10;
+      let retries = 0;
+      
+      while (!webSocketManager.getSocket() && retries < maxRetries) {
+        await new Promise(resolve => setTimeout(resolve, 500));
+        retries++;
+      }
+      
+      if (webSocketManager.getSocket()) {
+          setConnectionStatus(prev => ({ 
+            ...prev, 
+            isConnecting: false, 
+            isConnected: true,
+            error: null 
+          }));
+          
+          if (user) {
+              webSocketManager.authenticate(user);
+          }
+      } else {
+          throw new Error("Timeout ao obter socket.");
+      }
     } catch (error) {
-      console.error('Erro ao conectar WebSocket:', error);
+      Logger.error('Erro ao conectar WebSocket:', error);
       setConnectionStatus(prev => ({ 
         ...prev, 
         isConnecting: false, 
@@ -48,7 +65,7 @@ const useWebSocket = (userId = null) => {
 
   // Desconectar do WebSocket
   const disconnect = useCallback(() => {
-    webSocketService.disconnect();
+    webSocketManager.disconnect();
     setConnectionStatus({
       isConnected: false,
       isAuthenticated: false,
@@ -80,7 +97,7 @@ const useWebSocket = (userId = null) => {
     }
 
     reconnectTimeoutRef.current = setTimeout(() => {
-      console.log('🔄 Tentando reconectar WebSocket...');
+      Logger.log('🔄 Tentando reconectar WebSocket...');
       connect();
     }, 3000); // 3 segundos
   }, [connect]);
@@ -88,11 +105,11 @@ const useWebSocket = (userId = null) => {
   // Atualizar localização
   const updateLocation = useCallback((latitude, longitude, platform = 'mobile') => {
     if (!connectionStatus.isConnected || !connectionStatus.isAuthenticated) {
-      console.error('WebSocket não está pronto para enviar localização');
+      Logger.error('WebSocket não está pronto para enviar localização');
       return false;
     }
 
-    const success = webSocketService.updateLocation(latitude, longitude, platform);
+    const success = webSocketManager.updateDriverLocation(user, latitude, longitude);
     
     if (success) {
       setData(prev => ({
@@ -110,7 +127,7 @@ const useWebSocket = (userId = null) => {
   // Buscar motoristas próximos
   const findNearbyDrivers = useCallback((latitude, longitude, radius = 5000, limit = 10) => {
     if (!connectionStatus.isConnected) {
-      console.error('WebSocket não está conectado');
+      Logger.error('WebSocket não está conectado');
       return false;
     }
 
@@ -120,7 +137,7 @@ const useWebSocket = (userId = null) => {
   // Atualizar status do motorista
   const updateDriverStatus = useCallback((status, isOnline = true) => {
     if (!connectionStatus.isConnected || !connectionStatus.isAuthenticated) {
-      console.error('WebSocket não está pronto para atualizar status');
+      Logger.error('WebSocket não está pronto para atualizar status');
       return false;
     }
 
@@ -130,21 +147,21 @@ const useWebSocket = (userId = null) => {
   // Obter estatísticas
   const getStats = useCallback(() => {
     if (!connectionStatus.isConnected) {
-      console.error('WebSocket não está conectado');
+      Logger.error('WebSocket não está conectado');
       return false;
     }
 
-    return webSocketService.getStats();
+    return webSocketManager.emit('getStats');
   }, [connectionStatus.isConnected]);
 
   // Ping
   const ping = useCallback((data = {}) => {
     if (!connectionStatus.isConnected) {
-      console.error('WebSocket não está conectado');
+      Logger.error('WebSocket não está conectado');
       return false;
     }
 
-    return webSocketService.ping(data);
+    return webSocketManager.emit('ping', data);
   }, [connectionStatus.isConnected]);
 
   // Iniciar atualização automática de localização
@@ -157,7 +174,7 @@ const useWebSocket = (userId = null) => {
       updateLocation(latitude, longitude);
     }, intervalMs);
 
-    console.log(`📍 Iniciando atualizações de localização a cada ${intervalMs}ms`);
+    Logger.log(`📍 Iniciando atualizações de localização a cada ${intervalMs}ms`);
   }, [updateLocation]);
 
   // Parar atualização automática de localização
@@ -165,14 +182,14 @@ const useWebSocket = (userId = null) => {
     if (locationUpdateIntervalRef.current) {
       clearInterval(locationUpdateIntervalRef.current);
       locationUpdateIntervalRef.current = null;
-      console.log('📍 Parando atualizações de localização');
+      Logger.log('📍 Parando atualizações de localização');
     }
   }, []);
 
   // Configurar listeners de eventos
   useEffect(() => {
     // Evento de conexão
-    webSocketService.onConnect(() => {
+    webSocketManager.on('connect', () => {
       setConnectionStatus(prev => ({ 
         ...prev, 
         isConnected: true, 
@@ -182,7 +199,7 @@ const useWebSocket = (userId = null) => {
     });
 
     // Evento de desconexão
-    webSocketService.onDisconnect((reason) => {
+    webSocketManager.on('disconnect', (reason) => {
       setConnectionStatus(prev => ({ 
         ...prev, 
         isConnected: false, 
@@ -196,7 +213,7 @@ const useWebSocket = (userId = null) => {
     });
 
     // Evento de autenticação
-    webSocketService.onAuthenticated((authData) => {
+    webSocketManager.on('authenticated', (authData) => {
       setConnectionStatus(prev => ({ 
         ...prev, 
         isAuthenticated: true 
@@ -204,7 +221,7 @@ const useWebSocket = (userId = null) => {
     });
 
     // Evento de motoristas próximos
-    webSocketService.onNearbyDrivers((driversData) => {
+    webSocketManager.on('nearbyDrivers', (driversData) => {
       setData(prev => ({
         ...prev,
         nearbyDrivers: driversData.drivers || []
@@ -212,7 +229,7 @@ const useWebSocket = (userId = null) => {
     });
 
     // Evento de atualização de localização
-    webSocketService.onLocationUpdated((locationData) => {
+    webSocketManager.on('locationUpdated', (locationData) => {
       setData(prev => ({
         ...prev,
         locationUpdates: [
@@ -223,7 +240,7 @@ const useWebSocket = (userId = null) => {
     });
 
     // Evento de atualização de status do motorista
-    webSocketService.onDriverStatusUpdated((statusData) => {
+    webSocketManager.on('driverStatusUpdated', (statusData) => {
       setData(prev => ({
         ...prev,
         driverStatusUpdates: [
@@ -234,7 +251,7 @@ const useWebSocket = (userId = null) => {
     });
 
     // Evento de erro
-    webSocketService.onError((error) => {
+    webSocketManager.on('error', (error) => {
       setConnectionStatus(prev => ({ 
         ...prev, 
         error: error.message || 'Erro WebSocket desconhecido' 
@@ -274,8 +291,8 @@ const useWebSocket = (userId = null) => {
     stopLocationUpdates,
     
     // Informações de debug
-    debugInfo: webSocketService.getDebugInfo(),
+    debugInfo: webSocketManager.getConnectionStatus(),
   };
 };
 
-export default useWebSocket; 
+export default useWebSocket;

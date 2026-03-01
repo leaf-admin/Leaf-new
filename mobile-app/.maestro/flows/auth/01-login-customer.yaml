@@ -1,0 +1,20 @@
+# Teste: Login como Customer/Passageiro
+appId: br.com.leaf.ride
+---
+- runFlow: "../helpers/login.yaml"
+- assertVisible: 
+    text: "Solicitar Corrida"
+    timeout: 3000
+
+
+
+
+
+
+
+
+
+
+
+
+

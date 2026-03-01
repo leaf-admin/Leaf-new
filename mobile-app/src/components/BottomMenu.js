@@ -20,6 +20,16 @@ const MENU_ITEMS = [
     icon: (color) => <FontAwesome name="credit-card" size={26} color={color} />,
     route: 'WalletDetails',
   },
+  {
+    key: 'Settings',
+    icon: (color) => <Ionicons name="settings" size={26} color={color} />,
+    route: 'SettingsScreen',
+  },
+  {
+    key: 'Profile',
+    icon: (color) => <Ionicons name="person-circle" size={28} color={color} />,
+    route: 'ProfileScreen',
+  },
 ];
 
 export default function BottomMenu({ visible = true }) {

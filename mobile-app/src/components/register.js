@@ -14,24 +14,24 @@ import {
     Animated,
     ActivityIndicator
 } from 'react-native';
-import { colors } from '../common-local/theme';
+import { colors } from '../common/theme';
 var { height,width } = Dimensions.get('window');
 import i18n from '../i18n';
 import RadioForm from 'react-native-simple-radio-button';
 import RNPickerSelect from './RNPickerSelect';
 import { useSelector,useDispatch } from 'react-redux';
-import { api } from '../common-local';
+import { api } from '../common-local/api';
 import { Feather, AntDesign } from '@expo/vector-icons';
-import { MAIN_COLOR } from '../common-local/sharedFunctions';
+import { MAIN_COLOR } from '../common/sharedFunctions';
 import Button from './Button';
-import { fonts } from '../common-local/font';
+import { fonts } from '../common/font';
 import DeviceInfo from 'react-native-device-info';
 
 const hasNotch = DeviceInfo.hasNotch();
 
 export default function Registration(props) {
     const { t } = i18n;
-    const isRTL = i18n.locale.indexOf('he') === 0 || i18n.locale.indexOf('ar') === 0;
+    const isRTL = i18n.locale && (i18n.locale.indexOf('he') === 0 || i18n.locale.indexOf('ar') === 0);
     const {
         countries,
         editreferral

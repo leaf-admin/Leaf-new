@@ -23,7 +23,7 @@ import * as locationactions from './actions/locationactions';
 import * as chatactions from './actions/chatactions';
 import * as withdrawactions from './actions/withdrawactions';
 import * as DateFunctions from './other/DateFunctions';
-import * as GoogleAPIFunctions from './other/GoogleAPIFunctions';
+import * as OSMAPIFunctions from './other/OSMAPIFunctions';
 import * as GeoFunctions from './other/GeoFunctions';
 import * as languageactions from './actions/languageactions';
 import * as addressactions from './actions/addressactions';
@@ -36,8 +36,9 @@ import * as sosctions from './actions/sosaction';
 import * as complainactions from './actions/complainactions';
 import * as usedreferralaction from "./actions/usedreferralaction";
 import * as fetchFleetAdminEarnings from "./actions/fleetadminearningaction";
+import * as apiFunctions from "./api";
 
-const api =  {
+const api = {
     ...authactions,
     ...bookingactions,
     ...bookinglistactions,
@@ -58,7 +59,7 @@ const api =  {
     ...chatactions,
     ...withdrawactions,
     ...DateFunctions,
-    ...GoogleAPIFunctions,
+    ...OSMAPIFunctions,
     ...GeoFunctions,
     ...languageactions,
     ...NotificationFunctions,
@@ -69,7 +70,8 @@ const api =  {
     ...sosctions,
     ...usedreferralaction,
     ...fetchFleetAdminEarnings,
-    countries: countries   
+    ...apiFunctions.api,
+    countries: countries
 };
 
 export {

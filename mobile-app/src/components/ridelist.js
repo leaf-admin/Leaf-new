@@ -1,11 +1,25 @@
+import Logger from '../utils/Logger';
 import React, { useState, useEffect } from 'react';
 import { View, Text, FlatList, StyleSheet, TouchableOpacity, Image, Dimensions, Modal, Linking, Alert, Animated, TouchableWithoutFeedback,Platform } from 'react-native';
-import { colors } from '../common-local/theme';
-import i18n from '../i18n';
+import { colors } from '../common/theme';
+
+// Importar i18n com fallback para compatibilidade
+let i18nModule = null;
+try {
+    i18nModule = require('../i18n');
+} catch (error) {
+    Logger.warn('i18n não encontrado');
+}
+
+// Criar objeto i18n compatível
+const i18n = i18nModule && i18nModule.default ? i18nModule.default : (i18nModule || {
+    locale: 'pt',
+    t: (key) => key
+});
 import { useSelector } from 'react-redux';
 import SegmentedControlTab from 'react-native-segmented-control-tab';
 import moment from 'moment/min/moment-with-locales';
-import { MAIN_COLOR, SECONDORY_COLOR, appConsts } from '../common-local/sharedFunctions';
+import { MAIN_COLOR, SECONDORY_COLOR, appConsts } from '../common/sharedFunctions';
 var { width, height } = Dimensions.get('window');
 import { Ionicons, Entypo, Fontisto, AntDesign, Octicons, Feather, MaterialCommunityIcons } from '@expo/vector-icons';
 import { Avatar } from 'react-native-elements';
@@ -13,13 +27,34 @@ import StarRating from 'react-native-star-rating-widget';
 import Button from './Button';
 import RNPickerSelect from './RNPickerSelect';
 import Emptylist from './Emptylist';
-import { fonts } from '../common-local/font';
+import { fonts } from '../common/font';
 import { getLangKey } from '../common-local/other/getLangKey';
 import MapView, { Marker, Polyline } from 'react-native-maps';
 
 export default function RideList(props) {
-    const { t } = i18n;
-    const isRTL = i18n.locale.indexOf('he') === 0 || i18n.locale.indexOf('ar') === 0;
+    // Função de tradução segura - compatível com i18n antigo e novo
+    const t = (key) => {
+        try {
+            // Se i18n tem propriedade t (novo sistema)
+            if (i18n && typeof i18n.t === 'function') {
+                return i18n.t(key);
+            }
+            // Se i18n tem t como propriedade (sistema antigo)
+            if (i18n && i18n.t && typeof i18n.t === 'function') {
+                return i18n.t(key);
+            }
+            // Se i18n tem a chave diretamente
+            if (i18n && i18n[key]) {
+                return i18n[key];
+            }
+            // Fallback: retornar a chave
+            return key;
+        } catch (error) {
+            Logger.warn(`Erro ao traduzir "${key}":`, error);
+            return key;
+        }
+    };
+    const isRTL = i18n.locale && (i18n.locale.indexOf('he') === 0 || i18n.locale.indexOf('ar') === 0);
     //const isRTL = true;
     const settings = useSelector(state => state.settingsdata.settings);
     const [tabIndex, setTabIndex] = useState(props.tabIndex);
@@ -122,6 +157,11 @@ export default function RideList(props) {
                         <View style={styles.mapContainer}>
                             <MapView
                                 style={styles.map}
+                    <UrlTile
+                        urlTemplate="https://a.tile.openstreetmap.org/{z}/{x}/{y}.png"
+                        maximumZ={19}
+                        flipY={false}
+                    />
                                 initialRegion={{
                                     latitude: item.pickup.lat,
                                     longitude: item.pickup.lng,

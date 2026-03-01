@@ -1,9 +1,10 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { View, StyleSheet, Image, TouchableOpacity, Text, Alert, Dimensions } from 'react-native';
-import MapView, { PROVIDER_GOOGLE, Marker, Polyline } from 'react-native-maps';
+import MapView, { PROVIDER_GOOGLE, Marker, Polyline, Callout, Circle, UrlTile } from 'react-native-maps';
 import { useSelector, useDispatch } from 'react-redux';
 import { Ionicons } from '@expo/vector-icons';
 import * as Location from 'expo-location';
+import { GoogleMapApiConfig } from '../../config/GoogleMapApiConfig';
 
 import PassengerUI from '../components/map/PassengerUI';
 import DriverUI from '../components/map/DriverUI';
@@ -26,209 +27,239 @@ const { width, height } = Dimensions.get('window');
 const lightMapStyle = [
     {
         "elementType": "geometry",
-        "stylers": [{"color": "#f5f5f5"}]
+        "stylers": [{ "color": "#f5f5f5" }]
     },
     {
         "elementType": "labels.icon",
-        "stylers": [{"visibility": "off"}]
+        "stylers": [{ "visibility": "off" }]
     },
     {
         "elementType": "labels.text.fill",
-        "stylers": [{"color": "#616161"}]
+        "stylers": [{ "color": "#616161" }]
     },
     {
         "elementType": "labels.text.stroke",
-        "stylers": [{"color": "#f5f5f5"}]
+        "stylers": [{ "color": "#f5f5f5" }]
     },
     {
         "featureType": "administrative.land_parcel",
         "elementType": "labels.text.fill",
-        "stylers": [{"color": "#bdbdbd"}]
+        "stylers": [{ "color": "#bdbdbd" }]
     },
     {
         "featureType": "poi",
         "elementType": "geometry",
-        "stylers": [{"color": "#eeeeee"}]
+        "stylers": [{ "color": "#eeeeee" }]
     },
     {
         "featureType": "poi",
         "elementType": "labels.text.fill",
-        "stylers": [{"color": "#757575"}]
+        "stylers": [{ "color": "#757575" }]
     },
     {
         "featureType": "poi.park",
         "elementType": "geometry",
-        "stylers": [{"color": "#e5e5e5"}]
+        "stylers": [{ "color": "#e5e5e5" }]
     },
     {
         "featureType": "poi.park",
         "elementType": "labels.text.fill",
-        "stylers": [{"color": "#9e9e9e"}]
+        "stylers": [{ "color": "#9e9e9e" }]
     },
     {
         "featureType": "road",
         "elementType": "geometry",
-        "stylers": [{"color": "#ffffff"}]
+        "stylers": [{ "color": "#ffffff" }]
     },
     {
         "featureType": "road.arterial",
         "elementType": "labels.text.fill",
-        "stylers": [{"color": "#757575"}]
+        "stylers": [{ "color": "#757575" }]
     },
     {
         "featureType": "road.highway",
         "elementType": "geometry",
-        "stylers": [{"color": "#dadada"}]
+        "stylers": [{ "color": "#dadada" }]
     },
     {
         "featureType": "road.highway",
         "elementType": "labels.text.fill",
-        "stylers": [{"color": "#616161"}]
+        "stylers": [{ "color": "#616161" }]
     },
     {
         "featureType": "road.local",
         "elementType": "labels.text.fill",
-        "stylers": [{"color": "#9e9e9e"}]
+        "stylers": [{ "color": "#9e9e9e" }]
     },
     {
         "featureType": "transit.line",
         "elementType": "geometry",
-        "stylers": [{"color": "#e5e5e5"}]
+        "stylers": [{ "color": "#e5e5e5" }]
     },
     {
         "featureType": "transit.station",
         "elementType": "geometry",
-        "stylers": [{"color": "#eeeeee"}]
+        "stylers": [{ "color": "#eeeeee" }]
     },
     {
         "featureType": "water",
         "elementType": "geometry",
-        "stylers": [{"color": "#c9c9c9"}]
+        "stylers": [{ "color": "#c9c9c9" }]
     },
     {
         "featureType": "water",
         "elementType": "labels.text.fill",
-        "stylers": [{"color": "#9e9e9e"}]
+        "stylers": [{ "color": "#9e9e9e" }]
     }
 ];
 
 const darkMapStyle = [
     {
         "elementType": "geometry",
-        "stylers": [{"color": "#212121"}]
+        "stylers": [{ "color": "#212121" }]
     },
     {
         "elementType": "labels.icon",
-        "stylers": [{"visibility": "off"}]
+        "stylers": [{ "visibility": "off" }]
     },
     {
         "elementType": "labels.text.fill",
-        "stylers": [{"color": "#757575"}]
+        "stylers": [{ "color": "#757575" }]
     },
     {
         "elementType": "labels.text.stroke",
-        "stylers": [{"color": "#212121"}]
+        "stylers": [{ "color": "#212121" }]
     },
     {
         "featureType": "administrative",
         "elementType": "geometry",
-        "stylers": [{"color": "#757575"}]
+        "stylers": [{ "color": "#757575" }]
     },
     {
         "featureType": "administrative.country",
         "elementType": "labels.text.stroke",
-        "stylers": [{"color": "#4b4b4b"}]
+        "stylers": [{ "color": "#4b4b4b" }]
     },
     {
         "featureType": "administrative.land_parcel",
-        "stylers": [{"visibility": "off"}]
+        "stylers": [{ "visibility": "off" }]
     },
     {
         "featureType": "administrative.locality",
         "elementType": "labels.text.fill",
-        "stylers": [{"color": "#bdbdbd"}]
+        "stylers": [{ "color": "#bdbdbd" }]
     },
     {
         "featureType": "poi",
         "elementType": "labels.text.fill",
-        "stylers": [{"color": "#757575"}]
+        "stylers": [{ "color": "#757575" }]
     },
     {
         "featureType": "poi.park",
         "elementType": "geometry",
-        "stylers": [{"color": "#181818"}]
+        "stylers": [{ "color": "#181818" }]
     },
     {
         "featureType": "poi.park",
         "elementType": "labels.text.fill",
-        "stylers": [{"color": "#616161"}]
+        "stylers": [{ "color": "#616161" }]
     },
     {
         "featureType": "poi.park",
         "elementType": "labels.text.stroke",
-        "stylers": [{"color": "#1b1b1b"}]
+        "stylers": [{ "color": "#1b1b1b" }]
     },
     {
         "featureType": "road",
         "elementType": "geometry.fill",
-        "stylers": [{"color": "#2c2c2c"}]
+        "stylers": [{ "color": "#2c2c2c" }]
     },
     {
         "featureType": "road",
         "elementType": "labels.text.fill",
-        "stylers": [{"color": "#8a8a8a"}]
+        "stylers": [{ "color": "#8a8a8a" }]
     },
     {
         "featureType": "road.arterial",
         "elementType": "geometry",
-        "stylers": [{"color": "#373737"}]
+        "stylers": [{ "color": "#373737" }]
     },
     {
         "featureType": "road.highway",
         "elementType": "geometry",
-        "stylers": [{"color": "#3c3c3c"}]
+        "stylers": [{ "color": "#3c3c3c" }]
     },
     {
         "featureType": "road.highway.controlled_access",
         "elementType": "geometry",
-        "stylers": [{"color": "#4e4e4e"}]
+        "stylers": [{ "color": "#4e4e4e" }]
     },
     {
         "featureType": "road.local",
         "elementType": "labels.text.fill",
-        "stylers": [{"color": "#c0c0c0"}]
+        "stylers": [{ "color": "#c0c0c0" }]
     },
     {
         "featureType": "transit",
         "elementType": "labels.text.fill",
-        "stylers": [{"color": "#757575"}]
+        "stylers": [{ "color": "#757575" }]
     },
     {
         "featureType": "water",
         "elementType": "geometry",
-        "stylers": [{"color": "#000000"}]
+        "stylers": [{ "color": "#000000" }]
     },
     {
         "featureType": "water",
         "elementType": "labels.text.fill",
-        "stylers": [{"color": "#3d3d3d"}]
+        "stylers": [{ "color": "#3d3d3d" }]
     }
 ];
 
 export default function NewMapScreen(props) {
     const mapRef = useRef(null);
     const [routePolyline, setRoutePolyline] = useState(null);
+
+    // Log quando routePolyline muda
+    useEffect(() => {
+        console.log('🗺️ NewMapScreen - routePolyline atualizado:', {
+            hasPolyline: !!routePolyline,
+            length: routePolyline?.length || 0,
+            firstPoint: routePolyline?.[0],
+            lastPoint: routePolyline?.[routePolyline?.length - 1]
+        });
+    }, [routePolyline]);
     const [driverLocation, setDriverLocation] = useState(null);
     const [isDarkMode, setIsDarkMode] = useState(false);
     const [currentLocation, setCurrentLocation] = useState(null);
     const [pickupAddress, setPickupAddress] = useState('');
-    
+
     // Estados para cards de valores (baseado no MapScreen.js antigo)
     const [allCarTypes, setAllCarTypes] = useState([]);
     const [selectedCarType, setSelectedCarType] = useState(null);
     const [carEstimates, setCarEstimates] = useState({});
     const [filteredCarTypes, setFilteredCarTypes] = useState([]);
-    
+
+    // Estados para controlar z-index do botão de centralizar
+    const [bottomSheetState, setBottomSheetState] = useState({
+        isDocumentsBottomSheetOpen: false,
+        isVehicleBottomSheetOpen: false
+    });
+
+    // Função para calcular z-index do botão de centralizar
+    const getCenterButtonZIndex = () => {
+        if (bottomSheetState.isDocumentsBottomSheetOpen || bottomSheetState.isVehicleBottomSheetOpen) {
+            return -100; // Botão fica atrás quando BottomSheet está aberta
+        }
+        return 100; // Z-index normal quando BottomSheet está fechada
+    };
+
+    // Função para receber mudanças do estado das BottomSheets
+    const handleBottomSheetStateChange = (state) => {
+        setBottomSheetState(state);
+    };
+
+    // ===== FUNÇÕES PARA GERENCIAR RESERVAS =====
     const dispatch = useDispatch();
 
     const auth = useSelector(state => state.auth);
@@ -254,6 +285,19 @@ export default function NewMapScreen(props) {
         getCurrentLocation();
     }, []);
 
+    // Efeito para centralizar o mapa quando a localização mudar
+    useEffect(() => {
+        if (currentLocation && mapRef.current) {
+            console.log('🔄 Localização mudou, centralizando mapa...');
+            mapRef.current.animateToRegion({
+                latitude: currentLocation.lat,
+                longitude: currentLocation.lng,
+                latitudeDelta: 0.01,
+                longitudeDelta: 0.01,
+            }, 1000);
+        }
+    }, [currentLocation]);
+
     const getCurrentLocation = async () => {
         try {
             // Verificar permissões
@@ -271,83 +315,35 @@ export default function NewMapScreen(props) {
             });
 
             const { latitude, longitude } = location.coords;
-            setCurrentLocation({ lat: latitude, lng: longitude });
+            const newLocation = { lat: latitude, lng: longitude };
 
-            // Obter endereço reverso mais detalhado
+            console.log('📍 Nova localização obtida:', newLocation);
+            setCurrentLocation(newLocation);
+
+            // Centralizar o mapa automaticamente na nova localização
+            if (mapRef.current) {
+                console.log('🗺️ Centralizando mapa na nova localização...');
+                mapRef.current.animateToRegion({
+                    latitude: latitude,
+                    longitude: longitude,
+                    latitudeDelta: 0.01,
+                    longitudeDelta: 0.01,
+                }, 1000);
+                console.log('✅ Mapa centralizado automaticamente!');
+            }
+
+            // Obter endereço usando múltiplas fontes
             try {
-                const addressResponse = await Location.reverseGeocodeAsync({
-                    latitude,
-                    longitude
-                });
+                console.log('🔍 Tentando obter endereço para:', { latitude, longitude });
 
-                if (addressResponse.length > 0) {
-                    const address = addressResponse[0];
-                    
-                    // Usar o formattedAddress completo se disponível
-                    if (address.formattedAddress) {
-                        setPickupAddress(address.formattedAddress);
-                        console.log('📍 Endereço de embarque detalhado (formattedAddress):', address.formattedAddress);
-                        console.log('📍 Dados completos do endereço:', address);
-                    } else {
-                        // Construir endereço mais detalhado como fallback
-                        let fullAddress = '';
-                        
-                        // Adicionar número da rua se disponível
-                        if (address.streetNumber) {
-                            fullAddress += `${address.streetNumber} `;
-                        }
-                        
-                        // Adicionar nome da rua
-                        if (address.street) {
-                            fullAddress += `${address.street}`;
-                        }
-                        
-                        // Adicionar bairro se disponível
-                        if (address.district && address.district !== address.street) {
-                            fullAddress += `, ${address.district}`;
-                        }
-                        
-                        // Adicionar cidade
-                        if (address.city) {
-                            fullAddress += `, ${address.city}`;
-                        }
-                        
-                        // Adicionar estado
-                        if (address.region) {
-                            fullAddress += `, ${address.region}`;
-                        }
-                        
-                        // Se não conseguiu construir endereço detalhado, usar o padrão
-                        if (!fullAddress.trim()) {
-                            fullAddress = [
-                                address.street,
-                                address.district,
-                                address.city,
-                                address.region
-                            ].filter(Boolean).join(', ');
-                        }
-                        
-                        setPickupAddress(fullAddress);
-                        console.log('📍 Endereço de embarque detalhado (fallback):', fullAddress);
-                        console.log('📍 Dados completos do endereço:', address);
-                    }
-                }
+                const address = await getAddressFromMultipleSources(latitude, longitude);
+                setPickupAddress(address);
+                console.log('📍 Endereço final definido:', address);
+
             } catch (addressError) {
-                console.warn('⚠️ Erro ao obter endereço detalhado:', addressError);
-                
-                // Fallback: tentar usar Google Places API para obter endereço mais preciso
-                try {
-                    const googleAddress = await getAddressFromGooglePlaces(latitude, longitude);
-                    if (googleAddress) {
-                        setPickupAddress(googleAddress);
-                        console.log('📍 Endereço do Google Places:', googleAddress);
-                    } else {
-                        setPickupAddress('Localização atual');
-                    }
-                } catch (googleError) {
-                    console.warn('⚠️ Erro ao obter endereço do Google Places:', googleError);
-                    setPickupAddress('Localização atual');
-                }
+                console.warn('⚠️ Erro ao obter endereço:', addressError);
+                console.log('⚠️ Usando coordenadas como fallback final');
+                setPickupAddress(`Localização(${latitude.toFixed(6)}, ${longitude.toFixed(6)})`);
             }
 
         } catch (error) {
@@ -359,23 +355,101 @@ export default function NewMapScreen(props) {
     // Função para obter endereço mais preciso do Google Places
     const getAddressFromGooglePlaces = async (latitude, longitude) => {
         try {
+            console.log('🔍 Google Places API - Fazendo requisição para:', { latitude, longitude });
+
             // Usar a API do Google Places para obter endereço mais preciso
             const response = await fetch(
-                `https://maps.googleapis.com/maps/api/geocode/json?latlng=${latitude},${longitude}&key=YOUR_GOOGLE_API_KEY&language=pt-BR&result_type=street_address|route`
+                `https://maps.googleapis.com/maps/api/geocode/json?latlng=${latitude},${longitude}&key=AIzaSyBLwKg0KRiLVjAHVBQAUP7pB3Q80G246KY&language=pt-BR`
             );
-            
+
+            console.log('🔍 Google Places API - Status da resposta:', response.status);
+
             const data = await response.json();
-            
-            if (data.results && data.results.length > 0) {
+            console.log('🔍 Google Places API - Dados recebidos:', JSON.stringify(data, null, 2));
+
+            if (data.status === 'OK' && data.results && data.results.length > 0) {
                 const result = data.results[0];
+                console.log('✅ Endereço obtido com Google Places:', result.formatted_address);
                 return result.formatted_address;
+            } else if (data.status === 'ZERO_RESULTS') {
+                console.log('⚠️ Google Places API - Nenhum resultado encontrado');
+                return null;
+            } else {
+                console.log('⚠️ Google Places API - Status de erro:', data.status, data.error_message);
+                return null;
             }
-            
-            return null;
+
         } catch (error) {
             console.warn('⚠️ Erro na API do Google Places:', error);
             return null;
         }
+    };
+
+    // Função para tentar obter endereço de múltiplas fontes
+    const getAddressFromMultipleSources = async (latitude, longitude) => {
+        console.log('🔍 Tentando obter endereço de múltiplas fontes...');
+
+        // 1. Tentar Google Places API primeiro
+        try {
+            const googleAddress = await getAddressFromGooglePlaces(latitude, longitude);
+            if (googleAddress) {
+                console.log('✅ Endereço obtido com Google Places:', googleAddress);
+                return googleAddress;
+            }
+        } catch (error) {
+            console.log('⚠️ Google Places API falhou (billing não habilitado):', error.message);
+        }
+
+        // 2. Tentar Location.reverseGeocodeAsync com configurações diferentes
+        try {
+            const addressResponse = await Location.reverseGeocodeAsync({
+                latitude,
+                longitude,
+                useGoogleMaps: true // Tentar com Google Maps
+            });
+
+            if (addressResponse.length > 0) {
+                const address = addressResponse[0];
+                if (address.formattedAddress && address.formattedAddress !== 'Brasil') {
+                    console.log('✅ Endereço obtido com Google Maps:', address.formattedAddress);
+                    return address.formattedAddress;
+                }
+            }
+        } catch (error) {
+            console.log('⚠️ Google Maps reverse geocoding falhou:', error);
+        }
+
+        // 2. Tentar com configuração nativa
+        try {
+            const addressResponse = await Location.reverseGeocodeAsync({
+                latitude,
+                longitude,
+                useGoogleMaps: false
+            });
+
+            if (addressResponse.length > 0) {
+                const address = addressResponse[0];
+                // Construir endereço manualmente
+                const parts = [
+                    address.street,
+                    address.district,
+                    address.city,
+                    address.region
+                ].filter(Boolean);
+
+                if (parts.length > 0) {
+                    const manualAddress = parts.join(', ');
+                    console.log('✅ Endereço construído manualmente:', manualAddress);
+                    return manualAddress;
+                }
+            }
+        } catch (error) {
+            console.log('⚠️ Reverse geocoding nativo falhou:', error);
+        }
+
+        // 3. Fallback: usar coordenadas formatadas
+        console.log('⚠️ Todas as fontes falharam, usando coordenadas');
+        return `Localização (${latitude.toFixed(6)}, ${longitude.toFixed(6)})`;
     };
 
     // useEffect para desenhar as rotas
@@ -409,7 +483,7 @@ export default function NewMapScreen(props) {
             }
         }
     }, [booking?.driver_to_pickup_polyline, booking?.trip_polyline]);
-    
+
     // Efeito para calcular polyline quando dados de rota são atualizados
     useEffect(() => {
         // Usar o estado local do Redux que já está sendo monitorado
@@ -423,8 +497,8 @@ export default function NewMapScreen(props) {
     const handleSubmitRating = (ratingData) => {
         const webSocketManager = WebSocketManager.getInstance();
         const userType = auth.profile?.usertype;
-        
-        webSocketManager.emit('submit_rating', { 
+
+        webSocketManager.emit('submit_rating', {
             bookingId: booking.key,
             ratingData: ratingData,
             ratedBy: userType,
@@ -438,13 +512,36 @@ export default function NewMapScreen(props) {
     };
 
     const centerOnUser = () => {
+        console.log('🎯 centerOnUser chamado');
+        console.log('📍 currentLocation:', currentLocation);
+        console.log('🗺️ mapRef.current:', !!mapRef.current);
+
         if (mapRef.current && currentLocation) {
+            console.log('✅ Centralizando mapa na posição do usuário:', {
+                lat: currentLocation.lat,
+                lng: currentLocation.lng
+            });
+
+            // Centralizar com animação suave
             mapRef.current.animateToRegion({
                 latitude: currentLocation.lat,
                 longitude: currentLocation.lng,
-                latitudeDelta: 0.01,
+                latitudeDelta: 0.01,  // Zoom aproximado
                 longitudeDelta: 0.01,
             }, 1000);
+
+            console.log('✅ Mapa centralizado com sucesso!');
+        } else {
+            console.log('⚠️ Não foi possível centralizar:', {
+                hasMapRef: !!mapRef.current,
+                hasCurrentLocation: !!currentLocation
+            });
+
+            // Se não tem localização atual, tentar obter novamente
+            if (!currentLocation) {
+                console.log('🔄 Tentando obter localização atual...');
+                getCurrentLocation();
+            }
         }
     };
 
@@ -458,9 +555,20 @@ export default function NewMapScreen(props) {
 
     // Efeito para carregar tipos de carro
     useEffect(() => {
-        if (cartypes && cartypes.length > 0) {
-            setAllCarTypes(cartypes);
-            setFilteredCarTypes(cartypes);
+        console.log('🚗 NewMapScreen - useEffect cartypes:', {
+            hasCartypes: !!cartypes,
+            cartypesType: typeof cartypes,
+            cartypesLength: cartypes?.length || 0,
+            cartypesKeys: cartypes ? Object.keys(cartypes) : null,
+            cartypesCars: cartypes?.cars || null
+        });
+
+        if (cartypes && cartypes.cars && cartypes.cars.length > 0) {
+            console.log('✅ NewMapScreen - Definindo allCarTypes:', cartypes.cars.length, 'carros');
+            setAllCarTypes(cartypes.cars);
+            setFilteredCarTypes(cartypes.cars);
+        } else {
+            console.log('⚠️ NewMapScreen - cartypes não disponível ou vazio');
         }
     }, [cartypes]);
 
@@ -496,7 +604,7 @@ export default function NewMapScreen(props) {
             };
             return <RatingUI userToRate={userToRate} onSubmit={handleSubmitRating} />;
         }
-        
+
         if (bookingStatus === 'STARTED') {
             if (userType === 'customer') {
                 return <PassengerOnTripUI booking={booking} />;
@@ -505,17 +613,17 @@ export default function NewMapScreen(props) {
                 return <DriverOnTripUI booking={booking} />;
             }
         }
-        
+
         if (bookingStatus === 'ACCEPTED' || bookingStatus === 'REACHED') {
             if (userType === 'customer') {
-                return <PassengerEnRouteUI 
-                            booking={booking} 
-                            onDriverLocationUpdate={setDriverLocation} 
-                       />;
+                return <PassengerEnRouteUI
+                    booking={booking}
+                    onDriverLocationUpdate={setDriverLocation}
+                />;
             }
             if (userType === 'driver') {
-                return bookingStatus === 'ACCEPTED' ? 
-                    <DriverEnRouteUI booking={booking} onArrived={() => {}} /> : 
+                return bookingStatus === 'ACCEPTED' ?
+                    <DriverEnRouteUI booking={booking} onArrived={() => { }} /> :
                     <DriverStartTripUI booking={booking} />;
             }
         }
@@ -530,38 +638,46 @@ export default function NewMapScreen(props) {
                 hasPickupAddress: !!pickupAddress,
                 hasCurrentLocation: !!currentLocation
             });
-            
+
             console.log('🔍 Verificando componentes:', {
                 PassengerUI: typeof PassengerUI,
                 DriverUI: typeof DriverUI,
                 RatingUI: typeof RatingUI
             });
-            
+
+            console.log('🚗 NewMapScreen - Renderizando PassengerUI com allCarTypes:', {
+                allCarTypesLength: allCarTypes?.length || 0,
+                allCarTypes: allCarTypes,
+                cartypesFromRedux: cartypes
+            });
+
             return (
-                <PassengerUI 
-                    mapRef={mapRef} 
-                    routePolyline={routePolyline} 
-                    setRoutePolyline={setRoutePolyline} 
-                    theme={theme} 
+                <PassengerUI
+                    mapRef={mapRef}
+                    routePolyline={routePolyline}
+                    setRoutePolyline={setRoutePolyline}
+                    theme={theme}
                     isDarkMode={isDarkMode}
                     toggleTheme={toggleTheme}
                     pickupAddress={pickupAddress}
                     currentLocation={currentLocation}
-                    {...props} 
+                    allCarTypes={allCarTypes}
+                    {...props}
                 />
             );
         }
         if (userType === 'driver') {
             return (
-                <DriverUI 
-                    {...props} 
-                    mapRef={mapRef} 
-                    theme={theme} 
+                <DriverUI
+                    {...props}
+                    mapRef={mapRef}
+                    theme={theme}
                     isDarkMode={isDarkMode}
+                    onBottomSheetStateChange={handleBottomSheetStateChange}
                 />
             );
         }
-        
+
         // Fallback para quando não há userType definido
         console.log('⚠️ renderUI: userType não definido, retornando fallback');
         return (
@@ -582,7 +698,7 @@ export default function NewMapScreen(props) {
         <View style={styles.container}>
             <MapView
                 ref={mapRef}
-                style={StyleSheet.absoluteFillObject}
+                style={styles.map}
                 provider={PROVIDER_GOOGLE}
                 initialRegion={initialRegion}
                 showsUserLocation={true}
@@ -596,16 +712,18 @@ export default function NewMapScreen(props) {
                 loadingIndicatorColor={mapColors.primary}
                 loadingBackgroundColor={mapColors.background}
                 customMapStyle={isDarkMode ? darkMapStyle : lightMapStyle}
+                onMapReady={() => console.log('🗺️ MapView carregado e pronto')}
             >
                 {routePolyline && (
                     <Polyline
                         coordinates={routePolyline}
-                        strokeColor={mapColors.primary}
+                        strokeColor="#006400"
                         strokeWidth={4}
                         lineDashPattern={[1]}
+                        zIndex={1000}
                     />
                 )}
-                
+
                 {driverLocation && (
                     <Marker
                         coordinate={{
@@ -621,30 +739,26 @@ export default function NewMapScreen(props) {
                     </Marker>
                 )}
             </MapView>
-            
+
             {/* Botões de controle do mapa */}
-            <View style={styles.mapControls}>
+            <View style={[styles.mapControls, { zIndex: getCenterButtonZIndex() }]}>
                 {/* Botão de centralizar no usuário */}
-                <TouchableOpacity 
+                <TouchableOpacity
                     style={[styles.controlButton, { backgroundColor: mapColors.surface }]}
                     onPress={centerOnUser}
+                    activeOpacity={0.7}
                 >
-                    <Ionicons 
-                        name="locate" 
-                        size={24} 
-                        color={mapColors.text} 
+                    <Ionicons
+                        name="locate"
+                        size={24}
+                        color={mapColors.text}
                     />
                 </TouchableOpacity>
             </View>
-            
+
             {/* UI sobreposta */}
             <View style={StyleSheet.absoluteFillObject} pointerEvents="box-none">
-                {(() => {
-                    const ui = renderUI();
-                    console.log('🔍 renderUI retornou:', ui);
-                    console.log('🔍 Tipo do retorno:', typeof ui);
-                    return ui;
-                })()}
+                {renderUI()}
             </View>
 
             {/* Cards de opções de carro */}
@@ -669,8 +783,8 @@ export default function NewMapScreen(props) {
                                         <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
                                             <Text style={styles.carNameValue}>{car.name}</Text>
                                             <Text style={styles.priceNameValue}>
-                                                {carEstimates[car.name]?.estimateFare ? 
-                                                    `${settings.currency}${carEstimates[car.name].estimateFare.toFixed(settings.decimal)}` : 
+                                                {carEstimates[car.name]?.estimateFare ?
+                                                    `${settings.currency}${carEstimates[car.name].estimateFare.toFixed(settings.decimal)}` :
                                                     `${settings.currency}${car.min_fare.toFixed(settings.decimal)}`
                                                 }
                                             </Text>
@@ -717,11 +831,17 @@ const styles = StyleSheet.create({
     container: {
         flex: 1,
     },
+    map: {
+        flex: 1,
+        width: '100%',
+        height: '100%',
+    },
     mapControls: {
         position: 'absolute',
-        top: 100,
+        top: '50%',
         right: 20,
         zIndex: 1000,
+        transform: [{ translateY: -25 }], // Centralizar verticalmente o botão
     },
     controlButton: {
         width: 50,

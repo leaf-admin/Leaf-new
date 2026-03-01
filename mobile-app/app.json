@@ -1,0 +1,22 @@
+{
+  "expo": {
+    "name": "Leaf",
+    "slug": "leaf",
+    "owner": "izaakdias",
+    "version": "1.0.0",
+    "ios": {
+      "bundleIdentifier": "br.com.leaf.ride",
+      "buildNumber": "1.0.0",
+      "deploymentTarget": "16.0"
+    },
+    "android": {
+      "package": "br.com.leaf.ride",
+      "versionCode": 1
+    },
+    "extra": {
+      "eas": {
+        "projectId": "ce24d262-575b-4394-bb96-3d2b27161b97"
+      }
+    }
+  }
+}

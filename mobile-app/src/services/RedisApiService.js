@@ -1,56 +1,32 @@
-// RedisApiService.js - Serviço híbrido Redis + Firebase com cache local
-// Mock para testes Node.js
+import Logger from '../utils/Logger';
+// RedisApiService.js - Serviço para acessar Redis via webhooks/API
+import { Platform } from 'react-native';
 
-// Importar configuração centralizada
-const { API_URLS, API_CONFIG, getSelfHostedApiUrl, getFirebaseApiUrl } = require('../config/ApiConfig.cjs');
 
-const getApiUrl = (endpoint, useFallback = false) => {
-    if (useFallback) {
-        return getFirebaseApiUrl(endpoint);
-    }
-    return getSelfHostedApiUrl(endpoint);
-};
-
-const handleError = (error, showAlert = false) => ({ error: error.message, showAlert });
-const logError = (error) => console.error('Error logged:', error);
-
-const LocalCacheService = require('./LocalCacheService');
-const SyncService = require('./SyncService');
+// Configuração da API base
+const API_BASE_URL = 'https://api.leaf.app.br'; // VPS - API
 
 class RedisApiService {
     constructor() {
-        this.baseUrl = API_URLS.selfHostedApi;
-        this.isAvailable = true;
-        this.config = API_CONFIG;
-        
-        // Inicializar serviços híbridos
-        this.localCache = new LocalCacheService();
-        this.syncService = new SyncService();
-        
-        // Inicializar sincronização
-        this.syncService.initialize();
-        
-        console.log('🚀 RedisApiService híbrido inicializado');
-        console.log(`🏠 Self-Hosted API: ${this.baseUrl}`);
+        this.baseUrl = API_BASE_URL;
+        this.isAvailable = Platform.OS === 'web'; // Apenas web por enquanto
     }
 
     // Método genérico para fazer requisições
-    async makeRequest(endpoint, method = 'GET', data = null, useFallback = false) {
+    async makeRequest(endpoint, method = 'GET', data = null) {
         try {
-            const url = getApiUrl(endpoint, useFallback);
+            const url = `${this.baseUrl}${endpoint}`;
             const options = {
                 method,
                 headers: {
                     'Content-Type': 'application/json',
                 },
-                timeout: this.config.timeout,
             };
 
             if (data && method !== 'GET') {
                 options.body = JSON.stringify(data);
             }
 
-            console.log(`🌐 Fazendo requisição: ${method} ${url}`);
             const response = await fetch(url, options);
             
             if (!response.ok) {
@@ -59,114 +35,52 @@ class RedisApiService {
 
             return await response.json();
         } catch (error) {
-            console.error(`❌ Erro na requisição ${endpoint}:`, error);
-            const errorResult = handleError(error, false);
-            logError(error);
-            throw errorResult;
+            Logger.error(`❌ Redis API Error (${endpoint}):`, error);
+            throw error;
         }
     }
 
-    // Atualizar localização do usuário (Híbrido: Cache Local → Self-Hosted → Firebase)
+    // Atualizar localização do usuário
     async updateUserLocation(userId, lat, lng, timestamp = Date.now()) {
+        if (!this.isAvailable) {
+            Logger.log('📱 Redis API não disponível no React Native');
+            return null;
+        }
+
         try {
-            // 1. Salvar no cache local primeiro (instantâneo)
-            await this.localCache.setLocation(userId, { lat, lng, timestamp });
+            const result = await this.makeRequest('/update_user_location', 'POST', {
+                userId,
+                latitude: lat,
+                longitude: lng,
+                timestamp
+            });
             
-            // 2. Tentar Self-Hosted API primeiro
-            try {
-                const result = await this.makeRequest('/api/update_user_location', 'POST', {
-                    userId,
-                    lat,
-                    lng,
-                    timestamp
-                });
-                
-                console.log(`📍 Self-Hosted API: Localização atualizada (${userId})`);
-                return { success: true, cached: true, syncing: true, source: 'self-hosted' };
-                
-            } catch (selfHostedError) {
-                console.log('🔄 Self-Hosted falhou, tentando Firebase...');
-                
-                // 3. Fallback para Firebase
-                const result = await this.makeRequest('/update_user_location', 'POST', {
-                    userId,
-                    lat,
-                    lng,
-                    timestamp
-                }, true); // useFallback = true
-                
-                console.log(`📍 Firebase Fallback: Localização atualizada (${userId})`);
-                return { success: true, cached: true, syncing: true, source: 'firebase' };
-            }
-            
+            Logger.log('📍 Localização atualizada via Redis API:', userId);
+            return result;
         } catch (error) {
-            console.error('❌ Erro na atualização híbrida de localização:', error);
-            handleError(error, true);
+            Logger.error('❌ Erro ao atualizar localização via Redis API:', error);
             return null;
         }
     }
 
-    // Buscar motoristas próximos (Híbrido: Cache Local → Self-Hosted → Firebase)
+    // Buscar motoristas próximos
     async getNearbyDrivers(lat, lng, radius = 5) {
-        try {
-            // 1. Verificar cache local primeiro
-            const cachedDrivers = await this.localCache.getNearbyDrivers(lat, lng, radius);
-            if (cachedDrivers && cachedDrivers.length > 0) {
-                console.log(`🚗 Cache local: ${cachedDrivers.length} motoristas encontrados`);
-                return cachedDrivers;
-            }
-            
-            // 2. Se não encontrado no cache, buscar no Self-Hosted
-            if (!this.isAvailable) {
-                console.log('📱 Self-Hosted API não disponível, tentando Firebase...');
-                return await this.getNearbyDriversFromFirebase(lat, lng, radius);
-            }
-
-            try {
-                const result = await this.makeRequest('/api/nearby_drivers', 'GET', null, false, {
-                    lat,
-                    lng,
-                    radius
-                });
-                
-                if (result.success && result.drivers) {
-                    // Salvar no cache local
-                    await this.localCache.setNearbyDrivers(lat, lng, result.drivers);
-                    console.log(`🚗 Self-Hosted API: ${result.drivers.length} motoristas encontrados`);
-                    return result.drivers;
-                }
-                
-                throw new Error('Resposta inválida do Self-Hosted API');
-                
-            } catch (selfHostedError) {
-                console.log('🔄 Self-Hosted falhou, tentando Firebase...');
-                return await this.getNearbyDriversFromFirebase(lat, lng, radius);
-            }
-            
-        } catch (error) {
-            console.error('❌ Erro ao buscar motoristas próximos:', error);
-            handleError(error, true);
+        if (!this.isAvailable) {
+            Logger.log('📱 Redis API não disponível no React Native');
             return [];
         }
-    }
 
-    // Buscar motoristas no Firebase (fallback)
-    async getNearbyDriversFromFirebase(lat, lng, radius) {
         try {
             const result = await this.makeRequest('/get_nearby_drivers', 'POST', {
                 latitude: lat,
                 longitude: lng,
                 radius
-            }, true); // useFallback = true
+            });
             
-            if (result.success && result.drivers) {
-                console.log(`🚗 Firebase API: ${result.drivers.length} motoristas encontrados`);
-                return result.drivers;
-            }
-            
-            return [];
+            Logger.log('📍 Motoristas próximos via Redis API:', result.drivers?.length || 0);
+            return result.drivers || [];
         } catch (error) {
-            console.error('❌ Erro ao buscar motoristas no Firebase:', error);
+            Logger.error('❌ Erro ao buscar motoristas próximos via Redis API:', error);
             return [];
         }
     }
@@ -174,157 +88,103 @@ class RedisApiService {
     // Iniciar tracking de viagem
     async startTripTracking(tripId, driverId, passengerId, initialLocation) {
         if (!this.isAvailable) {
-            console.log('📱 Self-Hosted API não disponível');
+            Logger.log('📱 Redis API não disponível no React Native');
             return null;
         }
 
         try {
-            const result = await this.makeRequest('/api/start_trip_tracking', 'POST', {
+            const result = await this.makeRequest('/start_trip_tracking', 'POST', {
                 tripId,
                 driverId,
                 passengerId,
                 initialLocation
             });
             
-            console.log('🚗 Tracking iniciado via Self-Hosted API:', tripId);
+            Logger.log('🚗 Tracking iniciado via Redis API:', tripId);
             return result;
         } catch (error) {
-            console.log('🔄 Self-Hosted falhou, tentando Firebase...');
-            return await this.makeRequest('/start_trip_tracking', 'POST', {
-                tripId,
-                driverId,
-                passengerId,
-                initialLocation
-            }, true); // useFallback = true
+            Logger.error('❌ Erro ao iniciar tracking via Redis API:', error);
+            return null;
         }
     }
 
     // Atualizar localização da viagem
     async updateTripLocation(tripId, lat, lng, timestamp = Date.now()) {
         if (!this.isAvailable) {
-            console.log('📱 Self-Hosted API não disponível');
+            Logger.log('📱 Redis API não disponível no React Native');
             return null;
         }
 
         try {
-            const result = await this.makeRequest('/api/update_trip_location', 'POST', {
+            const result = await this.makeRequest('/update_trip_location', 'POST', {
                 tripId,
                 latitude: lat,
                 longitude: lng,
                 timestamp
             });
             
-            console.log('📍 Localização da viagem atualizada via Self-Hosted API:', tripId);
+            Logger.log('📍 Localização da viagem atualizada via Redis API:', tripId);
             return result;
         } catch (error) {
-            console.log('🔄 Self-Hosted falhou, tentando Firebase...');
-            return await this.makeRequest('/update_trip_location', 'POST', {
-                tripId,
-                latitude: lat,
-                longitude: lng,
-                timestamp
-            }, true); // useFallback = true
+            Logger.error('❌ Erro ao atualizar localização da viagem via Redis API:', error);
+            return null;
         }
     }
 
     // Finalizar tracking de viagem
     async endTripTracking(tripId, endLocation) {
         if (!this.isAvailable) {
-            console.log('📱 Self-Hosted API não disponível');
+            Logger.log('📱 Redis API não disponível no React Native');
             return null;
         }
 
         try {
-            const result = await this.makeRequest('/api/end_trip_tracking', 'POST', {
+            const result = await this.makeRequest('/end_trip_tracking', 'POST', {
                 tripId,
                 endLocation
             });
             
-            console.log('✅ Tracking finalizado via Self-Hosted API:', tripId);
+            Logger.log('✅ Tracking finalizado via Redis API:', tripId);
             return result;
         } catch (error) {
-            console.log('🔄 Self-Hosted falhou, tentando Firebase...');
-            return await this.makeRequest('/end_trip_tracking', 'POST', {
-                tripId,
-                endLocation
-            }, true); // useFallback = true
+            Logger.error('❌ Erro ao finalizar tracking via Redis API:', error);
+            return null;
         }
     }
 
-    // Obter dados da viagem (Híbrido: Cache Local → Self-Hosted → Firebase)
+    // Obter dados da viagem
     async getTripData(tripId) {
-        try {
-            // 1. Verificar cache local primeiro
-            const cachedTrip = await this.localCache.getTripData(tripId);
-            if (cachedTrip) {
-                console.log(`🚕 Cache local: Dados da viagem ${tripId} encontrados`);
-                return cachedTrip;
-            }
-            
-            // 2. Se não encontrado no cache, buscar no Self-Hosted
-            if (!this.isAvailable) {
-                console.log('📱 Self-Hosted API não disponível, tentando Firebase...');
-                return await this.getTripDataFromFirebase(tripId);
-            }
+        if (!this.isAvailable) {
+            Logger.log('📱 Redis API não disponível no React Native');
+            return null;
+        }
 
-            try {
-                const result = await this.makeRequest(`/api/get_trip_data/${tripId}`, 'GET');
-                const tripData = result.tripData || null;
-                
-                if (tripData) {
-                    // 3. Salvar no cache local
-                    await this.localCache.setTripData(tripId, tripData);
-                    console.log(`🚕 Self-Hosted API: Dados da viagem ${tripId} salvos no cache`);
-                }
-                
-                return tripData;
-                
-            } catch (selfHostedError) {
-                console.warn('⚠️ Self-Hosted falhou, tentando Firebase...', selfHostedError);
-                return await this.getTripDataFromFirebase(tripId);
-            }
+        try {
+            const result = await this.makeRequest(`/get_trip_data/${tripId}`, 'GET');
             
+            Logger.log('📍 Dados da viagem obtidos via Redis API:', tripId);
+            return result.tripData || null;
         } catch (error) {
-            console.error('❌ Erro na busca híbrida de dados da viagem:', error);
-            handleError(error, true);
-            return null;
-        }
-    }
-    
-    // Fallback para Firebase
-    async getTripDataFromFirebase(tripId) {
-        try {
-            const result = await this.makeRequest(`/get_trip_data/${tripId}`, 'GET', null, true);
-            const tripData = result.tripData || null;
-            
-            if (tripData) {
-                await this.localCache.setTripData(tripId, tripData);
-                console.log(`🔥 Firebase fallback: Dados da viagem ${tripId} salvos no cache`);
-            }
-            
-            return tripData;
-            
-        } catch (firebaseError) {
-            console.error('❌ Firebase também falhou:', firebaseError);
+            Logger.error('❌ Erro ao obter dados da viagem via Redis API:', error);
             return null;
         }
     }
 
-    // Obter estatísticas do Self-Hosted
+    // Obter estatísticas do Redis
     async getRedisStats() {
         if (!this.isAvailable) {
-            console.log('📱 Self-Hosted API não disponível');
+            Logger.log('📱 Redis API não disponível no React Native');
             return null;
         }
 
         try {
-            const result = await this.makeRequest('/api/stats', 'GET');
+            const result = await this.makeRequest('/get_redis_stats', 'GET');
             
-            console.log('📊 Estatísticas do Self-Hosted obtidas via API');
-            return result;
+            Logger.log('📊 Estatísticas do Redis obtidas via API');
+            return result.stats || null;
         } catch (error) {
-            console.log('🔄 Self-Hosted falhou, tentando Firebase...');
-            return await this.makeRequest('/get_redis_stats', 'GET', null, true);
+            Logger.error('❌ Erro ao obter estatísticas do Redis via API:', error);
+            return null;
         }
     }
 
@@ -336,56 +196,17 @@ class RedisApiService {
     // Testar conexão com a API
     async testConnection() {
         if (!this.isAvailable) {
-            return { available: false, reason: 'Serviço não disponível' };
+            return { available: false, reason: 'React Native não suportado' };
         }
 
         try {
-            const result = await this.makeRequest('/api/health', 'GET');
+            const result = await this.makeRequest('/health', 'GET');
             return { available: true, data: result };
         } catch (error) {
-            console.log('🔄 Self-Hosted falhou, tentando Firebase...');
-            try {
-                const firebaseResult = await this.makeRequest('/health', 'GET', null, true);
-                return { available: true, data: firebaseResult, source: 'firebase' };
-            } catch (firebaseError) {
-                return { available: false, reason: error.message };
-            }
+            return { available: false, reason: error.message };
         }
-    }
-
-    // Métodos de gerenciamento de cache
-    async getCacheStats() {
-        return await this.localCache.getCacheStats();
-    }
-
-    async clearCache() {
-        return await this.localCache.clearAllCache();
-    }
-
-    async cleanExpiredCache() {
-        return await this.localCache.cleanExpiredCache();
-    }
-
-    // Métodos de gerenciamento de sincronização
-    getSyncStats() {
-        return this.syncService.getSyncStats();
-    }
-
-    async retryFailedSyncs() {
-        return await this.syncService.retryFailedSyncs();
-    }
-
-    async getFailedSyncs() {
-        return await this.syncService.getFailedSyncs();
-    }
-
-    // Destruir serviço
-    destroy() {
-        this.syncService.destroy();
-        console.log('🗑️ RedisApiService híbrido destruído');
     }
 }
 
-// Exportar classe e instância singleton
-const redisApiService = new RedisApiService();
-module.exports = { redisApiService, RedisApiService }; 
+// Instância singleton
+export const redisApiService = new RedisApiService(); 

@@ -1,3 +1,4 @@
+import Logger from '../utils/Logger';
 import React, { useState, useEffect } from 'react';
 import {
     View,
@@ -11,16 +12,15 @@ import QRCode from 'react-native-qrcode-svg';
 import { colors } from '../common-local/theme';
 import { fonts } from '../common-local/font';
 import WooviService from '../services/WooviService';
-import i18n from '../i18n';
+import { useTranslation } from './i18n/LanguageProvider';
 
 const PixPayment = ({ amount, description, onPaymentComplete, onCancel }) => {
+    const { t } = useTranslation();
     const [qrCode, setQrCode] = useState(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
     const [paymentId, setPaymentId] = useState(null);
     const [paymentStatus, setPaymentStatus] = useState('pending');
-
-    const { t } = i18n;
 
     useEffect(() => {
         generateQRCode();
@@ -31,12 +31,28 @@ const PixPayment = ({ amount, description, onPaymentComplete, onCancel }) => {
     const generateQRCode = async () => {
         try {
             setLoading(true);
-            const response = await WooviService.generatePixQRCode(amount, description);
-            setQrCode(response.qrCode);
-            setPaymentId(response.paymentId);
+            // Usar novo sistema de pagamento antecipado
+            const response = await WooviService.processAdvancePayment({
+                passengerId: 'current_user_id', // TODO: Obter ID real do usuário
+                amount: amount * 100, // Converter para centavos
+                rideId: `ride_${Date.now()}`,
+                rideDetails: {
+                    origin: 'Origem da corrida',
+                    destination: 'Destino da corrida'
+                },
+                passengerName: 'Nome do Passageiro',
+                passengerEmail: 'passenger@leaf.com'
+            });
+            
+            if (response.success) {
+                setQrCode(response.qrCode);
+                setPaymentId(response.chargeId);
+            } else {
+                throw new Error(response.error);
+            }
         } catch (error) {
             setError(t('error_generating_qr'));
-            Alert.alert(t('error'), t('error_generating_qr'));
+            Alert.alert(t('messages.error'), t('payment.qrGenerationError'));
         } finally {
             setLoading(false);
         }
@@ -46,14 +62,15 @@ const PixPayment = ({ amount, description, onPaymentComplete, onCancel }) => {
         if (!paymentId) return;
 
         try {
-            const response = await WooviService.checkPaymentStatus(paymentId);
+            // Usar novo sistema de verificação de status
+            const response = await WooviService.getPaymentStatus(paymentId);
             setPaymentStatus(response.status);
 
-            if (response.status === 'completed') {
+            if (response.status === 'in_holding' || response.status === 'completed') {
                 onPaymentComplete(response);
             }
         } catch (error) {
-            console.error('Erro ao verificar status:', error);
+            Logger.error('Erro ao verificar status:', error);
         }
     };
 
@@ -64,7 +81,7 @@ const PixPayment = ({ amount, description, onPaymentComplete, onCancel }) => {
             }
             onCancel();
         } catch (error) {
-            Alert.alert(t('error'), t('error_canceling_payment'));
+            Alert.alert(t('messages.error'), t('payment.cancelError'));
         }
     };
 

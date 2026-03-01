@@ -3,7 +3,7 @@ import { Registration } from '../components';
 import { StyleSheet, View, Animated, Text } from 'react-native';
 import { useSelector,useDispatch } from 'react-redux';
 import i18n from '../i18n';
-import { api } from '../common-local';
+import { api } from '../common-local/api';
 
 export default function RegistrationPage(props) {
   const {

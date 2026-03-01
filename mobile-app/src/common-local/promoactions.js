@@ -1,15 +1,17 @@
+import Logger from '../utils/Logger';
 import {
   FETCH_PROMOS,
   FETCH_PROMOS_SUCCESS,
   FETCH_PROMOS_FAILED,
   EDIT_PROMOS
 } from "../types";
-import { firebase } from '../config/configureFirebase';
+import { firebase } from './config/configureFirebase';
 import { api } from '../api';
 import { store } from '../store/store';
 import { PROMO_LOADING, PROMO_LOADED, PROMO_ERROR } from '../store/types';
 import { getAuth } from '@react-native-firebase/auth';
 import { getUserId } from '../utils/authUtils';
+
 
 const waitForFirebaseInit = async () => {
   return new Promise((resolve) => {
@@ -38,13 +40,13 @@ export const fetchPromos = () => async (dispatch) => {
 
     // Aguardar inicialização do Firebase
     await waitForFirebaseInit();
-    console.log('fetchPromos - Firebase Database inicializado');
+    Logger.log('fetchPromos - Firebase Database inicializado');
 
     const authInstance = getAuth();
     const currentUser = authInstance.currentUser;
     
     if (!currentUser) {
-      console.error('fetchPromos - Usuário não autenticado');
+      Logger.error('fetchPromos - Usuário não autenticado');
       dispatch({
         type: FETCH_PROMOS_FAILED,
         payload: 'Usuário não autenticado'
@@ -53,13 +55,13 @@ export const fetchPromos = () => async (dispatch) => {
     }
 
     const token = await currentUser.getIdToken();
-    console.log('fetchPromos - Token obtido:', token ? 'Sim' : 'Não');
+    Logger.log('fetchPromos - Token obtido:', token ? 'Sim' : 'Não');
 
     const {
       promoRef
     } = firebase;
 
-    console.log('fetchPromos - Iniciando busca para UID:', currentUser.uid);
+    Logger.log('fetchPromos - Iniciando busca para UID:', currentUser.uid);
 
     onValue(promoRef, snapshot => {
       if (snapshot.val()) {
@@ -79,14 +81,14 @@ export const fetchPromos = () => async (dispatch) => {
         });
       }
     }, (error) => {
-      console.error('fetchPromos - Erro ao buscar dados:', error);
+      Logger.error('fetchPromos - Erro ao buscar dados:', error);
       dispatch({
         type: FETCH_PROMOS_FAILED,
         payload: error.message || 'Erro ao buscar promoções'
       });
     });
   } catch (error) {
-    console.error('fetchPromos - Erro:', error);
+    Logger.error('fetchPromos - Erro:', error);
     dispatch({
       type: FETCH_PROMOS_FAILED,
       payload: error.message || 'Erro ao buscar promoções'

@@ -5,7 +5,7 @@ import {
     EDIT_CAR
   } from "../types";
   import store from '../store/store';
-  import { firebase } from '../config/configureFirebase';
+  import { firebase } from './config/configureFirebase';
   
   export const fetchCars = () => (dispatch) => {
   

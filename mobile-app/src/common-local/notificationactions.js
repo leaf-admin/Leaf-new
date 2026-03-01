@@ -8,7 +8,7 @@ import {
   SEND_NOTIFICATION_FAILED,
 } from "../types";
 import { RequestPushMsg } from '../other/NotificationFunctions';
-import { firebase } from '../config/configureFirebase';
+import { firebase } from './config/configureFirebase';
 import store from '../store/store';
 
 export const fetchNotifications = () => (dispatch) => {

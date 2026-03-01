@@ -1,5 +1,7 @@
+import Logger from '../utils/Logger';
 import api from '../common-local/api';
 import { useState, useEffect } from 'react';
+
 
 // Configurações do chat
 const CHAT_CONFIG = {
@@ -15,7 +17,7 @@ export const chatService = {
       const response = await api.post('/api/chat/create', chatData);
       return response.data;
     } catch (error) {
-      console.error('Erro ao criar chat:', error);
+      Logger.error('Erro ao criar chat:', error);
       throw new Error('Falha ao criar chat');
     }
   },
@@ -26,7 +28,7 @@ export const chatService = {
       const response = await api.get(`/api/chat/${chatId}`);
       return response.data;
     } catch (error) {
-      console.error('Erro ao buscar chat:', error);
+      Logger.error('Erro ao buscar chat:', error);
       throw new Error('Chat não encontrado');
     }
   },
@@ -39,7 +41,7 @@ export const chatService = {
       });
       return response.data.messages;
     } catch (error) {
-      console.error('Erro ao buscar mensagens:', error);
+      Logger.error('Erro ao buscar mensagens:', error);
       throw new Error('Falha ao carregar mensagens');
     }
   },
@@ -50,7 +52,7 @@ export const chatService = {
       const response = await api.post('/api/chat/message/send', messageData);
       return response.data;
     } catch (error) {
-      console.error('Erro ao enviar mensagem:', error);
+      Logger.error('Erro ao enviar mensagem:', error);
       throw new Error('Falha ao enviar mensagem');
     }
   },
@@ -63,7 +65,7 @@ export const chatService = {
       });
       return response.data;
     } catch (error) {
-      console.error('Erro ao marcar como lida:', error);
+      Logger.error('Erro ao marcar como lida:', error);
       throw new Error('Falha ao marcar mensagens');
     }
   },
@@ -74,7 +76,7 @@ export const chatService = {
       const response = await api.get(`/api/user/${userId}/chats`);
       return response.data.chats;
     } catch (error) {
-      console.error('Erro ao buscar chats do usuário:', error);
+      Logger.error('Erro ao buscar chats do usuário:', error);
       throw new Error('Falha ao carregar chats');
     }
   },
@@ -85,7 +87,7 @@ export const chatService = {
       const response = await api.post(`/api/chat/${chatId}/end`);
       return response.data;
     } catch (error) {
-      console.error('Erro ao finalizar chat:', error);
+      Logger.error('Erro ao finalizar chat:', error);
       throw new Error('Falha ao finalizar chat');
     }
   },
@@ -96,7 +98,7 @@ export const chatService = {
       const response = await api.delete(`/api/chat/${chatId}`);
       return response.data;
     } catch (error) {
-      console.error('Erro ao deletar chat:', error);
+      Logger.error('Erro ao deletar chat:', error);
       throw new Error('Falha ao deletar chat');
     }
   },
@@ -107,7 +109,7 @@ export const chatService = {
       const response = await api.get(`/api/chat/${chatId}/stats`);
       return response.data;
     } catch (error) {
-      console.error('Erro ao buscar estatísticas:', error);
+      Logger.error('Erro ao buscar estatísticas:', error);
       throw new Error('Falha ao carregar estatísticas');
     }
   }
@@ -133,7 +135,7 @@ export class ChatWebSocket {
       this.ws = new WebSocket(wsUrl);
       
       this.ws.onopen = () => {
-        console.log('WebSocket conectado para chat:', this.chatId);
+        Logger.log('WebSocket conectado para chat:', this.chatId);
         this.reconnectAttempts = 0;
       };
       
@@ -151,22 +153,22 @@ export class ChatWebSocket {
             // Marcar mensagens como lidas
             break;
           default:
-            console.log('Mensagem WebSocket desconhecida:', data);
+            Logger.log('Mensagem WebSocket desconhecida:', data);
         }
       };
       
       this.ws.onerror = (error) => {
-        console.error('Erro WebSocket:', error);
+        Logger.error('Erro WebSocket:', error);
         this.onError(error);
       };
       
       this.ws.onclose = () => {
-        console.log('WebSocket desconectado');
+        Logger.log('WebSocket desconectado');
         this.reconnect();
       };
       
     } catch (error) {
-      console.error('Erro ao conectar WebSocket:', error);
+      Logger.error('Erro ao conectar WebSocket:', error);
       this.onError(error);
     }
   }
@@ -174,13 +176,13 @@ export class ChatWebSocket {
   reconnect() {
     if (this.reconnectAttempts < this.maxReconnectAttempts) {
       this.reconnectAttempts++;
-      console.log(`Tentativa de reconexão ${this.reconnectAttempts}/${this.maxReconnectAttempts}`);
+      Logger.log(`Tentativa de reconexão ${this.reconnectAttempts}/${this.maxReconnectAttempts}`);
       
       setTimeout(() => {
         this.connect();
       }, 1000 * this.reconnectAttempts); // Backoff exponencial
     } else {
-      console.error('Máximo de tentativas de reconexão atingido');
+      Logger.error('Máximo de tentativas de reconexão atingido');
       this.onError(new Error('Falha na conexão WebSocket'));
     }
   }

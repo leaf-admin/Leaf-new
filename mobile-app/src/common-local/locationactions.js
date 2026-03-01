@@ -1,3 +1,4 @@
+import Logger from '../utils/Logger';
 import {
     FETCH_BOOKING_LOCATION,
     FETCH_BOOKING_LOCATION_SUCCESS,
@@ -5,7 +6,7 @@ import {
     STOP_LOCATION_FETCH,
     STORE_ADRESSES
 } from "../types";
-import { firebase } from '../config/configureFirebase';
+import { firebase } from './config/configureFirebase';
 import { api } from '../api';
 import store from '../store/store';
 import { LOCATION_LOADING, LOCATION_LOADED, LOCATION_ERROR } from '../store/types';
@@ -13,6 +14,7 @@ import { getAuth } from '@react-native-firebase/auth';
 import { push, onValue, query, limitToLast, off, set, get } from '@react-native-firebase/database';
 import { Platform } from 'react-native';
 import { GetDistance } from '../other/GeoFunctions';
+
 
 // Feature flags para estratégia híbrida
 const USE_REDIS_TRACKING = false; // Redis desabilitado
@@ -24,7 +26,7 @@ export const saveTracking = async (bookingId, location) => {
         const { trackingRef } = firebase;
         await push(trackingRef(bookingId), location);
     } catch (error) {
-        console.error('❌ Error saving tracking:', error);
+        Logger.error('❌ Error saving tracking:', error);
         throw error;
     }
 };
@@ -83,7 +85,7 @@ export const saveUserLocation = async (location) => {
         // Usar apenas Firebase
         await set(userLocationRef(uid), location);
     } catch (error) {
-        console.error('❌ Error saving user location:', error);
+        Logger.error('❌ Error saving user location:', error);
         throw error;
     }
 };
@@ -140,11 +142,11 @@ export const getNearbyDrivers = async (lat, lng, radius = 5) => {
         // Ordenar por distância (mais próximo primeiro)
         drivers.sort((a, b) => parseFloat(a.distance) - parseFloat(b.distance));
 
-        console.log(`📍 Encontrados ${drivers.length} motoristas próximos`);
+        Logger.log(`📍 Encontrados ${drivers.length} motoristas próximos`);
         return drivers;
 
     } catch (error) {
-        console.error('❌ Erro ao buscar motoristas próximos:', error);
+        Logger.error('❌ Erro ao buscar motoristas próximos:', error);
         throw error;
     }
 };
@@ -181,12 +183,12 @@ export const startTripTracking = async (tripId, driverId, passengerId, initialLo
         };
 
         await set(trackingRef(tripId), tripData);
-        console.log(`🚗 Iniciado tracking da viagem ${tripId}`);
+        Logger.log(`🚗 Iniciado tracking da viagem ${tripId}`);
         
         return tripData;
 
     } catch (error) {
-        console.error('❌ Erro ao iniciar tracking:', error);
+        Logger.error('❌ Erro ao iniciar tracking:', error);
         throw error;
     }
 };
@@ -213,12 +215,12 @@ export const endTripTracking = async (tripId, endLocation) => {
         tripData.duration = tripData.endTime - tripData.startTime;
 
         await set(tripRef, tripData);
-        console.log(`✅ Finalizado tracking da viagem ${tripId}`);
+        Logger.log(`✅ Finalizado tracking da viagem ${tripId}`);
         
         return tripData;
 
     } catch (error) {
-        console.error('❌ Erro ao finalizar tracking:', error);
+        Logger.error('❌ Erro ao finalizar tracking:', error);
         throw error;
     }
 };
@@ -240,7 +242,7 @@ export const getTripData = async (tripId) => {
         return snapshot.val();
 
     } catch (error) {
-        console.error('❌ Erro ao obter dados da viagem:', error);
+        Logger.error('❌ Erro ao obter dados da viagem:', error);
         throw error;
     }
 };
@@ -280,7 +282,7 @@ export const getUserTripHistory = async (userId, userType = 'passenger', limit =
         return trips.slice(0, limit);
 
     } catch (error) {
-        console.error('❌ Erro ao obter histórico de viagens:', error);
+        Logger.error('❌ Erro ao obter histórico de viagens:', error);
         throw error;
     }
 };
@@ -342,7 +344,7 @@ export const getTripStatistics = async (userId, userType = 'passenger', period =
         return stats;
 
     } catch (error) {
-        console.error('❌ Erro ao obter estatísticas:', error);
+        Logger.error('❌ Erro ao obter estatísticas:', error);
         throw error;
     }
 };
@@ -370,11 +372,11 @@ export const persistTripData = async (tripId, tripData) => {
         // Salvar no Firebase
         await set(trackingRef(tripId), dataToPersist);
         
-        console.log(`💾 Dados da viagem ${tripId} persistidos com sucesso`);
+        Logger.log(`💾 Dados da viagem ${tripId} persistidos com sucesso`);
         return true;
 
     } catch (error) {
-        console.error('❌ Erro ao persistir dados da viagem:', error);
+        Logger.error('❌ Erro ao persistir dados da viagem:', error);
         throw error;
     }
 };

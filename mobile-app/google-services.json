@@ -8,18 +8,18 @@
   "client": [
     {
       "client_info": {
-        "mobilesdk_app_id": "1:106504629884:android:3806bf3c6600efb7a1a3f9",
+        "mobilesdk_app_id": "1:106504629884:android:b85380c4a25ce8c7a1a3f9",
         "android_client_info": {
-          "package_name": "com.leaf.app"
+          "package_name": "br.com.leaf.ride"
         }
       },
       "oauth_client": [
         {
-          "client_id": "106504629884-c8f1q97uje61ekc0n3ule987t5f2007u.apps.googleusercontent.com",
+          "client_id": "106504629884-lns4r4sdsclb3gk3dhe8skljfnd1c9hr.apps.googleusercontent.com",
           "client_type": 1,
           "android_info": {
-            "package_name": "com.leaf.app",
-            "certificate_hash": "5e8f16062ea3cd2c4a0d547876baa6f38cabf625"
+            "package_name": "br.com.leaf.ride",
+            "certificate_hash": "5437d65efa8c25a94d4a8e325721a9fcba32b4a8"
           }
         },
         {
@@ -40,10 +40,10 @@
               "client_type": 3
             },
             {
-              "client_id": "106504629884-u4akt2328ioo8k2j5gfskf5amqlp12hc.apps.googleusercontent.com",
+              "client_id": "106504629884-laja6e1vn4utkn93ftd99p42mu8qus9s.apps.googleusercontent.com",
               "client_type": 2,
               "ios_info": {
-                "bundle_id": "com.leaf.app"
+                "bundle_id": "br.com.leaf.ride"
               }
             }
           ]

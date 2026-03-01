@@ -1,3 +1,4 @@
+import Logger from '../utils/Logger';
 import React, { useState, useEffect, useRef } from 'react';
 import {
     StyleSheet,
@@ -19,7 +20,7 @@ import MapView, { Polyline, PROVIDER_GOOGLE, Marker, AnimatedRegion } from 'reac
 import { OtpModal } from '../components';
 import StarRating from 'react-native-star-rating-widget';
 import RadioForm from 'react-native-simple-radio-button';
-import { colors } from '../common-local/theme';
+import { colors } from '../common/theme';
 var { width, height } = Dimensions.get('window');
 import i18n from '../i18n';
 import { useSelector, useDispatch } from 'react-redux';
@@ -28,12 +29,12 @@ import carImageIcon from '../../assets/images/track_Car.png';
 import * as ImagePicker from 'expo-image-picker';
 import moment from 'moment/min/moment-with-locales';
 import { CommonActions } from '@react-navigation/native';
-import { appConsts, MAIN_COLOR, SECONDORY_COLOR } from '../common-local/sharedFunctions';
+import { appConsts, MAIN_COLOR, SECONDORY_COLOR } from '../common/sharedFunctions';
 import { Ionicons } from '@expo/vector-icons';
-import { fonts } from '../common-local/font';
+import { fonts } from '../common/font';
 import { getLangKey } from '../common-local/other/getLangKey';
 import DeviceInfo from 'react-native-device-info';
-import navigationService from '../services/NavigationService';
+
 
 const hasNotch = DeviceInfo.hasNotch();
 
@@ -384,60 +385,36 @@ export default function BookedCabScreen(props) {
         }
     }
 
-    const startNavigation = async () => {
-        try {
-            // Inicializar NavigationService se necessário
-            if (!navigationService.isInitialized) {
-                await navigationService.initialize();
-            }
+    const startNavigation = () => {
+        let url = 'https://www.google.com/maps/dir/?api=1&travelmode=driving';
+        if (curBooking.status == 'ACCEPTED') {
+            url = url + '&destination=' + curBooking.pickup.lat + "," + curBooking.pickup.lng;
+            Linking.openURL(url);
+        }
+        else if (curBooking.status == 'STARTED') {
+            if (curBooking.waypoints && curBooking.waypoints.length && curBooking.waypoints.length > 0) {
+                let abc = url + '&destination=' + curBooking.drop.lat + "," + curBooking.drop.lng + '&waypoints=';
+                if (curBooking.waypoints.length > 1) {
+                    for (let i = 0; i < curBooking.waypoints.length; i++) {
+                        let obj = curBooking.waypoints[i];
+                        if (i < curBooking.waypoints.length - 1) {
+                            abc = abc + obj.lat + ',' + obj.lng + '%7C'
+                        } else {
+                            abc = abc + obj.lat + ',' + obj.lng
 
-            let origin, destination;
-
-            if (curBooking.status == 'ACCEPTED') {
-                // Navegar para o ponto de coleta
-                origin = lastLocation || { lat: 0, lng: 0 };
-                destination = curBooking.pickup;
-            } else if (curBooking.status == 'STARTED') {
-                // Navegar para o destino
-                origin = lastLocation || { lat: 0, lng: 0 };
-                destination = curBooking.drop;
+                        }
+                    }
+                    Linking.openURL(abc);
+                } else {
+                    url = url + '&destination=' + curBooking.drop.lat + "," + curBooking.drop.lng + '&waypoints=' + curBooking.waypoints[0].lat + "," + curBooking.waypoints[0].lng;
+                    Linking.openURL(url);
+                }
             } else {
-                Alert.alert(t('alert'), t('navigation_available'));
-                return;
+                url = url + '&destination=' + curBooking.drop.lat + "," + curBooking.drop.lng;
+                Linking.openURL(url);
             }
-
-            console.log('🚗 BookedCabScreen - Iniciando navegação híbrida:', {
-                status: curBooking.status,
-                origin: origin,
-                destination: destination
-            });
-
-            // Calcular rota com trânsito (1x por corrida)
-            const routeData = await navigationService.calculateRouteWithTraffic(origin, destination);
-
-            // Mostrar preview da rota
-            const preview = await navigationService.showRoutePreview(routeData);
-
-            // Abrir navegação externa com fallback inteligente
-            const result = await navigationService.openExternalNavigation(origin, destination, routeData);
-
-            if (result.success) {
-                console.log(`✅ BookedCabScreen - Navegação aberta no ${result.name}`);
-                
-                // Mostrar feedback ao usuário
-                Alert.alert(
-                    'Navegação Iniciada',
-                    `Navegação aberta no ${result.name}. Você pode voltar ao app Leaf a qualquer momento.`,
-                    [{ text: 'OK' }]
-                );
-            } else {
-                console.error('❌ BookedCabScreen - Erro na navegação:', result.error);
-                Alert.alert('Erro', 'Não foi possível abrir a navegação. Tente novamente.');
-            }
-
-        } catch (error) {
-            console.error('❌ BookedCabScreen - Erro ao iniciar navegação:', error);
-            Alert.alert('Erro', 'Erro ao iniciar navegação. Tente novamente.');
+        } else {
+            Alert.alert(t('alert'), t('navigation_available'));
         }
     }
 
@@ -646,7 +623,7 @@ export default function BookedCabScreen(props) {
                                                         emptyColor={colors.STAR}
                                                         rating={curBooking && curBooking.driverOffers[key] && curBooking.driverOffers[key].driverRating ? parseFloat(curBooking.driverOffers[key].driverRating) : 0}
                                                         onChange={() => {
-                                                            //console.log('hello')
+                                                            //Logger.log('hello')
                                                         }}
                                                         style={[isRTL ? { transform: [{ scaleX: -1 }] } : null]}
                                                     />
@@ -985,6 +962,11 @@ export default function BookedCabScreen(props) {
                 {curBooking ?
                     <MapView
                         ref={mapRef}
+                    <UrlTile
+                        urlTemplate="https://a.tile.openstreetmap.org/{z}/{x}/{y}.png"
+                        maximumZ={19}
+                        flipY={false}
+                    />
                         style={styles.map}
                         provider={PROVIDER_GOOGLE}
                         initialRegion={{
@@ -1140,7 +1122,7 @@ export default function BookedCabScreen(props) {
                                                 rating={parseFloat(curBooking.driverRating)}
                                                 style={[styles.ratingContainerStyle, isRTL ? { marginRight: 0, transform: [{ scaleX: -1 }] } : { scaleX: 1 }]}
                                                 onChange={() => {
-                                                    //console.log('hello')
+                                                    //Logger.log('hello')
                                                 }}
                                             />
                                             <Text style={[styles.driverNameText, { textAlign: isRTL ? 'right' : 'left' }]} numberOfLines={1}>{curBooking.driverRating}</Text>

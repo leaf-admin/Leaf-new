@@ -1,3 +1,4 @@
+import Logger from '../utils/Logger';
 import {
     FETCH_PAYMENT_METHODS,
     FETCH_PAYMENT_METHODS_SUCCESS,
@@ -9,8 +10,9 @@ import {
     UPDATE_PAYMENT_METHOD
 } from "../types";
 import { RequestPushMsg } from '../other/NotificationFunctions';
-import { firebase } from '../config/configureFirebase';
+import { firebase } from './config/configureFirebase';
 import store from '../store/store';
+
 
 export const fetchPaymentMethods = () => (dispatch) => {
   const {
@@ -31,10 +33,10 @@ export const fetchPaymentMethods = () => (dispatch) => {
   };
 
   const profile = store.getState().auth.profile;
-  console.log('=== NOVA VERSAO fetchPaymentMethods ===', { profile });
+  Logger.log('=== NOVA VERSAO fetchPaymentMethods ===', { profile });
 
   if (!profile || !profile.usertype) {
-    console.warn('fetchPaymentMethods - Usuário não autenticado ou sem usertype. Não será feita busca de métodos de pagamento.');
+    Logger.warn('fetchPaymentMethods - Usuário não autenticado ou sem usertype. Não será feita busca de métodos de pagamento.');
     dispatch({
       type: FETCH_PAYMENT_METHODS_FAILED,
       payload: 'Usuário não autenticado ou sem tipo.'

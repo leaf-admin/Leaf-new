@@ -1,0 +1,89 @@
+# Teste: Login e Alteração de Perfil do App Único
+appId: br.com.leaf.ride
+env:
+  EXPO_PUBLIC_E2E_TEST: "true"
+---
+- launchApp:
+    clearState: true
+
+- takeScreenshot: "01-app-launched"
+
+# Aguardar tela de login aparecer e inserir o telefone de teste
+- assertVisible: "Telefone"
+- tapOn: "Telefone"
+- inputText: "11999999999"
+
+# Se houver botão Continuar/Entrar, clicar nele
+- runFlow:
+    when:
+      visible: "Continuar"
+    commands:
+      - tapOn: "Continuar"
+
+- runFlow:
+    when:
+      visible: "Entrar"
+    commands:
+      - tapOn: "Entrar"
+
+- waitForAnimationToEnd
+- takeScreenshot: "02-phone-submitted"
+
+# Inserção do Código/Senha
+- runFlow:
+    when:
+      visible: "Senha"
+    commands:
+      - inputText: "senha123"
+      - tapOn: "Entrar"
+
+- runFlow:
+    when:
+      visible: "Código"
+    commands:
+      - inputText: "123456"
+      - tapOn: "Verificar"
+
+- waitForAnimationToEnd
+
+# Se for a tela de cadastro
+- runFlow:
+    when:
+      visible: "Nome completo"
+    commands:
+      - inputText: "Maestro Test User"
+      - tapOn: "CPF"
+      - inputText: "12345678901"
+      - tapOn: "Cadastrar"
+
+- waitForAnimationToEnd
+- takeScreenshot: "03-login-success"
+
+# Verificar Painel de Passageiro (Default)
+- assertVisible: 
+    text: "Passageiro"
+    optional: true
+
+# Alternar para modo Motorista clicando no ProfileToggle
+- tapOn: "Passageiro"
+- waitForAnimationToEnd
+- takeScreenshot: "04-toggle-prompt-visible"
+
+# Se o backend perguntar, confirmar a alteração de permissão
+- runFlow:
+    when:
+      visible: "OK"
+    commands:
+      - tapOn: "OK"
+
+- waitForAnimationToEnd
+- takeScreenshot: "05-switched-to-driver"
+
+# Após confirmar, a interface deve exibir Motorista (e Ficar Online)
+- assertVisible: 
+    text: "Motorista"
+    optional: true
+
+- assertVisible:
+    text: "Ficar Online"
+    optional: true

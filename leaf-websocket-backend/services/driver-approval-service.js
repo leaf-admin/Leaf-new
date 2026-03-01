@@ -1,582 +1,450 @@
-const Redis = require('ioredis');
-const admin = require('firebase-admin');
-const { logger } = require('../utils/logger');
-const DriverNotificationService = require('./driver-notification-service');
-
-const APPROVAL_CONFIG = {
-  statuses: {
-    PENDING: 'pending',
-    UNDER_REVIEW: 'under_review', 
-    APPROVED: 'approved',
-    REJECTED: 'rejected',
-    SUSPENDED: 'suspended',
-    BLOCKED: 'blocked'
-  },
-  
-  documentTypes: {
-    DRIVER_LICENSE: 'driver_license',
-    VEHICLE_REGISTRATION: 'vehicle_registration',
-    INSURANCE: 'insurance',
-    BACKGROUND_CHECK: 'background_check',
-    VEHICLE_INSPECTION: 'vehicle_inspection',
-    ID_DOCUMENT: 'id_document'
-  },
-  
-  approvalCriteria: {
-    MIN_AGE: 21,
-    MIN_LICENSE_YEARS: 2,
-    REQUIRED_DOCUMENTS: ['driver_license', 'vehicle_registration', 'insurance'],
-    MAX_CRIMINAL_RECORDS: 0,
-    MIN_VEHICLE_YEAR: 2010
-  }
-};
+const WooviDriverService = require('./woovi-driver-service');
+const firebaseConfig = require('../firebase-config');
+const { logStructured, logError } = require('../utils/logger');
 
 class DriverApprovalService {
   constructor() {
-    this.redis = new Redis(process.env.REDIS_URL || 'redis://localhost:6379');
-    this.isInitialized = false;
-    this.notificationService = new DriverNotificationService();
+    // Criar instância do WooviDriverService
+    this.wooviDriverService = new WooviDriverService();
   }
-
-  async initialize() {
+  /**
+   * Processa a aprovação de um motorista e cria conta na Woovi
+   * @param {Object} driverData - Dados do motorista aprovado
+   * @param {string} driverData.id - ID do motorista no sistema
+   * @param {string} driverData.name - Nome completo
+   * @param {string} driverData.email - Email
+   * @param {string} driverData.phone - Telefone
+   * @param {string} driverData.cpf - CPF
+   * @returns {Promise<Object>} - Resultado da aprovação
+   */
+  async approveDriver(driverData) {
     try {
-      await this.redis.ping();
-      await this.notificationService.initialize();
-      this.isInitialized = true;
-      logger.info('✅ Driver Approval Service inicializado');
-    } catch (error) {
-      logger.error('❌ Erro ao inicializar Driver Approval Service:', error);
-      throw error;
-    }
-  }
-
-  async createApprovalRequest(driverData) {
-    try {
-      const approvalId = `approval_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+      logStructured('info', 'Processando aprovação do motorista', { service: 'driver-approval-service', driverId: driverData.id, driverName: driverData.name });
       
-      const approvalRequest = {
-        id: approvalId,
-        driverId: driverData.driverId,
-        status: APPROVAL_CONFIG.statuses.PENDING,
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
+      // 1. Tentar criar subaccount BaaS na Woovi (conta real para o motorista gerenciar saldo)
+      // Se API MASTER não estiver configurada, usa fallback automaticamente
+      let baasResult = await this.wooviDriverService.createDriverBaaSAccount({
+        name: driverData.name,
+        email: driverData.email,
+        phone: driverData.phone,
+        cpf: driverData.cpf,
+        driverId: driverData.id
+      });
+
+      // Se API MASTER não estiver configurada, usar fallback (customer)
+      let useCustomerFallback = false;
+      
+      if (!baasResult || !baasResult.success) {
+        if (baasResult && baasResult.useFallback) {
+          logStructured('warn', 'API MASTER não configurada ainda. Usando fallback (customer)', { service: 'driver-approval-service', driverId: driverData.id, note: 'Quando API MASTER estiver disponível, contas BaaS serão criadas automaticamente' });
+        } else {
+          logError(new Error(baasResult?.error || 'Erro desconhecido'), 'Falha ao criar subaccount BaaS', { service: 'driver-approval-service', driverId: driverData.id });
+          logStructured('warn', 'Tentando criar apenas customer como fallback', { service: 'driver-approval-service', driverId: driverData.id });
+        }
         
-        driver: {
+        useCustomerFallback = true;
+      }
+
+      // Se precisar usar fallback ou se BaaS falhou, criar customer
+      if (useCustomerFallback || !baasResult || !baasResult.success) {
+        const customerResult = await this.wooviDriverService.createDriverClient({
           name: driverData.name,
           email: driverData.email,
           phone: driverData.phone,
-          dateOfBirth: driverData.dateOfBirth,
-          address: driverData.address
-        },
-        
-        vehicle: {
-          make: driverData.vehicle.make,
-          model: driverData.vehicle.model,
-          year: driverData.vehicle.year,
-          color: driverData.vehicle.color,
-          plate: driverData.vehicle.plate
-        },
-        
-        documents: driverData.documents || [],
-        approvalHistory: [],
-        notes: [],
-        
-        approvalCriteria: {
-          ageCheck: this.checkAge(driverData.dateOfBirth),
-          licenseCheck: this.checkLicense(driverData.license),
-          vehicleCheck: this.checkVehicle(driverData.vehicle),
-          documentCheck: this.checkRequiredDocuments(driverData.documents)
-        },
-        
-        approvalScore: 0,
-        validationFlags: {
-          documentsComplete: false,
-          ageRequirement: false,
-          licenseValid: false,
-          vehicleSuitable: false
-        }
-      };
-      
-      await this.redis.setex(
-        `driver_approval:${approvalId}`, 
-        30 * 24 * 60 * 60,
-        JSON.stringify(approvalRequest)
-      );
-      
-      await this.redis.lpush('pending_approvals', approvalId);
-      await this.redis.sadd(`approvals_by_status:${approvalRequest.status}`, approvalId);
-      await this.redis.set(`driver_approval_index:${driverData.driverId}`, approvalId);
-      
-      logger.info(`✅ Solicitação de aprovação criada: ${approvalId}`);
-      return approvalRequest;
-      
-    } catch (error) {
-      logger.error('❌ Erro ao criar solicitação:', error);
-      throw error;
-    }
-  }
-
-  async getApprovalRequest(approvalId) {
-    try {
-      const data = await this.redis.get(`driver_approval:${approvalId}`);
-      return data ? JSON.parse(data) : null;
-    } catch (error) {
-      logger.error('❌ Erro ao buscar aprovação:', error);
-      return null;
-    }
-  }
-
-  async getApprovalsByStatus(status, page = 0, limit = 20) {
-    try {
-      const ids = await this.redis.smembers(`approvals_by_status:${status}`);
-      const start = page * limit;
-      const end = start + limit - 1;
-      const paginatedIds = ids.slice(start, end + 1);
-      
-      const approvals = [];
-      for (const id of paginatedIds) {
-        const approval = await this.getApprovalRequest(id);
-        if (approval) approvals.push(approval);
-      }
-      
-      return {
-        approvals,
-        total: ids.length,
-        page,
-        limit,
-        hasMore: end + 1 < ids.length
-      };
-    } catch (error) {
-      logger.error('❌ Erro ao buscar aprovações:', error);
-      return { approvals: [], total: 0, page, limit, hasMore: false };
-    }
-  }
-
-  async updateApprovalStatus(approvalId, newStatus, adminId, reason = '') {
-    try {
-      const approval = await this.getApprovalRequest(approvalId);
-      if (!approval) throw new Error('Aprovação não encontrada');
-      
-      const oldStatus = approval.status;
-      approval.status = newStatus;
-      approval.updatedAt = new Date().toISOString();
-      
-      approval.approvalHistory.push({
-        action: 'status_change',
-        fromStatus: oldStatus,
-        toStatus: newStatus,
-        adminId,
-        reason,
-        timestamp: new Date().toISOString()
-      });
-      
-      await this.redis.srem(`approvals_by_status:${oldStatus}`, approvalId);
-      await this.redis.sadd(`approvals_by_status:${newStatus}`, approvalId);
-      
-      if (newStatus === APPROVAL_CONFIG.statuses.APPROVED || 
-          newStatus === APPROVAL_CONFIG.statuses.REJECTED) {
-        await this.redis.lrem('pending_approvals', 0, approvalId);
-      }
-      
-      await this.redis.setex(
-        `driver_approval:${approvalId}`, 
-        30 * 24 * 60 * 60,
-        JSON.stringify(approval)
-      );
-      
-      logger.info(`✅ Status alterado: ${oldStatus} → ${newStatus}`);
-      return approval;
-      
-    } catch (error) {
-      logger.error('❌ Erro ao atualizar status:', error);
-      throw error;
-    }
-  }
-
-  async approveDriver(approvalId, adminId, reason = '') {
-    try {
-      const approval = await this.getApprovalRequest(approvalId);
-      if (!approval) throw new Error('Aprovação não encontrada');
-      
-      if (!this.canBeApproved(approval)) {
-        throw new Error('Não atende aos critérios de aprovação');
-      }
-      
-      // Atualizar no Redis
-      await this.updateApprovalStatus(
-        approvalId, 
-        APPROVAL_CONFIG.statuses.APPROVED, 
-        adminId, 
-        reason
-      );
-      
-      // Atualizar no Firebase
-      await this.updateDriverStatusInFirebase(approval.driverId, 'approved', adminId, reason);
-      
-      // Enviar notificação
-      await this.notificationService.sendApprovalNotification(approval.driverId, 'approved', reason);
-      
-      logger.info(`✅ Motorista ${approval.driverId} aprovado`);
-      return true;
-      
-    } catch (error) {
-      logger.error('❌ Erro ao aprovar motorista:', error);
-      throw error;
-    }
-  }
-
-  async rejectDriver(approvalId, adminId, reason) {
-    try {
-      if (!reason) throw new Error('Motivo da rejeição é obrigatório');
-      
-      const approval = await this.getApprovalRequest(approvalId);
-      if (!approval) throw new Error('Aprovação não encontrada');
-      
-      // Atualizar no Redis
-      await this.updateApprovalStatus(
-        approvalId, 
-        APPROVAL_CONFIG.statuses.REJECTED, 
-        adminId, 
-        reason
-      );
-      
-      // Atualizar no Firebase
-      await this.updateDriverStatusInFirebase(approval.driverId, 'rejected', adminId, reason);
-      
-      // Enviar notificação
-      await this.notificationService.sendApprovalNotification(approval.driverId, 'rejected', reason);
-      
-      logger.info(`❌ Motorista rejeitado: ${reason}`);
-      return true;
-      
-    } catch (error) {
-      logger.error('❌ Erro ao rejeitar motorista:', error);
-      throw error;
-    }
-  }
-
-  // Métodos auxiliares
-  checkAge(dateOfBirth) {
-    const birthDate = new Date(dateOfBirth);
-    const today = new Date();
-    const age = today.getFullYear() - birthDate.getFullYear();
-    const monthDiff = today.getMonth() - birthDate.getMonth();
-    
-    if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < birthDate.getDate())) {
-      age--;
-    }
-    
-    return {
-      age,
-      isValid: age >= APPROVAL_CONFIG.approvalCriteria.MIN_AGE,
-      requirement: APPROVAL_CONFIG.approvalCriteria.MIN_AGE
-    };
-  }
-
-  checkLicense(licenseData) {
-    const issueDate = new Date(licenseData.issueDate);
-    const today = new Date();
-    const yearsHeld = today.getFullYear() - issueDate.getFullYear();
-    
-    return {
-      yearsHeld,
-      isValid: yearsHeld >= APPROVAL_CONFIG.approvalCriteria.MIN_LICENSE_YEARS,
-      requirement: APPROVAL_CONFIG.approvalCriteria.MIN_LICENSE_YEARS,
-      expiresAt: licenseData.expiryDate
-    };
-  }
-
-  checkVehicle(vehicleData) {
-    return {
-      year: vehicleData.year,
-      isValid: vehicleData.year >= APPROVAL_CONFIG.approvalCriteria.MIN_VEHICLE_YEAR,
-      requirement: APPROVAL_CONFIG.approvalCriteria.MIN_VEHICLE_YEAR
-    };
-  }
-
-  checkRequiredDocuments(documents) {
-    const required = APPROVAL_CONFIG.approvalCriteria.REQUIRED_DOCUMENTS;
-    const uploaded = documents.map(d => d.type);
-    
-    const missing = required.filter(doc => !uploaded.includes(doc));
-    const uploadedDocs = required.filter(doc => uploaded.includes(doc));
-    
-    return {
-      required,
-      uploaded: uploadedDocs,
-      missing,
-      isComplete: missing.length === 0
-    };
-  }
-
-  canBeApproved(approval) {
-    return (
-      approval.approvalCriteria.ageCheck.isValid &&
-      approval.approvalCriteria.licenseCheck.isValid &&
-      approval.approvalCriteria.vehicleCheck.isValid &&
-      approval.approvalCriteria.documentCheck.isComplete
-    );
-  }
-
-  async getServiceStats() {
-    try {
-      const stats = {
-        totalApprovals: 0,
-        pendingApprovals: 0,
-        approvedDrivers: 0,
-        rejectedDrivers: 0,
-        approvalRate: 0
-      };
-      
-      for (const status of Object.values(APPROVAL_CONFIG.statuses)) {
-        const count = await this.redis.scard(`approvals_by_status:${status}`);
-        stats[`${status}Approvals`] = count;
-        
-        if (status === 'pending') stats.pendingApprovals = count;
-        if (status === 'approved') stats.approvedDrivers = count;
-        if (status === 'rejected') stats.rejectedDrivers = count;
-      }
-      
-      stats.totalApprovals = stats.approvedDrivers + stats.rejectedDrivers + stats.pendingApprovals;
-      
-      if (stats.totalApprovals > 0) {
-        stats.approvalRate = ((stats.approvedDrivers / stats.totalApprovals) * 100).toFixed(2);
-      }
-      
-      return stats;
-      
-    } catch (error) {
-      logger.error('❌ Erro ao obter estatísticas:', error);
-      return {};
-    }
-  }
-
-  // ===== MÉTODOS DE INTEGRAÇÃO FIREBASE =====
-
-  // Buscar usuários motoristas do Firebase
-  async fetchDriversFromFirebase() {
-    try {
-      const driversRef = admin.firestore().collection('users');
-      const snapshot = await driversRef
-        .where('userType', '==', 'driver')
-        .where('status', '==', 'pending_approval')
-        .get();
-
-      const drivers = [];
-      snapshot.forEach(doc => {
-        drivers.push({
-          id: doc.id,
-          ...doc.data()
+          cpf: driverData.cpf,
+          driverId: driverData.id
         });
-      });
 
-      return drivers;
-    } catch (error) {
-      logger.error('❌ Erro ao buscar motoristas do Firebase:', error);
-      return [];
-    }
-  }
-
-  // Buscar documentos do motorista do Firebase Storage
-  async fetchDriverDocumentsFromFirebase(driverId) {
-    try {
-      const documentsRef = admin.firestore().collection('driverDocuments');
-      const snapshot = await documentsRef
-        .where('driverId', '==', driverId)
-        .get();
-
-      const documents = [];
-      snapshot.forEach(doc => {
-        documents.push({
-          id: doc.id,
-          ...doc.data()
-        });
-      });
-
-      return documents;
-    } catch (error) {
-      logger.error('❌ Erro ao buscar documentos do motorista:', error);
-      return [];
-    }
-  }
-
-  // Buscar dados completos do motorista
-  async fetchDriverDataFromFirebase(driverId) {
-    try {
-      const userRef = admin.firestore().collection('users').doc(driverId);
-      const userDoc = await userRef.get();
-
-      if (!userDoc.exists) {
-        throw new Error('Motorista não encontrado');
-      }
-
-      const userData = userDoc.data();
-
-      // Buscar documentos
-      const documents = await this.fetchDriverDocumentsFromFirebase(driverId);
-
-      // Buscar dados do veículo
-      const vehicleRef = admin.firestore().collection('driverVehicles').doc(driverId);
-      const vehicleDoc = await vehicleRef.get();
-      const vehicleData = vehicleDoc.exists ? vehicleDoc.data() : {};
-
-      return {
-        ...userData,
-        documents,
-        vehicle: vehicleData
-      };
-    } catch (error) {
-      logger.error('❌ Erro ao buscar dados do motorista:', error);
-      return null;
-    }
-  }
-
-  // Atualizar status do motorista no Firebase
-  async updateDriverStatusInFirebase(driverId, status, adminId, reason = '') {
-    try {
-      const batch = admin.firestore().batch();
-
-      // Atualizar status do usuário
-      const userRef = admin.firestore().collection('users').doc(driverId);
-      batch.update(userRef, {
-        status: status,
-        approvedAt: status === 'approved' ? admin.firestore.FieldValue.serverTimestamp() : null,
-        rejectedAt: status === 'rejected' ? admin.firestore.FieldValue.serverTimestamp() : null,
-        approvedBy: adminId,
-        rejectionReason: status === 'rejected' ? reason : null,
-        lastUpdated: admin.firestore.FieldValue.serverTimestamp()
-      });
-
-      // Adicionar ao histórico de aprovações
-      const approvalHistoryRef = admin.firestore().collection('approvalHistory').doc();
-      batch.set(approvalHistoryRef, {
-        driverId,
-        adminId,
-        status,
-        reason,
-        timestamp: admin.firestore.FieldValue.serverTimestamp(),
-        documents: await this.fetchDriverDocumentsFromFirebase(driverId)
-      });
-
-      // Se aprovado, ativar conta
-      if (status === 'approved') {
-        const authUser = await admin.auth().getUser(driverId);
-        if (authUser) {
-          await admin.auth().setCustomUserClaims(driverId, {
-            approved: true,
-            role: 'driver'
-          });
+        if (!customerResult.success) {
+          return {
+            success: false,
+            error: 'Falha ao criar conta na Woovi',
+            details: customerResult.error
+          };
         }
+
+        // Usar customer como fallback (temporário até API MASTER estar disponível)
+        const updatedDriverData = {
+          ...driverData,
+          wooviAccountId: customerResult.wooviClientId,
+          wooviClientId: customerResult.wooviClientId, // Compatibilidade
+          isApproved: true,
+          approvedAt: new Date().toISOString(),
+          wooviAccountCreated: true,
+          baasAccountCreated: false, // Indica que não é BaaS real ainda
+          fallbackToCustomer: true,
+          baasUpgradePending: true // Flag para indicar que pode ser atualizado para BaaS depois
+        };
+
+        // ✅ Salvar wooviAccountId no Firestore (mesmo sendo fallback)
+        try {
+          const firestore = firebaseConfig.getFirestore();
+          if (firestore && customerResult.wooviClientId) {
+            const driverRef = firestore.collection('users').doc(driverData.id);
+            // Filtrar valores undefined para evitar erro no Firestore
+            const dataToSave = {
+              wooviAccountId: customerResult.wooviClientId,
+              wooviClientId: customerResult.wooviClientId,
+              wooviAccountCreated: true,
+              baasAccountCreated: false,
+              fallbackToCustomer: true,
+              baasUpgradePending: true, // Pode ser atualizado para BaaS quando API MASTER estiver disponível
+              wooviAccountCreatedAt: new Date().toISOString(),
+              isApproved: true,
+              approvedAt: new Date().toISOString()
+            };
+            // Remover valores undefined
+            Object.keys(dataToSave).forEach(key => {
+              if (dataToSave[key] === undefined) {
+                delete dataToSave[key];
+              }
+            });
+            
+            await driverRef.set(dataToSave, { merge: true });
+            
+            logStructured('info', 'wooviAccountId (fallback) salvo no Firestore', { service: 'driver-approval-service', driverId: driverData.id, wooviClientId: customerResult.wooviClientId });
+          } else if (!customerResult.wooviClientId) {
+            logStructured('warn', 'wooviClientId não disponível para salvar no Firestore', { service: 'driver-approval-service', driverId: driverData.id });
+          }
+        } catch (firestoreError) {
+          logError(firestoreError, 'Erro ao salvar wooviAccountId no Firestore (fallback)', { service: 'driver-approval-service', driverId: driverData.id });
+        }
+
+        return {
+          success: true,
+          message: 'Motorista aprovado (usando customer como fallback)',
+          driverData: updatedDriverData,
+          wooviAccountId: customerResult.wooviClientId,
+          wooviClientId: customerResult.wooviClientId
+        };
       }
 
-      await batch.commit();
-      logger.info(`✅ Status do motorista ${driverId} atualizado para ${status} no Firebase`);
-      return true;
-    } catch (error) {
-      logger.error('❌ Erro ao atualizar status do motorista no Firebase:', error);
-      throw error;
-    }
-  }
+      // Se chegou aqui, BaaS foi criado com sucesso
+      if (!baasResult || !baasResult.success) {
+        // Não deveria chegar aqui, mas por segurança retornar erro
+        return {
+          success: false,
+          error: 'Falha ao criar conta BaaS e fallback não foi executado corretamente'
+        };
+      }
 
-  // Buscar documentos do Firebase Storage
-  async getDocumentDownloadURL(documentId) {
-    try {
-      const bucket = admin.storage().bucket();
-      const file = bucket.file(`driver-documents/${documentId}`);
-      
-      const [url] = await file.getSignedUrl({
-        action: 'read',
-        expires: Date.now() + 15 * 60 * 1000 // 15 minutos
+      // 2. Criar também customer para compatibilidade (se necessário)
+      const customerResult = await this.wooviDriverService.createDriverClient({
+        name: driverData.name,
+        email: driverData.email,
+        phone: driverData.phone,
+        cpf: driverData.cpf,
+        driverId: driverData.id
       });
 
-      return url;
-    } catch (error) {
-      logger.error('❌ Erro ao gerar URL de download:', error);
-      return null;
-    }
-  }
+      // 3. Atualizar dados do motorista no sistema (Firebase/Firestore)
+      const updatedDriverData = {
+        ...driverData,
+        wooviAccountId: baasResult.wooviAccountId, // ID da conta BaaS (principal)
+        wooviClientId: baasResult.wooviClientId, // Para compatibilidade
+        customerId: customerResult.success ? customerResult.wooviClientId : null,
+        isApproved: true,
+        approvedAt: new Date().toISOString(),
+        wooviAccountCreated: true,
+        baasAccountCreated: true // Indica que é BaaS real
+      };
 
-  // Verificar documento no Firebase
-  async verifyDocumentInFirebase(documentId, verified, adminId, notes = '') {
-    try {
-      const docRef = admin.firestore().collection('driverDocuments').doc(documentId);
-      await docRef.update({
-        verified,
-        verifiedBy: adminId,
-        verifiedAt: admin.firestore.FieldValue.serverTimestamp(),
-        verificationNotes: notes
-      });
-
-      logger.info(`✅ Documento ${documentId} verificado: ${verified}`);
-      return true;
-    } catch (error) {
-      logger.error('❌ Erro ao verificar documento:', error);
-      throw error;
-    }
-  }
-
-  // Sincronizar dados do Firebase com Redis
-  async syncFirebaseData() {
-    try {
-      logger.info('🔄 Iniciando sincronização com Firebase...');
-      
-      // Buscar motoristas pendentes do Firebase
-      const firebaseDrivers = await this.fetchDriversFromFirebase();
-      
-      for (const driver of firebaseDrivers) {
-        // Buscar dados completos
-        const driverData = await this.fetchDriverDataFromFirebase(driver.id);
-        if (!driverData) continue;
-        
-        // Verificar se já existe no Redis
-        const existingApproval = await this.redis.get(`driver_approval_index:${driver.id}`);
-        
-        if (!existingApproval) {
-          // Criar nova solicitação de aprovação
-          await this.createApprovalRequest({
-            driverId: driver.id,
-            name: driverData.name || driverData.displayName,
-            email: driverData.email,
-            phone: driverData.phoneNumber,
-            dateOfBirth: driverData.dateOfBirth,
-            address: driverData.address,
-            vehicle: driverData.vehicle || {},
-            documents: driverData.documents || [],
-            license: driverData.license || {}
+      // ✅ Salvar wooviAccountId no Firestore
+      try {
+        const firestore = firebaseConfig.getFirestore();
+        if (firestore && baasResult.wooviAccountId) {
+          const driverRef = firestore.collection('users').doc(driverData.id);
+          
+          // Preparar dados para salvar (filtrar undefined)
+          const dataToSave = {
+            wooviAccountId: baasResult.wooviAccountId,
+            wooviClientId: baasResult.wooviClientId || baasResult.wooviAccountId,
+            wooviAccountCreated: true,
+            baasAccountCreated: true,
+            wooviAccountCreatedAt: new Date().toISOString(),
+            isApproved: true,
+            approvedAt: new Date().toISOString()
+          };
+          
+          // Adicionar customerId apenas se existir
+          if (customerResult.success && customerResult.wooviClientId) {
+            dataToSave.customerId = customerResult.wooviClientId;
+          }
+          
+          // Remover valores undefined para evitar erro no Firestore
+          Object.keys(dataToSave).forEach(key => {
+            if (dataToSave[key] === undefined) {
+              delete dataToSave[key];
+            }
           });
           
-          logger.info(`✅ Motorista ${driver.id} sincronizado do Firebase`);
+          await driverRef.set(dataToSave, { merge: true }); // merge: true para não sobrescrever outros campos
+          
+          logStructured('info', 'wooviAccountId salvo no Firestore', { service: 'driver-approval-service', driverId: driverData.id, wooviAccountId: baasResult.wooviAccountId });
+        } else if (!baasResult.wooviAccountId) {
+          logStructured('warn', 'wooviAccountId não disponível para salvar no Firestore', { service: 'driver-approval-service', driverId: driverData.id });
+        } else {
+          logStructured('warn', 'Firestore não disponível, wooviAccountId não foi salvo', { service: 'driver-approval-service', driverId: driverData.id });
         }
+      } catch (firestoreError) {
+        logError(firestoreError, 'Erro ao salvar wooviAccountId no Firestore', { service: 'driver-approval-service', driverId: driverData.id });
+        // Não bloquear aprovação se falhar ao salvar no Firestore
       }
-      
-      logger.info(`✅ Sincronização concluída: ${firebaseDrivers.length} motoristas processados`);
-      return firebaseDrivers.length;
+
+      // 4. Verificar e aplicar promoções elegíveis
+      try {
+        const promotionService = require('./promotion-service');
+        const promotionResult = await promotionService.checkAndApplyEligiblePromotions(driverData.id);
+        
+        if (promotionResult.success && promotionResult.results && promotionResult.results.length > 0) {
+          logStructured('info', 'Promoções aplicadas para motorista', { service: 'driver-approval-service', driverId: driverData.id, results: promotionResult.results });
+        }
+      } catch (promoError) {
+        logError(promoError, 'Erro ao verificar promoções (não bloqueia aprovação)', { service: 'driver-approval-service', driverId: driverData.id });
+        // Não bloquear aprovação se falhar verificação de promoções
+      }
+
+      // 5. Enviar notificação para o motorista
+      // TODO: Implementar notificação push/email
+      logStructured('info', 'Enviando notificação de aprovação', { service: 'driver-approval-service', driverId: driverData.id, email: driverData.email });
+      logStructured('info', 'Subaccount BaaS criada', { service: 'driver-approval-service', driverId: driverData.id, wooviAccountId: baasResult.wooviAccountId });
+
+      return {
+        success: true,
+        message: 'Motorista aprovado e conta BaaS criada com sucesso',
+        driverData: updatedDriverData,
+        wooviAccountId: baasResult.wooviAccountId,
+        wooviClientId: baasResult.wooviClientId
+      };
       
     } catch (error) {
-      logger.error('❌ Erro na sincronização com Firebase:', error);
-      throw error;
+      logError(error, 'Erro ao aprovar motorista', { service: 'driver-approval-service', driverId: driverData.id });
+      return {
+        success: false,
+        error: 'Erro interno do servidor',
+        details: error.message
+      };
     }
   }
 
-  // Métodos simulados para Firebase (implementar conforme necessário)
-  async fetchPromosFromFirebase(filters, page, limit) {
-    // TODO: Implementar busca real no Firebase
-    return [];
+  /**
+   * Processa ganhos de uma corrida para o motorista
+   * @param {Object} rideData - Dados da corrida
+   * @param {string} rideData.driverId - ID do motorista
+   * @param {string} rideData.wooviClientId - ID do cliente na Woovi
+   * @param {number} rideData.earnings - Ganhos em centavos
+   * @param {string} rideData.description - Descrição da corrida
+   * @returns {Promise<Object>} - Resultado do processamento
+   */
+  async processRideEarnings(rideData) {
+    try {
+      logStructured('info', 'Processando ganhos da corrida para motorista', { service: 'driver-approval-service', driverId: rideData.driverId, rideId: rideData.rideId });
+      
+      // Criar cobrança de ganhos na Woovi
+      const earningsResult = await this.wooviDriverService.createRideEarnings(
+        rideData.wooviClientId,
+        rideData.earnings,
+        rideData.description,
+        rideData.rideId
+      );
+
+      if (!earningsResult.success) {
+        logError(new Error(earningsResult.error), 'Falha ao criar cobrança de ganhos', { service: 'driver-approval-service', driverId: rideData.driverId, rideId: rideData.rideId });
+        return {
+          success: false,
+          error: 'Falha ao processar ganhos na Woovi',
+          details: earningsResult.error
+        };
+      }
+
+      // TODO: Atualizar banco de dados com os ganhos
+      // TODO: Enviar notificação para o motorista
+
+      return {
+        success: true,
+        message: 'Ganhos processados com sucesso',
+        chargeId: earningsResult.charge.id,
+        earnings: rideData.earnings
+      };
+      
+    } catch (error) {
+      logError(error, 'Erro ao processar ganhos', { service: 'driver-approval-service', driverId: rideData.driverId, rideId: rideData.rideId });
+      return {
+        success: false,
+        error: 'Erro interno do servidor',
+        details: error.message
+      };
+    }
   }
 
-  async fetchPromoByCodeFromFirebase(code) {
-    // TODO: Implementar busca real no Firebase
-    return null;
+  /**
+   * Busca wooviAccountId do motorista do Firestore
+   * @param {string} driverId - ID do motorista
+   * @returns {Promise<Object>} - Dados da conta Woovi ou null
+   */
+  async getDriverWooviAccountId(driverId) {
+    try {
+      const firestore = firebaseConfig.getFirestore();
+      if (!firestore) {
+        logStructured('warn', 'Firestore não disponível para buscar wooviAccountId', { service: 'driver-approval-service', driverId });
+        return null;
+      }
+
+      const driverRef = firestore.collection('users').doc(driverId);
+      const driverDoc = await driverRef.get();
+
+      if (!driverDoc.exists) {
+        logStructured('warn', 'Motorista não encontrado no Firestore', { service: 'driver-approval-service', driverId });
+        return null;
+      }
+
+      const driverData = driverDoc.data();
+      const wooviAccountId = driverData.wooviAccountId || driverData.wooviClientId;
+
+      if (!wooviAccountId) {
+        logStructured('warn', 'Motorista não possui wooviAccountId no Firestore', { service: 'driver-approval-service', driverId });
+        return null;
+      }
+
+      return {
+        wooviAccountId: wooviAccountId,
+        wooviClientId: driverData.wooviClientId || wooviAccountId,
+        pixKey: driverData.pixKey || driverData.wooviPixKey || null, // Chave Pix do motorista
+        pixKeyType: driverData.pixKeyType || null,
+        baasAccountCreated: driverData.baasAccountCreated || false,
+        fallbackToCustomer: driverData.fallbackToCustomer || false
+      };
+    } catch (error) {
+      logError(error, 'Erro ao buscar wooviAccountId do Firestore', { service: 'driver-approval-service', driverId });
+      return null;
+    }
   }
 
-  async fetchPromoByIdFromFirebase(promoId) {
-    // TODO: Implementar busca real no Firebase
-    return null;
+  /**
+   * Verifica se um motorista tem conta na Woovi
+   * @param {string} driverId - ID do motorista
+   * @returns {Promise<Object>} - Status da conta Woovi
+   */
+  async checkDriverWooviAccount(driverId) {
+    try {
+      // ✅ Buscar wooviAccountId do Firestore
+      const accountData = await this.getDriverWooviAccountId(driverId);
+      
+      if (!accountData || !accountData.wooviAccountId) {
+        return {
+          success: false,
+          hasAccount: false,
+          message: 'Motorista não possui conta na Woovi'
+        };
+      }
+
+      const wooviAccountId = accountData.wooviAccountId;
+
+      // Verificar se a conta ainda existe na Woovi (opcional - pode ser custoso)
+      // Por enquanto, apenas retornar os dados do Firestore
+      return {
+        success: true,
+        hasAccount: true,
+        wooviAccountId: wooviAccountId,
+        wooviClientId: accountData.wooviClientId,
+        baasAccountCreated: accountData.baasAccountCreated,
+        fallbackToCustomer: accountData.fallbackToCustomer,
+        message: 'Motorista possui conta na Woovi'
+      };
+
+    } catch (error) {
+      logError(error, 'Erro ao verificar conta Woovi', { service: 'driver-approval-service', driverId });
+      return {
+        success: false,
+        hasAccount: false,
+        error: error.message
+      };
+    }
   }
 
-  destroy() {
-    this.isInitialized = false;
-    logger.info('🗑️ Driver Approval Service destruído');
+  /**
+   * Cria conta Woovi para motorista existente (migração)
+   * @param {Object} driverData - Dados do motorista
+   * @returns {Promise<Object>} - Resultado da criação
+   */
+  async createWooviAccountForExistingDriver(driverData) {
+    try {
+      logStructured('info', 'Criando conta Woovi para motorista existente', { service: 'driver-approval-service', driverId: driverData.id, driverName: driverData.name });
+      
+      // Verificar se já tem conta
+      const accountCheck = await this.checkDriverWooviAccount(driverData.id);
+      
+      if (accountCheck.hasAccount) {
+        return {
+          success: true,
+          message: 'Motorista já possui conta na Woovi',
+          wooviClientId: accountCheck.wooviClientId
+        };
+      }
+
+      // Criar nova conta
+      const wooviResult = await this.wooviDriverService.createDriverClient({
+        name: driverData.name,
+        email: driverData.email,
+        phone: driverData.phone,
+        cpf: driverData.cpf,
+        driverId: driverData.id
+      });
+
+      if (!wooviResult.success) {
+        return {
+          success: false,
+          error: 'Falha ao criar conta na Woovi',
+          details: wooviResult.error
+        };
+      }
+
+      // ✅ Atualizar Firestore com wooviClientId
+      try {
+        const firestore = firebaseConfig.getFirestore();
+        if (firestore && wooviResult.wooviClientId) {
+          const driverRef = firestore.collection('users').doc(driverData.id);
+          
+          // Preparar dados (filtrar undefined)
+          const dataToSave = {
+            wooviAccountId: wooviResult.wooviClientId,
+            wooviClientId: wooviResult.wooviClientId,
+            wooviAccountCreated: true,
+            baasAccountCreated: false,
+            wooviAccountCreatedAt: new Date().toISOString()
+          };
+          
+          // Remover valores undefined
+          Object.keys(dataToSave).forEach(key => {
+            if (dataToSave[key] === undefined) {
+              delete dataToSave[key];
+            }
+          });
+          
+          await driverRef.set(dataToSave, { merge: true });
+          
+          logStructured('info', 'wooviClientId salvo no Firestore', { service: 'driver-approval-service', driverId: driverData.id, wooviClientId: wooviResult.wooviClientId });
+        } else if (!wooviResult.wooviClientId) {
+          logStructured('warn', 'wooviClientId não disponível para salvar', { service: 'driver-approval-service', driverId: driverData.id });
+        }
+      } catch (firestoreError) {
+        logError(firestoreError, 'Erro ao salvar wooviClientId no Firestore', { service: 'driver-approval-service', driverId: driverData.id });
+      }
+
+      return {
+        success: true,
+        message: 'Conta Woovi criada com sucesso',
+        wooviClientId: wooviResult.wooviClientId
+      };
+      
+    } catch (error) {
+      logError(error, '❌ Erro ao criar conta Woovi para motorista existente:', { service: 'driver-approval-service' });
+      return {
+        success: false,
+        error: 'Erro interno do servidor',
+        details: error.message
+      };
+    }
   }
 }
 

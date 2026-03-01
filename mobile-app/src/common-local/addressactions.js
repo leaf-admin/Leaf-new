@@ -5,7 +5,7 @@ import {
     EDIT_ADDRESS
   } from "../types";
   import store from '../store/store';
-  import { firebase } from '../config/configureFirebase';
+  import { firebase } from './config/configureFirebase';
   
   export const fetchAddresses = () => (dispatch) => {
     const { addressEditRef } = firebase;

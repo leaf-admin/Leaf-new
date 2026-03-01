@@ -1,3 +1,4 @@
+import Logger from '../utils/Logger';
 import React, { useState, useEffect } from 'react';
 import {
   View,
@@ -13,6 +14,9 @@ import {
 import { Icon } from 'react-native-elements';
 import { useSelector } from 'react-redux';
 import { api } from '../common-local';
+import WebSocketManager from '../services/WebSocketManager';
+import useWebSocketListeners from '../hooks/useWebSocketListeners';
+
 
 const { width } = Dimensions.get('window');
 
@@ -50,6 +54,45 @@ const DriverDashboardScreen = ({ navigation, route }) => {
   const auth = useSelector(state => state.auth);
   const currentUser = auth.profile;
 
+  // ===== INTEGRAÇÃO WEBSOCKET =====
+  const wsManager = WebSocketManager.getInstance();
+  const userType = currentUser?.userType || currentUser?.usertype;
+
+  // Configurar listeners WebSocket para dashboard do driver
+  useWebSocketListeners('DriverDashboard', {
+    onRideRequest: (data) => {
+      Logger.log('🚗 DriverDashboard - Solicitação de corrida recebida:', data);
+      // Atualizar contador de solicitações
+      // Mostrar notificação de nova corrida
+    },
+    onDriverStatusUpdated: (data) => {
+      Logger.log('🚗 DriverDashboard - Status do driver atualizado:', data);
+      // Atualizar status na UI
+    },
+    onTripStarted: (data) => {
+      Logger.log('🚗 DriverDashboard - Viagem iniciada:', data);
+      // Atualizar estatísticas em tempo real
+    },
+    onTripCompleted: (data) => {
+      Logger.log('🚗 DriverDashboard - Viagem finalizada:', data);
+      // Atualizar ganhos e estatísticas
+      loadDriverData(); // Recarregar dados
+    },
+    onDriverLocationUpdated: (data) => {
+      Logger.log('🚗 DriverDashboard - Localização atualizada:', data);
+      // Atualizar posição no mapa se necessário
+    },
+    onConnect: () => {
+      Logger.log('🚗 DriverDashboard - WebSocket conectado');
+    },
+    onDisconnect: (reason) => {
+      Logger.log('🚗 DriverDashboard - WebSocket desconectado:', reason);
+    },
+    onConnectError: (error) => {
+      Logger.error('🚗 DriverDashboard - Erro de conexão WebSocket:', error);
+    }
+  });
+
   useEffect(() => {
     loadDriverData();
   }, []);
@@ -62,7 +105,7 @@ const DriverDashboardScreen = ({ navigation, route }) => {
       setDriverData(response.data);
       
     } catch (error) {
-      console.error('Erro ao carregar dados do motorista:', error);
+      Logger.error('Erro ao carregar dados do motorista:', error);
     } finally {
       setIsLoading(false);
     }

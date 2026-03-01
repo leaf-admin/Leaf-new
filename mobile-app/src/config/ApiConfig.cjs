@@ -4,14 +4,14 @@
 // Configurações por ambiente
 const ENV = {
   development: {
-    // 🏠 SELF-HOSTED VPS (Vultr)
+    // 🏠 SELF-HOSTED LOCAL
     selfHostedApi: {
-      web: 'https://216.238.107.59.nip.io',
-      mobile: 'https://216.238.107.59.nip.io'
+      web: 'http://localhost:3001',
+      mobile: 'http://localhost:3001'
     },
     selfHostedWebSocket: {
-      web: 'wss://216.238.107.59.nip.io',
-      mobile: 'wss://216.238.107.59.nip.io'
+      web: 'http://localhost:3001',
+      mobile: 'http://localhost:3001'
     },
     // 🔄 FALLBACK - Firebase Functions (se necessário)
     firebaseFunctions: {
@@ -25,14 +25,14 @@ const ENV = {
     }
   },
   production: {
-    // 🏠 SELF-HOSTED VPS (Vultr) - PRODUÇÃO
+    // 🏠 SELF-HOSTED LOCAL - PRODUÇÃO
     selfHostedApi: {
-      web: 'https://216.238.107.59.nip.io',
-      mobile: 'https://216.238.107.59.nip.io'
+      web: 'http://localhost:3001',
+      mobile: 'http://localhost:3001'
     },
     selfHostedWebSocket: {
-      web: 'wss://216.238.107.59.nip.io',
-      mobile: 'wss://216.238.107.59.nip.io'
+      web: 'http://localhost:3001',
+      mobile: 'http://localhost:3001'
     },
     // 🔄 FALLBACK - Firebase Functions
     firebaseFunctions: {

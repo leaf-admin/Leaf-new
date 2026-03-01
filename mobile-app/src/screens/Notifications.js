@@ -1,3 +1,4 @@
+import Logger from '../utils/Logger';
 import React, { useState, useEffect } from 'react';
 import {
     StyleSheet,
@@ -11,13 +12,14 @@ import {
     StatusBar
 } from 'react-native';
 import { Icon } from 'react-native-elements';
-import { colors } from '../common-local/theme';
+import { colors } from '../common/theme';
 import i18n from '../i18n';
 import { useSelector, useDispatch } from 'react-redux';
-import { api } from '../common-local';
+import { api } from '../common-local/api';
 import moment from 'moment/min/moment-with-locales';
-import { MAIN_COLOR } from '../common-local/sharedFunctions';
-import { fonts } from '../common-local/font';
+import { MAIN_COLOR } from '../common/sharedFunctions';
+import { fonts } from '../common/font';
+
 
 export default function Notifications(props) {
     const { t } = i18n;
@@ -45,12 +47,29 @@ export default function Notifications(props) {
     const loadNotifications = async () => {
         try {
             setLoading(true);
-            const response = await getNotifications(auth.profile.uid);
-            if (response && response.length > 0) {
+            
+            // Verificar se getNotifications existe e se temos um UID
+            if (!getNotifications || typeof getNotifications !== 'function') {
+                Logger.error('getNotifications não está disponível no api');
+                return;
+            }
+
+            const uid = auth?.profile?.uid || auth?.profile?.id;
+            if (!uid) {
+                Logger.warn('UID do usuário não encontrado');
+                setNotifications([]);
+                return;
+            }
+
+            const response = await getNotifications(uid);
+            if (response && Array.isArray(response) && response.length > 0) {
                 setNotifications(response);
+            } else {
+                setNotifications([]);
             }
         } catch (error) {
-            console.error('Erro ao carregar notificações:', error);
+            Logger.error('Erro ao carregar notificações:', error);
+            setNotifications([]);
         } finally {
             setLoading(false);
         }

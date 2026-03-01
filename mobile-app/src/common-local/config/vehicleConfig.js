@@ -1,7 +1,9 @@
+import Logger from '../../utils/Logger';
 // Configuração para o sistema de veículos
 // Estrutura recomendada: Firestore como principal, com validações e regras de negócio
 
 import { firebase } from './configureFirebase';
+
 
 // Estrutura da coleção de veículos no Firestore
 export const VEHICLE_COLLECTION = 'vehicles';
@@ -34,6 +36,7 @@ export const VEHICLE_SCHEMA = {
     model: 'string',              // Modelo (ex: Corolla)
     year: 'string',               // Ano (ex: 2020)
     plate: 'string',              // Placa (ex: ABC-1234)
+    color: 'string',              // Cor do veículo (ex: BRANCO, PRETO)
     
     // Documentação
     crlvImage: 'string',          // URL da imagem do CRLV
@@ -148,7 +151,7 @@ export const vehicleBusinessLogic = {
             const snapshot = await query.get();
             return snapshot.empty; // true se a placa estiver disponível
         } catch (error) {
-            console.error('Erro ao verificar disponibilidade da placa:', error);
+            Logger.error('Erro ao verificar disponibilidade da placa:', error);
             return false;
         }
     },
@@ -159,7 +162,7 @@ export const vehicleBusinessLogic = {
             const snapshot = await vehicleFirestore.driverVehicles(driverId).get();
             return snapshot.size < limit;
         } catch (error) {
-            console.error('Erro ao verificar limite de veículos:', error);
+            Logger.error('Erro ao verificar limite de veículos:', error);
             return false;
         }
     },
@@ -182,7 +185,7 @@ export const vehicleBusinessLogic = {
             await vehicleFirestore.doc(vehicleId).update(updateData);
             return true;
         } catch (error) {
-            console.error('Erro ao atualizar status de uso:', error);
+            Logger.error('Erro ao atualizar status de uso:', error);
             return false;
         }
     },
@@ -198,7 +201,7 @@ export const vehicleBusinessLogic = {
             });
             return true;
         } catch (error) {
-            console.error('Erro ao aprovar veículo:', error);
+            Logger.error('Erro ao aprovar veículo:', error);
             return false;
         }
     },
@@ -215,7 +218,7 @@ export const vehicleBusinessLogic = {
             });
             return true;
         } catch (error) {
-            console.error('Erro ao rejeitar veículo:', error);
+            Logger.error('Erro ao rejeitar veículo:', error);
             return false;
         }
     },
@@ -232,7 +235,7 @@ export const vehicleBusinessLogic = {
             });
             return true;
         } catch (error) {
-            console.error('Erro ao solicitar informações:', error);
+            Logger.error('Erro ao solicitar informações:', error);
             return false;
         }
     },
@@ -249,7 +252,7 @@ export const vehicleQueries = {
                 ...doc.data()
             }));
         } catch (error) {
-            console.error('Erro ao buscar veículos do motorista:', error);
+            Logger.error('Erro ao buscar veículos do motorista:', error);
             return [];
         }
     },
@@ -266,7 +269,7 @@ export const vehicleQueries = {
             }
             return null;
         } catch (error) {
-            console.error('Erro ao buscar veículo:', error);
+            Logger.error('Erro ao buscar veículo:', error);
             return null;
         }
     },
@@ -280,7 +283,7 @@ export const vehicleQueries = {
                 ...doc.data()
             }));
         } catch (error) {
-            console.error('Erro ao buscar veículos por status:', error);
+            Logger.error('Erro ao buscar veículos por status:', error);
             return [];
         }
     },

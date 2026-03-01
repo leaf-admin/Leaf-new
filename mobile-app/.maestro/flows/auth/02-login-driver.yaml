@@ -1,0 +1,38 @@
+# Teste: Login como Driver/Motorista
+appId: br.com.leaf.ride
+---
+- launchApp
+- assertVisible: 
+    text: "Entrar"
+    timeout: 5000
+- tapOn: 
+    text: "Entrar"
+- assertVisible: 
+    text: "Telefone"
+    timeout: 3000
+- inputText: "11999999999"  # Número de teste para driver
+- tapOn: 
+    text: "Continuar"
+    timeout: 2000
+- assertVisible: 
+    text: "Código"
+    timeout: 3000
+- inputText: "123456"
+- tapOn: 
+    text: "Verificar"
+- assertVisible: 
+    text: "Ficar Online"
+    timeout: 5000
+
+
+
+
+
+
+
+
+
+
+
+
+

@@ -1,6 +1,8 @@
+import Logger from '../utils/Logger';
 import { io } from 'socket.io-client';
 import { Platform } from 'react-native';
 import { getWebSocketUrl, getWebSocketConfig } from '../config/WebSocketConfig';
+
 
 // Configuração da URL do WebSocket
 const SOCKET_URL = getWebSocketUrl();
@@ -19,12 +21,12 @@ class SocketService {
     // Conectar ao WebSocket
     connect() {
         if (this.socket && this.isConnected) {
-            console.log('🔌 Já conectado ao WebSocket');
+            Logger.log('🔌 Já conectado ao WebSocket');
             return;
         }
 
         try {
-            console.log('🔌 Conectando ao WebSocket:', SOCKET_URL);
+            Logger.log('🔌 Conectando ao WebSocket:', SOCKET_URL);
             
             this.socket = io(SOCKET_URL, {
                 transports: ['websocket', 'polling'],
@@ -44,7 +46,7 @@ class SocketService {
             this.setupEventListeners();
             
         } catch (error) {
-            console.error('❌ Erro ao conectar WebSocket:', error);
+            Logger.error('❌ Erro ao conectar WebSocket:', error);
         }
     }
 
@@ -54,7 +56,7 @@ class SocketService {
 
         // Conexão estabelecida
         this.socket.on('connect', () => {
-            console.log('✅ Conectado ao WebSocket:', this.socket.id);
+            Logger.log('✅ Conectado ao WebSocket:', this.socket.id);
             this.isConnected = true;
             this.reconnectAttempts = 0;
             
@@ -64,51 +66,51 @@ class SocketService {
 
         // Desconexão
         this.socket.on('disconnect', (reason) => {
-            console.log('🔌 Desconectado do WebSocket:', reason);
+            Logger.log('🔌 Desconectado do WebSocket:', reason);
             this.isConnected = false;
         });
 
         // Erro de conexão
         this.socket.on('connect_error', (error) => {
-            console.error('❌ Erro de conexão WebSocket:', error.message);
+            Logger.error('❌ Erro de conexão WebSocket:', error.message);
             this.isConnected = false;
             this.reconnectAttempts++;
             
             if (this.reconnectAttempts >= this.maxReconnectAttempts) {
-                console.error('❌ Máximo de tentativas de reconexão atingido');
+                Logger.error('❌ Máximo de tentativas de reconexão atingido');
             }
         });
 
         // Reconexão
         this.socket.on('reconnect', (attemptNumber) => {
-            console.log('🔄 Reconectado ao WebSocket após', attemptNumber, 'tentativas');
+            Logger.log('🔄 Reconectado ao WebSocket após', attemptNumber, 'tentativas');
             this.isConnected = true;
             this.reconnectAttempts = 0;
         });
 
         // Reconexão falhou
         this.socket.on('reconnect_failed', () => {
-            console.error('❌ Falha na reconexão WebSocket');
+            Logger.error('❌ Falha na reconexão WebSocket');
         });
 
         // Eventos de negócio
         this.socket.on('locationUpdated', (data) => {
-            console.log('📍 Localização atualizada:', data);
+            Logger.log('📍 Localização atualizada:', data);
             this.triggerEventListeners('locationUpdated', data);
         });
 
         this.socket.on('nearbyDrivers', (data) => {
-            console.log('🚗 Motoristas próximos recebidos:', data);
+            Logger.log('🚗 Motoristas próximos recebidos:', data);
             this.triggerEventListeners('nearbyDrivers', data);
         });
 
         this.socket.on('driverStatusUpdated', (data) => {
-            console.log('🔄 Status do motorista atualizado:', data);
+            Logger.log('🔄 Status do motorista atualizado:', data);
             this.triggerEventListeners('driverStatusUpdated', data);
         });
 
         this.socket.on('error', (error) => {
-            console.error('❌ Erro do servidor:', error);
+            Logger.error('❌ Erro do servidor:', error);
             this.triggerEventListeners('error', error);
         });
     }
@@ -116,7 +118,7 @@ class SocketService {
     // Desconectar
     disconnect() {
         if (this.socket) {
-            console.log('🔌 Desconectando do WebSocket');
+            Logger.log('🔌 Desconectando do WebSocket');
             this.socket.disconnect();
             this.socket = null;
             this.isConnected = false;
@@ -127,17 +129,17 @@ class SocketService {
     // Enviar evento
     emit(event, data) {
         if (this.socket && this.isConnected) {
-            console.log('📤 Enviando evento:', event, data);
+            Logger.log('📤 Enviando evento:', event, data);
             this.socket.emit(event, data);
         } else {
-            console.warn('⚠️ WebSocket não conectado. Tentando conectar...');
+            Logger.warn('⚠️ WebSocket não conectado. Tentando conectar...');
             this.connect();
             // Aguardar um pouco e tentar novamente
             setTimeout(() => {
                 if (this.socket && this.isConnected) {
                     this.socket.emit(event, data);
                 } else {
-                    console.error('❌ Falha ao enviar evento:', event);
+                    Logger.error('❌ Falha ao enviar evento:', event);
                 }
             }, 1000);
         }
@@ -169,7 +171,7 @@ class SocketService {
                 try {
                     callback(data);
                 } catch (error) {
-                    console.error('❌ Erro no callback do evento', event, ':', error);
+                    Logger.error('❌ Erro no callback do evento', event, ':', error);
                 }
             });
         }

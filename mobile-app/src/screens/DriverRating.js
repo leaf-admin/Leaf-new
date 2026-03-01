@@ -1,3 +1,4 @@
+import Logger from '../utils/Logger';
 import React, { useState, useEffect } from 'react';
 import {
     StyleSheet,
@@ -16,14 +17,17 @@ import {
 } from 'react-native';
 import { Button } from 'react-native-elements';
 import StarRating from 'react-native-star-rating-widget';
-import { colors } from '../common-local/theme';
+import { colors } from '../common/theme';
 var { width } = Dimensions.get('window');
 import i18n from '../i18n';
 import { useDispatch, useSelector } from 'react-redux';
-import { api } from '../common-local';
-import { MAIN_COLOR, SECONDORY_COLOR } from '../common-local/sharedFunctions';
+import { api } from '../../common';
+import { MAIN_COLOR, SECONDORY_COLOR } from '../common/sharedFunctions';
 import DownloadReceipt from '../components/DownloadReceipt';
-import { fonts } from '../common-local/font';
+import { fonts } from '../common/font';
+import WebSocketManager from '../services/WebSocketManager';
+import useWebSocketListeners from '../hooks/useWebSocketListeners';
+
 
 export default function DriverRating(props) {
     const { updateBooking } = api;
@@ -41,6 +45,33 @@ export default function DriverRating(props) {
     const auth = useSelector(state=> state.auth);
     const providers = useSelector(state => state.paymentmethods.providers);
     const [tipAmount, setTipAmount] = useState(['5', '10', '20']);
+
+    // ===== INTEGRAÇÃO WEBSOCKET =====
+    const wsManager = WebSocketManager.getInstance();
+    const currentUser = auth.profile;
+    const userType = currentUser?.userType || currentUser?.usertype;
+
+    // Configurar listeners WebSocket para avaliações
+    useWebSocketListeners('DriverRating', {
+        onRatingSubmitted: (data) => {
+            Logger.log('⭐ DriverRating - Avaliação submetida:', data);
+            // Atualizar estado da avaliação
+            // Navegar para próxima tela se necessário
+        },
+        onTripCompleted: (data) => {
+            Logger.log('⭐ DriverRating - Viagem finalizada:', data);
+            // Atualizar dados da viagem para avaliação
+        },
+        onConnect: () => {
+            Logger.log('⭐ DriverRating - WebSocket conectado');
+        },
+        onDisconnect: (reason) => {
+            Logger.log('⭐ DriverRating - WebSocket desconectado:', reason);
+        },
+        onConnectError: (error) => {
+            Logger.error('⭐ DriverRating - Erro de conexão WebSocket:', error);
+        }
+    });
 
     useEffect(() => {
         if (activeBookings && activeBookings.length >= 1) {
@@ -185,7 +216,7 @@ export default function DriverRating(props) {
                                 emptyColor={MAIN_COLOR}
                                 rating={booking && booking.driverRating ? booking.driverRating : 0}
                                 onChange={() => {
-                                    //console.log('hello')
+                                    //Logger.log('hello')
                                 }}
                                 style={[isRTL ? { transform: [{ scaleX: -1 }] } : null]}
                             />

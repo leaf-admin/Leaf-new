@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { colors } from '../common-local/theme';
+import { colors } from '../common/theme';
 import {
     StyleSheet,
     View,
@@ -15,9 +15,9 @@ import { Button } from 'react-native-elements'
 import { useSelector, useDispatch } from "react-redux";
 var { width } = Dimensions.get('window');
 import moment from 'moment/min/moment-with-locales';
-import { MAIN_COLOR } from "../common-local/sharedFunctions";
-import {SECONDORY_COLOR } from "../common-local/sharedFunctions";
-import { fonts } from '../common-local/font';
+import { MAIN_COLOR } from "../common/sharedFunctions";
+import {SECONDORY_COLOR } from "../common/sharedFunctions";
+import { fonts } from '../common/font';
 
 export default function Complain() {
     const dispatch = useDispatch();

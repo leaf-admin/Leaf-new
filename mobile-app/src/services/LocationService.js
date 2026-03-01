@@ -1,7 +1,9 @@
+import Logger from '../utils/Logger';
 // LocationService.js - Serviço de localização otimizado com cache híbrido
 // Mock para testes Node.js
 const { redisApiService } = require('./RedisApiService');
 const LocalCacheService = require('./LocalCacheService');
+
 const handleError = (error, showAlert = false) => ({ error: error.message, showAlert });
 
 class LocationService {
@@ -19,10 +21,10 @@ class LocationService {
             // Limpar cache expirado
             await this.localCache.cleanExpiredCache();
             
-            console.log('📍 LocationService inicializado');
+            Logger.log('📍 LocationService inicializado');
             return true;
         } catch (error) {
-            console.error('❌ Erro ao inicializar LocationService:', error);
+            Logger.error('❌ Erro ao inicializar LocationService:', error);
             return false;
         }
     }
@@ -52,7 +54,7 @@ class LocationService {
 
             return null;
         } catch (error) {
-            console.error('❌ Erro ao obter localização atual:', error);
+            Logger.error('❌ Erro ao obter localização atual:', error);
             handleError(error, true);
             return null;
         }
@@ -86,7 +88,7 @@ class LocationService {
                     resolve(location);
                 },
                 (error) => {
-                    console.error('❌ Erro de geolocalização:', error);
+                    Logger.error('❌ Erro de geolocalização:', error);
                     reject(error);
                 },
                 options
@@ -109,13 +111,13 @@ class LocationService {
             const result = await redisApiService.updateUserLocation(userId, location.lat, location.lng, location.timestamp);
             
             if (result && result.success) {
-                console.log(`📍 Localização atualizada: ${userId} (${location.lat}, ${location.lng})`);
+                Logger.log(`📍 Localização atualizada: ${userId} (${location.lat}, ${location.lng})`);
                 return result;
             } else {
                 throw new Error('Falha ao atualizar localização');
             }
         } catch (error) {
-            console.error('❌ Erro ao atualizar localização do usuário:', error);
+            Logger.error('❌ Erro ao atualizar localização do usuário:', error);
             handleError(error, true);
             return null;
         }
@@ -137,10 +139,10 @@ class LocationService {
             // 2. Buscar via RedisApiService (cache local + Redis + Firebase)
             const drivers = await redisApiService.getNearbyDrivers(lat, lng, radius);
             
-            console.log(`🚗 ${drivers.length} motoristas encontrados próximos a (${lat}, ${lng})`);
+            Logger.log(`🚗 ${drivers.length} motoristas encontrados próximos a (${lat}, ${lng})`);
             return drivers;
         } catch (error) {
-            console.error('❌ Erro ao buscar motoristas próximos:', error);
+            Logger.error('❌ Erro ao buscar motoristas próximos:', error);
             handleError(error, true);
             return [];
         }
@@ -150,12 +152,12 @@ class LocationService {
     async startLocationTracking(userId, interval = 30000) {
         try {
             if (this.isTracking) {
-                console.log('📍 Tracking já está ativo');
+                Logger.log('📍 Tracking já está ativo');
                 return true;
             }
 
             this.isTracking = true;
-            console.log(`📍 Iniciando tracking de localização para ${userId} (${interval}ms)`);
+            Logger.log(`📍 Iniciando tracking de localização para ${userId} (${interval}ms)`);
 
             // 1. Primeira atualização imediata
             await this.updateUserLocation(userId);
@@ -165,7 +167,7 @@ class LocationService {
                 try {
                     await this.updateUserLocation(userId);
                 } catch (error) {
-                    console.error('❌ Erro na atualização periódica:', error);
+                    Logger.error('❌ Erro na atualização periódica:', error);
                 }
             }, interval);
 
@@ -186,7 +188,7 @@ class LocationService {
                         }
                     },
                     (error) => {
-                        console.error('❌ Erro no watch de localização:', error);
+                        Logger.error('❌ Erro no watch de localização:', error);
                     },
                     {
                         enableHighAccuracy: true,
@@ -198,7 +200,7 @@ class LocationService {
 
             return true;
         } catch (error) {
-            console.error('❌ Erro ao iniciar tracking:', error);
+            Logger.error('❌ Erro ao iniciar tracking:', error);
             this.isTracking = false;
             return false;
         }
@@ -219,10 +221,10 @@ class LocationService {
                 this.watchId = null;
             }
 
-            console.log('⏹️ Tracking de localização parado');
+            Logger.log('⏹️ Tracking de localização parado');
             return true;
         } catch (error) {
-            console.error('❌ Erro ao parar tracking:', error);
+            Logger.error('❌ Erro ao parar tracking:', error);
             return false;
         }
     }
@@ -273,7 +275,7 @@ class LocationService {
                 timestamp: Date.now()
             };
         } catch (error) {
-            console.error('❌ Erro ao obter estatísticas:', error);
+            Logger.error('❌ Erro ao obter estatísticas:', error);
             return null;
         }
     }
@@ -283,10 +285,10 @@ class LocationService {
         try {
             await this.localCache.clearAllCache();
             this.currentLocation = null;
-            console.log('🗑️ Dados de localização limpos');
+            Logger.log('🗑️ Dados de localização limpos');
             return true;
         } catch (error) {
-            console.error('❌ Erro ao limpar dados:', error);
+            Logger.error('❌ Erro ao limpar dados:', error);
             return false;
         }
     }
@@ -295,7 +297,7 @@ class LocationService {
     destroy() {
         this.stopLocationTracking();
         this.currentLocation = null;
-        console.log('🗑️ LocationService destruído');
+        Logger.log('🗑️ LocationService destruído');
     }
 }
 

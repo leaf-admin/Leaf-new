@@ -3,11 +3,11 @@
 <plist version="1.0">
 <dict>
 	<key>CLIENT_ID</key>
-	<string>106504629884-u4akt2328ioo8k2j5gfskf5amqlp12hc.apps.googleusercontent.com</string>
+	<string>106504629884-laja6e1vn4utkn93ftd99p42mu8qus9s.apps.googleusercontent.com</string>
 	<key>REVERSED_CLIENT_ID</key>
-	<string>com.googleusercontent.apps.106504629884-u4akt2328ioo8k2j5gfskf5amqlp12hc</string>
+	<string>com.googleusercontent.apps.106504629884-laja6e1vn4utkn93ftd99p42mu8qus9s</string>
 	<key>ANDROID_CLIENT_ID</key>
-	<string>106504629884-c8f1q97uje61ekc0n3ule987t5f2007u.apps.googleusercontent.com</string>
+	<string>106504629884-66shu1trr4q2jh9jb1flmq1dos4ejq7n.apps.googleusercontent.com</string>
 	<key>API_KEY</key>
 	<string>AIzaSyDhY2L7TRG4l3xjINayyih-Md5ZMACp-0I</string>
 	<key>GCM_SENDER_ID</key>
@@ -15,7 +15,7 @@
 	<key>PLIST_VERSION</key>
 	<string>1</string>
 	<key>BUNDLE_ID</key>
-	<string>com.leaf.app</string>
+	<string>br.com.leaf.ride</string>
 	<key>PROJECT_ID</key>
 	<string>leaf-reactnative</string>
 	<key>STORAGE_BUCKET</key>
@@ -31,7 +31,7 @@
 	<key>IS_SIGNIN_ENABLED</key>
 	<true></true>
 	<key>GOOGLE_APP_ID</key>
-	<string>1:106504629884:ios:b3416a421de28022a1a3f9</string>
+	<string>1:106504629884:ios:727d0043031529f7a1a3f9</string>
 	<key>DATABASE_URL</key>
 	<string>https://leaf-reactnative-default-rtdb.firebaseio.com</string>
 </dict>

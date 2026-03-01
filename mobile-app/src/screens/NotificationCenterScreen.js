@@ -1,3 +1,4 @@
+import Logger from '../utils/Logger';
 import React, { useState, useEffect } from 'react';
 import {
   View,
@@ -14,8 +15,11 @@ import {
 import { Icon } from 'react-native-elements';
 import { useSelector } from 'react-redux';
 import { api } from '../common-local';
+import { useTranslation } from '../components/i18n/LanguageProvider';
+
 
 const NotificationCenterScreen = ({ navigation, route }) => {
+  const { t } = useTranslation();
   const [notifications, setNotifications] = useState([]);
   const [filteredNotifications, setFilteredNotifications] = useState([]);
   const [selectedFilter, setSelectedFilter] = useState('all');
@@ -49,8 +53,8 @@ const NotificationCenterScreen = ({ navigation, route }) => {
       setNotifications(response.data.notifications || []);
       
     } catch (error) {
-      console.error('Erro ao carregar notificações:', error);
-      Alert.alert('Erro', 'Não foi possível carregar as notificações');
+      Logger.error('Erro ao carregar notificações:', error);
+      Alert.alert(t('messages.error'), t('notifications.loadError'));
     } finally {
       setIsLoading(false);
     }
@@ -86,7 +90,7 @@ const NotificationCenterScreen = ({ navigation, route }) => {
       );
       
     } catch (error) {
-      console.error('Erro ao marcar como lida:', error);
+      Logger.error('Erro ao marcar como lida:', error);
     }
   };
 
@@ -99,7 +103,7 @@ const NotificationCenterScreen = ({ navigation, route }) => {
       );
       
     } catch (error) {
-      console.error('Erro ao marcar todas como lidas:', error);
+      Logger.error('Erro ao marcar todas como lidas:', error);
     }
   };
 
@@ -112,7 +116,7 @@ const NotificationCenterScreen = ({ navigation, route }) => {
       );
       
     } catch (error) {
-      console.error('Erro ao deletar notificação:', error);
+      Logger.error('Erro ao deletar notificação:', error);
     }
   };
 

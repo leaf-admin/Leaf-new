@@ -1,67 +1,6 @@
+import Logger from '../utils/Logger';
 // LocalCacheService.js - Cache local para otimização de performance
-// Mock AsyncStorage para testes Node.js
-const AsyncStorage = {
-    setItem: async (key, value) => {
-        // Simular AsyncStorage
-        return Promise.resolve();
-    },
-    getItem: async (key) => {
-        // Simular dados em cache
-        if (key.includes('test_user_1')) {
-            return JSON.stringify({
-                lat: -23.5505,
-                lng: -46.6333,
-                timestamp: Date.now(),
-                ttl: Date.now() + 300000
-            });
-        }
-        if (key.includes('nearby_drivers')) {
-            return JSON.stringify({
-                drivers: [
-                    { id: 'driver_1', lat: -23.5505, lng: -46.6333, distance: 100 },
-                    { id: 'driver_2', lat: -23.5506, lng: -46.6334, distance: 200 }
-                ],
-                timestamp: Date.now(),
-                ttl: Date.now() + 300000
-            });
-        }
-        // Simular cache de rotas
-        if (key.includes('route:')) {
-            return JSON.stringify({
-                routeData: {
-                    distance_in_km: 5.2,
-                    time_in_secs: 1200,
-                    polyline: 'mock_polyline_data',
-                    steps: []
-                },
-                timestamp: Date.now(),
-                ttl: Date.now() + 3600000 // 1 hora
-            });
-        }
-        // Simular cache de preços
-        if (key.includes('price:')) {
-            return JSON.stringify({
-                priceData: {
-                    baseFare: 5.00,
-                    distanceCost: 13.00,
-                    timeCost: 10.00,
-                    totalFare: 28.00,
-                    carType: 'standard'
-                },
-                routeData: {
-                    distance_in_km: 5.2,
-                    time_in_secs: 1200
-                },
-                timestamp: Date.now(),
-                ttl: Date.now() + 120000 // 2 minutos
-            });
-        }
-        return null;
-    },
-    removeItem: async (key) => Promise.resolve(),
-    getAllKeys: async () => Promise.resolve([]),
-    multiRemove: async (keys) => Promise.resolve()
-};
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 class LocalCacheService {
     constructor() {
@@ -76,7 +15,7 @@ class LocalCacheService {
     }
 
     // ===== CACHE DE ROTAS =====
-    
+
     // Salvar rota no cache local
     async setRoute(startLoc, destLoc, waypoints, routeData) {
         try {
@@ -87,12 +26,12 @@ class LocalCacheService {
                 ttl: Date.now() + this.ttl.routes,
                 accessCount: 1
             };
-            
+
             await AsyncStorage.setItem(key, JSON.stringify(data));
-            console.log(`🗺️ Cache local: Rota salva - ${startLoc} → ${destLoc}`);
+            Logger.log(`🗺️ Cache local: Rota salva - ${startLoc} → ${destLoc}`);
             return true;
         } catch (error) {
-            console.error('❌ Erro ao salvar rota no cache local:', error);
+            Logger.error('❌ Erro ao salvar rota no cache local:', error);
             return false;
         }
     }
@@ -102,26 +41,26 @@ class LocalCacheService {
         try {
             const key = this.generateRouteKey(startLoc, destLoc, waypoints);
             const data = await AsyncStorage.getItem(key);
-            
+
             if (data) {
                 const route = JSON.parse(data);
                 if (route.ttl > Date.now()) {
                     // Atualizar contador de acesso
                     route.accessCount = (route.accessCount || 0) + 1;
                     await AsyncStorage.setItem(key, JSON.stringify(route));
-                    
-                    console.log(`🗺️ Cache local: Rota encontrada - ${route.accessCount} acessos`);
+
+                    Logger.log(`🗺️ Cache local: Rota encontrada - ${route.accessCount} acessos`);
                     return route.routeData;
                 } else {
                     // TTL expirado, remover
                     await AsyncStorage.removeItem(key);
-                    console.log(`⏰ Cache local: Rota expirada`);
+                    Logger.log(`⏰ Cache local: Rota expirada`);
                 }
             }
-            
+
             return null;
         } catch (error) {
-            console.error('❌ Erro ao buscar rota do cache local:', error);
+            Logger.error('❌ Erro ao buscar rota do cache local:', error);
             return null;
         }
     }
@@ -133,18 +72,18 @@ class LocalCacheService {
             dest: destLoc,
             waypoints: waypoints || ''
         };
-        
+
         // Hash simples para chave única
         const hash = JSON.stringify(routeParams).split('').reduce((a, b) => {
             a = ((a << 5) - a) + b.charCodeAt(0);
             return a & a;
         }, 0);
-        
+
         return `route:${Math.abs(hash)}`;
     }
 
     // ===== CACHE DE PREÇOS =====
-    
+
     // Salvar preço no cache local
     async setPrice(startLoc, destLoc, waypoints, carType, priceData, routeData) {
         try {
@@ -157,12 +96,12 @@ class LocalCacheService {
                 validUntil: Date.now() + this.ttl.prices,
                 accessCount: 1
             };
-            
+
             await AsyncStorage.setItem(key, JSON.stringify(data));
-            console.log(`💰 Cache local: Preço salvo - R$ ${priceData.totalFare} (${carType})`);
+            Logger.log(`💰 Cache local: Preço salvo - R$ ${priceData.totalFare} (${carType})`);
             return true;
         } catch (error) {
-            console.error('❌ Erro ao salvar preço no cache local:', error);
+            Logger.error('❌ Erro ao salvar preço no cache local:', error);
             return false;
         }
     }
@@ -172,17 +111,17 @@ class LocalCacheService {
         try {
             const key = this.generatePriceKey(startLoc, destLoc, waypoints, carType);
             const data = await AsyncStorage.getItem(key);
-            
+
             if (data) {
                 const price = JSON.parse(data);
                 const timeRemaining = price.validUntil - Date.now();
-                
+
                 if (timeRemaining > 0) {
                     // Atualizar contador de acesso
                     price.accessCount = (price.accessCount || 0) + 1;
                     await AsyncStorage.setItem(key, JSON.stringify(price));
-                    
-                    console.log(`💰 Cache local: Preço encontrado - válido por mais ${Math.round(timeRemaining/1000)}s`);
+
+                    Logger.log(`💰 Cache local: Preço encontrado - válido por mais ${Math.round(timeRemaining / 1000)}s`);
                     return {
                         priceData: price.priceData,
                         routeData: price.routeData,
@@ -192,13 +131,13 @@ class LocalCacheService {
                 } else {
                     // TTL expirado, remover
                     await AsyncStorage.removeItem(key);
-                    console.log(`⏰ Cache local: Preço expirado`);
+                    Logger.log(`⏰ Cache local: Preço expirado`);
                 }
             }
-            
+
             return null;
         } catch (error) {
-            console.error('❌ Erro ao buscar preço do cache local:', error);
+            Logger.error('❌ Erro ao buscar preço do cache local:', error);
             return null;
         }
     }
@@ -213,18 +152,18 @@ class LocalCacheService {
             // Arredondar para 2 minutos para agrupar requests próximos
             timeSlot: Math.floor(Date.now() / this.ttl.prices) * this.ttl.prices
         };
-        
+
         // Hash simples para chave única
         const hash = JSON.stringify(priceParams).split('').reduce((a, b) => {
             a = ((a << 5) - a) + b.charCodeAt(0);
             return a & a;
         }, 0);
-        
+
         return `price:${Math.abs(hash)}`;
     }
 
     // ===== CACHE DE LOCALIZAÇÃO (EXISTENTE) =====
-    
+
     // Salvar localização no cache local
     async setLocation(userId, location) {
         try {
@@ -234,12 +173,12 @@ class LocalCacheService {
                 timestamp: Date.now(),
                 ttl: Date.now() + this.ttl.location
             };
-            
+
             await AsyncStorage.setItem(key, JSON.stringify(data));
-            console.log(`📍 Cache local: Localização salva para usuário ${userId}`);
+            Logger.log(`📍 Cache local: Localização salva para usuário ${userId}`);
             return true;
         } catch (error) {
-            console.error('❌ Erro ao salvar localização no cache local:', error);
+            Logger.error('❌ Erro ao salvar localização no cache local:', error);
             return false;
         }
     }
@@ -249,28 +188,28 @@ class LocalCacheService {
         try {
             const key = `location:${userId}`;
             const data = await AsyncStorage.getItem(key);
-            
+
             if (data) {
                 const location = JSON.parse(data);
                 if (location.ttl > Date.now()) {
-                    console.log(`📍 Cache local: Localização encontrada para usuário ${userId}`);
+                    Logger.log(`📍 Cache local: Localização encontrada para usuário ${userId}`);
                     return location;
                 } else {
                     // TTL expirado, remover
                     await AsyncStorage.removeItem(key);
-                    console.log(`⏰ Cache local: TTL expirado para usuário ${userId}`);
+                    Logger.log(`⏰ Cache local: TTL expirado para usuário ${userId}`);
                 }
             }
-            
+
             return null;
         } catch (error) {
-            console.error('❌ Erro ao buscar localização do cache local:', error);
+            Logger.error('❌ Erro ao buscar localização do cache local:', error);
             return null;
         }
     }
 
     // ===== CACHE DE MOTORISTAS PRÓXIMOS (EXISTENTE) =====
-    
+
     // Salvar motoristas próximos no cache
     async setNearbyDrivers(lat, lng, radius, drivers) {
         try {
@@ -280,12 +219,12 @@ class LocalCacheService {
                 timestamp: Date.now(),
                 ttl: Date.now() + this.ttl.nearbyDrivers
             };
-            
+
             await AsyncStorage.setItem(key, JSON.stringify(data));
-            console.log(`🚗 Cache local: ${drivers.length} motoristas salvos para área ${lat},${lng}`);
+            Logger.log(`🚗 Cache local: ${drivers.length} motoristas salvos para área ${lat},${lng}`);
             return true;
         } catch (error) {
-            console.error('❌ Erro ao salvar motoristas no cache local:', error);
+            Logger.error('❌ Erro ao salvar motoristas no cache local:', error);
             return false;
         }
     }
@@ -295,26 +234,26 @@ class LocalCacheService {
         try {
             const key = `nearby_drivers:${lat.toFixed(4)}:${lng.toFixed(4)}:${radius}`;
             const data = await AsyncStorage.getItem(key);
-            
+
             if (data) {
                 const drivers = JSON.parse(data);
                 if (drivers.ttl > Date.now()) {
-                    console.log(`🚗 Cache local: ${drivers.drivers.length} motoristas encontrados`);
+                    Logger.log(`🚗 Cache local: ${drivers.drivers.length} motoristas encontrados`);
                     return drivers.drivers;
                 } else {
                     await AsyncStorage.removeItem(key);
                 }
             }
-            
+
             return null;
         } catch (error) {
-            console.error('❌ Erro ao buscar motoristas do cache local:', error);
+            Logger.error('❌ Erro ao buscar motoristas do cache local:', error);
             return null;
         }
     }
 
     // ===== CACHE DE DADOS DE VIAGEM (EXISTENTE) =====
-    
+
     // Salvar dados de viagem no cache
     async setTripData(tripId, tripData) {
         try {
@@ -324,12 +263,12 @@ class LocalCacheService {
                 timestamp: Date.now(),
                 ttl: Date.now() + this.ttl.tripData
             };
-            
+
             await AsyncStorage.setItem(key, JSON.stringify(data));
-            console.log(`🚕 Cache local: Dados da viagem ${tripId} salvos`);
+            Logger.log(`🚕 Cache local: Dados da viagem ${tripId} salvos`);
             return true;
         } catch (error) {
-            console.error('❌ Erro ao salvar dados da viagem no cache:', error);
+            Logger.error('❌ Erro ao salvar dados da viagem no cache:', error);
             return false;
         }
     }
@@ -339,34 +278,34 @@ class LocalCacheService {
         try {
             const key = `trip:${tripId}`;
             const data = await AsyncStorage.getItem(key);
-            
+
             if (data) {
                 const trip = JSON.parse(data);
                 if (trip.ttl > Date.now()) {
-                    console.log(`🚕 Cache local: Dados da viagem ${tripId} encontrados`);
+                    Logger.log(`🚕 Cache local: Dados da viagem ${tripId} encontrados`);
                     return trip;
                 } else {
                     await AsyncStorage.removeItem(key);
                 }
             }
-            
+
             return null;
         } catch (error) {
-            console.error('❌ Erro ao buscar dados da viagem do cache:', error);
+            Logger.error('❌ Erro ao buscar dados da viagem do cache:', error);
             return null;
         }
     }
 
     // ===== LIMPEZA E ESTATÍSTICAS =====
-    
+
     // Limpar cache expirado
     async cleanExpiredCache() {
         try {
             const keys = await AsyncStorage.getAllKeys();
             const expiredKeys = [];
-            
+
             for (const key of keys) {
-                if (key.startsWith('location:') || key.startsWith('nearby_drivers:') || 
+                if (key.startsWith('location:') || key.startsWith('nearby_drivers:') ||
                     key.startsWith('trip:') || key.startsWith('route:') || key.startsWith('price:')) {
                     const data = await AsyncStorage.getItem(key);
                     if (data) {
@@ -377,15 +316,15 @@ class LocalCacheService {
                     }
                 }
             }
-            
+
             if (expiredKeys.length > 0) {
                 await AsyncStorage.multiRemove(expiredKeys);
-                console.log(`🧹 Cache local: ${expiredKeys.length} itens expirados removidos`);
+                Logger.log(`🧹 Cache local: ${expiredKeys.length} itens expirados removidos`);
             }
-            
+
             return expiredKeys.length;
         } catch (error) {
-            console.error('❌ Erro ao limpar cache expirado:', error);
+            Logger.error('❌ Erro ao limpar cache expirado:', error);
             return 0;
         }
     }
@@ -403,21 +342,21 @@ class LocalCacheService {
                 trips: 0,
                 expired: 0
             };
-            
+
             for (const key of keys) {
                 if (key.startsWith('route:')) stats.routes++;
                 else if (key.startsWith('price:')) stats.prices++;
                 else if (key.startsWith('location:')) stats.locations++;
                 else if (key.startsWith('nearby_drivers:')) stats.nearbyDrivers++;
                 else if (key.startsWith('trip:')) stats.trips++;
-                
+
                 stats.total++;
             }
-            
-            console.log(`📊 Cache local: ${stats.total} itens totais`);
+
+            Logger.log(`📊 Cache local: ${stats.total} itens totais`);
             return stats;
         } catch (error) {
-            console.error('❌ Erro ao obter estatísticas do cache:', error);
+            Logger.error('❌ Erro ao obter estatísticas do cache:', error);
             return null;
         }
     }
@@ -426,25 +365,25 @@ class LocalCacheService {
     async clearAllCache() {
         try {
             const keys = await AsyncStorage.getAllKeys();
-            const cacheKeys = keys.filter(key => 
-                key.startsWith('location:') || 
-                key.startsWith('nearby_drivers:') || 
+            const cacheKeys = keys.filter(key =>
+                key.startsWith('location:') ||
+                key.startsWith('nearby_drivers:') ||
                 key.startsWith('trip:') ||
                 key.startsWith('route:') ||
                 key.startsWith('price:')
             );
-            
+
             await AsyncStorage.multiRemove(cacheKeys);
-            console.log(`🗑️ Cache local: ${cacheKeys.length} itens removidos`);
+            Logger.log(`🗑️ Cache local: ${cacheKeys.length} itens removidos`);
             return cacheKeys.length;
         } catch (error) {
-            console.error('❌ Erro ao limpar cache:', error);
+            Logger.error('❌ Erro ao limpar cache:', error);
             return 0;
         }
     }
 
     // ===== MÉTODOS DE UTILIDADE =====
-    
+
     // Verificar se cache está disponível
     isAvailable() {
         return true; // Sempre disponível no mobile
@@ -456,9 +395,87 @@ class LocalCacheService {
         return 0;
     }
 
+    // ===== MÉTODOS GENÉRICOS (Substitutos diretos do AsyncStorage) =====
+
+    /**
+     * Obter item genérico do cache
+     */
+    async getItem(key) {
+        try {
+            return await AsyncStorage.getItem(key);
+        } catch (error) {
+            Logger.error(`❌ Erro ao buscar item ${key} do cache:`, error);
+            return null;
+        }
+    }
+
+    /**
+     * Salvar item genérico no cache
+     */
+    async setItem(key, value) {
+        try {
+            await AsyncStorage.setItem(key, value);
+            return true;
+        } catch (error) {
+            Logger.error(`❌ Erro ao salvar item ${key} no cache:`, error);
+            return false;
+        }
+    }
+
+    /**
+     * Salvar múltiplos itens genéricos no cache
+     */
+    async multiSet(keyValuePairs) {
+        try {
+            await AsyncStorage.multiSet(keyValuePairs);
+            return true;
+        } catch (error) {
+            Logger.error('❌ Erro ao salvar múltiplos itens no cache:', error);
+            return false;
+        }
+    }
+
+    /**
+     * Remover item genérico do cache
+     */
+    async removeItem(key) {
+        try {
+            await AsyncStorage.removeItem(key);
+            return true;
+        } catch (error) {
+            Logger.error(`❌ Erro ao remover item ${key} do cache:`, error);
+            return false;
+        }
+    }
+
+    /**
+     * Remover múltiplos itens genéricos do cache
+     */
+    async multiRemove(keys) {
+        try {
+            await AsyncStorage.multiRemove(keys);
+            return true;
+        } catch (error) {
+            Logger.error('❌ Erro ao remover múltiplos itens do cache:', error);
+            return false;
+        }
+    }
+
+    /**
+     * Obter todas as chaves do cache genérico
+     */
+    async getAllKeys() {
+        try {
+            return await AsyncStorage.getAllKeys();
+        } catch (error) {
+            Logger.error('❌ Erro ao obter todas as chaves do cache:', error);
+            return [];
+        }
+    }
+
     // Forçar limpeza de cache
     async forceCleanup() {
-        console.log('🧹 Cache local: Forçando limpeza...');
+        Logger.log('🧹 Cache local: Forçando limpeza...');
         return await this.cleanExpiredCache();
     }
 }
@@ -466,4 +483,4 @@ class LocalCacheService {
 // Instância singleton
 const localCacheService = new LocalCacheService();
 
-module.exports = localCacheService; 
+export default localCacheService; 

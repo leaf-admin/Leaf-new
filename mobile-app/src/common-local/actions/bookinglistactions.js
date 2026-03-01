@@ -1,3 +1,4 @@
+import Logger from '../../utils/Logger';
 import {
   FETCH_BOOKINGS,
   FETCH_BOOKINGS_SUCCESS,
@@ -12,11 +13,12 @@ import { firebase } from '../config/configureFirebase';
 import { addActualsToBooking, saveAddresses, updateDriverQueue } from "../other/sharedFunctions";
 import { getUserId } from '../utils/authUtils';
 
+
 const waitForFirebaseInit = async () => {
   return new Promise((resolve) => {
     const checkFirebase = () => {
       if (firebase && firebase.database) {
-        const db = firebase.database();
+        const db = firebase.database;
         if (db) {
           resolve(true);
         } else {
@@ -31,7 +33,7 @@ const waitForFirebaseInit = async () => {
 };
 
 export const fetchBookings = () => async (dispatch, getState) => {
-  console.log('=== LOG RASTREADOR fetchBookings (bookinglistactions) ===');
+  Logger.log('=== LOG RASTREADOR fetchBookings (bookinglistactions) ===');
   try {
     dispatch({
       type: FETCH_BOOKINGS,
@@ -39,7 +41,7 @@ export const fetchBookings = () => async (dispatch, getState) => {
     });
 
     await waitForFirebaseInit();
-    console.log('fetchBookings - Firebase Database inicializado');
+    Logger.log('fetchBookings - Firebase Database inicializado');
 
     const {
       bookingListRef,
@@ -48,7 +50,7 @@ export const fetchBookings = () => async (dispatch, getState) => {
 
     const uid = await getUserId();
     if (!uid) {
-      console.error('fetchBookings - UID não encontrado');
+      Logger.error('fetchBookings - UID não encontrado');
       dispatch({
         type: FETCH_BOOKINGS_FAILED,
         payload: 'Usuário não autenticado'
@@ -58,7 +60,7 @@ export const fetchBookings = () => async (dispatch, getState) => {
 
     const userInfo = getState().auth.profile;
     if (!userInfo || !userInfo.usertype) {
-      console.error('fetchBookings - Tipo de usuário não encontrado');
+      Logger.error('fetchBookings - Tipo de usuário não encontrado');
       dispatch({
         type: FETCH_BOOKINGS_FAILED,
         payload: 'Tipo de usuário não encontrado'
@@ -66,13 +68,13 @@ export const fetchBookings = () => async (dispatch, getState) => {
       return;
     }
 
-    console.log('fetchBookings - Iniciando busca com:', { uid, usertype: userInfo.usertype });
+    Logger.log('fetchBookings - Iniciando busca com:', { uid, usertype: userInfo.usertype });
 
     const bookingsRef = bookingListRef(uid, userInfo.usertype);
 
-    firebase.database().ref(bookingsRef).off();
+    firebase.database.ref(bookingsRef).off();
 
-    const listener = firebase.database().ref(bookingsRef).on('value', (snapshot) => {
+    const listener = firebase.database.ref(bookingsRef).on('value', (snapshot) => {
       if (snapshot.val()) {
         const data = snapshot.val();
         const active = [];
@@ -126,7 +128,7 @@ export const fetchBookings = () => async (dispatch, getState) => {
       // Não desligar o listener aqui, ele será desligado pela action.
 
     }, (error) => {
-      console.error('fetchBookings - Erro ao buscar dados:', error);
+      Logger.error('fetchBookings - Erro ao buscar dados:', error);
       dispatch({
         type: FETCH_BOOKINGS_FAILED,
         payload: error.message || 'Erro ao buscar reservas'
@@ -137,7 +139,7 @@ export const fetchBookings = () => async (dispatch, getState) => {
     return listener;
 
   } catch (error) {
-    console.error('fetchBookings - Erro:', error);
+    Logger.error('fetchBookings - Erro:', error);
     dispatch({
       type: FETCH_BOOKINGS_FAILED,
       payload: error.message || 'Erro ao buscar reservas'
@@ -146,7 +148,7 @@ export const fetchBookings = () => async (dispatch, getState) => {
     const { bookingListRef, database } = firebase; // Recriar refs se necessário
      if (uid && userInfo && userInfo.usertype && database) {
          const bookingsRef = bookingListRef(uid, userInfo.usertype);
-         firebase.database().ref(bookingsRef).off();
+         firebase.database.ref(bookingsRef).off();
      }
   }
 };
@@ -156,10 +158,10 @@ export const unsubscribeBookings = () => (dispatch, getState) => {
     const state = getState();
     const listener = state.bookinglistdata.listener; // Assumindo que o listener é salvo no estado
     if (listener && typeof listener === 'function') {
-        console.log('Desligando listener de bookings');
+        Logger.log('Desligando listener de bookings');
         listener(); // Chama a função retornada por onValue para desligar o listener
     } else {
-        console.warn('Nenhum listener de bookings ativo para desligar');
+        Logger.warn('Nenhum listener de bookings ativo para desligar');
     }
     // Remover listener do estado Redux, se aplicável
     // dispatch({ type: 'CLEAR_BOOKINGS_LISTENER' }); // Necessário adicionar este tipo de action/reducer
@@ -182,19 +184,19 @@ export const updateBooking = (booking) => async (dispatch) => {
     payload: booking,
   });
 
-  const settingsdata = await firebase.database().ref(settingsRef).once('value');
+  const settingsdata = await firebase.database.ref(settingsRef).once('value');
   const settings = settingsdata.val();
   
   if (booking.status == 'PAYMENT_PENDING') {
-    firebase.database().ref(singleBookingRef(booking.id)).set(booking);
+    firebase.database.ref(singleBookingRef(booking.id)).set(booking);
   }
   if (booking.status == 'NEW' || booking.status == 'ACCEPTED') {
-    firebase.database().ref(singleBookingRef(booking.id)).set(updateDriverQueue(booking));
+    firebase.database.ref(singleBookingRef(booking.id)).set(updateDriverQueue(booking));
   }
   if (booking.status == 'ARRIVED') {
     let dt = new Date();
     booking.driver_arrive_time = dt.getTime().toString();
-    firebase.database().ref(singleBookingRef(booking.id)).set(booking);
+    firebase.database.ref(singleBookingRef(booking.id)).set(booking);
     if(booking.customer_token){
       RequestPushMsg(
         booking.customer_token,
@@ -213,11 +215,11 @@ export const updateBooking = (booking) => async (dispatch) => {
     let timeString = dt.getTime();
     booking.trip_start_time = localString;
     booking.startTime = timeString;
-    firebase.database().ref(singleBookingRef(booking.id)).set(booking);
+    firebase.database.ref(singleBookingRef(booking.id)).set(booking);
 
     const driverLocation = store.getState().gpsdata.location;
     
-    firebase.database().ref(trackingRef(booking.id)).push({
+    firebase.database.ref(trackingRef(booking.id)).push({
       at: new Date().getTime(),
       status: 'STARTED',
       lat: driverLocation.lat,
@@ -240,7 +242,7 @@ export const updateBooking = (booking) => async (dispatch) => {
 
     const driverLocation = store.getState().gpsdata.location;
 
-    firebase.database().ref(trackingRef(booking.id)).push({
+    firebase.database.ref(trackingRef(booking.id)).push({
       at: new Date().getTime(),
       status: 'REACHED',
       lat: driverLocation.lat,
@@ -250,7 +252,7 @@ export const updateBooking = (booking) => async (dispatch) => {
     let address = await saveAddresses(booking,driverLocation);
 
     let bookingObj = await addActualsToBooking(booking, address, driverLocation);
-    firebase.database().ref(singleBookingRef(booking.id)).set(bookingObj);
+    firebase.database.ref(singleBookingRef(booking.id)).set(bookingObj);
 
     if(booking.customer_token){
       RequestPushMsg(
@@ -265,16 +267,16 @@ export const updateBooking = (booking) => async (dispatch) => {
   }
 
   if (booking.status == 'PENDING') {
-    firebase.database().ref(singleBookingRef(booking.id)).set(booking);
-    firebase.database().ref(singleUserRef(booking.driver)).set({ queue: false });
+    firebase.database.ref(singleBookingRef(booking.id)).set(booking);
+    firebase.database.ref(singleUserRef(booking.driver)).set({ queue: false });
   }
   if (booking.status == 'PAID') {
     if(booking.booking_from_web){
       booking.status = 'COMPLETE';
     }
-    firebase.database().ref(singleBookingRef(booking.id)).set(booking);
+    firebase.database.ref(singleBookingRef(booking.id)).set(booking);
     if(booking.driver == auth.currentUser.uid && (booking.prepaid || booking.payment_mode == 'cash' || booking.payment_mode == 'wallet')){
-      firebase.database().ref(singleUserRef(booking.driver)).set({ queue: false });
+      firebase.database.ref(singleUserRef(booking.driver)).set({ queue: false });
     }
 
     if(booking.customer_token){
@@ -301,7 +303,7 @@ export const updateBooking = (booking) => async (dispatch) => {
     }
 
   if (booking.status == 'COMPLETE') {
-    firebase.database().ref(singleBookingRef(booking.id)).set(booking);
+    firebase.database.ref(singleBookingRef(booking.id)).set(booking);
     if (booking.rating) {
       if(booking.driver_token){
         RequestPushMsg(
@@ -313,7 +315,7 @@ export const updateBooking = (booking) => async (dispatch) => {
               params: { bookingId: booking.id }
           });
       }
-      firebase.database().ref(userRatingsRef(booking.driver)).once('value').then((snapshot) => {
+      firebase.database.ref(userRatingsRef(booking.driver)).once('value').then((snapshot) => {
         let ratings = snapshot.val();
         let rating;
         if(ratings){
@@ -327,8 +329,8 @@ export const updateBooking = (booking) => async (dispatch) => {
         }else{
           rating =  booking.rating;
         }
-        firebase.database().ref(singleUserRef(booking.driver)).set({rating: rating});
-        firebase.database().ref(userRatingsRef(booking.driver)).push({
+        firebase.database.ref(singleUserRef(booking.driver)).set({rating: rating});
+        firebase.database.ref(userRatingsRef(booking.driver)).push({
           user: booking.customer,
           rate: booking.rating,
           bookingId: booking.id
@@ -350,13 +352,13 @@ export const cancelBooking = (data) => (dispatch) => {
     payload: data,
   });
 
-  firebase.database().ref(singleBookingRef(data.booking.id)).set({
+  firebase.database.ref(singleBookingRef(data.booking.id)).set({
     status: 'CANCELLED',
     reason: data.reason,
     cancelledBy: data.cancelledBy
   }).then(() => {
     if (data.booking.driver && (data.booking.status === 'NEW' || data.booking.status === 'ACCEPTED' || data.booking.status === 'ARRIVED')) {
-      firebase.database().ref(singleUserRef(data.booking.driver)).set({ queue: false });
+      firebase.database.ref(singleUserRef(data.booking.driver)).set({ queue: false });
       if(data.booking.driver_token){
         RequestPushMsg(
           data.booking.driver_token,
@@ -380,7 +382,7 @@ export const cancelBooking = (data) => (dispatch) => {
         }
    }
     if (data.booking.status === 'NEW') {
-      firebase.database().ref(requestedDriversRef(data.booking.id)).remove();
+      firebase.database.ref(requestedDriversRef(data.booking.id)).remove();
     }
   });
 };
@@ -390,9 +392,9 @@ export const updateBookingImage = (booking, imageType, imageBlob) => (dispatch) 
     singleBookingRef,
     bookingImageRef
   } = firebase;
-  firebase.storage().ref(bookingImageRef(booking.id,imageType)).put(imageBlob).then(() => {
+  firebase.storage.ref(bookingImageRef(booking.id,imageType)).put(imageBlob).then(() => {
     imageBlob.close()
-    return firebase.storage().ref(bookingImageRef(booking.id,imageType)).getDownloadURL()
+    return firebase.storage.ref(bookingImageRef(booking.id,imageType)).getDownloadURL()
   }).then((url) => {
     if(imageType == 'pickup_image'){
       booking.pickup_image = url;
@@ -400,7 +402,7 @@ export const updateBookingImage = (booking, imageType, imageBlob) => (dispatch) 
     if(imageType == 'deliver_image'){
       booking.deliver_image = url;
     }
-    firebase.database().ref(singleBookingRef(booking.id)).set(booking);
+    firebase.database.ref(singleBookingRef(booking.id)).set(booking);
     dispatch({
       type: UPDATE_BOOKING,
       payload: booking,
@@ -425,7 +427,7 @@ export const forceEndBooking = (booking) => async (dispatch) => {
   
   if (booking.status == 'STARTED') {
 
-    firebase.database().ref(trackingRef(booking.id)).push({
+    firebase.database.ref(trackingRef(booking.id)).push({
       at: new Date().getTime(),
       status: 'REACHED',
       lat: booking.drop.lat,
@@ -450,20 +452,20 @@ export const forceEndBooking = (booking) => async (dispatch) => {
         });
     }
 
-    firebase.database().ref(singleUserRef(booking.driver)).set({ queue: false });
+    firebase.database.ref(singleUserRef(booking.driver)).set({ queue: false });
 
     if(booking.prepaid){
 
-      const settingsdata = await firebase.database().ref(settingsRef).once('value');
+      const settingsdata = await firebase.database.ref(settingsRef).once('value');
       const settings = settingsdata.val();
 
-      firebase.database().ref(singleUserRef(booking.driver)).once('value').then((snapshot) => {
+      firebase.database.ref(singleUserRef(booking.driver)).once('value').then((snapshot) => {
         let walletBalance = parseFloat(snapshot.val().walletBalance);
         walletBalance = walletBalance + parseFloat(booking.driver_share);
         if(parseFloat(booking.cashPaymentAmount)>0){
           walletBalance = walletBalance - parseFloat(booking.cashPaymentAmount);
         }
-        firebase.database().ref(singleUserRef(booking.driver)).set({"walletBalance": parseFloat(walletBalance.toFixed(settings.decimal))});
+        firebase.database.ref(singleUserRef(booking.driver)).set({"walletBalance": parseFloat(walletBalance.toFixed(settings.decimal))});
 
         let details = {
           type: 'Credit',
@@ -471,7 +473,7 @@ export const forceEndBooking = (booking) => async (dispatch) => {
           date: new Date().getTime(),
           txRef: booking.id
         }
-        firebase.database().ref(walletHistoryRef(booking.driver)).push(details);
+        firebase.database.ref(walletHistoryRef(booking.driver)).push(details);
         
         if(parseFloat(booking.cashPaymentAmount)>0){
           let details = {
@@ -480,7 +482,7 @@ export const forceEndBooking = (booking) => async (dispatch) => {
             date: new Date().getTime(),
             txRef: booking.id
           }
-          firebase.database().ref(walletHistoryRef(booking.driver)).push(details);
+          firebase.database.ref(walletHistoryRef(booking.driver)).push(details);
         }  
       });
 
@@ -510,6 +512,6 @@ export const forceEndBooking = (booking) => async (dispatch) => {
       booking.status = 'PENDING';
     }
 
-    firebase.database().ref(singleBookingRef(booking.id)).set(booking);
+    firebase.database.ref(singleBookingRef(booking.id)).set(booking);
   }
 };

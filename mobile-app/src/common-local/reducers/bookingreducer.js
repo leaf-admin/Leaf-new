@@ -39,6 +39,13 @@ export const bookingreducer = (state = INITIAL_STATE, action) => {
       };
     case CLEAR_BOOKING:
       return INITIAL_STATE;
+    case 'SET_BOOKING':
+      // ✅ Adicionado para suportar setBooking action
+      return {
+        ...state,
+        booking: action.payload,
+        loading: false
+      };
     default:
       return state;
   }

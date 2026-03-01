@@ -1,3 +1,4 @@
+import Logger from '../utils/Logger';
 import React, { useState, useEffect } from 'react';
 import {
   View,
@@ -55,7 +56,7 @@ const BaaSAccountScreen = ({ navigation, route }) => {
       setAccountData(response.data);
       
     } catch (error) {
-      console.error('Erro ao carregar dados da conta:', error);
+      Logger.error('Erro ao carregar dados da conta:', error);
       Alert.alert('Erro', 'Não foi possível carregar os dados da conta');
     } finally {
       setIsLoading(false);

@@ -1,3 +1,4 @@
+import Logger from '../utils/Logger';
 import React, { useState, useEffect } from 'react';
 import {
   View,
@@ -16,10 +17,13 @@ import { Icon } from 'react-native-elements';
 import { useSelector } from 'react-redux';
 import { api } from '../common-local';
 import QRCode from 'react-native-qrcode-svg';
+import { useTranslation } from '../components/i18n/LanguageProvider';
+
 
 const { width, height } = Dimensions.get('window');
 
 const DriverBalanceScreen = ({ navigation, route }) => {
+  const { t } = useTranslation();
   const [balanceData, setBalanceData] = useState({
     balance: 0,
     minimumBalance: 49.90,
@@ -60,8 +64,8 @@ const DriverBalanceScreen = ({ navigation, route }) => {
       }
       
     } catch (error) {
-      console.error('Erro ao carregar dados do saldo:', error);
-      Alert.alert('Erro', 'Não foi possível carregar os dados do saldo');
+      Logger.error('Erro ao carregar dados do saldo:', error);
+      Alert.alert(t('messages.error'), t('driverBalance.loadError'));
     } finally {
       setIsLoading(false);
     }
@@ -79,8 +83,8 @@ const DriverBalanceScreen = ({ navigation, route }) => {
       setQrCodeData(response.data);
       
     } catch (error) {
-      console.error('Erro ao gerar QR Code:', error);
-      Alert.alert('Erro', 'Não foi possível gerar o QR Code');
+      Logger.error('Erro ao gerar QR Code:', error);
+      Alert.alert(t('messages.error'), t('driverBalance.qrCodeError'));
     } finally {
       setGeneratingQR(false);
     }
@@ -97,11 +101,11 @@ const DriverBalanceScreen = ({ navigation, route }) => {
       navigation.navigate('DriverDashboard');
     } else {
       Alert.alert(
-        'Saldo Insuficiente',
-        'Você precisa ter pelo menos R$ 49,90 na sua conta Leaf para ficar online. Use o QR Code abaixo para regularizar seu saldo.',
+        t('driverBalance.insufficientBalance'),
+        t('driverBalance.insufficientBalanceMessage'),
         [
-          { text: 'OK', style: 'default' },
-          { text: 'Gerar QR Code', onPress: generateQRCode }
+          { text: t('messages.confirm'), style: 'default' },
+          { text: t('driverBalance.generateQRCode'), onPress: generateQRCode }
         ]
       );
     }

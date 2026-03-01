@@ -1,0 +1,45 @@
+# Teste: Fluxo de Pagamento
+appId: br.com.leaf.ride
+---
+# Assumindo que há uma corrida para pagar
+# (Este teste deve ser executado após completar uma corrida)
+
+- launchApp
+- assertVisible: 
+    text: "Finalizar Pagamento"
+    timeout: 5000
+
+# Selecionar método de pagamento
+- tapOn: 
+    text: "Cartão de Crédito"
+    timeout: 2000
+
+# Preencher dados do cartão (se necessário)
+- tapOn: 
+    id: "card-number-input"
+    timeout: 2000
+- inputText: "4111111111111111"  # Cartão de teste
+- tapOn: 
+    text: "Confirmar"
+    timeout: 2000
+
+# Confirmar pagamento
+- tapOn: 
+    text: "Pagar"
+    timeout: 3000
+- assertVisible: 
+    text: "Pagamento Realizado"
+    timeout: 5000
+
+
+
+
+
+
+
+
+
+
+
+
+

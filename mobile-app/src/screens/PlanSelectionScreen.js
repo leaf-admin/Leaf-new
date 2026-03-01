@@ -1,3 +1,4 @@
+import Logger from '../utils/Logger';
 import React, { useState } from 'react';
 import {
   View,
@@ -13,10 +14,13 @@ import {
 import { Icon } from 'react-native-elements';
 import { useSelector } from 'react-redux';
 import { api } from '../common-local';
+import { useTranslation } from '../components/i18n/LanguageProvider';
+
 
 const { width } = Dimensions.get('window');
 
 const PlanSelectionScreen = ({ navigation, route }) => {
+  const { t } = useTranslation();
   const [selectedPlan, setSelectedPlan] = useState(null);
   const [isLoading, setIsLoading] = useState(false);
   
@@ -71,11 +75,11 @@ const PlanSelectionScreen = ({ navigation, route }) => {
       
       if (currentPlan && currentPlan.status === 'active') {
         Alert.alert(
-          'Plano Ativo',
-          'Você já possui um plano ativo. Deseja alterar para o novo plano?',
+          t('planSelection.activePlan'),
+          t('planSelection.activePlanMessage'),
           [
-            { text: 'Cancelar', style: 'cancel' },
-            { text: 'Alterar', onPress: () => proceedWithPlan(plan) }
+            { text: t('messages.cancel'), style: 'cancel' },
+            { text: t('planSelection.change'), onPress: () => proceedWithPlan(plan) }
           ]
         );
       } else {
@@ -83,8 +87,8 @@ const PlanSelectionScreen = ({ navigation, route }) => {
       }
       
     } catch (error) {
-      console.error('Erro ao selecionar plano:', error);
-      Alert.alert('Erro', 'Não foi possível selecionar o plano');
+      Logger.error('Erro ao selecionar plano:', error);
+      Alert.alert(t('messages.error'), t('planSelection.selectError'));
       setSelectedPlan(null);
     } finally {
       setIsLoading(false);
@@ -96,7 +100,7 @@ const PlanSelectionScreen = ({ navigation, route }) => {
       const response = await api.get(`/api/user/${currentUser.id}/plan`);
       return response.data.plan;
     } catch (error) {
-      console.error('Erro ao verificar plano atual:', error);
+      Logger.error('Erro ao verificar plano atual:', error);
       return null;
     }
   };
@@ -113,8 +117,8 @@ const PlanSelectionScreen = ({ navigation, route }) => {
       });
       
     } catch (error) {
-      console.error('Erro ao processar plano:', error);
-      Alert.alert('Erro', 'Falha ao processar seleção do plano');
+      Logger.error('Erro ao processar plano:', error);
+      Alert.alert(t('messages.error'), t('planSelection.processError'));
     }
   };
 
@@ -129,7 +133,7 @@ const PlanSelectionScreen = ({ navigation, route }) => {
       
       return response.data;
     } catch (error) {
-      console.error('Erro ao criar cobrança:', error);
+      Logger.error('Erro ao criar cobrança:', error);
       throw error;
     }
   };

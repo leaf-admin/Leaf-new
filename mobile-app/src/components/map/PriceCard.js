@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { memo, useCallback } from 'react';
 import {
   View,
   Text,
@@ -11,7 +11,7 @@ import { useTranslation } from 'react-i18next';
 
 const { width } = Dimensions.get('window');
 
-export default function PriceCard({ 
+const PriceCard = memo(function PriceCard({ 
   estimatedFare, 
   estimatedTime, 
   estimatedDistance, 
@@ -22,14 +22,14 @@ export default function PriceCard({
 }) {
   const { t } = useTranslation();
 
-  const handlePress = () => {
+  const handlePress = useCallback(() => {
     if (onPress) {
       onPress();
     }
     if (onSelectCar) {
       onSelectCar(carType);
     }
-  };
+  }, [onPress, onSelectCar, carType]);
 
   return (
     <TouchableOpacity 
@@ -123,7 +123,7 @@ export default function PriceCard({
       </TouchableOpacity>
     </TouchableOpacity>
   );
-}
+});
 
 const styles = StyleSheet.create({
   container: {
@@ -234,4 +234,6 @@ const styles = StyleSheet.create({
   selectedButtonText: {
     color: '#41D274',
   },
-}); 
+});
+
+export default PriceCard; 

@@ -1,7 +1,9 @@
 const admin = require('firebase-admin');
 const Redis = require('ioredis');
-const { logger } = require('../utils/logger');
+const { logger, logStructured } = require('../utils/logger');
 const path = require('path');
+const circuitBreakerService = require('./circuit-breaker-service');
+const traceContext = require('../utils/trace-context');
 
 class FCMService {
     constructor() {
@@ -50,7 +52,11 @@ class FCMService {
     async saveUserFCMToken(userId, userType, fcmToken, deviceInfo = {}) {
         try {
             if (!fcmToken) {
-                logger.warn(`Token FCM vazio para usuário ${userId}`);
+                logStructured('warn', 'Token FCM vazio', {
+                    service: 'fcm',
+                    operation: 'saveUserFCMToken',
+                    userId
+                });
                 return false;
             }
 
@@ -60,7 +66,12 @@ class FCMService {
                 fcmToken,
                 deviceInfo,
                 lastUpdated: new Date().toISOString(),
-                isActive: true
+                isActive: true,
+                // ✅ Informações adicionais para token personalizado
+                authenticated: deviceInfo.authenticated || false,
+                authenticatedAt: deviceInfo.authenticatedAt || null,
+                socketId: deviceInfo.socketId || null,
+                isTemporary: deviceInfo.isTemporary || false
             };
 
             // Salvar no Redis
@@ -76,11 +87,21 @@ class FCMService {
             // Definir TTL para o token (30 dias)
             await this.redis.expire(`fcm_tokens:${userId}`, 2592000);
 
-            logger.info(`✅ Token FCM salvo para usuário ${userId} (${userType})`);
+            logStructured('info', 'Token FCM salvo', {
+                service: 'fcm',
+                operation: 'saveUserFCMToken',
+                userId,
+                userType
+            });
             return true;
 
         } catch (error) {
-            logger.error(`❌ Erro ao salvar token FCM para usuário ${userId}:`, error);
+            logStructured('error', 'Erro ao salvar token FCM', {
+                service: 'fcm',
+                operation: 'saveUserFCMToken',
+                userId,
+                error: error.message
+            });
             return false;
         }
     }
@@ -119,11 +140,20 @@ class FCMService {
             // Remover da lista de tokens ativos
             await this.redis.srem('active_fcm_tokens', fcmToken);
 
-            logger.info(`✅ Token FCM removido para usuário ${userId}`);
+            logStructured('info', 'Token FCM removido', {
+                service: 'fcm',
+                operation: 'removeUserFCMToken',
+                userId
+            });
             return true;
 
         } catch (error) {
-            logger.error(`❌ Erro ao remover token FCM para usuário ${userId}:`, error);
+            logStructured('error', 'Erro ao remover token FCM', {
+                service: 'fcm',
+                operation: 'removeUserFCMToken',
+                userId,
+                error: error.message
+            });
             return false;
         }
     }
@@ -132,13 +162,21 @@ class FCMService {
     async sendNotificationToUser(userId, notification) {
         try {
             if (!this.isServiceAvailable()) {
-                logger.warn('FCM Service não disponível');
+                logStructured('warn', 'FCM Service não disponível', {
+                    service: 'fcm',
+                    operation: 'sendNotificationToUser',
+                    userId
+                });
                 return { success: false, error: 'FCM Service não disponível' };
             }
 
             // Verificar rate limiting
             if (!this.checkRateLimit(userId)) {
-                logger.warn(`Rate limit excedido para usuário ${userId}`);
+                logStructured('warn', 'Rate limit excedido', {
+                    service: 'fcm',
+                    operation: 'sendNotificationToUser',
+                    userId
+                });
                 return { success: false, error: 'Rate limit excedido' };
             }
 
@@ -146,7 +184,11 @@ class FCMService {
             const userTokens = await this.getUserFCMTokens(userId);
             
             if (userTokens.length === 0) {
-                logger.warn(`Usuário ${userId} não possui tokens FCM ativos`);
+                logStructured('warn', 'Usuário não possui tokens FCM ativos', {
+                    service: 'fcm',
+                    operation: 'sendNotificationToUser',
+                    userId
+                });
                 return { success: false, error: 'Nenhum token FCM encontrado' };
             }
 
@@ -162,7 +204,12 @@ class FCMService {
                         error: result.error
                     });
                 } catch (error) {
-                    logger.error(`Erro ao enviar para token ${tokenData.fcmToken}:`, error);
+                    logStructured('error', 'Erro ao enviar para token', {
+                        service: 'fcm',
+                        operation: 'sendNotificationToUser',
+                        userId,
+                        error: error.message
+                    });
                     results.push({
                         token: tokenData.fcmToken,
                         success: false,
@@ -172,7 +219,13 @@ class FCMService {
             }
 
             const successCount = results.filter(r => r.success).length;
-            logger.info(`📤 Notificação enviada para usuário ${userId}: ${successCount}/${userTokens.length} dispositivos`);
+            logStructured('info', 'Notificação enviada para usuário', {
+                service: 'fcm',
+                operation: 'sendNotificationToUser',
+                userId,
+                successCount,
+                totalTokens: userTokens.length
+            });
 
             return {
                 success: successCount > 0,
@@ -185,7 +238,12 @@ class FCMService {
             };
 
         } catch (error) {
-            logger.error(`❌ Erro ao enviar notificação para usuário ${userId}:`, error);
+            logStructured('error', 'Erro ao enviar notificação para usuário', {
+                service: 'fcm',
+                operation: 'sendNotificationToUser',
+                userId,
+                error: error.message
+            });
             return { success: false, error: error.message };
         }
     }
@@ -242,20 +300,48 @@ class FCMService {
                         channelId: notification.channelId || 'default',
                         priority: 'high',
                         defaultSound: true,
-                        defaultVibrateTimings: true
+                        defaultVibrateTimings: true,
+                        // ✅ Adicionar ações interativas (botões) se fornecidas
+                        ...(notification.actions && notification.actions.length > 0 && {
+                            clickAction: 'FLUTTER_NOTIFICATION_CLICK',
+                            // Ações aparecem como botões na notificação
+                            actions: notification.actions.map(action => ({
+                                action: action.id,
+                                title: action.title,
+                                icon: action.icon || 'ic_notification'
+                            }))
+                        })
                     }
                 },
                 apns: {
                     payload: {
                         aps: {
                             sound: 'default',
-                            badge: notification.badge || 1
+                            badge: notification.badge || 1,
+                            // ✅ Adicionar categoria para ações no iOS
+                            ...(notification.category && {
+                                category: notification.category
+                            })
                         }
                     }
                 }
             };
 
-            const response = await admin.messaging().send(message);
+            // Enviar com circuit breaker
+            const response = await circuitBreakerService.execute(
+                'fcm_send',
+                async () => {
+                    return await admin.messaging().send(message);
+                },
+                async () => {
+                    // Fallback: retornar erro se circuit breaker aberto
+                    throw new Error('Serviço de notificações temporariamente indisponível');
+                },
+                {
+                    failureThreshold: 5,
+                    timeout: 60000
+                }
+            );
             
             logger.info(`✅ Notificação enviada para token ${fcmToken}: ${response}`);
             
@@ -268,6 +354,107 @@ class FCMService {
             logger.error(`❌ Erro ao enviar notificação para token ${fcmToken}:`, error);
             
             // Se o token for inválido, removê-lo
+            if (error.code === 'messaging/invalid-registration-token' ||
+                error.code === 'messaging/registration-token-not-registered') {
+                await this.removeInvalidToken(fcmToken);
+            }
+            
+            return {
+                success: false,
+                error: error.message
+            };
+        }
+    }
+
+    /**
+     * Enviar notificação interativa com botões de ação
+     * @param {string} fcmToken - Token FCM do dispositivo
+     * @param {Object} notification - Dados da notificação
+     * @param {Array} actions - Array de ações (botões) [{id, title, icon?}]
+     * @param {string} category - Categoria para iOS (opcional)
+     * @returns {Promise<{success: boolean, messageId?: string, error?: string}>}
+     */
+    async sendInteractiveNotification(fcmToken, notification, actions = [], category = null) {
+        try {
+            if (!this.isServiceAvailable()) {
+                throw new Error('FCM Service não disponível');
+            }
+
+            // Preparar dados com informações das ações
+            const dataWithActions = {
+                ...notification.data,
+                timestamp: new Date().toISOString(),
+                hasActions: 'true',
+                actions: JSON.stringify(actions),
+                ...(category && { category })
+            };
+
+            const message = {
+                token: fcmToken,
+                notification: {
+                    title: notification.title,
+                    body: notification.body
+                },
+                data: dataWithActions,
+                android: {
+                    priority: 'high',
+                    notification: {
+                        channelId: notification.channelId || 'driver_actions',
+                        priority: 'high',
+                        defaultSound: true,
+                        defaultVibrateTimings: true,
+                        // ✅ Ações interativas para Android
+                        clickAction: 'FLUTTER_NOTIFICATION_CLICK',
+                        // Incluir ações no payload de dados para processamento no app
+                        ...(actions.length > 0 && {
+                            actions: actions.map(action => ({
+                                action: action.id,
+                                title: action.title,
+                                icon: action.icon || 'ic_notification'
+                            }))
+                        })
+                    }
+                },
+                apns: {
+                    payload: {
+                        aps: {
+                            sound: 'default',
+                            badge: notification.badge || 1,
+                            // ✅ Categoria para ações no iOS
+                            ...(category && {
+                                category: category
+                            })
+                        }
+                    }
+                }
+            };
+
+            // Enviar com circuit breaker
+            const response = await circuitBreakerService.execute(
+                'fcm_send',
+                async () => {
+                    return await admin.messaging().send(message);
+                },
+                async () => {
+                    // Fallback: retornar erro se circuit breaker aberto
+                    throw new Error('Serviço de notificações temporariamente indisponível');
+                },
+                {
+                    failureThreshold: 5,
+                    timeout: 60000
+                }
+            );
+            
+            logger.info(`✅ Notificação interativa enviada para token ${fcmToken}: ${response}`);
+            
+            return {
+                success: true,
+                messageId: response
+            };
+
+        } catch (error) {
+            logger.error(`❌ Erro ao enviar notificação interativa para token ${fcmToken}:`, error);
+            
             if (error.code === 'messaging/invalid-registration-token' ||
                 error.code === 'messaging/registration-token-not-registered') {
                 await this.removeInvalidToken(fcmToken);

@@ -1,0 +1,27 @@
+# Helper: Login com usuário de teste
+# Reutilizável em outros testes
+# Nota: Ajuste os seletores conforme sua UI real
+---
+- launchApp
+- assertVisible: 
+    text: "Entrar"
+    timeout: 10000
+- tapOn: 
+    text: "Entrar"
+- assertVisible: 
+    text: "Telefone"
+    timeout: 5000
+- inputText: "11999999999"
+- tapOn: 
+    text: "Continuar"
+    timeout: 3000
+- assertVisible: 
+    text: "Código"
+    timeout: 5000
+- inputText: "123456"
+- tapOn: 
+    text: "Verificar"
+- assertVisible: 
+    text: "Dashboard"
+    timeout: 10000
+

@@ -1,5 +1,6 @@
+import Logger from '../utils/Logger';
 import { FETCH_WALLET_HISTORY, FETCH_WALLET_HISTORY_SUCCESS, FETCH_WALLET_HISTORY_FAIL } from '../types.js';
-import { database } from '../config/configureFirebase';
+import { database } from './config/configureFirebase';
 
 export const fetchWalletHistory = (userId) => async (dispatch) => {
     try {
@@ -25,7 +26,7 @@ export const fetchWalletHistory = (userId) => async (dispatch) => {
         });
 
     } catch (error) {
-        console.error('Error fetching wallet history:', error);
+        Logger.error('Error fetching wallet history:', error);
         dispatch({
             type: FETCH_WALLET_HISTORY_FAIL,
             payload: error.message

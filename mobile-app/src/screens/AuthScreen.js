@@ -1,3 +1,4 @@
+import Logger from '../utils/Logger';
 import React, { useState, useEffect } from 'react';
 import { 
   View, 
@@ -17,6 +18,8 @@ import { MaterialCommunityIcons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { api } from '../common-local';
 import { firebase } from '../common-local/config/configureFirebase';
+import { useTranslation } from '../components/i18n/LanguageProvider';
+
 
 
 const LEAF_GREEN = '#1A330E';
@@ -26,6 +29,7 @@ const GOOGLE_BLUE = '#4285F4';
 
 
 export default function AuthScreen() {
+  const { t } = useTranslation();
   const navigation = useNavigation();
   const [isLogin, setIsLogin] = useState(true);
   const [email, setEmail] = useState('');
@@ -51,17 +55,17 @@ export default function AuthScreen() {
   // Função para login com email/senha
   const handleEmailAuth = async () => {
     if (!email.trim() || !password.trim()) {
-      Alert.alert('Atenção', 'Preencha todos os campos obrigatórios.');
+      Alert.alert(t('messages.attention'), t('auth.fillRequiredFields'));
       return;
     }
 
     if (!isLogin && password !== confirmPassword) {
-      Alert.alert('Atenção', 'As senhas não coincidem.');
+      Alert.alert(t('messages.attention'), t('auth.passwordsDoNotMatch'));
       return;
     }
 
     if (!isLogin && password.length < 6) {
-      Alert.alert('Atenção', 'A senha deve ter pelo menos 6 caracteres.');
+      Alert.alert(t('messages.attention'), t('auth.passwordTooShort'));
       return;
     }
 
@@ -73,7 +77,7 @@ export default function AuthScreen() {
       if (isLogin) {
         // Login
         const userCredential = await auth.signInWithEmailAndPassword(email, password);
-        console.log('✅ Login bem-sucedido:', userCredential.user.uid);
+        Logger.log('✅ Login bem-sucedido:', userCredential.user.uid);
         
         // Salvar dados básicos no AsyncStorage
         await AsyncStorage.setItem('@auth_uid', userCredential.user.uid);
@@ -92,19 +96,19 @@ export default function AuthScreen() {
           throw new Error('Usuário não está autenticado. Faça login novamente.');
         }
         
-        console.log('🔄 Atualizando usuário existente com email/senha...');
+        Logger.log('🔄 Atualizando usuário existente com email/senha...');
         
         // Atualizar email no Firebase Auth
         await currentUser.updateEmail(email);
-        console.log('✅ Email atualizado no Firebase Auth');
+        Logger.log('✅ Email atualizado no Firebase Auth');
         
         // Atualizar senha no Firebase Auth
         await currentUser.updatePassword(password);
-        console.log('✅ Senha atualizada no Firebase Auth');
+        Logger.log('✅ Senha atualizada no Firebase Auth');
         
         // Enviar email de verificação
         await currentUser.sendEmailVerification();
-        console.log('📧 Email de verificação enviado');
+        Logger.log('📧 Email de verificação enviado');
         
         // Atualizar dados no AsyncStorage
         const existingData = await AsyncStorage.getItem('@user_data');
@@ -116,13 +120,13 @@ export default function AuthScreen() {
           updatedAt: new Date().getTime()
         }));
         
-        console.log('✅ Usuário atualizado com email/senha');
+        Logger.log('✅ Usuário atualizado com email/senha');
         
         // Navegar para seleção de perfil
         navigation.navigate('ProfileSelection');
       }
     } catch (error) {
-      console.error('❌ Erro na autenticação:', error);
+      Logger.error('❌ Erro na autenticação:', error);
       let errorMessage = 'Ocorreu um erro durante a autenticação.';
       
       if (error.code === 'auth/user-not-found') {
@@ -137,7 +141,7 @@ export default function AuthScreen() {
         errorMessage = 'Email inválido.';
       }
       
-      Alert.alert('Erro', errorMessage);
+      Alert.alert(t('messages.error'), errorMessage);
     } finally {
       setLoading(false);
     }
@@ -154,7 +158,7 @@ export default function AuthScreen() {
   //     });
       
   //     const userInfo = await userInfoResponse.json();
-  //     console.log('👤 Dados do Google:', userInfo);
+  //     Logger.log('👤 Dados do Google:', userInfo);
       
   //     // Criar credencial do Google
   //     const { auth } = firebase;
@@ -162,7 +166,7 @@ export default function AuthScreen() {
       
   //     // Fazer login com Google
   //     const userCredential = await auth.signInWithCredential(credential);
-  //     console.log('✅ Login com Google bem-sucedido:', userCredential.user.uid);
+  //     Logger.log('✅ Login com Google bem-sucedido:', userCredential.user.uid);
       
   //     // Salvar dados do Google no AsyncStorage
   //     await AsyncStorage.setItem('@auth_uid', userCredential.user.uid);
@@ -182,7 +186,7 @@ export default function AuthScreen() {
   //     navigation.replace('ProfileSelection');
       
   //   } catch (error) {
-  //     console.error('❌ Erro no login com Google:', error);
+  //     Logger.error('❌ Erro no login com Google:', error);
   //     Alert.alert('Erro', 'Não foi possível fazer login com o Google. Tente novamente.');
   //   } finally {
   //     setLoading(false);
@@ -336,7 +340,7 @@ export default function AuthScreen() {
             <TouchableOpacity
               style={[styles.button, styles.skipButton]}
               onPress={() => {
-                console.log('⏭️ Usuário escolheu pular email/senha');
+                Logger.log('⏭️ Usuário escolheu pular email/senha');
                 navigation.navigate('ProfileSelection');
               }}
             >
@@ -370,7 +374,7 @@ export default function AuthScreen() {
             disabled={loading}
           >
             <Text style={styles.switchModeText}>
-              {isLogin ? 'Não tem uma conta? Cadastre-se' : 'Já tem uma conta? Faça login'}
+              {isLogin ? 'Não tem uma conta?' : 'Já tem uma conta? Faça login'}
             </Text>
           </TouchableOpacity>
         </View>

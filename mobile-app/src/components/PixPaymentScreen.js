@@ -1,3 +1,4 @@
+import Logger from '../utils/Logger';
 import React, { useState, useEffect } from 'react';
 import {
   View,
@@ -16,10 +17,13 @@ import { useDispatch, useSelector } from 'react-redux';
 import { createPixCharge, checkPaymentStatus } from '../services/paymentService';
 import { updateTripStatus } from '../actions/tripActions';
 import { formatMinimumFare, getFinalFareValue } from '../utils/minimumFareValidator';
+import { useTranslation } from './i18n/LanguageProvider';
+
 
 const { width } = Dimensions.get('window');
 
 const PixPaymentScreen = ({ route }) => {
+  const { t } = useTranslation();
   const navigation = useNavigation();
   const dispatch = useDispatch();
   
@@ -57,7 +61,7 @@ const PixPaymentScreen = ({ route }) => {
 
       setLoading(false);
     } catch (error) {
-      console.error('Erro ao gerar PIX:', error);
+      Logger.error('Erro ao gerar PIX:', error);
       setError('Erro ao gerar pagamento PIX');
       setLoading(false);
     }
@@ -80,7 +84,7 @@ const PixPaymentScreen = ({ route }) => {
             navigation.replace('DriverSearch', { tripData });
           }
         } catch (error) {
-          console.error('Erro ao verificar pagamento:', error);
+          Logger.error('Erro ao verificar pagamento:', error);
         }
       }
     }, 3000); // Verificar a cada 3 segundos
@@ -113,7 +117,7 @@ const PixPaymentScreen = ({ route }) => {
   const handleCopyPixCode = () => {
     if (qrCodeData?.brCode) {
       // Implementar cópia para clipboard
-      Alert.alert('Código PIX copiado!');
+      Alert.alert(t('payment.pixCopied'));
     }
   };
 
@@ -125,12 +129,12 @@ const PixPaymentScreen = ({ route }) => {
 
   const handleCancel = () => {
     Alert.alert(
-      'Cancelar Pagamento',
-      'Tem certeza que deseja cancelar? O pagamento será cancelado.',
+      t('payment.cancelPayment'),
+      t('payment.cancelConfirmation'),
       [
-        { text: 'Não', style: 'cancel' },
+        { text: t('messages.cancel'), style: 'cancel' },
         { 
-          text: 'Sim', 
+          text: t('messages.confirm'), 
           onPress: () => {
             navigation.goBack();
           }

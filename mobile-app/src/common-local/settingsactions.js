@@ -1,3 +1,4 @@
+import Logger from '../utils/Logger';
 import {
   FETCH_SETTINGS,
   FETCH_SETTINGS_SUCCESS,
@@ -6,7 +7,7 @@ import {
   CLEAR_SETTINGS_ERROR
 } from "../types";
 
-import { firebase } from '../config/configureFirebase';
+import { firebase } from './config/configureFirebase';
 import { api } from '../api';
 import { store } from '../store/store';
 import { SETTINGS_LOADING, SETTINGS_LOADED, SETTINGS_ERROR } from '../store/types';
@@ -60,7 +61,7 @@ export const clearSettingsViewError = () => (dispatch) => {
 // Função para buscar configurações de forma síncrona
 export const getSettings = async () => {
   try {
-    console.log('getSettings - Buscando configurações...');
+    Logger.log('getSettings - Buscando configurações...');
     
     const settingsRef = firebase.settingsRef;
     const snapshot = await new Promise((resolve) => {
@@ -72,14 +73,14 @@ export const getSettings = async () => {
 
     if (snapshot.val()) {
       const settings = snapshot.val();
-      console.log('getSettings - Configurações encontradas:', settings);
+      Logger.log('getSettings - Configurações encontradas:', settings);
       return settings;
     } else {
-      console.log('getSettings - Nenhuma configuração encontrada');
+      Logger.log('getSettings - Nenhuma configuração encontrada');
       return null;
     }
   } catch (error) {
-    console.warn('getSettings - Erro ao buscar configurações:', error);
+    Logger.warn('getSettings - Erro ao buscar configurações:', error);
     return null;
   }
 };

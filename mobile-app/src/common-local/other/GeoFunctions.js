@@ -1,3 +1,4 @@
+import Logger from '../../utils/Logger';
 export const GetDistance = (lat1, lon1, lat2, lon2) => {
     if ((lat1 === lat2) && (lon1 === lon2)) {
         return 0;
@@ -46,7 +47,7 @@ export const GetTripDistance = async (data) => {
                 coords.push({latitude : arr[arr.length - 1].lat, longitude : arr[arr.length - 1].lng});
             }
         }catch(error){
-            console.log(error);
+            Logger.log(error);
         }
         return {
             distance:distance ,

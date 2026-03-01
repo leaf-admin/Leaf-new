@@ -3,7 +3,7 @@
 
 module.exports = {
     // Google Maps (já configurado)
-    GOOGLE_MAPS_API_KEY: process.env.GOOGLE_MAPS_API_KEY || 'mock-key',
+    GOOGLE_MAPS_API_KEY: process.env.GOOGLE_MAPS_API_KEY || 'AIzaSyBLwKg0KRiLVjAHVBQAUP7pB3Q80G246KY',
     
     // MapBox - R$ 0,0025 por request, 600 req/min
     MAPBOX_API_KEY: 'pk.eyJ1IjoibGVhZi1hcHAiLCJhIjoiY205MHJxazByMGlybzJrcTIyZ25wdm1maSJ9.aX1wTUINIhk_nsQAACNnyA',

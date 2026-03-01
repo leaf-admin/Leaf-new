@@ -1,3 +1,4 @@
+import Logger from '../../utils/Logger';
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View,
@@ -16,6 +17,7 @@ import { TouchableOpacity } from 'react-native-gesture-handler';
 import { useSelector, useDispatch } from 'react-redux';
 import { colors } from '../../common-local/theme';
 import { useTranslation } from 'react-i18next';
+
 
 // Componente de chat otimizado para resolver problemas comuns do GiftedChat
 const OptimizedChat = ({ 
@@ -68,7 +70,7 @@ const OptimizedChat = ({
         setPage(1);
       }
     } catch (error) {
-      console.error('Erro ao carregar mensagens iniciais:', error);
+      Logger.error('Erro ao carregar mensagens iniciais:', error);
       Alert.alert(t('error'), t('chat_load_error'));
     } finally {
       setIsLoadingMessages(false);
@@ -90,7 +92,7 @@ const OptimizedChat = ({
         setHasMoreMessages(false);
       }
     } catch (error) {
-      console.error('Erro ao carregar mais mensagens:', error);
+      Logger.error('Erro ao carregar mais mensagens:', error);
     } finally {
       setIsLoadingMessages(false);
     }
@@ -117,7 +119,7 @@ const OptimizedChat = ({
       }
 
     } catch (error) {
-      console.error('Erro ao enviar mensagem:', error);
+      Logger.error('Erro ao enviar mensagem:', error);
       Alert.alert(t('error'), t('message_send_error'));
       
       // Remover mensagem local em caso de erro

@@ -1,0 +1,89 @@
+# Docker Compose Otimizado - Leaf System
+# Suporte para 500k+ usuários simultâneos
+
+version: '3.8'
+
+services:
+  # Redis Master - Cache principal
+  redis-master:
+    image: redis:7-alpine
+    container_name: leaf-redis-master
+    command: |
+      redis-server 
+      --appendonly yes 
+      --maxmemory 1gb 
+      --maxmemory-policy allkeys-lru 
+      --save 900 1 
+      --save 300 10 
+      --save 60 10000
+      --tcp-keepalive 300
+      --timeout 0
+    ports:
+      - "6380:6379"  # Porta modificada para evitar conflito
+    volumes:
+      - redis-master-data:/data
+    networks:
+      - leaf-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+
+  # WebSocket Instance 1 (Principal)
+  websocket-1:
+    build: .
+    container_name: leaf-websocket-1
+    environment:
+      - NODE_ENV=production
+      - PORT=3001
+      - INSTANCE_ID=websocket_1
+      - CLUSTER_MODE=true
+      - REDIS_HOST=redis-master
+      - REDIS_PORT=6379
+      - REDIS_URL=redis://redis-master:6379
+    ports:
+      - "3001:3001"
+    networks:
+      - leaf-network
+    restart: unless-stopped
+    depends_on:
+      - redis-master
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # WebSocket Instance 2 (Escalabilidade)
+  websocket-2:
+    build: .
+    container_name: leaf-websocket-2
+    environment:
+      - NODE_ENV=production
+      - PORT=3002
+      - INSTANCE_ID=websocket_2
+      - CLUSTER_MODE=true
+      - REDIS_HOST=redis-master
+      - REDIS_PORT=6379
+      - REDIS_URL=redis://redis-master:6379
+    ports:
+      - "3002:3002"
+    networks:
+      - leaf-network
+    restart: unless-stopped
+    depends_on:
+      - redis-master
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3002/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+volumes:
+  redis-master-data:
+
+networks:
+  leaf-network:
+    driver: bridge

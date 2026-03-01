@@ -4,7 +4,7 @@ import {
   FETCH_DRIVERS__EARNING_FAILED,
 } from "../types";
 import store from '../store/store';
-import { firebase } from '../config/configureFirebase';
+import { firebase } from './config/configureFirebase';
 
 export const fetchDriverEarnings = () => async (dispatch) => {
 

@@ -1,14 +1,15 @@
+import Logger from '../utils/Logger';
 import React from 'react';
 import { View, Alert, StyleSheet, Text, TouchableOpacity, I18nManager } from 'react-native';
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
-import { colors } from '../common-local/theme';
-import { MAIN_COLOR } from '../common-local/sharedFunctions';
-import i18n from '../i18n';
+import { colors } from '../common/theme';
+import { MAIN_COLOR } from '../common/sharedFunctions';
+import { useTranslation } from './i18n/LanguageProvider';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 const DownloadReceipt = ({ booking, settings }) => {
-    const { t } = i18n;
-    const isRTL = i18n.locale.indexOf('he') === 0 || i18n.locale.indexOf('ar') === 0;
+    const { t } = useTranslation();
+    const isRTL = false; // Simplificado para usar o novo sistema
 
     const generateHtmlContent = () => {
         const bookingDate = new Date(booking.bookingDate).toLocaleString('en-US', { year: 'numeric', month: 'numeric', day: 'numeric', hour: 'numeric', minute: 'numeric', hour12: true });
@@ -205,11 +206,11 @@ const DownloadReceipt = ({ booking, settings }) => {
             if (await Sharing.isAvailableAsync()) {
                 await Sharing.shareAsync(uri);
             } else {
-                Alert.alert(t("sharing_not_available"));
+            Alert.alert(t('messages.error'), t('receipt.sharingNotAvailable'));
             }
         } catch (error) {
-            console.error(error);
-            Alert.alert('Error', t("pdf_error"));
+            Logger.error(error);
+            Alert.alert(t('messages.error'), t('receipt.pdfError'));
         }
     };
 

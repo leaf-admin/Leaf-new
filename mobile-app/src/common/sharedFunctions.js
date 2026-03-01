@@ -1,14 +1,17 @@
+import Logger from '../utils/Logger';
+import { React } from 'react';
 import { View, Text, TouchableOpacity, Image, Dimensions  } from 'react-native';
-import { colors } from '../common-local/theme';
+import { colors } from './theme';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
-import i18n from '../i18n/index';
-import { api } from '../common-local';
+import i18n from '../i18n';
+import { api } from '../../common';
 import TaxiModal from '../components/TaxiModal';
 var { height, width } = Dimensions.get('window');
-import { fonts } from '../common-local/font';
+import { fonts } from './font';
+import { useState } from 'react';
 import {Tooltip,Icon } from 'react-native-elements';
 import { getLangKey } from '../common-local/other/getLangKey';
-import { firebase } from '../common-local/config/configureFirebase';
+
 
 export const MAIN_COLOR = colors.TAXIPRIMARY;
 export const SECONDORY_COLOR = colors.TAXISECONDORY;
@@ -40,9 +43,7 @@ export const CarHorizontal = (props) => {
     const { t } = i18n;
     const isRTL = i18n.locale.indexOf('he') === 0 || i18n.locale.indexOf('ar') === 0;
     const {onPress, carData, settings, styles} = props;
-    // Removido useState pois este arquivo não é um componente React
-    let open = false;
-    const setOpen = (value) => { open = value; };
+    const [open, setOpen] = useState(false);
 
     const truncateText = (text, maxLength) => {
         if (text.length > maxLength) {
@@ -234,11 +235,18 @@ export const prepareEstimateObject =  async (tripdata, instructionData) => {
     const {
         getDirectionsApi
     } = api;
+    
     // Log de entrada
-    console.log('prepareEstimateObject tripdata:', JSON.stringify(tripdata));
+    Logger.log('🚀 ===== prepareEstimateObject INICIADO =====');
+    Logger.log('prepareEstimateObject tripdata:', JSON.stringify(tripdata));
+    Logger.log('🔍 getDirectionsApi type:', typeof getDirectionsApi);
+    Logger.log('🔍 getDirectionsApi function:', getDirectionsApi?.toString?.()?.substring(0, 200));
+    
     try {
         const startLoc = tripdata.pickup.lat + ',' + tripdata.pickup.lng;
         const destLoc = tripdata.drop.lat + ',' + tripdata.drop.lng;
+        Logger.log('📍 Coordenadas formatadas:', { startLoc, destLoc });
+        
         let routeDetails = null;
         let waypoints = '';
         if (tripdata.drop && tripdata.drop.waypoints && tripdata.drop.waypoints.length > 0) {
@@ -251,12 +259,18 @@ export const prepareEstimateObject =  async (tripdata, instructionData) => {
                 }
             }
             const destination = tripdata.drop.lat + ',' + tripdata.drop.lng;
+            Logger.log('📍 Chamando getDirectionsApi COM waypoints:', { origin, destination, waypoints });
             routeDetails = await getDirectionsApi(origin, destination, waypoints);
         } else {
+            Logger.log('📍 Chamando getDirectionsApi SEM waypoints:', { startLoc, destLoc });
+            Logger.log('🔍 getDirectionsApi ANTES DE CHAMAR - toString:', getDirectionsApi.toString().substring(0, 500));
+            Logger.log('🔍 getDirectionsApi ANTES DE CHAMAR - includes "INICIADO":', getDirectionsApi.toString().includes('INICIADO'));
+            Logger.log('🔍 getDirectionsApi ANTES DE CHAMAR - includes "maps.googleapis.com":', getDirectionsApi.toString().includes('maps.googleapis.com'));
+            Logger.log('🔍 getDirectionsApi ANTES DE CHAMAR - includes "web.app":', getDirectionsApi.toString().includes('web.app'));
             routeDetails = await getDirectionsApi(startLoc, destLoc, null);
         }
         // Adicionar log detalhado do routeDetails para inspecionar campos de pedágio
-        console.log('prepareEstimateObject - routeDetails:', JSON.stringify(routeDetails, null, 2));
+        Logger.log('prepareEstimateObject - routeDetails:', JSON.stringify(routeDetails, null, 2));
 
         // Se vier duration_in_traffic, sobrescreve o time_in_secs
         if (routeDetails.duration_in_traffic) {
@@ -270,10 +284,10 @@ export const prepareEstimateObject =  async (tripdata, instructionData) => {
             routeDetails: routeDetails
         };
         // Log de saída
-        console.log('prepareEstimateObject retorno:', JSON.stringify(estimateObject));
+        Logger.log('prepareEstimateObject retorno:', JSON.stringify(estimateObject));
         return { estimateObject };
     } catch (e) {
-        console.log('prepareEstimateObject erro:', e);
+        Logger.log('prepareEstimateObject erro:', e);
         return { error: e };
     }
 }
@@ -309,8 +323,8 @@ export const RateView = (props) => {
 
 // Função de cálculo de tarifa (FareCalculator) para uso no app mobile
 export const FareCalculator = (distance, time, rateDetails, instructionData, decimal, routePoints, vehicleType = 'car', externalTollFee = null) => {  
-    console.log('[FareCalculator] rateDetails recebido:', rateDetails);
-    console.log('[FareCalculator] rateDetails.base_fare:', rateDetails?.base_fare);
+    Logger.log('[FareCalculator] rateDetails recebido:', rateDetails);
+    Logger.log('[FareCalculator] rateDetails.base_fare:', rateDetails?.base_fare);
     
     let baseCalculated =  (parseFloat(rateDetails?.rate_per_unit_distance || 0) * parseFloat(distance || 0)) + (parseFloat(rateDetails?.rate_per_hour || 0) * (parseFloat(time || 0) / 3600));
     if(rateDetails?.base_fare && rateDetails.base_fare > 0){
@@ -322,22 +336,12 @@ export const FareCalculator = (distance, time, rateDetails, instructionData, dec
     if(instructionData && instructionData.optionSelected){
         baseCalculated = baseCalculated + instructionData.optionSelected.amount;
     }
-    // Importar validador de tarifa mínima
-    const { getFinalFareValue } = require('../utils/minimumFareValidator');
-    
-    // Aplicar valor mínimo global de R$ 8,50 (ajuste automático)
-    const fareResult = getFinalFareValue(baseCalculated);
-    let total = fareResult.finalValue;
-    
-    // Log se foi ajustado
-    if (fareResult.wasAdjusted) {
-        console.log(`Tarifa ajustada para valor mínimo: R$ ${fareResult.originalValue.toFixed(2)} → R$ ${fareResult.finalValue.toFixed(2)}`);
-    }
+    let total = baseCalculated > parseFloat(rateDetails?.min_fare || 0) ? baseCalculated : parseFloat(rateDetails?.min_fare || 0);
     
     // Adiciona o valor do pedágio ao total
     if (externalTollFee !== null && !isNaN(externalTollFee)) {
         total += parseFloat(externalTollFee);
-        console.log('Valor do pedágio adicionado ao total:', externalTollFee);
+        Logger.log('Valor do pedágio adicionado ao total:', externalTollFee);
     }
     
     let convenienceFee = 0;
@@ -355,35 +359,3 @@ export const FareCalculator = (distance, time, rateDetails, instructionData, dec
         tollFee: externalTollFee !== null ? parseFloat(externalTollFee.toFixed(decimal)) : 0
     }
 }
-
-export const addActualsToBooking = async (booking, uid) => {
-  const { auth, singleUserRef, singleBookingRef } = firebase;
-  const snapshot = await singleUserRef(uid).once('value');
-  let profile = snapshot.val();
-  const settingdata = await singleBookingRef('settings').once('value');
-  let settings = settingdata.val();
-  const langSnap = await singleBookingRef('languages').orderByChild('default').equalTo(true).once('value');
-  const language = Object.values(langSnap.val())[0].keyValuePairs;
-  const fleetCommission_fee = profile?.fleetadmin ? ((parseFloat(booking?.estimate) - parseFloat(booking?.convenience_fees)) * parseFloat(booking?.fleet_admin_comission) / 100).toFixed(2) : 0;
-  
-  // Nova estrutura de cobrança operacional baseada no valor da corrida
-  const rideValue = parseFloat(booking?.estimate);
-  let operationalFee = 0;
-  
-  if (rideValue < 10.00) {
-    operationalFee = 0.79; // Corridas < R$ 10,00
-  } else if (rideValue <= 20.00) {
-    operationalFee = 0.99; // Corridas R$ 10,00 - R$ 20,00
-  } else {
-    operationalFee = 1.49; // Corridas > R$ 20,00
-  }
-  
-  // Novo cálculo: Valor para o motorista = Tarifa total - Taxa operacional
-  // Pedágios serão pagos diretamente pelo motorista, não são descontados do valor
-  let driver_fee = parseFloat(parseFloat(booking?.estimate) - operationalFee).toFixed(2);
-  booking.fleetCommission = fleetCommission_fee ? fleetCommission_fee : "0";
-  booking.driver_share = driver_fee ? driver_fee : "0";
-  booking.operational_fee = operationalFee.toFixed(2); // Adicionar taxa operacional ao booking
-  
-  return booking;
-};

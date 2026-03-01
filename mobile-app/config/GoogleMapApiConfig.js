@@ -1,4 +1,4 @@
 module.exports.GoogleMapApiConfig = {
-    ios: "AIzaSyByUEms15YpjPAbP4KF07b21kQuOuexI44",
-    android: "AIzaSyByUEms15YpjPAbP4KF07b21kQuOuexI44"
+    ios: "AIzaSyBLwKg0KRiLVjAHVBQAUP7pB3Q80G246KY",
+    android: "AIzaSyBLwKg0KRiLVjAHVBQAUP7pB3Q80G246KY"
 };

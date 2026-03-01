@@ -1,3 +1,4 @@
+import Logger from '../utils/Logger';
 import React, { useState, useEffect } from 'react';
 import {
   StyleSheet,
@@ -18,6 +19,11 @@ import { api } from '../common-local';
 import { MAIN_COLOR } from '../common-local/sharedFunctions';
 import { fonts } from '../common-local/font';
 import { PromoComp } from "../components";
+import { SkeletonLoader, LoadingSpinner } from '../components/LoadingStates';
+import { useResponsiveLayout } from '../components/ResponsiveLayout';
+import WebSocketManager from '../services/WebSocketManager';
+import useWebSocketListeners from '../hooks/useWebSocketListeners';
+
 
 export default function PaymentDetails(props) {
     const { t } = i18n;
@@ -27,6 +33,36 @@ export default function PaymentDetails(props) {
     const [loading, setLoading] = useState(true);
     const [paymentMethods, setPaymentMethods] = useState([]);
     const [isDarkMode, setIsDarkMode] = useState(false);
+    
+    // Responsive layout hook
+    const { config: responsiveConfig, isTablet, isMobile } = useResponsiveLayout();
+
+    // ===== INTEGRAÇÃO WEBSOCKET =====
+    const wsManager = WebSocketManager.getInstance();
+    const currentUser = auth.profile;
+    const userType = currentUser?.userType || currentUser?.usertype;
+
+    // Configurar listeners WebSocket para pagamentos
+    useWebSocketListeners('PaymentDetails', {
+        onPaymentConfirmed: (data) => {
+            Logger.log('💳 PaymentDetails - Pagamento confirmado:', data);
+            // Atualizar estado de pagamento
+            // Navegar para próxima tela se necessário
+        },
+        onBookingCreated: (data) => {
+            Logger.log('💳 PaymentDetails - Booking criado:', data);
+            // Atualizar estado da reserva
+        },
+        onConnect: () => {
+            Logger.log('💳 PaymentDetails - WebSocket conectado');
+        },
+        onDisconnect: (reason) => {
+            Logger.log('💳 PaymentDetails - WebSocket desconectado:', reason);
+        },
+        onConnectError: (error) => {
+            Logger.error('💳 PaymentDetails - Erro de conexão WebSocket:', error);
+        }
+    });
 
     // Tema dinâmico baseado no modo escuro/claro
     const theme = {
@@ -50,7 +86,7 @@ export default function PaymentDetails(props) {
                 setPaymentMethods(response);
             }
         } catch (error) {
-            console.error('Erro ao carregar métodos de pagamento:', error);
+            Logger.error('Erro ao carregar métodos de pagamento:', error);
         } finally {
             setLoading(false);
         }
@@ -66,7 +102,7 @@ export default function PaymentDetails(props) {
             await removePaymentMethod(methodId);
             await loadPaymentMethods();
         } catch (error) {
-            console.error('Erro ao remover método de pagamento:', error);
+            Logger.error('Erro ao remover método de pagamento:', error);
         } finally {
             setLoading(false);
         }
@@ -134,7 +170,15 @@ export default function PaymentDetails(props) {
             <ScrollView style={styles.scrollView}>
                 {loading ? (
                     <View style={styles.loadingContainer}>
-                        <ActivityIndicator size="large" color={MAIN_COLOR} />
+                        <LoadingSpinner 
+                            message="Carregando métodos de pagamento..." 
+                            color={MAIN_COLOR} 
+                        />
+                        <View style={styles.skeletonContainer}>
+                            <SkeletonLoader width="100%" height={60} style={styles.skeletonMethod} />
+                            <SkeletonLoader width="100%" height={60} style={styles.skeletonMethod} />
+                            <SkeletonLoader width="100%" height={60} style={styles.skeletonMethod} />
+                        </View>
                     </View>
                 ) : (
                     <View style={styles.contentContainer}>
@@ -261,7 +305,16 @@ const styles = StyleSheet.create({
         flex: 1,
         justifyContent: 'center',
         alignItems: 'center',
-  },
+        padding: 20,
+    },
+    skeletonContainer: {
+        width: '100%',
+        marginTop: 20,
+    },
+    skeletonMethod: {
+        marginBottom: 12,
+        borderRadius: 8,
+    },
     emptyContainer: {
     alignItems: 'center',
     justifyContent: 'center',

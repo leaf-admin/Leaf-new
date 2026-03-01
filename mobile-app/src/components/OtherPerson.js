@@ -5,8 +5,8 @@ import {
     Dimensions,
     Text
 } from 'react-native';
-import { colors } from '../common-local/theme';
-import { fonts } from '../common-local/font';
+import { colors } from '../common/theme';
+import { fonts } from '../common/font';
 import { Input, CheckBox } from 'react-native-elements';
 import i18n from '../i18n';
 var { width, height } = Dimensions.get('window');
@@ -15,7 +15,7 @@ export const MAIN_COLOR = colors.BLACK;
 
 export default function OtherPerson(props){
     const { t } = i18n;
-    const isRTL = i18n.locale.indexOf('he') === 0 || i18n.locale.indexOf('ar') === 0;
+    const isRTL = i18n.locale && (i18n.locale.indexOf('he') === 0 || i18n.locale.indexOf('ar') === 0);
     const { style, auth, otherPerson, setInstructionData, setOtherPerson, instructionData } = props;
     return (
         <View style={[auth && auth.profile && auth.profile.firstName && auth.profile.lastName && auth.profile.email ? styles.vew : styles.bottomContainer1, {flexDirection: 'column', width: '100%'}]} >

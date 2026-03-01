@@ -1,3 +1,4 @@
+import Logger from '../utils/Logger';
 import React, { useState, useEffect } from 'react';
 import {
   View,
@@ -41,7 +42,7 @@ const ToggleTestScreen = ({ navigation }) => {
   }, [currentMode]);
 
   const handleModeChange = (newMode, profileData) => {
-    console.log(`Modo alterado para: ${newMode}`, profileData);
+    Logger.log(`Modo alterado para: ${newMode}`, profileData);
     Alert.alert(
       'Toggle Testado',
       `Modo alterado para: ${newMode}\n\nDados carregados: ${JSON.stringify(profileData, null, 2)}`,

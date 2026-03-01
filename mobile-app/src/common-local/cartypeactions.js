@@ -1,16 +1,18 @@
+import Logger from '../utils/Logger';
 import {
   FETCH_CAR_TYPES,
   FETCH_CAR_TYPES_SUCCESS,
   FETCH_CAR_TYPES_FAILED,
   EDIT_CAR_TYPE
 } from "../types";
-import { firebase } from '../config/configureFirebase';
+import { firebase } from './config/configureFirebase';
 import { api } from '../api';
 import store from '../store/store';
 import { CARTYPE_LOADING, CARTYPE_LOADED, CARTYPE_ERROR } from '../store/types';
 import { getAuth } from '@react-native-firebase/auth';
 import { onValue, push, remove, set, uploadBytesResumable, getDownloadURL } from '@react-native-firebase/database';
 import { ref } from '@react-native-firebase/storage';
+
 
 export const fetchCarTypes = () => (dispatch) => {
 
@@ -71,7 +73,7 @@ export const editCarType = (cartype, method) => async (dispatch) => {
 // Função para buscar tipos de carro de forma síncrona
 export const getCarTypes = async () => {
   try {
-    console.log('getCarTypes - Buscando tipos de carro...');
+    Logger.log('getCarTypes - Buscando tipos de carro...');
     
     const carTypesRef = firebase.carTypesRef;
     const snapshot = await new Promise((resolve) => {
@@ -88,14 +90,14 @@ export const getCarTypes = async () => {
         return data[i]
       });
       
-      console.log('getCarTypes - Tipos de carro encontrados:', arr);
+      Logger.log('getCarTypes - Tipos de carro encontrados:', arr);
       return arr;
     } else {
-      console.log('getCarTypes - Nenhum tipo de carro encontrado');
+      Logger.log('getCarTypes - Nenhum tipo de carro encontrado');
       return null;
     }
   } catch (error) {
-    console.warn('getCarTypes - Erro ao buscar tipos de carro:', error);
+    Logger.warn('getCarTypes - Erro ao buscar tipos de carro:', error);
     return null;
   }
 };

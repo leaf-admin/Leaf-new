@@ -1,3 +1,4 @@
+import Logger from '../../utils/Logger';
 import { firebase } from '../config/configureFirebase';
 import store from '../store';
 
@@ -36,6 +37,6 @@ export const RequestPushMsg = (token, data) => {
 
     })
     .catch((error) => {
-        console.log(error)
+        Logger.log(error)
     });
 }

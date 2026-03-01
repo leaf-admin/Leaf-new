@@ -1,6 +1,8 @@
+import Logger from '../utils/Logger';
 import React, { useEffect, useState } from 'react';
 import { View, ActivityIndicator } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+
 
 export default function AppCommon({ children }) {
     const [isLoading, setIsLoading] = useState(true);
@@ -10,13 +12,13 @@ export default function AppCommon({ children }) {
     useEffect(() => {
         const initializeAuth = async () => {
             try {
-                console.log('AppCommon - Iniciando renderização');
+                Logger.log('AppCommon - Iniciando renderização');
                 
                 // Carregar dados do AsyncStorage
                 const userData = await AsyncStorage.getItem('@user_data');
                 const uid = await AsyncStorage.getItem('@auth_uid');
 
-                console.log('AppCommon - Estado de autenticação:', {
+                Logger.log('AppCommon - Estado de autenticação:', {
                     hasUserData: !!userData,
                     hasUid: !!uid,
                     loading: isLoading
@@ -34,7 +36,7 @@ export default function AppCommon({ children }) {
                     setIsLoading(false);
                 }
             } catch (error) {
-                console.error('AppCommon - Erro ao inicializar:', error);
+                Logger.error('AppCommon - Erro ao inicializar:', error);
                 setError({ 
                     flag: true, 
                     msg: error.message || 'Erro ao inicializar autenticação' 
@@ -55,10 +57,10 @@ export default function AppCommon({ children }) {
     }
 
     if (error && error.flag) {
-        console.log('AppCommon - Erro de autenticação:', error.msg);
+        Logger.log('AppCommon - Erro de autenticação:', error.msg);
         return children;
     }
 
-    console.log('AppCommon - Renderizando children');
+    Logger.log('AppCommon - Renderizando children');
     return children;
 } 

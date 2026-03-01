@@ -1,0 +1,65 @@
+name: EAS Build and TestFlight/PlayStore Submission
+
+on:
+  push:
+    branches:
+      - main
+      - release/*
+  workflow_dispatch:
+    inputs:
+      platform:
+        description: 'Plataforma para compilar (ios, android, all)'
+        required: true
+        default: 'all'
+        type: choice
+        options:
+          - all
+          - ios
+          - android
+      profile:
+        description: 'Perfil de Build'
+        required: true
+        default: 'production'
+        type: choice
+        options:
+          - production
+          - preview
+
+jobs:
+  build:
+    name: Expo Build & Submit
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Setup EAS
+        uses: expo/expo-github-action@v8
+        with:
+          eas-version: latest
+          token: ${{ secrets.EXPO_TOKEN }}
+
+      - name: Install dependencies
+        working-directory: ./mobile-app
+        run: npm ci
+
+      - name: Build and Submit iOS
+        if: ${{ github.event.inputs.platform == 'all' || github.event.inputs.platform == 'ios' }}
+        working-directory: ./mobile-app
+        run: eas build --platform ios --profile ${{ github.event.inputs.profile || 'production' }} --non-interactive --auto-submit
+        env:
+          EXPO_PUBLIC_API_URL: ${{ secrets.EXPO_PUBLIC_API_URL }}
+          EXPO_PUBLIC_WS_URL: ${{ secrets.EXPO_PUBLIC_WS_URL }}
+
+      - name: Build and Submit Android
+        if: ${{ github.event.inputs.platform == 'all' || github.event.inputs.platform == 'android' }}
+        working-directory: ./mobile-app
+        run: eas build --platform android --profile ${{ github.event.inputs.profile || 'production' }} --non-interactive --auto-submit
+        env:
+          EXPO_PUBLIC_API_URL: ${{ secrets.EXPO_PUBLIC_API_URL }}
+          EXPO_PUBLIC_WS_URL: ${{ secrets.EXPO_PUBLIC_WS_URL }}

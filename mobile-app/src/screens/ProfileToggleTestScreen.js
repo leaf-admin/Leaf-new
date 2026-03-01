@@ -1,3 +1,4 @@
+import Logger from '../utils/Logger';
 // ProfileToggleTestScreen.js - Tela de teste para toggle beta
 import React, { useState, useEffect } from 'react';
 import {
@@ -46,19 +47,19 @@ const ProfileToggleTestScreen = () => {
       await dispatch(loadProfileData(userId, currentMode));
       await dispatch(updateCacheStats());
     } catch (error) {
-      console.error('❌ Erro ao carregar dados iniciais:', error);
+      Logger.error('❌ Erro ao carregar dados iniciais:', error);
     }
   };
 
   const handleModeChange = async (newMode, profileData) => {
-    console.log(`🔄 Modo alterado para: ${newMode}`, profileData);
+    Logger.log(`🔄 Modo alterado para: ${newMode}`, profileData);
     
     // Recarregar dados do novo modo
     try {
       await dispatch(loadProfileData(userId, newMode));
       await dispatch(updateCacheStats());
     } catch (error) {
-      console.error('❌ Erro ao carregar dados do novo modo:', error);
+      Logger.error('❌ Erro ao carregar dados do novo modo:', error);
     }
   };
 

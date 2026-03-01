@@ -1,3 +1,4 @@
+import Logger from '../../utils/Logger';
 import {
     FETCH_LANGUAGE,
     FETCH_LANGUAGE_SUCCESS,
@@ -11,6 +12,7 @@ import { LANGUAGE_LOADING, LANGUAGE_LOADED, LANGUAGE_ERROR } from '../store/type
 import { getAuth } from '@react-native-firebase/auth';
 import { onValue, push, remove, set, update } from '@react-native-firebase/database';
 import { getLangKey } from "../other/getLangKey";
+
 
 export const fetchLanguages = () => (dispatch) => {
 
@@ -128,7 +130,7 @@ export const convertLanguage = async (word, userLangLocale)=>{
                     }
                   }
                   catch(err) {
-                    console.log("errror occured in language add", err)
+                    Logger.log("errror occured in language add", err)
                   };
             }
         }
@@ -139,7 +141,7 @@ export const convertLanguage = async (word, userLangLocale)=>{
 // Função para buscar idiomas de forma síncrona
 export const getLanguages = async () => {
     try {
-        console.log('getLanguages - Buscando idiomas...');
+        Logger.log('getLanguages - Buscando idiomas...');
         
         const languagesRef = firebase.languagesRef;
         const snapshot = await new Promise((resolve) => {
@@ -165,14 +167,14 @@ export const getLanguages = async () => {
                 langlist: arr
             };
             
-            console.log('getLanguages - Idiomas encontrados:', result);
+            Logger.log('getLanguages - Idiomas encontrados:', result);
             return result;
         } else {
-            console.log('getLanguages - Nenhum idioma encontrado');
+            Logger.log('getLanguages - Nenhum idioma encontrado');
             return null;
         }
     } catch (error) {
-        console.warn('getLanguages - Erro ao buscar idiomas:', error);
+        Logger.warn('getLanguages - Erro ao buscar idiomas:', error);
         return null;
     }
 };

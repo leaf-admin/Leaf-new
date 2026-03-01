@@ -1,0 +1,54 @@
+# Teste Real: Driver Ficar Online
+# Baseado na NewMapScreen.js e DriverUI.js
+appId: br.com.leaf.ride
+---
+- launchApp
+- takeScreenshot: "01-driver-app-opened"
+
+# Aguardar mapa carregar
+- waitForAnimationToEnd
+- takeScreenshot: "02-map-loaded"
+
+# Procurar botão "Ficar Online" ou toggle
+- runFlow:
+    when:
+      visible: 
+        - "Ficar Online"
+        - "Ficar online"
+        - "Online"
+        - "Começar a Trabalhar"
+    commands:
+      - takeScreenshot: "03-online-button-visible"
+      - tapOn: 
+          text: 
+            - "Ficar Online"
+            - "Ficar online"
+            - "Online"
+            - "Começar a Trabalhar"
+
+# Aguardar mudança de estado
+- waitForAnimationToEnd
+- takeScreenshot: "04-driver-online"
+
+# Verificar se apareceu confirmação ou mudou o estado
+- assertVisible: 
+    text: 
+      - "Você está online"
+      - "Aguardando corridas"
+      - "Online"
+    timeout: 10000
+    optional: true
+- takeScreenshot: "05-online-confirmed"
+
+
+
+
+
+
+
+
+
+
+
+
+

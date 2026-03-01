@@ -1,20 +1,20 @@
+import Logger from '../utils/Logger';
 import { Platform } from 'react-native';
-import { getWebSocketUrl } from './ApiConfig';
 
 // Configurações do WebSocket
 const WEBSOCKET_CONFIG = {
-  // 🏠 SELF-HOSTED VPS (Vultr) - PRINCIPAL
-  PRODUCTION: {
-    URL: 'wss://socket.leaf.app.br', // Vultr como principal
-  },
-  
-  // 🏠 SELF-HOSTED VPS (Vultr) - LOCAL
+  // Para desenvolvimento local (emulador Android/iOS)
   LOCAL: {
-    ANDROID_EMULATOR: 'http://216.238.107.59:3005', // VPS Vultr otimizada
-    IOS_SIMULATOR: 'http://216.238.107.59:3005', // VPS Vultr otimizada
-    DEVICE: 'http://216.238.107.59:3005', // VPS Vultr otimizada
+    ANDROID_EMULATOR: 'http://10.0.2.2:3001',
+    IOS_SIMULATOR: 'http://localhost:3001',
+    DEVICE: process.env.EXPO_PUBLIC_WS_URL || 'https://api.leaf.app.br',
   },
-  
+
+  // Para produção
+  PRODUCTION: {
+    URL: process.env.EXPO_PUBLIC_WS_URL || 'https://api.leaf.app.br',
+  },
+
   // Configurações de conexão
   CONNECTION: {
     TIMEOUT: 20000, // 20 segundos
@@ -22,14 +22,14 @@ const WEBSOCKET_CONFIG = {
     RECONNECTION_DELAY: 1000, // 1 segundo
     PING_INTERVAL: 30000, // 30 segundos
   },
-  
+
   // Configurações de localização
   LOCATION: {
     UPDATE_INTERVAL: 2000, // 2 segundos
     ACCURACY: 'high', // 'high', 'balanced', 'low'
     DISTANCE_FILTER: 10, // metros
   },
-  
+
   // Configurações de busca de motoristas
   DRIVER_SEARCH: {
     DEFAULT_RADIUS: 5000, // 5km
@@ -41,13 +41,21 @@ const WEBSOCKET_CONFIG = {
 
 // Determinar URL baseada na plataforma e ambiente
 const getWebSocketURL = () => {
-  if (__DEV__) {
-    // Desenvolvimento - sempre usar VPS
-    return WEBSOCKET_CONFIG.LOCAL.DEVICE;
-  } else {
-    // Produção - usar VPS
-    return WEBSOCKET_CONFIG.PRODUCTION.URL;
-  }
+  return process.env.EXPO_PUBLIC_WS_URL || 'https://api.leaf.app.br';
+
+  // Código antigo (comentado para referência):
+  // if (__DEV__) {
+  //   // Desenvolvimento
+  //   if (Platform.OS === 'android') {
+  //     return WEBSOCKET_CONFIG.LOCAL.ANDROID_EMULATOR;
+  //   } else if (Platform.OS === 'ios') {
+  //     return WEBSOCKET_CONFIG.LOCAL.IOS_SIMULATOR;
+  //   }
+  //   return WEBSOCKET_CONFIG.LOCAL.DEVICE;
+  // } else {
+  //   // Produção
+  //   return WEBSOCKET_CONFIG.PRODUCTION.URL;
+  // }
 };
 
 // Obter configurações de conexão
@@ -84,69 +92,70 @@ const getDriverSearchConfig = () => {
 // Função para obter IP da máquina local (para desenvolvimento)
 const getLocalIP = async () => {
   try {
-    // Sempre retornar VPS como principal
+    // Esta função pode ser implementada para detectar automaticamente o IP
+    // Por enquanto, retorna o IP configurado
     return WEBSOCKET_CONFIG.LOCAL.DEVICE;
   } catch (error) {
-    console.error('Erro ao obter IP local:', error);
+    Logger.error('Erro ao obter IP local:', error);
     return WEBSOCKET_CONFIG.LOCAL.DEVICE;
   }
 };
 
-// Validação de configuração
+// Função para validar configurações
 const validateConfig = () => {
-  const errors = [];
-  
-  if (!WEBSOCKET_CONFIG.LOCAL.DEVICE) {
-    errors.push('URL do WebSocket não configurada');
+  const url = getWebSocketURL();
+  const issues = [];
+
+  if (__DEV__) {
+    if (url.includes('216.238.107.59')) {
+      issues.push('⚠️ Altere o IP em WebSocketConfig.js para localhost ou IP da sua máquina');
+    }
   }
-  
-  if (WEBSOCKET_CONFIG.CONNECTION.TIMEOUT < 5000) {
-    errors.push('Timeout muito baixo para WebSocket');
+
+  if (url.includes('your-backend-domain.com')) {
+    issues.push('⚠️ Configure o domínio de produção em WebSocketConfig.js');
   }
-  
-  if (WEBSOCKET_CONFIG.LOCATION.UPDATE_INTERVAL < 1000) {
-    errors.push('Intervalo de atualização de localização muito baixo');
-  }
-  
+
   return {
-    isValid: errors.length === 0,
-    errors
+    isValid: issues.length === 0,
+    issues,
+    url,
   };
 };
 
-// Configuração de debug
-const DEBUG_CONFIG = {
-  logConnectionEvents: __DEV__,
-  logLocationUpdates: __DEV__,
-  logDriverSearch: __DEV__,
-  showNetworkErrors: __DEV__,
-  enableMockData: false
+export default {
+  getWebSocketURL,
+  getConnectionOptions,
+  getLocationConfig,
+  getDriverSearchConfig,
+  getLocalIP,
+  validateConfig,
+  config: WEBSOCKET_CONFIG,
 };
 
-// Configuração de monitoramento
-const MONITORING_CONFIG = {
-  enableHealthCheck: true,
-  healthCheckInterval: 30000, // 30 segundos
-  enableMetrics: true,
-  metricsInterval: 60000, // 1 minuto
-  enableAlerts: true
-};
-
-// Exportar configuração completa
+// Função para obter configuração baseada no ambiente
 export const getWebSocketConfig = () => {
-  return {
-    url: getWebSocketURL(),
-    connection: getConnectionOptions(),
-    location: getLocationConfig(),
-    driverSearch: getDriverSearchConfig(),
-    debug: DEBUG_CONFIG,
-    monitoring: MONITORING_CONFIG,
-    validation: validateConfig()
-  };
+  return __DEV__ ? getConnectionOptions() : getConnectionOptions();
 };
 
-// Exportar funções específicas
-export const getWebSocketUrl = () => getWebSocketURL();
+// Função para obter URL do WebSocket
+export const getWebSocketUrl = () => {
+  return getWebSocketURL();
+};
 
-// Configuração padrão
-export default getWebSocketConfig(); 
+// Instruções para configurar o IP:
+/*
+1. No Windows, abra o CMD e digite: ipconfig
+2. Procure por "IPv4 Address" na sua rede Wi-Fi
+3. Copie o IP (exemplo: 192.168.1.100)
+4. Substitua no arquivo acima na linha: url: 'http://SEU_IP:3001'
+
+Exemplo:
+- Seu IP é 192.168.1.50
+- Mude para: url: 'http://192.168.1.50:3001'
+
+IMPORTANTE:
+- Use o IP da sua máquina, não localhost
+- O app no dispositivo físico não consegue acessar localhost do PC
+- Certifique-se que o backend está rodando na porta 3001
+*/ 

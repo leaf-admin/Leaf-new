@@ -1,3 +1,4 @@
+import Logger from '../utils/Logger';
 import React, { useState, useEffect, useRef } from 'react';
 import { 
   View, 
@@ -12,13 +13,15 @@ import {
   Animated,
   Image,
   KeyboardAvoidingView,
-  Keyboard
+  Keyboard,
+  ScrollView
 } from 'react-native';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Linking from 'expo-linking';
 import auth from '@react-native-firebase/auth';
 import hybridOTPService from '../services/HybridOTPService';
+
 
 const { width, height } = Dimensions.get('window');
 
@@ -38,6 +41,7 @@ export default function PhoneInputScreen() {
   const [isLoading, setIsLoading] = useState(false);
   const [termsAccepted, setTermsAccepted] = useState(false);
   const [isKeyboardVisible, setIsKeyboardVisible] = useState(false);
+  const [keyboardHeight, setKeyboardHeight] = useState(0);
   
   const userType = route.params?.userType || 'passenger';
 
@@ -62,12 +66,22 @@ export default function PhoneInputScreen() {
     ]).start();
 
     // Listeners do teclado
-    const keyboardDidShowListener = Keyboard.addListener('keyboardDidShow', () => {
-      setIsKeyboardVisible(true);
-    });
-    const keyboardDidHideListener = Keyboard.addListener('keyboardDidHide', () => {
-      setIsKeyboardVisible(false);
-    });
+    const keyboardDidShowListener = Keyboard.addListener(
+      Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow',
+      (event) => {
+        Logger.log('🔑 Teclado abriu - altura:', event.endCoordinates.height);
+        setIsKeyboardVisible(true);
+        setKeyboardHeight(event.endCoordinates.height);
+      }
+    );
+    
+    const keyboardDidHideListener = Keyboard.addListener(
+      Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide',
+      () => {
+        setIsKeyboardVisible(false);
+        setKeyboardHeight(0);
+      }
+    );
 
     return () => {
       keyboardDidShowListener.remove();
@@ -119,13 +133,13 @@ export default function PhoneInputScreen() {
     setIsLoading(true);
     
     try {
-      console.log("PhoneInputScreen - Iniciando envio de OTP híbrido para:", phone);
+      Logger.log("PhoneInputScreen - Iniciando envio de OTP híbrido para:", phone);
       
       // Formatar telefone
       const cleanPhone = phone.replace(/\D/g, '');
       const formattedPhone = `+55${cleanPhone}`;
       
-      console.log("PhoneInputScreen - Telefone formatado:", formattedPhone);
+      Logger.log("PhoneInputScreen - Telefone formatado:", formattedPhone);
       
       // Inicializar serviço híbrido
       await hybridOTPService.initialize();
@@ -133,7 +147,7 @@ export default function PhoneInputScreen() {
       // Enviar OTP usando estratégia híbrida (SMS + WhatsApp fallback)
       const result = await hybridOTPService.sendOTP(formattedPhone);
       
-      console.log("PhoneInputScreen - Resultado do envio:", result);
+      Logger.log("PhoneInputScreen - Resultado do envio:", result);
       
       if (result.success) {
         // Salvar dados temporários
@@ -149,7 +163,7 @@ export default function PhoneInputScreen() {
         
         // Mostrar feedback do provedor usado
         const providerText = result.provider === 'sms' ? 'SMS' : 'WhatsApp';
-        console.log(`PhoneInputScreen - OTP enviado via ${providerText}`);
+        Logger.log(`PhoneInputScreen - OTP enviado via ${providerText}`);
         
         // Navegar para tela de OTP
         navigation.navigate('OTP', { 
@@ -165,7 +179,7 @@ export default function PhoneInputScreen() {
       }
       
     } catch (error) {
-      console.error("PhoneInputScreen - Erro ao enviar OTP:", error);
+      Logger.error("PhoneInputScreen - Erro ao enviar OTP:", error);
       
       let errorMessage = "Não foi possível enviar o código. Tente novamente.";
       
@@ -186,30 +200,27 @@ export default function PhoneInputScreen() {
   };
 
   const handleGoogleLogin = () => {
-    console.log("PhoneInputScreen - Login com Google");
+    Logger.log("PhoneInputScreen - Login com Google");
     // Implementar login com Google
   };
 
   const handleFacebookLogin = () => {
-    console.log("PhoneInputScreen - Login com Facebook");
+    Logger.log("PhoneInputScreen - Login com Facebook");
     // Implementar login com Facebook
   };
 
   const openTerms = () => {
-    console.log("PhoneInputScreen - Abrindo Termos de Uso");
+    Logger.log("PhoneInputScreen - Abrindo Termos de Uso");
     // Abrir termos de uso
   };
 
   const openPrivacy = () => {
-    console.log("PhoneInputScreen - Abrindo Política de Privacidade");
+    Logger.log("PhoneInputScreen - Abrindo Política de Privacidade");
     // Abrir política de privacidade
   };
 
   return (
-    <KeyboardAvoidingView 
-      style={styles.container}
-      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-    >
+    <View style={styles.container}>
       {/* Background com cor estática */}
       <View style={styles.backgroundContainer} />
       
@@ -230,6 +241,7 @@ export default function PhoneInputScreen() {
           styles.bottomSheet,
           {
             opacity: fadeAnim,
+            height: keyboardHeight > 0 ? height * 0.6 : height * 0.65,
             transform: [
               { 
                 translateY: cardAnim.interpolate({
@@ -250,60 +262,66 @@ export default function PhoneInputScreen() {
         {/* Handle do bottom sheet */}
         <View style={styles.handle} />
         
-        {/* Conteúdo do formulário */}
-        <View style={styles.formContainer}>
-          {/* Campo de Nome */}
-          <View style={styles.nameInputContainer}>
-            <TextInput
-              style={styles.nameInput}
-              value={name}
-              onChangeText={setName}
-              placeholder="Seu nome completo"
-              placeholderTextColor={GRAY}
-              autoCapitalize="words"
-              maxLength={50}
-            />
-          </View>
+        {/* ScrollView para permitir rolagem quando o teclado aparecer */}
+        <ScrollView
+          style={styles.scrollView}
+          contentContainerStyle={styles.scrollViewContent}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
+        >
+          {/* Conteúdo do formulário */}
+          <View style={styles.formContainer}>
+            {/* Campo de Nome */}
+            <View style={styles.nameInputContainer}>
+              <TextInput
+                style={styles.nameInput}
+                value={name}
+                onChangeText={setName}
+                placeholder="Seu nome completo"
+                placeholderTextColor={GRAY}
+                autoCapitalize="words"
+                maxLength={50}
+              />
+            </View>
 
-          {/* Campo de Telefone */}
-          <View style={styles.phoneInputContainer}>
-            {/* Seletor de País */}
-            <TouchableOpacity style={styles.countrySelector}>
-              <Text style={styles.flag}>🇧🇷</Text>
-              <Text style={styles.countryCode}>+55</Text>
-              <Text style={styles.dropdownArrow}>▼</Text>
-            </TouchableOpacity>
-            
             {/* Campo de Telefone */}
-            <TextInput
-              style={styles.phoneInput}
-              value={phone}
-              onChangeText={handlePhoneChange}
-              placeholder="(21) 99999-9999"
-              placeholderTextColor={GRAY}
-              keyboardType="phone-pad"
-              maxLength={15}
-            />
+            <View style={styles.phoneInputContainer}>
+              {/* Seletor de País */}
+              <TouchableOpacity style={styles.countrySelector}>
+                <Text style={styles.flag}>🇧🇷</Text>
+                <Text style={styles.countryCode}>+55</Text>
+                <Text style={styles.dropdownArrow}>▼</Text>
+              </TouchableOpacity>
+              
+              {/* Campo de Telefone */}
+              <TextInput
+                style={styles.phoneInput}
+                value={phone}
+                onChangeText={handlePhoneChange}
+                placeholder="(21) 99999-9999"
+                placeholderTextColor={GRAY}
+                keyboardType="phone-pad"
+                maxLength={15}
+              />
+            </View>
+
+            {/* Checkbox de Termos */}
+            <View style={styles.termsContainer}>
+              <TouchableOpacity 
+                style={[styles.checkbox, termsAccepted && styles.checkboxChecked]}
+                onPress={() => setTermsAccepted(!termsAccepted)}
+              >
+                {termsAccepted && <Text style={styles.checkmark}>✓</Text>}
+              </TouchableOpacity>
+              <Text style={styles.termsText}>
+                Li e aceito os{' '}
+                <Text style={styles.termsLink} onPress={openTerms}>Termos de Uso</Text>
+                {' '}e a{' '}
+                <Text style={styles.termsLink} onPress={openPrivacy}>Política de Privacidade</Text>
+              </Text>
+            </View>
           </View>
-
-
-
-          {/* Checkbox de Termos */}
-          <View style={styles.termsContainer}>
-            <TouchableOpacity 
-              style={[styles.checkbox, termsAccepted && styles.checkboxChecked]}
-              onPress={() => setTermsAccepted(!termsAccepted)}
-            >
-              {termsAccepted && <Text style={styles.checkmark}>✓</Text>}
-            </TouchableOpacity>
-            <Text style={styles.termsText}>
-              Li e aceito os{' '}
-              <Text style={styles.termsLink} onPress={openTerms}>Termos de Uso</Text>
-              {' '}e a{' '}
-              <Text style={styles.termsLink} onPress={openPrivacy}>Política de Privacidade</Text>
-            </Text>
-          </View>
-        </View>
+        </ScrollView>
 
         {/* Botão Próximo */}
         <View style={styles.footer}>
@@ -323,7 +341,7 @@ export default function PhoneInputScreen() {
           </TouchableOpacity>
         </View>
       </Animated.View>
-    </KeyboardAvoidingView>
+    </View>
   );
 }
 
@@ -375,7 +393,6 @@ const styles = StyleSheet.create({
     bottom: 0,
     left: 0,
     right: 0,
-    height: height * 0.65,
     backgroundColor: WHITE,
     borderTopLeftRadius: 20,
     borderTopRightRadius: 20,
@@ -398,10 +415,18 @@ const styles = StyleSheet.create({
     marginBottom: 20,
   },
   
+  // ScrollView
+  scrollView: {
+    flex: 1,
+  },
+  scrollViewContent: {
+    flexGrow: 1,
+    paddingBottom: 20,
+  },
+  
   // Formulário
   formContainer: {
     flex: 1,
-    marginBottom: 24,
     paddingTop: 20,
   },
   

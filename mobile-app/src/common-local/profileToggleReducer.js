@@ -1,5 +1,7 @@
+import Logger from '../utils/Logger';
 // profileToggleReducer.js - Reducer para toggle de perfil
 import { createSlice } from '@reduxjs/toolkit';
+
 
 const initialState = {
   currentMode: 'passenger', // 'passenger' | 'driver'
@@ -193,7 +195,7 @@ export const loadPermissions = (userId) => async (dispatch, getState) => {
     dispatch(setPermissions(permissions));
     return permissions;
   } catch (error) {
-    console.error('❌ Erro ao carregar permissões:', error);
+    Logger.error('❌ Erro ao carregar permissões:', error);
     return null;
   }
 };
@@ -205,7 +207,7 @@ export const updateCacheStats = () => async (dispatch, getState) => {
     dispatch(setCacheStats(stats));
     return stats;
   } catch (error) {
-    console.error('❌ Erro ao atualizar cache stats:', error);
+    Logger.error('❌ Erro ao atualizar cache stats:', error);
     return null;
   }
 };

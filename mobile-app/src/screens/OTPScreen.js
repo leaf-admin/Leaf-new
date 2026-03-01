@@ -1,552 +1,277 @@
-import React, { useState, useRef, useEffect } from 'react';
-import { 
-  View, 
-  Text, 
-  StyleSheet, 
-  TextInput, 
-  TouchableOpacity, 
-  Alert, 
-  ActivityIndicator,
-  Animated,
-  Dimensions,
-  Image
-} from 'react-native';
-import { useNavigation, useRoute } from '@react-navigation/native';
+import Logger from '../utils/Logger';
+import React, { useState, useEffect, useRef } from "react";
+import {
+    StyleSheet,
+    View,
+    Text,
+    TouchableOpacity,
+    Alert
+} from "react-native";
+import { TextInputMask } from 'react-native-masked-text';
+import rnauth from '@react-native-firebase/auth';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import auth from '@react-native-firebase/auth';
-import SmsRetriever from 'react-native-sms-retriever';
+import OnboardingLayout from '../components/OnboardingLayout';
 
-const { width, height } = Dimensions.get('window');
 
-// Constantes de cores
-const WHITE = '#FFFFFF';
-const BLACK = '#000000';
-const GRAY = '#666666';
-const LIGHT_GRAY = '#F5F5F5';
-const DARK_GRAY = '#333333';
+const LEAF_GREEN = '#1A330E';
+const LEAF_GRAY = '#B0B0B0';
 
-export default function OTPScreen() {
-  const navigation = useNavigation();
-  const route = useRoute();
-  
-  const [otp, setOtp] = useState(['', '', '', '', '', '']);
-  const [isLoading, setIsLoading] = useState(false);
-  const [resendTimer, setResendTimer] = useState(30);
-  const [canResend, setCanResend] = useState(false);
-  const [smsRetrieverActive, setSmsRetrieverActive] = useState(false);
+export default function OTPScreen({ navigation, route }) {
+    const [otp, setOtp] = useState("");
+    const [timer, setTimer] = useState(59);
+    const [canResend, setCanResend] = useState(false);
+    const { phone, verificationId } = route.params || {};
+    const [userType, setUserType] = React.useState(route?.params?.userType || null);
 
-  
-  const { phone, name, userType, verificationId } = route.params;
+    // Guardar referência do timer para poder limpar manualmente
+    const timerRef = useRef();
 
-  // Animações
-  const fadeAnim = useRef(new Animated.Value(0)).current;
-  const cardAnim = useRef(new Animated.Value(0)).current;
-
-  useEffect(() => {
-    // Animação de entrada
-    Animated.parallel([
-      Animated.timing(fadeAnim, {
-        toValue: 1,
-        duration: 800,
-        useNativeDriver: true,
-      }),
-      Animated.spring(cardAnim, {
-        toValue: 1,
-        tension: 80,
-        friction: 7,
-        useNativeDriver: true,
-      })
-    ]).start();
-
-    // Timer para reenvio
-    const timer = setInterval(() => {
-      setResendTimer((prev) => {
-        if (prev <= 1) {
-          setCanResend(true);
-          return 0;
+    useEffect(() => {
+        if (timer > 0) {
+            timerRef.current = setInterval(() => {
+                setTimer((prev) => prev - 1);
+            }, 1000);
+        } else {
+            setCanResend(true);
         }
-        return prev - 1;
-      });
-    }, 1000);
+        
+        return () => {
+            if (timerRef.current) {
+                clearInterval(timerRef.current);
+                timerRef.current = null;
+            }
+        };
+    }, [timer]);
 
+    useEffect(() => {
+        if (!userType) {
+            AsyncStorage.getItem('@user_type').then(type => {
+                if (type) setUserType(type);
+            });
+        }
+    }, []);
 
+    const handleContinue = async () => {
+        if (!otp || otp.replace(/\D/g, '').length !== 6) {
+            Alert.alert('Atenção', 'Digite o código de 6 dígitos recebido por SMS.');
+            return;
+        }
 
-    // Iniciar SMS Retriever para auto-preenchimento
-    startSmsRetriever();
-
-    return () => {
-      clearInterval(timer);
-      // Limpar SMS Retriever
-      SmsRetriever.removeSmsListener();
+        try {
+            // Limpar o timer antes de prosseguir
+            if (timerRef.current) {
+                clearInterval(timerRef.current);
+                timerRef.current = null;
+            }
+            
+            Logger.log('Iniciando verificação do OTP...');
+            const credential = rnauth.PhoneAuthProvider.credential(verificationId, otp.replace(/\D/g, ''));
+            
+            Logger.log('Credencial criada, tentando autenticar...');
+            const userCredential = await rnauth().signInWithCredential(credential);
+            
+            Logger.log('Autenticação bem sucedida:', userCredential);
+            
+            // Se o usuário já existe, vamos para o Map
+            if (route.params?.isExistingUser) {
+                navigation.reset({
+                    index: 0,
+                    routes: [{ name: 'TabRoot' }]
+                });
+                return;
+            }
+            
+            // Se é um novo usuário, vamos para a tela de complemento de dados
+            navigation.reset({
+                index: 0,
+                routes: [{ 
+                    name: 'CompleteRegistration',
+                    params: { 
+                        phone: userCredential.user.phoneNumber,
+                        userCredential: {
+                            uid: userCredential.user.uid,
+                            phoneNumber: userCredential.user.phoneNumber,
+                            isNewUser: true
+                        },
+                        userType: route.params?.userType // garantir propagação
+                    }
+                }]
+            });
+        } catch (error) {
+            Logger.error('Erro na verificação do OTP:', error);
+            Alert.alert('Erro', 'Código inválido ou expirado. Tente novamente.');
+        }
     };
-  }, []);
 
-  // Função para iniciar SMS Retriever
-  const startSmsRetriever = async () => {
-    try {
-      console.log("OTPScreen - Iniciando SMS Retriever...");
-      
-      // Verificar se o dispositivo suporta SMS Retriever
-      const isSupported = await SmsRetriever.isSupported();
-      
-      if (!isSupported) {
-        console.log("OTPScreen - SMS Retriever não suportado neste dispositivo");
-        setSmsRetrieverActive(false);
-        return;
-      }
-
-      // Iniciar listener para SMS
-      SmsRetriever.addSmsListener((message) => {
-        console.log("OTPScreen - SMS recebido:", message);
+    const handleResend = async () => {
+        if (!canResend) return;
         
-        // Extrair código OTP do SMS
-        const otpCode = extractOtpFromSms(message);
-        
-        if (otpCode) {
-          console.log("OTPScreen - Código OTP detectado:", otpCode);
-          
-          // Preencher automaticamente os campos
-          const otpArray = otpCode.split('').slice(0, 6);
-          setOtp(otpArray);
-          
-          // Mostrar feedback visual
-          Alert.alert(
-            "Código Detectado!",
-            `Código ${otpCode} foi detectado automaticamente. Verificando...`,
-            [{ text: "OK" }]
-          );
-          
-          // Verificar automaticamente após 1 segundo
-          setTimeout(() => {
-            handleVerifyOtp();
-          }, 1000);
+        try {
+            // Limpar o timer atual antes de reiniciar
+            if (timerRef.current) {
+                clearInterval(timerRef.current);
+                timerRef.current = null;
+            }
+            
+            setTimer(59);
+            setCanResend(false);
+            
+            const auth = rnauth();
+            const confirmation = await auth.verifyPhoneNumber(phone);
+            
+            if (confirmation && confirmation.verificationId) {
+                // Atualizar o verificationId se necessário
+                // setVerificationId(confirmation.verificationId);
+                Logger.log('Novo código enviado com sucesso');
+            }
+        } catch (error) {
+            Logger.error('Erro ao reenviar código:', error);
+            Alert.alert('Erro', 'Erro ao reenviar código. Tente novamente.');
+            setCanResend(true);
         }
-      });
+    };
 
-      console.log("OTPScreen - SMS Retriever iniciado com sucesso");
-      setSmsRetrieverActive(true);
-      
-    } catch (error) {
-      console.error("OTPScreen - Erro ao iniciar SMS Retriever:", error);
-      setSmsRetrieverActive(false);
-    }
-  };
+    // Limpar o timer quando o componente for desmontado
+    useEffect(() => {
+        return () => {
+            if (timerRef.current) {
+                clearInterval(timerRef.current);
+                timerRef.current = null;
+            }
+        };
+    }, []);
 
-  // Função para extrair OTP do SMS
-  const extractOtpFromSms = (message) => {
-    try {
-      // Padrões comuns de SMS do Firebase
-      const patterns = [
-        /(\d{6})/, // 6 dígitos consecutivos
-        /código[:\s]*(\d{6})/i, // "código: 123456"
-        /code[:\s]*(\d{6})/i, // "code: 123456"
-        /verificação[:\s]*(\d{6})/i, // "verificação: 123456"
-        /verification[:\s]*(\d{6})/i, // "verification: 123456"
-        /otp[:\s]*(\d{6})/i, // "otp: 123456"
-        /(\d{6})[^\d]*$/ // 6 dígitos no final da mensagem
-      ];
-
-      for (const pattern of patterns) {
-        const match = message.match(pattern);
-        if (match && match[1]) {
-          return match[1];
-        }
-      }
-
-      return null;
-    } catch (error) {
-      console.error("OTPScreen - Erro ao extrair OTP:", error);
-      return null;
-    }
-  };
-
-  const handleOtpChange = (text, index) => {
-    const newOtp = [...otp];
-    newOtp[index] = text;
-    setOtp(newOtp);
-
-    // Auto focus next input
-    if (text && index < 5) {
-      // Focus next input
-    }
-  };
-
-  const formatPhone = (phone) => {
-    const clean = phone.replace(/\D/g, '');
-    return `(${clean.slice(0, 2)}) ${clean.slice(2, 7)}-${clean.slice(7, 11)}`;
-  };
-
-  const validateOtp = () => {
-    return otp.join('').length === 6;
-  };
-
-  const handleVerifyOtp = async () => {
-    if (!validateOtp()) {
-      Alert.alert("Código Inválido", "Por favor, insira o código de 6 dígitos.");
-      return;
-    }
-
-    if (!verificationId) {
-      Alert.alert("Erro", "Dados de verificação não encontrados. Tente novamente.");
-      return;
-    }
-
-    setIsLoading(true);
-    
-    try {
-      const otpCode = otp.join('');
-      console.log("OTPScreen - Verificando OTP:", otpCode);
-      
-      // Criar credencial com Firebase
-      const credential = auth.PhoneAuthProvider.credential(verificationId, otpCode);
-      
-      // Fazer sign in com a credencial
-      const userCredential = await auth().signInWithCredential(credential);
-      
-      console.log("OTPScreen - OTP verificado com sucesso:", userCredential.user.uid);
-      
-      // Salvar dados temporários
-      const tempData = { 
-        phone, 
-        name, 
-        userType, 
-        otpVerified: true,
-        uid: userCredential.user.uid
-      };
-      await AsyncStorage.setItem('@temp_user_data', JSON.stringify(tempData));
-      
-      // Navegar para próxima tela
-      navigation.navigate('PersonalData', { phone, name, userType });
-      
-    } catch (error) {
-      console.error("OTPScreen - Erro ao verificar OTP:", error);
-      
-      let errorMessage = "Não foi possível verificar o código. Tente novamente.";
-      
-      if (error.code === 'auth/invalid-verification-code') {
-        errorMessage = "Código inválido. Verifique o número e tente novamente.";
-      } else if (error.code === 'auth/invalid-verification-id') {
-        errorMessage = "Sessão expirada. Solicite um novo código.";
-      } else if (error.code === 'auth/code-expired') {
-        errorMessage = "Código expirado. Solicite um novo código.";
-      }
-      
-      Alert.alert("Erro", errorMessage);
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  const handleResendOtp = async () => {
-    if (!canResend) return;
-
-    setCanResend(false);
-    setResendTimer(30);
-    
-    try {
-      console.log("OTPScreen - Reenviando OTP para:", phone);
-      
-      // Reenviar SMS via Firebase
-      const confirmation = await auth().verifyPhoneNumber(phone);
-      
-      console.log("OTPScreen - Novo SMS enviado, verificationId:", confirmation.verificationId);
-      
-      // Atualizar verificationId nos dados temporários
-      const tempDataString = await AsyncStorage.getItem('@temp_user_data');
-      const tempData = tempDataString ? JSON.parse(tempDataString) : {};
-      tempData.verificationId = confirmation.verificationId;
-      await AsyncStorage.setItem('@temp_user_data', JSON.stringify(tempData));
-      
-      Alert.alert("Código Reenviado", "Um novo código foi enviado para seu telefone.");
-      
-    } catch (error) {
-      console.error("OTPScreen - Erro ao reenviar OTP:", error);
-      
-      let errorMessage = "Não foi possível reenviar o código. Tente novamente.";
-      
-      if (error.code === 'auth/too-many-requests') {
-        errorMessage = "Muitas tentativas. Tente novamente em alguns minutos.";
-      } else if (error.code === 'auth/quota-exceeded') {
-        errorMessage = "Limite de SMS excedido. Tente novamente mais tarde.";
-      }
-      
-      Alert.alert("Erro", errorMessage);
-      setCanResend(true);
-    }
-  };
-
-  return (
-    <View style={styles.container}>
-      {/* Background com splash.png */}
-      <Image 
-        source={require('../../assets/images/splash.png')}
-        style={styles.backgroundImage}
-        resizeMode="cover"
-      />
-      
-      {/* Logo da Leaf no topo */}
-      <View style={styles.logoContainer}>
-        <Image 
-          source={require('../../assets/images/leaftransparentbg.png')}
-          style={styles.logo}
-          resizeMode="contain"
-        />
-      </View>
-
-      {/* BOTTOM SHEET */}
-      <Animated.View 
-        style={[
-          styles.bottomSheet,
-          {
-            opacity: fadeAnim,
-            transform: [
-              { 
-                translateY: cardAnim.interpolate({
-                  inputRange: [0, 1],
-                  outputRange: [height, 0]
-                })
-              },
-              { 
-                scale: cardAnim.interpolate({
-                  inputRange: [0, 1],
-                  outputRange: [0.9, 1]
-                })
-              }
-            ]
-          }
-        ]}
-      >
-        {/* Handle do bottom sheet */}
-        <View style={styles.handle} />
-        
-        {/* Título */}
-        <Text style={styles.title}>Verificação</Text>
-        
-        {/* Subtítulo */}
-        <Text style={styles.subtitle}>
-          Digite o código enviado para {formatPhone(phone)}
-        </Text>
-        
-        {/* Indicador de SMS Retriever */}
-        {smsRetrieverActive && (
-          <View style={styles.smsRetrieverContainer}>
-            <ActivityIndicator size="small" color="#1A330E" />
-            <Text style={styles.smsRetrieverText}>
-              Aguardando SMS para preenchimento automático...
-            </Text>
-          </View>
-        )}
-        
-
-        
-        {/* Campos OTP */}
-        <View style={styles.otpContainer}>
-          {otp.map((digit, index) => (
-            <TextInput
-              key={index}
-              style={styles.otpInput}
-              value={digit}
-              onChangeText={(text) => handleOtpChange(text, index)}
-              keyboardType="numeric"
-              maxLength={1}
-              textAlign="center"
-              placeholder="•"
-              placeholderTextColor={GRAY}
-            />
-          ))}
+    // Barra de progresso customizada
+    const progressBar = (
+        <View style={styles.progressBarContainer}>
+            <View style={styles.progressDot} />
+            <View style={styles.progressDot} />
+            <View style={[styles.progressDot, styles.progressActive]} />
+            <View style={styles.progressDot} />
         </View>
-        
-        {/* Botão verificar */}
-        <TouchableOpacity
-          style={[
-            styles.verifyButton,
-            !validateOtp() && styles.verifyButtonDisabled
-          ]}
-          onPress={handleVerifyOtp}
-          disabled={!validateOtp() || isLoading}
+    );
+
+    const isOtpValid = otp.replace(/\D/g, '').length === 6;
+
+    return (
+        <OnboardingLayout
+            progress={progressBar}
+            onContinue={handleContinue}
+            continueLabel="Verificar código"
+            continueDisabled={!isOtpValid}
         >
-          {isLoading ? (
-            <ActivityIndicator size="small" color={WHITE} />
-          ) : (
-            <Text style={styles.verifyButtonText}>Verificar</Text>
-          )}
-        </TouchableOpacity>
-        
-        {/* Reenviar código */}
-        <View style={styles.resendContainer}>
-          <Text style={styles.resendText}>
-            Não recebeu o código?{' '}
-            {canResend ? (
-              <Text style={styles.resendLink} onPress={handleResendOtp}>
-                Reenviar
-              </Text>
-            ) : (
-              <Text style={styles.resendTimer}>
-                Reenviar em {resendTimer}s
-              </Text>
-            )}
-          </Text>
-          
-
-        </View>
-      </Animated.View>
-    </View>
-  );
+            <View style={styles.container}>
+                <Text style={styles.title}>
+                    {userType === 'driver' ? 'Verificação de Parceiro' : 'Verificação de Passageiro'}
+                </Text>
+                <Text style={styles.subtitle}>
+                    Digite o código de 6 dígitos enviado para seu telefone
+                </Text>
+                
+                <View style={styles.otpContainer}>
+                    <Text style={styles.otpLabel}>Código de verificação</Text>
+                    <TextInputMask
+                        type={'custom'}
+                        options={{ mask: '9 9 9 9 9 9' }}
+                        value={otp}
+                        onChangeText={setOtp}
+                        style={styles.otpInput}
+                        placeholder="_ _ _ _ _ _"
+                        placeholderTextColor={LEAF_GRAY}
+                        keyboardType="number-pad"
+                        maxLength={11}
+                        autoFocus
+                    />
+                </View>
+                
+                <TouchableOpacity
+                    style={[styles.resendButton, { opacity: canResend ? 1 : 0.5 }]}
+                    onPress={handleResend}
+                    disabled={!canResend}
+                >
+                    <Text style={styles.resendButtonText}>
+                        {canResend ? 'Reenviar código' : `Reenviar em ${timer}s`}
+                    </Text>
+                </TouchableOpacity>
+                
+                <Text style={styles.infoText}>
+                    Não recebeu o código? Verifique se o número está correto
+                </Text>
+            </View>
+        </OnboardingLayout>
+    );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-  },
-  
-  // Background com splash.png
-  backgroundImage: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    width: width,
-    height: height,
-  },
-  
-  // Logo da Leaf
-  logoContainer: {
-    position: 'absolute',
-    top: 60,
-    left: 0,
-    right: 0,
-    alignItems: 'center',
-    zIndex: 1,
-  },
-  logo: {
-    width: 389,
-    height: 194,
-  },
-  
-  // BOTTOM SHEET
-  bottomSheet: {
-    position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
-    backgroundColor: WHITE,
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
-    padding: 32,
-    paddingBottom: 40,
-    height: height * 0.55 + 75,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: -4 },
-    shadowOpacity: 0.1,
-    shadowRadius: 12,
-    elevation: 8,
-  },
-  handle: {
-    width: 40,
-    height: 6,
-    backgroundColor: '#E5E7EB',
-    borderRadius: 3,
-    alignSelf: 'center',
-    marginBottom: 20,
-  },
-  
-  // Título
-  title: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: BLACK,
-    textAlign: 'left',
-    marginBottom: 8,
-  },
-  
-  // Subtítulo
-  subtitle: {
-    fontSize: 14,
-    color: GRAY,
-    textAlign: 'left',
-    marginBottom: 16,
-    lineHeight: 20,
-  },
-  
-  // SMS Retriever
-  smsRetrieverContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#F0F8F0',
-    borderRadius: 8,
-    padding: 12,
-    marginBottom: 32,
-  },
-  smsRetrieverText: {
-    fontSize: 12,
-    color: '#1A330E',
-    marginLeft: 8,
-    fontWeight: '500',
-  },
-  
-
-  
-  // Campos OTP
-  otpContainer: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginBottom: 32,
-  },
-  otpInput: {
-    width: 60,
-    height: 60,
-    borderWidth: 2,
-    borderColor: '#E5E7EB',
-    borderRadius: 12,
-    fontSize: 24,
-    fontWeight: 'bold',
-    color: BLACK,
-    backgroundColor: WHITE,
-  },
-  
-  // Botão verificar
-  verifyButton: {
-    backgroundColor: '#1A330E',
-    borderRadius: 8,
-    paddingVertical: 14,
-    alignItems: 'center',
-    marginBottom: 24,
-    shadowColor: '#1A330E',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.2,
-    shadowRadius: 4,
-    elevation: 4,
-  },
-  verifyButtonDisabled: {
-    backgroundColor: '#D1D5DB',
-    shadowOpacity: 0,
-    elevation: 0,
-  },
-  verifyButtonText: {
-    fontSize: 15,
-    fontWeight: 'bold',
-    color: WHITE,
-  },
-  
-  // Reenviar
-  resendContainer: {
-    alignItems: 'center',
-  },
-  resendText: {
-    fontSize: 13,
-    color: GRAY,
-    textAlign: 'center',
-    marginBottom: 16,
-  },
-  resendLink: {
-    color: '#1A330E',
-    fontWeight: '600',
-    textDecorationLine: 'underline',
-  },
-  resendTimer: {
-    color: GRAY,
-  },
-  
-
+    container: {
+        flex: 1,
+        alignItems: 'center',
+        paddingHorizontal: 24,
+        paddingTop: 48,
+    },
+    title: {
+        fontSize: 24,
+        fontWeight: 'bold',
+        color: LEAF_GREEN,
+        marginBottom: 8,
+        textAlign: 'center',
+    },
+    subtitle: {
+        fontSize: 16,
+        color: LEAF_GRAY,
+        marginBottom: 32,
+        textAlign: 'center',
+        lineHeight: 22,
+    },
+    otpContainer: {
+        width: '100%',
+        marginBottom: 32,
+    },
+    otpLabel: {
+        fontSize: 16,
+        fontWeight: '600',
+        color: LEAF_GREEN,
+        marginBottom: 8,
+    },
+    otpInput: {
+        fontSize: 24,
+        color: LEAF_GREEN,
+        borderBottomWidth: 2,
+        borderBottomColor: LEAF_GRAY,
+        paddingVertical: 12,
+        paddingHorizontal: 0,
+        textAlign: 'center',
+        letterSpacing: 8,
+    },
+    resendButton: {
+        marginBottom: 24,
+    },
+    resendButtonText: {
+        fontSize: 16,
+        color: LEAF_GREEN,
+        fontWeight: '600',
+        textAlign: 'center',
+    },
+    infoText: {
+        fontSize: 14,
+        color: LEAF_GRAY,
+        textAlign: 'center',
+        lineHeight: 20,
+    },
+    progressBarContainer: {
+        flexDirection: 'row',
+        justifyContent: 'center',
+        alignItems: 'center',
+        marginBottom: 0,
+    },
+    progressDot: {
+        width: 12,
+        height: 12,
+        borderRadius: 6,
+        backgroundColor: LEAF_GRAY,
+        marginHorizontal: 4,
+    },
+    progressActive: {
+        backgroundColor: LEAF_GREEN,
+    },
 }); 

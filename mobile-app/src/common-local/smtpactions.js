@@ -3,7 +3,7 @@ import {
   FETCH_SMTP_SUCCESS,
   FETCH_SMTP_FAILED
 } from "../types";
-import { firebase } from '../config/configureFirebase';
+import { firebase } from './config/configureFirebase';
 
 export const fetchSMTP = () => (dispatch) => {
 

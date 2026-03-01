@@ -1,38 +1,40 @@
+import Logger from '../utils/Logger';
 // ApiConfig.js - Configuração centralizada para URLs da API
 import { Platform } from 'react-native';
+
 
 // Configurações por ambiente
 const ENV = {
   development: {
-    // 🏠 SELF-HOSTED VPS (Vultr) - PRINCIPAL
+    // 🏠 SELF-HOSTED VPS - PRINCIPAL
     selfHostedApi: {
-      web: 'http://216.238.107.59:3005',
-      mobile: 'http://216.238.107.59:3005'
+      web: process.env.EXPO_PUBLIC_API_URL || 'https://api.leaf.app.br',
+      mobile: process.env.EXPO_PUBLIC_API_URL || 'https://api.leaf.app.br'
     },
     selfHostedWebSocket: {
-      web: 'http://216.238.107.59:3005',
-      mobile: 'http://216.238.107.59:3005'
+      web: process.env.EXPO_PUBLIC_WS_URL || 'http://localhost:3001',
+      mobile: process.env.EXPO_PUBLIC_WS_URL || 'http://localhost:3001'
     },
     // 🔄 FALLBACK - Firebase Functions (se necessário)
     firebaseFunctions: {
       web: 'https://us-central1-leaf-app-91dfdce0.cloudfunctions.net',
       mobile: 'https://us-central1-leaf-app-91dfdce0.cloudfunctions.net'
     },
-    // 📊 Dashboard local
+    // 📊 Dashboard VPS
     dashboard: {
-      web: 'http://192.168.0.39:3000',
-      mobile: 'http://192.168.0.37:3000'
+      web: process.env.EXPO_PUBLIC_DASHBOARD_URL || 'https://dashboard.leaf.app.br',
+      mobile: process.env.EXPO_PUBLIC_DASHBOARD_URL || 'https://dashboard.leaf.app.br'
     }
   },
   production: {
-    // 🏠 SELF-HOSTED VPS (Vultr) - PRODUÇÃO
+    // 🏠 SELF-HOSTED VPS - PRODUÇÃO
     selfHostedApi: {
-      web: 'https://api.leaf.app.br',
-      mobile: 'https://api.leaf.app.br'
+      web: process.env.EXPO_PUBLIC_API_URL || 'https://api.leaf.app.br',
+      mobile: process.env.EXPO_PUBLIC_API_URL || 'https://api.leaf.app.br'
     },
     selfHostedWebSocket: {
-      web: 'https://socket.leaf.app.br',
-      mobile: 'https://socket.leaf.app.br'
+      web: process.env.EXPO_PUBLIC_WS_URL || 'https://api.leaf.app.br',
+      mobile: process.env.EXPO_PUBLIC_WS_URL || 'https://api.leaf.app.br'
     },
     // 🔄 FALLBACK - Firebase Functions
     firebaseFunctions: {
@@ -41,57 +43,74 @@ const ENV = {
     },
     // 📊 Dashboard
     dashboard: {
-      web: 'https://dashboard.leafapp.com',
-      mobile: 'https://dashboard.leafapp.com'
+      web: process.env.EXPO_PUBLIC_DASHBOARD_URL || 'https://dashboard.leaf.app.br',
+      mobile: process.env.EXPO_PUBLIC_DASHBOARD_URL || 'https://dashboard.leaf.app.br'
     }
   }
 };
 
 // Determinar ambiente (pode ser expandido para usar variáveis de ambiente)
 const getEnvironment = () => {
-  // Por enquanto, sempre development
-  // TODO: Implementar lógica para detectar ambiente
-  return 'development';
+  // ✅ CORREÇÃO: Sempre usar 'production' para garantir uso da VPS
+  // A VPS está configurada tanto em development quanto production
+  return __DEV__ ? 'development' : 'production';
 };
 
 // Obter configuração baseada na plataforma
 const getConfig = () => {
   const env = getEnvironment();
   const platform = Platform.OS;
-  
+
+  // ✅ CORREÇÃO: Para dispositivos móveis (android/ios), sempre usar 'mobile'
+  // Isso garante que use a VPS (https://api.leaf.app.br) ao invés de localhost
+  const platformKey = (platform === 'android' || platform === 'ios') ? 'mobile' : platform;
+
+  Logger.log('🔧 [ApiConfig] Platform.OS:', platform, '| Usando chave:', platformKey);
+
   return {
     // 🏠 SELF-HOSTED VPS (PRINCIPAL)
-    selfHostedApi: ENV[env].selfHostedApi[platform] || ENV[env].selfHostedApi.web,
-    selfHostedWebSocket: ENV[env].selfHostedWebSocket[platform] || ENV[env].selfHostedWebSocket.web,
-    
+    // ✅ CORREÇÃO: Usar platformKey para garantir IP correto em dispositivos móveis
+    selfHostedApi: ENV[env].selfHostedApi[platformKey] || ENV[env].selfHostedApi.mobile || ENV[env].selfHostedApi.web,
+    selfHostedWebSocket: ENV[env].selfHostedWebSocket[platformKey] || ENV[env].selfHostedWebSocket.mobile || ENV[env].selfHostedWebSocket.web,
+
     // 🔄 FALLBACK - Firebase Functions
-    firebaseFunctions: ENV[env].firebaseFunctions[platform] || ENV[env].firebaseFunctions.web,
-    
+    firebaseFunctions: ENV[env].firebaseFunctions[platformKey] || ENV[env].firebaseFunctions.web,
+
     // 📊 Dashboard
-    dashboard: ENV[env].dashboard[platform] || ENV[env].dashboard.web,
-    
+    dashboard: ENV[env].dashboard[platformKey] || ENV[env].dashboard.web,
+
     environment: env,
-    platform
+    platform: platform,
+    platformKey: platformKey
   };
 };
 
 // Configuração atual
 const config = getConfig();
 
+// ✅ LOG DE DEBUG: Verificar URL configurada
+Logger.log('🔧 [ApiConfig] Configuração carregada:', {
+  platform: config.platform,
+  platformKey: config.platformKey,
+  selfHostedApi: config.selfHostedApi,
+  selfHostedWebSocket: config.selfHostedWebSocket,
+  environment: config.environment
+});
+
 // URLs específicas para serviços
 export const API_URLS = {
   // 🏠 SELF-HOSTED API (PRINCIPAL)
   selfHostedApi: config.selfHostedApi,
-  
+
   // 🔌 SELF-HOSTED WEBSOCKET
   selfHostedWebSocket: config.selfHostedWebSocket,
-  
+
   // 🔄 FALLBACK - Firebase Functions
   firebaseFunctions: config.firebaseFunctions,
-  
+
   // 📊 Dashboard
   dashboard: config.dashboard,
-  
+
   // Endpoints específicos - SELF-HOSTED
   selfHostedEndpoints: {
     updateUserLocation: '/api/update_user_location',
@@ -105,7 +124,7 @@ export const API_URLS = {
     getTripData: '/api/get_trip_data',
     getRedisStats: '/api/get_redis_stats'
   },
-  
+
   // Endpoints específicos - Firebase Functions (FALLBACK)
   firebaseEndpoints: {
     updateUserLocation: '/update_user_location',
@@ -120,9 +139,9 @@ export const API_URLS = {
   }
 };
 
-// Função para obter URL da API Self-Hosted
 export const getSelfHostedApiUrl = (endpoint) => {
-  return `${API_URLS.selfHostedApi}${endpoint}`;
+  let baseUrl = process.env.EXPO_PUBLIC_API_URL || API_URLS.selfHostedApi;
+  return `${baseUrl}${endpoint}`;
 };
 
 // Função para obter URL da API Firebase (fallback)

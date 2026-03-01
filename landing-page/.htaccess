@@ -1,0 +1,31 @@
+# Apache .htaccess (se estiver usando Apache)
+# Para Cloudflare Pages, usar _redirects em vez deste arquivo
+
+# Rewrite sem redirect (servir arquivo diretamente)
+RewriteEngine On
+RewriteBase /
+
+# Rotas sem extensão -> arquivos .html (serve diretamente)
+RewriteCond %{REQUEST_FILENAME} !-f
+RewriteCond %{REQUEST_FILENAME} !-d
+RewriteRule ^excluir-conta$ excluir-conta.html [L]
+RewriteRule ^privacy-policy$ privacy-policy.html [L]
+RewriteRule ^em-breve$ em-breve.html [L]
+
+# NÃO redirecionar se já for .html (evitar loop)
+RewriteCond %{REQUEST_URI} !\.html$
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

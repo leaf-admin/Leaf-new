@@ -1,0 +1,34 @@
+# Cloudflare Pages - Headers de Segurança
+# Permitir acesso a todas as páginas
+
+/*
+  X-Frame-Options: SAMEORIGIN
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: strict-origin-when-cross-origin
+
+/excluir-conta.html
+  X-Frame-Options: SAMEORIGIN
+  Access-Control-Allow-Origin: *
+
+/privacy-policy.html
+  X-Frame-Options: SAMEORIGIN
+  Access-Control-Allow-Origin: *
+
+/index.html
+  X-Frame-Options: SAMEORIGIN
+  Access-Control-Allow-Origin: *
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

@@ -1,3 +1,4 @@
+import Logger from '../utils/Logger';
 import React, { useState, useEffect } from 'react';
 import {
     View,
@@ -20,6 +21,9 @@ import { useSelector, useDispatch } from 'react-redux';
 import { colors } from '../common-local/theme';
 import { fonts } from '../common-local/font';
 import ThemeSwitch from '../components/ThemeSwitch';
+import { SkeletonLoader, LoadingSpinner } from '../components/LoadingStates';
+import { useResponsiveLayout } from '../components/ResponsiveLayout';
+import { getSelfHostedApiUrl } from '../config/ApiConfig';
 
 const MAIN_COLOR = colors.TAXIPRIMARY;
 const { width, height } = Dimensions.get('window');
@@ -56,15 +60,79 @@ export default function EarningsReportScreen({ navigation }) {
     const dispatch = useDispatch();
     const isDarkMode = useSelector(state => state.settingsdata.isDarkMode);
     const auth = useSelector(state => state.auth);
-    
-    const [earningsData, setEarningsData] = useState(MOCK_DATA);
-    const [activeCar, setActiveCar] = useState(MOCK_DATA.activeCar);
-    const [hasActiveCar, setHasActiveCar] = useState(true);
+
+    const [earningsData, setEarningsData] = useState(null);
+    const [activeCar, setActiveCar] = useState(null);
+    const [hasActiveCar, setHasActiveCar] = useState(false);
     const [withdrawModalVisible, setWithdrawModalVisible] = useState(false);
     const [withdrawValue, setWithdrawValue] = useState('');
     const [pixKey, setPixKey] = useState('');
     const [withdrawError, setWithdrawError] = useState('');
-    const saldoDisponivel = earningsData.balance || 0;
+    const saldoDisponivel = earningsData?.balance || 0;
+
+    // Loading states
+    const [isLoadingEarnings, setIsLoadingEarnings] = useState(true);
+    const [isLoadingChart, setIsLoadingChart] = useState(false);
+    const [isProcessingWithdraw, setIsProcessingWithdraw] = useState(false);
+
+    // Responsive layout hook
+    const { config: responsiveConfig, isTablet, isMobile } = useResponsiveLayout();
+
+    // Carregar dados ao montar o componente
+    useEffect(() => {
+        const loadEarningsData = async () => {
+            try {
+                setIsLoadingEarnings(true);
+                if (!auth?.profile?.uid) {
+                    setIsLoadingEarnings(false);
+                    return;
+                }
+
+                const baseUrl = getSelfHostedApiUrl('/api');
+                Logger.log(`Trazendo Relatório de Faturamento: ${baseUrl}/drivers/${auth.profile.uid}/earnings`);
+
+                const response = await fetch(`${baseUrl}/drivers/${auth.profile.uid}/earnings`);
+                const data = await response.json();
+
+                if (data && data.success && data.report) {
+                    setEarningsData(data.report);
+                    if (data.report.activeCar) {
+                        setActiveCar(data.report.activeCar);
+                        setHasActiveCar(true);
+                    } else {
+                        setHasActiveCar(false);
+                        setActiveCar(null);
+                    }
+                } else {
+                    // Fallback de segurança se JSON vier sem sucesso
+                    setEarningsData({
+                        balance: 0,
+                        rating: 0,
+                        tripsToday: 0,
+                        hoursOnline: 0,
+                        dailyEarnings: []
+                    });
+                    setHasActiveCar(false);
+                    setActiveCar(null);
+                }
+            } catch (error) {
+                Logger.error('Erro ao carregar dados de ganhos:', error);
+                setEarningsData({
+                    balance: 0,
+                    rating: 0,
+                    tripsToday: 0,
+                    hoursOnline: 0,
+                    dailyEarnings: []
+                });
+                setHasActiveCar(false);
+                setActiveCar(null);
+            } finally {
+                setIsLoadingEarnings(false);
+            }
+        };
+
+        loadEarningsData();
+    }, []);
 
     // Função para formatar valor monetário com separador de milhares
     function formatCurrency(value) {
@@ -99,8 +167,15 @@ export default function EarningsReportScreen({ navigation }) {
         const from = navigation?.route?.params?.from;
         return (
             <View style={styles.header}>
-                <TouchableOpacity 
-                    style={[styles.headerButton, { backgroundColor: isDarkMode ? '#333' : '#f8f8f8' }]}
+                <TouchableOpacity
+                    style={[
+                        styles.headerButton,
+                        {
+                            backgroundColor: isDarkMode ? '#2d2d2d' : '#e8e8e8',
+                            borderWidth: 1,
+                            borderColor: isDarkMode ? '#404040' : '#d0d0d0',
+                        }
+                    ]}
                     onPress={() => {
                         if (from === 'map') {
                             navigation.navigate('DriverTrips');
@@ -108,12 +183,13 @@ export default function EarningsReportScreen({ navigation }) {
                             navigation.goBack();
                         }
                     }}
+                    activeOpacity={0.7}
                 >
-                    <Ionicons name="chevron-back" size={24} color={isDarkMode ? '#fff' : colors.BLACK} />
+                    <Ionicons name="chevron-back" size={22} color={isDarkMode ? '#fff' : '#1a1a1a'} />
                 </TouchableOpacity>
                 <Text style={[styles.headerTitle, { color: isDarkMode ? '#fff' : colors.BLACK }]}>Meus ganhos</Text>
                 <View style={styles.headerRightContainer}>
-                    <TouchableOpacity 
+                    <TouchableOpacity
                         style={[styles.headerButton, { backgroundColor: isDarkMode ? '#333' : '#f8f8f8' }]}
                         onPress={() => navigation.navigate('Notifications')}
                     >
@@ -153,9 +229,9 @@ export default function EarningsReportScreen({ navigation }) {
         <View style={{ backgroundColor: isDarkMode ? '#232323' : '#F6FFF0', height: CARD_HEIGHT, borderRadius: CARD_RADIUS, padding: CARD_PADDING, flexDirection: 'row', alignItems: 'center', marginBottom: 12 }}>
             <View style={{ flex: 1, justifyContent: 'center' }}>
                 <Text style={{ color: isDarkMode ? '#b8e6b8' : '#1A330E', fontWeight: undefined, fontSize: 13, fontWeight: '500', marginBottom: 6 }}>Saldo disponível:</Text>
-                <Text style={{ color: isDarkMode ? '#fff' : '#1A330E', fontWeight: 'bold', fontSize: 32, marginTop: 0 }} numberOfLines={1} ellipsizeMode="clip">R$ {formatCurrency(earningsData.balance)}</Text>
+                <Text style={{ color: isDarkMode ? '#fff' : '#1A330E', fontWeight: 'bold', fontSize: 32, marginTop: 0 }} numberOfLines={1} ellipsizeMode="clip">R$ {formatCurrency(earningsData?.balance || 0)}</Text>
             </View>
-            <TouchableOpacity style={[styles.cashOutButtonRefined, { height: 38, borderRadius: 12, paddingHorizontal: 18, justifyContent: 'center' }]} onPress={() => setWithdrawModalVisible(true)}> 
+            <TouchableOpacity style={[styles.cashOutButtonRefined, { height: 38, borderRadius: 12, paddingHorizontal: 18, justifyContent: 'center' }]} onPress={() => setWithdrawModalVisible(true)}>
                 <Text style={styles.cashOutTextRefined}>sacar</Text>
                 <Ionicons name="chevron-forward" size={16} color="#fff" style={{ marginLeft: 2 }} />
             </TouchableOpacity>
@@ -214,7 +290,7 @@ export default function EarningsReportScreen({ navigation }) {
             styles.statCardGrid,
             dark ? styles.statCardDark : styles.statCardLight,
             { height: CARD_HEIGHT, borderRadius: CARD_RADIUS, padding: CARD_PADDING, justifyContent: 'center', marginBottom: 12 }
-        ]}> 
+        ]}>
             <View style={styles.statCardRow}>
                 {icon && <Ionicons name={icon} size={20} color={dark ? '#fff' : '#1A330E'} style={{ marginRight: 8 }} />}
                 <Text style={{ color: dark ? '#fff' : '#888', fontSize: 13, fontWeight: '500', marginBottom: 2 }}>{title}</Text>
@@ -228,13 +304,13 @@ export default function EarningsReportScreen({ navigation }) {
 
     // Card do carro ativo grid
     const CarCard = ({ dark }) => {
-        if (!hasActiveCar) {
+        if (!hasActiveCar || !activeCar) {
             return (
                 <View style={[
                     styles.statCardGrid,
                     dark ? styles.statCardDark : styles.statCardLight,
                     { height: CARD_HEIGHT, borderRadius: CARD_RADIUS, padding: CARD_PADDING, justifyContent: 'center', marginBottom: 12 }
-                ]}> 
+                ]}>
                     <View style={styles.statCardRow}>
                         <Ionicons name="car" size={20} color={dark ? '#fff' : '#1A330E'} style={{ marginRight: 8, opacity: 0.3 }} />
                         <Text style={{ color: dark ? '#fff' : '#888', fontSize: 13, fontWeight: '500', marginBottom: 2 }}>Seu carro</Text>
@@ -249,23 +325,23 @@ export default function EarningsReportScreen({ navigation }) {
                 styles.statCardGrid,
                 dark ? styles.statCardDark : styles.statCardLight,
                 { height: CARD_HEIGHT, borderRadius: CARD_RADIUS, padding: CARD_PADDING, justifyContent: 'center', marginBottom: 12 }
-            ]}> 
+            ]}>
                 <View style={styles.statCardRow}>
                     <Ionicons name="car" size={20} color={dark ? '#fff' : '#1A330E'} style={{ marginRight: 8 }} />
                     <Text style={{ color: dark ? '#fff' : '#888', fontSize: 13, fontWeight: '500', marginBottom: 2 }}>Seu carro</Text>
                 </View>
-                <Text style={{ color: dark ? '#fff' : '#1A330E', fontSize: 22, fontWeight: 'bold', marginTop: 0 }}>{activeCar.brand} {activeCar.model}</Text>
-                <Text style={{ color: dark ? '#fff' : '#aaa', fontSize: 12 }}>{activeCar.engine}, {activeCar.year}</Text>
+                <Text style={{ color: dark ? '#fff' : '#1A330E', fontSize: 22, fontWeight: 'bold', marginTop: 0 }}>{activeCar?.brand || ''} {activeCar?.model || ''}</Text>
+                <Text style={{ color: dark ? '#fff' : '#aaa', fontSize: 12 }}>{activeCar?.engine || ''}, {activeCar?.year || ''}</Text>
             </View>
         );
     };
 
     // Gráfico de ganhos diários: verde claro, barra selecionada verde escuro, valor no topo ao clicar
     const DailyEarningsChart = () => {
-        const data = earningsData.dailyEarnings.slice(-7);
+        const data = earningsData?.dailyEarnings?.slice(-7) || [];
         const [selectedIdx, setSelectedIdx] = useState(null);
-        const maxPeriod = Math.max(...data.map(item => item.amount), 1);
-        const highlightValue = selectedIdx !== null ? data[selectedIdx].amount : null;
+        const maxPeriod = data.length > 0 ? Math.max(...data.map(item => item.amount), 1) : 1;
+        const highlightValue = selectedIdx !== null && data[selectedIdx] ? data[selectedIdx].amount : null;
         // Cores fixas
         const BAR_COLOR = '#A5D6A7';
         const BAR_COLOR_SELECTED = '#388E3C';
@@ -277,7 +353,7 @@ export default function EarningsReportScreen({ navigation }) {
             return weekDays[(idx + 1) % 7];
         }
         return (
-            <View style={[styles.chartCard, { backgroundColor: isDarkMode ? '#181818' : '#fff', marginBottom: 12, marginTop: 0, minHeight: CARD_HEIGHT, maxHeight: CARD_HEIGHT, height: CARD_HEIGHT, borderRadius: CARD_RADIUS, padding: CARD_PADDING, justifyContent: 'center' }]}> 
+            <View style={[styles.chartCard, { backgroundColor: isDarkMode ? '#181818' : '#fff', marginBottom: 12, marginTop: 0, minHeight: CARD_HEIGHT, maxHeight: CARD_HEIGHT, height: CARD_HEIGHT, borderRadius: CARD_RADIUS, padding: CARD_PADDING, justifyContent: 'center' }]}>
                 {/* Espaço reservado para o valor selecionado */}
                 <View style={{ alignItems: 'center', minHeight: 22, marginBottom: 4, justifyContent: 'center' }}>
                     {selectedIdx !== null && (
@@ -285,87 +361,109 @@ export default function EarningsReportScreen({ navigation }) {
                     )}
                 </View>
                 <View style={styles.chartContainerGrid}>
-                    <View style={[styles.barsContainerGrid, { marginTop: 8, height: 56, alignItems: 'flex-end' }]}> 
-                        {data.map((item, index) => {
-                            const barHeight = (item.amount / maxPeriod) * 48;
-                            const selected = index === selectedIdx;
-                            return (
-                                <TouchableOpacity
-                                    key={index}
-                                    style={styles.barColumnGrid}
-                                    activeOpacity={0.7}
-                                    onPress={() => setSelectedIdx(index)}
-                                >
-                                    <View style={{ alignItems: 'center' }}>
-                                        <View 
-                                            style={[
-                                                styles.barGrid, 
-                                                { 
-                                                    height: barHeight,
-                                                    backgroundColor: selected ? BAR_COLOR_SELECTED : BAR_COLOR,
-                                                    marginBottom: 4,
-                                                    borderRadius: 8,
-                                                    width: selected ? 22 : 18,
-                                                    opacity: selected ? 1 : 0.85,
-                                                }
-                                            ]} 
-                                        />
-                                        <Text style={{ fontSize: 12, color: isDarkMode ? '#fff' : '#222', fontFamily: fonts.Medium, marginBottom: 0 }}>{item.day}</Text>
-                                        <Text style={{ fontSize: 12, color: isDarkMode ? '#ccc' : '#888', fontFamily: fonts.Medium, marginTop: 0 }}>{getWeekDayInitial(item.day, index)}</Text>
-                                    </View>
-                                </TouchableOpacity>
-                            );
-                        })}
-                    </View>
+                    {data.length === 0 ? (
+                        <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', height: 56 }}>
+                            <Text style={{ color: isDarkMode ? '#888' : '#aaa', fontSize: 14, fontFamily: fonts.Regular }}>
+                                Nenhum dado disponível
+                            </Text>
+                        </View>
+                    ) : (
+                        <View style={[styles.barsContainerGrid, { marginTop: 8, height: 56, alignItems: 'flex-end' }]}>
+                            {data.map((item, index) => {
+                                const barHeight = (item.amount / maxPeriod) * 48;
+                                const selected = index === selectedIdx;
+                                return (
+                                    <TouchableOpacity
+                                        key={index}
+                                        style={styles.barColumnGrid}
+                                        activeOpacity={0.7}
+                                        onPress={() => setSelectedIdx(index)}
+                                    >
+                                        <View style={{ alignItems: 'center' }}>
+                                            <View
+                                                style={[
+                                                    styles.barGrid,
+                                                    {
+                                                        height: barHeight,
+                                                        backgroundColor: selected ? BAR_COLOR_SELECTED : BAR_COLOR,
+                                                        marginBottom: 4,
+                                                        borderRadius: 8,
+                                                        width: selected ? 22 : 18,
+                                                        opacity: selected ? 1 : 0.85,
+                                                    }
+                                                ]}
+                                            />
+                                            <Text style={{ fontSize: 12, color: isDarkMode ? '#fff' : '#222', fontFamily: fonts.Medium, marginBottom: 0 }}>{item.day}</Text>
+                                            <Text style={{ fontSize: 12, color: isDarkMode ? '#ccc' : '#888', fontFamily: fonts.Medium, marginTop: 0 }}>{getWeekDayInitial(item.day, index)}</Text>
+                                        </View>
+                                    </TouchableOpacity>
+                                );
+                            })}
+                        </View>
+                    )}
                 </View>
             </View>
         );
     };
 
     return (
-        <View style={[styles.container, { backgroundColor: isDarkMode ? '#000' : '#f5f5f5' }]}> 
-            <StatusBar 
+        <View style={[styles.container, { backgroundColor: isDarkMode ? '#000' : '#f5f5f5' }]}>
+            <StatusBar
                 barStyle={isDarkMode ? 'light-content' : 'dark-content'}
                 backgroundColor={isDarkMode ? '#000' : '#fff'}
             />
             <Header />
-            <ScrollView 
-                style={styles.scrollView}
-                showsVerticalScrollIndicator={false}
-            >
-                {/* Topo igual à tela de perfil */}
-                <ProfileTop />
-                {/* Card de Saldo */}
-                <BalanceCard />
-                {/* Gráfico de ganhos por dia */}
-                <DailyEarningsChart />
-                {/* Grid de Cards Inferiores */}
-                <View style={styles.statsGridGrid}>
-                    <View style={styles.statsRowGrid}>
-                        <StatCard 
-                            title="Nota" 
-                            value={earningsData.rating} 
-                            icon="star"
-                            dark={true}
-                        />
-                        <StatCard 
-                            title="Viagens hoje" 
-                            value={earningsData.tripsToday} 
-                            icon="car-sport"
-                            dark={false}
-                        />
-                    </View>
-                    <View style={styles.statsRowGrid}>
-                        <CarCard dark={false} />
-                        <StatCard 
-                            title="Horas online" 
-                            value={`${earningsData.hoursOnline}h`} 
-                            icon="time"
-                            dark={true}
-                        />
-                    </View>
+
+            {isLoadingEarnings ? (
+                <View style={styles.skeletonContainer}>
+                    <LoadingSpinner
+                        message="Carregando relatórios de ganhos..."
+                        color={MAIN_COLOR}
+                    />
+                    <SkeletonLoader width="100%" height={120} style={styles.skeletonCard} />
+                    <SkeletonLoader width="100%" height={200} style={styles.skeletonCard} />
+                    <SkeletonLoader width="100%" height={150} style={styles.skeletonCard} />
+                    <SkeletonLoader width="100%" height={100} style={styles.skeletonCard} />
                 </View>
-            </ScrollView>
+            ) : (
+                <ScrollView
+                    style={styles.scrollView}
+                    showsVerticalScrollIndicator={false}
+                >
+                    {/* Topo igual à tela de perfil */}
+                    <ProfileTop />
+                    {/* Card de Saldo */}
+                    <BalanceCard />
+                    {/* Gráfico de ganhos por dia */}
+                    <DailyEarningsChart />
+                    {/* Grid de Cards Inferiores */}
+                    <View style={styles.statsGridGrid}>
+                        <View style={styles.statsRowGrid}>
+                            <StatCard
+                                title="Nota"
+                                value={earningsData?.rating || 0}
+                                icon="star"
+                                dark={true}
+                            />
+                            <StatCard
+                                title="Viagens hoje"
+                                value={earningsData?.tripsToday || 0}
+                                icon="car-sport"
+                                dark={false}
+                            />
+                        </View>
+                        <View style={styles.statsRowGrid}>
+                            <CarCard dark={false} />
+                            <StatCard
+                                title="Horas online"
+                                value={`${earningsData?.hoursOnline || 0}h`}
+                                icon="time"
+                                dark={true}
+                            />
+                        </View>
+                    </View>
+                </ScrollView>
+            )}
             <WithdrawModal />
         </View>
     );
@@ -389,6 +487,14 @@ const styles = StyleSheet.create({
         borderRadius: 20,
         justifyContent: 'center',
         alignItems: 'center',
+        shadowColor: '#000',
+        shadowOffset: {
+            width: 0,
+            height: 1,
+        },
+        shadowOpacity: 0.1,
+        shadowRadius: 2,
+        elevation: 2,
     },
     headerTitle: {
         fontSize: 18,
@@ -830,6 +936,14 @@ const styles = StyleSheet.create({
     modalCancelText: {
         color: '#333',
         fontWeight: 'bold',
+    },
+    skeletonContainer: {
+        flex: 1,
+        padding: 16,
+    },
+    skeletonCard: {
+        marginBottom: 16,
+        borderRadius: 12,
     },
     modalConfirmButton: {
         flex: 2,

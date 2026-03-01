@@ -4,7 +4,7 @@ import {
     FETCH_COMPLAIN_FAILED,
     EDIT_COMPLAIN
   } from "../types";
-  import { firebase } from '../config/configureFirebase';
+  import { firebase } from './config/configureFirebase';
   import store from '../store/store';
   
   export const fetchComplain = () => (dispatch) => {

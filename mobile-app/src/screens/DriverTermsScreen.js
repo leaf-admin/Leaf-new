@@ -1,3 +1,4 @@
+import Logger from '../utils/Logger';
 import React, { useState } from 'react';
 import { 
   View, 
@@ -10,6 +11,7 @@ import {
 } from 'react-native';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+
 
 const { width, height } = Dimensions.get('window');
 
@@ -46,7 +48,7 @@ export default function DriverTermsScreen() {
     }
 
     try {
-      console.log("DriverTermsScreen - Termos aceitos, salvando dados");
+      Logger.log("DriverTermsScreen - Termos aceitos, salvando dados");
       
       // Salvar aceitação dos termos
       const updatedUserData = {
@@ -59,11 +61,11 @@ export default function DriverTermsScreen() {
       
       await AsyncStorage.setItem('@temp_user_data', JSON.stringify(updatedUserData));
       
-      console.log("DriverTermsScreen - Navegando para upload da CNH");
+      Logger.log("DriverTermsScreen - Navegando para upload da CNH");
       navigation.navigate('CNHUpload', { userData: updatedUserData });
       
     } catch (error) {
-      console.error("DriverTermsScreen - Erro ao salvar termos:", error);
+      Logger.error("DriverTermsScreen - Erro ao salvar termos:", error);
       Alert.alert("Erro", "Não foi possível salvar os termos. Tente novamente.");
     }
   };

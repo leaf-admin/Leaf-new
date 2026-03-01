@@ -1,213 +1,189 @@
-# 🧪 TESTS - Índice de Testes
+# 🧪 TESTES AUTOMATIZADOS - LEAF APP
 
-**Pasta:** `/tests`  
-**Descrição:** Todos os testes do projeto organizados por categoria
+Sistema completo de testes automatizados para validar os 85 cenários do plano de testes.
 
----
+## ✅ **FIDEDIGNIDADE AO APP REAL**
 
-## 📁 **Estrutura de Pastas**
+**IMPORTANTE:** Os testes foram criados para replicar **EXATAMENTE** o comportamento do app mobile:
 
-### **🔗 Integração**
-- **Pasta:** `integration/`
-- **Descrição:** Testes de integração entre componentes
-- **Arquivos:** Testes de API, WebSocket, Redis, Firebase
+- ✅ **Mesmos eventos emitidos:** `authenticate`, `createBooking`, `acceptRide`, etc.
+- ✅ **Mesmos payloads:** Estrutura de dados idêntica ao app (`{ uid, userType }`, etc.)
+- ✅ **Mesmos timeouts:** Valores exatos do `WebSocketManager`
+- ✅ **Mesmas respostas esperadas:** `authenticated`, `bookingCreated`, `rideAccepted`, etc.
 
-### **⚡ Performance**
-- **Pasta:** `performance/`
-- **Descrição:** Testes de performance e carga
-- **Arquivos:** Testes de stress, benchmark, otimização
+Os testes **disparam diretamente para o servidor** usando a mesma comunicação que o app real, garantindo que os testes sejam válidos e reflitam o comportamento real do sistema.
 
-### **🧩 Unitários**
-- **Pasta:** `unit/`
-- **Descrição:** Testes unitários de funções e componentes
-- **Arquivos:** Testes isolados de módulos
+## 📋 Estrutura
 
-### **🌐 WebSocket**
-- **Pasta:** `websocket/`
-- **Descrição:** Testes específicos de WebSocket
-- **Arquivos:** Conexão, eventos, sincronização
-
-### **🔧 Setup**
-- **Pasta:** `setup/`
-- **Descrição:** Testes de configuração e setup
-- **Arquivos:** Instalação, configuração, ambiente
-
-### **🗄️ Redis**
-- **Pasta:** `redis/`
-- **Descrição:** Testes específicos do Redis
-- **Arquivos:** Conexão, operações, otimização
-
-### **📱 Mobile**
-- **Pasta:** `mobile/`
-- **Descrição:** Testes específicos do app mobile
-- **Arquivos:** Componentes, navegação, funcionalidades
-
-### **📊 Load**
-- **Pasta:** `load/`
-- **Descrição:** Testes de carga e stress
-- **Arquivos:** Múltiplos usuários, performance
-
-### **🔥 Firebase**
-- **Pasta:** `firebase/`
-- **Descrição:** Testes específicos do Firebase
-- **Arquivos:** Autenticação, Firestore, Functions
-
-### **🔐 Auth**
-- **Pasta:** `auth/`
-- **Descrição:** Testes de autenticação
-- **Arquivos:** Login, registro, permissões
-
-### **📜 Scripts**
-- **Pasta:** `scripts/`
-- **Descrição:** Scripts auxiliares para testes
-- **Arquivos:** Utilitários, helpers, setup
-
----
-
-## 🚀 **Como Executar os Testes**
-
-### **Executar Todos os Testes:**
-```bash
-# Executar todos os testes
-npm test
-
-# Ou executar por categoria
-npm run test:integration
-npm run test:unit
-npm run test:performance
+```
+tests/
+├── config/
+│   └── test-parameters.js       # Todos os parâmetros definidos
+├── helpers/
+│   ├── test-helpers.js           # Funções auxiliares
+│   └── websocket-client.js       # Cliente WebSocket para testes
+├── suites/
+│   ├── 00-template.test.js       # Template para novos testes
+│   ├── 01-autenticacao-identidade.test.js  # Suite exemplo
+│   └── ...                       # Outras suites
+├── reports/                      # Relatórios gerados
+├── test-runner.js               # Executor principal
+└── README.md                    # Este arquivo
 ```
 
-### **Executar Testes Específicos:**
+## 🚀 Como Executar
+
+### Pré-requisitos
+
 ```bash
-# Testes de integração
-node tests/integration/test-redis-optimization.cjs
-
-# Testes de performance
-node tests/performance/test-load-performance.cjs
-
-# Testes de WebSocket
-node tests/websocket/test-websocket-only.cjs
+npm install socket.io-client
 ```
 
-### **Executar Testes por Ambiente:**
+### Executar Todos os Testes
+
 ```bash
-# Desenvolvimento
-npm run test:dev
-
-# Produção
-npm run test:prod
-
-# Staging
-npm run test:staging
+node tests/test-runner.js
 ```
 
----
+### Executar Suite Específica
 
-## 📋 **Tipos de Teste**
-
-### **🔗 Testes de Integração**
-- **Objetivo:** Verificar se os componentes funcionam juntos
-- **Exemplos:** API + Redis, WebSocket + Firebase, Mobile + Backend
-- **Frequência:** Antes de cada deploy
-
-### **⚡ Testes de Performance**
-- **Objetivo:** Verificar performance e escalabilidade
-- **Exemplos:** Carga de usuários, tempo de resposta, uso de memória
-- **Frequência:** Semanalmente
-
-### **🧩 Testes Unitários**
-- **Objetivo:** Verificar funções individuais
-- **Exemplos:** Cálculos, validações, utilitários
-- **Frequência:** A cada mudança de código
-
-### **🌐 Testes de WebSocket**
-- **Objetivo:** Verificar comunicação em tempo real
-- **Exemplos:** Conexão, desconexão, eventos, sincronização
-- **Frequência:** Antes de cada release
-
----
-
-## 📊 **Cobertura de Testes**
-
-### **Métricas:**
-- **Cobertura de Código:** >80%
-- **Testes de Integração:** 100% das APIs
-- **Testes de Performance:** 100% dos endpoints críticos
-- **Testes de Segurança:** 100% das autenticações
-
-### **Relatórios:**
-- **Cobertura:** `coverage/`
-- **Logs:** `logs/`
-- **Resultados:** `results/`
-
----
-
-## 🔧 **Configuração**
-
-### **Variáveis de Ambiente:**
 ```bash
-# .env.test
-NODE_ENV=test
-TEST_DATABASE_URL=test-db-url
-TEST_REDIS_URL=test-redis-url
-TEST_FIREBASE_PROJECT=test-project
+node tests/suites/01-autenticacao-identidade.test.js
 ```
 
-### **Scripts de Setup:**
+### Com Variáveis de Ambiente
+
 ```bash
-# Setup do ambiente de teste
-npm run test:setup
-
-# Limpar dados de teste
-npm run test:clean
-
-# Reset do banco de teste
-npm run test:reset
+WS_URL=ws://216.238.107.59:3001 \
+TEST_DRIVER_ID=driver-001 \
+TEST_CUSTOMER_ID=customer-001 \
+node tests/test-runner.js
 ```
 
+## 📊 Resultados
+
+Os testes geram:
+- ✅ Relatório no console em tempo real
+- 📄 Arquivo JSON em `tests/reports/test-report-{timestamp}.json`
+- 📈 Estatísticas de sucesso/falha
+
+## 🎯 Cobertura de Testes
+
+### Categorias Implementadas
+
+1. ✅ **Autenticação e Identidade** (TC-001 a TC-004)
+   - Login Driver
+   - Login Customer
+   - Reconexão WebSocket
+   - Sessão Simultânea
+
+### Categorias Pendentes
+
+2. ⏳ Status do Motorista e Presença
+3. ⏳ Solicitação de Corrida
+4. ⏳ Distribuição e Notificação
+5. ⏳ Aceitação e Recusa
+6. ⏳ Reatribuição e Fallback
+7. ⏳ Cancelamentos
+8. ⏳ Início da Viagem
+9. ⏳ Durante a Viagem
+10. ⏳ Finalização da Viagem
+11. ⏳ Pagamento PIX
+12. ⏳ Pós-Corrida
+... (e mais 8 categorias)
+
+**Total:** 85 cenários de teste planejados
+
+## 🛠️ Criando Novos Testes
+
+### 1. Use o Template
+
+```bash
+cp tests/suites/00-template.test.js tests/suites/NN-nome-categoria.test.js
+```
+
+### 2. Implemente os Métodos
+
+Cada teste deve:
+- Incrementar `this.results.total`
+- Executar ações
+- Validar critérios de aceite
+- Registrar `passed` ou `failed`
+- Fazer cleanup (disconnect)
+
+### 3. Exemplo de Validação
+
+```javascript
+const checks = [];
+
+checks.push({
+    name: 'Evento recebido',
+    passed: client.hasReceivedEvent('rideRequest'),
+});
+
+checks.push({
+    name: 'Dados normalizados',
+    passed: TestHelpers.validateNormalizedBooking(data),
+});
+
+const allPassed = checks.every(c => c.passed);
+```
+
+## 📝 Parâmetros Disponíveis
+
+Todos os parâmetros estão em `config/test-parameters.js`:
+
+- `PARAMS.TIMEOUTS.*` - Todos os timeouts
+- `PARAMS.RADIUS.*` - Raios e distâncias
+- `PARAMS.FARES.*` - Valores e tarifas
+- `PARAMS.BUSINESS_RULES.*` - Regras de negócio
+- `PARAMS.VEHICLE_TYPES.*` - Tarifas por tipo de veículo
+- `PARAMS.POLICIES.*` - Políticas gerais
+
+## 🔧 Helpers Disponíveis
+
+### TestHelpers
+
+- `sleep(seconds)` - Aguarda tempo
+- `waitFor(condition, timeout)` - Aguarda condição
+- `calculateFare(vehicleType, distanceKm, timeMinutes)` - Calcula tarifa
+- `calculateDistance(lat1, lng1, lat2, lng2)` - Calcula distância
+- `validateNormalizedBooking(data)` - Valida dados normalizados
+- `createBookingPayload(pickup, destination, vehicleType)` - Cria payload de booking
+- `waitForEvent(socket, eventName, timeout)` - Aguarda evento
+
+### WebSocketTestClient
+
+- `connect()` - Conecta ao servidor
+- `authenticate()` - Autentica usuário
+- `on(event, callback)` - Registra listener
+- `emit(event, data)` - Emite evento
+- `waitForEvent(eventName, timeout)` - Aguarda evento específico
+- `hasReceivedEvent(eventName)` - Verifica se evento foi recebido
+- `getEvents(eventName)` - Obtém todos os eventos recebidos
+
+## 📈 Progresso
+
+- **Parâmetros Definidos:** 43/43 (100%) ✅
+- **Testes Implementados:** 4/85 (~5%)
+- **Testes Pendentes:** 81/85 (~95%)
+
+## 🎯 Próximos Passos
+
+1. Implementar suites para todas as categorias
+2. Criar testes de integração end-to-end
+3. Adicionar testes de carga/performance
+4. Integrar com CI/CD
+5. Adicionar cobertura de código
+
+## 📞 Suporte
+
+Para dúvidas ou problemas, consulte:
+- `PARAMETROS_DEFINIDOS.md` - Todos os parâmetros
+- `PLANO_TESTES_COMPLETO.md` - Cenários detalhados
+- Template em `tests/suites/00-template.test.js`
+
 ---
 
-## 📝 **Padrões de Nomenclatura**
+**Última atualização:** 29/01/2025
 
-### **Arquivos de Teste:**
-- `test-*.cjs` - Testes de integração
-- `test-*.js` - Testes unitários
-- `test-*.spec.js` - Testes específicos
-- `test-*.bench.js` - Benchmarks
-
-### **Pastas:**
-- `integration/` - Testes de integração
-- `unit/` - Testes unitários
-- `performance/` - Testes de performance
-- `e2e/` - Testes end-to-end
-
----
-
-## ⚠️ **Observações Importantes**
-
-### **Antes de Executar:**
-1. **Configurar ambiente** de teste
-2. **Instalar dependências** de teste
-3. **Configurar banco** de teste
-4. **Verificar permissões** de arquivo
-
-### **Durante os Testes:**
-1. **Não executar** em produção
-2. **Usar dados** de teste
-3. **Limpar** após execução
-4. **Verificar** logs de erro
-
-### **Após os Testes:**
-1. **Analisar** resultados
-2. **Corrigir** falhas
-3. **Atualizar** documentação
-4. **Limpar** dados temporários
-
----
-
-## 📚 **Documentação Adicional**
-
-- **README-TESTES.md** - Documentação detalhada dos testes
-- **Guia de Testes** - Como escrever novos testes
-- **Padrões de Teste** - Convenções e boas práticas
-- **Troubleshooting** - Solução de problemas comuns 

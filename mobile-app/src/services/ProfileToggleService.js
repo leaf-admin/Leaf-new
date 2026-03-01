@@ -1,3 +1,4 @@
+import Logger from '../utils/Logger';
 // ProfileToggleService.js - Serviço para toggle entre passageiro e motorista
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { api } from '../common-local';
@@ -13,12 +14,35 @@ class ProfileToggleService {
   }
 
   // ===== GESTÃO DE MODO =====
-  async getCurrentMode() {
+  /**
+   * Obter modo atual baseado no usertype do backend
+   * ✅ CRÍTICO: Role sempre vem do backend, não permite escolha manual
+   */
+  async getCurrentMode(userProfile = null) {
     try {
-      const mode = await AsyncStorage.getItem('leaf_current_mode');
-      return mode || 'passenger';
+      // ✅ SEMPRE usar usertype do backend como fonte da verdade
+      if (userProfile) {
+        const backendUserType = userProfile.usertype || userProfile.userType;
+        if (backendUserType) {
+          // Mapear usertype do backend para mode
+          const mode = backendUserType === 'driver' ? 'driver' : 'passenger';
+          // Salvar no AsyncStorage para cache
+          await AsyncStorage.setItem('leaf_current_mode', mode);
+          this.currentMode = mode;
+          return mode;
+        }
+      }
+      
+      // Fallback: tentar obter do AsyncStorage (cache)
+      const cachedMode = await AsyncStorage.getItem('leaf_current_mode');
+      if (cachedMode) {
+        return cachedMode;
+      }
+      
+      // Fallback final: passenger
+      return 'passenger';
     } catch (error) {
-      console.error('❌ Erro ao obter modo atual:', error);
+      Logger.error('❌ Erro ao obter modo atual:', error);
       return 'passenger';
     }
   }
@@ -27,31 +51,50 @@ class ProfileToggleService {
     try {
       await AsyncStorage.setItem('leaf_current_mode', mode);
       this.currentMode = mode;
-      console.log(`🔄 ProfileToggle: Modo alterado para ${mode}`);
+      Logger.log(`🔄 ProfileToggle: Modo alterado para ${mode}`);
       return true;
     } catch (error) {
-      console.error('❌ Erro ao definir modo:', error);
+      Logger.error('❌ Erro ao definir modo:', error);
       return false;
     }
   }
 
-  async switchMode(userId) {
+  /**
+   * Alternar modo - SEMPRE valida com backend antes
+   * ✅ CRÍTICO: Não permite toggle sem validação de permissões do backend
+   */
+  async switchMode(userId, userProfile = null) {
     try {
-      const currentMode = await this.getCurrentMode();
+      // ✅ 1. Obter modo atual do backend (fonte da verdade)
+      const currentMode = await this.getCurrentMode(userProfile);
       const newMode = currentMode === 'passenger' ? 'driver' : 'passenger';
       
-      console.log(`🔄 ProfileToggle: Alternando de ${currentMode} para ${newMode}`);
+      Logger.log(`🔄 ProfileToggle: Tentando alternar de ${currentMode} para ${newMode}`);
       
-      // 1. Atualizar modo no usuário base
-      await this.updateUserMode(userId, newMode);
+      // ✅ 2. VALIDAR permissões com backend ANTES de alternar
+      const canSwitch = await this.canSwitchToMode(userId, newMode);
+      if (!canSwitch) {
+        Logger.warn(`⚠️ ProfileToggle: Não tem permissão para alternar para ${newMode}`);
+        return {
+          success: false,
+          error: `Você não tem permissão para usar o modo ${newMode === 'passenger' ? 'Passageiro' : 'Motorista'}. Verifique seu perfil no backend.`
+        };
+      }
       
-      // 2. Carregar dados específicos do modo
+      // ✅ 3. Atualizar modo no backend (fonte da verdade)
+      const backendUpdated = await this.updateUserMode(userId, newMode);
+      if (!backendUpdated) {
+        Logger.warn('⚠️ ProfileToggle: Falha ao atualizar modo no backend, mas continuando...');
+        // Não bloquear se backend não estiver disponível, mas logar aviso
+      }
+      
+      // 4. Carregar dados específicos do modo
       const profileData = await this.loadProfileData(userId, newMode);
       
-      // 3. Salvar modo atual
+      // 5. Salvar modo atual (cache local)
       await this.setCurrentMode(newMode);
       
-      // 4. Limpar cache do modo anterior
+      // 6. Limpar cache do modo anterior
       await this.clearModeCache(currentMode);
       
       return {
@@ -61,7 +104,7 @@ class ProfileToggleService {
         message: `Modo alterado para ${newMode === 'passenger' ? 'Passageiro' : 'Motorista'}`
       };
     } catch (error) {
-      console.error('❌ Erro ao alternar modo:', error);
+      Logger.error('❌ Erro ao alternar modo:', error);
       return {
         success: false,
         error: error.message
@@ -77,12 +120,12 @@ class ProfileToggleService {
       // Verificar cache primeiro
       const cached = await this.getFromCache(cacheKey);
       if (cached) {
-        console.log(`📦 ProfileToggle: Dados de ${mode} carregados do cache`);
+        Logger.log(`📦 ProfileToggle: Dados de ${mode} carregados do cache`);
         return cached;
       }
       
       // Carregar do servidor
-      console.log(`🌐 ProfileToggle: Carregando dados de ${mode} do servidor`);
+      Logger.log(`🌐 ProfileToggle: Carregando dados de ${mode} do servidor`);
       const data = await this.fetchProfileData(userId, mode);
       
       // Salvar no cache
@@ -90,7 +133,7 @@ class ProfileToggleService {
       
       return data;
     } catch (error) {
-      console.error(`❌ Erro ao carregar dados de ${mode}:`, error);
+      Logger.error(`❌ Erro ao carregar dados de ${mode}:`, error);
       return this.getDefaultProfileData(mode);
     }
   }
@@ -107,7 +150,7 @@ class ProfileToggleService {
         throw new Error(response.data.message || 'Erro ao carregar perfil');
       }
     } catch (error) {
-      console.error(`❌ Erro na API para ${mode}:`, error);
+      Logger.error(`❌ Erro na API para ${mode}:`, error);
       throw error;
     }
   }
@@ -163,7 +206,7 @@ class ProfileToggleService {
       }
       return null;
     } catch (error) {
-      console.error('❌ Erro ao ler cache:', error);
+      Logger.error('❌ Erro ao ler cache:', error);
       return null;
     }
   }
@@ -176,7 +219,7 @@ class ProfileToggleService {
       };
       await AsyncStorage.setItem(key, JSON.stringify(cacheData));
     } catch (error) {
-      console.error('❌ Erro ao salvar cache:', error);
+      Logger.error('❌ Erro ao salvar cache:', error);
     }
   }
 
@@ -185,9 +228,9 @@ class ProfileToggleService {
       const keys = await AsyncStorage.getAllKeys();
       const modeKeys = keys.filter(key => key.includes(`profile_${mode}`));
       await AsyncStorage.multiRemove(modeKeys);
-      console.log(`🗑️ ProfileToggle: Cache de ${mode} limpo`);
+      Logger.log(`🗑️ ProfileToggle: Cache de ${mode} limpo`);
     } catch (error) {
-      console.error('❌ Erro ao limpar cache:', error);
+      Logger.error('❌ Erro ao limpar cache:', error);
     }
   }
 
@@ -200,13 +243,13 @@ class ProfileToggleService {
       });
       
       if (response.data.success) {
-        console.log(`✅ ProfileToggle: Modo atualizado no servidor`);
+        Logger.log(`✅ ProfileToggle: Modo atualizado no servidor`);
         return true;
       } else {
         throw new Error(response.data.message);
       }
     } catch (error) {
-      console.error('❌ Erro ao atualizar modo no servidor:', error);
+      Logger.error('❌ Erro ao atualizar modo no servidor:', error);
       // Não falhar se o servidor não estiver disponível
       return false;
     }
@@ -229,8 +272,10 @@ class ProfileToggleService {
       
       return false;
     } catch (error) {
-      console.error('❌ Erro ao verificar permissões:', error);
-      return true; // Permitir por padrão se não conseguir verificar
+      Logger.error('❌ Erro ao verificar permissões:', error);
+      // ✅ CRÍTICO: Não permitir por padrão se não conseguir verificar
+      // Isso garante que só alterna se backend confirmar
+      return false;
     }
   }
 
@@ -256,7 +301,7 @@ class ProfileToggleService {
       
       return stats;
     } catch (error) {
-      console.error('❌ Erro ao obter estatísticas de cache:', error);
+      Logger.error('❌ Erro ao obter estatísticas de cache:', error);
       return { total: 0, passenger: 0, driver: 0 };
     }
   }
@@ -266,10 +311,10 @@ class ProfileToggleService {
       const keys = await AsyncStorage.getAllKeys();
       const profileKeys = keys.filter(key => key.startsWith('profile_'));
       await AsyncStorage.multiRemove(profileKeys);
-      console.log('🗑️ ProfileToggle: Todo cache limpo');
+      Logger.log('🗑️ ProfileToggle: Todo cache limpo');
       return true;
     } catch (error) {
-      console.error('❌ Erro ao limpar todo cache:', error);
+      Logger.error('❌ Erro ao limpar todo cache:', error);
       return false;
     }
   }

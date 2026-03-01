@@ -4,7 +4,7 @@ import {
     FETCH_SMSCONFIG_FAILED,
     EDIT_SMSCONFIG
   } from "../types";
-  import { firebase } from '../config/configureFirebase';
+  import { firebase } from './config/configureFirebase';
 
   export const fetchSMSConfig = () => (dispatch) => {
 

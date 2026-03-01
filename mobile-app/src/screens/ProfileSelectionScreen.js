@@ -1,388 +1,318 @@
 import React, { useState, useRef } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, Animated, Dimensions, Image } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, Animated, Dimensions } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
+import { colors } from '../common/theme';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import OnboardingLayout from '../components/OnboardingLayout';
 
-const { width, height } = Dimensions.get('window');
-
-// Constantes de cores
+const { width } = Dimensions.get('window');
+const LEAF_GREEN = '#1A330E';
+const LEAF_LIGHT_GREEN = '#2A4A1E';
+const LEAF_GRAY = '#B0B0B0';
 const WHITE = '#FFFFFF';
-const BLACK = '#000000';
-const GRAY = '#666666';
-const LIGHT_GRAY = '#F5F5F5';
-const DARK_GRAY = '#333333';
 
 const options = [
   {
     key: 'passenger',
     title: 'Quero viajar',
-    symbol: '💼',
-    description: [
-      'Faça viagens com total segurança',
-      'Melhores carros e melhores motoristas',
-    ],
+    subtitle: 'Encontre motoristas próximos e faça suas viagens',
+    icon: '🚗',
+    color: '#4CAF50',
   },
   {
     key: 'driver',
-    title: 'Quero dirigir',
-    symbol: '$',
-    description: [
-      'Dirija e ganhe com suas viagens',
-      'Receba até 99% do valor pago',
-    ],
+    title: 'Quero ser parceiro',
+    subtitle: 'Dirija e ganhe dinheiro com suas viagens',
+    icon: '💰',
+    color: '#FF9800',
   },
 ];
 
 export default function ProfileSelectionScreen() {
   const navigation = useNavigation();
   const [selected, setSelected] = useState(null);
-  const [termsAccepted, setTermsAccepted] = useState(false);
-  const cardAnim = useRef(new Animated.Value(0)).current;
-  const descriptionAnim = useRef(new Animated.Value(0)).current;
+  const scaleAnim = useRef(new Animated.Value(1)).current;
+  const fadeAnim = useRef(new Animated.Value(0)).current;
 
   React.useEffect(() => {
-    // Animação simples: deslize de baixo para cima sem bounce
-    Animated.spring(cardAnim, {
-      toValue: 1,
-      tension: 100,
-      friction: 12,
-      useNativeDriver: true,
-    }).start();
+    // Animação de entrada
+    Animated.parallel([
+      Animated.timing(fadeAnim, {
+        toValue: 1,
+        duration: 800,
+        useNativeDriver: true,
+      }),
+      Animated.spring(scaleAnim, {
+        toValue: 1,
+        tension: 50,
+        friction: 7,
+        useNativeDriver: true,
+      })
+    ]).start();
   }, []);
 
   const handleOptionPress = (optionKey) => {
-    if (selected === optionKey) {
-      // Se clicar na mesma opção, desmarca
-      setSelected(null);
-      Animated.timing(descriptionAnim, {
-        toValue: 0,
-        duration: 200,
+    setSelected(optionKey);
+    
+    // Animação de seleção
+    Animated.sequence([
+      Animated.timing(scaleAnim, {
+        toValue: 0.95,
+        duration: 100,
         useNativeDriver: true,
-      }).start();
-    } else {
-      // Seleciona nova opção
-      setSelected(optionKey);
-      Animated.timing(descriptionAnim, {
+      }),
+      Animated.timing(scaleAnim, {
         toValue: 1,
-        duration: 300,
+        duration: 100,
         useNativeDriver: true,
-      }).start();
-    }
+      })
+    ]).start();
   };
 
   const handleContinue = async () => {
-    if (selected && termsAccepted) {
+    if (selected) {
+      // Salvar o tipo de usuário escolhido
       await AsyncStorage.setItem('@user_type', selected);
-      navigation.navigate('PhoneInput', { userType: selected });
+      
+      // Navegar diretamente para a tela de telefone
+      navigation.navigate('PhoneScreen', { userType: selected });
     }
   };
 
-  const selectedOption = options.find(option => option.key === selected);
+  // Barra de progresso customizada
+  const progressBar = (
+    <View style={styles.progressBarContainer}>
+      <View style={[styles.progressDot, styles.progressActive]} />
+      <View style={styles.progressDot} />
+      <View style={styles.progressDot} />
+      <View style={styles.progressDot} />
+    </View>
+  );
 
   return (
-    <View style={styles.container}>
-      {/* Background com cor estática */}
-      <View style={styles.backgroundContainer} />
-      
-      {/* Logo da Leaf no topo */}
-      <View style={styles.logoContainer}>
-        <Image 
-          source={require('../../assets/images/leaftransparentbg.png')}
-          style={styles.logo}
-          resizeMode="contain"
-        />
-      </View>
+    <OnboardingLayout
+      progress={progressBar}
+      onContinue={handleContinue}
+      continueLabel="Continuar"
+      continueDisabled={!selected}
+    >
+      <Animated.View style={[
+        styles.container,
+        {
+          opacity: fadeAnim,
+          transform: [{ scale: scaleAnim }]
+        }
+      ]}>
+        <View style={styles.header}>
+          <Text style={styles.title}>Como você quer usar o Leaf?</Text>
+          <Text style={styles.subtitle}>
+            Escolha o tipo de conta que melhor se adapta às suas necessidades
+          </Text>
+        </View>
 
-      {/* BOTTOM SHEET */}
-      <Animated.View 
-        style={[
-          styles.bottomSheet,
-          {
-            transform: [
-              { 
-                translateY: cardAnim.interpolate({
-                  inputRange: [0, 1],
-                  outputRange: [height, 0]
-                })
-              }
-            ]
-          }
-        ]}
-      >
-        {/* Handle do bottom sheet */}
-        <View style={styles.handle} />
-        
-        {/* Título do card */}
-        <Text style={styles.cardTitle}>Escolha seu perfil</Text>
-        
-        {/* Opções */}
-        <View style={styles.optionsContainer}>
-          {options.map((option, index) => {
-            const isSelected = selected === option.key;
-            
+        <View style={styles.optionsWrapper}>
+          {options.map((opt, index) => {
+            const isSelected = selected === opt.key;
             return (
-              <TouchableOpacity
-                key={option.key}
+              <Animated.View
+                key={opt.key}
                 style={[
-                  styles.optionCard,
-                  isSelected && styles.optionCardSelected
+                  styles.optionContainer,
+                  { transform: [{ scale: isSelected ? 1.02 : 1 }] }
                 ]}
-                onPress={() => handleOptionPress(option.key)}
-                activeOpacity={0.7}
               >
-                <View style={styles.optionContent}>
-                  {/* Radio button */}
-                  <View style={styles.radioContainer}>
+                <TouchableOpacity
+                  style={[
+                    styles.optionButton,
+                    isSelected && {
+                      ...styles.optionButtonSelected,
+                      backgroundColor: opt.color,
+                      borderColor: opt.color,
+                    }
+                  ]}
+                  onPress={() => handleOptionPress(opt.key)}
+                  activeOpacity={0.9}
+                >
+                  <View style={styles.optionContent}>
                     <View style={[
-                      styles.radioButton,
-                      isSelected && styles.radioButtonSelected
+                      styles.iconContainer,
+                      isSelected && { backgroundColor: WHITE + '20' }
                     ]}>
-                      {isSelected && <View style={styles.radioDot} />}
+                      <Text style={styles.iconText}>{opt.icon}</Text>
                     </View>
-                  </View>
-                  
-                  {/* Conteúdo da opção */}
-                  <View style={styles.optionTextContainer}>
-                    <Text style={styles.optionTitle}>
-                      {option.title}
-                    </Text>
                     
-                    {/* Descrição sempre visível */}
-                    {option.description.map((line, i) => (
-                      <Text key={i} style={styles.optionDescription}>
-                        {line}
+                    <View style={styles.textContainer}>
+                      <Text style={[
+                        styles.optionTitle,
+                        { color: isSelected ? WHITE : LEAF_GREEN }
+                      ]}>
+                        {opt.title}
                       </Text>
-                    ))}
+                      <Text style={[
+                        styles.optionSubtitle,
+                        { color: isSelected ? WHITE + 'CC' : LEAF_GRAY }
+                      ]}>
+                        {opt.subtitle}
+                      </Text>
+                    </View>
+
+                    {isSelected && (
+                      <View style={styles.checkmarkContainer}>
+                        <Text style={styles.checkmark}>✓</Text>
+                      </View>
+                    )}
                   </View>
-                </View>
-              </TouchableOpacity>
+                </TouchableOpacity>
+              </Animated.View>
             );
           })}
         </View>
 
-        {/* Checkbox de Termos */}
-        <View style={styles.termsContainer}>
-          <TouchableOpacity 
-            style={[styles.checkbox, termsAccepted && styles.checkboxChecked]}
-            onPress={() => setTermsAccepted(!termsAccepted)}
-          >
-            {termsAccepted && <Text style={styles.checkmark}>✓</Text>}
-          </TouchableOpacity>
-          <Text style={styles.termsText}>
-            Li e aceito os{' '}
-            <Text style={styles.termsLink}>Termos de Uso</Text>
-            {' '}e a{' '}
-            <Text style={styles.termsLink}>Política de Privacidade</Text>
-          </Text>
-        </View>
-
-        {/* Botão continuar */}
-        <TouchableOpacity
-          style={[
-            styles.continueButton,
-            (!selected || !termsAccepted) && styles.continueButtonDisabled
-          ]}
-          onPress={handleContinue}
-          disabled={!selected || !termsAccepted}
-          activeOpacity={0.8}
-        >
-          <Text style={[
-            styles.continueButtonText,
-            (!selected || !termsAccepted) && styles.continueButtonTextDisabled
-          ]}>
-            Continuar
-          </Text>
-        </TouchableOpacity>
+        {selected && (
+          <Animated.View style={[styles.selectedInfo, { opacity: fadeAnim }]}>
+            <Text style={styles.selectedInfoText}>
+              Você selecionou: {options.find(opt => opt.key === selected)?.title}
+            </Text>
+          </Animated.View>
+        )}
       </Animated.View>
-    </View>
+    </OnboardingLayout>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-  },
-  
-  // Background com cor estática
-  backgroundContainer: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    backgroundColor: '#1A330E', // Cor estática para o fundo
-    width: width,
-    height: height,
-  },
-  
-  // Logo da Leaf
-  logoContainer: {
-    position: 'absolute',
-    top: 60,
-    left: 0,
-    right: 0,
+    justifyContent: 'flex-start',
     alignItems: 'center',
-    zIndex: 1,
+    width: '100%',
+    paddingTop: 20,
   },
-  logo: {
-    width: 389,
-    height: 194,
+  header: {
+    alignItems: 'center',
+    marginBottom: 40,
+    paddingHorizontal: 20,
   },
-  
-  // BOTTOM SHEET
-  bottomSheet: {
-    position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
-    backgroundColor: WHITE,
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
-    padding: 32,
-    paddingBottom: 40,
-    height: height * 0.55 + 75,
+  title: {
+    fontSize: 28,
+    fontWeight: '800',
+    color: LEAF_GREEN,
+    marginBottom: 12,
+    textAlign: 'center',
+    letterSpacing: 0.5,
+  },
+  subtitle: {
+    fontSize: 16,
+    color: LEAF_GRAY,
+    textAlign: 'center',
+    lineHeight: 22,
+    paddingHorizontal: 20,
+  },
+  optionsWrapper: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    width: '100%',
+    gap: 20,
+    paddingHorizontal: 24,
+  },
+  optionContainer: {
+    width: '100%',
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: -4 },
+    shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.1,
+    shadowRadius: 8,
+    elevation: 4,
+  },
+  optionButton: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: '100%',
+    paddingVertical: 24,
+    paddingHorizontal: 20,
+    borderRadius: 16,
+    borderWidth: 2,
+    borderColor: '#E0E0E0',
+    backgroundColor: WHITE,
+    position: 'relative',
+    overflow: 'hidden',
+  },
+  optionButtonSelected: {
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.3,
     shadowRadius: 12,
     elevation: 8,
   },
-  handle: {
-    width: 40,
-    height: 6,
-    backgroundColor: '#E5E7EB',
-    borderRadius: 3,
-    alignSelf: 'center',
-    marginBottom: 20,
-  },
-  
-  // Título do card
-  cardTitle: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: BLACK,
-    textAlign: 'left',
-    marginBottom: 32,
-  },
-  
-  // Opções
-  optionsContainer: {
-    marginBottom: 32,
-  },
-  optionCard: {
-    backgroundColor: WHITE,
-    borderRadius: 8,
-    padding: 16,
-    marginBottom: 12,
-    borderWidth: 1,
-    borderColor: '#E5E7EB',
-  },
-  optionCardSelected: {
-    borderColor: '#1A330E',
-    borderWidth: 2,
-  },
   optionContent: {
     flexDirection: 'row',
-    alignItems: 'flex-start',
+    alignItems: 'center',
+    width: '100%',
+    zIndex: 1,
   },
-  radioContainer: {
-    marginRight: 12,
-    marginTop: 2,
-  },
-  radioButton: {
-    width: 18,
-    height: 18,
-    borderRadius: 9,
-    borderWidth: 2,
-    borderColor: '#D1D5DB',
+  iconContainer: {
+    width: 60,
+    height: 60,
+    borderRadius: 30,
+    backgroundColor: '#F5F5F5',
     alignItems: 'center',
     justifyContent: 'center',
+    marginRight: 16,
   },
-  radioButtonSelected: {
-    borderColor: '#1A330E',
+  iconText: {
+    fontSize: 28,
   },
-  radioDot: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
-    backgroundColor: '#1A330E',
-  },
-  optionTextContainer: {
+  textContainer: {
     flex: 1,
   },
   optionTitle: {
-    fontSize: 16,
-    fontWeight: 'normal',
-    color: BLACK,
-    marginBottom: 6,
+    fontSize: 20,
+    fontWeight: '700',
+    marginBottom: 4,
+    letterSpacing: 0.3,
   },
-  optionDescription: {
-    fontSize: 13,
-    color: GRAY,
-    lineHeight: 16,
-    marginBottom: 2,
+  optionSubtitle: {
+    fontSize: 14,
+    lineHeight: 20,
+    letterSpacing: 0.2,
   },
-  
-  // Termos
-  termsContainer: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    marginBottom: 20,
-  },
-  checkbox: {
-    width: 18,
-    height: 18,
-    borderRadius: 3,
-    borderWidth: 2,
-    borderColor: '#D1D5DB',
-    marginRight: 10,
+  checkmarkContainer: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: WHITE + '20',
     alignItems: 'center',
     justifyContent: 'center',
   },
-  checkboxChecked: {
-    backgroundColor: '#1A330E',
-    borderColor: '#1A330E',
-  },
   checkmark: {
     color: WHITE,
-    fontSize: 10,
+    fontSize: 18,
     fontWeight: 'bold',
   },
-  termsText: {
-    flex: 1,
-    fontSize: 13,
-    color: GRAY,
-    lineHeight: 18,
+  selectedInfo: {
+    marginTop: 20,
+    paddingHorizontal: 20,
   },
-  termsLink: {
-    color: '#1A330E',
+  selectedInfoText: {
+    fontSize: 14,
+    color: LEAF_GREEN,
+    textAlign: 'center',
     fontWeight: '600',
-    textDecorationLine: 'underline',
   },
-  
-  // Botão
-  continueButton: {
-    backgroundColor: '#1A330E',
-    borderRadius: 8,
-    paddingVertical: 14,
+  progressBarContainer: {
+    flexDirection: 'row',
+    justifyContent: 'center',
     alignItems: 'center',
-    shadowColor: '#1A330E',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.2,
-    shadowRadius: 4,
-    elevation: 4,
+    marginBottom: 0,
   },
-  continueButtonDisabled: {
-    backgroundColor: '#D1D5DB',
-    shadowOpacity: 0,
-    elevation: 0,
+  progressDot: {
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+    backgroundColor: colors.BORDER_BACKGROUND,
+    marginHorizontal: 4,
   },
-  continueButtonText: {
-    fontSize: 15,
-    fontWeight: 'bold',
-    color: WHITE,
-  },
-  continueButtonTextDisabled: {
-    color: '#9CA3AF',
+  progressActive: {
+    backgroundColor: colors.BIDTAXIPRIMARY,
   },
 }); 

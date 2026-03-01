@@ -1,3 +1,4 @@
+import Logger from '../utils/Logger';
 import React, { useState } from 'react';
 import {
   View,
@@ -80,7 +81,7 @@ const CancellationScreen = ({ navigation, route }) => {
 
   const processCancellation = () => {
     // Aqui você implementaria a lógica de cancelamento
-    console.log('Cancelando viagem:', {
+    Logger.log('Cancelando viagem:', {
       tripId: tripData?.id,
       reason: selectedReason,
       timestamp: new Date().toISOString()

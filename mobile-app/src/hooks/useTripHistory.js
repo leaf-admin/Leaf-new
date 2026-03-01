@@ -1,6 +1,8 @@
+import Logger from '../utils/Logger';
 import { useState, useEffect } from 'react';
 import { useSelector } from 'react-redux';
-import { getUserTripHistory, getTripStatistics } from '../common-local/actions/locationactions';
+import { getUserTripHistory, getTripStatistics } from '../common-local/src/actions/locationactions';
+
 
 export const useTripHistory = (userType = 'passenger') => {
     const auth = useSelector(state => state.authdata);
@@ -12,7 +14,7 @@ export const useTripHistory = (userType = 'passenger') => {
     // Carregar histórico de viagens
     const loadTripHistory = async (limit = 50) => {
         if (!auth.profile?.uid) {
-            console.log('⚠️ Usuário não autenticado');
+            Logger.log('⚠️ Usuário não autenticado');
             return;
         }
 
@@ -23,9 +25,9 @@ export const useTripHistory = (userType = 'passenger') => {
             const history = await getUserTripHistory(auth.profile.uid, userType, limit);
             setTripHistory(history);
             
-            console.log('📊 Trip history loaded:', history.length, 'trips');
+            Logger.log('📊 Trip history loaded:', history.length, 'trips');
         } catch (error) {
-            console.error('❌ Error loading trip history:', error);
+            Logger.error('❌ Error loading trip history:', error);
             setError(error);
         } finally {
             setLoading(false);
@@ -35,7 +37,7 @@ export const useTripHistory = (userType = 'passenger') => {
     // Carregar estatísticas
     const loadStatistics = async (period = 'month') => {
         if (!auth.profile?.uid) {
-            console.log('⚠️ Usuário não autenticado');
+            Logger.log('⚠️ Usuário não autenticado');
             return;
         }
 
@@ -46,9 +48,9 @@ export const useTripHistory = (userType = 'passenger') => {
             const stats = await getTripStatistics(auth.profile.uid, userType, period);
             setStatistics(stats);
             
-            console.log('📊 Trip statistics loaded:', stats);
+            Logger.log('📊 Trip statistics loaded:', stats);
         } catch (error) {
-            console.error('❌ Error loading trip statistics:', error);
+            Logger.error('❌ Error loading trip statistics:', error);
             setError(error);
         } finally {
             setLoading(false);

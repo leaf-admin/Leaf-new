@@ -1,4 +1,10 @@
-import api from '../common-local/api';
+import Logger from '../utils/Logger';
+import axios from 'axios';
+import { getSelfHostedApiUrl } from '../config/ApiConfig';
+
+
+// ✅ CORREÇÃO: Usar getSelfHostedApiUrl para obter URL correta do servidor
+const API_BASE_URL = getSelfHostedApiUrl('');
 
 // Configurações do Woovi
 const WOOVI_CONFIG = {
@@ -6,6 +12,19 @@ const WOOVI_CONFIG = {
   appId: 'Client_Id_7bd2d925-4878-4c9d-a33a-ed76c3d4e100',
   apiKey: 'Q2xpZW50X0lkXzdiZDJkOTI1LTQ4NzgtNGM5ZC1hMzNhLWVkNzZjM2Q0ZTEwMDpDbGllbnRfU2VjcmV0XzZhVCs2NnkrUFAwZXJxRG1qTFlDTHFjMWZORXJyOS9Yd0V5aENkYldsMDA9'
 };
+
+// Instância do axios configurada
+const api = axios.create({
+  baseURL: API_BASE_URL,
+  timeout: 30000,
+  headers: {
+    'Content-Type': 'application/json',
+    'Accept': 'application/json'
+  }
+});
+
+// ✅ Log para debug
+Logger.log('🔧 [paymentService] API_BASE_URL configurada:', API_BASE_URL);
 
 /**
  * Criar cobrança PIX via Woovi
@@ -18,6 +37,8 @@ const WOOVI_CONFIG = {
  */
 export const createPixCharge = async (chargeData) => {
   try {
+    Logger.log('💳 Criando cobrança PIX:', chargeData);
+    
     const response = await api.post('/api/v1/charge', {
       value: chargeData.value,
       correlationID: chargeData.correlationID,
@@ -25,15 +46,17 @@ export const createPixCharge = async (chargeData) => {
       expiresIn: chargeData.expiresIn || 3600
     }, {
       headers: {
-        'Authorization': WOOVI_CONFIG.apiKey,
+        'Authorization': `Basic ${WOOVI_CONFIG.apiKey}`,
         'Content-Type': 'application/json'
       }
     });
 
+    Logger.log('✅ Cobrança PIX criada:', response.data);
     return response;
   } catch (error) {
-    console.error('Erro ao criar cobrança PIX:', error);
-    throw new Error('Falha ao gerar pagamento PIX');
+    Logger.error('❌ Erro ao criar cobrança PIX:', error);
+    Logger.error('   Detalhes:', error.response?.data || error.message);
+    throw new Error(error.response?.data?.message || 'Falha ao gerar pagamento PIX');
   }
 };
 
@@ -46,15 +69,16 @@ export const checkPaymentStatus = async (chargeId) => {
   try {
     const response = await api.get(`/api/v1/charge/${chargeId}`, {
       headers: {
-        'Authorization': WOOVI_CONFIG.apiKey,
+        'Authorization': `Basic ${WOOVI_CONFIG.apiKey}`,
         'Content-Type': 'application/json'
       }
     });
 
     return response;
   } catch (error) {
-    console.error('Erro ao verificar status do pagamento:', error);
-    throw new Error('Falha ao verificar status do pagamento');
+    Logger.error('❌ Erro ao verificar status do pagamento:', error);
+    Logger.error('   Detalhes:', error.response?.data || error.message);
+    throw new Error(error.response?.data?.message || 'Falha ao verificar status do pagamento');
   }
 };
 
@@ -68,15 +92,15 @@ export const listCharges = async (filters = {}) => {
     const queryParams = new URLSearchParams(filters);
     const response = await api.get(`/api/v1/charge?${queryParams}`, {
       headers: {
-        'Authorization': WOOVI_CONFIG.apiKey,
+        'Authorization': `Basic ${WOOVI_CONFIG.apiKey}`,
         'Content-Type': 'application/json'
       }
     });
 
     return response;
   } catch (error) {
-    console.error('Erro ao listar cobranças:', error);
-    throw new Error('Falha ao listar cobranças');
+    Logger.error('❌ Erro ao listar cobranças:', error);
+    throw new Error(error.response?.data?.message || 'Falha ao listar cobranças');
   }
 };
 
@@ -94,15 +118,15 @@ export const createRefund = async (chargeId, amount, reason) => {
       reason
     }, {
       headers: {
-        'Authorization': WOOVI_CONFIG.apiKey,
+        'Authorization': `Basic ${WOOVI_CONFIG.apiKey}`,
         'Content-Type': 'application/json'
       }
     });
 
     return response;
   } catch (error) {
-    console.error('Erro ao criar reembolso:', error);
-    throw new Error('Falha ao processar reembolso');
+    Logger.error('❌ Erro ao criar reembolso:', error);
+    throw new Error(error.response?.data?.message || 'Falha ao processar reembolso');
   }
 };
 
@@ -182,14 +206,14 @@ export const calculateCancellationFee = (tripData) => {
 export const cancelTrip = async (tripId, reason) => {
   try {
     // Buscar dados da corrida
-    const tripResponse = await api.get(`/trips/${tripId}`);
+    const tripResponse = await api.get(`/api/trips/${tripId}`);
     const tripData = tripResponse.data;
 
     // Calcular taxa de cancelamento
     const cancellationFee = calculateCancellationFee(tripData);
 
     // Se há reembolso, processar via Woovi
-    if (cancellationFee.refundAmount > 0) {
+    if (cancellationFee.refundAmount > 0 && tripData.chargeId) {
       await createRefund(
         tripData.chargeId,
         cancellationFee.refundAmount,
@@ -198,7 +222,7 @@ export const cancelTrip = async (tripId, reason) => {
     }
 
     // Atualizar status da corrida
-    await api.put(`/trips/${tripId}`, {
+    await api.put(`/api/trips/${tripId}`, {
       status: 'CANCELLED',
       cancelledAt: new Date().toISOString(),
       cancellationReason: reason,
@@ -213,8 +237,8 @@ export const cancelTrip = async (tripId, reason) => {
       reason
     };
   } catch (error) {
-    console.error('Erro ao cancelar corrida:', error);
-    throw new Error('Falha ao processar cancelamento');
+    Logger.error('❌ Erro ao cancelar corrida:', error);
+    throw new Error(error.response?.data?.message || 'Falha ao processar cancelamento');
   }
 };
 
@@ -228,7 +252,7 @@ export const isPaymentConfirmed = async (chargeId) => {
     const status = await checkPaymentStatus(chargeId);
     return status.data.charge.status === 'CONFIRMED';
   } catch (error) {
-    console.error('Erro ao verificar confirmação:', error);
+    Logger.error('Erro ao verificar confirmação:', error);
     return false;
   }
 };
@@ -242,15 +266,15 @@ export const getChargeDetails = async (chargeId) => {
   try {
     const response = await api.get(`/api/v1/charge/${chargeId}`, {
       headers: {
-        'Authorization': WOOVI_CONFIG.apiKey,
+        'Authorization': `Basic ${WOOVI_CONFIG.apiKey}`,
         'Content-Type': 'application/json'
       }
     });
 
     return response.data;
   } catch (error) {
-    console.error('Erro ao obter detalhes da cobrança:', error);
-    throw new Error('Falha ao obter detalhes da cobrança');
+    Logger.error('❌ Erro ao obter detalhes da cobrança:', error);
+    throw new Error(error.response?.data?.message || 'Falha ao obter detalhes da cobrança');
   }
 };
 

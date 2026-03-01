@@ -1,15 +1,16 @@
+import Logger from '../utils/Logger';
 import React, { useState, useEffect, useRef } from 'react';
 import { StyleSheet, View, Text, TouchableOpacity, StatusBar, TextInput, Alert, KeyboardAvoidingView, Platform, ScrollView } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-// import { TextInputMask } from 'react-native-masked-text';
-import { api } from '../common-local';
+import { TextInputMask } from 'react-native-masked-text';
+import { api } from '../../common';
 import auth from '@react-native-firebase/auth';
 import { FirebaseConfig } from '../../config/FirebaseConfig';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as TaskManager from 'expo-task-manager';
 import * as Location from 'expo-location';
 import i18n from '../i18n';
-import { colors } from '../common-local/theme';
+import { colors } from '../common/theme';
 import GetPushToken from '../components/GetPushToken';
 import moment from 'moment/min/moment-with-locales';
 import {
@@ -18,28 +19,18 @@ import {
 import * as Notifications from 'expo-notifications';
 import * as SplashScreen from 'expo-splash-screen';
 import { Audio, InterruptionModeAndroid, InterruptionModeIOS } from 'expo-av';
-import { getUserId, getUserData, saveUserData } from '../common-local/utils/authUtils';
+import { getUserId, getUserData, saveUserData } from '../utils/authUtils';
 
-const LOCATION_TASK_NAME = 'background-location-task';
 
-TaskManager.defineTask(LOCATION_TASK_NAME, ({ data: { locations }, error }) => {
-  if (error) {
-    console.log(error);
-    return;
-  }
-  if (locations.length > 0) {
-    let location = locations[locations.length - 1];
-    if (location.coords) {
-      AsyncStorage.setItem('@gps_location', JSON.stringify({
-        lat: location.coords.latitude,
-        lng: location.coords.longitude
-      }));
-    }
-  }
-});
+// ✅ Importar BackgroundLocationService para registrar a task de localização em background
+// A task é definida no BackgroundLocationService quando o módulo é carregado
+import '../services/BackgroundLocationService';
+
+// ✅ Importar FeatureFlagService para inicializar feature flags
+import featureFlagService from '../services/FeatureFlagService';
 
 export default function AppCommon({ children }) {
-  console.log("AppCommon - Iniciando renderização");
+  Logger.log("AppCommon - Iniciando renderização");
 
   const { t } = i18n;
   
@@ -68,7 +59,7 @@ export default function AppCommon({ children }) {
   // Aguardar um tempo para garantir que a navegação esteja pronta
   useEffect(() => {
     const timer = setTimeout(() => {
-      console.log('AppCommon - Navegação considerada pronta após timeout');
+      Logger.log('AppCommon - Navegação considerada pronta após timeout');
       setIsNavigationReady(true);
     }, 1000); // Aguardar 1 segundo
 
@@ -78,23 +69,23 @@ export default function AppCommon({ children }) {
   // Função para logar todos os dados do AsyncStorage
   const logAllAsyncStorageData = async () => {
     try {
-      console.log('=== DADOS DO ASYNCSTORAGE ===');
+      Logger.log('=== DADOS DO ASYNCSTORAGE ===');
       const allKeys = await AsyncStorage.getAllKeys();
-      console.log('Chaves encontradas:', allKeys);
+      Logger.log('Chaves encontradas:', allKeys);
       
       for (const key of allKeys) {
         const value = await AsyncStorage.getItem(key);
-        console.log(`\nChave: ${key}`);
+        Logger.log(`\nChave: ${key}`);
         try {
           const parsedValue = JSON.parse(value);
-          console.log('Valor:', JSON.stringify(parsedValue, null, 2));
+          Logger.log('Valor:', JSON.stringify(parsedValue, null, 2));
         } catch (e) {
-          console.log('Valor:', value);
+          Logger.log('Valor:', value);
         }
       }
-      console.log('=== FIM DOS DADOS ===\n');
+      Logger.log('=== FIM DOS DADOS ===\n');
     } catch (error) {
-      console.error('Erro ao ler AsyncStorage:', error);
+      Logger.error('Erro ao ler AsyncStorage:', error);
     }
   };
 
@@ -105,7 +96,7 @@ export default function AppCommon({ children }) {
       const storedUserData = await AsyncStorage.getItem('@user_data');
       if (storedUserData) {
         const parsedUserData = JSON.parse(storedUserData);
-        console.log('Dados do usuário encontrados no AsyncStorage:', parsedUserData);
+        Logger.log('Dados do usuário encontrados no AsyncStorage:', parsedUserData);
         
         if (parsedUserData.uid && parsedUserData.usertype) {
           setUserData(parsedUserData);
@@ -114,7 +105,7 @@ export default function AppCommon({ children }) {
       }
       return false;
     } catch (error) {
-      console.error('Erro ao restaurar sessão:', error);
+      Logger.error('Erro ao restaurar sessão:', error);
       return false;
     }
   };
@@ -122,32 +113,33 @@ export default function AppCommon({ children }) {
   // Função para salvar token (implementação básica)
   const saveToken = async () => {
     try {
-      console.log('AppCommon - Salvando token...');
+      Logger.log('AppCommon - Salvando token...');
       // Implementação básica - pode ser expandida conforme necessário
       const token = await auth().currentUser?.getIdToken();
       if (token) {
         await AsyncStorage.setItem('@auth_token', token);
-        console.log('AppCommon - Token salvo com sucesso');
+        Logger.log('AppCommon - Token salvo com sucesso');
       }
     } catch (error) {
-      console.warn('AppCommon - Erro ao salvar token:', error);
+      Logger.warn('AppCommon - Erro ao salvar token:', error);
     }
   };
 
-  // Função para parar localização em background
+  // Função para parar localização em background (usando BackgroundLocationService)
   const StopBackgroundLocation = async () => {
     try {
-      console.log('AppCommon - Parando localização em background...');
-      await Location.stopLocationUpdatesAsync(LOCATION_TASK_NAME);
-      console.log('AppCommon - Localização em background parada');
+      Logger.log('AppCommon - Parando localização em background...');
+      const BackgroundLocationService = require('../services/BackgroundLocationService').default;
+      await BackgroundLocationService.stopBackgroundTracking();
+      Logger.log('AppCommon - Localização em background parada');
     } catch (error) {
-      console.warn('AppCommon - Erro ao parar localização:', error);
+      Logger.warn('AppCommon - Erro ao parar localização:', error);
     }
   };
 
   // Inicializar Firebase e verificar autenticação
   useEffect(() => {
-    console.log("AppCommon - Inicializando Firebase");
+    Logger.log("AppCommon - Inicializando Firebase");
     const initializeFirebase = async () => {
       try {
         // Logar todos os dados do AsyncStorage
@@ -155,26 +147,26 @@ export default function AppCommon({ children }) {
 
         // Tentar restaurar a sessão do usuário
         const sessionRestored = await restoreUserSession();
-        console.log('Sessão restaurada:', sessionRestored);
+        Logger.log('Sessão restaurada:', sessionRestored);
 
         // Verificar se o auth está disponível
-        console.log("AppCommon - Verificando se auth está disponível...");
+        Logger.log("AppCommon - Verificando se auth está disponível...");
         const authInstance = auth();
-        console.log("AppCommon - Auth instance:", authInstance);
+        Logger.log("AppCommon - Auth instance:", authInstance);
         
         // Verificar usuário atual
         const currentUser = authInstance.currentUser;
-        console.log("AppCommon - Usuário atual:", currentUser);
+        Logger.log("AppCommon - Usuário atual:", currentUser);
 
         // Configurar listener de autenticação
-        console.log("AppCommon - Configurando onAuthStateChanged...");
+        Logger.log("AppCommon - Configurando onAuthStateChanged...");
         const unsubscribe = authInstance.onAuthStateChanged(async (user) => {
-          console.log("AppCommon - Estado de autenticação mudou:", user ? "Usuário logado" : "Usuário não logado");
+          Logger.log("AppCommon - Estado de autenticação mudou:", user ? "Usuário logado" : "Usuário não logado");
           
           if (user) {
             // Usuário está logado no Firebase
             const uid = user.uid;
-            console.log("AppCommon - UID do usuário:", uid);
+            Logger.log("AppCommon - UID do usuário:", uid);
             
             // Se não temos dados do usuário, buscar do Firebase
             if (!userData) {
@@ -183,15 +175,15 @@ export default function AppCommon({ children }) {
                 if (userData) {
                   setUserData(userData);
                   await saveUserData(userData);
-                  console.log('Dados do usuário salvos:', userData);
+                  Logger.log('Dados do usuário salvos:', userData);
                 }
               } catch (apiError) {
-                console.warn('Erro ao buscar dados do usuário:', apiError);
+                Logger.warn('Erro ao buscar dados do usuário:', apiError);
               }
             }
           } else {
             // Usuário não está logado no Firebase
-            console.log("AppCommon - Nenhum usuário logado no Firebase");
+            Logger.log("AppCommon - Nenhum usuário logado no Firebase");
             // Não vamos limpar os dados do AsyncStorage aqui para manter a sessão
           }
           
@@ -201,9 +193,9 @@ export default function AppCommon({ children }) {
 
         // Fallback: se o listener não for chamado em 3 segundos, forçar inicialização
         setTimeout(() => {
-          console.log("AppCommon - Fallback: onAuthStateChanged não foi chamado, forçando inicialização");
+          Logger.log("AppCommon - Fallback: onAuthStateChanged não foi chamado, forçando inicialização");
           if (!isFirebaseInitialized) {
-            console.log("AppCommon - Forçando isFirebaseInitialized = true");
+            Logger.log("AppCommon - Forçando isFirebaseInitialized = true");
             setIsFirebaseInitialized(true);
             setIsLoading(false);
           }
@@ -213,7 +205,7 @@ export default function AppCommon({ children }) {
           unsubscribe();
         };
       } catch (error) {
-        console.error('Erro ao inicializar Firebase:', error);
+        Logger.error('Erro ao inicializar Firebase:', error);
         setIsFirebaseInitialized(true);
         setIsLoading(false);
       }
@@ -225,12 +217,16 @@ export default function AppCommon({ children }) {
   // Carregar configurações e outros dados iniciais
   useEffect(() => {
     if (isFirebaseInitialized && !isLoading) {
-      console.log("AppCommon - Carregando dados iniciais");
+      Logger.log("AppCommon - Carregando dados iniciais");
       const loadInitialData = async () => {
         try {
+          // ✅ Inicializar Feature Flags
+          await featureFlagService.initialize();
+          Logger.log('✅ AppCommon - Feature Flags inicializadas');
+          
           // Carregar configurações
           const settingsData = await api.getSettings();
-          console.log('AppCommon - Settings Data Completo:', JSON.stringify(settingsData, null, 2));
+          Logger.log('AppCommon - Settings Data Completo:', JSON.stringify(settingsData, null, 2));
           
           // Configurações padrão caso a API não retorne
           const defaultSettings = {
@@ -247,7 +243,8 @@ export default function AppCommon({ children }) {
             AllowCriticalEditsAdmin: false,
             CompanyTermCondition: '',
             carType_required: false,
-            horizontal_view: false
+            horizontal_view: false,
+            dynamicPricingEnabled: false // Padrão: desabilitado na fase inicial (baixa demanda)
           };
 
           // Mesclar configurações da API com as padrão
@@ -256,14 +253,14 @@ export default function AppCommon({ children }) {
             ...(settingsData || {})
           };
 
-          console.log('AppCommon - Settings Final:', JSON.stringify(finalSettings, null, 2));
-          console.log('AppCommon - Settings Decimal:', finalSettings.decimal);
-          console.log('AppCommon - Settings Currency:', finalSettings.currency);
+          Logger.log('AppCommon - Settings Final:', JSON.stringify(finalSettings, null, 2));
+          Logger.log('AppCommon - Settings Decimal:', finalSettings.decimal);
+          Logger.log('AppCommon - Settings Currency:', finalSettings.currency);
 
           if (finalSettings) {
             setSettings(finalSettings);
             await AsyncStorage.setItem('@settings', JSON.stringify(finalSettings));
-            console.log('AppCommon - Settings salvo no AsyncStorage');
+            Logger.log('AppCommon - Settings salvo no AsyncStorage');
           }
 
           // Carregar idiomas
@@ -274,7 +271,7 @@ export default function AppCommon({ children }) {
               await AsyncStorage.setItem('@languages', JSON.stringify(languagesData));
             }
           } catch (langError) {
-            console.warn('Erro ao carregar idiomas:', langError);
+            Logger.warn('Erro ao carregar idiomas:', langError);
           }
 
           // Carregar tipos de carro
@@ -284,13 +281,13 @@ export default function AppCommon({ children }) {
               await AsyncStorage.setItem('@car_types', JSON.stringify(carTypesData));
             }
           } catch (carError) {
-            console.warn('Erro ao carregar tipos de carro:', carError);
+            Logger.warn('Erro ao carregar tipos de carro:', carError);
           }
 
           // Logar todos os dados do AsyncStorage após carregar os dados iniciais
           await logAllAsyncStorageData();
         } catch (error) {
-          console.error('Erro ao carregar dados iniciais:', error);
+          Logger.error('Erro ao carregar dados iniciais:', error);
         }
       };
 
@@ -319,7 +316,7 @@ export default function AppCommon({ children }) {
           try {
             api.fetchDrivers('app');
           } catch (driverError) {
-            console.warn('Erro ao buscar motoristas:', driverError);
+            Logger.warn('Erro ao buscar motoristas:', driverError);
           }
           initialFunctionsNotCalled.current = false;
         } else if (role === 'driver') {
@@ -327,7 +324,7 @@ export default function AppCommon({ children }) {
             api.fetchTasks();
             api.fetchCars();
           } catch (taskError) {
-            console.warn('Erro ao buscar tarefas/carros:', taskError);
+            Logger.warn('Erro ao buscar tarefas/carros:', taskError);
           }
           initialFunctionsNotCalled.current = false;
         }
@@ -346,13 +343,13 @@ export default function AppCommon({ children }) {
       try {
         api.clearLoginError();
       } catch (clearError) {
-        console.warn('Erro ao limpar erro de login:', clearError);
+        Logger.warn('Erro ao limpar erro de login:', clearError);
       }
     }
     try {
       api.fetchusedreferral();
     } catch (referralError) {
-      console.warn('Erro ao buscar referências usadas:', referralError);
+      Logger.warn('Erro ao buscar referências usadas:', referralError);
     }
   }, [error, error?.flag, languagesData && languagesData.langlist, settings]);
 
@@ -388,21 +385,21 @@ export default function AppCommon({ children }) {
     try {
       await SplashScreen.hideAsync();
     } catch (splashError) {
-      console.warn('Erro ao esconder splash:', splashError);
+      Logger.warn('Erro ao esconder splash:', splashError);
     }
   };
   hideSplash();
 
   // Aguardar apenas a inicialização do Firebase
   if (isLoading || !isFirebaseInitialized) {
-    console.log("AppCommon - Aguardando inicialização:", { 
+    Logger.log("AppCommon - Aguardando inicialização:", { 
       isFirebaseInitialized, 
       isLoading
     });
     return <AuthLoadingScreen />;
   }
 
-  console.log("AppCommon - Renderizando children");
+  Logger.log("AppCommon - Renderizando children");
   return (
     <>
       {children}

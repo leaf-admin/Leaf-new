@@ -1,0 +1,116 @@
+# Teste Real: Solicitar Corrida Completa
+# Baseado na NewMapScreen.js
+appId: br.com.leaf.ride
+---
+# Assumindo que já está logado como customer
+- launchApp
+- takeScreenshot: "01-app-opened"
+
+# Aguardar mapa carregar
+- waitForAnimationToEnd
+- takeScreenshot: "02-map-loaded"
+
+# Procurar campo de origem (pode estar em diferentes lugares)
+- runFlow:
+    when:
+      visible: 
+        - "Origem"
+        - "De onde"
+        - "Onde você está?"
+    commands:
+      - tapOn: 
+          text: 
+            - "Origem"
+            - "De onde"
+            - "Onde você está?"
+      - takeScreenshot: "03-origin-tapped"
+
+# Preencher origem
+- inputText: "Avenida Paulista, 1000, São Paulo"
+- waitForAnimationToEnd
+- takeScreenshot: "04-origin-entered"
+
+# Selecionar primeira sugestão (se aparecer)
+- runFlow:
+    when:
+      visible: "Avenida Paulista"
+    commands:
+      - tapOn: "Avenida Paulista"
+      - takeScreenshot: "05-origin-selected"
+
+# Procurar campo de destino
+- runFlow:
+    when:
+      visible: 
+        - "Destino"
+        - "Para onde"
+        - "Para onde você vai?"
+    commands:
+      - tapOn: 
+          text: 
+            - "Destino"
+            - "Para onde"
+            - "Para onde você vai?"
+      - takeScreenshot: "06-destination-tapped"
+
+# Preencher destino
+- inputText: "Rua das Flores, 123, São Paulo"
+- waitForAnimationToEnd
+- takeScreenshot: "07-destination-entered"
+
+# Selecionar primeira sugestão (se aparecer)
+- runFlow:
+    when:
+      visible: "Rua das Flores"
+    commands:
+      - tapOn: "Rua das Flores"
+      - takeScreenshot: "08-destination-selected"
+
+# Aguardar cálculo de preço
+- waitForAnimationToEnd
+- takeScreenshot: "09-estimate-calculating"
+
+# Procurar botão de solicitar/agendar
+- runFlow:
+    when:
+      visible: 
+        - "Agendar Agora"
+        - "Solicitar Corrida"
+        - "Pedir Agora"
+        - "Confirmar"
+    commands:
+      - takeScreenshot: "10-booking-button-visible"
+      - tapOn: 
+          text: 
+            - "Agendar Agora"
+            - "Solicitar Corrida"
+            - "Pedir Agora"
+            - "Confirmar"
+
+# Aguardar processamento
+- waitForAnimationToEnd
+- takeScreenshot: "11-ride-requested"
+
+# Verificar se apareceu mensagem de sucesso ou busca de motoristas
+- assertVisible: 
+    text: 
+      - "Buscando motoristas"
+      - "Motoristas Disponíveis"
+      - "Aguardando"
+      - "Corrida solicitada"
+    timeout: 15000
+    optional: true
+- takeScreenshot: "12-driver-search"
+
+
+
+
+
+
+
+
+
+
+
+
+

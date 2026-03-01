@@ -5,14 +5,14 @@ import {
     Modal,
     Image
   } from 'react-native';
-import { colors } from '../common-local/theme';
+import { colors } from '../common/theme';
 import i18n from '../i18n';
-import { fonts } from '../common-local/font';
+import { fonts } from '../common/font';
 
 export function LoadingModal(props){
     const { loadingModal } = props;
     const { t } = i18n;
-    const isRTL = i18n.locale.indexOf('he') === 0 || i18n.locale.indexOf('ar') === 0;
+    const isRTL = i18n.locale && (i18n.locale.indexOf('he') === 0 || i18n.locale.indexOf('ar') === 0);
     return (
     <Modal
         animationType="fade"
