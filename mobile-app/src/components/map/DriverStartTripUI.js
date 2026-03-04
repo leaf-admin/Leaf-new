@@ -14,6 +14,9 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { useSelector } from 'react-redux';
 import { fonts } from '../../common-local/font';
+import { useTheme } from '../../common-local/theme';
+import Typography from '../design-system/Typography';
+import AnimatedButton from '../design-system/AnimatedButton';
 import BottomSheet, { BottomSheetView, BottomSheetBackdrop } from '@gorhom/bottom-sheet';
 import WebSocketManager from '../../services/WebSocketManager';
 import TripDataService from '../../services/TripDataService';
@@ -35,23 +38,24 @@ const translations = {
 
 export default function DriverStartTripUI({ booking, onStartTrip }) {
   const t = (key) => translations[key] || key;
+  const theme = useTheme();
   const auth = useSelector(state => state.auth);
   const [isStarting, setIsStarting] = useState(false);
-  
+
   // Estados para chat
   const [messageText, setMessageText] = useState('');
   const [chatMessages, setChatMessages] = useState([]);
   const [unreadMessagesCount, setUnreadMessagesCount] = useState(0);
   const [isChatBottomSheetOpen, setIsChatBottomSheetOpen] = useState(false);
-  
+
   // ✅ Timer de 2 minutos (120 segundos)
   const [boardingTimer, setBoardingTimer] = useState(120); // 2 minutos em segundos
   const [canCancelWithoutPenalty, setCanCancelWithoutPenalty] = useState(false);
-  
+
   // Ref para BottomSheet de chat
   const chatBottomSheetRef = useRef(null);
   const chatSnapPoints = ['45%', '64%'];
-  
+
   // Ref para ScrollView de mensagens
   const messagesScrollViewRef = useRef(null);
 
@@ -80,21 +84,21 @@ export default function DriverStartTripUI({ booking, onStartTrip }) {
     if (!isChatBottomSheetOpen || !booking?.id) {
       return;
     }
-    
+
     let tripRef = null;
     let wsCleanup = null;
-    
+
     const initializeChat = async () => {
       // Carregar mensagens existentes
       await loadChatMessages();
-      
+
       // Setup WebSocket listeners
       wsCleanup = setupWebSocketListeners();
-      
+
       // Listener em tempo real do Firebase
       const database = require('@react-native-firebase/database').default;
       tripRef = database().ref(`trip_data/${booking.id}/chat`);
-      
+
       const handleNewMessage = (snapshot) => {
         if (snapshot.exists()) {
           const newMessage = {
@@ -102,7 +106,7 @@ export default function DriverStartTripUI({ booking, onStartTrip }) {
             ...snapshot.val(),
             isOwn: snapshot.val().senderId === (auth?.profile?.uid || auth?.uid)
           };
-          
+
           setChatMessages(prev => {
             // Verificar se a mensagem já existe
             if (prev.find(m => m.id === newMessage.id)) {
@@ -114,24 +118,24 @@ export default function DriverStartTripUI({ booking, onStartTrip }) {
               return timeA - timeB;
             });
           });
-          
+
           // Incrementar contador de mensagens não lidas se for do passageiro e o chat estiver fechado
           if (!newMessage.isOwn && !isChatBottomSheetOpen) {
             setUnreadMessagesCount(prev => prev + 1);
           }
-          
+
           // Scroll para a última mensagem
           setTimeout(() => {
             messagesScrollViewRef.current?.scrollToEnd({ animated: true });
           }, 100);
         }
       };
-      
+
       tripRef.on('child_added', handleNewMessage);
     };
-    
+
     initializeChat();
-    
+
     return () => {
       // Cleanup
       if (wsCleanup) {
@@ -145,12 +149,12 @@ export default function DriverStartTripUI({ booking, onStartTrip }) {
 
   const loadChatMessages = async () => {
     if (!booking?.id) return;
-    
+
     try {
       // Buscar mensagens do Firebase Realtime Database
       const database = require('@react-native-firebase/database').default;
       const tripRef = database().ref(`trip_data/${booking.id}/chat`);
-      
+
       tripRef.once('value', (snapshot) => {
         if (snapshot.exists()) {
           const messagesData = snapshot.val();
@@ -164,9 +168,9 @@ export default function DriverStartTripUI({ booking, onStartTrip }) {
             const timeB = new Date(b.timestamp || 0).getTime();
             return timeA - timeB;
           });
-          
+
           setChatMessages(messages);
-          
+
           // Scroll para a última mensagem
           setTimeout(() => {
             messagesScrollViewRef.current?.scrollToEnd({ animated: false });
@@ -183,7 +187,7 @@ export default function DriverStartTripUI({ booking, onStartTrip }) {
 
   const setupWebSocketListeners = () => {
     const webSocketManager = WebSocketManager.getInstance();
-    
+
     const handleNewMessage = (data) => {
       if (data.bookingId === booking?.id) {
         const newMessage = {
@@ -194,23 +198,23 @@ export default function DriverStartTripUI({ booking, onStartTrip }) {
           timestamp: data.timestamp || new Date().toISOString(),
           isOwn: data.senderId === auth?.profile?.uid || data.senderId === auth?.uid
         };
-        
+
         setChatMessages(prev => [...prev, newMessage]);
-        
+
         // Incrementar contador de mensagens não lidas se for do passageiro e o chat estiver fechado
         if (!newMessage.isOwn && !isChatBottomSheetOpen) {
           setUnreadMessagesCount(prev => prev + 1);
         }
-        
+
         // Scroll para a última mensagem
         setTimeout(() => {
           messagesScrollViewRef.current?.scrollToEnd({ animated: true });
         }, 100);
       }
     };
-    
+
     webSocketManager.on('newMessage', handleNewMessage);
-    
+
     return () => {
       webSocketManager.off('newMessage', handleNewMessage);
     };
@@ -229,7 +233,7 @@ export default function DriverStartTripUI({ booking, onStartTrip }) {
 
     try {
       const webSocketManager = WebSocketManager.getInstance();
-      
+
       if (!webSocketManager.isConnected()) {
         Alert.alert('Erro', 'Não conectado ao servidor. Tente novamente.');
         return;
@@ -253,10 +257,10 @@ export default function DriverStartTripUI({ booking, onStartTrip }) {
         timestamp: new Date().toISOString(),
         isOwn: true
       };
-      
+
       setChatMessages(prev => [...prev, newMessage]);
       setMessageText('');
-      
+
       // Salvar mensagem no TripDataService
       await TripDataService.addChatMessage(booking.id, {
         senderId: newMessage.senderId,
@@ -264,12 +268,12 @@ export default function DriverStartTripUI({ booking, onStartTrip }) {
         message: newMessage.text,
         timestamp: newMessage.timestamp
       });
-      
+
       // Scroll para a última mensagem
       setTimeout(() => {
         messagesScrollViewRef.current?.scrollToEnd({ animated: true });
       }, 100);
-      
+
     } catch (error) {
       Logger.error('Erro ao enviar mensagem:', error);
       Alert.alert('Erro', 'Não foi possível enviar a mensagem.');
@@ -298,8 +302,8 @@ export default function DriverStartTripUI({ booking, onStartTrip }) {
       t('confirm_start_trip'),
       [
         { text: t('no'), style: 'cancel' },
-        { 
-          text: t('yes'), 
+        {
+          text: t('yes'),
           onPress: () => {
             setIsStarting(true);
             if (onStartTrip) {
@@ -321,14 +325,14 @@ export default function DriverStartTripUI({ booking, onStartTrip }) {
     const cancelMessage = canCancelWithoutPenalty
       ? 'Tem certeza que deseja cancelar esta corrida? Você pode cancelar sem penalização pois o tempo de espera expirou.'
       : 'Tem certeza que deseja cancelar esta corrida?';
-    
+
     Alert.alert(
       'Cancelar Corrida',
       cancelMessage,
       [
         { text: 'Não', style: 'cancel' },
-        { 
-          text: 'Sim, Cancelar', 
+        {
+          text: 'Sim, Cancelar',
           style: 'destructive',
           onPress: async () => {
             try {
@@ -339,7 +343,7 @@ export default function DriverStartTripUI({ booking, onStartTrip }) {
               }
 
               const webSocketManager = WebSocketManager.getInstance();
-              
+
               // Conectar se não estiver conectado
               if (!webSocketManager.isConnected()) {
                 await webSocketManager.connect();
@@ -347,7 +351,7 @@ export default function DriverStartTripUI({ booking, onStartTrip }) {
 
               // Cancelar corrida
               const result = await webSocketManager.cancelRide(bookingId, 'Cancelado pelo motorista');
-              
+
               if (result.success) {
                 Alert.alert(
                   'Corrida Cancelada',
@@ -371,45 +375,43 @@ export default function DriverStartTripUI({ booking, onStartTrip }) {
     <>
       {/* ✅ NOVO: Banner de status de conexão */}
       <NetworkStatusBanner />
-      
-      <View style={styles.container}>
+
+      <View style={[styles.container, { backgroundColor: theme.card }]}>
         {/* ✅ Timer de embarque */}
         <View style={[
           styles.timerContainer,
-          canCancelWithoutPenalty && styles.timerContainerExpired
+          { backgroundColor: theme.card === '#1A1A1A' ? 'rgba(65, 210, 116, 0.1)' : '#F0F9F0', borderColor: theme.leafGreen || '#41D274' },
+          canCancelWithoutPenalty && { backgroundColor: theme.card === '#1A1A1A' ? 'rgba(255, 59, 48, 0.1)' : '#FFF0F0', borderColor: '#FF3B30' }
         ]}>
-          <Ionicons 
-            name={canCancelWithoutPenalty ? "time-outline" : "time"} 
-            size={20} 
-            color={canCancelWithoutPenalty ? "#FF3B30" : LEAF_GREEN} 
+          <Ionicons
+            name={canCancelWithoutPenalty ? "time-outline" : "time"}
+            size={20}
+            color={canCancelWithoutPenalty ? "#FF3B30" : (theme.leafGreen || '#41D274')}
           />
-          <Text style={[
-            styles.timerText,
-            canCancelWithoutPenalty && styles.timerTextExpired
-          ]}>
-            {canCancelWithoutPenalty 
+          <Typography variant="label" weight="bold" color={canCancelWithoutPenalty ? "#FF3B30" : (theme.leafGreen || '#41D274')} style={{ marginLeft: 8 }}>
+            {canCancelWithoutPenalty
               ? 'Tempo de espera expirado - Pode cancelar sem penalização'
               : `Tempo de embarque: ${formatTimer(boardingTimer)}`
             }
-          </Text>
+          </Typography>
         </View>
 
         {/* Texto de confirmação */}
         <View style={styles.confirmationTextContainer}>
-          <Text style={styles.confirmationText}>
+          <Typography variant="caption" align="center" color={theme.textSecondary}>
             {t('confirm_passenger_boarding')}
-          </Text>
+          </Typography>
         </View>
 
         {/* Destino - Centralizado, maior e em negrito */}
         <View style={styles.destinationContainer}>
-          <Text style={styles.destinationLabel}>Destino</Text>
-          <Text style={styles.destinationAddress}>{booking?.drop_address || '--'}</Text>
+          <Typography variant="label" color={theme.textSecondary} style={{ marginBottom: 8 }}>Destino</Typography>
+          <Typography variant="h2" align="center" color={theme.text}>{booking?.drop_address || '--'}</Typography>
         </View>
 
         {/* Valor da corrida */}
-        <View style={styles.fareContainer}>
-          <Text style={styles.fareText}>
+        <View style={[styles.fareContainer, { backgroundColor: theme.card === '#1A1A1A' ? 'rgba(255,255,255,0.02)' : '#F8F9FA' }]}>
+          <Typography variant="h1" color={theme.leafGreen || '#41D274'} weight="bold">
             {(() => {
               const fare = booking?.estimated_fare || booking?.fare;
               if (!fare || fare === '--') return 'R$ --';
@@ -418,49 +420,43 @@ export default function DriverStartTripUI({ booking, onStartTrip }) {
               if (isNaN(fareNumber)) return 'R$ --';
               return `R$ ${fareNumber.toFixed(2).replace('.', ',')}`;
             })()}
-          </Text>
+          </Typography>
         </View>
 
         {/* Botão de mensagem */}
-        <TouchableOpacity 
-          style={styles.messageButton}
+        <TouchableOpacity
+          style={[styles.messageButton, { backgroundColor: theme.card === '#1A1A1A' ? 'rgba(255,255,255,0.05)' : '#F5F5F5', borderColor: theme.border }]}
           onPress={() => {
             setIsChatBottomSheetOpen(true);
             setUnreadMessagesCount(0);
             chatBottomSheetRef.current?.expand();
           }}
         >
-          <Ionicons name="chatbubble-outline" size={20} color={LEAF_GREEN} />
-          <Text style={styles.messageButtonText}>Enviar mensagem</Text>
+          <Ionicons name="chatbubble-outline" size={20} color={theme.leafGreen || '#41D274'} />
+          <Typography variant="body" color={theme.text} style={{ marginLeft: 8 }}>Enviar mensagem</Typography>
           {unreadMessagesCount > 0 && (
             <View style={styles.unreadBadge}>
-              <Text style={styles.unreadBadgeText}>
+              <Typography variant="caption" weight="bold" color="#FFFFFF">
                 {unreadMessagesCount > 9 ? '9+' : unreadMessagesCount}
-              </Text>
+              </Typography>
             </View>
           )}
         </TouchableOpacity>
 
         {/* Botão principal - Iniciar Viagem */}
-        <TouchableOpacity 
-          style={[styles.startTripButton, isStarting && styles.startTripButtonDisabled]} 
+        <AnimatedButton
+          title={t('start_trip')}
           onPress={handleStartTrip}
-          disabled={isStarting}
-        >
-          {isStarting ? (
-            <View style={styles.loadingContainer}>
-              <Ionicons name="hourglass" size={20} color="#FFFFFF" />
-              <Text style={styles.startTripButtonText}>{t('starting_trip')}</Text>
-            </View>
-          ) : (
-            <Text style={styles.startTripButtonText}>{t('start_trip')}</Text>
-          )}
-        </TouchableOpacity>
+          isLoading={isStarting}
+          style={{ marginBottom: 12 }}
+        />
 
         {/* Botão de cancelar */}
-        <TouchableOpacity style={styles.cancelButton} onPress={handleCancelRide}>
-          <Text style={styles.cancelButtonText}>{t('cancel_ride')}</Text>
-        </TouchableOpacity>
+        <AnimatedButton
+          title={t('cancel_ride')}
+          variant="danger-outline"
+          onPress={handleCancelRide}
+        />
       </View>
 
       {/* BottomSheet de Chat */}
@@ -470,6 +466,8 @@ export default function DriverStartTripUI({ booking, onStartTrip }) {
         snapPoints={chatSnapPoints}
         enablePanDownToClose={true}
         backdropComponent={renderChatBackdrop}
+        handleIndicatorStyle={{ backgroundColor: theme.textSecondary }}
+        backgroundStyle={{ backgroundColor: theme.card }}
         onChange={(index) => {
           setIsChatBottomSheetOpen(index >= 0);
           if (index >= 0) {
@@ -478,15 +476,15 @@ export default function DriverStartTripUI({ booking, onStartTrip }) {
         }}
       >
         <BottomSheetView style={styles.chatBottomSheetContent}>
-          <View style={styles.chatHeader}>
-            <Text style={styles.chatHeaderTitle}>Conversa com {booking?.customer_name || 'Passageiro'}</Text>
+          <View style={[styles.chatHeader, { borderBottomColor: theme.border }]}>
+            <Typography variant="h2" color={theme.text}>Conversa com {booking?.customer_name || 'Passageiro'}</Typography>
             <TouchableOpacity
               onPress={() => {
                 chatBottomSheetRef.current?.close();
                 setIsChatBottomSheetOpen(false);
               }}
             >
-              <Ionicons name="close" size={24} color="#333" />
+              <Ionicons name="close" size={24} color={theme.text} />
             </TouchableOpacity>
           </View>
 
@@ -500,9 +498,9 @@ export default function DriverStartTripUI({ booking, onStartTrip }) {
           >
             {chatMessages.length === 0 ? (
               <View style={styles.emptyMessagesContainer}>
-                <Ionicons name="chatbubbles-outline" size={48} color="#CCC" />
-                <Text style={styles.emptyMessagesText}>Nenhuma mensagem ainda</Text>
-                <Text style={styles.emptyMessagesSubtext}>Envie uma mensagem para o passageiro</Text>
+                <Ionicons name="chatbubbles-outline" size={48} color={theme.textSecondary} />
+                <Typography variant="h2" color={theme.textSecondary} style={{ marginTop: 16 }}>Nenhuma mensagem ainda</Typography>
+                <Typography variant="body" color={theme.textSecondary} style={{ marginTop: 8 }}>Envie uma mensagem para o passageiro</Typography>
               </View>
             ) : (
               chatMessages.map((message) => (
@@ -510,24 +508,18 @@ export default function DriverStartTripUI({ booking, onStartTrip }) {
                   key={message.id}
                   style={[
                     styles.messageBubble,
-                    message.isOwn ? styles.messageBubbleOwn : styles.messageBubbleOther
+                    message.isOwn ? { backgroundColor: theme.leafGreen || '#41D274', alignSelf: 'flex-end', borderBottomRightRadius: 4 } : { backgroundColor: theme.card === '#1A1A1A' ? 'rgba(255,255,255,0.05)' : '#F0F0F0', alignSelf: 'flex-start', borderBottomLeftRadius: 4 }
                   ]}
                 >
-                  <Text style={[
-                    styles.messageText,
-                    message.isOwn ? styles.messageTextOwn : styles.messageTextOther
-                  ]}>
+                  <Typography variant="body" color={message.isOwn ? '#FFFFFF' : theme.text}>
                     {message.text}
-                  </Text>
-                  <Text style={[
-                    styles.messageTime,
-                    message.isOwn ? styles.messageTimeOwn : styles.messageTimeOther
-                  ]}>
+                  </Typography>
+                  <Typography variant="caption" color={message.isOwn ? 'rgba(255, 255, 255, 0.7)' : theme.textSecondary} style={{ marginTop: 4 }}>
                     {new Date(message.timestamp).toLocaleTimeString('pt-BR', {
                       hour: '2-digit',
                       minute: '2-digit'
                     })}
-                  </Text>
+                  </Typography>
                 </View>
               ))
             )}
@@ -535,13 +527,13 @@ export default function DriverStartTripUI({ booking, onStartTrip }) {
 
           <KeyboardAvoidingView
             behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-            style={styles.chatInputContainer}
+            style={[styles.chatInputContainer, { borderTopColor: theme.border }]}
           >
-            <View style={styles.chatInputWrapper}>
+            <View style={[styles.chatInputWrapper, { backgroundColor: theme.card === '#1A1A1A' ? 'rgba(255,255,255,0.05)' : '#F5F5F5' }]}>
               <TextInput
-                style={styles.chatInput}
+                style={[styles.chatInput, { color: theme.text }]}
                 placeholder="Digite sua mensagem..."
-                placeholderTextColor="#999"
+                placeholderTextColor={theme.textSecondary}
                 value={messageText}
                 onChangeText={setMessageText}
                 multiline
@@ -550,7 +542,8 @@ export default function DriverStartTripUI({ booking, onStartTrip }) {
               <TouchableOpacity
                 style={[
                   styles.sendButton,
-                  !messageText.trim() && styles.sendButtonDisabled
+                  { backgroundColor: theme.leafGreen || '#41D274' },
+                  !messageText.trim() && { backgroundColor: theme.card === '#1A1A1A' ? 'rgba(255,255,255,0.1)' : '#E0E0E0' }
                 ]}
                 onPress={handleSendMessage}
                 disabled={!messageText.trim()}

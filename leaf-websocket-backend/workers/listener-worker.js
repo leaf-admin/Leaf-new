@@ -81,6 +81,13 @@ workerManager.registerListener(EVENT_TYPES.RIDE_STARTED, async (event) => {
     await startTripTimer(event, io);
 });
 
+workerManager.registerListener(EVENT_TYPES.RIDE_CANCELED, async (event) => {
+    const { bookingId } = event.data;
+    const GradualRadiusExpander = require('../services/gradual-radius-expander');
+    const expander = new GradualRadiusExpander(io);
+    await expander.stopSearch(bookingId);
+});
+
 // Tratamento de sinais para shutdown graceful
 process.on('SIGTERM', async () => {
     logStructured('info', 'SIGTERM recebido, parando worker', {

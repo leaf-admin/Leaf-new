@@ -86,7 +86,7 @@ const PrivacyPolicyScreen = ({ navigation, route }) => {
       Alert.alert(
         'Compartilhamento de Localização',
         newValue 
-          ? 'Permitir que o Leaf acesse sua localização para encontrar motoristas próximos?'
+          ? 'Permitir que a Leaf acesse sua localização para encontrar motoristas próximos?'
           : 'Desativar o compartilhamento de localização pode afetar a funcionalidade do app.',
         [
           { text: 'Cancelar', style: 'cancel' },
@@ -150,7 +150,7 @@ const PrivacyPolicyScreen = ({ navigation, route }) => {
       
       <View style={styles.policyCard}>
         <Text style={styles.policyText}>
-          O Leaf respeita sua privacidade e está comprometido em proteger seus dados pessoais. 
+          A Leaf respeita sua privacidade e está comprometido em proteger seus dados pessoais. 
           Esta política descreve como coletamos, usamos e protegemos suas informações.
         </Text>
       </View>

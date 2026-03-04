@@ -1,6 +1,7 @@
 import Logger from '../utils/Logger';
 import io from 'socket.io-client';
 import { getWebSocketURL } from '../config/NetworkConfig';
+import auth from '@react-native-firebase/auth';
 
 
 // ✅ CORREÇÃO: Calcular URL dinamicamente para evitar problemas em builds de release
@@ -11,17 +12,17 @@ class SimpleEventEmitter {
     constructor() {
         this.events = new Map();
     }
-    
+
     on(event, callback) {
         if (!this.events.has(event)) {
             this.events.set(event, []);
         }
         this.events.get(event).push(callback);
     }
-    
+
     off(event, callback) {
         if (!this.events.has(event)) return;
-        
+
         if (callback) {
             const listeners = this.events.get(event);
             const index = listeners.indexOf(callback);
@@ -35,10 +36,10 @@ class SimpleEventEmitter {
             this.events.delete(event);
         }
     }
-    
+
     emit(event, ...args) {
         if (!this.events.has(event)) return;
-        
+
         const listeners = [...this.events.get(event)]; // Cópia para evitar problemas
         listeners.forEach(callback => {
             try {
@@ -48,7 +49,7 @@ class SimpleEventEmitter {
             }
         });
     }
-    
+
     removeAllListeners(event) {
         if (event) {
             this.events.delete(event);
@@ -73,12 +74,13 @@ class WebSocketManager {
             this.isAuthenticated = false; // ✅ Rastrear estado de autenticação
             this.authenticatedUserId = null; // ✅ ID do usuário autenticado
             this.authenticatedUserType = null; // ✅ Tipo do usuário autenticado
+            this.authCredentials = null; // ✅ Armazenar credenciais para auto-reautenticação
             this.isAuthenticating = false; // ✅ Flag para evitar autenticação duplicada
-            
+
             // ✅ FASE 2: EventEmitter interno - única fonte de distribuição de eventos
             this.eventEmitter = new SimpleEventEmitter();
             this.socketListeners = new Set(); // Rastrear quais eventos do servidor estão sendo capturados
-            
+
             // Configurações de retry
             this.retryConfig = {
                 maxAttempts: 5,           // Máximo de tentativas (infinito se < 0)
@@ -86,7 +88,7 @@ class WebSocketManager {
                 maxDelay: 30000,         // Delay máximo: 30s
                 multiplier: 1.5          // Multiplicador exponencial
             };
-            
+
             WebSocketManager.instance = this;
         }
         return WebSocketManager.instance;
@@ -104,7 +106,7 @@ class WebSocketManager {
             Logger.log('✅ [WebSocketManager] Já conectado, ignorando nova conexão');
             return;
         }
-        
+
         if (this.isConnecting) {
             Logger.log('⏳ [WebSocketManager] Conexão já em andamento, aguardando...');
             return;
@@ -113,11 +115,11 @@ class WebSocketManager {
         try {
             this.isConnecting = true;
             this.connectionAttempts = 0;
-            
+
             // ✅ CORREÇÃO: Calcular URL dinamicamente para garantir que está correta
             const WEBSOCKET_URL = getWebSocketURL();
             Logger.log('🔌 [WebSocketManager] Conectando ao WebSocket:', WEBSOCKET_URL);
-            
+
             // ✅ Se já existe um socket, desconectar primeiro
             if (this.socket) {
                 Logger.log('🔌 [WebSocketManager] Desconectando socket anterior...');
@@ -129,14 +131,27 @@ class WebSocketManager {
             // ✅ CORREÇÃO: Tentar websocket primeiro, polling como fallback
             // Polling pode ter problemas em React Native, websocket é mais confiável
             const transports = ['websocket', 'polling'];
-            
+
             Logger.log('🔌 [WebSocketManager] Configuração de transporte:', {
                 transports,
                 url: WEBSOCKET_URL,
                 isDev: __DEV__
             });
-            
+
+            // ✅ Buscar token do Firebase para autenticação segura
+            let userToken = null;
+            try {
+                const currentUser = auth().currentUser;
+                if (currentUser) {
+                    userToken = await currentUser.getIdToken();
+                }
+            } catch (tokenError) {
+                Logger.warn('⚠️ [WebSocketManager] Erro ao obter token do Firebase:', tokenError);
+            }
+
             this.socket = io(WEBSOCKET_URL, {
+                // ✅ Passar token JWT na conexão (handshake)
+                auth: { token: userToken },
                 // ✅ Ignorar verificação de certificado SSL para IP direto (se usar HTTPS)
                 rejectUnauthorized: false,
                 // ✅ Permitir certificados auto-assinados
@@ -162,7 +177,7 @@ class WebSocketManager {
             });
 
             this.setupListeners();
-            
+
         } catch (error) {
             Logger.error('❌ [WebSocketManager] Erro ao inicializar WebSocket:', error.message);
             Logger.error('❌ [WebSocketManager] Stack:', error.stack);
@@ -177,10 +192,10 @@ class WebSocketManager {
         // ✅ FASE 2: Registrar eventos do servidor APENAS UMA VEZ
         // Lista de eventos que o servidor pode enviar
         const serverEvents = [
-            'rideRequest', 
+            'rideRequest',
             'newBookingAvailable',
             'newRideRequest', // ✅ Evento do DriverNotificationDispatcher 
-            'rideAccepted', 
+            'rideAccepted',
             'rideRejected',
             'tripStarted',
             'tripCompleted',
@@ -190,7 +205,7 @@ class WebSocketManager {
             'driverStatusChanged',
             'locationUpdated'
         ];
-        
+
         // ✅ Registrar listener para evento 'authenticated' do servidor
         if (!this.socketListeners.has('authenticated')) {
             this.socket.on('authenticated', (data) => {
@@ -211,7 +226,7 @@ class WebSocketManager {
             });
             this.socketListeners.add('authenticated');
         }
-        
+
         // ✅ FASE 2: Registrar cada evento do servidor apenas uma vez
         serverEvents.forEach(eventName => {
             if (!this.socketListeners.has(eventName)) {
@@ -236,12 +251,19 @@ class WebSocketManager {
             Logger.log('📡 [WebSocketManager] Socket ID:', this.socket.id);
             this.isConnecting = false;
             this.connectionAttempts = 0;
-            // Resetar autenticação ao reconectar
-            this.isAuthenticated = false;
-            this.authenticatedUserId = null;
-            this.authenticatedUserType = null;
+
+            // ✅ AUTO-REAUTENTICAÇÃO: Se já tínhamos credenciais, re-autenticar automaticamente
+            if (this.authCredentials) {
+                Logger.log('🔐 [WebSocketManager] Reconectado. Iniciando auto-reautenticação...');
+                this.authenticate(this.authCredentials.userId, this.authCredentials.userType);
+            } else {
+                // Se não temos credenciais salvas, resetar estado
+                this.isAuthenticated = false;
+                this.authenticatedUserId = null;
+                this.authenticatedUserType = null;
+            }
             this.isAuthenticating = false;
-            
+
             // ✅ FASE 2: Emitir evento de conexão através do EventEmitter
             this.eventEmitter.emit('connect');
         });
@@ -250,12 +272,10 @@ class WebSocketManager {
             Logger.log(`🔌 [WebSocketManager] Desconectado do servidor WebSocket: ${reason}`);
             Logger.log(`🔌 [WebSocketManager] Motivo da desconexão:`, reason);
             this.isConnecting = false;
-            // Resetar autenticação ao desconectar
+            // Resetar estado de autenticação (mas MANTER authCredentials para reconexão)
             this.isAuthenticated = false;
-            this.authenticatedUserId = null;
-            this.authenticatedUserType = null;
             this.isAuthenticating = false;
-            
+
             // ✅ FASE 2: Emitir através do EventEmitter
             this.eventEmitter.emit('disconnect', reason);
         });
@@ -265,17 +285,17 @@ class WebSocketManager {
             Logger.error('❌ [WebSocketManager] Erro de conexão WebSocket:', errorMessage);
             Logger.error('❌ [WebSocketManager] Tipo de erro:', error.type || 'N/A');
             Logger.error('❌ [WebSocketManager] Descrição:', error.description || 'N/A');
-            
+
             this.isConnecting = false;
             this.connectionAttempts++;
-            
+
             // ✅ Emitir erro através do EventEmitter
             this.eventEmitter.emit('connect_error', error);
-            
+
             // ✅ Se for timeout, tentar reconectar automaticamente
             if (errorMessage.includes('timeout') || error.type === 'TransportError') {
                 Logger.log(`🔄 [WebSocketManager] Timeout detectado. Tentativa ${this.connectionAttempts}/${this.maxConnectionAttempts}`);
-                
+
                 if (this.connectionAttempts < this.maxConnectionAttempts) {
                     const delay = Math.min(3000 * this.connectionAttempts, 10000); // Delay exponencial até 10s
                     Logger.log(`⏳ [WebSocketManager] Tentando reconectar em ${delay}ms...`);
@@ -327,7 +347,7 @@ class WebSocketManager {
             Logger.warn(`⚠️ WebSocket não conectado. Evento '${event}' não enviado.`);
         }
     }
-    
+
     // ✅ FASE 2: Método on() simplificado - usa apenas EventEmitter interno
     // NUNCA mais acessa socket.io diretamente - elimina completamente race conditions
     on(event, callback) {
@@ -336,22 +356,22 @@ class WebSocketManager {
             Logger.error('⚠️ WebSocketManager.on() requer event como string');
             return;
         }
-        
+
         if (typeof callback !== 'function') {
             Logger.error('⚠️ WebSocketManager.on() requer callback como function');
             return;
         }
-        
+
         // ✅ FASE 2: Inicializar EventEmitter se necessário
         if (!this.eventEmitter) {
             this.eventEmitter = new SimpleEventEmitter();
         }
-        
+
         // ✅ FASE 2: Registrar APENAS no EventEmitter interno
         // NUNCA mais registra diretamente no socket.io!
         this.eventEmitter.on(event, callback);
         // Logger.log(`📡 Listener registrado via EventEmitter: ${event}`); // Desabilitado para reduzir spam
-        
+
         // ✅ FASE 2: Garantir que o evento do servidor está sendo capturado
         // Se o socket já existe, garantir que o listener do servidor está ativo
         if (this.socket && !this.socketListeners.has(event)) {
@@ -359,17 +379,17 @@ class WebSocketManager {
             this._registerServerEventListener(event);
         }
     }
-    
+
     // ✅ FASE 2: Método privado para registrar listener do servidor
     _registerServerEventListener(eventName) {
         if (!this.socket || !this.socket.connected) {
             return; // Será registrado quando conectar
         }
-        
+
         if (this.socketListeners.has(eventName)) {
             return; // Já registrado
         }
-        
+
         try {
             this.socket.on(eventName, (data) => {
                 this.eventEmitter.emit(eventName, data);
@@ -388,21 +408,21 @@ class WebSocketManager {
             Logger.warn('⚠️ WebSocketManager.off() requer event como string');
             return;
         }
-        
+
         // ✅ FASE 2: Inicializar EventEmitter se necessário
         if (!this.eventEmitter) {
             this.eventEmitter = new SimpleEventEmitter();
             return;
         }
-        
+
         // ✅ FASE 2: Remover APENAS do EventEmitter interno
         // NUNCA mais remove do socket.io diretamente - não é necessário!
         this.eventEmitter.off(event, callback);
-        
+
         // Nota: Não removemos do socketListeners porque outros componentes podem estar usando
         // O listener do servidor permanece ativo e distribui para todos via EventEmitter
     }
-    
+
     // ✅ FASE 2: Método emit() - usar EventEmitter interno
     emit(event, ...args) {
         // ✅ FASE 2: Guard - Validar parâmetros
@@ -410,13 +430,13 @@ class WebSocketManager {
             Logger.warn('⚠️ WebSocketManager.emit() requer event como string');
             return;
         }
-        
+
         // ✅ FASE 2: Inicializar EventEmitter se necessário
         if (!this.eventEmitter) {
             this.eventEmitter = new SimpleEventEmitter();
             return;
         }
-        
+
         // ✅ FASE 2: Emitir através do EventEmitter interno
         this.eventEmitter.emit(event, ...args);
     }
@@ -425,7 +445,7 @@ class WebSocketManager {
     isConnected() {
         return this.socket?.connected || false;
     }
-    
+
     // Obter status completo da conexão
     getConnectionStatus() {
         return {
@@ -437,13 +457,13 @@ class WebSocketManager {
             isConnecting: this.isConnecting
         };
     }
-    
+
     // Verificar se pode receber solicitações de corrida
     canReceiveRideRequests() {
         const isConnected = this.isConnected();
         const isAuthenticated = this.isAuthenticated;
         const userType = this.authenticatedUserType;
-        
+
         // Log para debug (apenas quando houver problema)
         if (isConnected && isAuthenticated && userType !== 'driver') {
             Logger.log('⚠️ [canReceiveRideRequests] Status:', {
@@ -453,7 +473,7 @@ class WebSocketManager {
                 userId: this.authenticatedUserId
             });
         }
-        
+
         // Para drivers: precisa estar conectado, autenticado e ser do tipo 'driver'
         // Se userType não estiver definido mas estiver autenticado, assumir que é driver
         // (caso o servidor não retorne userType no evento authenticated)
@@ -463,51 +483,53 @@ class WebSocketManager {
         // Para outros tipos de usuário, retorna false
         return false;
     }
-    
+
     // Expor socket para autenticação
     getSocket() {
         return this.socket;
     }
-    
+
     // Método para autenticar usuário
     authenticate(userId, userType) {
         if (!this.socket?.connected) {
             Logger.warn('⚠️ [WebSocketManager] WebSocket não conectado. Não é possível autenticar.');
             return;
         }
-        
+
         // ✅ Evitar autenticação duplicada se já está autenticado com os mesmos dados
-        if (this.isAuthenticated && 
-            this.authenticatedUserId === userId && 
+        if (this.isAuthenticated &&
+            this.authenticatedUserId === userId &&
             this.authenticatedUserType === userType) {
             Logger.log('✅ [WebSocketManager] Já autenticado com esses dados, ignorando');
             return;
         }
-        
+
         // ✅ Evitar múltiplas tentativas simultâneas
         if (this.isAuthenticating) {
             Logger.log('⚠️ [WebSocketManager] Autenticação já em andamento, ignorando chamada duplicada');
             return;
         }
-        
+
         this.isAuthenticating = true;
         Logger.log(`🔐 [WebSocketManager] Autenticando usuário: ${userId} como ${userType}`);
-        
-        // ✅ Definir userType localmente ANTES de enviar ao servidor
-        // Isso garante que mesmo se o servidor não retornar, já temos o valor
+
+        // ✅ Salvar credenciais para auto-reautenticação em caso de queda
+        this.authCredentials = { userId, userType };
+
+        // ✅ Definir dados locais
         this.authenticatedUserType = userType;
         this.authenticatedUserId = userId;
-        
+
         this.socket.emit('authenticate', {
             uid: userId,
             userType: userType
         });
-        
+
         // Resetar flag após 3 segundos (tempo suficiente para resposta)
         setTimeout(() => {
             this.isAuthenticating = false;
         }, 3000);
-        
+
         // O listener 'authenticated' já está registrado em setupListeners()
         // e atualizará automaticamente isAuthenticated quando o servidor confirmar
     }
@@ -523,13 +545,13 @@ class WebSocketManager {
                 estimatedFare: bookingData.estimatedFare
             }
         });
-        
+
         if (!this.socket?.connected) {
             const error = new Error('WebSocket não conectado');
             Logger.error('❌ [WebSocketManager] Erro ao criar booking:', error.message);
             throw error;
         }
-        
+
         return new Promise((resolve, reject) => {
             const timeout = setTimeout(() => {
                 Logger.error('❌ [WebSocketManager] Timeout ao criar booking (15s)');
@@ -538,7 +560,7 @@ class WebSocketManager {
 
             Logger.log('📤 [WebSocketManager] Emitindo evento createBooking...');
             this.socket.emit('createBooking', bookingData);
-            
+
             this.socket.once('bookingCreated', (data) => {
                 Logger.log('✅ [WebSocketManager] Resposta bookingCreated recebida:', data);
                 clearTimeout(timeout);
@@ -550,7 +572,7 @@ class WebSocketManager {
                     reject(error);
                 }
             });
-            
+
             // ✅ Adicionar listener para erros do servidor
             this.socket.once('bookingError', (error) => {
                 Logger.error('❌ [WebSocketManager] Erro do servidor:', error);
@@ -564,7 +586,7 @@ class WebSocketManager {
         if (!this.socket?.connected) {
             throw new Error('WebSocket não conectado');
         }
-        
+
         return new Promise((resolve, reject) => {
             const timeout = setTimeout(() => {
                 reject(new Error('Driver response timeout'));
@@ -578,7 +600,7 @@ class WebSocketManager {
                     this.socket.off('acceptRideError', errorHandler);
                     reject(new Error(error.error || error.message || 'Driver response failed'));
                 };
-                
+
                 // ✅ Listener para sucesso
                 const successHandler = (data) => {
                     clearTimeout(timeout);
@@ -590,7 +612,7 @@ class WebSocketManager {
                         reject(new Error(data.error || 'Driver response failed'));
                     }
                 };
-                
+
                 // Configurar listeners ANTES de emitir
                 this.socket.on('rideAccepted', successHandler);
                 this.socket.on('acceptRideError', errorHandler); // ✅ NOVO
@@ -602,7 +624,7 @@ class WebSocketManager {
                     this.socket.off('rejectRideError', errorHandler);
                     reject(new Error(error.error || error.message || 'Driver response failed'));
                 };
-                
+
                 // ✅ Listener para sucesso
                 const successHandler = (data) => {
                     clearTimeout(timeout);
@@ -614,12 +636,12 @@ class WebSocketManager {
                         reject(new Error(data.error || 'Driver response failed'));
                     }
                 };
-                
+
                 // Configurar listeners ANTES de emitir
                 this.socket.on('rideRejected', successHandler);
                 this.socket.on('rejectRideError', errorHandler); // ✅ NOVO
             }
-            
+
             // Emitir após configurar listeners
             this.socket.emit('driverResponse', { bookingId, accepted, reason });
         });
@@ -630,12 +652,12 @@ class WebSocketManager {
         if (!this.socket?.connected) {
             throw new Error('WebSocket não conectado');
         }
-        
+
         return new Promise((resolve, reject) => {
             const timeout = setTimeout(() => {
                 reject(new Error('Accept ride timeout'));
             }, 15000);
-            
+
             // ✅ NOVO: Listener para erro (se validação falhar no servidor)
             const errorHandler = (error) => {
                 clearTimeout(timeout);
@@ -643,7 +665,7 @@ class WebSocketManager {
                 this.socket.off('acceptRideError', errorHandler);
                 reject(new Error(error.error || error.message || 'Accept ride failed'));
             };
-            
+
             // ✅ Listener para sucesso
             const successHandler = (data) => {
                 clearTimeout(timeout);
@@ -655,11 +677,11 @@ class WebSocketManager {
                     reject(new Error(data.error || 'Accept ride failed'));
                 }
             };
-            
+
             // Configurar listeners ANTES de emitir (evita race condition)
             this.socket.on('rideAccepted', successHandler);
             this.socket.on('acceptRideError', errorHandler); // ✅ NOVO
-            
+
             // Emitir após configurar listeners
             this.socket.emit('acceptRide', { rideId, ...driverData });
         });
@@ -670,12 +692,12 @@ class WebSocketManager {
         if (!this.socket?.connected) {
             throw new Error('WebSocket não conectado');
         }
-        
+
         return new Promise((resolve, reject) => {
             const timeout = setTimeout(() => {
                 reject(new Error('Reject ride timeout'));
             }, 10000);
-            
+
             // ✅ NOVO: Listener para erro (se validação falhar no servidor)
             const errorHandler = (error) => {
                 clearTimeout(timeout);
@@ -683,7 +705,7 @@ class WebSocketManager {
                 this.socket.off('rejectRideError', errorHandler);
                 reject(new Error(error.error || error.message || 'Reject ride failed'));
             };
-            
+
             // ✅ Listener para sucesso
             const successHandler = (data) => {
                 clearTimeout(timeout);
@@ -695,11 +717,11 @@ class WebSocketManager {
                     reject(new Error(data.error || 'Reject ride failed'));
                 }
             };
-            
+
             // Configurar listeners ANTES de emitir (evita race condition)
             this.socket.on('rideRejected', successHandler);
             this.socket.on('rejectRideError', errorHandler); // ✅ NOVO
-            
+
             // Emitir após configurar listeners
             this.socket.emit('rejectRide', { rideId, reason });
         });
@@ -710,12 +732,12 @@ class WebSocketManager {
         if (!this.socket?.connected) {
             throw new Error('WebSocket não conectado');
         }
-        
+
         return new Promise((resolve, reject) => {
             const timeout = setTimeout(() => {
                 reject(new Error('Arrive at pickup timeout'));
             }, 10000);
-            
+
             this.socket.emit('arriveAtPickup', { rideId, location });
             this.socket.once('arrivedAtPickup', (data) => {
                 clearTimeout(timeout);
@@ -732,14 +754,14 @@ class WebSocketManager {
         if (!this.socket?.connected) {
             throw new Error('WebSocket não conectado');
         }
-        
+
         return new Promise((resolve, reject) => {
             const timeout = setTimeout(() => {
                 reject(new Error('Start trip timeout'));
             }, 10000);
 
             this.socket.emit('startTrip', { bookingId, startLocation });
-            
+
             this.socket.once('tripStarted', (data) => {
                 clearTimeout(timeout);
                 if (data.success) {
@@ -756,13 +778,13 @@ class WebSocketManager {
         if (!this.socket?.connected) {
             throw new Error('WebSocket não conectado');
         }
-        
-        this.socket.emit('updateTripLocation', { 
-            bookingId, 
-            lat, 
-            lng, 
-            heading, 
-            speed 
+
+        this.socket.emit('updateTripLocation', {
+            bookingId,
+            lat,
+            lng,
+            heading,
+            speed
         });
     }
 
@@ -770,19 +792,19 @@ class WebSocketManager {
         if (!this.socket?.connected) {
             throw new Error('WebSocket não conectado');
         }
-        
+
         return new Promise((resolve, reject) => {
             const timeout = setTimeout(() => {
                 reject(new Error('Complete trip timeout'));
             }, 10000);
 
-            this.socket.emit('completeTrip', { 
-                bookingId, 
-                endLocation, 
-                distance, 
-                fare 
+            this.socket.emit('completeTrip', {
+                bookingId,
+                endLocation,
+                distance,
+                fare
             });
-            
+
             this.socket.once('tripCompleted', (data) => {
                 clearTimeout(timeout);
                 if (data.success) {
@@ -798,19 +820,19 @@ class WebSocketManager {
         if (!this.socket?.connected) {
             throw new Error('WebSocket não conectado');
         }
-        
+
         return new Promise((resolve, reject) => {
             const timeout = setTimeout(() => {
                 reject(new Error('Confirm payment timeout'));
             }, 10000);
 
-            this.socket.emit('confirmPayment', { 
-                bookingId, 
-                paymentMethod, 
-                paymentId, 
-                amount 
+            this.socket.emit('confirmPayment', {
+                bookingId,
+                paymentMethod,
+                paymentId,
+                amount
             });
-            
+
             this.socket.once('paymentConfirmed', (data) => {
                 clearTimeout(timeout);
                 if (data.success) {
@@ -827,12 +849,12 @@ class WebSocketManager {
         if (!this.socket?.connected) {
             throw new Error('WebSocket não conectado');
         }
-        
+
         return new Promise((resolve, reject) => {
             const timeout = setTimeout(() => {
                 reject(new Error('Submit rating timeout'));
             }, 15000);
-            
+
             this.socket.emit('submitRating', ratingData);
             this.socket.once('ratingSubmitted', (data) => {
                 clearTimeout(timeout);
@@ -850,12 +872,12 @@ class WebSocketManager {
         if (!this.socket?.connected) {
             throw new Error('WebSocket não conectado');
         }
-        
+
         return new Promise((resolve, reject) => {
             const timeout = setTimeout(() => {
                 reject(new Error('Get trip ratings timeout'));
             }, 10000);
-            
+
             this.socket.emit('getTripRatings', { tripId });
             this.socket.once('tripRatings', (data) => {
                 clearTimeout(timeout);
@@ -873,12 +895,12 @@ class WebSocketManager {
         if (!this.socket?.connected) {
             throw new Error('WebSocket não conectado');
         }
-        
+
         return new Promise((resolve, reject) => {
             const timeout = setTimeout(() => {
                 reject(new Error('Get user ratings timeout'));
             }, 10000);
-            
+
             this.socket.emit('getUserRatings', { targetUserId, userType });
             this.socket.once('userRatings', (data) => {
                 clearTimeout(timeout);
@@ -896,12 +918,12 @@ class WebSocketManager {
         if (!this.socket?.connected) {
             throw new Error('WebSocket não conectado');
         }
-        
+
         return new Promise((resolve, reject) => {
             const timeout = setTimeout(() => {
                 reject(new Error('Has user rated trip timeout'));
             }, 10000);
-            
+
             this.socket.emit('hasUserRatedTrip', { tripId, userType });
             this.socket.once('userRatedTrip', (data) => {
                 clearTimeout(timeout);
@@ -921,12 +943,12 @@ class WebSocketManager {
         if (!this.socket?.connected) {
             throw new Error('WebSocket não conectado');
         }
-        
+
         return new Promise((resolve, reject) => {
             const timeout = setTimeout(() => {
                 reject(new Error('Create chat timeout'));
             }, 10000);
-            
+
             this.socket.emit('create_chat', chatData);
             this.socket.once('chat_created', (data) => {
                 clearTimeout(timeout);
@@ -944,12 +966,12 @@ class WebSocketManager {
         if (!this.socket?.connected) {
             throw new Error('WebSocket não conectado');
         }
-        
+
         return new Promise((resolve, reject) => {
             const timeout = setTimeout(() => {
                 reject(new Error('Send message timeout'));
             }, 10000);
-            
+
             this.socket.emit('send_message', messageData);
             this.socket.once('message_sent', (data) => {
                 clearTimeout(timeout);
@@ -967,12 +989,12 @@ class WebSocketManager {
         if (!this.socket?.connected) {
             throw new Error('WebSocket não conectado');
         }
-        
+
         return new Promise((resolve, reject) => {
             const timeout = setTimeout(() => {
                 reject(new Error('Load messages timeout'));
             }, 10000);
-            
+
             this.socket.emit('load_messages', { chatId, page, limit });
             this.socket.once('messages_loaded', (data) => {
                 clearTimeout(timeout);
@@ -990,12 +1012,12 @@ class WebSocketManager {
         if (!this.socket?.connected) {
             throw new Error('WebSocket não conectado');
         }
-        
+
         return new Promise((resolve, reject) => {
             const timeout = setTimeout(() => {
                 reject(new Error('Mark messages read timeout'));
             }, 10000);
-            
+
             this.socket.emit('mark_messages_read', { chatId, messageIds });
             this.socket.once('messages_marked_read', (data) => {
                 clearTimeout(timeout);
@@ -1026,12 +1048,12 @@ class WebSocketManager {
         if (!this.socket?.connected) {
             throw new Error('WebSocket não conectado');
         }
-        
+
         return new Promise((resolve, reject) => {
             const timeout = setTimeout(() => {
                 reject(new Error('Get user chats timeout'));
             }, 10000);
-            
+
             this.socket.emit('get_user_chats', { limit });
             this.socket.once('user_chats_loaded', (data) => {
                 clearTimeout(timeout);
@@ -1051,12 +1073,12 @@ class WebSocketManager {
         if (!this.socket?.connected) {
             throw new Error('WebSocket não conectado');
         }
-        
+
         return new Promise((resolve, reject) => {
             const timeout = setTimeout(() => {
                 reject(new Error('Get promos timeout'));
             }, 10000);
-            
+
             this.socket.emit('get_promos', { filters, page, limit });
             this.socket.once('promos_loaded', (data) => {
                 clearTimeout(timeout);
@@ -1074,12 +1096,12 @@ class WebSocketManager {
         if (!this.socket?.connected) {
             throw new Error('WebSocket não conectado');
         }
-        
+
         return new Promise((resolve, reject) => {
             const timeout = setTimeout(() => {
                 reject(new Error('Get user promos timeout'));
             }, 10000);
-            
+
             this.socket.emit('get_user_promos', { filters });
             this.socket.once('user_promos_loaded', (data) => {
                 clearTimeout(timeout);
@@ -1097,12 +1119,12 @@ class WebSocketManager {
         if (!this.socket?.connected) {
             throw new Error('WebSocket não conectado');
         }
-        
+
         return new Promise((resolve, reject) => {
             const timeout = setTimeout(() => {
                 reject(new Error('Validate promo code timeout'));
             }, 10000);
-            
+
             this.socket.emit('validate_promo_code', { code, orderValue });
             this.socket.once('promo_code_validated', (data) => {
                 clearTimeout(timeout);
@@ -1120,12 +1142,12 @@ class WebSocketManager {
         if (!this.socket?.connected) {
             throw new Error('WebSocket não conectado');
         }
-        
+
         return new Promise((resolve, reject) => {
             const timeout = setTimeout(() => {
                 reject(new Error('Apply promo timeout'));
             }, 10000);
-            
+
             this.socket.emit('apply_promo', { promoId, orderData });
             this.socket.once('promo_applied', (data) => {
                 clearTimeout(timeout);
@@ -1143,12 +1165,12 @@ class WebSocketManager {
         if (!this.socket?.connected) {
             throw new Error('WebSocket não conectado');
         }
-        
+
         return new Promise((resolve, reject) => {
             const timeout = setTimeout(() => {
                 reject(new Error('Get promo by code timeout'));
             }, 10000);
-            
+
             this.socket.emit('get_promo_by_code', { code });
             this.socket.once('promo_by_code_loaded', (data) => {
                 clearTimeout(timeout);
@@ -1162,18 +1184,18 @@ class WebSocketManager {
     }
 
     // ==================== NOVOS MÉTODOS - GERENCIAMENTO DE STATUS DO DRIVER ====================
-    
+
     // Definir status do driver
     async setDriverStatus(driverId, status, isOnline = true) {
         if (!this.socket?.connected) {
             throw new Error('WebSocket não conectado');
         }
-        
+
         return new Promise((resolve, reject) => {
             const timeout = setTimeout(() => {
                 reject(new Error('Set driver status timeout'));
             }, 10000);
-            
+
             this.socket.emit('setDriverStatus', { driverId, status, isOnline });
             this.socket.once('driverStatusUpdated', (data) => {
                 clearTimeout(timeout);
@@ -1185,18 +1207,18 @@ class WebSocketManager {
             });
         });
     }
-    
+
     // Atualizar localização do driver
     async updateDriverLocation(driverId, lat, lng, heading = 0, speed = 0) {
         if (!this.socket?.connected) {
             throw new Error('WebSocket não conectado');
         }
-        
+
         return new Promise((resolve, reject) => {
             const timeout = setTimeout(() => {
                 reject(new Error('Update driver location timeout'));
             }, 10000);
-            
+
             this.socket.emit('updateDriverLocation', { driverId, lat, lng, heading, speed });
             this.socket.once('locationUpdated', (data) => {
                 clearTimeout(timeout);
@@ -1208,26 +1230,26 @@ class WebSocketManager {
             });
         });
     }
-    
+
     // ==================== NOVOS MÉTODOS - BUSCA E MATCHING DE DRIVERS ====================
-    
+
     // Buscar motoristas próximos
     async searchDrivers(pickupLocation, destinationLocation, rideType = 'standard', estimatedFare = 0, preferences = {}) {
         if (!this.socket?.connected) {
             throw new Error('WebSocket não conectado');
         }
-        
+
         return new Promise((resolve, reject) => {
             const timeout = setTimeout(() => {
                 reject(new Error('Search drivers timeout'));
             }, 15000);
-            
-            this.socket.emit('searchDrivers', { 
-                pickupLocation, 
-                destinationLocation, 
-                rideType, 
-                estimatedFare, 
-                preferences 
+
+            this.socket.emit('searchDrivers', {
+                pickupLocation,
+                destinationLocation,
+                rideType,
+                estimatedFare,
+                preferences
             });
             this.socket.once('driversFound', (data) => {
                 clearTimeout(timeout);
@@ -1239,18 +1261,18 @@ class WebSocketManager {
             });
         });
     }
-    
+
     // Cancelar busca de motoristas
     async cancelDriverSearch(bookingId, reason = 'Cancelado pelo usuário') {
         if (!this.socket?.connected) {
             throw new Error('WebSocket não conectado');
         }
-        
+
         return new Promise((resolve, reject) => {
             const timeout = setTimeout(() => {
                 reject(new Error('Cancel driver search timeout'));
             }, 10000);
-            
+
             this.socket.emit('cancelDriverSearch', { bookingId, reason });
             this.socket.once('driverSearchCancelled', (data) => {
                 clearTimeout(timeout);
@@ -1262,20 +1284,20 @@ class WebSocketManager {
             });
         });
     }
-    
+
     // ==================== NOVOS MÉTODOS - GERENCIAMENTO DE CORRIDAS ====================
-    
+
     // Cancelar corrida (com reembolso automático PIX)
     async cancelRide(bookingId, reason = 'Cancelado pelo usuário', cancellationFee = 0) {
         if (!this.socket?.connected) {
             throw new Error('WebSocket não conectado');
         }
-        
+
         return new Promise((resolve, reject) => {
             const timeout = setTimeout(() => {
                 reject(new Error('Cancel ride timeout'));
             }, 10000);
-            
+
             this.socket.emit('cancelRide', { bookingId, reason, cancellationFee });
             this.socket.once('rideCancelled', (data) => {
                 clearTimeout(timeout);
@@ -1287,20 +1309,20 @@ class WebSocketManager {
             });
         });
     }
-    
+
     // ==================== NOVOS MÉTODOS - SISTEMA DE SEGURANÇA ====================
-    
+
     // Reportar incidente
     async reportIncident(type, description, evidence = [], location = null) {
         if (!this.socket?.connected) {
             throw new Error('WebSocket não conectado');
         }
-        
+
         return new Promise((resolve, reject) => {
             const timeout = setTimeout(() => {
                 reject(new Error('Report incident timeout'));
             }, 10000);
-            
+
             this.socket.emit('reportIncident', { type, description, evidence, location });
             this.socket.once('incidentReported', (data) => {
                 clearTimeout(timeout);
@@ -1312,18 +1334,18 @@ class WebSocketManager {
             });
         });
     }
-    
+
     // Contato de emergência
     async emergencyContact(contactType, location = null, message = 'Solicitação de emergência') {
         if (!this.socket?.connected) {
             throw new Error('WebSocket não conectado');
         }
-        
+
         return new Promise((resolve, reject) => {
             const timeout = setTimeout(() => {
                 reject(new Error('Emergency contact timeout'));
             }, 10000);
-            
+
             this.socket.emit('emergencyContact', { contactType, location, message });
             this.socket.once('emergencyContacted', (data) => {
                 clearTimeout(timeout);
@@ -1335,20 +1357,20 @@ class WebSocketManager {
             });
         });
     }
-    
+
     // ==================== NOVOS MÉTODOS - SISTEMA DE SUPORTE ====================
-    
+
     // Criar ticket de suporte
     async createSupportTicket(type, priority = 'N3', description, attachments = []) {
         if (!this.socket?.connected) {
             throw new Error('WebSocket não conectado');
         }
-        
+
         return new Promise((resolve, reject) => {
             const timeout = setTimeout(() => {
                 reject(new Error('Create support ticket timeout'));
             }, 10000);
-            
+
             this.socket.emit('createSupportTicket', { type, priority, description, attachments });
             this.socket.once('supportTicketCreated', (data) => {
                 clearTimeout(timeout);
@@ -1360,20 +1382,20 @@ class WebSocketManager {
             });
         });
     }
-    
+
     // ==================== NOVOS MÉTODOS - NOTIFICAÇÕES AVANÇADAS ====================
-    
+
     // Atualizar preferências de notificação
     async updateNotificationPreferences(preferences) {
         if (!this.socket?.connected) {
             throw new Error('WebSocket não conectado');
         }
-        
+
         return new Promise((resolve, reject) => {
             const timeout = setTimeout(() => {
                 reject(new Error('Update notification preferences timeout'));
             }, 10000);
-            
+
             this.socket.emit('updateNotificationPreferences', preferences);
             this.socket.once('notificationPreferencesUpdated', (data) => {
                 clearTimeout(timeout);
@@ -1385,20 +1407,20 @@ class WebSocketManager {
             });
         });
     }
-    
+
     // ==================== NOVOS MÉTODOS - ANALYTICS E FEEDBACK ====================
-    
+
     // Rastrear ação do usuário
     async trackUserAction(action, actionData = {}, timestamp = null) {
         if (!this.socket?.connected) {
             throw new Error('WebSocket não conectado');
         }
-        
+
         return new Promise((resolve, reject) => {
             const timeout = setTimeout(() => {
                 reject(new Error('Track user action timeout'));
             }, 10000);
-            
+
             this.socket.emit('trackUserAction', { action, data: actionData, timestamp });
             this.socket.once('userActionTracked', (data) => {
                 clearTimeout(timeout);
@@ -1410,18 +1432,18 @@ class WebSocketManager {
             });
         });
     }
-    
+
     // Enviar feedback
     async submitFeedback(type, rating, comments = '', suggestions = '') {
         if (!this.socket?.connected) {
             throw new Error('WebSocket não conectado');
         }
-        
+
         return new Promise((resolve, reject) => {
             const timeout = setTimeout(() => {
                 reject(new Error('Submit feedback timeout'));
             }, 10000);
-            
+
             this.socket.emit('submitFeedback', { type, rating, comments, suggestions });
             this.socket.once('feedbackReceived', (data) => {
                 clearTimeout(timeout);
@@ -1433,20 +1455,20 @@ class WebSocketManager {
             });
         });
     }
-    
+
     // ==================== NOVOS MÉTODOS - CHAT E COMUNICAÇÃO ====================
-    
+
     // Criar chat (método atualizado)
     async createChat(chatData) {
         if (!this.socket?.connected) {
             throw new Error('WebSocket não conectado');
         }
-        
+
         return new Promise((resolve, reject) => {
             const timeout = setTimeout(() => {
                 reject(new Error('Create chat timeout'));
             }, 10000);
-            
+
             this.socket.emit('createChat', chatData);
             this.socket.once('chatCreated', (data) => {
                 clearTimeout(timeout);
@@ -1458,18 +1480,18 @@ class WebSocketManager {
             });
         });
     }
-    
+
     // Enviar mensagem (método atualizado)
     async sendMessage(messageData) {
         if (!this.socket?.connected) {
             throw new Error('WebSocket não conectado');
         }
-        
+
         return new Promise((resolve, reject) => {
             const timeout = setTimeout(() => {
                 reject(new Error('Send message timeout'));
             }, 10000);
-            
+
             this.socket.emit('sendMessage', messageData);
             this.socket.once('messageSent', (data) => {
                 clearTimeout(timeout);
@@ -1483,27 +1505,42 @@ class WebSocketManager {
     }
 
     // ==================== NOVOS MÉTODOS - NOTIFICAÇÕES FCM ====================
-    
+
     // Registrar token FCM
     async registerFCMToken(tokenData) {
         if (!this.socket?.connected) {
             throw new Error('WebSocket não conectado');
         }
-        
+
         return new Promise((resolve, reject) => {
             const timeout = setTimeout(() => {
                 reject(new Error('Register FCM token timeout'));
             }, 10000);
-            
+
             this.socket.emit('registerFCMToken', tokenData);
-            this.socket.once('fcmTokenRegistered', (data) => {
-                clearTimeout(timeout);
+
+            const onRegistered = (data) => {
+                cleanup();
                 if (data.success) {
                     resolve(data);
                 } else {
                     reject(new Error(data.error || 'Register FCM token failed'));
                 }
-            });
+            };
+
+            const onError = (error) => {
+                cleanup();
+                reject(new Error(error.error || 'Register FCM token error event'));
+            };
+
+            const cleanup = () => {
+                clearTimeout(timeout);
+                this.socket.off('fcmTokenRegistered', onRegistered);
+                this.socket.off('fcmTokenError', onError);
+            };
+
+            this.socket.once('fcmTokenRegistered', onRegistered);
+            this.socket.once('fcmTokenError', onError);
         });
     }
 
@@ -1512,12 +1549,12 @@ class WebSocketManager {
         if (!this.socket?.connected) {
             throw new Error('WebSocket não conectado');
         }
-        
+
         return new Promise((resolve, reject) => {
             const timeout = setTimeout(() => {
                 reject(new Error('Unregister FCM token timeout'));
             }, 10000);
-            
+
             this.socket.emit('unregisterFCMToken', tokenData);
             this.socket.once('fcmTokenUnregistered', (data) => {
                 clearTimeout(timeout);
@@ -1535,12 +1572,12 @@ class WebSocketManager {
         if (!this.socket?.connected) {
             throw new Error('WebSocket não conectado');
         }
-        
+
         return new Promise((resolve, reject) => {
             const timeout = setTimeout(() => {
                 reject(new Error('Send notification timeout'));
             }, 10000);
-            
+
             this.socket.emit('sendNotification', notificationData);
             this.socket.once('notificationSent', (data) => {
                 clearTimeout(timeout);
@@ -1558,12 +1595,12 @@ class WebSocketManager {
         if (!this.socket?.connected) {
             throw new Error('WebSocket não conectado');
         }
-        
+
         return new Promise((resolve, reject) => {
             const timeout = setTimeout(() => {
                 reject(new Error('Send notification to user timeout'));
             }, 10000);
-            
+
             this.socket.emit('sendNotificationToUser', {
                 userId,
                 notification,
@@ -1585,12 +1622,12 @@ class WebSocketManager {
         if (!this.socket?.connected) {
             throw new Error('WebSocket não conectado');
         }
-        
+
         return new Promise((resolve, reject) => {
             const timeout = setTimeout(() => {
                 reject(new Error('Send notification to user type timeout'));
             }, 10000);
-            
+
             this.socket.emit('sendNotificationToUserType', {
                 userType,
                 notification,
@@ -1600,8 +1637,66 @@ class WebSocketManager {
                 clearTimeout(timeout);
                 if (data.success) {
                     resolve(data);
+                }
+            });
+        });
+    }
+
+    // ==================== NOVOS MÉTODOS - EXTENSÃO DE CORRIDA (MUDANÇA DE DESTINO) ====================
+
+    /**
+     * Solicita extensão de corrida com cobrança adicional via Pix.
+     * @param {string} rideId 
+     * @param {object} newDrop {lat, lng, add}
+     * @param {number} newFare 
+     */
+    async requestRideExtension(rideId, newDrop, newFare) {
+        if (!this.socket?.connected) {
+            throw new Error('WebSocket não conectado');
+        }
+
+        return new Promise((resolve, reject) => {
+            const timeout = setTimeout(() => {
+                reject(new Error('Request ride extension timeout'));
+            }, 10000);
+
+            this.socket.emit('requestRideExtension', { rideId, newDrop, newFare });
+
+            // Note: In an event-driven system, the actual confirmation comes later.
+            // But we can listen for an immediate acknowledgment if available.
+            this.socket.once('rideExtensionRequested', (data) => {
+                clearTimeout(timeout);
+                if (data.success) {
+                    resolve(data);
                 } else {
-                    reject(new Error(data.error || 'Send notification to user type failed'));
+                    reject(new Error(data.error || 'Request ride extension failed'));
+                }
+            });
+        });
+    }
+
+    /**
+     * Solicita simples mudança de destino (mais barato ou igual)
+     * @param {string} rideId 
+     * @param {object} newDrop {lat, lng, add}
+     */
+    async changeDestination(rideId, newDrop) {
+        if (!this.socket?.connected) {
+            throw new Error('WebSocket não conectado');
+        }
+
+        return new Promise((resolve, reject) => {
+            const timeout = setTimeout(() => {
+                reject(new Error('Change destination timeout'));
+            }, 10000);
+
+            this.socket.emit('changeDestination', { rideId, newDrop });
+            this.socket.once('destinationChanged', (data) => {
+                clearTimeout(timeout);
+                if (data.success) {
+                    resolve(data);
+                } else {
+                    reject(new Error(data.error || 'Change destination failed'));
                 }
             });
         });

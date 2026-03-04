@@ -452,3 +452,1138 @@
 2026-02-25 15:10:16 [ERROR] [traceId:req-1772042986862-146f8d5a]  ❌ Erro ao atualizar estado da corrida booking_1772043011924_test_customer_001: Transição inválida: SEARCHING → SEARCHING
 2026-02-25 15:10:16 [ERROR] [traceId:req-1772042986862-146f8d5a]  ❌ Erro ao processar corrida booking_1772043011924_test_customer_001: Transição inválida: SEARCHING → SEARCHING
 2026-02-25 15:10:32 [ERROR] [traceId:req-1772042986875-a0fa3490]  Erro ao aceitar corrida {"driverId":"test_driver_001","eventType":"acceptRide"}
+2026-03-01 16:06:19 [ERROR]   Request failed with status code 404
+2026-03-01 16:06:39 [ERROR]   Request failed with status code 404
+2026-03-01 16:07:04 [ERROR]   Request failed with status code 404
+2026-03-01 16:09:46 [ERROR]   Request failed with status code 401
+2026-03-01 16:09:46 [ERROR]   Request failed with status code 404
+2026-03-01 16:09:56 [ERROR]   Request failed with status code 401
+2026-03-01 16:11:19 [ERROR]   Request failed with status code 401
+2026-03-01 16:11:20 [ERROR]   Request failed with status code 404
+2026-03-01 16:12:35 [ERROR]   Request failed with status code 401
+2026-03-01 16:12:35 [ERROR]   Request failed with status code 404
+2026-03-01 16:16:14 [ERROR]   Request failed with status code 401
+2026-03-01 16:16:14 [ERROR]   Request failed with status code 404
+2026-03-01 16:16:33 [ERROR]   Request failed with status code 401
+2026-03-01 16:21:06 [ERROR] [traceId:req-1772392845360-427dbf54]  Erro ao aceitar corrida {"driverId":"test_driver_001","eventType":"acceptRide"}
+2026-03-01 16:21:28 [ERROR] [traceId:req-1772392845360-427dbf54]  Erro ao aceitar corrida {"driverId":"test_driver_001","eventType":"acceptRide"}
+2026-03-01 16:22:09 [ERROR] [traceId:req-1772392845360-427dbf54]  Erro ao aceitar corrida {"driverId":"test_driver_001","eventType":"acceptRide"}
+2026-03-01 16:22:26 [ERROR] [traceId:req-1772392845360-427dbf54]  Erro ao aceitar corrida {"driverId":"test_driver_001","eventType":"acceptRide"}
+2026-03-01 16:53:47 [ERROR] [traceId:req-1772394806494-78eeb6ce]  Erro ao aceitar corrida {"driverId":"test_driver_001","eventType":"acceptRide"}
+2026-03-01 16:54:09 [ERROR] [traceId:req-1772394806494-78eeb6ce]  Erro ao aceitar corrida {"driverId":"test_driver_001","eventType":"acceptRide"}
+2026-03-01 17:00:10 [ERROR] [traceId:req-1772395198123-44d4ff70]  ❌ Transição inválida: SEARCHING → SEARCHING (booking: booking_1772395206764_test_customer_001)
+2026-03-01 17:00:10 [ERROR] [traceId:req-1772395198123-44d4ff70]  ❌ Erro ao atualizar estado da corrida booking_1772395206764_test_customer_001: Transição inválida: SEARCHING → SEARCHING
+2026-03-01 17:00:10 [ERROR] [traceId:req-1772395198123-44d4ff70]  ❌ Erro ao processar corrida booking_1772395206764_test_customer_001: Transição inválida: SEARCHING → SEARCHING
+2026-03-01 17:00:20 [ERROR] [traceId:req-1772395198141-f0e52876]  Erro ao aceitar corrida {"driverId":"test_driver_001","eventType":"acceptRide"}
+2026-03-01 17:02:19 [ERROR] [traceId:req-1772395326254-e1694eec]  ❌ Transição inválida: SEARCHING → SEARCHING (booking: booking_1772395334959_test_customer_001)
+2026-03-01 17:02:19 [ERROR] [traceId:req-1772395326254-e1694eec]  ❌ Erro ao atualizar estado da corrida booking_1772395334959_test_customer_001: Transição inválida: SEARCHING → SEARCHING
+2026-03-01 17:02:19 [ERROR] [traceId:req-1772395326254-e1694eec]  ❌ Erro ao processar corrida booking_1772395334959_test_customer_001: Transição inválida: SEARCHING → SEARCHING
+2026-03-01 17:02:28 [ERROR] [traceId:req-1772395326266-80682415]  Erro ao aceitar corrida {"driverId":"test_driver_001","eventType":"acceptRide"}
+2026-03-01 17:02:45 [ERROR] [traceId:req-1772395326266-80682415]  Erro ao aceitar corrida {"driverId":"test_driver_001","eventType":"acceptRide"}
+2026-03-01 17:03:47 [ERROR] [traceId:req-1772395326266-80682415]  ❌ [ResponseHandler] Erro ao enviar próxima corrida para test_driver_001: object null is not iterable (cannot read property Symbol(Symbol.iterator))
+2026-03-01 17:04:03 [ERROR] [traceId:req-1772395326266-80682415]  ❌ [ResponseHandler] Erro ao enviar próxima corrida para test_driver_001: object null is not iterable (cannot read property Symbol(Symbol.iterator))
+2026-03-01 17:04:24 [ERROR] [traceId:req-1772395451105-a26c424e]  ❌ Transição inválida: SEARCHING → SEARCHING (booking: booking_1772395459871_test_customer_001)
+2026-03-01 17:04:24 [ERROR] [traceId:req-1772395451105-a26c424e]  ❌ Erro ao atualizar estado da corrida booking_1772395459871_test_customer_001: Transição inválida: SEARCHING → SEARCHING
+2026-03-01 17:04:24 [ERROR] [traceId:req-1772395451105-a26c424e]  ❌ Erro ao processar corrida booking_1772395459871_test_customer_001: Transição inválida: SEARCHING → SEARCHING
+2026-03-01 17:05:14 [ERROR] [traceId:req-1772395451119-c7d2b4d5]  ❌ [ResponseHandler] Erro ao enviar próxima corrida para test_driver_001: object null is not iterable (cannot read property Symbol(Symbol.iterator))
+2026-03-01 17:09:50 [ERROR] [traceId:req-1772395777949-3c8e1696]  ❌ Transição inválida: SEARCHING → SEARCHING (booking: booking_1772395786656_test_customer_001)
+2026-03-01 17:09:50 [ERROR] [traceId:req-1772395777949-3c8e1696]  ❌ Erro ao atualizar estado da corrida booking_1772395786656_test_customer_001: Transição inválida: SEARCHING → SEARCHING
+2026-03-01 17:09:50 [ERROR] [traceId:req-1772395777949-3c8e1696]  ❌ Erro ao processar corrida booking_1772395786656_test_customer_001: Transição inválida: SEARCHING → SEARCHING
+2026-03-01 17:10:27 [ERROR] [traceId:req-1772395777964-e136a800]  ❌ [ResponseHandler] Erro ao enviar próxima corrida para test_driver_001: object null is not iterable (cannot read property Symbol(Symbol.iterator))
+2026-03-01 17:10:42 [ERROR] [traceId:req-1772395777964-e136a800]  ❌ [ResponseHandler] Erro ao enviar próxima corrida para test_driver_001: object null is not iterable (cannot read property Symbol(Symbol.iterator))
+2026-03-01 17:11:08 [ERROR] [traceId:req-1772395777964-e136a800]  ❌ [ResponseHandler] Erro ao enviar próxima corrida para test_driver_001: object null is not iterable (cannot read property Symbol(Symbol.iterator))
+2026-03-01 17:11:12 [ERROR] [traceId:req-1772395777964-e136a800]  ❌ [ResponseHandler] Erro ao enviar próxima corrida para test_driver_001: object null is not iterable (cannot read property Symbol(Symbol.iterator))
+2026-03-01 17:11:14 [ERROR] [traceId:req-1772395777964-e136a800]  ❌ [ResponseHandler] Erro ao enviar próxima corrida para test_driver_001: object null is not iterable (cannot read property Symbol(Symbol.iterator))
+2026-03-01 17:16:02 [ERROR] [traceId:req-1772396149351-061235d3]  ❌ Transição inválida: SEARCHING → SEARCHING (booking: booking_1772396158192_test_customer_001)
+2026-03-01 17:16:02 [ERROR] [traceId:req-1772396149351-061235d3]  ❌ Erro ao atualizar estado da corrida booking_1772396158192_test_customer_001: Transição inválida: SEARCHING → SEARCHING
+2026-03-01 17:16:02 [ERROR] [traceId:req-1772396149351-061235d3]  ❌ Erro ao processar corrida booking_1772396158192_test_customer_001: Transição inválida: SEARCHING → SEARCHING
+2026-03-01 17:20:40 [ERROR] [traceId:req-1772396149362-1668fbd3]  ❌ Transição inválida: SEARCHING → SEARCHING (booking: booking_1772396437053_test_customer_001)
+2026-03-01 17:20:40 [ERROR] [traceId:req-1772396149362-1668fbd3]  ❌ Erro ao atualizar estado da corrida booking_1772396437053_test_customer_001: Transição inválida: SEARCHING → SEARCHING
+2026-03-01 17:20:40 [ERROR] [traceId:req-1772396149362-1668fbd3]  ❌ Transição inválida: SEARCHING → SEARCHING (booking: booking_1772396437053_test_customer_001)
+2026-03-01 17:20:40 [ERROR] [traceId:req-1772396149362-1668fbd3]  ❌ Erro ao atualizar estado da corrida booking_1772396437053_test_customer_001: Transição inválida: SEARCHING → SEARCHING
+2026-03-01 17:20:40 [ERROR] [traceId:req-1772396149362-1668fbd3]  ❌ Erro ao processar corrida booking_1772396437053_test_customer_001: Transição inválida: SEARCHING → SEARCHING
+2026-03-01 17:20:40 [ERROR] [traceId:req-1772396149362-1668fbd3]  ❌ Erro ao processar corrida booking_1772396437053_test_customer_001: Transição inválida: SEARCHING → SEARCHING
+2026-03-01 17:26:27 [ERROR] [traceId:req-1772396774644-870a5a11]  ❌ Transição inválida: SEARCHING → SEARCHING (booking: booking_1772396783571_test_customer_001)
+2026-03-01 17:26:27 [ERROR] [traceId:req-1772396774644-870a5a11]  ❌ Erro ao atualizar estado da corrida booking_1772396783571_test_customer_001: Transição inválida: SEARCHING → SEARCHING
+2026-03-01 17:26:27 [ERROR] [traceId:req-1772396774644-870a5a11]  ❌ Erro ao processar corrida booking_1772396783571_test_customer_001: Transição inválida: SEARCHING → SEARCHING
+2026-03-01 17:34:09 [ERROR] [traceId:req-1772397221794-87dc5b88]  StartTripCommand falhou {"bookingId":"booking_1772397230598_test_customer_001","driverId":"test_driver_001","command":"StartTripCommand"}
+2026-03-01 17:34:09 [ERROR] [traceId:req-1772397221794-87dc5b88]  StartTripCommand falhou {"bookingId":"booking_1772397230598_test_customer_001","driverId":"test_driver_001","eventType":"startTrip"}
+2026-03-01 17:55:08 [ERROR] [traceId:req-1772398455575-9987cceb]  ❌ Transição inválida: SEARCHING → SEARCHING (booking: booking_1772398505872_test_customer_001)
+2026-03-01 17:55:08 [ERROR] [traceId:req-1772398455575-9987cceb]  ❌ Erro ao atualizar estado da corrida booking_1772398505872_test_customer_001: Transição inválida: SEARCHING → SEARCHING
+2026-03-01 17:55:08 [ERROR] [traceId:req-1772398455575-9987cceb]  ❌ Erro ao processar corrida booking_1772398505872_test_customer_001: Transição inválida: SEARCHING → SEARCHING
+2026-03-01 18:09:07 [ERROR] [traceId:req-1772398455588-a4bd068a]  AUDITORIA ERROR: createBooking por passenger_load_1
+2026-03-01 18:09:07 [ERROR] [traceId:req-1772398455588-a4bd068a]  AUDITORIA ERROR: createBooking por passenger_load_9
+2026-03-01 18:09:07 [ERROR] [traceId:req-1772398455588-a4bd068a]  AUDITORIA ERROR: createBooking por passenger_load_6
+2026-03-01 18:09:07 [ERROR] [traceId:req-1772398455588-a4bd068a]  AUDITORIA ERROR: createBooking por passenger_load_2
+2026-03-01 18:09:07 [ERROR] [traceId:req-1772398455588-a4bd068a]  AUDITORIA ERROR: createBooking por passenger_load_10
+2026-03-01 18:09:07 [ERROR] [traceId:req-1772398455588-a4bd068a]  AUDITORIA ERROR: createBooking por passenger_load_8
+2026-03-01 18:09:07 [ERROR] [traceId:req-1772398455588-a4bd068a]  AUDITORIA ERROR: createBooking por passenger_load_4
+2026-03-01 18:09:07 [ERROR] [traceId:req-1772398455588-a4bd068a]  AUDITORIA ERROR: createBooking por passenger_load_3
+2026-03-01 18:09:07 [ERROR] [traceId:req-1772398455588-a4bd068a]  AUDITORIA ERROR: createBooking por passenger_load_7
+2026-03-01 18:09:07 [ERROR] [traceId:req-1772398455588-a4bd068a]  AUDITORIA ERROR: createBooking por passenger_load_5
+2026-03-01 18:09:12 [ERROR] [traceId:req-1772398455588-a4bd068a]  AUDITORIA ERROR: createBooking por passenger_stress_2
+2026-03-01 18:09:12 [ERROR] [traceId:req-1772398455588-a4bd068a]  AUDITORIA ERROR: createBooking por passenger_stress_3
+2026-03-01 18:09:12 [ERROR] [traceId:req-1772398455588-a4bd068a]  AUDITORIA ERROR: createBooking por passenger_stress_14
+2026-03-01 18:09:12 [ERROR] [traceId:req-1772398455588-a4bd068a]  AUDITORIA ERROR: createBooking por passenger_stress_4
+2026-03-01 18:09:12 [ERROR] [traceId:req-1772398455588-a4bd068a]  AUDITORIA ERROR: createBooking por passenger_stress_12
+2026-03-01 18:09:12 [ERROR] [traceId:req-1772398455588-a4bd068a]  AUDITORIA ERROR: createBooking por passenger_stress_44
+2026-03-01 18:09:12 [ERROR] [traceId:req-1772398455588-a4bd068a]  AUDITORIA ERROR: createBooking por passenger_stress_19
+2026-03-01 18:09:12 [ERROR] [traceId:req-1772398455588-a4bd068a]  AUDITORIA ERROR: createBooking por passenger_stress_13
+2026-03-01 18:09:12 [ERROR] [traceId:req-1772398455588-a4bd068a]  AUDITORIA ERROR: createBooking por passenger_stress_25
+2026-03-01 18:09:12 [ERROR] [traceId:req-1772398455588-a4bd068a]  AUDITORIA ERROR: createBooking por passenger_stress_7
+2026-03-01 18:09:12 [ERROR] [traceId:req-1772398455588-a4bd068a]  AUDITORIA ERROR: createBooking por passenger_stress_40
+2026-03-01 18:09:12 [ERROR] [traceId:req-1772398455588-a4bd068a]  AUDITORIA ERROR: createBooking por passenger_stress_23
+2026-03-01 18:09:12 [ERROR] [traceId:req-1772398455588-a4bd068a]  AUDITORIA ERROR: createBooking por passenger_stress_36
+2026-03-01 18:09:12 [ERROR] [traceId:req-1772398455588-a4bd068a]  AUDITORIA ERROR: createBooking por passenger_stress_43
+2026-03-01 18:09:12 [ERROR] [traceId:req-1772398455588-a4bd068a]  AUDITORIA ERROR: createBooking por passenger_stress_5
+2026-03-01 18:09:12 [ERROR] [traceId:req-1772398455588-a4bd068a]  AUDITORIA ERROR: createBooking por passenger_stress_16
+2026-03-01 18:09:12 [ERROR] [traceId:req-1772398455588-a4bd068a]  AUDITORIA ERROR: createBooking por passenger_stress_10
+2026-03-01 18:09:12 [ERROR] [traceId:req-1772398455588-a4bd068a]  AUDITORIA ERROR: createBooking por passenger_stress_8
+2026-03-01 18:09:12 [ERROR] [traceId:req-1772398455588-a4bd068a]  AUDITORIA ERROR: createBooking por passenger_stress_29
+2026-03-01 18:09:12 [ERROR] [traceId:req-1772398455588-a4bd068a]  AUDITORIA ERROR: createBooking por passenger_stress_26
+2026-03-01 18:09:12 [ERROR] [traceId:req-1772398455588-a4bd068a]  AUDITORIA ERROR: createBooking por passenger_stress_9
+2026-03-01 18:09:12 [ERROR] [traceId:req-1772398455588-a4bd068a]  AUDITORIA ERROR: createBooking por passenger_stress_18
+2026-03-01 18:09:12 [ERROR] [traceId:req-1772398455588-a4bd068a]  AUDITORIA ERROR: createBooking por passenger_stress_42
+2026-03-01 18:09:12 [ERROR] [traceId:req-1772398455588-a4bd068a]  AUDITORIA ERROR: createBooking por passenger_stress_39
+2026-03-01 18:09:12 [ERROR] [traceId:req-1772398455588-a4bd068a]  AUDITORIA ERROR: createBooking por passenger_stress_30
+2026-03-01 18:09:12 [ERROR] [traceId:req-1772398455588-a4bd068a]  AUDITORIA ERROR: createBooking por passenger_stress_49
+2026-03-01 18:09:12 [ERROR] [traceId:req-1772398455588-a4bd068a]  AUDITORIA ERROR: createBooking por passenger_stress_37
+2026-03-01 18:09:12 [ERROR] [traceId:req-1772398455588-a4bd068a]  AUDITORIA ERROR: createBooking por passenger_stress_38
+2026-03-01 18:09:12 [ERROR] [traceId:req-1772398455588-a4bd068a]  AUDITORIA ERROR: createBooking por passenger_stress_21
+2026-03-01 18:09:12 [ERROR] [traceId:req-1772398455588-a4bd068a]  AUDITORIA ERROR: createBooking por passenger_stress_15
+2026-03-01 18:09:12 [ERROR] [traceId:req-1772398455588-a4bd068a]  AUDITORIA ERROR: createBooking por passenger_stress_32
+2026-03-01 18:09:12 [ERROR] [traceId:req-1772398455588-a4bd068a]  AUDITORIA ERROR: createBooking por passenger_stress_22
+2026-03-01 18:09:12 [ERROR] [traceId:req-1772398455588-a4bd068a]  AUDITORIA ERROR: createBooking por passenger_stress_50
+2026-03-01 18:09:12 [ERROR] [traceId:req-1772398455588-a4bd068a]  AUDITORIA ERROR: createBooking por passenger_stress_24
+2026-03-01 18:09:12 [ERROR] [traceId:req-1772398455588-a4bd068a]  AUDITORIA ERROR: createBooking por passenger_stress_1
+2026-03-01 18:09:12 [ERROR] [traceId:req-1772398455588-a4bd068a]  AUDITORIA ERROR: createBooking por passenger_stress_27
+2026-03-01 18:09:12 [ERROR] [traceId:req-1772398455588-a4bd068a]  AUDITORIA ERROR: createBooking por passenger_stress_33
+2026-03-01 18:09:12 [ERROR] [traceId:req-1772398455588-a4bd068a]  AUDITORIA ERROR: createBooking por passenger_stress_28
+2026-03-01 18:09:12 [ERROR] [traceId:req-1772398455588-a4bd068a]  AUDITORIA ERROR: createBooking por passenger_stress_17
+2026-03-01 18:09:12 [ERROR] [traceId:req-1772398455588-a4bd068a]  AUDITORIA ERROR: createBooking por passenger_stress_47
+2026-03-01 18:09:12 [ERROR] [traceId:req-1772398455588-a4bd068a]  AUDITORIA ERROR: createBooking por passenger_stress_6
+2026-03-01 18:09:12 [ERROR] [traceId:req-1772398455588-a4bd068a]  AUDITORIA ERROR: createBooking por passenger_stress_34
+2026-03-01 18:09:12 [ERROR] [traceId:req-1772398455588-a4bd068a]  AUDITORIA ERROR: createBooking por passenger_stress_35
+2026-03-01 18:09:12 [ERROR] [traceId:req-1772398455588-a4bd068a]  AUDITORIA ERROR: createBooking por passenger_stress_41
+2026-03-01 18:09:12 [ERROR] [traceId:req-1772398455588-a4bd068a]  AUDITORIA ERROR: createBooking por passenger_stress_46
+2026-03-01 18:09:12 [ERROR] [traceId:req-1772398455588-a4bd068a]  AUDITORIA ERROR: createBooking por passenger_stress_31
+2026-03-01 18:09:12 [ERROR] [traceId:req-1772398455588-a4bd068a]  AUDITORIA ERROR: createBooking por passenger_stress_20
+2026-03-01 18:09:12 [ERROR] [traceId:req-1772398455588-a4bd068a]  AUDITORIA ERROR: createBooking por passenger_stress_45
+2026-03-01 18:09:12 [ERROR] [traceId:req-1772398455588-a4bd068a]  AUDITORIA ERROR: createBooking por passenger_stress_48
+2026-03-01 18:09:12 [ERROR] [traceId:req-1772398455588-a4bd068a]  AUDITORIA ERROR: createBooking por passenger_stress_11
+2026-03-01 18:09:16 [ERROR] [traceId:req-1772398455588-a4bd068a]  AUDITORIA ERROR: createBooking por passenger_competition
+2026-03-01 18:10:46 [ERROR] [traceId:req-1772398455588-a4bd068a]  ❌ Transição inválida: SEARCHING → SEARCHING (booking: booking_1772399443451_passenger_stress_2)
+2026-03-01 18:10:46 [ERROR] [traceId:req-1772398455588-a4bd068a]  ❌ Erro ao atualizar estado da corrida booking_1772399443451_passenger_stress_2: Transição inválida: SEARCHING → SEARCHING
+2026-03-01 18:10:46 [ERROR] [traceId:req-1772398455588-a4bd068a]  ❌ Erro ao processar corrida booking_1772399443451_passenger_stress_2: Transição inválida: SEARCHING → SEARCHING
+2026-03-01 18:10:46 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:10:46 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:10:46 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:10:46 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:10:46 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:10:46 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:10:46 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:10:46 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:10:46 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:10:46 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:10:46 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:10:46 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:10:46 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:10:46 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:10:46 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:10:46 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:10:46 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:10:46 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:10:46 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:10:46 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:10:46 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:10:46 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:10:46 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:10:46 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:10:46 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:10:46 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:10:46 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:10:46 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:10:46 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:10:46 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:10:46 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:10:46 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:10:46 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:10:46 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:10:46 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:10:46 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:10:46 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:10:46 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:10:46 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:10:46 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:10:46 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:10:46 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:10:46 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:10:46 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:10:46 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:10:46 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:10:47 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:10:47 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:10:47 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:10:47 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:10:55 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:13:37 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:13:37 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:13:37 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:13:37 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:13:37 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:14:02 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:14:02 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:14:02 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:14:02 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:14:02 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:14:02 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:14:02 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:14:02 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:14:02 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:14:02 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:14:02 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:14:02 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:14:02 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:14:02 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:14:02 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:14:02 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:14:02 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:14:02 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:14:02 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:14:02 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:14:02 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:14:02 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:14:02 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:14:02 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:14:02 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:14:02 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:14:02 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:14:02 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:14:02 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:14:02 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:14:02 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:14:02 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:14:02 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:14:02 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:14:02 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:14:02 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:14:02 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:14:02 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:14:02 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:14:02 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:14:02 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:14:02 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:14:02 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:14:02 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:14:02 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:14:02 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:14:02 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:14:02 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:14:02 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:14:02 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:15:00 [ERROR] [traceId:req-1772398455588-a4bd068a]  AcceptRideCommand falhou {"bookingId":"booking_1772399642400_passenger_competition_v2","driverId":"driver_load_32","eventType":"acceptRide"}
+2026-03-01 18:15:00 [ERROR] [traceId:req-1772398455588-a4bd068a]  AcceptRideCommand falhou {"bookingId":"booking_1772399642400_passenger_competition_v2","driverId":"driver_load_33","eventType":"acceptRide"}
+2026-03-01 18:15:00 [ERROR] [traceId:req-1772398455588-a4bd068a]  AcceptRideCommand falhou {"bookingId":"booking_1772399642400_passenger_competition_v2","driverId":"driver_load_34","eventType":"acceptRide"}
+2026-03-01 18:15:00 [ERROR] [traceId:req-1772398455588-a4bd068a]  AcceptRideCommand falhou {"bookingId":"booking_1772399642400_passenger_competition_v2","driverId":"driver_load_35","eventType":"acceptRide"}
+2026-03-01 18:15:00 [ERROR] [traceId:req-1772398455588-a4bd068a]  AcceptRideCommand falhou {"bookingId":"booking_1772399642400_passenger_competition_v2","driverId":"driver_load_36","eventType":"acceptRide"}
+2026-03-01 18:15:00 [ERROR] [traceId:req-1772398455588-a4bd068a]  AcceptRideCommand falhou {"bookingId":"booking_1772399642400_passenger_competition_v2","driverId":"driver_load_37","eventType":"acceptRide"}
+2026-03-01 18:15:00 [ERROR] [traceId:req-1772398455588-a4bd068a]  AcceptRideCommand falhou {"bookingId":"booking_1772399642400_passenger_competition_v2","driverId":"driver_load_38","eventType":"acceptRide"}
+2026-03-01 18:15:00 [ERROR] [traceId:req-1772398455588-a4bd068a]  AcceptRideCommand falhou {"bookingId":"booking_1772399642400_passenger_competition_v2","driverId":"driver_load_39","eventType":"acceptRide"}
+2026-03-01 18:15:00 [ERROR] [traceId:req-1772398455588-a4bd068a]  AcceptRideCommand falhou {"bookingId":"booking_1772399642400_passenger_competition_v2","driverId":"driver_load_40","eventType":"acceptRide"}
+2026-03-01 18:15:01 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro no job de limpeza
+2026-03-01 18:27:35 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:27:35 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:27:35 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:27:35 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:27:35 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:27:35 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:27:35 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:27:35 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:27:35 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:27:35 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:27:35 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:27:35 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:27:35 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:27:35 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:27:35 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:27:35 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:27:35 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:27:35 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:27:35 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:27:35 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:27:35 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:27:35 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:27:35 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:27:35 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:27:35 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:27:36 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:27:36 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:27:36 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:27:36 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:27:36 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:27:38 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:27:38 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:27:38 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:27:38 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:27:38 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:27:38 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:27:38 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:27:38 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:27:38 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:27:38 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:27:38 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:27:38 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:27:38 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:27:38 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:27:38 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:27:38 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:27:38 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:27:38 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:27:38 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:27:38 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:27:39 [ERROR] [traceId:req-1772398455588-a4bd068a]  ❌ Transição inválida: CANCELED → CANCELED (booking: booking_1772400457269_test_customer_001)
+2026-03-01 18:27:39 [ERROR] [traceId:req-1772398455588-a4bd068a]  ❌ Erro ao atualizar estado da corrida booking_1772400457269_test_customer_001: Transição inválida: CANCELED → CANCELED
+2026-03-01 18:27:39 [ERROR] [traceId:req-1772398455588-a4bd068a]  CancelRideCommand falhou {"bookingId":"booking_1772400457269_test_customer_001","command":"CancelRideCommand"}
+2026-03-01 18:27:39 [ERROR] [traceId:req-1772398455588-a4bd068a]  CancelRideCommand falhou {"bookingId":"booking_1772400457269_test_customer_001","eventType":"cancelRide"}
+2026-03-01 18:27:54 [ERROR] [traceId:req-1772398455588-a4bd068a]  Value for argument "data" is not a valid Firestore document. Cannot use "undefined" as a Firestore value (found in field "details.details"). If you want to ignore undefined values, enable `ignoreUndefinedProperties`.
+2026-03-01 18:30:36 [ERROR] [traceId:req-1772398455588-a4bd068a]  ❌ Transição inválida: SEARCHING → SEARCHING (booking: booking_1772400633777_passenger_hotspot_1)
+2026-03-01 18:30:36 [ERROR] [traceId:req-1772398455588-a4bd068a]  ❌ Erro ao atualizar estado da corrida booking_1772400633777_passenger_hotspot_1: Transição inválida: SEARCHING → SEARCHING
+2026-03-01 18:30:36 [ERROR] [traceId:req-1772398455588-a4bd068a]  ❌ Erro ao processar corrida booking_1772400633777_passenger_hotspot_1: Transição inválida: SEARCHING → SEARCHING
+2026-03-01 18:30:37 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:30:37 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:30:37 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:30:37 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:30:37 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:30:37 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:30:37 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:30:37 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:30:37 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:30:37 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:30:37 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:30:37 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:30:37 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:30:37 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:30:37 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:30:37 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:30:37 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:30:37 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:30:37 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:30:37 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:30:37 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:30:37 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:30:37 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:30:37 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:30:37 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:30:37 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:30:37 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:30:37 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:30:37 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:30:37 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:30:37 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:30:37 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:30:37 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:30:37 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:30:37 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:30:37 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:30:37 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:30:37 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:30:37 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:30:37 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:30:37 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:30:37 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:30:37 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:30:37 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:30:37 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:30:37 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:30:37 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:30:37 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:30:37 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:30:37 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:30:38 [ERROR] [traceId:req-1772398455588-a4bd068a]  ❌ Transição inválida: CANCELED → CANCELED (booking: booking_1772400637740_test_customer_001)
+2026-03-01 18:30:38 [ERROR] [traceId:req-1772398455588-a4bd068a]  ❌ Erro ao atualizar estado da corrida booking_1772400637740_test_customer_001: Transição inválida: CANCELED → CANCELED
+2026-03-01 18:30:38 [ERROR] [traceId:req-1772398455588-a4bd068a]  CancelRideCommand falhou {"bookingId":"booking_1772400637740_test_customer_001","command":"CancelRideCommand"}
+2026-03-01 18:30:38 [ERROR] [traceId:req-1772398455588-a4bd068a]  CancelRideCommand falhou {"bookingId":"booking_1772400637740_test_customer_001","eventType":"cancelRide"}
+2026-03-01 18:30:48 [ERROR] [traceId:req-1772398455588-a4bd068a]  AcceptRideCommand falhou {"bookingId":"booking_1772400637704_test_customer_001","driverId":"churn_driver_13","eventType":"acceptRide"}
+2026-03-01 18:30:48 [ERROR] [traceId:req-1772398455588-a4bd068a]  AcceptRideCommand falhou {"bookingId":"booking_1772400637717_test_customer_001","driverId":"churn_driver_15","eventType":"acceptRide"}
+2026-03-01 18:30:48 [ERROR] [traceId:req-1772398455588-a4bd068a]  AcceptRideCommand falhou {"bookingId":"booking_1772400637722_test_customer_001","driverId":"churn_driver_17","eventType":"acceptRide"}
+2026-03-01 18:31:40 [ERROR] [traceId:req-1772398455588-a4bd068a]  ❌ Transição inválida: SEARCHING → SEARCHING (booking: booking_1772400697388_test_customer_001)
+2026-03-01 18:31:40 [ERROR] [traceId:req-1772398455588-a4bd068a]  ❌ Erro ao atualizar estado da corrida booking_1772400697388_test_customer_001: Transição inválida: SEARCHING → SEARCHING
+2026-03-01 18:31:40 [ERROR] [traceId:req-1772398455588-a4bd068a]  ❌ Erro ao processar corrida booking_1772400697388_test_customer_001: Transição inválida: SEARCHING → SEARCHING
+2026-03-01 18:32:53 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:32:53 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:32:53 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:32:53 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:32:53 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:32:53 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:32:53 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:32:53 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:32:53 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:32:53 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:32:53 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:32:53 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:32:53 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:32:53 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:32:53 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:32:53 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:32:53 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:32:53 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:32:53 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:32:53 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:32:53 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:32:53 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:32:53 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:32:53 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:32:53 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:32:53 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:32:53 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:32:53 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:32:53 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:32:53 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:32:54 [ERROR] [traceId:req-1772398455588-a4bd068a]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:33:36 [ERROR] [traceId:req-1772398455588-a4bd068a]  ❌ Transição inválida: SEARCHING → SEARCHING (booking: booking_1772400814108_test_customer_001)
+2026-03-01 18:33:36 [ERROR] [traceId:req-1772398455588-a4bd068a]  ❌ Erro ao atualizar estado da corrida booking_1772400814108_test_customer_001: Transição inválida: SEARCHING → SEARCHING
+2026-03-01 18:33:36 [ERROR] [traceId:req-1772398455588-a4bd068a]  ❌ Transição inválida: SEARCHING → SEARCHING (booking: booking_1772400814108_test_customer_001)
+2026-03-01 18:33:36 [ERROR] [traceId:req-1772398455588-a4bd068a]  ❌ Erro ao atualizar estado da corrida booking_1772400814108_test_customer_001: Transição inválida: SEARCHING → SEARCHING
+2026-03-01 18:33:36 [ERROR] [traceId:req-1772398455588-a4bd068a]  ❌ Erro ao processar corrida booking_1772400814108_test_customer_001: Transição inválida: SEARCHING → SEARCHING
+2026-03-01 18:33:36 [ERROR] [traceId:req-1772398455588-a4bd068a]  ❌ Erro ao processar corrida booking_1772400814108_test_customer_001: Transição inválida: SEARCHING → SEARCHING
+2026-03-01 18:34:56 [ERROR] [traceId:req-1772398455588-a4bd068a]  ❌ Transição inválida: SEARCHING → SEARCHING (booking: booking_1772400891961_test_customer_001)
+2026-03-01 18:34:56 [ERROR] [traceId:req-1772398455588-a4bd068a]  ❌ Erro ao atualizar estado da corrida booking_1772400891961_test_customer_001: Transição inválida: SEARCHING → SEARCHING
+2026-03-01 18:34:56 [ERROR] [traceId:req-1772398455588-a4bd068a]  ❌ Erro ao processar corrida booking_1772400891961_test_customer_001: Transição inválida: SEARCHING → SEARCHING
+2026-03-01 18:35:34 [ERROR] [traceId:req-1772398455588-a4bd068a]  ❌ Transição inválida: SEARCHING → SEARCHING (booking: booking_1772400931558_test_customer_001)
+2026-03-01 18:35:34 [ERROR] [traceId:req-1772398455588-a4bd068a]  ❌ Erro ao atualizar estado da corrida booking_1772400931558_test_customer_001: Transição inválida: SEARCHING → SEARCHING
+2026-03-01 18:35:34 [ERROR] [traceId:req-1772398455588-a4bd068a]  ❌ Erro ao processar corrida booking_1772400931558_test_customer_001: Transição inválida: SEARCHING → SEARCHING
+2026-03-01 18:38:14 [ERROR] [traceId:req-1772401086925-134577b7]  ❌ Transição inválida: SEARCHING → SEARCHING (booking: booking_1772401091246_passenger_hotspot_1)
+2026-03-01 18:38:14 [ERROR] [traceId:req-1772401086925-134577b7]  ❌ Erro ao atualizar estado da corrida booking_1772401091246_passenger_hotspot_1: Transição inválida: SEARCHING → SEARCHING
+2026-03-01 18:38:14 [ERROR] [traceId:req-1772401086925-134577b7]  ❌ Erro ao processar corrida booking_1772401091246_passenger_hotspot_1: Transição inválida: SEARCHING → SEARCHING
+2026-03-01 18:38:15 [ERROR] [traceId:req-1772401086873-62df498d]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:38:15 [ERROR] [traceId:req-1772401086887-30b3bf30]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:38:15 [ERROR] [traceId:req-1772401086887-30b3bf30]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:38:15 [ERROR] [traceId:req-1772401086887-30b3bf30]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:38:15 [ERROR] [traceId:req-1772401086887-30b3bf30]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:38:15 [ERROR] [traceId:req-1772401086887-30b3bf30]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:38:15 [ERROR] [traceId:req-1772401086887-30b3bf30]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:38:15 [ERROR] [traceId:req-1772401086887-30b3bf30]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:38:15 [ERROR] [traceId:req-1772401086887-30b3bf30]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:38:15 [ERROR] [traceId:req-1772401086887-30b3bf30]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:38:15 [ERROR] [traceId:req-1772401086887-30b3bf30]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:38:15 [ERROR] [traceId:req-1772401086887-30b3bf30]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:38:15 [ERROR] [traceId:req-1772401086887-30b3bf30]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:38:15 [ERROR] [traceId:req-1772401086887-30b3bf30]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:38:15 [ERROR] [traceId:req-1772401086887-30b3bf30]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:38:15 [ERROR] [traceId:req-1772401086887-30b3bf30]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:38:15 [ERROR] [traceId:req-1772401086887-30b3bf30]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:38:15 [ERROR] [traceId:req-1772401086887-30b3bf30]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:38:15 [ERROR] [traceId:req-1772401086887-30b3bf30]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:38:15 [ERROR] [traceId:req-1772401086887-30b3bf30]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:38:15 [ERROR] [traceId:req-1772401086815-6f385460]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:38:15 [ERROR] [traceId:req-1772401086815-6f385460]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:38:15 [ERROR] [traceId:req-1772401086815-6f385460]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:38:15 [ERROR] [traceId:req-1772401086815-6f385460]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:38:15 [ERROR] [traceId:req-1772401086815-6f385460]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:38:15 [ERROR] [traceId:req-1772401086815-6f385460]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:38:15 [ERROR] [traceId:req-1772401086815-6f385460]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:38:15 [ERROR] [traceId:req-1772401086815-6f385460]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:38:15 [ERROR] [traceId:req-1772401086815-6f385460]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:38:15 [ERROR] [traceId:req-1772401086815-6f385460]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:38:17 [ERROR] [traceId:req-1772401086925-134577b7]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:38:37 [ERROR] [traceId:req-1772401086920-fafdb688]  ❌ Transição inválida: SEARCHING → SEARCHING (booking: booking_1772401115575_test_customer_001)
+2026-03-01 18:38:37 [ERROR] [traceId:req-1772401086920-fafdb688]  ❌ Erro ao atualizar estado da corrida booking_1772401115575_test_customer_001: Transição inválida: SEARCHING → SEARCHING
+2026-03-01 18:38:37 [ERROR] [traceId:req-1772401086920-fafdb688]  ❌ Transição inválida: SEARCHING → SEARCHING (booking: booking_1772401115575_test_customer_001)
+2026-03-01 18:38:37 [ERROR] [traceId:req-1772401086920-fafdb688]  ❌ Erro ao atualizar estado da corrida booking_1772401115575_test_customer_001: Transição inválida: SEARCHING → SEARCHING
+2026-03-01 18:38:37 [ERROR] [traceId:req-1772401086920-fafdb688]  ❌ Erro ao processar corrida booking_1772401115575_test_customer_001: Transição inválida: SEARCHING → SEARCHING
+2026-03-01 18:38:37 [ERROR] [traceId:req-1772401086920-fafdb688]  ❌ Erro ao processar corrida booking_1772401115575_test_customer_001: Transição inválida: SEARCHING → SEARCHING
+2026-03-01 18:39:27 [ERROR] [traceId:req-1772401086920-fafdb688]  ❌ Transição inválida: SEARCHING → SEARCHING (booking: booking_1772401166858_test_customer_001)
+2026-03-01 18:39:27 [ERROR] [traceId:req-1772401086920-fafdb688]  ❌ Erro ao atualizar estado da corrida booking_1772401166858_test_customer_001: Transição inválida: SEARCHING → SEARCHING
+2026-03-01 18:39:27 [ERROR] [traceId:req-1772401086920-fafdb688]  ❌ Erro ao processar corrida booking_1772401166858_test_customer_001: Transição inválida: SEARCHING → SEARCHING
+2026-03-01 18:39:59 [ERROR] [traceId:req-1772401086920-fafdb688]  ❌ Transição inválida: SEARCHING → SEARCHING (booking: booking_1772401195964_test_customer_001)
+2026-03-01 18:39:59 [ERROR] [traceId:req-1772401086920-fafdb688]  ❌ Erro ao atualizar estado da corrida booking_1772401195964_test_customer_001: Transição inválida: SEARCHING → SEARCHING
+2026-03-01 18:39:59 [ERROR] [traceId:req-1772401086920-fafdb688]  ❌ Erro ao processar corrida booking_1772401195964_test_customer_001: Transição inválida: SEARCHING → SEARCHING
+2026-03-01 18:43:34 [ERROR] [traceId:req-1772401406486-8aac85cc]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:43:34 [ERROR] [traceId:req-1772401406486-8aac85cc]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:43:34 [ERROR] [traceId:req-1772401406486-8aac85cc]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:43:34 [ERROR] [traceId:req-1772401406486-8aac85cc]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:43:34 [ERROR] [traceId:req-1772401406486-8aac85cc]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:43:34 [ERROR] [traceId:req-1772401406486-8aac85cc]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:43:34 [ERROR] [traceId:req-1772401406486-8aac85cc]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:43:34 [ERROR] [traceId:req-1772401406486-8aac85cc]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:43:34 [ERROR] [traceId:req-1772401406486-8aac85cc]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:43:34 [ERROR] [traceId:req-1772401406486-8aac85cc]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:43:34 [ERROR] [traceId:req-1772401406486-8aac85cc]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:43:34 [ERROR] [traceId:req-1772401406486-8aac85cc]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:43:34 [ERROR] [traceId:req-1772401406486-8aac85cc]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:43:34 [ERROR] [traceId:req-1772401406486-8aac85cc]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:43:34 [ERROR] [traceId:req-1772401406486-8aac85cc]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:43:34 [ERROR] [traceId:req-1772401406486-8aac85cc]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:43:34 [ERROR] [traceId:req-1772401406486-8aac85cc]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:43:34 [ERROR] [traceId:req-1772401406486-8aac85cc]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:43:34 [ERROR] [traceId:req-1772401406486-8aac85cc]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:43:34 [ERROR] [traceId:req-1772401406486-8aac85cc]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:47:15 [ERROR] [traceId:req-1772401627191-9f39b4c2]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:47:15 [ERROR] [traceId:req-1772401627191-9f39b4c2]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:47:15 [ERROR] [traceId:req-1772401627191-9f39b4c2]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:47:15 [ERROR] [traceId:req-1772401627191-9f39b4c2]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:47:15 [ERROR] [traceId:req-1772401627191-9f39b4c2]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:47:15 [ERROR] [traceId:req-1772401627191-9f39b4c2]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:47:15 [ERROR] [traceId:req-1772401627191-9f39b4c2]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:47:15 [ERROR] [traceId:req-1772401627191-9f39b4c2]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:47:15 [ERROR] [traceId:req-1772401627191-9f39b4c2]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:47:15 [ERROR] [traceId:req-1772401627191-9f39b4c2]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:47:15 [ERROR] [traceId:req-1772401627191-9f39b4c2]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:47:15 [ERROR] [traceId:req-1772401627191-9f39b4c2]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:47:15 [ERROR] [traceId:req-1772401627191-9f39b4c2]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:47:15 [ERROR] [traceId:req-1772401627191-9f39b4c2]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:47:15 [ERROR] [traceId:req-1772401627191-9f39b4c2]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:47:15 [ERROR] [traceId:req-1772401627191-9f39b4c2]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:47:15 [ERROR] [traceId:req-1772401627191-9f39b4c2]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:47:15 [ERROR] [traceId:req-1772401627191-9f39b4c2]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:47:15 [ERROR] [traceId:req-1772401627191-9f39b4c2]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:47:15 [ERROR] [traceId:req-1772401627191-9f39b4c2]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:48:46 [ERROR] [traceId:req-1772401627174-cf805206]  ❌ Transição inválida: SEARCHING → SEARCHING (booking: booking_1772401722704_test_customer_001)
+2026-03-01 18:48:46 [ERROR] [traceId:req-1772401627174-cf805206]  ❌ Erro ao atualizar estado da corrida booking_1772401722704_test_customer_001: Transição inválida: SEARCHING → SEARCHING
+2026-03-01 18:48:46 [ERROR] [traceId:req-1772401627174-cf805206]  ❌ Erro ao processar corrida booking_1772401722704_test_customer_001: Transição inválida: SEARCHING → SEARCHING
+2026-03-01 18:49:57 [ERROR] [traceId:req-1772401627174-cf805206]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:49:57 [ERROR] [traceId:req-1772401627174-cf805206]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:49:57 [ERROR] [traceId:req-1772401627174-cf805206]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:49:57 [ERROR] [traceId:req-1772401627174-cf805206]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:49:57 [ERROR] [traceId:req-1772401627174-cf805206]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:49:57 [ERROR] [traceId:req-1772401627174-cf805206]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:49:57 [ERROR] [traceId:req-1772401627174-cf805206]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:49:57 [ERROR] [traceId:req-1772401627174-cf805206]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:49:57 [ERROR] [traceId:req-1772401627174-cf805206]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:49:57 [ERROR] [traceId:req-1772401627174-cf805206]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:49:57 [ERROR] [traceId:req-1772401627174-cf805206]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:49:57 [ERROR] [traceId:req-1772401627174-cf805206]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:49:57 [ERROR] [traceId:req-1772401627174-cf805206]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:49:57 [ERROR] [traceId:req-1772401627174-cf805206]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:49:57 [ERROR] [traceId:req-1772401627174-cf805206]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:49:57 [ERROR] [traceId:req-1772401627174-cf805206]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:49:57 [ERROR] [traceId:req-1772401627174-cf805206]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:49:57 [ERROR] [traceId:req-1772401627174-cf805206]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:49:57 [ERROR] [traceId:req-1772401627174-cf805206]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:49:57 [ERROR] [traceId:req-1772401627174-cf805206]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:52:51 [ERROR] [traceId:req-1772401627174-cf805206]  ❌ Transição inválida: SEARCHING → SEARCHING (booking: booking_1772401968841_p_a_0_1772401963937)
+2026-03-01 18:52:51 [ERROR] [traceId:req-1772401627174-cf805206]  ❌ Erro ao atualizar estado da corrida booking_1772401968841_p_a_0_1772401963937: Transição inválida: SEARCHING → SEARCHING
+2026-03-01 18:52:51 [ERROR] [traceId:req-1772401627174-cf805206]  ❌ Erro ao processar corrida booking_1772401968841_p_a_0_1772401963937: Transição inválida: SEARCHING → SEARCHING
+2026-03-01 18:52:53 [ERROR] [traceId:req-1772401627174-cf805206]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:52:53 [ERROR] [traceId:req-1772401627174-cf805206]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:52:53 [ERROR] [traceId:req-1772401627174-cf805206]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:52:53 [ERROR] [traceId:req-1772401627174-cf805206]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:52:53 [ERROR] [traceId:req-1772401627174-cf805206]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:52:53 [ERROR] [traceId:req-1772401627174-cf805206]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:52:53 [ERROR] [traceId:req-1772401627174-cf805206]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:52:53 [ERROR] [traceId:req-1772401627174-cf805206]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:52:53 [ERROR] [traceId:req-1772401627174-cf805206]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:52:53 [ERROR] [traceId:req-1772401627174-cf805206]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:52:53 [ERROR] [traceId:req-1772401627174-cf805206]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:52:53 [ERROR] [traceId:req-1772401627174-cf805206]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:52:53 [ERROR] [traceId:req-1772401627174-cf805206]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:52:53 [ERROR] [traceId:req-1772401627174-cf805206]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:52:53 [ERROR] [traceId:req-1772401627174-cf805206]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:52:53 [ERROR] [traceId:req-1772401627174-cf805206]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:52:53 [ERROR] [traceId:req-1772401627174-cf805206]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:52:53 [ERROR] [traceId:req-1772401627174-cf805206]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:52:53 [ERROR] [traceId:req-1772401627174-cf805206]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:52:53 [ERROR] [traceId:req-1772401627174-cf805206]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:55:58 [ERROR] [traceId:req-1772402149340-03bc1227]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:55:58 [ERROR] [traceId:req-1772402149340-03bc1227]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:55:58 [ERROR] [traceId:req-1772402149340-03bc1227]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:55:58 [ERROR] [traceId:req-1772402149340-03bc1227]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:55:58 [ERROR] [traceId:req-1772402149340-03bc1227]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:55:58 [ERROR] [traceId:req-1772402149340-03bc1227]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:55:58 [ERROR] [traceId:req-1772402149340-03bc1227]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:55:58 [ERROR] [traceId:req-1772402149340-03bc1227]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:55:58 [ERROR] [traceId:req-1772402149340-03bc1227]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:55:58 [ERROR] [traceId:req-1772402149340-03bc1227]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:55:58 [ERROR] [traceId:req-1772402149340-03bc1227]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:55:58 [ERROR] [traceId:req-1772402149340-03bc1227]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:55:58 [ERROR] [traceId:req-1772402149340-03bc1227]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:55:58 [ERROR] [traceId:req-1772402149340-03bc1227]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:55:58 [ERROR] [traceId:req-1772402149340-03bc1227]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:55:58 [ERROR] [traceId:req-1772402149340-03bc1227]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:55:58 [ERROR] [traceId:req-1772402149340-03bc1227]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:55:58 [ERROR] [traceId:req-1772402149340-03bc1227]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:55:58 [ERROR] [traceId:req-1772402149340-03bc1227]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:55:58 [ERROR] [traceId:req-1772402149340-03bc1227]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:56:05 [ERROR] [traceId:req-1772402149335-f9df13b9]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 18:57:47 [ERROR] [traceId:req-1772402149335-f9df13b9]  ❌ Transição inválida: SEARCHING → SEARCHING (booking: booking_1772402264420_p_d_1772402255109)
+2026-03-01 18:57:47 [ERROR] [traceId:req-1772402149335-f9df13b9]  ❌ Erro ao atualizar estado da corrida booking_1772402264420_p_d_1772402255109: Transição inválida: SEARCHING → SEARCHING
+2026-03-01 18:57:47 [ERROR] [traceId:req-1772402149335-f9df13b9]  ❌ Transição inválida: SEARCHING → SEARCHING (booking: booking_1772402264420_p_d_1772402255109)
+2026-03-01 18:57:47 [ERROR] [traceId:req-1772402149335-f9df13b9]  ❌ Erro ao atualizar estado da corrida booking_1772402264420_p_d_1772402255109: Transição inválida: SEARCHING → SEARCHING
+2026-03-01 18:57:47 [ERROR] [traceId:req-1772402149335-f9df13b9]  ❌ Erro ao processar corrida booking_1772402264420_p_d_1772402255109: Transição inválida: SEARCHING → SEARCHING
+2026-03-01 18:57:47 [ERROR] [traceId:req-1772402149335-f9df13b9]  ❌ Erro ao processar corrida booking_1772402264420_p_d_1772402255109: Transição inválida: SEARCHING → SEARCHING
+2026-03-01 19:00:13 [ERROR] [traceId:req-1772402404601-99e0b8cd]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 19:00:13 [ERROR] [traceId:req-1772402404601-99e0b8cd]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 19:00:13 [ERROR] [traceId:req-1772402404601-99e0b8cd]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 19:00:13 [ERROR] [traceId:req-1772402404601-99e0b8cd]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 19:00:13 [ERROR] [traceId:req-1772402404601-99e0b8cd]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 19:00:13 [ERROR] [traceId:req-1772402404601-99e0b8cd]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 19:00:13 [ERROR] [traceId:req-1772402404601-99e0b8cd]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 19:00:13 [ERROR] [traceId:req-1772402404601-99e0b8cd]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 19:00:13 [ERROR] [traceId:req-1772402404601-99e0b8cd]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 19:00:13 [ERROR] [traceId:req-1772402404601-99e0b8cd]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 19:00:13 [ERROR] [traceId:req-1772402404601-99e0b8cd]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 19:00:13 [ERROR] [traceId:req-1772402404601-99e0b8cd]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 19:00:13 [ERROR] [traceId:req-1772402404601-99e0b8cd]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 19:00:13 [ERROR] [traceId:req-1772402404601-99e0b8cd]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 19:00:13 [ERROR] [traceId:req-1772402404601-99e0b8cd]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 19:00:13 [ERROR] [traceId:req-1772402404601-99e0b8cd]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 19:00:13 [ERROR] [traceId:req-1772402404601-99e0b8cd]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 19:00:13 [ERROR] [traceId:req-1772402404601-99e0b8cd]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 19:00:13 [ERROR] [traceId:req-1772402404601-99e0b8cd]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 19:00:13 [ERROR] [traceId:req-1772402404601-99e0b8cd]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 19:16:49 [ERROR] [traceId:req-1772403400535-7776f383]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 19:16:49 [ERROR] [traceId:req-1772403400535-7776f383]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 19:16:49 [ERROR] [traceId:req-1772403400535-7776f383]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 19:16:49 [ERROR] [traceId:req-1772403400535-7776f383]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 19:16:49 [ERROR] [traceId:req-1772403400535-7776f383]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 19:16:49 [ERROR] [traceId:req-1772403400535-7776f383]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 19:16:49 [ERROR] [traceId:req-1772403400535-7776f383]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 19:16:49 [ERROR] [traceId:req-1772403400535-7776f383]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 19:16:49 [ERROR] [traceId:req-1772403400535-7776f383]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 19:16:49 [ERROR] [traceId:req-1772403400535-7776f383]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 19:16:49 [ERROR] [traceId:req-1772403400535-7776f383]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 19:16:49 [ERROR] [traceId:req-1772403400535-7776f383]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 19:16:49 [ERROR] [traceId:req-1772403400535-7776f383]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 19:16:49 [ERROR] [traceId:req-1772403400535-7776f383]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 19:16:49 [ERROR] [traceId:req-1772403400535-7776f383]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 19:16:49 [ERROR] [traceId:req-1772403400535-7776f383]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 19:16:49 [ERROR] [traceId:req-1772403400535-7776f383]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 19:16:49 [ERROR] [traceId:req-1772403400535-7776f383]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 19:16:49 [ERROR] [traceId:req-1772403400535-7776f383]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 19:16:49 [ERROR] [traceId:req-1772403400535-7776f383]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 19:16:56 [ERROR] [traceId:req-1772403400507-9d2309c6]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 19:20:39 [ERROR] [traceId:req-1772403629967-b4aae3cd]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 19:20:39 [ERROR] [traceId:req-1772403629967-b4aae3cd]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 19:20:39 [ERROR] [traceId:req-1772403629967-b4aae3cd]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 19:20:39 [ERROR] [traceId:req-1772403629967-b4aae3cd]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 19:20:39 [ERROR] [traceId:req-1772403629967-b4aae3cd]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 19:20:39 [ERROR] [traceId:req-1772403629967-b4aae3cd]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 19:20:39 [ERROR] [traceId:req-1772403629967-b4aae3cd]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 19:20:39 [ERROR] [traceId:req-1772403629967-b4aae3cd]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 19:20:39 [ERROR] [traceId:req-1772403629967-b4aae3cd]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 19:20:39 [ERROR] [traceId:req-1772403629967-b4aae3cd]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 19:20:39 [ERROR] [traceId:req-1772403629967-b4aae3cd]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 19:20:39 [ERROR] [traceId:req-1772403629967-b4aae3cd]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 19:20:39 [ERROR] [traceId:req-1772403629967-b4aae3cd]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 19:20:39 [ERROR] [traceId:req-1772403629967-b4aae3cd]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 19:20:39 [ERROR] [traceId:req-1772403629967-b4aae3cd]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 19:20:39 [ERROR] [traceId:req-1772403629967-b4aae3cd]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 19:20:39 [ERROR] [traceId:req-1772403629967-b4aae3cd]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 19:20:39 [ERROR] [traceId:req-1772403629967-b4aae3cd]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 19:20:39 [ERROR] [traceId:req-1772403629967-b4aae3cd]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 19:20:39 [ERROR] [traceId:req-1772403629967-b4aae3cd]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 19:22:52 [ERROR] [traceId:req-1772403629951-561a4f36]  ❌ Transição inválida: SEARCHING → SEARCHING (booking: booking_1772403767854_pd_1772403760344)
+2026-03-01 19:22:52 [ERROR] [traceId:req-1772403629951-561a4f36]  ❌ Erro ao atualizar estado da corrida booking_1772403767854_pd_1772403760344: Transição inválida: SEARCHING → SEARCHING
+2026-03-01 19:22:52 [ERROR] [traceId:req-1772403629951-561a4f36]  ❌ Erro ao processar corrida booking_1772403767854_pd_1772403760344: Transição inválida: SEARCHING → SEARCHING
+2026-03-01 19:27:32 [ERROR] [traceId:req-1772404043638-b379abdf]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 19:27:32 [ERROR] [traceId:req-1772404043638-b379abdf]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 19:27:32 [ERROR] [traceId:req-1772404043638-b379abdf]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 19:27:32 [ERROR] [traceId:req-1772404043638-b379abdf]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 19:27:32 [ERROR] [traceId:req-1772404043638-b379abdf]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 19:27:32 [ERROR] [traceId:req-1772404043638-b379abdf]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 19:27:32 [ERROR] [traceId:req-1772404043638-b379abdf]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 19:27:32 [ERROR] [traceId:req-1772404043638-b379abdf]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 19:27:32 [ERROR] [traceId:req-1772404043638-b379abdf]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 19:27:32 [ERROR] [traceId:req-1772404043638-b379abdf]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 19:27:32 [ERROR] [traceId:req-1772404043638-b379abdf]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 19:27:32 [ERROR] [traceId:req-1772404043638-b379abdf]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 19:27:32 [ERROR] [traceId:req-1772404043638-b379abdf]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 19:27:32 [ERROR] [traceId:req-1772404043638-b379abdf]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 19:27:32 [ERROR] [traceId:req-1772404043638-b379abdf]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 19:27:32 [ERROR] [traceId:req-1772404043638-b379abdf]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 19:27:32 [ERROR] [traceId:req-1772404043638-b379abdf]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 19:27:32 [ERROR] [traceId:req-1772404043638-b379abdf]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 19:27:32 [ERROR] [traceId:req-1772404043638-b379abdf]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 19:27:33 [ERROR] [traceId:req-1772404043638-b379abdf]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 19:27:38 [ERROR] [traceId:req-1772404043635-49ce32d1]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 19:30:20 [ERROR] [traceId:req-1772404043635-49ce32d1]  ❌ Transição inválida: SEARCHING → SEARCHING (booking: booking_1772404219096_pd_1772404210225)
+2026-03-01 19:30:20 [ERROR] [traceId:req-1772404043635-49ce32d1]  ❌ Erro ao atualizar estado da corrida booking_1772404219096_pd_1772404210225: Transição inválida: SEARCHING → SEARCHING
+2026-03-01 19:30:20 [ERROR] [traceId:req-1772404043635-49ce32d1]  ❌ Erro ao processar corrida booking_1772404219096_pd_1772404210225: Transição inválida: SEARCHING → SEARCHING
+2026-03-01 19:32:19 [ERROR] [traceId:req-1772404330258-aca270de]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 19:32:19 [ERROR] [traceId:req-1772404330258-aca270de]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 19:32:19 [ERROR] [traceId:req-1772404330258-aca270de]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 19:32:19 [ERROR] [traceId:req-1772404330258-aca270de]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 19:32:19 [ERROR] [traceId:req-1772404330258-aca270de]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 19:32:19 [ERROR] [traceId:req-1772404330258-aca270de]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 19:32:19 [ERROR] [traceId:req-1772404330258-aca270de]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 19:32:19 [ERROR] [traceId:req-1772404330258-aca270de]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 19:32:19 [ERROR] [traceId:req-1772404330258-aca270de]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 19:32:19 [ERROR] [traceId:req-1772404330258-aca270de]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 19:32:19 [ERROR] [traceId:req-1772404330258-aca270de]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 19:32:19 [ERROR] [traceId:req-1772404330258-aca270de]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 19:32:19 [ERROR] [traceId:req-1772404330258-aca270de]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 19:32:19 [ERROR] [traceId:req-1772404330258-aca270de]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 19:32:19 [ERROR] [traceId:req-1772404330258-aca270de]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 19:32:19 [ERROR] [traceId:req-1772404330258-aca270de]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 19:32:19 [ERROR] [traceId:req-1772404330258-aca270de]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 19:32:19 [ERROR] [traceId:req-1772404330258-aca270de]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 19:32:19 [ERROR] [traceId:req-1772404330258-aca270de]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 19:32:19 [ERROR] [traceId:req-1772404330258-aca270de]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 19:32:26 [ERROR] [traceId:req-1772404330251-18f80356]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 19:36:23 [ERROR] [traceId:req-1772404574056-458513a1]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 19:36:23 [ERROR] [traceId:req-1772404574056-458513a1]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 19:36:23 [ERROR] [traceId:req-1772404574056-458513a1]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 19:36:23 [ERROR] [traceId:req-1772404574056-458513a1]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 19:36:23 [ERROR] [traceId:req-1772404574056-458513a1]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 19:36:23 [ERROR] [traceId:req-1772404574056-458513a1]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 19:36:23 [ERROR] [traceId:req-1772404574056-458513a1]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 19:36:23 [ERROR] [traceId:req-1772404574056-458513a1]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 19:36:23 [ERROR] [traceId:req-1772404574056-458513a1]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 19:36:23 [ERROR] [traceId:req-1772404574056-458513a1]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 19:36:23 [ERROR] [traceId:req-1772404574056-458513a1]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 19:36:23 [ERROR] [traceId:req-1772404574056-458513a1]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 19:36:23 [ERROR] [traceId:req-1772404574056-458513a1]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 19:36:23 [ERROR] [traceId:req-1772404574056-458513a1]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 19:36:23 [ERROR] [traceId:req-1772404574056-458513a1]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 19:36:23 [ERROR] [traceId:req-1772404574056-458513a1]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 19:36:23 [ERROR] [traceId:req-1772404574056-458513a1]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 19:36:23 [ERROR] [traceId:req-1772404574056-458513a1]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 19:36:23 [ERROR] [traceId:req-1772404574056-458513a1]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 19:36:23 [ERROR] [traceId:req-1772404574056-458513a1]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 19:38:20 [ERROR] [traceId:req-1772404574049-4ed4f93c]  ❌ Transição inválida: SEARCHING → SEARCHING (booking: booking_1772404696369_pd_1772404687184)
+2026-03-01 19:38:20 [ERROR] [traceId:req-1772404574049-4ed4f93c]  ❌ Erro ao atualizar estado da corrida booking_1772404696369_pd_1772404687184: Transição inválida: SEARCHING → SEARCHING
+2026-03-01 19:38:20 [ERROR] [traceId:req-1772404574049-4ed4f93c]  ❌ Erro ao processar corrida booking_1772404696369_pd_1772404687184: Transição inválida: SEARCHING → SEARCHING
+2026-03-01 22:16:33 [ERROR] [traceId:req-1772404574049-4ed4f93c]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 22:16:33 [ERROR] [traceId:req-1772404574049-4ed4f93c]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 22:16:33 [ERROR] [traceId:req-1772404574049-4ed4f93c]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 22:16:33 [ERROR] [traceId:req-1772404574049-4ed4f93c]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 22:16:33 [ERROR] [traceId:req-1772404574049-4ed4f93c]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 22:16:33 [ERROR] [traceId:req-1772404574049-4ed4f93c]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 22:16:33 [ERROR] [traceId:req-1772404574049-4ed4f93c]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 22:16:33 [ERROR] [traceId:req-1772404574049-4ed4f93c]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 22:16:33 [ERROR] [traceId:req-1772404574049-4ed4f93c]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 22:16:33 [ERROR] [traceId:req-1772404574049-4ed4f93c]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 22:16:33 [ERROR] [traceId:req-1772404574049-4ed4f93c]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 22:16:33 [ERROR] [traceId:req-1772404574049-4ed4f93c]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 22:16:33 [ERROR] [traceId:req-1772404574049-4ed4f93c]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 22:16:33 [ERROR] [traceId:req-1772404574049-4ed4f93c]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 22:16:33 [ERROR] [traceId:req-1772404574049-4ed4f93c]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 22:16:33 [ERROR] [traceId:req-1772404574049-4ed4f93c]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 22:16:33 [ERROR] [traceId:req-1772404574049-4ed4f93c]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 22:16:33 [ERROR] [traceId:req-1772404574049-4ed4f93c]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 22:16:33 [ERROR] [traceId:req-1772404574049-4ed4f93c]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 22:16:33 [ERROR] [traceId:req-1772404574049-4ed4f93c]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 22:17:26 [ERROR] [traceId:req-1772404574049-4ed4f93c]  ❌ Transição inválida: SEARCHING → SEARCHING (booking: booking_1772414242970_pb_5_1772414239813)
+2026-03-01 22:17:26 [ERROR] [traceId:req-1772404574049-4ed4f93c]  ❌ Erro ao atualizar estado da corrida booking_1772414242970_pb_5_1772414239813: Transição inválida: SEARCHING → SEARCHING
+2026-03-01 22:17:26 [ERROR] [traceId:req-1772404574049-4ed4f93c]  ❌ Erro ao processar corrida booking_1772414242970_pb_5_1772414239813: Transição inválida: SEARCHING → SEARCHING
+2026-03-01 22:18:38 [ERROR] [traceId:req-1772404574049-4ed4f93c]  ❌ Transição inválida: SEARCHING → SEARCHING (booking: booking_1772414315533_pd_1772414306238)
+2026-03-01 22:18:38 [ERROR] [traceId:req-1772404574049-4ed4f93c]  ❌ Erro ao atualizar estado da corrida booking_1772414315533_pd_1772414306238: Transição inválida: SEARCHING → SEARCHING
+2026-03-01 22:18:38 [ERROR] [traceId:req-1772404574049-4ed4f93c]  ❌ Erro ao processar corrida booking_1772414315533_pd_1772414306238: Transição inválida: SEARCHING → SEARCHING
+2026-03-01 22:19:20 [ERROR] [traceId:req-1772404574049-4ed4f93c]  ❌ Transição inválida: SEARCHING → SEARCHING (booking: booking_1772414356155_test_customer_001)
+2026-03-01 22:19:20 [ERROR] [traceId:req-1772404574049-4ed4f93c]  ❌ Erro ao atualizar estado da corrida booking_1772414356155_test_customer_001: Transição inválida: SEARCHING → SEARCHING
+2026-03-01 22:19:20 [ERROR] [traceId:req-1772404574049-4ed4f93c]  ❌ Erro ao processar corrida booking_1772414356155_test_customer_001: Transição inválida: SEARCHING → SEARCHING
+2026-03-01 22:19:32 [ERROR] [traceId:req-1772404574049-4ed4f93c]  ❌ Transição inválida: SEARCHING → SEARCHING (booking: booking_1772414369494_test_customer_001)
+2026-03-01 22:19:32 [ERROR] [traceId:req-1772404574049-4ed4f93c]  ❌ Erro ao atualizar estado da corrida booking_1772414369494_test_customer_001: Transição inválida: SEARCHING → SEARCHING
+2026-03-01 22:19:32 [ERROR] [traceId:req-1772404574049-4ed4f93c]  ❌ Erro ao processar corrida booking_1772414369494_test_customer_001: Transição inválida: SEARCHING → SEARCHING
+2026-03-01 22:20:30 [ERROR] [traceId:req-1772404574049-4ed4f93c]  ❌ Transição inválida: SEARCHING → SEARCHING (booking: booking_1772414426632_test_customer_001)
+2026-03-01 22:20:30 [ERROR] [traceId:req-1772404574049-4ed4f93c]  ❌ Erro ao atualizar estado da corrida booking_1772414426632_test_customer_001: Transição inválida: SEARCHING → SEARCHING
+2026-03-01 22:20:30 [ERROR] [traceId:req-1772404574049-4ed4f93c]  ❌ Transição inválida: SEARCHING → SEARCHING (booking: booking_1772414426632_test_customer_001)
+2026-03-01 22:20:30 [ERROR] [traceId:req-1772404574049-4ed4f93c]  ❌ Erro ao atualizar estado da corrida booking_1772414426632_test_customer_001: Transição inválida: SEARCHING → SEARCHING
+2026-03-01 22:20:30 [ERROR] [traceId:req-1772404574049-4ed4f93c]  ❌ Erro ao processar corrida booking_1772414426632_test_customer_001: Transição inválida: SEARCHING → SEARCHING
+2026-03-01 22:20:30 [ERROR] [traceId:req-1772404574049-4ed4f93c]  ❌ Erro ao processar corrida booking_1772414426632_test_customer_001: Transição inválida: SEARCHING → SEARCHING
+2026-03-01 22:21:09 [ERROR] [traceId:req-1772404574049-4ed4f93c]  ❌ Transição inválida: SEARCHING → SEARCHING (booking: booking_1772414464922_test_customer_001)
+2026-03-01 22:21:09 [ERROR] [traceId:req-1772404574049-4ed4f93c]  ❌ Erro ao atualizar estado da corrida booking_1772414464922_test_customer_001: Transição inválida: SEARCHING → SEARCHING
+2026-03-01 22:21:09 [ERROR] [traceId:req-1772404574049-4ed4f93c]  ❌ Erro ao processar corrida booking_1772414464922_test_customer_001: Transição inválida: SEARCHING → SEARCHING
+2026-03-01 22:35:30 [ERROR] [traceId:req-1772415322252-419c9d9f]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 22:35:30 [ERROR] [traceId:req-1772415322252-419c9d9f]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 22:35:30 [ERROR] [traceId:req-1772415322252-419c9d9f]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 22:35:30 [ERROR] [traceId:req-1772415322252-419c9d9f]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 22:35:30 [ERROR] [traceId:req-1772415322252-419c9d9f]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 22:35:30 [ERROR] [traceId:req-1772415322252-419c9d9f]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 22:35:30 [ERROR] [traceId:req-1772415322252-419c9d9f]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 22:35:30 [ERROR] [traceId:req-1772415322252-419c9d9f]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 22:35:30 [ERROR] [traceId:req-1772415322252-419c9d9f]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 22:35:30 [ERROR] [traceId:req-1772415322252-419c9d9f]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 22:35:30 [ERROR] [traceId:req-1772415322252-419c9d9f]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 22:35:30 [ERROR] [traceId:req-1772415322252-419c9d9f]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 22:35:30 [ERROR] [traceId:req-1772415322252-419c9d9f]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 22:35:30 [ERROR] [traceId:req-1772415322252-419c9d9f]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 22:35:30 [ERROR] [traceId:req-1772415322252-419c9d9f]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 22:35:30 [ERROR] [traceId:req-1772415322252-419c9d9f]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 22:35:30 [ERROR] [traceId:req-1772415322252-419c9d9f]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 22:35:30 [ERROR] [traceId:req-1772415322252-419c9d9f]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 22:35:30 [ERROR] [traceId:req-1772415322252-419c9d9f]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 22:35:30 [ERROR] [traceId:req-1772415322252-419c9d9f]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 22:54:18 [ERROR] [traceId:req-1772416364635-89777259]  ❌ Transição inválida: SEARCHING → SEARCHING (booking: booking_1772416455367_pa_1_1772416450850)
+2026-03-01 22:54:18 [ERROR] [traceId:req-1772416364635-89777259]  ❌ Erro ao atualizar estado da corrida booking_1772416455367_pa_1_1772416450850: Transição inválida: SEARCHING → SEARCHING
+2026-03-01 22:54:18 [ERROR] [traceId:req-1772416364635-89777259]  ❌ Erro ao processar corrida booking_1772416455367_pa_1_1772416450850: Transição inválida: SEARCHING → SEARCHING
+2026-03-01 22:54:19 [ERROR] [traceId:req-1772416364635-89777259]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 22:54:19 [ERROR] [traceId:req-1772416364635-89777259]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 22:54:19 [ERROR] [traceId:req-1772416364635-89777259]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 22:54:19 [ERROR] [traceId:req-1772416364635-89777259]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 22:54:19 [ERROR] [traceId:req-1772416364635-89777259]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 22:54:19 [ERROR] [traceId:req-1772416364635-89777259]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 22:54:19 [ERROR] [traceId:req-1772416364635-89777259]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 22:54:19 [ERROR] [traceId:req-1772416364635-89777259]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 22:54:19 [ERROR] [traceId:req-1772416364635-89777259]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 22:54:19 [ERROR] [traceId:req-1772416364635-89777259]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 22:54:19 [ERROR] [traceId:req-1772416364635-89777259]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 22:54:19 [ERROR] [traceId:req-1772416364635-89777259]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 22:54:19 [ERROR] [traceId:req-1772416364635-89777259]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 22:54:19 [ERROR] [traceId:req-1772416364635-89777259]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 22:54:19 [ERROR] [traceId:req-1772416364635-89777259]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 22:54:19 [ERROR] [traceId:req-1772416364635-89777259]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 22:54:19 [ERROR] [traceId:req-1772416364635-89777259]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 22:54:19 [ERROR] [traceId:req-1772416364635-89777259]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 22:54:19 [ERROR] [traceId:req-1772416364635-89777259]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-01 22:54:19 [ERROR] [traceId:req-1772416364635-89777259]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-02 00:27:21 [ERROR] [traceId:req-1772422028521-9488017c]  ❌ Transição inválida: SEARCHING → SEARCHING (booking: booking_1772422036891_customer_1772422028497)
+2026-03-02 00:27:21 [ERROR] [traceId:req-1772422028521-9488017c]  ❌ Erro ao atualizar estado da corrida booking_1772422036891_customer_1772422028497: Transição inválida: SEARCHING → SEARCHING
+2026-03-02 00:27:21 [ERROR] [traceId:req-1772422028521-9488017c]  ❌ Erro ao processar corrida booking_1772422036891_customer_1772422028497: Transição inválida: SEARCHING → SEARCHING
+2026-03-02 00:27:50 [ERROR] [traceId:req-1772422029849-86378ad3]  ❌ Transição inválida: SEARCHING → SEARCHING (booking: booking_1772422067669_customer_b_1772422058495)
+2026-03-02 00:27:50 [ERROR] [traceId:req-1772422029849-86378ad3]  ❌ Erro ao atualizar estado da corrida booking_1772422067669_customer_b_1772422058495: Transição inválida: SEARCHING → SEARCHING
+2026-03-02 00:27:50 [ERROR] [traceId:req-1772422029849-86378ad3]  ❌ Erro ao processar corrida booking_1772422067669_customer_b_1772422058495: Transição inválida: SEARCHING → SEARCHING
+2026-03-02 00:29:34 [ERROR] [traceId:req-1772422162176-2e00d9c3]  ❌ Transição inválida: SEARCHING → SEARCHING (booking: booking_1772422170696_customer_1772422162147)
+2026-03-02 00:29:34 [ERROR] [traceId:req-1772422162176-2e00d9c3]  ❌ Erro ao atualizar estado da corrida booking_1772422170696_customer_1772422162147: Transição inválida: SEARCHING → SEARCHING
+2026-03-02 00:29:34 [ERROR] [traceId:req-1772422162176-2e00d9c3]  ❌ Erro ao processar corrida booking_1772422170696_customer_1772422162147: Transição inválida: SEARCHING → SEARCHING
+2026-03-02 00:32:30 [ERROR] [traceId:req-1772422337616-17311066]  ❌ Transição inválida: SEARCHING → SEARCHING (booking: booking_1772422346578_customer_1772422337594)
+2026-03-02 00:32:30 [ERROR] [traceId:req-1772422337616-17311066]  ❌ Erro ao atualizar estado da corrida booking_1772422346578_customer_1772422337594: Transição inválida: SEARCHING → SEARCHING
+2026-03-02 00:32:30 [ERROR] [traceId:req-1772422337616-17311066]  ❌ Erro ao processar corrida booking_1772422346578_customer_1772422337594: Transição inválida: SEARCHING → SEARCHING
+2026-03-02 01:05:09 [ERROR] [traceId:req-1772424287639-c758fd2d]  Erro ao ativar corrida em bookings:active {"bookingId":"booking_1772424294724_customer_1772424286255"}
+2026-03-02 01:05:35 [ERROR] [traceId:req-1772424287639-c758fd2d]  Erro ao ativar corrida em bookings:active {"bookingId":"booking_1772424319296_customer_b_1772424310631"}
+2026-03-02 01:08:49 [ERROR] [traceId:req-1772424507754-e1a829c7]  Erro ao ativar corrida em bookings:active {"bookingId":"booking_1772424514938_customer_1772424505894"}
+2026-03-02 01:09:03 [ERROR] [traceId:req-1772424507754-e1a829c7]  ❌ Transição inválida: SEARCHING → SEARCHING (booking: booking_1772424539597_customer_b_1772424530839)
+2026-03-02 01:09:03 [ERROR] [traceId:req-1772424507754-e1a829c7]  ❌ Erro ao atualizar estado da corrida booking_1772424539597_customer_b_1772424530839: Transição inválida: SEARCHING → SEARCHING
+2026-03-02 01:09:03 [ERROR] [traceId:req-1772424507754-e1a829c7]  ❌ Transição inválida: SEARCHING → SEARCHING (booking: booking_1772424539597_customer_b_1772424530839)
+2026-03-02 01:09:03 [ERROR] [traceId:req-1772424507754-e1a829c7]  ❌ Erro ao atualizar estado da corrida booking_1772424539597_customer_b_1772424530839: Transição inválida: SEARCHING → SEARCHING
+2026-03-02 01:09:03 [ERROR] [traceId:req-1772424507754-e1a829c7]  ❌ Erro ao processar corrida booking_1772424539597_customer_b_1772424530839: Transição inválida: SEARCHING → SEARCHING
+2026-03-02 01:09:03 [ERROR] [traceId:req-1772424507754-e1a829c7]  ❌ Erro ao processar corrida booking_1772424539597_customer_b_1772424530839: Transição inválida: SEARCHING → SEARCHING
+2026-03-02 01:09:15 [ERROR] [traceId:req-1772424507754-e1a829c7]  Erro ao ativar corrida em bookings:active {"bookingId":"booking_1772424539597_customer_b_1772424530839"}
+2026-03-02 01:11:19 [ERROR] [traceId:req-1772424507754-e1a829c7]  Erro ao ativar corrida em bookings:active {"bookingId":"booking_1772424664857_customer_1772424656330"}
+2026-03-02 01:12:13 [ERROR] [traceId:req-1772424721618-ac55fe6d]  ❌ Transição inválida: SEARCHING → SEARCHING (booking: booking_1772424730113_customer_1772424721597)
+2026-03-02 01:12:13 [ERROR] [traceId:req-1772424721618-ac55fe6d]  ❌ Erro ao atualizar estado da corrida booking_1772424730113_customer_1772424721597: Transição inválida: SEARCHING → SEARCHING
+2026-03-02 01:12:13 [ERROR] [traceId:req-1772424721618-ac55fe6d]  ❌ Erro ao processar corrida booking_1772424730113_customer_1772424721597: Transição inválida: SEARCHING → SEARCHING
+2026-03-02 01:12:25 [ERROR] [traceId:req-1772424722936-97336e85]  Erro ao ativar corrida em bookings:active {"bookingId":"booking_1772424730113_customer_1772424721597"}
+2026-03-02 01:13:08 [ERROR] [traceId:req-1772424722936-97336e85]  Erro ao ativar corrida em bookings:active {"bookingId":"booking_1772424773053_customer_b_1772424764737"}
+2026-03-02 01:16:27 [ERROR] [traceId:req-1772424722936-97336e85]  ❌ [RedisScan] Erro ao escanear chaves com padrão connections:user:*: Command timed out
+2026-03-02 01:16:28 [ERROR] [traceId:req-1772424722936-97336e85]  ❌ [ConnectionCleanupService] Erro ao limpar registros órfãos: Command timed out
+2026-03-02 01:16:28 [ERROR] [traceId:req-1772424722936-97336e85]  ❌ [RedisScan] Erro ao escanear chaves com padrão booking_search:*: Command timed out
+2026-03-02 01:16:28 [ERROR] [traceId:req-1772424722936-97336e85]  ❌ [RadiusExpansionManager] Erro ao buscar corridas em SEARCHING: Command timed out
+2026-03-02 01:16:28 [ERROR] [traceId:req-1772424722936-97336e85]  Command timed out
+2026-03-02 01:16:28 [ERROR] [traceId:req-1772424722936-97336e85]  ❌ [ResponseHandler] Erro ao enviar próxima corrida para driver_1772424721597: Command timed out
+2026-03-02 01:16:28 [ERROR] [traceId:req-1772424722936-97336e85]  ❌ [ResponseHandler] Erro ao enviar próxima corrida para driver_1772424721597: Command timed out
+2026-03-02 01:16:28 [ERROR] [traceId:req-1772424722936-97336e85]  ❌ [ResponseHandler] Erro ao enviar próxima corrida para driver_b_1772424764737: Command timed out
+2026-03-02 01:16:28 [ERROR] [traceId:req-1772424722936-97336e85]  ❌ [ResponseHandler] Erro ao enviar próxima corrida para driver_1772424721597: Command timed out
+2026-03-02 01:16:28 [ERROR] [traceId:req-1772424722936-97336e85]  ❌ [ResponseHandler] Erro ao enviar próxima corrida para driver_b_1772424764737: Command timed out
+2026-03-02 01:38:45 [ERROR] [traceId:req-1772424722936-97336e85]  ❌ Transição inválida: SEARCHING → SEARCHING (booking: booking_1772426321586_customer_1772426312429)
+2026-03-02 01:38:45 [ERROR] [traceId:req-1772424722936-97336e85]  ❌ Erro ao atualizar estado da corrida booking_1772426321586_customer_1772426312429: Transição inválida: SEARCHING → SEARCHING
+2026-03-02 01:38:45 [ERROR] [traceId:req-1772424722936-97336e85]  ❌ Erro ao processar corrida booking_1772426321586_customer_1772426312429: Transição inválida: SEARCHING → SEARCHING
+2026-03-02 01:38:57 [ERROR] [traceId:req-1772424722936-97336e85]  Erro ao ativar corrida em bookings:active {"bookingId":"booking_1772426321586_customer_1772426312429"}
+2026-03-02 01:39:28 [ERROR] [traceId:req-1772424722936-97336e85]  ❌ Transição inválida: SEARCHING → SEARCHING (booking: booking_1772426365846_customer_b_1772426357411)
+2026-03-02 01:39:28 [ERROR] [traceId:req-1772424722936-97336e85]  ❌ Erro ao atualizar estado da corrida booking_1772426365846_customer_b_1772426357411: Transição inválida: SEARCHING → SEARCHING
+2026-03-02 01:39:28 [ERROR] [traceId:req-1772424722936-97336e85]  ❌ Erro ao processar corrida booking_1772426365846_customer_b_1772426357411: Transição inválida: SEARCHING → SEARCHING
+2026-03-02 01:39:41 [ERROR] [traceId:req-1772424722936-97336e85]  Erro ao ativar corrida em bookings:active {"bookingId":"booking_1772426365846_customer_b_1772426357411"}
+2026-03-02 01:47:56 [ERROR] [traceId:req-1772424722936-97336e85]  ❌ Transição inválida: SEARCHING → SEARCHING (booking: booking_1772426872582_customer_1772426864070)
+2026-03-02 01:47:56 [ERROR] [traceId:req-1772424722936-97336e85]  ❌ Erro ao atualizar estado da corrida booking_1772426872582_customer_1772426864070: Transição inválida: SEARCHING → SEARCHING
+2026-03-02 01:47:56 [ERROR] [traceId:req-1772424722936-97336e85]  ❌ Erro ao processar corrida booking_1772426872582_customer_1772426864070: Transição inválida: SEARCHING → SEARCHING
+2026-03-02 01:48:08 [ERROR] [traceId:req-1772424722936-97336e85]  Erro ao ativar corrida em bookings:active {"bookingId":"booking_1772426872582_customer_1772426864070"}
+2026-03-02 01:48:52 [ERROR] [traceId:req-1772424722936-97336e85]  Erro ao ativar corrida em bookings:active {"bookingId":"booking_1772426916741_customer_b_1772426908371"}
+2026-03-02 01:51:39 [ERROR] [traceId:req-1772424722936-97336e85]  Erro ao ativar corrida em bookings:active {"bookingId":"booking_1772427085341_customer_b_1772427076435"}
+2026-03-02 01:54:47 [ERROR] [traceId:req-1772427264216-69afc1c7]  Erro ao ativar corrida em bookings:active {"bookingId":"booking_1772427271396_customer_b_1772427263083"}
+2026-03-02 07:00:24 [ERROR] [traceId:req-1772427264216-69afc1c7]  Erro ao ativar corrida em bookings:active {"bookingId":"booking_1772445608237_customer_b_1772445599658"}
+2026-03-02 07:35:05 [ERROR] [traceId:req-1772447694536-79a0fa66]  ❌ Transição inválida: SEARCHING → SEARCHING (booking: booking_1772447702874_test_customer_001)
+2026-03-02 07:35:05 [ERROR] [traceId:req-1772447694536-79a0fa66]  ❌ Erro ao atualizar estado da corrida booking_1772447702874_test_customer_001: Transição inválida: SEARCHING → SEARCHING
+2026-03-02 07:35:05 [ERROR] [traceId:req-1772447694536-79a0fa66]  ❌ Erro ao processar corrida booking_1772447702874_test_customer_001: Transição inválida: SEARCHING → SEARCHING
+2026-03-02 07:35:17 [ERROR] [traceId:req-1772447694552-a05f8cc9]  redis is not defined
+2026-03-02 07:35:52 [ERROR] [traceId:req-1772447694536-79a0fa66]  ❌ Transição inválida: SEARCHING → SEARCHING (booking: booking_1772447748088_test_customer_001)
+2026-03-02 07:35:52 [ERROR] [traceId:req-1772447694536-79a0fa66]  ❌ Erro ao atualizar estado da corrida booking_1772447748088_test_customer_001: Transição inválida: SEARCHING → SEARCHING
+2026-03-02 07:35:52 [ERROR] [traceId:req-1772447694536-79a0fa66]  ❌ Transição inválida: SEARCHING → SEARCHING (booking: booking_1772447748088_test_customer_001)
+2026-03-02 07:35:52 [ERROR] [traceId:req-1772447694536-79a0fa66]  ❌ Erro ao atualizar estado da corrida booking_1772447748088_test_customer_001: Transição inválida: SEARCHING → SEARCHING
+2026-03-02 07:35:52 [ERROR] [traceId:req-1772447694536-79a0fa66]  ❌ Erro ao processar corrida booking_1772447748088_test_customer_001: Transição inválida: SEARCHING → SEARCHING
+2026-03-02 07:35:52 [ERROR] [traceId:req-1772447694536-79a0fa66]  ❌ Erro ao processar corrida booking_1772447748088_test_customer_001: Transição inválida: SEARCHING → SEARCHING
+2026-03-02 07:36:03 [ERROR] [traceId:req-1772447694552-a05f8cc9]  redis is not defined
+2026-03-02 07:36:37 [ERROR] [traceId:req-1772447694552-a05f8cc9]  redis is not defined
+2026-03-02 07:47:43 [ERROR] [traceId:req-1772447694552-a05f8cc9]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-02 07:47:43 [ERROR] [traceId:req-1772447694552-a05f8cc9]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-02 07:47:43 [ERROR] [traceId:req-1772447694552-a05f8cc9]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-02 07:47:43 [ERROR] [traceId:req-1772447694552-a05f8cc9]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-02 07:47:43 [ERROR] [traceId:req-1772447694552-a05f8cc9]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-02 07:47:43 [ERROR] [traceId:req-1772447694552-a05f8cc9]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-02 07:47:43 [ERROR] [traceId:req-1772447694552-a05f8cc9]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-02 07:47:43 [ERROR] [traceId:req-1772447694552-a05f8cc9]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-02 07:47:43 [ERROR] [traceId:req-1772447694552-a05f8cc9]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-02 07:47:43 [ERROR] [traceId:req-1772447694552-a05f8cc9]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-02 07:47:43 [ERROR] [traceId:req-1772447694552-a05f8cc9]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-02 07:47:43 [ERROR] [traceId:req-1772447694552-a05f8cc9]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-02 07:47:43 [ERROR] [traceId:req-1772447694552-a05f8cc9]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-02 07:47:43 [ERROR] [traceId:req-1772447694552-a05f8cc9]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-02 07:47:43 [ERROR] [traceId:req-1772447694552-a05f8cc9]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-02 07:47:43 [ERROR] [traceId:req-1772447694552-a05f8cc9]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-02 07:47:43 [ERROR] [traceId:req-1772447694552-a05f8cc9]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-02 07:47:43 [ERROR] [traceId:req-1772447694552-a05f8cc9]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-02 07:47:44 [ERROR] [traceId:req-1772447694552-a05f8cc9]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-02 07:47:44 [ERROR] [traceId:req-1772447694552-a05f8cc9]  Erro ao verificar demanda {"eventType":"createBooking"}
+2026-03-02 07:48:17 [ERROR] [traceId:req-1772447694552-a05f8cc9]  ❌ Transição inválida: SEARCHING → SEARCHING (booking: booking_1772448494813_pb_2_1772448489734)
+2026-03-02 07:48:17 [ERROR] [traceId:req-1772447694552-a05f8cc9]  ❌ Erro ao atualizar estado da corrida booking_1772448494813_pb_2_1772448489734: Transição inválida: SEARCHING → SEARCHING
+2026-03-02 07:48:17 [ERROR] [traceId:req-1772447694552-a05f8cc9]  ❌ Erro ao processar corrida booking_1772448494813_pb_2_1772448489734: Transição inválida: SEARCHING → SEARCHING
+2026-03-02 07:49:56 [ERROR] [traceId:req-1772447694552-a05f8cc9]  ❌ Transição inválida: SEARCHING → SEARCHING (booking: booking_1772448592724_pd_1772448585546)
+2026-03-02 07:49:56 [ERROR] [traceId:req-1772447694552-a05f8cc9]  ❌ Erro ao atualizar estado da corrida booking_1772448592724_pd_1772448585546: Transição inválida: SEARCHING → SEARCHING
+2026-03-02 07:49:56 [ERROR] [traceId:req-1772447694552-a05f8cc9]  ❌ Erro ao processar corrida booking_1772448592724_pd_1772448585546: Transição inválida: SEARCHING → SEARCHING
+2026-03-02 08:03:57 [ERROR] [traceId:req-1772449413765-3e15f786]  redis is not defined
+2026-03-02 11:46:25 [ERROR]   Value for argument "data" is not a valid Firestore document. Cannot use "undefined" as a Firestore value (found in field "metadata.pixStatus"). If you want to ignore undefined values, enable `ignoreUndefinedProperties`.
+2026-03-02 11:46:25 [ERROR]   Value for argument "data" is not a valid Firestore document. Cannot use "undefined" as a Firestore value (found in field "metadata.pixStatus"). If you want to ignore undefined values, enable `ignoreUndefinedProperties`.
+2026-03-02 16:03:52 [ERROR]   Test error
+2026-03-02 16:03:52 [ERROR]   Cannot read properties of null (reading 'substring')
+2026-03-02 16:03:53 [ERROR]   ❌ Erro ao destruir FCM Service: Cannot read properties of null (reading 'disconnect')
+2026-03-02 16:04:05 [ERROR]   ❌ Erro ao destruir FCM Service: Cannot read properties of null (reading 'disconnect')
+2026-03-02 16:04:06 [ERROR]   Cannot read properties of null (reading 'substring')
+2026-03-02 16:04:06 [ERROR]   Test error
+2026-03-02 17:06:29 [ERROR]   ❌ Erro ao notificar driver test_driver_complete_1: this.io.in is not a function
+2026-03-02 17:06:30 [ERROR]   ❌ Erro ao notificar driver test_driver_complete_1: this.io.in is not a function
+2026-03-02 17:06:31 [ERROR]   ❌ Erro ao notificar driver test_driver_complete_1: this.io.in is not a function
+2026-03-02 17:06:32 [ERROR]   ❌ Erro ao notificar driver test_driver_complete_1: this.io.in is not a function
+2026-03-02 17:06:33 [ERROR]   ❌ Erro ao notificar driver test_driver_complete_1: this.io.in is not a function
+2026-03-02 17:06:34 [ERROR]   ❌ Erro ao notificar driver test_driver_complete_1: this.io.in is not a function
+2026-03-02 17:06:38 [ERROR]   ❌ Erro ao notificar driver test_driver_complete_1: this.io.in is not a function
+2026-03-02 17:06:39 [ERROR]   ❌ Erro ao notificar driver test_driver_complete_1: this.io.in is not a function
+2026-03-02 17:06:40 [ERROR]   ❌ Erro ao notificar driver test_driver_complete_1: this.io.in is not a function
+2026-03-02 17:06:41 [ERROR]   ❌ Erro ao notificar driver test_driver_complete_1: this.io.in is not a function
+2026-03-02 17:06:43 [ERROR]   ❌ Erro ao notificar driver test_driver_complete_1: this.io.in is not a function
+2026-03-02 17:06:44 [ERROR]   ❌ Erro ao notificar driver test_driver_complete_1: this.io.in is not a function
+2026-03-02 17:06:48 [ERROR]   ❌ Erro ao notificar driver test_driver_complete_1: this.io.in is not a function
+2026-03-02 17:06:49 [ERROR]   ❌ Erro ao notificar driver test_driver_complete_1: this.io.in is not a function
+2026-03-02 17:06:50 [ERROR]   ❌ Erro ao notificar driver test_driver_complete_1: this.io.in is not a function
+2026-03-02 17:06:51 [ERROR]   ❌ Erro ao notificar driver test_driver_complete_1: this.io.in is not a function
+2026-03-02 17:06:52 [ERROR]   ❌ Erro ao notificar driver test_driver_complete_1: this.io.in is not a function
+2026-03-02 17:06:53 [ERROR]   ❌ Erro ao notificar driver test_driver_complete_1: this.io.in is not a function
+2026-03-02 18:20:08 [ERROR]   ❌ Transição inválida: MATCHED → MATCHED (booking: test_race_stable_1772486406185)
+2026-03-02 18:20:08 [ERROR]   ❌ Erro ao atualizar estado da corrida test_race_stable_1772486406185: Transição inválida: MATCHED → MATCHED
+2026-03-02 18:20:08 [ERROR]   ❌ [ResponseHandler] Erro ao processar aceitação de test_driver_race_1 para test_race_stable_1772486406185: Transição inválida: MATCHED → MATCHED
+2026-03-02 18:26:08 [ERROR]   ❌ Transição inválida: MATCHED → MATCHED (booking: test_race_stable_1772486766159)
+2026-03-02 18:26:08 [ERROR]   ❌ Erro ao atualizar estado da corrida test_race_stable_1772486766159: Transição inválida: MATCHED → MATCHED
+2026-03-02 18:26:08 [ERROR]   ❌ [ResponseHandler] Erro ao processar aceitação de test_driver_race_1 para test_race_stable_1772486766159: Transição inválida: MATCHED → MATCHED
+2026-03-02 19:28:26 [ERROR]   handleChargeCreated is not defined
+2026-03-02 19:32:48 [ERROR]   handleChargeCreated is not defined
+2026-03-02 20:17:37 [ERROR]   ❌ [ResponseHandler] Erro ao enviar silent push de status: booking is not defined
+2026-03-02 20:19:54 [ERROR]   ❌ [ResponseHandler] Erro ao enviar silent push de status: booking is not defined
+2026-03-02 20:19:54 [ERROR]   ❌ [ResponseHandler] Erro ao enviar silent push de status: booking is not defined
+2026-03-02 20:19:58 [ERROR]   ❌ [ResponseHandler] Erro ao enviar silent push de status: booking is not defined
+2026-03-03 00:44:44 [ERROR]   ❌ Erro ao buscar e pontuar motoristas para booking_1772399399654_passenger_load_8: this.redis.georadius is not a function
+2026-03-03 17:25:31 [ERROR]   Socket.IO Engine - Erro de conexão
+2026-03-03 17:25:31 [ERROR]   Erro de conexão Socket.IO
+2026-03-03 17:25:31 [ERROR]   Socket.IO Engine - Erro de conexão
+2026-03-03 17:25:31 [ERROR]   Erro de conexão Socket.IO
+2026-03-03 17:25:32 [ERROR]   Socket.IO Engine - Erro de conexão
+2026-03-03 17:25:32 [ERROR]   Erro de conexão Socket.IO
+2026-03-03 17:25:33 [ERROR]   Socket.IO Engine - Erro de conexão
+2026-03-03 17:25:33 [ERROR]   Erro de conexão Socket.IO
+2026-03-03 17:25:34 [ERROR]   Socket.IO Engine - Erro de conexão
+2026-03-03 17:25:34 [ERROR]   Erro de conexão Socket.IO
+2026-03-03 17:25:35 [ERROR]   Socket.IO Engine - Erro de conexão
+2026-03-03 17:25:35 [ERROR]   Erro de conexão Socket.IO
+2026-03-03 17:25:36 [ERROR]   Socket.IO Engine - Erro de conexão
+2026-03-03 17:25:36 [ERROR]   Erro de conexão Socket.IO
+2026-03-03 17:25:37 [ERROR]   Socket.IO Engine - Erro de conexão
+2026-03-03 17:25:37 [ERROR]   Erro de conexão Socket.IO
+2026-03-03 17:25:38 [ERROR]   Socket.IO Engine - Erro de conexão
+2026-03-03 17:25:38 [ERROR]   Erro de conexão Socket.IO
+2026-03-03 17:25:39 [ERROR]   Socket.IO Engine - Erro de conexão
+2026-03-03 17:25:39 [ERROR]   Erro de conexão Socket.IO
+2026-03-03 17:25:40 [ERROR]   Socket.IO Engine - Erro de conexão
+2026-03-03 17:25:40 [ERROR]   Erro de conexão Socket.IO
+2026-03-03 17:25:41 [ERROR]   Socket.IO Engine - Erro de conexão
+2026-03-03 17:25:41 [ERROR]   Erro de conexão Socket.IO
+2026-03-03 17:25:42 [ERROR]   Socket.IO Engine - Erro de conexão
+2026-03-03 17:25:42 [ERROR]   Erro de conexão Socket.IO
+2026-03-03 17:25:43 [ERROR]   Socket.IO Engine - Erro de conexão
+2026-03-03 17:25:43 [ERROR]   Erro de conexão Socket.IO
+2026-03-03 17:25:44 [ERROR]   Socket.IO Engine - Erro de conexão
+2026-03-03 17:25:44 [ERROR]   Erro de conexão Socket.IO
+2026-03-03 17:25:45 [ERROR]   Socket.IO Engine - Erro de conexão
+2026-03-03 17:25:45 [ERROR]   Erro de conexão Socket.IO
+2026-03-03 17:25:46 [ERROR]   Socket.IO Engine - Erro de conexão
+2026-03-03 17:25:46 [ERROR]   Erro de conexão Socket.IO
+2026-03-03 17:25:47 [ERROR]   Socket.IO Engine - Erro de conexão
+2026-03-03 17:25:47 [ERROR]   Erro de conexão Socket.IO
+2026-03-03 17:25:48 [ERROR]   Socket.IO Engine - Erro de conexão
+2026-03-03 17:25:48 [ERROR]   Erro de conexão Socket.IO
+2026-03-03 17:25:49 [ERROR]   Socket.IO Engine - Erro de conexão
+2026-03-03 17:25:49 [ERROR]   Erro de conexão Socket.IO
+2026-03-03 17:25:50 [ERROR]   Socket.IO Engine - Erro de conexão
+2026-03-03 17:25:50 [ERROR]   Erro de conexão Socket.IO
+2026-03-03 17:25:51 [ERROR]   Socket.IO Engine - Erro de conexão
+2026-03-03 17:25:51 [ERROR]   Erro de conexão Socket.IO
+2026-03-03 17:25:52 [ERROR]   Socket.IO Engine - Erro de conexão
+2026-03-03 17:25:52 [ERROR]   Erro de conexão Socket.IO
+2026-03-03 17:25:53 [ERROR]   Socket.IO Engine - Erro de conexão
+2026-03-03 17:25:53 [ERROR]   Erro de conexão Socket.IO
+2026-03-03 17:25:54 [ERROR]   Socket.IO Engine - Erro de conexão
+2026-03-03 17:25:54 [ERROR]   Erro de conexão Socket.IO
+2026-03-03 17:25:55 [ERROR]   Socket.IO Engine - Erro de conexão
+2026-03-03 17:25:55 [ERROR]   Erro de conexão Socket.IO
+2026-03-03 17:25:56 [ERROR]   Socket.IO Engine - Erro de conexão
+2026-03-03 17:25:56 [ERROR]   Erro de conexão Socket.IO
+2026-03-03 17:25:57 [ERROR]   Socket.IO Engine - Erro de conexão
+2026-03-03 17:25:57 [ERROR]   Erro de conexão Socket.IO
+2026-03-03 17:25:58 [ERROR]   Socket.IO Engine - Erro de conexão
+2026-03-03 17:25:58 [ERROR]   Erro de conexão Socket.IO
+2026-03-03 17:26:00 [ERROR]   Socket.IO Engine - Erro de conexão
+2026-03-03 17:26:00 [ERROR]   Erro de conexão Socket.IO
+2026-03-03 17:26:00 [ERROR]   Socket.IO Engine - Erro de conexão
+2026-03-03 17:26:00 [ERROR]   Erro de conexão Socket.IO
+2026-03-03 17:26:02 [ERROR]   Socket.IO Engine - Erro de conexão
+2026-03-03 17:26:02 [ERROR]   Erro de conexão Socket.IO
+2026-03-03 17:26:03 [ERROR]   Socket.IO Engine - Erro de conexão
+2026-03-03 17:26:03 [ERROR]   Erro de conexão Socket.IO
+2026-03-03 17:26:03 [ERROR]   Socket.IO Engine - Erro de conexão
+2026-03-03 17:26:03 [ERROR]   Erro de conexão Socket.IO
+2026-03-03 17:26:05 [ERROR]   Socket.IO Engine - Erro de conexão
+2026-03-03 17:26:05 [ERROR]   Erro de conexão Socket.IO
+2026-03-03 17:26:06 [ERROR]   Socket.IO Engine - Erro de conexão
+2026-03-03 17:26:06 [ERROR]   Erro de conexão Socket.IO
+2026-03-03 17:26:07 [ERROR]   Socket.IO Engine - Erro de conexão
+2026-03-03 17:26:07 [ERROR]   Erro de conexão Socket.IO
+2026-03-03 17:26:08 [ERROR]   Socket.IO Engine - Erro de conexão
+2026-03-03 17:26:08 [ERROR]   Erro de conexão Socket.IO
+2026-03-03 17:26:09 [ERROR]   Socket.IO Engine - Erro de conexão
+2026-03-03 17:26:09 [ERROR]   Erro de conexão Socket.IO
+2026-03-03 17:26:10 [ERROR]   Socket.IO Engine - Erro de conexão
+2026-03-03 17:26:10 [ERROR]   Erro de conexão Socket.IO
+2026-03-03 17:26:11 [ERROR]   Socket.IO Engine - Erro de conexão
+2026-03-03 17:26:11 [ERROR]   Erro de conexão Socket.IO
+2026-03-03 17:26:12 [ERROR]   Socket.IO Engine - Erro de conexão
+2026-03-03 17:26:12 [ERROR]   Erro de conexão Socket.IO
+2026-03-03 17:26:13 [ERROR]   Socket.IO Engine - Erro de conexão
+2026-03-03 17:26:13 [ERROR]   Erro de conexão Socket.IO
+2026-03-03 17:26:15 [ERROR]   Socket.IO Engine - Erro de conexão
+2026-03-03 17:26:15 [ERROR]   Erro de conexão Socket.IO
+2026-03-03 17:26:15 [ERROR]   Socket.IO Engine - Erro de conexão
+2026-03-03 17:26:15 [ERROR]   Erro de conexão Socket.IO
+2026-03-03 17:26:16 [ERROR]   Socket.IO Engine - Erro de conexão
+2026-03-03 17:26:16 [ERROR]   Erro de conexão Socket.IO
+2026-03-03 17:26:18 [ERROR]   Socket.IO Engine - Erro de conexão
+2026-03-03 17:26:18 [ERROR]   Erro de conexão Socket.IO
+2026-03-03 17:26:18 [ERROR]   Socket.IO Engine - Erro de conexão
+2026-03-03 17:26:18 [ERROR]   Erro de conexão Socket.IO
+2026-03-03 17:26:19 [ERROR]   Socket.IO Engine - Erro de conexão
+2026-03-03 17:26:19 [ERROR]   Erro de conexão Socket.IO
+2026-03-03 17:26:21 [ERROR]   Socket.IO Engine - Erro de conexão
+2026-03-03 17:26:21 [ERROR]   Erro de conexão Socket.IO
+2026-03-03 17:26:21 [ERROR]   Socket.IO Engine - Erro de conexão
+2026-03-03 17:26:21 [ERROR]   Erro de conexão Socket.IO
+2026-03-03 17:26:22 [ERROR]   Socket.IO Engine - Erro de conexão
+2026-03-03 17:26:22 [ERROR]   Erro de conexão Socket.IO
+2026-03-03 17:26:24 [ERROR]   Socket.IO Engine - Erro de conexão
+2026-03-03 17:26:24 [ERROR]   Erro de conexão Socket.IO
+2026-03-03 17:26:24 [ERROR]   Socket.IO Engine - Erro de conexão
+2026-03-03 17:26:24 [ERROR]   Erro de conexão Socket.IO
+2026-03-03 17:26:25 [ERROR]   Socket.IO Engine - Erro de conexão
+2026-03-03 17:26:25 [ERROR]   Erro de conexão Socket.IO
+2026-03-03 17:26:27 [ERROR]   Socket.IO Engine - Erro de conexão
+2026-03-03 17:26:27 [ERROR]   Erro de conexão Socket.IO
+2026-03-03 17:26:27 [ERROR]   Socket.IO Engine - Erro de conexão
+2026-03-03 17:26:27 [ERROR]   Erro de conexão Socket.IO
+2026-03-03 17:26:28 [ERROR]   Socket.IO Engine - Erro de conexão
+2026-03-03 17:26:28 [ERROR]   Erro de conexão Socket.IO
+2026-03-03 17:26:30 [ERROR]   Socket.IO Engine - Erro de conexão
+2026-03-03 17:26:30 [ERROR]   Erro de conexão Socket.IO
+2026-03-03 17:26:30 [ERROR]   Socket.IO Engine - Erro de conexão
+2026-03-03 17:26:30 [ERROR]   Erro de conexão Socket.IO
+2026-03-03 17:26:31 [ERROR]   Socket.IO Engine - Erro de conexão
+2026-03-03 17:26:31 [ERROR]   Erro de conexão Socket.IO
+2026-03-03 17:26:33 [ERROR]   Socket.IO Engine - Erro de conexão
+2026-03-03 17:26:33 [ERROR]   Erro de conexão Socket.IO
+2026-03-03 17:26:34 [ERROR]   Socket.IO Engine - Erro de conexão
+2026-03-03 17:26:34 [ERROR]   Erro de conexão Socket.IO
+2026-03-03 17:26:34 [ERROR]   Socket.IO Engine - Erro de conexão
+2026-03-03 17:26:34 [ERROR]   Erro de conexão Socket.IO
+2026-03-03 17:26:36 [ERROR]   Socket.IO Engine - Erro de conexão
+2026-03-03 17:26:36 [ERROR]   Erro de conexão Socket.IO
+2026-03-03 17:26:37 [ERROR]   Socket.IO Engine - Erro de conexão
+2026-03-03 17:26:37 [ERROR]   Erro de conexão Socket.IO
+2026-03-03 17:26:38 [ERROR]   Socket.IO Engine - Erro de conexão
+2026-03-03 17:26:38 [ERROR]   Erro de conexão Socket.IO
+2026-03-03 17:26:39 [ERROR]   Socket.IO Engine - Erro de conexão
+2026-03-03 17:26:39 [ERROR]   Erro de conexão Socket.IO
+2026-03-03 17:26:39 [ERROR]   Socket.IO Engine - Erro de conexão
+2026-03-03 17:26:39 [ERROR]   Erro de conexão Socket.IO
+2026-03-03 17:26:40 [ERROR]   Socket.IO Engine - Erro de conexão
+2026-03-03 17:26:40 [ERROR]   Erro de conexão Socket.IO
+2026-03-03 17:26:41 [ERROR]   Socket.IO Engine - Erro de conexão
+2026-03-03 17:26:41 [ERROR]   Erro de conexão Socket.IO
+2026-03-03 17:26:42 [ERROR]   Socket.IO Engine - Erro de conexão
+2026-03-03 17:26:42 [ERROR]   Erro de conexão Socket.IO
+2026-03-03 17:26:43 [ERROR]   Socket.IO Engine - Erro de conexão
+2026-03-03 17:26:43 [ERROR]   Erro de conexão Socket.IO
+2026-03-03 17:26:44 [ERROR]   Socket.IO Engine - Erro de conexão
+2026-03-03 17:26:44 [ERROR]   Erro de conexão Socket.IO
+2026-03-03 17:26:45 [ERROR]   Socket.IO Engine - Erro de conexão
+2026-03-03 17:26:45 [ERROR]   Erro de conexão Socket.IO
+2026-03-03 17:26:46 [ERROR]   Socket.IO Engine - Erro de conexão
+2026-03-03 17:26:46 [ERROR]   Erro de conexão Socket.IO
+2026-03-03 17:26:46 [ERROR]   Socket.IO Engine - Erro de conexão
+2026-03-03 17:26:46 [ERROR]   Erro de conexão Socket.IO
+2026-03-03 17:26:47 [ERROR]   Socket.IO Engine - Erro de conexão
+2026-03-03 17:26:47 [ERROR]   Erro de conexão Socket.IO
+2026-03-03 17:26:48 [ERROR]   Socket.IO Engine - Erro de conexão
+2026-03-03 17:26:48 [ERROR]   Erro de conexão Socket.IO
+2026-03-03 17:26:49 [ERROR]   Socket.IO Engine - Erro de conexão
+2026-03-03 17:26:49 [ERROR]   Erro de conexão Socket.IO
+2026-03-03 17:26:49 [ERROR]   Socket.IO Engine - Erro de conexão
+2026-03-03 17:26:49 [ERROR]   Erro de conexão Socket.IO
+2026-03-03 17:26:50 [ERROR]   Socket.IO Engine - Erro de conexão
+2026-03-03 17:26:50 [ERROR]   Erro de conexão Socket.IO
+2026-03-03 17:26:52 [ERROR]   Socket.IO Engine - Erro de conexão
+2026-03-03 17:26:52 [ERROR]   Erro de conexão Socket.IO
+2026-03-03 17:26:52 [ERROR]   Socket.IO Engine - Erro de conexão
+2026-03-03 17:26:52 [ERROR]   Erro de conexão Socket.IO
+2026-03-03 17:26:52 [ERROR]   Socket.IO Engine - Erro de conexão
+2026-03-03 17:26:52 [ERROR]   Erro de conexão Socket.IO
+2026-03-03 17:26:53 [ERROR]   Socket.IO Engine - Erro de conexão
+2026-03-03 17:26:53 [ERROR]   Erro de conexão Socket.IO
+2026-03-03 17:26:55 [ERROR]   Socket.IO Engine - Erro de conexão
+2026-03-03 17:26:55 [ERROR]   Erro de conexão Socket.IO
+2026-03-03 17:26:55 [ERROR]   Socket.IO Engine - Erro de conexão
+2026-03-03 17:26:55 [ERROR]   Erro de conexão Socket.IO
+2026-03-03 17:26:55 [ERROR]   Socket.IO Engine - Erro de conexão
+2026-03-03 17:26:55 [ERROR]   Erro de conexão Socket.IO
+2026-03-03 17:26:56 [ERROR]   Socket.IO Engine - Erro de conexão
+2026-03-03 17:26:56 [ERROR]   Erro de conexão Socket.IO
+2026-03-03 17:26:58 [ERROR]   Socket.IO Engine - Erro de conexão
+2026-03-03 17:26:58 [ERROR]   Erro de conexão Socket.IO
+2026-03-03 17:26:58 [ERROR]   Socket.IO Engine - Erro de conexão
+2026-03-03 17:26:58 [ERROR]   Erro de conexão Socket.IO
+2026-03-03 17:26:58 [ERROR]   Socket.IO Engine - Erro de conexão
+2026-03-03 17:26:58 [ERROR]   Erro de conexão Socket.IO
+2026-03-03 17:26:59 [ERROR]   Socket.IO Engine - Erro de conexão
+2026-03-03 17:26:59 [ERROR]   Erro de conexão Socket.IO
+2026-03-03 17:27:01 [ERROR]   Socket.IO Engine - Erro de conexão
+2026-03-03 17:27:01 [ERROR]   Erro de conexão Socket.IO
+2026-03-03 17:27:01 [ERROR]   Socket.IO Engine - Erro de conexão
+2026-03-03 17:27:01 [ERROR]   Erro de conexão Socket.IO
+2026-03-03 17:27:02 [ERROR]   Socket.IO Engine - Erro de conexão
+2026-03-03 17:27:02 [ERROR]   Erro de conexão Socket.IO
+2026-03-03 17:27:02 [ERROR]   Socket.IO Engine - Erro de conexão
+2026-03-03 17:27:02 [ERROR]   Erro de conexão Socket.IO
+2026-03-03 17:27:04 [ERROR]   Socket.IO Engine - Erro de conexão
+2026-03-03 17:27:04 [ERROR]   Erro de conexão Socket.IO
+2026-03-03 17:27:05 [ERROR]   Socket.IO Engine - Erro de conexão
+2026-03-03 17:27:05 [ERROR]   Erro de conexão Socket.IO
+2026-03-03 17:27:05 [ERROR]   Socket.IO Engine - Erro de conexão
+2026-03-03 17:27:05 [ERROR]   Erro de conexão Socket.IO
+2026-03-03 17:27:07 [ERROR]   Socket.IO Engine - Erro de conexão
+2026-03-03 17:27:07 [ERROR]   Erro de conexão Socket.IO
+2026-03-03 17:27:08 [ERROR]   Socket.IO Engine - Erro de conexão
+2026-03-03 17:27:08 [ERROR]   Erro de conexão Socket.IO
+2026-03-03 17:27:09 [ERROR]   Socket.IO Engine - Erro de conexão
+2026-03-03 17:27:09 [ERROR]   Erro de conexão Socket.IO
+2026-03-03 17:29:02 [ERROR]   ❌ [RedisScan] Erro ao escanear chaves com padrão booking_search:*: Command timed out
+2026-03-03 17:29:02 [ERROR]   ❌ [RadiusExpansionManager] Erro ao buscar corridas em SEARCHING: Command timed out
+2026-03-03 17:29:02 [ERROR]   ❌ [RedisScan] Erro ao escanear chaves com padrão booking_search:*: Command timed out
+2026-03-03 17:29:02 [ERROR]   ❌ [RadiusExpansionManager] Erro ao buscar corridas em SEARCHING: Command timed out
+2026-03-03 17:29:02 [ERROR]   ❌ [RedisScan] Erro ao escanear chaves com padrão connection:*: Command timed out
+2026-03-03 17:29:02 [ERROR]   ❌ [ConnectionCleanupService] Erro ao limpar conexões órfãs: Command timed out
+2026-03-03 17:29:02 [ERROR]   ❌ [RedisScan] Erro ao escanear chaves com padrão booking_search:*: Command timed out
+2026-03-03 17:29:02 [ERROR]   ❌ [RadiusExpansionManager] Erro ao buscar corridas em SEARCHING: Command timed out
+2026-03-03 20:59:05 [ERROR]   ❌ Erro no subscriber Redis: connect ECONNREFUSED 127.0.0.1:6380
+2026-03-03 20:59:05 [ERROR]   ❌ Erro no subscriber Redis: connect ECONNREFUSED 127.0.0.1:6380
+2026-03-03 20:59:05 [ERROR]   ❌ Erro no subscriber Redis: connect ECONNREFUSED 127.0.0.1:6380
+2026-03-03 20:59:05 [ERROR]   ❌ Erro no subscriber Redis: connect ECONNREFUSED 127.0.0.1:6380
+2026-03-03 20:59:05 [ERROR]   ❌ Erro no subscriber Redis: connect ECONNREFUSED 127.0.0.1:6380
+2026-03-03 20:59:06 [ERROR]   ❌ Erro no subscriber Redis: connect ECONNREFUSED 127.0.0.1:6380
+2026-03-03 20:59:06 [ERROR]   Reached the max retries per request limit (which is 3). Refer to "maxRetriesPerRequest" option for details.
+2026-03-03 20:59:06 [ERROR]   ❌ [RedisScan] Erro ao escanear chaves com padrão booking_search:*: Reached the max retries per request limit (which is 3). Refer to "maxRetriesPerRequest" option for details.
+2026-03-03 20:59:06 [ERROR]   ❌ [RedisScan] Erro ao escanear chaves com padrão connection:*: Reached the max retries per request limit (which is 3). Refer to "maxRetriesPerRequest" option for details.
+2026-03-03 20:59:06 [ERROR]   ❌ [RadiusExpansionManager] Erro ao buscar corridas em SEARCHING: Reached the max retries per request limit (which is 3). Refer to "maxRetriesPerRequest" option for details.
+2026-03-03 20:59:06 [ERROR]   ❌ [ConnectionCleanupService] Erro ao limpar conexões órfãs: Reached the max retries per request limit (which is 3). Refer to "maxRetriesPerRequest" option for details.
+2026-03-03 20:59:06 [ERROR]   ❌ Erro no subscriber Redis: connect ECONNREFUSED 127.0.0.1:6380

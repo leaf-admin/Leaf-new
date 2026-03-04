@@ -324,7 +324,10 @@ class PaymentService {
       }
 
       // 2. Calcular valor líquido para o motorista (descontar taxas)
-      const netCalculation = this.calculateNetAmount(chargeStatus.amount);
+      // Nota: Como não temos o tollFee aqui, passamos 0 como fallback,
+      // mas o ideal é que esse método não recalcule, devia apenas consultar a holding.
+      // Futuro refactoring recomendado.
+      const netCalculation = this.calculateNetAmount(chargeStatus.amount, 0);
 
       // 3. Creditar saldo diretamente no motorista
       const creditResult = await this.creditDriverBalance(
@@ -832,20 +835,23 @@ class PaymentService {
   }
 
   /**
-   * Calcula valor líquido para o motorista
+   * Calcula valor líquido para o motorista (Imunizando Pedágio)
    * @param {number} totalAmount - Valor total da corrida em centavos
+   * @param {number} tollFee - Valor do pedágio em centavos (padrão 0)
    * @returns {Object} - Cálculo detalhado
    */
-  calculateNetAmount(totalAmount) {
-    // Calcular taxa operacional baseada no valor da corrida (3 faixas)
+  calculateNetAmount(totalAmount, tollFee = 0) {
+    const grossFare = Math.max(0, totalAmount - tollFee);
+
+    // Calcular taxa operacional baseada no valor da corrida (sem o pedágio)
     let operationalFee;
     let operationalFeeType;
 
-    if (totalAmount <= this.THRESHOLD_10) {
+    if (grossFare <= this.THRESHOLD_10) {
       // Até R$ 10,00
       operationalFee = this.OPERATIONAL_FEE_UP_TO_10;
       operationalFeeType = 'up_to_10';
-    } else if (totalAmount <= this.THRESHOLD_25) {
+    } else if (grossFare <= this.THRESHOLD_25) {
       // Acima de R$ 10,00 e abaixo de R$ 25,00
       operationalFee = this.OPERATIONAL_FEE_10_TO_25;
       operationalFeeType = '10_to_25';
@@ -855,18 +861,23 @@ class PaymentService {
       operationalFeeType = 'above_25';
     }
 
-    // Taxa Woovi: 0,8% com mínimo de R$ 0,50
-    const wooviFeePercentage = Math.round(totalAmount * this.WOOVI_FEE_PERCENTAGE);
+    // Taxa Woovi: 0,8% com mínimo de R$ 0,50 (calculada livre de pedágio)
+    const wooviFeePercentage = Math.round(grossFare * this.WOOVI_FEE_PERCENTAGE);
     const wooviFee = Math.max(wooviFeePercentage, this.WOOVI_FEE_MINIMUM);
-    const netAmount = totalAmount - operationalFee - wooviFee;
+
+    // Retenho do lucro da plataforma, o pedágio volta 100% pro motorista
+    const netGross = grossFare - operationalFee - wooviFee;
+    const netAmount = Math.max(0, netGross) + tollFee;
 
     return {
       totalAmount: totalAmount,
+      tollFee: tollFee,
       operationalFee: operationalFee,
       wooviFee: wooviFee,
       netAmount: Math.max(0, netAmount), // Não pode ser negativo
       breakdown: {
         total: (totalAmount / 100).toFixed(2),
+        tollFee: (tollFee / 100).toFixed(2),
         operationalFeeType: operationalFeeType,
         operationalFee: (operationalFee / 100).toFixed(2),
         wooviFee: (wooviFee / 100).toFixed(2),
@@ -890,11 +901,39 @@ class PaymentService {
         service: 'PaymentService',
         rideId: rideData.rideId,
         driverId: rideData.driverId,
-        totalAmount: rideData.totalAmount
+        totalAmount: rideData.totalAmount,
+        tollFee: rideData.tollFee || 0
       });
 
+      // 0. ✅ CAOS SCENARIO: Checar se o valor cobrado final é menor que o estimado pago (Encerramento Antecipado)
+      let passengerRefundAmount = 0;
+      let passengerRefundResult = null;
+      try {
+        const paymentRecord = await this.getStoredPayment(rideData.rideId);
+        const chargeIdToRefund = paymentRecord?.chargeId || paymentRecord?.paymentId;
+        if (paymentRecord && paymentRecord.status === 'PAID' && chargeIdToRefund && paymentRecord.amount > rideData.totalAmount) {
+          passengerRefundAmount = paymentRecord.amount - rideData.totalAmount;
+          logStructured('info', 'Encerramento Antecipado detectado: processando estorno parcial para o passageiro', {
+            service: 'PaymentService',
+            rideId: rideData.rideId,
+            originalAmount: paymentRecord.amount,
+            finalAmount: rideData.totalAmount,
+            refundAmount: passengerRefundAmount
+          });
+
+          passengerRefundResult = await this.processRefund(chargeIdToRefund, passengerRefundAmount, 'Estorno de Encerramento Antecipado (recalculo de rota)');
+          if (passengerRefundResult.success) {
+            logStructured('info', 'Estorno parcial do passageiro realizado com sucesso', { service: 'PaymentService', refundId: passengerRefundResult.refundId });
+          } else {
+            logStructured('error', 'Falha ao processar estorno parcial do passageiro', { service: 'PaymentService', error: passengerRefundResult.error });
+          }
+        }
+      } catch (refundCheckErr) {
+        logStructured('error', 'Erro ao checar necessidade de estorno parcial', { service: 'PaymentService', error: refundCheckErr.message });
+      }
+
       // 1. Calcular valor líquido
-      const netCalculation = this.calculateNetAmount(rideData.totalAmount);
+      const netCalculation = this.calculateNetAmount(rideData.totalAmount, rideData.tollFee || 0);
 
       if (netCalculation.netAmount <= 0) {
         return {
@@ -1089,6 +1128,91 @@ class PaymentService {
       return {
         success: false,
         error: 'Erro interno do servidor',
+        details: error.message
+      };
+    }
+  }
+
+  /**
+   * Processa a distribuição do recebimento de uma taxa de cancelamento ou No-Show para o motorista
+   * Garante que não aplica os R$ 1,50 padrão de operação, cobrando apenas o custo Woovi
+   * @param {Object} rideData - Dados da corrida cancelada
+   * @param {string} rideData.rideId - ID da corrida
+   * @param {string} rideData.driverId - ID do motorista
+   * @param {number} rideData.cancellationFee - Valor da multa cobrada do passageiro (em centavos)
+   * @returns {Promise<Object>} - Resultado da distribuição de No-Show
+   */
+  async processCancellationDistribution(rideData) {
+    try {
+      logStructured('info', 'Processando distribuição de Multa de Cancelamento/No-Show', {
+        service: 'PaymentService',
+        rideId: rideData.rideId,
+        driverId: rideData.driverId,
+        cancellationFee: rideData.cancellationFee
+      });
+
+      if (!rideData.cancellationFee || rideData.cancellationFee <= this.WOOVI_FEE_MINIMUM) {
+        return {
+          success: false,
+          error: 'Taxa de cancelamento muito baixa para distribuição'
+        };
+      }
+
+      // O motorista recebe a taxa menos o custo de transação da Woovi gerado pelo estorno parcial
+      const netAmount = rideData.cancellationFee - this.WOOVI_FEE_MINIMUM;
+
+      // Creditar via Firestore
+      const creditResult = await this.creditDriverBalance(
+        rideData.driverId,
+        netAmount,
+        `cancel_${rideData.rideId}` // prefix para rastreabilidade
+      );
+
+      if (!creditResult.success) {
+        throw new Error(creditResult.error);
+      }
+
+      // Atualizar status do holding/distribuir
+      const distributionData = {
+        rideId: rideData.rideId,
+        driverId: rideData.driverId,
+        status: 'distributed_cancellation',
+        distributedAt: new Date().toISOString(),
+        netAmount: netAmount,
+        balanceCreditId: creditResult.balanceId || null,
+        calculation: {
+          totalAmount: rideData.cancellationFee,
+          operationalFee: 0,
+          wooviFee: this.WOOVI_FEE_MINIMUM,
+          netAmount: netAmount
+        },
+        retainedFees: {
+          operationalFee: 0,
+          wooviFee: this.WOOVI_FEE_MINIMUM,
+          totalRetained: this.WOOVI_FEE_MINIMUM
+        }
+      };
+
+      await this.saveDistributionToFirestore(distributionData);
+
+      logStructured('info', 'Distribuição de multa processada com sucesso', {
+        service: 'payment-service',
+        rideId: distributionData.rideId,
+        netAmount: distributionData.netAmount
+      });
+
+      return {
+        success: true,
+        message: 'Distribuição de multa processada com sucesso',
+        netAmount: netAmount,
+        balance: creditResult.newBalance
+      };
+
+    } catch (error) {
+      logError(error, 'Erro ao processar distribuição de cancelamento', { service: 'payment-service' });
+      return {
+        success: false,
+        error: 'Erro interno',
         details: error.message
       };
     }

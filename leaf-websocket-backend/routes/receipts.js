@@ -25,8 +25,8 @@ router.get('/api/receipts/:rideId', async (req, res) => {
 
         // Buscar dados da corrida e gerar recibo
         const receipt = await receiptService.getReceiptByRideId(
-            rideId, 
-            req.app.locals.redis, 
+            rideId,
+            req.app.locals.redis,
             req.app.locals.firebaseDb
         );
 
@@ -39,11 +39,19 @@ router.get('/api/receipts/:rideId', async (req, res) => {
 
         // Responder conforme formato solicitado
         if (format === 'pdf') {
-            // TODO: Implementar geração de PDF
-            return res.status(501).json({
-                success: false,
-                error: 'Geração de PDF ainda não implementada'
-            });
+            try {
+                const pdfBuffer = await receiptService.generatePDFReceipt(receipt);
+
+                res.setHeader('Content-Type', 'application/pdf');
+                res.setHeader('Content-Disposition', `attachment; filename=recibo-${receipt.receiptId}.pdf`);
+                return res.send(pdfBuffer);
+            } catch (pdfError) {
+                logger.error(`❌ Erro ao gerar PDF do recibo:`, pdfError);
+                return res.status(500).json({
+                    success: false,
+                    error: 'Erro ao gerar o arquivo PDF'
+                });
+            }
         }
 
         res.json({
@@ -130,8 +138,8 @@ router.get('/api/receipts/user/:userId', async (req, res) => {
 
         // Filtrar apenas corridas concluídas
         const completedRides = Object.entries(bookings)
-            .filter(([_, booking]) => 
-                booking.status === 'COMPLETE' || 
+            .filter(([_, booking]) =>
+                booking.status === 'COMPLETE' ||
                 booking.status === 'PAID' ||
                 booking.status === 'completed'
             )
@@ -142,7 +150,7 @@ router.get('/api/receipts/user/:userId', async (req, res) => {
             completedRides.map(async ([rideId, rideData]) => {
                 try {
                     const receipt = await receiptService.generateReceipt(rideId, rideData);
-                    
+
                     // Retornar versão resumida
                     return {
                         receiptId: receipt.receiptId,
@@ -195,7 +203,7 @@ router.get('/api/receipts/:rideId/map', async (req, res) => {
         const redis = req.app.locals.redis;
 
         let rideData = null;
-        
+
         // Tentar Redis primeiro
         if (redis) {
             const redisData = await redis.hget('bookings:active', rideId);
@@ -256,7 +264,7 @@ router.get('/api/receipts/health', (req, res) => {
         features: {
             receiptGeneration: true,
             mapImages: !!receiptService.GOOGLE_MAPS_API_KEY,
-            pdfGeneration: false // TODO: implementar
+            pdfGeneration: true
         }
     });
 });

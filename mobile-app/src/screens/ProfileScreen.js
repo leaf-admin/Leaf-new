@@ -447,7 +447,7 @@ export default function ProfileScreen({ navigation }) {
                             <Text style={[styles.userName, { color: isDarkMode ? '#fff' : colors.BLACK }]}>{auth?.profile?.firstName || 'Usuário'} {auth?.profile?.lastName || ''}</Text>
                             <View style={styles.partnerInfoRow}>
                                 <Text style={[cardTypography.subtitle, styles.partnerSince, { color: isDarkMode ? '#ccc' : colors.GRAY }]}>
-                                    {isDriver ? `Parceiro Leaf desde ${new Date().getFullYear()}` : `Usuário Leaf desde ${new Date().getFullYear()}`}
+                                    {isDriver ? `Parceira Leaf desde ${new Date().getFullYear()}` : `Usuária Leaf desde ${new Date().getFullYear()}`}
                                 </Text>
                                 {/* Badge do Plano (apenas para motoristas) */}
                                 {isDriver && auth?.profile?.carType && (

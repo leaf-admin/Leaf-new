@@ -230,7 +230,7 @@ export default function HelpScreen({ navigation }) {
             return (
                 <View style={styles.contentSection}>
                     <Text style={[styles.sectionTitle, { color: isDarkMode ? '#fff' : colors.BLACK }]}>
-                        Bem-vindo ao Leaf!
+                        Bem-vindo à Leaf!
                     </Text>
                     <Text style={[styles.sectionDescription, { color: isDarkMode ? '#ccc' : colors.GRAY }]}>
                         Aprenda como usar o app Leaf para suas viagens de forma segura e eficiente.
@@ -245,7 +245,7 @@ export default function HelpScreen({ navigation }) {
             return (
                 <View style={styles.contentSection}>
                     <Text style={[styles.sectionTitle, { color: isDarkMode ? '#fff' : colors.BLACK }]}>
-                        Bem-vindo ao Leaf!
+                        Bem-vindo à Leaf!
                     </Text>
                     <Text style={[styles.sectionDescription, { color: isDarkMode ? '#ccc' : colors.GRAY }]}>
                         Aprenda como usar o app Leaf para suas viagens de forma segura e eficiente.

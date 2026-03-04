@@ -19,7 +19,7 @@ class PaymentConfirmedEvent extends CanonicalEvent {
         
         const eventData = {
             ...data,
-            traceId: validatedTraceId(data, EVENT_TYPES.PAYMENT_CONFIRMED),
+            traceId: validatedTraceId,
             correlationId: data.correlationId || data.bookingId || data.paymentId // ✅ Adicionar correlationId
         };
         

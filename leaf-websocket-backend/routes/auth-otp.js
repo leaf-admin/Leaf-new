@@ -1,6 +1,6 @@
 const express = require('express');
 const admin = require('firebase-admin');
-const { getRedisClient } = require('../redis-client');
+const redisPool = require('../utils/redis-pool');
 const { logger } = require('../utils/logger');
 
 const router = express.Router();
@@ -17,7 +17,7 @@ router.post('/request-otp', async (req, res) => {
 
         // Save to Redis (expires in 5 minutes)
         try {
-            const redisClient = getRedisClient();
+            const redisClient = redisPool.getConnection();
             await redisClient.set(`otp:${verificationId}:${phone}`, otp, 'EX', 300);
         } catch (redisError) {
             logger.error('Redis error storing OTP, falling back to mock response', redisError);
@@ -49,7 +49,7 @@ router.post('/verify-otp', async (req, res) => {
         if (otp === '000000') {
             logger.info(`[CUSTOM OTP] Accepted static bypass code for ${phone}`);
         } else {
-            const redisClient = getRedisClient();
+            const redisClient = redisPool.getConnection();
             const key = `otp:${verificationId}:${phone}`;
             const storedOtp = await redisClient.get(key);
 

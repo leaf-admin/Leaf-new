@@ -1,0 +1,38 @@
+
+🚙 INICIANDO SIMULAÇÃO: 1 HORA EM TEMPO REAL...
+📡 Solicitando requisições na região de operação...
+
+======================================================
+📊 RELATÓRIO DE DESEMPENHO - VISÃO CONSOLIDADA
+======================================================
+• Duração Simulada: 1 Hora
+• Frota Ativa: 250 motoristas conectados
+• Requisições Atendidas (Volume Misto): 837
+------------------------------------------------------
+✅ Corridas Concluídas: 723 (86.4%)
+❌ Cancelamentos (Pax/Driver): 99 (11.8%)
+⚠️ Pedidos de Reembolso/Ticket Suporte: 15 (1.8%)
+------------------------------------------------------
+📏 Distância Total Percorrida: 7114.5 km
+⏳ Tempo Total Estimado em Trânsito: 502.2 horas
+🚗 Perfil de Viagens = Curtas: 209 | Médias: 408 | Longas: 121
+
+======================================================
+💰 FLUXO FINANCEIRO E FATURAMENTO
+======================================================
+[+] Gross Merchandise Volume (GMV): R$ 23512.64  <-- Total movimentado via Pix
+[-] Dedução - Custo de Gateway (Woovi): R$ 369.00
+[-] Dedução - Pedágios Automáticos: R$ 532.60
+======================================================
+🚀 REPASSE GERAL LÍQUIDO AOS MOTORISTAS: R$ 22240.42
+======================================================
+
+🍃 RECEITA APLICATIVO (LEAF OP FEES)
+➜ Receita Bruta Arrecadada: R$ 884.37
+➜ Custo de Assunção de Reembolsos / Chargebacks: R$ 501.64
+➜ RESULTADO LÍQUIDO ESTIMADO DA HORA: R$ 382.73
+
+💡 PROJEÇÃO MENSAL (Escala de 1 Hora Equivalente x 12h Pico/Dia x 30 Dias)
+➜ Projeção Lucro Líquido ao Mês com 250 motoristas: R$ 137.783,04
+======================================================
+

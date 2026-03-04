@@ -16,7 +16,7 @@ class WebSocketTestClient {
       timeout: 20000,
       ...options
     };
-    
+
     this.socket = null;
     this.connected = false;
     this.authenticated = false;
@@ -25,7 +25,7 @@ class WebSocketTestClient {
     this.userId = null;
     this.userType = null;
   }
-  
+
   /**
    * Conectar ao servidor
    * @returns {Promise<void>}
@@ -33,23 +33,23 @@ class WebSocketTestClient {
   async connect() {
     return new Promise((resolve, reject) => {
       this.socket = io(this.url, this.options);
-      
+
       const timeout = setTimeout(() => {
         reject(new Error('Timeout ao conectar WebSocket'));
       }, this.options.timeout);
-      
+
       this.socket.on('connect', () => {
         clearTimeout(timeout);
         this.connected = true;
         console.log(`✅ [TestClient] Conectado: ${this.socket.id}`);
         resolve();
       });
-      
+
       this.socket.on('connect_error', (error) => {
         clearTimeout(timeout);
         reject(error);
       });
-      
+
       // Registrar todos os eventos recebidos
       this.socket.onAny((eventName, ...args) => {
         if (!this.events.has(eventName)) {
@@ -59,7 +59,7 @@ class WebSocketTestClient {
           timestamp: Date.now(),
           data: args[0] || {}
         });
-        
+
         // Notificar listeners
         if (this.eventListeners.has(eventName)) {
           this.eventListeners.get(eventName).forEach(callback => {
@@ -69,7 +69,7 @@ class WebSocketTestClient {
       });
     });
   }
-  
+
   /**
    * Autenticar usuário
    * @param {string} uid - ID do usuário
@@ -80,12 +80,12 @@ class WebSocketTestClient {
     if (!this.connected) {
       throw new Error('Socket não está conectado');
     }
-    
+
     return new Promise((resolve, reject) => {
       const timeout = setTimeout(() => {
         reject(new Error('Timeout ao autenticar'));
       }, 15000); // Aumentado para 15 segundos
-      
+
       // Registrar listeners ANTES de emitir o evento (evitar race condition)
       const authenticatedHandler = (data) => {
         clearTimeout(timeout);
@@ -95,31 +95,31 @@ class WebSocketTestClient {
         this.userType = userType;
         this.socket.userId = uid; // Simular comportamento do servidor
         this.socket.userType = userType;
-        
+
         // Entrar na room apropriada (servidor faz isso automaticamente, mas garantir)
         if (userType === 'driver') {
           this.socket.emit('join', `driver_${uid}`);
         } else if (userType === 'customer') {
           this.socket.emit('join', `customer_${uid}`);
         }
-        
+
         resolve(data);
       };
-      
+
       const errorHandler = (error) => {
         clearTimeout(timeout);
         this.socket.removeListener('authenticated', authenticatedHandler);
         reject(new Error(error.message || 'Erro na autenticação'));
       };
-      
+
       this.socket.once('authenticated', authenticatedHandler);
       this.socket.once('auth_error', errorHandler);
-      
+
       // Emitir evento após registrar listeners
       this.socket.emit('authenticate', { uid, userType });
     });
   }
-  
+
   /**
    * Criar booking (solicitar corrida)
    * @param {Object} data - Dados do booking
@@ -130,28 +130,28 @@ class WebSocketTestClient {
       const timeout = setTimeout(() => {
         reject(new Error('Timeout ao criar booking'));
       }, 20000); // Aumentado para 20 segundos
-      
+
       // Registrar listeners ANTES de emitir o evento
       const successHandler = (response) => {
         clearTimeout(timeout);
         this.socket.removeListener('bookingError', errorHandler);
         resolve(response);
       };
-      
+
       const errorHandler = (error) => {
         clearTimeout(timeout);
         this.socket.removeListener('bookingCreated', successHandler);
         reject(new Error(error.error || error.message || 'Erro ao criar booking'));
       };
-      
+
       this.socket.once('bookingCreated', successHandler);
       this.socket.once('bookingError', errorHandler);
-      
+
       // Emitir evento após registrar listeners
       this.socket.emit('createBooking', data);
     });
   }
-  
+
   /**
    * Confirmar pagamento
    * @param {Object} data - Dados do pagamento
@@ -162,21 +162,21 @@ class WebSocketTestClient {
       const timeout = setTimeout(() => {
         reject(new Error('Timeout ao confirmar pagamento'));
       }, 15000);
-      
+
       this.socket.emit('confirmPayment', data);
-      
+
       this.socket.once('paymentConfirmed', (response) => {
         clearTimeout(timeout);
         resolve(response);
       });
-      
+
       this.socket.once('paymentError', (error) => {
         clearTimeout(timeout);
         reject(new Error(error.error || error.message || 'Erro ao confirmar pagamento'));
       });
     });
   }
-  
+
   /**
    * Aceitar corrida (motorista)
    * @param {string} bookingId - ID da corrida
@@ -187,21 +187,21 @@ class WebSocketTestClient {
       const timeout = setTimeout(() => {
         reject(new Error('Timeout ao aceitar corrida'));
       }, 10000);
-      
+
       this.socket.emit('acceptRide', { bookingId });
-      
+
       this.socket.once('rideAccepted', (response) => {
         clearTimeout(timeout);
         resolve(response);
       });
-      
+
       this.socket.once('acceptRideError', (error) => {
         clearTimeout(timeout);
         reject(new Error(error.error || error.message || 'Erro ao aceitar corrida'));
       });
     });
   }
-  
+
   /**
    * Rejeitar corrida (motorista)
    * @param {string} bookingId - ID da corrida
@@ -213,9 +213,9 @@ class WebSocketTestClient {
       const timeout = setTimeout(() => {
         reject(new Error('Timeout ao rejeitar corrida'));
       }, 10000);
-      
+
       this.socket.emit('rejectRide', { bookingId, reason });
-      
+
       // Rejeição geralmente não retorna evento específico
       setTimeout(() => {
         clearTimeout(timeout);
@@ -223,7 +223,32 @@ class WebSocketTestClient {
       }, 1000);
     });
   }
-  
+
+  /**
+   * Notificar chegada ao local de embarque (motorista)
+   * @param {string} bookingId - ID da corrida
+   * @returns {Promise<Object>}
+   */
+  async arrivedAtPickup(bookingId) {
+    return new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        reject(new Error('Timeout ao notificar chegada ao local de embarque'));
+      }, 10000);
+
+      this.socket.emit('notificationAction', {
+        action: 'arrived_at_pickup',
+        bookingId
+      });
+
+      // O servidor geralmente não retorna evento imediato para o motorista,
+      // mas podemos aguardar um pouco ou observar logs
+      setTimeout(() => {
+        clearTimeout(timeout);
+        resolve({ success: true });
+      }, 1500);
+    });
+  }
+
   /**
    * Iniciar viagem
    * @param {Object} data - Dados do início da viagem
@@ -234,21 +259,21 @@ class WebSocketTestClient {
       const timeout = setTimeout(() => {
         reject(new Error('Timeout ao iniciar viagem'));
       }, 10000);
-      
+
       this.socket.emit('startTrip', data);
-      
+
       this.socket.once('tripStarted', (response) => {
         clearTimeout(timeout);
         resolve(response);
       });
-      
+
       this.socket.once('tripStartError', (error) => {
         clearTimeout(timeout);
         reject(new Error(error.error || error.message || 'Erro ao iniciar viagem'));
       });
     });
   }
-  
+
   /**
    * Finalizar viagem
    * @param {Object} data - Dados do fim da viagem
@@ -258,22 +283,22 @@ class WebSocketTestClient {
     return new Promise((resolve, reject) => {
       const timeout = setTimeout(() => {
         reject(new Error('Timeout ao finalizar viagem'));
-      }, 15000);
-      
+      }, 30000); // Expanded timeout to account for external woovi API payment resolution
+
       this.socket.emit('completeTrip', data);
-      
+
       this.socket.once('tripCompleted', (response) => {
         clearTimeout(timeout);
         resolve(response);
       });
-      
+
       this.socket.once('tripCompleteError', (error) => {
         clearTimeout(timeout);
         reject(new Error(error.error || error.message || 'Erro ao finalizar viagem'));
       });
     });
   }
-  
+
   /**
    * Cancelar corrida
    * @param {string} bookingId - ID da corrida
@@ -285,21 +310,71 @@ class WebSocketTestClient {
       const timeout = setTimeout(() => {
         reject(new Error('Timeout ao cancelar corrida'));
       }, 10000);
-      
+
       this.socket.emit('cancelRide', { bookingId, reason });
-      
+
       this.socket.once('rideCancelled', (response) => {
         clearTimeout(timeout);
         resolve(response);
       });
-      
+
       this.socket.once('rideCancellationError', (error) => {
         clearTimeout(timeout);
         reject(new Error(error.error || error.message || 'Erro ao cancelar corrida'));
       });
     });
   }
-  
+
+  /**
+   * Solicitar extensão de corrida (mais cara)
+   * @param {Object} data - Dados da extensão
+   * @returns {Promise<Object>}
+   */
+  async requestRideExtension(data) {
+    return new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        reject(new Error('Timeout ao solicitar extensão de corrida'));
+      }, 15000);
+
+      this.socket.emit('requestRideExtension', data);
+
+      this.socket.once('rideExtensionPaymentRequired', (response) => {
+        clearTimeout(timeout);
+        resolve(response);
+      });
+
+      this.socket.once('rideExtensionError', (error) => {
+        clearTimeout(timeout);
+        reject(new Error(error.error || error.message || 'Erro ao solicitar extensão'));
+      });
+    });
+  }
+
+  /**
+   * Alterar destino durante a corrida (mesmo preço ou mais barata)
+   * @param {Object} data - Dados do novo destino
+   * @returns {Promise<Object>}
+   */
+  async changeDestination(data) {
+    return new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        reject(new Error('Timeout ao alterar destino'));
+      }, 15000);
+
+      this.socket.emit('changeDestination', data);
+
+      this.socket.once('destinationChanged', (response) => {
+        clearTimeout(timeout);
+        resolve(response);
+      });
+
+      this.socket.once('changeDestinationError', (error) => {
+        clearTimeout(timeout);
+        reject(new Error(error.error || error.message || 'Erro ao alterar destino'));
+      });
+    });
+  }
+
   /**
    * Aguardar evento específico
    * @param {string} eventName - Nome do evento
@@ -312,22 +387,22 @@ class WebSocketTestClient {
       const events = this.events.get(eventName);
       return events[events.length - 1].data;
     }
-    
+
     return new Promise((resolve, reject) => {
       const timeoutId = setTimeout(() => {
         reject(new Error(`Timeout aguardando evento: ${eventName}`));
       }, timeout);
-      
+
       const listener = (data) => {
         clearTimeout(timeoutId);
         resolve(data);
       };
-      
+
       if (!this.eventListeners.has(eventName)) {
         this.eventListeners.set(eventName, []);
       }
       this.eventListeners.get(eventName).push(listener);
-      
+
       // Se evento já foi recebido, resolver imediatamente
       if (this.events.has(eventName) && this.events.get(eventName).length > 0) {
         clearTimeout(timeoutId);
@@ -336,7 +411,7 @@ class WebSocketTestClient {
       }
     });
   }
-  
+
   /**
    * Verificar se evento foi recebido
    * @param {string} eventName - Nome do evento
@@ -345,7 +420,7 @@ class WebSocketTestClient {
   hasReceivedEvent(eventName) {
     return this.events.has(eventName) && this.events.get(eventName).length > 0;
   }
-  
+
   /**
    * Obter todos os eventos recebidos
    * @param {string} eventName - Nome do evento
@@ -354,14 +429,14 @@ class WebSocketTestClient {
   getEvents(eventName) {
     return this.events.get(eventName) || [];
   }
-  
+
   /**
    * Limpar eventos recebidos
    */
   clearEvents() {
     this.events.clear();
   }
-  
+
   /**
    * Desconectar
    */
@@ -373,7 +448,7 @@ class WebSocketTestClient {
       this.socket = null;
     }
   }
-  
+
   /**
    * Obter ID do socket
    * @returns {string|null}

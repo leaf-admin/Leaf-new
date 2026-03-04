@@ -1,9 +1,11 @@
-import React, { useState, useRef, useEffect } from 'react';
-import { View, StyleSheet, Image, TouchableOpacity, Text, Alert, Dimensions } from 'react-native';
+import { View, StyleSheet, Image, TouchableOpacity, Alert, Dimensions, Modal, ActivityIndicator } from 'react-native';
 import MapView, { PROVIDER_GOOGLE, Marker, Polyline, Callout, Circle, UrlTile } from 'react-native-maps';
 import { useSelector, useDispatch } from 'react-redux';
 import { Ionicons } from '@expo/vector-icons';
 import * as Location from 'expo-location';
+import { useTheme } from '../common-local/theme';
+import Typography from '../components/design-system/Typography';
+import AnimatedButton from '../components/design-system/AnimatedButton';
 import { GoogleMapApiConfig } from '../../config/GoogleMapApiConfig';
 
 import PassengerUI from '../components/map/PassengerUI';
@@ -20,6 +22,9 @@ import { darkTheme, lightTheme } from '../common-local/theme';
 import { clearBooking } from '../common-local/actions/bookingactions';
 import polyline from '@mapbox/polyline';
 import carIcon from '../../assets/images/track_Car.png';
+import { FareCalculator, getDistanceMatrix } from '../common/sharedFunctions';
+import { fonts } from '../common/font';
+import { colors } from '../common/theme';
 
 const { width, height } = Dimensions.get('window');
 
@@ -258,6 +263,15 @@ export default function NewMapScreen(props) {
     const handleBottomSheetStateChange = (state) => {
         setBottomSheetState(state);
     };
+    // Estados para mudança de destino (Ride Extension)
+    const [changeDestModalVisible, setChangeDestModalVisible] = useState(false);
+    const [calculatingFare, setCalculatingFare] = useState(false);
+    const [newDropEstimate, setNewDropEstimate] = useState(null);
+    const [loading, setLoading] = useState(false);
+
+    // Funções de tradução simplificadas para o NewMapScreen (ou use i18n se disponível)
+    const t = (key, fallback) => fallback || key;
+    const isRTL = false; // Ajustar se necessário
 
     // ===== FUNÇÕES PARA GERENCIAR RESERVAS =====
     const dispatch = useDispatch();
@@ -270,7 +284,7 @@ export default function NewMapScreen(props) {
     const cartypes = useSelector(state => state.cartypes);
 
     // Tema baseado no estado
-    const theme = isDarkMode ? darkTheme : lightTheme;
+    const theme = useTheme();
 
     // Cores padrão para o mapa
     const mapColors = {
@@ -506,6 +520,84 @@ export default function NewMapScreen(props) {
 
         dispatch(clearBooking());
     };
+
+    // ✅ NOVO: Efeito para detectar Mudança de Destino via SearchScreen
+    useEffect(() => {
+        if (tripdata && tripdata.drop && tripdata.drop.source === 'search' && booking && (auth.profile?.usertype === 'customer' || auth.profile?.userType === 'customer')) {
+            const calculateNewFare = async () => {
+                setCalculatingFare(true);
+                setChangeDestModalVisible(true);
+
+                const startLoc = booking.pickup.lat + ',' + booking.pickup.lng;
+                const destLoc = tripdata.drop.lat + ',' + tripdata.drop.lng;
+
+                try {
+                    const res = await getDistanceMatrix(startLoc, destLoc);
+                    if (res) {
+                        const distance = parseFloat(res.distance) / 1000;
+                        const time = parseFloat(res.time_in_secs) / 60;
+
+                        const rateDetails = {
+                            rate_per_unit_distance: booking.rate_per_unit_distance || 0,
+                            rate_per_hour: booking.rate_per_hour || 0,
+                            base_fare: booking.base_fare || 0,
+                            min_fare: booking.min_fare || 0,
+                        };
+
+                        let estimate = FareCalculator(distance, time, rateDetails, booking.instructionData, booking.decimal, res.routePoints, booking.carType, 0);
+
+                        setNewDropEstimate({
+                            estimate: estimate.estimateFare,
+                            distance: res.distance,
+                            time: res.time_in_secs,
+                            newDrop: tripdata.drop,
+                            diff: estimate.estimateFare - booking.estimate
+                        });
+                    }
+                } catch (error) {
+                    console.error("Error calculating new fare:", error);
+                    Alert.alert(t('error', 'Erro'), t('fare_calc_error', "Erro ao calcular nova tarifa. Tente novamente mais tarde."));
+                    setChangeDestModalVisible(false);
+                }
+                setCalculatingFare(false);
+            };
+
+            setTimeout(calculateNewFare, 300);
+
+            dispatch({ type: 'UPDATE_TRIP_DROP', payload: { ...tripdata.drop, source: 'processed' } });
+        }
+    }, [tripdata?.drop, booking]);
+
+    const confirmDestinationChange = () => {
+        if (!newDropEstimate) return;
+        const webSocketManager = WebSocketManager.getInstance();
+        setChangeDestModalVisible(false);
+        setLoading(true);
+        if (newDropEstimate.diff > 0) {
+            // A corrida ficou mais cara. Pede extensão (Geração Pix Extra).
+            webSocketManager.requestRideExtension(booking.id, newDropEstimate.newDrop, newDropEstimate.estimate)
+                .then(() => {
+                    setLoading(false);
+                    Alert.alert(t('success', 'Sucesso'), t('extension_requested', 'Sua solicitação enviará um Pix extra para estender a corrida. Aguarde a confirmação do pagamento.'));
+                })
+                .catch(err => {
+                    setLoading(false);
+                    Alert.alert(t('error', 'Erro'), err.message || 'Erro ao processar');
+                });
+        } else {
+            // Corrida ficou mais barata ou mesmo preço. Change Destination direto.
+            webSocketManager.changeDestination(booking.id, newDropEstimate.newDrop)
+                .then(() => {
+                    setLoading(false);
+                    Alert.alert(t('success', 'Sucesso'), t('destination_changed', 'Destino alterado com sucesso! Se a corrida ficar mais barata a diferença será estornada no final.'));
+                })
+                .catch(err => {
+                    setLoading(false);
+                    Alert.alert(t('error', 'Erro'), err.message || 'Erro ao processar alteração.');
+                });
+        }
+    };
+
 
     const toggleTheme = () => {
         setIsDarkMode(!isDarkMode);
@@ -744,14 +836,14 @@ export default function NewMapScreen(props) {
             <View style={[styles.mapControls, { zIndex: getCenterButtonZIndex() }]}>
                 {/* Botão de centralizar no usuário */}
                 <TouchableOpacity
-                    style={[styles.controlButton, { backgroundColor: mapColors.surface }]}
+                    style={[styles.controlButton, { backgroundColor: theme.card }]}
                     onPress={centerOnUser}
                     activeOpacity={0.7}
                 >
                     <Ionicons
                         name="locate"
                         size={24}
-                        color={mapColors.text}
+                        color={theme.text}
                     />
                 </TouchableOpacity>
             </View>
@@ -770,7 +862,8 @@ export default function NewMapScreen(props) {
                                 key={car.id || index}
                                 style={[
                                     styles.carCard,
-                                    selectedCarType === car.name && styles.selectedCarCard
+                                    { backgroundColor: theme.card === '#1A1A1A' ? 'rgba(255,255,255,0.05)' : '#F8F9FA' },
+                                    selectedCarType === car.name && { borderColor: theme.leafGreen || '#41D274', backgroundColor: theme.card === '#1A1A1A' ? 'rgba(65, 210, 116, 0.1)' : '#E8F5E8' }
                                 ]}
                                 onPress={() => setSelectedCarType(car.name)}
                             >
@@ -781,16 +874,16 @@ export default function NewMapScreen(props) {
                                     />
                                     <View style={styles.carInfo}>
                                         <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-                                            <Text style={styles.carNameValue}>{car.name}</Text>
-                                            <Text style={styles.priceNameValue}>
+                                            <Typography variant="body" weight="bold" color={theme.text}>{car.name}</Typography>
+                                            <Typography variant="body" weight="bold" color={theme.leafGreen || '#41D274'}>
                                                 {carEstimates[car.name]?.estimateFare ?
                                                     `${settings.currency}${carEstimates[car.name].estimateFare.toFixed(settings.decimal)}` :
                                                     `${settings.currency}${car.min_fare.toFixed(settings.decimal)}`
                                                 }
-                                            </Text>
+                                            </Typography>
                                         </View>
                                         <View style={styles.carDetailsRow}>
-                                            <Text style={styles.carSubInfo}>{car.extra_info}</Text>
+                                            <Typography variant="caption" color={theme.textSecondary}>{car.extra_info}</Typography>
                                         </View>
                                     </View>
                                 </View>
@@ -803,29 +896,99 @@ export default function NewMapScreen(props) {
             {/* Botão de agendamento */}
             {selectedCarType && tripdata.pickup && tripdata.drop && tripdata.drop.add && (
                 <View style={styles.bookButtonContainer}>
-                    <TouchableOpacity
-                        style={styles.bookButton}
+                    <AnimatedButton
+                        title="Agendar Agora"
                         onPress={() => {
                             // Implementar lógica de agendamento
                             console.log('Agendando viagem para:', selectedCarType);
                         }}
-                    >
-                        <Text style={styles.bookButtonText}>
-                            Agendar Agora
-                        </Text>
-                        <Text style={styles.bookButtonSubtext}>
-                            {(() => {
-                                const selectedCar = filteredCarTypes.find(car => car.name === selectedCarType);
-                                const estimate = getEstimateForCar(selectedCar);
-                                return estimate.fare ? `${settings.currency}${estimate.fare}` : 'Preço sob consulta';
-                            })()}
-                        </Text>
-                    </TouchableOpacity>
+                    />
+                    <Typography variant="caption" color={theme.textSecondary} align="center" style={{ marginTop: 8 }}>
+                        {(() => {
+                            const selectedCar = filteredCarTypes.find(car => car.name === selectedCarType);
+                            const estimate = getEstimateForCar(selectedCar);
+                            return estimate.fare ? `${settings.currency}${estimate.fare}` : 'Preço sob consulta';
+                        })()}
+                    </Typography>
                 </View>
             )}
+            {/* Modal de Mudança de Destino */}
+            <Modal
+                animationType="fade"
+                transparent={true}
+                visible={changeDestModalVisible}
+                onRequestClose={() => {
+                    setChangeDestModalVisible(false);
+                }}
+            >
+                <View style={[styles.modalContainer, { backgroundColor: 'rgba(0,0,0,0.7)' }]}>
+                    <View style={[styles.modalView, { backgroundColor: theme.card }]}>
+                        <Typography variant="h2" align="center" style={{ marginBottom: 20 }} color={theme.text}>
+                            {t('change_destination', 'Alteração de Destino')}
+                        </Typography>
+                        {calculatingFare ? (
+                            <View style={styles.modalLoading}>
+                                <ActivityIndicator size="large" color={theme.leafGreen || '#41D274'} />
+                                <Typography variant="body" color={theme.textSecondary} style={{ marginTop: 15 }}>
+                                    {t('calculating_fare', 'Calculando nova tarifa...')}
+                                </Typography>
+                            </View>
+                        ) : newDropEstimate ? (
+                            <View>
+                                <View style={{ marginBottom: 12 }}>
+                                    <Typography variant="label" color={theme.textSecondary}>{t('new_destination', 'Novo Destino:')}</Typography>
+                                    <Typography variant="body" color={theme.text}>{newDropEstimate.newDrop?.add}</Typography>
+                                </View>
+
+                                <View style={{ marginBottom: 20 }}>
+                                    <Typography variant="label" color={theme.textSecondary}>{t('new_fare', 'Nova Tarifa Estimada:')}</Typography>
+                                    <Typography variant="h2" color={theme.leafGreen || '#41D274'}>R$ {(newDropEstimate.estimate).toFixed(2)}</Typography>
+                                </View>
+
+                                {newDropEstimate.diff > 0 ? (
+                                    <View style={[styles.fareAlertIncrease, { backgroundColor: theme.card === '#1A1A1A' ? 'rgba(255, 193, 7, 0.1)' : '#FFF3CD', borderLeftColor: '#FFC107' }]}>
+                                        <Typography variant="caption" color={theme.card === '#1A1A1A' ? '#FFC107' : '#856404'} weight="bold">
+                                            {t('fare_increase', 'Atenção: A corrida ficou mais longa. Para confirmar a alteração, um Pix adicional de')} R$ {(newDropEstimate.diff).toFixed(2)} {t('fare_increase_end', 'será solicitado após sua confirmação.')}
+                                        </Typography>
+                                    </View>
+                                ) : parseFloat(newDropEstimate.diff).toFixed(2) == 0 ? (
+                                    <View style={[styles.fareAlertSame, { backgroundColor: theme.card === '#1A1A1A' ? 'rgba(108, 117, 125, 0.1)' : '#E2E3E5', borderLeftColor: '#6C757D' }]}>
+                                        <Typography variant="caption" color={theme.card === '#1A1A1A' ? '#c0c0c0' : '#383D41'} weight="bold">
+                                            {t('fare_same', 'A tarifa estimada permanece a mesma.')}
+                                        </Typography>
+                                    </View>
+                                ) : (
+                                    <View style={[styles.fareAlertDecrease, { backgroundColor: theme.card === '#1A1A1A' ? 'rgba(40, 167, 69, 0.1)' : '#D4EDDA', borderLeftColor: '#28A745' }]}>
+                                        <Typography variant="caption" color={theme.card === '#1A1A1A' ? '#41D274' : '#155724'} weight="bold">
+                                            {t('fare_decrease', 'Sua viagem ficou mais barata! A diferença será automaticamente recalculada e estornada no encerramento da corrida.')}
+                                        </Typography>
+                                    </View>
+                                )}
+
+                                <View style={styles.modalFooter}>
+                                    <View style={{ flex: 1, marginRight: 8 }}>
+                                        <AnimatedButton
+                                            title={t('cancel', 'Cancelar')}
+                                            variant="outline"
+                                            onPress={() => setChangeDestModalVisible(false)}
+                                        />
+                                    </View>
+                                    <View style={{ flex: 1, marginLeft: 8 }}>
+                                        <AnimatedButton
+                                            title={t('confirm', 'Confirmar')}
+                                            onPress={confirmDestinationChange}
+                                        />
+                                    </View>
+                                </View>
+                            </View>
+                        ) : null}
+                    </View>
+                </View>
+            </Modal>
         </View>
     );
 }
+
 
 const styles = StyleSheet.create({
     container: {
@@ -943,4 +1106,125 @@ const styles = StyleSheet.create({
         marginTop: 5,
         opacity: 0.9,
     },
-}); 
+    // Estilos do Modal de Mudança de Destino
+    modalContainer: {
+        flex: 1,
+        backgroundColor: 'rgba(0,0,0,0.5)',
+        justifyContent: 'center',
+        alignItems: 'center'
+    },
+    modalView: {
+        width: '90%',
+        backgroundColor: '#FFF',
+        borderRadius: 20,
+        padding: 25,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.25,
+        shadowRadius: 4,
+        elevation: 5
+    },
+    modalTitle: {
+        fontFamily: fonts.Bold,
+        fontSize: 20,
+        marginBottom: 20,
+        color: '#333',
+        textAlign: 'center'
+    },
+    modalText: {
+        fontFamily: fonts.Regular,
+        fontSize: 15,
+        marginBottom: 12,
+        color: '#444',
+        lineHeight: 22
+    },
+    boldText: {
+        fontFamily: fonts.Bold,
+        color: '#000'
+    },
+    modalLoading: {
+        marginVertical: 30,
+        alignItems: 'center'
+    },
+    modalLoadingText: {
+        marginTop: 15,
+        fontFamily: fonts.Regular,
+        color: '#666'
+    },
+    fareAlertIncrease: {
+        backgroundColor: '#FFF3CD',
+        padding: 15,
+        borderRadius: 12,
+        marginBottom: 20,
+        borderLeftWidth: 5,
+        borderLeftColor: '#FFC107'
+    },
+    fareAlertIncreaseText: {
+        fontFamily: fonts.Bold,
+        color: '#856404',
+        fontSize: 14,
+        lineHeight: 20
+    },
+    fareAlertSame: {
+        backgroundColor: '#E2E3E5',
+        padding: 15,
+        borderRadius: 12,
+        marginBottom: 20,
+        borderLeftWidth: 5,
+        borderLeftColor: '#6C757D'
+    },
+    fareAlertSameText: {
+        fontFamily: fonts.Bold,
+        color: '#383D41',
+        fontSize: 14
+    },
+    fareAlertDecrease: {
+        backgroundColor: '#D4EDDA',
+        padding: 15,
+        borderRadius: 12,
+        marginBottom: 20,
+        borderLeftWidth: 5,
+        borderLeftColor: '#28A745'
+    },
+    fareAlertDecreaseText: {
+        fontFamily: fonts.Bold,
+        color: '#155724',
+        fontSize: 14,
+        lineHeight: 20
+    },
+    modalFooter: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        marginTop: 10
+    },
+    cancelButton: {
+        paddingVertical: 12,
+        width: '45%',
+        alignItems: 'center',
+        borderRadius: 12,
+        borderWidth: 1,
+        borderColor: '#DC3545'
+    },
+    cancelButtonText: {
+        color: '#DC3545',
+        fontFamily: fonts.Bold,
+        fontSize: 16
+    },
+    confirmButton: {
+        backgroundColor: '#28A745',
+        paddingVertical: 12,
+        width: '45%',
+        borderRadius: 12,
+        alignItems: 'center',
+        shadowColor: '#28A745',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.3,
+        shadowRadius: 3,
+        elevation: 3
+    },
+    confirmButtonText: {
+        color: '#FFF',
+        // fontFamily: fonts.Bold, // Assuming fonts is defined elsewhere, keeping original for now
+        fontSize: 16
+    }
+});

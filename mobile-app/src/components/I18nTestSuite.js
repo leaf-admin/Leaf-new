@@ -16,7 +16,7 @@ const I18nTestSuite = () => {
   // Teste 1: Traduções básicas
   const testBasicTranslations = () => {
     const tests = [
-      { key: 'welcome', expected: 'Welcome to Leaf' },
+      { key: 'welcome', expected: 'Welcome ta Leaf' },
       { key: 'app.name', expected: 'Leaf' },
       { key: 'auth.login', expected: 'Login' }
     ];

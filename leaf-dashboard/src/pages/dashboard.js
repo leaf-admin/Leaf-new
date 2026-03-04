@@ -8,14 +8,16 @@ import { Button } from '../components/ui/button'
 import { Badge } from '../components/ui/badge'
 import { Alert, AlertDescription } from '../components/ui/alert'
 import { leafAPI } from '../services/api'
-import { 
-  Users, 
-  Truck, 
-  DollarSign, 
+import {
+  Users,
+  Truck,
+  DollarSign,
   TrendingUp,
   Calendar,
   RefreshCw,
-  UserPlus
+  UserPlus,
+  ShieldAlert,
+  Wallet
 } from 'lucide-react'
 
 // Importar ApexCharts dinamicamente
@@ -25,7 +27,7 @@ export default function Dashboard() {
   const [period, setPeriod] = useState('24h')
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
-  
+
   // Dados
   const [newDrivers, setNewDrivers] = useState(0)
   const [newCustomers, setNewCustomers] = useState(0)
@@ -33,6 +35,7 @@ export default function Dashboard() {
   const [ridesRevenue, setRidesRevenue] = useState(0)
   const [operationalFee, setOperationalFee] = useState(0)
   const [subscriptionRevenue, setSubscriptionRevenue] = useState(0)
+  const [reserveFundLosses, setReserveFundLosses] = useState(0)
   const [revenueEvolution, setRevenueEvolution] = useState([])
 
   useEffect(() => {
@@ -69,7 +72,7 @@ export default function Dashboard() {
           leafAPI.getOperationalFeeStats(apiPeriod),
           leafAPI.getSubscriptionRevenue('30d')
         ])
-        
+
         // Buscar evolução separadamente (pode ser mais lento)
         const evolutionData = await leafAPI.getRevenueEvolution(30)
 
@@ -80,8 +83,9 @@ export default function Dashboard() {
           setRidesRevenue(ridesData.totalValue || 0)
           setOperationalFee(feeData.totalOperationalFee || 0)
           setSubscriptionRevenue(subscriptionData.revenue?.total || 0)
+          setReserveFundLosses(ridesData.reserveFundLosses || 0)
           setRevenueEvolution(evolutionData || [])
-          
+
           if (isFirstLoad) {
             setLoading(false)
             isFirstLoad = false
@@ -306,6 +310,38 @@ export default function Dashboard() {
                     </div>
                     <p className="text-xs text-muted-foreground mt-1">
                       Últimos 30 dias
+                    </p>
+                  </CardContent>
+                </Card>
+
+                <Card className="border-red-500/50 bg-red-50/50 dark:bg-red-950/20">
+                  <CardHeader className="flex flex-row items-center justify-between pb-2">
+                    <CardTitle className="text-sm font-medium text-red-600 dark:text-red-400">
+                      Fundo de Reserva (Perda)
+                    </CardTitle>
+                    <ShieldAlert className="h-4 w-4 text-red-500" />
+                  </CardHeader>
+                  <CardContent>
+                    <div className="text-2xl font-bold text-red-600 dark:text-red-400">
+                      R$ {parseFloat(reserveFundLosses).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                    </div>
+                    <p className="text-xs text-red-600/70 dark:text-red-400/70 mt-1">
+                      Taxas PIX de Corridas Canceladas (Desde Início)
+                    </p>
+                  </CardContent>
+                </Card>
+
+                <Card className="border-primary/50 bg-primary/5">
+                  <CardHeader className="flex flex-row items-center justify-between pb-2">
+                    <CardTitle className="text-sm font-medium">Receita de Op. Líquida</CardTitle>
+                    <Wallet className="h-4 w-4 text-primary" />
+                  </CardHeader>
+                  <CardContent>
+                    <div className="text-2xl font-black text-primary">
+                      R$ {Math.max(0, parseFloat(operationalFee) - parseFloat(reserveFundLosses)).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                    </div>
+                    <p className="text-xs text-muted-foreground mt-1">
+                      Lucro da Plataforma (OpFee - Reserva)
                     </p>
                   </CardContent>
                 </Card>

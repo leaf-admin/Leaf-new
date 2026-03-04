@@ -9,12 +9,12 @@ export const TermsOfService = () => {
       
       <Text style={styles.section}>1. Aceitação dos Termos</Text>
       <Text style={styles.text}>
-        Ao usar o aplicativo Leaf, você concorda com estes termos de serviço. Se você não concordar com qualquer parte destes termos, não poderá usar nossos serviços.
+        Ao usar o aplicativa Leaf, você concorda com estes termos de serviço. Se você não concordar com qualquer parte destes termos, não poderá usar nossos serviços.
       </Text>
 
       <Text style={styles.section}>2. Descrição do Serviço</Text>
       <Text style={styles.text}>
-        O Leaf é um aplicativo de transporte que conecta passageiros a motoristas. Nossos serviços incluem:
+        A Leaf é um aplicativo de transporte que conecta passageiros a motoristas. Nossos serviços incluem:
         - Agendamento de corridas
         - Processamento de pagamentos
         - Comunicação entre usuários
@@ -23,7 +23,7 @@ export const TermsOfService = () => {
 
       <Text style={styles.section}>3. Responsabilidades do Usuário</Text>
       <Text style={styles.text}>
-        Como usuário do Leaf, você concorda em:
+        Como usuário da Leaf, você concorda em:
         - Fornecer informações precisas e atualizadas
         - Manter a confidencialidade de sua conta
         - Usar o serviço de acordo com as leis aplicáveis
@@ -40,7 +40,7 @@ export const TermsOfService = () => {
 
       <Text style={styles.section}>5. Limitações de Responsabilidade</Text>
       <Text style={styles.text}>
-        O Leaf não é responsável por:
+        A Leaf não é responsável por:
         - Atrasos ou cancelamentos
         - Danos a propriedades
         - Problemas de comunicação

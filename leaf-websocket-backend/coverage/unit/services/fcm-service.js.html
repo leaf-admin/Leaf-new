@@ -23,30 +23,30 @@
         <div class='clearfix'>
             
             <div class='fl pad1y space-right2'>
-                <span class="strong">17% </span>
+                <span class="strong">16.91% </span>
                 <span class="quiet">Statements</span>
-                <span class='fraction'>34/200</span>
+                <span class='fraction'>34/201</span>
             </div>
         
             
             <div class='fl pad1y space-right2'>
-                <span class="strong">13.95% </span>
+                <span class="strong">14.11% </span>
                 <span class="quiet">Branches</span>
-                <span class='fraction'>12/86</span>
+                <span class='fraction'>12/85</span>
             </div>
         
             
             <div class='fl pad1y space-right2'>
-                <span class="strong">25.92% </span>
+                <span class="strong">25% </span>
                 <span class="quiet">Functions</span>
-                <span class='fraction'>7/27</span>
+                <span class='fraction'>7/28</span>
             </div>
         
             
             <div class='fl pad1y space-right2'>
-                <span class="strong">17.17% </span>
+                <span class="strong">17.08% </span>
                 <span class="quiet">Lines</span>
-                <span class='fraction'>34/198</span>
+                <span class='fraction'>34/199</span>
             </div>
         
             
@@ -803,7 +803,11 @@
 <a name='L738'></a><a href='#L738'>738</a>
 <a name='L739'></a><a href='#L739'>739</a>
 <a name='L740'></a><a href='#L740'>740</a>
-<a name='L741'></a><a href='#L741'>741</a></td><td class="line-coverage quiet"><span class="cline-any cline-yes">1x</span>
+<a name='L741'></a><a href='#L741'>741</a>
+<a name='L742'></a><a href='#L742'>742</a>
+<a name='L743'></a><a href='#L743'>743</a>
+<a name='L744'></a><a href='#L744'>744</a>
+<a name='L745'></a><a href='#L745'>745</a></td><td class="line-coverage quiet"><span class="cline-any cline-yes">1x</span>
 <span class="cline-any cline-yes">1x</span>
 <span class="cline-any cline-yes">1x</span>
 <span class="cline-any cline-yes">1x</span>
@@ -816,6 +820,10 @@
 <span class="cline-any cline-yes">14x</span>
 <span class="cline-any cline-yes">14x</span>
 <span class="cline-any cline-yes">14x</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
@@ -1551,11 +1559,15 @@ const circuitBreakerService = require('./circuit-breaker-service');
 const traceContext = require('../utils/trace-context');
 &nbsp;
 class FCMService {
-    constructor() {
-        this.redis = new Redis(process.env.REDIS_URL || <span class="branch-1 cbranch-no" title="branch not covered" >'redis://localhost:6379')</span>;
+    constructor(redis = null) {
+        this.redis = redis;
         this.isInitialized = false;
         this.rateLimitCounts = new Map();
         this.lastResetTime = Date.now();
+    }
+&nbsp;
+<span class="fstat-no" title="function not covered" >    se</span>tRedis(redis) {
+<span class="cstat-no" title="statement not covered" >        this.redis = redis;</span>
     }
 &nbsp;
     // Inicializar o serviço FCM
@@ -1565,7 +1577,7 @@ class FCMService {
 <span class="cstat-no" title="statement not covered" >            if (!admin.apps.length) {</span>
                 // Inicializar Firebase Admin se não estiver
                 const serviceAccountPath = <span class="cstat-no" title="statement not covered" >path.join(__dirname, '..', '..', 'mobile-app', 'config', 'leaf-reactnative-firebase-adminsdk-fbsvc-456a95e2fc.json');</span>
-                
+&nbsp;
 <span class="cstat-no" title="statement not covered" >                try {</span>
 <span class="cstat-no" title="statement not covered" >                    admin.initializeApp({</span>
                         credential: admin.credential.cert(serviceAccountPath),
@@ -1727,7 +1739,7 @@ class FCMService {
 &nbsp;
             // Obter tokens FCM do usuário
             const userTokens = <span class="cstat-no" title="statement not covered" >await this.getUserFCMTokens(userId);</span>
-            
+&nbsp;
 <span class="cstat-no" title="statement not covered" >            if (userTokens.length === 0) {</span>
 <span class="cstat-no" title="statement not covered" >                logStructured('warn', 'Usuário não possui tokens FCM ativos', {</span>
                     service: 'fcm',
@@ -1797,7 +1809,7 @@ class FCMService {
 <span class="fstat-no" title="function not covered" >    as</span>ync sendNotificationToUsers(userIds, notification) {
 <span class="cstat-no" title="statement not covered" >        try {</span>
             const results = <span class="cstat-no" title="statement not covered" >[];</span>
-            
+&nbsp;
 <span class="cstat-no" title="statement not covered" >            for (const userId of userIds) {</span>
                 const result = <span class="cstat-no" title="statement not covered" >await this.sendNotificationToUser(userId, notification);</span>
 <span class="cstat-no" title="statement not covered" >                results.push({ userId, result });</span>
@@ -1887,9 +1899,9 @@ class FCMService {
                     timeout: 60000
                 }
             );
-            
+&nbsp;
 <span class="cstat-no" title="statement not covered" >            logger.info(`✅ Notificação enviada para token ${fcmToken}: ${response}`);</span>
-            
+&nbsp;
 <span class="cstat-no" title="statement not covered" >            return {</span>
                 success: true,
                 messageId: response
@@ -1897,13 +1909,13 @@ class FCMService {
 &nbsp;
         } catch (error) {
 <span class="cstat-no" title="statement not covered" >            logger.error(`❌ Erro ao enviar notificação para token ${fcmToken}:`, error);</span>
-            
+&nbsp;
             // Se o token for inválido, removê-lo
 <span class="cstat-no" title="statement not covered" >            if (error.code === 'messaging/invalid-registration-token' ||</span>
                 error.code === 'messaging/registration-token-not-registered') {
 <span class="cstat-no" title="statement not covered" >                await this.removeInvalidToken(fcmToken);</span>
             }
-            
+&nbsp;
 <span class="cstat-no" title="statement not covered" >            return {</span>
                 success: false,
                 error: error.message
@@ -1989,9 +2001,9 @@ class FCMService {
                     timeout: 60000
                 }
             );
-            
+&nbsp;
 <span class="cstat-no" title="statement not covered" >            logger.info(`✅ Notificação interativa enviada para token ${fcmToken}: ${response}`);</span>
-            
+&nbsp;
 <span class="cstat-no" title="statement not covered" >            return {</span>
                 success: true,
                 messageId: response
@@ -1999,12 +2011,12 @@ class FCMService {
 &nbsp;
         } catch (error) {
 <span class="cstat-no" title="statement not covered" >            logger.error(`❌ Erro ao enviar notificação interativa para token ${fcmToken}:`, error);</span>
-            
+&nbsp;
 <span class="cstat-no" title="statement not covered" >            if (error.code === 'messaging/invalid-registration-token' ||</span>
                 error.code === 'messaging/registration-token-not-registered') {
 <span class="cstat-no" title="statement not covered" >                await this.removeInvalidToken(fcmToken);</span>
             }
-            
+&nbsp;
 <span class="cstat-no" title="statement not covered" >            return {</span>
                 success: false,
                 error: error.message
@@ -2035,9 +2047,9 @@ class FCMService {
             };
 &nbsp;
             const response = <span class="cstat-no" title="statement not covered" >await admin.messaging().send(message);</span>
-            
+&nbsp;
 <span class="cstat-no" title="statement not covered" >            logger.info(`✅ Notificação enviada para tópico ${topic}: ${response}`);</span>
-            
+&nbsp;
 <span class="cstat-no" title="statement not covered" >            return {</span>
                 success: true,
                 messageId: response
@@ -2187,7 +2199,7 @@ class FCMService {
 &nbsp;
             // Encontrar e remover de todos os usuários
             const keys = <span class="cstat-no" title="statement not covered" >await this.redis.keys('fcm_tokens:*');</span>
-            
+&nbsp;
 <span class="cstat-no" title="statement not covered" >            for (const key of keys) {</span>
                 const tokens = <span class="cstat-no" title="statement not covered" >await this.redis.hgetall(key);</span>
 <span class="cstat-no" title="statement not covered" >                for (const [token, data] of Object.entries(tokens)) {</span>
@@ -2235,7 +2247,7 @@ class FCMService {
             const thirtyDaysAgo = <span class="cstat-no" title="statement not covered" >now - (30 * 24 * 60 * 60 * 1000);</span>
 &nbsp;
             const keys = <span class="cstat-no" title="statement not covered" >await this.redis.keys('fcm_tokens:*');</span>
-            
+&nbsp;
 <span class="cstat-no" title="statement not covered" >            for (const key of keys) {</span>
                 const tokens = <span class="cstat-no" title="statement not covered" >await this.redis.hgetall(key);</span>
                 const updatedTokens = <span class="cstat-no" title="statement not covered" >{};</span>
@@ -2290,7 +2302,7 @@ module.exports = FCMService;
             <div class='footer quiet pad2 space-top1 center small'>
                 Code coverage generated by
                 <a href="https://istanbul.js.org/" target="_blank" rel="noopener noreferrer">istanbul</a>
-                at 2026-02-25T13:57:11.921Z
+                at 2026-03-02T19:04:06.263Z
             </div>
         <script src="../prettify.js"></script>
         <script>

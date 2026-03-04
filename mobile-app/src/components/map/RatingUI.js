@@ -11,9 +11,13 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useTranslation } from '../i18n/LanguageProvider';
+import { useTheme } from '../../common-local/theme';
+import Typography from '../design-system/Typography';
+import AnimatedButton from '../design-system/AnimatedButton';
 
 export default function RatingUI({ userToRate, onSubmit }) {
   const { t } = useTranslation();
+  const theme = useTheme();
   const [rating, setRating] = useState(0);
   const [comment, setComment] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -29,7 +33,7 @@ export default function RatingUI({ userToRate, onSubmit }) {
     }
 
     setIsSubmitting(true);
-    
+
     try {
       const ratingData = {
         rating: rating,
@@ -82,13 +86,13 @@ export default function RatingUI({ userToRate, onSubmit }) {
   };
 
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, { backgroundColor: theme.card }]}>
       {/* Header */}
       <View style={styles.header}>
-        <Text style={styles.title}>{t('rate_your_experience')}</Text>
-        <Text style={styles.subtitle}>
+        <Typography variant="h1" align="center" color={theme.text}>{t('rate_your_experience')}</Typography>
+        <Typography variant="body" align="center" color={theme.textSecondary} style={{ marginTop: 8 }}>
           {t('rate_user', { name: userToRate?.name || t('user') })}
-        </Text>
+        </Typography>
       </View>
 
       {/* Estrelas de avaliação */}
@@ -96,58 +100,50 @@ export default function RatingUI({ userToRate, onSubmit }) {
         <View style={styles.starsRow}>
           {renderStars()}
         </View>
-        <Text style={styles.ratingText}>{getRatingText()}</Text>
+        <Typography variant="h2" color={theme.leafGreen || '#41D274'} align="center">{getRatingText()}</Typography>
       </View>
 
       {/* Campo de comentário */}
       <View style={styles.commentContainer}>
-        <Text style={styles.commentLabel}>{t('additional_comments')}</Text>
+        <Typography variant="label" color={theme.textSecondary} style={{ marginBottom: 10 }}>{t('additional_comments')}</Typography>
         <TextInput
-          style={styles.commentInput}
+          style={[styles.commentInput, { backgroundColor: theme.card === '#1A1A1A' ? 'rgba(255,255,255,0.05)' : '#F5F5F5', color: theme.text, borderColor: theme.border }]}
           placeholder={t('comment_placeholder')}
-          placeholderTextColor="#999"
+          placeholderTextColor={theme.textSecondary}
           value={comment}
           onChangeText={setComment}
           multiline
           numberOfLines={3}
           maxLength={200}
         />
-        <Text style={styles.characterCount}>
+        <Typography variant="caption" color={theme.textSecondary} align="right" style={{ marginTop: 5 }}>
           {comment.length}/200 {t('characters')}
-        </Text>
+        </Typography>
       </View>
 
       {/* Botões de ação */}
       <View style={styles.actionButtons}>
-        <TouchableOpacity 
-          style={styles.submitButton} 
+        <AnimatedButton
+          title={t('submit_rating')}
           onPress={handleSubmit}
           disabled={isSubmitting || rating === 0}
-        >
-          {isSubmitting ? (
-            <View style={styles.loadingContainer}>
-              <Ionicons name="hourglass" size={20} color="#FFFFFF" />
-              <Text style={styles.submitButtonText}>{t('submitting')}</Text>
-            </View>
-          ) : (
-            <Text style={styles.submitButtonText}>{t('submit_rating')}</Text>
-          )}
-        </TouchableOpacity>
+          isLoading={isSubmitting}
+          style={{ marginBottom: 12 }}
+        />
 
-        <TouchableOpacity 
-          style={styles.skipButton} 
+        <AnimatedButton
+          title={t('skip_rating')}
+          variant="ghost"
           onPress={() => onSubmit && onSubmit({ rating: 0, comment: '', skipped: true })}
           disabled={isSubmitting}
-        >
-          <Text style={styles.skipButtonText}>{t('skip_rating')}</Text>
-        </TouchableOpacity>
+        />
       </View>
 
       {/* Informações adicionais */}
-      <View style={styles.infoContainer}>
-        <Text style={styles.infoText}>
+      <View style={[styles.infoContainer, { backgroundColor: theme.card === '#1A1A1A' ? 'rgba(255,255,255,0.02)' : '#F8F9FA' }]}>
+        <Typography variant="caption" color={theme.textSecondary} align="center">
           {t('rating_info')}
-        </Text>
+        </Typography>
       </View>
     </View>
   );

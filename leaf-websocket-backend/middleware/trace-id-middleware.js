@@ -19,7 +19,7 @@ const { validateAndEnsureTraceIdInHandler } = require('../utils/trace-validator'
  */
 function traceIdSocketMiddleware(socket, next) {
     try {
-        // Extrair traceId dos headers ou gerar novo
+        // Extrair traceId dos headers ou gerar novo (forçar novo se não houver no query/header)
         const traceId = traceContext.extractTraceId(
             socket.handshake?.query || {},
             socket.handshake?.headers || {}

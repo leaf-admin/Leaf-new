@@ -82,8 +82,8 @@ const LanguageSettingsScreen = ({ navigation }) => {
 
   const showLanguagePreview = (langCode) => {
     const previewTexts = {
-      en: "Welcome to Leaf - Your ride, your way",
-      pt: "Bem-vindo ao Leaf - Sua corrida, seu jeito",
+      en: "Welcome ta Leaf - Your ride, your way",
+      pt: "Bem-vindo à Leaf - Sua corrida, seu jeito",
       es: "Bienvenido a Leaf - Tu viaje, tu manera",
       fr: "Bienvenue sur Leaf - Votre trajet, votre façon",
       de: "Willkommen bei Leaf - Ihre Fahrt, Ihr Weg"

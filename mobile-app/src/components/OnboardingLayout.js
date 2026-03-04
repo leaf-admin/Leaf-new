@@ -51,7 +51,7 @@ const styles = StyleSheet.create({
   bottomArea: {
     width: '100%',
     alignItems: 'center',
-    paddingBottom: 16,
+    paddingBottom: 32, // Aumentado de 16 para 32 para dispositivos Android/iOS sem home indicator
     backgroundColor: '#F5F5F5',
   },
   progressWrapper: {
@@ -65,7 +65,7 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     paddingVertical: 16,
     alignItems: 'center',
-    marginBottom: 15,
+    marginBottom: 20, // Aumentado levemente para 20
   },
   buttonDisabled: {
     opacity: 0.5,

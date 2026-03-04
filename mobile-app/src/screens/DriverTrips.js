@@ -20,6 +20,9 @@ import { Ionicons } from '@expo/vector-icons';
 import { fonts } from '../common/font';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import Typography from '../components/design-system/Typography';
+import AnimatedButton from '../components/design-system/AnimatedButton';
+import { useTheme } from '../common-local/theme';
 
 
 export default function DriverTrips(props) {
@@ -94,8 +97,8 @@ export default function DriverTrips(props) {
             return key;
         }
     };
-    
-    const isRTL = (i18n && i18n.locale && typeof i18n.locale === 'string') 
+
+    const isRTL = (i18n && i18n.locale && typeof i18n.locale === 'string')
         ? (i18n.locale.indexOf('he') === 0 || i18n.locale.indexOf('ar') === 0)
         : false;
     const [amount, setAmount] = useState({});
@@ -108,19 +111,6 @@ export default function DriverTrips(props) {
     const [isLoading, setIsLoading] = useState(false);
     const insets = useSafeAreaInsets();
     useEffect(() => {
-        AsyncStorage.getItem('deviceId', (err, result) => {
-            if (result) {
-                setDeviceId(result);
-            }
-        });
-    }, []);
-
-
-    const [checks, setChecks] = useState({
-        driverActiveStatus: true
-    });
-
-    useEffect(() => {
         if (auth?.profile) {
             setChecks(prevChecks => ({
                 ...prevChecks,
@@ -132,27 +122,27 @@ export default function DriverTrips(props) {
     // Processar bookings apenas quando realmente mudarem
     const bookingsRef = useRef(null);
     const lastBookingsLength = useRef(0);
-    
+
     useEffect(() => {
         const bookings = bookinglistdata?.bookings;
         const bookingsLength = bookings?.length || 0;
         const decimalValue = settings?.decimal || 2;
-        
+
         // Só processar se realmente mudou
         if (bookingsLength === lastBookingsLength.current && bookingsRef.current === bookings) {
             return;
         }
-        
+
         lastBookingsLength.current = bookingsLength;
         bookingsRef.current = bookings;
-        
+
         if (bookings && bookingsLength > 0) {
             let today = new Date();
             let tdTrans = 0;
             let mnTrans = 0;
             let totTrans = 0;
             let count = 0;
-            
+
             for (let i = 0; i < bookings.length; i++) {
                 if (bookings[i].status === 'PAID' || bookings[i].status === 'COMPLETE') {
                     const { tripdate, driver_share } = bookings[i];
@@ -169,12 +159,12 @@ export default function DriverTrips(props) {
                     }
                 }
             }
-            
+
             setTotalEarning(parseFloat(totTrans.toFixed(decimalValue)));
             setToday(parseFloat(tdTrans.toFixed(decimalValue)));
             setThisMonth(parseFloat(mnTrans.toFixed(decimalValue)));
             setBookingCount(count);
-            
+
             const active = bookings.filter(booking =>
                 booking.status == 'ACCEPTED' ||
                 booking.status == 'ARRIVED' ||
@@ -375,27 +365,26 @@ export default function DriverTrips(props) {
     }
 
     // Header com botão voltar e título (seguindo padrão das outras telas)
-    const isDarkMode = useSelector(state => state.settingsdata?.isDarkMode) || false;
-    
+
     const Header = () => (
-        <View style={[styles.headerCustom, { backgroundColor: isDarkMode ? '#1a1a1a' : '#fff' }]}>
-            <TouchableOpacity 
+        <View style={[styles.headerCustom, { backgroundColor: theme.card, borderBottomWidth: 1, borderBottomColor: theme.border }]}>
+            <TouchableOpacity
                 style={[
-                    styles.headerButtonCustom, 
-                    { 
-                        backgroundColor: isDarkMode ? '#2d2d2d' : '#e8e8e8',
+                    styles.headerButtonCustom,
+                    {
+                        backgroundColor: isDarkMode ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.05)',
                         borderWidth: 1,
-                        borderColor: isDarkMode ? '#404040' : '#d0d0d0',
+                        borderColor: theme.border,
                     }
                 ]}
                 onPress={() => props.navigation.goBack()}
                 activeOpacity={0.7}
             >
-                <Ionicons name="chevron-back" size={22} color={isDarkMode ? '#fff' : '#1a1a1a'} />
+                <Ionicons name="chevron-back" size={22} color={theme.text} />
             </TouchableOpacity>
-            <Text style={[styles.headerTitleCustom, { color: isDarkMode ? '#fff' : colors.BLACK }]}>
+            <Typography variant="h2" weight="bold" color={theme.text}>
                 Histórico de viagens
-            </Text>
+            </Typography>
             <View style={styles.headerRightContainerCustom} />
         </View>
     );
@@ -447,7 +436,7 @@ export default function DriverTrips(props) {
     }
     const windoWidth = Dimensions.get("window").width
     const windoHight = Dimensions.get("window").height
-   
+
     // Adicionar verificações de segurança
     const isProfileApproved = auth && auth.profile && auth.profile.approved === true;
     const hasCarType = auth && auth.profile && auth.profile.carType;
@@ -455,378 +444,334 @@ export default function DriverTrips(props) {
     const hasLicenseImage = auth && auth.profile && auth.profile.licenseImage;
     const hasVerifyIdImage = auth && auth.profile && auth.profile.verifyIdImage;
     const hasTerm = auth && auth.profile && auth.profile.term;
-   
-    return (
-        <View style={styles.mainViewStyle}>
-            <StatusBar barStyle={isDarkMode ? "light-content" : "dark-content"} backgroundColor={isDarkMode ? '#1a1a1a' : '#fff'} />
-            <Header />
-            <KeyboardAvoidingView behavior={Platform.OS == "ios" ? "padding" : (__DEV__ ? null : "padding")}>
-                <View style={{height:'80%'}}>
-                <FlatList
-                    data={auth.profile && auth.profile.uid && auth.profile.driverActiveStatus ?
-                        (appConsts && appConsts.showBookingOptions ? tasks ? tasks : activeBookings : auth.profile.queue ? activeBookings : tasks) : []}
-                    keyExtractor={(item, index) => index.toString()}
-                    ListEmptyComponent={
-                        <View style={{ height: '100%', width: width, overflow: 'hidden' }}>
-                            {region && region.latitude && pageActive.current && auth?.profile ? (
-                                <MapView
-                                    region={{
-                    <UrlTile
-                        urlTemplate="https://a.tile.openstreetmap.org/{z}/{x}/{y}.png"
-                        maximumZ={19}
-                        flipY={false}
-                    />
-                                        latitude: region.latitude,
-                                        longitude: region.longitude,
-                                        latitudeDelta: latitudeDelta,
-                                        longitudeDelta: longitudeDelta
-                                    }}
-                                    minZoomLevel={3}
-                                    provider={PROVIDER_GOOGLE}
-                                    style={{ minHeight: height - 60, height: height - (Platform.OS == 'android' ? 15 : 60), width: width }}
-                                >
-                                    <Marker
-                                        coordinate={{ latitude: region.latitude, longitude: region.longitude }}
-                                        pinColor={colors.HEADER}
-                                    >
-                                        <View style={{ alignItems: 'center' }}>
-                                            <View style={{ alignItems: 'center', backgroundColor: '#fff', opacity: 0.8, borderColor: '#000', borderWidth: 1, borderRadius: 10, paddingVertical: 10, paddingHorizontal: 5, marginBottom: 5 }}>
-                                                <Text style={{ fontFamily: fonts.Bold, color: colors.BUTTON_ORANGE }}>{t('where_are_you')}</Text>
-                                                <Text style={{ fontFamily: fonts.Bold, color: colors.BUTTON_ORANGE }}>{auth.profile?.driverActiveStatus ? t('rider_not_here') : t('service_off')}</Text>
-                                            </View>
-                                            <Image
-                                                source={carImageIcon}
-                                                style={{ height: 40, width: 40 }}
-                                            />
-                                        </View>
-                                    </Marker>
-                                </MapView>
-                            ) : gps?.error ? (
-                                <View style={{ alignItems: 'center', justifyContent: 'center', height: height, width: width }}>
-                                    <Ionicons name="location-outline" size={48} color={colors.RED} style={{ marginBottom: 16 }} />
-                                    <Text style={{ fontFamily: fonts.Bold, fontSize: 18, color: colors.BLACK, marginBottom: 8 }}>{t('location_permission_error')}</Text>
-                                    <Text style={{ fontFamily: fonts.Regular, fontSize: 14, color: colors.GRAY, textAlign: 'center', paddingHorizontal: 20 }}>
-                                        É necessário permitir o acesso à localização para visualizar o mapa
-                                    </Text>
-                                </View>
-                            ) : (
-                                <View style={{ alignItems: 'center', justifyContent: 'center', height: height, width: width }}>
-                                    {isLoading ? (
-                                        <>
-                                            <Text style={{ fontFamily: fonts.Regular, fontSize: 16, color: colors.BLACK }}>{t('loading')}</Text>
-                                        </>
-                                    ) : (
-                                        <>
-                                            <Ionicons name="time-outline" size={64} color={colors.GRAY} style={{ marginBottom: 16, opacity: 0.5 }} />
-                                            <Text style={{ fontFamily: fonts.Bold, fontSize: 20, color: colors.BLACK, marginBottom: 8 }}>
-                                                Nenhuma viagem encontrada
-                                            </Text>
-                                            <Text style={{ fontFamily: fonts.Regular, fontSize: 14, color: colors.GRAY, textAlign: 'center', paddingHorizontal: 40 }}>
-                                                Quando você aceitar corridas, elas aparecerão aqui no histórico
-                                            </Text>
-                                        </>
-                                    )}
-                                </View>
-                            )}
-                            {gps.error || (!hasCarType && settings && settings.carType_required) || (!isCarApproved && settings && settings.carType_required) || (!hasLicenseImage && settings && settings.license_image_required) || (!isProfileApproved && settings && settings.driver_approval) || (settings && settings.imageIdApproval && !hasVerifyIdImage) || (!hasTerm && settings && settings.term_required) ?
-                                <View style={{
-                                    top: 0, left: 0, position: 'absolute', width: width - 20, margin: 10, borderRadius: 8, flexDirection: 'column', alignItems: 'center', backgroundColor: colors.new,
-                                    shadowColor: colors.BLACK, shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.75, shadowRadius: 4, elevation: 5,
-                                    minHeight: 10 + (gps.error ? 70 : 0) + (!hasCarType && settings && settings.carType_required ? 70 : 0) + (!isCarApproved && settings && settings.carType_required ? 70 : 0) + (!isProfileApproved && settings && settings.driver_approval ? 70 : 0) + (!hasLicenseImage && settings && settings.license_image_required ? 70 : 0) + (settings && settings.imageIdApproval && !hasVerifyIdImage ? 70 : 0) + (!hasTerm && settings && settings.term_required ? 70 : 0)
-                                }}>
-                                    {gps.error ?
-                                        <View style={[styles.alrt, { flexDirection: isRTL ? 'row-reverse' : 'row', }]}>
-                                            <View style={[styles.alrt1, { flexDirection: isRTL ? 'row-reverse' : 'row', }]}>
-                                                <Icon name="alert-circle" type="ionicon" color={colors.RED} size={18} />
-                                                <Text style={{ fontSize: 14, fontFamily: fonts.Bold, color: colors.BLACK, marginLeft: 3 }}>{t('always_on')}</Text>
-                                            </View>
-                                            <Button onPress={changePermission} title={t('fix').toUpperCase()} titleStyle={styles.checkButtonTitle} buttonStyle={styles.checkButtonStyle} />
-                                        </View>
-                                        : null}
-                                    {!hasCarType && settings && settings.carType_required ?
-                                        <View style={[styles.alrt, { flexDirection: isRTL ? 'row-reverse' : 'row' }]}>
-                                            <View style={[styles.alrt1, { flexDirection: isRTL ? 'row-reverse' : 'row' }]}>
-                                                <Icon name="alert-circle" type="ionicon" color={colors.RED} size={18} />
-                                                <Text style={{ fontSize: 14, fontFamily: fonts.Bold, color: colors.BLACK, marginLeft: 3 }}>{t('no_car_assign_text')}</Text>
-                                            </View>
-                                            <Button onPress={() => props.navigation.dispatch(CommonActions.reset({ index: 0, routes: [{ name: 'Cars', params: { fromPage: 'DriverTrips' } }] }))}
-                                                title={t('cars')} titleStyle={styles.checkButtonTitle} buttonStyle={styles.checkButtonStyle} />
-                                        </View>
-                                        : null}
-                                    {!isCarApproved && settings && settings.carType_required ?
-                                        <View style={[styles.alrt, { flexDirection: isRTL ? 'row-reverse' : 'row' }]}>
-                                            <View style={[styles.alrt1, { flexDirection: isRTL ? 'row-reverse' : 'row' }]}>
-                                                <Icon name="alert-circle" type="ionicon" color={colors.RED} size={16} />
-                                                <Text style={{ fontSize: 14, fontFamily: fonts.Bold, color: colors.BLACK, marginLeft: 3 }}>{t('carApproved_by_admin')}</Text>
-                                            </View>
-                                        </View>
-                                        : null}
-                                    {!hasLicenseImage && settings && settings.license_image_required ?
-                                        <View style={[styles.alrt, { flexDirection: isRTL ? 'row-reverse' : 'row' }]}>
-                                            <View style={[styles.alrt1, { flexDirection: isRTL ? 'row-reverse' : 'row' }]}>
-                                                <Icon name="alert-circle" type="ionicon" color={colors.RED} size={16} />
-                                                <Text style={{ fontSize: 14, fontFamily: fonts.Bold, color: colors.BLACK, marginLeft: 3 }}>{t('upload_driving_license')}</Text>
-                                            </View>
-                                            <Button onPress={navEditUser} title={t('profile')} titleStyle={styles.checkButtonTitle} buttonStyle={styles.checkButtonStyle} />
-                                        </View>
-                                        : null}
-                                    {!isProfileApproved && settings && settings.driver_approval ?
-                                        <View style={[styles.alrt, { flexDirection: isRTL ? 'row-reverse' : 'row' }]}>
-                                            <View style={[styles.alrt1, { flexDirection: isRTL ? 'row-reverse' : 'row', width: "100%" }]}>
-                                                <Icon name="alert-circle" type="ionicon" color={colors.RED} size={18} />
-                                                <Text style={{ fontSize: 14, fontFamily: fonts.Bold, color: colors.BLACK, marginLeft: 3 }}>{t('admin_contact')}</Text>
-                                            </View>
-                                        </View>
-                                        : null}
-                                    {settings && settings.imageIdApproval && !hasVerifyIdImage ?
-                                        <View style={[styles.alrt, { flexDirection: isRTL ? 'row-reverse' : 'row' }]}>
-                                            <View style={[styles.alrt1, { flexDirection: isRTL ? 'row-reverse' : 'row', padding: 2 }]}>
-                                                <Icon name="alert-circle" type="ionicon" color={colors.RED} size={18} />
-                                                <Text style={{ fontSize: 14, fontFamily: fonts.Bold, color: colors.BLACK, marginLeft: 3 }}>{t('upload_id_details')}</Text>
-                                            </View>
-                                            <Button onPress={navEditUser} title={t('profile')} titleStyle={styles.checkButtonTitle} buttonStyle={[styles.checkButtonStyle, { width: 90 }]} />
-                                        </View>
-                                        : null}
-                                    {!hasTerm && settings && settings.term_required ?
-                                        <View style={[styles.alrt, { flexDirection: isRTL ? 'row-reverse' : 'row' }]}>
-                                            <TouchableOpacity onPress={onTermLink} style={[styles.alrt1, { flexDirection: isRTL ? 'row-reverse' : 'row', width: width - 180, height: 50 }]}>
-                                                <Icon name="document-text" type="ionicon" color={colors.RED} size={18} />
-                                                <Text style={{ fontSize: 14, fontFamily: fonts.Bold, color: colors.SKY, marginLeft: 3, textDecorationLine: 'underline' }}>{t('term_condition')}</Text>
-                                            </TouchableOpacity>
-                                            <Button onPress={onTermAccept} title={t('accept')} titleStyle={styles.checkButtonTitle} buttonStyle={styles.checkButtonStyle} />
-                                        </View>
-                                        : null}
-                                </View>
-                                : null}
-                            
-                        </View>
-                    }
-                    renderItem={({ item, index }) => {
-                        return (
-                            <KeyboardAvoidingView behavior="position" style={styles.listItemView}>
-                                {/* <View style={styles.listItemView}> */}
-                                <View style={[styles.mapcontainer, activeBookings && activeBookings.length >= 1 ? { height: height - 500 } : null]}>
-                                    <MapView style={styles.map}
-                                        provider={PROVIDER_GOOGLE}
-                    <UrlTile
-                        urlTemplate="https://a.tile.openstreetmap.org/{z}/{x}/{y}.png"
-                        maximumZ={19}
-                        flipY={false}
-                    />
-                                        minZoomLevel={3}
-                                        initialRegion={{
-                                            latitude: item.pickup.lat,
-                                            longitude: item.pickup.lng,
-                                            latitudeDelta: activeBookings && activeBookings.length >= 1 ? 0.0922 : 0.0822,
-                                            longitudeDelta: activeBookings && activeBookings.length >= 1 ? 0.0421 : 0.0321
-                                        }}
-                                    >
-                                        <Marker
-                                            coordinate={{ latitude: item.pickup.lat, longitude: item.pickup.lng }}
-                                            title={item.pickup.add}
-                                            description={t('pickup_location')}>
-                                            <Image source={require("../../assets/images/green_pin.png")} style={{ height: 35, width: 35 }} />
-                                        </Marker>
 
-                                        <Marker
-                                            coordinate={{ latitude: item.drop.lat, longitude: item.drop.lng }}
-                                            title={item.drop.add}
-                                            description={t('drop_location')}>
-                                            <Image source={require("../../assets/images/rsz_2red_pin.png")} style={{ height: 35, width: 35 }} />
-                                        </Marker>
-                                        {item.waypoints && item.waypoints.length > 0 ? item.waypoints.map((point, index) => {
-                                            return (
-                                                <Marker
-                                                    coordinate={{ latitude: point.lat, longitude: point.lng }}
-                                                    title={point.add}
-                                                    key={index}
-                                                >
-                                                    <Image source={require("../../assets/images/rsz_2red_pin.png")} style={{ height: 35, width: 35 }} />
-                                                </Marker>
-                                            )
-                                        })
-                                            : null}
-                                        {item.coords ?
-                                            <Polyline
-                                                coordinates={item.coords}
-                                                strokeWidth={4}
-                                                strokeColor={colors.INDICATOR_BLUE}
-                                            />
-                                            : null}
-                                    </MapView>
-                                </View>
-                                <View style={styles.mapDetails}>
-                                    <View style={styles.dateView}>
-                                        <View>
-                                            <Text style={styles.listDate}>{moment(item.tripdate).format('lll')}</Text>
-                                        </View>
-                                        <RateView
-                                            uid={auth.profile.uid}
-                                            settings={settings}
-                                            item={item}
-                                            styles={styles}
+    return (
+        <View style={[styles.mainViewStyle, { backgroundColor: theme.background }]}>
+            <StatusBar barStyle={isDarkMode ? "light-content" : "dark-content"} backgroundColor={theme.background} />
+            <Header />
+            <KeyboardAvoidingView behavior={Platform.OS == "ios" ? "padding" : (__DEV__ ? null : "padding")} style={{ flex: 1 }}>
+                <View style={{ height: '80%' }}>
+                    <FlatList
+                        data={auth.profile && auth.profile.uid && auth.profile.driverActiveStatus ?
+                            (appConsts && appConsts.showBookingOptions ? tasks ? tasks : activeBookings : auth.profile.queue ? activeBookings : tasks) : []}
+                        keyExtractor={(item, index) => index.toString()}
+                        ListEmptyComponent={
+                            <View style={{ height: '100%', width: width, overflow: 'hidden' }}>
+                                {region && region.latitude && pageActive.current && auth?.profile ? (
+                                    <MapView
+                                        region={{
+                                            latitude: region.latitude,
+                                            longitude: region.longitude,
+                                            latitudeDelta: latitudeDelta,
+                                            longitudeDelta: longitudeDelta
+                                        }}
+                                        minZoomLevel={3}
+                                        provider={PROVIDER_GOOGLE}
+                                        style={{ minHeight: height - 60, height: height - (Platform.OS == 'android' ? 15 : 60), width: width }}
+                                    >
+                                        <UrlTile
+                                            urlTemplate="https://a.tile.openstreetmap.org/{z}/{x}/{y}.png"
+                                            maximumZ={19}
+                                            flipY={false}
                                         />
-                                        <View style={[styles.estimateView, { flexDirection: isRTL ? 'row-reverse' : 'row' }]}>
-                                            <Text style={styles.listEstimate}>{item.estimateDistance ? parseFloat(item.estimateDistance).toFixed(settings.decimal) : 0} {settings.convert_to_mile ? t('mile') : t('km')}</Text>
-                                            <Text style={styles.listEstimate}>{item.estimateTime ? parseFloat(item.estimateTime / 60).toFixed(0) : 0} {t('mins')}</Text>
-                                        </View>
-                                    </View>
-                                    <View style={[styles.addressViewStyle, isRTL ? {} : {}]}>
-                                        <View style={{ flexDirection: isRTL ? 'row-reverse' : 'row', alignItems: 'center', marginBottom: 8, width: '100%' }}>
-                                            <View style={styles.locationStyle}>
-                                                <Ionicons name="location-sharp" size={24} color="white" />
-                                            </View>
-                                            <Text style={[styles.addressViewTextStyle, isRTL ? { marginRight: 8 } : { marginLeft: 8 }, { textAlign: isRTL ? 'right' : 'left' }]}>{item.pickup.add}</Text>
-                                        </View>
-                                        {item.waypoints && item.waypoints.length > 0 ? item.waypoints.map((point, index) => {
-                                            return (
-                                                <View key={"key" + index} style={{ marginBottom: 8, flexDirection: isRTL ? 'row-reverse' : 'row', alignItems: 'center' }}>
-                                                    <View style={styles.locationStyle}>
-                                                        <Ionicons name="location-sharp" size={24} color="white" />
-                                                    </View>
-                                                    <Text style={[styles.addressViewTextStyle, isRTL ? { marginRight: 8 } : { marginLeft: 8 }, { textAlign: isRTL ? 'right' : 'left' }]}>{point.add}</Text>
+                                        <Marker
+                                            coordinate={{ latitude: region.latitude, longitude: region.longitude }}
+                                            pinColor={theme.primary}
+                                        >
+                                            <View style={{ alignItems: 'center' }}>
+                                                <View style={{ alignItems: 'center', backgroundColor: theme.card, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.1, shadowRadius: 4, elevation: 3, borderColor: theme.border, borderWidth: 1, borderRadius: 12, paddingVertical: 10, paddingHorizontal: 12, marginBottom: 5 }}>
+                                                    <Typography variant="small" weight="bold" color={theme.leafGreen || colors.BUTTON_ORANGE}>{t('where_are_you')}</Typography>
+                                                    <Typography variant="caption" weight="medium" color={theme.textSecondary}>{auth.profile?.driverActiveStatus ? t('rider_not_here') : t('service_off')}</Typography>
                                                 </View>
-                                            )
-                                        })
-                                            : null}
-                                        <View style={{ flexDirection: isRTL ? 'row-reverse' : 'row', alignItems: 'center' }}>
-                                            <View style={styles.locationStyle}>
-                                                <Ionicons name="location-sharp" size={24} color="white" />
-                                            </View>
-                                            <Text style={[styles.addressViewTextStyle, isRTL ? { marginRight: 8 } : { marginLeft: 8 }, { textAlign: isRTL ? 'right' : 'left' }]}>{item.drop.add}</Text>
-                                        </View>
-                                    </View>
-                                    <ExtraInfo
-                                        item={item}
-                                        uid={auth.profile.uid}
-                                        amount={amount}
-                                        setAmount={setAmount}
-                                        styles={styles}
-                                        onPressAccept={onPressAccept}
-                                        settings={settings}
-                                    />
-                                    {item && item.status != 'NEW' ?
-                                        <View style={styles.detailsBtnView}>
-                                            <View style={{ flex: 1 }}>
-                                                <Button
-                                                    onPress={() => {
-                                                        goToBooking(item.id);
-                                                    }}
-                                                    title={t('go_to_booking')}
-                                                    titleStyle={styles.titleStyles}
-                                                    buttonStyle={{
-                                                        backgroundColor: colors.DRIVER_TRIPS_BUTTON,
-                                                        width: 150,
-                                                        minHeight: 50,
-                                                        padding: 2,
-                                                        borderColor: colors.TRANSPARENT,
-                                                        borderWidth: 0,
-                                                        borderRadius: 10,
-                                                    }}
-                                                    containerStyle={{
-                                                        flex: 1,
-                                                        alignSelf: 'center',
-                                                        paddingRight: 14
-                                                    }}
+                                                <Image
+                                                    source={carImageIcon}
+                                                    style={{ height: 40, width: 40, tintColor: theme.leafGreen }}
                                                 />
                                             </View>
+                                        </Marker>
+                                    </MapView>
+                                ) : gps?.error ? (
+                                    <View style={{ alignItems: 'center', justifyContent: 'center', height: height - 200, width: width }}>
+                                        <Ionicons name="location-outline" size={48} color={theme.error || colors.RED} style={{ marginBottom: 16 }} />
+                                        <Typography variant="h2" weight="bold" color={theme.text} style={{ marginBottom: 8 }}>{t('location_permission_error')}</Typography>
+                                        <Typography variant="caption" color={theme.textSecondary} style={{ textAlign: 'center', paddingHorizontal: 20 }}>
+                                            É necessário permitir o acesso à localização para visualizar o mapa
+                                        </Typography>
+                                    </View>
+                                ) : (
+                                    <View style={{ alignItems: 'center', justifyContent: 'center', height: height - 200, width: width }}>
+                                        {isLoading ? (
+                                            <>
+                                                <ActivityIndicator size="large" color={theme.leafGreen} />
+                                                <Typography variant="caption" color={theme.textSecondary} style={{ marginTop: 12 }}>{t('loading')}</Typography>
+                                            </>
+                                        ) : (
+                                            <>
+                                                <Ionicons name="time-outline" size={64} color={theme.textSecondary} style={{ marginBottom: 16, opacity: 0.5 }} />
+                                                <Typography variant="h2" weight="bold" color={theme.text} style={{ marginBottom: 8 }}>
+                                                    Nenhuma viagem encontrada
+                                                </Typography>
+                                                <Typography variant="caption" color={theme.textSecondary} style={{ textAlign: 'center', paddingHorizontal: 40 }}>
+                                                    Quando você aceitar corridas, elas aparecerão aqui no histórico
+                                                </Typography>
+                                            </>
+                                        )}
+                                    </View>
+                                )}
+                                {gps.error || (!hasCarType && settings && settings.carType_required) || (!isCarApproved && settings && settings.carType_required) || (!hasLicenseImage && settings && settings.license_image_required) || (!isProfileApproved && settings && settings.driver_approval) || (settings && settings.imageIdApproval && !hasVerifyIdImage) || (!hasTerm && settings && settings.term_required) ?
+                                    <View style={{
+                                        top: 0, left: 0, position: 'absolute', width: width - 20, margin: 10, borderRadius: 8, flexDirection: 'column', alignItems: 'center', backgroundColor: colors.new,
+                                        shadowColor: colors.BLACK, shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.75, shadowRadius: 4, elevation: 5,
+                                        minHeight: 10 + (gps.error ? 70 : 0) + (!hasCarType && settings && settings.carType_required ? 70 : 0) + (!isCarApproved && settings && settings.carType_required ? 70 : 0) + (!isProfileApproved && settings && settings.driver_approval ? 70 : 0) + (!hasLicenseImage && settings && settings.license_image_required ? 70 : 0) + (settings && settings.imageIdApproval && !hasVerifyIdImage ? 70 : 0) + (!hasTerm && settings && settings.term_required ? 70 : 0)
+                                    }}>
+                                        {gps.error ?
+                                            <View style={[styles.alrt, { flexDirection: isRTL ? 'row-reverse' : 'row', }]}>
+                                                <View style={[styles.alrt1, { flexDirection: isRTL ? 'row-reverse' : 'row', }]}>
+                                                    <Icon name="alert-circle" type="ionicon" color={colors.RED} size={18} />
+                                                    <Text style={{ fontSize: 14, fontFamily: fonts.Bold, color: colors.BLACK, marginLeft: 3 }}>{t('always_on')}</Text>
+                                                </View>
+                                                <Button onPress={changePermission} title={t('fix').toUpperCase()} titleStyle={styles.checkButtonTitle} buttonStyle={styles.checkButtonStyle} />
+                                            </View>
+                                            : null}
+                                        {!hasCarType && settings && settings.carType_required ?
+                                            <View style={[styles.alrt, { flexDirection: isRTL ? 'row-reverse' : 'row' }]}>
+                                                <View style={[styles.alrt1, { flexDirection: isRTL ? 'row-reverse' : 'row' }]}>
+                                                    <Icon name="alert-circle" type="ionicon" color={colors.RED} size={18} />
+                                                    <Text style={{ fontSize: 14, fontFamily: fonts.Bold, color: colors.BLACK, marginLeft: 3 }}>{t('no_car_assign_text')}</Text>
+                                                </View>
+                                                <Button onPress={() => props.navigation.dispatch(CommonActions.reset({ index: 0, routes: [{ name: 'Cars', params: { fromPage: 'DriverTrips' } }] }))}
+                                                    title={t('cars')} titleStyle={styles.checkButtonTitle} buttonStyle={styles.checkButtonStyle} />
+                                            </View>
+                                            : null}
+                                        {!isCarApproved && settings && settings.carType_required ?
+                                            <View style={[styles.alrt, { flexDirection: isRTL ? 'row-reverse' : 'row' }]}>
+                                                <View style={[styles.alrt1, { flexDirection: isRTL ? 'row-reverse' : 'row' }]}>
+                                                    <Icon name="alert-circle" type="ionicon" color={colors.RED} size={16} />
+                                                    <Text style={{ fontSize: 14, fontFamily: fonts.Bold, color: colors.BLACK, marginLeft: 3 }}>{t('carApproved_by_admin')}</Text>
+                                                </View>
+                                            </View>
+                                            : null}
+                                        {!hasLicenseImage && settings && settings.license_image_required ?
+                                            <View style={[styles.alrt, { flexDirection: isRTL ? 'row-reverse' : 'row' }]}>
+                                                <View style={[styles.alrt1, { flexDirection: isRTL ? 'row-reverse' : 'row' }]}>
+                                                    <Icon name="alert-circle" type="ionicon" color={colors.RED} size={16} />
+                                                    <Text style={{ fontSize: 14, fontFamily: fonts.Bold, color: colors.BLACK, marginLeft: 3 }}>{t('upload_driving_license')}</Text>
+                                                </View>
+                                                <Button onPress={navEditUser} title={t('profile')} titleStyle={styles.checkButtonTitle} buttonStyle={styles.checkButtonStyle} />
+                                            </View>
+                                            : null}
+                                        {!isProfileApproved && settings && settings.driver_approval ?
+                                            <View style={[styles.alrt, { flexDirection: isRTL ? 'row-reverse' : 'row' }]}>
+                                                <View style={[styles.alrt1, { flexDirection: isRTL ? 'row-reverse' : 'row', width: "100%" }]}>
+                                                    <Icon name="alert-circle" type="ionicon" color={colors.RED} size={18} />
+                                                    <Text style={{ fontSize: 14, fontFamily: fonts.Bold, color: colors.BLACK, marginLeft: 3 }}>{t('admin_contact')}</Text>
+                                                </View>
+                                            </View>
+                                            : null}
+                                        {settings && settings.imageIdApproval && !hasVerifyIdImage ?
+                                            <View style={[styles.alrt, { flexDirection: isRTL ? 'row-reverse' : 'row' }]}>
+                                                <View style={[styles.alrt1, { flexDirection: isRTL ? 'row-reverse' : 'row', padding: 2 }]}>
+                                                    <Icon name="alert-circle" type="ionicon" color={colors.RED} size={18} />
+                                                    <Text style={{ fontSize: 14, fontFamily: fonts.Bold, color: colors.BLACK, marginLeft: 3 }}>{t('upload_id_details')}</Text>
+                                                </View>
+                                                <Button onPress={navEditUser} title={t('profile')} titleStyle={styles.checkButtonTitle} buttonStyle={[styles.checkButtonStyle, { width: 90 }]} />
+                                            </View>
+                                            : null}
+                                        {!hasTerm && settings && settings.term_required ?
+                                            <View style={[styles.alrt, { flexDirection: isRTL ? 'row-reverse' : 'row' }]}>
+                                                <TouchableOpacity onPress={onTermLink} style={[styles.alrt1, { flexDirection: isRTL ? 'row-reverse' : 'row', width: width - 180, height: 50 }]}>
+                                                    <Icon name="document-text" type="ionicon" color={colors.RED} size={18} />
+                                                    <Typography variant="caption" weight="bold" color={theme.leafGreen} style={{ marginLeft: 3, textDecorationLine: 'underline' }}>{t('term_condition')}</Typography>
+                                                </TouchableOpacity>
+                                                <AnimatedButton onPress={onTermAccept} title={t('accept')} variant="primary" small />
+                                            </View>
+                                            : null}
+                                    </View>
+                                    : null}
+
+                            </View>
+                        }
+                        renderItem={({ item, index }) => {
+                            return (
+                                <View style={styles.listItemView}>
+                                    {/* <View style={styles.listItemView}> */}
+                                    <View style={[styles.mapcontainer, activeBookings && activeBookings.length >= 1 ? { height: height - 500 } : null]}>
+                                        <MapView style={styles.map}
+                                            provider={PROVIDER_GOOGLE}
+                                            minZoomLevel={3}
+                                            initialRegion={{
+                                                latitude: item.pickup.lat,
+                                                longitude: item.pickup.lng,
+                                                latitudeDelta: activeBookings && activeBookings.length >= 1 ? 0.0922 : 0.0822,
+                                                longitudeDelta: activeBookings && activeBookings.length >= 1 ? 0.0421 : 0.0321
+                                            }}
+                                        >
+                                            <UrlTile
+                                                urlTemplate="https://a.tile.openstreetmap.org/{z}/{x}/{y}.png"
+                                                maximumZ={19}
+                                                flipY={false}
+                                            />
+                                            <Marker
+                                                coordinate={{ latitude: item.pickup.lat, longitude: item.pickup.lng }}
+                                                title={item.pickup.add}
+                                                description={t('pickup_location')}>
+                                                <Image source={require("../../assets/images/green_pin.png")} style={{ height: 35, width: 35 }} />
+                                            </Marker>
+
+                                            <Marker
+                                                coordinate={{ latitude: item.drop.lat, longitude: item.drop.lng }}
+                                                title={item.drop.add}
+                                                description={t('drop_location')}>
+                                                <Image source={require("../../assets/images/rsz_2red_pin.png")} style={{ height: 35, width: 35 }} />
+                                            </Marker>
+                                            {item.waypoints && item.waypoints.length > 0 ? item.waypoints.map((point, index) => {
+                                                return (
+                                                    <Marker
+                                                        coordinate={{ latitude: point.lat, longitude: point.lng }}
+                                                        title={point.add}
+                                                        key={index}
+                                                    >
+                                                        <Image source={require("../../assets/images/rsz_2red_pin.png")} style={{ height: 35, width: 35 }} />
+                                                    </Marker>
+                                                )
+                                            })
+                                                : null}
+                                            {item.coords ?
+                                                <Polyline
+                                                    coordinates={item.coords}
+                                                    strokeWidth={4}
+                                                    strokeColor={colors.INDICATOR_BLUE}
+                                                />
+                                                : null}
+                                        </MapView>
+                                    </View>
+                                    <View style={[styles.mapDetails, { backgroundColor: theme.card, borderBottomLeftRadius: 16, borderBottomRightRadius: 16, borderTopWidth: 1, borderTopColor: theme.border }]}>
+                                        <View style={styles.dateView}>
+                                            <View>
+                                                <Typography variant="h2" weight="bold" color={theme.text} style={{ alignSelf: 'center', marginTop: 5 }}>
+                                                    {moment(item.tripdate).format('lll')}
+                                                </Typography>
+                                            </View>
+                                            <RateView
+                                                uid={auth.profile.uid}
+                                                settings={settings}
+                                                item={item}
+                                                styles={styles}
+                                            />
+                                            <View style={[styles.estimateView, { flexDirection: isRTL ? 'row-reverse' : 'row' }]}>
+                                                <Typography variant="h3" color={theme.text}>
+                                                    {item.estimateDistance ? parseFloat(item.estimateDistance).toFixed(settings.decimal) : 0} {settings.convert_to_mile ? t('mile') : t('km')}
+                                                </Typography>
+                                                <Typography variant="h3" color={theme.text}>
+                                                    {item.estimateTime ? parseFloat(item.estimateTime / 60).toFixed(0) : 0} {t('mins')}
+                                                </Typography>
+                                            </View>
                                         </View>
-                                        :
-                                        <View style={[styles.detailsBtnView, { flexDirection: isRTL ? 'row-reverse' : 'row' }]}>
-                                            <View style={{ flex: 1 }}>
-                                                <Button
+                                        <View style={[styles.addressViewStyle, isRTL ? {} : {}]}>
+                                            <View style={{ flexDirection: isRTL ? 'row-reverse' : 'row', alignItems: 'center', marginBottom: 8, width: '100%' }}>
+                                                <View style={[styles.locationStyle, { backgroundColor: theme.leafGreen }]}>
+                                                    <Ionicons name="location-sharp" size={20} color="white" />
+                                                </View>
+                                                <Typography variant="caption" color={theme.text} style={[isRTL ? { marginRight: 8 } : { marginLeft: 8 }, { textAlign: isRTL ? 'right' : 'left', flex: 1 }]}>
+                                                    {item.pickup.add}
+                                                </Typography>
+                                            </View>
+                                            {item.waypoints && item.waypoints.length > 0 ? item.waypoints.map((point, index) => {
+                                                return (
+                                                    <View key={"key" + index} style={{ marginBottom: 8, flexDirection: isRTL ? 'row-reverse' : 'row', alignItems: 'center' }}>
+                                                        <View style={[styles.locationStyle, { backgroundColor: theme.textSecondary }]}>
+                                                            <Ionicons name="location-sharp" size={16} color="white" />
+                                                        </View>
+                                                        <Typography variant="caption" color={theme.text} style={[isRTL ? { marginRight: 8 } : { marginLeft: 8 }, { textAlign: isRTL ? 'right' : 'left', flex: 1 }]}>
+                                                            {point.add}
+                                                        </Typography>
+                                                    </View>
+                                                )
+                                            })
+                                                : null}
+                                            <View style={{ flexDirection: isRTL ? 'row-reverse' : 'row', alignItems: 'center' }}>
+                                                <View style={[styles.locationStyle, { backgroundColor: '#E74C3C' }]}>
+                                                    <Ionicons name="location-sharp" size={20} color="white" />
+                                                </View>
+                                                <Typography variant="caption" color={theme.text} style={[isRTL ? { marginRight: 8 } : { marginLeft: 8 }, { textAlign: isRTL ? 'right' : 'left', flex: 1 }]}>
+                                                    {item.drop.add}
+                                                </Typography>
+                                            </View>
+                                        </View>
+                                        <ExtraInfo
+                                            item={item}
+                                            uid={auth.profile.uid}
+                                            amount={amount}
+                                            setAmount={setAmount}
+                                            styles={styles}
+                                            onPressAccept={onPressAccept}
+                                            settings={settings}
+                                        />
+                                        {item && item.status != 'NEW' ?
+                                            <View style={styles.detailsBtnView}>
+                                                <AnimatedButton
+                                                    onPress={() => goToBooking(item.id)}
+                                                    title={t('go_to_booking')}
+                                                    variant="primary"
+                                                    style={{ width: '90%', alignSelf: 'center' }}
+                                                />
+                                            </View>
+                                            :
+                                            <View style={[styles.detailsBtnView, { flexDirection: isRTL ? 'row-reverse' : 'row', paddingHorizontal: 16 }]}>
+                                                <AnimatedButton
                                                     onPress={() => {
                                                         setModalVisible(true);
                                                         setSelectedItem(item);
                                                     }}
                                                     title={t('ignore_text')}
-                                                    titleStyle={styles.titleStyles}
-                                                    buttonStyle={[styles.btn, { backgroundColor: colors.LIGHT_RED, width: 150 }]}
-                                                    containerStyle={{
-                                                        flex: 1,
-                                                        alignSelf: isRTL ? 'flex-start' : 'flex-end',
-                                                        paddingRight: isRTL ? 0 : 14,
-                                                        paddingLeft: isRTL ? 14 : 0
-
-                                                    }}
+                                                    variant="danger"
+                                                    style={{ flex: 1, marginRight: isRTL ? 0 : 8, marginLeft: isRTL ? 8 : 0 }}
                                                 />
-                                            </View>
-                                            {item.deliveryWithBid && !(item.driverOffers && item.driverOffers[auth.profile.uid]) ?
-                                                <View style={styles.viewFlex1}>
-                                                    <Button
+                                                {(item.deliveryWithBid && !(item.driverOffers && item.driverOffers[auth.profile.uid])) || (!item.deliveryWithBid && (!appConsts.acceptWithAmount || (appConsts.acceptWithAmount && !(item.driverOffers && item.driverOffers[auth.profile.uid])))) ?
+                                                    <AnimatedButton
                                                         title={t('accept')}
-                                                        titleStyle={styles.titleStyles}
-                                                        onPress={() => {
-                                                            onPressAccept(item, amount[item.id])
-                                                        }}
-                                                        buttonStyle={[styles.btn, { backgroundColor: colors.DRIVER_TRIPS_BUTTON, width: 150 }]}
-                                                        containerStyle={{
-                                                            flex: 1,
-                                                            alignSelf: isRTL ? 'flex-end' : 'flex-start',
-                                                            paddingRight: isRTL ? 14 : 0,
-                                                            paddingLeft: isRTL ? 0 : 14
-                                                        }}
+                                                        onPress={() => onPressAccept(item, amount[item.id])}
+                                                        variant="primary"
+                                                        style={{ flex: 1, marginLeft: isRTL ? 0 : 8, marginRight: isRTL ? 8 : 0 }}
                                                     />
-                                                </View>
-                                                :
-                                                !item.deliveryWithBid && (!appConsts.acceptWithAmount || (appConsts.acceptWithAmount && !(item.driverOffers && item.driverOffers[auth.profile.uid]))) ?
-                                                    <View style={styles.viewFlex1}>
-                                                        <Button
-                                                            title={t('accept')}
-                                                            titleStyle={styles.titleStyles}
-                                                            onPress={() => {
-                                                                onPressAccept(item, amount[item.id])
-                                                            }}
-                                                            buttonStyle={[styles.btn, { backgroundColor: colors.DRIVER_TRIPS_BUTTON, width: 150 }]}
-                                                            containerStyle={{
-                                                                flex: 1,
-                                                                alignSelf: isRTL ? 'flex-end' : 'flex-start',
-                                                                paddingRight: isRTL ? 14 : 0,
-                                                                paddingLeft: isRTL ? 0 : 14
-                                                            }}
-                                                        />
-                                                    </View>
                                                     : null}
-                                        </View>
-                                    }
-                                </View>
-
-                            </KeyboardAvoidingView>
-                        )
-                    }
-                    }
-                />
-                </View>
-                <View style={styles.report}>
-                                <View style={{ flexDirection: isRTL ? 'row-reverse' : 'row', justifyContent: 'space-between', width: '80%', alignSelf: 'center', marginVertical:10}}>
-                                    <Text style={{ color: MAIN_COLOR, fontSize:windoHight > 1000? 30: 20, fontWeight: 'bold' }}>{t('today_text')}</Text>
-                                    <MaterialIcons
-                                        name="keyboard-arrow-right"
-                                        size={windoHight > 1000? 45:28}
-                                        color={MAIN_COLOR}
-                                        onPress={() => {
-                                            props.navigation.navigate("MyEarning");
-                                        }}
-                                    />
-                                </View>
-                                <View style={{ flexDirection: isRTL ? 'row-reverse' : 'row', justifyContent: 'space-between', width: '80%', alignSelf: 'center', marginTop: 5 }}>
-                                    <View style={{ flexDirection: isRTL ? 'row-reverse' : 'row', alignItems: 'center' }}>
-                                        <Text style={{ color: MAIN_COLOR, fontSize: windoHight > 1000? 30:20, fontWeight: 'bold' }}>{bookingCount}</Text>
-                                        <Text style={{ color: MAIN_COLOR, fontSize: windoHight > 1000? 26:18, marginHorizontal: 3 }}>{t('rides')}</Text>
+                                            </View>
+                                        }
                                     </View>
-                                    {settings.swipe_symbol === false ?
-                                        <Text style={{ color: MAIN_COLOR, fontSize: windoHight > 1000? 30: 20, fontWeight: 'bold' }}>
-                                            {settings.symbol}{today ? parseFloat(today).toFixed(settings.decimal) : '0'}
-                                        </Text>
-                                        :
-                                        <Text style={{ color: MAIN_COLOR, fontSize:  windoHight > 1000? 30: 20, fontWeight: 'bold' }}>
-                                            {today ? parseFloat(today).toFixed(settings.decimal) : '0'}{settings.symbol}
-                                        </Text>
-                                    }
+
                                 </View>
-                            </View> 
-                
-            </KeyboardAvoidingView>
+                            )
+                        }
+                        }
+                    />
+                </View>
+                <View style={[styles.report, { backgroundColor: theme.card, borderTopWidth: 1, borderTopColor: theme.border, paddingVertical: 16 }]}>
+                    <TouchableOpacity
+                        style={{ flexDirection: isRTL ? 'row-reverse' : 'row', justifyContent: 'space-between', width: '90%', alignSelf: 'center', marginBottom: 16 }}
+                        onPress={() => props.navigation.navigate("MyEarning")}
+                    >
+                        <Typography variant="h2" weight="bold" color={theme.text}>{t('today_text')}</Typography>
+                        <MaterialIcons
+                            name="keyboard-arrow-right"
+                            size={28}
+                            color={theme.leafGreen}
+                        />
+                    </TouchableOpacity>
+                    <View style={{ flexDirection: isRTL ? 'row-reverse' : 'row', justifyContent: 'space-between', width: '90%', alignSelf: 'center' }}>
+                        <View style={{ flexDirection: isRTL ? 'row-reverse' : 'row', alignItems: 'center' }}>
+                            <Typography variant="h2" weight="bold" color={theme.leafGreen}>{bookingCount}</Typography>
+                            <Typography variant="body" color={theme.textSecondary} style={{ marginHorizontal: 6 }}>{t('rides')}</Typography>
+                        </View>
+                        <Typography variant="h2" weight="bold" color={theme.leafGreen}>
+                            {settings.swipe_symbol === false ?
+                                `${settings.symbol}${today ? parseFloat(today).toFixed(settings.decimal) : '0'}` :
+                                `${today ? parseFloat(today).toFixed(settings.decimal) : '0'}${settings.symbol}`
+                            }
+                        </Typography>
+                    </View>
+                </View>
+
+            </KeyboardAvoidingView >
 
             <View style={styles.modalPage}>
                 <Modal
@@ -834,38 +779,42 @@ export default function DriverTrips(props) {
                     transparent={true}
                     visible={modalVisible}
                     onRequestClose={() => {
-                        Alert.alert(t('modal_close'));
+                        setModalVisible(false);
                     }}>
                     <View style={styles.modalMain}>
-                        <View style={styles.modalContainer}>
+                        <View style={[styles.modalContainer, { backgroundColor: theme.card, borderRadius: 20, padding: 24, maxHeight: 220 }]}>
                             <View style={styles.modalHeading}>
-                                <Text style={styles.alertStyle}>{t('alert_text')}</Text>
+                                <Typography variant="h2" weight="bold" color={theme.text}>{t('alert_text')}</Typography>
                             </View>
-                            <View style={styles.modalBody}>
-                                <Text style={{ fontSize: 16, fontFamily: fonts.Regular }}>{t('ignore_job_title')}</Text>
+                            <View style={[styles.modalBody, { marginVertical: 20 }]}>
+                                <Typography variant="body" color={theme.textSecondary} style={{ textAlign: 'center' }}>
+                                    {t('ignore_job_title')}
+                                </Typography>
                             </View>
-                            <View style={[styles.modalFooter, { flexDirection: isRTL ? 'row-reverse' : 'row' }]}>
-                                <TouchableHighlight
-                                    style={isRTL ? [styles.btnStyle] : [styles.btnStyle, styles.clickText]}
+                            <View style={[styles.modalFooter, { flexDirection: isRTL ? 'row-reverse' : 'row', borderTopWidth: 0 }]}>
+                                <AnimatedButton
                                     onPress={() => {
                                         setModalVisible(!modalVisible);
                                         setSelectedItem(null);
-                                    }}>
-                                    <Text style={styles.cancelTextStyle}>{t('cancel')}</Text>
-                                </TouchableHighlight>
-                                <TouchableHighlight
-                                    style={isRTL ? [styles.btnStyle, styles.clickText] : [styles.btnStyle]}
+                                    }}
+                                    title={t('cancel')}
+                                    variant="secondary"
+                                    style={{ flex: 1, marginRight: isRTL ? 0 : 8, marginLeft: isRTL ? 8 : 0 }}
+                                />
+                                <AnimatedButton
                                     onPress={() => {
                                         onPressIgnore(selectedItem.id)
-                                    }}>
-                                    <Text style={styles.okStyle}>{t('ok')}</Text>
-                                </TouchableHighlight>
+                                    }}
+                                    title={t('ok')}
+                                    variant="primary"
+                                    style={{ flex: 1, marginLeft: isRTL ? 0 : 8, marginRight: isRTL ? 8 : 0 }}
+                                />
                             </View>
                         </View>
                     </View>
                 </Modal>
             </View>
-        </View>
+        </View >
     )
 }
 
@@ -882,13 +831,13 @@ const styles = StyleSheet.create({
         alignItems: 'center',
     },
     report: {
-        height:'30%',
+        height: '30%',
         width: '100%',
         alignSelf: 'center',
         borderTopRightRadius: 15,
-        borderTopLeftRadius: 15, 
+        borderTopLeftRadius: 15,
         backgroundColor: colors.WHITE,
-        marginTop:-10,
+        marginTop: -10,
         shadowColor: 'black',
         shadowOffset: { width: 0, height: -4 },
         shadowOpacity: Platform.OS == 'ios' ? 0.1 : 0.8,

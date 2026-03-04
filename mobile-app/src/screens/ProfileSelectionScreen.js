@@ -104,7 +104,7 @@ export default function ProfileSelectionScreen() {
         }
       ]}>
         <View style={styles.header}>
-          <Text style={styles.title}>Como você quer usar o Leaf?</Text>
+          <Text style={styles.title}>Como você quer usar a Leaf?</Text>
           <Text style={styles.subtitle}>
             Escolha o tipo de conta que melhor se adapta às suas necessidades
           </Text>

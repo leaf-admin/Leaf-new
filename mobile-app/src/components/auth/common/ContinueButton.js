@@ -10,9 +10,9 @@ const colors = {
     greyPlaceholder: '#BDBDBD',
 };
 
-const ContinueButton = ({ 
-    onPress, 
-    disabled = false, 
+const ContinueButton = ({
+    onPress,
+    disabled = false,
     text = 'Continuar',
     style = {},
     textStyle = {}
@@ -47,7 +47,7 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         marginTop: 16,
         marginHorizontal: 24,
-        marginBottom: 20, // Garantir que não seja cortado
+        marginBottom: 40, // Aumentado de 20 para 40 para garantir visibilidade acima da barra do sistema
         shadowColor: '#000',
         shadowOffset: { width: 0, height: 4 },
         shadowOpacity: 0.15,

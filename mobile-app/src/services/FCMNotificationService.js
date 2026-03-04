@@ -35,7 +35,7 @@ class FCMNotificationService {
 
             // Configurar renovação periódica do token (apenas se token disponível)
             if (this.fcmToken) {
-            this.setupTokenRenewal();
+                this.setupTokenRenewal();
             } else {
                 Logger.warn('⚠️ Token FCM não disponível. Renovação periódica não será configurada.');
             }
@@ -81,7 +81,7 @@ class FCMNotificationService {
         try {
             // Verificar se já temos um token salvo
             const savedToken = await AsyncStorage.getItem('fcmToken');
-            
+
             if (savedToken) {
                 this.fcmToken = savedToken;
                 Logger.log('📱 Token FCM recuperado do cache:', savedToken);
@@ -89,7 +89,7 @@ class FCMNotificationService {
 
             // Obter novo token
             const token = await messaging().getToken();
-            
+
             if (token) {
                 this.fcmToken = token;
                 await AsyncStorage.setItem('fcmToken', token);
@@ -122,36 +122,35 @@ class FCMNotificationService {
                 Logger.warn('⚠️ Token FCM é null. Não será registrado no backend. App continuará funcionando normalmente.');
                 return;
             }
-            
+
             Logger.log('📤 Enviando token FCM para backend:', token);
-            
+
             // Aguardar um pouco para o store estar pronto
             await new Promise(resolve => setTimeout(resolve, 2000));
-            
+
             // Obter userId do Redux store ou TestUserService
             const userState = store.getState().auth;
             let userId = userState?.uid || userState?.profile?.uid;
             let userType = userState?.userType || userState?.profile?.userType || 'customer';
-            
+
             // Bypass para usuários de teste em desenvolvimento
             if (__DEV__ && (!userId || userId === 'anonymous')) {
                 Logger.log('🧪 Modo de desenvolvimento: Usando usuário de teste para FCM');
                 userId = 'test-user-dev';
             }
-            
-            // Se ainda não temos userId válido, tentar novamente em 5 segundos
+
+            // ✅ FIX: Allow sending FCM token even without userId (backend supports temporary tokens)
             if (!userId || userId === 'anonymous') {
-                Logger.log('⚠️ Usuário não autenticado, tentando novamente em 5 segundos...');
-                setTimeout(() => this.updateTokenOnBackend(token), 5000);
-                return;
+                Logger.log('ℹ️ Usuário não autenticado, enviando token como temporário...');
+                userId = null; // Backend uses temp_<socket.id> when null
             }
-            
-            Logger.log('👤 Estado do usuário:', { userId, userType });
-            
+
+            Logger.log('👤 Estado do usuário para FCM:', { userId, userType });
+
             // Registrar token via WebSocket (método correto)
             try {
                 const wsManager = WebSocketManager.getInstance();
-                
+
                 // Se não estiver conectado, tentar conectar
                 if (!wsManager.isConnected()) {
                     Logger.log('⏳ WebSocket não conectado, tentando conectar...');
@@ -161,13 +160,13 @@ class FCMNotificationService {
                         Logger.warn('⚠️ Erro ao conectar WebSocket:', connectError.message);
                     }
                 }
-                
+
                 // Aguardar conexão WebSocket se necessário (com timeout maior)
                 if (!wsManager.isConnected()) {
                     Logger.log('⏳ Aguardando conexão WebSocket...');
                     // Salvar token pendente para registrar quando conectar
                     this.pendingTokenRegistration = { token, userId, userType };
-                    
+
                     // Configurar listener para quando WebSocket conectar (apenas uma vez)
                     if (!this.wsConnectListener) {
                         this.wsConnectListener = () => {
@@ -178,7 +177,7 @@ class FCMNotificationService {
                         };
                         wsManager.on('connect', this.wsConnectListener);
                     }
-                    
+
                     // Aguardar até 15 segundos
                     await new Promise((resolve) => {
                         const checkConnection = setInterval(() => {
@@ -187,7 +186,7 @@ class FCMNotificationService {
                                 resolve();
                             }
                         }, 500);
-                        
+
                         // Timeout de 15 segundos
                         setTimeout(() => {
                             clearInterval(checkConnection);
@@ -195,7 +194,7 @@ class FCMNotificationService {
                         }, 15000);
                     });
                 }
-                
+
                 if (wsManager.isConnected()) {
                     await wsManager.registerFCMToken({
                         userId: userId,
@@ -204,14 +203,14 @@ class FCMNotificationService {
                         platform: Platform.OS,
                         timestamp: new Date().toISOString()
                     });
-                    
+
                     Logger.log('✅ Token FCM registrado no backend via WebSocket');
                     this.pendingTokenRegistration = null; // Limpar pendência
                 } else {
                     Logger.warn('⚠️ WebSocket não conectado após espera, token FCM será registrado quando a conexão for estabelecida');
                     // Salvar token pendente
                     this.pendingTokenRegistration = { token, userId, userType };
-                    
+
                     // Configurar listener se ainda não foi configurado
                     if (!this.wsConnectListener) {
                         this.wsConnectListener = () => {
@@ -227,16 +226,16 @@ class FCMNotificationService {
                 Logger.error('❌ Erro ao registrar token FCM via WebSocket:', wsError);
                 // Salvar token pendente apenas se token válido
                 if (token) {
-                this.pendingTokenRegistration = { token, userId, userType };
+                    this.pendingTokenRegistration = { token, userId, userType };
                 }
             }
-            
+
         } catch (error) {
             Logger.error('❌ Erro ao atualizar token no backend:', error.message);
             // ✅ CRÍTICO: Não tentar novamente se token for null
             if (token) {
                 // Tentar novamente em 5 segundos apenas se token válido
-            setTimeout(() => this.updateTokenOnBackend(token), 5000);
+                setTimeout(() => this.updateTokenOnBackend(token), 5000);
             }
         }
     }
@@ -247,7 +246,7 @@ class FCMNotificationService {
             // Handler para notificações em primeiro plano
             const unsubscribeForeground = messaging().onMessage(async remoteMessage => {
                 Logger.log('📱 Notificação recebida em primeiro plano:', remoteMessage);
-                
+
                 // Processar notificação
                 await this.handleForegroundNotification(remoteMessage);
             });
@@ -255,7 +254,7 @@ class FCMNotificationService {
             // Handler para notificações quando app é aberto
             const unsubscribeNotificationOpened = messaging().onNotificationOpenedApp(remoteMessage => {
                 Logger.log('📱 App aberto via notificação:', remoteMessage);
-                
+
                 // Processar notificação
                 this.handleNotificationOpened(remoteMessage);
             });
@@ -285,10 +284,10 @@ class FCMNotificationService {
             // Handler para mensagens em background
             messaging().setBackgroundMessageHandler(async remoteMessage => {
                 Logger.log('📱 Mensagem recebida em background:', remoteMessage);
-                
+
                 // Processar mensagem em background
                 await this.handleBackgroundMessage(remoteMessage);
-                
+
                 // Retornar Promise para indicar que foi processada
                 return Promise.resolve();
             });
@@ -342,7 +341,7 @@ class FCMNotificationService {
 
             // Processar baseado no tipo
             const notificationType = data?.type || 'general';
-            
+
             switch (notificationType) {
                 case 'trip_update':
                     await this.handleTripUpdate(remoteMessage);
@@ -368,11 +367,11 @@ class FCMNotificationService {
             const { data, notification } = remoteMessage;
 
             Logger.log('📱 Notificação padrão processada:', notification?.title);
-            
+
             // Mostrar notificação local usando expo-notifications
             if (notification) {
                 const { scheduleNotificationAsync } = await import('expo-notifications');
-                
+
                 await scheduleNotificationAsync({
                     content: {
                         title: notification.title || 'Leaf App',
@@ -392,12 +391,12 @@ class FCMNotificationService {
     async handleTripUpdate(remoteMessage) {
         try {
             const { data } = remoteMessage;
-            
+
             Logger.log('🚗 Atualização de viagem recebida:', data);
 
             // Atualizar estado da viagem no Redux
             // TODO: Implementar dispatch para Redux
-            
+
         } catch (error) {
             Logger.error('❌ Erro ao processar atualização de viagem:', error);
         }
@@ -407,12 +406,12 @@ class FCMNotificationService {
     async handlePaymentConfirmation(remoteMessage) {
         try {
             const { data } = remoteMessage;
-            
+
             Logger.log('💳 Confirmação de pagamento recebida:', data);
 
             // Atualizar estado de pagamento
             // TODO: Implementar dispatch para Redux
-            
+
         } catch (error) {
             Logger.error('❌ Erro ao processar confirmação de pagamento:', error);
         }
@@ -422,12 +421,12 @@ class FCMNotificationService {
     async handleRatingReceived(remoteMessage) {
         try {
             const { data } = remoteMessage;
-            
+
             Logger.log('⭐ Avaliação recebida:', data);
 
             // Atualizar estado de avaliações
             // TODO: Implementar dispatch para Redux
-            
+
         } catch (error) {
             Logger.error('❌ Erro ao processar avaliação recebida:', error);
         }
@@ -443,7 +442,7 @@ class FCMNotificationService {
 
             // TODO: Implementar navegação usando React Navigation
             // navigation.navigate(screen, data?.params);
-            
+
         } catch (error) {
             Logger.error('❌ Erro ao navegar para tela:', error);
         }
@@ -575,7 +574,7 @@ class FCMNotificationService {
                 try {
                     Logger.log('🔄 Renovando token FCM...');
                     const newToken = await messaging().getToken();
-                    
+
                     if (newToken && newToken !== this.fcmToken) {
                         Logger.log('🆕 Novo token FCM detectado:', newToken);
                         this.fcmToken = newToken;
@@ -586,7 +585,7 @@ class FCMNotificationService {
                     Logger.error('❌ Erro ao renovar token FCM:', error);
                 }
             }, 30 * 60 * 1000); // 30 minutos
-            
+
             Logger.log('✅ Renovação periódica do token FCM configurada');
         } catch (error) {
             Logger.error('❌ Erro ao configurar renovação do token:', error);
@@ -598,11 +597,11 @@ class FCMNotificationService {
         if (!this.pendingTokenRegistration) {
             return;
         }
-        
+
         try {
             const { token, userId, userType } = this.pendingTokenRegistration;
             const wsManager = WebSocketManager.getInstance();
-            
+
             if (wsManager.isConnected()) {
                 await wsManager.registerFCMToken({
                     userId: userId,
@@ -611,7 +610,7 @@ class FCMNotificationService {
                     platform: Platform.OS,
                     timestamp: new Date().toISOString()
                 });
-                
+
                 Logger.log('✅ Token FCM pendente registrado no backend via WebSocket');
                 this.pendingTokenRegistration = null;
             }
@@ -624,20 +623,20 @@ class FCMNotificationService {
     destroy() {
         try {
             this.clearNotificationHandlers();
-            
+
             // Remover listener de WebSocket
             if (this.wsConnectListener) {
                 const wsManager = WebSocketManager.getInstance();
                 wsManager.off('connect', this.wsConnectListener);
                 this.wsConnectListener = null;
             }
-            
+
             // Limpar intervalo de renovação
             if (this.tokenRenewalInterval) {
                 clearInterval(this.tokenRenewalInterval);
                 this.tokenRenewalInterval = null;
             }
-            
+
             this.pendingTokenRegistration = null;
             this.isInitialized = false;
             Logger.log('✅ FCM Notification Service destruído');

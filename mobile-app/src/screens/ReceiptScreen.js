@@ -76,7 +76,7 @@ const ReceiptScreen = ({ route, navigation }) => {
 
             await Share.share({
                 message: shareText,
-                title: 'Recibo Leaf'
+                title: 'Reciba Leaf'
             });
         } catch (error) {
             Logger.error('Erro ao compartilhar:', error);
@@ -169,7 +169,7 @@ const ReceiptScreen = ({ route, navigation }) => {
             if (isAvailable) {
                 await Sharing.shareAsync(uri, {
                     mimeType: 'application/pdf',
-                    dialogTitle: 'Download Recibo Leaf',
+                    dialogTitle: 'Download Reciba Leaf',
                     UTI: 'com.adobe.pdf'
                 });
             } else {

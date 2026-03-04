@@ -6,18 +6,20 @@ import { fonts } from '../../../common-local/font';
 import auth from '@react-native-firebase/auth';
 import { saveStepData } from '../../../utils/secureOnboardingStorage';
 import ContinueButton from '../common/ContinueButton';
+import { Typography } from '../../design-system/Typography';
+import { AnimatedButton } from '../../design-system/AnimatedButton';
 
 // ✅ CRÍTICO: Flag de ambiente de review (App Store compliance)
 const IS_REVIEW_ENV = Constants.expoConfig?.extra?.isReview === true;
 
 // Cores baseadas no design
 const colors = {
-    black: '#000000',
+    black: '#1C1C1E',
     grey80: '#333333',
     greyPlaceholder: '#BDBDBD',
     leafGreen: '#1A330E',
     white: '#FFFFFF',
-    lightGrey: '#F5F5F5',
+    lightGrey: '#F9F9F9',
     error: '#FF3B30'
 };
 
@@ -222,10 +224,12 @@ const OTPStep = ({ phoneNumber, confirmation, onVerified, onBack }) => {
             keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 20}
         >
             <View style={styles.container}>
-                <Text style={styles.title}>Verificação</Text>
-                <Text style={styles.subtitle}>
-                    Digite o código de 6 dígitos enviado para {phoneNumber}
-                </Text>
+                <View style={styles.header}>
+                    <Typography variant="h1" align="left" style={styles.title}>Verificação</Typography>
+                    <Typography variant="body" color={colors.grey80} align="left" style={styles.subtitle}>
+                        Digite o código de 6 dígitos enviado para {phoneNumber}
+                    </Typography>
+                </View>
 
                 {/* Inputs do OTP */}
                 <View style={styles.otpContainer}>
@@ -256,24 +260,31 @@ const OTPStep = ({ phoneNumber, confirmation, onVerified, onBack }) => {
 
                 {/* Reenvio do código */}
                 <View style={styles.resendContainer}>
-                    <Text style={styles.resendText}>
+                    <Typography variant="bodyMedium" color={colors.grey80}>
                         Não recebeu o código?{' '}
-                    </Text>
+                    </Typography>
                     {canResend ? (
                         <TouchableOpacity onPress={handleResendCode} disabled={loading}>
-                            <Text style={styles.resendLink}>Reenviar</Text>
+                            <Typography variant="bodyMedium" color={colors.leafGreen} style={styles.resendLink}>
+                                Reenviar
+                            </Typography>
                         </TouchableOpacity>
                     ) : (
-                        <Text style={styles.timerText}>
+                        <Typography variant="bodyMedium" color={colors.greyPlaceholder}>
                             Reenviar em {timer}s
-                        </Text>
+                        </Typography>
                     )}
                 </View>
 
-                {/* Botão voltar */}
-                <TouchableOpacity style={styles.backButton} onPress={onBack}>
-                    <Text style={styles.backButtonText}>Voltar</Text>
-                </TouchableOpacity>
+                <View style={styles.footer}>
+                    {/* Botão voltar */}
+                    <AnimatedButton
+                        variant="ghost"
+                        title="Voltar"
+                        onPress={onBack}
+                        style={styles.backButton}
+                    />
+                </View>
             </View>
         </KeyboardAvoidingView>
     );
@@ -286,21 +297,17 @@ const styles = StyleSheet.create({
     },
     container: {
         width: '100%',
-        paddingVertical: 20,
+        paddingVertical: 24,
         flex: 1,
+        justifyContent: 'space-between',
+    },
+    header: {
+        marginBottom: 32,
     },
     title: {
-        fontSize: 24,
-        color: colors.black,
-        fontFamily: fonts.Bold,
-        textAlign: 'left',
         marginBottom: 8,
     },
     subtitle: {
-        fontSize: 17,
-        color: colors.grey80,
-        fontFamily: fonts.Medium,
-        marginBottom: 32,
         lineHeight: 22,
     },
     otpContainer: {
@@ -325,39 +332,21 @@ const styles = StyleSheet.create({
     buttonContainer: {
         marginBottom: 24,
     },
-
     resendContainer: {
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'center',
         marginBottom: 24,
     },
-    resendText: {
-        fontSize: 17,
-        color: colors.grey80,
-        fontFamily: fonts.Medium,
-    },
     resendLink: {
-        color: colors.leafGreen,
         textDecorationLine: 'underline',
-        fontFamily: fonts.Medium,
-        fontSize: 17,
     },
-    timerText: {
-        color: colors.greyPlaceholder,
-        fontFamily: fonts.Medium,
-        fontSize: 17,
+    footer: {
+        marginTop: 'auto',
     },
     backButton: {
-        alignItems: 'center',
-        paddingVertical: 12,
-    },
-    backButtonText: {
-        color: colors.leafGreen,
-        fontSize: 17,
-        fontFamily: fonts.Medium,
-        textDecorationLine: 'underline',
-    },
+        marginTop: 4,
+    }
 });
 
 export default OTPStep; 

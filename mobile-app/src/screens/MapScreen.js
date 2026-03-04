@@ -442,7 +442,7 @@ export default function MapScreen(props) {
     const [isShowingResults, setIsShowingResults] = useState(false);
     const [settings, setSettings] = useState({});
 
-    // Novo estado para seleção de categoria - definindo Leaf Plus como padrão
+    // Novo estado para seleção de categoria - defininda Leaf Plus como padrão
     const [selectedCarType, setSelectedCarType] = useState('Leaf Plus');
 
     const [carEstimates, setCarEstimates] = useState({});
@@ -1935,7 +1935,35 @@ export default function MapScreen(props) {
             const selectedCar = filteredCarTypes.find(car => car.name === selectedCarType);
             if (!selectedCar) {
                 Logger.error('Carro selecionado não encontrado');
+                setBookModelLoading(false);
                 return;
+            }
+
+            // ✅ Validação de Geofencing Remoto ANTES de gravar no Firebase
+            try {
+                // Obter latitude e longitude reais de embarque
+                // Se o fallback for DEFAULT_REGION, pode tentar pegar lat/lng do tripdata.pickup
+                const plat = tripdata.pickup?.lat || location.coords.latitude;
+                const plng = tripdata.pickup?.lng || location.coords.longitude;
+
+                // Aqui usamos o BACKEND_URL público ou ngrok no lugar de localhost (exemplo estrutural)
+                // Vamos usar a mesma constante url do config
+                const configPath = require('../../config/GoogleMapApiConfig');
+                // Alternativamente, vamos pegar o servidor do FirebaseContext que o app usa se estiver rodando em Expo/Standalone
+                // Aqui faremos a requisição direto ao backend novo (que atende na porta 3000 local ou variável)
+                const backendUrl = process.env.EXPO_PUBLIC_BACKEND_URL || 'http://localhost:3000';
+
+                const response = await fetch(`${backendUrl}/api/geofence/check?lat=${plat}&lng=${plng}`);
+                if (response.ok) {
+                    const data = await response.json();
+                    if (!data.allowed) {
+                        setBookModelLoading(false);
+                        Alert.alert("Região não atendida", data.reason || "A Leaf ainda não opera neste local.");
+                        return; // 🛑 Cancela o processo e não manda firebase request
+                    }
+                }
+            } catch (err) {
+                Logger.warn('Erro ao validar geofence via API. Prosseguindo como fallback...', err.message);
             }
 
             const bookingData = {
@@ -1947,10 +1975,9 @@ export default function MapScreen(props) {
             await finaliseBooking(bookingData);
         } catch (error) {
             Logger.error('Erro ao agendar:', error);
-        } finally {
             setBookModelLoading(false);
         }
-    }, [selectedCarType, hasValidEstimate, bookModelLoading, filteredCarTypes, tripdata, getEstimateForCar]);
+    }, [selectedCarType, hasValidEstimate, bookModelLoading, tripdata, filteredCarTypes, getEstimateForCar, finaliseBooking, location]);
 
     useEffect(() => {
         const unsubscribe = props.navigation.addListener('focus', () => {

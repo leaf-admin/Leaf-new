@@ -7,6 +7,9 @@ import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card'
 import { Alert, AlertDescription } from '../components/ui/alert'
 import { Badge } from '../components/ui/badge'
 import { leafAPI } from '../services/api'
+import { Button } from '../components/ui/button'
+import { Check, X, ArrowLeft } from 'lucide-react'
+import Link from 'next/link'
 
 export default function DriverDocuments() {
   const router = useRouter()
@@ -33,6 +36,41 @@ export default function DriverDocuments() {
 
     fetchDocuments()
   }, [id])
+
+  const handleApproveAll = async () => {
+    if (!confirm('Deseja aprovar este motorista e todos os seus documentos?')) return
+
+    try {
+      setLoading(true)
+      await leafAPI.approveDriverApplication(id)
+      // Recarregar dados
+      const data = await leafAPI.getDriverDocuments(id)
+      setDocuments(data.data || data)
+      alert('Motorista aprovado com sucesso!')
+    } catch (err) {
+      alert('Erro ao aprovar motorista: ' + (err instanceof Error ? err.message : 'Erro desconhecido'))
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const handleReject = async () => {
+    const reason = prompt('Motivo da rejeição:')
+    if (!reason) return
+
+    try {
+      setLoading(true)
+      await leafAPI.rejectDriverApplication(id, [reason])
+      // Recarregar dados
+      const data = await leafAPI.getDriverDocuments(id)
+      setDocuments(data.data || data)
+      alert('Motorista rejeitado.')
+    } catch (err) {
+      alert('Erro ao rejeitar motorista: ' + (err instanceof Error ? err.message : 'Erro desconhecido'))
+    } finally {
+      setLoading(false)
+    }
+  }
 
   const getStatusBadge = (status) => {
     const variants = {
@@ -76,7 +114,29 @@ export default function DriverDocuments() {
       <div className="min-h-screen bg-background">
         <Navigation />
         <div className="p-8">
-          <h1 className="text-3xl font-bold mb-6">Documentos de Motorista</h1>
+          <div className="flex justify-between items-center mb-6">
+            <h1 className="text-3xl font-bold">Documentos de Motorista</h1>
+            <div className="flex gap-2">
+              <Button
+                variant="default"
+                className="bg-green-600 hover:bg-green-700 gap-2"
+                onClick={handleApproveAll}
+                disabled={loading || documents?.driver?.status === 'approved'}
+              >
+                <Check className="h-4 w-4" />
+                Aprovar Motorista
+              </Button>
+              <Button
+                variant="destructive"
+                className="gap-2"
+                onClick={handleReject}
+                disabled={loading || documents?.driver?.status === 'rejected'}
+              >
+                <X className="h-4 w-4" />
+                Rejeitar Motorista
+              </Button>
+            </div>
+          </div>
 
           {loading && (
             <Alert>

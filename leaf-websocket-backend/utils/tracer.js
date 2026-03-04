@@ -35,7 +35,7 @@ try {
 // Configuração de sampling baseada em ambiente
 function getSamplingRate() {
     const env = process.env.NODE_ENV || 'development';
-    
+
     switch (env) {
         case 'production':
             // Sampling 1-5% em produção
@@ -52,7 +52,7 @@ function getSamplingRate() {
 function getExporter() {
     // ✅ Usar OTLP HTTP para Tempo
     const tempoEndpoint = process.env.TEMPO_ENDPOINT || process.env.OTEL_EXPORTER_OTLP_ENDPOINT || 'http://localhost:4318';
-    
+
     return new OTLPTraceExporter({
         url: `${tempoEndpoint}/v1/traces`,
         // Headers opcionais (se necessário autenticação)
@@ -79,7 +79,7 @@ function initializeTracer() {
     }
 
     const samplingRate = getSamplingRate();
-    
+
     // Criar resource usando resourceFromAttributes
     const resourceAttrs = {};
     if (SemanticResourceAttributes.SERVICE_NAME) {
@@ -97,9 +97,9 @@ function initializeTracer() {
     } else {
         resourceAttrs['deployment.environment'] = process.env.NODE_ENV || 'development';
     }
-    
+
     const resource = resources.resourceFromAttributes(resourceAttrs);
-    
+
     sdk = new NodeSDK({
         resource: resource,
         traceExporter: getExporter(),
@@ -107,14 +107,23 @@ function initializeTracer() {
         // Vamos criar spans manualmente nos pontos críticos
     });
 
-    sdk.start();
-    
-    logStructured('info', 'OpenTelemetry inicializado', {
-        service: 'opentelemetry',
-        operation: 'initialize',
-        samplingRate: (samplingRate * 100).toFixed(1) + '%'
-    });
-    
+    try {
+        sdk.start();
+
+        logStructured('info', 'OpenTelemetry inicializado', {
+            service: 'opentelemetry',
+            operation: 'initialize',
+            samplingRate: (samplingRate * 100).toFixed(1) + '%'
+        });
+    } catch (error) {
+        logStructured('error', 'Falha ao iniciar OpenTelemetry SDK (provavelmente coletor offline)', {
+            service: 'opentelemetry',
+            error: error.message
+        });
+        sdk = null;
+        return trace.getTracer('leaf-backend-mock');
+    }
+
     return trace.getTracer('leaf-backend');
 }
 

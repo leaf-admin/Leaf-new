@@ -6,27 +6,32 @@ const circuitBreakerService = require('./circuit-breaker-service');
 const traceContext = require('../utils/trace-context');
 
 class FCMService {
-    constructor() {
-        this.redis = new Redis(process.env.REDIS_URL || 'redis://localhost:6379');
+    constructor(redis = null) {
+        this.redis = redis;
         this.isInitialized = false;
         this.rateLimitCounts = new Map();
         this.lastResetTime = Date.now();
     }
 
+    setRedis(redis) {
+        this.redis = redis;
+    }
+
     // Inicializar o serviço FCM
     async initialize() {
+        const startTime = Date.now();
         try {
             // Verificar se Firebase Admin já foi inicializado
             if (!admin.apps.length) {
                 // Inicializar Firebase Admin se não estiver
                 const serviceAccountPath = path.join(__dirname, '..', '..', 'mobile-app', 'config', 'leaf-reactnative-firebase-adminsdk-fbsvc-456a95e2fc.json');
-                
+
                 try {
                     admin.initializeApp({
                         credential: admin.credential.cert(serviceAccountPath),
                         databaseURL: process.env.FIREBASE_DATABASE_URL || 'https://leaf-reactnative-default-rtdb.firebaseio.com'
                     });
-                    logger.info('✅ Firebase Admin inicializado pelo FCM Service');
+                    logger.info(`✅ Firebase Admin inicializado em ${Date.now() - startTime}ms`);
                 } catch (initError) {
                     logger.error('❌ Erro ao inicializar Firebase Admin:', initError);
                     this.isInitialized = false;
@@ -35,7 +40,7 @@ class FCMService {
             }
 
             this.isInitialized = true;
-            logger.info('✅ FCM Service inicializado com sucesso');
+            logger.info(`✅ FCM Service inicializado com sucesso em ${Date.now() - startTime}ms`);
 
         } catch (error) {
             logger.error('❌ Erro ao inicializar FCM Service:', error);
@@ -182,7 +187,7 @@ class FCMService {
 
             // Obter tokens FCM do usuário
             const userTokens = await this.getUserFCMTokens(userId);
-            
+
             if (userTokens.length === 0) {
                 logStructured('warn', 'Usuário não possui tokens FCM ativos', {
                     service: 'fcm',
@@ -252,7 +257,7 @@ class FCMService {
     async sendNotificationToUsers(userIds, notification) {
         try {
             const results = [];
-            
+
             for (const userId of userIds) {
                 const result = await this.sendNotificationToUser(userId, notification);
                 results.push({ userId, result });
@@ -342,9 +347,9 @@ class FCMService {
                     timeout: 60000
                 }
             );
-            
+
             logger.info(`✅ Notificação enviada para token ${fcmToken}: ${response}`);
-            
+
             return {
                 success: true,
                 messageId: response
@@ -352,13 +357,13 @@ class FCMService {
 
         } catch (error) {
             logger.error(`❌ Erro ao enviar notificação para token ${fcmToken}:`, error);
-            
+
             // Se o token for inválido, removê-lo
             if (error.code === 'messaging/invalid-registration-token' ||
                 error.code === 'messaging/registration-token-not-registered') {
                 await this.removeInvalidToken(fcmToken);
             }
-            
+
             return {
                 success: false,
                 error: error.message
@@ -444,9 +449,9 @@ class FCMService {
                     timeout: 60000
                 }
             );
-            
+
             logger.info(`✅ Notificação interativa enviada para token ${fcmToken}: ${response}`);
-            
+
             return {
                 success: true,
                 messageId: response
@@ -454,12 +459,12 @@ class FCMService {
 
         } catch (error) {
             logger.error(`❌ Erro ao enviar notificação interativa para token ${fcmToken}:`, error);
-            
+
             if (error.code === 'messaging/invalid-registration-token' ||
                 error.code === 'messaging/registration-token-not-registered') {
                 await this.removeInvalidToken(fcmToken);
             }
-            
+
             return {
                 success: false,
                 error: error.message
@@ -490,9 +495,9 @@ class FCMService {
             };
 
             const response = await admin.messaging().send(message);
-            
+
             logger.info(`✅ Notificação enviada para tópico ${topic}: ${response}`);
-            
+
             return {
                 success: true,
                 messageId: response
@@ -504,6 +509,79 @@ class FCMService {
                 success: false,
                 error: error.message
             };
+        }
+    }
+
+    // =========================================================================
+    // ✅ NOVO: Enviar atualização persistente de status de corrida (Silent Push)
+    // =========================================================================
+    async sendRideStatusUpdate(userId, rideData) {
+        try {
+            if (!this.isServiceAvailable()) return { success: false, error: 'FCM indisponível' };
+
+            // Buscar tokens
+            const fcmTokensObj = await this.redis.hgetall(`fcm_tokens:${userId}`);
+            let fcmTokens = Object.keys(fcmTokensObj);
+
+            if (fcmTokens.length === 0) {
+                let tokenStr = await this.redis.get(`user:${userId}`) || await this.redis.get(`driver:${userId}`);
+                if (tokenStr) {
+                    const userData = JSON.parse(tokenStr);
+                    if (userData && userData.fcmToken) fcmTokens = [userData.fcmToken];
+                }
+            }
+
+            if (fcmTokens.length === 0) {
+                logger.warn(`⚠️ [FCMService] sendRideStatusUpdate ignorado: Sem token para ${userId}`);
+                return { success: false, error: 'Token FCM não encontrado' };
+            }
+
+            const dataPayload = {
+                type: 'ride_status_update',
+                bookingId: String(rideData.bookingId || ''),
+                status: String(rideData.status || ''),
+                userType: String(rideData.userType || ''),
+                driverName: String(rideData.driverName || ''),
+                customerName: String(rideData.customerName || ''),
+                estimatedTime: String(rideData.estimatedTime || ''),
+                distance: String(rideData.distance || ''),
+                fare: String(rideData.fare || ''),
+                timestamp: new Date().toISOString()
+            };
+
+            if (rideData.pickup) dataPayload.pickup = JSON.stringify(rideData.pickup);
+            if (rideData.destination) dataPayload.destination = JSON.stringify(rideData.destination);
+
+            let successCount = 0;
+            for (const fcmToken of fcmTokens) {
+                const message = {
+                    token: fcmToken,
+                    data: dataPayload,
+                    android: { priority: 'high' },
+                    apns: { payload: { aps: { 'content-available': 1 } } }
+                };
+
+                try {
+                    await circuitBreakerService.execute(
+                        'fcm_send',
+                        async () => admin.messaging().send(message),
+                        async () => { throw new Error('Fallback Timeout'); },
+                        { failureThreshold: 5, timeout: 60000 }
+                    );
+                    successCount++;
+                } catch (err) {
+                    logger.warn(`⚠️ Erro push silencioso fcm=${fcmToken.slice(0, 10)}...: ${err.message}`);
+                    if (err.code === 'messaging/invalid-registration-token' || err.code === 'messaging/registration-token-not-registered') {
+                        await this.removeInvalidToken(fcmToken);
+                    }
+                }
+            }
+            logger.info(`✅ [FCMService] sendRideStatusUpdate enviado para ${userId} (Status: ${rideData.status})`);
+            return { success: true, count: successCount };
+
+        } catch (error) {
+            logger.error(`❌ [FCMService] Erro em sendRideStatusUpdate param ${userId}:`, error);
+            return { success: false, error: error.message };
         }
     }
 
@@ -642,7 +720,7 @@ class FCMService {
 
             // Encontrar e remover de todos os usuários
             const keys = await this.redis.keys('fcm_tokens:*');
-            
+
             for (const key of keys) {
                 const tokens = await this.redis.hgetall(key);
                 for (const [token, data] of Object.entries(tokens)) {
@@ -690,7 +768,7 @@ class FCMService {
             const thirtyDaysAgo = now - (30 * 24 * 60 * 60 * 1000);
 
             const keys = await this.redis.keys('fcm_tokens:*');
-            
+
             for (const key of keys) {
                 const tokens = await this.redis.hgetall(key);
                 const updatedTokens = {};

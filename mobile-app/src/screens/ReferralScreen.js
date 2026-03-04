@@ -121,7 +121,7 @@ const ReferralScreen = ({ navigation, route }) => {
   const shareInvite = async (invite) => {
     try {
       const message = `🎫 Convite Leaf App!\n\n` +
-        `Olá! Você foi convidado para usar o Leaf App!\n\n` +
+        `Olá! Você foi convidado para usar a Leaf App!\n\n` +
         `Código do convite: ${invite.invite_code}\n\n` +
         `Benefícios:\n` +
         `✅ 100% das corridas ficam com você\n` +
@@ -341,7 +341,7 @@ const ReferralScreen = ({ navigation, route }) => {
         <View style={styles.benefitContent}>
           <Text style={styles.benefitTitle}>Convite Amigos</Text>
           <Text style={styles.benefitDescription}>
-            Convide até 3 amigos para usar o Leaf App
+            Convide até 3 amigos para usar a Leaf App
           </Text>
         </View>
       </View>

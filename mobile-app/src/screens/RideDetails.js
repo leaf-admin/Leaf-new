@@ -16,7 +16,10 @@ import {
     StatusBar,
     ActivityIndicator
 } from 'react-native';
+import * as FileSystem from 'expo-file-system';
+import * as Sharing from 'expo-sharing';
 import MapView, { Polyline, PROVIDER_GOOGLE, Marker } from 'react-native-maps';
+import { getSelfHostedApiUrl } from '../config/ApiConfig';
 import { Avatar } from 'react-native-elements';
 import * as DecodePolyLine from '@mapbox/polyline';
 import { colors } from '../common/theme';
@@ -84,6 +87,32 @@ export default function RideDetails(props) {
         }
     };
 
+    const handleDownloadPdf = async () => {
+        try {
+            setLoading(true);
+            const pdfUrl = getSelfHostedApiUrl(`/api/receipts/${rideDetails.id}/pdf`);
+            const fileUri = `${FileSystem.documentDirectory}recibo_${rideDetails.id}.pdf`;
+
+            const downloadRes = await FileSystem.downloadAsync(pdfUrl, fileUri);
+
+            if (downloadRes.status !== 200) {
+                Alert.alert('Erro', 'Não foi possível baixar o recibo.');
+                return;
+            }
+
+            if (await Sharing.isAvailableAsync()) {
+                await Sharing.shareAsync(downloadRes.uri);
+            } else {
+                Alert.alert('Sucesso', 'Recibo salvo em seus arquivos.');
+            }
+        } catch (error) {
+            Logger.error('Erro ao baixar recibo PDF:', error);
+            Alert.alert('Erro', 'Falha ao processar o download do recibo.');
+        } finally {
+            setLoading(false);
+        }
+    };
+
     const renderRideInfo = () => (
         <View style={[styles.rideInfoCard, { backgroundColor: theme.card }]}>
             <View style={styles.rideInfoHeader}>
@@ -96,7 +125,7 @@ export default function RideDetails(props) {
                 <Text style={[styles.rideInfoTitle, { color: theme.text }]}>
                     Detalhes da Corrida
                 </Text>
-                                    </View>
+            </View>
 
             <View style={styles.rideInfoContent}>
                 <View style={styles.infoRow}>
@@ -115,7 +144,7 @@ export default function RideDetails(props) {
                     <Text style={[styles.infoValue, { color: theme.text }]}>
                         {new Date(rideDetails.created_at).toLocaleDateString()}
                     </Text>
-                            </View>
+                </View>
 
                 <View style={styles.infoRow}>
                     <Text style={[styles.infoLabel, { color: theme.textSecondary }]}>
@@ -124,7 +153,7 @@ export default function RideDetails(props) {
                     <Text style={[styles.infoValue, { color: theme.text }]}>
                         R$ {rideDetails.amount.toFixed(2)}
                     </Text>
-                                            </View>
+                </View>
 
                 <View style={styles.infoRow}>
                     <Text style={[styles.infoLabel, { color: theme.textSecondary }]}>
@@ -133,9 +162,9 @@ export default function RideDetails(props) {
                     <Text style={[styles.infoValue, { color: theme.text }]}>
                         {rideDetails.distance} km
                     </Text>
-                                </View>
-                            </View>
-                        </View>
+                </View>
+            </View>
+        </View>
     );
 
     const renderLocationInfo = () => (
@@ -150,7 +179,7 @@ export default function RideDetails(props) {
                 <Text style={[styles.locationTitle, { color: theme.text }]}>
                     Localização
                 </Text>
-                    </View>
+            </View>
 
             <View style={styles.locationContent}>
                 <View style={styles.locationRow}>
@@ -158,47 +187,47 @@ export default function RideDetails(props) {
                     <Text style={[styles.locationText, { color: theme.text }]}>
                         {rideDetails.pickup_address}
                     </Text>
-                                </View>
+                </View>
 
                 <View style={styles.locationRow}>
                     <View style={[styles.dot, { backgroundColor: colors.RED }]} />
                     <Text style={[styles.locationText, { color: theme.text }]}>
                         {rideDetails.dropoff_address}
                     </Text>
-                                            </View>
-                                        </View>
-                                    </View>
+                </View>
+            </View>
+        </View>
     );
 
     return (
         <View style={[styles.container, { backgroundColor: theme.background }]}>
             <StatusBar hidden={true} />
-            
+
             {/* Header */}
             <View style={[styles.header, { backgroundColor: theme.card }]}>
-                <TouchableOpacity 
+                <TouchableOpacity
                     style={[styles.headerButton, { backgroundColor: theme.card }]}
                     onPress={() => props.navigation.goBack()}
                 >
                     <Icon name="arrow-back" type="material" color={theme.icon} size={24} />
                 </TouchableOpacity>
-                
+
                 <Text style={[styles.headerTitle, { color: theme.text }]}>Detalhes da Corrida</Text>
-                
+
                 <View style={styles.headerRightContainer}>
-                    <TouchableOpacity 
+                    <TouchableOpacity
                         style={[styles.headerButton, { backgroundColor: theme.card }]}
                         onPress={() => setIsDarkMode(!isDarkMode)}
                     >
-                        <Icon 
-                            name={isDarkMode ? "light-mode" : "dark-mode"} 
-                            type="material" 
-                            color={theme.icon} 
-                            size={24} 
+                        <Icon
+                            name={isDarkMode ? "light-mode" : "dark-mode"}
+                            type="material"
+                            color={theme.icon}
+                            size={24}
                         />
-                                    </TouchableOpacity>
-                            </View>
-                        </View>
+                    </TouchableOpacity>
+                </View>
+            </View>
 
             <ScrollView style={styles.scrollView}>
                 {loading ? (
@@ -218,6 +247,15 @@ export default function RideDetails(props) {
                                 <Text style={styles.cancelButtonText}>Cancelar Corrida</Text>
                             </TouchableOpacity>
                         )}
+
+                        {(rideDetails.status === 'COMPLETED' || rideDetails.status === 'PAID') && (
+                            <TouchableOpacity
+                                style={[styles.cancelButton, { backgroundColor: colors.GREEN }]}
+                                onPress={handleDownloadPdf}
+                            >
+                                <Text style={styles.cancelButtonText}>Baixar Recibo (PDF)</Text>
+                            </TouchableOpacity>
+                        )}
                     </View>
                 ) : (
                     <View style={styles.emptyContainer}>
@@ -230,7 +268,7 @@ export default function RideDetails(props) {
                         <Text style={[styles.emptyText, { color: theme.textSecondary }]}>
                             Não foi possível carregar os detalhes da corrida
                         </Text>
-                </View>
+                    </View>
                 )}
             </ScrollView>
         </View>

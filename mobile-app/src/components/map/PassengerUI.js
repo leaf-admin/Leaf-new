@@ -50,6 +50,9 @@ import PaymentBypassService from '../../services/PaymentBypassService';
 import RatingModal from '../common/RatingModal';
 import DriverAvailabilityService from '../../services/DriverAvailabilityService';
 import ProfileToggle from '../ProfileToggle';
+import { AnimatedButton } from '../design-system/AnimatedButton';
+import { Typography } from '../design-system/Typography';
+import { colors as semanticColors } from '../../common-local/theme';
 
 function getStreetAndNumber(address) {
     if (!address) return '';
@@ -104,9 +107,9 @@ const SearchingTimer = ({ tripStatus, style }) => {
 
     const formatted = `${Math.floor(time / 60)}:${(time % 60).toString().padStart(2, '0')}`;
     return (
-        <Text style={style}>
+        <Typography variant="h2" style={style}>
             {formatted}
-        </Text>
+        </Typography>
     );
 };
 
@@ -150,12 +153,12 @@ const SearchingMessage = ({ tripStatus, messages, style }) => {
     }, [tripStatus]);
 
     if (tripStatus !== 'searching' || !messages || messages.length === 0) {
-        return <Text style={style}>{messages?.[0] || ''}</Text>;
+        return <Typography variant="body" style={style}>{messages?.[0] || ''}</Typography>;
     }
 
     const messagesLen = messages.length;
     const index = Math.floor(time / 5) % messagesLen;
-    return <Text style={style}>{messages[index]}</Text>;
+    return <Typography variant="body" style={style} align="center">{messages[index]}</Typography>;
 };
 
 function PassengerUI(props) {
@@ -4577,15 +4580,15 @@ function PassengerUI(props) {
                                                 }}
                                                 activeOpacity={0.7}
                                             >
-                                                <Ionicons name="time-outline" color={theme.primary} size={22} style={styles.addressIcon} />
+                                                <Ionicons name="time-outline" color={safeTheme.primary} size={22} style={styles.addressIcon} />
                                                 <View style={styles.addressTextContainer}>
-                                                    <Text style={[styles.dropdownResultTopLine, { color: theme.text }]} numberOfLines={1}>
+                                                    <Typography variant="label" color={theme.text} numberOfLines={1}>
                                                         {formattedAddress.topLine}
-                                                    </Text>
+                                                    </Typography>
                                                     {formattedAddress.bottomLine && (
-                                                        <Text style={[styles.dropdownResultBottomLine, { color: theme.textSecondary }]} numberOfLines={1}>
+                                                        <Typography variant="caption" color={theme.textSecondary} numberOfLines={1}>
                                                             {formattedAddress.bottomLine}
-                                                        </Text>
+                                                        </Typography>
                                                     )}
                                                 </View>
                                             </TouchableOpacity>
@@ -4619,13 +4622,13 @@ function PassengerUI(props) {
                                                 activeOpacity={0.7}
                                             >
                                                 <View style={styles.dropdownResultTextContainer}>
-                                                    <Text style={[styles.dropdownResultTopLine, { color: theme.text }]} numberOfLines={1}>
+                                                    <Typography variant="label" color={theme.text} numberOfLines={1}>
                                                         {formattedAddress.topLine}
-                                                    </Text>
+                                                    </Typography>
                                                     {formattedAddress.bottomLine && (
-                                                        <Text style={[styles.dropdownResultBottomLine, { color: theme.textSecondary }]} numberOfLines={1}>
+                                                        <Typography variant="caption" color={theme.textSecondary} numberOfLines={1}>
                                                             {formattedAddress.bottomLine}
-                                                        </Text>
+                                                        </Typography>
                                                     )}
                                                 </View>
                                             </TouchableOpacity>
@@ -4637,9 +4640,9 @@ function PassengerUI(props) {
                             {/* ✅ Sem resultados */}
                             {showSearchResults && searchState.results.length === 0 && !searchState.loading && (
                                 <View style={styles.dropdownNoResults}>
-                                    <Text style={[styles.dropdownNoResultsText, { color: theme.textSecondary }]}>
+                                    <Typography variant="body" color={theme.textSecondary} align="center">
                                         {t('no_results_found')}
-                                    </Text>
+                                    </Typography>
                                 </View>
                             )}
                         </ScrollView>
@@ -4666,9 +4669,9 @@ function PassengerUI(props) {
                                     onPress={() => handleAddAddressDetails('pickup')}
                                 >
                                     <Ionicons name="add-circle-outline" size={16} color={theme.leafGreen || '#41D274'} />
-                                    <Text style={[styles.addDetailsButtonText, { color: theme.leafGreen || '#41D274' }]}>
+                                    <Typography variant="caption" weight="medium" color={theme.leafGreen || '#41D274'} style={styles.addDetailsButtonText}>
                                         Adicionar detalhes
-                                    </Text>
+                                    </Typography>
                                 </TouchableOpacity>
                             )}
                             {searchState.visible && searchState.type === 'pickup' ? (
@@ -4866,9 +4869,9 @@ function PassengerUI(props) {
                                     // ✅ Abrir campo e mostrar últimos destinos confirmados
                                     setSearchState({ visible: true, type: 'drop', inputText: '', results: [], loading: false });
                                 }}>
-                                    <Text style={tripdata.drop?.add ? [styles.addressText, { color: theme.text }] : [styles.addressPlaceholder, { color: theme.placeholder }]} numberOfLines={2}>
-                                        {tripdata.drop?.add ? formatAddressForDisplay(tripdata.drop.add) : 'Escolha seu destino'}
-                                    </Text>
+                                    <Typography variant="label" color={tripdata.drop?.add ? theme.text : theme.placeholder} numberOfLines={2}>
+                                        {tripdata.drop && tripdata.drop.add ? tripdata.drop.add : t('where_to_placeholder')}
+                                    </Typography>
                                     {tripdata.drop?.add && shouldShowSubtext(tripdata.drop.add) && (
                                         <Text style={[styles.addressSubtext, { color: theme.textSecondary }]} numberOfLines={1}>
                                             {getAddressSubtext(tripdata.drop.add)}
@@ -5172,12 +5175,12 @@ function PassengerUI(props) {
                     <BottomSheetView style={styles.bottomSheetContent}>
                         <View style={styles.loadingContainer}>
                             <ActivityIndicator size="large" color="#41D274" />
-                            <Text style={[styles.loadingText, { color: theme.text }]}>
-                                Calculando rota e preços...
-                            </Text>
-                            <Text style={[styles.loadingSubtext, { color: theme.textSecondary || '#666' }]}>
-                                Aguarde enquanto calculamos a melhor rota e o preço da sua viagem
-                            </Text>
+                            <Typography variant="h2" color={theme.text}>
+                                {t('calculating_route_price')}
+                            </Typography>
+                            <Typography variant="body" color={theme.textSecondary || '#666'} align="center">
+                                {t('wait_calculating_route')}
+                            </Typography>
                         </View>
                     </BottomSheetView>
                 </BottomSheet>
@@ -5210,16 +5213,16 @@ function PassengerUI(props) {
                     <BottomSheetView style={styles.bottomSheetContent}>
                         {/* ✅ Título da viagem */}
                         <View style={styles.tripTitleContainer}>
-                            <Text style={[styles.tripTitle, { color: theme.text }]}>
+                            <Typography variant="h2" color={theme.text} numberOfLines={1}>
                                 Sua viagem para {tripdata.drop?.add || tripdata.drop?.name || 'destino'}
-                            </Text>
+                            </Typography>
                             <View style={[styles.tripTitleSeparator, { backgroundColor: safeTheme.border || '#E0E0E0' }]} />
                         </View>
 
                         <View style={[styles.bottomSheetHeader, { alignItems: 'center', marginBottom: 0, paddingBottom: 0, marginTop: 5, paddingTop: 5 }]}>
-                            <Text style={[styles.bottomSheetTitle, { color: theme.text, textAlign: 'center' }]}>
+                            <Typography variant="h2" color={theme.text} align="center">
                                 Procurando motoristas
-                            </Text>
+                            </Typography>
                         </View>
 
                         <View style={styles.searchingContainer}>
@@ -5235,15 +5238,12 @@ function PassengerUI(props) {
 
                         {/* ✅ Botão de cancelar - sempre visível */}
                         <View style={styles.searchingCancelButtonContainer}>
-                            <TouchableOpacity
-                                style={styles.bottomSheetCancelButton}
+                            <AnimatedButton
+                                title="Cancelar"
+                                variant="danger"
                                 onPress={handleCancelBooking}
-                                activeOpacity={0.8}
-                            >
-                                <Text style={styles.bottomSheetCancelButtonText}>
-                                    Cancelar
-                                </Text>
-                            </TouchableOpacity>
+                                fullWidth
+                            />
                         </View>
                     </BottomSheetView>
                 </BottomSheet>
@@ -5294,9 +5294,9 @@ function PassengerUI(props) {
                                         )}
                                     </View>
                                     <View style={styles.driverNameContainerHeader}>
-                                        <Text style={[styles.driverNameOnWay, { color: theme.text || '#000000' }]}>
+                                        <Typography variant="h2" color={theme.text || '#000000'}>
                                             {driverInfo.name || 'Motorista'} está a caminho
-                                        </Text>
+                                        </Typography>
                                         {/* ✅ "Embarque em x minutos" com estimativa REAL */}
                                         {estimatedPickupTime !== null && estimatedPickupTime > 0 && (
                                             <Text style={[styles.embarkTimeText, { color: theme.textSecondary || '#666' }]}>
@@ -5317,18 +5317,18 @@ function PassengerUI(props) {
                                             <View style={styles.vehicleTextContainer}>
                                                 {/* Placa no topo */}
                                                 {driverInfo.vehicle?.plate && (
-                                                    <Text style={[styles.vehiclePlateTop, { color: theme.text }]}>
+                                                    <Typography variant="h3" weight="bold" color={theme.text}>
                                                         {driverInfo.vehicle.plate}
-                                                    </Text>
+                                                    </Typography>
                                                 )}
                                                 {/* Marca/Modelo/Cor abaixo da placa */}
-                                                <Text style={[styles.vehicleBrandModel, { color: theme.text }]}>
+                                                <Typography variant="body" color={theme.text}>
                                                     {[
                                                         driverInfo.vehicle.brand,
                                                         driverInfo.vehicle.model,
                                                         driverInfo.vehicle.color
                                                     ].filter(Boolean).join(' • ')}
-                                                </Text>
+                                                </Typography>
                                             </View>
                                         </View>
 
@@ -5380,18 +5380,12 @@ function PassengerUI(props) {
                                                     }
                                                 ]}
                                             >
-                                                <Text style={[
-                                                    styles.chatMessageText,
-                                                    { color: msg.isOwn ? '#FFFFFF' : theme.text }
-                                                ]}>
+                                                <Typography variant="body" color={msg.isOwn ? '#FFFFFF' : theme.text}>
                                                     {msg.text}
-                                                </Text>
-                                                <Text style={[
-                                                    styles.chatMessageTime,
-                                                    { color: msg.isOwn ? 'rgba(255,255,255,0.7)' : theme.textSecondary }
-                                                ]}>
+                                                </Typography>
+                                                <Typography variant="caption" color={msg.isOwn ? 'rgba(255,255,255,0.7)' : theme.textSecondary || '#666'} style={{ fontSize: 10, marginTop: 2 }}>
                                                     {new Date(msg.timestamp).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
-                                                </Text>
+                                                </Typography>
                                             </View>
                                         ))}
                                     </ScrollView>
@@ -5428,15 +5422,12 @@ function PassengerUI(props) {
                             )}
 
                             {/* Botão Cancelar */}
-                            <TouchableOpacity
-                                style={styles.bottomSheetCancelButton}
+                            <AnimatedButton
+                                title="Cancelar"
+                                variant="danger"
                                 onPress={handleCancelBooking}
-                                activeOpacity={0.8}
-                            >
-                                <Text style={styles.bottomSheetCancelButtonText}>
-                                    Cancelar
-                                </Text>
-                            </TouchableOpacity>
+                                fullWidth
+                            />
                         </ScrollView>
                     </BottomSheetView>
                 </BottomSheet>
@@ -5471,15 +5462,15 @@ function PassengerUI(props) {
                         <ScrollView showsVerticalScrollIndicator={false}>
                             {/* ✅ 1. Título "Seu motorista chegou" centralizado */}
                             <View style={styles.bottomSheetHeader}>
-                                <Text style={[styles.bottomSheetTitle, { color: theme.text, textAlign: 'center' }]}>
+                                <Typography variant="h2" weight="bold" color={theme.text} align="center">
                                     Seu motorista chegou
-                                </Text>
+                                </Typography>
 
                                 {/* ✅ 2. Timer "Embarque em xx:xx" centralizado */}
                                 <View style={styles.embarkTimerContainer}>
-                                    <Text style={[styles.embarkTimerLabel, { color: theme.textSecondary || '#666', fontSize: 12, textAlign: 'center' }]}>
+                                    <Typography variant="caption" color={theme.textSecondary || '#666'} align="center">
                                         Embarque em {formatEmbarkTimer(embarkTimer)}
-                                    </Text>
+                                    </Typography>
                                 </View>
                             </View>
 
@@ -5492,18 +5483,18 @@ function PassengerUI(props) {
                                             <View style={styles.vehicleTextContainer}>
                                                 {/* Placa no topo */}
                                                 {driverInfo.vehicle?.plate && (
-                                                    <Text style={[styles.vehiclePlateTop, { color: theme.text }]}>
+                                                    <Typography variant="h3" weight="bold" color={theme.text}>
                                                         {driverInfo.vehicle.plate}
-                                                    </Text>
+                                                    </Typography>
                                                 )}
                                                 {/* Marca/Modelo/Cor abaixo da placa */}
-                                                <Text style={[styles.vehicleBrandModel, { color: theme.text }]}>
+                                                <Typography variant="body" color={theme.text}>
                                                     {[
                                                         driverInfo.vehicle.brand,
                                                         driverInfo.vehicle.model,
                                                         driverInfo.vehicle.color
                                                     ].filter(Boolean).join(' • ')}
-                                                </Text>
+                                                </Typography>
                                             </View>
                                         </View>
 
@@ -5547,23 +5538,23 @@ function PassengerUI(props) {
                                             </View>
                                         )}
                                         <View style={styles.driverNameContainer}>
-                                            <Text style={[styles.driverName, { color: theme.text }]}>
+                                            <Typography variant="h3" weight="bold" color={theme.text}>
                                                 {driverInfo.name || 'Motorista'}
-                                            </Text>
+                                            </Typography>
                                             {/* Rating e Top Rated */}
                                             <View style={styles.driverRatingRow}>
                                                 {driverInfo.rating && (
                                                     <View style={styles.ratingContainer}>
                                                         <Ionicons name="star" size={14} color="#FFD700" />
-                                                        <Text style={[styles.ratingText, { color: theme.text }]}>
+                                                        <Typography variant="caption" weight="medium" color={theme.text} style={{ marginLeft: 4 }}>
                                                             {driverInfo.rating.toFixed(1)}
-                                                        </Text>
+                                                        </Typography>
                                                     </View>
                                                 )}
-                                                <Text style={[styles.topRatedText, { color: theme.textSecondary || '#666' }]}>
+                                                <Typography variant="caption" color={theme.textSecondary || '#666'} style={{ marginLeft: 8 }}>
                                                     Top Rated Driver
-                                                </Text>
-                                                <Ionicons name="trophy" size={14} color="#FFD700" />
+                                                </Typography>
+                                                <Ionicons name="trophy" size={14} color="#FFD700" style={{ marginLeft: 4 }} />
                                             </View>
                                         </View>
                                     </View>
@@ -5603,12 +5594,12 @@ function PassengerUI(props) {
                                             <View style={styles.addressLine} />
                                         </View>
                                         <View style={styles.addressTextContainer}>
-                                            <Text style={[styles.addressLabel, { color: theme.textSecondary || '#666' }]}>
+                                            <Typography variant="caption" color={theme.textSecondary || '#666'}>
                                                 Start Location
-                                            </Text>
-                                            <Text style={[styles.addressValue, { color: theme.text }]}>
+                                            </Typography>
+                                            <Typography variant="body" weight="medium" color={theme.text}>
                                                 {tripdata.pickup.add}
-                                            </Text>
+                                            </Typography>
                                         </View>
                                     </View>
                                 )}
@@ -5620,12 +5611,12 @@ function PassengerUI(props) {
                                             <View style={[styles.addressDot, { backgroundColor: '#000' }]} />
                                         </View>
                                         <View style={styles.addressTextContainer}>
-                                            <Text style={[styles.addressLabel, { color: theme.textSecondary || '#666' }]}>
+                                            <Typography variant="caption" color={theme.textSecondary || '#666'}>
                                                 Your Destination
-                                            </Text>
-                                            <Text style={[styles.addressValue, { color: theme.text }]}>
+                                            </Typography>
+                                            <Typography variant="body" weight="medium" color={theme.text}>
                                                 {tripdata.drop.add}
-                                            </Text>
+                                            </Typography>
                                         </View>
                                     </View>
                                 )}
@@ -5653,18 +5644,12 @@ function PassengerUI(props) {
                                                     }
                                                 ]}
                                             >
-                                                <Text style={[
-                                                    styles.chatMessageText,
-                                                    { color: msg.isOwn ? '#FFFFFF' : theme.text }
-                                                ]}>
+                                                <Typography variant="body" color={msg.isOwn ? '#FFFFFF' : theme.text}>
                                                     {msg.text}
-                                                </Text>
-                                                <Text style={[
-                                                    styles.chatMessageTime,
-                                                    { color: msg.isOwn ? 'rgba(255,255,255,0.7)' : theme.textSecondary }
-                                                ]}>
+                                                </Typography>
+                                                <Typography variant="caption" color={msg.isOwn ? 'rgba(255,255,255,0.7)' : theme.textSecondary || '#666'} style={{ fontSize: 10, marginTop: 2 }}>
                                                     {new Date(msg.timestamp).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
-                                                </Text>
+                                                </Typography>
                                             </View>
                                         ))}
                                     </ScrollView>
@@ -5701,15 +5686,12 @@ function PassengerUI(props) {
                             )}
 
                             {/* ✅ 7. Botão de cancelar */}
-                            <TouchableOpacity
-                                style={styles.bottomSheetCancelButton}
+                            <AnimatedButton
+                                title="Cancelar"
+                                variant="danger"
                                 onPress={handleCancelBooking}
-                                activeOpacity={0.8}
-                            >
-                                <Text style={styles.bottomSheetCancelButtonText}>
-                                    Cancelar
-                                </Text>
-                            </TouchableOpacity>
+                                fullWidth
+                            />
                         </ScrollView>
                     </BottomSheetView>
                 </BottomSheet>
@@ -5762,15 +5744,15 @@ function PassengerUI(props) {
                                             </View>
                                         )}
                                     </View>
-                                    <Text style={[styles.bottomSheetTitle, { color: theme.text }]}>
+                                    <Typography variant="h2" weight="bold" color={theme.text} style={{ marginLeft: 12 }}>
                                         A caminho de {tripdata.drop?.add || 'destino'}
-                                    </Text>
+                                    </Typography>
                                 </View>
                                 {/* Estimativa de chegada centralizada abaixo do título */}
                                 <View style={styles.estimatedTimeContainer}>
-                                    <Text style={styles.arrivalEstimateText}>
+                                    <Typography variant="caption" color={theme.textSecondary || '#666'} align="center">
                                         Estimativa de chegada às {estimatedArrivalTime}
-                                    </Text>
+                                    </Typography>
                                 </View>
                             </View>
 
@@ -5781,18 +5763,18 @@ function PassengerUI(props) {
                                     <View style={styles.vehicleInfoPhotoRow}>
                                         {/* Informações do veículo (esquerda) */}
                                         <View style={styles.vehicleInfoContainer}>
-                                            <Text style={[styles.vehicleBrandModel, { color: theme.text }]}>
+                                            <Typography variant="body" weight="bold" color={theme.text}>
                                                 {[
                                                     driverInfo.vehicle.brand,
                                                     driverInfo.vehicle.model,
                                                     driverInfo.vehicle.color
                                                 ].filter(Boolean).join(' ')}
-                                            </Text>
+                                            </Typography>
                                             {/* Placa exatamente abaixo */}
                                             {driverInfo.vehicle?.plate && (
-                                                <Text style={[styles.vehiclePlate, { color: theme.text }]}>
+                                                <Typography variant="h3" weight="bold" color={theme.text} style={styles.vehiclePlate}>
                                                     {driverInfo.vehicle.plate}
-                                                </Text>
+                                                </Typography>
                                             )}
                                         </View>
 
@@ -5844,18 +5826,12 @@ function PassengerUI(props) {
                                                     }
                                                 ]}
                                             >
-                                                <Text style={[
-                                                    styles.chatMessageText,
-                                                    { color: msg.isOwn ? '#FFFFFF' : theme.text }
-                                                ]}>
+                                                <Typography variant="body" color={msg.isOwn ? '#FFFFFF' : theme.text}>
                                                     {msg.text}
-                                                </Text>
-                                                <Text style={[
-                                                    styles.chatMessageTime,
-                                                    { color: msg.isOwn ? 'rgba(255,255,255,0.7)' : theme.textSecondary }
-                                                ]}>
+                                                </Typography>
+                                                <Typography variant="caption" color={msg.isOwn ? 'rgba(255,255,255,0.7)' : theme.textSecondary || '#666'} style={{ fontSize: 10, marginTop: 2 }}>
                                                     {new Date(msg.timestamp).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
-                                                </Text>
+                                                </Typography>
                                             </View>
                                         ))}
                                     </ScrollView>
@@ -5917,15 +5893,12 @@ function PassengerUI(props) {
                             </View>
 
                             {/* ✅ Botão de cancelar - sempre disponível */}
-                            <TouchableOpacity
-                                style={styles.bottomSheetCancelButton}
+                            <AnimatedButton
+                                title="Cancelar"
+                                variant="danger"
                                 onPress={handleCancelBooking}
-                                activeOpacity={0.8}
-                            >
-                                <Text style={styles.bottomSheetCancelButtonText}>
-                                    Cancelar
-                                </Text>
-                            </TouchableOpacity>
+                                fullWidth
+                            />
                         </ScrollView>
                     </BottomSheetView>
                 </BottomSheet>
@@ -6265,25 +6238,13 @@ function PassengerUI(props) {
                         })}
                     </View>
 
-                    <TouchableOpacity
-                        style={[
-                            styles.bottomSheetBookButton,
-                            (!selectedCarType || !carEstimates[selectedCarType?.name]?.estimateFare) && styles.bottomSheetBookButtonDisabled
-                        ]}
+                    <AnimatedButton
+                        title={tripStatus === 'idle' ? 'Pedir agora' : tripStatus === 'completed' ? 'Confirmar pagamento' : 'Solicitar'}
+                        variant="primary"
                         onPress={tripStatus === 'completed' ? handlePaymentConfirmation : initiateBooking}
-                        disabled={!selectedCarType || !carEstimates[selectedCarType?.name]?.estimateFare || bookModelLoading || tripStatus === 'accepted' || tripStatus === 'started'}
-                        activeOpacity={0.8}
-                    >
-                        {bookModelLoading ? (
-                            <ActivityIndicator color="#FFFFFF" size="small" />
-                        ) : (
-                            <Text style={styles.bottomSheetBookButtonText}>
-                                {tripStatus === 'idle' ? 'Pedir agora' :
-                                    tripStatus === 'completed' ? 'Confirmar pagamento' :
-                                        'Solicitar'}
-                            </Text>
-                        )}
-                    </TouchableOpacity>
+                        disabled={!selectedCarType || !carEstimates[selectedCarType?.name]?.estimateFare || tripStatus === 'accepted' || tripStatus === 'started'}
+                        loading={bookModelLoading}
+                    />
                 </BottomSheetView>
             </BottomSheet>
         );
@@ -6453,7 +6414,7 @@ function PassengerUI(props) {
 
                     Alert.alert(
                         'Pagamento Confirmado!',
-                        `Pagamento simulado com sucesso!\nValor: R$ ${result.amount}\n\nObrigado por usar o Leaf!`,
+                        `Pagamento simulado com sucesso!\nValor: R$ ${result.amount}\n\nObrigado por usar a Leaf!`,
                         [{ text: 'OK' }]
                     );
                 } else {
@@ -6482,7 +6443,7 @@ function PassengerUI(props) {
                 || auth.profile?.displayName
                 || auth.profile?.profile?.name
                 || auth.user?.name
-                || 'Passageiro Leaf';
+                || 'Passageira Leaf';
             const passengerEmail = auth.profile?.email
                 || auth.profile?.profile?.email
                 || auth.user?.email
@@ -6786,7 +6747,7 @@ function PassengerUI(props) {
                         || auth.profile?.displayName
                         || auth.profile?.profile?.name
                         || auth.user?.name
-                        || 'Passageiro Leaf'
+                        || 'Passageira Leaf'
                     }
                     passengerEmail={
                         auth.profile?.email
@@ -6943,8 +6904,20 @@ const styles = StyleSheet.create({
     header: { position: 'absolute', top: 15, left: 0, right: 0, flexDirection: 'row', justifyContent: 'space-between', paddingHorizontal: 20, zIndex: 1000 },
     headerButton: { width: 40, height: 40, borderRadius: 20, justifyContent: 'center', alignItems: 'center', shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.25, shadowRadius: 3.84, elevation: 5 },
     addressContainer: { position: 'absolute', top: 75, left: 0, right: 0, zIndex: 900, alignItems: 'center' },
-    addressCardGroup: { borderRadius: 18, width: '92%', shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.1, shadowRadius: 10, elevation: 6, overflow: 'hidden' }, // ✅ overflow: 'hidden' para manter bordas arredondadas, dropdown dentro
-    addressCardRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 10, paddingHorizontal: 18 }, // ✅ Reduzido paddingVertical de 14 para 10
+    addressCardGroup: {
+        borderRadius: 20,
+        width: '94%',
+        backgroundColor: '#FFFFFF',
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 8 },
+        shadowOpacity: 0.08,
+        shadowRadius: 16,
+        elevation: 8,
+        overflow: 'hidden',
+        borderWidth: 1,
+        borderColor: 'rgba(0,0,0,0.03)'
+    },
+    addressCardRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 12, paddingHorizontal: 20 },
     addressDivider: {
         height: 1,
         marginHorizontal: 18,
@@ -7078,25 +7051,27 @@ const styles = StyleSheet.create({
     },
     // Estilos do BottomSheet
     bottomSheetBackground: {
-        // ✅ backgroundColor removido - será definido via theme.card no inline style
-        borderTopLeftRadius: 24,
-        borderTopRightRadius: 24,
+        borderTopLeftRadius: 32,
+        borderTopRightRadius: 32,
         shadowColor: '#000',
-        shadowOffset: { width: 0, height: -2 },
-        shadowOpacity: 0.1,
-        shadowRadius: 8,
-        elevation: 10,
+        shadowOffset: { width: 0, height: -10 },
+        shadowOpacity: 0.05,
+        shadowRadius: 20,
+        elevation: 15,
+        borderWidth: 1,
+        borderColor: 'rgba(0,0,0,0.02)',
     },
     bottomSheetIndicator: {
-        backgroundColor: '#E0E0E0',
-        width: 40,
-        height: 4,
+        backgroundColor: '#E5E5EA',
+        width: 36,
+        height: 5,
+        borderRadius: 2.5,
     },
     bottomSheetContent: {
         flex: 1,
-        paddingHorizontal: 20,
-        paddingTop: 4,
-        paddingBottom: 4,
+        paddingHorizontal: 24,
+        paddingTop: 8,
+        paddingBottom: 16,
     },
     loadingContainer: {
         flex: 1,

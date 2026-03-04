@@ -19,11 +19,11 @@ import {
   SheetTitle,
   SheetTrigger,
 } from './ui/sheet'
-import { 
-  Home, 
-  BarChart3, 
-  MapPin, 
-  Users, 
+import {
+  Home,
+  BarChart3,
+  MapPin,
+  Users,
   List,
   Bell,
   Settings,
@@ -34,7 +34,8 @@ import {
   MessageCircle,
   Menu,
   ChevronDown,
-  Activity
+  Activity,
+  Calculator
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
@@ -43,6 +44,7 @@ const navItems = [
   { label: 'Dashboard', href: '/dashboard', icon: Home },
   { label: 'Métricas', href: '/metrics', icon: BarChart3 },
   { label: 'Histórico', href: '/metrics-history', icon: TrendingUp },
+  { label: 'Simulador', href: '/financial-simulator', icon: Calculator },
   { label: 'Observabilidade', href: '/observability', icon: Activity },
   { label: 'Usuários', href: '/users', icon: Users },
   { label: 'Lista de Espera', href: '/waitlist', icon: List },
@@ -69,9 +71,9 @@ export default function Navigation() {
       <div className="container flex h-16 items-center justify-between px-4 md:px-6 lg:px-8">
         {/* Logo / Brand */}
         <Link href="/dashboard" className="flex items-center gap-2 md:gap-3 cursor-pointer hover:opacity-80 transition-opacity flex-shrink-0">
-          <img 
-            src="/favicon.svg" 
-            alt="Leaf" 
+          <img
+            src="/favicon.svg"
+            alt="Leaf"
             className="h-8 w-8 md:h-10 md:w-10"
             onError={(e) => {
               // Fallback se imagem não carregar
@@ -118,8 +120,8 @@ export default function Navigation() {
           {/* Notifications */}
           <Button variant="ghost" size="icon" className="relative h-9 w-9">
             <Bell className="h-4 w-4 md:h-5 md:w-5" />
-            <Badge 
-              variant="destructive" 
+            <Badge
+              variant="destructive"
               className="absolute -top-0.5 -right-0.5 h-4 w-4 md:h-5 md:w-5 flex items-center justify-center p-0 text-[10px] md:text-xs"
             >
               3

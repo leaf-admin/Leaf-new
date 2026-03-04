@@ -1,0 +1,6 @@
+# Configuração do Dispositivo Físico
+device:
+  type: android
+  serial: irsgaiscr4j7cenv
+
+appId: br.com.leaf.ride

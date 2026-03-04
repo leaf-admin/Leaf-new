@@ -33,6 +33,9 @@ import * as FileSystem from 'expo-file-system';
 import * as ImagePicker from 'expo-image-picker';
 import BottomSheet, { BottomSheetView, BottomSheetBackdrop } from '@gorhom/bottom-sheet';
 import { fonts } from '../../common-local/font';
+import { useTheme } from '../../common-local/theme';
+import Typography from '../design-system/Typography';
+import AnimatedButton from '../design-system/AnimatedButton';
 import RideRequestModal from './RideRequestModal'; // Adicionado import para RideRequestModal
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { GetDistance } from '../../common-local/other/GeoFunctions';
@@ -61,6 +64,7 @@ const Icon = ({ name, type, color, size }) => {
 
 // ✅ Componente de Loading Screen
 const DriverLoadingScreen = ({ userName }) => {
+    const theme = useTheme();
     const fadeAnim = useRef(new Animated.Value(0)).current;
     const scaleAnim = useRef(new Animated.Value(0.8)).current;
 
@@ -82,7 +86,7 @@ const DriverLoadingScreen = ({ userName }) => {
     }, []);
 
     return (
-        <View style={loadingStyles.container}>
+        <View style={[loadingStyles.container, { backgroundColor: theme.primary || '#003002' }]}>
             <Animated.View
                 style={[
                     loadingStyles.content,
@@ -92,9 +96,9 @@ const DriverLoadingScreen = ({ userName }) => {
                     }
                 ]}
             >
-                <Text style={loadingStyles.welcomeText}>
+                <Typography variant="h1" color="#FFFFFF" align="center">
                     Bem vindo, {userName}
-                </Text>
+                </Typography>
 
                 <View style={loadingStyles.loadingContainer}>
                     <ActivityIndicator size="large" color="#FFFFFF" />
@@ -107,12 +111,13 @@ const DriverLoadingScreen = ({ userName }) => {
 function DriverUI(props) {
     // Função de tradução temporária
     const t = (key) => key;
+    const theme = useTheme();
     const dispatch = useDispatch();
     // ✅ OTIMIZAÇÃO: Usar shallowEqual para evitar re-renders quando objetos são iguais
     const auth = useSelector(state => state.auth, shallowEqual);
     const driverId = auth?.profile?.uid || auth?.uid || auth?.user?.uid;
 
-    const { theme, isDarkMode, toggleTheme, currentLocation, onBottomSheetStateChange, navigation, locationDenied } = props;
+    const { isDarkMode, toggleTheme, currentLocation, onBottomSheetStateChange, navigation, locationDenied } = props;
 
     // Refs para BottomSheets
     const documentsBottomSheetRef = useRef(null);
@@ -3836,7 +3841,7 @@ function DriverUI(props) {
                             }
                         }}
                     >
-                        <Ionicons name="menu" color={theme.icon} size={24} />
+                        <Ionicons name="menu" color={theme.text} size={24} />
                     </TouchableOpacity>
 
                     <View style={{ marginLeft: 6 }}>
@@ -3855,7 +3860,7 @@ function DriverUI(props) {
                                 }
                             }}
                         >
-                            <Ionicons name="help-circle-outline" color={theme.icon} size={24} />
+                            <Ionicons name="help-circle-outline" color={theme.text} size={24} />
                         </TouchableOpacity>
 
                         <TouchableOpacity
@@ -3868,7 +3873,7 @@ function DriverUI(props) {
                                 }
                             }}
                         >
-                            <Ionicons name="notifications-outline" color={theme.icon} size={24} />
+                            <Ionicons name="notifications-outline" color={theme.text} size={24} />
                         </TouchableOpacity>
 
                         <TouchableOpacity
@@ -3878,7 +3883,7 @@ function DriverUI(props) {
                             <Icon
                                 name={isDarkMode ? "sunny" : "moon"}
                                 type="ionicon"
-                                color={theme.icon}
+                                color={theme.text}
                                 size={24}
                             />
                         </TouchableOpacity>
@@ -3888,7 +3893,7 @@ function DriverUI(props) {
 
             {/* Modal de Ganhos do Motorista - Clicável */}
             <TouchableOpacity
-                style={[styles.earningsFloating, { zIndex: getButtonZIndex() }]}
+                style={[styles.earningsFloating, { zIndex: getButtonZIndex(), backgroundColor: theme.leafGreen || '#003002' }]}
                 onPress={openBalanceModal}
                 activeOpacity={0.8}
             >
@@ -3896,9 +3901,9 @@ function DriverUI(props) {
                     {isLoadingBalance ? (
                         <ActivityIndicator size="small" color="#FFFFFF" />
                     ) : (
-                        <Text style={styles.earningsValue}>
+                        <Typography variant="body" weight="bold" color="#FFFFFF">
                             R$ {driverEarnings.toFixed(2).replace('.', ',')}
-                        </Text>
+                        </Typography>
                     )}
                 </View>
             </TouchableOpacity>
@@ -3911,79 +3916,76 @@ function DriverUI(props) {
                 onRequestClose={() => setBalanceModalVisible(false)}
             >
                 <View style={styles.balanceModalOverlay}>
-                    <View style={[styles.balanceModalContent, isDarkMode && { backgroundColor: colors.black }]}>
+                    <View style={[styles.balanceModalContent, { backgroundColor: theme.card }]}>
                         {/* Header do Modal */}
-                        <View style={[styles.balanceModalHeader, isDarkMode && { borderBottomColor: colors.grey80 }]}>
-                            <Text style={[styles.balanceModalTitle, isDarkMode && { color: colors.white }]}>Saldo e Histórico</Text>
+                        <View style={[styles.balanceModalHeader, { borderBottomColor: theme.border }]}>
+                            <Typography variant="h2" color={theme.text}>Saldo e Histórico</Typography>
                             <TouchableOpacity
                                 onPress={() => setBalanceModalVisible(false)}
                                 style={styles.balanceModalCloseButton}
                             >
-                                <Ionicons name="close" size={24} color={isDarkMode ? colors.white : colors.black} />
+                                <Ionicons name="close" size={24} color={theme.text} />
                             </TouchableOpacity>
                         </View>
 
                         {/* Saldo Atual */}
-                        <View style={[styles.balanceCard, isDarkMode && { backgroundColor: colors.grey80 }]}>
-                            <Text style={[styles.balanceLabel, isDarkMode && { color: colors.white }]}>Saldo Disponível</Text>
-                            <Text style={[styles.balanceAmount, isDarkMode && { color: colors.white }]}>
+                        <View style={[styles.balanceCard, { backgroundColor: isDarkMode ? 'rgba(255,255,255,0.05)' : '#F5F5F5' }]}>
+                            <Typography variant="label" color={theme.textSecondary}>Saldo Disponível</Typography>
+                            <Typography variant="h1" color={theme.text} style={{ marginVertical: 8 }}>
                                 R$ {driverEarnings.toFixed(2).replace('.', ',')}
-                            </Text>
+                            </Typography>
                             <TouchableOpacity
                                 onPress={loadDriverEarnings}
                                 style={styles.refreshButton}
                             >
-                                <Ionicons name="refresh" size={16} color={colors.leafGreen} />
-                                <Text style={[styles.refreshButtonText, isDarkMode && { color: colors.white }]}>Atualizar</Text>
+                                <Ionicons name="refresh" size={16} color={theme.leafGreen || '#003002'} />
+                                <Typography variant="caption" weight="bold" color={theme.leafGreen || '#003002'} style={{ marginLeft: 4 }}>Atualizar</Typography>
                             </TouchableOpacity>
                         </View>
 
                         {/* Histórico de Transações */}
                         <View style={styles.historySection}>
-                            <Text style={[styles.historyTitle, isDarkMode && { color: colors.white }]}>Histórico de Movimentações</Text>
+                            <Typography variant="label" weight="bold" color={theme.text} style={{ marginBottom: 15 }}>Histórico de Movimentações</Typography>
 
                             {isLoadingHistory ? (
                                 <View style={styles.loadingContainer}>
-                                    <ActivityIndicator size="small" color={colors.leafGreen} />
-                                    <Text style={[styles.loadingText, isDarkMode && { color: colors.white }]}>Carregando histórico...</Text>
+                                    <ActivityIndicator size="small" color={theme.leafGreen || '#003002'} />
+                                    <Typography variant="caption" color={theme.textSecondary} style={{ marginTop: 8 }}>Carregando histórico...</Typography>
                                 </View>
                             ) : transactionHistory.length === 0 ? (
                                 <View style={styles.emptyHistory}>
-                                    <Ionicons name="receipt-outline" size={48} color={isDarkMode ? colors.greyPlaceholder : colors.greyPlaceholder} />
-                                    <Text style={[styles.emptyHistoryText, isDarkMode && { color: colors.white }]}>
+                                    <Ionicons name="receipt-outline" size={48} color={theme.border} />
+                                    <Typography variant="body" color={theme.textSecondary} align="center" style={{ marginTop: 10 }}>
                                         Nenhuma transação ainda
-                                    </Text>
+                                    </Typography>
                                 </View>
                             ) : (
                                 <ScrollView style={styles.transactionsList}>
                                     {transactionHistory.map((transaction) => (
-                                        <View key={transaction.id} style={[styles.transactionItem, isDarkMode && { backgroundColor: colors.grey80 }]}>
+                                        <View key={transaction.id} style={[styles.transactionItem, { borderBottomColor: theme.border }]}>
                                             <View style={styles.transactionIcon}>
                                                 <Ionicons
                                                     name={transaction.type === 'credit' ? 'arrow-down-circle' : 'arrow-up-circle'}
                                                     size={24}
-                                                    color={transaction.type === 'credit' ? colors.leafGreen : colors.error}
+                                                    color={transaction.type === 'credit' ? theme.leafGreen || '#4CAF50' : '#FF3B30'}
                                                 />
                                             </View>
                                             <View style={styles.transactionDetails}>
-                                                <Text style={[styles.transactionDescription, isDarkMode && { color: colors.white }]}>
+                                                <Typography variant="body" weight="medium" color={theme.text}>
                                                     {transaction.description ||
                                                         (transaction.type === 'credit' ? 'Crédito de corrida' : 'Débito')}
-                                                </Text>
-                                                <Text style={[styles.transactionDate, isDarkMode && { color: colors.greyPlaceholder }]}>
+                                                </Typography>
+                                                <Typography variant="caption" color={theme.textSecondary}>
                                                     {transaction.createdAt
                                                         ? new Date(transaction.createdAt).toLocaleString('pt-BR')
                                                         : 'Data não disponível'}
-                                                </Text>
+                                                </Typography>
                                             </View>
                                             <View style={styles.transactionAmount}>
-                                                <Text style={[
-                                                    styles.transactionAmountText,
-                                                    { color: transaction.type === 'credit' ? colors.leafGreen : colors.error }
-                                                ]}>
+                                                <Typography variant="body" weight="bold" color={transaction.type === 'credit' ? theme.leafGreen || '#4CAF50' : '#FF3B30'}>
                                                     {transaction.type === 'credit' ? '+' : '-'}
                                                     R$ {transaction.amount.toFixed(2).replace('.', ',')}
-                                                </Text>
+                                                </Typography>
                                             </View>
                                         </View>
                                     ))}
@@ -3994,21 +3996,20 @@ function DriverUI(props) {
                 </View>
             </Modal>
 
-
             {/* Card de Solicitação de Corrida - Renderizado quando há solicitação */}
             {/* FORÇA: Renderizar APENAS se não há lista de disponíveis */}
             {currentRideRequest && availableBookings.length === 0 && (
                 <View style={[styles.mockRideCardFloating, { zIndex: 300 }]}>
-                    <View style={styles.mockRideCard}>
+                    <View style={[styles.mockRideCard, { backgroundColor: theme.card }]}>
                         {/* Valor Principal - Centralizado no Topo */}
                         <View style={styles.mockRideValueContainer}>
-                            <Text style={styles.mockRideValue}>R$ {currentRideRequest.value}</Text>
+                            <Typography variant="h1" color={theme.text}>R$ {currentRideRequest.value}</Typography>
                         </View>
 
                         {/* Categoria */}
                         <View style={styles.mockRideCategoryContainer}>
-                            <View style={styles.mockRideCategory}>
-                                <Text style={styles.mockRideCategoryText}>{currentRideRequest.category}</Text>
+                            <View style={[styles.mockRideCategory, { backgroundColor: theme.leafGreen || '#003002' }]}>
+                                <Typography variant="caption" weight="bold" color="#FFFFFF">{currentRideRequest.category}</Typography>
                             </View>
                         </View>
 
@@ -4016,41 +4017,41 @@ function DriverUI(props) {
                         <View style={styles.mockRidePassenger}>
                             <View style={styles.mockRideRating}>
                                 <Ionicons name="star" color="#FFD700" size={16} />
-                                <Text style={styles.mockRideRatingText}>{currentRideRequest.passengerRating}</Text>
+                                <Typography variant="caption" color={theme.text} style={{ marginLeft: 4 }}>{currentRideRequest.passengerRating}</Typography>
                             </View>
-                            <Text style={styles.mockRideSeparator}>|</Text>
+                            <Typography variant="caption" color={theme.border} style={{ marginHorizontal: 8 }}>|</Typography>
                             <View style={styles.mockRideVerification}>
-                                <Text style={styles.mockRideVerificationText}>Passageiro verificado</Text>
+                                <Typography variant="caption" color={theme.leafGreen || '#2E7D32'}>Passageiro verificado</Typography>
                             </View>
                         </View>
 
                         {/* Status da Corrida */}
                         <View style={styles.rideStatusContainer}>
-                            <Text style={styles.rideStatusText}>
+                            <Typography variant="body" weight="bold" color={theme.leafGreen || '#4CAF50'} align="center">
                                 {rideStatus === 'accepted' && '✅ Corrida aceita!'}
                                 {rideStatus === 'enRoute' && '🚗 A caminho do embarque...'}
                                 {rideStatus === 'atPickup' && '📍 Cheguei ao local de embarque'}
                                 {rideStatus === 'inProgress' && '🚗 Corrida em andamento...'}
                                 {rideStatus === 'completed' && '🎯 Cheguei ao destino!'}
-                            </Text>
+                            </Typography>
                         </View>
 
                         {/* Tempo até Local de Partida + Distância */}
                         <View style={styles.mockRideLocation}>
                             <View style={styles.mockRideLocationHeader}>
-                                <Text style={styles.mockRideLocationTime}>
+                                <Typography variant="caption" color={theme.textSecondary}>
                                     Embarque em {currentRideRequest.pickupTime} min ({currentRideRequest.pickupDistance} km)
-                                </Text>
+                                </Typography>
                             </View>
                         </View>
 
                         {/* Endereço de Partida */}
                         <View style={styles.mockRideLocation}>
                             <View style={styles.mockRideLocationHeader}>
-                                <Ionicons name="location" color={colors.leafGreen} size={16} />
-                                <Text style={styles.mockRideLocationAddress}>
+                                <Ionicons name="location" color={theme.leafGreen || '#41D274'} size={16} />
+                                <Typography variant="body" color={theme.text} style={{ marginLeft: 8 }}>
                                     {currentRideRequest.pickupAddress}
-                                </Text>
+                                </Typography>
                             </View>
                         </View>
 
@@ -4058,25 +4059,25 @@ function DriverUI(props) {
                         <View style={styles.mockRideLocation}>
                             <View style={styles.mockRideLocationHeader}>
                                 <Ionicons name="flag" color="#FF6B6B" size={16} />
-                                <Text style={styles.mockRideLocationAddress}>
+                                <Typography variant="body" color={theme.text} style={{ marginLeft: 8 }}>
                                     {currentRideRequest.destinationAddress}
-                                </Text>
+                                </Typography>
                             </View>
                         </View>
 
                         {/* Chegada Estimada */}
                         <View style={styles.mockRideTripInfo}>
-                            <Text style={styles.mockRideTripText}>
+                            <Typography variant="caption" color={theme.textSecondary}>
                                 Chegada estimada às {currentRideRequest.estimatedArrival}
-                            </Text>
+                            </Typography>
                         </View>
 
                         {/* Timer de Embarque (quando chegou ao local) */}
                         {rideStatus === 'atPickup' && isPickupTimerActive && (
                             <View style={styles.pickupTimerContainer}>
-                                <Text style={styles.pickupTimerText}>
+                                <Typography variant="body" weight="bold" color="#FF3B30">
                                     ⏰ Tempo para embarque: {Math.floor(pickupTimer / 60)}:{(pickupTimer % 60).toString().padStart(2, '0')}
-                                </Text>
+                                </Typography>
                             </View>
                         )}
 
@@ -4102,18 +4103,12 @@ function DriverUI(props) {
                                                 }
                                             ]}
                                         >
-                                            <Text style={[
-                                                styles.chatMessageText,
-                                                { color: msg.isOwn ? '#FFFFFF' : '#000000' }
-                                            ]}>
+                                            <Typography variant="body" color={msg.isOwn ? '#FFFFFF' : theme.text}>
                                                 {msg.text}
-                                            </Text>
-                                            <Text style={[
-                                                styles.chatMessageTime,
-                                                { color: msg.isOwn ? 'rgba(255,255,255,0.7)' : '#666666' }
-                                            ]}>
+                                            </Typography>
+                                            <Typography variant="small" color={msg.isOwn ? 'rgba(255,255,255,0.7)' : theme.textSecondary} style={{ marginTop: 2 }}>
                                                 {new Date(msg.timestamp).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
-                                            </Text>
+                                            </Typography>
                                         </View>
                                     ))}
                                 </ScrollView>
@@ -4247,42 +4242,27 @@ function DriverUI(props) {
                                         },
                                     ]}
                                 >
-                                    <TouchableOpacity
-                                        style={[
-                                            styles.mockRideAcceptButton,
-                                            (!isTimerActive || timer === 0) && styles.mockRideAcceptButtonExpired
-                                        ]}
+                                    <AnimatedButton
+                                        title={isTimerActive && timer > 0
+                                            ? `Aceitar Corrida (${timer}s)`
+                                            : 'Corrida Expirada'
+                                        }
                                         onPress={() => {
                                             animateAcceptButton('press');
                                             acceptRideAndStart();
                                         }}
-                                        activeOpacity={0.8}
                                         disabled={!isTimerActive || timer === 0}
-                                    >
-                                        <Text style={[
-                                            styles.mockRideAcceptText,
-                                            (!isTimerActive || timer === 0) && styles.mockRideAcceptTextExpired
-                                        ]}>
-                                            {isTimerActive && timer > 0
-                                                ? `Aceitar Corrida (${timer}s)`
-                                                : 'Corrida Expirada'
-                                            }
-                                        </Text>
-                                    </TouchableOpacity>
+                                        variant={(!isTimerActive || timer === 0) ? 'secondary' : 'primary'}
+                                    />
                                 </Animated.View>
                             )}
 
                             {/* Botão para chegar ao local de embarque (estado enRoute) */}
                             {rideStatus === 'enRoute' && (
-                                <TouchableOpacity
-                                    style={styles.mockRideAcceptButton}
+                                <AnimatedButton
+                                    title="📍 Cheguei ao Local de Embarque"
                                     onPress={arriveAtPickup}
-                                    activeOpacity={0.8}
-                                >
-                                    <Text style={styles.mockRideAcceptText}>
-                                        📍 Cheguei ao Local de Embarque
-                                    </Text>
-                                </TouchableOpacity>
+                                />
                             )}
 
                             {/* Botão para iniciar corrida (estado atPickup) */}
@@ -4290,47 +4270,32 @@ function DriverUI(props) {
                                 <>
                                     {/* Tempo estimado de chegada */}
                                     <View style={styles.estimatedArrivalContainer}>
-                                        <Ionicons name="time-outline" size={16} color={colors.leafGreen} />
-                                        <Text style={styles.estimatedArrivalText}>
+                                        <Ionicons name="time-outline" size={16} color={theme.leafGreen || '#003002'} />
+                                        <Typography variant="caption" color={theme.textSecondary} style={{ marginLeft: 6 }}>
                                             Chegada estimada: {currentRideRequest?.estimatedArrivalTime || '15 min'}
-                                        </Text>
+                                        </Typography>
                                     </View>
-                                    <TouchableOpacity
-                                        style={styles.mockRideAcceptButton}
+                                    <AnimatedButton
+                                        title="🚗 Iniciar Corrida"
                                         onPress={startRide}
-                                        activeOpacity={0.8}
-                                    >
-                                        <Text style={styles.mockRideAcceptText}>
-                                            🚗 Iniciar Corrida
-                                        </Text>
-                                    </TouchableOpacity>
+                                    />
                                 </>
                             )}
 
                             {/* Botão para chegar ao destino (estado inProgress) */}
                             {rideStatus === 'inProgress' && (
-                                <TouchableOpacity
-                                    style={styles.mockRideAcceptButton}
+                                <AnimatedButton
+                                    title="🎯 Cheguei ao Destino"
                                     onPress={arriveAtDestination}
-                                    activeOpacity={0.8}
-                                >
-                                    <Text style={styles.mockRideAcceptText}>
-                                        🎯 Cheguei ao Destino
-                                    </Text>
-                                </TouchableOpacity>
+                                />
                             )}
 
                             {/* Botão para encerrar corrida (estado completed) */}
                             {rideStatus === 'completed' && (
-                                <TouchableOpacity
-                                    style={styles.mockRideAcceptButton}
+                                <AnimatedButton
+                                    title="✅ Encerrar Corrida"
                                     onPress={endRide}
-                                    activeOpacity={0.8}
-                                >
-                                    <Text style={styles.mockRideAcceptText}>
-                                        ✅ Encerrar Corrida
-                                    </Text>
-                                </TouchableOpacity>
+                                />
                             )}
                         </View>
                     </View>
@@ -4344,13 +4309,12 @@ function DriverUI(props) {
                         styles.statusButton,
                         {
                             backgroundColor: isButtonDisabled
-                                ? '#CCCCCC'
+                                ? theme.border
                                 : (!isApproved
                                     ? '#FF9800' // Laranja para "Concluir Cadastro" e "Cadastrar Veículo"
-                                    : (isOnline ? '#4CAF50' : '#F44336') // Verde/vermelho para online/offline
+                                    : (isOnline ? (theme.leafGreen || '#4CAF50') : '#FF3B30') // Verde/vermelho para online/offline
                                 ),
-                        },
-                        isButtonDisabled && styles.statusButtonDisabled
+                        }
                     ]}
                     onPress={() => {
                         // Se estiver em corrida, encerrar corrida
@@ -4363,16 +4327,12 @@ function DriverUI(props) {
                     activeOpacity={0.8}
                     disabled={isButtonDisabled}
                 >
-                    <Icon
+                    <Ionicons
                         name={isOnline ? "checkmark-circle" : "close-circle"}
-                        type="ionicon"
-                        color={isButtonDisabled ? "#999999" : "#FFFFFF"}
+                        color="#FFFFFF"
                         size={24}
                     />
-                    <Text style={[
-                        styles.statusText,
-                        isButtonDisabled && styles.statusTextDisabled
-                    ]}>
+                    <Typography variant="body" weight="bold" color="#FFFFFF" style={{ marginLeft: 8 }}>
                         {locationDenied
                             ? 'Ative a localização'
                             : !isApproved
@@ -4381,17 +4341,17 @@ function DriverUI(props) {
                                     ? 'Encerrar corrida'
                                     : (isOnline ? 'Online' : 'Ficar Online')
                         }
-                    </Text>
+                    </Typography>
                 </TouchableOpacity>
 
                 {/* Indicador de status da viagem */}
                 {currentBooking && (
                     <View style={[styles.tripStatusIndicator, { backgroundColor: theme.card }]}>
-                        <Text style={[styles.tripStatusText, { color: theme.text }]}>
+                        <Typography variant="caption" weight="medium" color={theme.text}>
                             {tripStatus === 'accepted' ? '🚗 Dirigindo para passageiro' :
                                 tripStatus === 'started' ? '🚀 Viagem em andamento' :
                                     tripStatus === 'completed' ? '✅ Viagem finalizada' : '⏳ Aguardando'}
-                        </Text>
+                        </Typography>
                     </View>
                 )}
             </View>
@@ -4408,48 +4368,46 @@ function DriverUI(props) {
                 return (
                     <View style={[styles.rideInfoFloating, { zIndex: getButtonZIndex() }]}>
                         <View style={[styles.rideInfoCard, { backgroundColor: theme.card }]}>
-                            <Text style={[styles.rideInfoTitle, { color: theme.text }]}>
+                            <Typography variant="h2" weight="bold" color={theme.text} style={{ marginBottom: 16 }}>
                                 {tripStatus === 'accepted' ? 'Corrida Aceita' :
                                     tripStatus === 'started' ? 'Viagem em Andamento' :
                                         tripStatus === 'completed' ? 'Viagem Finalizada' : 'Corrida Atual'}
-                            </Text>
+                            </Typography>
 
                             <View style={styles.rideDetails}>
-                                <Text style={[styles.rideDetailText, { color: theme.textSecondary }]}>
+                                <Typography variant="caption" color={theme.textSecondary} style={{ marginBottom: 8 }}>
                                     📍 {currentBooking.pickup?.add || 'Local de partida'}
-                                </Text>
-                                <Text style={[styles.rideDetailText, { color: theme.textSecondary }]}>
+                                </Typography>
+                                <Typography variant="caption" color={theme.textSecondary} style={{ marginBottom: 8 }}>
                                     🎯 {currentBooking.drop?.add || 'Destino'}
-                                </Text>
-                                <Text style={[styles.rideDetailText, { color: theme.textSecondary }]}>
+                                </Typography>
+                                <Typography variant="caption" color={theme.textSecondary} style={{ marginBottom: 8 }}>
                                     💰 R$ {driverNetValue}
-                                </Text>
+                                </Typography>
                                 {driverLocation && (
-                                    <Text style={[styles.rideDetailText, { color: theme.textSecondary }]}>
+                                    <Typography variant="caption" color={theme.textSecondary}>
                                         📍 Sua localização: {driverLocation.lat.toFixed(4)}, {driverLocation.lng.toFixed(4)}
-                                    </Text>
+                                    </Typography>
                                 )}
                             </View>
 
                             <View style={styles.rideActions}>
                                 {tripStatus === 'accepted' && (
-                                    <TouchableOpacity
-                                        style={[styles.actionButton, { backgroundColor: '#2196F50' }]}
+                                    <AnimatedButton
                                         onPress={startTrip}
-                                        activeOpacity={0.8}
-                                    >
-                                        <Text style={styles.actionButtonText}>Iniciar Viagem</Text>
-                                    </TouchableOpacity>
+                                        title="Iniciar Viagem"
+                                        variant="primary"
+                                        style={{ flex: 1 }}
+                                    />
                                 )}
 
                                 {tripStatus === 'started' && (
-                                    <TouchableOpacity
-                                        style={[styles.actionButton, { backgroundColor: '#4CAF50' }]}
+                                    <AnimatedButton
                                         onPress={finishTrip}
-                                        activeOpacity={0.8}
-                                    >
-                                        <Text style={styles.actionButtonText}>Finalizar Viagem</Text>
-                                    </TouchableOpacity>
+                                        title="Finalizar Viagem"
+                                        variant="primary"
+                                        style={{ flex: 1, backgroundColor: '#4CAF50' }}
+                                    />
                                 )}
 
                                 {/* Botão de avaliação será mostrado automaticamente após finalizar viagem */}
@@ -4499,61 +4457,55 @@ function DriverUI(props) {
                 snapPoints={documentsSnapPoints}
                 backdropComponent={renderDocumentsBackdrop}
                 enablePanDownToClose={true}
+                backgroundStyle={{ backgroundColor: theme.card }}
+                handleIndicatorStyle={{ backgroundColor: theme.border }}
             >
                 <BottomSheetView>
                     <View style={styles.documentsContent}>
-                        <Text style={styles.documentsTitle}>
+                        <Typography variant="h1" color={theme.text} style={{ marginBottom: 20 }}>
                             Concluir Cadastro
-                        </Text>
+                        </Typography>
 
                         {/* CNH */}
-                        <View style={styles.documentItem}>
-                            <Text style={styles.documentLabel}>
+                        <View style={[styles.documentItem, { backgroundColor: isDarkMode ? 'rgba(255,255,255,0.05)' : '#F9F9F9', borderColor: theme.border, borderWidth: 1, borderRadius: 12, padding: 16, marginBottom: 15 }]}>
+                            <Typography variant="body" weight="bold" color={theme.text} style={{ marginBottom: 4 }}>
                                 Enviar CNH
-                            </Text>
-                            <Text style={styles.documentSubtext}>
+                            </Typography>
+                            <Typography variant="caption" color={theme.textSecondary} style={{ marginBottom: 12 }}>
                                 Enviar foto da CNH aberta (frente e verso) ou anexar em PDF para CNH digital
-                            </Text>
-                            <TouchableOpacity
-                                style={styles.uploadButton}
+                            </Typography>
+                            <AnimatedButton
+                                title={documentStatus.cnh === 'pending' ? 'Enviar CNH' :
+                                    documentStatus.cnh === 'uploaded' ? 'CNH Enviada' : 'Em Análise'}
                                 onPress={() => uploadDocument('cnh')}
-                                activeOpacity={0.8}
-                            >
-                                <Text style={styles.uploadButtonText}>
-                                    {documentStatus.cnh === 'pending' ? 'Enviar CNH' :
-                                        documentStatus.cnh === 'uploaded' ? 'CNH Enviada' : 'Em Análise'}
-                                </Text>
-                            </TouchableOpacity>
+                                size="small"
+                                variant={documentStatus.cnh === 'pending' ? 'primary' : 'secondary'}
+                            />
                         </View>
 
                         {/* Comprovante de Residência */}
-                        <View style={styles.documentItem}>
-                            <Text style={styles.documentLabel}>
+                        <View style={[styles.documentItem, { backgroundColor: isDarkMode ? 'rgba(255,255,255,0.05)' : '#F9F9F9', borderColor: theme.border, borderWidth: 1, borderRadius: 12, padding: 16, marginBottom: 20 }]}>
+                            <Typography variant="body" weight="bold" color={theme.text} style={{ marginBottom: 4 }}>
                                 Enviar Comprovante de Residência
-                            </Text>
-                            <Text style={styles.documentSubtext}>
+                            </Typography>
+                            <Typography variant="caption" color={theme.textSecondary} style={{ marginBottom: 12 }}>
                                 Conta de água, luz, telefone, fatura de cartão ou outro comprovante em seu nome
-                            </Text>
-                            <TouchableOpacity
-                                style={styles.uploadButton}
+                            </Typography>
+                            <AnimatedButton
+                                title={documentStatus.residence === 'pending' ? 'Enviar Comprovante' :
+                                    documentStatus.residence === 'uploaded' ? 'Comprovante Enviado' : 'Em Análise'}
                                 onPress={() => uploadDocument('residence')}
-                                activeOpacity={0.8}
-                            >
-                                <Text style={styles.uploadButtonText}>
-                                    {documentStatus.residence === 'pending' ? 'Enviar Comprovante' :
-                                        documentStatus.residence === 'uploaded' ? 'Comprovante Enviado' : 'Em Análise'}
-                                </Text>
-                            </TouchableOpacity>
+                                size="small"
+                                variant={documentStatus.residence === 'pending' ? 'primary' : 'secondary'}
+                            />
                         </View>
 
                         {/* Botão fechar */}
-                        <TouchableOpacity
-                            style={styles.closeButton}
+                        <AnimatedButton
+                            title="Fechar"
                             onPress={closeDocumentsBottomSheet}
-                            activeOpacity={0.8}
-                        >
-                            <Text style={styles.closeButtonText}>Fechar</Text>
-                        </TouchableOpacity>
+                            variant="secondary"
+                        />
                     </View>
                 </BottomSheetView>
             </BottomSheet>
@@ -4565,35 +4517,32 @@ function DriverUI(props) {
                 snapPoints={vehicleSnapPoints}
                 backdropComponent={renderVehicleBackdrop}
                 enablePanDownToClose={true}
+                backgroundStyle={{ backgroundColor: theme.card }}
+                handleIndicatorStyle={{ backgroundColor: theme.border }}
             >
                 <BottomSheetView>
                     <View style={styles.vehicleContent}>
-                        <Text style={styles.vehicleTitle}>
+                        <Typography variant="h1" color={theme.text} style={{ marginBottom: 12 }}>
                             Cadastrar Veículo
-                        </Text>
+                        </Typography>
 
-                        <Text style={styles.vehicleSubtext}>
+                        <Typography variant="body" color={theme.textSecondary} style={{ marginBottom: 20 }}>
                             Envie o CRLV do seu veículo em PDF ou foto da galeria
-                        </Text>
+                        </Typography>
 
-                        <TouchableOpacity
-                            style={styles.uploadButton}
+                        <AnimatedButton
+                            title={documentStatus.vehicle === 'pending' ? 'Enviar CRLV' :
+                                documentStatus.vehicle === 'uploaded' ? 'CRLV Enviado' : 'Em Análise'}
                             onPress={uploadVehicleDocument}
-                            activeOpacity={0.8}
-                        >
-                            <Text style={styles.uploadButtonText}>
-                                {documentStatus.vehicle === 'pending' ? 'Enviar CRLV' :
-                                    documentStatus.vehicle === 'uploaded' ? 'CRLV Enviado' : 'Em Análise'}
-                            </Text>
-                        </TouchableOpacity>
+                            style={{ marginBottom: 15 }}
+                            variant={documentStatus.vehicle === 'pending' ? 'primary' : 'secondary'}
+                        />
 
-                        <TouchableOpacity
-                            style={styles.closeButton}
+                        <AnimatedButton
+                            title="Fechar"
                             onPress={closeVehicleBottomSheet}
-                            activeOpacity={0.8}
-                        >
-                            <Text style={styles.closeButtonText}>Fechar</Text>
-                        </TouchableOpacity>
+                            variant="secondary"
+                        />
                     </View>
                 </BottomSheetView>
             </BottomSheet>
@@ -4608,30 +4557,32 @@ function DriverUI(props) {
                 snapPoints={rideHistorySnapPoints}
                 backdropComponent={renderRideHistoryBackdrop}
                 enablePanDownToClose={true}
+                backgroundStyle={{ backgroundColor: theme.card }}
+                handleIndicatorStyle={{ backgroundColor: theme.border }}
             >
                 <BottomSheetView>
                     <View style={styles.rideHistoryContent}>
-                        <Text style={[styles.rideHistoryTitle, { color: theme.text }]}>
+                        <Typography variant="h1" color={theme.text} style={{ marginBottom: 20 }}>
                             Histórico de Corridas
-                        </Text>
+                        </Typography>
 
                         <ScrollView style={styles.rideHistoryList}>
                             {isLoadingRideHistory ? (
                                 <View style={styles.rideHistoryLoadingContainer}>
-                                    <ActivityIndicator size="large" color={colors.leafGreen} />
-                                    <Text style={[styles.rideHistoryLoadingText, { color: theme.textSecondary }]}>
+                                    <ActivityIndicator size="large" color={theme.leafGreen || '#41D274'} />
+                                    <Typography variant="body" color={theme.textSecondary} style={{ marginTop: 12 }}>
                                         Carregando histórico...
-                                    </Text>
+                                    </Typography>
                                 </View>
                             ) : rideHistory.length === 0 ? (
                                 <View style={styles.rideHistoryEmptyContainer}>
-                                    <Ionicons name="time-outline" size={48} color={theme.textSecondary} />
-                                    <Text style={[styles.rideHistoryEmptyText, { color: theme.textSecondary }]}>
+                                    <Ionicons name="time-outline" size={48} color={theme.border} />
+                                    <Typography variant="body" color={theme.textSecondary} align="center" style={{ marginTop: 16 }}>
                                         Nenhuma corrida encontrada
-                                    </Text>
-                                    <Text style={[styles.rideHistoryEmptySubtext, { color: theme.textSecondary }]}>
+                                    </Typography>
+                                    <Typography variant="caption" color={theme.textSecondary} align="center">
                                         Suas corridas concluídas aparecerão aqui
-                                    </Text>
+                                    </Typography>
                                 </View>
                             ) : (
                                 rideHistory.map((ride) => {
@@ -4664,33 +4615,35 @@ function DriverUI(props) {
                                     const fareText = `R$ ${parseFloat(ride.fare || 0).toFixed(2).replace('.', ',')}`;
 
                                     return (
-                                        <View key={ride.id || ride.bookingId} style={[styles.rideHistoryItem, { backgroundColor: theme.card }]}>
+                                        <View key={ride.id || ride.bookingId} style={[styles.rideHistoryItem, { backgroundColor: isDarkMode ? 'rgba(255,255,255,0.05)' : '#F9F9F9', borderColor: theme.border, borderWidth: 1 }]}>
                                             <View style={styles.rideHistoryItemHeader}>
-                                                <Text style={[styles.rideHistoryItemDate, { color: theme.text }]}>
+                                                <Typography variant="caption" weight="medium" color={theme.text}>
                                                     {dateText}
-                                                </Text>
-                                                <Text style={[styles.rideHistoryItemStatus, { color: colors.leafGreen }]}>
-                                                    Concluída
-                                                </Text>
+                                                </Typography>
+                                                <Typography variant="label" weight="bold" color={theme.leafGreen || '#41D274'}>
+                                                    CONCLUÍDA
+                                                </Typography>
                                             </View>
-                                            <Text
-                                                style={[styles.rideHistoryItemRoute, { color: theme.textSecondary }]}
+                                            <Typography
+                                                variant="body"
+                                                color={theme.text}
                                                 numberOfLines={2}
+                                                style={{ marginBottom: 8 }}
                                             >
                                                 {routeText}
-                                            </Text>
+                                            </Typography>
                                             {ride.distance && (
-                                                <Text style={[styles.rideHistoryItemDistance, { color: theme.textSecondary }]}>
+                                                <Typography variant="caption" color={theme.textSecondary} style={{ marginBottom: 12 }}>
                                                     📏 {ride.distance.toFixed(1)} km
                                                     {ride.duration && ` • ⏱️ ${Math.round(ride.duration)} min`}
-                                                </Text>
+                                                </Typography>
                                             )}
                                             <View style={styles.rideHistoryItemFooter}>
-                                                <Text style={[styles.rideHistoryItemFare, { color: theme.text }]}>
+                                                <Typography variant="h2" color={theme.text}>
                                                     {fareText}
-                                                </Text>
+                                                </Typography>
                                                 <TouchableOpacity
-                                                    style={[styles.rideHistoryReceiptButton, { backgroundColor: colors.leafGreen }]}
+                                                    style={[styles.rideHistoryReceiptButton, { backgroundColor: theme.leafGreen || '#41D274' }]}
                                                     onPress={() => {
                                                         if (navigation && navigation.navigate) {
                                                             navigation.navigate('Receipt', {
@@ -4705,10 +4658,10 @@ function DriverUI(props) {
                                                     }}
                                                     activeOpacity={0.7}
                                                 >
-                                                    <Ionicons name="receipt-outline" size={16} color={colors.white} />
-                                                    <Text style={styles.rideHistoryReceiptButtonText}>
+                                                    <Ionicons name="receipt-outline" size={16} color="#FFFFFF" />
+                                                    <Typography variant="caption" weight="bold" color="#FFFFFF" style={{ marginLeft: 6 }}>
                                                         Recibo
-                                                    </Text>
+                                                    </Typography>
                                                 </TouchableOpacity>
                                             </View>
                                         </View>
@@ -4717,13 +4670,11 @@ function DriverUI(props) {
                             )}
                         </ScrollView>
 
-                        <TouchableOpacity
-                            style={[styles.closeButton, { backgroundColor: theme.card }]}
+                        <AnimatedButton
+                            title="Fechar"
                             onPress={closeRideHistoryBottomSheet}
-                            activeOpacity={0.8}
-                        >
-                            <Text style={[styles.closeButtonText, { color: theme.text }]}>Fechar</Text>
-                        </TouchableOpacity>
+                            variant="secondary"
+                        />
                     </View>
                 </BottomSheetView>
             </BottomSheet>
@@ -4732,7 +4683,7 @@ function DriverUI(props) {
             {showSystemNotificationMock && (
                 <View style={styles.systemNotificationMockContainer}>
                     <TouchableOpacity
-                        style={styles.systemNotificationMock}
+                        style={[styles.systemNotificationMock, { backgroundColor: isDarkMode ? '#1A1A1A' : '#FFFFFF', borderColor: theme.border, borderWidth: 1 }]}
                         activeOpacity={0.9}
                         onPress={() => setIsNotificationExpanded(!isNotificationExpanded)}
                     >
@@ -4742,41 +4693,41 @@ function DriverUI(props) {
                                 <View style={styles.systemNotificationHeaderText}>
                                     {!mockTripStarted ? (
                                         <>
-                                            <Text style={styles.systemNotificationTitle}>
+                                            <Typography variant="body" weight="bold" color={theme.text}>
                                                 {mockArrivedAtPickup ? 'Aguardando embarque' : 'Corrida aceita!'}
-                                            </Text>
+                                            </Typography>
                                             {!mockArrivedAtPickup ? (
                                                 <>
-                                                    <Text style={styles.systemNotificationSubtitle}>
+                                                    <Typography variant="caption" color={theme.textSecondary}>
                                                         Vá até o local de embarque em:
-                                                    </Text>
-                                                    <Text style={styles.systemNotificationBody} numberOfLines={2}>
+                                                    </Typography>
+                                                    <Typography variant="body" color={theme.text} numberOfLines={2}>
                                                         Praça Mauá, Rio de Janeiro
-                                                    </Text>
+                                                    </Typography>
                                                 </>
                                             ) : (
-                                                <Text style={styles.systemNotificationBody}>
+                                                <Typography variant="body" weight="bold" color={theme.leafGreen || '#41D274'}>
                                                     Timer: {Math.floor(pickupTimer / 60)}:{(pickupTimer % 60).toString().padStart(2, '0')}
-                                                </Text>
+                                                </Typography>
                                             )}
                                         </>
                                     ) : mockArrivedAtDestination ? (
                                         <>
-                                            <Text style={styles.systemNotificationTitle}>
+                                            <Typography variant="body" weight="bold" color={theme.text}>
                                                 Você chegou ao destino
-                                            </Text>
-                                            <Text style={styles.systemNotificationBody}>
+                                            </Typography>
+                                            <Typography variant="caption" color={theme.textSecondary}>
                                                 Abra o aplicativo para encerrar a corrida
-                                            </Text>
+                                            </Typography>
                                         </>
                                     ) : (
                                         <>
-                                            <Text style={styles.systemNotificationTitle}>
+                                            <Typography variant="body" weight="bold" color={theme.text}>
                                                 A Caminho de Copacabana, Rio de Janeiro
-                                            </Text>
-                                            <Text style={styles.systemNotificationBody}>
+                                            </Typography>
+                                            <Typography variant="caption" color={theme.textSecondary}>
                                                 Chegada estimada {mockEstimatedArrival || '15:30'}
-                                            </Text>
+                                            </Typography>
                                         </>
                                     )}
                                 </View>
@@ -4785,7 +4736,7 @@ function DriverUI(props) {
                                 onPress={() => setShowSystemNotificationMock(false)}
                                 style={styles.systemNotificationClose}
                             >
-                                <Ionicons name="close" size={18} color="#666" />
+                                <Ionicons name="close" size={18} color={theme.textSecondary} />
                             </TouchableOpacity>
                         </View>
 
@@ -4793,7 +4744,7 @@ function DriverUI(props) {
                         {isNotificationExpanded && !mockTripStarted && (
                             <View style={styles.systemNotificationActions}>
                                 <TouchableOpacity
-                                    style={[styles.systemNotificationActionButton, styles.systemNotificationActionButtonPrimary]}
+                                    style={[styles.systemNotificationActionButton, { backgroundColor: theme.leafGreen || '#41D274' }]}
                                     onPress={() => {
                                         if (mockArrivedAtPickup) {
                                             // Iniciar corrida
@@ -4814,14 +4765,14 @@ function DriverUI(props) {
                                     activeOpacity={0.8}
                                 >
                                     <Ionicons name={mockArrivedAtPickup ? "play-circle" : "checkmark-circle"} size={18} color="#FFF" />
-                                    <Text style={styles.systemNotificationActionButtonText}>
+                                    <Typography variant="caption" weight="bold" color="#FFFFFF" style={{ marginLeft: 6 }}>
                                         {mockArrivedAtPickup ? 'Iniciar corrida' : 'Cheguei ao local'}
-                                    </Text>
+                                    </Typography>
                                 </TouchableOpacity>
 
                                 {!mockArrivedAtPickup && (
                                     <TouchableOpacity
-                                        style={[styles.systemNotificationActionButton, styles.systemNotificationActionButtonSecondary]}
+                                        style={[styles.systemNotificationActionButton, { backgroundColor: '#FF3B30' }]}
                                         onPress={() => {
                                             Logger.log('🔔 [MOCK] Botão "Cancelar" clicado');
                                             handleNotificationAction('cancel_ride', mockBookingId);
@@ -4830,7 +4781,7 @@ function DriverUI(props) {
                                         activeOpacity={0.8}
                                     >
                                         <Ionicons name="close-circle" size={18} color="#FFF" />
-                                        <Text style={styles.systemNotificationActionButtonText}>Cancelar</Text>
+                                        <Typography variant="caption" weight="bold" color="#FFFFFF" style={{ marginLeft: 6 }}>Cancelar</Typography>
                                     </TouchableOpacity>
                                 )}
                             </View>
@@ -4841,13 +4792,13 @@ function DriverUI(props) {
                             <Ionicons
                                 name={isNotificationExpanded ? "chevron-up" : "chevron-down"}
                                 size={16}
-                                color="#999"
+                                color={theme.textSecondary}
                             />
                         </View>
 
                         {/* Badge de preview */}
-                        <View style={styles.systemNotificationPreviewBadge}>
-                            <Text style={styles.systemNotificationPreviewText}>PREVIEW</Text>
+                        <View style={[styles.systemNotificationPreviewBadge, { backgroundColor: theme.leafGreen || '#003002' }]}>
+                            <Typography variant="caption" weight="bold" color="#FFFFFF">PREVIEW</Typography>
                         </View>
                     </TouchableOpacity>
                 </View>
@@ -4872,6 +4823,7 @@ function DriverUI(props) {
                 </TouchableOpacity>
             )} */}
 
+
             {/* Modal de Escolha de Navegação */}
             <Modal
                 visible={navigationModalVisible}
@@ -4880,22 +4832,22 @@ function DriverUI(props) {
                 onRequestClose={() => setNavigationModalVisible(false)}
             >
                 <View style={styles.navigationModalOverlay}>
-                    <View style={styles.navigationModalContent}>
+                    <View style={[styles.navigationModalContent, { backgroundColor: theme.card }]}>
                         {/* Header do Modal */}
                         <View style={styles.navigationModalHeader}>
                             <View style={styles.navigationModalTitleContainer}>
-                                <Text style={styles.navigationModalTitle}>
+                                <Typography variant="h2" color={theme.text}>
                                     {navigationType === 'pickup'
                                         ? `Navegar para Embarque de ${navigationPassengerName || 'Passageiro'}`
                                         : `Navegar para ${navigationPassengerName || 'Destino'}`
                                     }
-                                </Text>
+                                </Typography>
                             </View>
                             <TouchableOpacity
                                 onPress={() => setNavigationModalVisible(false)}
                                 style={styles.navigationModalCloseButton}
                             >
-                                <Ionicons name="close" size={24} color={colors.black} />
+                                <Ionicons name="close" size={24} color={theme.text} />
                             </TouchableOpacity>
                         </View>
 
@@ -4904,7 +4856,7 @@ function DriverUI(props) {
                             <View style={styles.navigationOptionsContainer}>
                                 {/* Google Maps */}
                                 <TouchableOpacity
-                                    style={styles.navigationOption}
+                                    style={[styles.navigationOption, { borderBottomColor: theme.border }]}
                                     onPress={async () => {
                                         if (navigationDestination && navigationDestination.latitude && navigationDestination.longitude) {
                                             setNavigationModalVisible(false);
@@ -4923,14 +4875,15 @@ function DriverUI(props) {
                                     }}
                                     activeOpacity={0.7}
                                 >
-                                    <Text style={styles.navigationOptionText}>
+                                    <Ionicons name="navigate-circle" size={24} color="#4285F4" />
+                                    <Typography variant="body" weight="medium" color={theme.text} style={{ marginLeft: 12 }}>
                                         Abrir com Google Maps
-                                    </Text>
+                                    </Typography>
                                 </TouchableOpacity>
 
                                 {/* Waze */}
                                 <TouchableOpacity
-                                    style={styles.navigationOption}
+                                    style={[styles.navigationOption, { borderBottomColor: theme.border }]}
                                     onPress={async () => {
                                         if (navigationDestination && navigationDestination.latitude && navigationDestination.longitude) {
                                             setNavigationModalVisible(false);
@@ -4949,23 +4902,21 @@ function DriverUI(props) {
                                     }}
                                     activeOpacity={0.7}
                                 >
-                                    <Text style={styles.navigationOptionText}>
+                                    <Ionicons name="navigate-circle" size={24} color="#33CCFF" />
+                                    <Typography variant="body" weight="medium" color={theme.text} style={{ marginLeft: 12 }}>
                                         Abrir com Waze
-                                    </Text>
+                                    </Typography>
                                 </TouchableOpacity>
                             </View>
                         )}
 
                         {/* Botão Cancelar */}
-                        <TouchableOpacity
-                            style={styles.navigationCancelButton}
+                        <AnimatedButton
+                            title="Cancelar"
                             onPress={() => setNavigationModalVisible(false)}
-                            activeOpacity={0.7}
-                        >
-                            <Text style={styles.navigationCancelButtonText}>
-                                Cancelar
-                            </Text>
-                        </TouchableOpacity>
+                            variant="secondary"
+                            style={{ marginTop: 20 }}
+                        />
                     </View>
                 </View>
             </Modal>
@@ -5352,7 +5303,7 @@ const styles = StyleSheet.create({
 
 
 
-    // Mock do Card de Nova Corrida - Estilo Leaf
+    // Mock do Card de Nova Corrida - Estila Leaf
     mockRideCardFloating: {
         position: 'absolute',
         bottom: 140, // Posicionado acima do botão de status
@@ -5502,7 +5453,7 @@ const styles = StyleSheet.create({
         color: '#999999',
     },
 
-    // Mock do Card de Nova Corrida - Estilo Leaf
+    // Mock do Card de Nova Corrida - Estila Leaf
     mockRideDestinationButton: {
         backgroundColor: colors.leafGreen,
         paddingVertical: 18, // Mesmo padding do botão "Concluir cadastro"

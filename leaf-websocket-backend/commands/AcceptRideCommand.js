@@ -65,76 +65,69 @@ class AcceptRideCommand extends Command {
 
                 const bookingKey = `booking:${this.bookingId}`;
 
-                // ✅ Risco 1 Resolvido: Watch no BookingKey para prevenir TOCTOU Race Condition
-                // Se qualquer outro motorista/processo alterar essa chave, o EXEC falhará.
-                await redis.watch(bookingKey);
-
-                // Buscar dados da corrida
-                // Buscar dados da corrida
-                const bookingData = await redis.hgetall(bookingKey);
-
-                if (!bookingData || Object.keys(bookingData).length === 0) {
-                    await redis.unwatch(); // Liberar watch antes de sair
-                    metrics.recordCommand('AcceptRide', (Date.now() - startTime) / 1000, false);
-                    return CommandResult.failure('Corrida não encontrada')
-                }
-
-                // Verificar estado atual (usando os dados em memória puxados via HGETALL atrelados ao WATCH)
-                const currentState = bookingData.state;
-
-                // Validar transição de estado
-                if (!RideStateManager.isValidTransition(currentState, RideStateManager.STATES.ACCEPTED)) {
-                    await redis.unwatch(); // Liberar watch
-                    metrics.recordCommand('AcceptRide', (Date.now() - startTime) / 1000, false);
-                    return CommandResult.failure(
-                        `Corrida não pode ser aceita no estado atual: ${currentState}`
-                    )
-                }
-
-                // Verificar se motorista já está em outra corrida
+                // Verificar se motorista já está em outra corrida (Lock de driver separado)
                 const isLocked = await driverLockManager.isDriverLocked(this.driverId);
                 if (isLocked.isLocked && isLocked.bookingId !== this.bookingId) {
-                    await redis.unwatch(); // Liberar watch
                     metrics.recordCommand('AcceptRide', (Date.now() - startTime) / 1000, false);
                     return CommandResult.failure('Motorista já está em outra corrida')
                 }
 
-                // Parsear dados da corrida
-                const customerId = bookingData.customerId;
-                const pickupLocation = bookingData.pickupLocation ?
-                    JSON.parse(bookingData.pickupLocation) : null;
-
-                // Iniciar transação no Redis para alteração Atômica
-                const multi = redis.multi();
-
-                // Preparar dados de estado
                 const newState = RideStateManager.STATES.ACCEPTED;
-                const updatedStateData = {
-                    state: newState,
-                    updatedAt: new Date().toISOString(),
-                    driverId: this.driverId,
-                    acceptedAt: new Date().toISOString()
-                };
+                const updatedAt = new Date().toISOString();
 
-                // Atualizar banco via bloco atômico MULTI (Semelhante ao que o RideStateManager.updateBookingState faria, mas isolado no bloco EXEC)
-                multi.hset(bookingKey, {
-                    ...updatedStateData,
-                    status: 'ACCEPTED' // Mantido para retrocompatibilidade
-                });
+                // LUA Script Atômico para garantir lock transacional absoluto do Booking
+                const luaScript = `
+                    local bookingKey = KEYS[1]
+                    local driverId = ARGV[1]
+                    local newState = ARGV[2]
+                    local updatedAt = ARGV[3]
 
-                // Executar bloco (Gatilho da Race Condition)
-                const execResult = await multi.exec();
+                    if redis.call('EXISTS', bookingKey) == 0 then
+                        return 'ERR_NOT_FOUND'
+                    end
 
-                if (!execResult) {
-                    // Se null no ioredis, significa que a transação falhou devido a uma modificação feita por outra requisição (o Watch desarmou)
+                    local currentState = redis.call('HGET', bookingKey, 'state')
+                    local currentStatus = redis.call('HGET', bookingKey, 'status')
+                    
+                    if currentState ~= 'PENDING' and currentState ~= 'REQUESTED' and currentState ~= 'SEARCHING' and currentStatus ~= 'pending' then
+                        return 'ERR_INVALID_STATE_' .. (currentState or 'null')
+                    end
+
+                    -- Realiza o update atômico
+                    redis.call('HMSET', bookingKey, 
+                        'state', newState, 
+                        'status', 'ACCEPTED', 
+                        'driverId', driverId, 
+                        'updatedAt', updatedAt, 
+                        'acceptedAt', updatedAt
+                    )
+
+                    -- Retorna dados complementares concatenados (customerId|||pickupLocation)
+                    local customerId = redis.call('HGET', bookingKey, 'customerId')
+                    local pickupLoc = redis.call('HGET', bookingKey, 'pickupLocation')
+                    return (customerId or '') .. '|||' .. (pickupLoc or '')
+                `;
+
+                // Executar o LUA no redis
+                const redisResult = await redis.eval(luaScript, 1, bookingKey, this.driverId, newState, updatedAt);
+
+                if (typeof redisResult === 'string' && redisResult.startsWith('ERR_')) {
                     metrics.recordCommand('AcceptRide', (Date.now() - startTime) / 1000, false);
-                    return CommandResult.failure('A corrida já foi aceita por outro motorista');
+                    if (redisResult === 'ERR_NOT_FOUND') {
+                        return CommandResult.failure('Corrida não encontrada');
+                    }
+                    return CommandResult.failure(`A corrida já foi aceita por outro motorista ou não está mais disponível.`);
                 }
 
-                // Registrar evento no histórico de estado manualmente, dado que encapsulamos o update no bloco
+                // Parseando retorno atômico do LUA
+                const [customerId, rawPickupLocation] = redisResult.split('|||');
+                const pickupLocation = rawPickupLocation ? JSON.parse(rawPickupLocation) : null;
+                const currentState = 'PENDING'; // Historicamente veio de Pending
+
+                // Registrar evento no histórico de estado manualmente
                 await eventSourcing.recordEvent(require('../services/event-sourcing').EVENT_TYPES.STATE_CHANGED, {
                     bookingId: this.bookingId,
-                    fromState: currentState || 'UNKNOWN',
+                    fromState: currentState,
                     toState: newState,
                     driverId: this.driverId
                 });

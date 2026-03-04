@@ -25,6 +25,7 @@ const eventSourcing = require('../services/event-sourcing');
 const traceContext = require('../utils/trace-context');
 const { metrics } = require('../utils/prometheus-metrics');
 const { validateAndEnsureTraceIdInCommand } = require('../utils/trace-validator');
+const { isWithinOperatingArea } = require('../utils/geofence');
 
 class RequestRideCommand extends Command {
     constructor(data) {
@@ -52,6 +53,13 @@ class RequestRideCommand extends Command {
         if (this.estimatedFare < 0) {
             throw new Error('RequestRideCommand: estimatedFare deve ser >= 0');
         }
+
+        // Validação de Geofencing (Área de Operação via Polígono)
+        const geofenceCheck = isWithinOperatingArea(this.pickupLocation.lat, this.pickupLocation.lng);
+        if (!geofenceCheck.isAllowed) {
+            throw new Error(`A Leaf ainda não opera nesta região. Operação negada: ${geofenceCheck.reason || 'Fora da área delimitada pelo mapa.'}`);
+        }
+
         return true;
     }
 
@@ -64,7 +72,7 @@ class RequestRideCommand extends Command {
                     customerId: this.customerId,
                     command: 'RequestRideCommand'
                 });
-                
+
                 // Validar
                 this.validate();
 

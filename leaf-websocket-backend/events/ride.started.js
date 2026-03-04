@@ -19,7 +19,7 @@ class RideStartedEvent extends CanonicalEvent {
         
         const eventData = {
             ...data,
-            traceId: validatedTraceId(data, EVENT_TYPES.RIDE_STARTED),
+            traceId: validatedTraceId,
             correlationId: data.correlationId || data.bookingId // ✅ Adicionar correlationId
         };
         

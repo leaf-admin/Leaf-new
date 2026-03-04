@@ -20,20 +20,20 @@ export default function WelcomeScreen({ navigation }) {
   const [currentText, setCurrentText] = useState(translations[0].welcome);
   const [currentBtn, setCurrentBtn] = useState(translations[0].start);
   const [currentIndex, setCurrentIndex] = useState(0);
-  
+
   // Animações separadas para texto e botão
   const welcomeFadeAnim = useRef(new Animated.Value(1)).current;
   const buttonFadeAnim = useRef(new Animated.Value(1)).current;
-  
+
   // Animação de entrada inicial
   const fadeInAnim = useRef(new Animated.Value(0)).current;
-  
+
   const [buttonDisabled, setButtonDisabled] = useState(false);
   const buttonAnim = useRef(new Animated.Value(1)).current;
 
   useEffect(() => {
     Logger.log("WelcomeScreen - Componente montado");
-    
+
     // Animação de entrada inicial
     Animated.timing(fadeInAnim, {
       toValue: 1,
@@ -65,7 +65,7 @@ export default function WelcomeScreen({ navigation }) {
         setCurrentIndex(idx);
         setCurrentText(translations[idx].welcome);
         setCurrentBtn(translations[idx].start);
-        
+
         // Fade in simultâneo para texto e botão
         Animated.parallel([
           Animated.timing(welcomeFadeAnim, {
@@ -81,7 +81,7 @@ export default function WelcomeScreen({ navigation }) {
         ]).start();
       });
     }, 4000); // 4 segundos para cada mudança
-    
+
     return () => clearInterval(interval);
   }, []);
 
@@ -113,7 +113,7 @@ export default function WelcomeScreen({ navigation }) {
         <Animated.Text style={[
           styles.welcomeText,
           { opacity: welcomeFadeAnim }
-        ]}> 
+        ]}>
           {currentText}
         </Animated.Text>
         <Image
@@ -175,7 +175,7 @@ const styles = StyleSheet.create({
     width: 215,
     alignItems: 'center',
     position: 'absolute',
-    bottom: 30,
+    bottom: 50, // Elevado de 30 para 50 para evitar sobreposição com barra de navegação/home indicator
     alignSelf: 'center',
   },
   startButtonText: {
