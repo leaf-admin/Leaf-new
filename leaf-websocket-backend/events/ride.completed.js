@@ -14,17 +14,17 @@ class RideCompletedEvent extends CanonicalEvent {
         const { trace } = require('@opentelemetry/api');
         const activeSpan = trace.getActiveSpan();
         const spanContext = activeSpan?.spanContext();
-        
+
         const validatedTraceId = validateAndEnsureTraceIdInEvent(data, EVENT_TYPES.RIDE_COMPLETED);
-        
+
         const eventData = {
             ...data,
-            traceId: validatedTraceId(data, EVENT_TYPES.RIDE_COMPLETED),
+            traceId: validatedTraceId,
             correlationId: data.correlationId || data.bookingId // ✅ Adicionar correlationId
         };
-        
+
         super(EVENT_TYPES.RIDE_COMPLETED, eventData);
-        
+
         // ✅ CRÍTICO: Criar metadata com correlationId e traceId para serialização
         if (!this.data.metadata) {
             this.data.metadata = {};
@@ -32,13 +32,13 @@ class RideCompletedEvent extends CanonicalEvent {
         this.data.metadata.correlationId = eventData.correlationId;
         this.data.metadata.traceId = spanContext?.traceId || validatedTraceId;
         this.data.metadata.spanId = spanContext?.spanId;
-        
+
         this.validateRideCompleted();
     }
 
     validateRideCompleted() {
-        const { bookingId, driverId, customerId, endLocation, finalFare, distance, duration } = this.data;
-        
+        const { bookingId, driverId, customerId, endLocation, finalFare, tollFee, distance, duration } = this.data;
+
         if (!bookingId) {
             throw new Error('RideCompletedEvent: bookingId é obrigatório');
         }

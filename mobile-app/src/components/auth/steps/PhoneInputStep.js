@@ -1,16 +1,21 @@
 import React, { useState } from 'react';
 import { View, Text, TextInput, TouchableOpacity, Alert, StyleSheet } from 'react-native';
+import { Typography } from '../../design-system/Typography';
+import { AnimatedButton } from '../../design-system/AnimatedButton';
+import { AnimatedInput } from '../../design-system/AnimatedInput';
 import { auth } from '../../../firebase';
 import { isReviewAccount, getReviewAccountInfo } from '../../../config/reviewAccounts';
 import { saveStepData } from '../../../utils/secureOnboardingStorage';
 import Logger from '../../../utils/Logger';
 import UserAuthService from '../../../services/UserAuthService';
-import { Constants } from 'expo-constants';
+import Constants from 'expo-constants';
 
 const colors = {
-    primary: '#003002',
+    primary: '#1A330E',
     white: '#FFFFFF',
-    lightGrey: '#F5F5F5'
+    lightGrey: '#F9F9F9',
+    text: { primary: '#1C1C1E', secondary: '#8E8E93' },
+    border: '#E5E5EA'
 };
 
 const PhoneInputStep = ({ onSwitchToRegister, onVerificationSent, onUserExists }) => {
@@ -142,42 +147,47 @@ const PhoneInputStep = ({ onSwitchToRegister, onVerificationSent, onUserExists }
 
     return (
         <View style={styles.container}>
-            <Text style={styles.title}>Bem-vindo ao Leaf</Text>
-            <Text style={styles.subtitle}>Digite seu número de telefone para continuar</Text>
+            <View style={styles.header}>
+                <Typography variant="h1" align="center" style={styles.title}>Bem-vindo(a) à Leaf</Typography>
+                <Typography variant="body" color={colors.text.secondary} align="center" style={styles.subtitle}>
+                    Digite seu número de telefone para continuar
+                </Typography>
+            </View>
 
             <View style={styles.inputContainer}>
                 <TouchableOpacity style={styles.countrySelector}>
-                    <Text style={styles.countryCode}>+55</Text>
+                    <Typography variant="h3" color={colors.primary} style={styles.countryCode}>+55</Typography>
                 </TouchableOpacity>
 
-                <TextInput
-                    style={styles.input}
-                    placeholder="Número de telefone"
+                <AnimatedInput
+                    placeholder="Número"
                     keyboardType="phone-pad"
                     value={phoneNumber}
                     onChangeText={setPhoneNumber}
                     maxLength={11}
                     editable={!loading && !checking}
+                    containerStyle={{ flex: 1, marginBottom: 0 }}
+                    style={styles.input}
                 />
             </View>
 
-            <TouchableOpacity
-                style={[styles.continueButton, (loading || checking) && styles.continueButtonDisabled]}
-                onPress={handleContinue}
-                disabled={loading || checking}
-            >
-                <Text style={[styles.continueButtonText, (loading || checking) && styles.continueButtonTextDisabled]}>
-                    {loading ? 'Enviando...' : checking ? 'Verificando...' : 'Continuar'}
-                </Text>
-            </TouchableOpacity>
+            <View style={styles.footer}>
+                <AnimatedButton
+                    title="Continuar"
+                    onPress={handleContinue}
+                    loading={loading || checking}
+                    disabled={phoneNumber.length < 10}
+                    style={styles.continueButton}
+                />
 
-            <TouchableOpacity
-                style={styles.registerButton}
-                onPress={onSwitchToRegister}
-                disabled={loading || checking}
-            >
-                <Text style={styles.registerText}>Não tem conta? Cadastre-se</Text>
-            </TouchableOpacity>
+                <AnimatedButton
+                    title="Não tem conta? Cadastre-se"
+                    variant="ghost"
+                    onPress={onSwitchToRegister}
+                    disabled={loading || checking}
+                    style={styles.registerButton}
+                />
+            </View>
         </View>
     );
 };
@@ -185,73 +195,51 @@ const PhoneInputStep = ({ onSwitchToRegister, onVerificationSent, onUserExists }
 const styles = StyleSheet.create({
     container: {
         flex: 1,
-        padding: 20,
-        justifyContent: 'center',
+        padding: 24,
+        paddingBottom: 40,
         backgroundColor: colors.white,
+        justifyContent: 'space-between',
+    },
+    header: {
+        marginTop: 24,
     },
     title: {
-        fontSize: 24,
-        fontWeight: 'bold',
-        textAlign: 'center',
-        marginBottom: 10,
-        color: colors.primary,
+        marginBottom: 8,
     },
     subtitle: {
-        fontSize: 16,
-        textAlign: 'center',
-        marginBottom: 30,
-        color: '#666',
+        marginBottom: 32,
     },
     inputContainer: {
         flexDirection: 'row',
-        borderWidth: 1,
-        borderColor: '#ddd',
-        borderRadius: 8,
-        marginBottom: 20,
+        alignItems: 'center',
+        marginBottom: 32,
         backgroundColor: colors.lightGrey,
+        borderRadius: 16,
+        paddingRight: 4,
     },
     countrySelector: {
-        paddingHorizontal: 15,
+        paddingHorizontal: 20,
         justifyContent: 'center',
         borderRightWidth: 1,
-        borderRightColor: '#ddd',
+        borderRightColor: colors.border,
+        height: 56,
     },
     countryCode: {
-        fontSize: 16,
-        color: colors.primary,
-        fontWeight: 'bold',
+        marginTop: 2, // optical alignment
     },
     input: {
-        flex: 1,
-        padding: 15,
-        fontSize: 16,
+        fontSize: 18,
+        letterSpacing: 1,
+    },
+    footer: {
+        marginTop: 'auto',
     },
     continueButton: {
-        backgroundColor: colors.primary,
-        padding: 15,
-        borderRadius: 8,
-        alignItems: 'center',
-        marginBottom: 15,
-    },
-    continueButtonDisabled: {
-        backgroundColor: '#ccc',
-    },
-    continueButtonText: {
-        color: colors.white,
-        fontSize: 16,
-        fontWeight: 'bold',
-    },
-    continueButtonTextDisabled: {
-        color: '#999',
+        marginBottom: 8,
     },
     registerButton: {
-        alignItems: 'center',
-        padding: 10,
-    },
-    registerText: {
-        color: colors.primary,
-        fontSize: 14,
-    },
+        marginTop: 4,
+    }
 });
 
 export default PhoneInputStep;

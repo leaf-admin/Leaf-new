@@ -9,6 +9,8 @@ import { Button } from '../components/ui/button'
 import { Badge } from '../components/ui/badge'
 import { leafAPI } from '../services/api'
 import Link from 'next/link'
+import { Check, X, FileText, Search, User } from 'lucide-react'
+import { toast } from 'sonner' // Presumindo que sonner está disponível ou usar alert
 
 export default function Drivers() {
   const [drivers, setDrivers] = useState([])
@@ -58,6 +60,43 @@ export default function Drivers() {
       clearInterval(interval)
     }
   }, [page, status, search])
+
+  const handleApproveAll = async (driverId) => {
+    if (!confirm('Deseja aprovar este motorista e todos os seus documentos?')) return
+
+    try {
+      setLoading(true)
+      await leafAPI.approveDriverApplication(driverId)
+      // Recarregar dados
+      const data = await leafAPI.getDrivers(page, limit, status, search)
+      setDrivers(data.applications || [])
+      setSummary(data.summary)
+      alert('Motorista aprovado com sucesso!')
+    } catch (err) {
+      alert('Erro ao aprovar motorista: ' + (err instanceof Error ? err.message : 'Erro desconhecido'))
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const handleReject = async (driverId) => {
+    const reason = prompt('Motivo da rejeição:')
+    if (!reason) return
+
+    try {
+      setLoading(true)
+      await leafAPI.rejectDriverApplication(driverId, [reason])
+      // Recarregar dados
+      const data = await leafAPI.getDrivers(page, limit, status, search)
+      setDrivers(data.applications || [])
+      setSummary(data.summary)
+      alert('Motorista rejeitado.')
+    } catch (err) {
+      alert('Erro ao rejeitar motorista: ' + (err instanceof Error ? err.message : 'Erro desconhecido'))
+    } finally {
+      setLoading(false)
+    }
+  }
 
   const getStatusBadge = (status) => {
     const variants = {
@@ -193,10 +232,34 @@ export default function Drivers() {
                           <div className="font-medium">{driver.score || 0}%</div>
                         </div>
                       </div>
-                      <div className="mt-4">
+                      <div className="mt-4 flex gap-2">
                         <Link href={`/driver-documents?id=${driver.id}`}>
-                          <Button variant="outline">Ver Documentos</Button>
+                          <Button variant="outline" className="gap-2">
+                            <FileText className="h-4 w-4" />
+                            Ver Documentos
+                          </Button>
                         </Link>
+
+                        {(driver.status === 'pending' || driver.status === 'in_review') && (
+                          <>
+                            <Button
+                              variant="default"
+                              className="bg-green-600 hover:bg-green-700 gap-2"
+                              onClick={() => handleApproveAll(driver.id)}
+                            >
+                              <Check className="h-4 w-4" />
+                              Aprovar Tudo
+                            </Button>
+                            <Button
+                              variant="destructive"
+                              className="gap-2"
+                              onClick={() => handleReject(driver.id)}
+                            >
+                              <X className="h-4 w-4" />
+                              Rejeitar
+                            </Button>
+                          </>
+                        )}
                       </div>
                     </CardContent>
                   </Card>

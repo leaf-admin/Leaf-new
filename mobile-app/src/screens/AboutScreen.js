@@ -154,7 +154,7 @@ export default function AboutScreen({ navigation }) {
 
                 <View style={[styles.descriptionCard, { backgroundColor: isDarkMode ? '#2a2a2a' : '#fff' }]}>
                     <Text style={[styles.descriptionText, { color: isDarkMode ? '#ccc' : colors.BLACK }]}>
-                        O Leaf é uma plataforma de mobilidade urbana que conecta passageiros 
+                        A Leaf é uma plataforma de mobilidade urbana que conecta passageiros 
                         a motoristas parceiros de forma segura, rápida e eficiente. 
                         Nossa missão é transformar a forma como as pessoas se movem pela cidade.
                     </Text>

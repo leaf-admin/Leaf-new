@@ -10,6 +10,7 @@ jest.setTimeout(30000);
 // Variáveis de ambiente de teste
 process.env.NODE_ENV = 'test';
 process.env.WS_URL = process.env.WS_URL || 'http://localhost:3001';
+process.env.GEOFENCE_RADIUS_KM = '9999'; // Permite requisições de teste em qualquer lugar do mundo
 
 // Suprimir logs durante testes (opcional)
 if (process.env.SUPPRESS_LOGS === 'true') {

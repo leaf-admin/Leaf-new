@@ -74,7 +74,7 @@ class ReceiptService {
      * Gera texto para compartilhamento
      */
     generateShareText(receipt) {
-        return `Recibo Leaf - ${receipt.title}\n\n` +
+        return `Reciba Leaf - ${receipt.title}\n\n` +
                `Origem: ${receipt.trip.pickup.address}\n` +
                `Destino: ${receipt.trip.dropoff.address}\n` +
                `Valor: ${receipt.financial.totalPaid.formatted}\n` +

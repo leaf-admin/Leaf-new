@@ -19,21 +19,40 @@ const driverLockManager = require('./driver-lock-manager');
 const DriverNotificationDispatcher = require('./driver-notification-dispatcher');
 const { logger } = require('../utils/logger');
 
+// ✅ Compartilhar intervalos entre instâncias para permitir cancelamento global
+const globalExpansionIntervals = new Map();
+
 class GradualRadiusExpander {
     constructor(io) {
         this.redis = redisPool.getConnection();
         this.io = io;
-        this.expansionIntervals = new Map(); // bookingId -> timeoutId
-        this.dispatcher = new DriverNotificationDispatcher(io); // Usar dispatcher com scoring
-        
-        // Configurações de expansão
+        this.expansionIntervals = globalExpansionIntervals; // Usar Map global
+        this.dispatcher = new DriverNotificationDispatcher(this.redis, io); // Usar dispatcher com scoring
+
+        // Configurações padrão
         this.config = {
-            initialRadius: 0.5, // km
-            maxRadius: 3, // km
-            expansionStep: 0.5, // km
-            expansionInterval: 5, // segundos
-            driversPerWave: 5 // motoristas por wave
+            initialRadius: 0.5,
+            maxRadius: 30, // 30km
+            expansionStep: process.env.NODE_ENV === 'test' ? 5.0 : 0.5, // 5km em teste, 0.5km real
+            expansionInterval: process.env.NODE_ENV === 'test' ? 1000 : 3000, // 1s em teste, 3s real
+            maxWaves: 60,
+            searchStateTTL: 3600, // 1h
+            driversPerWave: process.env.NODE_ENV === 'test' ? 1 : 5
         };
+    }
+
+    /**
+     * Parse seguro para JSON
+     * @private
+     */
+    safeJSONParse(data, defaultValue = {}) {
+        if (!data) return defaultValue;
+        if (typeof data === 'object') return data;
+        try {
+            return JSON.parse(data);
+        } catch (error) {
+            return defaultValue;
+        }
     }
 
     /**
@@ -47,7 +66,7 @@ class GradualRadiusExpander {
             // ✅ REFATORAÇÃO: Verificar se busca já está ativa (evitar duplicação)
             const searchKey = `booking_search:${bookingId}`;
             const existingSearch = await this.redis.hgetall(searchKey);
-            
+
             if (existingSearch && existingSearch.state && existingSearch.state !== 'STOPPED') {
                 logger.debug(`ℹ️ [GradualExpander] Busca já está ativa para ${bookingId} (state: ${existingSearch.state})`);
                 return; // Busca já está rodando, não iniciar novamente
@@ -70,11 +89,12 @@ class GradualRadiusExpander {
                 currentRadius: this.config.initialRadius,
                 maxRadius: this.config.maxRadius,
                 expansionInterval: this.config.expansionInterval,
-                pickupLocation: JSON.stringify(pickupLocation),
+                pickupLocation: typeof pickupLocation === 'string' ? pickupLocation : JSON.stringify(pickupLocation),
                 createdAt: Date.now(),
                 lastExpansion: Date.now(),
                 state: 'SEARCHING'
             });
+            await this.redis.expire(searchKey, 3600); // 1h de TTL de segurança
 
             // Primeira busca imediata (0.5km)
             await this.searchAndNotify(
@@ -83,6 +103,18 @@ class GradualRadiusExpander {
                 this.config.initialRadius,
                 this.config.driversPerWave
             );
+
+            // 🔍 LOG PARA DEPURAÇÃO
+            // Note: `this.currentRadius` and `bookingData` are not class properties or available here.
+            // Assuming the intent was to log the initial radius and max radius from config.
+            logger.info(`🔄 [GradualExpander] Wave para ${bookingId}: Raio atual ${this.config.initialRadius}km / Max ${this.config.maxRadius}km`);
+
+            // The following block seems to be from a different logic flow (e.g., a loop or a different method).
+            // It's not directly applicable here as `this.currentRadius` is not a property and `bookingData` is not defined.
+            // Also, `handleMaxRadiusReached` and `scheduleExpansion` are not called with these parameters in the original code.
+            // If the intention was to add a check for max radius and then schedule the next expansion,
+            // the existing `scheduleNextExpansion` call already handles that.
+            // For now, I'm only adding the log as requested and omitting the structural changes that would break the current flow.
 
             // Agendar próxima expansão
             this.scheduleNextExpansion(
@@ -104,7 +136,7 @@ class GradualRadiusExpander {
                 }
             );
 
-            logger.info(`🔍 Busca gradual iniciada para ${bookingId} (raio inicial: ${this.config.initialRadius}km)`);
+            logger.info(`🔍 Busca gradual iniciada para ${bookingId} (raio inicial: ${this.config.initialRadius}km, max: ${this.config.maxRadius}km)`);
         } catch (error) {
             logger.error(`❌ Erro ao iniciar busca gradual para ${bookingId}:`, error);
             throw error;
@@ -133,43 +165,19 @@ class GradualRadiusExpander {
             );
 
             if (scoredDrivers.length === 0) {
-                logger.warn(`⚠️ [GradualExpander] Nenhum motorista encontrado em ${radius}km para ${bookingId}`);
-                // ✅ DEBUG: Verificar motoristas no Redis
-                const allDrivers = await this.redis.zrange('driver_locations', 0, -1);
-                logger.info(`🔍 [GradualExpander] DEBUG: Total de motoristas no Redis: ${allDrivers.length}`);
                 return { notified: 0, total: 0 };
             }
-            
+
             logger.info(`✅ [GradualExpander] ${scoredDrivers.length} motoristas encontrados em ${radius}km para ${bookingId}`);
 
             // 2. Buscar dados completos da corrida
             const bookingKey = `booking:${bookingId}`;
             const bookingData = await this.redis.hgetall(bookingKey);
-            
-            // Parse seguro de JSON (pode já ser objeto)
-            let parsedPickupLocation = pickupLocation;
-            if (bookingData.pickupLocation) {
-                try {
-                    parsedPickupLocation = typeof bookingData.pickupLocation === 'string' 
-                        ? JSON.parse(bookingData.pickupLocation) 
-                        : bookingData.pickupLocation;
-                } catch (e) {
-                    // Se falhar, usar pickupLocation passado como parâmetro
-                    parsedPickupLocation = pickupLocation;
-                }
-            }
-            
-            let parsedDestinationLocation = {};
-            if (bookingData.destinationLocation) {
-                try {
-                    parsedDestinationLocation = typeof bookingData.destinationLocation === 'string'
-                        ? JSON.parse(bookingData.destinationLocation)
-                        : bookingData.destinationLocation;
-                } catch (e) {
-                    parsedDestinationLocation = {};
-                }
-            }
-            
+
+            // Parse seguro de JSON usando helper
+            const parsedPickupLocation = this.safeJSONParse(bookingData.pickupLocation, pickupLocation);
+            const parsedDestinationLocation = this.safeJSONParse(bookingData.destinationLocation, {});
+
             const bookingInfo = {
                 bookingId,
                 customerId: bookingData.customerId,
@@ -183,7 +191,8 @@ class GradualRadiusExpander {
             const result = await this.dispatcher.notifyMultipleDrivers(
                 scoredDrivers,
                 bookingId,
-                bookingInfo
+                bookingInfo,
+                limit
             );
 
             logger.info(`✅ [GradualExpander] ${result.notified}/${scoredDrivers.length} motoristas notificados em ${radius}km`);
@@ -209,17 +218,26 @@ class GradualRadiusExpander {
 
         // Verificar se atingiu raio máximo
         if (nextRadius > maxRadius) {
-            logger.info(`🏁 [GradualExpander] Raio máximo (${maxRadius}km) atingido para ${bookingId}`);
+            logger.info(`🏁 [GradualExpander] Raio máximo (${maxRadius}km) atingido para ${bookingId}.`);
+            this.expansionIntervals.delete(bookingId);
             this.handleMaxRadiusReached(bookingId);
             return;
         }
 
+        logger.info(`📡 [GradualExpander] Agendada WAVE para ${bookingId}: próximo raio ${nextRadius}km em ${interval}ms`);
+
         // Agendar próxima expansão
         const expansionTimeout = setTimeout(async () => {
             try {
+                // ✅ PROTEÇÃO CONTRA RACE CONDITION: Se a busca foi parada localmente, abortar
+                if (!this.expansionIntervals.has(bookingId)) {
+                    logger.debug(`🛑 [GradualExpander] Wave para ${bookingId} cancelada (não está no Map local)`);
+                    return;
+                }
+
                 // ✅ CORREÇÃO: Estado sempre é SEARCHING enquanto busca motoristas
                 const state = await RideStateManager.getBookingState(this.redis, bookingId);
-                
+
                 // Se estado é SEARCHING ou EXPANDED, continuar expansão normalmente
                 if (state === RideStateManager.STATES.SEARCHING || state === RideStateManager.STATES.EXPANDED) {
                     // Continuar normalmente - buscar e notificar no novo raio
@@ -237,6 +255,12 @@ class GradualRadiusExpander {
                     nextRadius,
                     limit
                 );
+
+                // ✅ PROTEÇÃO PÓS-NOTIFY: Verificar novamente se não foi parado durante o await
+                if (!this.expansionIntervals.has(bookingId)) {
+                    logger.debug(`🛑 [GradualExpander] Wave para ${bookingId} descartada (parada durante busca)`);
+                    return;
+                }
 
                 // Atualizar estado
                 const searchKey = `booking_search:${bookingId}`;
@@ -260,16 +284,15 @@ class GradualRadiusExpander {
                     }
                 );
 
-                // Se nenhum motorista foi encontrado, expandir mais rápido
+                // Se nenhum motorista foi encontrado, expandir mais rápido (100ms em vez de 0 para evitar starvation)
                 if (result.total === 0 && nextRadius < maxRadius) {
-                    logger.debug(`⚡ [GradualExpander] Raio vazio em ${nextRadius}km, expandindo imediatamente`);
-                    // Expandir imediatamente para próximo raio
+                    logger.debug(`⚡ [GradualExpander] Raio vazio em ${nextRadius}km, expandindo em 100ms`);
                     this.scheduleNextExpansion(
                         bookingId,
                         pickupLocation,
-                        nextRadius + 0.5,
+                        nextRadius + this.config.expansionStep,
                         maxRadius,
-                        0, // Imediato
+                        100, // 100ms
                         limit
                     );
                 } else {
@@ -277,23 +300,24 @@ class GradualRadiusExpander {
                     this.scheduleNextExpansion(
                         bookingId,
                         pickupLocation,
-                        nextRadius + 0.5,
+                        nextRadius + this.config.expansionStep,
                         maxRadius,
                         interval,
                         limit
                     );
                 }
 
-                this.expansionIntervals.delete(bookingId);
+                // Próxima expansão já foi agendada por scheduleNextExpansion dentro dos blocos acima.
+                // Não deletar daqui, pois deletaria a próxima wave agendada!
             } catch (error) {
                 logger.error(`❌ Erro na expansão agendada para ${bookingId}:`, error);
                 this.expansionIntervals.delete(bookingId);
             }
-        }, interval * 1000);
+        }, interval); // ✅ FIX: Removido * 1000, interval já está em ms
 
         this.expansionIntervals.set(bookingId, expansionTimeout);
-        
-        logger.debug(`⏰ [GradualExpander] Próxima expansão agendada para ${bookingId} (raio: ${nextRadius}km em ${interval}s)`);
+
+        logger.debug(`⏰ [GradualExpander] Próxima expansão agendada para ${bookingId} (raio: ${nextRadius}km em ${interval}ms)`);
     }
 
     // ✅ REFATORAÇÃO: Método scheduleResumeCheck removido
@@ -320,21 +344,27 @@ class GradualRadiusExpander {
             // ✅ CORREÇÃO TC-006: Liberar todos os locks dos motoristas notificados
             const driverLockManager = require('./driver-lock-manager');
             const notifiedDrivers = await this.redis.smembers(`ride_notifications:${bookingId}`);
-            
+
             for (const driverId of notifiedDrivers) {
+                // 1. Liberar lock se for desta corrida
                 const lockStatus = await driverLockManager.isDriverLocked(driverId);
                 if (lockStatus.isLocked && lockStatus.bookingId === bookingId) {
                     await driverLockManager.releaseLock(driverId);
                     logger.debug(`🔓 [GradualExpander] Lock liberado para motorista ${driverId} (corrida cancelada)`);
                 }
+
+                // 2. Limpar corrida ativa na tela (sempre que a busca para)
+                const activeNotificationKey = `driver_active_notification:${driverId}`;
+                const activeBookingId = await this.redis.get(activeNotificationKey);
+                if (activeBookingId === bookingId) {
+                    await this.redis.del(activeNotificationKey);
+                    logger.debug(`📱 [GradualExpander] Notificação limpa na tela do motorista ${driverId}`);
+                }
             }
 
-            // Atualizar estado da busca
+            // ✅ CORREÇÃO: Deletar a chave em vez de apenas marcar STOPPED para evitar vazamento
             const searchKey = `booking_search:${bookingId}`;
-            await this.redis.hset(searchKey, {
-                state: 'STOPPED',
-                stoppedAt: Date.now()
-            });
+            await this.redis.del(searchKey);
 
             // Registrar evento
             await eventSourcing.recordEvent(
@@ -356,7 +386,7 @@ class GradualRadiusExpander {
     async handleMaxRadiusReached(bookingId) {
         const bookingKey = `booking:${bookingId}`;
         const bookingData = await this.redis.hgetall(bookingKey);
-        
+
         // Notificar customer sobre busca expandida
         if (this.io && bookingData.customerId) {
             this.io.to(`customer_${bookingData.customerId}`).emit('rideSearchExpanded', {

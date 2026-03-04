@@ -11,6 +11,8 @@ const GradualRadiusExpander = require('../services/gradual-radius-expander');
 const { getTracer } = require('../utils/tracer');
 const { createListenerSpan, runInSpan, endSpanSuccess, endSpanError } = require('../utils/span-helpers');
 const { metrics } = require('../utils/prometheus-metrics');
+const idempotencyService = require('../services/idempotency-service');
+const RideStateManager = require('../services/ride-state-manager');
 
 /**
  * Notificar motoristas próximos
@@ -45,6 +47,34 @@ async function notifyDrivers(event, io) {
 
                 if (!bookingId || !pickupLocation) {
                     logger.warn('⚠️ [notifyDrivers] Dados incompletos no evento');
+                    return;
+                }
+
+                const eventTimestamp = event.timestamp || Date.now();
+                const now = Date.now();
+                const MAX_AGE_MS = 15 * 1000; // 15 segundos de validade máxima. Se atrasou mais que isso, a corrida é fantasma/time-out.
+
+                if (now - eventTimestamp > MAX_AGE_MS) {
+                    logger.warn(`⚠️ [notifyDrivers] Evento RIDE_REQUESTED muito antigo (${Math.round((now - eventTimestamp) / 1000)}s). Descartando evento fantasma de stream DLQ/XCLAIM.`, { bookingId });
+                    return;
+                }
+
+                // Proteção de Idempotência: só processar uma notificação de busca por bookingId
+                const eventId = event.eventId || bookingId;
+                const idempotencyKey = idempotencyService.generateKey('system', 'notify.drivers', eventId);
+                const idempotencyCheck = await idempotencyService.checkAndSet(idempotencyKey, 3600); // Lock 1 hora
+
+                if (!idempotencyCheck.isNew) {
+                    logger.warn(`⚠️ [notifyDrivers] Idempotência: Busca para ${bookingId} já disparada pelo worker. Ignorando evento redespachado.`, { bookingId });
+                    return;
+                }
+
+                // Verificar se a corrida não foi aceita antes de iniciar (caso seja um replay logo após aceitarem)
+                const redisPool = require('../utils/redis-pool');
+                const redis = redisPool.getConnection();
+                const currentState = await RideStateManager.getBookingState(redis, bookingId);
+                if (currentState && currentState !== RideStateManager.STATES.SEARCHING && currentState !== RideStateManager.STATES.PENDING) {
+                    logger.warn(`⚠️ [notifyDrivers] Corrida ${bookingId} não está mais aguardando motoristas (state: ${currentState}). Abortando busca inicial.`, { bookingId });
                     return;
                 }
 

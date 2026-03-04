@@ -9,7 +9,7 @@ export const PrivacyPolicy = () => {
       
       <Text style={styles.section}>1. Coleta de Informações</Text>
       <Text style={styles.text}>
-        O Leaf coleta informações necessárias para fornecer nossos serviços, incluindo:
+        A Leaf coleta informações necessárias para fornecer nossos serviços, incluindo:
         - Informações de perfil (nome, email, telefone)
         - Localização (para melhorar pickups e dropoffs)
         - Dados de pagamento (processados de forma segura)

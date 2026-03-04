@@ -42,7 +42,7 @@ class LeafAPIService {
 
   async request(endpoint, options = {}) {
     const url = `${this.baseURL}${endpoint}`
-    
+
     try {
       const token = await this.getAuthToken()
       const headers = {
@@ -69,13 +69,13 @@ class LeafAPIService {
             ...options,
             headers
           })
-          
+
           if (!retryResponse.ok) {
             const error = new Error(`API Error: ${retryResponse.status} ${retryResponse.statusText}`)
             error.status = retryResponse.status
             throw error
           }
-          
+
           return await retryResponse.json()
         }
       }
@@ -235,10 +235,29 @@ class LeafAPIService {
   async reviewDriverDocument(driverId, documentType, action, rejectionReason = '') {
     return await this.request(`/drivers/${driverId}/documents/${documentType}/review`, {
       method: 'POST',
-      body: JSON.stringify({ 
+      body: JSON.stringify({
         action, // 'approve' ou 'reject'
         rejectionReason,
         reviewedBy: 'admin'
+      })
+    })
+  }
+
+  // ✅ Aprovar/Rejeitar aplicação COMPLETA do motorista
+  async approveDriverApplication(driverId, notes = '') {
+    return await this.request(`/drivers/applications/${driverId}/approve`, {
+      method: 'POST',
+      body: JSON.stringify({ notes, adminNotes: notes })
+    })
+  }
+
+  async rejectDriverApplication(driverId, rejectionReasons = [], notes = '') {
+    return await this.request(`/drivers/applications/${driverId}/reject`, {
+      method: 'POST',
+      body: JSON.stringify({
+        rejectionReasons,
+        notes,
+        adminNotes: notes
       })
     })
   }
@@ -292,13 +311,20 @@ class LeafAPIService {
     return await this.request('/metrics/maps/demand-by-region')
   }
 
-  // Metrics History - SEM MOCK
   async getMetricsHistory(startDate, endDate, granularity = 'hour') {
     const params = new URLSearchParams()
     params.append('startDate', startDate)
     params.append('endDate', endDate)
     params.append('granularity', granularity)
     return await this.request(`/metrics/history?${params.toString()}`)
+  }
+
+  // ✅ SIMULADOR FINANCEIRO
+  async runFinancialSimulation(drivers = 250, hours = 1) {
+    const params = new URLSearchParams()
+    params.append('drivers', drivers.toString())
+    params.append('hours', hours.toString())
+    return await this.request(`/metrics/simulation/run?${params.toString()}`)
   }
 
   async getMetricsHistoryCompare(period1Start, period1End, period2Start, period2End) {
@@ -366,7 +392,7 @@ class LeafAPIService {
     if (params.limit) queryParams.append('limit', params.limit.toString())
     if (params.priority) queryParams.append('priority', params.priority)
     if (params.category) queryParams.append('category', params.category)
-    
+
     // Usar rota de admin para ver todos os tickets (dashboard admin)
     // A rota /admin/tickets está em support.js e requer autenticação admin
     try {
@@ -488,7 +514,7 @@ class LeafAPIService {
     // TODO: Criar API no backend que retorne evolução diária
     const data = []
     const today = new Date()
-    
+
     for (let i = days - 1; i >= 0; i--) {
       const date = new Date(today)
       date.setDate(date.getDate() - i)
@@ -499,7 +525,7 @@ class LeafAPIService {
         subscriptionRevenue: 0
       })
     }
-    
+
     return data
   }
 
@@ -507,7 +533,7 @@ class LeafAPIService {
     const today = new Date()
     const endDate = today.toISOString().split('T')[0]
     let startDate = new Date()
-    
+
     switch (period) {
       case '24h':
         startDate.setDate(today.getDate() - 1)
@@ -524,7 +550,7 @@ class LeafAPIService {
       default:
         startDate.setDate(today.getDate() - 1)
     }
-    
+
     return `${startDate.toISOString().split('T')[0]},${endDate}`
   }
 

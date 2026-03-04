@@ -12,6 +12,8 @@ import { MAIN_COLOR } from '../common/sharedFunctions';
 var { width, height } = Dimensions.get('window');
 import { DriverEarningRidelist } from '../components';
 import { fonts } from '../common/font';
+import Typography from '../components/design-system/Typography';
+import { useTheme } from '../common-local/theme';
 
 export default function DriverIncomeScreen(props) {
 
@@ -23,18 +25,18 @@ export default function DriverIncomeScreen(props) {
     const { t } = i18n;
     const isRTL = i18n.locale.indexOf('he') === 0 || i18n.locale.indexOf('ar') === 0;
 
-    const [bookingData,setBookingData] = useState([]);
+    const [bookingData, setBookingData] = useState([]);
     const [tabIndex, setTabIndex] = useState(0);
 
-    useEffect(()=>{
-        if(bookings){
+    useEffect(() => {
+        if (bookings) {
             setBookingData(bookings);
             setTabIndex(0);
-        }else{
+        } else {
             setBookingData([]);
             setTabIndex(0);
         }
-    },[bookings]);
+    }, [bookings]);
 
     const [bookingCount, setBookingCount] = useState();
 
@@ -73,58 +75,60 @@ export default function DriverIncomeScreen(props) {
         }
     }, [bookings]);
 
+    const { theme, isDarkMode } = useTheme();
+
     return (
-        <View style={styles.mainView}>
-            <View style={[styles.vew1,{marginBottom: 5, alignSelf:'center', alignContent:'center', alignItems:'center'}]}>     
-               
-                <View style={{flexDirection:isRTL? 'row-reverse':'row', width:'100%', justifyContent:'space-around', padding: 10, borderBottomWidth: 1, borderBlockColor: colors.FOOTERTOP}}>
-                    <View style={{ justifyContent:'center', alignItems:'center'}}>
-                        <Text style={styles.textStyle}>{t('booking_count')}</Text>
+        <View style={[styles.mainView, { backgroundColor: theme.background }]}>
+            <View style={[styles.vew1, { backgroundColor: theme.card, borderColor: theme.border, borderWidth: 1, elevation: 0 }]}>
+
+                <View style={{ flexDirection: isRTL ? 'row-reverse' : 'row', width: '100%', justifyContent: 'space-around', padding: 10, borderBottomWidth: 1, borderBottomColor: theme.border }}>
+                    <View style={{ justifyContent: 'center', alignItems: 'center' }}>
+                        <Typography variant="caption" color={theme.textSecondary}>{t('booking_count')}</Typography>
                         <View>
-                            <Text style={[styles.textStyleBold]}>{bookingCount}</Text>
+                            <Typography variant="body" weight="bold" color={theme.text}>{bookingCount}</Typography>
                         </View>
                     </View>
 
-                    <View style={{justifyContent:'center', alignItems:'center'}}>
-                        <Text style={styles.textStyle}>{t('today_text')}</Text>
+                    <View style={{ justifyContent: 'center', alignItems: 'center' }}>
+                        <Typography variant="caption" color={theme.textSecondary}>{t('today_text')}</Typography>
                         <View >
                             {settings.swipe_symbol === false ?
-                                <Text style={styles.textStyleBold}>{settings.symbol}{today ? parseFloat(today).toFixed(settings.decimal) : '0'}</Text>
-                            :
-                                <Text style={styles.textStyleBold}>{today ? parseFloat(today).toFixed(settings.decimal) : '0'}{settings.symbol}</Text>
+                                <Typography variant="body" weight="bold" color={theme.text}>{settings.symbol}{today ? parseFloat(today).toFixed(settings.decimal) : '0'}</Typography>
+                                :
+                                <Typography variant="body" weight="bold" color={theme.text}>{today ? parseFloat(today).toFixed(settings.decimal) : '0'}{settings.symbol}</Typography>
                             }
                         </View>
                     </View>
 
-                    <View style={{justifyContent:'center', alignItems:'center' }}>
-                        <Text style={styles.textStyle}>{t('thismonth')}</Text>
+                    <View style={{ justifyContent: 'center', alignItems: 'center' }}>
+                        <Typography variant="caption" color={theme.textSecondary}>{t('thismonth')}</Typography>
                         <View>
                             {settings.swipe_symbol === false ?
-                                <Text style={styles.textStyleBold}>{settings.symbol}{thisMonth?parseFloat(thisMonth).toFixed(settings.decimal):'0'}</Text>
-                            :
-                                <Text style={styles.textStyleBold}>{thisMonth?parseFloat(thisMonth).toFixed(settings.decimal):'0'}{settings.symbol}</Text>
+                                <Typography variant="body" weight="bold" color={theme.text}>{settings.symbol}{thisMonth ? parseFloat(thisMonth).toFixed(settings.decimal) : '0'}</Typography>
+                                :
+                                <Typography variant="body" weight="bold" color={theme.text}>{thisMonth ? parseFloat(thisMonth).toFixed(settings.decimal) : '0'}{settings.symbol}</Typography>
                             }
                         </View>
                     </View>
-                </View> 
+                </View>
 
-                <View style={{ flexDirection: isRTL ? 'row-reverse' :'row', alignItems:'center', justifyContent: 'space-around', alignItems:'center',minWidth: 250, paddingVertical: 15}}>
+                <View style={{ flexDirection: isRTL ? 'row-reverse' : 'row', alignItems: 'center', justifyContent: 'space-around', minWidth: 250, paddingVertical: 15 }}>
                     <View>
-                        <Text style={styles.textStyleBold}>{t('totalearning')}</Text>
+                        <Typography variant="body" weight="bold" color={theme.text}>{t('totalearning')}</Typography>
                     </View>
                     <View>
                         {settings.swipe_symbol === false ?
-                            <Text style={styles.textStyleBoldColor}>{settings.symbol}{totalEarning?parseFloat(totalEarning).toFixed(settings.decimal):'0'}</Text>
-                        :
-                            <Text style={styles.textStyleBoldColor}>{totalEarning?parseFloat(totalEarning).toFixed(settings.decimal):'0'}{settings.symbol}</Text>
+                            <Typography variant="h2" weight="bold" color={theme.leafGreen || '#4CAF50'}>{settings.symbol}{totalEarning ? parseFloat(totalEarning).toFixed(settings.decimal) : '0'}</Typography>
+                            :
+                            <Typography variant="h2" weight="bold" color={theme.leafGreen || '#4CAF50'}>{totalEarning ? parseFloat(totalEarning).toFixed(settings.decimal) : '0'}{settings.symbol}</Typography>
                         }
                     </View>
                 </View>
             </View>
-            <View style={{flex: 1}}>
-                {tabIndex>=0?
+            <View style={{ flex: 1 }}>
+                {tabIndex >= 0 ?
                     <DriverEarningRidelist data={bookingData} tabIndex={tabIndex} ></DriverEarningRidelist>
-                :null}
+                    : null}
             </View>
         </View>
     );
@@ -141,14 +145,14 @@ const styles = StyleSheet.create({
         height: '65%',
         width: '95%',
         alignSelf: 'center',
-        alignItems:'center',
-        marginTop:-25
+        alignItems: 'center',
+        marginTop: -25
 
     },
-    vew4:{
-        height:'15%',
-        width:'100%',
-        alignItems:'center',
+    vew4: {
+        height: '15%',
+        width: '100%',
+        alignItems: 'center',
         backgroundColor: MAIN_COLOR,
         shadowColor: colors.BLACK,
         shadowOffset: {
@@ -158,8 +162,8 @@ const styles = StyleSheet.create({
         shadowOpacity: 0.2,
         shadowRadius: 2,
         elevation: 3,
-        borderBottomLeftRadius:10,
-        borderBottomRightRadius:10
+        borderBottomLeftRadius: 10,
+        borderBottomRightRadius: 10
     },
     vew1: {
         width: '100%',
@@ -178,12 +182,12 @@ const styles = StyleSheet.create({
     vew2: {
         height: '100%',
         width: '40%',
-        justifyContent:'center',
+        justifyContent: 'center',
     },
     vew3: {
         height: '100%',
         width: '60%',
-        justifyContent:'center'
+        justifyContent: 'center'
     },
     todayEarningHeaderText: {
         fontSize: 20,
@@ -193,7 +197,7 @@ const styles = StyleSheet.create({
     todayEarningMoneyText: {
         fontSize: 30,
         color: colors.BALANCE_GREEN,
-        fontFamily:fonts.Bold
+        fontFamily: fonts.Bold
         // margin:15
     },
     todayEarningHeaderText2: {
@@ -203,7 +207,7 @@ const styles = StyleSheet.create({
     todayEarningMoneyText2: {
         fontSize: 30,
         color: colors.WHITE,
-        fontFamily:fonts.Bold
+        fontFamily: fonts.Bold
     },
     textStyle: {
         fontSize: 15,

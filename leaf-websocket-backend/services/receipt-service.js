@@ -9,8 +9,9 @@
  * - Hash único de identificação
  */
 
-const logger = require('../utils/logger');
+const { logger } = require('../utils/logger');
 const crypto = require('crypto');
+const PDFDocument = require('pdfkit');
 
 class ReceiptService {
     constructor() {
@@ -43,7 +44,7 @@ class ReceiptService {
      */
     formatDateTime(dateString) {
         if (!dateString) return { date: 'N/A', time: 'N/A' };
-        
+
         const date = new Date(dateString);
         const dateFormatted = date.toLocaleDateString('pt-BR', {
             day: '2-digit',
@@ -54,7 +55,7 @@ class ReceiptService {
             hour: '2-digit',
             minute: '2-digit'
         });
-        
+
         return { date: dateFormatted, time: timeFormatted };
     }
 
@@ -106,7 +107,7 @@ class ReceiptService {
                     date: tripDateFormatted,
                     time: tripTimeFormatted,
                     dateTime: tripDate,
-                    
+
                     // Local de partida
                     pickup: {
                         address: rideData.pickup?.add || 'Endereço de origem',
@@ -116,17 +117,17 @@ class ReceiptService {
                         },
                         timestamp: rideData.tripStartTime
                     },
-                    
+
                     // Local de destino
                     dropoff: {
-                        address: rideData.drop?.add || 'Endereço de destino', 
+                        address: rideData.drop?.add || 'Endereço de destino',
                         coordinates: {
                             lat: rideData.drop?.lat || 0,
                             lng: rideData.drop?.lng || 0
                         },
                         timestamp: rideData.endTime
                     },
-                    
+
                     // Tempo de viagem e distância
                     duration: tripMetrics.duration, // em minutos
                     durationFormatted: tripMetrics.durationFormatted,
@@ -136,7 +137,7 @@ class ReceiptService {
                         unit: 'km',
                         formatted: `${(parseFloat(rideData.distance || rideData.estimateDistance || 0) / 1000).toFixed(2)} km`
                     },
-                    
+
                     // Mapa do trajeto
                     mapImage: {
                         url: mapImageUrl,
@@ -208,7 +209,7 @@ class ReceiptService {
      */
     calculateFinancialBreakdown(rideData) {
         const totalFare = parseFloat(rideData.finalPrice || rideData.customer_paid || rideData.estimate || 0);
-        
+
         // Calcular taxa operacional baseada no valor (3 faixas)
         let operationalFee;
         if (totalFare <= 10.00) {
@@ -224,7 +225,7 @@ class ReceiptService {
 
         // Taxa Woovi: 0,8% com mínimo de R$ 0,50
         const wooviFee = Math.max(totalFare * this.WOOVI_FEE_PERCENTAGE, this.WOOVI_FEE_MINIMUM);
-        
+
         // Calcular valor líquido para o motorista
         const driverAmount = Math.max(0, totalFare - operationalFee - wooviFee);
 
@@ -241,17 +242,17 @@ class ReceiptService {
                     amount: totalFare,
                     formatted: `R$ ${totalFare.toFixed(2).replace('.', ',')}`
                 },
-                
+
                 operationalCost: {
                     amount: operationalFee,
                     formatted: `R$ ${operationalFee.toFixed(2).replace('.', ',')}`
                 },
-                
+
                 wooviFee: {
                     amount: wooviFee,
                     formatted: `R$ ${wooviFee.toFixed(2).replace('.', ',')}`
                 },
-                
+
                 driverAmount: {
                     amount: driverAmount,
                     formatted: `R$ ${driverAmount.toFixed(2).replace('.', ',')}`
@@ -274,14 +275,14 @@ class ReceiptService {
     calculateTripMetrics(rideData) {
         const startTime = new Date(rideData.tripStartTime || rideData.bookingDate);
         const endTime = new Date(rideData.endTime || rideData.completedAt || Date.now());
-        
+
         const durationMs = endTime.getTime() - startTime.getTime();
         const durationMinutes = Math.round(durationMs / (1000 * 60));
-        
+
         // Formatar duração
         const hours = Math.floor(durationMinutes / 60);
         const minutes = durationMinutes % 60;
-        const durationFormatted = hours > 0 
+        const durationFormatted = hours > 0
             ? `${hours}h ${minutes}min`
             : `${minutes}min`;
 
@@ -334,7 +335,7 @@ class ReceiptService {
         }
 
         const mapUrl = `${baseUrl}?${params.toString()}`;
-        
+
         logger.info(`🗺️ URL da imagem do mapa gerada: ${mapUrl.substring(0, 100)}...`);
         return mapUrl;
     }
@@ -412,7 +413,7 @@ class ReceiptService {
 
             // Salvar na coleção receipts
             await firebaseDb.ref(`receipts/${receipt.rideId}`).set(receiptData);
-            
+
             // Também salvar referência na corrida para fácil acesso
             await firebaseDb.ref(`bookings/${receipt.rideId}/receipt`).set({
                 receiptId: receipt.receiptId,
@@ -476,12 +477,93 @@ class ReceiptService {
     }
 
     /**
-     * Gera recibo em formato PDF (placeholder para implementação futura)
+     * Gera recibo em formato PDF em buffer de memória
+     * @param {Object} receipt - Objeto gerado por generateReceipt
+     * @returns {Promise<Buffer>} - Buffer do arquivo PDF
      */
     async generatePDFReceipt(receipt) {
-        // TODO: Implementar geração de PDF usando puppeteer ou similar
-        logger.info('📄 Geração de PDF será implementada em versão futura');
-        return null;
+        return new Promise((resolve, reject) => {
+            try {
+                logger.info(`📄 Gerando PDF para recibo: ${receipt.receiptId}`);
+
+                const doc = new PDFDocument({ margin: 50, size: 'A4' });
+                const buffers = [];
+
+                doc.on('data', buffers.push.bind(buffers));
+                doc.on('end', () => {
+                    const pdfData = Buffer.concat(buffers);
+                    logger.info(`✅ PDF gerado com sucesso [${pdfData.length} bytes]`);
+                    resolve(pdfData);
+                });
+
+                // --- CABEÇALHO ---
+                doc.fontSize(22).font('Helvetica-Bold').text('LEAF', { align: 'center' });
+                doc.fontSize(14).font('Helvetica').text('Comprovante de Viagem', { align: 'center' });
+                doc.moveDown(0.5);
+
+                // Dados da empresa
+                doc.fontSize(9).fillColor('#666666').text(receipt.legal.companyName, { align: 'center' });
+                doc.text(`CNPJ: ${receipt.legal.cnpj}`, { align: 'center' });
+                doc.moveDown(2);
+
+                // --- DETALHES GERAIS ---
+                doc.fillColor('#000000').fontSize(14).font('Helvetica-Bold').text('Detalhes da Viagem');
+                doc.moveTo(50, doc.y).lineTo(550, doc.y).strokeColor('#dddddd').stroke();
+                doc.moveDown(0.5);
+
+                doc.fontSize(10).font('Helvetica');
+                doc.text(`Data: `, { continued: true }).font('Helvetica-Bold').text(`${receipt.trip.date} às ${receipt.trip.time}`);
+                doc.font('Helvetica').text(`Passageiro: `, { continued: true }).font('Helvetica-Bold').text(`${receipt.customer.name}`);
+                doc.font('Helvetica').text(`Motorista: `, { continued: true }).font('Helvetica-Bold').text(`${receipt.driver.name}`);
+                doc.font('Helvetica').text(`Veículo: `, { continued: true }).font('Helvetica-Bold').text(`${receipt.driver.vehicle.brandModel} (${receipt.driver.vehicle.plate})`);
+                doc.moveDown(1.5);
+
+                // --- TRAJETO ---
+                doc.fontSize(14).font('Helvetica-Bold').text('Trajeto');
+                doc.moveTo(50, doc.y).lineTo(550, doc.y).strokeColor('#dddddd').stroke();
+                doc.moveDown(0.5);
+
+                doc.fontSize(10).font('Helvetica');
+                doc.text(`Origem: `, { continued: true }).font('Helvetica-Bold').text(`${receipt.trip.pickup.address}`);
+                doc.font('Helvetica').text(`Destino: `, { continued: true }).font('Helvetica-Bold').text(`${receipt.trip.dropoff.address}`);
+                doc.moveDown(0.5);
+                doc.font('Helvetica').text(`Distância: `, { continued: true }).font('Helvetica-Bold').text(`${receipt.trip.distance.formatted}`, { continued: true })
+                    .font('Helvetica').text(`  |  Duração: `, { continued: true }).font('Helvetica-Bold').text(`${receipt.trip.durationFormatted}`);
+                doc.moveDown(1.5);
+
+                // --- RESUMO FINANCEIRO ---
+                doc.fontSize(14).font('Helvetica-Bold').text('Resumo Financeiro');
+                doc.moveTo(50, doc.y).lineTo(550, doc.y).strokeColor('#dddddd').stroke();
+                doc.moveDown(0.5);
+
+                doc.fontSize(16).font('Helvetica-Bold').text(`Total Pago: ${receipt.financial.totalPaid.formatted}`);
+                doc.moveDown(0.2);
+                doc.fontSize(10).font('Helvetica').text(`Forma de Pagamento: `, { continued: true }).font('Helvetica-Bold').text(`${receipt.payment.method}`);
+                doc.font('Helvetica').text(`Status: `, { continued: true }).font('Helvetica-Bold').text(`${receipt.payment.status === 'completed' || receipt.payment.status === 'PAID' ? 'Pago' : receipt.payment.status}`);
+                doc.moveDown(2);
+
+                // --- RODAPÉ & AVISOS LEGAIS ---
+                // Empurra o rodapé para o fim se for possível, mas aqui usaremos posição simples
+                doc.moveDown(3);
+                doc.fontSize(8).fillColor('#999999').font('Helvetica');
+
+                doc.text(receipt.legal.note, { align: 'center', width: 500 });
+                doc.text(receipt.legal.privacyPolicy, { align: 'center', link: receipt.legal.privacyPolicy, underline: true });
+                doc.moveDown(0.5);
+                doc.text(`Recibo gerado em: ${new Date(receipt.issueDate).toLocaleString('pt-BR')}`, { align: 'center' });
+                doc.text(`Dúvidas? Entre em contato com o suporte na plataforma LEAF.`, { align: 'center' });
+                doc.moveDown(0.5);
+
+                // Hash e IDs pequenos
+                doc.fontSize(6).fillColor('#bbbbbb').text(`ID: ${receipt.receiptId} | REF: ${receipt.reference}`, { align: 'center' });
+                doc.text(`HASH: ${receipt.hash}`, { align: 'center' });
+
+                doc.end();
+            } catch (error) {
+                logger.error(`❌ Erro ao gerar PDF: ${error.message}`);
+                reject(error);
+            }
+        });
     }
 }
 

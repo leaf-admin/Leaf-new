@@ -18,6 +18,9 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { useSelector } from 'react-redux';
 import { fonts } from '../../common-local/font';
+import { useTheme } from '../../common-local/theme';
+import Typography from '../design-system/Typography';
+import AnimatedButton from '../design-system/AnimatedButton';
 import BottomSheet, { BottomSheetView, BottomSheetBackdrop } from '@gorhom/bottom-sheet';
 import WebSocketManager from '../../services/WebSocketManager';
 import TripDataService from '../../services/TripDataService';
@@ -50,32 +53,33 @@ const translations = {
 const DriverEnRouteUI = React.memo(function DriverEnRouteUI({ booking, onArrived }) {
   // Função de tradução simplificada
   const t = (key) => translations[key] || key;
+  const theme = useTheme();
   const auth = useSelector(state => state.auth);
   const [estimatedTime, setEstimatedTime] = useState('--');
   const [estimatedDistance, setEstimatedDistance] = useState('--');
-  
+
   // Estados para barra de progresso
   const [initialDistance, setInitialDistance] = useState(null); // Distância inicial quando motorista aceita
   const [currentDistance, setCurrentDistance] = useState(null); // Distância atual
   const [progressPercent, setProgressPercent] = useState(0); // Percentual de progresso (0-100)
   const progressAnimation = useRef(new Animated.Value(0)).current; // Animação da barra
-  
+
   // ✅ Refs para evitar re-renderizações desnecessárias
   const lastUpdateTimeRef = useRef(0);
   const lastDistanceRef = useRef(null);
   const lastPercentRef = useRef(0);
-  
+
   // Estados para chat
   const [messageText, setMessageText] = useState('');
   const [chatMessages, setChatMessages] = useState([]);
   const [unreadMessagesCount, setUnreadMessagesCount] = useState(0);
   const [isChatBottomSheetOpen, setIsChatBottomSheetOpen] = useState(false);
   const [distanceError, setDistanceError] = useState({ visible: false, message: '' });
-  
+
   // Ref para BottomSheet de chat
   const chatBottomSheetRef = useRef(null);
   const chatSnapPoints = ['45%', '64%']; // Reduzido 25% (era 60% e 85%)
-  
+
   // Ref para ScrollView de mensagens
   const messagesScrollViewRef = useRef(null);
 
@@ -91,18 +95,18 @@ const DriverEnRouteUI = React.memo(function DriverEnRouteUI({ booking, onArrived
   // ✅ Efeito para calcular e atualizar barra de progresso
   useEffect(() => {
     if (!booking) return;
-    
+
     let intervalId = null;
     let isMounted = true;
 
     const updateProgress = async () => {
       if (!isMounted) return;
-      
+
       try {
         // Obter coordenadas do ponto de partida
         let pickupLat = null;
         let pickupLng = null;
-        
+
         if (booking?.pickup_location?.latitude && booking?.pickup_location?.longitude) {
           pickupLat = booking.pickup_location.latitude;
           pickupLng = booking.pickup_location.longitude;
@@ -146,12 +150,12 @@ const DriverEnRouteUI = React.memo(function DriverEnRouteUI({ booking, onArrived
 
         // ✅ Otimização: Usar refs para comparar sem causar re-renderizações
         const distanceDiff = Math.abs(distanceInMeters - (lastDistanceRef.current || 0));
-        
+
         // ✅ Throttling: Só atualizar se passou tempo suficiente E distância mudou significativamente
         const now = Date.now();
         const timeSinceLastUpdate = now - lastUpdateTimeRef.current;
         const MIN_UPDATE_INTERVAL = 3000; // 3 segundos mínimo entre updates visuais
-        
+
         if (distanceDiff < 10 && currentDistance !== null && timeSinceLastUpdate < MIN_UPDATE_INTERVAL) {
           // Mas ainda verificar se chegou perto o suficiente para esconder erro
           if (distanceInMeters <= 50 && distanceError.visible) {
@@ -163,12 +167,12 @@ const DriverEnRouteUI = React.memo(function DriverEnRouteUI({ booking, onArrived
         // ✅ Atualizar refs antes de setState para evitar loops
         lastDistanceRef.current = distanceInMeters;
         lastUpdateTimeRef.current = now;
-        
+
         // ✅ Só atualizar estado se realmente mudou (evita re-renderizações)
         if (Math.abs(distanceInMeters - (currentDistance || 0)) >= 10) {
           setCurrentDistance(distanceInMeters);
         }
-        
+
         // ✅ Esconder erro se chegou perto
         if (distanceInMeters <= 50 && distanceError.visible) {
           setDistanceError({ visible: false, message: '' });
@@ -186,9 +190,9 @@ const DriverEnRouteUI = React.memo(function DriverEnRouteUI({ booking, onArrived
         if (percentDiff < 2 && progressPercent !== 0) {
           return;
         }
-        
+
         lastPercentRef.current = percent;
-        
+
         // ✅ Só atualizar estado se realmente mudou
         if (Math.abs(percent - progressPercent) >= 2) {
           setProgressPercent(percent);
@@ -227,21 +231,21 @@ const DriverEnRouteUI = React.memo(function DriverEnRouteUI({ booking, onArrived
     if (!isChatBottomSheetOpen || !booking?.id) {
       return;
     }
-    
+
     let tripRef = null;
     let wsCleanup = null;
-    
+
     const initializeChat = async () => {
       // Carregar mensagens existentes
       await loadChatMessages();
-      
+
       // Setup WebSocket listeners
       wsCleanup = setupWebSocketListeners();
-      
+
       // Listener em tempo real do Firebase
       const database = require('@react-native-firebase/database').default;
       tripRef = database().ref(`trip_data/${booking.id}/chat`);
-      
+
       const handleNewMessage = (snapshot) => {
         if (snapshot.exists()) {
           const newMessage = {
@@ -249,7 +253,7 @@ const DriverEnRouteUI = React.memo(function DriverEnRouteUI({ booking, onArrived
             ...snapshot.val(),
             isOwn: snapshot.val().senderId === (auth?.profile?.uid || auth?.uid)
           };
-          
+
           setChatMessages(prev => {
             // Verificar se a mensagem já existe
             if (prev.find(m => m.id === newMessage.id)) {
@@ -261,24 +265,24 @@ const DriverEnRouteUI = React.memo(function DriverEnRouteUI({ booking, onArrived
               return timeA - timeB;
             });
           });
-          
+
           // ✅ NOVO: Incrementar contador de mensagens não lidas se for do passageiro e o chat estiver fechado
           if (!newMessage.isOwn && !isChatBottomSheetOpen) {
             setUnreadMessagesCount(prev => prev + 1);
           }
-          
+
           // Scroll para a última mensagem
           setTimeout(() => {
             messagesScrollViewRef.current?.scrollToEnd({ animated: true });
           }, 100);
         }
       };
-      
+
       tripRef.on('child_added', handleNewMessage);
     };
-    
+
     initializeChat();
-    
+
     return () => {
       // Cleanup
       if (wsCleanup) {
@@ -292,12 +296,12 @@ const DriverEnRouteUI = React.memo(function DriverEnRouteUI({ booking, onArrived
 
   const loadChatMessages = async () => {
     if (!booking?.id) return;
-    
+
     try {
       // Buscar mensagens do Firebase Realtime Database
       const database = require('@react-native-firebase/database').default;
       const tripRef = database().ref(`trip_data/${booking.id}/chat`);
-      
+
       tripRef.once('value', (snapshot) => {
         if (snapshot.exists()) {
           const messagesData = snapshot.val();
@@ -311,9 +315,9 @@ const DriverEnRouteUI = React.memo(function DriverEnRouteUI({ booking, onArrived
             const timeB = new Date(b.timestamp || 0).getTime();
             return timeA - timeB;
           });
-          
+
           setChatMessages(messages);
-          
+
           // Scroll para a última mensagem
           setTimeout(() => {
             messagesScrollViewRef.current?.scrollToEnd({ animated: false });
@@ -330,7 +334,7 @@ const DriverEnRouteUI = React.memo(function DriverEnRouteUI({ booking, onArrived
 
   const setupWebSocketListeners = () => {
     const webSocketManager = WebSocketManager.getInstance();
-    
+
     const handleNewMessage = (data) => {
       if (data.bookingId === booking?.id) {
         const newMessage = {
@@ -341,23 +345,23 @@ const DriverEnRouteUI = React.memo(function DriverEnRouteUI({ booking, onArrived
           timestamp: data.timestamp || new Date().toISOString(),
           isOwn: data.senderId === auth?.profile?.uid || data.senderId === auth?.uid
         };
-        
+
         setChatMessages(prev => [...prev, newMessage]);
-        
+
         // ✅ NOVO: Incrementar contador de mensagens não lidas se for do passageiro e o chat estiver fechado
         if (!newMessage.isOwn && !isChatBottomSheetOpen) {
           setUnreadMessagesCount(prev => prev + 1);
         }
-        
+
         // Scroll para a última mensagem
         setTimeout(() => {
           messagesScrollViewRef.current?.scrollToEnd({ animated: true });
         }, 100);
       }
     };
-    
+
     webSocketManager.on('newMessage', handleNewMessage);
-    
+
     return () => {
       webSocketManager.off('newMessage', handleNewMessage);
     };
@@ -376,7 +380,7 @@ const DriverEnRouteUI = React.memo(function DriverEnRouteUI({ booking, onArrived
 
     try {
       const webSocketManager = WebSocketManager.getInstance();
-      
+
       if (!webSocketManager.isConnected()) {
         Alert.alert('Erro', 'Não conectado ao servidor. Tente novamente.');
         return;
@@ -400,10 +404,10 @@ const DriverEnRouteUI = React.memo(function DriverEnRouteUI({ booking, onArrived
         timestamp: new Date().toISOString(),
         isOwn: true
       };
-      
+
       setChatMessages(prev => [...prev, newMessage]);
       setMessageText('');
-      
+
       // Salvar mensagem no TripDataService
       await TripDataService.addChatMessage(booking.id, {
         senderId: newMessage.senderId,
@@ -411,12 +415,12 @@ const DriverEnRouteUI = React.memo(function DriverEnRouteUI({ booking, onArrived
         message: newMessage.text,
         timestamp: newMessage.timestamp
       });
-      
+
       // Scroll para a última mensagem
       setTimeout(() => {
         messagesScrollViewRef.current?.scrollToEnd({ animated: true });
       }, 100);
-      
+
     } catch (error) {
       Logger.error('Erro ao enviar mensagem:', error);
       Alert.alert('Erro', 'Não foi possível enviar a mensagem.');
@@ -444,7 +448,7 @@ const DriverEnRouteUI = React.memo(function DriverEnRouteUI({ booking, onArrived
       // ✅ Obter coordenadas do ponto de partida (suporta múltiplos formatos)
       let pickupLat = null;
       let pickupLng = null;
-      
+
       if (booking?.pickup_location?.latitude && booking?.pickup_location?.longitude) {
         pickupLat = booking.pickup_location.latitude;
         pickupLng = booking.pickup_location.longitude;
@@ -498,7 +502,7 @@ const DriverEnRouteUI = React.memo(function DriverEnRouteUI({ booking, onArrived
         });
         return;
       }
-      
+
       // Se chegou perto, esconder erro
       setDistanceError({ visible: false, message: '' });
 
@@ -523,8 +527,8 @@ const DriverEnRouteUI = React.memo(function DriverEnRouteUI({ booking, onArrived
       'Tem certeza que deseja cancelar esta corrida?',
       [
         { text: 'Não', style: 'cancel' },
-        { 
-          text: 'Sim, Cancelar', 
+        {
+          text: 'Sim, Cancelar',
           style: 'destructive',
           onPress: async () => {
             try {
@@ -535,7 +539,7 @@ const DriverEnRouteUI = React.memo(function DriverEnRouteUI({ booking, onArrived
               }
 
               const webSocketManager = WebSocketManager.getInstance();
-              
+
               // Conectar se não estiver conectado
               if (!webSocketManager.isConnected()) {
                 await webSocketManager.connect();
@@ -543,14 +547,14 @@ const DriverEnRouteUI = React.memo(function DriverEnRouteUI({ booking, onArrived
 
               // Cancelar corrida
               const result = await webSocketManager.cancelRide(bookingId, 'Cancelado pelo motorista');
-              
+
               if (result.success) {
                 Alert.alert(
                   'Corrida Cancelada',
                   'A corrida foi cancelada com sucesso.',
                   [{ text: 'OK' }]
                 );
-                
+
                 // Navegar de volta para a tela principal
                 // O Redux state será atualizado pelo backend
               } else {
@@ -575,36 +579,36 @@ const DriverEnRouteUI = React.memo(function DriverEnRouteUI({ booking, onArrived
 
   const handleNavigateToPickup = async () => {
     if (!booking?.pickup_location) return;
-    
+
     const { latitude, longitude } = booking.pickup_location;
     const address = booking?.pickup_address || 'Local de Embarque';
-    
+
     try {
       // Verificar se Google Maps está instalado
       const isGoogleMapsInstalled = await Linking.canOpenURL(
         Platform.OS === 'ios' ? 'comgooglemaps://' : 'google.navigation:q='
       );
-      
+
       // Verificar se Waze está instalado
       const isWazeInstalled = await Linking.canOpenURL('waze://');
-      
+
       if (!isGoogleMapsInstalled && !isWazeInstalled) {
         // Nenhum app de navegação instalado, abrir no navegador
         const url = `https://www.google.com/maps/dir/?api=1&destination=${latitude},${longitude}`;
         await Linking.openURL(url);
         return;
       }
-      
+
       // Mostrar opções de navegação
       const navigationOptions = [];
-      
+
       if (isGoogleMapsInstalled) {
         navigationOptions.push({
           text: '🗺️ Google Maps',
           onPress: async () => {
             try {
               const destination = `${latitude},${longitude}`;
-              const url = Platform.OS === 'ios' 
+              const url = Platform.OS === 'ios'
                 ? `comgooglemaps://?daddr=${destination}&q=${encodeURIComponent(address)}`
                 : `google.navigation:q=${destination}`;
               await Linking.openURL(url);
@@ -616,7 +620,7 @@ const DriverEnRouteUI = React.memo(function DriverEnRouteUI({ booking, onArrived
           }
         });
       }
-      
+
       if (isWazeInstalled) {
         navigationOptions.push({
           text: '🧭 Waze',
@@ -637,7 +641,7 @@ const DriverEnRouteUI = React.memo(function DriverEnRouteUI({ booking, onArrived
           }
         });
       }
-      
+
       // Adicionar opção de navegador web
       navigationOptions.push({
         text: '🌐 Navegador Web',
@@ -646,19 +650,19 @@ const DriverEnRouteUI = React.memo(function DriverEnRouteUI({ booking, onArrived
           Linking.openURL(url);
         }
       });
-      
+
       // Adicionar opção de cancelar
       navigationOptions.push({
         text: 'Cancelar',
         style: 'cancel'
       });
-      
+
       Alert.alert(
         'Navegar para Embarque',
         'Escolha seu app de navegação:',
         navigationOptions
       );
-      
+
     } catch (error) {
       Logger.error('Erro ao abrir navegação:', error);
       Alert.alert('Erro', 'Não foi possível abrir a navegação.');
@@ -669,27 +673,28 @@ const DriverEnRouteUI = React.memo(function DriverEnRouteUI({ booking, onArrived
     <>
       {/* ✅ NOVO: Banner de status de conexão */}
       <NetworkStatusBanner />
-      
+
       {/* Card pequeno no topo (mesma posição do PassengerUI) */}
       <View style={styles.topCard}>
-        <View style={styles.topCardContent}>
-          <Ionicons name="car" size={20} color={LEAF_GREEN} />
+        <View style={[styles.topCardContent, { backgroundColor: theme.card }]}>
+          <Ionicons name="car" size={20} color={theme.leafGreen || '#41D274'} />
           <View style={styles.topCardTextContainer}>
-            <Text style={styles.topCardText}>
-              A caminho do embarque de <Text style={styles.topCardBold}>{booking?.customer_name || 'Passageiro'}</Text>
+            <Typography variant="body" color={theme.text}>
+              {t('heading_to_pickup')} {booking?.customer_name || 'Passageiro'}
               {estimatedTime !== '--' && (
-                <Text style={styles.topCardTime}> • {estimatedTime} min</Text>
+                <Typography variant="body" weight="bold" color={theme.leafGreen || '#41D274'}> • {estimatedTime} min</Typography>
               )}
-            </Text>
-            
+            </Typography>
+
             {/* ✅ Barra de progresso animada */}
             {initialDistance !== null && (
               <View style={styles.progressContainer}>
-                <View style={styles.progressBarBackground}>
+                <View style={[styles.progressBarBackground, { backgroundColor: theme.card === '#1A1A1A' ? 'rgba(255,255,255,0.1)' : '#E0E0E0' }]}>
                   <Animated.View
                     style={[
                       styles.progressBarFill,
                       {
+                        backgroundColor: theme.leafGreen || '#41D274',
                         width: progressAnimation.interpolate({
                           inputRange: [0, 100],
                           outputRange: ['0%', '100%']
@@ -699,11 +704,11 @@ const DriverEnRouteUI = React.memo(function DriverEnRouteUI({ booking, onArrived
                   />
                 </View>
                 {currentDistance !== null && (
-                  <Text style={styles.progressText}>
-                    {Math.round(progressPercent)}% • {currentDistance < 1000 
-                      ? `${Math.round(currentDistance)}m` 
+                  <Typography variant="caption" color={theme.textSecondary} align="center" style={{ marginTop: 4 }}>
+                    {Math.round(progressPercent)}% • {currentDistance < 1000
+                      ? `${Math.round(currentDistance)}m`
                       : `${(currentDistance / 1000).toFixed(1)}km`} restantes
-                  </Text>
+                  </Typography>
                 )}
               </View>
             )}
@@ -712,36 +717,40 @@ const DriverEnRouteUI = React.memo(function DriverEnRouteUI({ booking, onArrived
       </View>
 
       {/* Card compacto na parte inferior */}
-      <View style={styles.bottomCard}>
+      <View style={[styles.bottomCard, { backgroundColor: theme.card }]}>
         {/* Botão de mensagem */}
-        <TouchableOpacity 
-          style={styles.messageButton}
+        <TouchableOpacity
+          style={[styles.messageButton, { backgroundColor: theme.card === '#1A1A1A' ? 'rgba(255,255,255,0.05)' : '#F5F5F5', borderColor: theme.border }]}
           onPress={() => {
             setIsChatBottomSheetOpen(true);
             setUnreadMessagesCount(0); // ✅ Resetar contador ao abrir
             chatBottomSheetRef.current?.expand();
           }}
         >
-          <Ionicons name="chatbubble-outline" size={20} color={LEAF_GREEN} />
-          <Text style={styles.messageButtonText}>Enviar mensagem</Text>
+          <Ionicons name="chatbubble-outline" size={20} color={theme.leafGreen || '#41D274'} />
+          <Typography variant="body" color={theme.text} style={{ marginLeft: 8 }}>{t('message')}</Typography>
           {unreadMessagesCount > 0 && (
             <View style={styles.unreadBadge}>
-              <Text style={styles.unreadBadgeText}>
+              <Typography variant="caption" weight="bold" color="#FFFFFF">
                 {unreadMessagesCount > 9 ? '9+' : unreadMessagesCount}
-              </Text>
+              </Typography>
             </View>
           )}
         </TouchableOpacity>
 
         {/* Botão principal - Cheguei */}
-        <TouchableOpacity style={styles.arrivedButton} onPress={handleArrived}>
-          <Text style={styles.arrivedButtonText}>{t('arrived_at_pickup')}</Text>
-        </TouchableOpacity>
+        <AnimatedButton
+          title={t('arrived_at_pickup')}
+          onPress={handleArrived}
+          style={{ marginBottom: 12 }}
+        />
 
         {/* Botão de cancelar */}
-        <TouchableOpacity style={styles.cancelButton} onPress={handleCancelRide}>
-          <Text style={styles.cancelButtonText}>Cancelar</Text>
-        </TouchableOpacity>
+        <AnimatedButton
+          title="Cancelar"
+          variant="danger-outline"
+          onPress={handleCancelRide}
+        />
       </View>
 
       {/* Modal de erro de distância */}
@@ -752,15 +761,16 @@ const DriverEnRouteUI = React.memo(function DriverEnRouteUI({ booking, onArrived
         onRequestClose={() => setDistanceError({ visible: false, message: '' })}
       >
         <View style={styles.distanceErrorOverlay}>
-          <View style={styles.distanceErrorCard}>
+          <View style={[styles.distanceErrorCard, { backgroundColor: theme.card }]}>
             <Ionicons name="alert-circle" size={32} color="#FF3B30" style={styles.distanceErrorIcon} />
-            <Text style={styles.distanceErrorText}>{distanceError.message}</Text>
-            <TouchableOpacity
-              style={styles.distanceErrorButton}
+            <Typography variant="body" align="center" color={theme.text} style={{ marginBottom: 24 }}>
+              {distanceError.message}
+            </Typography>
+            <AnimatedButton
+              title="Entendi"
               onPress={() => setDistanceError({ visible: false, message: '' })}
-            >
-              <Text style={styles.distanceErrorButtonText}>Entendi</Text>
-            </TouchableOpacity>
+              style={{ minWidth: 120 }}
+            />
           </View>
         </View>
       </Modal>
@@ -772,6 +782,8 @@ const DriverEnRouteUI = React.memo(function DriverEnRouteUI({ booking, onArrived
         snapPoints={chatSnapPoints}
         enablePanDownToClose={true}
         backdropComponent={renderChatBackdrop}
+        handleIndicatorStyle={{ backgroundColor: theme.textSecondary }}
+        backgroundStyle={{ backgroundColor: theme.card }}
         onChange={(index) => {
           setIsChatBottomSheetOpen(index >= 0);
           // ✅ Resetar contador quando abrir o bottom sheet
@@ -781,15 +793,15 @@ const DriverEnRouteUI = React.memo(function DriverEnRouteUI({ booking, onArrived
         }}
       >
         <BottomSheetView style={styles.chatBottomSheetContent}>
-          <View style={styles.chatHeader}>
-            <Text style={styles.chatHeaderTitle}>Conversa com {booking?.customer_name || 'Passageiro'}</Text>
+          <View style={[styles.chatHeader, { borderBottomColor: theme.border }]}>
+            <Typography variant="h2" color={theme.text}>Conversa com {booking?.customer_name || 'Passageiro'}</Typography>
             <TouchableOpacity
               onPress={() => {
                 chatBottomSheetRef.current?.close();
                 setIsChatBottomSheetOpen(false);
               }}
             >
-              <Ionicons name="close" size={24} color="#333" />
+              <Ionicons name="close" size={24} color={theme.text} />
             </TouchableOpacity>
           </View>
 
@@ -803,9 +815,9 @@ const DriverEnRouteUI = React.memo(function DriverEnRouteUI({ booking, onArrived
           >
             {chatMessages.length === 0 ? (
               <View style={styles.emptyMessagesContainer}>
-                <Ionicons name="chatbubbles-outline" size={48} color="#CCC" />
-                <Text style={styles.emptyMessagesText}>Nenhuma mensagem ainda</Text>
-                <Text style={styles.emptyMessagesSubtext}>Envie uma mensagem para o passageiro</Text>
+                <Ionicons name="chatbubbles-outline" size={48} color={theme.textSecondary} />
+                <Typography variant="h2" color={theme.textSecondary} style={{ marginTop: 16 }}>Nenhuma mensagem ainda</Typography>
+                <Typography variant="body" color={theme.textSecondary} style={{ marginTop: 8 }}>Envie uma mensagem para o passageiro</Typography>
               </View>
             ) : (
               chatMessages.map((message) => (
@@ -813,24 +825,18 @@ const DriverEnRouteUI = React.memo(function DriverEnRouteUI({ booking, onArrived
                   key={message.id}
                   style={[
                     styles.messageBubble,
-                    message.isOwn ? styles.messageBubbleOwn : styles.messageBubbleOther
+                    message.isOwn ? { backgroundColor: theme.leafGreen || '#41D274', alignSelf: 'flex-end', borderBottomRightRadius: 4 } : { backgroundColor: theme.card === '#1A1A1A' ? 'rgba(255,255,255,0.05)' : '#F0F0F0', alignSelf: 'flex-start', borderBottomLeftRadius: 4 }
                   ]}
                 >
-                  <Text style={[
-                    styles.messageText,
-                    message.isOwn ? styles.messageTextOwn : styles.messageTextOther
-                  ]}>
+                  <Typography variant="body" color={message.isOwn ? '#FFFFFF' : theme.text}>
                     {message.text}
-                  </Text>
-                  <Text style={[
-                    styles.messageTime,
-                    message.isOwn ? styles.messageTimeOwn : styles.messageTimeOther
-                  ]}>
+                  </Typography>
+                  <Typography variant="caption" color={message.isOwn ? 'rgba(255, 255, 255, 0.7)' : theme.textSecondary} style={{ marginTop: 4 }}>
                     {new Date(message.timestamp).toLocaleTimeString('pt-BR', {
                       hour: '2-digit',
                       minute: '2-digit'
                     })}
-                  </Text>
+                  </Typography>
                 </View>
               ))
             )}
@@ -838,13 +844,13 @@ const DriverEnRouteUI = React.memo(function DriverEnRouteUI({ booking, onArrived
 
           <KeyboardAvoidingView
             behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-            style={styles.chatInputContainer}
+            style={[styles.chatInputContainer, { borderTopColor: theme.border }]}
           >
-            <View style={styles.chatInputWrapper}>
+            <View style={[styles.chatInputWrapper, { backgroundColor: theme.card === '#1A1A1A' ? 'rgba(255,255,255,0.05)' : '#F5F5F5' }]}>
               <TextInput
-                style={styles.chatInput}
+                style={[styles.chatInput, { color: theme.text }]}
                 placeholder="Digite sua mensagem..."
-                placeholderTextColor="#999"
+                placeholderTextColor={theme.textSecondary}
                 value={messageText}
                 onChangeText={setMessageText}
                 multiline
@@ -853,7 +859,8 @@ const DriverEnRouteUI = React.memo(function DriverEnRouteUI({ booking, onArrived
               <TouchableOpacity
                 style={[
                   styles.sendButton,
-                  !messageText.trim() && styles.sendButtonDisabled
+                  { backgroundColor: theme.leafGreen || '#41D274' },
+                  !messageText.trim() && { backgroundColor: theme.card === '#1A1A1A' ? 'rgba(255,255,255,0.1)' : '#E0E0E0' }
                 ]}
                 onPress={handleSendMessage}
                 disabled={!messageText.trim()}

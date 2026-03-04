@@ -11,10 +11,14 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useTranslation } from 'react-i18next';
+import { useTheme } from '../../common-local/theme';
+import Typography from '../design-system/Typography';
+import AnimatedButton from '../design-system/AnimatedButton';
 
 
 export default function PassengerWaitingUI({ booking, onCancel }) {
   const { t } = useTranslation();
+  const theme = useTheme();
   const [waitingTime, setWaitingTime] = useState(0);
   const [estimatedArrival, setEstimatedArrival] = useState('--');
 
@@ -51,7 +55,7 @@ export default function PassengerWaitingUI({ booking, onCancel }) {
   };
 
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, { backgroundColor: theme.card }]}>
       {/* Header com informações do motorista */}
       <View style={styles.header}>
         <View style={styles.driverInfo}>
@@ -60,22 +64,26 @@ export default function PassengerWaitingUI({ booking, onCancel }) {
             style={styles.driverAvatar}
           />
           <View style={styles.driverDetails}>
-            <Text style={styles.driverName}>{booking?.driver_name || t('driver')}</Text>
-            <Text style={styles.carInfo}>
+            <Typography variant="h2" color={theme.text}>{booking?.driver_name || t('driver')}</Typography>
+            <Typography variant="body" color={theme.textSecondary}>
               {booking?.car_model} • {booking?.car_plate}
-            </Text>
+            </Typography>
             <View style={styles.ratingContainer}>
               <Ionicons name="star" size={16} color="#FFD700" />
-              <Text style={styles.rating}>{booking?.driver_rating || '5.0'}</Text>
+              <Typography variant="caption" color={theme.textSecondary} style={{ marginLeft: 4 }}>
+                {booking?.driver_rating || '5.0'}
+              </Typography>
             </View>
           </View>
         </View>
-        
+
         <View style={styles.statusContainer}>
-          <Text style={styles.statusText}>{t('driver_arriving')}</Text>
+          <Typography variant="label" color={theme.leafGreen || '#41D274'}>{t('driver_arriving')}</Typography>
           <View style={styles.waitingTimeContainer}>
             <Ionicons name="time" size={16} color="#FF6B6B" />
-            <Text style={styles.waitingTime}>{formatTime(waitingTime)}</Text>
+            <Typography variant="caption" color="#FF6B6B" style={{ marginLeft: 4, fontWeight: '500' }}>
+              {formatTime(waitingTime)}
+            </Typography>
           </View>
         </View>
       </View>
@@ -87,8 +95,8 @@ export default function PassengerWaitingUI({ booking, onCancel }) {
             <Ionicons name="location" size={20} color="#41D274" />
           </View>
           <View style={styles.locationText}>
-            <Text style={styles.locationLabel}>{t('pickup')}</Text>
-            <Text style={styles.locationAddress}>{booking?.pickup_address}</Text>
+            <Typography variant="caption" color={theme.textSecondary}>{t('pickup')}</Typography>
+            <Typography variant="body" color={theme.text} numberOfLines={2}>{booking?.pickup_address}</Typography>
           </View>
         </View>
 
@@ -97,60 +105,62 @@ export default function PassengerWaitingUI({ booking, onCancel }) {
             <Ionicons name="location" size={20} color="#FF6B6B" />
           </View>
           <View style={styles.locationText}>
-            <Text style={styles.locationLabel}>{t('destination')}</Text>
-            <Text style={styles.locationAddress}>{booking?.drop_address}</Text>
+            <Typography variant="caption" color={theme.textSecondary}>{t('destination')}</Typography>
+            <Typography variant="body" color={theme.text} numberOfLines={2}>{booking?.drop_address}</Typography>
           </View>
         </View>
 
         <View style={styles.tripDetails}>
           <View style={styles.detailItem}>
-            <Ionicons name="time" size={16} color="#666" />
-            <Text style={styles.detailText}>{estimatedArrival}</Text>
+            <Ionicons name="time" size={16} color={theme.textSecondary} />
+            <Typography variant="caption" color={theme.textSecondary} style={{ marginLeft: 6 }}>{estimatedArrival}</Typography>
           </View>
           <View style={styles.detailItem}>
-            <Ionicons name="map" size={16} color="#666" />
-            <Text style={styles.detailText}>{booking?.estimated_distance || '--'}</Text>
+            <Ionicons name="map" size={16} color={theme.textSecondary} />
+            <Typography variant="caption" color={theme.textSecondary} style={{ marginLeft: 6 }}>{booking?.estimated_distance || '--'}</Typography>
           </View>
           <View style={styles.detailItem}>
-            <Ionicons name="cash" size={16} color="#666" />
-            <Text style={styles.detailText}>R$ {booking?.estimated_fare || '--'}</Text>
+            <Ionicons name="cash" size={16} color={theme.textSecondary} />
+            <Typography variant="caption" color={theme.textSecondary} style={{ marginLeft: 6 }}>R$ {booking?.estimated_fare || '--'}</Typography>
           </View>
         </View>
       </View>
 
       {/* Status do motorista */}
-      <View style={styles.driverStatus}>
+      <View style={[styles.driverStatus, { backgroundColor: theme.card === '#1A1A1A' ? 'rgba(65, 210, 116, 0.1)' : '#F0F8FF' }]}>
         <View style={styles.statusIndicator}>
-          <ActivityIndicator size="small" color="#41D274" />
-          <Text style={styles.statusText}>{t('driver_en_route')}</Text>
+          <ActivityIndicator size="small" color={theme.leafGreen || '#41D274'} />
+          <Typography variant="label" color={theme.leafGreen || '#41D274'} style={{ marginLeft: 8 }}>{t('driver_en_route')}</Typography>
         </View>
-        <Text style={styles.statusDescription}>
+        <Typography variant="caption" color={theme.textSecondary} align="center">
           {t('driver_en_route_description')}
-        </Text>
+        </Typography>
       </View>
 
       {/* Botões de ação */}
       <View style={styles.actionButtons}>
         <TouchableOpacity style={styles.actionButton} onPress={handleContactDriver}>
-          <Ionicons name="call" size={24} color="#41D274" />
-          <Text style={styles.actionButtonText}>{t('call_driver')}</Text>
+          <Ionicons name="call" size={24} color={theme.leafGreen || '#41D274'} />
+          <Typography variant="caption" color={theme.textSecondary} style={{ marginTop: 5 }}>{t('call_driver')}</Typography>
         </TouchableOpacity>
 
         <TouchableOpacity style={styles.actionButton} onPress={() => Logger.log('Chat')}>
-          <Ionicons name="chatbubble" size={24} color="#41D274" />
-          <Text style={styles.actionButtonText}>{t('message')}</Text>
+          <Ionicons name="chatbubble" size={24} color={theme.leafGreen || '#41D274'} />
+          <Typography variant="caption" color={theme.textSecondary} style={{ marginTop: 5 }}>{t('message')}</Typography>
         </TouchableOpacity>
 
         <TouchableOpacity style={styles.actionButton} onPress={() => Logger.log('Compartilhar')}>
-          <Ionicons name="share" size={24} color="#41D274" />
-          <Text style={styles.actionButtonText}>{t('share')}</Text>
+          <Ionicons name="share" size={24} color={theme.leafGreen || '#41D274'} />
+          <Typography variant="caption" color={theme.textSecondary} style={{ marginTop: 5 }}>{t('share')}</Typography>
         </TouchableOpacity>
       </View>
 
       {/* Botão de cancelar */}
-      <TouchableOpacity style={styles.cancelButton} onPress={handleCancelRide}>
-        <Text style={styles.cancelButtonText}>{t('cancel_ride')}</Text>
-      </TouchableOpacity>
+      <AnimatedButton
+        title={t('cancel_ride')}
+        variant="danger"
+        onPress={handleCancelRide}
+      />
     </View>
   );
 }

@@ -33,32 +33,32 @@ const useWebSocket = (userId = null) => {
       // Wait for socket to be ready and available
       const maxRetries = 10;
       let retries = 0;
-      
+
       while (!webSocketManager.getSocket() && retries < maxRetries) {
         await new Promise(resolve => setTimeout(resolve, 500));
         retries++;
       }
-      
+
       if (webSocketManager.getSocket()) {
-          setConnectionStatus(prev => ({ 
-            ...prev, 
-            isConnecting: false, 
-            isConnected: true,
-            error: null 
-          }));
-          
-          if (user) {
-              webSocketManager.authenticate(user);
-          }
+        setConnectionStatus(prev => ({
+          ...prev,
+          isConnecting: false,
+          isConnected: true,
+          error: null
+        }));
+
+        if (user) {
+          webSocketManager.authenticate(user);
+        }
       } else {
-          throw new Error("Timeout ao obter socket.");
+        throw new Error("Timeout ao obter socket.");
       }
     } catch (error) {
       Logger.error('Erro ao conectar WebSocket:', error);
-      setConnectionStatus(prev => ({ 
-        ...prev, 
-        isConnecting: false, 
-        error: error.message 
+      setConnectionStatus(prev => ({
+        ...prev,
+        isConnecting: false,
+        error: error.message
       }));
     }
   }, [userId, connectionStatus.isConnecting, connectionStatus.isConnected]);
@@ -90,17 +90,10 @@ const useWebSocket = (userId = null) => {
     }
   }, []);
 
-  // Reconectar automaticamente
+  // Reconectar não é mais necessário manualmente pois o socket.io cuida disso
   const reconnect = useCallback(() => {
-    if (reconnectTimeoutRef.current) {
-      clearTimeout(reconnectTimeoutRef.current);
-    }
-
-    reconnectTimeoutRef.current = setTimeout(() => {
-      Logger.log('🔄 Tentando reconectar WebSocket...');
-      connect();
-    }, 3000); // 3 segundos
-  }, [connect]);
+    Logger.log('🔄 Reconnect requisitado (ignorado favor do auto-reconnect do Socket.io)');
+  }, []);
 
   // Atualizar localização
   const updateLocation = useCallback((latitude, longitude, platform = 'mobile') => {
@@ -110,7 +103,7 @@ const useWebSocket = (userId = null) => {
     }
 
     const success = webSocketManager.updateDriverLocation(user, latitude, longitude);
-    
+
     if (success) {
       setData(prev => ({
         ...prev,
@@ -190,33 +183,31 @@ const useWebSocket = (userId = null) => {
   useEffect(() => {
     // Evento de conexão
     webSocketManager.on('connect', () => {
-      setConnectionStatus(prev => ({ 
-        ...prev, 
-        isConnected: true, 
+      setConnectionStatus(prev => ({
+        ...prev,
+        isConnected: true,
         isConnecting: false,
-        error: null 
+        error: null
       }));
     });
 
     // Evento de desconexão
     webSocketManager.on('disconnect', (reason) => {
-      setConnectionStatus(prev => ({ 
-        ...prev, 
-        isConnected: false, 
-        isAuthenticated: false 
+      setConnectionStatus(prev => ({
+        ...prev,
+        isConnected: false,
+        isAuthenticated: false,
+        error: reason
       }));
-      
-      // Tentar reconectar automaticamente
-      if (reason !== 'io client disconnect') {
-        reconnect();
-      }
+
+      Logger.log(`🔌 [useWebSocket] Desconectado: ${reason}. Aguardando auto-reconnect...`);
     });
 
     // Evento de autenticação
     webSocketManager.on('authenticated', (authData) => {
-      setConnectionStatus(prev => ({ 
-        ...prev, 
-        isAuthenticated: true 
+      setConnectionStatus(prev => ({
+        ...prev,
+        isAuthenticated: true
       }));
     });
 
@@ -252,9 +243,9 @@ const useWebSocket = (userId = null) => {
 
     // Evento de erro
     webSocketManager.on('error', (error) => {
-      setConnectionStatus(prev => ({ 
-        ...prev, 
-        error: error.message || 'Erro WebSocket desconhecido' 
+      setConnectionStatus(prev => ({
+        ...prev,
+        error: error.message || 'Erro WebSocket desconhecido'
       }));
     });
 
@@ -274,10 +265,10 @@ const useWebSocket = (userId = null) => {
   return {
     // Status
     connectionStatus,
-    
+
     // Dados
     data,
-    
+
     // Métodos
     connect,
     disconnect,
@@ -289,7 +280,7 @@ const useWebSocket = (userId = null) => {
     ping,
     startLocationUpdates,
     stopLocationUpdates,
-    
+
     // Informações de debug
     debugInfo: webSocketManager.getConnectionStatus(),
   };

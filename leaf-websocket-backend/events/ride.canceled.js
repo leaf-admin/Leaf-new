@@ -19,7 +19,7 @@ class RideCanceledEvent extends CanonicalEvent {
         
         const eventData = {
             ...data,
-            traceId: validatedTraceId(data, EVENT_TYPES.RIDE_CANCELED),
+            traceId: validatedTraceId,
             correlationId: data.correlationId || data.bookingId // ✅ Adicionar correlationId
         };
         

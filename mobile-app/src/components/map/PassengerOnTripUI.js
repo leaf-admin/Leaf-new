@@ -10,10 +10,15 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useTranslation } from 'react-i18next';
+import { useNavigation } from '@react-navigation/native';
+import { useTheme } from '../../common-local/theme';
+import Typography from '../design-system/Typography';
+import AnimatedButton from '../design-system/AnimatedButton';
 
 
 export default function PassengerOnTripUI({ booking }) {
   const { t } = useTranslation();
+  const theme = useTheme();
   const [tripTime, setTripTime] = useState(0);
   const [estimatedArrival, setEstimatedArrival] = useState('--');
 
@@ -31,6 +36,8 @@ export default function PassengerOnTripUI({ booking }) {
     return `${mins}:${secs.toString().padStart(2, '0')}`;
   };
 
+  const navigation = useNavigation();
+
   const handleEmergency = () => {
     Alert.alert(
       t('emergency'),
@@ -43,7 +50,7 @@ export default function PassengerOnTripUI({ booking }) {
   };
 
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, { backgroundColor: theme.card }]}>
       {/* Header com informações do motorista */}
       <View style={styles.header}>
         <View style={styles.driverInfo}>
@@ -52,16 +59,16 @@ export default function PassengerOnTripUI({ booking }) {
             style={styles.driverAvatar}
           />
           <View style={styles.driverDetails}>
-            <Text style={styles.driverName}>{booking?.driver_name || t('driver')}</Text>
-            <Text style={styles.carInfo}>
+            <Typography variant="h2" color={theme.text}>{booking?.driver_name || t('driver')}</Typography>
+            <Typography variant="body" color={theme.textSecondary}>
               {booking?.car_model} • {booking?.car_plate}
-            </Text>
+            </Typography>
           </View>
         </View>
-        
+
         <View style={styles.statusContainer}>
-          <Text style={styles.statusText}>{t('on_trip')}</Text>
-          <Text style={styles.tripTime}>{formatTime(tripTime)}</Text>
+          <Typography variant="label" color={theme.leafGreen || '#41D274'}>{t('on_trip')}</Typography>
+          <Typography variant="h2" color={theme.text}>{formatTime(tripTime)}</Typography>
         </View>
       </View>
 
@@ -72,8 +79,8 @@ export default function PassengerOnTripUI({ booking }) {
             <Ionicons name="location" size={20} color="#41D274" />
           </View>
           <View style={styles.locationText}>
-            <Text style={styles.locationLabel}>{t('pickup')}</Text>
-            <Text style={styles.locationAddress}>{booking?.pickup_address}</Text>
+            <Typography variant="caption" color={theme.textSecondary}>{t('pickup')}</Typography>
+            <Typography variant="body" color={theme.text} numberOfLines={2}>{booking?.pickup_address}</Typography>
           </View>
         </View>
 
@@ -82,23 +89,23 @@ export default function PassengerOnTripUI({ booking }) {
             <Ionicons name="location" size={20} color="#FF6B6B" />
           </View>
           <View style={styles.locationText}>
-            <Text style={styles.locationLabel}>{t('destination')}</Text>
-            <Text style={styles.locationAddress}>{booking?.drop_address}</Text>
+            <Typography variant="caption" color={theme.textSecondary}>{t('destination')}</Typography>
+            <Typography variant="body" color={theme.text} numberOfLines={2}>{booking?.drop_address}</Typography>
           </View>
         </View>
 
         <View style={styles.tripDetails}>
           <View style={styles.detailItem}>
-            <Ionicons name="time" size={16} color="#666" />
-            <Text style={styles.detailText}>{estimatedArrival}</Text>
+            <Ionicons name="time" size={16} color={theme.textSecondary} />
+            <Typography variant="caption" color={theme.textSecondary} style={{ marginLeft: 6 }}>{estimatedArrival}</Typography>
           </View>
           <View style={styles.detailItem}>
-            <Ionicons name="map" size={16} color="#666" />
-            <Text style={styles.detailText}>{booking?.remaining_distance || '--'}</Text>
+            <Ionicons name="map" size={16} color={theme.textSecondary} />
+            <Typography variant="caption" color={theme.textSecondary} style={{ marginLeft: 6 }}>{booking?.remaining_distance || '--'}</Typography>
           </View>
           <View style={styles.detailItem}>
-            <Ionicons name="cash" size={16} color="#666" />
-            <Text style={styles.detailText}>R$ {booking?.current_fare || '--'}</Text>
+            <Ionicons name="cash" size={16} color={theme.textSecondary} />
+            <Typography variant="caption" color={theme.textSecondary} style={{ marginLeft: 6 }}>R$ {booking?.current_fare || '--'}</Typography>
           </View>
         </View>
       </View>
@@ -106,27 +113,35 @@ export default function PassengerOnTripUI({ booking }) {
       {/* Botões de ação */}
       <View style={styles.actionButtons}>
         <TouchableOpacity style={styles.actionButton} onPress={() => Logger.log('Chat')}>
-          <Ionicons name="chatbubble" size={24} color="#41D274" />
-          <Text style={styles.actionButtonText}>{t('message')}</Text>
+          <Ionicons name="chatbubble" size={24} color={theme.leafGreen || '#41D274'} />
+          <Typography variant="caption" color={theme.textSecondary} style={{ marginTop: 5 }}>{t('message')}</Typography>
         </TouchableOpacity>
 
         <TouchableOpacity style={styles.actionButton} onPress={() => Logger.log('Compartilhar')}>
-          <Ionicons name="share" size={24} color="#41D274" />
-          <Text style={styles.actionButtonText}>{t('share')}</Text>
+          <Ionicons name="share" size={24} color={theme.leafGreen || '#41D274'} />
+          <Typography variant="caption" color={theme.textSecondary} style={{ marginTop: 5 }}>{t('share')}</Typography>
         </TouchableOpacity>
 
-        <TouchableOpacity style={styles.actionButton} onPress={handleEmergency}>
-          <Ionicons name="warning" size={24} color="#FF6B6B" />
-          <Text style={styles.actionButtonText}>{t('emergency')}</Text>
+        <TouchableOpacity style={styles.actionButton} onPress={() => navigation.navigate('Search')}>
+          <Ionicons name="map-outline" size={24} color={theme.leafGreen || '#41D274'} />
+          <Typography variant="caption" color={theme.textSecondary} style={{ marginTop: 5 }}>{t('change_destination', 'Alterar Destino')}</Typography>
         </TouchableOpacity>
       </View>
 
       {/* Informações de segurança */}
-      <View style={styles.safetyInfo}>
-        <Text style={styles.safetyTitle}>{t('safety_tips')}</Text>
-        <Text style={styles.safetyText}>
+      <View style={[styles.safetyInfo, { backgroundColor: theme.card === '#1A1A1A' ? 'rgba(255, 193, 7, 0.1)' : '#FFF3CD', borderLeftColor: '#FFC107' }]}>
+        <Typography variant="label" color={theme.card === '#1A1A1A' ? '#FFC107' : '#856404'}>{t('safety_tips')}</Typography>
+        <Typography variant="caption" color={theme.card === '#1A1A1A' ? '#FFC107' : '#856404'} style={{ marginTop: 4 }}>
           {t('trip_safety_reminder')}
-        </Text>
+        </Typography>
+      </View>
+
+      <View style={{ marginTop: 20 }}>
+        <AnimatedButton
+          title={t('emergency')}
+          variant="danger"
+          onPress={handleEmergency}
+        />
       </View>
     </View>
   );

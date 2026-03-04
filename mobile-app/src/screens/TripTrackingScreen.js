@@ -66,7 +66,7 @@ const TripTrackingScreen = ({ navigation, route }) => {
         heading: data.heading,
         speed: data.speed
       });
-      
+
       // Centralizar mapa na nova posição
       if (mapRef.current) {
         mapRef.current.animateToRegion({
@@ -187,7 +187,7 @@ const TripTrackingScreen = ({ navigation, route }) => {
   return (
     <View style={styles.container}>
       <StatusBar barStyle="light-content" backgroundColor="#2E8B57" />
-      
+
       {/* Header */}
       <View style={styles.header}>
         <TouchableOpacity
@@ -196,12 +196,12 @@ const TripTrackingScreen = ({ navigation, route }) => {
         >
           <Icon name="arrow-back" type="material" color="#fff" size={24} />
         </TouchableOpacity>
-        
+
         <View style={styles.headerCenter}>
           <Text style={styles.headerTitle}>Acompanhar Viagem</Text>
           <Text style={styles.headerSubtitle}>{eta}</Text>
         </View>
-        
+
         <TouchableOpacity
           style={styles.helpButton}
           onPress={() => navigation.navigate('Support')}
@@ -213,11 +213,6 @@ const TripTrackingScreen = ({ navigation, route }) => {
       {/* Mapa */}
       <MapView
         ref={mapRef}
-                    <UrlTile
-                        urlTemplate="https://a.tile.openstreetmap.org/{z}/{x}/{y}.png"
-                        maximumZ={19}
-                        flipY={false}
-                    />
         provider={PROVIDER_GOOGLE}
         style={styles.map}
         initialRegion={{
@@ -238,6 +233,11 @@ const TripTrackingScreen = ({ navigation, route }) => {
         toolbarEnabled={false}
         moveOnMarkerPress={false}
       >
+        <UrlTile
+          urlTemplate="https://a.tile.openstreetmap.org/{z}/{x}/{y}.png"
+          maximumZ={19}
+          flipY={false}
+        />
         {/* Rota */}
         <Polyline
           coordinates={routeCoordinates}
@@ -245,7 +245,7 @@ const TripTrackingScreen = ({ navigation, route }) => {
           strokeWidth={4}
           lineDashPattern={[1]}
         />
-        
+
         {/* Motorista */}
         <Marker
           coordinate={driverLocation}
@@ -256,7 +256,7 @@ const TripTrackingScreen = ({ navigation, route }) => {
             <Icon name="directions-car" type="material" color="#2E8B57" size={24} />
           </View>
         </Marker>
-        
+
         {/* Destino */}
         <Marker
           coordinate={destination}
@@ -284,7 +284,7 @@ const TripTrackingScreen = ({ navigation, route }) => {
       <BottomSheetWrapper
         snapPoints={['30%', '50%']}
         index={0}
-        onClose={() => {}}
+        onClose={() => { }}
       >
         <View style={styles.driverInfoContainer}>
           <View style={styles.driverHeader}>
@@ -295,12 +295,12 @@ const TripTrackingScreen = ({ navigation, route }) => {
                 <Icon name="person" type="material" color="#666" size={32} />
               )}
             </View>
-            
+
             <View style={styles.driverDetails}>
               <Text style={styles.driverName}>{driverInfo.name}</Text>
               <Text style={styles.driverVehicle}>{driverInfo.vehicle}</Text>
               <Text style={styles.driverPlate}>{driverInfo.plate}</Text>
-              
+
               <View style={styles.ratingContainer}>
                 <Icon name="star" type="material" color="#FFD700" size={16} />
                 <Text style={styles.ratingText}>{driverInfo.rating}</Text>
@@ -316,7 +316,7 @@ const TripTrackingScreen = ({ navigation, route }) => {
               <Icon name="phone" type="material" color="#fff" size={20} />
               <Text style={styles.actionButtonText}>Ligar</Text>
             </TouchableOpacity>
-            
+
             <TouchableOpacity
               style={[styles.actionButton, styles.chatButton]}
               onPress={() => navigation.navigate('Chat', { driverId: 'driver_123' })}
@@ -324,7 +324,7 @@ const TripTrackingScreen = ({ navigation, route }) => {
               <Icon name="chat" type="material" color="#fff" size={20} />
               <Text style={styles.actionButtonText}>Chat</Text>
             </TouchableOpacity>
-            
+
             <TouchableOpacity
               style={[styles.actionButton, styles.cancelButton]}
               onPress={handleCancelTrip}

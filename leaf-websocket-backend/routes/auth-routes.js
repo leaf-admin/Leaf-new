@@ -21,7 +21,7 @@ router.post('/login', async (req, res) => {
 
     // Simular autenticação (em produção, usar Firebase Auth)
     const user = await authenticateUser(phone, password, userType);
-    
+
     if (!user) {
       return res.status(401).json({
         success: false,
@@ -62,9 +62,9 @@ router.post('/login', async (req, res) => {
 router.get('/api/auth/verify', async (req, res) => {
   try {
     const authHeader = req.headers.authorization;
-    
+
     // Aceitar token no header ou query string
-    const token = authHeader 
+    const token = authHeader
       ? authHeader.replace(/^Bearer\s+/i, '')
       : req.query.token;
 
@@ -79,7 +79,7 @@ router.get('/api/auth/verify', async (req, res) => {
     try {
       // Verificar token Firebase
       const decodedToken = await admin.auth().verifyIdToken(token);
-      
+
       // Buscar dados adicionais do usuário no Firestore (opcional)
       let userData = null;
       try {
@@ -130,8 +130,8 @@ router.get('/api/auth/verify', async (req, res) => {
 router.post('/api/auth/verify', async (req, res) => {
   try {
     const authHeader = req.headers.authorization;
-    
-    const token = authHeader 
+
+    const token = authHeader
       ? authHeader.replace(/^Bearer\s+/i, '')
       : req.body.token;
 
@@ -145,7 +145,7 @@ router.post('/api/auth/verify', async (req, res) => {
 
     try {
       const decodedToken = await admin.auth().verifyIdToken(token);
-      
+
       let userData = null;
       try {
         const userDoc = await admin.firestore().collection('users').doc(decodedToken.uid).get();
@@ -194,7 +194,7 @@ router.post('/api/auth/verify', async (req, res) => {
 router.get('/verify', async (req, res) => {
   try {
     const authHeader = req.headers.authorization;
-    
+
     if (!authHeader) {
       return res.status(401).json({
         success: false,
@@ -203,10 +203,10 @@ router.get('/verify', async (req, res) => {
     }
 
     const token = authHeader.replace(/^Bearer\s+/i, '');
-    
+
     try {
       const decodedToken = await admin.auth().verifyIdToken(token);
-      
+
       res.json({
         success: true,
         user: {
@@ -237,7 +237,7 @@ router.get('/verify', async (req, res) => {
 router.post('/refresh', async (req, res) => {
   try {
     const authHeader = req.headers.authorization;
-    
+
     if (!authHeader) {
       return res.status(401).json({
         success: false,
@@ -246,7 +246,7 @@ router.post('/refresh', async (req, res) => {
     }
 
     const decoded = graphqlAuth.verifyToken(authHeader);
-    
+
     // Gerar novo token
     const newToken = graphqlAuth.generateToken({
       userId: decoded.userId,
@@ -274,10 +274,10 @@ router.post('/refresh', async (req, res) => {
 router.post('/logout', async (req, res) => {
   try {
     const authHeader = req.headers.authorization;
-    
+
     if (authHeader) {
       const decoded = graphqlAuth.verifyToken(authHeader);
-      
+
       // Log de auditoria
       graphqlAuth.logAuditEvent(decoded.userId, 'LOGOUT', {
         ip: req.ip,
@@ -302,9 +302,14 @@ router.post('/logout', async (req, res) => {
 // Função auxiliar para autenticação (simulada)
 async function authenticateUser(phone, password, userType) {
   try {
-    // Em produção, usar Firebase Auth
-    // Por enquanto, simular com dados mock
-    
+    // Em produção, não permitir mock login
+    if (process.env.NODE_ENV === 'production') {
+      logStructured('warn', 'Tentativa de login mock em produção', { phone, userType });
+      return null;
+    }
+
+    // Por enquanto, simular com dados mock para ambientes dev/test
+
     const mockUsers = {
       '+5511999999999': {
         id: 'user-001',
@@ -333,7 +338,7 @@ async function authenticateUser(phone, password, userType) {
     };
 
     const user = mockUsers[phone];
-    
+
     if (user && user.password === password && user.userType === userType) {
       // Remover senha do retorno
       delete user.password;

@@ -1,12 +1,12 @@
 import Logger from '../utils/Logger';
 import React, { useState, useEffect, useRef } from 'react';
-import { 
-  View, 
-  Text, 
-  StyleSheet, 
-  TextInput, 
-  TouchableOpacity, 
-  Alert, 
+import {
+  View,
+  Text,
+  StyleSheet,
+  TextInput,
+  TouchableOpacity,
+  Alert,
   ActivityIndicator,
   Dimensions,
   Platform,
@@ -35,14 +35,14 @@ const DARK_GRAY = '#333333';
 export default function PhoneInputScreen() {
   const navigation = useNavigation();
   const route = useRoute();
-  
+
   const [phone, setPhone] = useState('');
   const [name, setName] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [termsAccepted, setTermsAccepted] = useState(false);
   const [isKeyboardVisible, setIsKeyboardVisible] = useState(false);
   const [keyboardHeight, setKeyboardHeight] = useState(0);
-  
+
   const userType = route.params?.userType || 'passenger';
 
   // Animações
@@ -74,7 +74,7 @@ export default function PhoneInputScreen() {
         setKeyboardHeight(event.endCoordinates.height);
       }
     );
-    
+
     const keyboardDidHideListener = Keyboard.addListener(
       Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide',
       () => {
@@ -93,7 +93,7 @@ export default function PhoneInputScreen() {
   const formatPhoneNumber = (text) => {
     // Remove tudo que não é número
     const numbers = text.replace(/\D/g, '');
-    
+
     // Aplica a máscara (XX) XXXXX-XXXX
     if (numbers.length <= 2) {
       return numbers;
@@ -131,58 +131,58 @@ export default function PhoneInputScreen() {
     }
 
     setIsLoading(true);
-    
+
     try {
       Logger.log("PhoneInputScreen - Iniciando envio de OTP híbrido para:", phone);
-      
+
       // Formatar telefone
       const cleanPhone = phone.replace(/\D/g, '');
       const formattedPhone = `+55${cleanPhone}`;
-      
+
       Logger.log("PhoneInputScreen - Telefone formatado:", formattedPhone);
-      
+
       // Inicializar serviço híbrido
       await hybridOTPService.initialize();
-      
+
       // Enviar OTP usando estratégia híbrida (SMS + WhatsApp fallback)
       const result = await hybridOTPService.sendOTP(formattedPhone);
-      
+
       Logger.log("PhoneInputScreen - Resultado do envio:", result);
-      
+
       if (result.success) {
         // Salvar dados temporários
-        const tempData = { 
-          phone: formattedPhone, 
-          name, 
+        const tempData = {
+          phone: formattedPhone,
+          name,
           userType,
           verificationId: result.verificationId,
           otpProvider: result.provider,
           otpCode: result.otp // Para debug/teste
         };
         await AsyncStorage.setItem('@temp_user_data', JSON.stringify(tempData));
-        
+
         // Mostrar feedback do provedor usado
         const providerText = result.provider === 'sms' ? 'SMS' : 'WhatsApp';
         Logger.log(`PhoneInputScreen - OTP enviado via ${providerText}`);
-        
+
         // Navegar para tela de OTP
-        navigation.navigate('OTP', { 
-          phone: formattedPhone, 
-          name, 
+        navigation.navigate('OTP', {
+          phone: formattedPhone,
+          name,
           userType,
           verificationId: result.verificationId,
           otpProvider: result.provider
         });
-        
+
       } else {
         throw new Error(result.error || 'Falha no envio do OTP');
       }
-      
+
     } catch (error) {
       Logger.error("PhoneInputScreen - Erro ao enviar OTP:", error);
-      
+
       let errorMessage = "Não foi possível enviar o código. Tente novamente.";
-      
+
       if (error.message.includes('invalid-phone-number')) {
         errorMessage = "Número de telefone inválido. Verifique o formato.";
       } else if (error.message.includes('too-many-requests') || error.message.includes('Muitas tentativas')) {
@@ -192,7 +192,7 @@ export default function PhoneInputScreen() {
       } else if (error.message.includes('SMS e WhatsApp falharam')) {
         errorMessage = "SMS e WhatsApp não estão disponíveis. Tente novamente mais tarde.";
       }
-      
+
       Alert.alert("Erro", errorMessage);
     } finally {
       setIsLoading(false);
@@ -223,11 +223,11 @@ export default function PhoneInputScreen() {
     <View style={styles.container}>
       {/* Background com cor estática */}
       <View style={styles.backgroundContainer} />
-      
+
       {/* Logo da Leaf no topo - só mostra quando teclado não está visível */}
       {!isKeyboardVisible && (
         <View style={styles.logoContainer}>
-          <Image 
+          <Image
             source={require('../../assets/images/leaftransparentbg.png')}
             style={styles.logo}
             resizeMode="contain"
@@ -236,20 +236,20 @@ export default function PhoneInputScreen() {
       )}
 
       {/* BOTTOM SHEET ULTRA FLAT */}
-      <Animated.View 
+      <Animated.View
         style={[
           styles.bottomSheet,
           {
             opacity: fadeAnim,
             height: keyboardHeight > 0 ? height * 0.6 : height * 0.65,
             transform: [
-              { 
+              {
                 translateY: cardAnim.interpolate({
                   inputRange: [0, 1],
                   outputRange: [height, 0]
                 })
               },
-              { 
+              {
                 scale: cardAnim.interpolate({
                   inputRange: [0, 1],
                   outputRange: [0.9, 1]
@@ -261,7 +261,7 @@ export default function PhoneInputScreen() {
       >
         {/* Handle do bottom sheet */}
         <View style={styles.handle} />
-        
+
         {/* ScrollView para permitir rolagem quando o teclado aparecer */}
         <ScrollView
           style={styles.scrollView}
@@ -292,7 +292,7 @@ export default function PhoneInputScreen() {
                 <Text style={styles.countryCode}>+55</Text>
                 <Text style={styles.dropdownArrow}>▼</Text>
               </TouchableOpacity>
-              
+
               {/* Campo de Telefone */}
               <TextInput
                 style={styles.phoneInput}
@@ -307,7 +307,7 @@ export default function PhoneInputScreen() {
 
             {/* Checkbox de Termos */}
             <View style={styles.termsContainer}>
-              <TouchableOpacity 
+              <TouchableOpacity
                 style={[styles.checkbox, termsAccepted && styles.checkboxChecked]}
                 onPress={() => setTermsAccepted(!termsAccepted)}
               >
@@ -325,9 +325,9 @@ export default function PhoneInputScreen() {
 
         {/* Botão Próximo */}
         <View style={styles.footer}>
-          <TouchableOpacity 
+          <TouchableOpacity
             style={[
-              styles.nextButton, 
+              styles.nextButton,
               (!validatePhone() || !termsAccepted || isLoading) && styles.nextButtonDisabled
             ]}
             onPress={handleNext}
@@ -350,7 +350,7 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: LEAF_GREEN,
   },
-  
+
   // Background com cor estática
   backgroundContainer: {
     position: 'absolute',
@@ -362,7 +362,7 @@ const styles = StyleSheet.create({
     width: width,
     height: height,
   },
-  
+
   // Logo da Leaf
   logoContainer: {
     position: 'absolute',
@@ -372,7 +372,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     zIndex: 1,
   },
-  
+
   // Header - IDÊNTICO AO DA TELA ANTERIOR
   header: {
     position: 'absolute',
@@ -386,7 +386,7 @@ const styles = StyleSheet.create({
     width: 389,
     height: 194,
   },
-  
+
   // BOTTOM SHEET ULTRA FLAT
   bottomSheet: {
     position: 'absolute',
@@ -397,14 +397,14 @@ const styles = StyleSheet.create({
     borderTopLeftRadius: 20,
     borderTopRightRadius: 20,
     padding: 32,
-    paddingBottom: 40,
+    paddingBottom: 60, // Aumentado de 40 para 60 para elevar o botão de rodapé
     shadowColor: '#000',
     shadowOffset: { width: 0, height: -4 },
     shadowOpacity: 0.1,
     shadowRadius: 12,
     elevation: 8,
   },
-  
+
   // Handle do bottom sheet
   handle: {
     width: 40,
@@ -414,7 +414,7 @@ const styles = StyleSheet.create({
     alignSelf: 'center',
     marginBottom: 20,
   },
-  
+
   // ScrollView
   scrollView: {
     flex: 1,
@@ -423,13 +423,13 @@ const styles = StyleSheet.create({
     flexGrow: 1,
     paddingBottom: 20,
   },
-  
+
   // Formulário
   formContainer: {
     flex: 1,
     paddingTop: 20,
   },
-  
+
   // Campo de nome
   nameInputContainer: {
     backgroundColor: WHITE,
@@ -445,7 +445,7 @@ const styles = StyleSheet.create({
     color: BLACK,
     paddingVertical: 8,
   },
-  
+
   // Campo de telefone
   phoneInputContainer: {
     flexDirection: 'row',
@@ -483,7 +483,7 @@ const styles = StyleSheet.create({
     color: BLACK,
     paddingVertical: 8,
   },
-  
+
   // Termos
   termsContainer: {
     flexDirection: 'row',
@@ -521,7 +521,7 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     textDecorationLine: 'underline',
   },
-  
+
   // Footer
   footer: {
     marginTop: 'auto',

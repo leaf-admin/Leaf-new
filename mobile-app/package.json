@@ -36,7 +36,7 @@
     "test:e2e:device": "bash scripts/run-test-device.sh",
     "test:device": "bash scripts/test-device-simple.sh",
     "device:connect": "bash scripts/connect-device.sh",
-    "build:standalone": "bash scripts/build-standalone-for-maestro.sh",
+    "reverse": "adb reverse tcp:3001 tcp:3001 && adb reverse tcp:8081 tcp:8081",
     "emulator:setup": "bash scripts/setup-emulator.sh"
   },
   "dependencies": {

@@ -106,10 +106,19 @@ class PersistentRideNotificationService {
             const { data } = remoteMessage;
 
             if (data && data.bookingId && data.status) {
-                if (data.status === 'completed' || data.status === 'cancelled') {
+                // Parse potential JSON strings from FCM data payload
+                const processedData = { ...data };
+                if (typeof processedData.pickup === 'string') {
+                    try { processedData.pickup = JSON.parse(processedData.pickup); } catch (e) { }
+                }
+                if (typeof processedData.destination === 'string') {
+                    try { processedData.destination = JSON.parse(processedData.destination); } catch (e) { }
+                }
+
+                if (processedData.status === 'completed' || processedData.status === 'cancelled') {
                     await this.dismissRideNotification();
                 } else {
-                    await this.updateRideNotification(data);
+                    await this.updateRideNotification(processedData);
                 }
             }
         };

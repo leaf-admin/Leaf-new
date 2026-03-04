@@ -23,9 +23,9 @@
         <div class='clearfix'>
             
             <div class='fl pad1y space-right2'>
-                <span class="strong">25.53% </span>
+                <span class="strong">23.52% </span>
                 <span class="quiet">Statements</span>
-                <span class='fraction'>12/47</span>
+                <span class='fraction'>12/51</span>
             </div>
         
             
@@ -44,9 +44,9 @@
         
             
             <div class='fl pad1y space-right2'>
-                <span class="strong">25.53% </span>
+                <span class="strong">23.52% </span>
                 <span class="quiet">Lines</span>
-                <span class='fraction'>12/47</span>
+                <span class='fraction'>12/51</span>
             </div>
         
             
@@ -205,7 +205,16 @@
 <a name='L140'></a><a href='#L140'>140</a>
 <a name='L141'></a><a href='#L141'>141</a>
 <a name='L142'></a><a href='#L142'>142</a>
-<a name='L143'></a><a href='#L143'>143</a></td><td class="line-coverage quiet"><span class="cline-any cline-neutral">&nbsp;</span>
+<a name='L143'></a><a href='#L143'>143</a>
+<a name='L144'></a><a href='#L144'>144</a>
+<a name='L145'></a><a href='#L145'>145</a>
+<a name='L146'></a><a href='#L146'>146</a>
+<a name='L147'></a><a href='#L147'>147</a>
+<a name='L148'></a><a href='#L148'>148</a>
+<a name='L149'></a><a href='#L149'>149</a>
+<a name='L150'></a><a href='#L150'>150</a>
+<a name='L151'></a><a href='#L151'>151</a>
+<a name='L152'></a><a href='#L152'>152</a></td><td class="line-coverage quiet"><span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
@@ -315,11 +324,20 @@
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-no">&nbsp;</span>
@@ -384,7 +402,7 @@ try {
 // Configuração de sampling baseada em ambiente
 function <span class="fstat-no" title="function not covered" >getSamplingRate(</span>) {
     const env = <span class="cstat-no" title="statement not covered" >process.env.NODE_ENV || 'development';</span>
-    
+&nbsp;
 <span class="cstat-no" title="statement not covered" >    switch (env) {</span>
         case 'production':
             // Sampling 1-5% em produção
@@ -401,7 +419,7 @@ function <span class="fstat-no" title="function not covered" >getSamplingRate(</
 function <span class="fstat-no" title="function not covered" >getExporter(</span>) {
     // ✅ Usar OTLP HTTP para Tempo
     const tempoEndpoint = <span class="cstat-no" title="statement not covered" >process.env.TEMPO_ENDPOINT || process.env.OTEL_EXPORTER_OTLP_ENDPOINT || 'http://localhost:4318';</span>
-    
+&nbsp;
 <span class="cstat-no" title="statement not covered" >    return new OTLPTraceExporter({</span>
         url: `${tempoEndpoint}/v1/traces`,
         // Headers opcionais (se necessário autenticação)
@@ -428,7 +446,7 @@ function <span class="fstat-no" title="function not covered" >initializeTracer(<
     }
 &nbsp;
     const samplingRate = <span class="cstat-no" title="statement not covered" >getSamplingRate();</span>
-    
+&nbsp;
     // Criar resource usando resourceFromAttributes
     const resourceAttrs = <span class="cstat-no" title="statement not covered" >{};</span>
 <span class="cstat-no" title="statement not covered" >    if (SemanticResourceAttributes.SERVICE_NAME) {</span>
@@ -446,9 +464,9 @@ function <span class="fstat-no" title="function not covered" >initializeTracer(<
     } else {
 <span class="cstat-no" title="statement not covered" >        resourceAttrs['deployment.environment'] = process.env.NODE_ENV || 'development';</span>
     }
-    
+&nbsp;
     const resource = <span class="cstat-no" title="statement not covered" >resources.resourceFromAttributes(resourceAttrs);</span>
-    
+&nbsp;
 <span class="cstat-no" title="statement not covered" >    sdk = new NodeSDK({</span>
         resource: resource,
         traceExporter: getExporter(),
@@ -456,14 +474,23 @@ function <span class="fstat-no" title="function not covered" >initializeTracer(<
         // Vamos criar spans manualmente nos pontos críticos
     });
 &nbsp;
-<span class="cstat-no" title="statement not covered" >    sdk.start();</span>
-    
-<span class="cstat-no" title="statement not covered" >    logStructured('info', 'OpenTelemetry inicializado', {</span>
-        service: 'opentelemetry',
-        operation: 'initialize',
-        samplingRate: (samplingRate * 100).toFixed(1) + '%'
-    });
-    
+<span class="cstat-no" title="statement not covered" >    try {</span>
+<span class="cstat-no" title="statement not covered" >        sdk.start();</span>
+&nbsp;
+<span class="cstat-no" title="statement not covered" >        logStructured('info', 'OpenTelemetry inicializado', {</span>
+            service: 'opentelemetry',
+            operation: 'initialize',
+            samplingRate: (samplingRate * 100).toFixed(1) + '%'
+        });
+    } catch (error) {
+<span class="cstat-no" title="statement not covered" >        logStructured('error', 'Falha ao iniciar OpenTelemetry SDK (provavelmente coletor offline)', {</span>
+            service: 'opentelemetry',
+            error: error.message
+        });
+<span class="cstat-no" title="statement not covered" >        sdk = null;</span>
+<span class="cstat-no" title="statement not covered" >        return trace.getTracer('leaf-backend-mock');</span>
+    }
+&nbsp;
 <span class="cstat-no" title="statement not covered" >    return trace.getTracer('leaf-backend');</span>
 }
 &nbsp;
@@ -496,7 +523,7 @@ module.exports = {
             <div class='footer quiet pad2 space-top1 center small'>
                 Code coverage generated by
                 <a href="https://istanbul.js.org/" target="_blank" rel="noopener noreferrer">istanbul</a>
-                at 2026-02-25T13:57:11.907Z
+                at 2026-03-02T19:04:06.250Z
             </div>
         <script src="../prettify.js"></script>
         <script>

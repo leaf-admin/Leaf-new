@@ -12,7 +12,8 @@ import {
     Linking,
     Alert,
     Share,
-    ScrollView
+    ScrollView,
+    ActivityIndicator
 } from 'react-native';
 import { TouchableOpacity as OldTouch } from 'react-native';
 import { Icon, Button } from 'react-native-elements';
@@ -29,7 +30,7 @@ import carImageIcon from '../../assets/images/track_Car.png';
 import * as ImagePicker from 'expo-image-picker';
 import moment from 'moment/min/moment-with-locales';
 import { CommonActions } from '@react-navigation/native';
-import { appConsts, MAIN_COLOR, SECONDORY_COLOR } from '../common/sharedFunctions';
+import { appConsts, MAIN_COLOR, SECONDORY_COLOR, FareCalculator, getDistanceMatrix } from '../common/sharedFunctions';
 import { Ionicons } from '@expo/vector-icons';
 import { fonts } from '../common/font';
 import { getLangKey } from '../common-local/other/getLangKey';
@@ -48,6 +49,7 @@ export default function BookedCabScreen(props) {
     const [confirmModalVisible, setConfirmModalVisible] = useState(false);
     const [searchModalVisible, setSearchModalVisible] = useState(false);
     const activeBookings = useSelector(state => state.bookinglistdata.active);
+    const tripdata = useSelector(state => state.tripdata);
     const [curBooking, setCurBooking] = useState(null);
     const cancelReasons = useSelector(state => state.cancelreasondata.complex);
     const auth = useSelector(state => state.auth);
@@ -63,6 +65,10 @@ export default function BookedCabScreen(props) {
     const [purchaseInfoModalStatus, setPurchaseInfoModalStatus] = useState(false);
     const [userInfoModalStatus, setUserInfoModalStatus] = useState(false);
     const settings = useSelector(state => state.settingsdata.settings);
+
+    // Variáveis da Extensão de Corrida (Mudança de Destino)
+    const [newDropEstimate, setNewDropEstimate] = useState(null);
+    const webSocketManager = require('../services/WebSocketManager').default;
 
     const { t } = i18n;
     const isRTL = i18n.locale.indexOf('he') === 0 || i18n.locale.indexOf('ar') === 0;
@@ -247,23 +253,52 @@ export default function BookedCabScreen(props) {
             }
         }
     }, [activeBookings, role, pageActive.current]);
- 
+
     const renderButtons = () => {
         return (
-            (curBooking && role == 'customer' && (curBooking.status == 'NEW' || curBooking.status == 'ACCEPTED')) ||
+            (curBooking && role == 'customer' && (curBooking.status == 'NEW' || curBooking.status == 'ACCEPTED' || curBooking.status == 'STARTED')) ||
                 (curBooking && role == 'driver' && (curBooking.status == 'ACCEPTED' || curBooking.status == 'ARRIVED' || curBooking.status == 'STARTED')) ?
                 <View style={{ height: 50, flexDirection: isRTL ? 'row-reverse' : 'row', width: '98%', alignSelf: 'center', marginVertical: 5, marginBottom: 15 }}>
-                    {(role == 'customer' && !curBooking.pickup_image && (curBooking.status == 'NEW' || curBooking.status == 'ACCEPTED')) ||
+                    {(role == 'customer' && !curBooking.pickup_image && (curBooking.status == 'NEW' || curBooking.status == 'ACCEPTED' || curBooking.status == 'STARTED')) ?
+                        <>
+                            <View style={{ flex: 1, paddingRight: (curBooking.status == 'ACCEPTED' || curBooking.status == 'STARTED') ? 5 : 0 }}>
+                                <Button
+                                    title={t('cancel_ride')}
+                                    loading={false}
+                                    loadingProps={{ size: "large" }}
+                                    titleStyle={{ fontFamily: fonts.Bold, fontSize: 13 }}
+                                    onPress={() => {
+                                        setModalVisible(true);
+                                    }}
+                                    buttonStyle={{ height: '100%', backgroundColor: colors.RED, borderRadius: 10, width: '100%', alignSelf: 'center' }}
+                                    containerStyle={{ height: '100%' }}
+                                />
+                            </View>
+                            {(curBooking.status == 'ACCEPTED' || curBooking.status == 'STARTED') && !appConsts.hasMultiDrop ?
+                                <View style={{ flex: 1, paddingLeft: 5 }}>
+                                    <Button
+                                        title={t('change_destination', 'Alterar Destino')}
+                                        loading={false}
+                                        loadingProps={{ size: "large" }}
+                                        titleStyle={{ fontFamily: fonts.Bold, fontSize: 13, color: colors.WHITE }}
+                                        onPress={() => {
+                                            props.navigation.navigate('Search', { locationType: 'drop' });
+                                        }}
+                                        buttonStyle={{ height: '100%', backgroundColor: MAIN_COLOR, borderRadius: 10, width: '100%', alignSelf: 'center' }}
+                                        containerStyle={{ height: '100%' }}
+                                    />
+                                </View>
+                                : null}
+                        </>
+                        :
                         (role == 'driver' && !curBooking.pickup_image && (curBooking.status == 'ACCEPTED' || curBooking.status == 'ARRIVED')) ?
-                        <View style={{ flex: 1 }}>
-                            <Button
-                                title={t('cancel_ride')}
-                                loading={false}
-                                loadingProps={{ size: "large" }}
-                                titleStyle={{ fontFamily:fonts.Bold, fontSize:13 }}
-                                onPress={() => {
-                                    role == 'customer' ?
-                                        setModalVisible(true) :
+                            <View style={{ flex: 1 }}>
+                                <Button
+                                    title={t('cancel_ride')}
+                                    loading={false}
+                                    loadingProps={{ size: "large" }}
+                                    titleStyle={{ fontFamily: fonts.Bold, fontSize: 13 }}
+                                    onPress={() => {
                                         Alert.alert(
                                             t('alert'),
                                             t('cancel_confirm'),
@@ -272,19 +307,18 @@ export default function BookedCabScreen(props) {
                                                 { text: t('ok'), onPress: () => dispatch(cancelBooking({ booking: curBooking, reason: t('driver_cancelled_booking'), cancelledBy: role })) },
                                             ]
                                         );
-                                }
-                                }
-                                buttonStyle={{ height: '100%', backgroundColor: colors.RED, borderRadius: 10, width: curBooking && role == 'customer' ? '100%' : '95%', alignSelf: curBooking && role == 'customer' ? 'center' : isRTL ? 'flex-end' : 'flex-start', }}
-                                containerStyle={{ height: '100%' }}
-                            />
-                        </View>
-                        : null}
+                                    }}
+                                    buttonStyle={{ height: '100%', backgroundColor: colors.RED, borderRadius: 10, width: '95%', alignSelf: isRTL ? 'flex-end' : 'flex-start' }}
+                                    containerStyle={{ height: '100%' }}
+                                />
+                            </View>
+                            : null}
                     {appConsts.captureBookingImage && settings && settings.AllowDeliveryPickupImageCapture && role == 'driver' && !curBooking.pickup_image && (curBooking.status == 'ACCEPTED' || curBooking.status == 'ARRIVED') ?
                         <View style={{ flex: 1 }}>
                             <Button
                                 title={t('take_pickup_image')}
                                 loading={loading}
-                                titleStyle={{ color: colors.WHITE, fontFamily:fonts.Bold, fontSize: 13 }}
+                                titleStyle={{ color: colors.WHITE, fontFamily: fonts.Bold, fontSize: 13 }}
                                 loadingProps={{ size: "large", color: colors.WHITE }}
                                 onPress={() => _pickImage(ImagePicker.launchCameraAsync)}
                                 buttonStyle={{ height: '100%', backgroundColor: MAIN_COLOR, width: '95%', borderRadius: 10, alignSelf: isRTL ? 'flex-start' : 'flex-end' }}
@@ -298,7 +332,7 @@ export default function BookedCabScreen(props) {
                                 title={t('start_trip')}
                                 loading={false}
                                 loadingProps={{ size: "large", color: colors.WHITE }}
-                                titleStyle={{ color: colors.WHITE, fontFamily:fonts.Bold, fontSize: 13 }}
+                                titleStyle={{ color: colors.WHITE, fontFamily: fonts.Bold, fontSize: 13 }}
                                 onPress={() => {
                                     if (curBooking.otp && appConsts.hasStartOtp) {
                                         setOtpModalVisible(true);
@@ -318,7 +352,7 @@ export default function BookedCabScreen(props) {
                                 title={t('take_deliver_image')}
                                 loading={loading}
                                 loadingProps={{ size: "large", color: colors.WHITE }}
-                                titleStyle={{ color: colors.WHITE,fontFamily:fonts.Bold, fontSize: 14 }}
+                                titleStyle={{ color: colors.WHITE, fontFamily: fonts.Bold, fontSize: 14 }}
                                 onPress={() => _pickImage(ImagePicker.launchCameraAsync)}
                                 buttonStyle={{ height: '100%', backgroundColor: MAIN_COLOR, borderRadius: 10, alignSelf: 'center', width: '100%' }}
                                 containerStyle={{ height: '100%' }}
@@ -330,7 +364,7 @@ export default function BookedCabScreen(props) {
                             <Button
                                 title={t('complete_ride')}
                                 loading={loading}
-                                titleStyle={{ color: colors.WHITE,fontFamily:fonts.Bold, fontSize: 16 }}
+                                titleStyle={{ color: colors.WHITE, fontFamily: fonts.Bold, fontSize: 16 }}
                                 onPress={() => {
                                     if (curBooking.otp && !appConsts.hasStartOtp) {
                                         setOtpModalVisible(true);
@@ -467,14 +501,14 @@ export default function BookedCabScreen(props) {
 
     const [cancellationReasonsObj, setCancellationReasonsObj] = useState(null);
 
-    useEffect(()=>{
-        if(cancelReasons){
-            let modReasons = cancelReasons.map((reasons)=>{
-                return {label:t(getLangKey(reasons.label)), value: reasons.value}
+    useEffect(() => {
+        if (cancelReasons) {
+            let modReasons = cancelReasons.map((reasons) => {
+                return { label: t(getLangKey(reasons.label)), value: reasons.value }
             })
             setCancellationReasonsObj(modReasons)
         }
-    },[cancelReasons])
+    }, [cancelReasons])
 
     const cancelModal = () => {
         return (
@@ -496,7 +530,7 @@ export default function BookedCabScreen(props) {
 
                             <ScrollView style={styles.radioScrollContainer}>
                                 <View style={styles.radioContainer}>
-                                    {cancellationReasonsObj ? 
+                                    {cancellationReasonsObj ?
                                         <RadioForm
                                             radio_props={cancellationReasonsObj}
                                             initial={0}
@@ -510,7 +544,7 @@ export default function BookedCabScreen(props) {
                                             radioStyle={[styles.radioStyle, { flexDirection: isRTL ? 'row-reverse' : 'row' }]}
                                             onPress={(value) => { setCancelReasonSelected(value) }}
                                         />
-                                    : null}
+                                        : null}
                                 </View>
                             </ScrollView>
 
@@ -530,7 +564,13 @@ export default function BookedCabScreen(props) {
                                     titleStyle={{ fontFamily: fonts.Bold }}
                                     onPress={() => {
                                         if (cancelReasonSelected >= 0) {
-                                            dispatch(cancelBooking({ booking: curBooking, reason: cancelReasons[cancelReasonSelected].label, cancelledBy: role }));
+                                            let finalReason = cancelReasons[cancelReasonSelected].label;
+                                            // ✅ Se o passageiro cancelar enquanto a corrida é NOVA/SEARCHING (antes do motorista aceitar),
+                                            // forçamos o motivo 'passenger_cancelled' para que o backend aplique a taxa do Fundo de Reserva.
+                                            if (role === 'customer' && curBooking.status === 'NEW') {
+                                                finalReason = 'passenger_cancelled';
+                                            }
+                                            dispatch(cancelBooking({ booking: curBooking, reason: finalReason, cancelledBy: role }));
                                             props.navigation.replace('TabRoot', { screen: 'RideList', params: { fromBooking: true } });
                                         } else {
                                             Alert.alert(t('alert'), t('select_reason'));
@@ -567,14 +607,14 @@ export default function BookedCabScreen(props) {
                 <View style={{ flex: 1, backgroundColor: colors.BACKGROUND, justifyContent: 'center', alignItems: 'center' }}>
                     <View style={{ width: width - 70, borderRadius: 10, flex: 1, maxHeight: 280, marginTop: 15, backgroundColor: colors.WHITE, alignItems: 'center' }}>
                         <Ionicons name="checkmark-circle" size={130} color={colors.GREEN} style={{ marginTop: 10, }} />
-                        <Text style={{ fontSize: 25, fontFamily:fonts.Bold, marginTop: -10 }}>{t('booking_successful')}</Text>
-                        <Text style={{ fontSize: 16, marginTop: 10,fontFamily:fonts.Regular }}>{t('booking_confirm')}</Text>
+                        <Text style={{ fontSize: 25, fontFamily: fonts.Bold, marginTop: -10 }}>{t('booking_successful')}</Text>
+                        <Text style={{ fontSize: 16, marginTop: 10, fontFamily: fonts.Regular }}>{t('booking_confirm')}</Text>
                         <View style={{ position: 'absolute', bottom: 20, alignSelf: 'center' }}>
                             <Button
                                 title={t('done')}
                                 loading={false}
                                 loadingProps={{ size: "large", }}
-                                titleStyle={{ fontFamily:fonts.Bold }}
+                                titleStyle={{ fontFamily: fonts.Bold }}
                                 onPress={() => confirmModalClose()}
                                 buttonStyle={{ width: 100, backgroundColor: colors.GREEN }}
                                 containerStyle={{ marginTop: 15 }}
@@ -603,7 +643,7 @@ export default function BookedCabScreen(props) {
                     {settings && curBooking && curBooking.driverOffers && !curBooking.selectedBid ?
                         <View style={{ width: width - 40, backgroundColor: colors.WHITE, borderRadius: 10, flex: 1, maxHeight: height - 200, marginTop: 15 }}>
                             <View style={{ color: colors.BLACK, position: 'absolute', top: 20, alignSelf: 'center' }}>
-                                <Text style={{ color: colors.BLACK, fontSize: 20,fontFamily:fonts.Regular }}>{t('drivers')}</Text>
+                                <Text style={{ color: colors.BLACK, fontSize: 20, fontFamily: fonts.Regular }}>{t('drivers')}</Text>
                             </View>
                             <View style={{ marginTop: 60, width: width - 60, height: height - 340, marginRight: 10, marginLeft: 10, alignSelf: 'center', maxWidth: 350, }}>
                                 <ScrollView showsVerticalScrollIndicator={false} style={{ flex: 1 }}>
@@ -614,7 +654,7 @@ export default function BookedCabScreen(props) {
                                                     <Image source={curBooking && curBooking.driverOffers[key].driver_image ? { uri: curBooking.driverOffers[key].driver_image } : require('../../assets/images/profilePic.png')} style={{ borderRadius: 33, width: 65, height: 65 }} />
                                                 </View>
                                                 <View style={{ width: '75%', alignItems: 'center' }}>
-                                                    <Text style={{ color: colors.BLACK, fontSize: 16,fontFamily:fonts.Regular, marginTop: 4, textAlign: 'center', }}>{curBooking.driverOffers[key].driver_name}</Text>
+                                                    <Text style={{ color: colors.BLACK, fontSize: 16, fontFamily: fonts.Regular, marginTop: 4, textAlign: 'center', }}>{curBooking.driverOffers[key].driver_name}</Text>
                                                     <StarRating
                                                         maxStars={5}
                                                         starSize={20}
@@ -629,21 +669,21 @@ export default function BookedCabScreen(props) {
                                                     />
                                                     <View style={{ flexDirection: isRTL ? 'row-reverse' : 'row', width: '100%', justifyContent: 'center', alignItems: 'center', marginTop: 4 }}>
                                                         {settings.swipe_symbol === false ?
-                                                            <Text style={{ color: colors.BLACK, fontSize: 22, fontFamily:fonts.Bold }}>{settings.symbol} {parseFloat(curBooking.driverOffers[key].trip_cost).toFixed(2)}</Text>
+                                                            <Text style={{ color: colors.BLACK, fontSize: 22, fontFamily: fonts.Bold }}>{settings.symbol} {parseFloat(curBooking.driverOffers[key].trip_cost).toFixed(2)}</Text>
                                                             :
-                                                            <Text style={{ color: colors.BLACK, fontSize: 22, fontFamily:fonts.Bold }}>{parseFloat(curBooking.driverOffers[key].trip_cost).toFixed(2)} {settings.symbol}</Text>
+                                                            <Text style={{ color: colors.BLACK, fontSize: 22, fontFamily: fonts.Bold }}>{parseFloat(curBooking.driverOffers[key].trip_cost).toFixed(2)} {settings.symbol}</Text>
                                                         }
                                                         <Button
                                                             title={t('accept')}
-                                                            titleStyle={[styles.buttonTitleText, { fontFamily:fonts.Bold}]}
+                                                            titleStyle={[styles.buttonTitleText, { fontFamily: fonts.Bold }]}
                                                             onPress={() => acceptBid(curBooking.driverOffers[key])}
                                                             buttonStyle={styles.accpt}
                                                         />
                                                     </View>
-                                                    <Text style={{ color: colors.BLACK, fontSize: 16, fontFamily:fonts.Bold, alignSelf: 'center' }}>{moment(curBooking.driverOffers[key].deliveryDate).format('lll')}</Text>
+                                                    <Text style={{ color: colors.BLACK, fontSize: 16, fontFamily: fonts.Bold, alignSelf: 'center' }}>{moment(curBooking.driverOffers[key].deliveryDate).format('lll')}</Text>
                                                     <View style={{ flexDirection: isRTL ? 'row-reverse' : 'row', alignSelf: 'center' }}>
-                                                        <Text style={{ color: colors.BLACK, fontSize: 12, marginTop: 3,fontFamily:fonts.Regular }}>{t('driver_distance')} - </Text>
-                                                        <Text style={{ color: colors.BLACK, fontSize: 16, fontFamily:fonts.Bold, }}>{curBooking && curBooking.driverEstimates && curBooking.driverEstimates[key].timein_text ? curBooking.driverEstimates[key].timein_text : t('within_min')}</Text>
+                                                        <Text style={{ color: colors.BLACK, fontSize: 12, marginTop: 3, fontFamily: fonts.Regular }}>{t('driver_distance')} - </Text>
+                                                        <Text style={{ color: colors.BLACK, fontSize: 16, fontFamily: fonts.Bold, }}>{curBooking && curBooking.driverEstimates && curBooking.driverEstimates[key].timein_text ? curBooking.driverEstimates[key].timein_text : t('within_min')}</Text>
                                                     </View>
                                                 </View>
 
@@ -658,7 +698,7 @@ export default function BookedCabScreen(props) {
                                     title={t('close')}
                                     loading={false}
                                     loadingProps={{ size: "large", }}
-                                    titleStyle={{ fontFamily:fonts.Bold }}
+                                    titleStyle={{ fontFamily: fonts.Bold }}
                                     onPress={() => { setSearchModalVisible(false) }}
                                     buttonStyle={{ width: 120, borderRadius: 10, backgroundColor: colors.RED }}
                                     containerStyle={{ marginTop: 20 }}
@@ -669,14 +709,14 @@ export default function BookedCabScreen(props) {
                         <View style={{ width: width - 70, borderRadius: 10, flex: 1, maxHeight: 310, marginTop: 15, backgroundColor: colors.WHITE }}>
                             <Image source={require('../../assets/images/g4.gif')} resizeMode={'contain'} style={{ width: '100%', height: 220, alignSelf: 'center' }} />
                             <View style={{ color: colors.BLACK, alignSelf: 'center' }}>
-                                <Text style={{ color: colors.HEADER, fontSize: 16,fontFamily:fonts.Regular }}>{t('driver_assign_messege')}</Text>
+                                <Text style={{ color: colors.HEADER, fontSize: 16, fontFamily: fonts.Regular }}>{t('driver_assign_messege')}</Text>
                             </View>
                             <View style={{ position: 'absolute', bottom: 10, alignSelf: 'center' }}>
                                 <Button
                                     title={t('close')}
                                     loading={false}
                                     loadingProps={{ size: "large", }}
-                                    titleStyle={{ fontFamily:fonts.Bold }}
+                                    titleStyle={{ fontFamily: fonts.Bold }}
                                     onPress={() => { setSearchModalVisible(false) }}
                                     buttonStyle={{ width: 120, backgroundColor: colors.RED }}
                                     containerStyle={{ marginTop: 20, }}
@@ -690,7 +730,7 @@ export default function BookedCabScreen(props) {
     }
 
     const chat = () => {
-        props.navigation.navigate("onlineChat", { bookingId: bookingId , status: curBooking.status})
+        props.navigation.navigate("onlineChat", { bookingId: bookingId, status: curBooking.status })
     }
     const openWhatsApp = () => {
         const message = 'Hi';
@@ -763,54 +803,54 @@ export default function BookedCabScreen(props) {
                 <View style={styles.centeredView}>
                     <View style={styles.modalView}>
                         <View style={{ width: '100%' }}>
-                        { (curBooking?.parcelTypeSelected?.description || curBooking?.optionSelected?.description||curBooking?.otherPerson || curBooking?.otherPersonPhone ||curBooking?.pickUpInstructions || curBooking?.deliveryInstructions) ?<>
-                        {  curBooking?.parcelTypeSelected?.description ?
-                            <View style={[styles.textContainerStyle, { alignItems: isRTL ? "flex-end" : "flex-start" }]}>
-                                <Text style={styles.textHeading}>{t('parcel_type')}</Text>
-                                <Text style={styles.textContent}>
-                                    {curBooking && curBooking.parcelTypeSelected ? t(getLangKey(curBooking.parcelTypeSelected.description)) : ''}
-                                </Text>
-                            </View> : null }
-                            {curBooking?.optionSelected?.description ? 
-                            <View style={[styles.textContainerStyle, { alignItems: isRTL ? "flex-end" : "flex-start" }]}>
-                                <Text style={styles.textHeading}>{t('options')}</Text>
-                                <Text style={styles.textContent}>
-                                    {curBooking && curBooking.optionSelected ? t(getLangKey(curBooking.optionSelected.description)) : ''}
-                                </Text>
-                            </View> : null}
-                            {curBooking && curBooking.otherPerson ?
-                            <View style={[styles.textContainerStyle, { alignItems: isRTL ? "flex-end" : "flex-start" }]}>
-                                <Text style={styles.textHeading}>{t('otherPerson')}</Text>
-                                <Text style={styles.textContent}>
-                                    {curBooking ? curBooking.otherPerson : ''}
-                                </Text>
-                            </View>
-                            : null }
-                            {curBooking && curBooking.otherPersonPhone ?
-                            <View style={[styles.textContainerStyle, { alignItems: isRTL ? "flex-end" : "flex-start" }]}>
-                                <Text style={styles.textHeading}>{t('otherPersonPhone')}</Text>
-                                <Text style={styles.textContent}>
-                                    {curBooking ? curBooking.otherPersonPhone : ''}
-                                </Text>
-                            </View>
-                            : null }
-                            {curBooking && curBooking.pickUpInstructions ?
-                            <View style={[styles.textContainerStyle, { alignItems: isRTL ? "flex-end" : "flex-start" }]}>
-                                <Text style={styles.textHeading}>{t('pickUpInstructions')}</Text>
-                                <Text style={styles.textContent}>
-                                    {curBooking ? curBooking.pickUpInstructions : ''}
-                                </Text>
-                            </View>
-                            : null }
-                            {curBooking && curBooking.deliveryInstructions ?
-                            <View style={[styles.textContainerStyle, { alignItems: isRTL ? "flex-end" : "flex-start" }]}>
-                                <Text style={styles.textHeading}>{t('deliveryInstructions')}</Text>
-                                <Text style={styles.textContent}>
-                                    {curBooking ? curBooking.deliveryInstructions : ''}
-                                </Text>
-                            </View>
-                            : null }
-                            </>: <Text style={[styles.textHeading, {textAlign: "center", marginVertical: 10}]}>{t('no_info_found')}</Text> }
+                            {(curBooking?.parcelTypeSelected?.description || curBooking?.optionSelected?.description || curBooking?.otherPerson || curBooking?.otherPersonPhone || curBooking?.pickUpInstructions || curBooking?.deliveryInstructions) ? <>
+                                {curBooking?.parcelTypeSelected?.description ?
+                                    <View style={[styles.textContainerStyle, { alignItems: isRTL ? "flex-end" : "flex-start" }]}>
+                                        <Text style={styles.textHeading}>{t('parcel_type')}</Text>
+                                        <Text style={styles.textContent}>
+                                            {curBooking && curBooking.parcelTypeSelected ? t(getLangKey(curBooking.parcelTypeSelected.description)) : ''}
+                                        </Text>
+                                    </View> : null}
+                                {curBooking?.optionSelected?.description ?
+                                    <View style={[styles.textContainerStyle, { alignItems: isRTL ? "flex-end" : "flex-start" }]}>
+                                        <Text style={styles.textHeading}>{t('options')}</Text>
+                                        <Text style={styles.textContent}>
+                                            {curBooking && curBooking.optionSelected ? t(getLangKey(curBooking.optionSelected.description)) : ''}
+                                        </Text>
+                                    </View> : null}
+                                {curBooking && curBooking.otherPerson ?
+                                    <View style={[styles.textContainerStyle, { alignItems: isRTL ? "flex-end" : "flex-start" }]}>
+                                        <Text style={styles.textHeading}>{t('otherPerson')}</Text>
+                                        <Text style={styles.textContent}>
+                                            {curBooking ? curBooking.otherPerson : ''}
+                                        </Text>
+                                    </View>
+                                    : null}
+                                {curBooking && curBooking.otherPersonPhone ?
+                                    <View style={[styles.textContainerStyle, { alignItems: isRTL ? "flex-end" : "flex-start" }]}>
+                                        <Text style={styles.textHeading}>{t('otherPersonPhone')}</Text>
+                                        <Text style={styles.textContent}>
+                                            {curBooking ? curBooking.otherPersonPhone : ''}
+                                        </Text>
+                                    </View>
+                                    : null}
+                                {curBooking && curBooking.pickUpInstructions ?
+                                    <View style={[styles.textContainerStyle, { alignItems: isRTL ? "flex-end" : "flex-start" }]}>
+                                        <Text style={styles.textHeading}>{t('pickUpInstructions')}</Text>
+                                        <Text style={styles.textContent}>
+                                            {curBooking ? curBooking.pickUpInstructions : ''}
+                                        </Text>
+                                    </View>
+                                    : null}
+                                {curBooking && curBooking.deliveryInstructions ?
+                                    <View style={[styles.textContainerStyle, { alignItems: isRTL ? "flex-end" : "flex-start" }]}>
+                                        <Text style={styles.textHeading}>{t('deliveryInstructions')}</Text>
+                                        <Text style={styles.textContent}>
+                                            {curBooking ? curBooking.deliveryInstructions : ''}
+                                        </Text>
+                                    </View>
+                                    : null}
+                            </> : <Text style={[styles.textHeading, { textAlign: "center", marginVertical: 10 }]}>{t('no_info_found')}</Text>}
                         </View>
                         <View style={{ flexDirection: 'row', alignSelf: 'center', height: 40 }}>
                             <OldTouch
@@ -956,17 +996,13 @@ export default function BookedCabScreen(props) {
         )
     }
 
+
     return (
         <View style={styles.mainContainer}>
             <View style={styles.mapcontainer}>
                 {curBooking ?
                     <MapView
                         ref={mapRef}
-                    <UrlTile
-                        urlTemplate="https://a.tile.openstreetmap.org/{z}/{x}/{y}.png"
-                        maximumZ={19}
-                        flipY={false}
-                    />
                         style={styles.map}
                         provider={PROVIDER_GOOGLE}
                         initialRegion={{
@@ -977,6 +1013,11 @@ export default function BookedCabScreen(props) {
                         }}
                         minZoomLevel={3}
                     >
+                        <UrlTile
+                            urlTemplate="https://a.tile.openstreetmap.org/{z}/{x}/{y}.png"
+                            maximumZ={19}
+                            flipY={false}
+                        />
 
                         {(curBooking.status == 'ACCEPTED' || curBooking.status == 'ARRIVED' || curBooking.status == 'STARTED') && lastLocation ?
                             <Marker.Animated
@@ -1077,7 +1118,7 @@ export default function BookedCabScreen(props) {
                     <TouchableOpacity
                         style={[styles.floatButton, isRTL ? { left: 10, bottom: (role == 'customer' && ((curBooking && curBooking.status == 'ARRIVED') || curBooking.status == 'REACHED' || curBooking.status == 'PAID' || (curBooking && curBooking.status == 'STARTED'))) ? 345 : 410 } : { right: 10, bottom: (role == 'customer' && ((curBooking && curBooking.status == 'ARRIVED') || curBooking.status == 'REACHED' || curBooking.status == 'PAID' || (curBooking && curBooking.status == 'STARTED'))) ? 360 : (role == 'customer' && (curBooking && curBooking.status == 'ACCEPTED')) ? 408 : 388 }]}
                         // onPress={() => openWhatsApp()}
-                        onPress={settings && settings.chatViaWhatsApp===true ? () => openWhatsApp()  :()=>chat() }
+                        onPress={settings && settings.chatViaWhatsApp === true ? () => openWhatsApp() : () => chat()}
                     >
                         <Icon
                             name="chatbubbles"
@@ -1168,7 +1209,7 @@ export default function BookedCabScreen(props) {
                                                     startNavigation()
                                                 }
                                             >
-                                                <Icon 
+                                                <Icon
                                                     name="navigate-circle"
                                                     type="ionicon"
                                                     size={30}
@@ -1215,20 +1256,20 @@ export default function BookedCabScreen(props) {
                 {(curBooking && curBooking.status == 'ARRIVED' || curBooking && curBooking.status == 'ACCEPTED' || curBooking && curBooking.status == 'REACHED' || curBooking && curBooking.status == 'PAID' || curBooking && curBooking.status == 'STARTED') ?
                     <View style={{ justifyContent: 'space-around', alignItems: 'center', flexDirection: isRTL ? 'row-reverse' : 'row', height: 55 }}>
                         <View style={{ alignItems: 'center' }}>
-                            <Text style={{fontFamily:fonts.Regular}}>{t('distance')}</Text>
-                            <Text style={{ fontFamily:fonts.Bold}}>{curBooking ? parseFloat(curBooking.estimateDistance).toFixed(settings.decimal) : 0} {settings.convert_to_mile ? t('mile') : t('km')}</Text>
+                            <Text style={{ fontFamily: fonts.Regular }}>{t('distance')}</Text>
+                            <Text style={{ fontFamily: fonts.Bold }}>{curBooking ? parseFloat(curBooking.estimateDistance).toFixed(settings.decimal) : 0} {settings.convert_to_mile ? t('mile') : t('km')}</Text>
                         </View>
                         <View style={{ alignItems: 'center' }}>
-                            <Text style={{fontFamily:fonts.Regular}}>{t('time')}</Text>
-                            <Text style={{fontFamily:fonts.Bold }}>{curBooking.estimateTime ? parseFloat(curBooking.estimateTime / 60).toFixed(0) : 0} {t('mins')}</Text>
+                            <Text style={{ fontFamily: fonts.Regular }}>{t('time')}</Text>
+                            <Text style={{ fontFamily: fonts.Bold }}>{curBooking.estimateTime ? parseFloat(curBooking.estimateTime / 60).toFixed(0) : 0} {t('mins')}</Text>
                         </View>
                         <View style={{ alignItems: 'center' }}>
-                            <Text style={{fontFamily:fonts.Regular}}>{t('cost')}</Text>
+                            <Text style={{ fontFamily: fonts.Regular }}>{t('cost')}</Text>
                             {/* <Text style={{fontWeight:'bold'}}>{curBooking? curBooking.distance:null}</Text> */}
                             {settings && settings.swipe_symbol === false ?
-                                <Text style={{ fontFamily:fonts.Bold }}>{settings.symbol} {curBooking && curBooking.trip_cost > 0 ? parseFloat(curBooking.trip_cost).toFixed(settings.decimal) : curBooking && curBooking.estimate ? parseFloat(curBooking.estimate).toFixed(settings.decimal) : 0}</Text>
+                                <Text style={{ fontFamily: fonts.Bold }}>{settings.symbol} {curBooking && curBooking.trip_cost > 0 ? parseFloat(curBooking.trip_cost).toFixed(settings.decimal) : curBooking && curBooking.estimate ? parseFloat(curBooking.estimate).toFixed(settings.decimal) : 0}</Text>
                                 :
-                                <Text style={{ fontFamily:fonts.Bold }}>{curBooking && curBooking.trip_cost > 0 ? parseFloat(curBooking.trip_cost).toFixed(settings.decimal) : curBooking && curBooking.estimate ? parseFloat(curBooking.estimate).toFixed(settings.decimal) : 0} {settings.symbol}</Text>
+                                <Text style={{ fontFamily: fonts.Bold }}>{curBooking && curBooking.trip_cost > 0 ? parseFloat(curBooking.trip_cost).toFixed(settings.decimal) : curBooking && curBooking.estimate ? parseFloat(curBooking.estimate).toFixed(settings.decimal) : 0} {settings.symbol}</Text>
                             }
                         </View>
                     </View>
@@ -1237,14 +1278,14 @@ export default function BookedCabScreen(props) {
                     <View style={{ width: width, height: 'auto', flexDirection: 'row', alignItems: 'center', justifyContent: 'center' }}>
                         <Image style={{ width: 40, height: 40 }} source={require('../../assets/images/loader.gif')} />
                         <TouchableOpacity onPress={() => { setSearchModalVisible(!searchModalVisible) }}>
-                            <Text style={{ fontSize: 22,fontFamily:fonts.Regular }}>{curBooking.driverOffers ? t('selectBid') : t('searching')}</Text>
+                            <Text style={{ fontSize: 22, fontFamily: fonts.Regular }}>{curBooking.driverOffers ? t('selectBid') : t('searching')}</Text>
                         </TouchableOpacity>
                     </View>
                     : null}
                 {curBooking && curBooking.status == "NEW" && curBooking.bookLater && (((new Date(curBooking.tripdate)) - (new Date())) / (1000 * 60)) > 15 ?
                     <View style={{ flex: 1, width: width, height: 'auto', flexDirection: 'row', alignItems: 'center', justifyContent: 'center' }}>
-                        <Text style={{ fontSize: 16,fontFamily:fonts.Regular }}>{t('trip_start_time') + ":  "}</Text>
-                        <Text style={{ fontFamily:fonts.Bold, fontSize: 16 }}>{moment(curBooking.tripdate).format('lll')}</Text>
+                        <Text style={{ fontSize: 16, fontFamily: fonts.Regular }}>{t('trip_start_time') + ":  "}</Text>
+                        <Text style={{ fontFamily: fonts.Bold, fontSize: 16 }}>{moment(curBooking.tripdate).format('lll')}</Text>
                     </View>
                     : null}
                 {
@@ -1266,9 +1307,6 @@ export default function BookedCabScreen(props) {
             {
                 searchModal()
             }
-            {
-                confirmModal()
-            }
             <OtpModal
                 modalvisable={otpModalVisible}
                 requestmodalclose={() => { setOtpModalVisible(false) }}
@@ -1277,8 +1315,8 @@ export default function BookedCabScreen(props) {
             />
         </View>
     );
-
 }
+
 
 const styles = StyleSheet.create({
     mainContainer: { flex: 1, backgroundColor: colors.WHITE, },
@@ -1359,7 +1397,7 @@ const styles = StyleSheet.create({
     },
     whereButton: { flex: 1, justifyContent: 'center', borderBottomColor: colors.WHITE, borderBottomWidth: 1 },
     whereContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', },
-    whereText: { flex: 9, fontFamily:fonts.Regular, fontSize: 14, fontWeight: '400', color: colors.WHITE },
+    whereText: { flex: 9, fontFamily: fonts.Regular, fontSize: 14, fontWeight: '400', color: colors.WHITE },
     iconContainer: { flex: 1, },
     dropButton: { flex: 1, justifyContent: 'center' },
     mapcontainer: {
@@ -1390,13 +1428,13 @@ const styles = StyleSheet.create({
         marginHorizontal: 5
     },
     otpContainer: { flex: 0.8, backgroundColor: colors.BOX_BG, width: width, flexDirection: 'row', justifyContent: 'space-between' },
-    cabText: { paddingLeft: 10, alignSelf: 'center', color: colors.BLACK, fontFamily:fonts.Regular },
-    cabBoldText: { fontFamily:fonts.Bold },
-    otpText: { color: colors.BLACK, fontFamily:fonts.Bold, },
+    cabText: { paddingLeft: 10, alignSelf: 'center', color: colors.BLACK, fontFamily: fonts.Regular },
+    cabBoldText: { fontFamily: fonts.Bold },
+    otpText: { color: colors.BLACK, fontFamily: fonts.Bold, },
     cabDetailsContainer: { flex: 2.5, backgroundColor: colors.WHITE, flexDirection: 'row', position: 'relative', zIndex: 1 },
     cabDetails: { flex: 19 },
     cabName: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center' },
-    cabNameText: { color: colors.BLACK, fontFamily:fonts.Bold, fontSize: 14 },
+    cabNameText: { color: colors.BLACK, fontFamily: fonts.Bold, fontSize: 14 },
     cabPhoto: { flex: 1, alignItems: 'center', justifyContent: 'center' },
     cabImage: { width: 100, height: height / 20, marginBottom: 5, marginTop: 5 },
     cabNumber: { flex: 1, alignItems: 'center', justifyContent: 'center' },
@@ -1442,7 +1480,7 @@ const styles = StyleSheet.create({
     cancelModalInnerContainer: { height: 500, width: width * 0.85, padding: 0, backgroundColor: colors.WHITE, alignItems: 'center', alignSelf: 'center', borderRadius: 7 },
     cancelContainer: { flex: 1, justifyContent: 'space-between', width: (width * 0.85) },
     cancelReasonContainer: { flex: 1 },
-    cancelReasonText: { top: 10, color: colors.BLACK, fontFamily:fonts.Bold, fontSize: 20, alignSelf: 'center' },
+    cancelReasonText: { top: 10, color: colors.BLACK, fontFamily: fonts.Bold, fontSize: 20, alignSelf: 'center' },
     radioContainer: { flex: 8, alignItems: 'center' },
     radioText: { fontSize: 16, fontFamily: fonts.Medium, color: colors.BLACK, },
     radioContainerStyle: { paddingTop: 30, marginHorizontal: 10 },
@@ -1505,23 +1543,23 @@ const styles = StyleSheet.create({
     },
     textHeading: {
         fontSize: 12,
-        fontFamily:fonts.Bold
+        fontFamily: fonts.Bold
     },
     textHeading1: {
         fontSize: 20,
         color: colors.BLACK,
-        fontFamily:fonts.Regular
+        fontFamily: fonts.Regular
     },
     textContent: {
         fontSize: 14,
         margin: 4,
-        fontFamily:fonts.Regular
+        fontFamily: fonts.Regular
     },
     textContent1: {
         fontSize: 20,
         color: colors.BUTTON_LOADING,
         padding: 5,
-        fontFamily:fonts.Regular
+        fontFamily: fonts.Regular
     },
     modalButtonStyle: {
         flex: 1,

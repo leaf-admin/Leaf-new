@@ -28,7 +28,7 @@ class EventListener {
     /**
      * Processar evento
      */
-    async handle(event) {
+    async handle(event, io) {
         if (!this.isActive) {
             return;
         }
@@ -38,10 +38,11 @@ class EventListener {
         const validatedTraceId = validateAndEnsureTraceIdInListener(event, listenerName);
 
         const startTime = Date.now();
-        
+
         try {
-            await this.handler(event);
-            
+            // ✅ CORREÇÃO: Passar io para o handler
+            await this.handler(event, io);
+
             // ✅ OBSERVABILIDADE: Registrar métrica de listener executado com sucesso
             const duration = (Date.now() - startTime) / 1000;
             metrics.recordListener(listenerName, duration, true);
@@ -50,7 +51,7 @@ class EventListener {
             // ✅ OBSERVABILIDADE: Registrar métrica de listener com falha
             const duration = (Date.now() - startTime) / 1000;
             metrics.recordListener(listenerName, duration, false);
-            
+
             logger.error(`❌ [EventListener] Erro ao processar evento ${this.eventType}: ${error.message}`);
             // Não propagar erro - listeners são independentes
         }
@@ -130,17 +131,17 @@ class EventBus {
      */
     async notifyListeners(event, publishTime = Date.now()) {
         const listeners = this.listeners.get(event.eventType) || [];
-        
+
         // Executar listeners em paralelo (não bloquear)
         const promises = listeners.map(listener => {
             // Calcular lag (tempo entre publicação e consumo)
             const lag = (Date.now() - publishTime) / 1000;
             const listenerName = listener.handler.name || 'anonymous';
-            
+
             // ✅ OBSERVABILIDADE: Registrar lag de evento
             metrics.recordEventConsumed(event.eventType, listenerName, lag);
-            
-            return listener.handle(event);
+
+            return listener.handle(event, this.io);
         });
         await Promise.allSettled(promises);
     }

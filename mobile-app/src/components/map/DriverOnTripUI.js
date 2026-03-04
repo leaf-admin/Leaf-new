@@ -10,10 +10,14 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useTranslation } from 'react-i18next';
+import { useTheme } from '../../common-local/theme';
+import Typography from '../design-system/Typography';
+import AnimatedButton from '../design-system/AnimatedButton';
 
 
 export default function DriverOnTripUI({ booking, onFinishTrip }) {
   const { t } = useTranslation();
+  const theme = useTheme();
   const [tripTime, setTripTime] = useState(0);
   const [estimatedArrival, setEstimatedArrival] = useState('--');
 
@@ -37,8 +41,8 @@ export default function DriverOnTripUI({ booking, onFinishTrip }) {
       t('confirm_finish_trip'),
       [
         { text: t('no'), style: 'cancel' },
-        { 
-          text: t('yes'), 
+        {
+          text: t('yes'),
           onPress: () => {
             if (onFinishTrip) {
               onFinishTrip();
@@ -57,7 +61,7 @@ export default function DriverOnTripUI({ booking, onFinishTrip }) {
   };
 
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, { backgroundColor: theme.card }]}>
       {/* Header com informações do passageiro */}
       <View style={styles.header}>
         <View style={styles.passengerInfo}>
@@ -66,17 +70,17 @@ export default function DriverOnTripUI({ booking, onFinishTrip }) {
             style={styles.passengerAvatar}
           />
           <View style={styles.passengerDetails}>
-            <Text style={styles.passengerName}>{booking?.customer_name || t('passenger')}</Text>
+            <Typography variant="h2" color={theme.text}>{booking?.customer_name || t('passenger')}</Typography>
             <View style={styles.ratingContainer}>
               <Ionicons name="star" size={16} color="#FFD700" />
-              <Text style={styles.rating}>{booking?.customer_rating || '5.0'}</Text>
+              <Typography variant="caption" color={theme.textSecondary} style={{ marginLeft: 4 }}>{booking?.customer_rating || '5.0'}</Typography>
             </View>
           </View>
         </View>
-        
+
         <View style={styles.statusContainer}>
-          <Text style={styles.statusText}>{t('on_trip')}</Text>
-          <Text style={styles.tripTime}>{formatTime(tripTime)}</Text>
+          <Typography variant="body" weight="bold" color={theme.leafGreen || '#41D274'}>{t('on_trip')}</Typography>
+          <Typography variant="caption" color={theme.textSecondary}>{formatTime(tripTime)}</Typography>
         </View>
       </View>
 
@@ -84,11 +88,11 @@ export default function DriverOnTripUI({ booking, onFinishTrip }) {
       <View style={styles.tripInfo}>
         <View style={styles.locationRow}>
           <View style={styles.locationIcon}>
-            <Ionicons name="location" size={20} color="#41D274" />
+            <Ionicons name="location" size={20} color={theme.leafGreen || '#41D274'} />
           </View>
           <View style={styles.locationText}>
-            <Text style={styles.locationLabel}>{t('pickup')}</Text>
-            <Text style={styles.locationAddress}>{booking?.pickup_address}</Text>
+            <Typography variant="caption" color={theme.textSecondary}>{t('pickup')}</Typography>
+            <Typography variant="body" color={theme.text}>{booking?.pickup_address}</Typography>
           </View>
         </View>
 
@@ -97,23 +101,23 @@ export default function DriverOnTripUI({ booking, onFinishTrip }) {
             <Ionicons name="location" size={20} color="#FF6B6B" />
           </View>
           <View style={styles.locationText}>
-            <Text style={styles.locationLabel}>{t('destination')}</Text>
-            <Text style={styles.locationAddress}>{booking?.drop_address}</Text>
+            <Typography variant="caption" color={theme.textSecondary}>{t('destination')}</Typography>
+            <Typography variant="body" color={theme.text}>{booking?.drop_address}</Typography>
           </View>
         </View>
 
-        <View style={styles.tripDetails}>
+        <View style={[styles.tripDetails, { borderTopColor: theme.border }]}>
           <View style={styles.detailItem}>
-            <Ionicons name="time" size={16} color="#666" />
-            <Text style={styles.detailText}>{estimatedArrival}</Text>
+            <Ionicons name="time" size={16} color={theme.textSecondary} />
+            <Typography variant="caption" color={theme.textSecondary} style={{ marginLeft: 6 }}>{estimatedArrival}</Typography>
           </View>
           <View style={styles.detailItem}>
-            <Ionicons name="map" size={16} color="#666" />
-            <Text style={styles.detailText}>{booking?.remaining_distance || '--'}</Text>
+            <Ionicons name="map" size={16} color={theme.textSecondary} />
+            <Typography variant="caption" color={theme.textSecondary} style={{ marginLeft: 6 }}>{booking?.remaining_distance || '--'}</Typography>
           </View>
           <View style={styles.detailItem}>
-            <Ionicons name="cash" size={16} color="#666" />
-            <Text style={styles.detailText}>R$ {booking?.current_fare || '--'}</Text>
+            <Ionicons name="cash" size={16} color={theme.textSecondary} />
+            <Typography variant="caption" color={theme.textSecondary} style={{ marginLeft: 6 }}>R$ {booking?.current_fare || '--'}</Typography>
           </View>
         </View>
       </View>
@@ -121,32 +125,34 @@ export default function DriverOnTripUI({ booking, onFinishTrip }) {
       {/* Botões de ação */}
       <View style={styles.actionButtons}>
         <TouchableOpacity style={styles.actionButton} onPress={handleContactPassenger}>
-          <Ionicons name="call" size={24} color="#41D274" />
-          <Text style={styles.actionButtonText}>{t('call_passenger')}</Text>
+          <Ionicons name="call" size={24} color={theme.leafGreen || '#41D274'} />
+          <Typography variant="caption" color={theme.textSecondary} style={{ marginTop: 5 }}>{t('call_passenger')}</Typography>
         </TouchableOpacity>
 
         <TouchableOpacity style={styles.actionButton} onPress={() => Logger.log('Chat')}>
-          <Ionicons name="chatbubble" size={24} color="#41D274" />
-          <Text style={styles.actionButtonText}>{t('message')}</Text>
+          <Ionicons name="chatbubble" size={24} color={theme.leafGreen || '#41D274'} />
+          <Typography variant="caption" color={theme.textSecondary} style={{ marginTop: 5 }}>{t('message')}</Typography>
         </TouchableOpacity>
 
         <TouchableOpacity style={styles.actionButton} onPress={() => Logger.log('Navegação')}>
-          <Ionicons name="navigate" size={24} color="#41D274" />
-          <Text style={styles.actionButtonText}>{t('navigate')}</Text>
+          <Ionicons name="navigate" size={24} color={theme.leafGreen || '#41D274'} />
+          <Typography variant="caption" color={theme.textSecondary} style={{ marginTop: 5 }}>{t('navigate')}</Typography>
         </TouchableOpacity>
       </View>
 
       {/* Botão principal - Finalizar Viagem */}
-      <TouchableOpacity style={styles.finishTripButton} onPress={handleFinishTrip}>
-        <Text style={styles.finishTripButtonText}>{t('finish_trip')}</Text>
-      </TouchableOpacity>
+      <AnimatedButton
+        title={t('finish_trip')}
+        onPress={handleFinishTrip}
+        style={{ marginBottom: 20 }}
+      />
 
       {/* Informações de segurança */}
-      <View style={styles.safetyInfo}>
-        <Text style={styles.safetyTitle}>{t('driver_safety_tips')}</Text>
-        <Text style={styles.safetyText}>
+      <View style={[styles.safetyInfo, { backgroundColor: theme.card === '#1A1A1A' ? 'rgba(65, 210, 116, 0.05)' : '#E8F5E8', borderLeftColor: theme.leafGreen || '#41D274' }]}>
+        <Typography variant="label" weight="bold" color={theme.leafGreen || '#2E7D32'} style={{ marginBottom: 5 }}>{t('driver_safety_tips')}</Typography>
+        <Typography variant="caption" color={theme.leafGreen || '#2E7D32'} style={{ lineHeight: 18 }}>
           {t('driver_safety_reminder')}
-        </Text>
+        </Typography>
       </View>
     </View>
   );

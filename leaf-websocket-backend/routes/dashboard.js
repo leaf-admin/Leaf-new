@@ -1,5 +1,6 @@
 const express = require('express');
 const router = express.Router();
+const { logStructured, logError } = require('../utils/logger');
 
 // ✅ Importar middlewares de autenticação
 const { authenticateJWT, requireRole, requirePermission } = require('../middleware/jwt-auth');
@@ -35,32 +36,32 @@ router.get('/api/users/stats', async (req, res) => {
       // Buscar dados do Firebase se disponível
       if (firebaseConfig && firebaseConfig.getRealtimeDB) {
         const db = firebaseConfig.getRealtimeDB();
-        
+
         // Buscar usuários do Firebase
         const usersSnapshot = await db.ref('users').once('value');
         const users = usersSnapshot.val() || {};
-        
-        const userArray = Object.keys(users).map(key => ({id: key, ...users[key]}));
+
+        const userArray = Object.keys(users).map(key => ({ id: key, ...users[key] }));
         const customers = userArray.filter(user => user.usertype === 'customer');
         const drivers = userArray.filter(user => user.usertype === 'driver');
-        
+
         // Calcular datas
         const today = new Date();
         const todayStart = new Date(today.getFullYear(), today.getMonth(), today.getDate());
         const weekStart = new Date(today.getTime() - 7 * 24 * 60 * 60 * 1000);
         const monthStart = new Date(today.getFullYear(), today.getMonth(), 1);
-        
+
         // Novos usuários por período
         const newToday = userArray.filter(user => {
           const createdAt = new Date(user.createdAt || 0);
           return createdAt >= todayStart;
         }).length;
-        
+
         const newThisWeek = userArray.filter(user => {
           const createdAt = new Date(user.createdAt || 0);
           return createdAt >= weekStart;
         }).length;
-        
+
         const newThisMonth = userArray.filter(user => {
           const createdAt = new Date(user.createdAt || 0);
           return createdAt >= monthStart;
@@ -82,22 +83,22 @@ router.get('/api/users/stats', async (req, res) => {
       // Complementar com dados do Redis
       const redis = new Redis(process.env.REDIS_URL || 'redis://redis-master:6379');
       const RedisScan = require('../utils/redis-scan');
-      
+
       const onlineUsers = await redis.scard('online_users') || 0;
       // ✅ CORRIGIDO: Usar SCAN ao invés de KEYS() (não bloqueante)
       const totalBookings = await RedisScan.countKeys(redis, 'bookings:*') || 0;
-      
+
       stats.activeToday = onlineUsers;
-      stats.conversionRate = totalBookings > 0 && onlineUsers > 0 ? 
+      stats.conversionRate = totalBookings > 0 && onlineUsers > 0 ?
         ((totalBookings / onlineUsers) * 100).toFixed(1) : 0;
-      
+
       await redis.disconnect();
 
     } catch (error) {
       logStructured('warn', '⚠️ Erro ao buscar dados reais:', error.message, { service: 'dashboard-routes' });
       // Manter stats zerados em caso de erro
     }
-    
+
     res.json(stats);
   } catch (error) {
     logError(error, 'Erro ao buscar stats de usuários:', { service: 'dashboard-routes' });
@@ -108,47 +109,47 @@ router.get('/api/users/stats', async (req, res) => {
 // 👥 Enhanced User Management - GESTÃO AVANÇADA
 router.get('/api/users', async (req, res) => {
   try {
-    const { 
-      type, 
-      status, 
-      dateRange, 
-      searchTerm, 
-      sortBy = 'createdAt', 
+    const {
+      type,
+      status,
+      dateRange,
+      searchTerm,
+      sortBy = 'createdAt',
       sortOrder = 'desc',
       page = 1,
-      limit = 50 
+      limit = 50
     } = req.query;
-    
+
     let users = [];
     let totalCount = 0;
 
     try {
       if (firebaseConfig && firebaseConfig.getRealtimeDB) {
         const db = firebaseConfig.getRealtimeDB();
-        
+
         // Buscar usuários do Firebase
         const usersSnapshot = await db.ref('users').once('value');
         const usersData = usersSnapshot.val() || {};
-        
+
         // Buscar corridas para estatísticas de usuários
         const bookingsSnapshot = await db.ref('bookings').once('value');
         const bookings = bookingsSnapshot.val() || {};
-        const bookingArray = Object.keys(bookings).map(key => ({id: key, ...bookings[key]}));
+        const bookingArray = Object.keys(bookings).map(key => ({ id: key, ...bookings[key] }));
 
         // Converter para array e enriquecer com dados
         users = Object.keys(usersData).map(userId => {
           const user = usersData[userId];
-          
+
           // Calcular estatísticas do usuário
-          const userBookings = bookingArray.filter(booking => 
+          const userBookings = bookingArray.filter(booking =>
             booking.customer === userId || booking.driver === userId
           );
-          
-          const completedBookings = userBookings.filter(booking => 
+
+          const completedBookings = userBookings.filter(booking =>
             booking.status === 'COMPLETE' || booking.status === 'PAID'
           );
 
-          const totalSpent = user.usertype === 'customer' 
+          const totalSpent = user.usertype === 'customer'
             ? completedBookings.reduce((sum, booking) => sum + parseFloat(booking.customer_paid || 0), 0)
             : 0;
 
@@ -159,7 +160,7 @@ router.get('/api/users', async (req, res) => {
           // Calcular rating médio
           const ratingsAsDriver = bookingArray.filter(b => b.driver === userId && b.rating);
           const ratingsAsCustomer = bookingArray.filter(b => b.customer === userId && b.driver_rating);
-          
+
           let averageRating = 0;
           if (user.usertype === 'driver' && ratingsAsDriver.length > 0) {
             averageRating = ratingsAsDriver.reduce((sum, b) => sum + parseFloat(b.rating), 0) / ratingsAsDriver.length;
@@ -207,7 +208,7 @@ router.get('/api/users', async (req, res) => {
 
         if (searchTerm) {
           const search = searchTerm.toLowerCase();
-          users = users.filter(user => 
+          users = users.filter(user =>
             user.name.toLowerCase().includes(search) ||
             user.email.toLowerCase().includes(search) ||
             user.phone.includes(search) ||
@@ -229,13 +230,13 @@ router.get('/api/users', async (req, res) => {
         users.sort((a, b) => {
           let aVal = a[sortBy];
           let bVal = b[sortBy];
-          
+
           // Converter para números se necessário
           if (sortBy === 'totalTrips' || sortBy === 'totalSpent' || sortBy === 'rating') {
             aVal = parseFloat(aVal) || 0;
             bVal = parseFloat(bVal) || 0;
           }
-          
+
           // Converter para datas se necessário
           if (sortBy === 'registrationDate' || sortBy === 'lastActivity') {
             aVal = new Date(aVal);
@@ -259,7 +260,7 @@ router.get('/api/users', async (req, res) => {
     } catch (error) {
       logStructured('warn', '⚠️ Erro ao buscar usuários do Firebase:', error.message, { service: 'dashboard-routes' });
     }
-    
+
     res.json({
       users,
       pagination: {
@@ -278,26 +279,26 @@ router.get('/api/users', async (req, res) => {
 // 🚗 Driver Applications - SISTEMA COMPLETO DE APROVAÇÃO
 router.get('/api/drivers/applications', async (req, res) => {
   try {
-    const { 
-      status, 
-      dateRange, 
-      sortBy = 'submissionDate', 
+    const {
+      status,
+      dateRange,
+      sortBy = 'submissionDate',
       sortOrder = 'desc',
       page = 1,
-      limit = 20 
+      limit = 20
     } = req.query;
-    
+
     let applications = [];
     let totalCount = 0;
 
     try {
       if (firebaseConfig && firebaseConfig.getRealtimeDB) {
         const db = firebaseConfig.getRealtimeDB();
-        
+
         // Buscar motoristas pendentes de aprovação
         const usersSnapshot = await db.ref('users').orderByChild('usertype').equalTo('driver').once('value');
         const users = usersSnapshot.val() || {};
-        
+
         // Buscar carros (para informações do veículo)
         const carsSnapshot = await db.ref('cars').once('value');
         const cars = carsSnapshot.val() || {};
@@ -308,89 +309,89 @@ router.get('/api/drivers/applications', async (req, res) => {
 
         applications = []; // Temporário para teste
         // applications = await Promise.all(Object.keys(users).map(async userId => {
-          const user = users[userId];
-          
-          // Buscar carro do motorista
-          const userCar = Object.values(cars).find(car => car.driver === userId);
-          
-          // Buscar documentos na nova estrutura: users/{uid}/documents/{documentType}
-          let userDocuments = {};
-          if (allUsersData[userId] && allUsersData[userId].documents) {
-            userDocuments = allUsersData[userId].documents;
-          }
+        const user = users[userId];
 
-          // Determinar status baseado nos documentos e aprovação
-          let applicationStatus = 'pending';
-          if (user.approved === true) {
-            applicationStatus = 'approved';
-          } else if (user.approved === false) {
-            applicationStatus = 'rejected';
-          } else if (userDocuments.cnh || userDocuments.comprovante_residencia || user.licenseImage || user.verifyIdImage) {
-            applicationStatus = 'in_review';
-          }
+        // Buscar carro do motorista
+        const userCar = Object.values(cars).find(car => car.driver === userId);
 
-          // Analisar documentos - NOVA ESTRUTURA + COMPATIBILIDADE COM ANTIGA
-          const documents = {
-            license: {
-              // Nova estrutura
-              front: userDocuments.cnh?.fileUrl || user.licenseImage || null,
-              back: userDocuments.cnh_verso?.fileUrl || user.licenseImageBack || null,
-              status: userDocuments.cnh ? userDocuments.cnh.status : (user.licenseImage ? (user.approved ? 'approved' : 'pending') : 'missing'),
-              uploadedAt: userDocuments.cnh?.uploadedAt || null,
-              type: userDocuments.cnh?.fileType || null
-            },
-            identity: {
-              // Nova estrutura  
-              front: userDocuments.comprovante_residencia?.fileUrl || user.verifyIdImage || null,
-              back: userDocuments.identidade_verso?.fileUrl || user.verifyIdImageBack || null,
-              status: userDocuments.comprovante_residencia ? userDocuments.comprovante_residencia.status : (user.verifyIdImage ? (user.approved ? 'approved' : 'pending') : 'missing'),
-              uploadedAt: userDocuments.comprovante_residencia?.uploadedAt || null,
-              type: userDocuments.comprovante_residencia?.fileType || null
-            },
-            vehicle: {
-              // Nova estrutura
-              registration: userDocuments.crlv?.fileUrl || userCar?.vehicleRegistration || null,
-              insurance: userDocuments.seguro?.fileUrl || userCar?.vehicleInsurance || null,
-              photos: userCar?.carImage || null,
-              status: userDocuments.crlv ? userDocuments.crlv.status : (userCar ? (user.approved ? 'approved' : 'pending') : 'missing'),
-              uploadedAt: userDocuments.crlv?.uploadedAt || null,
-              type: userDocuments.crlv?.fileType || null
-            },
-            // Adicionar todos os documentos enviados pelo usuário
-            all_documents: Object.keys(userDocuments).map(docType => ({
-              type: docType,
-              fileUrl: userDocuments[docType].fileUrl,
-              status: userDocuments[docType].status,
-              uploadedAt: userDocuments[docType].uploadedAt,
-              fileType: userDocuments[docType].fileType
-            }))
-          };
+        // Buscar documentos na nova estrutura: users/{uid}/documents/{documentType}
+        let userDocuments = {};
+        if (allUsersData[userId] && allUsersData[userId].documents) {
+          userDocuments = allUsersData[userId].documents;
+        }
 
-          return {
+        // Determinar status baseado nos documentos e aprovação
+        let applicationStatus = 'pending';
+        if (user.approved === true) {
+          applicationStatus = 'approved';
+        } else if (user.approved === false) {
+          applicationStatus = 'rejected';
+        } else if (userDocuments.cnh || userDocuments.comprovante_residencia || user.licenseImage || user.verifyIdImage) {
+          applicationStatus = 'in_review';
+        }
+
+        // Analisar documentos - NOVA ESTRUTURA + COMPATIBILIDADE COM ANTIGA
+        const documents = {
+          license: {
+            // Nova estrutura
+            front: userDocuments.cnh?.fileUrl || user.licenseImage || null,
+            back: userDocuments.cnh_verso?.fileUrl || user.licenseImageBack || null,
+            status: userDocuments.cnh ? userDocuments.cnh.status : (user.licenseImage ? (user.approved ? 'approved' : 'pending') : 'missing'),
+            uploadedAt: userDocuments.cnh?.uploadedAt || null,
+            type: userDocuments.cnh?.fileType || null
+          },
+          identity: {
+            // Nova estrutura  
+            front: userDocuments.comprovante_residencia?.fileUrl || user.verifyIdImage || null,
+            back: userDocuments.identidade_verso?.fileUrl || user.verifyIdImageBack || null,
+            status: userDocuments.comprovante_residencia ? userDocuments.comprovante_residencia.status : (user.verifyIdImage ? (user.approved ? 'approved' : 'pending') : 'missing'),
+            uploadedAt: userDocuments.comprovante_residencia?.uploadedAt || null,
+            type: userDocuments.comprovante_residencia?.fileType || null
+          },
+          vehicle: {
+            // Nova estrutura
+            registration: userDocuments.crlv?.fileUrl || userCar?.vehicleRegistration || null,
+            insurance: userDocuments.seguro?.fileUrl || userCar?.vehicleInsurance || null,
+            photos: userCar?.carImage || null,
+            status: userDocuments.crlv ? userDocuments.crlv.status : (userCar ? (user.approved ? 'approved' : 'pending') : 'missing'),
+            uploadedAt: userDocuments.crlv?.uploadedAt || null,
+            type: userDocuments.crlv?.fileType || null
+          },
+          // Adicionar todos os documentos enviados pelo usuário
+          all_documents: Object.keys(userDocuments).map(docType => ({
+            type: docType,
+            fileUrl: userDocuments[docType].fileUrl,
+            status: userDocuments[docType].status,
+            uploadedAt: userDocuments[docType].uploadedAt,
+            fileType: userDocuments[docType].fileType
+          }))
+        };
+
+        return {
+          id: userId,
+          driver: {
             id: userId,
-            driver: {
-              id: userId,
-              name: `${user.firstName || ''} ${user.lastName || ''}`.trim(),
-              email: user.email || '',
-              phone: user.mobile || '',
-              city: user.city || '',
-              state: user.state || ''
-            },
-            vehicle: userCar ? {
-              make: userCar.carMake || '',
-              model: userCar.carModel || '',
-              year: userCar.carYear || '',
-              plate: userCar.carNumber || '',
-              color: userCar.carColor || ''
-            } : null,
-            documents,
-            status: applicationStatus,
-            submissionDate: user.createdAt ? new Date(user.createdAt).toISOString() : new Date().toISOString(),
-            reviewDate: user.approvedAt ? new Date(user.approvedAt).toISOString() : null,
-            reviewedBy: user.approvedBy || null,
-            rejectionReason: user.rejectionReason || null,
-            notes: user.adminNotes || ''
-          };
+            name: `${user.firstName || ''} ${user.lastName || ''}`.trim(),
+            email: user.email || '',
+            phone: user.mobile || '',
+            city: user.city || '',
+            state: user.state || ''
+          },
+          vehicle: userCar ? {
+            make: userCar.carMake || '',
+            model: userCar.carModel || '',
+            year: userCar.carYear || '',
+            plate: userCar.carNumber || '',
+            color: userCar.carColor || ''
+          } : null,
+          documents,
+          status: applicationStatus,
+          submissionDate: user.createdAt ? new Date(user.createdAt).toISOString() : new Date().toISOString(),
+          reviewDate: user.approvedAt ? new Date(user.approvedAt).toISOString() : null,
+          reviewedBy: user.approvedBy || null,
+          rejectionReason: user.rejectionReason || null,
+          notes: user.adminNotes || ''
+        };
         // });
 
         // Aplicar filtros
@@ -408,7 +409,7 @@ router.get('/api/drivers/applications', async (req, res) => {
     } catch (error) {
       logStructured('warn', '⚠️ Erro ao buscar aplicações do Firebase:', error.message, { service: 'dashboard-routes' });
     }
-    
+
     res.json({
       applications,
       pagination: {
@@ -433,31 +434,31 @@ router.post('/api/drivers/:driverId/documents/:documentType/review', authenticat
     const reviewedBy = req.user.id; // ✅ ID do admin logado
 
     if (!['approve', 'reject'].includes(action)) {
-      return res.status(400).json({ 
+      return res.status(400).json({
         success: false,
-        message: 'Ação inválida. Use "approve" ou "reject".' 
+        message: 'Ação inválida. Use "approve" ou "reject".'
       });
     }
 
     if (action === 'reject' && !rejectionReason) {
-      return res.status(400).json({ 
+      return res.status(400).json({
         success: false,
-        message: 'Motivo da rejeição é obrigatório.' 
+        message: 'Motivo da rejeição é obrigatório.'
       });
     }
 
     try {
       if (firebaseConfig && firebaseConfig.getRealtimeDB) {
         const db = firebaseConfig.getRealtimeDB();
-        
+
         // Verificar se o documento existe
         const documentRef = db.ref(`users/${driverId}/documents/${documentType}`);
         const documentSnapshot = await documentRef.once('value');
-        
+
         if (!documentSnapshot.exists()) {
-          return res.status(404).json({ 
+          return res.status(404).json({
             success: false,
-            message: 'Documento não encontrado.' 
+            message: 'Documento não encontrado.'
           });
         }
 
@@ -482,7 +483,7 @@ router.post('/api/drivers/:driverId/documents/:documentType/review', authenticat
           const allDocsSnapshot = await db.ref(`users/${driverId}/documents`).once('value');
           const allDocs = allDocsSnapshot.val() || {};
           const allApproved = Object.values(allDocs).every(doc => doc.status === 'approved');
-          
+
           if (allApproved) {
             await db.ref(`users/${driverId}`).update({
               approved: true,
@@ -493,7 +494,7 @@ router.post('/api/drivers/:driverId/documents/:documentType/review', authenticat
         }
 
         logStructured('info', `✅ Documento ${documentType} do motorista ${driverId} ${action === 'approve' ? 'aprovado' : 'rejeitado'} por ${req.user.email} (${reviewedBy})`, { service: 'dashboard-routes' });
-        
+
         res.json({
           success: true,
           message: `Documento ${action === 'approve' ? 'aprovado' : 'rejeitado'} com sucesso!`,
@@ -509,16 +510,16 @@ router.post('/api/drivers/:driverId/documents/:documentType/review', authenticat
       }
     } catch (error) {
       logError(error, '❌ Erro ao revisar documento:', { service: 'dashboard-routes' });
-      res.status(500).json({ 
+      res.status(500).json({
         success: false,
-        message: `Erro ao ${action === 'approve' ? 'aprovar' : 'rejeitar'} documento: ${error.message}` 
+        message: `Erro ao ${action === 'approve' ? 'aprovar' : 'rejeitar'} documento: ${error.message}`
       });
     }
   } catch (error) {
     logError(error, '❌ Erro na API de review de documento:', { service: 'dashboard-routes' });
-    res.status(500).json({ 
+    res.status(500).json({
       success: false,
-      message: 'Erro interno do servidor.' 
+      message: 'Erro interno do servidor.'
     });
   }
 });
@@ -532,15 +533,15 @@ router.get('/api/drivers/:driverId/documents', authenticateJWT, requireRole(['ad
     try {
       if (firebaseConfig && firebaseConfig.getRealtimeDB) {
         const db = firebaseConfig.getRealtimeDB();
-        
+
         // Buscar documentos do motorista
         const documentsRef = db.ref(`users/${driverId}/documents`);
         const documentsSnapshot = await documentsRef.once('value');
-        
+
         const documents = {};
         if (documentsSnapshot.exists()) {
           const rawDocuments = documentsSnapshot.val();
-          
+
           // Organizar documentos
           Object.keys(rawDocuments).forEach(docType => {
             documents[docType] = {
@@ -573,16 +574,16 @@ router.get('/api/drivers/:driverId/documents', authenticateJWT, requireRole(['ad
       }
     } catch (error) {
       logError(error, '❌ Erro ao buscar documentos:', { service: 'dashboard-routes' });
-      res.status(500).json({ 
+      res.status(500).json({
         success: false,
-        message: `Erro ao buscar documentos: ${error.message}` 
+        message: `Erro ao buscar documentos: ${error.message}`
       });
     }
   } catch (error) {
     logError(error, '❌ Erro na API de documentos:', { service: 'dashboard-routes' });
-    res.status(500).json({ 
+    res.status(500).json({
       success: false,
-      message: 'Erro interno do servidor.' 
+      message: 'Erro interno do servidor.'
     });
   }
 });
@@ -594,11 +595,11 @@ router.post('/api/drivers/applications/:id/approve', authenticateJWT, requireRol
     const { id } = req.params;
     const { notes } = req.body;
     const adminId = req.user.id; // ✅ ID do admin logado
-    
+
     try {
       if (firebaseConfig && firebaseConfig.getRealtimeDB) {
         const db = firebaseConfig.getRealtimeDB();
-        
+
         // Verificar se o usuário existe
         const userSnapshot = await db.ref(`users/${id}`).once('value');
         if (!userSnapshot.exists()) {
@@ -623,7 +624,7 @@ router.post('/api/drivers/applications/:id/approve', authenticateJWT, requireRol
 
         // ✅ Salvar no Firebase Realtime Database
         await db.ref(`users/${id}`).update(updates);
-        
+
         // ✅ Atualizar também todos os documentos para aprovados
         const documentsSnapshot = await db.ref(`users/${id}/documents`).once('value');
         const documents = documentsSnapshot.val() || {};
@@ -636,11 +637,11 @@ router.post('/api/drivers/applications/:id/approve', authenticateJWT, requireRol
         if (Object.keys(documentUpdates).length > 0) {
           await db.ref().update(documentUpdates);
         }
-        
+
         logStructured('info', `✅ Aplicação aprovada: ${id} por ${req.user.email} (${adminId})`, { service: 'dashboard-routes' });
-        
-        res.json({ 
-          success: true, 
+
+        res.json({
+          success: true,
           message: 'Aplicação aprovada com sucesso',
           data: { driverId: id, approvedAt: updates.approvedAt }
         });
@@ -664,15 +665,15 @@ router.post('/api/drivers/applications/:id/reject', authenticateJWT, requireRole
     const { id } = req.params;
     const { notes, rejectionReasons } = req.body;
     const adminId = req.user.id; // ✅ ID do admin logado
-    
+
     if (!rejectionReasons) {
       return res.status(400).json({ error: 'Motivo da rejeição é obrigatório' });
     }
-    
+
     try {
       if (firebaseConfig && firebaseConfig.getRealtimeDB) {
         const db = firebaseConfig.getRealtimeDB();
-        
+
         // Verificar se o usuário existe
         const userSnapshot = await db.ref(`users/${id}`).once('value');
         if (!userSnapshot.exists()) {
@@ -698,7 +699,7 @@ router.post('/api/drivers/applications/:id/reject', authenticateJWT, requireRole
 
         // ✅ Salvar no Firebase Realtime Database
         await db.ref(`users/${id}`).update(updates);
-        
+
         // ✅ Atualizar também todos os documentos para rejeitados
         const documentsSnapshot = await db.ref(`users/${id}/documents`).once('value');
         const documents = documentsSnapshot.val() || {};
@@ -712,11 +713,11 @@ router.post('/api/drivers/applications/:id/reject', authenticateJWT, requireRole
         if (Object.keys(documentUpdates).length > 0) {
           await db.ref().update(documentUpdates);
         }
-        
+
         logStructured('info', `❌ Aplicação rejeitada: ${id} por ${req.user.email} (${adminId})`, { service: 'dashboard-routes' });
-        
-        res.json({ 
-          success: true, 
+
+        res.json({
+          success: true,
           message: 'Aplicação rejeitada',
           data: { driverId: id, rejectedAt: updates.rejectedAt }
         });
@@ -737,7 +738,7 @@ router.post('/api/drivers/applications/:id/reject', authenticateJWT, requireRole
 router.get('/api/metrics/financial', async (req, res) => {
   try {
     const { period } = req.query;
-    
+
     let metrics = {
       revenue: {
         total: 0,
@@ -769,19 +770,19 @@ router.get('/api/metrics/financial', async (req, res) => {
     try {
       if (firebaseConfig && firebaseConfig.getRealtimeDB) {
         const db = firebaseConfig.getRealtimeDB();
-        
+
         // Buscar corridas do Firebase
         const bookingsSnapshot = await db.ref('bookings').once('value');
         const bookings = bookingsSnapshot.val() || {};
-        
-        const bookingArray = Object.keys(bookings).map(key => ({id: key, ...bookings[key]}));
-        
+
+        const bookingArray = Object.keys(bookings).map(key => ({ id: key, ...bookings[key] }));
+
         // Filtrar por período se especificado
         let filteredBookings = bookingArray;
         if (period) {
           const today = new Date();
           let startDate = new Date();
-          
+
           switch (period) {
             case 'today':
               startDate = new Date(today.getFullYear(), today.getMonth(), today.getDate());
@@ -793,7 +794,7 @@ router.get('/api/metrics/financial', async (req, res) => {
               startDate = new Date(today.getFullYear(), today.getMonth(), 1);
               break;
           }
-          
+
           filteredBookings = bookingArray.filter(booking => {
             const tripDate = new Date(booking.tripdate || 0);
             return tripDate >= startDate;
@@ -803,15 +804,15 @@ router.get('/api/metrics/financial', async (req, res) => {
         // Calcular métricas reais
         const completedBookings = filteredBookings.filter(b => b.status === 'COMPLETE' || b.status === 'PAID');
         const cancelledBookings = filteredBookings.filter(b => b.status === 'CANCELLED');
-        
+
         const totalRevenue = completedBookings.reduce((sum, booking) => {
           return sum + parseFloat(booking.customer_paid || booking.total_fare || 0);
         }, 0);
-        
+
         const convenienceFees = completedBookings.reduce((sum, booking) => {
           return sum + parseFloat(booking.convenience_fees || 0);
         }, 0);
-        
+
         const totalFares = completedBookings.reduce((sum, booking) => {
           return sum + parseFloat(booking.driver_share || 0);
         }, 0);
@@ -847,7 +848,7 @@ router.get('/api/metrics/financial', async (req, res) => {
     } catch (error) {
       logStructured('warn', '⚠️ Erro ao buscar dados financeiros do Firebase:', error.message, { service: 'dashboard-routes' });
     }
-    
+
     res.json(metrics);
   } catch (error) {
     logError(error, 'Erro ao buscar métricas financeiras:', { service: 'dashboard-routes' });
@@ -859,7 +860,7 @@ router.get('/api/metrics/financial', async (req, res) => {
 router.get('/api/metrics/financial/advanced', async (req, res) => {
   try {
     const { period = 'month' } = req.query;
-    
+
     let metrics = {
       operationalCosts: {
         totalPerRide: 0,
@@ -896,16 +897,16 @@ router.get('/api/metrics/financial/advanced', async (req, res) => {
     try {
       if (firebaseConfig && firebaseConfig.getRealtimeDB) {
         const db = firebaseConfig.getRealtimeDB();
-        
+
         // Buscar corridas do período
         const bookingsSnapshot = await db.ref('bookings').once('value');
         const bookings = bookingsSnapshot.val() || {};
-        const bookingArray = Object.keys(bookings).map(key => ({id: key, ...bookings[key]}));
-        
+        const bookingArray = Object.keys(bookings).map(key => ({ id: key, ...bookings[key] }));
+
         // Filtrar por período
         const today = new Date();
         let startDate = new Date();
-        
+
         switch (period) {
           case 'today':
             startDate = new Date(today.getFullYear(), today.getMonth(), today.getDate());
@@ -920,13 +921,13 @@ router.get('/api/metrics/financial/advanced', async (req, res) => {
             startDate = new Date(today.getFullYear(), 0, 1);
             break;
         }
-        
+
         const filteredBookings = bookingArray.filter(booking => {
           const tripDate = new Date(booking.tripdate || 0);
           return tripDate >= startDate;
         });
 
-        const completedBookings = filteredBookings.filter(b => 
+        const completedBookings = filteredBookings.filter(b =>
           b.status === 'COMPLETE' || b.status === 'PAID'
         );
 
@@ -935,18 +936,18 @@ router.get('/api/metrics/financial/advanced', async (req, res) => {
           const grossRevenue = completedBookings.reduce((sum, booking) => {
             return sum + parseFloat(booking.customer_paid || booking.total_fare || 0);
           }, 0);
-          
+
           const commissionRevenue = completedBookings.reduce((sum, booking) => {
             return sum + parseFloat(booking.convenience_fees || 0);
           }, 0);
-          
+
           const driverPayouts = completedBookings.reduce((sum, booking) => {
             return sum + parseFloat(booking.driver_share || 0);
           }, 0);
 
           // Calcular custos operacionais reais por corrida
           const totalRides = completedBookings.length;
-          
+
           // Custos estimados baseados na realidade do mercado
           const apiCostsPerRide = {
             googleMaps: 0.005, // $0.005 por request de direção
@@ -955,11 +956,11 @@ router.get('/api/metrics/financial/advanced', async (req, res) => {
           };
 
           const serverCostsPerRide = 50 / Math.max(totalRides, 1); // $50/mês dividido pelas corridas
-          
+
           const totalApiCosts = totalRides * (apiCostsPerRide.googleMaps + apiCostsPerRide.firebase);
           const totalServerCosts = totalRides * serverCostsPerRide;
           const totalPaymentCosts = apiCostsPerRide.payment;
-          
+
           const totalOperationalCosts = totalApiCosts + totalServerCosts + totalPaymentCosts;
 
           metrics = {
@@ -1004,7 +1005,7 @@ router.get('/api/metrics/financial/advanced', async (req, res) => {
     } catch (error) {
       logStructured('warn', '⚠️ Erro ao calcular métricas financeiras avançadas:', error.message, { service: 'dashboard-routes' });
     }
-    
+
     res.json(metrics);
   } catch (error) {
     logError(error, 'Erro ao buscar métricas financeiras avançadas:', { service: 'dashboard-routes' });
@@ -1016,7 +1017,7 @@ router.get('/api/metrics/financial/advanced', async (req, res) => {
 router.get('/api/analytics/bookings', async (req, res) => {
   try {
     const { period = 'month', status } = req.query;
-    
+
     let analytics = {
       summary: {
         total: 0,
@@ -1049,16 +1050,16 @@ router.get('/api/analytics/bookings', async (req, res) => {
     try {
       if (firebaseConfig && firebaseConfig.getRealtimeDB) {
         const db = firebaseConfig.getRealtimeDB();
-        
+
         // Buscar corridas
         const bookingsSnapshot = await db.ref('bookings').once('value');
         const bookings = bookingsSnapshot.val() || {};
-        const bookingArray = Object.keys(bookings).map(key => ({id: key, ...bookings[key]}));
-        
+        const bookingArray = Object.keys(bookings).map(key => ({ id: key, ...bookings[key] }));
+
         // Filtrar por período
         const today = new Date();
         let startDate = new Date();
-        
+
         switch (period) {
           case 'today':
             startDate = new Date(today.getFullYear(), today.getMonth(), today.getDate());
@@ -1073,7 +1074,7 @@ router.get('/api/analytics/bookings', async (req, res) => {
             startDate = new Date(today.getFullYear(), 0, 1);
             break;
         }
-        
+
         let filteredBookings = bookingArray.filter(booking => {
           const tripDate = new Date(booking.tripdate || 0);
           return tripDate >= startDate;
@@ -1129,7 +1130,7 @@ router.get('/api/analytics/bookings', async (req, res) => {
           const date = new Date(today.getTime() - i * 24 * 60 * 60 * 1000);
           const dayStart = new Date(date.getFullYear(), date.getMonth(), date.getDate());
           const dayEnd = new Date(dayStart.getTime() + 24 * 60 * 60 * 1000);
-          
+
           const dayBookings = bookingArray.filter(booking => {
             const tripDate = new Date(booking.tripdate || 0);
             return tripDate >= dayStart && tripDate < dayEnd;
@@ -1165,7 +1166,7 @@ router.get('/api/analytics/bookings', async (req, res) => {
     } catch (error) {
       logStructured('warn', '⚠️ Erro ao calcular analytics de corridas:', error.message, { service: 'dashboard-routes' });
     }
-    
+
     res.json(analytics);
   } catch (error) {
     logError(error, 'Erro ao buscar analytics de corridas:', { service: 'dashboard-routes' });
@@ -1206,16 +1207,16 @@ router.get('/api/metrics/services', async (req, res) => {
     try {
       // Dados reais do Redis
       const redis = new Redis(process.env.REDIS_URL || 'redis://redis-master:6379');
-      
+
       // Informações reais do Redis
       const redisInfo = await redis.info();
       const connectedClients = await redis.client('list');
       const dbSize = await redis.dbsize();
-      
+
       // Parse das informações do Redis
       const memorySection = redisInfo.split('\r\n').find(line => line.includes('used_memory_human:'));
       const memoryUsed = memorySection ? parseFloat(memorySection.split(':')[1].replace('M', '')) : 0;
-      
+
       metrics.redis = {
         operations: dbSize,
         hitRate: Math.min(95, Math.max(85, 90 + Math.random() * 10)), // Entre 85-95%
@@ -1252,7 +1253,7 @@ router.get('/api/metrics/services', async (req, res) => {
       logStructured('warn', '⚠️ Erro ao obter métricas reais:', error.message, { service: 'dashboard-routes' });
       // Manter zeros em caso de erro
     }
-    
+
     res.json(metrics);
   } catch (error) {
     logError(error, 'Erro ao buscar métricas de serviços:', { service: 'dashboard-routes' });
@@ -1283,7 +1284,7 @@ router.get('/api/subscriptions', async (req, res) => {
         autoRenewal: true
       }
     ];
-    
+
     res.json(subscriptions);
   } catch (error) {
     logError(error, 'Erro ao buscar assinaturas:', { service: 'dashboard-routes' });
@@ -1310,7 +1311,7 @@ router.get('/api/subscriptions/stats', async (req, res) => {
       renewalRate: 84.5,
       avgLifetime: 3.8
     };
-    
+
     res.json(stats);
   } catch (error) {
     logError(error, 'Erro ao buscar stats de assinaturas:', { service: 'dashboard-routes' });
@@ -1342,7 +1343,7 @@ router.get('/api/promotions', async (req, res) => {
         }
       }
     ];
-    
+
     res.json(promotions);
   } catch (error) {
     logError(error, 'Erro ao buscar promoções:', { service: 'dashboard-routes' });
@@ -1363,7 +1364,7 @@ router.get('/api/promotions/stats', async (req, res) => {
       totalUsers: 1247,
       conversionRate: 24.8
     };
-    
+
     res.json(stats);
   } catch (error) {
     logError(error, 'Erro ao buscar stats de promoções:', { service: 'dashboard-routes' });
@@ -1374,10 +1375,10 @@ router.get('/api/promotions/stats', async (req, res) => {
 router.post('/api/promotions', async (req, res) => {
   try {
     const promotionData = req.body;
-    
+
     // Implementar criação de promoção
     logStructured('info', 'Criando promoção:', promotionData, { service: 'dashboard-routes' });
-    
+
     res.json({ success: true, id: 'promo_' + Date.now() });
   } catch (error) {
     logError(error, 'Erro ao criar promoção:', { service: 'dashboard-routes' });
@@ -1400,7 +1401,7 @@ router.get('/api/drivers/active', async (req, res) => {
         tripsToday: 12
       }
     ];
-    
+
     res.json(drivers);
   } catch (error) {
     logError(error, 'Erro ao buscar motoristas ativos:', { service: 'dashboard-routes' });
@@ -1420,7 +1421,7 @@ router.get('/api/passengers/active', async (req, res) => {
         waitingTime: 3
       }
     ];
-    
+
     res.json(passengers);
   } catch (error) {
     logError(error, 'Erro ao buscar passageiros ativos:', { service: 'dashboard-routes' });
@@ -1443,7 +1444,7 @@ router.get('/api/trips/active', async (req, res) => {
         fare: 25.50
       }
     ];
-    
+
     res.json(trips);
   } catch (error) {
     logError(error, 'Erro ao buscar corridas ativas:', { service: 'dashboard-routes' });
@@ -1465,13 +1466,13 @@ router.get('/api/live/stats', async (req, res) => {
 
     try {
       const redis = new Redis(process.env.REDIS_URL || 'redis://redis-master:6379');
-      
+
       // Dados reais do Redis
       const totalDrivers = await redis.zcard('driver_locations') || 0;
       const onlineUsers = await redis.scard('online_users') || 0;
       const activeBookings = await redis.keys('bookings:*').then(keys => keys.length) || 0;
       const availableDrivers = await redis.scard('available_drivers') || Math.floor(totalDrivers * 0.6);
-      
+
       stats = {
         driversOnline: totalDrivers,
         driversAvailable: availableDrivers,
@@ -1480,13 +1481,13 @@ router.get('/api/live/stats', async (req, res) => {
         avgWaitTime: activeBookings > 0 ? (2.5 + Math.random() * 3).toFixed(1) : 0, // 2.5-5.5 min
         avgTripTime: activeBookings > 0 ? (12 + Math.random() * 15).toFixed(1) : 0 // 12-27 min
       };
-      
+
       await redis.disconnect();
     } catch (redisError) {
       logStructured('warn', '⚠️ Redis não disponível para stats ao vivo:', redisError.message, { service: 'dashboard-routes' });
       // stats permanece zerado
     }
-    
+
     res.json(stats);
   } catch (error) {
     logError(error, 'Erro ao buscar stats em tempo real:', { service: 'dashboard-routes' });
@@ -1517,25 +1518,25 @@ router.get('/api/rides/stats', async (req, res) => {
         const db = firebaseConfig.getRealtimeDB();
         const bookingsSnapshot = await db.ref('bookings').once('value');
         const bookings = bookingsSnapshot.val() || {};
-        const bookingArray = Object.keys(bookings).map(key => ({id: key, ...bookings[key]}));
+        const bookingArray = Object.keys(bookings).map(key => ({ id: key, ...bookings[key] }));
 
         const today = new Date();
         today.setHours(0, 0, 0, 0);
-        
+
         const completedToday = bookingArray.filter(b => {
           const tripDate = new Date(b.tripdate || 0);
           return tripDate >= today && (b.status === 'COMPLETE' || b.status === 'PAID');
         });
 
-        const activeRides = bookingArray.filter(b => 
+        const activeRides = bookingArray.filter(b =>
           b.status === 'ACCEPTED' || b.status === 'IN_PROGRESS'
         );
 
-        const completedRides = bookingArray.filter(b => 
+        const completedRides = bookingArray.filter(b =>
           b.status === 'COMPLETE' || b.status === 'PAID'
         );
 
-        const totalValue = completedRides.reduce((sum, b) => 
+        const totalValue = completedRides.reduce((sum, b) =>
           sum + parseFloat(b.customer_paid || b.fare || 0), 0
         );
 
@@ -1573,11 +1574,11 @@ router.get('/api/revenue/stats', async (req, res) => {
         const db = firebaseConfig.getRealtimeDB();
         const bookingsSnapshot = await db.ref('bookings').once('value');
         const bookings = bookingsSnapshot.val() || {};
-        const bookingArray = Object.keys(bookings).map(key => ({id: key, ...bookings[key]}));
+        const bookingArray = Object.keys(bookings).map(key => ({ id: key, ...bookings[key] }));
 
         const today = new Date();
         today.setHours(0, 0, 0, 0);
-        
+
         const thisMonth = new Date();
         thisMonth.setDate(1);
         thisMonth.setHours(0, 0, 0, 0);
@@ -1592,11 +1593,11 @@ router.get('/api/revenue/stats', async (req, res) => {
           return tripDate >= thisMonth && (b.status === 'COMPLETE' || b.status === 'PAID');
         });
 
-        const todayRevenue = completedToday.reduce((sum, b) => 
+        const todayRevenue = completedToday.reduce((sum, b) =>
           sum + parseFloat(b.customer_paid || b.fare || 0), 0
         );
 
-        const monthlyRevenue = completedThisMonth.reduce((sum, b) => 
+        const monthlyRevenue = completedThisMonth.reduce((sum, b) =>
           sum + parseFloat(b.customer_paid || b.fare || 0), 0
         );
 
@@ -1632,13 +1633,13 @@ router.get('/api/conversion/stats', async (req, res) => {
         const db = firebaseConfig.getRealtimeDB();
         const bookingsSnapshot = await db.ref('bookings').once('value');
         const bookings = bookingsSnapshot.val() || {};
-        const bookingArray = Object.keys(bookings).map(key => ({id: key, ...bookings[key]}));
+        const bookingArray = Object.keys(bookings).map(key => ({ id: key, ...bookings[key] }));
 
         const total = bookingArray.length;
-        const completed = bookingArray.filter(b => 
+        const completed = bookingArray.filter(b =>
           b.status === 'COMPLETE' || b.status === 'PAID'
         ).length;
-        const cancelled = bookingArray.filter(b => 
+        const cancelled = bookingArray.filter(b =>
           b.status === 'CANCELLED'
         ).length;
 
@@ -1673,7 +1674,7 @@ router.get('/api/kyc-analytics/stats', async (req, res) => {
         const db = firebaseConfig.getRealtimeDB();
         const usersSnapshot = await db.ref('users').orderByChild('usertype').equalTo('driver').once('value');
         const drivers = usersSnapshot.val() || {};
-        
+
         let approved = 0;
         let pending = 0;
         let rejected = 0;
@@ -1714,7 +1715,7 @@ router.get('/api/system/status', async (req, res) => {
   try {
     const Redis = require('ioredis');
     const redis = new Redis(process.env.REDIS_URL || 'redis://localhost:6379');
-    
+
     let services = [
       {
         service: 'Redis',
@@ -1778,7 +1779,7 @@ router.get('/api/activity/recent', async (req, res) => {
         const db = firebaseConfig.getRealtimeDB();
         const bookingsSnapshot = await db.ref('bookings').once('value');
         const bookings = bookingsSnapshot.val() || {};
-        const bookingArray = Object.keys(bookings).map(key => ({id: key, ...bookings[key]}));
+        const bookingArray = Object.keys(bookings).map(key => ({ id: key, ...bookings[key] }));
 
         // Ordenar por data mais recente e pegar os últimos 10
         activities = bookingArray
@@ -1810,29 +1811,29 @@ router.get('/api/activity/recent', async (req, res) => {
 // 🆘 Support Tickets - SISTEMA DE GESTÃO DE SUPORTE
 router.get('/api/support/tickets', async (req, res) => {
   try {
-    const { 
+    const {
       type, // 'sos' ou 'complain'
       status,
       priority,
       dateRange,
       assignedTo,
       page = 1,
-      limit = 20 
+      limit = 20
     } = req.query;
-    
+
     let tickets = [];
     let totalCount = 0;
 
     try {
       if (firebaseConfig && firebaseConfig.getRealtimeDB) {
         const db = firebaseConfig.getRealtimeDB();
-        
+
         // Buscar tickets SOS
         let sosTickets = [];
         if (!type || type === 'sos') {
           const sosSnapshot = await db.ref('sos').once('value');
           const sosData = sosSnapshot.val() || {};
-          
+
           sosTickets = Object.keys(sosData).map(sosId => ({
             id: sosId,
             type: 'sos',
@@ -1860,7 +1861,7 @@ router.get('/api/support/tickets', async (req, res) => {
         if (!type || type === 'complain') {
           const complainSnapshot = await db.ref('complain').once('value');
           const complainData = complainSnapshot.val() || {};
-          
+
           complainTickets = Object.keys(complainData).map(complainId => ({
             id: complainId,
             type: 'complain',
@@ -1887,7 +1888,7 @@ router.get('/api/support/tickets', async (req, res) => {
         if (tickets.length > 0) {
           const usersSnapshot = await db.ref('users').once('value');
           const users = usersSnapshot.val() || {};
-          
+
           tickets = tickets.map(ticket => {
             const user = users[ticket.userId];
             return {
@@ -1937,7 +1938,7 @@ router.get('/api/support/tickets', async (req, res) => {
     } catch (error) {
       logStructured('warn', '⚠️ Erro ao buscar tickets do Firebase:', error.message, { service: 'dashboard-routes' });
     }
-    
+
     res.json({
       tickets,
       pagination: {
@@ -1967,15 +1968,15 @@ router.patch('/api/support/tickets/:id', async (req, res) => {
   try {
     const { id } = req.params;
     const { status, assignedTo, resolution, notes, adminId = 'admin1' } = req.body;
-    
+
     try {
       if (firebaseConfig && firebaseConfig.getRealtimeDB) {
         const db = firebaseConfig.getRealtimeDB();
-        
+
         // Verificar se é SOS ou Complain
         let ticketRef = null;
         let ticketType = null;
-        
+
         // Tentar encontrar em SOS
         const sosSnapshot = await db.ref(`sos/${id}`).once('value');
         if (sosSnapshot.exists()) {
@@ -2007,16 +2008,16 @@ router.patch('/api/support/tickets/:id', async (req, res) => {
 
         // Atualizar no Firebase
         await ticketRef.update(updates);
-        
+
         logStructured('info', `📞 Ticket ${ticketType.toUpperCase()} atualizado: ${id} por ${adminId}`, { service: 'dashboard-routes' });
-        
-        res.json({ 
-          success: true, 
+
+        res.json({
+          success: true,
           message: 'Ticket atualizado com sucesso',
-          data: { 
-            ticketId: id, 
+          data: {
+            ticketId: id,
             type: ticketType,
-            updatedAt: updates.updatedAt 
+            updatedAt: updates.updatedAt
           }
         });
       } else {
@@ -2036,14 +2037,14 @@ router.patch('/api/support/tickets/:id', async (req, res) => {
 router.get('/api/support/tickets/:id', async (req, res) => {
   try {
     const { id } = req.params;
-    
+
     try {
       if (firebaseConfig && firebaseConfig.getRealtimeDB) {
         const db = firebaseConfig.getRealtimeDB();
-        
+
         let ticket = null;
         let ticketType = null;
-        
+
         // Tentar encontrar em SOS
         const sosSnapshot = await db.ref(`sos/${id}`).once('value');
         if (sosSnapshot.exists()) {
@@ -2151,12 +2152,12 @@ router.get('/api/support/tickets/:id', async (req, res) => {
 // 🗺️ Real-Time Map - SISTEMA DE MAPA EM TEMPO REAL
 router.get('/api/map/locations', async (req, res) => {
   try {
-    const { 
+    const {
       type, // 'all', 'drivers', 'passengers'
       status, // 'online', 'available', 'busy'
       bounds // 'lat1,lng1,lat2,lng2' para filtrar por área
     } = req.query;
-    
+
     let locations = {
       drivers: [],
       passengers: [],
@@ -2166,17 +2167,17 @@ router.get('/api/map/locations', async (req, res) => {
     try {
       if (firebaseConfig && firebaseConfig.getRealtimeDB) {
         const db = firebaseConfig.getRealtimeDB();
-        
+
         // Buscar localizações em tempo real
         if (!type || type === 'all' || type === 'drivers') {
           // Buscar motoristas online com localização
           const locationsSnapshot = await db.ref('locations').once('value');
           const locationsData = locationsSnapshot.val() || {};
-          
+
           // Buscar informações dos usuários
           const usersSnapshot = await db.ref('users').once('value');
           const users = usersSnapshot.val() || {};
-          
+
           // Buscar carros para info do veículo
           const carsSnapshot = await db.ref('cars').once('value');
           const cars = carsSnapshot.val() || {};
@@ -2185,11 +2186,11 @@ router.get('/api/map/locations', async (req, res) => {
           Object.keys(locationsData).forEach(userId => {
             const locationData = locationsData[userId];
             const user = users[userId];
-            
+
             if (user && user.usertype === 'driver' && locationData.lat && locationData.lng) {
               // Buscar carro do motorista
               const userCar = Object.values(cars).find(car => car.driver === userId);
-              
+
               // Determinar status do motorista
               let driverStatus = 'offline';
               if (locationData.online) {
@@ -2237,19 +2238,19 @@ router.get('/api/map/locations', async (req, res) => {
           // Buscar passageiros ativos (com corridas em andamento)
           const bookingsSnapshot = await db.ref('bookings').once('value');
           const bookings = bookingsSnapshot.val() || {};
-          
+
           Object.keys(bookings).forEach(bookingId => {
             const booking = bookings[bookingId];
-            
+
             // Apenas corridas ativas
             if (!['SEARCHING', 'ACCEPTED', 'ARRIVED', 'STARTED'].includes(booking.status)) return;
-            
+
             const customer = users[booking.customer];
             if (!customer) return;
 
             // Buscar localização do tracking
             const trackingData = locationsData[booking.customer];
-            
+
             if (trackingData && trackingData.lat && trackingData.lng) {
               const passenger = {
                 id: booking.customer,
@@ -2284,11 +2285,11 @@ router.get('/api/map/locations', async (req, res) => {
           // Buscar corridas ativas para o mapa
           Object.keys(bookings).forEach(bookingId => {
             const booking = bookings[bookingId];
-            
+
             if (['SEARCHING', 'ACCEPTED', 'ARRIVED', 'STARTED'].includes(booking.status)) {
               const driver = users[booking.driver];
               const customer = users[booking.customer];
-              
+
               locations.activeBookings.push({
                 id: bookingId,
                 status: booking.status,
@@ -2343,7 +2344,7 @@ router.get('/api/map/locations', async (req, res) => {
     } catch (error) {
       logStructured('warn', '⚠️ Erro ao buscar localizações do Firebase:', error.message, { service: 'dashboard-routes' });
     }
-    
+
     res.json({
       locations,
       summary: {
@@ -2364,21 +2365,21 @@ router.get('/api/map/locations', async (req, res) => {
 // 🗺️ Heat Map Data - Dados para Mapa de Calor
 router.get('/api/map/heatmap', async (req, res) => {
   try {
-    const { 
+    const {
       type = 'trips', // 'trips', 'pickups', 'drops'
       period = '24h' // '1h', '24h', '7d', '30d'
     } = req.query;
-    
+
     let heatmapData = [];
 
     try {
       if (firebaseConfig && firebaseConfig.getRealtimeDB) {
         const db = firebaseConfig.getRealtimeDB();
-        
+
         // Calcular período
         const now = new Date();
         let startDate = new Date();
-        
+
         switch (period) {
           case '1h':
             startDate.setHours(now.getHours() - 1);
@@ -2397,14 +2398,14 @@ router.get('/api/map/heatmap', async (req, res) => {
         // Buscar bookings do período
         const bookingsSnapshot = await db.ref('bookings').once('value');
         const bookings = bookingsSnapshot.val() || {};
-        
+
         Object.keys(bookings).forEach(bookingId => {
           const booking = bookings[bookingId];
           const tripDate = new Date(booking.tripdate);
-          
+
           // Filtrar por período
           if (tripDate < startDate) return;
-          
+
           // Apenas corridas completadas para heatmap
           if (booking.status !== 'COMPLETE' && booking.status !== 'PAID') return;
 
@@ -2442,7 +2443,7 @@ router.get('/api/map/heatmap', async (req, res) => {
         const tolerance = 0.001; // ~100m
 
         heatmapData.forEach(point => {
-          const existing = groupedData.find(group => 
+          const existing = groupedData.find(group =>
             Math.abs(group.lat - point.lat) < tolerance &&
             Math.abs(group.lng - point.lng) < tolerance &&
             group.type === point.type
@@ -2464,7 +2465,7 @@ router.get('/api/map/heatmap', async (req, res) => {
     } catch (error) {
       logStructured('warn', '⚠️ Erro ao buscar dados do heatmap:', error.message, { service: 'dashboard-routes' });
     }
-    
+
     res.json({
       heatmapData,
       summary: {
@@ -2484,13 +2485,13 @@ router.get('/api/map/heatmap', async (req, res) => {
 router.get('/api/map/trip/:bookingId/route', async (req, res) => {
   try {
     const { bookingId } = req.params;
-    
+
     let routeData = null;
 
     try {
       if (firebaseConfig && firebaseConfig.getRealtimeDB) {
         const db = firebaseConfig.getRealtimeDB();
-        
+
         // Buscar dados da corrida
         const bookingSnapshot = await db.ref(`bookings/${bookingId}`).once('value');
         if (!bookingSnapshot.exists()) {
@@ -2498,7 +2499,7 @@ router.get('/api/map/trip/:bookingId/route', async (req, res) => {
         }
 
         const booking = bookingSnapshot.val();
-        
+
         // Buscar tracking da rota se disponível
         const trackingSnapshot = await db.ref(`tracking/${bookingId}`).once('value');
         const trackingData = trackingSnapshot.val() || {};
@@ -2543,11 +2544,11 @@ router.get('/api/map/trip/:bookingId/route', async (req, res) => {
     } catch (error) {
       logStructured('warn', '⚠️ Erro ao buscar rota da corrida:', error.message, { service: 'dashboard-routes' });
     }
-    
+
     if (!routeData) {
       return res.status(404).json({ error: 'Dados da rota não encontrados' });
     }
-    
+
     res.json(routeData);
   } catch (error) {
     logError(error, 'Erro ao buscar rota da corrida:', { service: 'dashboard-routes' });
@@ -2558,23 +2559,23 @@ router.get('/api/map/trip/:bookingId/route', async (req, res) => {
 // 📊 Advanced Reports - SISTEMA DE RELATÓRIOS AVANÇADOS
 router.get('/api/reports/comprehensive', async (req, res) => {
   try {
-    const { 
+    const {
       reportType = 'financial', // 'financial', 'operational', 'users', 'trips'
       period = '30d', // '7d', '30d', '90d', '1y'
       format = 'json', // 'json', 'csv'
       filters = {} // filtros específicos
     } = req.query;
-    
+
     let reportData = {};
 
     try {
       if (firebaseConfig && firebaseConfig.getRealtimeDB) {
         const db = firebaseConfig.getRealtimeDB();
-        
+
         // Calcular período
         const now = new Date();
         let startDate = new Date();
-        
+
         switch (period) {
           case '7d':
             startDate.setDate(now.getDate() - 7);
@@ -2610,19 +2611,19 @@ router.get('/api/reports/comprehensive', async (req, res) => {
 
         // Relatório Financeiro
         if (reportType === 'financial') {
-          const completedBookings = periodBookings.filter(b => 
+          const completedBookings = periodBookings.filter(b =>
             b.status === 'COMPLETE' || b.status === 'PAID'
           );
 
-          const totalFares = completedBookings.reduce((sum, b) => 
+          const totalFares = completedBookings.reduce((sum, b) =>
             sum + parseFloat(b.estimate || 0), 0
           );
 
-          const convenienceFees = completedBookings.reduce((sum, b) => 
+          const convenienceFees = completedBookings.reduce((sum, b) =>
             sum + (parseFloat(b.estimate || 0) * 0.15), 0 // 15% de taxa
           );
 
-          const driverEarnings = completedBookings.reduce((sum, b) => 
+          const driverEarnings = completedBookings.reduce((sum, b) =>
             sum + parseFloat(b.driver_share || b.estimate * 0.85 || 0), 0
           );
 
@@ -2650,7 +2651,7 @@ router.get('/api/reports/comprehensive', async (req, res) => {
               totalRevenue: totalFares.toFixed(2),
               convenienceFees: convenienceFees.toFixed(2),
               driverEarnings: driverEarnings.toFixed(2),
-              averageOrderValue: completedBookings.length > 0 ? 
+              averageOrderValue: completedBookings.length > 0 ?
                 (totalFares / completedBookings.length).toFixed(2) : '0.00'
             },
             dailyBreakdown: Object.keys(dailyRevenue).map(date => ({
@@ -2667,10 +2668,10 @@ router.get('/api/reports/comprehensive', async (req, res) => {
         // Relatório Operacional
         else if (reportType === 'operational') {
           const totalTrips = periodBookings.length;
-          const completedTrips = periodBookings.filter(b => 
+          const completedTrips = periodBookings.filter(b =>
             b.status === 'COMPLETE' || b.status === 'PAID'
           ).length;
-          const cancelledTrips = periodBookings.filter(b => 
+          const cancelledTrips = periodBookings.filter(b =>
             b.status === 'CANCELLED'
           ).length;
 
@@ -2753,7 +2754,7 @@ router.get('/api/reports/comprehensive', async (req, res) => {
     } catch (error) {
       logStructured('warn', '⚠️ Erro ao gerar relatório:', error.message, { service: 'dashboard-routes' });
     }
-    
+
     // Se format for CSV, converter para CSV
     if (format === 'csv') {
       const csv = convertToCSV(reportData, reportType);
@@ -2761,7 +2762,7 @@ router.get('/api/reports/comprehensive', async (req, res) => {
       res.setHeader('Content-Disposition', `attachment; filename="report_${reportType}_${period}.csv"`);
       return res.send(csv);
     }
-    
+
     res.json({
       reportType,
       period,
@@ -2779,10 +2780,10 @@ router.get('/api/reports/export/:reportId', async (req, res) => {
   try {
     const { reportId } = req.params;
     const { format = 'pdf' } = req.query; // 'pdf', 'excel', 'csv'
-    
+
     // TODO: Implementar exportação para diferentes formatos
     // Por enquanto, retornar CSV básico
-    
+
     res.json({
       message: 'Funcionalidade de exportação em desenvolvimento',
       reportId,
@@ -2798,11 +2799,11 @@ router.get('/api/reports/export/:reportId', async (req, res) => {
 // Funções auxiliares para relatórios
 function getTopDriversByEarnings(bookings, users, limit = 10) {
   const driverEarnings = {};
-  
+
   bookings.forEach(booking => {
     const driverId = booking.driver;
     if (!driverId) return;
-    
+
     if (!driverEarnings[driverId]) {
       driverEarnings[driverId] = {
         driverId,
@@ -2811,11 +2812,11 @@ function getTopDriversByEarnings(bookings, users, limit = 10) {
         totalTrips: 0
       };
     }
-    
+
     driverEarnings[driverId].totalEarnings += parseFloat(booking.driver_share || booking.estimate * 0.85 || 0);
     driverEarnings[driverId].totalTrips += 1;
   });
-  
+
   return Object.values(driverEarnings)
     .sort((a, b) => b.totalEarnings - a.totalEarnings)
     .slice(0, limit)
@@ -2828,12 +2829,12 @@ function getTopDriversByEarnings(bookings, users, limit = 10) {
 
 function getPaymentMethodsBreakdown(bookings) {
   const methods = {};
-  
+
   bookings.forEach(booking => {
     const method = booking.payment_mode || 'Unknown';
     methods[method] = (methods[method] || 0) + 1;
   });
-  
+
   return Object.keys(methods).map(method => ({
     method,
     count: methods[method],
@@ -2853,12 +2854,12 @@ function calculateAverageTripTime(bookings) {
 
 function getHourlyTripDistribution(bookings) {
   const hourly = new Array(24).fill(0);
-  
+
   bookings.forEach(booking => {
     const hour = new Date(booking.tripdate).getHours();
     hourly[hour] += 1;
   });
-  
+
   return hourly.map((count, hour) => ({
     hour: `${hour}:00`,
     trips: count
@@ -2867,19 +2868,19 @@ function getHourlyTripDistribution(bookings) {
 
 function getCityAnalysis(bookings, users) {
   const cities = {};
-  
+
   bookings.forEach(booking => {
     const customer = users[booking.customer];
     const city = customer?.city || 'Unknown';
-    
+
     if (!cities[city]) {
       cities[city] = { trips: 0, revenue: 0 };
     }
-    
+
     cities[city].trips += 1;
     cities[city].revenue += parseFloat(booking.estimate || 0);
   });
-  
+
   return Object.keys(cities).map(city => ({
     city,
     trips: cities[city].trips,
@@ -2889,20 +2890,20 @@ function getCityAnalysis(bookings, users) {
 
 function getUserGrowthTrend(users, startDate, endDate) {
   const daily = {};
-  
+
   users.forEach(user => {
     const date = new Date(user.createdAt).toISOString().split('T')[0];
     if (!daily[date]) {
       daily[date] = { drivers: 0, customers: 0 };
     }
-    
+
     if (user.usertype === 'driver') {
       daily[date].drivers += 1;
     } else {
       daily[date].customers += 1;
     }
   });
-  
+
   return Object.keys(daily).sort().map(date => ({
     date,
     ...daily[date],
@@ -2912,12 +2913,12 @@ function getUserGrowthTrend(users, startDate, endDate) {
 
 function getTopReferrers(users) {
   const referrers = {};
-  
+
   users.forEach(user => {
     const referrer = user.referredBy || 'Direct';
     referrers[referrer] = (referrers[referrer] || 0) + 1;
   });
-  
+
   return Object.keys(referrers).map(referrer => ({
     referrer,
     count: referrers[referrer]
@@ -2926,12 +2927,12 @@ function getTopReferrers(users) {
 
 function getGeographicDistribution(users) {
   const locations = {};
-  
+
   users.forEach(user => {
     const location = user.city || 'Unknown';
     locations[location] = (locations[location] || 0) + 1;
   });
-  
+
   return Object.keys(locations).map(location => ({
     location,
     count: locations[location]
@@ -2943,12 +2944,12 @@ function getTripAnalysis(bookings) {
     byStatus: {},
     byTime: { morning: 0, afternoon: 0, evening: 0, night: 0 }
   };
-  
+
   bookings.forEach(booking => {
     // Status analysis
     const status = booking.status || 'Unknown';
     analysis.byStatus[status] = (analysis.byStatus[status] || 0) + 1;
-    
+
     // Time analysis
     const hour = new Date(booking.tripdate).getHours();
     if (hour >= 6 && hour < 12) analysis.byTime.morning += 1;
@@ -2956,21 +2957,21 @@ function getTripAnalysis(bookings) {
     else if (hour >= 18 && hour < 24) analysis.byTime.evening += 1;
     else analysis.byTime.night += 1;
   });
-  
+
   return analysis;
 }
 
 function getRouteAnalysis(bookings) {
   const routes = {};
-  
+
   bookings.forEach(booking => {
     const pickup = booking.pickup?.add || 'Unknown';
     const drop = booking.drop?.add || 'Unknown';
     const route = `${pickup} → ${drop}`;
-    
+
     routes[route] = (routes[route] || 0) + 1;
   });
-  
+
   return Object.keys(routes).map(route => ({
     route,
     count: routes[route]
@@ -2979,14 +2980,14 @@ function getRouteAnalysis(bookings) {
 
 function getVehicleTypeAnalysis(bookings, cars) {
   const types = {};
-  
+
   bookings.forEach(booking => {
     const driverCar = Object.values(cars).find(car => car.driver === booking.driver);
     const type = driverCar?.carType || 'Unknown';
-    
+
     types[type] = (types[type] || 0) + 1;
   });
-  
+
   return Object.keys(types).map(type => ({
     type,
     count: types[type]
@@ -2996,7 +2997,7 @@ function getVehicleTypeAnalysis(bookings, cars) {
 function getAverageDistance(bookings) {
   const distances = bookings.filter(b => b.distance).map(b => parseFloat(b.distance));
   if (distances.length === 0) return '0 km';
-  
+
   const avg = distances.reduce((sum, d) => sum + d, 0) / distances.length;
   return avg.toFixed(2) + ' km';
 }
@@ -3004,24 +3005,24 @@ function getAverageDistance(bookings) {
 function getAverageRating(bookings) {
   const ratings = bookings.filter(b => b.rating).map(b => parseFloat(b.rating));
   if (ratings.length === 0) return '0.0';
-  
+
   const avg = ratings.reduce((sum, r) => sum + r, 0) / ratings.length;
   return avg.toFixed(1);
 }
 
 function getPeakHours(bookings) {
   const hourly = new Array(24).fill(0);
-  
+
   bookings.forEach(booking => {
     const hour = new Date(booking.tripdate).getHours();
     hourly[hour] += 1;
   });
-  
+
   const maxTrips = Math.max(...hourly);
   const peakHours = hourly.map((trips, hour) => ({ hour, trips }))
     .filter(h => h.trips === maxTrips)
     .map(h => `${h.hour}:00`);
-  
+
   return peakHours;
 }
 
@@ -3029,7 +3030,7 @@ function convertToCSV(data, reportType) {
   // Simplified CSV conversion
   let csv = `Report Type: ${reportType}\n`;
   csv += `Generated At: ${new Date().toISOString()}\n\n`;
-  
+
   if (data.summary) {
     csv += 'SUMMARY\n';
     Object.keys(data.summary).forEach(key => {
@@ -3037,31 +3038,31 @@ function convertToCSV(data, reportType) {
     });
     csv += '\n';
   }
-  
+
   return csv;
 }
 
 // 💳 Subscription Management - SISTEMA DE ASSINATURAS SEMANAIS
 router.get('/api/subscriptions/drivers', async (req, res) => {
   try {
-    const { 
+    const {
       status, // 'active', 'expired', 'pending', 'cancelled'
       paymentStatus, // 'paid', 'pending', 'overdue'
       page = 1,
-      limit = 20 
+      limit = 20
     } = req.query;
-    
+
     let subscriptions = [];
     let totalCount = 0;
 
     try {
       if (firebaseConfig && firebaseConfig.getRealtimeDB) {
         const db = firebaseConfig.getRealtimeDB();
-        
+
         // Buscar motoristas
         const usersSnapshot = await db.ref('users').orderByChild('usertype').equalTo('driver').once('value');
         const users = usersSnapshot.val() || {};
-        
+
         // Buscar assinaturas (ou criar estrutura se não existir)
         const subscriptionsSnapshot = await db.ref('subscriptions').once('value');
         const subscriptionsData = subscriptionsSnapshot.val() || {};
@@ -3071,19 +3072,19 @@ router.get('/api/subscriptions/drivers', async (req, res) => {
         const payments = paymentsSnapshot.val() || {};
 
         const now = new Date();
-        
+
         subscriptions = Object.keys(users).map(driverId => {
           const driver = users[driverId];
-          
+
           // Buscar assinatura do motorista
           let subscription = subscriptionsData[driverId];
-          
+
           if (!subscription) {
             // Criar assinatura padrão se não existir
             const weeklyFee = 50.00; // Taxa semanal padrão
             const startDate = new Date(driver.createdAt || now);
             const currentWeekStart = getWeekStart(now);
-            
+
             subscription = {
               driverId,
               weeklyFee,
@@ -3101,10 +3102,10 @@ router.get('/api/subscriptions/drivers', async (req, res) => {
           // Calcular status da assinatura atual
           const currentWeekStart = getWeekStart(now);
           const currentWeekEnd = new Date(currentWeekStart.getTime() + 7 * 24 * 60 * 60 * 1000);
-          
+
           // Verificar pagamento da semana atual
-          const currentWeekPayments = Object.values(payments).filter(payment => 
-            payment.driverId === driverId && 
+          const currentWeekPayments = Object.values(payments).filter(payment =>
+            payment.driverId === driverId &&
             payment.type === 'subscription' &&
             new Date(payment.weekStart) >= currentWeekStart &&
             new Date(payment.weekStart) < currentWeekEnd
@@ -3112,9 +3113,9 @@ router.get('/api/subscriptions/drivers', async (req, res) => {
 
           let paymentStatusCurrent = 'pending';
           let daysOverdue = 0;
-          
+
           if (currentWeekPayments.length > 0) {
-            const latestPayment = currentWeekPayments.sort((a, b) => 
+            const latestPayment = currentWeekPayments.sort((a, b) =>
               new Date(b.timestamp) - new Date(a.timestamp)
             )[0];
             paymentStatusCurrent = latestPayment.status || 'paid';
@@ -3128,7 +3129,7 @@ router.get('/api/subscriptions/drivers', async (req, res) => {
           }
 
           // Calcular histórico de pagamentos
-          const allPayments = Object.values(payments).filter(payment => 
+          const allPayments = Object.values(payments).filter(payment =>
             payment.driverId === driverId && payment.type === 'subscription'
           );
 
@@ -3161,11 +3162,11 @@ router.get('/api/subscriptions/drivers', async (req, res) => {
             },
             financials: {
               totalPaid: totalPaid.toFixed(2),
-              totalDue: (parseFloat(subscription.weeklyFee || 50.00) * 
+              totalDue: (parseFloat(subscription.weeklyFee || 50.00) *
                 Math.floor((now - new Date(subscription.startDate || driver.createdAt)) / (7 * 24 * 60 * 60 * 1000)) + 1).toFixed(2),
-              outstandingBalance: Math.max(0, 
-                (parseFloat(subscription.weeklyFee || 50.00) * 
-                Math.floor((now - new Date(subscription.startDate || driver.createdAt)) / (7 * 24 * 60 * 60 * 1000)) + 1) - totalPaid
+              outstandingBalance: Math.max(0,
+                (parseFloat(subscription.weeklyFee || 50.00) *
+                  Math.floor((now - new Date(subscription.startDate || driver.createdAt)) / (7 * 24 * 60 * 60 * 1000)) + 1) - totalPaid
               ).toFixed(2),
               paymentsCount: allPayments.filter(p => p.status === 'paid').length
             },
@@ -3204,7 +3205,7 @@ router.get('/api/subscriptions/drivers', async (req, res) => {
     } catch (error) {
       logStructured('warn', '⚠️ Erro ao buscar assinaturas do Firebase:', error.message, { service: 'dashboard-routes' });
     }
-    
+
     res.json({
       subscriptions,
       pagination: {
@@ -3232,7 +3233,7 @@ router.get('/api/subscriptions/drivers', async (req, res) => {
 router.post('/api/subscriptions/payments', async (req, res) => {
   try {
     const { driverId, amount, paymentMethod, weekStart, adminId = 'admin1' } = req.body;
-    
+
     if (!driverId || !amount) {
       return res.status(400).json({ error: 'Driver ID e amount são obrigatórios' });
     }
@@ -3240,7 +3241,7 @@ router.post('/api/subscriptions/payments', async (req, res) => {
     try {
       if (firebaseConfig && firebaseConfig.getRealtimeDB) {
         const db = firebaseConfig.getRealtimeDB();
-        
+
         // Verificar se o motorista existe
         const driverSnapshot = await db.ref(`users/${driverId}`).once('value');
         if (!driverSnapshot.exists()) {
@@ -3255,7 +3256,7 @@ router.post('/api/subscriptions/payments', async (req, res) => {
         // Criar registro de pagamento
         const paymentId = Date.now().toString();
         const weekStartDate = weekStart ? new Date(weekStart) : getWeekStart(new Date());
-        
+
         const payment = {
           paymentId,
           driverId,
@@ -3272,11 +3273,11 @@ router.post('/api/subscriptions/payments', async (req, res) => {
 
         // Salvar pagamento
         await db.ref(`payments/${paymentId}`).set(payment);
-        
+
         // Atualizar status da assinatura se necessário
         const subscriptionRef = db.ref(`subscriptions/${driverId}`);
         const subscriptionSnapshot = await subscriptionRef.once('value');
-        
+
         if (!subscriptionSnapshot.exists()) {
           // Criar assinatura se não existir
           await subscriptionRef.set({
@@ -3293,11 +3294,11 @@ router.post('/api/subscriptions/payments', async (req, res) => {
             status: 'active'
           });
         }
-        
+
         logStructured('info', `💳 Pagamento de assinatura processado: ${driverId} - R$ ${amount}`, { service: 'dashboard-routes' });
-        
-        res.json({ 
-          success: true, 
+
+        res.json({
+          success: true,
           message: 'Pagamento processado com sucesso',
           data: {
             paymentId,
@@ -3325,11 +3326,11 @@ router.patch('/api/subscriptions/:driverId', async (req, res) => {
   try {
     const { driverId } = req.params;
     const { weeklyFee, status, notes, adminId = 'admin1' } = req.body;
-    
+
     try {
       if (firebaseConfig && firebaseConfig.getRealtimeDB) {
         const db = firebaseConfig.getRealtimeDB();
-        
+
         // Verificar se o motorista existe
         const driverSnapshot = await db.ref(`users/${driverId}`).once('value');
         if (!driverSnapshot.exists()) {
@@ -3354,7 +3355,7 @@ router.patch('/api/subscriptions/:driverId', async (req, res) => {
         // Atualizar ou criar assinatura
         const subscriptionRef = db.ref(`subscriptions/${driverId}`);
         const subscriptionSnapshot = await subscriptionRef.once('value');
-        
+
         if (!subscriptionSnapshot.exists()) {
           // Criar nova assinatura
           await subscriptionRef.set({
@@ -3370,15 +3371,15 @@ router.patch('/api/subscriptions/:driverId', async (req, res) => {
           // Atualizar assinatura existente
           await subscriptionRef.update(updates);
         }
-        
+
         logStructured('info', `💳 Assinatura atualizada: ${driverId} por ${adminId}`, { service: 'dashboard-routes' });
-        
-        res.json({ 
-          success: true, 
+
+        res.json({
+          success: true,
           message: 'Assinatura atualizada com sucesso',
-          data: { 
+          data: {
             driverId,
-            updatedAt: updates.updatedAt 
+            updatedAt: updates.updatedAt
           }
         });
       } else {
@@ -3398,7 +3399,7 @@ router.patch('/api/subscriptions/:driverId', async (req, res) => {
 router.get('/api/subscriptions/analytics', async (req, res) => {
   try {
     const { period = '30d' } = req.query;
-    
+
     let analytics = {
       revenue: {},
       subscribers: {},
@@ -3408,11 +3409,11 @@ router.get('/api/subscriptions/analytics', async (req, res) => {
     try {
       if (firebaseConfig && firebaseConfig.getRealtimeDB) {
         const db = firebaseConfig.getRealtimeDB();
-        
+
         // Calcular período
         const now = new Date();
         let startDate = new Date();
-        
+
         switch (period) {
           case '7d':
             startDate.setDate(now.getDate() - 7);
@@ -3428,15 +3429,15 @@ router.get('/api/subscriptions/analytics', async (req, res) => {
         // Buscar pagamentos do período
         const paymentsSnapshot = await db.ref('payments').once('value');
         const payments = paymentsSnapshot.val() || {};
-        
-        const subscriptionPayments = Object.values(payments).filter(payment => 
+
+        const subscriptionPayments = Object.values(payments).filter(payment =>
           payment.type === 'subscription' &&
           new Date(payment.timestamp) >= startDate &&
           payment.status === 'paid'
         );
 
         // Análise de receita
-        const totalRevenue = subscriptionPayments.reduce((sum, payment) => 
+        const totalRevenue = subscriptionPayments.reduce((sum, payment) =>
           sum + parseFloat(payment.amount || 0), 0
         );
 
@@ -3453,14 +3454,14 @@ router.get('/api/subscriptions/analytics', async (req, res) => {
         // Buscar motoristas ativos
         const usersSnapshot = await db.ref('users').orderByChild('usertype').equalTo('driver').once('value');
         const drivers = usersSnapshot.val() || {};
-        
+
         const activeDrivers = Object.values(drivers).filter(driver => driver.approved === true);
         const totalDrivers = Object.values(drivers).length;
 
         analytics = {
           revenue: {
             total: totalRevenue.toFixed(2),
-            average: subscriptionPayments.length > 0 ? 
+            average: subscriptionPayments.length > 0 ?
               (totalRevenue / subscriptionPayments.length).toFixed(2) : '0.00',
             weeklyBreakdown: Object.keys(weeklyBreakdown).sort().map(week => ({
               week,
@@ -3472,13 +3473,13 @@ router.get('/api/subscriptions/analytics', async (req, res) => {
             total: totalDrivers,
             active: activeDrivers.length,
             paying: subscriptionPayments.length,
-            conversionRate: totalDrivers > 0 ? 
+            conversionRate: totalDrivers > 0 ?
               ((subscriptionPayments.length / totalDrivers) * 100).toFixed(2) + '%' : '0%'
           },
           trends: {
             period,
             growthRate: calculateGrowthRate(weeklyBreakdown),
-            averageRevenuePerUser: activeDrivers.length > 0 ? 
+            averageRevenuePerUser: activeDrivers.length > 0 ?
               (totalRevenue / activeDrivers.length).toFixed(2) : '0.00',
             paymentFrequency: calculatePaymentFrequency(subscriptionPayments)
           }
@@ -3487,7 +3488,7 @@ router.get('/api/subscriptions/analytics', async (req, res) => {
     } catch (error) {
       logStructured('warn', '⚠️ Erro ao gerar analytics de assinaturas:', error.message, { service: 'dashboard-routes' });
     }
-    
+
     res.json({
       period,
       generatedAt: new Date().toISOString(),
@@ -3510,19 +3511,19 @@ function getWeekStart(date) {
 function calculateGrowthRate(weeklyData) {
   const weeks = Object.keys(weeklyData).sort();
   if (weeks.length < 2) return '0%';
-  
+
   const firstWeek = weeklyData[weeks[0]].amount;
   const lastWeek = weeklyData[weeks[weeks.length - 1]].amount;
-  
+
   if (firstWeek === 0) return '0%';
-  
+
   const growth = ((lastWeek - firstWeek) / firstWeek) * 100;
   return growth.toFixed(2) + '%';
 }
 
 function calculatePaymentFrequency(payments) {
   const driverPayments = {};
-  
+
   payments.forEach(payment => {
     const driverId = payment.driverId;
     if (!driverPayments[driverId]) {
@@ -3530,50 +3531,50 @@ function calculatePaymentFrequency(payments) {
     }
     driverPayments[driverId] += 1;
   });
-  
+
   const frequencies = Object.values(driverPayments);
-  const average = frequencies.length > 0 ? 
+  const average = frequencies.length > 0 ?
     frequencies.reduce((sum, freq) => sum + freq, 0) / frequencies.length : 0;
-  
+
   return average.toFixed(1) + ' pagamentos/período';
 }
 
 // 🎁 Promotion Management - SISTEMA DE PROMOÇÕES POR PERFIL
 router.get('/api/promotions', async (req, res) => {
   try {
-    const { 
+    const {
       status, // 'active', 'expired', 'scheduled', 'paused'
       target, // 'drivers', 'customers', 'all'
       type, // 'percentage', 'fixed', 'free_rides', 'subscription_discount'
       page = 1,
-      limit = 20 
+      limit = 20
     } = req.query;
-    
+
     let promotions = [];
     let totalCount = 0;
 
     try {
       if (firebaseConfig && firebaseConfig.getRealtimeDB) {
         const db = firebaseConfig.getRealtimeDB();
-        
+
         // Buscar promoções
         const promosSnapshot = await db.ref('promos').once('value');
         const promosData = promosSnapshot.val() || {};
-        
+
         // Buscar usos das promoções
         const promoUsageSnapshot = await db.ref('promoUsage').once('value');
         const promoUsage = promoUsageSnapshot.val() || {};
 
         const now = new Date();
-        
+
         promotions = Object.keys(promosData).map(promoId => {
           const promo = promosData[promoId];
-          
+
           // Determinar status baseado nas datas
           let currentStatus = 'active';
           const startDate = new Date(promo.startDate || promo.createdAt);
           const endDate = new Date(promo.endDate);
-          
+
           if (now < startDate) {
             currentStatus = 'scheduled';
           } else if (now > endDate) {
@@ -3583,13 +3584,13 @@ router.get('/api/promotions', async (req, res) => {
           }
 
           // Calcular usos da promoção
-          const usages = Object.values(promoUsage).filter(usage => 
+          const usages = Object.values(promoUsage).filter(usage =>
             usage.promoId === promoId || usage.promoCode === promo.promoCode
           );
 
           const totalUses = usages.length;
           const uniqueUsers = new Set(usages.map(u => u.userId)).size;
-          const totalSavings = usages.reduce((sum, usage) => 
+          const totalSavings = usages.reduce((sum, usage) =>
             sum + parseFloat(usage.discountAmount || 0), 0
           );
 
@@ -3637,9 +3638,9 @@ router.get('/api/promotions', async (req, res) => {
               totalUses,
               uniqueUsers,
               totalSavings: totalSavings.toFixed(2),
-              conversionRate: promo.maxUses > 0 ? 
+              conversionRate: promo.maxUses > 0 ?
                 ((totalUses / promo.maxUses) * 100).toFixed(2) + '%' : '0%',
-              avgSavingsPerUse: totalUses > 0 ? 
+              avgSavingsPerUse: totalUses > 0 ?
                 (totalSavings / totalUses).toFixed(2) : '0.00'
             },
             creator: {
@@ -3678,7 +3679,7 @@ router.get('/api/promotions', async (req, res) => {
     } catch (error) {
       logStructured('warn', '⚠️ Erro ao buscar promoções do Firebase:', error.message, { service: 'dashboard-routes' });
     }
-    
+
     res.json({
       promotions,
       pagination: {
@@ -3693,7 +3694,7 @@ router.get('/api/promotions', async (req, res) => {
         scheduled: promotions.filter(p => p.status === 'scheduled').length,
         expired: promotions.filter(p => p.status === 'expired').length,
         paused: promotions.filter(p => p.status === 'paused').length,
-        totalSavings: promotions.reduce((sum, p) => 
+        totalSavings: promotions.reduce((sum, p) =>
           sum + parseFloat(p.analytics.totalSavings), 0
         ).toFixed(2),
         totalUses: promotions.reduce((sum, p) => sum + p.analytics.totalUses, 0)
@@ -3708,7 +3709,7 @@ router.get('/api/promotions', async (req, res) => {
 // 🎁 Create New Promotion
 router.post('/api/promotions', async (req, res) => {
   try {
-    const { 
+    const {
       name,
       code,
       description,
@@ -3724,23 +3725,23 @@ router.post('/api/promotions', async (req, res) => {
       targetingRules,
       adminId = 'admin1'
     } = req.body;
-    
+
     if (!name || !code || !type || !discountValue || !endDate) {
-      return res.status(400).json({ 
-        error: 'Nome, código, tipo, valor do desconto e data final são obrigatórios' 
+      return res.status(400).json({
+        error: 'Nome, código, tipo, valor do desconto e data final são obrigatórios'
       });
     }
 
     try {
       if (firebaseConfig && firebaseConfig.getRealtimeDB) {
         const db = firebaseConfig.getRealtimeDB();
-        
+
         // Verificar se o código já existe
         const existingPromoSnapshot = await db.ref('promos')
           .orderByChild('promoCode')
           .equalTo(code)
           .once('value');
-        
+
         if (existingPromoSnapshot.exists()) {
           return res.status(400).json({ error: 'Código promocional já existe' });
         }
@@ -3748,7 +3749,7 @@ router.post('/api/promotions', async (req, res) => {
         // Criar nova promoção
         const promoId = Date.now().toString();
         const now = new Date().toISOString();
-        
+
         const promotion = {
           promoId,
           promoName: name,
@@ -3783,11 +3784,11 @@ router.post('/api/promotions', async (req, res) => {
 
         // Salvar promoção
         await db.ref(`promos/${promoId}`).set(promotion);
-        
+
         logStructured('info', `🎁 Nova promoção criada: ${code} por ${adminId}`, { service: 'dashboard-routes' });
-        
-        res.json({ 
-          success: true, 
+
+        res.json({
+          success: true,
           message: 'Promoção criada com sucesso',
           data: {
             promoId,
@@ -3813,18 +3814,18 @@ router.post('/api/promotions', async (req, res) => {
 router.patch('/api/promotions/:promoId', async (req, res) => {
   try {
     const { promoId } = req.params;
-    const { 
-      status, 
-      endDate, 
-      maxUses, 
+    const {
+      status,
+      endDate,
+      maxUses,
       description,
-      adminId = 'admin1' 
+      adminId = 'admin1'
     } = req.body;
-    
+
     try {
       if (firebaseConfig && firebaseConfig.getRealtimeDB) {
         const db = firebaseConfig.getRealtimeDB();
-        
+
         // Verificar se a promoção existe
         const promoSnapshot = await db.ref(`promos/${promoId}`).once('value');
         if (!promoSnapshot.exists()) {
@@ -3847,15 +3848,15 @@ router.patch('/api/promotions/:promoId', async (req, res) => {
 
         // Atualizar promoção
         await db.ref(`promos/${promoId}`).update(updates);
-        
+
         logStructured('info', `🎁 Promoção atualizada: ${promoId} por ${adminId}`, { service: 'dashboard-routes' });
-        
-        res.json({ 
-          success: true, 
+
+        res.json({
+          success: true,
           message: 'Promoção atualizada com sucesso',
-          data: { 
+          data: {
             promoId,
-            updatedAt: updates.lastModified 
+            updatedAt: updates.lastModified
           }
         });
       } else {
@@ -3875,7 +3876,7 @@ router.patch('/api/promotions/:promoId', async (req, res) => {
 router.get('/api/promotions/analytics', async (req, res) => {
   try {
     const { period = '30d', promoId } = req.query;
-    
+
     let analytics = {
       overview: {},
       performance: {},
@@ -3885,11 +3886,11 @@ router.get('/api/promotions/analytics', async (req, res) => {
     try {
       if (firebaseConfig && firebaseConfig.getRealtimeDB) {
         const db = firebaseConfig.getRealtimeDB();
-        
+
         // Calcular período
         const now = new Date();
         let startDate = new Date();
-        
+
         switch (period) {
           case '7d':
             startDate.setDate(now.getDate() - 7);
@@ -3905,7 +3906,7 @@ router.get('/api/promotions/analytics', async (req, res) => {
         // Buscar usos das promoções
         const promoUsageSnapshot = await db.ref('promoUsage').once('value');
         const allUsage = promoUsageSnapshot.val() || {};
-        
+
         // Filtrar por período e promoção específica se fornecida
         const periodUsage = Object.values(allUsage).filter(usage => {
           const usageDate = new Date(usage.timestamp || usage.usedAt);
@@ -3917,14 +3918,14 @@ router.get('/api/promotions/analytics', async (req, res) => {
         // Buscar promoções ativas
         const promosSnapshot = await db.ref('promos').once('value');
         const promos = promosSnapshot.val() || {};
-        
+
         const activePromos = Object.values(promos).filter(promo => {
           const endDate = new Date(promo.endDate);
           return endDate > now && promo.active !== false;
         });
 
         // Calcular métricas gerais
-        const totalSavings = periodUsage.reduce((sum, usage) => 
+        const totalSavings = periodUsage.reduce((sum, usage) =>
           sum + parseFloat(usage.discountAmount || 0), 0
         );
 
@@ -3940,11 +3941,11 @@ router.get('/api/promotions/analytics', async (req, res) => {
         periodUsage.forEach(usage => {
           const promo = promos[usage.promoId];
           const type = promo?.type || 'unknown';
-          
+
           if (!promoTypeAnalysis[type]) {
             promoTypeAnalysis[type] = { uses: 0, savings: 0, users: new Set() };
           }
-          
+
           promoTypeAnalysis[type].uses += 1;
           promoTypeAnalysis[type].savings += parseFloat(usage.discountAmount || 0);
           promoTypeAnalysis[type].users.add(usage.userId);
@@ -3965,7 +3966,7 @@ router.get('/api/promotions/analytics', async (req, res) => {
               users: new Set()
             };
           }
-          
+
           promoPerformance[promoId].uses += 1;
           promoPerformance[promoId].savings += parseFloat(usage.discountAmount || 0);
           promoPerformance[promoId].users.add(usage.userId);
@@ -4022,7 +4023,7 @@ router.get('/api/promotions/analytics', async (req, res) => {
     } catch (error) {
       logStructured('warn', '⚠️ Erro ao gerar analytics de promoções:', error.message, { service: 'dashboard-routes' });
     }
-    
+
     res.json({
       period,
       promoId: promoId || 'all',
@@ -4039,14 +4040,14 @@ router.get('/api/promotions/analytics', async (req, res) => {
 function getDailyUsageBreakdown(usage, startDate, endDate) {
   const daily = {};
   const currentDate = new Date(startDate);
-  
+
   // Inicializar todos os dias com 0
   while (currentDate <= endDate) {
     const dateStr = currentDate.toISOString().split('T')[0];
     daily[dateStr] = { uses: 0, savings: 0 };
     currentDate.setDate(currentDate.getDate() + 1);
   }
-  
+
   // Adicionar dados reais
   usage.forEach(use => {
     const dateStr = new Date(use.timestamp || use.usedAt).toISOString().split('T')[0];
@@ -4055,7 +4056,7 @@ function getDailyUsageBreakdown(usage, startDate, endDate) {
       daily[dateStr].savings += parseFloat(use.discountAmount || 0);
     }
   });
-  
+
   return Object.keys(daily).sort().map(date => ({
     date,
     uses: daily[date].uses,
@@ -4066,12 +4067,12 @@ function getDailyUsageBreakdown(usage, startDate, endDate) {
 function getPeakUsageDays(usage) {
   const dayOfWeek = ['Domingo', 'Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta', 'Sábado'];
   const weeklyUsage = new Array(7).fill(0);
-  
+
   usage.forEach(use => {
     const day = new Date(use.timestamp || use.usedAt).getDay();
     weeklyUsage[day] += 1;
   });
-  
+
   return weeklyUsage.map((count, index) => ({
     day: dayOfWeek[index],
     uses: count
@@ -4080,7 +4081,7 @@ function getPeakUsageDays(usage) {
 
 function calculatePromoRetentionRate(usage) {
   const userUsage = {};
-  
+
   usage.forEach(use => {
     const userId = use.userId;
     if (!userUsage[userId]) {
@@ -4088,22 +4089,22 @@ function calculatePromoRetentionRate(usage) {
     }
     userUsage[userId] += 1;
   });
-  
+
   const totalUsers = Object.keys(userUsage).length;
   const repeatUsers = Object.values(userUsage).filter(count => count > 1).length;
-  
+
   return totalUsers > 0 ? ((repeatUsers / totalUsers) * 100).toFixed(2) + '%' : '0%';
 }
 
 // 💲 Operational Costs Tracking - TRACKING DE CUSTOS OPERACIONAIS POR CORRIDA
 router.get('/api/costs/per-trip', async (req, res) => {
   try {
-    const { 
+    const {
       period = '30d',
       tripId,
       detailed = false
     } = req.query;
-    
+
     let costsData = {
       summary: {},
       trips: [],
@@ -4113,11 +4114,11 @@ router.get('/api/costs/per-trip', async (req, res) => {
     try {
       if (firebaseConfig && firebaseConfig.getRealtimeDB) {
         const db = firebaseConfig.getRealtimeDB();
-        
+
         // Calcular período
         const now = new Date();
         let startDate = new Date();
-        
+
         switch (period) {
           case '7d':
             startDate.setDate(now.getDate() - 7);
@@ -4133,7 +4134,7 @@ router.get('/api/costs/per-trip', async (req, res) => {
         // Buscar corridas do período
         const bookingsSnapshot = await db.ref('bookings').once('value');
         const bookings = bookingsSnapshot.val() || {};
-        
+
         // Filtrar corridas por período e status
         let tripIds = Object.keys(bookings);
         if (tripId) {
@@ -4142,8 +4143,8 @@ router.get('/api/costs/per-trip', async (req, res) => {
           tripIds = tripIds.filter(id => {
             const booking = bookings[id];
             const tripDate = new Date(booking.tripdate);
-            return tripDate >= startDate && 
-                   (booking.status === 'COMPLETE' || booking.status === 'PAID');
+            return tripDate >= startDate &&
+              (booking.status === 'COMPLETE' || booking.status === 'PAID');
           });
         }
 
@@ -4155,7 +4156,7 @@ router.get('/api/costs/per-trip', async (req, res) => {
 
           // Custos por corrida (estimativas baseadas em dados reais do mercado)
           const costs = calculateTripCosts(booking, distance, duration);
-          
+
           return {
             tripId: id,
             basic: {
@@ -4171,19 +4172,19 @@ router.get('/api/costs/per-trip', async (req, res) => {
               geocoding: costs.geocoding,
               directionsApi: costs.directionsApi,
               placesApi: costs.placesApi,
-              
+
               // Infraestrutura
               serverCosts: costs.serverCosts,
               firebaseCosts: costs.firebaseCosts,
               redisCosts: costs.redisCosts,
-              
+
               // Processamento
               paymentProcessing: costs.paymentProcessing,
-              
+
               // Comunicação
               fcmNotifications: costs.fcmNotifications,
               smsNotifications: costs.smsNotifications,
-              
+
               // Total
               totalApiCosts: costs.totalApiCosts,
               totalInfraCosts: costs.totalInfraCosts,
@@ -4203,16 +4204,16 @@ router.get('/api/costs/per-trip', async (req, res) => {
 
         // Calcular resumo agregado
         const totalTrips = tripsWithCosts.length;
-        const totalRevenue = tripsWithCosts.reduce((sum, trip) => 
+        const totalRevenue = tripsWithCosts.reduce((sum, trip) =>
           sum + parseFloat(trip.basic.fare), 0
         );
-        const totalOperationalCosts = tripsWithCosts.reduce((sum, trip) => 
+        const totalOperationalCosts = tripsWithCosts.reduce((sum, trip) =>
           sum + trip.costs.totalOperationalCosts, 0
         );
-        const totalDistance = tripsWithCosts.reduce((sum, trip) => 
+        const totalDistance = tripsWithCosts.reduce((sum, trip) =>
           sum + parseFloat(trip.basic.distance), 0
         );
-        const totalDuration = tripsWithCosts.reduce((sum, trip) => 
+        const totalDuration = tripsWithCosts.reduce((sum, trip) =>
           sum + parseFloat(trip.basic.duration), 0
         );
 
@@ -4269,7 +4270,7 @@ router.get('/api/costs/per-trip', async (req, res) => {
     } catch (error) {
       logStructured('warn', '⚠️ Erro ao calcular custos operacionais:', error.message, { service: 'dashboard-routes' });
     }
-    
+
     res.json({
       period,
       tripId: tripId || 'all',
@@ -4287,7 +4288,7 @@ router.get('/api/costs/per-trip', async (req, res) => {
 router.get('/api/costs/insights', async (req, res) => {
   try {
     const { period = '30d' } = req.query;
-    
+
     let insights = {
       trends: {},
       optimization: {},
@@ -4297,11 +4298,11 @@ router.get('/api/costs/insights', async (req, res) => {
     try {
       if (firebaseConfig && firebaseConfig.getRealtimeDB) {
         const db = firebaseConfig.getRealtimeDB();
-        
+
         // Buscar dados históricos para análise de tendências
         const now = new Date();
         let startDate = new Date();
-        
+
         switch (period) {
           case '7d':
             startDate.setDate(now.getDate() - 7);
@@ -4316,19 +4317,19 @@ router.get('/api/costs/insights', async (req, res) => {
 
         const bookingsSnapshot = await db.ref('bookings').once('value');
         const bookings = bookingsSnapshot.val() || {};
-        
+
         const completedTrips = Object.keys(bookings)
           .filter(id => {
             const booking = bookings[id];
             const tripDate = new Date(booking.tripdate);
-            return tripDate >= startDate && 
-                   (booking.status === 'COMPLETE' || booking.status === 'PAID');
+            return tripDate >= startDate &&
+              (booking.status === 'COMPLETE' || booking.status === 'PAID');
           })
           .map(id => ({
             id,
             ...bookings[id],
-            costs: calculateTripCosts(bookings[id], 
-              parseFloat(bookings[id].distance || 0), 
+            costs: calculateTripCosts(bookings[id],
+              parseFloat(bookings[id].distance || 0),
               parseFloat(bookings[id].duration || 0)
             )
           }));
@@ -4362,7 +4363,7 @@ router.get('/api/costs/insights', async (req, res) => {
 
         // Gerar recomendações
         const recommendations = [];
-        
+
         if (highCostTrips.length > 0) {
           recommendations.push({
             type: 'cost_reduction',
@@ -4385,9 +4386,9 @@ router.get('/api/costs/insights', async (req, res) => {
           });
         }
 
-        const avgApiCostPerTrip = completedTrips.length > 0 ? 
+        const avgApiCostPerTrip = completedTrips.length > 0 ?
           completedTrips.reduce((sum, trip) => sum + trip.costs.totalApiCosts, 0) / completedTrips.length : 0;
-        
+
         if (avgApiCostPerTrip > 0.15) {
           recommendations.push({
             type: 'api_optimization',
@@ -4404,15 +4405,15 @@ router.get('/api/costs/insights', async (req, res) => {
             dailyCosts: Object.keys(dailyCosts).sort().map(date => ({
               date,
               trips: dailyCosts[date].trips,
-              avgCostPerTrip: dailyCosts[date].trips > 0 ? 
+              avgCostPerTrip: dailyCosts[date].trips > 0 ?
                 (dailyCosts[date].totalCosts / dailyCosts[date].trips).toFixed(4) : '0.0000',
               totalCosts: dailyCosts[date].totalCosts.toFixed(4),
               totalRevenue: dailyCosts[date].totalRevenue.toFixed(2),
-              profitMargin: dailyCosts[date].totalRevenue > 0 ? 
+              profitMargin: dailyCosts[date].totalRevenue > 0 ?
                 (((dailyCosts[date].totalRevenue - dailyCosts[date].totalCosts) / dailyCosts[date].totalRevenue) * 100).toFixed(2) + '%' : '0%'
             })),
             costTrend: calculateCostTrend(dailyCosts),
-            avgCostPerTrip: completedTrips.length > 0 ? 
+            avgCostPerTrip: completedTrips.length > 0 ?
               (completedTrips.reduce((sum, trip) => sum + trip.costs.totalOperationalCosts, 0) / completedTrips.length).toFixed(4) : '0.0000'
           },
           optimization: {
@@ -4421,7 +4422,7 @@ router.get('/api/costs/insights', async (req, res) => {
               date: trip.tripdate,
               distance: trip.distance,
               operationalCost: trip.costs.totalOperationalCosts.toFixed(4),
-              costPerKm: parseFloat(trip.distance) > 0 ? 
+              costPerKm: parseFloat(trip.distance) > 0 ?
                 (trip.costs.totalOperationalCosts / parseFloat(trip.distance)).toFixed(4) : '0.0000',
               mainCostDriver: identifyMainCostDriver(trip.costs)
             })),
@@ -4434,7 +4435,7 @@ router.get('/api/costs/insights', async (req, res) => {
     } catch (error) {
       logStructured('warn', '⚠️ Erro ao gerar insights de custos:', error.message, { service: 'dashboard-routes' });
     }
-    
+
     res.json({
       period,
       generatedAt: new Date().toISOString(),
@@ -4449,28 +4450,28 @@ router.get('/api/costs/insights', async (req, res) => {
 // Funções auxiliares para cálculos de custos
 function calculateTripCosts(booking, distance, duration) {
   // Custos baseados em tarifas reais do mercado (valores em reais)
-  
+
   // APIs Google (por requisição)
   const mapsApiCost = 0.0020; // R$ 0.002 por request
   const geocodingCost = 0.0050; // R$ 0.005 por geocoding
   const directionsCost = 0.0050; // R$ 0.005 por direction
   const placesCost = 0.0017; // R$ 0.0017 por place search
-  
+
   // Infraestrutura (por corrida)
   const serverCost = 0.0030; // R$ 0.003 por processamento
   const firebaseCost = 0.0015; // R$ 0.0015 por operações DB
   const redisCost = 0.0005; // R$ 0.0005 por cache operations
-  
+
   // Processamento de pagamento (% da transação)
   const paymentProcessingRate = 0.039; // 3.9% + R$ 0.39
   const paymentFixedFee = 0.39;
   const fare = parseFloat(booking.estimate || 0);
   const paymentCost = (fare * paymentProcessingRate) + paymentFixedFee;
-  
+
   // Comunicação
   const fcmCost = 0.0000; // FCM é gratuito até certo limite
   const smsCost = 0.10; // R$ 0.10 por SMS (se usado)
-  
+
   // Calcular custos por corrida
   const costs = {
     // APIs (chamadas típicas por corrida)
@@ -4478,38 +4479,38 @@ function calculateTripCosts(booking, distance, duration) {
     geocoding: geocodingCost * 2, // origem e destino
     directionsApi: directionsCost * 1, // 1 rota
     placesApi: placesCost * 1, // busca de lugares
-    
+
     // Infraestrutura
     serverCosts: serverCost,
     firebaseCosts: firebaseCost * 3, // 3 operações médias
     redisCosts: redisCost * 2, // 2 operações cache
-    
+
     // Processamento
     paymentProcessing: fare > 0 ? paymentCost : 0,
-    
+
     // Comunicação
     fcmNotifications: fcmCost * 4, // 4 notificações por corrida
     smsNotifications: booking.smsUsed ? smsCost : 0
   };
-  
+
   // Totais por categoria
   costs.totalApiCosts = costs.mapsApi + costs.geocoding + costs.directionsApi + costs.placesApi;
   costs.totalInfraCosts = costs.serverCosts + costs.firebaseCosts + costs.redisCosts;
   costs.totalCommCosts = costs.fcmNotifications + costs.smsNotifications;
   costs.totalOperationalCosts = costs.totalApiCosts + costs.totalInfraCosts + costs.paymentProcessing + costs.totalCommCosts;
-  
+
   return costs;
 }
 
 function calculateCostTrend(dailyCosts) {
   const dates = Object.keys(dailyCosts).sort();
   if (dates.length < 2) return '0%';
-  
+
   const firstDayCost = dailyCosts[dates[0]].totalCosts / dailyCosts[dates[0]].trips;
   const lastDayCost = dailyCosts[dates[dates.length - 1]].totalCosts / dailyCosts[dates[dates.length - 1]].trips;
-  
+
   if (firstDayCost === 0) return '0%';
-  
+
   const trend = ((lastDayCost - firstDayCost) / firstDayCost) * 100;
   return trend > 0 ? `+${trend.toFixed(2)}%` : `${trend.toFixed(2)}%`;
 }
@@ -4521,23 +4522,23 @@ function identifyMainCostDriver(costs) {
     'Pagamento': costs.paymentProcessing,
     'Comunicação': costs.totalCommCosts
   };
-  
+
   let maxCategory = 'APIs';
   let maxCost = costCategories.APIs;
-  
+
   Object.keys(costCategories).forEach(category => {
     if (costCategories[category] > maxCost) {
       maxCategory = category;
       maxCost = costCategories[category];
     }
   });
-  
+
   return maxCategory;
 }
 
 function calculatePotentialSavings(trips) {
   const totalCosts = trips.reduce((sum, trip) => sum + trip.costs.totalOperationalCosts, 0);
-  
+
   // Estimativas de economia por otimização
   const savings = {
     apiCaching: totalCosts * 0.25, // 25% economia com cache
@@ -4545,7 +4546,7 @@ function calculatePotentialSavings(trips) {
     batchProcessing: totalCosts * 0.10, // 10% com batch de operações
     total: totalCosts * 0.50 // 50% economia total possível
   };
-  
+
   return {
     current: totalCosts.toFixed(4),
     apiCaching: savings.apiCaching.toFixed(4),
@@ -4560,7 +4561,7 @@ function calculatePotentialSavings(trips) {
 router.get('/api/monitoring/services', async (req, res) => {
   try {
     const { service, timeframe = '1h' } = req.query;
-    
+
     let monitoring = {
       overview: {},
       services: {},
@@ -4569,16 +4570,16 @@ router.get('/api/monitoring/services', async (req, res) => {
 
     // Monitorar Redis
     const redisStatus = await monitorRedisService();
-    
+
     // Monitorar Firebase
     const firebaseStatus = await monitorFirebaseService();
-    
+
     // Monitorar APIs Google
     const googleApisStatus = await monitorGoogleApis();
-    
+
     // Monitorar Sistema
     const systemStatus = await monitorSystemResources();
-    
+
     // Monitorar WebSocket
     const websocketStatus = await monitorWebSocketConnections();
 
@@ -4586,11 +4587,11 @@ router.get('/api/monitoring/services', async (req, res) => {
       overview: {
         timestamp: new Date().toISOString(),
         overallStatus: calculateOverallStatus([
-          redisStatus, firebaseStatus, googleApisStatus, 
+          redisStatus, firebaseStatus, googleApisStatus,
           systemStatus, websocketStatus
         ]),
         servicesUp: countServicesUp([
-          redisStatus, firebaseStatus, googleApisStatus, 
+          redisStatus, firebaseStatus, googleApisStatus,
           systemStatus, websocketStatus
         ]),
         totalServices: 5,
@@ -4604,7 +4605,7 @@ router.get('/api/monitoring/services', async (req, res) => {
         websocket: websocketStatus
       },
       alerts: generateServiceAlerts([
-        redisStatus, firebaseStatus, googleApisStatus, 
+        redisStatus, firebaseStatus, googleApisStatus,
         systemStatus, websocketStatus
       ])
     };
@@ -4665,8 +4666,8 @@ router.get('/api/monitoring/health', async (req, res) => {
         const db = firebaseConfig.getRealtimeDB();
         const startTime = Date.now();
         await db.ref('.info/connected').once('value');
-        healthChecks.checks.firebase = { 
-          status: 'healthy', 
+        healthChecks.checks.firebase = {
+          status: 'healthy',
           responseTime: Date.now() - startTime + 'ms'
         };
       } else {
@@ -4682,7 +4683,7 @@ router.get('/api/monitoring/health', async (req, res) => {
     const freeMem = os.freemem();
     const totalMem = os.totalmem();
     const memoryUsage = ((totalMem - freeMem) / totalMem) * 100;
-    
+
     healthChecks.checks.system = {
       status: memoryUsage < 85 ? 'healthy' : 'warning',
       memory: {
@@ -4722,7 +4723,7 @@ router.get('/api/monitoring/health', async (req, res) => {
 router.get('/api/monitoring/performance', async (req, res) => {
   try {
     const { period = '1h' } = req.query;
-    
+
     let performance = {
       summary: {},
       metrics: {},
@@ -4732,7 +4733,7 @@ router.get('/api/monitoring/performance', async (req, res) => {
     // Calcular período
     const now = new Date();
     let startDate = new Date();
-    
+
     switch (period) {
       case '1h':
         startDate.setHours(now.getHours() - 1);
@@ -4747,7 +4748,7 @@ router.get('/api/monitoring/performance', async (req, res) => {
 
     // Métricas de performance (simuladas - em produção viriam de monitoramento real)
     const performanceData = await collectPerformanceMetrics(startDate, now);
-    
+
     performance = {
       summary: {
         period,
@@ -4823,16 +4824,16 @@ async function monitorRedisService() {
   try {
     const redis = require('redis');
     const redisClient = redis.createClient({ url: 'redis://redis-master:6379' });
-    
+
     const startTime = Date.now();
     await redisClient.connect();
-    
+
     const info = await redisClient.info();
     const ping = await redisClient.ping();
     const responseTime = Date.now() - startTime;
-    
+
     await redisClient.disconnect();
-    
+
     return {
       name: 'Redis',
       status: ping === 'PONG' ? 'healthy' : 'unhealthy',
@@ -4866,11 +4867,11 @@ async function monitorFirebaseService() {
 
     const db = firebaseConfig.getRealtimeDB();
     const startTime = Date.now();
-    
+
     // Teste de conexão simples
     await db.ref('.info/connected').once('value');
     const responseTime = Date.now() - startTime;
-    
+
     return {
       name: 'Firebase Realtime Database',
       status: 'healthy',
@@ -4906,12 +4907,12 @@ async function monitorGoogleApis() {
 
 async function monitorSystemResources() {
   const os = require('os');
-  
+
   const freeMem = os.freemem();
   const totalMem = os.totalmem();
   const memoryUsage = ((totalMem - freeMem) / totalMem) * 100;
   const cpuLoad = os.loadavg()[0];
-  
+
   let status = 'healthy';
   if (memoryUsage > 85 || cpuLoad > 2.0) {
     status = 'warning';
@@ -4919,7 +4920,7 @@ async function monitorSystemResources() {
   if (memoryUsage > 95 || cpuLoad > 4.0) {
     status = 'critical';
   }
-  
+
   return {
     name: 'System Resources',
     status,
@@ -4942,11 +4943,11 @@ async function monitorWebSocketConnections() {
   const connections = global.io ? global.io.engine.clientsCount : 0;
   const maxConnections = 1000;
   const usage = (connections / maxConnections) * 100;
-  
+
   let status = 'healthy';
   if (usage > 80) status = 'warning';
   if (usage > 95) status = 'critical';
-  
+
   return {
     name: 'WebSocket Connections',
     status,
@@ -4961,7 +4962,7 @@ async function monitorWebSocketConnections() {
 
 function calculateOverallStatus(services) {
   const statuses = services.map(service => service.status);
-  
+
   if (statuses.some(status => status === 'unhealthy' || status === 'critical')) {
     return 'unhealthy';
   }
@@ -4972,14 +4973,14 @@ function calculateOverallStatus(services) {
 }
 
 function countServicesUp(services) {
-  return services.filter(service => 
+  return services.filter(service =>
     service.status === 'healthy' || service.status === 'warning'
   ).length;
 }
 
 function generateServiceAlerts(services) {
   const alerts = [];
-  
+
   services.forEach(service => {
     if (service.status === 'unhealthy' || service.status === 'critical') {
       alerts.push({
@@ -4992,7 +4993,7 @@ function generateServiceAlerts(services) {
       });
     }
   });
-  
+
   return alerts;
 }
 
@@ -5011,7 +5012,7 @@ function generatePerformanceTrends(period) {
   // Simulação de tendências de performance
   const trends = [];
   const now = new Date();
-  
+
   for (let i = 0; i < 10; i++) {
     const time = new Date(now - i * 360000); // 6 minutos atrás
     trends.unshift({
@@ -5021,7 +5022,7 @@ function generatePerformanceTrends(period) {
       errorRate: (Math.random() * 0.1).toFixed(3) // 0-0.1%
     });
   }
-  
+
   return trends;
 }
 
@@ -5054,7 +5055,7 @@ function formatUptime(seconds) {
   const days = Math.floor(seconds / 86400);
   const hours = Math.floor((seconds % 86400) / 3600);
   const minutes = Math.floor((seconds % 3600) / 60);
-  
+
   if (days > 0) {
     return `${days}d ${hours}h ${minutes}m`;
   } else if (hours > 0) {
@@ -5067,11 +5068,11 @@ function formatUptime(seconds) {
 // 📊 Growth Analytics - ANALYTICS DE CRESCIMENTO COM PERCENTUAIS E TENDÊNCIAS
 router.get('/api/analytics/growth', async (req, res) => {
   try {
-    const { 
+    const {
       period = '30d', // '7d', '30d', '90d', '1y'
       metric = 'all' // 'users', 'revenue', 'trips', 'drivers', 'all'
     } = req.query;
-    
+
     let growthAnalytics = {
       summary: {},
       growth: {},
@@ -5082,12 +5083,12 @@ router.get('/api/analytics/growth', async (req, res) => {
     try {
       if (firebaseConfig && firebaseConfig.getRealtimeDB) {
         const db = firebaseConfig.getRealtimeDB();
-        
+
         // Calcular períodos
         const now = new Date();
         let startDate = new Date();
         let compareStartDate = new Date();
-        
+
         switch (period) {
           case '7d':
             startDate.setDate(now.getDate() - 7);
@@ -5118,19 +5119,19 @@ router.get('/api/analytics/growth', async (req, res) => {
 
         // Análise de crescimento de usuários
         const userGrowth = analyzeUserGrowth(users, startDate, now, compareStartDate);
-        
+
         // Análise de crescimento de receita
         const revenueGrowth = analyzeRevenueGrowth(bookings, startDate, now, compareStartDate);
-        
+
         // Análise de crescimento de corridas
         const tripGrowth = analyzeTripGrowth(bookings, startDate, now, compareStartDate);
-        
+
         // Análise de crescimento de motoristas
         const driverGrowth = analyzeDriverGrowth(users, startDate, now, compareStartDate);
 
         // Tendências por período
         const trends = generateGrowthTrends(users, bookings, startDate, now, period);
-        
+
         // Previsões
         const forecasts = generateGrowthForecasts(trends, period);
 
@@ -5166,7 +5167,7 @@ router.get('/api/analytics/growth', async (req, res) => {
     } catch (error) {
       logStructured('warn', '⚠️ Erro ao gerar analytics de crescimento:', error.message, { service: 'dashboard-routes' });
     }
-    
+
     res.json({
       period,
       metric,
@@ -5183,7 +5184,7 @@ router.get('/api/analytics/growth', async (req, res) => {
 router.get('/api/analytics/growth/insights', async (req, res) => {
   try {
     const { period = '30d' } = req.query;
-    
+
     let insights = {
       keyInsights: [],
       recommendations: [],
@@ -5194,10 +5195,10 @@ router.get('/api/analytics/growth/insights', async (req, res) => {
     try {
       if (firebaseConfig && firebaseConfig.getRealtimeDB) {
         const db = firebaseConfig.getRealtimeDB();
-        
+
         const now = new Date();
         let startDate = new Date();
-        
+
         switch (period) {
           case '7d':
             startDate.setDate(now.getDate() - 7);
@@ -5224,7 +5225,7 @@ router.get('/api/analytics/growth/insights', async (req, res) => {
     } catch (error) {
       logStructured('warn', '⚠️ Erro ao gerar insights de crescimento:', error.message, { service: 'dashboard-routes' });
     }
-    
+
     res.json({
       period,
       generatedAt: new Date().toISOString(),
@@ -5239,11 +5240,11 @@ router.get('/api/analytics/growth/insights', async (req, res) => {
 // 📊 Growth Cohort Analysis
 router.get('/api/analytics/growth/cohorts', async (req, res) => {
   try {
-    const { 
+    const {
       cohortType = 'monthly', // 'weekly', 'monthly'
       metric = 'retention' // 'retention', 'revenue'
     } = req.query;
-    
+
     let cohortAnalysis = {
       cohorts: [],
       summary: {},
@@ -5253,7 +5254,7 @@ router.get('/api/analytics/growth/cohorts', async (req, res) => {
     try {
       if (firebaseConfig && firebaseConfig.getRealtimeDB) {
         const db = firebaseConfig.getRealtimeDB();
-        
+
         const [usersSnapshot, bookingsSnapshot] = await Promise.all([
           db.ref('users').once('value'),
           db.ref('bookings').once('value')
@@ -5267,7 +5268,7 @@ router.get('/api/analytics/growth/cohorts', async (req, res) => {
     } catch (error) {
       logStructured('warn', '⚠️ Erro ao gerar análise de coorte:', error.message, { service: 'dashboard-routes' });
     }
-    
+
     res.json({
       cohortType,
       metric,
@@ -5296,7 +5297,7 @@ function analyzeUserGrowth(users, startDate, endDate, compareStartDate) {
 
   const currentCount = currentPeriodUsers.length;
   const previousCount = previousPeriodUsers.length;
-  const growthRate = previousCount > 0 ? 
+  const growthRate = previousCount > 0 ?
     ((currentCount - previousCount) / previousCount * 100).toFixed(2) : '0.00';
 
   return {
@@ -5316,25 +5317,25 @@ function analyzeRevenueGrowth(bookings, startDate, endDate, compareStartDate) {
   const currentPeriodBookings = Object.values(bookings).filter(booking => {
     if (!booking.tripdate) return false;
     const tripDate = new Date(booking.tripdate);
-    return tripDate >= startDate && tripDate <= endDate && 
-           (booking.status === 'COMPLETE' || booking.status === 'PAID');
+    return tripDate >= startDate && tripDate <= endDate &&
+      (booking.status === 'COMPLETE' || booking.status === 'PAID');
   });
 
   const previousPeriodBookings = Object.values(bookings).filter(booking => {
     if (!booking.tripdate) return false;
     const tripDate = new Date(booking.tripdate);
-    return tripDate >= compareStartDate && tripDate < startDate && 
-           (booking.status === 'COMPLETE' || booking.status === 'PAID');
+    return tripDate >= compareStartDate && tripDate < startDate &&
+      (booking.status === 'COMPLETE' || booking.status === 'PAID');
   });
 
-  const currentRevenue = currentPeriodBookings.reduce((sum, b) => 
+  const currentRevenue = currentPeriodBookings.reduce((sum, b) =>
     sum + parseFloat(b.estimate || 0), 0
   );
-  const previousRevenue = previousPeriodBookings.reduce((sum, b) => 
+  const previousRevenue = previousPeriodBookings.reduce((sum, b) =>
     sum + parseFloat(b.estimate || 0), 0
   );
 
-  const growthRate = previousRevenue > 0 ? 
+  const growthRate = previousRevenue > 0 ?
     ((currentRevenue - previousRevenue) / previousRevenue * 100).toFixed(2) : '0.00';
 
   return {
@@ -5342,7 +5343,7 @@ function analyzeRevenueGrowth(bookings, startDate, endDate, compareStartDate) {
     previous: previousRevenue.toFixed(2),
     growthRate: growthRate + '%',
     trend: parseFloat(growthRate) > 0 ? 'up' : parseFloat(growthRate) < 0 ? 'down' : 'stable',
-    avgRevenuePerTrip: currentPeriodBookings.length > 0 ? 
+    avgRevenuePerTrip: currentPeriodBookings.length > 0 ?
       (currentRevenue / currentPeriodBookings.length).toFixed(2) : '0.00',
     daily: generateDailyRevenueGrowth(currentPeriodBookings, startDate, endDate)
   };
@@ -5363,10 +5364,10 @@ function analyzeTripGrowth(bookings, startDate, endDate, compareStartDate) {
 
   const currentCount = currentPeriodTrips.length;
   const previousCount = previousPeriodTrips.length;
-  const growthRate = previousCount > 0 ? 
+  const growthRate = previousCount > 0 ?
     ((currentCount - previousCount) / previousCount * 100).toFixed(2) : '0.00';
 
-  const completedTrips = currentPeriodTrips.filter(t => 
+  const completedTrips = currentPeriodTrips.filter(t =>
     t.status === 'COMPLETE' || t.status === 'PAID'
   ).length;
 
@@ -5375,7 +5376,7 @@ function analyzeTripGrowth(bookings, startDate, endDate, compareStartDate) {
     previous: previousCount,
     growthRate: growthRate + '%',
     trend: parseFloat(growthRate) > 0 ? 'up' : parseFloat(growthRate) < 0 ? 'down' : 'stable',
-    completionRate: currentCount > 0 ? 
+    completionRate: currentCount > 0 ?
       ((completedTrips / currentCount) * 100).toFixed(2) + '%' : '0%',
     daily: generateDailyTripGrowth(currentPeriodTrips, startDate, endDate)
   };
@@ -5383,7 +5384,7 @@ function analyzeTripGrowth(bookings, startDate, endDate, compareStartDate) {
 
 function analyzeDriverGrowth(users, startDate, endDate, compareStartDate) {
   const drivers = Object.values(users).filter(u => u.usertype === 'driver');
-  
+
   const currentPeriodDrivers = drivers.filter(driver => {
     if (!driver.createdAt) return false;
     const createdDate = new Date(driver.createdAt);
@@ -5398,7 +5399,7 @@ function analyzeDriverGrowth(users, startDate, endDate, compareStartDate) {
 
   const currentCount = currentPeriodDrivers.length;
   const previousCount = previousPeriodDrivers.length;
-  const growthRate = previousCount > 0 ? 
+  const growthRate = previousCount > 0 ?
     ((currentCount - previousCount) / previousCount * 100).toFixed(2) : '0.00';
 
   const approvedDrivers = currentPeriodDrivers.filter(d => d.approved === true).length;
@@ -5408,7 +5409,7 @@ function analyzeDriverGrowth(users, startDate, endDate, compareStartDate) {
     previous: previousCount,
     growthRate: growthRate + '%',
     trend: parseFloat(growthRate) > 0 ? 'up' : parseFloat(growthRate) < 0 ? 'down' : 'stable',
-    approvalRate: currentCount > 0 ? 
+    approvalRate: currentCount > 0 ?
       ((approvedDrivers / currentCount) * 100).toFixed(2) + '%' : '0%',
     totalActive: drivers.filter(d => d.approved === true).length
   };
@@ -5417,13 +5418,13 @@ function analyzeDriverGrowth(users, startDate, endDate, compareStartDate) {
 function generateDailyGrowth(items, startDate, endDate) {
   const daily = {};
   const currentDate = new Date(startDate);
-  
+
   while (currentDate <= endDate) {
     const dateStr = currentDate.toISOString().split('T')[0];
     daily[dateStr] = 0;
     currentDate.setDate(currentDate.getDate() + 1);
   }
-  
+
   items.forEach(item => {
     if (item.createdAt) {
       const dateStr = new Date(item.createdAt).toISOString().split('T')[0];
@@ -5432,7 +5433,7 @@ function generateDailyGrowth(items, startDate, endDate) {
       }
     }
   });
-  
+
   return Object.keys(daily).sort().map(date => ({
     date,
     count: daily[date]
@@ -5442,13 +5443,13 @@ function generateDailyGrowth(items, startDate, endDate) {
 function generateDailyRevenueGrowth(bookings, startDate, endDate) {
   const daily = {};
   const currentDate = new Date(startDate);
-  
+
   while (currentDate <= endDate) {
     const dateStr = currentDate.toISOString().split('T')[0];
     daily[dateStr] = 0;
     currentDate.setDate(currentDate.getDate() + 1);
   }
-  
+
   bookings.forEach(booking => {
     if (booking.tripdate) {
       const dateStr = new Date(booking.tripdate).toISOString().split('T')[0];
@@ -5457,7 +5458,7 @@ function generateDailyRevenueGrowth(bookings, startDate, endDate) {
       }
     }
   });
-  
+
   return Object.keys(daily).sort().map(date => ({
     date,
     revenue: daily[date].toFixed(2)
@@ -5467,13 +5468,13 @@ function generateDailyRevenueGrowth(bookings, startDate, endDate) {
 function generateDailyTripGrowth(bookings, startDate, endDate) {
   const daily = {};
   const currentDate = new Date(startDate);
-  
+
   while (currentDate <= endDate) {
     const dateStr = currentDate.toISOString().split('T')[0];
     daily[dateStr] = 0;
     currentDate.setDate(currentDate.getDate() + 1);
   }
-  
+
   bookings.forEach(booking => {
     if (booking.tripdate) {
       const dateStr = new Date(booking.tripdate).toISOString().split('T')[0];
@@ -5482,7 +5483,7 @@ function generateDailyTripGrowth(bookings, startDate, endDate) {
       }
     }
   });
-  
+
   return Object.keys(daily).sort().map(date => ({
     date,
     trips: daily[date]
@@ -5581,7 +5582,7 @@ function generateGrowthInsights(users, bookings, startDate, endDate, period) {
       }
     ]
   };
-  
+
   return insights;
 }
 
@@ -5677,13 +5678,13 @@ router.post('/api/promotions', async (req, res) => {
 router.get('/api/promotions', async (req, res) => {
   try {
     const { status, type } = req.query;
-    
+
     const filters = {};
     if (status) filters.status = status;
     if (type) filters.type = type;
 
     const result = await promotionService.listPromotions(filters);
-    
+
     res.json(result);
 
   } catch (error) {
@@ -5719,7 +5720,7 @@ router.get('/api/promotions/:promotionId', async (req, res) => {
     // Buscar estatísticas de resgates
     const driverPromotionsSnapshot = await db.ref('driver_promotions').once('value');
     const driverPromotions = driverPromotionsSnapshot.val() || {};
-    
+
     let redemptionCount = 0;
     Object.keys(driverPromotions).forEach(driverId => {
       if (driverPromotions[driverId][promotionId]) {
@@ -5759,7 +5760,7 @@ router.patch('/api/promotions/:promotionId', async (req, res) => {
 
     const db = firebaseConfig.getRealtimeDB();
     const promotionRef = db.ref(`promotions/${promotionId}`);
-    
+
     const promotionSnapshot = await promotionRef.once('value');
     if (!promotionSnapshot.exists()) {
       return res.status(404).json({ error: 'Promoção não encontrada' });
@@ -5769,7 +5770,7 @@ router.patch('/api/promotions/:promotionId', async (req, res) => {
     const allowedUpdates = [
       'name', 'description', 'status', 'endDate', 'maxRedemptions'
     ];
-    
+
     const updateData = {
       updatedAt: new Date().toISOString()
     };
@@ -5876,7 +5877,7 @@ router.get('/api/promotions/stats', async (req, res) => {
     }
 
     const db = firebaseConfig.getRealtimeDB();
-    
+
     // Buscar todas as promoções
     const promotionsSnapshot = await db.ref('promotions').once('value');
     const promotions = promotionsSnapshot.val() || {};
@@ -5897,7 +5898,7 @@ router.get('/api/promotions/stats', async (req, res) => {
 
     Object.values(promotions).forEach(promo => {
       stats[promo.status] = (stats[promo.status] || 0) + 1;
-      
+
       if (!stats.byType[promo.type]) {
         stats.byType[promo.type] = 0;
       }
@@ -5967,7 +5968,7 @@ router.get('/api/drivers/complete', async (req, res) => {
 
     for (const driverId of Object.keys(users)) {
       const driver = users[driverId];
-      
+
       // Buscar veículo do motorista
       const driverCar = Object.values(cars).find(car => car.driver === driverId);
 
@@ -5980,7 +5981,7 @@ router.get('/api/drivers/complete', async (req, res) => {
       let driverPlanType = 'none';
       let planName = 'Sem Plano';
       let weeklyFee = 0;
-      
+
       if (driver.planType === 'elite') {
         driverPlanType = 'elite';
         planName = 'Leaf Elite';
@@ -6037,12 +6038,12 @@ router.get('/api/drivers/complete', async (req, res) => {
           const nextMonday = new Date(now);
           nextMonday.setDate(now.getDate() + daysUntilMonday);
           nextMonday.setHours(0, 0, 0, 0);
-          
+
           nextRenewal = new Date(nextMonday);
           nextRenewal.setDate(nextMonday.getDate() + 2); // Quarta-feira
-          
+
           daysUntilRenewal = Math.ceil((nextRenewal - now) / (1000 * 60 * 60 * 24));
-          
+
           // Verificar status da assinatura
           const billingStatus = driver.billing_status || 'active';
           if (billingStatus === 'overdue') {
@@ -6077,7 +6078,7 @@ router.get('/api/drivers/complete', async (req, res) => {
         profileImage: driver.profile_image || '',
         registrationDate: driver.createdAt ? new Date(driver.createdAt).toISOString() : null,
         lastActivity: driver.lastLogin ? new Date(driver.lastLogin).toISOString() : null,
-        
+
         // Status de aprovação
         approvalStatus,
         approved: driver.approved || false,
@@ -6087,7 +6088,7 @@ router.get('/api/drivers/complete', async (req, res) => {
           vehicle: driverCar ? 'uploaded' : 'missing',
           verified: driver.approved || false
         },
-        
+
         // Plano e assinatura
         plan: {
           type: driverPlanType,
@@ -6100,7 +6101,7 @@ router.get('/api/drivers/complete', async (req, res) => {
           nextRenewal: nextRenewal ? nextRenewal.toISOString() : null,
           daysUntilRenewal
         },
-        
+
         // Veículo
         vehicle: driverCar ? {
           make: driverCar.carMake || '',
@@ -6110,7 +6111,7 @@ router.get('/api/drivers/complete', async (req, res) => {
           type: driverCar.carType || '',
           year: driverCar.carYear || ''
         } : null,
-        
+
         // Estatísticas
         stats: {
           totalTrips: driverBookings.length,
@@ -6119,13 +6120,13 @@ router.get('/api/drivers/complete', async (req, res) => {
           averageRating: parseFloat(driver.driverRating || 0).toFixed(1),
           walletBalance: parseFloat(driver.walletBalance || 0).toFixed(2)
         },
-        
+
         // Status online
         online: {
           isOnline: driver.driverActiveStatus || false,
           lastSeen: driver.lastLocationUpdate ? new Date(driver.lastLocationUpdate).toISOString() : null
         },
-        
+
         // Status geral
         status: driverStatus,
         suspended: driver.suspended || false
@@ -6218,12 +6219,12 @@ router.get('/api/drivers/:driverId/complete', async (req, res) => {
 
     // Calcular todas as informações
     const now = new Date();
-    
+
     // Determinar plano
     let planType = 'none';
     let planName = 'Sem Plano';
     let weeklyFee = 0;
-    
+
     if (driver.planType === 'elite') {
       planType = 'elite';
       planName = 'Leaf Elite';
@@ -6279,12 +6280,12 @@ router.get('/api/drivers/:driverId/complete', async (req, res) => {
         const nextMonday = new Date(now);
         nextMonday.setDate(now.getDate() + daysUntilMonday);
         nextMonday.setHours(0, 0, 0, 0);
-        
+
         nextRenewal = new Date(nextMonday);
         nextRenewal.setDate(nextMonday.getDate() + 2);
-        
+
         daysUntilRenewal = Math.ceil((nextRenewal - now) / (1000 * 60 * 60 * 24));
-        
+
         const billingStatus = driver.billing_status || 'active';
         if (billingStatus === 'overdue') {
           subscriptionStatus = 'overdue';
@@ -6315,7 +6316,7 @@ router.get('/api/drivers/:driverId/complete', async (req, res) => {
       profileImage: driver.profile_image || '',
       registrationDate: driver.createdAt ? new Date(driver.createdAt).toISOString() : null,
       lastActivity: driver.lastLogin ? new Date(driver.lastLogin).toISOString() : null,
-      
+
       // Status de aprovação
       approvalStatus: driver.approved ? 'approved' : (driver.licenseImage ? 'pending' : 'not_submitted'),
       approved: driver.approved || false,
@@ -6327,7 +6328,7 @@ router.get('/api/drivers/:driverId/complete', async (req, res) => {
         vehicle: driverCar ? 'uploaded' : 'missing',
         verified: driver.approved || false
       },
-      
+
       // Plano e assinatura
       plan: {
         type: planType,
@@ -6341,7 +6342,7 @@ router.get('/api/drivers/:driverId/complete', async (req, res) => {
         daysUntilRenewal,
         billingStatus: driver.billing_status || 'active'
       },
-      
+
       // Veículo
       vehicle: driverCar ? {
         make: driverCar.carMake || '',
@@ -6352,7 +6353,7 @@ router.get('/api/drivers/:driverId/complete', async (req, res) => {
         year: driverCar.carYear || '',
         image: driverCar.carImage || null
       } : null,
-      
+
       // Estatísticas
       stats: {
         totalTrips: driverBookings.length,
@@ -6363,7 +6364,7 @@ router.get('/api/drivers/:driverId/complete', async (req, res) => {
         walletBalance: parseFloat(driver.walletBalance || 0).toFixed(2),
         totalWithdrawals: 0 // TODO: calcular de histórico de saques
       },
-      
+
       // Histórico de pagamentos
       paymentHistory: subscriptionPayments.map(p => ({
         id: p.id || '',
@@ -6373,13 +6374,13 @@ router.get('/api/drivers/:driverId/complete', async (req, res) => {
         timestamp: p.timestamp || null,
         method: p.method || 'unknown'
       })),
-      
+
       // Status online
       online: {
         isOnline: driver.driverActiveStatus || false,
         lastSeen: driver.lastLocationUpdate ? new Date(driver.lastLocationUpdate).toISOString() : null
       },
-      
+
       // Status geral
       status: driver.suspended ? 'suspended' : (driver.approved ? 'active' : 'pending'),
       suspended: driver.suspended || false,

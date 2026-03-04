@@ -1,6 +1,6 @@
 import Logger from '../utils/Logger';
 import React, { useState, useEffect } from 'react';
-import { View, Text, FlatList, StyleSheet, TouchableOpacity, Image, Dimensions, Modal, Linking, Alert, Animated, TouchableWithoutFeedback,Platform } from 'react-native';
+import { View, Text, FlatList, StyleSheet, TouchableOpacity, Image, Dimensions, Modal, Linking, Alert, Animated, TouchableWithoutFeedback, Platform } from 'react-native';
 import { colors } from '../common/theme';
 
 // Importar i18n com fallback para compatibilidade
@@ -102,15 +102,15 @@ export default function RideList(props) {
     }
 
     const onAlert = (item) => {
-        if(item.status==="COMPLETE") Alert.alert(t('alert'), t('booking_is') + t('COMPLETE') + "." + t('not_call'));
-        if(item.status==="CANCELLED") Alert.alert(t('alert'), t('booking_is') + t('CANCELLED') + "." + t('not_call'));
-        if(item.status==="PAID") Alert.alert(t('alert'), t('booking_is') + t('PAID') + "." + t('not_call'));
+        if (item.status === "COMPLETE") Alert.alert(t('alert'), t('booking_is') + t('COMPLETE') + "." + t('not_call'));
+        if (item.status === "CANCELLED") Alert.alert(t('alert'), t('booking_is') + t('CANCELLED') + "." + t('not_call'));
+        if (item.status === "PAID") Alert.alert(t('alert'), t('booking_is') + t('PAID') + "." + t('not_call'));
     }
-    
+
     const onChatAlert = (item) => {
-       if(item.status==="COMPLETE") Alert.alert(t('alert'), t('booking_is') + t('COMPLETE') + "." + t('not_chat'));
-       if(item.status==="CANCELLED") Alert.alert(t('alert'), t('booking_is') + t('CANCELLED') + "." + t('not_chat'));
-       if(item.status==="PAID") Alert.alert(t('alert'), t('booking_is') + t('PAID') + "." + t('not_chat'));
+        if (item.status === "COMPLETE") Alert.alert(t('alert'), t('booking_is') + t('COMPLETE') + "." + t('not_chat'));
+        if (item.status === "CANCELLED") Alert.alert(t('alert'), t('booking_is') + t('CANCELLED') + "." + t('not_chat'));
+        if (item.status === "PAID") Alert.alert(t('alert'), t('booking_is') + t('PAID') + "." + t('not_chat'));
     }
 
     const goHome = () => {
@@ -122,8 +122,8 @@ export default function RideList(props) {
 
         return (
             <View style={styles.rideContainer}>
-                <TouchableOpacity 
-                    activeOpacity={0.8} 
+                <TouchableOpacity
+                    activeOpacity={0.8}
                     onPress={() => setExpandedItem(isExpanded ? null : index)}
                     style={styles.rideHeader}
                 >
@@ -131,7 +131,7 @@ export default function RideList(props) {
                         <View style={styles.locationRow}>
                             <Ionicons name="location" size={20} color={colors.BALANCE_GREEN} />
                             <Text style={styles.locationText} numberOfLines={1}>{item.pickup.add}</Text>
-                                </View>
+                        </View>
                         <View style={styles.locationRow}>
                             <Ionicons name="location" size={20} color={colors.BUTTON_ORANGE} />
                             <Text style={styles.locationText} numberOfLines={1}>{item.drop.add}</Text>
@@ -145,10 +145,10 @@ export default function RideList(props) {
                             {moment(item.startTime).format('DD/MM/YYYY')}
                         </Text>
                     </View>
-                    <Ionicons 
-                        name={isExpanded ? "chevron-up" : "chevron-down"} 
-                        size={24} 
-                        color={MAIN_COLOR} 
+                    <Ionicons
+                        name={isExpanded ? "chevron-up" : "chevron-down"}
+                        size={24}
+                        color={MAIN_COLOR}
                     />
                 </TouchableOpacity>
 
@@ -157,11 +157,6 @@ export default function RideList(props) {
                         <View style={styles.mapContainer}>
                             <MapView
                                 style={styles.map}
-                    <UrlTile
-                        urlTemplate="https://a.tile.openstreetmap.org/{z}/{x}/{y}.png"
-                        maximumZ={19}
-                        flipY={false}
-                    />
                                 initialRegion={{
                                     latitude: item.pickup.lat,
                                     longitude: item.pickup.lng,
@@ -169,6 +164,11 @@ export default function RideList(props) {
                                     longitudeDelta: 0.0421,
                                 }}
                             >
+                                <UrlTile
+                                    urlTemplate="https://a.tile.openstreetmap.org/{z}/{x}/{y}.png"
+                                    maximumZ={19}
+                                    flipY={false}
+                                />
                                 <Marker
                                     coordinate={{ latitude: item.pickup.lat, longitude: item.pickup.lng }}
                                     title={item.pickup.add}
@@ -193,9 +193,9 @@ export default function RideList(props) {
 
                         <View style={styles.driverInfo}>
                             <View style={styles.driverHeader}>
-                                                <Avatar
-                                                    size="medium"
-                                                    rounded
+                                <Avatar
+                                    size="medium"
+                                    rounded
                                     source={item.driver_image ? { uri: item.driver_image } : require('../../assets/images/profilePic.png')}
                                 />
                                 <View style={styles.driverDetails}>
@@ -213,43 +213,43 @@ export default function RideList(props) {
                         </View>
                     </View>
                 )}
-                </View>
+            </View>
         );
     }
 
     return (
         <View style={styles.container}>
             <View style={styles.tabContainer}>
-                <TouchableOpacity 
-                    style={[styles.tab, tabIndex === 0 && styles.activeTab]} 
+                <TouchableOpacity
+                    style={[styles.tab, tabIndex === 0 && styles.activeTab]}
                     onPress={() => setTabIndex(0)}
                 >
                     <Text style={[styles.tabText, tabIndex === 0 && styles.activeTabText]}>
                         {t('active_booking')}
                     </Text>
                 </TouchableOpacity>
-                <TouchableOpacity 
-                    style={[styles.tab, tabIndex === 1 && styles.activeTab]} 
+                <TouchableOpacity
+                    style={[styles.tab, tabIndex === 1 && styles.activeTab]}
                     onPress={() => setTabIndex(1)}
                 >
                     <Text style={[styles.tabText, tabIndex === 1 && styles.activeTabText]}>
                         {t('COMPLETE')}
                     </Text>
                 </TouchableOpacity>
-                <TouchableOpacity 
-                    style={[styles.tab, tabIndex === 2 && styles.activeTab]} 
+                <TouchableOpacity
+                    style={[styles.tab, tabIndex === 2 && styles.activeTab]}
                     onPress={() => setTabIndex(2)}
                 >
                     <Text style={[styles.tabText, tabIndex === 2 && styles.activeTabText]}>
                         {t('CANCELLED')}
                     </Text>
                 </TouchableOpacity>
-                                    </View>
+            </View>
 
             <FlatList
-                data={tabIndex === 0 
+                data={tabIndex === 0
                     ? props.data.filter(item => !(item.status === 'CANCELLED' || item.status === 'COMPLETE'))
-                    : tabIndex === 1 
+                    : tabIndex === 1
                         ? props.data.filter(item => item.status === 'COMPLETE')
                         : props.data.filter(item => item.status === 'CANCELLED')
                 }

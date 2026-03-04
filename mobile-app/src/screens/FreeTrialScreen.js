@@ -149,7 +149,7 @@ const FreeTrialScreen = ({ navigation, route }) => {
       
       <Text style={styles.statusDescription}>
         {trialData.is_active 
-          ? 'Você está aproveitando o período grátis do Leaf App!'
+          ? 'Você está aproveitando o período grátis da Leaf App!'
           : 'Seu período grátis expirou. Ative um plano para continuar.'
         }
       </Text>
@@ -284,7 +284,7 @@ const FreeTrialScreen = ({ navigation, route }) => {
       <View style={styles.benefitItem}>
         <Icon name="check" type="material" color="#27ae60" size={20} />
         <Text style={styles.benefitText}>
-          Acesso completo ao Leaf App sem cobrança
+          Acesso completo à Leaf App sem cobrança
         </Text>
       </View>
       
@@ -326,7 +326,7 @@ const FreeTrialScreen = ({ navigation, route }) => {
         <Icon name="schedule" type="material" color="#e74c3c" size={48} />
         <Text style={styles.expiredTitle}>Período Grátis Expirado</Text>
         <Text style={styles.expiredDescription}>
-          Seu período grátis terminou. Para continuar usando o Leaf App, 
+          Seu período grátis terminou. Para continuar usando a Leaf App, 
           você precisa ativar um plano semanal.
         </Text>
         

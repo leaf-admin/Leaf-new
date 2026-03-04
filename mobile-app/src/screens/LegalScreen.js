@@ -88,11 +88,11 @@ const LegalScreen = ({ navigation, route }) => {
       <View style={styles.legalCard}>
         <Text style={styles.legalText}>
           <Text style={styles.boldText}>1. Aceitação dos Termos</Text>{'\n\n'}
-          Ao usar o aplicativo Leaf, você concorda com estes Termos de Uso. 
+          Ao usar o aplicativa Leaf, você concorda com estes Termos de Uso. 
           Se você não concordar com qualquer parte destes termos, não deve usar nossos serviços.{'\n\n'}
           
           <Text style={styles.boldText}>2. Descrição do Serviço</Text>{'\n\n'}
-          O Leaf é uma plataforma de mobilidade urbana que conecta passageiros a motoristas parceiros. 
+          A Leaf é uma plataforma de mobilidade urbana que conecta passageiros a motoristas parceiros. 
           Fornecemos serviços de transporte, processamento de pagamentos e comunicação entre usuários.{'\n\n'}
           
           <Text style={styles.boldText}>3. Elegibilidade</Text>{'\n\n'}
@@ -116,7 +116,7 @@ const LegalScreen = ({ navigation, route }) => {
           Consulte nossa política completa para mais detalhes.{'\n\n'}
           
           <Text style={styles.boldText}>8. Limitação de Responsabilidade</Text>{'\n\n'}
-          O Leaf não se responsabiliza por danos indiretos, incidentais ou consequenciais 
+          A Leaf não se responsabiliza por danos indiretos, incidentais ou consequenciais 
           decorrentes do uso de nossos serviços.{'\n\n'}
           
           <Text style={styles.boldText}>9. Modificações</Text>{'\n\n'}

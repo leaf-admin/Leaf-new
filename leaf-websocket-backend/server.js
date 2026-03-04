@@ -84,6 +84,8 @@ const validationService = require('./services/validation-service');
 const idempotencyService = require('./services/idempotency-service');
 const ConnectionCleanupService = require('./services/connection-cleanup-service');
 const vehicleLockManager = require('./services/vehicle-lock-manager');
+const FCMService = require('./services/fcm-service');
+const fcmService = new FCMService(); // Singleton local ao worker
 // =========================================================================================
 
 // ==================== IMPORTAÇÕES REFATORAÇÃO: COMMANDS E LISTENERS ====================
@@ -178,8 +180,13 @@ const allowedOrigins = [
     // Desenvolvimento local
     'http://localhost:3000',
     'http://localhost:3001',
+    'http://localhost:3002',
     'http://127.0.0.1:3000',
     'http://127.0.0.1:3001',
+    // IPs Locais do desenvolvedor
+    'http://192.168.0.33:8081',
+    'http://192.168.0.33:3000',
+    'http://192.168.0.33:3001',
     // Capacitor/React Native (não tem origin tradicional)
     'capacitor://localhost',
     'ionic://localhost',
@@ -191,10 +198,11 @@ const corsOptions = {
     origin: (origin, callback) => {
         // ✅ React Native e apps nativos não enviam origin (é null/undefined)
         // Permitir se não houver origin (React Native) ou se estiver na whitelist
-        if (!origin || allowedOrigins.includes(origin)) {
+        // Também permite qualquer IP da rede local 192.168.*.*
+        if (!origin || allowedOrigins.includes(origin) || origin.endsWith('ngrok-free.app') || origin.startsWith('http://192.168.')) {
             callback(null, true);
         } else {
-            logStructured('warn', 'CORS bloqueado', { service: 'server', origin, path: req.path });
+            logStructured('warn', 'CORS bloqueado', { service: 'server', origin });
             callback(new Error('Não permitido pelo CORS'));
         }
     },
@@ -207,6 +215,14 @@ const corsOptions = {
 app.use(traceIdExpressMiddleware);
 
 app.use(cors(corsOptions));
+
+// ✅ PROPRIEDADE DE SEGURANÇA: Rate Limiting Global
+if (process.env.NODE_ENV !== 'test') {
+    const { applyRateLimit } = require('./middleware/rateLimiter');
+    app.use(applyRateLimit);
+} else {
+    logStructured('info', 'Rate Limiting desabilitado no ambiente de testes', { service: 'server' });
+}
 
 // ✅ LOG DE DEBUG: Capturar TODAS as requisições (apenas em desenvolvimento)
 if (process.env.NODE_ENV === 'development' || process.env.DEBUG_REQUESTS === 'true') {
@@ -371,6 +387,9 @@ logStructured('info', 'Rotas de Health Check registradas', { service: 'server' }
 // Rotas de App Info
 const appRoutes = require('./routes/app-routes');
 app.use('/api/app', appRoutes);
+
+const geofenceRoutes = require('./routes/geofence-routes');
+app.use('/api/geofence', geofenceRoutes);
 logStructured('info', 'Rotas de App Info registradas', { service: 'server' });
 
 // Rotas de Notificações
@@ -423,43 +442,7 @@ const io = socketIo(server, {
     allowEIO3: true,
     allowEIO4: true, // ✅ Permitir Engine.IO v4
     maxHttpBufferSize: 1e6, // 1MB limit para VPS
-    cors: {
-        origin: (origin, callback) => {
-            // ✅ DEBUG: Log todas as tentativas de conexão (apenas em desenvolvimento)
-            if (process.env.NODE_ENV === 'development' || process.env.DEBUG_WEBSOCKET === 'true') {
-                logStructured('debug', 'Socket.IO CORS - Tentativa de conexão', {
-                    service: 'websocket',
-                    origin: origin || 'null/undefined (app nativo)'
-                });
-            }
-
-            // ✅ React Native e apps nativos não enviam origin (null/undefined) - SEMPRE permitir
-            if (!origin) {
-                if (process.env.NODE_ENV === 'development' || process.env.DEBUG_WEBSOCKET === 'true') {
-                    logStructured('debug', 'Socket.IO CORS - Permitindo conexão sem origin (app nativo)', { service: 'websocket' });
-                }
-                callback(null, true);
-                return;
-            }
-
-            // ✅ TEMPORÁRIO: Permitir qualquer origem para debug
-            if (process.env.NODE_ENV === 'development' || process.env.DEBUG_WEBSOCKET === 'true') {
-                logStructured('debug', 'Socket.IO CORS - Permitindo conexão (modo debug)', { service: 'websocket', origin });
-            }
-            callback(null, true);
-
-            // TODO: Restaurar verificação de whitelist em produção
-            // if (socketIoAllowedOrigins.includes(origin)) {
-            //     callback(null, true);
-            // } else {
-            //     console.warn(`⚠️ Socket.IO CORS bloqueado: ${origin}`);
-            //     callback(new Error('Não permitido pelo CORS'));
-            // }
-        },
-        methods: ["GET", "POST", "OPTIONS"],
-        credentials: false,
-        allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With"]
-    },
+    cors: process.env.NODE_ENV === 'test' ? { origin: true } : corsOptions, // ✅ Empregando a WhiteList global nos ambientes reais
     // Configurações otimizadas para VPS
     compression: false, // Desabilitar compressão para reduzir overhead
     serveClient: false, // Desabilitar cliente para economizar recursos
@@ -682,7 +665,7 @@ logStructured('info', 'Serviço de Notificação de Demanda inicializado', { ser
 
 // ==================== DASHBOARD WEBSOCKET SERVICE ====================
 const DashboardWebSocketService = require('./services/dashboard-websocket');
-const dashboardWebSocketService = new DashboardWebSocketService(io);
+const dashboardWebSocketService = new DashboardWebSocketService(io, redisPool.getConnection());
 logStructured('info', 'Dashboard WebSocket Service inicializado', { service: 'server' });
 // ======================================================================
 
@@ -965,6 +948,9 @@ const initializeWorkers = async () => {
         // Importar listeners pesados
         const notifyDrivers = require('./listeners/onRideRequested.notifyDrivers');
         const sendPush = require('./listeners/onRideAccepted.sendPush');
+        const notifyPassenger = require('./listeners/onRideAccepted.notifyPassenger');
+        const notifyDriver = require('./listeners/onRideAccepted.notifyDriver');
+        const startTripTimer = require('./listeners/onRideStarted.startTripTimer');
 
         // Registrar listeners pesados no WorkerManager
         // Nota: io já está exposto globalmente (linha ~507)
@@ -976,9 +962,27 @@ const initializeWorkers = async () => {
         });
 
         workerManager.registerListener(EVENT_TYPES.RIDE_ACCEPTED, async (event) => {
-            // sendPush precisa de io, usar global.io
             const ioInstance = global.io || io;
+            await notifyPassenger(event, ioInstance);
+            await notifyDriver(event, ioInstance);
             await sendPush(event, ioInstance);
+        });
+
+        workerManager.registerListener(EVENT_TYPES.RIDE_STARTED, async (event) => {
+            const ioInstance = global.io || io;
+            await startTripTimer(event, ioInstance);
+        });
+
+        workerManager.registerListener(EVENT_TYPES.RIDE_CANCELED, async (event) => {
+            const bookingId = event.bookingId || event.data?.bookingId;
+            if (!bookingId) {
+                logStructured('warn', 'RIDE_CANCELED listener recebeu evento sem bookingId', { event });
+                return;
+            }
+            const ioInstance = global.io || io;
+            const GradualRadiusExpander = require('./services/gradual-radius-expander');
+            const expander = new GradualRadiusExpander(ioInstance);
+            await expander.stopSearch(bookingId);
         });
 
         // Inicializar WorkerManager
@@ -1165,6 +1169,85 @@ io.on('connection', async (socket) => {
         workerId: cluster.worker?.id || 'main'
     });
 
+    // ==================== NOVOS EVENTOS - NOTIFICAÇÕES FCM ====================
+    // REGISTRAR IMEDIATAMENTE PARA NÃO PERDER EVENTOS DO CLIENTE
+    socket.on('registerFCMToken', async (data) => {
+        try {
+            logStructured('info', `Token FCM registrado`, { service: 'registerFCMToken', userId: data.userId, userType: data.userType, platform: data.platform });
+
+            const { userId, userType, fcmToken, platform, timestamp } = data;
+
+            if (!fcmToken) {
+                logStructured('error', `Token FCM não fornecido`, { service: 'registerFCMToken' });
+                socket.emit('fcmTokenError', { error: 'Token FCM é obrigatório' });
+                return;
+            }
+
+            const effectiveUserId = userId || `temp_${socket.id}`;
+            const effectiveUserType = userType || 'customer';
+
+            if (!userId) {
+                logStructured('warn', `Token FCM registrado sem userId, usando temporário`, { service: 'registerFCMToken', effectiveUserId });
+            }
+
+            const redis = redisPool.getConnection();
+
+            if (effectiveUserType === 'driver') {
+                await redis.hset(`driver:${effectiveUserId}`, {
+                    fcmToken: fcmToken,
+                    fcmTokenUpdated: new Date().toISOString(),
+                    fcmPlatform: platform || 'unknown',
+                    isTemporary: (!userId).toString()
+                });
+            } else {
+                await redis.hset(`user:${effectiveUserId}`, {
+                    fcmToken: fcmToken,
+                    fcmTokenUpdated: new Date().toISOString(),
+                    fcmPlatform: platform || 'unknown',
+                    isTemporary: (!userId).toString()
+                });
+            }
+
+            try {
+                if (!fcmService.isServiceAvailable()) {
+                    logStructured('info', 'Inicializando FCMService para registro de token', { service: 'websocket' });
+                    fcmService.setRedis(redis);
+                    await fcmService.initialize();
+                }
+
+                const saved = await fcmService.saveUserFCMToken(effectiveUserId, effectiveUserType, fcmToken, {
+                    platform,
+                    isTemporary: !userId,
+                    socketId: socket.id
+                });
+            } catch (fcmError) {
+                logStructured('error', 'Erro ao salvar token no FCMService', { service: 'websocket', operation: 'registerFCMToken', error: fcmError.message });
+            }
+
+            socket.emit('fcmTokenRegistered', {
+                success: true,
+                userId: effectiveUserId,
+                message: 'Token FCM registrado com sucesso'
+            });
+        } catch (error) {
+            logError(error, 'Erro ao registrar token FCM', { service: 'registerFCMToken', userId: data.userId });
+            socket.emit('fcmTokenError', { error: 'Erro interno do servidor: ' + error.message });
+        }
+    });
+
+    socket.on('unregisterFCMToken', async (data) => {
+        try {
+            const { userId, fcmToken } = data;
+            if (!userId || !fcmToken) return;
+            const redis = redisPool.getConnection();
+            await fcmService.removeUserFCMToken(userId, fcmToken);
+            socket.emit('fcmTokenUnregistered', { success: true });
+        } catch (error) {
+            logError(error, 'Erro ao desregistrar token FCM', { service: 'unregisterFCMToken' });
+        }
+    });
+    // ==========================================================================
+
     // ✅ Registrar handler de authenticate IMEDIATAMENTE após conexão
     if (process.env.NODE_ENV === 'development' || process.env.DEBUG_WEBSOCKET === 'true') {
         logStructured('debug', 'Registrando handlers para socket', {
@@ -1182,7 +1265,42 @@ io.on('connection', async (socket) => {
             socketId: socket.id,
             hasData: !!data
         });
+
         try {
+            // Verificar token de autenticação (JWT)
+            const isProd = process.env.NODE_ENV === 'production';
+            let verifiedUid = null;
+
+            if (isProd || data.token) {
+                if (!data.token) {
+                    socket.emit('authentication_error', { message: 'Token de autenticação ausente' });
+                    socket.disconnect();
+                    return;
+                }
+
+                try {
+                    const decodedToken = await admin.auth().verifyIdToken(data.token);
+                    verifiedUid = decodedToken.uid;
+                } catch (authError) {
+                    logStructured('warn', 'Token de autenticação inválido ou expirado', { error: authError.message });
+                    socket.emit('authentication_error', { message: 'Token inválido ou expirado' });
+                    socket.disconnect();
+                    return;
+                }
+            } else {
+                // Modo dev/teste sem token
+                verifiedUid = data.uid;
+
+                if (!verifiedUid) {
+                    socket.emit('authentication_error', { message: 'ID de usuário (uid) ausente' });
+                    socket.disconnect();
+                    return;
+                }
+            }
+
+            // A partir daqui, usar SOMENTE o uid validado pelo token
+            const authUserId = verifiedUid;
+
             // ✅ Registrar conexão no monitor centralizado (não bloquear se falhar)
             const workerId = process.env.NODE_ENV === 'production'
                 ? `worker-${cluster.worker?.id || 'main'}`
@@ -1190,24 +1308,24 @@ io.on('connection', async (socket) => {
             socket.workerId = workerId;
 
             try {
-                await connectionMonitor.registerConnection(socket.id, data.uid, data.userType || data.usertype || 'unknown', workerId);
+                await connectionMonitor.registerConnection(socket.id, authUserId, data.userType || data.usertype || 'unknown', workerId);
             } catch (monitorError) {
                 logStructured('error', 'Erro ao registrar no connectionMonitor (continuando)', {
                     service: 'websocket',
                     socketId: socket.id,
-                    userId: data.uid,
+                    userId: authUserId,
                     error: monitorError.message
                 });
             }
 
             // Armazenar informações do usuário no socket
-            socket.userId = data.uid;
+            socket.userId = authUserId;
             socket.userType = data.userType || data.usertype; // Armazenar tipo: driver ou customer/passenger
 
             logStructured('info', 'Usuário autenticado', {
                 service: 'websocket',
                 socketId: socket.id,
-                userId: data.uid,
+                userId: authUserId,
                 userType: socket.userType
             });
 
@@ -1221,7 +1339,7 @@ io.on('connection', async (socket) => {
             const SESSION_SIMULTANEA_BLOCKED = process.env.ALLOW_MULTIPLE_SESSIONS !== 'true'; // Permitir em testes
 
             // Verificar se usuário já está conectado em outro socket
-            const existingSocket = io.connectedUsers.get(data.uid);
+            const existingSocket = io.connectedUsers.get(authUserId);
             if (existingSocket && existingSocket.id !== socket.id && SESSION_SIMULTANEA_BLOCKED) {
                 // Desconectar sessão anterior
                 existingSocket.emit('sessionTerminated', {
@@ -1231,29 +1349,29 @@ io.on('connection', async (socket) => {
                 existingSocket.disconnect();
                 logStructured('info', 'Desconectando sessão anterior', {
                     service: 'websocket',
-                    userId: data.uid,
+                    userId: authUserId,
                     previousSocketId: existingSocket.id,
                     newSocketId: socket.id
                 });
             } else if (existingSocket && existingSocket.id !== socket.id) {
                 logStructured('warn', 'Múltiplas sessões permitidas (modo teste)', {
                     service: 'websocket',
-                    userId: data.uid,
+                    userId: authUserId,
                     socketId: socket.id
                 });
             }
 
             // Registrar nova conexão
-            io.connectedUsers.set(data.uid, socket);
+            io.connectedUsers.set(authUserId, socket);
 
             // ✅ Atualizar tipo de conexão no monitor centralizado
             try {
-                await connectionMonitor.updateConnectionType(socket.id, data.uid, socket.userType);
+                await connectionMonitor.updateConnectionType(socket.id, authUserId, socket.userType);
             } catch (monitorError) {
                 logStructured('error', 'Erro ao atualizar connectionMonitor (continuando)', {
                     service: 'websocket',
                     socketId: socket.id,
-                    userId: data.uid,
+                    userId: authUserId,
                     error: monitorError.message
                 });
                 // Continuar mesmo com erro - não bloquear autenticação
@@ -1262,18 +1380,18 @@ io.on('connection', async (socket) => {
             // Se for driver, adicionar ao room de drivers E room específico
             if (socket.userType === 'driver') {
                 socket.join('drivers_room');
-                socket.join(`driver_${data.uid}`); // ✅ Room específico para notificações diretas (usado pelo DriverNotificationDispatcher)
+                socket.join(`driver_${authUserId}`); // ✅ Room específico para notificações diretas (usado pelo DriverNotificationDispatcher)
                 logStructured('info', 'Driver adicionado aos rooms', {
                     service: 'websocket',
-                    userId: data.uid,
+                    userId: authUserId,
                     socketId: socket.id
                 });
             } else if (socket.userType === 'passenger' || socket.userType === 'customer') {
                 socket.join('customers_room');
-                socket.join(`customer_${data.uid}`); // ✅ Room específico para notificações diretas
+                socket.join(`customer_${authUserId}`); // ✅ Room específico para notificações diretas
                 logStructured('info', 'Customer adicionado aos rooms', {
                     service: 'websocket',
-                    userId: data.uid,
+                    userId: authUserId,
                     socketId: socket.id
                 });
             }
@@ -1285,10 +1403,10 @@ io.on('connection', async (socket) => {
                 await redisPool.ensureConnection();
                 const redis = redisPool.getConnection();
                 const tempUserId = `temp_${socket.id}`;
-                const FCMService = require('./services/fcm-service');
-                const fcmService = new FCMService();
 
+                // ✅ Usar singleton global
                 if (!fcmService.isServiceAvailable()) {
+                    fcmService.setRedis(redis);
                     await fcmService.initialize();
                 }
 
@@ -1303,55 +1421,55 @@ io.on('connection', async (socket) => {
 
                 // 2. Se não tem token temporário, verificar se já tem token registrado com userId real
                 if (!fcmToken) {
-                    fcmToken = await redis.hget(`user:${data.uid}`, 'fcmToken');
+                    fcmToken = await redis.hget(`user:${authUserId}`, 'fcmToken');
                     if (!fcmToken && socket.userType === 'driver') {
-                        fcmToken = await redis.hget(`driver:${data.uid}`, 'fcmToken');
+                        fcmToken = await redis.hget(`driver:${authUserId}`, 'fcmToken');
                     }
                 }
 
                 // 3. Se encontrou token (temporário ou existente), atualizar/registrar com userId real
                 if (fcmToken) {
                     const platform = await redis.hget(`user:${tempUserId}`, 'fcmPlatform') ||
-                        await redis.hget(`user:${data.uid}`, 'fcmPlatform') ||
+                        await redis.hget(`user:${authUserId}`, 'fcmPlatform') ||
                         await redis.hget(`driver:${tempUserId}`, 'fcmPlatform') ||
-                        await redis.hget(`driver:${data.uid}`, 'fcmPlatform') ||
+                        await redis.hget(`driver:${authUserId}`, 'fcmPlatform') ||
                         'unknown';
 
                     logStructured('info', 'Gerando token FCM personalizado para usuário autenticado', {
                         service: 'server',
-                        userId: data.uid,
+                        userId: authUserId,
                         userType: socket.userType,
                         platform
                     });
 
                     // Salvar token com userId real (substituindo temporário se existir)
                     if (socket.userType === 'driver') {
-                        await redis.hset(`driver:${data.uid}`, {
+                        await redis.hset(`driver:${authUserId}`, {
                             fcmToken: fcmToken,
                             fcmTokenUpdated: new Date().toISOString(),
                             fcmPlatform: platform,
                             isTemporary: 'false',
                             authenticatedAt: new Date().toISOString(),
-                            userId: data.uid
+                            userId: authUserId
                         });
                     } else {
-                        await redis.hset(`user:${data.uid}`, {
+                        await redis.hset(`user:${authUserId}`, {
                             fcmToken: fcmToken,
                             fcmTokenUpdated: new Date().toISOString(),
                             fcmPlatform: platform,
                             isTemporary: 'false',
                             authenticatedAt: new Date().toISOString(),
-                            userId: data.uid
+                            userId: authUserId
                         });
                     }
 
                     // Salvar no FCMService com userId real (método oficial)
-                    // Isso cria/atualiza o token em fcm_tokens:${data.uid}
-                    await fcmService.saveUserFCMToken(data.uid, socket.userType, fcmToken, {
+                    // Isso cria/atualiza o token em fcm_tokens:${authUserId}
+                    await fcmService.saveUserFCMToken(authUserId, socket.userType, fcmToken, {
                         platform,
                         authenticated: true,
                         authenticatedAt: new Date().toISOString(),
-                        userId: data.uid,
+                        userId: authUserId,
                         userType: socket.userType
                     });
 
@@ -1369,14 +1487,14 @@ io.on('connection', async (socket) => {
 
                         logStructured('info', 'Token FCM temporário migrado para userId real', {
                             service: 'server',
-                            userId: data.uid,
+                            userId: authUserId,
                             tempUserId,
                             action: 'migrate_token'
                         });
                     } else {
                         logStructured('info', 'Token FCM atualizado para usuário autenticado', {
                             service: 'server',
-                            userId: data.uid,
+                            userId: authUserId,
                             action: 'update_token'
                         });
                     }
@@ -1384,21 +1502,21 @@ io.on('connection', async (socket) => {
                     // Emitir evento confirmando token atualizado
                     socket.emit('fcmTokenUpdated', {
                         success: true,
-                        userId: data.uid,
+                        userId: authUserId,
                         message: 'Token FCM vinculado ao usuário autenticado',
                         token: fcmToken.substring(0, 20) + '...' // Apenas preview por segurança
                     });
                 } else {
                     logStructured('info', 'Nenhum token FCM encontrado - será registrado quando o app solicitar', {
                         service: 'websocket',
-                        userId: data.uid,
+                        userId: authUserId,
                         userType: socket.userType
                     });
                 }
             } catch (updateError) {
                 logStructured('error', 'Erro ao atualizar token FCM para usuário autenticado', {
                     service: 'websocket',
-                    userId: data.uid,
+                    userId: authUserId,
                     error: updateError.message,
                     stack: updateError.stack
                 });
@@ -1407,8 +1525,8 @@ io.on('connection', async (socket) => {
 
             // Preparar payload de resposta
             const authResponse = {
-                uid: data.uid,
-                userId: data.uid, // ✅ Adicionar userId para compatibilidade
+                uid: authUserId,
+                userId: authUserId, // ✅ Adicionar userId para compatibilidade
                 success: true,
                 userType: socket.userType || data.userType || data.usertype, // ✅ Incluir userType que o app espera
                 socketId: socket.id // ✅ Adicionar socketId para debug
@@ -1421,13 +1539,13 @@ io.on('connection', async (socket) => {
             }
 
             // ✅ GARANTIR que userId e userType estão setados no socket
-            socket.userId = data.uid;
+            socket.userId = authUserId;
             socket.userType = socket.userType || data.userType || data.usertype;
 
             logStructured('info', 'Autenticação confirmada', {
                 service: 'websocket',
                 socketId: socket.id,
-                userId: data.uid,
+                userId: authUserId,
                 userType: socket.userType
             });
 
@@ -1435,7 +1553,7 @@ io.on('connection', async (socket) => {
                 logStructured('debug', 'Enviando evento authenticated', {
                     service: 'websocket',
                     socketId: socket.id,
-                    userId: data.uid,
+                    userId: authUserId,
                     payload: authResponse
                 });
             }
@@ -1445,13 +1563,13 @@ io.on('connection', async (socket) => {
             logStructured('info', 'Evento authenticated emitido', {
                 service: 'websocket',
                 socketId: socket.id,
-                userId: data.uid
+                userId: authUserId
             });
         } catch (error) {
             logStructured('error', 'Erro na autenticação', {
                 service: 'websocket',
                 socketId: socket.id,
-                userId: data.uid,
+                userId: data.uid || 'unknown',
                 error: error.message,
                 stack: error.stack
             });
@@ -1464,12 +1582,13 @@ io.on('connection', async (socket) => {
     // Estes handlers devem estar prontos antes de qualquer evento chegar
 
     // 1. Disconnect (crítico - deve estar sempre pronto)
-    socket.on('disconnect', async () => {
+    socket.on('disconnect', async (reason) => {
         logStructured('info', 'Desconexão WebSocket', {
             service: 'websocket',
             socketId: socket.id,
             userId: socket.userId,
             userType: socket.userType,
+            reason: reason, // ✅ Adicionado: motivo da desconexão
             totalConnections: io.engine.clientsCount
         });
 
@@ -2450,6 +2569,7 @@ io.on('connection', async (socket) => {
 
                 // ✅ NOVO: Rate Limiting
                 const driverId = socket.userId || socket.id;
+                const correlationId = data?.correlationId || data?.bookingId;
                 const rateLimitCheck = await rateLimiterService.checkRateLimit(driverId, 'acceptRide');
 
                 if (!rateLimitCheck.allowed) {
@@ -2563,6 +2683,7 @@ io.on('connection', async (socket) => {
                 // ✅ FASE 1.3: Criar span para Command
                 const { trace: otelTrace } = require('@opentelemetry/api');
                 const activeSpan = otelTrace.getActiveSpan();
+                const tracer = getTracer();
                 const commandSpan = createCommandSpan(tracer, 'accept_ride', activeSpan, {
                     'command.driver_id': driverId,
                     'command.booking_id': bookingIdToUse,
@@ -2684,11 +2805,7 @@ io.on('connection', async (socket) => {
                     // Não bloquear aceitação se persistência falhar
                 }
 
-                // FASE 10: Registrar fim de match e aceitação para métricas
-                await metricsCollector.recordMatchEnd(bookingIdToUse, driverId, Date.now());
-                await metricsCollector.recordDriverAcceptance(bookingIdToUse, driverId, Date.now());
-
-                // Preparar resposta de sucesso para cache
+                // Preparar resposta de sucesso para driver
                 const acceptRideResponse = {
                     success: true,
                     bookingId: bookingIdToUse,
@@ -2697,13 +2814,71 @@ io.on('connection', async (socket) => {
                     timestamp: new Date().toISOString()
                 };
 
-                // ✅ NOVO: Cachear resultado para idempotency
+                // ✅ Emitir confirmação IMEDIATAMENTE para o motorista que solicitou o aceite
+                socket.emit('rideAccepted', acceptRideResponse);
+
+                // ✅ NOVO: Ativar corrida em bookings:active
+                try {
+                    const bookingData = await redis.hgetall(`booking:${bookingIdToUse}`);
+                    if (bookingData && Object.keys(bookingData).length > 0) {
+                        // Preparar dados para o Hash de corridas ativas (mantendo compatibilidade legada)
+                        const activeBookingData = {
+                            ...bookingData,
+                            status: 'ACCEPTED',
+                            driverId
+                        };
+
+                        // Mapeamento para compatibilidade com handlers antigos (changeDestination, etc)
+                        try {
+                            if (bookingData.pickupLocation) activeBookingData.pickup = JSON.parse(bookingData.pickupLocation);
+                            if (bookingData.destinationLocation) activeBookingData.drop = JSON.parse(bookingData.destinationLocation);
+                            if (bookingData.estimatedFare) activeBookingData.estimate = parseFloat(bookingData.estimatedFare);
+                        } catch (e) {
+                            logger.warn(`⚠️ [acceptRide] Erro ao parsear campos para bookings:active: ${e.message}`);
+                        }
+
+                        const bookingDataStr = JSON.stringify(activeBookingData);
+                        console.log(`🔍 [DEBUG] acceptRide: hset bookings:active for ${bookingIdToUse}. Data: ${bookingDataStr.substring(0, 100)}...`);
+
+                        // Validar tipo de dado no Redis antes de inserir
+                        const keyType = await redis.type('bookings:active');
+                        if (keyType !== 'hash' && keyType !== 'none') {
+                            console.warn(`⚠️ [DEBUG] acceptRide: bookings:active is NOT a hash, it is ${keyType}. Fixing...`);
+                            await redis.del('bookings:active');
+                        }
+
+                        await redis.hset('bookings:active', bookingIdToUse, bookingDataStr);
+                        console.log(`🔍 [DEBUG] acceptRide: hset success for ${bookingIdToUse}`);
+
+                        // ✅ Sincronizar activeBookings
+                        if (io.activeBookings) {
+                            io.activeBookings.set(bookingIdToUse, {
+                                ...io.activeBookings.get(bookingIdToUse),
+                                ...activeBookingData
+                            });
+                        }
+                    } else {
+                        console.log(`⚠️ [DEBUG] acceptRide: bookingData empty for ${bookingIdToUse}`);
+                    }
+                } catch (e) {
+                    console.error(`❌ [DEBUG] acceptRide: Error activating ride (hset): ${e.message}`, e.stack);
+                    logError(e, { context: 'Erro ao ativar corrida em bookings:active (hset)', bookingId: bookingIdToUse });
+                }
+
+                // ✅ Cachear resultado para idempotency
                 await idempotencyService.cacheResult(idempotencyKey, acceptRideResponse);
 
-                // ✅ NOTIFICAÇÃO JÁ FOI ENVIADA PELOS LISTENERS via EventBus
-                // Listeners emitem para: io.to('driver_${driverId}') e io.to('customer_${customerId}')
+                try {
+                    // FASE 10: Registrar fim de match e aceitação para métricas
+                    await metricsCollector.recordMatchEnd(bookingIdToUse, driverId, Date.now());
+                    await metricsCollector.recordDriverAcceptance(bookingIdToUse, driverId, Date.now());
+                } catch (metErr) {
+                    logger.error(`❌ [acceptRide] Erro em métricas: ${metErr.message}`);
+                }
+
+                // ✅ NOTIFICAÇÃO JÁ FOI ENVIADA PARA PASSAGEIRO PELOS LISTENERS via EventBus
                 const totalLatency = Date.now() - startTime;
-                logStructured('info', 'acceptRide concluído com sucesso', {
+                logStructured('info', 'acceptRide concluído com sucesso (Emissão Adiantada)', {
                     driverId,
                     bookingId: bookingIdToUse,
                     eventType: 'acceptRide',
@@ -2711,11 +2886,23 @@ io.on('connection', async (socket) => {
                 });
 
             } catch (error) {
+                console.error('[ACCEPT_RIDE_FATAL] Error not formatted properly:', error);
+
+                let safeErrorMsg = 'Erro desconhecido';
+                if (error instanceof Error) {
+                    safeErrorMsg = error.message;
+                } else if (typeof error === 'string') {
+                    safeErrorMsg = error;
+                } else if (error) {
+                    safeErrorMsg = JSON.stringify(error);
+                }
+
                 logStructured('error', 'Erro ao aceitar corrida', {
                     driverId: socket.userId || socket.id,
                     eventType: 'acceptRide',
-                    error: error.message,
-                    stack: error.stack
+                    error: safeErrorMsg,
+                    stack: error?.stack || null,
+                    rawError: safeErrorMsg
                 });
                 socket.emit('acceptRideError', { error: 'Erro ao processar aceitação' });
             }
@@ -3195,8 +3382,46 @@ io.on('connection', async (socket) => {
                 try {
                     const ridePersistenceService = require('./services/ride-persistence-service');
                     await ridePersistenceService.markRideStarted(bookingId);
+
+                    // ✅ NOVO: Atualizar estado em bookings:active e activeBookings
+                    const bookingDataRaw = await redis.hgetall(`booking:${bookingId}`);
+                    if (bookingDataRaw && Object.keys(bookingDataRaw).length > 0) {
+                        const activeBookingData = {
+                            ...bookingDataRaw,
+                            status: 'IN_PROGRESS'
+                        };
+
+                        // Mapeamento para compatibilidade legada
+                        try {
+                            if (bookingDataRaw.pickupLocation) activeBookingData.pickup = JSON.parse(bookingDataRaw.pickupLocation);
+                            if (bookingDataRaw.destinationLocation) activeBookingData.drop = JSON.parse(bookingDataRaw.destinationLocation);
+                            if (bookingDataRaw.estimatedFare) activeBookingData.estimate = parseFloat(bookingDataRaw.estimatedFare);
+                        } catch (e) {
+                            // Erro silencioso no parse
+                        }
+
+                        const bookingDataStr = JSON.stringify(activeBookingData);
+                        console.log(`🔍 [DEBUG] startTrip: hset bookings:active for ${bookingId}. Data: ${bookingDataStr.substring(0, 100)}...`);
+
+                        // Validar tipo de dado no Redis antes de inserir
+                        const keyType = await redis.type('bookings:active');
+                        if (keyType !== 'hash' && keyType !== 'none') {
+                            console.warn(`⚠️ [DEBUG] startTrip: bookings:active is NOT a hash, it is ${keyType}. Fixing...`);
+                            await redis.del('bookings:active');
+                        }
+
+                        await redis.hset('bookings:active', bookingId, bookingDataStr);
+                        console.log(`🔍 [DEBUG] startTrip: hset success for ${bookingId}`);
+
+                        if (io.activeBookings && io.activeBookings.has(bookingId)) {
+                            io.activeBookings.set(bookingId, {
+                                ...io.activeBookings.get(bookingId),
+                                ...activeBookingData
+                            });
+                        }
+                    }
                 } catch (persistError) {
-                    logStructured('error', 'Erro ao marcar corrida como iniciada no Firestore', {
+                    logStructured('error', 'Erro ao marcar corrida como iniciada no Firestore/Redis', {
                         bookingId,
                         eventType: 'startTrip',
                         error: persistError.message
@@ -3279,8 +3504,11 @@ io.on('connection', async (socket) => {
                     const driverFcmToken = await redis.hget(`driver:${driverId}`, 'fcmToken');
 
                     if (driverFcmToken && destinationAddress) {
-                        const FCMService = require('./services/fcm-service');
-                        const fcmService = new FCMService();
+                        // Usar singleton
+                        if (!fcmService.isServiceAvailable()) {
+                            fcmService.setRedis(redisPool.getConnection());
+                            await fcmService.initialize();
+                        }
 
                         // Calcular estimativa de chegada (aproximada usando fórmula de Haversine)
                         let estimatedArrival = 'calculando...';
@@ -3836,6 +4064,28 @@ io.on('connection', async (socket) => {
                     });
                 }
 
+                // ✅ NOVO: Atualizar Live Activity/Foreground Service (Silent Push)
+                try {
+                    const payloadData = {
+                        bookingId: bookingId,
+                        status: 'completed',
+                        distance: String(distance || '0'),
+                        fare: String(fare || '0')
+                    };
+
+                    if (customerIdToNotify) {
+                        await fcmService.sendRideStatusUpdate(customerIdToNotify, { ...payloadData, userType: 'customer' });
+                    }
+                    await fcmService.sendRideStatusUpdate(driverId, { ...payloadData, userType: 'driver' });
+                } catch (silentPushError) {
+                    logStructured('error', 'Erro ao enviar silent push em completeTrip', { error: silentPushError.message });
+                }
+
+                // ✅ NOVO: Limpar activeBookings (Memória)
+                if (io.activeBookings) {
+                    io.activeBookings.delete(bookingId);
+                }
+
             } catch (error) {
                 logStructured('error', 'Erro ao finalizar viagem', {
                     service: 'websocket',
@@ -4011,14 +4261,47 @@ io.on('connection', async (socket) => {
                             pickupAddress: pickupAddress,
                             timestamp: new Date().toISOString()
                         });
+
+                        // ✅ NOVO: Atualizar Live Activity/Foreground Service (Silent Push)
+                        try {
+                            if (!fcmService.isServiceAvailable()) fcmService.setRedis(redisPool.getConnection());
+                            await fcmService.sendRideStatusUpdate(booking.customerId, {
+                                bookingId: bookingId,
+                                status: 'arrived',
+                                userType: 'customer',
+                                driverName: driverId,
+                                pickup: booking.pickupLocation || booking.pickup || { address: pickupAddress },
+                                destination: booking.destination || booking.destinationLocation || {}
+                            });
+                        } catch (e) {
+                            logStructured('error', 'Erro ao enviar silent push de chegada (customer)', { error: e.message });
+                        }
+                    }
+
+                    // ✅ NOVO: Atualizar Live Activity/Foreground Service do Motorista
+                    try {
+                        const pickupAddress = booking.pickupLocation?.address || booking.pickup?.add || 'local de embarque';
+                        if (!fcmService.isServiceAvailable()) fcmService.setRedis(redisPool.getConnection());
+                        await fcmService.sendRideStatusUpdate(driverId, {
+                            bookingId: bookingId,
+                            status: 'arrived',
+                            userType: 'driver',
+                            pickup: booking.pickupLocation || booking.pickup || { address: pickupAddress },
+                            destination: booking.destination || booking.destinationLocation || {}
+                        });
+                    } catch (e) {
+                        logStructured('error', 'Erro ao enviar silent push de chegada (driver)', { error: e.message });
                     }
 
                     // ✅ NOVO: Enviar nova notificação para o motorista com botão "Iniciar corrida"
                     try {
                         const driverFcmToken = await redis.hget(`driver:${driverId}`, 'fcmToken');
                         if (driverFcmToken) {
-                            const FCMService = require('./services/fcm-service');
-                            const fcmService = new FCMService();
+                            // Usar singleton
+                            if (!fcmService.isServiceAvailable()) {
+                                fcmService.setRedis(redisPool.getConnection());
+                                await fcmService.initialize();
+                            }
 
                             const pickupAddress = booking.pickupLocation?.address || booking.pickup?.add || 'Local de embarque';
 
@@ -4538,6 +4821,14 @@ io.on('connection', async (socket) => {
 
             if (!driverId || !lat || !lng || socket.userType !== 'driver') {
                 return; // Dados inválidos, ignorar silenciosamente
+            }
+
+            // ✅ CAOS SCENARIO: Registrar Heartbeat para calcular tempo offline/resiliência de billing
+            try {
+                const heartbeatService = require('./services/heartbeat-service');
+                await heartbeatService.ping(driverId);
+            } catch (hbErr) {
+                logStructured('warn', 'Falha ao processar novo heartbeat service', { driverId, error: hbErr.message });
             }
 
             // ✅ Heartbeat: apenas renovar TTL usando última localização conhecida
@@ -5306,6 +5597,22 @@ io.on('connection', async (socket) => {
                     });
                 }
 
+                // ✅ NOVO: Atualizar Live Activity/Foreground Service (Silent Push)
+                try {
+                    const payloadData = {
+                        bookingId: bookingId,
+                        status: 'cancelled',
+                        distance: '0',
+                        fare: String(refundSummary?.refundAmountInReais || '0')
+                    };
+
+                    const drvIdToNotify = bookingData.driverId || (initiatorType === 'driver' ? initiatorId : null);
+                    if (passengerId) await fcmService.sendRideStatusUpdate(passengerId, { ...payloadData, userType: 'customer' });
+                    if (drvIdToNotify) await fcmService.sendRideStatusUpdate(drvIdToNotify, { ...payloadData, userType: 'driver' });
+                } catch (silentPushError) {
+                    logStructured('error', 'Erro ao enviar silent push em cancelRide', { error: silentPushError.message });
+                }
+
                 // ✅ Também emitir para o passageiro se houver (e for diferente do iniciador)
                 if (passengerId && passengerId !== initiatorId) {
                     io.to(`customer_${passengerId}`).emit('rideCancelled', cancellationResponse);
@@ -5373,6 +5680,11 @@ io.on('connection', async (socket) => {
                     eventType: 'cancelRide',
                     refundProcessed: true
                 });
+
+                // ✅ NOVO: Limpar activeBookings (Memória)
+                if (io.activeBookings) {
+                    io.activeBookings.delete(bookingId);
+                }
 
             } catch (error) {
                 logStructured('error', 'Erro ao cancelar corrida', {
@@ -6150,12 +6462,14 @@ io.on('connection', async (socket) => {
 
                 // Buscar dados da corrida
                 const bookingData = await redis.hget('bookings:active', bookingId);
+                console.log(`🔍 [DEBUG] changeDestination: bookingId=${bookingId}, bookingDataFound=${!!bookingData}`);
                 if (!bookingData) {
                     socket.emit('changeDestinationError', { error: 'Corrida não encontrada' });
                     return;
                 }
 
                 const booking = JSON.parse(bookingData);
+                console.log(`🔍 [DEBUG] changeDestination: bookingParsed=true, state=${booking.state}, pickupFound=${!!booking.pickup}`);
 
                 // Obter localização atual do passageiro (usar pickup atual ou localização do motorista)
                 const currentLocation = booking.currentLocation || booking.pickup;
@@ -6208,6 +6522,7 @@ io.on('connection', async (socket) => {
 
                 await redis.hset('bookings:active', bookingId, JSON.stringify(updatedBooking));
 
+                console.log(`🔍 [DEBUG] changeDestination: emitting destinationChanged for bookingId=${bookingId}`);
                 socket.emit('destinationChanged', {
                     success: true,
                     bookingId,
@@ -6227,181 +6542,58 @@ io.on('connection', async (socket) => {
             }
         });
 
-        // ==================== NOVOS EVENTOS - NOTIFICAÇÕES FCM ====================
-
-        // Registrar token FCM
-        socket.on('registerFCMToken', async (data) => {
+        // ✅ CAOS SCENARIO: Extensão de Rota Pré-Paga (Pix)
+        socket.on('requestRideExtension', async (data) => {
             try {
-                logStructured('info', `Token FCM registrado`, { service: 'registerFCMToken', userId: data.userId, userType: data.userType, platform: data.platform });
+                const customerId = socket.userId || data.customerId;
+                const { bookingId, newEndLocation, newFare } = data;
 
-                const { userId, userType, fcmToken, platform, timestamp } = data;
-
-                // ✅ PERMITIR REGISTRO SEM userId (usuário não logado ainda)
-                // O token FCM pode ser registrado antes do login
-                if (!fcmToken) {
-                    logStructured('error', `Token FCM não fornecido`, { service: 'registerFCMToken' });
-                    socket.emit('fcmTokenError', { error: 'Token FCM é obrigatório' });
+                if (!customerId || !bookingId || !newEndLocation || !newFare) {
+                    socket.emit('rideExtensionError', { error: 'Dados incompletos para extensão da corrida' });
                     return;
                 }
 
-                // Se não tem userId, usar um temporário baseado no socket.id
-                // Isso permite salvar o token mesmo sem login
-                const effectiveUserId = userId || `temp_${socket.id}`;
-                const effectiveUserType = userType || 'customer';
+                logStructured('info', 'Solicitação de extensão de rota recebida', { bookingId, customerId });
 
-                if (!userId) {
-                    logStructured('warn', `Token FCM registrado sem userId, usando temporário`, { service: 'registerFCMToken', effectiveUserId });
+                const ExtendRideCommand = require('./commands/ExtendRideCommand');
+                const command = new ExtendRideCommand({
+                    bookingId,
+                    customerId,
+                    newEndLocation,
+                    newFare,
+                    correlationId: bookingId
+                });
+
+                const result = await command.execute();
+
+                if (!result.success) {
+                    socket.emit('rideExtensionError', { error: result.error });
+                    return;
                 }
 
-                // ✅ OBTER CONEXÃO REDIS
+                // Enviar QR Code Pix para o passageiro pagar a diferença
+                socket.emit('rideExtensionPaymentRequired', result.data);
+
+                // Avisar o motorista que uma extensão está aguardando pagamento
                 const redis = redisPool.getConnection();
-
-                // Garantir conexão Redis
-                if (redis.status !== 'ready' && redis.status !== 'connect') {
-                    try {
-                        await redis.connect();
-                    } catch (connectError) {
-                        if (!connectError.message.includes('already connecting') &&
-                            !connectError.message.includes('already connected')) {
-                            logError(connectError, 'Erro ao conectar Redis', { service: 'registerFCMToken' });
-                            throw connectError;
-                        }
-                    }
-                }
-
-                // ✅ SALVAR TOKEN NO REDIS
-                // Para motoristas: salvar em driver:${userId} -> fcmToken
-                // Para passageiros: salvar em user:${userId} -> fcmToken
-                // IMPORTANTE: Salvar mesmo sem userId (usando temp_${socket.id})
-                if (effectiveUserType === 'driver') {
-                    await redis.hset(`driver:${effectiveUserId}`, {
-                        fcmToken: fcmToken,
-                        fcmTokenUpdated: new Date().toISOString(),
-                        fcmPlatform: platform || 'unknown',
-                        isTemporary: (!userId).toString() // Marcar se é temporário
-                    });
-                    logStructured('info', `Token FCM salvo para motorista`, { service: 'registerFCMToken', driverId: effectiveUserId });
-                } else {
-                    await redis.hset(`user:${effectiveUserId}`, {
-                        fcmToken: fcmToken,
-                        fcmTokenUpdated: new Date().toISOString(),
-                        fcmPlatform: platform || 'unknown',
-                        isTemporary: (!userId).toString() // Marcar se é temporário
-                    });
-                    logStructured('info', `Token FCM salvo para usuário`, { service: 'registerFCMToken', userId: effectiveUserId });
-                }
-
-                // ✅ SALVAR NO FCMService (MÉTODO CORRETO PARA PRODUÇÃO)
-                // O FCMService é o método oficial para buscar tokens e enviar notificações
-                try {
-                    const FCMService = require('./services/fcm-service');
-                    const fcmService = new FCMService();
-
-                    // Inicializar se necessário (singleton, então pode ser chamado múltiplas vezes)
-                    if (!fcmService.isServiceAvailable()) {
-                        await fcmService.initialize();
-                    }
-
-                    // Salvar token usando o método oficial do FCMService
-                    // Isso salva em fcm_tokens:${userId} que é onde o FCMService busca
-                    // IMPORTANTE: Salvar mesmo sem userId (usando temp_${socket.id})
-                    const saved = await fcmService.saveUserFCMToken(effectiveUserId, effectiveUserType, fcmToken, {
-                        platform,
-                        isTemporary: !userId,
-                        socketId: socket.id
-                    });
-                    if (saved) {
-                        logStructured('info', 'Token FCM salvo no FCMService', {
-                            service: 'websocket',
-                            operation: 'registerFCMToken',
-                            userId: effectiveUserId,
-                            userType: effectiveUserType
-                        });
-                    } else {
-                        logStructured('warn', 'Falha ao salvar token no FCMService', {
-                            service: 'websocket',
-                            operation: 'registerFCMToken',
-                            userId: effectiveUserId
+                const bookingDataStr = await redis.hget('bookings:active', bookingId);
+                if (bookingDataStr) {
+                    const booking = JSON.parse(bookingDataStr);
+                    if (booking.driverId) {
+                        io.to(`driver_${booking.driverId}`).emit('rideExtensionRequested', {
+                            bookingId,
+                            message: 'Passageiro solicitou extensão da rota. Aguardando pagamento Pix...'
                         });
                     }
-                } catch (fcmError) {
-                    logStructured('error', 'Erro ao salvar token no FCMService', {
-                        service: 'websocket',
-                        operation: 'registerFCMToken',
-                        userId: effectiveUserId,
-                        error: fcmError.message,
-                        stack: fcmError.stack
-                    });
-                    // Continuar mesmo com erro no FCMService - o token já foi salvo em user:${userId}
                 }
-
-                const tokenData = {
-                    userId: effectiveUserId,
-                    originalUserId: userId || null, // Manter referência ao userId original se houver
-                    userType: effectiveUserType,
-                    fcmToken,
-                    platform,
-                    timestamp: timestamp || new Date().toISOString(),
-                    isActive: true,
-                    isTemporary: !userId,
-                    lastSeen: new Date().toISOString()
-                };
-
-                // Emitir confirmação
-                socket.emit('fcmTokenRegistered', {
-                    success: true,
-                    userId: effectiveUserId,
-                    originalUserId: userId || null,
-                    message: 'Token FCM registrado com sucesso',
-                    data: tokenData
-                });
-
-                logStructured('info', `Token FCM registrado e salvo`, { service: 'registerFCMToken', userId: effectiveUserId, userType: effectiveUserType, isTemporary: !userId });
-
-                // Se o usuário fizer login depois, atualizar o token com o userId real
-                // Isso será feito no handler de authenticate
 
             } catch (error) {
-                logError(error, 'Erro ao registrar token FCM', { service: 'registerFCMToken', userId: data.userId });
-                socket.emit('fcmTokenError', { error: 'Erro interno do servidor: ' + error.message });
+                logError(error, 'Erro em requestRideExtension', { bookingId: data.bookingId });
+                socket.emit('rideExtensionError', { error: 'Erro interno ao processar extensão' });
             }
         });
 
-        // Desregistrar token FCM
-        socket.on('unregisterFCMToken', async (data) => {
-            try {
-                logStructured('info', `Token FCM desregistrado`, { service: 'unregisterFCMToken', userId: data.userId });
-
-                const { userId, fcmToken } = data;
-
-                if (!userId || !fcmToken) {
-                    socket.emit('fcmTokenError', { error: 'Dados de token FCM incompletos' });
-                    return;
-                }
-
-                // Simular remoção do token
-                const tokenData = {
-                    userId,
-                    fcmToken,
-                    isActive: false,
-                    unregisteredAt: new Date().toISOString()
-                };
-
-                // Emitir confirmação
-                socket.emit('fcmTokenUnregistered', {
-                    success: true,
-                    userId,
-                    message: 'Token FCM desregistrado com sucesso',
-                    data: tokenData
-                });
-
-                logStructured('info', `Token FCM desregistrado para usuário`, { service: 'unregisterFCMToken', userId });
-
-            } catch (error) {
-                logError(error, 'Erro ao desregistrar token FCM', { service: 'unregisterFCMToken', userId: data.userId });
-                socket.emit('fcmTokenError', { error: 'Erro interno do servidor' });
-            }
-        });
+        // NOTIFICAÇÕES FCM (Handlers agora registrados no topo da função connection)
 
         // Enviar notificação
         socket.on('sendNotification', async (data) => {

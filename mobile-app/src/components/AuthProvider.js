@@ -4,8 +4,10 @@ import { useDispatch } from 'react-redux';
 import { useAuth } from '../hooks/useAuth';
 import { FETCH_USER_SUCCESS } from '../common-local/types';
 import database from '@react-native-firebase/database';
-import realTimeNotificationService from '../services/RealTimeNotificationService';
+import interactiveNotificationService from '../services/InteractiveNotificationService';
 import persistentRideNotificationService from '../services/PersistentRideNotificationService';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { Platform } from 'react-native';
 
 
 const AuthProvider = ({ children }) => {
@@ -17,18 +19,18 @@ const AuthProvider = ({ children }) => {
   // ✅ Otimização: Memoizar função para evitar recriações desnecessárias
   const syncUserData = useCallback(async (firebaseUser) => {
     if (isSyncing || hasSynced.current) return; // Evitar múltiplas sincronizações
-    
+
     setIsSyncing(true);
     try {
       Logger.log('🔄 Sincronizando dados do usuário no Realtime Database...');
-      
+
       // 🚀 BYPASS PARA USUÁRIO DE TESTE - Permitir acesso total
       if (firebaseUser.uid && firebaseUser.uid.includes('test-user-dev')) {
         Logger.log('🧪 BYPASS: Usuário de teste detectado - permitindo acesso total ao database');
-        
+
         // Verificar se é customer de teste
         const isTestCustomer = firebaseUser.uid.includes('test-customer-dev');
-        
+
         // Criar dados mock para usuário de teste
         const testUserData = {
           uid: firebaseUser.uid,
@@ -73,35 +75,35 @@ const AuthProvider = ({ children }) => {
             bypassKYC: isTestCustomer      // Customer precisa de bypass de KYC
           }
         };
-        
+
         dispatch({
           type: FETCH_USER_SUCCESS,
           payload: testUserData
         });
-        
+
         // ✅ Inicializar serviços de notificação
         try {
           await persistentRideNotificationService.initialize();
-          await realTimeNotificationService.initialize(testUserData.uid, testUserData.usertype || testUserData.userType);
+          await interactiveNotificationService.initialize();
           Logger.log('✅ Serviços de notificação inicializados para usuário de teste');
         } catch (notifError) {
           Logger.warn('⚠️ Erro ao inicializar serviços de notificação:', notifError);
         }
-        
+
         hasSynced.current = true;
         setIsSyncing(false);
         Logger.log('✅ Usuário de teste sincronizado com bypass de permissões');
         return;
       }
-      
+
       // Buscar dados do usuário no Realtime Database
       const userRef = database().ref(`users/${firebaseUser.uid}`);
       const snapshot = await userRef.once('value');
-      
+
       if (snapshot.exists()) {
         const userData = snapshot.val();
         Logger.log('✅ Dados encontrados no Realtime Database:', userData);
-        
+
         // Criar payload completo com dados do Firebase Auth + Realtime Database
         const completeUserData = {
           uid: firebaseUser.uid,
@@ -130,38 +132,37 @@ const AuthProvider = ({ children }) => {
             ...userData
           }
         };
-        
+
         // Dispatch para o Redux
         dispatch({
           type: FETCH_USER_SUCCESS,
           payload: completeUserData
         });
-        
+
         Logger.log('✅ Usuário sincronizado com sucesso no Redux');
-        
+
         // ✅ Inicializar serviços de notificação após login
         try {
-          const userType = completeUserData.usertype || completeUserData.userType || 'customer';
           await persistentRideNotificationService.initialize();
-          await realTimeNotificationService.initialize(completeUserData.uid, userType);
+          await interactiveNotificationService.initialize();
           Logger.log('✅ Serviços de notificação inicializados');
         } catch (notifError) {
           Logger.warn('⚠️ Erro ao inicializar serviços de notificação:', notifError);
         }
-        
+
         // Salvar token FCM no Firebase se disponível
         try {
           const fcmToken = await AsyncStorage.getItem('fcmToken');
           if (fcmToken) {
             Logger.log('📱 Token FCM encontrado, salvando no Firebase:', fcmToken.substring(0, 20) + '...');
-            
+
             await userRef.update({
               fcmToken: fcmToken,
               pushToken: fcmToken,
               platform: Platform.OS,
               lastSeen: new Date().toISOString()
             });
-            
+
             Logger.log('✅ Token FCM salvo no Firebase Realtime Database');
           }
         } catch (fcmError) {
@@ -170,10 +171,10 @@ const AuthProvider = ({ children }) => {
       } else {
         Logger.log('⚠️ Usuário não encontrado no Realtime Database - NÃO criando perfil básico');
         Logger.log('⚠️ Deixando AppCommon controlar o fluxo de onboarding');
-        
+
         // NÃO criar perfil básico - deixar AppCommon controlar
         // hasSynced.current = false; // Manter como não sincronizado
-        
+
         // Dispatch de dados mínimos SEM usertype
         const minimalUserData = {
           uid: firebaseUser.uid,
@@ -187,21 +188,21 @@ const AuthProvider = ({ children }) => {
             // NÃO definir usertype aqui
           }
         };
-        
+
         dispatch({
           type: FETCH_USER_SUCCESS,
           payload: minimalUserData
         });
-        
+
         // NÃO marcar como sincronizado para permitir onboarding
         hasSynced.current = false;
       }
-      
+
       // Marcar como sincronizado
       // hasSynced.current = true; // Manter como não sincronizado
     } catch (error) {
       Logger.error('❌ Erro ao sincronizar dados do usuário:', error);
-      
+
       // Em caso de erro, usar dados mínimos SEM usertype
       const fallbackUserData = {
         uid: firebaseUser.uid,
@@ -215,12 +216,12 @@ const AuthProvider = ({ children }) => {
           // NÃO definir usertype aqui
         }
       };
-      
+
       dispatch({
         type: FETCH_USER_SUCCESS,
         payload: fallbackUserData
       });
-      
+
       // NÃO marcar como sincronizado para permitir onboarding
       hasSynced.current = false;
     } finally {

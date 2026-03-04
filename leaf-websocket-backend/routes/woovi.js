@@ -4,11 +4,28 @@ const router = express.Router();
 const { logStructured, logError } = require('../utils/logger');
 
 // Configuração Sandbox Woovi
-const WOOVI_CONFIG = {
-  apiToken: 'Q2xpZW50X0lkXzE4YzBkYzI3LTYzMDYtNDFkYy1hMmRlLWI2MzAzMzQ3YzNhZTpDbGllbnRfU2VjcmV0X29WWHc0TXJubnk5a0Q4R3laU1dXV01ROCsrbzh2a0xhR0FlVkRUZnNyeHc9',
-  baseUrl: 'https://api-sandbox.woovi.com',
-  environment: 'sandbox'
+let WOOVI_CONFIG = {
+  appId: process.env.WOOVI_APP_ID || '',
+  apiToken: process.env.WOOVI_API_TOKEN || 'Q2xpZW50X0lkXzE4YzBkYzI3LTYzMDYtNDFkYy1hMmRlLWI2MzAzMzQ3YzNhZTpDbGllbnRfU2VjcmV0X01ENWpTTW1DMExBYWx2WHhiY0tTSnlrVmYyM0g1Z0FxS0pZaE5zT0tUK1E9',
+  baseUrl: process.env.WOOVI_BASE_URL || 'https://api.woovi.com',
+  environment: process.env.WOOVI_ENVIRONMENT || 'sandbox'
 };
+
+// Tentar carregar configuração de sandbox se não estiver em produção
+if (process.env.WOOVI_ENVIRONMENT === 'sandbox' || process.env.NODE_ENV !== 'production') {
+  try {
+    const sandboxConfig = require('../config/woovi-sandbox');
+    WOOVI_CONFIG = {
+      appId: sandboxConfig.clientId,
+      apiToken: sandboxConfig.apiToken,
+      baseUrl: sandboxConfig.baseUrl,
+      environment: 'sandbox'
+    };
+    logStructured('info', 'Usando configuração de WOOVI SANDBOX', { service: 'woovi-routes', baseUrl: WOOVI_CONFIG.baseUrl });
+  } catch (err) {
+    logStructured('warn', 'Arquivo woovi-sandbox não encontrado, usando defaults', { service: 'woovi-routes' });
+  }
+}
 
 // Criar cobrança PIX
 router.post('/woovi/create-charge', async (req, res) => {
@@ -35,6 +52,7 @@ router.post('/woovi/create-charge', async (req, res) => {
     const response = await axios.post(`${WOOVI_CONFIG.baseUrl}/api/v1/charge`, chargeData, {
       headers: {
         'Authorization': WOOVI_CONFIG.apiToken,
+        'x-app-id': WOOVI_CONFIG.appId,
         'Content-Type': 'application/json'
       },
       timeout: 10000
@@ -47,6 +65,9 @@ router.post('/woovi/create-charge', async (req, res) => {
 
   } catch (error) {
     logError(error, 'Erro ao criar cobrança', { service: 'woovi-routes', errorData: error.response?.data });
+
+    // Fallback Mock was here. Removed to enforce real Sandbox testing.
+
     res.status(500).json({
       success: false,
       error: error.response?.data || error.message
@@ -62,6 +83,7 @@ router.get('/woovi/check-status/:correlationID', async (req, res) => {
     const response = await axios.get(`${WOOVI_CONFIG.baseUrl}/api/v1/charge/${correlationID}`, {
       headers: {
         'Authorization': WOOVI_CONFIG.apiToken,
+        'x-app-id': WOOVI_CONFIG.appId,
         'Content-Type': 'application/json'
       },
       timeout: 10000
@@ -74,6 +96,9 @@ router.get('/woovi/check-status/:correlationID', async (req, res) => {
 
   } catch (error) {
     logError(error, 'Erro ao verificar status', { service: 'woovi-routes', correlationID, errorData: error.response?.data });
+
+    // Fallback Mock was here. Removed to enforce real Sandbox testing.
+
     res.status(500).json({
       success: false,
       error: error.response?.data || error.message
@@ -89,6 +114,7 @@ router.get('/woovi/list-charges', async (req, res) => {
     const response = await axios.get(`${WOOVI_CONFIG.baseUrl}/api/v1/charge`, {
       headers: {
         'Authorization': WOOVI_CONFIG.apiToken,
+        'x-app-id': WOOVI_CONFIG.appId,
         'Content-Type': 'application/json'
       },
       params: { page, limit },
@@ -115,6 +141,7 @@ router.get('/woovi/test-connection', async (req, res) => {
     const response = await axios.get(`${WOOVI_CONFIG.baseUrl}/api/v1/me`, {
       headers: {
         'Authorization': WOOVI_CONFIG.apiToken,
+        'x-app-id': WOOVI_CONFIG.appId,
         'Content-Type': 'application/json'
       },
       timeout: 10000
@@ -504,27 +531,38 @@ async function handleChargeCompleted(data, io = null) {
 
       logStructured('info', 'Pagamento confirmado e verificado', { service: 'woovi-routes', chargeId, rideId, amount: amountInReais, status: finalStatus, paidAt: charge.paidAt });
 
+      // ✅ Verificar se é um pagamento de extensão de rota
+      const paymentTypeInfo = additionalInfo?.find(info => info.key === 'payment_type');
+      const isExtension = paymentTypeInfo && paymentTypeInfo.value === 'ride_extension';
+
       // ✅ Registrar pagamento confirmado e aguardar fluxo da corrida
       if (rideId) {
-        logStructured('info', 'Iniciando processamento de confirmação de pagamento', { service: 'woovi-routes', chargeId, rideId });
-        const confirmationResult = await processPaymentConfirmation(
-          chargeId,
-          rideId,
-          amount,
-          passengerId,
-          io,
-          {
-            event: eventName,
-            status: finalStatus,
-            additionalInfo,
-            pixStatus: pix?.status
-          }
-        );
-
-        if (confirmationResult && confirmationResult.success) {
-          logStructured('info', 'Pagamento registrado com sucesso', { service: 'woovi-routes', chargeId, rideId, processingStatus: confirmationResult.status || 'CONFIRMED' });
+        if (isExtension) {
+          logStructured('info', 'Iniciando processamento de extensão de corrida', { service: 'woovi-routes', chargeId, rideId });
+          const newFareInfo = additionalInfo.find(info => info.key === 'new_fare');
+          const newFare = newFareInfo ? parseInt(newFareInfo.value) : 0;
+          await processExtensionConfirmation(rideId, chargeId, amount, passengerId, io, newFare);
         } else {
-          logStructured('warn', 'Pagamento confirmado, mas ajustes pendentes', { service: 'woovi-routes', chargeId, rideId, reason: confirmationResult?.error || 'Falha ao armazenar confirmação' });
+          logStructured('info', 'Iniciando processamento de confirmação de pagamento inicial', { service: 'woovi-routes', chargeId, rideId });
+          const confirmationResult = await processPaymentConfirmation(
+            chargeId,
+            rideId,
+            amount,
+            passengerId,
+            io,
+            {
+              event: eventName,
+              status: finalStatus,
+              additionalInfo,
+              pixStatus: pix?.status || 'N/A'
+            }
+          );
+
+          if (confirmationResult && confirmationResult.success) {
+            logStructured('info', 'Pagamento registrado com sucesso', { service: 'woovi-routes', chargeId, rideId, processingStatus: confirmationResult.status || 'CONFIRMED' });
+          } else {
+            logStructured('warn', 'Pagamento confirmado, mas ajustes pendentes', { service: 'woovi-routes', chargeId, rideId, reason: confirmationResult?.error || 'Falha ao armazenar confirmação' });
+          }
         }
       } else {
         logStructured('warn', 'rideId não encontrado, não é possível registrar pagamento', { service: 'woovi-routes', chargeId });
@@ -536,6 +574,79 @@ async function handleChargeCompleted(data, io = null) {
 
   } catch (error) {
     logError(error, 'Erro ao processar cobrança completada', { service: 'woovi-routes', chargeId });
+  }
+}
+
+/**
+ * Processa a confirmação de um pagamento de Extensão de Corrida (passo adicional)
+ */
+async function processExtensionConfirmation(rideId, chargeId, amount, passengerId, io, newFare) {
+  try {
+    const EventSourcing = require('../services/event-sourcing');
+    const redisPool = require('../utils/redis-pool');
+    const redis = redisPool.getConnection();
+    const firebaseConfig = require('../firebase-config');
+    const firestore = firebaseConfig.getFirestore();
+
+    // 1. Atualiza corrida no Redis
+    let bookingDataStr = await redis.hget('bookings:active', rideId);
+    let originalDriverId = null;
+
+    if (bookingDataStr) {
+      let booking = JSON.parse(bookingDataStr);
+      booking.estimatedFare = parseInt(newFare);
+      booking.newEstimate = parseInt(newFare);
+      originalDriverId = booking.driverId;
+
+      await redis.hset('bookings:active', rideId, JSON.stringify(booking));
+      await redis.hmset(`booking:${rideId}`, {
+        estimatedFare: parseInt(newFare),
+        newEstimate: parseInt(newFare)
+      });
+
+      // Notificar Sockets
+      if (io && passengerId) {
+        io.to(`customer_${passengerId}`).emit('rideExtensionConfirmed', {
+          bookingId: rideId,
+          newFare: newFare,
+          message: 'Pagamento da extensão confirmado. Rota atualizada!'
+        });
+      }
+      if (io && originalDriverId) {
+        io.to(`driver_${originalDriverId}`).emit('rideExtensionConfirmed', {
+          bookingId: rideId,
+          newFare: newFare,
+          message: 'Passageiro pagou a extensão. Rota atualizada!'
+        });
+      }
+    }
+
+    // 2. Incrementar o valor original no Firestore para bater com o Total Amount no encerramento (refund logic)
+    if (firestore) {
+      const holdingRef = firestore.collection('payment_holdings').doc(rideId);
+      const holdingDoc = await holdingRef.get();
+      if (holdingDoc.exists) {
+        const adminVars = require('firebase-admin');
+        await holdingRef.update({
+          amount: adminVars.firestore.FieldValue.increment(amount),
+          extensionChargeId: chargeId, // salva referencia
+          updatedAt: adminVars.firestore.FieldValue.serverTimestamp()
+        });
+        logStructured('info', 'Payment holding atualizado com valor de extensão', { rideId, addedAmount: amount });
+      }
+    }
+
+    // 3. Event Sourcing
+    await EventSourcing.recordEvent(EventSourcing.EVENT_TYPES.RIDE_UPDATED, {
+      bookingId: rideId,
+      type: 'EXTENSION_PAID',
+      chargeId: chargeId,
+      amountAdded: amount,
+      newFare: newFare
+    });
+
+  } catch (error) {
+    logError(error, 'Erro ao processar Extensão de Corrida', { rideId });
   }
 }
 
@@ -740,5 +851,40 @@ router.post('/woovi/tokenize-card', async (req, res) => {
     });
   }
 });
+
+// ==================== STUB HANDLERS PARA WEBHOOKS ====================
+// Para evitar erros de "is not defined" e garantir retorno 200 OK para a Woovi
+
+async function handleChargeCreated(data) {
+  logStructured('info', 'Webhook Handler: Nova cobrança criada registrada no sistema (stub)', { service: 'woovi-routes' });
+}
+
+async function handleChargeExpired(data) {
+  logStructured('info', 'Webhook Handler: Cobrança expirada (stub)', { service: 'woovi-routes' });
+}
+
+async function handleTransactionReceived(data) {
+  logStructured('info', 'Webhook Handler: Transação recebida (stub)', { service: 'woovi-routes' });
+}
+
+async function handleRefundReceivedConfirmed(data) {
+  logStructured('info', 'Webhook Handler: Reembolso recebido e confirmado (stub)', { service: 'woovi-routes' });
+}
+
+async function handleRefundReceivedRejected(data) {
+  logStructured('info', 'Webhook Handler: Reembolso recebido, mas rejeitado (stub)', { service: 'woovi-routes' });
+}
+
+async function handleRefundSentConfirmed(data) {
+  logStructured('info', 'Webhook Handler: Reembolso enviado e confirmado (stub)', { service: 'woovi-routes' });
+}
+
+async function handleAccountApproved(data) {
+  logStructured('info', 'Webhook Handler: Conta BaaS aprovada (stub)', { service: 'woovi-routes' });
+}
+
+async function handleChargeCompletedDifferentPayer(data) {
+  logStructured('info', 'Webhook Handler: Pagamento concluído por um pagador diferente (stub)', { service: 'woovi-routes' });
+}
 
 module.exports = router;

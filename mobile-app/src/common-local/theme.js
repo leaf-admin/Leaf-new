@@ -1,9 +1,29 @@
 export const colors = {
+  // New Design System Semantic Palette
+  primary: '#1A330E',
+  background: '#FFFFFF',
+  surface: '#F9F9F9',
+
+  text: {
+    primary: '#1C1C1E',
+    secondary: '#8E8E93',
+    disabled: '#C7C7CC',
+  },
+
+  border: '#E5E5EA',
+  transparent: 'transparent',
+
+  // Feedback
+  error: '#FF3B30',
+  success: '#34C759',
+  warning: '#FFCC00',
+
+  // Legacy Colors (Kept for backward compatibility, will be replaced progressively)
   SKY: '#1E81D3',
-  LIGHT_RED:"#FF2121",
+  LIGHT_RED: "#FF2121",
   DULL_RED: "#B41B00",
   LIGHT_YELLOW: "#dbd6a0",
-  SIDEMENU:"#111b1e",
+  SIDEMENU: "#111b1e",
   PROFILE_PLACEHOLDER_TEXT: '#949494',
   PROFILE_PLACEHOLDER_CONTENT: '#4f4e4e',
   CAMERA_TEXT: '#3CC5E7',
@@ -32,7 +52,7 @@ export const colors = {
   WALLET_PRIMARY: "#c8c8c8",
   PROMO: "#9f9f9f",
   GREEN_DOT: "green",
-  BALANCE_GREEN:'#0cab03', 
+  BALANCE_GREEN: '#0cab03',
   BUTTON_YELLOW: "#06113C",
   BUTTON_ORANGE: "#f16f05",
   DRIVER_INCOME_YELLOW: "#e3deac",
@@ -40,19 +60,19 @@ export const colors = {
   BUTTON_LOADING: "blue",
   INDICATOR_BLUE: "#007aff",
   START_TRIP: "#018E16",
-  RE_GREEN:"#7ED957",
-  new:"#eeeeee",
-  new1:"#c6e2f6",
-  new2:"#ea969d",
-  REGIESTER_BUTTON:"#007AFF",
-  PLACEHOLDER_COLOR:"#7C8288",
-  INPUT_BORDER:"#e3e4e6",
-  INPUT_FOCUS:"#0079FF",
-  GREY:"#C0C0C0",
-  INPUT_BACKGROUND:"#F3F3F4",
-  PROMO_BACKGROUND:"rgb(244,245,251)",
-  PROMO_TEXT_COLOR:"#41D274",
-  BOOKING_STATUS_BG:"#DAF9CA",
+  RE_GREEN: "#7ED957",
+  new: "#eeeeee",
+  new1: "#c6e2f6",
+  new2: "#ea969d",
+  REGIESTER_BUTTON: "#007AFF",
+  PLACEHOLDER_COLOR: "#7C8288",
+  INPUT_BORDER: "#e3e4e6",
+  INPUT_FOCUS: "#0079FF",
+  GREY: "#C0C0C0",
+  INPUT_BACKGROUND: "#F3F3F4",
+  PROMO_BACKGROUND: "rgb(244,245,251)",
+  PROMO_TEXT_COLOR: "#41D274",
+  BOOKING_STATUS_BG: "#DAF9CA",
   TAXIPRIMARY: "#06113C",
   TAXISECONDORY: "#DDDEEE",
   DELIVERYPRIMARY: "#FE805D",
@@ -66,36 +86,36 @@ export const colors = {
   GREEN: "#0cab03",
   YELLOW: "#FFDE59 ",
   FOOTERTOP: "#969696",
-}
+};
 
 export const lightTheme = {
-    background: '#FFFFFF',
-    card: '#FFFFFF',
-    text: '#000000',
-    textSecondary: '#666666',
-    border: '#E0E0E0',
-    icon: '#000000',
-    divider: '#E0E0E0',
-    inputBg: '#F5F5F5',
-    inputBorder: '#E0E0E0',
-    placeholder: '#999999',
-    dropdown: '#FFFFFF',
-    leafGreen: '#41D274'
+  background: '#FFFFFF',
+  card: '#FFFFFF',
+  text: '#000000',
+  textSecondary: '#666666',
+  border: '#E0E0E0',
+  icon: '#000000',
+  divider: '#E0E0E0',
+  inputBg: '#F5F5F5',
+  inputBorder: '#E0E0E0',
+  placeholder: '#999999',
+  dropdown: '#FFFFFF',
+  leafGreen: '#41D274'
 };
 
 export const darkTheme = {
-    background: '#1A1A1A',
-    card: '#2A2A2A',
-    text: '#FFFFFF',
-    textSecondary: '#AAAAAA',
-    border: '#333333',
-    icon: '#FFFFFF',
-    divider: '#333333',
-    inputBg: '#2A2A2A',
-    inputBorder: '#333333',
-    placeholder: '#666666',
-    dropdown: '#2A2A2A',
-    leafGreen: '#41D274'
+  background: '#1A1A1A',
+  card: '#2A2A2A',
+  text: '#FFFFFF',
+  textSecondary: '#AAAAAA',
+  border: '#333333',
+  icon: '#FFFFFF',
+  divider: '#333333',
+  inputBg: '#2A2A2A',
+  inputBorder: '#333333',
+  placeholder: '#666666',
+  dropdown: '#2A2A2A',
+  leafGreen: '#41D274'
 };
 
 // Hook para usar o tema

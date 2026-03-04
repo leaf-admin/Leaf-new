@@ -26,13 +26,14 @@ const workerManager = new WorkerManager({
 });
 
 workerManager.registerListener(EVENT_TYPES.RIDE_COMPLETED, async (event) => {
-    const { bookingId, driverId, finalFare } = event.data;
+    const { bookingId, driverId, finalFare, tollFee } = event.data;
     const eventId = event.eventId || bookingId; // Fallback to bookingId if eventId is missing
 
     logStructured('info', 'Iniciando processamento contábil (Billing) da corrida', {
         bookingId,
         driverId,
         finalFare,
+        tollFee: tollFee || 0,
         eventId
     });
 
@@ -69,6 +70,7 @@ workerManager.registerListener(EVENT_TYPES.RIDE_COMPLETED, async (event) => {
         rideId: bookingId,
         driverId: driverId,
         totalAmount: finalFare,
+        tollFee: tollFee || 0, // Passa o tollFee
         wooviAccountId: accountData.accountId
     });
 
@@ -83,6 +85,60 @@ workerManager.registerListener(EVENT_TYPES.RIDE_COMPLETED, async (event) => {
     });
 
     // ✅ Salvar em Cache atrelado a Idempotência que o processamento funcionou
+    await idempotencyService.cacheResult(idempotencyKey, distributionResult, 604800);
+
+    return distributionResult;
+});
+
+// ✅ CAOS SCENARIO: Processamento de Payout do Motorista em Cancelamentos
+workerManager.registerListener(EVENT_TYPES.RIDE_CANCELED, async (event) => {
+    const { bookingId, driverId, cancellationFee } = event.data;
+    const eventId = event.eventId || `cancel_${bookingId}`;
+
+    // Apenas se houver multa e um motorista associado para receber
+    if (!cancellationFee || cancellationFee <= 0 || !driverId) {
+        return { success: true, reason: 'Sem multa ou motorista para processar' };
+    }
+
+    logStructured('info', 'Iniciando processamento contábil de multa (Cancelamento/No-Show)', {
+        bookingId,
+        driverId,
+        cancellationFee,
+        eventId
+    });
+
+    const idempotencyKey = idempotencyService.generateKey(driverId, 'billing.ride.canceled', eventId);
+    const idempotencyCheck = await idempotencyService.checkAndSet(idempotencyKey, 604800);
+
+    if (!idempotencyCheck.isNew) {
+        logStructured('warn', 'Idempotency detectado: Esta multa já teve processamento financeiro no worker', {
+            bookingId,
+            driverId
+        });
+        return { success: true, reason: 'Duplicate Processing Avoided', data: idempotencyCheck.cachedResult };
+    }
+
+    const paymentService = new PaymentService();
+
+    // Processar repasse da taxa de cancelamento excluindo o pedágio fixo (Woovi fee)
+    const distributionResult = await paymentService.processCancellationDistribution({
+        rideId: bookingId,
+        driverId: driverId,
+        cancellationFee: cancellationFee
+    });
+
+    if (!distributionResult.success) {
+        // Fallback limpo: se falhar, retorna erro para tentar no DLQ
+        throw new Error(`Falha na distribuição de multa de cancelamento: ${distributionResult.error}`);
+    }
+
+    logStructured('info', 'Processamento de multa contábil concluído com sucesso', {
+        bookingId,
+        driverId,
+        netAmount: distributionResult.netAmount
+    });
+
+    // Salvar cache atrelado a idempotência
     await idempotencyService.cacheResult(idempotencyKey, distributionResult, 604800);
 
     return distributionResult;

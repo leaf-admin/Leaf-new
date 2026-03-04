@@ -102,10 +102,10 @@ const ModernMapScreenExample = ({ navigation }) => {
     return (
         <Animated.View style={[styles.container, { opacity: fadeAnim }]}>
             <StatusBar hidden={true} />
-            
+
             {/* Header Moderno */}
             <View style={[styles.header, { backgroundColor: currentTheme.card }]}>
-                <TouchableOpacity 
+                <TouchableOpacity
                     style={styles.headerButton}
                     onPress={() => navigation.navigate('Settings')}
                 >
@@ -115,9 +115,9 @@ const ModernMapScreenExample = ({ navigation }) => {
                         color={currentTheme.icon}
                     />
                 </TouchableOpacity>
-                
+
                 <View style={styles.headerRightContainer}>
-                    <TouchableOpacity 
+                    <TouchableOpacity
                         style={styles.headerButton}
                         onPress={() => navigation.navigate('Notifications')}
                     >
@@ -127,8 +127,8 @@ const ModernMapScreenExample = ({ navigation }) => {
                             color={currentTheme.icon}
                         />
                     </TouchableOpacity>
-                    
-                    <TouchableOpacity 
+
+                    <TouchableOpacity
                         style={styles.headerButton}
                         onPress={() => setIsDarkMode(!isDarkMode)}
                     >
@@ -155,11 +155,6 @@ const ModernMapScreenExample = ({ navigation }) => {
             <View style={styles.mapContainer}>
                 <MapView
                     provider={PROVIDER_GOOGLE}
-                    <UrlTile
-                        urlTemplate="https://a.tile.openstreetmap.org/{z}/{x}/{y}.png"
-                        maximumZ={19}
-                        flipY={false}
-                    />
                     style={styles.map}
                     initialRegion={{
                         latitude: -23.5505,
@@ -168,7 +163,13 @@ const ModernMapScreenExample = ({ navigation }) => {
                         longitudeDelta: 0.0421,
                     }}
                     customMapStyle={isDarkMode ? darkMapStyle : lightMapStyle}
-                />
+                >
+                    <UrlTile
+                        urlTemplate="https://a.tile.openstreetmap.org/{z}/{x}/{y}.png"
+                        maximumZ={19}
+                        flipY={false}
+                    />
+                </MapView>
             </View>
 
             {/* Cards de Carros Modernos */}

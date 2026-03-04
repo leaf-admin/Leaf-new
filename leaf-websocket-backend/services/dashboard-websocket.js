@@ -5,8 +5,9 @@ const admin = require('firebase-admin');
 const { logStructured, logError } = require('../utils/logger');
 
 class DashboardWebSocketService {
-  constructor(io) {
+  constructor(io, redis) {
     this.io = io;
+    this.redis = redis;
     this.dashboardNamespace = io.of('/dashboard');
     this.setupDashboardEvents();
     this.startPeriodicUpdates();
@@ -19,22 +20,22 @@ class DashboardWebSocketService {
       // 🔐 Autenticação do dashboard via JWT ou Firebase Auth Token
       socket.on('authenticate', async (data) => {
         const { firebaseToken, jwtToken } = data;
-        
+
         // Prioridade 1: JWT Token (novo método)
         if (jwtToken) {
           try {
             const jwt = require('jsonwebtoken');
             const JWT_SECRET = process.env.JWT_SECRET || process.env.ADMIN_JWT_SECRET || 'leaf-admin-secret-key-change-in-production';
-            
+
             const decoded = jwt.verify(jwtToken, JWT_SECRET);
-            
+
             // Verificar se usuário é admin no Firestore
             const firestore = admin.firestore();
             const adminUserDoc = await firestore.collection('adminUsers').doc(decoded.userId).get();
-            
+
             if (!adminUserDoc.exists) {
-              socket.emit('authentication_error', { 
-                message: 'Usuário não possui permissões de admin' 
+              socket.emit('authentication_error', {
+                message: 'Usuário não possui permissões de admin'
               });
               socket.disconnect();
               return;
@@ -42,8 +43,8 @@ class DashboardWebSocketService {
 
             const adminData = adminUserDoc.data();
             if (!adminData.active) {
-              socket.emit('authentication_error', { 
-                message: 'Conta de admin desativada' 
+              socket.emit('authentication_error', {
+                message: 'Conta de admin desativada'
               });
               socket.disconnect();
               return;
@@ -54,8 +55,8 @@ class DashboardWebSocketService {
             socket.userId = decoded.userId;
             socket.userRole = decoded.role || adminData.role;
             socket.userPermissions = decoded.permissions || adminData.permissions || [];
-            
-            socket.emit('authenticated', { 
+
+            socket.emit('authenticated', {
               message: 'Dashboard autenticado com sucesso',
               user: {
                 id: decoded.userId,
@@ -64,24 +65,24 @@ class DashboardWebSocketService {
                 permissions: socket.userPermissions
               }
             });
-            
+
             logStructured('info', 'Dashboard autenticado (JWT)', { service: 'dashboard-websocket', socketId: socket.id, email: decoded.email || adminData.email, role: socket.userRole });
             return;
-            
+
           } catch (error) {
             logError(error, 'Erro na autenticação JWT do dashboard', { service: 'dashboard-websocket', socketId: socket.id });
-            socket.emit('authentication_error', { 
-              message: 'Token JWT inválido ou expirado' 
+            socket.emit('authentication_error', {
+              message: 'Token JWT inválido ou expirado'
             });
             socket.disconnect();
             return;
           }
         }
-        
+
         // Prioridade 2: Firebase Auth Token (fallback)
         if (!firebaseToken) {
-          socket.emit('authentication_error', { 
-            message: 'Token de autenticação não fornecido (JWT ou Firebase)' 
+          socket.emit('authentication_error', {
+            message: 'Token de autenticação não fornecido (JWT ou Firebase)'
           });
           socket.disconnect();
           return;
@@ -90,14 +91,14 @@ class DashboardWebSocketService {
         try {
           // Verificar token Firebase usando Admin SDK
           const decodedToken = await admin.auth().verifyIdToken(firebaseToken);
-          
+
           // Verificar se o usuário é admin no Firestore
           const firestore = admin.firestore();
           const adminUserDoc = await firestore.collection('adminUsers').doc(decodedToken.uid).get();
-          
+
           if (!adminUserDoc.exists) {
-            socket.emit('authentication_error', { 
-              message: 'Usuário não possui permissões de admin' 
+            socket.emit('authentication_error', {
+              message: 'Usuário não possui permissões de admin'
             });
             socket.disconnect();
             return;
@@ -105,8 +106,8 @@ class DashboardWebSocketService {
 
           const adminData = adminUserDoc.data();
           if (!adminData.active) {
-            socket.emit('authentication_error', { 
-              message: 'Conta de admin desativada' 
+            socket.emit('authentication_error', {
+              message: 'Conta de admin desativada'
             });
             socket.disconnect();
             return;
@@ -117,8 +118,8 @@ class DashboardWebSocketService {
           socket.userId = decodedToken.uid;
           socket.userRole = adminData.role;
           socket.userPermissions = adminData.permissions || [];
-          
-          socket.emit('authenticated', { 
+
+          socket.emit('authenticated', {
             message: 'Dashboard autenticado com sucesso',
             user: {
               uid: decodedToken.uid,
@@ -127,13 +128,13 @@ class DashboardWebSocketService {
               permissions: adminData.permissions
             }
           });
-          
+
           logStructured('info', 'Dashboard autenticado (Firebase)', { service: 'dashboard-websocket', socketId: socket.id, email: decodedToken.email, role: adminData.role });
-          
+
         } catch (error) {
           logError(error, 'Erro na autenticação do dashboard', { service: 'dashboard-websocket', socketId: socket.id });
-          socket.emit('authentication_error', { 
-            message: 'Token inválido ou expirado' 
+          socket.emit('authentication_error', {
+            message: 'Token inválido ou expirado'
           });
           socket.disconnect();
         }
@@ -319,36 +320,113 @@ class DashboardWebSocketService {
   }
 
   async getRealTimeMetrics() {
-    // Buscar métricas reais do sistema
-    // Por enquanto, retornar estrutura básica
-    // TODO: Integrar com serviços de métricas reais
-    return {
-      users: {
-        totalUsers: 1234,
-        activeUsers: 890,
-        newUsersToday: 45,
-        growthRate: 20.1
-      },
-      rides: {
-        totalRides: 5678,
-        activeRides: 89,
-        completedToday: 234,
-        averageValue: 25.50,
-        growthRate: 12.5
-      },
-      revenue: {
-        todayRevenue: 12345,
-        monthlyRevenue: 234567,
-        averageTicket: 25.50,
-        growthRate: 8.2
-      },
-      conversion: {
-        conversionRate: 78.5,
-        completionRate: 92.3,
-        growthRate: 2.1
-      },
-      timestamp: new Date().toISOString()
-    };
+    try {
+      const firestore = admin.firestore();
+
+      // 1. Contagem de Usuários (Total)
+      let totalUsersCount = 0;
+      let newUsersToday = 0;
+
+      const todayStart = new Date();
+      todayStart.setHours(0, 0, 0, 0);
+      const todayISO = todayStart.toISOString();
+
+      try {
+        const usersSnapshot = await firestore.collection('users').get();
+        totalUsersCount = usersSnapshot.size;
+
+        // Count users created today
+        usersSnapshot.forEach(doc => {
+          const data = doc.data();
+          if (data.createdAt && data.createdAt >= todayISO) {
+            newUsersToday++;
+          }
+        });
+      } catch (err) {
+        logError(err, 'Erro ao contar usuarios no Firestore', { service: 'dashboard-websocket' });
+      }
+
+      // 2. Corridas Ativas (Redis) e Histórico Diário (Firestore)
+      let activeRidesCount = 0;
+      if (this.redis) {
+        try {
+          const activeBookings = await this.redis.hkeys('bookings:active');
+          activeRidesCount = activeBookings.length;
+        } catch (err) { }
+      }
+
+      let completedToday = 0;
+      let todayRevenue = 0;
+      let totalRidesCount = 0;
+
+      try {
+        // Query daily completed rides (status = 'paid' or 'completed')
+        // We fetch all from today
+        const ridesSnapshot = await firestore.collection('bookings')
+          .where('createdAt', '>=', todayISO)
+          .get();
+
+        ridesSnapshot.forEach(doc => {
+          const data = doc.data();
+          if (data.status === 'completed' || data.status === 'PAID') {
+            completedToday++;
+            todayRevenue += parseFloat(data.finalPrice || data.estimate || 0);
+          }
+        });
+
+        // Optional: Count all time rides (might be heavy if lots of rides, using arbitrary count for now)
+        // A robust way in production is using Firestore aggregation queries (count)
+        const allRidesMeta = await firestore.collection('bookings').count().get();
+        totalRidesCount = allRidesMeta.data().count;
+
+      } catch (err) {
+        logError(err, 'Erro ao contar corridas no Firestore', { service: 'dashboard-websocket' });
+      }
+
+      // 3. Buscar Dados do Fundo de Reserva (Custos Prejudiciais Absorvidos)
+      let assumedCancellationCosts = 0;
+      if (this.redis) {
+        try {
+          const costStr = await this.redis.hget('metrics:financial', 'assumed_cancellation_costs');
+          if (costStr) assumedCancellationCosts = parseFloat(costStr);
+        } catch (err) { }
+      }
+
+      const activeUsers = 0; // We define online drivers later
+
+      return {
+        users: {
+          totalUsers: totalUsersCount,
+          activeUsers: activeUsers,
+          newUsersToday: newUsersToday,
+          growthRate: 0 // Placeholder
+        },
+        rides: {
+          totalRides: totalRidesCount,
+          activeRides: activeRidesCount,
+          completedToday: completedToday,
+          averageValue: completedToday > 0 ? (todayRevenue / completedToday) : 0,
+          growthRate: 0
+        },
+        revenue: {
+          todayRevenue: todayRevenue,
+          monthlyRevenue: todayRevenue * 30, // Rough estimate placeholder until we implement monthly aggregation
+          reserveFundLosses: assumedCancellationCosts, // ✅ Nova métrica de perdas absorvidas
+          netRevenueToday: todayRevenue > 0 ? (todayRevenue - assumedCancellationCosts) : 0,
+          averageTicket: completedToday > 0 ? (todayRevenue / completedToday) : 0,
+          growthRate: 0
+        },
+        conversion: {
+          conversionRate: 100, // Placeholder
+          completionRate: 100, // Placeholder
+          growthRate: 0
+        },
+        timestamp: new Date().toISOString()
+      };
+    } catch (error) {
+      logError(error, 'Erro fatal em getRealTimeMetrics', { service: 'dashboard-websocket' });
+      return null;
+    }
   }
 
   sendApprovalStats(socket) {
@@ -370,7 +448,7 @@ class DashboardWebSocketService {
 
   sendDashboardMetrics(socket, data) {
     const { dateRange } = data || {};
-    
+
     const financialMetrics = {
       revenue: {
         total: 125400.50 + Math.random() * 1000,
@@ -447,9 +525,9 @@ class DashboardWebSocketService {
   // 🎬 Métodos para ações
   handleDriverApplicationReview(socket, data) {
     const { applicationId, action, notes, rejectionReasons } = data;
-    
+
     logStructured('info', `Revisão de aplicação: ${action}`, { service: 'dashboard-websocket', applicationId, action, notes, rejectionReasons });
-    
+
     // Simular processamento
     setTimeout(() => {
       socket.emit('application_status_changed', {
@@ -472,9 +550,9 @@ class DashboardWebSocketService {
 
   handleSubscriptionAction(socket, data) {
     const { subscriptionId, action } = data;
-    
+
     logStructured('info', `Ação em assinatura: ${action}`, { service: 'dashboard-websocket', subscriptionId, action });
-    
+
     socket.emit('subscription_updated', {
       subscriptionId,
       action,
@@ -484,9 +562,9 @@ class DashboardWebSocketService {
 
   handlePromotionAction(socket, data) {
     const { promotionId, action } = data;
-    
+
     logStructured('info', `Ação em promoção: ${action}`, { service: 'dashboard-websocket', promotionId, action });
-    
+
     socket.emit('promotion_updated', {
       promotionId,
       action,
@@ -496,7 +574,7 @@ class DashboardWebSocketService {
 
   handleCreatePromotion(socket, data) {
     logStructured('info', 'Criando nova promoção', { service: 'dashboard-websocket', promotionName: data.name, ...data });
-    
+
     // Simular criação
     setTimeout(() => {
       const newPromotion = {
@@ -506,7 +584,7 @@ class DashboardWebSocketService {
       };
 
       socket.emit('promotion_created', newPromotion);
-      
+
       // Emitir para todos os dashboards
       this.dashboardNamespace.emit('new_promotion_created', {
         promotion: newPromotion,
@@ -517,9 +595,9 @@ class DashboardWebSocketService {
 
   handleBlockUser(socket, data) {
     const { userId } = data;
-    
+
     logStructured('warn', 'Bloqueando usuário', { service: 'dashboard-websocket', userId });
-    
+
     socket.emit('user_status_changed', {
       userId,
       status: 'blocked',
@@ -529,9 +607,9 @@ class DashboardWebSocketService {
 
   handleUnblockUser(socket, data) {
     const { userId } = data;
-    
+
     logStructured('info', 'Desbloqueando usuário', { service: 'dashboard-websocket', userId });
-    
+
     socket.emit('user_status_changed', {
       userId,
       status: 'active',
@@ -546,14 +624,14 @@ class DashboardWebSocketService {
       try {
         // Buscar métricas reais (se disponível)
         const metrics = await this.getRealTimeMetrics();
-        
+
         // Emitir para todos os dashboards conectados e autenticados
         this.dashboardNamespace.emit('metrics:updated', metrics);
       } catch (error) {
         logError(error, 'Erro ao buscar métricas em tempo real', { service: 'dashboard-websocket' });
       }
     }, 5000); // A cada 5 segundos
-    
+
     // Atualizar stats a cada 30 segundos
     setInterval(() => {
       this.dashboardNamespace.emit('live_stats_update', {

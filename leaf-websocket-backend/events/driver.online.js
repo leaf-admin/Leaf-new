@@ -19,7 +19,7 @@ class DriverOnlineEvent extends CanonicalEvent {
         
         const eventData = {
             ...data,
-            traceId: validatedTraceId(data, EVENT_TYPES.DRIVER_ONLINE),
+            traceId: validatedTraceId,
             correlationId: data.correlationId || data.driverId // ✅ Adicionar correlationId
         };
         

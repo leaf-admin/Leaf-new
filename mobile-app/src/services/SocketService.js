@@ -19,7 +19,7 @@ class SocketService {
     }
 
     // Conectar ao WebSocket
-    connect() {
+    async connect() {
         if (this.socket && this.isConnected) {
             Logger.log('🔌 Já conectado ao WebSocket');
             return;
@@ -27,8 +27,23 @@ class SocketService {
 
         try {
             Logger.log('🔌 Conectando ao WebSocket:', SOCKET_URL);
-            
+
+            // ✅ Buscar token do Firebase para autenticação segura
+            let userToken = null;
+            try {
+                // Importação dinâmica para evitar ciclos se não for global
+                const auth = require('@react-native-firebase/auth').default;
+                const currentUser = auth().currentUser;
+                if (currentUser) {
+                    userToken = await currentUser.getIdToken();
+                }
+            } catch (tokenError) {
+                Logger.warn('⚠️ Erro ao obter token do Firebase no SocketService:', tokenError);
+            }
+
             this.socket = io(SOCKET_URL, {
+                // ✅ Passar token JWT na conexão (handshake)
+                auth: { token: userToken },
                 transports: ['websocket', 'polling'],
                 timeout: CONFIG.timeout,
                 forceNew: true,
@@ -44,7 +59,7 @@ class SocketService {
             });
 
             this.setupEventListeners();
-            
+
         } catch (error) {
             Logger.error('❌ Erro ao conectar WebSocket:', error);
         }
@@ -59,7 +74,7 @@ class SocketService {
             Logger.log('✅ Conectado ao WebSocket:', this.socket.id);
             this.isConnected = true;
             this.reconnectAttempts = 0;
-            
+
             // Emitir evento de autenticação se necessário
             this.emit('authenticate', { platform: Platform.OS });
         });
@@ -75,7 +90,7 @@ class SocketService {
             Logger.error('❌ Erro de conexão WebSocket:', error.message);
             this.isConnected = false;
             this.reconnectAttempts++;
-            
+
             if (this.reconnectAttempts >= this.maxReconnectAttempts) {
                 Logger.error('❌ Máximo de tentativas de reconexão atingido');
             }

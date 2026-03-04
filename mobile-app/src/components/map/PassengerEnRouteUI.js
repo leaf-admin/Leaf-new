@@ -2,21 +2,24 @@ import Logger from '../../utils/Logger';
 import React, { useState, useEffect } from 'react';
 import {
   View,
-  Text,
   StyleSheet,
   TouchableOpacity,
   Image,
   Dimensions,
   Alert
 } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
 import { useSelector } from 'react-redux';
+import { useTheme } from '../../common-local/theme';
+import Typography from '../design-system/Typography';
+import AnimatedButton from '../design-system/AnimatedButton';
+import { Ionicons } from '@expo/vector-icons';
 
 // import { useTranslation } from 'react-i18next';
 
 const { width } = Dimensions.get('window');
 
 export default function PassengerEnRouteUI({ booking, onDriverLocationUpdate }) {
+  const theme = useTheme();
   // Função de tradução temporária
   const t = (key) => key;
   const [driverLocation, setDriverLocation] = useState(null);
@@ -48,7 +51,7 @@ export default function PassengerEnRouteUI({ booking, onDriverLocationUpdate }) 
   };
 
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, { backgroundColor: theme.card }]}>
       {/* Header com informações do motorista */}
       <View style={styles.header}>
         <View style={styles.driverInfo}>
@@ -57,22 +60,26 @@ export default function PassengerEnRouteUI({ booking, onDriverLocationUpdate }) 
             style={styles.driverAvatar}
           />
           <View style={styles.driverDetails}>
-            <Text style={styles.driverName}>{booking?.driver_name || t('driver')}</Text>
-            <Text style={styles.carInfo}>
+            <Typography variant="h2" color={theme.text}>{booking?.driver_name || t('driver')}</Typography>
+            <Typography variant="body" color={theme.textSecondary}>
               {booking?.car_model} • {booking?.car_plate}
-            </Text>
+            </Typography>
             <View style={styles.ratingContainer}>
               <Ionicons name="star" size={16} color="#FFD700" />
-              <Text style={styles.rating}>{booking?.driver_rating || '5.0'}</Text>
+              <Typography variant="caption" color={theme.textSecondary} style={{ marginLeft: 4 }}>
+                {booking?.driver_rating || '5.0'}
+              </Typography>
             </View>
           </View>
         </View>
-        
+
         <View style={styles.statusContainer}>
-          <Text style={styles.statusText}>{t('driver_on_way')}</Text>
+          <Typography variant="label" color={theme.leafGreen || '#41D274'}>{t('driver_on_way')}</Typography>
           <View style={styles.etaContainer}>
-            <Ionicons name="time" size={16} color="#41D274" />
-            <Text style={styles.etaText}>{estimatedTime} min</Text>
+            <Ionicons name="time" size={16} color={theme.leafGreen || '#41D274'} />
+            <Typography variant="caption" color={theme.textSecondary} style={{ marginLeft: 4 }}>
+              {estimatedTime} min
+            </Typography>
           </View>
         </View>
       </View>
@@ -84,8 +91,8 @@ export default function PassengerEnRouteUI({ booking, onDriverLocationUpdate }) 
             <Ionicons name="location" size={20} color="#41D274" />
           </View>
           <View style={styles.locationText}>
-            <Text style={styles.locationLabel}>{t('pickup')}</Text>
-            <Text style={styles.locationAddress}>{booking?.pickup_address}</Text>
+            <Typography variant="caption" color={theme.textSecondary}>{t('pickup')}</Typography>
+            <Typography variant="body" color={theme.text} numberOfLines={2}>{booking?.pickup_address}</Typography>
           </View>
         </View>
 
@@ -94,8 +101,8 @@ export default function PassengerEnRouteUI({ booking, onDriverLocationUpdate }) 
             <Ionicons name="location" size={20} color="#FF6B6B" />
           </View>
           <View style={styles.locationText}>
-            <Text style={styles.locationLabel}>{t('destination')}</Text>
-            <Text style={styles.locationAddress}>{booking?.drop_address}</Text>
+            <Typography variant="caption" color={theme.textSecondary}>{t('destination')}</Typography>
+            <Typography variant="body" color={theme.text} numberOfLines={2}>{booking?.drop_address}</Typography>
           </View>
         </View>
       </View>
@@ -103,25 +110,27 @@ export default function PassengerEnRouteUI({ booking, onDriverLocationUpdate }) 
       {/* Botões de ação */}
       <View style={styles.actionButtons}>
         <TouchableOpacity style={styles.actionButton} onPress={handleContactDriver}>
-          <Ionicons name="call" size={24} color="#41D274" />
-          <Text style={styles.actionButtonText}>{t('call_driver')}</Text>
+          <Ionicons name="call" size={24} color={theme.leafGreen || '#41D274'} />
+          <Typography variant="caption" color={theme.textSecondary} style={{ marginTop: 5 }}>{t('call_driver')}</Typography>
         </TouchableOpacity>
 
         <TouchableOpacity style={styles.actionButton} onPress={() => Logger.log('Chat')}>
-          <Ionicons name="chatbubble" size={24} color="#41D274" />
-          <Text style={styles.actionButtonText}>{t('message')}</Text>
+          <Ionicons name="chatbubble" size={24} color={theme.leafGreen || '#41D274'} />
+          <Typography variant="caption" color={theme.textSecondary} style={{ marginTop: 5 }}>{t('message')}</Typography>
         </TouchableOpacity>
 
         <TouchableOpacity style={styles.actionButton} onPress={() => Logger.log('Compartilhar')}>
-          <Ionicons name="share" size={24} color="#41D274" />
-          <Text style={styles.actionButtonText}>{t('share')}</Text>
+          <Ionicons name="share" size={24} color={theme.leafGreen || '#41D274'} />
+          <Typography variant="caption" color={theme.textSecondary} style={{ marginTop: 5 }}>{t('share')}</Typography>
         </TouchableOpacity>
       </View>
 
       {/* Botão de cancelar */}
-      <TouchableOpacity style={styles.cancelButton} onPress={handleCancelRide}>
-        <Text style={styles.cancelButtonText}>{t('cancel_ride')}</Text>
-      </TouchableOpacity>
+      <AnimatedButton
+        title={t('cancel_ride')}
+        variant="danger"
+        onPress={handleCancelRide}
+      />
     </View>
   );
 }
@@ -132,15 +141,16 @@ const styles = StyleSheet.create({
     bottom: 0,
     left: 0,
     right: 0,
-    backgroundColor: '#FFFFFF',
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
-    padding: 20,
+    borderTopLeftRadius: 32,
+    borderTopRightRadius: 32,
+    padding: 24,
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: -2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 8,
-    elevation: 10,
+    shadowOffset: { width: 0, height: -10 },
+    shadowOpacity: 0.05,
+    shadowRadius: 20,
+    elevation: 15,
+    borderWidth: 1,
+    borderColor: 'rgba(0,0,0,0.02)',
   },
   header: {
     flexDirection: 'row',
@@ -154,54 +164,59 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   driverAvatar: {
-    width: 50,
-    height: 50,
-    borderRadius: 25,
+    width: 60,
+    height: 60,
+    borderRadius: 30,
     marginRight: 15,
+    backgroundColor: '#F5F5F5',
   },
   driverDetails: {
     flex: 1,
   },
-  driverName: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: '#333',
-    marginBottom: 4,
-  },
-  carInfo: {
-    fontSize: 14,
-    color: '#666',
-    marginBottom: 4,
-  },
+  // driverName: { // Removed as per new styles
+  //   fontSize: 18,
+  //   fontWeight: '600',
+  //   color: '#333',
+  //   marginBottom: 4,
+  // },
+  // carInfo: { // Removed as per new styles
+  //   fontSize: 14,
+  //   color: '#666',
+  //   marginBottom: 4,
+  // },
   ratingContainer: {
     flexDirection: 'row',
     alignItems: 'center',
+    marginTop: 2,
   },
-  rating: {
-    fontSize: 14,
-    color: '#666',
-    marginLeft: 4,
-  },
+  // rating: { // Removed as per new styles
+  //   fontSize: 14,
+  //   color: '#666',
+  //   marginLeft: 4,
+  // },
   statusContainer: {
     alignItems: 'flex-end',
   },
-  statusText: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#41D274',
-    marginBottom: 4,
-  },
+  // statusText: { // Removed as per new styles
+  //   fontSize: 16,
+  //   fontWeight: '600',
+  //   color: '#41D274',
+  //   marginBottom: 4,
+  // },
   etaContainer: {
     flexDirection: 'row',
     alignItems: 'center',
   },
-  etaText: {
-    fontSize: 14,
-    color: '#666',
-    marginLeft: 4,
-  },
+  // etaText: { // Removed as per new styles
+  //   fontSize: 14,
+  //   color: '#666',
+  //   marginLeft: 4,
+  // },
   tripInfo: {
     marginBottom: 20,
+    padding: 16,
+    backgroundColor: 'rgba(0,0,0,0.02)',
+    borderRadius: 16,
   },
   locationRow: {
     flexDirection: 'row',
@@ -217,40 +232,44 @@ const styles = StyleSheet.create({
     flex: 1,
     marginLeft: 15,
   },
-  locationLabel: {
-    fontSize: 12,
-    color: '#999',
-    marginBottom: 2,
-  },
-  locationAddress: {
-    fontSize: 14,
-    color: '#333',
-    lineHeight: 20,
-  },
+  // locationLabel: { // Removed as per new styles
+  //   fontSize: 12,
+  //   color: '#999',
+  //   marginBottom: 2,
+  // },
+  // locationAddress: { // Removed as per new styles
+  //   fontSize: 14,
+  //   color: '#333',
+  //   lineHeight: 20,
+  // },
   actionButtons: {
     flexDirection: 'row',
     justifyContent: 'space-around',
-    marginBottom: 20,
+    marginBottom: 24,
+    backgroundColor: 'rgba(0,0,0,0.02)',
+    borderRadius: 16,
+    paddingVertical: 8,
   },
   actionButton: {
     alignItems: 'center',
-    padding: 15,
+    padding: 12,
+    flex: 1,
   },
-  actionButtonText: {
-    fontSize: 12,
-    color: '#666',
-    marginTop: 5,
-  },
-  cancelButton: {
-    backgroundColor: '#FF6B6B',
-    paddingVertical: 15,
-    paddingHorizontal: 30,
-    borderRadius: 25,
-    alignItems: 'center',
-  },
-  cancelButtonText: {
-    color: '#FFFFFF',
-    fontSize: 16,
-    fontWeight: '600',
-  },
-}); 
+  // actionButtonText: { // Removed as per new styles
+  //   fontSize: 12,
+  //   color: '#666',
+  //   marginTop: 5,
+  // },
+  // cancelButton: { // Removed as per new styles
+  //   backgroundColor: '#FF6B6B',
+  //   paddingVertical: 15,
+  //   paddingHorizontal: 30,
+  //   borderRadius: 25,
+  //   alignItems: 'center',
+  // },
+  // cancelButtonText: { // Removed as per new styles
+  //   color: '#FFFFFF',
+  //   fontSize: 16,
+  //   fontWeight: '600',
+  // },
+});

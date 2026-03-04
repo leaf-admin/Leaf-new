@@ -35,6 +35,7 @@ class CompleteTripCommand extends Command {
         this.bookingId = data.bookingId;
         this.endLocation = data.endLocation;
         this.finalFare = data.finalFare;
+        this.tollFee = data.tollFee || 0; // ✅ Adicionado pedágio
         this.distance = data.distance || 0;
         this.duration = data.duration || 0;
         // ✅ VALIDAÇÃO: Garantir traceId válido
@@ -131,6 +132,31 @@ class CompleteTripCommand extends Command {
                     logger.info(`🔓 [CompleteTripCommand] Lock de motorista ${this.driverId} liberado.`);
                 }
 
+                // ✅ CAOS SCENARIO: Descontar tempo offline do motorista para resiliência de faturamento
+                try {
+                    const heartbeatService = require('../services/heartbeat-service');
+                    const offlineTimeMs = await heartbeatService.getAndResetOfflineTime(this.driverId);
+                    const offlineSeconds = Math.floor(offlineTimeMs / 1000);
+
+                    if (offlineSeconds > 0) {
+                        const originalDuration = parseInt(this.duration || 0);
+                        const offlineMinutes = offlineSeconds / 60;
+                        const defaultMinuteRate = 50; // R$ 0,50 por minuto (taxa base dinâmica aproximação)
+
+                        // O motorista deve ser penalizado/faturamento deve ser corrigido retirando o tempo ocioso offline
+                        const discountAmount = Math.floor(offlineMinutes * defaultMinuteRate);
+
+                        this.duration = Math.max(0, originalDuration - offlineSeconds);
+                        this.finalFare = Math.max(0, parseInt(this.finalFare) - discountAmount);
+
+                        logger.info(`🔌 [CompleteTripCommand] Motorista esteve offline por ${offlineSeconds}s. Desconto aplicado: R$ ${(discountAmount / 100).toFixed(2)}. Duração corrigida para ${this.duration}s.`, {
+                            bookingId: this.bookingId, driverId: this.driverId
+                        });
+                    }
+                } catch (hbErr) {
+                    logger.warn(`⚠️ [CompleteTripCommand] Falha ao processar resiliência offline: ${hbErr.message}`);
+                }
+
                 // Atualizar estado da corrida
                 await RideStateManager.updateBookingState(
                     redis,
@@ -140,6 +166,7 @@ class CompleteTripCommand extends Command {
                         driverId: this.driverId,
                         endLocation: this.endLocation,
                         finalFare: this.finalFare,
+                        tollFee: this.tollFee,
                         distance: this.distance,
                         duration: this.duration,
                         completedAt: new Date().toISOString(),
@@ -152,10 +179,14 @@ class CompleteTripCommand extends Command {
                     status: 'COMPLETED',
                     endLocation: JSON.stringify(this.endLocation),
                     finalFare: String(this.finalFare),
+                    tollFee: String(this.tollFee),
                     distance: String(this.distance),
                     duration: String(this.duration),
                     completedAt: new Date().toISOString()
                 });
+
+                // ✅ NOVO: Remover da lista de corridas ativas
+                await redis.hdel('bookings:active', this.bookingId);
 
                 // Criar evento canônico
                 const event = new RideCompletedEvent({
@@ -164,6 +195,7 @@ class CompleteTripCommand extends Command {
                     customerId: customerId,
                     endLocation: this.endLocation,
                     finalFare: this.finalFare,
+                    tollFee: this.tollFee,
                     distance: this.distance,
                     duration: this.duration,
                     traceId: this.traceId, // ✅ Incluir traceId no evento
@@ -194,6 +226,7 @@ class CompleteTripCommand extends Command {
                     event: event.toJSON(),
                     endLocation: this.endLocation,
                     finalFare: this.finalFare,
+                    tollFee: this.tollFee,
                     distance: this.distance,
                     duration: this.duration,
                     paymentDistribution: { status: 'PENDING', message: 'Processamento assíncrono em andamento' }
