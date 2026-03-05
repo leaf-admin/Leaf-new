@@ -1,5 +1,5 @@
 # Dockerfile otimizado para produção
-FROM node:18-alpine
+FROM node:20-alpine
 
 # Instalar dependências do sistema
 RUN apk add --no-cache \
@@ -34,7 +34,7 @@ EXPOSE 3001
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD curl -f http://localhost:3001/health || exit 1
+    CMD curl -f http://localhost:3001/health/liveness || exit 1
 
 # Comando de inicialização
 CMD ["node", "server.js"]

@@ -1,5 +1,6 @@
 const admin = require('firebase-admin');
 const path = require('path');
+const fs = require('fs');
 const circuitBreakerService = require('./services/circuit-breaker-service');
 const { logStructured } = require('./utils/logger');
 const traceContext = require('./utils/trace-context');
@@ -22,14 +23,31 @@ function initializeFirebase() {
             return firebaseApp;
         }
 
-        // Caminho para o arquivo de credenciais
-        const serviceAccountPath = path.join(__dirname, 'leaf-reactnative-firebase-adminsdk-fbsvc-456a95e2fc.json');
+        const databaseURL = process.env.FIREBASE_DATABASE_URL || 'https://leaf-reactnative-default-rtdb.firebaseio.com';
 
-        // Inicializar app
-        firebaseApp = admin.initializeApp({
-            credential: admin.credential.cert(serviceAccountPath),
-            databaseURL: process.env.FIREBASE_DATABASE_URL || 'https://leaf-reactnative-default-rtdb.firebaseio.com'
-        });
+        // 1) Prioriza credencial via env (ideal para App Platform/containers)
+        const serviceAccountJson =
+            process.env.FIREBASE_SERVICE_ACCOUNT_JSON ||
+            process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON;
+
+        if (serviceAccountJson) {
+            const parsed = JSON.parse(serviceAccountJson);
+            firebaseApp = admin.initializeApp({
+                credential: admin.credential.cert(parsed),
+                databaseURL
+            });
+        } else {
+            // 2) Fallback para arquivo local (ambiente dev/VPS tradicional)
+            const serviceAccountPath = path.join(__dirname, 'leaf-reactnative-firebase-adminsdk-fbsvc-456a95e2fc.json');
+            if (!fs.existsSync(serviceAccountPath)) {
+                throw new Error('Firebase credentials ausentes: defina FIREBASE_SERVICE_ACCOUNT_JSON');
+            }
+
+            firebaseApp = admin.initializeApp({
+                credential: admin.credential.cert(serviceAccountPath),
+                databaseURL
+            });
+        }
 
         // Inicializar Firestore
         firestore = admin.firestore();
