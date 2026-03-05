@@ -6,7 +6,7 @@
  * Padrão Uber/99: Um ride = um traceId do início ao fim
  */
 
-const { v4: uuidv4 } = require('uuid');
+const { randomUUID } = require('crypto');
 
 /**
  * Classe para gerenciar contexto de trace
@@ -23,7 +23,7 @@ class TraceContext {
      */
     generateTraceId(prefix = 'req') {
         const timestamp = Date.now();
-        const random = uuidv4().substring(0, 8);
+        const random = randomUUID().substring(0, 8);
         return `${prefix}-${timestamp}-${random}`;
     }
 
@@ -119,4 +119,3 @@ class TraceContext {
 const traceContext = new TraceContext();
 
 module.exports = traceContext;
-

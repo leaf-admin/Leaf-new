@@ -9,14 +9,14 @@
  * - data: object (dados específicos do evento)
  */
 
-const { v4: uuidv4 } = require('uuid');
+const { randomUUID } = require('crypto');
 
 /**
  * Classe base para eventos canônicos
  */
 class CanonicalEvent {
     constructor(eventType, data) {
-        this.eventId = uuidv4();
+        this.eventId = randomUUID();
         this.occurredAt = Date.now();
         this.eventType = eventType;
         this.data = data;
