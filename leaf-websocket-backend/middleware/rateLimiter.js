@@ -3,52 +3,10 @@
 // Status: ✅ RATE LIMITING
 
 const rateLimit = require('express-rate-limit');
-const Redis = require('ioredis');
 const { logSecurity } = require('../utils/logger');
-
-// Configuração do Redis para rate limiting
-const redis = new Redis({
-  host: process.env.REDIS_HOST || 'localhost',
-  port: process.env.REDIS_PORT || 6379,
-  password: process.env.REDIS_PASSWORD || null,
-  db: process.env.REDIS_DB || 0,
-  retryDelayOnFailover: 100,
-  maxRetriesPerRequest: 3
-});
-
-// Store personalizado para Redis
-const RedisStore = {
-  incr: async (key) => {
-    try {
-      const count = await redis.incr(key);
-      await redis.expire(key, 60); // Expirar em 60 segundos
-      return { totalHits: count };
-    } catch (error) {
-      logSecurity('error', 'Erro no Redis store', { error: error.message });
-      return { totalHits: 1 };
-    }
-  },
-  
-  decrement: async (key) => {
-    try {
-      await redis.decr(key);
-    } catch (error) {
-      logSecurity('error', 'Erro ao decrementar no Redis', { error: error.message });
-    }
-  },
-  
-  resetKey: async (key) => {
-    try {
-      await redis.del(key);
-    } catch (error) {
-      logSecurity('error', 'Erro ao resetar chave no Redis', { error: error.message });
-    }
-  }
-};
 
 // Rate limiters específicos
 const generalLimiter = rateLimit({
-  store: RedisStore,
   windowMs: 60 * 1000, // 1 minuto
   max: 100, // Máximo 100 requisições por minuto
   message: {
@@ -71,7 +29,6 @@ const generalLimiter = rateLimit({
 });
 
 const authLimiter = rateLimit({
-  store: RedisStore,
   windowMs: 15 * 60 * 1000, // 15 minutos
   max: 5, // Máximo 5 tentativas de login por 15 minutos
   message: {
@@ -93,7 +50,6 @@ const authLimiter = rateLimit({
 });
 
 const locationLimiter = rateLimit({
-  store: RedisStore,
   windowMs: 60 * 1000, // 1 minuto
   max: 30, // Máximo 30 atualizações de localização por minuto
   message: {
@@ -115,7 +71,6 @@ const locationLimiter = rateLimit({
 });
 
 const websocketLimiter = rateLimit({
-  store: RedisStore,
   windowMs: 60 * 1000, // 1 minuto
   max: 50, // Máximo 50 conexões WebSocket por minuto
   message: {
@@ -137,7 +92,6 @@ const websocketLimiter = rateLimit({
 });
 
 const paymentLimiter = rateLimit({
-  store: RedisStore,
   windowMs: 60 * 1000, // 1 minuto
   max: 10, // Máximo 10 tentativas de pagamento por minuto
   message: {
@@ -189,6 +143,5 @@ module.exports = {
   authLimiter,
   locationLimiter,
   websocketLimiter,
-  paymentLimiter,
-  redis
-}; 
+  paymentLimiter
+};
