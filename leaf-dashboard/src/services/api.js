@@ -4,7 +4,7 @@
 import { auth } from '../lib/firebase'
 import { authService } from './auth-service'
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'https://dashboard.leaf.app.br/api'
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://147.182.204.181:3001/api'
 
 // API Service Class
 class LeafAPIService {
@@ -563,4 +563,3 @@ class LeafAPIService {
 // Export singleton instance
 export const leafAPI = new LeafAPIService()
 export default leafAPI
-

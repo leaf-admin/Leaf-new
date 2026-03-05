@@ -46,7 +46,7 @@ export default function Reports() {
 
   const handleGenerateReport = async (reportId, format = 'pdf') => {
     try {
-      const url = `${process.env.NEXT_PUBLIC_API_URL || 'https://dashboard.leaf.app.br/api'}/reports/generate/${reportId}?format=${format}`
+      const url = `${process.env.NEXT_PUBLIC_API_URL || 'http://147.182.204.181:3001/api'}/reports/generate/${reportId}?format=${format}`
       window.open(url, '_blank')
     } catch (err) {
       console.error('Erro ao gerar relatório:', err)

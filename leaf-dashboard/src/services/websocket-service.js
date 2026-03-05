@@ -6,9 +6,10 @@ import { authService } from './auth-service'
 
 // Converter http:// para ws:// se necessário
 const getWebSocketUrl = () => {
-  const url = process.env.NEXT_PUBLIC_WS_URL || process.env.NEXT_PUBLIC_API_URL || 'https://dashboard.leaf.app.br'
-  // Converter https:// para wss:// (WebSocket seguro)
-  return url.replace(/^https?/, 'wss')
+  const url = process.env.NEXT_PUBLIC_WS_URL || process.env.NEXT_PUBLIC_API_URL || 'http://147.182.204.181:3001'
+  if (url.startsWith('https://')) return url.replace('https://', 'wss://')
+  if (url.startsWith('http://')) return url.replace('http://', 'ws://')
+  return url
 }
 
 const WS_BASE_URL = getWebSocketUrl()
@@ -256,4 +257,3 @@ class WebSocketService {
 // Exportar instância singleton
 export const wsService = new WebSocketService()
 export default wsService
-

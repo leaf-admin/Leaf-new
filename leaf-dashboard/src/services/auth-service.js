@@ -1,6 +1,6 @@
 // Serviço de autenticação JWT para Dashboard Admin
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'https://dashboard.leaf.app.br/api';
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://147.182.204.181:3001/api';
 
 class AuthService {
   constructor() {
@@ -277,4 +277,3 @@ class AuthService {
 
 export const authService = new AuthService();
 export default authService;
-
