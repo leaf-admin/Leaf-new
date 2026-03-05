@@ -1,0 +1,58 @@
+name: leaf-new-backend
+region: nyc
+
+services:
+  - name: leaf-websocket-backend
+    environment_slug: node-js
+    source_dir: leaf-websocket-backend
+    github:
+      branch: main
+      deploy_on_push: true
+      repo: leaf-admin/Leaf-new
+    dockerfile_path: Dockerfile
+    http_port: 3001
+    instance_count: 1
+    instance_size_slug: apps-s-1vcpu-1gb
+    run_command: node server.js
+    health_check:
+      http_path: /health/quick
+      initial_delay_seconds: 30
+      period_seconds: 20
+      timeout_seconds: 10
+      success_threshold: 1
+      failure_threshold: 5
+    routes:
+      - path: /
+    envs:
+      - key: NODE_ENV
+        scope: RUN_TIME
+        value: production
+      - key: HOST
+        scope: RUN_TIME
+        value: 0.0.0.0
+      - key: PORT
+        scope: RUN_TIME
+        value: "3001"
+      - key: KYC_USE_VPS
+        scope: RUN_TIME
+        value: "false"
+      - key: ENABLE_PLACES_CACHE
+        scope: RUN_TIME
+        value: "false"
+      - key: FIREBASE_DATABASE_URL
+        scope: RUN_TIME
+        value: https://leaf-reactnative-default-rtdb.firebaseio.com
+      - key: REDIS_HOST
+        scope: RUN_TIME
+        type: SECRET
+        value: <SET_IN_DO_APP_SETTINGS>
+      - key: REDIS_PORT
+        scope: RUN_TIME
+        value: "6379"
+      - key: REDIS_PASSWORD
+        scope: RUN_TIME
+        type: SECRET
+        value: <SET_IN_DO_APP_SETTINGS>
+      - key: REDIS_DB
+        scope: RUN_TIME
+        value: "0"
