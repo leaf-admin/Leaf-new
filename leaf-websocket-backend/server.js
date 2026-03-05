@@ -7,6 +7,7 @@ const socketIo = require('socket.io');
 const cluster = require('cluster');
 const os = require('os');
 const cors = require('cors');
+const admin = require('firebase-admin');
 
 // Importar GraphQL
 const { applyMiddleware } = require('./graphql/server');
@@ -1279,19 +1280,31 @@ io.on('connection', async (socket) => {
             const isProd = process.env.NODE_ENV === 'production';
             let verifiedUid = null;
 
-            if (isProd || data.token) {
-                if (!data.token) {
+            const handshakeTokenRaw =
+                socket.handshake?.auth?.token ||
+                socket.handshake?.headers?.authorization?.replace(/^Bearer\s+/i, '') ||
+                '';
+            const authTokenRaw = data?.token || handshakeTokenRaw;
+            const authToken = typeof authTokenRaw === 'string' ? authTokenRaw.trim() : '';
+
+            if (isProd || authToken) {
+                if (!authToken) {
                     socket.emit('authentication_error', { message: 'Token de autenticação ausente' });
+                    socket.emit('auth_error', { message: 'Token de autenticação ausente' });
                     socket.disconnect();
                     return;
                 }
 
                 try {
-                    const decodedToken = await admin.auth().verifyIdToken(data.token);
+                    const decodedToken = await admin.auth().verifyIdToken(authToken);
                     verifiedUid = decodedToken.uid;
                 } catch (authError) {
-                    logStructured('warn', 'Token de autenticação inválido ou expirado', { error: authError.message });
+                    logStructured('warn', `Token de autenticação inválido ou expirado: ${authError.message}`, {
+                        service: 'websocket',
+                        socketId: socket.id
+                    });
                     socket.emit('authentication_error', { message: 'Token inválido ou expirado' });
+                    socket.emit('auth_error', { message: 'Token inválido ou expirado' });
                     socket.disconnect();
                     return;
                 }
