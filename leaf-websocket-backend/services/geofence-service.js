@@ -6,6 +6,8 @@
  */
 
 const { logger } = require('../utils/logger');
+const fs = require('fs');
+const path = require('path');
 
 class GeofenceService {
     constructor() {
@@ -27,6 +29,23 @@ class GeofenceService {
      * @returns {Array<Array<number>>} Array de coordenadas [lng, lat]
      */
     getDefaultRegion() {
+        // Priorizar polígono oficial do projeto para manter consistência
+        // com outras validações (ex.: RequestRideCommand -> utils/geofence.js).
+        try {
+            const filePath = path.join(__dirname, '..', 'config', 'geofence.json');
+            if (fs.existsSync(filePath)) {
+                const geojson = JSON.parse(fs.readFileSync(filePath, 'utf8'));
+                const coords = geojson?.features?.[0]?.geometry?.coordinates?.[0];
+                if (Array.isArray(coords) && coords.length >= 4) {
+                    return coords;
+                }
+            }
+        } catch (error) {
+            logger.warn('⚠️ Falha ao carregar config/geofence.json no GeofenceService, usando fallback SP', {
+                error: error.message
+            });
+        }
+
         // Região de São Paulo (área metropolitana aproximada)
         // Formato: [longitude, latitude] - GeoJSON format
         return [
@@ -208,4 +227,3 @@ class GeofenceService {
 // Exportar instância singleton
 const geofenceService = new GeofenceService();
 module.exports = geofenceService;
-
