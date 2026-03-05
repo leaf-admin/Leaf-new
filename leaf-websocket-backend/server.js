@@ -169,6 +169,14 @@ initializeTracer();
 const app = express();
 const server = http.createServer(app);
 
+// Health check ultra-rápido antes de middlewares pesados (rate limit/redis/etc)
+app.get('/health/liveness', (_req, res) => {
+    res.status(200).json({
+        status: 'alive',
+        timestamp: new Date().toISOString()
+    });
+});
+
 // ✅ Configuração CORS segura - apenas origens permitidas
 const allowedOrigins = [
     // Produção
