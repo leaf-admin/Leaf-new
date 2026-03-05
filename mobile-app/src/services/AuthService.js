@@ -5,7 +5,7 @@ import auth from '@react-native-firebase/auth';
 
 class AuthService {
     constructor() {
-        this.baseURL = 'https://api.leaf.app.br/api';
+        this.baseURL = 'http://147.182.204.181:3001/api';
         this.currentUser = null;
         this.idToken = null;
     }

@@ -5,7 +5,7 @@ import { Platform } from 'react-native';
 class RedisLocationService {
     constructor() {
         this.isAvailable = Platform.OS === 'web';
-        this.baseUrl = 'https://api.leaf.app.br';
+        this.baseUrl = 'http://147.182.204.181:3001';
     }
 
     // Inicializar serviço

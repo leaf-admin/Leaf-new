@@ -4,7 +4,7 @@ import { Platform } from 'react-native';
 
 
 // Configuração da API base
-const API_BASE_URL = 'https://api.leaf.app.br'; // VPS - API
+const API_BASE_URL = 'http://147.182.204.181:3001'; // VPS - API
 
 class RedisApiService {
     constructor() {

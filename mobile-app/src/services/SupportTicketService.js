@@ -9,7 +9,7 @@ class SupportTicketService {
         this.ticketsRef = firebase.database.ref('support_tickets');
         this.messagesRef = firebase.database.ref('support_messages');
         this.agentsRef = firebase.database.ref('support_agents');
-        this.baseURL = 'https://api.leaf.app.br/api/support'; // URL do backend VPS
+        this.baseURL = 'http://147.182.204.181:3001/api/support'; // URL do backend VPS
     }
 
     // ===== CRIAÇÃO E GESTÃO DE TICKETS =====

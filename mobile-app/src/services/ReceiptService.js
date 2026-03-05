@@ -27,7 +27,7 @@ class ReceiptService {
             // Se não encontrou no Realtime Database, tentar buscar via API
             // (fallback para recibos antigos que podem estar apenas no backend)
             try {
-                const response = await fetch(`https://api.leaf.app.br/api/receipts/${rideId}`);
+                const response = await fetch(`http://147.182.204.181:3001/api/receipts/${rideId}`);
                 if (response.ok) {
                     const data = await response.json();
                     if (data.success && data.receipt) {

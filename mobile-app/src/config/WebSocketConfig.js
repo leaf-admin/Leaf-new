@@ -7,12 +7,12 @@ const WEBSOCKET_CONFIG = {
   LOCAL: {
     ANDROID_EMULATOR: 'http://10.0.2.2:3001',
     IOS_SIMULATOR: 'http://localhost:3001',
-    DEVICE: process.env.EXPO_PUBLIC_WS_URL || 'https://api.leaf.app.br',
+    DEVICE: process.env.EXPO_PUBLIC_WS_URL || 'http://147.182.204.181:3001',
   },
 
   // Para produção
   PRODUCTION: {
-    URL: process.env.EXPO_PUBLIC_WS_URL || 'https://api.leaf.app.br',
+    URL: process.env.EXPO_PUBLIC_WS_URL || 'http://147.182.204.181:3001',
   },
 
   // Configurações de conexão
@@ -41,7 +41,7 @@ const WEBSOCKET_CONFIG = {
 
 // Determinar URL baseada na plataforma e ambiente
 const getWebSocketURL = () => {
-  return process.env.EXPO_PUBLIC_WS_URL || 'https://api.leaf.app.br';
+  return process.env.EXPO_PUBLIC_WS_URL || 'http://147.182.204.181:3001';
 
   // Código antigo (comentado para referência):
   // if (__DEV__) {
