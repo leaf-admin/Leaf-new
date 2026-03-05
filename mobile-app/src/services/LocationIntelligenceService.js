@@ -10,7 +10,7 @@ import { Alert } from 'react-native';
 class LocationIntelligenceService {
   constructor() {
     // URLs dos serviços
-    this.vultrUrl = 'https://api.leaf.app.br';
+    this.vultrUrl = 'http://147.182.204.181:3001';
     this.hostingerUrl = 'https://seu-dominio-hostinger.com'; // TODO: Configurar
     
     // Timeout mais agressivo para não atrasar o Google Places

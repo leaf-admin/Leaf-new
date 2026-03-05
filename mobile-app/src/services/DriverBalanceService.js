@@ -1,6 +1,5 @@
 import Logger from '../utils/Logger';
 import { getSelfHostedApiUrl } from '../config/ApiConfig';
-import { Platform } from 'react-native';
 
 
 /**
@@ -8,16 +7,7 @@ import { Platform } from 'react-native';
  */
 class DriverBalanceService {
   constructor() {
-    // ✅ CORREÇÃO: Para Android em dev, usar HTTP com IP direto (mesmo problema do WebSocket)
-    // getSelfHostedApiUrl retorna a URL base, então adicionamos /api/payment
-    let baseApiUrl = getSelfHostedApiUrl('/api/payment');
-    
-    // ✅ CORREÇÃO: Se for Android e estiver em dev, usar IP direto com HTTP
-    if (Platform.OS === 'android' && __DEV__) {
-      baseApiUrl = baseApiUrl.replace('https://api.leaf.app.br', 'http://147.93.66.253:3001');
-    }
-    
-    this.baseUrl = baseApiUrl;
+    this.baseUrl = getSelfHostedApiUrl('/api/payment');
     Logger.log('🔗 DriverBalanceService baseUrl:', this.baseUrl);
   }
 
@@ -166,6 +156,4 @@ class DriverBalanceService {
 }
 
 export default new DriverBalanceService();
-
-
 

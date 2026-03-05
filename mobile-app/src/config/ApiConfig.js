@@ -8,12 +8,12 @@ const ENV = {
   development: {
     // 🏠 SELF-HOSTED VPS - PRINCIPAL
     selfHostedApi: {
-      web: process.env.EXPO_PUBLIC_API_URL || 'https://api.leaf.app.br',
-      mobile: process.env.EXPO_PUBLIC_API_URL || 'https://api.leaf.app.br'
+      web: process.env.EXPO_PUBLIC_API_URL || 'http://147.182.204.181:3001',
+      mobile: process.env.EXPO_PUBLIC_API_URL || 'http://147.182.204.181:3001'
     },
     selfHostedWebSocket: {
-      web: process.env.EXPO_PUBLIC_WS_URL || 'http://localhost:3001',
-      mobile: process.env.EXPO_PUBLIC_WS_URL || 'http://localhost:3001'
+      web: process.env.EXPO_PUBLIC_WS_URL || 'http://147.182.204.181:3001',
+      mobile: process.env.EXPO_PUBLIC_WS_URL || 'http://147.182.204.181:3001'
     },
     // 🔄 FALLBACK - Firebase Functions (se necessário)
     firebaseFunctions: {
@@ -29,12 +29,12 @@ const ENV = {
   production: {
     // 🏠 SELF-HOSTED VPS - PRODUÇÃO
     selfHostedApi: {
-      web: process.env.EXPO_PUBLIC_API_URL || 'https://api.leaf.app.br',
-      mobile: process.env.EXPO_PUBLIC_API_URL || 'https://api.leaf.app.br'
+      web: process.env.EXPO_PUBLIC_API_URL || 'http://147.182.204.181:3001',
+      mobile: process.env.EXPO_PUBLIC_API_URL || 'http://147.182.204.181:3001'
     },
     selfHostedWebSocket: {
-      web: process.env.EXPO_PUBLIC_WS_URL || 'https://api.leaf.app.br',
-      mobile: process.env.EXPO_PUBLIC_WS_URL || 'https://api.leaf.app.br'
+      web: process.env.EXPO_PUBLIC_WS_URL || 'http://147.182.204.181:3001',
+      mobile: process.env.EXPO_PUBLIC_WS_URL || 'http://147.182.204.181:3001'
     },
     // 🔄 FALLBACK - Firebase Functions
     firebaseFunctions: {

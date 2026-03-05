@@ -8,7 +8,7 @@ import { Platform } from 'react-native';
 // Configurações de rede
 const NETWORK_CONFIG = {
     // IP do servidor (VPS)
-    LOCAL_IP: 'api.leaf.app.br', // VPS - API
+    LOCAL_IP: '147.182.204.181', // VPS - API
 
     // Portas dos serviços
     PORTS: {
@@ -19,16 +19,16 @@ const NETWORK_CONFIG = {
 
     // URLs de desenvolvimento (VPS)
     DEV_URLS: {
-        WEBSOCKET: `https://api.leaf.app.br`, // VPS - WebSocket (mesmo domínio da API)
-        API: `https://api.leaf.app.br`,
-        NOTIFICATIONS: `https://api.leaf.app.br`
+        WEBSOCKET: `http://147.182.204.181:3001`,
+        API: `http://147.182.204.181:3001`,
+        NOTIFICATIONS: `http://147.182.204.181:3001`
     },
 
     // URLs de produção (VPS - IP DIRETO)
     PROD_URLS: {
-        WEBSOCKET: process.env.EXPO_PUBLIC_WS_URL || 'https://api.leaf.app.br',
-        API: process.env.EXPO_PUBLIC_API_URL || 'https://api.leaf.app.br',
-        NOTIFICATIONS: process.env.EXPO_PUBLIC_API_URL || 'https://api.leaf.app.br'
+        WEBSOCKET: process.env.EXPO_PUBLIC_WS_URL || 'http://147.182.204.181:3001',
+        API: process.env.EXPO_PUBLIC_API_URL || 'http://147.182.204.181:3001',
+        NOTIFICATIONS: process.env.EXPO_PUBLIC_API_URL || 'http://147.182.204.181:3001'
     }
 };
 
@@ -39,12 +39,12 @@ export const getWebSocketURL = () => {
 
 export const getApiURL = () => {
     // ✅ SEMPRE usar VPS
-    return NETWORK_CONFIG.PROD_URLS.API; // https://api.leaf.app.br
+    return NETWORK_CONFIG.PROD_URLS.API;
 };
 
 export const getNotificationsURL = () => {
     // ✅ SEMPRE usar VPS
-    return NETWORK_CONFIG.PROD_URLS.NOTIFICATIONS; // https://api.leaf.app.br
+    return NETWORK_CONFIG.PROD_URLS.NOTIFICATIONS;
 };
 
 // Função para obter IP local automaticamente (futuro)
@@ -95,5 +95,4 @@ IMPORTANTE:
 - Certifique-se que o backend está rodando na porta 3001
 - Ambos (PC e dispositivo) devem estar na mesma rede Wi-Fi
 */
-
 
