@@ -12,9 +12,29 @@ try {
   logStructured('warn', '⚠️ Firebase config não encontrado', { service: 'metrics-routes' });
 }
 
-const landingMetricsRef = admin.firestore().collection('metrics').doc('landing');
+const getLandingMetricsRef = () => {
+  // Evita crash de boot quando Firebase ainda não está disponível no ambiente
+  if (admin.apps.length === 0 && firebaseConfig && firebaseConfig.initializeFirebase) {
+    firebaseConfig.initializeFirebase();
+  }
+
+  if (admin.apps.length === 0) {
+    return null;
+  }
+
+  return admin.firestore().collection('metrics').doc('landing');
+};
 
 const getLandingMetrics = async () => {
+  const landingMetricsRef = getLandingMetricsRef();
+  if (!landingMetricsRef) {
+    return {
+      waitlistCount: 0,
+      calculatorSimulations: 0,
+      updatedAt: null
+    };
+  }
+
   const snapshot = await landingMetricsRef.get();
 
   if (!snapshot.exists) {
@@ -36,6 +56,11 @@ const getLandingMetrics = async () => {
 
 router.post('/api/metrics/calculator', async (req, res) => {
   try {
+    const landingMetricsRef = getLandingMetricsRef();
+    if (!landingMetricsRef) {
+      return res.status(503).json({ error: 'Firebase indisponível no momento' });
+    }
+
     await landingMetricsRef.set({
       calculatorSimulations: admin.firestore.FieldValue.increment(1),
       updatedAt: admin.firestore.FieldValue.serverTimestamp()
@@ -1558,7 +1583,6 @@ router.get('/api/metrics/simulation/run', async (req, res) => {
 });
 
 module.exports = router;
-
 
 
 
