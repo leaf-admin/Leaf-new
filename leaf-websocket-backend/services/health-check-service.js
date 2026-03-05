@@ -70,8 +70,8 @@ class HealthCheckService {
       await this.redis.ping();
       const responseTime = Date.now() - startTime;
 
-      // Verificar latência
-      const status = responseTime > 100 ? 'warning' : 'healthy';
+      // Verificar latência (limiar mais realista para ambiente com carga)
+      const status = responseTime > 300 ? 'warning' : 'healthy';
 
       return {
         status,
@@ -298,7 +298,8 @@ class HealthCheckService {
       const redisCheck = await this.checkRedis();
       
       return {
-        status: redisCheck.status === 'healthy' ? 'healthy' : 'unhealthy',
+        // warning ainda significa backend pronto para tráfego
+        status: redisCheck.status === 'unhealthy' ? 'unhealthy' : 'healthy',
         timestamp: new Date().toISOString(),
         checks: {
           redis: redisCheck
@@ -318,4 +319,3 @@ class HealthCheckService {
 const healthCheckService = new HealthCheckService();
 
 module.exports = healthCheckService;
-
