@@ -2,7 +2,7 @@
 export const config = {
   api: {
     // Prioridade: variável de ambiente > servidor remoto (VPS Hostinger)
-    baseUrl: process.env.NEXT_PUBLIC_API_URL || 'https://dashboard.leaf.app.br/api',
+    baseUrl: process.env.NEXT_PUBLIC_API_URL || 'http://147.182.204.181:3001/api',
     timeout: 10000,
     retries: 3
   },
@@ -25,4 +25,3 @@ export const config = {
 }
 
 export default config
-
