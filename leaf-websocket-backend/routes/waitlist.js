@@ -4,10 +4,26 @@ const admin = require('firebase-admin');
 const { logger } = require('../utils/logger');
 const rateLimit = require('express-rate-limit');
 
-const landingMetricsRef = admin.firestore().collection('metrics').doc('landing');
+let firebaseConfig = null;
+try {
+  firebaseConfig = require('../firebase-config');
+} catch (_e) {}
+
+const getLandingMetricsRef = () => {
+  if (admin.apps.length === 0 && firebaseConfig && firebaseConfig.initializeFirebase) {
+    firebaseConfig.initializeFirebase();
+  }
+  if (admin.apps.length === 0) {
+    return null;
+  }
+  return admin.firestore().collection('metrics').doc('landing');
+};
 
 const incrementLandingMetric = async (field) => {
   try {
+    const landingMetricsRef = getLandingMetricsRef();
+    if (!landingMetricsRef) return;
+
     await landingMetricsRef.set({
       [field]: admin.firestore.FieldValue.increment(1),
       updatedAt: admin.firestore.FieldValue.serverTimestamp()
@@ -1114,7 +1130,6 @@ router.delete('/api/waitlist/landing/:id', requireFirebase, requireAdmin, async 
 });
 
 module.exports = router;
-
 
 
 
