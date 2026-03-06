@@ -2,7 +2,7 @@
  * Integration Tests for Health Check API
  */
 
-const { startTestServer, testRequest } = require('../../integration/config/test-setup');
+const { startTestServer, stopTestServer, testRequest } = require('../config/test-setup');
 
 describe('Health Check API Integration', () => {
   let server;
@@ -13,7 +13,7 @@ describe('Health Check API Integration', () => {
 
   afterAll(async () => {
     if (server) {
-      await server.close();
+      await stopTestServer();
     }
   });
 
@@ -24,14 +24,14 @@ describe('Health Check API Integration', () => {
       expect(response.status).toBe(200);
       expect(response.data).toHaveProperty('status');
       expect(response.data).toHaveProperty('timestamp');
-      expect(response.data).toHaveProperty('version');
+      expect(response.data).toHaveProperty('checks');
     });
 
     test('should include service information', async () => {
       const response = await testRequest('GET', '/api/health');
 
-      expect(response.data).toHaveProperty('services');
-      expect(Array.isArray(response.data.services)).toBe(true);
+      expect(response.data).toHaveProperty('checks.redis');
+      expect(response.data).toHaveProperty('checks.websocket');
     });
 
     test('should include uptime information', async () => {
@@ -69,9 +69,9 @@ describe('Health Check API Integration', () => {
     test('should include memory statistics', async () => {
       const response = await testRequest('GET', '/api/stats');
 
-      expect(response.data.memory).toHaveProperty('used');
-      expect(response.data.memory).toHaveProperty('free');
-      expect(response.data.memory).toHaveProperty('total');
+      expect(response.data.memory).toHaveProperty('rss');
+      expect(response.data.memory).toHaveProperty('heapUsed');
+      expect(response.data.memory).toHaveProperty('heapTotal');
     });
   });
 

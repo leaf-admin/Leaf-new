@@ -88,24 +88,37 @@ jest.mock('firebase-admin', () => ({
 // Mock do ioredis
 jest.mock('ioredis', () => {
   return jest.fn().mockImplementation(() => ({
-    connect: jest.fn(),
-    disconnect: jest.fn(),
+    connect: jest.fn().mockResolvedValue(undefined),
+    disconnect: jest.fn().mockResolvedValue(undefined),
     ping: jest.fn().mockResolvedValue('PONG'),
     get: jest.fn(),
     set: jest.fn(),
     del: jest.fn(),
+    expire: jest.fn(),
+    xadd: jest.fn(),
     hget: jest.fn(),
     hgetall: jest.fn(),
     hset: jest.fn(),
+    hdel: jest.fn(),
+    sadd: jest.fn(),
+    srem: jest.fn(),
+    scard: jest.fn(),
+    keys: jest.fn().mockResolvedValue([]),
     zadd: jest.fn(),
     zrem: jest.fn(),
     geoadd: jest.fn(),
     georadius: jest.fn(),
     publish: jest.fn(),
     subscribe: jest.fn(),
+    once: jest.fn(),
     on: jest.fn(),
     emit: jest.fn(),
-    status: 'ready'
+    status: 'ready',
+    options: {
+      host: 'localhost',
+      port: 6379,
+      db: 0
+    }
   }));
 });
 
@@ -168,4 +181,3 @@ global.createMockRes = (overrides = {}) => {
 
 // Helper para criar mock do next function
 global.createMockNext = () => jest.fn();
-
