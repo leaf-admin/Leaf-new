@@ -8,6 +8,7 @@ import {
     getDistanceMatrix as googleGetDistanceMatrix,
     getDirectionsApi as googleGetDirectionsApi
 } from './GoogleAPIFunctions';
+import { MAP_PROVIDER_CONFIG } from '../../config/mapProvider';
 
 // Utility for fetching from OSM / Nominatim with timeout
 const fetchOsm = async (url, timeoutMs = 5000) => {
@@ -31,6 +32,9 @@ const fetchOsm = async (url, timeoutMs = 5000) => {
 };
 
 export const fetchPlacesAutocomplete = async (searchKeyword, sessionToken, location = null) => {
+    if (!MAP_PROVIDER_CONFIG.enableOsmApiFallback) {
+        return googleFetchPlacesAutocomplete(searchKeyword, sessionToken, location);
+    }
     Logger.log('🔍 OSM fetchPlacesAutocomplete:', { searchKeyword });
     try {
         if (!searchKeyword || searchKeyword.trim().length < 3) return [];
@@ -68,6 +72,9 @@ export const fetchPlacesAutocomplete = async (searchKeyword, sessionToken, locat
 };
 
 export const fetchCoordsfromPlace = async (place_id) => {
+    if (!MAP_PROVIDER_CONFIG.enableOsmApiFallback) {
+        return googleFetchCoordsfromPlace(place_id);
+    }
     Logger.log('📍 OSM fetchCoordsfromPlace:', { place_id });
     try {
         // Since we injected the location directly in fetchPlacesAutocomplete for OSM, if it's an OSM result, we probably don't need to call this or we handle it gracefully in the calling component.
@@ -85,6 +92,9 @@ export const fetchCoordsfromPlace = async (place_id) => {
 };
 
 export const fetchAddressfromCoords = async (latlng) => {
+    if (!MAP_PROVIDER_CONFIG.enableOsmApiFallback) {
+        return googleFetchAddressfromCoords(latlng);
+    }
     Logger.log('🏠 OSM fetchAddressfromCoords:', latlng);
     try {
         let lat, lng;
@@ -119,6 +129,9 @@ export const detectInputType = (text) => {
 };
 
 export const fetchGeocodeAddress = async (address, location = null) => {
+    if (!MAP_PROVIDER_CONFIG.enableOsmApiFallback) {
+        return googleFetchGeocodeAddress(address, location);
+    }
     Logger.log('📍 OSM fetchGeocodeAddress:', { address });
     try {
         // Same logic as autocomplete for OSM Nominatim as it handles both search and geocoding
@@ -130,6 +143,9 @@ export const fetchGeocodeAddress = async (address, location = null) => {
 };
 
 export const getDistanceMatrix = async (startLoc, destLoc) => {
+    if (!MAP_PROVIDER_CONFIG.enableOsmApiFallback) {
+        return googleGetDistanceMatrix(startLoc, destLoc);
+    }
     Logger.log('📐 OSM getDistanceMatrix:', { startLoc, destLoc });
     try {
         // Distance matrix goes to standard Directions API in OSRM
@@ -144,6 +160,9 @@ export const getDistanceMatrix = async (startLoc, destLoc) => {
 import * as DecodePolyLine from '@mapbox/polyline';
 
 export const getDirectionsApi = async (startLoc, destLoc, waypoints) => {
+    if (!MAP_PROVIDER_CONFIG.enableOsmApiFallback) {
+        return googleGetDirectionsApi(startLoc, destLoc, waypoints);
+    }
     Logger.log('🚀 OSM getDirectionsApi:', { startLoc, destLoc });
     try {
         const origin = String(startLoc).trim().replace(/\s+/g, '');

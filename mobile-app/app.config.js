@@ -6,19 +6,8 @@ module.exports = {
     description: AppConfig.app_description,
     owner: "leaf-app",
     slug: "leafapp-reactnative",
-    privacy: "public",
     runtimeVersion: AppConfig.ios_app_version,
     scheme: "leafapp",
-    android: {
-        ...this.android,
-        intentFilters: [{
-            action: "VIEW",
-            data: {
-                scheme: "br.com.leaf.ride"
-            },
-            category: ["BROWSABLE", "DEFAULT"]
-        }]
-    },
     platforms: [
         "ios",
         "android"
@@ -57,21 +46,18 @@ module.exports = {
             backgroundColor: "#1A330E"
         },
         jsEngine: "hermes",
+        intentFilters: [{
+            action: "VIEW",
+            data: {
+                scheme: "br.com.leaf.ride"
+            },
+            category: ["BROWSABLE", "DEFAULT"]
+        }],
         config: {
             googleMaps: {
                 apiKey: GoogleMapApiConfig.android
             }
         }
-    },
-    android: {
-        package: "br.com.leaf.ride",
-        googleServicesFile: "./google-services.json",
-        icon: "./assets/icon.png",
-        adaptiveIcon: {
-            foregroundImage: "./assets/adaptive-icon.png",
-            backgroundColor: "#1A330E"
-        },
-        jsEngine: "hermes"
     },
     ios: {
         bundleIdentifier: "br.com.leaf.ride",

@@ -19,6 +19,7 @@ import RadioForm from 'react-native-simple-radio-button';
 import OtherPerson from './OtherPerson';
 import { fonts } from '../common/font';
 import DeviceInfo from 'react-native-device-info';
+import { MAP_PROVIDER_CONFIG } from '../config/mapProvider';
 
 const hasNotch = DeviceInfo.hasNotch();
 
@@ -87,11 +88,13 @@ export default function TaxiModal(props) {
                                 }}
                                 minZoomLevel={3}
                             >
-                                <UrlTile
-                                    urlTemplate="https://a.tile.openstreetmap.org/{z}/{x}/{y}.png"
-                                    maximumZ={19}
-                                    flipY={false}
-                                />
+                                {MAP_PROVIDER_CONFIG.enableOsmTiles ? (
+                                    <UrlTile
+                                        urlTemplate="https://a.tile.openstreetmap.org/{z}/{x}/{y}.png"
+                                        maximumZ={19}
+                                        flipY={false}
+                                    />
+                                ) : null}
                                 <Marker
                                     coordinate={{ latitude: (tripdata.pickup.lat), longitude: (tripdata.pickup.lng) }}
                                     title={tripdata.pickup.add}

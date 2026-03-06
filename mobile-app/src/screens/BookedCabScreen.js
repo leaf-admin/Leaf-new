@@ -1013,12 +1013,6 @@ export default function BookedCabScreen(props) {
                         }}
                         minZoomLevel={3}
                     >
-                        <UrlTile
-                            urlTemplate="https://a.tile.openstreetmap.org/{z}/{x}/{y}.png"
-                            maximumZ={19}
-                            flipY={false}
-                        />
-
                         {(curBooking.status == 'ACCEPTED' || curBooking.status == 'ARRIVED' || curBooking.status == 'STARTED') && lastLocation ?
                             <Marker.Animated
                                 coordinate={new AnimatedRegion({

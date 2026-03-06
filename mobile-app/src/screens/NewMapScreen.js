@@ -1,11 +1,12 @@
+import React, { useEffect, useRef, useState } from 'react';
 import { View, StyleSheet, Image, TouchableOpacity, Alert, Dimensions, Modal, ActivityIndicator } from 'react-native';
-import MapView, { PROVIDER_GOOGLE, Marker, Polyline, Callout, Circle, UrlTile } from 'react-native-maps';
+import MapView, { PROVIDER_GOOGLE, Marker, Polyline, Callout, Circle } from 'react-native-maps';
 import { useSelector, useDispatch } from 'react-redux';
 import { Ionicons } from '@expo/vector-icons';
 import * as Location from 'expo-location';
 import { useTheme } from '../common-local/theme';
-import Typography from '../components/design-system/Typography';
-import AnimatedButton from '../components/design-system/AnimatedButton';
+import { Typography } from '../components/design-system/Typography';
+import { AnimatedButton } from '../components/design-system/AnimatedButton';
 import { GoogleMapApiConfig } from '../../config/GoogleMapApiConfig';
 
 import PassengerUI from '../components/map/PassengerUI';

@@ -4,7 +4,6 @@ export default {
     owner: "leaf-app",
     slug: "leafapp-reactnative",
     scheme: "leafapp-reactnative",
-    privacy: "public",
     runtimeVersion: "1.0.0",
     platforms: [
         "ios",

@@ -160,12 +160,16 @@ const PhoneInputStep = ({ onSwitchToRegister, onVerificationSent, onUserExists }
                 </TouchableOpacity>
 
                 <AnimatedInput
+                    testID="auth-phone-input"
                     placeholder="Número"
                     keyboardType="phone-pad"
                     value={phoneNumber}
                     onChangeText={setPhoneNumber}
                     maxLength={11}
                     editable={!loading && !checking}
+                    returnKeyType="done"
+                    onSubmitEditing={handleContinue}
+                    blurOnSubmit={false}
                     containerStyle={{ flex: 1, marginBottom: 0 }}
                     style={styles.input}
                 />
@@ -173,6 +177,8 @@ const PhoneInputStep = ({ onSwitchToRegister, onVerificationSent, onUserExists }
 
             <View style={styles.footer}>
                 <AnimatedButton
+                    testID="auth-continue-btn"
+                    accessibilityLabel="auth-continue-btn"
                     title="Continuar"
                     onPress={handleContinue}
                     loading={loading || checking}

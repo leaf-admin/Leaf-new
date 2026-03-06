@@ -24,6 +24,7 @@ import * as chatactions from './actions/chatactions';
 import * as withdrawactions from './actions/withdrawactions';
 import * as DateFunctions from './other/DateFunctions';
 import * as OSMAPIFunctions from './other/OSMAPIFunctions';
+import * as GoogleAPIFunctions from './other/GoogleAPIFunctions';
 import * as GeoFunctions from './other/GeoFunctions';
 import * as languageactions from './actions/languageactions';
 import * as addressactions from './actions/addressactions';
@@ -60,6 +61,7 @@ const api = {
     ...withdrawactions,
     ...DateFunctions,
     ...OSMAPIFunctions,
+    ...GoogleAPIFunctions,
     ...GeoFunctions,
     ...languageactions,
     ...NotificationFunctions,

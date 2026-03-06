@@ -4,6 +4,7 @@ import Logger from '../utils/Logger';
 const { costMonitoringService } = require('./CostMonitoringService');
 const apiKeys = require('../../config/api-keys');
 const { RedisApiService } = require('./RedisApiService');
+const { MAP_PROVIDER_CONFIG } = require('../config/mapProvider');
 
 
 class HybridMapsService {
@@ -89,10 +90,16 @@ class HybridMapsService {
         
         // Estratégia de provedores (ordem de prioridade)
         this.providerStrategy = {
-            geocoding: ['google', 'mapbox', 'locationiq', 'osm'], // Google para precisão
-            directions: ['osm', 'mapbox', 'locationiq', 'google'], // OSM gratuito primeiro
-            reverse: ['osm', 'locationiq', 'mapbox', 'google'], // OSM gratuito primeiro
-            places: ['google'] // Apenas Google (dados ricos)
+            geocoding: MAP_PROVIDER_CONFIG.enableOsmApiFallback
+                ? ['google', 'mapbox', 'locationiq', 'osm']
+                : ['google', 'mapbox', 'locationiq'],
+            directions: MAP_PROVIDER_CONFIG.enableOsmApiFallback
+                ? ['google', 'mapbox', 'locationiq', 'osm']
+                : ['google', 'mapbox', 'locationiq'],
+            reverse: MAP_PROVIDER_CONFIG.enableOsmApiFallback
+                ? ['google', 'locationiq', 'mapbox', 'osm']
+                : ['google', 'locationiq', 'mapbox'],
+            places: ['google']
         };
         
         Logger.log('🗺️ HybridMapsService integrado com Redis e Firebase');

@@ -52,6 +52,7 @@ import PixPaymentBottomSheet from '../components/PixPaymentBottomSheet';
 import DriverSearchBottomSheet from '../components/DriverSearchBottomSheet';
 import { SkeletonLoader, CarSkeletonCard, LoadingSpinner, ProgressBar } from '../components/LoadingStates';
 import { useResponsiveLayout, ResponsiveGrid } from '../components/ResponsiveLayout';
+import { MAP_PROVIDER_CONFIG } from '../config/mapProvider';
 
 
 const hasNotch = DeviceInfo.hasNotch();
@@ -2548,11 +2549,13 @@ export default function MapScreen(props) {
                         onMapReady={() => setMapReady(true)}
                         onLayout={() => setMapLayout(true)}
                     >
-                        <UrlTile
-                            urlTemplate="https://a.tile.openstreetmap.org/{z}/{x}/{y}.png"
-                            maximumZ={19}
-                            flipY={false}
-                        />
+                        {MAP_PROVIDER_CONFIG.enableOsmTiles ? (
+                            <UrlTile
+                                urlTemplate="https://a.tile.openstreetmap.org/{z}/{x}/{y}.png"
+                                maximumZ={19}
+                                flipY={false}
+                            />
+                        ) : null}
                         {CarMarkers}
                         {RouteMarkers}
                         {RoutePolyline}

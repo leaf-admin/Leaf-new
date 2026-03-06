@@ -164,11 +164,6 @@ export default function RideList(props) {
                                     longitudeDelta: 0.0421,
                                 }}
                             >
-                                <UrlTile
-                                    urlTemplate="https://a.tile.openstreetmap.org/{z}/{x}/{y}.png"
-                                    maximumZ={19}
-                                    flipY={false}
-                                />
                                 <Marker
                                     coordinate={{ latitude: item.pickup.lat, longitude: item.pickup.lng }}
                                     title={item.pickup.add}

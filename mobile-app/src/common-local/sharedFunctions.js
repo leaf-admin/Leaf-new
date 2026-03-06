@@ -1,7 +1,7 @@
 import { firebase } from "./config/configureFirebase";
 import { FareCalculator } from "./other/FareCalculator";
 import { GetDistance, GetTripDistance } from "./other/GeoFunctions";
-import { fetchAddressfromCoords, fetchPlacesAutocomplete, fetchCoordsfromPlace } from './other/OSMAPIFunctions';
+import { fetchAddressfromCoords, fetchPlacesAutocomplete, fetchCoordsfromPlace } from './other/GoogleAPIFunctions';
 import store from './store/store';
 
 // Constantes

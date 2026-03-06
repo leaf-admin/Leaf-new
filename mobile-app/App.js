@@ -55,6 +55,20 @@ setupAxiosInterceptor();
 
 export default function App() {
   const [appIsReady, setAppIsReady] = useState(false);
+  const [isInitializationLocked, setIsInitializationLocked] = useState(false);
+
+  const withTimeout = useCallback(async (promise, timeoutMs, label) => {
+    let timeoutId;
+    const timeoutPromise = new Promise((_, reject) => {
+      timeoutId = setTimeout(() => reject(new Error(`${label} timeout (${timeoutMs}ms)`)), timeoutMs);
+    });
+
+    try {
+      return await Promise.race([promise, timeoutPromise]);
+    } finally {
+      clearTimeout(timeoutId);
+    }
+  }, []);
 
   // ✅ Desabilitar DevMenu também no useEffect para garantir (dentro do componente)
   useEffect(() => {
@@ -71,12 +85,15 @@ export default function App() {
 
   // Inicializar FCM e notificações interativas quando o app iniciar
   useEffect(() => {
+    if (isInitializationLocked) return;
+    setIsInitializationLocked(true);
+
     const initializeApp = async () => {
       try {
         Logger.log('🚀 Inicializando app...');
         
         // Garantir que a splash screen está visível
-        await SplashScreen.preventAutoHideAsync();
+        await withTimeout(SplashScreen.preventAutoHideAsync(), 2000, 'Splash preventAutoHide');
         
         // 1. Conectar WebSocket primeiro (para que o FCM possa registrar o token depois)
         // ✅ Timeout de 10s para conexão WebSocket (Item 1.3)
@@ -86,13 +103,8 @@ export default function App() {
             Logger.log('🔌 [App] Conectando WebSocket...');
             
             // Timeout de 10s para conexão
-            const wsPromise = wsManager.connect();
-            const timeoutPromise = new Promise((_, reject) => 
-              setTimeout(() => reject(new Error('WebSocket connection timeout')), 10000)
-            );
-            
             try {
-              await Promise.race([wsPromise, timeoutPromise]);
+              await withTimeout(wsManager.connect(), 10000, 'WebSocket connect');
               Logger.log('✅ [App] WebSocket conectado');
             } catch (timeoutError) {
               Logger.warn('⚠️ [App] WebSocket timeout ou erro (continuando mesmo assim):', timeoutError.message);
@@ -107,13 +119,13 @@ export default function App() {
         }
         
         // 2. Inicializar FCM (agora o WebSocket já está conectado ou tentando conectar)
-        await FCMNotificationService.initialize();
+        await withTimeout(FCMNotificationService.initialize(), 8000, 'FCM initialize');
         
         // 3. Inicializar serviço de notificações interativas do sistema
-        await InteractiveNotificationService.initialize();
+        await withTimeout(InteractiveNotificationService.initialize(), 5000, 'InteractiveNotification initialize');
         
         // 4. Inicializar serviço de notificações persistentes de corrida
-        await PersistentRideNotificationService.initialize();
+        await withTimeout(PersistentRideNotificationService.initialize(), 5000, 'PersistentRideNotification initialize');
         
         // Registrar handlers específicos para tipos de notificação
         FCMNotificationService.registerNotificationHandler('trip_update', async (remoteMessage) => {
@@ -128,15 +140,18 @@ export default function App() {
           Logger.log('⭐ Handler de avaliação registrado:', remoteMessage);
         });
 
-        // Aguardar 4 segundos para garantir que a splash apareça
-        await new Promise(resolve => setTimeout(resolve, 4000));
+        // Aguardar breve intervalo para transição visual suave
+        await new Promise(resolve => setTimeout(resolve, 1200));
 
         Logger.log('✅ App inicializado com sucesso');
         setAppIsReady(true);
       } catch (error) {
         Logger.error('❌ Erro ao inicializar app:', error);
-        // Mesmo com erro, mostrar o app após 4 segundos
-        setTimeout(() => setAppIsReady(true), 4000);
+        // Mesmo com erro, mostrar o app rapidamente
+        setTimeout(() => setAppIsReady(true), 1200);
+      } finally {
+        // Fallback final: nunca permitir splash infinita
+        setTimeout(() => setAppIsReady(true), 3000);
       }
     };
 
@@ -146,7 +161,7 @@ export default function App() {
     return () => {
       FCMNotificationService.destroy();
     };
-  }, []);
+  }, [isInitializationLocked, withTimeout]);
 
   // Esconder splash screen quando o app estiver pronto
   // IMPORTANTE: Só esconder DEPOIS que o componente estiver montado

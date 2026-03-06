@@ -2,7 +2,7 @@
 # Baseado na NewMapScreen.js
 appId: br.com.leaf.ride
 ---
-# Assumindo que já está logado como customer
+# Assumindo que ja esta logado como customer
 - launchApp
 - takeScreenshot: "01-app-opened"
 
@@ -10,27 +10,32 @@ appId: br.com.leaf.ride
 - waitForAnimationToEnd
 - takeScreenshot: "02-map-loaded"
 
-# Procurar campo de origem (pode estar em diferentes lugares)
+# Procurar campo de origem (varias variantes de UI)
 - runFlow:
     when:
-      visible: 
-        - "Origem"
-        - "De onde"
-        - "Onde você está?"
+      visible: "Origem"
     commands:
-      - tapOn: 
-          text: 
-            - "Origem"
-            - "De onde"
-            - "Onde você está?"
+      - tapOn: "Origem"
+      - takeScreenshot: "03-origin-tapped-origem"
+- runFlow:
+    when:
+      visible: "De onde"
+    commands:
+      - tapOn: "De onde"
+      - takeScreenshot: "03-origin-tapped-de-onde"
+- runFlow:
+    when:
+      visible: "Onde você está?"
+    commands:
+      - tapOn: "Onde você está?"
       - takeScreenshot: "03-origin-tapped"
 
 # Preencher origem
-- inputText: "Avenida Paulista, 1000, São Paulo"
+- inputText: "Avenida Paulista, 1000, Sao Paulo"
 - waitForAnimationToEnd
 - takeScreenshot: "04-origin-entered"
 
-# Selecionar primeira sugestão (se aparecer)
+# Selecionar primeira sugestao (se aparecer)
 - runFlow:
     when:
       visible: "Avenida Paulista"
@@ -38,27 +43,32 @@ appId: br.com.leaf.ride
       - tapOn: "Avenida Paulista"
       - takeScreenshot: "05-origin-selected"
 
-# Procurar campo de destino
+# Procurar campo de destino (varias variantes de UI)
 - runFlow:
     when:
-      visible: 
-        - "Destino"
-        - "Para onde"
-        - "Para onde você vai?"
+      visible: "Destino"
     commands:
-      - tapOn: 
-          text: 
-            - "Destino"
-            - "Para onde"
-            - "Para onde você vai?"
+      - tapOn: "Destino"
+      - takeScreenshot: "06-destination-tapped-destino"
+- runFlow:
+    when:
+      visible: "Para onde"
+    commands:
+      - tapOn: "Para onde"
+      - takeScreenshot: "06-destination-tapped-para-onde"
+- runFlow:
+    when:
+      visible: "Para onde você vai?"
+    commands:
+      - tapOn: "Para onde você vai?"
       - takeScreenshot: "06-destination-tapped"
 
 # Preencher destino
-- inputText: "Rua das Flores, 123, São Paulo"
+- inputText: "Rua das Flores, 123, Sao Paulo"
 - waitForAnimationToEnd
 - takeScreenshot: "07-destination-entered"
 
-# Selecionar primeira sugestão (se aparecer)
+# Selecionar primeira sugestao (se aparecer)
 - runFlow:
     when:
       visible: "Rua das Flores"
@@ -66,51 +76,39 @@ appId: br.com.leaf.ride
       - tapOn: "Rua das Flores"
       - takeScreenshot: "08-destination-selected"
 
-# Aguardar cálculo de preço
+# Aguardar calculo de preco
 - waitForAnimationToEnd
 - takeScreenshot: "09-estimate-calculating"
 
-# Procurar botão de solicitar/agendar
+# Procurar botao de solicitar/agendar (varias variantes de UI)
 - runFlow:
     when:
-      visible: 
-        - "Agendar Agora"
-        - "Solicitar Corrida"
-        - "Pedir Agora"
-        - "Confirmar"
+      visible: "Agendar Agora"
     commands:
-      - takeScreenshot: "10-booking-button-visible"
-      - tapOn: 
-          text: 
-            - "Agendar Agora"
-            - "Solicitar Corrida"
-            - "Pedir Agora"
-            - "Confirmar"
+      - takeScreenshot: "10-booking-button-agendar"
+      - tapOn: "Agendar Agora"
+- runFlow:
+    when:
+      visible: "Solicitar Corrida"
+    commands:
+      - takeScreenshot: "10-booking-button-solicitar"
+      - tapOn: "Solicitar Corrida"
+- runFlow:
+    when:
+      visible: "Pedir Agora"
+    commands:
+      - takeScreenshot: "10-booking-button-pedir"
+      - tapOn: "Pedir Agora"
+- runFlow:
+    when:
+      visible: "Confirmar"
+    commands:
+      - takeScreenshot: "10-booking-button-confirmar"
+      - tapOn: "Confirmar"
 
 # Aguardar processamento
 - waitForAnimationToEnd
 - takeScreenshot: "11-ride-requested"
 
-# Verificar se apareceu mensagem de sucesso ou busca de motoristas
-- assertVisible: 
-    text: 
-      - "Buscando motoristas"
-      - "Motoristas Disponíveis"
-      - "Aguardando"
-      - "Corrida solicitada"
-    timeout: 15000
-    optional: true
+# Captura estado final (mensagem pode variar por build)
 - takeScreenshot: "12-driver-search"
-
-
-
-
-
-
-
-
-
-
-
-
-

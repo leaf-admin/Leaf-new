@@ -469,11 +469,6 @@ export default function DriverTrips(props) {
                                         provider={PROVIDER_GOOGLE}
                                         style={{ minHeight: height - 60, height: height - (Platform.OS == 'android' ? 15 : 60), width: width }}
                                     >
-                                        <UrlTile
-                                            urlTemplate="https://a.tile.openstreetmap.org/{z}/{x}/{y}.png"
-                                            maximumZ={19}
-                                            flipY={false}
-                                        />
                                         <Marker
                                             coordinate={{ latitude: region.latitude, longitude: region.longitude }}
                                             pinColor={theme.primary}
@@ -606,11 +601,6 @@ export default function DriverTrips(props) {
                                                 longitudeDelta: activeBookings && activeBookings.length >= 1 ? 0.0421 : 0.0321
                                             }}
                                         >
-                                            <UrlTile
-                                                urlTemplate="https://a.tile.openstreetmap.org/{z}/{x}/{y}.png"
-                                                maximumZ={19}
-                                                flipY={false}
-                                            />
                                             <Marker
                                                 coordinate={{ latitude: item.pickup.lat, longitude: item.pickup.lng }}
                                                 title={item.pickup.add}

@@ -242,7 +242,7 @@ const I18nTestSuite = () => {
             <Text style={styles.exampleLabel}>t('welcome'):</Text> {t('welcome')}
           </Text>
           <Text style={styles.exampleText}>
-            <Text style={styles.exampleLabel}>t('ride.status', {{'{status: "confirmed"}'}}):</Text> {t('ride.status', { status: 'confirmed' })}
+            <Text style={styles.exampleLabel}>t('ride.status', {'{ status: \"confirmed\" }'}):</Text> {t('ride.status', { status: 'confirmed' })}
           </Text>
           <Text style={styles.exampleText}>
             <Text style={styles.exampleLabel}>formatCurrency(25.50):</Text> {formatCurrency(25.50)}

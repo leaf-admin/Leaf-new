@@ -13,7 +13,7 @@ const { logStructured, logError } = require('../utils/logger');
  * GET /health
  * Health check completo (todos os componentes)
  */
-router.get('/health', async (req, res) => {
+async function fullHealthHandler(req, res) {
   try {
     // Obter io do contexto global
     const io = global.io || null;
@@ -36,7 +36,10 @@ router.get('/health', async (req, res) => {
       error: 'Erro ao verificar saúde do sistema'
     });
   }
-});
+}
+
+router.get('/health', fullHealthHandler);
+router.get('/api/health', fullHealthHandler);
 
 /**
  * GET /health/quick
@@ -103,4 +106,3 @@ router.get('/health/liveness', (req, res) => {
 });
 
 module.exports = router;
-

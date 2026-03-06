@@ -32,7 +32,7 @@ import {
 } from '../../common/sharedFunctions';
 import { tollData } from '../../common-local/actions/estimateactions';
 import { calcularPedagiosPorPolyline } from '../../common-local/other/TollUtils';
-import { fetchPlacesAutocomplete, fetchCoordsfromPlace, getDirectionsApi, detectInputType, fetchGeocodeAddress } from '../../common-local/other/OSMAPIFunctions';
+import { fetchPlacesAutocomplete, fetchCoordsfromPlace, getDirectionsApi, detectInputType, fetchGeocodeAddress } from '../../common-local/other/GoogleAPIFunctions';
 import TripDataService from '../../services/TripDataService';
 import { GetDistance } from '../../common-local/other/GeoFunctions';
 import { fetchNearbyDrivers } from '../../common-local/usersactions';
@@ -550,6 +550,23 @@ function PassengerUI(props) {
     const [embarkTimer, setEmbarkTimer] = useState(120); // ✅ Timer decrescente quando motorista chegou (02:00 = 120 segundos)
     const embarkTimerIntervalRef = useRef(null); // ✅ Ref para o intervalo do timer de embarque
     const [messageText, setMessageText] = useState(''); // ✅ Texto da mensagem para enviar ao motorista
+
+    const hasValidTripEndpoints = useMemo(() => {
+        const pickupLat = Number(tripdata?.pickup?.lat);
+        const pickupLng = Number(tripdata?.pickup?.lng);
+        const dropLat = Number(tripdata?.drop?.lat);
+        const dropLng = Number(tripdata?.drop?.lng);
+
+        const pickupAddressText = typeof tripdata?.pickup?.add === 'string' ? tripdata.pickup.add.trim() : '';
+        const dropAddressText = typeof tripdata?.drop?.add === 'string' ? tripdata.drop.add.trim() : '';
+
+        const hasPickupAddress = pickupAddressText.length >= 5;
+        const hasDropAddress = dropAddressText.length >= 5;
+        const hasPickupCoords = Number.isFinite(pickupLat) && Number.isFinite(pickupLng);
+        const hasDropCoords = Number.isFinite(dropLat) && Number.isFinite(dropLng);
+
+        return hasPickupAddress && hasDropAddress && hasPickupCoords && hasDropCoords;
+    }, [tripdata?.pickup?.add, tripdata?.pickup?.lat, tripdata?.pickup?.lng, tripdata?.drop?.add, tripdata?.drop?.lat, tripdata?.drop?.lng]);
 
     const currentSearchMessage = useMemo(() => {
         if (tripStatus !== 'searching') {
@@ -6242,7 +6259,7 @@ function PassengerUI(props) {
                         title={tripStatus === 'idle' ? 'Pedir agora' : tripStatus === 'completed' ? 'Confirmar pagamento' : 'Solicitar'}
                         variant="primary"
                         onPress={tripStatus === 'completed' ? handlePaymentConfirmation : initiateBooking}
-                        disabled={!selectedCarType || !carEstimates[selectedCarType?.name]?.estimateFare || tripStatus === 'accepted' || tripStatus === 'started'}
+                        disabled={!hasValidTripEndpoints || !selectedCarType || !carEstimates[selectedCarType?.name]?.estimateFare || tripStatus === 'accepted' || tripStatus === 'started'}
                         loading={bookModelLoading}
                     />
                 </BottomSheetView>
@@ -6255,7 +6272,7 @@ function PassengerUI(props) {
         const carTypesToUse = fixedCarTypes || [];
 
         // SEMPRE mostrar botão quando há rota (CORREÇÃO IMPLEMENTADA)
-        if (!tripdata.pickup || !tripdata.drop || !tripdata.drop.add) return null;
+        if (!hasValidTripEndpoints) return null;
 
         const canBook = selectedCarType && carEstimates[selectedCarType.name]?.estimateFare;
 
@@ -6334,7 +6351,7 @@ function PassengerUI(props) {
                 </TouchableOpacity>
             </View>
         );
-    }, [selectedCarType, carEstimates, bookModelLoading, tripStatus, t, initiateBooking, settings?.symbol, locationDenied]);
+    }, [selectedCarType, carEstimates, bookModelLoading, tripStatus, t, initiateBooking, settings?.symbol, locationDenied, hasValidTripEndpoints]);
 
     // Função para confirmar pagamento
     // Funções auxiliares para status da viagem

@@ -12,6 +12,7 @@ import { Icon } from 'react-native-elements';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { colors, darkTheme, lightTheme } from '../common/theme';
 import MapView, { PROVIDER_GOOGLE, Marker, Polyline, UrlTile } from 'react-native-maps';
+import { MAP_PROVIDER_CONFIG } from '../config/mapProvider';
 
 // Importar os componentes modernos
 import ModernAddressCard from './ModernAddressCard';
@@ -164,11 +165,13 @@ const ModernMapScreenExample = ({ navigation }) => {
                     }}
                     customMapStyle={isDarkMode ? darkMapStyle : lightMapStyle}
                 >
-                    <UrlTile
-                        urlTemplate="https://a.tile.openstreetmap.org/{z}/{x}/{y}.png"
-                        maximumZ={19}
-                        flipY={false}
-                    />
+                    {MAP_PROVIDER_CONFIG.enableOsmTiles ? (
+                        <UrlTile
+                            urlTemplate="https://a.tile.openstreetmap.org/{z}/{x}/{y}.png"
+                            maximumZ={19}
+                            flipY={false}
+                        />
+                    ) : null}
                 </MapView>
             </View>
 

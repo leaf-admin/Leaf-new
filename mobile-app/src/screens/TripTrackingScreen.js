@@ -18,6 +18,7 @@ import { colors } from '../common-local/theme';
 import WebSocketManager from '../services/WebSocketManager';
 import useWebSocketListeners from '../hooks/useWebSocketListeners';
 import { useSelector } from 'react-redux';
+import { MAP_PROVIDER_CONFIG } from '../config/mapProvider';
 
 
 const { width, height } = Dimensions.get('window');
@@ -233,11 +234,13 @@ const TripTrackingScreen = ({ navigation, route }) => {
         toolbarEnabled={false}
         moveOnMarkerPress={false}
       >
-        <UrlTile
-          urlTemplate="https://a.tile.openstreetmap.org/{z}/{x}/{y}.png"
-          maximumZ={19}
-          flipY={false}
-        />
+        {MAP_PROVIDER_CONFIG.enableOsmTiles ? (
+          <UrlTile
+            urlTemplate="https://a.tile.openstreetmap.org/{z}/{x}/{y}.png"
+            maximumZ={19}
+            flipY={false}
+          />
+        ) : null}
         {/* Rota */}
         <Polyline
           coordinates={routeCoordinates}

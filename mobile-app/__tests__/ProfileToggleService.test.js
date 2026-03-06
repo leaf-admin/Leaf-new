@@ -12,7 +12,8 @@ jest.mock('../src/common-local/api', () => ({
     }
 }));
 
-const ProfileToggleService = require('../src/services/ProfileToggleService');
+const ProfileToggleServiceModule = require('../src/services/ProfileToggleService');
+const ProfileToggleService = ProfileToggleServiceModule.default || ProfileToggleServiceModule;
 const { api } = require('../src/common-local/api');
 
 describe('ProfileToggleService Integration', () => {

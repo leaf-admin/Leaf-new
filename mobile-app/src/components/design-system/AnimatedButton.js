@@ -18,7 +18,8 @@ export const AnimatedButton = ({
     style,
     textStyle,
     fullWidth = true,
-    children
+    children,
+    ...props
 }) => {
     const scale = useSharedValue(1);
     const pressed = useSharedValue(0);
@@ -85,6 +86,7 @@ export const AnimatedButton = ({
                 onPressOut={handlePressOut}
                 disabled={disabled || loading}
                 style={getContainerStyle()}
+                {...props}
             >
                 {children ? children : (
                     <Typography

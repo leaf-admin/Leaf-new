@@ -1,7 +1,7 @@
 import { firebase } from "../config/configureFirebase";
 import { FareCalculator } from "../other/FareCalculator";
 import { GetDistance, GetTripDistance } from "../other/GeoFunctions";
-import { fetchAddressfromCoords } from '../other/OSMAPIFunctions';
+import { fetchAddressfromCoords } from '../other/GoogleAPIFunctions';
 import store from '../store';
 
 export const formatBookingObject = async (bookingData, settings) => {
