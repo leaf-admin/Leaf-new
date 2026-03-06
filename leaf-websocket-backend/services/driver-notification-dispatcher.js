@@ -13,6 +13,7 @@ const driverLockManager = require('./driver-lock-manager');
 const eventSourcing = require('./event-sourcing');
 const { EVENT_TYPES } = require('./event-sourcing');
 const { logger, logStructured, logError } = require('../utils/logger');
+const driverEligibilityService = require('./driver-eligibility-service');
 const { performance } = require('perf_hooks');
 
 class DriverNotificationDispatcher {
@@ -52,7 +53,7 @@ class DriverNotificationDispatcher {
      * @param {string} bookingId - ID da corrida
      * @returns {Promise<Array>} Array de motoristas com scores ordenados
      */
-    async findAndScoreDrivers(pickupLocation, radius, limit, bookingId) {
+    async findAndScoreDrivers(pickupLocation, radius, limit, bookingId, rideRequirements = {}) {
         try {
             // ✅ CORREÇÃO: Garantir que pickupLocation seja um objeto válido
             const parsedPickup = this.safeJSONParse(pickupLocation, null);
@@ -95,11 +96,13 @@ class DriverNotificationDispatcher {
 
             if (!nearbyDrivers || nearbyDrivers.length === 0) {
                 logger.warn(`⚠️ [Dispatcher] Nenhum motorista encontrado em ${radius}km para ${bookingId}`);
-                // ✅ DEBUG: Verificar se há motoristas no Redis
-                const allDrivers = await this.redis.zrange('driver_locations', 0, -1);
-                logger.info(`🔍 [Dispatcher] DEBUG: Total de motoristas no Redis: ${allDrivers.length}`);
-                if (allDrivers.length > 0) {
-                    logger.info(`🔍 [Dispatcher] DEBUG: Motoristas no Redis: ${allDrivers.slice(0, 5).join(', ')}...`);
+                // Diagnóstico opcional (custoso) para incidentes.
+                if (process.env.DEBUG_DISPATCHER_REDIS === 'true') {
+                    const allDrivers = await this.redis.zrange('driver_locations', 0, -1);
+                    logger.info(`🔍 [Dispatcher] DEBUG: Total de motoristas no Redis: ${allDrivers.length}`);
+                    if (allDrivers.length > 0) {
+                        logger.info(`🔍 [Dispatcher] DEBUG: Motoristas no Redis: ${allDrivers.slice(0, 5).join(', ')}...`);
+                    }
                 }
                 return [];
             }
@@ -161,6 +164,16 @@ class DriverNotificationDispatcher {
                     continue; // Motorista offline ou não disponível
                 }
 
+                const eligibility = await driverEligibilityService.isDriverEligibleForRide(
+                    driverId,
+                    rideRequirements?.requestedCategory || null,
+                    driverData
+                );
+                if (!eligibility.eligible) {
+                    logger.debug(`⏭️ [Dispatcher] Driver ${driverId} ignorado por elegibilidade: ${eligibility.code}`);
+                    continue;
+                }
+
                 // Calcular score completo (Passando radius para normalização correta)
                 const score = await this.calculateDriverScore(
                     driverId,
@@ -181,10 +194,12 @@ class DriverNotificationDispatcher {
                     distance,
                     coordinates,
                     score,
-                    rating: driverData.rating || 5.0,
+                    rating: eligibility.profile?.rating || driverData.rating || 5.0,
                     acceptanceRate: driverData.acceptanceRate || 50.0,
                     responseTime: driverData.avgResponseTime || 5.0,
-                    totalTrips: driverData.totalTrips || 0
+                    totalTrips: driverData.totalTrips || 0,
+                    carType: eligibility.profile?.carType || null,
+                    category: eligibility.profile?.vehicleCategory || null
                 });
             }
 
@@ -239,6 +254,11 @@ class DriverNotificationDispatcher {
                     id: cached.id,
                     isOnline: cached.isOnline === 'true' || cached.isOnline === true,
                     status: normalizedStatus,
+                    carType: cached.carType || null,
+                    vehicleCategory: cached.vehicleCategory || null,
+                    acceptsPlusWithElite: cached.acceptsPlusWithElite === 'true' || cached.acceptsPlusWithElite === true,
+                    driverApproved: cached.driverApproved === 'true' || cached.driverApproved === true,
+                    vehicleApproved: cached.vehicleApproved === 'true' || cached.vehicleApproved === true,
                     rating: parseFloat(cached.rating || 5.0),
                     acceptanceRate: parseFloat(cached.acceptanceRate || 50.0),
                     avgResponseTime: parseFloat(cached.avgResponseTime || 5.0),
@@ -253,6 +273,11 @@ class DriverNotificationDispatcher {
                 id: driverId,
                 isOnline: true,
                 status: 'AVAILABLE',
+                carType: null,
+                vehicleCategory: null,
+                acceptsPlusWithElite: true,
+                driverApproved: true,
+                vehicleApproved: true,
                 rating: 5.0,
                 acceptanceRate: 50.0,
                 avgResponseTime: 5.0,
@@ -693,4 +718,3 @@ class DriverNotificationDispatcher {
 }
 
 module.exports = DriverNotificationDispatcher;
-

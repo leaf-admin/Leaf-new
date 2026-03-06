@@ -53,7 +53,7 @@ class LeafApiService {
     const [drivers, users, rides] = await Promise.all([
       this.request("/drivers/applications?page=1&limit=5").catch(() => ({ drivers: [] })),
       this.request("/users?page=1&limit=5").catch(() => ({ users: [] })),
-      this.request("/metrics").catch(() => ({})),
+      this.request("/metrics/overview").catch(() => ({})),
     ]);
 
     return {
@@ -64,11 +64,49 @@ class LeafApiService {
   }
 
   async getNewDrivers(period = "24h") {
-    return this.request(`/users/new/drivers?period=${encodeURIComponent(period)}`);
+    try {
+      const data = await this.request(`/users?type=driver&page=1&limit=500`);
+      const users = Array.isArray(data?.users) ? data.users : [];
+      const now = Date.now();
+      const periodMs =
+        period === "24h" ? 24 * 60 * 60 * 1000 :
+        period === "3d" ? 3 * 24 * 60 * 60 * 1000 :
+        period === "week" ? 7 * 24 * 60 * 60 * 1000 :
+        30 * 24 * 60 * 60 * 1000;
+
+      const filtered = users.filter((u) => {
+        if (!u?.registrationDate) return false;
+        const ts = new Date(u.registrationDate).getTime();
+        return Number.isFinite(ts) && now - ts <= periodMs;
+      });
+
+      return { users: filtered, count: filtered.length };
+    } catch {
+      return this.request("/users/stats").then((stats) => ({ users: [], count: Number(stats?.newToday || 0) }));
+    }
   }
 
   async getNewCustomers(period = "24h") {
-    return this.request(`/users/new/customers?period=${encodeURIComponent(period)}`);
+    try {
+      const data = await this.request(`/users?type=customer&page=1&limit=500`);
+      const users = Array.isArray(data?.users) ? data.users : [];
+      const now = Date.now();
+      const periodMs =
+        period === "24h" ? 24 * 60 * 60 * 1000 :
+        period === "3d" ? 3 * 24 * 60 * 60 * 1000 :
+        period === "week" ? 7 * 24 * 60 * 60 * 1000 :
+        30 * 24 * 60 * 60 * 1000;
+
+      const filtered = users.filter((u) => {
+        if (!u?.registrationDate) return false;
+        const ts = new Date(u.registrationDate).getTime();
+        return Number.isFinite(ts) && now - ts <= periodMs;
+      });
+
+      return { users: filtered, count: filtered.length };
+    } catch {
+      return this.request("/users/stats").then((stats) => ({ users: [], count: Number(stats?.newToday || 0) }));
+    }
   }
 
   async getRidesStats(period = "today") {
@@ -76,15 +114,30 @@ class LeafApiService {
   }
 
   async getOperationalFeeStats(period = "today") {
-    return this.request(`/metrics/operational-fee?period=${encodeURIComponent(period)}`);
+    return this.request(`/metrics/financial/operational-fee?period=${encodeURIComponent(period)}`);
   }
 
   async getSubscriptionRevenue(period = "30d") {
-    return this.request(`/metrics/subscription-revenue?period=${encodeURIComponent(period)}`);
+    const data = await this.request("/metrics/subscriptions/active");
+    const multiplier = period === "7d" ? 1 : 4;
+    const total = Number(data?.totalWeeklyRevenue || 0) * multiplier;
+    return { revenue: { total }, raw: data };
   }
 
   async getRevenueEvolution(days = 30) {
-    return this.request(`/metrics/revenue-evolution?days=${encodeURIComponent(String(days))}`);
+    const end = new Date();
+    const start = new Date(end.getTime() - Number(days) * 24 * 60 * 60 * 1000);
+    const format = (d) => d.toISOString().split("T")[0];
+    const response = await this.request(
+      `/metrics/history?startDate=${encodeURIComponent(format(start))}&endDate=${encodeURIComponent(format(end))}&granularity=day`,
+    );
+    const rows = Array.isArray(response?.data) ? response.data : [];
+    return rows.map((row) => ({
+      date: row?.date,
+      ridesRevenue: Number(row?.metrics?.revenue?.total || 0),
+      operationalFee: 0,
+      subscriptionRevenue: 0,
+    }));
   }
 
   async getRecentActivity() {
@@ -137,6 +190,13 @@ class LeafApiService {
 
   async getDriverDocuments(driverId) {
     return this.request(`/drivers/${driverId}/documents`);
+  }
+
+  async updateDriverVehicleConfig(driverId, payload = {}) {
+    return this.request(`/drivers/${driverId}/vehicle/config`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
   }
 
   async approveDriverApplication(driverId, notes = "") {

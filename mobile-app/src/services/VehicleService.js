@@ -36,6 +36,12 @@ class VehicleService {
 
             const userId = user.uid;
 
+            // Limite operacional: máximo de 4 veículos por motorista.
+            const currentUserVehicles = await this.getUserVehicles(userId);
+            if (currentUserVehicles.length >= 4) {
+                throw new Error('Limite de 4 veículos por perfil atingido');
+            }
+
             // 1. Verificar se veículo já existe no sistema
             let vehicleId;
             let existingVehicle = await this.getVehicleByPlate(vehicleData.plate);
@@ -537,6 +543,24 @@ class VehicleService {
             return true;
         } catch (error) {
             Logger.error('❌ Erro ao definir veículo ativo:', error);
+            return false;
+        }
+    }
+
+    /**
+     * Define se motorista elite também aceita corridas Plus.
+     * @param {string} userId
+     * @param {boolean} enabled
+     */
+    async setElitePlusPreference(userId, enabled) {
+        try {
+            await database().ref(`${this.USERS_PATH}/${userId}`).update({
+                acceptPlusWithElite: !!enabled,
+                updatedAt: new Date().toISOString()
+            });
+            return true;
+        } catch (error) {
+            Logger.error('❌ Erro ao atualizar preferência Elite/Plus:', error);
             return false;
         }
     }

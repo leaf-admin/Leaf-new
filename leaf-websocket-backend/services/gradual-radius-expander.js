@@ -17,6 +17,7 @@ const eventSourcing = require('./event-sourcing');
 const { EVENT_TYPES } = require('./event-sourcing');
 const driverLockManager = require('./driver-lock-manager');
 const DriverNotificationDispatcher = require('./driver-notification-dispatcher');
+const driverEligibilityService = require('./driver-eligibility-service');
 const { logger } = require('../utils/logger');
 
 // ✅ Compartilhar intervalos entre instâncias para permitir cancelamento global
@@ -157,11 +158,16 @@ class GradualRadiusExpander {
             logger.debug(`🔍 [GradualExpander] Buscando motoristas em ${radius}km para ${bookingId}`);
 
             // 1. Buscar motoristas e calcular scores usando dispatcher
+            const bookingKey = `booking:${bookingId}`;
+            const bookingData = await this.redis.hgetall(bookingKey);
+            const requestedCategory = driverEligibilityService.normalizeCategory(bookingData?.carType);
+
             const scoredDrivers = await this.dispatcher.findAndScoreDrivers(
                 pickupLocation,
                 radius,
                 limit,
-                bookingId
+                bookingId,
+                { requestedCategory }
             );
 
             if (scoredDrivers.length === 0) {
@@ -171,9 +177,6 @@ class GradualRadiusExpander {
             logger.info(`✅ [GradualExpander] ${scoredDrivers.length} motoristas encontrados em ${radius}km para ${bookingId}`);
 
             // 2. Buscar dados completos da corrida
-            const bookingKey = `booking:${bookingId}`;
-            const bookingData = await this.redis.hgetall(bookingKey);
-
             // Parse seguro de JSON usando helper
             const parsedPickupLocation = this.safeJSONParse(bookingData.pickupLocation, pickupLocation);
             const parsedDestinationLocation = this.safeJSONParse(bookingData.destinationLocation, {});
@@ -184,6 +187,7 @@ class GradualRadiusExpander {
                 pickupLocation: parsedPickupLocation,
                 destinationLocation: parsedDestinationLocation,
                 estimatedFare: parseFloat(bookingData.estimatedFare || 0),
+                carType: bookingData.carType || null,
                 paymentMethod: bookingData.paymentMethod || 'pix'
             };
 
@@ -401,4 +405,3 @@ class GradualRadiusExpander {
 }
 
 module.exports = GradualRadiusExpander;
-

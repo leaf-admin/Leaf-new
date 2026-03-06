@@ -34,6 +34,7 @@ class RequestRideCommand extends Command {
         this.pickupLocation = data.pickupLocation;
         this.destinationLocation = data.destinationLocation;
         this.estimatedFare = data.estimatedFare || 0;
+        this.carType = data.carType || null;
         this.paymentMethod = data.paymentMethod || 'pix';
         // ✅ VALIDAÇÃO: Garantir traceId válido
         this.traceId = validateAndEnsureTraceIdInCommand(data, 'RequestRide');
@@ -97,6 +98,7 @@ class RequestRideCommand extends Command {
                     pickupLocation: this.pickupLocation,
                     destinationLocation: this.destinationLocation,
                     estimatedFare: this.estimatedFare,
+                    carType: this.carType,
                     paymentMethod: this.paymentMethod,
                     regionHash
                 };
@@ -118,6 +120,7 @@ class RequestRideCommand extends Command {
                     pickupLocation: this.pickupLocation,
                     destinationLocation: this.destinationLocation,
                     estimatedFare: this.estimatedFare,
+                    carType: this.carType,
                     paymentMethod: this.paymentMethod,
                     traceId: this.traceId, // ✅ Incluir traceId no evento
                     correlationId: this.correlationId || bookingId // ✅ Incluir correlationId no evento

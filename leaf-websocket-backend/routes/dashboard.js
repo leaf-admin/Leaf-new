@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const { logStructured, logError } = require('../utils/logger');
+const redisPool = require('../utils/redis-pool');
 
 // ✅ Importar middlewares de autenticação
 const { authenticateJWT, requireRole, requirePermission } = require('../middleware/jwt-auth');
@@ -19,7 +20,6 @@ try {
 // 👥 User Management - DADOS REAIS (Firebase + Redis)
 router.get('/api/users/stats', async (req, res) => {
   try {
-    const Redis = require('ioredis');
     let stats = {
       total: 0,
       customers: 0,
@@ -81,7 +81,7 @@ router.get('/api/users/stats', async (req, res) => {
       }
 
       // Complementar com dados do Redis
-      const redis = new Redis(process.env.REDIS_URL || 'redis://redis-master:6379');
+      const redis = redisPool.getConnection();
       const RedisScan = require('../utils/redis-scan');
 
       const onlineUsers = await redis.scard('online_users') || 0;
@@ -91,8 +91,6 @@ router.get('/api/users/stats', async (req, res) => {
       stats.activeToday = onlineUsers;
       stats.conversionRate = totalBookings > 0 && onlineUsers > 0 ?
         ((totalBookings / onlineUsers) * 100).toFixed(1) : 0;
-
-      await redis.disconnect();
 
     } catch (error) {
       logStructured('warn', '⚠️ Erro ao buscar dados reais:', error.message, { service: 'dashboard-routes' });
@@ -556,6 +554,46 @@ router.get('/api/drivers/:driverId/documents', authenticateJWT, requireRole(['ad
         const userSnapshot = await userRef.once('value');
         const userData = userSnapshot.val() || {};
 
+        // Buscar estrutura de veículos do motorista (legado + atual)
+        const userVehiclesRef = db.ref(`user_vehicles/${driverId}`);
+        const userVehiclesSnapshot = await userVehiclesRef.once('value');
+        const userVehiclesRaw = userVehiclesSnapshot.val() || {};
+
+        const vehiclesRef = db.ref('vehicles');
+        const vehiclesSnapshot = await vehiclesRef.once('value');
+        const vehiclesRaw = vehiclesSnapshot.val() || {};
+
+        const userVehicleEntries = Object.keys(userVehiclesRaw).map((userVehicleId) => {
+          const userVehicle = userVehiclesRaw[userVehicleId] || {};
+          const linkedVehicle = userVehicle.vehicleId ? (vehiclesRaw[userVehicle.vehicleId] || {}) : {};
+
+          const category = linkedVehicle.manualCategory ||
+            linkedVehicle.carType ||
+            linkedVehicle.category ||
+            userVehicle.manualCategory ||
+            userData.carType ||
+            null;
+
+          return {
+            userVehicleId,
+            vehicleId: userVehicle.vehicleId || null,
+            isActive: userVehicle.isActive === true,
+            status: userVehicle.status || (userVehicle.approved === true ? 'approved' : 'pending'),
+            approved: userVehicle.approved === true || userVehicle.status === 'approved',
+            category,
+            plate: linkedVehicle.plate || linkedVehicle.vehicleNumber || linkedVehicle.vehiclePlate || null,
+            brand: linkedVehicle.brand || linkedVehicle.vehicleMake || null,
+            model: linkedVehicle.model || linkedVehicle.vehicleModel || null,
+            year: linkedVehicle.year || linkedVehicle.manufactureYear || null,
+            raw: {
+              userVehicle,
+              vehicle: linkedVehicle
+            }
+          };
+        });
+
+        const activeUserVehicle = userVehicleEntries.find((v) => v.isActive) || null;
+
         res.json({
           success: true,
           data: {
@@ -566,7 +604,15 @@ router.get('/api/drivers/:driverId/documents', authenticateJWT, requireRole(['ad
               phone: userData.mobile || ''
             },
             documents,
-            totalDocuments: Object.keys(documents).length
+            totalDocuments: Object.keys(documents).length,
+            vehicleConfig: {
+              activeUserVehicleId: activeUserVehicle?.userVehicleId || null,
+              activeVehicleId: activeUserVehicle?.vehicleId || null,
+              activeVehiclePlate: activeUserVehicle?.plate || userData.vehicleNumber || userData.carPlate || null,
+              category: activeUserVehicle?.category || userData.carType || null,
+              acceptPlusWithElite: userData.acceptPlusWithElite === true || userData.acceptPlusRides === true || userData.receivePlusRides === true,
+              vehicles: userVehicleEntries
+            }
           }
         });
       } else {
@@ -581,6 +627,156 @@ router.get('/api/drivers/:driverId/documents', authenticateJWT, requireRole(['ad
     }
   } catch (error) {
     logError(error, '❌ Erro na API de documentos:', { service: 'dashboard-routes' });
+    res.status(500).json({
+      success: false,
+      message: 'Erro interno do servidor.'
+    });
+  }
+});
+
+// 🚗 Atualizar configuração manual de veículo/categoria do motorista
+// ✅ Protegido com autenticação JWT e permissão de admin
+router.post('/api/drivers/:driverId/vehicle/config', authenticateJWT, requireRole(['admin', 'super-admin', 'manager']), async (req, res) => {
+  try {
+    const { driverId } = req.params;
+    const {
+      userVehicleId,
+      setActive = true,
+      category,
+      vehicleStatus,
+      acceptPlusWithElite
+    } = req.body || {};
+
+    if (!userVehicleId) {
+      return res.status(400).json({
+        success: false,
+        message: 'userVehicleId é obrigatório.'
+      });
+    }
+
+    const normalizedCategory = category ? String(category).trim().toLowerCase() : null;
+    if (normalizedCategory && !['plus', 'elite'].includes(normalizedCategory)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Categoria inválida. Use plus ou elite.'
+      });
+    }
+
+    if (vehicleStatus && !['approved', 'pending', 'rejected', 'active', 'inactive'].includes(String(vehicleStatus).toLowerCase())) {
+      return res.status(400).json({
+        success: false,
+        message: 'vehicleStatus inválido.'
+      });
+    }
+
+    if (!firebaseConfig || !firebaseConfig.getRealtimeDB) {
+      return res.status(503).json({
+        success: false,
+        message: 'Firebase não configurado.'
+      });
+    }
+
+    const db = firebaseConfig.getRealtimeDB();
+    const userRef = db.ref(`users/${driverId}`);
+    const userSnapshot = await userRef.once('value');
+    if (!userSnapshot.exists()) {
+      return res.status(404).json({ success: false, message: 'Motorista não encontrado.' });
+    }
+
+    const userVehiclesRef = db.ref(`user_vehicles/${driverId}`);
+    const userVehiclesSnapshot = await userVehiclesRef.once('value');
+    const userVehicles = userVehiclesSnapshot.val() || {};
+    const selected = userVehicles[userVehicleId];
+
+    if (!selected) {
+      return res.status(404).json({
+        success: false,
+        message: 'Veículo do motorista não encontrado.'
+      });
+    }
+
+    const updates = {};
+    Object.keys(userVehicles).forEach((id) => {
+      updates[`user_vehicles/${driverId}/${id}/isActive`] = false;
+      updates[`user_vehicles/${driverId}/${id}/updatedAt`] = new Date().toISOString();
+    });
+
+    updates[`user_vehicles/${driverId}/${userVehicleId}/isActive`] = setActive !== false;
+    updates[`user_vehicles/${driverId}/${userVehicleId}/updatedAt`] = new Date().toISOString();
+
+    if (vehicleStatus) {
+      const nextStatus = String(vehicleStatus).toLowerCase();
+      updates[`user_vehicles/${driverId}/${userVehicleId}/status`] = nextStatus;
+      updates[`user_vehicles/${driverId}/${userVehicleId}/approved`] = ['approved', 'active'].includes(nextStatus);
+      updates[`user_vehicles/${driverId}/${userVehicleId}/reviewedAt`] = new Date().toISOString();
+      updates[`user_vehicles/${driverId}/${userVehicleId}/reviewedBy`] = req.user.id;
+    }
+
+    if (normalizedCategory) {
+      const categoryLabel = normalizedCategory === 'elite' ? 'Leaf Elite' : 'Leaf Plus';
+      if (selected.vehicleId) {
+        updates[`vehicles/${selected.vehicleId}/manualCategory`] = normalizedCategory;
+        updates[`vehicles/${selected.vehicleId}/carType`] = categoryLabel;
+        updates[`vehicles/${selected.vehicleId}/category`] = normalizedCategory;
+        updates[`vehicles/${selected.vehicleId}/updatedAt`] = new Date().toISOString();
+      }
+      updates[`users/${driverId}/carType`] = categoryLabel;
+      updates[`users/${driverId}/updatedAt`] = new Date().toISOString();
+    }
+
+    if (typeof acceptPlusWithElite === 'boolean') {
+      updates[`users/${driverId}/acceptPlusWithElite`] = acceptPlusWithElite;
+      updates[`users/${driverId}/updatedAt`] = new Date().toISOString();
+    }
+
+    await db.ref().update(updates);
+
+    // Melhor esforço: atualizar cache Redis de elegibilidade para refletir mudança imediatamente.
+    try {
+      const redis = redisPool.getConnection();
+      await redisPool.ensureConnection();
+      const userData = (await userRef.once('value')).val() || {};
+      const selectedVehicleSnapshot = selected.vehicleId ? await db.ref(`vehicles/${selected.vehicleId}`).once('value') : null;
+      const selectedVehicleData = selectedVehicleSnapshot?.val() || {};
+      const plate = selectedVehicleData.plate || selectedVehicleData.vehicleNumber || userData.vehicleNumber || userData.carPlate || '';
+      const resolvedCategory = normalizedCategory ||
+        selectedVehicleData.manualCategory ||
+        selectedVehicleData.category ||
+        (String(userData.carType || '').toLowerCase().includes('elite') ? 'elite' : 'plus');
+
+      await redis.hset(`driver:${driverId}`, {
+        carType: resolvedCategory === 'elite' ? 'Leaf Elite' : 'Leaf Plus',
+        vehicleCategory: resolvedCategory,
+        vehicleNumber: plate,
+        acceptsPlusWithElite: String(userData.acceptPlusWithElite === true || acceptPlusWithElite === true),
+        activeVehicleId: selected.vehicleId || '',
+        driverApproved: String(userData.approved === true),
+        vehicleApproved: String((selected.status || '') === 'approved' || selected.approved === true),
+        lastVehicleConfigUpdate: new Date().toISOString()
+      });
+      await redis.del(`driver_eligibility_profile:${driverId}`);
+    } catch (redisSyncError) {
+      logStructured('warn', 'Falha ao sincronizar configuração de veículo no Redis', {
+        service: 'dashboard-routes',
+        driverId,
+        error: redisSyncError.message
+      });
+    }
+
+    res.json({
+      success: true,
+      message: 'Configuração do veículo atualizada com sucesso.',
+      data: {
+        driverId,
+        userVehicleId,
+        category: normalizedCategory || null,
+        setActive: setActive !== false,
+        vehicleStatus: vehicleStatus || null,
+        acceptPlusWithElite: typeof acceptPlusWithElite === 'boolean' ? acceptPlusWithElite : null
+      }
+    });
+  } catch (error) {
+    logError(error, 'Erro ao atualizar configuração de veículo do motorista', { service: 'dashboard-routes' });
     res.status(500).json({
       success: false,
       message: 'Erro interno do servidor.'
@@ -1176,7 +1372,6 @@ router.get('/api/analytics/bookings', async (req, res) => {
 
 router.get('/api/metrics/services', async (req, res) => {
   try {
-    const Redis = require('ioredis');
     let metrics = {
       websocket: {
         connections: 0,
@@ -1206,7 +1401,7 @@ router.get('/api/metrics/services', async (req, res) => {
 
     try {
       // Dados reais do Redis
-      const redis = new Redis(process.env.REDIS_URL || 'redis://redis-master:6379');
+      const redis = redisPool.getConnection();
 
       // Informações reais do Redis
       const redisInfo = await redis.info();
@@ -1233,8 +1428,6 @@ router.get('/api/metrics/services', async (req, res) => {
           uptime: 99.5 + Math.random() * 0.5 // 99.5-100%
         };
       }
-
-      await redis.disconnect();
 
       // Dados do sistema (básicos)
       const os = require('os');
@@ -1465,7 +1658,7 @@ router.get('/api/live/stats', async (req, res) => {
     };
 
     try {
-      const redis = new Redis(process.env.REDIS_URL || 'redis://redis-master:6379');
+      const redis = redisPool.getConnection();
 
       // Dados reais do Redis
       const totalDrivers = await redis.zcard('driver_locations') || 0;
@@ -1482,7 +1675,6 @@ router.get('/api/live/stats', async (req, res) => {
         avgTripTime: activeBookings > 0 ? (12 + Math.random() * 15).toFixed(1) : 0 // 12-27 min
       };
 
-      await redis.disconnect();
     } catch (redisError) {
       logStructured('warn', '⚠️ Redis não disponível para stats ao vivo:', redisError.message, { service: 'dashboard-routes' });
       // stats permanece zerado
@@ -1713,8 +1905,7 @@ router.get('/api/kyc-analytics/stats', async (req, res) => {
 // ⚙️ System Status
 router.get('/api/system/status', async (req, res) => {
   try {
-    const Redis = require('ioredis');
-    const redis = new Redis(process.env.REDIS_URL || 'redis://localhost:6379');
+    const redis = redisPool.getConnection();
 
     let services = [
       {
@@ -4649,12 +4840,9 @@ router.get('/api/monitoring/health', async (req, res) => {
     // Health check rápido para cada serviço
     try {
       // Redis health check
-      const redis = require('redis');
-      const redisClient = redis.createClient({ url: 'redis://redis-master:6379' });
-      await redisClient.connect();
+      const redisClient = redisPool.getConnection();
       await redisClient.ping();
       healthChecks.checks.redis = { status: 'healthy', responseTime: Date.now() };
-      await redisClient.disconnect();
     } catch (error) {
       healthChecks.checks.redis = { status: 'unhealthy', error: error.message };
       healthChecks.status = 'degraded';
@@ -4822,17 +5010,11 @@ router.get('/api/monitoring/performance', async (req, res) => {
 // Funções auxiliares para monitoramento
 async function monitorRedisService() {
   try {
-    const redis = require('redis');
-    const redisClient = redis.createClient({ url: 'redis://redis-master:6379' });
-
+    const redisClient = redisPool.getConnection();
     const startTime = Date.now();
-    await redisClient.connect();
-
     const info = await redisClient.info();
     const ping = await redisClient.ping();
     const responseTime = Date.now() - startTime;
-
-    await redisClient.disconnect();
 
     return {
       name: 'Redis',

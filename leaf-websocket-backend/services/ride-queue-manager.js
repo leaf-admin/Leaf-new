@@ -44,6 +44,7 @@ class RideQueueManager {
                 pickupLocation: JSON.stringify(bookingData.pickupLocation),
                 destinationLocation: JSON.stringify(bookingData.destinationLocation || {}),
                 estimatedFare: String(bookingData.estimatedFare || 0),
+                carType: bookingData.carType || '',
                 paymentMethod: bookingData.paymentMethod || 'pix',
                 region: regionHash,
                 state: RideStateManager.STATES.PENDING,
@@ -367,4 +368,3 @@ class RideQueueManager {
 const rideQueueManager = new RideQueueManager();
 
 module.exports = rideQueueManager;
-
