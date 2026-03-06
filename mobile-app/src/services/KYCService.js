@@ -11,6 +11,33 @@ import { getSelfHostedApiUrl } from '../config/ApiConfig';
 
 class KYCService {
   /**
+   * Verificar se motorista já possui validação KYC diária válida
+   * @param {string} driverId
+   * @param {number} maxAgeHours
+   * @returns {Promise<Object>}
+   */
+  async getVerificationStatus(driverId, maxAgeHours = 24) {
+    try {
+      const backendUrl = getSelfHostedApiUrl(`/api/kyc/verification-status/${driverId}?maxAgeHours=${maxAgeHours}`);
+      const response = await fetch(backendUrl, { method: 'GET' });
+      const result = await response.json().catch(() => ({}));
+
+      if (!response.ok) {
+        throw new Error(result.error || `Erro ${response.status}: ${response.statusText}`);
+      }
+
+      return result;
+    } catch (error) {
+      Logger.error('❌ Erro ao consultar status de verificação KYC:', error);
+      return {
+        success: false,
+        hasValid: false,
+        reason: error.message,
+      };
+    }
+  }
+
+  /**
    * Processar onboarding KYC (CNH + Selfie)
    * @param {string} driverId - ID do motorista
    * @param {string} cnhImageUri - URI da imagem da CNH
@@ -149,4 +176,3 @@ class KYCService {
 const kycService = new KYCService();
 
 export default kycService;
-

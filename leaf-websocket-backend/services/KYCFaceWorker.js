@@ -58,7 +58,7 @@ try {
 class FaceProcessor {
   constructor() {
     this.modelsLoaded = false;
-    this.similarityThreshold = 0.85;
+    this.similarityThreshold = parseFloat(process.env.KYC_SIMILARITY_THRESHOLD || '0.5');
   }
 
   async loadModels() {
@@ -313,4 +313,3 @@ parentPort.postMessage({ ready: true });
 }
 
 module.exports = KYCFaceWorker;
-

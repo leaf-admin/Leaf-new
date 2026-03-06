@@ -20,7 +20,7 @@ class KYCFaceProcessor {
     });
     
     this.modelsLoaded = false;
-    this.similarityThreshold = 0.85;
+    this.similarityThreshold = parseFloat(process.env.KYC_SIMILARITY_THRESHOLD || '0.5');
     this.faceDetectionOptions = new faceapi.SsdMobilenetv1Options({ 
       minConfidence: 0.7 
     });
@@ -364,4 +364,3 @@ class KYCFaceProcessor {
 }
 
 module.exports = KYCFaceProcessor;
-

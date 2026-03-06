@@ -1193,18 +1193,30 @@ class WebSocketManager {
 
         return new Promise((resolve, reject) => {
             const timeout = setTimeout(() => {
+                this.socket.off('driverStatusError', onError);
+                this.socket.off('driverStatusUpdated', onSuccess);
                 reject(new Error('Set driver status timeout'));
             }, 10000);
 
-            this.socket.emit('setDriverStatus', { driverId, status, isOnline });
-            this.socket.once('driverStatusUpdated', (data) => {
+            const onSuccess = (data) => {
                 clearTimeout(timeout);
+                this.socket.off('driverStatusError', onError);
                 if (data.success) {
                     resolve(data);
                 } else {
                     reject(new Error(data.error || 'Set driver status failed'));
                 }
-            });
+            };
+
+            const onError = (data) => {
+                clearTimeout(timeout);
+                this.socket.off('driverStatusUpdated', onSuccess);
+                reject(new Error(data?.error || data?.reason || 'Set driver status failed'));
+            };
+
+            this.socket.emit('setDriverStatus', { driverId, status, isOnline });
+            this.socket.once('driverStatusUpdated', onSuccess);
+            this.socket.once('driverStatusError', onError);
         });
     }
 

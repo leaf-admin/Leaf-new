@@ -186,12 +186,16 @@ const allowedOrigins = [
     'https://dashboard.leaf.app.br',
     'https://api.leaf.app.br',
     'https://socket.leaf.app.br',
+    'http://147.182.204.181:3001',
+    'https://147.182.204.181:3001',
     // Desenvolvimento local
     'http://localhost:3000',
     'http://localhost:3001',
     'http://localhost:3002',
+    'http://localhost:8081',
     'http://127.0.0.1:3000',
     'http://127.0.0.1:3001',
+    'http://127.0.0.1:8081',
     // IPs Locais do desenvolvedor
     'http://192.168.0.33:8081',
     'http://192.168.0.33:3000',
@@ -208,10 +212,21 @@ const corsOptions = {
         // ✅ React Native e apps nativos não enviam origin (é null/undefined)
         // Permitir se não houver origin (React Native) ou se estiver na whitelist
         // Também permite qualquer IP da rede local 192.168.*.*
-        if (!origin || allowedOrigins.includes(origin) || origin.endsWith('ngrok-free.app') || origin.startsWith('http://192.168.')) {
+        const isVpcDirectOrigin = /^https?:\/\/147\.182\.204\.181(?::\d+)?$/.test(origin || '');
+
+        if (
+            !origin ||
+            allowedOrigins.includes(origin) ||
+            isVpcDirectOrigin ||
+            origin.endsWith('ngrok-free.app') ||
+            origin.startsWith('http://192.168.') ||
+            origin.startsWith('http://10.') ||
+            origin.startsWith('exp://') ||
+            origin.includes('.expo.dev')
+        ) {
             callback(null, true);
         } else {
-            logStructured('warn', 'CORS bloqueado', { service: 'server', origin });
+            logStructured('warn', `CORS bloqueado: ${origin}`, { service: 'server', origin });
             callback(new Error('Não permitido pelo CORS'));
         }
     },
@@ -4455,6 +4470,28 @@ io.on('connection', async (socket) => {
 
     // ==================== NOVOS EVENTOS - GERENCIAMENTO DE STATUS DO DRIVER ====================
 
+    const IntegratedKYCService = require('./services/IntegratedKYCService');
+    const integratedKYCService = new IntegratedKYCService();
+
+    const enforceDailyKYCForOnline = async (driverId) => {
+        const requiresDailyKYC = process.env.KYC_DAILY_VERIFICATION_REQUIRED !== 'false';
+        if (!requiresDailyKYC) {
+            return { allowed: true };
+        }
+
+        const verificationStatus = await integratedKYCService.hasValidVerification(driverId, 24);
+
+        if (!verificationStatus.hasValid) {
+            return {
+                allowed: false,
+                reason: verificationStatus.reason || 'Verificação KYC expirada',
+                code: 'kycRequired'
+            };
+        }
+
+        return { allowed: true };
+    };
+
     // Definir status do driver
     socket.on('setDriverStatus', async (data) => {
         try {
@@ -4518,14 +4555,39 @@ io.on('connection', async (socket) => {
                         });
                         return;
                     }
+
+                    const dailyKYC = await enforceDailyKYCForOnline(driverId);
+                    if (!dailyKYC.allowed) {
+                        logStructured('warn', 'Motorista sem verificação KYC diária tentou ficar online', {
+                            service: 'websocket',
+                            operation: 'setDriverStatus',
+                            driverId: driverId,
+                            reason: dailyKYC.reason,
+                            socketId: socket.id
+                        });
+                        socket.emit('driverStatusError', {
+                            error: 'Verificação facial diária necessária para ficar online.',
+                            reason: dailyKYC.reason,
+                            code: dailyKYC.code,
+                            kycRequired: true
+                        });
+                        return;
+                    }
                 } catch (kycError) {
-                    // Se falhar verificação KYC, continuar (fail-open)
-                    logStructured('warn', 'Erro ao verificar KYC (continuando)', {
+                    // Falha de validação KYC deve impedir online para segurança
+                    logStructured('warn', 'Erro ao verificar KYC (bloqueando online)', {
                         service: 'websocket',
                         operation: 'setDriverStatus',
                         driverId: driverId,
                         error: kycError.message
                     });
+                    socket.emit('driverStatusError', {
+                        error: 'Não foi possível validar KYC agora. Tente novamente.',
+                        reason: kycError.message,
+                        code: 'kycCheckFailed',
+                        kycRequired: true
+                    });
+                    return;
                 }
             }
 
@@ -4856,6 +4918,31 @@ io.on('connection', async (socket) => {
             const isInTripState = isInTrip || tripStatus === 'started' || tripStatus === 'accepted';
             const redis = redisPool.getConnection();
 
+            // Aplicar validação KYC diária na transição offline -> online via updateLocation
+            const existingDriverState = await redis.hgetall(`driver:${driverId}`);
+            const wasOnline = existingDriverState?.isOnline === 'true';
+            if (!wasOnline) {
+                try {
+                    const dailyKYC = await enforceDailyKYCForOnline(driverId);
+                    if (!dailyKYC.allowed) {
+                        socket.emit('driverStatusError', {
+                            error: 'Verificação facial diária necessária para ficar online.',
+                            reason: dailyKYC.reason,
+                            code: dailyKYC.code,
+                            kycRequired: true
+                        });
+                        return;
+                    }
+                } catch (kycError) {
+                    socket.emit('driverStatusError', {
+                        error: 'Não foi possível validar KYC agora. Tente novamente.',
+                        reason: kycError.message,
+                        code: 'kycCheckFailed',
+                        kycRequired: true
+                    });
+                    return;
+                }
+            }
             // Verificar se motorista já está no Redis
             const existingData = await redis.hgetall(`driver:${driverId}`);
 
@@ -4986,6 +5073,33 @@ io.on('connection', async (socket) => {
             // - Em viagem: 30 segundos (dados críticos, precisa ser muito atualizado)
             // - Online disponível: 90 segundos (balanceia responsividade e tolerância a falhas)
             const isInTripState = isInTrip || tripStatus === 'started' || tripStatus === 'accepted';
+            const redis = redisPool.getConnection();
+
+            // Aplicar validação KYC diária na transição offline -> online via updateLocation
+            const existingDriverState = await redis.hgetall(`driver:${driverId}`);
+            const wasOnline = existingDriverState?.isOnline === 'true';
+            if (!wasOnline) {
+                try {
+                    const dailyKYC = await enforceDailyKYCForOnline(driverId);
+                    if (!dailyKYC.allowed) {
+                        socket.emit('driverStatusError', {
+                            error: 'Verificação facial diária necessária para ficar online.',
+                            reason: dailyKYC.reason,
+                            code: dailyKYC.code,
+                            kycRequired: true
+                        });
+                        return;
+                    }
+                } catch (kycError) {
+                    socket.emit('driverStatusError', {
+                        error: 'Não foi possível validar KYC agora. Tente novamente.',
+                        reason: kycError.message,
+                        code: 'kycCheckFailed',
+                        kycRequired: true
+                    });
+                    return;
+                }
+            }
 
             if (process.env.NODE_ENV === 'development' || process.env.DEBUG_LOCATION === 'true') {
                 logStructured('debug', 'Salvando localização do driver no Redis', {
@@ -5003,7 +5117,6 @@ io.on('connection', async (socket) => {
             await saveDriverLocation(driverId, lat, lng, 0, 0, Date.now(), true, isInTripState);
 
             // Verificar se foi salvo corretamente no GEO
-            const redis = redisPool.getConnection();
             const isInGeo = await redis.zscore('driver_locations', driverId);
             if (process.env.NODE_ENV === 'development' || process.env.DEBUG_LOCATION === 'true') {
                 logStructured('debug', 'Verificação pós-salvamento de localização', {

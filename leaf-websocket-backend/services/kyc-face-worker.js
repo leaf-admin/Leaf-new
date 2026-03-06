@@ -6,7 +6,7 @@ const { logStructured, logError } = require('../utils/logger');
 class FaceProcessor {
   constructor() {
     this.modelsLoaded = false;
-    this.similarityThreshold = 0.85;
+    this.similarityThreshold = parseFloat(process.env.KYC_SIMILARITY_THRESHOLD || '0.5');
   }
 
   async loadModels() {

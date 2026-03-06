@@ -26,7 +26,8 @@ class IntegratedKYCService {
     this.firebaseStorage = new FirebaseStorageService();
     this.useVPS = process.env.KYC_USE_VPS !== 'false'; // Por padrão, usar VPS se configurada
     
-    this.similarityThreshold = 0.85;
+    // Threshold simples para KYC diário (MVP): 50%
+    this.similarityThreshold = parseFloat(process.env.KYC_SIMILARITY_THRESHOLD || '0.5');
     this.initialized = false;
 
     this.initialize();
@@ -754,4 +755,3 @@ class IntegratedKYCService {
 }
 
 module.exports = IntegratedKYCService;
-
