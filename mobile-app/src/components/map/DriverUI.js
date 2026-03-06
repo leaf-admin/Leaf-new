@@ -2581,12 +2581,9 @@ function DriverUI(props) {
             const kycEnabled = await isKYCEnabled();
 
             if (kycEnabled) {
-                // 🟢 KYC HABILITADO: Abrir verificação KYC antes de ficar online
-                Logger.log('🔐 [KYC] KYC habilitado - abrindo verificação...');
-                navigation.navigate('KYCVerification', {
-                    driverId: auth.profile.id,
-                    onVerificationSuccess: activateOnlineStatus
-                });
+                // 🟢 KYC HABILITADO: validação será aplicada no backend no primeiro online do dia
+                Logger.log('🔐 [KYC] KYC habilitado - validação diária será exigida no backend');
+                await activateOnlineStatus();
             } else {
                 // 🔴 KYC DESABILITADO: Ficar online direto (bypass)
                 Logger.log('🚀 [KYC] KYC desabilitado - bypass ativado, ficando online direto...');

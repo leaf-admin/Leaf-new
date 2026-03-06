@@ -156,10 +156,11 @@ class KYCRoutes {
       try {
         const { userId } = req.params;
         
-        if (!this.kycService.isValidUUID(userId)) {
+        // Firebase UID não segue formato UUID - não bloquear por isso
+        if (!userId || typeof userId !== 'string') {
           return res.status(400).json({
             success: false,
-            error: 'userId deve ser um UUID válido'
+            error: 'userId inválido'
           });
         }
 

@@ -806,6 +806,13 @@ export const updateProfileImage = async (imageBlob, imageUri = null) => {
     const uid = authResult.uid;
     console.log('[updateProfileImage] Autenticação validada para UID:', uid);
 
+    const userSnapshot = await singleUserRef(uid).once('value');
+    const userData = userSnapshot?.val?.() || {};
+    const isDriver = userData.usertype === 'driver' || userData.userType === 'driver';
+    if (isDriver) {
+      throw new Error('PROFILE_IMAGE_LOCKED_FOR_DRIVER');
+    }
+
     const ref = profileImageRef(uid);
     console.log('[updateProfileImage] profileImageRef(uid):', ref);
 
@@ -857,6 +864,12 @@ export const updateWebProfileImage = async (imageBlob) => {
   try {
     const authResult = await validateAuthentication(auth);
     const uid = authResult.uid;
+    const userSnapshot = await singleUserRef(uid).once('value');
+    const userData = userSnapshot?.val?.() || {};
+    const isDriver = userData.usertype === 'driver' || userData.userType === 'driver';
+    if (isDriver) {
+      throw new Error('PROFILE_IMAGE_LOCKED_FOR_DRIVER');
+    }
     
     const ref = profileImageRef(uid);
     await ref.put(imageBlob);
@@ -883,6 +896,13 @@ export const updateCustomerProfileImage = async (imageBlob, id) => {
     } else {
       const authResult = await validateAuthentication(auth);
       uid = authResult.uid;
+    }
+
+    const userSnapshot = await singleUserRef(uid).once('value');
+    const userData = userSnapshot?.val?.() || {};
+    const isDriver = userData.usertype === 'driver' || userData.userType === 'driver';
+    if (isDriver) {
+      throw new Error('PROFILE_IMAGE_LOCKED_FOR_DRIVER');
     }
     
     const ref = profileImageRef(uid);
