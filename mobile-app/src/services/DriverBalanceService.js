@@ -9,6 +9,8 @@ class DriverBalanceService {
   constructor() {
     this.baseUrl = getSelfHostedApiUrl('/api/payment');
     Logger.log('🔗 DriverBalanceService baseUrl:', this.baseUrl);
+    this.WITHDRAW_FEE_THRESHOLD = 500;
+    this.WITHDRAW_FEE_BELOW_THRESHOLD = 1;
   }
 
   /**
@@ -153,7 +155,72 @@ class DriverBalanceService {
       if (timeoutId) clearTimeout(timeoutId);
     }
   }
+
+  /**
+   * Calcula taxa de saque no app (mesma regra do backend).
+   * @param {number} amount
+   */
+  calculateWithdrawFee(amount) {
+    const numeric = Number(amount);
+    if (!Number.isFinite(numeric) || numeric <= 0) return 0;
+    return numeric < this.WITHDRAW_FEE_THRESHOLD ? this.WITHDRAW_FEE_BELOW_THRESHOLD : 0;
+  }
+
+  /**
+   * Solicita saque do motorista.
+   * @param {string} driverId
+   * @param {number} amount
+   * @param {string} pixKey
+   */
+  async requestWithdrawal(driverId, amount, pixKey) {
+    const controller = new AbortController();
+    let timeoutId;
+
+    try {
+      const url = `${this.baseUrl}/driver-balance/${driverId}/withdraw`;
+      timeoutId = setTimeout(() => controller.abort(), 15000);
+
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        signal: controller.signal,
+        body: JSON.stringify({
+          amount,
+          pixKey
+        })
+      });
+
+      if (timeoutId) clearTimeout(timeoutId);
+
+      const contentType = response.headers.get('content-type');
+      if (!contentType || !contentType.includes('application/json')) {
+        return {
+          success: false,
+          error: `Erro no servidor (${response.status})`
+        };
+      }
+
+      const data = await response.json();
+      if (response.ok && data.success) {
+        return data;
+      }
+
+      return {
+        success: false,
+        error: data.error || 'Falha ao solicitar saque'
+      };
+    } catch (error) {
+      Logger.error('❌ Erro ao solicitar saque:', error);
+      return {
+        success: false,
+        error: error.message || 'Erro de conexão ao solicitar saque'
+      };
+    } finally {
+      if (timeoutId) clearTimeout(timeoutId);
+    }
+  }
 }
 
 export default new DriverBalanceService();
-

@@ -21,6 +21,8 @@ class PaymentService {
     this.THRESHOLD_25 = 2500; // R$ 25,00 em centavos
     this.WOOVI_FEE_PERCENTAGE = 0.008; // 0,8% da transação
     this.WOOVI_FEE_MINIMUM = 50; // R$ 0,50 mínimo (em centavos)
+    this.WITHDRAW_FEE_THRESHOLD_CENTS = 50000; // R$ 500,00
+    this.WITHDRAW_FEE_BELOW_THRESHOLD_CENTS = 100; // R$ 1,00
 
     // Configuração de retry
     this.maxRetries = 3;
@@ -1396,6 +1398,157 @@ class PaymentService {
       return {
         success: false,
         error: error.message
+      };
+    }
+  }
+
+  /**
+   * Calcula taxa de saque para motorista.
+   * Regra: abaixo de R$ 500,00 cobra R$ 1,00.
+   * @param {number} amountCents
+   */
+  calculateWithdrawFee(amountCents) {
+    if (!Number.isFinite(amountCents) || amountCents <= 0) {
+      return 0;
+    }
+    if (amountCents < this.WITHDRAW_FEE_THRESHOLD_CENTS) {
+      return this.WITHDRAW_FEE_BELOW_THRESHOLD_CENTS;
+    }
+    return 0;
+  }
+
+  /**
+   * Solicita saque do saldo do motorista.
+   * Debita imediatamente do saldo e registra pedido para processamento.
+   * @param {Object} data
+   * @param {string} data.driverId
+   * @param {number} data.amountCents - valor que motorista deseja receber
+   * @param {string} data.pixKey
+   */
+  async requestDriverWithdrawal(data) {
+    const firestore = firebaseConfig.getFirestore();
+    if (!firestore) {
+      return { success: false, error: 'Firestore não disponível' };
+    }
+
+    const driverId = data?.driverId;
+    const amountCents = Number.parseInt(data?.amountCents, 10);
+    const pixKey = String(data?.pixKey || '').trim();
+
+    if (!driverId || !Number.isFinite(amountCents) || amountCents <= 0 || !pixKey) {
+      return { success: false, error: 'Dados inválidos para saque' };
+    }
+
+    const withdrawFeeCents = this.calculateWithdrawFee(amountCents);
+    const totalDebitCents = amountCents + withdrawFeeCents;
+    const amountInReais = amountCents / 100;
+    const feeInReais = withdrawFeeCents / 100;
+    const totalDebitInReais = totalDebitCents / 100;
+
+    const balanceRef = firestore.collection('driver_balances').doc(driverId);
+    const withdrawalRef = firestore.collection('driver_withdrawals').doc();
+
+    try {
+      const transactionResult = await firestore.runTransaction(async (transaction) => {
+        const balanceDoc = await transaction.get(balanceRef);
+        const balanceData = balanceDoc.exists ? balanceDoc.data() : {};
+        const currentBalance = Number.parseFloat(balanceData.balance || 0);
+
+        if (currentBalance < totalDebitInReais) {
+          throw new Error('Saldo insuficiente para saque + taxa');
+        }
+
+        const newBalance = currentBalance - totalDebitInReais;
+
+        transaction.set(balanceRef, {
+          driverId,
+          balance: newBalance,
+          lastUpdated: admin.firestore.FieldValue.serverTimestamp(),
+          lastWithdrawalAt: admin.firestore.FieldValue.serverTimestamp(),
+          lastWithdrawalAmount: amountInReais,
+          lastWithdrawalFee: feeInReais
+        }, { merge: true });
+
+        const baseTransactionData = {
+          createdAt: admin.firestore.FieldValue.serverTimestamp(),
+          withdrawalId: withdrawalRef.id,
+          pixKey
+        };
+
+        const txCollection = balanceRef.collection('transactions');
+        const withdrawalTxRef = txCollection.doc();
+        transaction.set(withdrawalTxRef, {
+          ...baseTransactionData,
+          type: 'withdrawal',
+          amount: -amountInReais,
+          amountInCents: -amountCents,
+          previousBalance: currentBalance,
+          newBalance: newBalance,
+          description: `Saque solicitado (${pixKey})`
+        });
+
+        if (withdrawFeeCents > 0) {
+          const feeTxRef = txCollection.doc();
+          transaction.set(feeTxRef, {
+            ...baseTransactionData,
+            type: 'withdrawal_fee',
+            amount: -feeInReais,
+            amountInCents: -withdrawFeeCents,
+            previousBalance: currentBalance - amountInReais,
+            newBalance: newBalance,
+            description: 'Taxa de saque abaixo de R$ 500,00'
+          });
+        }
+
+        transaction.set(withdrawalRef, {
+          driverId,
+          pixKey,
+          amountCents,
+          amountInReais,
+          feeCents: withdrawFeeCents,
+          feeInReais,
+          totalDebitCents,
+          totalDebitInReais,
+          status: 'pending',
+          source: 'mobile_app',
+          createdAt: admin.firestore.FieldValue.serverTimestamp(),
+          updatedAt: admin.firestore.FieldValue.serverTimestamp()
+        });
+
+        return {
+          previousBalance: currentBalance,
+          newBalance,
+          withdrawFeeCents,
+          totalDebitCents
+        };
+      });
+
+      logStructured('info', 'Saque solicitado com sucesso', {
+        service: 'payment-service',
+        driverId,
+        withdrawalId: withdrawalRef.id,
+        amountCents,
+        withdrawFeeCents,
+        totalDebitCents
+      });
+
+      return {
+        success: true,
+        withdrawalId: withdrawalRef.id,
+        amountCents,
+        withdrawFeeCents,
+        totalDebitCents,
+        amountInReais: amountInReais.toFixed(2),
+        withdrawFeeInReais: feeInReais.toFixed(2),
+        totalDebitInReais: totalDebitInReais.toFixed(2),
+        previousBalance: transactionResult.previousBalance,
+        newBalance: transactionResult.newBalance
+      };
+    } catch (error) {
+      logError(error, 'Erro ao solicitar saque', { service: 'payment-service', driverId });
+      return {
+        success: false,
+        error: error.message || 'Erro ao solicitar saque'
       };
     }
   }

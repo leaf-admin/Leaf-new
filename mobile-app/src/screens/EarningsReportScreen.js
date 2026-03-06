@@ -24,6 +24,7 @@ import ThemeSwitch from '../components/ThemeSwitch';
 import { SkeletonLoader, LoadingSpinner } from '../components/LoadingStates';
 import { useResponsiveLayout } from '../components/ResponsiveLayout';
 import { getSelfHostedApiUrl } from '../config/ApiConfig';
+import DriverBalanceService from '../services/DriverBalanceService';
 
 const MAIN_COLOR = colors.TAXIPRIMARY;
 const { width, height } = Dimensions.get('window');
@@ -144,20 +145,73 @@ export default function EarningsReportScreen({ navigation }) {
 
     function handleWithdrawValueChange(val) {
         setWithdrawValue(val);
-        if (parseFloat(val.replace(',', '.')) > saldoDisponivel) {
-            setWithdrawError('valor excede o limite disponível');
+        const amount = parseFloat(String(val).replace(',', '.')) || 0;
+        const fee = DriverBalanceService.calculateWithdrawFee(amount);
+        const totalDebit = amount + fee;
+
+        if (amount <= 0) {
+            setWithdrawError('');
+            return;
+        }
+
+        if (totalDebit > saldoDisponivel) {
+            setWithdrawError(`saldo insuficiente para saque + taxa (R$ ${formatCurrency(totalDebit)})`);
         } else {
             setWithdrawError('');
         }
     }
 
-    function handleConfirmWithdraw() {
-        // Aqui você vai chamar a API/backend
-        setWithdrawModalVisible(false);
-        setWithdrawValue('');
-        setPixKey('');
-        setWithdrawError('');
-        // Feedback de sucesso/erro pode ser adicionado aqui
+    async function handleConfirmWithdraw() {
+        try {
+            if (!auth?.profile?.uid) {
+                Alert.alert('Erro', 'Motorista não autenticado');
+                return;
+            }
+
+            const amount = parseFloat(String(withdrawValue).replace(',', '.'));
+            if (!Number.isFinite(amount) || amount <= 0) {
+                setWithdrawError('Informe um valor válido');
+                return;
+            }
+
+            const fee = DriverBalanceService.calculateWithdrawFee(amount);
+            const totalDebit = amount + fee;
+            if (totalDebit > saldoDisponivel) {
+                setWithdrawError(`saldo insuficiente para saque + taxa (R$ ${formatCurrency(totalDebit)})`);
+                return;
+            }
+
+            setIsProcessingWithdraw(true);
+            const result = await DriverBalanceService.requestWithdrawal(auth.profile.uid, amount, pixKey);
+
+            if (!result.success) {
+                setWithdrawError(result.error || 'Falha ao solicitar saque');
+                return;
+            }
+
+            setWithdrawModalVisible(false);
+            setWithdrawValue('');
+            setPixKey('');
+            setWithdrawError('');
+
+            setEarningsData((prev) => {
+                if (!prev) return prev;
+                return {
+                    ...prev,
+                    balance: Number(result.newBalance || 0)
+                };
+            });
+
+            Alert.alert(
+                'Saque solicitado',
+                `Valor: R$ ${formatCurrency(amount)}\nTaxa: R$ ${formatCurrency(fee)}\nDébito total: R$ ${formatCurrency(totalDebit)}`
+            );
+        } catch (error) {
+            Logger.error('Erro ao confirmar saque:', error);
+            setWithdrawError('Erro ao solicitar saque');
+        } finally {
+            setIsProcessingWithdraw(false);
+        }
     }
 
     // Remover a função ThemeSwitch local e usar o import no Header
@@ -260,6 +314,17 @@ export default function EarningsReportScreen({ navigation }) {
                         onChangeText={handleWithdrawValueChange}
                     />
                     {withdrawError ? <Text style={styles.modalError}>{withdrawError}</Text> : null}
+                    <Text style={[styles.modalLabel, { marginTop: 4 }]}>
+                        Taxa de saque: abaixo de R$ 500,00 cobra R$ 1,00
+                    </Text>
+                    <Text style={[styles.modalLabel, { fontWeight: '700' }]}>
+                        {(() => {
+                            const amount = parseFloat(String(withdrawValue).replace(',', '.')) || 0;
+                            const fee = DriverBalanceService.calculateWithdrawFee(amount);
+                            const total = amount + fee;
+                            return `Taxa atual: R$ ${formatCurrency(fee)} • Débito total: R$ ${formatCurrency(total)}`;
+                        })()}
+                    </Text>
                     <Text style={styles.modalLabel}>Chave Pix</Text>
                     <TextInput
                         style={styles.modalInput}
@@ -272,11 +337,13 @@ export default function EarningsReportScreen({ navigation }) {
                             <Text style={styles.modalCancelText}>Cancelar</Text>
                         </TouchableOpacity>
                         <TouchableOpacity
-                            style={[styles.modalConfirmButton, { opacity: (!withdrawValue || !pixKey || !!withdrawError) ? 0.5 : 1 }]}
-                            disabled={!withdrawValue || !pixKey || !!withdrawError}
+                            style={[styles.modalConfirmButton, { opacity: (!withdrawValue || !pixKey || !!withdrawError || isProcessingWithdraw) ? 0.5 : 1 }]}
+                            disabled={!withdrawValue || !pixKey || !!withdrawError || isProcessingWithdraw}
                             onPress={handleConfirmWithdraw}
                         >
-                            <Text style={styles.modalConfirmText}>Confirmar saque</Text>
+                            <Text style={styles.modalConfirmText}>
+                                {isProcessingWithdraw ? 'Processando...' : 'Confirmar saque'}
+                            </Text>
                         </TouchableOpacity>
                     </View>
                 </View>

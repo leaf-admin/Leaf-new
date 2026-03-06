@@ -306,6 +306,66 @@ router.get('/payment/driver-balance/:driverId/transactions', async (req, res) =>
 });
 
 /**
+ * POST /api/payment/driver-balance/:driverId/withdraw
+ * Solicita saque do motorista com regra de taxa:
+ * - abaixo de R$500, cobra R$1,00
+ */
+router.post('/payment/driver-balance/:driverId/withdraw', async (req, res) => {
+  try {
+    const { driverId } = req.params;
+    const { amount, pixKey } = req.body || {};
+
+    if (!driverId) {
+      return res.status(400).json({
+        success: false,
+        error: 'driverId é obrigatório'
+      });
+    }
+
+    if (!amount || Number.isNaN(Number(amount)) || Number(amount) <= 0) {
+      return res.status(400).json({
+        success: false,
+        error: 'amount deve ser um número maior que zero'
+      });
+    }
+
+    if (!pixKey || String(pixKey).trim().length < 3) {
+      return res.status(400).json({
+        success: false,
+        error: 'pixKey é obrigatório'
+      });
+    }
+
+    const amountCents = Math.round(Number(amount) * 100);
+    const result = await paymentService.requestDriverWithdrawal({
+      driverId,
+      amountCents,
+      pixKey: String(pixKey).trim()
+    });
+
+    if (result.success) {
+      return res.status(200).json({
+        success: true,
+        ...result
+      });
+    }
+
+    const statusCode = String(result.error || '').toLowerCase().includes('saldo insuficiente') ? 400 : 500;
+    return res.status(statusCode).json({
+      success: false,
+      error: result.error || 'Erro ao processar saque'
+    });
+  } catch (error) {
+    logError(error, '❌ Erro na rota de saque do motorista:', { service: 'payment-routes' });
+    res.status(500).json({
+      success: false,
+      error: 'Erro interno do servidor',
+      details: error.message
+    });
+  }
+});
+
+/**
  * GET /api/payment/calculate-net
  * Calcula valor líquido para uma corrida
  */
@@ -338,7 +398,6 @@ router.get('/payment/calculate-net', async (req, res) => {
 });
 
 module.exports = router;
-
 
 
 
