@@ -1566,6 +1566,139 @@ class PaymentService {
   }
 
   /**
+   * Lista saques pendentes para processamento operacional.
+   * @param {number} limit
+   */
+  async listPendingWithdrawals(limit = 50) {
+    const firestore = firebaseConfig.getFirestore();
+    if (!firestore) {
+      return { success: false, error: 'Firestore não disponível' };
+    }
+
+    const safeLimit = Math.max(1, Math.min(Number(limit) || 50, 200));
+    const snapshot = await firestore
+      .collection('driver_withdrawals')
+      .where('status', '==', 'pending')
+      .limit(safeLimit)
+      .get();
+
+    const withdrawals = [];
+    snapshot.forEach((doc) => {
+      withdrawals.push({
+        id: doc.id,
+        ...doc.data()
+      });
+    });
+    withdrawals.sort((a, b) => {
+      const aMs = Number(a?.createdAt?.toMillis?.() || 0);
+      const bMs = Number(b?.createdAt?.toMillis?.() || 0);
+      return aMs - bMs;
+    });
+
+    return {
+      success: true,
+      withdrawals
+    };
+  }
+
+  /**
+   * Processa um saque pendente.
+   * Fluxo:
+   * 1) tenta Pix Out via Woovi
+   * 2) se sucesso, marca processed
+   * 3) se falhar, mantém pending para retry operacional
+   */
+  async processDriverWithdrawal(withdrawalId, actorId = 'system') {
+    const firestore = firebaseConfig.getFirestore();
+    if (!firestore) {
+      return { success: false, error: 'Firestore não disponível' };
+    }
+
+    if (!withdrawalId) {
+      return { success: false, error: 'withdrawalId é obrigatório' };
+    }
+
+    const withdrawalRef = firestore.collection('driver_withdrawals').doc(withdrawalId);
+    const withdrawalDoc = await withdrawalRef.get();
+    if (!withdrawalDoc.exists) {
+      return { success: false, error: 'Saque não encontrado' };
+    }
+
+    const withdrawal = withdrawalDoc.data();
+    if (withdrawal.status !== 'pending') {
+      return {
+        success: true,
+        alreadyProcessed: true,
+        status: withdrawal.status
+      };
+    }
+
+    if (!this.LEAF_PIX_KEY || this.LEAF_PIX_KEY === 'test@leaf.app.br') {
+      return {
+        success: false,
+        error: 'LEAF_PIX_KEY não configurada para processamento automático'
+      };
+    }
+
+    const amountCents = Number(withdrawal.amountCents || 0);
+    const driverPixKey = String(withdrawal.pixKey || '').trim();
+    if (!amountCents || !driverPixKey) {
+      return { success: false, error: 'Dados do saque inválidos' };
+    }
+
+    const transferResult = await this.wooviDriverService.transferDirectToDriver(
+      withdrawal.wooviAccountId || withdrawal.wooviClientId || withdrawal.driverId,
+      amountCents,
+      `Saque motorista ${withdrawal.driverId} - ${withdrawalId}`,
+      withdrawal.rideId || `withdraw_${withdrawalId}`,
+      driverPixKey,
+      this.LEAF_PIX_KEY
+    );
+
+    if (!transferResult.success) {
+      await withdrawalRef.set({
+        lastAttemptAt: admin.firestore.FieldValue.serverTimestamp(),
+        attempts: admin.firestore.FieldValue.increment(1),
+        lastError: transferResult.error || transferResult.details || 'Falha na transferência Woovi',
+        updatedAt: admin.firestore.FieldValue.serverTimestamp()
+      }, { merge: true });
+
+      logStructured('warn', 'Falha ao processar saque na Woovi (mantido pendente)', {
+        service: 'payment-service',
+        withdrawalId,
+        driverId: withdrawal.driverId,
+        error: transferResult.error || transferResult.details
+      });
+
+      return {
+        success: false,
+        error: transferResult.error || 'Falha ao transferir saque'
+      };
+    }
+
+    await withdrawalRef.set({
+      status: 'processed',
+      processedAt: admin.firestore.FieldValue.serverTimestamp(),
+      processedBy: actorId,
+      transferId: transferResult.transferId || transferResult.transactionId || null,
+      updatedAt: admin.firestore.FieldValue.serverTimestamp()
+    }, { merge: true });
+
+    logStructured('info', 'Saque processado com sucesso', {
+      service: 'payment-service',
+      withdrawalId,
+      driverId: withdrawal.driverId,
+      amountCents
+    });
+
+    return {
+      success: true,
+      withdrawalId,
+      transferId: transferResult.transferId || transferResult.transactionId || null
+    };
+  }
+
+  /**
    * Verifica status de um pagamento via chargeId na Woovi
    * @param {string} chargeId - ID da cobrança na Woovi (ou bookingId para testes)
    * @returns {Promise<Object>} - Status do pagamento

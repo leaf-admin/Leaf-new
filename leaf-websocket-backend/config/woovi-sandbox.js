@@ -8,12 +8,15 @@ function getWebhookUrl() {
 
 const WOOVI_SANDBOX_CONFIG = {
   // Credenciais Sandbox
-  clientId: 'Client_Id_18c0dc27-6306-41dc-a2de-b6303347c3ae',
-  clientSecret: 'Client_Secret_oVXw4Mrnny9kD8GyZSWWWMQ8++8vkLaGAeVDTfsrxw=',
-  apiToken: 'Q2xpZW50X0lkXzE4YzBkYzI3LTYzMDYtNDFkYy1hMmRlLWI2MzAzMzQ3YzNhZTpDbGllbnRfU2VjcmV0X29WWHc0TXJubnk5a0Q4R3laU1dXV01ROCsrbzh2a0xhR0FlVkRUZnNyeHc9',
+  // IMPORTANTE: preencher via .env / variáveis do ambiente.
+  // Não manter segredos hardcoded no repositório.
+  clientId: process.env.WOOVI_APP_ID || '',
+  clientSecret: process.env.WOOVI_CLIENT_SECRET || '',
+  apiToken: process.env.WOOVI_API_TOKEN || '',
   
   // URLs da API
-  baseUrl: 'https://api-sandbox.woovi.com',
+  // Endpoint REST da API Woovi Sandbox
+  baseUrl: process.env.WOOVI_BASE_URL || 'https://api.woovi-sandbox.com/api/v1',
   // ✅ Carrega URL do ngrok automaticamente (arquivo .ngrok-url.json ou variável de ambiente)
   // ✅ Prioridade: WOOVI_WEBHOOK_URL env > arquivo .ngrok-url.json > fallback local
   // ✅ Usar getWebhookUrl() para obter URL dinamicamente
@@ -61,7 +64,6 @@ const WOOVI_SANDBOX_CONFIG = {
 
 module.exports = WOOVI_SANDBOX_CONFIG;
 module.exports.getWebhookUrl = getWebhookUrl;
-
 
 
 

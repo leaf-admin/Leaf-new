@@ -117,6 +117,66 @@ service cloud.firestore {
                      request.auth.token.admin == true && 
                      request.auth.token.role == 'super-admin';
     }
+
+    match /payment_holdings/{rideId} {
+      allow read: if request.auth != null &&
+                     request.auth.token.admin == true &&
+                     request.auth.token.role in ['admin', 'super-admin'];
+      allow write: if request.auth != null &&
+                     request.auth.token.admin == true &&
+                     request.auth.token.role == 'super-admin';
+    }
+
+    match /payment_history/{eventId} {
+      allow read: if request.auth != null &&
+                     request.auth.token.admin == true &&
+                     request.auth.token.role in ['admin', 'super-admin'];
+      allow write: if request.auth != null &&
+                     request.auth.token.admin == true &&
+                     request.auth.token.role == 'super-admin';
+    }
+
+    match /payment_distributions/{rideId} {
+      allow read: if request.auth != null &&
+                     request.auth.token.admin == true &&
+                     request.auth.token.role in ['admin', 'super-admin'];
+      allow write: if request.auth != null &&
+                     request.auth.token.admin == true &&
+                     request.auth.token.role == 'super-admin';
+    }
+
+    match /driver_balances/{driverId} {
+      allow read: if request.auth != null &&
+                     (request.auth.uid == driverId ||
+                      (request.auth.token.admin == true &&
+                       request.auth.token.role in ['admin', 'super-admin']));
+      allow write: if request.auth != null &&
+                     request.auth.token.admin == true &&
+                     request.auth.token.role in ['admin', 'super-admin'];
+      match /transactions/{txId} {
+        allow read: if request.auth != null &&
+                       (request.auth.uid == driverId ||
+                        (request.auth.token.admin == true &&
+                         request.auth.token.role in ['admin', 'super-admin']));
+        allow write: if request.auth != null &&
+                       request.auth.token.admin == true &&
+                       request.auth.token.role in ['admin', 'super-admin'];
+      }
+    }
+
+    match /driver_withdrawals/{withdrawalId} {
+      allow read: if request.auth != null &&
+                     (request.auth.uid == resource.data.driverId ||
+                      (request.auth.token.admin == true &&
+                       request.auth.token.role in ['admin', 'super-admin']));
+      allow create: if request.auth != null &&
+                       (request.auth.uid == request.resource.data.driverId ||
+                        (request.auth.token.admin == true &&
+                         request.auth.token.role in ['admin', 'super-admin']));
+      allow update, delete: if request.auth != null &&
+                              request.auth.token.admin == true &&
+                              request.auth.token.role in ['admin', 'super-admin'];
+    }
     
     // ============================================
     // REGRAS PARA PROMOÇÕES

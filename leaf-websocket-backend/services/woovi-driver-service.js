@@ -1,34 +1,14 @@
 const axios = require('axios');
 const { logStructured, logError } = require('../utils/logger');
+const { getWooviConfig, getWooviAuthHeaders } = require('../config/woovi-config');
 
-// Configuração Woovi
-// ⚠️ ATENÇÃO: Para produção, atualizar baseUrl para 'https://api.woovi.com/api/v1' e usar credenciais de produção
-const WOOVI_CONFIG = {
-  // ✅ Usar variáveis de ambiente em produção
-  // ✅ NOVO APPID CRIADO PELO USUÁRIO (25/11/2025)
-  apiToken: process.env.WOOVI_API_TOKEN || 'Q2xpZW50X0lkXzE4YzBkYzI3LTYzMDYtNDFkYy1hMmRlLWI2MzAzMzQ3YzNhZTpDbGllbnRfU2VjcmV0X01ENWpTTW1DMExBYWx2WHhiY0tTSnlrVmYyM0g1Z0FxS0pZaE5zT0tUK1E9',
-  // ⚠️ SANDBOX: URL correta é 'https://api.woovi-sandbox.com/api/v1' (com ponto antes de woovi-sandbox)
-  // ✅ TESTADO: https://api-sandbox.woovi.com retorna 302 (redirecionamento) → HTML
-  // ✅ TESTADO: https://api.woovi-sandbox.com retorna 401 (JSON válido) → CORRETO
-  // ⚠️ PRODUÇÃO: 'https://api.woovi.com/api/v1'
-  baseUrl: process.env.WOOVI_BASE_URL || 'https://api.woovi-sandbox.com/api/v1',
-  appId: process.env.WOOVI_APP_ID || 'Client_Id_18c0dc27-6306-41dc-a2de-b6303347c3ae',
-  environment: process.env.WOOVI_ENVIRONMENT || 'sandbox', // 'sandbox' ou 'production'
-  // API MASTER para criar contas BaaS (deve ser configurada via env)
-  masterApiToken: process.env.WOOVI_MASTER_API_TOKEN || null,
-  masterAppId: process.env.WOOVI_MASTER_APP_ID || null
-};
+const WOOVI_CONFIG = getWooviConfig();
 
 class WooviDriverService {
   constructor() {
     this.api = axios.create({
       baseURL: WOOVI_CONFIG.baseUrl,
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': WOOVI_CONFIG.apiToken
-        // ⚠️ X-App-ID removido - routes/woovi.js não usa e pode estar causando erro "appID inválido"
-        // 'X-App-ID': WOOVI_CONFIG.appId
-      },
+      headers: getWooviAuthHeaders(WOOVI_CONFIG),
       timeout: 30000,
       maxRedirects: 0, // ✅ NÃO seguir redirecionamentos (evitar receber HTML)
       validateStatus: function (status) {
@@ -563,13 +543,15 @@ class WooviDriverService {
       // ✅ Garantir que os headers estão corretos a cada requisição
       // ⚠️ NOTA: routes/woovi.js não usa X-App-ID, apenas Authorization
       // Testando sem X-App-ID primeiro, se falhar, adicionar de volta
-      const requestHeaders = {
-        'Content-Type': 'application/json',
-        'Authorization': WOOVI_CONFIG.apiToken
-        // 'X-App-ID': WOOVI_CONFIG.appId // ⚠️ Comentado temporariamente para testar
-      };
+      const requestHeaders = getWooviAuthHeaders(WOOVI_CONFIG);
       
-      logStructured('debug', 'Headers da requisição', { service: 'woovi-driver-service', authorization: WOOVI_CONFIG.apiToken ? `${WOOVI_CONFIG.apiToken.substring(0, 20)}...` : 'Ausente', contentType: 'application/json', baseURL: WOOVI_CONFIG.baseUrl, xAppId: 'REMOVIDO (não usado)' });
+      logStructured('debug', 'Headers da requisição', {
+        service: 'woovi-driver-service',
+        authorization: WOOVI_CONFIG.apiToken ? `${WOOVI_CONFIG.apiToken.substring(0, 16)}...` : 'ausente',
+        contentType: 'application/json',
+        baseURL: WOOVI_CONFIG.baseUrl,
+        hasAppId: Boolean(WOOVI_CONFIG.appId)
+      });
 
       // ✅ Usar a instância do axios já configurada (this.api)
       // Mas garantir que os headers estão atualizados

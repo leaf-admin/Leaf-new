@@ -398,8 +398,14 @@ app.get('/health/liveness', (_req, res) => {
     });
 });
 
+const parseEnvList = (rawValue) =>
+    String(rawValue || '')
+        .split(',')
+        .map((item) => item.trim())
+        .filter(Boolean);
+
 // ✅ Configuração CORS segura - apenas origens permitidas
-const allowedOrigins = [
+const baseAllowedOrigins = [
     // Produção
     'https://leaf.app.br',
     'https://www.leaf.app.br',
@@ -426,21 +432,26 @@ const allowedOrigins = [
     'file://',
 ];
 
+const envAllowedOrigins = parseEnvList(process.env.CORS_ORIGIN);
+const allowedOrigins = Array.from(new Set([...baseAllowedOrigins, ...envAllowedOrigins]));
+const allowPrivateCors = String(process.env.ALLOW_PRIVATE_CORS || (process.env.NODE_ENV !== 'production')).toLowerCase() === 'true';
+const allowNgrokCors = String(process.env.ALLOW_NGROK_CORS || (process.env.NODE_ENV !== 'production')).toLowerCase() === 'true';
+
 // Função para validar origem
 const corsOptions = {
     origin: (origin, callback) => {
         // ✅ React Native e apps nativos não enviam origin (é null/undefined)
         // Permitir se não houver origin (React Native) ou se estiver na whitelist
-        // Também permite qualquer IP da rede local 192.168.*.*
         const isVpcDirectOrigin = /^https?:\/\/147\.182\.204\.181(?::\d+)?$/.test(origin || '');
+        const isPrivateNetworkOrigin = /^http:\/\/(192\.168\.|10\.)/.test(origin || '');
+        const isNgrokOrigin = /ngrok-free\.app$/i.test(origin || '');
 
         if (
             !origin ||
             allowedOrigins.includes(origin) ||
             isVpcDirectOrigin ||
-            origin.endsWith('ngrok-free.app') ||
-            origin.startsWith('http://192.168.') ||
-            origin.startsWith('http://10.') ||
+            (allowNgrokCors && isNgrokOrigin) ||
+            (allowPrivateCors && isPrivateNetworkOrigin) ||
             origin.startsWith('exp://') ||
             origin.includes('.expo.dev')
         ) {

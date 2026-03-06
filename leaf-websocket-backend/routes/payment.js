@@ -130,11 +130,11 @@ router.post('/payment/distribute', async (req, res) => {
   try {
     const { rideId, driverId, wooviClientId, totalAmount } = req.body;
 
-    if (!rideId || !driverId || !wooviClientId || !totalAmount) {
+    if (!rideId || !driverId || !totalAmount) {
       return res.status(400).json({
         success: false,
         error: 'Dados obrigatórios não fornecidos',
-        required: ['rideId', 'driverId', 'wooviClientId', 'totalAmount']
+        required: ['rideId', 'driverId', 'totalAmount']
       });
     }
 
@@ -366,6 +366,55 @@ router.post('/payment/driver-balance/:driverId/withdraw', async (req, res) => {
 });
 
 /**
+ * GET /api/payment/withdrawals/pending
+ * Lista saques pendentes para processamento
+ */
+router.get('/payment/withdrawals/pending', async (req, res) => {
+  try {
+    const limit = Number(req.query.limit || 50);
+    const result = await paymentService.listPendingWithdrawals(limit);
+
+    if (!result.success) {
+      return res.status(500).json(result);
+    }
+
+    return res.status(200).json(result);
+  } catch (error) {
+    logError(error, '❌ Erro ao listar saques pendentes', { service: 'payment-routes' });
+    return res.status(500).json({
+      success: false,
+      error: 'Erro interno do servidor',
+      details: error.message
+    });
+  }
+});
+
+/**
+ * POST /api/payment/withdrawals/:withdrawalId/process
+ * Processa saque pendente via Woovi Pix Out.
+ */
+router.post('/payment/withdrawals/:withdrawalId/process', async (req, res) => {
+  try {
+    const { withdrawalId } = req.params;
+    const actorId = req.body?.actorId || 'system';
+
+    const result = await paymentService.processDriverWithdrawal(withdrawalId, actorId);
+    if (result.success) {
+      return res.status(200).json(result);
+    }
+
+    return res.status(400).json(result);
+  } catch (error) {
+    logError(error, '❌ Erro ao processar saque pendente', { service: 'payment-routes' });
+    return res.status(500).json({
+      success: false,
+      error: 'Erro interno do servidor',
+      details: error.message
+    });
+  }
+});
+
+/**
  * GET /api/payment/calculate-net
  * Calcula valor líquido para uma corrida
  */
@@ -398,8 +447,6 @@ router.get('/payment/calculate-net', async (req, res) => {
 });
 
 module.exports = router;
-
-
 
 
 

@@ -75,6 +75,41 @@ service cloud.firestore {
       allow read: if isAdmin();
       allow write: if isSuperAdmin(); // Apenas super-admin pode modificar pagamentos
     }
+
+    match /payment_holdings/{rideId} {
+      allow read: if isAdmin();
+      allow write: if isSuperAdmin();
+    }
+
+    match /payment_history/{eventId} {
+      allow read: if isAdmin();
+      allow write: if isSuperAdmin();
+    }
+
+    match /payment_distributions/{rideId} {
+      allow read: if isAdmin();
+      allow write: if isSuperAdmin();
+    }
+
+    match /driver_balances/{driverId} {
+      allow read: if request.auth != null &&
+                     (request.auth.uid == driverId || isAdmin());
+      allow write: if isAdmin();
+
+      match /transactions/{txId} {
+        allow read: if request.auth != null &&
+                       (request.auth.uid == driverId || isAdmin());
+        allow write: if isAdmin();
+      }
+    }
+
+    match /driver_withdrawals/{withdrawalId} {
+      allow read: if request.auth != null &&
+                     (isAdmin() || request.auth.uid == resource.data.driverId);
+      allow create: if request.auth != null &&
+                       (isAdmin() || request.auth.uid == request.resource.data.driverId);
+      allow update, delete: if isAdmin();
+    }
     
     // ============================================
     // PROMOÇÕES
@@ -124,7 +159,6 @@ service cloud.firestore {
     }
   }
 }
-
 
 
 

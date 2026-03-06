@@ -2,38 +2,43 @@ const express = require('express');
 const axios = require('axios');
 const router = express.Router();
 const { logStructured, logError } = require('../utils/logger');
+const { getWooviConfig, getWooviAuthHeaders } = require('../config/woovi-config');
 
-// Configuração Sandbox Woovi
-let WOOVI_CONFIG = {
-  appId: process.env.WOOVI_APP_ID || '',
-  apiToken: process.env.WOOVI_API_TOKEN || 'Q2xpZW50X0lkXzE4YzBkYzI3LTYzMDYtNDFkYy1hMmRlLWI2MzAzMzQ3YzNhZTpDbGllbnRfU2VjcmV0X01ENWpTTW1DMExBYWx2WHhiY0tTSnlrVmYyM0g1Z0FxS0pZaE5zT0tUK1E9',
-  baseUrl: process.env.WOOVI_BASE_URL || 'https://api.woovi.com',
-  environment: process.env.WOOVI_ENVIRONMENT || 'sandbox'
-};
+const WOOVI_CONFIG = getWooviConfig();
+logStructured('info', 'Configuração Woovi carregada', {
+  service: 'woovi-routes',
+  environment: WOOVI_CONFIG.environment,
+  baseUrl: WOOVI_CONFIG.baseUrl,
+  hasToken: Boolean(WOOVI_CONFIG.apiToken),
+  hasAppId: Boolean(WOOVI_CONFIG.appId)
+});
 
-// Tentar carregar configuração de sandbox se não estiver em produção
-if (process.env.WOOVI_ENVIRONMENT === 'sandbox' || process.env.NODE_ENV !== 'production') {
-  try {
-    const sandboxConfig = require('../config/woovi-sandbox');
-    WOOVI_CONFIG = {
-      appId: sandboxConfig.clientId,
-      apiToken: sandboxConfig.apiToken,
-      baseUrl: sandboxConfig.baseUrl,
-      environment: 'sandbox'
-    };
-    logStructured('info', 'Usando configuração de WOOVI SANDBOX', { service: 'woovi-routes', baseUrl: WOOVI_CONFIG.baseUrl });
-  } catch (err) {
-    logStructured('warn', 'Arquivo woovi-sandbox não encontrado, usando defaults', { service: 'woovi-routes' });
+const ensureWooviCredentials = (res) => {
+  if (!WOOVI_CONFIG.apiToken) {
+    res.status(500).json({
+      success: false,
+      error: 'WOOVI_API_TOKEN não configurado'
+    });
+    return false;
   }
-}
+  return true;
+};
 
 // Criar cobrança PIX
 router.post('/woovi/create-charge', async (req, res) => {
   try {
-    const { value, description, correlationID } = req.body;
+    if (!ensureWooviCredentials(res)) return;
+    const { value, amount, description, correlationID } = req.body;
+    const amountInReais = Number(value ?? amount);
+    if (!Number.isFinite(amountInReais) || amountInReais <= 0) {
+      return res.status(400).json({
+        success: false,
+        error: 'Campo value (ou amount) deve ser número maior que zero'
+      });
+    }
 
     const chargeData = {
-      value: value * 100, // Converter para centavos
+      value: Math.round(amountInReais * 100), // Converter para centavos
       correlationID: correlationID || `leaf_${Date.now()}`,
       comment: description || 'Pagamento Leaf App',
       expiresIn: 3600, // 1 hora
@@ -49,12 +54,8 @@ router.post('/woovi/create-charge', async (req, res) => {
       ]
     };
 
-    const response = await axios.post(`${WOOVI_CONFIG.baseUrl}/api/v1/charge`, chargeData, {
-      headers: {
-        'Authorization': WOOVI_CONFIG.apiToken,
-        'x-app-id': WOOVI_CONFIG.appId,
-        'Content-Type': 'application/json'
-      },
+    const response = await axios.post(`${WOOVI_CONFIG.baseUrl}/charge`, chargeData, {
+      headers: getWooviAuthHeaders(WOOVI_CONFIG),
       timeout: 10000
     });
 
@@ -78,14 +79,11 @@ router.post('/woovi/create-charge', async (req, res) => {
 // Verificar status da cobrança
 router.get('/woovi/check-status/:correlationID', async (req, res) => {
   try {
+    if (!ensureWooviCredentials(res)) return;
     const { correlationID } = req.params;
 
-    const response = await axios.get(`${WOOVI_CONFIG.baseUrl}/api/v1/charge/${correlationID}`, {
-      headers: {
-        'Authorization': WOOVI_CONFIG.apiToken,
-        'x-app-id': WOOVI_CONFIG.appId,
-        'Content-Type': 'application/json'
-      },
+    const response = await axios.get(`${WOOVI_CONFIG.baseUrl}/charge/${correlationID}`, {
+      headers: getWooviAuthHeaders(WOOVI_CONFIG),
       timeout: 10000
     });
 
@@ -109,14 +107,11 @@ router.get('/woovi/check-status/:correlationID', async (req, res) => {
 // Listar cobranças
 router.get('/woovi/list-charges', async (req, res) => {
   try {
+    if (!ensureWooviCredentials(res)) return;
     const { page = 1, limit = 10 } = req.query;
 
-    const response = await axios.get(`${WOOVI_CONFIG.baseUrl}/api/v1/charge`, {
-      headers: {
-        'Authorization': WOOVI_CONFIG.apiToken,
-        'x-app-id': WOOVI_CONFIG.appId,
-        'Content-Type': 'application/json'
-      },
+    const response = await axios.get(`${WOOVI_CONFIG.baseUrl}/charge`, {
+      headers: getWooviAuthHeaders(WOOVI_CONFIG),
       params: { page, limit },
       timeout: 10000
     });
@@ -138,20 +133,36 @@ router.get('/woovi/list-charges', async (req, res) => {
 // Testar conexão
 router.get('/woovi/test-connection', async (req, res) => {
   try {
-    const response = await axios.get(`${WOOVI_CONFIG.baseUrl}/api/v1/me`, {
-      headers: {
-        'Authorization': WOOVI_CONFIG.apiToken,
-        'x-app-id': WOOVI_CONFIG.appId,
-        'Content-Type': 'application/json'
-      },
+    if (!ensureWooviCredentials(res)) return;
+    // Usa endpoint de listagem de cobranças como health-check de autenticação.
+    const response = await axios.get(`${WOOVI_CONFIG.baseUrl}/charge`, {
+      headers: getWooviAuthHeaders(WOOVI_CONFIG),
+      params: { page: 1, limit: 1 },
       timeout: 10000
     });
+
+    const contentType = String(response.headers?.['content-type'] || '').toLowerCase();
+    if (!contentType.includes('application/json')) {
+      return res.status(502).json({
+        success: false,
+        error: 'Resposta inválida da API Woovi (não JSON)',
+        details: {
+          baseUrl: WOOVI_CONFIG.baseUrl,
+          contentType
+        }
+      });
+    }
 
     res.json({
       success: true,
       message: 'Conexão com Woovi estabelecida com sucesso',
       environment: WOOVI_CONFIG.environment,
-      data: response.data
+      data: {
+        baseUrl: WOOVI_CONFIG.baseUrl,
+        requestStatus: response.status,
+        hasChargesArray: Array.isArray(response.data?.charges),
+        rawKeys: Object.keys(response.data || {})
+      }
     });
 
   } catch (error) {
