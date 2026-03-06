@@ -270,6 +270,60 @@ class LeafApiService {
     return data?.data?.stats || {};
   }
 
+  async sendPushNotification(payload = {}) {
+    return this.request("/notifications/send", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async getSubscriptionsDrivers(params = {}) {
+    const query = new URLSearchParams();
+    Object.entries(params).forEach(([key, value]) => {
+      if (value !== undefined && value !== null && value !== "") {
+        query.append(key, String(value));
+      }
+    });
+    return this.request(`/subscriptions/drivers?${query.toString()}`);
+  }
+
+  async updateDriverSubscription(driverId, payload = {}) {
+    return this.request(`/drivers/${driverId}/subscription`, {
+      method: "PATCH",
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async extendDriverFreePeriod(driverId, payload = {}) {
+    return this.request(`/drivers/${driverId}/extend-free`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async listPromotions(params = {}) {
+    const query = new URLSearchParams();
+    Object.entries(params).forEach(([key, value]) => {
+      if (value !== undefined && value !== null && value !== "") {
+        query.append(key, String(value));
+      }
+    });
+    return this.request(`/promotions?${query.toString()}`);
+  }
+
+  async createPromotion(payload = {}) {
+    return this.request("/promotions", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async applyPromotion(promotionId, driverId) {
+    return this.request(`/promotions/${promotionId}/apply/${driverId}`, {
+      method: "POST",
+    });
+  }
+
   async getWaitlist(page = 1, limit = 20, status = "pending") {
     const params = new URLSearchParams({
       page: String(page),

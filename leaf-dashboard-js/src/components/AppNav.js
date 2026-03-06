@@ -12,6 +12,8 @@ const items = [
   { href: "/notifications", label: "Notificações" },
   { href: "/users", label: "Usuários" },
   { href: "/drivers", label: "Motoristas" },
+  { href: "/subscriptions", label: "Assinaturas" },
+  { href: "/promotions", label: "Promocoes" },
   { href: "/waitlist", label: "Waitlist" },
   { href: "/support", label: "Suporte" },
   { href: "/financial-simulator", label: "Simulador" },

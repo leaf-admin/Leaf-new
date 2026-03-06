@@ -1512,73 +1512,6 @@ router.get('/api/subscriptions/stats', async (req, res) => {
   }
 });
 
-// 🎁 Promotions
-router.get('/api/promotions', async (req, res) => {
-  try {
-    const promotions = [
-      {
-        id: 'promo1',
-        name: 'Bem-vindo Motorista',
-        description: 'Primeira semana grátis para novos motoristas',
-        type: 'free_subscription',
-        value: 100,
-        targetAudience: 'new_drivers',
-        status: 'active',
-        usage: {
-          currentUsages: 147,
-          maxUsages: 1000
-        },
-        analytics: {
-          views: 2340,
-          clicks: 567,
-          conversions: 147,
-          revenue: 0
-        }
-      }
-    ];
-
-    res.json(promotions);
-  } catch (error) {
-    logError(error, 'Erro ao buscar promoções:', { service: 'dashboard-routes' });
-    res.status(500).json({ error: 'Erro interno do servidor' });
-  }
-});
-
-router.get('/api/promotions/stats', async (req, res) => {
-  try {
-    const stats = {
-      total: 8,
-      active: 5,
-      paused: 1,
-      expired: 1,
-      cancelled: 1,
-      totalRevenue: 45600.80,
-      totalSavings: 12300.50,
-      totalUsers: 1247,
-      conversionRate: 24.8
-    };
-
-    res.json(stats);
-  } catch (error) {
-    logError(error, 'Erro ao buscar stats de promoções:', { service: 'dashboard-routes' });
-    res.status(500).json({ error: 'Erro interno do servidor' });
-  }
-});
-
-router.post('/api/promotions', async (req, res) => {
-  try {
-    const promotionData = req.body;
-
-    // Implementar criação de promoção
-    logStructured('info', 'Criando promoção:', promotionData, { service: 'dashboard-routes' });
-
-    res.json({ success: true, id: 'promo_' + Date.now() });
-  } catch (error) {
-    logError(error, 'Erro ao criar promoção:', { service: 'dashboard-routes' });
-    res.status(500).json({ error: 'Erro interno do servidor' });
-  }
-});
-
 // 🗺️ Live Map Data
 router.get('/api/drivers/active', async (req, res) => {
   try {
@@ -3731,7 +3664,7 @@ function calculatePaymentFrequency(payments) {
 }
 
 // 🎁 Promotion Management - SISTEMA DE PROMOÇÕES POR PERFIL
-router.get('/api/promotions', async (req, res) => {
+router.get('/api/legacy/promotions', async (req, res) => {
   try {
     const {
       status, // 'active', 'expired', 'scheduled', 'paused'
@@ -3898,7 +3831,7 @@ router.get('/api/promotions', async (req, res) => {
 });
 
 // 🎁 Create New Promotion
-router.post('/api/promotions', async (req, res) => {
+router.post('/api/legacy/promotions', async (req, res) => {
   try {
     const {
       name,
@@ -4002,7 +3935,7 @@ router.post('/api/promotions', async (req, res) => {
 });
 
 // 🎁 Update Promotion
-router.patch('/api/promotions/:promoId', async (req, res) => {
+router.patch('/api/legacy/promotions/:promoId', async (req, res) => {
   try {
     const { promoId } = req.params;
     const {
@@ -4064,7 +3997,7 @@ router.patch('/api/promotions/:promoId', async (req, res) => {
 });
 
 // 🎁 Promotion Analytics
-router.get('/api/promotions/analytics', async (req, res) => {
+router.get('/api/legacy/promotions/analytics', async (req, res) => {
   try {
     const { period = '30d', promoId } = req.query;
 

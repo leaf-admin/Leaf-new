@@ -946,42 +946,54 @@ class PaymentService {
       }
 
       // 1.5. Lógica de Retenção Punitiva (Split de Carência - 50%)
+      // Fonte canônica: Realtime DB em subscriptions/{driverId}
       let retainedFees = 0;
       if (rideData.driverId) {
         try {
-          const firestore = firebaseConfig.getFirestore();
-          const userRef = firestore.collection('users').doc(rideData.driverId);
+          const db = firebaseConfig.getRealtimeDB();
+          if (db) {
+            const subscriptionRef = db.ref(`subscriptions/${rideData.driverId}`);
+            const userRef = db.ref(`users/${rideData.driverId}`);
+            const subscriptionSnapshot = await subscriptionRef.once('value');
+            const subscription = subscriptionSnapshot.val() || {};
 
-          await firestore.runTransaction(async (transaction) => {
-            const userDoc = await transaction.get(userRef);
-            if (userDoc.exists) {
-              const userData = userDoc.data();
-              const driverProfile = userData.driverProfile || {};
+            const status = String(subscription.status || '').toLowerCase();
+            const pendingFeeCents = Number(subscription.pendingFeeCents || 0);
 
-              if (driverProfile.subscriptionStatus === 'GRACE_PERIOD' && driverProfile.pendingFee > 0) {
-                // Retém até 50% do valor líquido ou o total da dívida, o que for menor
-                const maxSplit = Math.floor(netCalculation.netAmount / 2);
-                retainedFees = Math.min(maxSplit, driverProfile.pendingFee);
+            if (status === 'grace_period' && pendingFeeCents > 0) {
+              // Retém até 50% do valor líquido ou total da dívida, o que for menor
+              const maxSplit = Math.floor(netCalculation.netAmount / 2);
+              retainedFees = Math.min(maxSplit, pendingFeeCents);
 
-                driverProfile.pendingFee -= retainedFees;
-                if (driverProfile.pendingFee <= 0) {
-                  driverProfile.subscriptionStatus = 'ACTIVE';
-                }
+              const remainingDebt = Math.max(0, pendingFeeCents - retainedFees);
+              const nextStatus = remainingDebt === 0 ? 'active' : 'grace_period';
+              const nextBillingStatus = remainingDebt === 0 ? 'active' : 'overdue';
 
-                transaction.set(userRef, { driverProfile }, { merge: true });
+              await subscriptionRef.update({
+                pendingFeeCents: remainingDebt,
+                status: nextStatus,
+                updatedAt: new Date().toISOString(),
+                lastRetentionAt: new Date().toISOString(),
+                lastRetentionAmountCents: retainedFees
+              });
 
-                netCalculation.netAmount -= retainedFees; // Atualiza o valor que vai pro motorista
+              await userRef.update({
+                billing_status: nextBillingStatus,
+                subscriptionStatus: nextStatus,
+                subscription_pending_fee_cents: remainingDebt
+              });
 
-                logStructured('info', 'Retenção de Carência Aplicada', {
-                  service: 'PaymentService',
-                  driverId: rideData.driverId,
-                  retainedAmount: retainedFees,
-                  remainingDebt: driverProfile.pendingFee,
-                  newNetAmount: netCalculation.netAmount
-                });
-              }
+              netCalculation.netAmount -= retainedFees; // Atualiza o valor que vai pro motorista
+
+              logStructured('info', 'Retenção de Carência Aplicada', {
+                service: 'PaymentService',
+                driverId: rideData.driverId,
+                retainedAmount: retainedFees,
+                remainingDebt,
+                newNetAmount: netCalculation.netAmount
+              });
             }
-          });
+          }
         } catch (err) {
           logStructured('warn', 'Falha ao processar Split Punitivo', { service: 'PaymentService', error: err.message });
         }

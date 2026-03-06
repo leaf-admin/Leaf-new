@@ -5132,6 +5132,76 @@ io.on('connection', async (socket) => {
         return { allowed: true };
     };
 
+    const enforceSubscriptionForOnline = async (driverId) => {
+        try {
+            const db = firebaseConfig?.getRealtimeDB?.();
+            if (!db) {
+                return { allowed: true };
+            }
+
+            const [userSnapshot, subscriptionSnapshot] = await Promise.all([
+                db.ref(`users/${driverId}`).once('value'),
+                db.ref(`subscriptions/${driverId}`).once('value')
+            ]);
+
+            const user = userSnapshot.val() || {};
+            const subscription = subscriptionSnapshot.val() || {};
+
+            const planType = String(
+                user.planType ||
+                subscription.planType ||
+                ''
+            ).toLowerCase();
+
+            // Se ainda não há plano ativo definido, não bloqueia por assinatura.
+            if (planType !== 'plus' && planType !== 'elite') {
+                return { allowed: true };
+            }
+
+            const status = String(subscription.status || '').toLowerCase();
+            const userBilling = String(user.billing_status || '').toLowerCase();
+            const graceEndsAtRaw = subscription.gracePeriodEndsAt || user.subscription_grace_period_ends_at;
+            const graceEndsAt = graceEndsAtRaw ? new Date(graceEndsAtRaw) : null;
+            const now = new Date();
+
+            // Se grace expirou, promove para bloqueado/suspenso.
+            if ((status === 'grace_period' || userBilling === 'overdue') && graceEndsAt && now > graceEndsAt) {
+                await Promise.all([
+                    db.ref(`subscriptions/${driverId}`).update({
+                        status: 'blocked',
+                        updatedAt: now.toISOString()
+                    }),
+                    db.ref(`users/${driverId}`).update({
+                        billing_status: 'suspended',
+                        subscriptionStatus: 'blocked'
+                    })
+                ]);
+
+                return {
+                    allowed: false,
+                    code: 'subscriptionBlocked',
+                    reason: 'Período de regularização da assinatura expirado'
+                };
+            }
+
+            if (status === 'blocked' || userBilling === 'suspended') {
+                return {
+                    allowed: false,
+                    code: 'subscriptionBlocked',
+                    reason: 'Assinatura pendente. Regularize para ficar online'
+                };
+            }
+
+            return { allowed: true };
+        } catch (error) {
+            return {
+                allowed: false,
+                code: 'subscriptionCheckFailed',
+                reason: error.message || 'Falha ao validar assinatura'
+            };
+        }
+    };
+
     // Definir status do driver
     socket.on('setDriverStatus', async (data) => {
         try {
@@ -5178,6 +5248,25 @@ io.on('connection', async (socket) => {
             // ✅ FASE 0: Verificar se motorista está bloqueado por KYC
             const newIsOnline = isOnline !== undefined ? isOnline : (status === 'online' || status === 'available');
             if (newIsOnline) {
+                const subscriptionGate = await enforceSubscriptionForOnline(driverId);
+                if (!subscriptionGate.allowed) {
+                    logStructured('warn', 'Motorista bloqueado por assinatura tentou ficar online', {
+                        service: 'websocket',
+                        operation: 'setDriverStatus',
+                        driverId: driverId,
+                        reason: subscriptionGate.reason,
+                        code: subscriptionGate.code,
+                        socketId: socket.id
+                    });
+                    socket.emit('driverStatusError', {
+                        error: 'Assinatura pendente. Regularize para ficar online.',
+                        reason: subscriptionGate.reason,
+                        code: subscriptionGate.code,
+                        subscriptionRequired: true
+                    });
+                    return;
+                }
+
                 try {
                     const kycDriverStatusService = require('./services/kyc-driver-status-service');
                     const canWork = await kycDriverStatusService.canDriverWork(driverId);
@@ -5606,6 +5695,17 @@ io.on('connection', async (socket) => {
             const existingDriverState = await redis.hgetall(`driver:${driverId}`);
             const wasOnline = existingDriverState?.isOnline === 'true';
             if (!wasOnline) {
+                const subscriptionGate = await enforceSubscriptionForOnline(driverId);
+                if (!subscriptionGate.allowed) {
+                    socket.emit('driverStatusError', {
+                        error: 'Assinatura pendente. Regularize para ficar online.',
+                        reason: subscriptionGate.reason,
+                        code: subscriptionGate.code,
+                        subscriptionRequired: true
+                    });
+                    return;
+                }
+
                 try {
                     const dailyKYC = await enforceDailyKYCForOnline(driverId);
                     if (!dailyKYC.allowed) {
@@ -5763,6 +5863,17 @@ io.on('connection', async (socket) => {
             const existingDriverState = await redis.hgetall(`driver:${driverId}`);
             const wasOnline = existingDriverState?.isOnline === 'true';
             if (!wasOnline) {
+                const subscriptionGate = await enforceSubscriptionForOnline(driverId);
+                if (!subscriptionGate.allowed) {
+                    socket.emit('driverStatusError', {
+                        error: 'Assinatura pendente. Regularize para ficar online.',
+                        reason: subscriptionGate.reason,
+                        code: subscriptionGate.code,
+                        subscriptionRequired: true
+                    });
+                    return;
+                }
+
                 try {
                     const dailyKYC = await enforceDailyKYCForOnline(driverId);
                     if (!dailyKYC.allowed) {
