@@ -100,6 +100,26 @@ button {
   border-left-color: #dc2626;
 }
 
+.kpi-clickable {
+  cursor: pointer;
+  transition: transform 120ms ease, box-shadow 120ms ease, border-color 120ms ease;
+}
+
+.kpi-clickable:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 6px 20px rgba(15, 23, 42, 0.1);
+}
+
+.kpi-clickable:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
+
+.kpi-selected {
+  border-color: #0f766e !important;
+  box-shadow: 0 0 0 2px rgba(15, 118, 110, 0.16);
+}
+
 .card pre {
   margin: 0;
   max-height: 280px;
@@ -247,6 +267,39 @@ code {
   gap: 8px;
   max-height: 520px;
   overflow: auto;
+}
+
+.metric-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 10px;
+}
+
+.metric-list .row {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 10px;
+  background: #fff;
+}
+
+.metric-list .label {
+  font-size: 12px;
+  color: #64748b;
+}
+
+.metric-list .value {
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.meta-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: #fff;
+  font-size: 12px;
 }
 
 .ticket-btn {

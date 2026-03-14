@@ -156,6 +156,13 @@ class LeafApiService {
     return this.request("/metrics/financial/rides");
   }
 
+  async getMarketplaceMetrics(period = "month", startDate, endDate) {
+    const params = new URLSearchParams({ period });
+    if (startDate) params.append("startDate", startDate);
+    if (endDate) params.append("endDate", endDate);
+    return this.request(`/metrics/marketplace?${params.toString()}`);
+  }
+
   async getObservabilityMetrics() {
     return this.request("/metrics/observability");
   }
