@@ -16,6 +16,7 @@ import { colors } from '../common-local/theme';
 import { getSelfHostedApiUrl } from '../config/ApiConfig';
 import { useSelector, useDispatch } from 'react-redux';
 import { api } from '../common-local';
+import Logger from '../utils/Logger';
 
 const MAIN_COLOR = colors.TAXIPRIMARY;
 
@@ -92,7 +93,7 @@ export default function AddPaymentMethod({ navigation }) {
                 Alert.alert('Erro', 'Não foi possível tokenizar o cartão.');
             }
         } catch (error) {
-            console.error(error);
+            Logger.error(error);
             Alert.alert('Erro', 'Houve uma falha de conexão.');
         } finally {
             setLoading(false);

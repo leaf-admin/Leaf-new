@@ -66,8 +66,9 @@ class WebSocketManager {
         if (!WebSocketManager.instance) {
             this.socket = null;
             this.isConnecting = false;
+            this.connectionPromise = null;
             this.connectionAttempts = 0;
-            this.maxConnectionAttempts = 5; // ✅ Aumentado para 5 tentativas
+            this.maxConnectionAttempts = 20; // manter sessão persistente mesmo com oscilação de rede
             this.eventListeners = new Map(); // ✅ Manter para compatibilidade temporária
             this.pendingListeners = []; // ✅ Inicializar pendingListeners
             this._connectHandlers = new Set(); // ✅ FASE 1: Rastrear handlers de conexão para evitar duplicação
@@ -76,6 +77,7 @@ class WebSocketManager {
             this.authenticatedUserType = null; // ✅ Tipo do usuário autenticado
             this.authCredentials = null; // ✅ Armazenar credenciais para auto-reautenticação
             this.isAuthenticating = false; // ✅ Flag para evitar autenticação duplicada
+            this.reconnectTimer = null; // Evitar agendamento duplicado de reconexão manual
 
             // ✅ FASE 2: EventEmitter interno - única fonte de distribuição de eventos
             this.eventEmitter = new SimpleEventEmitter();
@@ -104,29 +106,30 @@ class WebSocketManager {
     async connect() {
         if (this.socket?.connected) {
             Logger.log('✅ [WebSocketManager] Já conectado, ignorando nova conexão');
-            return;
+            return true;
         }
 
-        if (this.isConnecting) {
+        if (this.connectionPromise) {
             Logger.log('⏳ [WebSocketManager] Conexão já em andamento, aguardando...');
-            return;
+            return this.connectionPromise;
         }
 
         try {
             this.isConnecting = true;
+            if (this.socket) {
+                Logger.log('🔁 [WebSocketManager] Reutilizando socket existente');
+                this.connectionPromise = this._waitForConnection();
+                if (!this.socket.active) {
+                    this.socket.connect();
+                }
+                return this.connectionPromise;
+            }
+
             this.connectionAttempts = 0;
 
             // ✅ CORREÇÃO: Calcular URL dinamicamente para garantir que está correta
             const WEBSOCKET_URL = getWebSocketURL();
             Logger.log('🔌 [WebSocketManager] Conectando ao WebSocket:', WEBSOCKET_URL);
-
-            // ✅ Se já existe um socket, desconectar primeiro
-            if (this.socket) {
-                Logger.log('🔌 [WebSocketManager] Desconectando socket anterior...');
-                this.socket.removeAllListeners();
-                this.socket.disconnect();
-                this.socket = null;
-            }
 
             // ✅ CORREÇÃO: Tentar websocket primeiro, polling como fallback
             // Polling pode ter problemas em React Native, websocket é mais confiável
@@ -159,13 +162,13 @@ class WebSocketManager {
                 reconnection: true,
                 reconnectionDelay: 3000,
                 reconnectionDelayMax: 10000,
-                reconnectionAttempts: 5,
+                reconnectionAttempts: 20,
                 timeout: 20000, // 20 segundos
-                forceNew: true, // ✅ Forçar nova conexão para evitar cache
                 upgrade: true,
                 rememberUpgrade: false, // ✅ Não lembrar upgrade para evitar problemas
                 // ✅ Configurações adicionais para React Native
-                autoConnect: true,
+                autoConnect: false,
+                forceNew: false,
                 // ✅ Headers extras para React Native
                 extraHeaders: {},
                 // ✅ Configurações de ping
@@ -176,14 +179,64 @@ class WebSocketManager {
                 allowEIO4: true,
             });
 
+            this.socketListeners.clear();
             this.setupListeners();
+            this.connectionPromise = this._waitForConnection();
+            this.socket.connect();
+            return this.connectionPromise;
 
         } catch (error) {
             Logger.error('❌ [WebSocketManager] Erro ao inicializar WebSocket:', error.message);
             Logger.error('❌ [WebSocketManager] Stack:', error.stack);
             this.isConnecting = false;
+            this.connectionPromise = null;
             throw error; // ✅ Re-throw para que o chamador possa tratar
         }
+    }
+
+    _waitForConnection(timeoutMs = 20000) {
+        if (!this.socket) {
+            this.isConnecting = false;
+            this.connectionPromise = null;
+            return Promise.reject(new Error('Socket não inicializado'));
+        }
+
+        if (this.socket.connected) {
+            this.isConnecting = false;
+            this.connectionPromise = null;
+            return Promise.resolve(true);
+        }
+
+        return new Promise((resolve, reject) => {
+            let settled = false;
+            let lastError = null;
+
+            const cleanup = () => {
+                this.socket?.off('connect', onConnect);
+                this.socket?.off('connect_error', onConnectError);
+            };
+
+            const finalize = (handler) => (value) => {
+                if (settled) return;
+                settled = true;
+                cleanup();
+                this.isConnecting = false;
+                this.connectionPromise = null;
+                handler(value);
+            };
+
+            const onConnect = finalize(() => resolve(true));
+            const onConnectError = (error) => {
+                lastError = error;
+            };
+
+            this.socket.on('connect', onConnect);
+            this.socket.on('connect_error', onConnectError);
+
+            setTimeout(() => {
+                finalize(() => reject(lastError || new Error('Timeout ao conectar WebSocket')))();
+            }, timeoutMs);
+        });
     }
 
     setupListeners() {
@@ -251,6 +304,10 @@ class WebSocketManager {
             Logger.log('📡 [WebSocketManager] Socket ID:', this.socket.id);
             this.isConnecting = false;
             this.connectionAttempts = 0;
+            if (this.reconnectTimer) {
+                clearTimeout(this.reconnectTimer);
+                this.reconnectTimer = null;
+            }
 
             // ✅ AUTO-REAUTENTICAÇÃO: Se já tínhamos credenciais, re-autenticar automaticamente
             if (this.authCredentials) {
@@ -292,35 +349,18 @@ class WebSocketManager {
             // ✅ Emitir erro através do EventEmitter
             this.eventEmitter.emit('connect_error', error);
 
-            // ✅ Se for timeout, tentar reconectar automaticamente
-            if (errorMessage.includes('timeout') || error.type === 'TransportError') {
-                Logger.log(`🔄 [WebSocketManager] Timeout detectado. Tentativa ${this.connectionAttempts}/${this.maxConnectionAttempts}`);
-
-                if (this.connectionAttempts < this.maxConnectionAttempts) {
-                    const delay = Math.min(3000 * this.connectionAttempts, 10000); // Delay exponencial até 10s
-                    Logger.log(`⏳ [WebSocketManager] Tentando reconectar em ${delay}ms...`);
-                    setTimeout(() => {
-                        if (!this.socket?.connected) {
-                            this.connect();
-                        }
-                    }, delay);
-                } else {
-                    Logger.log('🔌 [WebSocketManager] Máximo de tentativas de conexão atingido. Tentando reconectar em 30 segundos...');
-                    setTimeout(() => {
-                        this.connectionAttempts = 0;
-                        if (!this.socket?.connected) {
-                            this.connect();
-                        }
-                    }, 30000);
-                }
-            } else if (this.connectionAttempts >= this.maxConnectionAttempts) {
-                Logger.log('🔌 [WebSocketManager] Máximo de tentativas de conexão atingido. Tentando reconectar em 30 segundos...');
-                setTimeout(() => {
+            // Deixar o reconnect automático do socket.io atuar primeiro.
+            // Se esgotar tentativas, agenda uma nova janela única com jitter.
+            if (this.connectionAttempts >= this.maxConnectionAttempts && !this.reconnectTimer) {
+                const delay = 25000 + Math.floor(Math.random() * 10000);
+                Logger.log(`🔌 [WebSocketManager] Janela extra de reconexão em ${delay}ms`);
+                this.reconnectTimer = setTimeout(() => {
+                    this.reconnectTimer = null;
                     this.connectionAttempts = 0;
                     if (!this.socket?.connected) {
                         this.connect();
                     }
-                }, 30000);
+                }, delay);
             }
         });
 
@@ -378,6 +418,25 @@ class WebSocketManager {
             // Tentar registrar o listener do servidor
             this._registerServerEventListener(event);
         }
+    }
+
+    once(event, callback) {
+        if (!event || typeof event !== 'string') {
+            Logger.warn('⚠️ WebSocketManager.once() requer event como string');
+            return;
+        }
+
+        if (typeof callback !== 'function') {
+            Logger.warn('⚠️ WebSocketManager.once() requer callback como function');
+            return;
+        }
+
+        const onceCallback = (...args) => {
+            this.off(event, onceCallback);
+            callback(...args);
+        };
+
+        this.on(event, onceCallback);
     }
 
     // ✅ FASE 2: Método privado para registrar listener do servidor
@@ -532,6 +591,44 @@ class WebSocketManager {
 
         // O listener 'authenticated' já está registrado em setupListeners()
         // e atualizará automaticamente isAuthenticated quando o servidor confirmar
+    }
+
+    authenticateWithAck(userId, userType, timeoutMs = 10000) {
+        return new Promise((resolve, reject) => {
+            if (!this.socket?.connected) {
+                reject(new Error('WebSocket não conectado'));
+                return;
+            }
+
+            const cleanup = () => {
+                this.off('authenticated', onAuthenticated);
+            };
+
+            const timeout = setTimeout(() => {
+                cleanup();
+                reject(new Error(`Timeout de autenticação (${Math.floor(timeoutMs / 1000)}s)`));
+            }, timeoutMs);
+
+            const onAuthenticated = (data) => {
+                if (!data?.success) {
+                    clearTimeout(timeout);
+                    cleanup();
+                    reject(new Error(data?.error || 'Falha na autenticação'));
+                    return;
+                }
+
+                if (data.uid && data.uid !== userId) {
+                    return;
+                }
+
+                clearTimeout(timeout);
+                cleanup();
+                resolve(data);
+            };
+
+            this.on('authenticated', onAuthenticated);
+            this.authenticate(userId, userType);
+        });
     }
 
     // Métodos específicos para eventos de viagem

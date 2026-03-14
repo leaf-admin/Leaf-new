@@ -59,13 +59,14 @@
       "channel": "production"
     },
     "production": {
-  "node": "20.19.4",
-  "ios": {
-    "image": "macos-sonoma-14.6-xcode-16.1",
-    "buildConfiguration": "Release"
-  },
-  "channel": "production"
-  },
+      "node": "20.19.4",
+      "autoIncrement": true,
+      "ios": {
+        "image": "macos-sonoma-14.6-xcode-16.1",
+        "buildConfiguration": "Release"
+      },
+      "channel": "production"
+    },
     "production-apk": {
       "node": "20.19.4",
       "distribution": "internal",
@@ -77,6 +78,7 @@
     },
     "production-review": {
       "node": "20.19.4",
+      "autoIncrement": true,
       "distribution": "internal",
       "env": {
         "APP_REVIEW": "true"
@@ -105,6 +107,13 @@
     }
   },
   "submit": {
-    "production": {}
+    "production": {
+      "ios": {
+        "ascAppId": "6757092661"
+      },
+      "android": {
+        "track": "internal"
+      }
+    }
   }
 }

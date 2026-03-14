@@ -2,6 +2,12 @@ const express = require('express');
 const multer = require('multer');
 const IntegratedKYCService = require('../services/IntegratedKYCService');
 const { logStructured, logError } = require('../utils/logger');
+let firebaseConfig = null;
+try {
+  firebaseConfig = require('../firebase-config');
+} catch (e) {
+  logStructured('warn', '⚠️ Firebase config não encontrado', { service: 'kyc-routes-routes' });
+}
 
 class KYCRoutes {
   constructor() {
@@ -90,6 +96,49 @@ class KYCRoutes {
     });
 
     // Verificação facial
+    this.router.post('/verify-driver/device', async (req, res) => {
+      try {
+        const { userId, deviceKyc } = req.body || {};
+
+        if (!userId) {
+          return res.status(400).json({
+            success: false,
+            error: 'userId é obrigatório'
+          });
+        }
+
+        if (!deviceKyc || typeof deviceKyc !== 'object') {
+          return res.status(400).json({
+            success: false,
+            error: 'deviceKyc é obrigatório'
+          });
+        }
+
+        const deviceResult = await this.kycService.acceptDeviceVerification(userId, deviceKyc);
+        if (!deviceResult.success) {
+          return res.status(400).json(deviceResult);
+        }
+
+        return res.json({
+          success: true,
+          userId,
+          isMatch: deviceResult.isMatch,
+          similarityScore: deviceResult.similarityScore,
+          confidence: deviceResult.confidence,
+          threshold: deviceResult.threshold,
+          processingTime: deviceResult.processingTime,
+          mode: deviceResult.mode
+        });
+      } catch (error) {
+        logError(error, 'Erro na verificação device-first:', { service: 'kyc-routes-routes' });
+        return res.status(500).json({
+          success: false,
+          error: 'Erro interno do servidor',
+          details: error.message
+        });
+      }
+    });
+
     this.router.post('/verify-driver', this.upload.single('currentImage'), async (req, res) => {
       try {
         const { userId, forceRecheck, cacheValidityHours } = req.body;
@@ -98,6 +147,26 @@ class KYCRoutes {
           return res.status(400).json({
             success: false,
             error: 'userId é obrigatório'
+          });
+        }
+
+        // Device-first: app já envia resultado calculado localmente
+        if (req.body && req.body.deviceKyc) {
+          const deviceResult = await this.kycService.acceptDeviceVerification(userId, req.body.deviceKyc);
+
+          if (!deviceResult.success) {
+            return res.status(400).json(deviceResult);
+          }
+
+          return res.json({
+            success: true,
+            userId,
+            isMatch: deviceResult.isMatch,
+            similarityScore: deviceResult.similarityScore,
+            confidence: deviceResult.confidence,
+            threshold: deviceResult.threshold,
+            processingTime: deviceResult.processingTime,
+            mode: deviceResult.mode
           });
         }
 
@@ -151,6 +220,39 @@ class KYCRoutes {
       }
     });
 
+    // Obter assinatura âncora device-first (fallback quando app não tiver cache local)
+    this.router.get('/device-anchor/:userId', async (req, res) => {
+      try {
+        const { userId } = req.params;
+        if (!userId || typeof userId !== 'string') {
+          return res.status(400).json({ success: false, error: 'userId inválido' });
+        }
+
+        if (!firebaseConfig || !firebaseConfig.getRealtimeDB) {
+          return res.status(503).json({ success: false, error: 'Firebase não configurado' });
+        }
+
+        const db = firebaseConfig.getRealtimeDB();
+        const userSnap = await db.ref(`users/${userId}`).once('value');
+        const user = userSnap.val() || {};
+
+        res.json({
+          success: true,
+          userId,
+          anchorSignature: user.kycDeviceAnchorSignature || null,
+          anchorAlgorithm: user.kycDeviceAnchorAlgorithm || null,
+          anchorUpdatedAt: user.kycDeviceAnchorUpdatedAt || null
+        });
+      } catch (error) {
+        logError(error, 'Erro ao buscar assinatura âncora device-first', { service: 'kyc-routes-routes' });
+        res.status(500).json({
+          success: false,
+          error: 'Erro interno do servidor',
+          details: error.message
+        });
+      }
+    });
+
     // Obter encoding facial
     this.router.get('/encoding/:userId', async (req, res) => {
       try {
@@ -186,11 +288,12 @@ class KYCRoutes {
     this.router.delete('/encoding/:userId', async (req, res) => {
       try {
         const { userId } = req.params;
-        
-        if (!this.kycService.isValidUUID(userId)) {
+
+        // Firebase UID não segue formato UUID - não bloquear por isso
+        if (!userId || typeof userId !== 'string') {
           return res.status(400).json({
             success: false,
-            error: 'userId deve ser um UUID válido'
+            error: 'userId inválido'
           });
         }
 
@@ -248,11 +351,12 @@ class KYCRoutes {
       try {
         const { userId } = req.params;
         const { maxAgeHours } = req.query;
-        
-        if (!this.kycService.isValidUUID(userId)) {
+
+        // Firebase UID não segue formato UUID - não bloquear por isso
+        if (!userId || typeof userId !== 'string') {
           return res.status(400).json({
             success: false,
-            error: 'userId deve ser um UUID válido'
+            error: 'userId inválido'
           });
         }
 
@@ -280,11 +384,12 @@ class KYCRoutes {
     this.router.post('/invalidate-cache/:userId', async (req, res) => {
       try {
         const { userId } = req.params;
-        
-        if (!this.kycService.isValidUUID(userId)) {
+
+        // Firebase UID não segue formato UUID - não bloquear por isso
+        if (!userId || typeof userId !== 'string') {
           return res.status(400).json({
             success: false,
-            error: 'userId deve ser um UUID válido'
+            error: 'userId inválido'
           });
         }
 

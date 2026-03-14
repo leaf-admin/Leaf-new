@@ -30,6 +30,7 @@
     "stress-test": "node scripts/benchmark/stress-test.js",
     "admin:create": "node scripts/create-admin-user.js",
     "admin:test": "node test-admin-auth.js",
+    "config:validate": "node scripts/deploy/validate-runtime-config.js",
     "ngrok:start": "node scripts/utils/start-ngrok.js",
     "ngrok:auto": "node scripts/utils/start-ngrok-auto.js",
     "ngrok:url": "node scripts/utils/get-ngrok-url.js"

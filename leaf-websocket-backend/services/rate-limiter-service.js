@@ -10,32 +10,59 @@ const { logStructured, logError } = require('../utils/logger');
 
 class RateLimiterService {
   constructor() {
+    const toPositiveInt = (value, fallback) => {
+      const parsed = Number.parseInt(value, 10);
+      return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+    };
+
+    const defaultWindow = toPositiveInt(process.env.RATE_LIMIT_WINDOW_SECONDS, 60);
+    const resolveLimit = (envKey, fallback) => toPositiveInt(process.env[envKey], fallback);
+    const flowCoreLimit = resolveLimit('RATE_LIMIT_FLOW_CORE', 80);
+    const createBookingLimit = resolveLimit('RATE_LIMIT_CREATE_BOOKING', flowCoreLimit);
+    const confirmPaymentLimit = resolveLimit('RATE_LIMIT_CONFIRM_PAYMENT', createBookingLimit);
+    const startTripLimit = resolveLimit('RATE_LIMIT_START_TRIP', createBookingLimit);
+    const finishTripLimit = resolveLimit('RATE_LIMIT_FINISH_TRIP', startTripLimit);
+
     // Limites por endpoint (requisições por minuto)
     this.limits = {
-      // 🔴 CRÍTICO - Operações Financeiras
-      'confirmPayment': { limit: 5, window: 60 },      // 5/min
-      'finishTrip': { limit: 5, window: 60 },          // 5/min
-      
-      // 🔴 ALTO - Operações que Geram Custos
-      'createBooking': { limit: 10, window: 60 },      // 10/min
-      'startTrip': { limit: 5, window: 60 },           // 5/min
+      // 🔴 CRÍTICO - Fluxo principal de corrida (coerente entre etapas)
+      'createBooking': { limit: createBookingLimit, window: defaultWindow, scope: 'user_ip' },
+      'confirmPayment': { limit: confirmPaymentLimit, window: defaultWindow, scope: 'user_ip' },
+      'startTrip': { limit: startTripLimit, window: defaultWindow, scope: 'user' },
+      'finishTrip': { limit: finishTripLimit, window: defaultWindow, scope: 'user' },
       
       // 🟡 MÉDIO - Operações que Afetam Experiência
-      'acceptRide': { limit: 20, window: 60 },         // 20/min
-      'cancelRide': { limit: 3, window: 60 },          // 3/min
-      'rejectRide': { limit: 30, window: 60 },          // 30/min
+      'acceptRide': { limit: resolveLimit('RATE_LIMIT_ACCEPT_RIDE', 120), window: defaultWindow, scope: 'user_ip' },
+      'cancelRide': { limit: resolveLimit('RATE_LIMIT_CANCEL_RIDE', 20), window: defaultWindow },
+      'rejectRide': { limit: resolveLimit('RATE_LIMIT_REJECT_RIDE', 240), window: defaultWindow },
       
       // 🟡 MÉDIO - Operações de Alto Volume
-      'updateLocation': { limit: 200, window: 60 },     // 200/min
-      'updateDriverLocation': { limit: 200, window: 60 }, // 200/min
-      'searchDrivers': { limit: 120, window: 60 },       // 120/min
+      'updateLocation': { limit: resolveLimit('RATE_LIMIT_UPDATE_LOCATION', 2400), window: defaultWindow, scope: 'user' },
+      'updateDriverLocation': { limit: resolveLimit('RATE_LIMIT_UPDATE_DRIVER_LOCATION', 3000), window: defaultWindow, scope: 'user' },
+      'searchDrivers': { limit: resolveLimit('RATE_LIMIT_SEARCH_DRIVERS', 600), window: defaultWindow },
       
       // 🟢 BAIXO - Operações Leves
-      'sendMessage': { limit: 30, window: 60 },         // 30/min
+      'sendMessage': { limit: resolveLimit('RATE_LIMIT_SEND_MESSAGE', 180), window: defaultWindow },
     };
     
     // Fallback: permitir se Redis não estiver disponível (fail-open)
     this.failOpen = true;
+  }
+
+  buildScopeKey(endpoint, userId, context = {}) {
+    const cfg = this.limits[endpoint] || {};
+    const scope = cfg.scope || 'user';
+    const safeIp = context.ip || 'unknown';
+
+    if (scope === 'user_ip') {
+      return `${endpoint}:${userId}:${safeIp}`;
+    }
+
+    if (scope === 'ip') {
+      return `${endpoint}:ip:${safeIp}`;
+    }
+
+    return `${endpoint}:${userId}`;
   }
   
   /**
@@ -44,7 +71,7 @@ class RateLimiterService {
    * @param {string} endpoint - Nome do endpoint (ex: 'createBooking')
    * @returns {Promise<{allowed: boolean, remaining?: number, resetAt?: number, error?: string}>}
    */
-  async checkRateLimit(userId, endpoint) {
+  async checkRateLimit(userId, endpoint, context = {}) {
     try {
       // Se não há limite configurado para este endpoint, permitir
       if (!this.limits[endpoint]) {
@@ -55,7 +82,8 @@ class RateLimiterService {
       }
       
       const config = this.limits[endpoint];
-      const key = `rate_limit:${endpoint}:${userId}`;
+      const scopeKey = this.buildScopeKey(endpoint, userId, context);
+      const key = `rate_limit:${scopeKey}`;
       
       // Obter conexão Redis
       const redis = redisPool.getConnection();
@@ -67,12 +95,14 @@ class RateLimiterService {
           return {
             allowed: true,
             remaining: config.limit,
-            warning: 'Redis não disponível, rate limiting desabilitado'
+            warning: 'Redis não disponível, rate limiting desabilitado',
+            scopeKey
           };
         } else {
           return {
             allowed: false,
-            error: 'Serviço de rate limiting temporariamente indisponível'
+            error: 'Serviço de rate limiting temporariamente indisponível',
+            scopeKey
           };
         }
       }
@@ -90,12 +120,14 @@ class RateLimiterService {
           return {
             allowed: true,
             remaining: config.limit,
-            warning: 'Redis não disponível, rate limiting desabilitado'
+            warning: 'Redis não disponível, rate limiting desabilitado',
+            scopeKey
           };
         } else {
           return {
             allowed: false,
-            error: 'Serviço de rate limiting temporariamente indisponível'
+            error: 'Serviço de rate limiting temporariamente indisponível',
+            scopeKey
           };
         }
       }
@@ -121,14 +153,15 @@ class RateLimiterService {
         const ttl = await redis.ttl(key);
         const resetAt = Date.now() + (ttl * 1000);
         
-        logStructured('warn', 'Rate limit excedido [AUDITORIA]', { service: 'rate-limiter', endpoint, userId, count, limit: config.limit });
+        logStructured('warn', 'Rate limit excedido [AUDITORIA]', { service: 'rate-limiter', endpoint, userId, count, limit: config.limit, scopeKey });
         
         return {
           allowed: false,
           remaining: 0,
           resetAt: resetAt,
           limit: config.limit,
-          window: config.window
+          window: config.window,
+          scopeKey
         };
       }
       
@@ -144,11 +177,12 @@ class RateLimiterService {
       return {
         allowed: true,
         remaining: config.limit - newCount,
-        resetAt: Date.now() + (config.window * 1000)
+        resetAt: Date.now() + (config.window * 1000),
+        scopeKey
       };
       
     } catch (error) {
-      logError(error, 'Erro ao verificar rate limit', { service: 'rate-limiter', endpoint, userId });
+      logError(error, 'Erro ao verificar rate limit', { service: 'rate-limiter', endpoint, userId, ip: context.ip || 'unknown' });
       
       // Fail-open: permitir se houver erro
       if (this.failOpen) {
@@ -156,13 +190,15 @@ class RateLimiterService {
         return {
           allowed: true,
           remaining: this.limits[endpoint]?.limit || Infinity,
-          warning: 'Erro na verificação de rate limit'
+          warning: 'Erro na verificação de rate limit',
+          scopeKey: this.buildScopeKey(endpoint, userId, context)
         };
       } else {
         // Fail-closed: bloquear se houver erro
         return {
           allowed: false,
-          error: 'Erro ao verificar rate limit'
+          error: 'Erro ao verificar rate limit',
+          scopeKey: this.buildScopeKey(endpoint, userId, context)
         };
       }
     }
@@ -293,7 +329,7 @@ class RateLimiterService {
         const errorEvent = this.getErrorEventName(endpoint);
         socket.emit(errorEvent, {
           error: 'Muitas requisições',
-          message: `Você excedeu o limite de ${rateLimitResult.limit} requisições por minuto para ${endpoint}. Tente novamente em ${Math.ceil((rateLimitResult.resetAt - Date.now()) / 1000)} segundos.`,
+          message: `Você excedeu o limite de ${rateLimitResult.limit} requisições na janela atual para ${endpoint}. Tente novamente em ${Math.ceil((rateLimitResult.resetAt - Date.now()) / 1000)} segundos.`,
           code: 'RATE_LIMIT_EXCEEDED',
           limit: rateLimitResult.limit,
           remaining: rateLimitResult.remaining,
@@ -336,4 +372,3 @@ class RateLimiterService {
 }
 
 module.exports = new RateLimiterService();
-

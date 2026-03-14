@@ -17,6 +17,140 @@ class WooviDriverService {
     });
   }
 
+  createMasterApi() {
+    if (!WOOVI_CONFIG.masterApiToken) {
+      throw new Error('WOOVI_MASTER_API_TOKEN não configurado');
+    }
+
+    const sendMasterAppId = String(process.env.WOOVI_MASTER_SEND_APP_ID || '').toLowerCase() === 'true';
+    return axios.create({
+      baseURL: WOOVI_CONFIG.baseUrl,
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: WOOVI_CONFIG.masterApiToken,
+        ...(sendMasterAppId && WOOVI_CONFIG.masterAppId ? { 'x-app-id': WOOVI_CONFIG.masterAppId } : {})
+      },
+      timeout: 30000,
+      maxRedirects: 0,
+      validateStatus: function (status) {
+        return status >= 200 && status < 500;
+      }
+    });
+  }
+
+  async testMasterConnection() {
+    try {
+      const masterApi = this.createMasterApi();
+      const response = await masterApi.get('/charge', { params: { page: 1, limit: 1 } });
+      if (response.status >= 200 && response.status < 300) {
+        return {
+          success: true,
+          status: response.status,
+          hasChargesArray: Array.isArray(response.data?.charges),
+          rawKeys: Object.keys(response.data || {})
+        };
+      }
+      return {
+        success: false,
+        status: response.status,
+        error: response.data || 'Falha ao validar conexão master'
+      };
+    } catch (error) {
+      return {
+        success: false,
+        error: error.response?.data || error.message
+      };
+    }
+  }
+
+  async createSubaccount(subaccountData) {
+    try {
+      const masterApi = this.createMasterApi();
+      const payload = {
+        name: subaccountData.name,
+        pixKey: subaccountData.pixKey,
+        ...(subaccountData.taxID ? { taxID: subaccountData.taxID } : {}),
+        ...(subaccountData.email ? { email: subaccountData.email } : {}),
+        ...(subaccountData.phone ? { phone: subaccountData.phone } : {})
+      };
+      const response = await masterApi.post('/subaccount', payload);
+      if (response.status >= 200 && response.status < 300) {
+        return {
+          success: true,
+          status: response.status,
+          subaccount: response.data?.subaccount || response.data
+        };
+      }
+      return {
+        success: false,
+        status: response.status,
+        error: response.data || 'Falha ao criar subconta'
+      };
+    } catch (error) {
+      return {
+        success: false,
+        error: error.response?.data || error.message
+      };
+    }
+  }
+
+  async getSubaccountDetails(pixKey) {
+    try {
+      const masterApi = this.createMasterApi();
+      const response = await masterApi.get(`/subaccount/${encodeURIComponent(pixKey)}`);
+      if (response.status >= 200 && response.status < 300) {
+        return {
+          success: true,
+          status: response.status,
+          subaccount: response.data?.subaccount || response.data
+        };
+      }
+      return {
+        success: false,
+        status: response.status,
+        error: response.data || 'Falha ao consultar subconta'
+      };
+    } catch (error) {
+      return {
+        success: false,
+        error: error.response?.data || error.message
+      };
+    }
+  }
+
+  async createChargeWithSplit(chargeData) {
+    try {
+      const masterApi = this.createMasterApi();
+      const payload = {
+        value: chargeData.value,
+        correlationID: chargeData.correlationID || `leaf_split_${Date.now()}`,
+        comment: chargeData.comment || 'Cobrança Leaf com split',
+        ...(chargeData.expiresIn ? { expiresIn: chargeData.expiresIn } : {}),
+        ...(Array.isArray(chargeData.additionalInfo) ? { additionalInfo: chargeData.additionalInfo } : {}),
+        ...(chargeData.customer ? { customer: chargeData.customer } : {}),
+        ...(Array.isArray(chargeData.splits) ? { splits: chargeData.splits } : {})
+      };
+      const response = await masterApi.post('/charge', payload);
+      if (response.status >= 200 && response.status < 300) {
+        return {
+          success: true,
+          status: response.status,
+          data: response.data
+        };
+      }
+      return {
+        success: false,
+        status: response.status,
+        error: response.data || 'Falha ao criar cobrança com split'
+      };
+    } catch (error) {
+      return {
+        success: false,
+        error: error.response?.data || error.message
+      };
+    }
+  }
+
   /**
    * Cria um webhook na Woovi via API
    * Documentação: https://developers.woovi.com/docs/webhook/platform/webhook-platform-api
@@ -641,6 +775,39 @@ class WooviDriverService {
       }
     } catch (error) {
       logError(error, 'Erro ao verificar status da cobrança', { service: 'woovi-driver-service', errorData: error.response?.data });
+      return {
+        success: false,
+        error: error.response?.data || error.message
+      };
+    }
+  }
+
+  /**
+   * Cancela uma cobrança PIX
+   * @param {string} chargeId
+   * @returns {Promise<Object>}
+   */
+  async cancelCharge(chargeId) {
+    try {
+      const response = await this.api.post(`/charge/${chargeId}/cancel`);
+      if (response.status < 200 || response.status >= 300) {
+        return {
+          success: false,
+          status: response.status,
+          error: response.data || 'Falha ao cancelar cobrança'
+        };
+      }
+      return {
+        success: true,
+        status: response.status,
+        data: response.data
+      };
+    } catch (error) {
+      logError(error, 'Erro ao cancelar cobrança', {
+        service: 'woovi-driver-service',
+        chargeId,
+        errorData: error.response?.data
+      });
       return {
         success: false,
         error: error.response?.data || error.message

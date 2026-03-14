@@ -3,6 +3,12 @@
 
 const admin = require('firebase-admin');
 const { logStructured, logError } = require('../utils/logger');
+let firebaseConfig = null;
+try {
+  firebaseConfig = require('../firebase-config');
+} catch (error) {
+  logStructured('warn', '⚠️ Firebase config não encontrado para dashboard websocket', { service: 'dashboard-websocket' });
+}
 
 class DashboardWebSocketService {
   constructor(io, redis) {
@@ -141,8 +147,8 @@ class DashboardWebSocketService {
       });
 
       // 📊 Solicitar dados específicos
-      socket.on('request_live_data', () => {
-        this.sendLiveData(socket);
+      socket.on('request_live_data', async () => {
+        await this.sendLiveData(socket);
       });
 
       socket.on('request_user_stats', () => {
@@ -208,68 +214,177 @@ class DashboardWebSocketService {
   }
 
   // 📊 Métodos para enviar dados
-  sendLiveData(socket) {
-    const liveData = {
-      drivers: [
-        {
-          id: 'driver1',
-          name: 'João Silva',
-          lat: -23.5505 + (Math.random() - 0.5) * 0.01,
-          lng: -46.6333 + (Math.random() - 0.5) * 0.01,
-          status: 'available',
-          vehicle: { model: 'Honda Civic', plate: 'ABC-1234' },
-          rating: 4.8,
-          tripsToday: 12,
-          lastUpdate: new Date().toISOString()
-        },
-        {
-          id: 'driver2',
-          name: 'Maria Santos',
-          lat: -23.5615 + (Math.random() - 0.5) * 0.01,
-          lng: -46.6565 + (Math.random() - 0.5) * 0.01,
-          status: 'busy',
-          vehicle: { model: 'Toyota Corolla', plate: 'XYZ-5678' },
-          rating: 4.9,
-          tripsToday: 8,
-          lastUpdate: new Date().toISOString()
+  normalizeDriverStatus(rawStatus, isOnline) {
+    const status = String(rawStatus || '').toLowerCase();
+    if (status === 'busy' || status === 'in_trip' || status === 'started') return 'busy';
+    if (status === 'available' || status === 'online') return 'available';
+    return isOnline ? 'available' : 'offline';
+  }
+
+  async getLiveDataFromRedis() {
+    if (!this.redis) return null;
+
+    try {
+      const [driverIds, activeTripsCount] = await Promise.all([
+        this.redis.zrange('driver_locations', 0, -1),
+        this.redis.hlen('bookings:active').catch(() => 0)
+      ]);
+
+      const drivers = [];
+      if (Array.isArray(driverIds) && driverIds.length > 0) {
+        const pipeline = this.redis.pipeline();
+        driverIds.forEach((driverId) => {
+          pipeline.geopos('driver_locations', driverId);
+          pipeline.hgetall(`driver:${driverId}`);
+        });
+        const rows = await pipeline.exec();
+
+        for (let i = 0; i < driverIds.length; i++) {
+          const driverId = driverIds[i];
+          const geoResult = rows[i * 2]?.[1];
+          const hash = rows[i * 2 + 1]?.[1] || {};
+          const coords = Array.isArray(geoResult) ? geoResult[0] : null;
+          if (!coords || coords.length < 2) continue;
+
+          const lng = Number(coords[0]);
+          const lat = Number(coords[1]);
+          if (!Number.isFinite(lat) || !Number.isFinite(lng)) continue;
+
+          const isOnline = String(hash?.isOnline || 'true') === 'true';
+          const status = this.normalizeDriverStatus(hash?.status, isOnline);
+
+          drivers.push({
+            id: driverId,
+            type: 'driver',
+            name: hash?.name || hash?.displayName || '',
+            location: {
+              lat,
+              lng,
+              heading: Number(hash?.heading || 0),
+              speed: Number(hash?.speed || 0),
+              lastUpdate: hash?.lastUpdate ? new Date(Number(hash.lastUpdate)).toISOString() : new Date().toISOString()
+            },
+            status,
+            vehicle: {
+              plate: hash?.vehicleNumber || hash?.vehiclePlate || '',
+              type: hash?.carType || hash?.vehicleCategory || ''
+            },
+            rating: Number(hash?.rating || 0)
+          });
         }
-      ],
-      passengers: [
-        {
-          id: 'passenger1',
-          name: 'Carlos Oliveira',
-          lat: -23.5405 + (Math.random() - 0.5) * 0.01,
-          lng: -46.6405 + (Math.random() - 0.5) * 0.01,
-          status: 'waiting',
-          waitingTime: Math.floor(Math.random() * 10) + 1,
-          lastUpdate: new Date().toISOString()
+      }
+
+      const driversAvailable = drivers.filter((driver) => driver.status === 'available').length;
+      const driversBusy = drivers.filter((driver) => driver.status === 'busy').length;
+
+      return {
+        drivers,
+        passengers: [],
+        trips: [],
+        stats: {
+          driversOnline: drivers.length,
+          driversAvailable,
+          driversBusy,
+          passengerWaiting: 0,
+          activeTrips: Number(activeTripsCount || 0),
+          avgWaitTime: 0,
+          avgTripTime: 0
         }
-      ],
-      trips: [
-        {
-          id: 'trip1',
-          driver: { id: 'driver2', name: 'Maria Santos' },
-          passenger: { id: 'passenger1', name: 'Carlos Oliveira' },
-          pickup: { lat: -23.5405, lng: -46.6405, address: 'Av. Paulista, 1000' },
-          destination: { lat: -23.5705, lng: -46.6505, address: 'Shopping Ibirapuera' },
-          status: 'in_progress',
-          estimatedTime: 15,
-          distance: 8.5,
-          fare: 25.50,
-          startTime: new Date().toISOString()
+      };
+    } catch (error) {
+      logError(error, 'Erro ao montar live data via Redis', { service: 'dashboard-websocket' });
+      return null;
+    }
+  }
+
+  async getLiveDataFromFirebase() {
+    if (!firebaseConfig || !firebaseConfig.getRealtimeDB) return null;
+
+    try {
+      const db = firebaseConfig.getRealtimeDB();
+      const [locationsSnapshot, usersSnapshot] = await Promise.all([
+        db.ref('locations').once('value'),
+        db.ref('users').once('value')
+      ]);
+
+      const locationsData = locationsSnapshot.val() || {};
+      const users = usersSnapshot.val() || {};
+      const drivers = [];
+
+      Object.keys(locationsData).forEach((userId) => {
+        const locationData = locationsData[userId];
+        const user = users[userId];
+        if (!user || user.usertype !== 'driver') return;
+        const lat = Number(locationData?.lat);
+        const lng = Number(locationData?.lng);
+        if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
+
+        const status = locationData?.online ? (locationData?.busy ? 'busy' : 'available') : 'offline';
+        drivers.push({
+          id: userId,
+          type: 'driver',
+          name: `${user.firstName || ''} ${user.lastName || ''}`.trim(),
+          location: {
+            lat,
+            lng,
+            heading: Number(locationData?.heading || 0),
+            speed: Number(locationData?.speed || 0),
+            lastUpdate: locationData?.timestamp ? new Date(locationData.timestamp).toISOString() : new Date().toISOString()
+          },
+          status,
+          vehicle: {
+            plate: user?.carPlate || user?.vehiclePlate || '',
+            type: user?.carType || ''
+          },
+          rating: Number(user?.driverRating || 0)
+        });
+      });
+
+      const driversOnline = drivers.filter((driver) => driver.status !== 'offline').length;
+      const driversAvailable = drivers.filter((driver) => driver.status === 'available').length;
+      const driversBusy = drivers.filter((driver) => driver.status === 'busy').length;
+
+      return {
+        drivers,
+        passengers: [],
+        trips: [],
+        stats: {
+          driversOnline,
+          driversAvailable,
+          driversBusy,
+          passengerWaiting: 0,
+          activeTrips: 0,
+          avgWaitTime: 0,
+          avgTripTime: 0
         }
-      ],
+      };
+    } catch (error) {
+      logError(error, 'Erro ao montar live data via Firebase', { service: 'dashboard-websocket' });
+      return null;
+    }
+  }
+
+  async getLiveData() {
+    return (await this.getLiveDataFromRedis()) || (await this.getLiveDataFromFirebase()) || {
+      drivers: [],
+      passengers: [],
+      trips: [],
       stats: {
-        driversOnline: 245 + Math.floor(Math.random() * 20) - 10,
-        driversAvailable: 120 + Math.floor(Math.random() * 10) - 5,
-        passengerWaiting: 15 + Math.floor(Math.random() * 10) - 5,
-        activeTrips: 67 + Math.floor(Math.random() * 10) - 5,
-        avgWaitTime: 3.2 + (Math.random() - 0.5),
-        avgTripTime: 18.5 + (Math.random() - 0.5) * 2
+        driversOnline: 0,
+        driversAvailable: 0,
+        driversBusy: 0,
+        passengerWaiting: 0,
+        activeTrips: 0,
+        avgWaitTime: 0,
+        avgTripTime: 0
       }
     };
+  }
 
+  async sendLiveData(socket) {
+    const liveData = await this.getLiveData();
     socket.emit('live_stats', liveData.stats);
+    socket.emit('live_stats_update', liveData.stats);
     socket.emit('driver_location_update', { drivers: liveData.drivers });
     socket.emit('passenger_location_update', { passengers: liveData.passengers });
     socket.emit('trip_update', { trips: liveData.trips });
@@ -632,43 +747,18 @@ class DashboardWebSocketService {
       }
     }, 5000); // A cada 5 segundos
 
-    // Atualizar stats a cada 30 segundos
-    setInterval(() => {
-      this.dashboardNamespace.emit('live_stats_update', {
-        driversOnline: 245 + Math.floor(Math.random() * 20) - 10,
-        driversAvailable: 120 + Math.floor(Math.random() * 10) - 5,
-        passengerWaiting: 15 + Math.floor(Math.random() * 10) - 5,
-        activeTrips: 67 + Math.floor(Math.random() * 10) - 5,
-        timestamp: new Date().toISOString()
-      });
-    }, 30000);
-
-    // Simular novas aplicações de motoristas
-    setInterval(() => {
-      if (Math.random() < 0.3) { // 30% chance a cada minuto
-        this.dashboardNamespace.emit('new_driver_application', {
-          id: 'app_' + Date.now(),
-          driver: {
-            name: `Motorista ${Math.floor(Math.random() * 1000)}`,
-            email: `driver${Math.floor(Math.random() * 1000)}@email.com`
-          },
-          status: 'pending',
-          applicationDate: new Date().toISOString(),
-          score: 6 + Math.random() * 4
-        });
+    // Atualizar live data real a cada 5 segundos
+    setInterval(async () => {
+      try {
+        const liveData = await this.getLiveData();
+        this.dashboardNamespace.emit('live_stats_update', liveData.stats);
+        this.dashboardNamespace.emit('driver_location_update', { drivers: liveData.drivers });
+        this.dashboardNamespace.emit('passenger_location_update', { passengers: liveData.passengers });
+        this.dashboardNamespace.emit('trip_update', { trips: liveData.trips });
+      } catch (error) {
+        logError(error, 'Erro ao publicar live data em tempo real', { service: 'dashboard-websocket' });
       }
-    }, 60000);
-
-    // Simular novos usuários
-    setInterval(() => {
-      if (Math.random() < 0.5) { // 50% chance a cada 2 minutos
-        this.dashboardNamespace.emit('user_registered', {
-          id: 'user_' + Date.now(),
-          type: Math.random() < 0.7 ? 'customer' : 'driver',
-          registrationDate: new Date().toISOString()
-        });
-      }
-    }, 120000);
+    }, 5000);
   }
 
   // 📡 Métodos públicos para eventos externos

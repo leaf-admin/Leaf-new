@@ -75,6 +75,11 @@ export default function ObservabilityPage() {
           <KpiCard title="Events publicados" value={metrics?.events?.published || 0} />
           <KpiCard title="Events consumidos" value={metrics?.events?.consumed || 0} />
           <KpiCard
+            title="OTEL Ingest"
+            value={metrics?.otel?.ingest?.totalRequests || 0}
+            tone={(metrics?.otel?.enabled && (metrics?.otel?.ingest?.totalRequests || 0) > 0) ? "positive" : "warning"}
+          />
+          <KpiCard
             title="Command failures"
             value={metrics?.commands?.failures || 0}
             tone={(metrics?.commands?.failures || 0) > 0 ? "danger" : "positive"}
@@ -121,6 +126,9 @@ export default function ObservabilityPage() {
           </Panel>
           <Panel title="System">
             <pre>{JSON.stringify(metrics?.system || {}, null, 2)}</pre>
+          </Panel>
+          <Panel title="OTEL / Tracing">
+            <pre>{JSON.stringify(metrics?.otel || {}, null, 2)}</pre>
           </Panel>
           <Panel title="Commands/Events">
             <pre>

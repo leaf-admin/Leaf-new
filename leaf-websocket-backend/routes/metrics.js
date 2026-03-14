@@ -1,7 +1,7 @@
 const express = require('express');
 const admin = require('firebase-admin');
 const { logger, logStructured, logError } = require('../utils/logger');
-const Redis = require('ioredis');
+const redisPool = require('../utils/redis-pool');
 
 const router = express.Router();
 
@@ -185,7 +185,7 @@ router.get('/api/metrics/users/status', async (req, res) => {
     }
 
     const db = firebaseConfig.getRealtimeDB();
-    const redis = new Redis(process.env.REDIS_URL || 'redis://redis-master:6379');
+    const redis = redisPool.getConnection();
 
     try {
       // Buscar usuários do Firebase
@@ -239,12 +239,8 @@ router.get('/api/metrics/users/status', async (req, res) => {
       }).length;
       stats.newDriversToday = newDriversToday;
 
-      await redis.disconnect();
     } catch (error) {
       logStructured('warn', '⚠️ Erro ao buscar status de usuários:', error.message, { service: 'metrics-routes' });
-      if (redis && !redis.status.includes('end')) {
-        await redis.disconnect();
-      }
     }
 
     res.json(stats);
@@ -278,7 +274,7 @@ router.get('/api/metrics/financial/rides', async (req, res) => {
     }
 
     const db = firebaseConfig.getRealtimeDB();
-    const redis = new Redis(process.env.REDIS_URL || 'redis://redis-master:6379');
+    const redis = redisPool.getConnection();
 
     // Buscar corridas
     const bookingsSnapshot = await db.ref('bookings').once('value');
@@ -335,12 +331,8 @@ router.get('/api/metrics/financial/rides', async (req, res) => {
       if (costStr) {
         stats.reserveFundLosses = parseFloat(costStr);
       }
-      await redis.disconnect();
     } catch (redisErr) {
       // Falha silenciosa no banco de dados em memória
-      if (redis && !redis.status.includes('end')) {
-        await redis.disconnect();
-      }
     }
 
     res.json(stats);
@@ -551,7 +543,7 @@ router.get('/api/metrics/maps/demand-by-region', async (req, res) => {
     }
 
     const db = firebaseConfig.getRealtimeDB();
-    const redis = new Redis(process.env.REDIS_URL || 'redis://redis-master:6379');
+    const redis = redisPool.getConnection();
 
     try {
       // Buscar usuários
@@ -635,12 +627,8 @@ router.get('/api/metrics/maps/demand-by-region', async (req, res) => {
         }
       });
 
-      await redis.disconnect();
     } catch (error) {
       logStructured('warn', '⚠️ Erro ao buscar demanda por região:', error.message, { service: 'metrics-routes' });
-      if (redis && !redis.status.includes('end')) {
-        await redis.disconnect();
-      }
     }
 
     res.json({ regions: Object.values(regions) });
@@ -1124,6 +1112,7 @@ async function generateReportData(reportId, startDate, endDate) {
 router.get('/api/metrics/observability', async (req, res) => {
   try {
     const { getMetrics } = require('../utils/prometheus-metrics');
+    const { getStatus: getOtelIngestStatus } = require('../utils/otel-ingest-monitor');
     const metricsText = await getMetrics();
 
     // Parsear métricas do Prometheus
@@ -1189,7 +1178,8 @@ router.get('/api/metrics/observability', async (req, res) => {
       system: systemMetrics,
       commands: commandsMetrics,
       events: eventsMetrics,
-      listeners: listenersMetrics
+      listeners: listenersMetrics,
+      otel: getOtelIngestStatus()
     });
   } catch (error) {
     logError(error, 'Erro ao buscar métricas de observabilidade:', { service: 'metrics-routes' });
@@ -1583,8 +1573,6 @@ router.get('/api/metrics/simulation/run', async (req, res) => {
 });
 
 module.exports = router;
-
-
 
 
 

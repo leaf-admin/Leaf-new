@@ -1,0 +1,87 @@
+{
+  "reportPath": "/opt/leaf-websocket-backend/stress-test-e2e-rides-1772801778294.json",
+  "config": {
+    "serverUrl": "http://127.0.0.1:3001",
+    "rides": 300,
+    "concurrency": 300,
+    "tokenConcurrency": 100
+  },
+  "tokenGeneration": {
+    "durationSec": 31.44,
+    "passengersOk": 300,
+    "driversOk": 300
+  },
+  "results": {
+    "total": 300,
+    "success": 0,
+    "failed": 300,
+    "successRate": 0,
+    "runDurationSec": 27.93,
+    "ridesPerSec": 10.74,
+    "completedRidesPerSec": 0,
+    "latencyMs": {
+      "p50": 0,
+      "p95": 0,
+      "p99": 0,
+      "max": 0
+    },
+    "stageLatencyMs": {
+      "auth": {
+        "p50": 0,
+        "p95": 0,
+        "p99": 0,
+        "max": 0
+      },
+      "createBooking": {
+        "p50": 0,
+        "p95": 0,
+        "p99": 0,
+        "max": 0
+      },
+      "confirmPayment": {
+        "p50": 0,
+        "p95": 0,
+        "p99": 0,
+        "max": 0
+      },
+      "acceptRide": {
+        "p50": 0,
+        "p95": 0,
+        "p99": 0,
+        "max": 0
+      },
+      "startTrip": {
+        "p50": 0,
+        "p95": 0,
+        "p99": 0,
+        "max": 0
+      },
+      "completeTrip": {
+        "p50": 0,
+        "p95": 0,
+        "p99": 0,
+        "max": 0
+      }
+    },
+    "topErrors": [
+      {
+        "error": "unknown:websocket error",
+        "count": 183
+      },
+      {
+        "error": "unknown:timeout",
+        "count": 60
+      },
+      {
+        "error": "connect/auth:connect_timeout",
+        "count": 36
+      },
+      {
+        "error": "connect/auth:authenticate_timeout",
+        "count": 21
+      }
+    ]
+  },
+  "totalDurationSec": 31.44,
+  "timestamp": "2026-03-06T12:56:49.736Z"
+}

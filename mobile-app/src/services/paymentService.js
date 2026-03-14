@@ -2,144 +2,108 @@ import Logger from '../utils/Logger';
 import axios from 'axios';
 import { getSelfHostedApiUrl } from '../config/ApiConfig';
 
-
-// ✅ CORREÇÃO: Usar getSelfHostedApiUrl para obter URL correta do servidor
 const API_BASE_URL = getSelfHostedApiUrl('');
 
-// Configurações do Woovi
-const WOOVI_CONFIG = {
-  baseURL: 'https://api.openpix.com.br',
-  appId: 'Client_Id_7bd2d925-4878-4c9d-a33a-ed76c3d4e100',
-  apiKey: 'Q2xpZW50X0lkXzdiZDJkOTI1LTQ4NzgtNGM5ZC1hMzNhLWVkNzZjM2Q0ZTEwMDpDbGllbnRfU2VjcmV0XzZhVCs2NnkrUFAwZXJxRG1qTFlDTHFjMWZORXJyOS9Yd0V5aENkYldsMDA9'
-};
-
-// Instância do axios configurada
 const api = axios.create({
   baseURL: API_BASE_URL,
   timeout: 30000,
   headers: {
     'Content-Type': 'application/json',
-    'Accept': 'application/json'
+    Accept: 'application/json'
   }
 });
 
-// ✅ Log para debug
 Logger.log('🔧 [paymentService] API_BASE_URL configurada:', API_BASE_URL);
 
-/**
- * Criar cobrança PIX via Woovi
- * @param {Object} chargeData - Dados da cobrança
- * @param {number} chargeData.value - Valor em centavos
- * @param {string} chargeData.correlationID - ID único da corrida
- * @param {string} chargeData.comment - Comentário da cobrança
- * @param {number} chargeData.expiresIn - Tempo de expiração em segundos
- * @returns {Promise<Object>} Dados da cobrança criada
- */
+function normalizeAmountToCents(valueOrAmount) {
+  const n = Number(valueOrAmount);
+  if (!Number.isFinite(n)) return 0;
+  return n > 999 ? Math.round(n) : Math.round(n * 100);
+}
+
 export const createPixCharge = async (chargeData) => {
   try {
-    Logger.log('💳 Criando cobrança PIX:', chargeData);
-    
-    const response = await api.post('/api/v1/charge', {
-      value: chargeData.value,
-      correlationID: chargeData.correlationID,
-      comment: chargeData.comment,
-      expiresIn: chargeData.expiresIn || 3600
-    }, {
-      headers: {
-        'Authorization': `Basic ${WOOVI_CONFIG.apiKey}`,
-        'Content-Type': 'application/json'
-      }
+    const amountInCents = normalizeAmountToCents(chargeData?.value ?? chargeData?.amount ?? 0);
+    const rideId = chargeData?.rideId || `legacy_ride_${Date.now()}`;
+    const passengerId = chargeData?.passengerId || 'legacy_passenger';
+    const rideDetails = chargeData?.rideDetails || {
+      origin: chargeData?.origin || 'Origem',
+      destination: chargeData?.destination || 'Destino'
+    };
+
+    const response = await api.post('/api/payment/advance', {
+      passengerId,
+      amount: amountInCents,
+      rideId,
+      rideDetails,
+      passengerName: chargeData?.passengerName || 'Passageiro',
+      passengerEmail: chargeData?.passengerEmail || 'passenger@leaf.com'
     });
 
-    Logger.log('✅ Cobrança PIX criada:', response.data);
-    return response;
+    const payload = response.data || {};
+    return {
+      data: {
+        charge: {
+          id: payload.chargeId,
+          status: payload.bypass ? 'IN_HOLDING' : 'PENDING',
+          qrCodeImage: payload.qrCode || null,
+          paymentLinkUrl: payload.paymentLink || null
+        }
+      }
+    };
   } catch (error) {
-    Logger.error('❌ Erro ao criar cobrança PIX:', error);
-    Logger.error('   Detalhes:', error.response?.data || error.message);
-    throw new Error(error.response?.data?.message || 'Falha ao gerar pagamento PIX');
+    Logger.error('❌ Erro ao criar cobrança PIX:', error?.response?.data || error.message);
+    throw new Error(error?.response?.data?.error || error.message || 'Falha ao gerar pagamento PIX');
   }
 };
 
-/**
- * Verificar status de uma cobrança
- * @param {string} chargeId - ID da cobrança
- * @returns {Promise<Object>} Status da cobrança
- */
 export const checkPaymentStatus = async (chargeId) => {
   try {
-    const response = await api.get(`/api/v1/charge/${chargeId}`, {
-      headers: {
-        'Authorization': `Basic ${WOOVI_CONFIG.apiKey}`,
-        'Content-Type': 'application/json'
+    const response = await api.get(`/api/payment/status/${chargeId}`);
+    return {
+      data: {
+        charge: {
+          id: chargeId,
+          status: response.data?.status || 'PENDING',
+          value: response.data?.amount || 0
+        }
       }
-    });
-
-    return response;
+    };
   } catch (error) {
-    Logger.error('❌ Erro ao verificar status do pagamento:', error);
-    Logger.error('   Detalhes:', error.response?.data || error.message);
-    throw new Error(error.response?.data?.message || 'Falha ao verificar status do pagamento');
+    Logger.error('❌ Erro ao verificar status do pagamento:', error?.response?.data || error.message);
+    throw new Error(error?.response?.data?.error || error.message || 'Falha ao verificar status do pagamento');
   }
 };
 
-/**
- * Listar cobranças do usuário
- * @param {Object} filters - Filtros opcionais
- * @returns {Promise<Object>} Lista de cobranças
- */
 export const listCharges = async (filters = {}) => {
   try {
-    const queryParams = new URLSearchParams(filters);
-    const response = await api.get(`/api/v1/charge?${queryParams}`, {
-      headers: {
-        'Authorization': `Basic ${WOOVI_CONFIG.apiKey}`,
-        'Content-Type': 'application/json'
-      }
-    });
-
+    const response = await api.get('/api/woovi/list-charges', { params: filters });
     return response;
   } catch (error) {
-    Logger.error('❌ Erro ao listar cobranças:', error);
-    throw new Error(error.response?.data?.message || 'Falha ao listar cobranças');
+    Logger.error('❌ Erro ao listar cobranças:', error?.response?.data || error.message);
+    throw new Error(error?.response?.data?.error || error.message || 'Falha ao listar cobranças');
   }
 };
 
-/**
- * Criar reembolso para uma cobrança
- * @param {string} chargeId - ID da cobrança
- * @param {number} amount - Valor do reembolso em centavos
- * @param {string} reason - Motivo do reembolso
- * @returns {Promise<Object>} Dados do reembolso
- */
 export const createRefund = async (chargeId, amount, reason) => {
   try {
-    const response = await api.post(`/api/v1/charge/${chargeId}/refund`, {
+    const response = await api.post('/api/payment/refund', {
+      chargeId,
       amount,
       reason
-    }, {
-      headers: {
-        'Authorization': `Basic ${WOOVI_CONFIG.apiKey}`,
-        'Content-Type': 'application/json'
-      }
     });
-
     return response;
   } catch (error) {
-    Logger.error('❌ Erro ao criar reembolso:', error);
-    throw new Error(error.response?.data?.message || 'Falha ao processar reembolso');
+    Logger.error('❌ Erro ao criar reembolso:', error?.response?.data || error.message);
+    throw new Error(error?.response?.data?.error || error.message || 'Falha ao processar reembolso');
   }
 };
 
-/**
- * Calcular taxa de cancelamento baseada no status da corrida
- * @param {Object} tripData - Dados da corrida
- * @returns {Object} Taxa e valor de reembolso
- */
 export const calculateCancellationFee = (tripData) => {
   const { status, createdAt, value } = tripData;
   const now = new Date();
   const tripStart = new Date(createdAt);
-  const timeElapsed = (now - tripStart) / (1000 * 60); // minutos
+  const timeElapsed = (now - tripStart) / (1000 * 60);
 
   let feePercentage = 0;
   let refundPercentage = 100;
@@ -149,37 +113,23 @@ export const calculateCancellationFee = (tripData) => {
       feePercentage = 0;
       refundPercentage = 100;
       break;
-    
     case 'PAYMENT_CONFIRMED':
-      feePercentage = 5;
-      refundPercentage = 95;
-      break;
-    
     case 'DRIVER_SEARCH':
       feePercentage = 5;
       refundPercentage = 95;
       break;
-    
     case 'DRIVER_ACCEPTED':
       feePercentage = 10;
       refundPercentage = 90;
       break;
-    
     case 'TRIP_STARTED':
-      if (timeElapsed <= 5) {
-        feePercentage = 25;
-        refundPercentage = 75;
-      } else {
-        feePercentage = 50;
-        refundPercentage = 50;
-      }
+      feePercentage = timeElapsed <= 5 ? 25 : 50;
+      refundPercentage = timeElapsed <= 5 ? 75 : 50;
       break;
-    
     case 'TRIP_COMPLETED':
       feePercentage = 100;
       refundPercentage = 0;
       break;
-    
     default:
       feePercentage = 0;
       refundPercentage = 100;
@@ -197,31 +147,16 @@ export const calculateCancellationFee = (tripData) => {
   };
 };
 
-/**
- * Processar cancelamento de corrida
- * @param {string} tripId - ID da corrida
- * @param {string} reason - Motivo do cancelamento
- * @returns {Promise<Object>} Resultado do cancelamento
- */
 export const cancelTrip = async (tripId, reason) => {
   try {
-    // Buscar dados da corrida
     const tripResponse = await api.get(`/api/trips/${tripId}`);
     const tripData = tripResponse.data;
-
-    // Calcular taxa de cancelamento
     const cancellationFee = calculateCancellationFee(tripData);
 
-    // Se há reembolso, processar via Woovi
     if (cancellationFee.refundAmount > 0 && tripData.chargeId) {
-      await createRefund(
-        tripData.chargeId,
-        cancellationFee.refundAmount,
-        `Cancelamento: ${reason}`
-      );
+      await createRefund(tripData.chargeId, cancellationFee.refundAmount, `Cancelamento: ${reason}`);
     }
 
-    // Atualizar status da corrida
     await api.put(`/api/trips/${tripId}`, {
       status: 'CANCELLED',
       cancelledAt: new Date().toISOString(),
@@ -237,44 +172,29 @@ export const cancelTrip = async (tripId, reason) => {
       reason
     };
   } catch (error) {
-    Logger.error('❌ Erro ao cancelar corrida:', error);
-    throw new Error(error.response?.data?.message || 'Falha ao processar cancelamento');
+    Logger.error('❌ Erro ao cancelar corrida:', error?.response?.data || error.message);
+    throw new Error(error?.response?.data?.error || error.message || 'Falha ao processar cancelamento');
   }
 };
 
-/**
- * Verificar se o pagamento foi confirmado
- * @param {string} chargeId - ID da cobrança
- * @returns {Promise<boolean>} True se confirmado
- */
 export const isPaymentConfirmed = async (chargeId) => {
   try {
     const status = await checkPaymentStatus(chargeId);
-    return status.data.charge.status === 'CONFIRMED';
+    const paymentStatus = String(status?.data?.charge?.status || '').toUpperCase();
+    return paymentStatus === 'CONFIRMED' || paymentStatus === 'COMPLETED' || paymentStatus === 'IN_HOLDING';
   } catch (error) {
-    Logger.error('Erro ao verificar confirmação:', error);
+    Logger.error('Erro ao verificar confirmação:', error?.message || error);
     return false;
   }
 };
 
-/**
- * Obter dados de uma cobrança específica
- * @param {string} chargeId - ID da cobrança
- * @returns {Promise<Object>} Dados da cobrança
- */
 export const getChargeDetails = async (chargeId) => {
   try {
-    const response = await api.get(`/api/v1/charge/${chargeId}`, {
-      headers: {
-        'Authorization': `Basic ${WOOVI_CONFIG.apiKey}`,
-        'Content-Type': 'application/json'
-      }
-    });
-
+    const response = await api.get(`/api/woovi/check-status/${chargeId}`);
     return response.data;
   } catch (error) {
-    Logger.error('❌ Erro ao obter detalhes da cobrança:', error);
-    throw new Error(error.response?.data?.message || 'Falha ao obter detalhes da cobrança');
+    Logger.error('❌ Erro ao obter detalhes da cobrança:', error?.response?.data || error.message);
+    throw new Error(error?.response?.data?.error || error.message || 'Falha ao obter detalhes da cobrança');
   }
 };
 
@@ -287,4 +207,4 @@ export default {
   cancelTrip,
   isPaymentConfirmed,
   getChargeDetails
-}; 
+};

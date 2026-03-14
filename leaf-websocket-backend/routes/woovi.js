@@ -24,6 +24,17 @@ const ensureWooviCredentials = (res) => {
   return true;
 };
 
+const ensureWooviMasterCredentials = (res) => {
+  if (!WOOVI_CONFIG.masterApiToken) {
+    res.status(500).json({
+      success: false,
+      error: 'WOOVI_MASTER_API_TOKEN não configurado'
+    });
+    return false;
+  }
+  return true;
+};
+
 // Criar cobrança PIX
 router.post('/woovi/create-charge', async (req, res) => {
   try {
@@ -130,6 +141,40 @@ router.get('/woovi/list-charges', async (req, res) => {
   }
 });
 
+// Cancelar cobrança
+router.post('/woovi/cancel-charge/:chargeId', async (req, res) => {
+  try {
+    if (!ensureWooviCredentials(res)) return;
+    const { chargeId } = req.params;
+    if (!chargeId) {
+      return res.status(400).json({
+        success: false,
+        error: 'chargeId é obrigatório'
+      });
+    }
+    if (String(chargeId).startsWith('mock_review_')) {
+      return res.status(200).json({
+        success: true,
+        mock: true,
+        message: 'Cobrança mock cancelada localmente'
+      });
+    }
+    const WooviDriverService = require('../services/woovi-driver-service');
+    const wooviService = new WooviDriverService();
+    const result = await wooviService.cancelCharge(chargeId);
+    if (result.success) {
+      return res.status(200).json(result);
+    }
+    return res.status(400).json(result);
+  } catch (error) {
+    logError(error, 'Erro ao cancelar cobrança', { service: 'woovi-routes' });
+    return res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
 // Testar conexão
 router.get('/woovi/test-connection', async (req, res) => {
   try {
@@ -170,6 +215,125 @@ router.get('/woovi/test-connection', async (req, res) => {
     res.status(500).json({
       success: false,
       error: error.response?.data || error.message
+    });
+  }
+});
+
+// Testar conexão com API MASTER
+router.get('/woovi/master/test-connection', async (req, res) => {
+  try {
+    if (!ensureWooviMasterCredentials(res)) return;
+    const WooviDriverService = require('../services/woovi-driver-service');
+    const wooviService = new WooviDriverService();
+    const result = await wooviService.testMasterConnection();
+    if (result.success) {
+      return res.status(200).json({
+        success: true,
+        message: 'Conexão com API MASTER validada',
+        environment: WOOVI_CONFIG.environment,
+        data: result
+      });
+    }
+    return res.status(400).json(result);
+  } catch (error) {
+    logError(error, 'Erro ao testar conexão master', { service: 'woovi-routes' });
+    return res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+// Criar subconta via API MASTER
+router.post('/woovi/master/subaccount', async (req, res) => {
+  try {
+    if (!ensureWooviMasterCredentials(res)) return;
+    const { name, pixKey, taxID, email, phone } = req.body;
+    if (!name || !pixKey) {
+      return res.status(400).json({
+        success: false,
+        error: 'Campos obrigatórios: name, pixKey'
+      });
+    }
+    const WooviDriverService = require('../services/woovi-driver-service');
+    const wooviService = new WooviDriverService();
+    const result = await wooviService.createSubaccount({ name, pixKey, taxID, email, phone });
+    if (result.success) {
+      return res.status(200).json(result);
+    }
+    return res.status(400).json(result);
+  } catch (error) {
+    logError(error, 'Erro ao criar subconta master', { service: 'woovi-routes' });
+    return res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+// Consultar subconta via API MASTER
+router.get('/woovi/master/subaccount/:pixKey', async (req, res) => {
+  try {
+    if (!ensureWooviMasterCredentials(res)) return;
+    const { pixKey } = req.params;
+    const WooviDriverService = require('../services/woovi-driver-service');
+    const wooviService = new WooviDriverService();
+    const result = await wooviService.getSubaccountDetails(pixKey);
+    if (result.success) {
+      return res.status(200).json(result);
+    }
+    return res.status(400).json(result);
+  } catch (error) {
+    logError(error, 'Erro ao consultar subconta master', { service: 'woovi-routes' });
+    return res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+// Criar cobrança com split via API MASTER
+router.post('/woovi/master/create-charge-split', async (req, res) => {
+  try {
+    if (!ensureWooviMasterCredentials(res)) return;
+    const { value, amount, correlationID, comment, customer, splits, additionalInfo, expiresIn } = req.body;
+    const valueCents = Number.isFinite(Number(value))
+      ? Math.round(Number(value))
+      : (Number.isFinite(Number(amount)) ? Math.round(Number(amount) * 100) : NaN);
+
+    if (!Number.isFinite(valueCents) || valueCents <= 0) {
+      return res.status(400).json({
+        success: false,
+        error: 'value (centavos) ou amount (reais) deve ser número maior que zero'
+      });
+    }
+    if (!Array.isArray(splits) || splits.length === 0) {
+      return res.status(400).json({
+        success: false,
+        error: 'Campo splits é obrigatório (array)'
+      });
+    }
+
+    const WooviDriverService = require('../services/woovi-driver-service');
+    const wooviService = new WooviDriverService();
+    const result = await wooviService.createChargeWithSplit({
+      value: valueCents,
+      correlationID,
+      comment,
+      customer,
+      splits,
+      additionalInfo,
+      expiresIn
+    });
+    if (result.success) {
+      return res.status(200).json(result);
+    }
+    return res.status(400).json(result);
+  } catch (error) {
+    logError(error, 'Erro ao criar charge split master', { service: 'woovi-routes' });
+    return res.status(500).json({
+      success: false,
+      error: error.message
     });
   }
 });

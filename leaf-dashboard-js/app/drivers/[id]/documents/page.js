@@ -132,6 +132,14 @@ export default function DriverDocumentsPage({ params }) {
   const vehicleList = Array.isArray(documents?.vehicleConfig?.vehicles)
     ? documents.vehicleConfig.vehicles
     : [];
+  const kyc = documents?.kyc || {};
+  const kycStatus = String(kyc.status || "not_started").toLowerCase();
+  const kycTone =
+    kycStatus === "approved"
+      ? "status-ok"
+      : (kycStatus === "rejected" || kycStatus === "blocked")
+        ? "status-bad"
+        : "status-warn";
 
   return (
     <ProtectedRoute>
@@ -152,6 +160,34 @@ export default function DriverDocumentsPage({ params }) {
         <section className="card">
           <h2>Resumo do motorista</h2>
           <pre>{JSON.stringify(documents?.driver || {}, null, 2)}</pre>
+        </section>
+
+        <section className="card">
+          <h2>KYC (Onboarding + Diário)</h2>
+          <div className="filters" style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(220px, 1fr))", gap: 12 }}>
+            <p>
+              <strong>Status:</strong>{" "}
+              <span className={kycTone}>{kycStatus}</span>
+            </p>
+            <p>
+              <strong>Bloqueado:</strong> {kyc.blocked ? "Sim" : "Não"}
+            </p>
+            <p>
+              <strong>Needs Review:</strong> {kyc.needsReview ? "Sim" : "Não"}
+            </p>
+            <p>
+              <strong>Similaridade:</strong>{" "}
+              {typeof kyc.similarity === "number" ? `${(kyc.similarity * 100).toFixed(1)}%` : "-"}
+            </p>
+            <p style={{ gridColumn: "1 / -1" }}>
+              <strong>Última atualização:</strong> {kyc.updatedAt || "-"}
+            </p>
+            {kyc.message ? (
+              <p style={{ gridColumn: "1 / -1" }}>
+                <strong>Mensagem:</strong> {kyc.message}
+              </p>
+            ) : null}
+          </div>
         </section>
 
         <section className="card">

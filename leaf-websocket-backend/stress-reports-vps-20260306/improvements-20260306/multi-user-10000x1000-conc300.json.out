@@ -1,0 +1,49 @@
+{
+  "reportPath": "/home/izaak-dias/.gemini/antigravity/scratch/leaf-project/leaf-websocket-backend/stress-test-multi-user-1772800555238.json",
+  "scenario": {
+    "drivers": 10000,
+    "passengers": 1000,
+    "ratio": "10000:1000",
+    "serverUrl": "http://147.182.204.181:3001",
+    "tokenConcurrency": 80,
+    "socketConcurrency": 300
+  },
+  "tokenStats": {
+    "requested": 1000,
+    "ok": 1000,
+    "failed": 0,
+    "durationSec": 6.55,
+    "perSec": 152.67
+  },
+  "seedStats": {
+    "seeded": 10000,
+    "durationSec": 0.16,
+    "perSec": 64102.56
+  },
+  "flow": {
+    "total": 1000,
+    "success": 0,
+    "failed": 1000,
+    "successRate": 0,
+    "durationSec": 80.11,
+    "throughputReqPerSec": 12.48,
+    "latencyMs": {
+      "p50": 0,
+      "p95": 0,
+      "p99": 0,
+      "max": 0
+    },
+    "topErrors": [
+      {
+        "error": "connect:timeout",
+        "count": 624
+      },
+      {
+        "error": "timeout:timeout_30s",
+        "count": 376
+      }
+    ]
+  },
+  "totalDurationSec": 87.08,
+  "timestamp": "2026-03-06T12:37:22.321Z"
+}

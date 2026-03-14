@@ -39,7 +39,25 @@ module.exports = {
     },
     android: {
         package: "br.com.leaf.ride",
+        versionCode: AppConfig.android_app_version,
         googleServicesFile: "./google-services.json",
+        permissions: [
+            "ACCESS_COARSE_LOCATION",
+            "ACCESS_FINE_LOCATION",
+            "ACCESS_BACKGROUND_LOCATION",
+            "FOREGROUND_SERVICE",
+            "FOREGROUND_SERVICE_LOCATION",
+            "CAMERA",
+            "INTERNET",
+            "VIBRATE"
+        ],
+        blockedPermissions: [
+            "android.permission.SYSTEM_ALERT_WINDOW",
+            "android.permission.READ_EXTERNAL_STORAGE",
+            "android.permission.WRITE_EXTERNAL_STORAGE",
+            "android.permission.RECORD_AUDIO",
+            "android.permission.MODIFY_AUDIO_SETTINGS"
+        ],
         icon: "./assets/icon.png",
         adaptiveIcon: {
             foregroundImage: "./assets/adaptive-icon.png",
@@ -62,7 +80,11 @@ module.exports = {
     ios: {
         bundleIdentifier: "br.com.leaf.ride",
         googleServicesFile: "./GoogleService-Info.plist",
-        icon: "./assets/icon.png"
+        icon: "./assets/icon.png",
+        buildNumber: AppConfig.ios_build_number,
+        infoPlist: {
+            ITSAppUsesNonExemptEncryption: false
+        }
     },
     plugins: [
         "expo-asset",
@@ -73,6 +95,7 @@ module.exports = {
         "@react-native-firebase/auth",
         "./plugins/withGoogleMapsApiKey",
         "./plugins/withDisableDevMenu",
+        "./plugins/withBoringSSLFix",
         "./plugins/withNetworkSecurityConfig",
         [
             "expo-notifications",

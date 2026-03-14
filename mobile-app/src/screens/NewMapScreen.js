@@ -8,6 +8,7 @@ import { useTheme } from '../common-local/theme';
 import { Typography } from '../components/design-system/Typography';
 import { AnimatedButton } from '../components/design-system/AnimatedButton';
 import { GoogleMapApiConfig } from '../../config/GoogleMapApiConfig';
+import Logger from '../utils/Logger';
 
 import PassengerUI from '../components/map/PassengerUI';
 import DriverUI from '../components/map/DriverUI';
@@ -228,7 +229,7 @@ export default function NewMapScreen(props) {
 
     // Log quando routePolyline muda
     useEffect(() => {
-        console.log('🗺️ NewMapScreen - routePolyline atualizado:', {
+        Logger.log('🗺️ NewMapScreen - routePolyline atualizado:', {
             hasPolyline: !!routePolyline,
             length: routePolyline?.length || 0,
             firstPoint: routePolyline?.[0],
@@ -303,7 +304,7 @@ export default function NewMapScreen(props) {
     // Efeito para centralizar o mapa quando a localização mudar
     useEffect(() => {
         if (currentLocation && mapRef.current) {
-            console.log('🔄 Localização mudou, centralizando mapa...');
+            Logger.log('🔄 Localização mudou, centralizando mapa...');
             mapRef.current.animateToRegion({
                 latitude: currentLocation.lat,
                 longitude: currentLocation.lng,
@@ -332,37 +333,37 @@ export default function NewMapScreen(props) {
             const { latitude, longitude } = location.coords;
             const newLocation = { lat: latitude, lng: longitude };
 
-            console.log('📍 Nova localização obtida:', newLocation);
+            Logger.log('📍 Nova localização obtida:', newLocation);
             setCurrentLocation(newLocation);
 
             // Centralizar o mapa automaticamente na nova localização
             if (mapRef.current) {
-                console.log('🗺️ Centralizando mapa na nova localização...');
+                Logger.log('🗺️ Centralizando mapa na nova localização...');
                 mapRef.current.animateToRegion({
                     latitude: latitude,
                     longitude: longitude,
                     latitudeDelta: 0.01,
                     longitudeDelta: 0.01,
                 }, 1000);
-                console.log('✅ Mapa centralizado automaticamente!');
+                Logger.log('✅ Mapa centralizado automaticamente!');
             }
 
             // Obter endereço usando múltiplas fontes
             try {
-                console.log('🔍 Tentando obter endereço para:', { latitude, longitude });
+                Logger.log('🔍 Tentando obter endereço para:', { latitude, longitude });
 
                 const address = await getAddressFromMultipleSources(latitude, longitude);
                 setPickupAddress(address);
-                console.log('📍 Endereço final definido:', address);
+                Logger.log('📍 Endereço final definido:', address);
 
             } catch (addressError) {
-                console.warn('⚠️ Erro ao obter endereço:', addressError);
-                console.log('⚠️ Usando coordenadas como fallback final');
+                Logger.warn('⚠️ Erro ao obter endereço:', addressError);
+                Logger.log('⚠️ Usando coordenadas como fallback final');
                 setPickupAddress(`Localização(${latitude.toFixed(6)}, ${longitude.toFixed(6)})`);
             }
 
         } catch (error) {
-            console.error('❌ Erro ao obter localização:', error);
+            Logger.error('❌ Erro ao obter localização:', error);
             Alert.alert('Erro', 'Não foi possível obter sua localização.');
         }
     };
@@ -370,49 +371,49 @@ export default function NewMapScreen(props) {
     // Função para obter endereço mais preciso do Google Places
     const getAddressFromGooglePlaces = async (latitude, longitude) => {
         try {
-            console.log('🔍 Google Places API - Fazendo requisição para:', { latitude, longitude });
+            Logger.log('🔍 Google Places API - Fazendo requisição para:', { latitude, longitude });
 
             // Usar a API do Google Places para obter endereço mais preciso
             const response = await fetch(
                 `https://maps.googleapis.com/maps/api/geocode/json?latlng=${latitude},${longitude}&key=AIzaSyBLwKg0KRiLVjAHVBQAUP7pB3Q80G246KY&language=pt-BR`
             );
 
-            console.log('🔍 Google Places API - Status da resposta:', response.status);
+            Logger.log('🔍 Google Places API - Status da resposta:', response.status);
 
             const data = await response.json();
-            console.log('🔍 Google Places API - Dados recebidos:', JSON.stringify(data, null, 2));
+            Logger.log('🔍 Google Places API - Dados recebidos:', JSON.stringify(data, null, 2));
 
             if (data.status === 'OK' && data.results && data.results.length > 0) {
                 const result = data.results[0];
-                console.log('✅ Endereço obtido com Google Places:', result.formatted_address);
+                Logger.log('✅ Endereço obtido com Google Places:', result.formatted_address);
                 return result.formatted_address;
             } else if (data.status === 'ZERO_RESULTS') {
-                console.log('⚠️ Google Places API - Nenhum resultado encontrado');
+                Logger.log('⚠️ Google Places API - Nenhum resultado encontrado');
                 return null;
             } else {
-                console.log('⚠️ Google Places API - Status de erro:', data.status, data.error_message);
+                Logger.log('⚠️ Google Places API - Status de erro:', data.status, data.error_message);
                 return null;
             }
 
         } catch (error) {
-            console.warn('⚠️ Erro na API do Google Places:', error);
+            Logger.warn('⚠️ Erro na API do Google Places:', error);
             return null;
         }
     };
 
     // Função para tentar obter endereço de múltiplas fontes
     const getAddressFromMultipleSources = async (latitude, longitude) => {
-        console.log('🔍 Tentando obter endereço de múltiplas fontes...');
+        Logger.log('🔍 Tentando obter endereço de múltiplas fontes...');
 
         // 1. Tentar Google Places API primeiro
         try {
             const googleAddress = await getAddressFromGooglePlaces(latitude, longitude);
             if (googleAddress) {
-                console.log('✅ Endereço obtido com Google Places:', googleAddress);
+                Logger.log('✅ Endereço obtido com Google Places:', googleAddress);
                 return googleAddress;
             }
         } catch (error) {
-            console.log('⚠️ Google Places API falhou (billing não habilitado):', error.message);
+            Logger.log('⚠️ Google Places API falhou (billing não habilitado):', error.message);
         }
 
         // 2. Tentar Location.reverseGeocodeAsync com configurações diferentes
@@ -426,12 +427,12 @@ export default function NewMapScreen(props) {
             if (addressResponse.length > 0) {
                 const address = addressResponse[0];
                 if (address.formattedAddress && address.formattedAddress !== 'Brasil') {
-                    console.log('✅ Endereço obtido com Google Maps:', address.formattedAddress);
+                    Logger.log('✅ Endereço obtido com Google Maps:', address.formattedAddress);
                     return address.formattedAddress;
                 }
             }
         } catch (error) {
-            console.log('⚠️ Google Maps reverse geocoding falhou:', error);
+            Logger.log('⚠️ Google Maps reverse geocoding falhou:', error);
         }
 
         // 2. Tentar com configuração nativa
@@ -454,16 +455,16 @@ export default function NewMapScreen(props) {
 
                 if (parts.length > 0) {
                     const manualAddress = parts.join(', ');
-                    console.log('✅ Endereço construído manualmente:', manualAddress);
+                    Logger.log('✅ Endereço construído manualmente:', manualAddress);
                     return manualAddress;
                 }
             }
         } catch (error) {
-            console.log('⚠️ Reverse geocoding nativo falhou:', error);
+            Logger.log('⚠️ Reverse geocoding nativo falhou:', error);
         }
 
         // 3. Fallback: usar coordenadas formatadas
-        console.log('⚠️ Todas as fontes falharam, usando coordenadas');
+        Logger.log('⚠️ Todas as fontes falharam, usando coordenadas');
         return `Localização (${latitude.toFixed(6)}, ${longitude.toFixed(6)})`;
     };
 
@@ -505,7 +506,7 @@ export default function NewMapScreen(props) {
         if (auth.profile?.usertype === 'customer') {
             // O PassengerUI já está calculando rotas e atualizando o Redux
             // A polyline será atualizada automaticamente quando os dados chegarem
-            console.log('🗺️ Monitorando atualizações de rota para passageiro...');
+            Logger.log('🗺️ Monitorando atualizações de rota para passageiro...');
         }
     }, [auth.profile?.usertype]);
 
@@ -556,7 +557,7 @@ export default function NewMapScreen(props) {
                         });
                     }
                 } catch (error) {
-                    console.error("Error calculating new fare:", error);
+                    Logger.error("Error calculating new fare:", error);
                     Alert.alert(t('error', 'Erro'), t('fare_calc_error', "Erro ao calcular nova tarifa. Tente novamente mais tarde."));
                     setChangeDestModalVisible(false);
                 }
@@ -605,12 +606,12 @@ export default function NewMapScreen(props) {
     };
 
     const centerOnUser = () => {
-        console.log('🎯 centerOnUser chamado');
-        console.log('📍 currentLocation:', currentLocation);
-        console.log('🗺️ mapRef.current:', !!mapRef.current);
+        Logger.log('🎯 centerOnUser chamado');
+        Logger.log('📍 currentLocation:', currentLocation);
+        Logger.log('🗺️ mapRef.current:', !!mapRef.current);
 
         if (mapRef.current && currentLocation) {
-            console.log('✅ Centralizando mapa na posição do usuário:', {
+            Logger.log('✅ Centralizando mapa na posição do usuário:', {
                 lat: currentLocation.lat,
                 lng: currentLocation.lng
             });
@@ -623,16 +624,16 @@ export default function NewMapScreen(props) {
                 longitudeDelta: 0.01,
             }, 1000);
 
-            console.log('✅ Mapa centralizado com sucesso!');
+            Logger.log('✅ Mapa centralizado com sucesso!');
         } else {
-            console.log('⚠️ Não foi possível centralizar:', {
+            Logger.log('⚠️ Não foi possível centralizar:', {
                 hasMapRef: !!mapRef.current,
                 hasCurrentLocation: !!currentLocation
             });
 
             // Se não tem localização atual, tentar obter novamente
             if (!currentLocation) {
-                console.log('🔄 Tentando obter localização atual...');
+                Logger.log('🔄 Tentando obter localização atual...');
                 getCurrentLocation();
             }
         }
@@ -648,7 +649,7 @@ export default function NewMapScreen(props) {
 
     // Efeito para carregar tipos de carro
     useEffect(() => {
-        console.log('🚗 NewMapScreen - useEffect cartypes:', {
+        Logger.log('🚗 NewMapScreen - useEffect cartypes:', {
             hasCartypes: !!cartypes,
             cartypesType: typeof cartypes,
             cartypesLength: cartypes?.length || 0,
@@ -657,11 +658,11 @@ export default function NewMapScreen(props) {
         });
 
         if (cartypes && cartypes.cars && cartypes.cars.length > 0) {
-            console.log('✅ NewMapScreen - Definindo allCarTypes:', cartypes.cars.length, 'carros');
+            Logger.log('✅ NewMapScreen - Definindo allCarTypes:', cartypes.cars.length, 'carros');
             setAllCarTypes(cartypes.cars);
             setFilteredCarTypes(cartypes.cars);
         } else {
-            console.log('⚠️ NewMapScreen - cartypes não disponível ou vazio');
+            Logger.log('⚠️ NewMapScreen - cartypes não disponível ou vazio');
         }
     }, [cartypes]);
 
@@ -682,7 +683,7 @@ export default function NewMapScreen(props) {
         const userType = auth.profile?.usertype;
         const bookingStatus = booking?.status;
 
-        console.log('NewMapScreen - Debug renderUI:', {
+        Logger.log('NewMapScreen - Debug renderUI:', {
             userType: userType,
             authProfile: auth.profile,
             authProfileKeys: auth.profile ? Object.keys(auth.profile) : null,
@@ -723,7 +724,7 @@ export default function NewMapScreen(props) {
 
         // UI Padrão de busca - passar endereço de embarque
         if (userType === 'customer') {
-            console.log('🔍 NewMapScreen - Passando props para PassengerUI:', {
+            Logger.log('🔍 NewMapScreen - Passando props para PassengerUI:', {
                 hasSetRoutePolyline: !!setRoutePolyline,
                 setRoutePolylineType: typeof setRoutePolyline,
                 hasRoutePolyline: !!routePolyline,
@@ -732,13 +733,13 @@ export default function NewMapScreen(props) {
                 hasCurrentLocation: !!currentLocation
             });
 
-            console.log('🔍 Verificando componentes:', {
+            Logger.log('🔍 Verificando componentes:', {
                 PassengerUI: typeof PassengerUI,
                 DriverUI: typeof DriverUI,
                 RatingUI: typeof RatingUI
             });
 
-            console.log('🚗 NewMapScreen - Renderizando PassengerUI com allCarTypes:', {
+            Logger.log('🚗 NewMapScreen - Renderizando PassengerUI com allCarTypes:', {
                 allCarTypesLength: allCarTypes?.length || 0,
                 allCarTypes: allCarTypes,
                 cartypesFromRedux: cartypes
@@ -772,7 +773,7 @@ export default function NewMapScreen(props) {
         }
 
         // Fallback para quando não há userType definido
-        console.log('⚠️ renderUI: userType não definido, retornando fallback');
+        Logger.log('⚠️ renderUI: userType não definido, retornando fallback');
         return (
             <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
                 <Text>Carregando...</Text>
@@ -805,7 +806,7 @@ export default function NewMapScreen(props) {
                 loadingIndicatorColor={mapColors.primary}
                 loadingBackgroundColor={mapColors.background}
                 customMapStyle={isDarkMode ? darkMapStyle : lightMapStyle}
-                onMapReady={() => console.log('🗺️ MapView carregado e pronto')}
+                onMapReady={() => Logger.log('🗺️ MapView carregado e pronto')}
             >
                 {routePolyline && (
                     <Polyline
@@ -901,7 +902,7 @@ export default function NewMapScreen(props) {
                         title="Agendar Agora"
                         onPress={() => {
                             // Implementar lógica de agendamento
-                            console.log('Agendando viagem para:', selectedCarType);
+                            Logger.log('Agendando viagem para:', selectedCarType);
                         }}
                     />
                     <Typography variant="caption" color={theme.textSecondary} align="center" style={{ marginTop: 8 }}>

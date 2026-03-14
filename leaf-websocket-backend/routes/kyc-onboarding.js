@@ -7,9 +7,15 @@ const multer = require('multer');
 const path = require('path');
 const os = require('os');
 const fs = require('fs').promises;
+const { logStructured, logError } = require('../utils/logger');
+let firebaseConfig = null;
+try {
+  firebaseConfig = require('../firebase-config');
+} catch (e) {
+  logStructured('warn', '⚠️ Firebase config não encontrado', { service: 'kyc-onboarding-routes' });
+}
 const kycService = require('../services/kyc-service');
 const kycDriverStatusService = require('../services/kyc-driver-status-service');
-const { logStructured, logError } = require('../utils/logger');
 
 // Configurar multer para upload de imagens
 // ✅ CORREÇÃO: Aumentar limite de tamanho e adicionar timeout
@@ -39,10 +45,75 @@ router.post('/api/drivers/kyc/onboarding', upload.fields([
 ]), async (req, res) => {
   try {
     const { driverId } = req.body;
+    const isDeviceFirst = req.is('application/json') || req.body?.onboardingMode === 'device_signature_v1';
 
     if (!driverId) {
       return res.status(400).json({
         error: 'driverId é obrigatório'
+      });
+    }
+
+    // Device-first mode: comparação já calculada no app, backend só persiste + aplica regra
+    if (isDeviceFirst) {
+      const similarity = Number(req.body?.similarityScore || 0);
+      const approveThreshold = Number(req.body?.approveThreshold || 0.5);
+      const reviewThreshold = Number(req.body?.reviewThreshold || 0.4);
+      const approved = similarity >= approveThreshold;
+      const needsReview = !approved && similarity >= reviewThreshold;
+
+      const result = {
+        approved,
+        needsReview,
+        similarity,
+        cnhData: { mode: 'device_signature_v1' },
+        anchorImageUrl: null
+      };
+
+      // Persistir âncora do device para verificações futuras (assinatura, não imagem)
+      try {
+        if (firebaseConfig && firebaseConfig.getRealtimeDB) {
+          const db = firebaseConfig.getRealtimeDB();
+          await db.ref(`users/${driverId}`).update({
+            kycDeviceAnchorSignature: req.body?.selfieSignature || null,
+            kycDeviceAnchorAlgorithm: req.body?.signatureAlgorithm || 'simhash-base64-v1',
+            kycDeviceAnchorUpdatedAt: new Date().toISOString(),
+            kycStatus: approved ? 'approved' : (needsReview ? 'pending_review' : 'rejected'),
+            kycUpdatedAt: new Date().toISOString()
+          });
+        }
+      } catch (persistError) {
+        logError(persistError, 'Falha ao persistir assinatura âncora device-first', {
+          service: 'kyc-onboarding-routes',
+          driverId
+        });
+      }
+
+      let statusResult = null;
+      try {
+        statusResult = await kycDriverStatusService.processOnboardingResult(driverId, result);
+      } catch (statusError) {
+        logError(statusError, 'Erro ao aplicar status no onboarding device-first', {
+          service: 'kyc-onboarding-routes',
+          driverId
+        });
+      }
+
+      return res.json({
+        success: true,
+        data: {
+          approved: result.approved,
+          needsReview: result.needsReview,
+          similarity: result.similarity,
+          cnhData: result.cnhData,
+          anchorImageUrl: null,
+          blocked: statusResult?.blocked || false,
+          mode: 'device_signature_v1',
+          message: result.approved
+            ? 'KYC aprovado no dispositivo. Conta liberada.'
+            : result.needsReview
+              ? 'KYC em revisão manual.'
+              : 'KYC não aprovado no dispositivo.'
+        }
       });
     }
 
@@ -182,4 +253,3 @@ router.post('/api/drivers/:driverId/kyc/reverify', upload.single('selfie'), asyn
 });
 
 module.exports = router;
-

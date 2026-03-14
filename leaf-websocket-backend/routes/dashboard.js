@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const { logStructured, logError } = require('../utils/logger');
 const redisPool = require('../utils/redis-pool');
+const kycDriverStatusService = require('../services/kyc-driver-status-service');
 
 // ✅ Importar middlewares de autenticação
 const { authenticateJWT, requireRole, requirePermission } = require('../middleware/jwt-auth');
@@ -593,6 +594,11 @@ router.get('/api/drivers/:driverId/documents', authenticateJWT, requireRole(['ad
         });
 
         const activeUserVehicle = userVehicleEntries.find((v) => v.isActive) || null;
+        const normalizedKycStatus = userData.kycStatus ||
+          userData.kycOnboarding?.status ||
+          (userData.kycBlocked === true ? 'blocked' : null) ||
+          'not_started';
+        const kycPayload = userData.kycOnboarding || {};
 
         res.json({
           success: true,
@@ -601,7 +607,18 @@ router.get('/api/drivers/:driverId/documents', authenticateJWT, requireRole(['ad
             driver: {
               name: `${userData.firstName || ''} ${userData.lastName || ''}`.trim(),
               email: userData.email || '',
-              phone: userData.mobile || ''
+              phone: userData.mobile || '',
+              approved: userData.approved === true,
+              status: userData.status || (userData.approved === true ? 'approved' : 'pending')
+            },
+            kyc: {
+              status: normalizedKycStatus,
+              blocked: userData.kycBlocked === true || kycPayload.blocked === true,
+              approved: normalizedKycStatus === 'approved' || kycPayload.approved === true,
+              needsReview: normalizedKycStatus === 'pending_review' || kycPayload.needsReview === true,
+              similarity: typeof kycPayload.similarity === 'number' ? kycPayload.similarity : null,
+              message: kycPayload.message || null,
+              updatedAt: userData.kycUpdatedAt || kycPayload.updatedAt || null
             },
             documents,
             totalDocuments: Object.keys(documents).length,
@@ -815,6 +832,9 @@ router.post('/api/drivers/applications/:id/approve', authenticateJWT, requireRol
           approvedByEmail: req.user.email, // ✅ Email do admin para auditoria
           adminNotes: notes || '',
           status: 'approved',
+          kycStatus: 'approved',
+          kycBlocked: false,
+          kycUpdatedAt: new Date().toISOString(),
           updatedAt: new Date().toISOString()
         };
 
@@ -832,6 +852,20 @@ router.post('/api/drivers/applications/:id/approve', authenticateJWT, requireRol
         });
         if (Object.keys(documentUpdates).length > 0) {
           await db.ref().update(documentUpdates);
+        }
+
+        // Melhor esforço: liberar bloqueio KYC para refletir aprovação manual.
+        try {
+          await kycDriverStatusService.unblockDriver(id, {
+            confidence: 1,
+            similarityScore: 1
+          });
+        } catch (kycUnblockError) {
+          logStructured('warn', 'Falha ao liberar bloqueio KYC após aprovação manual', {
+            service: 'dashboard-routes',
+            driverId: id,
+            error: kycUnblockError.message
+          });
         }
 
         logStructured('info', `✅ Aplicação aprovada: ${id} por ${req.user.email} (${adminId})`, { service: 'dashboard-routes' });
@@ -890,6 +924,9 @@ router.post('/api/drivers/applications/:id/reject', authenticateJWT, requireRole
           rejectionReasons: rejectionReasons,
           adminNotes: notes || '',
           status: 'rejected',
+          kycStatus: 'rejected',
+          kycBlocked: true,
+          kycUpdatedAt: new Date().toISOString(),
           updatedAt: new Date().toISOString()
         };
 
@@ -908,6 +945,21 @@ router.post('/api/drivers/applications/:id/reject', authenticateJWT, requireRole
         });
         if (Object.keys(documentUpdates).length > 0) {
           await db.ref().update(documentUpdates);
+        }
+
+        // Melhor esforço: bloquear também no pipeline KYC para impedir operação.
+        try {
+          await kycDriverStatusService.blockDriver(
+            id,
+            `Aprovação manual rejeitada: ${Array.isArray(rejectionReasons) ? rejectionReasons.join(', ') : rejectionReasons}`,
+            { verificationAttempts: 0 }
+          );
+        } catch (kycBlockError) {
+          logStructured('warn', 'Falha ao bloquear motorista no serviço KYC após rejeição manual', {
+            service: 'dashboard-routes',
+            driverId: id,
+            error: kycBlockError.message
+          });
         }
 
         logStructured('info', `❌ Aplicação rejeitada: ${id} por ${req.user.email} (${adminId})`, { service: 'dashboard-routes' });

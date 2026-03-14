@@ -1,13 +1,14 @@
 module.exports.WooviConfig = {
-    // Configuração Sandbox Woovi
-    apiKey: 'Q2xpZW50X0lkXzE4YzBkYzI3LTYzMDYtNDFkYy1hMmRlLWI2MzAzMzQ3YzNhZTpDbGllbnRfU2VjcmV0X29WWHc0TXJubnk5a0Q4R3laU1dXV01ROCsrbzh2a0xhR0FlVkRUZnNyeHc9',
-    baseUrl: 'https://api-sandbox.woovi.com/api/v1',
+    // OBS: Mobile não deve chamar Woovi diretamente em produção.
+    // O fluxo oficial usa o backend Leaf.
+    apiKey: '',
+    baseUrl: 'https://api.woovi.com/api/v1',
     webhookUrl: 'https://api.leaf.app.br/api/woovi/webhook', // URL para produção ou ngrok
-    appId: 'Client_Id_18c0dc27-6306-41dc-a2de-b6303347c3ae',
-    environment: 'sandbox',
+    appId: '',
+    environment: 'production',
 
     // Configurações PIX
-    pixKey: 'test@leaf.app.br', // Chave PIX de teste
+    pixKey: '', // Configurar somente no backend
     beneficiary: {
         name: 'Leaf App - Sandbox',
         document: '12345678000199', // CNPJ de teste
@@ -16,6 +17,6 @@ module.exports.WooviConfig = {
     },
 
     // Configurações de teste
-    testMode: true,
+    testMode: false,
     timeout: 30000
-}; 
+};

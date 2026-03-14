@@ -21,7 +21,7 @@ class FeatureFlagService {
     // 🚩 Feature Flags padrão
     this.defaultFlags = {
       // KYC (Know Your Customer)
-      KYC_ENABLED: false,
+      KYC_ENABLED: true,
       
       // Adicione outras feature flags aqui conforme necessário
       // EXEMPLO:
@@ -226,5 +226,4 @@ class FeatureFlagService {
 const featureFlagService = new FeatureFlagService();
 
 export default featureFlagService;
-
 

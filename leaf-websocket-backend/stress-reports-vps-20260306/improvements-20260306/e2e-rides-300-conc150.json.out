@@ -1,0 +1,87 @@
+{
+  "reportPath": "/home/izaak-dias/.gemini/antigravity/scratch/leaf-project/leaf-websocket-backend/stress-test-e2e-rides-1772800657483.json",
+  "config": {
+    "serverUrl": "http://147.182.204.181:3001",
+    "rides": 300,
+    "concurrency": 150,
+    "tokenConcurrency": 80
+  },
+  "tokenGeneration": {
+    "durationSec": 78.83,
+    "passengersOk": 300,
+    "driversOk": 300
+  },
+  "results": {
+    "total": 300,
+    "success": 1,
+    "failed": 299,
+    "successRate": 0.33,
+    "runDurationSec": 75.86,
+    "ridesPerSec": 3.95,
+    "completedRidesPerSec": 0.01,
+    "latencyMs": {
+      "p50": 75836,
+      "p95": 75836,
+      "p99": 75836,
+      "max": 75836
+    },
+    "stageLatencyMs": {
+      "auth": {
+        "p50": 53783,
+        "p95": 53783,
+        "p99": 53783,
+        "max": 53783
+      },
+      "createBooking": {
+        "p50": 19558,
+        "p95": 19558,
+        "p99": 19558,
+        "max": 19558
+      },
+      "confirmPayment": {
+        "p50": 548,
+        "p95": 548,
+        "p99": 548,
+        "max": 548
+      },
+      "acceptRide": {
+        "p50": 274,
+        "p95": 274,
+        "p99": 274,
+        "max": 274
+      },
+      "startTrip": {
+        "p50": 459,
+        "p95": 459,
+        "p99": 459,
+        "max": 459
+      },
+      "completeTrip": {
+        "p50": 1214,
+        "p95": 1214,
+        "p99": 1214,
+        "max": 1214
+      }
+    },
+    "topErrors": [
+      {
+        "error": "unknown:timeout",
+        "count": 185
+      },
+      {
+        "error": "createBooking:createBooking_timeout",
+        "count": 72
+      },
+      {
+        "error": "connect/auth:authenticate_timeout",
+        "count": 41
+      },
+      {
+        "error": "connect/auth:connect_timeout",
+        "count": 1
+      }
+    ]
+  },
+  "totalDurationSec": 78.83,
+  "timestamp": "2026-03-06T12:38:56.316Z"
+}

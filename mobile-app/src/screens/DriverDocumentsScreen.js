@@ -10,6 +10,8 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { updateUserType } from '../../common/src/actions/authactions';
 import KYCCameraScreen from '../components/KYC/KYCCameraScreen';
 import faceDetectionService from '../services/FaceDetectionService';
+import kycService from '../services/KYCService';
+import { isKYCEnabled } from '../config/kycConfig';
 
 
 const DriverDocumentsScreen = ({ navigation }) => {
@@ -184,6 +186,45 @@ const DriverDocumentsScreen = ({ navigation }) => {
         setCameraType(null);
     };
 
+    const persistKycOnboardingStatus = async (uid, kycStatus, kycPayload = {}) => {
+        const kycData = {
+            status: kycStatus,
+            blocked: !!kycPayload.blocked,
+            similarity: typeof kycPayload.similarity === 'number' ? kycPayload.similarity : null,
+            needsReview: !!kycPayload.needsReview,
+            approved: !!kycPayload.approved,
+            message: kycPayload.message || null,
+            updatedAt: new Date().toISOString()
+        };
+
+        try {
+            if (firebase && typeof firebase.singleUserRef === 'function') {
+                await firebase.singleUserRef(uid).update({
+                    kycStatus,
+                    kycOnboarding: kycData,
+                    kycUpdatedAt: new Date().toISOString()
+                });
+            }
+        } catch (error) {
+            Logger.warn('[DriverDocumentsScreen] Falha ao persistir KYC no Firebase:', error);
+        }
+
+        try {
+            const storedUserData = await AsyncStorage.getItem('@user_data');
+            if (storedUserData) {
+                const userData = JSON.parse(storedUserData);
+                const updatedUserData = {
+                    ...userData,
+                    kycStatus,
+                    kycOnboarding: kycData
+                };
+                await AsyncStorage.setItem('@user_data', JSON.stringify(updatedUserData));
+            }
+        } catch (error) {
+            Logger.warn('[DriverDocumentsScreen] Falha ao persistir KYC no AsyncStorage:', error);
+        }
+    };
+
     const handleSaveDocuments = async () => {
         try {
             setLoading(true);
@@ -212,6 +253,73 @@ const DriverDocumentsScreen = ({ navigation }) => {
 
             // Atualizar tipo de usuário e documentos
             await dispatch(updateUserType(currentUserData.uid, documents));
+
+            const kycEnabled = await isKYCEnabled();
+            if (kycEnabled) {
+                const onboardingResult = await kycService.processOnboarding(
+                    currentUserData.uid,
+                    documents.cnh,
+                    documents.selfie
+                );
+
+                if (!onboardingResult.success) {
+                    await persistKycOnboardingStatus(currentUserData.uid, 'pending', {
+                        approved: false,
+                        needsReview: true,
+                        blocked: true,
+                        message: onboardingResult.error || 'Falha na validação KYC'
+                    });
+                    Alert.alert(
+                        'Validação em revisão',
+                        'Não foi possível concluir a validação automática agora. Seu cadastro ficou pendente para revisão manual.',
+                        [
+                            {
+                                text: 'OK',
+                                onPress: () => navigation.navigate('WaitList')
+                            }
+                        ]
+                    );
+                    return;
+                }
+
+                const kycData = onboardingResult.data || {};
+                if (kycData.approved) {
+                    await persistKycOnboardingStatus(currentUserData.uid, 'approved', kycData);
+                    Alert.alert(
+                        t('documents_success'),
+                        t('documents_success_message'),
+                        [
+                            {
+                                text: 'OK',
+                                onPress: () => navigation.navigate('VehicleRegistration')
+                            }
+                        ]
+                    );
+                    return;
+                }
+
+                if (kycData.needsReview) {
+                    await persistKycOnboardingStatus(currentUserData.uid, 'pending_review', kycData);
+                    Alert.alert(
+                        'Validação em revisão',
+                        'Seu KYC foi enviado para revisão manual. Você será notificado quando for liberado.',
+                        [
+                            {
+                                text: 'OK',
+                                onPress: () => navigation.navigate('WaitList')
+                            }
+                        ]
+                    );
+                    return;
+                }
+
+                await persistKycOnboardingStatus(currentUserData.uid, 'rejected', kycData);
+                Alert.alert(
+                    'Validação não aprovada',
+                    'A selfie não corresponde à foto da CNH. Refaça as fotos para continuar.'
+                );
+                return;
+            }
 
             Alert.alert(
                 t('documents_success'),

@@ -33,8 +33,10 @@ function getWooviConfig() {
     apiToken,
     appId,
     baseUrl,
-    masterApiToken: process.env.WOOVI_MASTER_API_TOKEN || null,
-    masterAppId: process.env.WOOVI_MASTER_APP_ID || null,
+    // Fallback para reduzir erros operacionais: se não houver chave master dedicada,
+    // usa o token principal informado em WOOVI_API_TOKEN.
+    masterApiToken: process.env.WOOVI_MASTER_API_TOKEN || apiToken || null,
+    masterAppId: process.env.WOOVI_MASTER_APP_ID || process.env.WOOVI_APP_ID || null,
     leafPixKey: process.env.LEAF_PIX_KEY || ''
   };
 }

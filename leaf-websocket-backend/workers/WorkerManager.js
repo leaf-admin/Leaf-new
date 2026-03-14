@@ -39,6 +39,8 @@ class WorkerManager {
             dlq: 0,
             startTime: Date.now()
         };
+        this.unhandledEventWarnAt = new Map();
+        this.unhandledEventWarnCooldownMs = Number.parseInt(process.env.UNHANDLED_EVENT_WARN_COOLDOWN_MS || '60000', 10);
     }
 
     /**
@@ -129,11 +131,17 @@ class WorkerManager {
         }
 
         if (!handler) {
-            logStructured('warn', 'Nenhum handler registrado para evento', {
-                service: 'worker-manager',
-                eventType,
-                eventId
-            });
+            const now = Date.now();
+            const lastWarnAt = this.unhandledEventWarnAt.get(eventType) || 0;
+            if ((now - lastWarnAt) >= this.unhandledEventWarnCooldownMs) {
+                this.unhandledEventWarnAt.set(eventType, now);
+                logStructured('warn', 'Nenhum handler registrado para evento', {
+                    service: 'worker-manager',
+                    eventType,
+                    eventId,
+                    cooldownMs: this.unhandledEventWarnCooldownMs
+                });
+            }
             return { success: true, skipped: true };
         }
 
@@ -391,4 +399,3 @@ class WorkerManager {
 }
 
 module.exports = WorkerManager;
-

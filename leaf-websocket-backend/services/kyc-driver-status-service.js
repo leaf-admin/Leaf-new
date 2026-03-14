@@ -392,17 +392,15 @@ class KYCDriverStatusService {
   async processVerificationResult(driverId, verificationResult) {
     try {
       if (verificationResult.success && verificationResult.isMatch) {
-        // Verificação bem-sucedida - manter liberado
-        logStructured('info', 'Verificação KYC bem-sucedida, motorista continua liberado', {
-          service: 'kyc-driver-status-service',
-          driverId,
-          confidence: verificationResult.confidence
-        });
-
-        // Atualizar última verificação
-        await this.updateRedisStatus(driverId, {
-          [this.statusKeys.kycLastVerification]: new Date().toISOString()
-        });
+        // Verificação bem-sucedida - manter liberado.
+        // Fast-path: não persiste/loga em toda chamada para evitar latência alta sob pico.
+        if (String(process.env.KYC_LOG_SUCCESS_VERBOSE || 'false').toLowerCase() === 'true') {
+          logStructured('debug', 'Verificação KYC bem-sucedida', {
+            service: 'kyc-driver-status-service',
+            driverId,
+            confidence: verificationResult.confidence
+          });
+        }
 
         return {
           success: true,
@@ -436,4 +434,3 @@ class KYCDriverStatusService {
 const kycDriverStatusService = new KYCDriverStatusService();
 
 module.exports = kycDriverStatusService;
-

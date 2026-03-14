@@ -45,6 +45,8 @@ import PermissionExplanationModal from '../PermissionExplanationModal';
 import LocationPermissionBanner from '../LocationPermissionBanner';
 import NetworkStatusBanner from '../NetworkStatusBanner';
 import ProfileToggle from '../ProfileToggle';
+import KYCCameraScreen from '../KYC/KYCCameraScreen';
+import kycService from '../../services/KYCService';
 
 // Cores padronizadas do onboarding
 const colors = {
@@ -281,6 +283,9 @@ function DriverUI(props) {
     const [isLoading, setIsLoading] = useState(true); // ✅ Estado de loading inicial
     const [showBackgroundLocationModal, setShowBackgroundLocationModal] = useState(false); // ✅ Modal de background location
     const [showBackgroundLocationBanner, setShowBackgroundLocationBanner] = useState(false); // ✅ Banner quando background location negada
+    const [showKYCModal, setShowKYCModal] = useState(false);
+    const [isKYCProcessing, setIsKYCProcessing] = useState(false);
+    const [kycPendingReason, setKycPendingReason] = useState('');
 
     // ✅ Estado para status da conexão WebSocket (VISÍVEL)
     const [connectionStatus, setConnectionStatus] = useState({
@@ -939,6 +944,20 @@ function DriverUI(props) {
             }
         };
 
+        const handleDriverStatusError = (data) => {
+            const isKYCRequired = data?.kycRequired || data?.code === 'kycRequired';
+            if (!isKYCRequired) {
+                return;
+            }
+
+            Logger.warn('⚠️ [KYC] Backend exigiu verificação diária para ficar online', data);
+            setIsOnline(false);
+            if (!showKYCModal && !isKYCProcessing) {
+                setKycPendingReason(data?.reason || 'Verificação diária necessária');
+                setShowKYCModal(true);
+            }
+        };
+
         // ===== REGISTRAR TODOS OS EVENTOS =====
         webSocketManager.on('rideRequest', handleNewBookingAvailable); // Evento recebido do backend
         webSocketManager.on('newBookingAvailable', handleNewBookingAvailable);
@@ -950,6 +969,7 @@ function DriverUI(props) {
         webSocketManager.on('paymentConfirmed', handlePaymentConfirmed);
         webSocketManager.on('ratingReceived', handleRatingReceived);
         webSocketManager.on('newMessage', handleNewMessage); // ✅ NOVO: Listener para mensagens do chat
+        webSocketManager.on('driverStatusError', handleDriverStatusError);
 
         // ===== REGISTRAR EVENTOS DO WEBSOCKET =====
         // Nota: A autenticação agora é feita no useEffect separado baseado em isOnline
@@ -966,9 +986,10 @@ function DriverUI(props) {
             webSocketManager.off('tripCompleted', handleTripCompleted);
             webSocketManager.off('paymentConfirmed', handlePaymentConfirmed);
             webSocketManager.off('ratingReceived', handleRatingReceived);
+            webSocketManager.off('driverStatusError', handleDriverStatusError);
         };
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [auth.profile?.uid, normalizeBookingData]);
+    }, [auth.profile?.uid, normalizeBookingData, showKYCModal, isKYCProcessing]);
 
     // ✅ Verificar status da permissão de background quando motorista fica online
     useEffect(() => {
@@ -1121,54 +1142,10 @@ function DriverUI(props) {
 
                 // 2. Autenticar (com retry)
                 if (webSocketManager.isConnected()) {
-                    if (!webSocketManager.socket) {
-                        throw new Error('Socket não disponível');
-                    }
-
-                    await new Promise((resolve, reject) => {
-                        const timeout = setTimeout(() => {
-                            reject(new Error('Timeout de autenticação (10s)'));
-                        }, 10000);
-
-                        // ✅ Verificar conexão antes de autenticar
-                        if (!webSocketManager.isConnected()) {
-                            Logger.error('❌ WebSocket não conectado - não é possível autenticar');
-                            reject(new Error('WebSocket não conectado'));
-                            return;
-                        }
-
-                        Logger.log('🔐 Autenticando motorista:', auth.profile?.uid);
-
-                        // ✅ Definir userType no WebSocketManager ANTES de autenticar
-                        // Isso garante que canReceiveRideRequests() funcione corretamente
-                        webSocketManager.authenticatedUserType = 'driver';
-                        webSocketManager.authenticatedUserId = auth.profile.uid;
-
-                        webSocketManager.socket.emit('authenticate', {
-                            uid: auth.profile.uid,
-                            userType: 'driver'
-                        });
-
-                        webSocketManager.socket.once('authenticated', (data) => {
-                            clearTimeout(timeout);
-                            if (data.success) {
-                                Logger.log('✅ Motorista autenticado:', auth.profile?.uid);
-                                // ✅ Garantir que o userType está definido após autenticação
-                                if (!webSocketManager.authenticatedUserType) {
-                                    webSocketManager.authenticatedUserType = 'driver';
-                                }
-                                retryCount = 0; // Reset contador em caso de sucesso
-                                resolve(data);
-                            } else {
-                                reject(new Error(data.error || 'Falha na autenticação'));
-                            }
-                        });
-
-                        webSocketManager.socket.once('error', (error) => {
-                            clearTimeout(timeout);
-                            reject(new Error(error.message || 'Erro na autenticação'));
-                        });
-                    });
+                    Logger.log('🔐 Autenticando motorista:', auth.profile?.uid);
+                    await webSocketManager.authenticateWithAck(auth.profile.uid, 'driver', 10000);
+                    Logger.log('✅ Motorista autenticado:', auth.profile?.uid);
+                    retryCount = 0; // Reset contador em caso de sucesso
 
                     // ✅ Sucesso - resetar flag
                     isAuthenticatingRef.current = false;
@@ -1223,28 +1200,10 @@ function DriverUI(props) {
         const handleReconnect = () => {
             // Aguardar um pouco para garantir que a conexão está estável
             setTimeout(async () => {
-                if (webSocketManager.isConnected() && webSocketManager.socket) {
+                if (webSocketManager.isConnected()) {
                     try {
-                        await new Promise((resolve, reject) => {
-                            const timeout = setTimeout(() => {
-                                reject(new Error('Timeout de reautenticação (10s)'));
-                            }, 10000);
-
-                            webSocketManager.socket.emit('authenticate', {
-                                uid: auth.profile.uid,
-                                userType: 'driver'
-                            });
-
-                            webSocketManager.socket.once('authenticated', (data) => {
-                                clearTimeout(timeout);
-                                if (data.success) {
-                                    Logger.log('✅ Motorista reautenticado após reconexão');
-                                    resolve(data);
-                                } else {
-                                    reject(new Error(data.error || 'Falha na reautenticação'));
-                                }
-                            });
-                        });
+                        await webSocketManager.authenticateWithAck(auth.profile.uid, 'driver', 10000);
+                        Logger.log('✅ Motorista reautenticado após reconexão');
                     } catch (error) {
                         Logger.error('❌ Erro ao reautenticar após reconexão:', error);
                     }
@@ -2060,13 +2019,11 @@ function DriverUI(props) {
         };
 
         // Registrar listener
-        webSocketManager.socket.on('driver_status_updated', handleDriverStatusUpdate);
+        webSocketManager.on('driver_status_updated', handleDriverStatusUpdate);
 
         // Cleanup
         return () => {
-            if (webSocketManager.socket) {
-                webSocketManager.socket.off('driver_status_updated', handleDriverStatusUpdate);
-            }
+            webSocketManager.off('driver_status_updated', handleDriverStatusUpdate);
         };
     }, [auth.profile?.uid]);
 
@@ -2140,24 +2097,7 @@ function DriverUI(props) {
                 await webSocketManager.connect();
 
                 // Autenticar como motorista
-                await new Promise((resolve, reject) => {
-                    webSocketManager.socket.emit('authenticate', {
-                        uid: auth.profile?.uid,
-                        userType: 'driver'
-                    });
-
-                    webSocketManager.socket.once('authenticated', (data) => {
-                        if (data.success) {
-                            resolve(data);
-                        } else {
-                            reject(new Error('Falha na autenticação'));
-                        }
-                    });
-
-                    setTimeout(() => {
-                        reject(new Error('Timeout de autenticação'));
-                    }, 10000);
-                });
+                await webSocketManager.authenticateWithAck(auth.profile?.uid, 'driver', 10000);
             }
 
             // ✅ Tentar usar acceptRide primeiro (novo método), fallback para driverResponse
@@ -2204,22 +2144,7 @@ function DriverUI(props) {
                 await webSocketManager.connect();
 
                 // Autenticar como motorista
-                await new Promise((resolve, reject) => {
-                    webSocketManager.socket.emit('authenticate', {
-                        uid: auth.profile?.uid,
-                        userType: 'driver'
-                    });
-
-                    webSocketManager.socket.once('authenticated', (data) => {
-                        if (data.success) {
-                            resolve(data);
-                        } else {
-                            reject(new Error('Falha na autenticação'));
-                        }
-                    });
-
-                    setTimeout(() => reject(new Error('Timeout de autenticação')), 10000);
-                });
+                await webSocketManager.authenticateWithAck(auth.profile?.uid, 'driver', 10000);
             }
 
             // Rejeitar reserva via WebSocket
@@ -2520,16 +2445,11 @@ function DriverUI(props) {
 
                             Logger.log('✅ [STATUS] Localização enviada via updateLocation');
                         }
-
-                        // Remover listener após sucesso
-                        webSocketManager.socket.off('authenticated', onAuthenticated);
                     }
                 };
 
                 // Registrar listener temporário
-                if (webSocketManager.socket) {
-                    webSocketManager.socket.once('authenticated', onAuthenticated);
-                }
+                webSocketManager.once('authenticated', onAuthenticated);
 
             } catch (error) {
                 Logger.error('❌ [STATUS] Erro ao autenticar em background:', error);
@@ -2589,6 +2509,44 @@ function DriverUI(props) {
                 Logger.log('🚀 [KYC] KYC desabilitado - bypass ativado, ficando online direto...');
                 await activateOnlineStatus();
             }
+        }
+    };
+
+    const handleKYCModalCancel = () => {
+        setShowKYCModal(false);
+        setKycPendingReason('');
+    };
+
+    const handleKYCCapture = async (selfieImageUri) => {
+        const driverId = auth?.profile?.uid;
+        if (!driverId) {
+            Alert.alert('Erro', 'Não foi possível identificar o motorista para validação KYC.');
+            setShowKYCModal(false);
+            return;
+        }
+
+        setShowKYCModal(false);
+        setIsKYCProcessing(true);
+
+        try {
+            const result = await kycService.verifyDriver(driverId, selfieImageUri);
+            const isMatch = !!(result?.success && result?.data?.isMatch);
+
+            if (!isMatch) {
+                Alert.alert(
+                    'Validação não aprovada',
+                    'Não foi possível validar sua identidade. Tente novamente com boa iluminação e rosto centralizado.'
+                );
+                return;
+            }
+
+            Alert.alert('Validação concluída', 'Identidade validada. Colocando você online...');
+            await activateOnlineStatus();
+        } catch (error) {
+            Logger.error('❌ [KYC] Erro ao validar motorista:', error);
+            Alert.alert('Erro', 'Falha ao validar identidade. Tente novamente.');
+        } finally {
+            setIsKYCProcessing(false);
         }
     };
 
@@ -3826,6 +3784,25 @@ function DriverUI(props) {
                 userType="driver"
                 locationType="background"
             />
+
+            <Modal
+                visible={showKYCModal}
+                animationType="slide"
+                onRequestClose={handleKYCModalCancel}
+            >
+                <KYCCameraScreen
+                    onCapture={handleKYCCapture}
+                    onCancel={handleKYCModalCancel}
+                    type="selfie"
+                />
+                {kycPendingReason ? (
+                    <View style={{ position: 'absolute', top: 52, left: 16, right: 16, backgroundColor: 'rgba(0,0,0,0.72)', borderRadius: 10, padding: 10 }}>
+                        <Text style={{ color: '#fff', textAlign: 'center', fontWeight: '600' }}>
+                            {`Verificação diária obrigatória. ${kycPendingReason}`}
+                        </Text>
+                    </View>
+                ) : null}
+            </Modal>
 
             {/* Header com informações do driver */}
             <View style={[styles.headerFloating, { zIndex: getButtonZIndex() }]}>

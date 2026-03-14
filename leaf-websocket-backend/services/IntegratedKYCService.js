@@ -644,6 +644,109 @@ class IntegratedKYCService {
     }
   }
 
+  /**
+   * Registrar resultado de verificação calculado no dispositivo.
+   * Backend atua apenas como coordenador (cache + bloqueio/liberação + auditoria).
+   */
+  async acceptDeviceVerification(userId, devicePayload = {}) {
+    try {
+      const similarityScore = Number(devicePayload.similarityScore || 0);
+      const threshold = Number(devicePayload.threshold || this.similarityThreshold);
+      const isMatch = Boolean(devicePayload.isMatch === true || similarityScore >= threshold);
+      const confidence = Number(devicePayload.confidence || similarityScore || 0);
+      const timestamp = Date.now();
+      const shouldRecoverBlocked = devicePayload.recoverBlocked === true;
+
+      const verificationResult = {
+        success: true,
+        userId,
+        isMatch,
+        similarityScore,
+        confidence,
+        threshold,
+        processingTime: Number(devicePayload.processingTime || 0),
+        attempts: 1,
+        totalTime: Number(devicePayload.processingTime || 0),
+        timestamp: new Date(timestamp).toISOString(),
+        fromCache: false,
+        fromVPS: false,
+        mode: 'device_signature_v1'
+      };
+
+      // Fast-path: para match positivo, evitar rotina pesada de status a cada request.
+      // Só dispara fluxo completo quando há mismatch ou quando o cliente pedir recuperação.
+      try {
+        const kycDriverStatusService = require('./kyc-driver-status-service');
+        if (!isMatch) {
+          await kycDriverStatusService.processVerificationResult(userId, {
+            success: false,
+            isMatch: false,
+            similarityScore,
+            confidence,
+            attempts: 1,
+            source: 'device_signature_v1'
+          });
+        } else if (shouldRecoverBlocked) {
+          await kycDriverStatusService.processVerificationResult(userId, {
+            success: true,
+            isMatch: true,
+            similarityScore,
+            confidence,
+            attempts: 1,
+            source: 'device_signature_v1'
+          });
+        }
+      } catch (statusError) {
+        logError(statusError, 'Erro ao atualizar status com verificação device-first', {
+          service: 'integrated-kyc-service',
+          userId
+        });
+      }
+
+      // Persistir cache de 24h para gate de online
+      const cacheKey = `kyc_verification:${userId}`;
+      const cachePayload = JSON.stringify({
+        success: true,
+        isMatch,
+        similarityScore,
+        confidence,
+        threshold,
+        timestamp,
+        mode: 'device_signature_v1'
+      });
+      // Persistência curta de observabilidade pode ser desabilitada para reduzir latência.
+      const writeAuditKey = String(process.env.KYC_WRITE_AUDIT_KEY || 'false').toLowerCase() === 'true';
+      const redisOps = this.redisClient.multi();
+      redisOps.set(cacheKey, cachePayload, 'EX', 24 * 60 * 60);
+      if (writeAuditKey) {
+        const verificationKey = `verification_result:${userId}`;
+        const verificationPayload = JSON.stringify({
+          success: true,
+          isMatch,
+          similarityScore,
+          confidence,
+          threshold,
+          timestamp,
+          mode: 'device_signature_v1'
+        });
+        redisOps.set(verificationKey, verificationPayload, 'EX', 24 * 60 * 60);
+      }
+      await redisOps.exec();
+
+      return verificationResult;
+    } catch (error) {
+      logError(error, 'Erro ao aceitar verificação device-first', {
+        service: 'integrated-kyc-service',
+        userId
+      });
+      return {
+        success: false,
+        error: error.message,
+        userId
+      };
+    }
+  }
+
   // Métodos para Analytics
   async getAnalytics(driverId = null, days = 7) {
     try {

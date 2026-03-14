@@ -5,10 +5,26 @@
 const rateLimit = require('express-rate-limit');
 const { logSecurity } = require('../utils/logger');
 
+const toPositiveInt = (value, fallback) => {
+  const parsed = Number.parseInt(value, 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+};
+
+const GENERAL_WINDOW_SEC = toPositiveInt(process.env.RATE_LIMIT_HTTP_GENERAL_WINDOW_SECONDS, 60);
+const GENERAL_LIMIT = toPositiveInt(process.env.RATE_LIMIT_HTTP_GENERAL, 200);
+const AUTH_WINDOW_SEC = toPositiveInt(process.env.RATE_LIMIT_HTTP_AUTH_WINDOW_SECONDS, 900);
+const AUTH_LIMIT = toPositiveInt(process.env.RATE_LIMIT_HTTP_AUTH, 8);
+const LOCATION_WINDOW_SEC = toPositiveInt(process.env.RATE_LIMIT_HTTP_LOCATION_WINDOW_SECONDS, 60);
+const LOCATION_LIMIT = toPositiveInt(process.env.RATE_LIMIT_HTTP_LOCATION, 240);
+const WEBSOCKET_WINDOW_SEC = toPositiveInt(process.env.RATE_LIMIT_HTTP_WEBSOCKET_WINDOW_SECONDS, 60);
+const WEBSOCKET_LIMIT = toPositiveInt(process.env.RATE_LIMIT_HTTP_WEBSOCKET, 220);
+const PAYMENT_WINDOW_SEC = toPositiveInt(process.env.RATE_LIMIT_HTTP_PAYMENT_WINDOW_SECONDS, 60);
+const PAYMENT_LIMIT = toPositiveInt(process.env.RATE_LIMIT_HTTP_PAYMENT, 80);
+
 // Rate limiters específicos
 const generalLimiter = rateLimit({
-  windowMs: 60 * 1000, // 1 minuto
-  max: 100, // Máximo 100 requisições por minuto
+  windowMs: GENERAL_WINDOW_SEC * 1000,
+  max: GENERAL_LIMIT,
   message: {
     error: 'Muitas requisições. Tente novamente em 1 minuto.',
     retryAfter: 60
@@ -29,8 +45,8 @@ const generalLimiter = rateLimit({
 });
 
 const authLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutos
-  max: 5, // Máximo 5 tentativas de login por 15 minutos
+  windowMs: AUTH_WINDOW_SEC * 1000,
+  max: AUTH_LIMIT,
   message: {
     error: 'Muitas tentativas de login. Tente novamente em 15 minutos.',
     retryAfter: 900
@@ -50,8 +66,8 @@ const authLimiter = rateLimit({
 });
 
 const locationLimiter = rateLimit({
-  windowMs: 60 * 1000, // 1 minuto
-  max: 30, // Máximo 30 atualizações de localização por minuto
+  windowMs: LOCATION_WINDOW_SEC * 1000,
+  max: LOCATION_LIMIT,
   message: {
     error: 'Muitas atualizações de localização. Aguarde um momento.',
     retryAfter: 60
@@ -71,8 +87,8 @@ const locationLimiter = rateLimit({
 });
 
 const websocketLimiter = rateLimit({
-  windowMs: 60 * 1000, // 1 minuto
-  max: 50, // Máximo 50 conexões WebSocket por minuto
+  windowMs: WEBSOCKET_WINDOW_SEC * 1000,
+  max: WEBSOCKET_LIMIT,
   message: {
     error: 'Muitas conexões WebSocket. Tente novamente em 1 minuto.',
     retryAfter: 60
@@ -92,8 +108,8 @@ const websocketLimiter = rateLimit({
 });
 
 const paymentLimiter = rateLimit({
-  windowMs: 60 * 1000, // 1 minuto
-  max: 10, // Máximo 10 tentativas de pagamento por minuto
+  windowMs: PAYMENT_WINDOW_SEC * 1000,
+  max: PAYMENT_LIMIT,
   message: {
     error: 'Muitas tentativas de pagamento. Aguarde um momento.',
     retryAfter: 60
@@ -115,6 +131,11 @@ const paymentLimiter = rateLimit({
 // Função para aplicar rate limiting baseado na rota
 const applyRateLimit = (req, res, next) => {
   const url = req.url;
+
+  // OTLP ingest interno não deve sofrer rate limiting para evitar queda de telemetria.
+  if (url.includes('/otel/v1/traces') || url.includes('/otel/health')) {
+    return next();
+  }
   
   // Rate limiting específico por rota
   if (url.includes('/auth') || url.includes('/login') || url.includes('/register')) {

@@ -25,8 +25,9 @@ const withNetworkSecurityConfig = (config) => {
         <domain includeSubdomains="true">127.0.0.1</domain>
         <domain includeSubdomains="true">10.0.2.2</domain>
         <domain includeSubdomains="true">192.168.0.37</domain>
-        <!-- Permitir IP da VPS -->
+        <!-- Permitir IPs da VPS -->
         <domain includeSubdomains="true">147.93.66.253</domain>
+        <domain includeSubdomains="true">147.182.204.181</domain>
         <!-- Permitir toda a faixa de IPs privados para desenvolvimento local -->
         <domain includeSubdomains="true">192.168.0.0</domain>
         <domain includeSubdomains="true">192.168.1.0</domain>
@@ -44,8 +45,8 @@ const withNetworkSecurityConfig = (config) => {
         </trust-anchors>
     </domain-config>
     
-    <!-- Configuração base: HTTPS por padrão -->
-    <base-config cleartextTrafficPermitted="false">
+    <!-- Configuração base para dev/teste: permitir HTTP -->
+    <base-config cleartextTrafficPermitted="true">
         <trust-anchors>
             <certificates src="system" />
         </trust-anchors>
@@ -92,5 +93,3 @@ const withNetworkSecurityConfig = (config) => {
 };
 
 module.exports = withNetworkSecurityConfig;
-
-

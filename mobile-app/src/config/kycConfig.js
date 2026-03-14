@@ -19,7 +19,7 @@ import featureFlagService from '../services/FeatureFlagService';
  * @returns {Promise<boolean>} true se KYC está habilitado
  */
 export const isKYCEnabled = async () => {
-  return await featureFlagService.getFlag('KYC_ENABLED', false);
+  return await featureFlagService.getFlag('KYC_ENABLED', true);
 };
 
 /**

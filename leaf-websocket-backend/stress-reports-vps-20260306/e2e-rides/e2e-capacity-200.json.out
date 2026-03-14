@@ -1,0 +1,70 @@
+{
+  "reportPath": "/opt/leaf-websocket-backend/stress-test-e2e-rides-1772789776349.json",
+  "config": {
+    "serverUrl": "http://127.0.0.1:3001",
+    "rides": 200,
+    "concurrency": 200,
+    "tokenConcurrency": 80
+  },
+  "tokenGeneration": {
+    "durationSec": 20.91,
+    "passengersOk": 200,
+    "driversOk": 200
+  },
+  "results": {
+    "total": 200,
+    "success": 200,
+    "failed": 0,
+    "successRate": 100,
+    "runDurationSec": 17.68,
+    "ridesPerSec": 11.31,
+    "completedRidesPerSec": 11.31,
+    "latencyMs": {
+      "p50": 13842,
+      "p95": 17243,
+      "p99": 17368,
+      "max": 17561
+    },
+    "stageLatencyMs": {
+      "auth": {
+        "p50": 5263,
+        "p95": 11810,
+        "p99": 12403,
+        "max": 12495
+      },
+      "createBooking": {
+        "p50": 1287,
+        "p95": 1871,
+        "p99": 2000,
+        "max": 2080
+      },
+      "confirmPayment": {
+        "p50": 782,
+        "p95": 1223,
+        "p99": 1298,
+        "max": 1341
+      },
+      "acceptRide": {
+        "p50": 730,
+        "p95": 1055,
+        "p99": 1233,
+        "max": 1251
+      },
+      "startTrip": {
+        "p50": 1384,
+        "p95": 1922,
+        "p99": 2042,
+        "max": 2109
+      },
+      "completeTrip": {
+        "p50": 3443,
+        "p95": 4305,
+        "p99": 4374,
+        "max": 4435
+      }
+    },
+    "topErrors": []
+  },
+  "totalDurationSec": 20.91,
+  "timestamp": "2026-03-06T09:36:37.261Z"
+}

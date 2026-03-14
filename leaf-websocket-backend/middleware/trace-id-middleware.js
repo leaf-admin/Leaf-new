@@ -36,11 +36,13 @@ function traceIdSocketMiddleware(socket, next) {
 
         // Executar próximo middleware com traceId no contexto
         traceContext.runWithTraceId(traceId, () => {
-            logStructured('info', 'Socket conectado com traceId', {
-                socketId: socket.id,
-                traceId,
-                operation: 'socket_connection'
-            });
+            if (process.env.DEBUG_TRACE_ID === 'true') {
+                logStructured('debug', 'Socket conectado com traceId', {
+                    socketId: socket.id,
+                    traceId,
+                    operation: 'socket_connection'
+                });
+            }
             next();
         });
     } catch (error) {
@@ -77,12 +79,14 @@ function traceIdExpressMiddleware(req, res, next) {
 
         // Executar próximo middleware com traceId no contexto
         traceContext.runWithTraceId(traceId, () => {
-            logStructured('info', 'Requisição HTTP recebida com traceId', {
-                method: req.method,
-                path: req.path,
-                traceId,
-                operation: 'http_request'
-            });
+            if (process.env.DEBUG_TRACE_ID === 'true') {
+                logStructured('debug', 'Requisição HTTP recebida com traceId', {
+                    method: req.method,
+                    path: req.path,
+                    traceId,
+                    operation: 'http_request'
+                });
+            }
             next();
         });
     } catch (error) {
@@ -114,4 +118,3 @@ module.exports = {
     traceIdExpressMiddleware,
     extractTraceIdFromEvent
 };
-

@@ -11,6 +11,7 @@
  */
 
 const io = require('socket.io-client');
+const axios = require('axios');
 const { logStructured, logError } = require('../../utils/logger');
 const { metrics } = require('../../utils/prometheus-metrics');
 
@@ -28,6 +29,27 @@ const serverUrl = args.includes('--url')
 const customerId = args.includes('--customer')
     ? args[args.indexOf('--customer') + 1]
     : `stress_test_customer_${Date.now()}`;
+const baseLat = args.includes('--base-lat')
+    ? parseFloat(args[args.indexOf('--base-lat') + 1])
+    : -23.5505;
+const baseLng = args.includes('--base-lng')
+    ? parseFloat(args[args.indexOf('--base-lng') + 1])
+    : -46.6333;
+const geoRadius = args.includes('--radius')
+    ? parseFloat(args[args.indexOf('--radius') + 1])
+    : 0.05;
+const authTokenArg = args.includes('--token')
+    ? args[args.indexOf('--token') + 1]
+    : '';
+const authEmail = args.includes('--email')
+    ? args[args.indexOf('--email') + 1]
+    : '';
+const authPassword = args.includes('--password')
+    ? args[args.indexOf('--password') + 1]
+    : '';
+const firebaseApiKey = args.includes('--firebase-api-key')
+    ? args[args.indexOf('--firebase-api-key') + 1]
+    : (process.env.FIREBASE_API_KEY || process.env.EXPO_PUBLIC_FIREBASE_API_KEY || '');
 
 // Estatísticas
 const stats = {
@@ -44,14 +66,34 @@ const stats = {
 
 // Gerar localização aleatória (centro de São Paulo)
 function randomLocation() {
-    const baseLat = -23.5505;
-    const baseLng = -46.6333;
-    const radius = 0.05; // ~5km
-    
+    const radius = Number.isFinite(geoRadius) ? geoRadius : 0.05;
+    const centerLat = Number.isFinite(baseLat) ? baseLat : -23.5505;
+    const centerLng = Number.isFinite(baseLng) ? baseLng : -46.6333;
+
     return {
-        lat: baseLat + (Math.random() - 0.5) * radius,
-        lng: baseLng + (Math.random() - 0.5) * radius
+        lat: centerLat + (Math.random() - 0.5) * radius,
+        lng: centerLng + (Math.random() - 0.5) * radius
     };
+}
+
+async function resolveAuthToken() {
+    if (authTokenArg) {
+        return authTokenArg.trim();
+    }
+
+    if (!authEmail || !authPassword || !firebaseApiKey) {
+        return '';
+    }
+
+    const url = `https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=${firebaseApiKey}`;
+    const payload = {
+        email: authEmail,
+        password: authPassword,
+        returnSecureToken: true
+    };
+
+    const response = await axios.post(url, payload, { timeout: 15000 });
+    return response.data?.idToken || '';
 }
 
 // Criar booking
@@ -122,12 +164,17 @@ async function processBatch(socket, batch, batchIndex) {
 
 // Função principal
 async function runStressTest() {
+    const authToken = await resolveAuthToken();
+
     logStructured('info', 'Iniciando stress test de commands', {
         service: 'stress-test',
         count,
         concurrency,
         serverUrl,
-        customerId
+        customerId,
+        hasAuthToken: !!authToken,
+        authMode: authTokenArg ? 'token' : (authEmail && authPassword ? 'firebase-email-password' : 'none'),
+        geofenceBase: { lat: baseLat, lng: baseLng, radius: geoRadius }
     });
 
     // Verificar se servidor está respondendo
@@ -165,7 +212,8 @@ async function runStressTest() {
         transports: ['websocket', 'polling'], // Fallback para polling
         reconnection: false,
         timeout: 20000,
-        forceNew: true
+        forceNew: true,
+        auth: authToken ? { token: authToken } : undefined
     });
 
     await new Promise((resolve, reject) => {
@@ -193,27 +241,39 @@ async function runStressTest() {
     });
 
     // Aguardar autenticação ser processada
-    await new Promise((resolve) => {
+    await new Promise((resolve, reject) => {
+        const authTimeout = setTimeout(() => {
+            reject(new Error('Timeout na autenticação'));
+        }, 10000);
+
         socket.once('authenticated', () => {
+            clearTimeout(authTimeout);
             logStructured('info', 'Autenticado com sucesso', {
                 service: 'stress-test'
             });
             resolve();
         });
-        
-        // Autenticar com campos corretos (uid ao invés de userId)
-        socket.emit('authenticate', {
-            uid: customerId,
-            userType: 'customer'
+
+        socket.once('authentication_error', (error) => {
+            clearTimeout(authTimeout);
+            reject(new Error(error?.message || 'authentication_error'));
+        });
+
+        socket.once('auth_error', (error) => {
+            clearTimeout(authTimeout);
+            reject(new Error(error?.message || 'auth_error'));
         });
         
-        // Timeout de segurança
-        setTimeout(() => {
-            logStructured('warn', 'Timeout na autenticação, continuando...', {
-                service: 'stress-test'
-            });
-            resolve();
-        }, 5000);
+        // Autenticar com campos corretos (uid ao invés de userId)
+        const authPayload = {
+            uid: customerId,
+            userType: 'customer'
+        };
+        if (authToken) {
+            authPayload.token = authToken;
+        }
+
+        socket.emit('authenticate', authPayload);
     });
 
     // Criar batches
@@ -259,7 +319,9 @@ async function runStressTest() {
             count,
             concurrency,
             serverUrl,
-            customerId
+            customerId,
+            hasAuthToken: !!authToken,
+            geofenceBase: { lat: baseLat, lng: baseLng, radius: geoRadius }
         },
         results: {
             total: stats.total,
@@ -275,8 +337,8 @@ async function runStressTest() {
                 p50: `${p50.toFixed(2)}ms`,
                 p95: `${p95.toFixed(2)}ms`,
                 p99: `${p99.toFixed(2)}ms`,
-                min: `${Math.min(...stats.latencies) || 0}ms`,
-                max: `${Math.max(...stats.latencies) || 0}ms`
+                min: `${stats.latencies.length ? Math.min(...stats.latencies) : 0}ms`,
+                max: `${stats.latencies.length ? Math.max(...stats.latencies) : 0}ms`
             },
             errors: stats.errors.slice(0, 10) // Primeiros 10 erros
         },
@@ -322,4 +384,3 @@ runStressTest().catch(error => {
     });
     process.exit(1);
 });
-

@@ -42,7 +42,8 @@ export default function Observability() {
         system: {},
         commands: { byCommand: {} },
         events: { byType: {} },
-        listeners: { byListener: {} }
+        listeners: { byListener: {} },
+        otel: { enabled: false, ingest: {} }
       })
     } finally {
       setLoading(false)
@@ -392,7 +393,7 @@ export default function Observability() {
                 Sistema
               </h2>
               
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-6">
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-6 gap-6">
                 <Card>
                   <CardHeader>
                     <CardTitle className="flex items-center gap-2">
@@ -465,6 +466,23 @@ export default function Observability() {
                       {metrics.system?.throughput || 0}
                     </div>
                     <p className="text-sm text-gray-500 mt-2">Req/seg</p>
+                  </CardContent>
+                </Card>
+
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="flex items-center gap-2">
+                      <Activity className="h-5 w-5" />
+                      OTEL Ingest
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="text-3xl font-bold">
+                      {metrics.otel?.ingest?.totalRequests || 0}
+                    </div>
+                    <p className="text-sm text-gray-500 mt-2">
+                      endpoint: {metrics.otel?.endpoint || 'N/A'}
+                    </p>
                   </CardContent>
                 </Card>
               </div>

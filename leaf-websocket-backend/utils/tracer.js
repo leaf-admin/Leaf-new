@@ -50,8 +50,15 @@ function getSamplingRate() {
 
 // Configuração do exporter (OTLP para Tempo)
 function getExporter() {
+    if (process.env.OTEL_ENABLED === 'false') {
+        return null;
+    }
+
     // ✅ Usar OTLP HTTP para Tempo
-    const tempoEndpoint = process.env.TEMPO_ENDPOINT || process.env.OTEL_EXPORTER_OTLP_ENDPOINT || 'http://localhost:4318';
+    const tempoEndpoint =
+        process.env.TEMPO_ENDPOINT ||
+        process.env.OTEL_EXPORTER_OTLP_ENDPOINT ||
+        `http://127.0.0.1:${process.env.PORT || 3001}/otel`;
 
     return new OTLPTraceExporter({
         url: `${tempoEndpoint}/v1/traces`,
@@ -79,6 +86,15 @@ function initializeTracer() {
     }
 
     const samplingRate = getSamplingRate();
+    const exporter = getExporter();
+
+    if (!exporter) {
+        logStructured('warn', 'OpenTelemetry desabilitado via OTEL_ENABLED=false', {
+            service: 'opentelemetry',
+            operation: 'initialize'
+        });
+        return trace.getTracer('leaf-backend-disabled');
+    }
 
     // Criar resource usando resourceFromAttributes
     const resourceAttrs = {};
@@ -102,7 +118,7 @@ function initializeTracer() {
 
     sdk = new NodeSDK({
         resource: resource,
-        traceExporter: getExporter(),
+        traceExporter: exporter,
         // Sampling manual (não usar auto-instrumentation)
         // Vamos criar spans manualmente nos pontos críticos
     });

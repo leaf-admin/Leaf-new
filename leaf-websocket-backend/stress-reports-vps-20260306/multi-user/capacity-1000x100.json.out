@@ -1,0 +1,40 @@
+{
+  "reportPath": "/opt/leaf-websocket-backend/stress-test-multi-user-1772788707193.json",
+  "scenario": {
+    "drivers": 1000,
+    "passengers": 100,
+    "ratio": "1000:100",
+    "serverUrl": "http://127.0.0.1:3001",
+    "tokenConcurrency": 40,
+    "socketConcurrency": 120
+  },
+  "tokenStats": {
+    "requested": 100,
+    "ok": 100,
+    "failed": 0,
+    "durationSec": 1.31,
+    "perSec": 76.1
+  },
+  "seedStats": {
+    "seeded": 1000,
+    "durationSec": 0.13,
+    "perSec": 8000
+  },
+  "flow": {
+    "total": 100,
+    "success": 100,
+    "failed": 0,
+    "successRate": 100,
+    "durationSec": 9.64,
+    "throughputReqPerSec": 10.37,
+    "latencyMs": {
+      "p50": 9239,
+      "p95": 9595,
+      "p99": 9621,
+      "max": 9623
+    },
+    "topErrors": []
+  },
+  "totalDurationSec": 11.36,
+  "timestamp": "2026-03-06T09:18:38.554Z"
+}

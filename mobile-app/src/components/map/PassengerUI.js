@@ -53,6 +53,7 @@ import ProfileToggle from '../ProfileToggle';
 import { AnimatedButton } from '../design-system/AnimatedButton';
 import { Typography } from '../design-system/Typography';
 import { colors as semanticColors } from '../../common-local/theme';
+import { getSelfHostedApiUrl } from '../../config/ApiConfig';
 
 function getStreetAndNumber(address) {
     if (!address) return '';
@@ -244,6 +245,11 @@ function PassengerUI(props) {
     const driverPolylineUpdateIntervalRef = useRef(null); // ✅ Ref para intervalo de atualização da polyline
     const destinationPolylineUpdateIntervalRef = useRef(null); // ✅ NOVO: Ref para intervalo de atualização da rota até destino
     const [nearbyDrivers, setNearbyDrivers] = useState([]); // ✅ Motoristas próximos para cálculo de pickup time
+    const [geofenceStatus, setGeofenceStatus] = useState({
+        isChecking: false,
+        outOfCoverage: false,
+        message: ''
+    });
     const [connectionStatus, setConnectionStatus] = useState({
         connected: false,
         authenticated: false,
@@ -1428,6 +1434,12 @@ function PassengerUI(props) {
 
     // ✅ Serviço de disponibilidade de motoristas em tempo real
     useEffect(() => {
+        if (geofenceStatus.outOfCoverage) {
+            DriverAvailabilityService.stopMonitoring();
+            setNearbyDrivers([]);
+            return;
+        }
+
         if (!tripdata.pickup || !tripdata.pickup.lat || !tripdata.pickup.lng) {
             DriverAvailabilityService.stopMonitoring();
             setNearbyDrivers([]);
@@ -1459,7 +1471,65 @@ function PassengerUI(props) {
             unsubscribe();
             DriverAvailabilityService.stopMonitoring();
         };
-    }, [tripdata.pickup?.lat, tripdata.pickup?.lng, settings?.driverRadius]);
+    }, [tripdata.pickup?.lat, tripdata.pickup?.lng, settings?.driverRadius, geofenceStatus.outOfCoverage]);
+
+    useEffect(() => {
+        const pickup = tripdata?.pickup;
+        const destination = tripdata?.drop;
+        const hasPickup = !!(pickup?.lat && pickup?.lng);
+        const hasDestination = !!(destination?.lat && destination?.lng);
+
+        if (!hasPickup || !hasDestination) {
+            setGeofenceStatus({
+                isChecking: false,
+                outOfCoverage: false,
+                message: ''
+            });
+            return;
+        }
+
+        let cancelled = false;
+        const validateGeofence = async () => {
+            setGeofenceStatus((prev) => ({ ...prev, isChecking: true }));
+
+            try {
+                const endpoint = getSelfHostedApiUrl('/api/geofence/check');
+                const [pickupResponse, destinationResponse] = await Promise.all([
+                    fetch(`${endpoint}?lat=${pickup.lat}&lng=${pickup.lng}`),
+                    fetch(`${endpoint}?lat=${destination.lat}&lng=${destination.lng}`)
+                ]);
+
+                const pickupJson = pickupResponse.ok ? await pickupResponse.json() : null;
+                const destinationJson = destinationResponse.ok ? await destinationResponse.json() : null;
+
+                const pickupAllowed = pickupJson?.isAllowed === true;
+                const destinationAllowed = destinationJson?.isAllowed === true;
+                const outOfCoverage = !pickupAllowed || !destinationAllowed;
+
+                if (!cancelled) {
+                    setGeofenceStatus({
+                        isChecking: false,
+                        outOfCoverage,
+                        message: outOfCoverage ? 'A Leaf ainda não está disponível na sua região' : ''
+                    });
+                }
+            } catch (error) {
+                Logger.warn('⚠️ [PassengerUI] Falha ao validar geofence no frontend:', error?.message);
+                if (!cancelled) {
+                    setGeofenceStatus({
+                        isChecking: false,
+                        outOfCoverage: false,
+                        message: ''
+                    });
+                }
+            }
+        };
+
+        validateGeofence();
+        return () => {
+            cancelled = true;
+        };
+    }, [tripdata?.pickup?.lat, tripdata?.pickup?.lng, tripdata?.drop?.lat, tripdata?.drop?.lng]);
 
     // ✅ Durante a busca, aumentar frequência de atualização e notificar NewMapScreen
     useEffect(() => {
@@ -1675,6 +1745,8 @@ function PassengerUI(props) {
                     errorMessage = 'Dados inválidos. Verifique origem e destino e tente novamente.';
                 } else if (error.message.includes('payment') || error.message.includes('pagamento')) {
                     errorMessage = 'Erro no processamento do pagamento. Verifique seus dados e tente novamente.';
+                } else if (error.message.toLowerCase().includes('região') || error.message.toLowerCase().includes('regiao')) {
+                    errorMessage = 'A Leaf ainda não está disponível na sua região.';
                 }
             }
 
@@ -3494,6 +3566,24 @@ function PassengerUI(props) {
             return;
         }
 
+        if (geofenceStatus.outOfCoverage) {
+            Alert.alert(
+                'Região indisponível',
+                'A Leaf ainda não está disponível na sua região',
+                [{ text: 'OK' }]
+            );
+            return;
+        }
+
+        if (!hasDriversForSelectedCar) {
+            Alert.alert(
+                'Sem motoristas disponíveis',
+                'Não há motoristas disponíveis para este tipo de corrida na sua região agora.',
+                [{ text: 'OK' }]
+            );
+            return;
+        }
+
         // ✅ VALIDAÇÃO: Verificar se está autenticado antes de abrir modal
         const webSocketManager = WebSocketManager.getInstance();
         const connectionStatus = webSocketManager.getConnectionStatus();
@@ -5121,6 +5211,13 @@ function PassengerUI(props) {
         return finalTime;
     }, [nearbyDrivers, tripdata.pickup]);
 
+    const hasDriversForSelectedCar = useMemo(() => {
+        if (!selectedCarType || !tripdata.pickup?.lat || !tripdata.pickup?.lng) {
+            return false;
+        }
+        return getPickupTime(selectedCarType) !== null;
+    }, [selectedCarType, tripdata.pickup?.lat, tripdata.pickup?.lng, getPickupTime, geofenceStatus.outOfCoverage]);
+
     // Backdrop para o BottomSheet - não deve interferir com interações do mapa
     const renderBackdrop = useCallback(
         (props) => (
@@ -6100,7 +6197,8 @@ function PassengerUI(props) {
                             // Verificar primeiro se há motoristas em geral, depois se há motoristas do tipo específico
                             const hasAnyDrivers = nearbyDrivers && nearbyDrivers.length > 0;
                             const hasDriversForThisCarType = pickupTime !== null && pickupTime !== undefined;
-                            const noDriversAvailable = !hasAnyDrivers; // Só mostrar "não há motoristas" se não houver nenhum
+                            const isOutOfCoverage = geofenceStatus.outOfCoverage;
+                            const noDriversAvailable = !isOutOfCoverage && !hasAnyDrivers; // Só mostrar "não há motoristas" se estiver em área atendida
 
                             // ✅ Log para debug (habilitado temporariamente)
                             Logger.log(`🔍 [Card ${car.name}] Debug:`, {
@@ -6208,7 +6306,14 @@ function PassengerUI(props) {
                                                 </View>
 
                                                 <View style={styles.bottomSheetCarDetails}>
-                                                    {noDriversAvailable ? (
+                                                    {isOutOfCoverage ? (
+                                                        <View style={styles.bottomSheetCarDetailItem}>
+                                                            <Ionicons name="alert-circle-outline" size={16} color={safeTheme.icon} style={styles.iconMarginRight} />
+                                                            <Text style={[styles.bottomSheetCarDetailText, { color: theme.textSecondary }]}>
+                                                                A Leaf ainda não está disponível na sua região
+                                                            </Text>
+                                                        </View>
+                                                    ) : noDriversAvailable ? (
                                                         <View style={styles.bottomSheetCarDetailItem}>
                                                             <Ionicons name="alert-circle-outline" size={16} color={safeTheme.icon} style={styles.iconMarginRight} />
                                                             <Text style={[styles.bottomSheetCarDetailText, { color: theme.textSecondary }]}>
@@ -6259,7 +6364,7 @@ function PassengerUI(props) {
                         title={tripStatus === 'idle' ? 'Pedir agora' : tripStatus === 'completed' ? 'Confirmar pagamento' : 'Solicitar'}
                         variant="primary"
                         onPress={tripStatus === 'completed' ? handlePaymentConfirmation : initiateBooking}
-                        disabled={!hasValidTripEndpoints || !selectedCarType || !carEstimates[selectedCarType?.name]?.estimateFare || tripStatus === 'accepted' || tripStatus === 'started'}
+                        disabled={!hasValidTripEndpoints || !selectedCarType || !carEstimates[selectedCarType?.name]?.estimateFare || geofenceStatus.outOfCoverage || !hasDriversForSelectedCar || tripStatus === 'accepted' || tripStatus === 'started'}
                         loading={bookModelLoading}
                     />
                 </BottomSheetView>
@@ -6281,6 +6386,10 @@ function PassengerUI(props) {
             // ✅ Se localização foi negada, mostrar mensagem específica
             if (locationDenied) {
                 return 'Ative a localização para solicitar uma corrida';
+            }
+
+            if (geofenceStatus.outOfCoverage) {
+                return 'A Leaf ainda não está disponível na sua região';
             }
 
             // Se não há carros disponíveis, mostrar mensagem específica
@@ -6325,7 +6434,7 @@ function PassengerUI(props) {
         };
 
         // ✅ Desabilitar botão se localização foi negada ou outras condições
-        const isDisabled = locationDenied || carTypesToUse.length === 0 || !canBook || bookModelLoading || tripStatus === 'accepted' || tripStatus === 'started';
+        const isDisabled = locationDenied || geofenceStatus.outOfCoverage || carTypesToUse.length === 0 || !canBook || bookModelLoading || tripStatus === 'accepted' || tripStatus === 'started';
 
         return (
             <View
@@ -6351,7 +6460,7 @@ function PassengerUI(props) {
                 </TouchableOpacity>
             </View>
         );
-    }, [selectedCarType, carEstimates, bookModelLoading, tripStatus, t, initiateBooking, settings?.symbol, locationDenied, hasValidTripEndpoints]);
+    }, [selectedCarType, carEstimates, bookModelLoading, tripStatus, t, initiateBooking, settings?.symbol, locationDenied, hasValidTripEndpoints, geofenceStatus.outOfCoverage]);
 
     // Função para confirmar pagamento
     // Funções auxiliares para status da viagem

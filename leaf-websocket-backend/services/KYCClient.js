@@ -7,20 +7,21 @@ class KYCClient {
     this.timeout = 30000; // 30 segundos
     this.retryAttempts = 3;
     this.retryDelay = 1000; // 1 segundo
+    this.mockMode = process.env.KYC_CLIENT_MOCK_MODE === 'true';
   }
 
   async makeRequest(method, endpoint, data = null, options = {}) {
     const url = `${this.kycServiceUrl}${endpoint}`;
 
-    // 🔥 START LOCAL MOCK 🔥
-    // Bypass actual KYC check for local development and Event-Driven Architecture Refactoring
-    logStructured('info', `[MOCKED KYC] Intercepted ${method} ${endpoint}`, { service: 'KYCClient' });
-    if (endpoint === '/health') return { status: 'healthy' };
-    if (endpoint === '/upload-profile') return { success: true, userId: 'mock-user', message: 'MOCKED UPLOAD' };
-    if (endpoint === '/verify-driver') return { success: true, is_match: true, similarity_score: 0.99, confidence: 'Alta' };
-    if (endpoint === '/stats') return { service: 'KYC MOCKED Service', version: 'Local' };
-    return { success: true, mocked: true };
-    // 🔥 END LOCAL MOCK 🔥
+    // Mock controlado por env (não mockar silenciosamente em produção)
+    if (this.mockMode) {
+      logStructured('warn', `[MOCKED KYC] Intercepted ${method} ${endpoint}`, { service: 'KYCClient' });
+      if (endpoint === '/health') return { status: 'healthy' };
+      if (endpoint === '/upload-profile') return { success: true, userId: 'mock-user', message: 'MOCKED UPLOAD' };
+      if (endpoint === '/verify-driver') return { success: true, is_match: true, similarity_score: 0.99, confidence: 'Alta' };
+      if (endpoint === '/stats') return { service: 'KYC MOCKED Service', version: 'Local' };
+      return { success: true, mocked: true };
+    }
 
     const config = {
       method,
@@ -165,4 +166,3 @@ class KYCClient {
 }
 
 module.exports = KYCClient;
-

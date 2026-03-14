@@ -1,6 +1,5 @@
 import Logger from '../utils/Logger';
-import { WooviConfig } from '../../config/WooviConfig';
-import { getApiUrl, getSelfHostedApiUrl } from '../config/ApiConfig';
+import { getSelfHostedApiUrl } from '../config/ApiConfig';
 import { createAxiosInstance } from '../utils/axiosInterceptor';
 
 
@@ -15,16 +14,6 @@ class WooviService {
         this.backendApi = createAxiosInstance({
             baseURL: apiBaseUrl, // Usa a configuração do ApiConfig
             timeout: 30000
-        });
-
-        // ✅ API direta Woovi com headers compatíveis com CORS
-        this.wooviApi = createAxiosInstance({
-            baseURL: WooviConfig.baseUrl,
-            headers: {
-                'Authorization': WooviConfig.apiKey,
-                'X-App-ID': WooviConfig.appId
-            },
-            timeout: WooviConfig.timeout || 30000
         });
     }
 
@@ -168,9 +157,7 @@ class WooviService {
     // COMPATIBILIDADE: Listar pagamentos
     async listPayments(page = 1, limit = 10) {
         try {
-            const response = await this.wooviApi.get('/charge', {
-                params: { page, limit }
-            });
+            const response = await this.backendApi.get('/api/woovi/list-charges', { params: { page, limit } });
             return response.data;
         } catch (error) {
             Logger.error('Erro ao listar pagamentos:', error);
@@ -181,11 +168,14 @@ class WooviService {
     // COMPATIBILIDADE: Cancelar pagamento
     async cancelPayment(paymentId) {
         try {
-            const response = await this.wooviApi.post(`/charge/${paymentId}/cancel`);
-            return response.data;
+            if (String(paymentId || '').startsWith('mock_review_')) {
+                return { success: true, mock: true, message: 'Cobrança mock cancelada localmente' };
+            }
+            const response = await this.backendApi.post(`/api/woovi/cancel-charge/${paymentId}`);
+            return response.data || { success: true };
         } catch (error) {
             Logger.error('Erro ao cancelar pagamento:', error);
-            throw error;
+            return { success: false, error: error?.response?.data || error.message };
         }
     }
 }

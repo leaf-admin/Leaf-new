@@ -31,6 +31,10 @@ class RidePersistenceService {
         
         logger.info(`🚀 Ride Persistence Service inicializado (Redis Mode: ${this.redisMode})`);
     }
+
+    getFinalizationOutboxKey() {
+        return 'rides:finalization_outbox';
+    }
     
     /**
      * Inicializar Firestore
@@ -324,6 +328,129 @@ class RidePersistenceService {
             };
         }
     }
+
+    async queueFinalizationOutbox(rideId, finalData, errorMessage = 'unknown_error') {
+        try {
+            const redis = redisPool.getConnection();
+            if (!redis || (redis.status !== 'ready' && redis.status !== 'connect')) {
+                return { success: false, error: 'Redis indisponivel para outbox' };
+            }
+
+            const outboxKey = this.getFinalizationOutboxKey();
+            const now = Date.now();
+            const payload = {
+                rideId,
+                finalData,
+                attempts: 0,
+                status: 'pending',
+                createdAt: now,
+                updatedAt: now,
+                nextRetryAt: now + 5000,
+                lastError: errorMessage
+            };
+
+            await redis.hset(outboxKey, rideId, JSON.stringify(payload));
+            logger.warn(`⚠️ Finalizacao da corrida ${rideId} enviada para outbox`);
+            return { success: true };
+        } catch (error) {
+            logger.error(`❌ Erro ao enfileirar outbox da corrida ${rideId}: ${error.message}`);
+            return { success: false, error: error.message };
+        }
+    }
+
+    async persistFinalRideDataWithOutbox(rideId, finalData) {
+        const saveResult = await this.saveFinalRideData(rideId, finalData);
+        if (saveResult.success) {
+            return { success: true, persisted: true, deferred: false };
+        }
+
+        const queueResult = await this.queueFinalizationOutbox(
+            rideId,
+            finalData,
+            saveResult.error || 'save_final_failed'
+        );
+
+        if (queueResult.success) {
+            return { success: true, persisted: false, deferred: true };
+        }
+
+        return {
+            success: false,
+            persisted: false,
+            deferred: false,
+            error: queueResult.error || saveResult.error || 'persist_and_outbox_failed'
+        };
+    }
+
+    async processFinalizationOutboxBatch(limit = 20) {
+        try {
+            const redis = redisPool.getConnection();
+            if (!redis || (redis.status !== 'ready' && redis.status !== 'connect')) {
+                return { processed: 0, retried: 0, failed: 0 };
+            }
+
+            const outboxKey = this.getFinalizationOutboxKey();
+            const items = await redis.hgetall(outboxKey);
+            const now = Date.now();
+            let processed = 0;
+            let retried = 0;
+            let failed = 0;
+            let scanned = 0;
+
+            for (const [rideId, raw] of Object.entries(items || {})) {
+                if (scanned >= limit) break;
+                scanned += 1;
+
+                let payload;
+                try {
+                    payload = JSON.parse(raw);
+                } catch (parseError) {
+                    await redis.hdel(outboxKey, rideId);
+                    failed += 1;
+                    continue;
+                }
+
+                if (!payload || payload.status === 'completed') {
+                    await redis.hdel(outboxKey, rideId);
+                    continue;
+                }
+
+                if (payload.nextRetryAt && payload.nextRetryAt > now) {
+                    continue;
+                }
+
+                const result = await this.saveFinalRideData(rideId, payload.finalData || {});
+                if (result.success) {
+                    await redis.hdel(outboxKey, rideId);
+                    processed += 1;
+                    continue;
+                }
+
+                const attempts = (payload.attempts || 0) + 1;
+                if (attempts >= 10) {
+                    payload.status = 'failed';
+                    payload.attempts = attempts;
+                    payload.updatedAt = now;
+                    payload.lastError = result.error || 'retry_failed';
+                    await redis.hset(outboxKey, rideId, JSON.stringify(payload));
+                    failed += 1;
+                    continue;
+                }
+
+                payload.attempts = attempts;
+                payload.updatedAt = now;
+                payload.lastError = result.error || 'retry_failed';
+                payload.nextRetryAt = now + Math.min(60000, 2000 * attempts);
+                await redis.hset(outboxKey, rideId, JSON.stringify(payload));
+                retried += 1;
+            }
+
+            return { processed, retried, failed };
+        } catch (error) {
+            logger.error(`❌ Erro ao processar outbox de finalizacao: ${error.message}`);
+            return { processed: 0, retried: 0, failed: 0, error: error.message };
+        }
+    }
     
     /**
      * Atualizar motorista da corrida (quando aceita)
@@ -471,6 +598,5 @@ class RidePersistenceService {
 const ridePersistenceService = new RidePersistenceService();
 
 module.exports = ridePersistenceService;
-
 
 

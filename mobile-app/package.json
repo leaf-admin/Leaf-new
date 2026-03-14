@@ -41,7 +41,10 @@
     "test:e2e:vps": "bash scripts/run-e2e-vps.sh",
     "test:e2e:stable": "bash scripts/run-e2e-stable-guarded.sh",
     "test:e2e:appium": "node e2e-appium/run-leaf-e2e.cjs",
-    "test:e2e:adb": "node e2e-adb/run-leaf-e2e-adb.cjs"
+    "test:e2e:adb": "node e2e-adb/run-leaf-e2e-adb.cjs",
+    "screenshots:adb": "bash scripts/capture-store-screenshots-adb.sh",
+    "qa:run": "bash scripts/qa-run.sh",
+    "qa:asserts": "bash scripts/qa-asserts.sh"
   },
   "dependencies": {
     "@expo/metro-runtime": "~4.0.1",
