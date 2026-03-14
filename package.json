@@ -1,4 +1,19 @@
 {
+  "private": true,
+  "workspaces": [
+    "leaf-websocket-backend",
+    "leaf-dashboard-js",
+    "mobile-app"
+  ],
+  "scripts": {
+    "bootstrap": "npm install --workspaces --include-workspace-root",
+    "dev:backend": "npm run dev --workspace leaf-websocket-backend",
+    "dev:dashboard": "npm run dev --workspace leaf-dashboard-js",
+    "dev:mobile": "npm run start --workspace mobile-app",
+    "build:dashboard": "npm run build --workspace leaf-dashboard-js",
+    "lint:dashboard": "npm run lint --workspace leaf-dashboard-js",
+    "test:backend": "npm run test --workspace leaf-websocket-backend"
+  },
   "dependencies": {
     "axios": "^1.12.1",
     "cors": "^2.8.5",
