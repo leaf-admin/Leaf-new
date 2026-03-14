@@ -1000,6 +1000,466 @@ router.post('/api/metrics/history/save', async (req, res) => {
   }
 });
 
+// ==========================================
+// 🧭 MARKETPLACE HEALTH - MÉTRICAS CONSOLIDADAS
+// ==========================================
+
+const COMPLETED_STATUSES = new Set(['COMPLETE', 'COMPLETED', 'PAID']);
+const CANCELLED_STATUSES = new Set(['CANCELLED', 'CANCELED']);
+
+function toNumber(value, fallback = 0) {
+  const num = Number.parseFloat(value);
+  return Number.isFinite(num) ? num : fallback;
+}
+
+function parseTs(value) {
+  if (value === null || value === undefined || value === '') return null;
+
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    // Trata segundos unix também
+    return value > 10_000_000_000 ? value : value * 1000;
+  }
+
+  if (typeof value === 'string') {
+    const asNum = Number(value);
+    if (Number.isFinite(asNum) && value.trim() !== '') {
+      return asNum > 10_000_000_000 ? asNum : asNum * 1000;
+    }
+  }
+
+  const date = new Date(value);
+  const ts = date.getTime();
+  return Number.isFinite(ts) ? ts : null;
+}
+
+function getWindow(period, startDate, endDate) {
+  const now = new Date();
+  let start = new Date(now);
+  let end = new Date(now);
+
+  if (period === 'custom' && startDate && endDate) {
+    start = new Date(startDate);
+    end = new Date(endDate);
+    end.setHours(23, 59, 59, 999);
+  } else if (period === 'today') {
+    start = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    end = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
+  } else if (period === 'week') {
+    start = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+  } else if (period === 'month') {
+    start = new Date(now.getFullYear(), now.getMonth(), 1);
+  } else if (period === '30d') {
+    start = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+  } else {
+    start = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+  }
+
+  const durationMs = Math.max(end.getTime() - start.getTime(), 1);
+  const previousEnd = new Date(start.getTime() - 1);
+  const previousStart = new Date(previousEnd.getTime() - durationMs);
+
+  return {
+    current: { start, end },
+    previous: { start: previousStart, end: previousEnd }
+  };
+}
+
+function isWithin(ts, window) {
+  if (!Number.isFinite(ts)) return false;
+  return ts >= window.start.getTime() && ts <= window.end.getTime();
+}
+
+router.get('/api/metrics/marketplace', async (req, res) => {
+  try {
+    const {
+      period = 'month',
+      startDate,
+      endDate
+    } = req.query;
+
+    const response = {
+      period,
+      window: {},
+      metrics: {},
+      raw: {},
+      assumptions: {
+        driverUtilizationEstimated: true,
+        costPerRideEstimated: true
+      }
+    };
+
+    if (!firebaseConfig || !firebaseConfig.getRealtimeDB) {
+      return res.json(response);
+    }
+
+    const db = firebaseConfig.getRealtimeDB();
+    const { current, previous } = getWindow(period, startDate, endDate);
+    response.window = {
+      current: {
+        start: current.start.toISOString(),
+        end: current.end.toISOString()
+      },
+      previous: {
+        start: previous.start.toISOString(),
+        end: previous.end.toISOString()
+      }
+    };
+
+    const [bookingsSnapshot, usersSnapshot] = await Promise.all([
+      db.ref('bookings').once('value'),
+      db.ref('users').once('value')
+    ]);
+
+    const bookings = bookingsSnapshot.val() || {};
+    const users = usersSnapshot.val() || {};
+
+    const normalizedBookings = Object.keys(bookings).map((id) => {
+      const b = bookings[id] || {};
+      const requestTs = parseTs(b.createdAt || b.tripdate || b.timestamp || b.activatedAt);
+      const acceptTs = parseTs(b.acceptedAt || b.driverAcceptedAt || b.matchedAt);
+      const arrivedTs = parseTs(b.driverArrivedAt || b.arrivedAt || b.pickupArrivedAt);
+      const tripStartTs = parseTs(b.tripstart || b.startedAt || b.startTime);
+      const tripEndTs = parseTs(b.tripend || b.completedAt || b.endTime || b.paidAt);
+      const status = String(b.status || '').toUpperCase();
+      const driverId = b.driver || b.driverId || null;
+      const customerId = b.customer || b.customerId || b.user || b.userId || null;
+      const fare = toNumber(b.customer_paid || b.total_fare || b.fare || b.estimate, 0);
+      const convenienceFee = toNumber(b.convenience_fees, 0);
+      const driverShare = toNumber(b.driver_share, 0);
+
+      return {
+        id,
+        status,
+        requestTs,
+        acceptTs,
+        arrivedTs,
+        tripStartTs,
+        tripEndTs,
+        driverId,
+        customerId,
+        fare,
+        convenienceFee,
+        driverShare
+      };
+    });
+
+    const currentBookings = normalizedBookings.filter((b) => isWithin(b.requestTs, current));
+    const previousBookings = normalizedBookings.filter((b) => isWithin(b.requestTs, previous));
+    const completedCurrent = currentBookings.filter((b) => COMPLETED_STATUSES.has(b.status));
+
+    const requested = currentBookings.length;
+    const accepted = currentBookings.filter((b) => b.driverId || b.acceptTs).length;
+    const cancelled = currentBookings.filter((b) => CANCELLED_STATUSES.has(b.status)).length;
+    const completed = completedCurrent.length;
+
+    const waitSamplesMin = currentBookings
+      .filter((b) => Number.isFinite(b.requestTs) && Number.isFinite(b.acceptTs) && b.acceptTs >= b.requestTs)
+      .map((b) => (b.acceptTs - b.requestTs) / (1000 * 60));
+
+    const pickupSamplesMin = currentBookings
+      .filter((b) => Number.isFinite(b.acceptTs) && Number.isFinite(b.arrivedTs) && b.arrivedTs >= b.acceptTs)
+      .map((b) => (b.arrivedTs - b.acceptTs) / (1000 * 60));
+
+    const waitAvgMin = waitSamplesMin.length
+      ? waitSamplesMin.reduce((sum, v) => sum + v, 0) / waitSamplesMin.length
+      : null;
+    const pickupAvgMin = pickupSamplesMin.length
+      ? pickupSamplesMin.reduce((sum, v) => sum + v, 0) / pickupSamplesMin.length
+      : null;
+
+    const activeDriverSet = new Set(currentBookings.map((b) => b.driverId).filter(Boolean));
+    const activePassengerSet = new Set(currentBookings.map((b) => b.customerId).filter(Boolean));
+
+    const activeDrivers = activeDriverSet.size;
+    const activePassengers = activePassengerSet.size;
+    const periodDays = Math.max(
+      1,
+      Math.ceil((current.end.getTime() - current.start.getTime()) / (24 * 60 * 60 * 1000))
+    );
+
+    const ridesPerDriverPerDay = activeDrivers > 0
+      ? requested / activeDrivers / periodDays
+      : null;
+
+    // Utilização (estimada): tempo em corrida / janela ativa por motorista
+    const busyMsByDriver = {};
+    const firstSeenByDriver = {};
+    const lastSeenByDriver = {};
+    currentBookings.forEach((b) => {
+      if (!b.driverId) return;
+
+      const marks = [b.requestTs, b.acceptTs, b.arrivedTs, b.tripStartTs, b.tripEndTs].filter(Number.isFinite);
+      if (marks.length > 0) {
+        const minMark = Math.min(...marks);
+        const maxMark = Math.max(...marks);
+        firstSeenByDriver[b.driverId] = Math.min(firstSeenByDriver[b.driverId] ?? minMark, minMark);
+        lastSeenByDriver[b.driverId] = Math.max(lastSeenByDriver[b.driverId] ?? maxMark, maxMark);
+      }
+
+      if (Number.isFinite(b.tripStartTs) && Number.isFinite(b.tripEndTs) && b.tripEndTs >= b.tripStartTs) {
+        busyMsByDriver[b.driverId] = (busyMsByDriver[b.driverId] || 0) + (b.tripEndTs - b.tripStartTs);
+      }
+    });
+
+    const totalBusyMs = Object.values(busyMsByDriver).reduce((sum, v) => sum + v, 0);
+    const estimatedOnlineMs = Object.keys(firstSeenByDriver).reduce((sum, driverId) => {
+      const first = firstSeenByDriver[driverId];
+      const last = lastSeenByDriver[driverId];
+      if (!Number.isFinite(first) || !Number.isFinite(last) || last < first) return sum;
+      const windowMs = Math.max(last - first, 30 * 60 * 1000); // piso de 30 min
+      return sum + windowMs;
+    }, 0);
+
+    const driverUtilization = estimatedOnlineMs > 0 ? (totalBusyMs / estimatedOnlineMs) : null;
+
+    const revenueTotal = completedCurrent.reduce((sum, b) => sum + b.fare, 0);
+    const ridesForFinancial = Math.max(completed, 1);
+    const revenuePerRide = completed > 0 ? (revenueTotal / completed) : null;
+
+    // Custo estimado por corrida (mesmo racional do dashboard financeiro avançado)
+    const apiUnitCost = 0.005 + 0.002;
+    const infraFixedCost = 50;
+    const paymentCost = revenueTotal * 0.029;
+    const totalEstimatedCost = (completed * apiUnitCost) + infraFixedCost + paymentCost;
+    const costPerRide = completed > 0 ? (totalEstimatedCost / ridesForFinancial) : null;
+    const marginPerRide = (revenuePerRide !== null && costPerRide !== null)
+      ? (revenuePerRide - costPerRide)
+      : null;
+    const revenuePerDriver = activeDrivers > 0 ? (revenueTotal / activeDrivers) : null;
+
+    // Ativos de passageiros em janelas padrão
+    const now = new Date();
+    const dayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+    const weekStart = now.getTime() - (7 * 24 * 60 * 60 * 1000);
+    const monthStart = now.getTime() - (30 * 24 * 60 * 60 * 1000);
+
+    const dau = new Set(normalizedBookings.filter((b) => b.customerId && Number.isFinite(b.requestTs) && b.requestTs >= dayStart).map((b) => b.customerId)).size;
+    const wau = new Set(normalizedBookings.filter((b) => b.customerId && Number.isFinite(b.requestTs) && b.requestTs >= weekStart).map((b) => b.customerId)).size;
+    const mau = new Set(normalizedBookings.filter((b) => b.customerId && Number.isFinite(b.requestTs) && b.requestTs >= monthStart).map((b) => b.customerId)).size;
+    const monthRideCount = normalizedBookings.filter((b) => Number.isFinite(b.requestTs) && b.requestTs >= monthStart).length;
+    const ridesPerPassengerMonth = mau > 0 ? (monthRideCount / mau) : null;
+
+    // Crescimento e retenção
+    const previousRequested = previousBookings.length;
+    const ridesGrowth = previousRequested > 0
+      ? (requested - previousRequested) / previousRequested
+      : null;
+
+    const previousActiveDrivers = new Set(previousBookings.map((b) => b.driverId).filter(Boolean));
+    const retainedDriversCount = [...activeDriverSet].filter((driverId) => previousActiveDrivers.has(driverId)).length;
+    const retentionDrivers = previousActiveDrivers.size > 0
+      ? retainedDriversCount / previousActiveDrivers.size
+      : null;
+
+    const driversArray = Object.keys(users).map((id) => ({ id, ...(users[id] || {}) }))
+      .filter((u) => String(u.usertype || '').toLowerCase() === 'driver');
+    const newDriversCurrent = driversArray.filter((d) => isWithin(parseTs(d.createdAt), current)).length;
+    const churnDrivers = [...previousActiveDrivers].filter((driverId) => !activeDriverSet.has(driverId)).length;
+    const driverGrowth = previousActiveDrivers.size > 0
+      ? (newDriversCurrent - churnDrivers) / previousActiveDrivers.size
+      : null;
+
+    const conversionRate = requested > 0 ? completed / requested : null;
+    const cancellationRate = requested > 0 ? cancelled / requested : null;
+    const mlr = requested > 0 ? accepted / requested : null;
+
+    response.metrics = {
+      liquidity: {
+        mlr,
+        averageWaitMinutes: waitAvgMin,
+        averagePickupMinutes: pickupAvgMin,
+        cancellationRate
+      },
+      drivers: {
+        ridesPerDriverPerDay,
+        utilization: driverUtilization,
+        activeDrivers
+      },
+      passengers: {
+        activePassengers,
+        dau,
+        wau,
+        mau,
+        ridesPerPassengerMonth,
+        conversionRate
+      },
+      financial: {
+        revenuePerRide,
+        costPerRide,
+        marginPerRide,
+        revenuePerDriver,
+        totalRevenue: revenueTotal
+      },
+      growth: {
+        driverGrowth,
+        ridesGrowth,
+        driverRetention: retentionDrivers
+      },
+      summary: {
+        ridesRequested: requested,
+        ridesAccepted: accepted,
+        ridesCompleted: completed,
+        ridesCancelled: cancelled
+      }
+    };
+
+    // Série diária para drill-down
+    const dailyBuckets = {};
+    currentBookings.forEach((b) => {
+      if (!Number.isFinite(b.requestTs)) return;
+      const day = new Date(b.requestTs).toISOString().split('T')[0];
+      if (!dailyBuckets[day]) {
+        dailyBuckets[day] = {
+          requested: 0,
+          accepted: 0,
+          completed: 0,
+          cancelled: 0,
+          waitSamples: [],
+          pickupSamples: [],
+          fareTotal: 0,
+          driverIds: new Set(),
+          passengerIds: new Set(),
+          busyMsByDriver: {},
+          firstSeenByDriver: {},
+          lastSeenByDriver: {}
+        };
+      }
+
+      const bucket = dailyBuckets[day];
+      bucket.requested += 1;
+      if (b.driverId || b.acceptTs) bucket.accepted += 1;
+      if (COMPLETED_STATUSES.has(b.status)) {
+        bucket.completed += 1;
+        bucket.fareTotal += b.fare;
+      }
+      if (CANCELLED_STATUSES.has(b.status)) bucket.cancelled += 1;
+      if (b.driverId) bucket.driverIds.add(b.driverId);
+      if (b.customerId) bucket.passengerIds.add(b.customerId);
+
+      if (Number.isFinite(b.requestTs) && Number.isFinite(b.acceptTs) && b.acceptTs >= b.requestTs) {
+        bucket.waitSamples.push((b.acceptTs - b.requestTs) / (1000 * 60));
+      }
+      if (Number.isFinite(b.acceptTs) && Number.isFinite(b.arrivedTs) && b.arrivedTs >= b.acceptTs) {
+        bucket.pickupSamples.push((b.arrivedTs - b.acceptTs) / (1000 * 60));
+      }
+
+      if (b.driverId) {
+        const marks = [b.requestTs, b.acceptTs, b.arrivedTs, b.tripStartTs, b.tripEndTs].filter(Number.isFinite);
+        if (marks.length > 0) {
+          const minMark = Math.min(...marks);
+          const maxMark = Math.max(...marks);
+          bucket.firstSeenByDriver[b.driverId] = Math.min(bucket.firstSeenByDriver[b.driverId] ?? minMark, minMark);
+          bucket.lastSeenByDriver[b.driverId] = Math.max(bucket.lastSeenByDriver[b.driverId] ?? maxMark, maxMark);
+        }
+        if (Number.isFinite(b.tripStartTs) && Number.isFinite(b.tripEndTs) && b.tripEndTs >= b.tripStartTs) {
+          bucket.busyMsByDriver[b.driverId] = (bucket.busyMsByDriver[b.driverId] || 0) + (b.tripEndTs - b.tripStartTs);
+        }
+      }
+    });
+
+    const DAILY_INFRA_COST = 50 / 30;
+    const timeline = Object.keys(dailyBuckets)
+      .sort((a, b) => a.localeCompare(b))
+      .map((day) => {
+        const bucket = dailyBuckets[day];
+        const activeDriversDay = bucket.driverIds.size;
+        const activePassengersDay = bucket.passengerIds.size;
+        const waitAvg = bucket.waitSamples.length
+          ? bucket.waitSamples.reduce((sum, v) => sum + v, 0) / bucket.waitSamples.length
+          : null;
+        const pickupAvg = bucket.pickupSamples.length
+          ? bucket.pickupSamples.reduce((sum, v) => sum + v, 0) / bucket.pickupSamples.length
+          : null;
+        const mlrDay = bucket.requested > 0 ? bucket.accepted / bucket.requested : null;
+        const cancelRateDay = bucket.requested > 0 ? bucket.cancelled / bucket.requested : null;
+        const conversionDay = bucket.requested > 0 ? bucket.completed / bucket.requested : null;
+        const ridesPerDriverDay = activeDriversDay > 0 ? bucket.requested / activeDriversDay : null;
+        const revenuePerRideDay = bucket.completed > 0 ? bucket.fareTotal / bucket.completed : null;
+        const costPerRideDay = bucket.completed > 0
+          ? (((bucket.completed * (0.005 + 0.002)) + (bucket.fareTotal * 0.029) + DAILY_INFRA_COST) / bucket.completed)
+          : null;
+        const marginPerRideDay = (revenuePerRideDay !== null && costPerRideDay !== null)
+          ? revenuePerRideDay - costPerRideDay
+          : null;
+        const revenuePerDriverDay = activeDriversDay > 0 ? bucket.fareTotal / activeDriversDay : null;
+
+        const busyMs = Object.values(bucket.busyMsByDriver).reduce((sum, v) => sum + v, 0);
+        const onlineMs = Object.keys(bucket.firstSeenByDriver).reduce((sum, driverId) => {
+          const first = bucket.firstSeenByDriver[driverId];
+          const last = bucket.lastSeenByDriver[driverId];
+          if (!Number.isFinite(first) || !Number.isFinite(last) || last < first) return sum;
+          return sum + Math.max(last - first, 30 * 60 * 1000);
+        }, 0);
+        const utilizationDay = onlineMs > 0 ? busyMs / onlineMs : null;
+
+        return {
+          date: day,
+          summary: {
+            ridesRequested: bucket.requested,
+            ridesAccepted: bucket.accepted,
+            ridesCompleted: bucket.completed,
+            ridesCancelled: bucket.cancelled
+          },
+          liquidity: {
+            mlr: mlrDay,
+            averageWaitMinutes: waitAvg,
+            averagePickupMinutes: pickupAvg,
+            cancellationRate: cancelRateDay
+          },
+          drivers: {
+            activeDrivers: activeDriversDay,
+            ridesPerDriverPerDay: ridesPerDriverDay,
+            utilization: utilizationDay
+          },
+          passengers: {
+            activePassengers: activePassengersDay,
+            conversionRate: conversionDay
+          },
+          financial: {
+            totalRevenue: bucket.fareTotal,
+            revenuePerRide: revenuePerRideDay,
+            costPerRide: costPerRideDay,
+            marginPerRide: marginPerRideDay,
+            revenuePerDriver: revenuePerDriverDay
+          }
+        };
+      });
+
+    response.timeline = {
+      daily: timeline
+    };
+
+    response.raw = {
+      numeratorDenominator: {
+        mlr: { accepted, requested },
+        cancellation: { cancelled, requested },
+        conversion: { completed, requested },
+        ridesPerDriverPerDay: { rides: requested, activeDrivers, days: periodDays },
+        ridesPerPassengerMonth: { ridesMonth: monthRideCount, mau }
+      },
+      timingSamples: {
+        waitCount: waitSamplesMin.length,
+        pickupCount: pickupSamplesMin.length
+      },
+      growth: {
+        previousRequested,
+        previousActiveDrivers: previousActiveDrivers.size,
+        retainedDrivers: retainedDriversCount,
+        newDriversCurrent,
+        churnDrivers
+      }
+    };
+
+    res.json(response);
+  } catch (error) {
+    logError(error, 'Erro ao gerar métricas consolidadas de marketplace', {
+      service: 'metrics-routes',
+      operation: 'marketplace-health'
+    });
+    res.status(500).json({ error: 'Erro ao calcular métricas de marketplace' });
+  }
+});
+
 // ✅ NOVO: Sistema de Relatórios
 const ReportService = require('../services/report-service');
 const reportService = new ReportService();
@@ -1573,8 +2033,6 @@ router.get('/api/metrics/simulation/run', async (req, res) => {
 });
 
 module.exports = router;
-
-
 
 
 
