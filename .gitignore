@@ -11,6 +11,11 @@ build
 .env.development.local
 .env.test.local
 .env.production.local
+.env
+*.env
+.env.*
+!*.env.example
+!*.env.sample
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
@@ -31,16 +36,23 @@ ios/build/
 
 # Firebase credentials
 leaf-reactnative-firebase-adminsdk-fbsvc-94a09a2472.json
-*.json
-!package.json
-!package-lock.json
-!yarn.lock
-!app.json
-!firebase.json
-!tsconfig.json
-!babel.config.js
-!metro.config.js
-!eas.json
+leaf-reactnative-firebase-adminsdk-*.json
+firebase-credentials.json
+mobile-app/config/leaf-reactnative-firebase-adminsdk-*.json
+leaf-websocket-backend/leaf-reactnative-firebase-adminsdk-*.json
+
+# Security-sensitive artifacts
+digitaloceankey
+digitaloceankey.pub
+*.pem
+*.p12
+*.pfx
+*.jks
+*.keystore
+*.key
+*.crt
+*.cer
+ngrok.pid
 
 # Giant Binaries and Environments
 *.apk
@@ -51,7 +63,6 @@ leaf-reactnative-firebase-adminsdk-fbsvc-94a09a2472.json
 *.so
 *.log
 venv/
-.env
 android-sdk/
 mobile-app/test-results/
 *.img
