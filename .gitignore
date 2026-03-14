@@ -52,3 +52,9 @@ leaf-reactnative-firebase-adminsdk-fbsvc-94a09a2472.json
 *.log
 venv/
 .env
+android-sdk/
+mobile-app/test-results/
+*.img
+*.iso
+*.qcow2
+*.dmg
