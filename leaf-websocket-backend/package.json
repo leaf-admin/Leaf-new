@@ -92,13 +92,13 @@
     "uuid": "^13.0.0",
     "winston": "^3.17.0",
     "ws": "^8.18.3",
+    "@graphql-tools/schema": "^10.0.25",
+    "@graphql-tools/utils": "^10.9.1",
+    "axios": "^1.13.2",
     "xlsx": "^0.18.5"
   },
   "devDependencies": {
     "@graphql-tools/mock": "^9.0.25",
-    "@graphql-tools/schema": "^10.0.25",
-    "@graphql-tools/utils": "^10.9.1",
-    "axios": "^1.13.2",
     "mongodb-memory-server": "^11.0.1",
     "nodemon": "^3.0.1",
     "pdf-poppler": "^0.2.3",

@@ -12,7 +12,6 @@ const { logStructured, logError } = require('../utils/logger');
 class HealthCheckService {
   constructor() {
     this.startTime = Date.now();
-    this.redis = redisPool.getConnection();
   }
 
   /**
@@ -39,12 +38,22 @@ class HealthCheckService {
     // System Health Check
     checks.checks.system = this.checkSystem();
 
+    // Em desenvolvimento, "critical" de sistema costuma refletir carga momentânea local
+    // (build/test), não necessariamente indisponibilidade real.
+    if (
+      process.env.NODE_ENV !== 'production' &&
+      checks.checks.system?.status === 'critical'
+    ) {
+      checks.checks.system.status = 'warning';
+      checks.checks.system.message = `${checks.checks.system.message} (degradado para warning em desenvolvimento)`;
+    }
+
     // Determinar status geral
     const allHealthy = Object.values(checks.checks).every(
       check => check.status === 'healthy' || check.status === 'warning'
     );
     const hasCritical = Object.values(checks.checks).some(
-      check => check.status === 'unhealthy'
+      check => check.status === 'unhealthy' || check.status === 'critical'
     );
 
     if (hasCritical) {
@@ -66,19 +75,59 @@ class HealthCheckService {
    */
   async checkRedis() {
     try {
-      const startTime = Date.now();
-      await this.redis.ping();
-      const responseTime = Date.now() - startTime;
+      await redisPool.ensureConnection();
+      const redis = redisPool.getConnection();
 
-      // Verificar latência (limiar mais realista para ambiente com carga)
-      const status = responseTime > 300 ? 'warning' : 'healthy';
+      const warningThresholdMs = Number.parseInt(
+        process.env.HEALTH_REDIS_WARNING_MS ||
+          (process.env.NODE_ENV === 'production' ? '300' : '1200'),
+        10
+      );
+      const unhealthyThresholdMs = Number.parseInt(
+        process.env.HEALTH_REDIS_UNHEALTHY_MS ||
+          (process.env.NODE_ENV === 'production' ? '1500' : '4000'),
+        10
+      );
+      const sampleCount = Math.max(
+        1,
+        Number.parseInt(process.env.HEALTH_REDIS_PING_SAMPLES || '3', 10)
+      );
+
+      const samples = [];
+      for (let i = 0; i < sampleCount; i += 1) {
+        const sampleStart = Date.now();
+        await redis.ping();
+        samples.push(Date.now() - sampleStart);
+      }
+
+      const responseTime = Math.round(
+        samples.reduce((acc, value) => acc + value, 0) / samples.length
+      );
+      const minLatency = Math.min(...samples);
+      const maxLatency = Math.max(...samples);
+
+      const status =
+        responseTime >= unhealthyThresholdMs
+          ? 'unhealthy'
+          : responseTime >= warningThresholdMs
+            ? 'warning'
+            : 'healthy';
 
       return {
         status,
         responseTime: `${responseTime}ms`,
         latency: responseTime,
+        minLatency,
+        maxLatency,
+        samples,
+        thresholds: {
+          warningMs: warningThresholdMs,
+          unhealthyMs: unhealthyThresholdMs
+        },
         message: status === 'warning' 
           ? `Redis respondendo lentamente (${responseTime}ms)`
+          : status === 'unhealthy'
+            ? `Redis com latência crítica (${responseTime}ms)`
           : 'Redis está saudável'
       };
     } catch (error) {

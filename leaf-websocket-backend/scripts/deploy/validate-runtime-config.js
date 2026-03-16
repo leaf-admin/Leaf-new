@@ -6,6 +6,10 @@
  * - Exibe alertas de CORS e OTEL
  */
 
+const fs = require('fs');
+const path = require('path');
+const dotenv = require('dotenv');
+
 const REQUIRED_COMMON = [
   'NODE_ENV',
   'WOOVI_ENVIRONMENT',
@@ -41,7 +45,38 @@ function checkRequired(keys) {
   return missing;
 }
 
+function resolveEnvPath(filePath) {
+  if (!filePath) return null;
+  return path.isAbsolute(filePath)
+    ? filePath
+    : path.resolve(process.cwd(), filePath);
+}
+
+function loadRuntimeEnv() {
+  const loadedFiles = [];
+  const backendRoot = path.resolve(__dirname, '..', '..');
+  const explicitEnvFile = resolveEnvPath(process.env.ENV_FILE);
+
+  const safeLoad = (filePath, override = false) => {
+    if (!filePath || !fs.existsSync(filePath)) {
+      return;
+    }
+    dotenv.config({ path: filePath, override });
+    loadedFiles.push(filePath);
+  };
+
+  if (explicitEnvFile) {
+    safeLoad(explicitEnvFile, true);
+    return loadedFiles;
+  }
+
+  // Alinhado ao server.js: por padrão valida o mesmo .env carregado na inicialização.
+  safeLoad(path.join(backendRoot, '.env'), false);
+  return loadedFiles;
+}
+
 function main() {
+  const envFilesLoaded = loadRuntimeEnv();
   const nodeEnv = String(process.env.NODE_ENV || 'development').toLowerCase();
   const wooviEnv = String(process.env.WOOVI_ENVIRONMENT || '').toLowerCase();
   const baseUrl = String(process.env.WOOVI_BASE_URL || '');
@@ -64,6 +99,7 @@ function main() {
 
   const report = {
     ok: missingCommon.length === 0 && missingProd.length === 0,
+    envFilesLoaded,
     nodeEnv,
     wooviEnv,
     baseUrl,

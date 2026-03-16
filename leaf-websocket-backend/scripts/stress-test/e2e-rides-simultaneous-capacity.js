@@ -27,7 +27,7 @@ const CONCURRENCY = Number.parseInt(arg('--concurrency', String(RIDES)), 10);
 const TOKEN_CONCURRENCY = Number.parseInt(arg('--token-concurrency', '40'), 10);
 const FIREBASE_API_KEY = arg(
   '--api-key',
-  process.env.FIREBASE_API_KEY || process.env.EXPO_PUBLIC_FIREBASE_API_KEY || 'AIzaSyChYseG1IcmffYHHVYT7MqtLlzfdWKE_fc'
+  process.env.FIREBASE_API_KEY || process.env.EXPO_PUBLIC_FIREBASE_API_KEY || ''
 );
 const REDIS_URL = arg('--redis-url', process.env.REDIS_URL || 'redis://:leaf_redis_2024@localhost:6379/0');
 const BASE_LAT = Number.parseFloat(arg('--base-lat', '-22.9068'));

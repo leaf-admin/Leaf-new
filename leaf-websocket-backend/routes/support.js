@@ -1,472 +1,461 @@
 const express = require('express');
-const router = express.Router();
-const { authenticateToken, authorizeRole } = require('./auth');
-const jwt = require('jsonwebtoken');
+const rateLimit = require('express-rate-limit');
+const { logStructured, logError } = require('../utils/logger');
+const {
+  authenticateSupport,
+  requireSupportRoles,
+  isSupportAgent
+} = require('../middleware/support-auth');
 
-// Firebase integration
+const router = express.Router();
+
 let firebaseConfig = null;
 try {
   firebaseConfig = require('../firebase-config');
-} catch (e) {
-  logStructured('warn', '⚠️ Firebase config não encontrado', { service: 'support-routes' });
+} catch (error) {
+  logStructured('warn', 'Firebase config não encontrado para suporte', {
+    service: 'support-routes',
+    error: error.message
+  });
 }
 
-// Redis integration
-let Redis = null;
-try {
-  Redis = require('ioredis');
-const { logStructured, logError } = require('../utils/logger');
-} catch (e) {
-  logStructured('warn', '⚠️ Redis não encontrado', { service: 'support-routes' });
-}
+const AGENT_ROLES = ['admin', 'manager', 'super-admin'];
 
-// Configurações
-const JWT_SECRET = process.env.JWT_SECRET || 'leaf-dashboard-secret-key-2025';
-
-// ===== MIDDLEWARE DE SEGURANÇA =====
-
-// Rate limiting para APIs de suporte
-const rateLimit = require('express-rate-limit');
 const supportRateLimit = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutos
-  max: 100, // máximo 100 requests por IP
+  windowMs: 15 * 60 * 1000,
+  max: 100,
   message: 'Muitas tentativas, tente novamente em 15 minutos',
   standardHeaders: true,
-  legacyHeaders: false,
+  legacyHeaders: false
 });
 
-// Middleware de validação de entrada
 const validateTicketData = (req, res, next) => {
   const { subject, description, category, priority } = req.body;
-  
+
   if (!subject || !description) {
     return res.status(400).json({ error: 'Assunto e descrição são obrigatórios' });
   }
-  
+
   if (subject.length > 200) {
     return res.status(400).json({ error: 'Assunto muito longo (máximo 200 caracteres)' });
   }
-  
+
   if (description.length > 2000) {
     return res.status(400).json({ error: 'Descrição muito longa (máximo 2000 caracteres)' });
   }
-  
+
   const validCategories = ['technical', 'payment', 'account', 'general'];
   if (category && !validCategories.includes(category)) {
     return res.status(400).json({ error: 'Categoria inválida' });
   }
-  
+
   const validPriorities = ['N1', 'N2', 'N3'];
   if (priority && !validPriorities.includes(priority)) {
     return res.status(400).json({ error: 'Prioridade inválida' });
   }
-  
-  next();
+
+  return next();
 };
 
-// Middleware de sanitização
-const sanitizeInput = (req, res, next) => {
-  // Sanitizar strings para prevenir XSS
-  const sanitizeString = (str) => {
-    if (typeof str !== 'string') return str;
-    return str
-      .replace(/[<>]/g, '') // Remove < e >
-      .replace(/javascript:/gi, '') // Remove javascript:
-      .replace(/on\w+=/gi, '') // Remove event handlers
+const sanitizeInput = (req, _res, next) => {
+  const sanitizeString = (value) => {
+    if (typeof value !== 'string') return value;
+    return value
+      .replace(/[<>]/g, '')
+      .replace(/javascript:/gi, '')
+      .replace(/on\w+=/gi, '')
       .trim();
   };
-  
-  if (req.body) {
-    Object.keys(req.body).forEach(key => {
+
+  if (req.body && typeof req.body === 'object') {
+    Object.keys(req.body).forEach((key) => {
       if (typeof req.body[key] === 'string') {
         req.body[key] = sanitizeString(req.body[key]);
       }
     });
   }
-  
-  next();
+
+  return next();
 };
+
+function getRealtimeDBOrFail(res) {
+  if (!firebaseConfig || !firebaseConfig.getRealtimeDB) {
+    res.status(500).json({ error: 'Serviço de tickets temporariamente indisponível' });
+    return null;
+  }
+
+  const db = firebaseConfig.getRealtimeDB();
+  if (!db) {
+    res.status(500).json({ error: 'Serviço de tickets temporariamente indisponível' });
+    return null;
+  }
+
+  return db;
+}
+
+function getRequesterId(req) {
+  return String(req.user?.uid || req.user?.id || '');
+}
+
+function getRequesterLabel(req) {
+  return req.user?.email || req.user?.username || req.user?.id || 'unknown';
+}
+
+function canAccessTicket(req, ticket) {
+  if (!ticket) return false;
+
+  const requesterId = getRequesterId(req);
+  if (requesterId && String(ticket.userId) === requesterId) {
+    return true;
+  }
+
+  return isSupportAgent(req.user);
+}
+
+router.get('/faq', (_req, res) => {
+  res.json({
+    faqs: [
+      {
+        question: 'Como entrar em contato com o suporte?',
+        answer: 'Use o chat em tempo real no app ou abra um ticket com o contexto da solicitação.'
+      },
+      {
+        question: 'Qual o horário de atendimento?',
+        answer: 'O suporte da plataforma opera 24 horas por dia, 7 dias por semana.'
+      },
+      {
+        question: 'Como criar um ticket?',
+        answer: 'No app, acesse Suporte > Tickets e informe assunto, categoria e descrição.'
+      }
+    ]
+  });
+});
 
 // ===== APIS DE TICKETS =====
 
-// Criar ticket
-router.post('/tickets', supportRateLimit, sanitizeInput, validateTicketData, async (req, res) => {
-  try {
-    const { subject, description, category = 'general', priority = 'N3', userInfo, metadata } = req.body;
-    
-    // Verificar se Firebase está disponível
-    if (!firebaseConfig || !firebaseConfig.getRealtimeDB) {
-      return res.status(500).json({ error: 'Serviço de tickets temporariamente indisponível' });
-    }
-    
-    const db = firebaseConfig.getRealtimeDB();
-    const ticketId = `TICKET-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-    const now = new Date().toISOString();
-    
-    const ticket = {
-      id: ticketId,
-      userId: req.user?.id || 'anonymous',
-      userType: req.user?.userType || 'passenger',
-      subject: subject.trim(),
-      description: description.trim(),
-      category,
-      priority,
-      status: 'open',
-      assignedAgent: null,
-      assignedAt: null,
-      resolvedAt: null,
-      closedAt: null,
-      createdAt: now,
-      updatedAt: now,
-      tags: [],
-      attachments: [],
-      escalationLevel: 1,
-      escalationHistory: [],
-      userInfo: userInfo || {},
-      metadata: metadata || {},
-      ipAddress: req.ip,
-      userAgent: req.get('User-Agent')
-    };
-    
-    // Salvar no Firebase
-    await db.ref(`support_tickets/${ticketId}`).set(ticket);
-    
-    // Criar mensagem inicial
-    const messageId = `MSG-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-    const initialMessage = {
-      id: messageId,
-      ticketId,
-      senderId: ticket.userId,
-      senderType: 'user',
-      message: description.trim(),
-      messageType: 'text',
-      isInternal: false,
-      attachments: [],
-      createdAt: now,
-      readBy: {
-        [ticket.userId]: now
-      }
-    };
-    
-    await db.ref(`support_messages/${ticketId}/${messageId}`).set(initialMessage);
-    
-    // ✅ Notificar agentes disponíveis via WebSocket (TEMPO REAL)
-    await notifyAvailableAgents(ticket);
-    
-    logStructured('info', `🎫 Novo ticket criado: ${ticketId} - Prioridade: ${priority}`, { service: 'support-routes' });
-    
-    res.status(201).json({
-      success: true,
-      ticket: {
-        id: ticket.id,
-        subject: ticket.subject,
-        status: ticket.status,
-        priority: ticket.priority,
-        createdAt: ticket.createdAt
-      }
-    });
-    
-  } catch (error) {
-    logError(error, '❌ Erro ao criar ticket:', { service: 'support-routes' });
-    res.status(500).json({ error: 'Erro interno do servidor' });
-  }
-});
+router.post(
+  '/tickets',
+  supportRateLimit,
+  authenticateSupport,
+  sanitizeInput,
+  validateTicketData,
+  async (req, res) => {
+    try {
+      const { subject, description, category = 'general', priority = 'N3', userInfo, metadata } = req.body;
 
-// Listar tickets do usuário
-router.get('/tickets', authenticateToken, async (req, res) => {
+      const db = getRealtimeDBOrFail(res);
+      if (!db) return;
+
+      const ticketId = `TICKET-${Date.now()}-${Math.random().toString(36).slice(2, 11)}`;
+      const now = new Date().toISOString();
+      const requesterId = getRequesterId(req);
+
+      const ticket = {
+        id: ticketId,
+        userId: requesterId,
+        userType: req.user?.userType || 'passenger',
+        subject: subject.trim(),
+        description: description.trim(),
+        category,
+        priority,
+        status: 'open',
+        assignedAgent: null,
+        assignedAt: null,
+        resolvedAt: null,
+        closedAt: null,
+        createdAt: now,
+        updatedAt: now,
+        tags: [],
+        attachments: [],
+        escalationLevel: 1,
+        escalationHistory: [],
+        userInfo: userInfo || {},
+        metadata: metadata || {},
+        ipAddress: req.ip,
+        userAgent: req.get('User-Agent')
+      };
+
+      await db.ref(`support_tickets/${ticketId}`).set(ticket);
+
+      const messageId = `MSG-${Date.now()}-${Math.random().toString(36).slice(2, 11)}`;
+      const initialMessage = {
+        id: messageId,
+        ticketId,
+        senderId: requesterId,
+        senderType: 'user',
+        message: description.trim(),
+        messageType: 'text',
+        isInternal: false,
+        attachments: [],
+        createdAt: now,
+        readBy: {
+          [requesterId]: now
+        }
+      };
+
+      await db.ref(`support_messages/${ticketId}/${messageId}`).set(initialMessage);
+      await notifyAvailableAgents(ticket);
+
+      logStructured('info', `Novo ticket criado: ${ticketId}`, {
+        service: 'support-routes',
+        ticketId,
+        priority,
+        requesterId
+      });
+
+      res.status(201).json({
+        success: true,
+        ticket: {
+          id: ticket.id,
+          subject: ticket.subject,
+          status: ticket.status,
+          priority: ticket.priority,
+          createdAt: ticket.createdAt,
+          userId: ticket.userId
+        }
+      });
+    } catch (error) {
+      logError(error, { service: 'support-routes', operation: 'createTicket' });
+      res.status(500).json({ error: 'Erro interno do servidor' });
+    }
+  }
+);
+
+router.get('/tickets', authenticateSupport, async (req, res) => {
   try {
-    const { status, priority, category, limit = 50, offset = 0 } = req.query;
-    
-    if (!firebaseConfig || !firebaseConfig.getRealtimeDB) {
-      return res.status(500).json({ error: 'Serviço de tickets temporariamente indisponível' });
+    const { status, priority, category, limit = 50, offset = 0, userId } = req.query;
+
+    const db = getRealtimeDBOrFail(res);
+    if (!db) return;
+
+    let snapshot;
+    const requesterId = getRequesterId(req);
+
+    if (isSupportAgent(req.user)) {
+      if (userId) {
+        snapshot = await db.ref('support_tickets').orderByChild('userId').equalTo(String(userId)).once('value');
+      } else {
+        snapshot = await db.ref('support_tickets').once('value');
+      }
+    } else {
+      snapshot = await db.ref('support_tickets').orderByChild('userId').equalTo(requesterId).once('value');
     }
-    
-    const db = firebaseConfig.getRealtimeDB();
-    const snapshot = await db.ref('support_tickets')
-      .orderByChild('userId')
-      .equalTo(req.user.id)
-      .once('value');
-    
-    let tickets = [];
-    if (snapshot.val()) {
-      tickets = Object.values(snapshot.val());
-    }
-    
-    // Aplicar filtros
-    if (status) {
-      tickets = tickets.filter(ticket => ticket.status === status);
-    }
-    if (priority) {
-      tickets = tickets.filter(ticket => ticket.priority === priority);
-    }
-    if (category) {
-      tickets = tickets.filter(ticket => ticket.category === category);
-    }
-    
-    // Ordenar por data de criação (mais recente primeiro)
+
+    let tickets = snapshot.val() ? Object.values(snapshot.val()) : [];
+
+    if (status) tickets = tickets.filter((ticket) => ticket.status === status);
+    if (priority) tickets = tickets.filter((ticket) => ticket.priority === priority);
+    if (category) tickets = tickets.filter((ticket) => ticket.category === category);
+
     tickets.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
-    
-    // Paginação
-    const paginatedTickets = tickets.slice(offset, offset + parseInt(limit));
-    
+
+    const numericOffset = Number.parseInt(offset, 10) || 0;
+    const numericLimit = Number.parseInt(limit, 10) || 50;
+    const paginatedTickets = tickets.slice(numericOffset, numericOffset + numericLimit);
+
     res.json({
       success: true,
       tickets: paginatedTickets,
       total: tickets.length,
-      hasMore: (offset + parseInt(limit)) < tickets.length
+      hasMore: numericOffset + numericLimit < tickets.length
     });
-    
   } catch (error) {
-    logError(error, '❌ Erro ao listar tickets:', { service: 'support-routes' });
+    logError(error, { service: 'support-routes', operation: 'listTickets' });
     res.status(500).json({ error: 'Erro interno do servidor' });
   }
 });
 
-// Obter ticket específico
-router.get('/tickets/:ticketId', authenticateToken, async (req, res) => {
+router.get('/tickets/:ticketId', authenticateSupport, async (req, res) => {
   try {
     const { ticketId } = req.params;
-    
-    if (!firebaseConfig || !firebaseConfig.getRealtimeDB) {
-      return res.status(500).json({ error: 'Serviço de tickets temporariamente indisponível' });
-    }
-    
-    const db = firebaseConfig.getRealtimeDB();
+
+    const db = getRealtimeDBOrFail(res);
+    if (!db) return;
+
     const snapshot = await db.ref(`support_tickets/${ticketId}`).once('value');
-    
-    if (!snapshot.val()) {
+    const ticket = snapshot.val();
+
+    if (!ticket) {
       return res.status(404).json({ error: 'Ticket não encontrado' });
     }
-    
-    const ticket = snapshot.val();
-    
-    // Verificar se o usuário tem acesso ao ticket
-    if (ticket.userId !== req.user.id && !['admin', 'manager'].includes(req.user.role)) {
+
+    if (!canAccessTicket(req, ticket)) {
       return res.status(403).json({ error: 'Acesso negado' });
     }
-    
-    res.json({
-      success: true,
-      ticket
-    });
-    
+
+    return res.json({ success: true, ticket });
   } catch (error) {
-    logError(error, '❌ Erro ao obter ticket:', { service: 'support-routes' });
-    res.status(500).json({ error: 'Erro interno do servidor' });
+    logError(error, { service: 'support-routes', operation: 'getTicket' });
+    return res.status(500).json({ error: 'Erro interno do servidor' });
   }
 });
 
-// ===== APIS DE MENSAGENS =====
-
-// Listar mensagens do ticket
-router.get('/tickets/:ticketId/messages', authenticateToken, async (req, res) => {
+router.get('/tickets/:ticketId/messages', authenticateSupport, async (req, res) => {
   try {
     const { ticketId } = req.params;
-    
-    if (!firebaseConfig || !firebaseConfig.getRealtimeDB) {
-      return res.status(500).json({ error: 'Serviço de tickets temporariamente indisponível' });
-    }
-    
-    const db = firebaseConfig.getRealtimeDB();
-    
-    // Verificar se o ticket existe e se o usuário tem acesso
+
+    const db = getRealtimeDBOrFail(res);
+    if (!db) return;
+
     const ticketSnapshot = await db.ref(`support_tickets/${ticketId}`).once('value');
-    if (!ticketSnapshot.val()) {
+    const ticket = ticketSnapshot.val();
+
+    if (!ticket) {
       return res.status(404).json({ error: 'Ticket não encontrado' });
     }
-    
-    const ticket = ticketSnapshot.val();
-    if (ticket.userId !== req.user.id && !['admin', 'manager'].includes(req.user.role)) {
+
+    if (!canAccessTicket(req, ticket)) {
       return res.status(403).json({ error: 'Acesso negado' });
     }
-    
-    // Buscar mensagens
-    const messagesSnapshot = await db.ref(`support_messages/${ticketId}`)
-      .orderByChild('createdAt')
-      .once('value');
-    
-    let messages = [];
-    if (messagesSnapshot.val()) {
-      messages = Object.values(messagesSnapshot.val());
-    }
-    
-    res.json({
-      success: true,
-      messages
-    });
-    
+
+    const messagesSnapshot = await db.ref(`support_messages/${ticketId}`).orderByChild('createdAt').once('value');
+    const messages = messagesSnapshot.val() ? Object.values(messagesSnapshot.val()) : [];
+
+    return res.json({ success: true, messages });
   } catch (error) {
-    logError(error, '❌ Erro ao listar mensagens:', { service: 'support-routes' });
-    res.status(500).json({ error: 'Erro interno do servidor' });
+    logError(error, { service: 'support-routes', operation: 'listTicketMessages' });
+    return res.status(500).json({ error: 'Erro interno do servidor' });
   }
 });
 
-// Enviar mensagem
-router.post('/tickets/:ticketId/messages', supportRateLimit, sanitizeInput, authenticateToken, async (req, res) => {
+router.post('/tickets/:ticketId/messages', supportRateLimit, sanitizeInput, authenticateSupport, async (req, res) => {
   try {
     const { ticketId } = req.params;
     const { message, messageType = 'text', attachments = [] } = req.body;
-    
+
     if (!message || !message.trim()) {
       return res.status(400).json({ error: 'Mensagem é obrigatória' });
     }
-    
+
     if (message.length > 1000) {
       return res.status(400).json({ error: 'Mensagem muito longa (máximo 1000 caracteres)' });
     }
-    
-    if (!firebaseConfig || !firebaseConfig.getRealtimeDB) {
-      return res.status(500).json({ error: 'Serviço de tickets temporariamente indisponível' });
-    }
-    
-    const db = firebaseConfig.getRealtimeDB();
-    
-    // Verificar se o ticket existe e se o usuário tem acesso
+
+    const db = getRealtimeDBOrFail(res);
+    if (!db) return;
+
     const ticketSnapshot = await db.ref(`support_tickets/${ticketId}`).once('value');
-    if (!ticketSnapshot.val()) {
+    const ticket = ticketSnapshot.val();
+
+    if (!ticket) {
       return res.status(404).json({ error: 'Ticket não encontrado' });
     }
-    
-    const ticket = ticketSnapshot.val();
-    if (ticket.userId !== req.user.id && !['admin', 'manager'].includes(req.user.role)) {
+
+    if (!canAccessTicket(req, ticket)) {
       return res.status(403).json({ error: 'Acesso negado' });
     }
-    
-    const messageId = `MSG-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+
+    const senderId = getRequesterId(req);
+    const senderType = senderId === String(ticket.userId) ? 'user' : 'agent';
+    const messageId = `MSG-${Date.now()}-${Math.random().toString(36).slice(2, 11)}`;
     const now = new Date().toISOString();
-    
+
     const newMessage = {
       id: messageId,
       ticketId,
-      senderId: req.user.id,
-      senderType: ticket.userId === req.user.id ? 'user' : 'agent',
+      senderId,
+      senderType,
       message: message.trim(),
       messageType,
       isInternal: false,
       attachments,
       createdAt: now,
       readBy: {
-        [req.user.id]: now
+        [senderId]: now
       }
     };
-    
-    // Salvar mensagem
+
     await db.ref(`support_messages/${ticketId}/${messageId}`).set(newMessage);
-    
-    // Atualizar timestamp do ticket
-    await db.ref(`support_tickets/${ticketId}`).update({
-      updatedAt: now
-    });
-    
-    // Notificar participantes
+    await db.ref(`support_tickets/${ticketId}`).update({ updatedAt: now });
+
     await notifyParticipants(ticketId, newMessage);
-    
-    logStructured('info', `💬 Mensagem enviada no ticket ${ticketId} por ${req.user.username}`, { service: 'support-routes' });
-    
-    res.status(201).json({
-      success: true,
-      message: newMessage
+
+    logStructured('info', `Mensagem enviada no ticket ${ticketId}`, {
+      service: 'support-routes',
+      ticketId,
+      senderId,
+      actor: getRequesterLabel(req)
     });
-    
+
+    return res.status(201).json({ success: true, message: newMessage });
   } catch (error) {
-    logError(error, '❌ Erro ao enviar mensagem:', { service: 'support-routes' });
-    res.status(500).json({ error: 'Erro interno do servidor' });
+    logError(error, { service: 'support-routes', operation: 'sendTicketMessage' });
+    return res.status(500).json({ error: 'Erro interno do servidor' });
   }
 });
 
-// ===== APIS DE AGENTES (ADMIN/MANAGER) =====
+// ===== APIS DE AGENTES =====
 
-// Listar todos os tickets (apenas admin/manager)
-router.get('/admin/tickets', authenticateToken, authorizeRole(['admin', 'manager']), async (req, res) => {
+router.get('/admin/tickets', authenticateSupport, requireSupportRoles(AGENT_ROLES), async (req, res) => {
   try {
     const { status, priority, category, agent, limit = 100, offset = 0 } = req.query;
-    
-    if (!firebaseConfig || !firebaseConfig.getRealtimeDB) {
-      return res.status(500).json({ error: 'Serviço de tickets temporariamente indisponível' });
-    }
-    
-    const db = firebaseConfig.getRealtimeDB();
+
+    const db = getRealtimeDBOrFail(res);
+    if (!db) return;
+
     const snapshot = await db.ref('support_tickets').once('value');
-    
-    let tickets = [];
-    if (snapshot.val()) {
-      tickets = Object.values(snapshot.val());
-    }
-    
-    // Aplicar filtros
-    if (status) {
-      tickets = tickets.filter(ticket => ticket.status === status);
-    }
-    if (priority) {
-      tickets = tickets.filter(ticket => ticket.priority === priority);
-    }
-    if (category) {
-      tickets = tickets.filter(ticket => ticket.category === category);
-    }
-    if (agent) {
-      tickets = tickets.filter(ticket => ticket.assignedAgent === agent);
-    }
-    
-    // Ordenar por prioridade e data
+    let tickets = snapshot.val() ? Object.values(snapshot.val()) : [];
+
+    if (status) tickets = tickets.filter((ticket) => ticket.status === status);
+    if (priority) tickets = tickets.filter((ticket) => ticket.priority === priority);
+    if (category) tickets = tickets.filter((ticket) => ticket.category === category);
+    if (agent) tickets = tickets.filter((ticket) => ticket.assignedAgent === agent);
+
     tickets.sort((a, b) => {
-      const priorityOrder = { 'N1': 3, 'N2': 2, 'N3': 1 };
+      const priorityOrder = { N1: 3, N2: 2, N3: 1 };
       const aPriority = priorityOrder[a.priority] || 0;
       const bPriority = priorityOrder[b.priority] || 0;
-      
+
       if (aPriority !== bPriority) {
         return bPriority - aPriority;
       }
-      
+
       return new Date(b.createdAt) - new Date(a.createdAt);
     });
-    
-    // Paginação
-    const paginatedTickets = tickets.slice(offset, offset + parseInt(limit));
-    
+
+    const numericOffset = Number.parseInt(offset, 10) || 0;
+    const numericLimit = Number.parseInt(limit, 10) || 100;
+
     res.json({
       success: true,
-      tickets: paginatedTickets,
+      tickets: tickets.slice(numericOffset, numericOffset + numericLimit),
       total: tickets.length,
-      hasMore: (offset + parseInt(limit)) < tickets.length
+      hasMore: numericOffset + numericLimit < tickets.length
     });
-    
   } catch (error) {
-    logError(error, '❌ Erro ao listar tickets admin:', { service: 'support-routes' });
+    logError(error, { service: 'support-routes', operation: 'listAdminTickets' });
     res.status(500).json({ error: 'Erro interno do servidor' });
   }
 });
 
-// Atribuir ticket a agente
-router.post('/admin/tickets/:ticketId/assign', authenticateToken, authorizeRole(['admin', 'manager']), async (req, res) => {
+router.post('/admin/tickets/:ticketId/assign', authenticateSupport, requireSupportRoles(AGENT_ROLES), async (req, res) => {
   try {
     const { ticketId } = req.params;
     const { agentId, agentName } = req.body;
-    
+
     if (!agentId || !agentName) {
       return res.status(400).json({ error: 'ID e nome do agente são obrigatórios' });
     }
-    
-    if (!firebaseConfig || !firebaseConfig.getRealtimeDB) {
-      return res.status(500).json({ error: 'Serviço de tickets temporariamente indisponível' });
-    }
-    
-    const db = firebaseConfig.getRealtimeDB();
+
+    const db = getRealtimeDBOrFail(res);
+    if (!db) return;
+
     const now = new Date().toISOString();
-    
-    // Atualizar ticket
+
     await db.ref(`support_tickets/${ticketId}`).update({
       assignedAgent: agentId,
       assignedAt: now,
       status: 'assigned',
       updatedAt: now
     });
-    
-    // Adicionar mensagem de sistema
-    const messageId = `MSG-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+
+    const messageId = `MSG-${Date.now()}-${Math.random().toString(36).slice(2, 11)}`;
+    const senderId = getRequesterId(req);
+
     const systemMessage = {
       id: messageId,
       ticketId,
-      senderId: req.user.id,
+      senderId,
       senderType: 'agent',
       message: `Ticket atribuído ao agente ${agentName}`,
       messageType: 'system',
@@ -474,59 +463,56 @@ router.post('/admin/tickets/:ticketId/assign', authenticateToken, authorizeRole(
       attachments: [],
       createdAt: now,
       readBy: {
-        [req.user.id]: now
+        [senderId]: now
       }
     };
-    
+
     await db.ref(`support_messages/${ticketId}/${messageId}`).set(systemMessage);
-    
-    logStructured('info', `👤 Ticket ${ticketId} atribuído ao agente ${agentName} por ${req.user.username}`, { service: 'support-routes' });
-    
-    res.json({
-      success: true,
-      message: 'Ticket atribuído com sucesso'
+
+    logStructured('info', `Ticket ${ticketId} atribuído`, {
+      service: 'support-routes',
+      ticketId,
+      assignedAgent: agentId,
+      actor: getRequesterLabel(req)
     });
-    
+
+    res.json({ success: true, message: 'Ticket atribuído com sucesso' });
   } catch (error) {
-    logError(error, '❌ Erro ao atribuir ticket:', { service: 'support-routes' });
+    logError(error, { service: 'support-routes', operation: 'assignTicket' });
     res.status(500).json({ error: 'Erro interno do servidor' });
   }
 });
 
-// Escalar ticket
-router.post('/admin/tickets/:ticketId/escalate', authenticateToken, authorizeRole(['admin', 'manager']), async (req, res) => {
+router.post('/admin/tickets/:ticketId/escalate', authenticateSupport, requireSupportRoles(AGENT_ROLES), async (req, res) => {
   try {
     const { ticketId } = req.params;
     const { reason } = req.body;
-    
+
     if (!reason || !reason.trim()) {
       return res.status(400).json({ error: 'Motivo da escalação é obrigatório' });
     }
-    
-    if (!firebaseConfig || !firebaseConfig.getRealtimeDB) {
-      return res.status(500).json({ error: 'Serviço de tickets temporariamente indisponível' });
-    }
-    
-    const db = firebaseConfig.getRealtimeDB();
-    
-    // Buscar ticket atual
+
+    const db = getRealtimeDBOrFail(res);
+    if (!db) return;
+
     const ticketSnapshot = await db.ref(`support_tickets/${ticketId}`).once('value');
-    if (!ticketSnapshot.val()) {
+    const ticket = ticketSnapshot.val();
+
+    if (!ticket) {
       return res.status(404).json({ error: 'Ticket não encontrado' });
     }
-    
-    const ticket = ticketSnapshot.val();
-    const newLevel = Math.min(ticket.escalationLevel + 1, 3);
+
+    const newLevel = Math.min((ticket.escalationLevel || 1) + 1, 3);
     const now = new Date().toISOString();
-    
+    const senderId = getRequesterId(req);
+
     const escalationEntry = {
       level: newLevel,
       reason: reason.trim(),
-      escalatedBy: req.user.id,
+      escalatedBy: senderId,
       escalatedAt: now
     };
-    
-    // Atualizar ticket
+
     await db.ref(`support_tickets/${ticketId}`).update({
       escalationLevel: newLevel,
       status: 'escalated',
@@ -535,13 +521,12 @@ router.post('/admin/tickets/:ticketId/escalate', authenticateToken, authorizeRol
       updatedAt: now,
       escalationHistory: [...(ticket.escalationHistory || []), escalationEntry]
     });
-    
-    // Adicionar mensagem de sistema
-    const messageId = `MSG-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+
+    const messageId = `MSG-${Date.now()}-${Math.random().toString(36).slice(2, 11)}`;
     const systemMessage = {
       id: messageId,
       ticketId,
-      senderId: req.user.id,
+      senderId,
       senderType: 'agent',
       message: `Ticket escalado para nível ${newLevel}. Motivo: ${reason.trim()}`,
       messageType: 'system',
@@ -549,52 +534,48 @@ router.post('/admin/tickets/:ticketId/escalate', authenticateToken, authorizeRol
       attachments: [],
       createdAt: now,
       readBy: {
-        [req.user.id]: now
+        [senderId]: now
       }
     };
-    
+
     await db.ref(`support_messages/${ticketId}/${messageId}`).set(systemMessage);
-    
-    logStructured('info', `⬆️ Ticket ${ticketId} escalado para nível ${newLevel} por ${req.user.username}`, { service: 'support-routes' });
-    
-    res.json({
-      success: true,
-      message: 'Ticket escalado com sucesso',
-      escalationLevel: newLevel
+
+    logStructured('info', `Ticket ${ticketId} escalado`, {
+      service: 'support-routes',
+      ticketId,
+      escalationLevel: newLevel,
+      actor: getRequesterLabel(req)
     });
-    
+
+    res.json({ success: true, message: 'Ticket escalado com sucesso', escalationLevel: newLevel });
   } catch (error) {
-    logError(error, '❌ Erro ao escalar ticket:', { service: 'support-routes' });
+    logError(error, { service: 'support-routes', operation: 'escalateTicket' });
     res.status(500).json({ error: 'Erro interno do servidor' });
   }
 });
 
-// Resolver ticket
-router.post('/admin/tickets/:ticketId/resolve', authenticateToken, authorizeRole(['admin', 'manager']), async (req, res) => {
+router.post('/admin/tickets/:ticketId/resolve', authenticateSupport, requireSupportRoles(AGENT_ROLES), async (req, res) => {
   try {
     const { ticketId } = req.params;
     const { resolution } = req.body;
-    
-    if (!firebaseConfig || !firebaseConfig.getRealtimeDB) {
-      return res.status(500).json({ error: 'Serviço de tickets temporariamente indisponível' });
-    }
-    
-    const db = firebaseConfig.getRealtimeDB();
+
+    const db = getRealtimeDBOrFail(res);
+    if (!db) return;
+
     const now = new Date().toISOString();
-    
-    // Atualizar ticket
+    const senderId = getRequesterId(req);
+
     await db.ref(`support_tickets/${ticketId}`).update({
       status: 'resolved',
       resolvedAt: now,
       updatedAt: now
     });
-    
-    // Adicionar mensagem de sistema
-    const messageId = `MSG-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+
+    const messageId = `MSG-${Date.now()}-${Math.random().toString(36).slice(2, 11)}`;
     const systemMessage = {
       id: messageId,
       ticketId,
-      senderId: req.user.id,
+      senderId,
       senderType: 'agent',
       message: resolution ? `Ticket resolvido. ${resolution}` : 'Ticket resolvido.',
       messageType: 'system',
@@ -602,93 +583,75 @@ router.post('/admin/tickets/:ticketId/resolve', authenticateToken, authorizeRole
       attachments: [],
       createdAt: now,
       readBy: {
-        [req.user.id]: now
+        [senderId]: now
       }
     };
-    
+
     await db.ref(`support_messages/${ticketId}/${messageId}`).set(systemMessage);
-    
-    logStructured('info', `✅ Ticket ${ticketId} resolvido por ${req.user.username}`, { service: 'support-routes' });
-    
-    res.json({
-      success: true,
-      message: 'Ticket resolvido com sucesso'
+
+    logStructured('info', `Ticket ${ticketId} resolvido`, {
+      service: 'support-routes',
+      ticketId,
+      actor: getRequesterLabel(req)
     });
-    
+
+    res.json({ success: true, message: 'Ticket resolvido com sucesso' });
   } catch (error) {
-    logError(error, '❌ Erro ao resolver ticket:', { service: 'support-routes' });
+    logError(error, { service: 'support-routes', operation: 'resolveTicket' });
     res.status(500).json({ error: 'Erro interno do servidor' });
   }
 });
 
-// ===== ESTATÍSTICAS =====
-
-// Estatísticas de tickets
-router.get('/admin/stats', authenticateToken, authorizeRole(['admin', 'manager']), async (req, res) => {
+router.get('/admin/stats', authenticateSupport, requireSupportRoles(AGENT_ROLES), async (req, res) => {
   try {
     const { startDate, endDate } = req.query;
-    
-    if (!firebaseConfig || !firebaseConfig.getRealtimeDB) {
-      return res.status(500).json({ error: 'Serviço de tickets temporariamente indisponível' });
-    }
-    
-    const db = firebaseConfig.getRealtimeDB();
+
+    const db = getRealtimeDBOrFail(res);
+    if (!db) return;
+
     const snapshot = await db.ref('support_tickets').once('value');
-    
-    let tickets = [];
-    if (snapshot.val()) {
-      tickets = Object.values(snapshot.val());
-    }
-    
-    // Aplicar filtro de data se fornecido
+    let tickets = snapshot.val() ? Object.values(snapshot.val()) : [];
+
     if (startDate && endDate) {
       const start = new Date(startDate);
       const end = new Date(endDate);
-      tickets = tickets.filter(ticket => {
+      tickets = tickets.filter((ticket) => {
         const ticketDate = new Date(ticket.createdAt);
         return ticketDate >= start && ticketDate <= end;
       });
     }
-    
+
     const stats = {
       total: tickets.length,
-      open: tickets.filter(t => t.status === 'open').length,
-      assigned: tickets.filter(t => t.status === 'assigned').length,
-      inProgress: tickets.filter(t => t.status === 'in_progress').length,
-      resolved: tickets.filter(t => t.status === 'resolved').length,
-      closed: tickets.filter(t => t.status === 'closed').length,
-      escalated: tickets.filter(t => t.status === 'escalated').length,
+      open: tickets.filter((ticket) => ticket.status === 'open').length,
+      assigned: tickets.filter((ticket) => ticket.status === 'assigned').length,
+      inProgress: tickets.filter((ticket) => ticket.status === 'in_progress').length,
+      resolved: tickets.filter((ticket) => ticket.status === 'resolved').length,
+      closed: tickets.filter((ticket) => ticket.status === 'closed').length,
+      escalated: tickets.filter((ticket) => ticket.status === 'escalated').length,
       byPriority: {
-        N1: tickets.filter(t => t.priority === 'N1').length,
-        N2: tickets.filter(t => t.priority === 'N2').length,
-        N3: tickets.filter(t => t.priority === 'N3').length
+        N1: tickets.filter((ticket) => ticket.priority === 'N1').length,
+        N2: tickets.filter((ticket) => ticket.priority === 'N2').length,
+        N3: tickets.filter((ticket) => ticket.priority === 'N3').length
       },
       byCategory: {
-        technical: tickets.filter(t => t.category === 'technical').length,
-        payment: tickets.filter(t => t.category === 'payment').length,
-        account: tickets.filter(t => t.category === 'account').length,
-        general: tickets.filter(t => t.category === 'general').length
+        technical: tickets.filter((ticket) => ticket.category === 'technical').length,
+        payment: tickets.filter((ticket) => ticket.category === 'payment').length,
+        account: tickets.filter((ticket) => ticket.category === 'account').length,
+        general: tickets.filter((ticket) => ticket.category === 'general').length
       },
       averageResolutionTime: calculateAverageResolutionTime(tickets)
     };
-    
-    res.json({
-      success: true,
-      stats
-    });
-    
+
+    res.json({ success: true, stats });
   } catch (error) {
-    logError(error, '❌ Erro ao obter estatísticas:', { service: 'support-routes' });
+    logError(error, { service: 'support-routes', operation: 'supportStats' });
     res.status(500).json({ error: 'Erro interno do servidor' });
   }
 });
 
-// ===== FUNÇÕES AUXILIARES =====
-
-// Calcular tempo médio de resolução
 function calculateAverageResolutionTime(tickets) {
-  const resolvedTickets = tickets.filter(t => t.resolvedAt);
-  
+  const resolvedTickets = tickets.filter((ticket) => ticket.resolvedAt);
   if (resolvedTickets.length === 0) return 0;
 
   const totalTime = resolvedTickets.reduce((sum, ticket) => {
@@ -697,89 +660,58 @@ function calculateAverageResolutionTime(tickets) {
     return sum + (resolved - created);
   }, 0);
 
-  return Math.round(totalTime / resolvedTickets.length / (1000 * 60 * 60)); // Converter para horas
+  return Math.round(totalTime / resolvedTickets.length / (1000 * 60 * 60));
 }
 
-// Obter instância do Socket.IO (será injetada)
 let ioInstance = null;
 
 function setIOInstance(io) {
   ioInstance = io;
 }
 
-// Notificar agentes disponíveis
 async function notifyAvailableAgents(ticket) {
   try {
-    logStructured('info', `🔔 Notificando agentes sobre novo ticket: ${ticket.id}`, { service: 'support-routes' });
-    
-    // Notificar via WebSocket para dashboard (todos os admins conectados)
-    if (ioInstance) {
-      // Emitir para todos os clientes conectados (dashboard admins)
-      ioInstance.emit('support:ticket:new', {
-        ticket: {
-          id: ticket.id,
-          subject: ticket.subject,
-          status: ticket.status,
-          priority: ticket.priority,
-          userId: ticket.userId,
-          userType: ticket.userType,
-          category: ticket.category,
-          createdAt: ticket.createdAt,
-          updatedAt: ticket.updatedAt
-        }
-      });
-      
-      logStructured('info', `✅ Notificação WebSocket enviada para dashboard sobre ticket: ${ticket.id}`, { service: 'support-routes' });
-    }
-    
-    // Aqui você implementaria:
-    // - Push notifications para agentes
-    // - Email para supervisores se necessário
-    
+    if (!ioInstance) return;
+
+    ioInstance.emit('support:ticket:new', {
+      ticket: {
+        id: ticket.id,
+        subject: ticket.subject,
+        status: ticket.status,
+        priority: ticket.priority,
+        userId: ticket.userId,
+        userType: ticket.userType,
+        category: ticket.category,
+        createdAt: ticket.createdAt,
+        updatedAt: ticket.updatedAt
+      }
+    });
   } catch (error) {
-    logError(error, '❌ Erro ao notificar agentes:', { service: 'support-routes' });
+    logError(error, { service: 'support-routes', operation: 'notifyAvailableAgents' });
   }
 }
 
-// Notificar participantes sobre nova mensagem
 async function notifyParticipants(ticketId, message) {
   try {
-    logStructured('info', `🔔 Notificando participantes sobre nova mensagem no ticket: ${ticketId}`, { service: 'support-routes' });
-    
-    // Notificar via WebSocket
-    if (ioInstance) {
-      // Notificar dashboard sobre nova mensagem
-      ioInstance.emit('support:message:new', {
-        ticketId,
-        message: {
-          id: message.id,
-          ticketId: message.ticketId,
-          senderId: message.senderId,
-          senderType: message.senderType,
-          message: message.message,
-          messageType: message.messageType,
-          createdAt: message.createdAt
-        }
-      });
-      
-      logStructured('info', `✅ Notificação WebSocket enviada sobre nova mensagem no ticket: ${ticketId}`, { service: 'support-routes' });
-    }
-    
+    if (!ioInstance) return;
+
+    ioInstance.emit('support:message:new', {
+      ticketId,
+      message: {
+        id: message.id,
+        ticketId: message.ticketId,
+        senderId: message.senderId,
+        senderType: message.senderType,
+        message: message.message,
+        messageType: message.messageType,
+        createdAt: message.createdAt
+      }
+    });
   } catch (error) {
-    logError(error, '❌ Erro ao notificar participantes:', { service: 'support-routes' });
+    logError(error, { service: 'support-routes', operation: 'notifyParticipants' });
   }
 }
 
-module.exports.setIOInstance = setIOInstance;
+router.setIOInstance = setIOInstance;
 
 module.exports = router;
-
-
-
-
-
-
-
-
-
-

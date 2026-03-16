@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import ProtectedRoute from "@/src/components/ProtectedRoute";
 import AppNav from "@/src/components/AppNav";
 import Panel from "@/src/components/ui/Panel";
@@ -13,60 +13,101 @@ const defaultForm = {
   days: 7,
   maxRedemptions: "",
   criteria: "all_drivers",
+  startDate: "",
+  endDate: "",
 };
+
+const statusOptions = ["all", "active", "paused", "completed", "expired"];
 
 export default function PromotionsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [rows, setRows] = useState([]);
+  const [stats, setStats] = useState(null);
+  const [statusFilter, setStatusFilter] = useState("all");
   const [form, setForm] = useState(defaultForm);
   const [driverId, setDriverId] = useState("");
   const [selectedPromotion, setSelectedPromotion] = useState("");
+  const [busyPromotionId, setBusyPromotionId] = useState("");
 
-  const load = async () => {
+  const load = useCallback(async () => {
     setLoading(true);
     setError("");
     try {
-      const response = await leafAPI.listPromotions({ status: "active" });
-      setRows(response?.promotions || []);
+      const params = statusFilter !== "all" ? { status: statusFilter } : {};
+      const [listResponse, statsResponse] = await Promise.all([
+        leafAPI.listPromotions(params),
+        leafAPI.getPromotionStats(),
+      ]);
+
+      setRows(listResponse?.promotions || []);
+      setStats(statsResponse?.stats || null);
     } catch (err) {
-      setError(err?.message || "Falha ao carregar promoções");
+      setError(err?.message || "Falha ao carregar promocoes");
     } finally {
       setLoading(false);
     }
-  };
+  }, [statusFilter]);
 
   useEffect(() => {
     load();
-  }, []);
+  }, [load]);
+
+  const canCreate = useMemo(() => form.name.trim().length > 2, [form.name]);
 
   const create = async () => {
+    if (!canCreate) {
+      setError("Informe um nome valido para a promocao");
+      return;
+    }
+
     try {
       setError("");
+      const now = new Date();
+      const startDateIso = form.startDate ? new Date(form.startDate).toISOString() : now.toISOString();
+      const isFutureStart = new Date(startDateIso).getTime() > now.getTime();
+
       await leafAPI.createPromotion({
-        name: form.name,
+        name: form.name.trim(),
         description: "beneficio criado via dashboard moderno",
         type: form.type,
+        status: isFutureStart ? "paused" : "active",
         benefit: {
-          type: "free_subscription",
+          type: form.type,
           duration: Number(form.days) || 7,
           unit: "days",
         },
         eligibility: {
           criteria: form.criteria,
         },
+        startDate: startDateIso,
+        endDate: form.endDate ? new Date(form.endDate).toISOString() : null,
         maxRedemptions: form.maxRedemptions ? Number(form.maxRedemptions) : null,
       });
       setForm(defaultForm);
       await load();
     } catch (err) {
-      setError(err?.message || "Falha ao criar promoção");
+      setError(err?.message || "Falha ao criar promocao");
+    }
+  };
+
+  const updatePromotionStatus = async (promotionId, status) => {
+    if (!promotionId || !status) return;
+    setBusyPromotionId(promotionId);
+    try {
+      setError("");
+      await leafAPI.updatePromotion(promotionId, { status });
+      await load();
+    } catch (err) {
+      setError(err?.message || "Falha ao atualizar status da promocao");
+    } finally {
+      setBusyPromotionId("");
     }
   };
 
   const applyToDriver = async () => {
     if (!selectedPromotion || !driverId) {
-      setError("Selecione promoção e informe driverId");
+      setError("Selecione promocao e informe driverId");
       return;
     }
 
@@ -82,7 +123,7 @@ export default function PromotionsPage() {
       });
       await load();
     } catch (err) {
-      setError(err?.message || "Falha ao aplicar promoção no motorista");
+      setError(err?.message || "Falha ao aplicar promocao no motorista");
     }
   };
 
@@ -92,27 +133,54 @@ export default function PromotionsPage() {
         <header className="header">
           <h1>Promocoes</h1>
           <div className="filters">
+            <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
+              {statusOptions.map((status) => (
+                <option key={status} value={status}>
+                  {status}
+                </option>
+              ))}
+            </select>
             <button onClick={load}>Atualizar</button>
           </div>
         </header>
 
         <AppNav />
-        {loading ? <LoadingState message="Carregando promoções..." /> : null}
+        {loading ? <LoadingState message="Carregando promocoes..." /> : null}
 
         <section className="grid">
+          <Panel title="Resumo">
+            <div className="filters">
+              <div>Total: {stats?.total ?? rows.length}</div>
+              <div>Ativas: {stats?.active ?? 0}</div>
+              <div>Pausadas: {stats?.paused ?? 0}</div>
+              <div>Concluidas: {stats?.completed ?? 0}</div>
+              <div>Expiradas: {stats?.expired ?? 0}</div>
+              <div>Resgates: {stats?.totalRedemptions ?? 0}</div>
+            </div>
+          </Panel>
+
           <Panel title="Criar Promocao">
             <div className="filters">
               <input
-                placeholder="Nome da promoção"
+                placeholder="Nome da promocao"
                 value={form.name}
                 onChange={(e) => setForm((prev) => ({ ...prev, name: e.target.value }))}
               />
+              <select
+                value={form.type}
+                onChange={(e) => setForm((prev) => ({ ...prev, type: e.target.value }))}
+              >
+                <option value="free_subscription">Assinatura gratis</option>
+                <option value="trial_extension">Extensao de trial</option>
+                <option value="discount">Desconto</option>
+              </select>
               <select
                 value={form.criteria}
                 onChange={(e) => setForm((prev) => ({ ...prev, criteria: e.target.value }))}
               >
                 <option value="all_drivers">Todos os motoristas</option>
                 <option value="first_n_drivers">Primeiros N motoristas</option>
+                <option value="specific_drivers">Lista especifica</option>
               </select>
               <input
                 type="number"
@@ -120,7 +188,7 @@ export default function PromotionsPage() {
                 max="365"
                 value={form.days}
                 onChange={(e) => setForm((prev) => ({ ...prev, days: e.target.value }))}
-                placeholder="Dias grátis"
+                placeholder="Duracao (dias)"
               />
               <input
                 type="number"
@@ -129,16 +197,30 @@ export default function PromotionsPage() {
                 onChange={(e) => setForm((prev) => ({ ...prev, maxRedemptions: e.target.value }))}
                 placeholder="Limite de resgates"
               />
-              <button onClick={create}>Criar promoção</button>
+              <input
+                type="datetime-local"
+                value={form.startDate}
+                onChange={(e) => setForm((prev) => ({ ...prev, startDate: e.target.value }))}
+              />
+              <input
+                type="datetime-local"
+                value={form.endDate}
+                onChange={(e) => setForm((prev) => ({ ...prev, endDate: e.target.value }))}
+              />
+              <button onClick={create} disabled={!canCreate}>
+                Criar promocao
+              </button>
             </div>
           </Panel>
 
-          <Panel title="Aplicar Manualmente + Push">
+          <Panel title="Aplicacao Manual + Push">
             <div className="filters">
               <select value={selectedPromotion} onChange={(e) => setSelectedPromotion(e.target.value)}>
-                <option value="">Selecione promoção</option>
+                <option value="">Selecione promocao</option>
                 {rows.map((promo) => (
-                  <option key={promo.id} value={promo.id}>{promo.name || promo.id}</option>
+                  <option key={promo.id} value={promo.id}>
+                    {promo.name || promo.id}
+                  </option>
                 ))}
               </select>
               <input
@@ -150,7 +232,7 @@ export default function PromotionsPage() {
             </div>
           </Panel>
 
-          <Panel title="Promoções Ativas">
+          <Panel title="Operacao de Promocoes">
             <table className="table">
               <thead>
                 <tr>
@@ -158,19 +240,52 @@ export default function PromotionsPage() {
                   <th>Nome</th>
                   <th>Tipo</th>
                   <th>Status</th>
+                  <th>Inicio</th>
+                  <th>Fim</th>
                   <th>Resgates</th>
+                  <th>Acoes</th>
                 </tr>
               </thead>
               <tbody>
-                {rows.map((promo, idx) => (
-                  <tr key={promo.id || `promo-${idx}`}>
-                    <td>{promo.id || "-"}</td>
-                    <td>{promo.name || "-"}</td>
-                    <td>{promo.type || "-"}</td>
-                    <td>{promo.status || "-"}</td>
-                    <td>{promo.currentRedemptions ?? "-"}</td>
-                  </tr>
-                ))}
+                {rows.map((promo, idx) => {
+                  const isBusy = busyPromotionId === promo.id;
+                  return (
+                    <tr key={promo.id || `promo-${idx}`}>
+                      <td>{promo.id || "-"}</td>
+                      <td>{promo.name || "-"}</td>
+                      <td>{promo.type || "-"}</td>
+                      <td>{promo.status || "-"}</td>
+                      <td>{promo.startDate ? new Date(promo.startDate).toLocaleString() : "-"}</td>
+                      <td>{promo.endDate ? new Date(promo.endDate).toLocaleString() : "-"}</td>
+                      <td>
+                        {promo.currentRedemptions ?? 0}
+                        {promo.maxRedemptions ? ` / ${promo.maxRedemptions}` : ""}
+                      </td>
+                      <td>
+                        <div className="filters">
+                          <button
+                            disabled={isBusy || promo.status === "active"}
+                            onClick={() => updatePromotionStatus(promo.id, "active")}
+                          >
+                            Iniciar/Retomar
+                          </button>
+                          <button
+                            disabled={isBusy || promo.status === "paused"}
+                            onClick={() => updatePromotionStatus(promo.id, "paused")}
+                          >
+                            Pausar
+                          </button>
+                          <button
+                            disabled={isBusy || promo.status === "completed"}
+                            onClick={() => updatePromotionStatus(promo.id, "completed")}
+                          >
+                            Encerrar
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </Panel>

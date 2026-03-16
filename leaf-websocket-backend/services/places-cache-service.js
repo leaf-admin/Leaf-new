@@ -25,8 +25,8 @@ class PlacesCacheService {
     // TTL para flag "buscando" (evita requisições duplicadas)
     this.fetchingTTL = 30; // 30 segundos
     
-    // Google Places API Key (do ambiente ou fallback)
-    this.googleApiKey = process.env.GOOGLE_MAPS_API_KEY || 'AIzaSyBLwKg0KRiLVjAHVBQAUP7pB3Q80G246KY';
+    // Google Places API Key (somente via ambiente)
+    this.googleApiKey = process.env.GOOGLE_MAPS_API_KEY || '';
     
     // 📊 Métricas de cache (em memória + Redis para persistência)
     this.metrics = {
@@ -244,6 +244,11 @@ class PlacesCacheService {
    */
   async fetchFromGooglePlaces(query, location = null) {
     try {
+      if (!this.googleApiKey) {
+        logger.warn('⚠️ [PlacesCache] GOOGLE_MAPS_API_KEY ausente; fallback remoto desabilitado');
+        return null;
+      }
+
       logger.info(`🌐 [PlacesCache] Buscando no Google Places: "${query}"`);
 
       // Construir URL da API Places Autocomplete
@@ -278,6 +283,10 @@ class PlacesCacheService {
    */
   async getPlaceDetails(placeId) {
     try {
+      if (!this.googleApiKey) {
+        return null;
+      }
+
       const url = `https://maps.googleapis.com/maps/api/place/details/json?place_id=${placeId}&key=${this.googleApiKey}&fields=geometry,formatted_address,name,place_id`;
 
       const response = await fetch(url);
@@ -432,6 +441,5 @@ class PlacesCacheService {
 const placesCacheService = new PlacesCacheService();
 
 module.exports = placesCacheService;
-
 
 

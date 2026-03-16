@@ -3,12 +3,13 @@
  */
 
 const dotenv = require('dotenv');
+const path = require('path');
 const express = require('express');
 const http = require('http');
 const socketIo = require('socket.io');
 const axios = require('axios');
 
-dotenv.config({ path: '.env' });
+dotenv.config({ path: process.env.ENV_FILE || path.resolve(__dirname, '../../../.env') });
 process.env.NODE_ENV = 'test';
 
 let testServer = null;

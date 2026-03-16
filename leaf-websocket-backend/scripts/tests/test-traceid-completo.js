@@ -432,13 +432,3 @@ module.exports = {
     testExternalOpsTraceId,
     testFullRideTrace
 };
-
-
-    testTraceIdExtraction,
-    testCommandTraceId,
-    testEventTraceId,
-    testListenerTraceId,
-    testExternalOpsTraceId,
-    testFullRideTrace
-};
-

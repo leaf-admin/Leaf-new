@@ -1,4 +1,5 @@
 const Redis = require('ioredis');
+const path = require('path');
 const { getTracer } = require('./tracer');
 const { SpanStatusCode } = require('@opentelemetry/api');
 const { logger, logRedis } = require('./logger');
@@ -9,14 +10,16 @@ const { metrics } = require('./prometheus-metrics');
 class RedisPool {
     constructor() {
         this.pool = null;
+        this.isShuttingDown = false;
         this.initializePool();
     }
 
     initializePool() {
         try {
-            // ✅ CORREÇÃO: Carregar dotenv se disponível (para carregar .env)
+            // Carrega .env do backend de forma determinística, independente do cwd.
             try {
-                require('dotenv').config();
+                const envPath = process.env.ENV_FILE || path.join(__dirname, '..', '.env');
+                require('dotenv').config({ path: envPath });
             } catch (e) {
                 // dotenv não disponível, continuar sem ele
             }
@@ -95,6 +98,10 @@ class RedisPool {
         });
 
         this.pool.on('error', (error) => {
+            if (this.isShuttingDown && (error?.code === 'ECONNRESET' || error?.code === 'ECONNREFUSED')) {
+                logger.debug(`Redis encerrando, ignorando erro transitório (${error.code})`);
+                return;
+            }
             logRedis('error', 'Erro no Redis Pool', {
                 operation: 'error',
                 error: error.message,
@@ -111,17 +118,27 @@ class RedisPool {
         });
 
         this.pool.on('close', () => {
+            if (this.isShuttingDown) {
+                logger.info('Redis Pool fechado durante shutdown');
+                return;
+            }
             logRedis('warn', 'Redis Pool fechado, tentando reconectar', {
                 operation: 'close'
             });
         });
 
         this.pool.on('reconnecting', (delay) => {
+            if (this.isShuttingDown) {
+                return;
+            }
             logger.info(`🔄 Reconectando Redis Pool... (delay: ${delay}ms)`);
         });
 
         // ✅ NOVO: Evento quando a conexão falha
         this.pool.on('end', () => {
+            if (this.isShuttingDown) {
+                return;
+            }
             logger.warn('⚠️ Redis Pool desconectado');
         });
     }
@@ -173,6 +190,10 @@ class RedisPool {
 
     // Método para obter conexão do pool (instrumentada)
     getConnection() {
+        if (this.isShuttingDown) {
+            return this.pool;
+        }
+
         // ✅ CORREÇÃO: Verificar se a conexão está ativa e tentar reconectar se necessário
         if (this.pool && (this.pool.status === 'end' || this.pool.status === 'close')) {
             logger.warn('⚠️ Redis desconectado, tentando reconectar...');
@@ -292,6 +313,32 @@ class RedisPool {
                 db: this.pool.options.db
             }
         };
+    }
+
+    async shutdown(options = {}) {
+        if (!this.pool) {
+            return;
+        }
+
+        this.isShuttingDown = true;
+        const timeoutMs = Number.parseInt(options.timeoutMs || '5000', 10);
+
+        try {
+            if (this.pool.status === 'ready' || this.pool.status === 'connect' || this.pool.status === 'connecting') {
+                const timeoutPromise = new Promise((_, reject) =>
+                    setTimeout(() => reject(new Error('redis_shutdown_timeout')), timeoutMs)
+                );
+                await Promise.race([this.pool.quit(), timeoutPromise]);
+            }
+        } catch (error) {
+            logger.warn(`⚠️ Erro ao encerrar Redis com quit(): ${error.message}`);
+        } finally {
+            try {
+                this.pool.disconnect(false);
+            } catch (disconnectError) {
+                logger.debug(`Falha não crítica em disconnect(): ${disconnectError.message}`);
+            }
+        }
     }
 }
 

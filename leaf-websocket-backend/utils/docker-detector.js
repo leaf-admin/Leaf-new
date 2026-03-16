@@ -9,6 +9,28 @@ const fs = require('fs');
 const { logger } = require('./logger');
 
 class DockerDetector {
+    static parseRedisUrl() {
+        if (!process.env.REDIS_URL) {
+            return null;
+        }
+
+        try {
+            const url = new URL(process.env.REDIS_URL);
+            if (url.protocol !== 'redis:' && url.protocol !== 'rediss:') {
+                return null;
+            }
+
+            const dbFromPath = (url.pathname || '/0').replace('/', '') || '0';
+            return {
+                host: url.hostname || null,
+                port: url.port ? parseInt(url.port, 10) : null,
+                password: url.password ? decodeURIComponent(url.password) : null,
+                db: Number.isNaN(parseInt(dbFromPath, 10)) ? 0 : parseInt(dbFromPath, 10)
+            };
+        } catch (_error) {
+            return null;
+        }
+    }
     /**
      * Verifica se está rodando dentro de um container Docker
      * @returns {boolean}
@@ -47,6 +69,11 @@ class DockerDetector {
             return process.env.REDIS_HOST;
         }
 
+        const parsed = this.parseRedisUrl();
+        if (parsed?.host) {
+            return parsed.host;
+        }
+
         // Se está em Docker, usar o nome do serviço
         if (this.isRunningInDocker()) {
             return 'redis'; // Nome do serviço no docker-compose
@@ -80,10 +107,11 @@ class DockerDetector {
      * @returns {Object}
      */
     static getRedisConfig() {
+        const parsed = this.parseRedisUrl();
         const host = this.getRedisHost();
-        const port = parseInt(process.env.REDIS_PORT || '6379');
-        const password = process.env.REDIS_PASSWORD || 'leaf_redis_2024';
-        const db = parseInt(process.env.REDIS_DB || '0');
+        const port = parsed?.port || parseInt(process.env.REDIS_PORT || '6379');
+        const password = parsed?.password || process.env.REDIS_PASSWORD || 'leaf_redis_2024';
+        const db = Number.isInteger(parsed?.db) ? parsed.db : parseInt(process.env.REDIS_DB || '0');
 
         return {
             host,
@@ -109,4 +137,3 @@ class DockerDetector {
 }
 
 module.exports = DockerDetector;
-

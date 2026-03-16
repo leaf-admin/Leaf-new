@@ -9,7 +9,7 @@
  */
 
 const firebaseConfig = require('../firebase-config');
-const logger = require('../utils/logger');
+const { logger } = require('../utils/logger');
 
 class PromotionService {
   constructor() {
@@ -801,6 +801,3 @@ class PromotionService {
 }
 
 module.exports = new PromotionService();
-
-module.exports = new PromotionService();
-

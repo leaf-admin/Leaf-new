@@ -1,5 +1,8 @@
 const AppConfig = require('./config/AppConfig').AppConfig;
 const GoogleMapApiConfig = require('./config/GoogleMapApiConfig').GoogleMapApiConfig;
+const fs = require('fs');
+const path = require('path');
+const withExpoModulesCoreFix = require('./plugins/withExpoModulesCoreFix');
 
 module.exports = {
     name: AppConfig.app_name,
@@ -40,7 +43,7 @@ module.exports = {
     android: {
         package: "br.com.leaf.ride",
         versionCode: AppConfig.android_app_version,
-        googleServicesFile: "./google-services.json",
+        googleServicesFile: process.env.GOOGLE_SERVICES_JSON || (fs.existsSync("./google-services.json") ? "./google-services.json" : undefined),
         permissions: [
             "ACCESS_COARSE_LOCATION",
             "ACCESS_FINE_LOCATION",
@@ -79,7 +82,7 @@ module.exports = {
     },
     ios: {
         bundleIdentifier: "br.com.leaf.ride",
-        googleServicesFile: "./GoogleService-Info.plist",
+        googleServicesFile: process.env.GOOGLE_SERVICES_INFO_PLIST || (fs.existsSync("./GoogleService-Info.plist") ? "./GoogleService-Info.plist" : undefined),
         icon: "./assets/icon.png",
         buildNumber: AppConfig.ios_build_number,
         deploymentTarget: "17.0",
@@ -97,6 +100,8 @@ module.exports = {
         "./plugins/withGoogleMapsApiKey",
         "./plugins/withDisableDevMenu",
         "./plugins/withBoringSSLFix",
+        "./plugins/withGradleNodeFix",
+        withExpoModulesCoreFix,
         "./plugins/withNetworkSecurityConfig",
         [
             "expo-notifications",

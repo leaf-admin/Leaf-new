@@ -6,6 +6,41 @@
 
 ---
 
+## 🚕 PRIORIDADE ALTA - Produto (Paridade Mobilidade)
+
+### Chat Pós-Corrida + Item Perdido
+
+- [ ] **product-chat-1-lost-item-flow** - Implementar fluxo completo de chat por item perdido
+  - Backend já possui bloqueio pós-corrida com exceção por `lost_item`
+  - Falta padronizar evento/contrato e jornada completa (abrir chamado, status, encerramento)
+  - Critério de aceite:
+    - Passageiro abre chat pós-corrida apenas via contexto `lost_item`
+    - Janela temporal configurável e auditável
+    - Motorista recebe notificação + pode responder no mesmo thread
+    - Encerramento automático/manual com histórico
+
+- [ ] **product-chat-2-front-validation-new-rules** - Validar e ajustar front para novas regras de chat
+  - App deve refletir bloqueio quando corrida finalizada sem `lost_item`
+  - Exibir CTA claro: "Reportar item esquecido"
+  - Critério de aceite:
+    - Sem bypass de regra no cliente
+    - Mensagens de erro amigáveis mapeadas por `code` do backend
+    - Testes de fluxo: antes do aceite, em corrida, pós-corrida, pós-corrida com item perdido
+
+### Preferência de Motorista Mulher (Compliance)
+
+- [ ] **product-compliance-1-female-driver-preference** - Discovery + implementação da preferência por motorista mulher
+  - Validar escopo legal aplicável (cidade/estado/operação) e política de produto
+  - Coletar/validar sexo no cadastro do motorista com consentimento e privacidade
+  - Adicionar opção no fluxo de solicitação de corrida
+  - Ajustar matching para respeitar preferência quando habilitada
+  - Critério de aceite:
+    - Flag por praça/região para rollout seguro
+    - Fallback explícito quando não houver disponibilidade
+    - Observabilidade de impacto (tempo de espera, conversão, cancelamento)
+
+---
+
 ## 🔥 PRIORIDADE ALTA - Observabilidade
 
 ### ✅ FASE 1.1: Logs Estruturados (Em Progresso - ~40% completo)
@@ -322,4 +357,3 @@ Sempre incluir:
 ---
 
 **Última atualização:** 2026-01-XX
-

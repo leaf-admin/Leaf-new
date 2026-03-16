@@ -1,0 +1,53 @@
+{
+  "id": "2634b9e2-0e64-44e1-b7ac-58fe0e584b54",
+  "status": "ERRORED",
+  "platform": "ANDROID",
+  "error": {
+    "errorCode": "EAS_BUILD_UNKNOWN_GRADLE_ERROR",
+    "message": "Gradle build failed with unknown error. See logs for the \"Run gradlew\" phase for more information."
+  },
+  "artifacts": {},
+  "fingerprint": {
+    "id": "019cf6a4-4a3b-70e9-b2e1-29239e94756a",
+    "hash": "766aa431792ba434d749d18550879002b9687982"
+  },
+  "initiatingActor": {
+    "id": "e94d69f1-d0f8-4024-b9cb-d4b04881b145",
+    "displayName": "leaf-app"
+  },
+  "logFiles": [
+    "https://job-logs.eascdn.net/production/2634b9e2-0e64-44e1-b7ac-58fe0e584b54/1773664488923-7b2e3514-6de8-43b9-9bda-86a572bcf5b6.txt?X-Goog-Algorithm=GOOG4-RSA-SHA256&X-Goog-Credential=www-production%40exponentjs.iam.gserviceaccount.com%2F20260316%2Fauto%2Fstorage%2Fgoog4_request&X-Goog-Date=20260316T133523Z&X-Goog-Expires=900&X-Goog-SignedHeaders=host&X-Goog-Signature=02ca7b57bffc0e91c8ba4cb45867fa25039c24ab0ac013d43769b1f9bd5b7e97ad4a6a61357adf85356a313bbef15fb242f34369a3bdf78e1406df8e6964373703c2f2cf88898bd3893c50aaaa72d276f1e3ae142f2d0c0936b90cb74455f93dc32091c734f44ba1b76cf4ceed42d446a0b4114ec3275e8050bfd45c2e739f293b4968a644a3d36ebb30796db6eae39136dca0d2c364d6e4d951065e774cae5758f1956be9051a8611ed19abb7b468764549bf265602b9624d8843bce3d3cc13892e80949c8f1bede79196718a146e956037d9f12fab8c4e9fca663ab5d36f68879d08bfc0483c0646844e8b1ad147222fbef00e3c50de5d6fcdfe50b4487edf",
+    "https://job-logs.eascdn.net/production/2634b9e2-0e64-44e1-b7ac-58fe0e584b54/1773666435081-1395146c-e604-454a-91c7-347114420119.txt?X-Goog-Algorithm=GOOG4-RSA-SHA256&X-Goog-Credential=www-production%40exponentjs.iam.gserviceaccount.com%2F20260316%2Fauto%2Fstorage%2Fgoog4_request&X-Goog-Date=20260316T133523Z&X-Goog-Expires=900&X-Goog-SignedHeaders=host&X-Goog-Signature=2dea9e150a31f9fefe1950209ed7194935ac3c75a6a9b9f74a05f6eb95d2d85d7c37edb391d420d168ce339a2a732389ebe162a574dcc4ae518ebfaaa91fd39a3d2e2fe9f3ee17e498caa5e2055dbedb1a08d666f92b4d7ff72565fedd3cd8d77162d98bf74d4528bc80d0d47b6cbf5901dbd435f3dd53f08095743a4fd4415a74a38bb2584fafd4ab2154f7366992196f7bba37366f3ba39fe390e912f117cfc2d077817e8a28585e4b96305ea84cadfee753d5b1e8cac0a01fb8332185ddb32a0a83c9b28ff3065bb17c2ece5c3fc2261483bc2752e0faa98543b99c6f39347aff5e26bb2b3c4d66160b777f17e0e4c37415cc26a89d4cd34f42a3757a15d5",
+    "https://job-logs.eascdn.net/production/2634b9e2-0e64-44e1-b7ac-58fe0e584b54/1773666435404-59b779f8-d149-4d2a-9f09-c9f891f39baf.txt?X-Goog-Algorithm=GOOG4-RSA-SHA256&X-Goog-Credential=www-production%40exponentjs.iam.gserviceaccount.com%2F20260316%2Fauto%2Fstorage%2Fgoog4_request&X-Goog-Date=20260316T133523Z&X-Goog-Expires=900&X-Goog-SignedHeaders=host&X-Goog-Signature=4ea2a793a175d9b433375656191825e1bdf41652fa29c1f90cc5d4d2a55c699719061efebdbdc91d07428beea7f9ae577d7c05a168017235d4535fe88aa769486728dd7fca54c89a07c23b20a084062ce724f02234657d83f4d808bfb62ca90b33934fcbcb6de6bd44723ae19d854cf01e428d43366deb255c3b907712e43dfe429823dd4fd79c1a635e3ff62fdab3e94a9183e74659ecd116cb41486ac7c0d08495e398f22ce8f33cff500daede22d710f07e90a056d04e39ab9e5cce8dd8ef2355fe1b9c6cadb4b7841f5045de9318462a21c74d498b608465a564b07f03af2f351c79fcb57037d219878aee2f704fcfc9cbcdd399dbb1f88429062989357e",
+    "https://job-logs.eascdn.net/production/2634b9e2-0e64-44e1-b7ac-58fe0e584b54/1773666435576-39068729-a9e1-4bc5-9bdd-1409cf0e1f03.txt?X-Goog-Algorithm=GOOG4-RSA-SHA256&X-Goog-Credential=www-production%40exponentjs.iam.gserviceaccount.com%2F20260316%2Fauto%2Fstorage%2Fgoog4_request&X-Goog-Date=20260316T133523Z&X-Goog-Expires=900&X-Goog-SignedHeaders=host&X-Goog-Signature=b5ee10060eb90daa197157a4dee0e100625fc1682eb12d1d370694a72c8a9bca13ebfdcb009fe6b0057e7a389064b938073eacb65be6ccc28ac4b9b4b50f773ee442c3918c70cfc33a4d1a380252eb8c91f4f5e9ab364fce50bc0c0d288359ca5ac850350a49aa67cc982c48cf91fe4b9a0d2fa105adb277a1374a86b8fb6854d3d6336f6284608a7aea86307e8e80f612cfba0815f67585139eff990351b34aa13569f1e3962e7d2c859d7dda87c4e9fd04a5db088dff89d0bafa3309480bdaa1888d5ba3551a53c3fcea319666d1bbc1a1072e8ff2fe3d42897acdab63ee4a4720ebde49f7ee1ec2ce39e49c5a5b212084c46f4a473a55289e1ed9cdbfd254"
+  ],
+  "project": {
+    "id": "91dfdce0-9705-4fde-8417-747273ab7cc2",
+    "name": "Leaf.app",
+    "slug": "leafapp-reactnative",
+    "ownerAccount": {
+      "id": "b8522c85-6956-471e-83a3-6e7454a7afc1",
+      "name": "leaf-app"
+    }
+  },
+  "channel": "production",
+  "distribution": "STORE",
+  "buildProfile": "production",
+  "sdkVersion": "52.0.0",
+  "appVersion": "1.0.1",
+  "appBuildVersion": "101",
+  "runtimeVersion": "1.0.1",
+  "gitCommitHash": "eec6de8228feab221e4a121003627c3b232afc33",
+  "gitCommitMessage": "mudanças globais no backend - mudança e otimizaçao no fluxo de corrida (Apis Google e cache com redis geo)",
+  "priority": "NORMAL",
+  "createdAt": "2026-03-16T12:34:47.368Z",
+  "updatedAt": "2026-03-16T13:11:37.638Z",
+  "completedAt": "2026-03-16T13:11:26.360Z",
+  "expirationDate": "2026-04-15T12:34:47.616Z",
+  "isForIosSimulator": false,
+  "metrics": {
+    "buildWaitTime": 1419,
+    "buildQueueTime": 1974506,
+    "buildDuration": 222590
+  }
+}

@@ -1,0 +1,288 @@
+{
+  "runId": 1773625692419,
+  "executedAt": "2026-03-16T01:48:18.727Z",
+  "keySuffix": "G246KY",
+  "summary": {
+    "runs": 10,
+    "okRuns": 10,
+    "fx": {
+      "usdToBrl": 5.4
+    },
+    "usd": {
+      "preRequest": {
+        "mean": 0.13283,
+        "p95": 0.13283,
+        "min": 0.13283,
+        "max": 0.13283
+      },
+      "postRequest": {
+        "mean": 0.07283,
+        "p95": 0.07283,
+        "min": 0.07283,
+        "max": 0.07283
+      },
+      "preElement": {
+        "mean": 0.13283,
+        "p95": 0.13283,
+        "min": 0.13283,
+        "max": 0.13283
+      },
+      "postElement": {
+        "mean": 0.05923,
+        "p95": 0.05923,
+        "min": 0.05923,
+        "max": 0.05923
+      }
+    },
+    "brl": {
+      "preRequest": {
+        "mean": 0.717282,
+        "p95": 0.717282,
+        "min": 0.717282,
+        "max": 0.717282
+      },
+      "postRequest": {
+        "mean": 0.393282,
+        "p95": 0.393282,
+        "min": 0.393282,
+        "max": 0.393282
+      },
+      "preElement": {
+        "mean": 0.717282,
+        "p95": 0.717282,
+        "min": 0.717282,
+        "max": 0.717282
+      },
+      "postElement": {
+        "mean": 0.319842,
+        "p95": 0.319842,
+        "min": 0.319842,
+        "max": 0.319842
+      }
+    },
+    "gain": {
+      "requestModelMeanPct": 45.17,
+      "elementModelMeanPct": 55.41,
+      "requestModelMeanBrlAbs": 0.324,
+      "elementModelMeanBrlAbs": 0.39744
+    },
+    "latencySec": {
+      "mean": 0.6305,
+      "p95": 1.432,
+      "min": 0.503,
+      "max": 1.432
+    }
+  },
+  "perRun": [
+    {
+      "run": 1,
+      "ok": true,
+      "latencySec": 1.432,
+      "usd": {
+        "preRequest": 0.13283,
+        "postRequest": 0.07283,
+        "preElement": 0.13283,
+        "postElement": 0.05923
+      },
+      "brl": {
+        "preRequest": 0.717282,
+        "postRequest": 0.393282,
+        "preElement": 0.717282,
+        "postElement": 0.319842
+      },
+      "observed": {
+        "elements25": 25,
+        "elements8": 8
+      }
+    },
+    {
+      "run": 2,
+      "ok": true,
+      "latencySec": 0.623,
+      "usd": {
+        "preRequest": 0.13283,
+        "postRequest": 0.07283,
+        "preElement": 0.13283,
+        "postElement": 0.05923
+      },
+      "brl": {
+        "preRequest": 0.717282,
+        "postRequest": 0.393282,
+        "preElement": 0.717282,
+        "postElement": 0.319842
+      },
+      "observed": {
+        "elements25": 25,
+        "elements8": 8
+      }
+    },
+    {
+      "run": 3,
+      "ok": true,
+      "latencySec": 0.534,
+      "usd": {
+        "preRequest": 0.13283,
+        "postRequest": 0.07283,
+        "preElement": 0.13283,
+        "postElement": 0.05923
+      },
+      "brl": {
+        "preRequest": 0.717282,
+        "postRequest": 0.393282,
+        "preElement": 0.717282,
+        "postElement": 0.319842
+      },
+      "observed": {
+        "elements25": 25,
+        "elements8": 8
+      }
+    },
+    {
+      "run": 4,
+      "ok": true,
+      "latencySec": 0.55,
+      "usd": {
+        "preRequest": 0.13283,
+        "postRequest": 0.07283,
+        "preElement": 0.13283,
+        "postElement": 0.05923
+      },
+      "brl": {
+        "preRequest": 0.717282,
+        "postRequest": 0.393282,
+        "preElement": 0.717282,
+        "postElement": 0.319842
+      },
+      "observed": {
+        "elements25": 25,
+        "elements8": 8
+      }
+    },
+    {
+      "run": 5,
+      "ok": true,
+      "latencySec": 0.547,
+      "usd": {
+        "preRequest": 0.13283,
+        "postRequest": 0.07283,
+        "preElement": 0.13283,
+        "postElement": 0.05923
+      },
+      "brl": {
+        "preRequest": 0.717282,
+        "postRequest": 0.393282,
+        "preElement": 0.717282,
+        "postElement": 0.319842
+      },
+      "observed": {
+        "elements25": 25,
+        "elements8": 8
+      }
+    },
+    {
+      "run": 6,
+      "ok": true,
+      "latencySec": 0.576,
+      "usd": {
+        "preRequest": 0.13283,
+        "postRequest": 0.07283,
+        "preElement": 0.13283,
+        "postElement": 0.05923
+      },
+      "brl": {
+        "preRequest": 0.717282,
+        "postRequest": 0.393282,
+        "preElement": 0.717282,
+        "postElement": 0.319842
+      },
+      "observed": {
+        "elements25": 25,
+        "elements8": 8
+      }
+    },
+    {
+      "run": 7,
+      "ok": true,
+      "latencySec": 0.503,
+      "usd": {
+        "preRequest": 0.13283,
+        "postRequest": 0.07283,
+        "preElement": 0.13283,
+        "postElement": 0.05923
+      },
+      "brl": {
+        "preRequest": 0.717282,
+        "postRequest": 0.393282,
+        "preElement": 0.717282,
+        "postElement": 0.319842
+      },
+      "observed": {
+        "elements25": 25,
+        "elements8": 8
+      }
+    },
+    {
+      "run": 8,
+      "ok": true,
+      "latencySec": 0.507,
+      "usd": {
+        "preRequest": 0.13283,
+        "postRequest": 0.07283,
+        "preElement": 0.13283,
+        "postElement": 0.05923
+      },
+      "brl": {
+        "preRequest": 0.717282,
+        "postRequest": 0.393282,
+        "preElement": 0.717282,
+        "postElement": 0.319842
+      },
+      "observed": {
+        "elements25": 25,
+        "elements8": 8
+      }
+    },
+    {
+      "run": 9,
+      "ok": true,
+      "latencySec": 0.514,
+      "usd": {
+        "preRequest": 0.13283,
+        "postRequest": 0.07283,
+        "preElement": 0.13283,
+        "postElement": 0.05923
+      },
+      "brl": {
+        "preRequest": 0.717282,
+        "postRequest": 0.393282,
+        "preElement": 0.717282,
+        "postElement": 0.319842
+      },
+      "observed": {
+        "elements25": 25,
+        "elements8": 8
+      }
+    },
+    {
+      "run": 10,
+      "ok": true,
+      "latencySec": 0.519,
+      "usd": {
+        "preRequest": 0.13283,
+        "postRequest": 0.07283,
+        "preElement": 0.13283,
+        "postElement": 0.05923
+      },
+      "brl": {
+        "preRequest": 0.717282,
+        "postRequest": 0.393282,
+        "preElement": 0.717282,
+        "postElement": 0.319842
+      },
+      "observed": {
+        "elements25": 25,
+        "elements8": 8
+      }
+    }
+  ]
+}

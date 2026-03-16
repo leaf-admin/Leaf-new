@@ -27,7 +27,7 @@ android
 mobile-app/dist
 android/
 ios/
-AccessKey.*
+# AccessKey.*
 node_modules/
 android/build/
 ios/build/
@@ -40,6 +40,9 @@ leaf-reactnative-firebase-adminsdk-*.json
 firebase-credentials.json
 mobile-app/config/leaf-reactnative-firebase-adminsdk-*.json
 leaf-websocket-backend/leaf-reactnative-firebase-adminsdk-*.json
+**/google-services.json
+**/GoogleService-Info.plist
+**/firebase-credentials.json
 
 # Security-sensitive artifacts
 digitaloceankey
@@ -65,7 +68,9 @@ ngrok.pid
 venv/
 android-sdk/
 mobile-app/test-results/
+mobile-app/reports/
 *.img
 *.iso
 *.qcow2
 *.dmg
+.local-tools/

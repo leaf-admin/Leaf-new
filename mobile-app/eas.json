@@ -60,7 +60,9 @@
     },
     "production": {
       "node": "20.19.4",
-      "autoIncrement": true,
+      "env": {
+        "EXPO_USE_METRO_WORKSPACE_ROOT": "true"
+      },
       "ios": {
         "image": "macos-sequoia-15.6-xcode-26.2",
         "buildConfiguration": "Release"

@@ -119,14 +119,14 @@ export default function MarketplaceMetricsPage() {
     group,
     items: metrics.filter((m) => m.group === group),
   }));
-  const timeline = Array.isArray(data?.timeline?.daily) ? data.timeline.daily : [];
   const series = useMemo(() => {
     if (!selected) return [];
+    const timeline = Array.isArray(data?.timeline?.daily) ? data.timeline.daily : [];
     return timeline.map((row) => ({
       date: row.date,
       value: get(row, selected.path.replace(/^metrics\./, ""), null),
     }));
-  }, [timeline, selected]);
+  }, [data, selected]);
   const seriesMax = useMemo(() => {
     const values = series
       .map((point) => Number(point.value))

@@ -1,0 +1,56 @@
+{
+  "id": "969c835c-bdfb-467b-95b7-00361cb8255a",
+  "status": "ERRORED",
+  "platform": "IOS",
+  "error": {
+    "errorCode": "XCODE_BUILD_ERROR",
+    "message": "The \"Run fastlane\" step failed because of an error in the Xcode build process. We automatically detected following errors in your Xcode build logs:\n- unsupported option '-G' for target 'arm64-apple-ios15.1'\nRefer to \"Xcode Logs\" below for additional, more detailed logs."
+  },
+  "artifacts": {
+    "xcodeBuildLogsUrl": "https://job-logs.eascdn.net/production-xcode-logs/969c835c-bdfb-467b-95b7-00361cb8255a?X-Goog-Algorithm=GOOG4-RSA-SHA256&X-Goog-Credential=www-production%40exponentjs.iam.gserviceaccount.com%2F20260316%2Fauto%2Fstorage%2Fgoog4_request&X-Goog-Date=20260316T133527Z&X-Goog-Expires=900&X-Goog-SignedHeaders=host&X-Goog-Signature=b45292e5cfe2aa687b6f87afdedd0a3f140a5b9e3afb9b43725a67420e0f602ebf285fe6a4283b665e989657ac40bd7d5fd74717cca20cc2acf7c1867c59a62d47e9e49d8bf51209004fd2a53c7d30994de97087b6eecb4ee5b96408e0497b9ec24ada80ea75207da9ae5b8f0ebbde28bf4934bc3772710e68446db0993286ed286182f9bda12b753146301a3b71318de5fdc1ef45fe8279f4bcda50fd06752901a8f3329be466008abf7da93c9c7a1409de661c01cdfdc7c5a57f73f7a2cf868dd1cd2fb175867963787b3894dce0ea22e49762b75563e5288085ffcb79d086539b832fcc62a409cf4cba137c57b0c554ccfe6aad8c361a5474f1096ba21446"
+  },
+  "fingerprint": {
+    "id": "019cf6a4-c2c5-70fe-9205-2267055c5a6e",
+    "hash": "0da4a6c48e6bb4314c30ad157d65dbf6ef97a9f9"
+  },
+  "initiatingActor": {
+    "id": "e94d69f1-d0f8-4024-b9cb-d4b04881b145",
+    "displayName": "leaf-app"
+  },
+  "logFiles": [
+    "https://job-logs.eascdn.net/production/969c835c-bdfb-467b-95b7-00361cb8255a/1773664519284-b19e79dd-3d8a-4d50-9caa-ccf2fdd60257.txt?X-Goog-Algorithm=GOOG4-RSA-SHA256&X-Goog-Credential=www-production%40exponentjs.iam.gserviceaccount.com%2F20260316%2Fauto%2Fstorage%2Fgoog4_request&X-Goog-Date=20260316T133527Z&X-Goog-Expires=900&X-Goog-SignedHeaders=host&X-Goog-Signature=af7060d903f6da39f4c4ab0fad4b98d72420fac247a41ef10c1e20e6e7e69c7ff86f0ecae4b26c6ca016256718fb2ee454d15c931977cd096a376defc3b6439567cabd744f6248a15edc1f0031fa6ec7eca22ad4ad8b884f411120c608733c5e7257f45b3cef323458aa09fd6daba745166191c03357e24ce7de428876a2ef8d4f6cb4aa7d5f59da0983c419c64f8699243ae99069fddf38f156bc5c15a21bae76c0a55fe454741efdfb2265e36d32d22324601dd6edbe07dee8e4f325cfe5f6678585e19b6a33b84740022a27554a7a0db39af28df80123a56263f1a177824345830b725e662ff486c9a72bec3723db09090bde211ed90541514ebe47127e58",
+    "https://job-logs.eascdn.net/production/969c835c-bdfb-467b-95b7-00361cb8255a/1773666711109-deae1eea-e66c-4a20-b6b1-bf8a9d7287b7.txt?X-Goog-Algorithm=GOOG4-RSA-SHA256&X-Goog-Credential=www-production%40exponentjs.iam.gserviceaccount.com%2F20260316%2Fauto%2Fstorage%2Fgoog4_request&X-Goog-Date=20260316T133527Z&X-Goog-Expires=900&X-Goog-SignedHeaders=host&X-Goog-Signature=0a10f1578496f28c50bc4e6855269d91987364d3446d7b29ed6c93682cc602f3b5542739183cd7c6a001bdf94482b43069d9a125730e8e11fbc8ef0303abd3f01a04c6b03ef1c7108dd8053b5f39033726bd547d04ddfb0fec6f496bf7042bced437b1390ced885e618f8f007ff559e3ae69aac82b6131b5488f43942cb14292100ee2b5ae55a86c48092a0467513707562e68ed154583a9f0fc95bf74345f6bb3e8c03090ecf6a04ab7a63fc3235711757b4eed79d389d9c68b24305d6051809460cac7f64e4a7e84e78550f396c3aa463068cd5a3bad1aed92bf1cb00a81e4aa06cdf1ed98d81f2559d58f39a6acea283e7ebb1c621d9cd12d48a1cfa1d13c",
+    "https://job-logs.eascdn.net/production/969c835c-bdfb-467b-95b7-00361cb8255a/1773666974868-96e77284-d3a8-49e0-9633-93bea3cdf4cf.txt?X-Goog-Algorithm=GOOG4-RSA-SHA256&X-Goog-Credential=www-production%40exponentjs.iam.gserviceaccount.com%2F20260316%2Fauto%2Fstorage%2Fgoog4_request&X-Goog-Date=20260316T133527Z&X-Goog-Expires=900&X-Goog-SignedHeaders=host&X-Goog-Signature=b2f11633f083bde569b247a648268b980d9d084cca25f693093e2cfb964dabb52b7b34498f6e424e51e487da9d6002723282b91c89d75ccef684235974014730650da1c6d42c07bddb43e945885642534ca351c47d8b2611dc6a2468d10db650226c67b3728e4f4ae00b3406846666c0312ee046b449525dd7d9dbf1e5897a4f9006480279bf5d71b48dcf269e25d5ed144bc08b06c3f6d1a790c8012271afe9e8bd9391bb1a4cf4cf42d3d1bd56885a00113b550e7255ec441ade7cae3ab0106dead0e3d959860d6565a7887f04e09a9cf15bfc17ef01b61707fc7c05aa468b8e58cd134c8f5d604015db3f78faee054c819b872210076a68149baca493f6d5",
+    "https://job-logs.eascdn.net/production/969c835c-bdfb-467b-95b7-00361cb8255a/1773666975241-90c1c657-cce0-4652-91f2-ff7f360ebe9f.txt?X-Goog-Algorithm=GOOG4-RSA-SHA256&X-Goog-Credential=www-production%40exponentjs.iam.gserviceaccount.com%2F20260316%2Fauto%2Fstorage%2Fgoog4_request&X-Goog-Date=20260316T133527Z&X-Goog-Expires=900&X-Goog-SignedHeaders=host&X-Goog-Signature=d821726d9e7c9d331cfd700e1c6febe26bba59daf32d6cd1075cb1ba82f8d858eb9c85f1b76c6e1519398c03d7e9b3185eec85fc7be89256ca7b187c1094e8bb1554db400e514ce1a009824d1d29089aebe87eeddf2cc1b3ca0a9063c503d35e228b92a688c9a3851b11d6a8e52ea31c4a399067d0ed49590894ed41dd830856030e160c6556b81b084bcdabfd3fca7102ee2470a8ae1f5aff83e1164c31e6abbc6b95fc1f10f070ee03660c55c0149bb2d6e41c29de17aafc24a7c51d5157577e1acd22babb9c2a77b05f9296fb75412a06bf0df842c58f10f4262bf265812e8c36b02e10c446e5fc18692c3e771ae13f40dcb7b43615ef28f0c4c4d4fec268",
+    "https://job-logs.eascdn.net/production/969c835c-bdfb-467b-95b7-00361cb8255a/1773666975505-e7dfa406-575c-4ab5-b423-1b91ff4b1b9e.txt?X-Goog-Algorithm=GOOG4-RSA-SHA256&X-Goog-Credential=www-production%40exponentjs.iam.gserviceaccount.com%2F20260316%2Fauto%2Fstorage%2Fgoog4_request&X-Goog-Date=20260316T133527Z&X-Goog-Expires=900&X-Goog-SignedHeaders=host&X-Goog-Signature=4dc811e256461081c6ea95be045d57aa39e748ab6f84f30c9ef11b9d1ea662ecce81276554b5c82aa64303f73e46284d8bda886e19566e4297e3b2627545a6d67c28d86f2abd9efee6657674450b7feaea8bc0eef1b8c216ebda4806263b6d227b1b7d00043a31626bdc86e301dcb7bca4ef4aea9026a7a1b24b450136cfb1affd77f53a74367f9c249474ef9046f44fa3a9e7953a3ed74a769a33bda9efa6deba3b244a21e90cb438b1d59ed54a0d0514759662f51249fd86e819500b5ac602a037af6229f89bb0993bd03bc5e4063d46e688f064a383c89b4581cc2ac1089cfbfc5a4c80724c275d8f9288885b3c9350eb686fe7bc2ad206c1b315755c1326"
+  ],
+  "project": {
+    "id": "91dfdce0-9705-4fde-8417-747273ab7cc2",
+    "name": "Leaf.app",
+    "slug": "leafapp-reactnative",
+    "ownerAccount": {
+      "id": "b8522c85-6956-471e-83a3-6e7454a7afc1",
+      "name": "leaf-app"
+    }
+  },
+  "channel": "production",
+  "distribution": "STORE",
+  "buildProfile": "production",
+  "sdkVersion": "52.0.0",
+  "appVersion": "1.0.1",
+  "appBuildVersion": "3",
+  "runtimeVersion": "1.0.1",
+  "gitCommitHash": "eec6de8228feab221e4a121003627c3b232afc33",
+  "gitCommitMessage": "mudanças globais no backend - mudança e otimizaçao no fluxo de corrida (Apis Google e cache com redis geo)",
+  "priority": "NORMAL",
+  "createdAt": "2026-03-16T12:35:18.618Z",
+  "updatedAt": "2026-03-16T13:22:41.289Z",
+  "completedAt": "2026-03-16T13:22:34.203Z",
+  "expirationDate": "2026-04-15T12:35:18.832Z",
+  "isForIosSimulator": false,
+  "metrics": {
+    "buildWaitTime": 2194383,
+    "buildQueueTime": 303771,
+    "buildDuration": 333154
+  }
+}

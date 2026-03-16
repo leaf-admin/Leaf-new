@@ -5,9 +5,10 @@
  */
 
 const dotenv = require('dotenv');
+const path = require('path');
 
 // Carregar variáveis de ambiente de teste
-dotenv.config({ path: '.env' });
+dotenv.config({ path: process.env.ENV_FILE || path.resolve(__dirname, '../../../.env') });
 
 // Configurar NODE_ENV para test
 process.env.NODE_ENV = 'test';
@@ -40,7 +41,7 @@ afterEach(() => {
 jest.setTimeout(5000);
 
 // Mock global para process.env
-process.env.REDIS_URL = process.env.REDIS_URL || 'redis://:test@localhost:6379';
+process.env.REDIS_URL = process.env.REDIS_URL || 'redis://:test@localhost:6380';
 process.env.PORT = '3001';
 process.env.NODE_ENV = 'test';
 

@@ -74,12 +74,17 @@ class WebSocketTestClient {
    * Autenticar usuário
    * @param {string} uid - ID do usuário
    * @param {string} userType - Tipo: 'customer' ou 'driver'
+   * @param {Object|string} [options] - Opções de autenticação (ou token direto)
    * @returns {Promise<Object>}
    */
-  async authenticate(uid, userType) {
+  async authenticate(uid, userType, options = {}) {
     if (!this.connected) {
       throw new Error('Socket não está conectado');
     }
+
+    const authOptions = typeof options === 'string' ? { token: options } : (options || {});
+    const token = String(authOptions.token || process.env.E2E_AUTH_TOKEN || '').trim();
+    const normalizedUserType = userType === 'passenger' ? 'customer' : userType;
 
     return new Promise((resolve, reject) => {
       const timeout = setTimeout(() => {
@@ -90,16 +95,17 @@ class WebSocketTestClient {
       const authenticatedHandler = (data) => {
         clearTimeout(timeout);
         this.socket.removeListener('auth_error', errorHandler);
+        this.socket.removeListener('authentication_error', errorHandler);
         this.authenticated = true;
         this.userId = uid;
-        this.userType = userType;
+        this.userType = normalizedUserType;
         this.socket.userId = uid; // Simular comportamento do servidor
-        this.socket.userType = userType;
+        this.socket.userType = normalizedUserType;
 
         // Entrar na room apropriada (servidor faz isso automaticamente, mas garantir)
-        if (userType === 'driver') {
+        if (normalizedUserType === 'driver') {
           this.socket.emit('join', `driver_${uid}`);
-        } else if (userType === 'customer') {
+        } else if (normalizedUserType === 'customer') {
           this.socket.emit('join', `customer_${uid}`);
         }
 
@@ -109,14 +115,19 @@ class WebSocketTestClient {
       const errorHandler = (error) => {
         clearTimeout(timeout);
         this.socket.removeListener('authenticated', authenticatedHandler);
+        this.socket.removeListener('authentication_error', errorHandler);
+        this.socket.removeListener('auth_error', errorHandler);
         reject(new Error(error.message || 'Erro na autenticação'));
       };
 
       this.socket.once('authenticated', authenticatedHandler);
       this.socket.once('auth_error', errorHandler);
+      this.socket.once('authentication_error', errorHandler);
 
       // Emitir evento após registrar listeners
-      this.socket.emit('authenticate', { uid, userType });
+      const payload = { uid, userType: normalizedUserType };
+      if (token) payload.token = token;
+      this.socket.emit('authenticate', payload);
     });
   }
 
@@ -163,7 +174,19 @@ class WebSocketTestClient {
         reject(new Error('Timeout ao confirmar pagamento'));
       }, 15000);
 
-      this.socket.emit('confirmPayment', data);
+      const mockPaymentDefaultEnabled =
+        String(process.env.E2E_MOCK_PAYMENT || 'true').toLowerCase() !== 'false';
+      const shouldInjectMock =
+        mockPaymentDefaultEnabled &&
+        data &&
+        data.mockPayment === undefined &&
+        data.__mockPayment === undefined;
+
+      const payload = shouldInjectMock
+        ? { ...data, mockPayment: true, __mockPayment: true }
+        : data;
+
+      this.socket.emit('confirmPayment', payload);
 
       this.socket.once('paymentConfirmed', (response) => {
         clearTimeout(timeout);
@@ -379,22 +402,52 @@ class WebSocketTestClient {
    * Aguardar evento específico
    * @param {string} eventName - Nome do evento
    * @param {number} timeout - Timeout em ms
+   * @param {Function} predicate - Filtro opcional para validar payload do evento
    * @returns {Promise<Object>}
    */
-  async waitForEvent(eventName, timeout = 10000) {
-    // Verificar se evento já foi recebido
-    if (this.events.has(eventName) && this.events.get(eventName).length > 0) {
-      const events = this.events.get(eventName);
-      return events[events.length - 1].data;
-    }
+  async waitForEvent(eventName, timeout = 10000, predicate = null) {
+    const matcher = typeof predicate === 'function' ? predicate : (() => true);
+
+    const findMatchingEvent = () => {
+      const events = this.events.get(eventName) || [];
+      for (let i = events.length - 1; i >= 0; i -= 1) {
+        const eventData = events[i].data;
+        try {
+          if (matcher(eventData)) return eventData;
+        } catch (_error) {
+          // Ignorar predicados inválidos e seguir aguardando próximo evento
+        }
+      }
+      return null;
+    };
+
+    // Verificar se evento já foi recebido (e atende predicado, se houver)
+    const existingMatch = findMatchingEvent();
+    if (existingMatch) return existingMatch;
 
     return new Promise((resolve, reject) => {
       const timeoutId = setTimeout(() => {
+        removeListener();
         reject(new Error(`Timeout aguardando evento: ${eventName}`));
       }, timeout);
 
+      const removeListener = () => {
+        const listeners = this.eventListeners.get(eventName) || [];
+        this.eventListeners.set(
+          eventName,
+          listeners.filter((registeredListener) => registeredListener !== listener)
+        );
+      };
+
       const listener = (data) => {
+        try {
+          if (!matcher(data)) return;
+        } catch (_error) {
+          return;
+        }
+
         clearTimeout(timeoutId);
+        removeListener();
         resolve(data);
       };
 
@@ -403,11 +456,12 @@ class WebSocketTestClient {
       }
       this.eventListeners.get(eventName).push(listener);
 
-      // Se evento já foi recebido, resolver imediatamente
-      if (this.events.has(eventName) && this.events.get(eventName).length > 0) {
+      // Revalidar após registrar listener para evitar race condition
+      const matchedAfterRegister = findMatchingEvent();
+      if (matchedAfterRegister) {
         clearTimeout(timeoutId);
-        const events = this.events.get(eventName);
-        resolve(events[events.length - 1].data);
+        removeListener();
+        resolve(matchedAfterRegister);
       }
     });
   }
@@ -459,4 +513,3 @@ class WebSocketTestClient {
 }
 
 module.exports = WebSocketTestClient;
-

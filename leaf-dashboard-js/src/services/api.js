@@ -37,13 +37,23 @@ class LeafApiService {
         }
       }
 
+      const contentType = response.headers.get("content-type") || "";
+      const payload = contentType.includes("application/json")
+        ? await response.json().catch(() => null)
+        : await response.text().catch(() => "");
+
       if (!response.ok) {
-        const err = new Error(`API Error ${response.status}`);
+        const apiMessage =
+          (payload && typeof payload === "object" && (payload.error || payload.message)) ||
+          (typeof payload === "string" ? payload : "") ||
+          `API Error ${response.status}`;
+        const err = new Error(apiMessage);
         err.status = response.status;
+        err.payload = payload;
         throw err;
       }
 
-      return await response.json();
+      return payload;
     } finally {
       clearTimeout(timeout);
     }
@@ -323,6 +333,17 @@ class LeafApiService {
       method: "POST",
       body: JSON.stringify(payload),
     });
+  }
+
+  async updatePromotion(promotionId, payload = {}) {
+    return this.request(`/promotions/${promotionId}`, {
+      method: "PATCH",
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async getPromotionStats() {
+    return this.request("/promotions/stats");
   }
 
   async applyPromotion(promotionId, driverId) {

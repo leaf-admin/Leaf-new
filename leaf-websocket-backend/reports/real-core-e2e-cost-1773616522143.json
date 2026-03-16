@@ -1,0 +1,379 @@
+{
+  "meta": {
+    "scenario": "real_core_e2e_cost",
+    "startedAt": "2026-03-15T23:15:22.144Z",
+    "serverUrl": "http://127.0.0.1:3026",
+    "mode": "local_real_execution",
+    "paymentMode": "mock_bypass_only",
+    "finishedAt": "2026-03-15T23:16:39.675Z",
+    "status": "failed",
+    "error": "Falha ao gerar recibo: Invalid time value",
+    "stack": "Error: Falha ao gerar recibo: Invalid time value\n    at ReceiptService.generateReceipt (/Users/izaakdias/Documents/Leaf-new/leaf-websocket-backend/services/receipt-service.js:203:19)\n    at ReceiptService.generateAndSaveReceipt (/Users/izaakdias/Documents/Leaf-new/leaf-websocket-backend/services/receipt-service.js:464:40)\n    at main (/Users/izaakdias/Documents/Leaf-new/leaf-websocket-backend/scripts/tests/run-real-core-e2e-cost.cjs:466:42)\n    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)"
+  },
+  "entities": {
+    "passengerId": "real_passenger_1773616522143",
+    "driverId": "real_driver_1773616522143",
+    "pickup": {
+      "lat": -23.5505,
+      "lng": -46.6333,
+      "address": "Av. Paulista, 1000 - São Paulo, SP"
+    },
+    "destination": {
+      "lat": -23.5615,
+      "lng": -46.6553,
+      "address": "Rua Oscar Freire, 1000 - São Paulo, SP"
+    },
+    "driverStart": {
+      "lat": -23.547,
+      "lng": -46.628
+    }
+  },
+  "flow": {
+    "steps": [
+      {
+        "step": "create_users",
+        "ok": true
+      },
+      {
+        "step": "connect_and_auth",
+        "ok": true
+      },
+      {
+        "step": "booking_and_payment",
+        "ok": true,
+        "bookingId": "booking_1773616526972_real_passenger_1773616522143"
+      },
+      {
+        "step": "driver_to_pickup_and_accept",
+        "ok": true
+      },
+      {
+        "step": "chat_6_messages",
+        "ok": true,
+        "total": 6
+      },
+      {
+        "step": "trip_coordinates_persisted",
+        "ok": true,
+        "total": 9
+      },
+      {
+        "step": "complete_trip",
+        "ok": true
+      },
+      {
+        "step": "persist_final_ride_data",
+        "ok": true
+      }
+    ],
+    "chatMessages": [
+      {
+        "from": "passenger",
+        "text": "Oi! Estou no portão principal.",
+        "at": "2026-03-15T23:16:06.936Z"
+      },
+      {
+        "from": "driver",
+        "text": "Perfeito, chego em 2 minutos.",
+        "at": "2026-03-15T23:16:08.976Z"
+      },
+      {
+        "from": "passenger",
+        "text": "Vou ficar de camisa azul.",
+        "at": "2026-03-15T23:16:10.141Z"
+      },
+      {
+        "from": "driver",
+        "text": "Vi você no mapa, já estou na esquina.",
+        "at": "2026-03-15T23:16:12.174Z"
+      },
+      {
+        "from": "passenger",
+        "text": "Beleza, te vi chegando.",
+        "at": "2026-03-15T23:16:14.077Z"
+      },
+      {
+        "from": "driver",
+        "text": "Pode entrar, estou de Civic prata.",
+        "at": "2026-03-15T23:16:16.123Z"
+      }
+    ],
+    "pickupCoordinates": [
+      {
+        "driverId": "real_driver_1773616522143",
+        "lat": -23.547,
+        "lng": -46.628,
+        "heading": 90,
+        "speed": 28,
+        "bookingId": "booking_1773616526972_real_passenger_1773616522143",
+        "timestamp": 1773616555557
+      },
+      {
+        "driverId": "real_driver_1773616522143",
+        "lat": -23.5477,
+        "lng": -46.62906,
+        "heading": 90,
+        "speed": 28,
+        "bookingId": "booking_1773616526972_real_passenger_1773616522143",
+        "timestamp": 1773616555909
+      },
+      {
+        "driverId": "real_driver_1773616522143",
+        "lat": -23.5484,
+        "lng": -46.63012,
+        "heading": 90,
+        "speed": 28,
+        "bookingId": "booking_1773616526972_real_passenger_1773616522143",
+        "timestamp": 1773616556265
+      },
+      {
+        "driverId": "real_driver_1773616522143",
+        "lat": -23.5491,
+        "lng": -46.63118,
+        "heading": 90,
+        "speed": 28,
+        "bookingId": "booking_1773616526972_real_passenger_1773616522143",
+        "timestamp": 1773616556618
+      },
+      {
+        "driverId": "real_driver_1773616522143",
+        "lat": -23.5498,
+        "lng": -46.63224,
+        "heading": 90,
+        "speed": 28,
+        "bookingId": "booking_1773616526972_real_passenger_1773616522143",
+        "timestamp": 1773616556971
+      },
+      {
+        "driverId": "real_driver_1773616522143",
+        "lat": -23.5505,
+        "lng": -46.6333,
+        "heading": 90,
+        "speed": 0,
+        "bookingId": "booking_1773616526972_real_passenger_1773616522143",
+        "timestamp": 1773616557323
+      }
+    ],
+    "tripCoordinates": [
+      {
+        "bookingId": "booking_1773616526972_real_passenger_1773616522143",
+        "driverId": "real_driver_1773616522143",
+        "lat": -23.5505,
+        "lng": -46.6333,
+        "heading": 95,
+        "speed": 36,
+        "timestamp": 1773616585178
+      },
+      {
+        "bookingId": "booking_1773616526972_real_passenger_1773616522143",
+        "driverId": "real_driver_1773616522143",
+        "lat": -23.551875,
+        "lng": -46.63605,
+        "heading": 95,
+        "speed": 36,
+        "timestamp": 1773616585480
+      },
+      {
+        "bookingId": "booking_1773616526972_real_passenger_1773616522143",
+        "driverId": "real_driver_1773616522143",
+        "lat": -23.55325,
+        "lng": -46.6388,
+        "heading": 95,
+        "speed": 36,
+        "timestamp": 1773616585781
+      },
+      {
+        "bookingId": "booking_1773616526972_real_passenger_1773616522143",
+        "driverId": "real_driver_1773616522143",
+        "lat": -23.554625,
+        "lng": -46.64155,
+        "heading": 95,
+        "speed": 36,
+        "timestamp": 1773616586083
+      },
+      {
+        "bookingId": "booking_1773616526972_real_passenger_1773616522143",
+        "driverId": "real_driver_1773616522143",
+        "lat": -23.556,
+        "lng": -46.6443,
+        "heading": 95,
+        "speed": 36,
+        "timestamp": 1773616586384
+      },
+      {
+        "bookingId": "booking_1773616526972_real_passenger_1773616522143",
+        "driverId": "real_driver_1773616522143",
+        "lat": -23.557375,
+        "lng": -46.64705,
+        "heading": 95,
+        "speed": 36,
+        "timestamp": 1773616586691
+      },
+      {
+        "bookingId": "booking_1773616526972_real_passenger_1773616522143",
+        "driverId": "real_driver_1773616522143",
+        "lat": -23.55875,
+        "lng": -46.6498,
+        "heading": 95,
+        "speed": 36,
+        "timestamp": 1773616586993
+      },
+      {
+        "bookingId": "booking_1773616526972_real_passenger_1773616522143",
+        "driverId": "real_driver_1773616522143",
+        "lat": -23.560125,
+        "lng": -46.65255,
+        "heading": 95,
+        "speed": 36,
+        "timestamp": 1773616587300
+      },
+      {
+        "bookingId": "booking_1773616526972_real_passenger_1773616522143",
+        "driverId": "real_driver_1773616522143",
+        "lat": -23.5615,
+        "lng": -46.6553,
+        "heading": 95,
+        "speed": 0,
+        "timestamp": 1773616587603
+      }
+    ]
+  },
+  "outputs": {
+    "booking": {
+      "success": true,
+      "bookingId": "booking_1773616526972_real_passenger_1773616522143",
+      "message": "Corrida solicitada com sucesso",
+      "traceId": "req-1773616523149-bdaf9b01",
+      "data": {
+        "bookingId": "booking_1773616526972_real_passenger_1773616522143",
+        "customerId": "real_passenger_1773616522143",
+        "pickupLocation": {
+          "lat": -23.5505,
+          "lng": -46.6333
+        },
+        "destinationLocation": {
+          "lat": -23.5615,
+          "lng": -46.6553
+        },
+        "estimatedFare": 42.5,
+        "paymentMethod": "pix",
+        "status": "requested",
+        "timestamp": "2026-03-15T23:15:33.919Z",
+        "traceId": "req-1773616523149-bdaf9b01"
+      }
+    },
+    "payment": {
+      "success": true,
+      "bookingId": "booking_1773616526972_real_passenger_1773616522143",
+      "message": "Pagamento confirmado com sucesso",
+      "data": {
+        "bookingId": "booking_1773616526972_real_passenger_1773616522143",
+        "paymentMethod": "pix",
+        "paymentId": "mock_payment_1773616522143",
+        "amount": 42.5,
+        "status": "confirmed",
+        "timestamp": "2026-03-15T23:15:39.891Z"
+      }
+    },
+    "rideRequestForDriver": null,
+    "completeTrip": {
+      "success": true,
+      "bookingId": "booking_1773616526972_real_passenger_1773616522143",
+      "message": "Viagem finalizada com sucesso",
+      "endLocation": {
+        "lat": -23.5615,
+        "lng": -46.6553
+      },
+      "distance": 6.4,
+      "fare": 42.5,
+      "persistence": "confirmed_firestore",
+      "timestamp": "2026-03-15T23:16:38.702Z"
+    },
+    "tripCompletedPassenger": {
+      "success": true,
+      "bookingId": "booking_1773616526972_real_passenger_1773616522143",
+      "message": "Viagem finalizada",
+      "endLocation": {
+        "lat": -23.5615,
+        "lng": -46.6553
+      },
+      "distance": 6.4,
+      "fare": 42.5,
+      "persistence": "confirmed_firestore",
+      "timestamp": "2026-03-15T23:16:38.702Z"
+    },
+    "tripCompletedDriver": {
+      "success": true,
+      "bookingId": "booking_1773616526972_real_passenger_1773616522143",
+      "message": "Viagem finalizada com sucesso",
+      "endLocation": {
+        "lat": -23.5615,
+        "lng": -46.6553
+      },
+      "distance": 6.4,
+      "fare": 42.5,
+      "persistence": "confirmed_firestore",
+      "timestamp": "2026-03-15T23:16:38.702Z"
+    },
+    "finalSnapshot": {
+      "bookingId": "booking_1773616526972_real_passenger_1773616522143",
+      "passengerId": "real_passenger_1773616522143",
+      "driverId": "real_driver_1773616522143",
+      "status": "completed",
+      "fare": 42.5,
+      "distanceKm": 6.4,
+      "chatMessages": 6,
+      "pickupCoordsCount": 6,
+      "tripCoordsCount": 9,
+      "completedAt": "2026-03-15T23:16:39.510Z"
+    }
+  },
+  "debug": {
+    "newRideRequest": {
+      "ok": false,
+      "event": "newRideRequest",
+      "error": "Timeout aguardando evento: newRideRequest"
+    },
+    "bookingStateAfterAccept": {
+      "bookingHash": {
+        "bookingId": "booking_1773616526972_real_passenger_1773616522143",
+        "customerId": "real_passenger_1773616522143",
+        "pickupLocation": "{\"lat\":-23.5505,\"lng\":-46.6333}",
+        "destinationLocation": "{\"lat\":-23.5615,\"lng\":-46.6553}",
+        "estimatedFare": "42.5",
+        "carType": "normal",
+        "paymentMethod": "pix",
+        "region": "6gyf4",
+        "state": "ACCEPTED",
+        "createdAt": "1773616531949",
+        "updatedAt": "2026-03-15T23:16:01.516Z",
+        "status": "ACCEPTED",
+        "timestamp": "2026-03-15T23:15:31.949Z",
+        "paymentStatus": "pending_payment",
+        "paymentChargeId": "",
+        "paymentAmountInCents": "",
+        "driverId": "real_driver_1773616522143",
+        "acceptedAt": "2026-03-15T23:16:01.516Z"
+      },
+      "activeBooking": null
+    },
+    "chatCreation": {
+      "ok": true,
+      "event": "chatCreated",
+      "data": {
+        "success": true,
+        "chatId": "booking_1773616526972_real_passenger_1773616522143",
+        "bookingId": "booking_1773616526972_real_passenger_1773616522143",
+        "participants": [
+          "real_passenger_1773616522143",
+          "real_driver_1773616522143"
+        ],
+        "type": "trip_chat",
+        "message": "Chat criado com sucesso"
+      },
+      "attempt": 2
+    }
+  },
+  "metrics": {},
+  "cost": {}
+}

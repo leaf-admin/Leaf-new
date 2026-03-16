@@ -1,0 +1,58 @@
+{
+  "runId": 1773620126726,
+  "executedAt": "2026-03-16T00:15:25.193Z",
+  "keySuffix": "G246KY",
+  "calls": {
+    "placeAutocomplete": {
+      "httpStatus": 200,
+      "apiStatus": "OK",
+      "predictions": 5,
+      "errorMessage": null
+    },
+    "placeDetails": {
+      "httpStatus": 200,
+      "apiStatus": "OK",
+      "hasResult": true,
+      "errorMessage": null
+    },
+    "geocode": {
+      "httpStatus": 200,
+      "apiStatus": "OK",
+      "results": 11,
+      "errorMessage": null
+    },
+    "directions": {
+      "httpStatus": 200,
+      "apiStatus": "OK",
+      "routes": 1,
+      "errorMessage": null
+    },
+    "distanceMatrix": {
+      "httpStatus": 200,
+      "apiStatus": "OK",
+      "rows": 1,
+      "elementStatus": "OK",
+      "errorMessage": null
+    }
+  },
+  "counts": {
+    "placeAutocomplete": 1,
+    "placeDetails": 1,
+    "geocoding": 1,
+    "directionsAdvanced": 1,
+    "distanceMatrixAdvanced": 1,
+    "staticMaps": 0
+  },
+  "cost": {
+    "currency": "USD",
+    "perSkuUnitPrice": {
+      "placeAutocomplete": 0.00283,
+      "placeDetails": 0.005,
+      "geocoding": 0.005,
+      "directionsAdvanced": 0.01,
+      "distanceMatrixAdvanced": 0.01,
+      "staticMaps": 0.002
+    },
+    "totalUsd": 0.03283
+  }
+}

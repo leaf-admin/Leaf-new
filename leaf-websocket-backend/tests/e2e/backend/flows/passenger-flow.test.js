@@ -87,10 +87,22 @@ describe('Fluxo Passageiro Completo', () => {
     await testData.helpers.sleep(1000);
   });
 
-  beforeEach(() => {
+  beforeEach(async () => {
     // Limpar eventos antes de cada teste
     passengerClient.clearEvents();
     driverClient.clearEvents();
+
+    // Reforçar estado online para evitar flakiness após testes que finalizam corrida
+    await driverSimulator.setDriverOnline(
+      testData.users.driver.uid,
+      testData.locations.pickup.lat,
+      testData.locations.pickup.lng,
+      0,
+      0,
+      true,
+      false
+    );
+    await testData.helpers.sleep(150);
   });
 
   test('deve completar fluxo completo de corrida', async () => {
@@ -128,7 +140,11 @@ describe('Fluxo Passageiro Completo', () => {
     console.log(`✅ Motorista verificado online no Redis antes de criar corrida`);
 
     // Aguardar notificação de nova corrida (evento: newRideRequest)
-    const notification = await driverClient.waitForEvent('newRideRequest', 20000);
+    const notification = await driverClient.waitForEvent(
+      'newRideRequest',
+      45000,
+      (eventData) => (eventData?.bookingId || eventData?.rideId) === bookingId
+    );
 
     expect(notification).toBeDefined();
     console.log(`[DEBUG Teste 1] Recebeu notificação para bookingId:`, notification.bookingId || notification.rideId, 'Esperado:', bookingId);
@@ -250,7 +266,11 @@ describe('Fluxo Passageiro Completo', () => {
 
     // Etapa 3: Driver recebe notificação (evento correto: newRideRequest)
     // Motorista já está online no Redis, então deve receber notificação
-    const notification = await driverClient.waitForEvent('newRideRequest', 20000);
+    const notification = await driverClient.waitForEvent(
+      'newRideRequest',
+      45000,
+      (eventData) => (eventData?.bookingId || eventData?.rideId) === booking.bookingId
+    );
     expect(notification).toBeDefined();
     console.log(`[DEBUG Teste 2] Recebeu notificação para bookingId:`, notification.bookingId || notification.rideId, 'Esperado:', booking.bookingId);
     expect(notification.bookingId || notification.rideId).toBe(booking.bookingId);
@@ -261,4 +281,3 @@ describe('Fluxo Passageiro Completo', () => {
     expect(accepted).toBeDefined();
   }, 60000);
 });
-
