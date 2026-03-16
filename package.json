@@ -27,11 +27,5 @@
   },
   "devDependencies": {
     "next": "^16.1.0"
-  },
-  "overrides": {
-    "react-native": "0.76.9",
-    "metro": "0.81.5",
-    "metro-config": "0.81.5",
-    "metro-resolver": "0.81.5"
   }
 }

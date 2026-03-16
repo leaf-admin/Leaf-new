@@ -28,16 +28,16 @@ Objetivo: migrar de Expo SDK 52 para SDK 54, mantendo funcionamento geral do app
 
 ## Fase 1 - Saneamento de debito tecnico pre-upgrade
 
-- [ ] Remover `overrides` globais de `react-native`/`metro` no root ou isolar para nao travar o mobile.
-- [ ] Corrigir dependencia faltante `expo-linear-gradient` ou remover imports nao usados.
-- [ ] Revisar `postinstall` (`scripts/fix-firebase-kotlin.js`) e remover chamada vazia.
-- [ ] Revisar plugins customizados e marcar quais sao realmente necessarios:
-- [ ] `withExpoModulesCoreFix`
-- [ ] `withGradleNodeFix`
-- [ ] `withBoringSSLFix`
-- [ ] `withNetworkSecurityConfig`
-- [ ] Congelar imagens EAS para evitar variacao de ambiente (`latest` -> imagem explicita).
-- [ ] Rodar smoke de inicializacao apos saneamento.
+- [x] Remover `overrides` globais de `react-native`/`metro` no root ou isolar para nao travar o mobile.
+- [x] Corrigir dependencia faltante `expo-linear-gradient` ou remover imports nao usados.
+- [x] Revisar `postinstall` (`scripts/fix-firebase-kotlin.js`) e remover chamada vazia.
+- [x] Revisar plugins customizados e marcar quais sao realmente necessarios:
+- [x] `withExpoModulesCoreFix` (necessario no SDK 52 pelo erro `components.release`; reavaliar remocao apos upgrade para 54)
+- [x] `withGradleNodeFix` (necessario em monorepo para resolver `react-native` no `expo-dev-launcher`)
+- [x] `withBoringSSLFix` (necessario no iOS/Xcode 26.2 para remover flags `-G*` em pods)
+- [x] `withNetworkSecurityConfig` (necessario para trafego HTTP de homologacao/dev; revisar endurecimento na Fase 7)
+- [x] Congelar imagens EAS para evitar variacao de ambiente (`latest` -> imagem explicita).
+- [x] Rodar smoke de inicializacao apos saneamento.
 
 ## Fase 2 - Upgrade controlado SDK 52 -> SDK 53
 
