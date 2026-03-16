@@ -21,6 +21,7 @@ Objetivo: migrar de Expo SDK 52 para SDK 54, mantendo funcionamento geral do app
 - [x] Criar tag de backup antes da migracao.
 - [x] Confirmar que o workspace esta limpo antes de iniciar mudancas de dependencias.
 - [x] Coletar baseline funcional do SDK 52.
+- [x] Analisar logs das ultimas falhas EAS (Android/iOS) antes de novas execucoes.
 - [ ] Gerar baseline de build Android (dev/preview).
 - [ ] Gerar baseline de build iOS (dev/preview).
 - [x] Consolidar baseline em um relatorio curto (`docs/migration-sdk54-baseline.md`).

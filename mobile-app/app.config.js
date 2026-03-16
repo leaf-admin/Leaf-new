@@ -2,7 +2,6 @@ const AppConfig = require('./config/AppConfig').AppConfig;
 const GoogleMapApiConfig = require('./config/GoogleMapApiConfig').GoogleMapApiConfig;
 const fs = require('fs');
 const path = require('path');
-const withExpoModulesCoreFix = require('./plugins/withExpoModulesCoreFix');
 
 module.exports = {
     name: AppConfig.app_name,
@@ -99,9 +98,8 @@ module.exports = {
         "@react-native-firebase/auth",
         "./plugins/withGoogleMapsApiKey",
         "./plugins/withDisableDevMenu",
-        "./plugins/withBoringSSLFix",
         "./plugins/withGradleNodeFix",
-        withExpoModulesCoreFix,
+        "./plugins/withExpoModulesCoreFix",
         "./plugins/withNetworkSecurityConfig",
         [
             "expo-notifications",
@@ -121,6 +119,7 @@ module.exports = {
               },
             }
         ],
+        "./plugins/withBoringSSLFix",
         [
             "expo-image-picker",
             {
