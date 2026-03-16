@@ -70,6 +70,7 @@ Objetivo: migrar de Expo SDK 52 para SDK 54, mantendo funcionamento geral do app
 
 ## Fase 5 - Dependencias nativas fora da matriz Expo
 
+- [x] Levantar status de versoes e risco das libs nativas criticas (`docs/migration-sdk54-phase5-risk-assessment-2026-03-16.md`).
 - [x] Validar compatibilidade da suite `@react-native-firebase` com RN do SDK 54 (upgrade para `23.8.8` + prebuild Android/iOS OK).
 - [ ] Validar `@react-native-google-signin/google-signin`.
 - [ ] Validar `expo-text-recognition` (manutencao/compatibilidade real).
