@@ -41,14 +41,14 @@ Objetivo: migrar de Expo SDK 52 para SDK 54, mantendo funcionamento geral do app
 
 ## Fase 2 - Upgrade controlado SDK 52 -> SDK 53
 
-- [ ] Atualizar `expo` para SDK 53.
-- [ ] Rodar `expo install --fix` para alinhar pacotes suportados.
-- [ ] Atualizar `jest-expo` e `babel-preset-expo` para linha do SDK 53.
-- [ ] Validar `expo prebuild` sem erro (Android/iOS).
-- [ ] Corrigir quebras de compilacao.
+- [x] Atualizar `expo` para SDK 53.
+- [x] Rodar `expo install --fix` para alinhar pacotes suportados.
+- [x] Atualizar `jest-expo` e `babel-preset-expo` para linha do SDK 53.
+- [x] Validar `expo prebuild` sem erro (Android/iOS).
+- [x] Corrigir quebras de compilacao.
 - [ ] Rodar app em Android (dev-client) e validar fluxo minimo.
 - [ ] Rodar app em iOS (dev-client) e validar fluxo minimo.
-- [ ] Registrar diff de dependencias e mudancas de codigo desta fase.
+- [x] Registrar diff de dependencias e mudancas de codigo desta fase (`docs/migration-sdk53-phase2-2026-03-16.md`).
 
 ## Fase 3 - Upgrade controlado SDK 53 -> SDK 54
 

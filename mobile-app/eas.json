@@ -9,7 +9,7 @@
       "distribution": "internal",
       "android": {
         "buildType": "apk",
-        "image": "sdk-52"
+        "image": "sdk-53"
       },
       "channel": "development"
     },
@@ -21,7 +21,7 @@
       },
       "android": {
         "buildType": "apk",
-        "image": "sdk-52"
+        "image": "sdk-53"
       },
       "channel": "development"
     },
@@ -30,7 +30,7 @@
       "distribution": "internal",
       "android": {
         "buildType": "apk",
-        "image": "sdk-52"
+        "image": "sdk-53"
       },
       "channel": "development"
     },
@@ -42,7 +42,7 @@
       },
       "android": {
         "buildType": "apk",
-        "image": "sdk-52"
+        "image": "sdk-53"
       },
       "ios": {
         "image": "macos-sequoia-15.6-xcode-26.2",
@@ -56,7 +56,7 @@
       "distribution": "internal",
       "android": {
         "buildType": "apk",
-        "image": "sdk-52"
+        "image": "sdk-53"
       },
       "channel": "production"
     },
@@ -76,7 +76,7 @@
       "distribution": "internal",
       "android": {
         "buildType": "apk",
-        "image": "sdk-52"
+        "image": "sdk-53"
       },
       "channel": "production"
     },
@@ -89,7 +89,7 @@
       },
       "android": {
         "buildType": "apk",
-        "image": "sdk-52"
+        "image": "sdk-53"
       },
       "ios": {
         "image": "macos-sequoia-15.6-xcode-26.2",
