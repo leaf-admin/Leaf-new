@@ -11,7 +11,7 @@ import {
 } from './src/screens';
 import * as Notifications from 'expo-notifications';
 import * as SplashScreen from 'expo-splash-screen';
-import { Audio, InterruptionModeAndroid, InterruptionModeIOS } from 'expo-av';
+import { createAudioPlayer, setAudioModeAsync } from 'expo-audio';
 import auth from '@react-native-firebase/auth';
 import { api } from 'common';
 
@@ -53,6 +53,7 @@ export default function AppCommon({ children }) {
   const langCalled = useRef();
   const [tasks, setTasks] = useState([]);
   const [sound, setSound] = useState();
+  const soundStatusSubscription = useRef(null);
   const [playedSounds, setPlayedSounds] = useState([]);
   const [deviceId,setDeviceId] = useState();
   const [playing, setPlaying] = useState();
@@ -128,23 +129,46 @@ export default function AppCommon({ children }) {
   }, [isFirebaseInitialized]);
 
   const loadSound = async () => {
-    Audio.setAudioModeAsync({
-      staysActiveInBackground: true,
-      playsInSilentModeIOS: true,
-      interruptionModeIOS: InterruptionModeIOS.DuckOthers,
-      interruptionModeAndroid: InterruptionModeAndroid.DuckOthers,
-      shouldDuckAndroid: true,
+    await setAudioModeAsync({
+      shouldPlayInBackground: true,
+      playsInSilentMode: true,
+      interruptionMode: 'duckOthers',
+      shouldRouteThroughEarpiece: false,
     });
 
-    const { sound } = await Audio.Sound.createAsync(settings.CarHornRepeat?require('./assets/sounds/repeat.wav'):require('./assets/sounds/horn.wav'));
-    setSound(sound);
-  }
+    const source = settings.CarHornRepeat
+      ? require('./assets/sounds/repeat.wav')
+      : require('./assets/sounds/horn.wav');
+    const player = createAudioPlayer(source);
+
+    if (soundStatusSubscription.current) {
+      soundStatusSubscription.current.remove();
+      soundStatusSubscription.current = null;
+    }
+    if (sound) {
+      sound.remove();
+    }
+
+    setSound(player);
+  };
   
   useEffect(()=>{
     if(settings){
       loadSound();
     }
   },[settings]);
+
+  useEffect(() => {
+    return () => {
+      if (soundStatusSubscription.current) {
+        soundStatusSubscription.current.remove();
+        soundStatusSubscription.current = null;
+      }
+      if (sound) {
+        sound.remove();
+      }
+    };
+  }, [sound]);
 
   useEffect(() => {
       AsyncStorage.getItem('deviceId', (err, result) => {
@@ -205,13 +229,13 @@ export default function AppCommon({ children }) {
     }
   }, [authState.current, tasks]);
 
-  _onPlaybackStatusUpdate = playbackStatus => {
+  const onPlaybackStatusUpdate = (playbackStatus) => {
     if (!playbackStatus.isLoaded) {
       if (playbackStatus.error) {
 
       }
     } else {
-      if (playbackStatus.isPlaying) {
+      if (playbackStatus.playing) {
          setPlaying(true);
       } else {
         setPlaying(false);
@@ -219,9 +243,10 @@ export default function AppCommon({ children }) {
       if (playbackStatus.isBuffering) {
 
       }
-      if (playbackStatus.didJustFinish && !playbackStatus.isLooping) {
+      if (playbackStatus.didJustFinish && !playbackStatus.loop) {
         setPlaying(false);
-        sound.stopAsync();
+        sound.pause();
+        sound.seekTo(0).catch(() => {});
       }
 
     }
@@ -232,9 +257,12 @@ export default function AppCommon({ children }) {
       if(!playedSounds.includes(tasks[i].id)){
         let newArr = [...playedSounds];
         newArr.push(tasks[i].id);
-        if(!playing){
-          sound.playAsync();
-          sound.setOnPlaybackStatusUpdate(_onPlaybackStatusUpdate);
+        if(!playing && sound){
+          if (!soundStatusSubscription.current) {
+            soundStatusSubscription.current = sound.addListener('playbackStatusUpdate', onPlaybackStatusUpdate);
+          }
+          sound.seekTo(0).catch(() => {});
+          sound.play();
         }
         setPlayedSounds(newArr);
       }

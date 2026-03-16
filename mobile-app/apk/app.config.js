@@ -124,6 +124,7 @@ export default {
     plugins: [
         "expo-asset",
         "expo-font",
+        "expo-audio",
         "expo-apple-authentication",
         "expo-localization",
         "@react-native-firebase/app", 

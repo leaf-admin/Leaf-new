@@ -20,7 +20,8 @@ import fcmService from './FCMNotificationService';
 // Configurar comportamento padrão das notificações
 Notifications.setNotificationHandler({
     handleNotification: async () => ({
-        shouldShowAlert: true,
+        shouldShowBanner: true,
+        shouldShowList: true,
         shouldPlaySound: true,
         shouldSetBadge: true,
     }),
@@ -473,6 +474,5 @@ class InteractiveNotificationService {
 // Exportar instância singleton
 const interactiveNotificationService = new InteractiveNotificationService();
 export default interactiveNotificationService;
-
 
 

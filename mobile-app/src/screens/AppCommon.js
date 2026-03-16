@@ -18,7 +18,6 @@ import {
 } from './';
 import * as Notifications from 'expo-notifications';
 import * as SplashScreen from 'expo-splash-screen';
-import { Audio, InterruptionModeAndroid, InterruptionModeIOS } from 'expo-av';
 import { getUserId, getUserData, saveUserData } from '../utils/authUtils';
 
 
@@ -47,10 +46,8 @@ export default function AppCommon({ children }) {
   const locationLoading = useRef(true);
   const fetchingToken = useRef(true);
   const langCalled = useRef();
-  const [sound, setSound] = useState();
   const [playedSounds, setPlayedSounds] = useState([]);
   const [deviceId,setDeviceId] = useState();
-  const [playing, setPlaying] = useState();
   const [isAuthReady, setIsAuthReady] = useState(false);
   const [firebaseUser, setFirebaseUser] = useState(null);
   const [languagesData, setLanguagesData] = useState(null);

@@ -767,7 +767,7 @@ class VehicleService {
 
             // Converter imagem de auditoria para base64 se disponível
             if (structuredData.auditImage) {
-                const FileSystem = require('expo-file-system').default;
+                const FileSystem = require('expo-file-system/legacy');
                 try {
                     const base64 = await FileSystem.readAsStringAsync(structuredData.auditImage, {
                         encoding: FileSystem.EncodingType.Base64,

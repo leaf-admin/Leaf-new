@@ -62,15 +62,15 @@ Objetivo: migrar de Expo SDK 52 para SDK 54, mantendo funcionamento geral do app
 
 ## Fase 4 - Limpeza de deprecacoes (zero debito tecnico)
 
-- [ ] Migrar uso de `expo-av` para `expo-audio`/`expo-video` quando aplicavel.
-- [ ] Enderecar APIs legadas de `expo-file-system` (migrar ou isolar em camada de compatibilidade).
-- [ ] Atualizar handler de notificacao para opcoes modernas de apresentacao no iOS.
-- [ ] Revisar warnings do `expo doctor` e zerar warnings bloqueantes.
-- [ ] Remover excecoes antigas de `reactNativeDirectoryCheck` que nao forem mais necessarias.
+- [x] Migrar uso de `expo-av` para `expo-audio`/`expo-video` quando aplicavel.
+- [x] Enderecar APIs legadas de `expo-file-system` (migrar ou isolar em camada de compatibilidade).
+- [x] Atualizar handler de notificacao para opcoes modernas de apresentacao no iOS.
+- [x] Revisar warnings do `expo doctor` e zerar warnings bloqueantes.
+- [x] Remover excecoes antigas de `reactNativeDirectoryCheck` que nao forem mais necessarias (removida excecao de `expo-av`).
 
 ## Fase 5 - Dependencias nativas fora da matriz Expo
 
-- [ ] Validar compatibilidade da suite `@react-native-firebase` com RN do SDK 54.
+- [x] Validar compatibilidade da suite `@react-native-firebase` com RN do SDK 54 (upgrade para `23.8.8` + prebuild Android/iOS OK).
 - [ ] Validar `@react-native-google-signin/google-signin`.
 - [ ] Validar `expo-text-recognition` (manutencao/compatibilidade real).
 - [ ] Validar libs nativas de maior risco:
