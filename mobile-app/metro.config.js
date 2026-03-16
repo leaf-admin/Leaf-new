@@ -1,6 +1,5 @@
 const { getDefaultConfig } = require('expo/metro-config');
 const path = require('path');
-const exclusionList = require('metro-config/src/defaults/exclusionList');
 
 const config = getDefaultConfig(__dirname);
 const { resolve } = config.resolver;
@@ -63,9 +62,9 @@ config.resolver.alias = {
 
 const rootReactNativePath = path.resolve(__dirname, '..', 'node_modules', 'react-native');
 const escapedRootReactNativePath = rootReactNativePath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-config.resolver.blockList = exclusionList([
-  new RegExp(`${escapedRootReactNativePath}[\\\\/].*`),
-]);
+config.resolver.blockList = [
+  new RegExp(`^${escapedRootReactNativePath}[\\\\/].*`),
+];
 
 config.resolver.resolveRequest = (context, moduleName, platform) => {
   if (moduleName === 'axios' || moduleName === 'axios/dist/node/axios.cjs') {

@@ -26,7 +26,7 @@
     "socket.io-client": "^4.8.1"
   },
   "devDependencies": {
-    "expo": "^53.0.27",
+    "expo": "^54.0.33",
     "next": "^16.1.0"
   }
 }
