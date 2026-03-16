@@ -6,13 +6,15 @@ import Logger from '../utils/Logger';
  * com detecção automática de idioma e fallback inteligente.
  */
 
-// Importar traduções estáticas
-import enTranslations from './en.json';
-import ptTranslations from './pt.json';
-import esTranslations from './es.json';
-import frTranslations from './fr.json';
-import deTranslations from './de.json';
+// Importar traduções estáticas disponíveis no projeto.
+// Idiomas sem arquivo dedicado usam fallback para inglês.
+import enTranslations from './en';
+import ptTranslations from './pt-BR';
 import languageAnalytics from '../services/LanguageAnalytics';
+
+const esTranslations = enTranslations;
+const frTranslations = enTranslations;
+const deTranslations = enTranslations;
 
 
 class LanguageManager {

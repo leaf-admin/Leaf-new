@@ -1,9 +1,19 @@
 const { getDefaultConfig } = require('expo/metro-config');
 const path = require('path');
+const exclusionList = require('metro-config/src/defaults/exclusionList');
 
 const config = getDefaultConfig(__dirname);
 const { resolve } = config.resolver;
-const axiosBrowserEntry = path.resolve(__dirname, 'node_modules/axios/dist/browser/axios.cjs');
+const resolveAxiosBrowserEntry = () => {
+  try {
+    return require.resolve('axios/dist/browser/axios.cjs', {
+      paths: [__dirname, path.resolve(__dirname, '..')]
+    });
+  } catch (_) {
+    return path.resolve(__dirname, 'node_modules/axios/dist/browser/axios.cjs');
+  }
+};
+const axiosBrowserEntry = resolveAxiosBrowserEntry();
 
 // Usar extensões padrão do Expo + algumas extras necessárias
 config.resolver.sourceExts.push('cjs');
@@ -32,6 +42,7 @@ config.resolver.nodeModulesPaths = [
 // Resolver apenas os problemas essenciais do Firebase
 config.resolver.alias = {
   ...config.resolver.alias,
+  'react-native': path.resolve(__dirname, 'node_modules/react-native'),
   // Force browser bundle for React Native runtime (avoid Node-only axios entry)
   'axios': axiosBrowserEntry,
   'idb': false,
@@ -49,6 +60,12 @@ config.resolver.alias = {
   'worker_threads': false,
   'use-sync-external-store/shim': 'use-sync-external-store/shim/with-selector',
 };
+
+const rootReactNativePath = path.resolve(__dirname, '..', 'node_modules', 'react-native');
+const escapedRootReactNativePath = rootReactNativePath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+config.resolver.blockList = exclusionList([
+  new RegExp(`${escapedRootReactNativePath}[\\\\/].*`),
+]);
 
 config.resolver.resolveRequest = (context, moduleName, platform) => {
   if (moduleName === 'axios' || moduleName === 'axios/dist/node/axios.cjs') {

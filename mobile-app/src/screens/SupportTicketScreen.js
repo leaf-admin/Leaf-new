@@ -1,5 +1,5 @@
 import Logger from '../utils/Logger';
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -25,7 +25,7 @@ import { SkeletonLoader, LoadingSpinner } from '../components/LoadingStates';
 import { useResponsiveLayout } from '../components/ResponsiveLayout';
 
 
-const SupportTicketScreen = ({ navigation }) => {
+const SupportTicketScreen = ({ navigation, route }) => {
   const [tickets, setTickets] = useState([]);
   const [selectedTicket, setSelectedTicket] = useState(null);
   const [messages, setMessages] = useState([]);
@@ -33,6 +33,7 @@ const SupportTicketScreen = ({ navigation }) => {
   const [isCreatingTicket, setIsCreatingTicket] = useState(false);
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [showTicketModal, setShowTicketModal] = useState(false);
+  const hasAutoOpenedTicketRef = useRef(false);
   
   // Loading states adicionais
   const [isLoadingTickets, setIsLoadingTickets] = useState(false);
@@ -69,6 +70,21 @@ const SupportTicketScreen = ({ navigation }) => {
   useEffect(() => {
     loadUserTickets();
   }, []);
+
+  useEffect(() => {
+    if (hasAutoOpenedTicketRef.current) return;
+
+    const paramTicket = route?.params?.ticket;
+    const paramTicketId = route?.params?.ticketId || paramTicket?.id;
+    if (!paramTicketId) return;
+    if (!tickets.length && !paramTicket) return;
+
+    const ticketToOpen = tickets.find((ticket) => ticket.id === paramTicketId) || paramTicket;
+    if (!ticketToOpen) return;
+
+    hasAutoOpenedTicketRef.current = true;
+    openTicket(ticketToOpen);
+  }, [tickets, route?.params?.ticket, route?.params?.ticketId]);
 
   const loadUserTickets = async () => {
     try {

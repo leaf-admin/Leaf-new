@@ -1046,15 +1046,21 @@ class WebSocketManager {
                 reject(new Error('Create chat timeout'));
             }, 10000);
 
-            this.socket.emit('create_chat', chatData);
-            this.socket.once('chat_created', (data) => {
+            const onSuccess = (data) => {
                 clearTimeout(timeout);
+                this.socket.off('chat_created', onSuccess);
+                this.socket.off('chatCreated', onSuccess);
                 if (data.success) {
                     resolve(data);
                 } else {
                     reject(new Error(data.error || 'Create chat failed'));
                 }
-            });
+            };
+
+            this.socket.emit('createChat', chatData);
+            this.socket.once('chatCreated', onSuccess);
+            // Compatibilidade com payload/evento legado
+            this.socket.once('chat_created', onSuccess);
         });
     }
 
@@ -1069,15 +1075,21 @@ class WebSocketManager {
                 reject(new Error('Send message timeout'));
             }, 10000);
 
-            this.socket.emit('send_message', messageData);
-            this.socket.once('message_sent', (data) => {
+            const onSuccess = (data) => {
                 clearTimeout(timeout);
+                this.socket.off('message_sent', onSuccess);
+                this.socket.off('messageSent', onSuccess);
                 if (data.success) {
                     resolve(data);
                 } else {
                     reject(new Error(data.error || 'Send message failed'));
                 }
-            });
+            };
+
+            this.socket.emit('sendMessage', messageData);
+            this.socket.once('messageSent', onSuccess);
+            // Compatibilidade com payload/evento legado
+            this.socket.once('message_sent', onSuccess);
         });
     }
 
@@ -1560,54 +1572,6 @@ class WebSocketManager {
                     resolve(data);
                 } else {
                     reject(new Error(data.error || 'Submit feedback failed'));
-                }
-            });
-        });
-    }
-
-    // ==================== NOVOS MÉTODOS - CHAT E COMUNICAÇÃO ====================
-
-    // Criar chat (método atualizado)
-    async createChat(chatData) {
-        if (!this.socket?.connected) {
-            throw new Error('WebSocket não conectado');
-        }
-
-        return new Promise((resolve, reject) => {
-            const timeout = setTimeout(() => {
-                reject(new Error('Create chat timeout'));
-            }, 10000);
-
-            this.socket.emit('createChat', chatData);
-            this.socket.once('chatCreated', (data) => {
-                clearTimeout(timeout);
-                if (data.success) {
-                    resolve(data);
-                } else {
-                    reject(new Error(data.error || 'Create chat failed'));
-                }
-            });
-        });
-    }
-
-    // Enviar mensagem (método atualizado)
-    async sendMessage(messageData) {
-        if (!this.socket?.connected) {
-            throw new Error('WebSocket não conectado');
-        }
-
-        return new Promise((resolve, reject) => {
-            const timeout = setTimeout(() => {
-                reject(new Error('Send message timeout'));
-            }, 10000);
-
-            this.socket.emit('sendMessage', messageData);
-            this.socket.once('messageSent', (data) => {
-                clearTimeout(timeout);
-                if (data.success) {
-                    resolve(data);
-                } else {
-                    reject(new Error(data.error || 'Send message failed'));
                 }
             });
         });

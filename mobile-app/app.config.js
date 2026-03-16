@@ -82,6 +82,7 @@ module.exports = {
         googleServicesFile: "./GoogleService-Info.plist",
         icon: "./assets/icon.png",
         buildNumber: AppConfig.ios_build_number,
+        deploymentTarget: "17.0",
         infoPlist: {
             ITSAppUsesNonExemptEncryption: false
         }
@@ -110,7 +111,8 @@ module.exports = {
             "expo-build-properties",
             {
               "ios": {
-                "useFrameworks": "static"
+                "useFrameworks": "static",
+                "deploymentTarget": "17.0"
               },
             }
         ],

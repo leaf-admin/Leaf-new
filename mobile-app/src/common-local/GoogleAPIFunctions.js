@@ -14,7 +14,7 @@ const getSafeConfig = () => {
         appId: "1:106504629884:web:ada50a78fcf7bf3ea1a3f9",
         databaseURL: "https://leaf-reactnative-default-rtdb.firebaseio.com",
         storageBucket: "leaf-reactnative.firebasestorage.app",
-        apiKey: "AIzaSyChYseG1IcmffYHHVYT7MqtLlzfdWKE_fc",
+        apiKey: process.env.EXPO_PUBLIC_FIREBASE_API_KEY || process.env.FIREBASE_API_KEY || '',
         authDomain: "leaf-reactnative.firebaseapp.com",
         messagingSenderId: "106504629884",
         measurementId: "G-22368DBCY9"
@@ -23,6 +23,10 @@ const getSafeConfig = () => {
 
 const normalizeQuery = (query = '') => query.trim().toLowerCase();
 const getLocalCacheKey = (query) => `@places_cache:${normalizeQuery(query)}`;
+const sanitizeSensitiveUrl = (url = '') =>
+    String(url)
+        .replace(/([?&]key=)[^&]+/gi, '$1***')
+        .replace(/([?&]sessiontoken=)[^&]+/gi, '$1***');
 
 const getFromLocalCache = async (query) => {
     try {
@@ -48,9 +52,81 @@ const saveToLocalCache = async (query, placeData) => {
     }
 };
 
+const MAPS_CACHE = new Map();
+const MAPS_INFLIGHT = new Map();
+const MAPS_CACHE_TTL_MS = {
+    directions: 90 * 1000,
+    matrix: 60 * 1000
+};
+const MAX_MATRIX_DESTINATIONS = 8;
+
+const normalizeCoord = (value) => Number.parseFloat(value || 0).toFixed(4);
+const buildCacheKey = (prefix, payload = '') => `${prefix}:${String(payload)}`;
+const parseCoordPair = (coordStr) => {
+    const [latRaw, lngRaw] = String(coordStr || '').split(',');
+    return {
+        lat: Number.parseFloat(latRaw),
+        lng: Number.parseFloat(lngRaw)
+    };
+};
+const getCached = (key, ttlMs) => {
+    const cached = MAPS_CACHE.get(key);
+    if (!cached) return null;
+    if (Date.now() - cached.at > ttlMs) {
+        MAPS_CACHE.delete(key);
+        return null;
+    }
+    return cached.value;
+};
+const setCached = (key, value) => {
+    MAPS_CACHE.set(key, { at: Date.now(), value });
+};
+const withInFlight = async (key, executor) => {
+    if (MAPS_INFLIGHT.has(key)) return MAPS_INFLIGHT.get(key);
+    const promise = (async () => {
+        try {
+            return await executor();
+        } finally {
+            MAPS_INFLIGHT.delete(key);
+        }
+    })();
+    MAPS_INFLIGHT.set(key, promise);
+    return promise;
+};
+const haversineKm = (aLat, aLng, bLat, bLng) => {
+    const toRad = (deg) => (deg * Math.PI) / 180;
+    const R = 6371;
+    const dLat = toRad((bLat || 0) - (aLat || 0));
+    const dLng = toRad((bLng || 0) - (aLng || 0));
+    const aa =
+        Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+        Math.cos(toRad(aLat || 0)) * Math.cos(toRad(bLat || 0)) *
+        Math.sin(dLng / 2) * Math.sin(dLng / 2);
+    const c = 2 * Math.atan2(Math.sqrt(aa), Math.sqrt(1 - aa));
+    return R * c;
+};
+const buildApproxMatrix = (startLoc, destinations = []) => {
+    const origin = parseCoordPair(startLoc);
+    return destinations.map((dest) => {
+        const point = parseCoordPair(dest);
+        const distanceKm = haversineKm(origin.lat, origin.lng, point.lat, point.lng);
+        const estimatedMinutes = Math.max(2, Math.round((distanceKm / 28) * 60));
+        return {
+            found: true,
+            timein_text: `${estimatedMinutes} min`,
+            distance_km: Number(distanceKm.toFixed(2)),
+            source: 'approx'
+        };
+    });
+};
+
 export const fetchPlacesAutocomplete = (searchKeyword, sessionToken, location = null) => {
     return new Promise(async (resolve, reject) => {
-        Logger.log('🔍 fetchPlacesAutocomplete chamado com:', { searchKeyword, sessionToken, location });
+        Logger.log('🔍 fetchPlacesAutocomplete chamado com:', {
+            searchKeyword,
+            hasSessionToken: !!sessionToken,
+            location
+        });
         
         // ✅ ESTRATÉGIA: Cache-first com fallback para Google
         // 1. Tentar backend cache primeiro
@@ -134,7 +210,7 @@ export const fetchPlacesAutocomplete = (searchKeyword, sessionToken, location = 
             }
 
             // 2️⃣ Fallback: Usar Google Places diretamente
-            const apiKey = 'AIzaSyBLwKg0KRiLVjAHVBQAUP7pB3Q80G246KY'; // Chave real do projeto (sem restrições)
+            const apiKey = process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY || process.env.GOOGLE_MAPS_API_KEY || ''; // Chave real do projeto (sem restrições)
             
             // Construir URL da API Places Autocomplete
             let url = `https://maps.googleapis.com/maps/api/place/autocomplete/json?input=${encodeURIComponent(searchKeyword)}&key=${apiKey}&language=pt-BR&components=country:br`;
@@ -153,7 +229,7 @@ export const fetchPlacesAutocomplete = (searchKeyword, sessionToken, location = 
                 url += `&sessiontoken=${sessionToken}`;
             }
             
-            Logger.log('🌐 URL da API Places:', url);
+            Logger.log('🌐 URL da API Places:', sanitizeSensitiveUrl(url));
             
             const response = await fetch(url);
             const json = await response.json();
@@ -211,7 +287,7 @@ async function saveToCache(query, placeData, location = null) {
         
         // Se não tem lat/lng, buscar detalhes
         if (!placeData.location && placeData.place_id) {
-            const apiKey = 'AIzaSyBLwKg0KRiLVjAHVBQAUP7pB3Q80G246KY';
+            const apiKey = process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY || process.env.GOOGLE_MAPS_API_KEY || '';
             const detailsUrl = `https://maps.googleapis.com/maps/api/place/details/json?place_id=${placeData.place_id}&key=${apiKey}&fields=geometry,formatted_address,name`;
             
             const detailsResponse = await fetch(detailsUrl);
@@ -264,12 +340,12 @@ export const fetchCoordsfromPlace = (place_id) => {
         Logger.log('📍 fetchCoordsfromPlace chamado com place_id:', place_id);
         
         // ✅ Usar API do Google Places diretamente
-        const apiKey = 'AIzaSyBLwKg0KRiLVjAHVBQAUP7pB3Q80G246KY'; // Chave real do projeto (sem restrições)
+        const apiKey = process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY || process.env.GOOGLE_MAPS_API_KEY || ''; // Chave real do projeto (sem restrições)
         
         // Construir URL da API Place Details
         const url = `https://maps.googleapis.com/maps/api/place/details/json?place_id=${place_id}&key=${apiKey}&language=pt-BR&fields=geometry,formatted_address,name`;
         
-        Logger.log('🌐 URL da API Place Details:', url);
+        Logger.log('🌐 URL da API Place Details:', sanitizeSensitiveUrl(url));
         
         fetch(url)
             .then(response => response.json())
@@ -329,33 +405,73 @@ export const fetchAddressfromCoords = (latlng) => {
 }
 
 export const getDistanceMatrix = (startLoc, destLoc) => {
-    return new Promise((resolve,reject)=>{
+    return new Promise(async (resolve,reject)=>{
         const config = getSafeConfig();
-        fetch(`https://${config.projectId}.web.app/googleapi`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                "Authorization": "Basic " + base64.encode(config.projectId + ":" + AccessKey)
-            },
-            body: JSON.stringify({
-                "start": startLoc,
-                "dest": destLoc,
-                "calltype": "matrix",
-            })
-        }).then(response => {
-            return response.json();
-        })
-        .then(json => {
-            if(json.error){
-                Logger.log(json.error);
-                reject(json.error);
-            }else{
-                resolve(json);
-            }
-        }).catch(error=>{
-            Logger.log(error);
-            reject("getDistanceMatrix Call Error")
-        })
+        const destinations = String(destLoc || '')
+            .split('|')
+            .map((item) => item.trim())
+            .filter(Boolean)
+            .slice(0, MAX_MATRIX_DESTINATIONS);
+
+        if (destinations.length === 0) {
+            resolve([]);
+            return;
+        }
+
+        const originPoint = parseCoordPair(startLoc);
+        const normalizedStart = `${normalizeCoord(originPoint.lat)},${normalizeCoord(originPoint.lng)}`;
+        const normalizedDestinations = destinations.map((dest) => {
+            const point = parseCoordPair(dest);
+            return `${normalizeCoord(point.lat)},${normalizeCoord(point.lng)}`;
+        });
+
+        const cacheKey = buildCacheKey('distance_matrix', `${normalizedStart}|${normalizedDestinations.join('|')}`);
+        const cached = getCached(cacheKey, MAPS_CACHE_TTL_MS.matrix);
+        if (cached) {
+            resolve(cached);
+            return;
+        }
+
+        try {
+            const result = await withInFlight(cacheKey, async () => {
+                const response = await fetch(`https://${config.projectId}.web.app/googleapi`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        "Authorization": "Basic " + base64.encode(config.projectId + ":" + AccessKey)
+                    },
+                    body: JSON.stringify({
+                        start: normalizedStart,
+                        dest: normalizedDestinations.join('|'),
+                        calltype: 'matrix'
+                    })
+                });
+                const json = await response.json();
+                if (json?.error) {
+                    throw new Error(json.error);
+                }
+                const parsed = Array.isArray(json)
+                    ? json
+                    : Array.isArray(json?.rows)
+                        ? (json.rows[0]?.elements || []).map((el) => ({
+                            found: el?.status === 'OK',
+                            timein_text: el?.duration?.text || el?.duration_in_traffic?.text || '5 min'
+                        }))
+                        : null;
+                if (!parsed || parsed.length === 0) {
+                    return buildApproxMatrix(normalizedStart, normalizedDestinations);
+                }
+                return parsed;
+            });
+
+            setCached(cacheKey, result);
+            resolve(result);
+        } catch (error) {
+            Logger.log('⚠️ getDistanceMatrix fallback aproximado:', error.message || error);
+            const fallback = buildApproxMatrix(normalizedStart, normalizedDestinations);
+            setCached(cacheKey, fallback);
+            resolve(fallback);
+        }
     });
 }
 
@@ -424,7 +540,7 @@ export const fetchGeocodeAddress = (address, location = null) => {
         Logger.log('📍 fetchGeocodeAddress chamado com endereço:', address, 'location:', location);
         
         // ✅ Usar API do Google Geocoding diretamente (Forward Geocoding)
-        const apiKey = 'AIzaSyBLwKg0KRiLVjAHVBQAUP7pB3Q80G246KY'; // Chave real do projeto (sem restrições)
+        const apiKey = process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY || process.env.GOOGLE_MAPS_API_KEY || ''; // Chave real do projeto (sem restrições)
         
         // Construir URL da API Geocoding (Forward)
         let url = `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(address)}&key=${apiKey}&language=pt-BR&components=country:br`;
@@ -440,7 +556,7 @@ export const fetchGeocodeAddress = (address, location = null) => {
             Logger.log('📍 Location bias aplicado para Geocoding (preferência, não restrição):', location);
         }
         
-        Logger.log('🌐 URL da API Geocoding (Forward):', url);
+        Logger.log('🌐 URL da API Geocoding (Forward):', sanitizeSensitiveUrl(url));
         
         fetch(url)
             .then(response => response.json())
@@ -485,28 +601,51 @@ export const fetchGeocodeAddress = (address, location = null) => {
 }
 
 export const getDirectionsApi = (startLoc, destLoc, waypoints) => {
-    return new Promise((resolve,reject)=>{
+    return new Promise(async (resolve,reject)=>{
         Logger.log('🗺️ getDirectionsApi chamado com:', { startLoc, destLoc, waypoints });
         
         // ✅ CORRIGIDO: Usar API do Google diretamente (endpoint do backend não existe mais)
-        const apiKey = 'AIzaSyBLwKg0KRiLVjAHVBQAUP7pB3Q80G246KY'; // Chave real do projeto (sem restrições)
+        const apiKey = process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY || process.env.GOOGLE_MAPS_API_KEY || ''; // Chave real do projeto (sem restrições)
         
-        // ✅ ADICIONAR departure_time=now para obter informações de trânsito
-        // Isso faz com que a API retorne duration_in_traffic com base no trânsito atual
-        // E também otimiza a rota considerando o trânsito atual
-        const departureTime = 'now'; // Usar 'now' para considerar trânsito atual
-        
-        // ✅ ADICIONAR alternatives=true para obter rotas alternativas
-        // Isso permite escolher a melhor rota entre múltiplas opções considerando trânsito
-        let url = `https://maps.googleapis.com/maps/api/directions/json?origin=${encodeURIComponent(startLoc)}&destination=${encodeURIComponent(destLoc)}&key=${apiKey}&language=pt-BR&units=metric&departure_time=${departureTime}&alternatives=true`;
+        const trafficEnabled = String(process.env.EXPO_PUBLIC_ENABLE_TRAFFIC_ROUTE || 'false').toLowerCase() === 'true';
+        const alternativesEnabled = String(process.env.EXPO_PUBLIC_ENABLE_ROUTE_ALTERNATIVES || 'false').toLowerCase() === 'true';
+        let url = `https://maps.googleapis.com/maps/api/directions/json?origin=${encodeURIComponent(startLoc)}&destination=${encodeURIComponent(destLoc)}&key=${apiKey}&language=pt-BR&units=metric`;
+        if (trafficEnabled) {
+            url += '&departure_time=now';
+        }
+        if (alternativesEnabled) {
+            url += '&alternatives=true';
+        }
         
         if(waypoints){
             url += `&waypoints=${encodeURIComponent(waypoints)}`;
         }
+
+        const originPoint = parseCoordPair(startLoc);
+        const destinationPoint = parseCoordPair(destLoc);
+        const normalizedWaypoints = waypoints
+            ? String(waypoints)
+                .split('|')
+                .map((item) => {
+                    const point = parseCoordPair(item);
+                    return `${normalizeCoord(point.lat)},${normalizeCoord(point.lng)}`;
+                })
+                .join('|')
+            : 'none';
+        const cacheKey = buildCacheKey(
+            'directions',
+            `${normalizeCoord(originPoint.lat)},${normalizeCoord(originPoint.lng)}|${normalizeCoord(destinationPoint.lat)},${normalizeCoord(destinationPoint.lng)}|${normalizedWaypoints}|traffic:${trafficEnabled}|alt:${alternativesEnabled}`
+        );
+        const cached = getCached(cacheKey, MAPS_CACHE_TTL_MS.directions);
+        if (cached) {
+            resolve(cached);
+            return;
+        }
         
-        Logger.log('🌐 URL da API Google Directions:', url);
+        Logger.log('🌐 URL da API Google Directions:', sanitizeSensitiveUrl(url));
         
-        fetch(url)
+        withInFlight(cacheKey, async () => {
+            return await fetch(url)
             .then(response => {
                 Logger.log('📡 Response status:', response.status);
                 if (!response.ok) {
@@ -558,6 +697,7 @@ export const getDirectionsApi = (startLoc, destLoc, waypoints) => {
                         timeDifference: result.duration_in_traffic ? 
                             Math.round((result.duration_in_traffic - leg.duration.value) / 60) : 0 // Diferença em minutos
                     });
+                    setCached(cacheKey, result);
                     resolve(result);
                 } else {
                     Logger.log('❌ Erro na API Google Directions:', json.status, json.error_message);
@@ -568,6 +708,8 @@ export const getDirectionsApi = (startLoc, destLoc, waypoints) => {
                 Logger.log('💥 Erro na requisição getDirectionsApi:', error);
                 reject(`getDirectionsApi Call Error: ${error.message || error}`);
             });
+        }).catch((error) => {
+            reject(`getDirectionsApi Call Error: ${error.message || error}`);
+        });
     });
 }
-

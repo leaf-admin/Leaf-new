@@ -371,11 +371,17 @@ export default function NewMapScreen(props) {
     // Função para obter endereço mais preciso do Google Places
     const getAddressFromGooglePlaces = async (latitude, longitude) => {
         try {
+            const googleMapsApiKey = GoogleMapApiConfig?.android || GoogleMapApiConfig?.ios || '';
+            if (!googleMapsApiKey) {
+                Logger.log('⚠️ Google Places API key ausente no ambiente, pulando consulta externa');
+                return null;
+            }
+
             Logger.log('🔍 Google Places API - Fazendo requisição para:', { latitude, longitude });
 
             // Usar a API do Google Places para obter endereço mais preciso
             const response = await fetch(
-                `https://maps.googleapis.com/maps/api/geocode/json?latlng=${latitude},${longitude}&key=AIzaSyBLwKg0KRiLVjAHVBQAUP7pB3Q80G246KY&language=pt-BR`
+                `https://maps.googleapis.com/maps/api/geocode/json?latlng=${latitude},${longitude}&key=${googleMapsApiKey}&language=pt-BR`
             );
 
             Logger.log('🔍 Google Places API - Status da resposta:', response.status);

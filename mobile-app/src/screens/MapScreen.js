@@ -298,16 +298,13 @@ export default function MapScreen(props) {
 
     // Fallback final para config se não estiver disponível
     if (!config) {
-        config = {
-            projectId: "leaf-reactnative",
-            appId: "1:106504629884:web:ada50a78fcf7bf3ea1a3f9",
-            databaseURL: "https://leaf-reactnative-default-rtdb.firebaseio.com",
-            storageBucket: "leaf-reactnative.firebasestorage.app",
-            apiKey: "AIzaSyChYseG1IcmffYHHVYT7MqtLlzfdWKE_fc",
-            authDomain: "leaf-reactnative.firebaseapp.com",
-            messagingSenderId: "106504629884",
-            measurementId: "G-22368DBCY9"
-        };
+        try {
+            const { FirebaseConfig } = require('../../config/FirebaseConfig');
+            config = FirebaseConfig;
+        } catch (cfgError) {
+            Logger.warn('FirebaseConfig fallback indisponível:', cfgError);
+            config = {};
+        }
     }
 
     const { t } = useTranslation();
@@ -1509,6 +1506,17 @@ export default function MapScreen(props) {
         dispatch(updateTripCar(value));
     }
 
+    const MATRIX_DRIVER_LIMIT = 8;
+    const estimateArrivalFromDistance = (distanceKm) => {
+        const safeDistance = Number.isFinite(Number(distanceKm)) ? Number(distanceKm) : 2;
+        const minutes = Math.max(2, Math.round((safeDistance / 28) * 60));
+        return {
+            timein_text: `${minutes} min`,
+            found: true,
+            source: 'approx'
+        };
+    };
+
     const getDrivers = async () => {
         if (tripdata.pickup) {
             try {
@@ -1529,40 +1537,44 @@ export default function MapScreen(props) {
                     let arr = {};
                     let startLoc = tripdata.pickup.lat + ',' + tripdata.pickup.lng;
                     let distArr = [];
+                    const etaByDriverId = {};
 
-                    // Usar motoristas já ordenados por distância do Redis/Firebase
-                    const sortedDrivers = settings.useDistanceMatrix ? nearbyDrivers.slice(0, 25) : nearbyDrivers;
+                    // Mantém o pool completo de motoristas, mas limita o custo da Matrix para os mais próximos.
+                    const sortedDrivers = [...nearbyDrivers].sort(
+                        (a, b) => (Number(a?.distance) || Number.MAX_SAFE_INTEGER) - (Number(b?.distance) || Number.MAX_SAFE_INTEGER)
+                    );
+                    const matrixCandidates = settings.useDistanceMatrix
+                        ? sortedDrivers.slice(0, MATRIX_DRIVER_LIMIT)
+                        : [];
 
                     if (sortedDrivers.length > 0) {
-                        // Preparar destinos para Distance Matrix (se necessário)
-                        let driverDest = "";
-                        for (let i = 0; i < sortedDrivers.length; i++) {
-                            let driver = { ...sortedDrivers[i] };
-                            driverDest = driverDest + driver.location.lat + "," + driver.location.lng;
-                            if (i < (sortedDrivers.length - 1)) {
-                                driverDest = driverDest + '|';
-                            }
-                        }
-
                         // Obter tempos de chegada
-                        if (settings.useDistanceMatrix) {
-                            distArr = await getDistanceMatrix(startLoc, driverDest);
-                        } else {
-                            // Usar distância já calculada pelo Redis/Firebase
-                            for (let i = 0; i < sortedDrivers.length; i++) {
-                                const driver = sortedDrivers[i];
-                                const timeEstimate = driver.distance ?
-                                    ((driver.distance * 2) + 1).toFixed(0) + ' min' :
-                                    '5 min';
-                                distArr.push({ timein_text: timeEstimate, found: true });
+                        if (settings.useDistanceMatrix && matrixCandidates.length > 0) {
+                            let driverDest = "";
+                            for (let i = 0; i < matrixCandidates.length; i++) {
+                                const driver = matrixCandidates[i];
+                                driverDest = driverDest + driver.location.lat + "," + driver.location.lng;
+                                if (i < (matrixCandidates.length - 1)) {
+                                    driverDest = driverDest + '|';
+                                }
                             }
+                            distArr = await getDistanceMatrix(startLoc, driverDest);
+
+                            for (let i = 0; i < matrixCandidates.length; i++) {
+                                const matrixEta = distArr[i];
+                                if (matrixEta && matrixEta.found) {
+                                    etaByDriverId[matrixCandidates[i].id] = matrixEta;
+                                }
+                            }
+                        } else {
+                            Logger.log('ℹ️ Distance Matrix desativada para busca de motoristas.');
                         }
 
                         // Processar motoristas
                         for (let i = 0; i < sortedDrivers.length; i++) {
                             let driver = { ...sortedDrivers[i] };
-                            if (distArr[i] && distArr[i].found && cars) {
-                                driver.arriveTime = distArr[i];
+                            if (cars) {
+                                driver.arriveTime = etaByDriverId[driver.id] || estimateArrivalFromDistance(driver.distance);
 
                                 // Adicionar imagem do carro
                                 for (let j = 0; j < cars.length; j++) {
@@ -1634,7 +1646,11 @@ export default function MapScreen(props) {
                     setFreeCars(availableDrivers);
                     setAllCarTypes(carWiseArr);
 
-                    Logger.log('✅ Motoristas processados:', availableDrivers.length);
+                    Logger.log('✅ Motoristas processados:', {
+                        total: availableDrivers.length,
+                        matrixUsed: Object.keys(etaByDriverId).length,
+                        approximateUsed: Math.max(0, availableDrivers.length - Object.keys(etaByDriverId).length)
+                    });
                 } else {
                     Logger.log('⚠️ Nenhum motorista encontrado na área');
                     setFreeCars([]);

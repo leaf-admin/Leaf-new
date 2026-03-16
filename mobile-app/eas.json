@@ -43,7 +43,7 @@
         "buildType": "apk"
       },
       "ios": {
-        "image": "macos-sonoma-14.6-xcode-16.0",
+        "image": "macos-sequoia-15.6-xcode-26.2",
         "buildConfiguration": "Release",
         "simulator": false
       },
@@ -62,7 +62,7 @@
       "node": "20.19.4",
       "autoIncrement": true,
       "ios": {
-        "image": "macos-sonoma-14.6-xcode-16.1",
+        "image": "macos-sequoia-15.6-xcode-26.2",
         "buildConfiguration": "Release"
       },
       "channel": "production"
@@ -88,7 +88,7 @@
         "image": "latest"
       },
       "ios": {
-        "image": "macos-sonoma-14.6-xcode-16.1",
+        "image": "macos-sequoia-15.6-xcode-26.2",
         "buildConfiguration": "Release"
       },
       "channel": "production"

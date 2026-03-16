@@ -10,7 +10,9 @@
         "exclude": [
           "react-native-maps",
           "react-native-star-rating-widget",
-          "react-native-segmented-control-tab"
+          "react-native-segmented-control-tab",
+          "expo-av",
+          "react-native-masked-text"
         ]
       }
     }
@@ -42,12 +44,12 @@
     "test:e2e:stable": "bash scripts/run-e2e-stable-guarded.sh",
     "test:e2e:appium": "node e2e-appium/run-leaf-e2e.cjs",
     "test:e2e:adb": "node e2e-adb/run-leaf-e2e-adb.cjs",
+    "build:android:export": "bash scripts/export-android-bytecode.sh",
     "screenshots:adb": "bash scripts/capture-store-screenshots-adb.sh",
     "qa:run": "bash scripts/qa-run.sh",
     "qa:asserts": "bash scripts/qa-asserts.sh"
   },
   "dependencies": {
-    "@expo/metro-runtime": "~4.0.1",
     "@gorhom/bottom-sheet": "4.6.1",
     "@mapbox/polyline": "1.1.1",
     "@react-native-async-storage/async-storage": "1.23.1",

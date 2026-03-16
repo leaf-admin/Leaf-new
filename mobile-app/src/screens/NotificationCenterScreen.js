@@ -176,7 +176,7 @@ const NotificationCenterScreen = ({ navigation, route }) => {
         navigation.navigate('PaymentDetails', { paymentId: notification.data?.paymentId });
         break;
       case 'support':
-        navigation.navigate('SupportScreen');
+        navigation.navigate('Support');
         break;
       default:
         // Notificação geral - não navega

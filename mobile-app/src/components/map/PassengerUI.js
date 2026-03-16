@@ -32,7 +32,7 @@ import {
 } from '../../common/sharedFunctions';
 import { tollData } from '../../common-local/actions/estimateactions';
 import { calcularPedagiosPorPolyline } from '../../common-local/other/TollUtils';
-import { fetchPlacesAutocomplete, fetchCoordsfromPlace, getDirectionsApi, detectInputType, fetchGeocodeAddress } from '../../common-local/other/GoogleAPIFunctions';
+import { fetchPlacesAutocomplete, fetchCoordsfromPlace, getDirectionsApi, detectInputType, fetchGeocodeAddress } from '../../common-local/GoogleAPIFunctions';
 import TripDataService from '../../services/TripDataService';
 import { GetDistance } from '../../common-local/other/GeoFunctions';
 import { fetchNearbyDrivers } from '../../common-local/usersactions';
@@ -61,6 +61,18 @@ function getStreetAndNumber(address) {
     if (match) return match[1].trim();
     return address.split(',')[0].trim();
 }
+
+const ROUTE_RECALC_CONFIG = {
+    pickup: {
+        minIntervalMs: 30000,
+        minMovementKm: 0.12
+    },
+    destination: {
+        minIntervalMs: 45000,
+        minMovementKm: 0.2
+    }
+};
+const DESTINATION_CHANGE_FORCE_RECALC_KM = 0.05;
 
 // ✅ Componente COMPLETAMENTE INDEPENDENTE para o timer - gerencia seu próprio estado
 const SearchingTimer = ({ tripStatus, style }) => {
@@ -374,6 +386,12 @@ function PassengerUI(props) {
     useEffect(() => {
         driverArrivedRef.current = driverArrived;
     }, [driverArrived]);
+
+    useEffect(() => {
+        if (tripStatus === 'idle' || tripStatus === 'completed' || tripStatus === 'canceled') {
+            resetRouteRecalcState();
+        }
+    }, [tripStatus, resetRouteRecalcState]);
 
     // ✅ Timer crescente usando timestamp (mais confiável no React Native)
     useEffect(() => {
@@ -777,6 +795,73 @@ function PassengerUI(props) {
 
     // Ref para o timer de debounce
     const searchTimeoutRef = useRef(null);
+    const placesSessionTokenRef = useRef(null);
+    const routeRecalcRef = useRef({
+        pickup: { lastAt: 0, origin: null, destination: null },
+        destination: { lastAt: 0, origin: null, destination: null }
+    });
+
+    const resetRouteRecalcState = useCallback(() => {
+        routeRecalcRef.current = {
+            pickup: { lastAt: 0, origin: null, destination: null },
+            destination: { lastAt: 0, origin: null, destination: null }
+        };
+    }, []);
+
+    const createPlacesSessionToken = useCallback(() => {
+        return `leaf-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+    }, []);
+
+    const getPlacesSessionToken = useCallback(() => {
+        if (!placesSessionTokenRef.current) {
+            placesSessionTokenRef.current = createPlacesSessionToken();
+        }
+        return placesSessionTokenRef.current;
+    }, [createPlacesSessionToken]);
+
+    const resetPlacesSessionToken = useCallback(() => {
+        placesSessionTokenRef.current = null;
+    }, []);
+
+    const shouldRequestRouteRecalc = useCallback((routeType, origin, destination) => {
+        const config = ROUTE_RECALC_CONFIG[routeType];
+        if (!config) return true;
+        if (!origin || !destination) return true;
+
+        const state = routeRecalcRef.current[routeType];
+        if (!state?.lastAt || !state.origin || !state.destination) {
+            return true;
+        }
+
+        const movedKm = GetDistance(
+            origin.lat,
+            origin.lng,
+            state.origin.lat,
+            state.origin.lng
+        );
+        const destinationChangedKm = GetDistance(
+            destination.lat,
+            destination.lng,
+            state.destination.lat,
+            state.destination.lng
+        );
+
+        if (Number.isFinite(destinationChangedKm) && destinationChangedKm >= DESTINATION_CHANGE_FORCE_RECALC_KM) {
+            return true;
+        }
+
+        const enoughTime = Date.now() - state.lastAt >= config.minIntervalMs;
+        const enoughMovement = Number.isFinite(movedKm) && movedKm >= config.minMovementKm;
+        return enoughTime && enoughMovement;
+    }, []);
+
+    const registerRouteRecalc = useCallback((routeType, origin, destination) => {
+        routeRecalcRef.current[routeType] = {
+            lastAt: Date.now(),
+            origin: { lat: origin.lat, lng: origin.lng },
+            destination: { lat: destination.lat, lng: destination.lng }
+        };
+    }, []);
 
     // Preencher endereço de embarque automaticamente (apenas se não estiver editando manualmente E não foi selecionado manualmente)
     useEffect(() => {
@@ -2597,6 +2682,16 @@ function PassengerUI(props) {
             return;
         }
 
+        const shouldRecalcPickupRoute = shouldRequestRouteRecalc(
+            'pickup',
+            { lat: driverLoc.lat, lng: driverLoc.lng },
+            { lat: pickupLoc.lat, lng: pickupLoc.lng }
+        );
+
+        if (!shouldRecalcPickupRoute) {
+            return;
+        }
+
         // ✅ Se temos destino, calcular rota completa com waypoints
         const dropLoc = tripdata?.drop;
         if (dropLoc && dropLoc.lat && dropLoc.lng) {
@@ -2626,6 +2721,11 @@ function PassengerUI(props) {
                 }
 
                 Logger.log(`✅ [Polyline] Rota completa calculada e leg1 atualizado: ${completeRoute.leg1.coords.length} pontos`);
+                registerRouteRecalc(
+                    'pickup',
+                    { lat: driverLoc.lat, lng: driverLoc.lng },
+                    { lat: pickupLoc.lat, lng: pickupLoc.lng }
+                );
                 return;
             }
         }
@@ -2654,6 +2754,11 @@ function PassengerUI(props) {
                     if (setRoutePolyline) {
                         setRoutePolyline(coordsArr);
                     }
+                    registerRouteRecalc(
+                        'pickup',
+                        { lat: driverLoc.lat, lng: driverLoc.lng },
+                        { lat: pickupLoc.lat, lng: pickupLoc.lng }
+                    );
                 } catch (decodeError) {
                     Logger.error('❌ [Polyline] Erro ao decodificar polyline:', decodeError);
                 }
@@ -2661,12 +2766,22 @@ function PassengerUI(props) {
         } catch (error) {
             Logger.error('❌ [Polyline] Erro ao calcular rota do motorista:', error);
         }
-    }, [setRoutePolyline, calculateCompleteRouteWithWaypoints, tripdata?.drop]);
+    }, [setRoutePolyline, calculateCompleteRouteWithWaypoints, tripdata?.drop, shouldRequestRouteRecalc, registerRouteRecalc]);
 
     // ✅ NOVO: Função para atualizar rota até o destino quando corrida inicia
     const updateRouteToDestination = useCallback(async (driverLoc, destinationLoc) => {
         if (!driverLoc || !driverLoc.lat || !driverLoc.lng || !destinationLoc || !destinationLoc.lat || !destinationLoc.lng) {
             Logger.warn('⚠️ [Polyline] Dados insuficientes para calcular rota até destino');
+            return;
+        }
+
+        const shouldRecalcDestinationRoute = shouldRequestRouteRecalc(
+            'destination',
+            { lat: driverLoc.lat, lng: driverLoc.lng },
+            { lat: destinationLoc.lat, lng: destinationLoc.lng }
+        );
+
+        if (!shouldRecalcDestinationRoute) {
             return;
         }
 
@@ -2693,6 +2808,11 @@ function PassengerUI(props) {
                     if (setRoutePolyline) {
                         setRoutePolyline(coordsArr);
                     }
+                    registerRouteRecalc(
+                        'destination',
+                        { lat: driverLoc.lat, lng: driverLoc.lng },
+                        { lat: destinationLoc.lat, lng: destinationLoc.lng }
+                    );
                 } catch (decodeError) {
                     Logger.error('❌ [Polyline] Erro ao decodificar polyline do destino:', decodeError);
                 }
@@ -2700,7 +2820,7 @@ function PassengerUI(props) {
         } catch (error) {
             Logger.error('❌ [Polyline] Erro ao calcular rota até destino:', error);
         }
-    }, [setRoutePolyline]);
+    }, [setRoutePolyline, shouldRequestRouteRecalc, registerRouteRecalc]);
 
     // ✅ useEffect para atualizar polyline do motorista a cada segundo quando aceito
     useEffect(() => {
@@ -4333,6 +4453,7 @@ function PassengerUI(props) {
     const handleSelectAddress = useCallback(async (address, type) => {
         // ✅ FECHAR dropdown imediatamente ao selecionar
         setSearchState({ visible: false, type: type || 'pickup', inputText: '', results: [], loading: false });
+        resetPlacesSessionToken();
         try {
             let coords;
 
@@ -4428,7 +4549,7 @@ function PassengerUI(props) {
             // ✅ Não mostrar alerta - apenas logar o erro para não interromper o fluxo
             Logger.warn('⚠️ [PassengerUI] Erro ao processar endereço selecionado');
         }
-    }, [dispatch, formatAddressSimplified, mapRef, saveToHistory, isChangingDestination, tripStatus, recalculateRideWithNewDestination]);
+    }, [dispatch, formatAddressSimplified, mapRef, saveToHistory, isChangingDestination, tripStatus, recalculateRideWithNewDestination, resetPlacesSessionToken]);
 
     const saveToHistory = async (address) => {
         try {
@@ -4885,6 +5006,7 @@ function PassengerUI(props) {
 
                                             // ✅ Fechar campo de busca após processar
                                             setSearchState({ visible: false, type: 'pickup', inputText: '', results: [], loading: false });
+                                            resetPlacesSessionToken();
                                         }, 300); // ✅ Aumentado para 300ms para garantir que clique no resultado seja processado
                                     }}
                                     keyboardShouldPersistTaps="handled"
@@ -4964,6 +5086,7 @@ function PassengerUI(props) {
                                         // Delay para permitir clique no resultado
                                         setTimeout(() => {
                                             setSearchState({ visible: false, type: 'drop', inputText: '', results: [], loading: false });
+                                            resetPlacesSessionToken();
                                         }, 200);
                                     }}
                                     keyboardShouldPersistTaps="handled"
@@ -4994,13 +5117,14 @@ function PassengerUI(props) {
                 </View>
             </View>
         );
-    }, [tripdata.pickup, tripdata.drop, theme, t, searchState.visible, searchState.type, searchState.inputText, searchState.results, searchState.loading, debouncedSearch, handleSelectAddress, formatAddressForDropdown]);
+    }, [tripdata.pickup, tripdata.drop, theme, t, searchState.visible, searchState.type, searchState.inputText, searchState.results, searchState.loading, debouncedSearch, handleSelectAddress, formatAddressForDropdown, resetPlacesSessionToken]);
 
     const performSearch = useCallback(async (text) => {
         Logger.log('🔍 Iniciando busca hierárquica para:', text);
 
         if (text.length < 3) {
             setSearchState(prev => ({ ...prev, results: [], loading: false }));
+            resetPlacesSessionToken();
             return;
         }
 
@@ -5012,6 +5136,7 @@ function PassengerUI(props) {
             Logger.log(`📍 Tipo detectado: ${inputType} para "${text}"`);
 
             let results = [];
+            const sessionToken = getPlacesSessionToken();
 
             // ✅ Obter localização atual para aplicar location bias
             const userLocation = currentLocation || pickupAddress;
@@ -5034,7 +5159,7 @@ function PassengerUI(props) {
                     // Fallback: tentar Places API se Geocoding falhar
                     Logger.log('🔄 Tentando fallback para Places API...');
                     try {
-                        results = await fetchPlacesAutocomplete(text, null, locationForBias);
+                        results = await fetchPlacesAutocomplete(text, sessionToken, locationForBias);
                         Logger.log('✅ Fallback Places API retornou:', results?.length || 0, 'resultados');
                     } catch (placesError) {
                         Logger.error('❌ Erro no fallback Places API:', placesError);
@@ -5045,7 +5170,7 @@ function PassengerUI(props) {
                 // 🏛️ NOME DE LUGAR: Usar Places API
                 Logger.log('🏛️ Buscando como NOME DE LUGAR usando Places API...');
                 try {
-                    results = await fetchPlacesAutocomplete(text, null, locationForBias);
+                    results = await fetchPlacesAutocomplete(text, sessionToken, locationForBias);
                     Logger.log('✅ Places API retornou:', results?.length || 0, 'resultados');
                 } catch (placesError) {
                     Logger.error('❌ Erro no Places API:', placesError);
@@ -5089,7 +5214,7 @@ function PassengerUI(props) {
                 [{ text: 'OK' }]
             );
         }
-    }, [currentLocation, pickupAddress]);
+    }, [currentLocation, pickupAddress, getPlacesSessionToken, resetPlacesSessionToken]);
 
     // Função de debounce para busca - mais responsiva
     const debouncedSearch = useCallback((text) => {
@@ -5101,6 +5226,7 @@ function PassengerUI(props) {
         // Se o texto for menor que 3 caracteres, limpar resultados imediatamente
         if (text.length < 3) {
             setSearchState(prev => ({ ...prev, results: [], loading: false }));
+            resetPlacesSessionToken();
             return;
         }
 
@@ -5114,7 +5240,7 @@ function PassengerUI(props) {
         }, 1000);
 
         Logger.log('⏰ Timer configurado para 1 segundo para:', text);
-    }, [performSearch]);
+    }, [performSearch, resetPlacesSessionToken]);
 
     // ✅ AddressDropdown removido - agora está integrado dentro do AddressFields
 

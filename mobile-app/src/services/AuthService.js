@@ -1,6 +1,7 @@
 import Logger from '../utils/Logger';
 import { firebase } from '../common-local/configureFirebase';
 import auth from '@react-native-firebase/auth';
+import { Platform } from 'react-native';
 
 
 class AuthService {
@@ -256,7 +257,6 @@ class AuthService {
 }
 
 export default new AuthService();
-
 
 
 

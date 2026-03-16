@@ -13,7 +13,12 @@ const arg = (name, fallback = '') => {
 
 const SERVER_URL = arg('--url', process.env.BACKEND_URL || 'http://147.182.204.181:3001');
 const OUT_FILE = arg('--out', '');
-const FIREBASE_API_KEY = process.env.FIREBASE_API_KEY || process.env.EXPO_PUBLIC_FIREBASE_API_KEY || 'AIzaSyChYseG1IcmffYHHVYT7MqtLlzfdWKE_fc';
+const FIREBASE_API_KEY = process.env.FIREBASE_API_KEY || process.env.EXPO_PUBLIC_FIREBASE_API_KEY || '';
+const QA_BASE_LAT = Number.parseFloat(arg('--base-lat', process.env.QA_BASE_LAT || '-23.55052'));
+const QA_BASE_LNG = Number.parseFloat(arg('--base-lng', process.env.QA_BASE_LNG || '-46.633308'));
+const QA_DEST_LAT = Number.parseFloat(arg('--dest-lat', process.env.QA_DEST_LAT || '-23.561414'));
+const QA_DEST_LNG = Number.parseFloat(arg('--dest-lng', process.env.QA_DEST_LNG || '-46.655881'));
+const QA_COORD_RADIUS = Number.parseFloat(arg('--radius', process.env.QA_COORD_RADIUS || '0.006'));
 
 const PASSENGER_EMAIL = process.env.QA_PASSENGER_EMAIL || 'joao.teste@leaf.com';
 const PASSENGER_PASSWORD = process.env.QA_PASSENGER_PASSWORD || 'teste123';
@@ -28,6 +33,9 @@ const stage = (name, ok, extra = {}) => {
 };
 
 async function signInWithPassword(email, password) {
+  if (!FIREBASE_API_KEY) {
+    throw new Error('firebase_api_key_missing');
+  }
   const url = `https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=${FIREBASE_API_KEY}`;
   const res = await axios.post(url, {
     email,
@@ -185,8 +193,21 @@ async function run() {
     ]);
     stage('websocket_auth_ok', true);
 
-    const pickup = randomPoint(-22.9068, -43.1729);
-    const destination = randomPoint(-22.9168, -43.1629);
+    const pickup = randomPoint(
+      Number.isFinite(QA_BASE_LAT) ? QA_BASE_LAT : -23.55052,
+      Number.isFinite(QA_BASE_LNG) ? QA_BASE_LNG : -46.633308,
+      Number.isFinite(QA_COORD_RADIUS) ? QA_COORD_RADIUS : 0.006
+    );
+    const destination = randomPoint(
+      Number.isFinite(QA_DEST_LAT) ? QA_DEST_LAT : -23.561414,
+      Number.isFinite(QA_DEST_LNG) ? QA_DEST_LNG : -46.655881,
+      Number.isFinite(QA_COORD_RADIUS) ? QA_COORD_RADIUS : 0.006
+    );
+    stage('geofence_coordinates_selected', true, {
+      pickup,
+      destination,
+      radius: Number.isFinite(QA_COORD_RADIUS) ? QA_COORD_RADIUS : 0.006
+    });
 
     const locationPayload = {
       lat: pickup.lat,
@@ -299,7 +320,8 @@ async function run() {
       paymentMethod: 'pix',
       paymentId: `qa_pay_${Date.now()}`,
       amount: 27.5,
-      pickupLocation: pickup
+      pickupLocation: pickup,
+      __mockPayment: true
     });
     await paymentWait;
     stage('payment_confirmed', true);

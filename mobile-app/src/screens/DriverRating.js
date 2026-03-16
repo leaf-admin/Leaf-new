@@ -108,36 +108,56 @@ export default function DriverRating(props) {
 
     const [state, setState] = useState(initData);
 
-    const submitNow = () => {
-        let curBooking = { ...booking };
+    const submitNow = async () => {
+        const curBooking = { ...(booking || bookingId) };
         curBooking.rating = starCount;
         curBooking.feedback = state.feedback;
         curBooking.status = 'COMPLETE';
-        curBooking.tipamount = amount >= 0? amount: null;
-        if(amount >0){
-            if(amount && auth.profile.walletBalance > amount){
-                dispatch(updateBooking(curBooking));
-                props.navigation.navigate('TabRoot', { name: "RideList", params: { "fromBooking": true } });
-            }else{
-               
-        Alert.alert(
-            t('alert'),
-            t('wallet_tips'),
-            [
-                { text: t('cancel'), onPress: () => { }, style: 'cancel' },
-                { text: t('ok'), onPress: () =>   
-                    props.navigation.push('addMoney', { userdata: auth.profile, providers: providers, tipamount: amount })
-                }
-            ],
-            { cancelable: false }
-        );
-    }
-    }
-    else{
-        dispatch(updateBooking(curBooking));
-                props.navigation.navigate('TabRoot', { name: "RideList", params: { "fromBooking": true } });
-    }
-}
+        curBooking.tipamount = amount >= 0 ? amount : null;
+
+        const finalizeFlow = () => {
+            dispatch(updateBooking(curBooking));
+            props.navigation.navigate('TabRoot', { name: "RideList", params: { "fromBooking": true } });
+        };
+
+        if (amount > 0 && !(amount && auth.profile.walletBalance > amount)) {
+            Alert.alert(
+                t('alert'),
+                t('wallet_tips'),
+                [
+                    { text: t('cancel'), onPress: () => { }, style: 'cancel' },
+                    {
+                        text: t('ok'),
+                        onPress: () => props.navigation.push('addMoney', { userdata: auth.profile, providers: providers, tipamount: amount })
+                    }
+                ],
+                { cancelable: false }
+            );
+            return;
+        }
+
+        try {
+            const RatingService = require('../services/RatingService').default;
+            const tripId = booking?.id || booking?.bookingId || bookingId?.id || bookingId?.bookingId;
+            const userId = auth?.profile?.uid || auth?.profile?.id || auth?.uid;
+
+            if (tripId && userId && starCount > 0) {
+                await RatingService.submitRating({
+                    tripId,
+                    userId,
+                    userType: 'customer',
+                    driverId: booking?.driver || booking?.driverId || bookingId?.driver || bookingId?.driverId || null,
+                    rating: starCount,
+                    comment: state.feedback || '',
+                    timestamp: new Date().toISOString()
+                });
+            }
+        } catch (error) {
+            Logger.warn('⚠️ [DriverRating] Falha ao enviar avaliação em tempo real. Mantido fallback local.', error?.message || error);
+        }
+
+        finalizeFlow();
+    };
 
     const alertModal = () => {
         return (

@@ -359,7 +359,7 @@ const DriverDashboardScreen = ({ navigation, route }) => {
         
         <TouchableOpacity
           style={styles.actionButton}
-          onPress={() => navigation.navigate('SupportScreen')}
+          onPress={() => navigation.navigate('Support')}
         >
           <Icon name="support-agent" type="material" color="#f39c12" size={24} />
           <Text style={styles.actionText}>Suporte</Text>

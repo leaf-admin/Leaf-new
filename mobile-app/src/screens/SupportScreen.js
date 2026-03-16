@@ -43,10 +43,18 @@ export default function SupportScreen({ navigation }) {
     useEffect(() => {
         loadSupportData();
         connectChat();
-        initializeSupportChat();
+        let unsubscribe = null;
+        initializeSupportChat()
+            .then((cleanupFn) => {
+                unsubscribe = cleanupFn;
+            })
+            .catch(() => {});
         
         // Cleanup ao desmontar
         return () => {
+            if (typeof unsubscribe === 'function') {
+                unsubscribe();
+            }
             SupportChatService.disconnect();
         };
     }, []);
@@ -375,7 +383,7 @@ export default function SupportScreen({ navigation }) {
                     renderItem={({ item }) => (
                         <TouchableOpacity
                             style={[styles.ticketCard, { backgroundColor: isDarkMode ? '#2a2a2a' : '#fff' }]}
-                            onPress={() => navigation.navigate('TicketDetails', { ticket: item })}
+                            onPress={() => navigation.navigate('SupportTicket', { ticket: item })}
                         >
                             <View style={styles.ticketHeader}>
                                 <Text style={[styles.ticketTitle, { color: isDarkMode ? '#fff' : colors.BLACK }]}>
