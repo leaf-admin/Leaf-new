@@ -5,6 +5,52 @@
 
 ---
 
+## 🚧 BACKLOG IMEDIATO (2026-03-22)
+
+- [ ] **woovi-driver-account-split-baas** - Integrar conta Woovi do motorista para split real e fluxo BaaS completo
+  - Bloqueio atual: dependência de habilitação/definição com a Woovi
+  - Critério de aceite: corrida liquidada com split real (passageiro -> plataforma + motorista), com conciliação e extrato no dashboard
+- [ ] **fcm-production-hardening-full** - Revisitar FCM para operação plena em produção (passageiro + motorista)
+  - Escopo: cadastro/refresh de token, fallback de entrega, tópicos/segmentação, observabilidade de falha/sucesso
+  - Critério de aceite: taxa de entrega validada em dispositivo real + painel com métricas por tipo de push
+- [ ] **phase3-rollout-cluster-readiness** - Preparar rollout controlado do split `gateway` + `sideeffects-worker` para futura Fase 4 (cluster/sticky-session)
+  - Escopo: playbook de rollback por variável, monitoração de backlog `ride_events`, alarmes de lag por consumer group
+  - Critério de aceite: failover validado com worker reiniciando sem perda funcional dos side effects
+- [ ] **phase3-worker-observability-gap** - Fechar observabilidade dedicada do worker de side effects
+  - Escopo: métricas separadas de CPU/memória/event loop por papel, dashboard com backlog/throughput por tipo de evento
+  - Critério de aceite: painel único exibindo `gateway` x `worker` com baseline e regressão histórica
+- [ ] **phase3-redis-consumer-orphan-cleanup** - Sanear consumer órfão em Redis Streams (`server-worker-1`) e zerar pendências antigas
+  - Escopo: procedimento seguro de claim/ack de pendências antigas + housekeeping de consumer groups
+  - Critério de aceite: `XINFO GROUPS ride_events` sem pendências antigas em consumer inativo
+- [ ] **phase3-worker-fcm-credentials-hardening** - Corrigir credenciais do Firebase no `sideeffects-worker` para eliminar falhas de `sendPush`
+  - Escopo: alinhar caminho/segredo de credencial no container do worker e validar envio real
+  - Critério de aceite: `sendPush` sem `ENOENT` e taxa de push confirmada no ambiente real
+
+## 🚧 BACKLOG FASE 4 (2026-03-23)
+
+- [ ] **phase4-auth-connect-bottleneck-high-pool** - Resolver gargalo de `passenger_connect_or_auth_failed` em pool alto (>=600)
+  - Evidência: benchmark `phase4-cluster-ladder-450-600-short.json` conectou apenas 141/620 passageiros
+  - Escopo: revisar limites/timeout de autenticação em massa, warm pool de tokens e estratégia de conexão progressiva
+  - Critério de aceite: conexão/auth >= 95% para passageiros em pool 600 com sucesso funcional 100%
+- [ ] **phase4-benchmark-runner-redis-noise-cleanup** - Remover dependência/ruído de Redis local no harness de stress
+  - Evidência: runner sempre tenta `localhost:6380` e gera warnings repetitivos antes dos testes
+  - Escopo: isolar helper e2e para modo remoto puro (sem redis local), manter logs limpos para leitura de benchmark
+  - Critério de aceite: execução de stress sem warnings de Redis local e sem impacto no fluxo E2E real
+- [ ] **phase4-per-worker-cpu-evidence-gap** - Fechar evidência contínua de CPU por worker no cenário cluster
+  - Evidência: validação principal foi por métricas HTTP/report; faltou série temporal estável de CPU por worker no relatório final
+  - Escopo: coletor padronizado (docker stats/top) acoplado ao benchmark com export em CSV para cada rodada
+  - Critério de aceite: relatório com CPU total + CPU por worker + variância por nível (300..600 + soak)
+
+---
+
+## 🧾 PRIORIDADE MÉDIA - KYC Azure (Liveness)
+
+- [ ] **kyc-azure-tier-monitoring** - Monitorar consumo do Azure Face (F0: 20 RPM / 30k mês) com alerta em 80% da cota mensal
+- [ ] **kyc-azure-tier-upgrade-playbook** - Preparar plano de upgrade de tier (S0+) sem downtime quando a operação superar limite do F0
+- [ ] **kyc-azure-cost-guardrail** - Definir guardrails por risco (step-up seletivo) para evitar custo excessivo de liveness
+
+---
+
 ## 🔥 PRIORIDADE ALTA - Observabilidade (Parcialmente Completo)
 
 ### FASE 1.1: Logs Estruturados
@@ -282,6 +328,3 @@
 ---
 
 **Última atualização:** 2026-01-03
-
-
-

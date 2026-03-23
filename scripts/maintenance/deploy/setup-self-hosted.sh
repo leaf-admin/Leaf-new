@@ -79,7 +79,7 @@ systemctl restart redis-server
 systemctl enable redis-server
 
 # Testar Redis
-if redis-cli -a leaf_redis_2024 ping | grep -q "PONG"; then
+if REDISCLI_AUTH=leaf_redis_2024 redis-cli ping | grep -q "PONG"; then
     success "Redis configurado e funcionando"
 else
     error "Falha na configuração do Redis"

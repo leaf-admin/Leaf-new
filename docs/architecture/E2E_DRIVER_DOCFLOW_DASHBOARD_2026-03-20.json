@@ -1,0 +1,199 @@
+{
+  "startedAt": "2026-03-20T04:04:04.533Z",
+  "apiBase": "http://localhost:3001/api",
+  "adminEmail": "qa.admin@leaf.app",
+  "files": {
+    "cnh": "/Users/izaakdias/Desktop/CNH-e.pdf.pdf",
+    "crlv": "/Users/izaakdias/Desktop/CRLV.pdf"
+  },
+  "checks": {
+    "applicationVisible": {
+      "ok": true,
+      "status": "in_review",
+      "submissionDate": "2026-03-20T04:04:10.351Z"
+    },
+    "documentsBefore": {
+      "total": 2,
+      "keys": [
+        "cnh",
+        "crlv"
+      ]
+    },
+    "backgroundUpload": {
+      "success": true,
+      "message": "Documento enviado com sucesso.",
+      "data": {
+        "driverId": "e2e_driver_1773979444717",
+        "documentType": "antecedentes_criminais",
+        "fileUrl": "https://storage.googleapis.com/leaf-reactnative.firebasestorage.app/documents/e2e_driver_1773979444717/antecedentes_criminais/1773979454567_certidao-antecedentes-e2e.pdf?GoogleAccessId=firebase-adminsdk-fbsvc%40leaf-reactnative.iam.gserviceaccount.com&Expires=2051222400&Signature=K5WK1DkkkKERk%2BG6hX3qZl7b7zj6xVcPlEmZ5IqKoPRc8rm3nmjzV9guPj6t7iiUfI%2B%2B3JA4w84imahFidTrm4m6hefwwMXfTBQfzQnJ5jub8UZIwOc351FMnHs0%2BIeyhc9ZQENJcr3KXVD12Mq7L9hJhdlhe1zwKVOWwCbXNgREcQb1czedIiMp1ozfuy57dYAtxigte9%2FKIPBkBOj9d%2Fksv8mqSVid96fJUfRtSwoP6nFI9QTMRDF1REhivQZeud3VMiKYjpU2UHpjN1QBXg06JivOokbaIu%2FKJxp0%2F2HIsI7mGfB%2FkAHXiy3T2H2KSBhGAPYN3zjY%2Ft2JmRXdpQ%3D%3D",
+        "status": "pending"
+      }
+    },
+    "documentKeysAfterUpload": [
+      "antecedentes_criminais",
+      "cnh",
+      "crlv"
+    ],
+    "fileAccess": {
+      "cnh": {
+        "status": 200,
+        "bytes": 287556
+      },
+      "crlv": {
+        "status": 200,
+        "bytes": 81593
+      },
+      "antecedentes": {
+        "status": 200,
+        "bytes": 1484
+      }
+    },
+    "reviewResponses": {
+      "skipped": true,
+      "reason": "E2E_SKIP_FINAL_APPROVAL"
+    },
+    "postReviewStatuses": {
+      "cnh": "pending",
+      "cnhRejectionReason": null,
+      "crlv": "pending",
+      "crlvRejectionReason": null,
+      "antecedentes": "pending"
+    },
+    "approveAll": {
+      "skipped": true,
+      "reason": "E2E_SKIP_FINAL_APPROVAL"
+    },
+    "finalUserApproval": {
+      "approved": false,
+      "approvedAt": null,
+      "approvedBy": null,
+      "status": "pending"
+    }
+  },
+  "driverId": "e2e_driver_1773979444717",
+  "extraction": {
+    "cnh": {
+      "success": true,
+      "source": "openai",
+      "model": "gpt-5.4-mini",
+      "textLength": 469,
+      "extractionSource": "pdf_image",
+      "data": {
+        "nome": "FELIPE RIBEIRO DIAS",
+        "cpf": "181.477.007-09",
+        "rg": null,
+        "dataNascimento": "08/02/2001",
+        "nomeMae": "DENISE CORREA RIBEIRO DIAS",
+        "genero": null,
+        "numeroRegistro": "08128534616",
+        "cnh": "2815434445",
+        "categoria": "B",
+        "validade": "28/07/2032",
+        "dataPrimeiraHabilitacao": "18/03/2023",
+        "ear": false,
+        "confidence": 0.98,
+        "warnings": [],
+        "extractedBy": "gpt-5.4-mini",
+        "extractionMethod": "openai_image",
+        "extractedAt": "2026-03-20T04:04:07.416Z",
+        "metadata": {
+          "source": "pdf_image",
+          "imageBytes": 105024
+        }
+      },
+      "message": "Dados da CNH extraídos com IA com sucesso"
+    },
+    "crlv": {
+      "success": true,
+      "source": "openai",
+      "model": "gpt-5.4-mini",
+      "textLength": 1548,
+      "extractionSource": "pdf_text",
+      "data": {
+        "placa": "QQO0616",
+        "renavam": "01188473104",
+        "chassi": "9BWKB45U0KP047969",
+        "marca": "VW",
+        "modelo": "NOVA SAVEIRO RB MBVS",
+        "anoFabricacao": 2019,
+        "anoModelo": 2019,
+        "cor": "BRANCA",
+        "combustivel": "ALCOOL/GASOLINA",
+        "categoria": "PARTICULAR",
+        "uf": "RJ",
+        "municipio": "NOVA IGUACU",
+        "vehicleType": "carga caminhonete",
+        "confidence": 0.92,
+        "warnings": [],
+        "extractedBy": "gpt-5.4-mini",
+        "extractionMethod": "openai",
+        "extractedAt": "2026-03-20T04:04:08.564Z",
+        "metadata": {
+          "source": "pdf_text",
+          "textLength": 1548
+        }
+      },
+      "message": "Dados do veículo extraídos com IA com sucesso"
+    }
+  },
+  "timings": [
+    {
+      "step": "ocr:/ocr/cnh/pdf",
+      "durationMs": 2700
+    },
+    {
+      "step": "ocr:/ocr/vehicle/pdf",
+      "durationMs": 1147
+    },
+    {
+      "step": "storage:upload_cnh",
+      "durationMs": 1255
+    },
+    {
+      "step": "storage:upload_crlv",
+      "durationMs": 531
+    },
+    {
+      "step": "db:seed_driver",
+      "durationMs": 911
+    },
+    {
+      "step": "admin:login",
+      "durationMs": 1424
+    },
+    {
+      "step": "dashboard:list_applications",
+      "durationMs": 364
+    },
+    {
+      "step": "dashboard:get_documents_before",
+      "durationMs": 1187
+    },
+    {
+      "step": "dashboard:upload_background_check",
+      "durationMs": 939
+    },
+    {
+      "step": "dashboard:get_documents_after_upload",
+      "durationMs": 892
+    },
+    {
+      "step": "fetch:cnh",
+      "durationMs": 1690
+    },
+    {
+      "step": "fetch:crlv",
+      "durationMs": 566
+    },
+    {
+      "step": "fetch:antecedentes",
+      "durationMs": 293
+    },
+    {
+      "step": "db:read_final_user",
+      "durationMs": 163
+    }
+  ],
+  "finishedAt": "2026-03-20T04:04:18.790Z",
+  "success": true
+}

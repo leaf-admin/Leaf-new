@@ -1,0 +1,105 @@
+{
+  "startedAt": "2026-03-20T01:17:46.330Z",
+  "apiBase": "http://localhost:3001/api",
+  "adminEmail": "qa.admin@leaf.app",
+  "files": {
+    "cnh": "/Users/izaakdias/Desktop/CNH-e.pdf.pdf",
+    "crlv": "/Users/izaakdias/Desktop/CRLV.pdf"
+  },
+  "checks": {},
+  "driverId": "e2e_driver_1773969466524",
+  "extraction": {
+    "cnh": {
+      "success": true,
+      "source": "openai",
+      "model": "gpt-5.4-mini",
+      "textLength": 469,
+      "extractionSource": "pdf_text",
+      "data": {
+        "nome": null,
+        "cpf": null,
+        "rg": null,
+        "dataNascimento": null,
+        "numeroRegistro": null,
+        "cnh": null,
+        "categoria": null,
+        "validade": null,
+        "dataPrimeiraHabilitacao": null,
+        "ear": null,
+        "confidence": 0.05,
+        "warnings": [
+          "O texto OCR fornecido contém apenas cabeçalho e instruções do documento, sem os campos da CNH solicitados.",
+          "Não foi possível identificar nome, CPF, número de registro, categoria, validade ou demais dados pessoais.",
+          "A confiança é muito baixa porque não há dados extraíveis da CNH no trecho enviado."
+        ],
+        "extractedBy": "gpt-5.4-mini",
+        "extractionMethod": "openai",
+        "extractedAt": "2026-03-20T01:17:48.219Z",
+        "metadata": {
+          "source": "pdf_text",
+          "textLength": 469
+        }
+      },
+      "message": "Dados da CNH extraídos com IA com sucesso"
+    },
+    "crlv": {
+      "success": true,
+      "source": "openai",
+      "model": "gpt-5.4-mini",
+      "textLength": 1548,
+      "extractionSource": "pdf_text",
+      "data": {
+        "placa": "QQO0616",
+        "renavam": "01188473104",
+        "chassi": "9BWKB45U0KP047969",
+        "marca": "VW",
+        "modelo": "NOVA SAVEIRO RB MBVS",
+        "anoFabricacao": 2019,
+        "anoModelo": 2019,
+        "cor": "BRANCA",
+        "combustivel": "ALCOOL/GASOLINA",
+        "categoria": "PARTICULAR",
+        "uf": "RJ",
+        "municipio": "NOVA IGUACU",
+        "vehicleType": "carga caminhonete",
+        "confidence": 0.91,
+        "warnings": [
+          "Alguns campos do OCR aparecem com formatação colada, exigindo inferência.",
+          "A placa foi inferida do bloco 'QQO0616/MG9BWKB45U0KP047969'."
+        ],
+        "extractedBy": "gpt-5.4-mini",
+        "extractionMethod": "openai",
+        "extractedAt": "2026-03-20T01:17:49.537Z",
+        "metadata": {
+          "source": "pdf_text",
+          "textLength": 1548
+        }
+      },
+      "message": "Dados do veículo extraídos com IA com sucesso"
+    }
+  },
+  "success": false,
+  "finishedAt": "2026-03-20T01:17:51.236Z",
+  "error": {
+    "message": "update failed: values argument contains a path /users/e2e_driver_1773969466524 that is ancestor of another path /users/e2e_driver_1773969466524/documents/cnh",
+    "stack": "Error: update failed: values argument contains a path /users/e2e_driver_1773969466524 that is ancestor of another path /users/e2e_driver_1773969466524/documents/cnh\n    at validateFirebaseMergePaths (/Users/izaakdias/Documents/Leaf-new/node_modules/@firebase/database-compat/dist/index.standalone.js:14249:19)\n    at validateFirebaseMergeDataArg (/Users/izaakdias/Documents/Leaf-new/node_modules/@firebase/database-compat/dist/index.standalone.js:14285:5)\n    at update (/Users/izaakdias/Documents/Leaf-new/node_modules/@firebase/database-compat/dist/index.standalone.js:16562:5)\n    at Reference.update (/Users/izaakdias/Documents/Leaf-new/node_modules/@firebase/database-compat/dist/index.standalone.js:18482:22)\n    at /Users/izaakdias/Documents/Leaf-new/leaf-websocket-backend/scripts/tests/e2e-driver-docflow-dashboard.cjs:297:22\n    at timed (/Users/izaakdias/Documents/Leaf-new/leaf-websocket-backend/scripts/tests/e2e-driver-docflow-dashboard.cjs:43:24)\n    at /Users/izaakdias/Documents/Leaf-new/leaf-websocket-backend/scripts/tests/e2e-driver-docflow-dashboard.cjs:221:11\n    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)"
+  },
+  "timings": [
+    {
+      "step": "ocr:/ocr/cnh/pdf",
+      "durationMs": 1696
+    },
+    {
+      "step": "ocr:/ocr/vehicle/pdf",
+      "durationMs": 1317
+    },
+    {
+      "step": "storage:upload_cnh",
+      "durationMs": 1167
+    },
+    {
+      "step": "storage:upload_crlv",
+      "durationMs": 527
+    }
+  ]
+}

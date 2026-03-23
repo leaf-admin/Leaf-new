@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -u
 
-BASE_URL="${1:-http://147.182.204.181:3001}"
+BASE_URL="${1:-https://api.147.182.204.181.sslip.io}"
 TIMEOUT="${TIMEOUT:-12}"
 
 PASS=0
