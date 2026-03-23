@@ -8,6 +8,7 @@ import { leafAPI } from "@/src/services/api";
 import KpiCard from "@/src/components/ui/KpiCard";
 import Panel from "@/src/components/ui/Panel";
 import { ErrorText, LoadingState } from "@/src/components/ui/PageFeedback";
+import { KeyValueGrid, TechnicalDetails } from "@/src/components/ui/DataViews";
 
 const statusTone = {
   approved: "status-ok",
@@ -118,6 +119,7 @@ export default function DriversPage() {
               <option value="approved">Aprovados</option>
               <option value="rejected">Rejeitados</option>
             </select>
+            <Link href="/drivers/review-queue">Fila de Documentos</Link>
           </div>
         </header>
 
@@ -132,52 +134,79 @@ export default function DriversPage() {
         </section>
 
         <section className="grid">
-          <Panel title="Resumo do backend">
-            <pre>{JSON.stringify(summary || {}, null, 2)}</pre>
+          <Panel
+            title="Resumo operacional"
+            subtitle="Visão rápida de aprovação, pendências e status de análise."
+          >
+            <KeyValueGrid
+              data={summary || {}}
+              labels={{
+                totalApplications: "Aplicações no período",
+                pending: "Pendentes",
+                approved: "Aprovadas",
+                rejected: "Rejeitadas",
+                inReview: "Em revisão",
+              }}
+            />
+            <TechnicalDetails title="Ver detalhes técnicos da listagem" data={summary || {}} />
           </Panel>
 
-          <Panel title="Aplicacoes">
-            <table className="table">
-              <thead>
-                <tr>
-                  <th>Motorista</th>
-                  <th>Contato</th>
-                  <th>Status</th>
-                  <th>Score</th>
-                  <th>Acoes</th>
-                </tr>
-              </thead>
-              <tbody>
-                {applications.map((item, idx) => {
-                  const itemId = item?.id;
-                  const isBusy = busyId === itemId;
-                  const itemStatus = String(item?.status || "pending").toLowerCase();
-                  const badgeClass = statusTone[itemStatus] || "status-warn";
-
-                  return (
-                    <tr key={itemId || item?.driver?.id || `d-${idx}`}>
-                      <td>{item?.driver?.name || "-"}</td>
-                      <td>{item?.driver?.email || item?.driver?.phone || "-"}</td>
-                      <td>
-                        <span className={badgeClass}>{itemStatus}</span>
-                      </td>
-                      <td>{item?.score ?? "-"}</td>
-                      <td>
-                        <div className="filters">
-                          {itemId ? <Link href={`/drivers/${itemId}/documents`}>Documentos</Link> : null}
-                          <button disabled={!itemId || isBusy} onClick={() => approve(itemId)}>
-                            Aprovar
-                          </button>
-                          <button disabled={!itemId || isBusy} onClick={() => reject(itemId)}>
-                            Rejeitar
-                          </button>
-                        </div>
-                      </td>
+          <Panel title="Aplicações" subtitle="Ações de revisão com acesso direto à ficha documental.">
+            <div className="table-shell">
+              <table className="table table-compact">
+                <thead>
+                  <tr>
+                    <th>Motorista</th>
+                    <th>Contato</th>
+                    <th>Status</th>
+                    <th>Score</th>
+                    <th>Ações</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {applications.length === 0 ? (
+                    <tr>
+                      <td colSpan={5}>Nenhum motorista encontrado para os filtros atuais.</td>
                     </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+                  ) : (
+                    applications.map((item, idx) => {
+                      const itemId = item?.id;
+                      const isBusy = busyId === itemId;
+                      const itemStatus = String(item?.status || "pending").toLowerCase();
+                      const badgeClass = statusTone[itemStatus] || "status-warn";
+
+                      return (
+                        <tr key={itemId || item?.driver?.id || `d-${idx}`}>
+                          <td>
+                            <strong>{item?.driver?.name || "-"}</strong>
+                            <span className="table-muted">{item?.driver?.id || itemId || "-"}</span>
+                          </td>
+                          <td>
+                            <div>{item?.driver?.email || "-"}</div>
+                            <span className="table-muted">{item?.driver?.phone || "-"}</span>
+                          </td>
+                          <td>
+                            <span className={badgeClass}>{itemStatus}</span>
+                          </td>
+                          <td>{item?.score ?? "-"}</td>
+                          <td>
+                            <div className="actions-cell">
+                              {itemId ? <Link href={`/drivers/${itemId}/documents`}>Documentos</Link> : null}
+                              <button disabled={!itemId || isBusy} onClick={() => approve(itemId)}>
+                                Aprovar
+                              </button>
+                              <button disabled={!itemId || isBusy} onClick={() => reject(itemId)}>
+                                Rejeitar
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })
+                  )}
+                </tbody>
+              </table>
+            </div>
             <div className="pager">
               <button onClick={() => setPage((p) => Math.max(1, p - 1))}>Anterior</button>
               <span>Pagina {page}</span>

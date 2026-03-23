@@ -32,7 +32,7 @@ export default function LoginPage() {
 
   return (
     <main className="page-center">
-      <form className="card" onSubmit={handleSubmit}>
+      <form className="card auth-card" onSubmit={handleSubmit}>
         <h1>Leaf Dashboard</h1>
         <p>Acesso administrativo</p>
         <input

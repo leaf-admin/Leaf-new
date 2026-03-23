@@ -24,6 +24,15 @@ function formatValue(value, format) {
   return Number(value).toLocaleString("pt-BR");
 }
 
+function summarizeCalcBase(rawValue) {
+  if (!rawValue || typeof rawValue !== "object") return "-";
+  const entries = Object.entries(rawValue).slice(0, 4);
+  if (entries.length === 0) return "-";
+  return entries
+    .map(([key, value]) => `${key}: ${Number.isFinite(Number(value)) ? Number(value).toLocaleString("pt-BR") : String(value)}`)
+    .join(" • ");
+}
+
 function evaluateGoal(metric) {
   const value = metric.value;
   if (value === null || value === undefined || Number.isNaN(value)) return "warning";
@@ -52,6 +61,9 @@ const METRIC_CONFIG = [
   { id: "marginPerRide", group: "Resumo Ideal", title: "Margem por corrida", path: "metrics.financial.marginPerRide", format: "brl", formula: "receita por corrida - custo por corrida" },
 
   { id: "driverUtilization", group: "Atividade Motoristas", title: "Utilização motorista", path: "metrics.drivers.utilization", format: "percent", formula: "tempo em corrida / tempo online (estimado)", targetType: "gte", target: 0.6 },
+  { id: "passengerDriverRatio", group: "Atividade Motoristas", title: "Passageiros por motorista", path: "metrics.drivers.passengerDriverRatio", format: "decimal", formula: "passageiros ativos / motoristas ativos", targetType: "range", targetMin: 0.8, targetMax: 2.5 },
+  { id: "driversPerKm2", group: "Atividade Motoristas", title: "Motoristas por km²", path: "metrics.drivers.driversPerKm2", format: "decimal", formula: "motoristas ativos / área estimada de cobertura (km²)" },
+  { id: "coverageAreaKm2", group: "Atividade Motoristas", title: "Área cobertura estimada", path: "metrics.drivers.coverageAreaKm2", format: "decimal", formula: "área do bounding box dos pontos de pickup (km²)" },
   { id: "dau", group: "Atividade Passageiros", title: "DAU", path: "metrics.passengers.dau", format: "number", formula: "passageiros com >=1 corrida no dia" },
   { id: "wau", group: "Atividade Passageiros", title: "WAU", path: "metrics.passengers.wau", format: "number", formula: "passageiros com >=1 corrida em 7 dias" },
   { id: "mau", group: "Atividade Passageiros", title: "MAU", path: "metrics.passengers.mau", format: "number", formula: "passageiros com >=1 corrida em 30 dias" },
@@ -74,6 +86,7 @@ export default function MarketplaceMetricsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [selectedId, setSelectedId] = useState("mlr");
+  const [seriesFilter, setSeriesFilter] = useState("");
 
   useEffect(() => {
     let mounted = true;
@@ -133,6 +146,13 @@ export default function MarketplaceMetricsPage() {
       .filter((value) => Number.isFinite(value));
     return values.length ? Math.max(...values) : 0;
   }, [series]);
+  const filteredSeries = useMemo(() => {
+    const term = seriesFilter.trim().toLowerCase();
+    if (!term) return series;
+    return series.filter((point) =>
+      `${point?.date || ""} ${String(point?.value ?? "")}`.toLowerCase().includes(term),
+    );
+  }, [series, seriesFilter]);
 
   return (
     <ProtectedRoute>
@@ -222,7 +242,7 @@ export default function MarketplaceMetricsPage() {
               {selected.rawPath ? (
                 <div className="row">
                   <div className="label">Base do cálculo</div>
-                  <div className="value">{JSON.stringify(get(data, selected.rawPath, {}))}</div>
+                  <div className="value">{summarizeCalcBase(get(data, selected.rawPath, {}))}</div>
                 </div>
               ) : null}
             </div>
@@ -257,25 +277,34 @@ export default function MarketplaceMetricsPage() {
         </Panel>
 
         <Panel title="Tabela de apoio (diária)">
-          {series.length === 0 ? (
+          <div className="filters">
+            <input
+              placeholder="Filtrar por data ou valor"
+              value={seriesFilter}
+              onChange={(e) => setSeriesFilter(e.target.value)}
+            />
+          </div>
+          {filteredSeries.length === 0 ? (
             <p className="text-muted">Sem dados.</p>
           ) : (
-            <table className="table">
-              <thead>
-                <tr>
-                  <th>Data</th>
-                  <th>{selected?.title || "Métrica"}</th>
-                </tr>
-              </thead>
-              <tbody>
-                {series.map((point) => (
-                  <tr key={`row-${point.date}`}>
-                    <td>{point.date}</td>
-                    <td>{formatValue(point.value, selected?.format)}</td>
+            <div className="table-shell">
+              <table className="table table-compact">
+                <thead>
+                  <tr>
+                    <th>Data</th>
+                    <th>{selected?.title || "Métrica"}</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {filteredSeries.map((point) => (
+                    <tr key={`row-${point.date}`}>
+                      <td>{point.date}</td>
+                      <td>{formatValue(point.value, selected?.format)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           )}
         </Panel>
 

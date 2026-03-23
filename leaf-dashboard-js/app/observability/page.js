@@ -7,6 +7,7 @@ import { leafAPI } from "@/src/services/api";
 import KpiCard from "@/src/components/ui/KpiCard";
 import Panel from "@/src/components/ui/Panel";
 import { ErrorText, LoadingState } from "@/src/components/ui/PageFeedback";
+import { KeyValueGrid, TechnicalDetails } from "@/src/components/ui/DataViews";
 
 const grafanaBase = process.env.NEXT_PUBLIC_GRAFANA_URL || "";
 
@@ -122,25 +123,65 @@ export default function ObservabilityPage() {
           </Panel>
 
           <Panel title="Redis">
-            <pre>{JSON.stringify(metrics?.redis || {}, null, 2)}</pre>
+            <KeyValueGrid
+              data={{
+                totalOps: metrics?.redis?.operations?.total || 0,
+                errors: metrics?.redis?.operations?.errors || 0,
+                p50LatencyMs: Number(metrics?.redis?.latency?.p50 || 0).toFixed(2),
+                p95LatencyMs: Number(metrics?.redis?.latency?.p95 || 0).toFixed(2),
+                poolHits: metrics?.redis?.pool?.hits || 0,
+                poolMisses: metrics?.redis?.pool?.misses || 0,
+              }}
+              labels={{
+                totalOps: "Operacoes totais",
+                errors: "Erros",
+                p50LatencyMs: "Latencia p50 (ms)",
+                p95LatencyMs: "Latencia p95 (ms)",
+                poolHits: "Pool hits",
+                poolMisses: "Pool misses",
+              }}
+            />
           </Panel>
           <Panel title="System">
-            <pre>{JSON.stringify(metrics?.system || {}, null, 2)}</pre>
+            <KeyValueGrid data={metrics?.system || {}} />
           </Panel>
           <Panel title="OTEL / Tracing">
-            <pre>{JSON.stringify(metrics?.otel || {}, null, 2)}</pre>
+            <KeyValueGrid
+              data={{
+                enabled: metrics?.otel?.enabled || false,
+                ingestRequests: metrics?.otel?.ingest?.totalRequests || 0,
+                ingestErrors: metrics?.otel?.ingest?.errors || 0,
+                tracesExported: metrics?.otel?.traces?.exported || 0,
+                spansDropped: metrics?.otel?.traces?.dropped || 0,
+              }}
+              labels={{
+                enabled: "OTEL habilitado",
+                ingestRequests: "Requisicoes de ingest",
+                ingestErrors: "Erros de ingest",
+                tracesExported: "Traces exportados",
+                spansDropped: "Spans descartados",
+              }}
+            />
           </Panel>
           <Panel title="Commands/Events">
-            <pre>
-              {JSON.stringify(
-                {
-                  commands: metrics?.commands || {},
-                  events: metrics?.events || {},
-                },
-                null,
-                2,
-              )}
-            </pre>
+            <KeyValueGrid
+              data={{
+                commandFailures: metrics?.commands?.failures || 0,
+                commandProcessed: metrics?.commands?.processed || 0,
+                eventsPublished: metrics?.events?.published || 0,
+                eventsConsumed: metrics?.events?.consumed || 0,
+              }}
+              labels={{
+                commandFailures: "Falhas em comandos",
+                commandProcessed: "Comandos processados",
+                eventsPublished: "Eventos publicados",
+                eventsConsumed: "Eventos consumidos",
+              }}
+            />
+            <TechnicalDetails
+              title="Ver payload técnico completo"
+              data={metrics || {}}
+            />
           </Panel>
         </section>
         <ErrorText message={error} />

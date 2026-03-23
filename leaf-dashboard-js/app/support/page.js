@@ -16,6 +16,8 @@ export default function SupportPage() {
   const [chatStatus, setChatStatus] = useState(null);
   const [newMessage, setNewMessage] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
+  const [ticketSearch, setTicketSearch] = useState("");
+  const [messageSearch, setMessageSearch] = useState("");
   const [error, setError] = useState("");
   const [wsStatus, setWsStatus] = useState("conectando");
   const [mode, setMode] = useState("ticket");
@@ -170,6 +172,24 @@ export default function SupportPage() {
     () => (mode === "ticket" ? ticketMessages : chatMessages),
     [mode, ticketMessages, chatMessages],
   );
+  const filteredTickets = useMemo(() => {
+    const term = ticketSearch.trim().toLowerCase();
+    if (!term) return tickets;
+    return tickets.filter((ticket) =>
+      `${ticket?.id || ""} ${ticket?.subject || ""} ${ticket?.status || ""} ${ticket?.user?.name || ""} ${ticket?.userId || ""}`
+        .toLowerCase()
+        .includes(term),
+    );
+  }, [tickets, ticketSearch]);
+  const filteredMessages = useMemo(() => {
+    const term = messageSearch.trim().toLowerCase();
+    if (!term) return currentMessages;
+    return currentMessages.filter((message) =>
+      `${message?.senderType || ""} ${message?.senderId || ""} ${message?.message || ""}`
+        .toLowerCase()
+        .includes(term),
+    );
+  }, [currentMessages, messageSearch]);
 
   const sendMessage = async () => {
     if (!selectedTicket || !newMessage.trim()) return;
@@ -223,6 +243,11 @@ export default function SupportPage() {
           <h1>Suporte</h1>
           <div className="filters">
             <span className={wsStatus === "conectado" ? "status-ok" : "status-warn"}>WS: {wsStatus}</span>
+            <input
+              placeholder="Buscar ticket"
+              value={ticketSearch}
+              onChange={(e) => setTicketSearch(e.target.value)}
+            />
             <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
               <option value="all">Todos</option>
               <option value="open">Abertos</option>
@@ -236,7 +261,7 @@ export default function SupportPage() {
         <section className="grid support-grid">
           <Panel title="Tickets">
             <div className="support-list">
-              {tickets.map((ticket) => (
+              {filteredTickets.map((ticket) => (
                 <button
                   key={ticket.id}
                   type="button"
@@ -250,6 +275,9 @@ export default function SupportPage() {
                   </span>
                 </button>
               ))}
+              {filteredTickets.length === 0 ? (
+                <p className="text-muted">Nenhum ticket encontrado para os filtros atuais.</p>
+              ) : null}
             </div>
           </Panel>
 
@@ -286,8 +314,15 @@ export default function SupportPage() {
                     Status do chat: <strong>{chatStatus?.status || "desconhecido"}</strong>
                   </p>
                 ) : null}
+                <div className="filters">
+                  <input
+                    placeholder="Filtrar mensagens"
+                    value={messageSearch}
+                    onChange={(e) => setMessageSearch(e.target.value)}
+                  />
+                </div>
                 <div className="support-messages">
-                  {currentMessages.map((message) => (
+                  {filteredMessages.map((message) => (
                     <div key={message.id || `${message.createdAt}-${message.message}`}>
                       <strong>{message.senderType || message.senderId || "user"}:</strong> {message.message || "-"}
                     </div>

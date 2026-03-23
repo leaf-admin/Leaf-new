@@ -1,18 +1,72 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { use, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import ProtectedRoute from "@/src/components/ProtectedRoute";
 import AppNav from "@/src/components/AppNav";
 import { leafAPI } from "@/src/services/api";
+import { KeyValueGrid, TechnicalDetails } from "@/src/components/ui/DataViews";
+
+const DOCUMENT_REJECTION_REASON_OPTIONS = {
+  cnh: [
+    "CNH sem EAR - Exerce atividade remunerada",
+    "CNH vencida a mais de 30 dias",
+    "CNH inválida - enviar CNH-e digital em PDF",
+  ],
+  crlv: [
+    "CRLV inválido - enviar CRLV digital em PDF",
+    "CRLV - ano do veículo não permitido (apenas são aceitos veículos com no máximo 10 anos de fabricação)",
+    "CRLV - marca/modelo do veículo não permitido",
+    "CRLV - licenciamento pendente (verificar no campo Exercício se corresponde ao ano atual)",
+  ],
+};
+
+function getReasonOptions(documentType) {
+  const normalized = String(documentType || "").trim().toLowerCase();
+  return DOCUMENT_REJECTION_REASON_OPTIONS[normalized] || [];
+}
+
+function resolveDocumentUrl(doc) {
+  const candidates = [
+    doc?.fileUrl,
+    doc?.url,
+    doc?.downloadUrl,
+    doc?.front,
+    doc?.back,
+    doc?.registration,
+    doc?.insurance,
+    doc?.file?.url,
+    doc?.metadata?.fileUrl,
+  ];
+
+  for (const candidate of candidates) {
+    const value = String(candidate || "").trim();
+    if (value) return value;
+  }
+  return "";
+}
+
+function formatDateTime(value) {
+  if (!value) return "-";
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return "-";
+  return parsed.toLocaleString("pt-BR");
+}
 
 export default function DriverDocumentsPage({ params }) {
-  const { id } = params;
+  const resolvedParams = use(params);
+  const id = String(resolvedParams?.id || "").trim();
   const [documents, setDocuments] = useState(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [reviewingType, setReviewingType] = useState(null);
   const [vehicleBusy, setVehicleBusy] = useState(false);
+  const [uploadingBackgroundDoc, setUploadingBackgroundDoc] = useState(false);
+  const [backgroundDocFile, setBackgroundDocFile] = useState(null);
+  const [selectedRejectionReasons, setSelectedRejectionReasons] = useState({});
+  const [showRatingReviews, setShowRatingReviews] = useState(false);
+  const [docSearch, setDocSearch] = useState("");
+  const [docStatusFilter, setDocStatusFilter] = useState("all");
   const [vehicleForm, setVehicleForm] = useState({
     userVehicleId: "",
     category: "plus",
@@ -22,6 +76,7 @@ export default function DriverDocumentsPage({ params }) {
   });
 
   const load = async () => {
+    if (!id) return;
     const response = await leafAPI.getDriverDocuments(id);
     setDocuments(response?.data || response);
   };
@@ -29,6 +84,7 @@ export default function DriverDocumentsPage({ params }) {
   useEffect(() => {
     let mounted = true;
     const run = async () => {
+      if (!id) return;
       try {
         const response = await leafAPI.getDriverDocuments(id);
         if (mounted) setDocuments(response?.data || response);
@@ -54,7 +110,7 @@ export default function DriverDocumentsPage({ params }) {
     setVehicleForm((prev) => ({
       ...prev,
       userVehicleId: activeVehicle?.userVehicleId || "",
-      category: currentCategory.includes("elite") ? "elite" : "plus",
+      category: currentCategory.includes("elite") ? "elite" : currentCategory.includes("moto") ? "moto" : "plus",
       vehicleStatus: String(activeVehicle?.status || "approved").toLowerCase(),
       setActive: true,
       acceptPlusWithElite: !!config.acceptPlusWithElite,
@@ -65,6 +121,7 @@ export default function DriverDocumentsPage({ params }) {
     if (!window.confirm("Aprovar motorista e todos os documentos?")) return;
     try {
       setBusy(true);
+      setError("");
       await leafAPI.approveDriverApplication(id);
       await load();
     } catch (err) {
@@ -79,6 +136,7 @@ export default function DriverDocumentsPage({ params }) {
     if (!reason) return;
     try {
       setBusy(true);
+      setError("");
       await leafAPI.rejectDriverApplication(id, [reason]);
       await load();
     } catch (err) {
@@ -88,12 +146,34 @@ export default function DriverDocumentsPage({ params }) {
     }
   };
 
+  const resolveRejectionReason = (documentType) => {
+    const selected = String(selectedRejectionReasons?.[documentType] || "").trim();
+    if (selected && selected !== "__custom__") {
+      return selected;
+    }
+
+    const options = getReasonOptions(documentType);
+    if (options.length > 0 && !selected) {
+      return "";
+    }
+
+    const customReason = window.prompt("Motivo da rejeição:");
+    return String(customReason || "").trim();
+  };
+
   const reviewSingle = async (documentType, action) => {
-    const reason = action === "reject" ? window.prompt("Motivo da rejeição:") : "";
-    if (action === "reject" && !reason) return;
+    const normalizedType = String(documentType || "").toLowerCase();
+    const reason = action === "reject" ? resolveRejectionReason(normalizedType) : "";
+
+    if (action === "reject" && !reason) {
+      setError("Selecione um motivo padrão de rejeição ou informe um motivo personalizado.");
+      return;
+    }
+
     try {
-      setReviewingType(documentType);
-      await leafAPI.reviewDriverDocument(id, documentType, action, reason || "");
+      setError("");
+      setReviewingType(normalizedType);
+      await leafAPI.reviewDriverDocument(id, normalizedType, action, reason || "");
       await load();
     } catch (err) {
       setError(err?.message || "Falha ao revisar documento");
@@ -126,9 +206,39 @@ export default function DriverDocumentsPage({ params }) {
     }
   };
 
-  const docsList = documents?.documents
-    ? Object.values(documents.documents)
-    : [];
+  const uploadBackgroundDocument = async () => {
+    if (!backgroundDocFile) {
+      setError("Selecione um arquivo PDF para anexar a certidão de antecedentes.");
+      return;
+    }
+
+    try {
+      setUploadingBackgroundDoc(true);
+      setError("");
+      await leafAPI.uploadDriverDocument(id, "antecedentes_criminais", backgroundDocFile);
+      setBackgroundDocFile(null);
+      await load();
+    } catch (err) {
+      setError(err?.message || "Falha ao anexar certidão de antecedentes");
+    } finally {
+      setUploadingBackgroundDoc(false);
+    }
+  };
+
+  const docsList = useMemo(
+    () => (documents?.documents ? Object.values(documents.documents) : []),
+    [documents?.documents],
+  );
+  const filteredDocsList = useMemo(() => {
+    const term = docSearch.trim().toLowerCase();
+    return docsList.filter((doc) => {
+      const status = String(doc?.status || "").toLowerCase();
+      if (docStatusFilter !== "all" && status !== docStatusFilter) return false;
+      if (!term) return true;
+      return `${doc?.type || ""} ${doc?.fileName || ""} ${status}`.toLowerCase().includes(term);
+    });
+  }, [docsList, docSearch, docStatusFilter]);
+
   const vehicleList = Array.isArray(documents?.vehicleConfig?.vehicles)
     ? documents.vehicleConfig.vehicles
     : [];
@@ -140,6 +250,14 @@ export default function DriverDocumentsPage({ params }) {
       : (kycStatus === "rejected" || kycStatus === "blocked")
         ? "status-bad"
         : "status-warn";
+  const ratingInsights = documents?.ratingInsights || {};
+  const averageRating = ratingInsights?.averageRating || documents?.driver?.rating || "-";
+  const totalRatings = Number(ratingInsights?.totalRatings || documents?.driver?.ratingCount || 0);
+  const latestNegativeReviews = Array.isArray(ratingInsights?.latestNegativeReviews)
+    ? ratingInsights.latestNegativeReviews
+    : [];
+  const backgroundCheckDoc = documents?.documents?.antecedentes_criminais || null;
+  const backgroundCheckUrl = resolveDocumentUrl(backgroundCheckDoc || {});
 
   return (
     <ProtectedRoute>
@@ -157,9 +275,123 @@ export default function DriverDocumentsPage({ params }) {
           </div>
         </header>
         <AppNav />
+
         <section className="card">
           <h2>Resumo do motorista</h2>
-          <pre>{JSON.stringify(documents?.driver || {}, null, 2)}</pre>
+          <KeyValueGrid
+            data={{
+              id: documents?.driver?.id || id,
+              nome: documents?.driver?.name || "-",
+              email: documents?.driver?.email || "-",
+              telefone: documents?.driver?.phone || "-",
+              cpf: documents?.driver?.cpf || "-",
+              dataNascimento: documents?.driver?.birthDate || null,
+              nomeMae: documents?.driver?.motherName || "-",
+              genero: documents?.driver?.genderLabel || documents?.driver?.gender || "-",
+              dataCadastro: documents?.driver?.registrationDate || null,
+              rating: averageRating,
+              status: documents?.driver?.status || "pending",
+              aprovado: documents?.driver?.approved || false,
+            }}
+            labels={{
+              id: "ID",
+              nome: "Nome",
+              email: "E-mail",
+              telefone: "Telefone",
+              cpf: "CPF",
+              dataNascimento: "Data de nascimento",
+              nomeMae: "Nome da mãe",
+              genero: "Gênero",
+              dataCadastro: "Data do cadastro",
+              rating: "Rating",
+              status: "Status",
+              aprovado: "Aprovado",
+            }}
+            valueFormatter={(key, value) => {
+              if (key === "dataNascimento" || key === "dataCadastro") {
+                return formatDateTime(value);
+              }
+
+              if (key === "rating") {
+                return (
+                  <button
+                    type="button"
+                    className="inline-link-btn"
+                    onClick={() => setShowRatingReviews((prev) => !prev)}
+                  >
+                    {value !== "-" ? `⭐ ${value}` : "Sem avaliações"} {totalRatings > 0 ? `(${totalRatings})` : ""}
+                  </button>
+                );
+              }
+
+              return value;
+            }}
+          />
+          {showRatingReviews ? (
+            <div className="review-list-wrap">
+              <h3>Avaliações recentes com comentário negativo</h3>
+              {latestNegativeReviews.length === 0 ? (
+                <p className="text-muted">Sem comentários negativos recentes para este motorista.</p>
+              ) : (
+                <ul className="review-list">
+                  {latestNegativeReviews.map((review, index) => (
+                    <li
+                      key={review.id || `${review.tripId || "trip"}-${review.createdAt || index}`}
+                      className="review-item"
+                    >
+                      <div className="review-meta">
+                        <span>⭐ {review.rating ?? "-"}</span>
+                        <span>{formatDateTime(review.createdAt)}</span>
+                        <span>Trip: {review.tripId || "-"}</span>
+                      </div>
+                      <p className="review-comment">{review.comment || "Sem comentário"}</p>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          ) : null}
+          <TechnicalDetails title="Ver payload técnico do motorista" data={documents?.driver || {}} />
+        </section>
+
+        <section className="card">
+          <h2>Certidão de antecedentes</h2>
+          <div className="filters" style={{ display: "grid", gap: 6 }}>
+            <p>
+              <strong>Status:</strong> {backgroundCheckDoc?.status || "missing"}
+            </p>
+            {backgroundCheckDoc?.uploadedAt ? (
+              <p>
+                <strong>Enviado em:</strong> {new Date(backgroundCheckDoc.uploadedAt).toLocaleString("pt-BR")}
+              </p>
+            ) : null}
+            <button
+              type="button"
+              disabled={!backgroundCheckUrl}
+              onClick={() => {
+                if (!backgroundCheckUrl) return;
+                window.open(backgroundCheckUrl, "_blank", "noopener,noreferrer");
+              }}
+            >
+              {backgroundCheckUrl ? "Visualizar certidão atual" : "Sem certidão anexada"}
+            </button>
+          </div>
+          <div className="filters" style={{ display: "flex", flexWrap: "wrap", gap: 12, alignItems: "center" }}>
+            <input
+              type="file"
+              accept="application/pdf,.pdf"
+              onChange={(event) => {
+                const nextFile = event?.target?.files?.[0] || null;
+                setBackgroundDocFile(nextFile);
+              }}
+            />
+            <button onClick={uploadBackgroundDocument} disabled={busy || uploadingBackgroundDoc || !backgroundDocFile}>
+              {uploadingBackgroundDoc ? "Enviando..." : "Anexar certidão (PDF)"}
+            </button>
+          </div>
+          <p className="text-muted" style={{ marginTop: 8 }}>
+            Documento anexado aqui fica disponível para revisão junto com CNH/CRLV.
+          </p>
         </section>
 
         <section className="card">
@@ -227,6 +459,7 @@ export default function DriverDocumentsPage({ params }) {
                 >
                   <option value="plus">Leaf Plus</option>
                   <option value="elite">Leaf Elite</option>
+                  <option value="moto">Leaf Moto</option>
                 </select>
               </label>
 
@@ -271,39 +504,103 @@ export default function DriverDocumentsPage({ params }) {
         </section>
 
         <section className="grid">
-          {docsList.length === 0 ? (
+          <article className="card">
+            <h2>Filtros de documentos</h2>
+            <div className="filters">
+              <input
+                placeholder="Buscar por tipo ou arquivo"
+                value={docSearch}
+                onChange={(e) => setDocSearch(e.target.value)}
+              />
+              <select
+                value={docStatusFilter}
+                onChange={(e) => setDocStatusFilter(e.target.value)}
+              >
+                <option value="all">Todos os status</option>
+                <option value="pending">pending</option>
+                <option value="approved">approved</option>
+                <option value="rejected">rejected</option>
+              </select>
+            </div>
+          </article>
+        </section>
+
+        <section className="grid list-scroll list-scroll-tall">
+          {filteredDocsList.length === 0 ? (
             <article className="card">
               <p>Nenhum documento encontrado.</p>
             </article>
           ) : (
-            docsList.map((doc, idx) => (
-              <article className="card" key={`${doc.type}-${idx}`}>
-                <h2>{String(doc.type || "documento").toUpperCase()}</h2>
-                <p>Status: {doc.status || "pending"}</p>
-                {doc.url ? (
-                  <a href={doc.url} target="_blank" rel="noreferrer">
-                    Ver documento
-                  </a>
-                ) : null}
-                {doc.rejectionReason ? <p className="error">{doc.rejectionReason}</p> : null}
-                <div className="filters">
-                  <button
-                    disabled={reviewingType === doc.type || busy}
-                    onClick={() => reviewSingle(doc.type, "approve")}
-                  >
-                    Aprovar doc
-                  </button>
-                  <button
-                    disabled={reviewingType === doc.type || busy}
-                    onClick={() => reviewSingle(doc.type, "reject")}
-                  >
-                    Rejeitar doc
-                  </button>
-                </div>
-              </article>
-            ))
+            filteredDocsList.map((doc, idx) => {
+              const normalizedType = String(doc.type || "documento").toLowerCase();
+              const docUrl = resolveDocumentUrl(doc);
+              const reasonOptions = getReasonOptions(normalizedType);
+              const currentReasonSelection = selectedRejectionReasons[normalizedType] || "";
+
+              return (
+                <article className="card" key={`${doc.type}-${idx}`}>
+                  <h2>{String(doc.type || "documento").toUpperCase()}</h2>
+                  <p>Status: {doc.status || "pending"}</p>
+                  {doc.fileName ? <p>Arquivo: {doc.fileName}</p> : null}
+                  {doc.uploadedAt ? <p>Enviado em: {new Date(doc.uploadedAt).toLocaleString("pt-BR")}</p> : null}
+                  {doc.rejectionReason ? <p className="error">{doc.rejectionReason}</p> : null}
+
+                  {reasonOptions.length > 0 ? (
+                    <div style={{ marginTop: 10 }}>
+                      <label>
+                        Motivo padrão de rejeição
+                        <select
+                          value={currentReasonSelection}
+                          onChange={(e) => {
+                            const nextValue = e.target.value;
+                            setSelectedRejectionReasons((prev) => ({
+                              ...prev,
+                              [normalizedType]: nextValue,
+                            }));
+                          }}
+                        >
+                          <option value="">Selecione um motivo</option>
+                          {reasonOptions.map((reason) => (
+                            <option key={reason} value={reason}>
+                              {reason}
+                            </option>
+                          ))}
+                          <option value="__custom__">Outro motivo (digitar)</option>
+                        </select>
+                      </label>
+                    </div>
+                  ) : null}
+
+                  <div className="filters">
+                    <button
+                      type="button"
+                      disabled={!docUrl}
+                      onClick={() => {
+                        if (!docUrl) return;
+                        window.open(docUrl, "_blank", "noopener,noreferrer");
+                      }}
+                    >
+                      {docUrl ? "Visualizar documento" : "Sem arquivo para visualizar"}
+                    </button>
+                    <button
+                      disabled={reviewingType === normalizedType || busy}
+                      onClick={() => reviewSingle(normalizedType, "approve")}
+                    >
+                      Aprovar doc
+                    </button>
+                    <button
+                      disabled={reviewingType === normalizedType || busy}
+                      onClick={() => reviewSingle(normalizedType, "reject")}
+                    >
+                      Rejeitar doc
+                    </button>
+                  </div>
+                </article>
+              );
+            })
           )}
         </section>
+
         {error ? <p className="error">{error}</p> : null}
       </main>
     </ProtectedRoute>

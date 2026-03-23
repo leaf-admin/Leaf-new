@@ -9,6 +9,7 @@ import { wsService } from "@/src/services/websocket-service";
 import KpiCard from "@/src/components/ui/KpiCard";
 import Panel from "@/src/components/ui/Panel";
 import { ErrorText, LoadingState } from "@/src/components/ui/PageFeedback";
+import { KeyValueGrid, TechnicalDetails } from "@/src/components/ui/DataViews";
 
 const periodMap = {
   "24h": "today",
@@ -24,6 +25,7 @@ function brl(value) {
 export default function DashboardPage() {
   const { user, signOut } = useAuth();
   const [period, setPeriod] = useState("24h");
+  const [activityFilter, setActivityFilter] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [wsStatus, setWsStatus] = useState("desconectado");
@@ -117,6 +119,24 @@ export default function DashboardPage() {
     [model.revenueEvolution],
   );
 
+  const filteredActivity = useMemo(() => {
+    const term = activityFilter.trim().toLowerCase();
+    const source = Array.isArray(model.recentActivity) ? model.recentActivity : [];
+    if (!term) return source;
+    return source.filter((event) => {
+      const haystack = [
+        event?.timestamp,
+        event?.type,
+        event?.event,
+        event?.description,
+        event?.message,
+      ]
+        .map((item) => String(item || "").toLowerCase())
+        .join(" ");
+      return haystack.includes(term);
+    });
+  }, [model.recentActivity, activityFilter]);
+
   return (
     <ProtectedRoute>
       <main className="page-shell">
@@ -185,33 +205,66 @@ export default function DashboardPage() {
             )}
           </Panel>
 
-          <Panel title="Atividade recente">
-            {model.recentActivity.length === 0 ? (
+          <Panel title="Atividade recente" subtitle="Eventos operacionais mais recentes do backend.">
+            <div className="filters">
+              <input
+                placeholder="Filtrar por tipo, descrição ou horário"
+                value={activityFilter}
+                onChange={(e) => setActivityFilter(e.target.value)}
+              />
+            </div>
+            {filteredActivity.length === 0 ? (
               <p className="text-muted">Sem eventos recentes.</p>
             ) : (
-              <table className="table">
-                <thead>
-                  <tr>
-                    <th>Horario</th>
-                    <th>Tipo</th>
-                    <th>Descricao</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {model.recentActivity.slice(0, 15).map((event, idx) => (
-                    <tr key={event.id || `${event.timestamp}-${idx}`}>
-                      <td>{event.timestamp ? new Date(event.timestamp).toLocaleString("pt-BR") : "-"}</td>
-                      <td>{event.type || event.event || "-"}</td>
-                      <td>{event.description || event.message || JSON.stringify(event)}</td>
+              <div className="table-shell">
+                <table className="table table-compact">
+                  <thead>
+                    <tr>
+                      <th>Horario</th>
+                      <th>Tipo</th>
+                      <th>Descricao</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody>
+                    {filteredActivity.slice(0, 60).map((event, idx) => (
+                      <tr key={event.id || `${event.timestamp}-${idx}`}>
+                        <td>{event.timestamp ? new Date(event.timestamp).toLocaleString("pt-BR") : "-"}</td>
+                        <td>{event.type || event.event || "-"}</td>
+                        <td>{event.description || event.message || JSON.stringify(event)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             )}
           </Panel>
 
-          <Panel title="Payload bruto">
-            <pre>{JSON.stringify(model, null, 2)}</pre>
+          <Panel title="Resumo consolidado">
+            <KeyValueGrid
+              data={{
+                novosMotoristas: model.newDrivers,
+                novosClientes: model.newCustomers,
+                totalCorridas: model.totalRides,
+                receitaCorridas: brl(model.ridesRevenue),
+                taxaOperacional: brl(model.operationalFee),
+                receitaAssinaturas: brl(model.subscriptionRevenue),
+                perdasFundoReserva: brl(model.reserveFundLosses),
+                eventosRecentes: model.recentActivity.length,
+                pontosHistoricoReceita: model.revenueEvolution.length,
+              }}
+              labels={{
+                novosMotoristas: "Novos motoristas",
+                novosClientes: "Novos clientes",
+                totalCorridas: "Total de corridas",
+                receitaCorridas: "Receita de corridas",
+                taxaOperacional: "Taxa operacional",
+                receitaAssinaturas: "Receita de assinaturas",
+                perdasFundoReserva: "Perdas do fundo de reserva",
+                eventosRecentes: "Eventos recentes",
+                pontosHistoricoReceita: "Pontos no histórico",
+              }}
+            />
+            <TechnicalDetails title="Ver payload técnico do dashboard" data={model} />
           </Panel>
         </section>
 

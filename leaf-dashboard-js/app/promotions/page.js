@@ -6,6 +6,7 @@ import AppNav from "@/src/components/AppNav";
 import Panel from "@/src/components/ui/Panel";
 import { ErrorText, LoadingState } from "@/src/components/ui/PageFeedback";
 import { leafAPI } from "@/src/services/api";
+import { KeyValueGrid } from "@/src/components/ui/DataViews";
 
 const defaultForm = {
   name: "",
@@ -25,6 +26,7 @@ export default function PromotionsPage() {
   const [rows, setRows] = useState([]);
   const [stats, setStats] = useState(null);
   const [statusFilter, setStatusFilter] = useState("all");
+  const [searchFilter, setSearchFilter] = useState("");
   const [form, setForm] = useState(defaultForm);
   const [driverId, setDriverId] = useState("");
   const [selectedPromotion, setSelectedPromotion] = useState("");
@@ -54,6 +56,15 @@ export default function PromotionsPage() {
   }, [load]);
 
   const canCreate = useMemo(() => form.name.trim().length > 2, [form.name]);
+  const filteredRows = useMemo(() => {
+    const term = searchFilter.trim().toLowerCase();
+    if (!term) return rows;
+    return rows.filter((promo) =>
+      `${promo?.id || ""} ${promo?.name || ""} ${promo?.type || ""} ${promo?.status || ""}`
+        .toLowerCase()
+        .includes(term),
+    );
+  }, [rows, searchFilter]);
 
   const create = async () => {
     if (!canCreate) {
@@ -133,6 +144,11 @@ export default function PromotionsPage() {
         <header className="header">
           <h1>Promocoes</h1>
           <div className="filters">
+            <input
+              placeholder="Buscar por id, nome, tipo ou status"
+              value={searchFilter}
+              onChange={(e) => setSearchFilter(e.target.value)}
+            />
             <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
               {statusOptions.map((status) => (
                 <option key={status} value={status}>
@@ -149,14 +165,24 @@ export default function PromotionsPage() {
 
         <section className="grid">
           <Panel title="Resumo">
-            <div className="filters">
-              <div>Total: {stats?.total ?? rows.length}</div>
-              <div>Ativas: {stats?.active ?? 0}</div>
-              <div>Pausadas: {stats?.paused ?? 0}</div>
-              <div>Concluidas: {stats?.completed ?? 0}</div>
-              <div>Expiradas: {stats?.expired ?? 0}</div>
-              <div>Resgates: {stats?.totalRedemptions ?? 0}</div>
-            </div>
+            <KeyValueGrid
+              data={{
+                total: stats?.total ?? rows.length,
+                active: stats?.active ?? 0,
+                paused: stats?.paused ?? 0,
+                completed: stats?.completed ?? 0,
+                expired: stats?.expired ?? 0,
+                totalRedemptions: stats?.totalRedemptions ?? 0,
+              }}
+              labels={{
+                total: "Total",
+                active: "Ativas",
+                paused: "Pausadas",
+                completed: "Concluídas",
+                expired: "Expiradas",
+                totalRedemptions: "Resgates",
+              }}
+            />
           </Panel>
 
           <Panel title="Criar Promocao">
@@ -217,7 +243,7 @@ export default function PromotionsPage() {
             <div className="filters">
               <select value={selectedPromotion} onChange={(e) => setSelectedPromotion(e.target.value)}>
                 <option value="">Selecione promocao</option>
-                {rows.map((promo) => (
+                {filteredRows.map((promo) => (
                   <option key={promo.id} value={promo.id}>
                     {promo.name || promo.id}
                   </option>
@@ -233,61 +259,69 @@ export default function PromotionsPage() {
           </Panel>
 
           <Panel title="Operacao de Promocoes">
-            <table className="table">
-              <thead>
-                <tr>
-                  <th>ID</th>
-                  <th>Nome</th>
-                  <th>Tipo</th>
-                  <th>Status</th>
-                  <th>Inicio</th>
-                  <th>Fim</th>
-                  <th>Resgates</th>
-                  <th>Acoes</th>
-                </tr>
-              </thead>
-              <tbody>
-                {rows.map((promo, idx) => {
-                  const isBusy = busyPromotionId === promo.id;
-                  return (
-                    <tr key={promo.id || `promo-${idx}`}>
-                      <td>{promo.id || "-"}</td>
-                      <td>{promo.name || "-"}</td>
-                      <td>{promo.type || "-"}</td>
-                      <td>{promo.status || "-"}</td>
-                      <td>{promo.startDate ? new Date(promo.startDate).toLocaleString() : "-"}</td>
-                      <td>{promo.endDate ? new Date(promo.endDate).toLocaleString() : "-"}</td>
-                      <td>
-                        {promo.currentRedemptions ?? 0}
-                        {promo.maxRedemptions ? ` / ${promo.maxRedemptions}` : ""}
-                      </td>
-                      <td>
-                        <div className="filters">
-                          <button
-                            disabled={isBusy || promo.status === "active"}
-                            onClick={() => updatePromotionStatus(promo.id, "active")}
-                          >
-                            Iniciar/Retomar
-                          </button>
-                          <button
-                            disabled={isBusy || promo.status === "paused"}
-                            onClick={() => updatePromotionStatus(promo.id, "paused")}
-                          >
-                            Pausar
-                          </button>
-                          <button
-                            disabled={isBusy || promo.status === "completed"}
-                            onClick={() => updatePromotionStatus(promo.id, "completed")}
-                          >
-                            Encerrar
-                          </button>
-                        </div>
-                      </td>
+            <div className="table-shell table-shell-tall">
+              <table className="table table-compact">
+                <thead>
+                  <tr>
+                    <th>ID</th>
+                    <th>Nome</th>
+                    <th>Tipo</th>
+                    <th>Status</th>
+                    <th>Inicio</th>
+                    <th>Fim</th>
+                    <th>Resgates</th>
+                    <th>Acoes</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredRows.length === 0 ? (
+                    <tr>
+                      <td colSpan={8}>Nenhuma promoção encontrada para os filtros atuais.</td>
                     </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+                  ) : (
+                    filteredRows.map((promo, idx) => {
+                      const isBusy = busyPromotionId === promo.id;
+                      return (
+                        <tr key={promo.id || `promo-${idx}`}>
+                          <td>{promo.id || "-"}</td>
+                          <td>{promo.name || "-"}</td>
+                          <td>{promo.type || "-"}</td>
+                          <td>{promo.status || "-"}</td>
+                          <td>{promo.startDate ? new Date(promo.startDate).toLocaleString() : "-"}</td>
+                          <td>{promo.endDate ? new Date(promo.endDate).toLocaleString() : "-"}</td>
+                          <td>
+                            {promo.currentRedemptions ?? 0}
+                            {promo.maxRedemptions ? ` / ${promo.maxRedemptions}` : ""}
+                          </td>
+                          <td>
+                            <div className="actions-cell">
+                              <button
+                                disabled={isBusy || promo.status === "active"}
+                                onClick={() => updatePromotionStatus(promo.id, "active")}
+                              >
+                                Iniciar/Retomar
+                              </button>
+                              <button
+                                disabled={isBusy || promo.status === "paused"}
+                                onClick={() => updatePromotionStatus(promo.id, "paused")}
+                              >
+                                Pausar
+                              </button>
+                              <button
+                                disabled={isBusy || promo.status === "completed"}
+                                onClick={() => updatePromotionStatus(promo.id, "completed")}
+                              >
+                                Encerrar
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })
+                  )}
+                </tbody>
+              </table>
+            </div>
           </Panel>
         </section>
 

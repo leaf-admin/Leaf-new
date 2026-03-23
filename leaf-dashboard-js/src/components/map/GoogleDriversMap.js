@@ -132,6 +132,14 @@ export default function GoogleDriversMap({ drivers = [] }) {
                     lat: Number(driver.location.lat),
                     lng: Number(driver.location.lng),
                   }}
+                  icon={{
+                    path: window.google.maps.SymbolPath.CIRCLE,
+                    scale: 7,
+                    fillColor: "#2563eb",
+                    fillOpacity: 0.95,
+                    strokeColor: "#ffffff",
+                    strokeWeight: 2,
+                  }}
                   label={{
                     text: String(idx + 1),
                     color: "#0f172a",

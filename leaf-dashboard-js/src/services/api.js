@@ -12,8 +12,10 @@ class LeafApiService {
     const timeout = setTimeout(() => controller.abort(), this.timeoutMs);
 
     try {
+      const isFormData =
+        typeof FormData !== "undefined" && options.body instanceof FormData;
       const headers = {
-        "Content-Type": "application/json",
+        ...(isFormData ? {} : { "Content-Type": "application/json" }),
         ...(options.headers || {}),
       };
       const token = authService.getAccessToken();
@@ -209,6 +211,17 @@ class LeafApiService {
     return this.request(`/drivers/${driverId}/documents`);
   }
 
+  async getDriverDocumentReviewQueue(params = {}) {
+    const query = new URLSearchParams();
+    Object.entries(params).forEach(([key, value]) => {
+      if (value !== undefined && value !== null && value !== "") {
+        query.append(key, String(value));
+      }
+    });
+    const suffix = query.toString();
+    return this.request(`/drivers/documents/review-queue${suffix ? `?${suffix}` : ""}`);
+  }
+
   async updateDriverVehicleConfig(driverId, payload = {}) {
     return this.request(`/drivers/${driverId}/vehicle/config`, {
       method: "POST",
@@ -238,6 +251,15 @@ class LeafApiService {
         rejectionReason,
         reviewedBy: "admin",
       }),
+    });
+  }
+
+  async uploadDriverDocument(driverId, documentType, file) {
+    const formData = new FormData();
+    formData.append("file", file);
+    return this.request(`/drivers/${driverId}/documents/${documentType}/upload`, {
+      method: "POST",
+      body: formData,
     });
   }
 
@@ -276,6 +298,77 @@ class LeafApiService {
     if (startDate) params.append("startDate", startDate);
     if (endDate) params.append("endDate", endDate);
     return this.request(`/map/heatmap?${params.toString()}`);
+  }
+
+  async getGeofenceAdminConfig() {
+    return this.request("/geofence/admin/config");
+  }
+
+  async updateGeofenceConfig(payload = {}) {
+    return this.request("/geofence/admin/config", {
+      method: "PATCH",
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async updateGeofenceState(stateCode, enabled) {
+    return this.request(`/geofence/admin/states/${encodeURIComponent(stateCode)}`, {
+      method: "PATCH",
+      body: JSON.stringify({ enabled: Boolean(enabled) }),
+    });
+  }
+
+  async updateGeofenceCity(stateCode, cityKey, payloadOrActive) {
+    const payload = (typeof payloadOrActive === "object" && payloadOrActive !== null)
+      ? payloadOrActive
+      : { active: Boolean(payloadOrActive) };
+    return this.request(
+      `/geofence/admin/cities/${encodeURIComponent(stateCode)}/${encodeURIComponent(cityKey)}`,
+      {
+        method: "PATCH",
+        body: JSON.stringify(payload),
+      },
+    );
+  }
+
+  async getReferralProgramsSummary() {
+    return this.request("/programs/referrals/summary");
+  }
+
+  async getReferralProgramsConfig() {
+    return this.request("/programs/referrals/config");
+  }
+
+  async updateReferralProgramsConfig(payload = {}) {
+    return this.request("/programs/referrals/config", {
+      method: "PATCH",
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async listReferralCampaigns() {
+    return this.request("/programs/referrals/campaigns");
+  }
+
+  async createReferralCampaign(payload = {}) {
+    return this.request("/programs/referrals/campaigns", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async updateReferralCampaign(campaignId, payload = {}) {
+    return this.request(`/programs/referrals/campaigns/${encodeURIComponent(campaignId)}`, {
+      method: "PATCH",
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async createGeofenceCity(payload = {}) {
+    return this.request("/geofence/admin/cities", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
   }
 
   async getNotifications() {
@@ -352,17 +445,18 @@ class LeafApiService {
     });
   }
 
-  async getWaitlist(page = 1, limit = 20, status = "pending") {
+  async getWaitlist(page = 1, limit = 20, status = "pending", city = "") {
     const params = new URLSearchParams({
       page: String(page),
       limit: String(limit),
       status,
     });
+    if (city) params.append("city", city);
     return this.request(`/waitlist/drivers?${params.toString()}`);
   }
 
   async getWaitlistStats() {
-    return this.request("/metrics/waitlist/landing");
+    return this.request("/waitlist/stats");
   }
 
   async runFinancialSimulation(drivers = 250, hours = 1) {

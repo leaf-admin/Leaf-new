@@ -9,6 +9,7 @@ import { leafAPI } from "@/src/services/api";
 export default function ReportsPage() {
   const [reports, setReports] = useState([]);
   const [error, setError] = useState("");
+  const [search, setSearch] = useState("");
 
   useEffect(() => {
     let mounted = true;
@@ -30,21 +31,33 @@ export default function ReportsPage() {
     const url = `${config.api.baseUrl}/reports/generate/${reportId}?format=${format}`;
     window.open(url, "_blank", "noopener,noreferrer");
   };
+  const filteredReports = reports.filter((report) =>
+    `${report?.id || ""} ${report?.name || ""} ${report?.title || ""} ${report?.description || ""}`
+      .toLowerCase()
+      .includes(search.trim().toLowerCase()),
+  );
 
   return (
     <ProtectedRoute>
       <main className="page-shell">
         <header className="header">
           <h1>Relatórios</h1>
+          <div className="filters">
+            <input
+              placeholder="Buscar relatório"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+            />
+          </div>
         </header>
         <AppNav />
-        <section className="grid">
-          {reports.length === 0 ? (
+        <section className="grid list-scroll list-scroll-tall">
+          {filteredReports.length === 0 ? (
             <article className="card">
               <p>Nenhum relatório disponível</p>
             </article>
           ) : (
-            reports.map((report) => (
+            filteredReports.map((report) => (
               <article className="card" key={report.id}>
                 <h2>{report.name || report.title || report.id}</h2>
                 <p>{report.description || "Sem descrição"}</p>

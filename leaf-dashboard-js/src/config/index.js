@@ -1,19 +1,28 @@
-const rawApiUrl = process.env.NEXT_PUBLIC_API_URL || "http://147.182.204.181:3001/api";
+const isDev = process.env.NODE_ENV === "development";
+const defaultApiUrl = isDev
+  ? "http://localhost:3001/api"
+  : "https://api.147.182.204.181.sslip.io/api";
+const defaultWsUrl = isDev
+  ? "http://localhost:3001"
+  : "https://socket.147.182.204.181.sslip.io";
+
+const rawApiUrl = process.env.NEXT_PUBLIC_API_URL || defaultApiUrl;
+const rawWsUrl = process.env.NEXT_PUBLIC_WS_URL || defaultWsUrl;
 
 const ensureApiUrl = (url) => {
-  if (!url) return "http://147.182.204.181:3001/api";
+  if (!url) return defaultApiUrl;
   return url.endsWith("/api") ? url : `${url.replace(/\/$/, "")}/api`;
 };
 
+const ensureSocketUrl = (url) => (url || "").replace(/\/$/, "");
+
 const apiBaseUrl = ensureApiUrl(rawApiUrl);
-const wsBaseUrl =
-  process.env.NEXT_PUBLIC_WS_URL ||
-  apiBaseUrl.replace(/\/api$/, "");
+const wsBaseUrl = ensureSocketUrl(rawWsUrl) || apiBaseUrl.replace(/\/api$/, "");
 
 export const config = {
   api: {
     baseUrl: apiBaseUrl,
-    timeoutMs: 10000,
+    timeoutMs: 30000,
   },
   ws: {
     baseUrl: wsBaseUrl,
