@@ -1,0 +1,8 @@
+09:19
+Cancelar corrida
+Ao cancelar agora, vamos encerrar sua solicitacao e
+retornar ao mapa.
+Cancelamento pode impactar prioridade em uma nova
+solicitacao.
+× Confirmar cancelamento
+Continuar corrida

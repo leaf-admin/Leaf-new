@@ -3,6 +3,7 @@ import axios from 'axios';
 import { Platform } from 'react-native';
 import auth from '@react-native-firebase/auth';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { toUserFriendlyError } from './friendlyErrorMessages';
 
 
 /**
@@ -32,7 +33,7 @@ export function createAxiosInstance(config = {}) {
         },
         (error) => {
             Logger.error('❌ [Axios] Erro na requisição:', error);
-            return Promise.reject(error);
+            return Promise.reject(toUserFriendlyError(error, { context: 'api' }));
         }
     );
 
@@ -47,9 +48,11 @@ export function createAxiosInstance(config = {}) {
             // Tratamento de erros de rede
             if (error.code === 'ECONNABORTED') {
                 Logger.error('⏱️ [Axios] Timeout na requisição');
+                error.code = error.code || 'ECONNABORTED';
                 error.message = 'Tempo de espera esgotado. Tente novamente.';
             } else if (error.message === 'Network Error') {
                 Logger.error('🌐 [Axios] Erro de rede');
+                error.code = error.code || 'NETWORK_ERROR';
                 error.message = 'Erro de conexão. Verifique sua internet.';
             } else if (error.response) {
                 // Erro com resposta do servidor
@@ -75,15 +78,17 @@ export function createAxiosInstance(config = {}) {
                     } catch (refreshError) {
                         Logger.error('❌ [Axios] Falha ao renovar Token do Firebase:', refreshError);
                         error.message = 'Sessão expirada permanentemente. Faça login novamente.';
+                        error.code = error.code || 'TOKEN_EXPIRED';
                         // Pode despachar evento de logout aqui
                     }
                 } else if (status >= 500) {
                     Logger.error('🔥 [Axios] Erro do servidor');
+                    error.code = error.code || 'INTERNAL_SERVER_ERROR';
                     error.message = 'Erro no servidor. Tente novamente mais tarde.';
                 }
             }
 
-            return Promise.reject(error);
+            return Promise.reject(toUserFriendlyError(error, { context: 'api' }));
         }
     );
 
@@ -113,7 +118,7 @@ export function setupAxiosInterceptor() {
         },
         (error) => {
             Logger.error('❌ [Axios Global] Erro na requisição:', error);
-            return Promise.reject(error);
+            return Promise.reject(toUserFriendlyError(error, { context: 'api' }));
         }
     );
 
@@ -143,10 +148,9 @@ export function setupAxiosInterceptor() {
                     Logger.error('❌ [Axios Global] Não foi possível renovar a sessão:', refreshError);
                 }
             }
-            return Promise.reject(error);
+            return Promise.reject(toUserFriendlyError(error, { context: 'api' }));
         }
     );
 
     Logger.log('✅ Axios interceptors configurados');
 }
-

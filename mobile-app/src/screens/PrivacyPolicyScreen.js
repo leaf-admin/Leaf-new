@@ -15,6 +15,7 @@ import {
 } from 'react-native';
 import { Icon } from 'react-native-elements';
 import { useSelector } from 'react-redux';
+import firebaseAuth from '@react-native-firebase/auth';
 import { api } from '../common-local';
 
 
@@ -30,8 +31,8 @@ const PrivacyPolicyScreen = ({ navigation, route }) => {
   const [isLoading, setIsLoading] = useState(true);
   const [expandedSection, setExpandedSection] = useState(null);
   
-  const auth = useSelector(state => state.auth);
-  const currentUser = auth.profile;
+  const authState = useSelector(state => state.auth);
+  const currentUser = authState.profile;
 
   const sections = [
     { id: 'overview', label: 'Visão Geral', icon: 'info' },
@@ -127,7 +128,34 @@ const PrivacyPolicyScreen = ({ navigation, route }) => {
 
   const confirmDeleteData = async () => {
     try {
-      await api.delete(`/api/privacy/delete-data/${currentUser.id}`);
+      const firebaseUser = firebaseAuth().currentUser;
+      const token = await firebaseUser?.getIdToken(true);
+
+      if (!token) {
+        throw new Error('Sessão inválida para solicitar exclusão de conta.');
+      }
+
+      const phoneFromProfile =
+        currentUser?.mobile ||
+        currentUser?.phone ||
+        currentUser?.phoneNumber ||
+        firebaseUser?.phoneNumber ||
+        '';
+
+      await api.post(
+        '/api/account/delete',
+        {
+          reason: 'user_requested_mobile_app',
+          additionalInfo: 'Solicitação enviada pela tela de privacidade do app',
+          phone: phoneFromProfile,
+          source: 'mobile-app-privacy-screen'
+        },
+        {
+          headers: {
+            Authorization: `Bearer ${token}`
+          }
+        }
+      );
       
       Alert.alert(
         'Dados Excluídos',
@@ -136,8 +164,32 @@ const PrivacyPolicyScreen = ({ navigation, route }) => {
       );
       
     } catch (error) {
+      const firebaseUser = firebaseAuth().currentUser;
+      const token = await firebaseUser?.getIdToken(true);
+      const fallbackUserId = currentUser?.id || firebaseUser?.uid;
+
+      // Compatibilidade com ambientes ainda não atualizados no endpoint novo.
+      if (token && fallbackUserId && error?.response?.status === 404) {
+        try {
+          await api.delete(`/api/privacy/delete-data/${fallbackUserId}`, {
+            headers: {
+              Authorization: `Bearer ${token}`
+            }
+          });
+
+          Alert.alert(
+            'Dados Excluídos',
+            'Seus dados pessoais foram excluídos com sucesso.',
+            [{ text: 'OK', onPress: () => navigation.navigate('AuthScreen') }]
+          );
+          return;
+        } catch (fallbackError) {
+          Logger.error('Erro no fallback de exclusão:', fallbackError);
+        }
+      }
+
       Logger.error('Erro ao excluir dados:', error);
-      Alert.alert('Erro', 'Não foi possível excluir os dados');
+      Alert.alert('Erro', 'Não foi possível excluir os dados. Tente novamente em instantes.');
     }
   };
 

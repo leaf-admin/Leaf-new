@@ -74,8 +74,15 @@ removeListener();
 
 ### KYC_ENABLED
 - **Descrição**: Habilita/desabilita verificação KYC antes de ficar online
-- **Valor padrão**: `false` (desabilitado)
+- **Valor padrão**: `true` (habilitado)
 - **Uso**: Controla se o motorista precisa passar pela verificação KYC
+
+### PROTOTYPE_ROBOTAXI_UI_ENABLED
+- **Descrição**: Alterna entre a UI nova do protótipo e o layout legado
+- **Valor padrão**: `true` (protótipo ativo)
+- **Uso**:
+  - `true`: abre fluxo `RobotaxiPrototype`
+  - `false`: volta para fluxo legado (`Splash/Map`)
 
 ## ➕ Adicionar Nova Feature Flag
 
@@ -145,5 +152,3 @@ Para resetar todas as flags para valores padrão:
 ```javascript
 await featureFlagService.resetFlags();
 ```
-
-

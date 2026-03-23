@@ -58,6 +58,7 @@ const MAPS_CACHE_TTL_MS = {
     directions: 90 * 1000,
     matrix: 60 * 1000
 };
+const DIRECTIONS_REQUEST_TIMEOUT_MS = 12000;
 const MAX_MATRIX_DESTINATIONS = 8;
 
 const normalizeCoord = (value) => Number.parseFloat(value || 0).toFixed(4);
@@ -215,13 +216,10 @@ export const fetchPlacesAutocomplete = (searchKeyword, sessionToken, location = 
             // Construir URL da API Places Autocomplete
             let url = `https://maps.googleapis.com/maps/api/place/autocomplete/json?input=${encodeURIComponent(searchKeyword)}&key=${apiKey}&language=pt-BR&components=country:br`;
             
-            // ✅ Adicionar location bias se localização disponível (prioriza resultados próximos, mas não restringe)
+            // ✅ Compatibilidade máxima com Places Autocomplete (Legacy): location + radius
             if (location && location.lat && location.lng) {
-                // Usar locationbias (circular) para PRIORIZAR resultados próximos, mas permitir resultados de qualquer lugar
-                // Formato: circle:radius@lat,lng (raio em metros)
-                // 50000m = 50km - prioriza resultados dentro de 50km, mas não restringe
-                url += `&locationbias=circle:50000@${location.lat},${location.lng}`;
-                Logger.log('📍 Location bias aplicado (prioriza, não restringe):', location);
+                url += `&location=${location.lat},${location.lng}&radius=50000`;
+                Logger.log('📍 Location/radius aplicado no Places Autocomplete:', location);
             }
             
             // Adicionar sessionToken se fornecido (para agrupar requisições e reduzir custos)
@@ -545,16 +543,9 @@ export const fetchGeocodeAddress = (address, location = null) => {
         // Construir URL da API Geocoding (Forward)
         let url = `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(address)}&key=${apiKey}&language=pt-BR&components=country:br`;
         
-        // ✅ Adicionar location bias se localização disponível (prioriza resultados próximos, mas não restringe)
-        if (location && location.lat && location.lng) {
-            // Para Geocoding API, não há locationbias, mas podemos usar bounds de forma flexível
-            // Vamos usar bounds do Rio de Janeiro como preferência, mas não restringir totalmente
-            // Se não encontrar resultados próximos, a API ainda retornará resultados de outros lugares
-            // Rio de Janeiro bounds: SW: -23.1, -43.8, NE: -22.7, -43.0
-            // Nota: bounds no Geocoding API é uma preferência, não uma restrição absoluta
-            url += `&bounds=-23.1,-43.8|-22.7,-43.0`;
-            Logger.log('📍 Location bias aplicado para Geocoding (preferência, não restrição):', location);
-        }
+        // ✅ Evitar bounds agressivo para não filtrar resultados válidos.
+        // `region=br` mantém preferência por Brasil sem restringir por cidade.
+        url += '&region=br';
         
         Logger.log('🌐 URL da API Geocoding (Forward):', sanitizeSensitiveUrl(url));
         
@@ -645,7 +636,9 @@ export const getDirectionsApi = (startLoc, destLoc, waypoints) => {
         Logger.log('🌐 URL da API Google Directions:', sanitizeSensitiveUrl(url));
         
         withInFlight(cacheKey, async () => {
-            return await fetch(url)
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), DIRECTIONS_REQUEST_TIMEOUT_MS);
+            return await fetch(url, { signal: controller.signal })
             .then(response => {
                 Logger.log('📡 Response status:', response.status);
                 if (!response.ok) {
@@ -706,7 +699,11 @@ export const getDirectionsApi = (startLoc, destLoc, waypoints) => {
             })
             .catch(error => {
                 Logger.log('💥 Erro na requisição getDirectionsApi:', error);
-                reject(`getDirectionsApi Call Error: ${error.message || error}`);
+                const isTimeout = error?.name === 'AbortError';
+                reject(`getDirectionsApi Call Error: ${isTimeout ? 'Timeout ao consultar rota do Google' : (error.message || error)}`);
+            })
+            .finally(() => {
+                clearTimeout(timeoutId);
             });
         }).catch((error) => {
             reject(`getDirectionsApi Call Error: ${error.message || error}`);

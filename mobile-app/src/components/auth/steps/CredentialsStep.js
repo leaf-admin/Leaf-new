@@ -1,402 +1,214 @@
-import React, { useState, useMemo } from 'react';
-import { View, Text, TextInput, TouchableOpacity, StyleSheet, Alert, ScrollView } from 'react-native';
-import { fonts } from '../../../common-local/font';
+import React, { useMemo, useState } from 'react';
+import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { fonts } from '../../../common-local/font';
 import ContinueButton from '../common/ContinueButton';
+import onboardingTheme from '../common/onboardingTheme';
 
-// Cores baseadas no design
-const colors = {
-    black: '#000000',
-    grey80: '#333333',
-    greyPlaceholder: '#BDBDBD',
-    leafGreen: '#1A330E',
-    white: '#FFFFFF',
-    lightGrey: '#F5F5F5',
-    error: '#FF3B30',
-    success: '#34C759'
-};
+const { color, radius, spacing, elevation } = onboardingTheme;
 
 const CredentialsStep = ({ onCreated, onBack, initialData = {} }) => {
-    const [credentials, setCredentials] = useState({
-        password: initialData.password || '',
-        confirmPassword: initialData.confirmPassword || '',
-        acceptTerms: initialData.acceptTerms || false,
-        acceptMarketing: initialData.acceptMarketing || false
-    });
+  const isDriver = initialData?.profileSelection?.userType === 'driver';
 
-    const [showPassword, setShowPassword] = useState(false);
-    const [showConfirmPassword, setShowConfirmPassword] = useState(false);
-    const [errors, setErrors] = useState({});
+  const [consents, setConsents] = useState({
+    acceptTerms: initialData.acceptTerms || false,
+    acceptPrivacy: initialData.acceptPrivacy || false,
+    consentBackgroundCheck: initialData.consentBackgroundCheck || false,
+    marketingOptIn: initialData.marketingOptIn || false
+  });
 
-    // Função para verificar se o formulário está válido
-    const isFormValid = useMemo(() => {
-        return credentials.password && 
-               credentials.confirmPassword && 
-               credentials.password === credentials.confirmPassword &&
-               credentials.password.length >= 8 &&
-               /(?=.*[a-z])(?=.*[A-Z])(?=.*\d)/.test(credentials.password) &&
-               credentials.acceptTerms &&
-               credentials.acceptMarketing;
-    }, [credentials]);
+  const [errors, setErrors] = useState({});
 
-    // Validação dos campos
-    const validateFields = () => {
-        const newErrors = {};
+  const isFormValid = useMemo(() => {
+    const baseAccepted = consents.acceptTerms && consents.acceptPrivacy;
+    if (!baseAccepted) {
+      return false;
+    }
 
-        if (!credentials.password) {
-            newErrors.password = 'Senha é obrigatória';
-        } else if (credentials.password.length < 8) {
-            newErrors.password = 'Senha deve ter pelo menos 8 caracteres';
-        } else if (!/(?=.*[a-z])(?=.*[A-Z])(?=.*\d)/.test(credentials.password)) {
-            newErrors.password = 'Senha deve conter letra maiúscula, minúscula e número';
-        }
+    if (!isDriver) {
+      return true;
+    }
 
-        if (!credentials.confirmPassword) {
-            newErrors.confirmPassword = 'Confirmação de senha é obrigatória';
-        } else if (credentials.password !== credentials.confirmPassword) {
-            newErrors.confirmPassword = 'Senhas não coincidem';
-        }
+    return consents.consentBackgroundCheck;
+  }, [consents, isDriver]);
 
-        if (!credentials.acceptTerms) {
-            newErrors.terms = 'Você deve aceitar os termos de uso';
-        }
+  const toggleConsent = field => {
+    setConsents(previous => ({ ...previous, [field]: !previous[field] }));
+    if (errors[field]) {
+      setErrors(previous => ({ ...previous, [field]: '' }));
+    }
+  };
 
-        if (!credentials.acceptMarketing) {
-            newErrors.marketing = 'Você deve aceitar os termos legais para parceiros';
-        }
+  const handleSubmit = () => {
+    const nextErrors = {};
 
-        setErrors(newErrors);
-        return Object.keys(newErrors).length === 0;
-    };
+    if (!consents.acceptTerms) {
+      nextErrors.acceptTerms = 'Você precisa aceitar os Termos de Uso.';
+    }
 
-    // Função para lidar com a criação das credenciais
-    const handleCreateCredentials = () => {
-        if (validateFields()) {
-            // Aqui você pode implementar a lógica para salvar as credenciais
-            // Por exemplo, criar o usuário no Firebase Auth
-            onCreated(credentials);
-        }
-    };
+    if (!consents.acceptPrivacy) {
+      nextErrors.acceptPrivacy = 'Você precisa aceitar a Política de Privacidade.';
+    }
 
-    // Função para atualizar um campo
-    const updateField = (field, value) => {
-        setCredentials(prev => ({ ...prev, [field]: value }));
-        // Limpar erro do campo quando o usuário começar a digitar
-        if (errors[field]) {
-            setErrors(prev => ({ ...prev, [field]: '' }));
-        }
-    };
+    if (isDriver && !consents.consentBackgroundCheck) {
+      nextErrors.consentBackgroundCheck = 'Consentimento para checagem de antecedentes é obrigatório para atuar.';
+    }
 
-    // Função para alternar checkbox
-    const toggleCheckbox = (field) => {
-        setCredentials(prev => ({ ...prev, [field]: !prev[field] }));
-        if (field === 'terms' && errors.terms) {
-            setErrors(prev => ({ ...prev, terms: '' }));
-        }
-    };
+    setErrors(nextErrors);
 
-    return (
-        <ScrollView 
-            style={styles.container} 
-            showsVerticalScrollIndicator={false}
-            contentContainerStyle={styles.scrollContent}
-        >
-            <View style={styles.header}>
-                <TouchableOpacity style={styles.backButton} onPress={onBack}>
-                    <Ionicons name="arrow-back" size={24} color={colors.leafGreen} />
-                </TouchableOpacity>
-                <Text style={styles.title}>Crie uma senha</Text>
-            </View>
+    if (Object.keys(nextErrors).length > 0) {
+      return;
+    }
 
-            {/* Senha */}
-            <View style={styles.fieldContainer}>
-                <Text style={styles.label}>Senha *</Text>
-                <View style={styles.passwordContainer}>
-                    <TextInput
-                        style={[styles.passwordInput, errors.password && styles.inputError]}
-                        value={credentials.password}
-                        onChangeText={(value) => updateField('password', value)}
-                        placeholder="Digite sua senha"
-                        placeholderTextColor={colors.greyPlaceholder}
-                        secureTextEntry={!showPassword}
-                        autoCapitalize="none"
-                    />
-                    <TouchableOpacity
-                        style={styles.eyeButton}
-                        onPress={() => setShowPassword(!showPassword)}
-                    >
-                        <Text style={styles.eyeButtonText}>
-                            {showPassword ? '👁️' : '👁️‍🗨️'}
-                        </Text>
-                    </TouchableOpacity>
-                </View>
-                {errors.password && <Text style={styles.errorText}>{errors.password}</Text>}
-                
-                {/* Requisitos da senha */}
-                <View style={styles.requirementsContainer}>
-                    <View style={styles.requirementItem}>
-                        <Text style={styles.requirementText}>
-                            • Pelo menos 8 caracteres
-                        </Text>
-                        <Text style={[
-                            styles.requirementIcon,
-                            credentials.password.length >= 8 ? styles.requirementMet : styles.requirementNotMet
-                        ]}>
-                            {credentials.password.length >= 8 ? '✓' : '✗'}
-                        </Text>
-                    </View>
-                    <View style={styles.requirementItem}>
-                        <Text style={styles.requirementText}>
-                            • Uma letra minúscula
-                        </Text>
-                        <Text style={[
-                            styles.requirementIcon,
-                            /(?=.*[a-z])/.test(credentials.password) ? styles.requirementMet : styles.requirementNotMet
-                        ]}>
-                            {/(?=.*[a-z])/.test(credentials.password) ? '✓' : '✗'}
-                        </Text>
-                    </View>
-                    <View style={styles.requirementItem}>
-                        <Text style={styles.requirementText}>
-                            • Uma letra maiúscula
-                        </Text>
-                        <Text style={[
-                            styles.requirementIcon,
-                            /(?=.*[A-Z])/.test(credentials.password) ? styles.requirementMet : styles.requirementNotMet
-                        ]}>
-                            {/(?=.*[A-Z])/.test(credentials.password) ? '✓' : '✗'}
-                        </Text>
-                    </View>
-                    <View style={styles.requirementItem}>
-                        <Text style={styles.requirementText}>
-                            • Um número
-                        </Text>
-                        <Text style={[
-                            styles.requirementIcon,
-                            /(?=.*\d)/.test(credentials.password) ? styles.requirementMet : styles.requirementNotMet
-                        ]}>
-                            {/(?=.*\d)/.test(credentials.password) ? '✓' : '✗'}
-                        </Text>
-                    </View>
-                </View>
-            </View>
+    onCreated(consents);
+  };
 
-            {/* Confirmar Senha */}
-            <View style={styles.fieldContainer}>
-                <Text style={styles.label}>Confirmar Senha *</Text>
-                <View style={styles.passwordContainer}>
-                    <TextInput
-                        style={[styles.passwordInput, errors.confirmPassword && styles.inputError]}
-                        value={credentials.confirmPassword}
-                        onChangeText={(value) => updateField('confirmPassword', value)}
-                        placeholder="Confirme sua senha"
-                        placeholderTextColor={colors.greyPlaceholder}
-                        secureTextEntry={!showConfirmPassword}
-                        autoCapitalize="none"
-                    />
-                    <TouchableOpacity
-                        style={styles.eyeButton}
-                        onPress={() => setShowConfirmPassword(!showConfirmPassword)}
-                    >
-                        <Text style={styles.eyeButtonText}>
-                            {showConfirmPassword ? '👁️' : '👁️‍🗨️'}
-                        </Text>
-                    </TouchableOpacity>
-                </View>
-                {errors.confirmPassword && <Text style={styles.errorText}>{errors.confirmPassword}</Text>}
-            </View>
+  return (
+    <ScrollView style={styles.container} showsVerticalScrollIndicator={false} contentContainerStyle={styles.content}>
+      <View style={styles.header}>
+        <TouchableOpacity style={styles.backButton} onPress={onBack}>
+          <Ionicons name="arrow-back" size={22} color={color.textPrimary} />
+        </TouchableOpacity>
+        <Text style={styles.title}>Finalizar cadastro</Text>
+      </View>
 
-            {/* Termos e Condições */}
-            <View style={styles.fieldContainer}>
-                <TouchableOpacity
-                    style={styles.checkboxContainer}
-                    onPress={() => toggleCheckbox('acceptTerms')}
-                >
-                    <View style={[
-                        styles.checkbox,
-                        credentials.acceptTerms && styles.checkboxChecked
-                    ]}>
-                        {credentials.acceptTerms && <Text style={styles.checkmark}>✓</Text>}
-                    </View>
-                    <Text style={styles.checkboxText}>
-                        Aceito os{' '}
-                        <Text style={styles.linkText}>Termos de Uso</Text>
-                        {' '}e{' '}
-                        <Text style={styles.linkText}>Política de Privacidade</Text>
-                    </Text>
-                </TouchableOpacity>
-                {errors.terms && <Text style={styles.errorText}>{errors.terms}</Text>}
-            </View>
+      <Text style={styles.subtitle}>
+        {isDriver
+          ? 'Revise e confirme os consentimentos obrigatórios para ativação do motorista.'
+          : 'Revise e confirme os termos para finalizar sua conta de passageiro.'}
+      </Text>
 
-            {/* Marketing */}
-            <View style={styles.fieldContainer}>
-                <TouchableOpacity
-                    style={styles.checkboxContainer}
-                    onPress={() => toggleCheckbox('acceptMarketing')}
-                >
-                    <View style={[
-                        styles.checkbox,
-                        credentials.acceptMarketing && styles.checkboxChecked
-                    ]}>
-                        {credentials.acceptMarketing && <Text style={styles.checkmark}>✓</Text>}
-                    </View>
-                    <Text style={styles.checkboxText}>
-                        Aceitar termos legais para parceiros *
-                    </Text>
-                </TouchableOpacity>
-                {errors.marketing && <Text style={styles.errorText}>{errors.marketing}</Text>}
-            </View>
+      <View style={styles.block}>
+        <ConsentRow
+          checked={consents.acceptTerms}
+          label="Aceito os Termos de Uso *"
+          onPress={() => toggleConsent('acceptTerms')}
+        />
+        {errors.acceptTerms ? <Text style={styles.errorText}>{errors.acceptTerms}</Text> : null}
 
-            {/* Botão Continuar */}
-            <ContinueButton
-                onPress={handleCreateCredentials}
-                disabled={!isFormValid}
-                text="Continuar"
+        <ConsentRow
+          checked={consents.acceptPrivacy}
+          label="Aceito a Política de Privacidade *"
+          onPress={() => toggleConsent('acceptPrivacy')}
+        />
+        {errors.acceptPrivacy ? <Text style={styles.errorText}>{errors.acceptPrivacy}</Text> : null}
+
+        {isDriver ? (
+          <>
+            <ConsentRow
+              checked={consents.consentBackgroundCheck}
+              label="Autorizo checagem de antecedentes criminais e validação regulatória *"
+              onPress={() => toggleConsent('consentBackgroundCheck')}
             />
-        </ScrollView>
-    );
+            {errors.consentBackgroundCheck ? (
+              <Text style={styles.errorText}>{errors.consentBackgroundCheck}</Text>
+            ) : null}
+
+            <ConsentRow
+              checked={consents.marketingOptIn}
+              label="Aceito receber comunicações promocionais (opcional)"
+              onPress={() => toggleConsent('marketingOptIn')}
+            />
+          </>
+        ) : null}
+      </View>
+
+      <ContinueButton onPress={handleSubmit} disabled={!isFormValid} text="Concluir" />
+    </ScrollView>
+  );
 };
 
-const styles = StyleSheet.create({
-    container: {
-        flex: 1,
-        paddingVertical: 5, // Reduzido de 20 para 5 (subindo 15px)
-    },
-    scrollContent: {
-        flexGrow: 1,
-        paddingBottom: 20, // Adicionado padding bottom para o botão
-    },
-    header: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        marginBottom: 16,
-        paddingHorizontal: 24,
-        marginTop: -10, // Adicionado margem negativa para subir mais
-    },
-    backButton: {
-        padding: 8,
-        marginRight: 12,
-    },
-    title: {
-        fontSize: 24,
-        color: colors.black,
-        fontFamily: fonts.Bold,
-        textAlign: 'left',
-    },
-    fieldContainer: {
-        marginBottom: 20, // Reduzido de 24 para 20 (subindo 4px)
-        paddingHorizontal: 24,
-    },
-    label: {
-        fontSize: 16,
-        color: colors.black,
-        fontFamily: fonts.Medium,
-        marginBottom: 8,
-    },
-    passwordContainer: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        borderWidth: 2,
-        borderColor: colors.lightGrey,
-        borderRadius: 8,
-        backgroundColor: colors.white,
-    },
-    passwordInput: {
-        flex: 1,
-        paddingHorizontal: 16,
-        paddingVertical: 14,
-        fontSize: 16,
-        fontFamily: fonts.Medium,
-        color: colors.black,
-    },
-    inputError: {
-        borderColor: colors.error,
-    },
-    eyeButton: {
-        paddingHorizontal: 16,
-        paddingVertical: 14,
-    },
-    eyeButtonText: {
-        fontSize: 20,
-    },
-    errorText: {
-        color: colors.error,
-        fontSize: 14,
-        fontFamily: fonts.Medium,
-        marginTop: 4,
-    },
-    requirementsContainer: {
-        marginTop: 10, // Reduzido de 12 para 10 (subindo 2px)
-        padding: 12,
-        backgroundColor: colors.lightGrey,
-        borderRadius: 8,
-    },
-    requirementsTitle: {
-        fontSize: 14,
-        color: colors.grey80,
-        fontFamily: fonts.Medium,
-        marginBottom: 8,
-    },
-    requirementItem: {
-        flexDirection: 'row',
-        justifyContent: 'space-between',
-        alignItems: 'center',
-        marginBottom: 4,
-    },
-    requirementText: {
-        fontSize: 14,
-        color: colors.greyPlaceholder,
-        fontFamily: fonts.Regular,
-    },
-    requirementIcon: {
-        fontSize: 18,
-        marginLeft: 8,
-    },
-    requirementMet: {
-        color: colors.success,
-        fontFamily: fonts.Medium,
-    },
-    requirementNotMet: {
-        color: colors.error,
-        fontFamily: fonts.Medium,
-    },
-    checkboxContainer: {
-        flexDirection: 'row',
-        alignItems: 'flex-start',
-    },
-    checkbox: {
-        width: 20,
-        height: 20,
-        borderWidth: 2,
-        borderColor: colors.lightGrey,
-        borderRadius: 4,
-        marginRight: 12,
-        marginTop: 2,
-        alignItems: 'center',
-        justifyContent: 'center',
-        backgroundColor: colors.white,
-    },
-    checkboxChecked: {
-        borderColor: colors.leafGreen,
-        backgroundColor: colors.leafGreen,
-    },
-    checkmark: {
-        color: colors.white,
-        fontSize: 14,
-        fontFamily: fonts.Bold,
-    },
-    checkboxText: {
-        flex: 1,
-        fontSize: 14,
-        color: colors.black,
-        fontFamily: fonts.Medium,
-        lineHeight: 20,
-    },
-    linkText: {
-        color: colors.leafGreen,
-        textDecorationLine: 'underline',
-    },
+function ConsentRow({ checked, label, onPress }) {
+  return (
+    <TouchableOpacity style={styles.consentRow} activeOpacity={0.86} onPress={onPress}>
+      <View style={[styles.checkbox, checked && styles.checkboxChecked]}>
+        {checked ? <Ionicons name="checkmark" size={14} color={color.accentText} /> : null}
+      </View>
+      <Text style={styles.consentLabel}>{label}</Text>
+    </TouchableOpacity>
+  );
+}
 
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    paddingHorizontal: spacing.lg,
+    paddingTop: spacing.xs
+  },
+  content: {
+    paddingBottom: spacing.xs
+  },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: spacing.sm
+  },
+  backButton: {
+    padding: 6,
+    marginRight: 8
+  },
+  title: {
+    fontSize: 22,
+    lineHeight: 28,
+    color: color.textPrimary,
+    fontFamily: fonts.Bold
+  },
+  subtitle: {
+    fontSize: 13,
+    lineHeight: 19,
+    color: color.textSecondary,
+    fontFamily: fonts.Regular,
+    marginBottom: spacing.sm
+  },
+  block: {
+    borderWidth: 1,
+    borderColor: color.glassStroke,
+    borderRadius: radius.lg,
+    backgroundColor: color.panelSoft,
+    padding: spacing.sm,
+    shadowColor: '#0E1522',
+    shadowOffset: { width: 0, height: 12 },
+    shadowOpacity: 0.16,
+    shadowRadius: 20,
+    elevation: 9
+  },
+  consentRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    marginBottom: spacing.xs
+  },
+  checkbox: {
+    width: 18,
+    height: 18,
+    borderRadius: 5,
+    borderWidth: 1,
+    borderColor: color.borderStrong,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 2,
+    marginRight: 8,
+    backgroundColor: color.surfaceMuted
+  },
+  checkboxChecked: {
+    borderColor: color.accent,
+    backgroundColor: color.accent
+  },
+  consentLabel: {
+    flex: 1,
+    fontSize: 13,
+    lineHeight: 18,
+    color: color.textPrimary,
+    fontFamily: fonts.Medium
+  },
+  errorText: {
+    marginTop: -4,
+    marginBottom: 8,
+    marginLeft: 26,
+    color: color.error,
+    fontSize: 12,
+    lineHeight: 16,
+    fontFamily: fonts.Medium
+  }
 });
 
-export default CredentialsStep; 
+export default CredentialsStep;

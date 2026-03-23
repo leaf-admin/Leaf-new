@@ -209,7 +209,11 @@ class DriverBalanceService {
 
       return {
         success: false,
-        error: data.error || 'Falha ao solicitar saque'
+        error: data.error || 'Falha ao solicitar saque',
+        code: data.code || null,
+        statusCode: response.status,
+        kyc: data.kyc || null,
+        details: data.details || null
       };
     } catch (error) {
       Logger.error('❌ Erro ao solicitar saque:', error);

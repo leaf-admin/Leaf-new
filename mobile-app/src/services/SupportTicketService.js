@@ -9,7 +9,15 @@ class SupportTicketService {
         this.ticketsRef = firebase.database.ref('support_tickets');
         this.messagesRef = firebase.database.ref('support_messages');
         this.agentsRef = firebase.database.ref('support_agents');
-        this.baseURL = 'http://147.182.204.181:3001/api/support'; // URL do backend VPS
+        const baseUrl = String(
+            process.env.EXPO_PUBLIC_API_URL ||
+            process.env.EXPO_PUBLIC_BACKEND_URL ||
+            'https://api.147.182.204.181.sslip.io'
+        )
+            .trim()
+            .replace(/\/+$/, '')
+            .replace(/\/api$/i, '');
+        this.baseURL = `${baseUrl}/api/support`;
     }
 
     // ===== CRIAÇÃO E GESTÃO DE TICKETS =====

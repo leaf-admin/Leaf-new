@@ -36,6 +36,14 @@ const withBoringSSLFix = (config) =>
         
         # Disable Index Store to avoid -G being re-injected or used by internal tools
         build_config.build_settings['COMPILER_INDEX_STORE_ENABLE'] = 'NO'
+
+        # RNFirebase + use_frameworks(static) with newer Xcode can hit modular/header issues.
+        build_config.build_settings['CLANG_ALLOW_NON_MODULAR_INCLUDES_IN_FRAMEWORK_MODULES'] = 'YES'
+
+        # Keep RNFirebase pods out of clang modules to avoid macro/protocol resolution breaks.
+        if target.name.start_with?('RNFB')
+          build_config.build_settings['CLANG_ENABLE_MODULES'] = 'NO'
+        end
       end
     end
 `;

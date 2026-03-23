@@ -5,18 +5,46 @@ import * as TaskManager from 'expo-task-manager';
 
 // Nome da task de background
 const LOCATION_TASK_NAME = 'background-location-task';
+const BACKGROUND_LOCATION_TIME_INTERVAL_MS = Number.parseInt(process.env.EXPO_PUBLIC_BACKGROUND_LOCATION_INTERVAL_MS || '2000', 10);
+const BACKGROUND_LOCATION_DISTANCE_INTERVAL_M = Number.parseInt(process.env.EXPO_PUBLIC_BACKGROUND_LOCATION_DISTANCE_M || '0', 10);
 
 // ✅ Registrar task de background (se ainda não estiver registrada)
 if (!TaskManager.isTaskDefined(LOCATION_TASK_NAME)) {
-    TaskManager.defineTask(LOCATION_TASK_NAME, ({ data, error }) => {
+    TaskManager.defineTask(LOCATION_TASK_NAME, async ({ data, error }) => {
         if (error) {
             Logger.error('❌ Erro na task de background:', error);
             return;
         }
         if (data) {
             const { locations } = data;
-            // Logger.log('📍 Localização em background:', locations); // Desabilitado para reduzir spam
-            // Aqui você pode enviar para o servidor
+            if (!Array.isArray(locations) || locations.length === 0) {
+                return;
+            }
+
+            try {
+                const locationBufferService = require('./LocationBufferService').default;
+                for (const locationItem of locations) {
+                    const coords = locationItem?.coords || {};
+                    const lat = Number(coords.latitude);
+                    const lng = Number(coords.longitude);
+                    if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+                        continue;
+                    }
+
+                    await locationBufferService.addDriverLocationFromBackground({
+                        lat,
+                        lng,
+                        accuracy: Number.isFinite(Number(coords.accuracy)) ? Number(coords.accuracy) : null,
+                        heading: Number.isFinite(Number(coords.heading)) ? Number(coords.heading) : null,
+                        speed: Number.isFinite(Number(coords.speed)) ? Number(coords.speed) : null,
+                        timestamp: Number.isFinite(Number(locationItem?.timestamp))
+                            ? Number(locationItem.timestamp)
+                            : Date.now()
+                    });
+                }
+            } catch (taskError) {
+                Logger.warn('⚠️ Falha ao bufferizar localização em background task:', taskError?.message || taskError);
+            }
         }
     });
 }
@@ -128,8 +156,8 @@ class BackgroundLocationService {
             // Iniciar tracking de localização
             await Location.startLocationUpdatesAsync(LOCATION_TASK_NAME, {
                 accuracy: Location.Accuracy.Balanced,
-                timeInterval: 5000, // 5 segundos
-                distanceInterval: 10, // 10 metros
+                timeInterval: BACKGROUND_LOCATION_TIME_INTERVAL_MS,
+                distanceInterval: BACKGROUND_LOCATION_DISTANCE_INTERVAL_M,
                 foregroundService: {
                     notificationTitle: 'Leaf App',
                     notificationBody: 'Rastreando sua localização',
@@ -259,4 +287,3 @@ class BackgroundLocationService {
 const instance = BackgroundLocationService.getInstance();
 export default instance;
 export { BackgroundLocationService };
-

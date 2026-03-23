@@ -1,0 +1,4 @@
+timestamp=20260316_185940
+backend_url=http://147.182.204.181:3001
+pass=2
+fail=0

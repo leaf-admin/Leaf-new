@@ -5,18 +5,38 @@ import { useNavigation } from '@react-navigation/native';
 import { useSelector } from 'react-redux';
 import { useOnboardingPersistence } from '../../hooks/useOnboardingPersistence';
 import AuthFlow from '../auth/AuthFlow';
+import onboardingTheme from '../auth/common/onboardingTheme';
 
+const { color } = onboardingTheme;
+
+const resolveInitialStep = (completedSteps = []) => {
+  if (completedSteps.includes('credentials') || completedSteps.includes('document_data')) {
+    return 5;
+  }
+  if (completedSteps.includes('profile_data')) {
+    return 4;
+  }
+  if (completedSteps.includes('profile_selection')) {
+    return 3;
+  }
+  if (completedSteps.includes('phone_validation')) {
+    return 2;
+  }
+  return 0;
+};
+
+const buildOnboardingPayload = (progress = {}) => {
+  const completed = Object.keys(progress || {}).filter(key => progress[key]);
+  return {
+    step: resolveInitialStep(completed),
+    completed
+  };
+};
 
 const OnboardingWrapper = ({ children }) => {
   const navigation = useNavigation();
   const auth = useSelector(state => state.auth);
-  const { 
-    onboarding, 
-    loadOnboardingData, 
-    isLoaded, 
-    getStepData,
-    isStepComplete 
-  } = useOnboardingPersistence();
+  const { onboarding, isLoaded } = useOnboardingPersistence();
   
   const [isCheckingStatus, setIsCheckingStatus] = useState(true);
   const [shouldShowOnboarding, setShouldShowOnboarding] = useState(false);
@@ -44,6 +64,10 @@ const OnboardingWrapper = ({ children }) => {
 
   // Verificar status do usuário e decidir o que mostrar
   useEffect(() => {
+    if (!isCheckingStatus) {
+      return;
+    }
+
     const checkUserStatus = async () => {
       try {
         Logger.log('OnboardingWrapper - 🔍 Verificando status do usuário...');
@@ -56,7 +80,7 @@ const OnboardingWrapper = ({ children }) => {
         if (!hasFirebaseAuth) {
           Logger.log('OnboardingWrapper - 🔐 Usuário não autenticado, mostrando onboarding imediatamente');
           setShouldShowOnboarding(true);
-          setOnboardingProgress(null);
+          setOnboardingProgress({ step: 0, completed: [] });
           setIsCheckingStatus(false);
           return;
         }
@@ -91,23 +115,7 @@ const OnboardingWrapper = ({ children }) => {
         } else {
           // 🔄 SITUAÇÃO 2: Usuário autenticado mas incompleto - continuar onboarding
           Logger.log('OnboardingWrapper - 🔄 Usuário autenticado mas incompleto, continuando onboarding');
-          
-          // Determinar step inicial baseado no progresso
-          let initialStep = 0;
-          if (isStepComplete('phone_validation')) {
-            initialStep = 2; // ProfileSelectionStep
-          } else if (isStepComplete('profile_selection')) {
-            initialStep = 3; // ProfileDataStep
-          } else if (isStepComplete('profile_data')) {
-            initialStep = 4; // DocumentStep
-          } else if (isStepComplete('document_data')) {
-            initialStep = 5; // CredentialsStep
-          }
-          
-          setOnboardingProgress({
-            step: initialStep,
-            completed: (onboarding.progress ? Object.keys(onboarding.progress).filter(key => onboarding.progress[key]) : [])
-          });
+          setOnboardingProgress(buildOnboardingPayload(onboarding.progress || {}));
           
           setShouldShowOnboarding(true);
           setIsCheckingStatus(false);
@@ -125,13 +133,13 @@ const OnboardingWrapper = ({ children }) => {
     if (isLoaded()) {
       checkUserStatus();
     }
-  }, [isLoaded, auth.profile, navigation, isStepComplete, onboarding.progress]);
+  }, [auth.profile, navigation, isCheckingStatus]);
 
   // Mostrar loading enquanto verifica
   if (isCheckingStatus) {
     return (
       <View style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color="#1A330E" />
+        <ActivityIndicator size="large" color={color.textPrimary} />
         <Text style={styles.loadingText}>Verificando perfil...</Text>
       </View>
     );
@@ -173,12 +181,12 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: '#1A330E',
+    backgroundColor: color.background,
   },
   loadingText: {
-    color: '#fff',
+    color: color.textPrimary,
     fontSize: 18,
-    fontWeight: '500',
+    fontWeight: '600',
     marginTop: 20,
   },
 });

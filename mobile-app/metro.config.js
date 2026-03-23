@@ -1,4 +1,5 @@
 const { getDefaultConfig } = require('expo/metro-config');
+const fs = require('fs');
 const path = require('path');
 
 const config = getDefaultConfig(__dirname);
@@ -33,15 +34,20 @@ config.resolver.alias = {
 };
 
 // Configurar resolução de módulos adicionais
-config.resolver.nodeModulesPaths = [
-  path.resolve(__dirname, 'node_modules'),
-  path.resolve(__dirname, '..', 'node_modules'),
-];
+const appNodeModulesPath = path.resolve(__dirname, 'node_modules');
+const rootNodeModulesPath = path.resolve(__dirname, '..', 'node_modules');
+const appReactNativePath = path.resolve(appNodeModulesPath, 'react-native');
+const rootReactNativePath = path.resolve(rootNodeModulesPath, 'react-native');
+const resolvedReactNativePath = fs.existsSync(appReactNativePath)
+  ? appReactNativePath
+  : rootReactNativePath;
+
+config.resolver.nodeModulesPaths = [appNodeModulesPath, rootNodeModulesPath];
 
 // Resolver apenas os problemas essenciais do Firebase
 config.resolver.alias = {
   ...config.resolver.alias,
-  'react-native': path.resolve(__dirname, 'node_modules/react-native'),
+  'react-native': resolvedReactNativePath,
   // Force browser bundle for React Native runtime (avoid Node-only axios entry)
   'axios': axiosBrowserEntry,
   'idb': false,
@@ -60,11 +66,11 @@ config.resolver.alias = {
   'use-sync-external-store/shim': 'use-sync-external-store/shim/with-selector',
 };
 
-const rootReactNativePath = path.resolve(__dirname, '..', 'node_modules', 'react-native');
-const escapedRootReactNativePath = rootReactNativePath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-config.resolver.blockList = [
-  new RegExp(`^${escapedRootReactNativePath}[\\\\/].*`),
-];
+if (fs.existsSync(appReactNativePath) && fs.existsSync(rootReactNativePath)) {
+  const blockedPath = resolvedReactNativePath === appReactNativePath ? rootReactNativePath : appReactNativePath;
+  const escapedBlockedPath = blockedPath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  config.resolver.blockList = [new RegExp(`^${escapedBlockedPath}[\\\\/].*`)];
+}
 
 config.resolver.resolveRequest = (context, moduleName, platform) => {
   if (moduleName === 'axios' || moduleName === 'axios/dist/node/axios.cjs') {

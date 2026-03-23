@@ -12,7 +12,6 @@ import {
     Dimensions
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { useDispatch } from 'react-redux';
 // Função de tradução temporária para evitar erro de provider
 const t = (key) => {
     const translations = {
@@ -35,13 +34,12 @@ const RatingModal = memo(function RatingModal({
     tripData,
     onSubmit 
 }) {
-    const dispatch = useDispatch();
-    
     // Estados da avaliação
     const [rating, setRating] = useState(0);
     const [selectedOptions, setSelectedOptions] = useState([]);
     const [comment, setComment] = useState('');
     const [suggestion, setSuggestion] = useState('');
+    const [isSubmitting, setIsSubmitting] = useState(false);
     
     // Opções baseadas no tipo de usuário e avaliação (memoizado)
     const getRatingOptions = useMemo(() => {
@@ -77,6 +75,7 @@ const RatingModal = memo(function RatingModal({
         setSelectedOptions([]);
         setComment('');
         setSuggestion('');
+        setIsSubmitting(false);
     };
     
     // Fechar modal (memoizado)
@@ -87,11 +86,17 @@ const RatingModal = memo(function RatingModal({
     
     // Submeter avaliação (memoizado)
     const handleSubmit = useCallback(async () => {
+        if (isSubmitting) {
+            return;
+        }
+
         if (!isFormValid()) {
             Alert.alert(t('messages.attention'), t('rating.fillRequiredFields'));
             return;
         }
-        
+
+        setIsSubmitting(true);
+
         try {
             const ratingData = {
                 tripId: tripData?.id || tripData?.bookingId,
@@ -105,8 +110,14 @@ const RatingModal = memo(function RatingModal({
             };
             
             // Chamar função de submit passada como prop
+            let submitResult = true;
             if (onSubmit) {
-                await onSubmit(ratingData);
+                submitResult = await onSubmit(ratingData);
+            }
+
+            // Permite que a tela pai controle erro e mantenha o modal aberto
+            if (submitResult === false) {
+                return;
             }
             
             // Limpar formulário e fechar
@@ -118,8 +129,10 @@ const RatingModal = memo(function RatingModal({
         } catch (error) {
             Logger.error('❌ Erro ao enviar avaliação:', error);
             Alert.alert(t('messages.error'), t('rating.submitError'));
+        } finally {
+            setIsSubmitting(false);
         }
-    }, [rating, selectedOptions, comment, suggestion, userType, tripData, onSubmit, onClose]);
+    }, [isSubmitting, rating, selectedOptions, comment, suggestion, userType, tripData, onSubmit, onClose]);
     
     // Toggle opção selecionada (memoizado)
     const toggleOption = useCallback((option) => {
@@ -282,13 +295,13 @@ const RatingModal = memo(function RatingModal({
                     {/* Botões de ação */}
                     <View style={styles.footer}>
                         <TouchableOpacity
-                            style={[styles.submitButton, !isFormValid() && styles.submitButtonDisabled]}
+                            style={[styles.submitButton, (!isFormValid() || isSubmitting) && styles.submitButtonDisabled]}
                             onPress={handleSubmit}
-                            disabled={!isFormValid()}
+                            disabled={!isFormValid() || isSubmitting}
                             activeOpacity={0.7}
                         >
                             <Text style={styles.submitButtonText}>
-                                Enviar Avaliação
+                                {isSubmitting ? 'Enviando...' : 'Enviar Avaliação'}
                             </Text>
                         </TouchableOpacity>
                     </View>

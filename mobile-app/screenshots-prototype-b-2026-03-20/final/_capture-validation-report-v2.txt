@@ -1,0 +1,23 @@
+[PASS] 01-RobotaxiPrototype.ocr.txt :: /para onde/
+[PASS] 02-RobotaxiPrototypeDestination.ocr.txt :: /para onde voce quer ir|para onde você quer ir/
+[PASS] 03-RobotaxiPrototypePayment.ocr.txt :: /pagamento pix/
+[PASS] 04-RobotaxiPrototypePaymentSuccess.ocr.txt :: /pagamento confirmado/
+[PASS] 05-RobotaxiPrototypePaymentFailed.ocr.txt :: /pagamento nao confirmado/
+[PASS] 06-RobotaxiPrototypeDriverSearch.ocr.txt :: /procurando motorista|tempo de busca/
+[PASS] 07-RobotaxiPrototypeNoDrivers.ocr.txt :: /nenhum motorista encontrado/
+[PASS] 08-RobotaxiPrototypeTrip.ocr.txt :: /viagem em andamento/
+[PASS] 09-RobotaxiPrototypeCancellation.ocr.txt :: /cancelar corrida/
+[PASS] 10-RobotaxiPrototypeReceipt.ocr.txt :: /recibos/
+[PASS] 11-RobotaxiPrototypeRating.ocr.txt :: /avalie a viagem/
+[PASS] 12-RobotaxiPrototypeComplain.ocr.txt :: /relatar problema/
+[PASS] 13-RobotaxiPrototypeChat.ocr.txt :: /chat da viagem/
+[PASS] 14-RobotaxiPrototypeSupport.ocr.txt :: /suporte/
+[PASS] 15-RobotaxiPrototypeMenu.ocr.txt :: /menu/
+[PASS] 16-RobotaxiPrototypeProfile.ocr.txt :: /passageira premium|historico de viagens|histórico de viagens/
+[PASS] 17-RobotaxiPrototypeSettings.ocr.txt :: /configuracoes|configurações/
+[PASS] 18-RobotaxiPrototypeDriverPanel.ocr.txt :: /painel do motorista/
+[PASS] 19-RobotaxiPrototypeDriverActivation.ocr.txt :: /ativacao do motorista|ativação do motorista/
+[PASS] 20-RobotaxiPrototypeDriverOffer.ocr.txt :: /nova corrida disponivel|nova corrida disponível/
+[PASS] 21-RobotaxiPrototypeDriverTrip.ocr.txt :: /status da corrida|motorista/
+---
+[PASS] Nenhum screenshot preso no menu de desenvolvedor

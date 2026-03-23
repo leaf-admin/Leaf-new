@@ -371,7 +371,7 @@ async function runScenarioRuntimeTests(collector) {
 
     const driverLoc = await emitAndWait({
       socket: driverSocket,
-      emitEvent: 'updateDriverLocation',
+      emitEvent: 'updateLocation',
       payload: {
         driverId: context.driverId,
         lat: TEST_COORDS.pickup.lat + 0.001,
@@ -383,7 +383,7 @@ async function runScenarioRuntimeTests(collector) {
       errorEvents: ['locationError']
     });
     collector.add(
-      'updateDriverLocation with GPS',
+      'updateLocation with GPS',
       driverLoc.ok ? 'passed' : 'failed',
       formatSocketResult(driverLoc)
     );
@@ -399,7 +399,7 @@ async function runScenarioRuntimeTests(collector) {
         estimatedFare: 32.5,
         preferences: { radiusKm: 5, limit: 10 }
       },
-      successEvents: ['driversFound', 'noDriversFound'],
+      successEvents: ['driversFound'],
       errorEvents: ['searchDriversError', 'driverSearchError']
     });
 

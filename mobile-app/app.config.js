@@ -1,7 +1,30 @@
+const { loadConfigEnv } = require('./config/loadConfigEnv');
+loadConfigEnv();
+
 const AppConfig = require('./config/AppConfig').AppConfig;
 const GoogleMapApiConfig = require('./config/GoogleMapApiConfig').GoogleMapApiConfig;
 const fs = require('fs');
 const path = require('path');
+const allowInsecureHttp = String(process.env.EXPO_PUBLIC_ALLOW_INSECURE_HTTP || 'false').toLowerCase() === 'true';
+const iosTransportSecurity = allowInsecureHttp
+    ? {
+        NSAllowsArbitraryLoads: true,
+        NSAllowsLocalNetworking: true,
+        NSExceptionDomains: {
+            "147.182.204.181": {
+                NSExceptionAllowsInsecureHTTPLoads: true,
+                NSIncludesSubdomains: true
+            },
+            "147.93.66.253": {
+                NSExceptionAllowsInsecureHTTPLoads: true,
+                NSIncludesSubdomains: true
+            }
+        }
+    }
+    : {
+        NSAllowsArbitraryLoads: false,
+        NSAllowsLocalNetworking: false
+    };
 
 module.exports = {
     name: AppConfig.app_name,
@@ -81,24 +104,36 @@ module.exports = {
     },
     ios: {
         bundleIdentifier: "br.com.leaf.ride",
+        config: {
+            googleMapsApiKey: GoogleMapApiConfig.ios
+        },
         googleServicesFile: process.env.GOOGLE_SERVICES_INFO_PLIST || (fs.existsSync("./GoogleService-Info.plist") ? "./GoogleService-Info.plist" : undefined),
         icon: "./assets/icon.png",
         buildNumber: AppConfig.ios_build_number,
         deploymentTarget: "17.0",
         infoPlist: {
-            ITSAppUsesNonExemptEncryption: false
+            ITSAppUsesNonExemptEncryption: false,
+            NSAppTransportSecurity: iosTransportSecurity
         }
     },
     plugins: [
         "expo-asset",
         "expo-font",
-        "expo-audio",
+        [
+            "expo-audio",
+            {
+                "microphonePermission": false,
+                "recordAudioAndroid": false,
+                "enableBackgroundRecording": false
+            }
+        ],
         "expo-apple-authentication",
         "expo-localization",
         "@react-native-firebase/app",
         "@react-native-firebase/auth",
         "./plugins/withGoogleMapsApiKey",
         "./plugins/withDisableDevMenu",
+        "./plugins/withDevLauncherPortScanFix",
         "./plugins/withGradleNodeFix",
         "./plugins/withExpoModulesCoreFix",
         "./plugins/withNetworkSecurityConfig",

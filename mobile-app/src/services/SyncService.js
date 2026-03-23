@@ -1,7 +1,17 @@
 import Logger from '../utils/Logger';
 // SyncService.js - Sincronização híbrida entre cache local, Redis e Firebase
 // Mock para testes Node.js
-const getApiUrl = (endpoint) => `http://localhost:5001/leaf-app-91dfdce0/us-central1${endpoint}`;
+const API_BASE_URL =
+  process.env.EXPO_PUBLIC_API_URL ||
+  process.env.EXPO_PUBLIC_BACKEND_URL ||
+  'https://api.147.182.204.181.sslip.io';
+
+const getApiUrl = (endpoint) => {
+    const normalizedEndpoint = endpoint.startsWith('/api/')
+        ? endpoint
+        : `/api${endpoint.startsWith('/') ? endpoint : `/${endpoint}`}`;
+    return `${API_BASE_URL}${normalizedEndpoint}`;
+};
 const handleError = (error, showAlert = false) => ({ error: error.message, showAlert });
 
 // Mock AsyncStorage para testes Node.js

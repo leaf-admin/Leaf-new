@@ -1,0 +1,44 @@
+appId: br.com.leaf.ride
+env:
+  TEST_PHONE: "11999999999"
+  TEST_OTP: "000000"
+---
+- launchApp:
+    clearState: true
+
+- openLink: "leafapp://"
+
+- extendedWaitUntil:
+    visible: "Abrir"
+    timeout: 20000
+
+- tapOn: "Abrir"
+
+- runFlow:
+    when:
+      visible: "Continue"
+    commands:
+      - tapOn: "Continue"
+
+- extendedWaitUntil:
+    visible:
+      id: "auth-phone-input"
+    timeout: 30000
+
+- tapOn:
+    id: "auth-phone-input"
+- eraseText
+- inputText: ${TEST_PHONE}
+- pressKey: Enter
+
+- extendedWaitUntil:
+    visible: "Verificação"
+    timeout: 30000
+
+- inputText: ${TEST_OTP}
+
+- extendedWaitUntil:
+    notVisible: "Verificação"
+    timeout: 30000
+
+- takeScreenshot: "ios-auth-login-success"

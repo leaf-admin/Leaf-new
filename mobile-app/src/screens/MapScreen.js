@@ -197,12 +197,13 @@ const fallbackCarTypes = [
         name: 'Leaf Plus',
         image: 'https://cdn.pixabay.com/photo/2017/06/03/08/11/car-2368193_640.png',
         min_fare: 8.50,
-        base_fare: 3.13,
-        rate_per_hour: 16.20,
-        rate_per_unit_distance: 1.42,
+        base_fare: 2.79,
+        fixed_fee: 1.10,
+        rate_per_hour: 15.60,
+        rate_per_unit_distance: 1.53,
         convenience_fee_type: 'flat',
         convenience_fees: 0,
-        extra_info: 'Capacity: 3, Type: Taxi',
+        extra_info: 'Capacity: 4, Type: Taxi',
         fleet_admin_fee: 1.55,
         pos: 5,
         id: 'type1'
@@ -210,16 +211,32 @@ const fallbackCarTypes = [
     {
         name: 'Leaf Elite',
         image: 'https://cdn.pixabay.com/photo/2022/01/23/18/20/car-6961567_640.png',
-        min_fare: 11.50,
-        base_fare: 5.59,
-        rate_per_hour: 18.00,
-        rate_per_unit_distance: 2.29,
+        min_fare: 10.50,
+        base_fare: 4.98,
+        fixed_fee: 1.80,
+        rate_per_hour: 17.40,
+        rate_per_unit_distance: 2.41,
         convenience_fee_type: 'flat',
         convenience_fees: 0,
         extra_info: 'Capacity: 4, Type: Sedan',
         fleet_admin_fee: 3.2,
         pos: 10,
         id: 'type3'
+    },
+    {
+        name: 'Leaf Moto',
+        image: 'https://cdn.pixabay.com/photo/2013/07/13/12/46/motorcycle-160175_640.png',
+        min_fare: 6.90,
+        base_fare: 2.18,
+        fixed_fee: 0.86,
+        rate_per_hour: 12.17,
+        rate_per_unit_distance: 1.19,
+        convenience_fee_type: 'flat',
+        convenience_fees: 0,
+        extra_info: 'Capacity: 1, Type: Moto',
+        fleet_admin_fee: 1.1,
+        pos: 15,
+        id: 'type_moto'
     }
 ];
 
@@ -1963,12 +1980,10 @@ export default function MapScreen(props) {
                 const plat = tripdata.pickup?.lat || location.coords.latitude;
                 const plng = tripdata.pickup?.lng || location.coords.longitude;
 
-                // Aqui usamos o BACKEND_URL público ou ngrok no lugar de localhost (exemplo estrutural)
-                // Vamos usar a mesma constante url do config
-                const configPath = require('../../config/GoogleMapApiConfig');
-                // Alternativamente, vamos pegar o servidor do FirebaseContext que o app usa se estiver rodando em Expo/Standalone
-                // Aqui faremos a requisição direto ao backend novo (que atende na porta 3000 local ou variável)
-                const backendUrl = process.env.EXPO_PUBLIC_BACKEND_URL || 'http://localhost:3000';
+                const backendUrl =
+                    process.env.EXPO_PUBLIC_BACKEND_URL ||
+                    process.env.EXPO_PUBLIC_API_URL ||
+                    'https://api.147.182.204.181.sslip.io';
 
                 const response = await fetch(`${backendUrl}/api/geofence/check?lat=${plat}&lng=${plng}`);
                 if (response.ok) {
@@ -2446,21 +2461,37 @@ export default function MapScreen(props) {
 
     // Otimizar useEffects
     useEffect(() => {
-        // Configurar listener para atualizações em tempo real dos tipos de carro
-        const carTypesRef = database().ref('car_types');
+        // Configurar listener para atualizações em tempo real dos tipos de carro.
+        // Primeiro tenta "cartypes" (fonte principal), com fallback legado para "car_types".
+        const carTypesRef = database().ref('cartypes');
+        const legacyCarTypesRef = database().ref('car_types');
 
-        const handleCarTypesUpdate = (snapshot) => {
-            const carTypesData = snapshot.val();
-            if (carTypesData) {
-                const carTypesArray = Object.values(carTypesData).filter(car => car && car.name);
-                setAllCarTypes(carTypesArray);
-            }
+        const hydrateCarTypes = (rawData) => {
+            if (!rawData || typeof rawData !== 'object') return [];
+            return Object.values(rawData).filter(car => car && car.name);
         };
 
-        carTypesRef.on('value', handleCarTypesUpdate);
+        const handlePrimaryCarTypesUpdate = (snapshot) => {
+            const primaryTypes = hydrateCarTypes(snapshot.val());
+            if (primaryTypes.length > 0) {
+                setAllCarTypes(primaryTypes);
+                return;
+            }
+
+            legacyCarTypesRef.once('value').then((legacySnapshot) => {
+                const legacyTypes = hydrateCarTypes(legacySnapshot.val());
+                if (legacyTypes.length > 0) {
+                    setAllCarTypes(legacyTypes);
+                }
+            }).catch(() => {
+                // manter fallback local se leitura legada falhar
+            });
+        };
+
+        carTypesRef.on('value', handlePrimaryCarTypesUpdate);
 
         return () => {
-            carTypesRef.off('value', handleCarTypesUpdate);
+            carTypesRef.off('value', handlePrimaryCarTypesUpdate);
         };
     }, []);
 

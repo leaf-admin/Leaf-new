@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { View, StyleSheet, Image, TouchableOpacity, Alert, Dimensions, Modal, ActivityIndicator } from 'react-native';
+import { View, StyleSheet, Image, TouchableOpacity, Alert, Dimensions, Modal, ActivityIndicator, Platform } from 'react-native';
 import MapView, { PROVIDER_GOOGLE, Marker, Polyline, Callout, Circle } from 'react-native-maps';
 import { useSelector, useDispatch } from 'react-redux';
 import { Ionicons } from '@expo/vector-icons';
@@ -226,6 +226,11 @@ const darkMapStyle = [
 export default function NewMapScreen(props) {
     const mapRef = useRef(null);
     const [routePolyline, setRoutePolyline] = useState(null);
+    const hasGoogleMapsKey = Boolean((GoogleMapApiConfig?.ios || '').trim());
+    const [mapLoaded, setMapLoaded] = useState(false);
+    const [mapProvider, setMapProvider] = useState(
+        Platform.OS === 'ios' && hasGoogleMapsKey ? PROVIDER_GOOGLE : undefined
+    );
 
     // Log quando routePolyline muda
     useEffect(() => {
@@ -300,6 +305,20 @@ export default function NewMapScreen(props) {
     useEffect(() => {
         getCurrentLocation();
     }, []);
+
+    // Fallback automático no iOS: se Google Maps não carregar tiles, troca para Apple Maps.
+    useEffect(() => {
+        if (Platform.OS !== 'ios' || mapProvider !== PROVIDER_GOOGLE) return;
+
+        const fallbackTimer = setTimeout(() => {
+            if (!mapLoaded) {
+                Logger.warn('⚠️ Google Maps não carregou no iOS, alternando para Apple Maps (fallback).');
+                setMapProvider(undefined);
+            }
+        }, 6000);
+
+        return () => clearTimeout(fallbackTimer);
+    }, [mapLoaded, mapProvider]);
 
     // Efeito para centralizar o mapa quando a localização mudar
     useEffect(() => {
@@ -799,7 +818,7 @@ export default function NewMapScreen(props) {
             <MapView
                 ref={mapRef}
                 style={styles.map}
-                provider={PROVIDER_GOOGLE}
+                provider={mapProvider}
                 initialRegion={initialRegion}
                 showsUserLocation={true}
                 showsMyLocationButton={false}
@@ -812,7 +831,11 @@ export default function NewMapScreen(props) {
                 loadingIndicatorColor={mapColors.primary}
                 loadingBackgroundColor={mapColors.background}
                 customMapStyle={isDarkMode ? darkMapStyle : lightMapStyle}
-                onMapReady={() => Logger.log('🗺️ MapView carregado e pronto')}
+                onMapReady={() => Logger.log(`🗺️ MapView pronto (provider: ${mapProvider || 'default'})`)}
+                onMapLoaded={() => {
+                    setMapLoaded(true);
+                    Logger.log(`✅ MapView tiles carregados (provider: ${mapProvider || 'default'})`);
+                }}
             >
                 {routePolyline && (
                     <Polyline
@@ -1009,22 +1032,21 @@ const styles = StyleSheet.create({
     },
     mapControls: {
         position: 'absolute',
-        top: '50%',
+        bottom: 250, // Keep clear of full-width docked trip card
         right: 20,
         zIndex: 1000,
-        transform: [{ translateY: -25 }], // Centralizar verticalmente o botão
     },
     controlButton: {
-        width: 50,
-        height: 50,
-        borderRadius: 25,
+        width: 48,
+        height: 48,
+        borderRadius: 24,
         justifyContent: 'center',
         alignItems: 'center',
         marginBottom: 10,
         shadowColor: '#000',
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.25,
-        shadowRadius: 3.84,
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.15,
+        shadowRadius: 10,
         elevation: 5,
     },
     // Estilos para cards de valores (baseado no MapScreen.js antigo)

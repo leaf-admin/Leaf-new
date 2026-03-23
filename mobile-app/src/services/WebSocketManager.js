@@ -2,10 +2,35 @@ import Logger from '../utils/Logger';
 import io from 'socket.io-client';
 import { getWebSocketURL } from '../config/NetworkConfig';
 import auth from '@react-native-firebase/auth';
+import { toUserFriendlyError } from '../utils/friendlyErrorMessages';
 
+const CREATE_BOOKING_TIMEOUT_MS = 120000; // 2 minutos mínimo para evitar timeout prematuro em cenários de alta latência
 
 // ✅ CORREÇÃO: Calcular URL dinamicamente para evitar problemas em builds de release
 // Não armazenar como constante, calcular sempre que necessário
+
+const buildSocketError = (payload, fallbackMessage = 'Erro desconhecido', context = 'websocket') => {
+    let message = fallbackMessage;
+
+    if (typeof payload === 'string' && payload.trim()) {
+        message = payload;
+    } else if (payload && typeof payload === 'object') {
+        message = payload.message || payload.error || fallbackMessage;
+    }
+
+    const error = toUserFriendlyError(
+        payload && typeof payload === 'object' ? { ...payload, message } : message,
+        { context, fallbackMessage }
+    );
+
+    if (payload && typeof payload === 'object') {
+        if (payload.code) error.code = payload.code;
+        if (payload.details) error.details = payload.details;
+        error.payload = payload;
+    }
+
+    return error;
+};
 
 // ✅ FASE 2: EventEmitter interno simples (compatível com React Native)
 class SimpleEventEmitter {
@@ -198,7 +223,13 @@ class WebSocketManager {
         if (!this.socket) {
             this.isConnecting = false;
             this.connectionPromise = null;
-            return Promise.reject(new Error('Socket não inicializado'));
+            return Promise.reject(
+                buildSocketError(
+                    { code: 'WS_NOT_INITIALIZED', message: 'Socket nao inicializado' },
+                    'Nao foi possivel iniciar a conexao com o servidor agora.',
+                    'websocket'
+                )
+            );
         }
 
         if (this.socket.connected) {
@@ -234,7 +265,15 @@ class WebSocketManager {
             this.socket.on('connect_error', onConnectError);
 
             setTimeout(() => {
-                finalize(() => reject(lastError || new Error('Timeout ao conectar WebSocket')))();
+                finalize(() =>
+                    reject(
+                        buildSocketError(
+                            lastError || { code: 'WS_CONNECT_TIMEOUT', message: 'Timeout ao conectar WebSocket' },
+                            'A conexao com o servidor demorou mais que o esperado. Tente novamente.',
+                            'websocket'
+                        )
+                    )
+                )();
             }, timeoutMs);
         });
     }
@@ -248,15 +287,31 @@ class WebSocketManager {
             'rideRequest',
             'newBookingAvailable',
             'newRideRequest', // ✅ Evento do DriverNotificationDispatcher 
+            'bookingCreated',
+            'bookingError',
+            'driversFound',
+            'noDriversFound',
             'rideAccepted',
+            'driverAccepted',
             'rideRejected',
+            'rideCancelled',
             'tripStarted',
             'tripCompleted',
             'paymentConfirmed',
+            'paymentRefunded',
             'ratingReceived',
             'authenticated', // ✅ Evento de autenticação confirmada
             'driverStatusChanged',
-            'locationUpdated'
+            'driverStatusUpdated',
+            'driverStatusError',
+            'driverSearchResumed',
+            'driver_status_updated',
+            'nearbyDrivers',
+            'driverLocation',
+            'driverArrived',
+            'arrivedAtPickup',
+            'locationUpdated',
+            'error'
         ];
 
         // ✅ Registrar listener para evento 'authenticated' do servidor
@@ -596,7 +651,13 @@ class WebSocketManager {
     authenticateWithAck(userId, userType, timeoutMs = 10000) {
         return new Promise((resolve, reject) => {
             if (!this.socket?.connected) {
-                reject(new Error('WebSocket não conectado'));
+                reject(
+                    buildSocketError(
+                        { code: 'WS_DISCONNECTED', message: 'WebSocket nao conectado' },
+                        'Sem conexao com o servidor agora. Verifique sua internet e tente novamente.',
+                        'auth'
+                    )
+                );
                 return;
             }
 
@@ -606,14 +667,26 @@ class WebSocketManager {
 
             const timeout = setTimeout(() => {
                 cleanup();
-                reject(new Error(`Timeout de autenticação (${Math.floor(timeoutMs / 1000)}s)`));
+                reject(
+                    buildSocketError(
+                        { code: 'AUTH_TIMEOUT', message: `Timeout de autenticacao (${Math.floor(timeoutMs / 1000)}s)` },
+                        'A validacao da sessao demorou mais que o esperado. Tente novamente.',
+                        'auth'
+                    )
+                );
             }, timeoutMs);
 
             const onAuthenticated = (data) => {
                 if (!data?.success) {
                     clearTimeout(timeout);
                     cleanup();
-                    reject(new Error(data?.error || 'Falha na autenticação'));
+                    reject(
+                        buildSocketError(
+                            data,
+                            'Nao foi possivel validar sua sessao agora. Tente novamente.',
+                            'auth'
+                        )
+                    );
                     return;
                 }
 
@@ -644,38 +717,63 @@ class WebSocketManager {
         });
 
         if (!this.socket?.connected) {
-            const error = new Error('WebSocket não conectado');
+            const error = buildSocketError(
+                { code: 'WS_DISCONNECTED', message: 'WebSocket não conectado' },
+                'Sem conexao com o servidor agora. Verifique sua internet e tente novamente.',
+                'websocket'
+            );
             Logger.error('❌ [WebSocketManager] Erro ao criar booking:', error.message);
             throw error;
         }
 
         return new Promise((resolve, reject) => {
-            const timeout = setTimeout(() => {
-                Logger.error('❌ [WebSocketManager] Timeout ao criar booking (15s)');
-                reject(new Error('Create booking timeout'));
-            }, 15000);
+            let timeout = null;
+
+            const cleanup = () => {
+                if (timeout) {
+                    clearTimeout(timeout);
+                    timeout = null;
+                }
+                this.socket?.off('bookingCreated', onBookingCreated);
+                this.socket?.off('bookingError', onBookingError);
+            };
+
+            const onBookingCreated = (data) => {
+                Logger.log('✅ [WebSocketManager] Resposta bookingCreated recebida:', data);
+                cleanup();
+                if (data?.success) {
+                    resolve(data);
+                    return;
+                }
+
+                const error = buildSocketError(data, 'Nao foi possivel solicitar a viagem agora.', 'booking');
+                Logger.error('❌ [WebSocketManager] Erro na resposta:', error.message, error.code || 'SEM_CODE');
+                reject(error);
+            };
+
+            const onBookingError = (errorPayload) => {
+                Logger.error('❌ [WebSocketManager] Erro do servidor:', errorPayload);
+                cleanup();
+                reject(buildSocketError(errorPayload, 'Nao foi possivel solicitar a viagem agora.', 'booking'));
+            };
+
+            timeout = setTimeout(() => {
+                Logger.error(`❌ [WebSocketManager] Timeout ao criar booking (${CREATE_BOOKING_TIMEOUT_MS}ms)`);
+                cleanup();
+                reject(
+                    buildSocketError(
+                        { code: 'BOOKING_TIMEOUT', message: 'Create booking timeout' },
+                        'Estamos com alta demanda no momento. Tente solicitar a viagem novamente.',
+                        'booking'
+                    )
+                );
+            }, CREATE_BOOKING_TIMEOUT_MS);
+
+            this.socket.on('bookingCreated', onBookingCreated);
+            this.socket.on('bookingError', onBookingError);
 
             Logger.log('📤 [WebSocketManager] Emitindo evento createBooking...');
             this.socket.emit('createBooking', bookingData);
-
-            this.socket.once('bookingCreated', (data) => {
-                Logger.log('✅ [WebSocketManager] Resposta bookingCreated recebida:', data);
-                clearTimeout(timeout);
-                if (data.success) {
-                    resolve(data);
-                } else {
-                    const error = new Error(data.error || 'Create booking failed');
-                    Logger.error('❌ [WebSocketManager] Erro na resposta:', error.message);
-                    reject(error);
-                }
-            });
-
-            // ✅ Adicionar listener para erros do servidor
-            this.socket.once('bookingError', (error) => {
-                Logger.error('❌ [WebSocketManager] Erro do servidor:', error);
-                clearTimeout(timeout);
-                reject(new Error(error.message || 'Erro ao criar booking'));
-            });
         });
     }
 
@@ -1329,8 +1427,8 @@ class WebSocketManager {
         });
     }
 
-    // Atualizar localização do driver
-    async updateDriverLocation(driverId, lat, lng, heading = 0, speed = 0) {
+    // Atualizar localização do driver (evento canônico do backend)
+    async updateLocation(driverId, lat, lng, heading = 0, speed = 0) {
         if (!this.socket?.connected) {
             throw new Error('WebSocket não conectado');
         }
@@ -1340,7 +1438,15 @@ class WebSocketManager {
                 reject(new Error('Update driver location timeout'));
             }, 10000);
 
-            this.socket.emit('updateDriverLocation', { driverId, lat, lng, heading, speed });
+            this.socket.emit('updateLocation', {
+                uid: driverId,
+                driverId,
+                lat,
+                lng,
+                heading,
+                speed,
+                timestamp: Date.now()
+            });
             this.socket.once('locationUpdated', (data) => {
                 clearTimeout(timeout);
                 if (data.success) {
@@ -1350,6 +1456,11 @@ class WebSocketManager {
                 }
             });
         });
+    }
+
+    // Compatibilidade temporária para chamadas legadas no app.
+    async updateDriverLocation(driverId, lat, lng, heading = 0, speed = 0) {
+        return this.updateLocation(driverId, lat, lng, heading, speed);
     }
 
     // ==================== NOVOS MÉTODOS - BUSCA E MATCHING DE DRIVERS ====================

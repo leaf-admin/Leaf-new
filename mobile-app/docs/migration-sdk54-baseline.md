@@ -28,6 +28,16 @@ Arquivos de referencia:
 - Node executado via NVM path: `~/.nvm/versions/node/v24.14.0/bin`.
 - `npm` e `npx` disponiveis apenas apos export do `PATH`.
 
-## Proximo passo
+## Atualizacao de execucao (2026-03-16)
 
-Executar baseline de build controlado (Android/iOS) nesta branch, com logs organizados, antes de alterar dependencias.
+Validacoes locais concluidas nesta branch:
+
+- Android:
+- `npm run build:local:android:release` -> OK (`android/app/build/outputs/apk/release/app-release.apk`).
+- `npm run build:local:android:aab` -> OK (`android/app/build/outputs/bundle/release/app-release.aab`).
+- iOS:
+- `npm run build:local:ios:simulator` -> OK.
+- Smoke no simulador (`xcrun simctl install/launch`) -> OK para `br.com.leaf.ride`.
+- `npm run build:local:ios:archive` -> BLOQUEADO por assinatura (`Signing for "Leaf" requires a development team`).
+
+Observacao: a trilha local sem EAS esta funcional para Android (release/aab) e iOS simulator; para distribuicao iOS falta apenas configuracao de signing/provisioning.

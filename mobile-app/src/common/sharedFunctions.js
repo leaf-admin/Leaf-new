@@ -5,6 +5,7 @@ import { colors } from './theme';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import i18n from '../i18n';
 import { api } from '../../common';
+import { getDirectionsApi as getDirectionsApiLocal, getDistanceMatrix as getDistanceMatrixLocal } from '../common-local/GoogleAPIFunctions';
 import TaxiModal from '../components/TaxiModal';
 var { height, width } = Dimensions.get('window');
 import { fonts } from './font';
@@ -161,9 +162,11 @@ export const CarVertical = (props) =>{
 
 export const validateBookingObj = async (t, addBookingObj, instructionData, settings, bookingType, roundTrip, tripInstructions, tripdata, drivers, otherPerson) => {
     const {
-        getDistanceMatrix,
         GetDistance,
     } = api;
+    const getDistanceMatrix = typeof getDistanceMatrixLocal === 'function'
+        ? getDistanceMatrixLocal
+        : api?.getDistanceMatrix;
     const MATRIX_DRIVER_LIMIT = 8;
     const estimateArrivalFromDistance = (distanceKm) => {
         const safeDistance = Number.isFinite(Number(distanceKm)) ? Number(distanceKm) : 2;
@@ -196,7 +199,7 @@ export const validateBookingObj = async (t, addBookingObj, instructionData, sett
             );
             const matrixCandidates = settings.useDistanceMatrix ? sortedDrivers.slice(0, MATRIX_DRIVER_LIMIT) : [];
             if (sortedDrivers.length > 0) {
-                if (settings.useDistanceMatrix && matrixCandidates.length > 0) {
+                if (settings.useDistanceMatrix && matrixCandidates.length > 0 && typeof getDistanceMatrix === 'function') {
                     let driverDest = "";
                     for (let i = 0; i < matrixCandidates.length; i++) {
                         let driver = { ...matrixCandidates[i] };
@@ -211,6 +214,8 @@ export const validateBookingObj = async (t, addBookingObj, instructionData, sett
                             etaByDriverId[matrixCandidates[i].id] = distArr[i];
                         }
                     }
+                } else if (settings.useDistanceMatrix && matrixCandidates.length > 0) {
+                    Logger.warn('⚠️ getDistanceMatrix indisponível, usando ETA aproximado por distância');
                 }
                 for (let i = 0; i < sortedDrivers.length; i++) {
                     const driverEta = etaByDriverId[sortedDrivers[i].id] || estimateArrivalFromDistance(sortedDrivers[i].distance);
@@ -244,9 +249,9 @@ export default function BookingModal(props){
 
 export const prepareEstimateObject =  async (tripdata, instructionData) => {
     const { t } = i18n;
-    const {
-        getDirectionsApi
-    } = api;
+    const getDirectionsApi = typeof getDirectionsApiLocal === 'function'
+        ? getDirectionsApiLocal
+        : api?.getDirectionsApi;
     
     // Log de entrada
     Logger.log('🚀 ===== prepareEstimateObject INICIADO =====');
@@ -255,6 +260,10 @@ export const prepareEstimateObject =  async (tripdata, instructionData) => {
     Logger.log('🔍 getDirectionsApi function:', getDirectionsApi?.toString?.()?.substring(0, 200));
     
     try {
+        if (typeof getDirectionsApi !== 'function') {
+            throw new Error('getDirectionsApi indisponível');
+        }
+
         const startLoc = tripdata.pickup.lat + ',' + tripdata.pickup.lng;
         const destLoc = tripdata.drop.lat + ',' + tripdata.drop.lng;
         Logger.log('📍 Coordenadas formatadas:', { startLoc, destLoc });

@@ -17,9 +17,9 @@ const ENCRYPTION_KEY = 'leaf-onboarding-secure-key-2024';
 
 // Estrutura para dados sensíveis
 const SENSITIVE_FIELDS = {
-  PROFILE_DATA: ['firstName', 'lastName', 'dateOfBirth', 'gender'],
-  DOCUMENT_DATA: ['cpf', 'email'],
-  CREDENTIALS: ['password', 'confirmPassword']
+  profile_data: ['fullName', 'firstName', 'lastName'],
+  document_data: ['cpf', 'email'],
+  credentials: ['acceptTerms', 'acceptPrivacy', 'consentBackgroundCheck', 'marketingOptIn']
 };
 
 // Função para verificar se dados estão criptografados
@@ -358,4 +358,3 @@ export const loadStepData = async (step) => {
     return {};
   }
 };
-

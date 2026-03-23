@@ -12,6 +12,117 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as ImageManipulator from 'expo-image-manipulator';
 
 class KYCService {
+  getAwsProviderName() {
+    return 'aws_rekognition_face_liveness';
+  }
+
+  async getLivenessProvider() {
+    try {
+      const backendUrl = getSelfHostedApiUrl('/api/kyc/liveness/provider');
+      const response = await fetch(backendUrl, { method: 'GET' });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(result.error || `Erro ${response.status}: ${response.statusText}`);
+      }
+      return {
+        success: true,
+        data: result
+      };
+    } catch (error) {
+      Logger.error('❌ Erro ao consultar provider de liveness:', error);
+      return {
+        success: false,
+        error: error.message
+      };
+    }
+  }
+
+  async getPreferredLivenessMode() {
+    const providerResult = await this.getLivenessProvider();
+    if (!providerResult?.success) {
+      return {
+        success: false,
+        mode: 'local',
+        provider: null,
+        config: null,
+        error: providerResult?.error || 'Falha ao consultar provider de liveness'
+      };
+    }
+
+    const provider = providerResult?.data?.provider || null;
+    const config = providerResult?.data?.config || {};
+    const awsReady = (
+      config.enabled === true
+      && config.credentialsEnabled === true
+      && config.hasAssumeRoleArn === true
+    );
+
+    return {
+      success: true,
+      mode: awsReady ? 'aws' : 'local',
+      provider,
+      config
+    };
+  }
+
+  async createAwsLivenessSession(driverId, options = {}) {
+    try {
+      const backendUrl = getSelfHostedApiUrl('/api/kyc/liveness/aws/session');
+      const response = await fetch(backendUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          userId: driverId,
+          challengeId: options?.challengeId || null,
+          requirement: options?.requirement || null
+        }),
+      });
+
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(result.error || `Erro ${response.status}: ${response.statusText}`);
+      }
+
+      return {
+        success: true,
+        data: result
+      };
+    } catch (error) {
+      Logger.error('❌ Erro ao criar sessão AWS liveness:', error);
+      return {
+        success: false,
+        error: error.message
+      };
+    }
+  }
+
+  async getAwsLivenessSessionResult(driverId, sessionId) {
+    try {
+      const backendUrl = getSelfHostedApiUrl(
+        `/api/kyc/liveness/aws/session/${sessionId}?userId=${encodeURIComponent(driverId)}`
+      );
+      const response = await fetch(backendUrl, { method: 'GET' });
+      const result = await response.json().catch(() => ({}));
+
+      if (!response.ok) {
+        throw new Error(result.error || `Erro ${response.status}: ${response.statusText}`);
+      }
+
+      return {
+        success: true,
+        data: result
+      };
+    } catch (error) {
+      Logger.error('❌ Erro ao buscar resultado AWS liveness:', error);
+      return {
+        success: false,
+        error: error.message
+      };
+    }
+  }
+
   getAnchorStorageKey(driverId) {
     return `@kyc_anchor_signature_${driverId}`;
   }
@@ -184,39 +295,57 @@ class KYCService {
    * Verificar identidade do motorista (re-verificação)
    * @param {string} driverId - ID do motorista
    * @param {string} selfieImageUri - URI da imagem da selfie atual
+   * @param {Object} options - Opções adicionais de verificação
    * @returns {Promise<Object>} Resultado da verificação
    */
-  async verifyDriver(driverId, selfieImageUri) {
+  async verifyDriver(driverId, selfieImageUri, options = {}) {
     try {
       Logger.log('🔐 Verificando identidade do motorista:', driverId);
+      const challengeId = options?.challengeId || null;
+      const requirement = options?.requirement || null;
+      const livenessPassed = options?.livenessPassed === true;
+      const awsSessionId = options?.awsSessionId || null;
+      const verificationMode = options?.mode
+        || (awsSessionId ? this.getAwsProviderName() : 'device_signature_v1');
+      const useAwsSessionOnly = Boolean(awsSessionId) && !selfieImageUri;
 
-      // Processar selfie (deve ter face)
-      const selfieProcessed = await faceDetectionService.processImage(selfieImageUri);
-      if (!selfieProcessed.success || !selfieProcessed.detection.hasFace) {
-        throw new Error('Nenhuma face detectada na selfie. Por favor, tire outra foto.');
-      }
+      let similarity = null;
+      let threshold = null;
+      let isMatch = null;
+      let currentSignatureHash = null;
+      let anchorSignatureHash = null;
 
-      // Device-first: gerar assinatura da selfie atual
-      const currentSig = await this.buildSignature(selfieProcessed.alignedUri || selfieImageUri);
-      let anchorSignature = await AsyncStorage.getItem(this.getAnchorStorageKey(driverId));
-
-      if (!anchorSignature) {
-        const anchorUrl = getSelfHostedApiUrl(`/api/kyc/device-anchor/${driverId}`);
-        const anchorResp = await fetch(anchorUrl, { method: 'GET' });
-        const anchorData = await anchorResp.json().catch(() => ({}));
-        if (anchorResp.ok && anchorData?.anchorSignature) {
-          anchorSignature = anchorData.anchorSignature;
-          await AsyncStorage.setItem(this.getAnchorStorageKey(driverId), anchorSignature);
+      if (!useAwsSessionOnly) {
+        // Processar selfie (deve ter face)
+        const selfieProcessed = await faceDetectionService.processImage(selfieImageUri);
+        if (!selfieProcessed.success || !selfieProcessed.detection.hasFace) {
+          throw new Error('Nenhuma face detectada na selfie. Por favor, tire outra foto.');
         }
-      }
 
-      if (!anchorSignature) {
-        throw new Error('Assinatura âncora não encontrada. Faça onboarding KYC novamente.');
-      }
+        // Device-first: gerar assinatura da selfie atual
+        const currentSig = await this.buildSignature(selfieProcessed.alignedUri || selfieImageUri);
+        let anchorSignature = await AsyncStorage.getItem(this.getAnchorStorageKey(driverId));
 
-      const similarity = this.similarityFromSignatures(anchorSignature, currentSig.signature);
-      const threshold = 0.5;
-      const isMatch = similarity >= threshold;
+        if (!anchorSignature) {
+          const anchorUrl = getSelfHostedApiUrl(`/api/kyc/device-anchor/${driverId}`);
+          const anchorResp = await fetch(anchorUrl, { method: 'GET' });
+          const anchorData = await anchorResp.json().catch(() => ({}));
+          if (anchorResp.ok && anchorData?.anchorSignature) {
+            anchorSignature = anchorData.anchorSignature;
+            await AsyncStorage.setItem(this.getAnchorStorageKey(driverId), anchorSignature);
+          }
+        }
+
+        if (!anchorSignature) {
+          throw new Error('Assinatura âncora não encontrada. Faça onboarding KYC novamente.');
+        }
+
+        similarity = this.similarityFromSignatures(anchorSignature, currentSig.signature);
+        threshold = 0.5;
+        isMatch = similarity >= threshold;
+        currentSignatureHash = currentSig.signature.slice(0, 12);
+        anchorSignatureHash = anchorSignature.slice(0, 12);
+      }
 
       // Enviar resultado leve para backend
       const backendUrl = getSelfHostedApiUrl('/api/kyc/verify-driver/device');
@@ -227,16 +356,27 @@ class KYCService {
         },
         body: JSON.stringify({
           userId: driverId,
+          challengeId,
+          requirement,
           deviceKyc: {
-            mode: 'device_signature_v1',
+            mode: verificationMode,
+            provider: verificationMode,
             recoverBlocked: true,
-            isMatch,
-            similarityScore: similarity,
-            confidence: similarity,
-            threshold,
+            isMatch: typeof isMatch === 'boolean' ? isMatch : undefined,
+            similarityScore: typeof similarity === 'number' ? similarity : undefined,
+            confidence: typeof similarity === 'number' ? similarity : undefined,
+            threshold: typeof threshold === 'number' ? threshold : undefined,
             processingTime: 0,
-            currentSignatureHash: currentSig.signature.slice(0, 12),
-            anchorSignatureHash: anchorSignature.slice(0, 12)
+            livenessPassed,
+            awsSessionId: awsSessionId || undefined,
+            aws: awsSessionId
+              ? {
+                sessionId: awsSessionId,
+                provider: this.getAwsProviderName()
+              }
+              : undefined,
+            currentSignatureHash: currentSignatureHash || undefined,
+            anchorSignatureHash: anchorSignatureHash || undefined
           }
         }),
       });

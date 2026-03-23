@@ -11,6 +11,12 @@ class VehicleService {
         this.VEHICLES_PATH = 'vehicles';
         this.USER_VEHICLES_PATH = 'user_vehicles';
         this.USERS_PATH = 'users';
+        this.VEHICLE_PLATE_INDEX_PATH = 'vehicle_plate_index';
+        this.VEHICLE_ACTIVE_ASSIGNMENT_PATH = 'vehicle_active_assignment';
+    }
+
+    normalizePlateKey(plate = '') {
+        return String(plate || '').replace(/[^A-Za-z0-9]/g, '').toUpperCase();
     }
 
     /**
@@ -162,11 +168,17 @@ class VehicleService {
             }
 
             const vehicleId = `vehicle_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-            const vehicleRef = database().ref(`${this.VEHICLES_PATH}/${vehicleId}`);
-            
+            const normalizedPlate = this.normalizePlateKey(vehicleData.plate);
+            const originalPlate = String(vehicleData.plate || '').toUpperCase().trim();
+            if (!normalizedPlate) {
+                throw new Error('Placa inválida para indexação do veículo');
+            }
+
             const vehicle = {
                 ...vehicleData,
                 id: vehicleId,
+                plate: originalPlate || normalizedPlate,
+                plateNormalized: normalizedPlate,
                 vehicleType: vehicleData.vehicleType || 'carro', // Tipo: 'carro' ou 'moto'
                 isActive: false, // Veículo inativo por padrão
                 status: 'idle', // Status padrão
@@ -174,7 +186,10 @@ class VehicleService {
                 updatedAt: new Date().toISOString()
             };
 
-            await vehicleRef.set(vehicle);
+            await database().ref().update({
+                [`${this.VEHICLES_PATH}/${vehicleId}`]: vehicle,
+                [`${this.VEHICLE_PLATE_INDEX_PATH}/${normalizedPlate}`]: vehicleId
+            });
             Logger.log('✅ Veículo criado no sistema:', vehicleId);
             return vehicleId;
         } catch (error) {
@@ -190,26 +205,52 @@ class VehicleService {
      */
     async getVehicleByPlate(plate) {
         try {
+            const normalizedPlate = this.normalizePlateKey(plate);
+            if (!normalizedPlate) {
+                return null;
+            }
+
+            const indexSnapshot = await database()
+                .ref(`${this.VEHICLE_PLATE_INDEX_PATH}/${normalizedPlate}`)
+                .once('value');
+
+            if (indexSnapshot.exists()) {
+                const vehicleId = indexSnapshot.val();
+                const vehicleSnapshot = await database().ref(`${this.VEHICLES_PATH}/${vehicleId}`).once('value');
+                if (vehicleSnapshot.exists()) {
+                    return {
+                        id: vehicleId,
+                        ...vehicleSnapshot.val()
+                    };
+                }
+            }
+
+            // Fallback legado: varrer coleção e consolidar índice para próximas consultas.
             const vehiclesRef = database().ref(this.VEHICLES_PATH);
             const snapshot = await vehiclesRef.once('value');
-            
-            if (snapshot.exists()) {
-                let foundVehicle = null;
-                
-                snapshot.forEach((childSnapshot) => {
-                    const vehicle = childSnapshot.val();
-                    if (vehicle.plate === plate) {
-                        foundVehicle = {
-                            id: childSnapshot.key,
-                            ...vehicle
-                        };
-                    }
-                });
-                
-                return foundVehicle;
+            if (!snapshot.exists()) return null;
+
+            let foundVehicle = null;
+            snapshot.forEach((childSnapshot) => {
+                const vehicle = childSnapshot.val() || {};
+                const vehiclePlate = this.normalizePlateKey(
+                    vehicle.plateNormalized || vehicle.plate || vehicle.vehicleNumber || vehicle.vehiclePlate
+                );
+                if (vehiclePlate === normalizedPlate) {
+                    foundVehicle = {
+                        id: childSnapshot.key,
+                        ...vehicle
+                    };
+                }
+            });
+
+            if (foundVehicle?.id) {
+                await database()
+                    .ref(`${this.VEHICLE_PLATE_INDEX_PATH}/${normalizedPlate}`)
+                    .set(foundVehicle.id);
             }
-            
-            return null;
+
+            return foundVehicle;
         } catch (error) {
             Logger.error('❌ Erro ao buscar veículo por placa:', error);
             return null;
@@ -303,29 +344,22 @@ class VehicleService {
      */
     async getActiveUserVehicleByVehicle(vehicleId) {
         try {
-            const userVehiclesRef = database().ref(this.USER_VEHICLES_PATH);
-            const snapshot = await userVehiclesRef.once('value');
-            
-            if (snapshot.exists()) {
-                let activeUserVehicle = null;
-                
-                snapshot.forEach((userSnapshot) => {
-                    userSnapshot.forEach((vehicleSnapshot) => {
-                        const userVehicle = vehicleSnapshot.val();
-                        if (userVehicle.vehicleId === vehicleId && 
-                            userVehicle.isActive && 
-                            userVehicle.status === 'active') {
-                            activeUserVehicle = {
-                                id: vehicleSnapshot.key,
-                                ...userVehicle
-                            };
-                        }
-                    });
-                });
-                
-                return activeUserVehicle;
+            const assignmentSnapshot = await database()
+                .ref(`${this.VEHICLE_ACTIVE_ASSIGNMENT_PATH}/${vehicleId}`)
+                .once('value');
+
+            if (assignmentSnapshot.exists()) {
+                const assignment = assignmentSnapshot.val() || {};
+                return {
+                    id: assignment.userVehicleId || '',
+                    userId: assignment.userId || assignment.driverId || null,
+                    vehicleId,
+                    isActive: true,
+                    status: 'active',
+                    ...assignment
+                };
             }
-            
+
             return null;
         } catch (error) {
             Logger.error('❌ Erro ao buscar usuário ativo com veículo:', error);
@@ -521,22 +555,87 @@ class VehicleService {
      */
     async setActiveVehicle(userId, vehicleId) {
         try {
-            // 1. Desativar todos os veículos do usuário
             const userVehicles = await this.getUserVehicles(userId);
+            const targetUserVehicle = userVehicles.find(uv => uv.vehicleId === vehicleId);
+            if (!targetUserVehicle) {
+                throw new Error('Veículo não encontrado no perfil para ativação');
+            }
+
+            const nowIso = new Date().toISOString();
+
+            // 1) Liberar locks antigos do mesmo usuário
+            const previousActiveVehicles = userVehicles
+                .filter(uv => uv.isActive === true && uv.vehicleId && uv.vehicleId !== vehicleId)
+                .map(uv => String(uv.vehicleId));
+
+            for (const previousVehicleId of previousActiveVehicles) {
+                await database()
+                    .ref(`${this.VEHICLE_ACTIVE_ASSIGNMENT_PATH}/${previousVehicleId}`)
+                    .transaction(current => {
+                        if (!current) return current;
+                        const currentUserId = String(current.userId || current.driverId || '');
+                        if (currentUserId !== String(userId)) return current;
+                        return null;
+                    });
+            }
+
+            // 2) Reservar lock do veículo alvo (bloqueia dois usuários com mesmo carro ativo)
+            const lockRef = database().ref(`${this.VEHICLE_ACTIVE_ASSIGNMENT_PATH}/${vehicleId}`);
+            const lockPayload = {
+                userId,
+                driverId: userId,
+                vehicleId,
+                userVehicleId: targetUserVehicle.id,
+                source: 'mobile_app',
+                assignedAt: nowIso,
+                updatedAt: nowIso
+            };
+            const tx = await lockRef.transaction(current => {
+                if (!current) return lockPayload;
+                const currentUserId = String(current.userId || current.driverId || '');
+                if (currentUserId === String(userId)) {
+                    return {
+                        ...current,
+                        ...lockPayload,
+                        assignedAt: current.assignedAt || nowIso
+                    };
+                }
+                return;
+            });
+
+            if (!tx.committed) {
+                const conflict = tx?.snapshot?.val() || {};
+                const conflictUser = conflict.userId || conflict.driverId || 'outro motorista';
+                throw new Error(`Veículo já está ativo com ${conflictUser}`);
+            }
+
+            // 3) Atualizar vínculos do usuário
             const updates = {};
-            
             for (const userVehicle of userVehicles) {
                 updates[`${this.USER_VEHICLES_PATH}/${userId}/${userVehicle.id}/isActive`] = false;
+                updates[`${this.USER_VEHICLES_PATH}/${userId}/${userVehicle.id}/updatedAt`] = nowIso;
             }
 
-            // 2. Ativar o veículo selecionado
-            const targetUserVehicle = userVehicles.find(uv => uv.vehicleId === vehicleId);
-            if (targetUserVehicle) {
-                updates[`${this.USER_VEHICLES_PATH}/${userId}/${targetUserVehicle.id}/isActive`] = true;
-                updates[`${this.USER_VEHICLES_PATH}/${userId}/${targetUserVehicle.id}/updatedAt`] = new Date().toISOString();
+            updates[`${this.USER_VEHICLES_PATH}/${userId}/${targetUserVehicle.id}/isActive`] = true;
+            updates[`${this.USER_VEHICLES_PATH}/${userId}/${targetUserVehicle.id}/status`] =
+                targetUserVehicle.status || 'approved';
+            updates[`${this.USER_VEHICLES_PATH}/${userId}/${targetUserVehicle.id}/updatedAt`] = nowIso;
+            updates[`${this.USERS_PATH}/${userId}/activeVehicleId`] = vehicleId;
+            updates[`${this.USERS_PATH}/${userId}/updatedAt`] = nowIso;
+
+            const lockVehicleIds = [...new Set([...previousActiveVehicles, String(vehicleId)])];
+            for (const lockVehicleId of lockVehicleIds) {
+                const assignmentSnapshot = await database()
+                    .ref(`${this.VEHICLE_ACTIVE_ASSIGNMENT_PATH}/${lockVehicleId}`)
+                    .once('value');
+                const assignment = assignmentSnapshot.val() || null;
+                const assignedUserId = assignment ? (assignment.userId || assignment.driverId || null) : null;
+                updates[`${this.VEHICLES_PATH}/${lockVehicleId}/activeDriverId`] = assignedUserId;
+                updates[`${this.VEHICLES_PATH}/${lockVehicleId}/activeUserVehicleId`] = assignment?.userVehicleId || null;
+                updates[`${this.VEHICLES_PATH}/${lockVehicleId}/isInUseByDriver`] = Boolean(assignedUserId);
+                updates[`${this.VEHICLES_PATH}/${lockVehicleId}/updatedAt`] = nowIso;
             }
 
-            // 3. Aplicar todas as atualizações
             await database().ref().update(updates);
 
             Logger.log('✅ Veículo ativo definido:', vehicleId);
@@ -597,6 +696,26 @@ class VehicleService {
             // Remover relacionamento usuário-veículo
             const userVehicleRef = database().ref(`${this.USER_VEHICLES_PATH}/${userId}/${userVehicle.id}`);
             await userVehicleRef.remove();
+
+            if (userVehicle.isActive === true && userVehicle.vehicleId) {
+                await database()
+                    .ref(`${this.VEHICLE_ACTIVE_ASSIGNMENT_PATH}/${userVehicle.vehicleId}`)
+                    .transaction(current => {
+                        if (!current) return current;
+                        const currentUserId = String(current.userId || current.driverId || '');
+                        if (currentUserId !== String(userId)) return current;
+                        return null;
+                    });
+
+                await database().ref().update({
+                    [`${this.VEHICLES_PATH}/${userVehicle.vehicleId}/activeDriverId`]: null,
+                    [`${this.VEHICLES_PATH}/${userVehicle.vehicleId}/activeUserVehicleId`]: null,
+                    [`${this.VEHICLES_PATH}/${userVehicle.vehicleId}/isInUseByDriver`]: false,
+                    [`${this.VEHICLES_PATH}/${userVehicle.vehicleId}/updatedAt`]: new Date().toISOString(),
+                    [`${this.USERS_PATH}/${userId}/activeVehicleId`]: '',
+                    [`${this.USERS_PATH}/${userId}/updatedAt`]: new Date().toISOString()
+                });
+            }
 
             Logger.log('✅ Veículo removido do usuário:', userVehicle.id);
             return true;

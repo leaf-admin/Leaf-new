@@ -6,25 +6,18 @@ import Logger from '../../../utils/Logger';
  */
 
 import React, { useState, useCallback, useRef, useEffect } from 'react';
-import { View, Text, TextInput, TouchableOpacity, StyleSheet, Alert, ActivityIndicator, KeyboardAvoidingView, Platform } from 'react-native';
+import { View, Text, TextInput, TouchableOpacity, StyleSheet, Alert, KeyboardAvoidingView, Platform } from 'react-native';
 import { fonts } from '../../../common-local/font';
 import auth from '@react-native-firebase/auth';
 import database from '@react-native-firebase/database';
+import { Ionicons } from '@expo/vector-icons';
 import ContinueButton from '../common/ContinueButton';
 import UserAuthService from '../../../services/UserAuthService';
+import onboardingTheme from '../common/onboardingTheme';
 
+const { color, radius, spacing, elevation } = onboardingTheme;
 
-const colors = {
-    black: '#000000',
-    grey80: '#333333',
-    greyPlaceholder: '#BDBDBD',
-    leafGreen: '#1A330E',
-    white: '#FFFFFF',
-    lightGrey: '#F5F5F5',
-    error: '#FF3B30'
-};
-
-const ForgotPasswordStep = ({ phoneNumber, existingUser, onPasswordReset, onBack }) => {
+const ForgotPasswordStep = ({ phoneNumber, onPasswordReset, onBack }) => {
     const [otp, setOtp] = useState(['', '', '', '', '', '']);
     const [newPassword, setNewPassword] = useState('');
     const [confirmPassword, setConfirmPassword] = useState('');
@@ -217,38 +210,40 @@ const ForgotPasswordStep = ({ phoneNumber, existingUser, onPasswordReset, onBack
                         Digite o código de 6 dígitos enviado para {phoneNumber}
                     </Text>
 
-                    {/* Inputs do OTP */}
-                    <View style={styles.otpContainer}>
-                        {otp.map((digit, index) => (
-                            <TextInput
-                                key={index}
-                                ref={ref => inputRefs.current[index] = ref}
-                                style={styles.otpInput}
-                                value={digit}
-                                onChangeText={(value) => handleOtpChange(value, index)}
-                                onKeyPress={(e) => handleKeyPress(e, index)}
-                                keyboardType="number-pad"
-                                maxLength={1}
-                                selectTextOnFocus
-                                autoFocus={index === 0}
-                            />
-                        ))}
-                    </View>
+                    <View style={styles.card}>
+                        {/* Inputs do OTP */}
+                        <View style={styles.otpContainer}>
+                            {otp.map((digit, index) => (
+                                <TextInput
+                                    key={index}
+                                    ref={ref => inputRefs.current[index] = ref}
+                                    style={styles.otpInput}
+                                    value={digit}
+                                    onChangeText={(value) => handleOtpChange(value, index)}
+                                    onKeyPress={(e) => handleKeyPress(e, index)}
+                                    keyboardType="number-pad"
+                                    maxLength={1}
+                                    selectTextOnFocus
+                                    autoFocus={index === 0}
+                                />
+                            ))}
+                        </View>
 
-                    {/* Reenvio */}
-                    <View style={styles.resendContainer}>
-                        <Text style={styles.resendText}>
-                            Não recebeu o código?{' '}
-                        </Text>
-                        {canResend ? (
-                            <TouchableOpacity onPress={handleResendOTP} disabled={loading}>
-                                <Text style={styles.resendLink}>Reenviar</Text>
-                            </TouchableOpacity>
-                        ) : (
-                            <Text style={styles.timerText}>
-                                Reenviar em {timer}s
+                        {/* Reenvio */}
+                        <View style={styles.resendContainer}>
+                            <Text style={styles.resendText}>
+                                Não recebeu o código?{' '}
                             </Text>
-                        )}
+                            {canResend ? (
+                                <TouchableOpacity onPress={handleResendOTP} disabled={loading}>
+                                    <Text style={styles.resendLink}>Reenviar</Text>
+                                </TouchableOpacity>
+                            ) : (
+                                <Text style={styles.timerText}>
+                                    Reenviar em {timer}s
+                                </Text>
+                            )}
+                        </View>
                     </View>
 
                     {/* Botão voltar */}
@@ -272,62 +267,68 @@ const ForgotPasswordStep = ({ phoneNumber, existingUser, onPasswordReset, onBack
                     Digite sua nova senha
                 </Text>
 
-                {/* Campo nova senha */}
-                <View style={styles.passwordContainer}>
-                    <TextInput
-                        style={styles.passwordInput}
-                        value={newPassword}
-                        onChangeText={setNewPassword}
-                        placeholder="Nova senha"
-                        placeholderTextColor={colors.greyPlaceholder}
-                        secureTextEntry={!showPassword}
-                        autoCapitalize="none"
-                    />
-                    <TouchableOpacity
-                        style={styles.eyeButton}
-                        onPress={() => setShowPassword(!showPassword)}
-                    >
-                        <Text style={styles.eyeButtonText}>
-                            {showPassword ? '👁️' : '👁️‍🗨️'}
-                        </Text>
-                    </TouchableOpacity>
-                </View>
+                <View style={styles.card}>
+                    {/* Campo nova senha */}
+                    <View style={styles.passwordContainer}>
+                        <TextInput
+                            style={styles.passwordInput}
+                            value={newPassword}
+                            onChangeText={setNewPassword}
+                            placeholder="Nova senha"
+                            placeholderTextColor={color.textMuted}
+                            secureTextEntry={!showPassword}
+                            autoCapitalize="none"
+                        />
+                        <TouchableOpacity
+                            style={styles.eyeButton}
+                            onPress={() => setShowPassword(!showPassword)}
+                        >
+                            <Ionicons
+                                name={showPassword ? 'eye-off' : 'eye'}
+                                size={20}
+                                color={color.textMuted}
+                            />
+                        </TouchableOpacity>
+                    </View>
 
-                {/* Campo confirmar senha */}
-                <View style={styles.passwordContainer}>
-                    <TextInput
-                        style={styles.passwordInput}
-                        value={confirmPassword}
-                        onChangeText={setConfirmPassword}
-                        placeholder="Confirmar senha"
-                        placeholderTextColor={colors.greyPlaceholder}
-                        secureTextEntry={!showConfirmPassword}
-                        autoCapitalize="none"
-                    />
-                    <TouchableOpacity
-                        style={styles.eyeButton}
-                        onPress={() => setShowConfirmPassword(!showConfirmPassword)}
-                    >
-                        <Text style={styles.eyeButtonText}>
-                            {showConfirmPassword ? '👁️' : '👁️‍🗨️'}
-                        </Text>
-                    </TouchableOpacity>
-                </View>
+                    {/* Campo confirmar senha */}
+                    <View style={styles.passwordContainer}>
+                        <TextInput
+                            style={styles.passwordInput}
+                            value={confirmPassword}
+                            onChangeText={setConfirmPassword}
+                            placeholder="Confirmar senha"
+                            placeholderTextColor={color.textMuted}
+                            secureTextEntry={!showConfirmPassword}
+                            autoCapitalize="none"
+                        />
+                        <TouchableOpacity
+                            style={styles.eyeButton}
+                            onPress={() => setShowConfirmPassword(!showConfirmPassword)}
+                        >
+                            <Ionicons
+                                name={showConfirmPassword ? 'eye-off' : 'eye'}
+                                size={20}
+                                color={color.textMuted}
+                            />
+                        </TouchableOpacity>
+                    </View>
 
-                {/* Requisitos da senha */}
-                <View style={styles.requirementsContainer}>
-                    <Text style={styles.requirementText}>
-                        • Pelo menos 8 caracteres
-                    </Text>
-                    <Text style={styles.requirementText}>
-                        • Uma letra minúscula
-                    </Text>
-                    <Text style={styles.requirementText}>
-                        • Uma letra maiúscula
-                    </Text>
-                    <Text style={styles.requirementText}>
-                        • Um número
-                    </Text>
+                    {/* Requisitos da senha */}
+                    <View style={styles.requirementsContainer}>
+                        <Text style={styles.requirementText}>
+                            • Pelo menos 8 caracteres
+                        </Text>
+                        <Text style={styles.requirementText}>
+                            • Uma letra minúscula
+                        </Text>
+                        <Text style={styles.requirementText}>
+                            • Uma letra maiúscula
+                        </Text>
+                        <Text style={styles.requirementText}>
+                            • Um número
+                        </Text>
+                    </View>
                 </View>
 
                 {/* Botão confirmar */}
@@ -349,116 +350,136 @@ const ForgotPasswordStep = ({ phoneNumber, existingUser, onPasswordReset, onBack
 const styles = StyleSheet.create({
     keyboardView: {
         flex: 1,
-        width: '100%',
+        width: '100%'
     },
     container: {
         width: '100%',
-        paddingVertical: 20,
+        paddingHorizontal: spacing.lg,
+        paddingVertical: spacing.sm
     },
     title: {
-        fontSize: 24,
-        color: colors.black,
+        fontSize: 22,
+        lineHeight: 28,
+        color: color.textPrimary,
         fontFamily: fonts.Bold,
         textAlign: 'left',
-        marginBottom: 8,
+        marginBottom: 6
     },
     subtitle: {
-        fontSize: 17,
-        color: colors.grey80,
-        fontFamily: fonts.Medium,
-        marginBottom: 32,
-        lineHeight: 22,
+        fontSize: 13,
+        lineHeight: 19,
+        color: color.textSecondary,
+        fontFamily: fonts.Regular,
+        marginBottom: spacing.sm
+    },
+    card: {
+        borderWidth: 1,
+        borderColor: color.glassStroke,
+        borderRadius: radius.lg,
+        backgroundColor: color.panelSoft,
+        shadowColor: '#0E1522',
+        shadowOffset: { width: 0, height: 12 },
+        shadowOpacity: 0.16,
+        shadowRadius: 20,
+        elevation: 9,
+        padding: spacing.sm,
+        marginBottom: spacing.sm
     },
     otpContainer: {
         flexDirection: 'row',
         justifyContent: 'space-between',
-        marginBottom: 24,
-        gap: 8,
+        marginBottom: spacing.sm,
+        gap: 6
     },
     otpInput: {
         flex: 1,
-        maxWidth: 42,
-        height: 48,
-        borderWidth: 2,
-        borderColor: colors.lightGrey,
-        borderRadius: 8,
+        maxWidth: 40,
+        height: 44,
+        borderWidth: 1,
+        borderColor: color.borderStrong,
+        borderRadius: radius.sm,
         textAlign: 'center',
-        fontSize: 18,
+        fontSize: 16,
         fontFamily: fonts.Bold,
-        color: colors.black,
-        backgroundColor: colors.white,
+        color: color.textPrimary,
+        backgroundColor: color.surfaceMuted
     },
     resendContainer: {
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'center',
-        marginBottom: 24,
+        marginBottom: 2
     },
     resendText: {
-        fontSize: 17,
-        color: colors.grey80,
-        fontFamily: fonts.Medium,
+        fontSize: 13,
+        lineHeight: 18,
+        color: color.textSecondary,
+        fontFamily: fonts.Medium
     },
     resendLink: {
-        color: colors.leafGreen,
+        color: color.accent,
         textDecorationLine: 'underline',
         fontFamily: fonts.Medium,
-        fontSize: 17,
+        fontSize: 13,
+        lineHeight: 18
     },
     timerText: {
-        color: colors.greyPlaceholder,
+        color: color.textMuted,
         fontFamily: fonts.Medium,
-        fontSize: 17,
+        fontSize: 13,
+        lineHeight: 18
     },
     passwordContainer: {
         flexDirection: 'row',
         alignItems: 'center',
-        borderWidth: 2,
-        borderColor: colors.lightGrey,
-        borderRadius: 8,
-        backgroundColor: colors.white,
-        marginBottom: 16,
+        borderWidth: 1,
+        borderColor: color.border,
+        borderRadius: radius.md,
+        backgroundColor: color.surfaceMuted,
+        marginBottom: 10,
+        minHeight: 46
     },
     passwordInput: {
         flex: 1,
-        paddingHorizontal: 16,
-        paddingVertical: 16,
-        fontSize: 17,
+        paddingHorizontal: 12,
+        paddingVertical: 10,
+        fontSize: 14,
+        lineHeight: 18,
         fontFamily: fonts.Medium,
-        color: colors.black,
+        color: color.textPrimary
     },
     eyeButton: {
-        paddingHorizontal: 16,
-        paddingVertical: 16,
-    },
-    eyeButtonText: {
-        fontSize: 20,
+        paddingHorizontal: 12,
+        paddingVertical: 10
     },
     requirementsContainer: {
-        marginTop: 8,
-        marginBottom: 24,
-        padding: 12,
-        backgroundColor: colors.lightGrey,
-        borderRadius: 8,
+        marginTop: 4,
+        marginBottom: 2,
+        padding: 10,
+        backgroundColor: color.surface,
+        borderRadius: radius.md,
+        borderWidth: 1,
+        borderColor: color.border
     },
     requirementText: {
-        fontSize: 14,
-        color: colors.greyPlaceholder,
+        fontSize: 12,
+        lineHeight: 16,
+        color: color.textSecondary,
         fontFamily: fonts.Regular,
-        marginBottom: 4,
+        marginBottom: 4
     },
     backButton: {
         alignItems: 'center',
-        paddingVertical: 12,
-        marginTop: 8,
+        paddingVertical: 10,
+        marginTop: 2
     },
     backButtonText: {
-        color: colors.leafGreen,
-        fontSize: 17,
+        color: color.textSecondary,
+        fontSize: 13,
+        lineHeight: 18,
         fontFamily: fonts.Medium,
-        textDecorationLine: 'underline',
-    },
+        textDecorationLine: 'underline'
+    }
 });
 
 export default ForgotPasswordStep;
-

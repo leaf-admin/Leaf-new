@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useCallback } from 'react';
-import { View, Platform } from 'react-native';
+import { Alert, View, Platform } from 'react-native';
 import { Provider } from 'react-redux';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import * as SplashScreen from 'expo-splash-screen';
@@ -15,8 +15,36 @@ import WebSocketManager from './src/services/WebSocketManager';
 import { setupAxiosInterceptor } from './src/utils/axiosInterceptor';
 import Logger from './src/utils/Logger';
 import NetworkStatusBanner from './src/components/NetworkStatusBanner';
+import { toUserFriendlyMessage } from './src/utils/friendlyErrorMessages';
 import './src/i18n'; // Inicializar i18n
 import './src/utils/ReanimatedWrapper'; // Suprimir warnings do Reanimated
+
+function installGlobalFriendlyAlertPatch() {
+  if (!Alert?.alert || global.__LEAF_ALERT_PATCHED__) {
+    return;
+  }
+
+  const originalAlert = Alert.alert.bind(Alert);
+  global.__LEAF_ALERT_PATCHED__ = true;
+
+  Alert.alert = (title, message, buttons, options) => {
+    // Alguns fluxos usam Alert.alert('mensagem-unica')
+    if (typeof message === 'undefined') {
+      const friendlySingleMessage = toUserFriendlyMessage(title, {
+        context: 'api',
+        fallbackMessage: 'Nao foi possivel concluir esta acao agora. Tente novamente.'
+      });
+      return originalAlert('Atencao', friendlySingleMessage, buttons, options);
+    }
+
+    const friendlyMessage = toUserFriendlyMessage(message, {
+      context: 'api',
+      fallbackMessage: 'Nao foi possivel concluir esta acao agora. Tente novamente.'
+    });
+
+    return originalAlert(title || 'Atencao', friendlyMessage, buttons, options);
+  };
+}
 
 // ✅ CRÍTICO: Manter a splash screen nativa visível desde o início
 // Isso DEVE ser chamado antes de qualquer renderização
@@ -52,6 +80,7 @@ if (Platform.OS !== 'web' && DevClient) {
 
 // ✅ Configurar interceptor axios para CORS
 setupAxiosInterceptor();
+installGlobalFriendlyAlertPatch();
 
 export default function App() {
   const [appIsReady, setAppIsReady] = useState(false);

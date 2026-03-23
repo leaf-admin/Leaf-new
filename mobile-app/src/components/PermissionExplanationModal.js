@@ -28,7 +28,7 @@ const PermissionExplanationModal = ({
       if (locationType === 'background') {
         return {
           title: '🚗 Receba corridas mesmo com o app em segundo plano',
-          text: 'Para receber solicitações de corrida enquanto você estiver online como motorista, a Leaf precisa acessar sua localização mesmo quando o app estiver em segundo plano.\n\nA localização é utilizada apenas enquanto você estiver online e nunca fora desse contexto.',
+          text: 'Este app coleta dados de localização para permitir que você receba corridas e mantenha a navegação ativa mesmo quando o app estiver fechado ou não em uso.\n\nA localização em segundo plano é utilizada apenas enquanto você estiver online como motorista, para operação da corrida e segurança. A Leaf não utiliza essa permissão para anúncios.',
           acceptButton: 'Permitir enquanto estiver online',
           cancelButton: 'Agora não',
         };
@@ -227,4 +227,3 @@ const styles = StyleSheet.create({
 });
 
 export default PermissionExplanationModal;
-

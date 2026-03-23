@@ -6,7 +6,7 @@ import {
     Image,
     Text,
     Platform,
-    Alert,
+    Alert as NativeAlert,
     ScrollView,
     ActivityIndicator,
     TextInput,
@@ -49,11 +49,11 @@ import { addBooking } from '../../common-local/actions/bookingactions';
 import PaymentBypassService from '../../services/PaymentBypassService';
 import RatingModal from '../common/RatingModal';
 import DriverAvailabilityService from '../../services/DriverAvailabilityService';
-import ProfileToggle from '../ProfileToggle';
 import { AnimatedButton } from '../design-system/AnimatedButton';
 import { Typography } from '../design-system/Typography';
 import { colors as semanticColors } from '../../common-local/theme';
 import { getSelfHostedApiUrl } from '../../config/ApiConfig';
+import { toUserFriendlyMessage } from '../../utils/friendlyErrorMessages';
 
 function getStreetAndNumber(address) {
     if (!address) return '';
@@ -73,6 +73,20 @@ const ROUTE_RECALC_CONFIG = {
     }
 };
 const DESTINATION_CHANGE_FORCE_RECALC_KM = 0.05;
+
+const Alert = {
+    ...NativeAlert,
+    alert: (title, message, buttons, options) =>
+        NativeAlert.alert(
+            title || 'Atencao',
+            toUserFriendlyMessage(message, {
+                context: 'trip',
+                fallbackMessage: 'Nao foi possivel concluir esta acao agora. Tente novamente.'
+            }),
+            buttons,
+            options
+        )
+};
 
 // ✅ Componente COMPLETAMENTE INDEPENDENTE para o timer - gerencia seu próprio estado
 const SearchingTimer = ({ tripStatus, style }) => {
@@ -260,7 +274,9 @@ function PassengerUI(props) {
     const [geofenceStatus, setGeofenceStatus] = useState({
         isChecking: false,
         outOfCoverage: false,
-        message: ''
+        message: '',
+        pickupOutOfCoverage: false,
+        destinationOutOfCoverage: false
     });
     const [connectionStatus, setConnectionStatus] = useState({
         connected: false,
@@ -570,6 +586,7 @@ function PassengerUI(props) {
     }, [tripStatus, currentLocation, mapRef, tripdata]);
 
     const [isDevPreviewActive, setIsDevPreviewActive] = useState(false); // ✅ Preview visual em modo desenvolvimento
+    const [cardVariant, setCardVariant] = useState('A'); // ✅ A/B visual do card de origem/destino
     const [driverAcceptedAt, setDriverAcceptedAt] = useState(null); // ✅ Timestamp quando motorista aceitou (para cálculo de taxa)
     const [embarkTimer, setEmbarkTimer] = useState(120); // ✅ Timer decrescente quando motorista chegou (02:00 = 120 segundos)
     const embarkTimerIntervalRef = useRef(null); // ✅ Ref para o intervalo do timer de embarque
@@ -937,12 +954,13 @@ function PassengerUI(props) {
             name: 'Leaf Plus',
             image: 'https://cdn.pixabay.com/photo/2017/06/03/08/11/car-2368193_640.png',
             min_fare: 8.50,
-            base_fare: 3.13,
-            rate_per_hour: 16.20,
-            rate_per_unit_distance: 1.42,
+            base_fare: 2.79,
+            fixed_fee: 1.10,
+            rate_per_hour: 15.60,
+            rate_per_unit_distance: 1.53,
             convenience_fee_type: 'flat',
             convenience_fees: 0,
-            extra_info: 'Capacity: 3, Type: Taxi',
+            extra_info: 'Capacity: 4, Type: Taxi',
             fleet_admin_fee: 1.55,
             pos: 5,
             id: 'type1'
@@ -950,18 +968,154 @@ function PassengerUI(props) {
         {
             name: 'Leaf Elite',
             image: 'https://cdn.pixabay.com/photo/2022/01/23/18/20/car-6961567_640.png',
-            min_fare: 11.50,
-            base_fare: 5.59,
-            rate_per_hour: 18.00,
-            rate_per_unit_distance: 2.29,
+            min_fare: 10.50,
+            base_fare: 4.98,
+            fixed_fee: 1.80,
+            rate_per_hour: 17.40,
+            rate_per_unit_distance: 2.41,
             convenience_fee_type: 'flat',
             convenience_fees: 0,
             extra_info: 'Capacity: 4, Type: Sedan',
             fleet_admin_fee: 3.2,
             pos: 10,
             id: 'type3'
+        },
+        {
+            name: 'Leaf Moto',
+            image: 'https://cdn.pixabay.com/photo/2013/07/13/12/46/motorcycle-160175_640.png',
+            min_fare: 6.90,
+            base_fare: 2.18,
+            fixed_fee: 0.86,
+            rate_per_hour: 12.17,
+            rate_per_unit_distance: 1.19,
+            convenience_fee_type: 'flat',
+            convenience_fees: 0,
+            extra_info: 'Capacity: 1, Type: Moto',
+            fleet_admin_fee: 1.1,
+            pos: 15,
+            id: 'type_moto'
         }
     ], []);
+
+    const parseCoordinateValue = useCallback((value) => {
+        if (value === null || value === undefined || value === '') {
+            return null;
+        }
+        const numeric = Number(
+            typeof value === 'string'
+                ? value.replace(',', '.')
+                : value
+        );
+        return Number.isFinite(numeric) ? numeric : null;
+    }, []);
+
+    const buildFallbackRouteMetrics = useCallback((pickup, drop) => {
+        const pickupLat = parseCoordinateValue(pickup?.lat);
+        const pickupLng = parseCoordinateValue(pickup?.lng);
+        const dropLat = parseCoordinateValue(drop?.lat);
+        const dropLng = parseCoordinateValue(drop?.lng);
+
+        if (pickupLat === null || pickupLng === null || dropLat === null || dropLng === null) {
+            return {
+                distanceInKm: 0.8,
+                timeInSecs: 120
+            };
+        }
+
+        const straightDistance = Number(GetDistance(pickupLat, pickupLng, dropLat, dropLng));
+        const normalizedStraightDistance = Number.isFinite(straightDistance) && straightDistance > 0
+            ? straightDistance
+            : 0.8;
+        const routeDistanceKm = Math.max(0.8, Number((normalizedStraightDistance * 1.25).toFixed(2)));
+        const avgSpeedKmH = 28;
+        const timeInSecs = Math.max(120, Math.round((routeDistanceKm / avgSpeedKmH) * 3600));
+
+        return {
+            distanceInKm: routeDistanceKm,
+            timeInSecs
+        };
+    }, [parseCoordinateValue]);
+
+    const normalizeRouteMetrics = useCallback((pickup, drop, rawDistance, rawTime) => {
+        const fallbackMetrics = buildFallbackRouteMetrics(pickup, drop);
+        const parsedDistance = parseCoordinateValue(rawDistance);
+        const parsedTime = parseCoordinateValue(rawTime);
+
+        return {
+            distanceInKm: parsedDistance && parsedDistance > 0 ? parsedDistance : fallbackMetrics.distanceInKm,
+            timeInSecs: parsedTime && parsedTime > 0 ? parsedTime : fallbackMetrics.timeInSecs
+        };
+    }, [buildFallbackRouteMetrics, parseCoordinateValue]);
+
+    const emitFareDebug = useCallback((label, payload) => {
+        try {
+            // Release-safe diagnostics (Logger.log não aparece em produção).
+            console.log(`[FARE_DEBUG] ${label}`, JSON.stringify(payload));
+        } catch (error) {
+            console.log(`[FARE_DEBUG] ${label}`, payload);
+        }
+    }, []);
+
+    const buildFallbackEstimate = useCallback((car, pickup, drop, reason = 'route_unavailable') => {
+        if (!car) {
+            return null;
+        }
+
+        const pickupLat = parseCoordinateValue(pickup?.lat);
+        const pickupLng = parseCoordinateValue(pickup?.lng);
+        const dropLat = parseCoordinateValue(drop?.lat);
+        const dropLng = parseCoordinateValue(drop?.lng);
+        if (pickupLat === null || pickupLng === null || dropLat === null || dropLng === null) {
+            return null;
+        }
+
+        const fallbackMetrics = buildFallbackRouteMetrics(pickup, drop);
+        const routeDistanceKm = fallbackMetrics.distanceInKm;
+        const timeInSecs = fallbackMetrics.timeInSecs;
+
+        let fare = 0;
+        try {
+            const { FareCalculator } = require('../../common/sharedFunctions');
+            const fareResult = FareCalculator(routeDistanceKm, timeInSecs, car, {}, 2, null, 'car', null);
+            fare = Number(fareResult?.grandTotal || 0);
+            if (!Number.isFinite(fare) || fare <= 0) {
+                throw new Error('Fallback fare inválido');
+            }
+        } catch (_) {
+            const baseFare = Number(car.base_fare || 0);
+            const perHour = Number(car.rate_per_hour || 0);
+            const perKm = Number(car.rate_per_unit_distance || 0);
+            const byDistanceAndTime = baseFare + (routeDistanceKm * perKm) + ((timeInSecs / 3600) * perHour);
+            const minFare = Number(car.min_fare || 0);
+            fare = Number(Math.max(minFare, byDistanceAndTime).toFixed(2));
+        }
+
+        emitFareDebug('fallback_estimate', {
+            reason,
+            car: car?.name,
+            minFare: Number(car?.min_fare || 0),
+            distanceInKm: routeDistanceKm,
+            timeInSecs,
+            fare
+        });
+
+        return {
+            pickup: { coords: { lat: pickupLat, lng: pickupLng }, description: pickup?.add },
+            drop: { coords: { lat: dropLat, lng: dropLng }, description: drop?.add },
+            carDetails: car.name,
+            routeDetails: {
+                distance_in_km: routeDistanceKm,
+                time_in_secs: timeInSecs,
+                polylinePoints: null,
+                source: 'local_fallback',
+                reason
+            },
+            estimateFare: fare,
+            estimateTime: timeInSecs,
+            estimateDistance: routeDistanceKm,
+            isFallbackEstimate: true
+        };
+    }, [buildFallbackRouteMetrics, parseCoordinateValue, emitFareDebug]);
 
     // useEffect EXATO do MapScreen antigo para calcular rota quando destino muda
     useEffect(() => {
@@ -981,6 +1135,7 @@ function PassengerUI(props) {
         const fetchEstimates = async () => {
             // ✅ Marcar como calculando
             isCalculatingRef.current = true;
+            setIsCalculatingRoute(true);
 
             try {
                 // Testar biblioteca polyline primeiro
@@ -1008,8 +1163,14 @@ function PassengerUI(props) {
                         // ✅ OTIMIZAÇÃO: Se temos fareData da rota completa, usar ele (evita 2ª chamada à API)
                         if (completeRouteFareData && tripStatus === 'accepted') {
                             Logger.log('✅ [Fare] Usando fareData da rota completa (1 única chamada à API)');
-                            const distance = completeRouteFareData.distance_km || 0;
-                            const time = completeRouteFareData.time_secs || 0;
+                            const normalizedRoute = normalizeRouteMetrics(
+                                tripdata.pickup,
+                                tripdata.drop,
+                                completeRouteFareData.distance_km,
+                                completeRouteFareData.time_secs
+                            );
+                            const distance = normalizedRoute.distanceInKm;
+                            const time = normalizedRoute.timeInSecs;
 
                             // ✅ Calcular pedágio usando polyline do leg2
                             let tollFee = 0;
@@ -1027,11 +1188,11 @@ function PassengerUI(props) {
                                 }
                             }
 
-                            // ✅ Calcular tarifa usando FareCalculator
-                            try {
-                                const { FareCalculator } = require('../../common/sharedFunctions');
-                                const fareResult = FareCalculator(
-                                    distance,
+                                // ✅ Calcular tarifa usando FareCalculator
+                                try {
+                                    const { FareCalculator } = require('../../common/sharedFunctions');
+                                    const fareResult = FareCalculator(
+                                        distance,
                                     time,
                                     car,
                                     {},
@@ -1040,6 +1201,15 @@ function PassengerUI(props) {
                                     'car',
                                     tollFee > 0 ? tollFee : null
                                 );
+                                emitFareDebug('initial_complete_route_fare', {
+                                    car: car?.name,
+                                    source: 'completeRouteFareData',
+                                    distance,
+                                    time,
+                                    tollFee,
+                                    minFare: Number(car?.min_fare || 0),
+                                    fare: Number(fareResult?.grandTotal || 0)
+                                });
 
                                 estimates[car.name] = {
                                     pickup: { coords: { lat: tripdata.pickup.lat, lng: tripdata.pickup.lng }, description: tripdata.pickup.add },
@@ -1100,8 +1270,14 @@ function PassengerUI(props) {
                                     }
                                 } else if (estimateObj.estimateObject.routeDetails) {
                                     const routeDetails = estimateObj.estimateObject.routeDetails;
-                                    const distance = routeDetails.distance_in_km || 0;
-                                    const time = routeDetails.time_in_secs || 0;
+                                    const normalizedRoute = normalizeRouteMetrics(
+                                        tripdata.pickup,
+                                        tripdata.drop,
+                                        routeDetails.distance_in_km,
+                                        routeDetails.time_in_secs
+                                    );
+                                    const distance = normalizedRoute.distanceInKm;
+                                    const time = normalizedRoute.timeInSecs;
 
                                     // CÁLCULO REAL DE PEDÁGIO USANDO A FUNÇÃO QUE JÁ FUNCIONAVA!
                                     let tollFee = 0;
@@ -1153,12 +1329,30 @@ function PassengerUI(props) {
 
                                         estimateFare = fareResult.grandTotal;
                                         estimateTime = time;
+                                        emitFareDebug('initial_directions_fare', {
+                                            car: car?.name,
+                                            source: 'directions',
+                                            distance,
+                                            time,
+                                            tollFee,
+                                            minFare: Number(car?.min_fare || 0),
+                                            fare: Number(fareResult?.grandTotal || 0)
+                                        });
 
                                     } catch (error) {
                                         Logger.error(`❌ Erro ao calcular tarifa para ${car.name}:`, error);
                                         // Fallback para cálculo básico
                                         estimateFare = (distance * (car.rate_per_unit_distance || 0)) + (car.base_fare || 0) + tollFee;
                                         estimateTime = time;
+                                        emitFareDebug('initial_directions_fare_basic_fallback', {
+                                            car: car?.name,
+                                            source: 'directions_basic_fallback',
+                                            distance,
+                                            time,
+                                            tollFee,
+                                            minFare: Number(car?.min_fare || 0),
+                                            fare: Number(estimateFare || 0)
+                                        });
                                     }
                                 }
 
@@ -1187,41 +1381,21 @@ function PassengerUI(props) {
                                 }
                             } else {
                                 Logger.log(`❌ Erro no estimateObj para ${car.name}:`, estimateObj);
-                                estimates[car.name] = null;
+                                estimates[car.name] = buildFallbackEstimate(
+                                    car,
+                                    tripdata.pickup,
+                                    tripdata.drop,
+                                    'prepare_estimate_error'
+                                );
                             }
                         } catch (error) {
                             Logger.error(`💥 Erro ao processar ${car.name}:`, error);
-
-                            // Se houve erro, tentar cálculo básico
-
-                            try {
-                                // Dados básicos de teste: 5km, 15 minutos
-                                const basicDistance = 5;
-                                const basicTime = 15 * 60; // 15 minutos em segundos
-
-                                const { FareCalculator } = require('../../common/sharedFunctions');
-                                const basicFareResult = FareCalculator(
-                                    basicDistance,
-                                    basicTime,
-                                    car,
-                                    {}, // instructionData
-                                    2, // decimal
-                                    null, // routePoints
-                                    'car', // vehicleType
-                                    0 // sem pedágio
-                                );
-
-
-                                estimates[car.name] = {
-                                    estimateFare: basicFareResult.grandTotal,
-                                    estimateTime: basicTime,
-                                    isBasicCalculation: true
-                                };
-
-                            } catch (basicError) {
-                                Logger.error(`❌ Erro também no cálculo básico para ${car.name}:`, basicError);
-                                estimates[car.name] = null;
-                            }
+                            estimates[car.name] = buildFallbackEstimate(
+                                car,
+                                tripdata.pickup,
+                                tripdata.drop,
+                                'estimate_exception'
+                            );
                         }
                     }
 
@@ -1267,6 +1441,7 @@ function PassengerUI(props) {
             } finally {
                 // ✅ Sempre marcar como não calculando ao final
                 isCalculatingRef.current = false;
+                setIsCalculatingRoute(false);
                 // ✅ Atualizar referência dos últimos dados calculados para permitir recálculo quando endereços mudarem
                 lastCalculationRef.current = {
                     pickup: tripdata.pickup?.add || tripdata.pickup?.lat,
@@ -1294,7 +1469,7 @@ function PassengerUI(props) {
             tripStatus !== 'accepted' && tripStatus !== 'started' && tripStatus !== 'searching') {
             fetchEstimates();
         }
-    }, [tripdata.pickup?.add, tripdata.pickup?.lat, tripdata.drop?.add, tripdata.drop?.lat, fixedCarTypes, tripStatus]);
+    }, [tripdata.pickup?.add, tripdata.pickup?.lat, tripdata.drop?.add, tripdata.drop?.lat, fixedCarTypes, tripStatus, buildFallbackEstimate, normalizeRouteMetrics, emitFareDebug]);
 
     // ✅ ATUALIZAR PREÇO A CADA MINUTO enquanto o card estiver aberto
     // Isso garante que o preço sempre reflita as condições de trânsito atuais
@@ -1353,8 +1528,14 @@ function PassengerUI(props) {
                                 // ✅ OTIMIZAÇÃO: Se temos fareData da rota completa, usar ele (evita 2ª chamada à API)
                                 if (completeRouteFareData && tripStatus === 'accepted') {
                                     Logger.log('✅ [Fare] Usando fareData da rota completa (1 única chamada à API)');
-                                    const distance = completeRouteFareData.distance_km || 0;
-                                    const time = completeRouteFareData.time_secs || 0;
+                                    const normalizedRoute = normalizeRouteMetrics(
+                                        tripdata.pickup,
+                                        tripdata.drop,
+                                        completeRouteFareData.distance_km,
+                                        completeRouteFareData.time_secs
+                                    );
+                                    const distance = normalizedRoute.distanceInKm;
+                                    const time = normalizedRoute.timeInSecs;
 
                                     // ✅ Calcular pedágio usando polyline do leg2
                                     let tollFee = 0;
@@ -1382,13 +1563,22 @@ function PassengerUI(props) {
                                             {},
                                             2,
                                             null,
-                                            'car',
-                                            tollFee > 0 ? tollFee : null
-                                        );
+                                        'car',
+                                        tollFee > 0 ? tollFee : null
+                                    );
+                                    emitFareDebug('price_update_complete_route_fare', {
+                                        car: car?.name,
+                                        source: 'completeRouteFareData',
+                                        distance,
+                                        time,
+                                        tollFee,
+                                        minFare: Number(car?.min_fare || 0),
+                                        fare: Number(fareResult?.grandTotal || 0)
+                                    });
 
-                                        estimates[car.name] = {
-                                            pickup: { coords: { lat: tripdata.pickup.lat, lng: tripdata.pickup.lng }, description: tripdata.pickup.add },
-                                            drop: { coords: { lat: tripdata.drop.lat, lng: tripdata.drop.lng }, description: tripdata.drop.add },
+                                    estimates[car.name] = {
+                                        pickup: { coords: { lat: tripdata.pickup.lat, lng: tripdata.pickup.lng }, description: tripdata.pickup.add },
+                                        drop: { coords: { lat: tripdata.drop.lat, lng: tripdata.drop.lng }, description: tripdata.drop.add },
                                             carDetails: car.name,
                                             routeDetails: {
                                                 distance_in_km: distance,
@@ -1415,8 +1605,14 @@ function PassengerUI(props) {
                                         const routeDetails = estimateObj.estimateObject.routeDetails;
 
                                         if (routeDetails) {
-                                            const distance = routeDetails.distance_in_km || 0;
-                                            const time = routeDetails.time_in_secs || 0;
+                                            const normalizedRoute = normalizeRouteMetrics(
+                                                tripdata.pickup,
+                                                tripdata.drop,
+                                                routeDetails.distance_in_km,
+                                                routeDetails.time_in_secs
+                                            );
+                                            const distance = normalizedRoute.distanceInKm;
+                                            const time = normalizedRoute.timeInSecs;
 
                                             // ✅ Calcular pedágio
                                             let tollFee = 0;
@@ -1447,6 +1643,15 @@ function PassengerUI(props) {
                                                     'car',
                                                     tollFee > 0 ? tollFee : null
                                                 );
+                                                emitFareDebug('price_update_directions_fare', {
+                                                    car: car?.name,
+                                                    source: 'directions',
+                                                    distance,
+                                                    time,
+                                                    tollFee,
+                                                    minFare: Number(car?.min_fare || 0),
+                                                    fare: Number(fareResult?.grandTotal || 0)
+                                                });
 
                                                 estimates[car.name] = {
                                                     ...estimateObj.estimateObject,
@@ -1515,7 +1720,7 @@ function PassengerUI(props) {
             Logger.log('🛑 [PriceUpdate] Parando atualização automática de preço');
             clearInterval(updateInterval);
         };
-    }, [tripStatus, tripdata.pickup, tripdata.drop, fixedCarTypes]);
+    }, [tripStatus, tripdata.pickup, tripdata.drop, fixedCarTypes, normalizeRouteMetrics, emitFareDebug]);
 
     // ✅ Serviço de disponibilidade de motoristas em tempo real
     useEffect(() => {
@@ -1558,17 +1763,32 @@ function PassengerUI(props) {
         };
     }, [tripdata.pickup?.lat, tripdata.pickup?.lng, settings?.driverRadius, geofenceStatus.outOfCoverage]);
 
+    const checkGeofencePoint = useCallback(async (lat, lng) => {
+        const endpoint = getSelfHostedApiUrl('/api/geofence/check');
+        const response = await fetch(`${endpoint}?lat=${lat}&lng=${lng}`);
+        if (!response.ok) {
+            throw new Error(`geofence_check_http_${response.status}`);
+        }
+        const payload = await response.json();
+        return {
+            isAllowed: payload?.isAllowed === true,
+            reason: payload?.reason || ''
+        };
+    }, []);
+
     useEffect(() => {
         const pickup = tripdata?.pickup;
         const destination = tripdata?.drop;
         const hasPickup = !!(pickup?.lat && pickup?.lng);
         const hasDestination = !!(destination?.lat && destination?.lng);
 
-        if (!hasPickup || !hasDestination) {
+        if (!hasPickup) {
             setGeofenceStatus({
                 isChecking: false,
                 outOfCoverage: false,
-                message: ''
+                message: '',
+                pickupOutOfCoverage: false,
+                destinationOutOfCoverage: false
             });
             return;
         }
@@ -1578,33 +1798,61 @@ function PassengerUI(props) {
             setGeofenceStatus((prev) => ({ ...prev, isChecking: true }));
 
             try {
-                const endpoint = getSelfHostedApiUrl('/api/geofence/check');
-                const [pickupResponse, destinationResponse] = await Promise.all([
-                    fetch(`${endpoint}?lat=${pickup.lat}&lng=${pickup.lng}`),
-                    fetch(`${endpoint}?lat=${destination.lat}&lng=${destination.lng}`)
-                ]);
+                const pickupCheck = await checkGeofencePoint(pickup.lat, pickup.lng);
+                if (cancelled) return;
 
-                const pickupJson = pickupResponse.ok ? await pickupResponse.json() : null;
-                const destinationJson = destinationResponse.ok ? await destinationResponse.json() : null;
-
-                const pickupAllowed = pickupJson?.isAllowed === true;
-                const destinationAllowed = destinationJson?.isAllowed === true;
-                const outOfCoverage = !pickupAllowed || !destinationAllowed;
-
-                if (!cancelled) {
+                if (!pickupCheck.isAllowed) {
                     setGeofenceStatus({
                         isChecking: false,
-                        outOfCoverage,
-                        message: outOfCoverage ? 'A Leaf ainda não está disponível na sua região' : ''
+                        outOfCoverage: true,
+                        message: 'A Leaf ainda não está disponível na sua região',
+                        pickupOutOfCoverage: true,
+                        destinationOutOfCoverage: false
                     });
+                    return;
                 }
+
+                if (!hasDestination) {
+                    setGeofenceStatus({
+                        isChecking: false,
+                        outOfCoverage: false,
+                        message: '',
+                        pickupOutOfCoverage: false,
+                        destinationOutOfCoverage: false
+                    });
+                    return;
+                }
+
+                const destinationCheck = await checkGeofencePoint(destination.lat, destination.lng);
+                if (cancelled) return;
+
+                if (!destinationCheck.isAllowed) {
+                    setGeofenceStatus({
+                        isChecking: false,
+                        outOfCoverage: true,
+                        message: 'Destino fora da área de cobertura da Leaf',
+                        pickupOutOfCoverage: false,
+                        destinationOutOfCoverage: true
+                    });
+                    return;
+                }
+
+                setGeofenceStatus({
+                    isChecking: false,
+                    outOfCoverage: false,
+                    message: '',
+                    pickupOutOfCoverage: false,
+                    destinationOutOfCoverage: false
+                });
             } catch (error) {
                 Logger.warn('⚠️ [PassengerUI] Falha ao validar geofence no frontend:', error?.message);
                 if (!cancelled) {
                     setGeofenceStatus({
                         isChecking: false,
                         outOfCoverage: false,
-                        message: ''
+                        message: '',
+                        pickupOutOfCoverage: false,
+                        destinationOutOfCoverage: false
                     });
                 }
             }
@@ -1614,7 +1862,7 @@ function PassengerUI(props) {
         return () => {
             cancelled = true;
         };
-    }, [tripdata?.pickup?.lat, tripdata?.pickup?.lng, tripdata?.drop?.lat, tripdata?.drop?.lng]);
+    }, [tripdata?.pickup?.lat, tripdata?.pickup?.lng, tripdata?.drop?.lat, tripdata?.drop?.lng, checkGeofencePoint]);
 
     // ✅ Durante a busca, aumentar frequência de atualização e notificar NewMapScreen
     useEffect(() => {
@@ -1701,6 +1949,65 @@ function PassengerUI(props) {
         const interval = setInterval(updateConnectionStatus, 5000); // Aumentado para 5 segundos
         return () => clearInterval(interval);
     }, [auth.uid]);
+
+    const resolveBookingErrorAlert = useCallback((error) => {
+        const code = String(error?.code || error?.payload?.code || '').toUpperCase();
+        const rawMessage = String(error?.message || error?.error || error?.payload?.message || '').toLowerCase();
+
+        if (code === 'NO_DRIVERS_AVAILABLE' || rawMessage.includes('não há motoristas') || rawMessage.includes('nao ha motoristas')) {
+            return {
+                title: 'Sem motoristas disponíveis',
+                message: 'No momento, não há motoristas disponíveis nesta região. Você pode tentar novamente em alguns instantes ou verificar outras áreas próximas.'
+            };
+        }
+
+        if (code === 'QUEUE_BACKPRESSURE') {
+            return {
+                title: 'Alta demanda na região',
+                message: 'Estamos com alta demanda na sua região agora. Tente novamente em alguns segundos.'
+            };
+        }
+
+        if (code === 'RATE_LIMIT_EXCEEDED') {
+            return {
+                title: 'Muitas tentativas',
+                message: error?.message || 'Você excedeu o limite de tentativas. Aguarde alguns segundos e tente novamente.'
+            };
+        }
+
+        if (code === 'VALIDATION_ERROR' || rawMessage.includes('invalid') || rawMessage.includes('inválido')) {
+            return {
+                title: 'Dados inválidos',
+                message: 'Não foi possível validar os dados da corrida. Verifique origem e destino e tente novamente.'
+            };
+        }
+
+        if (code.startsWith('GEOFENCE') || rawMessage.includes('região') || rawMessage.includes('regiao')) {
+            return {
+                title: 'Fora da área de cobertura',
+                message: 'A Leaf ainda não está disponível na sua região.'
+            };
+        }
+
+        if (rawMessage.includes('timeout')) {
+            return {
+                title: 'Tempo de espera esgotado',
+                message: 'A solicitação demorou mais que o esperado. Em períodos de alta latência, o processamento pode levar até 2 minutos.'
+            };
+        }
+
+        if (rawMessage.includes('network') || rawMessage.includes('conexão') || rawMessage.includes('connection')) {
+            return {
+                title: 'Erro de conexão',
+                message: 'Não foi possível se comunicar com o servidor. Verifique sua internet e tente novamente.'
+            };
+        }
+
+        return {
+            title: 'Erro ao Criar Reserva',
+            message: error?.message || 'Não foi possível criar a reserva no momento. Tente novamente.'
+        };
+    }, []);
 
     useEffect(() => {
         const webSocketManager = WebSocketManager.getInstance();
@@ -1803,9 +2110,10 @@ function PassengerUI(props) {
                 setTripStatus('idle');
                 setBookModelLoading(false);
                 isBookingInProgressRef.current = false;
+                const alertData = resolveBookingErrorAlert(data);
                 Alert.alert(
-                    'Não foi possível criar a reserva',
-                    'Por favor, verifique sua conexão e tente novamente. Se o problema persistir, entre em contato com o suporte.',
+                    alertData.title,
+                    alertData.message,
                     [{ text: 'OK' }]
                 );
             }
@@ -1817,27 +2125,11 @@ function PassengerUI(props) {
             setTripStatus('idle');
             setBookModelLoading(false);
             isBookingInProgressRef.current = false;
-
-            // ✅ Mensagem de erro específica e humana
-            let errorMessage = 'Não foi possível criar a reserva. Por favor, verifique sua conexão e tente novamente.';
-
-            if (error?.message) {
-                if (error.message.includes('network') || error.message.includes('conexão') || error.message.includes('connection')) {
-                    errorMessage = 'Erro de conexão. Verifique sua internet e tente novamente.';
-                } else if (error.message.includes('timeout')) {
-                    errorMessage = 'Tempo de espera esgotado. Tente novamente.';
-                } else if (error.message.includes('invalid') || error.message.includes('inválido')) {
-                    errorMessage = 'Dados inválidos. Verifique origem e destino e tente novamente.';
-                } else if (error.message.includes('payment') || error.message.includes('pagamento')) {
-                    errorMessage = 'Erro no processamento do pagamento. Verifique seus dados e tente novamente.';
-                } else if (error.message.toLowerCase().includes('região') || error.message.toLowerCase().includes('regiao')) {
-                    errorMessage = 'A Leaf ainda não está disponível na sua região.';
-                }
-            }
+            const alertData = resolveBookingErrorAlert(error);
 
             Alert.alert(
-                'Erro ao Criar Reserva',
-                errorMessage + ' Se o problema persistir, entre em contato com o suporte.',
+                alertData.title,
+                alertData.message,
                 [{ text: 'OK' }]
             );
         };
@@ -1846,6 +2138,10 @@ function PassengerUI(props) {
         const handleDriversFound = (data) => {
             Logger.log('🚗 [PASSENGER] Motoristas encontrados:', data);
             if (data.success) {
+                if (!Array.isArray(data.drivers) || data.drivers.length === 0) {
+                    handleNoDriversFound(data);
+                    return;
+                }
                 setTripStatus('searching');
                 Logger.log(`✅ [PASSENGER] ${data.drivers?.length || 0} motoristas notificados`);
                 // Não mostrar alerta - o status 'searching' já indica visualmente
@@ -2402,18 +2698,20 @@ function PassengerUI(props) {
                             }
 
                             const bookingData = {
-                                pickup: {
+                                customerId: auth.uid,
+                                pickupLocation: {
                                     lat: tripdata.pickup.lat,
                                     lng: tripdata.pickup.lng,
-                                    address: tripdata.pickup.add || pickupAddress
+                                    add: tripdata.pickup.add || pickupAddress
                                 },
-                                destination: {
+                                destinationLocation: {
                                     lat: tripdata.drop.lat,
                                     lng: tripdata.drop.lng,
-                                    address: tripdata.drop.add || tripdata.drop.address || ''
+                                    add: tripdata.drop.add || tripdata.drop.address || ''
                                 },
                                 carType: tripdata.carType || 'standard',
-                                estimatedFare: tripdata.estimate || 0
+                                estimatedFare: tripdata.estimate || 0,
+                                paymentMethod: 'pix'
                             };
 
                             Logger.log('📋 [PASSENGER] Criando nova solicitação após cancelamento:', bookingData);
@@ -2431,6 +2729,26 @@ function PassengerUI(props) {
                     createNewBooking();
                 }
             }, 1000); // Aguardar 1 segundo antes de reiniciar
+        };
+
+        // ✅ NOVO: Recuperação quando motorista desconecta antes de iniciar
+        const handleDriverSearchResumed = (data) => {
+            Logger.log('🔄 [PASSENGER] Busca por novo motorista retomada:', data);
+
+            const bookingId = data?.bookingId || currentBooking?.bookingId;
+            if (!bookingId || bookingId !== currentBooking?.bookingId) {
+                return;
+            }
+
+            // Voltar para busca mantendo a corrida ativa
+            setTripStatus('searching');
+            setDriverInfo(null);
+            setDriverLocation(null);
+            setDriverArrived(false);
+            setEstimatedPickupTime(null);
+            setDriverAcceptedAt(null);
+            setDriverToPickupPolyline([]);
+            setLocalRoutePolyline([]);
         };
 
         // ✅ NOVO: Handler para receber mensagens do chat (apenas durante corrida ativa)
@@ -2484,6 +2802,7 @@ function PassengerUI(props) {
         webSocketManager.on('paymentRefunded', handlePaymentRefunded);
         webSocketManager.on('newMessage', handleNewMessage); // ✅ NOVO: Listener para mensagens do chat
         webSocketManager.on('rideCancelled', handleRideCancelled); // ✅ NOVO: Handler para cancelamento pelo motorista
+        webSocketManager.on('driverSearchResumed', handleDriverSearchResumed); // ✅ NOVO: motorista desconectou
 
         // ===== CLEANUP =====
         return () => {
@@ -2498,6 +2817,7 @@ function PassengerUI(props) {
             webSocketManager.off('driverArrived', handleDriverArrived); // ✅ Cleanup
             webSocketManager.off('arrivedAtPickup', handleDriverArrived); // ✅ Cleanup
             webSocketManager.off('rideCancelled', handleRideCancelled); // ✅ Cleanup
+            webSocketManager.off('driverSearchResumed', handleDriverSearchResumed); // ✅ Cleanup
             webSocketManager.off('tripCompleted', handleTripCompleted);
             webSocketManager.off('paymentConfirmed', handlePaymentConfirmed);
             webSocketManager.off('paymentRefunded', handlePaymentRefunded);
@@ -2516,7 +2836,7 @@ function PassengerUI(props) {
                 embarkTimerIntervalRef.current = null;
             }
         };
-    }, [navigation, t, dispatch]); // ✅ CORRIGIDO: Removido tripdata.pickup das dependências para evitar loop
+    }, [navigation, t, dispatch, resolveBookingErrorAlert]); // ✅ CORRIGIDO: Removido tripdata.pickup das dependências para evitar loop
 
     // ✅ OTIMIZAÇÃO: Atualizar localização do passageiro com throttling
     // MOVIDO PARA FORA DO useEffect ANTERIOR - hooks não podem ser chamados dentro de outros hooks
@@ -2912,6 +3232,24 @@ function PassengerUI(props) {
 
     // Função removida - agora integrada diretamente no useEffect
 
+    const parseCalculatedFare = useCallback((fareValue) => {
+        if (fareValue === null || fareValue === undefined) {
+            return null;
+        }
+
+        const numericFare = Number(
+            typeof fareValue === 'string'
+                ? fareValue.replace(',', '.')
+                : fareValue
+        );
+
+        if (!Number.isFinite(numericFare) || numericFare <= 0) {
+            return null;
+        }
+
+        return Number(numericFare.toFixed(2));
+    }, []);
+
     // Função para obter estimativa de um carro específico
     const getEstimateForCar = useCallback((car) => {
         // Logger.log(`🔍 getEstimateForCar chamado para ${car.name}:`, carEstimates[car.name]);
@@ -2928,15 +3266,14 @@ function PassengerUI(props) {
         const estimate = carEstimates[car.name];
         // Logger.log(`✅ Estimativa encontrada para ${car.name}:`, estimate);
 
-        // ✅ Só retornar preço se for estimateFare calculado (não min_fare)
-        const calculatedFare = estimate.estimateFare || estimate.fare;
-        const isMinFare = calculatedFare === car?.min_fare;
+        // Aceita min_fare quando ele vier de cálculo real para evitar loading infinito em viagens curtas.
+        const calculatedFare = parseCalculatedFare(estimate.estimateFare ?? estimate.fare);
 
         return {
-            fare: (calculatedFare && !isMinFare) ? calculatedFare : null, // ✅ null se for min_fare
+            fare: calculatedFare,
             time: estimate.estimateTime || estimate.time || 0
         };
-    }, [carEstimates]);
+    }, [carEstimates, parseCalculatedFare]);
 
     const filteredCarTypes = useMemo(() => {
         if (!allCarTypes) return [];
@@ -3496,6 +3833,9 @@ function PassengerUI(props) {
                     add: tripdata.drop.add
                 },
                 estimatedFare: parseFloat(estimate.estimateFare || 0),
+                routeDistanceKm: parseFloat(estimate.routeDetails?.distance_in_km || estimate.estimateDistance || 0),
+                routeDurationSecs: parseFloat(estimate.routeDetails?.time_in_secs || estimate.estimateTime || 0),
+                tollFee: parseFloat(estimate.routeDetails?.tollFee || 0),
                 carType: selectedCarType.name,
                 paymentMethod: 'pix',
                 paymentStatus: 'confirmed', // ✅ Pagamento já confirmado
@@ -3579,13 +3919,27 @@ function PassengerUI(props) {
                             // O handler handleBookingCreated tratará a resposta
                             webSocketManager.createBooking(bookingData).catch(err => {
                                 Logger.error('❌ [PASSENGER] Erro ao enviar booking:', err);
+
+                                // Em cenários de latência alta no backend, manter a corrida em SEARCHING
+                                // e aguardar o evento bookingCreated em vez de abortar o fluxo.
+                                if (err?.code === 'BOOKING_TIMEOUT' || String(err?.message || '').toLowerCase().includes('create booking timeout')) {
+                                    Logger.warn('⏳ [PASSENGER] Timeout de confirmação do booking. Mantendo busca ativa e aguardando resposta do servidor...');
+                                    Alert.alert(
+                                        'Finalizando solicitação',
+                                        'Seu pagamento foi confirmado e estamos finalizando a criação da corrida. Aguarde alguns instantes.',
+                                        [{ text: 'OK' }]
+                                    );
+                                    return;
+                                }
+
                                 // Tratar erro: resetar estado
                                 setTripStatus('idle');
                                 setBookModelLoading(false);
                                 isBookingInProgressRef.current = false;
+                                const alertData = resolveBookingErrorAlert(err);
                                 Alert.alert(
-                                    'Não foi possível criar a reserva',
-                                    'Por favor, verifique sua conexão e tente novamente. Se o problema persistir, entre em contato com o suporte.',
+                                    alertData.title,
+                                    alertData.message,
                                     [{ text: 'OK' }]
                                 );
                             });
@@ -3633,14 +3987,15 @@ function PassengerUI(props) {
             setTripStatus('idle');
             setBookModelLoading(false);
             isBookingInProgressRef.current = false;
+            const alertData = resolveBookingErrorAlert(error);
 
             Alert.alert(
-                'Erro ao Criar Reserva',
-                error.message || 'Falha ao criar reserva após pagamento. Entre em contato com o suporte.',
+                alertData.title,
+                alertData.message,
                 [{ text: 'OK' }]
             );
         }
-    }, [selectedCarType, carEstimates, tripdata, auth.uid, dispatch]);
+    }, [selectedCarType, carEstimates, tripdata, auth.uid, dispatch, resolveBookingErrorAlert]);
 
     // ✅ Callback quando pagamento é confirmado
     const onPaymentConfirmed = useCallback((paymentData) => {
@@ -3686,10 +4041,19 @@ function PassengerUI(props) {
             return;
         }
 
+        if (geofenceStatus.isChecking) {
+            Alert.alert(
+                'Validando região',
+                'Aguarde um instante enquanto validamos a área de atendimento.',
+                [{ text: 'OK' }]
+            );
+            return;
+        }
+
         if (geofenceStatus.outOfCoverage) {
             Alert.alert(
                 'Região indisponível',
-                'A Leaf ainda não está disponível na sua região',
+                geofenceStatus.message || 'A Leaf ainda não está disponível na sua região',
                 [{ text: 'OK' }]
             );
             return;
@@ -4342,6 +4706,7 @@ function PassengerUI(props) {
 
     // ✅ Estado para rastrear se estamos alterando destino durante corrida
     const [isChangingDestination, setIsChangingDestination] = useState(false);
+    const isCardVariantB = cardVariant === 'B';
 
     // ✅ Função para alterar destino durante corrida
     const handleChangeDestination = useCallback(async () => {
@@ -4491,6 +4856,14 @@ function PassengerUI(props) {
                     placeId: address.place_id,
                     source: address.source || 'search'
                 };
+                emitFareDebug('address_selected', {
+                    type,
+                    source: address?.source || 'unknown',
+                    placeId: address?.place_id || address?.placeId || null,
+                    lat: newAddress.lat,
+                    lng: newAddress.lng,
+                    add: newAddress.add
+                });
 
                 if (type === 'pickup') {
                     // ✅ Marcar que pickup foi selecionado manualmente (não deve ser sobrescrito pelo GPS)
@@ -4549,7 +4922,7 @@ function PassengerUI(props) {
             // ✅ Não mostrar alerta - apenas logar o erro para não interromper o fluxo
             Logger.warn('⚠️ [PassengerUI] Erro ao processar endereço selecionado');
         }
-    }, [dispatch, formatAddressSimplified, mapRef, saveToHistory, isChangingDestination, tripStatus, recalculateRideWithNewDestination, resetPlacesSessionToken]);
+    }, [dispatch, formatAddressSimplified, mapRef, saveToHistory, isChangingDestination, tripStatus, recalculateRideWithNewDestination, resetPlacesSessionToken, emitFareDebug]);
 
     const saveToHistory = async (address) => {
         try {
@@ -4885,11 +5258,23 @@ function PassengerUI(props) {
         }
 
         return (
-            <View style={styles.addressContainer}>
-                <View style={[styles.addressCardGroup, { backgroundColor: safeTheme.card }]}>
-                    <View style={styles.addressCardRow}>
-                        <Ionicons name="location" color={safeTheme.icon} size={22} style={styles.addressIcon} />
+            <View style={[styles.addressContainerDocked, isCardVariantB && styles.addressContainerDockedB]}>
+                <View style={[styles.addressCardGroup, isCardVariantB && styles.addressCardGroupB]}>
+                    {!isCardVariantB && <View style={styles.addressCardHandle} />}
+                    <View style={styles.addressCardHeader}>
+                        <Text style={[styles.addressCardTitle, isCardVariantB ? styles.addressCardTitleB : styles.addressCardTitleA]}>
+                            {isCardVariantB ? 'Escolha seu trajeto' : 'Sua reserva'}
+                        </Text>
+                        <Text style={[styles.addressCardSubtitle, isCardVariantB && styles.addressCardSubtitleB]}>
+                            {isCardVariantB ? 'Confirme origem e destino para calcular' : 'Defina embarque e destino'}
+                        </Text>
+                    </View>
+                    {isCardVariantB && <View style={[styles.addressFlowConnector, styles.addressFlowConnectorB]} />}
+
+                    <View style={[styles.addressCardRow, styles.addressCardRowSurface, isCardVariantB && styles.addressCardRowSurfaceB]}>
+                        <Ionicons name={isCardVariantB ? 'navigate-circle' : 'compass-outline'} color={isCardVariantB ? '#0E7A35' : '#41D274'} size={18} style={styles.addressIcon} />
                         <View style={[styles.addressTextContainer, { flex: 1 }]}>
+                            <Text style={[styles.addressFieldLabel, isCardVariantB && styles.addressFieldLabelB]}>Embarque</Text>
                             {/* ✅ Botão para adicionar detalhes se o endereço for aproximado */}
                             {!searchState.visible && tripdata.pickup?.add && isApproximateAddress(tripdata.pickup.add) && (
                                 <TouchableOpacity
@@ -4905,9 +5290,9 @@ function PassengerUI(props) {
                             {searchState.visible && searchState.type === 'pickup' ? (
                                 // Campo de busca ativo
                                 <TextInput
-                                    style={[styles.searchInputInline, { color: theme.text }]}
+                                    style={[styles.searchInputInline, isCardVariantB && styles.searchInputInlineB]}
                                     placeholder="Digite local de embarque..."
-                                    placeholderTextColor={theme.placeholder}
+                                    placeholderTextColor={isCardVariantB ? 'rgba(0,0,0,0.35)' : 'rgba(255,255,255,0.45)'}
                                     value={searchState.inputText}
                                     onChangeText={(text) => {
                                         Logger.log('✏️ [PassengerUI] Editando campo de busca pickup:', text);
@@ -5015,9 +5400,9 @@ function PassengerUI(props) {
                             ) : (
                                 // ✅ Campo de embarque sempre editável
                                 <TextInput
-                                    style={[styles.addressTextInput, { color: theme.text }]}
+                                    style={[styles.addressTextInput, isCardVariantB && styles.addressTextInputB]}
                                     placeholder="Local de partida"
-                                    placeholderTextColor={theme.placeholder}
+                                    placeholderTextColor={isCardVariantB ? 'rgba(0,0,0,0.35)' : 'rgba(255,255,255,0.45)'}
                                     value={manualPickupText || (tripdata.pickup?.add ? formatAddressForDisplay(tripdata.pickup.add) : '') || ''}
                                     key={`pickup-input-${tripdata.pickup?.lat}-${tripdata.pickup?.lng}`} // ✅ Forçar re-render quando coordenadas mudarem
                                     onChangeText={(text) => {
@@ -5047,18 +5432,6 @@ function PassengerUI(props) {
                                     numberOfLines={1}
                                 />
                             )}
-                            {/* ✅ Botão para adicionar detalhes se o endereço for aproximado */}
-                            {!searchState.visible && tripdata.pickup?.add && isApproximateAddress(tripdata.pickup.add) && (
-                                <TouchableOpacity
-                                    style={styles.addDetailsButton}
-                                    onPress={() => handleAddAddressDetails('pickup')}
-                                >
-                                    <Ionicons name="add-circle-outline" size={16} color={theme.leafGreen || '#41D274'} />
-                                    <Text style={[styles.addDetailsButtonText, { color: theme.leafGreen || '#41D274' }]}>
-                                        Adicionar detalhes
-                                    </Text>
-                                </TouchableOpacity>
-                            )}
                         </View>
                     </View>
 
@@ -5067,15 +5440,16 @@ function PassengerUI(props) {
 
                     <View style={styles.addressDivider} />
 
-                    <View style={styles.addressCardRow}>
-                        <Ionicons name="flag" color={safeTheme.icon} size={22} style={styles.addressIcon} />
+                    <View style={[styles.addressCardRow, styles.addressCardRowSurface, isCardVariantB && styles.addressCardRowSurfaceB]}>
+                        <Ionicons name={isCardVariantB ? 'flag' : 'navigate-circle-outline'} color={isCardVariantB ? '#0E7A35' : '#FF9D2D'} size={18} style={styles.addressIcon} />
                         <View style={styles.addressTextContainer}>
+                            <Text style={[styles.addressFieldLabel, isCardVariantB && styles.addressFieldLabelB]}>Destino</Text>
                             {searchState.visible && searchState.type === 'drop' ? (
                                 // Campo de busca ativo
                                 <TextInput
-                                    style={[styles.searchInputInline, { color: theme.text }]}
+                                    style={[styles.searchInputInline, isCardVariantB && styles.searchInputInlineB]}
                                     placeholder="Digite seu destino..."
-                                    placeholderTextColor={theme.placeholder}
+                                    placeholderTextColor={isCardVariantB ? 'rgba(0,0,0,0.35)' : 'rgba(255,255,255,0.45)'}
                                     value={searchState.inputText}
                                     onChangeText={(text) => {
                                         setSearchState(prev => ({ ...prev, inputText: text }));
@@ -5095,15 +5469,33 @@ function PassengerUI(props) {
                             ) : (
                                 // Campo de destino normal
                                 <TouchableOpacity onPress={() => {
+                                    if (geofenceStatus.isChecking) {
+                                        Alert.alert(
+                                            'Validando região',
+                                            'Aguarde um instante enquanto validamos a área de atendimento.',
+                                            [{ text: 'OK' }]
+                                        );
+                                        return;
+                                    }
+
+                                    if (geofenceStatus.pickupOutOfCoverage) {
+                                        Alert.alert(
+                                            'Região indisponível',
+                                            geofenceStatus.message || 'A Leaf ainda não está disponível na sua região',
+                                            [{ text: 'OK' }]
+                                        );
+                                        return;
+                                    }
+
                                     Logger.log('🔍 Clicando no campo de destino');
                                     // ✅ Abrir campo e mostrar últimos destinos confirmados
                                     setSearchState({ visible: true, type: 'drop', inputText: '', results: [], loading: false });
                                 }}>
-                                    <Typography variant="label" color={tripdata.drop?.add ? theme.text : theme.placeholder} numberOfLines={2}>
-                                        {tripdata.drop && tripdata.drop.add ? tripdata.drop.add : t('where_to_placeholder')}
+                                    <Typography variant="label" color={tripdata.drop?.add ? (isCardVariantB ? '#111111' : '#FFFFFF') : (isCardVariantB ? 'rgba(0,0,0,0.42)' : 'rgba(255,255,255,0.58)')} numberOfLines={2}>
+                                        {tripdata.drop && tripdata.drop.add ? tripdata.drop.add : 'Local de destino'}
                                     </Typography>
                                     {tripdata.drop?.add && shouldShowSubtext(tripdata.drop.add) && (
-                                        <Text style={[styles.addressSubtext, { color: theme.textSecondary }]} numberOfLines={1}>
+                                        <Text style={[styles.addressSubtext, isCardVariantB && styles.addressSubtextB]} numberOfLines={1}>
                                             {getAddressSubtext(tripdata.drop.add)}
                                         </Text>
                                     )}
@@ -5117,7 +5509,7 @@ function PassengerUI(props) {
                 </View>
             </View>
         );
-    }, [tripdata.pickup, tripdata.drop, theme, t, searchState.visible, searchState.type, searchState.inputText, searchState.results, searchState.loading, debouncedSearch, handleSelectAddress, formatAddressForDropdown, resetPlacesSessionToken]);
+    }, [tripdata.pickup, tripdata.drop, theme, t, searchState.visible, searchState.type, searchState.inputText, searchState.results, searchState.loading, debouncedSearch, handleSelectAddress, formatAddressForDropdown, resetPlacesSessionToken, geofenceStatus, props.isDarkMode, isCardVariantB]);
 
     const performSearch = useCallback(async (text) => {
         Logger.log('🔍 Iniciando busca hierárquica para:', text);
@@ -5148,40 +5540,28 @@ function PassengerUI(props) {
                 Logger.log('⚠️ Localização não disponível, buscando em todo o Brasil');
             }
 
-            if (inputType === 'address') {
-                // 📍 ENDEREÇO: Usar Geocoding API (Forward)
-                Logger.log('📍 Buscando como ENDEREÇO usando Geocoding API...');
+            // 🧭 Places Autocomplete é a melhor fonte para input digitado parcialmente.
+            // Geocoding fica como fallback para melhorar acurácia em endereço completo.
+            Logger.log('🏛️ Buscando com Places API (primeira tentativa)...');
+            try {
+                results = await fetchPlacesAutocomplete(text, sessionToken, locationForBias);
+                Logger.log('✅ Places API retornou:', results?.length || 0, 'resultados');
+            } catch (placesError) {
+                Logger.error('❌ Erro no Places API:', placesError);
+            }
+
+            if (!results || results.length === 0) {
+                const fallbackReason = inputType === 'address'
+                    ? 'sem resultados no Places para input de endereço'
+                    : 'fallback padrão após Places sem resultado';
+                Logger.log(`🔄 Tentando fallback Geocoding API (${fallbackReason})...`);
                 try {
                     results = await fetchGeocodeAddress(text, locationForBias);
                     Logger.log('✅ Geocoding API retornou:', results?.length || 0, 'resultados');
                 } catch (geocodeError) {
                     Logger.error('❌ Erro no Geocoding API:', geocodeError);
-                    // Fallback: tentar Places API se Geocoding falhar
-                    Logger.log('🔄 Tentando fallback para Places API...');
-                    try {
-                        results = await fetchPlacesAutocomplete(text, sessionToken, locationForBias);
-                        Logger.log('✅ Fallback Places API retornou:', results?.length || 0, 'resultados');
-                    } catch (placesError) {
-                        Logger.error('❌ Erro no fallback Places API:', placesError);
-                        throw geocodeError; // Lançar erro original
-                    }
-                }
-            } else {
-                // 🏛️ NOME DE LUGAR: Usar Places API
-                Logger.log('🏛️ Buscando como NOME DE LUGAR usando Places API...');
-                try {
-                    results = await fetchPlacesAutocomplete(text, sessionToken, locationForBias);
-                    Logger.log('✅ Places API retornou:', results?.length || 0, 'resultados');
-                } catch (placesError) {
-                    Logger.error('❌ Erro no Places API:', placesError);
-                    // Fallback: tentar Geocoding API se Places falhar
-                    Logger.log('🔄 Tentando fallback para Geocoding API...');
-                    try {
-                        results = await fetchGeocodeAddress(text, locationForBias);
-                        Logger.log('✅ Fallback Geocoding API retornou:', results?.length || 0, 'resultados');
-                    } catch (geocodeError) {
-                        Logger.error('❌ Erro no fallback Geocoding API:', geocodeError);
-                        throw placesError; // Lançar erro original
+                    if (!results || results.length === 0) {
+                        throw geocodeError;
                     }
                 }
             }
@@ -5386,12 +5766,7 @@ function PassengerUI(props) {
         // ✅ Verificar se pelo menos um preço foi calculado (não usar min_fare)
         const hasCalculatedPrices = carTypesToUse.some(car => {
             const estimate = getEstimateForCar(car);
-            // Preço válido = tem fare calculado E não é null E não está calculando
-            return estimate &&
-                estimate.fare !== null &&
-                estimate.fare !== undefined &&
-                estimate.fare !== '0' &&
-                !isCalculatingRoute;
+            return estimate && estimate.fare !== null;
         });
 
         // ✅ Se está calculando OU não tem preços calculados, mostrar loading
@@ -6378,11 +6753,7 @@ function PassengerUI(props) {
                                 // Logger.warn(`⚠️ [Card] Tempo da rota não disponível (estimate.time = ${routeTimeInSeconds})`);
                             }
 
-                            // ✅ CORREÇÃO: Só renderizar card se o preço estiver calculado (não null, não min_fare)
-                            const hasValidPrice = estimate.fare !== null &&
-                                estimate.fare !== undefined &&
-                                estimate.fare !== '0' &&
-                                !isCalculatingRoute;
+                            const hasValidPrice = estimate.fare !== null && !isCalculatingRoute;
                             if (!hasValidPrice) {
                                 return null; // Não renderizar card até o preço estar calculado
                             }
@@ -6424,7 +6795,7 @@ function PassengerUI(props) {
                                                         {car.name}
                                                     </Text>
                                                     <Text style={[styles.bottomSheetCarPrice, { color: theme.text }]}>
-                                                        {estimate.fare !== null && estimate.fare !== undefined && estimate.fare !== '0' ?
+                                                        {estimate.fare !== null ?
                                                             `${settings?.symbol || 'R$'}${estimate.fare}` :
                                                             '--'
                                                         }
@@ -6490,7 +6861,7 @@ function PassengerUI(props) {
                         title={tripStatus === 'idle' ? 'Pedir agora' : tripStatus === 'completed' ? 'Confirmar pagamento' : 'Solicitar'}
                         variant="primary"
                         onPress={tripStatus === 'completed' ? handlePaymentConfirmation : initiateBooking}
-                        disabled={!hasValidTripEndpoints || !selectedCarType || !carEstimates[selectedCarType?.name]?.estimateFare || geofenceStatus.outOfCoverage || !hasDriversForSelectedCar || tripStatus === 'accepted' || tripStatus === 'started'}
+                        disabled={!hasValidTripEndpoints || !selectedCarType || !carEstimates[selectedCarType?.name]?.estimateFare || geofenceStatus.outOfCoverage || geofenceStatus.isChecking || !hasDriversForSelectedCar || tripStatus === 'accepted' || tripStatus === 'started'}
                         loading={bookModelLoading}
                     />
                 </BottomSheetView>
@@ -6514,8 +6885,12 @@ function PassengerUI(props) {
                 return 'Ative a localização para solicitar uma corrida';
             }
 
+            if (geofenceStatus.isChecking) {
+                return 'Validando área de cobertura...';
+            }
+
             if (geofenceStatus.outOfCoverage) {
-                return 'A Leaf ainda não está disponível na sua região';
+                return geofenceStatus.message || 'A Leaf ainda não está disponível na sua região';
             }
 
             // Se não há carros disponíveis, mostrar mensagem específica
@@ -6560,7 +6935,7 @@ function PassengerUI(props) {
         };
 
         // ✅ Desabilitar botão se localização foi negada ou outras condições
-        const isDisabled = locationDenied || geofenceStatus.outOfCoverage || carTypesToUse.length === 0 || !canBook || bookModelLoading || tripStatus === 'accepted' || tripStatus === 'started';
+        const isDisabled = locationDenied || geofenceStatus.outOfCoverage || geofenceStatus.isChecking || carTypesToUse.length === 0 || !canBook || bookModelLoading || tripStatus === 'accepted' || tripStatus === 'started';
 
         return (
             <View
@@ -6586,7 +6961,7 @@ function PassengerUI(props) {
                 </TouchableOpacity>
             </View>
         );
-    }, [selectedCarType, carEstimates, bookModelLoading, tripStatus, t, initiateBooking, settings?.symbol, locationDenied, hasValidTripEndpoints, geofenceStatus.outOfCoverage]);
+    }, [selectedCarType, carEstimates, bookModelLoading, tripStatus, t, initiateBooking, settings?.symbol, locationDenied, hasValidTripEndpoints, geofenceStatus.outOfCoverage, geofenceStatus.isChecking, geofenceStatus.message]);
 
     // Função para confirmar pagamento
     // Funções auxiliares para status da viagem
@@ -6757,25 +7132,50 @@ function PassengerUI(props) {
     };
 
     // ✅ Função para lidar com avaliação da viagem (integrada na bottom sheet)
-    const handleRatingSubmit = useCallback(async () => {
+    const handleRatingSubmit = useCallback(async (submittedRatingData = null) => {
+        if (isSubmittingRating) {
+            Logger.log('⏳ [PassengerUI] Envio de avaliação já em andamento, ignorando duplicado.');
+            return false;
+        }
+
+        const bookingSnapshot = currentBooking;
+        const ratingFromPayload = Number(submittedRatingData?.rating);
+        const normalizedRating =
+            Number.isFinite(ratingFromPayload) && ratingFromPayload > 0
+                ? ratingFromPayload
+                : Number(rating);
+        const normalizedOptions = Array.isArray(submittedRatingData?.selectedOptions)
+            ? submittedRatingData.selectedOptions
+            : ratingOptions;
+        const normalizedComment = typeof submittedRatingData?.comment === 'string'
+            ? submittedRatingData.comment.trim()
+            : ratingComment.trim();
+
         // ✅ Salvar avaliação no TripDataService (será salvo após sucesso)
-        if (rating === 0) {
+        if (!normalizedRating || normalizedRating <= 0) {
             Alert.alert('Atenção', 'Por favor, selecione uma avaliação');
-            return;
+            return false;
+        }
+
+        // Manter estado legado sincronizado quando o envio vem do RatingModal
+        if (submittedRatingData) {
+            setRating(normalizedRating);
+            setRatingComment(normalizedComment);
+            setRatingOptions(normalizedOptions);
         }
 
         setIsSubmittingRating(true);
 
         try {
             const ratingData = {
-                tripId: currentBooking?.bookingId || currentBooking?.id,
+                tripId: submittedRatingData?.tripId || bookingSnapshot?.bookingId || bookingSnapshot?.id,
                 userId: auth.profile?.uid || auth.profile?.id || auth.user?.uid,
-                rating,
-                selectedOptions: ratingOptions,
-                comment: ratingComment.trim(),
+                rating: normalizedRating,
+                selectedOptions: normalizedOptions,
+                comment: normalizedComment,
                 userType: 'customer',
-                timestamp: new Date().toISOString(),
-                tripData: currentBooking
+                timestamp: submittedRatingData?.timestamp || new Date().toISOString(),
+                tripData: bookingSnapshot
             };
 
             // Importar RatingService
@@ -6788,13 +7188,14 @@ function PassengerUI(props) {
                 Logger.log('✅ Avaliação enviada com sucesso');
 
                 // ✅ Salvar avaliação no TripDataService
-                if (currentBooking?.bookingId) {
-                    TripDataService.saveRating(currentBooking.bookingId, {
-                        driverRating: rating,
+                const bookingIdForRating = bookingSnapshot?.bookingId || bookingSnapshot?.id;
+                if (bookingIdForRating) {
+                    TripDataService.saveRating(bookingIdForRating, {
+                        driverRating: normalizedRating,
                         passengerRating: null, // Passageiro avalia motorista
-                        driverComment: ratingComment,
+                        driverComment: normalizedComment,
                         passengerComment: null,
-                        driverOptions: ratingOptions,
+                        driverOptions: normalizedOptions,
                         passengerOptions: []
                     }).catch(err => {
                         Logger.warn('⚠️ [PassengerUI] Erro ao salvar avaliação:', err);
@@ -6818,11 +7219,36 @@ function PassengerUI(props) {
                 setRatingModalVisible(false);
 
                 // ✅ NOVO: Limpar polyline
+                setLocalRoutePolyline([]);
                 setRouteToDestinationPolyline([]);
                 setDriverToPickupPolyline([]);
                 if (setRoutePolyline) {
                     setRoutePolyline([]);
                 }
+                setCompleteRouteFareData(null);
+                setCarEstimates({});
+                setSelectedCarType(null);
+                setPaymentModalVisible(false);
+
+                // ✅ Resetar estado de busca/tarifa para nova corrida
+                dispatch(clearEstimate());
+                dispatch(updateTripCar(null));
+                dispatch(updateTripDrop(null));
+
+                if (currentLocation) {
+                    dispatch(updateTripPickup({
+                        add: pickupAddress || `Localização (${currentLocation.lat.toFixed(6)}, ${currentLocation.lng.toFixed(6)})`,
+                        lat: currentLocation.lat,
+                        lng: currentLocation.lng
+                    }));
+                }
+
+                setPickupManuallySelected(false);
+                setIsManuallyEditingPickup(false);
+                setManualPickupText('');
+                setSearchState({ visible: false, type: 'pickup', inputText: '', results: [], loading: false });
+                resetPlacesSessionToken();
+                resetRouteRecalcState();
 
                 // ✅ Finalizar corrida
                 try {
@@ -6837,17 +7263,31 @@ function PassengerUI(props) {
                     'Sua avaliação foi registrada. Esperamos vê-lo novamente em breve!',
                     [{ text: 'OK' }]
                 );
-            } else {
-                throw new Error(result.error || 'Falha ao enviar avaliação');
+                return true;
             }
 
+            throw new Error(result.error || 'Falha ao enviar avaliação');
         } catch (error) {
             Logger.error('❌ Erro ao enviar avaliação:', error);
             Alert.alert('Erro', error.message || 'Falha ao enviar avaliação');
+            return false;
         } finally {
             setIsSubmittingRating(false);
         }
-    }, [rating, ratingComment, ratingOptions, currentBooking]);
+    }, [
+        isSubmittingRating,
+        currentBooking,
+        rating,
+        ratingOptions,
+        ratingComment,
+        auth,
+        setRoutePolyline,
+        dispatch,
+        currentLocation,
+        pickupAddress,
+        resetPlacesSessionToken,
+        resetRouteRecalcState
+    ]);
 
     // ✅ Função para pular avaliação
     const handleSkipRating = useCallback(async () => {
@@ -6877,11 +7317,36 @@ function PassengerUI(props) {
                         setRatingModalVisible(false);
 
                         // ✅ NOVO: Limpar polyline
+                        setLocalRoutePolyline([]);
                         setRouteToDestinationPolyline([]);
                         setDriverToPickupPolyline([]);
                         if (setRoutePolyline) {
                             setRoutePolyline([]);
                         }
+                        setCompleteRouteFareData(null);
+                        setCarEstimates({});
+                        setSelectedCarType(null);
+                        setPaymentModalVisible(false);
+
+                        // ✅ Resetar estado de busca/tarifa para nova corrida
+                        dispatch(clearEstimate());
+                        dispatch(updateTripCar(null));
+                        dispatch(updateTripDrop(null));
+
+                        if (currentLocation) {
+                            dispatch(updateTripPickup({
+                                add: pickupAddress || `Localização (${currentLocation.lat.toFixed(6)}, ${currentLocation.lng.toFixed(6)})`,
+                                lat: currentLocation.lat,
+                                lng: currentLocation.lng
+                            }));
+                        }
+
+                        setPickupManuallySelected(false);
+                        setIsManuallyEditingPickup(false);
+                        setManualPickupText('');
+                        setSearchState({ visible: false, type: 'pickup', inputText: '', results: [], loading: false });
+                        resetPlacesSessionToken();
+                        resetRouteRecalcState();
 
                         // ✅ Finalizar corrida
                         RideLocationManager.endRide().catch(error => {
@@ -6898,7 +7363,7 @@ function PassengerUI(props) {
                 }
             ]
         );
-    }, []);
+    }, [setRoutePolyline, dispatch, currentLocation, pickupAddress, resetPlacesSessionToken, resetRouteRecalcState]);
 
     // ✅ Toggle opção de avaliação
     const toggleRatingOption = useCallback((option) => {
@@ -6929,6 +7394,9 @@ function PassengerUI(props) {
                 // Forçar que o container não se ajuste ao teclado
             }}
         >
+            <View pointerEvents="none" style={styles.mapVignetteTop} />
+            <View pointerEvents="none" style={styles.mapVignetteBottom} />
+
             {/* Indicador de cálculo de rota */}
             {isCalculatingRoute && (
                 <View style={styles.routeCalculationIndicator}>
@@ -6941,26 +7409,38 @@ function PassengerUI(props) {
 
             {/* Header */}
             <View style={styles.header}>
-                <TouchableOpacity style={[styles.headerButton, { backgroundColor: safeTheme.card }]} onPress={() => {
+                <TouchableOpacity style={styles.headerButton} onPress={() => {
                     if (navigation && navigation.navigate) {
                         navigation.navigate('Profile');
                     } else {
                         Logger.log('Menu: Navegação não disponível');
                     }
                 }}>
-                    <Ionicons name="menu" color={safeTheme.icon} size={24} />
+                    <Ionicons name="menu" color="#FFFFFF" size={20} />
                 </TouchableOpacity>
-                <View style={{ marginLeft: 6 }}>
-                    <ProfileToggle userId={auth?.profile?.uid} style="discrete" size="small" />
-                </View>
                 <View style={styles.flexOne} />
-                <TouchableOpacity style={[styles.headerButton, { backgroundColor: safeTheme.card, marginRight: 5 }]} onPress={props.toggleTheme}>
-                    <Ionicons name={props.isDarkMode ? 'sunny' : 'moon'} color={safeTheme.icon} size={24} />
+                <TouchableOpacity style={[styles.headerButton, styles.headerButtonSpacing]} onPress={props.toggleTheme}>
+                    <Ionicons name={props.isDarkMode ? 'sunny' : 'moon'} color="#FFFFFF" size={18} />
                 </TouchableOpacity>
 
 
-                <TouchableOpacity style={[styles.headerButton, { backgroundColor: safeTheme.card }]} onPress={() => navigation.navigate('Notifications')}>
-                    <Ionicons name="notifications" color={safeTheme.icon} size={24} />
+                <TouchableOpacity style={styles.headerButton} onPress={() => navigation.navigate('Notifications')}>
+                    <Ionicons name="notifications" color="#FFFFFF" size={18} />
+                </TouchableOpacity>
+            </View>
+
+            <View style={styles.abSwitchContainer}>
+                <TouchableOpacity
+                    style={[styles.abSwitchOption, cardVariant === 'A' && styles.abSwitchOptionActive]}
+                    onPress={() => setCardVariant('A')}
+                >
+                    <Text style={[styles.abSwitchText, cardVariant === 'A' && styles.abSwitchTextActive]}>A</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                    style={[styles.abSwitchOption, cardVariant === 'B' && styles.abSwitchOptionActive]}
+                    onPress={() => setCardVariant('B')}
+                >
+                    <Text style={[styles.abSwitchText, cardVariant === 'B' && styles.abSwitchTextActive]}>B</Text>
                 </TouchableOpacity>
             </View>
 
@@ -7153,62 +7633,217 @@ const styles = StyleSheet.create({
         flex: 1,
         // ✅ Container não ajusta quando teclado abre (teclado sobrepõe)
     },
-    header: { position: 'absolute', top: 15, left: 0, right: 0, flexDirection: 'row', justifyContent: 'space-between', paddingHorizontal: 20, zIndex: 1000 },
-    headerButton: { width: 40, height: 40, borderRadius: 20, justifyContent: 'center', alignItems: 'center', shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.25, shadowRadius: 3.84, elevation: 5 },
-    addressContainer: { position: 'absolute', top: 75, left: 0, right: 0, zIndex: 900, alignItems: 'center' },
-    addressCardGroup: {
-        borderRadius: 20,
-        width: '94%',
-        backgroundColor: '#FFFFFF',
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 8 },
-        shadowOpacity: 0.08,
-        shadowRadius: 16,
-        elevation: 8,
-        overflow: 'hidden',
-        borderWidth: 1,
-        borderColor: 'rgba(0,0,0,0.03)'
+    mapVignetteTop: {
+        position: 'absolute',
+        top: 0,
+        left: 0,
+        right: 0,
+        height: 190,
+        backgroundColor: 'rgba(0,0,0,0.12)',
     },
-    addressCardRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 12, paddingHorizontal: 20 },
+    mapVignetteBottom: {
+        position: 'absolute',
+        bottom: 0,
+        left: 0,
+        right: 0,
+        height: 220,
+        backgroundColor: 'rgba(0,0,0,0.10)',
+    },
+    header: { position: 'absolute', top: Platform.OS === 'ios' ? 48 : 28, left: 0, right: 0, flexDirection: 'row', justifyContent: 'space-between', paddingHorizontal: 14, zIndex: 1000, alignItems: 'center' },
+    headerButton: { width: 39, height: 39, borderRadius: 19.5, justifyContent: 'center', alignItems: 'center', backgroundColor: '#000000', shadowColor: '#000', shadowOffset: { width: 0, height: 5 }, shadowOpacity: 0.2, shadowRadius: 8, elevation: 5, borderWidth: 1, borderColor: 'rgba(255,255,255,0.18)' },
+    headerButtonSpacing: { marginRight: 8 },
+    abSwitchContainer: {
+        position: 'absolute',
+        top: Platform.OS === 'ios' ? 96 : 80,
+        alignSelf: 'center',
+        zIndex: 980,
+        flexDirection: 'row',
+        backgroundColor: 'rgba(0,0,0,0.64)',
+        borderRadius: 999,
+        padding: 4,
+        borderWidth: 1,
+        borderColor: 'rgba(255,255,255,0.2)',
+    },
+    abSwitchOption: {
+        width: 34,
+        height: 26,
+        borderRadius: 999,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    abSwitchOptionActive: {
+        backgroundColor: '#41D274',
+    },
+    abSwitchText: {
+        color: '#FFFFFF',
+        fontSize: 12,
+        fontFamily: fonts.Bold,
+    },
+    abSwitchTextActive: {
+        color: '#0C0C0C',
+    },
+    
+    addressContainerDocked: {
+        position: 'absolute',
+        left: 0,
+        right: 0,
+        bottom: 0,
+        zIndex: 900,
+        alignItems: 'center'
+    },
+    addressContainerDockedB: {
+        bottom: 0,
+    },
+    
+    addressCardGroup: {
+        borderTopLeftRadius: 30,
+        borderTopRightRadius: 30,
+        width: '100%',
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 12 },
+        shadowOpacity: 0.36,
+        shadowRadius: 22,
+        elevation: 16,
+        overflow: 'hidden',
+        borderWidth: 0,
+        backgroundColor: '#060811',
+        paddingTop: 10,
+        paddingBottom: 14,
+        paddingHorizontal: 12,
+        borderBottomLeftRadius: 0,
+        borderBottomRightRadius: 0,
+    },
+    addressCardHandle: {
+        width: 44,
+        height: 4,
+        borderRadius: 999,
+        backgroundColor: 'rgba(255,255,255,0.32)',
+        alignSelf: 'center',
+        marginTop: 4,
+        marginBottom: 8,
+    },
+    addressCardGroupB: {
+        borderColor: 'rgba(0,0,0,0.1)',
+        backgroundColor: 'rgba(255,255,255,0.97)',
+        shadowOpacity: 0.16,
+    },
+    addressCardHeader: {
+        paddingHorizontal: 6,
+        paddingBottom: 12,
+        alignItems: 'flex-start',
+    },
+    addressCardTitle: {
+        color: '#FFFFFF',
+        fontSize: 16,
+        fontFamily: fonts.Bold,
+        letterSpacing: 0.2,
+    },
+    addressCardTitleA: {
+        fontFamily: fonts.Medium,
+        fontWeight: '600',
+        fontSize: 15,
+        letterSpacing: 0.2,
+    },
+    addressCardTitleB: {
+        color: '#111111',
+    },
+    addressCardSubtitle: {
+        color: 'rgba(255,255,255,0.72)',
+        fontSize: 11,
+        fontFamily: fonts.Medium,
+        marginTop: 6,
+    },
+    addressCardSubtitleB: {
+        color: 'rgba(0,0,0,0.58)',
+    },
+    addressFlowConnector: {
+        position: 'absolute',
+        left: 30,
+        top: 72,
+        width: 2,
+        height: 50,
+        backgroundColor: 'rgba(255,255,255,0.14)',
+        borderRadius: 2,
+        zIndex: 1,
+    },
+    addressFlowConnectorB: {
+        backgroundColor: 'rgba(0,0,0,0.14)',
+    },
+    addressCardRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 10, paddingHorizontal: 10 },
+    addressCardRowSurface: {
+        borderRadius: 14,
+        backgroundColor: 'rgba(255,255,255,0.06)',
+        borderWidth: 1,
+        borderColor: 'rgba(255,255,255,0.10)',
+        marginBottom: 6,
+        minHeight: 72,
+    },
+    addressCardRowSurfaceB: {
+        backgroundColor: 'rgba(0,0,0,0.035)',
+        borderColor: 'rgba(0,0,0,0.08)',
+    },
+    addressFieldLabel: {
+        color: 'rgba(255,255,255,0.54)',
+        fontSize: 9,
+        fontFamily: fonts.Medium,
+        marginBottom: 2,
+        textTransform: 'uppercase',
+        letterSpacing: 1.2,
+    },
+    addressFieldLabelB: {
+        color: 'rgba(0,0,0,0.48)',
+    },
     addressDivider: {
         height: 1,
-        marginHorizontal: 18,
-        backgroundColor: 'rgba(0,0,0,0.08)', // Linha suave e visível
+        marginHorizontal: 6,
+        marginVertical: 2,
+        backgroundColor: 'rgba(255,255,255,0.06)',
     },
-    addressIcon: { marginRight: 14 },
+    addressIcon: { marginRight: 8, marginLeft: 1, width: 16, textAlign: 'center' },
     addressTextContainer: {
         flex: 1,
     },
-    addressText: { flex: 1, fontFamily: fonts.Bold, fontSize: 14, fontWeight: 'bold', letterSpacing: 0.1 }, // ✅ Reduzido de 16 para 14pt e adicionado fontWeight bold
+    addressText: { flex: 1, fontFamily: fonts.Bold, fontSize: 13, fontWeight: 'bold', letterSpacing: 0.1 },
     addressTextInput: {
         flex: 1,
-        fontFamily: fonts.Bold,
-        fontSize: 14,
-        fontWeight: 'bold',
+        fontFamily: fonts.Medium,
+        fontSize: 16,
+        fontWeight: '600',
+        color: '#FFFFFF',
         paddingVertical: 0,
         paddingHorizontal: 0,
-        height: 20,
-        lineHeight: 20,
+        height: 24,
+        lineHeight: 24,
     },
-    addressSubtext: { fontFamily: fonts.Regular, fontSize: 12 },
-    addressPlaceholder: { flex: 1, fontFamily: fonts.Bold, fontSize: 14, fontWeight: 'bold' }, // ✅ Mesma fonte do campo de texto digitado
+    addressTextInputB: {
+        color: '#101010',
+    },
+    addressSubtext: { fontFamily: fonts.Regular, fontSize: 11, color: 'rgba(255,255,255,0.56)' },
+    addressSubtextB: { color: 'rgba(0,0,0,0.56)' },
+    addressPlaceholder: { flex: 1, fontFamily: fonts.Medium, fontSize: 16, fontWeight: '600', color: 'rgba(255,255,255,0.52)' },
     // Estilos para campo de busca inline
     searchInputInline: {
         flex: 1,
-        fontFamily: fonts.Bold,
-        fontSize: 14, // ✅ Mesmo tamanho do campo de partida
-        fontWeight: 'bold', // ✅ Negrito como o campo de partida
+        fontFamily: fonts.Medium,
+        fontSize: 16,
+        fontWeight: '600',
+        color: '#FFFFFF',
         paddingVertical: 0,
-        minHeight: 20
+        minHeight: 24
+    },
+    searchInputInlineB: {
+        color: '#101010',
     },
 
     // ✅ Estilos para dropdown integrado (dentro do card)
     dropdownIntegrated: {
-        maxHeight: 280, // ✅ 5 resultados completos = ~280px
+        maxHeight: 280,
+        borderRadius: 12,
+        backgroundColor: 'rgba(0,0,0,0.88)',
         borderTopWidth: 1,
-        borderTopColor: 'rgba(0,0,0,0.1)',
-        marginHorizontal: -18, // Compensar padding do card para alinhar com bordas
-        marginTop: 0,
+        borderTopColor: 'rgba(255,255,255,0.1)',
+        marginHorizontal: 0,
+        marginTop: 1,
     },
     dropdownLoadingContainer: {
         paddingVertical: 16,
@@ -7220,37 +7855,37 @@ const styles = StyleSheet.create({
     },
     dropdownResultItem: {
         flexDirection: 'row',
-        alignItems: 'center', // ✅ Centralizar verticalmente
-        paddingVertical: 8, // ✅ Reduzido de 14 para 8 (redução de 6px em cada lado = 12px total, próximo de 10px)
-        paddingHorizontal: 18, // ✅ Padding horizontal igual ao campo de endereço (addressCardRow)
+        alignItems: 'center',
+        paddingVertical: 9,
+        paddingHorizontal: 12,
         borderBottomWidth: 1,
-        borderBottomColor: 'rgba(0,0,0,0.05)',
-        minHeight: 46, // ✅ Reduzido de 56 para 46 (redução de 10px)
+        borderBottomColor: 'rgba(255,255,255,0.08)',
+        minHeight: 44,
     },
     // ✅ Estilo especial para itens com ícone (destinos recentes) - alinhar com addressCardRow
     // O dropdownIntegrated tem marginHorizontal: -18, então precisa compensar + 18px do addressCardRow
     dropdownResultItemWithIcon: {
-        paddingLeft: 36, // ✅ 18px (compensação do marginHorizontal do dropdownIntegrated) + 18px (padding do addressCardRow) = 36px total
-        paddingRight: 18, // ✅ Manter padding direito padrão
+        paddingLeft: 14,
+        paddingRight: 14,
     },
     dropdownResultTextContainer: {
         flex: 1,
-        justifyContent: 'center', // ✅ Centralizar conteúdo verticalmente
-        paddingLeft: 36, // ✅ Alinhar com o texto do campo (ícone 22px + marginRight 14px = 36px)
-        // ✅ Alinhar com o texto do campo de endereço (sem ícone, mas mesmo padding)
+        justifyContent: 'center',
+        paddingLeft: 10,
     },
     dropdownResultTopLine: {
-        fontFamily: fonts.Bold,
-        fontSize: 14, // ✅ Mesmo tamanho do campo de partida
-        fontWeight: 'bold', // ✅ Negrito como o campo de partida
-        marginBottom: 3, // ✅ Aumentar espaçamento entre linhas
-        lineHeight: 18, // ✅ Altura de linha para melhor legibilidade
+        color: '#FFFFFF',
+        fontFamily: fonts.Medium,
+        fontSize: 13,
+        fontWeight: '600',
+        marginBottom: 2,
+        lineHeight: 17,
     },
     dropdownResultBottomLine: {
         fontFamily: fonts.Regular,
-        fontSize: 12, // ✅ Mesmo tamanho da linha inferior do campo de partida
-        opacity: 0.7,
-        lineHeight: 16, // ✅ Altura de linha para melhor legibilidade
+        color: 'rgba(255,255,255,0.62)',
+        fontSize: 11,
+        lineHeight: 14,
     },
     dropdownNoResults: {
         paddingVertical: 20,

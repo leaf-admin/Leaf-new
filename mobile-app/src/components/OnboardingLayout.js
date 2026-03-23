@@ -1,5 +1,8 @@
 import React from 'react';
 import { View, StyleSheet, SafeAreaView, KeyboardAvoidingView, Platform, TouchableOpacity, Text } from 'react-native';
+import onboardingTheme from './auth/common/onboardingTheme';
+
+const { color, radius, spacing } = onboardingTheme;
 
 const OnboardingLayout = ({
   children,
@@ -37,43 +40,52 @@ const OnboardingLayout = ({
 const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
-    backgroundColor: '#F5F5F5',
+    backgroundColor: color.background,
   },
   flex: {
     flex: 1,
   },
   content: {
     flex: 1,
-    paddingHorizontal: 24,
-    paddingTop: 32,
+    paddingHorizontal: spacing.xl,
+    paddingTop: spacing.lg,
     paddingBottom: 16,
   },
   bottomArea: {
     width: '100%',
     alignItems: 'center',
-    paddingBottom: 32, // Aumentado de 16 para 32 para dispositivos Android/iOS sem home indicator
-    backgroundColor: '#F5F5F5',
+    paddingHorizontal: spacing.xl,
+    paddingTop: spacing.sm,
+    paddingBottom: spacing.lg,
+    backgroundColor: color.panel,
+    borderTopWidth: 1,
+    borderTopColor: color.borderStrong
   },
   progressWrapper: {
     width: '100%',
     alignItems: 'center',
-    marginBottom: 12,
+    marginBottom: 10,
   },
   button: {
-    width: 185,
-    backgroundColor: '#1A330E',
-    borderRadius: 8,
-    paddingVertical: 16,
+    width: '100%',
+    maxWidth: 360,
+    backgroundColor: color.accent,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: color.borderStrong,
+    minHeight: 52,
+    paddingVertical: 14,
     alignItems: 'center',
-    marginBottom: 20, // Aumentado levemente para 20
+    justifyContent: 'center'
   },
   buttonDisabled: {
-    opacity: 0.5,
+    backgroundColor: color.accentSoft,
+    borderColor: color.border
   },
   buttonText: {
-    color: '#F5F5F5',
-    fontSize: 18,
-    fontWeight: 'bold',
+    color: color.accentText,
+    fontSize: 16,
+    fontWeight: '600',
   },
 });
 

@@ -1,26 +1,32 @@
 import Logger from '../../../utils/Logger';
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { View, Text, TextInput, TouchableOpacity, StyleSheet, Alert, ActivityIndicator, KeyboardAvoidingView, Platform } from 'react-native';
+import { View, TextInput, TouchableOpacity, StyleSheet, Alert as NativeAlert, KeyboardAvoidingView, Platform, Text } from 'react-native';
 import Constants from 'expo-constants';
 import { fonts } from '../../../common-local/font';
 import auth from '@react-native-firebase/auth';
 import { saveStepData } from '../../../utils/secureOnboardingStorage';
 import ContinueButton from '../common/ContinueButton';
-import { Typography } from '../../design-system/Typography';
 import { AnimatedButton } from '../../design-system/AnimatedButton';
+import onboardingTheme from '../common/onboardingTheme';
+import { toUserFriendlyMessage } from '../../../utils/friendlyErrorMessages';
 
 // ✅ CRÍTICO: Flag de ambiente de review (App Store compliance)
 const IS_REVIEW_ENV = Constants.expoConfig?.extra?.isReview === true;
 
-// Cores baseadas no design
-const colors = {
-    black: '#1C1C1E',
-    grey80: '#333333',
-    greyPlaceholder: '#BDBDBD',
-    leafGreen: '#1A330E',
-    white: '#FFFFFF',
-    lightGrey: '#F9F9F9',
-    error: '#FF3B30'
+const { color, radius, spacing, elevation } = onboardingTheme;
+
+const Alert = {
+    ...NativeAlert,
+    alert: (title, message, buttons, options) =>
+        NativeAlert.alert(
+            title || 'Atencao',
+            toUserFriendlyMessage(message, {
+                context: 'auth',
+                fallbackMessage: 'Nao foi possivel validar o codigo agora. Tente novamente.'
+            }),
+            buttons,
+            options
+        )
 };
 
 const OTPStep = ({ phoneNumber, confirmation, onVerified, onBack }) => {
@@ -28,7 +34,60 @@ const OTPStep = ({ phoneNumber, confirmation, onVerified, onBack }) => {
     const [loading, setLoading] = useState(false);
     const [timer, setTimer] = useState(30);
     const [canResend, setCanResend] = useState(false);
+    const [currentConfirmation, setCurrentConfirmation] = useState(confirmation);
     const inputRefs = useRef([]);
+
+    useEffect(() => {
+        setCurrentConfirmation(confirmation);
+    }, [confirmation]);
+
+    const requestOtpWithFallback = useCallback(async (phone) => {
+        const { api } = require('../../../common-local/api');
+        const endpoints = [
+            '/api/custom-otp/request-otp',
+            '/custom-otp/request-otp'
+        ];
+
+        let lastError = null;
+        for (const endpoint of endpoints) {
+            try {
+                return await api.post(endpoint, { phone });
+            } catch (error) {
+                lastError = error;
+                if (error?.response?.status !== 404) {
+                    throw error;
+                }
+            }
+        }
+
+        throw lastError || new Error('Falha ao enviar OTP');
+    }, []);
+
+    const verifyOtpWithFallback = useCallback(async ({ phone, verificationId, otp }) => {
+        const { api } = require('../../../common-local/api');
+        const endpoints = [
+            '/api/custom-otp/verify-otp',
+            '/custom-otp/verify-otp'
+        ];
+
+        let lastError = null;
+        for (const endpoint of endpoints) {
+            try {
+                return await api.post(endpoint, {
+                    phone,
+                    verificationId,
+                    otp
+                });
+            } catch (error) {
+                lastError = error;
+                if (error?.response?.status !== 404) {
+                    throw error;
+                }
+            }
+        }
+
+        throw lastError || new Error('Falha ao verificar OTP');
+    }, []);
 
     useEffect(() => {
         // Timer para reenvio do código
@@ -65,7 +124,7 @@ const OTPStep = ({ phoneNumber, confirmation, onVerified, onBack }) => {
         }
 
         // ✅ Validação adicional: Bloquear tentativas de bypass em produção
-        if (confirmation?.isReviewAccount && !IS_REVIEW_ENV && !__DEV__) {
+        if (currentConfirmation?.isReviewAccount && !IS_REVIEW_ENV && !__DEV__) {
             Logger.error('🚫 Tentativa de bypass bloqueada em produção');
             Alert.alert('Erro', 'Bypass de OTP não permitido em produção');
             setLoading(false);
@@ -75,15 +134,15 @@ const OTPStep = ({ phoneNumber, confirmation, onVerified, onBack }) => {
         setLoading(true);
         try {
             // 🚀 VERIFICAR SE É NÚMERO DE TESTE COM CÓDIGO FIXO
-            if (confirmation && confirmation.isTestNumber) {
+            if (currentConfirmation && currentConfirmation.isTestNumber) {
                 Logger.log('🧪 Verificando código de teste:', otpString);
-                Logger.log('🔑 Código esperado:', confirmation.expectedOtp || '000000');
+                Logger.log('🔑 Código esperado:', currentConfirmation.expectedOtp || '000000');
 
                 // Aceitar código fixo para números de teste
-                const expectedCode = confirmation.expectedOtp || '000000';
+                const expectedCode = currentConfirmation.expectedOtp || '000000';
                 if (otpString === expectedCode) {
                     Logger.log('✅ Código de teste aceito!');
-                    const credential = await confirmation.confirm(otpString);
+                    const credential = await currentConfirmation.confirm(otpString);
                     if (credential && credential.user) {
                         onVerified(credential.user);
                     }
@@ -92,11 +151,10 @@ const OTPStep = ({ phoneNumber, confirmation, onVerified, onBack }) => {
                 }
             } else {
                 // Fluxo normal com Firebase ou Custom API
-                if (confirmation && confirmation.isCustomOtp) {
-                    const { api } = require('../../../common-local/api');
-                    const response = await api.post('/custom-otp/verify-otp', {
+                if (currentConfirmation && currentConfirmation.isCustomOtp) {
+                    const response = await verifyOtpWithFallback({
                         phone: phoneNumber,
-                        verificationId: confirmation.verificationId,
+                        verificationId: currentConfirmation.verificationId,
                         otp: otpString
                     });
 
@@ -110,7 +168,7 @@ const OTPStep = ({ phoneNumber, confirmation, onVerified, onBack }) => {
                     }
                 } else {
                     // Fallback para o FirebaseAuth antigo caso algum flow o invoque
-                    const credential = await confirmation.confirm(otpString);
+                    const credential = await currentConfirmation.confirm(otpString);
                     if (credential.user) {
                         // OTP verificado com sucesso
                         onVerified(credential.user);
@@ -141,7 +199,7 @@ const OTPStep = ({ phoneNumber, confirmation, onVerified, onBack }) => {
         } finally {
             setLoading(false);
         }
-    }, [otp, confirmation, onVerified, loading]);
+    }, [otp, currentConfirmation, onVerified, loading, verifyOtpWithFallback, phoneNumber]);
 
     // Função para lidar com mudança de input
     const handleOtpChange = useCallback(async (value, index) => {
@@ -186,9 +244,8 @@ const OTPStep = ({ phoneNumber, confirmation, onVerified, onBack }) => {
         setLoading(true);
         try {
             let newConfirmation;
-            if (confirmation && confirmation.isCustomOtp) {
-                const { api } = require('../../../common-local/api');
-                const response = await api.post('/custom-otp/request-otp', { phone: phoneNumber });
+            if (currentConfirmation && currentConfirmation.isCustomOtp) {
+                const response = await requestOtpWithFallback(phoneNumber);
                 if (response.data && response.data.success) {
                     newConfirmation = {
                         verificationId: response.data.verificationId,
@@ -201,10 +258,7 @@ const OTPStep = ({ phoneNumber, confirmation, onVerified, onBack }) => {
                 newConfirmation = await auth().signInWithPhoneNumber(phoneNumber, true);
             }
 
-            // Atualizar a confirmação no componente pai
-            if (onVerified) {
-                onVerified({ confirmation: newConfirmation });
-            }
+            setCurrentConfirmation(newConfirmation);
             setTimer(30);
             setCanResend(false);
             setOtp(['', '', '', '', '', '']);
@@ -225,54 +279,52 @@ const OTPStep = ({ phoneNumber, confirmation, onVerified, onBack }) => {
         >
             <View style={styles.container}>
                 <View style={styles.header}>
-                    <Typography variant="h1" align="left" style={styles.title}>Verificação</Typography>
-                    <Typography variant="body" color={colors.grey80} align="left" style={styles.subtitle}>
+                    <Text style={styles.title}>Verificação</Text>
+                    <Text style={styles.subtitle}>
                         Digite o código de 6 dígitos enviado para {phoneNumber}
-                    </Typography>
+                    </Text>
                 </View>
 
                 {/* Inputs do OTP */}
-                <View style={styles.otpContainer}>
-                    {otp.map((digit, index) => (
-                        <TextInput
-                            key={index}
-                            ref={ref => inputRefs.current[index] = ref}
-                            style={styles.otpInput}
-                            value={digit}
-                            onChangeText={(value) => handleOtpChange(value, index)}
-                            onKeyPress={(e) => handleKeyPress(e, index)}
-                            keyboardType="number-pad"
-                            maxLength={1}
-                            selectTextOnFocus
-                            autoFocus={index === 0}
-                        />
-                    ))}
-                </View>
+                <View style={styles.card}>
+                    <View style={styles.otpContainer}>
+                        {otp.map((digit, index) => (
+                            <TextInput
+                                key={index}
+                                ref={ref => inputRefs.current[index] = ref}
+                                style={styles.otpInput}
+                                value={digit}
+                                onChangeText={(value) => handleOtpChange(value, index)}
+                                onKeyPress={(e) => handleKeyPress(e, index)}
+                                keyboardType="number-pad"
+                                maxLength={1}
+                                selectTextOnFocus
+                                autoFocus={index === 0}
+                            />
+                        ))}
+                    </View>
 
-                {/* Botão de verificação */}
-                <View style={styles.buttonContainer}>
-                    <ContinueButton
-                        onPress={handleVerifyOTP}
-                        disabled={!otp.every(digit => digit) || loading}
-                        text={loading ? 'Verificando...' : 'Verificar'}
-                    />
+                    {/* Botão de verificação */}
+                    <View style={styles.buttonContainer}>
+                        <ContinueButton
+                            onPress={handleVerifyOTP}
+                            disabled={!otp.every(digit => digit) || loading}
+                            text={loading ? 'Verificando...' : 'Verificar'}
+                        />
+                    </View>
                 </View>
 
                 {/* Reenvio do código */}
                 <View style={styles.resendContainer}>
-                    <Typography variant="bodyMedium" color={colors.grey80}>
+                    <Text style={styles.resendText}>
                         Não recebeu o código?{' '}
-                    </Typography>
+                    </Text>
                     {canResend ? (
                         <TouchableOpacity onPress={handleResendCode} disabled={loading}>
-                            <Typography variant="bodyMedium" color={colors.leafGreen} style={styles.resendLink}>
-                                Reenviar
-                            </Typography>
+                            <Text style={styles.resendLink}>Reenviar</Text>
                         </TouchableOpacity>
                     ) : (
-                        <Typography variant="bodyMedium" color={colors.greyPlaceholder}>
-                            Reenviar em {timer}s
-                        </Typography>
+                        <Text style={styles.resendTimer}>Reenviar em {timer}s</Text>
                     )}
                 </View>
 
@@ -293,59 +345,96 @@ const OTPStep = ({ phoneNumber, confirmation, onVerified, onBack }) => {
 const styles = StyleSheet.create({
     keyboardView: {
         flex: 1,
-        width: '100%',
+        width: '100%'
     },
     container: {
         width: '100%',
-        paddingVertical: 24,
+        paddingHorizontal: spacing.lg,
+        paddingVertical: spacing.sm,
         flex: 1,
-        justifyContent: 'space-between',
+        justifyContent: 'flex-start'
     },
     header: {
-        marginBottom: 32,
+        marginBottom: spacing.md
     },
     title: {
-        marginBottom: 8,
+        marginBottom: spacing.xs,
+        color: color.textPrimary,
+        fontSize: 22,
+        lineHeight: 28,
+        fontFamily: fonts.Bold
     },
     subtitle: {
-        lineHeight: 22,
+        color: color.textSecondary,
+        fontSize: 14,
+        lineHeight: 20,
+        fontFamily: fonts.Regular
+    },
+    card: {
+        backgroundColor: color.panelSoft,
+        borderWidth: 1,
+        borderColor: color.glassStroke,
+        borderRadius: radius.lg,
+        padding: spacing.sm,
+        shadowColor: '#0E1522',
+        shadowOffset: { width: 0, height: 12 },
+        shadowOpacity: 0.16,
+        shadowRadius: 20,
+        elevation: 9
     },
     otpContainer: {
         flexDirection: 'row',
         justifyContent: 'space-between',
-        marginBottom: 24,
-        gap: 8,
+        marginBottom: spacing.sm,
+        gap: 6
     },
     otpInput: {
         flex: 1,
-        maxWidth: 42,
-        height: 48,
-        borderWidth: 2,
-        borderColor: colors.lightGrey,
-        borderRadius: 8,
+        maxWidth: 40,
+        height: 44,
+        borderWidth: 1,
+        borderColor: color.borderStrong,
+        borderRadius: radius.sm,
         textAlign: 'center',
-        fontSize: 18,
+        fontSize: 16,
         fontFamily: fonts.Bold,
-        color: colors.black,
-        backgroundColor: colors.white,
+        color: color.textPrimary,
+        backgroundColor: color.surface
     },
     buttonContainer: {
-        marginBottom: 24,
+        marginBottom: 0
     },
     resendContainer: {
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'center',
-        marginBottom: 24,
+        marginTop: spacing.md,
+        marginBottom: spacing.md
+    },
+    resendText: {
+        fontSize: 13,
+        lineHeight: 18,
+        color: color.textSecondary,
+        fontFamily: fonts.Medium
     },
     resendLink: {
         textDecorationLine: 'underline',
+        fontSize: 13,
+        lineHeight: 18,
+        color: color.accent,
+        fontFamily: fonts.Medium
+    },
+    resendTimer: {
+        fontSize: 13,
+        lineHeight: 18,
+        color: color.textMuted,
+        fontFamily: fonts.Medium
     },
     footer: {
-        marginTop: 'auto',
+        marginTop: spacing.xs
     },
     backButton: {
-        marginTop: 4,
+        marginTop: 4
     }
 });
 

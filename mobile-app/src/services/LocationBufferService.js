@@ -12,9 +12,15 @@ import { fetchNetInfo } from '../utils/NetInfoSafe';
 class LocationBufferService {
     constructor() {
         this.bufferKey = '@location_buffer';
+        this.activeTripContextKey = '@location_buffer_active_trip';
         this.maxBufferSize = 1000; // Máximo de 1000 localizações
         this.syncInterval = null;
         this.isOnline = true;
+        this.activeTripContextCache = null;
+    }
+
+    buildEventId() {
+        return `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
     }
 
     /**
@@ -57,21 +63,30 @@ class LocationBufferService {
      * @param {Object} location - { lat, lng, timestamp }
      * @param {string} userType - 'driver' ou 'customer'
      */
-    async addLocation(bookingId, location, userType = 'driver') {
+    async addLocation(bookingId, location, userType = 'driver', options = {}) {
         try {
-            if (!bookingId || !location || !location.lat || !location.lng) {
+            const lat = Number(location?.lat);
+            const lng = Number(location?.lng);
+            if (!bookingId || !Number.isFinite(lat) || !Number.isFinite(lng)) {
                 return;
             }
 
             const locationData = {
+                eventId: location.eventId || this.buildEventId(),
                 bookingId,
                 userType,
-                lat: location.lat,
-                lng: location.lng,
+                lat,
+                lng,
                 timestamp: location.timestamp || Date.now(),
                 accuracy: location.accuracy || null,
                 heading: location.heading || null,
-                speed: location.speed || null
+                speed: location.speed || null,
+                tripStatus: location.tripStatus || null,
+                isInTrip: location.isInTrip === true,
+                tripId: location.tripId || bookingId,
+                seq: Number.isFinite(Number(location.seq)) ? Number(location.seq) : null,
+                capturedAt: location.capturedAt || location.timestamp || Date.now(),
+                source: location.source || 'foreground'
             };
 
             // Carregar buffer atual
@@ -91,8 +106,12 @@ class LocationBufferService {
             Logger.log(`📍 [LocationBuffer] Localização adicionada ao buffer (${buffer.length} total)`);
 
             // Se estiver online, tentar enviar imediatamente
-            if (this.isOnline) {
-                await this.sendLocation(locationData);
+            const attemptImmediateSend = options.attemptImmediateSend !== false;
+            if (this.isOnline && attemptImmediateSend) {
+                const sent = await this.sendLocation(locationData);
+                if (sent) {
+                    await this.removeBufferedEventById(locationData.eventId);
+                }
             }
 
         } catch (error) {
@@ -114,6 +133,133 @@ class LocationBufferService {
         }
     }
 
+    async removeBufferedEventById(eventId) {
+        if (!eventId) {
+            return;
+        }
+        const buffer = await this.getBuffer();
+        const filtered = buffer.filter((item) => item.eventId !== eventId);
+        await AsyncStorage.setItem(this.bufferKey, JSON.stringify(filtered));
+    }
+
+    async setActiveTripContext(context = {}) {
+        if (!context.bookingId) {
+            return;
+        }
+        const existing = await this.getActiveTripContext();
+        const lastSeqFromContext = Number.isInteger(Number(context.lastSeq))
+            ? Number(context.lastSeq)
+            : (Number.isInteger(Number(existing?.lastSeq)) ? Number(existing.lastSeq) : 0);
+
+        const payload = {
+            bookingId: String(context.bookingId),
+            tripId: String(context.tripId || context.bookingId),
+            driverId: context.driverId ? String(context.driverId) : null,
+            tripStatus: context.tripStatus || 'accepted',
+            lastSeq: lastSeqFromContext,
+            updatedAt: Date.now()
+        };
+        this.activeTripContextCache = payload;
+        await AsyncStorage.setItem(this.activeTripContextKey, JSON.stringify(payload));
+    }
+
+    async updateActiveTripStatus(tripStatus) {
+        const context = await this.getActiveTripContext();
+        if (!context || !tripStatus) {
+            return;
+        }
+        context.tripStatus = tripStatus;
+        context.updatedAt = Date.now();
+        this.activeTripContextCache = context;
+        await AsyncStorage.setItem(this.activeTripContextKey, JSON.stringify(context));
+    }
+
+    async getActiveTripContext() {
+        if (this.activeTripContextCache) {
+            return this.activeTripContextCache;
+        }
+        try {
+            const raw = await AsyncStorage.getItem(this.activeTripContextKey);
+            this.activeTripContextCache = raw ? JSON.parse(raw) : null;
+            return this.activeTripContextCache;
+        } catch (error) {
+            Logger.error('❌ Erro ao ler contexto de corrida ativa:', error);
+            return null;
+        }
+    }
+
+    async clearActiveTripContext(expectedBookingId = null) {
+        const context = await this.getActiveTripContext();
+        if (!context) {
+            return;
+        }
+        if (expectedBookingId && String(context.bookingId) !== String(expectedBookingId)) {
+            return;
+        }
+        this.activeTripContextCache = null;
+        await AsyncStorage.removeItem(this.activeTripContextKey);
+    }
+
+    async reserveNextSeq(bookingId) {
+        const context = await this.getActiveTripContext();
+        if (!context || String(context.bookingId) !== String(bookingId)) {
+            return null;
+        }
+        const nextSeq = Number.isInteger(Number(context.lastSeq)) ? Number(context.lastSeq) + 1 : 1;
+        context.lastSeq = nextSeq;
+        context.updatedAt = Date.now();
+        this.activeTripContextCache = context;
+        await AsyncStorage.setItem(this.activeTripContextKey, JSON.stringify(context));
+        return nextSeq;
+    }
+
+    async syncSeqContext(bookingId, seq) {
+        if (!Number.isInteger(Number(seq))) {
+            return;
+        }
+        const context = await this.getActiveTripContext();
+        if (!context || String(context.bookingId) !== String(bookingId)) {
+            return;
+        }
+        const numericSeq = Number(seq);
+        const currentSeq = Number.isInteger(Number(context.lastSeq)) ? Number(context.lastSeq) : 0;
+        if (numericSeq > currentSeq) {
+            context.lastSeq = numericSeq;
+            context.updatedAt = Date.now();
+            this.activeTripContextCache = context;
+            await AsyncStorage.setItem(this.activeTripContextKey, JSON.stringify(context));
+        }
+    }
+
+    async addDriverLocationFromBackground(location = {}) {
+        const context = await this.getActiveTripContext();
+        if (!context?.bookingId) {
+            return { buffered: false, reason: 'no_active_trip' };
+        }
+
+        const seq = await this.reserveNextSeq(context.bookingId);
+        await this.addLocation(context.bookingId, {
+            lat: location.lat,
+            lng: location.lng,
+            timestamp: location.timestamp || Date.now(),
+            accuracy: location.accuracy || null,
+            heading: location.heading || null,
+            speed: location.speed || null,
+            tripStatus: context.tripStatus || 'started',
+            isInTrip: true,
+            tripId: context.tripId || context.bookingId,
+            seq,
+            capturedAt: location.timestamp || Date.now(),
+            source: 'background_task'
+        }, 'driver', { attemptImmediateSend: false });
+
+        return {
+            buffered: true,
+            bookingId: context.bookingId,
+            seq
+        };
+    }
+
     /**
      * Enviar localização (tentativa)
      * @param {Object} locationData - Dados da localização
@@ -122,8 +268,9 @@ class LocationBufferService {
         try {
             const WebSocketManager = require('./WebSocketManager').default;
             const webSocketManager = WebSocketManager.getInstance();
+            const status = webSocketManager.getConnectionStatus();
 
-            if (!webSocketManager.isConnected()) {
+            if (!webSocketManager.isConnected() || !status?.authenticated) {
                 // Não está conectado - manter no buffer
                 return false;
             }
@@ -136,7 +283,13 @@ class LocationBufferService {
                     accuracy: locationData.accuracy,
                     heading: locationData.heading,
                     speed: locationData.speed,
-                    timestamp: locationData.timestamp
+                    timestamp: locationData.timestamp,
+                    tripStatus: locationData.tripStatus,
+                    isInTrip: locationData.isInTrip,
+                    tripId: locationData.tripId,
+                    seq: locationData.seq,
+                    capturedAt: locationData.capturedAt,
+                    source: locationData.source || 'foreground'
                 });
             } else {
                 // Customer - enviar localização do passageiro
@@ -165,7 +318,7 @@ class LocationBufferService {
 
         try {
             const buffer = await this.getBuffer();
-            
+
             if (buffer.length === 0) {
                 return;
             }
@@ -177,7 +330,7 @@ class LocationBufferService {
 
             for (const locationData of buffer) {
                 const success = await this.sendLocation(locationData);
-                
+
                 if (success) {
                     synced.push(locationData);
                 } else {
@@ -248,4 +401,3 @@ class LocationBufferService {
 // Exportar instância singleton
 const locationBufferService = new LocationBufferService();
 export default locationBufferService;
-

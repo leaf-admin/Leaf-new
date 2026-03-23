@@ -1,21 +1,17 @@
 import React from 'react';
 import { TouchableOpacity, Text, StyleSheet } from 'react-native';
 import { fonts } from '../../../common-local/font';
+import onboardingTheme from './onboardingTheme';
 
-// Cores padronizadas
-const colors = {
-    leafGreen: '#1A330E',
-    lightGrey: '#F5F5F5',
-    white: '#FFFFFF',
-    greyPlaceholder: '#BDBDBD',
-};
+const { color, radius, spacing } = onboardingTheme;
 
 const ContinueButton = ({
     onPress,
     disabled = false,
     text = 'Continuar',
     style = {},
-    textStyle = {}
+    textStyle = {},
+    ...props
 }) => {
     return (
         <TouchableOpacity
@@ -27,6 +23,7 @@ const ContinueButton = ({
             onPress={onPress}
             disabled={disabled}
             activeOpacity={0.8}
+            {...props}
         >
             <Text style={[
                 styles.continueButtonText,
@@ -41,34 +38,35 @@ const ContinueButton = ({
 
 const styles = StyleSheet.create({
     continueButton: {
-        backgroundColor: colors.leafGreen,
-        borderRadius: 16,
-        paddingVertical: 18,
+        backgroundColor: color.accent,
+        borderRadius: radius.md,
+        borderWidth: 1,
+        borderColor: color.borderStrong,
+        paddingVertical: 12,
         alignItems: 'center',
-        marginTop: 16,
-        marginHorizontal: 24,
-        marginBottom: 40, // Aumentado de 20 para 40 para garantir visibilidade acima da barra do sistema
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 4 },
-        shadowOpacity: 0.15,
-        shadowRadius: 12,
-        elevation: 8,
-        minHeight: 56, // Altura mínima consistente
+        marginTop: spacing.sm,
+        marginBottom: spacing.md,
+        shadowColor: '#0E1522',
+        shadowOffset: { width: 0, height: 8 },
+        shadowOpacity: 0.14,
+        shadowRadius: 14,
+        elevation: 6,
+        minHeight: 46
     },
     continueButtonDisabled: {
-        backgroundColor: colors.lightGrey,
+        backgroundColor: color.accentSoft,
+        borderColor: color.border,
+        shadowOpacity: 0.06
     },
     continueButtonText: {
-        color: colors.white,
-        fontSize: 18,
-        fontFamily: fonts.Bold,
-        textAlign: 'center',
+        color: color.accentText,
+        fontSize: 15,
+        fontFamily: fonts.SemiBold,
+        textAlign: 'center'
     },
     continueButtonTextDisabled: {
-        color: colors.greyPlaceholder,
-    },
+        color: color.textMuted
+    }
 });
 
 export default ContinueButton;
-
-

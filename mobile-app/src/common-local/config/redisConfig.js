@@ -64,7 +64,14 @@ export const shouldUseRedis = () => {
 
 // Configuração para uso via API
 export const REDIS_API_CONFIG = {
-    baseUrl: 'http://147.182.204.181:3001',
+    baseUrl: (
+        process.env.EXPO_PUBLIC_API_URL ||
+        process.env.EXPO_PUBLIC_BACKEND_URL ||
+        'https://api.147.182.204.181.sslip.io'
+    )
+        .trim()
+        .replace(/\/+$/, '')
+        .replace(/\/api$/i, ''),
     useRedis: Platform.OS === 'web',
     timeout: 5000,
 };

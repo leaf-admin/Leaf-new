@@ -5,7 +5,7 @@ import {
     Text,
     StyleSheet,
     TouchableOpacity,
-    Alert,
+    Alert as NativeAlert,
     ScrollView,
     Linking,
     Platform,
@@ -23,6 +23,7 @@ import RatingModal from '../common/RatingModal';
 import TripDataService from '../../services/TripDataService';
 import PersistentRideNotificationService from '../../services/PersistentRideNotificationService';
 import RideLocationManager from '../../services/RideLocationManager';
+import locationBufferService from '../../services/LocationBufferService';
 import ReceiptService from '../../services/ReceiptService';
 import database from '@react-native-firebase/database';
 import firestore from '@react-native-firebase/firestore';
@@ -31,6 +32,7 @@ import messaging from '@react-native-firebase/messaging';
 // import DocumentPicker from 'react-native-document-picker';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as ImagePicker from 'expo-image-picker';
+import * as DocumentPicker from 'expo-document-picker';
 import BottomSheet, { BottomSheetView, BottomSheetBackdrop } from '@gorhom/bottom-sheet';
 import { fonts } from '../../common-local/font';
 import { useTheme } from '../../common-local/theme';
@@ -46,7 +48,10 @@ import LocationPermissionBanner from '../LocationPermissionBanner';
 import NetworkStatusBanner from '../NetworkStatusBanner';
 import ProfileToggle from '../ProfileToggle';
 import KYCCameraScreen from '../KYC/KYCCameraScreen';
+import AWSLivenessWebViewScreen from '../KYC/AWSLivenessWebViewScreen';
 import kycService from '../../services/KYCService';
+import driverDocumentExtractionService from '../../services/DriverDocumentExtractionService';
+import { toUserFriendlyMessage } from '../../utils/friendlyErrorMessages';
 
 // Cores padronizadas do onboarding
 const colors = {
@@ -57,6 +62,22 @@ const colors = {
     white: '#FFFFFF',
     lightGrey: '#F5F5F5',
     error: '#FF3B30'
+};
+
+const DRIVER_EMAIL_REMINDER_STORAGE_PREFIX = '@driver_email_reminder_day';
+
+const Alert = {
+    ...NativeAlert,
+    alert: (title, message, buttons, options) =>
+        NativeAlert.alert(
+            title || 'Atencao',
+            toUserFriendlyMessage(message, {
+                context: 'trip',
+                fallbackMessage: 'Nao foi possivel concluir esta acao agora. Tente novamente.'
+            }),
+            buttons,
+            options
+        )
 };
 
 // Função temporária para Icon (substituir por import real se necessário)
@@ -120,6 +141,83 @@ function DriverUI(props) {
     const driverId = auth?.profile?.uid || auth?.uid || auth?.user?.uid;
 
     const { isDarkMode, toggleTheme, currentLocation, onBottomSheetStateChange, navigation, locationDenied } = props;
+
+    useEffect(() => {
+        let isMounted = true;
+
+        const maybeShowEmailReminder = async () => {
+            try {
+                const profileUserType = String(auth?.profile?.usertype || auth?.profile?.userType || '').toLowerCase();
+                if (profileUserType !== 'driver') {
+                    return;
+                }
+
+                const existingEmail = String(auth?.profile?.email || '').trim();
+                if (existingEmail) {
+                    return;
+                }
+
+                const hour = new Date().getHours();
+                const isMorningWindow = hour >= 6 && hour < 12;
+                if (!isMorningWindow) {
+                    return;
+                }
+
+                const uid = auth?.profile?.uid || auth?.uid || auth?.user?.uid;
+                if (!uid) {
+                    return;
+                }
+
+                const dateToken = new Date().toISOString().slice(0, 10);
+                const reminderKey = `${DRIVER_EMAIL_REMINDER_STORAGE_PREFIX}_${uid}_${dateToken}`;
+                const alreadyShown = await AsyncStorage.getItem(reminderKey);
+                if (alreadyShown) {
+                    return;
+                }
+
+                await AsyncStorage.setItem(reminderKey, '1');
+
+                if (!isMounted) {
+                    return;
+                }
+
+                Alert.alert(
+                    'Complete seu e-mail',
+                    'Adicione seu e-mail para receber recibos de saque, avisos do sistema e informe de rendimentos.',
+                    [
+                        {
+                            text: 'Depois',
+                            style: 'cancel'
+                        },
+                        {
+                            text: 'Adicionar agora',
+                            onPress: () => {
+                                if (navigation?.navigate) {
+                                    navigation.navigate('EditProfileScreen');
+                                }
+                            }
+                        }
+                    ]
+                );
+            } catch (error) {
+                Logger.warn('⚠️ [DriverUI] Falha ao exibir lembrete de e-mail:', error?.message || error);
+            }
+        };
+
+        maybeShowEmailReminder();
+
+        return () => {
+            isMounted = false;
+        };
+    }, [
+        auth?.profile?.email,
+        auth?.profile?.uid,
+        auth?.profile?.usertype,
+        auth?.profile?.userType,
+        auth?.uid,
+        auth?.user?.uid,
+        navigation
+    ]);
 
     // Refs para BottomSheets
     const documentsBottomSheetRef = useRef(null);
@@ -286,6 +384,12 @@ function DriverUI(props) {
     const [showKYCModal, setShowKYCModal] = useState(false);
     const [isKYCProcessing, setIsKYCProcessing] = useState(false);
     const [kycPendingReason, setKycPendingReason] = useState('');
+    const [kycLivenessMode, setKycLivenessMode] = useState('local');
+    const [isKycProviderLoading, setIsKycProviderLoading] = useState(false);
+    const [kycChallengeContext, setKycChallengeContext] = useState({
+        challengeId: null,
+        requirement: null
+    });
 
     // ✅ Estado para status da conexão WebSocket (VISÍVEL)
     const [connectionStatus, setConnectionStatus] = useState({
@@ -302,6 +406,9 @@ function DriverUI(props) {
     // Refs para throttling de localização
     const lastLocationRef = useRef(null);
     const lastUpdateTimeRef = useRef(0);
+    const locationSeqRef = useRef(0);
+    const currentSeqTripIdRef = useRef(null);
+    const isLocationBufferInitializedRef = useRef(false);
 
     // Estados para gerenciar reservas e viagens
     const [availableBookings, setAvailableBookings] = useState([]);
@@ -348,6 +455,48 @@ function DriverUI(props) {
     const [navigationDestination, setNavigationDestination] = useState(null);
     const [navigationPassengerName, setNavigationPassengerName] = useState('');
     const [navigationType, setNavigationType] = useState('pickup'); // 'pickup' ou 'destination'
+
+    useEffect(() => {
+        let isMounted = true;
+
+        const resolveLivenessMode = async () => {
+            if (!showKYCModal) {
+                setIsKycProviderLoading(false);
+                setKycLivenessMode('local');
+                return;
+            }
+
+            setIsKycProviderLoading(true);
+            const providerResult = await kycService.getPreferredLivenessMode();
+            if (!isMounted) return;
+
+            if (!providerResult?.success) {
+                Logger.warn('⚠️ [KYC] Provider indisponível, usando fallback local:', providerResult?.error);
+                setKycLivenessMode('local');
+                setIsKycProviderLoading(false);
+                return;
+            }
+
+            setKycLivenessMode(providerResult.mode === 'aws' ? 'aws' : 'local');
+            setIsKycProviderLoading(false);
+        };
+
+        resolveLivenessMode();
+        return () => {
+            isMounted = false;
+        };
+    }, [showKYCModal]);
+
+    // Inicializar buffer de localização uma única vez para fallback offline
+    useEffect(() => {
+        if (isLocationBufferInitializedRef.current) {
+            return;
+        }
+        isLocationBufferInitializedRef.current = true;
+        locationBufferService.initialize().catch((error) => {
+            Logger.warn('⚠️ [DriverUI] Falha ao inicializar LocationBufferService:', error?.message || error);
+        });
+    }, []);
 
     // Estados para controlar z-index dinâmico
     const [isDocumentsBottomSheetOpen, setIsDocumentsBottomSheetOpen] = useState(false);
@@ -954,6 +1103,10 @@ function DriverUI(props) {
             setIsOnline(false);
             if (!showKYCModal && !isKYCProcessing) {
                 setKycPendingReason(data?.reason || 'Verificação diária necessária');
+                setKycChallengeContext({
+                    challengeId: data?.challengeId || null,
+                    requirement: data?.requirement || null
+                });
                 setShowKYCModal(true);
             }
         };
@@ -1221,54 +1374,8 @@ function DriverUI(props) {
         };
     }, [isOnline, auth.profile?.uid]);
 
-
-    // Atualizar localização em tempo real quando online
-    useEffect(() => {
-        if (isOnline && currentLocation && driverId) {
-            const webSocketManager = WebSocketManager.getInstance();
-
-            if (!webSocketManager.isConnected()) {
-                Logger.warn('⚠️ [DriverUI] WebSocket não conectado, tentando conectar...');
-                webSocketManager.connect().catch(err => {
-                    Logger.error('❌ [DriverUI] Erro ao conectar WebSocket para enviar localização:', err);
-                });
-                return; // Sair se não estiver conectado
-            }
-
-            // Verificar se está autenticado
-            const status = webSocketManager.getConnectionStatus();
-            if (!status.authenticated) {
-                Logger.warn('⚠️ [DriverUI] WebSocket não autenticado, autenticando...');
-                webSocketManager.authenticate(driverId, 'driver');
-                return; // Sair se não estiver autenticado
-            }
-
-            const isInTrip = tripStatus === 'started' || tripStatus === 'accepted';
-
-            Logger.log('📍 [DriverUI] Enviando updateLocation:', {
-                driverId,
-                lat: currentLocation.lat,
-                lng: currentLocation.lng,
-                isOnline,
-                isInTrip,
-                authenticated: status.authenticated
-            });
-
-            webSocketManager.emitToServer('updateLocation', {
-                driverId,
-                uid: driverId,
-                lat: currentLocation.lat,
-                lng: currentLocation.lng,
-                tripStatus,
-                isInTrip,
-                timestamp: Date.now()
-            });
-
-            if (tripStatus === 'started') {
-                updateDriverLocation();
-            }
-        }
-    }, [isOnline, currentLocation, tripStatus, driverId]);
+    // Emissor duplicado de updateLocation removido.
+    // O envio fica centralizado no efeito de tracking periódico abaixo.
 
     // ==================== NOTIFICAÇÕES INTERATIVAS ====================
     // Handler para processar ações de notificação (botões)
@@ -1562,15 +1669,35 @@ function DriverUI(props) {
         }
 
         const webSocketManager = WebSocketManager.getInstance();
-        if (!webSocketManager.isConnected()) {
-            return;
-        }
 
         // Importar função de cálculo de distância
         const GetDistance = require('../../common-local/other/GeoFunctions').GetDistance;
 
-        // Verificar se é viagem
+        // Verificar se é viagem e contexto ativo
         const isInTrip = tripStatus === 'started' || rideStatus === 'inProgress' || rideStatus === 'started';
+        const activeBookingId = currentRideRequest?.bookingId || currentBooking?.bookingId || null;
+
+        // Resetar sequência quando muda de corrida
+        if (isInTrip && activeBookingId && currentSeqTripIdRef.current !== activeBookingId) {
+            currentSeqTripIdRef.current = activeBookingId;
+            locationSeqRef.current = 0;
+            locationBufferService.setActiveTripContext({
+                bookingId: activeBookingId,
+                tripId: activeBookingId,
+                driverId: auth.profile?.uid,
+                tripStatus: tripStatus,
+                lastSeq: 0
+            }).catch(err => {
+                Logger.warn('⚠️ [DriverUI] Falha ao inicializar contexto de sequência da corrida:', err?.message || err);
+            });
+        } else if (isInTrip && activeBookingId) {
+            locationBufferService.updateActiveTripStatus(tripStatus).catch(err => {
+                Logger.warn('⚠️ [DriverUI] Falha ao atualizar status do contexto de sequência:', err?.message || err);
+            });
+        } else if (!isInTrip) {
+            currentSeqTripIdRef.current = null;
+            locationSeqRef.current = 0;
+        }
 
         // ✅ DETECTAR CHEGADA AO DESTINO (se estiver em viagem)
         if (isInTrip && currentRideRequest?.drop?.lat && currentRideRequest?.drop?.lng) {
@@ -1631,7 +1758,7 @@ function DriverUI(props) {
         const MIN_DISTANCE_METERS = 10; // 10 metros
 
         // ✅ NOVA LÓGICA: Enviar localização apenas quando há mudança significativa
-        const sendLocationUpdate = () => {
+        const sendLocationUpdate = async () => {
             const now = Date.now();
             const timeSinceLastUpdate = now - lastUpdateTimeRef.current;
 
@@ -1655,14 +1782,53 @@ function DriverUI(props) {
                 return; // Não moveu o suficiente, não atualiza
             }
 
-            // Atualizar localização
-            webSocketManager.emitToServer('updateLocation', {
+            const capturedAt = Date.now();
+            let nextSeq = null;
+            if (isInTrip && activeBookingId) {
+                const persistedSeq = await locationBufferService.reserveNextSeq(activeBookingId);
+                if (Number.isInteger(Number(persistedSeq))) {
+                    nextSeq = Number(persistedSeq);
+                    locationSeqRef.current = nextSeq;
+                } else {
+                    nextSeq = (locationSeqRef.current += 1);
+                    await locationBufferService.syncSeqContext(activeBookingId, nextSeq);
+                }
+            }
+            const payload = {
                 lat: currentLocation.lat,
                 lng: currentLocation.lng,
                 uid: auth.profile?.uid,
-                tripStatus: tripStatus, // ✅ Enviar estado da viagem para TTL diferenciado
-                isInTrip: isInTrip
-            });
+                tripStatus: tripStatus,
+                isInTrip: isInTrip,
+                tripId: activeBookingId,
+                seq: nextSeq,
+                capturedAt,
+                accuracy: currentLocation.accuracy || null,
+                heading: currentLocation.heading || null,
+                speed: currentLocation.speed || null
+            };
+
+            const connectionStatusNow = webSocketManager.getConnectionStatus();
+            const canSendRealtime = webSocketManager.isConnected() && connectionStatusNow?.authenticated;
+
+            if (canSendRealtime) {
+                webSocketManager.emitToServer('updateLocation', payload);
+            } else if (isInTrip && activeBookingId) {
+                // Fallback offline: persistir para sincronização posterior
+                await locationBufferService.addLocation(activeBookingId, {
+                    lat: payload.lat,
+                    lng: payload.lng,
+                    timestamp: capturedAt,
+                    accuracy: payload.accuracy,
+                    heading: payload.heading,
+                    speed: payload.speed,
+                    tripStatus: payload.tripStatus,
+                    isInTrip: payload.isInTrip,
+                    tripId: payload.tripId,
+                    seq: payload.seq,
+                    capturedAt: payload.capturedAt
+                }, 'driver');
+            }
 
             // ✅ Salvar localização do motorista no TripDataService (se estiver em corrida)
             if (isInTrip && currentRideRequest?.bookingId) {
@@ -1710,12 +1876,16 @@ function DriverUI(props) {
         };
 
         // Enviar localização imediatamente na primeira vez
-        sendLocationUpdate();
+        sendLocationUpdate().catch(err => {
+            Logger.warn('⚠️ [DriverUI] Falha no envio inicial de localização:', err?.message || err);
+        });
 
         // ✅ Configurar intervalo para verificar mudanças de localização (mais frequente)
         const locationCheckInterval = setInterval(() => {
-            if (isOnline && currentLocation && webSocketManager.isConnected()) {
-                sendLocationUpdate(); // Só envia se houver mudança significativa
+            if (isOnline && currentLocation) {
+                sendLocationUpdate().catch(err => {
+                    Logger.warn('⚠️ [DriverUI] Falha no envio periódico de localização:', err?.message || err);
+                }); // Só envia se houver mudança significativa
             }
         }, updateInterval);
 
@@ -1731,7 +1901,7 @@ function DriverUI(props) {
             clearInterval(locationCheckInterval);
             clearInterval(heartbeatInterval);
         };
-    }, [isOnline, currentLocation, tripStatus, rideStatus, currentRideRequest, auth.profile?.uid, showSystemNotificationMock, mockArrivedAtDestination]);
+    }, [isOnline, currentLocation, tripStatus, rideStatus, currentRideRequest, currentBooking, auth.profile?.uid, showSystemNotificationMock, mockArrivedAtDestination]);
 
     // Carregar status de aprovação do driver do banco de dados
     useEffect(() => {
@@ -2515,6 +2685,12 @@ function DriverUI(props) {
     const handleKYCModalCancel = () => {
         setShowKYCModal(false);
         setKycPendingReason('');
+        setKycLivenessMode('local');
+        setIsKycProviderLoading(false);
+        setKycChallengeContext({
+            challengeId: null,
+            requirement: null
+        });
     };
 
     const handleKYCCapture = async (selfieImageUri) => {
@@ -2529,7 +2705,12 @@ function DriverUI(props) {
         setIsKYCProcessing(true);
 
         try {
-            const result = await kycService.verifyDriver(driverId, selfieImageUri);
+            const result = await kycService.verifyDriver(driverId, selfieImageUri, {
+                challengeId: kycChallengeContext.challengeId || undefined,
+                requirement: kycChallengeContext.requirement || undefined,
+                livenessPassed: true,
+                mode: 'device_signature_v1'
+            });
             const isMatch = !!(result?.success && result?.data?.isMatch);
 
             if (!isMatch) {
@@ -2550,12 +2731,73 @@ function DriverUI(props) {
         }
     };
 
+    const handleKycAwsSuccess = async ({ sessionId }) => {
+        const driverId = auth?.profile?.uid;
+        if (!driverId) {
+            Alert.alert('Erro', 'Não foi possível identificar o motorista para validação KYC.');
+            setShowKYCModal(false);
+            return;
+        }
+
+        setShowKYCModal(false);
+        setIsKYCProcessing(true);
+
+        try {
+            const result = await kycService.verifyDriver(driverId, null, {
+                challengeId: kycChallengeContext.challengeId || undefined,
+                requirement: kycChallengeContext.requirement || undefined,
+                livenessPassed: true,
+                awsSessionId: sessionId,
+                mode: kycService.getAwsProviderName()
+            });
+            const isMatch = !!(result?.success && result?.data?.isMatch);
+
+            if (!isMatch) {
+                Alert.alert(
+                    'Validação não aprovada',
+                    result?.error || 'Não foi possível validar sua identidade. Tente novamente.'
+                );
+                return;
+            }
+
+            Alert.alert('Validação concluída', 'Identidade validada. Colocando você online...');
+            await activateOnlineStatus();
+        } catch (error) {
+            Logger.error('❌ [KYC] Erro ao validar motorista via AWS:', error);
+            Alert.alert('Erro', 'Falha ao validar identidade. Tente novamente.');
+        } finally {
+            setIsKYCProcessing(false);
+        }
+    };
+
+    const handleKycFallbackLocal = () => {
+        setKycLivenessMode('local');
+    };
+
     // Funções para upload de documentos
     const uploadDocument = async (documentType) => {
         try {
             Logger.log(`📄 Iniciando upload de ${documentType}...`);
 
-            // Mostrar opções de upload
+            if (documentType === 'cnh') {
+                Alert.alert(
+                    'Enviar CNH Digital',
+                    'Envie o PDF da CNH Digital para extração automática dos dados.',
+                    [
+                        {
+                            text: '📄 Selecionar PDF',
+                            onPress: () => pickPDFDocument(documentType)
+                        },
+                        {
+                            text: 'Cancelar',
+                            style: 'cancel'
+                        }
+                    ]
+                );
+                return;
+            }
+
+            // Demais documentos: imagem ou PDF
             Alert.alert(
                 `Enviar ${documentType.toUpperCase()}`,
                 'Escolha como deseja enviar o documento:',
@@ -2613,20 +2855,17 @@ function DriverUI(props) {
 
     const pickPDFDocument = async (documentType) => {
         try {
-            // Usar expo-image-picker para selecionar imagens
-            const result = await ImagePicker.launchImageLibraryAsync({
-                mediaTypes: ImagePicker.MediaTypeOptions.Images,
-                allowsEditing: true,
-                aspect: [4, 3],
-                quality: 0.8,
+            const result = await DocumentPicker.getDocumentAsync({
+                type: 'application/pdf',
+                copyToCacheDirectory: true,
+                multiple: false
             });
 
-            if (!result.canceled && result.assets[0]) {
+            if (!result.canceled && result.assets?.[0]) {
                 const file = result.assets[0];
                 Logger.log(`📄 Documento selecionado para ${documentType}:`, file.uri);
 
-                // Upload real para Firebase Storage
-                await uploadDocumentToStorage(documentType, 'image/jpeg', file.uri);
+                await uploadDocumentToStorage(documentType, 'pdf', file.uri, file);
             }
 
         } catch (error) {
@@ -2635,7 +2874,7 @@ function DriverUI(props) {
         }
     };
 
-    const uploadDocumentToStorage = async (documentType, fileType, fileUri) => {
+    const uploadDocumentToStorage = async (documentType, fileType, fileUri, fileMeta = null) => {
         try {
             // Mostrar loading
             Alert.alert('Enviando...', `Fazendo upload do ${documentType.toUpperCase()}...`);
@@ -2658,8 +2897,24 @@ function DriverUI(props) {
                 [documentType]: 'analyzing'
             }));
 
-            // Salvar no Firebase Database com URL do Storage
-            await saveDocumentStatusToFirebase(documentType, fileType, downloadURL);
+            let extractionPayload = null;
+            if (documentType === 'cnh' && fileType === 'pdf') {
+                try {
+                    extractionPayload = await driverDocumentExtractionService.extractCNHFromPDF({
+                        userId: auth.profile.uid,
+                        pdfAsset: {
+                            uri: fileUri,
+                            mimeType: fileMeta?.mimeType || 'application/pdf',
+                            name: fileMeta?.name || fileName
+                        }
+                    });
+                } catch (extractionError) {
+                    Logger.warn('⚠️ Falha na extração automática da CNH:', extractionError?.message || extractionError);
+                }
+            }
+
+            // Salvar no Firebase Database com URL do Storage + extração
+            await saveDocumentStatusToFirebase(documentType, fileType, downloadURL, extractionPayload, fileMeta);
 
             Alert.alert(
                 '✅ Sucesso!',
@@ -2672,18 +2927,77 @@ function DriverUI(props) {
         }
     };
 
-    const saveDocumentStatusToFirebase = async (documentType, fileType, fileUrl) => {
+    const saveDocumentStatusToFirebase = async (
+        documentType,
+        fileType,
+        fileUrl,
+        extractionPayload = null,
+        fileMeta = null
+    ) => {
         try {
             if (!auth.profile?.uid) {
                 Logger.error('❌ UID não disponível para salvar status');
                 return;
             }
 
+            const extractionData = extractionPayload?.data || {};
+            const normalizedGenderRaw = String(
+                extractionData?.genero || extractionData?.sexo || extractionData?.gender || extractionData?.sex || ''
+            )
+                .normalize('NFD')
+                .replace(/[\u0300-\u036f]/g, '')
+                .trim()
+                .toUpperCase();
+            const normalizedGender =
+                ['F', 'FEMININO', 'FEMALE', 'MULHER'].includes(normalizedGenderRaw)
+                    ? 'F'
+                    : ['M', 'MASCULINO', 'MALE', 'HOMEM'].includes(normalizedGenderRaw)
+                        ? 'M'
+                        : ['X', 'OUTRO', 'OTHER', 'N', 'NB', 'NAO BINARIO', 'NAO-BINARIO', 'NON BINARY'].includes(normalizedGenderRaw)
+                            ? 'X'
+                            : '';
+            const motherName = String(
+                extractionData?.nomeMae ||
+                extractionData?.nome_da_mae ||
+                extractionData?.nomeDaMae ||
+                extractionData?.mae ||
+                extractionData?.motherName ||
+                extractionData?.filiacaoMae ||
+                extractionData?.filiacao?.mae ||
+                ''
+            )
+                .replace(/\s+/g, ' ')
+                .trim()
+                .toUpperCase();
+            const birthDateRaw = String(
+                extractionData?.dataNascimento || extractionData?.birthDate || extractionData?.dateOfBirth || ''
+            ).trim();
+            const birthDateMatch = birthDateRaw.match(/^(\d{2})[\/\-](\d{2})[\/\-](\d{4})$/);
+            const birthDate = birthDateMatch
+                ? `${birthDateMatch[3]}-${birthDateMatch[2]}-${birthDateMatch[1]}`
+                : birthDateRaw;
+
             const documentData = {
                 type: documentType,
                 fileType: fileType,
                 fileUrl: fileUrl, // URL do Storage
                 status: 'analyzing',
+                extraction: extractionPayload
+                    ? {
+                        success: Boolean(extractionPayload?.success),
+                        source: extractionPayload?.source || null,
+                        model: extractionPayload?.model || null,
+                        usedFallback: Boolean(extractionPayload?.usedFallback),
+                        data: extractionPayload?.data || null
+                    }
+                    : null,
+                fileMeta: fileMeta
+                    ? {
+                        name: fileMeta?.name || null,
+                        size: Number(fileMeta?.size || 0),
+                        mimeType: fileMeta?.mimeType || null
+                    }
+                    : null,
                 uploadedAt: new Date().toISOString(),
                 updatedAt: new Date().toISOString()
             };
@@ -2691,6 +3005,34 @@ function DriverUI(props) {
             // Salvar no Firebase Database
             const documentRef = database().ref(`users/${auth.profile.uid}/documents/${documentType}`);
             await documentRef.set(documentData);
+
+            if (documentType === 'cnh' && extractionPayload?.success) {
+                const userIdentityUpdates = {
+                    updatedAt: new Date().toISOString()
+                };
+
+                if (birthDate) {
+                    userIdentityUpdates.birthDate = birthDate;
+                    userIdentityUpdates.dateOfBirth = birthDate;
+                    userIdentityUpdates.dob = birthDate;
+                }
+
+                if (motherName) {
+                    userIdentityUpdates.motherName = motherName;
+                    userIdentityUpdates.nomeMae = motherName;
+                }
+
+                if (normalizedGender) {
+                    userIdentityUpdates.gender = normalizedGender;
+                    userIdentityUpdates.genero = normalizedGender;
+                    userIdentityUpdates.genderLabel =
+                        normalizedGender === 'F' ? 'feminino' : normalizedGender === 'M' ? 'masculino' : 'outro';
+                }
+
+                if (Object.keys(userIdentityUpdates).length > 1) {
+                    await database().ref(`users/${auth.profile.uid}`).update(userIdentityUpdates);
+                }
+            }
 
 
         } catch (error) {
@@ -2703,15 +3045,10 @@ function DriverUI(props) {
         try {
             Logger.log('🚗 Iniciando upload do CRLV...');
 
-            // Mostrar opções de upload
             Alert.alert(
-                'Enviar CRLV',
-                'Escolha como deseja enviar o CRLV:',
+                'Enviar CRLV Digital',
+                'Envie o PDF do documento do veículo para extração automática.',
                 [
-                    {
-                        text: '📷 Foto da Galeria',
-                        onPress: () => pickVehicleImage()
-                    },
                     {
                         text: '📄 PDF',
                         onPress: () => pickVehiclePDF()
@@ -2759,18 +3096,16 @@ function DriverUI(props) {
 
     const pickVehiclePDF = async () => {
         try {
-            // Usar expo-image-picker para selecionar imagens
-            const result = await ImagePicker.launchImageLibraryAsync({
-                mediaTypes: ImagePicker.MediaTypeOptions.Images,
-                allowsEditing: true,
-                aspect: [4, 3],
-                quality: 0.8,
+            const result = await DocumentPicker.getDocumentAsync({
+                type: 'application/pdf',
+                copyToCacheDirectory: true,
+                multiple: false
             });
 
-            if (!result.canceled && result.assets[0]) {
+            if (!result.canceled && result.assets?.[0]) {
                 const file = result.assets[0];
                 Logger.log('📄 CRLV selecionado:', file.uri);
-                await uploadVehicleToStorage('image/jpeg', file.uri);
+                await uploadVehicleToStorage('pdf', file.uri, file);
             }
 
         } catch (error) {
@@ -2779,7 +3114,7 @@ function DriverUI(props) {
         }
     };
 
-    const uploadVehicleToStorage = async (fileType, fileUri) => {
+    const uploadVehicleToStorage = async (fileType, fileUri, fileMeta = null) => {
         try {
             // Mostrar loading
             Alert.alert('Enviando...', 'Fazendo upload do CRLV...');
@@ -2802,8 +3137,24 @@ function DriverUI(props) {
                 vehicle: 'analyzing'
             }));
 
-            // Salvar no Firebase Database com URL do Storage
-            await saveVehicleStatusToFirebase(fileType, downloadURL);
+            let extractionPayload = null;
+            if (fileType === 'pdf') {
+                try {
+                    extractionPayload = await driverDocumentExtractionService.extractVehicleFromPDF({
+                        userId: auth.profile.uid,
+                        pdfAsset: {
+                            uri: fileUri,
+                            mimeType: fileMeta?.mimeType || 'application/pdf',
+                            name: fileMeta?.name || fileName
+                        }
+                    });
+                } catch (extractionError) {
+                    Logger.warn('⚠️ Falha na extração automática do CRLV:', extractionError?.message || extractionError);
+                }
+            }
+
+            // Salvar no Firebase Database com URL do Storage + extração
+            await saveVehicleStatusToFirebase(fileType, downloadURL, extractionPayload, fileMeta);
 
             Alert.alert(
                 '✅ Sucesso!',
@@ -2816,7 +3167,7 @@ function DriverUI(props) {
         }
     };
 
-    const saveVehicleStatusToFirebase = async (fileType, fileUrl) => {
+    const saveVehicleStatusToFirebase = async (fileType, fileUrl, extractionPayload = null, fileMeta = null) => {
         try {
             if (!auth.profile?.uid) {
                 Logger.error('❌ UID não disponível para salvar status do veículo');
@@ -2828,6 +3179,22 @@ function DriverUI(props) {
                 fileType: fileType,
                 fileUrl: fileUrl, // URL do Storage
                 status: 'analyzing',
+                extraction: extractionPayload
+                    ? {
+                        success: Boolean(extractionPayload?.success),
+                        source: extractionPayload?.source || null,
+                        model: extractionPayload?.model || null,
+                        usedFallback: Boolean(extractionPayload?.usedFallback),
+                        data: extractionPayload?.data || null
+                    }
+                    : null,
+                fileMeta: fileMeta
+                    ? {
+                        name: fileMeta?.name || null,
+                        size: Number(fileMeta?.size || 0),
+                        mimeType: fileMeta?.mimeType || null
+                    }
+                    : null,
                 uploadedAt: new Date().toISOString(),
                 updatedAt: new Date().toISOString()
             };
@@ -3790,11 +4157,31 @@ function DriverUI(props) {
                 animationType="slide"
                 onRequestClose={handleKYCModalCancel}
             >
-                <KYCCameraScreen
-                    onCapture={handleKYCCapture}
-                    onCancel={handleKYCModalCancel}
-                    type="selfie"
-                />
+                {isKycProviderLoading ? (
+                    <View style={styles.kycProviderLoadingContainer}>
+                        <ActivityIndicator size="large" color="#1A330E" />
+                        <Text style={styles.kycProviderLoadingText}>Preparando validação facial...</Text>
+                    </View>
+                ) : (
+                    <>
+                        {kycLivenessMode === 'aws' ? (
+                            <AWSLivenessWebViewScreen
+                                driverId={auth?.profile?.uid}
+                                challengeId={kycChallengeContext.challengeId}
+                                requirement={kycChallengeContext.requirement}
+                                onSuccess={handleKycAwsSuccess}
+                                onCancel={handleKYCModalCancel}
+                                onFallbackLocal={handleKycFallbackLocal}
+                            />
+                        ) : (
+                            <KYCCameraScreen
+                                onCapture={handleKYCCapture}
+                                onCancel={handleKYCModalCancel}
+                                type="selfie"
+                            />
+                        )}
+                    </>
+                )}
                 {kycPendingReason ? (
                     <View style={{ position: 'absolute', top: 52, left: 16, right: 16, backgroundColor: 'rgba(0,0,0,0.72)', borderRadius: 10, padding: 10 }}>
                         <Text style={{ color: '#fff', textAlign: 'center', fontWeight: '600' }}>
@@ -4924,6 +5311,19 @@ const loadingStyles = StyleSheet.create({
 const styles = StyleSheet.create({
     container: {
         flex: 1,
+    },
+    kycProviderLoadingContainer: {
+        flex: 1,
+        backgroundColor: '#FFFFFF',
+        alignItems: 'center',
+        justifyContent: 'center',
+        paddingHorizontal: 24,
+    },
+    kycProviderLoadingText: {
+        marginTop: 12,
+        fontSize: 15,
+        color: '#111111',
+        textAlign: 'center',
     },
 
     // ✅ Barra de status da conexão (SEMPRE VISÍVEL)

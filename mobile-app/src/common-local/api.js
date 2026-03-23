@@ -1,8 +1,63 @@
 import Logger from '../utils/Logger';
 import { firebase } from './config/configureFirebase';
+import { createAxiosInstance } from '../utils/axiosInterceptor';
+import { API_URLS } from '../config/ApiConfig';
+
+const normalizeBaseUrl = (url) => {
+    const raw = String(url || '').trim();
+    if (!raw) return 'https://api.147.182.204.181.sslip.io';
+
+    const withoutTrailingSlash = raw.replace(/\/+$/, '');
+    // Evita duplicação de rota quando EXPO_PUBLIC_API_URL vier como ".../api"
+    return withoutTrailingSlash.replace(/\/api$/i, '');
+};
+
+const API_BASE_URL =
+    normalizeBaseUrl(
+        process.env.EXPO_PUBLIC_API_URL ||
+        process.env.EXPO_PUBLIC_BACKEND_URL ||
+        API_URLS?.selfHostedApi ||
+        'https://api.147.182.204.181.sslip.io'
+    );
+
+const httpClient = createAxiosInstance({
+    baseURL: API_BASE_URL,
+    timeout: 30000
+});
+
+const normalizeUrl = (url) => {
+    if (!url) return '/';
+    if (/^https?:\/\//i.test(url)) return url;
+    return `/${String(url).replace(/^\/+/, '')}`;
+};
+
+const request = (method, url, dataOrConfig, maybeConfig) => {
+    if (method === 'get' || method === 'delete') {
+        return httpClient.request({
+            method,
+            url: normalizeUrl(url),
+            ...(dataOrConfig || {})
+        });
+    }
+
+    return httpClient.request({
+        method,
+        url: normalizeUrl(url),
+        data: dataOrConfig,
+        ...(maybeConfig || {})
+    });
+};
 
 
 export const api = {
+    // HTTP client (usado por services/*)
+    request: (config) => httpClient.request(config),
+    get: (url, config = {}) => request('get', url, config),
+    post: (url, data = {}, config = {}) => request('post', url, data, config),
+    put: (url, data = {}, config = {}) => request('put', url, data, config),
+    patch: (url, data = {}, config = {}) => request('patch', url, data, config),
+    delete: (url, config = {}) => request('delete', url, config),
+
     // Funções existentes
     fetchBookings: () => async (dispatch) => {
         const { database } = firebase;
@@ -134,4 +189,6 @@ export const api = {
             return [];
         }
     }
-}; 
+};
+
+export default api;

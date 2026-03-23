@@ -1,0 +1,11 @@
+09:19
+Procurando motorista
+Veículo: Leaf Plus
+Destino: Destino
+Tempo de busca: 0:00
+Raio atual: 2,5 km
+Motoristas online simulados: 8
+Expandindo busca em 8s
+x
+Cancelar busca
+Abrir interface do motorista

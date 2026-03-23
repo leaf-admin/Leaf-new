@@ -1,31 +1,27 @@
 import React, { useState, useRef } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, Animated, Dimensions } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, Animated } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
-import { colors } from '../common/theme';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { Ionicons } from '@expo/vector-icons';
+import { fonts } from '../common-local/font';
 import OnboardingLayout from '../components/OnboardingLayout';
+import onboardingTheme from '../components/auth/common/onboardingTheme';
 
-const { width } = Dimensions.get('window');
-const LEAF_GREEN = '#1A330E';
-const LEAF_LIGHT_GREEN = '#2A4A1E';
-const LEAF_GRAY = '#B0B0B0';
-const WHITE = '#FFFFFF';
+const { color, radius, spacing, elevation } = onboardingTheme;
 
 const options = [
   {
     key: 'passenger',
     title: 'Quero viajar',
     subtitle: 'Encontre motoristas próximos e faça suas viagens',
-    icon: '🚗',
-    color: '#4CAF50',
+    icon: 'car-sport-outline'
   },
   {
     key: 'driver',
     title: 'Quero ser parceiro',
     subtitle: 'Dirija e ganhe dinheiro com suas viagens',
-    icon: '💰',
-    color: '#FF9800',
-  },
+    icon: 'navigate-outline'
+  }
 ];
 
 export default function ProfileSelectionScreen() {
@@ -35,51 +31,46 @@ export default function ProfileSelectionScreen() {
   const fadeAnim = useRef(new Animated.Value(0)).current;
 
   React.useEffect(() => {
-    // Animação de entrada
     Animated.parallel([
       Animated.timing(fadeAnim, {
         toValue: 1,
-        duration: 800,
-        useNativeDriver: true,
+        duration: 500,
+        useNativeDriver: true
       }),
       Animated.spring(scaleAnim, {
         toValue: 1,
         tension: 50,
         friction: 7,
-        useNativeDriver: true,
+        useNativeDriver: true
       })
     ]).start();
   }, []);
 
   const handleOptionPress = (optionKey) => {
     setSelected(optionKey);
-    
-    // Animação de seleção
+
     Animated.sequence([
       Animated.timing(scaleAnim, {
         toValue: 0.95,
         duration: 100,
-        useNativeDriver: true,
+        useNativeDriver: true
       }),
       Animated.timing(scaleAnim, {
         toValue: 1,
         duration: 100,
-        useNativeDriver: true,
+        useNativeDriver: true
       })
     ]).start();
   };
 
   const handleContinue = async () => {
     if (selected) {
-      // Salvar o tipo de usuário escolhido
       await AsyncStorage.setItem('@user_type', selected);
-      
-      // Navegar diretamente para a tela de telefone
-      navigation.navigate('PhoneScreen', { userType: selected });
+
+      navigation.navigate('PhoneInputScreen', { userType: selected });
     }
   };
 
-  // Barra de progresso customizada
   const progressBar = (
     <View style={styles.progressBarContainer}>
       <View style={[styles.progressDot, styles.progressActive]} />
@@ -111,7 +102,7 @@ export default function ProfileSelectionScreen() {
         </View>
 
         <View style={styles.optionsWrapper}>
-          {options.map((opt, index) => {
+          {options.map(opt => {
             const isSelected = selected === opt.key;
             return (
               <Animated.View
@@ -124,11 +115,7 @@ export default function ProfileSelectionScreen() {
                 <TouchableOpacity
                   style={[
                     styles.optionButton,
-                    isSelected && {
-                      ...styles.optionButtonSelected,
-                      backgroundColor: opt.color,
-                      borderColor: opt.color,
-                    }
+                    isSelected && styles.optionButtonSelected
                   ]}
                   onPress={() => handleOptionPress(opt.key)}
                   activeOpacity={0.9}
@@ -136,21 +123,25 @@ export default function ProfileSelectionScreen() {
                   <View style={styles.optionContent}>
                     <View style={[
                       styles.iconContainer,
-                      isSelected && { backgroundColor: WHITE + '20' }
+                      isSelected && styles.iconContainerSelected
                     ]}>
-                      <Text style={styles.iconText}>{opt.icon}</Text>
+                      <Ionicons
+                        name={opt.icon}
+                        size={28}
+                        color={isSelected ? color.accentText : color.textPrimary}
+                      />
                     </View>
                     
                     <View style={styles.textContainer}>
                       <Text style={[
                         styles.optionTitle,
-                        { color: isSelected ? WHITE : LEAF_GREEN }
+                        { color: isSelected ? color.accentText : color.textPrimary }
                       ]}>
                         {opt.title}
                       </Text>
                       <Text style={[
                         styles.optionSubtitle,
-                        { color: isSelected ? WHITE + 'CC' : LEAF_GRAY }
+                        { color: isSelected ? 'rgba(255,255,255,0.86)' : color.textSecondary }
                       ]}>
                         {opt.subtitle}
                       </Text>
@@ -186,43 +177,38 @@ const styles = StyleSheet.create({
     justifyContent: 'flex-start',
     alignItems: 'center',
     width: '100%',
-    paddingTop: 20,
+    paddingTop: spacing.xs
   },
   header: {
     alignItems: 'center',
-    marginBottom: 40,
-    paddingHorizontal: 20,
+    marginBottom: spacing.lg,
+    paddingHorizontal: spacing.sm
   },
   title: {
-    fontSize: 28,
-    fontWeight: '800',
-    color: LEAF_GREEN,
+    fontSize: 26,
+    fontFamily: fonts.Bold,
+    color: color.textPrimary,
     marginBottom: 12,
     textAlign: 'center',
-    letterSpacing: 0.5,
+    letterSpacing: 0.3
   },
   subtitle: {
     fontSize: 16,
-    color: LEAF_GRAY,
+    color: color.textSecondary,
     textAlign: 'center',
-    lineHeight: 22,
-    paddingHorizontal: 20,
+    lineHeight: 22
   },
   optionsWrapper: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
     width: '100%',
-    gap: 20,
-    paddingHorizontal: 24,
+    gap: spacing.md
   },
   optionContainer: {
     width: '100%',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.1,
-    shadowRadius: 8,
-    elevation: 4,
+    shadowColor: '#0E1522',
+    ...elevation.soft
   },
   optionButton: {
     alignItems: 'center',
@@ -230,19 +216,16 @@ const styles = StyleSheet.create({
     width: '100%',
     paddingVertical: 24,
     paddingHorizontal: 20,
-    borderRadius: 16,
-    borderWidth: 2,
-    borderColor: '#E0E0E0',
-    backgroundColor: WHITE,
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    borderColor: color.borderStrong,
+    backgroundColor: color.panel,
     position: 'relative',
-    overflow: 'hidden',
+    overflow: 'hidden'
   },
   optionButtonSelected: {
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.3,
-    shadowRadius: 12,
-    elevation: 8,
+    backgroundColor: color.accent,
+    borderColor: color.accent
   },
   optionContent: {
     flexDirection: 'row',
@@ -254,50 +237,50 @@ const styles = StyleSheet.create({
     width: 60,
     height: 60,
     borderRadius: 30,
-    backgroundColor: '#F5F5F5',
+    backgroundColor: color.surfaceMuted,
     alignItems: 'center',
     justifyContent: 'center',
-    marginRight: 16,
+    marginRight: 16
   },
-  iconText: {
-    fontSize: 28,
+  iconContainerSelected: {
+    backgroundColor: 'rgba(255,255,255,0.18)'
   },
   textContainer: {
-    flex: 1,
+    flex: 1
   },
   optionTitle: {
     fontSize: 20,
-    fontWeight: '700',
+    fontFamily: fonts.SemiBold,
     marginBottom: 4,
-    letterSpacing: 0.3,
+    letterSpacing: 0.2
   },
   optionSubtitle: {
     fontSize: 14,
     lineHeight: 20,
-    letterSpacing: 0.2,
+    letterSpacing: 0.1
   },
   checkmarkContainer: {
     width: 32,
     height: 32,
     borderRadius: 16,
-    backgroundColor: WHITE + '20',
+    backgroundColor: 'rgba(255,255,255,0.16)',
     alignItems: 'center',
-    justifyContent: 'center',
+    justifyContent: 'center'
   },
   checkmark: {
-    color: WHITE,
+    color: color.accentText,
     fontSize: 18,
-    fontWeight: 'bold',
+    fontWeight: 'bold'
   },
   selectedInfo: {
-    marginTop: 20,
-    paddingHorizontal: 20,
+    marginTop: spacing.sm,
+    paddingHorizontal: spacing.sm
   },
   selectedInfoText: {
     fontSize: 14,
-    color: LEAF_GREEN,
+    color: color.textSecondary,
     textAlign: 'center',
-    fontWeight: '600',
+    fontFamily: fonts.Medium
   },
   progressBarContainer: {
     flexDirection: 'row',
@@ -309,10 +292,10 @@ const styles = StyleSheet.create({
     width: 12,
     height: 12,
     borderRadius: 6,
-    backgroundColor: colors.BORDER_BACKGROUND,
-    marginHorizontal: 4,
+    backgroundColor: color.borderStrong,
+    marginHorizontal: 4
   },
   progressActive: {
-    backgroundColor: colors.BIDTAXIPRIMARY,
-  },
-}); 
+    backgroundColor: color.accent
+  }
+});

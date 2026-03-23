@@ -7,6 +7,15 @@ import Logger from '../utils/Logger';
 
 import database from '@react-native-firebase/database';
 
+const API_BASE_URL = String(
+    process.env.EXPO_PUBLIC_API_URL ||
+    process.env.EXPO_PUBLIC_BACKEND_URL ||
+    'https://api.147.182.204.181.sslip.io'
+)
+    .trim()
+    .replace(/\/+$/, '')
+    .replace(/\/api$/i, '');
+
 
 class ReceiptService {
     /**
@@ -27,7 +36,7 @@ class ReceiptService {
             // Se não encontrou no Realtime Database, tentar buscar via API
             // (fallback para recibos antigos que podem estar apenas no backend)
             try {
-                const response = await fetch(`http://147.182.204.181:3001/api/receipts/${rideId}`);
+                const response = await fetch(`${API_BASE_URL}/api/receipts/${rideId}`);
                 if (response.ok) {
                     const data = await response.json();
                     if (data.success && data.receipt) {

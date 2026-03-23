@@ -9,8 +9,17 @@ import { Alert } from 'react-native';
 
 class LocationIntelligenceService {
   constructor() {
+    const baseUrl = String(
+      process.env.EXPO_PUBLIC_API_URL ||
+      process.env.EXPO_PUBLIC_BACKEND_URL ||
+      'https://api.147.182.204.181.sslip.io'
+    )
+      .trim()
+      .replace(/\/+$/, '')
+      .replace(/\/api$/i, '');
+
     // URLs dos serviços
-    this.vultrUrl = 'http://147.182.204.181:3001';
+    this.vultrUrl = baseUrl;
     this.hostingerUrl = 'https://seu-dominio-hostinger.com'; // TODO: Configurar
     
     // Timeout mais agressivo para não atrasar o Google Places

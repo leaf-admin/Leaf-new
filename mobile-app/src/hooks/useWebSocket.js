@@ -96,15 +96,14 @@ const useWebSocket = (userId = null) => {
   }, []);
 
   // Atualizar localização
-  const updateLocation = useCallback((latitude, longitude, platform = 'mobile') => {
+  const updateLocation = useCallback(async (latitude, longitude, platform = 'mobile') => {
     if (!connectionStatus.isConnected || !connectionStatus.isAuthenticated) {
       Logger.error('WebSocket não está pronto para enviar localização');
       return false;
     }
 
-    const success = webSocketManager.updateDriverLocation(user, latitude, longitude);
-
-    if (success) {
+    try {
+      await webSocketManager.updateLocation(user, latitude, longitude);
       setData(prev => ({
         ...prev,
         locationUpdates: [
@@ -112,10 +111,13 @@ const useWebSocket = (userId = null) => {
           { latitude, longitude, timestamp: Date.now(), platform }
         ].slice(-10) // Manter apenas os últimos 10
       }));
-    }
 
-    return success;
-  }, [connectionStatus.isConnected, connectionStatus.isAuthenticated]);
+      return true;
+    } catch (error) {
+      Logger.error('Falha ao enviar localização via WebSocket:', error);
+      return false;
+    }
+  }, [connectionStatus.isConnected, connectionStatus.isAuthenticated, user]);
 
   // Buscar motoristas próximos
   const findNearbyDrivers = useCallback((latitude, longitude, radius = 5000, limit = 10) => {

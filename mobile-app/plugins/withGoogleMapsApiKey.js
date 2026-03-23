@@ -1,12 +1,17 @@
-const { withAndroidManifest } = require('@expo/config-plugins');
+const { withAndroidManifest, withInfoPlist } = require('@expo/config-plugins');
+const { loadConfigEnv } = require('../config/loadConfigEnv');
+
+loadConfigEnv();
 
 const withGoogleMapsApiKey = (config) => {
   const mapsApiKey =
     process.env.GOOGLE_MAPS_API_KEY ||
     process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY ||
     '';
+  const allowInsecureHttp =
+    String(process.env.EXPO_PUBLIC_ALLOW_INSECURE_HTTP || 'false').toLowerCase() === 'true';
 
-  return withAndroidManifest(config, (config) => {
+  config = withAndroidManifest(config, (config) => {
     const androidManifest = config.modResults;
     
     // Encontrar ou criar o elemento <application>
@@ -43,9 +48,47 @@ const withGoogleMapsApiKey = (config) => {
       existingApiKey.$['android:value'] = mapsApiKey;
       console.log('✅ Google Maps API Key já existe no AndroidManifest.xml');
     }
-    
+    if (!mapsApiKey) {
+      console.warn('⚠️ Google Maps API Key ausente durante prebuild (AndroidManifest ficará sem chave).');
+    }
+
     return config;
   });
+
+  config = withInfoPlist(config, (config) => {
+    config.modResults.GMSApiKey = mapsApiKey;
+    config.modResults.GOOGLE_MAPS_API_KEY = mapsApiKey;
+    const currentAts = config.modResults.NSAppTransportSecurity || {};
+    const currentExceptionDomains = currentAts.NSExceptionDomains || {};
+    config.modResults.NSAppTransportSecurity = {
+      ...currentAts,
+      NSAllowsArbitraryLoads: allowInsecureHttp,
+      NSAllowsLocalNetworking: true,
+      NSExceptionDomains: {
+        ...currentExceptionDomains,
+        '147.182.204.181': {
+          ...(currentExceptionDomains['147.182.204.181'] || {}),
+          NSExceptionAllowsInsecureHTTPLoads: true,
+          NSIncludesSubdomains: true
+        },
+        '147.93.66.253': {
+          ...(currentExceptionDomains['147.93.66.253'] || {}),
+          NSExceptionAllowsInsecureHTTPLoads: true,
+          NSIncludesSubdomains: true
+        }
+      }
+    };
+
+    if (!mapsApiKey) {
+      console.warn('⚠️ Google Maps API Key ausente durante prebuild (Info.plist ficará sem chave).');
+    } else {
+      console.log('✅ Google Maps API Key adicionada ao Info.plist (iOS)');
+    }
+
+    return config;
+  });
+
+  return config;
 };
 
 module.exports = withGoogleMapsApiKey;

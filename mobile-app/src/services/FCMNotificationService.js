@@ -1,6 +1,7 @@
 import Logger from '../utils/Logger';
 import messaging from '@react-native-firebase/messaging';
 import { Platform } from 'react-native';
+import * as Device from 'expo-device';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { store } from '../common-local/store';
 import WebSocketManager from './WebSocketManager';
@@ -79,6 +80,13 @@ class FCMNotificationService {
     // Obter token FCM
     async getFCMToken() {
         try {
+            // iOS Simulator não suporta token APNS/FCM real
+            if (!Device.isDevice) {
+                Logger.log('ℹ️ [FCM] Simulador detectado. Token push será ignorado neste ambiente.');
+                this.fcmToken = null;
+                return null;
+            }
+
             // Verificar se já temos um token salvo
             const savedToken = await AsyncStorage.getItem('fcmToken');
 

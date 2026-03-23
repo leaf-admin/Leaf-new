@@ -22,6 +22,9 @@ class FeatureFlagService {
     this.defaultFlags = {
       // KYC (Know Your Customer)
       KYC_ENABLED: true,
+
+      // Protótipo UI/UX Robotaxi (true = novo layout, false = layout legado)
+      PROTOTYPE_ROBOTAXI_UI_ENABLED: true,
       
       // Adicione outras feature flags aqui conforme necessário
       // EXEMPLO:
@@ -226,4 +229,3 @@ class FeatureFlagService {
 const featureFlagService = new FeatureFlagService();
 
 export default featureFlagService;
-

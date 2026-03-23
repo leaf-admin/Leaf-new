@@ -14,6 +14,7 @@ import {
     TextInput,
     KeyboardAvoidingView,
     Platform,
+    ActivityIndicator,
 } from 'react-native';
 import { Icon } from 'react-native-elements';
 import { Ionicons } from '@expo/vector-icons';
@@ -23,8 +24,11 @@ import { fonts } from '../common-local/font';
 import ThemeSwitch from '../components/ThemeSwitch';
 import { SkeletonLoader, LoadingSpinner } from '../components/LoadingStates';
 import { useResponsiveLayout } from '../components/ResponsiveLayout';
+import KYCCameraScreen from '../components/KYC/KYCCameraScreen';
+import AWSLivenessWebViewScreen from '../components/KYC/AWSLivenessWebViewScreen';
 import { getSelfHostedApiUrl } from '../config/ApiConfig';
 import DriverBalanceService from '../services/DriverBalanceService';
+import kycService from '../services/KYCService';
 
 const MAIN_COLOR = colors.TAXIPRIMARY;
 const { width, height } = Dimensions.get('window');
@@ -75,6 +79,13 @@ export default function EarningsReportScreen({ navigation }) {
     const [isLoadingEarnings, setIsLoadingEarnings] = useState(true);
     const [isLoadingChart, setIsLoadingChart] = useState(false);
     const [isProcessingWithdraw, setIsProcessingWithdraw] = useState(false);
+    const [showWithdrawKYCModal, setShowWithdrawKYCModal] = useState(false);
+    const [withdrawKycReason, setWithdrawKycReason] = useState('');
+    const [withdrawStepUpChallenge, setWithdrawStepUpChallenge] = useState(null);
+    const [pendingWithdrawalPayload, setPendingWithdrawalPayload] = useState(null);
+    const [isProcessingKYCWithdraw, setIsProcessingKYCWithdraw] = useState(false);
+    const [withdrawKycMode, setWithdrawKycMode] = useState('local');
+    const [isWithdrawKycProviderLoading, setIsWithdrawKycProviderLoading] = useState(false);
 
     // Responsive layout hook
     const { config: responsiveConfig, isTablet, isMobile } = useResponsiveLayout();
@@ -135,6 +146,37 @@ export default function EarningsReportScreen({ navigation }) {
         loadEarningsData();
     }, []);
 
+    useEffect(() => {
+        let isMounted = true;
+
+        const resolveWithdrawKycMode = async () => {
+            if (!showWithdrawKYCModal) {
+                setWithdrawKycMode('local');
+                setIsWithdrawKycProviderLoading(false);
+                return;
+            }
+
+            setIsWithdrawKycProviderLoading(true);
+            const providerResult = await kycService.getPreferredLivenessMode();
+            if (!isMounted) return;
+
+            if (!providerResult?.success) {
+                Logger.warn('⚠️ [KYC] Fallback local no saque:', providerResult?.error);
+                setWithdrawKycMode('local');
+                setIsWithdrawKycProviderLoading(false);
+                return;
+            }
+
+            setWithdrawKycMode(providerResult.mode === 'aws' ? 'aws' : 'local');
+            setIsWithdrawKycProviderLoading(false);
+        };
+
+        resolveWithdrawKycMode();
+        return () => {
+            isMounted = false;
+        };
+    }, [showWithdrawKYCModal]);
+
     // Função para formatar valor monetário com separador de milhares
     function formatCurrency(value) {
         if (typeof value !== 'number') value = parseFloat(value);
@@ -161,6 +203,182 @@ export default function EarningsReportScreen({ navigation }) {
         }
     }
 
+    function finalizeWithdrawalSuccess(result, amount, fee, totalDebit) {
+        setWithdrawModalVisible(false);
+        setShowWithdrawKYCModal(false);
+        setWithdrawValue('');
+        setPixKey('');
+        setWithdrawError('');
+        setWithdrawKycReason('');
+        setWithdrawStepUpChallenge(null);
+        setPendingWithdrawalPayload(null);
+
+        setEarningsData((prev) => {
+            if (!prev) return prev;
+            return {
+                ...prev,
+                balance: Number(result.newBalance || 0)
+            };
+        });
+
+        Alert.alert(
+            'Saque solicitado',
+            `Valor: R$ ${formatCurrency(amount)}\nTaxa: R$ ${formatCurrency(fee)}\nDébito total: R$ ${formatCurrency(totalDebit)}`
+        );
+    }
+
+    function mapKycRequirementMessage(requirement) {
+        if (requirement === 'LIVENESS_REQUIRED') {
+            return 'Precisamos validar seu rosto com prova de vida para concluir este saque.';
+        }
+        return 'Precisamos validar sua identidade para concluir este saque.';
+    }
+
+    async function handleWithdrawKYCCapture(selfieImageUri) {
+        try {
+            if (!auth?.profile?.uid) {
+                Alert.alert('Erro', 'Motorista não autenticado');
+                return;
+            }
+
+            if (!withdrawStepUpChallenge?.challengeId || !pendingWithdrawalPayload) {
+                setShowWithdrawKYCModal(false);
+                setWithdrawModalVisible(true);
+                setWithdrawError('Challenge KYC não disponível para concluir saque.');
+                return;
+            }
+
+            setShowWithdrawKYCModal(false);
+            setIsProcessingKYCWithdraw(true);
+
+            const verifyResult = await kycService.verifyDriver(
+                auth.profile.uid,
+                selfieImageUri,
+                {
+                    challengeId: withdrawStepUpChallenge.challengeId,
+                    requirement: withdrawStepUpChallenge.requirement,
+                    livenessPassed: true,
+                    mode: 'device_signature_v1'
+                }
+            );
+
+            const isMatch = !!(verifyResult?.success && verifyResult?.data?.isMatch);
+            if (!isMatch) {
+                setWithdrawModalVisible(true);
+                setWithdrawError(
+                    verifyResult?.error
+                    || 'Validação facial não aprovada. Tente novamente com boa iluminação.'
+                );
+                return;
+            }
+
+            const retryResult = await DriverBalanceService.requestWithdrawal(
+                auth.profile.uid,
+                pendingWithdrawalPayload.amount,
+                pendingWithdrawalPayload.pixKey
+            );
+
+            if (!retryResult.success) {
+                setWithdrawModalVisible(true);
+                setWithdrawError(retryResult.error || 'Falha ao solicitar saque após validação KYC');
+                return;
+            }
+
+            finalizeWithdrawalSuccess(
+                retryResult,
+                pendingWithdrawalPayload.amount,
+                pendingWithdrawalPayload.fee,
+                pendingWithdrawalPayload.totalDebit
+            );
+        } catch (error) {
+            Logger.error('Erro ao concluir validação KYC para saque:', error);
+            setWithdrawModalVisible(true);
+            setWithdrawError('Erro ao validar identidade para saque. Tente novamente.');
+        } finally {
+            setIsProcessingKYCWithdraw(false);
+            setIsProcessingWithdraw(false);
+        }
+    }
+
+    async function handleWithdrawKycAwsSuccess({ sessionId }) {
+        try {
+            if (!auth?.profile?.uid) {
+                Alert.alert('Erro', 'Motorista não autenticado');
+                return;
+            }
+
+            if (!withdrawStepUpChallenge?.challengeId || !pendingWithdrawalPayload) {
+                setShowWithdrawKYCModal(false);
+                setWithdrawModalVisible(true);
+                setWithdrawError('Challenge KYC não disponível para concluir saque.');
+                return;
+            }
+
+            setShowWithdrawKYCModal(false);
+            setIsProcessingKYCWithdraw(true);
+
+            const verifyResult = await kycService.verifyDriver(
+                auth.profile.uid,
+                null,
+                {
+                    challengeId: withdrawStepUpChallenge.challengeId,
+                    requirement: withdrawStepUpChallenge.requirement,
+                    livenessPassed: true,
+                    awsSessionId: sessionId,
+                    mode: kycService.getAwsProviderName()
+                }
+            );
+
+            const isMatch = !!(verifyResult?.success && verifyResult?.data?.isMatch);
+            if (!isMatch) {
+                setWithdrawModalVisible(true);
+                setWithdrawError(
+                    verifyResult?.error
+                    || 'Validação facial não aprovada. Tente novamente.'
+                );
+                return;
+            }
+
+            const retryResult = await DriverBalanceService.requestWithdrawal(
+                auth.profile.uid,
+                pendingWithdrawalPayload.amount,
+                pendingWithdrawalPayload.pixKey
+            );
+
+            if (!retryResult.success) {
+                setWithdrawModalVisible(true);
+                setWithdrawError(retryResult.error || 'Falha ao solicitar saque após validação KYC');
+                return;
+            }
+
+            finalizeWithdrawalSuccess(
+                retryResult,
+                pendingWithdrawalPayload.amount,
+                pendingWithdrawalPayload.fee,
+                pendingWithdrawalPayload.totalDebit
+            );
+        } catch (error) {
+            Logger.error('Erro ao concluir validação KYC AWS para saque:', error);
+            setWithdrawModalVisible(true);
+            setWithdrawError('Erro ao validar identidade para saque. Tente novamente.');
+        } finally {
+            setIsProcessingKYCWithdraw(false);
+            setIsProcessingWithdraw(false);
+        }
+    }
+
+    function handleWithdrawKycFallbackLocal() {
+        setWithdrawKycMode('local');
+    }
+
+    function handleWithdrawKYCCancel() {
+        setShowWithdrawKYCModal(false);
+        setWithdrawModalVisible(true);
+        setWithdrawKycMode('local');
+        setIsWithdrawKycProviderLoading(false);
+        setWithdrawError('Verificação facial necessária para concluir o saque.');
+    }
+
     async function handleConfirmWithdraw() {
         try {
             if (!auth?.profile?.uid) {
@@ -182,30 +400,35 @@ export default function EarningsReportScreen({ navigation }) {
             }
 
             setIsProcessingWithdraw(true);
-            const result = await DriverBalanceService.requestWithdrawal(auth.profile.uid, amount, pixKey);
+            const normalizedPixKey = String(pixKey || '').trim();
+            const result = await DriverBalanceService.requestWithdrawal(auth.profile.uid, amount, normalizedPixKey);
 
             if (!result.success) {
+                if (result.code === 'KYC_STEP_UP_REQUIRED' && result?.kyc?.challengeId) {
+                    const requirement = result.kyc.requirement || 'VERIFY_REQUIRED';
+                    setWithdrawKycReason(mapKycRequirementMessage(requirement));
+                    setWithdrawStepUpChallenge({
+                        challengeId: result.kyc.challengeId,
+                        requirement,
+                        expiresAt: result.kyc.challengeExpiresAt || null
+                    });
+                    setPendingWithdrawalPayload({
+                        amount,
+                        pixKey: normalizedPixKey,
+                        fee,
+                        totalDebit
+                    });
+                    setWithdrawError('');
+                    setWithdrawModalVisible(false);
+                    setShowWithdrawKYCModal(true);
+                    return;
+                }
+
                 setWithdrawError(result.error || 'Falha ao solicitar saque');
                 return;
             }
 
-            setWithdrawModalVisible(false);
-            setWithdrawValue('');
-            setPixKey('');
-            setWithdrawError('');
-
-            setEarningsData((prev) => {
-                if (!prev) return prev;
-                return {
-                    ...prev,
-                    balance: Number(result.newBalance || 0)
-                };
-            });
-
-            Alert.alert(
-                'Saque solicitado',
-                `Valor: R$ ${formatCurrency(amount)}\nTaxa: R$ ${formatCurrency(fee)}\nDébito total: R$ ${formatCurrency(totalDebit)}`
-            );
+            finalizeWithdrawalSuccess(result, amount, fee, totalDebit);
         } catch (error) {
             Logger.error('Erro ao confirmar saque:', error);
             setWithdrawError('Erro ao solicitar saque');
@@ -532,6 +755,58 @@ export default function EarningsReportScreen({ navigation }) {
                 </ScrollView>
             )}
             <WithdrawModal />
+
+            <Modal
+                visible={showWithdrawKYCModal}
+                animationType="slide"
+                onRequestClose={handleWithdrawKYCCancel}
+            >
+                {isWithdrawKycProviderLoading ? (
+                    <View style={styles.kycProviderLoadingContainer}>
+                        <ActivityIndicator size="large" color={MAIN_COLOR} />
+                        <Text style={styles.kycProviderLoadingText}>Preparando validação facial...</Text>
+                    </View>
+                ) : (
+                    <>
+                        {withdrawKycMode === 'aws' ? (
+                            <AWSLivenessWebViewScreen
+                                driverId={auth?.profile?.uid}
+                                challengeId={withdrawStepUpChallenge?.challengeId || null}
+                                requirement={withdrawStepUpChallenge?.requirement || null}
+                                onSuccess={handleWithdrawKycAwsSuccess}
+                                onCancel={handleWithdrawKYCCancel}
+                                onFallbackLocal={handleWithdrawKycFallbackLocal}
+                            />
+                        ) : (
+                            <KYCCameraScreen
+                                onCapture={handleWithdrawKYCCapture}
+                                onCancel={handleWithdrawKYCCancel}
+                                type="selfie"
+                            />
+                        )}
+                    </>
+                )}
+                {withdrawKycReason ? (
+                    <View style={styles.withdrawKycBanner}>
+                        <Text style={styles.withdrawKycBannerText}>
+                            {withdrawKycReason}
+                        </Text>
+                    </View>
+                ) : null}
+            </Modal>
+
+            <Modal
+                visible={isProcessingKYCWithdraw}
+                transparent
+                animationType="fade"
+            >
+                <View style={styles.processingOverlay}>
+                    <View style={styles.processingCard}>
+                        <ActivityIndicator size="large" color={MAIN_COLOR} />
+                        <Text style={styles.processingText}>Validando identidade para concluir saque...</Text>
+                    </View>
+                </View>
+            </Modal>
         </View>
     );
 }
@@ -539,6 +814,19 @@ export default function EarningsReportScreen({ navigation }) {
 const styles = StyleSheet.create({
     container: {
         flex: 1,
+    },
+    kycProviderLoadingContainer: {
+        flex: 1,
+        backgroundColor: '#FFFFFF',
+        alignItems: 'center',
+        justifyContent: 'center',
+        paddingHorizontal: 24,
+    },
+    kycProviderLoadingText: {
+        marginTop: 12,
+        fontSize: 15,
+        color: '#111111',
+        textAlign: 'center',
     },
     header: {
         flexDirection: 'row',
@@ -1022,5 +1310,49 @@ const styles = StyleSheet.create({
     modalConfirmText: {
         color: '#fff',
         fontWeight: 'bold',
+    },
+    withdrawKycBanner: {
+        position: 'absolute',
+        top: 56,
+        left: 16,
+        right: 16,
+        backgroundColor: 'rgba(0,0,0,0.72)',
+        borderRadius: 12,
+        paddingHorizontal: 12,
+        paddingVertical: 10,
+    },
+    withdrawKycBannerText: {
+        color: '#fff',
+        textAlign: 'center',
+        fontSize: 14,
+        fontWeight: '600',
+    },
+    processingOverlay: {
+        flex: 1,
+        justifyContent: 'center',
+        alignItems: 'center',
+        backgroundColor: 'rgba(0,0,0,0.32)',
+        paddingHorizontal: 24,
+    },
+    processingCard: {
+        width: '100%',
+        maxWidth: 320,
+        borderRadius: 18,
+        backgroundColor: '#fff',
+        paddingVertical: 20,
+        paddingHorizontal: 18,
+        alignItems: 'center',
+        shadowColor: '#000',
+        shadowOpacity: 0.12,
+        shadowOffset: { width: 0, height: 8 },
+        shadowRadius: 20,
+        elevation: 6,
+    },
+    processingText: {
+        marginTop: 12,
+        color: '#2a2a2a',
+        fontSize: 14,
+        textAlign: 'center',
+        fontWeight: '600',
     },
 }); 

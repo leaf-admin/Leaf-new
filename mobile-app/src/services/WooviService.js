@@ -174,8 +174,29 @@ class WooviService {
             const response = await this.backendApi.post(`/api/woovi/cancel-charge/${paymentId}`);
             return response.data || { success: true };
         } catch (error) {
+            const status = Number(error?.response?.status || 0);
+            const payload = error?.response?.data || {};
+            const providerStatus = Number(payload?.status || 0);
+            const providerError = String(payload?.error || '').toLowerCase();
+
+            // A Woovi pode retornar 404 para cobranças já liquidadas/expiradas.
+            // Tratamos como cancelamento idempotente para evitar erro falso no app.
+            if ((status === 400 || status === 404) && (providerStatus === 404 || providerError.includes('not found'))) {
+                Logger.warn('⚠️ [Woovi] cancelPayment retornou Not Found; tratando como já finalizada/cancelada.', {
+                    paymentId,
+                    status,
+                    providerStatus,
+                    payload
+                });
+                return {
+                    success: true,
+                    alreadyFinalized: true,
+                    message: 'Cobrança já finalizada ou indisponível para cancelamento'
+                };
+            }
+
             Logger.error('Erro ao cancelar pagamento:', error);
-            return { success: false, error: error?.response?.data || error.message };
+            return { success: false, error: payload || error.message };
         }
     }
 }

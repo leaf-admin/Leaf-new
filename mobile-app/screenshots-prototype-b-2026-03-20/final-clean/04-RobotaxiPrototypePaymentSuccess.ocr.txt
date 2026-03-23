@@ -1,0 +1,5 @@
+09:250
+Pagamento confirmado
+Corrida criada com sucesso. Agora vamos buscar seu
+motorista.
+e Continuar para busca

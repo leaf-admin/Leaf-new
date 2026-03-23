@@ -1,29 +1,65 @@
 import React, { useState } from 'react';
-import { View, Text, TextInput, TouchableOpacity, Alert, StyleSheet } from 'react-native';
-import { Typography } from '../../design-system/Typography';
-import { AnimatedButton } from '../../design-system/AnimatedButton';
-import { AnimatedInput } from '../../design-system/AnimatedInput';
-import { auth } from '../../../firebase';
+import { View, TouchableOpacity, Alert as NativeAlert, StyleSheet, Text, TextInput } from 'react-native';
+import auth from '@react-native-firebase/auth';
+import { fonts } from '../../../common-local/font';
 import { isReviewAccount, getReviewAccountInfo } from '../../../config/reviewAccounts';
 import { saveStepData } from '../../../utils/secureOnboardingStorage';
 import Logger from '../../../utils/Logger';
-import UserAuthService from '../../../services/UserAuthService';
 import Constants from 'expo-constants';
+import onboardingTheme from '../common/onboardingTheme';
+import ContinueButton from '../common/ContinueButton';
+import { toUserFriendlyMessage } from '../../../utils/friendlyErrorMessages';
 
-const colors = {
-    primary: '#1A330E',
-    white: '#FFFFFF',
-    lightGrey: '#F9F9F9',
-    text: { primary: '#1C1C1E', secondary: '#8E8E93' },
-    border: '#E5E5EA'
+const { color, radius, spacing } = onboardingTheme;
+
+const Alert = {
+    ...NativeAlert,
+    alert: (title, message, buttons, options) =>
+        NativeAlert.alert(
+            title || 'Atencao',
+            toUserFriendlyMessage(message, {
+                context: 'auth',
+                fallbackMessage: 'Nao foi possivel concluir a autenticacao agora. Tente novamente.'
+            }),
+            buttons,
+            options
+        )
 };
 
-const PhoneInputStep = ({ onSwitchToRegister, onVerificationSent, onUserExists }) => {
+const PhoneInputStep = ({ onSwitchToRegister, onVerificationSent }) => {
     const [phoneNumber, setPhoneNumber] = useState('');
     const [loading, setLoading] = useState(false);
     const [checking, setChecking] = useState(false);
 
     const IS_REVIEW_ENV = Constants.expoConfig?.extra?.isReview === true;
+    const ENABLE_CUSTOM_OTP_FALLBACK =
+        Constants.expoConfig?.extra?.enableCustomOtpFallback === true ||
+        IS_REVIEW_ENV ||
+        __DEV__;
+
+    const requestOtpWithFallback = async (fullPhoneNumber) => {
+        const { api } = require('../../../common-local/api');
+        const endpoints = [
+            '/api/custom-otp/request-otp',
+            '/custom-otp/request-otp'
+        ];
+
+        let lastError = null;
+
+        for (const endpoint of endpoints) {
+            try {
+                return await api.post(endpoint, { phone: fullPhoneNumber });
+            } catch (error) {
+                lastError = error;
+                // Se não for 404, não faz sentido tentar fallback
+                if (error?.response?.status !== 404) {
+                    throw error;
+                }
+            }
+        }
+
+        throw lastError || new Error('Falha ao enviar OTP');
+    };
 
     const handleContinue = async () => {
         if (phoneNumber.length < 10) {
@@ -92,27 +128,35 @@ const PhoneInputStep = ({ onSwitchToRegister, onVerificationSent, onUserExists }
                 }
             }
 
-            // 📱 ENVIAR OTP PARA CADASTRO NORMAL
-            Logger.log('📱 Enviando OTP via Custom API...');
-
-            // Usando API Local em vez de Firebase Auth para envio do OTP
-            const { api } = require('../../../common-local/api');
-            const response = await api.post('/custom-otp/request-otp', {
-                phone: fullPhoneNumber
-            });
-
-            if (response.data && response.data.success) {
-                const confirmation = {
-                    verificationId: response.data.verificationId,
-                    isCustomOtp: true
-                };
-
-                // Sucesso! Notifica o componente pai para avançar.
+            // 📱 Fluxo principal: Firebase Phone Auth (produção)
+            Logger.log('📱 Enviando OTP via Firebase Auth...');
+            try {
+                const firebaseConfirmation = await auth().signInWithPhoneNumber(fullPhoneNumber);
                 if (onVerificationSent) {
-                    onVerificationSent(confirmation, fullPhoneNumber, false);
+                    onVerificationSent(firebaseConfirmation, fullPhoneNumber, false);
                 }
-            } else {
+                return;
+            } catch (firebaseError) {
+                Logger.error('❌ Falha no envio OTP via Firebase:', firebaseError);
+                if (!ENABLE_CUSTOM_OTP_FALLBACK) {
+                    throw firebaseError;
+                }
+                Logger.warn('⚠️ Aplicando fallback de OTP customizado para ambiente de suporte.');
+            }
+
+            // Fallback controlado (dev/review/suporte)
+            const response = await requestOtpWithFallback(fullPhoneNumber);
+            if (!response.data || !response.data.success) {
                 throw new Error(response.data?.error || 'Erro ao enviar OTP');
+            }
+
+            const confirmation = {
+                verificationId: response.data.verificationId,
+                isCustomOtp: true
+            };
+
+            if (onVerificationSent) {
+                onVerificationSent(confirmation, fullPhoneNumber, false);
             }
         } catch (error) {
             Logger.error("Erro no handleContinue:", error);
@@ -148,51 +192,53 @@ const PhoneInputStep = ({ onSwitchToRegister, onVerificationSent, onUserExists }
     return (
         <View style={styles.container}>
             <View style={styles.header}>
-                <Typography variant="h1" align="center" style={styles.title}>Bem-vindo(a) à Leaf</Typography>
-                <Typography variant="body" color={colors.text.secondary} align="center" style={styles.subtitle}>
+                <Text style={styles.title}>Bem-vindo(a) à Leaf</Text>
+                <Text style={styles.subtitle}>
                     Digite seu número de telefone para continuar
-                </Typography>
+                </Text>
             </View>
 
-            <View style={styles.inputContainer}>
-                <TouchableOpacity style={styles.countrySelector}>
-                    <Typography variant="h3" color={colors.primary} style={styles.countryCode}>+55</Typography>
-                </TouchableOpacity>
+            <View style={styles.contentCard}>
+                <View style={styles.inputContainer}>
+                    <TouchableOpacity style={styles.countrySelector}>
+                        <Text style={styles.countryCode}>+55</Text>
+                    </TouchableOpacity>
 
-                <AnimatedInput
-                    testID="auth-phone-input"
-                    placeholder="Número"
-                    keyboardType="phone-pad"
-                    value={phoneNumber}
-                    onChangeText={setPhoneNumber}
-                    maxLength={11}
-                    editable={!loading && !checking}
-                    returnKeyType="done"
-                    onSubmitEditing={handleContinue}
-                    blurOnSubmit={false}
-                    containerStyle={{ flex: 1, marginBottom: 0 }}
-                    style={styles.input}
-                />
+                    <TextInput
+                        testID="auth-phone-input"
+                        placeholder="Número"
+                        placeholderTextColor={color.textMuted}
+                        keyboardType="phone-pad"
+                        value={phoneNumber}
+                        onChangeText={setPhoneNumber}
+                        maxLength={11}
+                        editable={!loading && !checking}
+                        returnKeyType="done"
+                        onSubmitEditing={handleContinue}
+                        blurOnSubmit={false}
+                        style={styles.input}
+                    />
+                </View>
             </View>
 
             <View style={styles.footer}>
-                <AnimatedButton
+                <ContinueButton
                     testID="auth-continue-btn"
                     accessibilityLabel="auth-continue-btn"
-                    title="Continuar"
                     onPress={handleContinue}
-                    loading={loading || checking}
+                    text={loading || checking ? 'Continuando...' : 'Continuar'}
                     disabled={phoneNumber.length < 10}
                     style={styles.continueButton}
                 />
 
-                <AnimatedButton
-                    title="Não tem conta? Cadastre-se"
-                    variant="ghost"
-                    onPress={onSwitchToRegister}
+                <TouchableOpacity
+                    activeOpacity={0.82}
+                    onPress={() => onSwitchToRegister?.(phoneNumber)}
                     disabled={loading || checking}
                     style={styles.registerButton}
-                />
+                >
+                    <Text style={styles.registerButtonText}>Não tem conta? Cadastre-se</Text>
+                </TouchableOpacity>
             </View>
         </View>
     );
@@ -201,50 +247,95 @@ const PhoneInputStep = ({ onSwitchToRegister, onVerificationSent, onUserExists }
 const styles = StyleSheet.create({
     container: {
         flex: 1,
-        padding: 24,
-        paddingBottom: 40,
-        backgroundColor: colors.white,
-        justifyContent: 'space-between',
+        paddingHorizontal: spacing.lg,
+        paddingTop: spacing.lg,
+        paddingBottom: spacing.md,
+        justifyContent: 'flex-start'
     },
     header: {
-        marginTop: 24,
+        marginTop: spacing.xs,
+        marginBottom: spacing.md
     },
     title: {
-        marginBottom: 8,
+        marginBottom: spacing.xs,
+        color: color.textPrimary,
+        fontSize: 20,
+        lineHeight: 26,
+        fontFamily: fonts.SemiBold,
+        textAlign: 'center'
     },
     subtitle: {
-        marginBottom: 32,
+        marginBottom: 0,
+        color: color.textSecondary,
+        fontSize: 14,
+        lineHeight: 20,
+        fontFamily: fonts.Regular,
+        textAlign: 'center'
+    },
+    contentCard: {
+        backgroundColor: color.panelSoft,
+        borderWidth: 1,
+        borderColor: color.glassStroke,
+        borderRadius: radius.lg,
+        padding: spacing.sm,
+        shadowColor: '#0E1522',
+        shadowOffset: { width: 0, height: 12 },
+        shadowOpacity: 0.16,
+        shadowRadius: 20,
+        elevation: 9,
+        marginBottom: spacing.md
     },
     inputContainer: {
         flexDirection: 'row',
         alignItems: 'center',
-        marginBottom: 32,
-        backgroundColor: colors.lightGrey,
-        borderRadius: 16,
+        backgroundColor: color.surfaceMuted,
+        borderWidth: 1,
+        borderColor: color.border,
+        borderRadius: radius.md,
         paddingRight: 4,
+        minHeight: 48
     },
     countrySelector: {
-        paddingHorizontal: 20,
+        paddingHorizontal: spacing.sm,
         justifyContent: 'center',
         borderRightWidth: 1,
-        borderRightColor: colors.border,
-        height: 56,
+        borderRightColor: color.border,
+        height: 48
     },
     countryCode: {
-        marginTop: 2, // optical alignment
+        marginTop: 1,
+        color: color.textPrimary,
+        fontSize: 16,
+        lineHeight: 20,
+        fontFamily: fonts.SemiBold
     },
     input: {
-        fontSize: 18,
-        letterSpacing: 1,
+        flex: 1,
+        height: 48,
+        paddingHorizontal: spacing.sm,
+        fontSize: 15,
+        lineHeight: 20,
+        letterSpacing: 0.2,
+        color: color.textPrimary,
+        fontFamily: fonts.Medium
     },
     footer: {
-        marginTop: 'auto',
+        marginTop: spacing.sm
     },
     continueButton: {
-        marginBottom: 8,
+        marginBottom: spacing.xs
     },
     registerButton: {
         marginTop: 4,
+        alignSelf: 'center',
+        paddingHorizontal: spacing.sm,
+        paddingVertical: spacing.xs
+    },
+    registerButtonText: {
+        color: color.textSecondary,
+        fontSize: 13,
+        lineHeight: 18,
+        fontFamily: fonts.SemiBold
     }
 });
 

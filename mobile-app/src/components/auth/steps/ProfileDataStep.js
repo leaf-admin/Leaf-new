@@ -1,283 +1,171 @@
-import React, { useState, useMemo, useCallback } from 'react';
-import { View, Text, TextInput, TouchableOpacity, StyleSheet, Alert, ScrollView } from 'react-native';
-import { fonts } from '../../../common-local/font';
+import React, { useCallback, useMemo, useState } from 'react';
+import { ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { fonts } from '../../../common-local/font';
 import { saveStepData } from '../../../utils/secureOnboardingStorage';
 import ContinueButton from '../common/ContinueButton';
+import onboardingTheme from '../common/onboardingTheme';
 
-// Cores baseadas no design
-const colors = {
-    black: '#000000',
-    grey80: '#333333',
-    greyPlaceholder: '#BDBDBD',
-    leafGreen: '#1A330E',
-    white: '#FFFFFF',
-    lightGrey: '#F5F5F5',
-    error: '#FF3B30'
-};
+const { color, radius, spacing, elevation } = onboardingTheme;
 
 const ProfileDataStep = ({ onSubmitted, onBack, initialData = {} }) => {
-    const [profileData, setProfileData] = useState({
-        firstName: initialData.firstName || '',
-        lastName: initialData.lastName || '',
-        dateOfBirth: initialData.dateOfBirth || '',
-        gender: initialData.gender || ''
+  const [profileData, setProfileData] = useState({
+    fullName: initialData.fullName || [initialData.firstName, initialData.lastName].filter(Boolean).join(' ').trim()
+  });
+  const [errors, setErrors] = useState({});
+
+  const isDriver = useMemo(() => initialData?.profileSelection?.userType === 'driver', [initialData?.profileSelection?.userType]);
+
+  const validateFields = useCallback(() => {
+    const nextErrors = {};
+    if (!profileData.fullName?.trim()) {
+      nextErrors.fullName = 'Nome completo é obrigatório';
+    }
+
+    setErrors(nextErrors);
+    return Object.keys(nextErrors).length === 0;
+  }, [profileData.fullName]);
+
+  const isFormValid = useMemo(() => Boolean(profileData.fullName?.trim()), [profileData.fullName]);
+
+  const updateField = useCallback(
+    async (field, value) => {
+      const nextData = { ...profileData, [field]: value };
+      setProfileData(nextData);
+      await saveStepData('profile_data', nextData);
+
+      if (errors[field]) {
+        setErrors(previous => ({ ...previous, [field]: '' }));
+      }
+    },
+    [errors, profileData]
+  );
+
+  const handleSubmit = () => {
+    if (!validateFields()) {
+      return;
+    }
+
+    onSubmitted({
+      fullName: profileData.fullName.trim()
     });
+  };
 
-    const [errors, setErrors] = useState({});
+  return (
+    <ScrollView
+      style={styles.container}
+      contentContainerStyle={styles.content}
+      showsVerticalScrollIndicator={false}
+      keyboardShouldPersistTaps="handled"
+    >
+      <View style={styles.header}>
+        <TouchableOpacity style={styles.backButton} onPress={onBack}>
+          <Ionicons name="arrow-back" size={22} color={color.textPrimary} />
+        </TouchableOpacity>
+        <Text style={styles.title}>Seus dados</Text>
+      </View>
 
-    // Validação dos campos
-    const validateFields = () => {
-        const newErrors = {};
+      <Text style={styles.subtitle}>
+        {isDriver
+          ? 'Informe seu nome para concluir o pré-cadastro de motorista.'
+          : 'Informe seu nome para criar sua conta de passageiro.'}
+      </Text>
 
-        if (!profileData.firstName.trim()) {
-            newErrors.firstName = 'Nome é obrigatório';
-        }
+      <View style={styles.card}>
+        <View style={styles.fieldContainer}>
+          <Text style={styles.label}>Nome completo *</Text>
+          <TextInput
+            style={[styles.input, errors.fullName && styles.inputError]}
+            value={profileData.fullName}
+            onChangeText={value => updateField('fullName', value)}
+            placeholder="Digite seu nome completo"
+            placeholderTextColor={color.textMuted}
+            autoCapitalize="words"
+            autoCorrect={false}
+          />
+          {errors.fullName ? <Text style={styles.errorText}>{errors.fullName}</Text> : null}
+        </View>
+      </View>
 
-        if (!profileData.lastName.trim()) {
-            newErrors.lastName = 'Sobrenome é obrigatório';
-        }
-
-        if (!profileData.dateOfBirth) {
-            newErrors.dateOfBirth = 'Data de nascimento é obrigatória';
-        }
-
-        if (!profileData.gender) {
-            newErrors.gender = 'Gênero é obrigatório';
-        }
-
-        setErrors(newErrors);
-        return Object.keys(newErrors).length === 0;
-    };
-
-    // Função para verificar se o formulário está válido
-    const isFormValid = useMemo(() => {
-        return profileData.firstName.trim() && 
-               profileData.lastName.trim() && 
-               profileData.dateOfBirth && 
-               profileData.gender;
-    }, [profileData.firstName, profileData.lastName, profileData.dateOfBirth, profileData.gender]);
-
-    // Função para lidar com o envio dos dados
-    const handleSubmit = () => {
-        if (validateFields()) {
-            onSubmitted(profileData);
-        }
-    };
-
-    // Função para atualizar um campo
-    const updateField = useCallback(async (field, value) => {
-        const newData = { ...profileData, [field]: value };
-        setProfileData(newData);
-        
-        // Salvar automaticamente no AsyncStorage
-        await saveStepData('profile_data', newData);
-        
-        // Limpar erro do campo quando o usuário começar a digitar
-        if (errors[field]) {
-            setErrors(prev => ({ ...prev, [field]: '' }));
-        }
-    }, [profileData, errors]);
-
-    // Função para formatar data de nascimento
-    const formatDateOfBirth = (value) => {
-        const numbers = value.replace(/\D/g, '');
-        if (numbers.length <= 2) return numbers;
-        if (numbers.length <= 4) return `${numbers.slice(0, 2)}/${numbers.slice(2)}`;
-        if (numbers.length <= 6) return `${numbers.slice(0, 2)}/${numbers.slice(2, 4)}/${numbers.slice(4)}`;
-        return `${numbers.slice(0, 2)}/${numbers.slice(2, 4)}/${numbers.slice(4, 8)}`;
-    };
-
-    const handleDateOfBirthChange = (value) => {
-        const formatted = formatDateOfBirth(value);
-        updateField('dateOfBirth', formatted);
-    };
-
-    return (
-        <ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
-            <View style={styles.header}>
-                <TouchableOpacity style={styles.backButton} onPress={onBack}>
-                    <Ionicons name="arrow-back" size={24} color={colors.leafGreen} />
-                </TouchableOpacity>
-                <Text style={styles.title}>Dados Pessoais</Text>
-            </View>
-            <Text style={styles.subtitle}>
-                Preencha seus dados pessoais básicos
-            </Text>
-
-            {/* Nome e Sobrenome */}
-            <View style={styles.row}>
-                <View style={styles.halfWidth}>
-                    <Text style={styles.label}>Nome *</Text>
-                    <TextInput
-                        style={[styles.input, errors.firstName && styles.inputError]}
-                        value={profileData.firstName}
-                        onChangeText={(value) => updateField('firstName', value)}
-                        placeholder="Seu nome"
-                        placeholderTextColor={colors.greyPlaceholder}
-                    />
-                    {errors.firstName && <Text style={styles.errorText}>{errors.firstName}</Text>}
-                </View>
-
-                <View style={styles.halfWidth}>
-                    <Text style={styles.label}>Sobrenome *</Text>
-                    <TextInput
-                        style={[styles.input, errors.lastName && styles.inputError]}
-                        value={profileData.lastName}
-                        onChangeText={(value) => updateField('lastName', value)}
-                        placeholder="Seu sobrenome"
-                        placeholderTextColor={colors.greyPlaceholder}
-                    />
-                    {errors.lastName && <Text style={styles.errorText}>{errors.lastName}</Text>}
-                </View>
-            </View>
-
-            {/* Data de Nascimento */}
-            <View style={styles.fieldContainer}>
-                <Text style={styles.label}>Data de Nascimento *</Text>
-                <TextInput
-                    style={[styles.input, errors.dateOfBirth && styles.inputError]}
-                    value={profileData.dateOfBirth}
-                    onChangeText={handleDateOfBirthChange}
-                    placeholder="DD/MM/AAAA"
-                    placeholderTextColor={colors.greyPlaceholder}
-                    keyboardType="numeric"
-                    maxLength={10}
-                />
-                {errors.dateOfBirth && <Text style={styles.errorText}>{errors.dateOfBirth}</Text>}
-            </View>
-
-            {/* Gênero */}
-            <View style={styles.fieldContainer}>
-                <Text style={styles.label}>Gênero *</Text>
-                <View style={styles.radioContainer}>
-                    {['Masculino', 'Feminino'].map((gender) => (
-                        <TouchableOpacity
-                            key={gender}
-                            style={[
-                                styles.radioButton,
-                                profileData.gender === gender && styles.radioButtonSelected
-                            ]}
-                            onPress={() => updateField('gender', gender)}
-                        >
-                            <Text style={[
-                                styles.radioText,
-                                profileData.gender === gender && styles.radioTextSelected
-                            ]}>
-                                {gender}
-                            </Text>
-                        </TouchableOpacity>
-                    ))}
-                </View>
-                {errors.gender && <Text style={styles.errorText}>{errors.gender}</Text>}
-            </View>
-
-            {/* Botão Continuar */}
-            <ContinueButton
-                onPress={handleSubmit}
-                disabled={!isFormValid}
-                text="Continuar"
-            />
-        </ScrollView>
-    );
+      <ContinueButton onPress={handleSubmit} disabled={!isFormValid} text="Continuar" />
+    </ScrollView>
+  );
 };
 
 const styles = StyleSheet.create({
-    container: {
-        flex: 1,
-        paddingVertical: 20,
-    },
-    header: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        marginBottom: 16,
-    },
-    backButton: {
-        padding: 8,
-        marginRight: 12,
-    },
-    title: {
-        fontSize: 24,
-        color: colors.black,
-        fontFamily: fonts.Bold,
-        textAlign: 'left',
-    },
-    subtitle: {
-        fontSize: 17,
-        color: colors.grey80,
-        fontFamily: fonts.Medium,
-        marginBottom: 32,
-        lineHeight: 22,
-    },
-    row: {
-        flexDirection: 'row',
-        justifyContent: 'space-between',
-        marginBottom: 20,
-    },
-    halfWidth: {
-        width: '48%',
-    },
-    fieldContainer: {
-        marginBottom: 20,
-    },
-    label: {
-        fontSize: 16,
-        color: colors.black,
-        fontFamily: fonts.Medium,
-        marginBottom: 8,
-    },
-    input: {
-        borderWidth: 2,
-        borderColor: colors.lightGrey,
-        borderRadius: 8,
-        paddingHorizontal: 16,
-        paddingVertical: 14,
-        fontSize: 16,
-        fontFamily: fonts.Medium,
-        color: colors.black,
-        backgroundColor: colors.white,
-    },
-    inputError: {
-        borderColor: colors.error,
-    },
-    errorText: {
-        color: colors.error,
-        fontSize: 14,
-        fontFamily: fonts.Medium,
-        marginTop: 4,
-    },
-    radioContainer: {
-        flexDirection: 'row',
-        justifyContent: 'space-between',
-    },
-    radioButton: {
-        flex: 1,
-        borderWidth: 2,
-        borderColor: colors.lightGrey,
-        borderRadius: 8,
-        paddingVertical: 12,
-        alignItems: 'center',
-        marginHorizontal: 4,
-        backgroundColor: colors.white,
-    },
-    radioButtonSelected: {
-        borderColor: colors.leafGreen,
-        backgroundColor: colors.leafGreen,
-    },
-    radioText: {
-        fontSize: 16,
-        color: colors.black,
-        fontFamily: fonts.Medium,
-    },
-    radioTextSelected: {
-        color: colors.white,
-    },
-
+  container: {
+    flex: 1,
+    paddingHorizontal: spacing.lg
+  },
+  content: {
+    paddingVertical: spacing.sm
+  },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: spacing.sm
+  },
+  backButton: {
+    padding: 6,
+    marginRight: 8
+  },
+  title: {
+    fontSize: 22,
+    lineHeight: 28,
+    color: color.textPrimary,
+    fontFamily: fonts.Bold,
+    textAlign: 'left'
+  },
+  subtitle: {
+    fontSize: 13,
+    lineHeight: 19,
+    color: color.textSecondary,
+    fontFamily: fonts.Regular,
+    marginBottom: spacing.sm
+  },
+  card: {
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    borderColor: color.glassStroke,
+    backgroundColor: color.panelSoft,
+    shadowColor: '#0E1522',
+    shadowOffset: { width: 0, height: 12 },
+    shadowOpacity: 0.16,
+    shadowRadius: 20,
+    elevation: 9,
+    padding: spacing.sm
+  },
+  fieldContainer: {
+    marginBottom: 2
+  },
+  label: {
+    fontSize: 13,
+    color: color.textPrimary,
+    fontFamily: fonts.SemiBold,
+    marginBottom: 6
+  },
+  input: {
+    borderWidth: 1,
+    borderColor: color.border,
+    borderRadius: radius.md,
+    paddingHorizontal: 12,
+    paddingVertical: 11,
+    fontSize: 14,
+    lineHeight: 18,
+    fontFamily: fonts.Medium,
+    color: color.textPrimary,
+    backgroundColor: color.surfaceMuted
+  },
+  inputError: {
+    borderColor: color.error
+  },
+  errorText: {
+    color: color.error,
+    fontSize: 12,
+    lineHeight: 16,
+    marginTop: 4,
+    fontFamily: fonts.Medium
+  }
 });
 
 export default ProfileDataStep;
-
-
-
-
-

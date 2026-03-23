@@ -1,0 +1,4 @@
+09:18
+Pagamento nao confirmado
+Nao foi possivel confirmar o pagamento nesta tentativa.
+O Tentar novamente

@@ -11,6 +11,29 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 
 
 class UserAuthService {
+  static async postCustomOtpWithFallback(pathSuffix, payload) {
+    const { api } = require('../common-local/api');
+    const endpoints = [
+      `/api/custom-otp/${pathSuffix}`,
+      `/custom-otp/${pathSuffix}`
+    ];
+
+    let lastError = null;
+
+    for (const endpoint of endpoints) {
+      try {
+        return await api.post(endpoint, payload);
+      } catch (error) {
+        lastError = error;
+        if (error?.response?.status !== 404) {
+          throw error;
+        }
+      }
+    }
+
+    throw lastError || new Error(`Falha em ${pathSuffix}`);
+  }
+
   // ✅ Rate limiting: armazenar tentativas por telefone
   static async checkRateLimit(phoneNumber) {
     try {
@@ -242,20 +265,8 @@ class UserAuthService {
         throw new Error('Usuário não encontrado');
       }
 
-      // Enviar OTP via API Customizada
-      const { api } = require('../common-local/api');
-      const response = await api.post('/custom-otp/request-otp', {
-        phone: phoneNumber
-      });
-
-      if (!response.data || !response.data.success) {
-        throw new Error('Falha ao enviar código OTP');
-      }
-
-      const confirmation = {
-        verificationId: response.data.verificationId,
-        isCustomOtp: true
-      };
+      // Fluxo principal via Firebase Phone Auth.
+      const confirmation = await auth().signInWithPhoneNumber(phoneNumber);
 
       // Registrar tentativa
       await this.recordAttempt(phoneNumber, false); // false porque ainda não resetou
@@ -280,20 +291,9 @@ class UserAuthService {
    */
   static async resetPassword(phoneNumber, verificationId, otp, newPassword) {
     try {
-      // Verificar OTP via API Customizada
-      const { api } = require('../common-local/api');
-      const response = await api.post('/custom-otp/verify-otp', {
-        phone: phoneNumber,
-        verificationId: verificationId,
-        otp: otp
-      });
-
-      if (!response.data || !response.data.success || !response.data.customToken) {
-        throw new Error('Código inválido ou expirado');
-      }
-
-      // Autenticar temporariamente via Custom Token
-      await auth().signInWithCustomToken(response.data.customToken);
+      // Verificar OTP via Firebase e autenticar temporariamente.
+      const credential = auth.PhoneAuthProvider.credential(verificationId, otp);
+      await auth().signInWithCredential(credential);
 
       // Atualizar senha
       const currentUser = auth().currentUser;
@@ -323,4 +323,3 @@ class UserAuthService {
 }
 
 export default UserAuthService;
-

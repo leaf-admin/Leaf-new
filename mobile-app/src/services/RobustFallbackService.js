@@ -371,26 +371,18 @@ class RobustFallbackService {
      * Mapear operação WebSocket para endpoint REST
      */
     getRestApiEndpoint(operation) {
+        // Mantemos apenas rotas REST comprovadamente disponíveis na API atual.
+        // Fluxos de corrida e localização são WebSocket-first e não têm fallback HTTP equivalente.
         const endpointMap = {
-            'createBooking': '/api/bookings',
-            'confirmPayment': '/api/payments/confirm',
-            'searchDrivers': '/api/drivers/search',
-            'updateDriverLocation': '/api/drivers/location',
-            'setDriverStatus': '/api/drivers/status',
-            'submitRating': '/api/ratings',
-            'sendMessage': '/api/messages',
-            'createSupportTicket': '/api/support/tickets',
-            'reportIncident': '/api/incidents',
-            'emergencyContact': '/api/emergency',
-            'updateNotificationPreferences': '/api/notifications/preferences',
-            'trackUserAction': '/api/analytics/track',
-            'submitFeedback': '/api/feedback',
-            'createChat': '/api/chat',
-            'cancelRide': '/api/rides/cancel',
-            'cancelDriverSearch': '/api/drivers/search/cancel'
+            createSupportTicket: '/api/support/tickets'
         };
-        
-        return endpointMap[operation] || '/api/fallback';
+
+        const endpoint = endpointMap[operation];
+        if (!endpoint) {
+            throw new Error(`Fallback REST não suportado para operação "${operation}"`);
+        }
+
+        return endpoint;
     }
 
     /**
@@ -459,7 +451,6 @@ class RobustFallbackService {
 // Singleton
 const robustFallbackService = new RobustFallbackService();
 export default robustFallbackService;
-
 
 
 

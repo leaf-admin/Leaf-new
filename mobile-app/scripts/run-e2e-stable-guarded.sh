@@ -1,15 +1,33 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT_DIR="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 MOBILE_DIR="$ROOT_DIR/mobile-app"
 BACKEND_DIR="$ROOT_DIR/leaf-websocket-backend"
 
-BACKEND_URL="${BACKEND_URL:-http://147.182.204.181:3001}"
+# shellcheck source=/dev/null
+source "${SCRIPT_DIR}/source-local-build-env.sh"
+
+BACKEND_URL="${BACKEND_URL:-https://api.147.182.204.181.sslip.io}"
 APP_PACKAGE="${APP_PACKAGE:-br.com.leaf.ride}"
 SEED_TEST_USERS="${SEED_TEST_USERS:-true}"
+ADB_BIN="${ADB_BIN:-$(command -v adb || true)}"
 
 export PATH="$PATH:$HOME/.maestro/bin"
+
+if [[ -z "$ADB_BIN" ]]; then
+  for candidate in \
+    "$ROOT_DIR/platform-tools/adb" \
+    "$ROOT_DIR/android-sdk/platform-tools/adb" \
+    "$HOME/Library/Android/sdk/platform-tools/adb" \
+    "$HOME/Android/Sdk/platform-tools/adb"; do
+    if [[ -x "$candidate" ]]; then
+      ADB_BIN="$candidate"
+      break
+    fi
+  done
+fi
 
 TIMESTAMP="$(date +%Y%m%d_%H%M%S)"
 ARTIFACTS_DIR="$MOBILE_DIR/.maestro/results/stable_guarded_${TIMESTAMP}"
@@ -28,9 +46,9 @@ check_cmd() {
 }
 
 bring_leaf_foreground() {
-  adb shell am force-stop com.google.android.apps.maps >/dev/null 2>&1 || true
-  adb shell am start -n br.com.leaf.ride/.MainActivity >/dev/null 2>&1 \
-    || adb shell monkey -p "$APP_PACKAGE" -c android.intent.category.LAUNCHER 1 >/dev/null 2>&1
+  "$ADB_BIN" shell am force-stop com.google.android.apps.maps >/dev/null 2>&1 || true
+  "$ADB_BIN" shell am start -n br.com.leaf.ride/.MainActivity >/dev/null 2>&1 \
+    || "$ADB_BIN" shell monkey -p "$APP_PACKAGE" -c android.intent.category.LAUNCHER 1 >/dev/null 2>&1
 }
 
 prepare_leaf_foreground() {
@@ -41,16 +59,20 @@ prepare_leaf_foreground() {
 echo "[stable] artifacts: $ARTIFACTS_DIR"
 echo "[stable] backend: $BACKEND_URL"
 
-check_cmd adb
 check_cmd curl
 check_cmd maestro
 
-if ! adb get-state >/dev/null 2>&1; then
+if [[ -z "$ADB_BIN" ]]; then
+  echo "[stable][error] Missing command: adb (or ADB_BIN path)."
+  exit 1
+fi
+
+if ! "$ADB_BIN" get-state >/dev/null 2>&1; then
   echo "[stable][error] No Android device connected via adb."
   exit 1
 fi
 
-if ! adb shell pm list packages | grep -q "$APP_PACKAGE"; then
+if ! "$ADB_BIN" shell pm list packages | grep -q "$APP_PACKAGE"; then
   echo "[stable][error] App package not installed: $APP_PACKAGE"
   exit 1
 fi

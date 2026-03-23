@@ -2,11 +2,20 @@ import Logger from '../utils/Logger';
 import { firebase } from '../common-local/configureFirebase';
 import auth from '@react-native-firebase/auth';
 import { Platform } from 'react-native';
+import { toUserFriendlyError } from '../utils/friendlyErrorMessages';
 
 
 class AuthService {
     constructor() {
-        this.baseURL = 'http://147.182.204.181:3001/api';
+        const baseUrl = String(
+            process.env.EXPO_PUBLIC_API_URL ||
+            process.env.EXPO_PUBLIC_BACKEND_URL ||
+            'https://api.147.182.204.181.sslip.io'
+        )
+            .trim()
+            .replace(/\/+$/, '')
+            .replace(/\/api$/i, '');
+        this.baseURL = `${baseUrl}/api`;
         this.currentUser = null;
         this.idToken = null;
     }
@@ -161,7 +170,10 @@ class AuthService {
                         } catch (retryError) {
                             clearTimeout(retryTimeoutId);
                             if (retryError.name === 'AbortError') {
-                                throw new Error('Send message timeout');
+                                throw toUserFriendlyError(
+                                    { code: 'ECONNABORTED', message: 'Send message timeout' },
+                                    { context: 'auth', fallbackMessage: 'A solicitacao demorou mais que o esperado. Tente novamente.' }
+                                );
                             }
                             throw retryError;
                         }
@@ -172,14 +184,20 @@ class AuthService {
             } catch (fetchError) {
                 clearTimeout(timeoutId);
                 if (fetchError.name === 'AbortError') {
-                    throw new Error('Send message timeout');
+                    throw toUserFriendlyError(
+                        { code: 'ECONNABORTED', message: 'Send message timeout' },
+                        { context: 'auth', fallbackMessage: 'A solicitacao demorou mais que o esperado. Tente novamente.' }
+                    );
                 }
                 throw fetchError;
             }
 
         } catch (error) {
             Logger.error('❌ Erro na requisição autenticada:', error);
-            throw error;
+            throw toUserFriendlyError(error, {
+                context: 'auth',
+                fallbackMessage: 'Nao foi possivel concluir a autenticacao agora. Tente novamente.'
+            });
         }
     }
 
@@ -213,14 +231,27 @@ class AuthService {
             const data = await response.json();
             
             if (!response.ok) {
-                throw new Error(data.error || `Erro ${response.status}: ${response.statusText}`);
+                throw toUserFriendlyError(
+                    {
+                        message: data?.error || `Erro ${response.status}: ${response.statusText}`,
+                        status: response.status,
+                        code: data?.code
+                    },
+                    {
+                        context: 'api',
+                        fallbackMessage: 'Nao foi possivel concluir esta solicitacao agora.'
+                    }
+                );
             }
 
             return data;
 
         } catch (error) {
             Logger.error('❌ Erro ao processar resposta da API:', error);
-            throw error;
+            throw toUserFriendlyError(error, {
+                context: 'api',
+                fallbackMessage: 'Nao foi possivel processar a resposta agora.'
+            });
         }
     }
 
@@ -257,6 +288,4 @@ class AuthService {
 }
 
 export default new AuthService();
-
-
 

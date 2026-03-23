@@ -18,19 +18,13 @@ import {
 } from 'react-native';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import * as Linking from 'expo-linking';
-import auth from '@react-native-firebase/auth';
 import hybridOTPService from '../services/HybridOTPService';
+import { fonts } from '../common-local/font';
+import onboardingTheme from '../components/auth/common/onboardingTheme';
 
+const { color, radius, spacing, elevation } = onboardingTheme;
 
 const { width, height } = Dimensions.get('window');
-
-const LEAF_GREEN = '#1A330E';
-const WHITE = '#FFFFFF';
-const BLACK = '#000000';
-const GRAY = '#666666';
-const LIGHT_GRAY = '#F5F5F5';
-const DARK_GRAY = '#333333';
 
 export default function PhoneInputScreen() {
   const navigation = useNavigation();
@@ -278,7 +272,7 @@ export default function PhoneInputScreen() {
                 value={name}
                 onChangeText={setName}
                 placeholder="Seu nome completo"
-                placeholderTextColor={GRAY}
+                placeholderTextColor={color.textMuted}
                 autoCapitalize="words"
                 maxLength={50}
               />
@@ -299,7 +293,7 @@ export default function PhoneInputScreen() {
                 value={phone}
                 onChangeText={handlePhoneChange}
                 placeholder="(21) 99999-9999"
-                placeholderTextColor={GRAY}
+                placeholderTextColor={color.textMuted}
                 keyboardType="phone-pad"
                 maxLength={15}
               />
@@ -328,13 +322,13 @@ export default function PhoneInputScreen() {
           <TouchableOpacity
             style={[
               styles.nextButton,
-              (!validatePhone() || !termsAccepted || isLoading) && styles.nextButtonDisabled
+              (!name.trim() || !validatePhone() || !termsAccepted || isLoading) && styles.nextButtonDisabled
             ]}
             onPress={handleNext}
-            disabled={!validatePhone() || !termsAccepted || isLoading}
+            disabled={!name.trim() || !validatePhone() || !termsAccepted || isLoading}
           >
             {isLoading ? (
-              <ActivityIndicator size="small" color={WHITE} />
+              <ActivityIndicator size="small" color={color.accentText} />
             ) : (
               <Text style={styles.nextButtonText}>Continuar</Text>
             )}
@@ -348,196 +342,195 @@ export default function PhoneInputScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: LEAF_GREEN,
+    backgroundColor: color.background
   },
 
-  // Background com cor estática
   backgroundContainer: {
     position: 'absolute',
     top: 0,
     left: 0,
     right: 0,
     bottom: 0,
-    backgroundColor: '#1A330E', // Cor estática para o fundo
+    backgroundColor: color.surfaceMuted,
     width: width,
-    height: height,
+    height: height
   },
 
-  // Logo da Leaf
   logoContainer: {
     position: 'absolute',
-    top: 60,
+    top: 56,
     left: 0,
     right: 0,
     alignItems: 'center',
-    zIndex: 1,
+    zIndex: 1
   },
 
-  // Header - IDÊNTICO AO DA TELA ANTERIOR
   header: {
     position: 'absolute',
     top: 60,
     left: 0,
     right: 0,
     alignItems: 'center',
-    zIndex: 1,
+    zIndex: 1
   },
   logo: {
-    width: 389,
-    height: 194,
+    width: 340,
+    height: 170
   },
 
-  // BOTTOM SHEET ULTRA FLAT
   bottomSheet: {
     position: 'absolute',
     bottom: 0,
     left: 0,
     right: 0,
-    backgroundColor: WHITE,
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
-    padding: 32,
-    paddingBottom: 60, // Aumentado de 40 para 60 para elevar o botão de rodapé
-    shadowColor: '#000',
+    backgroundColor: color.panel,
+    borderTopLeftRadius: radius.xl,
+    borderTopRightRadius: radius.xl,
+    borderWidth: 1,
+    borderColor: color.borderStrong,
+    padding: spacing.xl,
+    paddingBottom: 46,
+    shadowColor: '#0E1522',
     shadowOffset: { width: 0, height: -4 },
-    shadowOpacity: 0.1,
-    shadowRadius: 12,
-    elevation: 8,
+    shadowOpacity: 0.18,
+    shadowRadius: 16,
+    elevation: 12
   },
 
-  // Handle do bottom sheet
   handle: {
     width: 40,
     height: 6,
-    backgroundColor: '#E5E7EB',
+    backgroundColor: 'rgba(138,150,166,0.7)',
     borderRadius: 3,
     alignSelf: 'center',
-    marginBottom: 20,
+    marginBottom: spacing.md
   },
 
-  // ScrollView
   scrollView: {
-    flex: 1,
+    flex: 1
   },
   scrollViewContent: {
     flexGrow: 1,
-    paddingBottom: 20,
+    paddingBottom: spacing.md
   },
 
-  // Formulário
   formContainer: {
     flex: 1,
-    paddingTop: 20,
+    paddingTop: spacing.xs
   },
 
-  // Campo de nome
   nameInputContainer: {
-    backgroundColor: WHITE,
-    borderRadius: 12,
+    backgroundColor: color.surface,
+    borderRadius: radius.md,
     paddingHorizontal: 16,
     paddingVertical: 12,
-    marginBottom: 16,
+    marginBottom: spacing.sm,
     borderWidth: 1,
-    borderColor: '#E5E7EB',
+    borderColor: color.border
   },
   nameInput: {
     fontSize: 16,
-    color: BLACK,
-    paddingVertical: 8,
+    fontFamily: fonts.Medium,
+    color: color.textPrimary,
+    paddingVertical: 8
   },
 
-  // Campo de telefone
   phoneInputContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: WHITE,
-    borderRadius: 12,
+    backgroundColor: color.surface,
+    borderRadius: radius.md,
     paddingHorizontal: 16,
     paddingVertical: 12,
-    marginBottom: 16,
+    marginBottom: spacing.sm,
     borderWidth: 1,
-    borderColor: '#E5E7EB',
+    borderColor: color.border
   },
   countrySelector: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginRight: 12,
+    marginRight: 12
   },
   flag: {
     fontSize: 20,
-    marginRight: 8,
+    marginRight: 8
   },
   countryCode: {
     fontSize: 16,
-    fontWeight: '600',
-    color: LEAF_GREEN,
+    fontFamily: fonts.SemiBold,
+    color: color.textPrimary,
     marginRight: 4,
   },
   dropdownArrow: {
     fontSize: 12,
-    color: GRAY,
+    color: color.textMuted
   },
   phoneInput: {
     flex: 1,
     fontSize: 16,
-    color: BLACK,
+    fontFamily: fonts.Medium,
+    color: color.textPrimary,
     paddingVertical: 8,
   },
 
-  // Termos
   termsContainer: {
     flexDirection: 'row',
     alignItems: 'flex-start',
-    backgroundColor: WHITE,
-    borderRadius: 12,
+    backgroundColor: color.surface,
+    borderRadius: radius.md,
     padding: 16,
+    borderWidth: 1,
+    borderColor: color.border
   },
   checkbox: {
     width: 20,
     height: 20,
     borderRadius: 4,
-    borderWidth: 2,
-    borderColor: LEAF_GREEN,
+    borderWidth: 1,
+    borderColor: color.borderStrong,
     marginRight: 12,
     alignItems: 'center',
-    justifyContent: 'center',
+    justifyContent: 'center'
   },
   checkboxChecked: {
-    backgroundColor: LEAF_GREEN,
+    backgroundColor: color.accent,
+    borderColor: color.accent
   },
   checkmark: {
-    color: WHITE,
+    color: color.accentText,
     fontSize: 12,
-    fontWeight: 'bold',
+    fontWeight: 'bold'
   },
   termsText: {
     flex: 1,
     fontSize: 13,
-    color: LEAF_GREEN,
-    lineHeight: 18,
+    color: color.textSecondary,
+    lineHeight: 18
   },
   termsLink: {
-    color: LEAF_GREEN,
-    fontWeight: '600',
-    textDecorationLine: 'underline',
+    color: color.textPrimary,
+    fontFamily: fonts.SemiBold,
+    textDecorationLine: 'underline'
   },
 
-  // Footer
   footer: {
-    marginTop: 'auto',
+    marginTop: 'auto'
   },
   nextButton: {
-    backgroundColor: LEAF_GREEN,
-    borderRadius: 12,
+    backgroundColor: color.accent,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: color.borderStrong,
     paddingVertical: 16,
-    alignItems: 'center',
+    alignItems: 'center'
   },
   nextButtonDisabled: {
-    backgroundColor: '#C0C0C0',
+    backgroundColor: color.accentSoft,
+    borderColor: color.border
   },
   nextButtonText: {
     fontSize: 16,
-    fontWeight: 'bold',
-    color: WHITE,
-  },
-}); 
+    fontFamily: fonts.SemiBold,
+    color: color.accentText
+  }
+});

@@ -410,6 +410,13 @@ export default function RideFlowTestScreen() {
           <Text style={styles.currentScreenDescription}>{currentScreen?.description}</Text>
         </View>
 
+        <TouchableOpacity
+          style={[styles.button, styles.prototypeButton]}
+          onPress={() => navigation.navigate('RobotaxiPrototype')}
+        >
+          <Text style={styles.buttonText}>Abrir Robotaxi Prototype</Text>
+        </TouchableOpacity>
+
         <View style={styles.controlsContainer}>
           <TouchableOpacity
             style={[styles.button, styles.prevButton, currentScreenIndex === 0 && styles.buttonDisabled]}
@@ -560,6 +567,10 @@ const styles = StyleSheet.create({
     backgroundColor: '#4CAF50',
     marginBottom: 20,
   },
+  prototypeButton: {
+    backgroundColor: '#0F172A',
+    marginBottom: 12,
+  },
   autoPlayButtonActive: {
     backgroundColor: '#FF9800',
   },
@@ -624,4 +635,3 @@ const styles = StyleSheet.create({
     marginLeft: 10,
   },
 });
-

@@ -1,13 +1,12 @@
 import React, { useState } from 'react';
-import { View, Text, TextInput, TouchableOpacity, StyleSheet, SafeAreaView, ScrollView, Platform, Alert } from 'react-native';
+import { View, Text, TextInput, TouchableOpacity, StyleSheet, ScrollView, Alert } from 'react-native';
 import { useNavigation, useRoute } from '@react-navigation/native';
-import { colors } from '../common/theme';
-import * as ImagePicker from 'expo-image-picker';
+import { fonts } from '../common-local/font';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import OnboardingLayout from '../components/OnboardingLayout';
+import onboardingTheme from '../components/auth/common/onboardingTheme';
 
-const LEAF_GREEN = '#1A330E';
-const LEAF_GRAY = '#B0B0B0';
+const { color, radius, spacing, elevation } = onboardingTheme;
 
 const cities = [
   'São Paulo', 'Rio de Janeiro', 'Belo Horizonte', 'Brasília', 'Salvador', 'Curitiba', 'Porto Alegre', 'Recife', 'Fortaleza', 'Manaus'
@@ -162,7 +161,7 @@ export default function CompleteRegistrationScreen() {
                 value={name}
                 onChangeText={setName}
                 placeholder="Seu nome completo"
-                placeholderTextColor={LEAF_GRAY}
+                placeholderTextColor={color.textMuted}
                 autoCapitalize="words"
               />
             </View>
@@ -175,7 +174,7 @@ export default function CompleteRegistrationScreen() {
                   value={email}
                   onChangeText={setEmail}
                   placeholder="Seu e-mail"
-                  placeholderTextColor={LEAF_GRAY}
+                  placeholderTextColor={color.textMuted}
                   keyboardType="email-address"
                   autoCapitalize="none"
                 />
@@ -194,7 +193,7 @@ export default function CompleteRegistrationScreen() {
                     value={cpf}
                     onChangeText={(text) => setCpf(formatCPF(text))}
                     placeholder="000.000.000-00"
-                    placeholderTextColor={LEAF_GRAY}
+                    placeholderTextColor={color.textMuted}
                     keyboardType="numeric"
                     maxLength={14}
                   />
@@ -214,11 +213,11 @@ export default function CompleteRegistrationScreen() {
                     <MaterialCommunityIcons 
                       name={userData.cnhImage ? "check-circle" : "camera"} 
                       size={24} 
-                      color={userData.cnhImage ? "#4CAF50" : LEAF_GREEN} 
+                      color={userData.cnhImage ? "#4CAF50" : color.textPrimary} 
                     />
                     <Text style={[
                       styles.documentText,
-                      { color: userData.cnhImage ? "#4CAF50" : LEAF_GREEN }
+                      { color: userData.cnhImage ? "#4CAF50" : color.textPrimary }
                     ]}>
                       CNH {userData.cnhImage ? "✓ Enviada" : "📷 Enviar foto"}
                     </Text>
@@ -231,11 +230,11 @@ export default function CompleteRegistrationScreen() {
                     <MaterialCommunityIcons 
                       name={userData.crlvImage ? "check-circle" : "camera"} 
                       size={24} 
-                      color={userData.crlvImage ? "#4CAF50" : LEAF_GREEN} 
+                      color={userData.crlvImage ? "#4CAF50" : color.textPrimary} 
                     />
                     <Text style={[
                       styles.documentText,
-                      { color: userData.crlvImage ? "#4CAF50" : LEAF_GREEN }
+                      { color: userData.crlvImage ? "#4CAF50" : color.textPrimary }
                     ]}>
                       CRLV {userData.crlvImage ? "✓ Enviado" : "📷 Enviar foto"}
                     </Text>
@@ -246,24 +245,24 @@ export default function CompleteRegistrationScreen() {
                   <Text style={styles.label}>Cidade de atuação *</Text>
                   <TextInput
                     style={styles.input}
-                    value={city}
-                    onChangeText={setCity}
-                    placeholder="Selecione sua cidade"
-                    placeholderTextColor={LEAF_GRAY}
-                  />
-                </View>
+                  value={city}
+                  onChangeText={setCity}
+                  placeholder="Selecione sua cidade"
+                  placeholderTextColor={color.textMuted}
+                />
+              </View>
 
                 <View style={styles.inputGroup}>
                   <Text style={styles.label}>Conta bancária ou chave Pix *</Text>
                   <TextInput
                     style={styles.input}
-                    value={pix}
-                    onChangeText={setPix}
-                    placeholder="Chave Pix ou dados bancários"
-                    placeholderTextColor={LEAF_GRAY}
-                    autoCapitalize="none"
-                  />
-                </View>
+                  value={pix}
+                  onChangeText={setPix}
+                  placeholder="Chave Pix ou dados bancários"
+                  placeholderTextColor={color.textMuted}
+                  autoCapitalize="none"
+                />
+              </View>
               </>
             )}
 
@@ -272,7 +271,7 @@ export default function CompleteRegistrationScreen() {
                 <MaterialCommunityIcons
                   name={termsAccepted ? 'checkbox-marked' : 'checkbox-blank-outline'}
                   size={24}
-                  color={LEAF_GREEN}
+                  color={color.textPrimary}
                 />
                 <Text style={styles.termsText}>
                   Aceito os <Text style={styles.termsLink}>termos e políticas</Text> de privacidade
@@ -290,67 +289,78 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     alignItems: 'center',
-    paddingHorizontal: 24,
-    paddingTop: 48,
+    paddingHorizontal: spacing.xl,
+    paddingTop: spacing.md
   },
   title: {
     fontSize: 24,
-    fontWeight: 'bold',
-    color: LEAF_GREEN,
+    fontFamily: fonts.Bold,
+    color: color.textPrimary,
     marginBottom: 8,
-    textAlign: 'center',
+    textAlign: 'center'
   },
   subtitle: {
     fontSize: 16,
-    color: LEAF_GRAY,
-    marginBottom: 32,
+    color: color.textSecondary,
+    marginBottom: spacing.md,
     textAlign: 'center',
-    lineHeight: 22,
+    lineHeight: 22
   },
   scrollView: {
     flex: 1,
-    width: '100%',
+    width: '100%'
   },
   form: {
     width: '100%',
+    backgroundColor: color.panel,
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    borderColor: color.borderStrong,
+    padding: spacing.md,
+    shadowColor: '#0E1522',
+    ...elevation.soft
   },
   inputGroup: {
-    marginBottom: 20,
+    marginBottom: spacing.md
   },
   label: {
     fontSize: 16,
-    fontWeight: '600',
-    color: LEAF_GREEN,
-    marginBottom: 8,
+    fontFamily: fonts.SemiBold,
+    color: color.textPrimary,
+    marginBottom: 8
   },
   input: {
     fontSize: 16,
-    color: LEAF_GREEN,
-    borderBottomWidth: 2,
-    borderBottomColor: LEAF_GRAY,
+    color: color.textPrimary,
+    borderWidth: 1,
+    borderColor: color.border,
+    borderRadius: radius.md,
     paddingVertical: 12,
-    paddingHorizontal: 0,
+    paddingHorizontal: 14,
+    backgroundColor: color.surfaceMuted
   },
   inputError: {
-    borderBottomColor: '#FF4444',
+    borderColor: color.error
   },
   errorText: {
     fontSize: 12,
-    color: '#FF4444',
-    marginTop: 4,
+    color: color.error,
+    marginTop: 4
   },
   documentsContainer: {
     width: '100%',
-    backgroundColor: '#F8F8F8',
-    borderRadius: 12,
+    backgroundColor: color.surface,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: color.border,
     padding: 16,
-    marginBottom: 20,
+    marginBottom: spacing.md
   },
   documentsTitle: {
     fontSize: 16,
-    fontWeight: '600',
-    color: LEAF_GREEN,
-    marginBottom: 12,
+    fontFamily: fonts.SemiBold,
+    color: color.textPrimary,
+    marginBottom: 12
   },
   documentItem: {
     flexDirection: 'row',
@@ -359,44 +369,46 @@ const styles = StyleSheet.create({
     paddingHorizontal: 8,
     borderRadius: 8,
     marginBottom: 8,
-    backgroundColor: 'white',
+    backgroundColor: color.panelSoft
   },
   documentText: {
     fontSize: 16,
-    fontWeight: '500',
-    marginLeft: 12,
+    fontFamily: fonts.Medium,
+    marginLeft: 12
   },
   uploadBtn: {
     flexDirection: 'row',
     alignItems: 'center',
-    borderBottomWidth: 2,
-    borderBottomColor: LEAF_GRAY,
+    borderWidth: 1,
+    borderColor: color.border,
+    borderRadius: radius.md,
+    backgroundColor: color.surfaceMuted,
     paddingVertical: 12,
-    paddingHorizontal: 0,
+    paddingHorizontal: 12
   },
   uploadText: {
     fontSize: 16,
-    color: LEAF_GREEN,
-    marginLeft: 8,
+    color: color.textPrimary,
+    marginLeft: 8
   },
   termsContainer: {
     marginTop: 24,
-    marginBottom: 32,
+    marginBottom: 8
   },
   termsRow: {
     flexDirection: 'row',
-    alignItems: 'flex-start',
+    alignItems: 'flex-start'
   },
   termsText: {
     fontSize: 14,
-    color: LEAF_GRAY,
+    color: color.textSecondary,
     marginLeft: 8,
     flex: 1,
-    lineHeight: 20,
+    lineHeight: 20
   },
   termsLink: {
-    color: LEAF_GREEN,
-    fontWeight: '600',
+    color: color.textPrimary,
+    fontFamily: fonts.SemiBold
   },
   progressBarContainer: {
     flexDirection: 'row',
@@ -408,10 +420,10 @@ const styles = StyleSheet.create({
     width: 12,
     height: 12,
     borderRadius: 6,
-    backgroundColor: LEAF_GRAY,
-    marginHorizontal: 4,
+    backgroundColor: color.borderStrong,
+    marginHorizontal: 4
   },
   progressActive: {
-    backgroundColor: LEAF_GREEN,
-  },
-}); 
+    backgroundColor: color.accent
+  }
+});

@@ -2,18 +2,29 @@ import Logger from '../utils/Logger';
 // ApiConfig.js - Configuração centralizada para URLs da API
 import { Platform } from 'react-native';
 
+const DEFAULT_API_BASE_URL = 'https://api.147.182.204.181.sslip.io';
+const DEFAULT_WS_BASE_URL = 'https://socket.147.182.204.181.sslip.io';
+const DEFAULT_DASHBOARD_URL = 'https://dashboard.147.182.204.181.sslip.io';
+
+const normalizeBaseUrl = (url, fallback = 'https://api.147.182.204.181.sslip.io') => {
+  const raw = String(url || '').trim();
+  if (!raw) return fallback;
+  const withoutTrailingSlash = raw.replace(/\/+$/, '');
+  // Evita /api/api/* quando a variável de ambiente já inclui o prefixo /api
+  return withoutTrailingSlash.replace(/\/api$/i, '');
+};
 
 // Configurações por ambiente
 const ENV = {
   development: {
     // 🏠 SELF-HOSTED VPS - PRINCIPAL
     selfHostedApi: {
-      web: process.env.EXPO_PUBLIC_API_URL || 'http://147.182.204.181:3001',
-      mobile: process.env.EXPO_PUBLIC_API_URL || 'http://147.182.204.181:3001'
+      web: normalizeBaseUrl(process.env.EXPO_PUBLIC_API_URL, 'https://api.147.182.204.181.sslip.io'),
+      mobile: normalizeBaseUrl(process.env.EXPO_PUBLIC_API_URL, 'https://api.147.182.204.181.sslip.io')
     },
     selfHostedWebSocket: {
-      web: process.env.EXPO_PUBLIC_WS_URL || 'http://147.182.204.181:3001',
-      mobile: process.env.EXPO_PUBLIC_WS_URL || 'http://147.182.204.181:3001'
+      web: process.env.EXPO_PUBLIC_WS_URL || process.env.EXPO_PUBLIC_SOCKET_URL || process.env.EXPO_PUBLIC_API_URL || DEFAULT_WS_BASE_URL,
+      mobile: process.env.EXPO_PUBLIC_WS_URL || process.env.EXPO_PUBLIC_SOCKET_URL || process.env.EXPO_PUBLIC_API_URL || DEFAULT_WS_BASE_URL
     },
     // 🔄 FALLBACK - Firebase Functions (se necessário)
     firebaseFunctions: {
@@ -22,19 +33,19 @@ const ENV = {
     },
     // 📊 Dashboard VPS
     dashboard: {
-      web: process.env.EXPO_PUBLIC_DASHBOARD_URL || 'https://dashboard.leaf.app.br',
-      mobile: process.env.EXPO_PUBLIC_DASHBOARD_URL || 'https://dashboard.leaf.app.br'
+      web: process.env.EXPO_PUBLIC_DASHBOARD_URL || DEFAULT_DASHBOARD_URL,
+      mobile: process.env.EXPO_PUBLIC_DASHBOARD_URL || DEFAULT_DASHBOARD_URL
     }
   },
   production: {
     // 🏠 SELF-HOSTED VPS - PRODUÇÃO
     selfHostedApi: {
-      web: process.env.EXPO_PUBLIC_API_URL || 'http://147.182.204.181:3001',
-      mobile: process.env.EXPO_PUBLIC_API_URL || 'http://147.182.204.181:3001'
+      web: normalizeBaseUrl(process.env.EXPO_PUBLIC_API_URL, DEFAULT_API_BASE_URL),
+      mobile: normalizeBaseUrl(process.env.EXPO_PUBLIC_API_URL, DEFAULT_API_BASE_URL)
     },
     selfHostedWebSocket: {
-      web: process.env.EXPO_PUBLIC_WS_URL || 'http://147.182.204.181:3001',
-      mobile: process.env.EXPO_PUBLIC_WS_URL || 'http://147.182.204.181:3001'
+      web: process.env.EXPO_PUBLIC_WS_URL || process.env.EXPO_PUBLIC_SOCKET_URL || process.env.EXPO_PUBLIC_API_URL || DEFAULT_WS_BASE_URL,
+      mobile: process.env.EXPO_PUBLIC_WS_URL || process.env.EXPO_PUBLIC_SOCKET_URL || process.env.EXPO_PUBLIC_API_URL || DEFAULT_WS_BASE_URL
     },
     // 🔄 FALLBACK - Firebase Functions
     firebaseFunctions: {
@@ -43,8 +54,8 @@ const ENV = {
     },
     // 📊 Dashboard
     dashboard: {
-      web: process.env.EXPO_PUBLIC_DASHBOARD_URL || 'https://dashboard.leaf.app.br',
-      mobile: process.env.EXPO_PUBLIC_DASHBOARD_URL || 'https://dashboard.leaf.app.br'
+      web: process.env.EXPO_PUBLIC_DASHBOARD_URL || DEFAULT_DASHBOARD_URL,
+      mobile: process.env.EXPO_PUBLIC_DASHBOARD_URL || DEFAULT_DASHBOARD_URL
     }
   }
 };
@@ -62,7 +73,7 @@ const getConfig = () => {
   const platform = Platform.OS;
 
   // ✅ CORREÇÃO: Para dispositivos móveis (android/ios), sempre usar 'mobile'
-  // Isso garante que use a VPS (https://api.leaf.app.br) ao invés de localhost
+  // Isso garante que use a VPS (https://api.147.182.204.181.sslip.io) ao invés de localhost
   const platformKey = (platform === 'android' || platform === 'ios') ? 'mobile' : platform;
 
   Logger.log('🔧 [ApiConfig] Platform.OS:', platform, '| Usando chave:', platformKey);
@@ -113,16 +124,17 @@ export const API_URLS = {
 
   // Endpoints específicos - SELF-HOSTED
   selfHostedEndpoints: {
-    updateUserLocation: '/api/update_user_location',
-    updateDriverLocation: '/api/update_driver_location',
-    getNearbyDrivers: '/api/nearby_drivers',
-    getStats: '/api/stats',
+    // WebSocket-only no backend atual
+    updateUserLocation: '__WS_ONLY__',
+    updateDriverLocation: '__WS_ONLY__',
+    getNearbyDrivers: '/api/drivers/nearby',
+    getStats: '/api/app/stats',
     health: '/api/health',
-    startTripTracking: '/api/start_trip_tracking',
-    updateTripLocation: '/api/update_trip_location',
-    endTripTracking: '/api/end_trip_tracking',
-    getTripData: '/api/get_trip_data',
-    getRedisStats: '/api/get_redis_stats'
+    startTripTracking: '__WS_ONLY__',
+    updateTripLocation: '__WS_ONLY__',
+    endTripTracking: '__WS_ONLY__',
+    getTripData: '__WS_ONLY__',
+    getRedisStats: '/api/queue/cache/stats'
   },
 
   // Endpoints específicos - Firebase Functions (FALLBACK)
@@ -140,7 +152,7 @@ export const API_URLS = {
 };
 
 export const getSelfHostedApiUrl = (endpoint) => {
-  let baseUrl = process.env.EXPO_PUBLIC_API_URL || API_URLS.selfHostedApi;
+  let baseUrl = normalizeBaseUrl(process.env.EXPO_PUBLIC_API_URL || API_URLS.selfHostedApi);
   return `${baseUrl}${endpoint}`;
 };
 
@@ -161,10 +173,18 @@ export const getDashboardUrl = () => {
 
 // Função principal para obter URL da API (usa Self-Hosted como principal)
 export const getApiUrl = (endpoint, useFallback = false) => {
-  if (useFallback) {
-    return getFirebaseApiUrl(API_URLS.firebaseEndpoints[endpoint] || endpoint);
+  const mapped = useFallback
+    ? API_URLS.firebaseEndpoints[endpoint] || endpoint
+    : API_URLS.selfHostedEndpoints[endpoint] || endpoint;
+
+  if (mapped === '__WS_ONLY__') {
+    throw new Error(`Endpoint "${endpoint}" é WebSocket-only e não possui fallback HTTP.`);
   }
-  return getSelfHostedApiUrl(API_URLS.selfHostedEndpoints[endpoint] || endpoint);
+
+  if (useFallback) {
+    return getFirebaseApiUrl(mapped);
+  }
+  return getSelfHostedApiUrl(mapped);
 };
 
 // Função principal para obter URL do WebSocket (usa Self-Hosted como principal)

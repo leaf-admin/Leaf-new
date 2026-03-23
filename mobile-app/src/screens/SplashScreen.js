@@ -1,9 +1,33 @@
 import Logger from '../utils/Logger';
 import React, { useEffect, useRef, useState } from 'react';
-import { View, Image, StyleSheet, StatusBar, Animated, Text, ActivityIndicator, Dimensions, Alert } from 'react-native';
+import { View, Image, StyleSheet, StatusBar, Animated, Text, ActivityIndicator, Dimensions } from 'react-native';
 import { useSelector } from 'react-redux';
 import { useOnboardingPersistence } from '../hooks/useOnboardingPersistence';
 import AuthFlow from '../components/auth/AuthFlow';
+
+const resolveInitialStep = (completedSteps = []) => {
+  if (completedSteps.includes('credentials') || completedSteps.includes('document_data')) {
+    return 5;
+  }
+  if (completedSteps.includes('profile_data')) {
+    return 4;
+  }
+  if (completedSteps.includes('profile_selection')) {
+    return 3;
+  }
+  if (completedSteps.includes('phone_validation')) {
+    return 2;
+  }
+  return 0;
+};
+
+const buildOnboardingPayload = (progress = {}) => {
+  const completed = Object.keys(progress || {}).filter(key => progress[key]);
+  return {
+    step: resolveInitialStep(completed),
+    completed
+  };
+};
 
 export default function SplashScreen({ navigation }) {
   const fadeAnim = useRef(new Animated.Value(0)).current;
@@ -14,19 +38,17 @@ export default function SplashScreen({ navigation }) {
   const [isChecking, setIsChecking] = useState(true);
   const [shouldShowOnboarding, setShouldShowOnboarding] = useState(false);
   const [onboardingProgress, setOnboardingProgress] = useState(null);
-  const [showSplash, setShowSplash] = useState(true);
 
   // Redux e hooks
   const auth = useSelector(state => state.auth);
-  const { 
-    onboarding, 
-    loadOnboardingData, 
-    isLoaded, 
-    isStepComplete 
-  } = useOnboardingPersistence();
+  const { onboarding, isLoaded } = useOnboardingPersistence();
 
   // Verificar status do usuário nos bastidores
   useEffect(() => {
+    if (!isChecking) {
+      return;
+    }
+
     const checkUserStatus = async () => {
       // ✅ Timeout de 5s para verificação de usuário (Item 1.3)
       const timeoutId = setTimeout(() => {
@@ -48,7 +70,7 @@ export default function SplashScreen({ navigation }) {
           clearTimeout(timeoutId);
           Logger.log('SplashScreen - 🔐 Usuário não autenticado, preparando onboarding');
           setShouldShowOnboarding(true);
-          setOnboardingProgress(null);
+          setOnboardingProgress({ step: 0, completed: [] });
           setIsChecking(false);
           return;
         }
@@ -98,23 +120,9 @@ export default function SplashScreen({ navigation }) {
         } else {
           // 🔄 SITUAÇÃO 2: Usuário autenticado mas incompleto - continuar onboarding
           Logger.log('SplashScreen - 🔄 Usuário autenticado mas incompleto, preparando onboarding');
-          
-          // Determinar step inicial baseado no progresso
-          let initialStep = 0;
-          if (isStepComplete('phone_validation')) {
-            initialStep = 2; // ProfileSelectionStep
-          } else if (isStepComplete('profile_selection')) {
-            initialStep = 3; // ProfileDataStep
-          } else if (isStepComplete('profile_data')) {
-            initialStep = 4; // DocumentStep
-          } else if (isStepComplete('document_data')) {
-            initialStep = 5; // CredentialsStep
-          }
-          
-          setOnboardingProgress({
-            step: initialStep,
-            completed: (onboarding.progress ? Object.keys(onboarding.progress).filter(key => onboarding.progress[key]) : [])
-          });
+
+          const progressPayload = buildOnboardingPayload(onboarding.progress || {});
+          setOnboardingProgress(progressPayload);
           
           setShouldShowOnboarding(true);
           setIsChecking(false);
@@ -131,7 +139,7 @@ export default function SplashScreen({ navigation }) {
 
     // Executar verificação imediatamente
     checkUserStatus();
-  }, [auth.profile, navigation, isLoaded, isStepComplete, onboarding.progress]);
+  }, [auth.profile, navigation, isChecking]);
 
   useEffect(() => {
     // Animação simples e rápida

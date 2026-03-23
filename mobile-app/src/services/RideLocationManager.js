@@ -1,6 +1,7 @@
 import Logger from '../utils/Logger';
 import PersistentRideNotificationService from './PersistentRideNotificationService';
 import BackgroundLocationService from './BackgroundLocationService';
+import locationBufferService from './LocationBufferService';
 
 /**
  * 🚗 GERENCIADOR DE CORRIDAS COM LOCALIZAÇÃO E NOTIFICAÇÕES
@@ -53,6 +54,12 @@ class RideLocationManager {
 
             // ✅ 2. INICIAR TRACKING DE LOCALIZAÇÃO (só para motorista)
             if (userType === 'driver') {
+                await locationBufferService.setActiveTripContext({
+                    bookingId,
+                    tripId: bookingId,
+                    tripStatus: status || 'accepted',
+                    lastSeq: 0
+                });
                 await this.startLocationTracking();
             }
 
@@ -92,6 +99,7 @@ class RideLocationManager {
 
             // ✅ GERENCIAR TRACKING BASEADO NO STATUS
             if (this.currentUserType === 'driver') {
+                await locationBufferService.updateActiveTripStatus(status);
                 if (status === 'started' || status === 'accepted') {
                     // Garantir que tracking está ativo durante corrida
                     await this.startLocationTracking();
@@ -119,6 +127,7 @@ class RideLocationManager {
 
             // ✅ 1. PARAR TRACKING DE LOCALIZAÇÃO
             await this.stopLocationTracking();
+            await locationBufferService.clearActiveTripContext(this.currentRideId);
 
             // ✅ 2. REMOVER NOTIFICAÇÃO PERSISTENTE
             await PersistentRideNotificationService.dismissRideNotification();
@@ -203,6 +212,7 @@ class RideLocationManager {
 
             await this.stopLocationTracking();
             await PersistentRideNotificationService.dismissRideNotification();
+            await locationBufferService.clearActiveTripContext();
 
             this.currentRideId = null;
             this.currentUserType = null;
@@ -219,7 +229,6 @@ class RideLocationManager {
 // Exportar instância singleton
 const rideLocationManager = new RideLocationManager();
 export default rideLocationManager;
-
 
 
 

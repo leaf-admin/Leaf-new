@@ -3,7 +3,7 @@ module.exports.WooviConfig = {
     // O fluxo oficial usa o backend Leaf.
     apiKey: '',
     baseUrl: 'https://api.woovi.com/api/v1',
-    webhookUrl: 'https://api.leaf.app.br/api/woovi/webhook', // URL para produção ou ngrok
+    webhookUrl: 'https://api.147.182.204.181.sslip.io/api/woovi/webhook', // URL para produção ou ngrok
     appId: '',
     environment: 'production',
 
