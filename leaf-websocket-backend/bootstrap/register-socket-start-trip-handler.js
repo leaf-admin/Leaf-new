@@ -96,20 +96,45 @@ function registerSocketStartTripHandler({
                     return;
                 }
 
-                // ✅ VALIDAÇÃO CRÍTICA: Verificar se pagamento está confirmado (in_holding)
-                // 🔒 SEGURANÇA: Bloquear início de corrida se pagamento não estiver confirmado
+                // ✅ VALIDAÇÃO CRÍTICA: Verificar se pagamento está confirmado
+                // Primeiro tenta fast-path no Redis (booking hash), fallback para serviço externo.
                 if (!paymentMockEnabled) {
                     try {
-                        const PaymentService = require('../services/payment-service');
-                        const paymentService = new PaymentService();
+                        const normalizeStatus = (value) => String(value || '').trim().toLowerCase();
+                        const parsePositiveAmount = (value) => {
+                            const parsed = Number.parseFloat(value);
+                            return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+                        };
+                        const validStatuses = new Set(['in_holding', 'confirmed', 'paid']);
 
-                        // Buscar status do pagamento
-                        const paymentStatus = await paymentService.getPaymentStatus(bookingId);
+                        let paymentStatus = null;
+                        const bookingSnapshot = await redis.hgetall(`booking:${bookingId}`);
+                        if (bookingSnapshot && Object.keys(bookingSnapshot).length > 0) {
+                            const redisStatus = normalizeStatus(
+                                bookingSnapshot.paymentStatus ||
+                                bookingSnapshot.payment_status ||
+                                bookingSnapshot.statusPagamento
+                            );
+                            if (validStatuses.has(redisStatus)) {
+                                paymentStatus = {
+                                    success: true,
+                                    status: redisStatus,
+                                    amount:
+                                        parsePositiveAmount(bookingSnapshot.amount) ||
+                                        parsePositiveAmount(bookingSnapshot.finalFare) ||
+                                        parsePositiveAmount(bookingSnapshot.estimatedFare)
+                                };
+                            }
+                        }
 
-                        // ✅ VALIDAÇÃO 1: Verificar se a verificação foi bem-sucedida
-                        if (!paymentStatus.success) {
-                            // Verificar se é erro de "não encontrado" ou erro real de verificação
-                            const isNotFound = paymentStatus.error && (
+                        if (!paymentStatus) {
+                            const PaymentService = require('../services/payment-service');
+                            const paymentService = new PaymentService();
+                            paymentStatus = await paymentService.getPaymentStatus(bookingId);
+                        }
+
+                        if (!paymentStatus?.success) {
+                            const isNotFound = paymentStatus?.error && (
                                 paymentStatus.error.includes('não encontrado') ||
                                 paymentStatus.error.includes('not found') ||
                                 paymentStatus.error.includes('não existe') ||
@@ -118,7 +143,6 @@ function registerSocketStartTripHandler({
                             );
 
                             if (isNotFound) {
-                                // Pagamento não encontrado
                                 logStructured('warn', 'Tentativa de iniciar corrida sem pagamento', {
                                     driverId,
                                     bookingId,
@@ -132,27 +156,26 @@ function registerSocketStartTripHandler({
                                     paymentStatus: null
                                 });
                                 return;
-                            } else {
-                                // Erro real na verificação
-                                logStructured('error', 'Erro ao verificar status do pagamento', {
-                                    driverId,
-                                    bookingId,
-                                    eventType: 'startTrip',
-                                    error: paymentStatus.error
-                                });
-
-                                socket.emit('tripStartError', {
-                                    error: 'Erro ao verificar pagamento',
-                                    message: 'Não foi possível verificar o status do pagamento. Tente novamente.',
-                                    code: 'PAYMENT_VERIFICATION_ERROR'
-                                });
-                                return;
                             }
+
+                            logStructured('error', 'Erro ao verificar status do pagamento', {
+                                driverId,
+                                bookingId,
+                                eventType: 'startTrip',
+                                error: paymentStatus?.error || 'unknown_payment_validation_error'
+                            });
+
+                            socket.emit('tripStartError', {
+                                error: 'Erro ao verificar pagamento',
+                                message: 'Não foi possível verificar o status do pagamento. Tente novamente.',
+                                code: 'PAYMENT_VERIFICATION_ERROR'
+                            });
+                            return;
                         }
 
-                        // ✅ VALIDAÇÃO 2: Verificar se pagamento existe (double-check)
-                        if (!paymentStatus.status || paymentStatus.status === null || paymentStatus.status === undefined) {
-                            logStructured('warn', 'Tentativa de iniciar corrida sem pagamento (double-check)', {
+                        const normalizedStatus = normalizeStatus(paymentStatus.status);
+                        if (!normalizedStatus) {
+                            logStructured('warn', 'Tentativa de iniciar corrida sem status de pagamento válido', {
                                 driverId,
                                 bookingId,
                                 eventType: 'startTrip'
@@ -167,32 +190,27 @@ function registerSocketStartTripHandler({
                             return;
                         }
 
-                        // ✅ VALIDAÇÃO 3: Verificar se pagamento está em status válido para iniciar corrida
-                        // Status válidos: 'in_holding' (pagamento confirmado e em holding)
-                        const validStatuses = ['in_holding'];
-
-                        if (!validStatuses.includes(paymentStatus.status)) {
+                        if (!validStatuses.has(normalizedStatus)) {
                             logStructured('warn', 'Tentativa de iniciar corrida com pagamento em status inválido', {
                                 driverId,
                                 bookingId,
                                 eventType: 'startTrip',
-                                currentStatus: paymentStatus.status,
-                                requiredStatus: 'in_holding'
+                                currentStatus: normalizedStatus,
+                                requiredStatus: 'in_holding|confirmed|paid'
                             });
 
                             socket.emit('tripStartError', {
                                 error: 'Pagamento não confirmado',
-                                message: `A corrida só pode ser iniciada após confirmação do pagamento. Status atual: ${paymentStatus.status}. Status requerido: in_holding`,
+                                message: `A corrida só pode ser iniciada após confirmação do pagamento. Status atual: ${normalizedStatus}.`,
                                 code: 'PAYMENT_NOT_CONFIRMED',
-                                paymentStatus: paymentStatus.status,
-                                requiredStatus: 'in_holding',
+                                paymentStatus: normalizedStatus,
+                                requiredStatus: 'in_holding|confirmed|paid',
                                 amount: paymentStatus.amount || null
                             });
                             return;
                         }
 
-                        // ✅ VALIDAÇÃO 4: Verificar se há valor do pagamento (opcional, mas recomendado)
-                        if (paymentStatus.amount && paymentStatus.amount <= 0) {
+                        if (paymentStatus.amount && Number(paymentStatus.amount) <= 0) {
                             logStructured('warn', 'Tentativa de iniciar corrida com valor de pagamento inválido', {
                                 service: 'websocket',
                                 operation: 'startTrip',
@@ -205,21 +223,20 @@ function registerSocketStartTripHandler({
                                 error: 'Valor de pagamento inválido',
                                 message: 'O valor do pagamento é inválido. Entre em contato com o suporte.',
                                 code: 'INVALID_PAYMENT_AMOUNT',
-                                paymentStatus: paymentStatus.status
+                                paymentStatus: normalizedStatus
                             });
                             return;
                         }
 
-                        // ✅ Pagamento validado com sucesso
                         logStructured('info', 'Pagamento confirmado para corrida', {
                             service: 'websocket',
                             operation: 'startTrip',
                             bookingId,
                             driverId,
-                            paymentStatus: paymentStatus.status,
-                            amount: paymentStatus.amount ? (paymentStatus.amount / 100).toFixed(2) : 'N/A'
+                            paymentStatus: normalizedStatus,
+                            source: paymentStatus?.success ? 'redis_or_payment_service' : 'unknown',
+                            amount: paymentStatus.amount || null
                         });
-
                     } catch (paymentCheckError) {
                         logStructured('error', 'Erro crítico ao verificar pagamento para corrida', {
                             service: 'websocket',
@@ -230,16 +247,6 @@ function registerSocketStartTripHandler({
                             stack: paymentCheckError.stack
                         });
 
-                        // Log de auditoria para segurança
-                        logStructured('warn', 'Tentativa de iniciar corrida bloqueada - Erro crítico na verificação', {
-                            service: 'websocket',
-                            operation: 'startTrip',
-                            bookingId,
-                            driverId,
-                            error: paymentCheckError.message
-                        });
-
-                        // Em caso de erro na verificação, bloquear por segurança (fail-safe)
                         socket.emit('tripStartError', {
                             error: 'Erro ao verificar pagamento',
                             message: 'Não foi possível verificar o status do pagamento. A corrida não pode ser iniciada por segurança.',

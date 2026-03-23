@@ -74,7 +74,31 @@ module.exports = {
             max_restarts: 10,
             min_uptime: '10s',
             watch: false
+        },
+        {
+            name: 'trip-location-worker',
+            script: './workers/worker-trip-location.js',
+            instances: 1,
+            exec_mode: 'fork',
+            env: {
+                NODE_ENV: 'production',
+                ENABLE_TRIP_LOCATION_PERSISTENCE_WORKER: 'true',
+                ENABLE_TRIP_LOCATION_FIRESTORE_PERSISTENCE: 'true',
+                TRIP_LOCATION_WORKER_GROUP: 'trip-location-workers',
+                TRIP_LOCATION_WORKER_BATCH_SIZE: 40,
+                TRIP_LOCATION_WORKER_BLOCK_TIME: 1000,
+                TRIP_LOCATION_WORKER_MAX_RETRIES: 4,
+                TRIP_LOCATION_CHUNK_SIZE: 30,
+                TRIP_LOCATION_PERIODIC_FLUSH_MS: 15000
+            },
+            error_file: './logs/trip-location-worker-error.log',
+            out_file: './logs/trip-location-worker-out.log',
+            log_date_format: 'YYYY-MM-DD HH:mm:ss Z',
+            merge_logs: true,
+            autorestart: true,
+            max_restarts: 10,
+            min_uptime: '10s',
+            watch: false
         }
     ]
 };
-

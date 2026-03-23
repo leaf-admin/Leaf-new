@@ -465,19 +465,6 @@ function registerSocketCancelRideHandler({
                 await redis.del(`booking_search:${bookingId}`);
                 await redis.del(`ride_notifications:${bookingId}`);
 
-                // 10. Registrar evento
-                const eventSourcing = require('../services/event-sourcing');
-                const { EVENT_TYPES } = require('../services/event-sourcing');
-                await eventSourcing.recordEvent(
-                    EVENT_TYPES.RIDE_CANCELED,
-                    {
-                        bookingId,
-                        reason: reason || 'Cancelado pelo usuário',
-                        canceledBy: socket.userId || socket.id,
-                        canceledAt: Date.now()
-                    }
-                );
-
                 logStructured('info', 'Corrida cancelada - Reembolso automático processado', {
                     service: 'server',
                     bookingId,

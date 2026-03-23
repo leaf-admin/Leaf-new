@@ -1,5 +1,8 @@
 const express = require('express');
 const router = express.Router();
+const path = require('path');
+const multer = require('multer');
+const admin = require('firebase-admin');
 const { logStructured, logError } = require('../utils/logger');
 const redisPool = require('../utils/redis-pool');
 const RedisScan = require('../utils/redis-scan');
@@ -19,6 +22,195 @@ try {
 
 const legacyPromotionsRoutesEnabled =
   String(process.env.ENABLE_LEGACY_PROMOTIONS_ROUTES || 'false').toLowerCase() === 'true';
+
+const adminDocumentUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: {
+    fileSize: 15 * 1024 * 1024,
+    files: 1
+  },
+  fileFilter: (req, file, cb) => {
+    if (file.mimetype === 'application/pdf' || file.mimetype.startsWith('image/')) {
+      cb(null, true);
+      return;
+    }
+    cb(new Error('Formato inválido. Envie PDF ou imagem.'));
+  }
+});
+
+function parseRatingValue(value) {
+  const parsed = Number.parseFloat(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function normalizeId(value) {
+  return String(value || '').trim();
+}
+
+function flattenTripRatings(tripRatingsRaw = {}) {
+  const flattened = [];
+  if (!tripRatingsRaw || typeof tripRatingsRaw !== 'object') {
+    return flattened;
+  }
+
+  for (const [tripId, tripNode] of Object.entries(tripRatingsRaw)) {
+    if (!tripNode || typeof tripNode !== 'object') continue;
+
+    // Formato 1: trip_ratings/{tripId}/{ratingId}
+    for (const [ratingId, ratingData] of Object.entries(tripNode)) {
+      if (!ratingData || typeof ratingData !== 'object') continue;
+      if (parseRatingValue(ratingData.rating) == null) continue;
+      flattened.push({
+        id: ratingData.id || ratingId,
+        tripId: ratingData.tripId || tripId,
+        ...ratingData
+      });
+    }
+  }
+
+  return flattened;
+}
+
+function computeAverageRatingForUser(userId, userType, bookingArray = [], tripRatings = []) {
+  const safeUserId = normalizeId(userId);
+  if (!safeUserId) return 0;
+
+  // Fonte principal: trip_ratings (mais confiável e recente).
+  const tripRatingsForUser = tripRatings
+    .filter((rating) => normalizeId(rating.targetUserId || rating.targetUser || rating.target_uid) === safeUserId)
+    .map((rating) => parseRatingValue(rating.rating))
+    .filter((value) => value != null);
+
+  if (tripRatingsForUser.length > 0) {
+    return tripRatingsForUser.reduce((sum, value) => sum + value, 0) / tripRatingsForUser.length;
+  }
+
+  // Fallback legado: campos no booking.
+  if (userType === 'driver') {
+    const legacyRatings = bookingArray
+      .filter((booking) => normalizeId(booking.driver || booking.driverId || booking.driver_id) === safeUserId)
+      .map((booking) => parseRatingValue(booking.rating))
+      .filter((value) => value != null);
+
+    if (legacyRatings.length > 0) {
+      return legacyRatings.reduce((sum, value) => sum + value, 0) / legacyRatings.length;
+    }
+  }
+
+  if (userType === 'customer') {
+    const legacyRatings = bookingArray
+      .filter((booking) => normalizeId(booking.customer || booking.customerId || booking.customer_id) === safeUserId)
+      .map((booking) => parseRatingValue(booking.driver_rating))
+      .filter((value) => value != null);
+
+    if (legacyRatings.length > 0) {
+      return legacyRatings.reduce((sum, value) => sum + value, 0) / legacyRatings.length;
+    }
+  }
+
+  return 0;
+}
+
+function normalizeBirthDate(value) {
+  const raw = String(value || '').trim();
+  if (!raw) return null;
+
+  const ddmmyyyy = raw.match(/^(\d{2})[\/\-](\d{2})[\/\-](\d{4})$/);
+  if (ddmmyyyy) {
+    const [, dd, mm, yyyy] = ddmmyyyy;
+    return `${yyyy}-${mm}-${dd}`;
+  }
+
+  const yyyymmdd = raw.match(/^(\d{4})[\/\-](\d{2})[\/\-](\d{2})$/);
+  if (yyyymmdd) {
+    const [, yyyy, mm, dd] = yyyymmdd;
+    return `${yyyy}-${mm}-${dd}`;
+  }
+
+  const parsed = new Date(raw);
+  if (Number.isNaN(parsed.getTime())) return null;
+  return parsed.toISOString().slice(0, 10);
+}
+
+function normalizeMotherName(value) {
+  const name = String(value || '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return name || null;
+}
+
+function normalizeGenderCode(value) {
+  const normalized = String(value || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .trim()
+    .toUpperCase();
+
+  if (!normalized) return null;
+  if (['F', 'FEMININO', 'FEMALE', 'MULHER'].includes(normalized)) return 'F';
+  if (['M', 'MASCULINO', 'MALE', 'HOMEM'].includes(normalized)) return 'M';
+  if (['X', 'OUTRO', 'OTHER', 'N', 'NB', 'NAO BINARIO', 'NAO-BINARIO', 'NON BINARY'].includes(normalized)) {
+    return 'X';
+  }
+  return null;
+}
+
+function genderCodeToLabel(code) {
+  if (code === 'F') return 'Feminino';
+  if (code === 'M') return 'Masculino';
+  if (code === 'X') return 'Outro';
+  return null;
+}
+
+function resolveDriverIdentityData(userData = {}, documents = {}) {
+  const cnhExtracted = documents?.cnh?.extractedData || {};
+  const cnhIdentity = documents?.cnh?.extractedIdentity || {};
+
+  const birthDate = normalizeBirthDate(
+    userData?.birthDate ||
+      userData?.dateOfBirth ||
+      userData?.dob ||
+      userData?.dataNascimento ||
+      cnhExtracted?.dataNascimento ||
+      cnhExtracted?.birthDate ||
+      cnhExtracted?.dateOfBirth ||
+      cnhIdentity?.birthDate ||
+      null
+  );
+
+  const motherName = normalizeMotherName(
+    userData?.motherName ||
+      userData?.nomeMae ||
+      userData?.nomeDaMae ||
+      cnhExtracted?.nomeMae ||
+      cnhExtracted?.nome_da_mae ||
+      cnhExtracted?.nomeDaMae ||
+      cnhExtracted?.mae ||
+      cnhExtracted?.motherName ||
+      cnhExtracted?.filiacaoMae ||
+      cnhExtracted?.filiacao?.mae ||
+      cnhIdentity?.motherName ||
+      null
+  );
+
+  const gender = normalizeGenderCode(
+    userData?.gender ||
+      userData?.genero ||
+      cnhExtracted?.genero ||
+      cnhExtracted?.sexo ||
+      cnhExtracted?.gender ||
+      cnhExtracted?.sex ||
+      cnhIdentity?.gender ||
+      null
+  );
+
+  return {
+    birthDate,
+    motherName,
+    gender,
+    genderLabel: genderCodeToLabel(gender)
+  };
+}
 
 // 📊 DASHBOARD APIs
 // Estas APIs serão implementadas para fornecer dados para o dashboard
@@ -139,6 +331,10 @@ router.get('/api/users', async (req, res) => {
         const bookings = bookingsSnapshot.val() || {};
         const bookingArray = Object.keys(bookings).map(key => ({ id: key, ...bookings[key] }));
 
+        // Buscar avaliações consolidadas (fonte principal para rating de usuário)
+        const tripRatingsSnapshot = await db.ref('trip_ratings').once('value');
+        const tripRatings = flattenTripRatings(tripRatingsSnapshot.val() || {});
+
         // Converter para array e enriquecer com dados
         users = Object.keys(usersData).map(userId => {
           const user = usersData[userId];
@@ -160,16 +356,7 @@ router.get('/api/users', async (req, res) => {
             ? completedBookings.reduce((sum, booking) => sum + parseFloat(booking.driver_share || 0), 0)
             : 0;
 
-          // Calcular rating médio
-          const ratingsAsDriver = bookingArray.filter(b => b.driver === userId && b.rating);
-          const ratingsAsCustomer = bookingArray.filter(b => b.customer === userId && b.driver_rating);
-
-          let averageRating = 0;
-          if (user.usertype === 'driver' && ratingsAsDriver.length > 0) {
-            averageRating = ratingsAsDriver.reduce((sum, b) => sum + parseFloat(b.rating), 0) / ratingsAsDriver.length;
-          } else if (user.usertype === 'customer' && ratingsAsCustomer.length > 0) {
-            averageRating = ratingsAsCustomer.reduce((sum, b) => sum + parseFloat(b.driver_rating), 0) / ratingsAsCustomer.length;
-          }
+          const averageRating = computeAverageRatingForUser(userId, user.usertype, bookingArray, tripRatings);
 
           return {
             id: userId,
@@ -279,6 +466,89 @@ router.get('/api/users', async (req, res) => {
   }
 });
 
+// 👤 Atualizar dados cadastrais de usuário via dashboard (admin)
+router.patch('/api/users/:userId', authenticateJWT, requireRole(['admin', 'super-admin', 'manager']), async (req, res) => {
+  try {
+    const { userId } = req.params;
+    const db = firebaseConfig?.getRealtimeDB ? firebaseConfig.getRealtimeDB() : null;
+
+    if (!db) {
+      return res.status(500).json({ error: 'Realtime DB indisponível' });
+    }
+
+    const safeUserId = normalizeId(userId);
+    if (!safeUserId) {
+      return res.status(400).json({ error: 'userId inválido' });
+    }
+
+    const userSnapshot = await db.ref(`users/${safeUserId}`).once('value');
+    if (!userSnapshot.exists()) {
+      return res.status(404).json({ error: 'Usuário não encontrado' });
+    }
+
+    const payload = req.body || {};
+    const nowIso = new Date().toISOString();
+    const updates = {};
+
+    const setStringIfPresent = (fieldName, targetField) => {
+      if (typeof payload[fieldName] === 'string' && payload[fieldName].trim()) {
+        updates[targetField] = payload[fieldName].trim();
+      }
+    };
+
+    setStringIfPresent('firstName', 'firstName');
+    setStringIfPresent('lastName', 'lastName');
+    setStringIfPresent('email', 'email');
+    setStringIfPresent('mobile', 'mobile');
+    setStringIfPresent('phone', 'mobile');
+    setStringIfPresent('city', 'city');
+    setStringIfPresent('state', 'state');
+    setStringIfPresent('carType', 'carType');
+    setStringIfPresent('usertype', 'usertype');
+
+    if (typeof payload.name === 'string' && payload.name.trim()) {
+      const fullName = payload.name.trim();
+      const parts = fullName.split(/\s+/);
+      updates.firstName = parts.shift() || '';
+      updates.lastName = parts.join(' ');
+    }
+
+    if (typeof payload.approved === 'boolean') {
+      updates.approved = payload.approved;
+    }
+
+    if (Object.keys(updates).length === 0) {
+      return res.status(400).json({ error: 'Nenhum campo válido para atualização' });
+    }
+
+    updates.updatedAt = nowIso;
+
+    await db.ref(`users/${safeUserId}`).update(updates);
+
+    const updatedUserSnapshot = await db.ref(`users/${safeUserId}`).once('value');
+    const updatedUser = updatedUserSnapshot.val() || {};
+
+    return res.json({
+      success: true,
+      message: 'Dados cadastrais atualizados com sucesso',
+      user: {
+        id: safeUserId,
+        firstName: updatedUser.firstName || '',
+        lastName: updatedUser.lastName || '',
+        email: updatedUser.email || '',
+        mobile: updatedUser.mobile || '',
+        city: updatedUser.city || '',
+        state: updatedUser.state || '',
+        approved: Boolean(updatedUser.approved),
+        updatedAt: updatedUser.updatedAt || nowIso
+      }
+    });
+  } catch (error) {
+    logError(error, 'Erro ao atualizar dados cadastrais de usuário', { service: 'dashboard-routes' });
+    return res.status(500).json({ error: 'Erro interno do servidor' });
+  }
+});
+
 // 🚗 Driver Applications - SISTEMA COMPLETO DE APROVAÇÃO
 router.get('/api/drivers/applications', async (req, res) => {
   try {
@@ -305,97 +575,149 @@ router.get('/api/drivers/applications', async (req, res) => {
         // Buscar carros (para informações do veículo)
         const carsSnapshot = await db.ref('cars').once('value');
         const cars = carsSnapshot.val() || {};
+        const carsByDriverId = {};
+        Object.entries(cars || {}).forEach(([carId, carValue]) => {
+          if (!carValue || typeof carValue !== 'object') return;
+          const ownerId = String(carValue.driver || carValue.userId || '').trim();
+          if (!ownerId) return;
+          if (!Array.isArray(carsByDriverId[ownerId])) {
+            carsByDriverId[ownerId] = [];
+          }
+          carsByDriverId[ownerId].push({ id: carId, ...carValue });
+        });
 
-        // Buscar documentos de todos os usuários de uma vez
-        const allDocumentsSnapshot = await db.ref('users').once('value');
-        const allUsersData = allDocumentsSnapshot.val() || {};
+        const driverIds = Object.keys(users);
+        applications = driverIds
+          .map((userId) => {
+            const user = users[userId];
+            if (!user || typeof user !== 'object') {
+              return null;
+            }
 
-        applications = []; // Temporário para teste
-        // applications = await Promise.all(Object.keys(users).map(async userId => {
-        const user = users[userId];
+            const userCar = (carsByDriverId[userId] && carsByDriverId[userId][0]) || null;
+            const userDocuments =
+              user?.documents && typeof user.documents === 'object'
+                ? user.documents
+                : {};
 
-        // Buscar carro do motorista
-        const userCar = Object.values(cars).find(car => car.driver === userId);
+            let applicationStatus = 'pending';
+            const hasExplicitRejection =
+              user.status === 'rejected' ||
+              user.kycStatus === 'rejected' ||
+              user.rejectedAt ||
+              user.rejectionReason ||
+              (Array.isArray(user.rejectionReasons) && user.rejectionReasons.length > 0);
 
-        // Buscar documentos na nova estrutura: users/{uid}/documents/{documentType}
-        let userDocuments = {};
-        if (allUsersData[userId] && allUsersData[userId].documents) {
-          userDocuments = allUsersData[userId].documents;
-        }
+            if (user.approved === true) {
+              applicationStatus = 'approved';
+            } else if (hasExplicitRejection) {
+              applicationStatus = 'rejected';
+            } else if (
+              userDocuments.cnh ||
+              userDocuments.crlv ||
+              userDocuments.antecedentes_criminais ||
+              user.licenseImage ||
+              user.verifyIdImage
+            ) {
+              applicationStatus = 'in_review';
+            }
 
-        // Determinar status baseado nos documentos e aprovação
-        let applicationStatus = 'pending';
-        if (user.approved === true) {
-          applicationStatus = 'approved';
-        } else if (user.approved === false) {
-          applicationStatus = 'rejected';
-        } else if (userDocuments.cnh || userDocuments.comprovante_residencia || user.licenseImage || user.verifyIdImage) {
-          applicationStatus = 'in_review';
-        }
+            const documents = {
+              license: {
+                front: userDocuments.cnh?.fileUrl || user.licenseImage || null,
+                back: userDocuments.cnh_verso?.fileUrl || user.licenseImageBack || null,
+                status: userDocuments.cnh
+                  ? userDocuments.cnh.status
+                  : (user.licenseImage ? (user.approved ? 'approved' : 'pending') : 'missing'),
+                uploadedAt: userDocuments.cnh?.uploadedAt || null,
+                type: userDocuments.cnh?.fileType || null
+              },
+              identity: {
+                front: userDocuments.comprovante_residencia?.fileUrl || user.verifyIdImage || null,
+                back: userDocuments.identidade_verso?.fileUrl || user.verifyIdImageBack || null,
+                status: userDocuments.comprovante_residencia
+                  ? userDocuments.comprovante_residencia.status
+                  : (user.verifyIdImage ? (user.approved ? 'approved' : 'pending') : 'missing'),
+                uploadedAt: userDocuments.comprovante_residencia?.uploadedAt || null,
+                type: userDocuments.comprovante_residencia?.fileType || null
+              },
+              vehicle: {
+                registration: userDocuments.crlv?.fileUrl || userCar?.vehicleRegistration || null,
+                insurance: userDocuments.seguro?.fileUrl || userCar?.vehicleInsurance || null,
+                photos: userCar?.carImage || null,
+                status: userDocuments.crlv
+                  ? userDocuments.crlv.status
+                  : (userCar ? (user.approved ? 'approved' : 'pending') : 'missing'),
+                uploadedAt: userDocuments.crlv?.uploadedAt || null,
+                type: userDocuments.crlv?.fileType || null
+              },
+              backgroundCheck: {
+                fileUrl: userDocuments.antecedentes_criminais?.fileUrl || null,
+                status: userDocuments.antecedentes_criminais?.status || 'missing',
+                uploadedAt: userDocuments.antecedentes_criminais?.uploadedAt || null,
+                type: userDocuments.antecedentes_criminais?.fileType || null
+              },
+              all_documents: Object.keys(userDocuments).map((docType) => ({
+                type: docType,
+                fileUrl: userDocuments[docType]?.fileUrl || null,
+                status: userDocuments[docType]?.status || 'pending',
+                uploadedAt: userDocuments[docType]?.uploadedAt || null,
+                fileType: userDocuments[docType]?.fileType || null,
+                rejectionReason: userDocuments[docType]?.rejectionReason || null
+              }))
+            };
+            const driverIdentity = resolveDriverIdentityData(user, userDocuments);
 
-        // Analisar documentos - NOVA ESTRUTURA + COMPATIBILIDADE COM ANTIGA
-        const documents = {
-          license: {
-            // Nova estrutura
-            front: userDocuments.cnh?.fileUrl || user.licenseImage || null,
-            back: userDocuments.cnh_verso?.fileUrl || user.licenseImageBack || null,
-            status: userDocuments.cnh ? userDocuments.cnh.status : (user.licenseImage ? (user.approved ? 'approved' : 'pending') : 'missing'),
-            uploadedAt: userDocuments.cnh?.uploadedAt || null,
-            type: userDocuments.cnh?.fileType || null
-          },
-          identity: {
-            // Nova estrutura  
-            front: userDocuments.comprovante_residencia?.fileUrl || user.verifyIdImage || null,
-            back: userDocuments.identidade_verso?.fileUrl || user.verifyIdImageBack || null,
-            status: userDocuments.comprovante_residencia ? userDocuments.comprovante_residencia.status : (user.verifyIdImage ? (user.approved ? 'approved' : 'pending') : 'missing'),
-            uploadedAt: userDocuments.comprovante_residencia?.uploadedAt || null,
-            type: userDocuments.comprovante_residencia?.fileType || null
-          },
-          vehicle: {
-            // Nova estrutura
-            registration: userDocuments.crlv?.fileUrl || userCar?.vehicleRegistration || null,
-            insurance: userDocuments.seguro?.fileUrl || userCar?.vehicleInsurance || null,
-            photos: userCar?.carImage || null,
-            status: userDocuments.crlv ? userDocuments.crlv.status : (userCar ? (user.approved ? 'approved' : 'pending') : 'missing'),
-            uploadedAt: userDocuments.crlv?.uploadedAt || null,
-            type: userDocuments.crlv?.fileType || null
-          },
-          // Adicionar todos os documentos enviados pelo usuário
-          all_documents: Object.keys(userDocuments).map(docType => ({
-            type: docType,
-            fileUrl: userDocuments[docType].fileUrl,
-            status: userDocuments[docType].status,
-            uploadedAt: userDocuments[docType].uploadedAt,
-            fileType: userDocuments[docType].fileType
-          }))
-        };
+            return {
+              id: userId,
+              driver: {
+                id: userId,
+                name: `${user.firstName || ''} ${user.lastName || ''}`.trim(),
+                email: user.email || '',
+                phone: user.mobile || '',
+                cpf: user.cpf || user.document || user.documentNumber || '',
+                birthDate: driverIdentity.birthDate,
+                motherName: driverIdentity.motherName,
+                gender: driverIdentity.gender,
+                genderLabel: driverIdentity.genderLabel,
+                city: user.city || '',
+                state: user.state || ''
+              },
+              vehicle: userCar
+                ? {
+                    make: userCar.carMake || '',
+                    model: userCar.carModel || '',
+                    year: userCar.carYear || '',
+                    plate: userCar.carNumber || '',
+                    color: userCar.carColor || ''
+                  }
+                : null,
+              documents,
+              status: applicationStatus,
+              submissionDate: user.createdAt
+                ? new Date(user.createdAt).toISOString()
+                : new Date().toISOString(),
+              reviewDate: user.approvedAt ? new Date(user.approvedAt).toISOString() : null,
+              reviewedBy: user.approvedBy || null,
+              rejectionReason: user.rejectionReason || null,
+              notes: user.adminNotes || ''
+            };
+          })
+          .filter(Boolean);
 
-        return {
-          id: userId,
-          driver: {
-            id: userId,
-            name: `${user.firstName || ''} ${user.lastName || ''}`.trim(),
-            email: user.email || '',
-            phone: user.mobile || '',
-            city: user.city || '',
-            state: user.state || ''
-          },
-          vehicle: userCar ? {
-            make: userCar.carMake || '',
-            model: userCar.carModel || '',
-            year: userCar.carYear || '',
-            plate: userCar.carNumber || '',
-            color: userCar.carColor || ''
-          } : null,
-          documents,
-          status: applicationStatus,
-          submissionDate: user.createdAt ? new Date(user.createdAt).toISOString() : new Date().toISOString(),
-          reviewDate: user.approvedAt ? new Date(user.approvedAt).toISOString() : null,
-          reviewedBy: user.approvedBy || null,
-          rejectionReason: user.rejectionReason || null,
-          notes: user.adminNotes || ''
-        };
-        // });
+        const sortDirection = String(sortOrder).toLowerCase() === 'asc' ? 1 : -1;
+        const normalizedSortBy = String(sortBy || 'submissionDate').toLowerCase();
+        applications.sort((a, b) => {
+          if (normalizedSortBy === 'status') {
+            return String(a.status || '').localeCompare(String(b.status || '')) * sortDirection;
+          }
+          if (normalizedSortBy === 'name') {
+            return String(a?.driver?.name || '').localeCompare(String(b?.driver?.name || '')) * sortDirection;
+          }
+          const aTs = new Date(a?.submissionDate || 0).getTime();
+          const bTs = new Date(b?.submissionDate || 0).getTime();
+          return (aTs - bTs) * sortDirection;
+        });
 
         // Aplicar filtros
         if (status && status !== 'all') {
@@ -435,6 +757,7 @@ router.post('/api/drivers/:driverId/documents/:documentType/review', authenticat
     const { driverId, documentType } = req.params;
     const { action, rejectionReason } = req.body; // action: 'approve' | 'reject'
     const reviewedBy = req.user.id; // ✅ ID do admin logado
+    const normalizedDocumentType = sanitizeDocumentType(documentType);
 
     if (!['approve', 'reject'].includes(action)) {
       return res.status(400).json({
@@ -455,7 +778,7 @@ router.post('/api/drivers/:driverId/documents/:documentType/review', authenticat
         const db = firebaseConfig.getRealtimeDB();
 
         // Verificar se o documento existe
-        const documentRef = db.ref(`users/${driverId}/documents/${documentType}`);
+        const documentRef = db.ref(`users/${driverId}/documents/${normalizedDocumentType}`);
         const documentSnapshot = await documentRef.once('value');
 
         if (!documentSnapshot.exists()) {
@@ -465,13 +788,17 @@ router.post('/api/drivers/:driverId/documents/:documentType/review', authenticat
           });
         }
 
+        const existingDocument = documentSnapshot.val() || {};
+        const nextStatus = action === 'approve' ? 'approved' : 'rejected';
+        const reviewAtIso = new Date().toISOString();
+
         // ✅ Atualizar status do documento no Firebase Realtime Database
         const reviewData = {
-          status: action === 'approve' ? 'approved' : 'rejected',
-          reviewedAt: new Date().toISOString(),
+          status: nextStatus,
+          reviewedAt: reviewAtIso,
           reviewedBy: reviewedBy, // ✅ ID do admin logado
           reviewedByEmail: req.user.email, // ✅ Email do admin para auditoria
-          updatedAt: new Date().toISOString()
+          updatedAt: reviewAtIso
         };
 
         if (action === 'reject') {
@@ -480,6 +807,31 @@ router.post('/api/drivers/:driverId/documents/:documentType/review', authenticat
 
         // ✅ Salvar alteração no Firebase Realtime Database
         await documentRef.update(reviewData);
+
+        // Índice denormalizado para consultas rápidas por tipo/status.
+        const statusIndexPath = `driver_documents_index/${normalizedDocumentType}`;
+        const statusBuckets = ['pending', 'approved', 'rejected'];
+        const indexUpdates = {};
+        statusBuckets.forEach((bucket) => {
+          indexUpdates[`${statusIndexPath}/${bucket}/${driverId}`] = null;
+        });
+        indexUpdates[`${statusIndexPath}/${nextStatus}/${driverId}`] = {
+          driverId,
+          documentType: normalizedDocumentType,
+          status: nextStatus,
+          uploadedAt: existingDocument.uploadedAt || null,
+          reviewedAt: reviewAtIso,
+          updatedAt: reviewAtIso,
+          fileName: existingDocument.fileName || null,
+          fileType: existingDocument.fileType || null
+        };
+        await db.ref().update(indexUpdates);
+        await adjustDocumentIndexCounters(
+          db,
+          normalizedDocumentType,
+          existingDocument.status || null,
+          nextStatus
+        );
 
         // ✅ Atualizar também o status geral do motorista se todos os documentos estiverem aprovados
         if (action === 'approve') {
@@ -496,14 +848,14 @@ router.post('/api/drivers/:driverId/documents/:documentType/review', authenticat
           }
         }
 
-        logStructured('info', `✅ Documento ${documentType} do motorista ${driverId} ${action === 'approve' ? 'aprovado' : 'rejeitado'} por ${req.user.email} (${reviewedBy})`, { service: 'dashboard-routes' });
+        logStructured('info', `✅ Documento ${normalizedDocumentType} do motorista ${driverId} ${action === 'approve' ? 'aprovado' : 'rejeitado'} por ${req.user.email} (${reviewedBy})`, { service: 'dashboard-routes' });
 
         res.json({
           success: true,
           message: `Documento ${action === 'approve' ? 'aprovado' : 'rejeitado'} com sucesso!`,
           data: {
             driverId,
-            documentType,
+            documentType: normalizedDocumentType,
             action,
             reviewedAt: reviewData.reviewedAt
           }
@@ -559,14 +911,58 @@ router.get('/api/drivers/:driverId/documents', authenticateJWT, requireRole(['ad
         const userSnapshot = await userRef.once('value');
         const userData = userSnapshot.val() || {};
 
+        // Buscar avaliações do motorista (destino das avaliações de passageiro)
+        const userRatingsRef = db.ref(`user_ratings/${driverId}`);
+        const userRatingsSnapshot = await userRatingsRef.once('value');
+        const rawUserRatings = userRatingsSnapshot.val() || {};
+
+        const userRatings = Object.entries(rawUserRatings)
+          .map(([ratingId, ratingData]) => {
+            const parsedRating = parseRatingValue(ratingData?.rating);
+            if (parsedRating == null) return null;
+            return {
+              id: ratingData?.id || ratingId,
+              tripId: ratingData?.tripId || null,
+              reviewerId: ratingData?.reviewerId || null,
+              reviewerType: ratingData?.reviewerType || null,
+              rating: parsedRating,
+              comment: String(ratingData?.comment || '').trim(),
+              createdAt: ratingData?.createdAt || null
+            };
+          })
+          .filter(Boolean)
+          .sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
+
+        const ratingCount = userRatings.length;
+        const ratingAverageFromReviews = ratingCount > 0
+          ? userRatings.reduce((sum, item) => sum + Number(item.rating || 0), 0) / ratingCount
+          : null;
+        const fallbackRating = parseRatingValue(userData.driverRating || userData.rating);
+        const resolvedRating = ratingAverageFromReviews != null ? ratingAverageFromReviews : fallbackRating;
+
+        const latestNegativeReviews = userRatings
+          .filter((item) => Number(item.rating) <= 3 && item.comment.length > 0)
+          .slice(0, 10);
+
         // Buscar estrutura de veículos do motorista (legado + atual)
         const userVehiclesRef = db.ref(`user_vehicles/${driverId}`);
         const userVehiclesSnapshot = await userVehiclesRef.once('value');
         const userVehiclesRaw = userVehiclesSnapshot.val() || {};
 
-        const vehiclesRef = db.ref('vehicles');
-        const vehiclesSnapshot = await vehiclesRef.once('value');
-        const vehiclesRaw = vehiclesSnapshot.val() || {};
+        const linkedVehicleIds = [...new Set(
+          Object.values(userVehiclesRaw)
+            .map((entry) => entry?.vehicleId)
+            .filter(Boolean)
+            .map((value) => String(value))
+        )];
+        const vehicleSnapshots = await Promise.all(
+          linkedVehicleIds.map((vehicleId) => db.ref(`vehicles/${vehicleId}`).once('value'))
+        );
+        const vehiclesRaw = {};
+        vehicleSnapshots.forEach((snapshot, index) => {
+          if (!snapshot?.exists()) return;
+          vehiclesRaw[linkedVehicleIds[index]] = snapshot.val() || {};
+        });
 
         const userVehicleEntries = Object.keys(userVehiclesRaw).map((userVehicleId) => {
           const userVehicle = userVehiclesRaw[userVehicleId] || {};
@@ -603,6 +999,7 @@ router.get('/api/drivers/:driverId/documents', authenticateJWT, requireRole(['ad
           (userData.kycBlocked === true ? 'blocked' : null) ||
           'not_started';
         const kycPayload = userData.kycOnboarding || {};
+        const driverIdentity = resolveDriverIdentityData(userData, documents);
 
         res.json({
           success: true,
@@ -612,8 +1009,21 @@ router.get('/api/drivers/:driverId/documents', authenticateJWT, requireRole(['ad
               name: `${userData.firstName || ''} ${userData.lastName || ''}`.trim(),
               email: userData.email || '',
               phone: userData.mobile || '',
+              cpf: userData.cpf || userData.document || userData.documentNumber || '',
+              birthDate: driverIdentity.birthDate,
+              motherName: driverIdentity.motherName,
+              gender: driverIdentity.gender,
+              genderLabel: driverIdentity.genderLabel,
+              registrationDate: userData.createdAt ? new Date(userData.createdAt).toISOString() : null,
+              rating: resolvedRating != null ? Number(resolvedRating).toFixed(1) : null,
+              ratingCount,
               approved: userData.approved === true,
               status: userData.status || (userData.approved === true ? 'approved' : 'pending')
+            },
+            ratingInsights: {
+              averageRating: resolvedRating != null ? Number(resolvedRating).toFixed(1) : null,
+              totalRatings: ratingCount,
+              latestNegativeReviews
             },
             kyc: {
               status: normalizedKycStatus,
@@ -655,6 +1065,532 @@ router.get('/api/drivers/:driverId/documents', authenticateJWT, requireRole(['ad
   }
 });
 
+function sanitizeDocumentType(value) {
+  return String(value || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9_\-]/g, '_')
+    .replace(/_+/g, '_');
+}
+
+function sanitizeFilename(value) {
+  return String(value || 'documento')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-zA-Z0-9._-]/g, '_')
+    .replace(/_+/g, '_');
+}
+
+const REVIEWABLE_DOCUMENT_TYPES = ['cnh', 'crlv', 'antecedentes_criminais'];
+const REVIEWABLE_DOCUMENT_STATUSES = ['pending', 'approved', 'rejected'];
+const REVIEWABLE_DOCUMENT_SORT_FIELDS = ['uploadedAt', 'updatedAt', 'reviewedAt'];
+
+function normalizeQueueStatus(value) {
+  const normalized = String(value || 'pending').trim().toLowerCase();
+  if (normalized === 'all') return 'all';
+  return REVIEWABLE_DOCUMENT_STATUSES.includes(normalized) ? normalized : 'pending';
+}
+
+function normalizeQueueSortField(value) {
+  const normalized = String(value || 'uploadedAt').trim();
+  return REVIEWABLE_DOCUMENT_SORT_FIELDS.includes(normalized) ? normalized : 'uploadedAt';
+}
+
+function normalizeQueueSortOrder(value) {
+  const normalized = String(value || 'desc').trim().toLowerCase();
+  return normalized === 'asc' ? 'asc' : 'desc';
+}
+
+function parseTimestampValue(value) {
+  if (!value) return 0;
+  if (typeof value === 'number') return Number.isFinite(value) ? value : 0;
+  const parsed = new Date(value).getTime();
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function normalizeIndexStatus(value) {
+  const normalized = String(value || '').trim().toLowerCase();
+  return REVIEWABLE_DOCUMENT_STATUSES.includes(normalized) ? normalized : null;
+}
+
+async function adjustDocumentIndexCounters(db, documentType, previousStatus, nextStatus) {
+  const safeDocumentType = sanitizeDocumentType(documentType);
+  if (!safeDocumentType) return;
+
+  const fromStatus = normalizeIndexStatus(previousStatus);
+  const toStatus = normalizeIndexStatus(nextStatus);
+
+  if (!fromStatus && !toStatus) return;
+  if (fromStatus === toStatus) return;
+
+  const deltas = {};
+  if (fromStatus) deltas[fromStatus] = (deltas[fromStatus] || 0) - 1;
+  if (toStatus) deltas[toStatus] = (deltas[toStatus] || 0) + 1;
+
+  await Promise.all(
+    Object.entries(deltas).map(([status, delta]) =>
+      db.ref(`driver_documents_index_stats/${safeDocumentType}/${status}`).transaction((current) => {
+        const currentNumber = Number.parseInt(current, 10);
+        const safeCurrent = Number.isFinite(currentNumber) ? currentNumber : 0;
+        const nextValue = safeCurrent + delta;
+        return nextValue > 0 ? nextValue : 0;
+      })
+    )
+  );
+}
+
+// 📚 Fila de revisão de documentos usando índice denormalizado
+router.get(
+  '/api/drivers/documents/review-queue',
+  authenticateJWT,
+  requireRole(['admin', 'super-admin', 'manager']),
+  async (req, res) => {
+    try {
+      if (!firebaseConfig || !firebaseConfig.getRealtimeDB) {
+        return res.status(503).json({
+          success: false,
+          message: 'Firebase não configurado.'
+        });
+      }
+
+      const db = firebaseConfig.getRealtimeDB();
+      const {
+        documentType = 'all',
+        status = 'pending',
+        search = '',
+        page = 1,
+        limit = 25,
+        sortBy = 'uploadedAt',
+        sortOrder = 'desc'
+      } = req.query;
+
+      const safePage = Math.max(1, Number.parseInt(page, 10) || 1);
+      const safeLimit = Math.min(100, Math.max(1, Number.parseInt(limit, 10) || 25));
+      const safeStatus = normalizeQueueStatus(status);
+      const safeSortBy = normalizeQueueSortField(sortBy);
+      const safeSortOrder = normalizeQueueSortOrder(sortOrder);
+      const searchText = String(search || '').trim().toLowerCase();
+
+      let selectedTypes = [];
+      if (String(documentType || '').toLowerCase() === 'all') {
+        selectedTypes = [...REVIEWABLE_DOCUMENT_TYPES];
+      } else {
+        selectedTypes = [sanitizeDocumentType(documentType)].filter(Boolean);
+      }
+
+      selectedTypes = [...new Set(selectedTypes)].filter((type) =>
+        REVIEWABLE_DOCUMENT_TYPES.includes(type)
+      );
+      if (selectedTypes.length === 0) {
+        selectedTypes = [...REVIEWABLE_DOCUMENT_TYPES];
+      }
+
+      const selectedStatuses = safeStatus === 'all'
+        ? [...REVIEWABLE_DOCUMENT_STATUSES]
+        : [safeStatus];
+
+      const counterSnapshots = await Promise.all(
+        selectedTypes.flatMap((type) =>
+          REVIEWABLE_DOCUMENT_STATUSES.map((statusKey) =>
+            db.ref(`driver_documents_index_stats/${type}/${statusKey}`).once('value')
+              .then((snapshot) => ({
+                type,
+                status: statusKey,
+                count: Number.parseInt(snapshot.val(), 10) || 0
+              }))
+          )
+        )
+      );
+      const countersByType = {};
+      selectedTypes.forEach((type) => {
+        countersByType[type] = { pending: 0, approved: 0, rejected: 0 };
+      });
+      counterSnapshots.forEach(({ type, status, count }) => {
+        if (!countersByType[type]) {
+          countersByType[type] = { pending: 0, approved: 0, rejected: 0 };
+        }
+        countersByType[type][status] = count;
+      });
+
+      const summaryFromCounters = selectedTypes.reduce(
+        (acc, type) => {
+          const source = countersByType[type] || {};
+          acc.byStatus.pending += Number(source.pending || 0);
+          acc.byStatus.approved += Number(source.approved || 0);
+          acc.byStatus.rejected += Number(source.rejected || 0);
+          return acc;
+        },
+        {
+          total: 0,
+          byStatus: {
+            pending: 0,
+            approved: 0,
+            rejected: 0
+          }
+        }
+      );
+      summaryFromCounters.total =
+        summaryFromCounters.byStatus.pending +
+        summaryFromCounters.byStatus.approved +
+        summaryFromCounters.byStatus.rejected;
+
+      // Busca incremental no índice para evitar scans grandes.
+      const prefetchSize = Math.min(
+        10000,
+        safePage * safeLimit + (searchText ? 1000 : 500)
+      );
+
+      const indexQueries = [];
+      selectedTypes.forEach((type) => {
+        selectedStatuses.forEach((statusKey) => {
+          indexQueries.push(
+            db
+              .ref(`driver_documents_index/${type}/${statusKey}`)
+              .orderByChild(safeSortBy)
+              .limitToLast(prefetchSize)
+              .once('value')
+              .then((snapshot) => ({ type, status: statusKey, snapshot }))
+          );
+        });
+      });
+
+      const indexResults = await Promise.all(indexQueries);
+      const queueItems = [];
+
+      indexResults.forEach(({ type, status, snapshot }) => {
+        const raw = snapshot?.val() || {};
+        Object.entries(raw).forEach(([driverId, payload]) => {
+          const item = payload && typeof payload === 'object' ? payload : {};
+          queueItems.push({
+            driverId,
+            documentType: type,
+            status,
+            fileName: item.fileName || null,
+            fileType: item.fileType || null,
+            uploadedAt: item.uploadedAt || null,
+            updatedAt: item.updatedAt || null,
+            reviewedAt: item.reviewedAt || null
+          });
+        });
+      });
+
+      if (queueItems.length === 0) {
+        return res.json({
+          success: true,
+          data: {
+            items: [],
+            pagination: {
+              page: safePage,
+              limit: safeLimit,
+              total: 0,
+              pages: 0
+            },
+            filters: {
+              documentType: selectedTypes.length === REVIEWABLE_DOCUMENT_TYPES.length ? 'all' : selectedTypes[0],
+              status: safeStatus,
+              sortBy: safeSortBy,
+              sortOrder: safeSortOrder,
+              search: searchText
+            },
+            summary: {
+              total: 0,
+              byStatus: {
+                pending: 0,
+                approved: 0,
+                rejected: 0
+              }
+            }
+          }
+        });
+      }
+
+      const uniqueDriverIds = [...new Set(queueItems.map((item) => item.driverId))];
+      const userSnapshots = await Promise.all(
+        uniqueDriverIds.map((driverId) => db.ref(`users/${driverId}`).once('value'))
+      );
+      const usersById = {};
+      uniqueDriverIds.forEach((driverId, index) => {
+        usersById[driverId] = userSnapshots[index]?.val() || {};
+      });
+
+      const enriched = queueItems.map((item) => {
+        const user = usersById[item.driverId] || {};
+        const name = `${user.firstName || ''} ${user.lastName || ''}`.trim();
+        const statusValue = String(item.status || '').toLowerCase();
+        return {
+          ...item,
+          sortTs: parseTimestampValue(item[safeSortBy]),
+          driver: {
+            id: item.driverId,
+            name: name || user.name || '-',
+            email: user.email || '',
+            phone: user.mobile || '',
+            cpf: user.cpf || user.document || user.documentNumber || '',
+            approved: user.approved === true,
+            status: user.status || (user.approved === true ? 'approved' : 'pending')
+          },
+          status: REVIEWABLE_DOCUMENT_STATUSES.includes(statusValue) ? statusValue : 'pending'
+        };
+      });
+
+      const filtered = searchText
+        ? enriched.filter((item) => {
+            const candidate = [
+              item.driverId,
+              item.driver?.name,
+              item.driver?.email,
+              item.driver?.phone,
+              item.driver?.cpf,
+              item.documentType
+            ]
+              .map((value) => String(value || '').toLowerCase())
+              .join(' ');
+            return candidate.includes(searchText);
+          })
+        : enriched;
+
+      filtered.sort((a, b) => {
+        const tsCompare = a.sortTs - b.sortTs;
+        if (tsCompare !== 0) {
+          return safeSortOrder === 'asc' ? tsCompare : -tsCompare;
+        }
+        const aId = `${a.driverId}:${a.documentType}:${a.status}`;
+        const bId = `${b.driverId}:${b.documentType}:${b.status}`;
+        return aId.localeCompare(bId);
+      });
+
+      const summary = filtered.reduce(
+        (acc, item) => {
+          acc.total += 1;
+          const key = REVIEWABLE_DOCUMENT_STATUSES.includes(item.status) ? item.status : 'pending';
+          acc.byStatus[key] += 1;
+          return acc;
+        },
+        {
+          total: 0,
+          byStatus: {
+            pending: 0,
+            approved: 0,
+            rejected: 0
+          }
+        }
+      );
+
+      const offset = (safePage - 1) * safeLimit;
+      const paged = filtered.slice(offset, offset + safeLimit);
+      const totalForPagination = searchText
+        ? filtered.length
+        : Math.max(
+          filtered.length,
+          safeStatus === 'all'
+            ? Number(summaryFromCounters.total || 0)
+            : Number(summaryFromCounters.byStatus[safeStatus] || 0)
+        );
+      const pages = Math.ceil(totalForPagination / safeLimit);
+
+      const docSnapshots = await Promise.all(
+        paged.map((item) =>
+          db.ref(`users/${item.driverId}/documents/${item.documentType}`).once('value')
+        )
+      );
+      const items = paged.map((item, index) => {
+        const doc = docSnapshots[index]?.val() || {};
+        return {
+          driverId: item.driverId,
+          driver: item.driver,
+          documentType: item.documentType,
+          status: item.status,
+          fileName: item.fileName || doc.fileName || null,
+          fileType: item.fileType || doc.fileType || null,
+          uploadedAt: item.uploadedAt || doc.uploadedAt || null,
+          updatedAt: item.updatedAt || doc.updatedAt || null,
+          reviewedAt: item.reviewedAt || doc.reviewedAt || null,
+          rejectionReason: doc.rejectionReason || null,
+          fileUrl: doc.fileUrl || null
+        };
+      });
+
+      return res.json({
+        success: true,
+        data: {
+          items,
+          pagination: {
+            page: safePage,
+            limit: safeLimit,
+            total: totalForPagination,
+            pages
+          },
+          filters: {
+            documentType: selectedTypes.length === REVIEWABLE_DOCUMENT_TYPES.length ? 'all' : selectedTypes[0],
+            status: safeStatus,
+            sortBy: safeSortBy,
+            sortOrder: safeSortOrder,
+            search: searchText
+          },
+          summary: searchText || summaryFromCounters.total === 0 ? summary : summaryFromCounters
+        }
+      });
+    } catch (error) {
+      logError(error, 'Erro ao buscar fila de revisão de documentos', { service: 'dashboard-routes' });
+      return res.status(500).json({
+        success: false,
+        message: `Erro ao buscar fila de revisão: ${error.message}`
+      });
+    }
+  }
+);
+
+// 📎 Upload de documento pelo dashboard (ex.: certidão de antecedentes)
+router.post(
+  '/api/drivers/:driverId/documents/:documentType/upload',
+  authenticateJWT,
+  requireRole(['admin', 'super-admin', 'manager']),
+  (req, res, next) => {
+    adminDocumentUpload.single('file')(req, res, (err) => {
+      if (err) {
+        return res.status(400).json({
+          success: false,
+          message: err.message || 'Falha ao receber arquivo'
+        });
+      }
+      return next();
+    });
+  },
+  async (req, res) => {
+    try {
+      const { driverId } = req.params;
+      const documentType = sanitizeDocumentType(req.params.documentType);
+
+      if (!driverId || !documentType) {
+        return res.status(400).json({
+          success: false,
+          message: 'driverId e documentType são obrigatórios.'
+        });
+      }
+
+      if (!req.file) {
+        return res.status(400).json({
+          success: false,
+          message: 'Arquivo é obrigatório.'
+        });
+      }
+
+      if (!firebaseConfig || !firebaseConfig.getRealtimeDB) {
+        return res.status(503).json({
+          success: false,
+          message: 'Firebase não configurado.'
+        });
+      }
+
+      const db = firebaseConfig.getRealtimeDB();
+      const userSnapshot = await db.ref(`users/${driverId}`).once('value');
+      if (!userSnapshot.exists()) {
+        return res.status(404).json({
+          success: false,
+          message: 'Motorista não encontrado.'
+        });
+      }
+
+      const requestedMime = String(req.file.mimetype || '').toLowerCase();
+      if (documentType === 'antecedentes_criminais' && requestedMime !== 'application/pdf') {
+        return res.status(400).json({
+          success: false,
+          message: 'A certidão de antecedentes deve ser enviada em PDF.'
+        });
+      }
+
+      const nowIso = new Date().toISOString();
+      const bucketName = process.env.FIREBASE_STORAGE_BUCKET || 'leaf-reactnative.firebasestorage.app';
+      const bucket = admin.storage().bucket(bucketName);
+      const fileName = sanitizeFilename(req.file.originalname || `${documentType}.pdf`);
+      const extension = path.extname(fileName) || (requestedMime === 'application/pdf' ? '.pdf' : '');
+      const objectPath = `documents/${driverId}/${documentType}/${Date.now()}_${fileName.replace(extension, '')}${extension}`;
+      const storageFile = bucket.file(objectPath);
+
+      await storageFile.save(req.file.buffer, {
+        resumable: false,
+        metadata: {
+          contentType: req.file.mimetype,
+          metadata: {
+            uploadedBy: String(req.user?.id || ''),
+            uploadedByEmail: String(req.user?.email || ''),
+            documentType,
+            driverId
+          }
+        }
+      });
+
+      const [signedUrl] = await storageFile.getSignedUrl({
+        action: 'read',
+        expires: '2035-01-01'
+      });
+
+      const documentPayload = {
+        type: documentType,
+        status: 'pending',
+        fileUrl: signedUrl,
+        filePath: objectPath,
+        fileType: req.file.mimetype,
+        fileName,
+        fileSize: Number(req.file.size || 0),
+        uploadedAt: nowIso,
+        uploadedBy: String(req.user?.id || ''),
+        uploadedByEmail: String(req.user?.email || ''),
+        updatedAt: nowIso
+      };
+
+      const documentPath = `users/${driverId}/documents/${documentType}`;
+      const previousDocumentSnapshot = await db.ref(documentPath).once('value');
+      const previousDocument = previousDocumentSnapshot.val() || {};
+      const previousStatus = previousDocument?.status || null;
+      const statusIndexPath = `driver_documents_index/${documentType}`;
+      const indexPayload = {
+        driverId,
+        documentType,
+        status: 'pending',
+        uploadedAt: nowIso,
+        reviewedAt: null,
+        updatedAt: nowIso,
+        fileName,
+        fileType: req.file.mimetype
+      };
+
+      await db.ref().update({
+        [documentPath]: documentPayload,
+        [`${statusIndexPath}/pending/${driverId}`]: indexPayload,
+        [`${statusIndexPath}/approved/${driverId}`]: null,
+        [`${statusIndexPath}/rejected/${driverId}`]: null
+      });
+      await adjustDocumentIndexCounters(db, documentType, previousStatus, 'pending');
+
+      logStructured('info', 'Documento enviado via dashboard', {
+        service: 'dashboard-routes',
+        driverId,
+        documentType,
+        uploadedBy: req.user?.email || req.user?.id || 'admin',
+        fileSize: documentPayload.fileSize
+      });
+
+      return res.json({
+        success: true,
+        message: 'Documento enviado com sucesso.',
+        data: {
+          driverId,
+          documentType,
+          fileUrl: signedUrl,
+          status: 'pending'
+        }
+      });
+    } catch (error) {
+      logError(error, 'Erro ao fazer upload de documento no dashboard', { service: 'dashboard-routes' });
+      return res.status(500).json({
+        success: false,
+        message: `Erro ao enviar documento: ${error.message}`
+      });
+    }
+  }
+);
+
 // 🚗 Atualizar configuração manual de veículo/categoria do motorista
 // ✅ Protegido com autenticação JWT e permissão de admin
 router.post('/api/drivers/:driverId/vehicle/config', authenticateJWT, requireRole(['admin', 'super-admin', 'manager']), async (req, res) => {
@@ -676,10 +1612,10 @@ router.post('/api/drivers/:driverId/vehicle/config', authenticateJWT, requireRol
     }
 
     const normalizedCategory = category ? String(category).trim().toLowerCase() : null;
-    if (normalizedCategory && !['plus', 'elite'].includes(normalizedCategory)) {
+    if (normalizedCategory && !['plus', 'elite', 'moto'].includes(normalizedCategory)) {
       return res.status(400).json({
         success: false,
-        message: 'Categoria inválida. Use plus ou elite.'
+        message: 'Categoria inválida. Use plus, elite ou moto.'
       });
     }
 
@@ -716,38 +1652,152 @@ router.post('/api/drivers/:driverId/vehicle/config', authenticateJWT, requireRol
       });
     }
 
+    const selectedVehicleId = selected.vehicleId || null;
+    const nowIso = new Date().toISOString();
+    if (setActive !== false && !selectedVehicleId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Não é possível ativar vínculo sem vehicleId associado.'
+      });
+    }
+
+    const releaseVehicleLockForDriver = async (vehicleId) => {
+      if (!vehicleId) return;
+      const lockRef = db.ref(`vehicle_active_assignment/${vehicleId}`);
+      await lockRef.transaction((current) => {
+        if (!current) return current;
+        const currentUserId = String(current.userId || current.driverId || '');
+        if (currentUserId !== String(driverId)) return current;
+        return null;
+      });
+    };
+
+    const acquireVehicleLockForDriver = async (vehicleId) => {
+      if (!vehicleId) return { ok: false, conflict: null };
+      const lockRef = db.ref(`vehicle_active_assignment/${vehicleId}`);
+      const lockPayload = {
+        userId: driverId,
+        driverId,
+        vehicleId,
+        userVehicleId,
+        source: 'dashboard_admin',
+        assignedAt: nowIso,
+        updatedAt: nowIso
+      };
+
+      const tx = await lockRef.transaction((current) => {
+        if (!current) return lockPayload;
+        const currentUserId = String(current.userId || current.driverId || '');
+        if (currentUserId === String(driverId)) {
+          return {
+            ...current,
+            ...lockPayload,
+            assignedAt: current.assignedAt || nowIso
+          };
+        }
+        return;
+      });
+
+      if (!tx.committed) {
+        return {
+          ok: false,
+          conflict: tx?.snapshot?.val() || null
+        };
+      }
+
+      return {
+        ok: true,
+        conflict: null
+      };
+    };
+
+    const lockAffectedVehicleIds = new Set();
+    const currentlyActiveVehicleIds = [...new Set(
+      Object.values(userVehicles)
+        .filter((item) => item?.isActive === true && item?.vehicleId)
+        .map((item) => String(item.vehicleId))
+    )];
+
+    for (const activeVehicleId of currentlyActiveVehicleIds) {
+      if (setActive !== false && selectedVehicleId && String(activeVehicleId) === String(selectedVehicleId)) {
+        continue;
+      }
+      lockAffectedVehicleIds.add(String(activeVehicleId));
+      await releaseVehicleLockForDriver(String(activeVehicleId));
+    }
+
+    if (selectedVehicleId) {
+      lockAffectedVehicleIds.add(String(selectedVehicleId));
+      if (setActive !== false) {
+        const acquireResult = await acquireVehicleLockForDriver(String(selectedVehicleId));
+        if (!acquireResult.ok) {
+          const conflictUserId = acquireResult?.conflict?.userId || acquireResult?.conflict?.driverId || null;
+          return res.status(409).json({
+            success: false,
+            code: 'VEHICLE_ALREADY_ACTIVE',
+            message: conflictUserId
+              ? `Este veículo já está ativo no perfil ${conflictUserId}.`
+              : 'Este veículo já está ativo em outro perfil.',
+            data: {
+              vehicleId: selectedVehicleId,
+              conflict: acquireResult?.conflict || null
+            }
+          });
+        }
+      } else {
+        await releaseVehicleLockForDriver(String(selectedVehicleId));
+      }
+    }
+
     const updates = {};
     Object.keys(userVehicles).forEach((id) => {
       updates[`user_vehicles/${driverId}/${id}/isActive`] = false;
-      updates[`user_vehicles/${driverId}/${id}/updatedAt`] = new Date().toISOString();
+      updates[`user_vehicles/${driverId}/${id}/updatedAt`] = nowIso;
     });
 
     updates[`user_vehicles/${driverId}/${userVehicleId}/isActive`] = setActive !== false;
-    updates[`user_vehicles/${driverId}/${userVehicleId}/updatedAt`] = new Date().toISOString();
+    updates[`user_vehicles/${driverId}/${userVehicleId}/updatedAt`] = nowIso;
+    updates[`users/${driverId}/activeVehicleId`] = setActive !== false ? (selectedVehicleId || '') : '';
+    updates[`users/${driverId}/updatedAt`] = nowIso;
 
     if (vehicleStatus) {
       const nextStatus = String(vehicleStatus).toLowerCase();
       updates[`user_vehicles/${driverId}/${userVehicleId}/status`] = nextStatus;
       updates[`user_vehicles/${driverId}/${userVehicleId}/approved`] = ['approved', 'active'].includes(nextStatus);
-      updates[`user_vehicles/${driverId}/${userVehicleId}/reviewedAt`] = new Date().toISOString();
+      updates[`user_vehicles/${driverId}/${userVehicleId}/reviewedAt`] = nowIso;
       updates[`user_vehicles/${driverId}/${userVehicleId}/reviewedBy`] = req.user.id;
     }
 
     if (normalizedCategory) {
-      const categoryLabel = normalizedCategory === 'elite' ? 'Leaf Elite' : 'Leaf Plus';
+      const categoryLabel = normalizedCategory === 'elite'
+        ? 'Leaf Elite'
+        : normalizedCategory === 'moto'
+          ? 'Leaf Moto'
+          : 'Leaf Plus';
       if (selected.vehicleId) {
         updates[`vehicles/${selected.vehicleId}/manualCategory`] = normalizedCategory;
         updates[`vehicles/${selected.vehicleId}/carType`] = categoryLabel;
         updates[`vehicles/${selected.vehicleId}/category`] = normalizedCategory;
-        updates[`vehicles/${selected.vehicleId}/updatedAt`] = new Date().toISOString();
+        updates[`vehicles/${selected.vehicleId}/updatedAt`] = nowIso;
       }
       updates[`users/${driverId}/carType`] = categoryLabel;
-      updates[`users/${driverId}/updatedAt`] = new Date().toISOString();
+      updates[`users/${driverId}/updatedAt`] = nowIso;
     }
 
     if (typeof acceptPlusWithElite === 'boolean') {
       updates[`users/${driverId}/acceptPlusWithElite`] = acceptPlusWithElite;
-      updates[`users/${driverId}/updatedAt`] = new Date().toISOString();
+      updates[`users/${driverId}/updatedAt`] = nowIso;
+    }
+
+    const lockIds = [...lockAffectedVehicleIds];
+    for (const lockVehicleId of lockIds) {
+      const assignmentSnapshot = await db.ref(`vehicle_active_assignment/${lockVehicleId}`).once('value');
+      const assignment = assignmentSnapshot.val() || null;
+      const assignedUserId = assignment ? (assignment.userId || assignment.driverId || null) : null;
+      updates[`vehicles/${lockVehicleId}/activeDriverId`] = assignedUserId;
+      updates[`vehicles/${lockVehicleId}/activeUserVehicleId`] = assignment?.userVehicleId || null;
+      updates[`vehicles/${lockVehicleId}/isInUseByDriver`] = Boolean(assignedUserId);
+      updates[`vehicles/${lockVehicleId}/updatedAt`] = nowIso;
     }
 
     await db.ref().update(updates);
@@ -763,17 +1813,23 @@ router.post('/api/drivers/:driverId/vehicle/config', authenticateJWT, requireRol
       const resolvedCategory = normalizedCategory ||
         selectedVehicleData.manualCategory ||
         selectedVehicleData.category ||
-        (String(userData.carType || '').toLowerCase().includes('elite') ? 'elite' : 'plus');
+        (
+          String(userData.carType || '').toLowerCase().includes('elite')
+            ? 'elite'
+            : String(userData.carType || '').toLowerCase().includes('moto')
+              ? 'moto'
+              : 'plus'
+        );
 
       await redis.hset(`driver:${driverId}`, {
-        carType: resolvedCategory === 'elite' ? 'Leaf Elite' : 'Leaf Plus',
+        carType: resolvedCategory === 'elite' ? 'Leaf Elite' : resolvedCategory === 'moto' ? 'Leaf Moto' : 'Leaf Plus',
         vehicleCategory: resolvedCategory,
         vehicleNumber: plate,
         acceptsPlusWithElite: String(userData.acceptPlusWithElite === true || acceptPlusWithElite === true),
-        activeVehicleId: selected.vehicleId || '',
+        activeVehicleId: setActive !== false ? (selected.vehicleId || '') : '',
         driverApproved: String(userData.approved === true),
         vehicleApproved: String((selected.status || '') === 'approved' || selected.approved === true),
-        lastVehicleConfigUpdate: new Date().toISOString()
+        lastVehicleConfigUpdate: nowIso
       });
       await redis.del(`driver_eligibility_profile:${driverId}`);
     } catch (redisSyncError) {
@@ -849,13 +1905,41 @@ router.post('/api/drivers/applications/:id/approve', authenticateJWT, requireRol
         const documentsSnapshot = await db.ref(`users/${id}/documents`).once('value');
         const documents = documentsSnapshot.val() || {};
         const documentUpdates = {};
+        const counterTransitions = [];
+        const reviewedAtIso = new Date().toISOString();
         Object.keys(documents).forEach(docType => {
-          documentUpdates[`users/${id}/documents/${docType}/status`] = 'approved';
-          documentUpdates[`users/${id}/documents/${docType}/reviewedAt`] = new Date().toISOString();
-          documentUpdates[`users/${id}/documents/${docType}/reviewedBy`] = adminId;
+          const normalizedDocType = sanitizeDocumentType(docType);
+          if (!normalizedDocType) return;
+          const existingDoc = documents[docType] || {};
+          const previousStatus = existingDoc.status || null;
+          documentUpdates[`users/${id}/documents/${normalizedDocType}/status`] = 'approved';
+          documentUpdates[`users/${id}/documents/${normalizedDocType}/reviewedAt`] = reviewedAtIso;
+          documentUpdates[`users/${id}/documents/${normalizedDocType}/reviewedBy`] = adminId;
+          documentUpdates[`users/${id}/documents/${normalizedDocType}/updatedAt`] = reviewedAtIso;
+          documentUpdates[`users/${id}/documents/${normalizedDocType}/rejectionReason`] = null;
+          documentUpdates[`driver_documents_index/${normalizedDocType}/pending/${id}`] = null;
+          documentUpdates[`driver_documents_index/${normalizedDocType}/rejected/${id}`] = null;
+          documentUpdates[`driver_documents_index/${normalizedDocType}/approved/${id}`] = {
+            driverId: id,
+            documentType: normalizedDocType,
+            status: 'approved',
+            uploadedAt: existingDoc.uploadedAt || null,
+            reviewedAt: reviewedAtIso,
+            updatedAt: reviewedAtIso,
+            fileName: existingDoc.fileName || null,
+            fileType: existingDoc.fileType || null
+          };
+          counterTransitions.push({ documentType: normalizedDocType, previousStatus, nextStatus: 'approved' });
         });
         if (Object.keys(documentUpdates).length > 0) {
           await db.ref().update(documentUpdates);
+          if (counterTransitions.length > 0) {
+            await Promise.all(
+              counterTransitions.map((entry) =>
+                adjustDocumentIndexCounters(db, entry.documentType, entry.previousStatus, entry.nextStatus)
+              )
+            );
+          }
         }
 
         // Melhor esforço: liberar bloqueio KYC para refletir aprovação manual.
@@ -941,14 +2025,41 @@ router.post('/api/drivers/applications/:id/reject', authenticateJWT, requireRole
         const documentsSnapshot = await db.ref(`users/${id}/documents`).once('value');
         const documents = documentsSnapshot.val() || {};
         const documentUpdates = {};
+        const counterTransitions = [];
+        const reviewedAtIso = new Date().toISOString();
         Object.keys(documents).forEach(docType => {
-          documentUpdates[`users/${id}/documents/${docType}/status`] = 'rejected';
-          documentUpdates[`users/${id}/documents/${docType}/reviewedAt`] = new Date().toISOString();
-          documentUpdates[`users/${id}/documents/${docType}/reviewedBy`] = adminId;
-          documentUpdates[`users/${id}/documents/${docType}/rejectionReason`] = rejectionReasons?.join(', ') || 'Aplicação rejeitada';
+          const normalizedDocType = sanitizeDocumentType(docType);
+          if (!normalizedDocType) return;
+          const existingDoc = documents[docType] || {};
+          const previousStatus = existingDoc.status || null;
+          documentUpdates[`users/${id}/documents/${normalizedDocType}/status`] = 'rejected';
+          documentUpdates[`users/${id}/documents/${normalizedDocType}/reviewedAt`] = reviewedAtIso;
+          documentUpdates[`users/${id}/documents/${normalizedDocType}/reviewedBy`] = adminId;
+          documentUpdates[`users/${id}/documents/${normalizedDocType}/updatedAt`] = reviewedAtIso;
+          documentUpdates[`users/${id}/documents/${normalizedDocType}/rejectionReason`] = rejectionReasons?.join(', ') || 'Aplicação rejeitada';
+          documentUpdates[`driver_documents_index/${normalizedDocType}/pending/${id}`] = null;
+          documentUpdates[`driver_documents_index/${normalizedDocType}/approved/${id}`] = null;
+          documentUpdates[`driver_documents_index/${normalizedDocType}/rejected/${id}`] = {
+            driverId: id,
+            documentType: normalizedDocType,
+            status: 'rejected',
+            uploadedAt: existingDoc.uploadedAt || null,
+            reviewedAt: reviewedAtIso,
+            updatedAt: reviewedAtIso,
+            fileName: existingDoc.fileName || null,
+            fileType: existingDoc.fileType || null
+          };
+          counterTransitions.push({ documentType: normalizedDocType, previousStatus, nextStatus: 'rejected' });
         });
         if (Object.keys(documentUpdates).length > 0) {
           await db.ref().update(documentUpdates);
+          if (counterTransitions.length > 0) {
+            await Promise.all(
+              counterTransitions.map((entry) =>
+                adjustDocumentIndexCounters(db, entry.documentType, entry.previousStatus, entry.nextStatus)
+              )
+            );
+          }
         }
 
         // Melhor esforço: bloquear também no pipeline KYC para impedir operação.
@@ -2530,6 +3641,35 @@ router.get('/api/map/locations', async (req, res) => {
       logStructured('warn', '⚠️ Erro ao buscar localizações do Firebase:', error.message, { service: 'dashboard-routes' });
     }
 
+    const driverCoordinates = locations.drivers
+      .map((driver) => ({
+        lat: Number(driver?.location?.lat),
+        lng: Number(driver?.location?.lng)
+      }))
+      .filter((point) => Number.isFinite(point.lat) && Number.isFinite(point.lng));
+
+    let driverDensityPerKm2 = null;
+    if (driverCoordinates.length >= 2) {
+      const lats = driverCoordinates.map((point) => point.lat);
+      const lngs = driverCoordinates.map((point) => point.lng);
+      const minLat = Math.min(...lats);
+      const maxLat = Math.max(...lats);
+      const minLng = Math.min(...lngs);
+      const maxLng = Math.max(...lngs);
+      const avgLat = (minLat + maxLat) / 2;
+
+      const latKm = Math.max((maxLat - minLat) * 111.32, 0.001);
+      const lngKm = Math.max((maxLng - minLng) * 111.32 * Math.cos((avgLat * Math.PI) / 180), 0.001);
+      const areaKm2 = latKm * lngKm;
+      if (Number.isFinite(areaKm2) && areaKm2 > 0) {
+        driverDensityPerKm2 = locations.drivers.length / areaKm2;
+      }
+    }
+
+    const passengerDriverRatio = locations.drivers.length > 0
+      ? locations.passengers.length / locations.drivers.length
+      : null;
+
     res.json({
       locations,
       summary: {
@@ -2537,7 +3677,9 @@ router.get('/api/map/locations', async (req, res) => {
         availableDrivers: locations.drivers.filter(d => d.status === 'available').length,
         busyDrivers: locations.drivers.filter(d => d.status === 'busy').length,
         activePassengers: locations.passengers.length,
-        activeBookings: locations.activeBookings.length
+        activeBookings: locations.activeBookings.length,
+        passengerDriverRatio,
+        driverDensityPerKm2
       },
       lastUpdate: new Date().toISOString()
     });
@@ -3872,6 +5014,7 @@ function calculatePaymentFrequency(payments) {
   return average.toFixed(1) + ' pagamentos/período';
 }
 
+if (legacyPromotionsRoutesEnabled) {
 // 🎁 Promotion Management - SISTEMA DE PROMOÇÕES POR PERFIL
 router.get('/api/legacy/promotions', async (req, res) => {
   if (!legacyPromotionsRoutesEnabled) {
@@ -4396,6 +5539,7 @@ router.get('/api/legacy/promotions/analytics', async (req, res) => {
     res.status(500).json({ error: 'Erro interno do servidor' });
   }
 });
+}
 
 // Funções auxiliares para promoções
 function getDailyUsageBreakdown(usage, startDate, endDate) {

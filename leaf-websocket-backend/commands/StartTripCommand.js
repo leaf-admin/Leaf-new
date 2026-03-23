@@ -7,7 +7,7 @@
  * - Validar que viagem pode ser iniciada
  * - Verificar pagamento confirmado
  * - Atualizar estado da corrida
- * - Publicar evento ride.started
+ * - Construir evento canônico ride.started (publicação ocorre no handler/EventBus)
  * 
  * NÃO faz:
  * - Notificar passageiro (isso é responsabilidade de listeners)
@@ -20,12 +20,12 @@ const RideStateManager = require('../services/ride-state-manager');
 const PaymentService = require('../services/payment-service');
 const redisPool = require('../utils/redis-pool');
 const { logger, logStructured } = require('../utils/logger');
-const eventSourcing = require('../services/event-sourcing');
 const traceContext = require('../utils/trace-context');
 const { metrics } = require('../utils/prometheus-metrics');
 const { getTracer } = require('../utils/tracer');
 const { SpanStatusCode } = require('@opentelemetry/api');
 const { validateAndEnsureTraceIdInCommand } = require('../utils/trace-validator');
+const { setActiveTripForDriver } = require('../utils/active-trip-index');
 
 class StartTripCommand extends Command {
     constructor(data) {
@@ -116,12 +116,28 @@ class StartTripCommand extends Command {
                 )
             }
 
-            // Verificar status do pagamento
+            // Verificar status do pagamento (fast-path Redis -> fallback payment service)
             span.addEvent('Checking payment status');
-            const paymentService = new PaymentService();
-            const paymentStatus = await paymentService.getPaymentStatus(this.bookingId);
-            
-            if (!paymentStatus || (paymentStatus.status !== 'PAID' && paymentStatus.status !== 'in_holding')) {
+            const normalizePaymentStatus = (status) => String(status || '').trim().toLowerCase();
+            const validPaymentStatuses = new Set(['in_holding', 'paid', 'confirmed']);
+            let paymentStatus = {
+                success: false,
+                status: normalizePaymentStatus(
+                    bookingData.paymentStatus ||
+                    bookingData.payment_status ||
+                    bookingData.statusPagamento
+                )
+            };
+
+            if (!validPaymentStatuses.has(paymentStatus.status)) {
+                const paymentService = new PaymentService();
+                paymentStatus = await paymentService.getPaymentStatus(this.bookingId);
+                paymentStatus.status = normalizePaymentStatus(paymentStatus?.status);
+            } else {
+                paymentStatus.success = true;
+            }
+
+            if (!paymentStatus?.success || !validPaymentStatuses.has(paymentStatus.status)) {
                 span.setStatus({ code: SpanStatusCode.ERROR, message: 'Pagamento não confirmado' });
                 span.setAttribute('payment.status', paymentStatus?.status || 'unknown');
                 span.end();
@@ -131,6 +147,9 @@ class StartTripCommand extends Command {
 
             // Parsear dados da corrida
             const customerId = bookingData.customerId;
+
+            // Renovar índice de corrida ativa ao iniciar viagem
+            await setActiveTripForDriver(redis, this.driverId, this.bookingId, customerId);
 
             // Atualizar estado da corrida
             span.addEvent('Updating ride state');
@@ -163,13 +182,6 @@ class StartTripCommand extends Command {
                     traceId: this.traceId, // ✅ Incluir traceId no evento
                     correlationId: this.correlationId || this.bookingId // ✅ Incluir correlationId no evento
                 });
-
-                // Registrar evento no event sourcing
-                span.addEvent('Recording event in event sourcing');
-                await eventSourcing.recordEvent(
-                    eventSourcing.EVENT_TYPES.RIDE_STARTED,
-                    event.data
-                );
 
                 logStructured('info', 'StartTripCommand executado com sucesso', {
                     bookingId: this.bookingId,

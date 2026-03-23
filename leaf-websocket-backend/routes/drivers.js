@@ -107,7 +107,9 @@ router.get('/api/drivers/applications', requireFirebase, async (req, res) => {
               email: driver.email || 'Email não informado',
               phone: driver.phone || 'Telefone não informado',
               cpf: driver.cpf || 'CPF não informado',
-              birthDate: driver.dateOfBirth || '1990-01-01',
+              birthDate: driver.birthDate || driver.dateOfBirth || driver.dob || null,
+              motherName: driver.motherName || driver.nomeMae || null,
+              gender: driver.gender || driver.genero || null,
               address: {
                 street: driver.address?.street || 'Endereço não informado',
                 city: driver.city || 'Cidade não informada',
@@ -383,7 +385,9 @@ router.get('/api/drivers/applications/:id', requireFirebase, async (req, res) =>
         email: user.email || 'Email não informado',
         phone: user.phone || 'Telefone não informado',
         cpf: user.cpf || 'CPF não informado',
-        birthDate: user.dateOfBirth || '1990-01-01',
+        birthDate: user.birthDate || user.dateOfBirth || user.dob || null,
+        motherName: user.motherName || user.nomeMae || null,
+        gender: user.gender || user.genero || null,
         address: {
           street: user.address?.street || 'Endereço não informado',
           city: user.city || 'Cidade não informada',
@@ -470,7 +474,12 @@ router.get('/api/drivers/nearby', async (req, res) => {
       });
     }
 
-    logger.info(`🔍 [DriversRoute] Buscando motoristas próximos: lat=${latitude}, lng=${longitude}, radius=${radiusKm}km, limit=${limitNum}`);
+    const eligibleDriverGeoKey = process.env.ELIGIBLE_DRIVER_GEO_KEY || 'driver_locations_eligible';
+    const allDriverGeoKey = process.env.ALL_DRIVER_GEO_KEY || 'driver_locations';
+    const allowFallbackPool = process.env.NEARBY_ALLOW_FALLBACK_POOL === 'true';
+    let activeGeoKey = eligibleDriverGeoKey;
+
+    logger.info(`🔍 [DriversRoute] Buscando motoristas próximos: lat=${latitude}, lng=${longitude}, radius=${radiusKm}km, limit=${limitNum}, geoKey=${activeGeoKey}`);
 
     const redis = redisPool.getConnection();
 
@@ -481,12 +490,12 @@ router.get('/api/drivers/nearby', async (req, res) => {
     }
 
     // ✅ Verificar total de motoristas no GEO antes da busca
-    const totalDriversBefore = await redis.zcard('driver_locations');
-    logger.info(`📊 [DriversRoute] Total de motoristas no Redis GEO antes da busca: ${totalDriversBefore}`);
+    const totalDriversBefore = await redis.zcard(activeGeoKey);
+    logger.info(`📊 [DriversRoute] Total de motoristas no Redis GEO (${activeGeoKey}) antes da busca: ${totalDriversBefore}`);
 
     // 1. Buscar motoristas próximos usando Redis GEO
-    const nearbyDrivers = await redis.georadius(
-      'driver_locations',
+    let nearbyDrivers = await redis.georadius(
+      activeGeoKey,
       longitude,
       latitude,
       radiusKm,
@@ -506,33 +515,54 @@ router.get('/api/drivers/nearby', async (req, res) => {
     });
 
     if (!nearbyDrivers || nearbyDrivers.length === 0) {
-      logger.warn(`⚠️ [DriversRoute] Nenhum motorista encontrado em ${radiusKm}km`);
-      // ✅ Verificar se há motoristas no Redis GEO (debug)
-      const totalDrivers = await redis.zcard('driver_locations');
-      logger.info(`📊 [DriversRoute] Total de motoristas no Redis GEO: ${totalDrivers}`);
+      logger.warn(`⚠️ [DriversRoute] Nenhum motorista encontrado em ${radiusKm}km no pool ${activeGeoKey}`);
 
-      // ✅ Testar georadius sem COUNT para ver se retorna algo
-      const testResult = await redis.georadius(
-        'driver_locations',
-        longitude,
-        latitude,
-        radiusKm,
-        'km',
-        'WITHCOORD',
-        'WITHDIST'
-      );
-      logger.info(`🧪 [DriversRoute] Teste sem COUNT retornou: ${testResult?.length || 0} motoristas`);
+      let testResult = [];
+      if (allowFallbackPool && activeGeoKey !== allDriverGeoKey) {
+        activeGeoKey = allDriverGeoKey;
+        logger.warn(`⚠️ [DriversRoute] Fallback habilitado. Reexecutando busca em ${activeGeoKey}`);
+        testResult = await redis.georadius(
+          activeGeoKey,
+          longitude,
+          latitude,
+          radiusKm,
+          'km',
+          'WITHCOORD',
+          'WITHDIST',
+          'COUNT',
+          limitNum * 2
+        );
+        nearbyDrivers = Array.isArray(testResult) ? testResult : [];
+      }
 
-      return res.json({
-        drivers: [],
-        count: 0,
-        source: 'redis_geo',
-        debug: {
-          totalDriversInRedis: totalDrivers,
-          searchRadius: radiusKm,
-          testWithoutCount: testResult?.length || 0
-        }
-      });
+      if (!nearbyDrivers || nearbyDrivers.length === 0) {
+        const totalDrivers = await redis.zcard(activeGeoKey);
+        logger.info(`📊 [DriversRoute] Total de motoristas no Redis GEO (${activeGeoKey}): ${totalDrivers}`);
+
+        // ✅ Testar georadius sem COUNT para ver se retorna algo
+        testResult = await redis.georadius(
+          activeGeoKey,
+          longitude,
+          latitude,
+          radiusKm,
+          'km',
+          'WITHCOORD',
+          'WITHDIST'
+        );
+        logger.info(`🧪 [DriversRoute] Teste sem COUNT em ${activeGeoKey} retornou: ${testResult?.length || 0} motoristas`);
+
+        return res.json({
+          drivers: [],
+          count: 0,
+          source: 'redis_geo',
+          geoKey: activeGeoKey,
+          debug: {
+            totalDriversInRedis: totalDrivers,
+            searchRadius: radiusKm,
+            testWithoutCount: testResult?.length || 0
+          }
+        });
+      }
     }
 
     // 2. Filtrar motoristas disponíveis (status + lock)
@@ -644,7 +674,8 @@ router.get('/api/drivers/nearby', async (req, res) => {
         rating: driverInfo.rating,
         carType: driverInfo.carType,
         vehicleNumber: driverInfo.vehicleNumber,
-        source: 'redis_geo'
+        source: 'redis_geo',
+        geoKey: activeGeoKey
       });
 
       // Limitar ao número solicitado
@@ -662,6 +693,7 @@ router.get('/api/drivers/nearby', async (req, res) => {
       drivers: availableDrivers,
       count: availableDrivers.length,
       source: 'redis_geo',
+      geoKey: activeGeoKey,
       query: {
         lat: latitude,
         lng: longitude,

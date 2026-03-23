@@ -5,6 +5,7 @@ const express = require('express');
 const router = express.Router();
 const redisPool = require('../utils/redis-pool');
 const connectionMonitor = require('../services/connection-monitor');
+const { logError } = require('../utils/logger');
 
 // ✅ IMPORTANTE: Rotas específicas DEVEM vir ANTES das rotas dinâmicas
 // Caso contrário, /locks/all será capturado por /:driverId
@@ -16,7 +17,6 @@ const connectionMonitor = require('../services/connection-monitor');
 router.get('/locks/all', async (req, res) => {
     try {
         const driverLockManager = require('../services/driver-lock-manager');
-const { logStructured, logError } = require('../utils/logger');
         const stats = await driverLockManager.getLockStats();
         
         return res.json({
@@ -128,32 +128,46 @@ router.get('/:driverId', async (req, res) => {
             }
         }
         
-        // 4. Verificar status no Redis
-        const driverStatus = await redis.hget(`driver:${driverId}:status`, 'status') || 'offline';
-        const isOnlineStatus = driverStatus === 'online';
+        // 4. Verificar status no Redis (modelo atual: hash driver:{id})
+        const driverHash = await redis.hgetall(`driver:${driverId}`);
+        const legacyDriverStatus = await redis.hget(`driver:${driverId}:status`, 'status');
+        const normalizedStatus = String(
+            driverHash?.status || legacyDriverStatus || 'offline'
+        ).toLowerCase();
+        const isOnlineFlag = driverHash?.isOnline === 'true' || driverHash?.isOnline === true;
+        const isOnlineStatus = isOnlineFlag || normalizedStatus === 'online' || normalizedStatus === 'available';
         
         // 5. Verificar se pode receber solicitações
+        const isDispatchEligible = driverHash?.dispatchEligible !== 'false';
         const canReceiveRequests = (
             isAuthenticated &&
             isInDriverRoom &&
             isOnlineStatus &&
+            isDispatchEligible &&
             socketId !== null
         );
-        
+
         // 6. Verificar última localização
-        const locationData = await redis.zscore('driver_locations', driverId);
         let lastLocation = null;
-        if (locationData) {
+        if (driverHash && driverHash.lat && driverHash.lng) {
+            lastLocation = {
+                lat: Number.parseFloat(driverHash.lat),
+                lng: Number.parseFloat(driverHash.lng),
+                heading: Number.parseFloat(driverHash.heading || 0),
+                speed: Number.parseFloat(driverHash.speed || 0),
+                timestamp: driverHash.lastSeen || driverHash.timestamp || null
+            };
+        } else if (isOnlineInRedis) {
             const locationStr = await redis.hget(`driver:${driverId}:location`, 'data');
             if (locationStr) {
                 try {
                     lastLocation = JSON.parse(locationStr);
                 } catch (e) {
-                    lastLocation = { error: 'Invalid location data' };
+                    lastLocation = { error: 'Invalid legacy location data' };
                 }
             }
         }
-        
+
         const status = {
             driverId,
             connected: socketId !== null,
@@ -162,12 +176,14 @@ router.get('/:driverId', async (req, res) => {
             inDriverRoom: isInDriverRoom,
             canReceiveRequests,
             socketId,
-            status: driverStatus,
+            status: normalizedStatus,
             lastLocation,
             timestamp: new Date().toISOString(),
             details: {
                 totalDriverConnections: driverConnections,
                 isOnlineInRedis,
+                dispatchEligible: driverHash?.dispatchEligible || null,
+                dispatchEligibilityCode: driverHash?.dispatchEligibilityCode || null,
                 rooms: socketId ? Array.from(io.sockets.sockets.get(socketId)?.rooms || []) : []
             }
         };
@@ -326,6 +342,3 @@ router.get('/:driverId/lock', async (req, res) => {
 });
 
 module.exports = router;
-
-
-

@@ -86,10 +86,48 @@ describe('Fluxo Motorista Completo', () => {
     await testData.helpers.sleep(1000);
   });
   
-  beforeEach(() => {
+  beforeEach(async () => {
     // Limpar eventos antes de cada teste
     driverClient.clearEvents();
     passengerClient.clearEvents();
+
+    const [bookingKeys, searchKeys, notificationKeys, excludedDriverKeys, pendingQueues, activeQueues] = await Promise.all([
+      driverSimulator.keys('booking:*'),
+      driverSimulator.keys('booking_search:*'),
+      driverSimulator.keys('ride_notifications:*'),
+      driverSimulator.keys('ride_excluded_drivers:*'),
+      driverSimulator.keys('ride_queue:*:pending'),
+      driverSimulator.keys('ride_queue:*:active')
+    ]);
+
+    await Promise.allSettled([
+      bookingKeys.length ? driverSimulator.del(...bookingKeys) : Promise.resolve(),
+      searchKeys.length ? driverSimulator.del(...searchKeys) : Promise.resolve(),
+      notificationKeys.length ? driverSimulator.del(...notificationKeys) : Promise.resolve(),
+      excludedDriverKeys.length ? driverSimulator.del(...excludedDriverKeys) : Promise.resolve(),
+      pendingQueues.length ? driverSimulator.del(...pendingQueues) : Promise.resolve(),
+      activeQueues.length ? driverSimulator.del(...activeQueues) : Promise.resolve()
+    ]);
+
+    await driverSimulator.del(
+      `driver_lock:${testData.users.driver.uid}`,
+      `driver_active_notification:${testData.users.driver.uid}`,
+      `active_trip_by_driver:${testData.users.driver.uid}`,
+      `active_trip_customer_by_driver:${testData.users.driver.uid}`,
+      'bookings:active',
+      'activeRides'
+    );
+
+    await driverSimulator.setDriverOnline(
+      testData.users.driver.uid,
+      testData.locations.pickup.lat,
+      testData.locations.pickup.lng,
+      0,
+      0,
+      true,
+      false
+    );
+    await testData.helpers.sleep(150);
   });
   
   test('deve completar fluxo completo do motorista', async () => {
@@ -119,7 +157,11 @@ describe('Fluxo Motorista Completo', () => {
     console.log('\n🔔 ETAPA 3: Motorista recebe notificação');
     
     // Aguardar notificação de nova corrida
-    const notification = await driverClient.waitForEvent('newRideRequest', 20000);
+    const notification = await driverClient.waitForEvent(
+      'newRideRequest',
+      30000,
+      (event) => (event?.bookingId || event?.rideId) === bookingId
+    );
     
     expect(notification).toBeDefined();
     expect(notification.bookingId || notification.rideId).toBe(bookingId);
@@ -149,6 +191,8 @@ describe('Fluxo Motorista Completo', () => {
       testData.locations.pickup
     );
     
+    await driverClient.arrivedAtPickup(bookingId);
+    await testData.helpers.sleep(300);
     const startResponse = await driverClient.startTrip(startTripData);
     
     expect(startResponse).toBeDefined();
@@ -171,7 +215,7 @@ describe('Fluxo Motorista Completo', () => {
         lng: testData.locations.pickup.lng + (i * 0.001)
       };
       
-      driverClient.socket.emit('updateDriverLocation', {
+      driverClient.socket.emit('updateLocation', {
         driverId: testData.users.driver.uid,
         lat: intermediateLocation.lat,
         lng: intermediateLocation.lng,
@@ -218,6 +262,5 @@ describe('Fluxo Motorista Completo', () => {
     
     console.log('✅ Todos os eventos esperados foram recebidos');
     console.log(`✅ Fluxo completo do motorista concluído com sucesso!`);
-  }, 60000); // Timeout de 60 segundos para teste completo
+  }, 120000); // Timeout ampliado para execução remota/VPS
 });
-

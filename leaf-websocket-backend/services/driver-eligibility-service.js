@@ -3,6 +3,15 @@ const firebaseConfig = require('../firebase-config');
 const { logStructured } = require('../utils/logger');
 
 const PROFILE_CACHE_TTL_SECONDS = 90;
+const PROFILE_CACHE_FALLBACK_TTL_SECONDS = Number.parseInt(
+    process.env.DRIVER_ELIGIBILITY_FALLBACK_CACHE_TTL_SECONDS || '30',
+    10
+);
+const ENABLE_FIREBASE_PROFILE_LOOKUP = process.env.ENABLE_DRIVER_ELIGIBILITY_FIREBASE !== 'false';
+const FIREBASE_PROFILE_TIMEOUT_MS = Math.max(
+    100,
+    Number.parseInt(process.env.DRIVER_ELIGIBILITY_FIREBASE_TIMEOUT_MS || '300', 10)
+);
 const ELITE_MIN_RATING = 4.8;
 const ELITE_RECOVERY_MIN_GOOD_RIDES = 10;
 const ELITE_RECOVERY_MIN_RATING = 4.0;
@@ -14,6 +23,13 @@ function normalizeCategory(value) {
     const normalized = String(value).trim().toLowerCase();
 
     if (normalized.includes('elite') || normalized === 'premium') return 'elite';
+    if (
+        normalized.includes('moto') ||
+        normalized.includes('motorcycle') ||
+        normalized.includes('bike')
+    ) {
+        return 'moto';
+    }
     if (
         normalized.includes('plus') ||
         normalized.includes('standard') ||
@@ -89,15 +105,42 @@ class DriverEligibilityService {
     }
 
     async _getProfileFromFirebase(driverId) {
+        if (!ENABLE_FIREBASE_PROFILE_LOOKUP) {
+            return null;
+        }
+
         const db = firebaseConfig?.getRealtimeDB?.();
         if (!db) {
             return null;
         }
 
-        const [userSnapshot, userVehiclesSnapshot] = await Promise.all([
-            db.ref(`users/${driverId}`).once('value'),
-            db.ref(`user_vehicles/${driverId}`).once('value')
-        ]);
+        const timeoutPromise = (stage) => new Promise((_, reject) => {
+            const timer = setTimeout(() => {
+                reject(new Error(`driver_eligibility_firebase_timeout:${stage}:${FIREBASE_PROFILE_TIMEOUT_MS}ms`));
+            }, FIREBASE_PROFILE_TIMEOUT_MS);
+            timer.unref?.();
+        });
+
+        let userSnapshot;
+        let userVehiclesSnapshot;
+        try {
+            [userSnapshot, userVehiclesSnapshot] = await Promise.race([
+                Promise.all([
+                    db.ref(`users/${driverId}`).once('value'),
+                    db.ref(`user_vehicles/${driverId}`).once('value')
+                ]),
+                timeoutPromise('user_and_user_vehicles')
+            ]);
+        } catch (error) {
+            logStructured('warn', 'DriverEligibility: timeout/falha ao consultar perfil base no Firebase (fallback local)', {
+                service: 'driver-eligibility-service',
+                driverId,
+                stage: 'user_and_user_vehicles',
+                timeoutMs: FIREBASE_PROFILE_TIMEOUT_MS,
+                error: error.message
+            });
+            return null;
+        }
 
         const user = userSnapshot?.val() || {};
         const userVehicles = userVehiclesSnapshot?.val() || {};
@@ -115,17 +158,39 @@ class DriverEligibilityService {
         });
 
         let vehicle = null;
+        let activeAssignment = null;
         if (activeUserVehicle?.vehicleId) {
-            const vehicleSnapshot = await db.ref(`vehicles/${activeUserVehicle.vehicleId}`).once('value');
-            if (vehicleSnapshot?.exists()) {
-                vehicle = vehicleSnapshot.val();
+            try {
+                const [vehicleSnapshot, assignmentSnapshot] = await Promise.race([
+                    Promise.all([
+                        db.ref(`vehicles/${activeUserVehicle.vehicleId}`).once('value'),
+                        db.ref(`vehicle_active_assignment/${activeUserVehicle.vehicleId}`).once('value')
+                    ]),
+                    timeoutPromise('vehicle_and_assignment')
+                ]);
+                if (vehicleSnapshot?.exists()) {
+                    vehicle = vehicleSnapshot.val();
+                }
+                if (assignmentSnapshot?.exists()) {
+                    activeAssignment = assignmentSnapshot.val();
+                }
+            } catch (error) {
+                logStructured('warn', 'DriverEligibility: timeout/falha ao consultar veículo/assignment no Firebase (fallback local)', {
+                    service: 'driver-eligibility-service',
+                    driverId,
+                    vehicleId: activeUserVehicle.vehicleId,
+                    stage: 'vehicle_and_assignment',
+                    timeoutMs: FIREBASE_PROFILE_TIMEOUT_MS,
+                    error: error.message
+                });
             }
         }
 
         return {
             user,
             activeUserVehicle,
-            vehicle
+            vehicle,
+            activeAssignment
         };
     }
 
@@ -144,13 +209,14 @@ class DriverEligibilityService {
                 acceptsPlusWithElite: toBoolean(cached.acceptsPlusWithElite, true),
                 rating: Number.parseFloat(cached.rating || fallbackDriverData.rating || '5'),
                 activeVehicleId: cached.activeVehicleId || null,
-                vehiclePlate: cached.vehiclePlate || null
+                vehiclePlate: cached.vehiclePlate || null,
+                assignmentConflict: toBoolean(cached.assignmentConflict, false)
             };
         }
 
         const firebaseProfile = await this._getProfileFromFirebase(driverId);
         if (!firebaseProfile) {
-            return {
+            const fallbackProfile = {
                 driverId,
                 driverApproved: true,
                 vehicleApproved: true,
@@ -159,19 +225,45 @@ class DriverEligibilityService {
                 acceptsPlusWithElite: true,
                 rating: Number.parseFloat(fallbackDriverData.rating || '5'),
                 activeVehicleId: null,
-                vehiclePlate: fallbackDriverData.vehicleNumber || fallbackDriverData.vehiclePlate || null
+                vehiclePlate: fallbackDriverData.vehicleNumber || fallbackDriverData.vehiclePlate || null,
+                assignmentConflict: false
             };
+
+            // Cache curto para evitar repetição de lookups lentos em ondas consecutivas.
+            await this.redis.hset(cacheKey, {
+                driverId: fallbackProfile.driverId,
+                driverApproved: String(fallbackProfile.driverApproved),
+                vehicleApproved: String(fallbackProfile.vehicleApproved),
+                vehicleCategory: fallbackProfile.vehicleCategory || '',
+                carType: fallbackProfile.carType || '',
+                acceptsPlusWithElite: String(fallbackProfile.acceptsPlusWithElite),
+                rating: String(fallbackProfile.rating),
+                activeVehicleId: fallbackProfile.activeVehicleId || '',
+                vehiclePlate: fallbackProfile.vehiclePlate || '',
+                assignmentConflict: String(fallbackProfile.assignmentConflict === true)
+            });
+            await this.redis.expire(cacheKey, PROFILE_CACHE_FALLBACK_TTL_SECONDS);
+
+            return fallbackProfile;
         }
 
-        const { user, activeUserVehicle, vehicle } = firebaseProfile;
+        const { user, activeUserVehicle, vehicle, activeAssignment } = firebaseProfile;
 
         const userApprovedFlag = user?.approved ?? user?.isApproved ?? user?.profileApproved ?? null;
         const userStatus = String(user?.status || '').toLowerCase();
         const driverApproved = userApprovedFlag === null ? (userStatus ? userStatus === 'approved' : true) : toBoolean(userApprovedFlag, false);
 
+        const assignedUserId = activeAssignment
+            ? String(activeAssignment.userId || activeAssignment.driverId || '')
+            : '';
+        const assignmentConflict = Boolean(
+            activeUserVehicle?.vehicleId &&
+            assignedUserId &&
+            assignedUserId !== String(driverId)
+        );
         const uvStatus = String(activeUserVehicle?.status || '').toLowerCase();
         const vehicleApproved = activeUserVehicle
-            ? (toBoolean(activeUserVehicle?.approved, false) || uvStatus === 'approved' || uvStatus === 'active')
+            ? ((toBoolean(activeUserVehicle?.approved, false) || uvStatus === 'approved' || uvStatus === 'active') && !assignmentConflict)
             : true;
 
         const catalogCategory = await this._resolveCategoryFromCatalog(vehicle);
@@ -208,7 +300,8 @@ class DriverEligibilityService {
             acceptsPlusWithElite,
             rating: Number.isFinite(rating) ? rating : 5,
             activeVehicleId: activeUserVehicle?.vehicleId || null,
-            vehiclePlate: vehicle?.plate || vehicle?.vehicleNumber || user?.carPlate || user?.vehicleNumber || null
+            vehiclePlate: vehicle?.plate || vehicle?.vehicleNumber || user?.carPlate || user?.vehicleNumber || null,
+            assignmentConflict
         };
 
         await this.redis.hset(cacheKey, {
@@ -220,7 +313,8 @@ class DriverEligibilityService {
             acceptsPlusWithElite: String(profile.acceptsPlusWithElite),
             rating: String(profile.rating),
             activeVehicleId: profile.activeVehicleId || '',
-            vehiclePlate: profile.vehiclePlate || ''
+            vehiclePlate: profile.vehiclePlate || '',
+            assignmentConflict: String(profile.assignmentConflict === true)
         });
         await this.redis.expire(cacheKey, PROFILE_CACHE_TTL_SECONDS);
 
@@ -233,6 +327,10 @@ class DriverEligibilityService {
 
         if (!profile.driverApproved) {
             return { eligible: false, code: 'DRIVER_NOT_APPROVED', profile };
+        }
+
+        if (profile.assignmentConflict) {
+            return { eligible: false, code: 'VEHICLE_ASSIGNED_TO_ANOTHER_DRIVER', profile };
         }
 
         if (!profile.vehicleApproved) {
@@ -288,6 +386,14 @@ class DriverEligibilityService {
                     eliteRecoveryProgress: recoveredRides
                 }
             };
+        }
+
+        if (normalizedRequested === 'moto') {
+            if (profile.vehicleCategory !== 'moto') {
+                return { eligible: false, code: 'NOT_MOTO_VEHICLE', profile };
+            }
+
+            return { eligible: true, code: 'MOTO_MATCH', profile };
         }
 
         return { eligible: false, code: 'UNSUPPORTED_CATEGORY', profile };

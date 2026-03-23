@@ -211,6 +211,102 @@ class SupportChatService {
     }
 
     /**
+     * Reabrir chat de suporte para um usuário.
+     * @param {string} userId
+     * @param {string} reason
+     * @param {object} metadata
+     * @returns {Promise<object>}
+     */
+    async reopenChat(userId, reason = 'manual_reopen', metadata = {}) {
+        try {
+            const now = new Date().toISOString();
+            const currentStatusJson = await this.redis.hget(this.chatStatusKey, userId);
+            const currentStatus = currentStatusJson ? JSON.parse(currentStatusJson) : {};
+
+            const nextStatus = {
+                userId,
+                status: 'active',
+                createdAt: currentStatus.createdAt || now,
+                updatedAt: now,
+                reopenedAt: now,
+                reopenReason: reason,
+                ...metadata
+            };
+
+            await this.redis.hset(this.chatStatusKey, userId, JSON.stringify(nextStatus));
+
+            logger.info(`✅ Chat reaberto para usuário ${userId} (${reason})`);
+            return {
+                success: true,
+                reopened: true,
+                status: nextStatus
+            };
+        } catch (error) {
+            logger.error('❌ Erro ao reabrir chat:', error);
+            return {
+                success: false,
+                reopened: false,
+                error: error.message
+            };
+        }
+    }
+
+    /**
+     * Reabre chat automaticamente se o usuário possuir ticket aberto.
+     * @param {string} userId
+     * @param {string} reason
+     * @returns {Promise<object>}
+     */
+    async reopenChatForOpenTicket(userId, reason = 'incoming_message') {
+        try {
+            const db = firebaseConfig.getRealtimeDB();
+            if (!db) {
+                return {
+                    reopened: false,
+                    reason: 'realtime_db_unavailable'
+                };
+            }
+
+            const snapshot = await db.ref('support_tickets').orderByChild('userId').equalTo(String(userId)).once('value');
+            const tickets = snapshot.val() ? Object.values(snapshot.val()) : [];
+            if (tickets.length === 0) {
+                return {
+                    reopened: false,
+                    reason: 'no_tickets'
+                };
+            }
+
+            const activeStatuses = new Set(['open', 'assigned', 'in_progress', 'escalated', 'pending']);
+            tickets.sort((a, b) => new Date(b.updatedAt || b.createdAt || 0) - new Date(a.updatedAt || a.createdAt || 0));
+
+            const openTicket = tickets.find((ticket) => activeStatuses.has(String(ticket.status || '').toLowerCase()));
+            if (!openTicket) {
+                return {
+                    reopened: false,
+                    reason: 'no_open_ticket'
+                };
+            }
+
+            const reopenResult = await this.reopenChat(userId, reason, {
+                ticketId: openTicket.id || null,
+                ticketStatus: openTicket.status || 'open'
+            });
+
+            return {
+                ...reopenResult,
+                reopened: Boolean(reopenResult.reopened)
+            };
+        } catch (error) {
+            logger.error('❌ Erro ao reabrir chat por ticket aberto:', error);
+            return {
+                reopened: false,
+                reason: 'exception',
+                error: error.message
+            };
+        }
+    }
+
+    /**
      * ✅ Obter status do chat
      * @param {string} userId - ID do usuário
      * @returns {Promise<Object>} Status do chat
@@ -412,4 +508,3 @@ class SupportChatService {
 const supportChatService = new SupportChatService();
 
 module.exports = supportChatService;
-

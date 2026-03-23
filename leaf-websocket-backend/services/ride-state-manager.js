@@ -64,7 +64,8 @@ class RideStateManager {
         ],
         [RideStateManager.STATES.ACCEPTED]: [
             RideStateManager.STATES.IN_PROGRESS,
-            RideStateManager.STATES.CANCELED
+            RideStateManager.STATES.CANCELED,
+            RideStateManager.STATES.SEARCHING // ✅ Recuperação: motorista desconectou antes de iniciar
         ],
         [RideStateManager.STATES.IN_PROGRESS]: [
             RideStateManager.STATES.COMPLETED,
@@ -208,4 +209,3 @@ class RideStateManager {
 }
 
 module.exports = RideStateManager;
-

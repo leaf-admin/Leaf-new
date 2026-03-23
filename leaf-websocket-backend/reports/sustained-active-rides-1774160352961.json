@@ -1,0 +1,247 @@
+{
+  "startedAt": "2026-03-22T06:19:12.961Z",
+  "config": {
+    "wsUrl": "http://127.0.0.1:3001",
+    "httpBase": "http://127.0.0.1:3001",
+    "profile": "production",
+    "forceRealPayment": true,
+    "mockCompletePayment": true,
+    "provisionDriverVehicles": false,
+    "strictReady": true,
+    "loopTickMs": 250,
+    "heartbeatMs": 1200,
+    "paymentRetries": 4,
+    "dispatchTimeoutMs": 45000,
+    "readinessTimeoutMs": 30000,
+    "drainTimeoutMs": 300000
+  },
+  "pool": {
+    "requested": {
+      "drivers": 40,
+      "passengers": 40
+    },
+    "connected": {
+      "drivers": 0,
+      "passengers": 0
+    },
+    "readyDrivers": 0,
+    "uids": {
+      "drivers": 40,
+      "passengers": 40
+    },
+    "tokenGeneration": {
+      "total": 80,
+      "ok": 80,
+      "failed": 0
+    }
+  },
+  "windows": [],
+  "metrics": {
+    "startedRides": 0,
+    "completedRides": 0,
+    "failedStarts": 0,
+    "failedCompletes": 0,
+    "paymentBlockedRetries": 0,
+    "paymentBlockedHardFails": 0,
+    "noDriverCapacityMisses": 0,
+    "noPassengerCapacityMisses": 0,
+    "latencyMs": {
+      "createBooking": [],
+      "confirmPayment": [],
+      "bookingToDispatch": [],
+      "acceptRide": [],
+      "startTrip": [],
+      "tripDuration": [],
+      "completeTrip": [],
+      "fullFlowToStart": []
+    },
+    "errors": {
+      "driver_connect_or_auth_failed": 40,
+      "passenger_connect_or_auth_failed": 40,
+      "fatal": 1
+    },
+    "errorSamples": {}
+  },
+  "notes": [
+    "Driver session skipped (capacity_1774160352961_driver_0): websocket error",
+    "Driver session skipped (capacity_1774160352961_driver_1): websocket error",
+    "Driver session skipped (capacity_1774160352961_driver_2): websocket error",
+    "Driver session skipped (capacity_1774160352961_driver_3): websocket error",
+    "Driver session skipped (capacity_1774160352961_driver_4): websocket error",
+    "Driver session skipped (capacity_1774160352961_driver_5): websocket error",
+    "Driver session skipped (capacity_1774160352961_driver_6): websocket error",
+    "Driver session skipped (capacity_1774160352961_driver_7): websocket error",
+    "Driver session skipped (capacity_1774160352961_driver_8): websocket error",
+    "Driver session skipped (capacity_1774160352961_driver_9): websocket error",
+    "Driver session skipped (capacity_1774160352961_driver_10): websocket error",
+    "Driver session skipped (capacity_1774160352961_driver_11): websocket error",
+    "Driver session skipped (capacity_1774160352961_driver_12): websocket error",
+    "Driver session skipped (capacity_1774160352961_driver_13): websocket error",
+    "Driver session skipped (capacity_1774160352961_driver_14): websocket error",
+    "Driver session skipped (capacity_1774160352961_driver_15): websocket error",
+    "Driver session skipped (capacity_1774160352961_driver_16): websocket error",
+    "Driver session skipped (capacity_1774160352961_driver_17): websocket error",
+    "Driver session skipped (capacity_1774160352961_driver_18): websocket error",
+    "Driver session skipped (capacity_1774160352961_driver_19): websocket error",
+    "Driver session skipped (capacity_1774160352961_driver_20): websocket error",
+    "Driver session skipped (capacity_1774160352961_driver_21): websocket error",
+    "Driver session skipped (capacity_1774160352961_driver_22): websocket error",
+    "Driver session skipped (capacity_1774160352961_driver_23): websocket error",
+    "Driver session skipped (capacity_1774160352961_driver_24): websocket error",
+    "Driver session skipped (capacity_1774160352961_driver_25): websocket error",
+    "Driver session skipped (capacity_1774160352961_driver_26): websocket error",
+    "Driver session skipped (capacity_1774160352961_driver_27): websocket error",
+    "Driver session skipped (capacity_1774160352961_driver_28): websocket error",
+    "Driver session skipped (capacity_1774160352961_driver_29): websocket error",
+    "Driver session skipped (capacity_1774160352961_driver_30): websocket error",
+    "Driver session skipped (capacity_1774160352961_driver_31): websocket error",
+    "Driver session skipped (capacity_1774160352961_driver_32): websocket error",
+    "Driver session skipped (capacity_1774160352961_driver_33): websocket error",
+    "Driver session skipped (capacity_1774160352961_driver_34): websocket error",
+    "Driver session skipped (capacity_1774160352961_driver_35): websocket error",
+    "Driver session skipped (capacity_1774160352961_driver_36): websocket error",
+    "Driver session skipped (capacity_1774160352961_driver_37): websocket error",
+    "Driver session skipped (capacity_1774160352961_driver_38): websocket error",
+    "Driver session skipped (capacity_1774160352961_driver_39): websocket error",
+    "Passenger session skipped (capacity_1774160352961_passenger_0): websocket error",
+    "Passenger session skipped (capacity_1774160352961_passenger_1): websocket error",
+    "Passenger session skipped (capacity_1774160352961_passenger_2): websocket error",
+    "Passenger session skipped (capacity_1774160352961_passenger_3): websocket error",
+    "Passenger session skipped (capacity_1774160352961_passenger_4): websocket error",
+    "Passenger session skipped (capacity_1774160352961_passenger_5): websocket error",
+    "Passenger session skipped (capacity_1774160352961_passenger_6): websocket error",
+    "Passenger session skipped (capacity_1774160352961_passenger_7): websocket error",
+    "Passenger session skipped (capacity_1774160352961_passenger_8): websocket error",
+    "Passenger session skipped (capacity_1774160352961_passenger_9): websocket error",
+    "Passenger session skipped (capacity_1774160352961_passenger_10): websocket error",
+    "Passenger session skipped (capacity_1774160352961_passenger_11): websocket error",
+    "Passenger session skipped (capacity_1774160352961_passenger_12): websocket error",
+    "Passenger session skipped (capacity_1774160352961_passenger_13): websocket error",
+    "Passenger session skipped (capacity_1774160352961_passenger_14): websocket error",
+    "Passenger session skipped (capacity_1774160352961_passenger_15): websocket error",
+    "Passenger session skipped (capacity_1774160352961_passenger_16): websocket error",
+    "Passenger session skipped (capacity_1774160352961_passenger_17): websocket error",
+    "Passenger session skipped (capacity_1774160352961_passenger_18): websocket error",
+    "Passenger session skipped (capacity_1774160352961_passenger_19): websocket error",
+    "Passenger session skipped (capacity_1774160352961_passenger_20): websocket error",
+    "Passenger session skipped (capacity_1774160352961_passenger_21): websocket error",
+    "Passenger session skipped (capacity_1774160352961_passenger_22): websocket error",
+    "Passenger session skipped (capacity_1774160352961_passenger_23): websocket error",
+    "Passenger session skipped (capacity_1774160352961_passenger_24): websocket error",
+    "Passenger session skipped (capacity_1774160352961_passenger_25): websocket error",
+    "Passenger session skipped (capacity_1774160352961_passenger_26): websocket error",
+    "Passenger session skipped (capacity_1774160352961_passenger_27): websocket error",
+    "Passenger session skipped (capacity_1774160352961_passenger_28): websocket error",
+    "Passenger session skipped (capacity_1774160352961_passenger_29): websocket error",
+    "Passenger session skipped (capacity_1774160352961_passenger_30): websocket error",
+    "Passenger session skipped (capacity_1774160352961_passenger_31): websocket error",
+    "Passenger session skipped (capacity_1774160352961_passenger_32): websocket error",
+    "Passenger session skipped (capacity_1774160352961_passenger_33): websocket error",
+    "Passenger session skipped (capacity_1774160352961_passenger_34): websocket error",
+    "Passenger session skipped (capacity_1774160352961_passenger_35): websocket error",
+    "Passenger session skipped (capacity_1774160352961_passenger_36): websocket error",
+    "Passenger session skipped (capacity_1774160352961_passenger_37): websocket error",
+    "Passenger session skipped (capacity_1774160352961_passenger_38): websocket error",
+    "Passenger session skipped (capacity_1774160352961_passenger_39): websocket error",
+    "Fatal: Insufficient sessions after connect/auth (drivers=0, passengers=0)"
+  ],
+  "finishedAt": "2026-03-22T06:19:15.194Z",
+  "durationMs": 2233,
+  "summary": {
+    "startedRides": 0,
+    "completedRides": 0,
+    "activeRidesAtEnd": 0,
+    "completionRatePct": 0,
+    "failedStarts": 0,
+    "failedCompletes": 0,
+    "paymentBlockedRetries": 0,
+    "paymentBlockedHardFails": 0,
+    "noDriverCapacityMisses": 0,
+    "noPassengerCapacityMisses": 0,
+    "latencyMs": {
+      "createBooking": {
+        "count": 0,
+        "p50": 0,
+        "p95": 0,
+        "p99": 0,
+        "max": 0,
+        "avg": 0
+      },
+      "confirmPayment": {
+        "count": 0,
+        "p50": 0,
+        "p95": 0,
+        "p99": 0,
+        "max": 0,
+        "avg": 0
+      },
+      "bookingToDispatch": {
+        "count": 0,
+        "p50": 0,
+        "p95": 0,
+        "p99": 0,
+        "max": 0,
+        "avg": 0
+      },
+      "acceptRide": {
+        "count": 0,
+        "p50": 0,
+        "p95": 0,
+        "p99": 0,
+        "max": 0,
+        "avg": 0
+      },
+      "startTrip": {
+        "count": 0,
+        "p50": 0,
+        "p95": 0,
+        "p99": 0,
+        "max": 0,
+        "avg": 0
+      },
+      "completeTrip": {
+        "count": 0,
+        "p50": 0,
+        "p95": 0,
+        "p99": 0,
+        "max": 0,
+        "avg": 0
+      },
+      "tripDuration": {
+        "count": 0,
+        "p50": 0,
+        "p95": 0,
+        "p99": 0,
+        "max": 0,
+        "avg": 0
+      },
+      "fullFlowToStart": {
+        "count": 0,
+        "p50": 0,
+        "p95": 0,
+        "p99": 0,
+        "max": 0,
+        "avg": 0
+      }
+    },
+    "topErrors": [
+      {
+        "error": "driver_connect_or_auth_failed",
+        "count": 40
+      },
+      {
+        "error": "passenger_connect_or_auth_failed",
+        "count": 40
+      },
+      {
+        "error": "fatal",
+        "count": 1
+      }
+    ],
+    "errorSamples": {}
+  },
+  "capacityEstimate": {
+    "sustainedActiveRidesEstimated": 0,
+    "interpretation": "No window met the >=90% target-hit + low-failure criteria. Check errors and pool readiness."
+  }
+}

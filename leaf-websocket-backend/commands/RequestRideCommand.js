@@ -7,7 +7,7 @@
  * - Validar dados da corrida
  * - Criar booking no Redis
  * - Adicionar à fila
- * - Publicar evento ride.requested
+ * - Construir evento canônico ride.requested (publicação ocorre no handler/EventBus)
  * 
  * NÃO faz:
  * - Notificar motoristas (isso é responsabilidade de listeners)
@@ -20,12 +20,12 @@ const rideQueueManager = require('../services/ride-queue-manager');
 const RideStateManager = require('../services/ride-state-manager');
 const redisPool = require('../utils/redis-pool');
 const GeoHashUtils = require('../utils/geohash-utils');
-const { logger, logStructured } = require('../utils/logger');
-const eventSourcing = require('../services/event-sourcing');
+const { logStructured } = require('../utils/logger');
 const traceContext = require('../utils/trace-context');
 const { metrics } = require('../utils/prometheus-metrics');
 const { validateAndEnsureTraceIdInCommand } = require('../utils/trace-validator');
-const { isWithinOperatingArea } = require('../utils/geofence');
+const geofenceService = require('../services/geofence-service');
+const fareEstimationService = require('../services/fare-estimation-service');
 
 class RequestRideCommand extends Command {
     constructor(data) {
@@ -34,6 +34,9 @@ class RequestRideCommand extends Command {
         this.pickupLocation = data.pickupLocation;
         this.destinationLocation = data.destinationLocation;
         this.estimatedFare = data.estimatedFare || 0;
+        this.routeDistanceKm = data.routeDistanceKm || 0;
+        this.routeDurationSecs = data.routeDurationSecs || 0;
+        this.tollFee = data.tollFee || 0;
         this.carType = data.carType || null;
         this.paymentMethod = data.paymentMethod || 'pix';
         // ✅ VALIDAÇÃO: Garantir traceId válido
@@ -54,11 +57,28 @@ class RequestRideCommand extends Command {
         if (this.estimatedFare < 0) {
             throw new Error('RequestRideCommand: estimatedFare deve ser >= 0');
         }
+        if (this.routeDistanceKm < 0) {
+            throw new Error('RequestRideCommand: routeDistanceKm deve ser >= 0');
+        }
+        if (this.routeDurationSecs < 0) {
+            throw new Error('RequestRideCommand: routeDurationSecs deve ser >= 0');
+        }
+        if (this.tollFee < 0) {
+            throw new Error('RequestRideCommand: tollFee deve ser >= 0');
+        }
 
-        // Validação de Geofencing (Área de Operação via Polígono)
-        const geofenceCheck = isWithinOperatingArea(this.pickupLocation.lat, this.pickupLocation.lng);
-        if (!geofenceCheck.isAllowed) {
-            throw new Error(`A Leaf ainda não opera nesta região. Operação negada: ${geofenceCheck.reason || 'Fora da área delimitada pelo mapa.'}`);
+        // Validação dinâmica de geofence (runtime + dashboard)
+        if (geofenceService.isActive()) {
+            const geofenceValidation = geofenceService.validateRideLocations(
+                this.pickupLocation,
+                this.destinationLocation
+            );
+
+            if (!geofenceValidation.valid) {
+                throw new Error(
+                    `A Leaf ainda não opera nesta região. Operação negada: ${geofenceValidation.error || 'Fora da área delimitada pelo mapa.'}`
+                );
+            }
         }
 
         return true;
@@ -91,13 +111,28 @@ class RequestRideCommand extends Command {
                     5 // Precisão 5 = ~5km x 5km
                 );
 
+                // Tarifa server-authoritative para evitar divergência de cálculo no cliente.
+                const fareEstimation = fareEstimationService.estimateRideFare({
+                    pickupLocation: this.pickupLocation,
+                    destinationLocation: this.destinationLocation,
+                    carType: this.carType,
+                    routeDistanceKm: this.routeDistanceKm,
+                    routeDurationSecs: this.routeDurationSecs,
+                    tollFee: this.tollFee,
+                    clientEstimatedFare: this.estimatedFare
+                });
+
                 // Criar dados da corrida
                 const bookingData = {
                     bookingId,
                     customerId: this.customerId,
                     pickupLocation: this.pickupLocation,
                     destinationLocation: this.destinationLocation,
-                    estimatedFare: this.estimatedFare,
+                    estimatedFare: fareEstimation.estimatedFare,
+                    routeDistanceKm: fareEstimation.routeMetrics.distanceKm,
+                    routeDurationSecs: fareEstimation.routeMetrics.durationSecs,
+                    tollFee: fareEstimation.tollFee,
+                    fareSource: fareEstimation.routeMetrics.source,
                     carType: this.carType,
                     paymentMethod: this.paymentMethod,
                     regionHash
@@ -119,18 +154,12 @@ class RequestRideCommand extends Command {
                     customerId: this.customerId,
                     pickupLocation: this.pickupLocation,
                     destinationLocation: this.destinationLocation,
-                    estimatedFare: this.estimatedFare,
+                    estimatedFare: fareEstimation.estimatedFare,
                     carType: this.carType,
                     paymentMethod: this.paymentMethod,
                     traceId: this.traceId, // ✅ Incluir traceId no evento
                     correlationId: this.correlationId || bookingId // ✅ Incluir correlationId no evento
                 });
-
-                // Registrar evento no event sourcing
-                await eventSourcing.recordEvent(
-                    eventSourcing.EVENT_TYPES.RIDE_REQUESTED,
-                    event.data
-                );
 
                 logStructured('info', 'RequestRideCommand executado com sucesso', {
                     bookingId,

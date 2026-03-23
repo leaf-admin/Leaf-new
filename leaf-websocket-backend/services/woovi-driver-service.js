@@ -791,6 +791,23 @@ class WooviDriverService {
     try {
       const response = await this.api.post(`/charge/${chargeId}/cancel`);
       if (response.status < 200 || response.status >= 300) {
+        const responseErrorText = String(
+          response.data?.error ||
+          response.data?.message ||
+          ''
+        ).toLowerCase();
+
+        // A Woovi pode responder 404 quando a cobrança já foi finalizada/expirada.
+        // Tratamos como cancelamento idempotente para o fluxo do app.
+        if (response.status === 404 || responseErrorText.includes('not found')) {
+          return {
+            success: true,
+            alreadyFinalized: true,
+            status: response.status,
+            data: response.data
+          };
+        }
+
         return {
           success: false,
           status: response.status,

@@ -203,293 +203,154 @@ function registerSocketCompleteTripHandler({
                     }
                 }
 
-                const finalRideSnapshot = {
-                    fare: fare,
-                    netFare: null,
-                    distance: distance,
-                    duration: null,
-                    endLocation: endLocation,
-                    driverEarnings: null,
-                    financialBreakdown: null
-                };
-
-                // ✅ NOVO: Processar distribuição de pagamento líquido para o motorista
-                // Em modo mock de testes, evitar dependência de integrações externas.
-                if (paymentMockEnabled) {
-                    const mockedFare = parseFloat(fare) || 0;
-                    const mockedNetAmount = Math.max(0, Math.round(mockedFare * 100));
-
-                    finalRideSnapshot.netFare = mockedFare;
-                    finalRideSnapshot.driverEarnings = mockedFare;
-                    finalRideSnapshot.financialBreakdown = {
-                        mode: 'mock',
-                        grossAmount: mockedNetAmount,
-                        netAmount: mockedNetAmount,
-                        retainedFees: 0
-                    };
-
-                    logStructured('warn', 'completeTrip executado em modo mock de distribuição de pagamento', {
-                        bookingId,
-                        driverId,
-                        eventType: 'completeTrip',
-                        mockPayment: true
-                    });
-
-                    socket.emit('paymentDistributed', {
-                        success: true,
-                        bookingId,
-                        netAmount: mockedNetAmount,
-                        netAmountInReais: mockedFare.toFixed(2),
-                        transferId: null,
-                        balanceCreditId: driverId,
-                        retainedFees: 0,
-                        mockPayment: true,
-                        message: 'Distribuição mock aplicada para testes'
-                    });
-                } else {
-                    try {
-                        const PaymentService = require('../services/payment-service');
-                        const paymentService = new PaymentService();
-
-                        // Buscar dados do booking para obter informações do motorista e pagamento
-                        const bookingData = io.activeBookings?.get(bookingId);
-
-                        if (bookingData && fare) {
-                            // ✅ Buscar wooviAccountId do motorista (do booking ou do banco de dados)
-                            let wooviAccountId = bookingData.driverWooviAccountId || bookingData.wooviAccountId;
-                            let wooviClientId = bookingData.driverWooviClientId || bookingData.wooviClientId;
-
-                            // Se não encontrou no booking, buscar do banco de dados
-                            if (!wooviAccountId && driverId) {
-                                try {
-                                    const DriverApprovalService = require('../services/driver-approval-service');
-                                    const driverApprovalService = new DriverApprovalService();
-                                    const accountData = await driverApprovalService.getDriverWooviAccountId(driverId);
-
-                                    if (accountData) {
-                                        wooviAccountId = accountData.wooviAccountId;
-                                        wooviClientId = accountData.wooviClientId;
-                                        logStructured('info', 'wooviAccountId encontrado do banco de dados', {
-                                            driverId,
-                                            bookingId,
-                                            eventType: 'completeTrip'
-                                        });
-                                    } else {
-                                        logStructured('warn', 'wooviAccountId não encontrado', {
-                                            driverId,
-                                            bookingId,
-                                            eventType: 'completeTrip'
-                                        });
-                                    }
-                                } catch (accountError) {
-                                    logStructured('error', 'Erro ao buscar wooviAccountId do banco', {
-                                        driverId,
-                                        bookingId,
-                                        eventType: 'completeTrip',
-                                        error: accountError.message
-                                    });
-                                }
-                            }
-
-                            // ✅ MVP: Sempre processar distribuição (usa saldo no Firestore)
-                            // Converter fare para centavos
-                            const fareInCents = Math.round(parseFloat(fare) * 100);
-
-                            logStructured('info', 'Processando distribuição de pagamento', {
-                                bookingId,
-                                driverId,
-                                fare: fareInCents,
-                                eventType: 'completeTrip'
-                            });
-
-                            const distributionResult = await paymentService.processNetDistribution({
-                                rideId: bookingId,
-                                driverId: driverId, // ✅ Sempre disponível - usado para creditar saldo
-                                wooviAccountId: wooviAccountId, // Opcional (para BaaS futuro)
-                                wooviClientId: wooviClientId, // Opcional (para BaaS futuro)
-                                totalAmount: fareInCents
-                            });
-
-                            if (distributionResult.success) {
-                                finalRideSnapshot.netFare = distributionResult.netAmount ? (distributionResult.netAmount / 100) : null;
-                                finalRideSnapshot.driverEarnings = distributionResult.netAmount ? (distributionResult.netAmount / 100) : null;
-                                finalRideSnapshot.financialBreakdown = distributionResult.calculation || null;
-
-                                logStructured('info', 'Pagamento distribuído com sucesso', {
-                                    bookingId,
-                                    driverId,
-                                    netAmount: distributionResult.netAmount,
-                                    eventType: 'completeTrip'
-                                });
-
-                                // Notificar motorista sobre o pagamento
-                                socket.emit('paymentDistributed', {
-                                    success: true,
-                                    bookingId,
-                                    netAmount: distributionResult.netAmount,
-                                    netAmountInReais: (distributionResult.netAmount / 100).toFixed(2),
-                                    transferId: distributionResult.transferId || null,
-                                    balanceCreditId: distributionResult.balanceCreditId || driverId,
-                                    retainedFees: distributionResult.retainedFees,
-                                    message: 'Saldo creditado com sucesso'
-                                });
-                            } else {
-                                logStructured('error', 'Erro ao distribuir pagamento', {
-                                    bookingId,
-                                    driverId,
-                                    eventType: 'completeTrip',
-                                    error: distributionResult.error
-                                });
-                                // Não bloquear finalização da viagem se distribuição falhar
-                                // Mas logar o erro para investigação
-                                socket.emit('paymentDistributed', {
-                                    success: false,
-                                    bookingId,
-                                    error: distributionResult.error
-                                });
-                            }
-                        } else {
-                            logStructured('warn', 'Dados do booking ou fare não disponíveis', {
-                                bookingId,
-                                eventType: 'completeTrip'
-                            });
-                        }
-                    } catch (paymentError) {
-                        logStructured('error', 'Erro ao processar distribuição de pagamento', {
-                            bookingId,
-                            driverId,
-                            eventType: 'completeTrip',
-                            error: paymentError.message
-                        });
-                        // Não bloquear finalização da viagem se distribuição falhar
-                    }
-                }
-
-                // Persistencia garantida: tenta Firestore primeiro e usa outbox se indisponivel.
-                const ridePersistenceService = require('../services/ride-persistence-service');
-                const persistFinalResult = await ridePersistenceService.persistFinalRideDataWithOutbox(
-                    bookingId,
-                    finalRideSnapshot
-                );
-
-                if (!persistFinalResult.success) {
-                    logStructured('error', 'Falha ao persistir finalizacao da corrida', {
-                        bookingId,
-                        eventType: 'completeTrip',
-                        error: persistFinalResult.error || 'persist_final_failed'
-                    });
-                    socket.emit('tripCompleteError', {
-                        error: 'Falha ao persistir finalização da corrida. Tente novamente.',
-                        code: 'FINAL_PERSISTENCE_FAILED',
-                        retryAfterSec: 2
-                    });
-                    return;
-                }
-
-                if (persistFinalResult.deferred) {
-                    logStructured('warn', 'Finalizacao enfileirada em outbox para retry', {
-                        bookingId,
-                        eventType: 'completeTrip'
-                    });
-                }
-
-                // ✅ Gerar e salvar recibo da corrida em background
-                setImmediate(async () => {
-                    try {
-                        const ReceiptService = require('../services/receipt-service');
-                        const receiptService = new ReceiptService();
-
-                        // Buscar dados completos da corrida
-                        const bookingDataForReceipt = io.activeBookings?.get(bookingId);
-                        if (bookingDataForReceipt) {
-                            const receiptData = {
-                                ...bookingDataForReceipt,
-                                finalPrice: fare,
-                                distance: distance,
-                                endTime: new Date().toISOString(),
-                                completedAt: new Date().toISOString(),
-                                status: 'COMPLETED'
-                            };
-
-                            // Gerar e salvar recibo
-                            const firebaseDb = firebaseConfig?.getRealtimeDB?.();
-                            await receiptService.generateAndSaveReceipt(bookingId, receiptData, firebaseDb);
-                            logStructured('info', 'Recibo gerado e salvo', {
-                                bookingId,
-                                eventType: 'completeTrip'
-                            });
-                        }
-                    } catch (receiptError) {
-                        logStructured('warn', 'Erro ao gerar recibo', {
-                            bookingId,
-                            eventType: 'completeTrip',
-                            error: receiptError.message
-                        });
-                        // Não bloquear finalização se recibo falhar
-                    }
-                });
-
-                // Emitir confirmação para o driver
-                // ✅ Padronizar uso de rooms para alta escalabilidade
+                // Emitir confirmação imediatamente para reduzir latência no caminho crítico
                 const tripCompletedData = {
                     success: true,
                     bookingId,
                     message: 'Viagem finalizada com sucesso',
-                    endLocation,
-                    distance,
-                    fare,
-                    persistence: persistFinalResult.deferred ? 'deferred_outbox' : 'confirmed_firestore',
+                    endLocation: resultEndLocation || endLocation,
+                    distance: resultDistance || distance,
+                    fare: finalFare || fare,
+                    persistence: 'accepted_background',
                     timestamp: new Date().toISOString()
                 };
 
-                // ✅ Notificar driver via room (escalável e confiável)
                 io.to(`driver_${driverId}`).emit('tripCompleted', tripCompletedData);
 
-                // ✅ Buscar customerId do booking para notificar o customer correto via room
-                const bookingKey = `booking:${bookingId}`;
-                const bookingDataRedis = await redis.hgetall(bookingKey);
-                const customerIdToNotify = bookingDataRedis?.customerId || bookingDataRedis?.customer ||
-                    io.activeBookings?.get(bookingId)?.customerId;
+                let customerIdToNotify = customerId || io.activeBookings?.get(bookingId)?.customerId || null;
+                if (!customerIdToNotify) {
+                    const bookingDataRedis = await redis.hgetall(`booking:${bookingId}`);
+                    customerIdToNotify = bookingDataRedis?.customerId || bookingDataRedis?.customer || null;
+                }
 
-                // ✅ Notificar customer via room (escalável e confiável)
                 if (customerIdToNotify) {
                     io.to(`customer_${customerIdToNotify}`).emit('tripCompleted', {
                         ...tripCompletedData,
                         message: 'Viagem finalizada'
                     });
-                    logStructured('info', 'tripCompleted enviado para customer', {
-                        bookingId,
-                        customerId: customerIdToNotify,
-                        eventType: 'completeTrip'
-                    });
                 } else {
-                    logStructured('warn', 'CustomerId não encontrado', {
+                    logStructured('warn', 'CustomerId não encontrado para tripCompleted', {
                         bookingId,
                         eventType: 'completeTrip'
                     });
                 }
 
-                // ✅ NOVO: Atualizar Live Activity/Foreground Service (Silent Push)
-                try {
-                    const payloadData = {
-                        bookingId: bookingId,
-                        status: 'completed',
-                        distance: String(distance || '0'),
-                        fare: String(fare || '0')
-                    };
+                // Pós-processamento assíncrono para não bloquear ack da finalização
+                setImmediate(async () => {
+                    try {
+                        const finalRideSnapshot = {
+                            fare: finalFare || fare,
+                            netFare: null,
+                            distance: resultDistance || distance,
+                            duration: resultDuration || duration || null,
+                            endLocation: resultEndLocation || endLocation,
+                            driverEarnings: null,
+                            financialBreakdown: paymentDistribution || null
+                        };
 
-                    if (customerIdToNotify) {
-                        await fcmService.sendRideStatusUpdate(customerIdToNotify, { ...payloadData, userType: 'customer' });
+                        if (paymentMockEnabled) {
+                            const mockedFare = parseFloat(finalFare || fare) || 0;
+                            const mockedNetAmount = Math.max(0, Math.round(mockedFare * 100));
+                            finalRideSnapshot.netFare = mockedFare;
+                            finalRideSnapshot.driverEarnings = mockedFare;
+                            finalRideSnapshot.financialBreakdown = {
+                                mode: 'mock',
+                                grossAmount: mockedNetAmount,
+                                netAmount: mockedNetAmount,
+                                retainedFees: 0
+                            };
+
+                            io.to(`driver_${driverId}`).emit('paymentDistributed', {
+                                success: true,
+                                bookingId,
+                                netAmount: mockedNetAmount,
+                                netAmountInReais: mockedFare.toFixed(2),
+                                transferId: null,
+                                balanceCreditId: driverId,
+                                retainedFees: 0,
+                                mockPayment: true,
+                                message: 'Distribuição mock aplicada para testes'
+                            });
+                        } else {
+                            io.to(`driver_${driverId}`).emit('paymentDistributed', {
+                                success: true,
+                                bookingId,
+                                pending: true,
+                                message: 'Distribuição financeira em processamento assíncrono'
+                            });
+                        }
+
+                        const ridePersistenceService = require('../services/ride-persistence-service');
+                        const persistFinalResult = await ridePersistenceService.persistFinalRideDataWithOutbox(
+                            bookingId,
+                            finalRideSnapshot
+                        );
+
+                        if (!persistFinalResult.success) {
+                            logStructured('error', 'Falha ao persistir finalizacao da corrida (background)', {
+                                bookingId,
+                                eventType: 'completeTrip',
+                                error: persistFinalResult.error || 'persist_final_failed'
+                            });
+                        } else if (persistFinalResult.deferred) {
+                            logStructured('warn', 'Finalizacao enfileirada em outbox para retry', {
+                                bookingId,
+                                eventType: 'completeTrip'
+                            });
+                        }
+
+                        try {
+                            const ReceiptService = require('../services/receipt-service');
+                            const receiptService = new ReceiptService();
+                            const bookingDataForReceipt = io.activeBookings?.get(bookingId);
+                            if (bookingDataForReceipt) {
+                                const receiptData = {
+                                    ...bookingDataForReceipt,
+                                    finalPrice: finalFare || fare,
+                                    distance: resultDistance || distance,
+                                    endTime: new Date().toISOString(),
+                                    completedAt: new Date().toISOString(),
+                                    status: 'COMPLETED'
+                                };
+                                const firebaseDb = firebaseConfig?.getRealtimeDB?.();
+                                await receiptService.generateAndSaveReceipt(bookingId, receiptData, firebaseDb);
+                            }
+                        } catch (receiptError) {
+                            logStructured('warn', 'Erro ao gerar recibo', {
+                                bookingId,
+                                eventType: 'completeTrip',
+                                error: receiptError.message
+                            });
+                        }
+
+                        try {
+                            const payloadData = {
+                                bookingId: bookingId,
+                                status: 'completed',
+                                distance: String(resultDistance || distance || '0'),
+                                fare: String(finalFare || fare || '0')
+                            };
+
+                            if (customerIdToNotify) {
+                                await fcmService.sendRideStatusUpdate(customerIdToNotify, { ...payloadData, userType: 'customer' });
+                            }
+                            await fcmService.sendRideStatusUpdate(driverId, { ...payloadData, userType: 'driver' });
+                        } catch (silentPushError) {
+                            logStructured('error', 'Erro ao enviar silent push em completeTrip', { error: silentPushError.message });
+                        }
+                    } catch (backgroundError) {
+                        logStructured('error', 'Erro no pós-processamento assíncrono do completeTrip', {
+                            bookingId,
+                            driverId,
+                            eventType: 'completeTrip',
+                            error: backgroundError.message
+                        });
+                    } finally {
+                        if (io.activeBookings) {
+                            io.activeBookings.delete(bookingId);
+                        }
                     }
-                    await fcmService.sendRideStatusUpdate(driverId, { ...payloadData, userType: 'driver' });
-                } catch (silentPushError) {
-                    logStructured('error', 'Erro ao enviar silent push em completeTrip', { error: silentPushError.message });
-                }
-
-                // ✅ NOVO: Limpar activeBookings (Memória)
-                if (io.activeBookings) {
-                    io.activeBookings.delete(bookingId);
-                }
+                });
 
             } catch (error) {
                 logStructured('error', 'Erro ao finalizar viagem', {

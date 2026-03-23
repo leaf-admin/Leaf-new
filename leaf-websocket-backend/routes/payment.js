@@ -1,5 +1,6 @@
 const express = require('express');
 const PaymentService = require('../services/payment-service');
+const kycPolicyService = require('../services/kyc-policy-service');
 const { logStructured, logError } = require('../utils/logger');
 const router = express.Router();
 
@@ -41,7 +42,32 @@ router.post('/payment/advance', async (req, res) => {
     const result = await paymentService.processAdvancePayment(paymentData);
 
     if (result.success) {
-      res.status(200).json(result);
+      const chargeId =
+        result.chargeId ||
+        result?.charge?.id ||
+        result?.charge?.identifier ||
+        result?.charge?.correlationID ||
+        null;
+      const qrCode =
+        result.qrCode ||
+        result.qrCodeImage ||
+        result?.charge?.qrCodeImage ||
+        result?.charge?.paymentMethods?.pix?.qrCodeImage ||
+        null;
+      const paymentLink =
+        result.paymentLink ||
+        result.paymentLinkUrl ||
+        result?.charge?.paymentLinkUrl ||
+        result?.charge?.paymentMethods?.pix?.paymentLinkUrl ||
+        null;
+
+      res.status(200).json({
+        ...result,
+        chargeId,
+        qrCode,
+        paymentLink,
+        charge: result.charge || (chargeId ? { id: chargeId, correlationID: chargeId } : undefined)
+      });
     } else {
       res.status(400).json(result);
     }
@@ -337,6 +363,29 @@ router.post('/payment/driver-balance/:driverId/withdraw', async (req, res) => {
     }
 
     const amountCents = Math.round(Number(amount) * 100);
+
+    const stepUpPolicy = await kycPolicyService.evaluateWithdrawalStepUp({
+      driverId,
+      amountCents
+    });
+
+    if (stepUpPolicy.requirement !== 'NONE') {
+      return res.status(403).json({
+        success: false,
+        error: 'Verificacao adicional obrigatoria antes do saque',
+        code: 'KYC_STEP_UP_REQUIRED',
+        kyc: {
+          requirement: stepUpPolicy.requirement,
+          riskScore: stepUpPolicy.riskScore,
+          challengeId: stepUpPolicy.challenge?.challengeId || null,
+          challengeExpiresAt: stepUpPolicy.challenge?.expiresAt || null,
+          signals: stepUpPolicy.signals || [],
+          verificationMaxAgeHours:
+            kycPolicyService.getConfig().verificationMaxAgeHours
+        }
+      });
+    }
+
     const result = await paymentService.requestDriverWithdrawal({
       driverId,
       amountCents,
@@ -447,8 +496,6 @@ router.get('/payment/calculate-net', async (req, res) => {
 });
 
 module.exports = router;
-
-
 
 
 

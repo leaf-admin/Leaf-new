@@ -49,6 +49,114 @@ class ResponseHandler {
         }
     }
 
+    isDispatchableSearchState(state) {
+        return state === RideStateManager.STATES.PENDING ||
+            state === RideStateManager.STATES.SEARCHING ||
+            state === RideStateManager.STATES.EXPANDED ||
+            state === RideStateManager.STATES.NOTIFIED ||
+            state === RideStateManager.STATES.AWAITING_RESPONSE ||
+            state === RideStateManager.STATES.REJECTED;
+    }
+
+    async isBookingCurrentForCustomer(bookingId, bookingData) {
+        const customerId = bookingData?.customerId;
+        if (!customerId) return true;
+
+        const activeBookingId = await this.redis.get(`customer_active_booking:${customerId}`);
+        if (activeBookingId && activeBookingId !== bookingId) {
+            logger.debug(`⏭️ [ResponseHandler] Booking ${bookingId} ignorado para motorista: cliente ${customerId} tem ativo ${activeBookingId}`);
+            return false;
+        }
+
+        const status = String(bookingData.status || '').toUpperCase();
+        if (status === 'SUPERSEDED' || status === 'CANCELED' || status === 'COMPLETED' || status === 'NO_DRIVERS_AVAILABLE') {
+            logger.debug(`⏭️ [ResponseHandler] Booking ${bookingId} ignorado por status ${status}`);
+            return false;
+        }
+
+        return true;
+    }
+
+    getBookingTimestampMs(bookingData) {
+        const candidates = [
+            bookingData?.createdAt,
+            bookingData?.requestedAt,
+            bookingData?.activatedAt,
+            bookingData?.timestamp
+        ];
+
+        for (const candidate of candidates) {
+            if (candidate === undefined || candidate === null || candidate === '') continue;
+
+            const raw = String(candidate).trim();
+            if (/^\d+$/.test(raw)) {
+                const numeric = Number(raw);
+                if (Number.isFinite(numeric) && numeric > 0) {
+                    return numeric < 10_000_000_000 ? numeric * 1000 : numeric;
+                }
+            }
+
+            const parsed = Date.parse(raw);
+            if (Number.isFinite(parsed)) return parsed;
+        }
+
+        return null;
+    }
+
+    isBookingStaleForDispatch(bookingData) {
+        const staleThresholdMs = Number(process.env.DISPATCH_STALE_BOOKING_MS || '300000');
+        if (!Number.isFinite(staleThresholdMs) || staleThresholdMs <= 0) return false;
+
+        const createdAtMs = this.getBookingTimestampMs(bookingData);
+        if (!createdAtMs) return false;
+
+        return (Date.now() - createdAtMs) > staleThresholdMs;
+    }
+
+    async cleanupStaleBookingIfNeeded(bookingId, bookingData, regionHash, currentState) {
+        if (!this.isDispatchableSearchState(currentState)) return false;
+        if (!this.isBookingStaleForDispatch(bookingData)) return false;
+
+        try {
+            logger.warn(`⚠️ [ResponseHandler] Corrida stale ${bookingId} removida do dispatch (state=${currentState}, region=${regionHash})`);
+
+            await rideQueueManager.dequeueRide(bookingId, regionHash).catch(() => null);
+            await this.redis.del(`booking_search:${bookingId}`).catch(() => null);
+            await this.redis.expire(`ride_notifications:${bookingId}`, 60).catch(() => null);
+            await this.redis.expire(`ride_excluded_drivers:${bookingId}`, 60).catch(() => null);
+
+            const customerId = bookingData?.customerId;
+            if (customerId) {
+                const activeKey = `customer_active_booking:${customerId}`;
+                const activeBookingId = await this.redis.get(activeKey).catch(() => null);
+                if (activeBookingId === bookingId) {
+                    await this.redis.del(activeKey).catch(() => null);
+                }
+            }
+
+            await this.redis.hset(`booking:${bookingId}`, {
+                status: 'NO_DRIVERS_AVAILABLE',
+                noDriversFoundReason: 'STALE_DISPATCH_CLEANUP',
+                noDriversFoundAt: new Date().toISOString()
+            }).catch(() => null);
+
+            await RideStateManager.updateBookingState(
+                this.redis,
+                bookingId,
+                RideStateManager.STATES.CANCELED,
+                {
+                    canceledBy: 'system',
+                    reason: 'STALE_DISPATCH_CLEANUP',
+                    cancelledAt: new Date().toISOString()
+                }
+            ).catch(() => null);
+        } catch (error) {
+            logger.error(`❌ [ResponseHandler] Falha ao limpar corrida stale ${bookingId}:`, error);
+        }
+
+        return true;
+    }
+
     /**
      * Processar aceitação de corrida pelo motorista
      * @param {string} driverId - ID do motorista
@@ -779,6 +887,15 @@ class ResponseHandler {
                             continue;
                         }
 
+                        const pendingState = await RideStateManager.getBookingState(this.redis, bookingId);
+                        if (!this.isDispatchableSearchState(pendingState)) {
+                            continue;
+                        }
+
+                        if (!(await this.isBookingCurrentForCustomer(bookingId, bookingData))) {
+                            continue;
+                        }
+
                         try {
                             const pickupLocation = JSON.parse(bookingData.pickupLocation);
                             if (pickupLocation && pickupLocation.lat && pickupLocation.lng) {
@@ -832,15 +949,14 @@ class ResponseHandler {
 
                 if (activeBookings && activeBookings.length > 0) {
                     // Verificar estados em batch
-                    const RideStateManager = require('./ride-state-manager');
                     const stateChecks = activeBookings.map((bookingId) =>
                         RideStateManager.getBookingState(this.redis, bookingId).then(state => ({ bookingId, state }))
                     );
                     const stateResults = await Promise.all(stateChecks);
 
-                    // Filtrar apenas corridas em SEARCHING/EXPANDED (disponíveis)
+                    // Filtrar apenas corridas em estados despacháveis
                     const availableBookings = stateResults
-                        .filter(({ state }) => state === RideStateManager.STATES.SEARCHING || state === RideStateManager.STATES.EXPANDED)
+                        .filter(({ state }) => this.isDispatchableSearchState(state))
                         .map(({ bookingId }) => bookingId);
 
                     logger.debug(`🔍 [ResponseHandler] ${availableBookings.length} corridas disponíveis (SEARCHING/EXPANDED) na fila ativa para ${driverId}`);
@@ -851,11 +967,9 @@ class ResponseHandler {
                     for (const bookingId of availableBookings) {
                         const bookingKey = `booking:${bookingId}`;
                         const bookingData = await this.redis.hgetall(bookingKey);
-                        if (bookingData) {
+                        if (bookingData && await this.isBookingCurrentForCustomer(bookingId, bookingData)) {
                             const timestamp = bookingData.createdAt || bookingData.activatedAt || '0';
                             bookingsWithTimestamp.push({ bookingId, timestamp });
-                        } else {
-                            bookingsWithTimestamp.push({ bookingId, timestamp: '0' });
                         }
                     }
 
@@ -876,6 +990,17 @@ class ResponseHandler {
 
                         if (!bookingData || !bookingData.pickupLocation) {
                             continue; // Pular se não tem dados
+                        }
+
+                        const latestActiveState = await RideStateManager.getBookingState(this.redis, bookingId);
+                        const wasCleanedAsStale = await this.cleanupStaleBookingIfNeeded(
+                            bookingId,
+                            bookingData,
+                            regionHash,
+                            latestActiveState
+                        );
+                        if (wasCleanedAsStale) {
+                            continue;
                         }
 
                         // ✅ Verificar se corrida está dentro do raio do motorista (5km máximo)
@@ -957,6 +1082,16 @@ class ResponseHandler {
                 return null;
             }
 
+            const latestState = await RideStateManager.getBookingState(this.redis, bookingId);
+            if (!this.isDispatchableSearchState(latestState)) {
+                logger.info(`ℹ️ [ResponseHandler] Corrida ${bookingId} ignorada no envio para ${driverId} (state=${latestState})`);
+                return null;
+            }
+
+            if (!(await this.isBookingCurrentForCustomer(bookingId, bookingData))) {
+                return null;
+            }
+
             // 5. ✅ CORREÇÃO: Não pular se já foi notificado, mas não está na tela (permitir re-notificação)
             const alreadyNotified = await this.redis.sismember(`ride_notifications:${bookingId}`, driverId);
             if (alreadyNotified) {
@@ -994,8 +1129,7 @@ class ResponseHandler {
             };
 
             // ✅ CORREÇÃO TC-003: Verificar se busca já está ativa
-            const RideStateManager = require('./ride-state-manager');
-            const currentState = await RideStateManager.getBookingState(this.redis, bookingId);
+            const currentState = latestState;
             const parsedPickupLocation = this.safeJSONParse(bookingData.pickupLocation);
             const searchKey = `booking_search:${bookingId}`;
             const existingSearch = await this.redis.hgetall(searchKey);
@@ -1123,4 +1257,3 @@ class ResponseHandler {
 }
 
 module.exports = ResponseHandler;
-

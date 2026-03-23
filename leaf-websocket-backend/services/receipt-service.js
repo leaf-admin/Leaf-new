@@ -38,6 +38,42 @@ class ReceiptService {
     }
 
     /**
+     * Parse resiliente de timestamp ISO/epoch/date-object.
+     * Retorna fallback quando o valor não é válido.
+     */
+    parseDateValue(value, fallback = null) {
+        if (value === null || value === undefined || value === '') {
+            return fallback;
+        }
+
+        if (value instanceof Date && !Number.isNaN(value.getTime())) {
+            return new Date(value.getTime());
+        }
+
+        const rawText = String(value).trim();
+        if (!rawText) {
+            return fallback;
+        }
+
+        const asNumber = Number(rawText);
+        if (Number.isFinite(asNumber)) {
+            // Heurística: segundos vs milissegundos
+            const millis = asNumber < 10_000_000_000 ? asNumber * 1000 : asNumber;
+            const parsedFromNumber = new Date(millis);
+            if (!Number.isNaN(parsedFromNumber.getTime())) {
+                return parsedFromNumber;
+            }
+        }
+
+        const parsedFromText = new Date(rawText);
+        if (!Number.isNaN(parsedFromText.getTime())) {
+            return parsedFromText;
+        }
+
+        return fallback;
+    }
+
+    /**
      * Formata data e horário para exibição
      * @param {string} dateString - Data em ISO string
      * @returns {Object} - Objeto com data e horário formatados
@@ -45,7 +81,9 @@ class ReceiptService {
     formatDateTime(dateString) {
         if (!dateString) return { date: 'N/A', time: 'N/A' };
 
-        const date = new Date(dateString);
+        const date = this.parseDateValue(dateString);
+        if (!date) return { date: 'N/A', time: 'N/A' };
+
         const dateFormatted = date.toLocaleDateString('pt-BR', {
             day: '2-digit',
             month: '2-digit',
@@ -82,7 +120,16 @@ class ReceiptService {
             const receiptHash = this.generateReceiptHash(rideId, rideData);
 
             // 5. Formatar data e horário
-            const tripDate = rideData.endTime || rideData.completedAt || rideData.tripStartTime || rideData.bookingDate;
+            const tripDate =
+                this.parseDateValue(
+                    rideData.endTime ||
+                    rideData.completedAt ||
+                    rideData.tripStartTime ||
+                    rideData.startedAt ||
+                    rideData.bookingDate ||
+                    rideData.createdAt,
+                    new Date()
+                )?.toISOString() || new Date().toISOString();
             const { date: tripDateFormatted, time: tripTimeFormatted } = this.formatDateTime(tripDate);
 
             // 6. Obter destino para título
@@ -109,24 +156,24 @@ class ReceiptService {
                     dateTime: tripDate,
 
                     // Local de partida
-                    pickup: {
-                        address: rideData.pickup?.add || 'Endereço de origem',
-                        coordinates: {
-                            lat: rideData.pickup?.lat || 0,
-                            lng: rideData.pickup?.lng || 0
+                        pickup: {
+                            address: rideData.pickup?.add || 'Endereço de origem',
+                            coordinates: {
+                                lat: rideData.pickup?.lat || 0,
+                                lng: rideData.pickup?.lng || 0
+                            },
+                            timestamp: this.parseDateValue(rideData.tripStartTime || rideData.startedAt || rideData.startTime)?.toISOString() || null
                         },
-                        timestamp: rideData.tripStartTime
-                    },
 
                     // Local de destino
-                    dropoff: {
-                        address: rideData.drop?.add || 'Endereço de destino',
-                        coordinates: {
-                            lat: rideData.drop?.lat || 0,
-                            lng: rideData.drop?.lng || 0
+                        dropoff: {
+                            address: rideData.drop?.add || 'Endereço de destino',
+                            coordinates: {
+                                lat: rideData.drop?.lat || 0,
+                                lng: rideData.drop?.lng || 0
+                            },
+                            timestamp: this.parseDateValue(rideData.endTime || rideData.completedAt || rideData.endDate)?.toISOString() || null
                         },
-                        timestamp: rideData.endTime
-                    },
 
                     // Tempo de viagem e distância
                     duration: tripMetrics.duration, // em minutos
@@ -273,11 +320,46 @@ class ReceiptService {
      * Calcula métricas da viagem
      */
     calculateTripMetrics(rideData) {
-        const startTime = new Date(rideData.tripStartTime || rideData.bookingDate);
-        const endTime = new Date(rideData.endTime || rideData.completedAt || Date.now());
+        const now = new Date();
+        const endTime = this.parseDateValue(
+            rideData.endTime || rideData.completedAt || rideData.endDate,
+            now
+        );
 
-        const durationMs = endTime.getTime() - startTime.getTime();
-        const durationMinutes = Math.round(durationMs / (1000 * 60));
+        const startTime = this.parseDateValue(
+            rideData.tripStartTime ||
+            rideData.startedAt ||
+            rideData.startTime ||
+            rideData.bookingDate ||
+            rideData.createdAt,
+            endTime
+        );
+        const normalizedStartTime = startTime.getTime() > endTime.getTime()
+            ? new Date(endTime.getTime())
+            : startTime;
+
+        let durationMinutes;
+
+        // Prioridade para duração explícita quando disponível
+        const explicitSeconds = Number(rideData.durationSeconds || rideData.routeDurationSecs || rideData.tripDurationSecs);
+        const explicitMinutes = Number(rideData.durationMinutes || rideData.tripDurationMinutes);
+        const fallbackDuration = Number(rideData.duration);
+
+        if (Number.isFinite(explicitSeconds) && explicitSeconds >= 0) {
+            durationMinutes = Math.round(explicitSeconds / 60);
+        } else if (Number.isFinite(explicitMinutes) && explicitMinutes >= 0) {
+            durationMinutes = Math.round(explicitMinutes);
+        } else if (Number.isFinite(fallbackDuration) && fallbackDuration >= 0) {
+            // No fluxo principal, `duration` costuma vir em segundos.
+            durationMinutes = Math.round(fallbackDuration / 60);
+        } else {
+            const durationMs = Math.max(0, endTime.getTime() - normalizedStartTime.getTime());
+            durationMinutes = Math.round(durationMs / (1000 * 60));
+        }
+
+        if (!Number.isFinite(durationMinutes) || durationMinutes < 0) {
+            durationMinutes = 0;
+        }
 
         // Formatar duração
         const hours = Math.floor(durationMinutes / 60);
@@ -289,7 +371,7 @@ class ReceiptService {
         return {
             duration: durationMinutes,
             durationFormatted,
-            startTime: startTime.toISOString(),
+            startTime: normalizedStartTime.toISOString(),
             endTime: endTime.toISOString()
         };
     }
@@ -568,7 +650,5 @@ class ReceiptService {
 }
 
 module.exports = ReceiptService;
-
-
 
 

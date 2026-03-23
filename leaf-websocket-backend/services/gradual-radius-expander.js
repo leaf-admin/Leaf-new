@@ -17,11 +17,17 @@ const eventSourcing = require('./event-sourcing');
 const { EVENT_TYPES } = require('./event-sourcing');
 const driverLockManager = require('./driver-lock-manager');
 const DriverNotificationDispatcher = require('./driver-notification-dispatcher');
-const driverEligibilityService = require('./driver-eligibility-service');
 const { logger } = require('../utils/logger');
 
 // ✅ Compartilhar intervalos entre instâncias para permitir cancelamento global
 const globalExpansionIntervals = new Map();
+const ACTIVE_SEARCH_STATES = new Set(['PENDING', 'SEARCHING', 'EXPANDED', 'NOTIFIED', 'AWAITING_RESPONSE', 'REJECTED']);
+const ELIGIBLE_DRIVER_GEO_KEY = process.env.ELIGIBLE_DRIVER_GEO_KEY || 'driver_locations_eligible';
+
+const parsePositiveNumber = (value, fallback) => {
+    const parsed = Number.parseFloat(value);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+};
 
 class GradualRadiusExpander {
     constructor(io) {
@@ -31,14 +37,16 @@ class GradualRadiusExpander {
         this.dispatcher = new DriverNotificationDispatcher(this.redis, io); // Usar dispatcher com scoring
 
         // Configurações padrão
+        const isTest = process.env.NODE_ENV === 'test';
         this.config = {
-            initialRadius: 0.5,
-            maxRadius: 30, // 30km
-            expansionStep: process.env.NODE_ENV === 'test' ? 5.0 : 0.5, // 5km em teste, 0.5km real
-            expansionInterval: process.env.NODE_ENV === 'test' ? 1000 : 3000, // 1s em teste, 3s real
+            // Defaults priorizam resposta rápida; todos podem ser ajustados por env.
+            initialRadius: parsePositiveNumber(process.env.MATCH_INITIAL_RADIUS_KM, isTest ? 5.0 : 1.0),
+            maxRadius: parsePositiveNumber(process.env.MATCH_MAX_RADIUS_KM, 30),
+            expansionStep: parsePositiveNumber(process.env.MATCH_EXPANSION_STEP_KM, isTest ? 5.0 : 1.0),
+            expansionInterval: parsePositiveNumber(process.env.MATCH_EXPANSION_INTERVAL_MS, isTest ? 1000 : 700),
             maxWaves: 60,
             searchStateTTL: 3600, // 1h
-            driversPerWave: process.env.NODE_ENV === 'test' ? 1 : 5
+            driversPerWave: Number.parseInt(process.env.MATCH_DRIVERS_PER_WAVE || (isTest ? '1' : '12'), 10)
         };
     }
 
@@ -54,6 +62,64 @@ class GradualRadiusExpander {
         } catch (error) {
             return defaultValue;
         }
+    }
+
+    async getSearchDispatchability(bookingId, bookingData = null) {
+        const booking = bookingData && Object.keys(bookingData).length > 0
+            ? bookingData
+            : await this.redis.hgetall(`booking:${bookingId}`);
+
+        if (!booking || Object.keys(booking).length === 0) {
+            return { ok: false, reason: 'BOOKING_NOT_FOUND' };
+        }
+
+        const state = await RideStateManager.getBookingState(this.redis, bookingId);
+        const status = String(booking.status || '').toUpperCase();
+        if (!state || !ACTIVE_SEARCH_STATES.has(state)) {
+            return { ok: false, reason: 'STATE_NOT_SEARCHABLE', state, status, bookingData: booking };
+        }
+
+        if (status === 'SUPERSEDED' || status === 'CANCELED' || status === 'COMPLETED' || status === 'NO_DRIVERS_AVAILABLE') {
+            return { ok: false, reason: 'BOOKING_STATUS_BLOCKED', state, status, bookingData: booking };
+        }
+
+        const customerId = booking.customerId;
+        if (customerId) {
+            const activeBookingId = await this.redis.get(`customer_active_booking:${customerId}`);
+            if (activeBookingId && activeBookingId !== bookingId) {
+                return {
+                    ok: false,
+                    reason: 'STALE_CUSTOMER_ACTIVE_BOOKING',
+                    state,
+                    status,
+                    customerId,
+                    activeBookingId,
+                    bookingData: booking
+                };
+            }
+        }
+
+        return { ok: true, state, status, bookingData: booking };
+    }
+
+    async hasEligibleDriversNearby(pickupLocation, radiusKm) {
+        const parsedPickup = this.safeJSONParse(pickupLocation, null);
+        const lat = Number(parsedPickup?.lat);
+        const lng = Number(parsedPickup?.lng);
+        if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+            return false;
+        }
+
+        const nearby = await this.redis.georadius(
+            ELIGIBLE_DRIVER_GEO_KEY,
+            lng,
+            lat,
+            radiusKm,
+            'km',
+            'COUNT',
+            1
+        );
+        return Array.isArray(nearby) && nearby.length > 0;
     }
 
     /**
@@ -73,6 +139,12 @@ class GradualRadiusExpander {
                 return; // Busca já está rodando, não iniciar novamente
             }
 
+            const dispatchability = await this.getSearchDispatchability(bookingId);
+            if (!dispatchability.ok) {
+                logger.info(`ℹ️ [GradualExpander] Busca não iniciada para ${bookingId}: ${dispatchability.reason}`);
+                return;
+            }
+
             // Verificar se corrida ainda está válida
             const state = await RideStateManager.getBookingState(this.redis, bookingId);
             // ✅ PAUSAR: Se está em NOTIFIED, não iniciar busca (aguardar resposta)
@@ -82,6 +154,17 @@ class GradualRadiusExpander {
             }
             if (state !== RideStateManager.STATES.SEARCHING && state !== RideStateManager.STATES.PENDING && state !== RideStateManager.STATES.EXPANDED) {
                 logger.warn(`⚠️ [GradualExpander] Corrida ${bookingId} não está em estado válido para busca (state: ${state})`);
+                return;
+            }
+
+            // Se não há nenhum motorista elegível ativo na região de busca, encerra imediatamente.
+            const hasEligibleDrivers = await this.hasEligibleDriversNearby(pickupLocation, this.config.maxRadius);
+            if (!hasEligibleDrivers) {
+                logger.info(`ℹ️ [GradualExpander] Corrida ${bookingId}: sem motoristas elegíveis ativos no raio ${this.config.maxRadius}km`);
+                await this.handleMaxRadiusReached(bookingId, {
+                    reason: 'NO_ELIGIBLE_DRIVERS_IN_REGION',
+                    searchedRadius: this.config.maxRadius
+                });
                 return;
             }
 
@@ -160,14 +243,20 @@ class GradualRadiusExpander {
             // 1. Buscar motoristas e calcular scores usando dispatcher
             const bookingKey = `booking:${bookingId}`;
             const bookingData = await this.redis.hgetall(bookingKey);
-            const requestedCategory = driverEligibilityService.normalizeCategory(bookingData?.carType);
+            const dispatchability = await this.getSearchDispatchability(bookingId, bookingData);
+            if (!dispatchability.ok) {
+                logger.info(`ℹ️ [GradualExpander] Encerrando busca de ${bookingId} em searchAndNotify: ${dispatchability.reason}`);
+                await this.stopSearch(bookingId);
+                return { notified: 0, total: 0 };
+            }
+            const safeBookingData = dispatchability.bookingData;
 
             const scoredDrivers = await this.dispatcher.findAndScoreDrivers(
                 pickupLocation,
                 radius,
                 limit,
                 bookingId,
-                { requestedCategory }
+                {}
             );
 
             if (scoredDrivers.length === 0) {
@@ -178,17 +267,17 @@ class GradualRadiusExpander {
 
             // 2. Buscar dados completos da corrida
             // Parse seguro de JSON usando helper
-            const parsedPickupLocation = this.safeJSONParse(bookingData.pickupLocation, pickupLocation);
-            const parsedDestinationLocation = this.safeJSONParse(bookingData.destinationLocation, {});
+            const parsedPickupLocation = this.safeJSONParse(safeBookingData.pickupLocation, pickupLocation);
+            const parsedDestinationLocation = this.safeJSONParse(safeBookingData.destinationLocation, {});
 
             const bookingInfo = {
                 bookingId,
-                customerId: bookingData.customerId,
+                customerId: safeBookingData.customerId,
                 pickupLocation: parsedPickupLocation,
                 destinationLocation: parsedDestinationLocation,
-                estimatedFare: parseFloat(bookingData.estimatedFare || 0),
-                carType: bookingData.carType || null,
-                paymentMethod: bookingData.paymentMethod || 'pix'
+                estimatedFare: parseFloat(safeBookingData.estimatedFare || 0),
+                carType: safeBookingData.carType || null,
+                paymentMethod: safeBookingData.paymentMethod || 'pix'
             };
 
             // 3. Notificar motoristas usando dispatcher (com locks e timeouts)
@@ -248,6 +337,14 @@ class GradualRadiusExpander {
                 } else {
                     // Corrida já foi aceita ou cancelada
                     logger.debug(`🛑 [GradualExpander] Busca parada para ${bookingId} (state: ${state})`);
+                    this.expansionIntervals.delete(bookingId);
+                    return;
+                }
+
+                const dispatchability = await this.getSearchDispatchability(bookingId);
+                if (!dispatchability.ok) {
+                    logger.info(`🛑 [GradualExpander] Encerrando wave de ${bookingId}: ${dispatchability.reason}`);
+                    await this.stopSearch(bookingId);
                     this.expansionIntervals.delete(bookingId);
                     return;
                 }
@@ -370,6 +467,10 @@ class GradualRadiusExpander {
             const searchKey = `booking_search:${bookingId}`;
             await this.redis.del(searchKey);
 
+            // Evitar crescimento infinito de chaves históricas de notificação.
+            await this.redis.expire(`ride_notifications:${bookingId}`, 600);
+            await this.redis.expire(`ride_excluded_drivers:${bookingId}`, 600);
+
             // Registrar evento
             await eventSourcing.recordEvent(
                 EVENT_TYPES.DRIVER_SEARCH_STOPPED,
@@ -387,20 +488,94 @@ class GradualRadiusExpander {
      * Handler quando raio máximo é atingido
      * @private
      */
-    async handleMaxRadiusReached(bookingId) {
+    async handleMaxRadiusReached(bookingId, options = {}) {
+        const reasonCode = options?.reason || 'NO_DRIVERS_AVAILABLE';
+        const searchedRadius = Number.isFinite(Number(options?.searchedRadius))
+            ? Number(options.searchedRadius)
+            : this.config.maxRadius;
+        const userMessage = reasonCode === 'NO_ELIGIBLE_DRIVERS_IN_REGION'
+            ? 'Não há motoristas ativos na sua região neste momento'
+            : 'Nenhum motorista disponível no momento';
         const bookingKey = `booking:${bookingId}`;
         const bookingData = await this.redis.hgetall(bookingKey);
 
-        // Notificar customer sobre busca expandida
+        // Se corrida já foi aceita/cancelada durante a expansão, não emitir falha de busca.
+        const currentState = await RideStateManager.getBookingState(this.redis, bookingId);
+        const activeSearchStates = new Set([
+            RideStateManager.STATES.PENDING,
+            RideStateManager.STATES.SEARCHING,
+            RideStateManager.STATES.EXPANDED,
+            RideStateManager.STATES.NOTIFIED,
+            RideStateManager.STATES.AWAITING_RESPONSE
+        ]);
+
+        if (!activeSearchStates.has(currentState)) {
+            logger.info(`ℹ️ [GradualExpander] Raio máximo atingido para ${bookingId}, mas estado atual é ${currentState}. Ignorando noDriversFound.`);
+            return;
+        }
+
+        const dispatchability = await this.getSearchDispatchability(bookingId, bookingData);
+        if (!dispatchability.ok && dispatchability.reason === 'STALE_CUSTOMER_ACTIVE_BOOKING') {
+            await this.stopSearch(bookingId);
+            logger.info(`ℹ️ [GradualExpander] Corrida ${bookingId} já supersedida por ${dispatchability.activeBookingId}, encerrando sem notificar cliente.`);
+            return;
+        }
+
+        // Notificar customer sobre busca expandida + finalização sem motoristas
         if (this.io && bookingData.customerId) {
             this.io.to(`customer_${bookingData.customerId}`).emit('rideSearchExpanded', {
                 bookingId,
                 message: 'Buscando motoristas em área expandida',
                 currentRadius: this.config.maxRadius
             });
+
+            this.io.to(`customer_${bookingData.customerId}`).emit('noDriversFound', {
+                success: false,
+                bookingId,
+                message: userMessage,
+                code: reasonCode,
+                searchedRadius
+            });
         }
 
-        logger.info(`📈 [GradualExpander] Raio máximo atingido para ${bookingId}, notificando customer`);
+        // Marcar estado final da busca e limpar recursos.
+        try {
+            await this.redis.hset(bookingKey, {
+                noDriversFoundAt: new Date().toISOString(),
+                noDriversFoundReason: reasonCode,
+                status: 'NO_DRIVERS_AVAILABLE'
+            });
+            await RideStateManager.updateBookingState(
+                this.redis,
+                bookingId,
+                RideStateManager.STATES.CANCELED,
+                {
+                    canceledBy: 'system',
+                    reason: reasonCode,
+                    cancelledAt: new Date().toISOString()
+                }
+            );
+
+            if (bookingData.customerId) {
+                const activeKey = `customer_active_booking:${bookingData.customerId}`;
+                const activeBookingId = await this.redis.get(activeKey);
+                if (activeBookingId === bookingId) {
+                    await this.redis.del(activeKey);
+                }
+            }
+        } catch (error) {
+            logger.warn(`⚠️ [GradualExpander] Falha ao persistir metadata de noDriversFound para ${bookingId}: ${error.message}`);
+        }
+
+        try {
+            const rideQueueManager = require('./ride-queue-manager');
+            await rideQueueManager.dequeueRide(bookingId);
+        } catch (queueError) {
+            logger.warn(`⚠️ [GradualExpander] Falha ao remover corrida ${bookingId} da fila após noDriversFound: ${queueError.message}`);
+        }
+
+        await this.stopSearch(bookingId);
+        logger.info(`📈 [GradualExpander] Busca encerrada para ${bookingId} com noDriversFound (${reasonCode})`);
     }
 }
 

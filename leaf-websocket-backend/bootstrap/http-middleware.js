@@ -65,10 +65,12 @@ function configureHttpMiddleware({
     app.use(express.json({ limit: '50mb' })); // Aumentado de 10mb para 50mb
     app.use(express.urlencoded({ extended: true, limit: '50mb' })); // Adicionado para multipart/form-data
 
-    // ✅ CORREÇÃO: Configurar timeout do servidor para uploads grandes (60s)
-    server.timeout = parseInt(process.env.SERVER_TIMEOUT) || 60000; // 60 segundos
-    server.keepAliveTimeout = 65000; // 65 segundos (maior que timeout)
-    server.headersTimeout = 66000; // 66 segundos (maior que keepAliveTimeout)
+    // ✅ Timeout mais alto para OCR/extração via IA em PDFs grandes.
+    // Mantém compatível com produção via variável de ambiente SERVER_TIMEOUT.
+    const requestTimeoutMs = parseInt(process.env.SERVER_TIMEOUT, 10) || 300000; // 5 minutos
+    server.timeout = requestTimeoutMs;
+    server.keepAliveTimeout = requestTimeoutMs + 5000;
+    server.headersTimeout = requestTimeoutMs + 10000;
     app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
     // ✅ INICIALIZAR FIREBASE ANTES DE REGISTRAR ROTAS

@@ -19,6 +19,16 @@ try {
   });
 }
 
+let supportChatService = null;
+try {
+  supportChatService = require('../services/support-chat-service');
+} catch (error) {
+  logStructured('warn', 'Support Chat Service não encontrado para reabertura automática', {
+    service: 'support-routes',
+    error: error.message
+  });
+}
+
 const AGENT_ROLES = ['admin', 'manager', 'super-admin'];
 
 const supportRateLimit = rateLimit({
@@ -195,6 +205,11 @@ router.post(
 
       await db.ref(`support_messages/${ticketId}/${messageId}`).set(initialMessage);
       await notifyAvailableAgents(ticket);
+
+      // Garantir que o chat do usuário volte para ativo ao abrir novo ticket.
+      if (supportChatService && supportChatService.reopenChat) {
+        await supportChatService.reopenChat(requesterId, 'ticket_created', { ticketId });
+      }
 
       logStructured('info', `Novo ticket criado: ${ticketId}`, {
         service: 'support-routes',

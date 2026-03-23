@@ -23,6 +23,21 @@ function initializeFirebase() {
             return firebaseApp;
         }
 
+        // Reutilizar app default já inicializado por outro módulo (ex.: helper de token em testes)
+        if (Array.isArray(admin.apps) && admin.apps.length > 0) {
+            firebaseApp = admin.app();
+            firestore = admin.firestore();
+            realtimeDB = admin.database();
+            storage = admin.storage();
+
+            logStructured('info', 'Firebase app default reaproveitado', {
+                service: 'firebase',
+                operation: 'initialize',
+                source: 'admin.apps[0]'
+            });
+            return firebaseApp;
+        }
+
         const databaseURL = process.env.FIREBASE_DATABASE_URL || 'https://leaf-reactnative-default-rtdb.firebaseio.com';
 
         // 1) Prioriza credencial via env (ideal para App Platform/containers)

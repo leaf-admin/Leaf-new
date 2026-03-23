@@ -6,6 +6,8 @@
  */
 
 const io = require('socket.io-client');
+const { getIdTokenForUid } = require('./firebase-id-token');
+const E2E_VERBOSE = String(process.env.E2E_VERBOSE || 'false').toLowerCase() === 'true';
 
 class WebSocketTestClient {
   constructor(url, options = {}) {
@@ -41,7 +43,9 @@ class WebSocketTestClient {
       this.socket.on('connect', () => {
         clearTimeout(timeout);
         this.connected = true;
-        console.log(`✅ [TestClient] Conectado: ${this.socket.id}`);
+        if (E2E_VERBOSE) {
+          console.log(`✅ [TestClient] Conectado: ${this.socket.id}`);
+        }
         resolve();
       });
 
@@ -83,7 +87,18 @@ class WebSocketTestClient {
     }
 
     const authOptions = typeof options === 'string' ? { token: options } : (options || {});
-    const token = String(authOptions.token || process.env.E2E_AUTH_TOKEN || '').trim();
+    const shouldGenerateToken = String(process.env.E2E_GENERATE_FIREBASE_TOKEN || 'true').toLowerCase() !== 'false';
+    let token = String(authOptions.token || process.env.E2E_AUTH_TOKEN || '').trim();
+    if (!token && shouldGenerateToken) {
+      try {
+        token = await getIdTokenForUid(uid);
+      } catch (error) {
+        // Em backend local com NODE_ENV=test pode autenticar sem token; em produção, o erro surgirá no evento auth_error.
+        if (E2E_VERBOSE) {
+          console.warn(`⚠️ [TestClient] Não foi possível gerar token Firebase para ${uid}: ${error.message}`);
+        }
+      }
+    }
     const normalizedUserType = userType === 'passenger' ? 'customer' : userType;
 
     return new Promise((resolve, reject) => {
@@ -186,17 +201,22 @@ class WebSocketTestClient {
         ? { ...data, mockPayment: true, __mockPayment: true }
         : data;
 
-      this.socket.emit('confirmPayment', payload);
-
-      this.socket.once('paymentConfirmed', (response) => {
+      const successHandler = (response) => {
         clearTimeout(timeout);
+        this.socket.removeListener('paymentError', errorHandler);
         resolve(response);
-      });
+      };
 
-      this.socket.once('paymentError', (error) => {
+      const errorHandler = (error) => {
         clearTimeout(timeout);
+        this.socket.removeListener('paymentConfirmed', successHandler);
         reject(new Error(error.error || error.message || 'Erro ao confirmar pagamento'));
-      });
+      };
+
+      this.socket.once('paymentConfirmed', successHandler);
+      this.socket.once('paymentError', errorHandler);
+
+      this.socket.emit('confirmPayment', payload);
     });
   }
 
@@ -211,17 +231,22 @@ class WebSocketTestClient {
         reject(new Error('Timeout ao aceitar corrida'));
       }, 10000);
 
-      this.socket.emit('acceptRide', { bookingId });
-
-      this.socket.once('rideAccepted', (response) => {
+      const successHandler = (response) => {
         clearTimeout(timeout);
+        this.socket.removeListener('acceptRideError', errorHandler);
         resolve(response);
-      });
+      };
 
-      this.socket.once('acceptRideError', (error) => {
+      const errorHandler = (error) => {
         clearTimeout(timeout);
+        this.socket.removeListener('rideAccepted', successHandler);
         reject(new Error(error.error || error.message || 'Erro ao aceitar corrida'));
-      });
+      };
+
+      this.socket.once('rideAccepted', successHandler);
+      this.socket.once('acceptRideError', errorHandler);
+
+      this.socket.emit('acceptRide', { bookingId });
     });
   }
 
@@ -281,19 +306,24 @@ class WebSocketTestClient {
     return new Promise((resolve, reject) => {
       const timeout = setTimeout(() => {
         reject(new Error('Timeout ao iniciar viagem'));
-      }, 10000);
+      }, 25000);
+
+      const successHandler = (response) => {
+        clearTimeout(timeout);
+        this.socket.removeListener('tripStartError', errorHandler);
+        resolve(response);
+      };
+
+      const errorHandler = (error) => {
+        clearTimeout(timeout);
+        this.socket.removeListener('tripStarted', successHandler);
+        reject(new Error(error.error || error.message || 'Erro ao iniciar viagem'));
+      };
+
+      this.socket.once('tripStarted', successHandler);
+      this.socket.once('tripStartError', errorHandler);
 
       this.socket.emit('startTrip', data);
-
-      this.socket.once('tripStarted', (response) => {
-        clearTimeout(timeout);
-        resolve(response);
-      });
-
-      this.socket.once('tripStartError', (error) => {
-        clearTimeout(timeout);
-        reject(new Error(error.error || error.message || 'Erro ao iniciar viagem'));
-      });
     });
   }
 
@@ -308,17 +338,22 @@ class WebSocketTestClient {
         reject(new Error('Timeout ao finalizar viagem'));
       }, 30000); // Expanded timeout to account for external woovi API payment resolution
 
-      this.socket.emit('completeTrip', data);
-
-      this.socket.once('tripCompleted', (response) => {
+      const successHandler = (response) => {
         clearTimeout(timeout);
+        this.socket.removeListener('tripCompleteError', errorHandler);
         resolve(response);
-      });
+      };
 
-      this.socket.once('tripCompleteError', (error) => {
+      const errorHandler = (error) => {
         clearTimeout(timeout);
+        this.socket.removeListener('tripCompleted', successHandler);
         reject(new Error(error.error || error.message || 'Erro ao finalizar viagem'));
-      });
+      };
+
+      this.socket.once('tripCompleted', successHandler);
+      this.socket.once('tripCompleteError', errorHandler);
+
+      this.socket.emit('completeTrip', data);
     });
   }
 
@@ -332,19 +367,24 @@ class WebSocketTestClient {
     return new Promise((resolve, reject) => {
       const timeout = setTimeout(() => {
         reject(new Error('Timeout ao cancelar corrida'));
-      }, 10000);
+      }, 30000);
+
+      const successHandler = (response) => {
+        clearTimeout(timeout);
+        this.socket.removeListener('rideCancellationError', errorHandler);
+        resolve(response);
+      };
+
+      const errorHandler = (error) => {
+        clearTimeout(timeout);
+        this.socket.removeListener('rideCancelled', successHandler);
+        reject(new Error(error.error || error.message || 'Erro ao cancelar corrida'));
+      };
+
+      this.socket.once('rideCancelled', successHandler);
+      this.socket.once('rideCancellationError', errorHandler);
 
       this.socket.emit('cancelRide', { bookingId, reason });
-
-      this.socket.once('rideCancelled', (response) => {
-        clearTimeout(timeout);
-        resolve(response);
-      });
-
-      this.socket.once('rideCancellationError', (error) => {
-        clearTimeout(timeout);
-        reject(new Error(error.error || error.message || 'Erro ao cancelar corrida'));
-      });
     });
   }
 
@@ -355,21 +395,36 @@ class WebSocketTestClient {
    */
   async requestRideExtension(data) {
     return new Promise((resolve, reject) => {
+      const mockExtensionDefaultEnabled =
+        String(process.env.E2E_MOCK_PAYMENT || 'true').toLowerCase() !== 'false';
+      const payload =
+        mockExtensionDefaultEnabled &&
+        data &&
+        data.mockPayment === undefined &&
+        data.__mockPayment === undefined
+          ? { ...data, mockPayment: true, __mockPayment: true }
+          : data;
+
       const timeout = setTimeout(() => {
         reject(new Error('Timeout ao solicitar extensão de corrida'));
-      }, 15000);
+      }, 30000);
 
-      this.socket.emit('requestRideExtension', data);
-
-      this.socket.once('rideExtensionPaymentRequired', (response) => {
+      const successHandler = (response) => {
         clearTimeout(timeout);
+        this.socket.removeListener('rideExtensionError', errorHandler);
         resolve(response);
-      });
+      };
 
-      this.socket.once('rideExtensionError', (error) => {
+      const errorHandler = (error) => {
         clearTimeout(timeout);
+        this.socket.removeListener('rideExtensionPaymentRequired', successHandler);
         reject(new Error(error.error || error.message || 'Erro ao solicitar extensão'));
-      });
+      };
+
+      this.socket.once('rideExtensionPaymentRequired', successHandler);
+      this.socket.once('rideExtensionError', errorHandler);
+
+      this.socket.emit('requestRideExtension', payload);
     });
   }
 
@@ -384,17 +439,22 @@ class WebSocketTestClient {
         reject(new Error('Timeout ao alterar destino'));
       }, 15000);
 
-      this.socket.emit('changeDestination', data);
-
-      this.socket.once('destinationChanged', (response) => {
+      const successHandler = (response) => {
         clearTimeout(timeout);
+        this.socket.removeListener('changeDestinationError', errorHandler);
         resolve(response);
-      });
+      };
 
-      this.socket.once('changeDestinationError', (error) => {
+      const errorHandler = (error) => {
         clearTimeout(timeout);
+        this.socket.removeListener('destinationChanged', successHandler);
         reject(new Error(error.error || error.message || 'Erro ao alterar destino'));
-      });
+      };
+
+      this.socket.once('destinationChanged', successHandler);
+      this.socket.once('changeDestinationError', errorHandler);
+
+      this.socket.emit('changeDestination', data);
     });
   }
 

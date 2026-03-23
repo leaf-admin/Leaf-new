@@ -62,9 +62,14 @@ function setupEventBusAndWorkers({
             });
 
             workerManager.registerListener(EVENT_TYPES.RIDE_CANCELED, async (event) => {
-                const bookingId = event.bookingId || event.data?.bookingId;
+                const rawPayload = event?.data && typeof event.data === 'object' ? event.data : {};
+                const nestedPayload = rawPayload?.data && typeof rawPayload.data === 'object' ? rawPayload.data : null;
+                const bookingId = event?.bookingId || rawPayload?.bookingId || nestedPayload?.bookingId;
                 if (!bookingId) {
-                    logStructured('warn', 'RIDE_CANCELED listener recebeu evento sem bookingId', { event });
+                    logStructured('debug', 'RIDE_CANCELED listener ignorou evento sem bookingId', {
+                        listener: 'ride_canceled.stop_search',
+                        eventType: event?.eventType || null
+                    });
                     return;
                 }
                 const ioInstance = global.io || io;

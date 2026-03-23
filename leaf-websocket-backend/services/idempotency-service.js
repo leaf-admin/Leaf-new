@@ -34,6 +34,8 @@ class IdempotencyService {
     async checkAndSet(key, ttl = null) {
         try {
             await this.ensureConnection();
+
+            const operation = this.extractOperationFromKey(key);
             
             const idempotencyKey = `idempotency:${key}`;
             const ttlToUse = ttl || this.defaultTTL;
@@ -44,7 +46,7 @@ class IdempotencyService {
             if (result === 'OK' || result === true) {
                 // Chave criada = primeira vez (não é duplicado)
                 logger.debug(`✅ [Idempotency] Nova requisição: ${key}`);
-                metrics.recordIdempotency(key.split(':')[0] || 'unknown', false); // miss
+                metrics.recordIdempotency(operation, false); // miss
                 return { isNew: true, cachedResult: null };
             } else {
                 // Chave já existe = requisição duplicada
@@ -55,14 +57,14 @@ class IdempotencyService {
                 
                 if (cachedResult) {
                     logger.debug(`✅ [Idempotency] Retornando resultado cached para: ${key}`);
-                    metrics.recordIdempotency(key.split(':')[0] || 'unknown', true); // hit
+                    metrics.recordIdempotency(operation, true); // hit
                     return { 
                         isNew: false, 
                         cachedResult: JSON.parse(cachedResult) 
                     };
                 }
                 
-                metrics.recordIdempotency(key.split(':')[0] || 'unknown', true); // hit (duplicado sem cache)
+                metrics.recordIdempotency(operation, true); // hit (duplicado sem cache)
                 return { isNew: false, cachedResult: null };
             }
         } catch (error) {
@@ -113,6 +115,39 @@ class IdempotencyService {
         return `${userId}:${action}:${Date.now()}`;
     }
 
+    normalizeOperationLabel(value) {
+        const safe = String(value || '')
+            .trim()
+            .toLowerCase()
+            .replace(/[^a-z0-9_]+/g, '_')
+            .replace(/_+/g, '_')
+            .replace(/^_+|_+$/g, '');
+        if (!safe) return 'unknown';
+        if (safe.length > 40) {
+            return safe.slice(0, 40);
+        }
+        return safe;
+    }
+
+    extractOperationFromKey(key) {
+        if (!key || typeof key !== 'string') {
+            return 'unknown';
+        }
+
+        const parts = key.split(':');
+        if (parts.length >= 2 && parts[1]) {
+            return this.normalizeOperationLabel(parts[1]);
+        }
+
+        const lower = key.toLowerCase();
+        if (lower.startsWith('sustain_')) return 'sustain';
+        if (lower.startsWith('capacity_')) return 'capacity';
+        if (lower.startsWith('system')) return 'system';
+
+        const firstToken = lower.split('_')[0];
+        return this.normalizeOperationLabel(firstToken || 'custom');
+    }
+
     /**
      * Limpar chave de idempotency (útil para testes ou casos especiais)
      * @param {string} key - Chave de idempotency
@@ -137,4 +172,3 @@ class IdempotencyService {
 // Singleton
 const idempotencyService = new IdempotencyService();
 module.exports = idempotencyService;
-

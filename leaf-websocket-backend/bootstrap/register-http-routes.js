@@ -105,6 +105,16 @@ function registerHttpRoutes({ app, logStructured, io = null }) {
     }
     logStructured('info', 'Rotas de Support (completo) registradas com WebSocket', { service: 'server' });
 
+    // Rotas de Geofence (registradas antes do dashboard para evitar conflitos de matching)
+    const geofenceRoutes = require('../routes/geofence-routes');
+    app.use('/api/geofence', geofenceRoutes);
+    logStructured('info', 'Rotas de Geofence registradas', { service: 'server' });
+
+    // Rotas de Programas de Convites / Founder
+    const referralProgramsRoutes = require('../routes/referral-programs');
+    app.use('/api/programs/referrals', referralProgramsRoutes);
+    logStructured('info', 'Rotas de Programas de Convites registradas', { service: 'server' });
+
     // Rotas Dashboard
     app.use('/', dashboardRoutes);
     logStructured('info', 'Rotas Dashboard registradas', { service: 'server' });
@@ -121,7 +131,6 @@ function registerHttpRoutes({ app, logStructured, io = null }) {
     // Rotas Waitlist - ANTES do CORS global para evitar conflitos
     // Nota: waitlistRoutes tem seu próprio middleware CORS que sobrescreve o global
     app.use('/', waitlistRoutes);
-    app.use('/', metricsRoutes);
     logStructured('info', 'Rotas Waitlist registradas', { service: 'server' });
 
     // Rotas de verificação de status do driver
@@ -168,10 +177,12 @@ function registerHttpRoutes({ app, logStructured, io = null }) {
     // Rotas de App Info
     const appRoutes = require('../routes/app-routes');
     app.use('/api/app', appRoutes);
-
-    const geofenceRoutes = require('../routes/geofence-routes');
-    app.use('/api/geofence', geofenceRoutes);
     logStructured('info', 'Rotas de App Info registradas', { service: 'server' });
+
+    // Rotas públicas legais (Privacy Policy, Terms, Account Deletion)
+    const legalPagesRoutes = require('../routes/legal-pages');
+    app.use('/', legalPagesRoutes);
+    logStructured('info', 'Rotas de páginas legais registradas', { service: 'server' });
 
     // Rotas de Notificações
     app.use('/api/notifications', notificationsRoutes);

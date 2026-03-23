@@ -215,12 +215,96 @@ class OCRService {
   }
 
   /**
+   * Tenta extrair a maior imagem JPEG/JPX embutida no PDF (XObject /Subtype /Image).
+   * Útil para CNH-e/CRLV-e que vêm como imagem dentro de um PDF com pouco texto nativo.
+   * @param {Buffer} pdfBuffer
+   * @returns {Buffer|null}
+   */
+  extractLargestEmbeddedImageFromPDF(pdfBuffer) {
+    try {
+      const raw = pdfBuffer.toString('latin1');
+      const objectRegex = /(\d+)\s+0\s+obj([\s\S]*?)endobj/g;
+
+      let match;
+      let best = null;
+
+      while ((match = objectRegex.exec(raw)) !== null) {
+        const objectBody = match[2] || '';
+        if (!/\/Subtype\s*\/Image/.test(objectBody)) continue;
+        if (!/\/Filter\s*\/(DCTDecode|JPXDecode)/.test(objectBody)) continue;
+
+        const streamMarker = objectBody.indexOf('stream');
+        const endStreamMarker = objectBody.lastIndexOf('endstream');
+        if (streamMarker < 0 || endStreamMarker <= streamMarker) continue;
+
+        const fullObjectText = match[0];
+        const streamInFullObject = fullObjectText.indexOf('stream');
+        const endStreamInFullObject = fullObjectText.lastIndexOf('endstream');
+        if (streamInFullObject < 0 || endStreamInFullObject <= streamInFullObject) continue;
+
+        let streamStart = match.index + streamInFullObject + 'stream'.length;
+        const nextTwo = raw.slice(streamStart, streamStart + 2);
+        if (nextTwo === '\r\n') {
+          streamStart += 2;
+        } else if (nextTwo[0] === '\n' || nextTwo[0] === '\r') {
+          streamStart += 1;
+        }
+
+        let streamEnd = match.index + endStreamInFullObject;
+        if (raw[streamEnd - 1] === '\n' && raw[streamEnd - 2] === '\r') {
+          streamEnd -= 2;
+        } else if (raw[streamEnd - 1] === '\n' || raw[streamEnd - 1] === '\r') {
+          streamEnd -= 1;
+        }
+
+        if (streamEnd <= streamStart) continue;
+
+        const widthMatch = objectBody.match(/\/Width\s+(\d+)/);
+        const heightMatch = objectBody.match(/\/Height\s+(\d+)/);
+        const width = Number(widthMatch?.[1] || 0);
+        const height = Number(heightMatch?.[1] || 0);
+        const score = width > 0 && height > 0 ? width * height : (streamEnd - streamStart);
+
+        if (!best || score > best.score) {
+          best = {
+            score,
+            width,
+            height,
+            streamStart,
+            streamEnd
+          };
+        }
+      }
+
+      if (!best) return null;
+      const imageBuffer = pdfBuffer.slice(best.streamStart, best.streamEnd);
+      if (!imageBuffer || imageBuffer.length < 1024) return null;
+
+      logger.info('🖼️ Imagem embutida extraída do PDF', {
+        width: best.width || null,
+        height: best.height || null,
+        bytes: imageBuffer.length
+      });
+
+      return imageBuffer;
+    } catch (error) {
+      logger.warn('⚠️ Falha ao extrair imagem embutida do PDF:', error.message);
+      return null;
+    }
+  }
+
+  /**
    * Converte PDF para imagem (para uso com Tesseract)
    * @param {Buffer} pdfBuffer - Buffer do PDF
    * @returns {Promise<Buffer>} Buffer da imagem
    */
   async convertPDFToImage(pdfBuffer) {
     try {
+      const embeddedImage = this.extractLargestEmbeddedImageFromPDF(pdfBuffer);
+      if (embeddedImage) {
+        return embeddedImage;
+      }
+
       const { execSync } = require('child_process');
       const fs = require('fs');
       const path = require('path');
@@ -1228,4 +1312,3 @@ class OCRService {
 }
 
 module.exports = new OCRService();
-

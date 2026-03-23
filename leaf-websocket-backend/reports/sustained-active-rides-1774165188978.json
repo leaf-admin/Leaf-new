@@ -1,0 +1,199 @@
+{
+  "startedAt": "2026-03-22T07:39:48.979Z",
+  "config": {
+    "wsUrl": "https://api.147.182.204.181.sslip.io",
+    "httpBase": "https://api.147.182.204.181.sslip.io",
+    "profile": "quick",
+    "forceRealPayment": true,
+    "mockCompletePayment": true,
+    "provisionDriverVehicles": true,
+    "strictReady": true,
+    "loopTickMs": 220,
+    "heartbeatMs": 1000,
+    "paymentRetries": 4,
+    "dispatchTimeoutMs": 45000,
+    "readinessTimeoutMs": 30000,
+    "preBookingReadinessRecheckMs": 0,
+    "drainTimeoutMs": 300000
+  },
+  "pool": {
+    "requested": {
+      "drivers": 18,
+      "passengers": 22
+    },
+    "connected": {
+      "drivers": 18,
+      "passengers": 22
+    },
+    "readyDrivers": 0,
+    "uids": {
+      "drivers": 18,
+      "passengers": 22
+    },
+    "tokenGeneration": {
+      "total": 40,
+      "ok": 40,
+      "failed": 0
+    },
+    "provisioning": {
+      "attempted": 18,
+      "ok": 0,
+      "failed": 18
+    }
+  },
+  "windows": [],
+  "metrics": {
+    "startedRides": 0,
+    "completedRides": 0,
+    "failedStarts": 0,
+    "failedCompletes": 0,
+    "paymentBlockedRetries": 0,
+    "paymentBlockedHardFails": 0,
+    "noDriverCapacityMisses": 0,
+    "noPassengerCapacityMisses": 0,
+    "latencyMs": {
+      "createBooking": [],
+      "confirmPayment": [],
+      "bookingToDispatch": [],
+      "acceptRide": [],
+      "startTrip": [],
+      "tripDuration": [],
+      "completeTrip": [],
+      "fullFlowToStart": []
+    },
+    "errors": {
+      "fatal": 1
+    },
+    "errorSamples": {}
+  },
+  "notes": [
+    "Driver vehicle provisioning failed (capacity_1774165188978_driver_0): firebase_realtime_unavailable",
+    "Driver vehicle provisioning failed (capacity_1774165188978_driver_1): firebase_realtime_unavailable",
+    "Driver vehicle provisioning failed (capacity_1774165188978_driver_2): firebase_realtime_unavailable",
+    "Driver vehicle provisioning failed (capacity_1774165188978_driver_3): firebase_realtime_unavailable",
+    "Driver vehicle provisioning failed (capacity_1774165188978_driver_4): firebase_realtime_unavailable",
+    "Driver vehicle provisioning failed (capacity_1774165188978_driver_5): firebase_realtime_unavailable",
+    "Driver vehicle provisioning failed (capacity_1774165188978_driver_6): firebase_realtime_unavailable",
+    "Driver vehicle provisioning failed (capacity_1774165188978_driver_7): firebase_realtime_unavailable",
+    "Driver vehicle provisioning failed (capacity_1774165188978_driver_8): firebase_realtime_unavailable",
+    "Driver vehicle provisioning failed (capacity_1774165188978_driver_9): firebase_realtime_unavailable",
+    "Driver vehicle provisioning failed (capacity_1774165188978_driver_10): firebase_realtime_unavailable",
+    "Driver vehicle provisioning failed (capacity_1774165188978_driver_11): firebase_realtime_unavailable",
+    "Driver vehicle provisioning failed (capacity_1774165188978_driver_12): firebase_realtime_unavailable",
+    "Driver vehicle provisioning failed (capacity_1774165188978_driver_13): firebase_realtime_unavailable",
+    "Driver vehicle provisioning failed (capacity_1774165188978_driver_14): firebase_realtime_unavailable",
+    "Driver vehicle provisioning failed (capacity_1774165188978_driver_15): firebase_realtime_unavailable",
+    "Driver vehicle provisioning failed (capacity_1774165188978_driver_16): firebase_realtime_unavailable",
+    "Driver vehicle provisioning failed (capacity_1774165188978_driver_17): firebase_realtime_unavailable",
+    "Driver not ready at bootstrap (capacity_1774165188978_driver_0) - canReceiveRequests=false",
+    "Driver not ready at bootstrap (capacity_1774165188978_driver_1) - canReceiveRequests=false",
+    "Driver not ready at bootstrap (capacity_1774165188978_driver_2) - canReceiveRequests=false",
+    "Driver not ready at bootstrap (capacity_1774165188978_driver_3) - canReceiveRequests=false",
+    "Driver not ready at bootstrap (capacity_1774165188978_driver_4) - canReceiveRequests=false",
+    "Driver not ready at bootstrap (capacity_1774165188978_driver_5) - canReceiveRequests=false",
+    "Driver not ready at bootstrap (capacity_1774165188978_driver_6) - canReceiveRequests=false",
+    "Driver not ready at bootstrap (capacity_1774165188978_driver_7) - canReceiveRequests=false",
+    "Driver not ready at bootstrap (capacity_1774165188978_driver_8) - canReceiveRequests=false",
+    "Driver not ready at bootstrap (capacity_1774165188978_driver_9) - canReceiveRequests=false",
+    "Driver not ready at bootstrap (capacity_1774165188978_driver_10) - canReceiveRequests=false",
+    "Driver not ready at bootstrap (capacity_1774165188978_driver_11) - canReceiveRequests=false",
+    "Driver not ready at bootstrap (capacity_1774165188978_driver_12) - canReceiveRequests=false",
+    "Driver not ready at bootstrap (capacity_1774165188978_driver_13) - canReceiveRequests=false",
+    "Driver not ready at bootstrap (capacity_1774165188978_driver_14) - canReceiveRequests=false",
+    "Driver not ready at bootstrap (capacity_1774165188978_driver_15) - canReceiveRequests=false",
+    "Driver not ready at bootstrap (capacity_1774165188978_driver_16) - canReceiveRequests=false",
+    "Driver not ready at bootstrap (capacity_1774165188978_driver_17) - canReceiveRequests=false",
+    "Fatal: No usable pool to run scenario (0 effective active capacity)"
+  ],
+  "finishedAt": "2026-03-22T07:41:27.102Z",
+  "durationMs": 98123,
+  "summary": {
+    "startedRides": 0,
+    "completedRides": 0,
+    "activeRidesAtEnd": 0,
+    "completionRatePct": 0,
+    "failedStarts": 0,
+    "failedCompletes": 0,
+    "paymentBlockedRetries": 0,
+    "paymentBlockedHardFails": 0,
+    "noDriverCapacityMisses": 0,
+    "noPassengerCapacityMisses": 0,
+    "latencyMs": {
+      "createBooking": {
+        "count": 0,
+        "p50": 0,
+        "p95": 0,
+        "p99": 0,
+        "max": 0,
+        "avg": 0
+      },
+      "confirmPayment": {
+        "count": 0,
+        "p50": 0,
+        "p95": 0,
+        "p99": 0,
+        "max": 0,
+        "avg": 0
+      },
+      "bookingToDispatch": {
+        "count": 0,
+        "p50": 0,
+        "p95": 0,
+        "p99": 0,
+        "max": 0,
+        "avg": 0
+      },
+      "acceptRide": {
+        "count": 0,
+        "p50": 0,
+        "p95": 0,
+        "p99": 0,
+        "max": 0,
+        "avg": 0
+      },
+      "startTrip": {
+        "count": 0,
+        "p50": 0,
+        "p95": 0,
+        "p99": 0,
+        "max": 0,
+        "avg": 0
+      },
+      "completeTrip": {
+        "count": 0,
+        "p50": 0,
+        "p95": 0,
+        "p99": 0,
+        "max": 0,
+        "avg": 0
+      },
+      "tripDuration": {
+        "count": 0,
+        "p50": 0,
+        "p95": 0,
+        "p99": 0,
+        "max": 0,
+        "avg": 0
+      },
+      "fullFlowToStart": {
+        "count": 0,
+        "p50": 0,
+        "p95": 0,
+        "p99": 0,
+        "max": 0,
+        "avg": 0
+      }
+    },
+    "topErrors": [
+      {
+        "error": "fatal",
+        "count": 1
+      }
+    ],
+    "errorSamples": {}
+  },
+  "capacityEstimate": {
+    "sustainedActiveRidesEstimated": 0,
+    "interpretation": "No window met the >=90% target-hit + low-failure criteria. Check errors and pool readiness."
+  }
+}

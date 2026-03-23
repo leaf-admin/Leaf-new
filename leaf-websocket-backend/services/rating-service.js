@@ -1,5 +1,6 @@
 const firebaseConfig = require('../firebase-config');
 const { logStructured } = require('../utils/logger');
+const kycPolicyService = require('./kyc-policy-service');
 
 const MAX_COMMENT_LENGTH = 500;
 
@@ -150,6 +151,39 @@ class RatingService {
 
     await db.ref().update(updates);
 
+    let kycEscalation = null;
+    if (
+      reviewerType === 'passenger'
+      && targetUserId
+      && kycPolicyService.isPhotoMismatchReport({
+        ...payload,
+        selectedOptions: rating.selectedOptions,
+        comment: rating.comment
+      })
+    ) {
+      try {
+        kycEscalation = await kycPolicyService.markDriverForPhotoMismatch({
+          driverId: targetUserId,
+          tripId,
+          reporterId: reviewerId,
+          reporterType: reviewerType,
+          payload: {
+            selectedOptions: rating.selectedOptions,
+            comment: rating.comment,
+            suggestion: payload.suggestion || null
+          }
+        });
+      } catch (kycError) {
+        logStructured('warn', 'Falha ao acionar revalidacao KYC por denuncia', {
+          service: 'rating-service',
+          tripId,
+          reviewerId,
+          targetUserId,
+          error: kycError.message
+        });
+      }
+    }
+
     logStructured('info', 'Avaliação registrada', {
       service: 'rating-service',
       tripId,
@@ -162,7 +196,8 @@ class RatingService {
     return {
       success: true,
       ratingId,
-      rating
+      rating,
+      kycEscalation
     };
   }
 

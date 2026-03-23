@@ -3,14 +3,18 @@ const router = express.Router();
 const admin = require('firebase-admin');
 const { logger } = require('../utils/logger');
 
+const DEFAULT_DELETION_REASON = 'user_requested_mobile_app';
+const legacyDeleteDataRoutesEnabled =
+  String(process.env.ENABLE_LEGACY_ACCOUNT_DELETE_ROUTES || 'false').toLowerCase() === 'true';
+
 // Middleware de autenticação Firebase
 const requireFirebase = async (req, res, next) => {
   try {
     const authHeader = req.headers.authorization;
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
-      return res.status(401).json({ 
+      return res.status(401).json({
         success: false,
-        error: 'Token de autorização não fornecido' 
+        error: 'Token de autorização não fornecido'
       });
     }
 
@@ -21,51 +25,43 @@ const requireFirebase = async (req, res, next) => {
     next();
   } catch (error) {
     logger.error('Erro na autenticação Firebase:', error);
-    return res.status(401).json({ 
+    return res.status(401).json({
       success: false,
-      error: 'Token inválido ou expirado' 
+      error: 'Token inválido ou expirado'
     });
   }
 };
 
-/**
- * POST /api/account/delete
- * Exclui conta do usuário autenticado
- * Requer: autenticação + telefone + senha
- */
-router.post('/api/account/delete', requireFirebase, async (req, res) => {
+const normalizePhone = (phone) => String(phone || '').replace(/\D/g, '');
+
+async function processAccountDeletion(req, res, options = {}) {
+  const { allowParamUserId = false } = options;
+
   try {
-    const userId = req.user.uid;
-    const { reason, additionalInfo, phone, password } = req.body;
+    const authenticatedUserId = req.user.uid;
+    const requestedUserId = String(req.params.userId || authenticatedUserId).trim();
 
-    // Validação de entrada
-    if (!reason) {
-      return res.status(400).json({
+    if (allowParamUserId && requestedUserId && requestedUserId !== authenticatedUserId) {
+      return res.status(403).json({
         success: false,
-        message: 'Motivo da exclusão é obrigatório.'
+        message: 'Você só pode excluir a sua própria conta.'
       });
     }
 
-    if (!phone) {
-      return res.status(400).json({
-        success: false,
-        message: 'Número de telefone é obrigatório.'
-      });
-    }
+    const userId = authenticatedUserId;
 
-    if (!password) {
-      return res.status(400).json({
-        success: false,
-        message: 'Senha é obrigatória.'
-      });
-    }
+    const {
+      reason,
+      additionalInfo,
+      phone,
+      password,
+      source
+    } = req.body || {};
 
-    // Normalizar telefone (remover caracteres não numéricos)
-    const normalizedPhone = phone.replace(/\D/g, '');
+    const deletionReason = String(reason || DEFAULT_DELETION_REASON).trim() || DEFAULT_DELETION_REASON;
 
-    // Buscar dados do usuário no Firestore
     const userDoc = await admin.firestore().collection('users').doc(userId).get();
-    
+
     if (!userDoc.exists) {
       return res.status(404).json({
         success: false,
@@ -73,102 +69,71 @@ router.post('/api/account/delete', requireFirebase, async (req, res) => {
       });
     }
 
-    const userData = userDoc.data();
+    const userData = userDoc.data() || {};
 
-    // 1. Verificar se o telefone corresponde ao usuário logado
-    const userPhone = userData.phone?.replace(/\D/g, '') || userData.phoneNumber?.replace(/\D/g, '') || '';
-    
-    if (userPhone !== normalizedPhone) {
-      logger.warn(`Tentativa de exclusão com telefone incorreto - UserId: ${userId}, Telefone fornecido: ${normalizedPhone}, Telefone cadastrado: ${userPhone}`);
+    // Torna o endpoint compatível com autenticação por OTP (sem senha no app).
+    // Se telefone for enviado, validamos contra o cadastro para evitar erro de identificação.
+    const normalizedPhone = normalizePhone(phone);
+    const registeredPhone = normalizePhone(
+      userData.phone || userData.phoneNumber || req.user.phone_number || ''
+    );
+
+    if (normalizedPhone && registeredPhone && normalizedPhone !== registeredPhone) {
+      logger.warn(
+        `Tentativa de exclusão com telefone divergente - UserId: ${userId}, informado: ${normalizedPhone}, cadastrado: ${registeredPhone}`
+      );
       return res.status(400).json({
         success: false,
         message: 'Número de telefone não corresponde à sua conta.'
       });
     }
 
-    // 2. Verificar senha
-    // Nota: Em produção, você deve ter a senha criptografada no Firestore
-    // Por enquanto, vamos verificar via Firebase Auth reautenticação
-    try {
-      // Tentar reautenticar o usuário com email e senha
-      // Como Firebase Auth não permite verificar senha diretamente,
-      // vamos usar o método de reautenticação
-      
-      // Se o usuário tem email cadastrado, tentamos reautenticar
-      if (userData.email) {
-        // Nota: Esta é uma abordagem simplificada
-        // Em produção, você deve implementar verificação de senha adequada
-        // Por exemplo, usando Firebase Admin para verificar credenciais
-        
-        // Por enquanto, vamos aceitar se o token Firebase é válido e telefone está correto
-        // Em produção real, implemente verificação de senha adequada
-      } else {
-        // Se não tem email, validar senha de outra forma (se armazenada no Firestore)
-        // Por segurança, vamos requerer que tenha email ou senha armazenada
-        if (!userData.passwordHash) {
-          logger.warn(`Usuário ${userId} não tem método de verificação de senha configurado`);
-          // Continuar com validação alternativa se necessário
-        }
-      }
-    } catch (authError) {
-      logger.error(`Erro ao verificar senha do usuário ${userId}:`, authError);
-      return res.status(400).json({
-        success: false,
-        message: 'Senha incorreta. Por favor, verifique sua senha e tente novamente.'
+    if (userData.status === 'deletion_pending') {
+      return res.json({
+        success: true,
+        message: 'Sua conta já está marcada para exclusão.',
+        deletionRequested: true
       });
     }
 
-    // 3. Log do motivo da exclusão (antes de excluir)
     const deletionLog = {
-      userId: userId,
-      reason: reason,
+      userId,
+      reason: deletionReason,
       additionalInfo: additionalInfo || '',
-      phone: normalizedPhone,
+      phone: normalizedPhone || registeredPhone || null,
+      passwordProvided: Boolean(password),
+      source: source || 'mobile-app',
       timestamp: admin.firestore.FieldValue.serverTimestamp(),
       userEmail: userData.email || null,
       userName: userData.name || userData.fullName || null
     };
 
     await admin.firestore().collection('account_deletions').add(deletionLog);
-    logger.info(`Registro de exclusão de conta criado - UserId: ${userId}, Motivo: ${reason}`);
-
-    // 4. Processar exclusão da conta
-    // Nota: Firebase Auth não permite exclusão direta via Admin SDK sem confirmação
-    // Vou marcar a conta como "para exclusão" e processar em background
-    // ou excluir diretamente se a política permitir
+    logger.info(`Registro de exclusão de conta criado - UserId: ${userId}, Motivo: ${deletionReason}`);
 
     try {
-      // Marcar conta como desabilitada primeiro
       await admin.auth().updateUser(userId, {
         disabled: true
       });
 
-      // Marcar no Firestore como pendente de exclusão
       await admin.firestore().collection('users').doc(userId).update({
         status: 'deletion_pending',
         deletionRequestedAt: admin.firestore.FieldValue.serverTimestamp(),
-        deletionReason: reason
+        deletionReason,
+        deletionSource: source || 'mobile-app',
+        deletionAdditionalInfo: additionalInfo || ''
       });
 
-      // Log de sucesso
       logger.info(`Conta marcada para exclusão - UserId: ${userId}`);
 
-      // Em produção, você pode querer:
-      // 1. Enviar email de confirmação
-      // 2. Agendar exclusão após período de espera (ex: 30 dias)
-      // 3. Processar exclusão completa em background job
-      
-      // Por enquanto, vamos considerar a exclusão como concluída
-      res.json({
+      return res.json({
         success: true,
-        message: 'Sua conta foi excluída com sucesso. Todos os seus dados serão permanentemente removidos.',
+        message: 'Sua conta foi marcada para exclusão com sucesso. Seus dados serão removidos conforme a política de retenção aplicável.',
         deletionRequested: true
       });
-
     } catch (deleteError) {
       logger.error(`Erro ao excluir conta do usuário ${userId}:`, deleteError);
-      
-      // Reverter marcação no Firestore se falhar
+
       try {
         await admin.firestore().collection('users').doc(userId).update({
           status: userData.status || 'active'
@@ -179,32 +144,42 @@ router.post('/api/account/delete', requireFirebase, async (req, res) => {
 
       return res.status(500).json({
         success: false,
-        message: 'Erro ao processar exclusão da conta. Por favor, tente novamente ou entre em contato com o suporte.'
+        message: 'Erro ao processar exclusão da conta. Tente novamente ou entre em contato com o suporte.'
       });
     }
-
   } catch (error) {
     logger.error('Erro ao excluir conta:', error);
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
       message: 'Erro interno ao processar exclusão da conta.'
     });
   }
+}
+
+/**
+ * POST /api/account/delete
+ * Exclui conta do usuário autenticado
+ */
+router.post('/api/account/delete', requireFirebase, async (req, res) => {
+  await processAccountDeletion(req, res, { allowParamUserId: false });
 });
 
+/**
+ * DELETE /api/privacy/delete-data/:userId
+ * Rota legada para compatibilidade com versões antigas do app
+ */
+if (legacyDeleteDataRoutesEnabled) {
+  router.delete('/api/privacy/delete-data/:userId', requireFirebase, async (req, res) => {
+    await processAccountDeletion(req, res, { allowParamUserId: true });
+  });
+
+  /**
+   * POST /api/privacy/delete-data/:userId
+   * Compatibilidade adicional para clientes que não enviam DELETE
+   */
+  router.post('/api/privacy/delete-data/:userId', requireFirebase, async (req, res) => {
+    await processAccountDeletion(req, res, { allowParamUserId: true });
+  });
+}
+
 module.exports = router;
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-

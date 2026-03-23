@@ -5,6 +5,9 @@ const { logStructured, logError } = require('../utils/logger');
 const { getWooviConfig, getWooviAuthHeaders } = require('../config/woovi-config');
 
 const WOOVI_CONFIG = getWooviConfig();
+const legacyWooviAliasRouteEnabled =
+  String(process.env.ENABLE_LEGACY_WOOVI_ALIAS_ROUTE || 'false').toLowerCase() === 'true';
+
 logStructured('info', 'Configuração Woovi carregada', {
   service: 'woovi-routes',
   environment: WOOVI_CONFIG.environment,
@@ -12,6 +15,69 @@ logStructured('info', 'Configuração Woovi carregada', {
   hasToken: Boolean(WOOVI_CONFIG.apiToken),
   hasAppId: Boolean(WOOVI_CONFIG.appId)
 });
+
+const COMPLETED_WEBHOOK_EVENTS = new Set([
+  'OPENPIX:CHARGE_COMPLETED',
+  'CHARGE_COMPLETED',
+  'CHARGE_CONFIRMED',
+  'CHARGE_PAID',
+  'CHARGE.COMPLETED',
+  'CHARGE.CONFIRMED',
+  'CHARGE.PAID',
+  'LEAF-CHARGE.CONFIRMED',
+  'LEAF-CHARGE.COMPLETED',
+  'OPENPIX:TRANSACTION_RECEIVED',
+  'TRANSACTION_RECEIVED'
+]);
+
+const COMPLETED_PAYMENT_STATUSES = new Set([
+  'COMPLETED',
+  'CONFIRMED',
+  'PAID',
+  'IN_HOLDING',
+  'DISTRIBUTED'
+]);
+
+function normalizeEventName(eventName) {
+  return String(eventName || '').trim().toUpperCase();
+}
+
+function normalizePaymentStatus(status) {
+  return String(status || '').trim().toUpperCase();
+}
+
+function normalizeAdditionalInfo(rawAdditionalInfo) {
+  if (Array.isArray(rawAdditionalInfo)) {
+    return rawAdditionalInfo.filter((info) => info && typeof info === 'object');
+  }
+
+  if (rawAdditionalInfo && typeof rawAdditionalInfo === 'object') {
+    return Object.entries(rawAdditionalInfo).map(([key, value]) => ({
+      key,
+      value: value === null || value === undefined ? '' : String(value)
+    }));
+  }
+
+  return [];
+}
+
+function getAdditionalInfoValue(additionalInfo, acceptedKeys = []) {
+  if (!Array.isArray(additionalInfo) || additionalInfo.length === 0 || !acceptedKeys.length) {
+    return null;
+  }
+
+  const acceptedSet = new Set(acceptedKeys.map((key) => String(key || '').toLowerCase()));
+  const match = additionalInfo.find((info) => {
+    const key = String(info?.key || info?.name || '').toLowerCase();
+    return acceptedSet.has(key);
+  });
+
+  if (!match || match.value === undefined || match.value === null || match.value === '') {
+    return null;
+  }
+
+  return String(match.value);
+}
 
 const ensureWooviCredentials = (res) => {
   if (!WOOVI_CONFIG.apiToken) {
@@ -117,9 +183,10 @@ router.get('/woovi/check-status/:correlationID', async (req, res) => {
 
 // Listar cobranças
 router.get('/woovi/list-charges', async (req, res) => {
+  const page = req.query.page || 1;
+  const limit = req.query.limit || 10;
   try {
     if (!ensureWooviCredentials(res)) return;
-    const { page = 1, limit = 10 } = req.query;
 
     const response = await axios.get(`${WOOVI_CONFIG.baseUrl}/charge`, {
       headers: getWooviAuthHeaders(WOOVI_CONFIG),
@@ -481,9 +548,8 @@ router.post('/woovi/test-webhook', async (req, res) => {
   }
 });
 
-// Webhook para receber notificações da Woovi
+// Webhook principal para receber notificações da Woovi
 // Documentação: https://developers.woovi.com/docs/category/exemplos
-// ✅ Suporta ambas as rotas: /woovi/webhook e /woovi-webhook (com hífen)
 router.post('/woovi/webhook', async (req, res) => {
   // ✅ Armazenar io no req para uso nas funções de handler
   req.io = req.app.get('io');
@@ -551,7 +617,7 @@ router.post('/woovi/webhook', async (req, res) => {
         // ==================== EVENTOS DE TRANSAÇÃO ====================
         case 'OPENPIX:TRANSACTION_RECEIVED': // ✅ Transação recebida (cobrança ou QR code estático)
           logStructured('info', 'Transação recebida', { service: 'woovi-routes', event });
-          await handleTransactionReceived(req.body);
+          await handleTransactionReceived(req.body, req.io);
           break;
 
         // ==================== EVENTOS DE REEMBOLSO ====================
@@ -610,12 +676,13 @@ router.post('/woovi/webhook', async (req, res) => {
   }
 });
 
-// ✅ Rota alternativa com hífen (para compatibilidade com webhooks antigos)
-router.post('/woovi-webhook', async (req, res) => {
-  // Redirecionar para a mesma lógica
-  req.url = '/woovi/webhook';
-  return router.handle(req, res);
-});
+// ✅ Rota alternativa com hífen (habilite apenas se precisar suportar webhook legado)
+if (legacyWooviAliasRouteEnabled) {
+  router.post('/woovi-webhook', async (req, res) => {
+    req.url = '/woovi/webhook';
+    return router.handle(req, res);
+  });
+}
 
 /**
  * Handler para cobrança completada/paga via webhook
@@ -625,6 +692,7 @@ router.post('/woovi-webhook', async (req, res) => {
  * @param {Object} io - Instância do Socket.IO (opcional)
  */
 async function handleChargeCompleted(data, io = null) {
+  let resolvedChargeId = null;
   try {
     const PaymentService = require('../services/payment-service');
     const paymentService = new PaymentService();
@@ -632,41 +700,50 @@ async function handleChargeCompleted(data, io = null) {
     // ✅ Extrair dados do webhook conforme formato real da Woovi
     // Formato: { event: 'OPENPIX:CHARGE_COMPLETED', charge: {...}, pix: {...} }
     const eventName = data.event || data.type || data.name || 'OPENPIX:CHARGE_COMPLETED';
+    const normalizedEventName = normalizeEventName(eventName);
     const charge = data.charge || data;
     const pix = data.pix || {};
 
     // ✅ Usar identifier como chargeId (formato Woovi)
     const chargeId = charge.identifier || charge.id || charge.chargeId || charge.transactionID;
+    resolvedChargeId = chargeId;
     const correlationID = charge.correlationID || charge.correlationId;
     const amount = charge.value || charge.amount;
     const status = charge.status || charge.state;
-    const additionalInfo = charge.additionalInfo || [];
+    const normalizedWebhookStatus = normalizePaymentStatus(status);
+    const additionalInfo = normalizeAdditionalInfo(charge.additionalInfo);
 
     if (!chargeId) {
       logStructured('error', 'chargeId (identifier) não encontrado no webhook', { service: 'woovi-routes', data });
       return;
     }
 
-    logStructured('info', 'Processando pagamento confirmado', { service: 'woovi-routes', event: eventName, chargeId, correlationID, amount, status, additionalInfoCount: additionalInfo.length, paidAt: charge.paidAt });
+    logStructured('info', 'Processando pagamento confirmado', {
+      service: 'woovi-routes',
+      event: eventName,
+      normalizedEventName,
+      chargeId,
+      correlationID,
+      amount,
+      status,
+      normalizedWebhookStatus,
+      additionalInfoCount: additionalInfo.length,
+      paidAt: charge.paidAt
+    });
 
     // ✅ Extrair rideId e passengerId de additionalInfo (formato Woovi)
     let rideId = null;
     let passengerId = null;
 
-    if (additionalInfo && additionalInfo.length > 0) {
-      const rideInfo = additionalInfo.find(info =>
-        info.key === 'ride_id' || info.key === 'rideId' || info.key === 'bookingId'
-      );
-      if (rideInfo) {
-        rideId = rideInfo.value;
+    if (additionalInfo.length > 0) {
+      rideId = getAdditionalInfoValue(additionalInfo, ['ride_id', 'rideId', 'bookingId']);
+      passengerId = getAdditionalInfoValue(additionalInfo, ['passenger_id', 'passengerId']);
+
+      if (rideId) {
         logStructured('info', 'rideId encontrado em additionalInfo', { service: 'woovi-routes', rideId, chargeId });
       }
 
-      const passengerInfo = additionalInfo.find(info =>
-        info.key === 'passenger_id' || info.key === 'passengerId'
-      );
-      if (passengerInfo) {
-        passengerId = passengerInfo.value;
+      if (passengerId) {
         logStructured('info', 'passengerId encontrado em additionalInfo', { service: 'woovi-routes', passengerId, chargeId });
       }
     }
@@ -690,32 +767,39 @@ async function handleChargeCompleted(data, io = null) {
     logStructured('info', 'Dados extraídos do webhook', { service: 'woovi-routes', chargeId, rideId, passengerId, amount, status, amountInReais: amount ? (amount / 100).toFixed(2) : null });
 
     // ✅ Verificar status do pagamento na Woovi (usando identifier como chargeId)
-    // ⚠️ NOTA: Se o webhook já diz que está COMPLETED, confiar no webhook primeiro
-    // A verificação na API é apenas uma confirmação adicional
-    const isCompleted = status === 'COMPLETED' || charge.status === 'COMPLETED';
+    // ⚠️ Se o evento/status já indica pagamento concluído, confiar no webhook.
+    const webhookIndicatesCompleted =
+      COMPLETED_WEBHOOK_EVENTS.has(normalizedEventName) ||
+      COMPLETED_PAYMENT_STATUSES.has(normalizedWebhookStatus);
 
     // Verificar na API apenas se necessário (para garantir)
     let statusResult = null;
-    if (!isCompleted) {
+    let normalizedProviderStatus = '';
+    if (!webhookIndicatesCompleted) {
       statusResult = await paymentService.getPaymentStatus(chargeId);
+      normalizedProviderStatus = normalizePaymentStatus(statusResult?.status);
     }
 
-    if (isCompleted || (statusResult && statusResult.success && statusResult.status === 'COMPLETED')) {
+    const providerIndicatesCompleted =
+      Boolean(statusResult?.success) &&
+      COMPLETED_PAYMENT_STATUSES.has(normalizedProviderStatus);
+
+    if (webhookIndicatesCompleted || providerIndicatesCompleted) {
       const amountInReais = statusResult?.amountInReais || (amount ? (amount / 100) : null);
       const finalStatus = statusResult?.status || status || charge.status;
 
       logStructured('info', 'Pagamento confirmado e verificado', { service: 'woovi-routes', chargeId, rideId, amount: amountInReais, status: finalStatus, paidAt: charge.paidAt });
 
       // ✅ Verificar se é um pagamento de extensão de rota
-      const paymentTypeInfo = additionalInfo?.find(info => info.key === 'payment_type');
-      const isExtension = paymentTypeInfo && paymentTypeInfo.value === 'ride_extension';
+      const paymentTypeValue = getAdditionalInfoValue(additionalInfo, ['payment_type']);
+      const isExtension = String(paymentTypeValue || '').toLowerCase() === 'ride_extension';
 
       // ✅ Registrar pagamento confirmado e aguardar fluxo da corrida
       if (rideId) {
         if (isExtension) {
           logStructured('info', 'Iniciando processamento de extensão de corrida', { service: 'woovi-routes', chargeId, rideId });
-          const newFareInfo = additionalInfo.find(info => info.key === 'new_fare');
-          const newFare = newFareInfo ? parseInt(newFareInfo.value) : 0;
+          const newFareValue = getAdditionalInfoValue(additionalInfo, ['new_fare']);
+          const newFare = newFareValue ? parseInt(newFareValue, 10) : 0;
           await processExtensionConfirmation(rideId, chargeId, amount, passengerId, io, newFare);
         } else {
           logStructured('info', 'Iniciando processamento de confirmação de pagamento inicial', { service: 'woovi-routes', chargeId, rideId });
@@ -744,11 +828,23 @@ async function handleChargeCompleted(data, io = null) {
       }
 
     } else {
-      logStructured('warn', 'Status do pagamento não está COMPLETED', { service: 'woovi-routes', statusResult, webhookStatus: status, chargeId });
+      logStructured('warn', 'Pagamento não confirmado após validações', {
+        service: 'woovi-routes',
+        chargeId,
+        webhookStatus: status,
+        normalizedWebhookStatus,
+        normalizedEventName,
+        providerStatus: statusResult?.status || null,
+        normalizedProviderStatus,
+        providerSuccess: Boolean(statusResult?.success)
+      });
     }
 
   } catch (error) {
-    logError(error, 'Erro ao processar cobrança completada', { service: 'woovi-routes', chargeId });
+    logError(error, 'Erro ao processar cobrança completada', {
+      service: 'woovi-routes',
+      chargeId: resolvedChargeId
+    });
   }
 }
 
@@ -836,8 +932,30 @@ async function processExtensionConfirmation(rideId, chargeId, amount, passengerI
 async function processPaymentConfirmation(chargeId, rideId, amount, passengerId, io = null, metadata = {}) {
   try {
     const PaymentService = require('../services/payment-service');
+    const paymentDispatchService = require('../services/payment-dispatch-service');
     const paymentService = new PaymentService();
     const amountInReais = amount ? (amount / 100).toFixed(2) : null;
+    const amountInCents = Number.isFinite(Number(amount)) ? Math.round(Number(amount)) : 0;
+
+    let resolvedBookingId = rideId;
+    try {
+      const linkedBookingId = await paymentDispatchService.resolveBookingIdFromPaymentRefs({
+        bookingId: rideId,
+        chargeId,
+        temporaryRideId: rideId
+      });
+
+      if (linkedBookingId) {
+        resolvedBookingId = linkedBookingId;
+      }
+    } catch (resolveError) {
+      logStructured('warn', 'Não foi possível resolver bookingId via vínculo de pagamento', {
+        service: 'woovi-routes',
+        rideId,
+        chargeId,
+        error: resolveError.message
+      });
+    }
 
     const emitPassengerStatus = (status, extra = {}) => {
       if (!io || !passengerId) {
@@ -846,8 +964,9 @@ async function processPaymentConfirmation(chargeId, rideId, amount, passengerId,
 
       const payload = {
         success: true,
-        rideId,
-        bookingId: rideId,
+        rideId: resolvedBookingId,
+        bookingId: resolvedBookingId,
+        paymentReferenceRideId: rideId,
         chargeId,
         amountInReais,
         status,
@@ -856,10 +975,19 @@ async function processPaymentConfirmation(chargeId, rideId, amount, passengerId,
       };
 
       io.to(`customer_${passengerId}`).emit('paymentConfirmed', payload);
-      logStructured('info', 'Evento paymentConfirmed enviado ao passageiro', { service: 'woovi-routes', rideId, passengerId });
+      logStructured('info', 'Evento paymentConfirmed enviado ao passageiro', {
+        service: 'woovi-routes',
+        rideId: resolvedBookingId,
+        passengerId
+      });
     };
 
-    logStructured('info', 'Buscando dados da corrida', { service: 'woovi-routes', rideId });
+    logStructured('info', 'Buscando dados da corrida para confirmação de pagamento', {
+      service: 'woovi-routes',
+      rideId,
+      resolvedBookingId,
+      chargeId
+    });
 
     // ✅ Buscar dados da corrida do Redis
     let bookingData = null;
@@ -877,13 +1005,16 @@ async function processPaymentConfirmation(chargeId, rideId, amount, passengerId,
 
       if (redis) {
         // Tentar buscar de bookings:active primeiro
-        const redisData = await redis.hget('bookings:active', rideId);
+        const redisData = await redis.hget('bookings:active', resolvedBookingId);
         if (redisData) {
           bookingData = typeof redisData === 'string' ? JSON.parse(redisData) : redisData;
-          logStructured('info', 'Corrida encontrada no Redis (bookings:active)', { service: 'woovi-routes', rideId });
+          logStructured('info', 'Corrida encontrada no Redis (bookings:active)', {
+            service: 'woovi-routes',
+            rideId: resolvedBookingId
+          });
         } else {
           // Tentar buscar de booking:${rideId}
-          const bookingKey = `booking:${rideId}`;
+          const bookingKey = `booking:${resolvedBookingId}`;
           const bookingHash = await redis.hgetall(bookingKey);
           if (bookingHash && Object.keys(bookingHash).length > 0) {
             bookingData = {};
@@ -894,12 +1025,19 @@ async function processPaymentConfirmation(chargeId, rideId, amount, passengerId,
                 bookingData[key] = value;
               }
             }
-            logStructured('info', `Corrida encontrada no Redis (booking:${rideId})`, { service: 'woovi-routes', rideId });
+            logStructured('info', `Corrida encontrada no Redis (booking:${resolvedBookingId})`, {
+              service: 'woovi-routes',
+              rideId: resolvedBookingId
+            });
           }
         }
       }
     } catch (redisError) {
-      logStructured('warn', 'Erro ao buscar do Redis', { service: 'woovi-routes', error: redisError.message, rideId });
+      logStructured('warn', 'Erro ao buscar do Redis', {
+        service: 'woovi-routes',
+        error: redisError.message,
+        rideId: resolvedBookingId
+      });
     }
 
     // ✅ Se não encontrou no Redis, buscar do Firestore
@@ -908,16 +1046,23 @@ async function processPaymentConfirmation(chargeId, rideId, amount, passengerId,
         const firebaseConfig = require('../firebase-config');
         const firestore = firebaseConfig.getFirestore();
         if (firestore) {
-          const bookingRef = firestore.collection('bookings').doc(rideId);
+          const bookingRef = firestore.collection('bookings').doc(resolvedBookingId);
           const bookingDoc = await bookingRef.get();
 
           if (bookingDoc.exists) {
             bookingData = bookingDoc.data();
-            logStructured('info', 'Corrida encontrada no Firestore', { service: 'woovi-routes', rideId });
+            logStructured('info', 'Corrida encontrada no Firestore', {
+              service: 'woovi-routes',
+              rideId: resolvedBookingId
+            });
           }
         }
       } catch (firestoreError) {
-        logStructured('warn', 'Erro ao buscar do Firestore', { service: 'woovi-routes', error: firestoreError.message, rideId });
+        logStructured('warn', 'Erro ao buscar do Firestore', {
+          service: 'woovi-routes',
+          error: firestoreError.message,
+          rideId: resolvedBookingId
+        });
       }
     }
 
@@ -928,11 +1073,17 @@ async function processPaymentConfirmation(chargeId, rideId, amount, passengerId,
         || bookingData.driver?.id
         || bookingData.driverId;
 
-      logStructured('info', 'Dados da corrida', { service: 'woovi-routes', rideId, driverId, status: bookingData.status, passengerId: bookingData.passengerId || bookingData.customer?.uid });
+      logStructured('info', 'Dados da corrida', {
+        service: 'woovi-routes',
+        rideId: resolvedBookingId,
+        driverId,
+        status: bookingData.status,
+        passengerId: bookingData.passengerId || bookingData.customer?.uid
+      });
     }
 
     const storeResult = await paymentService.storeConfirmedPayment({
-      rideId,
+      rideId: resolvedBookingId,
       chargeId,
       amount,
       passengerId,
@@ -940,17 +1091,39 @@ async function processPaymentConfirmation(chargeId, rideId, amount, passengerId,
     });
 
     if (!storeResult.success) {
-      logError(new Error(storeResult.error), 'Falha ao armazenar pagamento confirmado', { service: 'woovi-routes', rideId, chargeId });
+      logError(new Error(storeResult.error), 'Falha ao armazenar pagamento confirmado', {
+        service: 'woovi-routes',
+        rideId: resolvedBookingId,
+        chargeId
+      });
+    }
+
+    try {
+      await paymentDispatchService.markBookingPaymentConfirmed({
+        bookingId: resolvedBookingId,
+        chargeId,
+        temporaryRideId: rideId,
+        amountInCents,
+        paymentStatus: 'in_holding',
+        source: 'woovi_webhook'
+      });
+    } catch (markError) {
+      logStructured('warn', 'Falha ao marcar booking como pago no webhook', {
+        service: 'woovi-routes',
+        rideId: resolvedBookingId,
+        chargeId,
+        error: markError.message
+      });
     }
 
     const rideStatus = (bookingData?.status || 'pending').toUpperCase();
 
     if (driverId) {
-      await paymentService.associateDriverToPayment(rideId, driverId);
+      await paymentService.associateDriverToPayment(resolvedBookingId, driverId);
 
       const completedStatuses = ['COMPLETED', 'FINISHED', 'FINALIZED', 'DONE'];
       if (completedStatuses.includes(rideStatus)) {
-        const releaseResult = await paymentService.releasePaymentToDriver(rideId, driverId);
+        const releaseResult = await paymentService.releasePaymentToDriver(resolvedBookingId, driverId);
         if (releaseResult.success) {
           emitPassengerStatus('PAYMENT_RELEASED', { driverId, amount });
         }
@@ -961,9 +1134,36 @@ async function processPaymentConfirmation(chargeId, rideId, amount, passengerId,
       emitPassengerStatus('AWAITING_DRIVER');
     }
 
+    paymentDispatchService.triggerDispatchAfterPayment({
+      bookingId: resolvedBookingId,
+      io,
+      pickupLocation: bookingData?.pickupLocation || null,
+      source: 'woovi_webhook_payment_confirmed',
+      force: true,
+      maxAttempts: Number.parseInt(process.env.WEBHOOK_PAYMENT_DISPATCH_MAX_ATTEMPTS || '120', 10),
+      retryDelayMs: Number.parseInt(process.env.WEBHOOK_PAYMENT_DISPATCH_RETRY_DELAY_MS || '1000', 10)
+    }).then((dispatchResult) => {
+      logStructured('info', 'Dispatch pós-pagamento (webhook) processado', {
+        service: 'woovi-routes',
+        rideId: resolvedBookingId,
+        chargeId,
+        success: Boolean(dispatchResult?.success),
+        skipped: Boolean(dispatchResult?.skipped),
+        reason: dispatchResult?.reason || null,
+        attempts: dispatchResult?.attempts || 1
+      });
+    }).catch((dispatchError) => {
+      logStructured('warn', 'Falha ao acionar dispatch pós-pagamento (webhook)', {
+        service: 'woovi-routes',
+        rideId: resolvedBookingId,
+        chargeId,
+        error: dispatchError.message
+      });
+    });
+
     return {
       success: true,
-      rideId,
+      rideId: resolvedBookingId,
       chargeId,
       status: 'confirmed'
     };
@@ -1038,8 +1238,40 @@ async function handleChargeExpired(data) {
   logStructured('info', 'Webhook Handler: Cobrança expirada (stub)', { service: 'woovi-routes' });
 }
 
-async function handleTransactionReceived(data) {
-  logStructured('info', 'Webhook Handler: Transação recebida (stub)', { service: 'woovi-routes' });
+async function handleTransactionReceived(data, io = null) {
+  const charge = data?.charge || data?.data || {};
+  const chargeId =
+    charge?.identifier ||
+    charge?.id ||
+    charge?.transactionID ||
+    data?.identifier ||
+    data?.id ||
+    data?.transactionID ||
+    null;
+  const statusRaw = charge?.status || data?.status || '';
+  const status = String(statusRaw || '').toUpperCase();
+
+  logStructured('info', 'Webhook Handler: Transação recebida', {
+    service: 'woovi-routes',
+    chargeId,
+    status: status || 'N/A'
+  });
+
+  if (!chargeId) {
+    return;
+  }
+
+  const normalizedPayload = {
+    ...data,
+    event: data?.event || 'OPENPIX:TRANSACTION_RECEIVED',
+    charge: {
+      ...charge,
+      identifier: chargeId,
+      status: status || 'COMPLETED'
+    }
+  };
+
+  await handleChargeCompleted(normalizedPayload, io);
 }
 
 async function handleRefundReceivedConfirmed(data) {

@@ -424,6 +424,36 @@ class ValidationService {
           max: this.limits.fare.max,
           label: 'Valor estimado'
         },
+        routeDistanceKm: {
+          type: 'number',
+          required: false,
+          min: this.limits.distance.min,
+          max: this.limits.distance.max,
+          label: 'Distância da rota em km'
+        },
+        routeDurationSecs: {
+          type: 'number',
+          required: false,
+          min: 0,
+          max: 60 * 60 * 24 * 3, // 72h (limite de segurança)
+          label: 'Duração da rota em segundos'
+        },
+        tollFee: {
+          type: 'number',
+          required: false,
+          min: 0,
+          max: this.limits.fare.max,
+          label: 'Valor de pedágio'
+        },
+        carType: {
+          type: 'string',
+          required: false,
+          min: 1,
+          max: 80,
+          pattern: 'alphanumericWithSpaces',
+          label: 'Categoria do veículo',
+          sanitize: { trim: true, removeHtml: true, escapeHtml: true }
+        },
         paymentMethod: {
           type: 'string',
           required: false,
@@ -635,4 +665,3 @@ class ValidationService {
 }
 
 module.exports = new ValidationService();
-

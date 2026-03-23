@@ -23,7 +23,8 @@ class ConnectionCleanupService {
         this.config = {
             cleanupInterval: 60000,        // Limpar a cada 1 minuto
             heartbeatTimeout: 120000,       // 2 minutos sem heartbeat = desconectado
-            orphanedConnectionTTL: 300000  // 5 minutos = conexão órfã
+            orphanedConnectionTTL: 300000,  // 5 minutos = conexão órfã
+            eligibleGeoStaleMs: Number.parseInt(process.env.ELIGIBLE_GEO_STALE_MS || '180000', 10) // 3 min
         };
     }
 
@@ -88,10 +89,13 @@ class ConnectionCleanupService {
             // 3. Limpar registros órfãos no Redis
             stats.redisCleanup = await this.cleanupRedisOrphans();
 
-            stats.total = stats.heartbeatExpired + stats.orphanedConnections + stats.redisCleanup;
+            // 4. Limpar pool GEO elegível com drivers stale/offline
+            stats.eligibleGeoCleanup = await this.cleanupEligibleGeoStaleDrivers();
+
+            stats.total = stats.heartbeatExpired + stats.orphanedConnections + stats.redisCleanup + stats.eligibleGeoCleanup;
 
             if (stats.total > 0) {
-                logger.info(`✅ [ConnectionCleanupService] Limpeza concluída: ${stats.total} conexões removidas (heartbeat: ${stats.heartbeatExpired}, órfãs: ${stats.orphanedConnections}, Redis: ${stats.redisCleanup})`);
+                logger.info(`✅ [ConnectionCleanupService] Limpeza concluída: ${stats.total} registros removidos (heartbeat: ${stats.heartbeatExpired}, órfãs: ${stats.orphanedConnections}, Redis: ${stats.redisCleanup}, geoElegível: ${stats.eligibleGeoCleanup})`);
             } else {
                 logger.debug(`✅ [ConnectionCleanupService] Nenhuma conexão para limpar`);
             }
@@ -208,6 +212,61 @@ class ConnectionCleanupService {
     }
 
     /**
+     * Limpar motoristas stale/offline do pool geo elegível de dispatch.
+     * Evita dispatch para drivers órfãos após restart/deploy abrupto.
+     * @returns {Promise<number>} Número de drivers removidos do pool elegível.
+     */
+    async cleanupEligibleGeoStaleDrivers() {
+        try {
+            const eligibleDriverGeoKey = process.env.ELIGIBLE_DRIVER_GEO_KEY || 'driver_locations_eligible';
+            const driverIds = await this.redis.zrange(eligibleDriverGeoKey, 0, -1);
+            if (!Array.isArray(driverIds) || driverIds.length === 0) {
+                return 0;
+            }
+
+            const now = Date.now();
+            const staleThresholdMs = Math.max(60000, this.config.eligibleGeoStaleMs);
+            const readPipeline = this.redis.pipeline();
+            driverIds.forEach((driverId) => {
+                readPipeline.hmget(`driver:${driverId}`, 'isOnline', 'dispatchEligible', 'lastUpdate', 'timestamp');
+            });
+
+            const snapshots = await readPipeline.exec();
+            const cleanupPipeline = this.redis.pipeline();
+            let removed = 0;
+
+            for (let i = 0; i < driverIds.length; i += 1) {
+                const driverId = driverIds[i];
+                const result = snapshots?.[i]?.[1] || [];
+                const [isOnlineRaw, dispatchEligibleRaw, lastUpdateRaw, timestampRaw] = result;
+
+                const isOnline = String(isOnlineRaw || '').toLowerCase() === 'true';
+                const dispatchEligible = String(dispatchEligibleRaw || '').toLowerCase() === 'true';
+                const lastUpdate = Number.parseInt(lastUpdateRaw || timestampRaw || '0', 10);
+                const stale = !Number.isFinite(lastUpdate) || lastUpdate <= 0 || (now - lastUpdate > staleThresholdMs);
+
+                if (!isOnline || !dispatchEligible || stale) {
+                    cleanupPipeline.zrem(eligibleDriverGeoKey, driverId);
+                    if (!isOnline || stale) {
+                        cleanupPipeline.srem('online_drivers', driverId);
+                    }
+                    removed += 1;
+                }
+            }
+
+            if (removed > 0) {
+                await cleanupPipeline.exec();
+                logger.warn(`⚠️ [ConnectionCleanupService] Removidos ${removed} motoristas stale/offline do GEO elegível`);
+            }
+
+            return removed;
+        } catch (error) {
+            logger.error(`❌ [ConnectionCleanupService] Erro ao limpar GEO elegível:`, error);
+            return 0;
+        }
+    }
+
+    /**
      * Obter estatísticas do serviço
      * @returns {Promise<Object>}
      */
@@ -238,4 +297,3 @@ class ConnectionCleanupService {
 }
 
 module.exports = ConnectionCleanupService;
-

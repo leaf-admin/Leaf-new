@@ -58,7 +58,7 @@ docker-compose -f docker-compose.local.yml restart
 
 **Testar Redis:**
 ```bash
-docker-compose -f docker-compose.local.yml exec redis redis-cli -a leaf_redis_2024 ping
+docker-compose -f docker-compose.local.yml exec redis env REDISCLI_AUTH=leaf_redis_2024 redis-cli ping
 ```
 
 **Testar WebSocket:**
@@ -136,7 +136,7 @@ docker-compose -f docker-compose.local.yml ps redis
 docker-compose -f docker-compose.local.yml logs redis
 
 # Testar conexão manual
-docker-compose -f docker-compose.local.yml exec redis redis-cli -a leaf_redis_2024 ping
+docker-compose -f docker-compose.local.yml exec redis env REDISCLI_AUTH=leaf_redis_2024 redis-cli ping
 ```
 
 ### WebSocket não inicia
@@ -166,4 +166,3 @@ kill -9 <PID>
 ---
 
 **Status**: ✅ Estrutura criada e pronta para testes locais
-

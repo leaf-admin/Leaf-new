@@ -12,6 +12,13 @@ services:
     # ports:
     #   - "6379:6379"
     restart: unless-stopped
+    mem_limit: 1536m
+    cpus: "0.50"
+    pids_limit: 256
+    ulimits:
+      nofile:
+        soft: 131072
+        hard: 131072
     healthcheck:
       test: ["CMD", "redis-cli", "--raw", "incr", "ping"]
       interval: 10s
@@ -27,12 +34,40 @@ services:
       dockerfile: Dockerfile
     container_name: leaf-websocket
     ports:
-      - "3001:3001"
+      - "127.0.0.1:3001:3001"
     environment:
       # Ambiente
       - NODE_ENV=production
       - PORT=3001
       - HOST=0.0.0.0
+      - RUNTIME_ROLE=gateway
+      - ENABLE_EMBEDDED_LISTENER_WORKERS=false
+      - ENABLE_DIRECT_RIDE_REQUESTED_DISPATCH=true
+      - LEAF_SERVER_RUNTIME=vps
+      - LEAF_CLUSTER_ENABLED=${LEAF_CLUSTER_ENABLED:-true}
+      - LEAF_CLUSTER_WORKERS=${LEAF_CLUSTER_WORKERS:-2}
+      - LEAF_CLUSTER_SCHEDULER_LEADER_ID=${LEAF_CLUSTER_SCHEDULER_LEADER_ID:-1}
+      - SOCKET_ALLOW_POLLING=${SOCKET_ALLOW_POLLING:-false}
+      - SOCKET_ADMISSION_ENABLED=${SOCKET_ADMISSION_ENABLED:-true}
+      - SOCKET_ADMISSION_MAX_INFLIGHT=${SOCKET_ADMISSION_MAX_INFLIGHT:-320}
+      - SOCKET_ADMISSION_MAX_QUEUE=${SOCKET_ADMISSION_MAX_QUEUE:-5000}
+      - SOCKET_ADMISSION_MAX_WAIT_MS=${SOCKET_ADMISSION_MAX_WAIT_MS:-12000}
+      - SOCKET_ADMISSION_HOLD_MS=${SOCKET_ADMISSION_HOLD_MS:-6000}
+      - AUTH_VERIFY_ADMISSION_ENABLED=${AUTH_VERIFY_ADMISSION_ENABLED:-true}
+      - AUTH_VERIFY_MAX_INFLIGHT=${AUTH_VERIFY_MAX_INFLIGHT:-240}
+      - AUTH_VERIFY_MAX_QUEUE=${AUTH_VERIFY_MAX_QUEUE:-5000}
+      - AUTH_VERIFY_MAX_WAIT_MS=${AUTH_VERIFY_MAX_WAIT_MS:-12000}
+      - TRUST_PROXY_HOPS=${TRUST_PROXY_HOPS:-1}
+      - DISPATCH_NOTIFY_CONCURRENCY=${DISPATCH_NOTIFY_CONCURRENCY:-6}
+      - DISPATCH_VERIFY_SOCKET_ROOM=${DISPATCH_VERIFY_SOCKET_ROOM:-false}
+      - ENABLE_LEGACY_RUNTIME_ENDPOINTS=${ENABLE_LEGACY_RUNTIME_ENDPOINTS:-false}
+      - ENABLE_LEGACY_UPDATE_DRIVER_LOCATION_EVENT=${ENABLE_LEGACY_UPDATE_DRIVER_LOCATION_EVENT:-false}
+      - ENABLE_LEGACY_NO_DRIVERS_FOUND_EVENT=${ENABLE_LEGACY_NO_DRIVERS_FOUND_EVENT:-false}
+      - ENABLE_LEGACY_AUTH_VERIFY_ROUTE=${ENABLE_LEGACY_AUTH_VERIFY_ROUTE:-false}
+      - ENABLE_LEGACY_WOOVI_ALIAS_ROUTE=${ENABLE_LEGACY_WOOVI_ALIAS_ROUTE:-false}
+      - ENABLE_LEGACY_SOCKET_BRIDGE=${ENABLE_LEGACY_SOCKET_BRIDGE:-false}
+      - ENABLE_LEGACY_SOCKET_NOTIFICATIONS=${ENABLE_LEGACY_SOCKET_NOTIFICATIONS:-false}
+      - ENABLE_LEGACY_PROMOTIONS_ROUTES=${ENABLE_LEGACY_PROMOTIONS_ROUTES:-false}
       
       # Redis
       - REDIS_HOST=redis
@@ -49,10 +84,14 @@ services:
       # Woovi
       - WOOVI_WEBHOOK_URL=${WOOVI_WEBHOOK_URL:-http://147.93.66.253/api/woovi/webhook}
       - SERVER_URL=${SERVER_URL:-http://147.93.66.253}
+      - WOOVI_ENVIRONMENT=${WOOVI_ENVIRONMENT:-production}
       - WOOVI_API_TOKEN=${WOOVI_API_TOKEN}
+      - WOOVI_APP_ID=${WOOVI_APP_ID}
       - WOOVI_CLIENT_ID=${WOOVI_CLIENT_ID}
       - WOOVI_CLIENT_SECRET=${WOOVI_CLIENT_SECRET}
       - WOOVI_BASE_URL=${WOOVI_BASE_URL:-https://api-sandbox.woovi.com}
+      - WOOVI_MASTER_API_TOKEN=${WOOVI_MASTER_API_TOKEN}
+      - WOOVI_MASTER_APP_ID=${WOOVI_MASTER_APP_ID}
       
       # API Keys
       - GOOGLE_MAPS_API_KEY=${GOOGLE_MAPS_API_KEY}
@@ -70,6 +109,23 @@ services:
       # Leaf específico
       - LEAF_WOOVI_ACCOUNT_ID=${LEAF_WOOVI_ACCOUNT_ID}
       - LEAF_PIX_KEY=${LEAF_PIX_KEY}
+
+      # AWS Rekognition Face Liveness (KYC)
+      - KYC_AWS_LIVENESS_ENABLED=${KYC_AWS_LIVENESS_ENABLED:-false}
+      - AWS_REGION=${AWS_REGION:-us-east-1}
+      - KYC_AWS_LIVENESS_CONFIDENCE_THRESHOLD=${KYC_AWS_LIVENESS_CONFIDENCE_THRESHOLD:-80}
+      - KYC_AWS_LIVENESS_SESSION_TTL_SECONDS=${KYC_AWS_LIVENESS_SESSION_TTL_SECONDS:-1200}
+      - KYC_AWS_LIVENESS_AUDIT_IMAGES_LIMIT=${KYC_AWS_LIVENESS_AUDIT_IMAGES_LIMIT:-0}
+      - KYC_AWS_LIVENESS_CREDENTIALS_ENABLED=${KYC_AWS_LIVENESS_CREDENTIALS_ENABLED:-true}
+      - KYC_AWS_LIVENESS_STS_DURATION_SECONDS=${KYC_AWS_LIVENESS_STS_DURATION_SECONDS:-900}
+      - KYC_AWS_LIVENESS_ASSUME_ROLE_ARN=${KYC_AWS_LIVENESS_ASSUME_ROLE_ARN}
+      - KYC_AWS_LIVENESS_ASSUME_ROLE_EXTERNAL_ID=${KYC_AWS_LIVENESS_ASSUME_ROLE_EXTERNAL_ID}
+      - KYC_AWS_LIVENESS_STS_SESSION_NAME_PREFIX=${KYC_AWS_LIVENESS_STS_SESSION_NAME_PREFIX:-leaf-liveness}
+      - KYC_AWS_LIVENESS_S3_BUCKET=${KYC_AWS_LIVENESS_S3_BUCKET}
+      - KYC_AWS_LIVENESS_S3_PREFIX=${KYC_AWS_LIVENESS_S3_PREFIX:-kyc/liveness}
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
+      - AWS_SESSION_TOKEN=${AWS_SESSION_TOKEN}
       
     volumes:
       # Firebase credentials (montar arquivo JSON)
@@ -80,12 +136,79 @@ services:
       redis:
         condition: service_healthy
     restart: unless-stopped
+    mem_limit: 3g
+    cpus: "1.75"
+    pids_limit: 512
+    ulimits:
+      nofile:
+        soft: 262144
+        hard: 262144
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:3001/health"]
+      test: ["CMD", "curl", "-f", "http://localhost:3001/health/liveness"]
       interval: 30s
       timeout: 10s
       retries: 3
       start_period: 40s
+    networks:
+      - leaf-network
+
+  # ===== SIDE EFFECTS WORKER =====
+  sideeffects-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: leaf-sideeffects-worker
+    command: ["node", "workers/listener-worker.js"]
+    environment:
+      # Ambiente
+      - NODE_ENV=production
+      - RUNTIME_ROLE=sideeffects
+      - ENABLE_EMBEDDED_LISTENER_WORKERS=false
+      - LEAF_SERVER_RUNTIME=vps
+
+      # Redis
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REDIS_PASSWORD=leaf_redis_2024
+      - REDIS_DB=0
+      - REDIS_URL=redis://:leaf_redis_2024@redis:6379/0
+
+      # Firebase (push notifications)
+      - FIREBASE_PROJECT_ID=${FIREBASE_PROJECT_ID:-leaf-app-91dfdce0}
+      - FIREBASE_DATABASE_URL=${FIREBASE_DATABASE_URL:-https://leaf-reactnative-default-rtdb.firebaseio.com}
+      - GOOGLE_APPLICATION_CREDENTIALS=/app/firebase-credentials.json
+
+      # Monitoramento
+      - LOG_LEVEL=${LOG_LEVEL:-info}
+      - ENABLE_METRICS=${ENABLE_METRICS:-true}
+      - WORKER_STREAM_NAME=ride_events
+      - WORKER_GROUP_NAME=listener-workers
+      - WORKER_BATCH_SIZE=16
+      - WORKER_BLOCK_TIME=150
+      - WORKER_UNHANDLED_QUIET_EVENTS=ride.requested,ride.queued,state.changed,driver.notified,driver.search.started,ride.completed,ride.dequeued,queue.processed
+      - WORKER_MAX_RETRIES=3
+    volumes:
+      - ./firebase-credentials.json:/app/firebase-credentials.json:ro
+      - ./logs:/app/logs
+    depends_on:
+      redis:
+        condition: service_healthy
+      websocket:
+        condition: service_healthy
+    restart: unless-stopped
+    mem_limit: 1024m
+    cpus: "0.75"
+    pids_limit: 256
+    ulimits:
+      nofile:
+        soft: 131072
+        hard: 131072
+    healthcheck:
+      test: ["CMD", "node", "-e", "const redis=require('./utils/redis-pool'); redis.ensureConnection().then(()=>process.exit(0)).catch(()=>process.exit(1));"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
     networks:
       - leaf-network
 
@@ -104,7 +227,7 @@ services:
         condition: service_healthy
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost/health"]
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost/health/liveness"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -118,4 +241,3 @@ volumes:
 networks:
   leaf-network:
     driver: bridge
-

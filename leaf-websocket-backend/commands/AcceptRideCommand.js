@@ -7,7 +7,7 @@
  * - Validar que corrida pode ser aceita
  * - Atualizar estado da corrida
  * - Atribuir motorista à corrida
- * - Publicar evento ride.accepted
+ * - Construir evento canônico ride.accepted (publicação ocorre no handler/EventBus)
  * 
  * NÃO faz:
  * - Notificar passageiro (isso é responsabilidade de listeners)
@@ -24,6 +24,7 @@ const eventSourcing = require('../services/event-sourcing');
 const traceContext = require('../utils/trace-context');
 const { metrics } = require('../utils/prometheus-metrics');
 const { validateAndEnsureTraceIdInCommand } = require('../utils/trace-validator');
+const { setActiveTripForDriver } = require('../utils/active-trip-index');
 
 class AcceptRideCommand extends Command {
     constructor(data) {
@@ -65,11 +66,21 @@ class AcceptRideCommand extends Command {
 
                 const bookingKey = `booking:${this.bookingId}`;
 
-                // Verificar se motorista já está em outra corrida (Lock de driver separado)
-                const isLocked = await driverLockManager.isDriverLocked(this.driverId);
-                if (isLocked.isLocked && isLocked.bookingId !== this.bookingId) {
+                // Garantir lock da corrida aceita (evita re-oferta até completeTrip/cancelRide).
+                const lockStatus = await driverLockManager.isDriverLocked(this.driverId);
+                if (lockStatus.isLocked && lockStatus.bookingId !== this.bookingId) {
                     metrics.recordCommand('AcceptRide', (Date.now() - startTime) / 1000, false);
                     return CommandResult.failure('Motorista já está em outra corrida')
+                }
+
+                if (lockStatus.isLocked && lockStatus.bookingId === this.bookingId) {
+                    await driverLockManager.renewLock(this.driverId, 3600);
+                } else if (!lockStatus.isLocked) {
+                    const lockAcquired = await driverLockManager.acquireLock(this.driverId, this.bookingId, 3600);
+                    if (!lockAcquired) {
+                        metrics.recordCommand('AcceptRide', (Date.now() - startTime) / 1000, false);
+                        return CommandResult.failure('Motorista já está em outra corrida')
+                    }
                 }
 
                 const newState = RideStateManager.STATES.ACCEPTED;
@@ -124,12 +135,20 @@ class AcceptRideCommand extends Command {
                 const pickupLocation = rawPickupLocation ? JSON.parse(rawPickupLocation) : null;
                 const currentState = 'PENDING'; // Historicamente veio de Pending
 
-                // Registrar evento no histórico de estado manualmente
-                await eventSourcing.recordEvent(require('../services/event-sourcing').EVENT_TYPES.STATE_CHANGED, {
-                    bookingId: this.bookingId,
-                    fromState: currentState,
-                    toState: newState,
-                    driverId: this.driverId
+                // Limpar corrida ativa na tela do motorista após aceite bem-sucedido.
+                await redis.del(`driver_active_notification:${this.driverId}`);
+
+                // Indexar corrida ativa por motorista para lookup O(1) no tracking
+                await setActiveTripForDriver(redis, this.driverId, this.bookingId, customerId);
+
+                // Registrar histórico fora do caminho crítico de latência.
+                setImmediate(() => {
+                    eventSourcing.recordEvent(require('../services/event-sourcing').EVENT_TYPES.STATE_CHANGED, {
+                        bookingId: this.bookingId,
+                        fromState: currentState,
+                        toState: newState,
+                        driverId: this.driverId
+                    }).catch(() => null);
                 });
 
                 // Criar evento canônico
@@ -140,12 +159,6 @@ class AcceptRideCommand extends Command {
                     traceId: this.traceId, // ✅ Incluir traceId no evento
                     correlationId: this.correlationId || this.bookingId // ✅ Incluir correlationId no evento
                 });
-
-                // Registrar evento no event sourcing
-                await eventSourcing.recordEvent(
-                    eventSourcing.EVENT_TYPES.RIDE_ACCEPTED,
-                    event.data
-                );
 
                 logStructured('info', 'AcceptRideCommand executado com sucesso', {
                     bookingId: this.bookingId,

@@ -8,6 +8,16 @@ const promClient = require('prom-client');
 
 // Criar registry
 const register = new promClient.Registry();
+const sanitizeLabelValue = (value, fallback = 'unknown', maxLength = 40) => {
+    const normalized = String(value || '')
+        .trim()
+        .toLowerCase()
+        .replace(/[^a-z0-9_]+/g, '_')
+        .replace(/_+/g, '_')
+        .replace(/^_+|_+$/g, '');
+    if (!normalized) return fallback;
+    return normalized.slice(0, maxLength);
+};
 
 // Coletar métricas padrão (CPU, memória, etc)
 promClient.collectDefaultMetrics({ register });
@@ -192,6 +202,52 @@ const activeWorkers = new promClient.Gauge({
     registers: [register]
 });
 
+// ==================== HOTPATH / REALTIME ====================
+
+// Event loop lag (ms)
+const eventLoopLagMeanMs = new promClient.Gauge({
+    name: 'leaf_event_loop_lag_mean_ms',
+    help: 'Média de event loop lag em milissegundos',
+    registers: [register]
+});
+
+const eventLoopLagP95Ms = new promClient.Gauge({
+    name: 'leaf_event_loop_lag_p95_ms',
+    help: 'P95 de event loop lag em milissegundos',
+    registers: [register]
+});
+
+const eventLoopLagMaxMs = new promClient.Gauge({
+    name: 'leaf_event_loop_lag_max_ms',
+    help: 'Máximo de event loop lag em milissegundos',
+    registers: [register]
+});
+
+// Volume de updates realtime (presença/localização)
+const realtimeUpdatesTotal = new promClient.Counter({
+    name: 'leaf_realtime_updates_total',
+    help: 'Total de updates realtime processados por canal e resultado',
+    labelNames: ['channel', 'result'],
+    registers: [register]
+});
+
+// Latência de operações críticas (hot path)
+const hotpathDuration = new promClient.Histogram({
+    name: 'leaf_hotpath_duration_seconds',
+    help: 'Latência das operações críticas no hot path',
+    labelNames: ['path', 'status'],
+    buckets: [0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5],
+    registers: [register]
+});
+
+// Volume de operações Redis no hot path
+const redisHotpathOps = new promClient.Counter({
+    name: 'leaf_redis_hotpath_ops_total',
+    help: 'Total de operações Redis no hot path por caminho e operação',
+    labelNames: ['path', 'operation'],
+    registers: [register]
+});
+
 // ==================== EXPORT ====================
 
 /**
@@ -254,7 +310,10 @@ const metrics = {
     // Idempotency
     recordIdempotency: (operation, hit) => {
         const result = hit ? 'hit' : 'miss';
-        idempotencyTotal.inc({ operation, result });
+        idempotencyTotal.inc({
+            operation: sanitizeLabelValue(operation, 'unknown'),
+            result
+        });
     },
     
     // ==================== MÉTRICAS DE NEGÓCIO ====================
@@ -294,6 +353,37 @@ const metrics = {
     // Workers ativos
     setActiveWorkers: (count, workerType = 'listener') => {
         activeWorkers.set({ worker_type: workerType }, count);
+    },
+
+    // Event loop lag
+    setEventLoopLag: (meanMs = 0, p95Ms = 0, maxMs = 0) => {
+        eventLoopLagMeanMs.set(Number.isFinite(meanMs) ? meanMs : 0);
+        eventLoopLagP95Ms.set(Number.isFinite(p95Ms) ? p95Ms : 0);
+        eventLoopLagMaxMs.set(Number.isFinite(maxMs) ? maxMs : 0);
+    },
+
+    // Realtime update volume
+    recordRealtimeUpdate: (channel = 'unknown', result = 'processed', count = 1) => {
+        realtimeUpdatesTotal.inc({
+            channel: sanitizeLabelValue(channel, 'unknown'),
+            result: sanitizeLabelValue(result, 'processed')
+        }, Number.isFinite(count) && count > 0 ? count : 1);
+    },
+
+    // Hot path latency
+    recordHotpathLatency: (path, durationSeconds, success = true) => {
+        hotpathDuration.observe({
+            path: sanitizeLabelValue(path, 'unknown'),
+            status: success ? 'success' : 'failure'
+        }, Number.isFinite(durationSeconds) && durationSeconds >= 0 ? durationSeconds : 0);
+    },
+
+    // Redis ops in hot path
+    recordRedisHotpathOp: (path, operation, count = 1) => {
+        redisHotpathOps.inc({
+            path: sanitizeLabelValue(path, 'unknown'),
+            operation: sanitizeLabelValue(operation, 'unknown')
+        }, Number.isFinite(count) && count > 0 ? count : 1);
     }
 };
 

@@ -48,7 +48,7 @@ function buildTestApp() {
     });
   });
 
-  app.get('/api/stats', (_req, res) => {
+  app.get('/api/app/stats', (_req, res) => {
     res.status(200).json({
       redis: { connected: true, operations: 0 },
       memory: process.memoryUsage(),

@@ -1,5 +1,6 @@
 function registerSocketConfirmPaymentHandler({
     socket,
+    io,
     extractTraceIdFromEvent,
     traceContext,
     logStructured,
@@ -105,27 +106,41 @@ function registerSocketConfirmPaymentHandler({
                 const payloadPickupLocation = data?.pickupLocation;
                 const pickupLocationToValidate = bookingPickupLocation || payloadPickupLocation;
 
-                if (!paymentMockEnabled && pickupLocationToValidate?.lat && pickupLocationToValidate?.lng) {
-                    const availability = await findAvailableDriversForPickup(pickupLocationToValidate, {
-                        carType: bookingCarType
-                    });
+                const skipAvailabilityCheck =
+                    String(process.env.CONFIRM_PAYMENT_SKIP_AVAILABILITY_CHECK || 'true').toLowerCase() === 'true';
 
-                    if (!availability.success) {
-                        socket.emit('paymentError', {
-                            error: 'Não foi possível validar disponibilidade de motoristas',
-                            message: 'Falha temporária ao validar disponibilidade. Tente novamente em instantes.',
-                            code: 'AVAILABILITY_CHECK_FAILED'
-                        });
-                        return;
-                    }
+                if (!paymentMockEnabled && !skipAvailabilityCheck && pickupLocationToValidate?.lat && pickupLocationToValidate?.lng) {
+                    try {
+                        const availabilityTimeoutMs = Number.parseInt(
+                            process.env.CONFIRM_PAYMENT_AVAILABILITY_TIMEOUT_MS || '800',
+                            10
+                        );
+                        const availability = await Promise.race([
+                            findAvailableDriversForPickup(pickupLocationToValidate, {
+                                carType: bookingCarType
+                            }),
+                            new Promise((_, reject) => setTimeout(() => reject(new Error('availability_check_timeout')), availabilityTimeoutMs))
+                        ]);
 
-                    if ((availability.drivers || []).length === 0) {
-                        socket.emit('paymentError', {
-                            error: 'Não há motoristas disponíveis na região',
-                            message: 'Pagamento bloqueado para evitar cobrança sem parceiro disponível.',
-                            code: 'NO_DRIVERS_AVAILABLE'
+                        if (!availability.success) {
+                            logStructured('warn', 'confirmPayment: falha no pre-check de disponibilidade, seguindo fluxo', {
+                                bookingId,
+                                eventType: 'confirmPayment',
+                                code: 'AVAILABILITY_CHECK_FAILED'
+                            });
+                        } else if ((availability.drivers || []).length === 0) {
+                            logStructured('warn', 'confirmPayment: sem motoristas no pre-check, mantendo corrida em busca', {
+                                bookingId,
+                                eventType: 'confirmPayment',
+                                code: 'NO_DRIVERS_AVAILABLE'
+                            });
+                        }
+                    } catch (availabilityError) {
+                        logStructured('warn', 'confirmPayment: erro no pre-check de disponibilidade, seguindo fluxo', {
+                            bookingId,
+                            eventType: 'confirmPayment',
+                            error: availabilityError.message
                         });
-                        return;
                     }
                 }
 
@@ -217,13 +232,24 @@ function registerSocketConfirmPaymentHandler({
                     timestamp: new Date().toISOString()
                 };
 
-                // ✅ NOVO: Log de auditoria para pagamento confirmado
-                const chargeId = paymentId || `payment_${Date.now()}`;
-                await auditService.logPaymentAction(userId, 'confirmPayment', bookingId, chargeId, {
-                    paymentMethod,
-                    amount,
-                    amountInCents: typeof amount === 'number' && amount < 1000 ? Math.round(amount * 100) : Math.round(amount)
-                }, true, null, metadata);
+                const paymentDispatchService = require('../services/payment-dispatch-service');
+                const amountInCents = typeof amount === 'number' && amount < 1000 ? Math.round(amount * 100) : Math.round(amount || 0);
+                try {
+                    await paymentDispatchService.markBookingPaymentConfirmed({
+                        bookingId,
+                        chargeId: paymentId || data?.chargeId || '',
+                        temporaryRideId: data?.rideId || data?.temporaryRideId || '',
+                        amountInCents,
+                        paymentStatus: 'in_holding',
+                        source: 'socket_confirmPayment'
+                    });
+                } catch (markPaymentError) {
+                    logStructured('warn', 'confirmPayment: falha ao marcar booking como pago', {
+                        bookingId,
+                        eventType: 'confirmPayment',
+                        error: markPaymentError.message
+                    });
+                }
 
                 // Emitir confirmação
                 socket.emit('paymentConfirmed', {
@@ -231,6 +257,48 @@ function registerSocketConfirmPaymentHandler({
                     bookingId,
                     message: 'Pagamento confirmado com sucesso',
                     data: paymentData
+                });
+
+                // Auditoria em background para não bloquear ACK de pagamento.
+                setImmediate(async () => {
+                    try {
+                        const chargeId = paymentId || `payment_${Date.now()}`;
+                        await auditService.logPaymentAction(userId, 'confirmPayment', bookingId, chargeId, {
+                            paymentMethod,
+                            amount,
+                            amountInCents
+                        }, true, null, metadata);
+                    } catch (auditError) {
+                        logStructured('warn', 'confirmPayment: falha ao gravar auditoria em background', {
+                            bookingId,
+                            eventType: 'confirmPayment',
+                            error: auditError.message
+                        });
+                    }
+                });
+
+                // Disparar busca de motorista sem esperar o próximo tick para reduzir janela de corrida.
+                paymentDispatchService.triggerDispatchAfterPayment({
+                    bookingId,
+                    io,
+                    pickupLocation: pickupLocationToValidate,
+                    source: 'socket_confirmPayment',
+                    force: true
+                }).then((dispatchResult) => {
+                    logStructured('info', 'confirmPayment: dispatch pós-pagamento processado', {
+                        bookingId,
+                        eventType: 'confirmPayment',
+                        success: Boolean(dispatchResult?.success),
+                        skipped: Boolean(dispatchResult?.skipped),
+                        reason: dispatchResult?.reason || null,
+                        attempts: dispatchResult?.attempts || 1
+                    });
+                }).catch((dispatchError) => {
+                    logStructured('warn', 'confirmPayment: falha ao acionar dispatch pós-pagamento', {
+                        bookingId,
+                        eventType: 'confirmPayment',
+                        error: dispatchError.message
+                    });
                 });
 
                 const totalLatency = Date.now() - startTime;

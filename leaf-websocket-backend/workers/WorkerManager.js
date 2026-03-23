@@ -30,6 +30,7 @@ class WorkerManager {
         this.retryBackoff = options.retryBackoff || [1000, 2000, 5000]; // ms
         this.dlqStreamName = options.dlqStreamName || 'ride_events_dlq';
         this.redis = null;
+        this.blockingRedis = null;
         this.isRunning = false;
         this.listeners = new Map(); // eventType -> handler function
         this.stats = {
@@ -41,6 +42,12 @@ class WorkerManager {
         };
         this.unhandledEventWarnAt = new Map();
         this.unhandledEventWarnCooldownMs = Number.parseInt(process.env.UNHANDLED_EVENT_WARN_COOLDOWN_MS || '60000', 10);
+        this.unhandledQuietEvents = new Set(
+            String(process.env.WORKER_UNHANDLED_QUIET_EVENTS || '')
+                .split(',')
+                .map((value) => value.trim())
+                .filter(Boolean)
+        );
     }
 
     /**
@@ -50,6 +57,19 @@ class WorkerManager {
         try {
             await redisPool.ensureConnection();
             this.redis = redisPool.getConnection();
+            if (!this.blockingRedis) {
+                // Cliente dedicado para comandos bloqueantes (XREADGROUP BLOCK),
+                // evitando bloquear o cliente Redis principal do backend.
+                this.blockingRedis = this.redis.duplicate();
+                this.blockingRedis.on('error', (error) => {
+                    logStructured('warn', 'Erro no cliente Redis bloqueante do worker', {
+                        service: 'worker-manager',
+                        consumerName: this.consumerName,
+                        error: error.message
+                    });
+                });
+            }
+            await this._ensureBlockingRedisReady();
 
             // Criar Consumer Group (MKSTREAM cria o stream se não existir)
             try {
@@ -99,6 +119,55 @@ class WorkerManager {
         }
     }
 
+    async _ensureBlockingRedisReady() {
+        if (!this.blockingRedis) return;
+
+        const waitUntilReady = async (timeoutMs = 10000) => {
+            await new Promise((resolve, reject) => {
+                const onReady = () => {
+                    cleanup();
+                    resolve(true);
+                };
+                const onError = (err) => {
+                    cleanup();
+                    reject(err);
+                };
+                const timeout = setTimeout(() => {
+                    cleanup();
+                    reject(new Error('Timeout aguardando conexão do Redis bloqueante'));
+                }, timeoutMs);
+
+                const cleanup = () => {
+                    clearTimeout(timeout);
+                    this.blockingRedis.off('ready', onReady);
+                    this.blockingRedis.off('error', onError);
+                };
+
+                this.blockingRedis.on('ready', onReady);
+                this.blockingRedis.on('error', onError);
+            });
+        };
+
+        const status = this.blockingRedis.status;
+        if (status === 'ready' || status === 'connect') return;
+
+        if (status === 'connecting' || status === 'reconnecting') {
+            await waitUntilReady();
+            return;
+        }
+
+        try {
+            await this.blockingRedis.connect();
+        } catch (error) {
+            const message = error?.message || '';
+            if (message.includes('already connecting') || message.includes('already connected')) {
+                await waitUntilReady();
+                return;
+            }
+            throw error;
+        }
+    }
+
     /**
      * Registrar listener para um tipo de evento
      */
@@ -120,8 +189,9 @@ class WorkerManager {
         const eventType = eventData.type || 'unknown';
         const handler = this.listeners.get(eventType);
         
-        // Log para debug
-        if (!handler) {
+        // Log para debug (somente para tipos não silenciosos)
+        const isQuietUnhandled = this.unhandledQuietEvents.has(eventType);
+        if (!handler && !isQuietUnhandled) {
             logStructured('debug', 'Evento recebido sem handler', {
                 service: 'worker-manager',
                 eventType,
@@ -131,6 +201,10 @@ class WorkerManager {
         }
 
         if (!handler) {
+            if (isQuietUnhandled) {
+                return { success: true, skipped: true };
+            }
+
             const now = Date.now();
             const lastWarnAt = this.unhandledEventWarnAt.get(eventType) || 0;
             if ((now - lastWarnAt) >= this.unhandledEventWarnCooldownMs) {
@@ -284,7 +358,8 @@ class WorkerManager {
 
         try {
             // Ler eventos do Consumer Group
-            const results = await this.redis.xreadgroup(
+            const readClient = this.blockingRedis || this.redis;
+            const results = await readClient.xreadgroup(
                 'GROUP', this.groupName, this.consumerName,
                 'COUNT', this.batchSize,
                 'BLOCK', this.blockTime,
@@ -376,6 +451,20 @@ class WorkerManager {
     async stop() {
         this.isRunning = false;
         metrics.setActiveWorkers(0, 'listener');
+
+        if (this.blockingRedis) {
+            try {
+                if (this.blockingRedis.status === 'ready' || this.blockingRedis.status === 'connect') {
+                    await this.blockingRedis.quit();
+                } else {
+                    this.blockingRedis.disconnect();
+                }
+            } catch (_error) {
+                // Ignorar erro no shutdown do cliente bloqueante.
+            } finally {
+                this.blockingRedis = null;
+            }
+        }
 
         logStructured('info', 'Worker parado', {
             service: 'worker-manager',

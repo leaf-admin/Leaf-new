@@ -11,25 +11,41 @@ const { getTracer } = require('../utils/tracer');
 const { createListenerSpan, runInSpan, endSpanSuccess, endSpanError } = require('../utils/span-helpers');
 const { metrics } = require('../utils/prometheus-metrics');
 
+function normalizeAcceptedPayload(event) {
+    const rawData = event?.data && typeof event.data === 'object' ? event.data : {};
+    const nestedData = rawData?.data && typeof rawData.data === 'object' ? rawData.data : null;
+    const payload = (rawData?.bookingId || rawData?.customerId || rawData?.driverId)
+        ? rawData
+        : (nestedData || rawData);
+
+    return {
+        payload,
+        traceId: payload?.traceId || rawData?.traceId || null,
+        spanContext: payload?._otelSpanContext || rawData?._otelSpanContext || null
+    };
+}
+
 /**
  * Notificar motorista via WebSocket
  */
 async function notifyDriver(event, io) {
     const startTime = Date.now();
     const eventType = event.eventType || 'ride.accepted';
+    const normalized = normalizeAcceptedPayload(event);
+    const payload = normalized.payload || {};
     // ✅ OBSERVABILIDADE: Extrair traceId do evento
-    const traceId = event.data?.traceId || traceContext.getCurrentTraceId();
+    const traceId = normalized.traceId || traceContext.getCurrentTraceId();
     return await traceContext.runWithTraceId(traceId, async () => {
         // ✅ FASE 1.3: Criar span para Listener (linkado ao evento)
         const tracer = getTracer();
-        const eventSpanContext = event.data?._otelSpanContext;
+        const eventSpanContext = normalized.spanContext;
         const listenerSpan = createListenerSpan(tracer, 'notify_driver', eventSpanContext, {
-            'listener.booking_id': event.data?.bookingId
+            'listener.booking_id': payload?.bookingId
         });
 
         try {
             return await runInSpan(listenerSpan, async () => {
-                const { driverId, bookingId, customerId } = event.data;
+                const { driverId, bookingId, customerId } = payload;
 
                 metrics.recordListener('onRideAccepted.notifyDriver', (Date.now() - startTime) / 1000, true);
 
@@ -45,7 +61,13 @@ async function notifyDriver(event, io) {
                 });
 
                 if (!driverId || !bookingId || !customerId) {
-                    logger.warn('⚠️ [notifyDriver] Dados incompletos no evento');
+                    logStructured('debug', 'notifyDriver ignorou evento incompleto', {
+                        listener: 'notifyDriver',
+                        eventType,
+                        hasDriverId: Boolean(driverId),
+                        hasBookingId: Boolean(bookingId),
+                        hasCustomerId: Boolean(customerId)
+                    });
                     return;
                 }
 
@@ -71,8 +93,8 @@ async function notifyDriver(event, io) {
         } catch (error) {
             endSpanError(listenerSpan, error);
             logStructured('error', 'notifyDriver falhou', {
-                driverId: event.data?.driverId,
-                bookingId: event.data?.bookingId,
+                driverId: payload?.driverId,
+                bookingId: payload?.bookingId,
                 listener: 'notifyDriver',
                 error: error.message
             });

@@ -1,0 +1,74 @@
+{
+  "config": {
+    "serverUrl": "http://147.182.204.181:3001",
+    "rides": 20,
+    "concurrency": 20,
+    "tokenConcurrency": 40
+  },
+  "tokenGeneration": {
+    "durationSec": 0.83,
+    "passengersOk": 20,
+    "driversOk": 20
+  },
+  "results": {
+    "total": 20,
+    "success": 0,
+    "failed": 20,
+    "successRate": 0,
+    "runDurationSec": 2.46,
+    "ridesPerSec": 8.12,
+    "completedRidesPerSec": 0,
+    "latencyMs": {
+      "p50": 0,
+      "p95": 0,
+      "p99": 0,
+      "max": 0
+    },
+    "stageLatencyMs": {
+      "auth": {
+        "p50": 0,
+        "p95": 0,
+        "p99": 0,
+        "max": 0
+      },
+      "createBooking": {
+        "p50": 0,
+        "p95": 0,
+        "p99": 0,
+        "max": 0
+      },
+      "confirmPayment": {
+        "p50": 0,
+        "p95": 0,
+        "p99": 0,
+        "max": 0
+      },
+      "acceptRide": {
+        "p50": 0,
+        "p95": 0,
+        "p99": 0,
+        "max": 0
+      },
+      "startTrip": {
+        "p50": 0,
+        "p95": 0,
+        "p99": 0,
+        "max": 0
+      },
+      "completeTrip": {
+        "p50": 0,
+        "p95": 0,
+        "p99": 0,
+        "max": 0
+      }
+    },
+    "topErrors": [
+      {
+        "error": "unknown:Pagamento bloqueado para evitar cobrança sem parceiro disponível.",
+        "count": 20
+      }
+    ]
+  },
+  "totalDurationSec": 4.22,
+  "timestamp": "2026-03-22T03:08:11.306Z"
+}

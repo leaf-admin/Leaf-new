@@ -1,0 +1,411 @@
+{
+  "startedAt": "2026-03-22T07:42:00.439Z",
+  "config": {
+    "wsUrl": "https://api.147.182.204.181.sslip.io",
+    "httpBase": "https://api.147.182.204.181.sslip.io",
+    "profile": "production",
+    "forceRealPayment": true,
+    "mockCompletePayment": true,
+    "provisionDriverVehicles": true,
+    "strictReady": true,
+    "loopTickMs": 220,
+    "heartbeatMs": 1000,
+    "paymentRetries": 4,
+    "dispatchTimeoutMs": 45000,
+    "readinessTimeoutMs": 30000,
+    "preBookingReadinessRecheckMs": 0,
+    "drainTimeoutMs": 300000
+  },
+  "pool": {
+    "requested": {
+      "drivers": 6,
+      "passengers": 8
+    },
+    "connected": {
+      "drivers": 6,
+      "passengers": 8
+    },
+    "readyDrivers": 6,
+    "uids": {
+      "drivers": 6,
+      "passengers": 8
+    },
+    "tokenGeneration": {
+      "total": 14,
+      "ok": 14,
+      "failed": 0
+    },
+    "provisioning": {
+      "attempted": 6,
+      "ok": 6,
+      "failed": 0
+    },
+    "maxActiveByPool": 6
+  },
+  "windows": [
+    {
+      "name": "smoke",
+      "durationSec": 30,
+      "targetActiveRequested": 2,
+      "targetActiveEffective": 2,
+      "rideDurationSec": {
+        "min": 30,
+        "max": 40
+      },
+      "started": 2,
+      "completed": 2,
+      "failedStarts": 0,
+      "failedCompletes": 0,
+      "paymentBlockedRetries": 0,
+      "paymentBlockedHardFails": 0,
+      "noDriverCapacityMisses": 0,
+      "noPassengerCapacityMisses": 0,
+      "activeSamples": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2
+      ],
+      "errors": {},
+      "latencyMs": {
+        "createBooking": {
+          "count": 2,
+          "p50": 223,
+          "p95": 223,
+          "p99": 223,
+          "max": 224,
+          "avg": 223.5
+        },
+        "confirmPayment": {
+          "count": 2,
+          "p50": 353,
+          "p95": 353,
+          "p99": 353,
+          "max": 368,
+          "avg": 360.5
+        },
+        "bookingToDispatch": {
+          "count": 2,
+          "p50": 45,
+          "p95": 45,
+          "p99": 45,
+          "max": 65,
+          "avg": 55
+        },
+        "acceptRide": {
+          "count": 2,
+          "p50": 201,
+          "p95": 201,
+          "p99": 201,
+          "max": 205,
+          "avg": 203
+        },
+        "startTrip": {
+          "count": 2,
+          "p50": 194,
+          "p95": 194,
+          "p99": 194,
+          "max": 200,
+          "avg": 197
+        },
+        "completeTrip": {
+          "count": 2,
+          "p50": 214,
+          "p95": 214,
+          "p99": 214,
+          "max": 215,
+          "avg": 214.5
+        },
+        "fullFlowToStart": {
+          "count": 2,
+          "p50": 978,
+          "p95": 978,
+          "p99": 978,
+          "max": 990,
+          "avg": 984
+        },
+        "tripDuration": {
+          "count": 2,
+          "p50": 29273,
+          "p95": 29273,
+          "p99": 29273,
+          "max": 29285,
+          "avg": 29279
+        }
+      },
+      "startedAt": "2026-03-22T07:42:07.946Z",
+      "finishedAt": "2026-03-22T07:42:37.992Z",
+      "activeStats": {
+        "avg": 1.93,
+        "max": 2,
+        "target": 2,
+        "targetHitPct": 96.5
+      }
+    }
+  ],
+  "metrics": {
+    "startedRides": 2,
+    "completedRides": 2,
+    "failedStarts": 0,
+    "failedCompletes": 0,
+    "paymentBlockedRetries": 0,
+    "paymentBlockedHardFails": 0,
+    "noDriverCapacityMisses": 0,
+    "noPassengerCapacityMisses": 0,
+    "latencyMs": {
+      "createBooking": [
+        224,
+        223
+      ],
+      "confirmPayment": [
+        353,
+        368
+      ],
+      "bookingToDispatch": [
+        45,
+        65
+      ],
+      "acceptRide": [
+        509,
+        508
+      ],
+      "startTrip": [
+        200,
+        194
+      ],
+      "tripDuration": [
+        29285,
+        29273
+      ],
+      "completeTrip": [
+        214,
+        215
+      ],
+      "fullFlowToStart": [
+        978,
+        990
+      ]
+    },
+    "errors": {},
+    "errorSamples": {}
+  },
+  "notes": [],
+  "finishedAt": "2026-03-22T07:42:38.216Z",
+  "durationMs": 37777,
+  "summary": {
+    "startedRides": 2,
+    "completedRides": 2,
+    "activeRidesAtEnd": 0,
+    "completionRatePct": 100,
+    "failedStarts": 0,
+    "failedCompletes": 0,
+    "paymentBlockedRetries": 0,
+    "paymentBlockedHardFails": 0,
+    "noDriverCapacityMisses": 0,
+    "noPassengerCapacityMisses": 0,
+    "latencyMs": {
+      "createBooking": {
+        "count": 2,
+        "p50": 223,
+        "p95": 223,
+        "p99": 223,
+        "max": 224,
+        "avg": 223.5
+      },
+      "confirmPayment": {
+        "count": 2,
+        "p50": 353,
+        "p95": 353,
+        "p99": 353,
+        "max": 368,
+        "avg": 360.5
+      },
+      "bookingToDispatch": {
+        "count": 2,
+        "p50": 45,
+        "p95": 45,
+        "p99": 45,
+        "max": 65,
+        "avg": 55
+      },
+      "acceptRide": {
+        "count": 2,
+        "p50": 508,
+        "p95": 508,
+        "p99": 508,
+        "max": 509,
+        "avg": 508.5
+      },
+      "startTrip": {
+        "count": 2,
+        "p50": 194,
+        "p95": 194,
+        "p99": 194,
+        "max": 200,
+        "avg": 197
+      },
+      "completeTrip": {
+        "count": 2,
+        "p50": 214,
+        "p95": 214,
+        "p99": 214,
+        "max": 215,
+        "avg": 214.5
+      },
+      "tripDuration": {
+        "count": 2,
+        "p50": 29273,
+        "p95": 29273,
+        "p99": 29273,
+        "max": 29285,
+        "avg": 29279
+      },
+      "fullFlowToStart": {
+        "count": 2,
+        "p50": 978,
+        "p95": 978,
+        "p99": 978,
+        "max": 990,
+        "avg": 984
+      }
+    },
+    "topErrors": [],
+    "errorSamples": {}
+  },
+  "capacityEstimate": {
+    "sustainedActiveRidesEstimated": 1.93,
+    "interpretation": "Highest average active rides in windows with >=90% target hit and low start failures."
+  }
+}

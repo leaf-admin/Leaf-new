@@ -214,6 +214,8 @@ function registerSocketAcceptRideHandler({
                 // Command executado com sucesso
                 const { bookingId: resultBookingId, driverId: resultDriverId, customerId, event, pickupLocation } = result.data;
 
+                let eventPublished = false;
+
                 // ✅ REFATORAÇÃO: Publicar evento no EventBus (listeners vão notificar passageiro e motorista)
                 if (event) {
                     // ✅ FASE 1.3: Criar span para Event publish
@@ -246,20 +248,29 @@ function registerSocketAcceptRideHandler({
 
                         // ✅ MÉTRICAS: Registrar evento publicado
                         metrics.recordEventPublished('ride.accepted');
+                        eventPublished = true;
 
                         endSpanSuccess(eventSpan, {
                             'event.latency_ms': Date.now() - eventStartTime
                         });
                     } catch (error) {
                         endSpanError(eventSpan, error);
-                        throw error;
+                        logStructured('warn', 'Falha ao publicar ride.accepted no EventBus (seguindo com fallback direto)', {
+                            driverId,
+                            bookingId: bookingIdToUse,
+                            customerId,
+                            eventType: 'acceptRide',
+                            error: error.message
+                        });
                     }
 
-                    const eventLatency = Date.now() - eventStartTime;
-                    logEvent('ride.accepted', 'published', {
-                        bookingId: bookingIdToUse,
-                        latency_ms: eventLatency
-                    });
+                    if (eventPublished) {
+                        const eventLatency = Date.now() - eventStartTime;
+                        logEvent('ride.accepted', 'published', {
+                            bookingId: bookingIdToUse,
+                            latency_ms: eventLatency
+                        });
+                    }
                 }
 
                 // ✅ NOVO: Atualizar motorista da corrida no Firestore
@@ -288,6 +299,25 @@ function registerSocketAcceptRideHandler({
                 // ✅ Emitir confirmação IMEDIATAMENTE para o motorista que solicitou o aceite
                 socket.emit('rideAccepted', acceptRideResponse);
 
+                // ✅ Fallback direto para passageiro (garante transição de estado mesmo se listener falhar)
+                if (customerId) {
+                    io.to(`customer_${customerId}`).emit('rideAccepted', {
+                        success: true,
+                        bookingId: bookingIdToUse,
+                        driverId,
+                        customerId,
+                        message: 'Motorista aceitou sua corrida',
+                        timestamp: new Date().toISOString(),
+                        source: eventPublished ? 'listener_plus_fallback' : 'direct_fallback'
+                    });
+                } else {
+                    logStructured('warn', 'acceptRide sem customerId para notificar passageiro', {
+                        driverId,
+                        bookingId: bookingIdToUse,
+                        eventType: 'acceptRide'
+                    });
+                }
+
                 // ✅ NOVO: Ativar corrida em bookings:active
                 try {
                     if (!redisPool) {
@@ -309,7 +339,11 @@ function registerSocketAcceptRideHandler({
                             if (bookingData.destinationLocation) activeBookingData.drop = JSON.parse(bookingData.destinationLocation);
                             if (bookingData.estimatedFare) activeBookingData.estimate = parseFloat(bookingData.estimatedFare);
                         } catch (e) {
-                            logger.warn(`⚠️ [acceptRide] Erro ao parsear campos para bookings:active: ${e.message}`);
+                            logStructured('warn', 'acceptRide: erro ao parsear campos para bookings:active', {
+                                bookingId: bookingIdToUse,
+                                eventType: 'acceptRide',
+                                error: e.message
+                            });
                         }
 
                         const bookingDataStr = JSON.stringify(activeBookingData);
@@ -364,7 +398,12 @@ function registerSocketAcceptRideHandler({
                     await metricsCollector.recordMatchEnd(bookingIdToUse, driverId, Date.now());
                     await metricsCollector.recordDriverAcceptance(bookingIdToUse, driverId, Date.now());
                 } catch (metErr) {
-                    logger.error(`❌ [acceptRide] Erro em métricas: ${metErr.message}`);
+                    logStructured('warn', 'acceptRide: erro ao registrar métricas', {
+                        bookingId: bookingIdToUse,
+                        driverId,
+                        eventType: 'acceptRide',
+                        error: metErr.message
+                    });
                 }
 
                 // ✅ NOTIFICAÇÃO JÁ FOI ENVIADA PARA PASSAGEIRO PELOS LISTENERS via EventBus

@@ -10,6 +10,7 @@ Workers dedicados para processar listeners pesados, desacoplando do processo pri
 workers/
 ├── WorkerManager.js        # Gerenciador de workers com Consumer Groups
 ├── listener-worker.js      # Worker para processar listeners pesados
+├── worker-trip-location.js # Worker para consolidar trilha de localização
 └── README.md              # Esta documentação
 ```
 
@@ -23,6 +24,7 @@ workers/
 ### Listeners Pesados (Workers)
 - `notifyDrivers` - Busca motoristas próximos, cálculos de score
 - `sendPush` - Chamadas externas FCM, busca de tokens
+- `trip.location.v1` - Persistência de rota da corrida em chunks
 
 ## 🚀 Como Usar
 
@@ -46,6 +48,16 @@ pm2 stop listener-worker
 
 # Reiniciar
 pm2 restart listener-worker
+```
+
+### 2.1 Worker de Localização da Corrida
+
+```bash
+# Iniciar worker dedicado de localização
+pm2 start workers/worker-trip-location.js --name trip-location-worker
+
+# Logs
+pm2 logs trip-location-worker
 ```
 
 ### 3. Executar Múltiplos Workers
@@ -76,6 +88,19 @@ WORKER_GROUP_NAME=listener-workers
 WORKER_BATCH_SIZE=10
 WORKER_BLOCK_TIME=1000
 WORKER_MAX_RETRIES=3
+
+# Trip Location Worker
+ENABLE_TRIP_LOCATION_PERSISTENCE_WORKER=true
+ENABLE_TRIP_LOCATION_FIRESTORE_PERSISTENCE=true
+TRIP_LOCATION_WORKER_GROUP=trip-location-workers
+TRIP_LOCATION_WORKER_BATCH_SIZE=40
+TRIP_LOCATION_WORKER_BLOCK_TIME=1000
+TRIP_LOCATION_WORKER_MAX_RETRIES=4
+TRIP_LOCATION_CHUNK_SIZE=30
+TRIP_LOCATION_PERIODIC_FLUSH_MS=15000
+TRIP_LOCATION_CHUNK_RETENTION_DAYS=30
+TRIP_LOCATION_OUT_OF_ORDER_WINDOW=15
+TRIP_LOCATION_DEDUP_TTL_SECONDS=21600
 ```
 
 ### Consumer Groups
@@ -205,4 +230,3 @@ const stats = workerManager.getStats();
 - [ ] Implementar auto-scaling baseado em lag
 - [ ] Adicionar dashboard para monitorar workers
 - [ ] Implementar reprocessamento automático de DLQ
-

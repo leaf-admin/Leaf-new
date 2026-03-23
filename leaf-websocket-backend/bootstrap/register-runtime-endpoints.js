@@ -1,4 +1,7 @@
 function registerRuntimeEndpoints({ app, io, VPS_CONFIG, logStructured }) {
+    const legacyRuntimeEndpointsEnabled =
+        String(process.env.ENABLE_LEGACY_RUNTIME_ENDPOINTS || 'false').toLowerCase() === 'true';
+
     // ✅ Endpoint de restart (apenas em desenvolvimento ou com token)
     app.post('/restart', async (req, res) => {
         const restartToken = req.headers['x-restart-token'] || req.query.token;
@@ -38,88 +41,89 @@ function registerRuntimeEndpoints({ app, io, VPS_CONFIG, logStructured }) {
         }
     });
 
-    // Endpoint antigo (mantido para compatibilidade)
-    app.get('/metrics-old', async (req, res) => {
-        try {
-            const metrics = {
-                timestamp: new Date().toISOString(),
-                connections: {
-                    total: io.engine.clientsCount,
-                    max: VPS_CONFIG.MAX_CONNECTIONS,
-                    percentage: (io.engine.clientsCount / VPS_CONFIG.MAX_CONNECTIONS * 100).toFixed(2)
-                },
-                performance: {
-                    memory: process.memoryUsage(),
-                    uptime: process.uptime(),
-                    workers: VPS_CONFIG.CLUSTER_WORKERS
-                },
-                graphql: {
-                    enabled: true,
-                    queries: 26,
-                    mutations: 6,
-                    subscriptions: 6,
-                    features: [
-                        'Dashboard Resolver',
-                        'User Resolver com DataLoader',
-                        'Driver Resolver com Redis GEO',
-                        'Booking Resolver',
-                        'Cache Inteligente',
-                        'Rate Limiting',
-                        'Query Complexity Analysis'
-                    ]
-                }
-            };
+    if (legacyRuntimeEndpointsEnabled) {
+        // Endpoint antigo (mantido apenas quando legado estiver explicitamente habilitado).
+        app.get('/metrics-old', async (req, res) => {
+            try {
+                const metrics = {
+                    timestamp: new Date().toISOString(),
+                    connections: {
+                        total: io.engine.clientsCount,
+                        max: VPS_CONFIG.MAX_CONNECTIONS,
+                        percentage: (io.engine.clientsCount / VPS_CONFIG.MAX_CONNECTIONS * 100).toFixed(2)
+                    },
+                    performance: {
+                        memory: process.memoryUsage(),
+                        uptime: process.uptime(),
+                        workers: VPS_CONFIG.CLUSTER_WORKERS
+                    },
+                    graphql: {
+                        enabled: true,
+                        queries: 26,
+                        mutations: 6,
+                        subscriptions: 6,
+                        features: [
+                            'Dashboard Resolver',
+                            'User Resolver com DataLoader',
+                            'Driver Resolver com Redis GEO',
+                            'Booking Resolver',
+                            'Cache Inteligente',
+                            'Rate Limiting',
+                            'Query Complexity Analysis'
+                        ]
+                    }
+                };
 
-            res.json(metrics);
-        } catch (error) {
-            res.status(500).json({ error: error.message });
-        }
-    });
+                res.json(metrics);
+            } catch (error) {
+                res.status(500).json({ error: error.message });
+            }
+        });
 
-    // Stats endpoint para GraphQL
-    app.get('/stats', async (req, res) => {
-        try {
-            const stats = {
-                timestamp: new Date().toISOString(),
-                server: {
-                    status: 'running',
-                    uptime: process.uptime(),
-                    memory: process.memoryUsage(),
-                    workers: ULTRA_CONFIG.CLUSTER_WORKERS
-                },
-                websocket: {
-                    connections: io.engine.clientsCount,
-                    maxConnections: ULTRA_CONFIG.MAX_CONNECTIONS
-                },
-                graphql: {
-                    status: 'active',
-                    endpoint: '/graphql',
-                    queries: 26,
-                    mutations: 6,
-                    subscriptions: 6,
-                    features: [
-                        'Dashboard Resolver',
-                        'User Resolver com DataLoader',
-                        'Driver Resolver com Redis GEO',
-                        'Booking Resolver',
-                        'Cache Inteligente',
-                        'Rate Limiting',
-                        'Query Complexity Analysis',
-                        'Depth Limiting'
-                    ]
-                },
-                performance: {
-                    requestsPerSecond: ULTRA_CONFIG.MAX_REQUESTS_PER_SECOND,
-                    maxConnections: ULTRA_CONFIG.MAX_CONNECTIONS,
-                    clusterWorkers: ULTRA_CONFIG.CLUSTER_WORKERS
-                }
-            };
+        app.get('/stats', async (req, res) => {
+            try {
+                const stats = {
+                    timestamp: new Date().toISOString(),
+                    server: {
+                        status: 'running',
+                        uptime: process.uptime(),
+                        memory: process.memoryUsage(),
+                        workers: VPS_CONFIG.CLUSTER_WORKERS
+                    },
+                    websocket: {
+                        connections: io.engine.clientsCount,
+                        maxConnections: VPS_CONFIG.MAX_CONNECTIONS
+                    },
+                    graphql: {
+                        status: 'active',
+                        endpoint: '/graphql',
+                        queries: 26,
+                        mutations: 6,
+                        subscriptions: 6,
+                        features: [
+                            'Dashboard Resolver',
+                            'User Resolver com DataLoader',
+                            'Driver Resolver com Redis GEO',
+                            'Booking Resolver',
+                            'Cache Inteligente',
+                            'Rate Limiting',
+                            'Query Complexity Analysis',
+                            'Depth Limiting'
+                        ]
+                    },
+                    performance: {
+                        requestsPerSecond: VPS_CONFIG.MAX_REQUESTS_PER_SECOND,
+                        maxConnections: VPS_CONFIG.MAX_CONNECTIONS,
+                        clusterWorkers: VPS_CONFIG.CLUSTER_WORKERS
+                    }
+                };
 
-            res.json(stats);
-        } catch (error) {
-            res.status(500).json({ error: error.message });
-        }
-    });
+                res.json(stats);
+            } catch (error) {
+                res.status(500).json({ error: error.message });
+            }
+        });
+    }
 }
 
 module.exports = registerRuntimeEndpoints;

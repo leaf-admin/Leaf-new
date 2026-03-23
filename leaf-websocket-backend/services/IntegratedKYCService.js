@@ -656,6 +656,11 @@ class IntegratedKYCService {
       const confidence = Number(devicePayload.confidence || similarityScore || 0);
       const timestamp = Date.now();
       const shouldRecoverBlocked = devicePayload.recoverBlocked === true;
+      const verificationMode = String(
+        devicePayload.mode
+        || devicePayload.provider
+        || 'device_signature_v1'
+      );
 
       const verificationResult = {
         success: true,
@@ -670,7 +675,7 @@ class IntegratedKYCService {
         timestamp: new Date(timestamp).toISOString(),
         fromCache: false,
         fromVPS: false,
-        mode: 'device_signature_v1'
+        mode: verificationMode
       };
 
       // Fast-path: para match positivo, evitar rotina pesada de status a cada request.
@@ -684,7 +689,7 @@ class IntegratedKYCService {
             similarityScore,
             confidence,
             attempts: 1,
-            source: 'device_signature_v1'
+            source: verificationMode
           });
         } else if (shouldRecoverBlocked) {
           await kycDriverStatusService.processVerificationResult(userId, {
@@ -693,7 +698,7 @@ class IntegratedKYCService {
             similarityScore,
             confidence,
             attempts: 1,
-            source: 'device_signature_v1'
+            source: verificationMode
           });
         }
       } catch (statusError) {
@@ -712,7 +717,7 @@ class IntegratedKYCService {
         confidence,
         threshold,
         timestamp,
-        mode: 'device_signature_v1'
+        mode: verificationMode
       });
       // Persistência curta de observabilidade pode ser desabilitada para reduzir latência.
       const writeAuditKey = String(process.env.KYC_WRITE_AUDIT_KEY || 'false').toLowerCase() === 'true';
@@ -727,7 +732,7 @@ class IntegratedKYCService {
           confidence,
           threshold,
           timestamp,
-          mode: 'device_signature_v1'
+          mode: verificationMode
         });
         redisOps.set(verificationKey, verificationPayload, 'EX', 24 * 60 * 60);
       }

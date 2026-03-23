@@ -4,6 +4,7 @@ const admin = require('firebase-admin');
 const circuitBreakerService = require('./circuit-breaker-service');
 const { logStructured, logError } = require('../utils/logger');
 const traceContext = require('../utils/trace-context');
+const redisPool = require('../utils/redis-pool');
 
 class PaymentService {
   constructor() {
@@ -313,11 +314,37 @@ class PaymentService {
         };
       }
 
+      const chargePayload = chargeResult?.charge || {};
+      const chargeId =
+        chargePayload.identifier ||
+        chargePayload.id ||
+        chargePayload.transactionID ||
+        chargePayload.correlationID ||
+        chargePayload?.paymentMethods?.pix?.identifier ||
+        chargePayload?.paymentMethods?.pix?.transactionID ||
+        null;
+      const qrCode =
+        chargePayload.qrCodeImage ||
+        chargePayload?.paymentMethods?.pix?.qrCodeImage ||
+        null;
+      const paymentLink = chargePayload.paymentLinkUrl || null;
+
       logStructured('info', 'Cobrança criada com sucesso', {
         service: 'PaymentService',
-        chargeId: chargeResult.charge?.id,
+        chargeId,
         correlationID: chargeData.correlationID
       });
+
+      if (!chargeId) {
+        return {
+          success: false,
+          error: 'Falha ao identificar cobrança PIX',
+          details: {
+            message: 'A Woovi retornou cobrança sem identificador',
+            correlationID: chargeData.correlationID
+          }
+        };
+      }
 
       // ✅ SIMPLIFICADO: Apenas criar cobrança, sem holding
       // Quando pagamento for confirmado, creditar saldo diretamente no motorista
@@ -325,9 +352,9 @@ class PaymentService {
       return {
         success: true,
         message: 'Pagamento antecipado processado com sucesso',
-        chargeId: chargeResult.charge.id,
-        qrCode: chargeResult.charge.qrCodeImage,
-        paymentLink: chargeResult.charge.paymentLinkUrl,
+        chargeId,
+        qrCode,
+        paymentLink,
         rideId: paymentData.rideId,
         amount: paymentData.amount
       };
@@ -1763,6 +1790,36 @@ class PaymentService {
         };
       }
 
+      // Fallback rápido: booking já marcado como pago no Redis.
+      // Útil para a janela logo após pagamento confirmado e antes do Firestore.
+      try {
+        await redisPool.ensureConnection();
+        const redis = redisPool.getConnection();
+        const bookingHash = await redis.hgetall(`booking:${chargeId}`);
+        if (bookingHash && Object.keys(bookingHash).length > 0) {
+          const bookingPaymentStatus = String(bookingHash.paymentStatus || '').toLowerCase();
+          const amountInCents = Number.parseInt(bookingHash.paymentAmountInCents || '0', 10);
+
+          if (['confirmed', 'paid', 'in_holding'].includes(bookingPaymentStatus)) {
+            return {
+              success: true,
+              status: 'in_holding',
+              amount: Number.isFinite(amountInCents) ? amountInCents : 0,
+              amountInReais: Number.isFinite(amountInCents) ? (amountInCents / 100) : 0,
+              chargeId,
+              paidAt: bookingHash.paymentConfirmedAt || bookingHash.updatedAt || null,
+              source: 'booking_cache'
+            };
+          }
+        }
+      } catch (redisLookupError) {
+        logStructured('debug', 'Falha ao consultar status de pagamento no cache Redis', {
+          service: 'payment-service',
+          chargeId,
+          error: redisLookupError.message
+        });
+      }
+
       // ✅ NOVO: Primeiro verificar se existe payment holding no Firestore (para testes)
       try {
         const firestore = firebaseConfig.getFirestore();
@@ -1782,14 +1839,8 @@ class PaymentService {
               paidAt: holdingData.paidAt || null
             };
           } else {
-            // ✅ NOVO: Se não encontrou no Firestore, retornar "não encontrado" explicitamente
+            // Sem holding local: continua para consulta direta na Woovi.
             logStructured('warn', 'Payment holding não encontrado no Firestore', { service: 'payment-service', chargeId });
-            return {
-              success: false,
-              error: 'Pagamento não encontrado',
-              status: null,
-              code: 'PAYMENT_NOT_FOUND'
-            };
           }
         }
       } catch (firestoreError) {

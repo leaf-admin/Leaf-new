@@ -9,6 +9,73 @@ function registerSocketDisconnectHandler({
     logStructured,
     releaseAdmissionSlotIfNeeded
 }) {
+    const ELIGIBLE_DRIVER_GEO_KEY = process.env.ELIGIBLE_DRIVER_GEO_KEY || 'driver_locations_eligible';
+    const {
+        resolveAcceptedBookingCandidatesForDriver,
+        recoverAcceptedBooking
+    } = require('../services/accepted-ride-recovery-service');
+
+    const recoverAcceptedRideOnDriverDisconnect = async ({ redis, driverData }) => {
+        try {
+            const driverId = socket.userId;
+            if (!driverId) {
+                return;
+            }
+
+            const { bookingIds } = await resolveAcceptedBookingCandidatesForDriver(redis, driverId, {
+                scanLimit: 300
+            });
+
+            if (!bookingIds || bookingIds.length === 0) {
+                return;
+            }
+
+            const pickupFallback = (
+                driverData && driverData.lat && driverData.lng
+            )
+                ? { lat: Number(driverData.lat), lng: Number(driverData.lng) }
+                : null;
+
+            for (const bookingId of bookingIds) {
+                const recoveryResult = await recoverAcceptedBooking({
+                    redis,
+                    io,
+                    bookingId,
+                    expectedDriverId: driverId,
+                    reason: 'driver_disconnect_before_start',
+                    source: 'driver_disconnect_handler',
+                    recoveryMetadata: {
+                        recoveryTriggeredFrom: 'socket_disconnect'
+                    },
+                    pickupFallback
+                });
+
+                if (recoveryResult.recovered) {
+                    logStructured('info', 'Recuperação de corrida executada após desconexão do motorista', {
+                        service: 'websocket',
+                        bookingId,
+                        driverId,
+                        reason: recoveryResult.reason,
+                        dispatchReason: recoveryResult.dispatchResult?.reason || null
+                    });
+                } else if (!recoveryResult.skipped) {
+                    logStructured('warn', 'Recuperação de corrida falhou após desconexão do motorista', {
+                        service: 'websocket',
+                        bookingId,
+                        driverId,
+                        reason: recoveryResult.reason || 'UNKNOWN_FAILURE'
+                    });
+                }
+            }
+        } catch (recoveryError) {
+            logStructured('error', 'Erro na recuperação de corrida após desconexão do motorista', {
+                service: 'websocket',
+                driverId: socket.userId,
+                error: recoveryError.message
+            });
+        }
+    };
+
     // 1. Disconnect (crítico - deve estar sempre pronto)
     socket.on('disconnect', async (reason) => {
         releaseAdmissionSlotIfNeeded();
@@ -116,6 +183,16 @@ function registerSocketDisconnectHandler({
                         });
                     }
                 }
+
+                await redis.zrem(ELIGIBLE_DRIVER_GEO_KEY, socket.userId);
+                await redis.srem('online_drivers', socket.userId);
+                await redis.hset(`driver:${socket.userId}`, {
+                    dispatchEligible: 'false',
+                    dispatchEligibilityCode: 'OFFLINE',
+                    dispatchEligibilityCheckedAt: new Date().toISOString()
+                });
+
+                await recoverAcceptedRideOnDriverDisconnect({ redis, driverData });
             } catch (error) {
                 logStructured('error', 'Erro ao processar desconexão do motorista', {
                     service: 'websocket',

@@ -1,0 +1,359 @@
+{
+  "startedAt": "2026-03-22T08:00:01.627Z",
+  "config": {
+    "wsUrl": "https://api.147.182.204.181.sslip.io",
+    "httpBase": "https://api.147.182.204.181.sslip.io",
+    "profile": "production",
+    "forceRealPayment": true,
+    "mockCompletePayment": true,
+    "provisionDriverVehicles": true,
+    "strictReady": true,
+    "loopTickMs": 220,
+    "heartbeatMs": 900,
+    "paymentRetries": 4,
+    "dispatchTimeoutMs": 45000,
+    "readinessTimeoutMs": 30000,
+    "preBookingReadinessRecheckMs": 0,
+    "drainTimeoutMs": 300000
+  },
+  "pool": {
+    "requested": {
+      "drivers": 8,
+      "passengers": 10
+    },
+    "connected": {
+      "drivers": 8,
+      "passengers": 10
+    },
+    "readyDrivers": 8,
+    "uids": {
+      "drivers": 8,
+      "passengers": 10
+    },
+    "tokenGeneration": {
+      "total": 18,
+      "ok": 18,
+      "failed": 0
+    },
+    "provisioning": {
+      "attempted": 8,
+      "ok": 8,
+      "failed": 0
+    },
+    "maxActiveByPool": 8
+  },
+  "windows": [
+    {
+      "name": "smoke",
+      "durationSec": 20,
+      "targetActiveRequested": 3,
+      "targetActiveEffective": 3,
+      "rideDurationSec": {
+        "min": 25,
+        "max": 35
+      },
+      "started": 0,
+      "completed": 0,
+      "failedStarts": 3,
+      "failedCompletes": 0,
+      "paymentBlockedRetries": 0,
+      "paymentBlockedHardFails": 0,
+      "noDriverCapacityMisses": 0,
+      "noPassengerCapacityMisses": 0,
+      "activeSamples": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "errors": {
+        "create_booking": 3
+      },
+      "latencyMs": {
+        "createBooking": {
+          "count": 0,
+          "p50": 0,
+          "p95": 0,
+          "p99": 0,
+          "max": 0,
+          "avg": 0
+        },
+        "confirmPayment": {
+          "count": 0,
+          "p50": 0,
+          "p95": 0,
+          "p99": 0,
+          "max": 0,
+          "avg": 0
+        },
+        "bookingToDispatch": {
+          "count": 0,
+          "p50": 0,
+          "p95": 0,
+          "p99": 0,
+          "max": 0,
+          "avg": 0
+        },
+        "acceptRide": {
+          "count": 0,
+          "p50": 0,
+          "p95": 0,
+          "p99": 0,
+          "max": 0,
+          "avg": 0
+        },
+        "startTrip": {
+          "count": 0,
+          "p50": 0,
+          "p95": 0,
+          "p99": 0,
+          "max": 0,
+          "avg": 0
+        },
+        "completeTrip": {
+          "count": 0,
+          "p50": 0,
+          "p95": 0,
+          "p99": 0,
+          "max": 0,
+          "avg": 0
+        },
+        "fullFlowToStart": {
+          "count": 0,
+          "p50": 0,
+          "p95": 0,
+          "p99": 0,
+          "max": 0,
+          "avg": 0
+        },
+        "tripDuration": {
+          "count": 0,
+          "p50": 0,
+          "p95": 0,
+          "p99": 0,
+          "max": 0,
+          "avg": 0
+        }
+      },
+      "startedAt": "2026-03-22T08:00:55.489Z",
+      "finishedAt": "2026-03-22T08:01:15.607Z",
+      "activeStats": {
+        "avg": 0,
+        "max": 0,
+        "target": 3,
+        "targetHitPct": 0
+      }
+    }
+  ],
+  "metrics": {
+    "startedRides": 0,
+    "completedRides": 0,
+    "failedStarts": 3,
+    "failedCompletes": 0,
+    "paymentBlockedRetries": 0,
+    "paymentBlockedHardFails": 0,
+    "noDriverCapacityMisses": 0,
+    "noPassengerCapacityMisses": 0,
+    "latencyMs": {
+      "createBooking": [],
+      "confirmPayment": [],
+      "bookingToDispatch": [],
+      "acceptRide": [],
+      "startTrip": [],
+      "tripDuration": [],
+      "completeTrip": [],
+      "fullFlowToStart": []
+    },
+    "errors": {
+      "create_booking": 3
+    },
+    "errorSamples": {
+      "create_booking": [
+        "Timeout ao criar booking"
+      ]
+    }
+  },
+  "notes": [],
+  "finishedAt": "2026-03-22T08:01:15.607Z",
+  "durationMs": 73980,
+  "summary": {
+    "startedRides": 0,
+    "completedRides": 0,
+    "activeRidesAtEnd": 0,
+    "completionRatePct": 0,
+    "failedStarts": 3,
+    "failedCompletes": 0,
+    "paymentBlockedRetries": 0,
+    "paymentBlockedHardFails": 0,
+    "noDriverCapacityMisses": 0,
+    "noPassengerCapacityMisses": 0,
+    "latencyMs": {
+      "createBooking": {
+        "count": 0,
+        "p50": 0,
+        "p95": 0,
+        "p99": 0,
+        "max": 0,
+        "avg": 0
+      },
+      "confirmPayment": {
+        "count": 0,
+        "p50": 0,
+        "p95": 0,
+        "p99": 0,
+        "max": 0,
+        "avg": 0
+      },
+      "bookingToDispatch": {
+        "count": 0,
+        "p50": 0,
+        "p95": 0,
+        "p99": 0,
+        "max": 0,
+        "avg": 0
+      },
+      "acceptRide": {
+        "count": 0,
+        "p50": 0,
+        "p95": 0,
+        "p99": 0,
+        "max": 0,
+        "avg": 0
+      },
+      "startTrip": {
+        "count": 0,
+        "p50": 0,
+        "p95": 0,
+        "p99": 0,
+        "max": 0,
+        "avg": 0
+      },
+      "completeTrip": {
+        "count": 0,
+        "p50": 0,
+        "p95": 0,
+        "p99": 0,
+        "max": 0,
+        "avg": 0
+      },
+      "tripDuration": {
+        "count": 0,
+        "p50": 0,
+        "p95": 0,
+        "p99": 0,
+        "max": 0,
+        "avg": 0
+      },
+      "fullFlowToStart": {
+        "count": 0,
+        "p50": 0,
+        "p95": 0,
+        "p99": 0,
+        "max": 0,
+        "avg": 0
+      }
+    },
+    "topErrors": [
+      {
+        "error": "create_booking",
+        "count": 3
+      }
+    ],
+    "errorSamples": {
+      "create_booking": [
+        "Timeout ao criar booking"
+      ]
+    }
+  },
+  "capacityEstimate": {
+    "sustainedActiveRidesEstimated": 0,
+    "interpretation": "No window met the >=90% target-hit + low-failure criteria. Check errors and pool readiness."
+  }
+}

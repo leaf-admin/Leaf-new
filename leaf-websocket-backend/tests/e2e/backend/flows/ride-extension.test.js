@@ -7,7 +7,6 @@
 const WebSocketTestClient = require('../__helpers__/websocket-test-client');
 const RedisDriverSimulator = require('../__helpers__/redis-driver-simulator');
 const testData = require('../__fixtures__/test-data');
-const redisPool = require('../../../../utils/redis-pool');
 
 console.log('🔍 [INIT] Test file loaded');
 
@@ -15,12 +14,27 @@ const WS_URL = process.env.WS_URL || 'http://localhost:3001';
 
 describe('Ride Extension E2E Tests', () => {
     let drivers = [];
-    let redis;
+    let createdBookingIds = [];
     const driverSim = new RedisDriverSimulator();
 
     beforeAll(async () => {
-        redis = redisPool.getConnection();
-        await redisPool.ensureConnection();
+        // noop
+    });
+
+    beforeEach(async () => {
+        const [searchKeys, pendingQueues, activeQueues, lockKeys] = await Promise.all([
+            driverSim.keys('booking_search:*'),
+            driverSim.keys('ride_queue:*:pending'),
+            driverSim.keys('ride_queue:*:active'),
+            driverSim.keys('driver_lock:*')
+        ]);
+
+        await Promise.allSettled([
+            searchKeys.length ? driverSim.del(...searchKeys) : Promise.resolve(),
+            pendingQueues.length ? driverSim.del(...pendingQueues) : Promise.resolve(),
+            activeQueues.length ? driverSim.del(...activeQueues) : Promise.resolve(),
+            lockKeys.length ? driverSim.del(...lockKeys) : Promise.resolve()
+        ]);
     });
 
     afterEach(async () => {
@@ -28,6 +42,31 @@ describe('Ride Extension E2E Tests', () => {
             await driverSim.removeDriver(driverId);
         }
         drivers = [];
+
+        const [pendingQueues, activeQueues] = await Promise.all([
+            driverSim.keys('ride_queue:*:pending'),
+            driverSim.keys('ride_queue:*:active')
+        ]);
+
+        for (const bookingId of createdBookingIds) {
+            try {
+                await driverSim.del(
+                    `booking:${bookingId}`,
+                    `booking_search:${bookingId}`,
+                    `ride_notifications:${bookingId}`,
+                    `ride_excluded_drivers:${bookingId}`
+                );
+                for (const queueKey of pendingQueues) {
+                    await driverSim.zrem(queueKey, bookingId);
+                }
+                for (const queueKey of activeQueues) {
+                    await driverSim.hdel(queueKey, bookingId);
+                }
+            } catch (_error) {
+                // ignore cleanup errors
+            }
+        }
+        createdBookingIds = [];
     });
 
     test('Scenario 1: Fare Increase (Ride Extension via Pix)', async () => {
@@ -56,6 +95,7 @@ describe('Ride Extension E2E Tests', () => {
             console.log('📡 Creating booking...');
             const booking = await client.createBooking(testData.booking.createBookingData(null, null, customerId));
             const bookingId = booking.bookingId;
+            createdBookingIds.push(bookingId);
             console.log(`✅ Booking created: ${bookingId}`);
 
             console.log('📡 Confirming payment...');
@@ -64,6 +104,13 @@ describe('Ride Extension E2E Tests', () => {
 
             console.log('📡 Driver awaiting request...');
             await dClient.waitForEvent('newRideRequest', 15000);
+
+            await driverSim.del(
+                `driver_lock:${driverId}`,
+                `driver_active_notification:${driverId}`,
+                `active_trip_by_driver:${driverId}`,
+                `active_trip_customer_by_driver:${driverId}`
+            );
 
             console.log('📡 Accepting ride...');
             await dClient.acceptRide(bookingId);
@@ -140,6 +187,7 @@ describe('Ride Extension E2E Tests', () => {
             console.log('📡 Creating booking...');
             const booking = await client.createBooking(testData.booking.createBookingData(null, null, customerId));
             const bookingId = booking.bookingId;
+            createdBookingIds.push(bookingId);
             console.log(`✅ Booking created: ${bookingId}`);
 
             console.log('📡 Confirming payment...');
@@ -149,9 +197,21 @@ describe('Ride Extension E2E Tests', () => {
             console.log('📡 Driver awaiting request...');
             await dClient.waitForEvent('newRideRequest', 15000);
 
+            await driverSim.del(
+                `driver_lock:${driverId}`,
+                `driver_active_notification:${driverId}`,
+                `active_trip_by_driver:${driverId}`,
+                `active_trip_customer_by_driver:${driverId}`
+            );
+
             console.log('📡 Accepting ride...');
             await dClient.acceptRide(bookingId);
             console.log('✅ Ride accepted');
+
+            console.log('📡 Motorista chegando ao local...');
+            await dClient.arrivedAtPickup(bookingId);
+            await testData.helpers.sleep(300);
+            console.log('✅ Motorista chegou ao local');
 
             console.log('📡 Starting trip...');
             await dClient.startTrip({ bookingId, startLocation: testData.locations.pickup });

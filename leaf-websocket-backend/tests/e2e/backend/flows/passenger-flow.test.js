@@ -92,7 +92,31 @@ describe('Fluxo Passageiro Completo', () => {
     passengerClient.clearEvents();
     driverClient.clearEvents();
 
+    const [bookingKeys, searchKeys, notificationKeys, excludedDriverKeys, pendingQueues, activeQueues] = await Promise.all([
+      driverSimulator.keys('booking:*'),
+      driverSimulator.keys('booking_search:*'),
+      driverSimulator.keys('ride_notifications:*'),
+      driverSimulator.keys('ride_excluded_drivers:*'),
+      driverSimulator.keys('ride_queue:*:pending'),
+      driverSimulator.keys('ride_queue:*:active')
+    ]);
+
+    await Promise.allSettled([
+      bookingKeys.length ? driverSimulator.del(...bookingKeys) : Promise.resolve(),
+      searchKeys.length ? driverSimulator.del(...searchKeys) : Promise.resolve(),
+      notificationKeys.length ? driverSimulator.del(...notificationKeys) : Promise.resolve(),
+      excludedDriverKeys.length ? driverSimulator.del(...excludedDriverKeys) : Promise.resolve(),
+      pendingQueues.length ? driverSimulator.del(...pendingQueues) : Promise.resolve(),
+      activeQueues.length ? driverSimulator.del(...activeQueues) : Promise.resolve()
+    ]);
+
     // Reforçar estado online para evitar flakiness após testes que finalizam corrida
+    await driverSimulator.del(
+      `driver_lock:${testData.users.driver.uid}`,
+      `driver_active_notification:${testData.users.driver.uid}`,
+      `active_trip_by_driver:${testData.users.driver.uid}`,
+      `active_trip_customer_by_driver:${testData.users.driver.uid}`
+    );
     await driverSimulator.setDriverOnline(
       testData.users.driver.uid,
       testData.locations.pickup.lat,
@@ -143,12 +167,11 @@ describe('Fluxo Passageiro Completo', () => {
     const notification = await driverClient.waitForEvent(
       'newRideRequest',
       45000,
-      (eventData) => (eventData?.bookingId || eventData?.rideId) === bookingId
+      (event) => (event?.bookingId || event?.rideId) === bookingId
     );
 
     expect(notification).toBeDefined();
     console.log(`[DEBUG Teste 1] Recebeu notificação para bookingId:`, notification.bookingId || notification.rideId, 'Esperado:', bookingId);
-    expect(notification.bookingId || notification.rideId).toBe(bookingId);
 
     console.log(`✅ Driver recebeu notificação da corrida ${bookingId}`);
 
@@ -170,6 +193,10 @@ describe('Fluxo Passageiro Completo', () => {
 
     // ========== ETAPA 5: INICIAR VIAGEM ==========
     console.log('\n🚀 ETAPA 5: Iniciar viagem');
+
+    // Reforço de estado: alguns fluxos exigem marcação explícita de chegada antes do startTrip.
+    await driverClient.arrivedAtPickup(bookingId);
+    await testData.helpers.sleep(400);
 
     const startTripData = testData.trip.createStartTripData(
       bookingId,
@@ -199,7 +226,7 @@ describe('Fluxo Passageiro Completo', () => {
         lng: testData.locations.pickup.lng + (i * 0.001)
       };
 
-      driverClient.socket.emit('updateDriverLocation', {
+      driverClient.socket.emit('updateLocation', {
         driverId: testData.users.driver.uid,
         lat: intermediateLocation.lat,
         lng: intermediateLocation.lng,
@@ -246,7 +273,7 @@ describe('Fluxo Passageiro Completo', () => {
 
     console.log('✅ Todos os eventos esperados foram recebidos');
     console.log(`✅ Fluxo completo concluído com sucesso!`);
-  }, 60000); // Timeout de 60 segundos para teste completo
+  }, 120000); // Timeout ampliado para execução estável em VPS real
 
   test('deve validar cada etapa do fluxo individualmente', async () => {
     // Teste mais granular para debug
@@ -269,15 +296,14 @@ describe('Fluxo Passageiro Completo', () => {
     const notification = await driverClient.waitForEvent(
       'newRideRequest',
       45000,
-      (eventData) => (eventData?.bookingId || eventData?.rideId) === booking.bookingId
+      (event) => (event?.bookingId || event?.rideId) === booking.bookingId
     );
     expect(notification).toBeDefined();
     console.log(`[DEBUG Teste 2] Recebeu notificação para bookingId:`, notification.bookingId || notification.rideId, 'Esperado:', booking.bookingId);
-    expect(notification.bookingId || notification.rideId).toBe(booking.bookingId);
 
     // Etapa 4: Driver aceita
     await driverClient.acceptRide(booking.bookingId);
     const accepted = await passengerClient.waitForEvent('rideAccepted', 10000);
     expect(accepted).toBeDefined();
-  }, 60000);
+  }, 90000);
 });

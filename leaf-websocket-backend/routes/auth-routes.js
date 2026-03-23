@@ -58,8 +58,8 @@ router.post('/login', async (req, res) => {
 });
 
 // Endpoint para verificar token Firebase
-// GET /api/auth/verify
-router.get('/api/auth/verify', async (req, res) => {
+// GET /auth/verify e /api/auth/verify
+router.get('/verify', async (req, res) => {
   try {
     const authHeader = req.headers.authorization;
 
@@ -126,8 +126,8 @@ router.get('/api/auth/verify', async (req, res) => {
   }
 });
 
-// POST /api/auth/verify (alternativa)
-router.post('/api/auth/verify', async (req, res) => {
+// POST /auth/verify e /api/auth/verify (alternativa)
+router.post('/verify', async (req, res) => {
   try {
     const authHeader = req.headers.authorization;
 
@@ -185,49 +185,6 @@ router.post('/api/auth/verify', async (req, res) => {
       authenticated: false,
       success: false,
       message: 'Erro ao verificar token',
-      valid: false
-    });
-  }
-});
-
-// Endpoint legacy para verificar token (mantido para compatibilidade)
-router.get('/verify', async (req, res) => {
-  try {
-    const authHeader = req.headers.authorization;
-
-    if (!authHeader) {
-      return res.status(401).json({
-        success: false,
-        message: 'Token não fornecido'
-      });
-    }
-
-    const token = authHeader.replace(/^Bearer\s+/i, '');
-
-    try {
-      const decodedToken = await admin.auth().verifyIdToken(token);
-
-      res.json({
-        success: true,
-        user: {
-          uid: decodedToken.uid,
-          email: decodedToken.email,
-          name: decodedToken.name
-        },
-        valid: true
-      });
-    } catch (firebaseError) {
-      return res.status(401).json({
-        success: false,
-        message: 'Token inválido ou expirado',
-        valid: false
-      });
-    }
-
-  } catch (error) {
-    res.status(401).json({
-      success: false,
-      message: error.message,
       valid: false
     });
   }
@@ -354,4 +311,3 @@ async function authenticateUser(phone, password, userType) {
 }
 
 module.exports = router;
-

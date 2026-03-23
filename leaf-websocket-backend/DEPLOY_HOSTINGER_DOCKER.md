@@ -8,6 +8,16 @@ Guia completo para deploy do Leaf App na Hostinger VPS usando Docker Compose.
 - Arquivo `firebase-credentials.json` configurado
 - Variáveis de ambiente configuradas (Woovi, API Keys, etc.)
 
+### Sanity check obrigatório antes de deploy
+
+```bash
+./scripts/ops/check-vps-runtime-parity.sh
+```
+
+Se retornar divergência, sincronize primeiro o runtime alvo da VPS para evitar deploy com arquivo incorreto.
+
+O deploy de produção está fixado no runtime `server.vps.js` via `LEAF_SERVER_RUNTIME=vps` no `docker-compose.hostinger.yml`.
+
 ## 🔧 Configuração Inicial
 
 ### 1. Preparar Variáveis de Ambiente
@@ -227,7 +237,7 @@ ssh root@147.93.66.253 "cd /opt/leaf-app && docker-compose config"
 
 ```bash
 # Verificar Redis
-ssh root@147.93.66.253 "cd /opt/leaf-app && docker-compose exec redis redis-cli -a leaf_redis_2024 ping"
+ssh root@147.93.66.253 "cd /opt/leaf-app && docker-compose exec redis env REDISCLI_AUTH=leaf_redis_2024 redis-cli ping"
 ```
 
 ### Firebase credentials não encontrado
@@ -313,4 +323,3 @@ Após o deploy:
 ---
 
 **Pronto!** 🎉 O Leaf App está rodando na Hostinger VPS com Docker!
-

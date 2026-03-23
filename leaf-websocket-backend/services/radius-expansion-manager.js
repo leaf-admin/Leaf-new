@@ -48,7 +48,43 @@ class RadiusExpansionManager {
         
         // Instâncias dos serviços
         this.expander = new GradualRadiusExpander(io);
-        this.dispatcher = new DriverNotificationDispatcher(io);
+        this.dispatcher = new DriverNotificationDispatcher(this.redis, io);
+    }
+
+    async isBookingEligibleForExpansion(bookingId, bookingData = null) {
+        const snapshot = bookingData && Object.keys(bookingData).length > 0
+            ? bookingData
+            : await this.redis.hgetall(`booking:${bookingId}`);
+
+        if (!snapshot || Object.keys(snapshot).length === 0) {
+            return { ok: false, reason: 'BOOKING_NOT_FOUND' };
+        }
+
+        const state = await RideStateManager.getBookingState(this.redis, bookingId);
+        if (state !== RideStateManager.STATES.SEARCHING && state !== RideStateManager.STATES.EXPANDED) {
+            return { ok: false, reason: 'STATE_NOT_ELIGIBLE', state };
+        }
+
+        const status = String(snapshot.status || '').toUpperCase();
+        if (status === 'SUPERSEDED' || status === 'CANCELED' || status === 'COMPLETED' || status === 'NO_DRIVERS_AVAILABLE') {
+            return { ok: false, reason: 'STATUS_BLOCKED', state, status };
+        }
+
+        const customerId = snapshot.customerId;
+        if (customerId) {
+            const activeBookingId = await this.redis.get(`customer_active_booking:${customerId}`);
+            if (activeBookingId && activeBookingId !== bookingId) {
+                return {
+                    ok: false,
+                    reason: 'STALE_CUSTOMER_ACTIVE_BOOKING',
+                    state,
+                    status,
+                    activeBookingId
+                };
+            }
+        }
+
+        return { ok: true, state, status, bookingData: snapshot };
     }
 
     /**
@@ -185,6 +221,12 @@ class RadiusExpansionManager {
                 return;
             }
 
+            const eligibility = await this.isBookingEligibleForExpansion(bookingId, bookingData);
+            if (!eligibility.ok) {
+                logger.info(`ℹ️ [RadiusExpansionManager] Expansão ignorada para ${bookingId}: ${eligibility.reason}`);
+                return;
+            }
+
             // Parse seguro de pickupLocation
             let pickupLocation = {};
             if (bookingData.pickupLocation) {
@@ -265,7 +307,8 @@ class RadiusExpansionManager {
             const result = await this.dispatcher.notifyMultipleDrivers(
                 driversIn5km,
                 bookingId,
-                bookingInfo
+                bookingInfo,
+                this.config.driversPerWave
             );
 
             logger.info(`✅ [RadiusExpansionManager] ${result.notified} motorista(s) notificado(s) após expansão para 5km (${bookingId})`);
@@ -354,4 +397,3 @@ class RadiusExpansionManager {
 }
 
 module.exports = RadiusExpansionManager;
-

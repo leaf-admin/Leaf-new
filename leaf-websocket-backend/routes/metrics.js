@@ -1069,6 +1069,46 @@ function isWithin(ts, window) {
   return ts >= window.start.getTime() && ts <= window.end.getTime();
 }
 
+function parseLatLng(source) {
+  if (!source) return { lat: null, lng: null };
+
+  if (typeof source === 'string') {
+    try {
+      const parsed = JSON.parse(source);
+      return parseLatLng(parsed);
+    } catch (_error) {
+      return { lat: null, lng: null };
+    }
+  }
+
+  const lat = Number.parseFloat(source.lat ?? source.latitude ?? source.pickupLat ?? source.pickup_lat);
+  const lng = Number.parseFloat(source.lng ?? source.lon ?? source.longitude ?? source.pickupLng ?? source.pickup_lng);
+
+  return {
+    lat: Number.isFinite(lat) ? lat : null,
+    lng: Number.isFinite(lng) ? lng : null
+  };
+}
+
+function estimateBoundingAreaKm2(points = []) {
+  const valid = points.filter((point) => Number.isFinite(point.lat) && Number.isFinite(point.lng));
+  if (valid.length < 2) return null;
+
+  const lats = valid.map((point) => point.lat);
+  const lngs = valid.map((point) => point.lng);
+  const minLat = Math.min(...lats);
+  const maxLat = Math.max(...lats);
+  const minLng = Math.min(...lngs);
+  const maxLng = Math.max(...lngs);
+
+  const avgLat = (minLat + maxLat) / 2;
+  const latKm = Math.max((maxLat - minLat) * 111.32, 0.001);
+  const lngKm = Math.max((maxLng - minLng) * 111.32 * Math.cos((avgLat * Math.PI) / 180), 0.001);
+  const areaKm2 = latKm * lngKm;
+
+  return Number.isFinite(areaKm2) ? areaKm2 : null;
+}
+
 router.get('/api/metrics/marketplace', async (req, res) => {
   try {
     const {
@@ -1126,6 +1166,8 @@ router.get('/api/metrics/marketplace', async (req, res) => {
       const fare = toNumber(b.customer_paid || b.total_fare || b.fare || b.estimate, 0);
       const convenienceFee = toNumber(b.convenience_fees, 0);
       const driverShare = toNumber(b.driver_share, 0);
+      const pickupParsed = parseLatLng(b.pickup || b.pickupLocation || null);
+      const destinationParsed = parseLatLng(b.drop || b.destination || null);
 
       return {
         id,
@@ -1139,7 +1181,11 @@ router.get('/api/metrics/marketplace', async (req, res) => {
         customerId,
         fare,
         convenienceFee,
-        driverShare
+        driverShare,
+        pickupLat: pickupParsed.lat,
+        pickupLng: pickupParsed.lng,
+        destinationLat: destinationParsed.lat,
+        destinationLng: destinationParsed.lng
       };
     });
 
@@ -1172,6 +1218,7 @@ router.get('/api/metrics/marketplace', async (req, res) => {
 
     const activeDrivers = activeDriverSet.size;
     const activePassengers = activePassengerSet.size;
+    const passengerDriverRatio = activeDrivers > 0 ? (activePassengers / activeDrivers) : null;
     const periodDays = Math.max(
       1,
       Math.ceil((current.end.getTime() - current.start.getTime()) / (24 * 60 * 60 * 1000))
@@ -1211,6 +1258,14 @@ router.get('/api/metrics/marketplace', async (req, res) => {
     }, 0);
 
     const driverUtilization = estimatedOnlineMs > 0 ? (totalBusyMs / estimatedOnlineMs) : null;
+
+    const spatialPoints = currentBookings
+      .map((b) => ({ lat: b.pickupLat, lng: b.pickupLng }))
+      .filter((point) => Number.isFinite(point.lat) && Number.isFinite(point.lng));
+    const coverageAreaKm2 = estimateBoundingAreaKm2(spatialPoints);
+    const driversPerKm2 = (coverageAreaKm2 && coverageAreaKm2 > 0 && activeDrivers > 0)
+      ? (activeDrivers / coverageAreaKm2)
+      : null;
 
     const revenueTotal = completedCurrent.reduce((sum, b) => sum + b.fare, 0);
     const ridesForFinancial = Math.max(completed, 1);
@@ -1273,7 +1328,10 @@ router.get('/api/metrics/marketplace', async (req, res) => {
       drivers: {
         ridesPerDriverPerDay,
         utilization: driverUtilization,
-        activeDrivers
+        activeDrivers,
+        passengerDriverRatio,
+        driversPerKm2,
+        coverageAreaKm2
       },
       passengers: {
         activePassengers,
@@ -2033,7 +2091,6 @@ router.get('/api/metrics/simulation/run', async (req, res) => {
 });
 
 module.exports = router;
-
 
 
 

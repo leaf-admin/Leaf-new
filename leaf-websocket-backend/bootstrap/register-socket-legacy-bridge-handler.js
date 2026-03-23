@@ -9,6 +9,7 @@ function registerSocketLegacyBridgeHandler({
     redisPool,
     logStructured
 }) {
+    const ELIGIBLE_DRIVER_GEO_KEY = process.env.ELIGIBLE_DRIVER_GEO_KEY || 'driver_locations_eligible';
     const bridgeMeta = {
         bridge: 'legacy-event-bridge',
         userId: socket.userId || socket.id
@@ -210,8 +211,10 @@ function registerSocketLegacyBridgeHandler({
             logBridgeEvent('setDriverStatus', 'driverStatusUpdated');
             const redis = redisPool.getConnection();
             const driverId = data.driverId || socket.userId;
-            const status = data.status || 'offline';
-            const isOnline = data.isOnline !== false;
+            const requestedStatus = String(data.status || '').toUpperCase();
+            const requestedOnline = data.isOnline !== false && requestedStatus !== 'OFFLINE';
+            const status = requestedOnline ? 'AVAILABLE' : 'OFFLINE';
+            const isOnline = requestedOnline === true;
 
             if (!driverId) {
                 socket.emit('driverStatusError', {
@@ -221,18 +224,40 @@ function registerSocketLegacyBridgeHandler({
                 return;
             }
 
-            await redis.hset(`driver:${driverId}`, {
+            const driverKey = `driver:${driverId}`;
+            const existingDriverState = await redis.hgetall(driverKey);
+            const existingIsEligible = existingDriverState?.dispatchEligible === 'true';
+
+            if (!isOnline) {
+                await redis.zrem(ELIGIBLE_DRIVER_GEO_KEY, driverId);
+            }
+
+            await redis.hset(driverKey, {
                 driverId,
                 status,
                 isOnline: String(isOnline),
+                dispatchEligible: String(isOnline && existingIsEligible),
+                dispatchEligibilityCode: isOnline
+                    ? (existingDriverState?.dispatchEligibilityCode || 'AWAITING_LOCATION_SYNC')
+                    : 'OFFLINE',
+                dispatchEligibilityCheckedAt: new Date().toISOString(),
                 updatedAt: new Date().toISOString()
             });
+
+            if (isOnline && existingIsEligible) {
+                const lat = Number(existingDriverState?.lat);
+                const lng = Number(existingDriverState?.lng);
+                if (Number.isFinite(lat) && Number.isFinite(lng)) {
+                    await redis.geoadd(ELIGIBLE_DRIVER_GEO_KEY, lng, lat, driverId);
+                }
+            }
 
             socket.emit('driverStatusUpdated', {
                 success: true,
                 driverId,
                 status,
                 isOnline,
+                dispatchEligible: isOnline && existingIsEligible,
                 timestamp: new Date().toISOString(),
                 bridgeMode: 'compat'
             });
@@ -434,6 +459,7 @@ function registerSocketLegacyBridgeHandler({
                 reviewerType: result.rating.reviewerType,
                 targetUserId: result.rating.targetUserId,
                 timestamp: result.rating.createdAt,
+                kycEscalation: result.kycEscalation || null,
                 bridgeMode: 'compat'
             };
 

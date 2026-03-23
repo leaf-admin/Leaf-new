@@ -9,18 +9,83 @@ const { logger } = require('../utils/logger');
 const fs = require('fs');
 const path = require('path');
 
+function coordinatesEqual(a, b) {
+    return (
+        Array.isArray(a) &&
+        Array.isArray(b) &&
+        Number(a[0]) === Number(b[0]) &&
+        Number(a[1]) === Number(b[1])
+    );
+}
+
+function normalizeRegionCoordinates(region) {
+    if (!Array.isArray(region) || region.length < 3) {
+        return null;
+    }
+
+    const normalized = [];
+
+    for (const point of region) {
+        let lng = null;
+        let lat = null;
+
+        if (Array.isArray(point) && point.length >= 2) {
+            lng = Number(point[0]);
+            lat = Number(point[1]);
+        } else if (point && typeof point === 'object') {
+            lng = Number(point.lng);
+            lat = Number(point.lat);
+        } else {
+            return null;
+        }
+
+        if (!Number.isFinite(lng) || !Number.isFinite(lat)) {
+            return null;
+        }
+
+        normalized.push([lng, lat]);
+    }
+
+    if (normalized.length < 3) {
+        return null;
+    }
+
+    const first = normalized[0];
+    const last = normalized[normalized.length - 1];
+    if (!coordinatesEqual(first, last)) {
+        normalized.push([first[0], first[1]]);
+    }
+
+    return normalized.length >= 4 ? normalized : null;
+}
+
+const isGeofenceBypassEnabled = () => {
+    return (
+        String(process.env.BYPASS_GEOFENCE || '').toLowerCase() === 'true' ||
+        String(process.env.GEOFENCE_RADIUS_KM || '') === '9999' ||
+        String(process.env.APP_REVIEW || '').toLowerCase() === 'true'
+    );
+};
+
 class GeofenceService {
     constructor() {
-        // ✅ Região padrão: São Paulo (pode ser configurada via env)
-        // Formato: Array de coordenadas [lng, lat] formando polígono
+        // Região padrão vem do arquivo oficial do projeto (config/geofence.json).
+        // Sem configuração explícita, geofence fica inativo para evitar bloqueios surpresa.
         this.defaultRegion = this.getDefaultRegion();
-        
+
+        this.runtimeEnabled = true;
+        this.regionSource = 'none';
+
         // ✅ Carregar região do ambiente ou usar padrão
-        this.allowedRegion = this.loadRegionFromEnv() || this.defaultRegion;
-        
+        const envRegion = this.loadRegionFromEnv();
+        this.allowedRegion = envRegion || this.defaultRegion;
+        this.regionSource = envRegion ? 'env' : (this.defaultRegion ? 'default' : 'none');
+
         logger.info('✅ GeofenceService inicializado', {
-            regionPoints: this.allowedRegion.length,
-            region: process.env.GEOFENCE_REGION || 'default'
+            regionPoints: Array.isArray(this.allowedRegion) ? this.allowedRegion.length : 0,
+            regionSource: this.regionSource,
+            runtimeEnabled: this.runtimeEnabled,
+            bypassEnabled: isGeofenceBypassEnabled()
         });
     }
 
@@ -36,25 +101,18 @@ class GeofenceService {
             if (fs.existsSync(filePath)) {
                 const geojson = JSON.parse(fs.readFileSync(filePath, 'utf8'));
                 const coords = geojson?.features?.[0]?.geometry?.coordinates?.[0];
-                if (Array.isArray(coords) && coords.length >= 4) {
-                    return coords;
+                const normalized = normalizeRegionCoordinates(coords);
+                if (normalized) {
+                    return normalized;
                 }
             }
         } catch (error) {
-            logger.warn('⚠️ Falha ao carregar config/geofence.json no GeofenceService, usando fallback SP', {
+            logger.warn('⚠️ Falha ao carregar config/geofence.json no GeofenceService, mantendo geofence inativo', {
                 error: error.message
             });
         }
 
-        // Região de São Paulo (área metropolitana aproximada)
-        // Formato: [longitude, latitude] - GeoJSON format
-        return [
-            [-47.2, -23.8],  // Oeste
-            [-46.3, -23.8],  // Leste (inferior)
-            [-46.3, -23.4],  // Leste (superior)
-            [-47.2, -23.4],  // Oeste (superior)
-            [-47.2, -23.8]   // Fechar polígono
-        ];
+        return null;
     }
 
     /**
@@ -70,11 +128,12 @@ class GeofenceService {
             // Formato esperado: JSON array de coordenadas
             // Exemplo: GEOFENCE_REGION='[[-47.2,-23.8],[-46.3,-23.8],[-46.3,-23.4],[-47.2,-23.4],[-47.2,-23.8]]'
             const region = JSON.parse(process.env.GEOFENCE_REGION);
-            
-            if (Array.isArray(region) && region.length >= 3) {
-                return region;
+            const normalized = normalizeRegionCoordinates(region);
+
+            if (normalized) {
+                return normalized;
             }
-            
+
             logger.warn('⚠️ GEOFENCE_REGION inválido, usando região padrão');
             return null;
         } catch (error) {
@@ -126,6 +185,16 @@ class GeofenceService {
      * @returns {{valid: boolean, error?: string, details?: Object}}
      */
     validateRideLocations(pickupLocation, destinationLocation) {
+        if (isGeofenceBypassEnabled()) {
+            return {
+                valid: true,
+                details: {
+                    bypass: true,
+                    reason: 'BYPASS_GEOFENCE habilitado'
+                }
+            };
+        }
+
         if (!pickupLocation || !pickupLocation.lat || !pickupLocation.lng) {
             return {
                 valid: false,
@@ -192,7 +261,10 @@ class GeofenceService {
      * @returns {Array<Array<number>>} Região atual
      */
     getCurrentRegion() {
-        return this.allowedRegion;
+        if (!Array.isArray(this.allowedRegion)) {
+            return null;
+        }
+        return this.allowedRegion.map(([lng, lat]) => [lng, lat]);
     }
 
     /**
@@ -201,17 +273,50 @@ class GeofenceService {
      * @returns {boolean} true se atualizado com sucesso
      */
     updateRegion(newRegion) {
-        if (!Array.isArray(newRegion) || newRegion.length < 3) {
+        const normalized = normalizeRegionCoordinates(newRegion);
+        if (!normalized) {
             logger.error('❌ Região inválida para atualização');
             return false;
         }
 
-        this.allowedRegion = newRegion;
+        this.allowedRegion = normalized;
+        this.regionSource = 'runtime';
         logger.info('✅ Região de geofence atualizada', {
-            points: newRegion.length
+            points: normalized.length
         });
-        
+
         return true;
+    }
+
+    /**
+     * Ativar/desativar geofence em runtime sem reiniciar backend
+     * @param {boolean} enabled
+     * @returns {boolean}
+     */
+    setEnabled(enabled) {
+        if (typeof enabled !== 'boolean') {
+            logger.error('❌ Flag enabled inválida para geofence');
+            return false;
+        }
+        this.runtimeEnabled = enabled;
+        logger.info('✅ Geofence runtime atualizado', { enabled });
+        return true;
+    }
+
+    /**
+     * Flag administrativa de geofence (independente do bypass)
+     * @returns {boolean}
+     */
+    isEnabled() {
+        return this.runtimeEnabled !== false;
+    }
+
+    /**
+     * Retorna se bypass global está ativo
+     * @returns {boolean}
+     */
+    isBypassEnabled() {
+        return isGeofenceBypassEnabled();
     }
 
     /**
@@ -219,8 +324,14 @@ class GeofenceService {
      * @returns {boolean} true se geofence está ativo
      */
     isActive() {
+        if (isGeofenceBypassEnabled()) {
+            return false;
+        }
+        if (!this.isEnabled()) {
+            return false;
+        }
         // Geofence está ativo se há região definida
-        return this.allowedRegion && this.allowedRegion.length >= 3;
+        return !!(this.allowedRegion && this.allowedRegion.length >= 4);
     }
 }
 

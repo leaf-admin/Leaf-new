@@ -24,7 +24,9 @@ class DockerDetector {
             return {
                 host: url.hostname || null,
                 port: url.port ? parseInt(url.port, 10) : null,
+                username: url.username ? decodeURIComponent(url.username) : null,
                 password: url.password ? decodeURIComponent(url.password) : null,
+                protocol: url.protocol.replace(':', ''),
                 db: Number.isNaN(parseInt(dbFromPath, 10)) ? 0 : parseInt(dbFromPath, 10)
             };
         } catch (_error) {
@@ -111,14 +113,27 @@ class DockerDetector {
         const host = this.getRedisHost();
         const port = parsed?.port || parseInt(process.env.REDIS_PORT || '6379');
         const password = parsed?.password || process.env.REDIS_PASSWORD || 'leaf_redis_2024';
+        const username = parsed?.username || process.env.REDIS_USERNAME || undefined;
         const db = Number.isInteger(parsed?.db) ? parsed.db : parseInt(process.env.REDIS_DB || '0');
+        const protocol = parsed?.protocol || (String(process.env.REDIS_USE_TLS || '').toLowerCase() === 'true' ? 'rediss' : 'redis');
+        const tlsEnabled = protocol === 'rediss' || String(process.env.REDIS_USE_TLS || '').toLowerCase() === 'true';
+        const rejectUnauthorized = String(process.env.REDIS_TLS_REJECT_UNAUTHORIZED || 'true').toLowerCase() !== 'false';
 
-        return {
+        const config = {
             host,
             port,
+            username,
             password,
             db
         };
+
+        if (tlsEnabled) {
+            config.tls = {
+                rejectUnauthorized
+            };
+        }
+
+        return config;
     }
 
     /**

@@ -279,7 +279,7 @@ function registerSocketActiveRideHandlers({
     socket.on('requestRideExtension', async (data) => {
         try {
             const customerId = socket.userId || data.customerId;
-            const { bookingId, newEndLocation, newFare } = data;
+            const { bookingId, newEndLocation, newFare, mockPayment, __mockPayment } = data;
 
             if (!customerId || !bookingId || !newEndLocation || !newFare) {
                 socket.emit('rideExtensionError', { error: 'Dados incompletos para extensão da corrida' });
@@ -294,6 +294,7 @@ function registerSocketActiveRideHandlers({
                 customerId,
                 newEndLocation,
                 newFare,
+                mockPayment: mockPayment === true || __mockPayment === true,
                 correlationId: bookingId
             });
 
@@ -307,17 +308,31 @@ function registerSocketActiveRideHandlers({
             // Enviar QR Code Pix para o passageiro pagar a diferença
             socket.emit('rideExtensionPaymentRequired', result.data);
 
-            // Avisar o motorista que uma extensão está aguardando pagamento
+            // Avisar o motorista que uma extensão está aguardando pagamento.
+            // Primeiro tenta em bookings:active, depois faz fallback para booking hash.
             const redis = redisPool.getConnection();
+            let driverId = null;
+
             const bookingDataStr = await redis.hget('bookings:active', bookingId);
             if (bookingDataStr) {
-                const booking = JSON.parse(bookingDataStr);
-                if (booking.driverId) {
-                    io.to(`driver_${booking.driverId}`).emit('rideExtensionRequested', {
-                        bookingId,
-                        message: 'Passageiro solicitou extensão da rota. Aguardando pagamento Pix...'
-                    });
+                try {
+                    const booking = JSON.parse(bookingDataStr);
+                    driverId = booking?.driverId || null;
+                } catch (_error) {
+                    driverId = null;
                 }
+            }
+
+            if (!driverId) {
+                const bookingHash = await redis.hgetall(`booking:${bookingId}`);
+                driverId = bookingHash?.driverId || null;
+            }
+
+            if (driverId) {
+                io.to(`driver_${driverId}`).emit('rideExtensionRequested', {
+                    bookingId,
+                    message: 'Passageiro solicitou extensão da rota. Aguardando pagamento Pix...'
+                });
             }
 
         } catch (error) {

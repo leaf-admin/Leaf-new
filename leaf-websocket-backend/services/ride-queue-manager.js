@@ -312,7 +312,8 @@ class RideQueueManager {
      */
     async getActiveRegions() {
         try {
-            const queueKeys = await this.redis.keys('ride_queue:*:pending');
+            const RedisScan = require('../utils/redis-scan');
+            const queueKeys = await RedisScan.scanKeys(this.redis, 'ride_queue:*:pending');
             const regions = new Set();
 
             for (const key of queueKeys) {

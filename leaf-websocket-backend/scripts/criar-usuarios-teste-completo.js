@@ -58,6 +58,40 @@ const TEST_USERS = {
       plate: 'ABC1234',
       carType: 'Leaf Plus'
     }
+  },
+  driver2: {
+    email: 'ana.teste@leaf.com',
+    password: 'teste123',
+    phone: '+5511888888899',
+    firstName: 'Ana',
+    lastName: 'Oliveira Teste',
+    cpf: '98765432108',
+    usertype: 'driver',
+    vehicle: {
+      make: 'Toyota',
+      model: 'Corolla',
+      year: '2021',
+      color: 'Branco',
+      plate: 'QWE1234',
+      carType: 'Leaf Elite'
+    }
+  },
+  driver3: {
+    email: 'carla.teste@leaf.com',
+    password: 'teste123',
+    phone: '+5511888888877',
+    firstName: 'Carla',
+    lastName: 'Pereira Teste',
+    cpf: '98765432107',
+    usertype: 'driver',
+    vehicle: {
+      make: 'Nissan',
+      model: 'Kicks',
+      year: '2022',
+      color: 'Cinza',
+      plate: 'RTY5678',
+      carType: 'Leaf Plus'
+    }
   }
 };
 
@@ -253,6 +287,8 @@ async function main() {
   
   // Criar motorista
   results.driver = await createCompleteUser(TEST_USERS.driver, true);
+  results.driver2 = await createCompleteUser(TEST_USERS.driver2, true);
+  results.driver3 = await createCompleteUser(TEST_USERS.driver3, true);
   
   // Resumo
   console.log(`\n${'='.repeat(60)}`);
@@ -281,6 +317,30 @@ async function main() {
   } else {
     console.log(`\n❌ ERRO AO CRIAR MOTORISTA: ${results.driver.error}`);
   }
+
+  if (results.driver2?.success) {
+    console.log(`\n✅ MOTORISTA 2 CRIADO:`);
+    console.log(`   UID: ${results.driver2.uid}`);
+    console.log(`   Email: ${results.driver2.email}`);
+    console.log(`   Telefone: ${results.driver2.phone}`);
+    if (results.driver2.vehicleId) {
+      console.log(`   Veículo ID: ${results.driver2.vehicleId}`);
+    }
+  } else if (results.driver2) {
+    console.log(`\n⚠️  ERRO AO CRIAR MOTORISTA 2: ${results.driver2.error}`);
+  }
+
+  if (results.driver3?.success) {
+    console.log(`\n✅ MOTORISTA 3 CRIADO:`);
+    console.log(`   UID: ${results.driver3.uid}`);
+    console.log(`   Email: ${results.driver3.email}`);
+    console.log(`   Telefone: ${results.driver3.phone}`);
+    if (results.driver3.vehicleId) {
+      console.log(`   Veículo ID: ${results.driver3.vehicleId}`);
+    }
+  } else if (results.driver3) {
+    console.log(`\n⚠️  ERRO AO CRIAR MOTORISTA 3: ${results.driver3.error}`);
+  }
   
   console.log(`\n${'='.repeat(60)}`);
   
@@ -304,5 +364,4 @@ main().catch((error) => {
   console.error('❌ Erro fatal:', error);
   process.exit(1);
 });
-
 

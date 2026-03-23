@@ -25,6 +25,88 @@ function registerSocketCreateBookingHandler({
     metricsCollector,
     findAvailableDriversForPickup
 }) {
+    const CUSTOMER_ACTIVE_BOOKING_TTL_SECONDS = Number.parseInt(
+        process.env.CUSTOMER_ACTIVE_BOOKING_TTL_SECONDS || '21600',
+        10
+    );
+    const CREATE_BOOKING_BACKGROUND_EVENT_PUBLISH = process.env.CREATE_BOOKING_BACKGROUND_EVENT_PUBLISH !== 'false';
+    const SKIP_EVENTBUS_NOTIFY_FOR_PAID_BOOKINGS = process.env.SKIP_EVENTBUS_NOTIFY_FOR_PAID_BOOKINGS !== 'false';
+    const INCLUDE_CREATE_BOOKING_PERF_DEBUG = process.env.INCLUDE_CREATE_BOOKING_PERF_DEBUG === 'true';
+
+    const SEARCH_STATES = new Set(['PENDING', 'SEARCHING', 'NOTIFIED', 'AWAITING_RESPONSE', 'EXPANDED', 'REJECTED']);
+    const BLOCKING_STATES = new Set(['MATCHED', 'ACCEPTED', 'IN_PROGRESS']);
+    const FINAL_STATES = new Set(['COMPLETED', 'CANCELED']);
+
+    const cleanupSupersededBookingSearch = async ({
+        previousBookingId,
+        customerId,
+        replacementBookingId,
+        redis,
+        logStructured
+    }) => {
+        if (!previousBookingId || previousBookingId === replacementBookingId) {
+            return;
+        }
+
+        try {
+            const GradualRadiusExpander = require('../services/gradual-radius-expander');
+            const rideQueueManager = require('../services/ride-queue-manager');
+            const RideStateManager = require('../services/ride-state-manager');
+            const expander = new GradualRadiusExpander(io);
+
+            // Finaliza o booking anterior para evitar que siga sendo selecionado por monitores paralelos.
+            const previousState = await RideStateManager.getBookingState(redis, previousBookingId);
+            if (previousState && previousState !== RideStateManager.STATES.CANCELED && previousState !== RideStateManager.STATES.COMPLETED) {
+                try {
+                    await RideStateManager.updateBookingState(
+                        redis,
+                        previousBookingId,
+                        RideStateManager.STATES.CANCELED,
+                        {
+                            canceledBy: customerId || 'system',
+                            reason: 'SUPERSEDED_BY_NEW_REQUEST',
+                            supersededByBookingId: replacementBookingId || '',
+                            cancelledAt: new Date().toISOString()
+                        }
+                    );
+                } catch (stateError) {
+                    logStructured('warn', 'Falha ao finalizar estado do booking supersedido', {
+                        customerId,
+                        previousBookingId,
+                        replacementBookingId: replacementBookingId || null,
+                        eventType: 'createBooking',
+                        error: stateError.message
+                    });
+                }
+            }
+
+            await expander.stopSearch(previousBookingId);
+            await rideQueueManager.dequeueRide(previousBookingId);
+
+            await redis.hset(`booking:${previousBookingId}`, {
+                status: 'SUPERSEDED',
+                supersededAt: new Date().toISOString(),
+                supersededByBookingId: replacementBookingId || '',
+                supersededByCustomerId: customerId || ''
+            });
+
+            logStructured('info', 'Busca de booking anterior encerrada por supersedência', {
+                customerId,
+                previousBookingId,
+                replacementBookingId,
+                eventType: 'createBooking'
+            });
+        } catch (supersedeError) {
+            logStructured('warn', 'Falha ao encerrar booking anterior supersedido', {
+                customerId,
+                previousBookingId,
+                replacementBookingId,
+                eventType: 'createBooking',
+                error: supersedeError.message
+            });
+        }
+    };
+
     socket.on('createBooking', async (data) => {
         // ✅ OBSERVABILIDADE: Gerar traceId no início do handler
         const traceId = extractTraceIdFromEvent(data, socket);
@@ -51,6 +133,9 @@ function registerSocketCreateBookingHandler({
                     });
 
                     const startTime = Date.now();
+                    const perfTrace = {
+                        start: startTime
+                    };
 
                     // ✅ NOVO: Rate Limiting
                     const userId = socket.userId || data.customerId || socket.id;
@@ -82,6 +167,7 @@ function registerSocketCreateBookingHandler({
                         });
                         return;
                     }
+                    perfTrace.afterRateLimit = Date.now();
 
                     logStructured('info', 'Solicitação de corrida recebida', {
                         socketId: socket.id,
@@ -89,8 +175,14 @@ function registerSocketCreateBookingHandler({
                         eventType: 'createBooking'
                     });
 
+                    // ✅ Segurança: forçar customerId autenticado no payload antes da validação
+                    const authCustomerId = socket.userId || null;
+                    const validationPayload = authCustomerId
+                        ? { ...data, customerId: authCustomerId }
+                        : data;
+
                     // ✅ NOVO: Validação e sanitização de dados
-                    const validation = validationService.validateEndpoint('createBooking', data);
+                    const validation = validationService.validateEndpoint('createBooking', validationPayload);
 
                     if (!validation.valid) {
                         const metadata = getSocketMetadata(socket);
@@ -113,12 +205,79 @@ function registerSocketCreateBookingHandler({
                         });
                         return;
                     }
+                    perfTrace.afterValidation = Date.now();
 
                     // Usar dados sanitizados
-                    const { customerId, pickupLocation, destinationLocation, estimatedFare, paymentMethod } = validation.sanitized;
+                    const {
+                        customerId: sanitizedCustomerId,
+                        pickupLocation,
+                        destinationLocation,
+                        estimatedFare,
+                        routeDistanceKm,
+                        routeDurationSecs,
+                        tollFee,
+                        carType: sanitizedCarType,
+                        paymentMethod
+                    } = validation.sanitized;
+                    const customerId = authCustomerId || sanitizedCustomerId;
+                    const customerActiveBookingKey = customerId
+                        ? `customer_active_booking:${customerId}`
+                        : null;
+                    let supersededBookingId = null;
+
+                    if (authCustomerId && sanitizedCustomerId && sanitizedCustomerId !== authCustomerId) {
+                        logStructured('warn', 'createBooking com customerId divergente do usuário autenticado', {
+                            userId,
+                            socketUserId: authCustomerId,
+                            payloadCustomerId: sanitizedCustomerId,
+                            eventType: 'createBooking'
+                        });
+                    }
+
+                    if (customerActiveBookingKey) {
+                        try {
+                            const redis = redisPool.getConnection();
+                            const activeBookingId = await redis.get(customerActiveBookingKey);
+
+                            if (activeBookingId) {
+                                const RideStateManager = require('../services/ride-state-manager');
+                                const activeState = await RideStateManager.getBookingState(redis, activeBookingId);
+
+                                if (BLOCKING_STATES.has(activeState)) {
+                                    socket.emit('bookingError', {
+                                        error: 'Você já possui uma corrida ativa',
+                                        message: 'Finalize a corrida atual antes de solicitar uma nova.',
+                                        code: 'ACTIVE_RIDE_EXISTS',
+                                        activeBookingId
+                                    });
+                                    return;
+                                }
+
+                                if (FINAL_STATES.has(activeState)) {
+                                    await redis.del(customerActiveBookingKey);
+                                } else if (SEARCH_STATES.has(activeState)) {
+                                    supersededBookingId = activeBookingId;
+                                    await cleanupSupersededBookingSearch({
+                                        previousBookingId: activeBookingId,
+                                        customerId,
+                                        replacementBookingId: null,
+                                        redis,
+                                        logStructured
+                                    });
+                                }
+                            }
+                        } catch (activeBookingGuardError) {
+                            logStructured('warn', 'Falha ao validar/superseder booking ativo do cliente (seguindo fluxo)', {
+                                customerId,
+                                eventType: 'createBooking',
+                                error: activeBookingGuardError.message
+                            });
+                        }
+                    }
+                    perfTrace.afterActiveGuard = Date.now();
                     const normalizedPaymentStatus = (data?.paymentStatus || 'pending_payment').toString().toLowerCase();
                     const hasConfirmedPayment = ['confirmed', 'paid', 'in_holding'].includes(normalizedPaymentStatus);
-                    const requestedCarType = data?.carType || null;
+                    const requestedCarType = sanitizedCarType || data?.carType || null;
 
                     // Backpressure no início do fluxo: evita empilhar corrida quando fila regional já está saturada.
                     const queueBackpressureEnabled = process.env.ENABLE_QUEUE_BACKPRESSURE !== 'false';
@@ -132,7 +291,7 @@ function registerSocketCreateBookingHandler({
                             const redis = redisPool.getConnection();
                             const pendingRides = await redis.zcard(queueKey);
                             const pendingLimit = Number.parseInt(process.env.QUEUE_PENDING_LIMIT_PER_REGION || '5000', 10);
-                            const onlineDrivers = await redis.sCard('online_drivers');
+                            const onlineDrivers = await redis.scard('online_drivers');
                             const minOnlineDriversBypass = Number.parseInt(process.env.QUEUE_BACKPRESSURE_MIN_ONLINE_DRIVERS_BYPASS || '200', 10);
 
                             if (pendingRides >= pendingLimit && onlineDrivers < minOnlineDriversBypass) {
@@ -167,6 +326,7 @@ function registerSocketCreateBookingHandler({
                             });
                         }
                     }
+                    perfTrace.afterBackpressure = Date.now();
 
                     // ✅ NOVO: Idempotency - Verificar se requisição já foi processada
                     const idempotencyKey = data.idempotencyKey || idempotencyService.generateKey(
@@ -176,6 +336,7 @@ function registerSocketCreateBookingHandler({
                     );
 
                     const idempotencyCheck = await idempotencyService.checkAndSet(idempotencyKey);
+                    perfTrace.afterIdempotency = Date.now();
 
                     if (!idempotencyCheck.isNew) {
                         // Requisição duplicada - retornar resultado cached ou erro
@@ -227,64 +388,37 @@ function registerSocketCreateBookingHandler({
                         eventType: 'createBooking'
                     });
 
-                    // ✅ NOVO: Validação de Geofence - Verificar se origem e destino estão dentro da região permitida
-                    const geofenceService = require('../services/geofence-service');
-                    if (geofenceService.isActive()) {
-                        const geofenceValidation = geofenceService.validateRideLocations(pickupLocation, destinationLocation);
-
-                        if (!geofenceValidation.valid) {
-                            const metadata = getSocketMetadata(socket);
-                            await auditService.logRideAction(userId, 'createBooking', null, {
-                                error: 'Geofence validation failed',
-                                geofenceError: geofenceValidation.error,
-                                code: geofenceValidation.code,
-                                details: geofenceValidation.details
-                            }, false, geofenceValidation.error, metadata);
-
-                            logStructured('warn', 'Geofence validation falhou', {
-                                userId,
-                                eventType: 'createBooking',
-                                geofenceError: geofenceValidation.error
-                            });
-
-                            socket.emit('bookingError', {
-                                error: geofenceValidation.error,
-                                message: geofenceValidation.error,
-                                code: geofenceValidation.code,
-                                details: geofenceValidation.details
-                            });
-                            return;
-                        }
-
-                        logStructured('info', 'Geofence validado', {
-                            userId,
-                            eventType: 'createBooking'
-                        });
-                    }
-
-                    // Guarda de negócio: se a corrida já está paga, validar disponibilidade real antes de criar booking.
+                    // Guarda de negócio: validar disponibilidade quando pagamento já confirmado.
+                    // Não bloquear a criação da corrida por falhas transitórias desta checagem.
                     if (hasConfirmedPayment) {
-                        const availability = await findAvailableDriversForPickup(pickupLocation, {
-                            carType: requestedCarType
+                        // Pré-check informativo: não deve bloquear criação de corrida.
+                        setImmediate(async () => {
+                            try {
+                                const availability = await findAvailableDriversForPickup(pickupLocation, {
+                                    carType: requestedCarType
+                                });
+
+                                if (!availability.success) {
+                                    logStructured('warn', 'createBooking: validação de disponibilidade falhou, seguindo fluxo', {
+                                        userId,
+                                        eventType: 'createBooking',
+                                        code: 'AVAILABILITY_CHECK_FAILED'
+                                    });
+                                } else if ((availability.drivers || []).length === 0) {
+                                    logStructured('warn', 'createBooking: sem motoristas no pre-check, mantendo busca ativa', {
+                                        userId,
+                                        eventType: 'createBooking',
+                                        code: 'NO_DRIVERS_AVAILABLE'
+                                    });
+                                }
+                            } catch (availabilityError) {
+                                logStructured('warn', 'createBooking: erro no pre-check de disponibilidade, seguindo fluxo', {
+                                    userId,
+                                    eventType: 'createBooking',
+                                    error: availabilityError.message
+                                });
+                            }
                         });
-
-                        if (!availability.success) {
-                            socket.emit('bookingError', {
-                                error: 'Não foi possível validar disponibilidade de motoristas',
-                                message: 'Falha temporária ao validar disponibilidade. Tente novamente em instantes.',
-                                code: 'AVAILABILITY_CHECK_FAILED'
-                            });
-                            return;
-                        }
-
-                        if ((availability.drivers || []).length === 0) {
-                            socket.emit('bookingError', {
-                                error: 'Não há motoristas disponíveis na sua região no momento',
-                                message: 'Não foi possível iniciar a busca de corrida agora porque não há parceiros disponíveis.',
-                                code: 'NO_DRIVERS_AVAILABLE'
-                            });
-                            return;
-                        }
                     }
 
                     // ✅ FASE 1.3: Criar span para Command
@@ -306,6 +440,7 @@ function registerSocketCreateBookingHandler({
 
                     // Executar command dentro do span
                     const commandStartTime = Date.now();
+                    perfTrace.commandStart = commandStartTime;
                     let result;
                     let commandLatency;
                     try {
@@ -314,6 +449,9 @@ function registerSocketCreateBookingHandler({
                             pickupLocation,
                             destinationLocation,
                             estimatedFare: estimatedFare || 0,
+                            routeDistanceKm: routeDistanceKm || 0,
+                            routeDurationSecs: routeDurationSecs || 0,
+                            tollFee: tollFee || 0,
                             carType: requestedCarType,
                             paymentMethod: paymentMethod || 'pix',
                             traceId, // ✅ Passar traceId para o command
@@ -363,19 +501,82 @@ function registerSocketCreateBookingHandler({
 
                     // Command executado com sucesso
                     const { bookingId, bookingData: commandBookingData, event, regionHash } = result.data;
+                    perfTrace.afterCommand = Date.now();
+
+                    if (supersededBookingId && supersededBookingId !== bookingId) {
+                        try {
+                            const redis = redisPool.getConnection();
+                            await redis.hset(`booking:${supersededBookingId}`, {
+                                supersededByBookingId: bookingId,
+                                supersededAt: new Date().toISOString()
+                            });
+                        } catch (supersededUpdateError) {
+                            logStructured('warn', 'Falha ao atualizar vínculo de supersedência com booking final', {
+                                bookingId,
+                                supersededBookingId,
+                                eventType: 'createBooking',
+                                error: supersededUpdateError.message
+                            });
+                        }
+                    }
+
+                    // Persistir metadados de pagamento antes do dispatch.
+                    // Isso evita janelas onde consumidores veem a corrida como "unpaid".
+                    try {
+                        const paymentDispatchService = require('../services/payment-dispatch-service');
+                        const paymentChargeId = data?.paymentData?.chargeId || data?.paymentId || '';
+                        const paymentAmountInCents = data?.paymentData?.amountInCents || '';
+                        const temporaryRideId = data?.paymentData?.rideId || data?.rideId || '';
+
+                        if (hasConfirmedPayment) {
+                            await paymentDispatchService.markBookingPaymentConfirmed({
+                                bookingId,
+                                chargeId: paymentChargeId,
+                                temporaryRideId,
+                                amountInCents: paymentAmountInCents,
+                                paymentStatus: 'in_holding',
+                                source: 'createBooking'
+                            });
+                        } else {
+                            await paymentDispatchService.linkPaymentToBooking({
+                                bookingId,
+                                chargeId: paymentChargeId,
+                                temporaryRideId
+                            });
+                        }
+                    } catch (bookingMetaError) {
+                        logStructured('warn', 'Falha ao persistir metadados de pagamento antes do dispatch', {
+                            bookingId,
+                            error: bookingMetaError.message,
+                            eventType: 'createBooking'
+                        });
+                    }
 
                     // ✅ REFATORAÇÃO: Publicar evento no EventBus (listeners vão notificar motoristas)
                     if (event) {
-                        // ✅ FASE 1.3: Criar span para Event publish
-                        const { trace: otelTrace } = require('@opentelemetry/api');
-                        const activeSpan = otelTrace.getActiveSpan();
-                        const eventSpan = createEventSpan(tracer, 'ride.requested', activeSpan, {
-                            'event.booking_id': bookingId,
-                            'correlation.id': correlationId // ✅ Passar correlationId
-                        });
+                        if (!event.data) {
+                            event.data = {};
+                        }
+                        if (!event.data.metadata) {
+                            event.data.metadata = {};
+                        }
+                        if (hasConfirmedPayment && SKIP_EVENTBUS_NOTIFY_FOR_PAID_BOOKINGS) {
+                            // Corridas pagas usam dispatch imediato dedicado; evita notificação duplicada.
+                            event.data.skipDriverNotify = true;
+                            event.data.metadata.skipDriverNotify = true;
+                            event.data.metadata.dispatchStrategy = 'payment_dispatch_only';
+                        }
 
-                        const eventStartTime = Date.now();
-                        try {
+                        const publishRideRequestedEvent = async () => {
+                            // ✅ FASE 1.3: Criar span para Event publish
+                            const { trace: otelTrace } = require('@opentelemetry/api');
+                            const activeSpan = otelTrace.getActiveSpan();
+                            const eventSpan = createEventSpan(tracer, 'ride.requested', activeSpan, {
+                                'event.booking_id': bookingId,
+                                'correlation.id': correlationId // ✅ Passar correlationId
+                            });
+
+                            const eventStartTime = Date.now();
                             await runInSpan(eventSpan, async () => {
                                 await eventBus.publish({
                                     eventType: 'ride.requested',
@@ -385,16 +586,11 @@ function registerSocketCreateBookingHandler({
 
                             // ✅ Salvar contexto do evento para linkar com listeners
                             const eventSpanContext = eventSpan.spanContext();
-                            if (event.data) {
-                                event.data._otelSpanContext = eventSpanContext;
-                                // ✅ CRÍTICO: Serializar correlationId e traceId no evento
-                                if (!event.data.metadata) {
-                                    event.data.metadata = {};
-                                }
-                                event.data.metadata.correlationId = correlationId;
-                                event.data.metadata.traceId = eventSpanContext.traceId;
-                                event.data.metadata.spanId = eventSpanContext.spanId;
-                            }
+                            event.data._otelSpanContext = eventSpanContext;
+                            // ✅ CRÍTICO: Serializar correlationId e traceId no evento
+                            event.data.metadata.correlationId = correlationId;
+                            event.data.metadata.traceId = eventSpanContext.traceId;
+                            event.data.metadata.spanId = eventSpanContext.spanId;
 
                             // ✅ MÉTRICAS: Registrar evento publicado
                             metrics.recordEventPublished('ride.requested');
@@ -402,16 +598,34 @@ function registerSocketCreateBookingHandler({
                             endSpanSuccess(eventSpan, {
                                 'event.latency_ms': Date.now() - eventStartTime
                             });
-                        } catch (error) {
-                            endSpanError(eventSpan, error);
-                            throw error;
-                        }
 
-                        const eventLatency = Date.now() - eventStartTime;
-                        logEvent('ride.requested', 'published', {
-                            bookingId,
-                            latency_ms: eventLatency
-                        });
+                            const eventLatency = Date.now() - eventStartTime;
+                            logEvent('ride.requested', 'published', {
+                                bookingId,
+                                latency_ms: eventLatency
+                            });
+                        };
+
+                        if (CREATE_BOOKING_BACKGROUND_EVENT_PUBLISH) {
+                            setImmediate(async () => {
+                                try {
+                                    await publishRideRequestedEvent();
+                                } catch (publishError) {
+                                    logStructured('warn', 'createBooking: falha ao publicar ride.requested em background', {
+                                        bookingId,
+                                        eventType: 'createBooking',
+                                        error: publishError.message
+                                    });
+                                }
+                            });
+                        } else {
+                            try {
+                                await publishRideRequestedEvent();
+                            } catch (error) {
+                                endSpanError(socketSpan, error);
+                                throw error;
+                            }
+                        }
                     }
 
                     // Armazenar também em activeBookings (compatibilidade)
@@ -420,81 +634,40 @@ function registerSocketCreateBookingHandler({
                         customerId,
                         pickupLocation,
                         destinationLocation,
-                        estimatedFare,
+                        estimatedFare: commandBookingData?.estimatedFare || estimatedFare || 0,
                         paymentMethod,
                         status: 'requested'
                     });
 
-                    // FASE 10: Registrar início de match para métricas
-                    await metricsCollector.recordMatchStart(bookingId, Date.now());
-
-                    // ✅ NOVO: Log de auditoria para criação de corrida bem-sucedida
-                    await auditService.logRideAction(userId, 'createBooking', bookingId, {
-                        pickupLocation,
-                        destinationLocation,
-                        estimatedFare,
-                        paymentMethod,
-                        regionHash
-                    }, true, null, metadata);
-
-                    // Verificar demanda e notificar motoristas offline (em background)
-                    setImmediate(async () => {
-                        try {
-                            const redis = redisPool.getConnection();
-                            await redisPool.ensureConnection();
-
-                            const queueKey = `ride_queue:${regionHash}:pending`;
-                            const pendingRides = await redis.zcard(queueKey);
-
-                            // Notificar motoristas offline se houver demanda
-                            if (pendingRides >= 3) {
-                                const demandNotificationService = require('../services/demand-notification-service');
-                                await demandNotificationService.checkAndNotifyDemand(
-                                    pickupLocation,
-                                    pendingRides
-                                );
-                            }
-                        } catch (error) {
-                            logStructured('error', 'Erro ao verificar demanda', {
-                                error: error.message,
-                                eventType: 'createBooking'
-                            });
-                        }
-                    });
-
-                    // ✅ NOVO: Salvar corrida no Firestore
-                    try {
-                        const ridePersistenceService = require('../services/ride-persistence-service');
-                        await ridePersistenceService.saveRide({
-                            rideId: bookingId,
-                            bookingId: bookingId,
-                            passengerId: customerId,
-                            pickupLocation: pickupLocation,
-                            destinationLocation: destinationLocation,
-                            estimatedFare: estimatedFare || 0,
-                            paymentMethod: paymentMethod || 'pix',
-                            paymentStatus: data.paymentStatus || 'pending_payment',
-                            status: 'pending',
-                            carType: data.carType || null
-                        });
-                    } catch (persistError) {
-                        logStructured('error', 'Erro ao salvar corrida no Firestore', {
-                            bookingId,
-                            error: persistError.message,
-                            eventType: 'createBooking'
-                        });
-                        // Não bloquear criação da corrida se persistência falhar
-                    }
-
-                    // Persistir metadados adicionais de pagamento/disponibilidade no booking para validações posteriores.
+                    // Persistir metadados essenciais no booking.
+                    // Para corridas pagas, o bloco anterior já gravou status/chargeId/amount.
                     try {
                         const redis = redisPool.getConnection();
-                        await redis.hset(`booking:${bookingId}`, {
-                            paymentStatus: normalizedPaymentStatus,
-                            carType: requestedCarType || '',
-                            paymentChargeId: data?.paymentData?.chargeId || data?.paymentId || '',
-                            paymentAmountInCents: data?.paymentData?.amountInCents ? String(data.paymentData.amountInCents) : ''
-                        });
+                        const bookingPatch = {
+                            carType: requestedCarType || ''
+                        };
+
+                        if (!hasConfirmedPayment) {
+                            const paymentChargeId = data?.paymentData?.chargeId || data?.paymentId || '';
+                            const paymentReferenceRideId = data?.paymentData?.rideId || data?.rideId || '';
+                            bookingPatch.paymentStatus = normalizedPaymentStatus;
+                            bookingPatch.paymentChargeId = paymentChargeId;
+                            bookingPatch.paymentAmountInCents = data?.paymentData?.amountInCents
+                                ? String(data.paymentData.amountInCents)
+                                : '';
+                            bookingPatch.paymentReferenceRideId = paymentReferenceRideId;
+                        }
+
+                        await redis.hset(`booking:${bookingId}`, bookingPatch);
+
+                        if (customerActiveBookingKey) {
+                            await redis.set(
+                                customerActiveBookingKey,
+                                bookingId,
+                                'EX',
+                                CUSTOMER_ACTIVE_BOOKING_TTL_SECONDS
+                            );
+                        }
                     } catch (bookingMetaError) {
                         logStructured('warn', 'Falha ao persistir metadados no booking', {
                             bookingId,
@@ -502,6 +675,7 @@ function registerSocketCreateBookingHandler({
                             eventType: 'createBooking'
                         });
                     }
+                    perfTrace.beforeResponse = Date.now();
 
                     // Preparar resposta de sucesso
                     // ✅ Garantir que traceId esteja disponível (pode vir do contexto ou do handler)
@@ -529,11 +703,26 @@ function registerSocketCreateBookingHandler({
                             customerId,
                             pickupLocation,
                             destinationLocation,
-                            estimatedFare,
+                            estimatedFare: commandBookingData?.estimatedFare || estimatedFare || 0,
                             paymentMethod,
                             status: 'requested',
                             timestamp: new Date().toISOString(),
-                            traceId: finalTraceId // ✅ SOLUÇÃO: Incluir também dentro de data (garantido)
+                            traceId: finalTraceId, // ✅ SOLUÇÃO: Incluir também dentro de data (garantido)
+                            ...(INCLUDE_CREATE_BOOKING_PERF_DEBUG
+                                ? {
+                                    perfMs: {
+                                        rateLimit: (perfTrace.afterRateLimit || Date.now()) - perfTrace.start,
+                                        validation: (perfTrace.afterValidation || Date.now()) - (perfTrace.afterRateLimit || perfTrace.start),
+                                        activeGuard: (perfTrace.afterActiveGuard || Date.now()) - (perfTrace.afterValidation || perfTrace.start),
+                                        backpressure: (perfTrace.afterBackpressure || Date.now()) - (perfTrace.afterActiveGuard || perfTrace.start),
+                                        idempotency: (perfTrace.afterIdempotency || Date.now()) - (perfTrace.afterBackpressure || perfTrace.start),
+                                        preCommand: (perfTrace.afterIdempotency || Date.now()) - perfTrace.start,
+                                        command: (perfTrace.afterCommand || Date.now()) - (perfTrace.commandStart || perfTrace.start),
+                                        postCommandBeforeResponse: (perfTrace.beforeResponse || Date.now()) - (perfTrace.afterCommand || perfTrace.start),
+                                        totalToResponse: Date.now() - perfTrace.start
+                                    }
+                                }
+                                : {})
                         }
                     };
 
@@ -543,9 +732,6 @@ function registerSocketCreateBookingHandler({
                         traceId: finalTraceId,
                         eventType: 'createBooking'
                     });
-
-                    // ✅ NOVO: Cachear resultado para idempotency (DEPOIS de garantir traceId)
-                    await idempotencyService.cacheResult(idempotencyKey, bookingResponse);
 
                     // ✅ GARANTIR que traceId esteja presente antes de emitir (dupla verificação)
                     if (!bookingResponse.traceId) {
@@ -586,8 +772,59 @@ function registerSocketCreateBookingHandler({
                         });
                     }
 
-                    // Emitir confirmação para o cliente
+                    // Emitir confirmação para o cliente o quanto antes para evitar timeout no app.
                     socket.emit('bookingCreated', responseToEmit);
+
+                    // Cache de idempotência fora do caminho síncrono da resposta.
+                    setImmediate(async () => {
+                        try {
+                            await idempotencyService.cacheResult(idempotencyKey, bookingResponse);
+                        } catch (idempotencyCacheError) {
+                            logStructured('warn', 'Falha ao cachear resultado de idempotência (background)', {
+                                bookingId,
+                                eventType: 'createBooking',
+                                error: idempotencyCacheError.message
+                            });
+                        }
+                    });
+
+                    // Para corridas já pagas, acionar dispatch imediato e resiliente sem depender de fila/event bus.
+                    if (hasConfirmedPayment) {
+                        const paymentDispatchService = require('../services/payment-dispatch-service');
+                        const paidDispatchMaxAttempts = Number.parseInt(
+                            process.env.PAID_BOOKING_DISPATCH_MAX_ATTEMPTS || '120',
+                            10
+                        );
+                        const paidDispatchRetryDelayMs = Number.parseInt(
+                            process.env.PAID_BOOKING_DISPATCH_RETRY_DELAY_MS || '1000',
+                            10
+                        );
+
+                        paymentDispatchService.triggerDispatchAfterPayment({
+                            bookingId,
+                            io,
+                            pickupLocation,
+                            source: 'createBooking_paid_immediate',
+                            force: true,
+                            maxAttempts: paidDispatchMaxAttempts,
+                            retryDelayMs: paidDispatchRetryDelayMs
+                        }).then((dispatchResult) => {
+                            logStructured('info', 'createBooking: dispatch imediato para corrida paga processado', {
+                                bookingId,
+                                eventType: 'createBooking',
+                                success: Boolean(dispatchResult?.success),
+                                skipped: Boolean(dispatchResult?.skipped),
+                                reason: dispatchResult?.reason || null,
+                                attempts: dispatchResult?.attempts || 1
+                            });
+                        }).catch((dispatchError) => {
+                            logStructured('warn', 'createBooking: falha ao acionar dispatch imediato para corrida paga', {
+                                bookingId,
+                                eventType: 'createBooking',
+                                error: dispatchError.message
+                            });
+                        });
+                    }
 
                     // ✅ DEBUG: Log após emitir para confirmar
                     if (process.env.NODE_ENV === 'development' || process.env.DEBUG_WEBSOCKET === 'true') {
@@ -597,6 +834,78 @@ function registerSocketCreateBookingHandler({
                             traceId: responseToEmit.traceId
                         });
                     }
+
+                    // Pós-processamentos em background (não bloquear bookingCreated / dispatch para motorista).
+                    setImmediate(async () => {
+                        try {
+                            await metricsCollector.recordMatchStart(bookingId, Date.now());
+                        } catch (metricsError) {
+                            logStructured('warn', 'Falha ao registrar match start (background)', {
+                                bookingId,
+                                eventType: 'createBooking',
+                                error: metricsError.message
+                            });
+                        }
+
+                        try {
+                            await auditService.logRideAction(userId, 'createBooking', bookingId, {
+                                pickupLocation,
+                                destinationLocation,
+                                estimatedFare: commandBookingData?.estimatedFare || estimatedFare || 0,
+                                paymentMethod,
+                                regionHash
+                            }, true, null, metadata);
+                        } catch (auditError) {
+                            logStructured('warn', 'Falha ao registrar auditoria createBooking (background)', {
+                                bookingId,
+                                eventType: 'createBooking',
+                                error: auditError.message
+                            });
+                        }
+
+                        try {
+                            const redis = redisPool.getConnection();
+                            await redisPool.ensureConnection();
+                            const queueKey = `ride_queue:${regionHash}:pending`;
+                            const pendingRides = await redis.zcard(queueKey);
+
+                            if (pendingRides >= 3) {
+                                const demandNotificationService = require('../services/demand-notification-service');
+                                await demandNotificationService.checkAndNotifyDemand(
+                                    pickupLocation,
+                                    pendingRides
+                                );
+                            }
+                        } catch (demandError) {
+                            logStructured('error', 'Erro ao verificar demanda (background)', {
+                                bookingId,
+                                error: demandError.message,
+                                eventType: 'createBooking'
+                            });
+                        }
+
+                        try {
+                            const ridePersistenceService = require('../services/ride-persistence-service');
+                            await ridePersistenceService.saveRide({
+                                rideId: bookingId,
+                                bookingId: bookingId,
+                                passengerId: customerId,
+                                pickupLocation: pickupLocation,
+                                destinationLocation: destinationLocation,
+                                estimatedFare: commandBookingData?.estimatedFare || estimatedFare || 0,
+                                paymentMethod: paymentMethod || 'pix',
+                                paymentStatus: data.paymentStatus || 'pending_payment',
+                                status: 'pending',
+                                carType: data.carType || null
+                            });
+                        } catch (persistError) {
+                            logStructured('error', 'Erro ao salvar corrida no Firestore (background)', {
+                                bookingId,
+                                error: persistError.message,
+                                eventType: 'createBooking'
+                            });
+                        }
+                    });
 
                     const totalLatency = Date.now() - startTime;
                     logStructured('info', 'createBooking concluído com sucesso', {

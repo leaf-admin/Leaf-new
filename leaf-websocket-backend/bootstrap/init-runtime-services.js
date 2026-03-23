@@ -47,6 +47,15 @@ function initializeRuntimeServices({
     logStructured('info', 'DriverPoolMonitor iniciado (monitoramento contínuo de motoristas livres)', { service: 'server', phase: 'fase9' });
     // ============================================================================
 
+    // ==================== MONITOR DE RECUPERAÇÃO DE ACCEPTED ÓRFÃO ====================
+    const AcceptedRideRecoveryMonitor = require('../services/accepted-ride-recovery-monitor');
+    const acceptedRideRecoveryMonitor = new AcceptedRideRecoveryMonitor(io);
+    acceptedRideRecoveryMonitor.start();
+    logStructured('info', 'AcceptedRideRecoveryMonitor iniciado (reconciliação de ACCEPTED órfão)', {
+        service: 'server'
+    });
+    // ============================================================================
+
     // ==================== SERVIÇO DE NOTIFICAÇÃO DE DEMANDA ====================
     const DemandNotificationService = require('../services/demand-notification-service');
     const demandNotificationService = new DemandNotificationService(io);
@@ -64,6 +73,7 @@ function initializeRuntimeServices({
     setInterval(async () => {
         try {
             const redis = redisPool.getConnection();
+            const ELIGIBLE_DRIVER_GEO_KEY = process.env.ELIGIBLE_DRIVER_GEO_KEY || 'driver_locations_eligible';
 
             // Garantir conexão Redis
             if (redis.status !== 'ready' && redis.status !== 'connect') {
@@ -98,6 +108,8 @@ function initializeRuntimeServices({
                 }
 
                 const exists = await redis.exists(`driver:${driverId}`);
+                const driverSnapshot = exists ? await redis.hgetall(`driver:${driverId}`) : null;
+                const snapshotOnline = driverSnapshot?.isOnline === 'true' || driverSnapshot?.isOnline === true;
 
                 if (isConnected) {
                     // Motorista está conectado - NUNCA remover, apenas renovar se necessário
@@ -127,6 +139,14 @@ function initializeRuntimeServices({
                         await redis.expire(`driver:${driverId}`, getTTL('DRIVER_LOCATION', 'ONLINE'));
                     }
                 } else {
+                    if (exists && !snapshotOnline) {
+                        // Sanitize: não manter motorista OFFLINE no GEO ativo.
+                        await redis.zrem('driver_locations', driverId);
+                        await redis.zrem(ELIGIBLE_DRIVER_GEO_KEY, driverId);
+                        cleanedActive++;
+                        continue;
+                    }
+
                     // Motorista NÃO está conectado - pode remover se não existe
                     // Mas manter por um tempo para análise de comportamento (não remover imediatamente)
                     // Só remover se realmente não existe E não está conectado há muito tempo
@@ -183,6 +203,7 @@ function initializeRuntimeServices({
         radiusExpansionManager,
         queueWorker,
         driverPoolMonitor,
+        acceptedRideRecoveryMonitor,
         demandNotificationService,
         dashboardWebSocketService
     };

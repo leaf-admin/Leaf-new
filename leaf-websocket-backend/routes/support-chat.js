@@ -89,7 +89,10 @@ router.post('/chat/:userId/message', authenticateSupport, async (req, res) => {
         // ✅ Verificar se o chat não está encerrado
         const chatStatus = await supportChatService.getChatStatus(userId);
         if (chatStatus.status === 'closed') {
-            return res.status(400).json({ error: 'Chat já está encerrado' });
+            const reopenResult = await supportChatService.reopenChatForOpenTicket(userId, 'incoming_message_after_closed');
+            if (!reopenResult.reopened) {
+                return res.status(400).json({ error: 'Chat já está encerrado' });
+            }
         }
 
         const result = await supportChatService.sendMessage(

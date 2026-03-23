@@ -5,6 +5,8 @@
  */
 
 const redisPool = require('../utils/redis-pool');
+const Redis = require('ioredis');
+const DockerDetector = require('../utils/docker-detector');
 const firebaseConfig = require('../firebase-config');
 const os = require('os');
 const { logStructured, logError } = require('../utils/logger');
@@ -12,6 +14,211 @@ const { logStructured, logError } = require('../utils/logger');
 class HealthCheckService {
   constructor() {
     this.startTime = Date.now();
+    this.redisHealthClient = null;
+    this.redisHealthConfigKey = '';
+    this.redisHealthInFlight = null;
+    this.redisHealthCache = null;
+  }
+
+  getRedisThresholds() {
+    return {
+      warningThresholdMs: Number.parseInt(
+        process.env.HEALTH_REDIS_WARNING_MS ||
+          (process.env.NODE_ENV === 'production' ? '300' : '1200'),
+        10
+      ),
+      unhealthyThresholdMs: Number.parseInt(
+        process.env.HEALTH_REDIS_UNHEALTHY_MS ||
+          (process.env.NODE_ENV === 'production' ? '1500' : '4000'),
+        10
+      )
+    };
+  }
+
+  getRedisSampleCount() {
+    return Math.max(
+      1,
+      Number.parseInt(process.env.HEALTH_REDIS_PING_SAMPLES || '3', 10)
+    );
+  }
+
+  getRedisHealthCacheTtlMs() {
+    return Math.max(
+      0,
+      Number.parseInt(process.env.HEALTH_REDIS_CACHE_TTL_MS || '1500', 10)
+    );
+  }
+
+  getCachedRedisHealth() {
+    const cache = this.redisHealthCache;
+    if (!cache) {
+      return null;
+    }
+
+    const ttlMs = this.getRedisHealthCacheTtlMs();
+    if (ttlMs <= 0) {
+      return null;
+    }
+
+    if (Date.now() - cache.timestamp > ttlMs) {
+      return null;
+    }
+
+    return cache.payload;
+  }
+
+  setCachedRedisHealth(payload) {
+    this.redisHealthCache = {
+      timestamp: Date.now(),
+      payload
+    };
+  }
+
+  getRedisHealthProbeTimeouts() {
+    return {
+      connectTimeout: Number.parseInt(process.env.HEALTH_REDIS_CONNECT_TIMEOUT_MS || '1500', 10),
+      commandTimeout: Number.parseInt(process.env.HEALTH_REDIS_COMMAND_TIMEOUT_MS || '1500', 10)
+    };
+  }
+
+  getRedisHealthConfig() {
+    const baseConfig = DockerDetector.getRedisConfig();
+    const { connectTimeout, commandTimeout } = this.getRedisHealthProbeTimeouts();
+
+    return {
+      ...baseConfig,
+      lazyConnect: true,
+      enableOfflineQueue: false,
+      connectTimeout,
+      commandTimeout,
+      maxRetriesPerRequest: 1,
+      retryStrategy: () => null
+    };
+  }
+
+  getRedisHealthConfigKey(config) {
+    const passwordMarker = config.password ? 'with-pass' : 'without-pass';
+    return `${config.host}:${config.port}:${config.db}:${passwordMarker}`;
+  }
+
+  waitForClientReady(client, timeoutMs = 2000) {
+    return new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        cleanup();
+        reject(new Error('timeout aguardando Redis ready'));
+      }, timeoutMs);
+
+      const onReady = () => {
+        cleanup();
+        resolve();
+      };
+      const onError = error => {
+        cleanup();
+        reject(error);
+      };
+
+      const cleanup = () => {
+        clearTimeout(timeout);
+        client.off('ready', onReady);
+        client.off('error', onError);
+      };
+
+      client.once('ready', onReady);
+      client.once('error', onError);
+    });
+  }
+
+  async getDedicatedRedisHealthClient() {
+    const config = this.getRedisHealthConfig();
+    const configKey = this.getRedisHealthConfigKey(config);
+
+    const needsNewClient =
+      !this.redisHealthClient ||
+      this.redisHealthConfigKey !== configKey ||
+      this.redisHealthClient.status === 'close' ||
+      this.redisHealthClient.status === 'end';
+
+    if (needsNewClient) {
+      await this.resetRedisHealthClient();
+      this.redisHealthClient = new Redis(config);
+      this.redisHealthConfigKey = configKey;
+      this.redisHealthClient.on('error', error => {
+        if (this.redisHealthClient?.status === 'end' || this.redisHealthClient?.status === 'close') {
+          return;
+        }
+        logError(error, 'Erro no Redis health probe client', {
+          service: 'health-check-service',
+          component: 'redis-health-probe'
+        });
+      });
+    }
+
+    if (this.redisHealthClient.status === 'wait') {
+      await this.redisHealthClient.connect();
+    } else if (this.redisHealthClient.status === 'connecting' || this.redisHealthClient.status === 'connect') {
+      await this.waitForClientReady(this.redisHealthClient, this.getRedisHealthProbeTimeouts().connectTimeout + 800);
+    }
+
+    return this.redisHealthClient;
+  }
+
+  async resetRedisHealthClient() {
+    if (!this.redisHealthClient) {
+      return;
+    }
+
+    try {
+      this.redisHealthClient.disconnect(false);
+    } catch (_error) {
+      // Sem impacto: cliente de health check é descartável
+    } finally {
+      this.redisHealthClient = null;
+      this.redisHealthConfigKey = '';
+    }
+  }
+
+  async collectRedisSamples(redis, sampleCount) {
+    const samples = [];
+    for (let i = 0; i < sampleCount; i += 1) {
+      const sampleStart = process.hrtime.bigint();
+      await redis.ping();
+      const elapsedMs = Number((process.hrtime.bigint() - sampleStart) / BigInt(1e6));
+      samples.push(elapsedMs);
+    }
+    return samples;
+  }
+
+  buildRedisHealthPayload(samples, thresholds, source = 'dedicated') {
+    const responseTime = Math.round(
+      samples.reduce((acc, value) => acc + value, 0) / samples.length
+    );
+    const minLatency = Math.min(...samples);
+    const maxLatency = Math.max(...samples);
+    const status =
+      responseTime >= thresholds.unhealthyThresholdMs
+        ? 'unhealthy'
+        : responseTime >= thresholds.warningThresholdMs
+          ? 'warning'
+          : 'healthy';
+
+    return {
+      status,
+      source,
+      responseTime: `${responseTime}ms`,
+      latency: responseTime,
+      minLatency,
+      maxLatency,
+      samples,
+      thresholds: {
+        warningMs: thresholds.warningThresholdMs,
+        unhealthyMs: thresholds.unhealthyThresholdMs
+      },
+      message: status === 'warning'
+        ? `Redis respondendo lentamente (${responseTime}ms)`
+        : status === 'unhealthy'
+          ? `Redis com latência crítica (${responseTime}ms)`
+          : 'Redis está saudável'
+    };
   }
 
   /**
@@ -74,72 +281,59 @@ class HealthCheckService {
    * Health check do Redis
    */
   async checkRedis() {
+    const cached = this.getCachedRedisHealth();
+    if (cached) {
+      return cached;
+    }
+
+    if (!this.redisHealthInFlight) {
+      this.redisHealthInFlight = (async () => {
+        const thresholds = this.getRedisThresholds();
+        const sampleCount = this.getRedisSampleCount();
+
+        try {
+          const redis = await this.getDedicatedRedisHealthClient();
+          const samples = await this.collectRedisSamples(redis, sampleCount);
+          return this.buildRedisHealthPayload(samples, thresholds, 'dedicated');
+        } catch (dedicatedError) {
+          await this.resetRedisHealthClient();
+          logError(dedicatedError, 'Redis health check dedicado falhou, tentando fallback no pool compartilhado', {
+            service: 'health-check-service',
+            component: 'redis-health-probe'
+          });
+
+          try {
+            await redisPool.ensureConnection();
+            const redis = redisPool.getConnection();
+            const samples = await this.collectRedisSamples(redis, sampleCount);
+            const fallbackPayload = this.buildRedisHealthPayload(samples, thresholds, 'shared-fallback');
+            return {
+              ...fallbackPayload,
+              fallbackReason: dedicatedError.message
+            };
+          } catch (fallbackError) {
+            logError(fallbackError, 'Redis health check falhou também no fallback compartilhado', {
+              service: 'health-check-service',
+              component: 'redis'
+            });
+
+            return {
+              status: 'unhealthy',
+              error: fallbackError.message,
+              fallbackReason: dedicatedError.message,
+              message: 'Redis não está respondendo'
+            };
+          }
+        }
+      })();
+    }
+
     try {
-      await redisPool.ensureConnection();
-      const redis = redisPool.getConnection();
-
-      const warningThresholdMs = Number.parseInt(
-        process.env.HEALTH_REDIS_WARNING_MS ||
-          (process.env.NODE_ENV === 'production' ? '300' : '1200'),
-        10
-      );
-      const unhealthyThresholdMs = Number.parseInt(
-        process.env.HEALTH_REDIS_UNHEALTHY_MS ||
-          (process.env.NODE_ENV === 'production' ? '1500' : '4000'),
-        10
-      );
-      const sampleCount = Math.max(
-        1,
-        Number.parseInt(process.env.HEALTH_REDIS_PING_SAMPLES || '3', 10)
-      );
-
-      const samples = [];
-      for (let i = 0; i < sampleCount; i += 1) {
-        const sampleStart = Date.now();
-        await redis.ping();
-        samples.push(Date.now() - sampleStart);
-      }
-
-      const responseTime = Math.round(
-        samples.reduce((acc, value) => acc + value, 0) / samples.length
-      );
-      const minLatency = Math.min(...samples);
-      const maxLatency = Math.max(...samples);
-
-      const status =
-        responseTime >= unhealthyThresholdMs
-          ? 'unhealthy'
-          : responseTime >= warningThresholdMs
-            ? 'warning'
-            : 'healthy';
-
-      return {
-        status,
-        responseTime: `${responseTime}ms`,
-        latency: responseTime,
-        minLatency,
-        maxLatency,
-        samples,
-        thresholds: {
-          warningMs: warningThresholdMs,
-          unhealthyMs: unhealthyThresholdMs
-        },
-        message: status === 'warning' 
-          ? `Redis respondendo lentamente (${responseTime}ms)`
-          : status === 'unhealthy'
-            ? `Redis com latência crítica (${responseTime}ms)`
-          : 'Redis está saudável'
-      };
-    } catch (error) {
-      logError(error, 'Redis health check falhou', {
-        service: 'health-check-service',
-        component: 'redis'
-      });
-      return {
-        status: 'unhealthy',
-        error: error.message,
-        message: 'Redis não está respondendo'
-      };
+      const payload = await this.redisHealthInFlight;
+      this.setCachedRedisHealth(payload);
+      return payload;
+    } finally {
+      this.redisHealthInFlight = null;
     }
   }
 

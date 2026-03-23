@@ -213,7 +213,7 @@ const WS_URL = process.env.WS_URL || 'http://147.93.66.253:3001';
 
 3. **Testar conexão manual:**
    ```bash
-   ssh root@147.93.66.253 "cd /opt/leaf-app && docker-compose exec redis redis-cli -a leaf_redis_2024 ping"
+   ssh root@147.93.66.253 "cd /opt/leaf-app && docker-compose exec redis env REDISCLI_AUTH=leaf_redis_2024 redis-cli ping"
    ```
 
 ### WebSocket não inicia
@@ -293,4 +293,3 @@ const WS_URL = process.env.WS_URL || 'http://147.93.66.253:3001';
 
 **Última atualização:** 2024-01-XX
 **Status:** ✅ Implementado e testado
-

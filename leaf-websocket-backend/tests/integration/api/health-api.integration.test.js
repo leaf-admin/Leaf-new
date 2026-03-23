@@ -49,9 +49,9 @@ describe('Health Check API Integration', () => {
     });
   });
 
-  describe('GET /api/stats', () => {
+  describe('GET /api/app/stats', () => {
     test('should return system statistics', async () => {
-      const response = await testRequest('GET', '/api/stats');
+      const response = await testRequest('GET', '/api/app/stats');
 
       expect(response.status).toBe(200);
       expect(response.data).toHaveProperty('redis');
@@ -60,14 +60,14 @@ describe('Health Check API Integration', () => {
     });
 
     test('should include Redis statistics', async () => {
-      const response = await testRequest('GET', '/api/stats');
+      const response = await testRequest('GET', '/api/app/stats');
 
       expect(response.data.redis).toHaveProperty('connected');
       expect(response.data.redis).toHaveProperty('operations');
     });
 
     test('should include memory statistics', async () => {
-      const response = await testRequest('GET', '/api/stats');
+      const response = await testRequest('GET', '/api/app/stats');
 
       expect(response.data.memory).toHaveProperty('rss');
       expect(response.data.memory).toHaveProperty('heapUsed');

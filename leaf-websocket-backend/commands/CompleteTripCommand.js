@@ -7,7 +7,7 @@
  * - Validar que viagem pode ser finalizada
  * - Atualizar estado da corrida
  * - Processar pagamento final
- * - Publicar evento ride.completed
+ * - Construir evento canônico ride.completed (publicação ocorre no handler/EventBus)
  * 
  * NÃO faz:
  * - Notificar passageiro (isso é responsabilidade de listeners)
@@ -21,12 +21,13 @@ const PaymentService = require('../services/payment-service');
 const driverLockManager = require('../services/driver-lock-manager');
 const redisPool = require('../utils/redis-pool');
 const { logger, logStructured } = require('../utils/logger');
-const eventSourcing = require('../services/event-sourcing');
 const traceContext = require('../utils/trace-context');
 const { metrics } = require('../utils/prometheus-metrics');
 const { getTracer } = require('../utils/tracer');
 const { SpanStatusCode } = require('@opentelemetry/api');
 const { validateAndEnsureTraceIdInCommand } = require('../utils/trace-validator');
+const { clearActiveTripForDriver } = require('../utils/active-trip-index');
+const tripLocationPersistenceService = require('../services/trip-location-persistence-service');
 
 class CompleteTripCommand extends Command {
     constructor(data) {
@@ -185,8 +186,40 @@ class CompleteTripCommand extends Command {
                     completedAt: new Date().toISOString()
                 });
 
+                if (customerId) {
+                    const customerActiveBookingKey = `customer_active_booking:${customerId}`;
+                    const activeBookingId = await redis.get(customerActiveBookingKey);
+                    if (activeBookingId === this.bookingId) {
+                        await redis.del(customerActiveBookingKey);
+                    }
+                }
+
+                await redis.del(
+                    `booking_search:${this.bookingId}`,
+                    `ride_notifications:${this.bookingId}`,
+                    `ride_excluded_drivers:${this.bookingId}`
+                );
+
                 // ✅ NOVO: Remover da lista de corridas ativas
                 await redis.hdel('bookings:active', this.bookingId);
+                await clearActiveTripForDriver(redis, this.driverId, this.bookingId);
+
+                // Flush final da trilha de localização fora do caminho crítico.
+                // Persistência de trilha é best-effort e não deve atrasar ACK de completeTrip.
+                setImmediate(async () => {
+                    try {
+                        await tripLocationPersistenceService.forceFinalizeTrip(this.bookingId, {
+                            status: 'completed',
+                            reason: 'ride_completed'
+                        });
+                    } catch (locationFinalizeError) {
+                        logStructured('warn', 'Falha ao finalizar trilha de localização da corrida', {
+                            service: 'complete-trip-command',
+                            bookingId: this.bookingId,
+                            error: locationFinalizeError.message
+                        });
+                    }
+                });
 
                 // Criar evento canônico
                 const event = new RideCompletedEvent({
@@ -201,12 +234,6 @@ class CompleteTripCommand extends Command {
                     traceId: this.traceId, // ✅ Incluir traceId no evento
                     correlationId: this.correlationId || this.bookingId // ✅ Incluir correlationId no evento
                 });
-
-                // Registrar evento no event sourcing
-                await eventSourcing.recordEvent(
-                    eventSourcing.EVENT_TYPES.RIDE_COMPLETED,
-                    event.data
-                );
 
                 logStructured('info', 'CompleteTripCommand executado com sucesso', {
                     bookingId: this.bookingId,

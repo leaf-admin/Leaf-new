@@ -11,6 +11,7 @@ VPS_USER="root"
 VPS_SSH_KEY="/Users/izaakdias/Documents/Leaf-new/digitaloceankey"
 APP_DIR="/opt/leaf-app"
 PROJECT_DIR="leaf-websocket-backend"
+CHECK_RUNTIME_PARITY="${CHECK_RUNTIME_PARITY:-true}"
 
 # Cores
 RED='\033[0;31m'
@@ -50,6 +51,18 @@ check_prerequisites() {
     
     echo -e "${GREEN}✅ Pré-requisitos OK${NC}"
     echo ""
+}
+
+runtime_parity_precheck() {
+    if [[ "$CHECK_RUNTIME_PARITY" != "true" ]]; then
+        return
+    fi
+
+    if [[ -x "./scripts/ops/check-vps-runtime-parity.sh" ]]; then
+        echo -e "${BLUE}🧭 Verificando paridade de runtime (pré-deploy, informativo)...${NC}"
+        RUNTIME_MODE=vps STRICT=false FETCH_REMOTE=true ./scripts/ops/check-vps-runtime-parity.sh || true
+        echo ""
+    fi
 }
 
 # ===== FUNÇÃO: Instalar Docker na VPS =====
@@ -262,7 +275,7 @@ check_health() {
         
         # Verificar Redis
         echo "🔴 Verificando Redis..."
-        if docker compose exec -T redis redis-cli -a leaf_redis_2024 ping 2>/dev/null | grep -q PONG || docker-compose exec -T redis redis-cli -a leaf_redis_2024 ping 2>/dev/null | grep -q PONG; then
+        if docker compose exec -T redis env REDISCLI_AUTH=leaf_redis_2024 redis-cli ping 2>/dev/null | grep -q PONG || docker-compose exec -T redis env REDISCLI_AUTH=leaf_redis_2024 redis-cli ping 2>/dev/null | grep -q PONG; then
             echo "✅ Redis está respondendo"
         else
             echo "❌ Redis não está respondendo"
@@ -295,6 +308,19 @@ EOF
     echo ""
 }
 
+runtime_parity_postcheck() {
+    if [[ "$CHECK_RUNTIME_PARITY" != "true" ]]; then
+        return
+    fi
+
+    if [[ -x "./scripts/ops/check-vps-runtime-parity.sh" ]]; then
+        echo -e "${BLUE}🧭 Verificando paridade de runtime (pós-deploy, obrigatório)...${NC}"
+        RUNTIME_MODE=vps STRICT=true FETCH_REMOTE=false ./scripts/ops/check-vps-runtime-parity.sh
+        echo -e "${GREEN}✅ Runtime em paridade após deploy${NC}"
+        echo ""
+    fi
+}
+
 # ===== FUNÇÃO: Mostrar informações finais =====
 show_final_info() {
     echo ""
@@ -324,15 +350,16 @@ show_final_info() {
 # ===== EXECUÇÃO PRINCIPAL =====
 main() {
     check_prerequisites
+    runtime_parity_precheck
     install_docker
     setup_directories
     copy_files
     copy_application_code
     build_and_start
     check_health
+    runtime_parity_postcheck
     show_final_info
 }
 
 # Executar
 main
-

@@ -4,6 +4,9 @@ function registerSocketSearchDriversHandler({
     logStructured,
     findAvailableDriversForPickup
 }) {
+    const emitLegacyNoDriversFoundEvent =
+        String(process.env.ENABLE_LEGACY_NO_DRIVERS_FOUND_EVENT || 'false').toLowerCase() === 'true';
+
     socket.on('searchDrivers', async (data) => {
         try {
             // ✅ NOVO: Rate Limiting
@@ -84,7 +87,7 @@ function registerSocketSearchDriversHandler({
             socket.emit('driversFound', payload);
 
             // Compatibilidade com listeners legados
-            if (drivers.length === 0) {
+            if (emitLegacyNoDriversFoundEvent && drivers.length === 0) {
                 socket.emit('noDriversFound', {
                     success: true,
                     message: payload.message,

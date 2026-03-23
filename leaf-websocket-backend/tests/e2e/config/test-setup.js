@@ -11,6 +11,7 @@ jest.setTimeout(30000);
 process.env.NODE_ENV = 'test';
 process.env.WS_URL = process.env.WS_URL || 'http://localhost:3001';
 process.env.GEOFENCE_RADIUS_KM = '9999'; // Permite requisições de teste em qualquer lugar do mundo
+process.env.REDIS_DISABLE_RECONNECT = 'true';
 
 // Suprimir logs durante testes (opcional)
 if (process.env.SUPPRESS_LOGS === 'true') {
@@ -26,12 +27,3 @@ if (process.env.SUPPRESS_LOGS === 'true') {
 
 // Helpers globais
 global.sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
-
-// Cleanup após todos os testes
-afterAll(async () => {
-  // Aguardar um pouco para garantir que tudo foi limpo
-  await new Promise(resolve => setTimeout(resolve, 1000));
-});
-
-
-

@@ -42,7 +42,6 @@ const registerSocketAcceptRideHandler = require('./bootstrap/register-socket-acc
 const registerSocketRejectRideHandler = require('./bootstrap/register-socket-reject-ride-handler');
 const registerSocketStartTripHandler = require('./bootstrap/register-socket-start-trip-handler');
 const registerSocketCompleteTripHandler = require('./bootstrap/register-socket-complete-trip-handler');
-const registerSocketUpdateDriverLocationHandler = require('./bootstrap/register-socket-update-driver-location-handler');
 const registerSocketDriverHeartbeatHandler = require('./bootstrap/register-socket-driver-heartbeat-handler');
 const registerSocketUpdateLocationHandler = require('./bootstrap/register-socket-update-location-handler');
 const registerSocketSearchDriversHandler = require('./bootstrap/register-socket-search-drivers-handler');
@@ -52,8 +51,7 @@ const registerSocketCancelRideHandler = require('./bootstrap/register-socket-can
 const registerSocketSafetySupportHandlers = require('./bootstrap/register-socket-safety-support-handlers');
 const registerSocketEngagementChatHandlers = require('./bootstrap/register-socket-engagement-chat-handlers');
 const registerSocketActiveRideHandlers = require('./bootstrap/register-socket-active-ride-handlers');
-const registerSocketLegacyNotificationHandlers = require('./bootstrap/register-socket-legacy-notification-handlers');
-const registerSocketLegacyBridgeHandler = require('./bootstrap/register-socket-legacy-bridge-handler');
+const registerSocketDriverControlHandlers = require('./bootstrap/register-socket-driver-control-handlers');
 
 // Importar logger primeiro (necessário para logs abaixo)
 const { logStructured, logError, logCommand, logEvent } = require('./utils/logger');
@@ -76,7 +74,6 @@ const idempotencyService = require('./services/idempotency-service');
 const ConnectionCleanupService = require('./services/connection-cleanup-service');
 const vehicleLockManager = require('./services/vehicle-lock-manager');
 const driverLockManager = require('./services/driver-lock-manager');
-const driverEligibilityService = require('./services/driver-eligibility-service');
 const FCMService = require('./services/fcm-service');
 const fcmService = new FCMService(); // Singleton local ao worker
 // =========================================================================================
@@ -146,6 +143,11 @@ const SOCKET_ADMISSION_MAX_WAIT_MS = Number.parseInt(process.env.SOCKET_ADMISSIO
 const SOCKET_ADMISSION_HOLD_MS = Number.parseInt(process.env.SOCKET_ADMISSION_HOLD_MS || '10000', 10);
 let socketAdmissionInFlight = 0;
 const socketAdmissionQueue = [];
+
+const ENABLE_LEGACY_SOCKET_NOTIFICATIONS =
+    String(process.env.ENABLE_LEGACY_SOCKET_NOTIFICATIONS || 'false').toLowerCase() === 'true';
+const ENABLE_LEGACY_SOCKET_BRIDGE =
+    String(process.env.ENABLE_LEGACY_SOCKET_BRIDGE || 'false').toLowerCase() === 'true';
 
 // Lane dedicada para autenticação para evitar rajadas de verifyIdToken simultâneas.
 const AUTH_VERIFY_ADMISSION_ENABLED = process.env.AUTH_VERIFY_ADMISSION_ENABLED !== 'false';
@@ -364,6 +366,9 @@ initializeTracer();
 const app = express();
 const server = http.createServer(app);
 
+// Necessário atrás de Nginx/Load Balancer para rate limit e IP real funcionarem corretamente.
+app.set('trust proxy', 1);
+
 // Health check ultra-rápido antes de middlewares pesados (rate limit/redis/etc)
 app.get('/health/liveness', (_req, res) => {
     res.status(200).json({
@@ -386,6 +391,10 @@ const baseAllowedOrigins = [
     'https://dashboard.leaf.app.br',
     'https://api.leaf.app.br',
     'https://socket.leaf.app.br',
+    // Produção temporária (sslip.io)
+    'https://dashboard.147.182.204.181.sslip.io',
+    'https://api.147.182.204.181.sslip.io',
+    'https://socket.147.182.204.181.sslip.io',
     'http://147.182.204.181:3001',
     'https://147.182.204.181:3001',
     // Desenvolvimento local
@@ -417,6 +426,7 @@ const corsOptions = {
         // ✅ React Native e apps nativos não enviam origin (é null/undefined)
         // Permitir se não houver origin (React Native) ou se estiver na whitelist
         const isVpcDirectOrigin = /^https?:\/\/147\.182\.204\.181(?::\d+)?$/.test(origin || '');
+        const isSslipOrigin = /^https?:\/\/(?:api|socket|dashboard)\.147\.182\.204\.181\.sslip\.io$/.test(origin || '');
         const isPrivateNetworkOrigin = /^http:\/\/(192\.168\.|10\.)/.test(origin || '');
         const isNgrokOrigin = /ngrok-free\.app$/i.test(origin || '');
 
@@ -424,6 +434,7 @@ const corsOptions = {
             !origin ||
             allowedOrigins.includes(origin) ||
             isVpcDirectOrigin ||
+            isSslipOrigin ||
             (allowNgrokCors && isNgrokOrigin) ||
             (allowPrivateCors && isPrivateNetworkOrigin) ||
             origin.startsWith('exp://') ||
@@ -682,10 +693,10 @@ async function findAvailableDriversForPickup(pickupLocation, options = {}) {
 
     const radiusKm = Number.parseFloat(options.radiusKm || process.env.PAYMENT_AVAILABILITY_RADIUS_KM || '5');
     const limit = Number.parseInt(options.limit || process.env.PAYMENT_AVAILABILITY_LIMIT || '12', 10);
-    const requestedCategory = driverEligibilityService.normalizeCategory(options.carType);
+    const eligibleDriverGeoKey = process.env.ELIGIBLE_DRIVER_GEO_KEY || 'driver_locations_eligible';
     const georadiusCount = Math.max(limit * 3, limit);
     const nearbyDrivers = await redis.georadius(
-        'driver_locations',
+        eligibleDriverGeoKey,
         longitude,
         latitude,
         radiusKm,
@@ -729,15 +740,6 @@ async function findAvailableDriversForPickup(pickupLocation, options = {}) {
         const isAvailable = driverStatus === 'AVAILABLE' || driverStatus === 'ONLINE';
         if (!isOnline || !isAvailable) continue;
 
-        const eligibilityCheck = await driverEligibilityService.isDriverEligibleForRide(
-            driverId,
-            requestedCategory,
-            driverData
-        );
-        if (!eligibilityCheck.eligible) {
-            continue;
-        }
-
         eligibleDrivers.push({
             id: driverId,
             distanceKm,
@@ -746,8 +748,8 @@ async function findAvailableDriversForPickup(pickupLocation, options = {}) {
                 lat,
                 lng
             },
-            carType: eligibilityCheck.profile?.carType || driverData.carType || null,
-            category: eligibilityCheck.profile?.vehicleCategory || null,
+            carType: driverData.carType || null,
+            category: driverData.vehicleCategory || null,
             rating: Number.parseFloat(driverData.rating || '5.0')
         });
 
@@ -816,6 +818,7 @@ const saveDriverLocation = async (driverId, lat, lng, heading = 0, speed = 0, ti
         if (isOnline) {
             // 2. Motorista ONLINE: adicionar/atualizar no GEO ativo (para match rápido)
             await redis.geoadd('driver_locations', lng, lat, driverId);
+            await redis.sadd('online_drivers', driverId);
 
             // 3. Remover do GEO offline (se estava offline antes)
             await redis.zrem('driver_offline_locations', driverId);
@@ -843,6 +846,7 @@ const saveDriverLocation = async (driverId, lat, lng, heading = 0, speed = 0, ti
 
             // 3. Remover do GEO ativo (não deve aparecer em buscas de match)
             await redis.zrem('driver_locations', driverId);
+            await redis.srem('online_drivers', driverId);
 
             // 4. TTL longo para offline (24 horas - para notificações futuras)
             const { getTTL } = require('./config/redis-ttl-config');
@@ -1028,6 +1032,7 @@ io.on('connection', async (socket) => {
     // Confirmar pagamento
     registerSocketConfirmPaymentHandler({
         socket,
+        io,
         extractTraceIdFromEvent,
         traceContext,
         logStructured,
@@ -1138,15 +1143,7 @@ io.on('connection', async (socket) => {
         fcmService
     });
 
-    // 9. UpdateDriverLocation (crítico - GPS do motorista)
-    registerSocketUpdateDriverLocationHandler({
-        socket,
-        rateLimiterService,
-        logStructured,
-        saveDriverLocation
-    });
-
-    // 10. DriverHeartbeat (crítico - heartbeat GPS)
+    // 9. DriverHeartbeat (crítico - heartbeat GPS)
     registerSocketDriverHeartbeatHandler({
         socket,
         redisPool,
@@ -1157,7 +1154,7 @@ io.on('connection', async (socket) => {
         vehicleLockManager
     });
 
-    // 11. UpdateLocation (crítico - GPS genérico)
+    // 10. UpdateLocation + UpdateDriverLocation (crítico - GPS unificado)
     registerSocketUpdateLocationHandler({
         socket,
         io,
@@ -1237,19 +1234,31 @@ io.on('connection', async (socket) => {
         logError
     });
 
-    registerSocketLegacyNotificationHandlers({
-        socket,
-        logStructured,
-        logError
-    });
-
-    // Bridge de compatibilidade para eventos legados ainda emitidos por clientes antigos.
-    registerSocketLegacyBridgeHandler({
+    registerSocketDriverControlHandlers({
         socket,
         io,
         redisPool,
         logStructured
     });
+
+    if (ENABLE_LEGACY_SOCKET_NOTIFICATIONS) {
+        const registerSocketLegacyNotificationHandlers = require('./bootstrap/register-socket-legacy-notification-handlers');
+        registerSocketLegacyNotificationHandlers({
+            socket,
+            logStructured,
+            logError
+        });
+    }
+
+    if (ENABLE_LEGACY_SOCKET_BRIDGE) {
+        const registerSocketLegacyBridgeHandler = require('./bootstrap/register-socket-legacy-bridge-handler');
+        registerSocketLegacyBridgeHandler({
+            socket,
+            io,
+            redisPool,
+            logStructured
+        });
+    }
     }); // Fecha io.on('connection')
 
     // Graceful shutdown (registrar uma única vez por processo)
