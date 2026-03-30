@@ -287,6 +287,22 @@ Resultado acumulado desta wave:
   - o padrão de extração para helpers centralizados funcionou sem tocar em comportamento de domínio
   - isso abre um caminho seguro para repetir a mesma estratégia em hotspots pequenos antes de entrar em `routes/dashboard.js` e `routes/metrics.js`
 
+## Corte incremental nas rotas KYC
+- mais dois acessos pontuais ao RTDB foram removidos das rotas KYC:
+  - `leaf-websocket-backend/routes/kyc-onboarding.js`
+  - `leaf-websocket-backend/routes/kyc-routes.js`
+- comportamento novo:
+  - `kyc-onboarding` passou a persistir a âncora device-first via `firebaseConfig.updateRealtimeDB(...)`
+  - `kyc-routes` passou a ler a assinatura âncora via `firebaseConfig.getFromRealtimeDB(...)`
+- validação:
+  - `node --check` das duas rotas: `OK`
+- impacto medido no auditor:
+  - relatório anterior: `legacy-runtime-surface-1774858076645.md` com `101`
+  - relatório novo: `legacy-runtime-surface-1774858237369.md` com `99`
+- leitura operacional:
+  - essa wave foi pequena, mas importante porque confirma que os cortes incrementais também funcionam em rotas HTTP sem reabrir comportamento
+  - o alvo natural seguinte continua sendo um hotspot limpo e versionado, antes de entrar nos arquivos grandes do dashboard
+
 ## Riscos que continuam abertos
 - `server.vps.js`, `routes/dashboard.js` e `register-socket-create-booking-handler.js` continuam mistos com trabalho paralelo
 - baseline agora possui worker dedicado, mas ainda nao foi validado em Redis real local nesta maquina

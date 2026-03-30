@@ -559,13 +559,11 @@ class KYCRoutes {
           return res.status(400).json({ success: false, error: 'userId inválido' });
         }
 
-        if (!firebaseConfig || !firebaseConfig.getRealtimeDB) {
+        if (!firebaseConfig || !firebaseConfig.getFromRealtimeDB) {
           return res.status(503).json({ success: false, error: 'Firebase não configurado' });
         }
 
-        const db = firebaseConfig.getRealtimeDB();
-        const userSnap = await db.ref(`users/${userId}`).once('value');
-        const user = userSnap.val() || {};
+        const user = (await firebaseConfig.getFromRealtimeDB(`users/${userId}`)) || {};
 
         res.json({
           success: true,

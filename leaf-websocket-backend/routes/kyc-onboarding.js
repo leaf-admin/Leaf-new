@@ -71,9 +71,8 @@ router.post('/api/drivers/kyc/onboarding', upload.fields([
 
       // Persistir âncora do device para verificações futuras (assinatura, não imagem)
       try {
-        if (firebaseConfig && firebaseConfig.getRealtimeDB) {
-          const db = firebaseConfig.getRealtimeDB();
-          await db.ref(`users/${driverId}`).update({
+        if (firebaseConfig && firebaseConfig.updateRealtimeDB) {
+          await firebaseConfig.updateRealtimeDB(`users/${driverId}`, {
             kycDeviceAnchorSignature: req.body?.selfieSignature || null,
             kycDeviceAnchorAlgorithm: req.body?.signatureAlgorithm || 'simhash-base64-v1',
             kycDeviceAnchorUpdatedAt: new Date().toISOString(),

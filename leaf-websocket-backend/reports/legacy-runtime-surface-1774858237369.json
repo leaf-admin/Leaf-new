@@ -1,0 +1,1127 @@
+{
+  "generatedAt": "2026-03-30T08:10:37.369Z",
+  "scannedFiles": 225,
+  "categories": {
+    "legacy_feature_flags": {
+      "description": "Flags de runtime legado e espelhos RTDB",
+      "totalMatches": 48,
+      "files": {
+        "bootstrap/register-runtime-endpoints.js": {
+          "totalMatches": 1,
+          "matches": [
+            {
+              "line": 3,
+              "count": 1,
+              "content": "String(process.env.ENABLE_LEGACY_RUNTIME_ENDPOINTS || 'false').toLowerCase() === 'true';"
+            }
+          ]
+        },
+        "bootstrap/register-socket-search-drivers-handler.js": {
+          "totalMatches": 1,
+          "matches": [
+            {
+              "line": 8,
+              "count": 1,
+              "content": "String(process.env.ENABLE_LEGACY_NO_DRIVERS_FOUND_EVENT || 'false').toLowerCase() === 'true';"
+            }
+          ]
+        },
+        "bootstrap/register-socket-update-location-handler.js": {
+          "totalMatches": 3,
+          "matches": [
+            {
+              "line": 13,
+              "count": 1,
+              "content": "const ENABLE_LEGACY_UPDATE_DRIVER_LOCATION_EVENT ="
+            },
+            {
+              "line": 14,
+              "count": 1,
+              "content": "String(process.env.ENABLE_LEGACY_UPDATE_DRIVER_LOCATION_EVENT || 'false').toLowerCase() === 'true';"
+            },
+            {
+              "line": 543,
+              "count": 1,
+              "content": "if (ENABLE_LEGACY_UPDATE_DRIVER_LOCATION_EVENT) {"
+            }
+          ]
+        },
+        "routes/account-routes.js": {
+          "totalMatches": 4,
+          "matches": [
+            {
+              "line": 7,
+              "count": 3,
+              "content": "String(process.env.ENABLE_LEGACY_PROFILE_RTDB_MIRROR || 'true').toLowerCase() === 'true';"
+            },
+            {
+              "line": 10,
+              "count": 1,
+              "content": "String(process.env.ENABLE_LEGACY_ACCOUNT_DELETE_ROUTES || 'false').toLowerCase() === 'true';"
+            }
+          ]
+        },
+        "routes/dashboard.js": {
+          "totalMatches": 4,
+          "matches": [
+            {
+              "line": 40,
+              "count": 1,
+              "content": "String(process.env.ENABLE_LEGACY_PROMOTIONS_ROUTES || 'false').toLowerCase() === 'true';"
+            },
+            {
+              "line": 42,
+              "count": 3,
+              "content": "String(process.env.ENABLE_LEGACY_DASHBOARD_USERS_RTDB_MIRROR || 'false').toLowerCase() === 'true';"
+            }
+          ]
+        },
+        "routes/woovi.js": {
+          "totalMatches": 1,
+          "matches": [
+            {
+              "line": 9,
+              "count": 1,
+              "content": "String(process.env.ENABLE_LEGACY_WOOVI_ALIAS_ROUTE || 'false').toLowerCase() === 'true';"
+            }
+          ]
+        },
+        "server.js": {
+          "totalMatches": 6,
+          "matches": [
+            {
+              "line": 147,
+              "count": 1,
+              "content": "const ENABLE_LEGACY_SOCKET_NOTIFICATIONS ="
+            },
+            {
+              "line": 148,
+              "count": 1,
+              "content": "String(process.env.ENABLE_LEGACY_SOCKET_NOTIFICATIONS || 'false').toLowerCase() === 'true';"
+            },
+            {
+              "line": 149,
+              "count": 1,
+              "content": "const ENABLE_LEGACY_SOCKET_BRIDGE ="
+            },
+            {
+              "line": 150,
+              "count": 1,
+              "content": "String(process.env.ENABLE_LEGACY_SOCKET_BRIDGE || 'false').toLowerCase() === 'true';"
+            },
+            {
+              "line": 1254,
+              "count": 1,
+              "content": "if (ENABLE_LEGACY_SOCKET_NOTIFICATIONS) {"
+            },
+            {
+              "line": 1263,
+              "count": 1,
+              "content": "if (ENABLE_LEGACY_SOCKET_BRIDGE) {"
+            }
+          ]
+        },
+        "server.vps.js": {
+          "totalMatches": 9,
+          "matches": [
+            {
+              "line": 245,
+              "count": 1,
+              "content": "const ENABLE_LEGACY_RUNTIME_ENDPOINTS ="
+            },
+            {
+              "line": 246,
+              "count": 1,
+              "content": "String(process.env.ENABLE_LEGACY_RUNTIME_ENDPOINTS || 'false').toLowerCase() === 'true';"
+            },
+            {
+              "line": 247,
+              "count": 1,
+              "content": "const ENABLE_LEGACY_UPDATE_DRIVER_LOCATION_EVENT ="
+            },
+            {
+              "line": 248,
+              "count": 1,
+              "content": "String(process.env.ENABLE_LEGACY_UPDATE_DRIVER_LOCATION_EVENT || 'false').toLowerCase() === 'true';"
+            },
+            {
+              "line": 249,
+              "count": 1,
+              "content": "const ENABLE_LEGACY_NO_DRIVERS_FOUND_EVENT ="
+            },
+            {
+              "line": 250,
+              "count": 1,
+              "content": "String(process.env.ENABLE_LEGACY_NO_DRIVERS_FOUND_EVENT || 'false').toLowerCase() === 'true';"
+            },
+            {
+              "line": 1873,
+              "count": 1,
+              "content": "if (ENABLE_LEGACY_RUNTIME_ENDPOINTS) {"
+            },
+            {
+              "line": 9075,
+              "count": 1,
+              "content": "if (ENABLE_LEGACY_UPDATE_DRIVER_LOCATION_EVENT) {"
+            },
+            {
+              "line": 9935,
+              "count": 1,
+              "content": "if (ENABLE_LEGACY_NO_DRIVERS_FOUND_EVENT && drivers.length === 0) {"
+            }
+          ]
+        },
+        "services/promotion-service.js": {
+          "totalMatches": 6,
+          "matches": [
+            {
+              "line": 18,
+              "count": 2,
+              "content": "const LEGACY_IMPORT_ENABLED = process.env.PROMOTIONS_ENABLE_LEGACY_IMPORT !== 'false';"
+            },
+            {
+              "line": 19,
+              "count": 4,
+              "content": "const LEGACY_MIRROR_ENABLED = process.env.PROMOTIONS_ENABLE_LEGACY_RTDB_MIRROR !== 'false';"
+            }
+          ]
+        },
+        "services/referral-program-state-service.js": {
+          "totalMatches": 6,
+          "matches": [
+            {
+              "line": 14,
+              "count": 2,
+              "content": "const LEGACY_IMPORT_ENABLED = process.env.REFERRAL_PROGRAMS_ENABLE_LEGACY_IMPORT !== 'false';"
+            },
+            {
+              "line": 15,
+              "count": 4,
+              "content": "const LEGACY_MIRROR_ENABLED = process.env.REFERRAL_PROGRAMS_ENABLE_LEGACY_RTDB_MIRROR !== 'false';"
+            }
+          ]
+        },
+        "services/support-ticket-service.js": {
+          "totalMatches": 6,
+          "matches": [
+            {
+              "line": 10,
+              "count": 2,
+              "content": "const LEGACY_IMPORT_ENABLED = process.env.SUPPORT_TICKETS_ENABLE_LEGACY_IMPORT !== 'false';"
+            },
+            {
+              "line": 11,
+              "count": 4,
+              "content": "const LEGACY_MIRROR_ENABLED = process.env.SUPPORT_TICKETS_ENABLE_LEGACY_RTDB_MIRROR === 'true';"
+            }
+          ]
+        },
+        "workers/cron-subscription.js": {
+          "totalMatches": 1,
+          "matches": [
+            {
+              "line": 21,
+              "count": 1,
+              "content": "if (process.env.ENABLE_LEGACY_WEEKLY_SUBSCRIPTION_CRON === 'true') {"
+            }
+          ]
+        }
+      }
+    },
+    "rtdb_access": {
+      "description": "Acessos diretos ao Realtime Database",
+      "totalMatches": 99,
+      "files": {
+        "bootstrap/register-socket-legacy-bridge-handler.js": {
+          "totalMatches": 1,
+          "matches": [
+            {
+              "line": 607,
+              "count": 1,
+              "content": "const db = firebaseConfig.getRealtimeDB();"
+            }
+          ]
+        },
+        "firebase-config.js": {
+          "totalMatches": 6,
+          "matches": [
+            {
+              "line": 44,
+              "count": 1,
+              "content": "realtimeDB = admin.database();"
+            },
+            {
+              "line": 86,
+              "count": 1,
+              "content": "realtimeDB = admin.database();"
+            },
+            {
+              "line": 139,
+              "count": 1,
+              "content": "function getRealtimeDB() {"
+            },
+            {
+              "line": 207,
+              "count": 1,
+              "content": "async function syncToRealtimeDB(path, data) {"
+            },
+            {
+              "line": 257,
+              "count": 1,
+              "content": "promises.push(syncToRealtimeDB(`locations/${uid}`, {"
+            },
+            {
+              "line": 281,
+              "count": 1,
+              "content": "promises.push(syncToRealtimeDB(`drivers/${uid}/status`, {"
+            }
+          ]
+        },
+        "routes/account-routes.js": {
+          "totalMatches": 2,
+          "matches": [
+            {
+              "line": 315,
+              "count": 1,
+              "content": "const db = admin.database();"
+            },
+            {
+              "line": 330,
+              "count": 1,
+              "content": "const db = admin.database();"
+            }
+          ]
+        },
+        "routes/dashboard.js": {
+          "totalMatches": 44,
+          "matches": [
+            {
+              "line": 367,
+              "count": 1,
+              "content": "const legacyDb = firebaseConfig?.getRealtimeDB ? firebaseConfig.getRealtimeDB() : null;"
+            },
+            {
+              "line": 438,
+              "count": 1,
+              "content": "const db = firebaseConfig.getRealtimeDB();"
+            },
+            {
+              "line": 736,
+              "count": 1,
+              "content": "const db = firebaseConfig.getRealtimeDB();"
+            },
+            {
+              "line": 901,
+              "count": 1,
+              "content": "const db = firebaseConfig.getRealtimeDB();"
+            },
+            {
+              "line": 1139,
+              "count": 1,
+              "content": "const db = firebaseConfig.getRealtimeDB();"
+            },
+            {
+              "line": 1271,
+              "count": 1,
+              "content": "const db = firebaseConfig.getRealtimeDB();"
+            },
+            {
+              "line": 1426,
+              "count": 1,
+              "content": "const db = firebaseConfig.getRealtimeDB();"
+            },
+            {
+              "line": 1553,
+              "count": 1,
+              "content": "const db = firebaseConfig.getRealtimeDB();"
+            },
+            {
+              "line": 1706,
+              "count": 1,
+              "content": "const db = firebaseConfig.getRealtimeDB();"
+            },
+            {
+              "line": 2118,
+              "count": 1,
+              "content": "const db = firebaseConfig.getRealtimeDB();"
+            },
+            {
+              "line": 2174,
+              "count": 1,
+              "content": "const db = firebaseConfig.getRealtimeDB();"
+            },
+            {
+              "line": 2233,
+              "count": 1,
+              "content": "const db = firebaseConfig.getRealtimeDB();"
+            },
+            {
+              "line": 2274,
+              "count": 1,
+              "content": "const db = firebaseConfig.getRealtimeDB();"
+            },
+            {
+              "line": 2353,
+              "count": 1,
+              "content": "const db = firebaseConfig.getRealtimeDB();"
+            },
+            {
+              "line": 2378,
+              "count": 1,
+              "content": "const db = firebaseConfig.getRealtimeDB();"
+            },
+            {
+              "line": 2450,
+              "count": 1,
+              "content": "const db = firebaseConfig.getRealtimeDB();"
+            },
+            {
+              "line": 2627,
+              "count": 1,
+              "content": "const db = firebaseConfig.getRealtimeDB();"
+            },
+            {
+              "line": 2701,
+              "count": 1,
+              "content": "const db = firebaseConfig.getRealtimeDB();"
+            },
+            {
+              "line": 2950,
+              "count": 1,
+              "content": "const db = firebaseConfig.getRealtimeDB();"
+            },
+            {
+              "line": 3066,
+              "count": 1,
+              "content": "const db = firebaseConfig.getRealtimeDB();"
+            },
+            {
+              "line": 3146,
+              "count": 1,
+              "content": "const db = firebaseConfig.getRealtimeDB();"
+            },
+            {
+              "line": 3795,
+              "count": 1,
+              "content": "const db = firebaseConfig.getRealtimeDB();"
+            },
+            {
+              "line": 3955,
+              "count": 1,
+              "content": "const db = firebaseConfig.getRealtimeDB();"
+            },
+            {
+              "line": 4038,
+              "count": 1,
+              "content": "const db = firebaseConfig.getRealtimeDB();"
+            },
+            {
+              "line": 4112,
+              "count": 1,
+              "content": "const db = firebaseConfig.getRealtimeDB();"
+            },
+            {
+              "line": 4267,
+              "count": 1,
+              "content": "const db = firebaseConfig.getRealtimeDB();"
+            },
+            {
+              "line": 4453,
+              "count": 1,
+              "content": "const db = firebaseConfig.getRealtimeDB();"
+            },
+            {
+              "line": 4550,
+              "count": 1,
+              "content": "const db = firebaseConfig.getRealtimeDB();"
+            },
+            {
+              "line": 4618,
+              "count": 1,
+              "content": "const db = firebaseConfig.getRealtimeDB();"
+            },
+            {
+              "line": 4847,
+              "count": 1,
+              "content": "const db = firebaseConfig.getRealtimeDB();"
+            },
+            {
+              "line": 5031,
+              "count": 1,
+              "content": "const db = firebaseConfig.getRealtimeDB();"
+            },
+            {
+              "line": 5394,
+              "count": 1,
+              "content": "const db = firebaseConfig.getRealtimeDB();"
+            },
+            {
+              "line": 5590,
+              "count": 1,
+              "content": "const db = firebaseConfig.getRealtimeDB();"
+            },
+            {
+              "line": 5845,
+              "count": 1,
+              "content": "const db = firebaseConfig.getRealtimeDB();"
+            },
+            {
+              "line": 5957,
+              "count": 1,
+              "content": "const db = firebaseConfig.getRealtimeDB();"
+            },
+            {
+              "line": 6016,
+              "count": 1,
+              "content": "const db = firebaseConfig.getRealtimeDB();"
+            },
+            {
+              "line": 6621,
+              "count": 1,
+              "content": "const db = firebaseConfig.getRealtimeDB();"
+            },
+            {
+              "line": 6867,
+              "count": 1,
+              "content": "const db = firebaseConfig.getRealtimeDB();"
+            },
+            {
+              "line": 7094,
+              "count": 1,
+              "content": "const db = firebaseConfig.getRealtimeDB();"
+            },
+            {
+              "line": 7143,
+              "count": 1,
+              "content": "const db = firebaseConfig.getRealtimeDB();"
+            },
+            {
+              "line": 7275,
+              "count": 1,
+              "content": "const db = firebaseConfig.getRealtimeDB();"
+            },
+            {
+              "line": 7319,
+              "count": 1,
+              "content": "const db = firebaseConfig.getRealtimeDB();"
+            },
+            {
+              "line": 7362,
+              "count": 1,
+              "content": "const db = firebaseConfig.getRealtimeDB();"
+            },
+            {
+              "line": 7407,
+              "count": 1,
+              "content": "const db = firebaseConfig.getRealtimeDB();"
+            }
+          ]
+        },
+        "routes/drivers.js": {
+          "totalMatches": 6,
+          "matches": [
+            {
+              "line": 37,
+              "count": 1,
+              "content": "const db = firebaseConfig.getRealtimeDB();"
+            },
+            {
+              "line": 206,
+              "count": 1,
+              "content": "const db = firebaseConfig.getRealtimeDB();"
+            },
+            {
+              "line": 279,
+              "count": 1,
+              "content": "const db = firebaseConfig.getRealtimeDB();"
+            },
+            {
+              "line": 355,
+              "count": 1,
+              "content": "const db = firebaseConfig.getRealtimeDB();"
+            },
+            {
+              "line": 606,
+              "count": 1,
+              "content": "const db = firebaseConfig.getRealtimeDB();"
+            },
+            {
+              "line": 720,
+              "count": 1,
+              "content": "const db = firebaseConfig.getRealtimeDB();"
+            }
+          ]
+        },
+        "routes/geofence-routes.js": {
+          "totalMatches": 6,
+          "matches": [
+            {
+              "line": 41,
+              "count": 1,
+              "content": "function getRealtimeDB() {"
+            },
+            {
+              "line": 45,
+              "count": 1,
+              "content": "return firebaseConfig.getRealtimeDB();"
+            },
+            {
+              "line": 274,
+              "count": 1,
+              "content": "const db = getRealtimeDB();"
+            },
+            {
+              "line": 305,
+              "count": 1,
+              "content": "const db = getRealtimeDB();"
+            },
+            {
+              "line": 314,
+              "count": 1,
+              "content": "const db = getRealtimeDB();"
+            },
+            {
+              "line": 348,
+              "count": 1,
+              "content": "const db = getRealtimeDB();"
+            }
+          ]
+        },
+        "routes/metrics.js": {
+          "totalMatches": 8,
+          "matches": [
+            {
+              "line": 126,
+              "count": 1,
+              "content": "const db = firebaseConfig.getRealtimeDB();"
+            },
+            {
+              "line": 218,
+              "count": 1,
+              "content": "const db = firebaseConfig.getRealtimeDB();"
+            },
+            {
+              "line": 317,
+              "count": 1,
+              "content": "const db = firebaseConfig.getRealtimeDB();"
+            },
+            {
+              "line": 418,
+              "count": 1,
+              "content": "const db = firebaseConfig.getRealtimeDB();"
+            },
+            {
+              "line": 499,
+              "count": 1,
+              "content": "const db = firebaseConfig.getRealtimeDB();"
+            },
+            {
+              "line": 596,
+              "count": 1,
+              "content": "const db = firebaseConfig.getRealtimeDB();"
+            },
+            {
+              "line": 720,
+              "count": 1,
+              "content": "const db = firebaseConfig.getRealtimeDB();"
+            },
+            {
+              "line": 1196,
+              "count": 1,
+              "content": "const db = firebaseConfig.getRealtimeDB();"
+            }
+          ]
+        },
+        "routes/referral-programs.js": {
+          "totalMatches": 3,
+          "matches": [
+            {
+              "line": 27,
+              "count": 1,
+              "content": "function getRealtimeDB() {"
+            },
+            {
+              "line": 31,
+              "count": 1,
+              "content": "return firebaseConfig.getRealtimeDB();"
+            },
+            {
+              "line": 244,
+              "count": 1,
+              "content": "const db = getRealtimeDB();"
+            }
+          ]
+        },
+        "server.js": {
+          "totalMatches": 1,
+          "matches": [
+            {
+              "line": 570,
+              "count": 1,
+              "content": "const db = firebaseConfig.getRealtimeDB();"
+            }
+          ]
+        },
+        "services/city-activation-state-service.js": {
+          "totalMatches": 1,
+          "matches": [
+            {
+              "line": 23,
+              "count": 1,
+              "content": "this.legacyDb = firebaseConfig.getRealtimeDB();"
+            }
+          ]
+        },
+        "services/daily-subscription-service.js": {
+          "totalMatches": 3,
+          "matches": [
+            {
+              "line": 359,
+              "count": 1,
+              "content": "const db = firebaseConfig.getRealtimeDB();"
+            },
+            {
+              "line": 369,
+              "count": 1,
+              "content": "const db = options.db || firebaseConfig.getRealtimeDB();"
+            },
+            {
+              "line": 519,
+              "count": 1,
+              "content": "const db = firebaseConfig.getRealtimeDB();"
+            }
+          ]
+        },
+        "services/driver-application-service.js": {
+          "totalMatches": 1,
+          "matches": [
+            {
+              "line": 18,
+              "count": 1,
+              "content": "const db = firebaseConfig?.getRealtimeDB ? firebaseConfig.getRealtimeDB() : null;"
+            }
+          ]
+        },
+        "services/driver-subscription-service.js": {
+          "totalMatches": 4,
+          "matches": [
+            {
+              "line": 20,
+              "count": 1,
+              "content": "function getRealtimeDB() {"
+            },
+            {
+              "line": 21,
+              "count": 1,
+              "content": "if (firebaseConfig?.getRealtimeDB) return firebaseConfig.getRealtimeDB();"
+            },
+            {
+              "line": 149,
+              "count": 1,
+              "content": "const realtimeDb = db || getRealtimeDB();"
+            },
+            {
+              "line": 178,
+              "count": 1,
+              "content": "const realtimeDb = db || getRealtimeDB();"
+            }
+          ]
+        },
+        "services/firebase-storage-service.js": {
+          "totalMatches": 1,
+          "matches": [
+            {
+              "line": 129,
+              "count": 1,
+              "content": "const db = getRealtimeDB();"
+            }
+          ]
+        },
+        "services/health-check-service.js": {
+          "totalMatches": 1,
+          "matches": [
+            {
+              "line": 346,
+              "count": 1,
+              "content": "const realtimeDB = firebaseConfig.getRealtimeDB();"
+            }
+          ]
+        },
+        "services/promotion-service.js": {
+          "totalMatches": 1,
+          "matches": [
+            {
+              "line": 122,
+              "count": 1,
+              "content": "this.legacyDb = firebaseConfig.getRealtimeDB();"
+            }
+          ]
+        },
+        "services/rating-service.js": {
+          "totalMatches": 1,
+          "matches": [
+            {
+              "line": 32,
+              "count": 1,
+              "content": "this._db = firebaseConfig.getRealtimeDB();"
+            }
+          ]
+        },
+        "services/referral-program-state-service.js": {
+          "totalMatches": 1,
+          "matches": [
+            {
+              "line": 110,
+              "count": 1,
+              "content": "this.legacyDb = firebaseConfig.getRealtimeDB();"
+            }
+          ]
+        },
+        "services/subscription-state-service.js": {
+          "totalMatches": 7,
+          "matches": [
+            {
+              "line": 27,
+              "count": 1,
+              "content": "getRealtimeDB() {"
+            },
+            {
+              "line": 28,
+              "count": 1,
+              "content": "return firebaseConfig?.getRealtimeDB?.() || (admin.apps.length > 0 ? admin.database() : null);"
+            },
+            {
+              "line": 121,
+              "count": 1,
+              "content": "const realtimeDb = db || this.getRealtimeDB();"
+            },
+            {
+              "line": 142,
+              "count": 1,
+              "content": "const realtimeDb = db || this.getRealtimeDB();"
+            },
+            {
+              "line": 193,
+              "count": 1,
+              "content": "const realtimeDb = db || this.getRealtimeDB();"
+            },
+            {
+              "line": 221,
+              "count": 1,
+              "content": "const realtimeDb = db || this.getRealtimeDB();"
+            },
+            {
+              "line": 278,
+              "count": 1,
+              "content": "const realtimeDb = db || this.getRealtimeDB();"
+            }
+          ]
+        },
+        "services/support-ticket-service.js": {
+          "totalMatches": 1,
+          "matches": [
+            {
+              "line": 22,
+              "count": 1,
+              "content": "return firebaseConfig?.getRealtimeDB ? firebaseConfig.getRealtimeDB() : null;"
+            }
+          ]
+        }
+      }
+    },
+    "legacy_routes": {
+      "description": "Rotas HTTP explicitamente legadas",
+      "totalMatches": 4,
+      "files": {
+        "routes/dashboard.js": {
+          "totalMatches": 4,
+          "matches": [
+            {
+              "line": 4245,
+              "count": 1,
+              "content": "router.get('/api/legacy/promotions', async (req, res) => {"
+            },
+            {
+              "line": 4419,
+              "count": 1,
+              "content": "router.post('/api/legacy/promotions', async (req, res) => {"
+            },
+            {
+              "line": 4530,
+              "count": 1,
+              "content": "router.patch('/api/legacy/promotions/:promoId', async (req, res) => {"
+            },
+            {
+              "line": 4599,
+              "count": 1,
+              "content": "router.get('/api/legacy/promotions/analytics', async (req, res) => {"
+            }
+          ]
+        }
+      }
+    },
+    "legacy_fallback_logs": {
+      "description": "Logs e mensagens de fallback legado",
+      "totalMatches": 22,
+      "files": {
+        "routes/account-routes.js": {
+          "totalMatches": 1,
+          "matches": [
+            {
+              "line": 375,
+              "count": 1,
+              "content": "source: 'rtdb_migrated'"
+            }
+          ]
+        },
+        "routes/dashboard.js": {
+          "totalMatches": 2,
+          "matches": [
+            {
+              "line": 2102,
+              "count": 1,
+              "content": "logStructured('warn', 'Fallback RTDB em /api/rides/stats', {"
+            },
+            {
+              "line": 3785,
+              "count": 1,
+              "content": "logStructured('warn', 'Fallback RTDB em /api/subscriptions/drivers', {"
+            }
+          ]
+        },
+        "routes/metrics.js": {
+          "totalMatches": 5,
+          "matches": [
+            {
+              "line": 108,
+              "count": 1,
+              "content": "logStructured('warn', 'Fallback RTDB em /api/metrics/rides/daily', {"
+            },
+            {
+              "line": 193,
+              "count": 1,
+              "content": "logStructured('warn', 'Fallback RTDB em /api/metrics/users/status', {"
+            },
+            {
+              "line": 297,
+              "count": 1,
+              "content": "logStructured('warn', 'Fallback RTDB em /api/metrics/financial/rides', {"
+            },
+            {
+              "line": 399,
+              "count": 1,
+              "content": "logStructured('warn', 'Fallback RTDB em /api/metrics/financial/operational-fee', {"
+            },
+            {
+              "line": 703,
+              "count": 1,
+              "content": "logStructured('warn', 'Fallback RTDB em /api/metrics/subscriptions/active', {"
+            }
+          ]
+        },
+        "services/city-activation-state-service.js": {
+          "totalMatches": 1,
+          "matches": [
+            {
+              "line": 65,
+              "count": 1,
+              "content": "source: 'legacy_rtdb_import',"
+            }
+          ]
+        },
+        "services/driver-application-service.js": {
+          "totalMatches": 1,
+          "matches": [
+            {
+              "line": 480,
+              "count": 1,
+              "content": "source: 'rtdb_mirror',"
+            }
+          ]
+        },
+        "services/driver-subscription-service.js": {
+          "totalMatches": 1,
+          "matches": [
+            {
+              "line": 143,
+              "count": 1,
+              "content": "source: 'rtdb_mirror',"
+            }
+          ]
+        },
+        "services/promotion-service.js": {
+          "totalMatches": 4,
+          "matches": [
+            {
+              "line": 234,
+              "count": 1,
+              "content": "source: 'rtdb_import'"
+            },
+            {
+              "line": 250,
+              "count": 1,
+              "content": "source: 'rtdb_import'"
+            },
+            {
+              "line": 278,
+              "count": 1,
+              "content": "source: 'rtdb_import'"
+            },
+            {
+              "line": 302,
+              "count": 1,
+              "content": "source: 'rtdb_import'"
+            }
+          ]
+        },
+        "services/referral-program-state-service.js": {
+          "totalMatches": 5,
+          "matches": [
+            {
+              "line": 278,
+              "count": 1,
+              "content": "source: existing ? 'rtdb_import' : 'firestore'"
+            },
+            {
+              "line": 315,
+              "count": 1,
+              "content": "source: 'rtdb_import'"
+            },
+            {
+              "line": 355,
+              "count": 1,
+              "content": "source: 'rtdb_import'"
+            },
+            {
+              "line": 400,
+              "count": 1,
+              "content": "source: 'rtdb_import'"
+            },
+            {
+              "line": 440,
+              "count": 1,
+              "content": "source: 'rtdb_import'"
+            }
+          ]
+        },
+        "services/support-ticket-service.js": {
+          "totalMatches": 2,
+          "matches": [
+            {
+              "line": 166,
+              "count": 1,
+              "content": "const ticket = normalizeTicket(ticketId, { ...rawTicket, source: 'rtdb_migrated' });"
+            },
+            {
+              "line": 217,
+              "count": 1,
+              "content": "normalizeTicket(ticketId, { ...value, source: 'rtdb_migrated' })"
+            }
+          ]
+        }
+      }
+    }
+  },
+  "topFiles": [
+    {
+      "file": "routes/dashboard.js",
+      "totalMatches": 54
+    },
+    {
+      "file": "routes/metrics.js",
+      "totalMatches": 13
+    },
+    {
+      "file": "services/referral-program-state-service.js",
+      "totalMatches": 12
+    },
+    {
+      "file": "services/promotion-service.js",
+      "totalMatches": 11
+    },
+    {
+      "file": "server.vps.js",
+      "totalMatches": 9
+    },
+    {
+      "file": "services/support-ticket-service.js",
+      "totalMatches": 9
+    },
+    {
+      "file": "routes/account-routes.js",
+      "totalMatches": 7
+    },
+    {
+      "file": "server.js",
+      "totalMatches": 7
+    },
+    {
+      "file": "services/subscription-state-service.js",
+      "totalMatches": 7
+    },
+    {
+      "file": "firebase-config.js",
+      "totalMatches": 6
+    },
+    {
+      "file": "routes/drivers.js",
+      "totalMatches": 6
+    },
+    {
+      "file": "routes/geofence-routes.js",
+      "totalMatches": 6
+    },
+    {
+      "file": "services/driver-subscription-service.js",
+      "totalMatches": 5
+    },
+    {
+      "file": "bootstrap/register-socket-update-location-handler.js",
+      "totalMatches": 3
+    },
+    {
+      "file": "routes/referral-programs.js",
+      "totalMatches": 3
+    },
+    {
+      "file": "services/daily-subscription-service.js",
+      "totalMatches": 3
+    },
+    {
+      "file": "services/city-activation-state-service.js",
+      "totalMatches": 2
+    },
+    {
+      "file": "services/driver-application-service.js",
+      "totalMatches": 2
+    },
+    {
+      "file": "bootstrap/register-runtime-endpoints.js",
+      "totalMatches": 1
+    },
+    {
+      "file": "bootstrap/register-socket-legacy-bridge-handler.js",
+      "totalMatches": 1
+    },
+    {
+      "file": "bootstrap/register-socket-search-drivers-handler.js",
+      "totalMatches": 1
+    },
+    {
+      "file": "routes/woovi.js",
+      "totalMatches": 1
+    },
+    {
+      "file": "services/firebase-storage-service.js",
+      "totalMatches": 1
+    },
+    {
+      "file": "services/health-check-service.js",
+      "totalMatches": 1
+    },
+    {
+      "file": "services/rating-service.js",
+      "totalMatches": 1
+    }
+  ]
+}
