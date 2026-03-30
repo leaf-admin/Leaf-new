@@ -359,6 +359,23 @@ Resultado acumulado desta wave:
   - esse ajuste completa melhor o corte que já tínhamos feito na `waitlist`
   - seguimos convertendo serviços satélites para a borda centralizada do Firebase antes de entrar nos hotspots pesados
 
+## Corte incremental no firebase-storage-service
+- `leaf-websocket-backend/services/firebase-storage-service.js` deixou de usar `getRealtimeDB()` no fallback da CNH
+- comportamento novo:
+  - o fallback legado passou a usar `getFromRealtimeDB('users/{userId}/documents/cnh')`
+  - e, se necessário, `getFromRealtimeDB('users/{userId}')`
+- teste novo:
+  - `tests/unit/services/firebase-storage-service.unit.test.js`
+- validação:
+  - `node --check` do serviço e do teste: `OK`
+  - Jest: `1/1` teste passando
+- impacto medido no auditor:
+  - relatório anterior: `legacy-runtime-surface-1774878452085.md` com `96`
+  - relatório novo: `legacy-runtime-surface-1774878548474.md` com `95`
+- leitura operacional:
+  - o fallback de documentos agora também passa pela borda centralizada do Firebase
+  - com isso, os ganhos restantes do macro plano estão cada vez mais concentrados nos arquivos grandes/mistos do runtime
+
 ## Riscos que continuam abertos
 - `server.vps.js`, `routes/dashboard.js` e `register-socket-create-booking-handler.js` continuam mistos com trabalho paralelo
 - baseline agora possui worker dedicado, mas ainda nao foi validado em Redis real local nesta maquina
