@@ -570,14 +570,12 @@ function registerSocketLegacyBridgeHandler({
                 return;
             }
 
-            const db = firebaseConfig.getRealtimeDB();
-            if (!db) {
+            if (!firebaseConfig || typeof firebaseConfig.getFromRealtimeDB !== 'function') {
                 socket.emit('user_promos_loaded', { success: true, promos: [] });
                 return;
             }
 
-            const snapshot = await db.ref(`driver_promotions/${userId}`).once('value');
-            const raw = snapshot.val() || {};
+            const raw = await firebaseConfig.getFromRealtimeDB(`driver_promotions/${userId}`) || {};
             const promos = Object.values(raw).sort((a, b) => {
                 return new Date(b.redeemedAt || 0).getTime() - new Date(a.redeemedAt || 0).getTime();
             });

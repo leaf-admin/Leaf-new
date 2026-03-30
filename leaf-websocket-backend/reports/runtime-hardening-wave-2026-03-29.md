@@ -434,7 +434,7 @@ Resultado acumulado desta wave:
   - `node --check` do arquivo: `OK`
 - impacto medido no auditor:
   - relatório anterior: `legacy-runtime-surface-1774878950410.md` com `89`
-  - relatório novo: `legacy-runtime-surface-1774879352439.md` com `83`
+  - relatório exploratório: `legacy-runtime-surface-1774879352439.md` com `83`
   - `routes/drivers.js` caiu de `6` para `2` matches na categoria `rtdb_access`
 - impacto medido no auditor de hotspots mistos:
   - relatório novo: `mixed-legacy-hotspots-1774879400815.md`
@@ -443,6 +443,31 @@ Resultado acumulado desta wave:
 - leitura operacional:
   - esta wave mostrou que ainda dá para reduzir legado dentro de arquivos sujos sem atropelar os blocos paralelos, desde que a área do diff esteja fora da zona já em disputa
   - os maiores ganhos restantes agora se concentram cada vez mais em `routes/dashboard.js`, `routes/metrics.js`, `server.js` e `server.vps.js`
+
+## Correção de baseline após probe revertido
+- durante a medição exploratória de `drivers-routes`, houve um probe temporário em `routes/account-routes.js` que também reduzia `rtdb_access` no worktree, mas esse probe foi revertido antes de qualquer commit
+- leitura correta para o ganho permanente:
+  - `routes/drivers.js`: `6 -> 2`
+  - baseline global consolidado após o corte real de `drivers-routes`: `89 -> 85`
+- isso preserva o histórico honesto: o commit de `drivers-routes` continua válido, mas a queda para `83` deve ser lida como medição exploratória, não como baseline final persistente
+
+## Corte cirúrgico em arquivo misto: legacy socket promo bridge
+- `leaf-websocket-backend/bootstrap/register-socket-legacy-bridge-handler.js` tinha um acesso direto restante em `driver_promotions/{userId}`
+- comportamento novo:
+  - o evento `get_user_promos` passou a usar `firebaseConfig.getFromRealtimeDB(...)`
+  - o bridge deixou de abrir a instância do RTDB diretamente nesse fluxo
+- validação:
+  - `node --check` do arquivo: `OK`
+- impacto medido no auditor:
+  - relatório anterior consolidado: `legacy-runtime-surface-1774879526649.md` com `84`
+  - `bootstrap/register-socket-legacy-bridge-handler.js` saiu da categoria `rtdb_access`
+- impacto medido no auditor de hotspots mistos:
+  - relatório novo: `mixed-legacy-hotspots-1774879546110.md`
+  - `dirtyHotspots: 15`
+  - `cleanHotspots: 6`
+- leitura operacional:
+  - o bridge legadão continua existindo, mas já com uma borda de leitura menos espalhada
+  - a próxima fronteira difícil agora está cada vez mais concentrada em `dashboard.js`, `metrics.js`, `server.js` e `server.vps.js`
 
 ## Riscos que continuam abertos
 - `server.vps.js`, `routes/dashboard.js` e `register-socket-create-booking-handler.js` continuam mistos com trabalho paralelo
