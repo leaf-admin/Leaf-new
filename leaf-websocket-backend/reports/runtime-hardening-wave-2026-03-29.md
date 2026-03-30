@@ -325,6 +325,23 @@ Resultado acumulado desta wave:
   - esse corte confirma que serviços de domínio que ainda dependiam de `db.ref(...)` podem migrar para helpers sem perda de comportamento
   - seguimos reduzindo a superfície legada antes de entrar em arquivos mais arriscados como `routes/metrics.js` e `routes/dashboard.js`
 
+## Corte incremental no health-check-service
+- `leaf-websocket-backend/services/health-check-service.js` deixou de consultar a instância do RTDB diretamente no `checkFirebase()`
+- comportamento novo:
+  - o health check do Realtime Database passou a usar `firebaseConfig.getFromRealtimeDB('.info/connected')`
+  - isso preserva a verificação funcional de leitura sem espalhar `getRealtimeDB()` pelo domínio
+- teste novo:
+  - `tests/unit/services/health-check-service.unit.test.js`
+- validação:
+  - `node --check` do serviço e do teste: `OK`
+  - Jest: `1/1` teste passando
+- impacto medido no auditor:
+  - relatório anterior: `legacy-runtime-surface-1774878173433.md` com `98`
+  - relatório novo: `legacy-runtime-surface-1774878322854.md` com `97`
+- leitura operacional:
+  - essa foi uma redução pequena, mas útil para manter a trilha do legado consistente também nos serviços de observabilidade
+  - os próximos ganhos mais relevantes agora estão concentrados nos hotspots grandes ou em arquivos atualmente mistos
+
 ## Riscos que continuam abertos
 - `server.vps.js`, `routes/dashboard.js` e `register-socket-create-booking-handler.js` continuam mistos com trabalho paralelo
 - baseline agora possui worker dedicado, mas ainda nao foi validado em Redis real local nesta maquina

@@ -343,7 +343,7 @@ class HealthCheckService {
   async checkFirebase() {
     try {
       const firestore = firebaseConfig.getFirestore();
-      const realtimeDB = firebaseConfig.getRealtimeDB();
+      const canReadRealtime = typeof firebaseConfig.getFromRealtimeDB === 'function';
 
       const results = {
         firestore: { status: 'unavailable', message: 'Firestore não inicializado' },
@@ -372,10 +372,10 @@ class HealthCheckService {
       }
 
       // Check Realtime DB
-      if (realtimeDB) {
+      if (canReadRealtime) {
         try {
           const startTime = Date.now();
-          await realtimeDB.ref('.info/connected').once('value');
+          await firebaseConfig.getFromRealtimeDB('.info/connected');
           const responseTime = Date.now() - startTime;
           results.realtimeDB = {
             status: responseTime > 500 ? 'warning' : 'healthy',
