@@ -1,31 +1,33 @@
 const { logStructured } = require('../utils/logger');
+const { PRICING_CONSTANTS } = require('./pricing/calculateFare');
+const { runDynamicPricingEngine } = require('./pricing');
+const pricingContextProvider = require('./pricing-context-provider');
 
 const RATE_CARDS = {
   leaf_plus: {
-    minFare: 8.5,
-    baseFare: 2.79,
-    fixedFee: 1.1,
-    ratePerHour: 15.6,
-    ratePerKm: 1.53
+    minFare: PRICING_CONSTANTS.valor_minimo,
+    baseFare: PRICING_CONSTANTS.preco_base,
+    fixedFee: PRICING_CONSTANTS.taxa_fixa,
+    ratePerHour: PRICING_CONSTANTS.valor_min * 60,
+    ratePerKm: PRICING_CONSTANTS.valor_km
   },
   leaf_elite: {
-    minFare: 10.5,
-    baseFare: 4.98,
-    fixedFee: 1.8,
-    ratePerHour: 17.4,
-    ratePerKm: 2.41
+    minFare: PRICING_CONSTANTS.valor_minimo,
+    baseFare: PRICING_CONSTANTS.preco_base,
+    fixedFee: PRICING_CONSTANTS.taxa_fixa,
+    ratePerHour: PRICING_CONSTANTS.valor_min * 60,
+    ratePerKm: PRICING_CONSTANTS.valor_km
   },
   leaf_moto: {
-    minFare: 6.9,
-    baseFare: 2.18,
-    fixedFee: 0.86,
-    ratePerHour: 12.17,
-    ratePerKm: 1.19
+    minFare: PRICING_CONSTANTS.valor_minimo,
+    baseFare: PRICING_CONSTANTS.preco_base,
+    fixedFee: PRICING_CONSTANTS.taxa_fixa,
+    ratePerHour: PRICING_CONSTANTS.valor_min * 60,
+    ratePerKm: PRICING_CONSTANTS.valor_km
   }
 };
 
 const DEFAULT_CAR_TYPE = 'leaf_plus';
-const MAX_FARE = 10000;
 
 function toNumber(value, fallback = 0) {
   const parsed = Number(
@@ -109,27 +111,76 @@ function buildFallbackRouteMetrics({ pickupLocation, destinationLocation }) {
   };
 }
 
-function calculateFareWithRateCard({ distanceKm, durationSecs, tollFee, rateCard }) {
-  const distanceFare = distanceKm * rateCard.ratePerKm;
-  const timeFare = (durationSecs / 3600) * rateCard.ratePerHour;
-  const subtotal = rateCard.baseFare + rateCard.fixedFee + distanceFare + timeFare;
-  const clampedSubtotal = Math.max(rateCard.minFare, subtotal);
-  const total = clampedSubtotal + Math.max(0, tollFee);
-  return roundCurrency(Math.min(MAX_FARE, total));
+function normalizePricingContext(pricingContext = {}, effectiveDurationSecs = 0) {
+  const operational = pricingContext.operational || pricingContext || {};
+  const current = operational.current || {};
+  const etaPickupMin = pricingContext.trip?.eta_pickup_min
+    ?? pricingContext.eta_pickup_min
+    ?? current.avg_pickup_eta_min
+    ?? 0;
+
+  return {
+    trip: {
+      distance_km: pricingContext.trip?.distance_km,
+      duration_min_traffic: pricingContext.trip?.duration_min_traffic,
+      eta_pickup_min: toNumber(etaPickupMin, 0)
+    },
+    operational: {
+      current: {
+        active_requests_5m: toNumber(current.active_requests_5m, 0),
+        idle_drivers: toNumber(current.idle_drivers, 0),
+        avg_pickup_eta_min: toNumber(current.avg_pickup_eta_min, toNumber(etaPickupMin, 0)),
+        trip_time_inflation: toNumber(current.trip_time_inflation, 1),
+        cancel_rate: toNumber(current.cancel_rate, 0),
+        accept_rate: current.accept_rate === undefined ? 1 : toNumber(current.accept_rate, 1),
+        avg_speed_kmh: toNumber(current.avg_speed_kmh, 0)
+      },
+      baseline: {
+        expected_requests_5m: toNumber(operational.baseline?.expected_requests_5m, NaN),
+        expected_idle_drivers: toNumber(operational.baseline?.expected_idle_drivers, NaN),
+        expected_pickup_eta_min: toNumber(operational.baseline?.expected_pickup_eta_min, NaN),
+        expected_speed_kmh: toNumber(operational.baseline?.expected_speed_kmh, NaN),
+        expected_cancel_rate: toNumber(operational.baseline?.expected_cancel_rate, NaN)
+      },
+      state_context: {
+        now: operational.state_context?.now || new Date().toISOString(),
+        previous_state: operational.state_context?.previous_state,
+        state_entered_at: operational.state_context?.state_entered_at || null,
+        state_exited_at: operational.state_context?.state_exited_at || null,
+        recent_exception_history: Array.isArray(operational.state_context?.recent_exception_history)
+          ? operational.state_context.recent_exception_history
+          : [],
+        degraded_neighbor_count: toNumber(operational.state_context?.degraded_neighbor_count, 0),
+        is_special_zone: operational.state_context?.is_special_zone === true,
+        zone_type: operational.state_context?.zone_type || null
+      }
+    },
+    effectiveDurationMin: Math.max(0, effectiveDurationSecs / 60)
+  };
 }
 
-function estimateRideFare({
+function sanitizeBaseline(baseline = {}) {
+  const sanitized = {};
+  Object.entries(baseline).forEach(([key, value]) => {
+    if (Number.isFinite(value)) {
+      sanitized[key] = value;
+    }
+  });
+  return sanitized;
+}
+
+async function estimateRideFare({
+  redis,
   pickupLocation,
   destinationLocation,
   carType,
   routeDistanceKm,
   routeDurationSecs,
   tollFee,
-  clientEstimatedFare
+  clientEstimatedFare,
+  pricingContext
 }) {
   const normalizedCarType = normalizeCarType(carType);
-  const rateCard = RATE_CARDS[normalizedCarType] || RATE_CARDS[DEFAULT_CAR_TYPE];
-
   const providedDistanceKm = toNumber(routeDistanceKm, 0);
   const providedDurationSecs = toNumber(routeDurationSecs, 0);
   const hasProvidedRouteMetrics = providedDistanceKm > 0 && providedDurationSecs > 0;
@@ -142,15 +193,35 @@ function estimateRideFare({
   const effectiveDistanceKm = hasProvidedRouteMetrics ? providedDistanceKm : fallbackMetrics.distanceKm;
   const effectiveDurationSecs = hasProvidedRouteMetrics ? providedDurationSecs : fallbackMetrics.durationSecs;
   const effectiveTollFee = toNumber(tollFee, 0);
-
-  const estimatedFare = calculateFareWithRateCard({
-    distanceKm: effectiveDistanceKm,
-    durationSecs: effectiveDurationSecs,
-    tollFee: effectiveTollFee,
-    rateCard
-  });
-
   const clientFare = toNumber(clientEstimatedFare, 0);
+  const derivedPricingContext = await pricingContextProvider.buildDerivedPricingContext({
+    redis,
+    pickupLocation,
+    destinationLocation,
+    routeDistanceKm: effectiveDistanceKm,
+    routeDurationSecs: effectiveDurationSecs,
+    explicitPricingContext: pricingContext
+  });
+  const normalizedPricingContext = normalizePricingContext(
+    derivedPricingContext.pricingContext,
+    effectiveDurationSecs
+  );
+
+  const engineResult = runDynamicPricingEngine({
+    trip: {
+      distance_km: effectiveDistanceKm,
+      duration_min_traffic: normalizedPricingContext.trip.duration_min_traffic || normalizedPricingContext.effectiveDurationMin,
+      eta_pickup_min: normalizedPricingContext.trip.eta_pickup_min
+    },
+    operational: {
+      current: normalizedPricingContext.operational.current,
+      baseline: sanitizeBaseline(normalizedPricingContext.operational.baseline),
+      state_context: normalizedPricingContext.operational.state_context
+    }
+  });
+  await pricingContextProvider.recordPricingEvaluation(derivedPricingContext.metadata, engineResult);
+
+  const estimatedFare = roundCurrency(engineResult.pricingPayload.final_price);
   const fareDiff = roundCurrency(Math.abs(clientFare - estimatedFare));
 
   if (clientFare > 0 && fareDiff >= 1) {
@@ -160,7 +231,8 @@ function estimateRideFare({
       clientFare,
       serverFare: estimatedFare,
       fareDiff,
-      routeMetricsSource: hasProvidedRouteMetrics ? 'client_route_metrics' : fallbackMetrics.source
+      routeMetricsSource: hasProvidedRouteMetrics ? 'client_route_metrics' : fallbackMetrics.source,
+      operationalState: engineResult.pricingPayload.operational_state
     });
   }
 
@@ -174,7 +246,18 @@ function estimateRideFare({
     },
     tollFee: roundCurrency(effectiveTollFee),
     clientFare: roundCurrency(clientFare),
-    fareDiff
+    fareDiff,
+    pricingPayload: engineResult.pricingPayload,
+    operationalState: engineResult.pricingPayload.operational_state,
+    scorePressao: engineResult.pricingPayload.score_pressao,
+    scoreExcecao: engineResult.pricingPayload.score_excecao,
+    exceptionalMode: engineResult.exceptionalMode,
+    pricingDebug: {
+      context: normalizedPricingContext,
+      pressure: engineResult.pressure,
+      exception: engineResult.exception,
+      state: engineResult.operationalState
+    }
   };
 }
 

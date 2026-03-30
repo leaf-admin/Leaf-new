@@ -45,6 +45,7 @@ const kycProxyRoutes = require('./routes/kyc-proxy-routes');
 const kycAnalyticsRoutes = require('./routes/kyc-analytics-routes');
 
 // Importar rotas Dashboard
+const pricingRoutes = require('./routes/pricing');
 const dashboardRoutes = require('./routes/dashboard');
 
 // Importar rotas de Métricas
@@ -851,6 +852,10 @@ try {
 
 // Rotas Dashboard
 app.use('/', dashboardRoutes);
+
+// Rotas de Pricing
+app.use('/api', pricingRoutes);
+logStructured('info', 'Rotas de Pricing registradas', { service: 'server' });
 logStructured('info', 'Rotas Dashboard registradas', { service: 'server' });
 
 // Rotas de Métricas
@@ -3439,6 +3444,7 @@ io.on('connection', async (socket) => {
                             routeDurationSecs: routeDurationSecs || 0,
                             tollFee: tollFee || 0,
                             carType: requestedCarType,
+                            pricingContext: data.pricingContext || data.operational || null,
                             paymentMethod: paymentMethod || 'pix',
                             traceId, // ✅ Passar traceId para o command
                             correlationId // ✅ Passar correlationId para o command
@@ -3789,6 +3795,10 @@ io.on('connection', async (socket) => {
                             bookingId,
                             customerId,
                             pickupLocation,
+                            pricingPayload: commandBookingData?.pricingPayload || null,
+                            operationalState: commandBookingData?.operationalState || null,
+                            scorePressao: commandBookingData?.scorePressao ?? null,
+                            scoreExcecao: commandBookingData?.scoreExcecao ?? null,
                             destinationLocation,
                             estimatedFare: commandBookingData?.estimatedFare || estimatedFare || 0,
                             paymentMethod,

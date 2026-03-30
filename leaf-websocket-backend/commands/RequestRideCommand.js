@@ -39,6 +39,7 @@ class RequestRideCommand extends Command {
         this.tollFee = data.tollFee || 0;
         this.carType = data.carType || null;
         this.paymentMethod = data.paymentMethod || 'pix';
+        this.pricingContext = data.pricingContext || data.operational || null;
         // ✅ VALIDAÇÃO: Garantir traceId válido
         this.traceId = validateAndEnsureTraceIdInCommand(data, 'RequestRide');
         this.correlationId = data.correlationId || null; // ✅ Adicionar correlationId
@@ -112,14 +113,16 @@ class RequestRideCommand extends Command {
                 );
 
                 // Tarifa server-authoritative para evitar divergência de cálculo no cliente.
-                const fareEstimation = fareEstimationService.estimateRideFare({
+                const fareEstimation = await fareEstimationService.estimateRideFare({
+                    redis,
                     pickupLocation: this.pickupLocation,
                     destinationLocation: this.destinationLocation,
                     carType: this.carType,
                     routeDistanceKm: this.routeDistanceKm,
                     routeDurationSecs: this.routeDurationSecs,
                     tollFee: this.tollFee,
-                    clientEstimatedFare: this.estimatedFare
+                    clientEstimatedFare: this.estimatedFare,
+                    pricingContext: this.pricingContext
                 });
 
                 // Criar dados da corrida
@@ -133,6 +136,10 @@ class RequestRideCommand extends Command {
                     routeDurationSecs: fareEstimation.routeMetrics.durationSecs,
                     tollFee: fareEstimation.tollFee,
                     fareSource: fareEstimation.routeMetrics.source,
+                    pricingPayload: fareEstimation.pricingPayload,
+                    operationalState: fareEstimation.operationalState,
+                    scorePressao: fareEstimation.scorePressao,
+                    scoreExcecao: fareEstimation.scoreExcecao,
                     carType: this.carType,
                     paymentMethod: this.paymentMethod,
                     regionHash

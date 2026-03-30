@@ -20,6 +20,7 @@ function registerHttpRoutes({ app, logStructured, io = null }) {
 
     // Importar rotas Dashboard
     const dashboardRoutes = require('../routes/dashboard');
+    const pricingRoutes = require('../routes/pricing');
 
     // Importar rotas de Métricas
     const metricsRoutes = require('../routes/metrics');
@@ -32,6 +33,7 @@ function registerHttpRoutes({ app, logStructured, io = null }) {
 
     // Importar rotas de drivers
     const driversRoutes = require('../routes/drivers');
+    const driverActivationRoutes = require('../routes/driver-activation');
 
     // Importar rotas de Notificações
     const notificationsRoutes = require('../routes/notifications');
@@ -119,6 +121,10 @@ function registerHttpRoutes({ app, logStructured, io = null }) {
     app.use('/', dashboardRoutes);
     logStructured('info', 'Rotas Dashboard registradas', { service: 'server' });
 
+    // Rotas de Pricing
+    app.use('/api', pricingRoutes);
+    logStructured('info', 'Rotas de Pricing registradas', { service: 'server' });
+
     // Rotas de Métricas
     app.use('/', metricsRoutes);
     logStructured('info', 'Rotas de Métricas registradas', { service: 'server' });
@@ -138,7 +144,9 @@ function registerHttpRoutes({ app, logStructured, io = null }) {
 
     // Rotas de drivers (inclui /api/drivers/nearby)
     app.use('/', driversRoutes);
+    app.use('/', driverActivationRoutes);
     logStructured('info', 'Rotas de Drivers registradas', { service: 'server' });
+    logStructured('info', 'Rotas de Ativação de Motorista registradas', { service: 'server' });
     logStructured('info', 'Rotas de verificação de status do driver registradas', { service: 'server' });
 
     // Rotas de Conta (Account Management)

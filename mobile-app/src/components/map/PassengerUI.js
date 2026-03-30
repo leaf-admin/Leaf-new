@@ -22,36 +22,45 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import BottomSheet, { BottomSheetView, BottomSheetBackdrop } from '@gorhom/bottom-sheet';
 import { useSelector, useDispatch, shallowEqual } from 'react-redux';
-import { api } from '../../common-local';
-import { fonts } from "../../common-local/font";
+import { fonts, colors as semanticColors } from '../../theme/runtimeTokens';
 // import { useTranslation } from 'react-i18next';
 import polyline from '@mapbox/polyline';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
     prepareEstimateObject,
 } from '../../common/sharedFunctions';
-import { tollData } from '../../common-local/actions/estimateactions';
-import { calcularPedagiosPorPolyline } from '../../common-local/other/TollUtils';
-import { fetchPlacesAutocomplete, fetchCoordsfromPlace, getDirectionsApi, detectInputType, fetchGeocodeAddress } from '../../common-local/GoogleAPIFunctions';
+import {
+    tollData,
+    fetchPlacesAutocomplete,
+    fetchCoordsfromPlace,
+    getDirectionsApi,
+    detectInputType,
+    fetchGeocodeAddress,
+    fetchNearbyDrivers,
+    updateTripPickup,
+    updateTripDrop,
+    updateTripCar,
+    getEstimate,
+    clearEstimate,
+    setEstimate,
+    addBooking,
+    saveAddresses
+} from '../../services/runtime/passengerMapBridge';
+import { calcularPedagiosPorPolyline, GetDistance } from '../../services/runtime/mapGeoService';
 import TripDataService from '../../services/TripDataService';
-import { GetDistance } from '../../common-local/other/GeoFunctions';
-import { fetchNearbyDrivers } from '../../common-local/usersactions';
-import { updateTripPickup, updateTripDrop, updateTripCar } from '../../common-local/actions/tripactions';
 import { MAIN_COLOR } from '../../common/sharedFunctions';
 import WebSocketManager from '../../services/WebSocketManager';
 import PersistentRideNotificationService from '../../services/PersistentRideNotificationService';
 import RideLocationManager from '../../services/RideLocationManager';
 import PriceCard from './PriceCard';
 import WooviPaymentModal from '../payment/WooviPaymentModal';
-import { getEstimate, clearEstimate, setEstimate } from '../../common-local/actions/estimateactions';
-import { addBooking } from '../../common-local/actions/bookingactions';
 // import { useLocationIntelligence } from '../../hooks/useLocationIntelligence';
 import PaymentBypassService from '../../services/PaymentBypassService';
 import RatingModal from '../common/RatingModal';
 import DriverAvailabilityService from '../../services/DriverAvailabilityService';
+import { fetchDynamicPricingQuote } from '../../services/runtime/pricingQuoteService';
 import { AnimatedButton } from '../design-system/AnimatedButton';
 import { Typography } from '../design-system/Typography';
-import { colors as semanticColors } from '../../common-local/theme';
 import { getSelfHostedApiUrl } from '../../config/ApiConfig';
 import { toUserFriendlyMessage } from '../../utils/friendlyErrorMessages';
 
@@ -947,6 +956,7 @@ function PassengerUI(props) {
     // ✅ REF para evitar múltiplas execuções simultâneas
     const isCalculatingRef = useRef(false);
     const lastCalculationRef = useRef({ pickup: null, drop: null });
+    const pricingQuoteVersionRef = useRef(0);
 
     // ✅ DEFINIR fixedCarTypes ANTES de usar nos useEffects
     const fixedCarTypes = useMemo(() => [
@@ -1116,6 +1126,117 @@ function PassengerUI(props) {
             isFallbackEstimate: true
         };
     }, [buildFallbackRouteMetrics, parseCoordinateValue, emitFareDebug]);
+
+    const applyDynamicPricingQuotes = useCallback(async (baseEstimates, tripSnapshot) => {
+        if (!baseEstimates || typeof baseEstimates !== 'object' || Object.keys(baseEstimates).length === 0) {
+            return null;
+        }
+
+        if (!tripSnapshot?.pickup || !tripSnapshot?.drop) {
+            return null;
+        }
+
+        const version = pricingQuoteVersionRef.current + 1;
+        pricingQuoteVersionRef.current = version;
+
+        const quotedEntries = await Promise.all(
+            Object.entries(baseEstimates).map(async ([carName, estimate]) => {
+                if (!estimate) {
+                    return [carName, estimate];
+                }
+
+                const selectedCar = (fixedCarTypes || []).find(
+                    (car) => String(car?.name || '').trim().toLowerCase() === String(carName || '').trim().toLowerCase()
+                );
+                const routeDistanceKm = Number(
+                    estimate?.routeDetails?.distance_in_km ??
+                    estimate?.estimateDistance ??
+                    estimate?.distance ??
+                    0
+                );
+                const routeDurationSecs = Number(
+                    estimate?.routeDetails?.time_in_secs ??
+                    estimate?.estimateTime ??
+                    estimate?.time ??
+                    0
+                );
+                const clientEstimatedFare = Number(estimate?.estimateFare ?? estimate?.fare ?? 0);
+                const tollFee = Number(estimate?.routeDetails?.tollFee ?? estimate?.tollFee ?? 0);
+
+                if (!(routeDistanceKm > 0) || !(routeDurationSecs > 0)) {
+                    return [carName, estimate];
+                }
+
+                try {
+                    const quote = await fetchDynamicPricingQuote({
+                        pickupLocation: {
+                            lat: parseFloat(tripSnapshot.pickup.lat),
+                            lng: parseFloat(tripSnapshot.pickup.lng),
+                            add: tripSnapshot.pickup.add
+                        },
+                        destinationLocation: {
+                            lat: parseFloat(tripSnapshot.drop.lat),
+                            lng: parseFloat(tripSnapshot.drop.lng),
+                            add: tripSnapshot.drop.add
+                        },
+                        carType: selectedCar?.name || estimate?.carDetails || carName,
+                        routeDistanceKm,
+                        routeDurationSecs,
+                        tollFee,
+                        clientEstimatedFare
+                    });
+
+                    if (pricingQuoteVersionRef.current !== version) {
+                        return [carName, estimate];
+                    }
+
+                    return [
+                        carName,
+                        {
+                            ...estimate,
+                            estimateFare: Number(quote?.estimatedFare || clientEstimatedFare || estimate?.estimateFare || 0),
+                            estimateDistance: Number(quote?.routeDistanceKm || routeDistanceKm || estimate?.estimateDistance || 0),
+                            estimateTime: Number(quote?.routeDurationSecs || routeDurationSecs || estimate?.estimateTime || 0),
+                            tollFee: Number(quote?.tollFee || tollFee || estimate?.tollFee || 0),
+                            pricingPayload: quote?.pricingPayload || estimate?.pricingPayload || null,
+                            passengerNotice:
+                                quote?.pricingPayload?.passenger_notice ||
+                                estimate?.passengerNotice ||
+                                null,
+                            operationalState:
+                                quote?.operationalState ||
+                                quote?.pricingPayload?.operational_state ||
+                                estimate?.operationalState ||
+                                null,
+                            scorePressao: Number.isFinite(Number(quote?.scorePressao))
+                                ? Number(quote.scorePressao)
+                                : estimate?.scorePressao,
+                            scoreExcecao: Number.isFinite(Number(quote?.scoreExcecao))
+                                ? Number(quote.scoreExcecao)
+                                : estimate?.scoreExcecao,
+                            driverRegionStatus:
+                                quote?.pricingPayload?.driver_region_status ||
+                                estimate?.driverRegionStatus ||
+                                null,
+                            pricingSource: 'backend_dynamic'
+                        }
+                    ];
+                } catch (quoteError) {
+                    Logger.warn(
+                        `⚠️ [PassengerUI] Falha ao enriquecer cotação dinâmica para ${carName}:`,
+                        quoteError?.message || quoteError
+                    );
+                    return [carName, estimate];
+                }
+            })
+        );
+
+        if (pricingQuoteVersionRef.current !== version) {
+            return null;
+        }
+
+        return Object.fromEntries(quotedEntries);
+    }, [fixedCarTypes]);
 
     // useEffect EXATO do MapScreen antigo para calcular rota quando destino muda
     useEffect(() => {
@@ -1401,6 +1522,11 @@ function PassengerUI(props) {
 
                     setCarEstimates(estimates);
 
+                    const backendPricedEstimates = await applyDynamicPricingQuotes(estimates, tripdata);
+                    if (backendPricedEstimates && Object.keys(backendPricedEstimates).length > 0) {
+                        setCarEstimates((current) => ({ ...current, ...backendPricedEstimates }));
+                    }
+
                     // ✅ Atualizar polyline APENAS se não estiver em uma corrida ativa
                     // Durante corrida (accepted, started, searching), manter a polyline existente
                     if (firstPolyline) {
@@ -1469,7 +1595,7 @@ function PassengerUI(props) {
             tripStatus !== 'accepted' && tripStatus !== 'started' && tripStatus !== 'searching') {
             fetchEstimates();
         }
-    }, [tripdata.pickup?.add, tripdata.pickup?.lat, tripdata.drop?.add, tripdata.drop?.lat, fixedCarTypes, tripStatus, buildFallbackEstimate, normalizeRouteMetrics, emitFareDebug]);
+    }, [tripdata.pickup?.add, tripdata.pickup?.lat, tripdata.drop?.add, tripdata.drop?.lat, fixedCarTypes, tripStatus, buildFallbackEstimate, normalizeRouteMetrics, emitFareDebug, applyDynamicPricingQuotes]);
 
     // ✅ ATUALIZAR PREÇO A CADA MINUTO enquanto o card estiver aberto
     // Isso garante que o preço sempre reflita as condições de trânsito atuais
@@ -1690,6 +1816,10 @@ function PassengerUI(props) {
 
                             if (Object.keys(estimates).length > 0) {
                                 setCarEstimates(prev => ({ ...prev, ...estimates }));
+                                const backendPricedEstimates = await applyDynamicPricingQuotes(estimates, tripdata);
+                                if (backendPricedEstimates && Object.keys(backendPricedEstimates).length > 0) {
+                                    setCarEstimates(prev => ({ ...prev, ...backendPricedEstimates }));
+                                }
                                 Logger.log('✅ [PriceUpdate] Preços atualizados com sucesso');
                             }
 
@@ -1720,7 +1850,7 @@ function PassengerUI(props) {
             Logger.log('🛑 [PriceUpdate] Parando atualização automática de preço');
             clearInterval(updateInterval);
         };
-    }, [tripStatus, tripdata.pickup, tripdata.drop, fixedCarTypes, normalizeRouteMetrics, emitFareDebug]);
+    }, [tripStatus, tripdata.pickup, tripdata.drop, fixedCarTypes, normalizeRouteMetrics, emitFareDebug, applyDynamicPricingQuotes]);
 
     // ✅ Serviço de disponibilidade de motoristas em tempo real
     useEffect(() => {
@@ -2317,7 +2447,6 @@ function PassengerUI(props) {
             const driverLocation = driverInfoData?.location || data.location || data.driver?.location;
 
             if (driverLocation && driverLocation.lat && driverLocation.lng && tripdata.pickup && tripdata.pickup.lat && tripdata.pickup.lng) {
-                const GetDistance = require('../../common-local/other/GeoFunctions').GetDistance;
                 const distanceKm = GetDistance(
                     driverLocation.lat,
                     driverLocation.lng,
@@ -2487,7 +2616,6 @@ function PassengerUI(props) {
 
             // ✅ Recalcular tempo estimado se motorista ainda não chegou e temos localização
             if (!driverArrived && data.location && data.location.lat && data.location.lng && tripdata.pickup && tripdata.pickup.lat && tripdata.pickup.lng && tripStatus === 'accepted') {
-                const GetDistance = require('../../common-local/other/GeoFunctions').GetDistance;
                 const distanceKm = GetDistance(
                     data.location.lat,
                     data.location.lng,
@@ -3356,7 +3484,6 @@ function PassengerUI(props) {
                     text: 'Sim, salvar',
                     onPress: async () => {
                         try {
-                            const { saveAddresses } = require('../../common-local/actions/authactions');
                             await saveAddresses(auth.uid, {
                                 add: fullAddress,
                                 lat: currentAddress.lat,
@@ -4741,6 +4868,115 @@ function PassengerUI(props) {
         );
     }, []);
 
+    const resolveCurrentRideContractedFare = useCallback(() => {
+        const candidates = [
+            Number(currentBooking?.paymentAmountInCents || 0) / 100,
+            Number(currentBooking?.paymentData?.amountInCents || 0) / 100,
+            Number(currentBooking?.amountInCents || 0) / 100,
+            Number(currentBooking?.estimatedFare || 0),
+            Number(currentBooking?.estimate || 0),
+            Number(currentBooking?.fare || 0),
+            Number(tripdata?.estimate || 0)
+        ].filter((value) => Number.isFinite(value) && value > 0);
+
+        if (candidates.length === 0) {
+            return 0;
+        }
+
+        return Number(Math.max(...candidates).toFixed(2));
+    }, [
+        currentBooking?.amountInCents,
+        currentBooking?.estimatedFare,
+        currentBooking?.estimate,
+        currentBooking?.fare,
+        currentBooking?.paymentAmountInCents,
+        currentBooking?.paymentData?.amountInCents,
+        tripdata?.estimate
+    ]);
+
+    const calculateExtensionQuoteForDestination = useCallback(async (newDestination) => {
+        const origin = {
+            lat: currentLocation?.lat ?? currentBooking?.currentLocation?.lat ?? currentBooking?.pickup?.lat ?? currentBooking?.pickupLocation?.lat ?? null,
+            lng: currentLocation?.lng ?? currentBooking?.currentLocation?.lng ?? currentBooking?.pickup?.lng ?? currentBooking?.pickupLocation?.lng ?? null,
+            add: currentLocation?.address || currentBooking?.pickup?.add || currentBooking?.pickup?.address || currentBooking?.pickupLocation?.address || 'Local atual'
+        };
+
+        if (!origin.lat || !origin.lng || !newDestination?.lat || !newDestination?.lng) {
+            return null;
+        }
+
+        const selectedCarName =
+            currentBooking?.carType ||
+            currentBooking?.carDetails ||
+            selectedCarType?.name ||
+            tripdata?.carType ||
+            fixedCarTypes?.[0]?.name ||
+            '';
+
+        const normalizedSelectedCarName = String(selectedCarName || '').trim().toLowerCase();
+        const activeCar = (fixedCarTypes || []).find((car) => String(car?.name || '').trim().toLowerCase() === normalizedSelectedCarName) || fixedCarTypes?.[0] || null;
+
+        if (!activeCar) {
+            return null;
+        }
+
+        try {
+            const originLabel = `${origin.lat},${origin.lng}`;
+            const destinationLabel = `${newDestination.lat},${newDestination.lng}`;
+            const routeDetails = await getDirectionsApi(originLabel, destinationLabel);
+
+            const distanceKm = Number(routeDetails?.distance_in_km || routeDetails?.distance || 0);
+            const timeInSecs = Number(routeDetails?.time_in_secs || routeDetails?.time || 0);
+
+            if (Number.isFinite(distanceKm) && distanceKm > 0 && Number.isFinite(timeInSecs) && timeInSecs > 0) {
+                const { FareCalculator } = require('../../common/sharedFunctions');
+                const fareResult = FareCalculator(distanceKm, timeInSecs, activeCar, {}, 2, null, 'car', null);
+                const preciseFare = Number(fareResult?.grandTotal || fareResult?.estimateFare || 0);
+                if (Number.isFinite(preciseFare) && preciseFare > 0) {
+                    return Number(preciseFare.toFixed(2));
+                }
+            }
+        } catch (quoteError) {
+            Logger.warn('⚠️ [PassengerUI] Falha ao calcular cotação precisa da extensão:', quoteError?.message || quoteError);
+        }
+
+        const fallbackEstimate = buildFallbackEstimate(
+            activeCar,
+            origin,
+            {
+                ...newDestination,
+                add: newDestination?.add || newDestination?.address || newDestination?.formattedAddress || 'Novo destino'
+            },
+            'ride_extension_change_destination'
+        );
+
+        const fallbackFare = Number(fallbackEstimate?.estimateFare || 0);
+        if (Number.isFinite(fallbackFare) && fallbackFare > 0) {
+            return Number(fallbackFare.toFixed(2));
+        }
+
+        return null;
+    }, [
+        buildFallbackEstimate,
+        currentBooking?.carDetails,
+        currentBooking?.carType,
+        currentBooking?.currentLocation?.lat,
+        currentBooking?.currentLocation?.lng,
+        currentBooking?.pickup?.add,
+        currentBooking?.pickup?.address,
+        currentBooking?.pickup?.lat,
+        currentBooking?.pickup?.lng,
+        currentBooking?.pickupLocation?.address,
+        currentBooking?.pickupLocation?.lat,
+        currentBooking?.pickupLocation?.lng,
+        currentLocation?.address,
+        currentLocation?.lat,
+        currentLocation?.lng,
+        fixedCarTypes,
+        selectedCarType?.name,
+        tripdata?.carType
+    ]);
+
     // ✅ Função para recalcular corrida com novo destino
     const recalculateRideWithNewDestination = useCallback(async (newDestination) => {
         try {
@@ -4764,25 +5000,44 @@ function PassengerUI(props) {
                 newDestination
             );
 
-            const fareDifference = parseFloat(result.fareDifference || 0);
+            const contractedFare = resolveCurrentRideContractedFare();
+            const calculatedNewFare = await calculateExtensionQuoteForDestination(newDestination);
+            const backendNewFare = parseFloat(result.newFare || 0);
+            const effectiveNewFare =
+                Number.isFinite(calculatedNewFare) && calculatedNewFare > 0
+                    ? calculatedNewFare
+                    : (Number.isFinite(backendNewFare) && backendNewFare > 0 ? backendNewFare : 0);
+            const effectiveFareDifference =
+                effectiveNewFare > 0 && contractedFare > 0
+                    ? Number((effectiveNewFare - contractedFare).toFixed(2))
+                    : parseFloat(result.fareDifference || 0);
+            const fareDifference = effectiveFareDifference;
 
             if (result.requiresPayment && fareDifference > 0) {
-                // Valor maior: mostrar modal de pagamento da diferença
+                // Valor maior: agora entra na regra formal de extensão.
                 Alert.alert(
-                    'Pagamento Adicional Necessário',
-                    `O novo destino aumenta o valor da corrida em R$ ${fareDifference.toFixed(2)}.\n\nDeseja continuar?`,
+                    'Extensão de Corrida',
+                    `O novo destino aumenta o valor da corrida em R$ ${fareDifference.toFixed(2)}.\n\nVamos solicitar o aceite do motorista. Se ele aceitar, o app abrirá o Pix do complemento.`,
                     [
                         { text: 'Cancelar', style: 'cancel' },
                         {
-                            text: 'Pagar diferença',
+                            text: 'Solicitar extensão',
                             onPress: async () => {
-                                // Pagamento da diferença será processado automaticamente via Woovi
-                                // await processAdditionalPayment(fareDifference);
+                                try {
+                                    await webSocketManager.requestRideExtension(
+                                        currentBooking.bookingId,
+                                        newDestination,
+                                        effectiveNewFare
+                                    );
 
-                                // Atualizar destino no Redux
-                                dispatch(updateTripDrop(newDestination));
-
-                                Alert.alert('Sucesso', 'Destino alterado com sucesso!');
+                                    Alert.alert(
+                                        'Solicitação enviada',
+                                        'Motorista avisado. Assim que ele aceitar, o complemento Pix será exibido para confirmar o novo destino.'
+                                    );
+                                } catch (extensionError) {
+                                    Logger.error('Erro ao solicitar extensão:', extensionError);
+                                    Alert.alert('Erro', extensionError?.message || 'Não foi possível solicitar a extensão da corrida.');
+                                }
                             }
                         }
                     ]
@@ -4813,7 +5068,7 @@ function PassengerUI(props) {
             Logger.error('Erro ao recalcular corrida:', error);
             Alert.alert('Erro', error.message || 'Não foi possível recalcular a corrida');
         }
-    }, [currentBooking, dispatch]);
+    }, [calculateExtensionQuoteForDestination, currentBooking, dispatch, resolveCurrentRideContractedFare]);
 
     const handleSelectAddress = useCallback(async (address, type) => {
         // ✅ FECHAR dropdown imediatamente ao selecionar
@@ -6760,6 +7015,11 @@ function PassengerUI(props) {
 
                             const isLast = index === carTypesToUse.length - 1;
                             const isSelected = selectedCarType?.name === car.name;
+                            const passengerNotice = String(
+                                estimate?.passengerNotice ||
+                                estimate?.pricingPayload?.passenger_notice ||
+                                ''
+                            ).trim();
 
                             return (
                                 <React.Fragment key={car.id || index}>
@@ -6848,6 +7108,20 @@ function PassengerUI(props) {
                                                         </>
                                                     )}
                                                 </View>
+
+                                                {passengerNotice ? (
+                                                    <View style={styles.bottomSheetCarNoticeWrap}>
+                                                        <Ionicons
+                                                            name="sparkles-outline"
+                                                            size={14}
+                                                            color="#8A6400"
+                                                            style={styles.iconMarginRight}
+                                                        />
+                                                        <Text style={styles.bottomSheetCarNoticeText}>
+                                                            {passengerNotice}
+                                                        </Text>
+                                                    </View>
+                                                ) : null}
                                             </View>
                                         </View>
                                     </TouchableOpacity>
@@ -7024,7 +7298,7 @@ function PassengerUI(props) {
                     bookingId: currentBooking.id,
                     amount: currentBooking.estimate,
                     method: 'credit_card',
-                    passengerId: 'test-customer-dev',
+                    passengerId: auth.uid || auth.profile?.uid || auth.user?.uid || null,
                     passengerName: 'Customer de Teste'
                 };
 
@@ -8105,6 +8379,24 @@ const styles = StyleSheet.create({
     bottomSheetCarDetailText: {
         fontSize: 12,
         fontFamily: fonts.Regular,
+    },
+    bottomSheetCarNoticeWrap: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        marginTop: 8,
+        paddingHorizontal: 10,
+        paddingVertical: 7,
+        borderRadius: 12,
+        backgroundColor: 'rgba(255, 214, 102, 0.18)',
+        borderWidth: 1,
+        borderColor: 'rgba(138, 100, 0, 0.12)',
+    },
+    bottomSheetCarNoticeText: {
+        flex: 1,
+        fontSize: 12,
+        lineHeight: 16,
+        fontFamily: fonts.Regular,
+        color: '#8A6400',
     },
     bottomSheetBookButton: {
         // ✅ Mesmo tamanho e design do botão "Online" do DriverUI, mas com cor #003002
