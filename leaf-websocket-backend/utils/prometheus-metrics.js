@@ -330,6 +330,28 @@ const pricingExceptionScore = new promClient.Histogram({
     registers: [register]
 });
 
+const pricingBaselineMaterializations = new promClient.Counter({
+    name: 'leaf_pricing_baseline_materialization_total',
+    help: 'Total de execuções da materialização de baseline de pricing',
+    labelNames: ['result'],
+    registers: [register]
+});
+
+const pricingBaselineMaterializationDuration = new promClient.Histogram({
+    name: 'leaf_pricing_baseline_materialization_duration_seconds',
+    help: 'Duração em segundos da materialização de baseline de pricing',
+    labelNames: ['result'],
+    buckets: [0.05, 0.1, 0.25, 0.5, 1, 2, 5, 10, 30, 60, 120],
+    registers: [register]
+});
+
+const pricingBaselineMaterializedCells = new promClient.Counter({
+    name: 'leaf_pricing_baseline_materialized_cells_total',
+    help: 'Total de células observadas durante a materialização de baseline de pricing',
+    labelNames: ['status'],
+    registers: [register]
+});
+
 // ==================== EXPORT ====================
 
 /**
@@ -546,6 +568,32 @@ const metrics = {
             { operational_state: labels.operational_state },
             Number.isFinite(scoreExcecao) ? scoreExcecao : 0
         );
+    },
+
+    recordPricingBaselineMaterialization: ({
+        success = true,
+        durationSeconds = 0,
+        candidateCells = 0,
+        processedCells = 0,
+        failedCells = 0
+    } = {}) => {
+        const result = success ? 'success' : 'failure';
+
+        pricingBaselineMaterializations.inc({ result });
+        pricingBaselineMaterializationDuration.observe(
+            { result },
+            Number.isFinite(durationSeconds) && durationSeconds >= 0 ? durationSeconds : 0
+        );
+
+        if (Number.isFinite(candidateCells) && candidateCells > 0) {
+            pricingBaselineMaterializedCells.inc({ status: 'candidate' }, candidateCells);
+        }
+        if (Number.isFinite(processedCells) && processedCells > 0) {
+            pricingBaselineMaterializedCells.inc({ status: 'processed' }, processedCells);
+        }
+        if (Number.isFinite(failedCells) && failedCells > 0) {
+            pricingBaselineMaterializedCells.inc({ status: 'failed' }, failedCells);
+        }
     }
 };
 

@@ -13,7 +13,8 @@ jest.mock('../../../services/pricing', () => ({
 
 jest.mock('../../../utils/prometheus-metrics', () => ({
   metrics: {
-    recordPricingEvaluation: jest.fn()
+    recordPricingEvaluation: jest.fn(),
+    recordPricingBaselineMaterialization: jest.fn()
   }
 }));
 

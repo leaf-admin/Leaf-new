@@ -18,6 +18,9 @@
   - `services/pricing-baseline-materializer.js`
 - runner operacional:
   - `scripts/ops/materialize-pricing-baselines.cjs`
+- worker recorrente e config PM2 dedicada:
+  - `workers/pricing-baseline-worker.js`
+  - `workers/pm2.pricing-baseline.config.js`
 
 ### Observabilidade
 - metricas Prometheus adicionadas:
@@ -27,6 +30,9 @@
   - `leaf_pricing_minimum_fare_applied_total`
   - `leaf_pricing_score_pressao`
   - `leaf_pricing_score_excecao`
+  - `leaf_pricing_baseline_materialization_total`
+  - `leaf_pricing_baseline_materialization_duration_seconds`
+  - `leaf_pricing_baseline_materialized_cells_total`
 - integracao de metricas em:
   - `utils/map-h3-refresh-broadcaster.js`
   - `services/dashboard-websocket.js`
@@ -79,7 +85,7 @@ Resultado:
 
 ## Riscos que continuam abertos
 - `server.vps.js`, `routes/dashboard.js` e `register-socket-create-booking-handler.js` continuam mistos com trabalho paralelo
-- baseline ainda nao esta ligado a um scheduler oficial de 5 minutos
+- baseline agora possui worker dedicado, mas ainda nao foi validado em Redis real local nesta maquina
 - histerese do pricing continua dependente de Redis e do provider, mas ainda sem job distribuido formal
 - custo por SKU via billing export/BigQuery ainda nao foi implantado
 - Android fisico, `EARLY_ENDED_REVIEW` e limpeza final do legado continuam fora desta wave

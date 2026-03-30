@@ -11,6 +11,7 @@ workers/
 ├── WorkerManager.js        # Gerenciador de workers com Consumer Groups
 ├── listener-worker.js      # Worker para processar listeners pesados
 ├── worker-trip-location.js # Worker para consolidar trilha de localização
+├── pricing-baseline-worker.js # Worker de baseline operacional de pricing por H3
 └── README.md              # Esta documentação
 ```
 
@@ -25,6 +26,7 @@ workers/
 - `notifyDrivers` - Busca motoristas próximos, cálculos de score
 - `sendPush` - Chamadas externas FCM, busca de tokens
 - `trip.location.v1` - Persistência de rota da corrida em chunks
+- `pricing-baseline-worker` - Materialização de baseline e histórico curto de pricing por célula H3
 
 ## 🚀 Como Usar
 
@@ -58,6 +60,19 @@ pm2 start workers/worker-trip-location.js --name trip-location-worker
 
 # Logs
 pm2 logs trip-location-worker
+```
+
+### 2.2 Worker de Baseline de Pricing
+
+```bash
+# Execução única manual
+ENABLE_PRICING_BASELINE_WORKER=true node workers/pricing-baseline-worker.js --once
+
+# Execução contínua com PM2
+pm2 start workers/pm2.pricing-baseline.config.js
+
+# Logs
+pm2 logs pricing-baseline-worker
 ```
 
 ### 3. Executar Múltiplos Workers
@@ -101,6 +116,12 @@ TRIP_LOCATION_PERIODIC_FLUSH_MS=15000
 TRIP_LOCATION_CHUNK_RETENTION_DAYS=30
 TRIP_LOCATION_OUT_OF_ORDER_WINDOW=15
 TRIP_LOCATION_DEDUP_TTL_SECONDS=21600
+
+# Pricing Baseline Worker
+ENABLE_PRICING_BASELINE_WORKER=true
+PRICING_BASELINE_WORKER_INTERVAL_MS=300000
+PRICING_BASELINE_WORKER_RUN_ON_BOOT=true
+PRICING_BASELINE_MAX_CELLS=250
 ```
 
 ### Consumer Groups
