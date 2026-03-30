@@ -151,12 +151,15 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
     trafficLayerEnabled,
     clearFlowPreview,
     bookingStatus,
+    selectedDestination,
+    selectedVehicle,
     tripDistanceKm,
     searchingElapsedSeconds,
     unreadNotificationCount,
     driverOnline,
     driverCanGoOnline,
     paymentMethod,
+    driverInfo,
     setDriverOnline,
     tripHistory,
     driverOffers,
@@ -180,6 +183,7 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
   const wasSearchingRef = useRef(false);
   const lastSearchRadiusRef = useRef(null);
   const lastAutoNavigationPhaseRef = useRef('');
+  const lastPassengerAutoRouteRef = useRef('');
   const [homeCardHeight, setHomeCardHeight] = useState(HOME_CARD_FALLBACK_HEIGHT);
   const [driverBottomCtaHeight, setDriverBottomCtaHeight] = useState(DRIVER_BOTTOM_CTA_FALLBACK_HEIGHT);
   const [driverLiveRideHeight, setDriverLiveRideHeight] = useState(0);
@@ -233,6 +237,11 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
     currentRouteName === 'RobotaxiPrototypeDriverTrip' ||
     currentRouteName === 'RobotaxiPrototypeDriverSearch';
   const isDestinationRoute = currentRouteName === 'RobotaxiPrototypeDestination';
+  const isPassengerPrimaryRoute =
+    isHomeRoute ||
+    currentRouteName === 'RobotaxiPrototypeDriverSearch' ||
+    currentRouteName === 'RobotaxiPrototypeTrip' ||
+    currentRouteName === 'RobotaxiPrototypeReceipt';
   const freezeBackgroundMapCamera = isDestinationRoute;
   const hasMenuTopAction = isDriverRole || isHomeRoute || isDriverRoute;
 
@@ -273,6 +282,24 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
   const passengerOccludedBottom = insets.bottom + HOME_CARD_BOTTOM_OFFSET + homeCardHeight;
   const driverOccludedBottom = insets.bottom + DRIVER_BOTTOM_CTA_OFFSET + driverBottomCtaHeight;
   const driverLiveOffer = Array.isArray(driverOffers) && driverOffers.length > 0 ? driverOffers[0] : null;
+  const passengerAutoRoute = useMemo(() => {
+    if (isDriverRole) {
+      return null;
+    }
+
+    const normalizedStatus = String(bookingStatus || '').trim().toLowerCase();
+    if (normalizedStatus === 'completed') {
+      return 'RobotaxiPrototypeReceipt';
+    }
+    if (['accepted', 'arrived', 'started', 'operational_interrupted', 'searching_replacement'].includes(normalizedStatus)) {
+      return 'RobotaxiPrototypeTrip';
+    }
+    if (['searching', 'requesting'].includes(normalizedStatus)) {
+      return 'RobotaxiPrototypeDriverSearch';
+    }
+
+    return null;
+  }, [bookingStatus, isDriverRole]);
   const hasDriverLiveRideOverlay = Boolean(
     isDriverRole &&
       isHomeRoute &&
@@ -809,6 +836,59 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
     lastAutoNavigationPhaseRef.current = phaseKey;
     handleOpenDriverNavigation();
   }, [driverActiveRide?.bookingId, driverActiveRide?.id, driverTripAssist?.status, handleOpenDriverNavigation, isDriverRole, isHomeRoute]);
+
+  useEffect(() => {
+    if (isDriverRole || !isPassengerPrimaryRoute) {
+      lastPassengerAutoRouteRef.current = '';
+      return;
+    }
+
+    if (!passengerAutoRoute) {
+      lastPassengerAutoRouteRef.current = '';
+      return;
+    }
+
+    if (currentRouteName === passengerAutoRoute) {
+      lastPassengerAutoRouteRef.current = passengerAutoRoute;
+      return;
+    }
+
+    const routeKey = `${passengerAutoRoute}:${bookingStatus || 'idle'}:${selectedDestination?.name || ''}`;
+    if (lastPassengerAutoRouteRef.current === routeKey) {
+      return;
+    }
+
+    lastPassengerAutoRouteRef.current = routeKey;
+    const commonParams = {
+      destination: selectedDestination?.name || 'Destino',
+      vehicle: selectedVehicle || 'Leaf Plus'
+    };
+
+    if (passengerAutoRoute === 'RobotaxiPrototypeReceipt') {
+      navigation.replace('RobotaxiPrototypeReceipt', { fromTrip: true });
+      return;
+    }
+
+    if (passengerAutoRoute === 'RobotaxiPrototypeTrip') {
+      navigation.replace('RobotaxiPrototypeTrip', {
+        ...commonParams,
+        driverName: driverInfo?.name || 'Motorista'
+      });
+      return;
+    }
+
+    navigation.replace('RobotaxiPrototypeDriverSearch', commonParams);
+  }, [
+    bookingStatus,
+    currentRouteName,
+    driverInfo?.name,
+    isDriverRole,
+    isPassengerPrimaryRoute,
+    navigation,
+    passengerAutoRoute,
+    selectedDestination?.name,
+    selectedVehicle
+  ]);
 
   return (
     <PrototypeScreenTransition>

@@ -223,7 +223,14 @@ Resultado acumulado desta wave:
     - `activeBookingId: booking-proof-passenger-1`
 - leitura honesta:
   - o overwrite destrutivo do snapshot foi corrigido
-  - ainda resta uma passada específica para garantir que a navegação visual do passageiro reflita automaticamente esse estado roteado em todas as capturas
+  - a passada seguinte fechou também a auto-navegação visual do passageiro a partir do `bookingStatus`
+  - validacao final no `iPhone 17 Pro`:
+    - captura correta da superfície `operational_interrupted / passenger_decision_pending`
+    - screenshot: `/tmp/leaf-passenger-operational-17pro-v3.png`
+  - com isso, o fluxo de QA passou a cobrir:
+    - persistência correta do snapshot seedado
+    - preservação do estado durante o bootstrap
+    - navegação automática da home para a tela de viagem quando o runtime exigir
 
 ## Riscos que continuam abertos
 - `server.vps.js`, `routes/dashboard.js` e `register-socket-create-booking-handler.js` continuam mistos com trabalho paralelo
