@@ -7,6 +7,7 @@ const { metrics } = require('../utils/prometheus-metrics');
 const { getAdminUser } = require('../utils/admin-user-cache');
 const { resolveJwtSecret } = require('../utils/jwt-secret-resolver');
 const { getDashboardLiveData } = require('./dashboard-live-data-service');
+const { getRideOperationsSnapshot } = require('./ride-health-monitor');
 let firebaseConfig = null;
 try {
   firebaseConfig = require('../firebase-config');
@@ -590,6 +591,24 @@ class DashboardWebSocketService {
       // 3. Buscar Dados do Fundo de Reserva (Custos Prejudiciais Absorvidos)
       let assumedCancellationCosts = 0;
       let financialMetrics = {};
+      let operations = {
+        reassignmentPending: {
+          total: 0,
+          stuck: 0,
+          oldestAgeMs: 0,
+          oldestBookingId: null,
+          bookingIds: [],
+          stuckThresholdMs: 0
+        },
+        earlyEndedReview: {
+          total: 0,
+          recent: 0,
+          oldestAgeMs: 0,
+          oldestBookingId: null,
+          bookingIds: [],
+          recentWindowMs: 0
+        }
+      };
       if (this.redis) {
         try {
           financialMetrics = await this.redis.hgetall('metrics:financial');
@@ -611,6 +630,9 @@ class DashboardWebSocketService {
             financialMetrics?.averageTicket,
             0
           );
+          operations = await getRideOperationsSnapshot(this.redis, {
+            nowIso: new Date().toISOString()
+          });
         } catch (err) { }
       }
 
@@ -643,6 +665,7 @@ class DashboardWebSocketService {
           completionRate: 100, // Placeholder
           growthRate: 0
         },
+        operations,
         timestamp: new Date().toISOString()
       };
 

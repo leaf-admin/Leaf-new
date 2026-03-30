@@ -352,6 +352,34 @@ const pricingBaselineMaterializedCells = new promClient.Counter({
     registers: [register]
 });
 
+const rideHealthStateTotal = new promClient.Gauge({
+    name: 'leaf_ride_health_state_total',
+    help: 'Total atual de corridas em estados operacionais monitorados',
+    labelNames: ['state'],
+    registers: [register]
+});
+
+const rideHealthStuckTotal = new promClient.Gauge({
+    name: 'leaf_ride_health_stuck_total',
+    help: 'Total atual de corridas presas em estados operacionais monitorados',
+    labelNames: ['state'],
+    registers: [register]
+});
+
+const rideHealthRecentTotal = new promClient.Gauge({
+    name: 'leaf_ride_health_recent_total',
+    help: 'Total recente de corridas em estados operacionais monitorados',
+    labelNames: ['state'],
+    registers: [register]
+});
+
+const rideHealthAlertsTotal = new promClient.Counter({
+    name: 'leaf_ride_health_alert_total',
+    help: 'Total de alertas emitidos pelo monitor operacional de corridas',
+    labelNames: ['alert_type', 'severity'],
+    registers: [register]
+});
+
 // ==================== EXPORT ====================
 
 /**
@@ -594,6 +622,34 @@ const metrics = {
         if (Number.isFinite(failedCells) && failedCells > 0) {
             pricingBaselineMaterializedCells.inc({ status: 'failed' }, failedCells);
         }
+    },
+
+    setRideHealthStateCount: (state = 'unknown', count = 0) => {
+        rideHealthStateTotal.set(
+            { state: sanitizeLabelValue(state, 'unknown') },
+            Number.isFinite(count) && count >= 0 ? count : 0
+        );
+    },
+
+    setRideHealthStuckCount: (state = 'unknown', count = 0) => {
+        rideHealthStuckTotal.set(
+            { state: sanitizeLabelValue(state, 'unknown') },
+            Number.isFinite(count) && count >= 0 ? count : 0
+        );
+    },
+
+    setRideHealthRecentCount: (state = 'unknown', count = 0) => {
+        rideHealthRecentTotal.set(
+            { state: sanitizeLabelValue(state, 'unknown') },
+            Number.isFinite(count) && count >= 0 ? count : 0
+        );
+    },
+
+    recordRideHealthAlert: (alertType = 'unknown', severity = 'warning', count = 1) => {
+        rideHealthAlertsTotal.inc({
+            alert_type: sanitizeLabelValue(alertType, 'unknown'),
+            severity: sanitizeLabelValue(severity, 'warning')
+        }, Number.isFinite(count) && count > 0 ? count : 1);
     }
 };
 

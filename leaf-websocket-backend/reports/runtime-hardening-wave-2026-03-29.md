@@ -4,6 +4,7 @@
 - materializacao inicial de baseline de pricing por microrregiao H3
 - persistencia de estado e historico curto de excecao em Redis
 - observabilidade de H3 refresh e pricing dinamico
+- monitor operacional de `REASSIGNMENT_PENDING` preso e volume de `EARLY_ENDED_REVIEW`
 - instrumentacao de auditoria de pricing em `estimateRideFare`, `RequestRideCommand` e `POST /api/pricing/quote`
 - primeira rodada segura de higiene de repo sem cleanup destrutivo
 
@@ -35,6 +36,17 @@
   - `workers/pricing-baseline-worker.js`
   - `workers/pm2.pricing-baseline.config.js`
 
+### Ride health operacional
+- monitor de estados operacionais sensiveis:
+  - `services/ride-health-monitor.js`
+- indexacao automatica na state machine:
+  - `services/ride-state-manager.js`
+- worker recorrente e config PM2 dedicada:
+  - `workers/ride-health-monitor-worker.js`
+  - `workers/pm2.ride-health-monitor.config.js`
+- resumo operacional agora entra no payload do dashboard websocket:
+  - `services/dashboard-websocket.js`
+
 ### Observabilidade
 - metricas Prometheus adicionadas:
   - `leaf_h3_refresh_hint_total`
@@ -42,10 +54,14 @@
   - `leaf_pricing_dynamic_quotes_total`
   - `leaf_pricing_minimum_fare_applied_total`
   - `leaf_pricing_score_pressao`
-  - `leaf_pricing_score_excecao`
-  - `leaf_pricing_baseline_materialization_total`
-  - `leaf_pricing_baseline_materialization_duration_seconds`
-  - `leaf_pricing_baseline_materialized_cells_total`
+- `leaf_pricing_score_excecao`
+- `leaf_pricing_baseline_materialization_total`
+- `leaf_pricing_baseline_materialization_duration_seconds`
+- `leaf_pricing_baseline_materialized_cells_total`
+- `leaf_ride_health_state_total`
+- `leaf_ride_health_stuck_total`
+- `leaf_ride_health_recent_total`
+- `leaf_ride_health_alert_total`
 - integracao de metricas em:
   - `utils/map-h3-refresh-broadcaster.js`
   - `services/dashboard-websocket.js`
@@ -94,10 +110,14 @@
   - `tests/unit/services/ride-settlement-service.unit.test.js`
   - `tests/unit/commands/EndRideWithReviewCommand.unit.test.js`
   - `tests/unit/utils/trip-completion-payload.unit.test.js`
+  - `tests/unit/services/ride-health-monitor.unit.test.js`
+  - `tests/unit/workers/ride-health-monitor-worker.unit.test.js`
+  - `tests/unit/services/ride-state-manager-monitoring.unit.test.js`
 
 Resultado acumulado desta wave:
-- `9/9` suites
-- `17/17` testes
+- `12/12` suites
+- `24/24` testes
+- monitor operacional de `REASSIGNMENT_PENDING` preso e volume de `EARLY_ENDED_REVIEW` adicionado
 
 ## Riscos que continuam abertos
 - `server.vps.js`, `routes/dashboard.js` e `register-socket-create-booking-handler.js` continuam mistos com trabalho paralelo

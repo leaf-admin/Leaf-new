@@ -12,6 +12,7 @@ workers/
 ├── listener-worker.js      # Worker para processar listeners pesados
 ├── worker-trip-location.js # Worker para consolidar trilha de localização
 ├── pricing-baseline-worker.js # Worker de baseline operacional de pricing por H3
+├── ride-health-monitor-worker.js # Worker de monitoramento operacional de rides
 └── README.md              # Esta documentação
 ```
 
@@ -27,6 +28,7 @@ workers/
 - `sendPush` - Chamadas externas FCM, busca de tokens
 - `trip.location.v1` - Persistência de rota da corrida em chunks
 - `pricing-baseline-worker` - Materialização de baseline e histórico curto de pricing por célula H3
+- `ride-health-monitor-worker` - Monitor de `REASSIGNMENT_PENDING` preso e volume de `EARLY_ENDED_REVIEW`
 
 ## 🚀 Como Usar
 
@@ -73,6 +75,19 @@ pm2 start workers/pm2.pricing-baseline.config.js
 
 # Logs
 pm2 logs pricing-baseline-worker
+```
+
+### 2.3 Worker de Ride Health
+
+```bash
+# Execução única manual
+ENABLE_RIDE_HEALTH_MONITOR_WORKER=true node workers/ride-health-monitor-worker.js --once
+
+# Execução contínua com PM2
+pm2 start workers/pm2.ride-health-monitor.config.js
+
+# Logs
+pm2 logs ride-health-monitor-worker
 ```
 
 ### 3. Executar Múltiplos Workers
@@ -122,6 +137,14 @@ ENABLE_PRICING_BASELINE_WORKER=true
 PRICING_BASELINE_WORKER_INTERVAL_MS=300000
 PRICING_BASELINE_WORKER_RUN_ON_BOOT=true
 PRICING_BASELINE_MAX_CELLS=250
+
+# Ride Health Monitor Worker
+ENABLE_RIDE_HEALTH_MONITOR_WORKER=true
+RIDE_HEALTH_MONITOR_INTERVAL_MS=60000
+RIDE_HEALTH_MONITOR_RUN_ON_BOOT=true
+RIDE_HEALTH_REASSIGNMENT_STUCK_THRESHOLD_MS=300000
+RIDE_HEALTH_EARLY_REVIEW_WARNING_COUNT=3
+RIDE_HEALTH_EARLY_REVIEW_CRITICAL_COUNT=6
 ```
 
 ### Consumer Groups
@@ -191,6 +214,9 @@ for (const [id, fields] of events) {
 - `leaf_listener_total{listener_name, status}` - Total de listeners processados
 - `leaf_listener_duration_seconds{listener_name, status}` - Latência dos listeners
 - `leaf_event_backlog{event_type="dlq"}` - Tamanho da DLQ
+- `leaf_ride_health_state_total{state}` - Corridas monitoradas por estado operacional
+- `leaf_ride_health_stuck_total{state}` - Corridas presas em estados operacionais
+- `leaf_ride_health_recent_total{state}` - Volume recente de estados operacionais sensíveis
 
 ### Estatísticas do Worker
 

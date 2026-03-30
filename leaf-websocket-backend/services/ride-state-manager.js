@@ -182,6 +182,18 @@ class RideStateManager {
                 ...metadata
             });
 
+            try {
+                const { syncTrackedRideState } = require('./ride-health-monitor');
+                await syncTrackedRideState(redis, {
+                    bookingId,
+                    previousState: currentState || null,
+                    newState,
+                    updatedAt: updateData.updatedAt
+                });
+            } catch (monitoringError) {
+                logger.warn(`⚠️ Falha ao sincronizar ride health monitor para ${bookingId}: ${monitoringError.message}`);
+            }
+
             logger.info(`✅ Estado atualizado: ${bookingId} (${currentState || 'NEW'} → ${newState})`);
             return true;
         } catch (error) {
