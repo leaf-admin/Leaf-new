@@ -104,9 +104,37 @@ class StartTripCommand extends Command {
             // Verificar estado atual
             span.addEvent('Validating state transition');
             const currentState = await RideStateManager.getBookingState(redis, this.bookingId);
-            
+
+            if (currentState === RideStateManager.STATES.ACCEPTED) {
+                span.setStatus({ code: SpanStatusCode.ERROR, message: 'Chegada ao embarque obrigatória' });
+                span.setAttribute('state.current', currentState);
+                span.end();
+                metrics.recordCommand('StartTrip', (Date.now() - startTime) / 1000, false);
+                return CommandResult.failure(
+                    'A corrida só pode ser iniciada após registrar chegada ao embarque.'
+                );
+            }
+
+            let operationalContinuation = null;
+            try {
+                operationalContinuation = bookingData?.operationalContinuation
+                    ? JSON.parse(bookingData.operationalContinuation)
+                    : null;
+            } catch (_continuationError) {
+                operationalContinuation = null;
+            }
+
+            const targetState =
+                operationalContinuation &&
+                (
+                    operationalContinuation.status === 'REPLACEMENT_DRIVER_ACCEPTED' ||
+                    operationalContinuation.status === 'REASSIGNED_IN_PROGRESS'
+                )
+                    ? RideStateManager.STATES.REASSIGNED_IN_PROGRESS
+                    : RideStateManager.STATES.IN_PROGRESS;
+
             // Validar transição de estado
-            if (!RideStateManager.isValidTransition(currentState, RideStateManager.STATES.IN_PROGRESS)) {
+            if (!RideStateManager.isValidTransition(currentState, targetState)) {
                 span.setStatus({ code: SpanStatusCode.ERROR, message: 'Transição de estado inválida' });
                 span.setAttribute('state.current', currentState);
                 span.end();
@@ -156,7 +184,7 @@ class StartTripCommand extends Command {
             await RideStateManager.updateBookingState(
                 redis,
                 this.bookingId,
-                RideStateManager.STATES.IN_PROGRESS,
+                targetState,
                 {
                     driverId: this.driverId,
                     startLocation: this.startLocation,
@@ -166,11 +194,23 @@ class StartTripCommand extends Command {
 
             // Atualizar booking
             span.addEvent('Updating booking in Redis');
-            await redis.hset(bookingKey, {
-                status: 'IN_PROGRESS',
+            const bookingPatch = {
+                status: targetState,
                 startLocation: JSON.stringify(this.startLocation),
                 startedAt: new Date().toISOString()
-            });
+            };
+
+            if (targetState === RideStateManager.STATES.REASSIGNED_IN_PROGRESS && operationalContinuation) {
+                bookingPatch.operationalContinuation = JSON.stringify({
+                    ...operationalContinuation,
+                    status: 'REASSIGNED_IN_PROGRESS',
+                    reassignedStartedAt: bookingPatch.startedAt,
+                    currentLegStartedAt: bookingPatch.startedAt,
+                    replacementDriverId: this.driverId
+                });
+            }
+
+            await redis.hset(bookingKey, bookingPatch);
 
                 // Criar evento canônico
                 span.addEvent('Creating RideStartedEvent');

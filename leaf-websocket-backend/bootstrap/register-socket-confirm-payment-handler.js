@@ -251,6 +251,25 @@ function registerSocketConfirmPaymentHandler({
                     });
                 }
 
+                try {
+                    const { applyConfirmedRideExtension } = require('../services/ride-lifecycle-service');
+                    const redis = redisPool.getConnection();
+                    await applyConfirmedRideExtension({
+                        redis,
+                        bookingId,
+                        chargeId: paymentId || data?.chargeId || '',
+                        amountInCents,
+                        io,
+                        source: 'socket_confirmPayment'
+                    });
+                } catch (extensionApplyError) {
+                    logStructured('warn', 'confirmPayment: falha ao aplicar extensão confirmada', {
+                        bookingId,
+                        eventType: 'confirmPayment',
+                        error: extensionApplyError.message
+                    });
+                }
+
                 // Emitir confirmação
                 socket.emit('paymentConfirmed', {
                     success: true,

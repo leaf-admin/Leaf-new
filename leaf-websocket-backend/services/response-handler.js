@@ -218,6 +218,7 @@ class ResponseHandler {
 
             // ✅ ACEITAR estados NOTIFIED e SEARCHING (motorista pode aceitar se foi notificado)
             if (currentState !== RideStateManager.STATES.SEARCHING &&
+                currentState !== RideStateManager.STATES.REASSIGNMENT_PENDING &&
                 currentState !== RideStateManager.STATES.NOTIFIED &&
                 currentState !== RideStateManager.STATES.AWAITING_RESPONSE) {
                 logger.warn(`⚠️ [ResponseHandler] Corrida ${bookingId} não está disponível para aceitação (state: ${currentState})`);
@@ -230,7 +231,9 @@ class ResponseHandler {
             logger.info(`✅ [ResponseHandler] Corrida ${bookingId} está em estado válido para aceitação: ${currentState}`);
 
             // 3. Parar busca gradual (cancelar expansões futuras)
-            await this.expander.stopSearch(bookingId);
+            await this.expander.stopSearch(bookingId, {
+                preserveDriverId: driverId
+            });
 
             // 4. Cancelar todos os timeouts de resposta dos outros motoristas
             this.dispatcher.clearAllTimeouts(bookingId);
@@ -238,7 +241,8 @@ class ResponseHandler {
             // 5. Atualizar estado da corrida: NOTIFIED/SEARCHING → MATCHED → ACCEPTED
             // Se estava em NOTIFIED, pular MATCHED e ir direto para ACCEPTED
             if (currentState === RideStateManager.STATES.NOTIFIED ||
-                currentState === RideStateManager.STATES.AWAITING_RESPONSE) {
+                currentState === RideStateManager.STATES.AWAITING_RESPONSE ||
+                currentState === RideStateManager.STATES.REASSIGNMENT_PENDING) {
                 logger.info(`📊 [ResponseHandler] Transição direta: ${currentState} → ACCEPTED`);
                 await RideStateManager.updateBookingState(
                     this.redis,
@@ -796,6 +800,7 @@ class ResponseHandler {
                     if (currentState === RideStateManager.STATES.SEARCHING ||
                         currentState === RideStateManager.STATES.NOTIFIED ||
                         currentState === RideStateManager.STATES.AWAITING_RESPONSE ||
+                        currentState === RideStateManager.STATES.REASSIGNMENT_PENDING ||
                         currentState === RideStateManager.STATES.EXPANDED) {
 
                         // Remover motorista da lista de notificados para que possa receber novamente

@@ -454,6 +454,7 @@ function registerSocketCreateBookingHandler({
                             tollFee: tollFee || 0,
                             carType: requestedCarType,
                             paymentMethod: paymentMethod || 'pix',
+                            pricingContext: data.pricingContext || data.operational || null,
                             traceId, // ✅ Passar traceId para o command
                             correlationId // ✅ Passar correlationId para o command
                         });
@@ -704,6 +705,10 @@ function registerSocketCreateBookingHandler({
                             pickupLocation,
                             destinationLocation,
                             estimatedFare: commandBookingData?.estimatedFare || estimatedFare || 0,
+                            pricingPayload: commandBookingData?.pricingPayload || null,
+                            operationalState: commandBookingData?.operationalState || null,
+                            scorePressao: commandBookingData?.scorePressao ?? null,
+                            scoreExcecao: commandBookingData?.scoreExcecao ?? null,
                             paymentMethod,
                             status: 'requested',
                             timestamp: new Date().toISOString(),

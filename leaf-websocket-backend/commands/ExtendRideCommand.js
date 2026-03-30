@@ -7,6 +7,12 @@ const traceContext = require('../utils/trace-context');
 const { metrics } = require('../utils/prometheus-metrics');
 const { validateAndEnsureTraceIdInCommand } = require('../utils/trace-validator');
 const PaymentService = require('../services/payment-service');
+const paymentDispatchService = require('../services/payment-dispatch-service');
+const {
+    resolveContractualFare,
+    resolveRideExtensionPaymentTimeoutSec,
+    buildRideExtensionExpiresAt
+} = require('../services/ride-lifecycle-service');
 
 class ExtendRideCommand extends Command {
     constructor(data) {
@@ -16,6 +22,8 @@ class ExtendRideCommand extends Command {
         this.newEndLocation = data.newEndLocation;
         this.newFare = data.newFare;
         this.mockPayment = data.mockPayment === true || data.__mockPayment === true;
+        this.eventType = data.eventType || 'EXTENSION_REQUESTED';
+        this.skipEventRecord = data.skipEventRecord === true;
         this.traceId = validateAndEnsureTraceIdInCommand(data, 'ExtendRide');
         this.correlationId = data.correlationId || this.bookingId;
     }
@@ -61,11 +69,15 @@ class ExtendRideCommand extends Command {
                 }
 
                 const currentState = await RideStateManager.getBookingState(redis, this.bookingId);
-                if (currentState !== RideStateManager.STATES.IN_PROGRESS) {
+                const allowedStates = new Set([
+                    RideStateManager.STATES.IN_PROGRESS,
+                    RideStateManager.STATES.REASSIGNED_IN_PROGRESS
+                ]);
+                if (!allowedStates.has(currentState)) {
                     return CommandResult.failure('A corrida precisa estar IN_PROGRESS para ser estendida');
                 }
 
-                const currentFare = Number(bookingData.estimatedFare || bookingData.totalAmount || 0);
+                const currentFare = Number(resolveContractualFare(bookingData) || 0);
                 const newFareNumber = Number(this.newFare);
 
                 if (newFareNumber <= currentFare) {
@@ -83,6 +95,8 @@ class ExtendRideCommand extends Command {
                 let pixQRCode = null;
                 let paymentLink = null;
                 let brCode = null;
+                let expiresAt = null;
+                const expiresIn = resolveRideExtensionPaymentTimeoutSec();
 
                 if (paymentMockEnabled) {
                     const stamp = Date.now();
@@ -90,6 +104,7 @@ class ExtendRideCommand extends Command {
                     pixQRCode = `mock_pix_qrcode_${stamp}`;
                     paymentLink = `leaf://mock/extend/${this.bookingId}`;
                     brCode = `000201010212mock${stamp}`;
+                    expiresAt = buildRideExtensionExpiresAt(new Date(stamp), expiresIn);
                 } else {
                     const paymentService = new PaymentService();
 
@@ -101,6 +116,7 @@ class ExtendRideCommand extends Command {
                         value: diffFare,
                         comment: `Extensão da Corrida ${this.bookingId}`,
                         correlationID: uniqueCorrelationID,
+                        expiresIn,
                         additionalInfo: [
                             { key: 'passenger_id', value: this.customerId },
                             { key: 'ride_id', value: this.bookingId },
@@ -139,17 +155,29 @@ class ExtendRideCommand extends Command {
                         chargePayload.brCode ||
                         chargePayload?.paymentMethods?.pix?.brCode ||
                         null;
+                    expiresAt =
+                        chargePayload.expiresAt ||
+                        chargePayload.expirationDate ||
+                        chargePayload.expiresAtDate ||
+                        buildRideExtensionExpiresAt(new Date(), expiresIn);
                 }
 
-                await eventSourcing.recordEvent('ride.updated', {
+                await paymentDispatchService.linkPaymentToBooking({
                     bookingId: this.bookingId,
-                    type: 'EXTENSION_REQUESTED',
-                    newEndLocation: this.newEndLocation,
-                    newFare: newFareNumber,
-                    diffFare,
-                    chargeId,
-                    correlationId: this.correlationId
+                    chargeId
                 });
+
+                if (!this.skipEventRecord) {
+                    await eventSourcing.recordEvent('ride.updated', {
+                        bookingId: this.bookingId,
+                        type: this.eventType,
+                        newEndLocation: this.newEndLocation,
+                        newFare: newFareNumber,
+                        diffFare,
+                        chargeId,
+                        correlationId: this.correlationId
+                    });
+                }
 
                 logStructured('info', 'Extensão de corrida solicitada. Aguardando pagamento', {
                     bookingId: this.bookingId,
@@ -170,7 +198,8 @@ class ExtendRideCommand extends Command {
                     chargeId,
                     pixQRCode,
                     paymentLink,
-                    brCode
+                    brCode,
+                    expiresAt
                 });
             } catch (error) {
                 logStructured('error', 'ExtendRideCommand falhou', {

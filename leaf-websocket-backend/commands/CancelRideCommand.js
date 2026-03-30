@@ -29,6 +29,89 @@ const { validateAndEnsureTraceIdInCommand } = require('../utils/trace-validator'
 const { clearActiveTripForDriver } = require('../utils/active-trip-index');
 const tripLocationPersistenceService = require('../services/trip-location-persistence-service');
 
+const PASSENGER_CANCEL_FIXED_FEE_CENTS = Math.max(
+    0,
+    Number.parseInt(process.env.PASSENGER_CANCEL_FIXED_FEE_CENTS || '200', 10) || 200
+);
+const PASSENGER_CANCEL_DRIVER_DISTANCE_RATE_CENTS_PER_KM = Math.max(
+    0,
+    Number.parseInt(process.env.PASSENGER_CANCEL_DRIVER_DISTANCE_RATE_CENTS_PER_KM || '120', 10) || 120
+);
+const PASSENGER_CANCEL_DRIVER_TIME_RATE_CENTS_PER_MIN = Math.max(
+    0,
+    Number.parseInt(process.env.PASSENGER_CANCEL_DRIVER_TIME_RATE_CENTS_PER_MIN || '30', 10) || 30
+);
+const PASSENGER_CANCEL_FEE_CAP_PERCENT = Math.min(
+    1,
+    Math.max(0, Number.parseFloat(process.env.PASSENGER_CANCEL_FEE_CAP_PERCENT || '0.7') || 0.7)
+);
+
+function toFiniteNumber(value) {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : null;
+}
+
+function parseLocationCandidate(rawValue) {
+    if (!rawValue) return null;
+    if (typeof rawValue === 'object') {
+        const lat = toFiniteNumber(rawValue.lat);
+        const lng = toFiniteNumber(rawValue.lng);
+        if (lat === null || lng === null) return null;
+        return { lat, lng };
+    }
+
+    try {
+        const parsed = JSON.parse(rawValue);
+        const lat = toFiniteNumber(parsed?.lat);
+        const lng = toFiniteNumber(parsed?.lng);
+        if (lat === null || lng === null) return null;
+        return { lat, lng };
+    } catch (_error) {
+        return null;
+    }
+}
+
+function parseTimestampMs(rawValue) {
+    if (!rawValue) return null;
+    if (typeof rawValue === 'number' && Number.isFinite(rawValue)) return rawValue;
+    const numeric = Number(rawValue);
+    if (Number.isFinite(numeric) && numeric > 0) {
+        return numeric;
+    }
+    const dateValue = Date.parse(String(rawValue));
+    if (Number.isFinite(dateValue)) {
+        return dateValue;
+    }
+    return null;
+}
+
+function normalizeMoneyToCents(rawValue) {
+    const parsed = Number.parseFloat(rawValue || 0);
+    if (!Number.isFinite(parsed) || parsed <= 0) return 0;
+    if (parsed >= 1000) return Math.round(parsed); // já está em centavos
+    return Math.round(parsed * 100); // valor em reais
+}
+
+function haversineDistanceKm(lat1, lng1, lat2, lng2) {
+    const nLat1 = toFiniteNumber(lat1);
+    const nLng1 = toFiniteNumber(lng1);
+    const nLat2 = toFiniteNumber(lat2);
+    const nLng2 = toFiniteNumber(lng2);
+    if ([nLat1, nLng1, nLat2, nLng2].some((entry) => entry === null)) {
+        return null;
+    }
+
+    const toRad = (deg) => (deg * Math.PI) / 180;
+    const dLat = toRad(nLat2 - nLat1);
+    const dLng = toRad(nLng2 - nLng1);
+    const a = Math.sin(dLat / 2) * Math.sin(dLat / 2)
+        + Math.cos(toRad(nLat1)) * Math.cos(toRad(nLat2))
+        * Math.sin(dLng / 2) * Math.sin(dLng / 2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    const earthRadiusKm = 6371;
+    return earthRadiusKm * c;
+}
+
 class CancelRideCommand extends Command {
     constructor(data) {
         super(data);
@@ -96,10 +179,18 @@ class CancelRideCommand extends Command {
                 // Verificar estado atual
                 const currentState = await RideStateManager.getBookingState(redis, this.bookingId);
 
-                // Validar transição de estado (pode cancelar de qualquer estado exceto COMPLETED)
-                if (currentState === RideStateManager.STATES.COMPLETED) {
+                const blockedStatesAfterTripStart = new Set([
+                    RideStateManager.STATES.IN_PROGRESS,
+                    RideStateManager.STATES.REASSIGNED_IN_PROGRESS,
+                    RideStateManager.STATES.COMPLETED,
+                    RideStateManager.STATES.EARLY_ENDED_BY_RIDER,
+                    RideStateManager.STATES.EARLY_ENDED_REVIEW
+                ]);
+
+                // Depois que a corrida começou, o fluxo correto é complete/endEarly/review.
+                if (blockedStatesAfterTripStart.has(currentState)) {
                     metrics.recordCommand('CancelRide', (Date.now() - startTime) / 1000, false);
-                    return CommandResult.failure('Corrida já finalizada não pode ser cancelada')
+                    return CommandResult.failure('Após o início da corrida, use o encerramento adequado em vez de cancelamento')
                 }
 
                 // Parsear dados da corrida
@@ -115,53 +206,79 @@ class CancelRideCommand extends Command {
                     }
                 }
 
-                // ✅ CAOS SCENARIO: Lógica Dinâmica de Cancelamento (Passageiro)
+                const paymentService = new PaymentService();
+
+                // ✅ Regra de negócio (passageiro):
+                // - sem motorista aceito: estorno integral
+                // - com motorista aceito: taxa = woovi + distância + tempo + R$2,00
                 if (this.userType === 'customer' && (!this.cancellationFee || this.cancellationFee === 0)) {
                     if (currentState === RideStateManager.STATES.SEARCHING || currentState === RideStateManager.STATES.PENDING || currentState === RideStateManager.STATES.NOTIFIED) {
-                        // Cancelamento Gratuito (Busca/Pendente)
                         this.cancellationFee = 0;
-                        logger.info(`💸 [CancelRideCommand] Cancelamento na busca. Estorno 100%. Taxa Woovi absorvida pela Leaf.`);
-
-                        // ✅ PHASE 8: Pre-Acceptance Financial Tracking (Reserve Fund)
-                        const estimatedFare = parseFloat(bookingData.estimatedFare || 0);
-                        if (estimatedFare > 0) {
-                            let assumedWooviFee = estimatedFare * 0.0008; // 0.08%
-                            if (assumedWooviFee < 0.50) assumedWooviFee = 0.50; // min 50 cents
-
-                            // Acumular prejuízo no fundo de reserva (hash de métricas globais)
-                            await redis.hincrbyfloat('metrics:financial', 'assumed_cancellation_costs', assumedWooviFee);
-                            logger.info(`🔻 [ReserveFund] Adicionado prejuízo assumido de taxa PIX: R$ ${assumedWooviFee.toFixed(2)} para corrida ${this.bookingId}`);
-                        }
+                        logger.info(`💸 [CancelRideCommand] Cancelamento antes de aceite. Estorno integral.`);
                     } else if (currentState === RideStateManager.STATES.ACCEPTED || currentState === RideStateManager.STATES.ARRIVED) {
-                        // Passou do Aceite. Checar Tempo de Carência (2 minutos).
-                        const acceptedAtStr = bookingData.acceptedAt;
-                        if (acceptedAtStr) {
-                            const acceptedAt = new Date(acceptedAtStr).getTime();
-                            const elapsedMs = Date.now() - acceptedAt;
-                            const elapsedMinutes = Math.floor(elapsedMs / 60000);
+                        const estimatedFareCents = normalizeMoneyToCents(bookingData.estimatedFare || bookingData.totalAmount || 0);
+                        const wooviFee = Math.max(
+                            Math.round(estimatedFareCents * paymentService.WOOVI_FEE_PERCENTAGE),
+                            paymentService.WOOVI_FEE_MINIMUM
+                        );
+                        const acceptedAtMs = parseTimestampMs(bookingData.acceptedAt) || Date.now();
+                        const elapsedMinutes = Math.max(0, Math.round((Date.now() - acceptedAtMs) / 60000));
+                        const driverTimeFee = elapsedMinutes * PASSENGER_CANCEL_DRIVER_TIME_RATE_CENTS_PER_MIN;
 
-                            if (elapsedMinutes <= 2) {
-                                this.cancellationFee = 0;
-                                logger.info(`💸 [CancelRideCommand] Cancelamento dentro da carência (<= 2 min). Estorno 100%.`);
-                            } else {
-                                // Aplicar multa
-                                const wooviFee = 50; // 50 centavos
-                                const driverTimeFee = (elapsedMinutes - 2) * 50; // 50 centavos por minuto excedente
-
-                                const estimatedFare = parseInt(bookingData.estimatedFare || 0);
-                                const maxFee = estimatedFare > 0 ? Math.floor(estimatedFare * 0.4) : 500; // Teto de 40%
-
-                                let calculatedFee = wooviFee + driverTimeFee;
-                                if (calculatedFee > maxFee && maxFee > 0) calculatedFee = maxFee;
-
-                                this.cancellationFee = calculatedFee;
-                                logger.info(`💸 [CancelRideCommand] Cancelamento após carência (${elapsedMinutes} min). Aplicando multa de R$ ${(this.cancellationFee / 100).toFixed(2)}.`);
+                        const acceptedLocation = parseLocationCandidate(bookingData.driverAcceptedLocation);
+                        let currentDriverLocation = null;
+                        if (driverId) {
+                            try {
+                                const driverGeo = await redis.geopos('driver_locations', driverId);
+                                const driverGeoPoint = Array.isArray(driverGeo) && driverGeo.length > 0
+                                    ? driverGeo[0]
+                                    : null;
+                                const geoLng = toFiniteNumber(driverGeoPoint?.[0]);
+                                const geoLat = toFiniteNumber(driverGeoPoint?.[1]);
+                                if (geoLat !== null && geoLng !== null) {
+                                    currentDriverLocation = { lat: geoLat, lng: geoLng };
+                                }
+                            } catch (_geoError) {
+                                currentDriverLocation = null;
                             }
-                        } else {
-                            // Se não encontrou acceptedAt, sem taxa
-                            this.cancellationFee = 0;
-                            logger.warn(`⚠️ [CancelRideCommand] acceptedAt não encontrado para a corrida ${this.bookingId}, isentando de taxa de cancelamento.`);
                         }
+
+                        let traveledDistanceKm = null;
+                        if (acceptedLocation && currentDriverLocation) {
+                            traveledDistanceKm = haversineDistanceKm(
+                                acceptedLocation.lat,
+                                acceptedLocation.lng,
+                                currentDriverLocation.lat,
+                                currentDriverLocation.lng
+                            );
+                        }
+                        if (!Number.isFinite(traveledDistanceKm) || traveledDistanceKm < 0) {
+                            traveledDistanceKm = Math.max(
+                                0,
+                                Number.parseFloat(bookingData.driverDistanceToPickupKm || 0)
+                            );
+                        }
+
+                        const driverDistanceFee = Math.round(
+                            traveledDistanceKm * PASSENGER_CANCEL_DRIVER_DISTANCE_RATE_CENTS_PER_KM
+                        );
+                        const fixedFee = PASSENGER_CANCEL_FIXED_FEE_CENTS;
+                        const rawFee = wooviFee + driverDistanceFee + driverTimeFee + fixedFee;
+                        const cappedFee = estimatedFareCents > 0
+                            ? Math.min(rawFee, Math.round(estimatedFareCents * PASSENGER_CANCEL_FEE_CAP_PERCENT))
+                            : rawFee;
+
+                        this.cancellationFee = Math.max(
+                            Math.max(wooviFee + fixedFee, 0),
+                            Math.round(cappedFee)
+                        );
+
+                        logger.info(
+                            `💸 [CancelRideCommand] Cancelamento com motorista aceito. Taxa=R$ ${(this.cancellationFee / 100).toFixed(2)} (woovi=${(wooviFee / 100).toFixed(2)}, dist=${(driverDistanceFee / 100).toFixed(2)}, tempo=${(driverTimeFee / 100).toFixed(2)}, fixo=${(fixedFee / 100).toFixed(2)})`
+                        );
+                    } else {
+                        this.cancellationFee = 0;
+                        logger.info(`💸 [CancelRideCommand] Estado ${currentState} sem taxa de cancelamento para passageiro.`);
                     }
                 } else if (this.userType === 'driver' && currentState === RideStateManager.STATES.ARRIVED) {
                     // ✅ CAOS SCENARIO: No-Show do Passageiro (Driver No-Show Câncel)
@@ -192,7 +309,6 @@ class CancelRideCommand extends Command {
 
                 // Processar reembolso se houver pagamento
                 let refundResult = null;
-                const paymentService = new PaymentService();
                 const paymentRecord = await paymentService.getStoredPayment(this.bookingId);
 
                 if (paymentRecord && paymentRecord.status === 'PAID' && paymentRecord.paymentId) {

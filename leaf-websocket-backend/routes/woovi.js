@@ -611,7 +611,7 @@ router.post('/woovi/webhook', async (req, res) => {
         case 'charge.expired':
         case 'Leaf-charge.expired':
           logStructured('info', 'Cobrança expirada', { service: 'woovi-routes', event });
-          await handleChargeExpired(req.body);
+          await handleChargeExpired({ ...req.body, io: req.io });
           break;
 
         // ==================== EVENTOS DE TRANSAÇÃO ====================
@@ -813,7 +813,8 @@ async function handleChargeCompleted(data, io = null) {
               event: eventName,
               status: finalStatus,
               additionalInfo,
-              pixStatus: pix?.status || 'N/A'
+              pixStatus: pix?.status || 'N/A',
+              paidAt: charge?.paidAt || null
             }
           );
 
@@ -853,67 +854,54 @@ async function handleChargeCompleted(data, io = null) {
  */
 async function processExtensionConfirmation(rideId, chargeId, amount, passengerId, io, newFare) {
   try {
-    const EventSourcing = require('../services/event-sourcing');
+    const eventSourcing = require('../services/event-sourcing');
     const redisPool = require('../utils/redis-pool');
-    const redis = redisPool.getConnection();
+    const { applyConfirmedRideExtension } = require('../services/ride-lifecycle-service');
     const firebaseConfig = require('../firebase-config');
     const firestore = firebaseConfig.getFirestore();
+    const adminVars = require('firebase-admin');
 
-    // 1. Atualiza corrida no Redis
-    let bookingDataStr = await redis.hget('bookings:active', rideId);
-    let originalDriverId = null;
+    await redisPool.ensureConnection();
+    const redis = redisPool.getConnection();
 
-    if (bookingDataStr) {
-      let booking = JSON.parse(bookingDataStr);
-      booking.estimatedFare = parseInt(newFare);
-      booking.newEstimate = parseInt(newFare);
-      originalDriverId = booking.driverId;
+    const extensionResult = await applyConfirmedRideExtension({
+      redis,
+      bookingId: rideId,
+      chargeId,
+      amountInCents: amount,
+      io,
+      source: 'woovi_extension_webhook'
+    });
 
-      await redis.hset('bookings:active', rideId, JSON.stringify(booking));
-      await redis.hmset(`booking:${rideId}`, {
-        estimatedFare: parseInt(newFare),
-        newEstimate: parseInt(newFare)
-      });
-
-      // Notificar Sockets
-      if (io && passengerId) {
-        io.to(`customer_${passengerId}`).emit('rideExtensionConfirmed', {
-          bookingId: rideId,
-          newFare: newFare,
-          message: 'Pagamento da extensão confirmado. Rota atualizada!'
-        });
-      }
-      if (io && originalDriverId) {
-        io.to(`driver_${originalDriverId}`).emit('rideExtensionConfirmed', {
-          bookingId: rideId,
-          newFare: newFare,
-          message: 'Passageiro pagou a extensão. Rota atualizada!'
-        });
-      }
-    }
-
-    // 2. Incrementar o valor original no Firestore para bater com o Total Amount no encerramento (refund logic)
     if (firestore) {
       const holdingRef = firestore.collection('payment_holdings').doc(rideId);
-      const holdingDoc = await holdingRef.get();
-      if (holdingDoc.exists) {
-        const adminVars = require('firebase-admin');
-        await holdingRef.update({
-          amount: adminVars.firestore.FieldValue.increment(amount),
-          extensionChargeId: chargeId, // salva referencia
-          updatedAt: adminVars.firestore.FieldValue.serverTimestamp()
-        });
-        logStructured('info', 'Payment holding atualizado com valor de extensão', { rideId, addedAmount: amount });
-      }
+      await holdingRef.set({
+        amount: adminVars.firestore.FieldValue.increment(amount),
+        extensionChargeId: chargeId,
+        updatedAt: adminVars.firestore.FieldValue.serverTimestamp()
+      }, { merge: true });
+
+      const ridePaymentRef = firestore.collection('ride_payments').doc(rideId);
+      await ridePaymentRef.set({
+        amount: adminVars.firestore.FieldValue.increment(amount),
+        extensionChargeId: chargeId,
+        lastExtensionPaidAt: adminVars.firestore.FieldValue.serverTimestamp()
+      }, { merge: true });
+
+      logStructured('info', 'Pagamentos agregados atualizados com valor de extensão', {
+        service: 'woovi-routes',
+        rideId,
+        addedAmount: amount
+      });
     }
 
-    // 3. Event Sourcing
-    await EventSourcing.recordEvent(EventSourcing.EVENT_TYPES.RIDE_UPDATED, {
+    await eventSourcing.recordEvent(eventSourcing.EVENT_TYPES.RIDE_UPDATED, {
       bookingId: rideId,
       type: 'EXTENSION_PAID',
       chargeId: chargeId,
       amountAdded: amount,
-      newFare: newFare
+      newFare: newFare,
+      status: extensionResult?.success && !extensionResult?.skipped ? 'CONFIRMED' : 'PENDING_MANUAL_CHECK'
     });
 
   } catch (error) {
@@ -933,6 +921,8 @@ async function processPaymentConfirmation(chargeId, rideId, amount, passengerId,
   try {
     const PaymentService = require('../services/payment-service');
     const paymentDispatchService = require('../services/payment-dispatch-service');
+    const redisPool = require('../utils/redis-pool');
+    const { applyConfirmedRideExtension } = require('../services/ride-lifecycle-service');
     const paymentService = new PaymentService();
     const amountInReais = amount ? (amount / 100).toFixed(2) : null;
     const amountInCents = Number.isFinite(Number(amount)) ? Math.round(Number(amount)) : 0;
@@ -1099,6 +1089,28 @@ async function processPaymentConfirmation(chargeId, rideId, amount, passengerId,
     }
 
     try {
+      await paymentService.savePaymentHolding(resolvedBookingId, {
+        status: 'in_holding',
+        amount: amountInCents,
+        paymentMethod: 'pix',
+        paymentId: chargeId,
+        chargeId,
+        passengerId: passengerId || null,
+        paidAt: metadata?.paidAt || new Date().toISOString(),
+        confirmedAt: new Date().toISOString(),
+        temporaryRideId: rideId || null,
+        source: 'woovi_webhook'
+      });
+    } catch (holdingError) {
+      logStructured('warn', 'Falha ao materializar payment holding após webhook confirmado', {
+        service: 'woovi-routes',
+        rideId: resolvedBookingId,
+        chargeId,
+        error: holdingError.message
+      });
+    }
+
+    try {
       await paymentDispatchService.markBookingPaymentConfirmed({
         bookingId: resolvedBookingId,
         chargeId,
@@ -1113,6 +1125,34 @@ async function processPaymentConfirmation(chargeId, rideId, amount, passengerId,
         rideId: resolvedBookingId,
         chargeId,
         error: markError.message
+      });
+    }
+
+    try {
+      await redisPool.ensureConnection();
+      const redis = redisPool.getConnection();
+      const extensionResult = await applyConfirmedRideExtension({
+        redis,
+        bookingId: resolvedBookingId,
+        chargeId,
+        amountInCents,
+        io,
+        source: 'woovi_webhook'
+      });
+
+      if (extensionResult?.success && !extensionResult?.skipped) {
+        logStructured('info', 'Extensão confirmada automaticamente após webhook de pagamento', {
+          service: 'woovi-routes',
+          rideId: resolvedBookingId,
+          chargeId
+        });
+      }
+    } catch (extensionError) {
+      logStructured('warn', 'Falha ao aplicar extensão confirmada após webhook', {
+        service: 'woovi-routes',
+        rideId: resolvedBookingId,
+        chargeId,
+        error: extensionError.message
       });
     }
 
@@ -1235,7 +1275,68 @@ async function handleChargeCreated(data) {
 }
 
 async function handleChargeExpired(data) {
-  logStructured('info', 'Webhook Handler: Cobrança expirada (stub)', { service: 'woovi-routes' });
+  const paymentDispatchService = require('../services/payment-dispatch-service');
+  const redisPool = require('../utils/redis-pool');
+  const { expirePendingRideExtension } = require('../services/ride-lifecycle-service');
+
+  const charge = data?.charge || data?.data || {};
+  const chargeId =
+    charge?.identifier ||
+    charge?.id ||
+    charge?.transactionID ||
+    data?.identifier ||
+    data?.id ||
+    data?.transactionID ||
+    null;
+
+  if (!chargeId) {
+    logStructured('warn', 'Webhook Handler: Cobrança expirada sem chargeId', {
+      service: 'woovi-routes'
+    });
+    return;
+  }
+
+  let resolvedBookingId = null;
+  try {
+    resolvedBookingId = await paymentDispatchService.resolveBookingIdFromPaymentRefs({
+      bookingId: data?.rideId || data?.bookingId || null,
+      chargeId,
+      temporaryRideId: data?.rideId || data?.correlationID || null
+    });
+  } catch (resolveError) {
+    logStructured('warn', 'Webhook Handler: não foi possível resolver booking da cobrança expirada', {
+      service: 'woovi-routes',
+      chargeId,
+      error: resolveError.message
+    });
+  }
+
+  if (!resolvedBookingId) {
+    logStructured('warn', 'Webhook Handler: cobrança expirada sem booking vinculado', {
+      service: 'woovi-routes',
+      chargeId
+    });
+    return;
+  }
+
+  await redisPool.ensureConnection();
+  const redis = redisPool.getConnection();
+  const result = await expirePendingRideExtension({
+    redis,
+    bookingId: resolvedBookingId,
+    chargeId,
+    io: data?.io || null,
+    source: 'woovi_charge_expired_webhook',
+    reason: 'PAYMENT_TIMEOUT'
+  });
+
+  logStructured('info', 'Webhook Handler: cobrança expirada processada', {
+    service: 'woovi-routes',
+    chargeId,
+    bookingId: resolvedBookingId,
+    skipped: Boolean(result?.skipped),
+    reason: result?.reason || null
+  });
 }
 
 async function handleTransactionReceived(data, io = null) {

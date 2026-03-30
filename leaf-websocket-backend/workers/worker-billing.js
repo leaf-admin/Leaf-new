@@ -13,6 +13,7 @@ const PaymentService = require('../services/payment-service');
 const driverApprovalService = require('../services/driver-approval-service');
 const idempotencyService = require('../services/idempotency-service');
 const { EVENT_TYPES } = require('../events');
+const { isMultiLegBillingEnabled } = require('../utils/ride-lifecycle-feature-flags');
 
 // Criar WorkerManager focado em billing
 const workerManager = new WorkerManager({
@@ -53,6 +54,112 @@ workerManager.registerListener(EVENT_TYPES.RIDE_COMPLETED, async (event) => {
     }
 
     const paymentService = new PaymentService();
+    const rideLegSettlements = Array.isArray(event.data?.rideLegSettlements)
+        ? event.data.rideLegSettlements.filter(Boolean)
+        : [];
+
+    if (rideLegSettlements.length > 1) {
+        if (!isMultiLegBillingEnabled()) {
+            throw new Error(
+                `Multi-leg billing desabilitado para booking ${bookingId}; habilite ENABLE_MULTI_LEG_BILLING=true antes do rollout`
+            );
+        }
+
+        const distributedAt = new Date().toISOString();
+        const legResults = [];
+
+        for (const leg of rideLegSettlements) {
+            const legDriverId = leg?.driverId;
+            const driverNetAmountReais = Number(leg?.driverNetAmount || 0);
+            const driverNetAmountCents = paymentService.toCents(driverNetAmountReais);
+
+            if (!legDriverId || driverNetAmountCents <= 0) {
+                legResults.push({
+                    legId: leg?.legId || null,
+                    legNumber: leg?.legNumber || null,
+                    driverId: legDriverId || null,
+                    skipped: true,
+                    reason: 'INVALID_DRIVER_OR_NET_AMOUNT'
+                });
+                continue;
+            }
+
+            const creditResult = await paymentService.creditDriverBalance(
+                legDriverId,
+                driverNetAmountCents,
+                `${bookingId}:leg:${leg?.legNumber || 'x'}`
+            );
+
+            if (!creditResult.success) {
+                throw new Error(
+                    `Falha ao creditar saldo da perna ${leg?.legNumber || '?'} para ${legDriverId}: ${creditResult.error}`
+                );
+            }
+
+            legResults.push({
+                legId: leg?.legId || null,
+                legNumber: leg?.legNumber || null,
+                driverId: legDriverId,
+                grossAmount: Number(leg?.grossAmount || 0),
+                driverNetAmount: driverNetAmountReais,
+                operationalFee: Number(leg?.operationalFee || 0),
+                paymentIntermediationFee: Number(leg?.paymentIntermediationFee || 0),
+                platformAbsorbedOperationalFee: Number(leg?.platformAbsorbedOperationalFee || 0),
+                platformAbsorbedPaymentIntermediationFee: Number(leg?.platformAbsorbedPaymentIntermediationFee || 0),
+                balanceCreditId: creditResult.balanceId || legDriverId,
+                distributedAt
+            });
+        }
+
+        const distributionSummary = {
+            rideId: bookingId,
+            driverId,
+            status: 'distributed',
+            distributedAt,
+            mode: 'multi_leg',
+            legs: legResults,
+            totalGrossAmount: rideLegSettlements.reduce(
+                (accumulator, leg) => accumulator + Number(leg?.grossAmount || 0),
+                0
+            ),
+            totalDriverNetAmount: rideLegSettlements.reduce(
+                (accumulator, leg) => accumulator + Number(leg?.driverNetAmount || 0),
+                0
+            ),
+            totalPlatformAbsorbedOperationalFee: rideLegSettlements.reduce(
+                (accumulator, leg) => accumulator + Number(leg?.platformAbsorbedOperationalFee || 0),
+                0
+            ),
+            totalPlatformAbsorbedPaymentIntermediationFee: rideLegSettlements.reduce(
+                (accumulator, leg) => accumulator + Number(leg?.platformAbsorbedPaymentIntermediationFee || 0),
+                0
+            )
+        };
+
+        await paymentService.saveDistributionToFirestore(distributionSummary);
+        await paymentService.updatePaymentHolding(bookingId, {
+            status: 'distributed',
+            distributedAt,
+            distributionData: distributionSummary
+        }).catch((error) => {
+            logStructured('warn', 'Falha ao atualizar payment holding da distribuição multi-leg', {
+                bookingId,
+                error: error.message
+            });
+            return null;
+        });
+
+        logStructured('info', 'Processamento contábil multi-leg concluído com sucesso', {
+            bookingId,
+            legs: legResults.length
+        });
+
+        await idempotencyService.cacheResult(idempotencyKey, distributionSummary, 604800);
+        return {
+            success: true,
+            data: distributionSummary
+        };
+    }
 
     // Obter dados da conta Woovi do motorista
     const accountData = await driverApprovalService.getDriverWooviAccount(driverId);
@@ -158,6 +265,11 @@ process.on('SIGINT', async () => {
 });
 
 // Iniciar worker
+logStructured('info', 'Inicializando billing-worker', {
+    service: 'billing-worker',
+    multiLegBillingEnabled: isMultiLegBillingEnabled()
+});
+
 workerManager.start().catch(error => {
     logStructured('error', 'Erro fatal ao iniciar billing worker', {
         service: 'billing-worker',

@@ -14,8 +14,17 @@ const eventSourcing = require('./event-sourcing');
 const { EVENT_TYPES } = require('./event-sourcing');
 const { logger, logStructured, logError } = require('../utils/logger');
 const { performance } = require('perf_hooks');
+const PaymentService = require('./payment-service');
 
-const DISPATCHABLE_SEARCH_STATES = new Set(['PENDING', 'SEARCHING', 'EXPANDED', 'NOTIFIED', 'AWAITING_RESPONSE', 'REJECTED']);
+const DISPATCHABLE_SEARCH_STATES = new Set([
+    'PENDING',
+    'SEARCHING',
+    'EXPANDED',
+    'NOTIFIED',
+    'AWAITING_RESPONSE',
+    'REJECTED',
+    'REASSIGNMENT_PENDING'
+]);
 const ELIGIBLE_DRIVER_GEO_KEY = process.env.ELIGIBLE_DRIVER_GEO_KEY || 'driver_locations_eligible';
 const ALL_DRIVER_GEO_KEY = process.env.ALL_DRIVER_GEO_KEY || 'driver_locations';
 const STRICT_ELIGIBLE_DRIVER_POOL = process.env.STRICT_ELIGIBLE_DRIVER_POOL !== 'false';
@@ -39,6 +48,7 @@ class DriverNotificationDispatcher {
         this.redis = redis || redisPool.getConnection();
         this.io = io;
         this.timeoutHandlers = new Map(); // bookingId_driverId -> timeoutId
+        this.paymentService = new PaymentService();
 
         // Configurações de score (Foco 100% em distância conforme solicitado)
         this.scoreWeights = {
@@ -517,6 +527,8 @@ class DriverNotificationDispatcher {
             preflightPipeline.get(activeNotificationKey);
             preflightPipeline.sismember(`ride_excluded_drivers:${bookingId}`, driverId);
             preflightPipeline.sismember(`ride_notifications:${bookingId}`, driverId);
+            preflightPipeline.hmget(`driver:${driverId}`, 'isOnline', 'dispatchEligible', 'status');
+            preflightPipeline.ttl(`driver_soft_ban:${driverId}`);
             const preflightResults = await preflightPipeline.exec();
 
             const currentActiveId = preflightResults?.[0] && !preflightResults[0][0]
@@ -524,6 +536,30 @@ class DriverNotificationDispatcher {
                 : null;
             const isExcluded = Number(preflightResults?.[1] && !preflightResults[1][0] ? preflightResults[1][1] : 0) === 1;
             const alreadyNotified = Number(preflightResults?.[2] && !preflightResults[2][0] ? preflightResults[2][1] : 0) === 1;
+            const driverStatusTuple = preflightResults?.[3] && !preflightResults[3][0]
+                ? (preflightResults[3][1] || [])
+                : [];
+            const softBanTtlSeconds = Number(preflightResults?.[4] && !preflightResults[4][0] ? preflightResults[4][1] : -2);
+            const rawIsOnline = driverStatusTuple?.[0];
+            const rawDispatchEligible = driverStatusTuple?.[1];
+            const rawDriverStatus = driverStatusTuple?.[2];
+            const isDriverOnline = String(rawIsOnline || '').toLowerCase() === 'true';
+            const isDriverDispatchEligible = String(rawDispatchEligible || '').toLowerCase() !== 'false';
+            const normalizedDriverStatus = String(rawDriverStatus || 'available').toLowerCase();
+            const isDriverStatusEligible =
+                normalizedDriverStatus === '' ||
+                normalizedDriverStatus === 'available' ||
+                normalizedDriverStatus === 'online';
+
+            if (!isDriverOnline || !isDriverDispatchEligible || !isDriverStatusEligible) {
+                logger.debug(`⏭️ [Dispatcher] Driver ${driverId} ignorado no preflight (online=${isDriverOnline}, dispatchEligible=${isDriverDispatchEligible}, status=${normalizedDriverStatus || 'n/a'})`);
+                return false;
+            }
+
+            if (Number.isFinite(softBanTtlSeconds) && softBanTtlSeconds > 0) {
+                logger.info(`⛔ [Dispatcher] Driver ${driverId} em soft-ban por ${softBanTtlSeconds}s, pulando dispatch`);
+                return false;
+            }
 
             // 2. Verificar se motorista já tem corrida ativa na tela (usa chave específica para UI)
             if (currentActiveId && currentActiveId !== bookingId) {
@@ -586,19 +622,85 @@ class DriverNotificationDispatcher {
                 ...finalDispatchability.bookingData,
                 ...bookingData
             };
+            const pickupLocationParsed = this.safeJSONParse(effectiveBookingData.pickupLocation);
+            const destinationLocationParsed = this.safeJSONParse(effectiveBookingData.destinationLocation);
+            const operationalContinuation = this.safeJSONParse(
+                effectiveBookingData.operationalContinuation || effectiveBookingData.reassignmentContext,
+                null
+            );
+
+            const pickupLat = Number(pickupLocationParsed?.lat);
+            const pickupLng = Number(pickupLocationParsed?.lng);
+            const destinationLat = Number(destinationLocationParsed?.lat);
+            const destinationLng = Number(destinationLocationParsed?.lng);
+            let estimatedTripDistanceKm = null;
+            if (
+                Number.isFinite(pickupLat) &&
+                Number.isFinite(pickupLng) &&
+                Number.isFinite(destinationLat) &&
+                Number.isFinite(destinationLng)
+            ) {
+                const earthRadiusKm = 6371;
+                const toRad = (deg) => (deg * Math.PI) / 180;
+                const dLat = toRad(destinationLat - pickupLat);
+                const dLng = toRad(destinationLng - pickupLng);
+                const a = Math.sin(dLat / 2) * Math.sin(dLat / 2)
+                    + Math.cos(toRad(pickupLat)) * Math.cos(toRad(destinationLat))
+                    * Math.sin(dLng / 2) * Math.sin(dLng / 2);
+                const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+                estimatedTripDistanceKm = Number((earthRadiusKm * c).toFixed(2));
+            }
+
+            const driverDistanceToPickupKm = Number(effectiveBookingData.driverDistanceToPickupKm);
+            const estimatedArrivalToPickupMinFromDistance = Number.isFinite(driverDistanceToPickupKm) && driverDistanceToPickupKm >= 0
+                ? Math.max(1, Math.round(driverDistanceToPickupKm / 0.45))
+                : null;
+            const estimatedArrivalToPickupMin = Number.isFinite(Number(effectiveBookingData.estimatedArrivalToPickupMin))
+                ? Number(effectiveBookingData.estimatedArrivalToPickupMin)
+                : estimatedArrivalToPickupMinFromDistance;
 
             // 3. Preparar dados da notificação
             const notificationData = {
                 rideId: bookingId,
                 bookingId: bookingId,
                 customerId: effectiveBookingData.customerId,
-                pickupLocation: this.safeJSONParse(effectiveBookingData.pickupLocation),
-                destinationLocation: this.safeJSONParse(effectiveBookingData.destinationLocation),
+                passengerName: effectiveBookingData.passengerName || effectiveBookingData.customerName || null,
+                pickupLocation: pickupLocationParsed,
+                destinationLocation: destinationLocationParsed,
                 estimatedFare: effectiveBookingData.estimatedFare,
                 paymentMethod: effectiveBookingData.paymentMethod || 'pix',
+                pickupAddress: pickupLocationParsed?.add || pickupLocationParsed?.address || null,
+                destinationAddress: destinationLocationParsed?.add || destinationLocationParsed?.address || null,
+                ...(Number.isFinite(estimatedTripDistanceKm) ? { estimatedTripDistanceKm } : {}),
+                ...(Number.isFinite(estimatedArrivalToPickupMin) ? { estimatedArrivalToPickupMin } : {}),
+                ...(Number.isFinite(driverDistanceToPickupKm) ? { driverDistanceToPickupKm } : {}),
+                ...(operationalContinuation
+                    ? {
+                        isOperationalContinuation: true,
+                        rideMode: 'continuation',
+                        previousDriverId: operationalContinuation?.interruptedByDriverId || null,
+                        remainingReservedAmount: Number(operationalContinuation?.remainingReservedAmount || 0) || 0,
+                        continuationMessage: 'Corrida em continuidade a partir do ponto de interrupção.',
+                        operationalContinuation
+                    }
+                    : {}),
                 timeout: responseTimeoutSeconds,
                 timestamp: new Date().toISOString()
             };
+
+            const estimatedFare = Number(
+                effectiveBookingData.estimatedFare
+                ?? effectiveBookingData.estimate
+                ?? effectiveBookingData.fare
+                ?? 0
+            );
+            if (Number.isFinite(estimatedFare) && estimatedFare >= 0) {
+                const estimatedBreakdown = this.paymentService.calculateFareBreakdownFromReais(estimatedFare, 0);
+                notificationData.estimatedOperationalFee = estimatedBreakdown.operationalFee;
+                notificationData.estimatedPaymentIntermediationFee = estimatedBreakdown.paymentIntermediationFee;
+                notificationData.estimatedTotalFees = estimatedBreakdown.totalFees;
+                notificationData.estimatedDriverNetAmount = estimatedBreakdown.driverNetAmount;
+            }
 
             // 4. ✅ VERIFICAR CONEXÃO: Verificar se motorista está conectado antes de enviar
             const driverRoom = `driver_${driverId}`;
@@ -757,7 +859,11 @@ class DriverNotificationDispatcher {
                     bookingId,
                     {
                         ...bookingData,
-                        score: driver.score
+                        score: driver.score,
+                        driverDistanceToPickupKm: driver.distance,
+                        estimatedArrivalToPickupMin: Number.isFinite(driver.distance)
+                            ? Math.max(1, Math.round(driver.distance / 0.45))
+                            : null
                     },
                     {
                         skipInitialDispatchabilityCheck: true,

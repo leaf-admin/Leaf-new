@@ -7,6 +7,7 @@ const { logStructured, logError } = require('../utils/logger');
 const redisPool = require('../utils/redis-pool');
 const RedisScan = require('../utils/redis-scan');
 const kycDriverStatusService = require('../services/kyc-driver-status-service');
+const h3MapService = require('../services/h3-map-service');
 const os = require('os');
 
 // ✅ Importar middlewares de autenticação
@@ -3686,6 +3687,37 @@ router.get('/api/map/locations', async (req, res) => {
   } catch (error) {
     logError(error, 'Erro ao buscar localizações:', { service: 'dashboard-routes' });
     res.status(500).json({ error: 'Erro interno do servidor' });
+  }
+});
+
+router.get('/api/map/h3-cells', async (req, res) => {
+  try {
+    const redis = redisPool.getConnection();
+    const includeEmpty = h3MapService.helpers.parseBoolean(req.query.includeEmpty, false);
+    const includeBoundary = h3MapService.helpers.parseBoolean(req.query.includeBoundary, true);
+    const payload = await h3MapService.getCells({
+      redis,
+      bbox: req.query.bbox,
+      zoom: req.query.zoom,
+      surface: String(req.query.surface || 'dashboard').trim().toLowerCase(),
+      mode: String(req.query.mode || 'supply_demand').trim().toLowerCase(),
+      includeEmpty,
+      includeBoundary
+    });
+
+    res.json(payload);
+  } catch (error) {
+    const statusCode = Number(error?.statusCode || 500);
+    logError(error, 'Erro ao montar mapa H3', {
+      service: 'dashboard-routes',
+      operation: 'getMapH3Cells',
+      statusCode
+    });
+
+    res.status(statusCode).json({
+      error: error?.message || 'Erro interno ao montar mapa H3',
+      ...(error?.details ? { details: error.details } : {})
+    });
   }
 });
 

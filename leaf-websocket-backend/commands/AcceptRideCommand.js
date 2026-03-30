@@ -25,6 +25,61 @@ const traceContext = require('../utils/trace-context');
 const { metrics } = require('../utils/prometheus-metrics');
 const { validateAndEnsureTraceIdInCommand } = require('../utils/trace-validator');
 const { setActiveTripForDriver } = require('../utils/active-trip-index');
+const { resolveAcceptRidePayload } = require('../utils/accept-ride-payload');
+
+function toFiniteNumber(value) {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : null;
+}
+
+function parseLocationCandidate(rawValue) {
+    if (!rawValue) return null;
+    if (typeof rawValue === 'object') {
+        const lat = toFiniteNumber(rawValue.lat);
+        const lng = toFiniteNumber(rawValue.lng);
+        if (lat === null || lng === null) return null;
+        return { lat, lng };
+    }
+
+    try {
+        const parsed = JSON.parse(rawValue);
+        const lat = toFiniteNumber(parsed?.lat);
+        const lng = toFiniteNumber(parsed?.lng);
+        if (lat === null || lng === null) return null;
+        return { lat, lng };
+    } catch (_error) {
+        return null;
+    }
+}
+
+function haversineDistanceKm(lat1, lng1, lat2, lng2) {
+    const nLat1 = toFiniteNumber(lat1);
+    const nLng1 = toFiniteNumber(lng1);
+    const nLat2 = toFiniteNumber(lat2);
+    const nLng2 = toFiniteNumber(lng2);
+    if ([nLat1, nLng1, nLat2, nLng2].some((entry) => entry === null)) {
+        return null;
+    }
+
+    const toRad = (deg) => (deg * Math.PI) / 180;
+    const dLat = toRad(nLat2 - nLat1);
+    const dLng = toRad(nLng2 - nLng1);
+    const a = Math.sin(dLat / 2) * Math.sin(dLat / 2)
+        + Math.cos(toRad(nLat1)) * Math.cos(toRad(nLat2))
+        * Math.sin(dLng / 2) * Math.sin(dLng / 2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    const earthRadiusKm = 6371;
+    return earthRadiusKm * c;
+}
+
+function estimateEtaMinutesFromDistanceKm(distanceKm) {
+    if (!Number.isFinite(distanceKm) || distanceKm < 0) {
+        return null;
+    }
+    // Estimativa conservadora (~27 km/h em tráfego urbano)
+    const minutes = Math.round(distanceKm / 0.45);
+    return Math.max(1, minutes);
+}
 
 class AcceptRideCommand extends Command {
     constructor(data) {
@@ -65,21 +120,65 @@ class AcceptRideCommand extends Command {
                 const redis = redisPool.getConnection();
 
                 const bookingKey = `booking:${this.bookingId}`;
+                const normalizeState = (value) => String(value || '').trim().toUpperCase();
 
                 // Garantir lock da corrida aceita (evita re-oferta até completeTrip/cancelRide).
                 const lockStatus = await driverLockManager.isDriverLocked(this.driverId);
                 if (lockStatus.isLocked && lockStatus.bookingId !== this.bookingId) {
-                    metrics.recordCommand('AcceptRide', (Date.now() - startTime) / 1000, false);
-                    return CommandResult.failure('Motorista já está em outra corrida')
+                    // Lock pode ficar residual após falhas/restarts; recuperar automaticamente quando stale.
+                    let staleLockDetected = false;
+                    try {
+                        const [lockStateRaw, lockStatusRaw] = await redis.hmget(
+                            `booking:${lockStatus.bookingId}`,
+                            'state',
+                            'status'
+                        );
+                        const lockState = normalizeState(lockStateRaw);
+                        const lockBookingStatus = normalizeState(lockStatusRaw);
+                        const terminalStates = new Set([
+                            'COMPLETED',
+                            'CANCELED',
+                            'CANCELLED',
+                            'REJECTED',
+                            'EXPIRED',
+                            'NO_DRIVERS_FOUND'
+                        ]);
+                        staleLockDetected = (
+                            (!lockState && !lockBookingStatus) ||
+                            terminalStates.has(lockState) ||
+                            terminalStates.has(lockBookingStatus)
+                        );
+                    } catch (_lockInspectError) {
+                        staleLockDetected = false;
+                    }
+
+                    if (staleLockDetected) {
+                        await driverLockManager.releaseLock(this.driverId);
+                        logStructured('warn', 'Lock stale recuperado durante AcceptRideCommand', {
+                            command: 'AcceptRideCommand',
+                            driverId: this.driverId,
+                            previousBookingId: lockStatus.bookingId,
+                            newBookingId: this.bookingId
+                        });
+                    } else {
+                        metrics.recordCommand('AcceptRide', (Date.now() - startTime) / 1000, false);
+                        return CommandResult.failure('Motorista já está em outra corrida');
+                    }
                 }
 
-                if (lockStatus.isLocked && lockStatus.bookingId === this.bookingId) {
+                const lockStatusAfterRecovery = await driverLockManager.isDriverLocked(this.driverId);
+                if (lockStatusAfterRecovery.isLocked && lockStatusAfterRecovery.bookingId !== this.bookingId) {
+                    metrics.recordCommand('AcceptRide', (Date.now() - startTime) / 1000, false);
+                    return CommandResult.failure('Motorista já está em outra corrida');
+                }
+
+                if (lockStatusAfterRecovery.isLocked && lockStatusAfterRecovery.bookingId === this.bookingId) {
                     await driverLockManager.renewLock(this.driverId, 3600);
-                } else if (!lockStatus.isLocked) {
+                } else if (!lockStatusAfterRecovery.isLocked) {
                     const lockAcquired = await driverLockManager.acquireLock(this.driverId, this.bookingId, 3600);
                     if (!lockAcquired) {
                         metrics.recordCommand('AcceptRide', (Date.now() - startTime) / 1000, false);
-                        return CommandResult.failure('Motorista já está em outra corrida')
+                        return CommandResult.failure('Motorista já está em outra corrida');
                     }
                 }
 
@@ -99,9 +198,26 @@ class AcceptRideCommand extends Command {
 
                     local currentState = redis.call('HGET', bookingKey, 'state')
                     local currentStatus = redis.call('HGET', bookingKey, 'status')
-                    
-                    if currentState ~= 'PENDING' and currentState ~= 'REQUESTED' and currentState ~= 'SEARCHING' and currentStatus ~= 'pending' then
-                        return 'ERR_INVALID_STATE_' .. (currentState or 'null')
+                    local currentDriverId = redis.call('HGET', bookingKey, 'driverId')
+                    local currentStateUpper = string.upper(currentState or '')
+                    local currentStatusUpper = string.upper(currentStatus or '')
+
+                    if (
+                        (currentStateUpper == 'ACCEPTED' or currentStatusUpper == 'ACCEPTED' or currentStateUpper == 'IN_PROGRESS' or currentStatusUpper == 'IN_PROGRESS' or currentStatusUpper == 'STARTED')
+                        and tostring(currentDriverId or '') == tostring(driverId)
+                    ) then
+                        local customerId = redis.call('HGET', bookingKey, 'customerId')
+                        local pickupLoc = redis.call('HGET', bookingKey, 'pickupLocation')
+                        return 'OK_ALREADY_ACCEPTED|||' .. (customerId or '') .. '|||' .. (pickupLoc or '')
+                    end
+
+                    if currentStateUpper ~= 'PENDING'
+                        and currentStateUpper ~= 'REQUESTED'
+                        and currentStateUpper ~= 'SEARCHING'
+                        and currentStateUpper ~= 'REASSIGNMENT_PENDING'
+                        and currentStatusUpper ~= 'PENDING'
+                        and currentStatusUpper ~= 'REASSIGNMENT_PENDING' then
+                        return 'ERR_INVALID_STATE_' .. (currentStateUpper ~= '' and currentStateUpper or 'NULL')
                     end
 
                     -- Realiza o update atômico
@@ -130,10 +246,111 @@ class AcceptRideCommand extends Command {
                     return CommandResult.failure(`A corrida já foi aceita por outro motorista ou não está mais disponível.`);
                 }
 
+                const alreadyAcceptedBySameDriver =
+                    typeof redisResult === 'string' &&
+                    redisResult.startsWith('OK_ALREADY_ACCEPTED|||');
+                const serializedResult = alreadyAcceptedBySameDriver
+                    ? redisResult.replace('OK_ALREADY_ACCEPTED|||', '')
+                    : redisResult;
+
                 // Parseando retorno atômico do LUA
-                const [customerId, rawPickupLocation] = redisResult.split('|||');
-                const pickupLocation = rawPickupLocation ? JSON.parse(rawPickupLocation) : null;
-                const currentState = 'PENDING'; // Historicamente veio de Pending
+                const [customerId, rawPickupLocation] = String(serializedResult || '|||').split('|||');
+                const pickupLocation = parseLocationCandidate(rawPickupLocation);
+                const currentState = alreadyAcceptedBySameDriver ? 'ACCEPTED' : 'PENDING'; // Historicamente veio de Pending
+
+                const bookingSnapshot = await redis.hgetall(bookingKey);
+                let operationalContinuation = null;
+                try {
+                    operationalContinuation = bookingSnapshot?.operationalContinuation
+                        ? JSON.parse(bookingSnapshot.operationalContinuation)
+                        : null;
+                } catch (_continuationError) {
+                    operationalContinuation = null;
+                }
+                const isReassignment = Boolean(
+                    operationalContinuation &&
+                    (
+                        operationalContinuation.status === 'SEARCHING_REPLACEMENT_DRIVER' ||
+                        operationalContinuation.status === 'REPLACEMENT_DRIVER_ACCEPTED'
+                    )
+                );
+                let destinationLocation = parseLocationCandidate(bookingSnapshot?.destinationLocation);
+                let estimatedFare = Number.parseFloat(
+                    bookingSnapshot?.estimatedFare ?? bookingSnapshot?.fare ?? bookingSnapshot?.estimate ?? 0
+                );
+
+                let driverAcceptedLocation = null;
+                let driverDistanceToPickupKm = null;
+                let estimatedArrivalToPickupMin = null;
+
+                try {
+                    const driverGeo = await redis.geopos('driver_locations', this.driverId);
+                    const driverGeoPoint = Array.isArray(driverGeo) && driverGeo.length > 0
+                        ? driverGeo[0]
+                        : null;
+                    const driverLng = toFiniteNumber(driverGeoPoint?.[0]);
+                    const driverLat = toFiniteNumber(driverGeoPoint?.[1]);
+                    if (driverLat !== null && driverLng !== null) {
+                        driverAcceptedLocation = { lat: driverLat, lng: driverLng };
+                    }
+                } catch (_geoError) {
+                    driverAcceptedLocation = null;
+                }
+
+                if (driverAcceptedLocation && pickupLocation) {
+                    const computedDistance = haversineDistanceKm(
+                        driverAcceptedLocation.lat,
+                        driverAcceptedLocation.lng,
+                        pickupLocation.lat,
+                        pickupLocation.lng
+                    );
+                    if (Number.isFinite(computedDistance)) {
+                        driverDistanceToPickupKm = Number(computedDistance.toFixed(3));
+                        estimatedArrivalToPickupMin = estimateEtaMinutesFromDistanceKm(driverDistanceToPickupKm);
+                    }
+                }
+
+                const bookingPatch = {};
+                if (driverAcceptedLocation) {
+                    bookingPatch.driverAcceptedLocation = JSON.stringify(driverAcceptedLocation);
+                }
+                if (driverDistanceToPickupKm !== null) {
+                    bookingPatch.driverDistanceToPickupKm = String(driverDistanceToPickupKm);
+                }
+                if (estimatedArrivalToPickupMin !== null) {
+                    bookingPatch.estimatedArrivalToPickupMin = String(estimatedArrivalToPickupMin);
+                }
+                if (Object.keys(bookingPatch).length > 0) {
+                    await redis.hset(bookingKey, bookingPatch);
+                }
+
+                if (isReassignment && operationalContinuation) {
+                    const continuationPatch = {
+                        ...operationalContinuation,
+                        status: 'REPLACEMENT_DRIVER_ACCEPTED',
+                        replacementDriverId: this.driverId,
+                        replacementAcceptedAt: updatedAt
+                    };
+                    await redis.hset(bookingKey, {
+                        operationalContinuation: JSON.stringify(continuationPatch),
+                        reassignedDriverId: this.driverId,
+                        reassignedAcceptedAt: updatedAt
+                    });
+                }
+
+                const enrichedPayload = await resolveAcceptRidePayload(redis, this.bookingId, {
+                    pickupLocation,
+                    destinationLocation,
+                    estimatedFare,
+                    driverAcceptedLocation,
+                    driverDistanceToPickupKm,
+                    estimatedArrivalToPickupMin
+                });
+                destinationLocation = enrichedPayload.destinationLocation;
+                estimatedFare = enrichedPayload.estimatedFare;
+                driverAcceptedLocation = enrichedPayload.driverAcceptedLocation;
+                driverDistanceToPickupKm = enrichedPayload.driverDistanceToPickupKm;
+                estimatedArrivalToPickupMin = enrichedPayload.estimatedArrivalToPickupMin;
 
                 // Limpar corrida ativa na tela do motorista após aceite bem-sucedido.
                 await redis.del(`driver_active_notification:${this.driverId}`);
@@ -142,28 +359,33 @@ class AcceptRideCommand extends Command {
                 await setActiveTripForDriver(redis, this.driverId, this.bookingId, customerId);
 
                 // Registrar histórico fora do caminho crítico de latência.
-                setImmediate(() => {
-                    eventSourcing.recordEvent(require('../services/event-sourcing').EVENT_TYPES.STATE_CHANGED, {
-                        bookingId: this.bookingId,
-                        fromState: currentState,
-                        toState: newState,
-                        driverId: this.driverId
-                    }).catch(() => null);
-                });
+                if (!alreadyAcceptedBySameDriver) {
+                    setImmediate(() => {
+                        eventSourcing.recordEvent(require('../services/event-sourcing').EVENT_TYPES.STATE_CHANGED, {
+                            bookingId: this.bookingId,
+                            fromState: currentState,
+                            toState: newState,
+                            driverId: this.driverId
+                        }).catch(() => null);
+                    });
+                }
 
                 // Criar evento canônico
-                const event = new RideAcceptedEvent({
-                    bookingId: this.bookingId,
-                    driverId: this.driverId,
-                    customerId: customerId,
-                    traceId: this.traceId, // ✅ Incluir traceId no evento
-                    correlationId: this.correlationId || this.bookingId // ✅ Incluir correlationId no evento
-                });
+                const event = alreadyAcceptedBySameDriver
+                    ? null
+                    : new RideAcceptedEvent({
+                        bookingId: this.bookingId,
+                        driverId: this.driverId,
+                        customerId: customerId,
+                        traceId: this.traceId, // ✅ Incluir traceId no evento
+                        correlationId: this.correlationId || this.bookingId // ✅ Incluir correlationId no evento
+                    });
 
                 logStructured('info', 'AcceptRideCommand executado com sucesso', {
                     bookingId: this.bookingId,
                     driverId: this.driverId,
                     customerId: customerId,
+                    idempotentReuse: alreadyAcceptedBySameDriver,
                     command: 'AcceptRideCommand'
                 });
 
@@ -175,8 +397,15 @@ class AcceptRideCommand extends Command {
                     bookingId: this.bookingId,
                     driverId: this.driverId,
                     customerId: customerId,
-                    event: event.toJSON(),
-                    pickupLocation
+                    event: event ? event.toJSON() : null,
+                    pickupLocation,
+                    destinationLocation,
+                    estimatedFare: Number.isFinite(estimatedFare) ? estimatedFare : null,
+                    driverAcceptedLocation,
+                    driverDistanceToPickupKm,
+                    estimatedArrivalToPickupMin,
+                    idempotentAccept: alreadyAcceptedBySameDriver,
+                    isReassignment
                 });
 
             } catch (error) {

@@ -28,6 +28,11 @@ const { SpanStatusCode } = require('@opentelemetry/api');
 const { validateAndEnsureTraceIdInCommand } = require('../utils/trace-validator');
 const { clearActiveTripForDriver } = require('../utils/active-trip-index');
 const tripLocationPersistenceService = require('../services/trip-location-persistence-service');
+const {
+    resolveRideLegs,
+    resolveOperationalContinuation,
+    buildContinuationRideLeg
+} = require('../services/ride-lifecycle-service');
 
 class CompleteTripCommand extends Command {
     constructor(data) {
@@ -119,6 +124,48 @@ class CompleteTripCommand extends Command {
 
                 // Parsear dados da corrida
                 const customerId = bookingData.customerId;
+                const rideCity = bookingData.city || bookingData.pickupCity || bookingData.destinationCity || 'unknown';
+                const rideServiceType = bookingData.carType || bookingData.serviceType || 'standard';
+                const existingRideLegs = resolveRideLegs(bookingData);
+                const operationalContinuation = resolveOperationalContinuation(bookingData);
+                const completedAt = new Date().toISOString();
+                let rideLegSettlements = existingRideLegs;
+                let completedContinuation = operationalContinuation;
+
+                if (existingRideLegs.length > 0 || operationalContinuation) {
+                    const finalRideLeg = buildContinuationRideLeg({
+                        bookingHash: bookingData,
+                        existingRideLegs,
+                        driverId: this.driverId,
+                        finalFare: this.finalFare,
+                        distanceKm: this.distance,
+                        durationSecs: this.duration,
+                        startLocation: bookingData.startLocation || bookingData.pickupLocation || null,
+                        endLocation: this.endLocation,
+                        startedAt:
+                            operationalContinuation?.currentLegStartedAt ||
+                            operationalContinuation?.reassignedStartedAt ||
+                            bookingData.startedAt ||
+                            null,
+                        endedAt: completedAt,
+                        metadata: {
+                            completionType: existingRideLegs.length > 0 ? 'REASSIGNED_COMPLETION' : 'STANDARD_COMPLETION'
+                        }
+                    });
+
+                    if (finalRideLeg.grossAmount > 0 || existingRideLegs.length === 0) {
+                        rideLegSettlements = [...existingRideLegs, finalRideLeg];
+                    }
+
+                    if (operationalContinuation) {
+                        completedContinuation = {
+                            ...operationalContinuation,
+                            status: 'COMPLETED_AFTER_REASSIGNMENT',
+                            completedAt,
+                            replacementDriverId: this.driverId
+                        };
+                    }
+                }
 
                 // ✅ ARCHITECTURE SHIFT: EDA Refactoring
                 // O processamento contábil e distribuição de valor líquido via Woovi
@@ -170,7 +217,9 @@ class CompleteTripCommand extends Command {
                         tollFee: this.tollFee,
                         distance: this.distance,
                         duration: this.duration,
-                        completedAt: new Date().toISOString(),
+                        completedAt,
+                        rideLegs: rideLegSettlements,
+                        operationalContinuation: completedContinuation,
                         paymentDistribution: { status: 'PENDING', message: 'Processamento assíncrono em andamento' }
                     }
                 );
@@ -183,7 +232,9 @@ class CompleteTripCommand extends Command {
                     tollFee: String(this.tollFee),
                     distance: String(this.distance),
                     duration: String(this.duration),
-                    completedAt: new Date().toISOString()
+                    completedAt,
+                    ...(rideLegSettlements.length > 0 ? { rideLegs: JSON.stringify(rideLegSettlements) } : {}),
+                    ...(completedContinuation ? { operationalContinuation: JSON.stringify(completedContinuation) } : {})
                 });
 
                 if (customerId) {
@@ -231,6 +282,8 @@ class CompleteTripCommand extends Command {
                     tollFee: this.tollFee,
                     distance: this.distance,
                     duration: this.duration,
+                    rideLegSettlements,
+                    operationalContinuation: completedContinuation,
                     traceId: this.traceId, // ✅ Incluir traceId no evento
                     correlationId: this.correlationId || this.bookingId // ✅ Incluir correlationId no evento
                 });
@@ -250,6 +303,8 @@ class CompleteTripCommand extends Command {
                     bookingId: this.bookingId,
                     driverId: this.driverId,
                     customerId: customerId,
+                    city: rideCity,
+                    serviceType: rideServiceType,
                     event: event.toJSON(),
                     endLocation: this.endLocation,
                     finalFare: this.finalFare,

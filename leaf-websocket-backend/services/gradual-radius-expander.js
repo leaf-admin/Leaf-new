@@ -4,11 +4,10 @@
  * Implementa expansão gradual de raio para notificar motoristas
  * progressivamente, começando pelos mais próximos.
  * 
- * Fluxo:
- * T=0s: 0.5km → notificar 5 motoristas
- * T=5s: 1km → notificar próximos 5 (se nenhum aceitou)
- * T=10s: 1.5km → notificar próximos 5
- * ... até 3km
+ * Fluxo padrão:
+ * T=0s: 2.5km
+ * T=8s: 5.0km
+ * (todos os valores podem ser sobrescritos por variáveis de ambiente)
  */
 
 const redisPool = require('../utils/redis-pool');
@@ -21,7 +20,15 @@ const { logger } = require('../utils/logger');
 
 // ✅ Compartilhar intervalos entre instâncias para permitir cancelamento global
 const globalExpansionIntervals = new Map();
-const ACTIVE_SEARCH_STATES = new Set(['PENDING', 'SEARCHING', 'EXPANDED', 'NOTIFIED', 'AWAITING_RESPONSE', 'REJECTED']);
+const ACTIVE_SEARCH_STATES = new Set([
+    'PENDING',
+    'SEARCHING',
+    'EXPANDED',
+    'NOTIFIED',
+    'AWAITING_RESPONSE',
+    'REJECTED',
+    'REASSIGNMENT_PENDING'
+]);
 const ELIGIBLE_DRIVER_GEO_KEY = process.env.ELIGIBLE_DRIVER_GEO_KEY || 'driver_locations_eligible';
 
 const parsePositiveNumber = (value, fallback) => {
@@ -39,11 +46,11 @@ class GradualRadiusExpander {
         // Configurações padrão
         const isTest = process.env.NODE_ENV === 'test';
         this.config = {
-            // Defaults priorizam resposta rápida; todos podem ser ajustados por env.
-            initialRadius: parsePositiveNumber(process.env.MATCH_INITIAL_RADIUS_KM, isTest ? 5.0 : 1.0),
-            maxRadius: parsePositiveNumber(process.env.MATCH_MAX_RADIUS_KM, 30),
-            expansionStep: parsePositiveNumber(process.env.MATCH_EXPANSION_STEP_KM, isTest ? 5.0 : 1.0),
-            expansionInterval: parsePositiveNumber(process.env.MATCH_EXPANSION_INTERVAL_MS, isTest ? 1000 : 700),
+            // Regras padrão de busca: 2.5km inicial -> 5km em 8s (alinhado com UX do passageiro).
+            initialRadius: parsePositiveNumber(process.env.MATCH_INITIAL_RADIUS_KM, isTest ? 5.0 : 2.5),
+            maxRadius: parsePositiveNumber(process.env.MATCH_MAX_RADIUS_KM, isTest ? 30 : 5.0),
+            expansionStep: parsePositiveNumber(process.env.MATCH_EXPANSION_STEP_KM, isTest ? 5.0 : 2.5),
+            expansionInterval: parsePositiveNumber(process.env.MATCH_EXPANSION_INTERVAL_MS, isTest ? 1000 : 8000),
             maxWaves: 60,
             searchStateTTL: 3600, // 1h
             driversPerWave: Number.parseInt(process.env.MATCH_DRIVERS_PER_WAVE || (isTest ? '1' : '12'), 10)
@@ -152,7 +159,12 @@ class GradualRadiusExpander {
                 logger.debug(`⏸️ [GradualExpander] Corrida ${bookingId} está em NOTIFIED, pausando busca (aguardando resposta)`);
                 return;
             }
-            if (state !== RideStateManager.STATES.SEARCHING && state !== RideStateManager.STATES.PENDING && state !== RideStateManager.STATES.EXPANDED) {
+            if (
+                state !== RideStateManager.STATES.SEARCHING &&
+                state !== RideStateManager.STATES.PENDING &&
+                state !== RideStateManager.STATES.EXPANDED &&
+                state !== RideStateManager.STATES.REASSIGNMENT_PENDING
+            ) {
                 logger.warn(`⚠️ [GradualExpander] Corrida ${bookingId} não está em estado válido para busca (state: ${state})`);
                 return;
             }
@@ -273,11 +285,26 @@ class GradualRadiusExpander {
             const bookingInfo = {
                 bookingId,
                 customerId: safeBookingData.customerId,
+                passengerName: safeBookingData.passengerName || safeBookingData.customerName || null,
                 pickupLocation: parsedPickupLocation,
                 destinationLocation: parsedDestinationLocation,
+                pickupAddress:
+                    parsedPickupLocation?.add ||
+                    parsedPickupLocation?.address ||
+                    safeBookingData.pickupAddress ||
+                    '',
+                destinationAddress:
+                    parsedDestinationLocation?.add ||
+                    parsedDestinationLocation?.address ||
+                    safeBookingData.destinationAddress ||
+                    '',
                 estimatedFare: parseFloat(safeBookingData.estimatedFare || 0),
                 carType: safeBookingData.carType || null,
-                paymentMethod: safeBookingData.paymentMethod || 'pix'
+                paymentMethod: safeBookingData.paymentMethod || 'pix',
+                operationalContinuation:
+                    safeBookingData.operationalContinuation || safeBookingData.reassignmentContext || null,
+                reassignmentContext:
+                    safeBookingData.reassignmentContext || safeBookingData.operationalContinuation || null
             };
 
             // 3. Notificar motoristas usando dispatcher (com locks e timeouts)
@@ -430,8 +457,12 @@ class GradualRadiusExpander {
      * @param {string} bookingId - ID da corrida
      * @returns {Promise<void>}
      */
-    async stopSearch(bookingId) {
+    async stopSearch(bookingId, options = {}) {
         try {
+            const preserveDriverId = options?.preserveDriverId
+                ? String(options.preserveDriverId)
+                : null;
+
             // Cancelar expansões agendadas
             const timeout = this.expansionIntervals.get(bookingId);
             if (timeout) {
@@ -447,11 +478,15 @@ class GradualRadiusExpander {
             const notifiedDrivers = await this.redis.smembers(`ride_notifications:${bookingId}`);
 
             for (const driverId of notifiedDrivers) {
+                const isPreservedDriver = preserveDriverId && driverId === preserveDriverId;
+
                 // 1. Liberar lock se for desta corrida
-                const lockStatus = await driverLockManager.isDriverLocked(driverId);
-                if (lockStatus.isLocked && lockStatus.bookingId === bookingId) {
-                    await driverLockManager.releaseLock(driverId);
-                    logger.debug(`🔓 [GradualExpander] Lock liberado para motorista ${driverId} (corrida cancelada)`);
+                if (!isPreservedDriver) {
+                    const lockStatus = await driverLockManager.isDriverLocked(driverId);
+                    if (lockStatus.isLocked && lockStatus.bookingId === bookingId) {
+                        await driverLockManager.releaseLock(driverId);
+                        logger.debug(`🔓 [GradualExpander] Lock liberado para motorista ${driverId} (corrida finalizada para busca)`);
+                    }
                 }
 
                 // 2. Limpar corrida ativa na tela (sempre que a busca para)
@@ -477,7 +512,7 @@ class GradualRadiusExpander {
                 { bookingId }
             );
 
-            logger.info(`🛑 [GradualExpander] Busca parada para ${bookingId}`);
+            logger.info(`🛑 [GradualExpander] Busca parada para ${bookingId}${preserveDriverId ? ` (preservando lock do motorista ${preserveDriverId})` : ''}`);
         } catch (error) {
             logger.error(`❌ Erro ao parar busca para ${bookingId}:`, error);
         }
@@ -506,7 +541,8 @@ class GradualRadiusExpander {
             RideStateManager.STATES.SEARCHING,
             RideStateManager.STATES.EXPANDED,
             RideStateManager.STATES.NOTIFIED,
-            RideStateManager.STATES.AWAITING_RESPONSE
+            RideStateManager.STATES.AWAITING_RESPONSE,
+            RideStateManager.STATES.REASSIGNMENT_PENDING
         ]);
 
         if (!activeSearchStates.has(currentState)) {
