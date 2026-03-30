@@ -22,6 +22,7 @@ function registerSocketCancelRideHandler({
     PaymentService,
     fcmService
 }) {
+    const { scheduleMapH3Refresh } = require('../utils/map-h3-refresh-broadcaster');
     socket.on('cancelRide', async (data) => {
         // ✅ OBSERVABILIDADE: Gerar traceId no início do handler
         const traceId = extractTraceIdFromEvent(data, socket);
@@ -196,11 +197,8 @@ function registerSocketCancelRideHandler({
 
                     // ✅ MÉTRICAS: Registrar latência do command
                     const commandLatency = (Date.now() - commandStartTime) / 1000;
-                    metrics.recordCommand('cancel_ride', commandLatency, result.success);
                 } catch (error) {
                     endSpanError(commandSpan, error);
-                    const commandLatency = (Date.now() - commandStartTime) / 1000;
-                    metrics.recordCommand('cancel_ride', commandLatency, false);
                     throw error;
                 }
 
@@ -460,6 +458,12 @@ function registerSocketCancelRideHandler({
                         eventType: 'cancelRide'
                     });
                 }
+
+                scheduleMapH3Refresh(io, {
+                    reason: 'ride_cancelled',
+                    bookingId,
+                    driverId: driverIdFromBooking || bookingData.driverId || null
+                });
 
                 // 9. Limpar dados de busca
                 await redis.del(`booking_search:${bookingId}`);

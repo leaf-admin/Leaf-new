@@ -20,6 +20,7 @@ function registerSocketStartTripHandler({
     logEvent,
     fcmService
 }) {
+    const { scheduleMapH3Refresh } = require('../utils/map-h3-refresh-broadcaster');
     socket.on('startTrip', async (data) => {
         // ✅ OBSERVABILIDADE: Gerar traceId no início do handler
         const traceId = extractTraceIdFromEvent(data, socket);
@@ -302,11 +303,8 @@ function registerSocketStartTripHandler({
 
                     // ✅ MÉTRICAS: Registrar latência do command
                     const commandLatency = (Date.now() - commandStartTime) / 1000;
-                    metrics.recordCommand('start_trip', commandLatency, result.success);
                 } catch (error) {
                     endSpanError(commandSpan, error);
-                    const commandLatency = (Date.now() - commandStartTime) / 1000;
-                    metrics.recordCommand('start_trip', commandLatency, false);
                     throw error;
                 }
 
@@ -445,6 +443,11 @@ function registerSocketStartTripHandler({
 
                 // ✅ Notificar driver via room (escalável e confiável)
                 io.to(`driver_${driverId}`).emit('tripStarted', tripStartedData);
+                scheduleMapH3Refresh(io, {
+                    reason: 'trip_started',
+                    bookingId,
+                    driverId
+                });
 
                 const totalLatency = Date.now() - startTime;
                 logStructured('info', 'startTrip concluído com sucesso', {

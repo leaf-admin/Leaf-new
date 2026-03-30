@@ -3,6 +3,7 @@ const {
     setActiveTripForDriver
 } = require('../utils/active-trip-index');
 const driverEligibilityService = require('../services/driver-eligibility-service');
+const { scheduleMapH3Refresh } = require('../utils/map-h3-refresh-broadcaster');
 
 const ENABLE_ACTIVE_TRIP_INDEX = process.env.ENABLE_ACTIVE_TRIP_INDEX !== 'false';
 const ENABLE_TRIP_LOCATION_STREAM = process.env.ENABLE_TRIP_LOCATION_STREAM !== 'false';
@@ -503,6 +504,11 @@ function registerSocketUpdateLocationHandler({
                     speed: normalizedSpeed,
                     timestamp: normalizedTimestamp
                 }
+            });
+            scheduleMapH3Refresh(io, {
+                reason: 'location_updated',
+                driverId,
+                bookingId: activeTripId || null
             });
 
             if (process.env.NODE_ENV === 'development' || process.env.DEBUG_LOCATION === 'true') {

@@ -1,3 +1,6 @@
+const { assessDriverArrivalAtPickup } = require('../utils/pickup-arrival-policy');
+const { scheduleMapH3Refresh } = require('../utils/map-h3-refresh-broadcaster');
+
 function registerSocketDriverControlHandlers({
     socket,
     io,
@@ -11,20 +14,34 @@ function registerSocketDriverControlHandlers({
             const rideId = data.rideId || data.bookingId || null;
             const location = data.location || null;
 
-            socket.emit('arrivedAtPickup', {
-                success: true,
-                rideId,
-                bookingId: rideId,
-                location,
-                timestamp: new Date().toISOString()
-            });
-
             if (!rideId) return;
 
             const redis = redisPool.getConnection();
             const bookingData = await redis.hgetall(`booking:${rideId}`);
+            const arrivalAssessment = await assessDriverArrivalAtPickup({
+                redis,
+                driverId: socket.userId || null,
+                booking: bookingData,
+                location
+            });
+
+            if (!arrivalAssessment.allowed) {
+                socket.emit('arrivedAtPickup', {
+                    success: false,
+                    error: arrivalAssessment.message,
+                    code: arrivalAssessment.code,
+                    bookingId: rideId,
+                    details: {
+                        distanceMeters: arrivalAssessment.distanceMeters ?? null,
+                        toleranceMeters: arrivalAssessment.toleranceMeters ?? null
+                    }
+                });
+                return;
+            }
+
             const customerId = bookingData?.customerId || bookingData?.customer || bookingData?.passengerId || null;
 
+            const boardingDeadlineAt = new Date(Date.now() + 120000).toISOString();
             if (customerId) {
                 io.to(`customer_${customerId}`).emit('arrivedAtPickup', {
                     success: true,
@@ -32,9 +49,27 @@ function registerSocketDriverControlHandlers({
                     bookingId: rideId,
                     location,
                     driverId: socket.userId || null,
+                    pickupToleranceReached: true,
+                    distanceMeters: arrivalAssessment.distanceMeters,
+                    toleranceMeters: arrivalAssessment.toleranceMeters,
+                    boardingWindowSec: 120,
+                    boardingDeadlineAt,
                     timestamp: new Date().toISOString()
                 });
             }
+
+            socket.emit('arrivedAtPickup', {
+                success: true,
+                rideId,
+                bookingId: rideId,
+                location,
+                pickupToleranceReached: true,
+                distanceMeters: arrivalAssessment.distanceMeters,
+                toleranceMeters: arrivalAssessment.toleranceMeters,
+                boardingWindowSec: 120,
+                boardingDeadlineAt,
+                timestamp: new Date().toISOString()
+            });
         } catch (error) {
             socket.emit('arrivedAtPickup', {
                 success: false,
@@ -99,6 +134,12 @@ function registerSocketDriverControlHandlers({
                 isOnline,
                 dispatchEligible: isOnline && existingIsEligible,
                 checkedAt: new Date().toISOString()
+            });
+            scheduleMapH3Refresh(io, {
+                reason: 'driver_status_updated',
+                driverId,
+                status,
+                isOnline
             });
         } catch (error) {
             logStructured('warn', 'Falha ao processar setDriverStatus', {

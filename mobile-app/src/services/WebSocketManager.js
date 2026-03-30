@@ -5,6 +5,15 @@ import auth from '@react-native-firebase/auth';
 import { toUserFriendlyError } from '../utils/friendlyErrorMessages';
 
 const CREATE_BOOKING_TIMEOUT_MS = 120000; // 2 minutos mínimo para evitar timeout prematuro em cenários de alta latência
+const CREATE_BOOKING_MAX_RETRIES = 4;
+const CREATE_BOOKING_RETRY_BASE_DELAY_MS = 800;
+const CREATE_BOOKING_RETRY_JITTER_MS = 350;
+const WS_CONNECT_TIMEOUT_MS = 30000;
+const AUTH_ACK_DEFAULT_TIMEOUT_MS = 18000;
+const AUTH_BUSY_MAX_RETRIES = 4;
+const AUTH_BUSY_JITTER_MS = 250;
+const ACTIVE_RIDE_SYNC_TIMEOUT_MS = 8000;
+const TRANSIENT_CONNECT_ERROR_LOG_WINDOW_MS = 15000;
 
 // ✅ CORREÇÃO: Calcular URL dinamicamente para evitar problemas em builds de release
 // Não armazenar como constante, calcular sempre que necessário
@@ -31,6 +40,18 @@ const buildSocketError = (payload, fallbackMessage = 'Erro desconhecido', contex
 
     return error;
 };
+
+const sleepMs = (delayMs) => new Promise((resolve) => setTimeout(resolve, delayMs));
+
+const CREATE_BOOKING_RETRYABLE_CODES = new Set([
+    'BOOKING_TIMEOUT',
+    'WS_DISCONNECTED',
+    'WS_CONNECT_TIMEOUT',
+    'DUPLICATE_REQUEST',
+    'QUEUE_BACKPRESSURE',
+    'AUTH_BUSY',
+    'AUTH_TIMEOUT'
+]);
 
 // ✅ FASE 2: EventEmitter interno simples (compatível com React Native)
 class SimpleEventEmitter {
@@ -103,6 +124,14 @@ class WebSocketManager {
             this.authCredentials = null; // ✅ Armazenar credenciais para auto-reautenticação
             this.isAuthenticating = false; // ✅ Flag para evitar autenticação duplicada
             this.reconnectTimer = null; // Evitar agendamento duplicado de reconexão manual
+            this.lastActiveRideSnapshot = null; // Snapshot de corrida ativa para reidratação pós-reconexão
+            this._lastActiveRideSyncAt = 0;
+            this.authAckInFlight = null;
+            this.authAckInFlightKey = null;
+            this.lastSocketUrl = null;
+            this.lastConnectErrorSignature = null;
+            this.lastConnectErrorLoggedAt = 0;
+            this.suppressedConnectErrorCount = 0;
 
             // ✅ FASE 2: EventEmitter interno - única fonte de distribuição de eventos
             this.eventEmitter = new SimpleEventEmitter();
@@ -154,6 +183,7 @@ class WebSocketManager {
 
             // ✅ CORREÇÃO: Calcular URL dinamicamente para garantir que está correta
             const WEBSOCKET_URL = getWebSocketURL();
+            this.lastSocketUrl = WEBSOCKET_URL;
             Logger.log('🔌 [WebSocketManager] Conectando ao WebSocket:', WEBSOCKET_URL);
 
             // ✅ CORREÇÃO: Tentar websocket primeiro, polling como fallback
@@ -188,7 +218,7 @@ class WebSocketManager {
                 reconnectionDelay: 3000,
                 reconnectionDelayMax: 10000,
                 reconnectionAttempts: 20,
-                timeout: 20000, // 20 segundos
+                timeout: WS_CONNECT_TIMEOUT_MS,
                 upgrade: true,
                 rememberUpgrade: false, // ✅ Não lembrar upgrade para evitar problemas
                 // ✅ Configurações adicionais para React Native
@@ -219,7 +249,73 @@ class WebSocketManager {
         }
     }
 
-    _waitForConnection(timeoutMs = 20000) {
+    _serializeConnectErrorDescription(description) {
+        if (!description) return 'N/A';
+        if (typeof description === 'string') return description;
+        if (typeof description === 'object') {
+            return description._type || description.type || description.message || 'N/A';
+        }
+        return String(description);
+    }
+
+    _isTransientConnectError(error) {
+        const errorMessage = String(error?.message || '').toLowerCase();
+        const errorType = String(error?.type || '').toLowerCase();
+        const descriptionType = String(error?.description?._type || error?.description?.type || '').toLowerCase();
+
+        if (errorType === 'transporterror' && errorMessage.includes('websocket error')) {
+            return true;
+        }
+
+        if (errorMessage.includes('xhr poll error')) {
+            return true;
+        }
+
+        return descriptionType === 'error' && (errorMessage.includes('websocket') || errorMessage.includes('network'));
+    }
+
+    _logConnectError(error) {
+        const errorMessage = error?.message || 'Erro desconhecido';
+        const errorType = error?.type || 'N/A';
+        const description = this._serializeConnectErrorDescription(error?.description);
+        const signature = `${errorType}:${errorMessage}:${description}`;
+        const now = Date.now();
+        const isTransient = this._isTransientConnectError(error);
+
+        if (isTransient) {
+            const shouldLogNow = (
+                this.lastConnectErrorSignature !== signature ||
+                now - this.lastConnectErrorLoggedAt >= TRANSIENT_CONNECT_ERROR_LOG_WINDOW_MS
+            );
+
+            if (shouldLogNow) {
+                const suppressedSinceLastLog = this.suppressedConnectErrorCount;
+                this.suppressedConnectErrorCount = 0;
+                this.lastConnectErrorSignature = signature;
+                this.lastConnectErrorLoggedAt = now;
+                Logger.log('🔄 [WebSocketManager] Conexão instável detectada. Retry automático ativo.', {
+                    message: errorMessage,
+                    type: errorType,
+                    url: this.lastSocketUrl || 'N/A',
+                    suppressedSinceLastLog
+                });
+            } else {
+                this.suppressedConnectErrorCount += 1;
+            }
+
+            return;
+        }
+
+        this.lastConnectErrorSignature = signature;
+        this.lastConnectErrorLoggedAt = now;
+        this.suppressedConnectErrorCount = 0;
+        Logger.error('❌ [WebSocketManager] Erro de conexão WebSocket:', errorMessage);
+        Logger.error('❌ [WebSocketManager] Tipo de erro:', errorType);
+        Logger.error('❌ [WebSocketManager] URL:', this.lastSocketUrl || 'N/A');
+        Logger.error('❌ [WebSocketManager] Descrição:', description);
+    }
+
+    _waitForConnection(timeoutMs = WS_CONNECT_TIMEOUT_MS) {
         if (!this.socket) {
             this.isConnecting = false;
             this.connectionPromise = null;
@@ -299,8 +395,25 @@ class WebSocketManager {
             'tripCompleted',
             'paymentConfirmed',
             'paymentRefunded',
+            'rideExtensionRequestAccepted',
+            'rideExtensionApprovalRequested',
+            'rideExtensionPaymentRequired',
+            'rideExtensionPendingPayment',
+            'rideExtensionRejected',
+            'rideExtensionExpired',
+            'rideExtensionConfirmed',
+            'rideExtensionError',
+            'rideExtensionResponseError',
+            'rideOperationalInterruption',
+            'rideOperationalInterrupted',
+            'rideOperationalContinuationSearching',
+            'rideOperationalReleased',
+            'rideOperationalInterruptionError',
+            'rideOperationalContinuationError',
             'ratingReceived',
             'authenticated', // ✅ Evento de autenticação confirmada
+            'auth_error',
+            'authentication_error',
             'driverStatusChanged',
             'driverStatusUpdated',
             'driverStatusError',
@@ -310,7 +423,16 @@ class WebSocketManager {
             'driverLocation',
             'driverArrived',
             'arrivedAtPickup',
+            'passengerLocationUpdated',
+            'passengerLocationError',
+            'tripIntegrityCheckRequired',
+            'tripIntegrityCancelled',
+            'boardingStatusConfirmed',
+            'boardingStatusError',
+            'activeRideSync',
             'locationUpdated',
+            'mapH3Refresh',
+            'map_h3_refresh',
             'error'
         ];
 
@@ -331,8 +453,27 @@ class WebSocketManager {
                 }
                 // ✅ FASE 2: Retransmitir através do EventEmitter
                 this.eventEmitter.emit('authenticated', data);
+
+                const now = Date.now();
+                if (now - this._lastActiveRideSyncAt > 1000) {
+                    this._lastActiveRideSyncAt = now;
+                    this.syncActiveRideWithAck(ACTIVE_RIDE_SYNC_TIMEOUT_MS).catch((syncError) => {
+                        Logger.warn('⚠️ [WebSocketManager] Falha ao sincronizar corrida ativa após autenticação:', syncError?.message || syncError);
+                    });
+                }
             });
             this.socketListeners.add('authenticated');
+        }
+
+        if (!this.socketListeners.has('activeRideSync')) {
+            this.socket.on('activeRideSync', (snapshot) => {
+                if (snapshot?.success) {
+                    this.lastActiveRideSnapshot = snapshot;
+                    this._rehydrateRideEventsFromSync(snapshot);
+                }
+                this.eventEmitter.emit('activeRideSync', snapshot);
+            });
+            this.socketListeners.add('activeRideSync');
         }
 
         // ✅ FASE 2: Registrar cada evento do servidor apenas uma vez
@@ -367,7 +508,15 @@ class WebSocketManager {
             // ✅ AUTO-REAUTENTICAÇÃO: Se já tínhamos credenciais, re-autenticar automaticamente
             if (this.authCredentials) {
                 Logger.log('🔐 [WebSocketManager] Reconectado. Iniciando auto-reautenticação...');
-                this.authenticate(this.authCredentials.userId, this.authCredentials.userType);
+                this.authenticateWithAck(
+                    this.authCredentials.userId,
+                    this.authCredentials.userType,
+                    AUTH_ACK_DEFAULT_TIMEOUT_MS,
+                    { maxRetries: AUTH_BUSY_MAX_RETRIES }
+                ).catch((authError) => {
+                    Logger.warn('⚠️ [WebSocketManager] Auto-reautenticação com ACK falhou, fallback para emissão simples:', authError?.message || authError);
+                    this.authenticate(this.authCredentials.userId, this.authCredentials.userType, { force: true });
+                });
             } else {
                 // Se não temos credenciais salvas, resetar estado
                 this.isAuthenticated = false;
@@ -393,10 +542,7 @@ class WebSocketManager {
         });
 
         this.socket.on('connect_error', (error) => {
-            const errorMessage = error.message || 'Erro desconhecido';
-            Logger.error('❌ [WebSocketManager] Erro de conexão WebSocket:', errorMessage);
-            Logger.error('❌ [WebSocketManager] Tipo de erro:', error.type || 'N/A');
-            Logger.error('❌ [WebSocketManager] Descrição:', error.description || 'N/A');
+            this._logConnectError(error);
 
             this.isConnecting = false;
             this.connectionAttempts++;
@@ -604,11 +750,13 @@ class WebSocketManager {
     }
 
     // Método para autenticar usuário
-    authenticate(userId, userType) {
+    authenticate(userId, userType, options = {}) {
         if (!this.socket?.connected) {
             Logger.warn('⚠️ [WebSocketManager] WebSocket não conectado. Não é possível autenticar.');
             return;
         }
+
+        const force = options?.force === true;
 
         // ✅ Evitar autenticação duplicada se já está autenticado com os mesmos dados
         if (this.isAuthenticated &&
@@ -619,7 +767,7 @@ class WebSocketManager {
         }
 
         // ✅ Evitar múltiplas tentativas simultâneas
-        if (this.isAuthenticating) {
+        if (this.isAuthenticating && !force) {
             Logger.log('⚠️ [WebSocketManager] Autenticação já em andamento, ignorando chamada duplicada');
             return;
         }
@@ -648,7 +796,68 @@ class WebSocketManager {
         // e atualizará automaticamente isAuthenticated quando o servidor confirmar
     }
 
-    authenticateWithAck(userId, userType, timeoutMs = 10000) {
+    async authenticateWithAck(
+        userId,
+        userType,
+        timeoutMs = AUTH_ACK_DEFAULT_TIMEOUT_MS,
+        options = {}
+    ) {
+        const requestKey = `${userId || ''}:${userType || ''}`;
+        if (this.authAckInFlight && this.authAckInFlightKey === requestKey) {
+            return this.authAckInFlight;
+        }
+
+        const maxRetries = Number.isFinite(options?.maxRetries)
+            ? Math.max(0, options.maxRetries)
+            : AUTH_BUSY_MAX_RETRIES;
+
+        const runAuth = async () => {
+            let attempt = 0;
+            let lastError = null;
+
+            while (attempt <= maxRetries) {
+                attempt += 1;
+                try {
+                    const authData = await this._authenticateSingleAttempt(userId, userType, timeoutMs);
+                    return authData;
+                } catch (error) {
+                    lastError = error;
+                    const errorCode = error?.code || error?.payload?.code || null;
+                    const retryAfterSec = Number(error?.retryAfterSec || error?.payload?.retryAfterSec || 0);
+                    const canRetry = errorCode === 'AUTH_BUSY' && attempt <= maxRetries;
+
+                    if (!canRetry) {
+                        throw error;
+                    }
+
+                    const retryDelayMs = Math.max(
+                        250,
+                        (retryAfterSec > 0 ? retryAfterSec * 1000 : 1000) + Math.floor(Math.random() * AUTH_BUSY_JITTER_MS)
+                    );
+
+                    Logger.warn(`⚠️ [WebSocketManager] Auth em alta carga (AUTH_BUSY). Retry ${attempt}/${maxRetries} em ${retryDelayMs}ms`);
+                    await sleepMs(retryDelayMs);
+                }
+            }
+
+            throw lastError || buildSocketError(
+                { code: 'AUTH_RETRY_EXHAUSTED', message: 'Falha ao autenticar após retries' },
+                'Nao foi possivel validar sua sessao agora. Tente novamente.',
+                'auth'
+            );
+        };
+
+        this.authAckInFlightKey = requestKey;
+        this.authAckInFlight = runAuth().finally(() => {
+            if (this.authAckInFlightKey === requestKey) {
+                this.authAckInFlight = null;
+                this.authAckInFlightKey = null;
+            }
+        });
+        return this.authAckInFlight;
+    }
+
+    _authenticateSingleAttempt(userId, userType, timeoutMs) {
         return new Promise((resolve, reject) => {
             if (!this.socket?.connected) {
                 reject(
@@ -663,69 +872,150 @@ class WebSocketManager {
 
             const cleanup = () => {
                 this.off('authenticated', onAuthenticated);
+                this.off('auth_error', onAuthError);
+                this.off('authentication_error', onAuthenticationError);
+                clearTimeout(timeout);
             };
 
-            const timeout = setTimeout(() => {
+            const completeWithError = (payload, fallbackMessage = 'Nao foi possivel validar sua sessao agora. Tente novamente.') => {
                 cleanup();
-                reject(
-                    buildSocketError(
-                        { code: 'AUTH_TIMEOUT', message: `Timeout de autenticacao (${Math.floor(timeoutMs / 1000)}s)` },
-                        'A validacao da sessao demorou mais que o esperado. Tente novamente.',
-                        'auth'
-                    )
-                );
-            }, timeoutMs);
+                const error = buildSocketError(payload, fallbackMessage, 'auth');
+                if (payload?.retryAfterSec) {
+                    error.retryAfterSec = payload.retryAfterSec;
+                }
+                reject(error);
+            };
 
             const onAuthenticated = (data) => {
+                if (data?.uid && data.uid !== userId) {
+                    return;
+                }
+
                 if (!data?.success) {
-                    clearTimeout(timeout);
-                    cleanup();
-                    reject(
-                        buildSocketError(
-                            data,
-                            'Nao foi possivel validar sua sessao agora. Tente novamente.',
-                            'auth'
-                        )
-                    );
+                    completeWithError(data);
                     return;
                 }
 
-                if (data.uid && data.uid !== userId) {
-                    return;
-                }
-
-                clearTimeout(timeout);
                 cleanup();
                 resolve(data);
             };
 
+            const onAuthError = (payload) => {
+                completeWithError(payload);
+            };
+
+            const onAuthenticationError = (payload) => {
+                completeWithError(payload);
+            };
+
+            const timeout = setTimeout(() => {
+                completeWithError(
+                    { code: 'AUTH_TIMEOUT', message: `Timeout de autenticacao (${Math.floor(timeoutMs / 1000)}s)` },
+                    'A validacao da sessao demorou mais que o esperado. Tente novamente.'
+                );
+            }, timeoutMs);
+
             this.on('authenticated', onAuthenticated);
-            this.authenticate(userId, userType);
+            this.on('auth_error', onAuthError);
+            this.on('authentication_error', onAuthenticationError);
+            this.authenticate(userId, userType, { force: true });
         });
     }
 
-    // Métodos específicos para eventos de viagem
-    async createBooking(bookingData) {
-        Logger.log('📤 [WebSocketManager] Criando booking...', {
-            connected: this.socket?.connected,
-            socketId: this.socket?.id,
-            bookingData: {
-                customerId: bookingData.customerId,
-                carType: bookingData.carType,
-                estimatedFare: bookingData.estimatedFare
-            }
-        });
+    _buildCreateBookingIdempotencyKey(bookingData = {}, requestId = '') {
+        const customerId =
+            bookingData?.customerId ||
+            this.authenticatedUserId ||
+            this.authCredentials?.userId ||
+            'anonymous';
+        const pickupLat = Number(bookingData?.pickupLocation?.lat || 0).toFixed(5);
+        const pickupLng = Number(bookingData?.pickupLocation?.lng || 0).toFixed(5);
+        const destinationLat = Number(bookingData?.destinationLocation?.lat || 0).toFixed(5);
+        const destinationLng = Number(bookingData?.destinationLocation?.lng || 0).toFixed(5);
+        const fare = Number(bookingData?.estimatedFare || 0).toFixed(2);
+        const carType = String(bookingData?.carType || 'standard').toLowerCase();
 
-        if (!this.socket?.connected) {
-            const error = buildSocketError(
-                { code: 'WS_DISCONNECTED', message: 'WebSocket não conectado' },
-                'Sem conexao com o servidor agora. Verifique sua internet e tente novamente.',
-                'websocket'
-            );
-            Logger.error('❌ [WebSocketManager] Erro ao criar booking:', error.message);
-            throw error;
+        const digestSource = `${customerId}|${pickupLat}|${pickupLng}|${destinationLat}|${destinationLng}|${carType}|${fare}|${requestId}`;
+        let digest = 0;
+        for (let i = 0; i < digestSource.length; i += 1) {
+            digest = ((digest << 5) - digest) + digestSource.charCodeAt(i);
+            digest |= 0;
         }
 
+        return `mobile_${customerId}_${requestId}_${Math.abs(digest).toString(36)}`;
+    }
+
+    _isCreateBookingRetryable(error) {
+        const code = String(error?.code || error?.payload?.code || '').toUpperCase();
+        if (CREATE_BOOKING_RETRYABLE_CODES.has(code)) {
+            return true;
+        }
+
+        const rawMessage = String(
+            error?.message ||
+            error?.rawMessage ||
+            error?.payload?.message ||
+            ''
+        ).toLowerCase();
+
+        return (
+            rawMessage.includes('timeout ao criar booking') ||
+            rawMessage.includes('create booking timeout') ||
+            rawMessage.includes('websocket') ||
+            rawMessage.includes('desconect')
+        );
+    }
+
+    _extractCreateBookingRetryDelayMs(error, attempt) {
+        const retryAfterSec = Number(error?.retryAfterSec || error?.payload?.retryAfterSec || 0);
+        const retryAfterDelayMs = retryAfterSec > 0 ? retryAfterSec * 1000 : 0;
+        const progressiveDelayMs = Math.min(
+            CREATE_BOOKING_RETRY_BASE_DELAY_MS * Math.max(1, attempt),
+            5000
+        );
+        const baseDelayMs = Math.max(retryAfterDelayMs, progressiveDelayMs);
+        return baseDelayMs + Math.floor(Math.random() * CREATE_BOOKING_RETRY_JITTER_MS);
+    }
+
+    async _recoverCreateBookingFromSync(idempotencyKey) {
+        if (!this.socket?.connected || !this.authenticatedUserId || !this.authenticatedUserType) {
+            return null;
+        }
+
+        try {
+            const syncSnapshot = await this.syncActiveRideWithAck(
+                Math.max(ACTIVE_RIDE_SYNC_TIMEOUT_MS, 12000)
+            );
+
+            if (!syncSnapshot?.success || !syncSnapshot?.hasActiveRide || !syncSnapshot?.bookingId) {
+                return null;
+            }
+
+            Logger.warn('⚠️ [WebSocketManager] createBooking reconciliado via syncActiveRide', {
+                bookingId: syncSnapshot.bookingId,
+                idempotencyKey
+            });
+
+            return {
+                success: true,
+                bookingId: syncSnapshot.bookingId,
+                idempotencyKey,
+                rehydrated: true,
+                message: 'Corrida recuperada após reconexão',
+                data: {
+                    bookingId: syncSnapshot.bookingId,
+                    customerId: syncSnapshot.customerId || this.authenticatedUserId,
+                    status: String(syncSnapshot.status || 'SEARCHING').toLowerCase(),
+                    rehydrated: true
+                }
+            };
+        } catch (syncError) {
+            Logger.warn('⚠️ [WebSocketManager] Falha ao reconciliar createBooking via syncActiveRide:', syncError?.message || syncError);
+            return null;
+        }
+    }
+
+    _createBookingSingleAttempt(bookingData) {
         return new Promise((resolve, reject) => {
             let timeout = null;
 
@@ -734,11 +1024,23 @@ class WebSocketManager {
                     clearTimeout(timeout);
                     timeout = null;
                 }
-                this.socket?.off('bookingCreated', onBookingCreated);
-                this.socket?.off('bookingError', onBookingError);
+                this.off('bookingCreated', onBookingCreated);
+                this.off('bookingError', onBookingError);
             };
 
             const onBookingCreated = (data) => {
+                const responseCustomerId =
+                    data?.customerId ||
+                    data?.data?.customerId ||
+                    data?.booking?.customerId;
+                if (
+                    bookingData?.customerId &&
+                    responseCustomerId &&
+                    responseCustomerId !== bookingData.customerId
+                ) {
+                    return;
+                }
+
                 Logger.log('✅ [WebSocketManager] Resposta bookingCreated recebida:', data);
                 cleanup();
                 if (data?.success) {
@@ -754,7 +1056,11 @@ class WebSocketManager {
             const onBookingError = (errorPayload) => {
                 Logger.error('❌ [WebSocketManager] Erro do servidor:', errorPayload);
                 cleanup();
-                reject(buildSocketError(errorPayload, 'Nao foi possivel solicitar a viagem agora.', 'booking'));
+                const error = buildSocketError(errorPayload, 'Nao foi possivel solicitar a viagem agora.', 'booking');
+                if (errorPayload?.retryAfterSec) {
+                    error.retryAfterSec = errorPayload.retryAfterSec;
+                }
+                reject(error);
             };
 
             timeout = setTimeout(() => {
@@ -769,11 +1075,190 @@ class WebSocketManager {
                 );
             }, CREATE_BOOKING_TIMEOUT_MS);
 
-            this.socket.on('bookingCreated', onBookingCreated);
-            this.socket.on('bookingError', onBookingError);
+            this.on('bookingCreated', onBookingCreated);
+            this.on('bookingError', onBookingError);
 
             Logger.log('📤 [WebSocketManager] Emitindo evento createBooking...');
             this.socket.emit('createBooking', bookingData);
+        });
+    }
+
+    // Métodos específicos para eventos de viagem
+    async createBooking(bookingData, options = {}) {
+        const maxRetries = Number.isFinite(options?.maxRetries)
+            ? Math.max(0, options.maxRetries)
+            : CREATE_BOOKING_MAX_RETRIES;
+        const requestId = options?.requestId || `${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+        const idempotencyKey = options?.idempotencyKey
+            || bookingData?.idempotencyKey
+            || this._buildCreateBookingIdempotencyKey(bookingData, requestId);
+        const payload = {
+            ...bookingData,
+            idempotencyKey,
+            clientRequestId: requestId
+        };
+
+        Logger.log('📤 [WebSocketManager] Criando booking...', {
+            connected: this.socket?.connected,
+            socketId: this.socket?.id,
+            idempotencyKey,
+            bookingData: {
+                customerId: payload.customerId,
+                carType: payload.carType,
+                estimatedFare: payload.estimatedFare
+            }
+        });
+
+        let lastError = null;
+
+        for (let attempt = 1; attempt <= maxRetries + 1; attempt += 1) {
+            try {
+                if (!this.socket?.connected) {
+                    await this.connect();
+                }
+
+                if (!this.isAuthenticated) {
+                    const authUserId =
+                        this.authCredentials?.userId ||
+                        payload.customerId ||
+                        this.authenticatedUserId;
+                    const authUserType =
+                        this.authCredentials?.userType ||
+                        this.authenticatedUserType ||
+                        'customer';
+
+                    if (authUserId) {
+                        await this.authenticateWithAck(
+                            authUserId,
+                            authUserType,
+                            AUTH_ACK_DEFAULT_TIMEOUT_MS,
+                            { maxRetries: AUTH_BUSY_MAX_RETRIES }
+                        );
+                    }
+                }
+
+                if (attempt > 1) {
+                    Logger.warn(`🔁 [WebSocketManager] Retry createBooking (${attempt}/${maxRetries + 1})`, {
+                        idempotencyKey
+                    });
+                }
+
+                const response = await this._createBookingSingleAttempt(payload);
+                return {
+                    ...response,
+                    idempotencyKey: response?.idempotencyKey || idempotencyKey
+                };
+            } catch (error) {
+                lastError = error;
+                const retryable = this._isCreateBookingRetryable(error);
+
+                if (retryable) {
+                    const recovered = await this._recoverCreateBookingFromSync(idempotencyKey);
+                    if (recovered) {
+                        return recovered;
+                    }
+                }
+
+                const hasMoreAttempts = attempt <= maxRetries;
+                if (!retryable || !hasMoreAttempts) {
+                    throw error;
+                }
+
+                const retryDelayMs = this._extractCreateBookingRetryDelayMs(error, attempt);
+                Logger.warn(
+                    `⚠️ [WebSocketManager] createBooking falhou (${error?.code || 'SEM_CODE'}). Nova tentativa em ${retryDelayMs}ms`,
+                    { idempotencyKey }
+                );
+                await sleepMs(retryDelayMs);
+            }
+        }
+
+        throw lastError || buildSocketError(
+            { code: 'BOOKING_RETRY_EXHAUSTED', message: 'Falha ao criar booking apos retries' },
+            'Nao foi possivel solicitar a viagem agora. Tente novamente em instantes.',
+            'booking'
+        );
+    }
+
+    async checkRideAvailability(payload = {}, options = {}) {
+        const timeoutMs = Number.isFinite(options?.timeoutMs) ? options.timeoutMs : 12000;
+
+        if (!this.socket?.connected) {
+            await this.connect();
+        }
+
+        if (!this.isAuthenticated) {
+            const authUserId =
+                this.authCredentials?.userId ||
+                payload.customerId ||
+                this.authenticatedUserId;
+            const authUserType =
+                this.authCredentials?.userType ||
+                this.authenticatedUserType ||
+                'customer';
+
+            if (authUserId) {
+                await this.authenticateWithAck(
+                    authUserId,
+                    authUserType,
+                    AUTH_ACK_DEFAULT_TIMEOUT_MS,
+                    { maxRetries: AUTH_BUSY_MAX_RETRIES }
+                );
+            }
+        }
+
+        return new Promise((resolve, reject) => {
+            let timeout = null;
+
+            const cleanup = () => {
+                if (timeout) {
+                    clearTimeout(timeout);
+                    timeout = null;
+                }
+                this.off('rideAvailabilityResult', onSuccess);
+                this.off('rideAvailabilityError', onError);
+            };
+
+            const onSuccess = (data) => {
+                cleanup();
+                if (data?.success) {
+                    resolve(data);
+                    return;
+                }
+                reject(
+                    buildSocketError(
+                        data,
+                        'Nao foi possivel validar a disponibilidade agora.',
+                        'availability'
+                    )
+                );
+            };
+
+            const onError = (errorPayload) => {
+                cleanup();
+                reject(
+                    buildSocketError(
+                        errorPayload,
+                        'Nao foi possivel validar a disponibilidade agora.',
+                        'availability'
+                    )
+                );
+            };
+
+            timeout = setTimeout(() => {
+                cleanup();
+                reject(
+                    buildSocketError(
+                        { code: 'AVAILABILITY_TIMEOUT', message: 'Ride availability timeout' },
+                        'Nao foi possivel validar a disponibilidade agora.',
+                        'availability'
+                    )
+                );
+            }, timeoutMs);
+
+            this.on('rideAvailabilityResult', onSuccess);
+            this.on('rideAvailabilityError', onError);
+            this.socket.emit('checkRideAvailability', payload);
         });
     }
 
@@ -933,14 +1418,100 @@ class WebSocketManager {
                 reject(new Error('Arrive at pickup timeout'));
             }, 10000);
 
-            this.socket.emit('arriveAtPickup', { rideId, location });
-            this.socket.once('arrivedAtPickup', (data) => {
+            const bookingId = rideId;
+
+            const cleanup = () => {
                 clearTimeout(timeout);
-                if (data.success) {
-                    resolve(data);
-                } else {
-                    reject(new Error(data.error || 'Arrive at pickup failed'));
+                this.off('arrivedAtPickup', onArrivedAtPickup);
+                this.off('notificationActionSuccess', onNotificationSuccess);
+                this.off('notificationActionError', onNotificationError);
+            };
+
+            const onArrivedAtPickup = (data) => {
+                if (data?.bookingId && bookingId && data.bookingId !== bookingId) {
+                    return;
                 }
+                cleanup();
+                if (data?.success === false || data?.error) {
+                    reject(new Error(data?.error || 'Arrive at pickup failed'));
+                    return;
+                }
+                resolve(data || { success: true, bookingId });
+            };
+
+            const onNotificationSuccess = (data) => {
+                if (String(data?.action || '').toLowerCase() !== 'arrived_at_pickup') {
+                    return;
+                }
+                if (data?.bookingId && bookingId && data.bookingId !== bookingId) {
+                    return;
+                }
+                cleanup();
+                resolve({
+                    success: true,
+                    bookingId,
+                    ...data
+                });
+            };
+
+            const onNotificationError = (error) => {
+                cleanup();
+                reject(new Error(error?.error || error?.message || 'Arrive at pickup failed'));
+            };
+
+            this.on('arrivedAtPickup', onArrivedAtPickup);
+            this.on('notificationActionSuccess', onNotificationSuccess);
+            this.on('notificationActionError', onNotificationError);
+            this.socket.emit('notificationAction', {
+                action: 'arrived_at_pickup',
+                bookingId,
+                location
+            });
+        });
+    }
+
+    async confirmBoardingStatus(bookingId, boarded = true) {
+        if (!this.socket?.connected) {
+            throw new Error('WebSocket não conectado');
+        }
+        if (!bookingId) {
+            throw new Error('bookingId obrigatório para confirmar embarque');
+        }
+
+        return new Promise((resolve, reject) => {
+            const timeout = setTimeout(() => {
+                cleanup();
+                reject(new Error('Confirm boarding status timeout'));
+            }, 10000);
+
+            const cleanup = () => {
+                clearTimeout(timeout);
+                this.off('boardingStatusConfirmed', onSuccess);
+                this.off('boardingStatusError', onError);
+            };
+
+            const onSuccess = (data) => {
+                if (data?.bookingId && String(data.bookingId) !== String(bookingId)) {
+                    return;
+                }
+                cleanup();
+                if (data?.success === false || data?.error) {
+                    reject(new Error(data?.error || 'Boarding confirmation failed'));
+                    return;
+                }
+                resolve(data || { success: true, bookingId, boarded: Boolean(boarded) });
+            };
+
+            const onError = (error) => {
+                cleanup();
+                reject(new Error(error?.error || error?.message || 'Boarding confirmation failed'));
+            };
+
+            this.on('boardingStatusConfirmed', onSuccess);
+            this.on('boardingStatusError', onError);
+            this.socket.emit('confirmBoardingStatus', {
+                bookingId,
+                boarded: Boolean(boarded)
             });
         });
     }
@@ -1393,17 +1964,68 @@ class WebSocketManager {
     // ==================== NOVOS MÉTODOS - GERENCIAMENTO DE STATUS DO DRIVER ====================
 
     // Definir status do driver
-    async setDriverStatus(driverId, status, isOnline = true) {
+    async setDriverStatus(driverId, status, isOnline = true, options = {}) {
         if (!this.socket?.connected) {
-            throw new Error('WebSocket não conectado');
+            throw buildSocketError(
+                { code: 'WS_DISCONNECTED', message: 'WebSocket nao conectado' },
+                'Sem conexão com o servidor agora. Verifique sua internet e tente novamente.',
+                'driver_status'
+            );
+        }
+
+        const timeoutMs = Number.isFinite(options?.timeoutMs) ? options.timeoutMs : 12000;
+        const location = options?.location || null;
+        const heading = Number.isFinite(options?.heading) ? options.heading : 0;
+        const speed = Number.isFinite(options?.speed) ? options.speed : 0;
+        const payload = {
+            driverId,
+            status,
+            isOnline
+        };
+
+        if (location && Number.isFinite(location?.lat) && Number.isFinite(location?.lng)) {
+            payload.lat = Number(location.lat);
+            payload.lng = Number(location.lng);
+            payload.heading = Number.isFinite(location?.heading) ? Number(location.heading) : heading;
+            payload.speed = Number.isFinite(location?.speed) ? Number(location.speed) : speed;
         }
 
         return new Promise((resolve, reject) => {
+            const buildDriverStatusError = (payload, fallbackCode = 'SET_DRIVER_STATUS_FAILED', fallbackMessage = 'Falha ao atualizar status do motorista.') => {
+                const normalizedPayload =
+                    payload && typeof payload === 'object'
+                        ? payload
+                        : { code: fallbackCode, message: String(payload || fallbackMessage) };
+                const error = buildSocketError(
+                    {
+                        ...normalizedPayload,
+                        code: normalizedPayload?.code || fallbackCode,
+                        message:
+                            normalizedPayload?.message ||
+                            normalizedPayload?.error ||
+                            normalizedPayload?.reason ||
+                            fallbackMessage
+                    },
+                    fallbackMessage,
+                    'driver_status'
+                );
+                if (normalizedPayload?.retryAfterSec) {
+                    error.retryAfterSec = normalizedPayload.retryAfterSec;
+                }
+                return error;
+            };
+
             const timeout = setTimeout(() => {
                 this.socket.off('driverStatusError', onError);
                 this.socket.off('driverStatusUpdated', onSuccess);
-                reject(new Error('Set driver status timeout'));
-            }, 10000);
+                reject(
+                    buildDriverStatusError(
+                        { code: 'SET_DRIVER_STATUS_TIMEOUT', message: 'Set driver status timeout' },
+                        'SET_DRIVER_STATUS_TIMEOUT',
+                        'O servidor demorou para responder ao atualizar seu status. Tente novamente.'
+                    )
+                );
+            }, timeoutMs);
 
             const onSuccess = (data) => {
                 clearTimeout(timeout);
@@ -1411,17 +2033,17 @@ class WebSocketManager {
                 if (data.success) {
                     resolve(data);
                 } else {
-                    reject(new Error(data.error || 'Set driver status failed'));
+                    reject(buildDriverStatusError(data));
                 }
             };
 
             const onError = (data) => {
                 clearTimeout(timeout);
                 this.socket.off('driverStatusUpdated', onSuccess);
-                reject(new Error(data?.error || data?.reason || 'Set driver status failed'));
+                reject(buildDriverStatusError(data));
             };
 
-            this.socket.emit('setDriverStatus', { driverId, status, isOnline });
+            this.socket.emit('setDriverStatus', payload);
             this.socket.once('driverStatusUpdated', onSuccess);
             this.socket.once('driverStatusError', onError);
         });
@@ -1449,7 +2071,7 @@ class WebSocketManager {
             });
             this.socket.once('locationUpdated', (data) => {
                 clearTimeout(timeout);
-                if (data.success) {
+                if (data?.success !== false) {
                     resolve(data);
                 } else {
                     reject(new Error(data.error || 'Update driver location failed'));
@@ -1461,6 +2083,57 @@ class WebSocketManager {
     // Compatibilidade temporária para chamadas legadas no app.
     async updateDriverLocation(driverId, lat, lng, heading = 0, speed = 0) {
         return this.updateLocation(driverId, lat, lng, heading, speed);
+    }
+
+    // Localização do passageiro durante corrida ativa (monitoramento de tripulação)
+    async updatePassengerLocation(bookingId, lat, lng, heading = 0, speed = 0) {
+        if (!this.socket?.connected) {
+            throw new Error('WebSocket não conectado');
+        }
+        if (!bookingId) {
+            throw new Error('bookingId obrigatório para updatePassengerLocation');
+        }
+
+        return new Promise((resolve, reject) => {
+            const timeout = setTimeout(() => {
+                cleanup();
+                reject(new Error('Update passenger location timeout'));
+            }, 10000);
+
+            const cleanup = () => {
+                clearTimeout(timeout);
+                this.off('passengerLocationUpdated', onSuccess);
+                this.off('passengerLocationError', onError);
+            };
+
+            const onSuccess = (data) => {
+                if (data?.bookingId && String(data.bookingId) !== String(bookingId)) {
+                    return;
+                }
+                cleanup();
+                if (data?.success === false || data?.error) {
+                    reject(new Error(data?.error || 'Update passenger location failed'));
+                    return;
+                }
+                resolve(data || { success: true, bookingId });
+            };
+
+            const onError = (error) => {
+                cleanup();
+                reject(new Error(error?.error || error?.message || 'Update passenger location failed'));
+            };
+
+            this.on('passengerLocationUpdated', onSuccess);
+            this.on('passengerLocationError', onError);
+            this.socket.emit('passengerLocationUpdate', {
+                bookingId,
+                lat,
+                lng,
+                heading,
+                speed,
+                timestamp: Date.now()
+            });
+        });
     }
 
     // ==================== NOVOS MÉTODOS - BUSCA E MATCHING DE DRIVERS ====================
@@ -1840,21 +2513,81 @@ class WebSocketManager {
         }
 
         return new Promise((resolve, reject) => {
+            const cleanup = () => {
+                clearTimeout(timeout);
+                this.socket.off('rideExtensionRequestAccepted', onAccepted);
+                this.socket.off('rideExtensionError', onError);
+            };
+
+            const onAccepted = (data) => {
+                cleanup();
+                if (data?.success === false || data?.error) {
+                    reject(new Error(data?.error || 'Request ride extension failed'));
+                    return;
+                }
+                resolve(data);
+            };
+
+            const onError = (data) => {
+                cleanup();
+                reject(new Error(data?.error || data?.message || 'Request ride extension failed'));
+            };
+
             const timeout = setTimeout(() => {
+                cleanup();
                 reject(new Error('Request ride extension timeout'));
             }, 10000);
 
-            this.socket.emit('requestRideExtension', { rideId, newDrop, newFare });
+            this.socket.on('rideExtensionRequestAccepted', onAccepted);
+            this.socket.on('rideExtensionError', onError);
+            this.socket.emit('requestRideExtension', {
+                bookingId: rideId,
+                newEndLocation: newDrop,
+                newFare
+            });
+        });
+    }
 
-            // Note: In an event-driven system, the actual confirmation comes later.
-            // But we can listen for an immediate acknowledgment if available.
-            this.socket.once('rideExtensionRequested', (data) => {
+    async respondRideExtension(rideId, accepted, options = {}) {
+        if (!this.socket?.connected) {
+            throw new Error('WebSocket não conectado');
+        }
+
+        return new Promise((resolve, reject) => {
+            const cleanup = () => {
                 clearTimeout(timeout);
-                if (data.success) {
-                    resolve(data);
-                } else {
-                    reject(new Error(data.error || 'Request ride extension failed'));
-                }
+                this.socket.off('rideExtensionPendingPayment', onPendingPayment);
+                this.socket.off('rideExtensionRejected', onRejected);
+                this.socket.off('rideExtensionResponseError', onError);
+            };
+
+            const onPendingPayment = (data) => {
+                cleanup();
+                resolve(data);
+            };
+
+            const onRejected = (data) => {
+                cleanup();
+                resolve(data);
+            };
+
+            const onError = (data) => {
+                cleanup();
+                reject(new Error(data?.error || data?.message || 'Ride extension response failed'));
+            };
+
+            const timeout = setTimeout(() => {
+                cleanup();
+                reject(new Error('Respond ride extension timeout'));
+            }, 10000);
+
+            this.socket.on('rideExtensionPendingPayment', onPendingPayment);
+            this.socket.on('rideExtensionRejected', onRejected);
+            this.socket.on('rideExtensionResponseError', onError);
+            this.socket.emit('respondRideExtension', {
+                bookingId: rideId,
+                accepted: Boolean(accepted),
+                ...options
             });
         });
     }
@@ -1870,20 +2603,271 @@ class WebSocketManager {
         }
 
         return new Promise((resolve, reject) => {
+            const cleanup = () => {
+                clearTimeout(timeout);
+                this.socket.off('destinationChanged', onChanged);
+                this.socket.off('changeDestinationError', onError);
+            };
+
+            const onChanged = (data) => {
+                cleanup();
+                if (data?.success) {
+                    resolve(data);
+                } else {
+                    reject(new Error(data?.error || 'Change destination failed'));
+                }
+            };
+
+            const onError = (data) => {
+                cleanup();
+                reject(new Error(data?.error || data?.message || 'Change destination failed'));
+            };
+
             const timeout = setTimeout(() => {
+                cleanup();
                 reject(new Error('Change destination timeout'));
             }, 10000);
 
-            this.socket.emit('changeDestination', { rideId, newDrop });
-            this.socket.once('destinationChanged', (data) => {
-                clearTimeout(timeout);
-                if (data.success) {
-                    resolve(data);
-                } else {
-                    reject(new Error(data.error || 'Change destination failed'));
-                }
+            this.socket.on('destinationChanged', onChanged);
+            this.socket.on('changeDestinationError', onError);
+            this.socket.emit('changeDestination', {
+                bookingId: rideId,
+                newDestination: newDrop
             });
         });
+    }
+
+    async endTripEarlyByRider(bookingId, endLocation, distanceKm = 0, durationSecs = 0, reason = 'EARLY_DROPOFF_BY_RIDER') {
+        if (!this.socket?.connected) {
+            throw new Error('WebSocket não conectado');
+        }
+
+        return new Promise((resolve, reject) => {
+            const cleanup = () => {
+                clearTimeout(timeout);
+                this.socket.off('tripCompleted', onCompleted);
+                this.socket.off('tripCompleteError', onError);
+            };
+
+            const onCompleted = (data) => {
+                cleanup();
+                if (data?.success) {
+                    resolve(data);
+                } else {
+                    reject(new Error(data?.error || 'End trip early failed'));
+                }
+            };
+
+            const onError = (data) => {
+                cleanup();
+                reject(new Error(data?.error || data?.message || 'End trip early failed'));
+            };
+
+            const timeout = setTimeout(() => {
+                cleanup();
+                reject(new Error('End trip early timeout'));
+            }, 12000);
+
+            this.socket.on('tripCompleted', onCompleted);
+            this.socket.on('tripCompleteError', onError);
+            this.socket.emit('endTripEarlyByRider', {
+                bookingId,
+                endLocation,
+                distanceKm,
+                durationSecs,
+                reason
+            });
+        });
+    }
+
+    async interruptRideOperational(
+        bookingId,
+        interruptionLocation,
+        distanceKm = 0,
+        durationSecs = 0,
+        reason = 'VEHICLE_BREAKDOWN',
+        note = ''
+    ) {
+        if (!this.socket?.connected) {
+            throw new Error('WebSocket não conectado');
+        }
+
+        return new Promise((resolve, reject) => {
+            const cleanup = () => {
+                clearTimeout(timeout);
+                this.socket.off('rideOperationalInterrupted', onInterrupted);
+                this.socket.off('rideOperationalInterruptionError', onError);
+            };
+
+            const onInterrupted = (payload) => {
+                cleanup();
+                if (payload?.success === false || payload?.error) {
+                    reject(new Error(payload?.error || 'Operational interruption failed'));
+                    return;
+                }
+                resolve(payload);
+            };
+
+            const onError = (payload) => {
+                cleanup();
+                reject(new Error(payload?.error || payload?.message || 'Operational interruption failed'));
+            };
+
+            const timeout = setTimeout(() => {
+                cleanup();
+                reject(new Error('Operational interruption timeout'));
+            }, 12000);
+
+            this.socket.on('rideOperationalInterrupted', onInterrupted);
+            this.socket.on('rideOperationalInterruptionError', onError);
+            this.socket.emit('interruptRideOperational', {
+                bookingId,
+                interruptionLocation,
+                distanceKm,
+                durationSecs,
+                reason,
+                note
+            });
+        });
+    }
+
+    async respondOperationalContinuation(bookingId, continueTrip) {
+        if (!this.socket?.connected) {
+            throw new Error('WebSocket não conectado');
+        }
+
+        return new Promise((resolve, reject) => {
+            const cleanup = () => {
+                clearTimeout(timeout);
+                this.socket.off('rideOperationalContinuationSearching', onSearching);
+                this.socket.off('tripCompleted', onTripCompleted);
+                this.socket.off('rideOperationalContinuationError', onError);
+            };
+
+            const onSearching = (payload) => {
+                if (payload?.bookingId && String(payload.bookingId) !== String(bookingId)) {
+                    return;
+                }
+                cleanup();
+                resolve(payload);
+            };
+
+            const onTripCompleted = (payload) => {
+                if (payload?.bookingId && String(payload.bookingId) !== String(bookingId)) {
+                    return;
+                }
+                cleanup();
+                resolve(payload);
+            };
+
+            const onError = (payload) => {
+                cleanup();
+                reject(new Error(payload?.error || payload?.message || 'Operational continuation failed'));
+            };
+
+            const timeout = setTimeout(() => {
+                cleanup();
+                reject(new Error('Operational continuation timeout'));
+            }, 15000);
+
+            this.socket.on('rideOperationalContinuationSearching', onSearching);
+            this.socket.on('tripCompleted', onTripCompleted);
+            this.socket.on('rideOperationalContinuationError', onError);
+            this.socket.emit('respondOperationalContinuation', {
+                bookingId,
+                continueTrip: Boolean(continueTrip)
+            });
+        });
+    }
+
+    async syncActiveRideWithAck(timeoutMs = ACTIVE_RIDE_SYNC_TIMEOUT_MS) {
+        if (!this.socket?.connected) {
+            throw buildSocketError(
+                { code: 'WS_DISCONNECTED', message: 'WebSocket nao conectado' },
+                'Sem conexao com o servidor agora. Verifique sua internet e tente novamente.',
+                'ride_sync'
+            );
+        }
+
+        if (!this.authenticatedUserId || !this.authenticatedUserType) {
+            throw buildSocketError(
+                { code: 'AUTH_REQUIRED', message: 'Usuario nao autenticado' },
+                'A sessao ainda nao foi validada. Tente novamente.',
+                'ride_sync'
+            );
+        }
+
+        return new Promise((resolve, reject) => {
+            const cleanup = () => {
+                this.off('activeRideSync', onSync);
+                clearTimeout(timeout);
+            };
+
+            const onSync = (payload) => {
+                cleanup();
+                if (!payload?.success) {
+                    reject(
+                        buildSocketError(
+                            payload,
+                            'Nao foi possivel sincronizar sua corrida ativa agora.',
+                            'ride_sync'
+                        )
+                    );
+                    return;
+                }
+                resolve(payload);
+            };
+
+            const timeout = setTimeout(() => {
+                cleanup();
+                reject(
+                    buildSocketError(
+                        { code: 'RIDE_SYNC_TIMEOUT', message: `Timeout ao sincronizar corrida ativa (${Math.floor(timeoutMs / 1000)}s)` },
+                        'A sincronizacao da corrida ativa demorou mais que o esperado.',
+                        'ride_sync'
+                    )
+                );
+            }, timeoutMs);
+
+            this.on('activeRideSync', onSync);
+            this.socket.emit('syncActiveRide', {
+                uid: this.authenticatedUserId,
+                userType: this.authenticatedUserType
+            });
+        });
+    }
+
+    _rehydrateRideEventsFromSync(snapshot) {
+        if (!snapshot?.success || !snapshot?.hasActiveRide) {
+            return;
+        }
+
+        const status = String(snapshot.status || '').toUpperCase();
+        const payload = {
+            success: true,
+            bookingId: snapshot.bookingId,
+            driverId: snapshot.driverId || null,
+            customerId: snapshot.customerId || null,
+            location: snapshot.driverLocation || null,
+            pickupLocation: snapshot.pickupLocation || null,
+            destinationLocation: snapshot.destinationLocation || null,
+            estimatedFare: snapshot.estimatedFare,
+            finalFare: snapshot.finalFare,
+            paymentStatus: snapshot.paymentStatus || null,
+            rehydrated: true,
+            syncedAt: snapshot.syncedAt || new Date().toISOString()
+        };
+
+        this.eventEmitter.emit('activeRideRehydrated', payload);
+
+        if (['MATCHED', 'ACCEPTED'].includes(status)) {
+            this.eventEmitter.emit('rideAccepted', payload);
+            return;
+        }
+
+        if (['IN_PROGRESS', 'STARTED'].includes(status)) {
+            this.eventEmitter.emit('tripStarted', payload);
+        }
     }
 }
 

@@ -5,6 +5,12 @@ import auth from '@react-native-firebase/auth';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { toUserFriendlyError } from './friendlyErrorMessages';
 
+function isCanceledAxiosError(error) {
+    return axios.isCancel?.(error)
+        || error?.code === 'ERR_CANCELED'
+        || error?.name === 'CanceledError'
+        || error?.message === 'canceled';
+}
 
 /**
  * Cria uma instância do axios com configurações padrão
@@ -43,6 +49,10 @@ export function createAxiosInstance(config = {}) {
             return response;
         },
         async (error) => {
+            if (isCanceledAxiosError(error)) {
+                return Promise.reject(error);
+            }
+
             const originalRequest = error.config;
 
             // Tratamento de erros de rede
@@ -128,6 +138,10 @@ export function setupAxiosInterceptor() {
             return response;
         },
         async (error) => {
+            if (isCanceledAxiosError(error)) {
+                return Promise.reject(error);
+            }
+
             const originalRequest = error.config;
 
             // Tratamento global de erros para tokens expirados (Sessão Infinita)

@@ -10,6 +10,16 @@ class LeafApiService {
   async request(endpoint, options = {}) {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), this.timeoutMs);
+    const externalSignal = options.signal;
+    const abortFromExternal = () => controller.abort();
+
+    if (externalSignal) {
+      if (externalSignal.aborted) {
+        controller.abort();
+      } else {
+        externalSignal.addEventListener("abort", abortFromExternal, { once: true });
+      }
+    }
 
     try {
       const isFormData =
@@ -57,6 +67,9 @@ class LeafApiService {
 
       return payload;
     } finally {
+      if (externalSignal) {
+        externalSignal.removeEventListener("abort", abortFromExternal);
+      }
       clearTimeout(timeout);
     }
   }
@@ -179,6 +192,14 @@ class LeafApiService {
     return this.request("/metrics/observability");
   }
 
+  async getSystemStatus() {
+    return this.request("/system/status");
+  }
+
+  async getMonitoringHealth() {
+    return this.request("/monitoring/health");
+  }
+
   async getDrivers(page = 1, limit = 20, status = "all", search = "") {
     const params = new URLSearchParams({
       page: String(page),
@@ -298,6 +319,16 @@ class LeafApiService {
     if (startDate) params.append("startDate", startDate);
     if (endDate) params.append("endDate", endDate);
     return this.request(`/map/heatmap?${params.toString()}`);
+  }
+
+  async getMapH3Cells(params = {}, options = {}) {
+    const query = new URLSearchParams();
+    Object.entries(params).forEach(([key, value]) => {
+      if (value !== undefined && value !== null && value !== "") {
+        query.append(key, String(value));
+      }
+    });
+    return this.request(`/map/h3-cells?${query.toString()}`, options);
   }
 
   async getGeofenceAdminConfig() {

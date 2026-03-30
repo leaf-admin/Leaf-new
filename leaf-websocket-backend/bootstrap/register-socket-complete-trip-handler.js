@@ -20,6 +20,9 @@ function registerSocketCompleteTripHandler({
     logEvent,
     fcmService
 }) {
+    const { buildTripCompletedPayload } = require('../utils/trip-completion-payload');
+    const { scheduleMapH3Refresh } = require('../utils/map-h3-refresh-broadcaster');
+
     socket.on('completeTrip', async (data) => {
         // ✅ OBSERVABILIDADE: Gerar traceId no início do handler
         const traceId = extractTraceIdFromEvent(data, socket);
@@ -136,11 +139,8 @@ function registerSocketCompleteTripHandler({
 
                     // ✅ MÉTRICAS: Registrar latência do command
                     const commandLatency = (Date.now() - commandStartTime) / 1000;
-                    metrics.recordCommand('complete_trip', commandLatency, result.success);
                 } catch (error) {
                     endSpanError(commandSpan, error);
-                    const commandLatency = (Date.now() - commandStartTime) / 1000;
-                    metrics.recordCommand('complete_trip', commandLatency, false);
                     throw error;
                 }
 
@@ -167,7 +167,31 @@ function registerSocketCompleteTripHandler({
                 }
 
                 // Command executado com sucesso (já processou pagamento e atualizou estado)
-                const { bookingId: resultBookingId, driverId: resultDriverId, customerId, event, endLocation: resultEndLocation, finalFare, distance: resultDistance, duration: resultDuration, paymentDistribution } = result.data;
+                const {
+                    bookingId: resultBookingId,
+                    driverId: resultDriverId,
+                    customerId,
+                    city = 'unknown',
+                    serviceType = 'standard',
+                    event,
+                    endLocation: resultEndLocation,
+                    finalFare,
+                    tollFee: resultTollFee,
+                    distance: resultDistance,
+                    duration: resultDuration,
+                    paymentDistribution
+                } = result.data;
+
+                const PaymentService = require('../services/payment-service');
+                const paymentService = new PaymentService();
+                const fareReais = Number(finalFare || fare || 0);
+                const tollFeeReais = Number(resultTollFee || 0);
+                const fareBreakdown = paymentService.calculateFareBreakdownFromReais(fareReais, tollFeeReais);
+
+                metrics.recordRideCompleted(city, serviceType || 'standard');
+                if (Number.isFinite(Number(resultDuration)) && Number(resultDuration) >= 0) {
+                    metrics.recordRideTotalDuration(Number(resultDuration), city);
+                }
 
                 // ✅ REFATORAÇÃO: Publicar evento no EventBus (listeners vão processar notificações)
                 if (event) {
@@ -204,18 +228,29 @@ function registerSocketCompleteTripHandler({
                 }
 
                 // Emitir confirmação imediatamente para reduzir latência no caminho crítico
-                const tripCompletedData = {
-                    success: true,
+                const bookingSnapshot = await redis.hgetall(`booking:${bookingId}`);
+                const tripCompletedData = buildTripCompletedPayload({
                     bookingId,
-                    message: 'Viagem finalizada com sucesso',
-                    endLocation: resultEndLocation || endLocation,
+                    bookingData: bookingSnapshot,
+                    resultEndLocation,
+                    endLocation,
                     distance: resultDistance || distance,
-                    fare: finalFare || fare,
-                    persistence: 'accepted_background',
-                    timestamp: new Date().toISOString()
-                };
+                    duration: resultDuration,
+                    fareBreakdown,
+                    paymentDistribution,
+                    rideLegs: bookingSnapshot?.rideLegs ? JSON.parse(bookingSnapshot.rideLegs) : null,
+                    operationalContinuation: bookingSnapshot?.operationalContinuation
+                        ? JSON.parse(bookingSnapshot.operationalContinuation)
+                        : null,
+                    persistence: 'accepted_background'
+                });
 
                 io.to(`driver_${driverId}`).emit('tripCompleted', tripCompletedData);
+                scheduleMapH3Refresh(io, {
+                    reason: 'trip_completed',
+                    bookingId,
+                    driverId
+                });
 
                 let customerIdToNotify = customerId || io.activeBookings?.get(bookingId)?.customerId || null;
                 if (!customerIdToNotify) {

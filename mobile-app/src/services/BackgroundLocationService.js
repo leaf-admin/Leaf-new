@@ -2,17 +2,19 @@ import Logger from '../utils/Logger';
 import * as Location from 'expo-location';
 import { Platform, Alert, Linking, AppState } from 'react-native';
 import * as TaskManager from 'expo-task-manager';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 // Nome da task de background
 const LOCATION_TASK_NAME = 'background-location-task';
 const BACKGROUND_LOCATION_TIME_INTERVAL_MS = Number.parseInt(process.env.EXPO_PUBLIC_BACKGROUND_LOCATION_INTERVAL_MS || '2000', 10);
 const BACKGROUND_LOCATION_DISTANCE_INTERVAL_M = Number.parseInt(process.env.EXPO_PUBLIC_BACKGROUND_LOCATION_DISTANCE_M || '0', 10);
+const BACKGROUND_DISCLOSURE_ACCEPTED_KEY = 'has_shown_background_location_modal';
 
 // ✅ Registrar task de background (se ainda não estiver registrada)
 if (!TaskManager.isTaskDefined(LOCATION_TASK_NAME)) {
     TaskManager.defineTask(LOCATION_TASK_NAME, async ({ data, error }) => {
         if (error) {
-            Logger.error('❌ Erro na task de background:', error);
+            Logger.warn('⚠️ Erro na task de background:', error?.message || error);
             return;
         }
         if (data) {
@@ -23,6 +25,7 @@ if (!TaskManager.isTaskDefined(LOCATION_TASK_NAME)) {
 
             try {
                 const locationBufferService = require('./LocationBufferService').default;
+                const prototypeDriverTripAssistantService = require('./PrototypeDriverTripAssistantService').default;
                 for (const locationItem of locations) {
                     const coords = locationItem?.coords || {};
                     const lat = Number(coords.latitude);
@@ -40,6 +43,11 @@ if (!TaskManager.isTaskDefined(LOCATION_TASK_NAME)) {
                         timestamp: Number.isFinite(Number(locationItem?.timestamp))
                             ? Number(locationItem.timestamp)
                             : Date.now()
+                    });
+
+                    await prototypeDriverTripAssistantService.handleBackgroundLocationUpdate({
+                        lat,
+                        lng
                     });
                 }
             } catch (taskError) {
@@ -78,8 +86,19 @@ class BackgroundLocationService {
                 };
             }
 
-            // Solicitar permissão de background
+            // Solicitar permissão de background apenas após disclosure explícito no app
             let backgroundStatus = 'denied';
+            const hasAcceptedDisclosure =
+                (await AsyncStorage.getItem(BACKGROUND_DISCLOSURE_ACCEPTED_KEY)) === 'true';
+
+            if (!hasAcceptedDisclosure) {
+                Logger.warn('⚠️ Background location bloqueada até disclosure explícito do usuário');
+                return {
+                    foreground: foregroundStatus === 'granted',
+                    background: false
+                };
+            }
+
             if (Platform.OS === 'android') {
                 const { status } = await Location.requestBackgroundPermissionsAsync();
                 backgroundStatus = status;

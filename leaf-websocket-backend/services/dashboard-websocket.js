@@ -3,6 +3,9 @@
 
 const admin = require('firebase-admin');
 const { logStructured, logError } = require('../utils/logger');
+const { getAdminUser } = require('../utils/admin-user-cache');
+const { resolveJwtSecret } = require('../utils/jwt-secret-resolver');
+const { getDashboardLiveData } = require('./dashboard-live-data-service');
 let firebaseConfig = null;
 try {
   firebaseConfig = require('../firebase-config');
@@ -10,13 +13,220 @@ try {
   logStructured('warn', '⚠️ Firebase config não encontrado para dashboard websocket', { service: 'dashboard-websocket' });
 }
 
+const DASHBOARD_JWT_SECRET = resolveJwtSecret(['JWT_SECRET', 'ADMIN_JWT_SECRET'], {
+  context: 'dashboard-websocket'
+});
+
 class DashboardWebSocketService {
   constructor(io, redis) {
     this.io = io;
     this.redis = redis;
     this.dashboardNamespace = io.of('/dashboard');
+    this.authenticatedRoom = 'dashboard:authenticated';
+    this.authenticatedSocketIds = new Set();
+    this.metricsIntervalId = null;
+    this.liveIntervalId = null;
+    this.metricsIntervalMs = Math.max(
+      5000,
+      Number.parseInt(process.env.DASHBOARD_METRICS_INTERVAL_MS || '60000', 10)
+    );
+    this.liveIntervalMs = Math.max(
+      3000,
+      Number.parseInt(process.env.DASHBOARD_LIVE_INTERVAL_MS || '5000', 10)
+    );
+    this.metricsCache = null;
+    this.liveDataCache = null;
+    this.h3RefreshCooldownMs = Math.max(
+      500,
+      Number.parseInt(process.env.DASHBOARD_H3_REFRESH_COOLDOWN_MS || '900', 10)
+    );
+    this.lastH3RefreshAt = 0;
+    this.pendingH3RefreshTimerId = null;
+    this.pendingH3RefreshPayload = null;
     this.setupDashboardEvents();
-    this.startPeriodicUpdates();
+  }
+
+  getMetricsCacheTtlMs() {
+    return Math.max(
+      5000,
+      Number.parseInt(
+        process.env.DASHBOARD_METRICS_CACHE_TTL_MS || String(Math.min(this.metricsIntervalMs, 45000)),
+        10
+      )
+    );
+  }
+
+  getLiveCacheTtlMs() {
+    return Math.max(
+      1000,
+      Number.parseInt(
+        process.env.DASHBOARD_LIVE_CACHE_TTL_MS || String(Math.min(this.liveIntervalMs, 4000)),
+        10
+      )
+    );
+  }
+
+  isCacheValid(cache, ttlMs) {
+    return Boolean(cache && (Date.now() - cache.timestamp) < ttlMs);
+  }
+
+  setCache(kind, payload) {
+    const entry = {
+      timestamp: Date.now(),
+      payload
+    };
+
+    if (kind === 'metrics') {
+      this.metricsCache = entry;
+      return;
+    }
+
+    if (kind === 'live') {
+      this.liveDataCache = entry;
+    }
+  }
+
+  getCachedPayload(kind) {
+    if (kind === 'metrics' && this.isCacheValid(this.metricsCache, this.getMetricsCacheTtlMs())) {
+      return this.metricsCache.payload;
+    }
+
+    if (kind === 'live' && this.isCacheValid(this.liveDataCache, this.getLiveCacheTtlMs())) {
+      return this.liveDataCache.payload;
+    }
+
+    return null;
+  }
+
+  hasAuthenticatedClients() {
+    return this.authenticatedSocketIds.size > 0;
+  }
+
+  ensureAuthenticated(socket) {
+    if (socket?.authenticated) {
+      return true;
+    }
+
+    socket?.emit('authentication_error', {
+      message: 'Dashboard não autenticado'
+    });
+    return false;
+  }
+
+  markSocketAuthenticated(socket) {
+    if (!socket || this.authenticatedSocketIds.has(socket.id)) {
+      return;
+    }
+
+    this.authenticatedSocketIds.add(socket.id);
+    socket.join(this.authenticatedRoom);
+
+    if (this.authenticatedSocketIds.size === 1) {
+      this.startPeriodicUpdates();
+    }
+  }
+
+  unmarkSocketAuthenticated(socket) {
+    if (!socket || !this.authenticatedSocketIds.has(socket.id)) {
+      return;
+    }
+
+    this.authenticatedSocketIds.delete(socket.id);
+    socket.leave(this.authenticatedRoom);
+
+    if (!this.hasAuthenticatedClients()) {
+      this.stopPeriodicUpdates();
+    }
+  }
+
+  emitToAuthenticated(event, payload) {
+    this.dashboardNamespace.to(this.authenticatedRoom).emit(event, payload);
+  }
+
+  emitH3RefreshNow(payload = {}) {
+    this.lastH3RefreshAt = Date.now();
+    this.emitToAuthenticated('map_h3_refresh', {
+      scope: 'viewport',
+      surfaces: ['dashboard'],
+      timestamp: new Date().toISOString(),
+      ...payload
+    });
+  }
+
+  scheduleH3Refresh(payload = {}) {
+    if (!this.hasAuthenticatedClients()) {
+      return;
+    }
+
+    this.pendingH3RefreshPayload = {
+      ...(this.pendingH3RefreshPayload || {}),
+      ...payload
+    };
+
+    const now = Date.now();
+    const remainingMs = Math.max(0, this.h3RefreshCooldownMs - (now - this.lastH3RefreshAt));
+
+    if (remainingMs === 0 && !this.pendingH3RefreshTimerId) {
+      const nextPayload = this.pendingH3RefreshPayload;
+      this.pendingH3RefreshPayload = null;
+      this.emitH3RefreshNow(nextPayload);
+      return;
+    }
+
+    if (this.pendingH3RefreshTimerId) {
+      return;
+    }
+
+    this.pendingH3RefreshTimerId = setTimeout(() => {
+      this.pendingH3RefreshTimerId = null;
+      const nextPayload = this.pendingH3RefreshPayload;
+      this.pendingH3RefreshPayload = null;
+      this.emitH3RefreshNow(nextPayload);
+    }, remainingMs || this.h3RefreshCooldownMs);
+  }
+
+  async pushInitialSnapshot(socket) {
+    try {
+      const [metrics, liveData] = await Promise.all([
+        this.getRealTimeMetrics(),
+        this.getLiveData()
+      ]);
+
+      if (metrics) {
+        socket.emit('metrics:updated', metrics);
+      }
+
+      if (liveData) {
+        socket.emit('live_stats', liveData.stats);
+        socket.emit('live_stats_update', liveData.stats);
+        socket.emit('driver_location_update', { drivers: liveData.drivers });
+        socket.emit('passenger_location_update', { passengers: liveData.passengers });
+        socket.emit('trip_update', { trips: liveData.trips });
+        socket.emit('map_h3_refresh', {
+          scope: 'viewport',
+          surfaces: ['dashboard'],
+          reason: 'initial_snapshot',
+          timestamp: new Date().toISOString()
+        });
+      }
+    } catch (error) {
+      logError(error, 'Erro ao enviar snapshot inicial do dashboard', { service: 'dashboard-websocket' });
+    }
+  }
+
+  async runCountAggregate(aggregateQuery, logMessage, fallback = 0) {
+    try {
+      const snapshot = await aggregateQuery.get();
+      return Number(snapshot?.data?.().count || 0);
+    } catch (error) {
+      logError(error, logMessage, { service: 'dashboard-websocket' });
+      return fallback;
+    }
+  }
+
+  parseMetricNumber(value, fallback = 0) {
+    const numeric = Number.parseFloat(value);
+    return Number.isFinite(numeric) ? numeric : fallback;
   }
 
   setupDashboardEvents() {
@@ -31,15 +241,14 @@ class DashboardWebSocketService {
         if (jwtToken) {
           try {
             const jwt = require('jsonwebtoken');
-            const JWT_SECRET = process.env.JWT_SECRET || process.env.ADMIN_JWT_SECRET || 'leaf-admin-secret-key-change-in-production';
+            const decoded = jwt.verify(jwtToken, DASHBOARD_JWT_SECRET);
 
-            const decoded = jwt.verify(jwtToken, JWT_SECRET);
+            const adminUserRecord = await getAdminUser(decoded.userId, {
+              source: 'dashboard-websocket.authenticate.jwt',
+              maxAgeMs: 15 * 1000
+            });
 
-            // Verificar se usuário é admin no Firestore
-            const firestore = admin.firestore();
-            const adminUserDoc = await firestore.collection('adminUsers').doc(decoded.userId).get();
-
-            if (!adminUserDoc.exists) {
+            if (!adminUserRecord.exists) {
               socket.emit('authentication_error', {
                 message: 'Usuário não possui permissões de admin'
               });
@@ -47,7 +256,7 @@ class DashboardWebSocketService {
               return;
             }
 
-            const adminData = adminUserDoc.data();
+            const adminData = adminUserRecord.data || {};
             if (!adminData.active) {
               socket.emit('authentication_error', {
                 message: 'Conta de admin desativada'
@@ -61,6 +270,7 @@ class DashboardWebSocketService {
             socket.userId = decoded.userId;
             socket.userRole = decoded.role || adminData.role;
             socket.userPermissions = decoded.permissions || adminData.permissions || [];
+            this.markSocketAuthenticated(socket);
 
             socket.emit('authenticated', {
               message: 'Dashboard autenticado com sucesso',
@@ -73,6 +283,7 @@ class DashboardWebSocketService {
             });
 
             logStructured('info', 'Dashboard autenticado (JWT)', { service: 'dashboard-websocket', socketId: socket.id, email: decoded.email || adminData.email, role: socket.userRole });
+            this.pushInitialSnapshot(socket).catch(() => {});
             return;
 
           } catch (error) {
@@ -98,11 +309,12 @@ class DashboardWebSocketService {
           // Verificar token Firebase usando Admin SDK
           const decodedToken = await admin.auth().verifyIdToken(firebaseToken);
 
-          // Verificar se o usuário é admin no Firestore
-          const firestore = admin.firestore();
-          const adminUserDoc = await firestore.collection('adminUsers').doc(decodedToken.uid).get();
+          const adminUserRecord = await getAdminUser(decodedToken.uid, {
+            source: 'dashboard-websocket.authenticate.firebase',
+            maxAgeMs: 15 * 1000
+          });
 
-          if (!adminUserDoc.exists) {
+          if (!adminUserRecord.exists) {
             socket.emit('authentication_error', {
               message: 'Usuário não possui permissões de admin'
             });
@@ -110,7 +322,7 @@ class DashboardWebSocketService {
             return;
           }
 
-          const adminData = adminUserDoc.data();
+          const adminData = adminUserRecord.data || {};
           if (!adminData.active) {
             socket.emit('authentication_error', {
               message: 'Conta de admin desativada'
@@ -124,6 +336,7 @@ class DashboardWebSocketService {
           socket.userId = decodedToken.uid;
           socket.userRole = adminData.role;
           socket.userPermissions = adminData.permissions || [];
+          this.markSocketAuthenticated(socket);
 
           socket.emit('authenticated', {
             message: 'Dashboard autenticado com sucesso',
@@ -136,6 +349,7 @@ class DashboardWebSocketService {
           });
 
           logStructured('info', 'Dashboard autenticado (Firebase)', { service: 'dashboard-websocket', socketId: socket.id, email: decodedToken.email, role: adminData.role });
+          this.pushInitialSnapshot(socket).catch(() => {});
 
         } catch (error) {
           logError(error, 'Erro na autenticação do dashboard', { service: 'dashboard-websocket', socketId: socket.id });
@@ -148,34 +362,42 @@ class DashboardWebSocketService {
 
       // 📊 Solicitar dados específicos
       socket.on('request_live_data', async () => {
+        if (!this.ensureAuthenticated(socket)) return;
         await this.sendLiveData(socket);
       });
 
       socket.on('request_user_stats', () => {
+        if (!this.ensureAuthenticated(socket)) return;
         this.sendUserStats(socket);
       });
 
       socket.on('request_rides_stats', () => {
+        if (!this.ensureAuthenticated(socket)) return;
         this.sendRidesStats(socket);
       });
 
       socket.on('request_revenue_stats', () => {
+        if (!this.ensureAuthenticated(socket)) return;
         this.sendRevenueStats(socket);
       });
 
       socket.on('request_approval_stats', () => {
+        if (!this.ensureAuthenticated(socket)) return;
         this.sendApprovalStats(socket);
       });
 
       socket.on('request_dashboard_metrics', (data) => {
+        if (!this.ensureAuthenticated(socket)) return;
         this.sendDashboardMetrics(socket, data);
       });
 
       socket.on('request_subscription_stats', () => {
+        if (!this.ensureAuthenticated(socket)) return;
         this.sendSubscriptionStats(socket);
       });
 
       socket.on('request_promotion_stats', () => {
+        if (!this.ensureAuthenticated(socket)) return;
         this.sendPromotionStats(socket);
       });
 
@@ -208,6 +430,7 @@ class DashboardWebSocketService {
       });
 
       socket.on('disconnect', () => {
+        this.unmarkSocketAuthenticated(socket);
         logStructured('info', 'Dashboard desconectado', { service: 'dashboard-websocket', socketId: socket.id });
       });
     });
@@ -222,150 +445,20 @@ class DashboardWebSocketService {
   }
 
   async getLiveDataFromRedis() {
-    if (!this.redis) return null;
-
-    try {
-      const [driverIds, activeTripsCount] = await Promise.all([
-        this.redis.zrange('driver_locations', 0, -1),
-        this.redis.hlen('bookings:active').catch(() => 0)
-      ]);
-
-      const drivers = [];
-      if (Array.isArray(driverIds) && driverIds.length > 0) {
-        const pipeline = this.redis.pipeline();
-        driverIds.forEach((driverId) => {
-          pipeline.geopos('driver_locations', driverId);
-          pipeline.hgetall(`driver:${driverId}`);
-        });
-        const rows = await pipeline.exec();
-
-        for (let i = 0; i < driverIds.length; i++) {
-          const driverId = driverIds[i];
-          const geoResult = rows[i * 2]?.[1];
-          const hash = rows[i * 2 + 1]?.[1] || {};
-          const coords = Array.isArray(geoResult) ? geoResult[0] : null;
-          if (!coords || coords.length < 2) continue;
-
-          const lng = Number(coords[0]);
-          const lat = Number(coords[1]);
-          if (!Number.isFinite(lat) || !Number.isFinite(lng)) continue;
-
-          const isOnline = String(hash?.isOnline || 'true') === 'true';
-          const status = this.normalizeDriverStatus(hash?.status, isOnline);
-
-          drivers.push({
-            id: driverId,
-            type: 'driver',
-            name: hash?.name || hash?.displayName || '',
-            location: {
-              lat,
-              lng,
-              heading: Number(hash?.heading || 0),
-              speed: Number(hash?.speed || 0),
-              lastUpdate: hash?.lastUpdate ? new Date(Number(hash.lastUpdate)).toISOString() : new Date().toISOString()
-            },
-            status,
-            vehicle: {
-              plate: hash?.vehicleNumber || hash?.vehiclePlate || '',
-              type: hash?.carType || hash?.vehicleCategory || ''
-            },
-            rating: Number(hash?.rating || 0)
-          });
-        }
-      }
-
-      const driversAvailable = drivers.filter((driver) => driver.status === 'available').length;
-      const driversBusy = drivers.filter((driver) => driver.status === 'busy').length;
-
-      return {
-        drivers,
-        passengers: [],
-        trips: [],
-        stats: {
-          driversOnline: drivers.length,
-          driversAvailable,
-          driversBusy,
-          passengerWaiting: 0,
-          activeTrips: Number(activeTripsCount || 0),
-          avgWaitTime: 0,
-          avgTripTime: 0
-        }
-      };
-    } catch (error) {
-      logError(error, 'Erro ao montar live data via Redis', { service: 'dashboard-websocket' });
-      return null;
-    }
+    return getDashboardLiveData(this.redis);
   }
 
   async getLiveDataFromFirebase() {
-    if (!firebaseConfig || !firebaseConfig.getRealtimeDB) return null;
-
-    try {
-      const db = firebaseConfig.getRealtimeDB();
-      const [locationsSnapshot, usersSnapshot] = await Promise.all([
-        db.ref('locations').once('value'),
-        db.ref('users').once('value')
-      ]);
-
-      const locationsData = locationsSnapshot.val() || {};
-      const users = usersSnapshot.val() || {};
-      const drivers = [];
-
-      Object.keys(locationsData).forEach((userId) => {
-        const locationData = locationsData[userId];
-        const user = users[userId];
-        if (!user || user.usertype !== 'driver') return;
-        const lat = Number(locationData?.lat);
-        const lng = Number(locationData?.lng);
-        if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
-
-        const status = locationData?.online ? (locationData?.busy ? 'busy' : 'available') : 'offline';
-        drivers.push({
-          id: userId,
-          type: 'driver',
-          name: `${user.firstName || ''} ${user.lastName || ''}`.trim(),
-          location: {
-            lat,
-            lng,
-            heading: Number(locationData?.heading || 0),
-            speed: Number(locationData?.speed || 0),
-            lastUpdate: locationData?.timestamp ? new Date(locationData.timestamp).toISOString() : new Date().toISOString()
-          },
-          status,
-          vehicle: {
-            plate: user?.carPlate || user?.vehiclePlate || '',
-            type: user?.carType || ''
-          },
-          rating: Number(user?.driverRating || 0)
-        });
-      });
-
-      const driversOnline = drivers.filter((driver) => driver.status !== 'offline').length;
-      const driversAvailable = drivers.filter((driver) => driver.status === 'available').length;
-      const driversBusy = drivers.filter((driver) => driver.status === 'busy').length;
-
-      return {
-        drivers,
-        passengers: [],
-        trips: [],
-        stats: {
-          driversOnline,
-          driversAvailable,
-          driversBusy,
-          passengerWaiting: 0,
-          activeTrips: 0,
-          avgWaitTime: 0,
-          avgTripTime: 0
-        }
-      };
-    } catch (error) {
-      logError(error, 'Erro ao montar live data via Firebase', { service: 'dashboard-websocket' });
-      return null;
-    }
+    return null;
   }
 
   async getLiveData() {
-    return (await this.getLiveDataFromRedis()) || (await this.getLiveDataFromFirebase()) || {
+    const cachedPayload = this.getCachedPayload('live');
+    if (cachedPayload) {
+      return cachedPayload;
+    }
+
+    const liveData = (await this.getLiveDataFromRedis()) || {
       drivers: [],
       passengers: [],
       trips: [],
@@ -379,6 +472,9 @@ class DashboardWebSocketService {
         avgTripTime: 0
       }
     };
+
+    this.setCache('live', liveData);
+    return liveData;
   }
 
   async sendLiveData(socket) {
@@ -435,8 +531,15 @@ class DashboardWebSocketService {
   }
 
   async getRealTimeMetrics() {
+    const cachedPayload = this.getCachedPayload('metrics');
+    if (cachedPayload) {
+      return cachedPayload;
+    }
+
     try {
       const firestore = admin.firestore();
+      const usersCollection = firestore.collection('users');
+      const bookingsCollection = firestore.collection('bookings');
 
       // 1. Contagem de Usuários (Total)
       let totalUsersCount = 0;
@@ -446,70 +549,71 @@ class DashboardWebSocketService {
       todayStart.setHours(0, 0, 0, 0);
       const todayISO = todayStart.toISOString();
 
-      try {
-        const usersSnapshot = await firestore.collection('users').get();
-        totalUsersCount = usersSnapshot.size;
-
-        // Count users created today
-        usersSnapshot.forEach(doc => {
-          const data = doc.data();
-          if (data.createdAt && data.createdAt >= todayISO) {
-            newUsersToday++;
-          }
-        });
-      } catch (err) {
-        logError(err, 'Erro ao contar usuarios no Firestore', { service: 'dashboard-websocket' });
-      }
+      totalUsersCount = await this.runCountAggregate(
+        usersCollection.count(),
+        'Erro ao contar usuarios totais no Firestore'
+      );
+      newUsersToday = await this.runCountAggregate(
+        usersCollection.where('createdAt', '>=', todayISO).count(),
+        'Erro ao contar novos usuarios do dia no Firestore'
+      );
 
       // 2. Corridas Ativas (Redis) e Histórico Diário (Firestore)
       let activeRidesCount = 0;
       if (this.redis) {
         try {
-          const activeBookings = await this.redis.hkeys('bookings:active');
-          activeRidesCount = activeBookings.length;
+          activeRidesCount = await this.redis.hlen('bookings:active');
         } catch (err) { }
       }
 
       let completedToday = 0;
       let todayRevenue = 0;
       let totalRidesCount = 0;
+      let averageTicket = 0;
+      let monthlyRevenue = 0;
 
-      try {
-        // Query daily completed rides (status = 'paid' or 'completed')
-        // We fetch all from today
-        const ridesSnapshot = await firestore.collection('bookings')
+      totalRidesCount = await this.runCountAggregate(
+        bookingsCollection.count(),
+        'Erro ao contar corridas totais no Firestore'
+      );
+      completedToday = await this.runCountAggregate(
+        bookingsCollection
           .where('createdAt', '>=', todayISO)
-          .get();
-
-        ridesSnapshot.forEach(doc => {
-          const data = doc.data();
-          if (data.status === 'completed' || data.status === 'PAID') {
-            completedToday++;
-            todayRevenue += parseFloat(data.finalPrice || data.estimate || 0);
-          }
-        });
-
-        // Optional: Count all time rides (might be heavy if lots of rides, using arbitrary count for now)
-        // A robust way in production is using Firestore aggregation queries (count)
-        const allRidesMeta = await firestore.collection('bookings').count().get();
-        totalRidesCount = allRidesMeta.data().count;
-
-      } catch (err) {
-        logError(err, 'Erro ao contar corridas no Firestore', { service: 'dashboard-websocket' });
-      }
+          .where('status', 'in', ['completed', 'PAID'])
+          .count(),
+        'Erro ao contar corridas concluídas do dia no Firestore'
+      );
 
       // 3. Buscar Dados do Fundo de Reserva (Custos Prejudiciais Absorvidos)
       let assumedCancellationCosts = 0;
+      let financialMetrics = {};
       if (this.redis) {
         try {
-          const costStr = await this.redis.hget('metrics:financial', 'assumed_cancellation_costs');
-          if (costStr) assumedCancellationCosts = parseFloat(costStr);
+          financialMetrics = await this.redis.hgetall('metrics:financial');
+          const costStr = financialMetrics?.assumed_cancellation_costs;
+          if (costStr) assumedCancellationCosts = this.parseMetricNumber(costStr);
+          todayRevenue = this.parseMetricNumber(
+            financialMetrics?.today_revenue ??
+            financialMetrics?.todayRevenue ??
+            financialMetrics?.daily_revenue,
+            0
+          );
+          monthlyRevenue = this.parseMetricNumber(
+            financialMetrics?.monthly_revenue ??
+            financialMetrics?.monthlyRevenue,
+            0
+          );
+          averageTicket = this.parseMetricNumber(
+            financialMetrics?.average_ticket ??
+            financialMetrics?.averageTicket,
+            0
+          );
         } catch (err) { }
       }
 
       const activeUsers = 0; // We define online drivers later
 
-      return {
+      const payload = {
         users: {
           totalUsers: totalUsersCount,
           activeUsers: activeUsers,
@@ -520,15 +624,15 @@ class DashboardWebSocketService {
           totalRides: totalRidesCount,
           activeRides: activeRidesCount,
           completedToday: completedToday,
-          averageValue: completedToday > 0 ? (todayRevenue / completedToday) : 0,
+          averageValue: averageTicket || (completedToday > 0 ? (todayRevenue / completedToday) : 0),
           growthRate: 0
         },
         revenue: {
           todayRevenue: todayRevenue,
-          monthlyRevenue: todayRevenue * 30, // Rough estimate placeholder until we implement monthly aggregation
-          reserveFundLosses: assumedCancellationCosts, // ✅ Nova métrica de perdas absorvidas
+          monthlyRevenue: monthlyRevenue,
+          reserveFundLosses: assumedCancellationCosts,
           netRevenueToday: todayRevenue > 0 ? (todayRevenue - assumedCancellationCosts) : 0,
-          averageTicket: completedToday > 0 ? (todayRevenue / completedToday) : 0,
+          averageTicket: averageTicket || (completedToday > 0 ? (todayRevenue / completedToday) : 0),
           growthRate: 0
         },
         conversion: {
@@ -538,6 +642,9 @@ class DashboardWebSocketService {
         },
         timestamp: new Date().toISOString()
       };
+
+      this.setCache('metrics', payload);
+      return payload;
     } catch (error) {
       logError(error, 'Erro fatal em getRealTimeMetrics', { service: 'dashboard-websocket' });
       return null;
@@ -734,31 +841,71 @@ class DashboardWebSocketService {
 
   // 🔄 Atualizações periódicas
   startPeriodicUpdates() {
-    // Atualizar métricas gerais a cada 5 segundos
-    setInterval(async () => {
-      try {
-        // Buscar métricas reais (se disponível)
-        const metrics = await this.getRealTimeMetrics();
+    if (this.metricsIntervalId || this.liveIntervalId) {
+      return;
+    }
 
-        // Emitir para todos os dashboards conectados e autenticados
-        this.dashboardNamespace.emit('metrics:updated', metrics);
+    this.metricsIntervalId = setInterval(async () => {
+      if (!this.hasAuthenticatedClients()) {
+        return;
+      }
+
+      try {
+        const metrics = await this.getRealTimeMetrics();
+        if (metrics) {
+          this.emitToAuthenticated('metrics:updated', metrics);
+        }
       } catch (error) {
         logError(error, 'Erro ao buscar métricas em tempo real', { service: 'dashboard-websocket' });
       }
-    }, 5000); // A cada 5 segundos
+    }, this.metricsIntervalMs);
 
-    // Atualizar live data real a cada 5 segundos
-    setInterval(async () => {
+    this.liveIntervalId = setInterval(async () => {
+      if (!this.hasAuthenticatedClients()) {
+        return;
+      }
+
       try {
         const liveData = await this.getLiveData();
-        this.dashboardNamespace.emit('live_stats_update', liveData.stats);
-        this.dashboardNamespace.emit('driver_location_update', { drivers: liveData.drivers });
-        this.dashboardNamespace.emit('passenger_location_update', { passengers: liveData.passengers });
-        this.dashboardNamespace.emit('trip_update', { trips: liveData.trips });
+        this.emitToAuthenticated('live_stats_update', liveData.stats);
+        this.emitToAuthenticated('driver_location_update', { drivers: liveData.drivers });
+        this.emitToAuthenticated('passenger_location_update', { passengers: liveData.passengers });
+        this.emitToAuthenticated('trip_update', { trips: liveData.trips });
+        this.scheduleH3Refresh({
+          reason: 'live_loop'
+        });
       } catch (error) {
         logError(error, 'Erro ao publicar live data em tempo real', { service: 'dashboard-websocket' });
       }
-    }, 5000);
+    }, this.liveIntervalMs);
+
+    logStructured('info', 'Loops periódicos do dashboard iniciados', {
+      service: 'dashboard-websocket',
+      metricsIntervalMs: this.metricsIntervalMs,
+      liveIntervalMs: this.liveIntervalMs
+    });
+  }
+
+  stopPeriodicUpdates() {
+    if (this.metricsIntervalId) {
+      clearInterval(this.metricsIntervalId);
+      this.metricsIntervalId = null;
+    }
+
+    if (this.liveIntervalId) {
+      clearInterval(this.liveIntervalId);
+      this.liveIntervalId = null;
+    }
+
+    if (this.pendingH3RefreshTimerId) {
+      clearTimeout(this.pendingH3RefreshTimerId);
+      this.pendingH3RefreshTimerId = null;
+    }
+    this.pendingH3RefreshPayload = null;
+
+    logStructured('info', 'Loops periódicos do dashboard parados', {
+      service: 'dashboard-websocket'
+    });
   }
 
   // 📡 Métodos públicos para eventos externos
@@ -769,10 +916,18 @@ class DashboardWebSocketService {
       lng: location.lng,
       timestamp: new Date().toISOString()
     });
+    this.scheduleH3Refresh({
+      reason: 'driver_location_update',
+      driverId
+    });
   }
 
   emitTripUpdate(tripData) {
     this.dashboardNamespace.emit('trip_update', tripData);
+    this.scheduleH3Refresh({
+      reason: 'trip_update',
+      bookingId: tripData?.bookingId || tripData?.id || null
+    });
   }
 
   emitUserRegistered(userData) {

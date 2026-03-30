@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { io } from "socket.io-client";
 import ProtectedRoute from "@/src/components/ProtectedRoute";
 import AppNav from "@/src/components/AppNav";
@@ -13,6 +13,9 @@ import { ErrorText, LoadingState } from "@/src/components/ui/PageFeedback";
 import GoogleDriversMap from "@/src/components/map/GoogleDriversMap";
 import { KeyValueGrid, TechnicalDetails } from "@/src/components/ui/DataViews";
 
+const H3_VIEWPORT_DEBOUNCE_MS = 400;
+const H3_SOCKET_REFRESH_DEBOUNCE_MS = 900;
+
 function formatRegionDraft(region) {
   if (!Array.isArray(region)) return "[]";
   return JSON.stringify(region, null, 2);
@@ -20,6 +23,10 @@ function formatRegionDraft(region) {
 
 export default function MapsPage() {
   const [locations, setLocations] = useState(null);
+  const [h3Cells, setH3Cells] = useState([]);
+  const [h3Loading, setH3Loading] = useState(false);
+  const [h3Error, setH3Error] = useState("");
+  const [mapViewport, setMapViewport] = useState(null);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
   const [normalizedDrivers, setNormalizedDrivers] = useState([]);
@@ -37,6 +44,9 @@ export default function MapsPage() {
   const [geofenceBusy, setGeofenceBusy] = useState(false);
   const [geofenceEnabledDraft, setGeofenceEnabledDraft] = useState(true);
   const [geofenceRegionDraft, setGeofenceRegionDraft] = useState("[]");
+  const h3ViewportRequestRef = useRef("");
+  const h3SocketRefreshTimerRef = useRef(null);
+  const [h3RefreshNonce, setH3RefreshNonce] = useState(0);
 
   useEffect(() => {
     let mounted = true;
@@ -59,6 +69,84 @@ export default function MapsPage() {
     return () => {
       mounted = false;
       clearInterval(timer);
+    };
+  }, []);
+
+  const handleMapViewportChange = useCallback((viewport) => {
+    if (!viewport?.bbox || !Number.isFinite(Number(viewport?.zoom))) {
+      return;
+    }
+
+    const nextKey = `${viewport.bbox}:${viewport.zoom}`;
+    if (nextKey === h3ViewportRequestRef.current) {
+      return;
+    }
+
+    h3ViewportRequestRef.current = nextKey;
+    setMapViewport({
+      bbox: viewport.bbox,
+      zoom: Number(viewport.zoom),
+    });
+  }, []);
+
+  const scheduleH3Refresh = useCallback(() => {
+    if (!mapViewport?.bbox || !Number.isFinite(Number(mapViewport?.zoom))) {
+      return;
+    }
+
+    if (h3SocketRefreshTimerRef.current) {
+      clearTimeout(h3SocketRefreshTimerRef.current);
+    }
+
+    h3SocketRefreshTimerRef.current = setTimeout(() => {
+      setH3RefreshNonce((current) => current + 1);
+      h3SocketRefreshTimerRef.current = null;
+    }, H3_SOCKET_REFRESH_DEBOUNCE_MS);
+  }, [mapViewport]);
+
+  useEffect(() => {
+    if (!mapViewport?.bbox || !Number.isFinite(Number(mapViewport?.zoom))) {
+      return undefined;
+    }
+
+    const controller = new AbortController();
+    const timer = setTimeout(async () => {
+      try {
+        setH3Loading(true);
+        setH3Error("");
+        const response = await leafAPI.getMapH3Cells(
+          {
+            bbox: mapViewport.bbox,
+            zoom: mapViewport.zoom,
+            surface: "dashboard",
+            mode: "supply_demand",
+            includeBoundary: true,
+            includeEmpty: true,
+          },
+          { signal: controller.signal },
+        );
+        setH3Cells(Array.isArray(response?.cells) ? response.cells : []);
+      } catch (err) {
+        if (controller.signal.aborted) return;
+        setH3Error(err?.message || "Falha ao carregar células H3");
+      } finally {
+        if (!controller.signal.aborted) {
+          setH3Loading(false);
+        }
+      }
+    }, H3_VIEWPORT_DEBOUNCE_MS);
+
+    return () => {
+      clearTimeout(timer);
+      controller.abort();
+    };
+  }, [h3RefreshNonce, mapViewport]);
+
+  useEffect(() => {
+    return () => {
+      if (h3SocketRefreshTimerRef.current) {
+        clearTimeout(h3SocketRefreshTimerRef.current);
+      }
     };
   }, []);
 
@@ -144,6 +232,7 @@ export default function MapsPage() {
           activeBookings: prev?.locations?.activeBookings || [],
         },
       }));
+      scheduleH3Refresh();
     };
 
     const onTrips = (payload) => {
@@ -161,22 +250,29 @@ export default function MapsPage() {
           activeBookings: trips.length || prev?.summary?.activeBookings || 0,
         },
       }));
+      scheduleH3Refresh();
+    };
+
+    const onH3Refresh = () => {
+      scheduleH3Refresh();
     };
 
     socket.on("live_stats", onLiveStats);
     socket.on("live_stats_update", onLiveStats);
     socket.on("driver_location_update", onDrivers);
     socket.on("trip_update", onTrips);
+    socket.on("map_h3_refresh", onH3Refresh);
 
     return () => {
       socket.off("live_stats", onLiveStats);
       socket.off("live_stats_update", onLiveStats);
       socket.off("driver_location_update", onDrivers);
       socket.off("trip_update", onTrips);
+      socket.off("map_h3_refresh", onH3Refresh);
       socket.disconnect();
       setWsStatus("desconectado");
     };
-  }, []);
+  }, [scheduleH3Refresh]);
 
   const loadGeoConfig = useCallback(async () => {
     try {
@@ -681,7 +777,13 @@ export default function MapsPage() {
             )}
           </Panel>
           <Panel title="Google Maps (motoristas)" subtitle="Mapa operacional com pontos reais da frota online.">
-            <GoogleDriversMap drivers={locations?.locations?.drivers || []} />
+            <GoogleDriversMap
+              drivers={locations?.locations?.drivers || []}
+              h3Cells={h3Cells}
+              h3Loading={h3Loading}
+              h3Error={h3Error}
+              onViewportChange={handleMapViewportChange}
+            />
           </Panel>
         </section>
         <ErrorText message={allErrors} />

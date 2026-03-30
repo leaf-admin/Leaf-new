@@ -248,6 +248,44 @@ const redisHotpathOps = new promClient.Counter({
     registers: [register]
 });
 
+// ==================== H3 MAP ====================
+
+const h3CellsRequests = new promClient.Counter({
+    name: 'leaf_h3_cells_request_total',
+    help: 'Total de requisições do mapa H3 por superfície e modo',
+    labelNames: ['surface', 'mode'],
+    registers: [register]
+});
+
+const h3CellsComputeMs = new promClient.Histogram({
+    name: 'leaf_h3_cells_compute_ms',
+    help: 'Tempo de computação do payload H3 em milissegundos',
+    labelNames: ['surface', 'mode'],
+    buckets: [1, 5, 10, 25, 50, 100, 250, 500, 1000, 2500, 5000],
+    registers: [register]
+});
+
+const h3CellsCacheHit = new promClient.Counter({
+    name: 'leaf_h3_cells_cache_hit_total',
+    help: 'Total de hits de cache do mapa H3',
+    labelNames: ['surface', 'mode'],
+    registers: [register]
+});
+
+const h3CellsCacheMiss = new promClient.Counter({
+    name: 'leaf_h3_cells_cache_miss_total',
+    help: 'Total de misses de cache do mapa H3',
+    labelNames: ['surface', 'mode'],
+    registers: [register]
+});
+
+const h3CellsReturned = new promClient.Counter({
+    name: 'leaf_h3_cells_returned_total',
+    help: 'Total de células H3 retornadas por superfície e modo',
+    labelNames: ['surface', 'mode'],
+    registers: [register]
+});
+
 // ==================== EXPORT ====================
 
 /**
@@ -384,6 +422,40 @@ const metrics = {
             path: sanitizeLabelValue(path, 'unknown'),
             operation: sanitizeLabelValue(operation, 'unknown')
         }, Number.isFinite(count) && count > 0 ? count : 1);
+    },
+
+    // H3 map
+    recordH3CellsRequest: (surface = 'dashboard', mode = 'supply_demand') => {
+        h3CellsRequests.inc({
+            surface: sanitizeLabelValue(surface, 'dashboard'),
+            mode: sanitizeLabelValue(mode, 'supply_demand')
+        });
+    },
+
+    recordH3CellsCompute: (surface = 'dashboard', mode = 'supply_demand', durationMs = 0) => {
+        h3CellsComputeMs.observe({
+            surface: sanitizeLabelValue(surface, 'dashboard'),
+            mode: sanitizeLabelValue(mode, 'supply_demand')
+        }, Number.isFinite(durationMs) && durationMs >= 0 ? durationMs : 0);
+    },
+
+    recordH3CellsCache: (surface = 'dashboard', mode = 'supply_demand', hit = false) => {
+        const labels = {
+            surface: sanitizeLabelValue(surface, 'dashboard'),
+            mode: sanitizeLabelValue(mode, 'supply_demand')
+        };
+        if (hit) {
+            h3CellsCacheHit.inc(labels);
+            return;
+        }
+        h3CellsCacheMiss.inc(labels);
+    },
+
+    recordH3CellsReturned: (surface = 'dashboard', mode = 'supply_demand', count = 0) => {
+        h3CellsReturned.inc({
+            surface: sanitizeLabelValue(surface, 'dashboard'),
+            mode: sanitizeLabelValue(mode, 'supply_demand')
+        }, Number.isFinite(count) && count > 0 ? count : 0);
     }
 };
 
