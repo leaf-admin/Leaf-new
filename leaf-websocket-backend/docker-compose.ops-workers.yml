@@ -1,0 +1,107 @@
+version: '3.8'
+
+services:
+  pricing-baseline-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: leaf-pricing-baseline-worker
+    command: ["node", "workers/pricing-baseline-worker.js"]
+    environment:
+      - NODE_ENV=production
+      - RUNTIME_ROLE=pricing-baseline
+      - LEAF_SERVER_RUNTIME=vps
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REDIS_PASSWORD=leaf_redis_2024
+      - REDIS_DB=0
+      - REDIS_URL=redis://:leaf_redis_2024@redis:6379/0
+      - LOG_LEVEL=${LOG_LEVEL:-info}
+      - ENABLE_METRICS=${ENABLE_METRICS:-true}
+      - ENABLE_PRICING_BASELINE_WORKER=${ENABLE_PRICING_BASELINE_WORKER:-true}
+      - PRICING_BASELINE_WORKER_INTERVAL_MS=${PRICING_BASELINE_WORKER_INTERVAL_MS:-300000}
+      - PRICING_BASELINE_WORKER_RUN_ON_BOOT=${PRICING_BASELINE_WORKER_RUN_ON_BOOT:-true}
+      - PRICING_BASELINE_MAX_CELLS=${PRICING_BASELINE_MAX_CELLS:-250}
+      - PRICING_BASELINE_ROUTE_DISTANCE_KM=${PRICING_BASELINE_ROUTE_DISTANCE_KM:-1.5}
+      - PRICING_BASELINE_ROUTE_DURATION_SECS=${PRICING_BASELINE_ROUTE_DURATION_SECS:-240}
+      - PRICING_H3_RESOLUTION=${PRICING_H3_RESOLUTION:-9}
+      - PRICING_H3_RING_SIZE=${PRICING_H3_RING_SIZE:-1}
+      - PRICING_H3_BASELINE_RING_SIZE=${PRICING_H3_BASELINE_RING_SIZE:-2}
+      - PRICING_BASELINE_ALPHA=${PRICING_BASELINE_ALPHA:-0.18}
+      - PRICING_HISTORY_MAX_POINTS=${PRICING_HISTORY_MAX_POINTS:-20}
+    volumes:
+      - ./logs:/app/logs
+    depends_on:
+      redis:
+        condition: service_healthy
+      websocket:
+        condition: service_healthy
+    restart: unless-stopped
+    mem_limit: 768m
+    cpus: "0.60"
+    pids_limit: 256
+    ulimits:
+      nofile:
+        soft: 131072
+        hard: 131072
+    healthcheck:
+      test: ["CMD", "node", "-e", "const redis=require('./utils/redis-pool'); redis.ensureConnection().then(()=>process.exit(0)).catch(()=>process.exit(1));"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    networks:
+      - leaf-network
+
+  ride-health-monitor-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: leaf-ride-health-monitor-worker
+    command: ["node", "workers/ride-health-monitor-worker.js"]
+    environment:
+      - NODE_ENV=production
+      - RUNTIME_ROLE=ride-health-monitor
+      - LEAF_SERVER_RUNTIME=vps
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REDIS_PASSWORD=leaf_redis_2024
+      - REDIS_DB=0
+      - REDIS_URL=redis://:leaf_redis_2024@redis:6379/0
+      - LOG_LEVEL=${LOG_LEVEL:-info}
+      - ENABLE_METRICS=${ENABLE_METRICS:-true}
+      - ENABLE_RIDE_HEALTH_MONITOR_WORKER=${ENABLE_RIDE_HEALTH_MONITOR_WORKER:-true}
+      - RIDE_HEALTH_MONITOR_INTERVAL_MS=${RIDE_HEALTH_MONITOR_INTERVAL_MS:-60000}
+      - RIDE_HEALTH_MONITOR_RUN_ON_BOOT=${RIDE_HEALTH_MONITOR_RUN_ON_BOOT:-true}
+      - RIDE_HEALTH_MONITOR_BACKFILL_ON_BOOT=${RIDE_HEALTH_MONITOR_BACKFILL_ON_BOOT:-true}
+      - RIDE_HEALTH_BACKFILL_SCAN_COUNT=${RIDE_HEALTH_BACKFILL_SCAN_COUNT:-250}
+      - RIDE_HEALTH_BACKFILL_MAX_KEYS=${RIDE_HEALTH_BACKFILL_MAX_KEYS:-10000}
+      - RIDE_HEALTH_REASSIGNMENT_STUCK_THRESHOLD_MS=${RIDE_HEALTH_REASSIGNMENT_STUCK_THRESHOLD_MS:-300000}
+      - RIDE_HEALTH_REASSIGNMENT_STUCK_CRITICAL_COUNT=${RIDE_HEALTH_REASSIGNMENT_STUCK_CRITICAL_COUNT:-3}
+      - RIDE_HEALTH_EARLY_REVIEW_WINDOW_MS=${RIDE_HEALTH_EARLY_REVIEW_WINDOW_MS:-3600000}
+      - RIDE_HEALTH_EARLY_REVIEW_WARNING_COUNT=${RIDE_HEALTH_EARLY_REVIEW_WARNING_COUNT:-3}
+      - RIDE_HEALTH_EARLY_REVIEW_CRITICAL_COUNT=${RIDE_HEALTH_EARLY_REVIEW_CRITICAL_COUNT:-6}
+      - RIDE_HEALTH_TOP_BOOKINGS_LIMIT=${RIDE_HEALTH_TOP_BOOKINGS_LIMIT:-5}
+    volumes:
+      - ./logs:/app/logs
+    depends_on:
+      redis:
+        condition: service_healthy
+      websocket:
+        condition: service_healthy
+    restart: unless-stopped
+    mem_limit: 384m
+    cpus: "0.30"
+    pids_limit: 256
+    ulimits:
+      nofile:
+        soft: 131072
+        hard: 131072
+    healthcheck:
+      test: ["CMD", "node", "-e", "const redis=require('./utils/redis-pool'); redis.ensureConnection().then(()=>process.exit(0)).catch(()=>process.exit(1));"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    networks:
+      - leaf-network

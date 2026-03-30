@@ -70,7 +70,7 @@ pm2 logs trip-location-worker
 # Execução única manual
 ENABLE_PRICING_BASELINE_WORKER=true node workers/pricing-baseline-worker.js --once
 
-# Execução contínua com PM2
+# Execução contínua com PM2 (fallback fora do runtime Docker canônico)
 pm2 start workers/pm2.pricing-baseline.config.js
 
 # Logs
@@ -83,12 +83,30 @@ pm2 logs pricing-baseline-worker
 # Execução única manual
 ENABLE_RIDE_HEALTH_MONITOR_WORKER=true node workers/ride-health-monitor-worker.js --once
 
-# Execução contínua com PM2
+# Execução contínua com PM2 (fallback fora do runtime Docker canônico)
 pm2 start workers/pm2.ride-health-monitor.config.js
 
 # Logs
 pm2 logs ride-health-monitor-worker
 ```
+
+### 2.4 Runtime canônico na VPS
+
+No runtime oficial `VPS + Redis + Firestore + mobile prototype`, os workers abaixo rodam em containers Docker dedicados:
+
+- `pricing-baseline-worker`
+- `ride-health-monitor-worker`
+
+Deploy canônico:
+
+```bash
+bash leaf-websocket-backend/scripts/ops/deploy-dashboard-rbac-vps.sh
+```
+
+Compose do runtime:
+
+- base: `docker-compose.hostinger.yml`
+- overlay operacional: `docker-compose.ops-workers.yml`
 
 ### 3. Executar Múltiplos Workers
 

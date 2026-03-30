@@ -106,6 +106,9 @@ node --check "$BACKEND_LOCAL_DIR/workers/ride-health-monitor-worker.js"
 node --check "$BACKEND_LOCAL_DIR/scripts/ops/materialize-pricing-baselines.cjs"
 node --check "$BACKEND_LOCAL_DIR/scripts/ops/backfill-ride-health-index.cjs"
 node --check "$BACKEND_LOCAL_DIR/scripts/create-admin-profile-user.js"
+if command -v docker >/dev/null 2>&1; then
+  docker compose -f "$BACKEND_LOCAL_DIR/docker-compose.hostinger.yml" -f "$BACKEND_LOCAL_DIR/docker-compose.ops-workers.yml" config --services >/dev/null
+fi
 npm --prefix "$DASH_LOCAL_DIR" run -s lint
 npm --prefix "$DASH_LOCAL_DIR" run -s build
 
@@ -185,6 +188,7 @@ scp_cmd "$BACKEND_LOCAL_DIR/workers/pm2.ride-health-monitor.config.js" "$VPS_USE
 scp_cmd "$BACKEND_LOCAL_DIR/scripts/ops/materialize-pricing-baselines.cjs" "$VPS_USER@$VPS_IP:$REMOTE_BACKEND_DIR/scripts/ops/materialize-pricing-baselines.cjs"
 scp_cmd "$BACKEND_LOCAL_DIR/scripts/ops/backfill-ride-health-index.cjs" "$VPS_USER@$VPS_IP:$REMOTE_BACKEND_DIR/scripts/ops/backfill-ride-health-index.cjs"
 scp_cmd "$BACKEND_LOCAL_DIR/scripts/create-admin-profile-user.js" "$VPS_USER@$VPS_IP:$REMOTE_BACKEND_DIR/scripts/create-admin-profile-user.js"
+scp_cmd "$BACKEND_LOCAL_DIR/docker-compose.ops-workers.yml" "$VPS_USER@$VPS_IP:$REMOTE_BACKEND_DIR/docker-compose.ops-workers.yml"
 scp_cmd "$BACKEND_LOCAL_DIR/package.json" "$VPS_USER@$VPS_IP:$REMOTE_BACKEND_DIR/package.json"
 
 echo "[deploy] Sincronizando dashboard completo..."
@@ -215,7 +219,11 @@ ssh_cmd "
   set -e
   cd '$REMOTE_BACKEND_DIR'
   if command -v docker >/dev/null 2>&1 && [ -f docker-compose.yml ]; then
-    docker compose up -d --build websocket
+    if [ -f docker-compose.ops-workers.yml ]; then
+      docker compose -f docker-compose.yml -f docker-compose.ops-workers.yml up -d --build websocket pricing-baseline-worker ride-health-monitor-worker
+    else
+      docker compose up -d --build websocket
+    fi
   elif command -v pm2 >/dev/null 2>&1; then
     npm install --omit=dev >/dev/null 2>&1 || npm install >/dev/null 2>&1
     restarted=0
@@ -281,6 +289,27 @@ ssh_cmd "
     sleep 2
   done
   exit 1
+"
+ssh_cmd "
+  set -e
+  if command -v docker >/dev/null 2>&1 && [ -f '$REMOTE_BACKEND_DIR/docker-compose.yml' ] && [ -f '$REMOTE_BACKEND_DIR/docker-compose.ops-workers.yml' ]; then
+    cd '$REMOTE_BACKEND_DIR'
+    for svc in pricing-baseline-worker ride-health-monitor-worker; do
+      ok=0
+      for i in \$(seq 1 30); do
+        if docker compose -f docker-compose.yml -f docker-compose.ops-workers.yml ps --status running --services \"\$svc\" | grep -qx \"\$svc\"; then
+          ok=1
+          break
+        fi
+        sleep 2
+      done
+      if [ \"\$ok\" -ne 1 ]; then
+        echo \"[deploy] worker docker nao ficou running: \$svc\" >&2
+        docker compose -f docker-compose.yml -f docker-compose.ops-workers.yml ps >&2 || true
+        exit 1
+      fi
+    done
+  fi
 "
 ssh_cmd "
   set -e

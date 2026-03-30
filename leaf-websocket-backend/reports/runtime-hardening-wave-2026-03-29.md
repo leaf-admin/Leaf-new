@@ -138,8 +138,24 @@ Resultado acumulado desta wave:
   - rota publica `POST /api/pricing/quote` voltou a responder `200`
   - `backfill-ride-health-index.cjs` executou com sucesso dentro do container do backend usando Redis interno do runtime Docker
 - resultado final:
-  - rerun completo de `bash leaf-websocket-backend/scripts/ops/deploy-dashboard-rbac-vps.sh` terminou em `OK`
-  - backend e dashboard voltaram a ficar saudaveis no caminho oficial de rollout
+- rerun completo de `bash leaf-websocket-backend/scripts/ops/deploy-dashboard-rbac-vps.sh` terminou em `OK`
+- backend e dashboard voltaram a ficar saudaveis no caminho oficial de rollout
+
+## Runtime canônico dos workers operacionais
+- `pricing-baseline-worker` e `ride-health-monitor-worker` foram promovidos para o runtime Docker canônico da VPS
+- o runtime Docker agora usa:
+  - compose base `docker-compose.hostinger.yml`
+  - overlay operacional `docker-compose.ops-workers.yml`
+- o overlay define ambos como servicos dedicados, com:
+  - Redis interno do stack
+  - restart policy `unless-stopped`
+  - healthcheck por conectividade Redis
+  - dependência do `websocket` saudável
+- o deploy oficial agora:
+  - publica o compose canônico para `docker-compose.yml`
+  - sobe `websocket`, `pricing-baseline-worker` e `ride-health-monitor-worker` no mesmo ciclo
+  - valida se os dois workers ficaram `running`
+- PM2 host-side permanece apenas como fallback para ambientes que não usem o runtime Docker oficial
 
 ## Riscos que continuam abertos
 - `server.vps.js`, `routes/dashboard.js` e `register-socket-create-booking-handler.js` continuam mistos com trabalho paralelo
