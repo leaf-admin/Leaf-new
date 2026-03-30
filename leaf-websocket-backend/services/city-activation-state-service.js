@@ -8,7 +8,6 @@ const LEGACY_CONFIG_PATH = 'operations/geography/cityActivation';
 class CityActivationStateService {
   constructor() {
     this.firestore = null;
-    this.legacyDb = null;
   }
 
   getFirestore() {
@@ -16,13 +15,6 @@ class CityActivationStateService {
       this.firestore = firebaseConfig.getFirestore();
     }
     return this.firestore;
-  }
-
-  getLegacyDb() {
-    if (!this.legacyDb && firebaseConfig?.getRealtimeDB) {
-      this.legacyDb = firebaseConfig.getRealtimeDB();
-    }
-    return this.legacyDb;
   }
 
   configDoc() {
@@ -48,14 +40,12 @@ class CityActivationStateService {
       }
     }
 
-    const legacyDb = this.getLegacyDb();
-    if (!legacyDb) {
+    if (!firebaseConfig?.getFromRealtimeDB) {
       return null;
     }
 
     try {
-      const snapshot = await legacyDb.ref(LEGACY_CONFIG_PATH).once('value');
-      const legacyConfig = snapshot.val() || null;
+      const legacyConfig = (await firebaseConfig.getFromRealtimeDB(LEGACY_CONFIG_PATH)) || null;
 
       if (legacyConfig && firestoreDoc) {
         try {

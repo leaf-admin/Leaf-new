@@ -342,6 +342,23 @@ Resultado acumulado desta wave:
   - essa foi uma redução pequena, mas útil para manter a trilha do legado consistente também nos serviços de observabilidade
   - os próximos ganhos mais relevantes agora estão concentrados nos hotspots grandes ou em arquivos atualmente mistos
 
+## Refino no city-activation-state-service
+- `leaf-websocket-backend/services/city-activation-state-service.js` deixou de cachear e consultar diretamente a instância do RTDB legado
+- comportamento novo:
+  - fallback legado agora usa `firebaseConfig.getFromRealtimeDB(LEGACY_CONFIG_PATH)`
+  - a estratégia Firestore-first e o espelhamento controlado do legado foram mantidos
+- teste ajustado:
+  - `tests/unit/services/city-activation-state-service.unit.test.js`
+- validação:
+  - `node --check` do serviço e do teste: `OK`
+  - Jest: `2/2` testes passando
+- impacto medido no auditor:
+  - relatório anterior: `legacy-runtime-surface-1774878322854.md` com `97`
+  - relatório novo: `legacy-runtime-surface-1774878452085.md` com `96`
+- leitura operacional:
+  - esse ajuste completa melhor o corte que já tínhamos feito na `waitlist`
+  - seguimos convertendo serviços satélites para a borda centralizada do Firebase antes de entrar nos hotspots pesados
+
 ## Riscos que continuam abertos
 - `server.vps.js`, `routes/dashboard.js` e `register-socket-create-booking-handler.js` continuam mistos com trabalho paralelo
 - baseline agora possui worker dedicado, mas ainda nao foi validado em Redis real local nesta maquina

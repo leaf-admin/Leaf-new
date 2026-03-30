@@ -1,6 +1,7 @@
 jest.mock('../../../firebase-config', () => ({
   getFirestore: jest.fn(),
-  getRealtimeDB: jest.fn()
+  getRealtimeDB: jest.fn(),
+  getFromRealtimeDB: jest.fn()
 }));
 
 jest.mock('../../../utils/logger', () => ({
@@ -39,9 +40,7 @@ describe('city-activation-state-service', () => {
         doc: jest.fn().mockReturnValue(firestoreDoc)
       })
     });
-    firebaseConfig.getRealtimeDB.mockReturnValue({
-      ref: jest.fn()
-    });
+    firebaseConfig.getFromRealtimeDB.mockResolvedValue(null);
 
     const service = require('../../../services/city-activation-state-service');
     const result = await service.getConfig();
@@ -75,22 +74,14 @@ describe('city-activation-state-service', () => {
         doc: jest.fn().mockReturnValue(firestoreDoc)
       })
     };
-    const legacyOnce = jest.fn().mockResolvedValue({
-      val: () => legacyConfig
-    });
-
     firebaseConfig.getFirestore.mockReturnValue(firestore);
-    firebaseConfig.getRealtimeDB.mockReturnValue({
-      ref: jest.fn().mockReturnValue({
-        once: legacyOnce
-      })
-    });
+    firebaseConfig.getFromRealtimeDB.mockResolvedValue(legacyConfig);
 
     const service = require('../../../services/city-activation-state-service');
     const result = await service.getConfig();
 
     expect(result).toEqual(legacyConfig);
-    expect(legacyOnce).toHaveBeenCalledWith('value');
+    expect(firebaseConfig.getFromRealtimeDB).toHaveBeenCalledWith('operations/geography/cityActivation');
     expect(firestoreSet).toHaveBeenCalledWith(
       expect.objectContaining({
         ...legacyConfig,
