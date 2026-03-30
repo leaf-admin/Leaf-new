@@ -80,8 +80,13 @@ node --check "$BACKEND_LOCAL_DIR/routes/dashboard.js"
 node --check "$BACKEND_LOCAL_DIR/routes/pricing.js"
 node --check "$BACKEND_LOCAL_DIR/services/fare-estimation-service.js"
 node --check "$BACKEND_LOCAL_DIR/services/h3-map-service.js"
+node --check "$BACKEND_LOCAL_DIR/services/pricing-context-store.js"
 node --check "$BACKEND_LOCAL_DIR/services/pricing-context-provider.js"
+node --check "$BACKEND_LOCAL_DIR/services/pricing-baseline-materializer.js"
+node --check "$BACKEND_LOCAL_DIR/services/dashboard-websocket.js"
+node --check "$BACKEND_LOCAL_DIR/services/ride-health-monitor.js"
 node --check "$BACKEND_LOCAL_DIR/services/ride-queue-manager.js"
+node --check "$BACKEND_LOCAL_DIR/services/ride-state-manager.js"
 node --check "$BACKEND_LOCAL_DIR/services/pricing/utils.js"
 node --check "$BACKEND_LOCAL_DIR/services/pricing/pressureScore.js"
 node --check "$BACKEND_LOCAL_DIR/services/pricing/exceptionScore.js"
@@ -96,6 +101,10 @@ node --check "$BACKEND_LOCAL_DIR/routes/referral-programs.js"
 node --check "$BACKEND_LOCAL_DIR/utils/prometheus-metrics.js"
 node --check "$BACKEND_LOCAL_DIR/server.js"
 node --check "$BACKEND_LOCAL_DIR/server.vps.js"
+node --check "$BACKEND_LOCAL_DIR/workers/pricing-baseline-worker.js"
+node --check "$BACKEND_LOCAL_DIR/workers/ride-health-monitor-worker.js"
+node --check "$BACKEND_LOCAL_DIR/scripts/ops/materialize-pricing-baselines.cjs"
+node --check "$BACKEND_LOCAL_DIR/scripts/ops/backfill-ride-health-index.cjs"
 node --check "$BACKEND_LOCAL_DIR/scripts/create-admin-profile-user.js"
 npm --prefix "$DASH_LOCAL_DIR" run -s lint
 npm --prefix "$DASH_LOCAL_DIR" run -s build
@@ -139,17 +148,22 @@ else
   echo "[deploy] Google Maps key do dashboard: ausente"
 fi
 
-ssh_cmd "mkdir -p '$REMOTE_BACKEND_DIR/bootstrap' '$REMOTE_BACKEND_DIR/commands' '$REMOTE_BACKEND_DIR/routes' '$REMOTE_BACKEND_DIR/services' '$REMOTE_BACKEND_DIR/services/pricing' '$REMOTE_BACKEND_DIR/utils' '$REMOTE_BACKEND_DIR/middleware' '$REMOTE_BACKEND_DIR/scripts' '$REMOTE_BACKEND_DIR/scripts/ops' '$REMOTE_DASHBOARD_DIR/app/observability' '$REMOTE_DASHBOARD_DIR/src/components'"
+ssh_cmd "mkdir -p '$REMOTE_BACKEND_DIR/bootstrap' '$REMOTE_BACKEND_DIR/commands' '$REMOTE_BACKEND_DIR/routes' '$REMOTE_BACKEND_DIR/services' '$REMOTE_BACKEND_DIR/services/pricing' '$REMOTE_BACKEND_DIR/utils' '$REMOTE_BACKEND_DIR/middleware' '$REMOTE_BACKEND_DIR/scripts' '$REMOTE_BACKEND_DIR/scripts/ops' '$REMOTE_BACKEND_DIR/workers' '$REMOTE_BACKEND_DIR/logs' '$REMOTE_DASHBOARD_DIR/app/observability' '$REMOTE_DASHBOARD_DIR/src/components'"
 
 echo "[deploy] Enviando backend..."
 scp_cmd "$BACKEND_LOCAL_DIR/bootstrap/register-socket-create-booking-handler.js" "$VPS_USER@$VPS_IP:$REMOTE_BACKEND_DIR/bootstrap/register-socket-create-booking-handler.js"
 scp_cmd "$BACKEND_LOCAL_DIR/commands/RequestRideCommand.js" "$VPS_USER@$VPS_IP:$REMOTE_BACKEND_DIR/commands/RequestRideCommand.js"
 scp_cmd "$BACKEND_LOCAL_DIR/routes/dashboard.js" "$VPS_USER@$VPS_IP:$REMOTE_BACKEND_DIR/routes/dashboard.js"
 scp_cmd "$BACKEND_LOCAL_DIR/routes/pricing.js" "$VPS_USER@$VPS_IP:$REMOTE_BACKEND_DIR/routes/pricing.js"
+scp_cmd "$BACKEND_LOCAL_DIR/services/dashboard-websocket.js" "$VPS_USER@$VPS_IP:$REMOTE_BACKEND_DIR/services/dashboard-websocket.js"
 scp_cmd "$BACKEND_LOCAL_DIR/services/fare-estimation-service.js" "$VPS_USER@$VPS_IP:$REMOTE_BACKEND_DIR/services/fare-estimation-service.js"
 scp_cmd "$BACKEND_LOCAL_DIR/services/h3-map-service.js" "$VPS_USER@$VPS_IP:$REMOTE_BACKEND_DIR/services/h3-map-service.js"
+scp_cmd "$BACKEND_LOCAL_DIR/services/pricing-context-store.js" "$VPS_USER@$VPS_IP:$REMOTE_BACKEND_DIR/services/pricing-context-store.js"
 scp_cmd "$BACKEND_LOCAL_DIR/services/pricing-context-provider.js" "$VPS_USER@$VPS_IP:$REMOTE_BACKEND_DIR/services/pricing-context-provider.js"
+scp_cmd "$BACKEND_LOCAL_DIR/services/pricing-baseline-materializer.js" "$VPS_USER@$VPS_IP:$REMOTE_BACKEND_DIR/services/pricing-baseline-materializer.js"
+scp_cmd "$BACKEND_LOCAL_DIR/services/ride-health-monitor.js" "$VPS_USER@$VPS_IP:$REMOTE_BACKEND_DIR/services/ride-health-monitor.js"
 scp_cmd "$BACKEND_LOCAL_DIR/services/ride-queue-manager.js" "$VPS_USER@$VPS_IP:$REMOTE_BACKEND_DIR/services/ride-queue-manager.js"
+scp_cmd "$BACKEND_LOCAL_DIR/services/ride-state-manager.js" "$VPS_USER@$VPS_IP:$REMOTE_BACKEND_DIR/services/ride-state-manager.js"
 scp_cmd "$BACKEND_LOCAL_DIR/services/pricing/utils.js" "$VPS_USER@$VPS_IP:$REMOTE_BACKEND_DIR/services/pricing/utils.js"
 scp_cmd "$BACKEND_LOCAL_DIR/services/pricing/pressureScore.js" "$VPS_USER@$VPS_IP:$REMOTE_BACKEND_DIR/services/pricing/pressureScore.js"
 scp_cmd "$BACKEND_LOCAL_DIR/services/pricing/exceptionScore.js" "$VPS_USER@$VPS_IP:$REMOTE_BACKEND_DIR/services/pricing/exceptionScore.js"
@@ -164,6 +178,12 @@ scp_cmd "$BACKEND_LOCAL_DIR/routes/referral-programs.js" "$VPS_USER@$VPS_IP:$REM
 scp_cmd "$BACKEND_LOCAL_DIR/utils/prometheus-metrics.js" "$VPS_USER@$VPS_IP:$REMOTE_BACKEND_DIR/utils/prometheus-metrics.js"
 scp_cmd "$BACKEND_LOCAL_DIR/server.js" "$VPS_USER@$VPS_IP:$REMOTE_BACKEND_DIR/server.js"
 scp_cmd "$BACKEND_LOCAL_DIR/server.vps.js" "$VPS_USER@$VPS_IP:$REMOTE_BACKEND_DIR/server.vps.js"
+scp_cmd "$BACKEND_LOCAL_DIR/workers/pricing-baseline-worker.js" "$VPS_USER@$VPS_IP:$REMOTE_BACKEND_DIR/workers/pricing-baseline-worker.js"
+scp_cmd "$BACKEND_LOCAL_DIR/workers/pm2.pricing-baseline.config.js" "$VPS_USER@$VPS_IP:$REMOTE_BACKEND_DIR/workers/pm2.pricing-baseline.config.js"
+scp_cmd "$BACKEND_LOCAL_DIR/workers/ride-health-monitor-worker.js" "$VPS_USER@$VPS_IP:$REMOTE_BACKEND_DIR/workers/ride-health-monitor-worker.js"
+scp_cmd "$BACKEND_LOCAL_DIR/workers/pm2.ride-health-monitor.config.js" "$VPS_USER@$VPS_IP:$REMOTE_BACKEND_DIR/workers/pm2.ride-health-monitor.config.js"
+scp_cmd "$BACKEND_LOCAL_DIR/scripts/ops/materialize-pricing-baselines.cjs" "$VPS_USER@$VPS_IP:$REMOTE_BACKEND_DIR/scripts/ops/materialize-pricing-baselines.cjs"
+scp_cmd "$BACKEND_LOCAL_DIR/scripts/ops/backfill-ride-health-index.cjs" "$VPS_USER@$VPS_IP:$REMOTE_BACKEND_DIR/scripts/ops/backfill-ride-health-index.cjs"
 scp_cmd "$BACKEND_LOCAL_DIR/scripts/create-admin-profile-user.js" "$VPS_USER@$VPS_IP:$REMOTE_BACKEND_DIR/scripts/create-admin-profile-user.js"
 scp_cmd "$BACKEND_LOCAL_DIR/package.json" "$VPS_USER@$VPS_IP:$REMOTE_BACKEND_DIR/package.json"
 
@@ -209,6 +229,19 @@ ssh_cmd "
     if [ \"\$restarted\" -eq 0 ]; then
       echo '[deploy] Aviso: processo backend não encontrado no PM2; nenhum start automático executado.'
     fi
+
+    if [ -f workers/ride-health-monitor-worker.js ] && [ -f workers/pm2.ride-health-monitor.config.js ]; then
+      ENABLE_RIDE_HEALTH_MONITOR_WORKER=true \
+      RIDE_HEALTH_MONITOR_BACKFILL_ON_BOOT=true \
+      node workers/ride-health-monitor-worker.js --once --backfill >/tmp/ride-health-monitor-backfill.json 2>/tmp/ride-health-monitor-backfill.err || true
+
+      if pm2 describe ride-health-monitor-worker >/dev/null 2>&1; then
+        pm2 restart ride-health-monitor-worker --update-env
+      else
+        pm2 start workers/pm2.ride-health-monitor.config.js
+      fi
+    fi
+
     pm2 save >/dev/null 2>&1 || true
   elif command -v systemctl >/dev/null 2>&1; then
     systemctl restart leaf-websocket-backend 2>/dev/null || true
@@ -238,7 +271,11 @@ echo "[deploy] Smoke checks..."
 ssh_cmd "
   set -e
   for i in \$(seq 1 40); do
-    if curl -fsS -m 4 http://127.0.0.1:3001/health/liveness >/dev/null; then
+    if command -v docker >/dev/null 2>&1 && docker ps --format '{{.Names}}' | grep -qx leaf-websocket; then
+      if docker exec leaf-websocket curl -fsS -m 4 http://127.0.0.1:3001/health/liveness >/dev/null 2>&1; then
+        exit 0
+      fi
+    elif curl -fsS -m 4 http://127.0.0.1:3001/health/liveness >/dev/null; then
       exit 0
     fi
     sleep 2

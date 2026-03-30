@@ -119,6 +119,28 @@ Resultado acumulado desta wave:
 - `24/24` testes
 - monitor operacional de `REASSIGNMENT_PENDING` preso e volume de `EARLY_ENDED_REVIEW` adicionado
 
+## Validacao VPS e hotfix de deploy
+- durante a primeira tentativa de rollout desta wave, o `leaf-websocket` entrou em restart loop na VPS porque `services/pricing-context-store.js` nao estava incluido no conjunto de arquivos sincronizados pelo deploy seletivo
+- o sintoma operacional foi:
+  - healthcheck do backend falhando
+  - `leaf-websocket` reiniciando em loop
+  - stack principal: `Cannot find module './pricing-context-store'`
+- correcao aplicada:
+  - `scripts/ops/deploy-dashboard-rbac-vps.sh` agora sincroniza tambem:
+    - `services/pricing-context-store.js`
+    - `services/pricing-baseline-materializer.js`
+    - `workers/pricing-baseline-worker.js`
+    - `workers/pm2.pricing-baseline.config.js`
+    - `scripts/ops/materialize-pricing-baselines.cjs`
+  - smoke do backend no deploy passou a ser `docker-aware`, validando `http://127.0.0.1:3001/health/liveness` via `docker exec leaf-websocket ...` quando o runtime canônico estiver em Docker
+- recuperacao validada:
+  - backend interno respondeu `{\"status\":\"alive\"...}`
+  - rota publica `POST /api/pricing/quote` voltou a responder `200`
+  - `backfill-ride-health-index.cjs` executou com sucesso dentro do container do backend usando Redis interno do runtime Docker
+- resultado final:
+  - rerun completo de `bash leaf-websocket-backend/scripts/ops/deploy-dashboard-rbac-vps.sh` terminou em `OK`
+  - backend e dashboard voltaram a ficar saudaveis no caminho oficial de rollout
+
 ## Riscos que continuam abertos
 - `server.vps.js`, `routes/dashboard.js` e `register-socket-create-booking-handler.js` continuam mistos com trabalho paralelo
 - baseline agora possui worker dedicado, mas ainda nao foi validado em Redis real local nesta maquina
