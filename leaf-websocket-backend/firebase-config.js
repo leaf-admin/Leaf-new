@@ -152,6 +152,13 @@ function getRealtimeDB() {
     return realtimeDB;
 }
 
+function isRealtimeDBAvailable() {
+    if (!realtimeDB) {
+        initializeFirebase();
+    }
+    return !!realtimeDB;
+}
+
 // Obter instância do Storage
 function getStorage() {
     if (!storage) {
@@ -437,10 +444,42 @@ async function updateRealtimeDB(path, data) {
     }
 }
 
+async function updateRealtimeDBRoot(updates) {
+    try {
+        if (!realtimeDB) {
+            recordRealtimeDbMetric('update_root', 'unavailable');
+            logStructured('warn', 'Realtime Database não disponível', {
+                service: 'firebase',
+                operation: 'updateRealtimeDBRoot'
+            });
+            return false;
+        }
+
+        await realtimeDB.ref().update(updates);
+        recordRealtimeDbMetric('update_root', 'success');
+
+        logStructured('info', 'Atualização raiz concluída no Realtime DB', {
+            service: 'firebase',
+            operation: 'updateRealtimeDBRoot',
+            keys: Object.keys(updates || {}).length
+        });
+        return true;
+    } catch (error) {
+        recordRealtimeDbMetric('update_root', 'failure');
+        logStructured('error', 'Erro ao atualizar raiz do Realtime DB', {
+            service: 'firebase',
+            operation: 'updateRealtimeDBRoot',
+            error: error.message
+        });
+        return false;
+    }
+}
+
 module.exports = {
     initializeFirebase,
     getFirestore,
     getRealtimeDB,
+    isRealtimeDBAvailable,
     getStorage,
     syncToFirestore,
     syncToRealtimeDB,
@@ -449,5 +488,6 @@ module.exports = {
     syncTripData,
     getFromFirestore,
     getFromRealtimeDB,
-    updateRealtimeDB
+    updateRealtimeDB,
+    updateRealtimeDBRoot
 }; 

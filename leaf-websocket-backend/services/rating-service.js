@@ -23,16 +23,6 @@ function normalizeComment(value) {
 }
 
 class RatingService {
-  constructor() {
-    this._db = null;
-  }
-
-  async _getDb() {
-    if (this._db) return this._db;
-    this._db = firebaseConfig.getRealtimeDB();
-    return this._db;
-  }
-
   _resolveTripId(data = {}) {
     return data.tripId || data.bookingId || data.rideId || null;
   }
@@ -76,8 +66,7 @@ class RatingService {
   }
 
   async submitRating(payload = {}, context = {}) {
-    const db = await this._getDb();
-    if (!db) {
+    if (!firebaseConfig.isRealtimeDBAvailable()) {
       return { success: false, error: 'Firebase não disponível' };
     }
 
@@ -102,15 +91,13 @@ class RatingService {
       };
     }
 
-    const indexRef = db.ref(`rating_trip_index/${tripId}/${reviewerId}`);
-    const existingIndex = await indexRef.once('value');
-    if (existingIndex.exists()) {
-      const existing = existingIndex.val();
+    const existing = await firebaseConfig.getFromRealtimeDB(`rating_trip_index/${tripId}/${reviewerId}`);
+    if (existing) {
       return {
         success: false,
         error: 'Usuário já avaliou esta corrida',
         alreadyRated: true,
-        ratingId: existing?.ratingId || null
+        ratingId: existing.ratingId || null
       };
     }
 
@@ -149,7 +136,10 @@ class RatingService {
       updates[`bookings/${tripId}/driver_feedback`] = comment || null;
     }
 
-    await db.ref().update(updates);
+    const writeSucceeded = await firebaseConfig.updateRealtimeDBRoot(updates);
+    if (!writeSucceeded) {
+      return { success: false, error: 'Firebase não disponível' };
+    }
 
     let kycEscalation = null;
     if (
@@ -202,12 +192,10 @@ class RatingService {
   }
 
   async getTripRatings(tripId) {
-    const db = await this._getDb();
-    if (!db) return { success: false, error: 'Firebase não disponível' };
+    if (!firebaseConfig.isRealtimeDBAvailable()) return { success: false, error: 'Firebase não disponível' };
     if (!tripId) return { success: false, error: 'tripId é obrigatório' };
 
-    const snapshot = await db.ref(`trip_ratings/${tripId}`).once('value');
-    const raw = snapshot.val() || {};
+    const raw = (await firebaseConfig.getFromRealtimeDB(`trip_ratings/${tripId}`)) || {};
     const ratings = Object.values(raw).sort((a, b) => {
       return new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime();
     });
@@ -221,30 +209,26 @@ class RatingService {
   }
 
   async hasUserRatedTrip(tripId, reviewerId) {
-    const db = await this._getDb();
-    if (!db) return { success: false, error: 'Firebase não disponível' };
+    if (!firebaseConfig.isRealtimeDBAvailable()) return { success: false, error: 'Firebase não disponível' };
     if (!tripId || !reviewerId) {
       return { success: false, error: 'tripId e reviewerId são obrigatórios' };
     }
 
-    const snapshot = await db.ref(`rating_trip_index/${tripId}/${reviewerId}`).once('value');
-    const value = snapshot.val();
+    const value = await firebaseConfig.getFromRealtimeDB(`rating_trip_index/${tripId}/${reviewerId}`);
     return {
       success: true,
       tripId,
       reviewerId,
-      hasRated: snapshot.exists(),
+      hasRated: !!value,
       ratingId: value?.ratingId || null
     };
   }
 
   async getUserRatings(targetUserId) {
-    const db = await this._getDb();
-    if (!db) return { success: false, error: 'Firebase não disponível' };
+    if (!firebaseConfig.isRealtimeDBAvailable()) return { success: false, error: 'Firebase não disponível' };
     if (!targetUserId) return { success: false, error: 'targetUserId é obrigatório' };
 
-    const snapshot = await db.ref(`user_ratings/${targetUserId}`).once('value');
-    const raw = snapshot.val() || {};
+    const raw = (await firebaseConfig.getFromRealtimeDB(`user_ratings/${targetUserId}`)) || {};
     const ratings = Object.values(raw).sort((a, b) => {
       return new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime();
     });

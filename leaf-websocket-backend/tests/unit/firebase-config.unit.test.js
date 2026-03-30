@@ -3,6 +3,7 @@ describe('firebase-config legacy metrics', () => {
   let refMock;
   let setMock;
   let updateMock;
+  let rootUpdateMock;
   let onceMock;
 
   function loadModule({ snapshotExists = true, snapshotValue = { ok: true } } = {}) {
@@ -14,15 +15,24 @@ describe('firebase-config legacy metrics', () => {
 
     setMock = jest.fn().mockResolvedValue(undefined);
     updateMock = jest.fn().mockResolvedValue(undefined);
+    rootUpdateMock = jest.fn().mockResolvedValue(undefined);
     onceMock = jest.fn().mockResolvedValue({
       exists: () => snapshotExists,
       val: () => snapshotValue
     });
-    refMock = jest.fn(() => ({
-      set: setMock,
-      update: updateMock,
-      once: onceMock
-    }));
+    refMock = jest.fn((path) => {
+      if (path === undefined || path === '') {
+        return {
+          update: rootUpdateMock
+        };
+      }
+
+      return {
+        set: setMock,
+        update: updateMock,
+        once: onceMock
+      };
+    });
 
     const firestoreFn = jest.fn(() => ({}));
     firestoreFn.FieldValue = {
@@ -136,6 +146,26 @@ describe('firebase-config legacy metrics', () => {
     expect(metricsMock.recordLegacyDependencyAccess).toHaveBeenCalledWith(expect.objectContaining({
       dependency: 'realtime_db',
       operation: 'update',
+      result: 'success'
+    }));
+  });
+
+  test('registra update raiz bem-sucedido no Realtime DB', async () => {
+    const firebaseConfig = loadModule();
+    firebaseConfig.getRealtimeDB();
+
+    const result = await firebaseConfig.updateRealtimeDBRoot({
+      'ratings/rating-1': { rating: 5 }
+    });
+
+    expect(result).toBe(true);
+    expect(refMock).toHaveBeenCalledWith();
+    expect(rootUpdateMock).toHaveBeenCalledWith({
+      'ratings/rating-1': { rating: 5 }
+    });
+    expect(metricsMock.recordLegacyDependencyAccess).toHaveBeenCalledWith(expect.objectContaining({
+      dependency: 'realtime_db',
+      operation: 'update_root',
       result: 'success'
     }));
   });

@@ -10,23 +10,10 @@ jest.mock('../../../utils/logger', () => ({
   logStructured: jest.fn()
 }));
 
-function createMockRealtimeDb() {
-  const update = jest.fn().mockResolvedValue(true);
-  return {
-    ref: jest.fn((path = '') => ({
-      once: jest.fn().mockResolvedValue({
-        exists: () => false,
-        val: () => null
-      }),
-      update: path ? jest.fn() : update
-    })),
-    __update: update
-  };
-}
-
 describe('rating-service KYC escalation', () => {
   let ratingService;
-  let mockRealtimeDb;
+  let mockGetFromRealtimeDB;
+  let mockUpdateRealtimeDBRoot;
 
   beforeEach(() => {
     jest.resetModules();
@@ -34,10 +21,13 @@ describe('rating-service KYC escalation', () => {
     mockMarkDriverForPhotoMismatch.mockResolvedValue({ success: true });
     mockIsPhotoMismatchReport.mockReturnValue(false);
 
-    mockRealtimeDb = createMockRealtimeDb();
+    mockGetFromRealtimeDB = jest.fn().mockResolvedValue(null);
+    mockUpdateRealtimeDBRoot = jest.fn().mockResolvedValue(true);
 
     jest.doMock('../../../firebase-config', () => ({
-      getRealtimeDB: jest.fn(() => mockRealtimeDb)
+      isRealtimeDBAvailable: jest.fn(() => true),
+      getFromRealtimeDB: (...args) => mockGetFromRealtimeDB(...args),
+      updateRealtimeDBRoot: (...args) => mockUpdateRealtimeDBRoot(...args)
     }));
 
     ratingService = require('../../../services/rating-service');
@@ -66,6 +56,7 @@ describe('rating-service KYC escalation', () => {
         reporterType: 'passenger'
       })
     );
+    expect(mockUpdateRealtimeDBRoot).toHaveBeenCalled();
     expect(result.kycEscalation).toEqual({ success: true });
   });
 

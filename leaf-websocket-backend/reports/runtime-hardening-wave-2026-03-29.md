@@ -303,6 +303,28 @@ Resultado acumulado desta wave:
   - essa wave foi pequena, mas importante porque confirma que os cortes incrementais também funcionam em rotas HTTP sem reabrir comportamento
   - o alvo natural seguinte continua sendo um hotspot limpo e versionado, antes de entrar nos arquivos grandes do dashboard
 
+## Corte incremental no rating-service
+- `leaf-websocket-backend/services/rating-service.js` deixou de depender diretamente do objeto `db` do RTDB
+- `firebase-config.js` ganhou dois helpers adicionais:
+  - `isRealtimeDBAvailable()`
+  - `updateRealtimeDBRoot(updates)`
+- comportamento novo no `rating-service`:
+  - leitura de índices e avaliações via `getFromRealtimeDB(...)`
+  - escrita em lote das avaliações via `updateRealtimeDBRoot(...)`
+  - preservação do retorno de erro quando o RTDB estiver indisponível
+- testes cobertos:
+  - `tests/unit/firebase-config.unit.test.js`
+  - `tests/unit/services/rating-service-kyc.unit.test.js`
+- validação:
+  - `node --check` de `firebase-config.js` e `rating-service.js`: `OK`
+  - Jest: `7/7` testes passando nas suítes de `firebase-config` + `rating-service`
+- impacto medido no auditor:
+  - relatório anterior: `legacy-runtime-surface-1774858237369.md` com `99`
+  - relatório novo: `legacy-runtime-surface-1774878173433.md` com `98`
+- leitura operacional:
+  - esse corte confirma que serviços de domínio que ainda dependiam de `db.ref(...)` podem migrar para helpers sem perda de comportamento
+  - seguimos reduzindo a superfície legada antes de entrar em arquivos mais arriscados como `routes/metrics.js` e `routes/dashboard.js`
+
 ## Riscos que continuam abertos
 - `server.vps.js`, `routes/dashboard.js` e `register-socket-create-booking-handler.js` continuam mistos com trabalho paralelo
 - baseline agora possui worker dedicado, mas ainda nao foi validado em Redis real local nesta maquina
