@@ -470,7 +470,7 @@ function PrototypeMapLayer({
           </Marker>
         ) : null}
 
-        {mapChildren}
+        {!iosMapSafeMode ? mapChildren : null}
       </MapView>
 
       {Platform.OS === 'android' && androidUserOverlayPoint ? (

@@ -723,15 +723,7 @@ class H3MapService {
           })
         };
       })
-      .sort((left, right) => {
-        if (right.metrics.demand !== left.metrics.demand) {
-          return right.metrics.demand - left.metrics.demand;
-        }
-        if (right.metrics.supply !== left.metrics.supply) {
-          return right.metrics.supply - left.metrics.supply;
-        }
-        return left.h3Index.localeCompare(right.h3Index);
-      });
+      .sort((left, right) => left.h3Index.localeCompare(right.h3Index));
 
     return {
       resolution,

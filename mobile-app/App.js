@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { Alert, View, Platform } from 'react-native';
 import { Provider } from 'react-redux';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
@@ -85,6 +85,8 @@ installGlobalFriendlyAlertPatch();
 export default function App() {
   const [appIsReady, setAppIsReady] = useState(false);
   const [isInitializationLocked, setIsInitializationLocked] = useState(false);
+  const bootWatchdogRef = useRef(null);
+  const hasMarkedReadyRef = useRef(false);
 
   const withTimeout = useCallback(async (promise, timeoutMs, label) => {
     let timeoutId;
@@ -97,6 +99,22 @@ export default function App() {
     } finally {
       clearTimeout(timeoutId);
     }
+  }, []);
+
+  const markAppReady = useCallback((reason) => {
+    if (hasMarkedReadyRef.current) {
+      return;
+    }
+
+    hasMarkedReadyRef.current = true;
+
+    if (bootWatchdogRef.current) {
+      clearTimeout(bootWatchdogRef.current);
+      bootWatchdogRef.current = null;
+    }
+
+    Logger.log(`✅ App liberado para renderização (${reason})`);
+    setAppIsReady(true);
   }, []);
 
   // ✅ Desabilitar DevMenu também no useEffect para garantir (dentro do componente)
@@ -116,6 +134,11 @@ export default function App() {
   useEffect(() => {
     if (isInitializationLocked) return;
     setIsInitializationLocked(true);
+
+    bootWatchdogRef.current = setTimeout(() => {
+      Logger.warn('⚠️ [App] Watchdog de boot acionado; liberando UI antes do fim da inicialização');
+      markAppReady('watchdog');
+    }, 3500);
 
     const initializeApp = async () => {
       try {
@@ -147,6 +170,10 @@ export default function App() {
           // Continuar mesmo se o WebSocket falhar - ele tentará reconectar automaticamente
         }
         
+        // Libera a UI assim que a infraestrutura crítica mínima terminar.
+        // Serviços de notificação continuam no background para evitar boot travado.
+        markAppReady('core-ready');
+
         // 2. Inicializar FCM (agora o WebSocket já está conectado ou tentando conectar)
         await withTimeout(FCMNotificationService.initialize(), 8000, 'FCM initialize');
         
@@ -169,18 +196,16 @@ export default function App() {
           Logger.log('⭐ Handler de avaliação registrado:', remoteMessage);
         });
 
-        // Aguardar breve intervalo para transição visual suave
-        await new Promise(resolve => setTimeout(resolve, 1200));
-
         Logger.log('✅ App inicializado com sucesso');
-        setAppIsReady(true);
+        markAppReady('full-init');
       } catch (error) {
         Logger.error('❌ Erro ao inicializar app:', error);
-        // Mesmo com erro, mostrar o app rapidamente
-        setTimeout(() => setAppIsReady(true), 1200);
+        markAppReady('init-error');
       } finally {
-        // Fallback final: nunca permitir splash infinita
-        setTimeout(() => setAppIsReady(true), 3000);
+        if (bootWatchdogRef.current) {
+          clearTimeout(bootWatchdogRef.current);
+          bootWatchdogRef.current = null;
+        }
       }
     };
 
@@ -188,9 +213,13 @@ export default function App() {
 
     // Cleanup quando o app for destruído
     return () => {
+      if (bootWatchdogRef.current) {
+        clearTimeout(bootWatchdogRef.current);
+        bootWatchdogRef.current = null;
+      }
       FCMNotificationService.destroy();
     };
-  }, [isInitializationLocked, withTimeout]);
+  }, [isInitializationLocked, markAppReady, withTimeout]);
 
   // Esconder splash screen quando o app estiver pronto
   // IMPORTANTE: Só esconder DEPOIS que o componente estiver montado
