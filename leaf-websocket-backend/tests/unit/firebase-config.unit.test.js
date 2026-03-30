@@ -2,6 +2,7 @@ describe('firebase-config legacy metrics', () => {
   let metricsMock;
   let refMock;
   let setMock;
+  let updateMock;
   let onceMock;
 
   function loadModule({ snapshotExists = true, snapshotValue = { ok: true } } = {}) {
@@ -12,12 +13,14 @@ describe('firebase-config legacy metrics', () => {
     };
 
     setMock = jest.fn().mockResolvedValue(undefined);
+    updateMock = jest.fn().mockResolvedValue(undefined);
     onceMock = jest.fn().mockResolvedValue({
       exists: () => snapshotExists,
       val: () => snapshotValue
     });
     refMock = jest.fn(() => ({
       set: setMock,
+      update: updateMock,
       once: onceMock
     }));
 
@@ -114,6 +117,26 @@ describe('firebase-config legacy metrics', () => {
       dependency: 'realtime_db',
       operation: 'read',
       result: 'empty'
+    }));
+  });
+
+  test('registra update bem-sucedido no Realtime DB', async () => {
+    const firebaseConfig = loadModule();
+    firebaseConfig.getRealtimeDB();
+
+    const result = await firebaseConfig.updateRealtimeDB('users/test-driver', {
+      kycStatus: 'approved'
+    });
+
+    expect(result).toBe(true);
+    expect(refMock).toHaveBeenCalledWith('users/test-driver');
+    expect(updateMock).toHaveBeenCalledWith({
+      kycStatus: 'approved'
+    });
+    expect(metricsMock.recordLegacyDependencyAccess).toHaveBeenCalledWith(expect.objectContaining({
+      dependency: 'realtime_db',
+      operation: 'update',
+      result: 'success'
     }));
   });
 });

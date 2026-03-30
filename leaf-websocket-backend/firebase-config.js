@@ -402,6 +402,41 @@ async function getFromRealtimeDB(path) {
     }
 }
 
+// Atualizar dados no Realtime Database sem expor ref/update no domínio
+async function updateRealtimeDB(path, data) {
+    try {
+        if (!realtimeDB) {
+            recordRealtimeDbMetric('update', 'unavailable');
+            logStructured('warn', 'Realtime Database não disponível', {
+                service: 'firebase',
+                operation: 'updateRealtimeDB',
+                path
+            });
+            return false;
+        }
+
+        const ref = realtimeDB.ref(path);
+        await ref.update(data);
+        recordRealtimeDbMetric('update', 'success');
+
+        logStructured('info', 'Dados atualizados no Realtime DB', {
+            service: 'firebase',
+            operation: 'updateRealtimeDB',
+            path
+        });
+        return true;
+    } catch (error) {
+        recordRealtimeDbMetric('update', 'failure');
+        logStructured('error', 'Erro ao atualizar dados no Realtime DB', {
+            service: 'firebase',
+            operation: 'updateRealtimeDB',
+            path,
+            error: error.message
+        });
+        return false;
+    }
+}
+
 module.exports = {
     initializeFirebase,
     getFirestore,
@@ -413,5 +448,6 @@ module.exports = {
     syncDriverStatus,
     syncTripData,
     getFromFirestore,
-    getFromRealtimeDB
+    getFromRealtimeDB,
+    updateRealtimeDB
 }; 

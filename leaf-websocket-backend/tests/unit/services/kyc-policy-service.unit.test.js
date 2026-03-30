@@ -33,7 +33,9 @@ jest.mock('../../../utils/redis-pool', () => ({
 
 jest.mock('../../../firebase-config', () => ({
   getFirestore: jest.fn(() => null),
-  getRealtimeDB: jest.fn(() => null)
+  getRealtimeDB: jest.fn(() => null),
+  getFromRealtimeDB: jest.fn(() => null),
+  updateRealtimeDB: jest.fn(() => true)
 }));
 
 jest.mock('../../../services/kyc-driver-status-service', () => ({

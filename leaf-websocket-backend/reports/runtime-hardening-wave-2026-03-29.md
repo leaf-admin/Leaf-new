@@ -258,6 +258,35 @@ Resultado acumulado desta wave:
     - preferir Firestore
     - usar import controlado do legado só quando necessário
 
+## Fechamento do gap de deploy e novo corte no KYC
+- o deploy canônico não estava levando o corte de `waitlist` para a VPS
+- correção aplicada no script oficial:
+  - `leaf-websocket-backend/scripts/ops/deploy-dashboard-rbac-vps.sh`
+  - inclusão de validação e sync para:
+    - `routes/waitlist.js`
+    - `services/city-activation-state-service.js`
+- validação remota após o ajuste:
+  - `docker exec leaf-websocket curl http://127.0.0.1:3001/health/liveness` respondeu `alive`
+  - `POST /api/pricing/quote` permaneceu respondendo `200`
+- segundo corte estrutural do legado:
+  - `leaf-websocket-backend/services/kyc-policy-service.js` deixou de acessar `getRealtimeDB().ref(...)` diretamente
+  - `leaf-websocket-backend/firebase-config.js` ganhou o helper `updateRealtimeDB(path, data)`
+  - `kyc-policy-service` passou a usar:
+    - `getFromRealtimeDB(...)`
+    - `updateRealtimeDB(...)`
+- testes cobertos:
+  - `tests/unit/firebase-config.unit.test.js`
+  - `tests/unit/services/kyc-policy-service.unit.test.js`
+- validação:
+  - `node --check` de `firebase-config.js` e `kyc-policy-service.js`: `OK`
+  - Jest: `9/9` testes passando nas suítes de `firebase-config` + `kyc-policy-service`
+- impacto medido no auditor:
+  - relatório anterior: `legacy-runtime-surface-1774857578397.md` com `104` acessos diretos RTDB
+  - relatório novo: `legacy-runtime-surface-1774858076645.md` com `101`
+- leitura operacional:
+  - o padrão de extração para helpers centralizados funcionou sem tocar em comportamento de domínio
+  - isso abre um caminho seguro para repetir a mesma estratégia em hotspots pequenos antes de entrar em `routes/dashboard.js` e `routes/metrics.js`
+
 ## Riscos que continuam abertos
 - `server.vps.js`, `routes/dashboard.js` e `register-socket-create-booking-handler.js` continuam mistos com trabalho paralelo
 - baseline agora possui worker dedicado, mas ainda nao foi validado em Redis real local nesta maquina

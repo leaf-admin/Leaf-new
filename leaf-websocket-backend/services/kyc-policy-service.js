@@ -130,7 +130,6 @@ class KYCPolicyService {
 
   async getDriverKycState(driverId) {
     const firestore = firebaseConfig.getFirestore();
-    const realtimeDb = firebaseConfig.getRealtimeDB();
     let usersDoc = {};
     let driversDoc = {};
     let realtimeUser = {};
@@ -145,10 +144,7 @@ class KYCPolicyService {
       driversDoc = driversSnap.exists ? driversSnap.data() : {};
     }
 
-    if (realtimeDb) {
-      const realtimeSnap = await realtimeDb.ref(`users/${driverId}`).once('value');
-      realtimeUser = realtimeSnap.val() || {};
-    }
+    realtimeUser = (await firebaseConfig.getFromRealtimeDB(`users/${driverId}`)) || {};
 
     return { usersDoc, driversDoc, realtimeUser };
   }
@@ -622,7 +618,6 @@ class KYCPolicyService {
   async recordVerificationSuccess(driverId, options = {}) {
     const verifiedAtIso = options.verifiedAt || new Date().toISOString();
     const firestore = firebaseConfig.getFirestore();
-    const realtimeDb = firebaseConfig.getRealtimeDB();
 
     const realtimePayload = {
       kycLastVerificationAt: verifiedAtIso,
@@ -657,14 +652,12 @@ class KYCPolicyService {
       firestorePayload.kycBlocked = false;
     }
 
-    if (realtimeDb) {
-      await realtimeDb.ref(`users/${driverId}`).update(realtimePayload).catch((error) => {
-        logError(error, 'Falha ao atualizar status KYC no Realtime DB', {
-          service: 'kyc-policy-service',
-          driverId
-        });
+    await firebaseConfig.updateRealtimeDB(`users/${driverId}`, realtimePayload).catch((error) => {
+      logError(error, 'Falha ao atualizar status KYC no Realtime DB', {
+        service: 'kyc-policy-service',
+        driverId
       });
-    }
+    });
 
     if (firestore) {
       await Promise.all([
@@ -750,7 +743,6 @@ class KYCPolicyService {
     const reason = 'Denuncia de divergencia facial: revalidacao obrigatoria';
     const nowIso = new Date().toISOString();
     const firestore = firebaseConfig.getFirestore();
-    const realtimeDb = firebaseConfig.getRealtimeDB();
 
     if (firestore) {
       await firestore.collection('kyc_events').add({
@@ -795,23 +787,21 @@ class KYCPolicyService {
       });
     }
 
-    if (realtimeDb) {
-      await realtimeDb.ref(`users/${driverId}`).update({
-        kycReverifyRequired: true,
-        kycReverifyReason: reason,
-        kycReverifySource: 'passenger_photo_mismatch_report',
-        kycPhotoMismatchReportedAt: nowIso,
-        kycReverifyRequestedAt: nowIso,
-        kycStatus: 'pending_reverify',
-        kycBlocked: true,
-        kycUpdatedAt: nowIso
-      }).catch((error) => {
-        logError(error, 'Falha ao atualizar status KYC no Realtime DB apos denuncia', {
-          service: 'kyc-policy-service',
-          driverId
-        });
+    await firebaseConfig.updateRealtimeDB(`users/${driverId}`, {
+      kycReverifyRequired: true,
+      kycReverifyReason: reason,
+      kycReverifySource: 'passenger_photo_mismatch_report',
+      kycPhotoMismatchReportedAt: nowIso,
+      kycReverifyRequestedAt: nowIso,
+      kycStatus: 'pending_reverify',
+      kycBlocked: true,
+      kycUpdatedAt: nowIso
+    }).catch((error) => {
+      logError(error, 'Falha ao atualizar status KYC no Realtime DB apos denuncia', {
+        service: 'kyc-policy-service',
+        driverId
       });
-    }
+    });
 
     await this.integratedKycService.invalidateVerificationCache(driverId).catch(() => null);
 
