@@ -1,0 +1,410 @@
+{
+  "meta": {
+    "startedAt": "2026-03-29T23:57:30.289Z",
+    "wsUrl": "https://socket.147.182.204.181.sslip.io",
+    "apiBaseUrl": "https://api.147.182.204.181.sslip.io",
+    "passengerUid": "OjML1wSzdNRaynjqMRlSW1Y0LVy2",
+    "driverUid": "8vg2kxxqi3TYKlpD6eBlWgYseIq2",
+    "outputPath": "/Users/izaakdias/Documents/Leaf-new/leaf-websocket-backend/reports/dynamic-pricing-smoke-vps-1774828650289.json",
+    "initialCleanup": {
+      "ok": true
+    },
+    "finishedAt": "2026-03-29T23:58:15.097Z"
+  },
+  "scenarios": [
+    {
+      "scenario": "normal",
+      "driverOnline": {
+        "success": true,
+        "attempts": 1,
+        "ack": {
+          "success": true,
+          "driverId": "8vg2kxxqi3TYKlpD6eBlWgYseIq2",
+          "status": "online",
+          "isOnline": true,
+          "ready": true,
+          "onlineRedis": true,
+          "message": "Status atualizado com sucesso"
+        }
+      },
+      "bookingId": "booking_1774828660388_OjML1wSzdNRaynjqMRlSW1Y0LVy2",
+      "bookingResponse": {
+        "success": true,
+        "bookingId": "booking_1774828660388_OjML1wSzdNRaynjqMRlSW1Y0LVy2",
+        "idempotencyKey": "pricing_normal_1774828660265",
+        "message": "Corrida solicitada com sucesso",
+        "traceId": "req-1774828657048-9295b6e8",
+        "data": {
+          "bookingId": "booking_1774828660388_OjML1wSzdNRaynjqMRlSW1Y0LVy2",
+          "idempotencyKey": "pricing_normal_1774828660265",
+          "customerId": "OjML1wSzdNRaynjqMRlSW1Y0LVy2",
+          "pickupLocation": {
+            "lat": -22.9075,
+            "lng": -43.1736
+          },
+          "destinationLocation": {
+            "lat": -22.9121,
+            "lng": -43.1825
+          },
+          "estimatedFare": 18.45,
+          "pricingPayload": {
+            "base_fare": 2.79,
+            "distance_component": 1.04,
+            "time_component": 13.6,
+            "fixed_fee": 0.95,
+            "base_price_before_dynamic": 18.38,
+            "score_pressao": 0.025,
+            "score_excecao": 0,
+            "dynamic_factor": 1.0037,
+            "dynamic_percentage": 0.38,
+            "pickup_adjustment": 0,
+            "minimum_fare_applied": false,
+            "final_price": 18.45,
+            "operational_state": "NORMAL",
+            "passenger_notice": null,
+            "driver_region_status": {
+              "state": "NORMAL",
+              "driver_notice": "Região estável",
+              "opportunity_level": "LOW",
+              "recommended_repositioning": false
+            }
+          },
+          "operationalState": "NORMAL",
+          "scorePressao": 0.025,
+          "scoreExcecao": 0,
+          "paymentMethod": "pix",
+          "status": "requested",
+          "timestamp": "2026-03-29T23:57:40.459Z",
+          "traceId": "req-1774828657048-9295b6e8"
+        }
+      },
+      "payment": {
+        "chargeId": "mock_review_pricing_normal_1774828660265",
+        "rideId": "pricing_normal_1774828660265",
+        "amountInCents": 1845,
+        "mocked": true
+      },
+      "emittedData": {
+        "estimatedFare": 18.45,
+        "operationalState": "NORMAL",
+        "scorePressao": 0.025,
+        "scoreExcecao": 0
+      },
+      "expected": {
+        "base_fare": 2.79,
+        "distance_component": 1.04,
+        "time_component": 13.6,
+        "fixed_fee": 0.95,
+        "base_price_before_dynamic": 18.38,
+        "score_pressao": 0.025,
+        "score_excecao": 0,
+        "dynamic_factor": 1.0037,
+        "dynamic_percentage": 0.38,
+        "pickup_adjustment": 0,
+        "minimum_fare_applied": false,
+        "final_price": 18.45,
+        "operational_state": "NORMAL",
+        "passenger_notice": null,
+        "driver_region_status": {
+          "state": "NORMAL",
+          "driver_notice": "Região estável",
+          "opportunity_level": "LOW",
+          "recommended_repositioning": false
+        }
+      },
+      "actual": {
+        "base_fare": 2.79,
+        "distance_component": 1.04,
+        "time_component": 13.6,
+        "fixed_fee": 0.95,
+        "base_price_before_dynamic": 18.38,
+        "score_pressao": 0.025,
+        "score_excecao": 0,
+        "dynamic_factor": 1.0037,
+        "dynamic_percentage": 0.38,
+        "pickup_adjustment": 0,
+        "minimum_fare_applied": false,
+        "final_price": 18.45,
+        "operational_state": "NORMAL",
+        "passenger_notice": null,
+        "driver_region_status": {
+          "state": "NORMAL",
+          "driver_notice": "Região estável",
+          "opportunity_level": "LOW",
+          "recommended_repositioning": false
+        }
+      },
+      "cleanup": {
+        "local": {
+          "ok": true
+        },
+        "remote": {
+          "ok": true
+        }
+      }
+    },
+    {
+      "scenario": "pressao",
+      "driverOnline": {
+        "success": true,
+        "attempts": 1,
+        "ack": {
+          "success": true,
+          "driverId": "8vg2kxxqi3TYKlpD6eBlWgYseIq2",
+          "status": "online",
+          "isOnline": true,
+          "ready": true,
+          "onlineRedis": true,
+          "message": "Status atualizado com sucesso"
+        }
+      },
+      "bookingId": "booking_1774828673502_OjML1wSzdNRaynjqMRlSW1Y0LVy2",
+      "bookingResponse": {
+        "success": true,
+        "bookingId": "booking_1774828673502_OjML1wSzdNRaynjqMRlSW1Y0LVy2",
+        "idempotencyKey": "pricing_pressao_1774828673384",
+        "message": "Corrida solicitada com sucesso",
+        "traceId": "req-1774828657048-9295b6e8",
+        "data": {
+          "bookingId": "booking_1774828673502_OjML1wSzdNRaynjqMRlSW1Y0LVy2",
+          "idempotencyKey": "pricing_pressao_1774828673384",
+          "customerId": "OjML1wSzdNRaynjqMRlSW1Y0LVy2",
+          "pickupLocation": {
+            "lat": -22.9075,
+            "lng": -43.1736
+          },
+          "destinationLocation": {
+            "lat": -22.9121,
+            "lng": -43.1825
+          },
+          "estimatedFare": 35.47,
+          "pricingPayload": {
+            "base_fare": 2.79,
+            "distance_component": 1.56,
+            "time_component": 24.48,
+            "fixed_fee": 0.95,
+            "base_price_before_dynamic": 29.78,
+            "score_pressao": 0.6075,
+            "score_excecao": 0.366,
+            "dynamic_factor": 1.1643,
+            "dynamic_percentage": 16.43,
+            "pickup_adjustment": 0.8,
+            "minimum_fare_applied": false,
+            "final_price": 35.47,
+            "operational_state": "PRESSAO",
+            "passenger_notice": "Alta demanda nesta região",
+            "driver_region_status": {
+              "state": "PRESSAO",
+              "driver_notice": "Região aquecida",
+              "opportunity_level": "MEDIUM",
+              "recommended_repositioning": true
+            }
+          },
+          "operationalState": "PRESSAO",
+          "scorePressao": 0.6075,
+          "scoreExcecao": 0.366,
+          "paymentMethod": "pix",
+          "status": "requested",
+          "timestamp": "2026-03-29T23:57:53.519Z",
+          "traceId": "req-1774828657048-9295b6e8"
+        }
+      },
+      "payment": {
+        "chargeId": "mock_review_pricing_pressao_1774828673384",
+        "rideId": "pricing_pressao_1774828673384",
+        "amountInCents": 3547,
+        "mocked": true
+      },
+      "emittedData": {
+        "estimatedFare": 35.47,
+        "operationalState": "PRESSAO",
+        "scorePressao": 0.6075,
+        "scoreExcecao": 0.366
+      },
+      "expected": {
+        "base_fare": 2.79,
+        "distance_component": 1.56,
+        "time_component": 24.48,
+        "fixed_fee": 0.95,
+        "base_price_before_dynamic": 29.78,
+        "score_pressao": 0.6075,
+        "score_excecao": 0.366,
+        "dynamic_factor": 1.1643,
+        "dynamic_percentage": 16.43,
+        "pickup_adjustment": 0.8,
+        "minimum_fare_applied": false,
+        "final_price": 35.47,
+        "operational_state": "PRESSAO",
+        "passenger_notice": "Alta demanda nesta região",
+        "driver_region_status": {
+          "state": "PRESSAO",
+          "driver_notice": "Região aquecida",
+          "opportunity_level": "MEDIUM",
+          "recommended_repositioning": true
+        }
+      },
+      "actual": {
+        "base_fare": 2.79,
+        "distance_component": 1.56,
+        "time_component": 24.48,
+        "fixed_fee": 0.95,
+        "base_price_before_dynamic": 29.78,
+        "score_pressao": 0.6075,
+        "score_excecao": 0.366,
+        "dynamic_factor": 1.1643,
+        "dynamic_percentage": 16.43,
+        "pickup_adjustment": 0.8,
+        "minimum_fare_applied": false,
+        "final_price": 35.47,
+        "operational_state": "PRESSAO",
+        "passenger_notice": "Alta demanda nesta região",
+        "driver_region_status": {
+          "state": "PRESSAO",
+          "driver_notice": "Região aquecida",
+          "opportunity_level": "MEDIUM",
+          "recommended_repositioning": true
+        }
+      },
+      "cleanup": {
+        "local": {
+          "ok": true
+        },
+        "remote": {
+          "ok": true
+        }
+      }
+    },
+    {
+      "scenario": "excepcional",
+      "driverOnline": {
+        "success": true,
+        "attempts": 1,
+        "ack": {
+          "success": true,
+          "driverId": "8vg2kxxqi3TYKlpD6eBlWgYseIq2",
+          "status": "online",
+          "isOnline": true,
+          "ready": true,
+          "onlineRedis": true,
+          "message": "Status atualizado com sucesso"
+        }
+      },
+      "bookingId": "booking_1774828686743_OjML1wSzdNRaynjqMRlSW1Y0LVy2",
+      "bookingResponse": {
+        "success": true,
+        "bookingId": "booking_1774828686743_OjML1wSzdNRaynjqMRlSW1Y0LVy2",
+        "idempotencyKey": "pricing_excepcional_1774828686634",
+        "message": "Corrida solicitada com sucesso",
+        "traceId": "req-1774828657048-9295b6e8",
+        "data": {
+          "bookingId": "booking_1774828686743_OjML1wSzdNRaynjqMRlSW1Y0LVy2",
+          "idempotencyKey": "pricing_excepcional_1774828686634",
+          "customerId": "OjML1wSzdNRaynjqMRlSW1Y0LVy2",
+          "pickupLocation": {
+            "lat": -22.9075,
+            "lng": -43.1736
+          },
+          "destinationLocation": {
+            "lat": -22.9121,
+            "lng": -43.1825
+          },
+          "estimatedFare": 65.22,
+          "pricingPayload": {
+            "base_fare": 2.79,
+            "distance_component": 2.34,
+            "time_component": 40.8,
+            "fixed_fee": 0.95,
+            "base_price_before_dynamic": 46.88,
+            "score_pressao": 0.9905,
+            "score_excecao": 1,
+            "dynamic_factor": 1.3486,
+            "dynamic_percentage": 34.86,
+            "pickup_adjustment": 2,
+            "minimum_fare_applied": false,
+            "final_price": 65.22,
+            "operational_state": "EXCEPCIONAL",
+            "passenger_notice": "Preços mais altos no momento devido à demanda",
+            "driver_region_status": {
+              "state": "EXCEPCIONAL",
+              "driver_notice": "Região excepcionalmente aquecida",
+              "opportunity_level": "HIGH",
+              "recommended_repositioning": true
+            }
+          },
+          "operationalState": "EXCEPCIONAL",
+          "scorePressao": 0.9905,
+          "scoreExcecao": 1,
+          "paymentMethod": "pix",
+          "status": "requested",
+          "timestamp": "2026-03-29T23:58:06.754Z",
+          "traceId": "req-1774828657048-9295b6e8"
+        }
+      },
+      "payment": {
+        "chargeId": "mock_review_pricing_excepcional_1774828686634",
+        "rideId": "pricing_excepcional_1774828686634",
+        "amountInCents": 6522,
+        "mocked": true
+      },
+      "emittedData": {
+        "estimatedFare": 65.22,
+        "operationalState": "EXCEPCIONAL",
+        "scorePressao": 0.9905,
+        "scoreExcecao": 1
+      },
+      "expected": {
+        "base_fare": 2.79,
+        "distance_component": 2.34,
+        "time_component": 40.8,
+        "fixed_fee": 0.95,
+        "base_price_before_dynamic": 46.88,
+        "score_pressao": 0.9905,
+        "score_excecao": 1,
+        "dynamic_factor": 1.3486,
+        "dynamic_percentage": 34.86,
+        "pickup_adjustment": 2,
+        "minimum_fare_applied": false,
+        "final_price": 65.22,
+        "operational_state": "EXCEPCIONAL",
+        "passenger_notice": "Preços mais altos no momento devido à demanda",
+        "driver_region_status": {
+          "state": "EXCEPCIONAL",
+          "driver_notice": "Região excepcionalmente aquecida",
+          "opportunity_level": "HIGH",
+          "recommended_repositioning": true
+        }
+      },
+      "actual": {
+        "base_fare": 2.79,
+        "distance_component": 2.34,
+        "time_component": 40.8,
+        "fixed_fee": 0.95,
+        "base_price_before_dynamic": 46.88,
+        "score_pressao": 0.9905,
+        "score_excecao": 1,
+        "dynamic_factor": 1.3486,
+        "dynamic_percentage": 34.86,
+        "pickup_adjustment": 2,
+        "minimum_fare_applied": false,
+        "final_price": 65.22,
+        "operational_state": "EXCEPCIONAL",
+        "passenger_notice": "Preços mais altos no momento devido à demanda",
+        "driver_region_status": {
+          "state": "EXCEPCIONAL",
+          "driver_notice": "Região excepcionalmente aquecida",
+          "opportunity_level": "HIGH",
+          "recommended_repositioning": true
+        }
+      },
+      "cleanup": {
+        "local": {
+          "ok": true
+        },
+        "remote": {
+          "ok": true
+        }
+      }
+    }
+  ],
+  "status": "ok"
+}

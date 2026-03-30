@@ -1,0 +1,233 @@
+{
+  "meta": {
+    "startedAt": "2026-03-29T20:28:40.094Z",
+    "apiBaseUrl": "https://api.147.182.204.181.sslip.io/api",
+    "reportPath": "/Users/izaakdias/Documents/Leaf-new/leaf-websocket-backend/reports/smoke-h3-map-vps-1774816120094.json",
+    "finishedAt": "2026-03-29T20:28:44.318Z"
+  },
+  "scenarios": [
+    {
+      "name": "rio-dashboard-zoom14",
+      "query": {
+        "bbox": "-43.20,-22.93,-43.15,-22.89",
+        "zoom": 14,
+        "surface": "dashboard",
+        "mode": "supply_demand",
+        "includeBoundary": true,
+        "includeEmpty": false
+      },
+      "durationMs": 1113,
+      "resolution": 8,
+      "summary": {
+        "cells": 38,
+        "driversOnline": 0,
+        "driversAvailable": 0,
+        "openRequests": 0,
+        "activeTrips": 994
+      },
+      "cells": 38,
+      "sample": {
+        "h3Index": "88a8a06a01fffff",
+        "resolution": 8,
+        "center": {
+          "lat": -22.902441304944457,
+          "lng": -43.17432371615203
+        },
+        "boundary": [
+          {
+            "lat": -22.90711756447307,
+            "lng": -43.17341056697209
+          },
+          {
+            "lat": -22.904114851612793,
+            "lng": -43.16924076442801
+          },
+          {
+            "lat": -22.89943844744073,
+            "lng": -43.17015394261774
+          },
+          {
+            "lat": -22.897764789586937,
+            "lng": -43.17523685129591
+          },
+          {
+            "lat": -22.90076756993178,
+            "lng": -43.179406623495524
+          },
+          {
+            "lat": -22.905443940634292,
+            "lng": -43.178493517373234
+          }
+        ],
+        "metrics": {
+          "supply": 0,
+          "availableDrivers": 0,
+          "busyDrivers": 0,
+          "demand": 299,
+          "openRequests": 0,
+          "activeTrips": 299,
+          "imbalance": 299,
+          "surplus": -299,
+          "demandLevel": "critical",
+          "fillRateHint": "critical"
+        },
+        "style": {
+          "fill": "#EF4444",
+          "stroke": "#B91C1C",
+          "fillOpacity": 0.24,
+          "strokeOpacity": 0.72,
+          "strokeWidth": 1.2
+        }
+      }
+    },
+    {
+      "name": "rio-driver-zoom16",
+      "query": {
+        "bbox": "-43.20,-22.93,-43.15,-22.89",
+        "zoom": 16,
+        "surface": "driver",
+        "mode": "supply_demand",
+        "includeBoundary": true,
+        "includeEmpty": false
+      },
+      "durationMs": 1903,
+      "resolution": 9,
+      "summary": {
+        "cells": 136,
+        "driversOnline": 0,
+        "driversAvailable": 0,
+        "openRequests": 0,
+        "activeTrips": 994
+      },
+      "cells": 136,
+      "sample": {
+        "h3Index": "89a8a06a0d7ffff",
+        "resolution": 9,
+        "center": {
+          "lat": -22.910267723377988,
+          "lng": -43.171436474415025
+        },
+        "boundary": [
+          {
+            "lat": -22.91184275210828,
+            "lng": -43.17044941978958
+          },
+          {
+            "lat": -22.910316893590007,
+            "lng": -43.16938849382393
+          },
+          {
+            "lat": -22.908741843484577,
+            "lng": -43.17037554941823
+          },
+          {
+            "lat": -22.90869266083201,
+            "lng": -43.172423523476056
+          },
+          {
+            "lat": -22.910218526957046,
+            "lng": -43.17348445184708
+          },
+          {
+            "lat": -22.911793568127866,
+            "lng": -43.17249740375624
+          }
+        ],
+        "metrics": {
+          "supply": 0,
+          "availableDrivers": 0,
+          "busyDrivers": 0,
+          "demand": 88,
+          "openRequests": 0,
+          "activeTrips": 88,
+          "imbalance": 88,
+          "surplus": -88,
+          "demandLevel": "critical",
+          "fillRateHint": "critical"
+        },
+        "style": {
+          "fill": "#EF4444",
+          "stroke": "#B91C1C",
+          "fillOpacity": 0.28,
+          "strokeOpacity": 0.82,
+          "strokeWidth": 1.4
+        }
+      }
+    },
+    {
+      "name": "sf-driver-include-empty",
+      "query": {
+        "bbox": "-122.44,37.75,-122.39,37.80",
+        "zoom": 16,
+        "surface": "driver",
+        "mode": "supply_demand",
+        "includeBoundary": true,
+        "includeEmpty": true
+      },
+      "durationMs": 1205,
+      "resolution": 9,
+      "summary": {
+        "cells": 223,
+        "driversOnline": 0,
+        "driversAvailable": 0,
+        "openRequests": 0,
+        "activeTrips": 0
+      },
+      "cells": 223,
+      "sample": {
+        "h3Index": "89283080c93ffff",
+        "resolution": 9,
+        "center": {
+          "lat": 37.79742668519182,
+          "lng": -122.39860534672667
+        },
+        "boundary": [
+          {
+            "lat": 37.79592213887592,
+            "lng": -122.39734561646776
+          },
+          {
+            "lat": 37.797604531758,
+            "lng": -122.39627358309373
+          },
+          {
+            "lat": 37.79910906804379,
+            "lng": -122.39753332695238
+          },
+          {
+            "lat": 37.79893118813359,
+            "lng": -122.39986510321276
+          },
+          {
+            "lat": 37.79724879510272,
+            "lng": -122.40093706724444
+          },
+          {
+            "lat": 37.79574428213054,
+            "lng": -122.39967732436068
+          }
+        ],
+        "metrics": {
+          "supply": 0,
+          "availableDrivers": 0,
+          "busyDrivers": 0,
+          "demand": 0,
+          "openRequests": 0,
+          "activeTrips": 0,
+          "imbalance": 0,
+          "surplus": 0,
+          "demandLevel": "low",
+          "fillRateHint": "idle"
+        },
+        "style": {
+          "fill": "#22C55E",
+          "stroke": "#15803D",
+          "fillOpacity": 0.28,
+          "strokeOpacity": 0.82,
+          "strokeWidth": 1.4
+        }
+      }
+    }
+  ],
+  "status": "ok"
+}

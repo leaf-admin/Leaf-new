@@ -1,0 +1,1396 @@
+{
+  "meta": {
+    "startedAt": "2026-03-29T02:33:50.780Z",
+    "wsUrl": "https://socket.147.182.204.181.sslip.io",
+    "baseUrl": "https://api.147.182.204.181.sslip.io",
+    "passengerUid": "OjML1wSzdNRaynjqMRlSW1Y0LVy2",
+    "driver1Uid": "8vg2kxxqi3TYKlpD6eBlWgYseIq2",
+    "reportPath": "/Users/izaakdias/Documents/Leaf-new/leaf-websocket-backend/reports/operational-reassignment-smoke-vps-1774751630780.json",
+    "currentStage": "passenger_ends_after_interruption",
+    "driver2Uid": "F0CIj7noqrc74qdPJD80T9FCxME2",
+    "driver2Phone": "11888888889",
+    "finishedAt": "2026-03-29T02:34:18.963Z"
+  },
+  "flows": {
+    "driver2OfferDebug": {
+      "rideId": "booking_1774751642180_OjML1wSzdNRaynjqMRlSW1Y0LVy2",
+      "bookingId": "booking_1774751642180_OjML1wSzdNRaynjqMRlSW1Y0LVy2",
+      "customerId": "OjML1wSzdNRaynjqMRlSW1Y0LVy2",
+      "passengerName": null,
+      "pickupLocation": {
+        "lat": -22.9092,
+        "lng": -43.1771,
+        "address": "Ponto de interrupção - Glória"
+      },
+      "destinationLocation": {
+        "lat": -22.9121,
+        "lng": -43.1825
+      },
+      "estimatedFare": 8.5,
+      "paymentMethod": "pix",
+      "pickupAddress": "Ponto de interrupção - Glória",
+      "destinationAddress": null,
+      "estimatedTripDistanceKm": 0.64,
+      "estimatedArrivalToPickupMin": 1,
+      "driverDistanceToPickupKm": 0.0002,
+      "isOperationalContinuation": true,
+      "rideMode": "continuation",
+      "previousDriverId": "8vg2kxxqi3TYKlpD6eBlWgYseIq2",
+      "remainingReservedAmount": 27.5,
+      "continuationMessage": "Corrida em continuidade a partir do ponto de interrupção.",
+      "operationalContinuation": {
+        "status": "SEARCHING_REPLACEMENT_DRIVER",
+        "interruptedAt": "2026-03-29T02:34:07.214Z",
+        "interruptedByDriverId": "8vg2kxxqi3TYKlpD6eBlWgYseIq2",
+        "currentState": "IN_PROGRESS",
+        "reason": "VEHICLE_BREAKDOWN",
+        "note": "Falha mecânica em teste controlado",
+        "pickupLocation": {
+          "lat": -22.9092,
+          "lng": -43.1771,
+          "address": "Ponto de interrupção - Glória"
+        },
+        "originalDestination": {
+          "lat": -22.9121,
+          "lng": -43.1825
+        },
+        "executedFare": 0,
+        "remainingReservedAmount": 27.5,
+        "estimatedRefund": 27.5,
+        "closedRideLeg": {
+          "legId": "leg_1774751647214_dx00re",
+          "legNumber": 1,
+          "driverId": "8vg2kxxqi3TYKlpD6eBlWgYseIq2",
+          "legType": "PRIMARY",
+          "reason": "VEHICLE_BREAKDOWN",
+          "grossAmount": 0,
+          "distanceKm": 2.8,
+          "durationSecs": 420,
+          "startedAt": "2026-03-29T02:34:03.712Z",
+          "endedAt": "2026-03-29T02:34:07.212Z",
+          "startLocation": {
+            "lat": -22.9075,
+            "lng": -43.1736
+          },
+          "endLocation": {
+            "lat": -22.9092,
+            "lng": -43.1771,
+            "address": "Ponto de interrupção - Glória"
+          },
+          "operationalFee": 0.99,
+          "paymentIntermediationFee": 0.5,
+          "totalFees": 1.49,
+          "driverNetAmount": 0,
+          "rescueBonus": 0,
+          "platformAbsorbedOperationalFee": 0,
+          "platformAbsorbedPaymentIntermediationFee": 0,
+          "financialPolicy": {
+            "absorbedOperationalFee": false,
+            "absorbedPaymentIntermediationFee": false
+          },
+          "source": "operational_interrupt",
+          "metadata": {
+            "interruptionNote": "Falha mecânica em teste controlado",
+            "settlementType": "INTERRUPTED_OPERATIONAL",
+            "previousState": "IN_PROGRESS"
+          }
+        },
+        "passengerDecision": "CONTINUE",
+        "decisionAt": "2026-03-29T02:34:07.413Z",
+        "reassignmentRequestedAt": "2026-03-29T02:34:07.413Z"
+      },
+      "timeout": 8,
+      "timestamp": "2026-03-29T02:34:07.430Z",
+      "estimatedOperationalFee": 0.99,
+      "estimatedPaymentIntermediationFee": 0.5,
+      "estimatedTotalFees": 1.49,
+      "estimatedDriverNetAmount": 7.01
+    },
+    "continueWithOtherDriver": {
+      "bookingId": "booking_1774751642180_OjML1wSzdNRaynjqMRlSW1Y0LVy2",
+      "driverInterrupted": {
+        "success": true,
+        "bookingId": "booking_1774751642180_OjML1wSzdNRaynjqMRlSW1Y0LVy2",
+        "reason": "VEHICLE_BREAKDOWN",
+        "note": "Falha mecânica em teste controlado",
+        "interruption": {
+          "status": "PASSENGER_DECISION_PENDING",
+          "interruptedAt": "2026-03-29T02:34:07.214Z",
+          "interruptedByDriverId": "8vg2kxxqi3TYKlpD6eBlWgYseIq2",
+          "currentState": "IN_PROGRESS",
+          "reason": "VEHICLE_BREAKDOWN",
+          "note": "Falha mecânica em teste controlado",
+          "pickupLocation": {
+            "lat": -22.9092,
+            "lng": -43.1771,
+            "address": "Ponto de interrupção - Glória"
+          },
+          "originalDestination": {
+            "lat": -22.9121,
+            "lng": -43.1825
+          },
+          "executedFare": 0,
+          "remainingReservedAmount": 27.5,
+          "estimatedRefund": 27.5,
+          "closedRideLeg": {
+            "legId": "leg_1774751647214_dx00re",
+            "legNumber": 1,
+            "driverId": "8vg2kxxqi3TYKlpD6eBlWgYseIq2",
+            "legType": "PRIMARY",
+            "reason": "VEHICLE_BREAKDOWN",
+            "grossAmount": 0,
+            "distanceKm": 2.8,
+            "durationSecs": 420,
+            "startedAt": "2026-03-29T02:34:03.712Z",
+            "endedAt": "2026-03-29T02:34:07.212Z",
+            "startLocation": {
+              "lat": -22.9075,
+              "lng": -43.1736
+            },
+            "endLocation": {
+              "lat": -22.9092,
+              "lng": -43.1771,
+              "address": "Ponto de interrupção - Glória"
+            },
+            "operationalFee": 0.99,
+            "paymentIntermediationFee": 0.5,
+            "totalFees": 1.49,
+            "driverNetAmount": 0,
+            "rescueBonus": 0,
+            "platformAbsorbedOperationalFee": 0,
+            "platformAbsorbedPaymentIntermediationFee": 0,
+            "financialPolicy": {
+              "absorbedOperationalFee": false,
+              "absorbedPaymentIntermediationFee": false
+            },
+            "source": "operational_interrupt",
+            "metadata": {
+              "interruptionNote": "Falha mecânica em teste controlado",
+              "settlementType": "INTERRUPTED_OPERATIONAL",
+              "previousState": "IN_PROGRESS"
+            }
+          }
+        },
+        "rideLegs": [
+          {
+            "legId": "leg_1774751647214_dx00re",
+            "legNumber": 1,
+            "driverId": "8vg2kxxqi3TYKlpD6eBlWgYseIq2",
+            "legType": "PRIMARY",
+            "reason": "VEHICLE_BREAKDOWN",
+            "grossAmount": 0,
+            "distanceKm": 2.8,
+            "durationSecs": 420,
+            "startedAt": "2026-03-29T02:34:03.712Z",
+            "endedAt": "2026-03-29T02:34:07.212Z",
+            "startLocation": {
+              "lat": -22.9075,
+              "lng": -43.1736
+            },
+            "endLocation": {
+              "lat": -22.9092,
+              "lng": -43.1771,
+              "address": "Ponto de interrupção - Glória"
+            },
+            "operationalFee": 0.99,
+            "paymentIntermediationFee": 0.5,
+            "totalFees": 1.49,
+            "driverNetAmount": 0,
+            "rescueBonus": 0,
+            "platformAbsorbedOperationalFee": 0,
+            "platformAbsorbedPaymentIntermediationFee": 0,
+            "financialPolicy": {
+              "absorbedOperationalFee": false,
+              "absorbedPaymentIntermediationFee": false
+            },
+            "source": "operational_interrupt",
+            "metadata": {
+              "interruptionNote": "Falha mecânica em teste controlado",
+              "settlementType": "INTERRUPTED_OPERATIONAL",
+              "previousState": "IN_PROGRESS"
+            }
+          }
+        ],
+        "message": "Corrida interrompida por motivo operacional. Aguardando decisão do passageiro."
+      },
+      "passengerInterruption": {
+        "success": true,
+        "bookingId": "booking_1774751642180_OjML1wSzdNRaynjqMRlSW1Y0LVy2",
+        "reason": "VEHICLE_BREAKDOWN",
+        "note": "Falha mecânica em teste controlado",
+        "interruption": {
+          "status": "PASSENGER_DECISION_PENDING",
+          "interruptedAt": "2026-03-29T02:34:07.214Z",
+          "interruptedByDriverId": "8vg2kxxqi3TYKlpD6eBlWgYseIq2",
+          "currentState": "IN_PROGRESS",
+          "reason": "VEHICLE_BREAKDOWN",
+          "note": "Falha mecânica em teste controlado",
+          "pickupLocation": {
+            "lat": -22.9092,
+            "lng": -43.1771,
+            "address": "Ponto de interrupção - Glória"
+          },
+          "originalDestination": {
+            "lat": -22.9121,
+            "lng": -43.1825
+          },
+          "executedFare": 0,
+          "remainingReservedAmount": 27.5,
+          "estimatedRefund": 27.5,
+          "closedRideLeg": {
+            "legId": "leg_1774751647214_dx00re",
+            "legNumber": 1,
+            "driverId": "8vg2kxxqi3TYKlpD6eBlWgYseIq2",
+            "legType": "PRIMARY",
+            "reason": "VEHICLE_BREAKDOWN",
+            "grossAmount": 0,
+            "distanceKm": 2.8,
+            "durationSecs": 420,
+            "startedAt": "2026-03-29T02:34:03.712Z",
+            "endedAt": "2026-03-29T02:34:07.212Z",
+            "startLocation": {
+              "lat": -22.9075,
+              "lng": -43.1736
+            },
+            "endLocation": {
+              "lat": -22.9092,
+              "lng": -43.1771,
+              "address": "Ponto de interrupção - Glória"
+            },
+            "operationalFee": 0.99,
+            "paymentIntermediationFee": 0.5,
+            "totalFees": 1.49,
+            "driverNetAmount": 0,
+            "rescueBonus": 0,
+            "platformAbsorbedOperationalFee": 0,
+            "platformAbsorbedPaymentIntermediationFee": 0,
+            "financialPolicy": {
+              "absorbedOperationalFee": false,
+              "absorbedPaymentIntermediationFee": false
+            },
+            "source": "operational_interrupt",
+            "metadata": {
+              "interruptionNote": "Falha mecânica em teste controlado",
+              "settlementType": "INTERRUPTED_OPERATIONAL",
+              "previousState": "IN_PROGRESS"
+            }
+          }
+        },
+        "rideLegs": [
+          {
+            "legId": "leg_1774751647214_dx00re",
+            "legNumber": 1,
+            "driverId": "8vg2kxxqi3TYKlpD6eBlWgYseIq2",
+            "legType": "PRIMARY",
+            "reason": "VEHICLE_BREAKDOWN",
+            "grossAmount": 0,
+            "distanceKm": 2.8,
+            "durationSecs": 420,
+            "startedAt": "2026-03-29T02:34:03.712Z",
+            "endedAt": "2026-03-29T02:34:07.212Z",
+            "startLocation": {
+              "lat": -22.9075,
+              "lng": -43.1736
+            },
+            "endLocation": {
+              "lat": -22.9092,
+              "lng": -43.1771,
+              "address": "Ponto de interrupção - Glória"
+            },
+            "operationalFee": 0.99,
+            "paymentIntermediationFee": 0.5,
+            "totalFees": 1.49,
+            "driverNetAmount": 0,
+            "rescueBonus": 0,
+            "platformAbsorbedOperationalFee": 0,
+            "platformAbsorbedPaymentIntermediationFee": 0,
+            "financialPolicy": {
+              "absorbedOperationalFee": false,
+              "absorbedPaymentIntermediationFee": false
+            },
+            "source": "operational_interrupt",
+            "metadata": {
+              "interruptionNote": "Falha mecânica em teste controlado",
+              "settlementType": "INTERRUPTED_OPERATIONAL",
+              "previousState": "IN_PROGRESS"
+            }
+          }
+        ],
+        "message": "Seu motorista não consegue continuar. Deseja seguir com outro parceiro?"
+      },
+      "passengerSearching": {
+        "success": true,
+        "bookingId": "booking_1774751642180_OjML1wSzdNRaynjqMRlSW1Y0LVy2",
+        "status": "REASSIGNMENT_PENDING",
+        "pickupLocation": {
+          "lat": -22.9092,
+          "lng": -43.1771,
+          "address": "Ponto de interrupção - Glória"
+        },
+        "previousDriverId": "8vg2kxxqi3TYKlpD6eBlWgYseIq2",
+        "dispatchResult": {
+          "success": true,
+          "skipped": false,
+          "bookingId": "booking_1774751642180_OjML1wSzdNRaynjqMRlSW1Y0LVy2",
+          "attempts": 1
+        },
+        "rideLegs": [
+          {
+            "legId": "leg_1774751647214_dx00re",
+            "legNumber": 1,
+            "driverId": "8vg2kxxqi3TYKlpD6eBlWgYseIq2",
+            "legType": "PRIMARY",
+            "reason": "VEHICLE_BREAKDOWN",
+            "grossAmount": 0,
+            "distanceKm": 2.8,
+            "durationSecs": 420,
+            "startedAt": "2026-03-29T02:34:03.712Z",
+            "endedAt": "2026-03-29T02:34:07.212Z",
+            "startLocation": {
+              "lat": -22.9075,
+              "lng": -43.1736
+            },
+            "endLocation": {
+              "lat": -22.9092,
+              "lng": -43.1771,
+              "address": "Ponto de interrupção - Glória"
+            },
+            "operationalFee": 0.99,
+            "paymentIntermediationFee": 0.5,
+            "totalFees": 1.49,
+            "driverNetAmount": 0,
+            "rescueBonus": 0,
+            "platformAbsorbedOperationalFee": 0,
+            "platformAbsorbedPaymentIntermediationFee": 0,
+            "financialPolicy": {
+              "absorbedOperationalFee": false,
+              "absorbedPaymentIntermediationFee": false
+            },
+            "source": "operational_interrupt",
+            "metadata": {
+              "interruptionNote": "Falha mecânica em teste controlado",
+              "settlementType": "INTERRUPTED_OPERATIONAL",
+              "previousState": "IN_PROGRESS"
+            }
+          }
+        ],
+        "message": "Estamos procurando outro motorista parceiro para continuar a corrida."
+      },
+      "driverReleased": {
+        "success": true,
+        "bookingId": "booking_1774751642180_OjML1wSzdNRaynjqMRlSW1Y0LVy2",
+        "message": "O passageiro optou por continuar com outro parceiro."
+      },
+      "driver2Offer": {
+        "rideId": "booking_1774751642180_OjML1wSzdNRaynjqMRlSW1Y0LVy2",
+        "bookingId": "booking_1774751642180_OjML1wSzdNRaynjqMRlSW1Y0LVy2",
+        "customerId": "OjML1wSzdNRaynjqMRlSW1Y0LVy2",
+        "passengerName": null,
+        "pickupLocation": {
+          "lat": -22.9092,
+          "lng": -43.1771,
+          "address": "Ponto de interrupção - Glória"
+        },
+        "destinationLocation": {
+          "lat": -22.9121,
+          "lng": -43.1825
+        },
+        "estimatedFare": 8.5,
+        "paymentMethod": "pix",
+        "pickupAddress": "Ponto de interrupção - Glória",
+        "destinationAddress": null,
+        "estimatedTripDistanceKm": 0.64,
+        "estimatedArrivalToPickupMin": 1,
+        "driverDistanceToPickupKm": 0.0002,
+        "isOperationalContinuation": true,
+        "rideMode": "continuation",
+        "previousDriverId": "8vg2kxxqi3TYKlpD6eBlWgYseIq2",
+        "remainingReservedAmount": 27.5,
+        "continuationMessage": "Corrida em continuidade a partir do ponto de interrupção.",
+        "operationalContinuation": {
+          "status": "SEARCHING_REPLACEMENT_DRIVER",
+          "interruptedAt": "2026-03-29T02:34:07.214Z",
+          "interruptedByDriverId": "8vg2kxxqi3TYKlpD6eBlWgYseIq2",
+          "currentState": "IN_PROGRESS",
+          "reason": "VEHICLE_BREAKDOWN",
+          "note": "Falha mecânica em teste controlado",
+          "pickupLocation": {
+            "lat": -22.9092,
+            "lng": -43.1771,
+            "address": "Ponto de interrupção - Glória"
+          },
+          "originalDestination": {
+            "lat": -22.9121,
+            "lng": -43.1825
+          },
+          "executedFare": 0,
+          "remainingReservedAmount": 27.5,
+          "estimatedRefund": 27.5,
+          "closedRideLeg": {
+            "legId": "leg_1774751647214_dx00re",
+            "legNumber": 1,
+            "driverId": "8vg2kxxqi3TYKlpD6eBlWgYseIq2",
+            "legType": "PRIMARY",
+            "reason": "VEHICLE_BREAKDOWN",
+            "grossAmount": 0,
+            "distanceKm": 2.8,
+            "durationSecs": 420,
+            "startedAt": "2026-03-29T02:34:03.712Z",
+            "endedAt": "2026-03-29T02:34:07.212Z",
+            "startLocation": {
+              "lat": -22.9075,
+              "lng": -43.1736
+            },
+            "endLocation": {
+              "lat": -22.9092,
+              "lng": -43.1771,
+              "address": "Ponto de interrupção - Glória"
+            },
+            "operationalFee": 0.99,
+            "paymentIntermediationFee": 0.5,
+            "totalFees": 1.49,
+            "driverNetAmount": 0,
+            "rescueBonus": 0,
+            "platformAbsorbedOperationalFee": 0,
+            "platformAbsorbedPaymentIntermediationFee": 0,
+            "financialPolicy": {
+              "absorbedOperationalFee": false,
+              "absorbedPaymentIntermediationFee": false
+            },
+            "source": "operational_interrupt",
+            "metadata": {
+              "interruptionNote": "Falha mecânica em teste controlado",
+              "settlementType": "INTERRUPTED_OPERATIONAL",
+              "previousState": "IN_PROGRESS"
+            }
+          },
+          "passengerDecision": "CONTINUE",
+          "decisionAt": "2026-03-29T02:34:07.413Z",
+          "reassignmentRequestedAt": "2026-03-29T02:34:07.413Z"
+        },
+        "timeout": 8,
+        "timestamp": "2026-03-29T02:34:07.430Z",
+        "estimatedOperationalFee": 0.99,
+        "estimatedPaymentIntermediationFee": 0.5,
+        "estimatedTotalFees": 1.49,
+        "estimatedDriverNetAmount": 7.01
+      },
+      "driver2Accepted": {
+        "success": true,
+        "bookingId": "booking_1774751642180_OjML1wSzdNRaynjqMRlSW1Y0LVy2",
+        "driverId": "F0CIj7noqrc74qdPJD80T9FCxME2",
+        "message": "Corrida aceita com sucesso",
+        "timestamp": "2026-03-29T02:34:07.649Z",
+        "pickupLocation": {
+          "lat": -22.9092,
+          "lng": -43.1771
+        },
+        "destinationLocation": {
+          "lat": -22.9121,
+          "lng": -43.1825
+        },
+        "estimatedFare": 8.5,
+        "driverDistanceToPickupKm": 0,
+        "estimatedArrivalToPickupMin": 1,
+        "estimatedOperationalFee": 0.99,
+        "estimatedPaymentIntermediationFee": 0.5,
+        "estimatedTotalFees": 1.49,
+        "estimatedDriverNetAmount": 7.01,
+        "driver": {
+          "id": "F0CIj7noqrc74qdPJD80T9FCxME2",
+          "name": "Motorista Leaf",
+          "vehicle": {
+            "model": "",
+            "plate": "TES8889"
+          },
+          "location": {
+            "lat": -22.909198917803398,
+            "lng": -43.1770983338356
+          }
+        },
+        "location": {
+          "lat": -22.909198917803398,
+          "lng": -43.1770983338356
+        },
+        "vehicle": {
+          "model": "",
+          "plate": "TES8889"
+        }
+      },
+      "driver2Arrived": {
+        "action": "arrived_at_pickup",
+        "bookingId": "booking_1774751642180_OjML1wSzdNRaynjqMRlSW1Y0LVy2",
+        "message": "Você informou que chegou ao local de embarque",
+        "pickupToleranceReached": true,
+        "distanceMeters": 0,
+        "toleranceMeters": 20,
+        "boardingWindowSec": 120,
+        "boardingDeadlineAt": "2026-03-29T02:36:08.542Z"
+      },
+      "driver2Start": {
+        "success": true,
+        "bookingId": "booking_1774751642180_OjML1wSzdNRaynjqMRlSW1Y0LVy2",
+        "message": "Viagem iniciada com sucesso",
+        "startLocation": {
+          "lat": -22.9092,
+          "lng": -43.1771
+        },
+        "timestamp": "2026-03-29T02:34:08.754Z"
+      },
+      "driver2Completed": {
+        "success": true,
+        "bookingId": "booking_1774751642180_OjML1wSzdNRaynjqMRlSW1Y0LVy2",
+        "message": "Viagem finalizada com sucesso",
+        "endLocation": {
+          "lat": -22.9121,
+          "lng": -43.1825
+        },
+        "distance": 5100,
+        "duration": 0,
+        "fare": 27.5,
+        "operationalFee": 1.49,
+        "paymentIntermediationFee": 0.5,
+        "totalFees": 1.99,
+        "driverNetAmount": 25.51,
+        "paymentMethod": "pix",
+        "pickup": "Ponto de interrupção - Glória",
+        "drop": "Destino",
+        "pickupCoordinate": {
+          "lat": -22.9092,
+          "lng": -43.1771
+        },
+        "destinationCoordinate": {
+          "lat": -22.9121,
+          "lng": -43.1825
+        },
+        "paymentDistribution": {
+          "status": "PENDING",
+          "message": "Processamento assíncrono em andamento"
+        },
+        "completionType": "COMPLETED",
+        "rideLegs": [
+          {
+            "legId": "leg_1774751647214_dx00re",
+            "legNumber": 1,
+            "driverId": "8vg2kxxqi3TYKlpD6eBlWgYseIq2",
+            "legType": "PRIMARY",
+            "reason": "VEHICLE_BREAKDOWN",
+            "grossAmount": 0,
+            "distanceKm": 2.8,
+            "durationSecs": 420,
+            "startedAt": "2026-03-29T02:34:03.712Z",
+            "endedAt": "2026-03-29T02:34:07.212Z",
+            "startLocation": {
+              "lat": -22.9075,
+              "lng": -43.1736
+            },
+            "endLocation": {
+              "lat": -22.9092,
+              "lng": -43.1771,
+              "address": "Ponto de interrupção - Glória"
+            },
+            "operationalFee": 0.99,
+            "paymentIntermediationFee": 0.5,
+            "totalFees": 1.49,
+            "driverNetAmount": 0,
+            "rescueBonus": 0,
+            "platformAbsorbedOperationalFee": 0,
+            "platformAbsorbedPaymentIntermediationFee": 0,
+            "financialPolicy": {
+              "absorbedOperationalFee": false,
+              "absorbedPaymentIntermediationFee": false
+            },
+            "source": "operational_interrupt",
+            "metadata": {
+              "interruptionNote": "Falha mecânica em teste controlado",
+              "settlementType": "INTERRUPTED_OPERATIONAL",
+              "previousState": "IN_PROGRESS"
+            }
+          },
+          {
+            "legId": "leg_1774751648950_w6ss82",
+            "legNumber": 2,
+            "driverId": "F0CIj7noqrc74qdPJD80T9FCxME2",
+            "legType": "CONTINUATION",
+            "reason": "CONTINUATION_COMPLETED",
+            "grossAmount": 27.5,
+            "distanceKm": 5100,
+            "durationSecs": 0,
+            "startedAt": "2026-03-29T02:34:08.753Z",
+            "endedAt": "2026-03-29T02:34:08.949Z",
+            "startLocation": {
+              "lat": -22.9092,
+              "lng": -43.1771
+            },
+            "endLocation": {
+              "lat": -22.9121,
+              "lng": -43.1825
+            },
+            "operationalFee": 0,
+            "paymentIntermediationFee": 0,
+            "totalFees": 0,
+            "driverNetAmount": 27.5,
+            "rescueBonus": 0,
+            "platformAbsorbedOperationalFee": 1.49,
+            "platformAbsorbedPaymentIntermediationFee": 0.5,
+            "financialPolicy": {
+              "absorbedOperationalFee": true,
+              "absorbedPaymentIntermediationFee": true
+            },
+            "source": "continuation_completion",
+            "metadata": {
+              "completionType": "REASSIGNED_COMPLETION",
+              "remainingGrossAmount": 27.5,
+              "alreadySettled": 0
+            }
+          }
+        ],
+        "operationalContinuation": {
+          "status": "COMPLETED_AFTER_REASSIGNMENT",
+          "interruptedAt": "2026-03-29T02:34:07.214Z",
+          "interruptedByDriverId": "8vg2kxxqi3TYKlpD6eBlWgYseIq2",
+          "currentState": "IN_PROGRESS",
+          "reason": "VEHICLE_BREAKDOWN",
+          "note": "Falha mecânica em teste controlado",
+          "pickupLocation": {
+            "lat": -22.9092,
+            "lng": -43.1771,
+            "address": "Ponto de interrupção - Glória"
+          },
+          "originalDestination": {
+            "lat": -22.9121,
+            "lng": -43.1825
+          },
+          "executedFare": 0,
+          "remainingReservedAmount": 27.5,
+          "estimatedRefund": 27.5,
+          "closedRideLeg": {
+            "legId": "leg_1774751647214_dx00re",
+            "legNumber": 1,
+            "driverId": "8vg2kxxqi3TYKlpD6eBlWgYseIq2",
+            "legType": "PRIMARY",
+            "reason": "VEHICLE_BREAKDOWN",
+            "grossAmount": 0,
+            "distanceKm": 2.8,
+            "durationSecs": 420,
+            "startedAt": "2026-03-29T02:34:03.712Z",
+            "endedAt": "2026-03-29T02:34:07.212Z",
+            "startLocation": {
+              "lat": -22.9075,
+              "lng": -43.1736
+            },
+            "endLocation": {
+              "lat": -22.9092,
+              "lng": -43.1771,
+              "address": "Ponto de interrupção - Glória"
+            },
+            "operationalFee": 0.99,
+            "paymentIntermediationFee": 0.5,
+            "totalFees": 1.49,
+            "driverNetAmount": 0,
+            "rescueBonus": 0,
+            "platformAbsorbedOperationalFee": 0,
+            "platformAbsorbedPaymentIntermediationFee": 0,
+            "financialPolicy": {
+              "absorbedOperationalFee": false,
+              "absorbedPaymentIntermediationFee": false
+            },
+            "source": "operational_interrupt",
+            "metadata": {
+              "interruptionNote": "Falha mecânica em teste controlado",
+              "settlementType": "INTERRUPTED_OPERATIONAL",
+              "previousState": "IN_PROGRESS"
+            }
+          },
+          "passengerDecision": "CONTINUE",
+          "decisionAt": "2026-03-29T02:34:07.413Z",
+          "reassignmentRequestedAt": "2026-03-29T02:34:07.413Z",
+          "replacementDriverId": "F0CIj7noqrc74qdPJD80T9FCxME2",
+          "replacementAcceptedAt": "2026-03-29T02:34:07.642Z",
+          "reassignedStartedAt": "2026-03-29T02:34:08.753Z",
+          "currentLegStartedAt": "2026-03-29T02:34:08.753Z",
+          "completedAt": "2026-03-29T02:34:08.949Z"
+        },
+        "authoritativeSnapshot": true,
+        "financialSnapshotSource": "backend_final",
+        "persistence": "accepted_background",
+        "timestamp": "2026-03-29T02:34:08.959Z"
+      },
+      "passengerContinuationCompleted": {
+        "success": true,
+        "bookingId": "booking_1774751642180_OjML1wSzdNRaynjqMRlSW1Y0LVy2",
+        "message": "Viagem finalizada",
+        "endLocation": {
+          "lat": -22.9121,
+          "lng": -43.1825
+        },
+        "distance": 5100,
+        "duration": 0,
+        "fare": 27.5,
+        "operationalFee": 1.49,
+        "paymentIntermediationFee": 0.5,
+        "totalFees": 1.99,
+        "driverNetAmount": 25.51,
+        "paymentMethod": "pix",
+        "pickup": "Ponto de interrupção - Glória",
+        "drop": "Destino",
+        "pickupCoordinate": {
+          "lat": -22.9092,
+          "lng": -43.1771
+        },
+        "destinationCoordinate": {
+          "lat": -22.9121,
+          "lng": -43.1825
+        },
+        "paymentDistribution": {
+          "status": "PENDING",
+          "message": "Processamento assíncrono em andamento"
+        },
+        "completionType": "COMPLETED",
+        "rideLegs": [
+          {
+            "legId": "leg_1774751647214_dx00re",
+            "legNumber": 1,
+            "driverId": "8vg2kxxqi3TYKlpD6eBlWgYseIq2",
+            "legType": "PRIMARY",
+            "reason": "VEHICLE_BREAKDOWN",
+            "grossAmount": 0,
+            "distanceKm": 2.8,
+            "durationSecs": 420,
+            "startedAt": "2026-03-29T02:34:03.712Z",
+            "endedAt": "2026-03-29T02:34:07.212Z",
+            "startLocation": {
+              "lat": -22.9075,
+              "lng": -43.1736
+            },
+            "endLocation": {
+              "lat": -22.9092,
+              "lng": -43.1771,
+              "address": "Ponto de interrupção - Glória"
+            },
+            "operationalFee": 0.99,
+            "paymentIntermediationFee": 0.5,
+            "totalFees": 1.49,
+            "driverNetAmount": 0,
+            "rescueBonus": 0,
+            "platformAbsorbedOperationalFee": 0,
+            "platformAbsorbedPaymentIntermediationFee": 0,
+            "financialPolicy": {
+              "absorbedOperationalFee": false,
+              "absorbedPaymentIntermediationFee": false
+            },
+            "source": "operational_interrupt",
+            "metadata": {
+              "interruptionNote": "Falha mecânica em teste controlado",
+              "settlementType": "INTERRUPTED_OPERATIONAL",
+              "previousState": "IN_PROGRESS"
+            }
+          },
+          {
+            "legId": "leg_1774751648950_w6ss82",
+            "legNumber": 2,
+            "driverId": "F0CIj7noqrc74qdPJD80T9FCxME2",
+            "legType": "CONTINUATION",
+            "reason": "CONTINUATION_COMPLETED",
+            "grossAmount": 27.5,
+            "distanceKm": 5100,
+            "durationSecs": 0,
+            "startedAt": "2026-03-29T02:34:08.753Z",
+            "endedAt": "2026-03-29T02:34:08.949Z",
+            "startLocation": {
+              "lat": -22.9092,
+              "lng": -43.1771
+            },
+            "endLocation": {
+              "lat": -22.9121,
+              "lng": -43.1825
+            },
+            "operationalFee": 0,
+            "paymentIntermediationFee": 0,
+            "totalFees": 0,
+            "driverNetAmount": 27.5,
+            "rescueBonus": 0,
+            "platformAbsorbedOperationalFee": 1.49,
+            "platformAbsorbedPaymentIntermediationFee": 0.5,
+            "financialPolicy": {
+              "absorbedOperationalFee": true,
+              "absorbedPaymentIntermediationFee": true
+            },
+            "source": "continuation_completion",
+            "metadata": {
+              "completionType": "REASSIGNED_COMPLETION",
+              "remainingGrossAmount": 27.5,
+              "alreadySettled": 0
+            }
+          }
+        ],
+        "operationalContinuation": {
+          "status": "COMPLETED_AFTER_REASSIGNMENT",
+          "interruptedAt": "2026-03-29T02:34:07.214Z",
+          "interruptedByDriverId": "8vg2kxxqi3TYKlpD6eBlWgYseIq2",
+          "currentState": "IN_PROGRESS",
+          "reason": "VEHICLE_BREAKDOWN",
+          "note": "Falha mecânica em teste controlado",
+          "pickupLocation": {
+            "lat": -22.9092,
+            "lng": -43.1771,
+            "address": "Ponto de interrupção - Glória"
+          },
+          "originalDestination": {
+            "lat": -22.9121,
+            "lng": -43.1825
+          },
+          "executedFare": 0,
+          "remainingReservedAmount": 27.5,
+          "estimatedRefund": 27.5,
+          "closedRideLeg": {
+            "legId": "leg_1774751647214_dx00re",
+            "legNumber": 1,
+            "driverId": "8vg2kxxqi3TYKlpD6eBlWgYseIq2",
+            "legType": "PRIMARY",
+            "reason": "VEHICLE_BREAKDOWN",
+            "grossAmount": 0,
+            "distanceKm": 2.8,
+            "durationSecs": 420,
+            "startedAt": "2026-03-29T02:34:03.712Z",
+            "endedAt": "2026-03-29T02:34:07.212Z",
+            "startLocation": {
+              "lat": -22.9075,
+              "lng": -43.1736
+            },
+            "endLocation": {
+              "lat": -22.9092,
+              "lng": -43.1771,
+              "address": "Ponto de interrupção - Glória"
+            },
+            "operationalFee": 0.99,
+            "paymentIntermediationFee": 0.5,
+            "totalFees": 1.49,
+            "driverNetAmount": 0,
+            "rescueBonus": 0,
+            "platformAbsorbedOperationalFee": 0,
+            "platformAbsorbedPaymentIntermediationFee": 0,
+            "financialPolicy": {
+              "absorbedOperationalFee": false,
+              "absorbedPaymentIntermediationFee": false
+            },
+            "source": "operational_interrupt",
+            "metadata": {
+              "interruptionNote": "Falha mecânica em teste controlado",
+              "settlementType": "INTERRUPTED_OPERATIONAL",
+              "previousState": "IN_PROGRESS"
+            }
+          },
+          "passengerDecision": "CONTINUE",
+          "decisionAt": "2026-03-29T02:34:07.413Z",
+          "reassignmentRequestedAt": "2026-03-29T02:34:07.413Z",
+          "replacementDriverId": "F0CIj7noqrc74qdPJD80T9FCxME2",
+          "replacementAcceptedAt": "2026-03-29T02:34:07.642Z",
+          "reassignedStartedAt": "2026-03-29T02:34:08.753Z",
+          "currentLegStartedAt": "2026-03-29T02:34:08.753Z",
+          "completedAt": "2026-03-29T02:34:08.949Z"
+        },
+        "authoritativeSnapshot": true,
+        "financialSnapshotSource": "backend_final",
+        "persistence": "accepted_background",
+        "timestamp": "2026-03-29T02:34:08.959Z"
+      }
+    },
+    "endAfterInterruption": {
+      "bookingId": "booking_1774751656866_OjML1wSzdNRaynjqMRlSW1Y0LVy2",
+      "driverInterrupted": {
+        "success": true,
+        "bookingId": "booking_1774751656866_OjML1wSzdNRaynjqMRlSW1Y0LVy2",
+        "reason": "POLICE_STOP_OR_SEIZURE",
+        "note": "Parada operacional em teste",
+        "interruption": {
+          "status": "PASSENGER_DECISION_PENDING",
+          "interruptedAt": "2026-03-29T02:34:18.659Z",
+          "interruptedByDriverId": "8vg2kxxqi3TYKlpD6eBlWgYseIq2",
+          "currentState": "IN_PROGRESS",
+          "reason": "POLICE_STOP_OR_SEIZURE",
+          "note": "Parada operacional em teste",
+          "pickupLocation": {
+            "lat": -22.9092,
+            "lng": -43.1771,
+            "address": "Ponto de interrupção - Glória"
+          },
+          "originalDestination": {
+            "lat": -22.9121,
+            "lng": -43.1825
+          },
+          "executedFare": 0,
+          "remainingReservedAmount": 27.5,
+          "estimatedRefund": 27.5,
+          "closedRideLeg": {
+            "legId": "leg_1774751658659_3y9844",
+            "legNumber": 1,
+            "driverId": "8vg2kxxqi3TYKlpD6eBlWgYseIq2",
+            "legType": "PRIMARY",
+            "reason": "POLICE_STOP_OR_SEIZURE",
+            "grossAmount": 0,
+            "distanceKm": 3.1,
+            "durationSecs": 480,
+            "startedAt": "2026-03-29T02:34:18.462Z",
+            "endedAt": "2026-03-29T02:34:18.659Z",
+            "startLocation": {
+              "lat": -22.9075,
+              "lng": -43.1736
+            },
+            "endLocation": {
+              "lat": -22.9092,
+              "lng": -43.1771,
+              "address": "Ponto de interrupção - Glória"
+            },
+            "operationalFee": 0.99,
+            "paymentIntermediationFee": 0.5,
+            "totalFees": 1.49,
+            "driverNetAmount": 0,
+            "rescueBonus": 0,
+            "platformAbsorbedOperationalFee": 0,
+            "platformAbsorbedPaymentIntermediationFee": 0,
+            "financialPolicy": {
+              "absorbedOperationalFee": false,
+              "absorbedPaymentIntermediationFee": false
+            },
+            "source": "operational_interrupt",
+            "metadata": {
+              "interruptionNote": "Parada operacional em teste",
+              "settlementType": "INTERRUPTED_OPERATIONAL",
+              "previousState": "IN_PROGRESS"
+            }
+          }
+        },
+        "rideLegs": [
+          {
+            "legId": "leg_1774751658659_3y9844",
+            "legNumber": 1,
+            "driverId": "8vg2kxxqi3TYKlpD6eBlWgYseIq2",
+            "legType": "PRIMARY",
+            "reason": "POLICE_STOP_OR_SEIZURE",
+            "grossAmount": 0,
+            "distanceKm": 3.1,
+            "durationSecs": 480,
+            "startedAt": "2026-03-29T02:34:18.462Z",
+            "endedAt": "2026-03-29T02:34:18.659Z",
+            "startLocation": {
+              "lat": -22.9075,
+              "lng": -43.1736
+            },
+            "endLocation": {
+              "lat": -22.9092,
+              "lng": -43.1771,
+              "address": "Ponto de interrupção - Glória"
+            },
+            "operationalFee": 0.99,
+            "paymentIntermediationFee": 0.5,
+            "totalFees": 1.49,
+            "driverNetAmount": 0,
+            "rescueBonus": 0,
+            "platformAbsorbedOperationalFee": 0,
+            "platformAbsorbedPaymentIntermediationFee": 0,
+            "financialPolicy": {
+              "absorbedOperationalFee": false,
+              "absorbedPaymentIntermediationFee": false
+            },
+            "source": "operational_interrupt",
+            "metadata": {
+              "interruptionNote": "Parada operacional em teste",
+              "settlementType": "INTERRUPTED_OPERATIONAL",
+              "previousState": "IN_PROGRESS"
+            }
+          }
+        ],
+        "message": "Corrida interrompida por motivo operacional. Aguardando decisão do passageiro."
+      },
+      "passengerInterruption": {
+        "success": true,
+        "bookingId": "booking_1774751656866_OjML1wSzdNRaynjqMRlSW1Y0LVy2",
+        "reason": "POLICE_STOP_OR_SEIZURE",
+        "note": "Parada operacional em teste",
+        "interruption": {
+          "status": "PASSENGER_DECISION_PENDING",
+          "interruptedAt": "2026-03-29T02:34:18.659Z",
+          "interruptedByDriverId": "8vg2kxxqi3TYKlpD6eBlWgYseIq2",
+          "currentState": "IN_PROGRESS",
+          "reason": "POLICE_STOP_OR_SEIZURE",
+          "note": "Parada operacional em teste",
+          "pickupLocation": {
+            "lat": -22.9092,
+            "lng": -43.1771,
+            "address": "Ponto de interrupção - Glória"
+          },
+          "originalDestination": {
+            "lat": -22.9121,
+            "lng": -43.1825
+          },
+          "executedFare": 0,
+          "remainingReservedAmount": 27.5,
+          "estimatedRefund": 27.5,
+          "closedRideLeg": {
+            "legId": "leg_1774751658659_3y9844",
+            "legNumber": 1,
+            "driverId": "8vg2kxxqi3TYKlpD6eBlWgYseIq2",
+            "legType": "PRIMARY",
+            "reason": "POLICE_STOP_OR_SEIZURE",
+            "grossAmount": 0,
+            "distanceKm": 3.1,
+            "durationSecs": 480,
+            "startedAt": "2026-03-29T02:34:18.462Z",
+            "endedAt": "2026-03-29T02:34:18.659Z",
+            "startLocation": {
+              "lat": -22.9075,
+              "lng": -43.1736
+            },
+            "endLocation": {
+              "lat": -22.9092,
+              "lng": -43.1771,
+              "address": "Ponto de interrupção - Glória"
+            },
+            "operationalFee": 0.99,
+            "paymentIntermediationFee": 0.5,
+            "totalFees": 1.49,
+            "driverNetAmount": 0,
+            "rescueBonus": 0,
+            "platformAbsorbedOperationalFee": 0,
+            "platformAbsorbedPaymentIntermediationFee": 0,
+            "financialPolicy": {
+              "absorbedOperationalFee": false,
+              "absorbedPaymentIntermediationFee": false
+            },
+            "source": "operational_interrupt",
+            "metadata": {
+              "interruptionNote": "Parada operacional em teste",
+              "settlementType": "INTERRUPTED_OPERATIONAL",
+              "previousState": "IN_PROGRESS"
+            }
+          }
+        },
+        "rideLegs": [
+          {
+            "legId": "leg_1774751658659_3y9844",
+            "legNumber": 1,
+            "driverId": "8vg2kxxqi3TYKlpD6eBlWgYseIq2",
+            "legType": "PRIMARY",
+            "reason": "POLICE_STOP_OR_SEIZURE",
+            "grossAmount": 0,
+            "distanceKm": 3.1,
+            "durationSecs": 480,
+            "startedAt": "2026-03-29T02:34:18.462Z",
+            "endedAt": "2026-03-29T02:34:18.659Z",
+            "startLocation": {
+              "lat": -22.9075,
+              "lng": -43.1736
+            },
+            "endLocation": {
+              "lat": -22.9092,
+              "lng": -43.1771,
+              "address": "Ponto de interrupção - Glória"
+            },
+            "operationalFee": 0.99,
+            "paymentIntermediationFee": 0.5,
+            "totalFees": 1.49,
+            "driverNetAmount": 0,
+            "rescueBonus": 0,
+            "platformAbsorbedOperationalFee": 0,
+            "platformAbsorbedPaymentIntermediationFee": 0,
+            "financialPolicy": {
+              "absorbedOperationalFee": false,
+              "absorbedPaymentIntermediationFee": false
+            },
+            "source": "operational_interrupt",
+            "metadata": {
+              "interruptionNote": "Parada operacional em teste",
+              "settlementType": "INTERRUPTED_OPERATIONAL",
+              "previousState": "IN_PROGRESS"
+            }
+          }
+        ],
+        "message": "Seu motorista não consegue continuar. Deseja seguir com outro parceiro?"
+      },
+      "passengerEndedTrip": {
+        "success": true,
+        "bookingId": "booking_1774751656866_OjML1wSzdNRaynjqMRlSW1Y0LVy2",
+        "message": "Corrida encerrada por interrupção operacional",
+        "endLocation": {
+          "lat": -22.9092,
+          "lng": -43.1771,
+          "address": "Ponto de interrupção - Glória"
+        },
+        "distance": 3.1,
+        "duration": 480,
+        "fare": 0,
+        "operationalFee": 0.99,
+        "paymentIntermediationFee": 0.5,
+        "totalFees": 1.49,
+        "driverNetAmount": 0,
+        "paymentMethod": "pix",
+        "pickup": "Ponto de interrupção - Glória",
+        "drop": "Destino",
+        "pickupCoordinate": {
+          "lat": -22.9092,
+          "lng": -43.1771
+        },
+        "destinationCoordinate": {
+          "lat": -22.9121,
+          "lng": -43.1825
+        },
+        "paymentDistribution": {
+          "status": "PENDING",
+          "message": "Distribuição financeira em processamento assíncrono"
+        },
+        "completionType": "INTERRUPTED_OPERATIONAL_ENDED",
+        "settlement": {
+          "estimatedRefund": 27.5,
+          "remainingReservedAmount": 27.5
+        },
+        "rideLegs": [
+          {
+            "legId": "leg_1774751658659_3y9844",
+            "legNumber": 1,
+            "driverId": "8vg2kxxqi3TYKlpD6eBlWgYseIq2",
+            "legType": "PRIMARY",
+            "reason": "POLICE_STOP_OR_SEIZURE",
+            "grossAmount": 0,
+            "distanceKm": 3.1,
+            "durationSecs": 480,
+            "startedAt": "2026-03-29T02:34:18.462Z",
+            "endedAt": "2026-03-29T02:34:18.659Z",
+            "startLocation": {
+              "lat": -22.9075,
+              "lng": -43.1736
+            },
+            "endLocation": {
+              "lat": -22.9092,
+              "lng": -43.1771,
+              "address": "Ponto de interrupção - Glória"
+            },
+            "operationalFee": 0.99,
+            "paymentIntermediationFee": 0.5,
+            "totalFees": 1.49,
+            "driverNetAmount": 0,
+            "rescueBonus": 0,
+            "platformAbsorbedOperationalFee": 0,
+            "platformAbsorbedPaymentIntermediationFee": 0,
+            "financialPolicy": {
+              "absorbedOperationalFee": false,
+              "absorbedPaymentIntermediationFee": false
+            },
+            "source": "operational_interrupt",
+            "metadata": {
+              "interruptionNote": "Parada operacional em teste",
+              "settlementType": "INTERRUPTED_OPERATIONAL",
+              "previousState": "IN_PROGRESS"
+            }
+          }
+        ],
+        "operationalContinuation": {
+          "status": "PASSENGER_ENDED_RIDE",
+          "interruptedAt": "2026-03-29T02:34:18.659Z",
+          "interruptedByDriverId": "8vg2kxxqi3TYKlpD6eBlWgYseIq2",
+          "currentState": "IN_PROGRESS",
+          "reason": "POLICE_STOP_OR_SEIZURE",
+          "note": "Parada operacional em teste",
+          "pickupLocation": {
+            "lat": -22.9092,
+            "lng": -43.1771,
+            "address": "Ponto de interrupção - Glória"
+          },
+          "originalDestination": {
+            "lat": -22.9121,
+            "lng": -43.1825
+          },
+          "executedFare": 0,
+          "remainingReservedAmount": 27.5,
+          "estimatedRefund": 27.5,
+          "closedRideLeg": {
+            "legId": "leg_1774751658659_3y9844",
+            "legNumber": 1,
+            "driverId": "8vg2kxxqi3TYKlpD6eBlWgYseIq2",
+            "legType": "PRIMARY",
+            "reason": "POLICE_STOP_OR_SEIZURE",
+            "grossAmount": 0,
+            "distanceKm": 3.1,
+            "durationSecs": 480,
+            "startedAt": "2026-03-29T02:34:18.462Z",
+            "endedAt": "2026-03-29T02:34:18.659Z",
+            "startLocation": {
+              "lat": -22.9075,
+              "lng": -43.1736
+            },
+            "endLocation": {
+              "lat": -22.9092,
+              "lng": -43.1771,
+              "address": "Ponto de interrupção - Glória"
+            },
+            "operationalFee": 0.99,
+            "paymentIntermediationFee": 0.5,
+            "totalFees": 1.49,
+            "driverNetAmount": 0,
+            "rescueBonus": 0,
+            "platformAbsorbedOperationalFee": 0,
+            "platformAbsorbedPaymentIntermediationFee": 0,
+            "financialPolicy": {
+              "absorbedOperationalFee": false,
+              "absorbedPaymentIntermediationFee": false
+            },
+            "source": "operational_interrupt",
+            "metadata": {
+              "interruptionNote": "Parada operacional em teste",
+              "settlementType": "INTERRUPTED_OPERATIONAL",
+              "previousState": "IN_PROGRESS"
+            }
+          },
+          "passengerDecision": "END",
+          "decisionAt": "2026-03-29T02:34:18.866Z"
+        },
+        "authoritativeSnapshot": true,
+        "financialSnapshotSource": "backend_final",
+        "persistence": "accepted_background",
+        "timestamp": "2026-03-29T02:34:18.874Z"
+      },
+      "driver1EndedTrip": {
+        "success": true,
+        "bookingId": "booking_1774751656866_OjML1wSzdNRaynjqMRlSW1Y0LVy2",
+        "message": "Corrida encerrada por interrupção operacional",
+        "endLocation": {
+          "lat": -22.9092,
+          "lng": -43.1771,
+          "address": "Ponto de interrupção - Glória"
+        },
+        "distance": 3.1,
+        "duration": 480,
+        "fare": 0,
+        "operationalFee": 0.99,
+        "paymentIntermediationFee": 0.5,
+        "totalFees": 1.49,
+        "driverNetAmount": 0,
+        "paymentMethod": "pix",
+        "pickup": "Ponto de interrupção - Glória",
+        "drop": "Destino",
+        "pickupCoordinate": {
+          "lat": -22.9092,
+          "lng": -43.1771
+        },
+        "destinationCoordinate": {
+          "lat": -22.9121,
+          "lng": -43.1825
+        },
+        "paymentDistribution": {
+          "status": "PENDING",
+          "message": "Distribuição financeira em processamento assíncrono"
+        },
+        "completionType": "INTERRUPTED_OPERATIONAL_ENDED",
+        "settlement": {
+          "estimatedRefund": 27.5,
+          "remainingReservedAmount": 27.5
+        },
+        "rideLegs": [
+          {
+            "legId": "leg_1774751658659_3y9844",
+            "legNumber": 1,
+            "driverId": "8vg2kxxqi3TYKlpD6eBlWgYseIq2",
+            "legType": "PRIMARY",
+            "reason": "POLICE_STOP_OR_SEIZURE",
+            "grossAmount": 0,
+            "distanceKm": 3.1,
+            "durationSecs": 480,
+            "startedAt": "2026-03-29T02:34:18.462Z",
+            "endedAt": "2026-03-29T02:34:18.659Z",
+            "startLocation": {
+              "lat": -22.9075,
+              "lng": -43.1736
+            },
+            "endLocation": {
+              "lat": -22.9092,
+              "lng": -43.1771,
+              "address": "Ponto de interrupção - Glória"
+            },
+            "operationalFee": 0.99,
+            "paymentIntermediationFee": 0.5,
+            "totalFees": 1.49,
+            "driverNetAmount": 0,
+            "rescueBonus": 0,
+            "platformAbsorbedOperationalFee": 0,
+            "platformAbsorbedPaymentIntermediationFee": 0,
+            "financialPolicy": {
+              "absorbedOperationalFee": false,
+              "absorbedPaymentIntermediationFee": false
+            },
+            "source": "operational_interrupt",
+            "metadata": {
+              "interruptionNote": "Parada operacional em teste",
+              "settlementType": "INTERRUPTED_OPERATIONAL",
+              "previousState": "IN_PROGRESS"
+            }
+          }
+        ],
+        "operationalContinuation": {
+          "status": "PASSENGER_ENDED_RIDE",
+          "interruptedAt": "2026-03-29T02:34:18.659Z",
+          "interruptedByDriverId": "8vg2kxxqi3TYKlpD6eBlWgYseIq2",
+          "currentState": "IN_PROGRESS",
+          "reason": "POLICE_STOP_OR_SEIZURE",
+          "note": "Parada operacional em teste",
+          "pickupLocation": {
+            "lat": -22.9092,
+            "lng": -43.1771,
+            "address": "Ponto de interrupção - Glória"
+          },
+          "originalDestination": {
+            "lat": -22.9121,
+            "lng": -43.1825
+          },
+          "executedFare": 0,
+          "remainingReservedAmount": 27.5,
+          "estimatedRefund": 27.5,
+          "closedRideLeg": {
+            "legId": "leg_1774751658659_3y9844",
+            "legNumber": 1,
+            "driverId": "8vg2kxxqi3TYKlpD6eBlWgYseIq2",
+            "legType": "PRIMARY",
+            "reason": "POLICE_STOP_OR_SEIZURE",
+            "grossAmount": 0,
+            "distanceKm": 3.1,
+            "durationSecs": 480,
+            "startedAt": "2026-03-29T02:34:18.462Z",
+            "endedAt": "2026-03-29T02:34:18.659Z",
+            "startLocation": {
+              "lat": -22.9075,
+              "lng": -43.1736
+            },
+            "endLocation": {
+              "lat": -22.9092,
+              "lng": -43.1771,
+              "address": "Ponto de interrupção - Glória"
+            },
+            "operationalFee": 0.99,
+            "paymentIntermediationFee": 0.5,
+            "totalFees": 1.49,
+            "driverNetAmount": 0,
+            "rescueBonus": 0,
+            "platformAbsorbedOperationalFee": 0,
+            "platformAbsorbedPaymentIntermediationFee": 0,
+            "financialPolicy": {
+              "absorbedOperationalFee": false,
+              "absorbedPaymentIntermediationFee": false
+            },
+            "source": "operational_interrupt",
+            "metadata": {
+              "interruptionNote": "Parada operacional em teste",
+              "settlementType": "INTERRUPTED_OPERATIONAL",
+              "previousState": "IN_PROGRESS"
+            }
+          },
+          "passengerDecision": "END",
+          "decisionAt": "2026-03-29T02:34:18.866Z"
+        },
+        "authoritativeSnapshot": true,
+        "financialSnapshotSource": "backend_final",
+        "persistence": "accepted_background",
+        "timestamp": "2026-03-29T02:34:18.874Z"
+      }
+    }
+  },
+  "status": "success"
+}

@@ -1,0 +1,247 @@
+{
+  "generatedAt": "2026-03-30T00:43:58.911Z",
+  "query": "/api/map/h3-cells?bbox=-43.25,-22.95,-43.10,-22.84&zoom=16&surface=driver&mode=supply_demand&includeBoundary=true&includeEmpty=true",
+  "statusCode": 200,
+  "resolution": 8,
+  "uniqueStyleCount": 7,
+  "sample": [
+    {
+      "h3Index": "88a8a06a01fffff",
+      "demandLevel": "critical",
+      "demand": 299,
+      "availableDrivers": 0,
+      "imbalance": 299,
+      "style": {
+        "fill": "#f16430",
+        "stroke": "#b73015",
+        "fillOpacity": 0.099,
+        "strokeOpacity": 0.162,
+        "strokeWidth": 0.51,
+        "visualIntensity": 0.9
+      }
+    },
+    {
+      "h3Index": "88a8a06a0dfffff",
+      "demandLevel": "critical",
+      "demand": 274,
+      "availableDrivers": 0,
+      "imbalance": 274,
+      "style": {
+        "fill": "#f16430",
+        "stroke": "#b73015",
+        "fillOpacity": 0.099,
+        "strokeOpacity": 0.162,
+        "strokeWidth": 0.51,
+        "visualIntensity": 0.9
+      }
+    },
+    {
+      "h3Index": "88a8a06a09fffff",
+      "demandLevel": "critical",
+      "demand": 204,
+      "availableDrivers": 0,
+      "imbalance": 204,
+      "style": {
+        "fill": "#f16430",
+        "stroke": "#b73015",
+        "fillOpacity": 0.099,
+        "strokeOpacity": 0.162,
+        "strokeWidth": 0.51,
+        "visualIntensity": 0.9
+      }
+    },
+    {
+      "h3Index": "88a8a06a05fffff",
+      "demandLevel": "critical",
+      "demand": 33,
+      "availableDrivers": 0,
+      "imbalance": 33,
+      "style": {
+        "fill": "#f16430",
+        "stroke": "#b73015",
+        "fillOpacity": 0.099,
+        "strokeOpacity": 0.162,
+        "strokeWidth": 0.51,
+        "visualIntensity": 0.9
+      }
+    },
+    {
+      "h3Index": "88a8a06a03fffff",
+      "demandLevel": "critical",
+      "demand": 15,
+      "availableDrivers": 0,
+      "imbalance": 15,
+      "style": {
+        "fill": "#f16430",
+        "stroke": "#b73015",
+        "fillOpacity": 0.099,
+        "strokeOpacity": 0.162,
+        "strokeWidth": 0.51,
+        "visualIntensity": 0.9
+      }
+    },
+    {
+      "h3Index": "88a8a06a2bfffff",
+      "demandLevel": "critical",
+      "demand": 14,
+      "availableDrivers": 0,
+      "imbalance": 14,
+      "style": {
+        "fill": "#f16430",
+        "stroke": "#b73015",
+        "fillOpacity": 0.099,
+        "strokeOpacity": 0.162,
+        "strokeWidth": 0.51,
+        "visualIntensity": 0.9
+      }
+    },
+    {
+      "h3Index": "88a8a06b5bfffff",
+      "demandLevel": "critical",
+      "demand": 13,
+      "availableDrivers": 0,
+      "imbalance": 13,
+      "style": {
+        "fill": "#f16430",
+        "stroke": "#b73015",
+        "fillOpacity": 0.099,
+        "strokeOpacity": 0.162,
+        "strokeWidth": 0.51,
+        "visualIntensity": 0.9
+      }
+    },
+    {
+      "h3Index": "88a8a06a0bfffff",
+      "demandLevel": "critical",
+      "demand": 12,
+      "availableDrivers": 0,
+      "imbalance": 12,
+      "style": {
+        "fill": "#f16430",
+        "stroke": "#b73015",
+        "fillOpacity": 0.099,
+        "strokeOpacity": 0.162,
+        "strokeWidth": 0.51,
+        "visualIntensity": 0.9
+      }
+    },
+    {
+      "h3Index": "88a8a06a11fffff",
+      "demandLevel": "critical",
+      "demand": 12,
+      "availableDrivers": 0,
+      "imbalance": 12,
+      "style": {
+        "fill": "#f16430",
+        "stroke": "#b73015",
+        "fillOpacity": 0.099,
+        "strokeOpacity": 0.162,
+        "strokeWidth": 0.51,
+        "visualIntensity": 0.9
+      }
+    },
+    {
+      "h3Index": "88a8a06a1dfffff",
+      "demandLevel": "critical",
+      "demand": 12,
+      "availableDrivers": 0,
+      "imbalance": 12,
+      "style": {
+        "fill": "#f16430",
+        "stroke": "#b73015",
+        "fillOpacity": 0.099,
+        "strokeOpacity": 0.162,
+        "strokeWidth": 0.51,
+        "visualIntensity": 0.9
+      }
+    },
+    {
+      "h3Index": "88a8a06a53fffff",
+      "demandLevel": "critical",
+      "demand": 11,
+      "availableDrivers": 0,
+      "imbalance": 11,
+      "style": {
+        "fill": "#f16430",
+        "stroke": "#b73015",
+        "fillOpacity": 0.099,
+        "strokeOpacity": 0.162,
+        "strokeWidth": 0.51,
+        "visualIntensity": 0.9
+      }
+    },
+    {
+      "h3Index": "88a8a06a21fffff",
+      "demandLevel": "critical",
+      "demand": 10,
+      "availableDrivers": 0,
+      "imbalance": 10,
+      "style": {
+        "fill": "#f16430",
+        "stroke": "#b73015",
+        "fillOpacity": 0.099,
+        "strokeOpacity": 0.162,
+        "strokeWidth": 0.51,
+        "visualIntensity": 0.9
+      }
+    }
+  ],
+  "uniqueStylesPreview": [
+    {
+      "fill": "#f16430",
+      "stroke": "#b73015",
+      "fillOpacity": 0.099,
+      "strokeOpacity": 0.162,
+      "strokeWidth": 0.51,
+      "visualIntensity": 0.9
+    },
+    {
+      "fill": "#f27425",
+      "stroke": "#b63912",
+      "fillOpacity": 0.095,
+      "strokeOpacity": 0.156,
+      "strokeWidth": 0.5,
+      "visualIntensity": 0.85
+    },
+    {
+      "fill": "#f3841b",
+      "stroke": "#b5430e",
+      "fillOpacity": 0.091,
+      "strokeOpacity": 0.151,
+      "strokeWidth": 0.49,
+      "visualIntensity": 0.8
+    },
+    {
+      "fill": "#f48b17",
+      "stroke": "#b5470d",
+      "fillOpacity": 0.089,
+      "strokeOpacity": 0.148,
+      "strokeWidth": 0.48,
+      "visualIntensity": 0.78
+    },
+    {
+      "fill": "#f8ba11",
+      "stroke": "#c17406",
+      "fillOpacity": 0.072,
+      "strokeOpacity": 0.122,
+      "strokeWidth": 0.42,
+      "visualIntensity": 0.54
+    },
+    {
+      "fill": "#b2ca2d",
+      "stroke": "#8e8717",
+      "fillOpacity": 0.052,
+      "strokeOpacity": 0.093,
+      "strokeWidth": 0.35,
+      "visualIntensity": 0.28
+    },
+    {
+      "fill": "#22C55E",
+      "stroke": "#15803D",
+      "fillOpacity": 0.031,
+      "strokeOpacity": 0.063,
+      "strokeWidth": 0.28,
+      "visualIntensity": 0
+    }
+  ]
+}
