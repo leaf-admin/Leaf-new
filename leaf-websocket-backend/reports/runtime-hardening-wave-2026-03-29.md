@@ -157,6 +157,42 @@ Resultado acumulado desta wave:
   - valida se os dois workers ficaram `running`
 - PM2 host-side permanece apenas como fallback para ambientes que não usem o runtime Docker oficial
 
+## Observabilidade do legado e auditoria de superfície
+- adicionamos instrumentação central de acesso ao Realtime Database no funil compartilhado de `firebase-config.js`
+- a nova métrica Prometheus introduzida foi:
+  - `leaf_legacy_runtime_access_total`
+- labels observadas:
+  - `dependency`
+  - `operation`
+  - `source`
+  - `result`
+- cobertura instrumentada nesta wave:
+  - inicialização do Firebase/RTDB
+  - obtenção da instância de RTDB
+  - leituras em RTDB
+  - escritas em RTDB
+- também foi criado um auditor automatizado de superfície legada:
+  - `scripts/ops/report-legacy-runtime-surface.cjs`
+- artefatos gerados:
+  - `reports/legacy-runtime-surface-1774854348616.json`
+  - `reports/legacy-runtime-surface-1774854348616.md`
+- resumo do scan mais recente:
+  - `224` arquivos analisados
+  - `48` matches de flags de runtime legado
+  - `106` matches de acesso RTDB
+  - `4` rotas explicitamente legadas
+  - `21` logs/fallbacks legados
+- hotspots mapeados:
+  - `routes/dashboard.js`: `54` ocorrências agregadas
+  - `routes/metrics.js`: `13`
+  - `services/referral-program-state-service.js`: `12`
+  - `services/promotion-service.js`: `11`
+  - `server.vps.js`: `9`
+- leitura operacional desta wave:
+  - agora temos telemetria central para medir o peso real do legado sem tocar primeiro nos arquivos mistos de maior risco
+  - o relatório automatizado cria uma base objetiva para o desligamento progressivo do RTDB e dos fallbacks herdados
+  - os maiores alvos de cleanup futuro ficaram identificados com prioridade clara
+
 ## Riscos que continuam abertos
 - `server.vps.js`, `routes/dashboard.js` e `register-socket-create-booking-handler.js` continuam mistos com trabalho paralelo
 - baseline agora possui worker dedicado, mas ainda nao foi validado em Redis real local nesta maquina

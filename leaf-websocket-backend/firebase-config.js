@@ -3,6 +3,7 @@ const path = require('path');
 const fs = require('fs');
 const circuitBreakerService = require('./services/circuit-breaker-service');
 const { logStructured } = require('./utils/logger');
+const { metrics } = require('./utils/prometheus-metrics');
 const traceContext = require('./utils/trace-context');
 
 // Configuração do Firebase Admin SDK
@@ -10,6 +11,19 @@ let firebaseApp = null;
 let firestore = null;
 let realtimeDB = null;
 let storage = null;
+
+function recordRealtimeDbMetric(operation, result = 'success', source = 'firebase_config') {
+    try {
+        metrics.recordLegacyDependencyAccess({
+            dependency: 'realtime_db',
+            operation,
+            source,
+            result
+        });
+    } catch (_error) {
+        // Métricas nunca devem quebrar o runtime.
+    }
+}
 
 // Inicializar Firebase Admin SDK
 function initializeFirebase() {
@@ -29,6 +43,7 @@ function initializeFirebase() {
             firestore = admin.firestore();
             realtimeDB = admin.database();
             storage = admin.storage();
+            recordRealtimeDbMetric('initialize', 'success', 'firebase_config_reuse');
 
             logStructured('info', 'Firebase app default reaproveitado', {
                 service: 'firebase',
@@ -69,6 +84,7 @@ function initializeFirebase() {
 
         // Inicializar Realtime Database
         realtimeDB = admin.database();
+        recordRealtimeDbMetric('initialize', 'success');
 
         // Inicializar Storage
         storage = admin.storage();
@@ -93,6 +109,7 @@ function initializeFirebase() {
         return firebaseApp;
 
     } catch (error) {
+        recordRealtimeDbMetric('initialize', 'failure');
         logStructured('error', 'Erro ao inicializar Firebase', {
             service: 'firebase',
             operation: 'initialize',
@@ -124,12 +141,14 @@ function getRealtimeDB() {
         initializeFirebase();
     }
     if (!realtimeDB) {
+        recordRealtimeDbMetric('get_instance', 'unavailable');
         logStructured('warn', 'Realtime Database não disponível', {
             service: 'firebase',
             operation: 'getRealtimeDB'
         });
         return null;
     }
+    recordRealtimeDbMetric('get_instance', 'success');
     return realtimeDB;
 }
 
@@ -188,6 +207,7 @@ async function syncToFirestore(collection, documentId, data) {
 async function syncToRealtimeDB(path, data) {
     try {
         if (!realtimeDB) {
+            recordRealtimeDbMetric('write', 'unavailable');
             logStructured('warn', 'Realtime Database não disponível', {
                 service: 'firebase',
                 operation: 'syncToRealtimeDB',
@@ -202,6 +222,7 @@ async function syncToRealtimeDB(path, data) {
             synced_at: admin.database.ServerValue.TIMESTAMP,
             source: 'redis-backend'
         });
+        recordRealtimeDbMetric('write', 'success');
 
         logStructured('info', 'Dados sincronizados para Realtime DB', {
             service: 'firebase',
@@ -211,6 +232,7 @@ async function syncToRealtimeDB(path, data) {
         return true;
 
     } catch (error) {
+        recordRealtimeDbMetric('write', 'failure');
         logStructured('error', 'Erro ao sincronizar para Realtime DB', {
             service: 'firebase',
             operation: 'syncToRealtimeDB',
@@ -347,6 +369,7 @@ async function getFromFirestore(collection, documentId) {
 async function getFromRealtimeDB(path) {
     try {
         if (!realtimeDB) {
+            recordRealtimeDbMetric('read', 'unavailable');
             logStructured('warn', 'Realtime Database não disponível', {
                 service: 'firebase',
                 operation: 'getFromRealtimeDB',
@@ -359,12 +382,16 @@ async function getFromRealtimeDB(path) {
         const snapshot = await ref.once('value');
 
         if (snapshot.exists()) {
+            recordRealtimeDbMetric('read', 'success');
             return snapshot.val();
         }
+
+        recordRealtimeDbMetric('read', 'empty');
 
         return null;
 
     } catch (error) {
+        recordRealtimeDbMetric('read', 'failure');
         logStructured('error', 'Erro ao obter dados do Realtime DB', {
             service: 'firebase',
             operation: 'getFromRealtimeDB',

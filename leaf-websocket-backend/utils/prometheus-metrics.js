@@ -248,6 +248,15 @@ const redisHotpathOps = new promClient.Counter({
     registers: [register]
 });
 
+// ==================== LEGACY RUNTIME ====================
+
+const legacyRuntimeAccessTotal = new promClient.Counter({
+    name: 'leaf_legacy_runtime_access_total',
+    help: 'Total de acessos a dependencias legadas por tipo de operacao e resultado',
+    labelNames: ['dependency', 'operation', 'source', 'result'],
+    registers: [register]
+});
+
 // ==================== H3 MAP ====================
 
 const h3CellsRequests = new promClient.Counter({
@@ -515,6 +524,22 @@ const metrics = {
         redisHotpathOps.inc({
             path: sanitizeLabelValue(path, 'unknown'),
             operation: sanitizeLabelValue(operation, 'unknown')
+        }, Number.isFinite(count) && count > 0 ? count : 1);
+    },
+
+    // Legacy runtime dependency access
+    recordLegacyDependencyAccess: ({
+        dependency = 'unknown',
+        operation = 'access',
+        source = 'unknown',
+        result = 'success',
+        count = 1
+    } = {}) => {
+        legacyRuntimeAccessTotal.inc({
+            dependency: sanitizeLabelValue(dependency, 'unknown'),
+            operation: sanitizeLabelValue(operation, 'access'),
+            source: sanitizeLabelValue(source, 'unknown'),
+            result: sanitizeLabelValue(result, 'success')
         }, Number.isFinite(count) && count > 0 ? count : 1);
     },
 
