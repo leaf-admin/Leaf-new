@@ -32,6 +32,7 @@ const MIN_HEADING_DELTA_DEG = 2;
 const NOTIFICATION_LIMIT = 24;
 const DRIVER_ACTIVATION_STORAGE_PREFIX = '@prototype_driver_activation_';
 const RUNTIME_SESSION_STORAGE_PREFIX = '@prototype_runtime_session_';
+const RUNTIME_QA_SEED_STORAGE_PREFIX = '@prototype_runtime_qa_seed_';
 const CONFIRMED_DESTINATIONS_STORAGE_KEY = 'confirmedDestinations';
 const DRIVER_LOCATION_HEARTBEAT_MS = 5000;
 const PASSENGER_LOCATION_HEARTBEAT_MS = 2000;
@@ -288,6 +289,8 @@ let runtimeBoardingCountdownTimer = null;
 let runtimeActivationSyncInFlight = null;
 let runtimeActivationSyncUid = '';
 let runtimeActivationLastSyncAtByUid = Object.create(null);
+let runtimeDeferredSocketBootstrapTimer = null;
+let runtimeQALockUntil = 0;
 
 function normalizeRuntimeRole(rawRole) {
   const normalized = String(rawRole || '')
@@ -418,6 +421,79 @@ function resolveRuntimeSessionStorageKey(uid) {
   return `${RUNTIME_SESSION_STORAGE_PREFIX}${key || 'anonymous'}`;
 }
 
+function resolveRuntimeQaSeedStorageKey(uid) {
+  const key = String(uid || '').trim();
+  return `${RUNTIME_QA_SEED_STORAGE_PREFIX}${key || 'anonymous'}`;
+}
+
+function isRuntimeQALockActive() {
+  return Number.isFinite(runtimeQALockUntil) && runtimeQALockUntil > Date.now();
+}
+
+function clearDeferredSocketBootstrapTimer() {
+  if (runtimeDeferredSocketBootstrapTimer) {
+    clearTimeout(runtimeDeferredSocketBootstrapTimer);
+    runtimeDeferredSocketBootstrapTimer = null;
+  }
+}
+
+async function loadPersistedRuntimeQaSeed(uid) {
+  const safeUid = String(uid || '').trim();
+  if (!safeUid) {
+    return null;
+  }
+
+  try {
+    const raw = await AsyncStorage.getItem(resolveRuntimeQaSeedStorageKey(safeUid));
+    if (!raw) {
+      return null;
+    }
+
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === 'object' ? parsed : null;
+  } catch (error) {
+    Logger.warn('⚠️ [PrototypeRuntime] Falha ao carregar lock QA persistido:', error?.message || error);
+    return null;
+  }
+}
+
+async function clearPersistedRuntimeQaSeed(uid) {
+  const safeUid = String(uid || '').trim();
+  if (!safeUid) {
+    return;
+  }
+
+  try {
+    await AsyncStorage.removeItem(resolveRuntimeQaSeedStorageKey(safeUid));
+  } catch (error) {
+    Logger.warn('⚠️ [PrototypeRuntime] Falha ao limpar lock QA persistido:', error?.message || error);
+  }
+}
+
+function scheduleDeferredSocketBootstrap(profile, freezeUntil) {
+  const freezeTimestamp = Number(freezeUntil) || 0;
+  const remainingMs = Math.max(0, freezeTimestamp - Date.now());
+
+  runtimeQALockUntil = freezeTimestamp;
+  clearDeferredSocketBootstrapTimer();
+
+  if (!profile?.uid || remainingMs <= 0) {
+    runtimeQALockUntil = 0;
+    return;
+  }
+
+  runtimeDeferredSocketBootstrapTimer = setTimeout(() => {
+    runtimeDeferredSocketBootstrapTimer = null;
+    runtimeQALockUntil = 0;
+    clearPersistedRuntimeQaSeed(profile.uid).catch(error => {
+      Logger.warn('⚠️ [PrototypeRuntime] Falha ao limpar lock QA expirado:', error?.message || error);
+    });
+    ensureSocketReady(profile).catch(error => {
+      Logger.warn('⚠️ [PrototypeRuntime] Falha ao iniciar socket após lock QA:', error?.message || error);
+    });
+  }, remainingMs);
+}
+
 function mergeDriverActivation(a, b) {
   const stateA = computeDriverOnboardingState(a || createInitialDriverOnboardingState());
   const stateB = computeDriverOnboardingState(b || createInitialDriverOnboardingState());
@@ -521,6 +597,11 @@ function clearRuntimeSessionPersistTimer() {
 function scheduleRuntimeSessionPersist() {
   const safeUid = String(runtimeState?.profileUid || '').trim();
   if (!safeUid) {
+    clearRuntimeSessionPersistTimer();
+    return;
+  }
+
+  if (runtimeState.initializing || !runtimeState.ready || isRuntimeQALockActive()) {
     clearRuntimeSessionPersistTimer();
     return;
   }
@@ -2940,6 +3021,11 @@ async function ensureSocketReady(profile) {
     return false;
   }
 
+  if (isRuntimeQALockActive()) {
+    Logger.log('⏸️ [PrototypeRuntime] Socket adiado por lock QA temporário.');
+    return false;
+  }
+
   const socket = WebSocketManager.getInstance();
 
   try {
@@ -3040,6 +3126,7 @@ async function bootstrapRuntime(profile) {
   runtimeBootstrapPromise = (async () => {
     setRuntimeState({ initializing: true });
     await ensureCurrentLocation({ allowCurrentPosition: Platform.OS !== 'android' });
+    let qaSeedLock = null;
     if (profile?.uid) {
       const persistedSession = await loadPersistedRuntimeSession(profile.uid);
       if (persistedSession && typeof persistedSession === 'object') {
@@ -3049,8 +3136,18 @@ async function bootstrapRuntime(profile) {
           activeRole: resolveRuntimeRole(profile)
         });
       }
+      qaSeedLock = await loadPersistedRuntimeQaSeed(profile.uid);
+      const freezeUntil = Number(qaSeedLock?.freezeUntil || 0);
+      if (freezeUntil > 0 && freezeUntil <= Date.now()) {
+        await clearPersistedRuntimeQaSeed(profile.uid);
+        qaSeedLock = null;
+      }
     }
-    if (profile?.uid) {
+    if (profile?.uid && Number(qaSeedLock?.freezeUntil || 0) > Date.now()) {
+      scheduleDeferredSocketBootstrap(profile, Number(qaSeedLock.freezeUntil));
+    } else if (profile?.uid) {
+      runtimeQALockUntil = 0;
+      clearDeferredSocketBootstrapTimer();
       await ensureSocketReady(profile);
     }
     setRuntimeState({

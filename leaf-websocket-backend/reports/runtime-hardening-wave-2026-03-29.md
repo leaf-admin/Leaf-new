@@ -199,6 +199,32 @@ Resultado acumulado desta wave:
     - `docker exec leaf-websocket curl http://127.0.0.1:3001/health/liveness` respondeu `{\"status\":\"alive\"...}`
     - `POST /api/pricing/quote` publico permaneceu respondendo `200`
 
+## QA seed lock para a superfície do passageiro
+- a trilha de QA do `prototypeRideRuntime` estava sobrescrevendo snapshots seedados ainda durante o bootstrap
+- causa raiz confirmada:
+  - o runtime persistia novamente a sessão enquanto ainda estava inicializando
+  - qualquer patch persistido cedo demais recriava a sessão com `bookingStatus: idle`
+- correção aplicada:
+  - lock temporário de QA separado da sessão normal
+  - adiamento do `ensureSocketReady` enquanto o lock estiver ativo
+  - bloqueio da persistência automática enquanto:
+    - `runtimeState.initializing === true`
+    - `runtimeState.ready === false`
+    - o lock QA estiver ativo
+- arquivos envolvidos:
+  - `mobile-app/src/screens/prototype/prototypeRideRuntime.js`
+  - `mobile-app/scripts/qa/seed-prototype-ios-state.cjs`
+- validação:
+  - parse do runtime e do seed script: `OK`
+  - seed executado com sucesso no `iPhone 17 Pro`
+  - estado persistido após boot permaneceu:
+    - `bookingStatus: operational_interrupted`
+    - `operationalContinuation.status: passenger_decision_pending`
+    - `activeBookingId: booking-proof-passenger-1`
+- leitura honesta:
+  - o overwrite destrutivo do snapshot foi corrigido
+  - ainda resta uma passada específica para garantir que a navegação visual do passageiro reflita automaticamente esse estado roteado em todas as capturas
+
 ## Riscos que continuam abertos
 - `server.vps.js`, `routes/dashboard.js` e `register-socket-create-booking-handler.js` continuam mistos com trabalho paralelo
 - baseline agora possui worker dedicado, mas ainda nao foi validado em Redis real local nesta maquina
