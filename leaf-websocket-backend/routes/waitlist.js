@@ -3,13 +3,13 @@ const router = express.Router();
 const admin = require('firebase-admin');
 const { logger } = require('../utils/logger');
 const rateLimit = require('express-rate-limit');
+const cityActivationStateService = require('../services/city-activation-state-service');
 
 let firebaseConfig = null;
 try {
   firebaseConfig = require('../firebase-config');
 } catch (_e) {}
 
-const CITY_ACTIVATION_DB_PATH = 'operations/geography/cityActivation';
 const WAITLIST_DEFAULT_MAX_ACTIVE_DRIVERS = Number.parseInt(
   process.env.WAITLIST_DEFAULT_MAX_ACTIVE_DRIVERS || '300',
   10
@@ -52,25 +52,8 @@ function normalizeStateCode(value) {
   return String(value || '').trim().toUpperCase();
 }
 
-function getRealtimeDB() {
-  if (!firebaseConfig || typeof firebaseConfig.getRealtimeDB !== 'function') {
-    return null;
-  }
-  return firebaseConfig.getRealtimeDB();
-}
-
 async function loadCityActivationConfig() {
-  try {
-    const db = getRealtimeDB();
-    if (!db) return null;
-    const snapshot = await db.ref(CITY_ACTIVATION_DB_PATH).once('value');
-    return snapshot.val() || null;
-  } catch (error) {
-    logger.warn('Nao foi possivel carregar configuracao de cidades para waitlist', {
-      error: error.message
-    });
-    return null;
-  }
+  return cityActivationStateService.getConfig();
 }
 
 function resolveCityConfigFromActivation(config, cityValue, fallbackStateCode) {

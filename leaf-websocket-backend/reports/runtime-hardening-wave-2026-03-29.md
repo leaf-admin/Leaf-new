@@ -232,6 +232,32 @@ Resultado acumulado desta wave:
     - preservação do estado durante o bootstrap
     - navegação automática da home para a tela de viagem quando o runtime exigir
 
+## Primeiro corte estrutural do legado no plano macro
+- a rota de `waitlist` deixou de ler a configuração de ativação de cidades diretamente do RTDB
+- nova camada introduzida:
+  - `leaf-websocket-backend/services/city-activation-state-service.js`
+- comportamento novo:
+  - Firestore-first para configuração operacional
+  - fallback controlado ao RTDB legado
+  - import automático do snapshot legado para Firestore quando o documento ainda não existir
+- rota atualizada:
+  - `leaf-websocket-backend/routes/waitlist.js`
+- teste novo:
+  - `tests/unit/services/city-activation-state-service.unit.test.js`
+- validação:
+  - `node --check` do serviço e da rota: `OK`
+  - Jest: `2/2` testes passando
+- impacto medido no relatório de superfície legado:
+  - relatório anterior: `106` acessos diretos RTDB
+  - relatório novo `legacy-runtime-surface-1774857578397.md`: `104`
+  - `routes/waitlist.js` deixou de aparecer entre os top files de acesso direto ao RTDB
+- leitura operacional:
+  - esse foi o primeiro corte real do plano macro de desligamento progressivo do legado
+  - a estratégia comprovada aqui é:
+    - mover leitura para serviço dedicado
+    - preferir Firestore
+    - usar import controlado do legado só quando necessário
+
 ## Riscos que continuam abertos
 - `server.vps.js`, `routes/dashboard.js` e `register-socket-create-booking-handler.js` continuam mistos com trabalho paralelo
 - baseline agora possui worker dedicado, mas ainda nao foi validado em Redis real local nesta maquina
