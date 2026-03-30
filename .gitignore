@@ -74,3 +74,11 @@ mobile-app/reports/
 *.qcow2
 *.dmg
 .local-tools/
+.tmp/
+tmp/
+leaf-websocket-backend/coverage/
+leaf-websocket-backend/tmp/
+mobile-app/.tmp-*
+mobile-app/.tmp-qa-evidence/
+mobile-app/.maestro/
+mobile-app/tmp/
