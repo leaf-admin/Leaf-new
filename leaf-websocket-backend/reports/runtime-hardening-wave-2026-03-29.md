@@ -418,6 +418,32 @@ Resultado acumulado desta wave:
   - esta foi a primeira redução grande já dentro de um arquivo misto, sem arrastar o diff paralelo do worktree
   - a estratégia de higiene funcionou: snapshot primeiro, corte cirúrgico depois, commit só com hunks nossos
 
+## Corte cirúrgico em arquivo misto: drivers-routes
+- `leaf-websocket-backend/routes/drivers.js` tinha acessos legados espalhados, mas em regiões ainda estáveis o suficiente para um recorte seguro
+- comportamento novo:
+  - foi criada uma borda local mínima com `runRealtimeDbQuery()`, `readRealtime()`, `updateRealtime()` e `updateRealtimeRoot()`
+  - os fluxos de:
+    - listagem de aplicações
+    - aprovação
+    - rejeição
+    - leitura de aplicação específica
+    - fallback de motorista no `/api/drivers/nearby`
+    passaram a preferir `firebaseConfig.getFromRealtimeDB`, `updateRealtimeDB` e `updateRealtimeDBRoot`
+  - a área de `earnings` não foi tocada nesta wave, porque já estava misturada com outra frente
+- validação:
+  - `node --check` do arquivo: `OK`
+- impacto medido no auditor:
+  - relatório anterior: `legacy-runtime-surface-1774878950410.md` com `89`
+  - relatório novo: `legacy-runtime-surface-1774879352439.md` com `83`
+  - `routes/drivers.js` caiu de `6` para `2` matches na categoria `rtdb_access`
+- impacto medido no auditor de hotspots mistos:
+  - relatório novo: `mixed-legacy-hotspots-1774879400815.md`
+  - `dirtyHotspots: 16`
+  - `cleanHotspots: 6`
+- leitura operacional:
+  - esta wave mostrou que ainda dá para reduzir legado dentro de arquivos sujos sem atropelar os blocos paralelos, desde que a área do diff esteja fora da zona já em disputa
+  - os maiores ganhos restantes agora se concentram cada vez mais em `routes/dashboard.js`, `routes/metrics.js`, `server.js` e `server.vps.js`
+
 ## Riscos que continuam abertos
 - `server.vps.js`, `routes/dashboard.js` e `register-socket-create-booking-handler.js` continuam mistos com trabalho paralelo
 - baseline agora possui worker dedicado, mas ainda nao foi validado em Redis real local nesta maquina

@@ -23,6 +23,43 @@ const requireFirebase = (req, res, next) => {
   next();
 };
 
+async function runRealtimeDbQuery(executor) {
+  if (!firebaseConfig || typeof firebaseConfig.getRealtimeDB !== 'function') {
+    return null;
+  }
+
+  return executor(firebaseConfig.getRealtimeDB());
+}
+
+async function readRealtime(path) {
+  if (firebaseConfig && typeof firebaseConfig.getFromRealtimeDB === 'function') {
+    return firebaseConfig.getFromRealtimeDB(path);
+  }
+
+  const snapshot = await runRealtimeDbQuery((db) => db.ref(path).once('value'));
+  if (!snapshot || !snapshot.exists()) {
+    return null;
+  }
+
+  return snapshot.val();
+}
+
+async function updateRealtime(path, payload) {
+  if (firebaseConfig && typeof firebaseConfig.updateRealtimeDB === 'function') {
+    return firebaseConfig.updateRealtimeDB(path, payload);
+  }
+
+  return runRealtimeDbQuery((db) => db.ref(path).update(payload));
+}
+
+async function updateRealtimeRoot(updates) {
+  if (firebaseConfig && typeof firebaseConfig.updateRealtimeDBRoot === 'function') {
+    return firebaseConfig.updateRealtimeDBRoot(updates);
+  }
+
+  return runRealtimeDbQuery((db) => db.ref().update(updates));
+}
+
 // 🚗 DRIVER APPROVAL APIs
 
 // GET /api/drivers/applications - Listar aplicações de motoristas
@@ -32,12 +69,10 @@ router.get('/api/drivers/applications', requireFirebase, async (req, res) => {
 
     logStructured('info', '📋 Buscando aplicações de motoristas:', { page, limit, status, search }, { service: 'drivers-routes' });
 
-    const db = firebaseConfig.getRealtimeDB();
     const storage = firebaseConfig.getStorage();
 
     // Buscar usuários do Firebase
-    const usersSnapshot = await db.ref('users').once('value');
-    const users = usersSnapshot.val() || {};
+    const users = await readRealtime('users') || {};
 
     // Filtrar apenas motoristas
     let driverApplications = Object.keys(users)
@@ -77,12 +112,10 @@ router.get('/api/drivers/applications', requireFirebase, async (req, res) => {
       paginatedApplications.map(async (driver) => {
         try {
           // Buscar documentos do usuário
-          const documentsSnapshot = await db.ref(`users/${driver.uid}/documents`).once('value');
-          const documents = documentsSnapshot.val() || {};
+          const documents = await readRealtime(`users/${driver.uid}/documents`) || {};
 
           // Buscar dados do veículo
-          const vehicleSnapshot = await db.ref(`users/${driver.uid}/vehicles/current`).once('value');
-          const vehicle = vehicleSnapshot.val() || {};
+          const vehicle = await readRealtime(`users/${driver.uid}/vehicles/current`) || {};
 
           // Determinar status da aplicação
           let applicationStatus = 'pending';
@@ -201,10 +234,8 @@ router.post('/api/drivers/applications/:id/approve', requireFirebase, async (req
 
     logStructured('info', `✅ Aprovando motorista ${id}:`, { notes, adminNotes }, { service: 'drivers-routes' });
 
-    const db = firebaseConfig.getRealtimeDB();
-
     // Atualizar status do motorista
-    await db.ref(`users/${id}`).update({
+    await updateRealtime(`users/${id}`, {
       isApproved: true,
       isRejected: false,
       reviewDate: new Date().toISOString(),
@@ -214,8 +245,7 @@ router.post('/api/drivers/applications/:id/approve', requireFirebase, async (req
     });
 
     // Atualizar status dos documentos para aprovados
-    const documentsSnapshot = await db.ref(`users/${id}/documents`).once('value');
-    const documents = documentsSnapshot.val() || {};
+    const documents = await readRealtime(`users/${id}/documents`) || {};
 
     const documentUpdates = {};
     Object.keys(documents).forEach(docType => {
@@ -225,13 +255,13 @@ router.post('/api/drivers/applications/:id/approve', requireFirebase, async (req
     });
 
     if (Object.keys(documentUpdates).length > 0) {
-      await db.ref().update(documentUpdates);
+      await updateRealtimeRoot(documentUpdates);
     }
 
     // Atualizar status do veículo se existir
-    const vehicleSnapshot = await db.ref(`users/${id}/vehicles/current`).once('value');
-    if (vehicleSnapshot.exists()) {
-      await db.ref(`users/${id}/vehicles/current`).update({
+    const vehicle = await readRealtime(`users/${id}/vehicles/current`);
+    if (vehicle) {
+      await updateRealtime(`users/${id}/vehicles/current`, {
         status: 'approved',
         reviewedAt: new Date().toISOString(),
         reviewedBy: 'admin'
@@ -274,10 +304,8 @@ router.post('/api/drivers/applications/:id/reject', requireFirebase, async (req,
 
     logStructured('info', `❌ Rejeitando motorista ${id}:`, { notes, rejectionReasons, adminNotes }, { service: 'drivers-routes' });
 
-    const db = firebaseConfig.getRealtimeDB();
-
     // Atualizar status do motorista
-    await db.ref(`users/${id}`).update({
+    await updateRealtime(`users/${id}`, {
       isApproved: false,
       isRejected: true,
       reviewDate: new Date().toISOString(),
@@ -288,8 +316,7 @@ router.post('/api/drivers/applications/:id/reject', requireFirebase, async (req,
     });
 
     // Atualizar status dos documentos para rejeitados
-    const documentsSnapshot = await db.ref(`users/${id}/documents`).once('value');
-    const documents = documentsSnapshot.val() || {};
+    const documents = await readRealtime(`users/${id}/documents`) || {};
 
     const documentUpdates = {};
     Object.keys(documents).forEach(docType => {
@@ -300,13 +327,13 @@ router.post('/api/drivers/applications/:id/reject', requireFirebase, async (req,
     });
 
     if (Object.keys(documentUpdates).length > 0) {
-      await db.ref().update(documentUpdates);
+      await updateRealtimeRoot(documentUpdates);
     }
 
     // Atualizar status do veículo se existir
-    const vehicleSnapshot = await db.ref(`users/${id}/vehicles/current`).once('value');
-    if (vehicleSnapshot.exists()) {
-      await db.ref(`users/${id}/vehicles/current`).update({
+    const vehicle = await readRealtime(`users/${id}/vehicles/current`);
+    if (vehicle) {
+      await updateRealtime(`users/${id}/vehicles/current`, {
         status: 'rejected',
         reviewedAt: new Date().toISOString(),
         reviewedBy: 'admin',
@@ -350,26 +377,20 @@ router.get('/api/drivers/applications/:id', requireFirebase, async (req, res) =>
 
     logStructured('info', `📋 Buscando aplicação do motorista ${id}`, { service: 'drivers-routes' });
 
-    const db = firebaseConfig.getRealtimeDB();
-
     // Buscar dados do motorista
-    const userSnapshot = await db.ref(`users/${id}`).once('value');
-    if (!userSnapshot.exists()) {
+    const user = await readRealtime(`users/${id}`);
+    if (!user) {
       return res.status(404).json({
         error: 'Motorista não encontrado',
         message: 'ID do motorista inválido'
       });
     }
 
-    const user = userSnapshot.val();
-
     // Buscar documentos
-    const documentsSnapshot = await db.ref(`users/${id}/documents`).once('value');
-    const documents = documentsSnapshot.val() || {};
+    const documents = await readRealtime(`users/${id}/documents`) || {};
 
     // Buscar veículo
-    const vehicleSnapshot = await db.ref(`users/${id}/vehicles/current`).once('value');
-    const vehicle = vehicleSnapshot.val() || {};
+    const vehicle = await readRealtime(`users/${id}/vehicles/current`) || {};
 
     // Determinar status
     let applicationStatus = 'pending';
@@ -601,10 +622,8 @@ router.get('/api/drivers/nearby', async (req, res) => {
         logger.debug(`⚠️ [DriversRoute] Driver ${driverId} não tem dados no Redis, buscando Firebase...`);
         if (firebaseConfig) {
           try {
-            const db = firebaseConfig.getRealtimeDB();
-            const userSnapshot = await db.ref(`users/${driverId}`).once('value');
-            if (userSnapshot.exists()) {
-              const user = userSnapshot.val();
+            const user = await readRealtime(`users/${driverId}`);
+            if (user) {
               driverInfo = {
                 id: driverId,
                 firstName: user.firstName || user.name || '',
