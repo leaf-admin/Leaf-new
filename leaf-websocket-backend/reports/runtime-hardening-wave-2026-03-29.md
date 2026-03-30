@@ -18,6 +18,8 @@
 - novo socket modular:
   - `endRideWithReview`
   - integrado em `bootstrap/register-socket-active-ride-handlers.js`
+- socket tambem ligado no runtime canonico:
+  - `server.vps.js`
 - `tripCompleted` agora aceita `reviewContext`
 
 ### Pricing baseline materializado
@@ -100,7 +102,6 @@ Resultado acumulado desta wave:
 ## Riscos que continuam abertos
 - `server.vps.js`, `routes/dashboard.js` e `register-socket-create-booking-handler.js` continuam mistos com trabalho paralelo
 - baseline agora possui worker dedicado, mas ainda nao foi validado em Redis real local nesta maquina
-- o novo socket `endRideWithReview` esta ligado no caminho modular (`server.js`), mas a ligacao explicita no runtime canonico (`server.vps.js`) continua pendente
 - histerese do pricing continua dependente de Redis e do provider, mas ainda sem job distribuido formal
 - custo por SKU via billing export/BigQuery ainda nao foi implantado
 - Android fisico, `EARLY_ENDED_REVIEW` e limpeza final do legado continuam fora desta wave

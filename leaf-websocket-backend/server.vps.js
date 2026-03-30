@@ -6266,7 +6266,7 @@ io.on('connection', async (socket) => {
                         message: 'Distribuição financeira em processamento assíncrono'
                     },
                     completionType: 'INTERRUPTED_OPERATIONAL_ENDED',
-                    settlement: {
+                    settlement: result.data.settlement || {
                         estimatedRefund: result.data.interruption?.estimatedRefund || 0,
                         remainingReservedAmount: result.data.interruption?.remainingReservedAmount || 0
                     },
@@ -6347,6 +6347,196 @@ io.on('connection', async (socket) => {
                 socket.emit('rideOperationalContinuationError', {
                     error: 'Erro interno ao responder continuidade'
                 });
+            }
+        });
+    });
+
+    socket.on('endRideWithReview', async (data) => {
+        const traceId = extractTraceIdFromEvent(data, socket);
+        await traceContext.runWithTraceId(traceId, async () => {
+            try {
+                const actorId = socket.userId || data.actorId || data.userId || socket.id;
+                const bookingId = data.bookingId;
+                const endLocation = data.endLocation || data.interruptionLocation;
+                const distanceKm = Number.parseFloat(data.distanceKm ?? data.distance ?? 0) || 0;
+                const durationSecs = Number.parseFloat(data.durationSecs ?? data.duration ?? 0) || 0;
+                const actorType = data.actorType || 'system';
+                const reviewCategory = data.reviewCategory || 'TECHNICAL_FAILURE';
+                const reason = data.reason || 'MANUAL_REVIEW_REQUIRED';
+                const note = String(data.note || '').trim();
+
+                if (!bookingId || !endLocation?.lat || !endLocation?.lng) {
+                    socket.emit('endRideWithReviewError', {
+                        error: 'bookingId e endLocation são obrigatórios'
+                    });
+                    return;
+                }
+
+                clearBoardingWindowTimeout(bookingId);
+                clearTripIntegrityConfirmationTimeout(bookingId);
+
+                const EndRideWithReviewCommand = require('./commands/EndRideWithReviewCommand');
+                const command = new EndRideWithReviewCommand({
+                    bookingId,
+                    actorId,
+                    actorType,
+                    endLocation,
+                    distanceKm,
+                    durationSecs,
+                    reviewCategory,
+                    reason,
+                    note,
+                    traceId,
+                    correlationId: bookingId
+                });
+
+                const result = await command.execute();
+                if (!result.success) {
+                    socket.emit('endRideWithReviewError', {
+                        error: result.error || 'Erro ao encerrar corrida para revisão'
+                    });
+                    return;
+                }
+
+                const {
+                    driverId,
+                    customerId,
+                    event,
+                    finalFare,
+                    tollFee,
+                    distance,
+                    duration,
+                    paymentDistribution,
+                    settlement,
+                    reviewContext,
+                    rideLegs,
+                    interruption
+                } = result.data;
+
+                const paymentService = new PaymentService();
+                const fareBreakdown = paymentService.calculateFareBreakdownFromReais(
+                    Number(finalFare || 0),
+                    Number(tollFee || 0)
+                );
+
+                const redis = redisPool.getConnection();
+                const bookingSnapshot = await redis.hgetall(`booking:${bookingId}`);
+                const tripCompletedData = buildTripCompletedPayload({
+                    bookingId,
+                    message: 'Corrida encerrada e encaminhada para revisão manual',
+                    bookingData: bookingSnapshot,
+                    resultEndLocation: endLocation,
+                    endLocation,
+                    distance,
+                    duration,
+                    fareBreakdown,
+                    paymentDistribution,
+                    completionType: 'EARLY_ENDED_REVIEW',
+                    settlement,
+                    rideLegs: rideLegs || (bookingSnapshot?.rideLegs ? JSON.parse(bookingSnapshot.rideLegs) : null),
+                    operationalContinuation: interruption || (
+                        bookingSnapshot?.operationalContinuation
+                            ? JSON.parse(bookingSnapshot.operationalContinuation)
+                            : null
+                    ),
+                    reviewContext,
+                    persistence: 'accepted_background'
+                });
+
+                if (driverId) {
+                    io.to(`driver_${driverId}`).emit('tripCompleted', tripCompletedData);
+                    io.to(`driver_${driverId}`).emit('paymentDistributed', {
+                        success: true,
+                        bookingId,
+                        pending: true,
+                        underReview: true,
+                        message: 'Liquidação financeira em revisão manual'
+                    });
+                }
+
+                if (customerId) {
+                    io.to(`customer_${customerId}`).emit('tripCompleted', {
+                        ...tripCompletedData,
+                        message: 'Corrida encerrada e enviada para revisão'
+                    });
+                }
+
+                socket.emit('rideEndedWithReview', {
+                    success: true,
+                    bookingId,
+                    reviewContext,
+                    settlement
+                });
+
+                setImmediate(async () => {
+                    try {
+                        if (event) {
+                            const tracer = getTracer();
+                            const { trace: otelTrace } = require('@opentelemetry/api');
+                            const activeSpan = otelTrace.getActiveSpan();
+                            const eventSpan = createEventSpan(tracer, 'ride.completed', activeSpan, {
+                                'event.booking_id': bookingId,
+                                'correlation.id': bookingId
+                            });
+
+                            try {
+                                await runInSpan(eventSpan, async () => {
+                                    await eventBus.publish({
+                                        eventType: 'ride.completed',
+                                        data: event
+                                    });
+                                });
+
+                                const eventSpanContext = eventSpan.spanContext();
+                                if (event.data) {
+                                    event.data._otelSpanContext = eventSpanContext;
+                                }
+                                logEvent('ride.completed', 'published', { bookingId, completionType: 'EARLY_ENDED_REVIEW' });
+                            } catch (eventError) {
+                                endSpanError(eventSpan, eventError);
+                                throw eventError;
+                            }
+                        }
+
+                        const ridePersistenceService = require('./services/ride-persistence-service');
+                        await ridePersistenceService.persistFinalRideDataWithOutbox(bookingId, {
+                            fare: finalFare,
+                            netFare: null,
+                            distance,
+                            duration,
+                            endLocation,
+                            driverEarnings: null,
+                            financialBreakdown: paymentDistribution || null,
+                            completionType: 'EARLY_ENDED_REVIEW',
+                            settlement,
+                            reviewContext
+                        });
+
+                        clearTripIntegrityConfirmationTimeout(bookingId);
+                        await redis.del(`trip_integrity:${bookingId}`);
+                    } catch (backgroundError) {
+                        logStructured('error', 'Erro no pós-processamento do endRideWithReview', {
+                            bookingId,
+                            actorId,
+                            eventType: 'endRideWithReview',
+                            error: backgroundError.message
+                        });
+                    } finally {
+                        if (io.activeBookings) {
+                            io.activeBookings.delete(bookingId);
+                        }
+                    }
+                });
+            } catch (error) {
+                logStructured('error', 'Erro ao encerrar corrida para revisão manual', {
+                    service: 'websocket',
+                    operation: 'endRideWithReview',
+                    userId: socket.userId || socket.id,
+                    bookingId: data?.bookingId,
+                    error: error.message,
+                    stack: error.stack
+                });
+                socket.emit('endRideWithReviewError', { error: 'Erro ao encerrar corrida para revisão manual' });
             }
         });
     });
