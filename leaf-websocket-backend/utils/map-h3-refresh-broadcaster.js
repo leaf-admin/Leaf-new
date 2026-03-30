@@ -1,3 +1,5 @@
+const { metrics } = require('./prometheus-metrics');
+
 const DEFAULT_COOLDOWN_MS = Math.max(
   500,
   Number.parseInt(process.env.APP_H3_REFRESH_COOLDOWN_MS || '900', 10)
@@ -28,7 +30,9 @@ function buildPayload(payload = {}) {
 
 function emitNow(io, state, payload = {}) {
   state.lastEmitAt = Date.now();
-  io.emit('map_h3_refresh', buildPayload(payload));
+  const finalPayload = buildPayload(payload);
+  metrics.recordH3RefreshHint('driver', finalPayload.reason || 'unknown');
+  io.emit('map_h3_refresh', finalPayload);
 }
 
 function scheduleMapH3Refresh(io, payload = {}) {

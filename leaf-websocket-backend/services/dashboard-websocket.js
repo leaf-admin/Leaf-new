@@ -3,6 +3,7 @@
 
 const admin = require('firebase-admin');
 const { logStructured, logError } = require('../utils/logger');
+const { metrics } = require('../utils/prometheus-metrics');
 const { getAdminUser } = require('../utils/admin-user-cache');
 const { resolveJwtSecret } = require('../utils/jwt-secret-resolver');
 const { getDashboardLiveData } = require('./dashboard-live-data-service');
@@ -145,12 +146,14 @@ class DashboardWebSocketService {
 
   emitH3RefreshNow(payload = {}) {
     this.lastH3RefreshAt = Date.now();
-    this.emitToAuthenticated('map_h3_refresh', {
+    const finalPayload = {
       scope: 'viewport',
       surfaces: ['dashboard'],
       timestamp: new Date().toISOString(),
       ...payload
-    });
+    };
+    metrics.recordH3RefreshHint('dashboard', finalPayload.reason || 'unknown');
+    this.emitToAuthenticated('map_h3_refresh', finalPayload);
   }
 
   scheduleH3Refresh(payload = {}) {

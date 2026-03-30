@@ -1,4 +1,5 @@
 const { logStructured } = require('../utils/logger');
+const { metrics } = require('../utils/prometheus-metrics');
 const { PRICING_CONSTANTS } = require('./pricing/calculateFare');
 const { runDynamicPricingEngine } = require('./pricing');
 const pricingContextProvider = require('./pricing-context-provider');
@@ -220,6 +221,15 @@ async function estimateRideFare({
     }
   });
   await pricingContextProvider.recordPricingEvaluation(derivedPricingContext.metadata, engineResult);
+  metrics.recordPricingEvaluation({
+    success: true,
+    operationalState: engineResult.pricingPayload.operational_state,
+    baselineSource: derivedPricingContext.metadata?.baselineSource || 'derived_heuristic',
+    dynamicApplied: Number(engineResult.pricingPayload.dynamic_percentage || 0) > 0,
+    minimumFareApplied: Boolean(engineResult.pricingPayload.minimum_fare_applied),
+    scorePressao: Number(engineResult.pricingPayload.score_pressao || 0),
+    scoreExcecao: Number(engineResult.pricingPayload.score_excecao || 0)
+  });
 
   const estimatedFare = roundCurrency(engineResult.pricingPayload.final_price);
   const fareDiff = roundCurrency(Math.abs(clientFare - estimatedFare));
@@ -252,8 +262,27 @@ async function estimateRideFare({
     scorePressao: engineResult.pricingPayload.score_pressao,
     scoreExcecao: engineResult.pricingPayload.score_excecao,
     exceptionalMode: engineResult.exceptionalMode,
+    pricingAudit: {
+      originCell: derivedPricingContext.metadata?.originCell || null,
+      resolution: derivedPricingContext.metadata?.resolution || null,
+      zoneType: derivedPricingContext.metadata?.zoneType || null,
+      baselineSource: derivedPricingContext.metadata?.baselineSource || 'derived_heuristic',
+      stateSource: derivedPricingContext.metadata?.stateSource || 'derived_fallback',
+      historySource: derivedPricingContext.metadata?.historySource || 'derived_fallback',
+      degradedNeighborCount: derivedPricingContext.metadata?.degradedNeighborCount || 0,
+      trackedCells: Array.isArray(derivedPricingContext.metadata?.trackedCells)
+        ? derivedPricingContext.metadata.trackedCells
+        : [],
+      evaluatedAt: derivedPricingContext.metadata?.nowIso || new Date().toISOString(),
+      currentSnapshot: normalizedPricingContext.operational.current,
+      baselineSnapshot: sanitizeBaseline(normalizedPricingContext.operational.baseline),
+      stateSnapshot: normalizedPricingContext.operational.state_context
+    },
     pricingDebug: {
       context: normalizedPricingContext,
+      baselineSource: derivedPricingContext.metadata?.baselineSource || 'derived_heuristic',
+      stateSource: derivedPricingContext.metadata?.stateSource || 'derived_fallback',
+      historySource: derivedPricingContext.metadata?.historySource || 'derived_fallback',
       pressure: engineResult.pressure,
       exception: engineResult.exception,
       state: engineResult.operationalState

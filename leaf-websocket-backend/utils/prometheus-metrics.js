@@ -286,6 +286,50 @@ const h3CellsReturned = new promClient.Counter({
     registers: [register]
 });
 
+const h3RefreshHints = new promClient.Counter({
+    name: 'leaf_h3_refresh_hint_total',
+    help: 'Total de hints de refresh H3 emitidos por superfície e motivo',
+    labelNames: ['surface', 'reason'],
+    registers: [register]
+});
+
+const pricingEvaluations = new promClient.Counter({
+    name: 'leaf_pricing_evaluation_total',
+    help: 'Total de avaliações de pricing por estado operacional e source de baseline',
+    labelNames: ['result', 'operational_state', 'baseline_source'],
+    registers: [register]
+});
+
+const pricingDynamicQuotes = new promClient.Counter({
+    name: 'leaf_pricing_dynamic_quotes_total',
+    help: 'Total de avaliações de pricing com dinâmica aplicada',
+    labelNames: ['operational_state'],
+    registers: [register]
+});
+
+const pricingMinimumFareApplied = new promClient.Counter({
+    name: 'leaf_pricing_minimum_fare_applied_total',
+    help: 'Total de avaliações de pricing que caíram no valor mínimo',
+    labelNames: ['operational_state'],
+    registers: [register]
+});
+
+const pricingPressureScore = new promClient.Histogram({
+    name: 'leaf_pricing_score_pressao',
+    help: 'Distribuição do score de pressão operacional',
+    labelNames: ['operational_state'],
+    buckets: [0, 0.05, 0.1, 0.2, 0.35, 0.5, 0.6, 0.75, 0.9, 1],
+    registers: [register]
+});
+
+const pricingExceptionScore = new promClient.Histogram({
+    name: 'leaf_pricing_score_excecao',
+    help: 'Distribuição do score de exceção operacional',
+    labelNames: ['operational_state'],
+    buckets: [0, 0.05, 0.1, 0.2, 0.35, 0.5, 0.6, 0.75, 0.9, 1],
+    registers: [register]
+});
+
 // ==================== EXPORT ====================
 
 /**
@@ -456,6 +500,52 @@ const metrics = {
             surface: sanitizeLabelValue(surface, 'dashboard'),
             mode: sanitizeLabelValue(mode, 'supply_demand')
         }, Number.isFinite(count) && count > 0 ? count : 0);
+    },
+
+    recordH3RefreshHint: (surface = 'driver', reason = 'unknown', count = 1) => {
+        h3RefreshHints.inc({
+            surface: sanitizeLabelValue(surface, 'driver'),
+            reason: sanitizeLabelValue(reason, 'unknown')
+        }, Number.isFinite(count) && count > 0 ? count : 1);
+    },
+
+    recordPricingEvaluation: ({
+        success = true,
+        operationalState = 'NORMAL',
+        baselineSource = 'unknown',
+        dynamicApplied = false,
+        minimumFareApplied = false,
+        scorePressao = 0,
+        scoreExcecao = 0
+    } = {}) => {
+        const labels = {
+            result: success ? 'success' : 'failure',
+            operational_state: sanitizeLabelValue(operationalState, 'normal'),
+            baseline_source: sanitizeLabelValue(baselineSource, 'unknown')
+        };
+
+        pricingEvaluations.inc(labels);
+
+        if (dynamicApplied) {
+            pricingDynamicQuotes.inc({
+                operational_state: labels.operational_state
+            });
+        }
+
+        if (minimumFareApplied) {
+            pricingMinimumFareApplied.inc({
+                operational_state: labels.operational_state
+            });
+        }
+
+        pricingPressureScore.observe(
+            { operational_state: labels.operational_state },
+            Number.isFinite(scorePressao) ? scorePressao : 0
+        );
+        pricingExceptionScore.observe(
+            { operational_state: labels.operational_state },
+            Number.isFinite(scoreExcecao) ? scoreExcecao : 0
+        );
     }
 };
 

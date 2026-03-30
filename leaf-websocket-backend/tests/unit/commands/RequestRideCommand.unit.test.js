@@ -52,7 +52,12 @@ jest.mock('../../../services/fare-estimation-service', () => ({
     },
     operationalState: 'PRESSAO',
     scorePressao: 0.32,
-    scoreExcecao: 0.11
+    scoreExcecao: 0.11,
+    pricingAudit: {
+      originCell: '89a81082813ffff',
+      baselineSource: 'redis_materialized',
+      stateSource: 'redis_materialized'
+    }
   }))
 }));
 
@@ -128,7 +133,12 @@ describe('RequestRideCommand', () => {
       },
       operationalState: 'PRESSAO',
       scorePressao: 0.32,
-      scoreExcecao: 0.11
+      scoreExcecao: 0.11,
+      pricingAudit: {
+        originCell: '89a81082813ffff',
+        baselineSource: 'redis_materialized',
+        stateSource: 'redis_materialized'
+      }
     });
     traceContext.runWithTraceId.mockImplementation(async (_traceId, fn) => fn());
     metrics.recordCommand.mockImplementation(() => {});
@@ -172,6 +182,10 @@ describe('RequestRideCommand', () => {
         final_price: 18.4,
         operational_state: 'PRESSAO'
       }),
+      pricingAudit: expect.objectContaining({
+        originCell: '89a81082813ffff',
+        baselineSource: 'redis_materialized'
+      }),
       operationalState: 'PRESSAO',
       scorePressao: 0.32,
       scoreExcecao: 0.11
@@ -180,6 +194,9 @@ describe('RequestRideCommand', () => {
       estimatedFare: 18.4,
       pricingPayload: expect.objectContaining({
         passenger_notice: 'Alta demanda nesta região'
+      }),
+      pricingAudit: expect.objectContaining({
+        stateSource: 'redis_materialized'
       }),
       operationalState: 'PRESSAO'
     }));

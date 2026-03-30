@@ -1,6 +1,7 @@
 const express = require('express');
 const redisPool = require('../utils/redis-pool');
 const fareEstimationService = require('../services/fare-estimation-service');
+const { metrics } = require('../utils/prometheus-metrics');
 const { logStructured } = require('../utils/logger');
 
 const router = express.Router();
@@ -50,12 +51,23 @@ router.post('/pricing/quote', async (req, res) => {
       routeDurationSecs: result.routeMetrics?.durationSecs || 0,
       tollFee: result.tollFee || 0,
       pricingPayload: result.pricingPayload || null,
+      pricingAudit: result.pricingAudit || null,
       operationalState: result.operationalState || 'NORMAL',
       scorePressao: result.scorePressao || 0,
       scoreExcecao: result.scoreExcecao || 0,
       exceptionalMode: result.exceptionalMode || null
     });
   } catch (error) {
+    metrics.recordPricingEvaluation({
+      success: false,
+      operationalState: 'UNKNOWN',
+      baselineSource: 'unavailable',
+      dynamicApplied: false,
+      minimumFareApplied: false,
+      scorePressao: 0,
+      scoreExcecao: 0
+    });
+
     logStructured('error', 'Falha ao calcular quote dinâmico', {
       service: 'pricing-routes',
       operation: 'pricing_quote',

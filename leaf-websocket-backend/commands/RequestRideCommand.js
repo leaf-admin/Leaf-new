@@ -137,6 +137,7 @@ class RequestRideCommand extends Command {
                     tollFee: fareEstimation.tollFee,
                     fareSource: fareEstimation.routeMetrics.source,
                     pricingPayload: fareEstimation.pricingPayload,
+                    pricingAudit: fareEstimation.pricingAudit,
                     operationalState: fareEstimation.operationalState,
                     scorePressao: fareEstimation.scorePressao,
                     scoreExcecao: fareEstimation.scoreExcecao,

@@ -65,6 +65,13 @@ describe('fare-estimation-service', () => {
     expect(result.operationalState).toBe(result.pricingPayload.operational_state);
     expect(result.scorePressao).toBe(result.pricingPayload.score_pressao);
     expect(result.scoreExcecao).toBe(result.pricingPayload.score_excecao);
+    expect(result.pricingAudit).toEqual(expect.objectContaining({
+      baselineSource: expect.any(String),
+      stateSource: expect.any(String),
+      historySource: expect.any(String),
+      currentSnapshot: expect.any(Object),
+      baselineSnapshot: expect.any(Object)
+    }));
   });
 
   test('estimateRideFare deve cair em fallback haversine sem métricas de rota', async () => {

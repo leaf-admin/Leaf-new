@@ -1,5 +1,6 @@
 const h3 = require('h3-js');
 const h3MapService = require('./h3-map-service');
+const pricingContextStore = require('./pricing-context-store');
 
 const PRICING_H3_RESOLUTION = Number.parseInt(process.env.PRICING_H3_RESOLUTION || '9', 10);
 const PRICING_H3_RING_SIZE = Number.parseInt(process.env.PRICING_H3_RING_SIZE || '1', 10);
@@ -7,12 +8,9 @@ const PRICING_H3_BASELINE_RING_SIZE = Math.max(
   PRICING_H3_RING_SIZE + 1,
   Number.parseInt(process.env.PRICING_H3_BASELINE_RING_SIZE || '2', 10)
 );
-const REDIS_BASELINE_KEY_PREFIX = process.env.PRICING_BASELINE_KEY_PREFIX || 'pricing:baseline';
-const REDIS_STATE_KEY_PREFIX = process.env.PRICING_STATE_KEY_PREFIX || 'pricing:state';
 const BASELINE_ALPHA = clamp(process.env.PRICING_BASELINE_ALPHA || 0.18, 0.05, 0.5);
-const REDIS_TTL_SECONDS = Number.parseInt(process.env.PRICING_REDIS_TTL_SECONDS || String(14 * 24 * 60 * 60), 10);
 const STATE_CACHE_TTL_MS = Number.parseInt(process.env.PRICING_STATE_CACHE_TTL_MS || String(20 * 60 * 1000), 10);
-const HISTORY_WINDOW_MS = Number.parseInt(process.env.PRICING_HISTORY_WINDOW_MS || String(20 * 60 * 1000), 10);
+const HISTORY_WINDOW_MS = pricingContextStore.DEFAULT_HISTORY_WINDOW_MS;
 const HISTORY_MAX_POINTS = Number.parseInt(process.env.PRICING_HISTORY_MAX_POINTS || '20', 10);
 
 const DEFAULT_ZONE_BASELINES = {
@@ -128,24 +126,6 @@ function resolveZoneType({ pickupLocation, destinationLocation }) {
 
 function getZoneBaseline(zoneType) {
   return DEFAULT_ZONE_BASELINES[zoneType] || DEFAULT_ZONE_BASELINES.default;
-}
-
-function isRedisUsable(redis) {
-  return redis
-    && typeof redis.hgetall === 'function'
-    && typeof redis.hset === 'function'
-    && typeof redis.expire === 'function';
-}
-
-function buildBaselineRedisKey(originCell, nowIso) {
-  const now = new Date(nowIso);
-  const dayOfWeek = now.getUTCDay();
-  const hour = now.getUTCHours();
-  return `${REDIS_BASELINE_KEY_PREFIX}:${originCell}:${dayOfWeek}:${hour}`;
-}
-
-function buildStateRedisKey(originCell) {
-  return `${REDIS_STATE_KEY_PREFIX}:${originCell}`;
 }
 
 function buildBBoxFromCells(cells) {
@@ -361,40 +341,22 @@ function parseHistory(rawHistory) {
 }
 
 async function loadRedisPricingState(redis, originCell, nowIso) {
-  if (!isRedisUsable(redis) || !originCell) {
-    return { baseline: null, state: null };
+  if (!pricingContextStore.isRedisPricingStoreUsable(redis) || !originCell) {
+    return {
+      baseline: null,
+      state: null,
+      baselineSource: 'unavailable',
+      stateSource: 'unavailable',
+      historySource: 'unavailable'
+    };
   }
 
-  try {
-    const [baselineHash, stateHash] = await Promise.all([
-      redis.hgetall(buildBaselineRedisKey(originCell, nowIso)).catch(() => ({})),
-      redis.hgetall(buildStateRedisKey(originCell)).catch(() => ({}))
-    ]);
-
-    const baseline = baselineHash && Object.keys(baselineHash).length > 0
-      ? {
-          expected_requests_5m: toNumber(baselineHash.expected_requests_5m, NaN),
-          expected_idle_drivers: toNumber(baselineHash.expected_idle_drivers, NaN),
-          expected_pickup_eta_min: toNumber(baselineHash.expected_pickup_eta_min, NaN),
-          expected_speed_kmh: toNumber(baselineHash.expected_speed_kmh, NaN),
-          expected_cancel_rate: toNumber(baselineHash.expected_cancel_rate, NaN),
-          sample_count: toNumber(baselineHash.sample_count, 0)
-        }
-      : null;
-
-    const state = stateHash && Object.keys(stateHash).length > 0
-      ? {
-          previous_state: stateHash.state || 'NORMAL',
-          state_entered_at: stateHash.entered_at || null,
-          state_exited_at: stateHash.exited_at || null,
-          recent_exception_history: parseHistory(stateHash.recent_exception_history)
-        }
-      : null;
-
-    return { baseline, state };
-  } catch (_error) {
-    return { baseline: null, state: null };
-  }
+  return pricingContextStore.loadPricingContextState(redis, {
+    resolution: PRICING_H3_RESOLUTION,
+    h3Index: originCell,
+    nowIso,
+    historyWindowMs: HISTORY_WINDOW_MS
+  });
 }
 
 function deepMergeLeafValues(base = {}, override = {}) {
@@ -552,12 +514,16 @@ async function buildDerivedPricingContext({
     metadata: {
       redis,
       originCell,
+      resolution: PRICING_H3_RESOLUTION,
       nowIso,
       zoneType,
       trackedCells,
       degradedNeighborCount,
       derivedCurrent,
-      derivedBaseline: derivedContext.operational.baseline
+      derivedBaseline: derivedContext.operational.baseline,
+      baselineSource: redisSnapshots.baselineSource || 'derived_heuristic',
+      stateSource: redisSnapshots.stateSource || 'derived_fallback',
+      historySource: redisSnapshots.historySource || 'derived_fallback'
     }
   };
 }
@@ -596,23 +562,19 @@ async function recordPricingEvaluation(metadata, engineResult) {
     expiresAt: nowMs + STATE_CACHE_TTL_MS
   });
 
-  if (!isRedisUsable(metadata.redis)) {
+  if (!pricingContextStore.isRedisPricingStoreUsable(metadata.redis)) {
     return;
   }
 
   try {
-    const baselineKey = buildBaselineRedisKey(metadata.originCell, nowIso);
-    const stateKey = buildStateRedisKey(metadata.originCell);
     const current = metadata.derivedCurrent || {};
-    const previousBaselineHash = await metadata.redis.hgetall(baselineKey).catch(() => ({}));
-    const previousBaseline = {
-      expected_requests_5m: toNumber(previousBaselineHash.expected_requests_5m, NaN),
-      expected_idle_drivers: toNumber(previousBaselineHash.expected_idle_drivers, NaN),
-      expected_pickup_eta_min: toNumber(previousBaselineHash.expected_pickup_eta_min, NaN),
-      expected_speed_kmh: toNumber(previousBaselineHash.expected_speed_kmh, NaN),
-      expected_cancel_rate: toNumber(previousBaselineHash.expected_cancel_rate, NaN),
-      sample_count: toNumber(previousBaselineHash.sample_count, 0)
-    };
+    const previousSnapshots = await pricingContextStore.loadPricingContextState(metadata.redis, {
+      resolution: metadata.resolution || PRICING_H3_RESOLUTION,
+      h3Index: metadata.originCell,
+      nowIso,
+      historyWindowMs: HISTORY_WINDOW_MS
+    });
+    const previousBaseline = previousSnapshots.baseline || {};
 
     const shouldUpdateBaseline = nextState !== 'EXCEPCIONAL';
     const baselinePayload = shouldUpdateBaseline
@@ -637,30 +599,27 @@ async function recordPricingEvaluation(metadata, engineResult) {
         }
       : null;
 
-    const pipeline = metadata.redis.pipeline();
-    if (baselinePayload) {
-      pipeline.hset(baselineKey, {
-        expected_requests_5m: String(Number(baselinePayload.expected_requests_5m.toFixed(3))),
-        expected_idle_drivers: String(Number(baselinePayload.expected_idle_drivers.toFixed(3))),
-        expected_pickup_eta_min: String(Number(baselinePayload.expected_pickup_eta_min.toFixed(3))),
-        expected_speed_kmh: String(Number(baselinePayload.expected_speed_kmh.toFixed(3))),
-        expected_cancel_rate: String(Number(baselinePayload.expected_cancel_rate.toFixed(4))),
-        sample_count: String(baselinePayload.sample_count),
-        updated_at: baselinePayload.updated_at
-      });
-      pipeline.expire(baselineKey, REDIS_TTL_SECONDS);
-    }
-
-    pipeline.hset(stateKey, {
-      state: nextState,
-      entered_at: previousState === nextState ? (previous.entered_at || nowIso) : nowIso,
-      exited_at: previousState === nextState ? (previous.exited_at || '') : nowIso,
-      recent_exception_history: JSON.stringify(nextHistory),
-      zone_type: metadata.zoneType || '',
-      updated_at: nowIso
+    await pricingContextStore.persistPricingContextState(metadata.redis, {
+      resolution: metadata.resolution || PRICING_H3_RESOLUTION,
+      h3Index: metadata.originCell,
+      nowIso,
+      baselinePayload,
+      statePayload: {
+        state: nextState,
+        entered_at: previousState === nextState ? (previous.entered_at || nowIso) : nowIso,
+        exited_at: previousState === nextState ? (previous.exited_at || '') : nowIso,
+        zone_type: metadata.zoneType || '',
+        updated_at: nowIso,
+        last_score_pressao: Number(engineResult.pricingPayload.score_pressao || 0),
+        last_score_excecao: Number(engineResult.pricingPayload.score_excecao || 0),
+        last_exceptional_mode_active: Boolean(engineResult.exceptionalMode?.exceptional_mode_active)
+      },
+      historyPoint: {
+        timestamp: nowIso,
+        score_excecao: Number(engineResult.pricingPayload.score_excecao || 0)
+      },
+      historyWindowMs: HISTORY_WINDOW_MS
     });
-    pipeline.expire(stateKey, REDIS_TTL_SECONDS);
-    await pipeline.exec();
   } catch (_error) {
     // fallback silencioso para cache local
   }
