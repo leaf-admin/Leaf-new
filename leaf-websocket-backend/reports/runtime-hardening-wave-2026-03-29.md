@@ -376,6 +376,21 @@ Resultado acumulado desta wave:
   - o fallback de documentos agora também passa pela borda centralizada do Firebase
   - com isso, os ganhos restantes do macro plano estão cada vez mais concentrados nos arquivos grandes/mistos do runtime
 
+## Passada de higiene para os hotspots restantes
+- foi criado um auditor específico para cruzar:
+  - `git status --porcelain`
+  - `legacy-runtime-surface-*.json`
+- artefato novo:
+  - `scripts/ops/report-mixed-legacy-hotspots.cjs`
+- relatório gerado:
+  - `mixed-legacy-hotspots-1774878749428.md`
+- resultado prático:
+  - `dirtyHotspots: 17`
+  - `cleanHotspots: 6`
+- leitura operacional:
+  - esta passada não reduz legado sozinha, mas reduz bastante o risco de tocar em arquivos grandes já modificados por outras frentes
+  - a próxima etapa passa a entrar nos hotspots sujos pelo menor diff pré-existente primeiro, em vez de atacar logo `dashboard.js` e `metrics.js`
+
 ## Riscos que continuam abertos
 - `server.vps.js`, `routes/dashboard.js` e `register-socket-create-booking-handler.js` continuam mistos com trabalho paralelo
 - baseline agora possui worker dedicado, mas ainda nao foi validado em Redis real local nesta maquina
