@@ -5869,6 +5869,488 @@ io.on('connection', async (socket) => {
         }); // Fecha traceContext.runWithTraceId
     });
 
+    socket.on('endTripEarlyByRider', async (data) => {
+        const traceId = extractTraceIdFromEvent(data, socket);
+        await traceContext.runWithTraceId(traceId, async () => {
+            try {
+                if (!isRiderEarlyEndEnabled()) {
+                    socket.emit('tripCompleteError', {
+                        error: 'Encerramento antecipado pelo passageiro está desabilitado no momento.'
+                    });
+                    return;
+                }
+
+                const customerId = socket.userId || data.customerId || socket.id;
+                const bookingId = data.bookingId;
+                const endLocation = data.endLocation;
+                const distanceKm = Number.parseFloat(data.distanceKm ?? data.distance ?? 0) || 0;
+                const durationSecs = Number.parseFloat(data.durationSecs ?? data.duration ?? 0) || 0;
+                const reason = String(data.reason || 'EARLY_DROPOFF_BY_RIDER').trim() || 'EARLY_DROPOFF_BY_RIDER';
+
+                if (!bookingId || !endLocation?.lat || !endLocation?.lng) {
+                    socket.emit('tripCompleteError', { error: 'bookingId e endLocation são obrigatórios' });
+                    return;
+                }
+
+                clearBoardingWindowTimeout(bookingId);
+                clearTripIntegrityConfirmationTimeout(bookingId);
+
+                const EndRideEarlyByRiderCommand = require('./commands/EndRideEarlyByRiderCommand');
+                const command = new EndRideEarlyByRiderCommand({
+                    bookingId,
+                    customerId,
+                    endLocation,
+                    distanceKm,
+                    durationSecs,
+                    reason,
+                    traceId,
+                    correlationId: bookingId
+                });
+
+                const result = await command.execute();
+                if (!result.success) {
+                    socket.emit('tripCompleteError', { error: result.error || 'Erro ao encerrar corrida antecipadamente' });
+                    return;
+                }
+
+                const {
+                    driverId,
+                    customerId: resultCustomerId,
+                    event,
+                    finalFare,
+                    tollFee,
+                    distance,
+                    duration,
+                    paymentDistribution,
+                    settlement
+                } = result.data;
+
+                const PaymentService = require('./services/payment-service');
+                const paymentService = new PaymentService();
+                const fareBreakdown = paymentService.calculateFareBreakdownFromReais(
+                    Number(finalFare || 0),
+                    Number(tollFee || 0)
+                );
+
+                const redis = redisPool.getConnection();
+                const bookingSnapshot = await redis.hgetall(`booking:${bookingId}`);
+                const tripCompletedData = buildTripCompletedPayload({
+                    bookingId,
+                    message: 'Corrida encerrada antecipadamente pelo passageiro',
+                    bookingData: bookingSnapshot,
+                    resultEndLocation: endLocation,
+                    endLocation,
+                    distance,
+                    duration,
+                    fareBreakdown,
+                    paymentDistribution,
+                    completionType: 'EARLY_ENDED_BY_RIDER',
+                    settlement,
+                    rideLegs: bookingSnapshot?.rideLegs ? JSON.parse(bookingSnapshot.rideLegs) : null,
+                    operationalContinuation: bookingSnapshot?.operationalContinuation
+                        ? JSON.parse(bookingSnapshot.operationalContinuation)
+                        : null,
+                    persistence: 'accepted_background'
+                });
+
+                if (driverId) {
+                    io.to(`driver_${driverId}`).emit('tripCompleted', tripCompletedData);
+                    io.to(`driver_${driverId}`).emit('paymentDistributed', {
+                        success: true,
+                        bookingId,
+                        pending: true,
+                        message: 'Distribuição financeira em processamento assíncrono'
+                    });
+                }
+
+                if (resultCustomerId) {
+                    io.to(`customer_${resultCustomerId}`).emit('tripCompleted', {
+                        ...tripCompletedData,
+                        message: 'Corrida encerrada antecipadamente'
+                    });
+                }
+
+                setImmediate(async () => {
+                    try {
+                        if (event) {
+                            const tracer = getTracer();
+                            const { trace: otelTrace } = require('@opentelemetry/api');
+                            const activeSpan = otelTrace.getActiveSpan();
+                            const eventSpan = createEventSpan(tracer, 'ride.completed', activeSpan, {
+                                'event.booking_id': bookingId,
+                                'correlation.id': bookingId
+                            });
+
+                            try {
+                                await runInSpan(eventSpan, async () => {
+                                    await eventBus.publish({
+                                        eventType: 'ride.completed',
+                                        data: event
+                                    });
+                                });
+
+                                const eventSpanContext = eventSpan.spanContext();
+                                if (event.data) {
+                                    event.data._otelSpanContext = eventSpanContext;
+                                }
+                                logEvent('ride.completed', 'published', { bookingId, completionType: 'EARLY_ENDED_BY_RIDER' });
+                            } catch (eventError) {
+                                endSpanError(eventSpan, eventError);
+                                throw eventError;
+                            }
+                        }
+
+                        const ridePersistenceService = require('./services/ride-persistence-service');
+                        await ridePersistenceService.persistFinalRideDataWithOutbox(bookingId, {
+                            fare: finalFare,
+                            netFare: null,
+                            distance,
+                            duration,
+                            endLocation,
+                            driverEarnings: null,
+                            financialBreakdown: paymentDistribution || null,
+                            completionType: 'EARLY_ENDED_BY_RIDER',
+                            settlement
+                        });
+
+                        clearTripIntegrityConfirmationTimeout(bookingId);
+                        await redis.del(`trip_integrity:${bookingId}`);
+
+                        try {
+                            const ReceiptService = require('./services/receipt-service');
+                            const receiptService = new ReceiptService();
+                            const bookingDataForReceipt = io.activeBookings?.get(bookingId);
+                            if (bookingDataForReceipt) {
+                                const receiptData = {
+                                    ...bookingDataForReceipt,
+                                    finalPrice: finalFare,
+                                    distance,
+                                    endTime: new Date().toISOString(),
+                                    completedAt: new Date().toISOString(),
+                                    status: 'EARLY_ENDED_BY_RIDER',
+                                    completionType: 'EARLY_ENDED_BY_RIDER'
+                                };
+                                const firebaseDb = firebaseConfig?.getRealtimeDB?.();
+                                await receiptService.generateAndSaveReceipt(bookingId, receiptData, firebaseDb);
+                            }
+                        } catch (receiptError) {
+                            logStructured('warn', 'Erro ao gerar recibo de encerramento antecipado', {
+                                bookingId,
+                                eventType: 'endTripEarlyByRider',
+                                error: receiptError.message
+                            });
+                        }
+                    } catch (backgroundError) {
+                        logStructured('error', 'Erro no pós-processamento do endTripEarlyByRider', {
+                            bookingId,
+                            customerId,
+                            eventType: 'endTripEarlyByRider',
+                            error: backgroundError.message
+                        });
+                    } finally {
+                        if (io.activeBookings) {
+                            io.activeBookings.delete(bookingId);
+                        }
+                    }
+                });
+            } catch (error) {
+                logStructured('error', 'Erro ao encerrar corrida antecipadamente pelo passageiro', {
+                    service: 'websocket',
+                    operation: 'endTripEarlyByRider',
+                    userId: socket.userId || socket.id,
+                    bookingId: data?.bookingId,
+                    error: error.message,
+                    stack: error.stack
+                });
+                socket.emit('tripCompleteError', { error: 'Erro ao encerrar corrida antecipadamente' });
+            }
+        });
+    });
+
+    socket.on('interruptRideOperational', async (data) => {
+        const traceId = extractTraceIdFromEvent(data, socket);
+        await traceContext.runWithTraceId(traceId, async () => {
+            try {
+                if (!isOperationalReassignmentEnabled()) {
+                    socket.emit('rideOperationalInterruptionError', {
+                        error: 'Continuidade operacional com reatribuição está desabilitada no momento.'
+                    });
+                    return;
+                }
+
+                const driverId = socket.userId || data.driverId || socket.id;
+                const bookingId = data.bookingId;
+                const interruptionLocation = data.interruptionLocation || data.endLocation;
+                const distanceKm = Number.parseFloat(data.distanceKm ?? data.distance ?? 0) || 0;
+                const durationSecs = Number.parseFloat(data.durationSecs ?? data.duration ?? 0) || 0;
+                const reason = String(data.reason || 'VEHICLE_BREAKDOWN').trim() || 'VEHICLE_BREAKDOWN';
+                const note = String(data.note || '').trim();
+
+                if (!bookingId || !interruptionLocation?.lat || !interruptionLocation?.lng) {
+                    socket.emit('rideOperationalInterruptionError', {
+                        error: 'bookingId e interruptionLocation são obrigatórios'
+                    });
+                    return;
+                }
+
+                const InterruptRideOperationalCommand = require('./commands/InterruptRideOperationalCommand');
+                const command = new InterruptRideOperationalCommand({
+                    bookingId,
+                    driverId,
+                    interruptionLocation,
+                    distanceKm,
+                    durationSecs,
+                    reason,
+                    note,
+                    traceId,
+                    correlationId: bookingId
+                });
+
+                const result = await command.execute();
+                if (!result.success) {
+                    socket.emit('rideOperationalInterruptionError', {
+                        error: result.error || 'Erro ao interromper corrida'
+                    });
+                    return;
+                }
+
+                const payload = {
+                    success: true,
+                    bookingId,
+                    reason,
+                    note,
+                    interruption: result.data.interruption,
+                    rideLegs: result.data.rideLegs,
+                    message: 'Corrida interrompida por motivo operacional. Aguardando decisão do passageiro.'
+                };
+
+                socket.emit('rideOperationalInterrupted', payload);
+
+                if (result.data.customerId) {
+                    io.to(`customer_${result.data.customerId}`).emit('rideOperationalInterruption', {
+                        ...payload,
+                        message: 'Seu motorista não consegue continuar. Deseja seguir com outro parceiro?'
+                    });
+                }
+
+                if (io.activeBookings) {
+                    const activeBooking = io.activeBookings.get(bookingId);
+                    if (activeBooking) {
+                        io.activeBookings.set(bookingId, {
+                            ...activeBooking,
+                            status: 'INTERRUPTED_OPERATIONAL',
+                            pickupLocation: interruptionLocation,
+                            driverId: null
+                        });
+                    }
+                }
+            } catch (error) {
+                logStructured('error', 'Erro ao interromper corrida operacionalmente', {
+                    service: 'websocket',
+                    operation: 'interruptRideOperational',
+                    userId: socket.userId || socket.id,
+                    bookingId: data?.bookingId,
+                    error: error.message
+                });
+                socket.emit('rideOperationalInterruptionError', {
+                    error: 'Erro interno ao interromper corrida'
+                });
+            }
+        });
+    });
+
+    socket.on('respondOperationalContinuation', async (data) => {
+        const traceId = extractTraceIdFromEvent(data, socket);
+        await traceContext.runWithTraceId(traceId, async () => {
+            try {
+                if (!isOperationalReassignmentEnabled()) {
+                    socket.emit('rideOperationalContinuationError', {
+                        error: 'Continuidade operacional com reatribuição está desabilitada no momento.'
+                    });
+                    return;
+                }
+
+                const customerId = socket.userId || data.customerId || socket.id;
+                const bookingId = data.bookingId;
+                const continueTrip = data.continueTrip === true || data.accepted === true;
+
+                if (!bookingId) {
+                    socket.emit('rideOperationalContinuationError', {
+                        error: 'bookingId é obrigatório'
+                    });
+                    return;
+                }
+
+                const RespondOperationalContinuationCommand = require('./commands/RespondOperationalContinuationCommand');
+                const command = new RespondOperationalContinuationCommand({
+                    bookingId,
+                    customerId,
+                    continueTrip,
+                    traceId,
+                    correlationId: bookingId
+                });
+
+                const result = await command.execute();
+                if (!result.success) {
+                    socket.emit('rideOperationalContinuationError', {
+                        error: result.error || 'Erro ao responder continuidade'
+                    });
+                    return;
+                }
+
+                if (result.data.continueTrip) {
+                    const { triggerDispatchAfterPayment } = require('./services/payment-dispatch-service');
+                    const dispatchResult = await triggerDispatchAfterPayment({
+                        bookingId,
+                        io,
+                        pickupLocation: result.data.pickupLocation,
+                        source: 'operational_reassignment',
+                        force: true
+                    });
+
+                    const payload = {
+                        success: true,
+                        bookingId,
+                        status: 'REASSIGNMENT_PENDING',
+                        pickupLocation: result.data.pickupLocation,
+                        previousDriverId: result.data.previousDriverId,
+                        dispatchResult,
+                        rideLegs: result.data.rideLegs,
+                        message: 'Estamos procurando outro motorista parceiro para continuar a corrida.'
+                    };
+
+                    socket.emit('rideOperationalContinuationSearching', payload);
+                    io.to(`customer_${customerId}`).emit('rideOperationalContinuationSearching', payload);
+                    if (result.data.previousDriverId) {
+                        io.to(`driver_${result.data.previousDriverId}`).emit('rideOperationalReleased', {
+                            success: true,
+                            bookingId,
+                            message: 'O passageiro optou por continuar com outro parceiro.'
+                        });
+                    }
+
+                    if (io.activeBookings) {
+                        const activeBooking = io.activeBookings.get(bookingId);
+                        if (activeBooking) {
+                            io.activeBookings.set(bookingId, {
+                                ...activeBooking,
+                                status: 'REASSIGNMENT_PENDING',
+                                pickupLocation: result.data.pickupLocation,
+                                driverId: null
+                            });
+                        }
+                    }
+                    return;
+                }
+
+                const PaymentService = require('./services/payment-service');
+                const paymentService = new PaymentService();
+                const fareBreakdown = paymentService.calculateFareBreakdownFromReais(
+                    Number(result.data.finalFare || 0),
+                    0
+                );
+                const redis = redisPool.getConnection();
+                const bookingSnapshot = await redis.hgetall(`booking:${bookingId}`);
+                const endLocation = result.data.interruption?.pickupLocation;
+                const tripCompletedData = buildTripCompletedPayload({
+                    bookingId,
+                    message: 'Corrida encerrada por interrupção operacional',
+                    bookingData: bookingSnapshot,
+                    resultEndLocation: endLocation,
+                    endLocation,
+                    distance: result.data.distance,
+                    duration: result.data.duration,
+                    fareBreakdown,
+                    paymentDistribution: {
+                        status: 'PENDING',
+                        message: 'Distribuição financeira em processamento assíncrono'
+                    },
+                    completionType: 'INTERRUPTED_OPERATIONAL_ENDED',
+                    settlement: {
+                        estimatedRefund: result.data.interruption?.estimatedRefund || 0,
+                        remainingReservedAmount: result.data.interruption?.remainingReservedAmount || 0
+                    },
+                    rideLegs: result.data.rideLegs,
+                    operationalContinuation: result.data.interruption,
+                    persistence: 'accepted_background'
+                });
+
+                if (result.data.driverId) {
+                    io.to(`driver_${result.data.driverId}`).emit('tripCompleted', tripCompletedData);
+                }
+                io.to(`customer_${customerId}`).emit('tripCompleted', tripCompletedData);
+
+                setImmediate(async () => {
+                    try {
+                        if (result.data.event) {
+                            const tracer = getTracer();
+                            const { trace: otelTrace } = require('@opentelemetry/api');
+                            const activeSpan = otelTrace.getActiveSpan();
+                            const eventSpan = createEventSpan(tracer, 'ride.completed', activeSpan, {
+                                'event.booking_id': bookingId,
+                                'correlation.id': bookingId
+                            });
+
+                            try {
+                                await runInSpan(eventSpan, async () => {
+                                    await eventBus.publish({
+                                        eventType: 'ride.completed',
+                                        data: result.data.event
+                                    });
+                                });
+                                logEvent('ride.completed', 'published', {
+                                    bookingId,
+                                    completionType: 'INTERRUPTED_OPERATIONAL_ENDED'
+                                });
+                            } catch (eventError) {
+                                endSpanError(eventSpan, eventError);
+                                throw eventError;
+                            }
+                        }
+
+                        const ridePersistenceService = require('./services/ride-persistence-service');
+                        await ridePersistenceService.persistFinalRideDataWithOutbox(bookingId, {
+                            fare: result.data.finalFare,
+                            netFare: null,
+                            distance: result.data.distance,
+                            duration: result.data.duration,
+                            endLocation,
+                            driverEarnings: null,
+                            financialBreakdown: tripCompletedData.paymentDistribution || null,
+                            completionType: 'INTERRUPTED_OPERATIONAL_ENDED',
+                            settlement: {
+                                estimatedRefund: result.data.interruption?.estimatedRefund || 0,
+                                remainingReservedAmount: result.data.interruption?.remainingReservedAmount || 0
+                            }
+                        });
+                    } catch (backgroundError) {
+                        logStructured('error', 'Erro no pós-processamento da interrupção operacional', {
+                            bookingId,
+                            customerId,
+                            eventType: 'interruptRideOperational',
+                            error: backgroundError.message
+                        });
+                    } finally {
+                        if (io.activeBookings) {
+                            io.activeBookings.delete(bookingId);
+                        }
+                    }
+                });
+            } catch (error) {
+                logStructured('error', 'Erro ao responder continuidade operacional', {
+                    service: 'websocket',
+                    operation: 'respondOperationalContinuation',
+                    userId: socket.userId || socket.id,
+                    bookingId: data?.bookingId,
+                    error: error.message
+                });
+                socket.emit('rideOperationalContinuationError', {
+                    error: 'Erro interno ao responder continuidade'
+                });
+            }
+        });
+    });
+
     // Enviar avaliação
     socket.on('submitRating', async (data) => {
         try {
@@ -8564,8 +9046,17 @@ io.on('connection', async (socket) => {
         // ✅ CAOS SCENARIO: Extensão de Rota Pré-Paga (Pix)
         socket.on('requestRideExtension', async (data) => {
             try {
+                if (!isRideExtensionFlowEnabled()) {
+                    socket.emit('rideExtensionError', {
+                        error: 'Fluxo de extensão de corrida desabilitado no momento.'
+                    });
+                    return;
+                }
+
                 const customerId = socket.userId || data.customerId;
-                const { bookingId, newEndLocation, newFare } = data;
+                const bookingId = data.bookingId || data.rideId;
+                const newEndLocation = data.newEndLocation || data.newDrop;
+                const newFare = data.newFare;
 
                 if (!customerId || !bookingId || !newEndLocation || !newFare) {
                     socket.emit('rideExtensionError', { error: 'Dados incompletos para extensão da corrida' });
@@ -8590,25 +9081,116 @@ io.on('connection', async (socket) => {
                     return;
                 }
 
-                // Enviar QR Code Pix para o passageiro pagar a diferença
-                socket.emit('rideExtensionPaymentRequired', result.data);
+                socket.emit('rideExtensionRequestAccepted', result.data);
 
-                // Avisar o motorista que uma extensão está aguardando pagamento
                 const redis = redisPool.getConnection();
+                let driverId = null;
                 const bookingDataStr = await redis.hget('bookings:active', bookingId);
                 if (bookingDataStr) {
-                    const booking = JSON.parse(bookingDataStr);
-                    if (booking.driverId) {
-                        io.to(`driver_${booking.driverId}`).emit('rideExtensionRequested', {
-                            bookingId,
-                            message: 'Passageiro solicitou extensão da rota. Aguardando pagamento Pix...'
-                        });
+                    try {
+                        const booking = JSON.parse(bookingDataStr);
+                        driverId = booking?.driverId || null;
+                    } catch (_error) {
+                        driverId = null;
                     }
+                }
+
+                if (!driverId) {
+                    const bookingHash = await redis.hgetall(`booking:${bookingId}`);
+                    driverId = bookingHash?.driverId || null;
+                }
+
+                if (driverId) {
+                    io.to(`driver_${driverId}`).emit('rideExtensionApprovalRequested', {
+                        bookingId,
+                        requestId: result.data.requestId,
+                        currentFare: result.data.currentFare,
+                        newFare: result.data.newFare,
+                        diffFare: result.data.diffFare,
+                        newEndLocation,
+                        message: 'Passageiro solicitou extensão da rota. Aceite ou recuse a alteração.'
+                    });
                 }
 
             } catch (error) {
                 logError(error, 'Erro em requestRideExtension', { bookingId: data.bookingId });
                 socket.emit('rideExtensionError', { error: 'Erro interno ao processar extensão' });
+            }
+        });
+
+        socket.on('respondRideExtension', async (data) => {
+            try {
+                if (!isRideExtensionFlowEnabled()) {
+                    socket.emit('rideExtensionResponseError', {
+                        error: 'Fluxo de extensão de corrida desabilitado no momento.'
+                    });
+                    return;
+                }
+
+                const driverId = socket.userId || data.driverId;
+                const bookingId = data.bookingId || data.rideId;
+                const accepted = data.accepted === true;
+
+                if (!driverId || !bookingId) {
+                    socket.emit('rideExtensionResponseError', { error: 'bookingId e driverId são obrigatórios' });
+                    return;
+                }
+
+                const RespondRideExtensionCommand = require('./commands/RespondRideExtensionCommand');
+                const command = new RespondRideExtensionCommand({
+                    bookingId,
+                    driverId,
+                    accepted,
+                    mockPayment: data.mockPayment === true || data.__mockPayment === true,
+                    correlationId: bookingId
+                });
+
+                const result = await command.execute();
+                if (!result.success) {
+                    socket.emit('rideExtensionResponseError', { error: result.error });
+                    return;
+                }
+
+                const extensionRequest = result.data.extensionRequest || {};
+                const passengerId = extensionRequest.requestedBy || null;
+
+                if (!accepted) {
+                    const payload = {
+                        success: true,
+                        bookingId,
+                        status: 'DRIVER_DECLINED',
+                        extensionRequest,
+                        message: 'O motorista recusou a extensão da corrida.'
+                    };
+                    socket.emit('rideExtensionRejected', payload);
+                    if (passengerId) {
+                        io.to(`customer_${passengerId}`).emit('rideExtensionRejected', payload);
+                    }
+                    return;
+                }
+
+                const passengerPayload = {
+                    success: true,
+                    bookingId,
+                    status: 'PENDING_PAYMENT',
+                    diffFare: result.data.payment.diffFare,
+                    newFare: result.data.payment.newFare,
+                    chargeId: result.data.payment.chargeId,
+                    pixQRCode: result.data.payment.pixQRCode,
+                    paymentLink: result.data.payment.paymentLink,
+                    brCode: result.data.payment.brCode,
+                    expiresAt: result.data.payment.expiresAt || extensionRequest.expiresAt || null,
+                    newEndLocation: extensionRequest.newEndLocation,
+                    message: 'Motorista aceitou a extensão. Pague o complemento Pix para confirmar o novo destino.'
+                };
+
+                socket.emit('rideExtensionPendingPayment', passengerPayload);
+                if (passengerId) {
+                    io.to(`customer_${passengerId}`).emit('rideExtensionPaymentRequired', passengerPayload);
+                }
+            } catch (error) {
+                logError(error, 'Erro em respondRideExtension', { bookingId: data.bookingId });
+                socket.emit('rideExtensionResponseError', { error: 'Erro interno ao responder extensão' });
             }
         });
 
