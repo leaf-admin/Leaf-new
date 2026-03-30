@@ -9,6 +9,17 @@
 
 ## Entregas implementadas
 
+### Settlement autoritativo e review
+- servico unificado de settlement para finalizacoes especiais:
+  - `services/ride-settlement-service.js`
+- `EndRideEarlyByRiderCommand` e `RespondOperationalContinuationCommand` passam a usar o servico autoritativo
+- novo comando:
+  - `commands/EndRideWithReviewCommand.js`
+- novo socket modular:
+  - `endRideWithReview`
+  - integrado em `bootstrap/register-socket-active-ride-handlers.js`
+- `tripCompleted` agora aceita `reviewContext`
+
 ### Pricing baseline materializado
 - store central para baseline/state/history:
   - `services/pricing-context-store.js`
@@ -78,14 +89,18 @@
   - `tests/unit/services/pricing-context-provider.unit.test.js`
   - `tests/unit/services/fare-estimation-service.unit.test.js`
   - `tests/unit/commands/RequestRideCommand.unit.test.js`
+  - `tests/unit/services/ride-settlement-service.unit.test.js`
+  - `tests/unit/commands/EndRideWithReviewCommand.unit.test.js`
+  - `tests/unit/utils/trip-completion-payload.unit.test.js`
 
-Resultado:
-- `5/5` suites
-- `9/9` testes
+Resultado acumulado desta wave:
+- `9/9` suites
+- `17/17` testes
 
 ## Riscos que continuam abertos
 - `server.vps.js`, `routes/dashboard.js` e `register-socket-create-booking-handler.js` continuam mistos com trabalho paralelo
 - baseline agora possui worker dedicado, mas ainda nao foi validado em Redis real local nesta maquina
+- o novo socket `endRideWithReview` esta ligado no caminho modular (`server.js`), mas a ligacao explicita no runtime canonico (`server.vps.js`) continua pendente
 - histerese do pricing continua dependente de Redis e do provider, mas ainda sem job distribuido formal
 - custo por SKU via billing export/BigQuery ainda nao foi implantado
 - Android fisico, `EARLY_ENDED_REVIEW` e limpeza final do legado continuam fora desta wave

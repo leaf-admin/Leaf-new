@@ -16,6 +16,10 @@ const {
   resolveRideLegs,
   resolveOperationalContinuation
 } = require('../services/ride-lifecycle-service');
+const {
+  buildAuthoritativeCompletionArtifacts,
+  buildInterruptedOperationalEndedSettlement
+} = require('../services/ride-settlement-service');
 
 class RespondOperationalContinuationCommand extends Command {
   constructor(data) {
@@ -165,25 +169,16 @@ class RespondOperationalContinuationCommand extends Command {
           passengerDecision: 'END',
           decisionAt: nowIso
         };
-
-        await RideStateManager.updateBookingState(
-          redis,
-          this.bookingId,
-          RideStateManager.STATES.INTERRUPTED_OPERATIONAL_ENDED,
-          {
-            customerId: this.customerId,
-            driverId: interruptedDriverId,
-            interruptionReason: completedContinuation.reason,
-            completedAt: nowIso,
-            finalFare,
-            distance,
-            duration,
-            completionType: 'INTERRUPTED_OPERATIONAL_ENDED',
-            operationalContinuation: completedContinuation
-          }
-        );
-
-        await persistBookingPatch(redis, this.bookingId, {
+        const settlement = buildInterruptedOperationalEndedSettlement(context.bookingHash, {
+          operationalContinuation: completedContinuation,
+          rideLegs,
+          finalFare,
+          distanceKm: distance,
+          durationSecs: duration
+        });
+        const completion = buildAuthoritativeCompletionArtifacts({
+          bookingHash: context.bookingHash,
+          bookingId: this.bookingId,
           status: 'INTERRUPTED_OPERATIONAL_ENDED',
           completedAt: nowIso,
           completionType: 'INTERRUPTED_OPERATIONAL_ENDED',
@@ -192,9 +187,23 @@ class RespondOperationalContinuationCommand extends Command {
           finalFare,
           distance,
           duration,
+          settlement,
+          rideLegs,
           operationalContinuation: completedContinuation,
-          rideLegs
+          driverId: interruptedDriverId,
+          customerId: bookingCustomerId,
+          traceId: this.traceId,
+          correlationId: this.correlationId
         });
+
+        await RideStateManager.updateBookingState(
+          redis,
+          this.bookingId,
+          RideStateManager.STATES.INTERRUPTED_OPERATIONAL_ENDED,
+          completion.stateMetadata
+        );
+
+        await persistBookingPatch(redis, this.bookingId, completion.bookingPatch);
 
         if (bookingCustomerId) {
           const customerActiveBookingKey = `customer_active_booking:${bookingCustomerId}`;
@@ -230,35 +239,14 @@ class RespondOperationalContinuationCommand extends Command {
           }
         });
 
-        const event = new RideCompletedEvent({
-          bookingId: this.bookingId,
-          driverId: interruptedDriverId,
-          customerId: bookingCustomerId,
-          endLocation: interruptionLocation,
-          finalFare,
-          tollFee: parseMoneyValue(context.bookingHash.tollFee || 0, 0),
-          distance,
-          duration,
-          completionType: 'INTERRUPTED_OPERATIONAL_ENDED',
-          completionReason: completedContinuation.reason,
-          rideLegSettlements: rideLegs,
-          operationalContinuation: completedContinuation,
-          traceId: this.traceId,
-          correlationId: this.correlationId
-        });
+        const event = new RideCompletedEvent(completion.eventData);
 
         metrics.recordCommand('RespondOperationalContinuation', (Date.now() - startedAt) / 1000, true);
         return CommandResult.success({
-          bookingId: this.bookingId,
-          customerId: bookingCustomerId,
+          ...completion.resultData,
           continueTrip: false,
-          driverId: interruptedDriverId,
           event: event.toJSON(),
-          finalFare,
-          distance,
-          duration,
-          rideLegs,
-          interruption: completedContinuation
+          continueTrip: false
         });
       } catch (error) {
         logStructured('error', 'RespondOperationalContinuationCommand falhou', {

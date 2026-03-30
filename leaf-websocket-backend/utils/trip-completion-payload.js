@@ -84,6 +84,7 @@ function buildTripCompletedPayload({
   settlement = null,
   rideLegs = null,
   operationalContinuation = null,
+  reviewContext = null,
   persistence = 'accepted_background'
 }) {
   const pickup = resolveLocationDetails(
@@ -124,6 +125,7 @@ function buildTripCompletedPayload({
     ...(settlement ? { settlement } : {}),
     ...(Array.isArray(rideLegs) ? { rideLegs } : {}),
     ...(operationalContinuation ? { operationalContinuation } : {}),
+    ...(reviewContext ? { reviewContext } : {}),
     authoritativeSnapshot: true,
     financialSnapshotSource: 'backend_final',
     persistence,

@@ -615,7 +615,7 @@ function registerSocketActiveRideHandlers({
                     message: 'Distribuição financeira em processamento assíncrono'
                 },
                 completionType: 'INTERRUPTED_OPERATIONAL_ENDED',
-                settlement: {
+                settlement: result.data.settlement || {
                     estimatedRefund: result.data.interruption?.estimatedRefund || 0,
                     remainingReservedAmount: result.data.interruption?.remainingReservedAmount || 0
                 },
@@ -638,6 +638,102 @@ function registerSocketActiveRideHandlers({
             logError(error, 'Erro em respondOperationalContinuation', { bookingId: data.bookingId });
             socket.emit('rideOperationalContinuationError', {
                 error: 'Erro interno ao responder continuidade'
+            });
+        }
+    });
+
+    socket.on('endRideWithReview', async (data) => {
+        try {
+            const actorId = socket.userId || data.actorId || data.userId || socket.id;
+            const bookingId = data.bookingId;
+            const endLocation = data.endLocation || data.interruptionLocation;
+            const distanceKm = Number.parseFloat(data.distanceKm ?? data.distance ?? 0) || 0;
+            const durationSecs = Number.parseFloat(data.durationSecs ?? data.duration ?? 0) || 0;
+            const actorType = data.actorType || 'system';
+            const reviewCategory = data.reviewCategory || 'TECHNICAL_FAILURE';
+            const reason = data.reason || 'MANUAL_REVIEW_REQUIRED';
+            const note = String(data.note || '').trim();
+
+            if (!bookingId || !endLocation?.lat || !endLocation?.lng) {
+                socket.emit('endRideWithReviewError', {
+                    error: 'bookingId e endLocation são obrigatórios'
+                });
+                return;
+            }
+
+            const EndRideWithReviewCommand = require('../commands/EndRideWithReviewCommand');
+            const command = new EndRideWithReviewCommand({
+                bookingId,
+                actorId,
+                actorType,
+                endLocation,
+                distanceKm,
+                durationSecs,
+                reviewCategory,
+                reason,
+                note,
+                correlationId: bookingId
+            });
+
+            const result = await command.execute();
+            if (!result.success) {
+                socket.emit('endRideWithReviewError', {
+                    error: result.error || 'Erro ao encerrar corrida para revisão'
+                });
+                return;
+            }
+
+            const PaymentService = require('../services/payment-service');
+            const { buildTripCompletedPayload } = require('../utils/trip-completion-payload');
+            const paymentService = new PaymentService();
+            const fareBreakdown = paymentService.calculateFareBreakdownFromReais(
+                Number(result.data.finalFare || 0),
+                0
+            );
+            const redis = redisPool.getConnection();
+            const bookingSnapshot = await redis.hgetall(`booking:${bookingId}`);
+            const tripCompletedData = buildTripCompletedPayload({
+                bookingId,
+                message: 'Corrida encerrada e encaminhada para revisão manual',
+                bookingData: bookingSnapshot,
+                resultEndLocation: result.data.endLocation,
+                endLocation: result.data.endLocation,
+                distance: result.data.distance,
+                duration: result.data.duration,
+                fareBreakdown,
+                paymentDistribution: result.data.paymentDistribution,
+                completionType: 'EARLY_ENDED_REVIEW',
+                settlement: result.data.settlement,
+                rideLegs: result.data.rideLegs,
+                operationalContinuation: result.data.interruption || null,
+                reviewContext: result.data.reviewContext,
+                persistence: 'accepted_background'
+            });
+
+            if (result.data.driverId) {
+                io.to(`driver_${result.data.driverId}`).emit('tripCompleted', tripCompletedData);
+            }
+            if (result.data.customerId) {
+                io.to(`customer_${result.data.customerId}`).emit('tripCompleted', tripCompletedData);
+            }
+
+            socket.emit('rideEndedWithReview', {
+                success: true,
+                bookingId,
+                reviewContext: result.data.reviewContext,
+                settlement: result.data.settlement
+            });
+
+            const { scheduleMapH3Refresh } = require('../utils/map-h3-refresh-broadcaster');
+            scheduleMapH3Refresh(io, {
+                reason: 'trip_review_completed',
+                bookingId,
+                driverId: result.data.driverId || null
+            });
+        } catch (error) {
+            logError(error, 'Erro em endRideWithReview', { bookingId: data.bookingId });
+            socket.emit('endRideWithReviewError', {
+                error: 'Erro interno ao encerrar corrida para revisão'
             });
         }
     });
