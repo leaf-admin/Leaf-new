@@ -1,0 +1,144 @@
+{
+  "generatedAt": "2026-03-30T13:56:28.375Z",
+  "sourceLegacySurface": "legacy-runtime-surface-1774878950410.json",
+  "summary": {
+    "dirtyHotspots": 17,
+    "cleanHotspots": 5
+  },
+  "dirtyHotspots": [
+    {
+      "file": "routes/dashboard.js",
+      "totalMatches": 54,
+      "gitStatus": " M",
+      "dirty": true
+    },
+    {
+      "file": "routes/metrics.js",
+      "totalMatches": 13,
+      "gitStatus": " M",
+      "dirty": true
+    },
+    {
+      "file": "services/referral-program-state-service.js",
+      "totalMatches": 12,
+      "gitStatus": "??",
+      "dirty": true
+    },
+    {
+      "file": "services/promotion-service.js",
+      "totalMatches": 11,
+      "gitStatus": " M",
+      "dirty": true
+    },
+    {
+      "file": "server.vps.js",
+      "totalMatches": 9,
+      "gitStatus": " M",
+      "dirty": true
+    },
+    {
+      "file": "services/support-ticket-service.js",
+      "totalMatches": 9,
+      "gitStatus": "??",
+      "dirty": true
+    },
+    {
+      "file": "routes/account-routes.js",
+      "totalMatches": 7,
+      "gitStatus": " M",
+      "dirty": true
+    },
+    {
+      "file": "server.js",
+      "totalMatches": 7,
+      "gitStatus": " M",
+      "dirty": true
+    },
+    {
+      "file": "services/subscription-state-service.js",
+      "totalMatches": 7,
+      "gitStatus": "??",
+      "dirty": true
+    },
+    {
+      "file": "firebase-config.js",
+      "totalMatches": 6,
+      "gitStatus": " M",
+      "dirty": true
+    },
+    {
+      "file": "routes/drivers.js",
+      "totalMatches": 6,
+      "gitStatus": " M",
+      "dirty": true
+    },
+    {
+      "file": "services/driver-subscription-service.js",
+      "totalMatches": 5,
+      "gitStatus": "??",
+      "dirty": true
+    },
+    {
+      "file": "routes/referral-programs.js",
+      "totalMatches": 3,
+      "gitStatus": " M",
+      "dirty": true
+    },
+    {
+      "file": "services/daily-subscription-service.js",
+      "totalMatches": 3,
+      "gitStatus": " M",
+      "dirty": true
+    },
+    {
+      "file": "services/driver-application-service.js",
+      "totalMatches": 2,
+      "gitStatus": "??",
+      "dirty": true
+    },
+    {
+      "file": "bootstrap/register-runtime-endpoints.js",
+      "totalMatches": 1,
+      "gitStatus": " M",
+      "dirty": true
+    },
+    {
+      "file": "bootstrap/register-socket-legacy-bridge-handler.js",
+      "totalMatches": 1,
+      "gitStatus": " M",
+      "dirty": true
+    }
+  ],
+  "cleanHotspots": [
+    {
+      "file": "bootstrap/register-socket-update-location-handler.js",
+      "totalMatches": 3,
+      "gitStatus": "clean",
+      "dirty": false
+    },
+    {
+      "file": "bootstrap/register-socket-search-drivers-handler.js",
+      "totalMatches": 1,
+      "gitStatus": "clean",
+      "dirty": false
+    },
+    {
+      "file": "routes/woovi.js",
+      "totalMatches": 1,
+      "gitStatus": "clean",
+      "dirty": false
+    },
+    {
+      "file": "services/city-activation-state-service.js",
+      "totalMatches": 1,
+      "gitStatus": "clean",
+      "dirty": false
+    },
+    {
+      "file": "workers/cron-subscription.js",
+      "totalMatches": 1,
+      "gitStatus": "clean",
+      "dirty": false
+    }
+  ]
+}

@@ -150,6 +150,26 @@ describe('firebase-config legacy metrics', () => {
     }));
   });
 
+  test('registra set bem-sucedido no Realtime DB', async () => {
+    const firebaseConfig = loadModule();
+    firebaseConfig.getRealtimeDB();
+
+    const result = await firebaseConfig.setRealtimeDB('operations/test', {
+      enabled: true
+    });
+
+    expect(result).toBe(true);
+    expect(refMock).toHaveBeenCalledWith('operations/test');
+    expect(setMock).toHaveBeenCalledWith({
+      enabled: true
+    });
+    expect(metricsMock.recordLegacyDependencyAccess).toHaveBeenCalledWith(expect.objectContaining({
+      dependency: 'realtime_db',
+      operation: 'set',
+      result: 'success'
+    }));
+  });
+
   test('registra update raiz bem-sucedido no Realtime DB', async () => {
     const firebaseConfig = loadModule();
     firebaseConfig.getRealtimeDB();

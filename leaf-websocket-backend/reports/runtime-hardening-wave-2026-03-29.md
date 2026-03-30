@@ -391,6 +391,33 @@ Resultado acumulado desta wave:
   - esta passada não reduz legado sozinha, mas reduz bastante o risco de tocar em arquivos grandes já modificados por outras frentes
   - a próxima etapa passa a entrar nos hotspots sujos pelo menor diff pré-existente primeiro, em vez de atacar logo `dashboard.js` e `metrics.js`
 
+## Corte cirúrgico em arquivo misto: geofence-routes
+- `leaf-websocket-backend/routes/geofence-routes.js` era o primeiro hotspot sujo com diff paralelo pequeno o suficiente para um corte seguro
+- comportamento novo:
+  - `loadCityActivationConfig()` passou a usar `firebaseConfig.getFromRealtimeDB(CITY_ACTIVATION_DB_PATH)`
+  - `persistCityActivationConfig()` passou a usar `firebaseConfig.setRealtimeDB(CITY_ACTIVATION_DB_PATH, configToPersist)`
+  - `loadGeofenceAdminConfig()` passou a usar `firebaseConfig.getFromRealtimeDB(GEOFENCE_ADMIN_DB_PATH)`
+  - `persistGeofenceAdminConfig()` passou a usar `firebaseConfig.setRealtimeDB(GEOFENCE_ADMIN_DB_PATH, configToPersist)`
+  - a rota deixou de depender de uma instância local de `getRealtimeDB()`
+- borda nova do helper:
+  - `leaf-websocket-backend/firebase-config.js` ganhou `setRealtimeDB(path, data)`
+- teste novo:
+  - `tests/unit/firebase-config.unit.test.js` ganhou cobertura de `setRealtimeDB()`
+- validação:
+  - `node --check` dos arquivos alterados: `OK`
+  - Jest: `6/6` testes passando em `tests/unit/firebase-config.unit.test.js`
+- impacto medido no auditor:
+  - relatório anterior: `legacy-runtime-surface-1774878548474.md` com `95`
+  - relatório novo: `legacy-runtime-surface-1774878950410.md` com `89`
+  - `routes/geofence-routes.js` saiu completamente da categoria `rtdb_access`
+- impacto medido no auditor de hotspots mistos:
+  - relatório novo: `mixed-legacy-hotspots-1774878988375.md`
+  - `dirtyHotspots: 17`
+  - `cleanHotspots: 5`
+- leitura operacional:
+  - esta foi a primeira redução grande já dentro de um arquivo misto, sem arrastar o diff paralelo do worktree
+  - a estratégia de higiene funcionou: snapshot primeiro, corte cirúrgico depois, commit só com hunks nossos
+
 ## Riscos que continuam abertos
 - `server.vps.js`, `routes/dashboard.js` e `register-socket-create-booking-handler.js` continuam mistos com trabalho paralelo
 - baseline agora possui worker dedicado, mas ainda nao foi validado em Redis real local nesta maquina

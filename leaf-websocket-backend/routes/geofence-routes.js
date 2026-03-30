@@ -38,11 +38,12 @@ const DEFAULT_RJ_CITIES = [
 let inMemoryCityActivationConfig = null;
 let inMemoryGeofenceAdminConfig = null;
 
-function getRealtimeDB() {
-    if (!firebaseConfig || typeof firebaseConfig.getRealtimeDB !== 'function') {
-        return null;
-    }
-    return firebaseConfig.getRealtimeDB();
+function hasRealtimeConfigAccess() {
+    return !!(
+        firebaseConfig
+        && typeof firebaseConfig.getFromRealtimeDB === 'function'
+        && typeof firebaseConfig.setRealtimeDB === 'function'
+    );
 }
 
 function normalizeStateCode(value) {
@@ -271,22 +272,18 @@ function buildConfigResponse(cityActivationConfig) {
 }
 
 async function loadCityActivationConfig() {
-    const db = getRealtimeDB();
-
-    if (!db) {
+    if (!hasRealtimeConfigAccess()) {
         if (!inMemoryCityActivationConfig) {
             inMemoryCityActivationConfig = normalizeConfig(null);
         }
         return { config: deepClone(inMemoryCityActivationConfig), storage: 'memory' };
     }
 
-    const ref = db.ref(CITY_ACTIVATION_DB_PATH);
-    const snapshot = await ref.once('value');
-    const rawConfig = snapshot.val();
+    const rawConfig = await firebaseConfig.getFromRealtimeDB(CITY_ACTIVATION_DB_PATH);
     const normalized = normalizeConfig(rawConfig);
 
     if (!rawConfig) {
-        await ref.set(normalized);
+        await firebaseConfig.setRealtimeDB(CITY_ACTIVATION_DB_PATH, normalized);
         logStructured('info', 'Config geografia inicializada com base no RJ', {
             service: 'geofence-routes',
             path: CITY_ACTIVATION_DB_PATH
@@ -302,18 +299,15 @@ async function persistCityActivationConfig(configToPersist, storage) {
         return;
     }
 
-    const db = getRealtimeDB();
-    if (!db) {
+    if (!hasRealtimeConfigAccess()) {
         throw new Error('Firebase Realtime DB indisponivel');
     }
 
-    await db.ref(CITY_ACTIVATION_DB_PATH).set(configToPersist);
+    await firebaseConfig.setRealtimeDB(CITY_ACTIVATION_DB_PATH, configToPersist);
 }
 
 async function loadGeofenceAdminConfig() {
-    const db = getRealtimeDB();
-
-    if (!db) {
+    if (!hasRealtimeConfigAccess()) {
         if (!inMemoryGeofenceAdminConfig) {
             inMemoryGeofenceAdminConfig = applyGeofenceAdminConfig(normalizeGeofenceAdminConfig(null));
         } else {
@@ -322,14 +316,12 @@ async function loadGeofenceAdminConfig() {
         return { config: deepClone(inMemoryGeofenceAdminConfig), storage: 'memory' };
     }
 
-    const ref = db.ref(GEOFENCE_ADMIN_DB_PATH);
-    const snapshot = await ref.once('value');
-    const rawConfig = snapshot.val();
+    const rawConfig = await firebaseConfig.getFromRealtimeDB(GEOFENCE_ADMIN_DB_PATH);
     const normalized = normalizeGeofenceAdminConfig(rawConfig);
     const applied = applyGeofenceAdminConfig(normalized);
 
     if (!rawConfig) {
-        await ref.set(applied);
+        await firebaseConfig.setRealtimeDB(GEOFENCE_ADMIN_DB_PATH, applied);
         logStructured('info', 'Config geofence admin inicializada', {
             service: 'geofence-routes',
             path: GEOFENCE_ADMIN_DB_PATH
@@ -345,12 +337,11 @@ async function persistGeofenceAdminConfig(configToPersist, storage) {
         return;
     }
 
-    const db = getRealtimeDB();
-    if (!db) {
+    if (!hasRealtimeConfigAccess()) {
         throw new Error('Firebase Realtime DB indisponivel');
     }
 
-    await db.ref(GEOFENCE_ADMIN_DB_PATH).set(configToPersist);
+    await firebaseConfig.setRealtimeDB(GEOFENCE_ADMIN_DB_PATH, configToPersist);
 }
 
 function extractAdminId(req) {

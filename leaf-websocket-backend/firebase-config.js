@@ -444,6 +444,40 @@ async function updateRealtimeDB(path, data) {
     }
 }
 
+async function setRealtimeDB(path, data) {
+    try {
+        if (!realtimeDB) {
+            recordRealtimeDbMetric('set', 'unavailable');
+            logStructured('warn', 'Realtime Database não disponível', {
+                service: 'firebase',
+                operation: 'setRealtimeDB',
+                path
+            });
+            return false;
+        }
+
+        const ref = realtimeDB.ref(path);
+        await ref.set(data);
+        recordRealtimeDbMetric('set', 'success');
+
+        logStructured('info', 'Dados gravados no Realtime DB', {
+            service: 'firebase',
+            operation: 'setRealtimeDB',
+            path
+        });
+        return true;
+    } catch (error) {
+        recordRealtimeDbMetric('set', 'failure');
+        logStructured('error', 'Erro ao gravar dados no Realtime DB', {
+            service: 'firebase',
+            operation: 'setRealtimeDB',
+            path,
+            error: error.message
+        });
+        return false;
+    }
+}
+
 async function updateRealtimeDBRoot(updates) {
     try {
         if (!realtimeDB) {
@@ -488,6 +522,7 @@ module.exports = {
     syncTripData,
     getFromFirestore,
     getFromRealtimeDB,
+    setRealtimeDB,
     updateRealtimeDB,
     updateRealtimeDBRoot
 }; 
