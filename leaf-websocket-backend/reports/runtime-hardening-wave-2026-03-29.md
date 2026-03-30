@@ -192,6 +192,12 @@ Resultado acumulado desta wave:
   - agora temos telemetria central para medir o peso real do legado sem tocar primeiro nos arquivos mistos de maior risco
   - o relatório automatizado cria uma base objetiva para o desligamento progressivo do RTDB e dos fallbacks herdados
   - os maiores alvos de cleanup futuro ficaram identificados com prioridade clara
+- fechamento de rollout:
+  - o deploy canônico foi ajustado para sincronizar `firebase-config.js` e `scripts/ops/report-legacy-runtime-surface.cjs`
+  - validacao remota apos rollout:
+    - `firebase-config.js` remoto passou a conter `recordLegacyDependencyAccess`
+    - `docker exec leaf-websocket curl http://127.0.0.1:3001/health/liveness` respondeu `{\"status\":\"alive\"...}`
+    - `POST /api/pricing/quote` publico permaneceu respondendo `200`
 
 ## Riscos que continuam abertos
 - `server.vps.js`, `routes/dashboard.js` e `register-socket-create-booking-handler.js` continuam mistos com trabalho paralelo
