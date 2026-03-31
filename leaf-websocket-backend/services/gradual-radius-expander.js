@@ -53,7 +53,11 @@ class GradualRadiusExpander {
             expansionInterval: parsePositiveNumber(process.env.MATCH_EXPANSION_INTERVAL_MS, isTest ? 1000 : 8000),
             maxWaves: 60,
             searchStateTTL: 3600, // 1h
-            driversPerWave: Number.parseInt(process.env.MATCH_DRIVERS_PER_WAVE || (isTest ? '1' : '12'), 10)
+            driversPerWave: Number.parseInt(process.env.MATCH_DRIVERS_PER_WAVE || (isTest ? '1' : '12'), 10),
+            driverResponseWaitMs: Math.max(
+                1000,
+                parsePositiveNumber(process.env.DISPATCH_DRIVER_RESPONSE_TIMEOUT_SECONDS, 8) * 1000
+            )
         };
     }
 
@@ -193,7 +197,7 @@ class GradualRadiusExpander {
             await this.redis.expire(searchKey, 3600); // 1h de TTL de segurança
 
             // Primeira busca imediata (0.5km)
-            await this.searchAndNotify(
+            const initialResult = await this.searchAndNotify(
                 bookingId,
                 pickupLocation,
                 this.config.initialRadius,
@@ -213,12 +217,22 @@ class GradualRadiusExpander {
             // For now, I'm only adding the log as requested and omitting the structural changes that would break the current flow.
 
             // Agendar próxima expansão
+            const nextInterval = initialResult.notified > 0
+                ? this.config.driverResponseWaitMs
+                : this.config.expansionInterval;
+
+            if (initialResult.notified > 0) {
+                logger.info(
+                    `⏸️ [GradualExpander] ${initialResult.notified} motorista(s) já foram notificados para ${bookingId}. Aguardando ${nextInterval}ms antes da próxima wave.`
+                );
+            }
+
             this.scheduleNextExpansion(
                 bookingId,
                 pickupLocation,
                 this.config.initialRadius + this.config.expansionStep,
                 this.config.maxRadius,
-                this.config.expansionInterval,
+                nextInterval,
                 this.config.driversPerWave
             );
 
@@ -412,8 +426,22 @@ class GradualRadiusExpander {
                     }
                 );
 
+                const hasPendingDrivers = result.notified > 0;
+
+                if (hasPendingDrivers && nextRadius < maxRadius) {
+                    logger.info(
+                        `⏸️ [GradualExpander] ${result.notified} motorista(s) aguardando resposta para ${bookingId}. Próxima wave em ${this.config.driverResponseWaitMs}ms.`
+                    );
+                    this.scheduleNextExpansion(
+                        bookingId,
+                        pickupLocation,
+                        nextRadius + this.config.expansionStep,
+                        maxRadius,
+                        this.config.driverResponseWaitMs,
+                        limit
+                    );
                 // Se nenhum motorista foi encontrado, expandir mais rápido (100ms em vez de 0 para evitar starvation)
-                if (result.total === 0 && nextRadius < maxRadius) {
+                } else if (result.total === 0 && nextRadius < maxRadius) {
                     logger.debug(`⚡ [GradualExpander] Raio vazio em ${nextRadius}km, expandindo em 100ms`);
                     this.scheduleNextExpansion(
                         bookingId,

@@ -1747,6 +1747,41 @@ const saveDriverLocation = async (
         }
 
         const existingDriverState = await getDriverStateHot(redis, driverId, preloadedDriverState);
+        let driverProfilePatch = {};
+
+        if (
+            !existingDriverState?.carType ||
+            !existingDriverState?.vehicleCategory ||
+            existingDriverState?.driverApproved === undefined ||
+            existingDriverState?.vehicleApproved === undefined
+        ) {
+            try {
+                const driverEligibilityService = require('./services/driver-eligibility-service');
+                const resolvedProfile = await driverEligibilityService.resolveDriverProfile(driverId, existingDriverState);
+                if (resolvedProfile) {
+                    driverProfilePatch = {
+                        driverApproved: String(resolvedProfile.driverApproved !== false),
+                        vehicleApproved: String(resolvedProfile.vehicleApproved !== false),
+                        carType: resolvedProfile.carType || existingDriverState?.carType || '',
+                        vehicleCategory:
+                            resolvedProfile.vehicleCategory || existingDriverState?.vehicleCategory || '',
+                        acceptsPlusWithElite: String(resolvedProfile.acceptsPlusWithElite !== false),
+                        assignmentConflict: String(resolvedProfile.assignmentConflict === true),
+                        ...(resolvedProfile.vehiclePlate
+                            ? { vehiclePlate: resolvedProfile.vehiclePlate }
+                            : existingDriverState?.vehiclePlate
+                              ? { vehiclePlate: existingDriverState.vehiclePlate }
+                              : {})
+                    };
+                }
+            } catch (profileError) {
+                logStructured('warn', 'Falha ao enriquecer metadados de veículo do motorista no hotpath', {
+                    service: 'server',
+                    driverId,
+                    error: profileError.message
+                });
+            }
+        }
 
         // 1. Construir patch completo de status
         const driverStatus = {
@@ -1761,7 +1796,7 @@ const saveDriverLocation = async (
             timestamp: timestamp.toString(),
             lastSeen: new Date().toISOString()
         };
-        const mergedDriverState = { ...existingDriverState, ...driverStatus };
+        const mergedDriverState = { ...existingDriverState, ...driverProfilePatch, ...driverStatus };
         const eligibility = computeDispatchEligibilityFromState(mergedDriverState, isOnline, isInTrip);
         const dispatchPatch = {
             dispatchEligible: eligibility.eligible ? 'true' : 'false',
@@ -1771,7 +1806,7 @@ const saveDriverLocation = async (
 
         // ✅ OTIMIZAÇÃO: consolidar mutações em um único pipeline.
         const pipeline = redis.pipeline();
-        pipeline.hset(driverKey, { ...driverStatus, ...dispatchPatch });
+        pipeline.hset(driverKey, { ...driverStatus, ...driverProfilePatch, ...dispatchPatch });
 
         if (isOnline) {
             // 2. Motorista ONLINE: adicionar/atualizar no GEO ativo (para match rápido)
