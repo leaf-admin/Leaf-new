@@ -29,7 +29,7 @@ import RNPickerSelect from './RNPickerSelect';
 import Emptylist from './Emptylist';
 import { fonts } from '../common/font';
 import { getLangKey } from '../common-local/other/getLangKey';
-import MapView, { Marker, Polyline } from 'react-native-maps';
+import MapView, { Marker, Polyline, PROVIDER_GOOGLE } from 'react-native-maps';
 
 export default function RideList(props) {
     // Função de tradução segura - compatível com i18n antigo e novo
@@ -157,6 +157,7 @@ export default function RideList(props) {
                         <View style={styles.mapContainer}>
                             <MapView
                                 style={styles.map}
+                                provider={PROVIDER_GOOGLE}
                                 initialRegion={{
                                     latitude: item.pickup.lat,
                                     longitude: item.pickup.lng,

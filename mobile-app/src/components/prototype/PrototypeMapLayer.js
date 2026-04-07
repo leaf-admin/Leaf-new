@@ -4,11 +4,41 @@ import { Ionicons } from '@expo/vector-icons';
 import MapView, { Circle, Marker, Polyline, PROVIDER_GOOGLE } from 'react-native-maps';
 import mapStyleAppleLike from './mapStyleAppleLike';
 import robotaxiPrototypeTokens from '../design-system/robotaxiPrototypeTokens';
-import profilePic from '../../../assets/images/profilePic.png';
 
 const { color, motion } = robotaxiPrototypeTokens;
 const ROUTE_ANIMATION_DURATION = motion.timing.map;
 const POINTS_PER_SEGMENT = 18;
+
+function resolveAvatarInitial(value) {
+  return String(value || 'L').trim().charAt(0).toUpperCase() || 'L';
+}
+
+function resolveProjectedOverlayPointWithinSafeZones(point, width, height) {
+  if (!point || !Number.isFinite(width) || !Number.isFinite(height)) {
+    return point;
+  }
+
+  const nextPoint = { ...point };
+  const topSafeMaxY = 124;
+  const sideSafeX = 88;
+  const minX = 28;
+  const maxX = width - 28;
+  const minY = 28;
+  const maxY = Math.max(56, height - 320);
+
+  if (nextPoint.y <= topSafeMaxY && nextPoint.x <= sideSafeX) {
+    nextPoint.x = sideSafeX;
+    nextPoint.y = Math.max(topSafeMaxY + 8, nextPoint.y);
+  } else if (nextPoint.y <= topSafeMaxY && nextPoint.x >= width - sideSafeX) {
+    nextPoint.x = width - sideSafeX;
+    nextPoint.y = Math.max(topSafeMaxY + 8, nextPoint.y);
+  }
+
+  nextPoint.x = Math.min(Math.max(nextPoint.x, minX), maxX);
+  nextPoint.y = Math.min(Math.max(nextPoint.y, minY), maxY);
+  return nextPoint;
+}
+
 function densifyPath(path = [], pointsPerSegment = POINTS_PER_SEGMENT) {
   if (!Array.isArray(path) || path.length < 2) {
     return [];
@@ -48,6 +78,7 @@ function isValidMapRegion(candidate) {
 const IOSUserMarkerContent = React.memo(function IOSUserMarkerContent({
   rotationDegrees,
   avatarSource,
+  avatarLetter,
   onAvatarError
 }) {
   return (
@@ -55,23 +86,30 @@ const IOSUserMarkerContent = React.memo(function IOSUserMarkerContent({
       <View style={[styles.userArrowOrbit, { transform: [{ rotate: `${rotationDegrees}deg` }] }]} pointerEvents="none">
         <Ionicons name="caret-up" size={14} color={color.accent.primary} style={styles.userArrow} />
       </View>
-      <Image
-        source={avatarSource}
-        defaultSource={profilePic}
-        style={styles.avatarImage}
-        resizeMode="cover"
-        fadeDuration={0}
-        onError={onAvatarError}
-      />
+      <View style={styles.avatarFallbackCircle}>
+        <Text style={styles.avatarFallbackLetter}>
+          {resolveAvatarInitial(avatarLetter)}
+        </Text>
+        {avatarSource ? (
+          <Image
+            source={avatarSource}
+            style={styles.avatarImage}
+            resizeMode="cover"
+            fadeDuration={0}
+            onError={onAvatarError}
+          />
+        ) : null}
+      </View>
     </View>
   );
 });
 
-const AndroidUserOverlay = React.memo(function AndroidUserOverlay({
+const FloatingUserOverlay = React.memo(function FloatingUserOverlay({
   pointX,
   pointY,
   rotationDegrees,
   avatarSource,
+  avatarLetter,
   onAvatarError
 }) {
   return (
@@ -94,14 +132,20 @@ const AndroidUserOverlay = React.memo(function AndroidUserOverlay({
         >
           <Ionicons name="caret-up" size={18} color={color.accent.primary} style={styles.androidUserOverlayArrow} />
         </View>
-        <Image
-          source={avatarSource}
-          defaultSource={profilePic}
-          style={styles.androidUserOverlayAvatar}
-          resizeMode="cover"
-          fadeDuration={0}
-          onError={onAvatarError}
-        />
+        <View style={styles.androidAvatarFallbackCircle}>
+          <Text style={styles.avatarFallbackLetter}>
+            {resolveAvatarInitial(avatarLetter)}
+          </Text>
+          {avatarSource ? (
+            <Image
+              source={avatarSource}
+              style={styles.androidUserOverlayAvatar}
+              resizeMode="cover"
+              fadeDuration={0}
+              onError={onAvatarError}
+            />
+          ) : null}
+        </View>
       </View>
     </View>
   );
@@ -119,18 +163,27 @@ function PrototypeMapLayer({
   searchingMode = false,
   searchCenterCoordinate,
   searchRadiusKm = null,
+  searchPreviewRadiusKm = null,
   nearbyVehicles = [],
   routeCoordinates,
   destinationCoordinate,
   destinationLabel,
   destinationAddress,
+  originLabel = '',
+  originAddress = '',
   onMapLayout,
   onMapPanDrag,
   onRegionChangeComplete,
   mapChildren,
-  children
+  children,
+  mapSafetyProfile = 'default',
+  interactionEnabled = true
 }) {
-  const iosMapSafeMode = __DEV__ && Platform.OS === 'ios';
+  const iosMapSafeMode = Platform.OS === 'ios' && mapSafetyProfile === 'driver';
+  const mapProvider =
+    Platform.OS === 'ios' || Platform.OS === 'android'
+      ? PROVIDER_GOOGLE
+      : undefined;
   const windowLayout = useWindowDimensions();
   const markerCoordinate = userCoordinate || region;
   const hasDriverCoordinate =
@@ -142,8 +195,14 @@ function PrototypeMapLayer({
     Number.isFinite(searchCenterCoordinate?.latitude) &&
     Number.isFinite(searchCenterCoordinate?.longitude);
   const hasSearchRadius = Number.isFinite(searchRadiusKm) && searchRadiusKm > 0;
+  const hasSearchPreviewRadius =
+    Number.isFinite(searchPreviewRadiusKm) &&
+    searchPreviewRadiusKm > 0 &&
+    searchPreviewRadiusKm > (searchRadiusKm || 0) + 0.04;
   const searchRadiusMeters = hasSearchRadius ? Math.round(searchRadiusKm * 1000) : 0;
-  const isExpandedSearchStage = hasSearchRadius && searchRadiusKm >= 4.9;
+  const searchPreviewRadiusMeters = hasSearchPreviewRadius
+    ? Math.round(searchPreviewRadiusKm * 1000)
+    : 0;
   const normalizedUserHeading = useMemo(() => {
     const heading = Number(userHeading);
     if (!Number.isFinite(heading)) {
@@ -154,6 +213,9 @@ function PrototypeMapLayer({
     return normalized < 0 ? normalized + 360 : normalized;
   }, [userHeading]);
   const hasRoute = Array.isArray(routeCoordinates) && routeCoordinates.length >= 2;
+  const iosLifecycleSafeMode =
+    Platform.OS === 'ios' && (searchingMode || hasDriverCoordinate || hasRoute);
+  const useSimplifiedIosMap = iosMapSafeMode || iosLifecycleSafeMode;
   const hasDestination = Boolean(destinationCoordinate) && Number.isFinite(destinationCoordinate?.latitude) && Number.isFinite(destinationCoordinate?.longitude);
   const denseRoute = useMemo(() => densifyPath(routeCoordinates), [routeCoordinates]);
   const normalizedNearbyVehicles = useMemo(() => {
@@ -175,7 +237,7 @@ function PrototypeMapLayer({
   const normalizedAvatarUri = String(userAvatarUri || '').trim();
   const shouldRenderAvatarImage = Boolean(normalizedAvatarUri) && !userAvatarFailed;
   const resolvedAvatarSource = useMemo(() => {
-    return shouldRenderAvatarImage ? { uri: normalizedAvatarUri } : profilePic;
+    return shouldRenderAvatarImage ? { uri: normalizedAvatarUri } : null;
   }, [normalizedAvatarUri, shouldRenderAvatarImage]);
   const userMarkerTracksViewChanges = Platform.OS === 'android';
   const handleAvatarError = useCallback(() => {
@@ -210,8 +272,12 @@ function PrototypeMapLayer({
     });
   }, []);
 
-  const androidUserOverlayPoint = useMemo(() => {
-    const projectionRegion = androidVisibleRegion || region;
+  // Keep the user avatar tied to the real map coordinate on iOS.
+  // The projected overlay is only needed for the Android screen-space marker path.
+  const shouldRenderProjectedUserOverlay = Platform.OS === 'android';
+  const projectedUserOverlayPoint = useMemo(() => {
+    const projectionRegion =
+      Platform.OS === 'android' ? androidVisibleRegion || region : region;
     const resolvedWidth =
       Number.isFinite(androidMapLayout.width) && androidMapLayout.width > 0
         ? androidMapLayout.width
@@ -227,7 +293,7 @@ function PrototypeMapLayer({
       resolvedHeight > 0;
     const maxVisibleY = hasLayout ? Math.max(56, resolvedHeight - 320) : 0;
 
-    if (Platform.OS !== 'android' || !hasLayout) {
+    if (!shouldRenderProjectedUserOverlay || !hasLayout) {
       return null;
     }
 
@@ -259,10 +325,10 @@ function PrototypeMapLayer({
       return centerFallbackPoint;
     }
 
-      return {
+    return resolveProjectedOverlayPointWithinSafeZones({
       x: Math.min(Math.max(x, 28), resolvedWidth - 28),
       y: Math.min(Math.max(y, 28), maxVisibleY)
-    };
+    }, resolvedWidth, resolvedHeight);
   }, [
     androidMapLayout.height,
     androidMapLayout.width,
@@ -273,6 +339,7 @@ function PrototypeMapLayer({
     region?.latitudeDelta,
     region?.longitude,
     region?.longitudeDelta,
+    shouldRenderProjectedUserOverlay,
     windowLayout.height,
     windowLayout.width
   ]);
@@ -311,174 +378,207 @@ function PrototypeMapLayer({
 
   return (
     <View style={styles.mapArea}>
-      <MapView
-        ref={mapRef}
+      <View
+        pointerEvents={interactionEnabled ? 'auto' : 'none'}
         style={StyleSheet.absoluteFillObject}
-        onRegionChange={scheduleAndroidVisibleRegionUpdate}
-        onRegionChangeComplete={nextRegion => {
-          scheduleAndroidVisibleRegionUpdate(nextRegion);
-          if (typeof onRegionChangeComplete === 'function') {
-            onRegionChangeComplete(nextRegion);
-          }
-        }}
-        onPanDrag={onMapPanDrag}
         onLayout={event => {
           onMapLayout?.(event);
           const width = event?.nativeEvent?.layout?.width;
           const height = event?.nativeEvent?.layout?.height;
           if (Number.isFinite(width) && Number.isFinite(height) && width > 0 && height > 0) {
-            setAndroidMapLayout({ width, height });
+            setAndroidMapLayout(previous => {
+              if (previous.width === width && previous.height === height) {
+                return previous;
+              }
+
+              return { width, height };
+            });
           }
         }}
-        provider={Platform.OS === 'android' ? PROVIDER_GOOGLE : undefined}
-        initialRegion={region}
-        mapType="standard"
-        customMapStyle={mapStyleAppleLike}
-        rotateEnabled
-        pitchEnabled={false}
-        toolbarEnabled={false}
-        showsCompass={false}
-        showsUserLocation={false}
-        showsMyLocationButton={false}
-        showsTraffic={Boolean(showTraffic)}
       >
-        {!iosMapSafeMode && searchingMode && hasSearchCenter && hasSearchRadius && isExpandedSearchStage ? (
-          <Circle
-            key="search-radius-outer"
-            center={searchCenterCoordinate}
-            radius={2500}
-            strokeWidth={1}
-            strokeColor="rgba(54,65,78,0.22)"
-            fillColor="rgba(54,65,78,0.06)"
-          />
-        ) : null}
-
-        {!iosMapSafeMode && searchingMode && hasSearchCenter && hasSearchRadius ? (
-          <Circle
-            key="search-radius-current"
-            center={searchCenterCoordinate}
-            radius={searchRadiusMeters}
-            strokeWidth={1.2}
-            strokeColor="rgba(17,26,39,0.28)"
-            fillColor="rgba(17,26,39,0.08)"
-          />
-        ) : null}
-
-        {!iosMapSafeMode && hasRoute && animatedRouteCoordinates.length >= 2 ? (
-          <Polyline
-            key="route-shadow"
-            coordinates={animatedRouteCoordinates}
-            strokeColor="rgba(26,51,14,0.26)"
-            strokeWidth={8}
-            lineCap="round"
-            lineJoin="round"
-          />
-        ) : null}
-
-        {!iosMapSafeMode && hasRoute && animatedRouteCoordinates.length >= 2 ? (
-          <Polyline
-            key="route-main"
-            coordinates={animatedRouteCoordinates}
-            strokeColor={color.accent.primary}
-            strokeWidth={5}
-            lineCap="round"
-            lineJoin="round"
-          />
-        ) : null}
-
-        {!iosMapSafeMode && hasDestination ? (
-          <Marker
-            key="destination-marker"
-            coordinate={{ latitude: destinationCoordinate.latitude, longitude: destinationCoordinate.longitude }}
-            zIndex={18}
-            tracksViewChanges={false}
-          >
-            <View style={styles.destinationMarkerWrap}>
-              <View style={styles.destinationAvatar}>
-                <Ionicons name="business-outline" size={16} color="#667180" />
-              </View>
-            </View>
-
-            {showMarkerCallouts ? (
-              <View style={styles.calloutBubble}>
-                <Text style={styles.calloutTitle}>{destinationLabel || 'Destino'}</Text>
-                <Text style={styles.calloutAddress}>{destinationAddress || 'Endereço de destino'}</Text>
-              </View>
-            ) : null}
-          </Marker>
-        ) : null}
-
-        {!iosMapSafeMode && hasDriverCoordinate ? (
-          <Marker
-            key="driver-marker"
-            coordinate={{ latitude: driverCoordinate.latitude, longitude: driverCoordinate.longitude }}
-            zIndex={19}
-            anchor={{ x: 0.5, y: 0.5 }}
-            tracksViewChanges={false}
-          >
-            <View style={styles.driverMarker}>
-              <Ionicons name="car-sport" size={16} color="#22303D" />
-            </View>
-          </Marker>
-        ) : null}
-
-        {!iosMapSafeMode && searchingMode
-          ? normalizedNearbyVehicles.map((vehicle, index) => {
-              const id = String(vehicle.id || '');
-              const isOuterVehicle = id.startsWith('outer');
-              const lat = Number(vehicle.coordinate.latitude).toFixed(6);
-              const lng = Number(vehicle.coordinate.longitude).toFixed(6);
-              return (
-                <Marker
-                  key={`nearby-${id || 'vehicle'}-${index}-${lat}-${lng}`}
-                  coordinate={{
-                    latitude: vehicle.coordinate.latitude,
-                    longitude: vehicle.coordinate.longitude
-                  }}
-                  zIndex={16}
-                  anchor={{ x: 0.5, y: 0.5 }}
-                  tracksViewChanges={false}
-                >
-                  <View style={[styles.nearbyVehicleMarker, isOuterVehicle && styles.nearbyVehicleMarkerOuter]}>
-                    <Ionicons name="car-sport-outline" size={13} color="#1D2733" />
-                  </View>
-                </Marker>
-              );
-            })
-          : null}
-
-        {Platform.OS !== 'android' ? (
-          <Marker
-            key="user-marker"
-            coordinate={{ latitude: markerCoordinate.latitude, longitude: markerCoordinate.longitude }}
-            zIndex={20}
-            anchor={{ x: 0.5, y: 0.5 }}
-            tracksViewChanges={userMarkerTracksViewChanges}
-          >
-            <IOSUserMarkerContent
-              rotationDegrees={normalizedUserHeading}
-              avatarSource={resolvedAvatarSource}
-              onAvatarError={handleAvatarError}
+        <MapView
+          ref={mapRef}
+          style={StyleSheet.absoluteFillObject}
+          onRegionChange={scheduleAndroidVisibleRegionUpdate}
+          onRegionChangeComplete={nextRegion => {
+            scheduleAndroidVisibleRegionUpdate(nextRegion);
+            if (typeof onRegionChangeComplete === 'function') {
+              onRegionChangeComplete(nextRegion);
+            }
+          }}
+          onPanDrag={interactionEnabled ? onMapPanDrag : undefined}
+          provider={mapProvider}
+          initialRegion={region}
+          mapType="standard"
+          customMapStyle={mapStyleAppleLike}
+          scrollEnabled={interactionEnabled}
+          zoomEnabled={interactionEnabled}
+          rotateEnabled={interactionEnabled}
+          pitchEnabled={false}
+          toolbarEnabled={false}
+          showsCompass={false}
+          showsUserLocation={false}
+          showsMyLocationButton={false}
+          showsTraffic={Boolean(showTraffic)}
+        >
+          {!useSimplifiedIosMap && searchingMode && hasSearchCenter && hasSearchPreviewRadius ? (
+            <Circle
+              key="search-radius-preview"
+              center={searchCenterCoordinate}
+              radius={searchPreviewRadiusMeters}
+              strokeWidth={1}
+              strokeColor="rgba(13,148,136,0.20)"
+              fillColor="rgba(45,212,191,0.04)"
             />
+          ) : null}
 
-            {showMarkerCallouts ? (
-              <View style={styles.calloutBubble}>
-                <Text style={styles.calloutTitle}>Você está aqui</Text>
-                <Text style={styles.calloutAddress}>1540 Mission St, San Francisco</Text>
+          {!useSimplifiedIosMap && searchingMode && hasSearchCenter && hasSearchRadius ? (
+            <Circle
+              key="search-radius-current"
+              center={searchCenterCoordinate}
+              radius={searchRadiusMeters}
+              strokeWidth={1.7}
+              strokeColor="rgba(13,148,136,0.46)"
+              fillColor="rgba(45,212,191,0.12)"
+            />
+          ) : null}
+
+          {!useSimplifiedIosMap && hasRoute && animatedRouteCoordinates.length >= 2 ? (
+            <Polyline
+              key="route-shadow"
+              coordinates={animatedRouteCoordinates}
+              strokeColor="rgba(7,22,39,0.24)"
+              strokeWidth={12}
+              lineCap="round"
+              lineJoin="round"
+            />
+          ) : null}
+
+          {hasRoute && animatedRouteCoordinates.length >= 2 ? (
+            <Polyline
+              key="route-main"
+              coordinates={animatedRouteCoordinates}
+              strokeColor={useSimplifiedIosMap ? "#E85D04" : "#F97316"}
+              strokeWidth={useSimplifiedIosMap ? 5 : 7}
+              lineCap="round"
+              lineJoin="round"
+            />
+          ) : null}
+
+          {!useSimplifiedIosMap && hasRoute && animatedRouteCoordinates.length >= 2 ? (
+            <Polyline
+              key="route-highlight"
+              coordinates={animatedRouteCoordinates}
+              strokeColor="#FED7AA"
+              strokeWidth={2.6}
+              lineCap="round"
+              lineJoin="round"
+            />
+          ) : null}
+
+          {hasDestination && !useSimplifiedIosMap ? (
+            <Marker
+              key="destination-marker"
+              coordinate={{ latitude: destinationCoordinate.latitude, longitude: destinationCoordinate.longitude }}
+              zIndex={18}
+              tracksViewChanges={false}
+              pinColor={undefined}
+            >
+              <>
+                <View style={styles.destinationMarkerWrap}>
+                  <View style={styles.destinationAvatar}>
+                    <Ionicons name="business-outline" size={16} color="#667180" />
+                  </View>
+                </View>
+
+                {showMarkerCallouts ? (
+                  <View style={styles.calloutBubble}>
+                    <Text style={styles.calloutTitle}>{destinationLabel || 'Chegada'}</Text>
+                    <Text style={styles.calloutAddress}>{destinationAddress || 'Endereço de destino'}</Text>
+                  </View>
+                ) : null}
+              </>
+            </Marker>
+          ) : null}
+
+          {hasDriverCoordinate && !useSimplifiedIosMap ? (
+            <Marker
+              key="driver-marker"
+              coordinate={{ latitude: driverCoordinate.latitude, longitude: driverCoordinate.longitude }}
+              zIndex={19}
+              anchor={{ x: 0.5, y: 0.5 }}
+              tracksViewChanges={false}
+              pinColor={undefined}
+            >
+              <View style={styles.driverMarker}>
+                <Ionicons name="car-sport" size={16} color="#22303D" />
               </View>
-            ) : null}
-          </Marker>
-        ) : null}
+            </Marker>
+          ) : null}
 
-        {!iosMapSafeMode ? mapChildren : null}
-      </MapView>
+          {!useSimplifiedIosMap && searchingMode
+            ? normalizedNearbyVehicles.map((vehicle, index) => {
+                const id = String(vehicle.id || '');
+                const isOuterVehicle = id.startsWith('outer');
+                const lat = Number(vehicle.coordinate.latitude).toFixed(6);
+                const lng = Number(vehicle.coordinate.longitude).toFixed(6);
+                return (
+                  <Marker
+                    key={`nearby-${id || 'vehicle'}-${index}-${lat}-${lng}`}
+                    coordinate={{
+                      latitude: vehicle.coordinate.latitude,
+                      longitude: vehicle.coordinate.longitude
+                    }}
+                    zIndex={16}
+                    anchor={{ x: 0.5, y: 0.5 }}
+                    tracksViewChanges={false}
+                  >
+                    <View style={[styles.nearbyVehicleMarker, isOuterVehicle && styles.nearbyVehicleMarkerOuter]}>
+                      <Ionicons name="car-sport-outline" size={13} color="#1D2733" />
+                    </View>
+                  </Marker>
+                );
+              })
+            : null}
 
-      {Platform.OS === 'android' && androidUserOverlayPoint ? (
-        <AndroidUserOverlay
-          pointX={androidUserOverlayPoint.x}
-          pointY={androidUserOverlayPoint.y}
+          {Platform.OS !== 'android' ? (
+            <Marker
+              key="user-marker"
+              coordinate={{ latitude: markerCoordinate.latitude, longitude: markerCoordinate.longitude }}
+              zIndex={20}
+              anchor={{ x: 0.5, y: 0.5 }}
+              tracksViewChanges={userMarkerTracksViewChanges}
+              pinColor={undefined}
+            >
+              <>
+                <IOSUserMarkerContent
+                  rotationDegrees={normalizedUserHeading}
+                  avatarSource={resolvedAvatarSource}
+                  avatarLetter={userAvatarLetter}
+                  onAvatarError={handleAvatarError}
+                />
+
+                {showMarkerCallouts ? (
+                  <View style={styles.calloutBubble}>
+                    <Text style={styles.calloutTitle}>{originLabel || 'Partida'}</Text>
+                    <Text style={styles.calloutAddress}>{originAddress || 'Sua localização atual'}</Text>
+                  </View>
+                ) : null}
+              </>
+            </Marker>
+          ) : null}
+
+            {!useSimplifiedIosMap ? mapChildren : null}
+        </MapView>
+      </View>
+
+      {shouldRenderProjectedUserOverlay && projectedUserOverlayPoint ? (
+        <FloatingUserOverlay
+          pointX={projectedUserOverlayPoint.x}
+          pointY={projectedUserOverlayPoint.y}
           rotationDegrees={normalizedUserHeading}
           avatarSource={resolvedAvatarSource}
+          avatarLetter={userAvatarLetter}
           onAvatarError={handleAvatarError}
         />
       ) : null}
@@ -494,6 +594,110 @@ const styles = StyleSheet.create({
   mapArea: {
     ...StyleSheet.absoluteFillObject,
     backgroundColor: color.bg.map
+  },
+  simulatorMapFallback: {
+    ...StyleSheet.absoluteFillObject,
+    overflow: 'hidden',
+    backgroundColor: color.bg.map
+  },
+  simulatorMapGlowTop: {
+    position: 'absolute',
+    top: -48,
+    left: -24,
+    right: '34%',
+    height: 180,
+    borderRadius: 999,
+    backgroundColor: 'rgba(42, 77, 29, 0.12)'
+  },
+  simulatorMapGlowBottom: {
+    position: 'absolute',
+    right: -40,
+    bottom: 120,
+    width: 220,
+    height: 220,
+    borderRadius: 999,
+    backgroundColor: 'rgba(232, 93, 4, 0.10)'
+  },
+  simulatorMapGrid: {
+    ...StyleSheet.absoluteFillObject
+  },
+  simulatorMapGridLineHorizontal: {
+    position: 'absolute',
+    left: 20,
+    right: 20,
+    top: '24%',
+    borderTopWidth: 1,
+    borderColor: 'rgba(17,26,39,0.08)'
+  },
+  simulatorMapGridLineHorizontalMid: {
+    top: '58%'
+  },
+  simulatorMapGridLineVertical: {
+    position: 'absolute',
+    top: 20,
+    bottom: 20,
+    left: '28%',
+    borderLeftWidth: 1,
+    borderColor: 'rgba(17,26,39,0.08)'
+  },
+  simulatorMapGridLineVerticalRight: {
+    left: '71%'
+  },
+  simulatorRouteBand: {
+    position: 'absolute',
+    left: 48,
+    right: 84,
+    top: '44%',
+    height: 6,
+    borderRadius: 999,
+    backgroundColor: '#E85D04',
+    transform: [{ rotate: '-18deg' }],
+    shadowColor: color.shadow.base,
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.14,
+    shadowRadius: 16
+  },
+  simulatorFallbackLegend: {
+    position: 'absolute',
+    left: 18,
+    right: 18,
+    top: 18,
+    gap: 10
+  },
+  simulatorFallbackChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'flex-start',
+    gap: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 999,
+    backgroundColor: 'rgba(255,255,255,0.88)',
+    borderWidth: 1,
+    borderColor: color.border.subtle
+  },
+  simulatorFallbackChipText: {
+    maxWidth: 210,
+    color: color.text.secondary,
+    fontSize: 12,
+    fontWeight: '600'
+  },
+  simulatorFallbackFootnote: {
+    position: 'absolute',
+    left: 18,
+    right: 18,
+    bottom: 22,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    borderRadius: 18,
+    backgroundColor: 'rgba(255,255,255,0.84)',
+    borderWidth: 1,
+    borderColor: color.border.subtle
+  },
+  simulatorFallbackFootnoteText: {
+    color: color.text.muted,
+    fontSize: 11,
+    lineHeight: 15
   },
   userMarkerWrap: {
     width: 58,
@@ -566,6 +770,7 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(22,31,43,0.12)'
   },
   avatarImage: {
+    position: 'absolute',
     width: 54,
     height: 54,
     borderRadius: 27,
@@ -573,10 +778,27 @@ const styles = StyleSheet.create({
     borderWidth: 4,
     borderColor: 'rgba(255,255,255,0.96)'
   },
+  avatarFallbackCircle: {
+    width: 54,
+    height: 54,
+    borderRadius: 27,
+    backgroundColor: '#DCE7D5',
+    borderWidth: 4,
+    borderColor: 'rgba(255,255,255,0.96)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    overflow: 'hidden'
+  },
+  avatarFallbackLetter: {
+    color: '#203123',
+    fontSize: 18,
+    lineHeight: 20,
+    fontWeight: '700'
+  },
   androidUserOverlayLayer: {
     ...StyleSheet.absoluteFillObject,
-    zIndex: 30,
-    elevation: 30
+    zIndex: 12,
+    elevation: 12
   },
   androidUserOverlay: {
     position: 'absolute',
@@ -587,12 +809,24 @@ const styles = StyleSheet.create({
     overflow: 'visible'
   },
   androidUserOverlayAvatar: {
+    position: 'absolute',
     width: 46,
     height: 46,
     borderRadius: 23,
     backgroundColor: 'rgba(255,255,255,0.96)',
     borderWidth: 4,
     borderColor: 'rgba(255,255,255,0.96)'
+  },
+  androidAvatarFallbackCircle: {
+    width: 46,
+    height: 46,
+    borderRadius: 23,
+    backgroundColor: '#DCE7D5',
+    borderWidth: 4,
+    borderColor: 'rgba(255,255,255,0.96)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    overflow: 'hidden'
   },
   androidUserArrowOrbit: {
     position: 'absolute',
@@ -606,9 +840,9 @@ const styles = StyleSheet.create({
     zIndex: 3
   },
   calloutBubble: {
-    maxWidth: 220,
+    maxWidth: 208,
     borderRadius: 14,
-    paddingVertical: 8,
+    paddingVertical: 7,
     paddingHorizontal: 10,
     backgroundColor: 'rgba(255,255,255,0.92)',
     borderWidth: 1,
@@ -628,5 +862,5 @@ const styles = StyleSheet.create({
     marginTop: 2,
     color: '#505B69',
     fontSize: 11
-  }
+  },
 });

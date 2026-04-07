@@ -4,10 +4,9 @@ import MapView, { PROVIDER_GOOGLE, Marker, Polyline, Callout, Circle } from 'rea
 import { useSelector, useDispatch } from 'react-redux';
 import { Ionicons } from '@expo/vector-icons';
 import * as Location from 'expo-location';
-import { useTheme } from '../common-local/theme';
+import { useTheme } from '../theme/runtimeTokens';
 import { Typography } from '../components/design-system/Typography';
 import { AnimatedButton } from '../components/design-system/AnimatedButton';
-import { GoogleMapApiConfig } from '../../config/GoogleMapApiConfig';
 import Logger from '../utils/Logger';
 
 import PassengerUI from '../components/map/PassengerUI';
@@ -20,8 +19,8 @@ import DriverOnTripUI from '../components/map/DriverOnTripUI';
 import PassengerOnTripUI from '../components/map/PassengerOnTripUI';
 import RatingUI from '../components/map/RatingUI';
 import WebSocketManager from '../services/WebSocketManager';
-import { darkTheme, lightTheme } from '../common-local/theme';
-import { clearBooking } from '../common-local/actions/bookingactions';
+import { darkTheme, lightTheme } from '../theme/runtimeTokens';
+import { clearBooking } from '../services/runtime/bookingStateBridge';
 import polyline from '@mapbox/polyline';
 import carIcon from '../../assets/images/track_Car.png';
 import { FareCalculator, getDistanceMatrix } from '../common/sharedFunctions';
@@ -226,10 +225,9 @@ const darkMapStyle = [
 export default function NewMapScreen(props) {
     const mapRef = useRef(null);
     const [routePolyline, setRoutePolyline] = useState(null);
-    const hasGoogleMapsKey = Boolean((GoogleMapApiConfig?.ios || '').trim());
     const [mapLoaded, setMapLoaded] = useState(false);
     const [mapProvider, setMapProvider] = useState(
-        Platform.OS === 'ios' && hasGoogleMapsKey ? PROVIDER_GOOGLE : undefined
+        Platform.OS === 'ios' || Platform.OS === 'android' ? PROVIDER_GOOGLE : undefined
     );
 
     // Log quando routePolyline muda
@@ -306,14 +304,14 @@ export default function NewMapScreen(props) {
         getCurrentLocation();
     }, []);
 
-    // Fallback automático no iOS: se Google Maps não carregar tiles, troca para Apple Maps.
+    // Keep Google Maps as the only provider on native mobile and surface tile issues in logs
+    // instead of silently swapping the map stack underneath the user.
     useEffect(() => {
         if (Platform.OS !== 'ios' || mapProvider !== PROVIDER_GOOGLE) return;
 
         const fallbackTimer = setTimeout(() => {
             if (!mapLoaded) {
-                Logger.warn('⚠️ Google Maps não carregou no iOS, alternando para Apple Maps (fallback).');
-                setMapProvider(undefined);
+                Logger.warn('⚠️ Google Maps não carregou tiles no iOS dentro da janela esperada.');
             }
         }, 6000);
 

@@ -17,6 +17,54 @@ function isCoordinateValid(value) {
   return Boolean(value) && Number.isFinite(value.latitude) && Number.isFinite(value.longitude);
 }
 
+function areCoordinatesEqual(left, right) {
+  if (left === right) {
+    return true;
+  }
+
+  if (!left || !right) {
+    return false;
+  }
+
+  return left.latitude === right.latitude && left.longitude === right.longitude;
+}
+
+function areCoordinateListsEqual(left = [], right = []) {
+  if (left === right) {
+    return true;
+  }
+
+  if (!Array.isArray(left) || !Array.isArray(right) || left.length !== right.length) {
+    return false;
+  }
+
+  for (let index = 0; index < left.length; index += 1) {
+    if (!areCoordinatesEqual(left[index], right[index])) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+function areRoutesEqual(left, right) {
+  if (left === right) {
+    return true;
+  }
+
+  if (!left || !right) {
+    return false;
+  }
+
+  return (
+    areCoordinatesEqual(left.origin, right.origin) &&
+    areCoordinatesEqual(left.destination, right.destination) &&
+    areCoordinateListsEqual(left.coordinates, right.coordinates) &&
+    String(left.destinationLabel || '') === String(right.destinationLabel || '') &&
+    String(left.destinationAddress || '') === String(right.destinationAddress || '')
+  );
+}
+
 function buildCurvePoints(origin, destination) {
   const latDiff = destination.latitude - origin.latitude;
   const lonDiff = destination.longitude - origin.longitude;
@@ -43,6 +91,10 @@ export function setPrototypeMapRoute(payload) {
   const destination = payload?.destination;
 
   if (!isCoordinateValid(origin) || !isCoordinateValid(destination)) {
+    if (currentRoute === DEFAULT_ROUTE) {
+      return;
+    }
+
     currentRoute = DEFAULT_ROUTE;
     notify();
     return;
@@ -53,7 +105,7 @@ export function setPrototypeMapRoute(payload) {
       ? payload.coordinates
       : buildCurvePoints(origin, destination);
 
-  currentRoute = {
+  const nextRoute = {
     origin,
     destination,
     coordinates,
@@ -61,12 +113,26 @@ export function setPrototypeMapRoute(payload) {
     destinationAddress: payload?.destinationAddress || ''
   };
 
+  if (areRoutesEqual(currentRoute, nextRoute)) {
+    return;
+  }
+
+  currentRoute = nextRoute;
+
   notify();
 }
 
 export function clearPrototypeMapRoute() {
+  if (currentRoute === DEFAULT_ROUTE) {
+    return;
+  }
+
   currentRoute = DEFAULT_ROUTE;
   notify();
+}
+
+export function getPrototypeMapRoute() {
+  return currentRoute;
 }
 
 export function subscribePrototypeMapRoute(listener) {
