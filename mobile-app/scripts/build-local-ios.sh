@@ -4,6 +4,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
+WORKSPACE_ROOT="$(cd "${PROJECT_DIR}/.." && pwd)"
 
 # shellcheck source=/dev/null
 source "${SCRIPT_DIR}/source-local-build-env.sh"
@@ -13,6 +14,8 @@ IOS_DEVELOPMENT_TEAM="${IOS_DEVELOPMENT_TEAM:-}"
 IOS_CODE_SIGN_STYLE="${IOS_CODE_SIGN_STYLE:-Automatic}"
 FORCE_SIGNED_ARCHIVE="${FORCE_SIGNED_ARCHIVE:-0}"
 IOS_ALLOW_PROVISIONING_DEVICE_REGISTRATION="${IOS_ALLOW_PROVISIONING_DEVICE_REGISTRATION:-1}"
+IOS_SIMULATOR_CONFIGURATION="${IOS_SIMULATOR_CONFIGURATION:-Release}"
+IOS_SIMULATOR_UDID="${IOS_SIMULATOR_UDID:-195D2C57-87DC-4953-ABF1-4FD351ADBBEF}"
 
 ensure_ios_native() {
   if [[ -d "${PROJECT_DIR}/ios" ]]; then
@@ -52,8 +55,24 @@ resolve_scheme() {
 
 resolve_simulator_destination() {
   local preferred_name=""
+  local preferred_udid=""
+  if [[ -n "${IOS_SIMULATOR_UDID}" ]]; then
+    echo "id=${IOS_SIMULATOR_UDID}"
+    return
+  fi
+  preferred_udid="$(xcrun simctl list devices available 2>/dev/null | awk -F '[()]' '/Booted/ && /iPhone/ {gsub(/^[[:space:]]+|[[:space:]]+$/, "", $2); print $2; exit}')"
+  if [[ -n "${preferred_udid}" ]]; then
+    echo "id=${preferred_udid}"
+    return
+  fi
+
   preferred_name="$(xcrun simctl list devices available 2>/dev/null | awk -F '[()]' '/Booted/ && /iPhone/ {gsub(/^[[:space:]]+|[[:space:]]+$/, "", $1); print $1; exit}')"
   if [[ -z "${preferred_name}" ]]; then
+    preferred_udid="$(xcrun simctl list devices available 2>/dev/null | awk -F '[()]' '/iPhone/ && /Shutdown/ {gsub(/^[[:space:]]+|[[:space:]]+$/, "", $2); print $2; exit}')"
+    if [[ -n "${preferred_udid}" ]]; then
+      echo "id=${preferred_udid}"
+      return
+    fi
     preferred_name="$(xcrun simctl list devices available 2>/dev/null | awk -F '[()]' '/iPhone/ && /Shutdown/ {gsub(/^[[:space:]]+|[[:space:]]+$/, "", $1); print $1; exit}')"
   fi
 
@@ -66,11 +85,18 @@ resolve_simulator_destination() {
 
 ensure_pods() {
   local ios_dir="${PROJECT_DIR}/ios"
+  local generated_dir="${ios_dir}/build/generated/ios"
+  local generated_podspec="${generated_dir}/ReactCodegen.podspec"
   if [[ -f "${ios_dir}/Podfile.lock" && -f "${ios_dir}/Pods/Manifest.lock" && -f "${ios_dir}/Podfile" ]] \
     && cmp -s "${ios_dir}/Podfile.lock" "${ios_dir}/Pods/Manifest.lock" \
-    && [[ "${ios_dir}/Podfile" -ot "${ios_dir}/Pods/Manifest.lock" ]]; then
+    && [[ "${ios_dir}/Podfile" -ot "${ios_dir}/Pods/Manifest.lock" ]] \
+    && [[ -f "${generated_podspec}" ]]; then
     echo "✅ Pods já sincronizados (pod install não necessário)."
     return
+  fi
+
+  if [[ ! -f "${generated_podspec}" ]]; then
+    echo "➡️  Codegen iOS ausente em ${generated_dir}; regenerando Pods..."
   fi
 
   (cd "${ios_dir}" && pod install --repo-update)
@@ -137,14 +163,29 @@ main() {
   if [[ "$(uname -m)" == "arm64" ]]; then
     sim_extra_args+=("EXCLUDED_ARCHS=x86_64")
   fi
+  if [[ -f "${WORKSPACE_ROOT}/package.json" && "${WORKSPACE_ROOT}" != "${PROJECT_DIR}" ]]; then
+    export PROJECT_ROOT="${WORKSPACE_ROOT}"
+    if [[ -f "${PROJECT_DIR}/index.js" ]]; then
+      export ENTRY_FILE="$(basename "${PROJECT_DIR}")/index.js"
+    fi
+  else
+    export PROJECT_ROOT="${PROJECT_DIR}"
+    if [[ -f "${PROJECT_DIR}/index.js" ]]; then
+      export ENTRY_FILE="index.js"
+    fi
+  fi
 
   case "${MODE}" in
     simulator)
+      export LEAF_DISABLE_UPDATES_FOR_SIMULATOR=1
+      local built_app_path="${PROJECT_DIR}/ios/build/Build/Products/${IOS_SIMULATOR_CONFIGURATION}-iphonesimulator/${scheme}.app"
+      local expo_plist_path="${built_app_path}/Expo.plist"
+      mkdir -p "${PROJECT_DIR}/ios/build/Build/Products/${IOS_SIMULATOR_CONFIGURATION}-iphonesimulator/EXUpdates.bundle"
       if [[ -n "${workspace}" ]]; then
         xcodebuild \
           -workspace "${workspace}" \
           -scheme "${scheme}" \
-          -configuration Debug \
+          -configuration "${IOS_SIMULATOR_CONFIGURATION}" \
           -sdk iphonesimulator \
           -destination "${sim_destination}" \
           -derivedDataPath "${PROJECT_DIR}/ios/build" \
@@ -154,12 +195,17 @@ main() {
         xcodebuild \
           -project "${project}" \
           -scheme "${scheme}" \
-          -configuration Debug \
+          -configuration "${IOS_SIMULATOR_CONFIGURATION}" \
           -sdk iphonesimulator \
           -destination "${sim_destination}" \
           -derivedDataPath "${PROJECT_DIR}/ios/build" \
           "${sim_extra_args[@]}" \
           build
+      fi
+      if [[ -f "${expo_plist_path}" ]]; then
+        /usr/libexec/PlistBuddy -c "Set :EXUpdatesEnabled false" "${expo_plist_path}" >/dev/null 2>&1 || true
+        /usr/libexec/PlistBuddy -c "Set :EXUpdatesCheckOnLaunch NEVER" "${expo_plist_path}" >/dev/null 2>&1 || true
+        /usr/libexec/PlistBuddy -c "Delete :EXUpdatesURL" "${expo_plist_path}" >/dev/null 2>&1 || true
       fi
       echo "✅ Build iOS simulator concluída em ${PROJECT_DIR}/ios/build"
       ;;
