@@ -2,6 +2,7 @@ import Logger from '../utils/Logger';
 import io from 'socket.io-client';
 import { getWebSocketURL } from '../config/NetworkConfig';
 import auth from '@react-native-firebase/auth';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { toUserFriendlyError } from '../utils/friendlyErrorMessages';
 
 const CREATE_BOOKING_TIMEOUT_MS = 120000; // 2 minutos mínimo para evitar timeout prematuro em cenários de alta latência
@@ -14,6 +15,10 @@ const AUTH_BUSY_MAX_RETRIES = 4;
 const AUTH_BUSY_JITTER_MS = 250;
 const ACTIVE_RIDE_SYNC_TIMEOUT_MS = 8000;
 const TRANSIENT_CONNECT_ERROR_LOG_WINDOW_MS = 15000;
+const TEST_MODE_STORAGE_KEY = '@test_mode';
+const AUTH_UID_STORAGE_KEY = '@auth_uid';
+const USER_DATA_STORAGE_KEY = '@user_data';
+const QA_SOCKET_ID_TOKEN_STORAGE_KEY = '@qa_socket_id_token';
 
 // ✅ CORREÇÃO: Calcular URL dinamicamente para evitar problemas em builds de release
 // Não armazenar como constante, calcular sempre que necessário
@@ -50,8 +55,13 @@ const CREATE_BOOKING_RETRYABLE_CODES = new Set([
     'DUPLICATE_REQUEST',
     'QUEUE_BACKPRESSURE',
     'AUTH_BUSY',
-    'AUTH_TIMEOUT'
+    'AUTH_TIMEOUT',
+    'PAYMENT_NOT_CONFIRMED'
 ]);
+
+function createSocketRequestId(prefix = 'req') {
+    return `${prefix}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+}
 
 // ✅ FASE 2: EventEmitter interno simples (compatível com React Native)
 class SimpleEventEmitter {
@@ -132,6 +142,8 @@ class WebSocketManager {
             this.lastConnectErrorSignature = null;
             this.lastConnectErrorLoggedAt = 0;
             this.suppressedConnectErrorCount = 0;
+            this.qaSocketBypassState = { enabled: false, uid: null };
+            this.lastSocketAuthPayload = null;
 
             // ✅ FASE 2: EventEmitter interno - única fonte de distribuição de eventos
             this.eventEmitter = new SimpleEventEmitter();
@@ -157,6 +169,116 @@ class WebSocketManager {
         return WebSocketManager.instance;
     }
 
+    async _buildSocketAuthPayload() {
+        let userToken = null;
+        try {
+            const currentUser = auth().currentUser;
+            if (currentUser) {
+                userToken = await currentUser.getIdToken();
+            }
+        } catch (tokenError) {
+            Logger.warn('⚠️ [WebSocketManager] Erro ao obter token do Firebase:', tokenError);
+        }
+
+        if (userToken) {
+            this.qaSocketBypassState = { enabled: false, uid: null };
+            this.lastSocketAuthPayload = { token: userToken };
+            return this.lastSocketAuthPayload;
+        }
+
+        const qaSocketIdToken = await this._resolveQaSocketIdToken();
+        if (qaSocketIdToken) {
+            this.qaSocketBypassState = { enabled: false, uid: null };
+            this.lastSocketAuthPayload = { token: qaSocketIdToken };
+            return this.lastSocketAuthPayload;
+        }
+
+        const qaBypassPayload = await this._resolveQaSocketBypassPayload();
+        if (qaBypassPayload) {
+            this.qaSocketBypassState = { enabled: true, uid: qaBypassPayload.uid };
+            this.lastSocketAuthPayload = {
+                token: null,
+                uid: qaBypassPayload.uid,
+                qaAuthBypass: true,
+                qaAutomation: true
+            };
+            return this.lastSocketAuthPayload;
+        }
+
+        this.qaSocketBypassState = { enabled: false, uid: null };
+        this.lastSocketAuthPayload = { token: null };
+        return this.lastSocketAuthPayload;
+    }
+
+    async _resolveQaSocketIdToken() {
+        try {
+            const [testModeRaw, qaSocketIdTokenRaw] = await Promise.all([
+                AsyncStorage.getItem(TEST_MODE_STORAGE_KEY),
+                AsyncStorage.getItem(QA_SOCKET_ID_TOKEN_STORAGE_KEY),
+            ]);
+
+            const qaSocketTokenEnabled = String(testModeRaw || '').trim().toLowerCase() === 'true';
+            const qaSocketIdToken = String(qaSocketIdTokenRaw || '').trim();
+            if (qaSocketTokenEnabled && qaSocketIdToken) {
+                return qaSocketIdToken;
+            }
+        } catch (qaTokenError) {
+            Logger.warn('⚠️ [WebSocketManager] Erro ao recuperar idToken QA do socket:', qaTokenError);
+        }
+
+        return null;
+    }
+
+    async _resolveQaSocketBypassPayload(preferredUserId = '') {
+        try {
+            const [testModeRaw, persistedUidRaw, storedUserDataRaw] = await Promise.all([
+                AsyncStorage.getItem(TEST_MODE_STORAGE_KEY),
+                AsyncStorage.getItem(AUTH_UID_STORAGE_KEY),
+                AsyncStorage.getItem(USER_DATA_STORAGE_KEY)
+            ]);
+            const qaSocketBypassEnabled = String(testModeRaw || '').trim().toLowerCase() === 'true';
+            let storedUserData = null;
+            if (storedUserDataRaw) {
+                try {
+                    storedUserData = JSON.parse(storedUserDataRaw);
+                } catch (_error) {
+                    storedUserData = null;
+                }
+            }
+            const qaSocketBypassUid = String(
+                preferredUserId ||
+                this.authCredentials?.userId ||
+                this.authenticatedUserId ||
+                storedUserData?.uid ||
+                persistedUidRaw ||
+                ''
+            ).trim();
+
+            if (qaSocketBypassEnabled && qaSocketBypassUid) {
+                return {
+                    uid: qaSocketBypassUid,
+                    qaAuthBypass: true,
+                    qaAutomation: true
+                };
+            }
+        } catch (qaBypassError) {
+            Logger.warn('⚠️ [WebSocketManager] Erro ao montar bypass QA do socket:', qaBypassError);
+        }
+
+        return null;
+    }
+
+    _buildSocketQueryPayload(socketAuth = null) {
+        if (socketAuth?.qaAuthBypass && socketAuth?.uid) {
+            return {
+                uid: socketAuth.uid,
+                qaAuthBypass: 'true',
+                qaAutomation: 'true'
+            };
+        }
+        return {};
+    }
+
     async connect() {
         if (this.socket?.connected) {
             Logger.log('✅ [WebSocketManager] Já conectado, ignorando nova conexão');
@@ -172,6 +294,11 @@ class WebSocketManager {
             this.isConnecting = true;
             if (this.socket) {
                 Logger.log('🔁 [WebSocketManager] Reutilizando socket existente');
+                const socketAuth = await this._buildSocketAuthPayload();
+                this.socket.auth = socketAuth;
+                if (this.socket.io?.opts) {
+                    this.socket.io.opts.query = this._buildSocketQueryPayload(socketAuth);
+                }
                 this.connectionPromise = this._waitForConnection();
                 if (!this.socket.active) {
                     this.socket.connect();
@@ -197,19 +324,13 @@ class WebSocketManager {
             });
 
             // ✅ Buscar token do Firebase para autenticação segura
-            let userToken = null;
-            try {
-                const currentUser = auth().currentUser;
-                if (currentUser) {
-                    userToken = await currentUser.getIdToken();
-                }
-            } catch (tokenError) {
-                Logger.warn('⚠️ [WebSocketManager] Erro ao obter token do Firebase:', tokenError);
-            }
+            const socketAuth = await this._buildSocketAuthPayload();
+            const socketQuery = this._buildSocketQueryPayload(socketAuth);
 
             this.socket = io(WEBSOCKET_URL, {
                 // ✅ Passar token JWT na conexão (handshake)
-                auth: { token: userToken },
+                auth: socketAuth,
+                query: socketQuery,
                 // ✅ Ignorar verificação de certificado SSL para IP direto (se usar HTTPS)
                 rejectUnauthorized: false,
                 // ✅ Permitir certificados auto-assinados
@@ -423,6 +544,8 @@ class WebSocketManager {
             'driverLocation',
             'driverArrived',
             'arrivedAtPickup',
+            'notificationActionSuccess',
+            'notificationActionError',
             'passengerLocationUpdated',
             'passengerLocationError',
             'tripIntegrityCheckRequired',
@@ -750,7 +873,7 @@ class WebSocketManager {
     }
 
     // Método para autenticar usuário
-    authenticate(userId, userType, options = {}) {
+    async authenticate(userId, userType, options = {}) {
         if (!this.socket?.connected) {
             Logger.warn('⚠️ [WebSocketManager] WebSocket não conectado. Não é possível autenticar.');
             return;
@@ -782,10 +905,31 @@ class WebSocketManager {
         this.authenticatedUserType = userType;
         this.authenticatedUserId = userId;
 
-        this.socket.emit('authenticate', {
+        const qaBypassPayload = await this._resolveQaSocketBypassPayload(userId);
+        const shouldUseQaSocketBypass = Boolean(
+            qaBypassPayload?.qaAuthBypass &&
+            String(qaBypassPayload?.uid || '') === String(userId || '')
+        );
+        const socketAuthPayload = await this._buildSocketAuthPayload();
+
+        if (shouldUseQaSocketBypass) {
+            this.qaSocketBypassState = { enabled: true, uid: String(userId || '').trim() };
+        }
+
+        const authenticatePayload = {
             uid: userId,
-            userType: userType
-        });
+            userType: userType,
+            ...(shouldUseQaSocketBypass ? {
+                qaAuthBypass: true,
+                qaAutomation: true
+            } : {})
+        };
+
+        if (socketAuthPayload?.token) {
+            authenticatePayload.token = socketAuthPayload.token;
+        }
+
+        this.socket.emit('authenticate', authenticatePayload);
 
         // Resetar flag após 3 segundos (tempo suficiente para resposta)
         setTimeout(() => {
@@ -918,7 +1062,17 @@ class WebSocketManager {
             this.on('authenticated', onAuthenticated);
             this.on('auth_error', onAuthError);
             this.on('authentication_error', onAuthenticationError);
-            this.authenticate(userId, userType, { force: true });
+            Promise.resolve(
+                this.authenticate(userId, userType, { force: true })
+            ).catch((error) => {
+                completeWithError(
+                    {
+                        code: 'AUTH_EMIT_ERROR',
+                        message: error?.message || 'Falha ao iniciar autenticacao'
+                    },
+                    'Nao foi possivel iniciar a validacao da sua sessao.'
+                );
+            });
         });
     }
 
@@ -928,6 +1082,17 @@ class WebSocketManager {
             this.authenticatedUserId ||
             this.authCredentials?.userId ||
             'anonymous';
+        const stablePaymentReference = String(
+            bookingData?.paymentId ||
+            bookingData?.paymentData?.chargeId ||
+            bookingData?.paymentData?.paymentId ||
+            ''
+        ).trim();
+
+        if (stablePaymentReference) {
+            return `mobile_${customerId}_payment_${stablePaymentReference}`;
+        }
+
         const pickupLat = Number(bookingData?.pickupLocation?.lat || 0).toFixed(5);
         const pickupLng = Number(bookingData?.pickupLocation?.lng || 0).toFixed(5);
         const destinationLat = Number(bookingData?.destinationLocation?.lat || 0).toFixed(5);
@@ -1182,6 +1347,9 @@ class WebSocketManager {
 
     async checkRideAvailability(payload = {}, options = {}) {
         const timeoutMs = Number.isFinite(options?.timeoutMs) ? options.timeoutMs : 12000;
+        const requestId =
+            String(options?.requestId || payload?.requestId || '').trim() ||
+            createSocketRequestId('availability');
 
         if (!this.socket?.connected) {
             await this.connect();
@@ -1220,6 +1388,9 @@ class WebSocketManager {
             };
 
             const onSuccess = (data) => {
+                if (data?.requestId && data.requestId !== requestId) {
+                    return;
+                }
                 cleanup();
                 if (data?.success) {
                     resolve(data);
@@ -1235,6 +1406,9 @@ class WebSocketManager {
             };
 
             const onError = (errorPayload) => {
+                if (errorPayload?.requestId && errorPayload.requestId !== requestId) {
+                    return;
+                }
                 cleanup();
                 reject(
                     buildSocketError(
@@ -1258,7 +1432,10 @@ class WebSocketManager {
 
             this.on('rideAvailabilityResult', onSuccess);
             this.on('rideAvailabilityError', onError);
-            this.socket.emit('checkRideAvailability', payload);
+            this.socket.emit('checkRideAvailability', {
+                ...payload,
+                requestId
+            });
         });
     }
 
@@ -1334,7 +1511,16 @@ class WebSocketManager {
         }
 
         return new Promise((resolve, reject) => {
+            const expectedRideId = String(rideId || '').trim();
+            const expectedDriverId = String(
+                driverData?.driver?.id ||
+                driverData?.driverId ||
+                this.authenticatedUserId ||
+                ''
+            ).trim();
             const timeout = setTimeout(() => {
+                this.socket.off('rideAccepted', successHandler);
+                this.socket.off('acceptRideError', errorHandler);
                 reject(new Error('Accept ride timeout'));
             }, 15000);
 
@@ -1348,6 +1534,21 @@ class WebSocketManager {
 
             // ✅ Listener para sucesso
             const successHandler = (data) => {
+                const payloadRideId = String(data?.bookingId || data?.rideId || '').trim();
+                const payloadDriverId = String(data?.driver?.id || data?.driverId || '').trim();
+
+                if (expectedRideId && payloadRideId && payloadRideId !== expectedRideId) {
+                    return;
+                }
+
+                if (
+                    expectedDriverId &&
+                    payloadDriverId &&
+                    payloadDriverId !== expectedDriverId
+                ) {
+                    return;
+                }
+
                 clearTimeout(timeout);
                 this.socket.off('rideAccepted', successHandler);
                 this.socket.off('acceptRideError', errorHandler);
@@ -2015,9 +2216,30 @@ class WebSocketManager {
                 return error;
             };
 
-            const timeout = setTimeout(() => {
+            const matchesDriverStatusPayload = (data) => {
+                if (!data || typeof data !== 'object') {
+                    return true;
+                }
+
+                const payloadDriverId = String(
+                    data.driverId ||
+                    data.uid ||
+                    data.userId ||
+                    ''
+                ).trim();
+
+                return !payloadDriverId || payloadDriverId === String(driverId || '').trim();
+            };
+
+            const cleanup = () => {
+                clearTimeout(timeout);
                 this.socket.off('driverStatusError', onError);
                 this.socket.off('driverStatusUpdated', onSuccess);
+                this.socket.off('driver_status_updated', onSuccess);
+            };
+
+            const timeout = setTimeout(() => {
+                cleanup();
                 reject(
                     buildDriverStatusError(
                         { code: 'SET_DRIVER_STATUS_TIMEOUT', message: 'Set driver status timeout' },
@@ -2028,8 +2250,10 @@ class WebSocketManager {
             }, timeoutMs);
 
             const onSuccess = (data) => {
-                clearTimeout(timeout);
-                this.socket.off('driverStatusError', onError);
+                if (!matchesDriverStatusPayload(data)) {
+                    return;
+                }
+                cleanup();
                 if (data.success) {
                     resolve(data);
                 } else {
@@ -2038,14 +2262,29 @@ class WebSocketManager {
             };
 
             const onError = (data) => {
-                clearTimeout(timeout);
-                this.socket.off('driverStatusUpdated', onSuccess);
+                if (!matchesDriverStatusPayload(data)) {
+                    return;
+                }
+                cleanup();
                 reject(buildDriverStatusError(data));
             };
 
-            this.socket.emit('setDriverStatus', payload);
-            this.socket.once('driverStatusUpdated', onSuccess);
-            this.socket.once('driverStatusError', onError);
+            this.socket.on('driverStatusUpdated', onSuccess);
+            this.socket.on('driver_status_updated', onSuccess);
+            this.socket.on('driverStatusError', onError);
+
+            try {
+                this.socket.emit('setDriverStatus', payload);
+            } catch (error) {
+                cleanup();
+                reject(
+                    buildDriverStatusError(
+                        error,
+                        'SET_DRIVER_STATUS_EMIT_FAILED',
+                        'Não foi possível enviar a atualização de status ao servidor.'
+                    )
+                );
+            }
         });
     }
 
@@ -2853,6 +3092,18 @@ class WebSocketManager {
             destinationLocation: snapshot.destinationLocation || null,
             estimatedFare: snapshot.estimatedFare,
             finalFare: snapshot.finalFare,
+            operationalFee: snapshot.operationalFee ?? null,
+            paymentIntermediationFee: snapshot.paymentIntermediationFee ?? null,
+            totalFees: snapshot.totalFees ?? null,
+            driverNetAmount: snapshot.driverNetAmount ?? null,
+            estimatedOperationalFee: snapshot.estimatedOperationalFee ?? null,
+            estimatedPaymentIntermediationFee: snapshot.estimatedPaymentIntermediationFee ?? null,
+            estimatedTotalFees: snapshot.estimatedTotalFees ?? null,
+            estimatedDriverNetAmount: snapshot.estimatedDriverNetAmount ?? null,
+            pricingSnapshotLocked: snapshot.pricingSnapshotLocked === true,
+            pricingSnapshotLockedAt: snapshot.pricingSnapshotLockedAt || null,
+            boardingDeadlineAt: snapshot.boardingDeadlineAt || null,
+            boardingWindowSec: snapshot.boardingWindowSec ?? null,
             paymentStatus: snapshot.paymentStatus || null,
             rehydrated: true,
             syncedAt: snapshot.syncedAt || new Date().toISOString()

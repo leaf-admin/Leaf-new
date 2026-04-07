@@ -1,0 +1,678 @@
+import React from 'react';
+import { Alert, Text, TouchableOpacity, View } from 'react-native';
+import { fireEvent, render, waitFor } from '@testing-library/react-native';
+
+import RobotaxiHomeScreen from '../src/screens/prototype/RobotaxiHomeScreen';
+import { usePrototypeRideRuntime } from '../src/screens/prototype/prototypeRideRuntime';
+import {
+  resolvePassengerAutoRoute,
+  shouldAutoSyncPassengerRoute,
+} from '../src/screens/prototype/passengerFlowRouting';
+
+const mockUseNavigationState = jest.fn((selector) =>
+  selector({
+    index: 0,
+    routes: [{ name: 'RobotaxiPrototype', key: 'home' }],
+  })
+);
+const mockUseIsFocused = jest.fn(() => true);
+const mockPrototypeMapLayer = jest.fn(({ children }) => <View>{children}</View>);
+
+jest.mock('../src/screens/prototype/prototypeRideRuntime', () => ({
+  usePrototypeRideRuntime: jest.fn(),
+}));
+
+jest.mock('@react-navigation/native', () => ({
+  useIsFocused: (...args) => mockUseIsFocused(...args),
+  useNavigationState: (...args) => mockUseNavigationState(...args),
+}));
+
+jest.mock('react-native-safe-area-context', () => ({
+  useSafeAreaInsets: jest.fn(() => ({ top: 0, bottom: 0, left: 0, right: 0 })),
+}));
+
+jest.mock('react-native-maps', () => {
+  const React = require('react');
+  const { View } = require('react-native');
+  const MockView = ({ children }) => <View>{children}</View>;
+  return {
+    __esModule: true,
+    default: MockView,
+    Polygon: MockView,
+    Marker: MockView,
+    Polyline: MockView,
+  };
+});
+
+jest.mock('../src/components/prototype/PrototypeScreenTransition', () => {
+  const React = require('react');
+  return ({ children }) => <>{children}</>;
+});
+
+jest.mock('../src/components/prototype/PrototypeMapLayer', () => {
+  return (...args) => mockPrototypeMapLayer(...args);
+});
+
+jest.mock('../src/components/prototype/PrototypeScaffold', () => {
+  const React = require('react');
+  const { View } = require('react-native');
+  return {
+    PrototypeBottomIsland: () => <View testID="passenger-bottom-island" />,
+    PrototypeTopControls: () => <View testID="prototype-top-controls" />,
+  };
+});
+
+jest.mock('../src/screens/prototype/home/PassengerHomeOverlay', () => {
+  const React = require('react');
+  const { View } = require('react-native');
+  return () => <View />;
+});
+
+jest.mock('../src/screens/prototype/home/DriverHomeOverlay', () => {
+  const React = require('react');
+  const { TouchableOpacity, Text } = require('react-native');
+  return ({ onToggleOnline }) => (
+    <TouchableOpacity testID="driver-home-toggle-online" onPress={onToggleOnline}>
+      <Text>Ficar online</Text>
+    </TouchableOpacity>
+  );
+});
+
+jest.mock('../src/screens/prototype/home/DriverLiveRideOverlay', () => {
+  const React = require('react');
+  const { View } = require('react-native');
+  return () => <View />;
+});
+
+jest.mock('../src/screens/prototype/home/DriverTripStatusBanner', () => {
+  const React = require('react');
+  const { View } = require('react-native');
+  return () => <View />;
+});
+
+jest.mock('../src/screens/prototype/prototypeMapOcclusion', () => ({
+  subscribePrototypeMapOcclusion: jest.fn(() => jest.fn()),
+  usePrototypeMapOcclusion: jest.fn(),
+}));
+
+jest.mock('../src/screens/prototype/prototypeMapRoute', () => ({
+  clearPrototypeMapRoute: jest.fn(),
+  subscribePrototypeMapRoute: jest.fn(() => jest.fn()),
+}));
+
+jest.mock('../src/screens/prototype/passengerFlowRouting', () => ({
+  resolvePassengerAutoRoute: jest.fn(() => null),
+  shouldAutoSyncPassengerRoute: jest.fn(() => false),
+}));
+
+jest.mock('../src/services/DriverExternalNavigationService', () => ({
+  openDriverExternalNavigation: jest.fn(),
+}));
+
+jest.mock('../src/services/runtime/h3MapService', () => ({
+  fetchH3CellsForRegion: jest.fn().mockResolvedValue([]),
+}));
+
+jest.mock('../src/services/WebSocketManager', () => ({
+  __esModule: true,
+  default: { getInstance: jest.fn(() => ({ on: jest.fn(), off: jest.fn() })) },
+}));
+
+function buildDriverRuntime(overrides = {}) {
+  return {
+    activeRole: 'driver',
+    profile: {
+      uid: 'driver_1',
+      userType: 'driver',
+      usertype: 'driver',
+      name: 'Driver Test',
+    },
+    currentCoordinate: { latitude: -23.55, longitude: -46.63 },
+    currentHeading: 0,
+    driverCoordinate: { latitude: -23.55, longitude: -46.63 },
+    trafficLayerEnabled: false,
+    clearFlowPreview: jest.fn(),
+    bookingStatus: 'idle',
+    activeBooking: null,
+    selectedDestination: null,
+    selectedVehicle: null,
+    tripDistanceKm: null,
+    searchingElapsedSeconds: 0,
+    unreadNotificationCount: 0,
+    driverOnline: false,
+    driverOnlinePending: false,
+    driverCanGoOnline: true,
+    paymentMethod: 'pix',
+    driverInfo: { id: 'driver_1', name: 'Driver Test' },
+    setDriverOnline: jest.fn().mockResolvedValue({ success: true, isOnline: true }),
+    tripHistory: [],
+    driverOffers: [],
+    driverActiveRide: null,
+    driverExtensionRequest: { status: 'idle' },
+    driverTripAssist: { status: '' },
+    acceptDriverOffer: jest.fn(),
+    rejectDriverOffer: jest.fn(),
+    respondToDriverExtension: jest.fn(),
+    interruptRideOperationalFlow: jest.fn(),
+    markDriverArrived: jest.fn(),
+    startTripFlow: jest.fn(),
+    completeTripFlow: jest.fn(),
+    ...overrides,
+  };
+}
+
+function buildPassengerRuntime(overrides = {}) {
+  return {
+    activeRole: 'customer',
+    profile: {
+      uid: 'customer_1',
+      userType: 'customer',
+      usertype: 'customer',
+      name: 'Passenger Test',
+    },
+    currentCoordinate: { latitude: -23.55, longitude: -46.63 },
+    currentHeading: 0,
+    driverCoordinate: null,
+    trafficLayerEnabled: false,
+    clearFlowPreview: jest.fn(),
+    bookingStatus: 'idle',
+    activeBooking: null,
+    selectedDestination: null,
+    selectedVehicle: null,
+    tripDistanceKm: null,
+    searchingElapsedSeconds: 0,
+    unreadNotificationCount: 0,
+    driverOnline: false,
+    driverOnlinePending: false,
+    driverCanGoOnline: false,
+    paymentMethod: 'pix',
+    driverInfo: null,
+    setDriverOnline: jest.fn(),
+    tripHistory: [],
+    driverOffers: [],
+    driverActiveRide: null,
+    driverExtensionRequest: { status: 'idle' },
+    driverTripAssist: null,
+    acceptDriverOffer: jest.fn(),
+    rejectDriverOffer: jest.fn(),
+    cancelRideSearch: jest.fn(),
+    endTripEarlyFlow: jest.fn(),
+    respondOperationalContinuationFlow: jest.fn(),
+    respondToDriverExtension: jest.fn(),
+    interruptRideOperationalFlow: jest.fn(),
+    markDriverArrived: jest.fn(),
+    startTripFlow: jest.fn(),
+    completeTripFlow: jest.fn(),
+    dismissCompletedReceipt: jest.fn(),
+    currentAddress: '1540 Mission St, San Francisco',
+    ...overrides,
+  };
+}
+
+describe('driver online toggle', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    mockUseIsFocused.mockReturnValue(true);
+    mockUseNavigationState.mockImplementation((selector) =>
+      selector({
+        index: 0,
+        routes: [{ name: 'RobotaxiPrototype', key: 'home' }],
+      })
+    );
+    resolvePassengerAutoRoute.mockReturnValue(null);
+    shouldAutoSyncPassengerRoute.mockReturnValue(false);
+    jest.spyOn(Alert, 'alert').mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    Alert.alert.mockRestore();
+  });
+
+  it('surfaces a failed online toggle result to the driver', async () => {
+    const setDriverOnline = jest.fn().mockResolvedValue({
+      success: false,
+      error: 'Não foi possível finalizar o modo online agora. Tente novamente.',
+    });
+
+    usePrototypeRideRuntime.mockReturnValue(
+      buildDriverRuntime({
+        setDriverOnline,
+      })
+    );
+
+    const navigation = {
+      navigate: jest.fn(),
+      canGoBack: jest.fn(() => false),
+      goBack: jest.fn(),
+    };
+
+    const { getByTestId } = render(
+      <RobotaxiHomeScreen navigation={navigation} route={{ params: {} }} />
+    );
+
+    fireEvent.press(getByTestId('driver-home-toggle-online'));
+
+    await waitFor(() => {
+      expect(setDriverOnline).toHaveBeenCalledWith(true);
+      expect(Alert.alert).toHaveBeenCalledWith(
+        'Modo motorista',
+        'Não foi possível finalizar o modo online agora. Tente novamente.'
+      );
+    });
+  });
+
+  it('retries the driver online QA automation when the home is stuck pending', async () => {
+    const setDriverOnline = jest.fn().mockResolvedValue({
+      success: true,
+      isOnline: true,
+    });
+
+    usePrototypeRideRuntime.mockReturnValue(
+      buildDriverRuntime({
+        driverOnline: false,
+        driverOnlinePending: true,
+        setDriverOnline,
+      })
+    );
+
+    const navigation = {
+      navigate: jest.fn(),
+      canGoBack: jest.fn(() => false),
+      goBack: jest.fn(),
+    };
+
+    render(
+      <RobotaxiHomeScreen
+        navigation={navigation}
+        route={{
+          params: {
+            qaAutomation: '1',
+            qaDriverAction: 'set_online',
+            qaNonce: 'retry-pending-online',
+          },
+        }}
+      />
+    );
+
+    await waitFor(() => {
+      expect(setDriverOnline).toHaveBeenCalledWith(true);
+    });
+  });
+
+  it('allows the driver offline QA automation to clear a stuck pending state', async () => {
+    const setDriverOnline = jest.fn().mockResolvedValue({
+      success: true,
+      isOnline: false,
+    });
+
+    usePrototypeRideRuntime.mockReturnValue(
+      buildDriverRuntime({
+        driverOnline: false,
+        driverOnlinePending: true,
+        setDriverOnline,
+      })
+    );
+
+    const navigation = {
+      navigate: jest.fn(),
+      canGoBack: jest.fn(() => false),
+      goBack: jest.fn(),
+    };
+
+    render(
+      <RobotaxiHomeScreen
+        navigation={navigation}
+        route={{
+          params: {
+            qaAutomation: '1',
+            qaDriverAction: 'set_offline',
+            qaNonce: 'clear-pending-offline',
+          },
+        }}
+      />
+    );
+
+    await waitFor(() => {
+      expect(setDriverOnline).toHaveBeenCalledWith(false);
+    });
+  });
+
+  it('clears stale passenger preview data when the home map is idle again', async () => {
+    const clearFlowPreview = jest.fn();
+
+    usePrototypeRideRuntime.mockReturnValue(
+      buildPassengerRuntime({
+        bookingStatus: 'idle',
+        selectedDestination: {
+          name: 'Ferry Building',
+          address: '1 Ferry Building, San Francisco',
+          coordinate: { latitude: 37.7955, longitude: -122.3937 },
+        },
+        clearFlowPreview,
+      })
+    );
+
+    const navigation = {
+      navigate: jest.fn(),
+      replace: jest.fn(),
+      canGoBack: jest.fn(() => false),
+      goBack: jest.fn(),
+    };
+
+    render(<RobotaxiHomeScreen navigation={navigation} route={{ params: {} }} />);
+
+    await waitFor(() => {
+      expect(clearFlowPreview).toHaveBeenCalled();
+    });
+  });
+
+  it('pushes strong pickup and destination labels when passenger search is rehydrated from booking data', async () => {
+    resolvePassengerAutoRoute.mockReturnValue('RobotaxiPrototypeDriverSearch');
+    shouldAutoSyncPassengerRoute.mockReturnValue(true);
+
+    usePrototypeRideRuntime.mockReturnValue(
+      buildPassengerRuntime({
+        bookingStatus: 'searching',
+        selectedDestination: null,
+        selectedVehicle: 'Leaf Plus',
+        activeBooking: {
+          pickupLocation: { add: '1540 Mission St, San Francisco' },
+          destinationLocation: { add: 'Ferry Building, San Francisco' },
+        },
+      })
+    );
+
+    const navigation = {
+      navigate: jest.fn(),
+      replace: jest.fn(),
+      canGoBack: jest.fn(() => false),
+      goBack: jest.fn(),
+    };
+
+    render(<RobotaxiHomeScreen navigation={navigation} route={{ params: {} }} />);
+
+    await waitFor(() => {
+      expect(navigation.navigate).toHaveBeenCalledWith(
+        'RobotaxiPrototypeDriverSearch',
+        expect.objectContaining({
+          destination: 'Ferry Building',
+          destinationAddress: 'Ferry Building, San Francisco',
+          originAddress: '1540 Mission St, San Francisco',
+          vehicle: 'Leaf Plus',
+        })
+      );
+      expect(navigation.replace).not.toHaveBeenCalled();
+    });
+  });
+
+  it('opens the passenger trip as an overlay over the home map instead of replacing the base route', async () => {
+    resolvePassengerAutoRoute.mockReturnValue('RobotaxiPrototypeTrip');
+    shouldAutoSyncPassengerRoute.mockReturnValue(true);
+    mockUseIsFocused.mockReturnValue(true);
+    mockUseNavigationState.mockImplementation((selector) =>
+      selector({
+        index: 0,
+        routes: [{ name: 'RobotaxiPrototype', key: 'home' }],
+      })
+    );
+
+    usePrototypeRideRuntime.mockReturnValue(
+      buildPassengerRuntime({
+        bookingStatus: 'accepted',
+        selectedVehicle: 'Leaf Plus',
+        selectedDestination: {
+          name: 'Ferry Building',
+          address: '1 Ferry Building, San Francisco',
+          coordinate: { latitude: 37.7955, longitude: -122.3937 },
+        },
+        activeBooking: {
+          pickupLocation: { add: '1540 Mission St, San Francisco' },
+          destinationLocation: { add: '1 Ferry Building, San Francisco' },
+        },
+        driverInfo: { name: 'Motorista Teste' },
+      })
+    );
+
+    const navigation = {
+      navigate: jest.fn(),
+      replace: jest.fn(),
+      canGoBack: jest.fn(() => false),
+      goBack: jest.fn(),
+    };
+
+    render(<RobotaxiHomeScreen navigation={navigation} route={{ params: {} }} />);
+
+    await waitFor(() => {
+      expect(navigation.navigate).toHaveBeenCalledWith(
+        'RobotaxiPrototypeTrip',
+        expect.objectContaining({
+          destination: 'Ferry Building',
+          destinationAddress: '1 Ferry Building, San Francisco',
+          originAddress: '1540 Mission St, San Francisco',
+          vehicle: 'Leaf Plus',
+          driverName: 'Motorista Teste',
+        })
+      );
+      expect(navigation.replace).not.toHaveBeenCalled();
+    });
+  });
+
+  it('hides passenger home chrome while the trip overlay is on top of the map', () => {
+    mockUseIsFocused.mockReturnValue(false);
+    mockUseNavigationState.mockImplementation((selector) =>
+      selector({
+        index: 1,
+        routes: [
+          { name: 'RobotaxiPrototype', key: 'home' },
+          { name: 'RobotaxiPrototypeTrip', key: 'trip' },
+        ],
+      })
+    );
+
+    usePrototypeRideRuntime.mockReturnValue(
+      buildPassengerRuntime({
+        bookingStatus: 'accepted',
+        activeBooking: {
+          pickupLocation: { add: '1540 Mission St, San Francisco' },
+          destinationLocation: { add: '1 Ferry Building, San Francisco' },
+        },
+        selectedDestination: {
+          name: 'Ferry Building',
+          address: '1 Ferry Building, San Francisco',
+          coordinate: { latitude: 37.7955, longitude: -122.3937 },
+        },
+        driverCoordinate: { latitude: 37.7772, longitude: -122.4193 },
+      })
+    );
+
+    const navigation = {
+      navigate: jest.fn(),
+      replace: jest.fn(),
+      canGoBack: jest.fn(() => true),
+      goBack: jest.fn(),
+    };
+
+    const { queryByTestId } = render(
+      <RobotaxiHomeScreen navigation={navigation} route={{ params: {} }} />
+    );
+
+    expect(queryByTestId('passenger-bottom-island')).toBeNull();
+    expect(queryByTestId('prototype-top-controls')).toBeNull();
+    expect(mockPrototypeMapLayer).toHaveBeenCalledWith(
+      expect.objectContaining({ interactionEnabled: false }),
+      undefined
+    );
+  });
+
+  it('accepts the driver offer through the home QA automation hook', async () => {
+    const acceptDriverOffer = jest.fn().mockResolvedValue({ success: true });
+
+    usePrototypeRideRuntime.mockReturnValue(
+      buildDriverRuntime({
+        bookingStatus: 'searching',
+        driverOffers: [
+          {
+            bookingId: 'booking_qa_accept',
+            id: 'booking_qa_accept',
+            pickupAddress: '1540 Mission St, San Francisco',
+            dropoffAddress: '1 Ferry Building, San Francisco',
+            estimatedDriverNetAmount: 15.01,
+            pricingSnapshotLocked: true,
+            payout: 'R$ 15,01',
+          },
+        ],
+        acceptDriverOffer,
+      })
+    );
+
+    const navigation = {
+      navigate: jest.fn(),
+      replace: jest.fn(),
+      canGoBack: jest.fn(() => false),
+      goBack: jest.fn(),
+    };
+
+    render(
+      <RobotaxiHomeScreen
+        navigation={navigation}
+        route={{
+          params: {
+            qaAutomation: '1',
+            qaDriverAction: 'accept_offer',
+            qaNonce: 'accept-once',
+          },
+        }}
+      />
+    );
+
+    await waitFor(() => {
+      expect(acceptDriverOffer).toHaveBeenCalledWith(
+        expect.objectContaining({ bookingId: 'booking_qa_accept' })
+      );
+    });
+  });
+
+  it('completes the trip through the home QA automation hook and opens the receipt', async () => {
+    const completeTripFlow = jest.fn().mockResolvedValue({ success: true });
+
+    usePrototypeRideRuntime.mockReturnValue(
+      buildDriverRuntime({
+        bookingStatus: 'started',
+        driverTripAssist: { status: 'started' },
+        driverActiveRide: {
+          bookingId: 'booking_qa_complete',
+          id: 'booking_qa_complete',
+          status: 'started',
+          pickupAddress: '1540 Mission St, San Francisco',
+          dropoffAddress: '1 Ferry Building, San Francisco',
+          estimatedDriverNetAmount: 15.01,
+        },
+        completeTripFlow,
+      })
+    );
+
+    const navigation = {
+      navigate: jest.fn(),
+      replace: jest.fn(),
+      canGoBack: jest.fn(() => false),
+      goBack: jest.fn(),
+    };
+
+    render(
+      <RobotaxiHomeScreen
+        navigation={navigation}
+        route={{
+          params: {
+            qaAutomation: '1',
+            qaDriverAction: 'complete_trip',
+            qaNonce: 'complete-once',
+          },
+        }}
+      />
+    );
+
+    await waitFor(() => {
+      expect(completeTripFlow).toHaveBeenCalled();
+      expect(navigation.navigate).toHaveBeenCalledWith(
+        'RobotaxiPrototypeReceipt',
+        { fromTrip: true }
+      );
+    });
+  });
+
+  it('cleans up a passenger searching replacement ride through the home QA automation hook', async () => {
+    const cancelRideSearch = jest.fn().mockResolvedValue({ success: true });
+
+    usePrototypeRideRuntime.mockReturnValue(
+      buildPassengerRuntime({
+        bookingStatus: 'searching_replacement',
+        activeBookingId: 'booking_cleanup_1',
+        cancelRideSearch,
+      })
+    );
+
+    const navigation = {
+      navigate: jest.fn(),
+      replace: jest.fn(),
+      canGoBack: jest.fn(() => false),
+      goBack: jest.fn(),
+    };
+
+    render(
+      <RobotaxiHomeScreen
+        navigation={navigation}
+        route={{
+          params: {
+            qaAutomation: '1',
+            qaPassengerAction: 'cleanup_active',
+            qaNonce: 'cleanup-searching-replacement',
+          },
+        }}
+      />
+    );
+
+    await waitFor(() => {
+      expect(cancelRideSearch).toHaveBeenCalled();
+    });
+  });
+
+  it('ends an interrupted operational ride through the home QA automation hook', async () => {
+    const respondOperationalContinuationFlow = jest.fn().mockResolvedValue({ success: true });
+
+    usePrototypeRideRuntime.mockReturnValue(
+      buildPassengerRuntime({
+        bookingStatus: 'operational_interrupted',
+        activeBookingId: 'booking_interrupt_1',
+        operationalContinuation: {
+          status: 'passenger_decision_pending',
+          bookingId: 'booking_interrupt_1',
+        },
+        respondOperationalContinuationFlow,
+      })
+    );
+
+    const navigation = {
+      navigate: jest.fn(),
+      replace: jest.fn(),
+      canGoBack: jest.fn(() => false),
+      goBack: jest.fn(),
+    };
+
+    render(
+      <RobotaxiHomeScreen
+        navigation={navigation}
+        route={{
+          params: {
+            qaAutomation: '1',
+            qaPassengerAction: 'cleanup_active',
+            qaNonce: 'cleanup-operational',
+          },
+        }}
+      />
+    );
+
+    await waitFor(() => {
+      expect(respondOperationalContinuationFlow).toHaveBeenCalledWith(false);
+    });
+  });
+});
