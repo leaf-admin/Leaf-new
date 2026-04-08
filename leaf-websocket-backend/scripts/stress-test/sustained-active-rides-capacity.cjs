@@ -75,6 +75,7 @@ Runtime controls:
   --token-concurrency <n>                Firebase token generation concurrency (default: 20)
   --connect-concurrency <n>              Socket connect/auth concurrency (default: 20)
   --readiness-concurrency <n>            Driver readiness checks concurrency (default: 16)
+  --driver-status-token <token>          Token para /api/driver-status* (x-driver-status-token)
   --max-start-concurrency <n>            Max parallel ride starts (default: 12)
   --max-complete-concurrency <n>         Max parallel ride completes (default: 12)
   --loop-tick-ms <n>                     Main loop tick (default: 250)
@@ -120,6 +121,15 @@ const PROFILE = arg('--profile', 'production');
 const TOKEN_CONCURRENCY = Math.max(1, argInt('--token-concurrency', 20));
 const CONNECT_CONCURRENCY = Math.max(1, argInt('--connect-concurrency', 20));
 const READINESS_CONCURRENCY = Math.max(1, argInt('--readiness-concurrency', 16));
+const DRIVER_STATUS_TOKEN = String(
+  arg(
+    '--driver-status-token',
+    process.env.DRIVER_STATUS_DEBUG_TOKEN ||
+      process.env.RUNTIME_ADMIN_TOKEN ||
+      process.env.RESTART_TOKEN ||
+      ''
+  ) || ''
+).trim();
 const MAX_START_CONCURRENCY = Math.max(1, argInt('--max-start-concurrency', 12));
 const MAX_COMPLETE_CONCURRENCY = Math.max(1, argInt('--max-complete-concurrency', 12));
 const HEARTBEAT_MS = Math.max(500, argInt('--heartbeat-ms', 1200));
@@ -130,6 +140,7 @@ const READINESS_TIMEOUT_MS = Math.max(5000, argInt('--readiness-timeout-ms', 300
 const PRE_BOOKING_READINESS_RECHECK_MS = Math.max(0, argInt('--pre-booking-readiness-recheck-ms', 0));
 const DRAIN_TIMEOUT_MS = Math.max(10000, argInt('--drain-timeout-ms', 300000));
 const STRICT_READY = argBool('--strict-ready', true);
+const ALLOW_PROVISIONAL_READY = argBool('--allow-provisional-ready', true);
 const FORCE_REAL_PAYMENT = argBool('--force-real-payment', true);
 const MOCK_COMPLETE_PAYMENT = argBool('--mock-complete-payment', true);
 const PROVISION_DRIVER_VEHICLES = argBool('--provision-driver-vehicles', true);
@@ -162,7 +173,12 @@ const state = {
   runningWindow: null,
   httpClient: axios.create({
     baseURL: HTTP_BASE,
-    timeout: 8000
+    timeout: 8000,
+    headers: DRIVER_STATUS_TOKEN
+      ? {
+          'x-driver-status-token': DRIVER_STATUS_TOKEN
+        }
+      : undefined
   }),
   report: {
     startedAt: new Date().toISOString(),
@@ -179,6 +195,8 @@ const state = {
       paymentRetries: PAYMENT_RETRIES,
       dispatchTimeoutMs: DISPATCH_TIMEOUT_MS,
       readinessTimeoutMs: READINESS_TIMEOUT_MS,
+      driverStatusTokenConfigured: Boolean(DRIVER_STATUS_TOKEN),
+      readinessMode: DRIVER_STATUS_TOKEN ? 'driver_status_http' : (ALLOW_PROVISIONAL_READY ? 'provisional_socket_only' : 'driver_status_http_missing_token'),
       preBookingReadinessRecheckMs: PRE_BOOKING_READINESS_RECHECK_MS,
       drainTimeoutMs: DRAIN_TIMEOUT_MS
     },
@@ -547,7 +565,11 @@ function emitDriverStatusAndLocation(driverSession, isInTrip, options = {}) {
   if (forceStatus || driverSession.lastDriverStatus !== status) {
     driverSession.client.socket.emit('setDriverStatus', {
       status,
-      isOnline: true
+      isOnline: true,
+      lat: driverSession.location.lat,
+      lng: driverSession.location.lng,
+      heading,
+      speed
     });
     driverSession.lastDriverStatus = status;
     driverSession.lastStatusEmitAt = nowMs();
@@ -649,8 +671,35 @@ async function readDriverStatus(driverId) {
 
 async function waitDriverReady(driverSession, timeoutMs = READINESS_TIMEOUT_MS) {
   const startedAt = nowMs();
+  let provisionalSamples = 0;
   while (nowMs() - startedAt < timeoutMs) {
-    emitDriverStatusAndLocation(driverSession, false);
+    emitDriverStatusAndLocation(driverSession, false, {
+      forceStatus: provisionalSamples === 0
+    });
+
+    if (!DRIVER_STATUS_TOKEN && ALLOW_PROVISIONAL_READY) {
+      provisionalSamples += 1;
+      if (driverSession.client?.socket?.connected && provisionalSamples >= 3) {
+        const status = {
+          provisionalReady: true,
+          canReceiveRequests: true,
+          details: {
+            isOnlineInRedis: null,
+            isEligibleInGeo: null,
+            dispatchEligible: 'provisional',
+            dispatchEligibilityCode: 'PROVISIONAL_NO_STATUS_TOKEN'
+          }
+        };
+        driverSession.isReady = true;
+        driverSession.lastReadyAt = nowMs();
+        driverSession.lastReadyStatus = status;
+        return true;
+      }
+
+      await sleep(800);
+      continue;
+    }
+
     try {
       const status = await readDriverStatus(driverSession.uid);
       const canReceiveRequests = status?.canReceiveRequests === true;
@@ -1393,6 +1442,11 @@ async function bootstrapPools() {
   }
 
   logLine(`[setup] validating driver readiness (canReceiveRequests + inGeo)...`);
+  if (!DRIVER_STATUS_TOKEN && ALLOW_PROVISIONAL_READY) {
+    state.report.notes.push(
+      'Driver status token ausente; bootstrap de readiness usando fallback provisório baseado em socket conectado + heartbeat.'
+    );
+  }
   const readinessResults = await withConcurrency(
     state.drivers,
     READINESS_CONCURRENCY,
@@ -1414,8 +1468,14 @@ async function bootstrapPools() {
       } else {
         driver.status = 'idle';
       }
+      const status = driver.lastReadyStatus || {};
+      const details = status.details || {};
       state.report.notes.push(
-        `Driver not ready at bootstrap (${driver.uid}) - canReceiveRequests=${driver.lastReadyStatus?.canReceiveRequests || false}`
+        `Driver not ready at bootstrap (${driver.uid}) - canReceiveRequests=${status.canReceiveRequests === true}` +
+        ` onlineRedis=${details.isOnlineInRedis === true}` +
+        ` eligibleGeo=${details.isEligibleInGeo === true}` +
+        ` dispatchEligible=${details.dispatchEligible ?? 'n/a'}` +
+        ` dispatchCode=${details.dispatchEligibilityCode ?? 'n/a'}`
       );
       continue;
     }
@@ -1629,6 +1689,12 @@ function finalizeReportAndPrint() {
 async function main() {
   logLine(`[run] ws=${WS_URL}`);
   logLine(`[run] windows=${windows.map((w) => `${w.name}:${w.durationSec}s@${w.targetActive}`).join(', ')}`);
+  if (!DRIVER_STATUS_TOKEN) {
+    state.report.notes.push(
+      'Driver status token não configurado no harness (--driver-status-token ou env DRIVER_STATUS_DEBUG_TOKEN/RUNTIME_ADMIN_TOKEN).'
+    );
+    logLine('[warn] driver-status token ausente; /api/driver-status* pode retornar 401 em produção.');
+  }
 
   await bootstrapPools();
   await runWindows();
