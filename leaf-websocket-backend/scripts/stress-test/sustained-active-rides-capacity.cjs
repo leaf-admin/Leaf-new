@@ -86,7 +86,7 @@ Runtime controls:
   --pre-booking-readiness-recheck-ms <n> Revalidar readiness antes do booking quando stale (default: 0 = desabilitado)
   --drain-timeout-ms <n>                 End-of-test drain timeout (default: 300000)
   --strict-ready <true|false>            Exclude drivers that never become ready (default: true)
-  --force-real-payment <true|false>      Enforce mockPayment=false (default: true)
+  --force-real-payment <true|false>      Use real payment advance/webhook and mockPayment=false (default: false)
   --mock-complete-payment <true|false>   Use mock on completeTrip only (default: true)
   --provision-driver-vehicles <bool>     Provision test drivers with active approved vehicle (default: true)
   --provision-concurrency <n>            Provision concurrency (default: 24)
@@ -141,10 +141,13 @@ const PRE_BOOKING_READINESS_RECHECK_MS = Math.max(0, argInt('--pre-booking-readi
 const DRAIN_TIMEOUT_MS = Math.max(10000, argInt('--drain-timeout-ms', 300000));
 const STRICT_READY = argBool('--strict-ready', true);
 const ALLOW_PROVISIONAL_READY = argBool('--allow-provisional-ready', true);
-const FORCE_REAL_PAYMENT = argBool('--force-real-payment', true);
+const FORCE_REAL_PAYMENT = argBool('--force-real-payment', false);
 const MOCK_COMPLETE_PAYMENT = argBool('--mock-complete-payment', true);
 const PROVISION_DRIVER_VEHICLES = argBool('--provision-driver-vehicles', true);
 const PROVISION_CONCURRENCY = Math.max(1, argInt('--provision-concurrency', 24));
+const START_FAILURE_COOLDOWN_MS = Math.max(0, argInt('--start-failure-cooldown-ms', 3000));
+const PAYMENT_FAILURE_COOLDOWN_MS = Math.max(0, argInt('--payment-failure-cooldown-ms', 5000));
+const RATE_LIMIT_FAILURE_COOLDOWN_MS = Math.max(0, argInt('--rate-limit-failure-cooldown-ms', 15000));
 const BASE_LAT = argFloat('--base-lat', -22.9068);
 const BASE_LNG = argFloat('--base-lng', -43.1729);
 const SPREAD_LAT = argFloat('--spread-lat', 0.06);
@@ -187,6 +190,7 @@ const state = {
       httpBase: HTTP_BASE,
       profile: PROFILE,
       forceRealPayment: FORCE_REAL_PAYMENT,
+      prepaidBookingFlow: true,
       mockCompletePayment: MOCK_COMPLETE_PAYMENT,
       provisionDriverVehicles: PROVISION_DRIVER_VEHICLES,
       strictReady: STRICT_READY,
@@ -264,6 +268,12 @@ function logLine(line) {
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function normalizeAmountToCents(amount) {
+  const numericAmount = Number(amount);
+  if (!Number.isFinite(numericAmount)) return 0;
+  return numericAmount > 999 ? Math.round(numericAmount) : Math.round(numericAmount * 100);
 }
 
 function nowMs() {
@@ -469,6 +479,8 @@ function classifyError(error) {
   const message = String(error?.message || error || '').trim();
   if (!message) return 'unknown';
   if (message.includes('confirmPayment_timeout') || message.includes('Timeout ao confirmar pagamento')) return 'payment_timeout';
+  if (message.toLowerCase().includes('pagamento')) return 'payment';
+  if (message.toLowerCase().includes('requisiç') || message.toLowerCase().includes('rate limit')) return 'rate_limit';
   if (message.includes('booking')) return 'create_booking';
   if (message.includes('payment')) return 'payment';
   if (message.includes('veículo ativo') || message.includes('vehicle')) return 'driver_vehicle';
@@ -495,6 +507,18 @@ function addErrorMetric(key, error = null) {
     while (samples.length > 6) samples.shift();
     state.report.metrics.errorSamples[key] = samples;
   }
+}
+
+function computeFailureCooldownMs(error) {
+  const message = String(error?.message || error || '').toLowerCase();
+  if (!message) return START_FAILURE_COOLDOWN_MS;
+  if (message.includes('requisiç') || message.includes('rate limit')) {
+    return RATE_LIMIT_FAILURE_COOLDOWN_MS;
+  }
+  if (message.includes('pagamento') || message.includes('payment')) {
+    return PAYMENT_FAILURE_COOLDOWN_MS;
+  }
+  return START_FAILURE_COOLDOWN_MS;
 }
 
 function isPaymentBlockedNoPartner(errorPayload) {
@@ -729,6 +753,94 @@ async function clearDriverLock(driverId) {
   }
 }
 
+async function createAdvancePayment({
+  passenger,
+  pickup,
+  destination,
+  amount,
+  windowSpec,
+  rideStartedAt
+}) {
+  const amountInCents = normalizeAmountToCents(amount);
+  const rideId = `headroom_${windowSpec.name}_${passenger.uid}_${rideStartedAt}`;
+
+  if (!FORCE_REAL_PAYMENT) {
+    return {
+      rideId,
+      chargeId: `mock_review_${rideId}_${Date.now()}`,
+      amountInCents,
+      bypass: true,
+      synthetic: true,
+      raw: {
+        success: true,
+        bypass: true,
+        synthetic: true
+      }
+    };
+  }
+
+  const passengerEmailSafe = `${String(passenger.uid || 'passenger')
+    .replace(/[^a-zA-Z0-9._-]/g, '')
+    .slice(0, 48) || 'passenger'}@leaf.local`;
+
+  const response = await state.httpClient.post('/api/payment/advance', {
+    passengerId: passenger.uid,
+    amount: amountInCents,
+    rideId,
+    rideDetails: {
+      origin: pickup?.address || pickup?.add || 'Pickup',
+      destination: destination?.address || destination?.add || 'Destination'
+    },
+    passengerName: `Headroom Passenger ${String(passenger.uid || '').slice(0, 8)}`,
+    passengerEmail: passengerEmailSafe
+  });
+
+  const payload = response?.data || {};
+  const chargeId = String(payload?.chargeId || payload?.charge?.id || '').trim();
+  if (!chargeId) {
+    throw new Error(`payment_advance_missing_charge:${JSON.stringify(payload)}`);
+  }
+
+  return {
+    rideId,
+    chargeId,
+    amountInCents,
+    bypass: payload?.bypass === true,
+    raw: payload
+  };
+}
+
+async function confirmAdvancePaymentByWebhook({
+  chargeId,
+  rideId,
+  amountInCents,
+  passengerId
+}) {
+  const webhookPayload = {
+    event: 'OPENPIX:CHARGE_COMPLETED',
+    charge: {
+      identifier: chargeId,
+      transactionID: chargeId,
+      correlationID: `headroom_${rideId}_${Date.now()}`,
+      value: amountInCents,
+      status: 'COMPLETED',
+      paidAt: new Date().toISOString(),
+      additionalInfo: [
+        { key: 'ride_id', value: rideId },
+        { key: 'passenger_id', value: passengerId || '' },
+        { key: 'payment_type', value: 'advance_payment' },
+        { key: 'service', value: 'ride_sharing' }
+      ]
+    },
+    pix: {
+      status: 'COMPLETED'
+    }
+  };
+
+  await state.httpClient.post('/api/woovi/test-webhook', webhookPayload);
+  await sleep(350);
+}
+
 async function confirmPaymentDetailed(passengerSession, payload, timeoutMs = 25000) {
   return new Promise((resolve, reject) => {
     let settled = false;
@@ -772,6 +884,7 @@ function pickIdleDriver() {
   for (let i = 0; i < drivers.length; i += 1) {
     const idx = (state.driverCursor + i) % drivers.length;
     const candidate = drivers[idx];
+    if ((candidate.cooldownUntil || 0) > nowMs()) continue;
     if (candidate.status === 'idle' && candidate.isReady === true) {
       state.driverCursor = (idx + 1) % drivers.length;
       return candidate;
@@ -786,6 +899,7 @@ function pickIdlePassenger() {
   for (let i = 0; i < passengers.length; i += 1) {
     const idx = (state.passengerCursor + i) % passengers.length;
     const candidate = passengers[idx];
+    if ((candidate.cooldownUntil || 0) > nowMs()) continue;
     if (candidate.status === 'idle') {
       state.passengerCursor = (idx + 1) % passengers.length;
       return candidate;
@@ -909,6 +1023,8 @@ async function launchRide(windowSpec, windowReport) {
   let pickup = null;
   let destination = null;
   let assignedDriver = null;
+  let advancePayment = null;
+  let estimatedFare = 0;
 
   try {
     const readinessStaleMs = nowMs() - (seedDriver.lastReadyAt || 0);
@@ -930,6 +1046,25 @@ async function launchRide(windowSpec, windowReport) {
     }, 0.0012);
 
     flowMarks.start = nowMs();
+    estimatedFare = Number((20 + Math.random() * 35).toFixed(2));
+    advancePayment = await createAdvancePayment({
+      passenger,
+      pickup,
+      destination,
+      amount: estimatedFare,
+      windowSpec,
+      rideStartedAt: flowMarks.start
+    });
+
+    if (!advancePayment.bypass) {
+      await confirmAdvancePaymentByWebhook({
+        chargeId: advancePayment.chargeId,
+        rideId: advancePayment.rideId,
+        amountInCents: advancePayment.amountInCents,
+        passengerId: passenger.uid
+      });
+    }
+
     const bookingResponse = await passenger.client.createBooking({
       customerId: passenger.uid,
       pickupLocation: {
@@ -940,8 +1075,17 @@ async function launchRide(windowSpec, windowReport) {
         ...destination,
         address: `Destination ${windowSpec.name} ${flowMarks.start}`
       },
-      estimatedFare: Number((20 + Math.random() * 35).toFixed(2)),
+      estimatedFare,
       paymentMethod: 'pix',
+      paymentStatus: 'confirmed',
+      paymentId: advancePayment.chargeId,
+      paymentData: {
+        chargeId: advancePayment.chargeId,
+        rideId: advancePayment.rideId,
+        amountInCents: advancePayment.amountInCents,
+        paymentStatus: 'confirmed',
+        confirmedAt: new Date().toISOString()
+      },
       carType: 'plus',
       idempotencyKey: `sustain_${windowSpec.name}_${passenger.uid}_${flowMarks.start}`
     });
@@ -959,14 +1103,19 @@ async function launchRide(windowSpec, windowReport) {
       const paymentPayload = {
         bookingId,
         paymentMethod: 'pix',
-        paymentId: `pay_${windowSpec.name}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
-        amount: Number((20 + Math.random() * 35).toFixed(2)),
+        paymentId: advancePayment.chargeId,
+        chargeId: advancePayment.chargeId,
+        rideId: advancePayment.rideId,
+        amount: estimatedFare,
         pickupLocation: pickup
       };
 
       if (FORCE_REAL_PAYMENT) {
         paymentPayload.mockPayment = false;
         paymentPayload.__mockPayment = false;
+      } else {
+        paymentPayload.mockPayment = true;
+        paymentPayload.__mockPayment = true;
       }
 
       const paymentResult = await confirmPaymentDetailed(passenger, paymentPayload);
@@ -1011,6 +1160,17 @@ async function launchRide(windowSpec, windowReport) {
     await assignedDriver.client.acceptRide(bookingId);
     flowMarks.acceptDone = nowMs();
     windowReport.latencyMs.acceptRide.push(flowMarks.acceptDone - acceptStart);
+
+    assignedDriver.location = { lat: pickup.lat, lng: pickup.lng };
+    assignedDriver.client.socket.emit('updateLocation', {
+      lat: pickup.lat,
+      lng: pickup.lng,
+      tripStatus: 'accepted',
+      isInTrip: false,
+      seq: Date.now() % 100000
+    });
+    await sleep(250);
+    await assignedDriver.client.arrivedAtPickup(bookingId);
 
     const startStart = nowMs();
     await assignedDriver.client.startTrip({
@@ -1065,6 +1225,7 @@ async function launchRide(windowSpec, windowReport) {
     return true;
   } catch (error) {
     const key = classifyError(error);
+    const cooldownMs = computeFailureCooldownMs(error);
     addErrorMetric(key, error);
     addWindowError(windowReport, key);
     state.report.metrics.failedStarts += 1;
@@ -1081,18 +1242,21 @@ async function launchRide(windowSpec, windowReport) {
 
     passenger.status = 'idle';
     passenger.activeBookingId = null;
+    passenger.cooldownUntil = nowMs() + cooldownMs;
 
     if (assignedDriver) {
       await clearDriverLock(assignedDriver.uid);
       assignedDriver.status = 'idle';
       assignedDriver.activeBookingId = null;
       assignedDriver.isReady = false;
+      assignedDriver.cooldownUntil = nowMs() + Math.min(cooldownMs, 5000);
 
       const readyAgain = await waitDriverReady(assignedDriver, 10000);
       if (readyAgain) {
         assignedDriver.status = 'idle';
         assignedDriver.isReady = true;
         assignedDriver.readinessFailures = 0;
+        assignedDriver.cooldownUntil = nowMs() + Math.min(cooldownMs, 5000);
       } else {
         assignedDriver.isReady = false;
         assignedDriver.status = 'idle';

@@ -19,6 +19,12 @@ function argBool(name, fallback = false) {
   return ['1', 'true', 'yes', 'on'].includes(raw);
 }
 
+function argInt(name, fallback = 0) {
+  const raw = arg(name, String(fallback));
+  const parsed = Number.parseInt(raw, 10);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
 function percentile(values = [], percentileValue = 95) {
   const numeric = values
     .map((value) => Number(value))
@@ -150,6 +156,22 @@ function writeMarkdown(reportDir, batterySummary) {
 
 async function main() {
   const url = arg('--url', process.env.WS_URL || process.env.API_BASE_URL || 'http://127.0.0.1:3001');
+  const forceRealPayment = argBool(
+    '--force-real-payment',
+    String(process.env.HEADROOM_FORCE_REAL_PAYMENT || 'false').toLowerCase() === 'true'
+  );
+  const startFailureCooldownMs = argInt(
+    '--start-failure-cooldown-ms',
+    Number.parseInt(process.env.HEADROOM_START_FAILURE_COOLDOWN_MS || '3000', 10)
+  );
+  const paymentFailureCooldownMs = argInt(
+    '--payment-failure-cooldown-ms',
+    Number.parseInt(process.env.HEADROOM_PAYMENT_FAILURE_COOLDOWN_MS || '5000', 10)
+  );
+  const rateLimitFailureCooldownMs = argInt(
+    '--rate-limit-failure-cooldown-ms',
+    Number.parseInt(process.env.HEADROOM_RATE_LIMIT_FAILURE_COOLDOWN_MS || '15000', 10)
+  );
   const targets = String(arg('--targets', '250,300,350'))
     .split(',')
     .map((value) => Number.parseInt(value.trim(), 10))
@@ -171,6 +193,10 @@ async function main() {
       '--drivers', String(target),
       '--passengers', String(target),
       '--profile', 'production',
+      '--force-real-payment', forceRealPayment ? 'true' : 'false',
+      '--start-failure-cooldown-ms', String(startFailureCooldownMs),
+      '--payment-failure-cooldown-ms', String(paymentFailureCooldownMs),
+      '--rate-limit-failure-cooldown-ms', String(rateLimitFailureCooldownMs),
       '--windows', windows,
       '--report-path', reportPath,
       '--quiet', quiet ? 'true' : 'false'
@@ -208,6 +234,12 @@ async function main() {
   const batterySummary = {
     generatedAt: new Date().toISOString(),
     url,
+    config: {
+      forceRealPayment,
+      startFailureCooldownMs,
+      paymentFailureCooldownMs,
+      rateLimitFailureCooldownMs
+    },
     conclusion,
     scenarios: scenarioResults
   };
