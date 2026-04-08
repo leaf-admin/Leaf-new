@@ -1,0 +1,227 @@
+const express = require('express');
+const { authenticateSupport, requireSupportRoles } = require('../middleware/support-auth');
+const safetyIncidentService = require('../services/safety-incident-service');
+const passengerTrustService = require('../services/passenger-trust-service');
+const operationalAreaPolicyService = require('../services/operational-area-policy-service');
+const disputeReviewService = require('../services/dispute-review-service');
+const opsOverviewService = require('../services/ops-overview-service');
+const { logError } = require('../utils/logger');
+
+const router = express.Router();
+const OPS_ROLES = ['admin', 'manager', 'super-admin', 'support', 'development', 'viewer'];
+const MUTATION_ROLES = ['admin', 'manager', 'super-admin', 'support', 'development'];
+
+router.use(authenticateSupport, requireSupportRoles(OPS_ROLES));
+
+router.get('/overview', async (req, res) => {
+  try {
+    const { hours = 1, city = null, regionHash = null } = req.query;
+    const overview = await opsOverviewService.getOverview({ hours, city, regionHash });
+    res.json({ success: true, overview });
+  } catch (error) {
+    logError(error, { service: 'ops-routes', operation: 'overview' });
+    res.status(500).json({ success: false, error: 'Erro ao buscar overview operacional' });
+  }
+});
+
+router.get('/alerts', async (req, res) => {
+  try {
+    const { hours = 1, city = null, regionHash = null } = req.query;
+    const alerts = await opsOverviewService.getAlerts({ hours, city, regionHash });
+    res.json({ success: true, alerts });
+  } catch (error) {
+    logError(error, { service: 'ops-routes', operation: 'alerts' });
+    res.status(500).json({ success: false, error: 'Erro ao buscar alertas operacionais' });
+  }
+});
+
+router.get('/incidents', async (req, res) => {
+  try {
+    const incidents = await safetyIncidentService.listIncidents(req.query);
+    res.json({ success: true, incidents });
+  } catch (error) {
+    logError(error, { service: 'ops-routes', operation: 'listIncidents' });
+    res.status(500).json({ success: false, error: 'Erro ao listar incidentes' });
+  }
+});
+
+router.get('/incidents/:incidentId', async (req, res) => {
+  try {
+    const incident = await safetyIncidentService.getIncident(req.params.incidentId);
+    if (!incident) {
+      return res.status(404).json({ success: false, error: 'Incidente não encontrado' });
+    }
+    return res.json({ success: true, incident });
+  } catch (error) {
+    logError(error, { service: 'ops-routes', operation: 'getIncident' });
+    return res.status(500).json({ success: false, error: 'Erro ao buscar incidente' });
+  }
+});
+
+router.post('/incidents/:incidentId/ack', requireSupportRoles(MUTATION_ROLES), async (req, res) => {
+  try {
+    const incident = await safetyIncidentService.ackIncident(req.params.incidentId, {
+      actorId: req.user?.uid || req.user?.id || 'ops',
+      assignedTo: req.body?.assignedTo || null,
+      note: req.body?.note || null
+    });
+    res.json({ success: true, incident });
+  } catch (error) {
+    logError(error, { service: 'ops-routes', operation: 'ackIncident' });
+    res.status(500).json({ success: false, error: error.message || 'Erro ao reconhecer incidente' });
+  }
+});
+
+router.post('/incidents/:incidentId/resolve', requireSupportRoles(MUTATION_ROLES), async (req, res) => {
+  try {
+    const incident = await safetyIncidentService.resolveIncident(req.params.incidentId, {
+      actorId: req.user?.uid || req.user?.id || 'ops',
+      resolutionCode: req.body?.resolutionCode || null,
+      note: req.body?.note || null,
+      close: req.body?.close === true
+    });
+    res.json({ success: true, incident });
+  } catch (error) {
+    logError(error, { service: 'ops-routes', operation: 'resolveIncident' });
+    res.status(500).json({ success: false, error: error.message || 'Erro ao resolver incidente' });
+  }
+});
+
+router.get('/passengers/:userId/trust', async (req, res) => {
+  try {
+    const profile = await passengerTrustService.getProfile(req.params.userId);
+    res.json({ success: true, profile });
+  } catch (error) {
+    logError(error, { service: 'ops-routes', operation: 'getPassengerTrust' });
+    res.status(500).json({ success: false, error: 'Erro ao buscar perfil de trust' });
+  }
+});
+
+router.post('/passengers/:userId/watchlist', requireSupportRoles(MUTATION_ROLES), async (req, res) => {
+  try {
+    const profile = await passengerTrustService.watchlistPassenger(req.params.userId, {
+      operatorId: req.user?.uid || req.user?.id || 'ops',
+      reasonCode: req.body?.reasonCode || 'manual_watchlist',
+      evidenceRefs: req.body?.evidenceRefs || [],
+      notes: req.body?.notes || null
+    });
+    res.json({ success: true, profile });
+  } catch (error) {
+    logError(error, { service: 'ops-routes', operation: 'watchlistPassenger' });
+    res.status(500).json({ success: false, error: 'Erro ao colocar passageiro em watchlist' });
+  }
+});
+
+router.post('/passengers/:userId/block', requireSupportRoles(MUTATION_ROLES), async (req, res) => {
+  try {
+    const profile = await passengerTrustService.blockPassenger(req.params.userId, {
+      operatorId: req.user?.uid || req.user?.id || 'ops',
+      reasonCode: req.body?.reasonCode || 'manual_block',
+      evidenceRefs: req.body?.evidenceRefs || [],
+      notes: req.body?.notes || null,
+      expiresAt: req.body?.expiresAt || null,
+      soft: req.body?.soft === true
+    });
+    res.json({ success: true, profile });
+  } catch (error) {
+    logError(error, { service: 'ops-routes', operation: 'blockPassenger' });
+    res.status(500).json({ success: false, error: 'Erro ao bloquear passageiro' });
+  }
+});
+
+router.post('/passengers/:userId/unblock', requireSupportRoles(MUTATION_ROLES), async (req, res) => {
+  try {
+    const profile = await passengerTrustService.unblockPassenger(req.params.userId, {
+      operatorId: req.user?.uid || req.user?.id || 'ops',
+      reasonCode: req.body?.reasonCode || 'manual_unblock',
+      evidenceRefs: req.body?.evidenceRefs || [],
+      notes: req.body?.notes || null
+    });
+    res.json({ success: true, profile });
+  } catch (error) {
+    logError(error, { service: 'ops-routes', operation: 'unblockPassenger' });
+    res.status(500).json({ success: false, error: 'Erro ao desbloquear passageiro' });
+  }
+});
+
+router.get('/areas/policies', async (req, res) => {
+  try {
+    const policies = await operationalAreaPolicyService.listPolicies(req.query);
+    res.json({ success: true, policies });
+  } catch (error) {
+    logError(error, { service: 'ops-routes', operation: 'listPolicies' });
+    res.status(500).json({ success: false, error: 'Erro ao listar políticas operacionais' });
+  }
+});
+
+router.post('/areas/policies', requireSupportRoles(MUTATION_ROLES), async (req, res) => {
+  try {
+    const policy = await operationalAreaPolicyService.createPolicy({
+      ...req.body,
+      actorId: req.user?.uid || req.user?.id || 'ops'
+    });
+    res.status(201).json({ success: true, policy });
+  } catch (error) {
+    logError(error, { service: 'ops-routes', operation: 'createPolicy' });
+    res.status(500).json({ success: false, error: error.message || 'Erro ao criar política operacional' });
+  }
+});
+
+router.post('/areas/policies/:policyId/activate', requireSupportRoles(MUTATION_ROLES), async (req, res) => {
+  try {
+    const policy = await operationalAreaPolicyService.activatePolicy(req.params.policyId, {
+      actorId: req.user?.uid || req.user?.id || 'ops'
+    });
+    res.json({ success: true, policy });
+  } catch (error) {
+    logError(error, { service: 'ops-routes', operation: 'activatePolicy' });
+    res.status(500).json({ success: false, error: error.message || 'Erro ao ativar política operacional' });
+  }
+});
+
+router.post('/areas/policies/:policyId/deactivate', requireSupportRoles(MUTATION_ROLES), async (req, res) => {
+  try {
+    const policy = await operationalAreaPolicyService.deactivatePolicy(req.params.policyId, {
+      actorId: req.user?.uid || req.user?.id || 'ops'
+    });
+    res.json({ success: true, policy });
+  } catch (error) {
+    logError(error, { service: 'ops-routes', operation: 'deactivatePolicy' });
+    res.status(500).json({ success: false, error: error.message || 'Erro ao desativar política operacional' });
+  }
+});
+
+router.get('/disputes', async (req, res) => {
+  try {
+    const disputes = await disputeReviewService.listDisputes(req.query);
+    res.json({ success: true, disputes });
+  } catch (error) {
+    logError(error, { service: 'ops-routes', operation: 'listDisputes' });
+    res.status(500).json({ success: false, error: 'Erro ao listar disputas' });
+  }
+});
+
+router.post('/disputes', requireSupportRoles(MUTATION_ROLES), async (req, res) => {
+  try {
+    const dispute = await disputeReviewService.createDispute(req.body);
+    res.status(201).json({ success: true, dispute });
+  } catch (error) {
+    logError(error, { service: 'ops-routes', operation: 'createDispute' });
+    res.status(500).json({ success: false, error: error.message || 'Erro ao criar disputa' });
+  }
+});
+
+router.post('/disputes/:disputeId/decision', requireSupportRoles(MUTATION_ROLES), async (req, res) => {
+  try {
+    const dispute = await disputeReviewService.decideDispute(req.params.disputeId, {
+      ...req.body,
+      actorId: req.user?.uid || req.user?.id || 'ops'
+    });
+    res.json({ success: true, dispute });
+  } catch (error) {
+    logError(error, { service: 'ops-routes', operation: 'decideDispute' });
+    res.status(500).json({ success: false, error: error.message || 'Erro ao decidir disputa' });
+  }
+});
+
+module.exports = router;

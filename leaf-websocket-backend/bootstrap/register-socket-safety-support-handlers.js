@@ -3,6 +3,9 @@ function registerSocketSafetySupportHandlers({
     io,
     logStructured
 }) {
+    const safetyIncidentService = require('../services/safety-incident-service');
+    const supportQueueService = require('../services/support-queue-service');
+
     // ==================== NOVOS EVENTOS - SISTEMA DE SEGURANÇA ====================
 
     // Reportar incidente
@@ -22,22 +25,28 @@ function registerSocketSafetySupportHandlers({
                 return;
             }
 
-            // Simular processamento do incidente
-            const incidentData = {
-                reportId: `incident_${Date.now()}`,
-                type,
+            const incidentData = await safetyIncidentService.createIncident({
+                bookingId: data?.bookingId || null,
+                userId: socket.userId || socket.id,
+                userType: socket.userType || 'passenger',
+                city: data?.city || data?.pickupCity || 'default',
+                regionHash: data?.regionHash || '*',
+                category: type || 'safety',
+                severity: data?.severity || (type === 'emergency' ? 'critical' : 'high'),
                 description,
                 evidence: evidence || [],
-                location,
-                status: 'under_review',
-                priority: type === 'safety' ? 'high' : 'medium',
-                timestamp: timestamp || new Date().toISOString()
-            };
+                location: location || null,
+                actorId: socket.userId || socket.id
+            });
 
             // Emitir confirmação
             socket.emit('incidentReported', {
                 success: true,
-                reportId: incidentData.reportId,
+                reportId: incidentData.incidentId,
+                incidentId: incidentData.incidentId,
+                status: incidentData.status,
+                slaTargetAt: incidentData.slaTargetAt,
+                ticketId: incidentData.ticketId || null,
                 message: 'Incidente reportado com sucesso',
                 data: incidentData
             });
@@ -45,9 +54,9 @@ function registerSocketSafetySupportHandlers({
             logStructured('info', 'Incidente reportado com sucesso', {
                 service: 'server',
                 userId: socket.userId || socket.id,
-                reportId: incidentData.reportId,
+                reportId: incidentData.incidentId,
                 type,
-                priority: incidentData.priority,
+                priority: incidentData.severity,
                 eventType: 'reportIncident'
             });
 
@@ -79,32 +88,38 @@ function registerSocketSafetySupportHandlers({
                 return;
             }
 
-            // Simular contato de emergência
-            const emergencyData = {
-                emergencyId: `emergency_${Date.now()}`,
-                contactType,
-                location,
-                message: message || 'Solicitação de emergência',
-                status: 'contacted',
-                estimatedResponseTime: contactType === 'police' ? 5 : 10,
-                timestamp: new Date().toISOString()
-            };
+            const emergencyData = await safetyIncidentService.createIncident({
+                bookingId: data?.bookingId || null,
+                userId: socket.userId || socket.id,
+                userType: socket.userType || 'passenger',
+                city: data?.city || data?.pickupCity || 'default',
+                regionHash: data?.regionHash || '*',
+                category: 'emergency',
+                severity: 'critical',
+                description: message || 'Solicitação de emergência',
+                evidence: [],
+                location: location || null,
+                actorId: socket.userId || socket.id
+            });
 
             // Emitir confirmação
             socket.emit('emergencyContacted', {
                 success: true,
-                emergencyId: emergencyData.emergencyId,
+                emergencyId: emergencyData.incidentId,
+                incidentId: emergencyData.incidentId,
                 contactType,
-                estimatedResponseTime: emergencyData.estimatedResponseTime,
+                estimatedResponseTime: contactType === 'police' ? 5 : 10,
+                status: emergencyData.status,
+                slaTargetAt: emergencyData.slaTargetAt,
                 message: 'Contato de emergência realizado'
             });
 
             logStructured('warn', 'Contato de emergência realizado', {
                 service: 'server',
                 userId: socket.userId || socket.id,
-                emergencyId: emergencyData.emergencyId,
+                emergencyId: emergencyData.incidentId,
                 contactType,
-                estimatedResponseTime: emergencyData.estimatedResponseTime,
+                estimatedResponseTime: contactType === 'police' ? 5 : 10,
                 eventType: 'emergencyContact'
             });
 
@@ -183,32 +198,36 @@ function registerSocketSafetySupportHandlers({
                 return;
             }
 
-            // Simular criação do ticket
-            const ticketData = {
-                ticketId: `ticket_${Date.now()}`,
-                type,
-                priority: priority || 'N3',
+            const { ticket, queue } = await supportQueueService.createSupportTicket({
+                subject: data.subject || `${type} support request`,
                 description,
-                attachments: attachments || [],
-                status: 'open',
-                estimatedResponseTime: priority === 'N1' ? 30 : priority === 'N2' ? 120 : 480, // minutos
-                timestamp: new Date().toISOString()
-            };
+                category: ['technical', 'payment', 'account', 'general'].includes(type) ? type : 'general',
+                priority: priority || 'N3',
+                requesterId: socket.userId || socket.id,
+                userType: socket.userType || 'passenger',
+                metadata: {
+                    source: 'socket_support',
+                    attachments: attachments || [],
+                    bookingId: data.bookingId || null
+                }
+            });
 
             // Emitir confirmação
             socket.emit('supportTicketCreated', {
                 success: true,
-                ticketId: ticketData.ticketId,
-                estimatedResponseTime: ticketData.estimatedResponseTime,
+                ticketId: ticket.id,
+                estimatedResponseTime: queue?.slaMinutes?.firstResponse || 240,
+                ackTargetAt: queue?.ackTargetAt || null,
+                firstResponseTargetAt: queue?.firstResponseTargetAt || null,
                 message: 'Ticket de suporte criado com sucesso',
-                data: ticketData
+                data: ticket
             });
 
             logStructured('info', 'Ticket de suporte criado com sucesso', {
                 service: 'websocket',
                 operation: 'createSupportTicket',
-                ticketId: ticketData.ticketId,
-                priority: ticketData.priority
+                ticketId: ticket.id,
+                priority: ticket.priority
             });
 
         } catch (error) {

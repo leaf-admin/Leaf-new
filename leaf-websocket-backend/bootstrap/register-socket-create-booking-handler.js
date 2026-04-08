@@ -23,8 +23,10 @@ function registerSocketCreateBookingHandler({
     logEvent,
     eventBus,
     metricsCollector,
-    findAvailableDriversForPickup
+    findAvailableDriversForPickup,
+    rideCostTelemetryService
 }) {
+    const { scheduleCreateBookingAvailabilityPrecheck } = require('../services/create-booking-availability-precheck');
     const CUSTOMER_ACTIVE_BOOKING_TTL_SECONDS = Number.parseInt(
         process.env.CUSTOMER_ACTIVE_BOOKING_TTL_SECONDS || '21600',
         10
@@ -234,6 +236,37 @@ function registerSocketCreateBookingHandler({
                         });
                     }
 
+                    if (customerId) {
+                        try {
+                            const passengerTrustService = require('../services/passenger-trust-service');
+                            const trustDecision = await passengerTrustService.checkEligibility(customerId);
+                            if (!trustDecision.allowed) {
+                                socket.emit('bookingError', {
+                                    error: 'Solicitação bloqueada',
+                                    message: trustDecision.reason,
+                                    code: trustDecision.code,
+                                    trustStatus: trustDecision.profile?.trustStatus || null,
+                                    trustScore: trustDecision.profile?.trustScore ?? null
+                                });
+
+                                logStructured('warn', 'createBooking bloqueado por trust & safety', {
+                                    customerId,
+                                    trustStatus: trustDecision.profile?.trustStatus || null,
+                                    trustScore: trustDecision.profile?.trustScore ?? null,
+                                    trustCode: trustDecision.code,
+                                    eventType: 'createBooking'
+                                });
+                                return;
+                            }
+                        } catch (trustGuardError) {
+                            logStructured('warn', 'Falha no guard de trust do passageiro (seguindo fluxo)', {
+                                customerId,
+                                eventType: 'createBooking',
+                                error: trustGuardError.message
+                            });
+                        }
+                    }
+
                     if (customerActiveBookingKey) {
                         try {
                             const redis = redisPool.getConnection();
@@ -328,6 +361,69 @@ function registerSocketCreateBookingHandler({
                     }
                     perfTrace.afterBackpressure = Date.now();
 
+                    let areaPolicyDecision = null;
+                    const areaPolicyCity = String(
+                        pickupLocation?.city
+                        || pickupLocation?.cityName
+                        || data?.city
+                        || process.env.DEFAULT_OPERATIONS_CITY
+                        || 'default'
+                    ).trim();
+                    const areaPolicyRegionHash = GeoHashUtils.getRegionHash(
+                        pickupLocation.lat,
+                        pickupLocation.lng
+                    );
+
+                    try {
+                        const operationalAreaPolicyService = require('../services/operational-area-policy-service');
+                        const redis = redisPool.getConnection();
+                        const queueKey = `ride_queue:${areaPolicyRegionHash}:pending`;
+                        const pendingRides = await redis.zcard(queueKey).catch(() => 0);
+                        const availability = await findAvailableDriversForPickup(pickupLocation, {
+                            carType: requestedCarType,
+                            limit: Number.parseInt(process.env.OPERATIONS_POLICY_DRIVER_LIMIT || '12', 10),
+                            radiusKm: Number.parseFloat(process.env.OPERATIONS_POLICY_RADIUS_KM || '5')
+                        }).catch(() => ({ summary: { eligible: 0 } }));
+
+                        areaPolicyDecision = await operationalAreaPolicyService.evaluateCreateBooking({
+                            city: areaPolicyCity,
+                            regionHash: areaPolicyRegionHash,
+                            openRequests: pendingRides,
+                            availableDrivers: availability?.summary?.eligible || 0
+                        });
+
+                        if (!areaPolicyDecision.allowed) {
+                            socket.emit('bookingError', {
+                                error: 'Solicitações temporariamente restritas na sua área',
+                                message: 'A operação está controlando novas corridas nesta região neste momento.',
+                                code: 'AREA_POLICY_RESTRICTED',
+                                dispatchMode: areaPolicyDecision.dispatchMode,
+                                reasons: areaPolicyDecision.reasons,
+                                policyId: areaPolicyDecision.policy?.policyId || null,
+                                regionHash: areaPolicyRegionHash
+                            });
+
+                            logStructured('warn', 'createBooking bloqueado por política operacional', {
+                                customerId,
+                                city: areaPolicyCity,
+                                regionHash: areaPolicyRegionHash,
+                                dispatchMode: areaPolicyDecision.dispatchMode,
+                                reasons: areaPolicyDecision.reasons,
+                                policyId: areaPolicyDecision.policy?.policyId || null,
+                                eventType: 'createBooking'
+                            });
+                            return;
+                        }
+                    } catch (areaPolicyError) {
+                        logStructured('warn', 'Falha na política operacional de área (seguindo fluxo)', {
+                            customerId,
+                            city: areaPolicyCity,
+                            regionHash: areaPolicyRegionHash,
+                            eventType: 'createBooking',
+                            error: areaPolicyError.message
+                        });
+                    }
+
                     // ✅ NOVO: Idempotency - Verificar se requisição já foi processada
                     const idempotencyKey = data.idempotencyKey || idempotencyService.generateKey(
                         userId,
@@ -382,6 +478,24 @@ function registerSocketCreateBookingHandler({
                         }
                     }
 
+                    if (areaPolicyDecision?.policy) {
+                        try {
+                            const operationalAreaPolicyService = require('../services/operational-area-policy-service');
+                            await operationalAreaPolicyService.recordAcceptedRequest(
+                                areaPolicyDecision.policy,
+                                areaPolicyRegionHash
+                            );
+                        } catch (areaPolicyRecordError) {
+                            logStructured('warn', 'Falha ao registrar request em política operacional', {
+                                customerId,
+                                regionHash: areaPolicyRegionHash,
+                                policyId: areaPolicyDecision.policy?.policyId || null,
+                                eventType: 'createBooking',
+                                error: areaPolicyRecordError.message
+                            });
+                        }
+                    }
+
                     // ✅ REFATORAÇÃO: Usar RequestRideCommand
                     logStructured('info', 'Executando RequestRideCommand', {
                         customerId,
@@ -390,36 +504,17 @@ function registerSocketCreateBookingHandler({
 
                     // Guarda de negócio: validar disponibilidade quando pagamento já confirmado.
                     // Não bloquear a criação da corrida por falhas transitórias desta checagem.
-                    if (hasConfirmedPayment) {
-                        // Pré-check informativo: não deve bloquear criação de corrida.
-                        setImmediate(async () => {
-                            try {
-                                const availability = await findAvailableDriversForPickup(pickupLocation, {
-                                    carType: requestedCarType
-                                });
-
-                                if (!availability.success) {
-                                    logStructured('warn', 'createBooking: validação de disponibilidade falhou, seguindo fluxo', {
-                                        userId,
-                                        eventType: 'createBooking',
-                                        code: 'AVAILABILITY_CHECK_FAILED'
-                                    });
-                                } else if ((availability.drivers || []).length === 0) {
-                                    logStructured('warn', 'createBooking: sem motoristas no pre-check, mantendo busca ativa', {
-                                        userId,
-                                        eventType: 'createBooking',
-                                        code: 'NO_DRIVERS_AVAILABLE'
-                                    });
-                                }
-                            } catch (availabilityError) {
-                                logStructured('warn', 'createBooking: erro no pre-check de disponibilidade, seguindo fluxo', {
-                                    userId,
-                                    eventType: 'createBooking',
-                                    error: availabilityError.message
-                                });
-                            }
-                        });
-                    }
+                    scheduleCreateBookingAvailabilityPrecheck({
+                        hasConfirmedPayment,
+                        pickupLocation,
+                        requestedCarType,
+                        checkAvailability: findAvailableDriversForPickup,
+                        logStructured,
+                        logContext: {
+                            userId,
+                            eventType: 'createBooking'
+                        }
+                    });
 
                     // ✅ FASE 1.3: Criar span para Command
                     const tracer = getTracer();
@@ -465,11 +560,9 @@ function registerSocketCreateBookingHandler({
 
                         // ✅ MÉTRICAS: Registrar latência do command
                         commandLatency = (Date.now() - commandStartTime) / 1000;
-                        metrics.recordCommand('request_ride', commandLatency, result.success);
                     } catch (error) {
                         endSpanError(commandSpan, error);
                         commandLatency = (Date.now() - commandStartTime) / 1000;
-                        metrics.recordCommand('request_ride', commandLatency, false);
                         throw error;
                     }
 
@@ -592,9 +685,6 @@ function registerSocketCreateBookingHandler({
                             event.data.metadata.correlationId = correlationId;
                             event.data.metadata.traceId = eventSpanContext.traceId;
                             event.data.metadata.spanId = eventSpanContext.spanId;
-
-                            // ✅ MÉTRICAS: Registrar evento publicado
-                            metrics.recordEventPublished('ride.requested');
 
                             endSpanSuccess(eventSpan, {
                                 'event.latency_ms': Date.now() - eventStartTime
@@ -779,6 +869,37 @@ function registerSocketCreateBookingHandler({
 
                     // Emitir confirmação para o cliente o quanto antes para evitar timeout no app.
                     socket.emit('bookingCreated', responseToEmit);
+
+                    // Telemetria de custo enviada junto com o createBooking entra em background
+                    // para não disputar o tempo crítico de resposta ao cliente.
+                    if (rideCostTelemetryService && data?.rideCostTelemetry?.snapshot) {
+                        setImmediate(async () => {
+                            try {
+                                await rideCostTelemetryService.ingestSnapshot({
+                                    bookingId,
+                                    sourceMeta: {
+                                        ...data?.rideCostTelemetry?.sourceMeta,
+                                        userId: customerId,
+                                        userType: socket.userType || 'customer',
+                                        socketId: socket.id
+                                    },
+                                    snapshot: data.rideCostTelemetry.snapshot,
+                                    pricingSheet: data?.rideCostTelemetry?.pricingSheet || null,
+                                    requestMeta: {
+                                        source: 'createBooking',
+                                        socketId: socket.id,
+                                        receivedAt: new Date().toISOString()
+                                    }
+                                });
+                            } catch (telemetryError) {
+                                logStructured('warn', 'Falha ao persistir telemetria inicial da corrida', {
+                                    bookingId,
+                                    eventType: 'createBooking',
+                                    error: telemetryError.message
+                                });
+                            }
+                        });
+                    }
 
                     // Cache de idempotência fora do caminho síncrono da resposta.
                     setImmediate(async () => {

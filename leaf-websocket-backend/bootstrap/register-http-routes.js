@@ -102,10 +102,14 @@ function registerHttpRoutes({ app, logStructured, io = null }) {
     const supportChatRoutes = require('../routes/support-chat');
     app.use('/api/support', supportChatRoutes);
 
+    const opsRoutes = require('../routes/ops');
+    app.use('/api/ops', opsRoutes);
+
     if (supportFullRoutes.setIOInstance && io) {
         supportFullRoutes.setIOInstance(io);
     }
     logStructured('info', 'Rotas de Support (completo) registradas com WebSocket', { service: 'server' });
+    logStructured('info', 'Rotas de Ops registradas', { service: 'server' });
 
     // Rotas de Geofence (registradas antes do dashboard para evitar conflitos de matching)
     const geofenceRoutes = require('../routes/geofence-routes');

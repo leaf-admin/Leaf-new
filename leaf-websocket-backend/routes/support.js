@@ -29,7 +29,10 @@ try {
   });
 }
 
-const AGENT_ROLES = ['admin', 'manager', 'super-admin'];
+const supportTicketService = require('../services/support-ticket-service');
+const supportQueueService = require('../services/support-queue-service');
+
+const AGENT_ROLES = ['admin', 'manager', 'super-admin', 'support', 'development'];
 
 const supportRateLimit = rateLimit({
   windowMs: 15 * 60 * 1000,
@@ -88,21 +91,6 @@ const sanitizeInput = (req, _res, next) => {
   return next();
 };
 
-function getRealtimeDBOrFail(res) {
-  if (!firebaseConfig || !firebaseConfig.getRealtimeDB) {
-    res.status(500).json({ error: 'Serviço de tickets temporariamente indisponível' });
-    return null;
-  }
-
-  const db = firebaseConfig.getRealtimeDB();
-  if (!db) {
-    res.status(500).json({ error: 'Serviço de tickets temporariamente indisponível' });
-    return null;
-  }
-
-  return db;
-}
-
 function getRequesterId(req) {
   return String(req.user?.uid || req.user?.id || '');
 }
@@ -143,6 +131,33 @@ router.get('/faq', (_req, res) => {
 
 // ===== APIS DE TICKETS =====
 
+router.get('/queue/summary', authenticateSupport, requireSupportRoles(AGENT_ROLES), async (_req, res) => {
+  try {
+    const summary = await supportQueueService.getQueueSummary({ autoEscalate: true });
+    res.json({ success: true, summary });
+  } catch (error) {
+    logError(error, { service: 'support-routes', operation: 'queueSummary' });
+    res.status(500).json({ error: 'Erro interno do servidor' });
+  }
+});
+
+router.get('/queue/backlog', authenticateSupport, requireSupportRoles(AGENT_ROLES), async (req, res) => {
+  try {
+    const { priority, status, limit = 100, offset = 0 } = req.query;
+    const backlog = await supportQueueService.getBacklog({
+      priority,
+      status,
+      limit,
+      offset,
+      autoEscalate: true
+    });
+    res.json({ success: true, ...backlog });
+  } catch (error) {
+    logError(error, { service: 'support-routes', operation: 'queueBacklog' });
+    res.status(500).json({ error: 'Erro interno do servidor' });
+  }
+});
+
 router.post(
   '/tickets',
   supportRateLimit,
@@ -152,68 +167,30 @@ router.post(
   async (req, res) => {
     try {
       const { subject, description, category = 'general', priority = 'N3', userInfo, metadata } = req.body;
-
-      const db = getRealtimeDBOrFail(res);
-      if (!db) return;
-
-      const ticketId = `TICKET-${Date.now()}-${Math.random().toString(36).slice(2, 11)}`;
-      const now = new Date().toISOString();
       const requesterId = getRequesterId(req);
-
-      const ticket = {
-        id: ticketId,
-        userId: requesterId,
-        userType: req.user?.userType || 'passenger',
+      const { ticket } = await supportQueueService.createSupportTicket({
         subject: subject.trim(),
         description: description.trim(),
         category,
         priority,
-        status: 'open',
-        assignedAgent: null,
-        assignedAt: null,
-        resolvedAt: null,
-        closedAt: null,
-        createdAt: now,
-        updatedAt: now,
-        tags: [],
-        attachments: [],
-        escalationLevel: 1,
-        escalationHistory: [],
+        requesterId,
+        userType: req.user?.userType || 'passenger',
         userInfo: userInfo || {},
         metadata: metadata || {},
         ipAddress: req.ip,
         userAgent: req.get('User-Agent')
-      };
+      });
 
-      await db.ref(`support_tickets/${ticketId}`).set(ticket);
-
-      const messageId = `MSG-${Date.now()}-${Math.random().toString(36).slice(2, 11)}`;
-      const initialMessage = {
-        id: messageId,
-        ticketId,
-        senderId: requesterId,
-        senderType: 'user',
-        message: description.trim(),
-        messageType: 'text',
-        isInternal: false,
-        attachments: [],
-        createdAt: now,
-        readBy: {
-          [requesterId]: now
-        }
-      };
-
-      await db.ref(`support_messages/${ticketId}/${messageId}`).set(initialMessage);
       await notifyAvailableAgents(ticket);
 
       // Garantir que o chat do usuário volte para ativo ao abrir novo ticket.
       if (supportChatService && supportChatService.reopenChat) {
-        await supportChatService.reopenChat(requesterId, 'ticket_created', { ticketId });
+        await supportChatService.reopenChat(requesterId, 'ticket_created', { ticketId: ticket.id });
       }
 
-      logStructured('info', `Novo ticket criado: ${ticketId}`, {
+      logStructured('info', `Novo ticket criado: ${ticket.id}`, {
         service: 'support-routes',
-        ticketId,
+        ticketId: ticket.id,
         priority,
         requesterId
       });
@@ -239,40 +216,22 @@ router.post(
 router.get('/tickets', authenticateSupport, async (req, res) => {
   try {
     const { status, priority, category, limit = 50, offset = 0, userId } = req.query;
-
-    const db = getRealtimeDBOrFail(res);
-    if (!db) return;
-
-    let snapshot;
     const requesterId = getRequesterId(req);
-
-    if (isSupportAgent(req.user)) {
-      if (userId) {
-        snapshot = await db.ref('support_tickets').orderByChild('userId').equalTo(String(userId)).once('value');
-      } else {
-        snapshot = await db.ref('support_tickets').once('value');
-      }
-    } else {
-      snapshot = await db.ref('support_tickets').orderByChild('userId').equalTo(requesterId).once('value');
-    }
-
-    let tickets = snapshot.val() ? Object.values(snapshot.val()) : [];
-
-    if (status) tickets = tickets.filter((ticket) => ticket.status === status);
-    if (priority) tickets = tickets.filter((ticket) => ticket.priority === priority);
-    if (category) tickets = tickets.filter((ticket) => ticket.category === category);
-
-    tickets.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
-
-    const numericOffset = Number.parseInt(offset, 10) || 0;
-    const numericLimit = Number.parseInt(limit, 10) || 50;
-    const paginatedTickets = tickets.slice(numericOffset, numericOffset + numericLimit);
+    const { tickets, total, hasMore } = await supportTicketService.listTickets({
+      status,
+      priority,
+      category,
+      limit,
+      offset,
+      userId: isSupportAgent(req.user) ? (userId ? String(userId) : null) : requesterId,
+      isAgent: isSupportAgent(req.user)
+    });
 
     res.json({
       success: true,
-      tickets: paginatedTickets,
-      total: tickets.length,
-      hasMore: numericOffset + numericLimit < tickets.length
+      tickets,
+      total,
+      hasMore
     });
   } catch (error) {
     logError(error, { service: 'support-routes', operation: 'listTickets' });
@@ -283,12 +242,7 @@ router.get('/tickets', authenticateSupport, async (req, res) => {
 router.get('/tickets/:ticketId', authenticateSupport, async (req, res) => {
   try {
     const { ticketId } = req.params;
-
-    const db = getRealtimeDBOrFail(res);
-    if (!db) return;
-
-    const snapshot = await db.ref(`support_tickets/${ticketId}`).once('value');
-    const ticket = snapshot.val();
+    const ticket = await supportTicketService.getTicket(ticketId);
 
     if (!ticket) {
       return res.status(404).json({ error: 'Ticket não encontrado' });
@@ -308,12 +262,7 @@ router.get('/tickets/:ticketId', authenticateSupport, async (req, res) => {
 router.get('/tickets/:ticketId/messages', authenticateSupport, async (req, res) => {
   try {
     const { ticketId } = req.params;
-
-    const db = getRealtimeDBOrFail(res);
-    if (!db) return;
-
-    const ticketSnapshot = await db.ref(`support_tickets/${ticketId}`).once('value');
-    const ticket = ticketSnapshot.val();
+    const ticket = await supportTicketService.getTicket(ticketId);
 
     if (!ticket) {
       return res.status(404).json({ error: 'Ticket não encontrado' });
@@ -323,8 +272,7 @@ router.get('/tickets/:ticketId/messages', authenticateSupport, async (req, res) 
       return res.status(403).json({ error: 'Acesso negado' });
     }
 
-    const messagesSnapshot = await db.ref(`support_messages/${ticketId}`).orderByChild('createdAt').once('value');
-    const messages = messagesSnapshot.val() ? Object.values(messagesSnapshot.val()) : [];
+    const messages = await supportTicketService.listMessages(ticketId);
 
     return res.json({ success: true, messages });
   } catch (error) {
@@ -346,11 +294,7 @@ router.post('/tickets/:ticketId/messages', supportRateLimit, sanitizeInput, auth
       return res.status(400).json({ error: 'Mensagem muito longa (máximo 1000 caracteres)' });
     }
 
-    const db = getRealtimeDBOrFail(res);
-    if (!db) return;
-
-    const ticketSnapshot = await db.ref(`support_tickets/${ticketId}`).once('value');
-    const ticket = ticketSnapshot.val();
+    const ticket = await supportTicketService.getTicket(ticketId);
 
     if (!ticket) {
       return res.status(404).json({ error: 'Ticket não encontrado' });
@@ -362,26 +306,14 @@ router.post('/tickets/:ticketId/messages', supportRateLimit, sanitizeInput, auth
 
     const senderId = getRequesterId(req);
     const senderType = senderId === String(ticket.userId) ? 'user' : 'agent';
-    const messageId = `MSG-${Date.now()}-${Math.random().toString(36).slice(2, 11)}`;
-    const now = new Date().toISOString();
-
-    const newMessage = {
-      id: messageId,
-      ticketId,
+    const newMessage = await supportTicketService.addMessage(ticketId, {
       senderId,
       senderType,
       message: message.trim(),
       messageType,
-      isInternal: false,
       attachments,
-      createdAt: now,
-      readBy: {
-        [senderId]: now
-      }
-    };
-
-    await db.ref(`support_messages/${ticketId}/${messageId}`).set(newMessage);
-    await db.ref(`support_tickets/${ticketId}`).update({ updatedAt: now });
+      isInternal: false
+    });
 
     await notifyParticipants(ticketId, newMessage);
 
@@ -399,43 +331,86 @@ router.post('/tickets/:ticketId/messages', supportRateLimit, sanitizeInput, auth
   }
 });
 
+router.post('/tickets/:ticketId/assign', authenticateSupport, requireSupportRoles(AGENT_ROLES), async (req, res) => {
+  try {
+    const { ticketId } = req.params;
+    const { agentId, agentName } = req.body;
+
+    if (!agentId || !agentName) {
+      return res.status(400).json({ error: 'ID e nome do agente são obrigatórios' });
+    }
+
+    await supportQueueService.assignTicket(ticketId, {
+      agentId,
+      agentName,
+      actorId: getRequesterId(req)
+    });
+
+    res.json({ success: true, message: 'Ticket atribuído com sucesso' });
+  } catch (error) {
+    logError(error, { service: 'support-routes', operation: 'assignTicketAlias' });
+    res.status(500).json({ error: 'Erro interno do servidor' });
+  }
+});
+
+router.post('/tickets/:ticketId/escalate', authenticateSupport, requireSupportRoles(AGENT_ROLES), async (req, res) => {
+  try {
+    const { ticketId } = req.params;
+    const { reason } = req.body;
+
+    if (!reason || !reason.trim()) {
+      return res.status(400).json({ error: 'Motivo da escalação é obrigatório' });
+    }
+
+    const result = await supportQueueService.escalateTicket(ticketId, {
+      reason: reason.trim(),
+      actorId: getRequesterId(req)
+    });
+
+    res.json({ success: true, message: 'Ticket escalado com sucesso', escalationLevel: result.escalationLevel });
+  } catch (error) {
+    logError(error, { service: 'support-routes', operation: 'escalateTicketAlias' });
+    res.status(500).json({ error: 'Erro interno do servidor' });
+  }
+});
+
+router.post('/tickets/:ticketId/resolve', authenticateSupport, requireSupportRoles(AGENT_ROLES), async (req, res) => {
+  try {
+    const { ticketId } = req.params;
+    const { resolution } = req.body;
+
+    await supportQueueService.resolveTicket(ticketId, {
+      resolution,
+      actorId: getRequesterId(req)
+    });
+
+    res.json({ success: true, message: 'Ticket resolvido com sucesso' });
+  } catch (error) {
+    logError(error, { service: 'support-routes', operation: 'resolveTicketAlias' });
+    res.status(500).json({ error: 'Erro interno do servidor' });
+  }
+});
+
 // ===== APIS DE AGENTES =====
 
 router.get('/admin/tickets', authenticateSupport, requireSupportRoles(AGENT_ROLES), async (req, res) => {
   try {
     const { status, priority, category, agent, limit = 100, offset = 0 } = req.query;
-
-    const db = getRealtimeDBOrFail(res);
-    if (!db) return;
-
-    const snapshot = await db.ref('support_tickets').once('value');
-    let tickets = snapshot.val() ? Object.values(snapshot.val()) : [];
-
-    if (status) tickets = tickets.filter((ticket) => ticket.status === status);
-    if (priority) tickets = tickets.filter((ticket) => ticket.priority === priority);
-    if (category) tickets = tickets.filter((ticket) => ticket.category === category);
-    if (agent) tickets = tickets.filter((ticket) => ticket.assignedAgent === agent);
-
-    tickets.sort((a, b) => {
-      const priorityOrder = { N1: 3, N2: 2, N3: 1 };
-      const aPriority = priorityOrder[a.priority] || 0;
-      const bPriority = priorityOrder[b.priority] || 0;
-
-      if (aPriority !== bPriority) {
-        return bPriority - aPriority;
-      }
-
-      return new Date(b.createdAt) - new Date(a.createdAt);
+    const { tickets, total, hasMore } = await supportTicketService.listTickets({
+      status,
+      priority,
+      category,
+      agent,
+      limit,
+      offset,
+      isAgent: true
     });
-
-    const numericOffset = Number.parseInt(offset, 10) || 0;
-    const numericLimit = Number.parseInt(limit, 10) || 100;
 
     res.json({
       success: true,
-      tickets: tickets.slice(numericOffset, numericOffset + numericLimit),
-      total: tickets.length,
-      hasMore: numericOffset + numericLimit < tickets.length
+      tickets,
+      total,
+      hasMore
     });
   } catch (error) {
     logError(error, { service: 'support-routes', operation: 'listAdminTickets' });
@@ -452,37 +427,12 @@ router.post('/admin/tickets/:ticketId/assign', authenticateSupport, requireSuppo
       return res.status(400).json({ error: 'ID e nome do agente são obrigatórios' });
     }
 
-    const db = getRealtimeDBOrFail(res);
-    if (!db) return;
-
-    const now = new Date().toISOString();
-
-    await db.ref(`support_tickets/${ticketId}`).update({
-      assignedAgent: agentId,
-      assignedAt: now,
-      status: 'assigned',
-      updatedAt: now
-    });
-
-    const messageId = `MSG-${Date.now()}-${Math.random().toString(36).slice(2, 11)}`;
     const senderId = getRequesterId(req);
-
-    const systemMessage = {
-      id: messageId,
-      ticketId,
-      senderId,
-      senderType: 'agent',
-      message: `Ticket atribuído ao agente ${agentName}`,
-      messageType: 'system',
-      isInternal: true,
-      attachments: [],
-      createdAt: now,
-      readBy: {
-        [senderId]: now
-      }
-    };
-
-    await db.ref(`support_messages/${ticketId}/${messageId}`).set(systemMessage);
+    await supportQueueService.assignTicket(ticketId, {
+      agentId,
+      agentName,
+      actorId: senderId
+    });
 
     logStructured('info', `Ticket ${ticketId} atribuído`, {
       service: 'support-routes',
@@ -507,62 +457,20 @@ router.post('/admin/tickets/:ticketId/escalate', authenticateSupport, requireSup
       return res.status(400).json({ error: 'Motivo da escalação é obrigatório' });
     }
 
-    const db = getRealtimeDBOrFail(res);
-    if (!db) return;
-
-    const ticketSnapshot = await db.ref(`support_tickets/${ticketId}`).once('value');
-    const ticket = ticketSnapshot.val();
-
-    if (!ticket) {
-      return res.status(404).json({ error: 'Ticket não encontrado' });
-    }
-
-    const newLevel = Math.min((ticket.escalationLevel || 1) + 1, 3);
-    const now = new Date().toISOString();
     const senderId = getRequesterId(req);
-
-    const escalationEntry = {
-      level: newLevel,
+    const result = await supportQueueService.escalateTicket(ticketId, {
       reason: reason.trim(),
-      escalatedBy: senderId,
-      escalatedAt: now
-    };
-
-    await db.ref(`support_tickets/${ticketId}`).update({
-      escalationLevel: newLevel,
-      status: 'escalated',
-      assignedAgent: null,
-      assignedAt: null,
-      updatedAt: now,
-      escalationHistory: [...(ticket.escalationHistory || []), escalationEntry]
+      actorId: senderId
     });
-
-    const messageId = `MSG-${Date.now()}-${Math.random().toString(36).slice(2, 11)}`;
-    const systemMessage = {
-      id: messageId,
-      ticketId,
-      senderId,
-      senderType: 'agent',
-      message: `Ticket escalado para nível ${newLevel}. Motivo: ${reason.trim()}`,
-      messageType: 'system',
-      isInternal: true,
-      attachments: [],
-      createdAt: now,
-      readBy: {
-        [senderId]: now
-      }
-    };
-
-    await db.ref(`support_messages/${ticketId}/${messageId}`).set(systemMessage);
 
     logStructured('info', `Ticket ${ticketId} escalado`, {
       service: 'support-routes',
       ticketId,
-      escalationLevel: newLevel,
+      escalationLevel: result.escalationLevel,
       actor: getRequesterLabel(req)
     });
 
-    res.json({ success: true, message: 'Ticket escalado com sucesso', escalationLevel: newLevel });
+    res.json({ success: true, message: 'Ticket escalado com sucesso', escalationLevel: result.escalationLevel });
   } catch (error) {
     logError(error, { service: 'support-routes', operation: 'escalateTicket' });
     res.status(500).json({ error: 'Erro interno do servidor' });
@@ -574,35 +482,11 @@ router.post('/admin/tickets/:ticketId/resolve', authenticateSupport, requireSupp
     const { ticketId } = req.params;
     const { resolution } = req.body;
 
-    const db = getRealtimeDBOrFail(res);
-    if (!db) return;
-
-    const now = new Date().toISOString();
     const senderId = getRequesterId(req);
-
-    await db.ref(`support_tickets/${ticketId}`).update({
-      status: 'resolved',
-      resolvedAt: now,
-      updatedAt: now
+    await supportQueueService.resolveTicket(ticketId, {
+      resolution,
+      actorId: senderId
     });
-
-    const messageId = `MSG-${Date.now()}-${Math.random().toString(36).slice(2, 11)}`;
-    const systemMessage = {
-      id: messageId,
-      ticketId,
-      senderId,
-      senderType: 'agent',
-      message: resolution ? `Ticket resolvido. ${resolution}` : 'Ticket resolvido.',
-      messageType: 'system',
-      isInternal: false,
-      attachments: [],
-      createdAt: now,
-      readBy: {
-        [senderId]: now
-      }
-    };
-
-    await db.ref(`support_messages/${ticketId}/${messageId}`).set(systemMessage);
 
     logStructured('info', `Ticket ${ticketId} resolvido`, {
       service: 'support-routes',
@@ -620,43 +504,7 @@ router.post('/admin/tickets/:ticketId/resolve', authenticateSupport, requireSupp
 router.get('/admin/stats', authenticateSupport, requireSupportRoles(AGENT_ROLES), async (req, res) => {
   try {
     const { startDate, endDate } = req.query;
-
-    const db = getRealtimeDBOrFail(res);
-    if (!db) return;
-
-    const snapshot = await db.ref('support_tickets').once('value');
-    let tickets = snapshot.val() ? Object.values(snapshot.val()) : [];
-
-    if (startDate && endDate) {
-      const start = new Date(startDate);
-      const end = new Date(endDate);
-      tickets = tickets.filter((ticket) => {
-        const ticketDate = new Date(ticket.createdAt);
-        return ticketDate >= start && ticketDate <= end;
-      });
-    }
-
-    const stats = {
-      total: tickets.length,
-      open: tickets.filter((ticket) => ticket.status === 'open').length,
-      assigned: tickets.filter((ticket) => ticket.status === 'assigned').length,
-      inProgress: tickets.filter((ticket) => ticket.status === 'in_progress').length,
-      resolved: tickets.filter((ticket) => ticket.status === 'resolved').length,
-      closed: tickets.filter((ticket) => ticket.status === 'closed').length,
-      escalated: tickets.filter((ticket) => ticket.status === 'escalated').length,
-      byPriority: {
-        N1: tickets.filter((ticket) => ticket.priority === 'N1').length,
-        N2: tickets.filter((ticket) => ticket.priority === 'N2').length,
-        N3: tickets.filter((ticket) => ticket.priority === 'N3').length
-      },
-      byCategory: {
-        technical: tickets.filter((ticket) => ticket.category === 'technical').length,
-        payment: tickets.filter((ticket) => ticket.category === 'payment').length,
-        account: tickets.filter((ticket) => ticket.category === 'account').length,
-        general: tickets.filter((ticket) => ticket.category === 'general').length
-      },
-      averageResolutionTime: calculateAverageResolutionTime(tickets)
-    };
+    const stats = await supportTicketService.getAdminStats({ startDate, endDate });
 
     res.json({ success: true, stats });
   } catch (error) {
@@ -664,19 +512,6 @@ router.get('/admin/stats', authenticateSupport, requireSupportRoles(AGENT_ROLES)
     res.status(500).json({ error: 'Erro interno do servidor' });
   }
 });
-
-function calculateAverageResolutionTime(tickets) {
-  const resolvedTickets = tickets.filter((ticket) => ticket.resolvedAt);
-  if (resolvedTickets.length === 0) return 0;
-
-  const totalTime = resolvedTickets.reduce((sum, ticket) => {
-    const created = new Date(ticket.createdAt);
-    const resolved = new Date(ticket.resolvedAt);
-    return sum + (resolved - created);
-  }, 0);
-
-  return Math.round(totalTime / resolvedTickets.length / (1000 * 60 * 60));
-}
 
 let ioInstance = null;
 
