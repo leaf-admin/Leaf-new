@@ -25,7 +25,9 @@ router.post('/request-otp', async (req, res) => {
             throw redisError;
         }
 
-        logger.info(`[CUSTOM OTP] OTP for ${phone} is ${otp}`); // For debugging / demonstration without sending SMS
+        if (process.env.NODE_ENV !== 'production' || process.env.DEBUG_OTP === 'true') {
+            logger.info(`[CUSTOM OTP] OTP generated for ${phone}`); // Do not print OTP value in production logs.
+        }
 
         // TODO: Integrate WhatsApp API (e.g. Meta Cloud API, Z-API) or Nodemailer here
         // Example: await sendWhatsAppOTP(phone, otp);
@@ -45,9 +47,12 @@ router.post('/verify-otp', async (req, res) => {
             return res.status(400).json({ error: 'Missing parameters' });
         }
 
-        // Test credentials for Review/App stores
-        if (otp === '000000') {
+        // Test credentials only for Review/App stores.
+        const appReviewOtpBypassEnabled = String(process.env.APP_REVIEW || 'false').toLowerCase() === 'true';
+        if (otp === '000000' && appReviewOtpBypassEnabled) {
             logger.info(`[CUSTOM OTP] Accepted static bypass code for ${phone}`);
+        } else if (otp === '000000') {
+            return res.status(400).json({ error: 'Invalid or expired OTP' });
         } else {
             const redisClient = redisPool.getConnection();
             const key = `otp:${verificationId}:${phone}`;

@@ -5,6 +5,7 @@ function registerHttpRoutes({ app, logStructured, io = null }) {
     // Importar rotas de autenticação
     const authRoutes = require('../routes/auth-routes');
     const customOtpRoutes = require('../routes/auth-otp');
+    const passwordAuthRoutes = require('../routes/auth-password');
 
     // Importar rotas de autenticação admin (JWT)
     const adminAuthRoutes = require('../routes/admin-auth');
@@ -68,6 +69,7 @@ function registerHttpRoutes({ app, logStructured, io = null }) {
     // Rotas de autenticação também em /api/auth
     app.use('/api/auth', authRoutes);
     app.use('/api/custom-otp', customOtpRoutes);
+    app.use('/api/auth/password', passwordAuthRoutes);
     logStructured('info', 'Rotas de Autenticação registradas', { service: 'server' });
 
     // Rotas de autenticação admin (JWT)
@@ -162,6 +164,11 @@ function registerHttpRoutes({ app, logStructured, io = null }) {
     const paymentRoutes = require('../routes/payment');
     app.use('/api', paymentRoutes); // As rotas começam com /payment, então /api + /payment = /api/payment
     logStructured('info', 'Rotas de Payment registradas', { service: 'server' });
+
+    // Rotas de Recibos / histórico de corridas via read-model REST
+    const receiptsRoutes = require('../routes/receipts');
+    app.use('/', receiptsRoutes);
+    logStructured('info', 'Rotas de Recibos registradas', { service: 'server' });
 
     // ✅ Rotas de Woovi (Webhooks e integração)
     const wooviRoutes = require('../routes/woovi');

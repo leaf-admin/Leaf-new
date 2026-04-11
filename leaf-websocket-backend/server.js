@@ -36,6 +36,7 @@ const setupEventBusAndWorkers = require('./bootstrap/setup-eventbus-workers');
 const registerSocketAuthenticateHandler = require('./bootstrap/register-socket-authenticate-handler');
 const registerSocketDisconnectHandler = require('./bootstrap/register-socket-disconnect-handler');
 const registerSocketCreateBookingHandler = require('./bootstrap/register-socket-create-booking-handler');
+const registerSocketRideCostTelemetryHandler = require('./bootstrap/register-socket-ride-cost-telemetry-handler');
 const registerSocketConfirmPaymentHandler = require('./bootstrap/register-socket-confirm-payment-handler');
 const registerSocketDriverResponseHandler = require('./bootstrap/register-socket-driver-response-handler');
 const registerSocketAcceptRideHandler = require('./bootstrap/register-socket-accept-ride-handler');
@@ -71,6 +72,8 @@ const rateLimiterService = require('./services/rate-limiter-service');
 const auditService = require('./services/audit-service');
 const validationService = require('./services/validation-service');
 const idempotencyService = require('./services/idempotency-service');
+const rideCostTelemetryService = require('./services/ride-cost-telemetry-service');
+const pricingH3ReadModelService = require('./services/pricing-h3-read-model-service');
 const ConnectionCleanupService = require('./services/connection-cleanup-service');
 const vehicleLockManager = require('./services/vehicle-lock-manager');
 const driverLockManager = require('./services/driver-lock-manager');
@@ -123,7 +126,7 @@ const { recordIngest, getStatus: getOtelIngestStatus } = require('./utils/otel-i
 const VPS_CONFIG = {
     MAX_CONNECTIONS: 10000, // Reduzido para VPS
     MAX_REQUESTS_PER_SECOND: 5000, // Reduzido para VPS
-    CLUSTER_WORKERS: Math.min(os.cpus().length, 2), // Máximo 2 workers para VPS
+    CLUSTER_WORKERS: Math.min(os.cpus().length, 6), // Usa até 6 workers por padrão em hosts maiores
     MEMORY_LIMIT: '512MB', // Limite de memória para VPS
     TIMEOUT: 30000 // Timeout aumentado para conexões mais lentas
 };
@@ -401,9 +404,11 @@ const baseAllowedOrigins = [
     'http://localhost:3000',
     'http://localhost:3001',
     'http://localhost:3002',
+    'http://localhost:3020',
     'http://localhost:8081',
     'http://127.0.0.1:3000',
     'http://127.0.0.1:3001',
+    'http://127.0.0.1:3020',
     'http://127.0.0.1:8081',
     // IPs Locais do desenvolvedor
     'http://192.168.0.33:8081',
@@ -427,6 +432,7 @@ const corsOptions = {
         // Permitir se não houver origin (React Native) ou se estiver na whitelist
         const isVpcDirectOrigin = /^https?:\/\/147\.182\.204\.181(?::\d+)?$/.test(origin || '');
         const isSslipOrigin = /^https?:\/\/(?:api|socket|dashboard)\.147\.182\.204\.181\.sslip\.io$/.test(origin || '');
+        const isLoopbackOrigin = /^http:\/\/(?:localhost|127\.0\.0\.1)(?::\d+)?$/.test(origin || '');
         const isPrivateNetworkOrigin = /^http:\/\/(192\.168\.|10\.)/.test(origin || '');
         const isNgrokOrigin = /ngrok-free\.app$/i.test(origin || '');
 
@@ -435,6 +441,7 @@ const corsOptions = {
             allowedOrigins.includes(origin) ||
             isVpcDirectOrigin ||
             isSslipOrigin ||
+            isLoopbackOrigin ||
             (allowNgrokCors && isNgrokOrigin) ||
             (allowPrivateCors && isPrivateNetworkOrigin) ||
             origin.startsWith('exp://') ||
@@ -475,6 +482,10 @@ const io = createSocketServer({
     app,
     logStructured
 });
+
+// Disponibiliza io para rotas HTTP que precisam publicar eventos realtime.
+app.set('io', io);
+app.locals.io = io;
 
 // Injeção explícita de Socket.IO nas rotas de suporte HTTP.
 // O registerHttpRoutes é executado antes da criação do io.
@@ -582,9 +593,11 @@ async function enforceSubscriptionForOnline(driverId) {
         const gracePeriodEndsAtRaw = subscriptionData.gracePeriodEndsAt || userData.subscription_grace_period_ends_at || null;
         const gracePeriodEndsAtTs = gracePeriodEndsAtRaw ? Date.parse(gracePeriodEndsAtRaw) : Number.NaN;
         const gracePeriodExpired = Number.isFinite(gracePeriodEndsAtTs) ? gracePeriodEndsAtTs < Date.now() : false;
+        const blockAfterGraceEnabled =
+            String(process.env.SUBSCRIPTION_BLOCK_ON_GRACE_EXPIRY || 'false').toLowerCase() === 'true';
 
         const statusBlocked = subscriptionStatus === 'blocked' || subscriptionStatus === 'cancelled' || billingStatus === 'suspended';
-        const blockedAfterGrace = subscriptionStatus === 'grace_period' && gracePeriodExpired;
+        const blockedAfterGrace = blockAfterGraceEnabled && subscriptionStatus === 'grace_period' && gracePeriodExpired;
 
         if (statusBlocked || blockedAfterGrace) {
             return {
@@ -862,6 +875,14 @@ const saveDriverLocation = async (driverId, lat, lng, heading = 0, speed = 0, ti
             }
         }
 
+        await pricingH3ReadModelService.applyDriverSnapshot(redis, {
+            driverId,
+            lat,
+            lng,
+            isOnline,
+            available: Boolean(isOnline) && !Boolean(isInTrip)
+        }).catch(() => null);
+
     } catch (error) {
         logStructured('error', 'Erro ao salvar localização do motorista', {
             service: 'server',
@@ -1025,9 +1046,16 @@ io.on('connection', async (socket) => {
         logEvent,
         eventBus,
         metricsCollector,
-        findAvailableDriversForPickup
+        findAvailableDriversForPickup,
+        rideCostTelemetryService
     });
     // =========================================================================================
+
+    registerSocketRideCostTelemetryHandler({
+        socket,
+        logStructured,
+        rideCostTelemetryService
+    });
 
     // Confirmar pagamento
     registerSocketConfirmPaymentHandler({
@@ -1100,6 +1128,7 @@ io.on('connection', async (socket) => {
         getSocketMetadata,
         auditService,
         redisPool,
+        idempotencyService,
         StartTripCommand,
         getTracer,
         createCommandSpan,
@@ -1238,7 +1267,9 @@ io.on('connection', async (socket) => {
         socket,
         io,
         redisPool,
-        logStructured
+        logStructured,
+        enforceSubscriptionForOnline,
+        enforceDailyKYCForOnline
     });
 
     if (ENABLE_LEGACY_SOCKET_NOTIFICATIONS) {
