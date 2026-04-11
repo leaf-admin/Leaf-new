@@ -85,6 +85,8 @@ function buildPricingResponse(engineResult) {
   const operationalState = engineResult.operationalState.estado_atual;
 
   return {
+    car_type: fare.car_type,
+    rate_card_version: fare.rate_card_version,
     base_fare: fare.breakdown.preco_base,
     distance_component: fare.breakdown.distancia_component,
     time_component: fare.breakdown.tempo_component,
@@ -110,7 +112,8 @@ function runDynamicPricingEngine(input = {}) {
   const trip = {
     distance_km: Number(input?.trip?.distance_km) || 0,
     duration_min_traffic: Number(input?.trip?.duration_min_traffic) || 0,
-    eta_pickup_min: Number(input?.trip?.eta_pickup_min) || 0
+    eta_pickup_min: Number(input?.trip?.eta_pickup_min) || 0,
+    carType: input?.trip?.carType || input?.trip?.car_type || input?.carType || input?.car_type
   };
 
   const pressure = calculatePressureScore(current);
@@ -131,6 +134,7 @@ function runDynamicPricingEngine(input = {}) {
     distance_km: trip.distance_km,
     duration_min_traffic: trip.duration_min_traffic,
     eta_pickup_min: trip.eta_pickup_min,
+    carType: trip.carType,
     score_pressao: pressure.score,
     score_excecao: exception.score
   });

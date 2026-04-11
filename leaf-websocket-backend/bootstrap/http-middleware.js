@@ -1,3 +1,14 @@
+function shouldCaptureSignedWebhookRawBody(req) {
+    const requestUrl = String(req.originalUrl || req.url || '');
+    return requestUrl.includes('/api/woovi/webhook') || requestUrl.includes('/api/woovi-webhook');
+}
+
+function captureSignedWebhookRawBody(req, _res, buffer) {
+    if (shouldCaptureSignedWebhookRawBody(req) && Buffer.isBuffer(buffer)) {
+        req.rawBody = Buffer.from(buffer);
+    }
+}
+
 function configureHttpMiddleware({
     app,
     server,
@@ -62,7 +73,7 @@ function configureHttpMiddleware({
     }
 
     // ✅ CORREÇÃO: Aumentar limite e timeout para uploads de CNH
-    app.use(express.json({ limit: '50mb' })); // Aumentado de 10mb para 50mb
+    app.use(express.json({ limit: '50mb', verify: captureSignedWebhookRawBody })); // Aumentado de 10mb para 50mb
     app.use(express.urlencoded({ extended: true, limit: '50mb' })); // Adicionado para multipart/form-data
 
     // ✅ Timeout mais alto para OCR/extração via IA em PDFs grandes.

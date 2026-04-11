@@ -18,6 +18,7 @@ const PAYMENT_DISPATCH_RETRY_DELAY_MS = Number.parseInt(
 
 const DISPATCHABLE_STATES = new Set([
   RideStateManager.STATES.PENDING,
+  RideStateManager.STATES.AWAITING_PAYMENT,
   RideStateManager.STATES.SEARCHING,
   RideStateManager.STATES.EXPANDED,
   RideStateManager.STATES.REJECTED,
@@ -270,7 +271,7 @@ async function triggerDispatchAttempt({
     return { success: false, skipped: true, reason: 'PICKUP_LOCATION_INVALID' };
   }
 
-  if (!state || state === RideStateManager.STATES.PENDING) {
+  if (!state || state === RideStateManager.STATES.PENDING || state === RideStateManager.STATES.AWAITING_PAYMENT) {
     try {
       if (!state) {
         await redis.hset(bookingKey, {

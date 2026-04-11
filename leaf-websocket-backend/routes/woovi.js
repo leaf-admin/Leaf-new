@@ -1,10 +1,13 @@
 const express = require('express');
 const axios = require('axios');
+const crypto = require('crypto');
 const router = express.Router();
 const { logStructured, logError } = require('../utils/logger');
 const { getWooviConfig, getWooviAuthHeaders } = require('../config/woovi-config');
+const { authenticateJWT, requireRole } = require('../middleware/jwt-auth');
 
 const WOOVI_CONFIG = getWooviConfig();
+const WOOVI_ADMIN_ROLES = ['admin', 'super-admin', 'manager'];
 const legacyWooviAliasRouteEnabled =
   String(process.env.ENABLE_LEGACY_WOOVI_ALIAS_ROUTE || 'false').toLowerCase() === 'true';
 
@@ -44,6 +47,329 @@ function normalizeEventName(eventName) {
 
 function normalizePaymentStatus(status) {
   return String(status || '').trim().toUpperCase();
+}
+
+function isProductionRuntime() {
+  if (String(process.env.WOOVI_WEBHOOK_REQUIRE_SIGNATURE || 'false').toLowerCase() === 'true') {
+    return true;
+  }
+
+  return [
+    process.env.NODE_ENV,
+    process.env.APP_ENV,
+    process.env.LEAF_ENV,
+    process.env.ENVIRONMENT
+  ].some((value) => ['production', 'prod'].includes(String(value || '').toLowerCase()));
+}
+
+function getWebhookRawBody(req) {
+  if (Buffer.isBuffer(req.rawBody)) {
+    return req.rawBody;
+  }
+
+  return Buffer.from(JSON.stringify(req.body || {}));
+}
+
+function safeEqualString(left, right) {
+  const leftBuffer = Buffer.from(String(left || ''));
+  const rightBuffer = Buffer.from(String(right || ''));
+  return leftBuffer.length === rightBuffer.length && crypto.timingSafeEqual(leftBuffer, rightBuffer);
+}
+
+function getSignatureCandidates(signatureHeader) {
+  const raw = String(signatureHeader || '').trim();
+  if (!raw) return [];
+
+  const candidates = new Set([raw]);
+  raw.split(',').forEach((part) => {
+    const trimmed = part.trim();
+    if (!trimmed) return;
+    candidates.add(trimmed);
+    const separatorIndex = trimmed.indexOf('=');
+    if (separatorIndex !== -1) {
+      candidates.add(trimmed.slice(separatorIndex + 1).trim().replace(/^"|"$/g, ''));
+    }
+  });
+
+  if (raw.startsWith('sha256=')) {
+    candidates.add(raw.slice('sha256='.length));
+  }
+
+  return [...candidates].filter(Boolean);
+}
+
+function verifyHmacSignature({ rawBody, signatureHeader, secret }) {
+  if (!secret || !signatureHeader) return false;
+
+  const expectedHex = crypto.createHmac('sha256', secret).update(rawBody).digest('hex');
+  const expectedBase64 = crypto.createHmac('sha256', secret).update(rawBody).digest('base64');
+
+  return getSignatureCandidates(signatureHeader).some((candidate) => (
+    safeEqualString(candidate, expectedHex) ||
+    safeEqualString(candidate, `sha256=${expectedHex}`) ||
+    safeEqualString(candidate, expectedBase64)
+  ));
+}
+
+function normalizePemKey(publicKey) {
+  const normalized = String(publicKey || '').replace(/\\n/g, '\n').trim();
+  if (!normalized) return '';
+  if (normalized.includes('BEGIN PUBLIC KEY')) return normalized;
+
+  const chunks = normalized.match(/.{1,64}/g) || [];
+  return `-----BEGIN PUBLIC KEY-----\n${chunks.join('\n')}\n-----END PUBLIC KEY-----`;
+}
+
+function decodeSignatureCandidate(candidate) {
+  const value = String(candidate || '').trim();
+  if (!value) return null;
+
+  if (/^[a-f0-9]+$/i.test(value) && value.length % 2 === 0) {
+    return Buffer.from(value, 'hex');
+  }
+
+  try {
+    return Buffer.from(value, 'base64');
+  } catch {
+    return null;
+  }
+}
+
+function verifyPublicKeySignature({ rawBody, signatureHeader, publicKey }) {
+  const formattedPublicKey = normalizePemKey(publicKey);
+  if (!formattedPublicKey || !signatureHeader) return false;
+
+  const configuredAlgorithm = process.env.WOOVI_WEBHOOK_PUBLIC_KEY_ALGORITHM || 'RSA-SHA256';
+  const cryptoAlgorithm = String(configuredAlgorithm).toLowerCase() === 'ed25519'
+    ? null
+    : configuredAlgorithm;
+
+  return getSignatureCandidates(signatureHeader).some((candidate) => {
+    const signature = decodeSignatureCandidate(candidate);
+    if (!signature || signature.length === 0) return false;
+
+    try {
+      return crypto.verify(cryptoAlgorithm, rawBody, formattedPublicKey, signature);
+    } catch {
+      return false;
+    }
+  });
+}
+
+function verifyWooviWebhookSignature(req) {
+  const rawBody = getWebhookRawBody(req);
+  const recommendedSignature = req.get('x-webhook-signature');
+  const deprecatedHmacSignature = req.get('x-openpix-signature');
+  const publicKey = process.env.WOOVI_WEBHOOK_PUBLIC_KEY || process.env.OPENPIX_WEBHOOK_PUBLIC_KEY || '';
+  const recommendedHmacSecret =
+    process.env.WOOVI_WEBHOOK_SIGNATURE_SECRET ||
+    process.env.OPENPIX_WEBHOOK_SIGNATURE_SECRET ||
+    '';
+  const deprecatedHmacSecret =
+    process.env.WOOVI_WEBHOOK_HMAC_SECRET ||
+    process.env.OPENPIX_WEBHOOK_HMAC_SECRET ||
+    '';
+  const verifiersConfigured = Boolean(publicKey || recommendedHmacSecret || deprecatedHmacSecret);
+  const signaturePresent = Boolean(recommendedSignature || deprecatedHmacSignature);
+
+  if (
+    recommendedSignature &&
+    publicKey &&
+    verifyPublicKeySignature({ rawBody, signatureHeader: recommendedSignature, publicKey })
+  ) {
+    return {
+      valid: true,
+      method: 'x-webhook-signature/public-key',
+      recommendedSignaturePresent: true,
+      deprecatedHmacPresent: Boolean(deprecatedHmacSignature)
+    };
+  }
+
+  if (
+    recommendedSignature &&
+    recommendedHmacSecret &&
+    verifyHmacSignature({ rawBody, signatureHeader: recommendedSignature, secret: recommendedHmacSecret })
+  ) {
+    return {
+      valid: true,
+      method: 'x-webhook-signature/hmac-sha256',
+      recommendedSignaturePresent: true,
+      deprecatedHmacPresent: Boolean(deprecatedHmacSignature)
+    };
+  }
+
+  if (
+    deprecatedHmacSignature &&
+    deprecatedHmacSecret &&
+    verifyHmacSignature({ rawBody, signatureHeader: deprecatedHmacSignature, secret: deprecatedHmacSecret })
+  ) {
+    return {
+      valid: true,
+      method: 'x-openpix-signature/hmac-sha256',
+      recommendedSignaturePresent: Boolean(recommendedSignature),
+      deprecatedHmacPresent: true
+    };
+  }
+
+  const allowUnsignedDev =
+    !isProductionRuntime() &&
+    !verifiersConfigured &&
+    !signaturePresent &&
+    String(process.env.WOOVI_WEBHOOK_ALLOW_UNSIGNED || 'true').toLowerCase() === 'true';
+
+  if (allowUnsignedDev) {
+    return {
+      valid: true,
+      method: 'unsigned_non_production',
+      recommendedSignaturePresent: false,
+      deprecatedHmacPresent: false
+    };
+  }
+
+  return {
+    valid: false,
+    method: null,
+    reason: !verifiersConfigured
+      ? 'WEBHOOK_SIGNATURE_VERIFIER_NOT_CONFIGURED'
+      : (!signaturePresent ? 'WEBHOOK_SIGNATURE_MISSING' : 'WEBHOOK_SIGNATURE_INVALID'),
+    recommendedSignaturePresent: Boolean(recommendedSignature),
+    deprecatedHmacPresent: Boolean(deprecatedHmacSignature)
+  };
+}
+
+async function auditWooviWebhookDecision(payload) {
+  const auditPayload = {
+    service: 'woovi-routes',
+    auditedAt: new Date().toISOString(),
+    ...payload
+  };
+
+  logStructured(payload.decision === 'rejected' ? 'warn' : 'info', 'Auditoria webhook Woovi', auditPayload);
+
+  try {
+    const redisPool = require('../utils/redis-pool');
+    await redisPool.ensureConnection();
+    const redis = redisPool.getConnection();
+    const fields = [];
+    Object.entries(auditPayload).forEach(([key, value]) => {
+      fields.push(key, typeof value === 'string' ? value : JSON.stringify(value ?? null));
+    });
+    await redis.xadd('audit:woovi:webhooks', 'MAXLEN', '~', 10000, '*', ...fields);
+  } catch (auditError) {
+    logStructured('warn', 'Falha ao persistir auditoria de webhook Woovi no Redis', {
+      service: 'woovi-routes',
+      error: auditError.message,
+      decision: payload.decision || null,
+      chargeId: payload.chargeId || null
+    });
+  }
+}
+
+async function beginWooviWebhookIdempotency({ event, chargeId, amount }) {
+  if (!chargeId) {
+    return { duplicate: false, key: null };
+  }
+
+  try {
+    const redisPool = require('../utils/redis-pool');
+    await redisPool.ensureConnection();
+    const redis = redisPool.getConnection();
+    const key = [
+      'woovi:webhook:idempotency',
+      String(chargeId),
+      normalizeEventName(event),
+      String(Number.isFinite(Number(amount)) ? Math.round(Number(amount)) : 0)
+    ].join(':');
+    const ttlSeconds = Number.parseInt(process.env.WOOVI_WEBHOOK_IDEMPOTENCY_TTL_SECONDS || '172800', 10);
+    const result = await redis.set(key, new Date().toISOString(), 'NX', 'EX', ttlSeconds);
+    return {
+      duplicate: result !== 'OK',
+      key
+    };
+  } catch (idempotencyError) {
+    logStructured('warn', 'Falha ao aplicar idempotência do webhook Woovi; seguindo com processamento', {
+      service: 'woovi-routes',
+      chargeId,
+      event,
+      error: idempotencyError.message
+    });
+    return { duplicate: false, key: null, error: idempotencyError.message };
+  }
+}
+
+function parseAmountCandidateToCents(value, keyHint = '') {
+  if (value === null || value === undefined || value === '') return null;
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric) || numeric <= 0) return null;
+  const hint = String(keyHint || '').toLowerCase();
+  if (hint.includes('cent') || hint.includes('incent')) {
+    return Math.round(numeric);
+  }
+
+  return Math.round(numeric * 100);
+}
+
+function extractExpectedBookingAmountInCents(bookingData = {}) {
+  const candidates = [
+    ['paymentAmountInCents', bookingData.paymentAmountInCents],
+    ['amountInCents', bookingData.amountInCents],
+    ['fareInCents', bookingData.fareInCents],
+    ['totalAmountInCents', bookingData.totalAmountInCents],
+    ['estimatedFareCents', bookingData.estimatedFareCents],
+    ['paymentAmount', bookingData.paymentAmount],
+    ['totalAmount', bookingData.totalAmount],
+    ['estimatedFare', bookingData.estimatedFare],
+    ['fare', bookingData.fare],
+    ['price', bookingData.price],
+    ['pricingPayload.final_price', bookingData.pricingPayload?.final_price]
+  ];
+
+  for (const [key, value] of candidates) {
+    const parsed = parseAmountCandidateToCents(value, key);
+    if (parsed) return parsed;
+  }
+
+  return null;
+}
+
+function validateWebhookAmountAgainstBooking({ bookingData, amountInCents, rideId, chargeId }) {
+  const strictValidation =
+    isProductionRuntime() ||
+    String(process.env.WOOVI_STRICT_WEBHOOK_AMOUNT_VALIDATION || 'true').toLowerCase() === 'true';
+
+  if (!bookingData) {
+    return strictValidation
+      ? { ok: false, code: 'BOOKING_NOT_FOUND_FOR_PAYMENT', expectedAmountInCents: null }
+      : { ok: true, code: 'BOOKING_NOT_FOUND_ALLOWED_IN_NON_PROD', expectedAmountInCents: null };
+  }
+
+  const expectedAmountInCents = extractExpectedBookingAmountInCents(bookingData);
+  if (!expectedAmountInCents) {
+    return strictValidation
+      ? { ok: false, code: 'EXPECTED_AMOUNT_NOT_FOUND', expectedAmountInCents: null }
+      : { ok: true, code: 'EXPECTED_AMOUNT_MISSING_ALLOWED_IN_NON_PROD', expectedAmountInCents: null };
+  }
+
+  const difference = Math.abs(Number(amountInCents || 0) - expectedAmountInCents);
+  if (difference > 1) {
+    return {
+      ok: false,
+      code: 'PAYMENT_AMOUNT_MISMATCH',
+      expectedAmountInCents,
+      receivedAmountInCents: amountInCents,
+      difference,
+      rideId,
+      chargeId
+    };
+  }
+
+  return {
+    ok: true,
+    code: 'PAYMENT_AMOUNT_MATCH',
+    expectedAmountInCents,
+    receivedAmountInCents: amountInCents,
+    difference
+  };
 }
 
 function normalizeAdditionalInfo(rawAdditionalInfo) {
@@ -102,7 +428,7 @@ const ensureWooviMasterCredentials = (res) => {
 };
 
 // Criar cobrança PIX
-router.post('/woovi/create-charge', async (req, res) => {
+router.post('/woovi/create-charge', authenticateJWT, requireRole(WOOVI_ADMIN_ROLES), async (req, res) => {
   try {
     if (!ensureWooviCredentials(res)) return;
     const { value, amount, description, correlationID } = req.body;
@@ -154,7 +480,7 @@ router.post('/woovi/create-charge', async (req, res) => {
 });
 
 // Verificar status da cobrança
-router.get('/woovi/check-status/:correlationID', async (req, res) => {
+router.get('/woovi/check-status/:correlationID', authenticateJWT, requireRole(WOOVI_ADMIN_ROLES), async (req, res) => {
   try {
     if (!ensureWooviCredentials(res)) return;
     const { correlationID } = req.params;
@@ -182,7 +508,7 @@ router.get('/woovi/check-status/:correlationID', async (req, res) => {
 });
 
 // Listar cobranças
-router.get('/woovi/list-charges', async (req, res) => {
+router.get('/woovi/list-charges', authenticateJWT, requireRole(WOOVI_ADMIN_ROLES), async (req, res) => {
   const page = req.query.page || 1;
   const limit = req.query.limit || 10;
   try {
@@ -209,7 +535,7 @@ router.get('/woovi/list-charges', async (req, res) => {
 });
 
 // Cancelar cobrança
-router.post('/woovi/cancel-charge/:chargeId', async (req, res) => {
+router.post('/woovi/cancel-charge/:chargeId', authenticateJWT, requireRole(WOOVI_ADMIN_ROLES), async (req, res) => {
   try {
     if (!ensureWooviCredentials(res)) return;
     const { chargeId } = req.params;
@@ -220,6 +546,13 @@ router.post('/woovi/cancel-charge/:chargeId', async (req, res) => {
       });
     }
     if (String(chargeId).startsWith('mock_review_')) {
+      if (String(process.env.APP_REVIEW || 'false').toLowerCase() !== 'true') {
+        return res.status(400).json({
+          success: false,
+          error: 'Cobrança mock permitida apenas em APP_REVIEW=true'
+        });
+      }
+
       return res.status(200).json({
         success: true,
         mock: true,
@@ -243,7 +576,7 @@ router.post('/woovi/cancel-charge/:chargeId', async (req, res) => {
 });
 
 // Testar conexão
-router.get('/woovi/test-connection', async (req, res) => {
+router.get('/woovi/test-connection', authenticateJWT, requireRole(WOOVI_ADMIN_ROLES), async (req, res) => {
   try {
     if (!ensureWooviCredentials(res)) return;
     // Usa endpoint de listagem de cobranças como health-check de autenticação.
@@ -287,7 +620,7 @@ router.get('/woovi/test-connection', async (req, res) => {
 });
 
 // Testar conexão com API MASTER
-router.get('/woovi/master/test-connection', async (req, res) => {
+router.get('/woovi/master/test-connection', authenticateJWT, requireRole(WOOVI_ADMIN_ROLES), async (req, res) => {
   try {
     if (!ensureWooviMasterCredentials(res)) return;
     const WooviDriverService = require('../services/woovi-driver-service');
@@ -312,7 +645,7 @@ router.get('/woovi/master/test-connection', async (req, res) => {
 });
 
 // Criar subconta via API MASTER
-router.post('/woovi/master/subaccount', async (req, res) => {
+router.post('/woovi/master/subaccount', authenticateJWT, requireRole(WOOVI_ADMIN_ROLES), async (req, res) => {
   try {
     if (!ensureWooviMasterCredentials(res)) return;
     const { name, pixKey, taxID, email, phone } = req.body;
@@ -339,7 +672,7 @@ router.post('/woovi/master/subaccount', async (req, res) => {
 });
 
 // Consultar subconta via API MASTER
-router.get('/woovi/master/subaccount/:pixKey', async (req, res) => {
+router.get('/woovi/master/subaccount/:pixKey', authenticateJWT, requireRole(WOOVI_ADMIN_ROLES), async (req, res) => {
   try {
     if (!ensureWooviMasterCredentials(res)) return;
     const { pixKey } = req.params;
@@ -360,7 +693,7 @@ router.get('/woovi/master/subaccount/:pixKey', async (req, res) => {
 });
 
 // Criar cobrança com split via API MASTER
-router.post('/woovi/master/create-charge-split', async (req, res) => {
+router.post('/woovi/master/create-charge-split', authenticateJWT, requireRole(WOOVI_ADMIN_ROLES), async (req, res) => {
   try {
     if (!ensureWooviMasterCredentials(res)) return;
     const { value, amount, correlationID, comment, customer, splits, additionalInfo, expiresIn } = req.body;
@@ -406,7 +739,7 @@ router.post('/woovi/master/create-charge-split', async (req, res) => {
 });
 
 // ✅ Listar webhooks via API
-router.get('/woovi/list-webhooks', async (req, res) => {
+router.get('/woovi/list-webhooks', authenticateJWT, requireRole(WOOVI_ADMIN_ROLES), async (req, res) => {
   try {
     const WooviDriverService = require('../services/woovi-driver-service');
     const wooviService = new WooviDriverService();
@@ -428,7 +761,7 @@ router.get('/woovi/list-webhooks', async (req, res) => {
 });
 
 // ✅ Criar webhook via API
-router.post('/woovi/create-webhook', async (req, res) => {
+router.post('/woovi/create-webhook', authenticateJWT, requireRole(WOOVI_ADMIN_ROLES), async (req, res) => {
   try {
     const WooviDriverService = require('../services/woovi-driver-service');
     const wooviService = new WooviDriverService();
@@ -465,7 +798,7 @@ router.post('/woovi/create-webhook', async (req, res) => {
 });
 
 // ✅ Atualizar webhook via API
-router.put('/woovi/update-webhook/:webhookId', async (req, res) => {
+router.put('/woovi/update-webhook/:webhookId', authenticateJWT, requireRole(WOOVI_ADMIN_ROLES), async (req, res) => {
   try {
     const WooviDriverService = require('../services/woovi-driver-service');
     const wooviService = new WooviDriverService();
@@ -502,7 +835,7 @@ router.put('/woovi/update-webhook/:webhookId', async (req, res) => {
 });
 
 // ✅ Deletar webhook via API
-router.delete('/woovi/delete-webhook/:webhookId', async (req, res) => {
+router.delete('/woovi/delete-webhook/:webhookId', authenticateJWT, requireRole(WOOVI_ADMIN_ROLES), async (req, res) => {
   try {
     const WooviDriverService = require('../services/woovi-driver-service');
     const wooviService = new WooviDriverService();
@@ -526,8 +859,17 @@ router.delete('/woovi/delete-webhook/:webhookId', async (req, res) => {
 });
 
 // ✅ Endpoint de teste para enviar webhook manualmente (para debug)
-router.post('/woovi/test-webhook', async (req, res) => {
+router.post('/woovi/test-webhook', authenticateJWT, requireRole(WOOVI_ADMIN_ROLES), async (req, res) => {
   try {
+    const testWebhookEnabled =
+      String(process.env.ENABLE_WOOVI_TEST_WEBHOOK || 'false').toLowerCase() === 'true';
+    if (isProductionRuntime() && !testWebhookEnabled) {
+      return res.status(404).json({
+        success: false,
+        error: 'Webhook de teste desabilitado em produção'
+      });
+    }
+
     const io = req.app.get('io');
 
     logStructured('info', 'Webhook de teste recebido', { service: 'woovi-routes', body: req.body });
@@ -554,14 +896,89 @@ router.post('/woovi/webhook', async (req, res) => {
   // ✅ Armazenar io no req para uso nas funções de handler
   req.io = req.app.get('io');
   try {
+    const signatureDecision = verifyWooviWebhookSignature(req);
     // ✅ Log resumido do webhook recebido
     const event = req.body.event || req.body.type || req.body.name || 'UNKNOWN';
     const charge = req.body.charge || req.body.data || {};
-    const chargeId = charge.identifier || charge.id || 'N/A';
+    const chargeId = charge.identifier || charge.id || null;
+    const correlationID = charge.correlationID || charge.correlationId || null;
     const status = charge.status || 'N/A';
     const amount = charge.value || charge.amount || 0;
 
-    logStructured('info', 'Webhook recebido', { service: 'woovi-routes', event, chargeId, status, amount: amount ? (amount / 100).toFixed(2) : 'N/A', timestamp: new Date().toISOString() });
+    if (!signatureDecision.valid) {
+      await auditWooviWebhookDecision({
+        decision: 'rejected',
+        reason: signatureDecision.reason,
+        signatureValid: false,
+        signatureMethod: null,
+        recommendedSignaturePresent: signatureDecision.recommendedSignaturePresent,
+        deprecatedHmacPresent: signatureDecision.deprecatedHmacPresent,
+        event,
+        chargeId,
+        correlationID,
+        amount,
+        status
+      });
+
+      return res.status(401).json({
+        success: false,
+        error: 'Assinatura do webhook inválida',
+        code: signatureDecision.reason || 'WEBHOOK_SIGNATURE_INVALID'
+      });
+    }
+
+    const idempotencyDecision = await beginWooviWebhookIdempotency({
+      event,
+      chargeId,
+      amount
+    });
+
+    if (idempotencyDecision.duplicate) {
+      await auditWooviWebhookDecision({
+        decision: 'duplicate_ignored',
+        signatureValid: true,
+        signatureMethod: signatureDecision.method,
+        event,
+        chargeId,
+        correlationID,
+        amount,
+        status,
+        idempotencyKey: idempotencyDecision.key
+      });
+
+      return res.status(200).json({
+        success: true,
+        received: true,
+        duplicate: true,
+        timestamp: new Date().toISOString()
+      });
+    }
+
+    await auditWooviWebhookDecision({
+      decision: 'accepted_for_processing',
+      signatureValid: true,
+      signatureMethod: signatureDecision.method,
+      recommendedSignaturePresent: signatureDecision.recommendedSignaturePresent,
+      deprecatedHmacPresent: signatureDecision.deprecatedHmacPresent,
+      event,
+      chargeId,
+      correlationID,
+      amount,
+      status,
+      idempotencyKey: idempotencyDecision.key || null
+    });
+    req.body._webhookSignatureMethod = signatureDecision.method;
+
+    logStructured('info', 'Webhook recebido', {
+      service: 'woovi-routes',
+      event,
+      chargeId,
+      status,
+      amount: amount ? (amount / 100).toFixed(2) : 'N/A',
+      signatureValid: true,
+      signatureMethod: signatureDecision.method,
+      timestamp: new Date().toISOString()
+    });
 
     // ✅ Formato real da Woovi: { event: 'OPENPIX:CHARGE_COMPLETED', charge: {...}, pix: {...}, company: {...}, account: {...} }
     // ✅ Também pode vir como: { type: 'charge.completed', data: {...} }
@@ -814,7 +1231,9 @@ async function handleChargeCompleted(data, io = null) {
               status: finalStatus,
               additionalInfo,
               pixStatus: pix?.status || 'N/A',
-              paidAt: charge?.paidAt || null
+              paidAt: charge?.paidAt || null,
+              signatureMethod: data?._webhookSignatureMethod || null,
+              correlationID
             }
           );
 
@@ -1072,6 +1491,42 @@ async function processPaymentConfirmation(chargeId, rideId, amount, passengerId,
       });
     }
 
+    const amountValidation = validateWebhookAmountAgainstBooking({
+      bookingData,
+      amountInCents,
+      rideId: resolvedBookingId,
+      chargeId
+    });
+
+    await auditWooviWebhookDecision({
+      decision: amountValidation.ok ? 'payment_amount_validated' : 'payment_rejected',
+      reason: amountValidation.code,
+      signatureValid: true,
+      signatureMethod: metadata?.signatureMethod || metadata?.webhookSignatureMethod || null,
+      chargeId,
+      correlationID: metadata?.correlationID || null,
+      rideId: resolvedBookingId,
+      amount: amountInCents,
+      expectedAmountInCents: amountValidation.expectedAmountInCents || null,
+      status: metadata?.status || null
+    });
+
+    if (!amountValidation.ok) {
+      logStructured('warn', 'Pagamento rejeitado por validação antifraude do webhook', {
+        service: 'woovi-routes',
+        rideId: resolvedBookingId,
+        chargeId,
+        reason: amountValidation.code,
+        expectedAmountInCents: amountValidation.expectedAmountInCents || null,
+        receivedAmountInCents: amountInCents
+      });
+      return {
+        success: false,
+        error: amountValidation.code,
+        status: 'REJECTED'
+      };
+    }
+
     const storeResult = await paymentService.storeConfirmedPayment({
       rideId: resolvedBookingId,
       chargeId,
@@ -1218,7 +1673,7 @@ async function processPaymentConfirmation(chargeId, rideId, amount, passengerId,
 }
 
 // ✅ Tokenizar Cartão de Crédito via Woovi/OpenPix
-router.post('/woovi/tokenize-card', async (req, res) => {
+router.post('/woovi/tokenize-card', authenticateJWT, requireRole(WOOVI_ADMIN_ROLES), async (req, res) => {
   try {
     const { number, expiration, cvv, holderName } = req.body;
 
@@ -1394,5 +1849,14 @@ async function handleAccountApproved(data) {
 async function handleChargeCompletedDifferentPayer(data) {
   logStructured('info', 'Webhook Handler: Pagamento concluído por um pagador diferente (stub)', { service: 'woovi-routes' });
 }
+
+router.__private = {
+  verifyWooviWebhookSignature,
+  beginWooviWebhookIdempotency,
+  extractExpectedBookingAmountInCents,
+  validateWebhookAmountAgainstBooking,
+  normalizeEventName,
+  normalizePaymentStatus
+};
 
 module.exports = router;

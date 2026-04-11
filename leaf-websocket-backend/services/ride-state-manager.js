@@ -9,11 +9,61 @@ const { logger } = require('../utils/logger');
 const eventSourcing = require('./event-sourcing');
 
 class RideStateManager {
+    static _scheduleSideEffects(task) {
+        setImmediate(() => {
+            Promise.resolve()
+                .then(task)
+                .catch((error) => {
+                    logger.warn(`⚠️ Falha em side effect assíncrono de estado: ${error.message}`);
+                });
+        });
+    }
+
+    static async _runStateSideEffects(redis, { bookingId, currentState, newState, updateData }, options = {}) {
+        const { deferSideEffects = false } = options || {};
+        const payload = {
+            bookingId,
+            previousState: currentState || null,
+            newState,
+            updatedAt: updateData.updatedAt
+        };
+
+        const runSideEffects = async () => {
+            const sideEffects = [
+                eventSourcing.recordEvent(require('./event-sourcing').EVENT_TYPES.STATE_CHANGED, {
+                    bookingId,
+                    fromState: currentState || 'UNKNOWN',
+                    toState: newState,
+                    ...updateData
+                })
+            ];
+
+            try {
+                const { syncTrackedRideState } = require('./ride-health-monitor');
+                sideEffects.push(
+                    syncTrackedRideState(redis, payload)
+                );
+            } catch (monitoringError) {
+                logger.warn(`⚠️ Falha ao preparar ride health monitor para ${bookingId}: ${monitoringError.message}`);
+            }
+
+            await Promise.allSettled(sideEffects);
+        };
+
+        if (deferSideEffects) {
+            RideStateManager._scheduleSideEffects(runSideEffects);
+            return;
+        }
+
+        await runSideEffects();
+    }
+
     /**
      * Estados possíveis de uma corrida
      */
     static STATES = {
         PENDING: 'PENDING',
+        AWAITING_PAYMENT: 'AWAITING_PAYMENT',
         SEARCHING: 'SEARCHING',
         NOTIFIED: 'NOTIFIED', // ✅ NOVO: Motorista foi notificado, aguardando resposta
         AWAITING_RESPONSE: 'AWAITING_RESPONSE', // ✅ NOVO: Aguardando resposta do motorista (alias para NOTIFIED)
@@ -39,11 +89,18 @@ class RideStateManager {
      */
     static VALID_TRANSITIONS = {
         [RideStateManager.STATES.PENDING]: [
+            RideStateManager.STATES.AWAITING_PAYMENT,
+            RideStateManager.STATES.SEARCHING,
+            RideStateManager.STATES.AWAITING_RESPONSE,
+            RideStateManager.STATES.CANCELED
+        ],
+        [RideStateManager.STATES.AWAITING_PAYMENT]: [
             RideStateManager.STATES.SEARCHING,
             RideStateManager.STATES.CANCELED
         ],
         [RideStateManager.STATES.SEARCHING]: [
             RideStateManager.STATES.NOTIFIED, // ✅ NOVO: Pode transitar para NOTIFIED quando motorista é notificado
+            RideStateManager.STATES.AWAITING_RESPONSE,
             RideStateManager.STATES.MATCHED,
             RideStateManager.STATES.CANCELED,
             RideStateManager.STATES.EXPANDED
@@ -61,6 +118,7 @@ class RideStateManager {
             RideStateManager.STATES.CANCELED
         ],
         [RideStateManager.STATES.EXPANDED]: [
+            RideStateManager.STATES.AWAITING_RESPONSE,
             RideStateManager.STATES.MATCHED,
             RideStateManager.STATES.CANCELED,
             RideStateManager.STATES.SEARCHING
@@ -98,6 +156,7 @@ class RideStateManager {
             RideStateManager.STATES.EARLY_ENDED_REVIEW
         ],
         [RideStateManager.STATES.REASSIGNMENT_PENDING]: [
+            RideStateManager.STATES.AWAITING_RESPONSE,
             RideStateManager.STATES.ACCEPTED,
             RideStateManager.STATES.EARLY_ENDED_REVIEW,
             RideStateManager.STATES.CANCELED
@@ -139,7 +198,7 @@ class RideStateManager {
      * @param {Object} metadata - Metadados adicionais (driverId, reason, etc.)
      * @returns {Promise<boolean>} true se estado foi atualizado com sucesso
      */
-    static async updateBookingState(redis, bookingId, newState, metadata = {}) {
+    static async updateBookingState(redis, bookingId, newState, metadata = {}, options = {}) {
         try {
             const bookingKey = `booking:${bookingId}`;
             
@@ -174,25 +233,11 @@ class RideStateManager {
 
             await redis.hset(bookingKey, updateData);
 
-            // Registrar evento
-            await eventSourcing.recordEvent(require('./event-sourcing').EVENT_TYPES.STATE_CHANGED, {
-                bookingId,
-                fromState: currentState || 'UNKNOWN',
-                toState: newState,
-                ...metadata
-            });
-
-            try {
-                const { syncTrackedRideState } = require('./ride-health-monitor');
-                await syncTrackedRideState(redis, {
-                    bookingId,
-                    previousState: currentState || null,
-                    newState,
-                    updatedAt: updateData.updatedAt
-                });
-            } catch (monitoringError) {
-                logger.warn(`⚠️ Falha ao sincronizar ride health monitor para ${bookingId}: ${monitoringError.message}`);
-            }
+            await RideStateManager._runStateSideEffects(
+                redis,
+                { bookingId, currentState, newState, updateData },
+                options
+            );
 
             logger.info(`✅ Estado atualizado: ${bookingId} (${currentState || 'NEW'} → ${newState})`);
             return true;

@@ -15,8 +15,10 @@ if (process.env.REDIS_HOST && process.env.REDIS_PASSWORD && process.env.REDIS_CA
 const express = require('express');
 const http = require('http');
 const socketIo = require('socket.io');
+const { createAdapter } = require('@socket.io/redis-adapter');
 const cluster = require('cluster');
 const os = require('os');
+const { monitorEventLoopDelay } = require('perf_hooks');
 const cors = require('cors');
 const admin = require('firebase-admin');
 
@@ -57,6 +59,7 @@ const driverStatusCheckRoutes = require('./routes/driver-status-check');
 
 // Importar rotas de drivers
 const driversRoutes = require('./routes/drivers');
+const driverActivationRoutes = require('./routes/driver-activation');
 
 // Importar rotas de Notificações
 const notificationsRoutes = require('./routes/notifications');
@@ -98,12 +101,14 @@ const ConnectionCleanupService = require('./services/connection-cleanup-service'
 const vehicleLockManager = require('./services/vehicle-lock-manager');
 const driverLockManager = require('./services/driver-lock-manager');
 const FCMService = require('./services/fcm-service');
+const { clearActiveTripForDriver, resolveActiveTripForDriver } = require('./utils/active-trip-index');
 const fcmService = new FCMService(); // Singleton local ao worker
 // =========================================================================================
 
 // ==================== IMPORTAÇÕES REFATORAÇÃO: COMMANDS E LISTENERS ====================
 const setupListeners = require('./listeners/setupListeners');
 const { getEventBus } = require('./listeners');
+const notifyDriversInline = require('./listeners/onRideRequested.notifyDrivers');
 const RequestRideCommand = require('./commands/RequestRideCommand');
 const AcceptRideCommand = require('./commands/AcceptRideCommand');
 const StartTripCommand = require('./commands/StartTripCommand');
@@ -145,7 +150,41 @@ const metricsCollector = require('./services/metrics-collector');
 const queueMonitoringRoutes = require('./routes/queue-monitoring');
 const IntegratedKYCService = require('./services/IntegratedKYCService');
 const { recordIngest, getStatus: getOtelIngestStatus } = require('./utils/otel-ingest-monitor');
+const { metrics: runtimeMetrics } = require('./utils/prometheus-metrics');
 // ============================================================================================
+
+function recordRealtimeMetricSafe(channel, result, count = 1) {
+    try {
+        runtimeMetrics.recordRealtimeUpdate(channel, result, count);
+    } catch (error) {
+        if (process.env.DEBUG_OBSERVABILITY_METRICS === 'true') {
+            logStructured('debug', 'Falha ao registrar métrica realtime', {
+                service: 'observability',
+                channel,
+                result,
+                error: error.message
+            });
+        }
+    }
+}
+
+function recordHotpathLatencySafe(pathName, durationMs, success = true) {
+    const durationSeconds = Number(durationMs) / 1000;
+    const safeDuration = Number.isFinite(durationSeconds) && durationSeconds >= 0 ? durationSeconds : 0;
+    try {
+        runtimeMetrics.recordHotpathLatency(pathName, safeDuration, success);
+    } catch (error) {
+        if (process.env.DEBUG_OBSERVABILITY_METRICS === 'true') {
+            logStructured('debug', 'Falha ao registrar latência hotpath', {
+                service: 'observability',
+                path: pathName,
+                durationMs,
+                success,
+                error: error.message
+            });
+        }
+    }
+}
 
 // Configurações otimizadas para VPS com recursos limitados
 const VPS_CONFIG = {
@@ -156,12 +195,34 @@ const VPS_CONFIG = {
     TIMEOUT: 30000 // Timeout aumentado para conexões mais lentas
 };
 
+const CLUSTER_ENABLED =
+    String(process.env.LEAF_CLUSTER_ENABLED || 'false').toLowerCase() === 'true' &&
+    process.env.NODE_ENV === 'production';
+const CLUSTER_WORKERS = Math.max(
+    1,
+    Number.parseInt(process.env.LEAF_CLUSTER_WORKERS || String(VPS_CONFIG.CLUSTER_WORKERS), 10) || VPS_CONFIG.CLUSTER_WORKERS
+);
+const CLUSTER_SCHEDULER_LEADER_ID = Math.max(
+    1,
+    Number.parseInt(process.env.LEAF_CLUSTER_SCHEDULER_LEADER_ID || '1', 10) || 1
+);
+const IS_CLUSTER_PRIMARY = CLUSTER_ENABLED && (cluster.isPrimary || cluster.isMaster);
+
 // Cache curto para reduzir custo de verifyIdToken em picos de reconexão/reautenticação.
 const AUTH_TOKEN_CACHE_TTL_MS = Number.parseInt(process.env.AUTH_TOKEN_CACHE_TTL_MS || '120000', 10);
 const AUTH_TOKEN_CACHE_MAX = Number.parseInt(process.env.AUTH_TOKEN_CACHE_MAX || '5000', 10);
+const AUTH_CONTEXT_STATE = {
+    AUTHENTICATED: 'authenticated',
+    CACHED: 'cached'
+};
 const authTokenCache = new Map();
 const authTokenVerifyInFlight = new Map();
 const integratedKYCService = new IntegratedKYCService();
+const paymentServiceSingleton = new PaymentService();
+const paymentDispatchService = require('./services/payment-dispatch-service');
+const SESSION_LOCK_TTL_MS = Number.parseInt(process.env.SESSION_LOCK_TTL_MS || '5000', 10);
+const SESSION_LOCK_MAX_ATTEMPTS = Number.parseInt(process.env.SESSION_LOCK_MAX_ATTEMPTS || '25', 10);
+const SESSION_LOCK_RETRY_MS = Number.parseInt(process.env.SESSION_LOCK_RETRY_MS || '25', 10);
 
 // Admission control para reduzir picos de handshake/socket em bursts.
 const SOCKET_ADMISSION_ENABLED = process.env.SOCKET_ADMISSION_ENABLED !== 'false';
@@ -178,14 +239,89 @@ const ENABLE_LEGACY_UPDATE_DRIVER_LOCATION_EVENT =
     String(process.env.ENABLE_LEGACY_UPDATE_DRIVER_LOCATION_EVENT || 'false').toLowerCase() === 'true';
 const ENABLE_LEGACY_NO_DRIVERS_FOUND_EVENT =
     String(process.env.ENABLE_LEGACY_NO_DRIVERS_FOUND_EVENT || 'false').toLowerCase() === 'true';
+const ENABLE_SOCKETIO_REDIS_ADAPTER =
+    String(process.env.ENABLE_SOCKETIO_REDIS_ADAPTER || 'true').toLowerCase() !== 'false';
+const ENABLE_DIRECT_RIDE_REQUESTED_DISPATCH =
+    String(process.env.ENABLE_DIRECT_RIDE_REQUESTED_DISPATCH || 'true').toLowerCase() === 'true';
+const RUNTIME_ROLE = String(process.env.RUNTIME_ROLE || 'gateway').trim().toLowerCase();
+const ENABLE_EMBEDDED_LISTENER_WORKERS =
+    String(
+        process.env.ENABLE_EMBEDDED_LISTENER_WORKERS ||
+        (RUNTIME_ROLE === 'gateway' ? 'true' : 'false')
+    ).toLowerCase() === 'true';
 
 // Lane dedicada para autenticação para evitar rajadas de verifyIdToken simultâneas.
 const AUTH_VERIFY_ADMISSION_ENABLED = process.env.AUTH_VERIFY_ADMISSION_ENABLED !== 'false';
 const AUTH_VERIFY_MAX_INFLIGHT = Number.parseInt(process.env.AUTH_VERIFY_MAX_INFLIGHT || '160', 10);
 const AUTH_VERIFY_MAX_QUEUE = Number.parseInt(process.env.AUTH_VERIFY_MAX_QUEUE || '1200', 10);
 const AUTH_VERIFY_MAX_WAIT_MS = Number.parseInt(process.env.AUTH_VERIFY_MAX_WAIT_MS || '6000', 10);
+const AUTH_VERIFY_BUSY_RETRY_ATTEMPTS = Math.max(
+    0,
+    Number.parseInt(process.env.AUTH_VERIFY_BUSY_RETRY_ATTEMPTS || '1', 10) || 1
+);
+const AUTH_VERIFY_BUSY_RETRY_DELAY_MS = Math.max(
+    50,
+    Number.parseInt(process.env.AUTH_VERIFY_BUSY_RETRY_DELAY_MS || '250', 10) || 250
+);
+const AUTH_BUSY_RETRY_AFTER_SEC = Math.max(
+    1,
+    Number.parseInt(process.env.AUTH_BUSY_RETRY_AFTER_SEC || '2', 10) || 2
+);
 let authVerifyInFlight = 0;
 const authVerifyQueue = [];
+
+// Realtime hot state/cache controls (presença/localização)
+const DRIVER_STATE_HOT_CACHE_TTL_MS = Number.parseInt(process.env.DRIVER_STATE_HOT_CACHE_TTL_MS || '1000', 10);
+const DRIVER_STATE_HOT_CACHE_MAX = Number.parseInt(process.env.DRIVER_STATE_HOT_CACHE_MAX || '20000', 10);
+const UPDATE_LOCATION_RATE_LIMIT_CACHE_MS = Number.parseInt(process.env.UPDATE_LOCATION_RATE_LIMIT_CACHE_MS || '1000', 10);
+const DRIVER_UPDATE_MIN_INTERVAL_MS = Number.parseInt(process.env.DRIVER_UPDATE_MIN_INTERVAL_MS || '350', 10);
+const DRIVER_UPDATE_MIN_INTERVAL_TRIP_MS = Number.parseInt(process.env.DRIVER_UPDATE_MIN_INTERVAL_TRIP_MS || '200', 10);
+const DRIVER_UPDATE_MIN_DISTANCE_METERS = Number.parseFloat(process.env.DRIVER_UPDATE_MIN_DISTANCE_METERS || '8');
+const DRIVER_UPDATE_MIN_DISTANCE_TRIP_METERS = Number.parseFloat(process.env.DRIVER_UPDATE_MIN_DISTANCE_TRIP_METERS || '2');
+const VEHICLE_LOCK_RECOVERY_COOLDOWN_MS = Number.parseInt(process.env.VEHICLE_LOCK_RECOVERY_COOLDOWN_MS || '12000', 10);
+const VEHICLE_LOCK_RECOVERY_FIREBASE_LOOKUP_ENABLED =
+    String(process.env.VEHICLE_LOCK_RECOVERY_FIREBASE_LOOKUP_ENABLED || 'true').toLowerCase() !== 'false';
+const DRIVER_DISCONNECT_GRACE_MS = Math.max(
+    0,
+    Number.parseInt(process.env.DRIVER_DISCONNECT_GRACE_MS || '25000', 10) || 25000
+);
+const DRIVER_BOARDING_WINDOW_SECONDS = Math.max(
+    30,
+    Number.parseInt(process.env.DRIVER_BOARDING_WINDOW_SECONDS || '120', 10) || 120
+);
+const TRIP_INTEGRITY_ENABLED =
+    String(process.env.TRIP_INTEGRITY_ENABLED || 'true').toLowerCase() !== 'false';
+const TRIP_INTEGRITY_DISTANCE_THRESHOLD_METERS = Math.max(
+    50,
+    Number.parseInt(process.env.TRIP_INTEGRITY_DISTANCE_THRESHOLD_METERS || '220', 10) || 220
+);
+const TRIP_INTEGRITY_LOCATION_STALE_MS = Math.max(
+    5000,
+    Number.parseInt(process.env.TRIP_INTEGRITY_LOCATION_STALE_MS || '45000', 10) || 45000
+);
+const TRIP_INTEGRITY_CONSECUTIVE_BREACH_LIMIT = Math.max(
+    1,
+    Number.parseInt(process.env.TRIP_INTEGRITY_CONSECUTIVE_BREACH_LIMIT || '3', 10) || 3
+);
+const TRIP_INTEGRITY_CONFIRM_TIMEOUT_MS = Math.max(
+    5000,
+    Number.parseInt(process.env.TRIP_INTEGRITY_CONFIRM_TIMEOUT_MS || '20000', 10) || 20000
+);
+const TRIP_INTEGRITY_SOFT_BAN_SECONDS = Math.max(
+    60,
+    Number.parseInt(process.env.TRIP_INTEGRITY_SOFT_BAN_SECONDS || '300', 10) || 300
+);
+const AUTH_PUSH_ACTIVE_RIDE_SYNC = String(process.env.AUTH_PUSH_ACTIVE_RIDE_SYNC || 'true').toLowerCase() !== 'false';
+const EVENT_LOOP_LAG_SAMPLE_MS = Number.parseInt(process.env.EVENT_LOOP_LAG_SAMPLE_MS || '1000', 10);
+const EVENT_LOOP_LAG_RESOLUTION_MS = Number.parseInt(process.env.EVENT_LOOP_LAG_RESOLUTION_MS || '20', 10);
+
+const driverStateHotCache = new Map();
+const updateLocationRateLimitCache = new Map();
+const driverRealtimeUpdateGateCache = new Map();
+const vehicleLockRecoveryAttemptCache = new Map();
+const pendingDriverDisconnectCleanup = new Map();
+const pendingBoardingWindowTimeouts = new Map();
+const pendingTripIntegrityConfirmTimeouts = new Map();
 
 function fingerprintToken(token) {
     if (!token || typeof token !== 'string') return '';
@@ -194,20 +330,744 @@ function fingerprintToken(token) {
 
 function cleanupAuthTokenCache() {
     const now = Date.now();
-    for (const [token, cached] of authTokenCache.entries()) {
+    for (const [tokenHash, cached] of authTokenCache.entries()) {
         if (!cached || cached.expiresAt <= now) {
-            authTokenCache.delete(token);
+            authTokenCache.delete(tokenHash);
         }
     }
     if (authTokenCache.size > AUTH_TOKEN_CACHE_MAX) {
         const overflow = authTokenCache.size - AUTH_TOKEN_CACHE_MAX;
         let dropped = 0;
-        for (const token of authTokenCache.keys()) {
-            authTokenCache.delete(token);
+        for (const tokenHash of authTokenCache.keys()) {
+            authTokenCache.delete(tokenHash);
             dropped += 1;
             if (dropped >= overflow) break;
         }
     }
+}
+
+function trimHotMapIfNeeded(mapRef, maxItems) {
+    if (!mapRef || mapRef.size <= maxItems) return;
+    const overflow = mapRef.size - maxItems;
+    let dropped = 0;
+    for (const key of mapRef.keys()) {
+        mapRef.delete(key);
+        dropped += 1;
+        if (dropped >= overflow) break;
+    }
+}
+
+function toFiniteNumber(value) {
+    const numeric = Number(value);
+    return Number.isFinite(numeric) ? numeric : null;
+}
+
+function normalizeVehiclePlate(plate) {
+    return String(plate || '').toUpperCase().replace(/[^A-Z0-9]/g, '').trim();
+}
+
+function haversineDistanceMeters(lat1, lng1, lat2, lng2) {
+    const nLat1 = toFiniteNumber(lat1);
+    const nLng1 = toFiniteNumber(lng1);
+    const nLat2 = toFiniteNumber(lat2);
+    const nLng2 = toFiniteNumber(lng2);
+    if ([nLat1, nLng1, nLat2, nLng2].some((v) => v === null)) return Number.POSITIVE_INFINITY;
+
+    const toRad = (deg) => (deg * Math.PI) / 180;
+    const dLat = toRad(nLat2 - nLat1);
+    const dLng = toRad(nLng2 - nLng1);
+    const a = Math.sin(dLat / 2) * Math.sin(dLat / 2)
+        + Math.cos(toRad(nLat1)) * Math.cos(toRad(nLat2))
+        * Math.sin(dLng / 2) * Math.sin(dLng / 2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    const earthRadiusMeters = 6371000;
+    return earthRadiusMeters * c;
+}
+
+function clearBoardingWindowTimeout(bookingId) {
+    if (!bookingId) return;
+    const existingTimeout = pendingBoardingWindowTimeouts.get(bookingId);
+    if (existingTimeout) {
+        clearTimeout(existingTimeout);
+        pendingBoardingWindowTimeouts.delete(bookingId);
+    }
+}
+
+function scheduleBoardingWindowTimeout({
+    io,
+    bookingId,
+    customerId,
+    driverId,
+    pickupAddress,
+    deadlineAtMs
+}) {
+    if (!bookingId || !io) return;
+
+    clearBoardingWindowTimeout(bookingId);
+    const delayMs = Math.max(1000, Number(deadlineAtMs) - Date.now());
+
+    const timeoutId = setTimeout(async () => {
+        pendingBoardingWindowTimeouts.delete(bookingId);
+        clearTripIntegrityConfirmationTimeout(bookingId);
+
+        try {
+            await redisPool.ensureConnection();
+            const redis = redisPool.getConnection();
+            const bookingKey = `booking:${bookingId}`;
+            const bookingData = await redis.hgetall(bookingKey);
+            if (!bookingData || Object.keys(bookingData).length === 0) {
+                return;
+            }
+
+            const stateUpper = String(bookingData.state || '').trim().toUpperCase();
+            const statusUpper = String(bookingData.status || '').trim().toUpperCase();
+            const activeStates = new Set(['ARRIVED', 'DRIVER_ARRIVED', 'ACCEPTED']);
+            const terminalStates = new Set(['IN_PROGRESS', 'STARTED', 'COMPLETED', 'CANCELED', 'CANCELLED', 'REJECTED']);
+            if (terminalStates.has(stateUpper) || terminalStates.has(statusUpper)) {
+                return;
+            }
+            if (!activeStates.has(stateUpper) && !activeStates.has(statusUpper)) {
+                return;
+            }
+
+            const resolvedCustomerId = customerId || bookingData.customerId || null;
+            const resolvedDriverId = driverId || bookingData.driverId || null;
+            const cancelledAt = new Date().toISOString();
+            const cancelReason = 'Tempo de embarque expirado';
+
+            await RideStateManager.updateBookingState(
+                redis,
+                bookingId,
+                RideStateManager.STATES.CANCELED,
+                {
+                    canceledBy: 'system',
+                    reason: cancelReason,
+                    cancellationFee: 0,
+                    cancelledAt
+                }
+            );
+            await redis.hset(bookingKey, {
+                status: 'CANCELED',
+                state: 'CANCELED',
+                canceledBy: 'system',
+                reason: cancelReason,
+                cancellationFee: '0',
+                cancelledAt
+            });
+            await redis.hdel('bookings:active', bookingId);
+            await redis.del(`booking_search:${bookingId}`);
+
+            if (resolvedDriverId) {
+                try {
+                    await driverLockManager.releaseLock(resolvedDriverId);
+                } catch (_releaseError) {
+                    // best effort
+                }
+                try {
+                    await clearActiveTripForDriver(redis, resolvedDriverId, bookingId);
+                } catch (_clearTripError) {
+                    // best effort
+                }
+            }
+
+            const expirationPayload = {
+                success: true,
+                bookingId,
+                reason: 'BOARDING_WINDOW_EXPIRED',
+                message: 'Tempo de embarque expirou. A corrida foi cancelada automaticamente.',
+                pickupAddress: pickupAddress || bookingData?.pickupLocation?.add || 'local de embarque',
+                deadlineAt: new Date(deadlineAtMs).toISOString(),
+                timestamp: new Date().toISOString()
+            };
+
+            if (resolvedCustomerId) {
+                io.to(`customer_${resolvedCustomerId}`).emit('boardingWindowExpired', expirationPayload);
+                io.to(`customer_${resolvedCustomerId}`).emit('rideCancelled', expirationPayload);
+            }
+            if (resolvedDriverId) {
+                io.to(`driver_${resolvedDriverId}`).emit('boardingWindowExpired', expirationPayload);
+                io.to(`driver_${resolvedDriverId}`).emit('rideCancelled', expirationPayload);
+            }
+
+            logStructured('warn', 'Janela de embarque expirada - corrida cancelada automaticamente', {
+                service: 'server',
+                bookingId,
+                customerId: resolvedCustomerId,
+                driverId: resolvedDriverId,
+                deadlineAt: new Date(deadlineAtMs).toISOString(),
+                eventType: 'boardingWindowExpired'
+            });
+        } catch (error) {
+            logStructured('error', 'Falha ao processar expiração da janela de embarque', {
+                service: 'server',
+                bookingId,
+                error: error.message,
+                eventType: 'boardingWindowExpired'
+            });
+        }
+    }, delayMs);
+
+    pendingBoardingWindowTimeouts.set(bookingId, timeoutId);
+}
+
+function clearTripIntegrityConfirmationTimeout(bookingId) {
+    if (!bookingId) return;
+    const timeoutId = pendingTripIntegrityConfirmTimeouts.get(bookingId);
+    if (timeoutId) {
+        clearTimeout(timeoutId);
+        pendingTripIntegrityConfirmTimeouts.delete(bookingId);
+    }
+}
+
+function parseIntegrityTimestampMs(value) {
+    if (value == null) return null;
+    const numeric = Number(value);
+    if (Number.isFinite(numeric) && numeric > 0) return numeric;
+    const parsedDate = Date.parse(String(value));
+    return Number.isFinite(parsedDate) ? parsedDate : null;
+}
+
+function parseIntegrityLocation(snapshot, prefix) {
+    if (!snapshot || !prefix) return null;
+    const lat = Number(snapshot[`${prefix}Lat`]);
+    const lng = Number(snapshot[`${prefix}Lng`]);
+    const at = parseIntegrityTimestampMs(snapshot[`${prefix}At`]);
+    if (!Number.isFinite(lat) || !Number.isFinite(lng) || !Number.isFinite(at)) {
+        return null;
+    }
+    return { lat, lng, at };
+}
+
+function isTripIntegrityMonitoringState(stateOrStatus) {
+    const normalized = String(stateOrStatus || '').trim().toUpperCase();
+    return normalized === 'STARTED' || normalized === 'IN_PROGRESS';
+}
+
+async function cancelRideForTripIntegrityViolation({
+    io,
+    redis,
+    bookingId,
+    driverId,
+    customerId,
+    reasonCode,
+    reasonMessage
+}) {
+    if (!TRIP_INTEGRITY_ENABLED || !bookingId || !redis || !io) {
+        return { success: false, skipped: true, reason: 'NOT_ENABLED_OR_INVALID' };
+    }
+
+    const cancelLockKey = `trip_integrity_cancel_lock:${bookingId}`;
+    const lockAcquired = await redis.set(cancelLockKey, String(Date.now()), 'NX', 'EX', 20);
+    if (!lockAcquired) {
+        return { success: false, skipped: true, reason: 'LOCK_ALREADY_HELD' };
+    }
+
+    clearTripIntegrityConfirmationTimeout(bookingId);
+
+    let bookingData = null;
+    let resolvedDriverId = driverId || null;
+    let resolvedCustomerId = customerId || null;
+
+    try {
+        bookingData = await redis.hgetall(`booking:${bookingId}`);
+        if (bookingData && Object.keys(bookingData).length > 0) {
+            resolvedDriverId = resolvedDriverId || bookingData.driverId || null;
+            resolvedCustomerId = resolvedCustomerId || bookingData.customerId || null;
+        }
+
+        const currentState = await RideStateManager.getBookingState(redis, bookingId);
+        const stateUpper = String(currentState || '').trim().toUpperCase();
+        const statusUpper = String(bookingData?.status || '').trim().toUpperCase();
+        const alreadyTerminal = new Set(['COMPLETED', 'CANCELED', 'CANCELLED', 'REJECTED']);
+        if (alreadyTerminal.has(stateUpper) || alreadyTerminal.has(statusUpper)) {
+            return { success: false, skipped: true, reason: 'BOOKING_ALREADY_TERMINAL' };
+        }
+
+        const tripIntegrityReason = reasonMessage || 'Corrida cancelada por divergência de localização entre motorista e passageiro.';
+        const command = new CancelRideCommand({
+            bookingId,
+            canceledBy: 'system_trip_integrity',
+            reason: tripIntegrityReason,
+            cancellationFee: 0,
+            traceId: traceContext.generateTraceId('trip_integrity_cancel'),
+            correlationId: bookingId,
+            userType: 'system'
+        });
+
+        const cancelResult = await command.execute();
+        if (!cancelResult?.success) {
+            logStructured('error', 'CancelRideCommand falhou no cancelamento por tripIntegrity', {
+                service: 'trip-integrity',
+                bookingId,
+                reasonCode,
+                error: cancelResult?.error || 'unknown_cancel_command_failure'
+            });
+            recordRealtimeMetricSafe('trip_integrity', 'cancel_failed');
+            return { success: false, error: cancelResult?.error || 'CANCEL_COMMAND_FAILED' };
+        }
+
+        const rideCanceledEvent = cancelResult?.data?.event || null;
+        if (rideCanceledEvent) {
+            try {
+                await eventBus.publish({
+                    eventType: 'ride.canceled',
+                    data: rideCanceledEvent
+                });
+            } catch (eventPublishError) {
+                logStructured('warn', 'Falha ao publicar ride.canceled no cancelamento por tripIntegrity', {
+                    service: 'trip-integrity',
+                    bookingId,
+                    reasonCode,
+                    error: eventPublishError.message
+                });
+            }
+        }
+
+        if (resolvedDriverId) {
+            await redis.set(`driver_soft_ban:${resolvedDriverId}`, String(Date.now()), 'EX', TRIP_INTEGRITY_SOFT_BAN_SECONDS);
+        }
+
+        const payload = {
+            success: true,
+            bookingId,
+            reason: reasonCode || 'TRIP_INTEGRITY_VIOLATION',
+            message: tripIntegrityReason,
+            driverSoftBanSec: resolvedDriverId ? TRIP_INTEGRITY_SOFT_BAN_SECONDS : 0,
+            timestamp: new Date().toISOString()
+        };
+
+        if (resolvedCustomerId) {
+            io.to(`customer_${resolvedCustomerId}`).emit('tripIntegrityCancelled', payload);
+            io.to(`customer_${resolvedCustomerId}`).emit('rideCancelled', payload);
+        }
+        if (resolvedDriverId) {
+            io.to(`driver_${resolvedDriverId}`).emit('tripIntegrityCancelled', payload);
+            io.to(`driver_${resolvedDriverId}`).emit('rideCancelled', payload);
+        }
+
+        const tripIntegrityKey = `trip_integrity:${bookingId}`;
+        await redis.hset(tripIntegrityKey, {
+            divergenceCount: '0',
+            alertOpenAt: '',
+            alertResolvedAt: String(Date.now()),
+            lastCancellationAt: String(Date.now()),
+            lastCancellationReason: payload.reason
+        });
+        await redis.expire(tripIntegrityKey, 6 * 60 * 60);
+        recordRealtimeMetricSafe('trip_integrity', 'cancelled');
+
+        logStructured('warn', 'Corrida cancelada por violação de tripulação', {
+            service: 'trip-integrity',
+            bookingId,
+            driverId: resolvedDriverId,
+            customerId: resolvedCustomerId,
+            reasonCode: payload.reason,
+            softBanSeconds: payload.driverSoftBanSec
+        });
+
+        return { success: true, payload };
+    } catch (error) {
+        logStructured('error', 'Erro ao cancelar corrida por tripIntegrity', {
+            service: 'trip-integrity',
+            bookingId,
+            driverId: resolvedDriverId,
+            customerId: resolvedCustomerId,
+            reasonCode,
+            error: error.message
+        });
+        recordRealtimeMetricSafe('trip_integrity', 'cancel_exception');
+        return { success: false, error: error.message };
+    }
+}
+
+function scheduleTripIntegrityConfirmationTimeout({
+    io,
+    bookingId,
+    timeoutMs
+}) {
+    if (!TRIP_INTEGRITY_ENABLED || !io || !bookingId) return;
+    clearTripIntegrityConfirmationTimeout(bookingId);
+
+    const safeTimeoutMs = Math.max(1000, Number(timeoutMs) || TRIP_INTEGRITY_CONFIRM_TIMEOUT_MS);
+    const timeoutId = setTimeout(async () => {
+        pendingTripIntegrityConfirmTimeouts.delete(bookingId);
+
+        try {
+            await redisPool.ensureConnection();
+            const redis = redisPool.getConnection();
+            const integrityKey = `trip_integrity:${bookingId}`;
+            const snapshot = await redis.hgetall(integrityKey);
+            if (!snapshot || Object.keys(snapshot).length === 0) {
+                return;
+            }
+
+            if (snapshot.alertOpenAt && !snapshot.alertResolvedAt && !snapshot.boardingConfirmedAt) {
+                const bookingData = await redis.hgetall(`booking:${bookingId}`);
+                await cancelRideForTripIntegrityViolation({
+                    io,
+                    redis,
+                    bookingId,
+                    driverId: bookingData?.driverId || null,
+                    customerId: bookingData?.customerId || null,
+                    reasonCode: 'TRIP_INTEGRITY_CONFIRMATION_TIMEOUT',
+                    reasonMessage: 'Corrida cancelada por falta de confirmação de embarque após divergência de localização.'
+                });
+            }
+        } catch (error) {
+            logStructured('error', 'Erro ao processar timeout de confirmação de tripIntegrity', {
+                service: 'trip-integrity',
+                bookingId,
+                error: error.message
+            });
+        }
+    }, safeTimeoutMs);
+
+    pendingTripIntegrityConfirmTimeouts.set(bookingId, timeoutId);
+}
+
+async function registerTripIntegrityLocationUpdate({
+    io,
+    redis,
+    bookingId,
+    driverId,
+    customerId,
+    driverLocation,
+    passengerLocation
+}) {
+    if (!TRIP_INTEGRITY_ENABLED || !io || !redis || !bookingId) {
+        return;
+    }
+
+    const bookingData = await redis.hgetall(`booking:${bookingId}`);
+    if (!bookingData || Object.keys(bookingData).length === 0) {
+        return;
+    }
+
+    const state = await RideStateManager.getBookingState(redis, bookingId);
+    const status = String(bookingData.status || '').trim().toUpperCase();
+    if (!isTripIntegrityMonitoringState(state) && !isTripIntegrityMonitoringState(status)) {
+        clearTripIntegrityConfirmationTimeout(bookingId);
+        return;
+    }
+
+    const integrityKey = `trip_integrity:${bookingId}`;
+    const nowTs = Date.now();
+    const nextFields = {
+        updatedAt: String(nowTs),
+        driverId: String(driverId || bookingData.driverId || ''),
+        customerId: String(customerId || bookingData.customerId || '')
+    };
+
+    if (
+        driverLocation &&
+        Number.isFinite(Number(driverLocation.lat)) &&
+        Number.isFinite(Number(driverLocation.lng))
+    ) {
+        nextFields.driverLat = String(Number(driverLocation.lat));
+        nextFields.driverLng = String(Number(driverLocation.lng));
+        nextFields.driverAt = String(parseIntegrityTimestampMs(driverLocation.timestamp) || nowTs);
+    }
+
+    if (
+        passengerLocation &&
+        Number.isFinite(Number(passengerLocation.lat)) &&
+        Number.isFinite(Number(passengerLocation.lng))
+    ) {
+        nextFields.passengerLat = String(Number(passengerLocation.lat));
+        nextFields.passengerLng = String(Number(passengerLocation.lng));
+        nextFields.passengerAt = String(parseIntegrityTimestampMs(passengerLocation.timestamp) || nowTs);
+    }
+
+    await redis.hset(integrityKey, nextFields);
+    await redis.expire(integrityKey, 6 * 60 * 60);
+
+    const snapshot = await redis.hgetall(integrityKey);
+    const driverPoint = parseIntegrityLocation(snapshot, 'driver');
+    const passengerPoint = parseIntegrityLocation(snapshot, 'passenger');
+
+    if (!driverPoint || !passengerPoint) {
+        return;
+    }
+
+    const staleThresholdMs = TRIP_INTEGRITY_LOCATION_STALE_MS;
+    if ((nowTs - driverPoint.at) > staleThresholdMs || (nowTs - passengerPoint.at) > staleThresholdMs) {
+        return;
+    }
+
+    const distanceMeters = Math.round(
+        haversineDistanceMeters(driverPoint.lat, driverPoint.lng, passengerPoint.lat, passengerPoint.lng)
+    );
+    if (!Number.isFinite(distanceMeters)) {
+        return;
+    }
+
+    const thresholdMeters = TRIP_INTEGRITY_DISTANCE_THRESHOLD_METERS;
+    const parsedCount = Number.parseInt(snapshot.divergenceCount || '0', 10);
+    const currentCount = Number.isFinite(parsedCount) ? Math.max(0, parsedCount) : 0;
+
+    if (distanceMeters <= thresholdMeters) {
+        await redis.hset(integrityKey, {
+            divergenceCount: '0',
+            alertOpenAt: '',
+            alertResolvedAt: String(nowTs),
+            lastDistanceMeters: String(distanceMeters),
+            lastEvaluatedAt: String(nowTs)
+        });
+        clearTripIntegrityConfirmationTimeout(bookingId);
+        recordRealtimeMetricSafe('trip_integrity', 'within_threshold');
+        return;
+    }
+
+    const nextCount = currentCount + 1;
+    await redis.hset(integrityKey, {
+        divergenceCount: String(nextCount),
+        lastDistanceMeters: String(distanceMeters),
+        lastEvaluatedAt: String(nowTs)
+    });
+
+    recordRealtimeMetricSafe('trip_integrity', 'distance_breach');
+
+    if (nextCount < TRIP_INTEGRITY_CONSECUTIVE_BREACH_LIMIT) {
+        return;
+    }
+
+    const alertOpenAt = parseIntegrityTimestampMs(snapshot.alertOpenAt);
+    const resolvedDriverId = String(snapshot.driverId || bookingData.driverId || driverId || '');
+    const resolvedCustomerId = String(snapshot.customerId || bookingData.customerId || customerId || '');
+
+    if (!alertOpenAt) {
+        const payload = {
+            success: true,
+            bookingId,
+            reason: 'TRIP_INTEGRITY_DISTANCE_DIVERGENCE',
+            message: 'Detectamos divergência de localização. Você embarcou corretamente?',
+            distanceMeters,
+            thresholdMeters,
+            confirmationTimeoutSec: Math.round(TRIP_INTEGRITY_CONFIRM_TIMEOUT_MS / 1000),
+            timestamp: new Date().toISOString()
+        };
+
+        await redis.hset(integrityKey, {
+            alertOpenAt: String(nowTs),
+            alertResolvedAt: '',
+            lastAlertAt: String(nowTs),
+            lastAlertDistanceMeters: String(distanceMeters)
+        });
+        await redis.expire(integrityKey, 6 * 60 * 60);
+
+        if (resolvedCustomerId) {
+            io.to(`customer_${resolvedCustomerId}`).emit('tripIntegrityCheckRequired', payload);
+        }
+        if (resolvedDriverId) {
+            io.to(`driver_${resolvedDriverId}`).emit('tripIntegrityCheckRequired', {
+                ...payload,
+                message: 'Divergência de localização detectada. Aguarde confirmação do passageiro.'
+            });
+        }
+
+        scheduleTripIntegrityConfirmationTimeout({
+            io,
+            bookingId,
+            timeoutMs: TRIP_INTEGRITY_CONFIRM_TIMEOUT_MS
+        });
+
+        logStructured('warn', 'Alerta de tripIntegrity emitido', {
+            service: 'trip-integrity',
+            bookingId,
+            customerId: resolvedCustomerId || null,
+            driverId: resolvedDriverId || null,
+            distanceMeters,
+            thresholdMeters,
+            divergenceCount: nextCount
+        });
+        recordRealtimeMetricSafe('trip_integrity', 'alert_emitted');
+        return;
+    }
+
+    const elapsedSinceAlertMs = nowTs - alertOpenAt;
+    if (elapsedSinceAlertMs >= TRIP_INTEGRITY_CONFIRM_TIMEOUT_MS) {
+        await cancelRideForTripIntegrityViolation({
+            io,
+            redis,
+            bookingId,
+            driverId: resolvedDriverId || null,
+            customerId: resolvedCustomerId || null,
+            reasonCode: 'TRIP_INTEGRITY_DISTANCE_TIMEOUT',
+            reasonMessage: 'Corrida cancelada após divergência de localização não resolvida.'
+        });
+    }
+}
+
+function getCachedDriverState(driverId) {
+    if (!driverId) return null;
+    const cached = driverStateHotCache.get(driverId);
+    if (!cached) return null;
+    if (cached.expiresAt <= Date.now()) {
+        driverStateHotCache.delete(driverId);
+        return null;
+    }
+    return cached.state || null;
+}
+
+function setCachedDriverState(driverId, state) {
+    if (!driverId || !state || typeof state !== 'object') return;
+    driverStateHotCache.set(driverId, {
+        state,
+        expiresAt: Date.now() + DRIVER_STATE_HOT_CACHE_TTL_MS
+    });
+    trimHotMapIfNeeded(driverStateHotCache, DRIVER_STATE_HOT_CACHE_MAX);
+}
+
+async function getDriverStateHot(redis, driverId, fallbackState = null) {
+    if (fallbackState && typeof fallbackState === 'object' && Object.keys(fallbackState).length > 0) {
+        setCachedDriverState(driverId, fallbackState);
+        runtimeMetrics.recordRealtimeUpdate('driver_state_hot_cache', 'set');
+        return fallbackState;
+    }
+
+    const cachedState = getCachedDriverState(driverId);
+    if (cachedState) {
+        runtimeMetrics.recordRealtimeUpdate('driver_state_hot_cache', 'hit');
+        return cachedState;
+    }
+
+    runtimeMetrics.recordRealtimeUpdate('driver_state_hot_cache', 'miss');
+    const redisStart = Date.now();
+    const fetchedState = await redis.hgetall(`driver:${driverId}`);
+    runtimeMetrics.recordRedisHotpathOp('driver_state_hot_fetch', 'hgetall', 1);
+    runtimeMetrics.recordHotpathLatency('driver_state_hot_fetch', (Date.now() - redisStart) / 1000, true);
+
+    if (fetchedState && Object.keys(fetchedState).length > 0) {
+        setCachedDriverState(driverId, fetchedState);
+        return fetchedState;
+    }
+    return {};
+}
+
+function shouldRunUpdateLocationRateLimit(driverId) {
+    if (!driverId) return true;
+    const now = Date.now();
+    const cached = updateLocationRateLimitCache.get(driverId);
+    if (cached && cached.expiresAt > now) {
+        return false;
+    }
+    updateLocationRateLimitCache.set(driverId, {
+        expiresAt: now + UPDATE_LOCATION_RATE_LIMIT_CACHE_MS
+    });
+    trimHotMapIfNeeded(updateLocationRateLimitCache, DRIVER_STATE_HOT_CACHE_MAX);
+    return true;
+}
+
+function shouldSkipRealtimeUpdate(driverId, nextState) {
+    if (!driverId || !nextState) {
+        return { skip: false, reason: null };
+    }
+    const previous = driverRealtimeUpdateGateCache.get(driverId);
+    if (!previous) {
+        return { skip: false, reason: null };
+    }
+
+    const nowTs = Number(nextState.timestamp || Date.now());
+    const prevTs = Number(previous.timestamp || 0);
+    const elapsedMs = Math.max(0, nowTs - prevTs);
+    const inTrip = Boolean(nextState.isInTrip);
+    const minIntervalMs = inTrip ? DRIVER_UPDATE_MIN_INTERVAL_TRIP_MS : DRIVER_UPDATE_MIN_INTERVAL_MS;
+    const minDistanceMeters = inTrip ? DRIVER_UPDATE_MIN_DISTANCE_TRIP_METERS : DRIVER_UPDATE_MIN_DISTANCE_METERS;
+    const movedMeters = haversineDistanceMeters(previous.lat, previous.lng, nextState.lat, nextState.lng);
+    const statusChanged = String(previous.tripStatus || '') !== String(nextState.tripStatus || '');
+    const onlineChanged = String(previous.isOnline || '') !== String(nextState.isOnline || '');
+
+    if (!statusChanged && !onlineChanged && elapsedMs < minIntervalMs && movedMeters < minDistanceMeters) {
+        return { skip: true, reason: 'coalesced' };
+    }
+    return { skip: false, reason: null };
+}
+
+function markRealtimeUpdateProcessed(driverId, state) {
+    if (!driverId || !state) return;
+    driverRealtimeUpdateGateCache.set(driverId, {
+        lat: toFiniteNumber(state.lat),
+        lng: toFiniteNumber(state.lng),
+        timestamp: Number(state.timestamp || Date.now()),
+        isInTrip: Boolean(state.isInTrip),
+        tripStatus: state.tripStatus || '',
+        isOnline: Boolean(state.isOnline)
+    });
+    trimHotMapIfNeeded(driverRealtimeUpdateGateCache, DRIVER_STATE_HOT_CACHE_MAX);
+}
+
+function shouldAttemptVehicleLockRecovery(driverId) {
+    if (!driverId) return false;
+    const now = Date.now();
+    const cached = vehicleLockRecoveryAttemptCache.get(driverId);
+    if (cached && cached.expiresAt > now) {
+        return false;
+    }
+    vehicleLockRecoveryAttemptCache.set(driverId, {
+        expiresAt: now + Math.max(2000, VEHICLE_LOCK_RECOVERY_COOLDOWN_MS)
+    });
+    trimHotMapIfNeeded(vehicleLockRecoveryAttemptCache, DRIVER_STATE_HOT_CACHE_MAX);
+    return true;
+}
+
+async function tryRecoverVehicleLockContext({
+    driverId,
+    socket,
+    existingDriverState,
+    redis,
+    logStructured
+}) {
+    let vehiclePlate = normalizeVehiclePlate(socket?.vehiclePlate || existingDriverState?.vehiclePlate || '');
+    let source = vehiclePlate ? 'cached_state' : 'firebase_profile';
+
+    if (!vehiclePlate && VEHICLE_LOCK_RECOVERY_FIREBASE_LOOKUP_ENABLED) {
+        const db = firebaseConfig?.getRealtimeDB?.();
+        if (db) {
+            const userSnapshot = await db.ref(`users/${driverId}`).once('value');
+            const userData = userSnapshot?.val?.() || {};
+            vehiclePlate = normalizeVehiclePlate(
+                userData.carPlate || userData.vehicleNumber || userData.vehiclePlate || ''
+            );
+        }
+    }
+
+    if (!vehiclePlate) {
+        return { recovered: false, reason: 'VEHICLE_PLATE_UNAVAILABLE' };
+    }
+
+    const lockResult = await vehicleLockManager.acquireLock(vehiclePlate, driverId);
+    if (!lockResult?.success) {
+        return {
+            recovered: false,
+            reason: 'VEHICLE_LOCK_NOT_ACQUIRED',
+            error: lockResult?.error || null
+        };
+    }
+
+    const nowIso = new Date().toISOString();
+    const driverPatch = {
+        vehiclePlate,
+        vehicleLockValidated: 'true',
+        vehicleLockValidatedAt: nowIso,
+        updatedAt: nowIso
+    };
+
+    socket.vehiclePlate = vehiclePlate;
+    await redis.hset(`driver:${driverId}`, driverPatch);
+    setCachedDriverState(driverId, {
+        ...(existingDriverState || {}),
+        ...driverPatch
+    });
+
+    logStructured('info', 'Contexto de lock recuperado durante updateLocation', {
+        service: 'websocket',
+        operation: 'updateLocation',
+        driverId,
+        source,
+        vehiclePlate
+    });
+
+    return { recovered: true, vehiclePlate, source };
 }
 
 function releaseSocketAdmissionSlot() {
@@ -260,6 +1120,7 @@ function runSocketAdmission(socket, next) {
     }
 
     if (socketAdmissionQueue.length >= SOCKET_ADMISSION_MAX_QUEUE) {
+        recordRealtimeMetricSafe('socket_admission', 'server_busy_retry');
         next(new Error('SERVER_BUSY_RETRY'));
         return;
     }
@@ -273,6 +1134,7 @@ function runSocketAdmission(socket, next) {
     setTimeout(() => {
         if (pending.cancelled || granted) return;
         pending.cancelled = true;
+        recordRealtimeMetricSafe('socket_admission', 'server_busy_timeout');
         next(new Error('SERVER_BUSY_TIMEOUT'));
     }, SOCKET_ADMISSION_MAX_WAIT_MS);
 }
@@ -314,6 +1176,7 @@ function acquireAuthVerifySlot() {
         }
 
         if (authVerifyQueue.length >= AUTH_VERIFY_MAX_QUEUE) {
+            recordRealtimeMetricSafe('authenticate', 'auth_busy_queue_full');
             reject(new Error('AUTH_BUSY_QUEUE_FULL'));
             return;
         }
@@ -327,20 +1190,36 @@ function acquireAuthVerifySlot() {
         setTimeout(() => {
             if (pending.cancelled) return;
             pending.cancelled = true;
+            recordRealtimeMetricSafe('authenticate', 'auth_busy_timeout');
             reject(new Error('AUTH_BUSY_TIMEOUT'));
         }, AUTH_VERIFY_MAX_WAIT_MS);
     });
 }
 
-async function verifyFirebaseTokenCached(token) {
-    const now = Date.now();
-    const cached = authTokenCache.get(token);
-    if (cached && cached.expiresAt > now) {
-        return cached.uid;
+async function verifyFirebaseTokenCached(token, requestedRole = 'unknown') {
+    const tokenHash = fingerprintToken(token);
+    if (!tokenHash) {
+        throw new Error('AUTH_TOKEN_INVALID');
     }
 
-    if (authTokenVerifyInFlight.has(token)) {
-        return authTokenVerifyInFlight.get(token);
+    const now = Date.now();
+    const cached = authTokenCache.get(tokenHash);
+    if (cached && cached.expiresAt > now) {
+        cached.lastSeenAt = now;
+        if ((!cached.role || cached.role === 'unknown') && requestedRole && requestedRole !== 'unknown') {
+            cached.role = requestedRole;
+        }
+        return {
+            uid: cached.uid,
+            role: cached.role || requestedRole || 'unknown',
+            sessionState: AUTH_CONTEXT_STATE.CACHED,
+            tokenHash,
+            fromCache: true
+        };
+    }
+
+    if (authTokenVerifyInFlight.has(tokenHash)) {
+        return authTokenVerifyInFlight.get(tokenHash);
     }
 
     const verifyPromise = (async () => {
@@ -348,53 +1227,132 @@ async function verifyFirebaseTokenCached(token) {
         const nowInner = Date.now();
         const tokenExpMs = decodedToken?.exp ? decodedToken.exp * 1000 : nowInner + AUTH_TOKEN_CACHE_TTL_MS;
         const cacheExpiresAt = Math.min(tokenExpMs, nowInner + AUTH_TOKEN_CACHE_TTL_MS);
-        authTokenCache.set(token, {
+        const role = decodedToken?.role || decodedToken?.userType || requestedRole || 'unknown';
+        authTokenCache.set(tokenHash, {
             uid: decodedToken.uid,
-            expiresAt: cacheExpiresAt
+            role,
+            sessionState: AUTH_CONTEXT_STATE.AUTHENTICATED,
+            expiresAt: cacheExpiresAt,
+            lastSeenAt: nowInner
         });
 
         if (authTokenCache.size % 100 === 0 || authTokenCache.size > AUTH_TOKEN_CACHE_MAX) {
             cleanupAuthTokenCache();
         }
 
-        return decodedToken.uid;
+        return {
+            uid: decodedToken.uid,
+            role,
+            sessionState: AUTH_CONTEXT_STATE.AUTHENTICATED,
+            tokenHash,
+            fromCache: false
+        };
     })();
 
-    authTokenVerifyInFlight.set(token, verifyPromise);
+    authTokenVerifyInFlight.set(tokenHash, verifyPromise);
     try {
         return await verifyPromise;
     } finally {
-        authTokenVerifyInFlight.delete(token);
+        authTokenVerifyInFlight.delete(tokenHash);
     }
 }
 
-// Cluster mode otimizado para VPS - DESABILITADO TEMPORARIAMENTE (causa "Session ID unknown")
-// TODO: Implementar sticky sessions ou Redis adapter para Socket.IO antes de reativar cluster
-if (false && cluster.isMaster && process.env.NODE_ENV === 'production') {
-    logStructured('info', `Iniciando ${VPS_CONFIG.CLUSTER_WORKERS} workers otimizados para VPS`, { service: 'server', workers: VPS_CONFIG.CLUSTER_WORKERS });
+function sleepMs(delayMs) {
+    return new Promise((resolve) => setTimeout(resolve, delayMs));
+}
 
-    for (let i = 0; i < VPS_CONFIG.CLUSTER_WORKERS; i++) {
+async function acquireUserSessionLock(redis, userId, ownerToken) {
+    const key = `session_lock:${userId}`;
+    for (let attempt = 0; attempt < SESSION_LOCK_MAX_ATTEMPTS; attempt += 1) {
+        const acquired = await redis.set(key, ownerToken, 'PX', SESSION_LOCK_TTL_MS, 'NX');
+        if (acquired === 'OK') {
+            return { key, acquired: true };
+        }
+        await sleepMs(SESSION_LOCK_RETRY_MS);
+    }
+    return { key, acquired: false };
+}
+
+async function releaseUserSessionLock(redis, lockRef, ownerToken) {
+    if (!lockRef?.key) {
+        return;
+    }
+    try {
+        const currentOwner = await redis.get(lockRef.key);
+        if (currentOwner === ownerToken) {
+            await redis.del(lockRef.key);
+        }
+    } catch (_releaseError) {
+        // Silencioso: lock expira por TTL.
+    }
+}
+
+// Cluster mode otimizado para VPS (opt-in por env)
+if (IS_CLUSTER_PRIMARY) {
+    logStructured('info', 'Iniciando cluster do websocket backend', {
+        service: 'server',
+        workers: CLUSTER_WORKERS,
+        schedulerLeaderWorkerId: CLUSTER_SCHEDULER_LEADER_ID
+    });
+
+    for (let i = 0; i < CLUSTER_WORKERS; i++) {
         cluster.fork();
     }
 
     cluster.on('exit', (worker, code, signal) => {
-        logStructured('warn', 'Worker morreu. Reiniciando...', { service: 'server', workerPid: worker.process.pid, code, signal });
+        logStructured('warn', 'Worker do cluster encerrou, reiniciando', {
+            service: 'server',
+            workerPid: worker?.process?.pid,
+            workerId: worker?.id,
+            code,
+            signal
+        });
         cluster.fork();
     });
 
     cluster.on('online', (worker) => {
-        logStructured('info', 'Worker online', { service: 'server', workerPid: worker.process.pid });
+        logStructured('info', 'Worker do cluster online', {
+            service: 'server',
+            workerPid: worker?.process?.pid,
+            workerId: worker?.id
+        });
     });
 } else {
-    // Modo desenvolvimento - sem cluster (ou cluster desabilitado)
-    logStructured('info', 'Executando servidor único (cluster desabilitado para evitar Session ID unknown)', { service: 'server' });
+    logStructured('info', 'Inicializando runtime de aplicação', {
+        service: 'server',
+        clusterEnabled: CLUSTER_ENABLED,
+        isClusterWorker: Boolean(cluster.worker),
+        workerId: cluster.worker?.id || null,
+        runtimeRole: RUNTIME_ROLE,
+        embeddedListenerWorkers: ENABLE_EMBEDDED_LISTENER_WORKERS
+    });
 }
-// ✅ FASE 1.3: Inicializar OpenTelemetry ANTES de tudo
-initializeTracer();
+
+if (!IS_CLUSTER_PRIMARY) {
+    // ✅ FASE 1.3: Inicializar OpenTelemetry ANTES de tudo
+    initializeTracer();
 
 // Worker process
 const app = express();
 const server = http.createServer(app);
+
+// Executa atrás de Nginx reverse proxy (VPS produção), necessário para rate-limit/IP real.
+// Mantemos configurável via env para rollback rápido.
+const trustProxyHops = Number.parseInt(process.env.TRUST_PROXY_HOPS || '1', 10);
+app.set('trust proxy', Number.isFinite(trustProxyHops) ? trustProxyHops : 1);
+
+// Observabilidade de saturação: event loop lag.
+const eventLoopLagMonitor = monitorEventLoopDelay({
+    resolution: Math.max(10, EVENT_LOOP_LAG_RESOLUTION_MS)
+});
+eventLoopLagMonitor.enable();
+setInterval(() => {
+    const meanMs = Number((eventLoopLagMonitor.mean / 1e6).toFixed(2));
+    const p95Ms = Number((eventLoopLagMonitor.percentile(95) / 1e6).toFixed(2));
+    const maxMs = Number((eventLoopLagMonitor.max / 1e6).toFixed(2));
+    runtimeMetrics.setEventLoopLag(meanMs, p95Ms, maxMs);
+    eventLoopLagMonitor.reset();
+}, Math.max(250, EVENT_LOOP_LAG_SAMPLE_MS)).unref();
 
 // Health check ultra-rápido antes de middlewares pesados (rate limit/redis/etc)
 app.get('/health/liveness', (_req, res) => {
@@ -412,15 +1370,20 @@ const allowedOrigins = [
     'https://dashboard.leaf.app.br',
     'https://api.leaf.app.br',
     'https://socket.leaf.app.br',
+    'https://dashboard.147.182.204.181.sslip.io',
+    'https://api.147.182.204.181.sslip.io',
+    'https://socket.147.182.204.181.sslip.io',
     'http://147.182.204.181:3001',
     'https://147.182.204.181:3001',
     // Desenvolvimento local
     'http://localhost:3000',
     'http://localhost:3001',
     'http://localhost:3002',
+    'http://localhost:3020',
     'http://localhost:8081',
     'http://127.0.0.1:3000',
     'http://127.0.0.1:3001',
+    'http://127.0.0.1:3020',
     'http://127.0.0.1:8081',
     // IPs Locais do desenvolvedor
     'http://192.168.0.33:8081',
@@ -514,7 +1477,15 @@ if (process.env.NODE_ENV === 'development' || process.env.DEBUG_REQUESTS === 'tr
 }
 
 // ✅ CORREÇÃO: Aumentar limite e timeout para uploads de CNH
-app.use(express.json({ limit: '50mb' })); // Aumentado de 10mb para 50mb
+app.use(express.json({
+    limit: '50mb',
+    verify: (req, _res, buf) => {
+        const path = String(req.originalUrl || req.url || '');
+        if (path.includes('/api/woovi/webhook') || path.includes('/api/woovi-webhook')) {
+            req.rawBody = Buffer.from(buf || Buffer.alloc(0));
+        }
+    }
+})); // Aumentado de 10mb para 50mb
 app.use(express.urlencoded({ extended: true, limit: '50mb' })); // Adicionado para multipart/form-data
 
 // ✅ CORREÇÃO: Configurar timeout do servidor para uploads grandes (60s)
@@ -595,7 +1566,9 @@ app.use('/api/driver-status', driverStatusCheckRoutes);
 
 // Rotas de drivers (inclui /api/drivers/nearby)
 app.use('/', driversRoutes);
+app.use('/', driverActivationRoutes);
 logStructured('info', 'Rotas de Drivers registradas', { service: 'server' });
+logStructured('info', 'Rotas de Ativação de Motorista registradas', { service: 'server' });
 // app.set('io', io); // ✅ Será definido depois da criação do io (linha ~244)
 logStructured('info', 'Rotas de verificação de status do driver registradas', { service: 'server' });
 
@@ -603,6 +1576,11 @@ logStructured('info', 'Rotas de verificação de status do driver registradas', 
 const accountRoutes = require('./routes/account-routes');
 app.use('/', accountRoutes);
 logStructured('info', 'Rotas de Conta (Account) registradas', { service: 'server' });
+
+// Rotas públicas legais (privacidade, termos e exclusão de conta)
+const legalPagesRoutes = require('./routes/legal-pages');
+app.use('/', legalPagesRoutes);
+logStructured('info', 'Rotas Legais públicas registradas', { service: 'server' });
 
 // Rotas de Payment (Saldo do motorista e pagamentos)
 const paymentRoutes = require('./routes/payment');
@@ -632,11 +1610,8 @@ app.use('/api/support', supportFullRoutes);
 const supportChatRoutes = require('./routes/support-chat');
 app.use('/api/support', supportChatRoutes);
 
-// Injetar Socket.IO nas rotas de suporte
-if (supportFullRoutes.setIOInstance) {
-    supportFullRoutes.setIOInstance(io);
-}
-logStructured('info', 'Rotas de Support (completo) registradas com WebSocket', { service: 'server' });
+// Nota: injeção de Socket.IO nas rotas de suporte ocorre após criação do io.
+logStructured('info', 'Rotas de Support (completo) registradas', { service: 'server' });
 
 // ✅ Rotas de KYC Onboarding (CNH + Selfie)
 const kycOnboardingRoutes = require('./routes/kyc-onboarding');
@@ -723,6 +1698,58 @@ const io = socketIo(server, {
     allowUpgrades: true,
     perMessageDeflate: false // Desabilitar compressão per-message
 });
+let socketIoAdapterPubClient = null;
+let socketIoAdapterSubClient = null;
+const initializeSocketIoRedisAdapter = async () => {
+    if (!ENABLE_SOCKETIO_REDIS_ADAPTER) {
+        logStructured('info', 'Socket.IO Redis Adapter desabilitado por configuração', {
+            service: 'websocket',
+            runtimeRole: RUNTIME_ROLE
+        });
+        return;
+    }
+
+    try {
+        await redisPool.ensureConnection();
+        const baseRedisClient = redisPool.getConnection();
+        socketIoAdapterPubClient = baseRedisClient.duplicate();
+        socketIoAdapterSubClient = baseRedisClient.duplicate();
+        await socketIoAdapterPubClient.ping();
+        await socketIoAdapterSubClient.ping();
+        io.adapter(createAdapter(socketIoAdapterPubClient, socketIoAdapterSubClient));
+        logStructured('info', 'Socket.IO Redis Adapter inicializado', {
+            service: 'websocket',
+            runtimeRole: RUNTIME_ROLE
+        });
+    } catch (error) {
+        if (socketIoAdapterPubClient) {
+            socketIoAdapterPubClient.disconnect();
+            socketIoAdapterPubClient = null;
+        }
+        if (socketIoAdapterSubClient) {
+            socketIoAdapterSubClient.disconnect();
+            socketIoAdapterSubClient = null;
+        }
+        logStructured('warn', 'Falha ao inicializar Socket.IO Redis Adapter (seguindo sem adapter)', {
+            service: 'websocket',
+            runtimeRole: RUNTIME_ROLE,
+            error: error.message
+        });
+    }
+};
+initializeSocketIoRedisAdapter().catch((error) => {
+    logStructured('warn', 'Erro inesperado ao inicializar Socket.IO Redis Adapter', {
+        service: 'websocket',
+        runtimeRole: RUNTIME_ROLE,
+        error: error.message
+    });
+});
+
+// Injetar Socket.IO nas rotas de suporte após inicialização do io
+if (supportFullRoutes.setIOInstance) {
+    supportFullRoutes.setIOInstance(io);
+    logStructured('info', 'Rotas de Support (completo) conectadas ao WebSocket', { service: 'server' });
+}
 
 // ✅ DEBUG: Log de conexões e erros
 io.engine.on('connection_error', (err) => {
@@ -770,15 +1797,35 @@ global.io = io;
 // A rota /health agora é gerenciada por healthRoutes (linha 362)
 // que inclui: /health, /health/quick, /health/readiness, /health/liveness
 
-// ✅ Endpoint de restart (apenas em desenvolvimento ou com token)
-app.post('/restart', async (req, res) => {
-    const restartToken = req.headers['x-restart-token'] || req.query.token;
-    const validToken = process.env.RESTART_TOKEN || 'dev-restart-token-123';
-
-    if (restartToken !== validToken && process.env.NODE_ENV === 'production') {
-        return res.status(403).json({ error: 'Token inválido' });
+const runtimeAccessToken = String(
+    process.env.RUNTIME_ADMIN_TOKEN || process.env.RESTART_TOKEN || ''
+).trim();
+const runtimeAccessTokenConfigured = runtimeAccessToken.length > 0;
+const enforceRuntimeAccess = (req, res, next) => {
+    if (!runtimeAccessTokenConfigured) {
+        if (process.env.NODE_ENV === 'production') {
+            return res.status(503).json({
+                error: 'Token de runtime nao configurado',
+                hint: 'Configure RUNTIME_ADMIN_TOKEN no ambiente'
+            });
+        }
+        return next();
     }
 
+    const providedToken =
+        req.headers['x-runtime-token'] ||
+        req.headers['x-restart-token'] ||
+        req.query.token;
+
+    if (providedToken !== runtimeAccessToken) {
+        return res.status(403).json({ error: 'Token invalido' });
+    }
+
+    return next();
+};
+
+// ✅ Endpoint de restart (apenas em desenvolvimento ou com token)
+app.post('/restart', enforceRuntimeAccess, async (req, res) => {
     res.json({
         message: 'Reiniciando servidor...',
         timestamp: new Date().toISOString()
@@ -793,7 +1840,7 @@ app.post('/restart', async (req, res) => {
 
 // Metrics endpoint ultra-otimizado
 // ✅ FASE 2.1: Endpoint Prometheus (formato padrão)
-app.get('/metrics', async (req, res) => {
+app.get('/metrics', enforceRuntimeAccess, async (req, res) => {
     try {
         const { getMetrics } = require('./utils/prometheus-metrics');
         const metrics = await getMetrics();
@@ -811,7 +1858,7 @@ app.get('/metrics', async (req, res) => {
 
 if (ENABLE_LEGACY_RUNTIME_ENDPOINTS) {
     // Endpoint antigo (mantido apenas quando legado estiver explicitamente habilitado).
-    app.get('/metrics-old', async (req, res) => {
+    app.get('/metrics-old', enforceRuntimeAccess, async (req, res) => {
         try {
             const metrics = {
                 timestamp: new Date().toISOString(),
@@ -848,7 +1895,7 @@ if (ENABLE_LEGACY_RUNTIME_ENDPOINTS) {
         }
     });
 
-    app.get('/stats', async (req, res) => {
+    app.get('/stats', enforceRuntimeAccess, async (req, res) => {
         try {
             const stats = {
                 timestamp: new Date().toISOString(),
@@ -912,10 +1959,25 @@ if (!io.activeBookings) {
 // ==================== INICIALIZAÇÃO FASE 8: QUEUE WORKER ====================
 // Inicializar worker para processar filas continuamente
 const queueWorker = new QueueWorker(io);
+const shouldRunQueueWorker =
+    !CLUSTER_ENABLED || !cluster.worker || cluster.worker.id === CLUSTER_SCHEDULER_LEADER_ID;
 
-// Iniciar worker (processa filas a cada 3 segundos)
-queueWorker.start();
-logStructured('info', 'QueueWorker iniciado (processamento contínuo de filas)', { service: 'server', phase: 'fase8' });
+if (shouldRunQueueWorker) {
+    queueWorker.start();
+    logStructured('info', 'QueueWorker iniciado no worker líder (processamento contínuo de filas)', {
+        service: 'server',
+        phase: 'fase8',
+        workerId: cluster.worker?.id || null,
+        schedulerLeaderWorkerId: CLUSTER_SCHEDULER_LEADER_ID
+    });
+} else {
+    logStructured('info', 'QueueWorker desabilitado neste worker do cluster', {
+        service: 'server',
+        phase: 'fase8',
+        workerId: cluster.worker?.id || null,
+        schedulerLeaderWorkerId: CLUSTER_SCHEDULER_LEADER_ID
+    });
+}
 
 // FASE 10: Injetar instância do worker nas rotas de monitoramento
 queueMonitoringRoutes.setQueueWorker(queueWorker);
@@ -928,8 +1990,17 @@ const DriverPoolMonitor = require('./services/driver-pool-monitor');
 const driverPoolMonitor = new DriverPoolMonitor(io);
 
 // Iniciar monitor (verifica motoristas livres a cada 5 segundos)
-driverPoolMonitor.start();
-logStructured('info', 'DriverPoolMonitor iniciado (monitoramento contínuo de motoristas livres)', { service: 'server', phase: 'fase9' });
+const enableDriverPoolMonitor = process.env.ENABLE_DRIVER_POOL_MONITOR === 'true';
+if (enableDriverPoolMonitor) {
+    driverPoolMonitor.start();
+    logStructured('info', 'DriverPoolMonitor iniciado (monitoramento contínuo de motoristas livres)', { service: 'server', phase: 'fase9' });
+} else {
+    logStructured('info', 'DriverPoolMonitor desabilitado por configuração', {
+        service: 'server',
+        phase: 'fase9',
+        env: 'ENABLE_DRIVER_POOL_MONITOR'
+    });
+}
 // ============================================================================
 
 // ==================== SERVIÇO DE NOTIFICAÇÃO DE DEMANDA ====================
@@ -1088,6 +2159,248 @@ function parseBookingLocation(rawValue) {
     return null;
 }
 
+const BOOKING_PARTY_CACHE_TTL_MS = 30 * 1000;
+const bookingPartyCache = new Map();
+const BOOKING_PARTY_CACHE_MAX = 5000;
+
+function parseBookingParticipant(rawValue) {
+    if (!rawValue) return null;
+    if (typeof rawValue === 'object') {
+        return rawValue.uid || rawValue.id || rawValue.userId || null;
+    }
+    if (typeof rawValue !== 'string') {
+        return null;
+    }
+    try {
+        const parsed = JSON.parse(rawValue);
+        if (parsed && typeof parsed === 'object') {
+            return parsed.uid || parsed.id || parsed.userId || null;
+        }
+    } catch (_) {
+        // Ignorar parse errors e usar fallback string.
+    }
+    return rawValue;
+}
+
+function getCachedBookingParties(bookingId) {
+    const cached = bookingPartyCache.get(bookingId);
+    if (!cached) return null;
+    if (cached.expiresAt <= Date.now()) {
+        bookingPartyCache.delete(bookingId);
+        return null;
+    }
+    return cached.value;
+}
+
+function setCachedBookingParties(bookingId, value) {
+    if (bookingPartyCache.size >= BOOKING_PARTY_CACHE_MAX) {
+        const iterator = bookingPartyCache.keys();
+        const firstKey = iterator.next().value;
+        if (firstKey !== undefined) {
+            bookingPartyCache.delete(firstKey);
+        }
+    }
+    bookingPartyCache.set(bookingId, {
+        value,
+        expiresAt: Date.now() + BOOKING_PARTY_CACHE_TTL_MS
+    });
+}
+
+async function resolveBookingParties(redis, bookingId) {
+    if (!bookingId) {
+        return { customerId: null, driverId: null };
+    }
+
+    const cached = getCachedBookingParties(bookingId);
+    if (cached) {
+        return cached;
+    }
+
+    const bookingData = await redis.hgetall(`booking:${bookingId}`);
+    if (!bookingData || Object.keys(bookingData).length === 0) {
+        return { customerId: null, driverId: null };
+    }
+
+    const customerId = bookingData.customerId
+        || bookingData.customer
+        || bookingData.passengerId
+        || parseBookingParticipant(bookingData.passenger)
+        || parseBookingParticipant(bookingData.customer)
+        || null;
+
+    const driverId = bookingData.driverId
+        || bookingData.driver
+        || parseBookingParticipant(bookingData.driverData)
+        || null;
+
+    const value = { customerId, driverId };
+    setCachedBookingParties(bookingId, value);
+    return value;
+}
+
+const TERMINAL_BOOKING_STATES = new Set([
+    'COMPLETED',
+    'CANCELED',
+    'CANCELLED',
+    'SUPERSEDED',
+    'NO_DRIVERS_AVAILABLE',
+    'EXPIRED'
+]);
+
+function normalizeBookingState(bookingData = {}) {
+    const rawState = bookingData.status || bookingData.state || bookingData.tripStatus || '';
+    return String(rawState || '').trim().toUpperCase();
+}
+
+function parseNumericBookingValue(value) {
+    const parsed = Number.parseFloat(value);
+    return Number.isFinite(parsed) ? parsed : null;
+}
+
+async function buildActiveRideSnapshotForUser(redis, userId, userType) {
+    if (!redis || !userId || !userType) {
+        return {
+            hasActiveRide: false,
+            bookingId: null
+        };
+    }
+
+    let bookingId = null;
+
+    if (userType === 'driver') {
+        const indexedTrip = await resolveActiveTripForDriver(redis, userId);
+        bookingId = indexedTrip?.tripId || null;
+
+        if (!bookingId) {
+            const driverState = await getDriverStateHot(redis, userId);
+            bookingId = driverState?.activeTripId || null;
+        }
+    } else if (userType === 'customer' || userType === 'passenger') {
+        bookingId = await redis.get(`customer_active_booking:${userId}`);
+    }
+
+    if (!bookingId) {
+        return {
+            hasActiveRide: false,
+            bookingId: null
+        };
+    }
+
+    const bookingData = await redis.hgetall(`booking:${bookingId}`);
+    if (!bookingData || Object.keys(bookingData).length === 0) {
+        return {
+            hasActiveRide: false,
+            bookingId,
+            stale: true
+        };
+    }
+
+    const status = normalizeBookingState(bookingData);
+    const hasActiveRide = !TERMINAL_BOOKING_STATES.has(status);
+
+    return {
+        hasActiveRide,
+        bookingId,
+        status: status || 'UNKNOWN',
+        customerId: bookingData.customerId
+            || bookingData.customer
+            || bookingData.passengerId
+            || parseBookingParticipant(bookingData.passenger)
+            || null,
+        driverId: bookingData.driverId
+            || bookingData.driver
+            || parseBookingParticipant(bookingData.driverData)
+            || null,
+        pickupLocation: parseBookingLocation(bookingData.pickupLocation) || parseBookingLocation(bookingData.pickup),
+        destinationLocation: parseBookingLocation(bookingData.destinationLocation) || parseBookingLocation(bookingData.drop),
+        estimatedFare: parseNumericBookingValue(bookingData.estimatedFare || bookingData.estimate),
+        finalFare: parseNumericBookingValue(bookingData.finalFare || bookingData.fare),
+        paymentStatus: bookingData.paymentStatus || bookingData.payment_status || null,
+        startedAt: bookingData.startedAt || null,
+        acceptedAt: bookingData.acceptedAt || null,
+        updatedAt: bookingData.updatedAt || bookingData.timestamp || null
+    };
+}
+
+async function hasEligibleDriversForPickupFast(pickupLocation, options = {}) {
+    const redis = redisPool.getConnection();
+    await redisPool.ensureConnection();
+
+    const latitude = Number.parseFloat(pickupLocation?.lat);
+    const longitude = Number.parseFloat(pickupLocation?.lng);
+    if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
+        return {
+            success: false,
+            error: 'pickup_location_invalid',
+            hasDrivers: false,
+            radiusKm: null
+        };
+    }
+
+    const radiusKm = Number.parseFloat(options.radiusKm || process.env.PAYMENT_AVAILABILITY_RADIUS_KM || '5');
+    const requestedCarType = normalizeCarType(options.carType);
+    const eligibleGeoKey = process.env.ELIGIBLE_DRIVER_GEO_KEY || 'driver_locations_eligible';
+
+    const nearbyDrivers = await redis.georadius(
+        eligibleGeoKey,
+        longitude,
+        latitude,
+        radiusKm,
+        'km',
+        'COUNT',
+        8
+    );
+
+    if (!Array.isArray(nearbyDrivers) || nearbyDrivers.length === 0) {
+        return {
+            success: true,
+            hasDrivers: false,
+            radiusKm
+        };
+    }
+
+    if (!requestedCarType) {
+        return {
+            success: true,
+            hasDrivers: true,
+            radiusKm
+        };
+    }
+
+    // Reduz N+1: buscar estado dos motoristas em lote.
+    const driverStatePipeline = redis.pipeline();
+    for (const driverId of nearbyDrivers) {
+        driverStatePipeline.hgetall(`driver:${driverId}`);
+    }
+    const driverStateResults = await driverStatePipeline.exec();
+
+    for (let i = 0; i < nearbyDrivers.length; i += 1) {
+        const driverId = nearbyDrivers[i];
+        const [driverErr, driverData] = driverStateResults[i] || [];
+        if (driverErr || !driverData || Object.keys(driverData).length === 0) continue;
+
+        const isOnline = driverData.isOnline === true || driverData.isOnline === 'true';
+        const dispatchEligible = driverData.dispatchEligible === true || driverData.dispatchEligible === 'true';
+        const driverStatus = (driverData.status || '').toUpperCase();
+        const isAvailable = driverStatus === 'AVAILABLE' || driverStatus === 'ONLINE';
+        const driverCarType = normalizeCarType(driverData.carType);
+
+        if (isOnline && dispatchEligible && isAvailable && driverCarType === requestedCarType) {
+            return {
+                success: true,
+                hasDrivers: true,
+                radiusKm
+            };
+        }
+    }
+
+    return {
+        success: true,
+        hasDrivers: false,
+        radiusKm
+    };
+}
+
 async function findAvailableDriversForPickup(pickupLocation, options = {}) {
     const redis = redisPool.getConnection();
     await redisPool.ensureConnection();
@@ -1222,28 +2535,22 @@ const computeDispatchEligibilityFromState = (driverState, isOnline, isInTrip) =>
     return { eligible: true, code: 'ELIGIBLE' };
 };
 
-const syncDriverDispatchGeo = async (redis, driverId, lat, lng, isOnline, isInTrip, mergedState = {}) => {
-    const eligibleDriverGeoKey = process.env.ELIGIBLE_DRIVER_GEO_KEY || 'driver_locations_eligible';
-    const eligibility = computeDispatchEligibilityFromState(mergedState, isOnline, isInTrip);
-
-    if (eligibility.eligible) {
-        await redis.geoadd(eligibleDriverGeoKey, lng, lat, driverId);
-    } else {
-        await redis.zrem(eligibleDriverGeoKey, driverId);
-    }
-
-    await redis.hset(`driver:${driverId}`, {
-        dispatchEligible: eligibility.eligible ? 'true' : 'false',
-        dispatchEligibilityCode: eligibility.code,
-        dispatchEligibilityCheckedAt: new Date().toISOString()
-    });
-
-    return eligibility;
-};
-
-const saveDriverLocation = async (driverId, lat, lng, heading = 0, speed = 0, timestamp = Date.now(), isOnline = true, isInTrip = false) => {
+const saveDriverLocation = async (
+    driverId,
+    lat,
+    lng,
+    heading = 0,
+    speed = 0,
+    timestamp = Date.now(),
+    isOnline = true,
+    isInTrip = false,
+    preloadedDriverState = null
+) => {
+    const hotpathStart = Date.now();
     try {
         const redis = redisPool.getConnection();
+        const driverKey = `driver:${driverId}`;
+        const eligibleDriverGeoKey = process.env.ELIGIBLE_DRIVER_GEO_KEY || 'driver_locations_eligible';
 
         // Garantir conexão Redis (ioredis usa status, não isOpen)
         if (redis.status !== 'ready' && redis.status !== 'connect') {
@@ -1258,9 +2565,9 @@ const saveDriverLocation = async (driverId, lat, lng, heading = 0, speed = 0, ti
             }
         }
 
-        const existingDriverState = await redis.hgetall(`driver:${driverId}`);
+        const existingDriverState = await getDriverStateHot(redis, driverId, preloadedDriverState);
 
-        // 1. Salvar status completo do motorista em driver:${driverId}
+        // 1. Construir patch completo de status
         const driverStatus = {
             id: driverId,
             isOnline: isOnline ? 'true' : 'false',
@@ -1273,19 +2580,29 @@ const saveDriverLocation = async (driverId, lat, lng, heading = 0, speed = 0, ti
             timestamp: timestamp.toString(),
             lastSeen: new Date().toISOString()
         };
-
-        await redis.hset(`driver:${driverId}`, driverStatus);
         const mergedDriverState = { ...existingDriverState, ...driverStatus };
+        const eligibility = computeDispatchEligibilityFromState(mergedDriverState, isOnline, isInTrip);
+        const dispatchPatch = {
+            dispatchEligible: eligibility.eligible ? 'true' : 'false',
+            dispatchEligibilityCode: eligibility.code,
+            dispatchEligibilityCheckedAt: new Date().toISOString()
+        };
+
+        // ✅ OTIMIZAÇÃO: consolidar mutações em um único pipeline.
+        const pipeline = redis.pipeline();
+        pipeline.hset(driverKey, { ...driverStatus, ...dispatchPatch });
 
         if (isOnline) {
             // 2. Motorista ONLINE: adicionar/atualizar no GEO ativo (para match rápido)
-            await redis.geoadd('driver_locations', lng, lat, driverId);
+            pipeline.geoadd('driver_locations', lng, lat, driverId);
 
             // 3. Remover do GEO offline (se estava offline antes)
-            await redis.zrem('driver_offline_locations', driverId);
-
-            // 4. Sincronizar pool de dispatch elegível imediatamente
-            const eligibility = await syncDriverDispatchGeo(redis, driverId, lat, lng, true, isInTrip, mergedDriverState);
+            pipeline.zrem('driver_offline_locations', driverId);
+            if (eligibility.eligible) {
+                pipeline.geoadd(eligibleDriverGeoKey, lng, lat, driverId);
+            } else {
+                pipeline.zrem(eligibleDriverGeoKey, driverId);
+            }
 
             // 5. ✅ OTIMIZAÇÃO: TTL diferenciado por estado (usando configuração centralizada)
             // - Em viagem: 60 segundos (dados críticos, mas heartbeat renova a cada 30s)
@@ -1295,30 +2612,46 @@ const saveDriverLocation = async (driverId, lat, lng, heading = 0, speed = 0, ti
             const ttl = isInTrip
                 ? getTTL('DRIVER_LOCATION', 'IN_TRIP')
                 : getTTL('DRIVER_LOCATION', 'ONLINE');
-            await redis.expire(`driver:${driverId}`, ttl);
+            pipeline.expire(driverKey, ttl);
 
-            logStructured('info', `Motorista ${isInTrip ? 'EM VIAGEM' : 'ONLINE'} salvo no Redis (GEO ativo)`, {
-                service: 'server',
-                driverId,
-                status: isInTrip ? 'IN_TRIP' : 'ONLINE',
-                location: { lat, lng },
-                dispatchEligible: eligibility.eligible,
-                dispatchEligibilityCode: eligibility.code,
-                ttl
-            });
+            const pipelineResult = await pipeline.exec();
+            const pipelineError = pipelineResult?.find(([cmdErr]) => cmdErr)?.[0];
+            if (pipelineError) {
+                throw pipelineError;
+            }
+            runtimeMetrics.recordRedisHotpathOp('save_driver_location_online', 'pipeline_ops', 5);
+
+            if (process.env.DEBUG_LOCATION === 'true' || process.env.DEBUG_DRIVER_LOCATION === 'true') {
+                logStructured('debug', `Motorista ${isInTrip ? 'EM VIAGEM' : 'ONLINE'} salvo no Redis (GEO ativo)`, {
+                    service: 'server',
+                    driverId,
+                    status: isInTrip ? 'IN_TRIP' : 'ONLINE',
+                    location: { lat, lng },
+                    dispatchEligible: eligibility.eligible,
+                    dispatchEligibilityCode: eligibility.code,
+                    ttl
+                });
+            }
         } else {
             // 2. Motorista OFFLINE: adicionar no GEO offline (para notificações de demanda)
-            await redis.geoadd('driver_offline_locations', lng, lat, driverId);
+            pipeline.geoadd('driver_offline_locations', lng, lat, driverId);
 
             // 3. Remover do GEO ativo (não deve aparecer em buscas de match)
-            await redis.zrem('driver_locations', driverId);
+            pipeline.zrem('driver_locations', driverId);
 
             // 4. Remover do GEO elegível para dispatch
-            await syncDriverDispatchGeo(redis, driverId, lat, lng, false, isInTrip, mergedDriverState);
+            pipeline.zrem(eligibleDriverGeoKey, driverId);
 
             // 5. TTL longo para offline (24 horas - para notificações futuras)
             const { getTTL } = require('./config/redis-ttl-config');
-            await redis.expire(`driver:${driverId}`, getTTL('DRIVER_LOCATION', 'OFFLINE'));
+            pipeline.expire(driverKey, getTTL('DRIVER_LOCATION', 'OFFLINE'));
+
+            const pipelineResult = await pipeline.exec();
+            const pipelineError = pipelineResult?.find(([cmdErr]) => cmdErr)?.[0];
+            if (pipelineError) {
+                throw pipelineError;
+            }
+            runtimeMetrics.recordRedisHotpathOp('save_driver_location_offline', 'pipeline_ops', 5);
 
             if (process.env.NODE_ENV === 'development' || process.env.DEBUG_DRIVER_LOCATION === 'true') {
                 logStructured('debug', 'Motorista OFFLINE salvo no Redis (GEO offline)', {
@@ -1330,7 +2663,13 @@ const saveDriverLocation = async (driverId, lat, lng, heading = 0, speed = 0, ti
             }
         }
 
+        const cachedMergedState = { ...mergedDriverState, ...dispatchPatch };
+        setCachedDriverState(driverId, cachedMergedState);
+        runtimeMetrics.recordRealtimeUpdate('driver_state_hot_cache', 'set');
+        runtimeMetrics.recordHotpathLatency('save_driver_location', (Date.now() - hotpathStart) / 1000, true);
+
     } catch (error) {
+        runtimeMetrics.recordHotpathLatency('save_driver_location', (Date.now() - hotpathStart) / 1000, false);
         logStructured('error', 'Erro ao salvar localização do motorista', {
             service: 'server',
             driverId,
@@ -1340,6 +2679,194 @@ const saveDriverLocation = async (driverId, lat, lng, heading = 0, speed = 0, ti
         throw error;
     }
 };
+
+function clearPendingDriverDisconnectCleanup(driverId, reason = null) {
+    if (!driverId) {
+        return false;
+    }
+
+    const pending = pendingDriverDisconnectCleanup.get(driverId);
+    if (!pending) {
+        return false;
+    }
+
+    clearTimeout(pending.timeoutHandle);
+    pendingDriverDisconnectCleanup.delete(driverId);
+
+    if (reason) {
+        logStructured('info', 'Cleanup de desconexão de motorista cancelado durante janela de graça', {
+            service: 'websocket',
+            driverId,
+            previousSocketId: pending.socketId,
+            reason
+        });
+    }
+
+    return true;
+}
+
+async function finalizeDriverDisconnectCleanup({
+    io,
+    driverId,
+    socketId,
+    vehiclePlate,
+    reason
+}) {
+    if (!driverId) {
+        return;
+    }
+
+    const replacementSocket = io?.connectedUsers?.get(driverId);
+    if (replacementSocket && replacementSocket.connected && replacementSocket.id !== socketId) {
+        logStructured('info', 'Cleanup de desconexão abortado: motorista reconectou na janela de graça', {
+            service: 'websocket',
+            userId: driverId,
+            oldSocketId: socketId,
+            newSocketId: replacementSocket.id,
+            reason
+        });
+        return;
+    }
+
+    try {
+        if (vehiclePlate) {
+            logStructured('info', 'Liberando lock de veículo após grace period de desconexão', {
+                service: 'websocket',
+                socketId,
+                userId: driverId,
+                vehiclePlate
+            });
+            try {
+                await vehicleLockManager.releaseLock(vehiclePlate, driverId);
+            } catch (lockError) {
+                logStructured('error', 'Erro ao liberar lock de veículo após grace period', {
+                    service: 'websocket',
+                    userId: driverId,
+                    vehiclePlate,
+                    error: lockError.message
+                });
+            }
+        }
+
+        const redis = redisPool.getConnection();
+        if (redis.status !== 'ready' && redis.status !== 'connect') {
+            try {
+                await redis.connect();
+            } catch (connectError) {
+                if (!connectError.message.includes('already connecting') &&
+                    !connectError.message.includes('already connected')) {
+                    logStructured('error', 'Erro ao conectar Redis no cleanup de desconexão', {
+                        service: 'websocket',
+                        socketId,
+                        userId: driverId,
+                        error: connectError.message
+                    });
+                    return;
+                }
+            }
+        }
+
+        const driverData = await redis.hgetall(`driver:${driverId}`);
+        if (driverData && driverData.lat && driverData.lng) {
+            await saveDriverLocation(
+                driverId,
+                parseFloat(driverData.lat),
+                parseFloat(driverData.lng),
+                parseFloat(driverData.heading || 0),
+                parseFloat(driverData.speed || 0),
+                Date.now(),
+                false
+            );
+        } else {
+            try {
+                await redis.zrem('driver_locations', driverId);
+            } catch (zremError) {
+                logStructured('warn', 'Erro ao remover motorista desconectado do GEO ativo após grace period', {
+                    service: 'websocket',
+                    socketId,
+                    userId: driverId,
+                    error: zremError.message
+                });
+            }
+        }
+
+        try {
+            const nowIso = new Date().toISOString();
+            await redis.hset(`driver:${driverId}`, {
+                vehiclePlate: '',
+                vehicleLockValidated: 'false',
+                vehicleLockValidatedAt: nowIso,
+                isOnline: 'false',
+                updatedAt: nowIso
+            });
+        } catch (driverLockCleanupError) {
+            logStructured('warn', 'Falha ao limpar estado de lock após grace period de desconexão', {
+                service: 'websocket',
+                socketId,
+                userId: driverId,
+                error: driverLockCleanupError.message
+            });
+        }
+
+        logStructured('info', 'Cleanup de desconexão de motorista concluído após janela de graça', {
+            service: 'websocket',
+            socketId,
+            userId: driverId,
+            reason
+        });
+    } catch (error) {
+        logStructured('error', 'Erro ao executar cleanup de desconexão de motorista', {
+            service: 'websocket',
+            socketId,
+            userId: driverId,
+            error: error.message,
+            stack: error.stack
+        });
+    }
+}
+
+function scheduleDriverDisconnectCleanup({
+    io,
+    driverId,
+    socketId,
+    vehiclePlate,
+    reason
+}) {
+    if (!driverId || DRIVER_DISCONNECT_GRACE_MS <= 0) {
+        return false;
+    }
+
+    clearPendingDriverDisconnectCleanup(driverId);
+
+    const timeoutHandle = setTimeout(async () => {
+        pendingDriverDisconnectCleanup.delete(driverId);
+        await finalizeDriverDisconnectCleanup({
+            io,
+            driverId,
+            socketId,
+            vehiclePlate,
+            reason
+        });
+    }, DRIVER_DISCONNECT_GRACE_MS);
+
+    pendingDriverDisconnectCleanup.set(driverId, {
+        timeoutHandle,
+        socketId,
+        reason,
+        vehiclePlate: vehiclePlate || null,
+        createdAt: Date.now()
+    });
+
+    logStructured('info', 'Janela de graça de desconexão agendada para motorista', {
+        service: 'websocket',
+        userId: driverId,
+        socketId,
+        graceMs: DRIVER_DISCONNECT_GRACE_MS,
+        reason
+    });
+
+    return true;
+}
 // =========================================================================================
 
 // ✅ LOG DE DEBUG: Capturar erros de conexão
@@ -1426,9 +2953,14 @@ const initializeWorkers = async () => {
         });
 
         workerManager.registerListener(EVENT_TYPES.RIDE_CANCELED, async (event) => {
-            const bookingId = event.bookingId || event.data?.bookingId;
+            const rawPayload = event?.data && typeof event.data === 'object' ? event.data : {};
+            const nestedPayload = rawPayload?.data && typeof rawPayload.data === 'object' ? rawPayload.data : null;
+            const bookingId = event?.bookingId || rawPayload?.bookingId || nestedPayload?.bookingId;
             if (!bookingId) {
-                logStructured('warn', 'RIDE_CANCELED listener recebeu evento sem bookingId', { event });
+                logStructured('debug', 'RIDE_CANCELED listener ignorou evento sem bookingId', {
+                    listener: 'ride_canceled.stop_search',
+                    eventType: event?.eventType || null
+                });
                 return;
             }
             const ioInstance = global.io || io;
@@ -1474,9 +3006,17 @@ const initializeWorkers = async () => {
 
 // Inicializar workers após Redis estar pronto
 // Executar em background para não bloquear inicialização do servidor
-initializeWorkers().catch((error) => {
-    logError(error, 'Erro ao inicializar workers', { service: 'server' });
-});
+if (ENABLE_EMBEDDED_LISTENER_WORKERS) {
+    initializeWorkers().catch((error) => {
+        logError(error, 'Erro ao inicializar workers', { service: 'server' });
+    });
+} else {
+    logStructured('info', 'WorkerManager embutido desabilitado para este runtime role', {
+        service: 'server',
+        phase: 'workers',
+        runtimeRole: RUNTIME_ROLE
+    });
+}
 // ====================================================================
 
 // ✅ NOVO: Middleware para gerar traceId automaticamente em conexões Socket.IO
@@ -1552,37 +3092,23 @@ logStructured('info', '🔵 Iniciando processo de inicialização do servidor', 
             connectionCleanupService.start();
             logStructured('info', 'Serviço de limpeza de conexões iniciado', { service: 'connection-cleanup' });
 
-            // ✅ Iniciar serviço de cobrança diária de assinatura
-            const dailySubscriptionService = require('./services/daily-subscription-service');
+            const isSchedulerLeaderWorker =
+                !CLUSTER_ENABLED || !cluster.worker || cluster.worker.id === CLUSTER_SCHEDULER_LEADER_ID;
+            if (isSchedulerLeaderWorker) {
+                // ✅ Iniciar serviço de cobrança diária de assinatura
+                const dailySubscriptionService = require('./services/daily-subscription-service');
 
-            // Agendar cobrança diária (todos os dias às 00:00)
-            const scheduleDailySubscription = () => {
-                const now = new Date();
-                const tomorrow = new Date(now);
-                tomorrow.setDate(tomorrow.getDate() + 1);
-                tomorrow.setHours(0, 0, 0, 0); // Meia-noite
+                // Agendar cobrança diária (todos os dias às 00:00)
+                const scheduleDailySubscription = () => {
+                    const now = new Date();
+                    const tomorrow = new Date(now);
+                    tomorrow.setDate(tomorrow.getDate() + 1);
+                    tomorrow.setHours(0, 0, 0, 0); // Meia-noite
 
-                const msUntilMidnight = tomorrow.getTime() - now.getTime();
+                    const msUntilMidnight = tomorrow.getTime() - now.getTime();
 
-                // Agendar primeira execução
-                setTimeout(() => {
-                    logStructured('info', 'Iniciando cobrança diária de assinaturas', { service: 'daily-subscription' });
-                    dailySubscriptionService.processAllDailyCharges()
-                        .then(result => {
-                            logStructured('info', 'Cobrança diária concluída', {
-                                service: 'daily-subscription',
-                                total: result.total,
-                                processed: result.processed,
-                                skipped: result.skipped,
-                                failed: result.failed
-                            });
-                        })
-                        .catch(error => {
-                            logError(error, 'Erro na cobrança diária', { service: 'daily-subscription' });
-                        });
-
-                    // Agendar próxima execução (24 horas depois)
-                    setInterval(() => {
+                    // Agendar primeira execução
+                    setTimeout(() => {
                         logStructured('info', 'Iniciando cobrança diária de assinaturas', { service: 'daily-subscription' });
                         dailySubscriptionService.processAllDailyCharges()
                             .then(result => {
@@ -1597,33 +3123,61 @@ logStructured('info', '🔵 Iniciando processo de inicialização do servidor', 
                             .catch(error => {
                                 logError(error, 'Erro na cobrança diária', { service: 'daily-subscription' });
                             });
-                    }, 24 * 60 * 60 * 1000); // 24 horas
-                }, msUntilMidnight);
 
-                logStructured('info', 'Cobrança diária de assinaturas agendada', { service: 'daily-subscription', scheduledFor: tomorrow.toISOString() });
-            };
+                        // Agendar próxima execução (24 horas depois)
+                        setInterval(() => {
+                            logStructured('info', 'Iniciando cobrança diária de assinaturas', { service: 'daily-subscription' });
+                            dailySubscriptionService.processAllDailyCharges()
+                                .then(result => {
+                                    logStructured('info', 'Cobrança diária concluída', {
+                                        service: 'daily-subscription',
+                                        total: result.total,
+                                        processed: result.processed,
+                                        skipped: result.skipped,
+                                        failed: result.failed
+                                    });
+                                })
+                                .catch(error => {
+                                    logError(error, 'Erro na cobrança diária', { service: 'daily-subscription' });
+                                });
+                        }, 24 * 60 * 60 * 1000); // 24 horas
+                    }, msUntilMidnight);
 
-            scheduleDailySubscription();
+                    logStructured('info', 'Cobrança diária de assinaturas agendada', {
+                        service: 'daily-subscription',
+                        scheduledFor: tomorrow.toISOString(),
+                        workerId: cluster.worker?.id || null
+                    });
+                };
 
-            // Reprocessa finalizacoes pendentes (outbox) para garantir persistencia no Firestore.
-            try {
-                const ridePersistenceService = require('./services/ride-persistence-service');
-                const outboxIntervalMs = Number.parseInt(process.env.RIDE_FINALIZATION_OUTBOX_INTERVAL_MS || '10000', 10);
-                setInterval(async () => {
-                    const stats = await ridePersistenceService.processFinalizationOutboxBatch(30);
-                    if ((stats.processed || 0) > 0 || (stats.retried || 0) > 0 || (stats.failed || 0) > 0) {
-                        logStructured('info', 'Outbox de finalizacao processado', {
-                            service: 'ride-persistence',
-                            processed: stats.processed || 0,
-                            retried: stats.retried || 0,
-                            failed: stats.failed || 0
-                        });
-                    }
-                }, outboxIntervalMs);
-            } catch (outboxInitError) {
-                logStructured('error', 'Falha ao iniciar processador de outbox de finalizacao', {
-                    service: 'ride-persistence',
-                    error: outboxInitError.message
+                scheduleDailySubscription();
+
+                // Reprocessa finalizacoes pendentes (outbox) para garantir persistencia no Firestore.
+                try {
+                    const ridePersistenceService = require('./services/ride-persistence-service');
+                    const outboxIntervalMs = Number.parseInt(process.env.RIDE_FINALIZATION_OUTBOX_INTERVAL_MS || '10000', 10);
+                    setInterval(async () => {
+                        const stats = await ridePersistenceService.processFinalizationOutboxBatch(30);
+                        if ((stats.processed || 0) > 0 || (stats.retried || 0) > 0 || (stats.failed || 0) > 0) {
+                            logStructured('info', 'Outbox de finalizacao processado', {
+                                service: 'ride-persistence',
+                                processed: stats.processed || 0,
+                                retried: stats.retried || 0,
+                                failed: stats.failed || 0
+                            });
+                        }
+                    }, outboxIntervalMs);
+                } catch (outboxInitError) {
+                    logStructured('error', 'Falha ao iniciar processador de outbox de finalizacao', {
+                        service: 'ride-persistence',
+                        error: outboxInitError.message
+                    });
+                }
+            } else {
+                logStructured('info', 'Jobs periódicos desabilitados neste worker do cluster', {
+                    service: 'server',
+                    workerId: cluster.worker?.id || null,
+                    schedulerLeaderWorkerId: CLUSTER_SCHEDULER_LEADER_ID
                 });
             }
 
@@ -1753,12 +3307,14 @@ io.on('connection', async (socket) => {
                 hasData: !!data
             });
         }
+        recordRealtimeMetricSafe('authenticate', 'attempt');
 
         try {
             // Verificar token de autenticação (JWT)
             const isProd = process.env.NODE_ENV === 'production';
             const requestedUserType = data.userType || data.usertype || socket.userType;
             let verifiedUid = null;
+            let verifiedAuthContext = null;
             let releaseAuthSlot = () => { };
 
             const handshakeTokenRaw =
@@ -1786,12 +3342,14 @@ io.on('connection', async (socket) => {
                     socketId: socket.id,
                     reauthenticated: true
                 });
+                recordRealtimeMetricSafe('authenticate', 'success_reauth');
                 releaseAdmissionSlotIfNeeded();
                 return;
             }
 
             if (isProd || authToken) {
                 if (!authToken) {
+                    recordRealtimeMetricSafe('authenticate', 'error_missing_token');
                     socket.emit('authentication_error', { message: 'Token de autenticação ausente' });
                     socket.emit('auth_error', { message: 'Token de autenticação ausente' });
                     socket.disconnect();
@@ -1800,11 +3358,41 @@ io.on('connection', async (socket) => {
                 }
 
                 try {
-                    releaseAuthSlot = await acquireAuthVerifySlot();
-                    verifiedUid = await verifyFirebaseTokenCached(authToken);
+                    let verified = false;
+                    let busyAuthError = null;
+                    for (let attempt = 0; attempt <= AUTH_VERIFY_BUSY_RETRY_ATTEMPTS; attempt += 1) {
+                        releaseAuthSlot = () => { };
+                        try {
+                            releaseAuthSlot = await acquireAuthVerifySlot();
+                            verifiedAuthContext = await verifyFirebaseTokenCached(authToken, requestedUserType || 'unknown');
+                            verifiedUid = verifiedAuthContext.uid;
+                            verified = true;
+                            break;
+                        } catch (authError) {
+                            const authBusy = authError?.message === 'AUTH_BUSY_QUEUE_FULL' || authError?.message === 'AUTH_BUSY_TIMEOUT';
+                            if (!authBusy) {
+                                throw authError;
+                            }
+
+                            busyAuthError = authError;
+                            if (attempt >= AUTH_VERIFY_BUSY_RETRY_ATTEMPTS) {
+                                throw authError;
+                            }
+
+                            const backoffMs = AUTH_VERIFY_BUSY_RETRY_DELAY_MS * (attempt + 1);
+                            await sleepMs(backoffMs);
+                        } finally {
+                            releaseAuthSlot();
+                        }
+                    }
+
+                    if (!verified && busyAuthError) {
+                        throw busyAuthError;
+                    }
                 } catch (authError) {
                     if (authError?.message === 'AUTH_BUSY_QUEUE_FULL' || authError?.message === 'AUTH_BUSY_TIMEOUT') {
-                        const retryAfterSec = 2;
+                        const retryAfterSec = AUTH_BUSY_RETRY_AFTER_SEC;
+                        recordRealtimeMetricSafe('authenticate', 'auth_busy');
                         socket.emit('authentication_error', {
                             message: 'Sistema autenticando em alta carga. Tente novamente.',
                             code: 'AUTH_BUSY',
@@ -1822,19 +3410,19 @@ io.on('connection', async (socket) => {
                         service: 'websocket',
                         socketId: socket.id
                     });
+                    recordRealtimeMetricSafe('authenticate', 'error_invalid_token');
                     socket.emit('authentication_error', { message: 'Token inválido ou expirado' });
                     socket.emit('auth_error', { message: 'Token inválido ou expirado' });
                     socket.disconnect();
                     releaseAdmissionSlotIfNeeded();
                     return;
-                } finally {
-                    releaseAuthSlot();
                 }
             } else {
                 // Modo dev/teste sem token
                 verifiedUid = data.uid;
 
                 if (!verifiedUid) {
+                    recordRealtimeMetricSafe('authenticate', 'error_missing_uid');
                     socket.emit('authentication_error', { message: 'ID de usuário (uid) ausente' });
                     socket.disconnect();
                     releaseAdmissionSlotIfNeeded();
@@ -1844,6 +3432,7 @@ io.on('connection', async (socket) => {
 
             // A partir daqui, usar SOMENTE o uid validado pelo token
             const authUserId = verifiedUid;
+            const authUserType = requestedUserType || verifiedAuthContext?.role || 'unknown';
 
             // ✅ Registrar conexão no monitor centralizado (não bloquear se falhar)
             const workerId = process.env.NODE_ENV === 'production'
@@ -1852,7 +3441,7 @@ io.on('connection', async (socket) => {
             socket.workerId = workerId;
 
             connectionMonitor
-                .registerConnection(socket.id, authUserId, data.userType || data.usertype || 'unknown', workerId)
+                .registerConnection(socket.id, authUserId, authUserType, workerId)
                 .catch((monitorError) => {
                     logStructured('error', 'Erro ao registrar no connectionMonitor (continuando)', {
                         service: 'websocket',
@@ -1864,8 +3453,20 @@ io.on('connection', async (socket) => {
 
             // Armazenar informações do usuário no socket
             socket.userId = authUserId;
-            socket.userType = data.userType || data.usertype; // Armazenar tipo: driver ou customer/passenger
+            socket.userType = authUserType; // Armazenar tipo: driver ou customer/passenger
             socket.authTokenDigest = authTokenDigest;
+            if (socket.userType === 'driver') {
+                clearPendingDriverDisconnectCleanup(authUserId, 'reauthenticated');
+            }
+            if (authTokenDigest && authTokenCache.has(authTokenDigest)) {
+                const cachedContext = authTokenCache.get(authTokenDigest);
+                if (cachedContext) {
+                    cachedContext.role = socket.userType || cachedContext.role || 'unknown';
+                    cachedContext.sessionState = AUTH_CONTEXT_STATE.AUTHENTICATED;
+                    cachedContext.lastSeenAt = Date.now();
+                    authTokenCache.set(authTokenDigest, cachedContext);
+                }
+            }
 
             if (authDebugEnabled) {
                 logStructured('debug', 'Usuário autenticado', {
@@ -1876,7 +3477,9 @@ io.on('connection', async (socket) => {
                 });
             }
 
-            // Inicializar rastreamento de conexões se não existir
+            const sessionRoom = `session_user_${authUserId}`;
+
+            // Inicializar rastreamento de conexões local (compatibilidade observabilidade)
             if (!io.connectedUsers) {
                 io.connectedUsers = new Map();
             }
@@ -1885,31 +3488,50 @@ io.on('connection', async (socket) => {
             // ✅ DESABILITADO para testes - permitir múltiplas conexões de teste
             const SESSION_SIMULTANEA_BLOCKED = process.env.ALLOW_MULTIPLE_SESSIONS !== 'true'; // Permitir em testes
 
-            // Verificar se usuário já está conectado em outro socket
-            const existingSocket = io.connectedUsers.get(authUserId);
-            if (existingSocket && existingSocket.id !== socket.id && SESSION_SIMULTANEA_BLOCKED) {
-                // Desconectar sessão anterior
-                existingSocket.emit('sessionTerminated', {
-                    reason: 'Nova sessão iniciada em outro dispositivo',
-                    timestamp: new Date().toISOString()
-                });
-                existingSocket.disconnect();
-                logStructured('info', 'Desconectando sessão anterior', {
-                    service: 'websocket',
-                    userId: authUserId,
-                    previousSocketId: existingSocket.id,
-                    newSocketId: socket.id
-                });
-            } else if (existingSocket && existingSocket.id !== socket.id) {
-                logStructured('warn', 'Múltiplas sessões permitidas (modo teste)', {
-                    service: 'websocket',
-                    userId: authUserId,
-                    socketId: socket.id
-                });
-            }
-
             // Registrar nova conexão
             io.connectedUsers.set(authUserId, socket);
+            socket.join(sessionRoom);
+
+            let sessionLockRef = null;
+            const sessionLockOwner = `${socket.id}:${Date.now()}`;
+            let redisForSessionLock = null;
+            if (SESSION_SIMULTANEA_BLOCKED) {
+                try {
+                    await redisPool.ensureConnection();
+                    redisForSessionLock = redisPool.getConnection();
+                    sessionLockRef = await acquireUserSessionLock(redisForSessionLock, authUserId, sessionLockOwner);
+                    if (!sessionLockRef.acquired) {
+                        logStructured('warn', 'Não foi possível adquirir lock de sessão no tempo limite', {
+                            service: 'websocket',
+                            userId: authUserId,
+                            socketId: socket.id
+                        });
+                    }
+                } catch (sessionLockError) {
+                    logStructured('warn', 'Falha ao adquirir lock de sessão', {
+                        service: 'websocket',
+                        userId: authUserId,
+                        socketId: socket.id,
+                        error: sessionLockError.message
+                    });
+                }
+            }
+
+            try {
+                // Fast-path: evitar fetchSockets cross-worker por conexão (custoso em alto volume).
+                // Em modo bloqueado, terminamos qualquer sessão anterior pelo room da sessão.
+                if (SESSION_SIMULTANEA_BLOCKED) {
+                    io.to(sessionRoom).except(socket.id).emit('sessionTerminated', {
+                        reason: 'Nova sessão iniciada em outro dispositivo',
+                        timestamp: new Date().toISOString()
+                    });
+                    io.in(sessionRoom).except(socket.id).disconnectSockets(true);
+                }
+            } finally {
+                if (SESSION_SIMULTANEA_BLOCKED && sessionLockRef?.acquired && redisForSessionLock) {
+                    await releaseUserSessionLock(redisForSessionLock, sessionLockRef, sessionLockOwner);
+                }
+            }
 
             // ✅ Atualizar tipo de conexão no monitor centralizado
             connectionMonitor
@@ -2045,7 +3667,7 @@ io.on('connection', async (socket) => {
                 uid: authUserId,
                 userId: authUserId, // ✅ Adicionar userId para compatibilidade
                 success: true,
-                userType: socket.userType || data.userType || data.usertype, // ✅ Incluir userType que o app espera
+                userType: socket.userType || authUserType, // ✅ Incluir userType que o app espera
                 socketId: socket.id // ✅ Adicionar socketId para debug
             };
 
@@ -2057,7 +3679,7 @@ io.on('connection', async (socket) => {
 
             // ✅ GARANTIR que userId e userType estão setados no socket
             socket.userId = authUserId;
-            socket.userType = socket.userType || data.userType || data.usertype;
+            socket.userType = socket.userType || authUserType;
 
             if (authDebugEnabled) {
                 logStructured('debug', 'Autenticação confirmada', {
@@ -2079,6 +3701,40 @@ io.on('connection', async (socket) => {
 
             // ✅ Emitir authenticated ANTES de qualquer outra coisa
             socket.emit('authenticated', authResponse);
+            recordRealtimeMetricSafe('authenticate', 'success');
+
+            if (AUTH_PUSH_ACTIVE_RIDE_SYNC) {
+                setImmediate(async () => {
+                    try {
+                        const redis = redisPool.getConnection();
+                        if (redis.status !== 'ready' && redis.status !== 'connect') {
+                            await redis.connect().catch(() => { });
+                        }
+
+                        const activeRideSnapshot = await buildActiveRideSnapshotForUser(
+                            redis,
+                            authUserId,
+                            socket.userType
+                        );
+
+                        socket.emit('activeRideSync', {
+                            success: true,
+                            source: 'auth_rehydrate',
+                            ...activeRideSnapshot,
+                            syncedAt: new Date().toISOString()
+                        });
+                    } catch (activeRideSyncError) {
+                        logStructured('warn', 'Falha ao enviar sync de corrida ativa pós-autenticação', {
+                            service: 'websocket',
+                            socketId: socket.id,
+                            userId: authUserId,
+                            userType: socket.userType,
+                            error: activeRideSyncError.message
+                        });
+                    }
+                });
+            }
+
             releaseAdmissionSlotIfNeeded();
             if (authDebugEnabled) {
                 logStructured('debug', 'Evento authenticated emitido', {
@@ -2095,6 +3751,7 @@ io.on('connection', async (socket) => {
                 error: error.message,
                 stack: error.stack
             });
+            recordRealtimeMetricSafe('authenticate', 'error_exception');
             socket.emit('auth_error', { message: error.message });
             releaseAdmissionSlotIfNeeded();
         }
@@ -2126,98 +3783,35 @@ io.on('connection', async (socket) => {
 
         // Se for motorista, salvar última localização como offline e liberar lock de veículo
         if (socket.userId && socket.userType === 'driver') {
-            try {
-                // ✅ FASE 1: Liberar lock de veículo ao desconectar
-                if (socket.vehiclePlate) {
-                    logStructured('info', 'Liberando lock de veículo na desconexão', {
-                        service: 'websocket',
-                        socketId: socket.id,
-                        userId: socket.userId,
-                        vehiclePlate: socket.vehiclePlate
-                    });
-                    try {
-                        await vehicleLockManager.releaseLock(socket.vehiclePlate, socket.userId);
-                        logStructured('info', 'Lock de veículo liberado', {
-                            service: 'websocket',
-                            userId: socket.userId,
-                            vehiclePlate: socket.vehiclePlate
-                        });
-                    } catch (lockError) {
-                        logStructured('error', 'Erro ao liberar lock de veículo', {
-                            service: 'websocket',
-                            userId: socket.userId,
-                            vehiclePlate: socket.vehiclePlate,
-                            error: lockError.message
-                        });
-                        // Não bloquear desconexão por erro no lock
-                    }
-                }
+            const replacementSocket = io.connectedUsers?.get(socket.userId);
+            const hasActiveReplacement =
+                replacementSocket &&
+                replacementSocket.connected &&
+                replacementSocket.id !== socket.id;
 
-                const redis = redisPool.getConnection();
-
-                // Garantir conexão Redis
-                if (redis.status !== 'ready' && redis.status !== 'connect') {
-                    try {
-                        await redis.connect();
-                    } catch (connectError) {
-                        if (!connectError.message.includes('already connecting') &&
-                            !connectError.message.includes('already connected')) {
-                            logStructured('error', 'Erro ao conectar Redis na desconexão', {
-                                service: 'websocket',
-                                socketId: socket.id,
-                                userId: socket.userId,
-                                error: connectError.message
-                            });
-                            return; // Continuar sem salvar como offline
-                        }
-                    }
-                }
-
-                // Buscar última localização conhecida
-                const driverData = await redis.hgetall(`driver:${socket.userId}`);
-
-                if (driverData && driverData.lat && driverData.lng) {
-                    // Salvar como offline com última localização
-                    await saveDriverLocation(
-                        socket.userId,
-                        parseFloat(driverData.lat),
-                        parseFloat(driverData.lng),
-                        parseFloat(driverData.heading || 0),
-                        parseFloat(driverData.speed || 0),
-                        Date.now(),
-                        false // offline
-                    );
-                    logStructured('info', 'Motorista desconectado - salvo como OFFLINE com última localização', {
-                        service: 'websocket',
-                        socketId: socket.id,
-                        userId: socket.userId
-                    });
-                } else {
-                    // Se não tem localização, apenas remover do GEO ativo
-                    try {
-                        await redis.zrem('driver_locations', socket.userId);
-                        logStructured('info', 'Motorista desconectado - removido do GEO ativo', {
-                            service: 'websocket',
-                            socketId: socket.id,
-                            userId: socket.userId
-                        });
-                    } catch (error) {
-                        // Ignorar erro se Redis não disponível
-                        logStructured('warn', 'Erro ao remover do GEO', {
-                            service: 'websocket',
-                            socketId: socket.id,
-                            userId: socket.userId,
-                            error: error.message
-                        });
-                    }
-                }
-            } catch (error) {
-                logStructured('error', 'Erro ao processar desconexão do motorista', {
+            if (hasActiveReplacement) {
+                logStructured('info', 'Desconexão de socket antigo ignorada: motorista já possui sessão ativa', {
                     service: 'websocket',
-                    socketId: socket.id,
                     userId: socket.userId,
-                    error: error.message,
-                    stack: error.stack
+                    oldSocketId: socket.id,
+                    newSocketId: replacementSocket.id,
+                    reason
+                });
+            } else if (DRIVER_DISCONNECT_GRACE_MS > 0) {
+                scheduleDriverDisconnectCleanup({
+                    io,
+                    driverId: socket.userId,
+                    socketId: socket.id,
+                    vehiclePlate: socket.vehiclePlate,
+                    reason
+                });
+            } else {
+                await finalizeDriverDisconnectCleanup({
+                    io,
+                    driverId: socket.userId,
+                    socketId: socket.id,
+                    vehiclePlate: socket.vehiclePlate,
+                    reason
                 });
             }
         }
@@ -2237,11 +3831,334 @@ io.on('connection', async (socket) => {
         }
     });
 
+    socket.on('syncActiveRide', async (data = {}) => {
+        try {
+            const userId = socket.userId || data.uid || data.userId;
+            const userType = socket.userType || data.userType;
+
+            if (!userId || !userType) {
+                socket.emit('activeRideSync', {
+                    success: false,
+                    code: 'NOT_AUTHENTICATED',
+                    message: 'Usuário não autenticado para sincronização de corrida ativa'
+                });
+                return;
+            }
+
+            const redis = redisPool.getConnection();
+            if (redis.status !== 'ready' && redis.status !== 'connect') {
+                await redis.connect().catch(() => { });
+            }
+
+            const activeRideSnapshot = await buildActiveRideSnapshotForUser(redis, userId, userType);
+
+            socket.emit('activeRideSync', {
+                success: true,
+                source: 'explicit_sync',
+                ...activeRideSnapshot,
+                syncedAt: new Date().toISOString()
+            });
+        } catch (error) {
+            logStructured('error', 'Erro ao sincronizar corrida ativa para reconexão', {
+                service: 'websocket',
+                socketId: socket.id,
+                userId: socket.userId || 'unknown',
+                userType: socket.userType || 'unknown',
+                error: error.message
+            });
+
+            socket.emit('activeRideSync', {
+                success: false,
+                code: 'SYNC_FAILED',
+                message: 'Não foi possível sincronizar a corrida ativa agora'
+            });
+        }
+    });
+
     // ======================== EVENTOS DE CORRIDA ========================
 
     // ==================== FASE 7: createBooking - INTEGRAÇÃO COM SISTEMA DE FILAS ====================
+    const CUSTOMER_ACTIVE_BOOKING_TTL_SECONDS = Number.parseInt(
+        process.env.CUSTOMER_ACTIVE_BOOKING_TTL_SECONDS || '21600',
+        10
+    );
+    const CREATE_BOOKING_BACKGROUND_EVENT_PUBLISH = process.env.CREATE_BOOKING_BACKGROUND_EVENT_PUBLISH !== 'false';
+    const SKIP_EVENTBUS_NOTIFY_FOR_PAID_BOOKINGS = process.env.SKIP_EVENTBUS_NOTIFY_FOR_PAID_BOOKINGS !== 'false';
+    const REQUIRE_PAYMENT_BEFORE_BOOKING =
+        String(process.env.REQUIRE_PAYMENT_BEFORE_BOOKING || 'true').toLowerCase() !== 'false';
+    const VERIFY_PAYMENT_BEFORE_BOOKING =
+        String(process.env.VERIFY_PAYMENT_BEFORE_BOOKING || 'true').toLowerCase() !== 'false';
+    const REQUIRE_PAYMENT_CHARGE_REF_BEFORE_BOOKING =
+        String(process.env.REQUIRE_PAYMENT_CHARGE_REF_BEFORE_BOOKING || 'true').toLowerCase() !== 'false';
+    const PAID_PAYMENT_STATUSES = new Set(['confirmed', 'paid', 'in_holding']);
+    const CONFIRM_PAYMENT_SYNC_HOLDING =
+        String(process.env.CONFIRM_PAYMENT_SYNC_HOLDING || 'false').toLowerCase() === 'true';
+    const SEARCH_STATES = new Set(['PENDING', 'SEARCHING', 'NOTIFIED', 'AWAITING_RESPONSE', 'EXPANDED', 'REJECTED']);
+    const BLOCKING_STATES = new Set(['MATCHED', 'ACCEPTED', 'IN_PROGRESS']);
+    const FINAL_STATES = new Set(['COMPLETED', 'CANCELED']);
+
+    const buildCreateBookingIdempotencyFingerprint = ({
+        pickupLocation,
+        destinationLocation,
+        carType,
+        paymentMethod,
+        estimatedFare,
+        paymentStatus,
+        dedupeWindowBucket
+    }) => {
+        const pickupLat = Number(pickupLocation?.lat || 0).toFixed(6);
+        const pickupLng = Number(pickupLocation?.lng || 0).toFixed(6);
+        const destinationLat = Number(destinationLocation?.lat || 0).toFixed(6);
+        const destinationLng = Number(destinationLocation?.lng || 0).toFixed(6);
+        const normalizedFare = Number(estimatedFare || 0).toFixed(2);
+        const normalizedCarType = String(carType || 'leaf_plus').toLowerCase();
+        const normalizedPaymentMethod = String(paymentMethod || 'pix').toLowerCase();
+        const normalizedPaymentStatus = String(paymentStatus || 'pending_payment').toLowerCase();
+        const normalizedWindowBucket = Number(dedupeWindowBucket || 0);
+        return [
+            pickupLat,
+            pickupLng,
+            destinationLat,
+            destinationLng,
+            normalizedCarType,
+            normalizedPaymentMethod,
+            normalizedFare,
+            normalizedPaymentStatus,
+            normalizedWindowBucket
+        ].join('|');
+    };
+
+    const cleanupSupersededBookingSearch = async ({
+        previousBookingId,
+        customerId,
+        replacementBookingId,
+        redis
+    }) => {
+        if (!previousBookingId || previousBookingId === replacementBookingId) {
+            return;
+        }
+
+        try {
+            const GradualRadiusExpander = require('./services/gradual-radius-expander');
+            const RideStateManager = require('./services/ride-state-manager');
+            const expander = new GradualRadiusExpander(io);
+
+            const previousState = await RideStateManager.getBookingState(redis, previousBookingId);
+            if (previousState &&
+                previousState !== RideStateManager.STATES.CANCELED &&
+                previousState !== RideStateManager.STATES.COMPLETED) {
+                try {
+                    await RideStateManager.updateBookingState(
+                        redis,
+                        previousBookingId,
+                        RideStateManager.STATES.CANCELED,
+                        {
+                            canceledBy: customerId || 'system',
+                            reason: 'SUPERSEDED_BY_NEW_REQUEST',
+                            supersededByBookingId: replacementBookingId || '',
+                            cancelledAt: new Date().toISOString()
+                        }
+                    );
+                } catch (stateError) {
+                    logStructured('warn', 'Falha ao finalizar estado do booking supersedido', {
+                        customerId,
+                        previousBookingId,
+                        replacementBookingId: replacementBookingId || null,
+                        eventType: 'createBooking',
+                        error: stateError.message
+                    });
+                }
+            }
+
+            await expander.stopSearch(previousBookingId);
+            await rideQueueManager.dequeueRide(previousBookingId);
+
+            await redis.hset(`booking:${previousBookingId}`, {
+                status: 'SUPERSEDED',
+                supersededAt: new Date().toISOString(),
+                supersededByBookingId: replacementBookingId || '',
+                supersededByCustomerId: customerId || ''
+            });
+
+            logStructured('info', 'Busca de booking anterior encerrada por supersedência', {
+                customerId,
+                previousBookingId,
+                replacementBookingId,
+                eventType: 'createBooking'
+            });
+        } catch (supersedeError) {
+            logStructured('warn', 'Falha ao encerrar booking anterior supersedido', {
+                customerId,
+                previousBookingId,
+                replacementBookingId,
+                eventType: 'createBooking',
+                error: supersedeError.message
+            });
+        }
+    };
+
+    const releaseSupersededBookingDriverLocks = async (bookingId, redis) => {
+        if (!bookingId) return;
+        try {
+            const driverLockManager = require('./services/driver-lock-manager');
+            const notifiedDrivers = await redis.smembers(`ride_notifications:${bookingId}`);
+
+            const syncLimit = Math.max(
+                1,
+                Number.parseInt(process.env.SUPERSEDED_LOCK_RELEASE_SYNC_LIMIT || '6', 10)
+            );
+            const syncDrivers = notifiedDrivers.slice(0, syncLimit);
+            const asyncDrivers = notifiedDrivers.slice(syncLimit);
+
+            const releaseForDriver = async (driverId) => {
+                try {
+                    const lockStatus = await driverLockManager.isDriverLocked(driverId);
+                    if (lockStatus.isLocked && lockStatus.bookingId === bookingId) {
+                        await driverLockManager.releaseLock(driverId);
+                    }
+                } catch (lockError) {
+                    logStructured('warn', 'Falha ao liberar lock de driver de booking supersedido', {
+                        bookingId,
+                        driverId,
+                        eventType: 'createBooking',
+                        error: lockError.message
+                    });
+                }
+
+                try {
+                    const activeNotificationKey = `driver_active_notification:${driverId}`;
+                    const activeBookingId = await redis.get(activeNotificationKey);
+                    if (activeBookingId === bookingId) {
+                        await redis.del(activeNotificationKey);
+                    }
+                } catch (notificationError) {
+                    logStructured('warn', 'Falha ao limpar notificação ativa de booking supersedido', {
+                        bookingId,
+                        driverId,
+                        eventType: 'createBooking',
+                        error: notificationError.message
+                    });
+                }
+            };
+
+            for (const driverId of syncDrivers) {
+                await releaseForDriver(driverId);
+            }
+
+            if (asyncDrivers.length > 0) {
+                setImmediate(async () => {
+                    for (const driverId of asyncDrivers) {
+                        await releaseForDriver(driverId);
+                    }
+                });
+            }
+        } catch (error) {
+            logStructured('warn', 'Falha ao liberar locks/notificações de booking supersedido', {
+                bookingId,
+                eventType: 'createBooking',
+                error: error.message
+            });
+        }
+    };
+
+    const markBookingSupersededFast = async ({
+        bookingId,
+        customerId,
+        replacementBookingId,
+        redis
+    }) => {
+        if (!bookingId) return;
+
+        await redis.hset(`booking:${bookingId}`, {
+            status: 'SUPERSEDED',
+            state: 'CANCELED',
+            supersededAt: new Date().toISOString(),
+            supersededByBookingId: replacementBookingId || '',
+            supersededByCustomerId: customerId || '',
+            updatedAt: new Date().toISOString()
+        });
+    };
+
+    socket.on('checkRideAvailability', async (data = {}) => {
+        const userId = socket.userId || data.customerId || socket.id;
+
+        try {
+            const pickupLocation = data?.pickupLocation || {
+                lat: data?.lat,
+                lng: data?.lng
+            };
+            const requestedCarType = data?.carType || data?.vehicle || null;
+            const requestedRadiusKm = Number.parseFloat(
+                data?.radiusKm || process.env.PAYMENT_AVAILABILITY_RADIUS_KM || '5'
+            );
+
+            const availability = await hasEligibleDriversForPickupFast(pickupLocation, {
+                carType: requestedCarType,
+                radiusKm: requestedRadiusKm
+            });
+
+            if (!availability?.success) {
+                socket.emit('rideAvailabilityError', {
+                    success: false,
+                    code: 'AVAILABILITY_CHECK_FAILED',
+                    error: 'Não foi possível validar disponibilidade agora.',
+                    message: 'Não foi possível validar disponibilidade agora.'
+                });
+                return;
+            }
+
+            socket.emit('rideAvailabilityResult', {
+                success: true,
+                available: Boolean(availability.hasDrivers),
+                hasDrivers: Boolean(availability.hasDrivers),
+                code: availability.hasDrivers ? 'DRIVERS_AVAILABLE' : 'NO_DRIVERS_AVAILABLE',
+                message: availability.hasDrivers
+                    ? 'Há motoristas disponíveis para esta corrida.'
+                    : 'Não há motoristas disponíveis',
+                carType: requestedCarType,
+                radiusKm: availability.radiusKm || requestedRadiusKm
+            });
+
+            logStructured('info', 'Pré-check de disponibilidade concluído', {
+                userId,
+                eventType: 'checkRideAvailability',
+                requestedCarType,
+                hasDrivers: Boolean(availability.hasDrivers),
+                radiusKm: availability.radiusKm || requestedRadiusKm
+            });
+        } catch (availabilityError) {
+            logStructured('warn', 'Erro no pré-check de disponibilidade', {
+                userId,
+                eventType: 'checkRideAvailability',
+                error: availabilityError.message
+            });
+
+            socket.emit('rideAvailabilityError', {
+                success: false,
+                code: 'AVAILABILITY_CHECK_ERROR',
+                error: 'Não foi possível validar disponibilidade agora.',
+                message: 'Não foi possível validar disponibilidade agora.'
+            });
+        }
+    });
+
     // Solicitar corrida (NOVO FLUXO COM FILAS E EXPANSÃO GRADUAL)
     socket.on('createBooking', async (data) => {
+        const bookingHandlerStartedAt = Date.now();
+        recordRealtimeMetricSafe('create_booking', 'attempt');
+
+        const emitBookingError = (payload = {}, metricCode) => {
+            const normalizedCode = String(metricCode || payload?.code || payload?.error || 'unknown')
+                .trim()
+                .toLowerCase()
+                .replace(/[^a-z0-9_]+/g, '_')
+                .replace(/_+/g, '_')
+                .replace(/^_+|_+$/g, '');
+            const metricLabel = normalizedCode ? `error_${normalizedCode}` : 'error_unknown';
+            recordRealtimeMetricSafe('create_booking', metricLabel);
+            socket.emit('bookingError', payload);
+        };
+
         // ✅ OBSERVABILIDADE: Gerar traceId no início do handler
         const traceId = extractTraceIdFromEvent(data, socket);
 
@@ -2276,25 +4193,35 @@ io.on('connection', async (socket) => {
                     });
 
                     if (!rateLimitCheck.allowed) {
-                        // ✅ NOVO: Log de auditoria para rate limit excedido
-                        await auditService.logSecurityAction(userId, 'rateLimitExceeded', 'createBooking', {
-                            limit: rateLimitCheck.limit,
-                            remaining: rateLimitCheck.remaining,
-                            resetAt: rateLimitCheck.resetAt
-                        }, metadata);
-
-                        socket.emit('bookingError', {
+                        emitBookingError({
                             error: 'Muitas requisições',
                             message: `Você excedeu o limite de ${rateLimitCheck.limit} requisições por minuto. Tente novamente em ${Math.ceil((rateLimitCheck.resetAt - Date.now()) / 1000)} segundos.`,
                             code: 'RATE_LIMIT_EXCEEDED',
                             limit: rateLimitCheck.limit,
                             remaining: rateLimitCheck.remaining,
                             resetAt: rateLimitCheck.resetAt
-                        });
+                        }, 'RATE_LIMIT_EXCEEDED');
                         logStructured('warn', 'Rate limit excedido', {
                             userId,
                             eventType: 'createBooking',
                             limit: rateLimitCheck.limit
+                        });
+
+                        // Auditoria em background para não bloquear ACK ao app.
+                        setImmediate(async () => {
+                            try {
+                                await auditService.logSecurityAction(userId, 'rateLimitExceeded', 'createBooking', {
+                                    limit: rateLimitCheck.limit,
+                                    remaining: rateLimitCheck.remaining,
+                                    resetAt: rateLimitCheck.resetAt
+                                }, metadata);
+                            } catch (auditError) {
+                                logStructured('warn', 'Falha ao registrar auditoria de rateLimitExceeded (background)', {
+                                    userId,
+                                    eventType: 'createBooking',
+                                    error: auditError.message
+                                });
+                            }
                         });
                         return;
                     }
@@ -2305,36 +4232,231 @@ io.on('connection', async (socket) => {
                         eventType: 'createBooking'
                     });
 
+                    // ✅ Segurança: forçar customerId autenticado no payload antes da validação
+                    const authCustomerId = socket.userId || null;
+                    const validationPayload = authCustomerId
+                        ? { ...data, customerId: authCustomerId }
+                        : data;
+
                     // ✅ NOVO: Validação e sanitização de dados
-                    const validation = validationService.validateEndpoint('createBooking', data);
+                    const validation = validationService.validateEndpoint('createBooking', validationPayload);
 
                     if (!validation.valid) {
-                        const metadata = getSocketMetadata(socket);
-                        await auditService.logRideAction(userId, 'createBooking', null, {
-                            error: 'Validação falhou',
-                            validationErrors: validation.errors
-                        }, false, 'Dados de entrada inválidos', metadata);
-
                         logStructured('warn', 'Validação falhou', {
                             userId,
                             eventType: 'createBooking',
                             validationErrors: validation.errors
                         });
 
-                        socket.emit('bookingError', {
+                        emitBookingError({
                             error: 'Dados inválidos',
                             message: 'Os dados fornecidos não são válidos',
                             details: validation.errors,
                             code: 'VALIDATION_ERROR'
+                        }, 'VALIDATION_ERROR');
+
+                        // Auditoria em background para não bloquear ACK ao app.
+                        setImmediate(async () => {
+                            try {
+                                await auditService.logRideAction(userId, 'createBooking', null, {
+                                    error: 'Validação falhou',
+                                    validationErrors: validation.errors
+                                }, false, 'Dados de entrada inválidos', metadata);
+                            } catch (auditError) {
+                                logStructured('warn', 'Falha ao registrar auditoria de validação createBooking (background)', {
+                                    userId,
+                                    eventType: 'createBooking',
+                                    error: auditError.message
+                                });
+                            }
                         });
                         return;
                     }
 
                     // Usar dados sanitizados
-                    const { customerId, pickupLocation, destinationLocation, estimatedFare, paymentMethod } = validation.sanitized;
-                    const normalizedPaymentStatus = (data?.paymentStatus || 'pending_payment').toString().toLowerCase();
-                    const hasConfirmedPayment = ['confirmed', 'paid', 'in_holding'].includes(normalizedPaymentStatus);
-                    const requestedCarType = data?.carType || null;
+                    const {
+                        customerId: sanitizedCustomerId,
+                        pickupLocation,
+                        destinationLocation,
+                        estimatedFare,
+                        routeDistanceKm,
+                        routeDurationSecs,
+                        tollFee,
+                        carType: sanitizedCarType,
+                        paymentMethod
+                    } = validation.sanitized;
+                    const customerId = authCustomerId || sanitizedCustomerId;
+                    const customerActiveBookingKey = customerId
+                        ? `customer_active_booking:${customerId}`
+                        : null;
+                    let supersededBookingId = null;
+
+                    if (authCustomerId && sanitizedCustomerId && sanitizedCustomerId !== authCustomerId) {
+                        logStructured('warn', 'createBooking com customerId divergente do usuário autenticado', {
+                            userId,
+                            socketUserId: authCustomerId,
+                            payloadCustomerId: sanitizedCustomerId,
+                            eventType: 'createBooking'
+                        });
+                    }
+
+                    if (customerActiveBookingKey) {
+                        try {
+                            const redis = redisPool.getConnection();
+                            const activeBookingId = await redis.get(customerActiveBookingKey);
+
+                            if (activeBookingId) {
+                                const RideStateManager = require('./services/ride-state-manager');
+                                const activeState = await RideStateManager.getBookingState(redis, activeBookingId);
+
+                                if (BLOCKING_STATES.has(activeState)) {
+                                    emitBookingError({
+                                        error: 'Você já possui uma corrida ativa',
+                                        message: 'Finalize a corrida atual antes de solicitar uma nova.',
+                                        code: 'ACTIVE_RIDE_EXISTS',
+                                        activeBookingId
+                                    }, 'ACTIVE_RIDE_EXISTS');
+                                    return;
+                                }
+
+                                if (FINAL_STATES.has(activeState)) {
+                                    await redis.del(customerActiveBookingKey);
+                                } else if (SEARCH_STATES.has(activeState)) {
+                                    supersededBookingId = activeBookingId;
+                                    await markBookingSupersededFast({
+                                        bookingId: activeBookingId,
+                                        customerId,
+                                        replacementBookingId: null,
+                                        redis
+                                    });
+                                    // Caminho crítico mínimo: restante da supersedência segue em background.
+                                    setImmediate(async () => {
+                                        try {
+                                            await releaseSupersededBookingDriverLocks(activeBookingId, redis);
+                                        } catch (releaseError) {
+                                            logStructured('warn', 'Falha ao liberar locks de booking supersedido em background', {
+                                                customerId,
+                                                previousBookingId: activeBookingId,
+                                                eventType: 'createBooking',
+                                                error: releaseError.message
+                                            });
+                                        }
+                                        try {
+                                            await cleanupSupersededBookingSearch({
+                                                previousBookingId: activeBookingId,
+                                                customerId,
+                                                replacementBookingId: null,
+                                                redis
+                                            });
+                                        } catch (supersedeCleanupError) {
+                                            logStructured('warn', 'Falha ao limpar booking supersedido em background', {
+                                                customerId,
+                                                previousBookingId: activeBookingId,
+                                                eventType: 'createBooking',
+                                                error: supersedeCleanupError.message
+                                            });
+                                        }
+                                    });
+                                }
+                            }
+                        } catch (activeBookingGuardError) {
+                            logStructured('warn', 'Falha ao validar/superseder booking ativo do cliente (seguindo fluxo)', {
+                                customerId,
+                                eventType: 'createBooking',
+                                error: activeBookingGuardError.message
+                            });
+                        }
+                    }
+
+                    let normalizedPaymentStatus = (data?.paymentStatus || 'pending_payment').toString().toLowerCase();
+                    let hasConfirmedPayment = PAID_PAYMENT_STATUSES.has(normalizedPaymentStatus);
+                    const paymentChargeId = String(data?.paymentData?.chargeId || data?.paymentId || '').trim();
+                    const paymentReferenceRideId = String(data?.paymentData?.rideId || data?.rideId || '').trim();
+                    const parsedPaymentAmountInCents = Number.parseInt(
+                        String(data?.paymentData?.amountInCents ?? data?.paymentAmountInCents ?? data?.amountInCents ?? ''),
+                        10
+                    );
+                    let resolvedPaymentAmountInCents =
+                        Number.isFinite(parsedPaymentAmountInCents) && parsedPaymentAmountInCents > 0
+                            ? parsedPaymentAmountInCents
+                            : null;
+                    const requestedCarType = sanitizedCarType || data?.carType || null;
+
+                    if (REQUIRE_PAYMENT_BEFORE_BOOKING && !hasConfirmedPayment) {
+                        emitBookingError({
+                            error: 'Pagamento obrigatório',
+                            message: 'Finalize o pagamento PIX antes de solicitar a corrida.',
+                            code: 'PAYMENT_REQUIRED'
+                        }, 'PAYMENT_REQUIRED');
+                        return;
+                    }
+
+                    if (
+                        REQUIRE_PAYMENT_BEFORE_BOOKING &&
+                        REQUIRE_PAYMENT_CHARGE_REF_BEFORE_BOOKING &&
+                        !paymentChargeId
+                    ) {
+                        emitBookingError({
+                            error: 'Referência de pagamento ausente',
+                            message: 'Não foi possível validar o pagamento desta solicitação. Gere um novo PIX e tente novamente.',
+                            code: 'PAYMENT_REFERENCE_REQUIRED'
+                        }, 'PAYMENT_REFERENCE_REQUIRED');
+                        return;
+                    }
+
+                    if (hasConfirmedPayment && VERIFY_PAYMENT_BEFORE_BOOKING && paymentChargeId) {
+                        try {
+                            const paymentStatusCheck = await paymentServiceSingleton.getPaymentStatus(paymentChargeId);
+                            if (!paymentStatusCheck?.success) {
+                                emitBookingError({
+                                    error: 'Pagamento não confirmado',
+                                    message: 'Ainda não recebemos a confirmação do PIX. Aguarde alguns segundos e tente novamente.',
+                                    code: 'PAYMENT_NOT_CONFIRMED',
+                                    retryAfterSec: 2
+                                }, 'PAYMENT_NOT_CONFIRMED');
+                                return;
+                            }
+
+                            const verifiedPaymentStatus = String(paymentStatusCheck.status || '').trim().toLowerCase();
+                            if (!PAID_PAYMENT_STATUSES.has(verifiedPaymentStatus)) {
+                                emitBookingError({
+                                    error: 'Pagamento não confirmado',
+                                    message: 'O pagamento desta corrida ainda não foi confirmado.',
+                                    code: 'PAYMENT_NOT_CONFIRMED',
+                                    paymentStatus: verifiedPaymentStatus,
+                                    retryAfterSec: 2
+                                }, 'PAYMENT_NOT_CONFIRMED');
+                                return;
+                            }
+
+                            normalizedPaymentStatus = verifiedPaymentStatus;
+                            hasConfirmedPayment = true;
+
+                            const amountFromPaymentStatus = Number(paymentStatusCheck.amount);
+                            if (
+                                (!Number.isFinite(resolvedPaymentAmountInCents) || resolvedPaymentAmountInCents <= 0) &&
+                                Number.isFinite(amountFromPaymentStatus) &&
+                                amountFromPaymentStatus > 0
+                            ) {
+                                resolvedPaymentAmountInCents = Math.round(amountFromPaymentStatus);
+                            }
+                        } catch (paymentVerificationError) {
+                            logStructured('warn', 'Falha ao validar status do pagamento antes do createBooking', {
+                                userId,
+                                eventType: 'createBooking',
+                                paymentChargeId,
+                                error: paymentVerificationError.message
+                            });
+
+                            emitBookingError({
+                                error: 'Erro ao validar pagamento',
+                                message: 'Não foi possível validar o pagamento agora. Tente novamente em instantes.',
+                                code: 'PAYMENT_VERIFICATION_ERROR',
+                                retryAfterSec: 2
+                            }, 'PAYMENT_VERIFICATION_ERROR');
+                            return;
+                        }
+                    }
 
                     // Backpressure no início do fluxo: evita empilhar corrida quando fila regional já está saturada.
                     const queueBackpressureEnabled = process.env.ENABLE_QUEUE_BACKPRESSURE !== 'false';
@@ -2346,14 +4468,22 @@ io.on('connection', async (socket) => {
                             );
                             const queueKey = `ride_queue:${regionHashForGuard}:pending`;
                             const redis = redisPool.getConnection();
-                            const pendingRides = await redis.zcard(queueKey);
+                            const queuePipeline = redis.pipeline();
+                            queuePipeline.zcard(queueKey);
+                            queuePipeline.scard('online_drivers');
+                            const queuePipelineResult = await queuePipeline.exec();
+                            const pendingResult = queuePipelineResult?.[0] || [];
+                            const onlineDriversResult = queuePipelineResult?.[1] || [];
+                            if (pendingResult[0]) throw pendingResult[0];
+                            if (onlineDriversResult[0]) throw onlineDriversResult[0];
+                            const pendingRides = Number(pendingResult[1] || 0);
                             const pendingLimit = Number.parseInt(process.env.QUEUE_PENDING_LIMIT_PER_REGION || '5000', 10);
-                            const onlineDrivers = await redis.sCard('online_drivers');
+                            const onlineDrivers = Number(onlineDriversResult[1] || 0);
                             const minOnlineDriversBypass = Number.parseInt(process.env.QUEUE_BACKPRESSURE_MIN_ONLINE_DRIVERS_BYPASS || '200', 10);
 
                             if (pendingRides >= pendingLimit && onlineDrivers < minOnlineDriversBypass) {
                                 const retryAfterSec = Number.parseInt(process.env.QUEUE_BACKPRESSURE_RETRY_AFTER_SEC || '3', 10);
-                                socket.emit('bookingError', {
+                                emitBookingError({
                                     error: 'Sistema temporariamente congestionado',
                                     message: 'Estamos com alta demanda na sua região. Tente novamente em alguns segundos.',
                                     code: 'QUEUE_BACKPRESSURE',
@@ -2363,7 +4493,7 @@ io.on('connection', async (socket) => {
                                     onlineDrivers,
                                     minOnlineDriversBypass,
                                     regionHash: regionHashForGuard
-                                });
+                                }, 'QUEUE_BACKPRESSURE');
 
                                 logStructured('warn', 'createBooking bloqueado por backpressure', {
                                     userId,
@@ -2385,10 +4515,20 @@ io.on('connection', async (socket) => {
                     }
 
                     // ✅ NOVO: Idempotency - Verificar se requisição já foi processada
+                    const dedupeWindowBucket = Math.floor(Date.now() / 15000);
+                    const createBookingFingerprint = buildCreateBookingIdempotencyFingerprint({
+                        pickupLocation,
+                        destinationLocation,
+                        carType: requestedCarType,
+                        paymentMethod,
+                        estimatedFare,
+                        paymentStatus: normalizedPaymentStatus,
+                        dedupeWindowBucket
+                    });
                     const idempotencyKey = data.idempotencyKey || idempotencyService.generateKey(
                         userId,
                         'createBooking',
-                        `${pickupLocation.lat}_${pickupLocation.lng}_${destinationLocation.lat}_${destinationLocation.lng}_${Date.now()}`
+                        createBookingFingerprint
                     );
 
                     const idempotencyCheck = await idempotencyService.checkAndSet(idempotencyKey);
@@ -2419,6 +4559,17 @@ io.on('connection', async (socket) => {
                                 });
                             }
                             socket.emit('bookingCreated', cachedResult);
+                            if (customerId) {
+                                try {
+                                    socket.to(`customer_${customerId}`).emit('bookingCreated', cachedResult);
+                                } catch (mirrorEmitError) {
+                                    logStructured('warn', 'Falha ao espelhar bookingCreated cached para room do cliente', {
+                                        customerId,
+                                        eventType: 'createBooking',
+                                        error: mirrorEmitError.message
+                                    });
+                                }
+                            }
                             return;
                         } else {
                             // Requisição duplicada mas sem resultado cached (ainda processando)
@@ -2427,12 +4578,12 @@ io.on('connection', async (socket) => {
                                 eventType: 'createBooking',
                                 idempotencyKey
                             });
-                            socket.emit('bookingError', {
+                            emitBookingError({
                                 error: 'Requisição duplicada',
                                 message: 'Esta requisição já está sendo processada. Aguarde...',
                                 code: 'DUPLICATE_REQUEST',
                                 retryAfterSec: 1
-                            });
+                            }, 'DUPLICATE_REQUEST');
                             return;
                         }
                     }
@@ -2449,25 +4600,35 @@ io.on('connection', async (socket) => {
                         const geofenceValidation = geofenceService.validateRideLocations(pickupLocation, destinationLocation);
 
                         if (!geofenceValidation.valid) {
-                            const metadata = getSocketMetadata(socket);
-                            await auditService.logRideAction(userId, 'createBooking', null, {
-                                error: 'Geofence validation failed',
-                                geofenceError: geofenceValidation.error,
-                                code: geofenceValidation.code,
-                                details: geofenceValidation.details
-                            }, false, geofenceValidation.error, metadata);
-
                             logStructured('warn', 'Geofence validation falhou', {
                                 userId,
                                 eventType: 'createBooking',
                                 geofenceError: geofenceValidation.error
                             });
 
-                            socket.emit('bookingError', {
+                            emitBookingError({
                                 error: geofenceValidation.error,
                                 message: geofenceValidation.error,
                                 code: geofenceValidation.code,
                                 details: geofenceValidation.details
+                            }, geofenceValidation.code || 'GEOFENCE_VALIDATION_ERROR');
+
+                            // Auditoria em background para não bloquear ACK ao app.
+                            setImmediate(async () => {
+                                try {
+                                    await auditService.logRideAction(userId, 'createBooking', null, {
+                                        error: 'Geofence validation failed',
+                                        geofenceError: geofenceValidation.error,
+                                        code: geofenceValidation.code,
+                                        details: geofenceValidation.details
+                                    }, false, geofenceValidation.error, metadata);
+                                } catch (auditError) {
+                                    logStructured('warn', 'Falha ao registrar auditoria de geofence createBooking (background)', {
+                                        userId,
+                                        eventType: 'createBooking',
+                                        error: auditError.message
+                                    });
+                                }
                             });
                             return;
                         }
@@ -2480,25 +4641,130 @@ io.on('connection', async (socket) => {
 
                     // Guarda de negócio: se a corrida já está paga, validar disponibilidade real antes de criar booking.
                     if (hasConfirmedPayment) {
-                        const availability = await findAvailableDriversForPickup(pickupLocation, {
+                        const availability = await hasEligibleDriversForPickupFast(pickupLocation, {
                             carType: requestedCarType
                         });
 
                         if (!availability.success) {
-                            socket.emit('bookingError', {
+                            emitBookingError({
                                 error: 'Não foi possível validar disponibilidade de motoristas',
                                 message: 'Falha temporária ao validar disponibilidade. Tente novamente em instantes.',
                                 code: 'AVAILABILITY_CHECK_FAILED'
-                            });
+                            }, 'AVAILABILITY_CHECK_FAILED');
                             return;
                         }
 
-                        if ((availability.drivers || []).length === 0) {
-                            socket.emit('bookingError', {
+                        if (!availability.hasDrivers) {
+                            let refundPayload = null;
+                            if (paymentChargeId && Number.isFinite(resolvedPaymentAmountInCents) && resolvedPaymentAmountInCents > 0) {
+                                const refundRequestedAt = new Date().toISOString();
+                                try {
+                                    const refundResult = await paymentServiceSingleton.processRefund(
+                                        paymentChargeId,
+                                        resolvedPaymentAmountInCents,
+                                        'No driver found before booking creation'
+                                    );
+
+                                    if (refundResult?.success) {
+                                        refundPayload = {
+                                            refundStatus: 'REFUNDED',
+                                            refundAmount: Number((resolvedPaymentAmountInCents / 100).toFixed(2)),
+                                            refundAmountInCents: resolvedPaymentAmountInCents,
+                                            cancellationFee: 0,
+                                            cancellationFeeInCents: 0,
+                                            refundId: refundResult.refundId || null,
+                                            chargeId: paymentChargeId,
+                                            refundRequestedAt
+                                        };
+
+                                        io.to(`customer_${customerId}`).emit('paymentRefunded', {
+                                            success: true,
+                                            rideId: paymentReferenceRideId || null,
+                                            chargeId: paymentChargeId,
+                                            refundStatus: 'REFUNDED',
+                                            refundAmount: refundPayload.refundAmount,
+                                            cancellationFee: 0,
+                                            refundId: refundPayload.refundId,
+                                            initiatedBy: 'system',
+                                            initiatedById: 'createBooking_no_driver',
+                                            timestamp: refundRequestedAt
+                                        });
+
+                                        setImmediate(async () => {
+                                            try {
+                                                await auditService.logPaymentAction(
+                                                    userId,
+                                                    'autoRefundNoDriverBeforeBooking',
+                                                    paymentReferenceRideId || null,
+                                                    paymentChargeId,
+                                                    {
+                                                        amountInCents: resolvedPaymentAmountInCents,
+                                                        refundId: refundPayload.refundId,
+                                                        reason: 'No driver found before booking creation'
+                                                    },
+                                                    true,
+                                                    null,
+                                                    metadata
+                                                );
+                                            } catch (auditError) {
+                                                logStructured('warn', 'Falha ao registrar auditoria de auto-refund sem motorista (background)', {
+                                                    userId,
+                                                    paymentChargeId,
+                                                    eventType: 'createBooking',
+                                                    error: auditError.message
+                                                });
+                                            }
+                                        });
+                                    } else {
+                                        refundPayload = {
+                                            refundStatus: 'REFUND_PENDING',
+                                            refundAmount: Number((resolvedPaymentAmountInCents / 100).toFixed(2)),
+                                            refundAmountInCents: resolvedPaymentAmountInCents,
+                                            cancellationFee: 0,
+                                            cancellationFeeInCents: 0,
+                                            chargeId: paymentChargeId,
+                                            refundRequestedAt,
+                                            refundError: refundResult?.error || refundResult?.details || 'Falha ao processar reembolso'
+                                        };
+
+                                        logStructured('warn', 'Reembolso automático não concluído no createBooking sem motorista', {
+                                            userId,
+                                            customerId,
+                                            paymentChargeId,
+                                            eventType: 'createBooking',
+                                            refundError: refundPayload.refundError
+                                        });
+                                    }
+                                } catch (refundError) {
+                                    refundPayload = {
+                                        refundStatus: 'REFUND_PENDING',
+                                        refundAmount: Number((resolvedPaymentAmountInCents / 100).toFixed(2)),
+                                        refundAmountInCents: resolvedPaymentAmountInCents,
+                                        cancellationFee: 0,
+                                        cancellationFeeInCents: 0,
+                                        chargeId: paymentChargeId,
+                                        refundRequestedAt,
+                                        refundError: refundError.message
+                                    };
+
+                                    logStructured('warn', 'Erro ao processar auto-refund no createBooking sem motorista', {
+                                        userId,
+                                        customerId,
+                                        paymentChargeId,
+                                        eventType: 'createBooking',
+                                        error: refundError.message
+                                    });
+                                }
+                            }
+
+                            emitBookingError({
                                 error: 'Não há motoristas disponíveis na sua região no momento',
-                                message: 'Não foi possível iniciar a busca de corrida agora porque não há parceiros disponíveis.',
-                                code: 'NO_DRIVERS_AVAILABLE'
-                            });
+                                message: refundPayload?.refundStatus === 'REFUNDED'
+                                    ? 'Não há parceiros disponíveis no momento. O estorno do seu PIX já foi iniciado automaticamente.'
+                                    : 'Não foi possível iniciar a busca de corrida agora porque não há parceiros disponíveis.',
+                                code: 'NO_DRIVERS_AVAILABLE',
+                                ...(refundPayload || {})
+                            }, 'NO_DRIVERS_AVAILABLE');
                             return;
                         }
                     }
@@ -2530,6 +4796,10 @@ io.on('connection', async (socket) => {
                             pickupLocation,
                             destinationLocation,
                             estimatedFare: estimatedFare || 0,
+                            routeDistanceKm: routeDistanceKm || 0,
+                            routeDurationSecs: routeDurationSecs || 0,
+                            tollFee: tollFee || 0,
+                            carType: requestedCarType,
                             paymentMethod: paymentMethod || 'pix',
                             traceId, // ✅ Passar traceId para o command
                             correlationId // ✅ Passar correlationId para o command
@@ -2541,11 +4811,9 @@ io.on('connection', async (socket) => {
 
                         // ✅ MÉTRICAS: Registrar latência do command
                         commandLatency = (Date.now() - commandStartTime) / 1000;
-                        metrics.recordCommand('request_ride', commandLatency, result.success);
                     } catch (error) {
                         endSpanError(commandSpan, error);
                         commandLatency = (Date.now() - commandStartTime) / 1000;
-                        metrics.recordCommand('request_ride', commandLatency, false);
                         throw error;
                     }
 
@@ -2556,22 +4824,31 @@ io.on('connection', async (socket) => {
                     });
 
                     if (!result.success) {
-                        // Erro no command
-                        const metadata = getSocketMetadata(socket);
-                        await auditService.logRideAction(userId, 'createBooking', null, {
-                            error: result.error
-                        }, false, result.error, metadata);
-
                         logStructured('error', 'RequestRideCommand falhou', {
                             userId,
                             eventType: 'createBooking',
                             error: result.error
                         });
 
-                        socket.emit('bookingError', {
+                        emitBookingError({
                             error: result.error,
                             message: result.error,
                             code: 'COMMAND_ERROR'
+                        }, 'COMMAND_ERROR');
+
+                        // Auditoria em background para não bloquear ACK ao app.
+                        setImmediate(async () => {
+                            try {
+                                await auditService.logRideAction(userId, 'createBooking', null, {
+                                    error: result.error
+                                }, false, result.error, metadata);
+                            } catch (auditError) {
+                                logStructured('warn', 'Falha ao registrar auditoria de commandError createBooking (background)', {
+                                    userId,
+                                    eventType: 'createBooking',
+                                    error: auditError.message
+                                });
+                            }
                         });
                         return;
                     }
@@ -2579,53 +4856,136 @@ io.on('connection', async (socket) => {
                     // Command executado com sucesso
                     const { bookingId, bookingData: commandBookingData, event, regionHash } = result.data;
 
-                    // ✅ REFATORAÇÃO: Publicar evento no EventBus (listeners vão notificar motoristas)
-                    if (event) {
-                        // ✅ FASE 1.3: Criar span para Event publish
-                        const { trace: otelTrace } = require('@opentelemetry/api');
-                        const activeSpan = otelTrace.getActiveSpan();
-                        const eventSpan = createEventSpan(tracer, 'ride.requested', activeSpan, {
-                            'event.booking_id': bookingId,
-                            'correlation.id': correlationId // ✅ Passar correlationId
+                    // Persistir metadados de pagamento antes do dispatch.
+                    // Isso evita janelas onde consumidores veem a corrida como "unpaid".
+                    try {
+                        const paymentDispatchService = require('./services/payment-dispatch-service');
+                        const paymentAmountInCents = Number.isFinite(resolvedPaymentAmountInCents)
+                            ? String(Math.round(resolvedPaymentAmountInCents))
+                            : '';
+                        const temporaryRideId = paymentReferenceRideId;
+
+                        if (hasConfirmedPayment) {
+                            await paymentDispatchService.markBookingPaymentConfirmed({
+                                bookingId,
+                                chargeId: paymentChargeId,
+                                temporaryRideId,
+                                amountInCents: paymentAmountInCents,
+                                paymentStatus: 'in_holding',
+                                source: 'createBooking'
+                            });
+                        } else {
+                            await paymentDispatchService.linkPaymentToBooking({
+                                bookingId,
+                                chargeId: paymentChargeId,
+                                temporaryRideId
+                            });
+                        }
+                    } catch (bookingMetaError) {
+                        logStructured('warn', 'Falha ao persistir metadados de pagamento antes do dispatch', {
+                            bookingId,
+                            error: bookingMetaError.message,
+                            eventType: 'createBooking'
                         });
+                    }
 
-                        const eventStartTime = Date.now();
-                        try {
-                            await runInSpan(eventSpan, async () => {
-                                await eventBus.publish({
-                                    eventType: 'ride.requested',
-                                    data: event
-                                });
-                            });
-
-                            // ✅ Salvar contexto do evento para linkar com listeners
-                            const eventSpanContext = eventSpan.spanContext();
-                            if (event.data) {
-                                event.data._otelSpanContext = eventSpanContext;
-                                // ✅ CRÍTICO: Serializar correlationId e traceId no evento
-                                if (!event.data.metadata) {
-                                    event.data.metadata = {};
-                                }
-                                event.data.metadata.correlationId = correlationId;
-                                event.data.metadata.traceId = eventSpanContext.traceId;
-                                event.data.metadata.spanId = eventSpanContext.spanId;
-                            }
-
-                            // ✅ MÉTRICAS: Registrar evento publicado
-                            metrics.recordEventPublished('ride.requested');
-
-                            endSpanSuccess(eventSpan, {
-                                'event.latency_ms': Date.now() - eventStartTime
-                            });
-                        } catch (error) {
-                            endSpanError(eventSpan, error);
-                            throw error;
+                    // ✅ REFATORAÇÃO: Publicar evento no EventBus sem travar ACK (quando habilitado).
+                    if (event) {
+                        if (!event.data) {
+                            event.data = {};
+                        }
+                        if (!event.data.metadata) {
+                            event.data.metadata = {};
+                        }
+                        if (hasConfirmedPayment && SKIP_EVENTBUS_NOTIFY_FOR_PAID_BOOKINGS) {
+                            event.data.skipDriverNotify = true;
+                            event.data.metadata.skipDriverNotify = true;
+                            event.data.metadata.dispatchStrategy = 'payment_dispatch_only';
                         }
 
-                        const eventLatency = Date.now() - eventStartTime;
-                        logEvent('ride.requested', 'published', {
-                            bookingId,
-                            latency_ms: eventLatency
+                        const publishRideRequestedEvent = async () => {
+                            const { trace: otelTrace } = require('@opentelemetry/api');
+                            const activeSpan = otelTrace.getActiveSpan();
+                            const eventSpan = createEventSpan(tracer, 'ride.requested', activeSpan, {
+                                'event.booking_id': bookingId,
+                                'correlation.id': correlationId
+                            });
+
+                            const eventStartTime = Date.now();
+                            try {
+                                await runInSpan(eventSpan, async () => {
+                                    await eventBus.publish({
+                                        eventType: 'ride.requested',
+                                        data: event
+                                    });
+                                });
+
+                                const eventSpanContext = eventSpan.spanContext();
+                                if (event.data) {
+                                    event.data._otelSpanContext = eventSpanContext;
+                                    if (!event.data.metadata) {
+                                        event.data.metadata = {};
+                                    }
+                                    event.data.metadata.correlationId = correlationId;
+                                    event.data.metadata.traceId = eventSpanContext.traceId;
+                                    event.data.metadata.spanId = eventSpanContext.spanId;
+                                }
+
+                                endSpanSuccess(eventSpan, {
+                                    'event.latency_ms': Date.now() - eventStartTime
+                                });
+                            } catch (error) {
+                                endSpanError(eventSpan, error);
+                                throw error;
+                            }
+
+                            const eventLatency = Date.now() - eventStartTime;
+                            logEvent('ride.requested', 'published', {
+                                bookingId,
+                                latency_ms: eventLatency
+                            });
+                        };
+
+                        if (CREATE_BOOKING_BACKGROUND_EVENT_PUBLISH) {
+                            setImmediate(async () => {
+                                try {
+                                    await publishRideRequestedEvent();
+                                } catch (publishError) {
+                                    logStructured('warn', 'createBooking: falha ao publicar ride.requested em background', {
+                                        bookingId,
+                                        eventType: 'createBooking',
+                                        error: publishError.message
+                                    });
+                                }
+                            });
+                        } else {
+                            await publishRideRequestedEvent();
+                        }
+                    }
+
+                    // Dispatch crítico deve ocorrer no gateway para evitar jitter de rede/consumer no caminho de matching.
+                    if (
+                        event
+                        && ENABLE_DIRECT_RIDE_REQUESTED_DISPATCH
+                        && RUNTIME_ROLE === 'gateway'
+                        && !ENABLE_EMBEDDED_LISTENER_WORKERS
+                    ) {
+                        setImmediate(async () => {
+                            try {
+                                await notifyDriversInline(
+                                    {
+                                        eventType: 'ride.requested',
+                                        data: event
+                                    },
+                                    io
+                                );
+                            } catch (dispatchError) {
+                                logStructured('warn', 'createBooking: falha no dispatch inline de ride.requested', {
+                                    bookingId,
+                                    eventType: 'createBooking',
+                                    error: dispatchError.message
+                                });
+                            }
                         });
                     }
 
@@ -2635,22 +4995,39 @@ io.on('connection', async (socket) => {
                         customerId,
                         pickupLocation,
                         destinationLocation,
-                        estimatedFare,
+                        estimatedFare: commandBookingData?.estimatedFare || estimatedFare || 0,
                         paymentMethod,
                         status: 'requested'
                     });
 
-                    // FASE 10: Registrar início de match para métricas
-                    await metricsCollector.recordMatchStart(bookingId, Date.now());
+                    // FASE 10 / Auditoria em background para não atrasar ACK ao app.
+                    setImmediate(async () => {
+                        try {
+                            await metricsCollector.recordMatchStart(bookingId, Date.now());
+                        } catch (metricsError) {
+                            logStructured('warn', 'Falha ao registrar match start (background)', {
+                                bookingId,
+                                eventType: 'createBooking',
+                                error: metricsError.message
+                            });
+                        }
 
-                    // ✅ NOVO: Log de auditoria para criação de corrida bem-sucedida
-                    await auditService.logRideAction(userId, 'createBooking', bookingId, {
-                        pickupLocation,
-                        destinationLocation,
-                        estimatedFare,
-                        paymentMethod,
-                        regionHash
-                    }, true, null, metadata);
+                        try {
+                            await auditService.logRideAction(userId, 'createBooking', bookingId, {
+                                pickupLocation,
+                                destinationLocation,
+                                estimatedFare,
+                                paymentMethod,
+                                regionHash
+                            }, true, null, metadata);
+                        } catch (auditError) {
+                            logStructured('warn', 'Falha ao registrar auditoria createBooking (background)', {
+                                bookingId,
+                                eventType: 'createBooking',
+                                error: auditError.message
+                            });
+                        }
+                    });
 
                     // Verificar demanda e notificar motoristas offline (em background)
                     setImmediate(async () => {
@@ -2677,39 +5054,77 @@ io.on('connection', async (socket) => {
                         }
                     });
 
-                    // ✅ NOVO: Salvar corrida no Firestore
-                    try {
-                        const ridePersistenceService = require('./services/ride-persistence-service');
-                        await ridePersistenceService.saveRide({
-                            rideId: bookingId,
-                            bookingId: bookingId,
-                            passengerId: customerId,
-                            pickupLocation: pickupLocation,
-                            destinationLocation: destinationLocation,
-                            estimatedFare: estimatedFare || 0,
-                            paymentMethod: paymentMethod || 'pix',
-                            paymentStatus: data.paymentStatus || 'pending_payment',
-                            status: 'pending',
-                            carType: data.carType || null
-                        });
-                    } catch (persistError) {
-                        logStructured('error', 'Erro ao salvar corrida no Firestore', {
-                            bookingId,
-                            error: persistError.message,
-                            eventType: 'createBooking'
-                        });
-                        // Não bloquear criação da corrida se persistência falhar
-                    }
+                    // Persistência em Firestore em background (best-effort).
+                    setImmediate(async () => {
+                        try {
+                            const ridePersistenceService = require('./services/ride-persistence-service');
+                            await ridePersistenceService.saveRide({
+                                rideId: bookingId,
+                                bookingId: bookingId,
+                                passengerId: customerId,
+                                pickupLocation: pickupLocation,
+                                destinationLocation: destinationLocation,
+                                estimatedFare: estimatedFare || 0,
+                                paymentMethod: paymentMethod || 'pix',
+                                paymentStatus: normalizedPaymentStatus,
+                                status: 'pending',
+                                carType: data.carType || null
+                            });
+                        } catch (persistError) {
+                            logStructured('error', 'Erro ao salvar corrida no Firestore (background)', {
+                                bookingId,
+                                error: persistError.message,
+                                eventType: 'createBooking'
+                            });
+                        }
+                    });
 
                     // Persistir metadados adicionais de pagamento/disponibilidade no booking para validações posteriores.
                     try {
                         const redis = redisPool.getConnection();
-                        await redis.hset(`booking:${bookingId}`, {
+                        const bookingMetaPipeline = redis.pipeline();
+                        bookingMetaPipeline.hset(`booking:${bookingId}`, {
                             paymentStatus: normalizedPaymentStatus,
                             carType: requestedCarType || '',
-                            paymentChargeId: data?.paymentData?.chargeId || data?.paymentId || '',
-                            paymentAmountInCents: data?.paymentData?.amountInCents ? String(data.paymentData.amountInCents) : ''
+                            paymentChargeId: paymentChargeId,
+                            paymentAmountInCents: Number.isFinite(resolvedPaymentAmountInCents)
+                                ? String(Math.round(resolvedPaymentAmountInCents))
+                                : '',
+                            paymentReferenceRideId: paymentReferenceRideId
                         });
+
+                        if (customerActiveBookingKey) {
+                            bookingMetaPipeline.set(
+                                customerActiveBookingKey,
+                                bookingId,
+                                'EX',
+                                CUSTOMER_ACTIVE_BOOKING_TTL_SECONDS
+                            );
+                        }
+                        const bookingMetaPipelineResult = await bookingMetaPipeline.exec();
+                        const bookingMetaPipelineError = bookingMetaPipelineResult?.find(([commandError]) => commandError)?.[0];
+                        if (bookingMetaPipelineError) {
+                            throw bookingMetaPipelineError;
+                        }
+
+                        if (supersededBookingId) {
+                            setImmediate(async () => {
+                                try {
+                                    await redis.hset(`booking:${supersededBookingId}`, {
+                                        supersededByBookingId: bookingId,
+                                        supersededAt: new Date().toISOString()
+                                    });
+                                } catch (supersedeCleanupError) {
+                                    logStructured('warn', 'Falha ao atualizar vínculo de supersedência em background', {
+                                        customerId,
+                                        previousBookingId: supersededBookingId,
+                                        replacementBookingId: bookingId,
+                                        eventType: 'createBooking',
+                                        error: supersedeCleanupError.message
+                                    });
+                                }
+                            });
+                        }
                     } catch (bookingMetaError) {
                         logStructured('warn', 'Falha ao persistir metadados no booking', {
                             bookingId,
@@ -2737,14 +5152,16 @@ io.on('connection', async (socket) => {
                     const bookingResponse = {
                         success: true,
                         bookingId,
+                        idempotencyKey,
                         message: 'Corrida solicitada com sucesso',
                         traceId: finalTraceId, // ✅ Incluir traceId no nível raiz
                         data: {
                             bookingId,
+                            idempotencyKey,
                             customerId,
                             pickupLocation,
                             destinationLocation,
-                            estimatedFare,
+                            estimatedFare: commandBookingData?.estimatedFare || estimatedFare || 0,
                             paymentMethod,
                             status: 'requested',
                             timestamp: new Date().toISOString(),
@@ -2759,8 +5176,18 @@ io.on('connection', async (socket) => {
                         eventType: 'createBooking'
                     });
 
-                    // ✅ NOVO: Cachear resultado para idempotency (DEPOIS de garantir traceId)
-                    await idempotencyService.cacheResult(idempotencyKey, bookingResponse);
+                    // Cachear resultado de idempotência em background para não atrasar ACK.
+                    setImmediate(async () => {
+                        try {
+                            await idempotencyService.cacheResult(idempotencyKey, bookingResponse);
+                        } catch (idempotencyCacheError) {
+                            logStructured('warn', 'Falha ao cachear resultado de idempotência (background)', {
+                                bookingId,
+                                eventType: 'createBooking',
+                                error: idempotencyCacheError.message
+                            });
+                        }
+                    });
 
                     // ✅ GARANTIR que traceId esteja presente antes de emitir (dupla verificação)
                     if (!bookingResponse.traceId) {
@@ -2785,6 +5212,7 @@ io.on('connection', async (socket) => {
                     const responseToEmit = {
                         success: bookingResponse.success,
                         bookingId: bookingResponse.bookingId,
+                        idempotencyKey: bookingResponse.idempotencyKey,
                         message: bookingResponse.message,
                         traceId: bookingResponse.traceId, // ✅ Forçar inclusão explícita
                         data: {
@@ -2803,6 +5231,18 @@ io.on('connection', async (socket) => {
 
                     // Emitir confirmação para o cliente
                     socket.emit('bookingCreated', responseToEmit);
+                    if (customerId) {
+                        try {
+                            socket.to(`customer_${customerId}`).emit('bookingCreated', responseToEmit);
+                        } catch (mirrorEmitError) {
+                            logStructured('warn', 'Falha ao espelhar bookingCreated para room do cliente', {
+                                customerId,
+                                bookingId,
+                                eventType: 'createBooking',
+                                error: mirrorEmitError.message
+                            });
+                        }
+                    }
 
                     // ✅ DEBUG: Log após emitir para confirmar
                     if (process.env.NODE_ENV === 'development' || process.env.DEBUG_WEBSOCKET === 'true') {
@@ -2813,7 +5253,47 @@ io.on('connection', async (socket) => {
                         });
                     }
 
+                    // Para corridas já pagas, acionar dispatch imediato e resiliente sem depender de fila/event bus.
+                    if (hasConfirmedPayment) {
+                        const paymentDispatchService = require('./services/payment-dispatch-service');
+                        const paidDispatchMaxAttempts = Number.parseInt(
+                            process.env.PAID_BOOKING_DISPATCH_MAX_ATTEMPTS || '120',
+                            10
+                        );
+                        const paidDispatchRetryDelayMs = Number.parseInt(
+                            process.env.PAID_BOOKING_DISPATCH_RETRY_DELAY_MS || '1000',
+                            10
+                        );
+
+                        paymentDispatchService.triggerDispatchAfterPayment({
+                            bookingId,
+                            io,
+                            pickupLocation,
+                            source: 'createBooking_paid_immediate',
+                            force: true,
+                            maxAttempts: paidDispatchMaxAttempts,
+                            retryDelayMs: paidDispatchRetryDelayMs
+                        }).then((dispatchResult) => {
+                            logStructured('info', 'createBooking: dispatch imediato para corrida paga processado', {
+                                bookingId,
+                                eventType: 'createBooking',
+                                success: Boolean(dispatchResult?.success),
+                                skipped: Boolean(dispatchResult?.skipped),
+                                reason: dispatchResult?.reason || null,
+                                attempts: dispatchResult?.attempts || 1
+                            });
+                        }).catch((dispatchError) => {
+                            logStructured('warn', 'createBooking: falha ao acionar dispatch imediato para corrida paga', {
+                                bookingId,
+                                eventType: 'createBooking',
+                                error: dispatchError.message
+                            });
+                        });
+                    }
+
                     const totalLatency = Date.now() - startTime;
+                    recordRealtimeMetricSafe('create_booking', 'success');
+                    recordHotpathLatencySafe('create_booking', totalLatency, true);
                     logStructured('info', 'createBooking concluído com sucesso', {
                         userId,
                         bookingId,
@@ -2823,6 +5303,8 @@ io.on('connection', async (socket) => {
                 });
             } catch (error) {
                 endSpanError(socketSpan, error);
+                recordRealtimeMetricSafe('create_booking', 'error_exception');
+                recordHotpathLatencySafe('create_booking', Date.now() - bookingHandlerStartedAt, false);
                 console.error('🔥 ERRO CRÍTICO EM CREATE_BOOKING:', error); // ✅ DEBUG DIRETO
                 logStructured('error', 'Erro ao criar corrida', {
                     userId: socket.userId || data?.customerId || socket.id,
@@ -2834,12 +5316,26 @@ io.on('connection', async (socket) => {
                 // ✅ NOVO: Log de auditoria para erro na criação de corrida
                 const userId = socket.userId || data?.customerId || socket.id;
                 const metadata = getSocketMetadata(socket);
-                await auditService.logRideAction(userId, 'createBooking', null, {
-                    error: error.message,
-                    stack: error.stack
-                }, false, error.message, metadata);
+                emitBookingError({
+                    error: 'Erro interno do servidor',
+                    message: 'Não foi possível concluir sua solicitação agora. Tente novamente em instantes.',
+                    code: 'INTERNAL_SERVER_ERROR'
+                }, 'INTERNAL_SERVER_ERROR');
 
-                socket.emit('bookingError', { error: 'Erro interno do servidor' });
+                setImmediate(async () => {
+                    try {
+                        await auditService.logRideAction(userId, 'createBooking', null, {
+                            error: error.message,
+                            stack: error.stack
+                        }, false, error.message, metadata);
+                    } catch (auditError) {
+                        logStructured('warn', 'Falha ao registrar auditoria de erro crítico createBooking (background)', {
+                            userId,
+                            eventType: 'createBooking',
+                            error: auditError.message
+                        });
+                    }
+                });
             }
         });
     });
@@ -2915,55 +5411,18 @@ io.on('connection', async (socket) => {
 
                 // Usar dados sanitizados
                 const { bookingId, paymentMethod, paymentId, amount } = validation.sanitized;
-
-                // Guarda de negócio: só confirma pagamento se houver motorista elegível no momento.
-                let bookingPickupLocation = null;
-                let bookingCarType = null;
-                try {
-                    const redis = redisPool.getConnection();
-                    const bookingData = await redis.hgetall(`booking:${bookingId}`);
-                    bookingPickupLocation = parseBookingLocation(bookingData?.pickupLocation);
-                    bookingCarType = bookingData?.carType || null;
-                } catch (bookingLookupError) {
-                    logStructured('warn', 'confirmPayment: erro ao buscar booking para validação de disponibilidade', {
-                        bookingId,
-                        eventType: 'confirmPayment',
-                        error: bookingLookupError.message
-                    });
-                }
-
-                const payloadPickupLocation = data?.pickupLocation;
-                const pickupLocationToValidate = bookingPickupLocation || payloadPickupLocation;
-
-                if (pickupLocationToValidate?.lat && pickupLocationToValidate?.lng) {
-                    const availability = await findAvailableDriversForPickup(pickupLocationToValidate, {
-                        carType: bookingCarType
-                    });
-
-                    if (!availability.success) {
-                        socket.emit('paymentError', {
-                            error: 'Não foi possível validar disponibilidade de motoristas',
-                            message: 'Falha temporária ao validar disponibilidade. Tente novamente em instantes.',
-                            code: 'AVAILABILITY_CHECK_FAILED'
-                        });
-                        return;
-                    }
-
-                    if ((availability.drivers || []).length === 0) {
-                        socket.emit('paymentError', {
-                            error: 'Não há motoristas disponíveis na região',
-                            message: 'Pagamento bloqueado para evitar cobrança sem parceiro disponível.',
-                            code: 'NO_DRIVERS_AVAILABLE'
-                        });
-                        return;
-                    }
-                }
+                const paymentMockEnabled =
+                    data?.mockPayment === true ||
+                    data?.__mockPayment === true ||
+                    String(process.env.MOCK_PAYMENT_FOR_TESTS || '').toLowerCase() === 'true';
+                const skipAvailabilityCheck =
+                    String(process.env.CONFIRM_PAYMENT_SKIP_AVAILABILITY_CHECK || 'true').toLowerCase() === 'true';
 
                 // ✅ NOVO: Idempotency - Verificar se requisição já foi processada
                 const idempotencyKey = data.idempotencyKey || idempotencyService.generateKey(
                     userId,
                     'confirmPayment',
-                    `${bookingId}_${paymentId || Date.now()}`
+                    `${bookingId}_${paymentId || paymentMethod || amount || 'unknown'}`
                 );
 
                 const idempotencyCheck = await idempotencyService.checkAndSet(idempotencyKey);
@@ -2995,38 +5454,107 @@ io.on('connection', async (socket) => {
                     }
                 }
 
-                // ✅ NOVO: Salvar payment holding como "in_holding" para permitir startTrip
+                // Guarda de negócio:
+                // A elegibilidade já é garantida no pool ativo de dispatch; aqui só validamos em modo best-effort.
+                let bookingPickupLocation = null;
+                let bookingCarType = null;
+                const payloadPickupLocation = parseBookingLocation(data?.pickupLocation);
+                const shouldLoadBookingContext = !payloadPickupLocation || !skipAvailabilityCheck;
                 try {
-                    const PaymentService = require('./services/payment-service');
-                    const paymentService = new PaymentService();
-                    const paymentHoldingTimeoutMs = Number.parseInt(process.env.PAYMENT_HOLDING_TIMEOUT_MS || '2500', 10);
-
-                    // Converter amount para centavos se necessário
-                    const amountInCents = typeof amount === 'number' && amount < 1000 ? Math.round(amount * 100) : Math.round(amount);
-
-                    await Promise.race([
-                        paymentService.savePaymentHolding(bookingId, {
-                            status: 'in_holding',
-                            amount: amountInCents,
-                            paymentMethod: paymentMethod,
-                            paymentId: paymentId || `payment_${Date.now()}`,
-                            paidAt: new Date().toISOString(),
-                            confirmedAt: new Date().toISOString()
-                        }),
-                        new Promise((_, reject) => setTimeout(() => reject(new Error('payment_holding_timeout')), paymentHoldingTimeoutMs))
-                    ]);
-
-                    logStructured('info', 'Payment holding salvo', {
-                        bookingId,
-                        eventType: 'confirmPayment'
-                    });
-                } catch (holdingError) {
-                    logStructured('error', 'Erro ao salvar payment holding', {
+                    if (shouldLoadBookingContext) {
+                        const redis = redisPool.getConnection();
+                        const [bookingPickupRaw, bookingCarTypeRaw] = await redis.hmget(
+                            `booking:${bookingId}`,
+                            'pickupLocation',
+                            'carType'
+                        );
+                        bookingPickupLocation = parseBookingLocation(bookingPickupRaw);
+                        bookingCarType = bookingCarTypeRaw || null;
+                    }
+                } catch (bookingLookupError) {
+                    logStructured('warn', 'confirmPayment: erro ao buscar booking para validação de disponibilidade', {
                         bookingId,
                         eventType: 'confirmPayment',
-                        error: holdingError.message
+                        error: bookingLookupError.message
                     });
-                    // Não bloquear confirmação se holding falhar
+                }
+
+                const pickupLocationToValidate = payloadPickupLocation || bookingPickupLocation;
+
+                if (!paymentMockEnabled && !skipAvailabilityCheck && pickupLocationToValidate?.lat && pickupLocationToValidate?.lng) {
+                    try {
+                        const availabilityTimeoutMs = Number.parseInt(
+                            process.env.CONFIRM_PAYMENT_AVAILABILITY_TIMEOUT_MS || '800',
+                            10
+                        );
+                        const availability = await Promise.race([
+                            findAvailableDriversForPickup(pickupLocationToValidate, { carType: bookingCarType }),
+                            new Promise((_, reject) => setTimeout(() => reject(new Error('availability_check_timeout')), availabilityTimeoutMs))
+                        ]);
+
+                        if (!availability?.success) {
+                            logStructured('warn', 'confirmPayment: pre-check de disponibilidade indisponível (seguindo fluxo)', {
+                                bookingId,
+                                eventType: 'confirmPayment',
+                                code: 'AVAILABILITY_CHECK_FAILED'
+                            });
+                        } else if ((availability.drivers || []).length === 0) {
+                            logStructured('warn', 'confirmPayment: sem motoristas no pre-check (seguindo fluxo)', {
+                                bookingId,
+                                eventType: 'confirmPayment',
+                                code: 'NO_DRIVERS_AVAILABLE'
+                            });
+                        }
+                    } catch (availabilityError) {
+                        logStructured('warn', 'confirmPayment: erro no pre-check de disponibilidade (seguindo fluxo)', {
+                            bookingId,
+                            eventType: 'confirmPayment',
+                            error: availabilityError.message
+                        });
+                    }
+                }
+
+                const amountInCents = typeof amount === 'number' && amount < 1000
+                    ? Math.round(amount * 100)
+                    : Math.round(amount || 0);
+                const paymentHoldingTimeoutMs = Number.parseInt(
+                    process.env.PAYMENT_HOLDING_TIMEOUT_MS || '2500',
+                    10
+                );
+                const persistPaymentHolding = async () => {
+                    try {
+                        await Promise.race([
+                            paymentServiceSingleton.savePaymentHolding(bookingId, {
+                                status: 'in_holding',
+                                amount: amountInCents,
+                                paymentMethod: paymentMethod,
+                                paymentId: paymentId || `payment_${Date.now()}`,
+                                paidAt: new Date().toISOString(),
+                                confirmedAt: new Date().toISOString()
+                            }),
+                            new Promise((_, reject) => setTimeout(() => reject(new Error('payment_holding_timeout')), paymentHoldingTimeoutMs))
+                        ]);
+
+                        logStructured('info', 'Payment holding salvo', {
+                            bookingId,
+                            eventType: 'confirmPayment'
+                        });
+                    } catch (holdingError) {
+                        logStructured('error', 'Erro ao salvar payment holding', {
+                            bookingId,
+                            eventType: 'confirmPayment',
+                            error: holdingError.message
+                        });
+                        // Não bloquear confirmação se holding falhar
+                    }
+                };
+
+                if (CONFIRM_PAYMENT_SYNC_HOLDING) {
+                    await persistPaymentHolding();
+                } else {
+                    setImmediate(() => {
+                        persistPaymentHolding().catch(() => { });
+                    });
                 }
 
                 // Simular processamento do pagamento
@@ -3039,13 +5567,22 @@ io.on('connection', async (socket) => {
                     timestamp: new Date().toISOString()
                 };
 
-                // ✅ NOVO: Log de auditoria para pagamento confirmado
-                const chargeId = paymentId || `payment_${Date.now()}`;
-                await auditService.logPaymentAction(userId, 'confirmPayment', bookingId, chargeId, {
-                    paymentMethod,
-                    amount,
-                    amountInCents: typeof amount === 'number' && amount < 1000 ? Math.round(amount * 100) : Math.round(amount)
-                }, true, null, metadata);
+                try {
+                    await paymentDispatchService.markBookingPaymentConfirmed({
+                        bookingId,
+                        chargeId: paymentId || data?.chargeId || '',
+                        temporaryRideId: data?.rideId || data?.temporaryRideId || '',
+                        amountInCents,
+                        paymentStatus: 'in_holding',
+                        source: 'socket_confirmPayment'
+                    });
+                } catch (markPaymentError) {
+                    logStructured('warn', 'confirmPayment: falha ao marcar booking como pago', {
+                        bookingId,
+                        eventType: 'confirmPayment',
+                        error: markPaymentError.message
+                    });
+                }
 
                 // Emitir confirmação
                 socket.emit('paymentConfirmed', {
@@ -3053,6 +5590,48 @@ io.on('connection', async (socket) => {
                     bookingId,
                     message: 'Pagamento confirmado com sucesso',
                     data: paymentData
+                });
+
+                // Auditoria em background para não bloquear ACK de pagamento.
+                setImmediate(async () => {
+                    try {
+                        const chargeId = paymentId || `payment_${Date.now()}`;
+                        await auditService.logPaymentAction(userId, 'confirmPayment', bookingId, chargeId, {
+                            paymentMethod,
+                            amount,
+                            amountInCents
+                        }, true, null, metadata);
+                    } catch (auditError) {
+                        logStructured('warn', 'confirmPayment: falha ao gravar auditoria em background', {
+                            bookingId,
+                            eventType: 'confirmPayment',
+                            error: auditError.message
+                        });
+                    }
+                });
+
+                // Disparar busca de motorista sem esperar o próximo tick para reduzir janela de corrida.
+                paymentDispatchService.triggerDispatchAfterPayment({
+                    bookingId,
+                    io,
+                    pickupLocation: pickupLocationToValidate,
+                    source: 'socket_confirmPayment',
+                    force: true
+                }).then((dispatchResult) => {
+                    logStructured('info', 'confirmPayment: dispatch pós-pagamento processado', {
+                        bookingId,
+                        eventType: 'confirmPayment',
+                        success: Boolean(dispatchResult?.success),
+                        skipped: Boolean(dispatchResult?.skipped),
+                        reason: dispatchResult?.reason || null,
+                        attempts: dispatchResult?.attempts || 1
+                    });
+                }).catch((dispatchError) => {
+                    logStructured('warn', 'confirmPayment: falha ao acionar dispatch pós-pagamento', {
+                        bookingId,
+                        eventType: 'confirmPayment',
+                        error: dispatchError.message
+                    });
                 });
 
                 const totalLatency = Date.now() - startTime;
@@ -3178,13 +5757,23 @@ io.on('connection', async (socket) => {
                     driverId: socket.id
                 });
 
-                // Notificar cliente
-                io.emit('rideAccepted', {
-                    success: true,
-                    bookingId,
-                    message: 'Motorista aceitou sua corrida',
-                    driverId: socket.id
-                });
+                // Notificar somente o passageiro dono da corrida (evita fan-out global).
+                const redis = redisPool.getConnection();
+                const { customerId } = await resolveBookingParties(redis, bookingId);
+                if (customerId) {
+                    io.to(`customer_${customerId}`).emit('rideAccepted', {
+                        success: true,
+                        bookingId,
+                        message: 'Motorista aceitou sua corrida',
+                        driverId: socket.id
+                    });
+                } else {
+                    logStructured('warn', 'rideAccepted sem customerId resolvido (fan-out bloqueado)', {
+                        service: 'websocket',
+                        bookingId,
+                        socketId: socket.id
+                    });
+                }
 
                 logStructured('info', 'Motorista aceitou corrida', {
                     service: 'websocket',
@@ -3383,7 +5972,6 @@ io.on('connection', async (socket) => {
 
                     // ✅ MÉTRICAS: Registrar latência do command
                     const commandLatency = (Date.now() - acceptStartTime) / 1000;
-                    metrics.recordCommand('accept_ride', commandLatency, result.success);
 
                     // ✅ MÉTRICAS: Registrar corrida aceita
                     if (result.success) {
@@ -3395,7 +5983,6 @@ io.on('connection', async (socket) => {
                 } catch (error) {
                     endSpanError(commandSpan, error);
                     const commandLatency = (Date.now() - acceptStartTime) / 1000;
-                    metrics.recordCommand('accept_ride', commandLatency, false);
                     throw error;
                 }
 
@@ -3414,156 +6001,273 @@ io.on('connection', async (socket) => {
                 }
 
                 // Command executado com sucesso
-                const { bookingId: resultBookingId, driverId: resultDriverId, customerId, event, pickupLocation } = result.data;
+                const {
+                    bookingId: resultBookingId,
+                    driverId: resultDriverId,
+                    customerId,
+                    event
+                } = result.data;
+                const { resolveAcceptRidePayload } = require('./utils/accept-ride-payload');
+                const acceptRideRedis = redisPool.getConnection();
+                const {
+                    pickupLocation,
+                    destinationLocation,
+                    estimatedFare,
+                    driverAcceptedLocation,
+                    driverDistanceToPickupKm,
+                    estimatedArrivalToPickupMin
+                } = await resolveAcceptRidePayload(acceptRideRedis, bookingIdToUse, result.data);
 
-                // ✅ REFATORAÇÃO: Publicar evento no EventBus (listeners vão notificar passageiro e motorista)
-                if (event) {
-                    // ✅ FASE 1.3: Criar span para Event publish
-                    const eventSpan = createEventSpan(tracer, 'ride.accepted', activeSpan, {
-                        'event.booking_id': resultBookingId || bookingIdToUse,
-                        'correlation.id': correlationId // ✅ Passar correlationId
-                    });
+                const driverNamePayload = String(
+                    driverData?.driver?.name ||
+                    driverData?.driverName ||
+                    socket?.driverName ||
+                    'Motorista Leaf'
+                ).trim();
+                const driverVehicleModel = String(
+                    driverData?.driver?.vehicle?.model ||
+                    driverData?.vehicle?.model ||
+                    socket?.vehicleModel ||
+                    ''
+                ).trim();
+                const driverVehiclePlate = String(
+                    driverData?.driver?.vehicle?.plate ||
+                    driverData?.vehicle?.plate ||
+                    socket?.vehiclePlate ||
+                    ''
+                ).trim();
+                const acceptedLat = toFiniteNumber(
+                    driverData?.driver?.location?.lat ??
+                    driverData?.location?.lat ??
+                    driverAcceptedLocation?.lat
+                );
+                const acceptedLng = toFiniteNumber(
+                    driverData?.driver?.location?.lng ??
+                    driverData?.location?.lng ??
+                    driverAcceptedLocation?.lng
+                );
+                const acceptedLocation = (acceptedLat !== null && acceptedLng !== null)
+                    ? { lat: acceptedLat, lng: acceptedLng }
+                    : null;
 
-                    const eventStartTime = Date.now();
-                    try {
-                        await runInSpan(eventSpan, async () => {
-                            await eventBus.publish({
-                                eventType: 'ride.accepted',
-                                data: event
-                            });
-                        });
-
-                        // ✅ Salvar contexto do evento para linkar com listeners
-                        const eventSpanContext = eventSpan.spanContext();
-                        if (event.data) {
-                            event.data._otelSpanContext = eventSpanContext;
-                            // ✅ CRÍTICO: Serializar correlationId e traceId no evento
-                            if (!event.data.metadata) {
-                                event.data.metadata = {};
-                            }
-                            event.data.metadata.correlationId = correlationId;
-                            event.data.metadata.traceId = eventSpanContext.traceId;
-                            event.data.metadata.spanId = eventSpanContext.spanId;
-                        }
-
-                        // ✅ MÉTRICAS: Registrar evento publicado
-                        metrics.recordEventPublished('ride.accepted');
-
-                        endSpanSuccess(eventSpan, {
-                            'event.latency_ms': Date.now() - eventStartTime
-                        });
-                    } catch (error) {
-                        endSpanError(eventSpan, error);
-                        throw error;
+                if (event?.data) {
+                    if (!event.data.metadata || typeof event.data.metadata !== 'object') {
+                        event.data.metadata = {};
                     }
-
-                    const eventLatency = Date.now() - eventStartTime;
-                    logEvent('ride.accepted', 'published', {
-                        bookingId: bookingIdToUse,
-                        latency_ms: eventLatency
-                    });
+                    if (!event.data.metadata.socketDelivery || typeof event.data.metadata.socketDelivery !== 'object') {
+                        event.data.metadata.socketDelivery = {};
+                    }
+                    event.data.metadata.socketDelivery.driverRideAcceptedEmitted = true;
+                    event.data.metadata.socketDelivery.passengerRideAcceptedEmitted = Boolean(customerId);
                 }
 
-                // ✅ NOVO: Atualizar motorista da corrida no Firestore
-                try {
-                    const ridePersistenceService = require('./services/ride-persistence-service');
-                    await ridePersistenceService.updateRideDriver(bookingIdToUse, driverId);
-                } catch (persistError) {
-                    logStructured('error', 'Erro ao atualizar motorista da corrida no Firestore', {
-                        bookingId: bookingIdToUse,
-                        driverId,
-                        eventType: 'acceptRide',
-                        error: persistError.message
-                    });
-                    // Não bloquear aceitação se persistência falhar
+                let estimatedBreakdown = null;
+                const estimatedFareValue = Number(estimatedFare);
+                if (Number.isFinite(estimatedFareValue) && estimatedFareValue >= 0) {
+                    estimatedBreakdown = paymentServiceSingleton.calculateFareBreakdownFromReais(estimatedFareValue, 0);
                 }
 
-                // Preparar resposta de sucesso para driver
                 const acceptRideResponse = {
                     success: true,
                     bookingId: bookingIdToUse,
                     driverId: driverId,
                     message: 'Corrida aceita com sucesso',
-                    timestamp: new Date().toISOString()
+                    timestamp: new Date().toISOString(),
+                    pickupLocation: pickupLocation || null,
+                    destinationLocation: destinationLocation || null,
+                    estimatedFare: Number.isFinite(estimatedFareValue) ? estimatedFareValue : null,
+                    driverDistanceToPickupKm: Number.isFinite(Number(driverDistanceToPickupKm))
+                        ? Number(driverDistanceToPickupKm)
+                        : null,
+                    estimatedArrivalToPickupMin: Number.isFinite(Number(estimatedArrivalToPickupMin))
+                        ? Number(estimatedArrivalToPickupMin)
+                        : null,
+                    ...(estimatedBreakdown ? {
+                        estimatedOperationalFee: estimatedBreakdown.operationalFee,
+                        estimatedPaymentIntermediationFee: estimatedBreakdown.paymentIntermediationFee,
+                        estimatedTotalFees: estimatedBreakdown.totalFees,
+                        estimatedDriverNetAmount: estimatedBreakdown.driverNetAmount
+                    } : {}),
+                    driver: {
+                        id: driverId,
+                        name: driverNamePayload || 'Motorista Leaf',
+                        vehicle: {
+                            model: driverVehicleModel,
+                            plate: driverVehiclePlate
+                        },
+                        ...(acceptedLocation ? { location: acceptedLocation } : {})
+                    },
+                    ...(acceptedLocation ? { location: acceptedLocation } : {}),
+                    vehicle: {
+                        model: driverVehicleModel,
+                        plate: driverVehiclePlate
+                    }
                 };
 
                 // ✅ Emitir confirmação IMEDIATAMENTE para o motorista que solicitou o aceite
                 socket.emit('rideAccepted', acceptRideResponse);
+                if (customerId) {
+                    io.to(`customer_${customerId}`).emit('rideAccepted', {
+                        ...acceptRideResponse,
+                        message: 'Motorista aceitou sua corrida'
+                    });
+                }
 
-                // ✅ NOVO: Ativar corrida em bookings:active
-                try {
-                    const bookingData = await redis.hgetall(`booking:${bookingIdToUse}`);
-                    if (bookingData && Object.keys(bookingData).length > 0) {
-                        // Preparar dados para o Hash de corridas ativas (mantendo compatibilidade legada)
-                        const activeBookingData = {
-                            ...bookingData,
-                            status: 'ACCEPTED',
-                            driverId
-                        };
-
-                        // Mapeamento para compatibilidade com handlers antigos (changeDestination, etc)
+                // Pós-processamento em background para manter acceptRide responsivo.
+                setImmediate(async () => {
+                    try {
+                        // Encerrar imediatamente a busca desta corrida e liberar motoristas concorrentes.
+                        // Mantém o lock do motorista vencedor para evitar corrida com novas ofertas.
                         try {
-                            if (bookingData.pickupLocation) activeBookingData.pickup = JSON.parse(bookingData.pickupLocation);
-                            if (bookingData.destinationLocation) activeBookingData.drop = JSON.parse(bookingData.destinationLocation);
-                            if (bookingData.estimatedFare) activeBookingData.estimate = parseFloat(bookingData.estimatedFare);
-                        } catch (e) {
-                            logger.warn(`⚠️ [acceptRide] Erro ao parsear campos para bookings:active: ${e.message}`);
+                            const GradualRadiusExpander = require('./services/gradual-radius-expander');
+                            const expander = new GradualRadiusExpander(io);
+                            await expander.stopSearch(bookingIdToUse, {
+                                preserveDriverId: driverId
+                            });
+                        } catch (stopSearchError) {
+                            logStructured('warn', 'acceptRide: falha ao encerrar busca pós-aceite', {
+                                driverId,
+                                bookingId: bookingIdToUse,
+                                eventType: 'acceptRide',
+                                error: stopSearchError.message
+                            });
                         }
 
-                        const bookingDataStr = JSON.stringify(activeBookingData);
-                        const flowDebugEnabled = process.env.DEBUG_RIDE_FLOW === 'true';
-                        if (flowDebugEnabled) {
-                            logStructured('debug', 'acceptRide: persistindo booking ativo', {
+                        // ✅ REFATORAÇÃO: Publicar evento no EventBus (listeners vão notificar passageiro e motorista)
+                        if (event) {
+                            const eventSpan = createEventSpan(tracer, 'ride.accepted', activeSpan, {
+                                'event.booking_id': resultBookingId || bookingIdToUse,
+                                'correlation.id': correlationId
+                            });
+
+                            const eventStartTime = Date.now();
+                            try {
+                                await runInSpan(eventSpan, async () => {
+                                    await eventBus.publish({
+                                        eventType: 'ride.accepted',
+                                        data: event
+                                    });
+                                });
+
+                                const eventSpanContext = eventSpan.spanContext();
+                                if (event.data) {
+                                    event.data._otelSpanContext = eventSpanContext;
+                                    if (!event.data.metadata) {
+                                        event.data.metadata = {};
+                                    }
+                                    event.data.metadata.correlationId = correlationId;
+                                    event.data.metadata.traceId = eventSpanContext.traceId;
+                                    event.data.metadata.spanId = eventSpanContext.spanId;
+                                }
+
+                                endSpanSuccess(eventSpan, {
+                                    'event.latency_ms': Date.now() - eventStartTime
+                                });
+                            } catch (eventError) {
+                                endSpanError(eventSpan, eventError);
+                                throw eventError;
+                            }
+
+                            const eventLatency = Date.now() - eventStartTime;
+                            logEvent('ride.accepted', 'published', {
+                                bookingId: bookingIdToUse,
+                                latency_ms: eventLatency
+                            });
+                        }
+
+                        // ✅ Atualizar motorista da corrida no Firestore (best-effort)
+                        try {
+                            const ridePersistenceService = require('./services/ride-persistence-service');
+                            await ridePersistenceService.updateRideDriver(bookingIdToUse, driverId);
+                        } catch (persistError) {
+                            logStructured('error', 'Erro ao atualizar motorista da corrida no Firestore', {
+                                bookingId: bookingIdToUse,
+                                driverId,
+                                eventType: 'acceptRide',
+                                error: persistError.message
+                            });
+                        }
+
+                        // ✅ Ativar corrida em bookings:active (compatibilidade)
+                        if (!redisPool) {
+                            throw new Error('redisPool indisponível no acceptRide');
+                        }
+                        await redisPool.ensureConnection();
+                        const redis = redisPool.getConnection();
+                        if (!redis) {
+                            throw new Error('Conexão Redis indisponível no acceptRide');
+                        }
+
+                        const bookingData = await redis.hgetall(`booking:${bookingIdToUse}`);
+                        if (bookingData && Object.keys(bookingData).length > 0) {
+                            const activeBookingData = {
+                                ...bookingData,
+                                status: 'ACCEPTED',
+                                driverId
+                            };
+
+                            try {
+                                if (bookingData.pickupLocation) activeBookingData.pickup = JSON.parse(bookingData.pickupLocation);
+                                if (bookingData.destinationLocation) activeBookingData.drop = JSON.parse(bookingData.destinationLocation);
+                                if (bookingData.estimatedFare) activeBookingData.estimate = parseFloat(bookingData.estimatedFare);
+                            } catch (e) {
+                                logger.warn(`⚠️ [acceptRide] Erro ao parsear campos para bookings:active: ${e.message}`);
+                            }
+
+                            const bookingDataStr = JSON.stringify(activeBookingData);
+                            const flowDebugEnabled = process.env.DEBUG_RIDE_FLOW === 'true';
+                            if (flowDebugEnabled) {
+                                logStructured('debug', 'acceptRide: persistindo booking ativo', {
+                                    service: 'acceptRide',
+                                    bookingId: bookingIdToUse
+                                });
+                            }
+
+                            const keyType = await redis.type('bookings:active');
+                            if (keyType !== 'hash' && keyType !== 'none') {
+                                logStructured('warn', 'acceptRide: key bookings:active com tipo inválido, corrigindo', {
+                                    service: 'acceptRide',
+                                    keyType
+                                });
+                                await redis.del('bookings:active');
+                            }
+
+                            await redis.hset('bookings:active', bookingIdToUse, bookingDataStr);
+                            if (flowDebugEnabled) {
+                                logStructured('debug', 'acceptRide: booking ativo persistido', {
+                                    service: 'acceptRide',
+                                    bookingId: bookingIdToUse
+                                });
+                            }
+
+                            if (io.activeBookings) {
+                                io.activeBookings.set(bookingIdToUse, {
+                                    ...io.activeBookings.get(bookingIdToUse),
+                                    ...activeBookingData
+                                });
+                            }
+                        } else if (process.env.DEBUG_RIDE_FLOW === 'true') {
+                            logStructured('debug', 'acceptRide: bookingData vazio ao ativar corrida', {
                                 service: 'acceptRide',
                                 bookingId: bookingIdToUse
                             });
                         }
 
-                        // Validar tipo de dado no Redis antes de inserir
-                        const keyType = await redis.type('bookings:active');
-                        if (keyType !== 'hash' && keyType !== 'none') {
-                            logStructured('warn', 'acceptRide: key bookings:active com tipo inválido, corrigindo', {
-                                service: 'acceptRide',
-                                keyType
-                            });
-                            await redis.del('bookings:active');
-                        }
+                        await idempotencyService.cacheResult(idempotencyKey, acceptRideResponse);
 
-                        await redis.hset('bookings:active', bookingIdToUse, bookingDataStr);
-                        if (flowDebugEnabled) {
-                            logStructured('debug', 'acceptRide: booking ativo persistido', {
-                                service: 'acceptRide',
-                                bookingId: bookingIdToUse
-                            });
+                        try {
+                            await metricsCollector.recordMatchEnd(bookingIdToUse, driverId, Date.now());
+                            await metricsCollector.recordDriverAcceptance(bookingIdToUse, driverId, Date.now());
+                        } catch (metErr) {
+                            logger.error(`❌ [acceptRide] Erro em métricas: ${metErr.message}`);
                         }
-
-                        // ✅ Sincronizar activeBookings
-                        if (io.activeBookings) {
-                            io.activeBookings.set(bookingIdToUse, {
-                                ...io.activeBookings.get(bookingIdToUse),
-                                ...activeBookingData
-                            });
-                        }
-                    } else if (process.env.DEBUG_RIDE_FLOW === 'true') {
-                        logStructured('debug', 'acceptRide: bookingData vazio ao ativar corrida', {
-                            service: 'acceptRide',
+                    } catch (backgroundError) {
+                        logError(backgroundError, {
+                            context: 'Erro no pós-processamento do acceptRide',
                             bookingId: bookingIdToUse
                         });
                     }
-                } catch (e) {
-                    logError(e, { context: 'Erro ao ativar corrida em bookings:active (hset)', bookingId: bookingIdToUse });
-                }
-
-                // ✅ Cachear resultado para idempotency
-                await idempotencyService.cacheResult(idempotencyKey, acceptRideResponse);
-
-                try {
-                    // FASE 10: Registrar fim de match e aceitação para métricas
-                    await metricsCollector.recordMatchEnd(bookingIdToUse, driverId, Date.now());
-                    await metricsCollector.recordDriverAcceptance(bookingIdToUse, driverId, Date.now());
-                } catch (metErr) {
-                    logger.error(`❌ [acceptRide] Erro em métricas: ${metErr.message}`);
-                }
+                });
 
                 // ✅ NOTIFICAÇÃO JÁ FOI ENVIADA PARA PASSAGEIRO PELOS LISTENERS via EventBus
                 const totalLatency = Date.now() - startTime;
@@ -3802,6 +6506,10 @@ io.on('connection', async (socket) => {
                 // Usar dados sanitizados
                 const { bookingId, startLocation } = validation.sanitized;
 
+                // Ao iniciar, encerra janela de embarque pendente (se existir).
+                clearBoardingWindowTimeout(bookingId);
+                clearTripIntegrityConfirmationTimeout(bookingId);
+
                 // ✅ Obter conexão Redis
                 const redis = redisPool.getConnection();
 
@@ -3810,19 +6518,44 @@ io.on('connection', async (socket) => {
                     return;
                 }
 
-                // ✅ VALIDAÇÃO CRÍTICA: Verificar se pagamento está confirmado (in_holding)
-                // 🔒 SEGURANÇA: Bloquear início de corrida se pagamento não estiver confirmado
+                // ✅ VALIDAÇÃO CRÍTICA: Verificar se pagamento está confirmado
+                // Primeiro tenta fast-path no Redis (booking hash), fallback para serviço externo.
                 try {
-                    const PaymentService = require('./services/payment-service');
-                    const paymentService = new PaymentService();
+                    const normalizeStatus = (value) => String(value || '').trim().toLowerCase();
+                    const parsePositiveAmount = (value) => {
+                        const parsed = Number.parseFloat(value);
+                        return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+                    };
+                    const validStatuses = new Set(['in_holding', 'confirmed', 'paid']);
 
-                    // Buscar status do pagamento
-                    const paymentStatus = await paymentService.getPaymentStatus(bookingId);
+                    let paymentStatus = null;
+                    const bookingSnapshot = await redis.hgetall(`booking:${bookingId}`);
+                    if (bookingSnapshot && Object.keys(bookingSnapshot).length > 0) {
+                        const redisStatus = normalizeStatus(
+                            bookingSnapshot.paymentStatus ||
+                            bookingSnapshot.payment_status ||
+                            bookingSnapshot.statusPagamento
+                        );
+                        if (validStatuses.has(redisStatus)) {
+                            paymentStatus = {
+                                success: true,
+                                status: redisStatus,
+                                amount:
+                                    parsePositiveAmount(bookingSnapshot.amount) ||
+                                    parsePositiveAmount(bookingSnapshot.finalFare) ||
+                                    parsePositiveAmount(bookingSnapshot.estimatedFare)
+                            };
+                        }
+                    }
 
-                    // ✅ VALIDAÇÃO 1: Verificar se a verificação foi bem-sucedida
-                    if (!paymentStatus.success) {
-                        // Verificar se é erro de "não encontrado" ou erro real de verificação
-                        const isNotFound = paymentStatus.error && (
+                    if (!paymentStatus) {
+                        const PaymentService = require('./services/payment-service');
+                        const paymentService = new PaymentService();
+                        paymentStatus = await paymentService.getPaymentStatus(bookingId);
+                    }
+
+                    if (!paymentStatus?.success) {
+                        const isNotFound = paymentStatus?.error && (
                             paymentStatus.error.includes('não encontrado') ||
                             paymentStatus.error.includes('not found') ||
                             paymentStatus.error.includes('não existe') ||
@@ -3831,7 +6564,6 @@ io.on('connection', async (socket) => {
                         );
 
                         if (isNotFound) {
-                            // Pagamento não encontrado
                             logStructured('warn', 'Tentativa de iniciar corrida sem pagamento', {
                                 driverId,
                                 bookingId,
@@ -3845,27 +6577,26 @@ io.on('connection', async (socket) => {
                                 paymentStatus: null
                             });
                             return;
-                        } else {
-                            // Erro real na verificação
-                            logStructured('error', 'Erro ao verificar status do pagamento', {
-                                driverId,
-                                bookingId,
-                                eventType: 'startTrip',
-                                error: paymentStatus.error
-                            });
-
-                            socket.emit('tripStartError', {
-                                error: 'Erro ao verificar pagamento',
-                                message: 'Não foi possível verificar o status do pagamento. Tente novamente.',
-                                code: 'PAYMENT_VERIFICATION_ERROR'
-                            });
-                            return;
                         }
+
+                        logStructured('error', 'Erro ao verificar status do pagamento', {
+                            driverId,
+                            bookingId,
+                            eventType: 'startTrip',
+                            error: paymentStatus?.error || 'unknown_payment_validation_error'
+                        });
+
+                        socket.emit('tripStartError', {
+                            error: 'Erro ao verificar pagamento',
+                            message: 'Não foi possível verificar o status do pagamento. Tente novamente.',
+                            code: 'PAYMENT_VERIFICATION_ERROR'
+                        });
+                        return;
                     }
 
-                    // ✅ VALIDAÇÃO 2: Verificar se pagamento existe (double-check)
-                    if (!paymentStatus.status || paymentStatus.status === null || paymentStatus.status === undefined) {
-                        logStructured('warn', 'Tentativa de iniciar corrida sem pagamento (double-check)', {
+                    const normalizedStatus = normalizeStatus(paymentStatus.status);
+                    if (!normalizedStatus) {
+                        logStructured('warn', 'Tentativa de iniciar corrida sem status de pagamento válido', {
                             driverId,
                             bookingId,
                             eventType: 'startTrip'
@@ -3880,32 +6611,27 @@ io.on('connection', async (socket) => {
                         return;
                     }
 
-                    // ✅ VALIDAÇÃO 3: Verificar se pagamento está em status válido para iniciar corrida
-                    // Status válidos: 'in_holding' (pagamento confirmado e em holding)
-                    const validStatuses = ['in_holding'];
-
-                    if (!validStatuses.includes(paymentStatus.status)) {
+                    if (!validStatuses.has(normalizedStatus)) {
                         logStructured('warn', 'Tentativa de iniciar corrida com pagamento em status inválido', {
                             driverId,
                             bookingId,
                             eventType: 'startTrip',
-                            currentStatus: paymentStatus.status,
-                            requiredStatus: 'in_holding'
+                            currentStatus: normalizedStatus,
+                            requiredStatus: 'in_holding|confirmed|paid'
                         });
 
                         socket.emit('tripStartError', {
                             error: 'Pagamento não confirmado',
-                            message: `A corrida só pode ser iniciada após confirmação do pagamento. Status atual: ${paymentStatus.status}. Status requerido: in_holding`,
+                            message: `A corrida só pode ser iniciada após confirmação do pagamento. Status atual: ${normalizedStatus}.`,
                             code: 'PAYMENT_NOT_CONFIRMED',
-                            paymentStatus: paymentStatus.status,
-                            requiredStatus: 'in_holding',
+                            paymentStatus: normalizedStatus,
+                            requiredStatus: 'in_holding|confirmed|paid',
                             amount: paymentStatus.amount || null
                         });
                         return;
                     }
 
-                    // ✅ VALIDAÇÃO 4: Verificar se há valor do pagamento (opcional, mas recomendado)
-                    if (paymentStatus.amount && paymentStatus.amount <= 0) {
+                    if (paymentStatus.amount && Number(paymentStatus.amount) <= 0) {
                         logStructured('warn', 'Tentativa de iniciar corrida com valor de pagamento inválido', {
                             service: 'websocket',
                             operation: 'startTrip',
@@ -3918,21 +6644,20 @@ io.on('connection', async (socket) => {
                             error: 'Valor de pagamento inválido',
                             message: 'O valor do pagamento é inválido. Entre em contato com o suporte.',
                             code: 'INVALID_PAYMENT_AMOUNT',
-                            paymentStatus: paymentStatus.status
+                            paymentStatus: normalizedStatus
                         });
                         return;
                     }
 
-                    // ✅ Pagamento validado com sucesso
                     logStructured('info', 'Pagamento confirmado para corrida', {
                         service: 'websocket',
                         operation: 'startTrip',
                         bookingId,
                         driverId,
-                        paymentStatus: paymentStatus.status,
-                        amount: paymentStatus.amount ? (paymentStatus.amount / 100).toFixed(2) : 'N/A'
+                        paymentStatus: normalizedStatus,
+                        source: paymentStatus?.success ? 'redis_or_payment_service' : 'unknown',
+                        amount: paymentStatus.amount || null
                     });
-
                 } catch (paymentCheckError) {
                     logStructured('error', 'Erro crítico ao verificar pagamento para corrida', {
                         service: 'websocket',
@@ -3943,16 +6668,6 @@ io.on('connection', async (socket) => {
                         stack: paymentCheckError.stack
                     });
 
-                    // Log de auditoria para segurança
-                    logStructured('warn', 'Tentativa de iniciar corrida bloqueada - Erro crítico na verificação', {
-                        service: 'websocket',
-                        operation: 'startTrip',
-                        bookingId,
-                        driverId,
-                        error: paymentCheckError.message
-                    });
-
-                    // Em caso de erro na verificação, bloquear por segurança (fail-safe)
                     socket.emit('tripStartError', {
                         error: 'Erro ao verificar pagamento',
                         message: 'Não foi possível verificar o status do pagamento. A corrida não pode ser iniciada por segurança.',
@@ -4000,11 +6715,9 @@ io.on('connection', async (socket) => {
 
                     // ✅ MÉTRICAS: Registrar latência do command
                     const commandLatency = (Date.now() - commandStartTime) / 1000;
-                    metrics.recordCommand('start_trip', commandLatency, result.success);
                 } catch (error) {
                     endSpanError(commandSpan, error);
                     const commandLatency = (Date.now() - commandStartTime) / 1000;
-                    metrics.recordCommand('start_trip', commandLatency, false);
                     throw error;
                 }
 
@@ -4033,105 +6746,6 @@ io.on('connection', async (socket) => {
                 // Command executado com sucesso
                 const { bookingId: resultBookingId, driverId: resultDriverId, customerId, event, startLocation: resultStartLocation } = result.data;
 
-                // ✅ REFATORAÇÃO: Publicar evento no EventBus (listeners vão iniciar timer)
-                if (event) {
-                    // ✅ FASE 1.3: Criar span para Event publish
-                    const eventSpan = createEventSpan(tracer, 'ride.started', activeSpan, {
-                        'event.booking_id': bookingId,
-                        'correlation.id': correlationId
-                    });
-
-                    const eventStartTime = Date.now();
-                    try {
-                        await runInSpan(eventSpan, async () => {
-                            await eventBus.publish({
-                                eventType: 'ride.started',
-                                data: event
-                            });
-                        });
-
-                        // ✅ Salvar contexto do evento para linkar com listeners
-                        const eventSpanContext = eventSpan.spanContext();
-                        if (event.data) {
-                            event.data._otelSpanContext = eventSpanContext;
-                        }
-
-                        const eventLatency = Date.now() - eventStartTime;
-                        logEvent('ride.started', 'published', {
-                            bookingId,
-                            latency_ms: eventLatency
-                        });
-                    } catch (error) {
-                        endSpanError(eventSpan, error);
-                        throw error;
-                    }
-                }
-
-                // ✅ NOVO: Marcar corrida como iniciada no Firestore
-                try {
-                    const ridePersistenceService = require('./services/ride-persistence-service');
-                    await ridePersistenceService.markRideStarted(bookingId);
-
-                    // ✅ NOVO: Atualizar estado em bookings:active e activeBookings
-                    const bookingDataRaw = await redis.hgetall(`booking:${bookingId}`);
-                    if (bookingDataRaw && Object.keys(bookingDataRaw).length > 0) {
-                        const activeBookingData = {
-                            ...bookingDataRaw,
-                            status: 'IN_PROGRESS'
-                        };
-
-                        // Mapeamento para compatibilidade legada
-                        try {
-                            if (bookingDataRaw.pickupLocation) activeBookingData.pickup = JSON.parse(bookingDataRaw.pickupLocation);
-                            if (bookingDataRaw.destinationLocation) activeBookingData.drop = JSON.parse(bookingDataRaw.destinationLocation);
-                            if (bookingDataRaw.estimatedFare) activeBookingData.estimate = parseFloat(bookingDataRaw.estimatedFare);
-                        } catch (e) {
-                            // Erro silencioso no parse
-                        }
-
-                        const bookingDataStr = JSON.stringify(activeBookingData);
-                        const flowDebugEnabled = process.env.DEBUG_RIDE_FLOW === 'true';
-                        if (flowDebugEnabled) {
-                            logStructured('debug', 'startTrip: persistindo booking ativo', {
-                                service: 'startTrip',
-                                bookingId
-                            });
-                        }
-
-                        // Validar tipo de dado no Redis antes de inserir
-                        const keyType = await redis.type('bookings:active');
-                        if (keyType !== 'hash' && keyType !== 'none') {
-                            logStructured('warn', 'startTrip: key bookings:active com tipo inválido, corrigindo', {
-                                service: 'startTrip',
-                                keyType
-                            });
-                            await redis.del('bookings:active');
-                        }
-
-                        await redis.hset('bookings:active', bookingId, bookingDataStr);
-                        if (flowDebugEnabled) {
-                            logStructured('debug', 'startTrip: booking ativo persistido', {
-                                service: 'startTrip',
-                                bookingId
-                            });
-                        }
-
-                        if (io.activeBookings && io.activeBookings.has(bookingId)) {
-                            io.activeBookings.set(bookingId, {
-                                ...io.activeBookings.get(bookingId),
-                                ...activeBookingData
-                            });
-                        }
-                    }
-                } catch (persistError) {
-                    logStructured('error', 'Erro ao marcar corrida como iniciada no Firestore/Redis', {
-                        bookingId,
-                        eventType: 'startTrip',
-                        error: persistError.message
-                    });
-                    // Não bloquear início da viagem se persistência falhar
-                }
-
                 // ✅ Padronizar uso de rooms para alta escalabilidade e confiabilidade
                 const tripStartedData = {
                     success: true,
@@ -4144,6 +6758,14 @@ io.on('connection', async (socket) => {
                 // ✅ Notificar driver via room (escalável e confiável)
                 io.to(`driver_${driverId}`).emit('tripStarted', tripStartedData);
 
+                const customerIdToNotify = customerId || io.activeBookings?.get(bookingId)?.customerId || null;
+                if (customerIdToNotify) {
+                    io.to(`customer_${customerIdToNotify}`).emit('tripStarted', {
+                        ...tripStartedData,
+                        message: 'Viagem iniciada'
+                    });
+                }
+
                 const totalLatency = Date.now() - startTime;
                 logStructured('info', 'startTrip concluído com sucesso', {
                     driverId,
@@ -4152,133 +6774,197 @@ io.on('connection', async (socket) => {
                     latency_ms: totalLatency
                 });
 
-                // ✅ Buscar customerId do booking no Redis (para notificações adicionais se necessário)
-                const bookingKey = `booking:${bookingId}`;
-                const bookingDataRedis = await redis.hgetall(bookingKey);
-                const customerIdToNotify = customerId || bookingDataRedis?.customerId || bookingDataRedis?.customer;
+                // Pós-processamentos em background para manter startTrip com ACK rápido.
+                setImmediate(async () => {
+                    try {
+                        if (event) {
+                            const eventSpan = createEventSpan(tracer, 'ride.started', activeSpan, {
+                                'event.booking_id': bookingId,
+                                'correlation.id': correlationId
+                            });
 
-                // ✅ Debug: Log para verificar se customerId foi encontrado
-                if (!customerIdToNotify) {
-                    logStructured('warn', 'customerId não encontrado no Redis', {
-                        bookingId,
-                        eventType: 'startTrip'
-                    });
+                            const eventStartTime = Date.now();
+                            try {
+                                await runInSpan(eventSpan, async () => {
+                                    await eventBus.publish({
+                                        eventType: 'ride.started',
+                                        data: event
+                                    });
+                                });
 
-                    // ✅ Fallback: Tentar buscar de activeBookings
-                    const activeBooking = io.activeBookings?.get(bookingId);
-                    if (activeBooking?.customerId) {
-                        const fallbackCustomerId = activeBooking.customerId;
-                        io.to(`customer_${fallbackCustomerId}`).emit('tripStarted', {
-                            ...tripStartedData,
-                            message: 'Viagem iniciada'
-                        });
-                        logStructured('info', 'customerId encontrado em activeBookings (fallback)', {
-                            bookingId,
-                            customerId: fallbackCustomerId,
-                            eventType: 'startTrip'
-                        });
-                    } else {
-                        logStructured('error', 'customerId não encontrado em nenhum lugar', {
-                            bookingId,
-                            eventType: 'startTrip'
-                        });
-                    }
-                } else {
-                    // ✅ Notificar customer via room (escalável e confiável)
-                    io.to(`customer_${customerIdToNotify}`).emit('tripStarted', {
-                        ...tripStartedData,
-                        message: 'Viagem iniciada'
-                    });
-                    logStructured('info', 'tripStarted enviado para customer', {
-                        bookingId,
-                        customerId: customerIdToNotify,
-                        eventType: 'startTrip'
-                    });
-                }
-
-                // ✅ NOVO: Enviar notificação para motorista durante corrida
-                try {
-                    const destinationLocation = bookingDataRedis.destinationLocation ?
-                        (typeof bookingDataRedis.destinationLocation === 'string' ? JSON.parse(bookingDataRedis.destinationLocation) : bookingDataRedis.destinationLocation)
-                        : null;
-                    const destinationAddress = destinationLocation?.address || destinationLocation?.add || 'destino';
-
-                    // Buscar FCM token do motorista
-                    const driverFcmToken = await redis.hget(`driver:${driverId}`, 'fcmToken');
-
-                    if (driverFcmToken && destinationAddress) {
-                        // Usar singleton
-                        if (!fcmService.isServiceAvailable()) {
-                            fcmService.setRedis(redisPool.getConnection());
-                            await fcmService.initialize();
-                        }
-
-                        // Calcular estimativa de chegada (aproximada usando fórmula de Haversine)
-                        let estimatedArrival = 'calculando...';
-                        if (startLocation && destinationLocation && startLocation.lat && startLocation.lng && destinationLocation.lat && destinationLocation.lng) {
-                            // Fórmula de Haversine para calcular distância
-                            const R = 6371; // Raio da Terra em km
-                            const dLat = (destinationLocation.lat - startLocation.lat) * Math.PI / 180;
-                            const dLon = (destinationLocation.lng - startLocation.lng) * Math.PI / 180;
-                            const a =
-                                Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-                                Math.cos(startLocation.lat * Math.PI / 180) * Math.cos(destinationLocation.lat * Math.PI / 180) *
-                                Math.sin(dLon / 2) * Math.sin(dLon / 2);
-                            const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-                            const distanceKm = R * c;
-
-                            // Velocidade média: 35 km/h = ~0.583 km/min
-                            const speedKmPerMin = 0.583;
-                            const estimatedMinutes = Math.max(1, Math.round(distanceKm / speedKmPerMin));
-                            estimatedArrival = `${estimatedMinutes} ${estimatedMinutes === 1 ? 'minuto' : 'minutos'}`;
-                        }
-
-                        // Enviar notificação durante corrida
-                        await fcmService.sendInteractiveNotification(
-                            driverFcmToken,
-                            {
-                                title: '🚗 A caminho do destino',
-                                body: `A caminho de ${destinationAddress} • Chegada em ${estimatedArrival}`,
-                                data: {
-                                    type: 'trip_in_progress',
-                                    bookingId: bookingId,
-                                    driverId: driverId,
-                                    destinationAddress: destinationAddress,
-                                    estimatedArrival: estimatedArrival,
-                                    hasActions: 'true'
-                                },
-                                channelId: 'driver_actions',
-                                badge: 1
-                            },
-                            [
-                                {
-                                    id: 'end_trip',
-                                    title: 'Encerrar corrida',
-                                    icon: 'ic_stop'
+                                const eventSpanContext = eventSpan.spanContext();
+                                if (event.data) {
+                                    event.data._otelSpanContext = eventSpanContext;
                                 }
-                            ],
-                            'TRIP_IN_PROGRESS' // Nova categoria para corrida em andamento
-                        );
 
-                        logStructured('info', 'Notificação durante corrida enviada para motorista', {
-                            service: 'server',
+                                const eventLatency = Date.now() - eventStartTime;
+                                logEvent('ride.started', 'published', {
+                                    bookingId,
+                                    latency_ms: eventLatency
+                                });
+                            } catch (eventError) {
+                                endSpanError(eventSpan, eventError);
+                                throw eventError;
+                            }
+                        }
+
+                        try {
+                            const ridePersistenceService = require('./services/ride-persistence-service');
+                            await ridePersistenceService.markRideStarted(bookingId);
+
+                            const bookingDataRaw = await redis.hgetall(`booking:${bookingId}`);
+                            if (bookingDataRaw && Object.keys(bookingDataRaw).length > 0) {
+                                const activeBookingData = {
+                                    ...bookingDataRaw,
+                                    status: 'IN_PROGRESS'
+                                };
+
+                                try {
+                                    if (bookingDataRaw.pickupLocation) activeBookingData.pickup = JSON.parse(bookingDataRaw.pickupLocation);
+                                    if (bookingDataRaw.destinationLocation) activeBookingData.drop = JSON.parse(bookingDataRaw.destinationLocation);
+                                    if (bookingDataRaw.estimatedFare) activeBookingData.estimate = parseFloat(bookingDataRaw.estimatedFare);
+                                } catch (_) {
+                                    // noop
+                                }
+
+                                const bookingDataStr = JSON.stringify(activeBookingData);
+                                const flowDebugEnabled = process.env.DEBUG_RIDE_FLOW === 'true';
+                                if (flowDebugEnabled) {
+                                    logStructured('debug', 'startTrip: persistindo booking ativo', {
+                                        service: 'startTrip',
+                                        bookingId
+                                    });
+                                }
+
+                                const keyType = await redis.type('bookings:active');
+                                if (keyType !== 'hash' && keyType !== 'none') {
+                                    logStructured('warn', 'startTrip: key bookings:active com tipo inválido, corrigindo', {
+                                        service: 'startTrip',
+                                        keyType
+                                    });
+                                    await redis.del('bookings:active');
+                                }
+
+                                await redis.hset('bookings:active', bookingId, bookingDataStr);
+                                if (flowDebugEnabled) {
+                                    logStructured('debug', 'startTrip: booking ativo persistido', {
+                                        service: 'startTrip',
+                                        bookingId
+                                    });
+                                }
+
+                                if (io.activeBookings && io.activeBookings.has(bookingId)) {
+                                    io.activeBookings.set(bookingId, {
+                                        ...io.activeBookings.get(bookingId),
+                                        ...activeBookingData
+                                    });
+                                }
+                            }
+                        } catch (persistError) {
+                            logStructured('error', 'Erro ao marcar corrida como iniciada no Firestore/Redis', {
+                                bookingId,
+                                eventType: 'startTrip',
+                                error: persistError.message
+                            });
+                        }
+
+                        const bookingDataRedis = await redis.hgetall(`booking:${bookingId}`);
+                        const customerIdFallback = customerIdToNotify || bookingDataRedis?.customerId || bookingDataRedis?.customer || null;
+                        if (!customerIdToNotify && customerIdFallback) {
+                            io.to(`customer_${customerIdFallback}`).emit('tripStarted', {
+                                ...tripStartedData,
+                                message: 'Viagem iniciada'
+                            });
+                            logStructured('info', 'tripStarted enviado para customer (fallback)', {
+                                bookingId,
+                                customerId: customerIdFallback,
+                                eventType: 'startTrip'
+                            });
+                        }
+
+                        try {
+                            const destinationLocation = bookingDataRedis.destinationLocation
+                                ? (typeof bookingDataRedis.destinationLocation === 'string'
+                                    ? JSON.parse(bookingDataRedis.destinationLocation)
+                                    : bookingDataRedis.destinationLocation)
+                                : null;
+                            const destinationAddress = destinationLocation?.address || destinationLocation?.add || 'destino';
+                            const driverFcmToken = await redis.hget(`driver:${driverId}`, 'fcmToken');
+
+                            if (driverFcmToken && destinationAddress) {
+                                if (!fcmService.isServiceAvailable()) {
+                                    fcmService.setRedis(redisPool.getConnection());
+                                    await fcmService.initialize();
+                                }
+
+                                let estimatedArrival = 'calculando...';
+                                if (
+                                    startLocation &&
+                                    destinationLocation &&
+                                    startLocation.lat &&
+                                    startLocation.lng &&
+                                    destinationLocation.lat &&
+                                    destinationLocation.lng
+                                ) {
+                                    const R = 6371;
+                                    const dLat = (destinationLocation.lat - startLocation.lat) * Math.PI / 180;
+                                    const dLon = (destinationLocation.lng - startLocation.lng) * Math.PI / 180;
+                                    const a =
+                                        Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+                                        Math.cos(startLocation.lat * Math.PI / 180) * Math.cos(destinationLocation.lat * Math.PI / 180) *
+                                        Math.sin(dLon / 2) * Math.sin(dLon / 2);
+                                    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+                                    const distanceKm = R * c;
+                                    const speedKmPerMin = 0.583;
+                                    const estimatedMinutes = Math.max(1, Math.round(distanceKm / speedKmPerMin));
+                                    estimatedArrival = `${estimatedMinutes} ${estimatedMinutes === 1 ? 'minuto' : 'minutos'}`;
+                                }
+
+                                await fcmService.sendInteractiveNotification(
+                                    driverFcmToken,
+                                    {
+                                        title: '🚗 A caminho do destino',
+                                        body: `A caminho de ${destinationAddress} • Chegada em ${estimatedArrival}`,
+                                        data: {
+                                            type: 'trip_in_progress',
+                                            bookingId: bookingId,
+                                            driverId: driverId,
+                                            destinationAddress: destinationAddress,
+                                            estimatedArrival: estimatedArrival,
+                                            hasActions: 'true'
+                                        },
+                                        channelId: 'driver_actions',
+                                        badge: 1
+                                    },
+                                    [
+                                        {
+                                            id: 'end_trip',
+                                            title: 'Encerrar corrida',
+                                            icon: 'ic_stop'
+                                        }
+                                    ],
+                                    'TRIP_IN_PROGRESS'
+                                );
+                            }
+                        } catch (notifError) {
+                            logStructured('error', 'Erro ao enviar notificação durante corrida', {
+                                service: 'websocket',
+                                operation: 'startTrip',
+                                driverId,
+                                bookingId,
+                                error: notifError.message,
+                                stack: notifError.stack
+                            });
+                        }
+                    } catch (backgroundError) {
+                        logStructured('error', 'Erro no pós-processamento assíncrono do startTrip', {
+                            bookingId,
                             driverId,
-                            bookingId: data?.bookingId,
                             eventType: 'startTrip',
-                            notificationType: 'TRIP_IN_PROGRESS'
+                            error: backgroundError.message
                         });
                     }
-                } catch (notifError) {
-                    logStructured('error', 'Erro ao enviar notificação durante corrida', {
-                        service: 'websocket',
-                        operation: 'startTrip',
-                        driverId,
-                        bookingId,
-                        error: notifError.message,
-                        stack: notifError.stack
-                    });
-                    // Não falhar o fluxo se a notificação falhar
-                }
+                });
 
             } catch (error) {
                 logStructured('error', 'Erro ao iniciar viagem', {
@@ -4322,14 +7008,23 @@ io.on('connection', async (socket) => {
                 lastUpdate: new Date().toISOString()
             };
 
-            // Notificar cliente sobre atualização de localização do driver durante viagem
-            io.emit('tripLocationUpdated', {
+            const payload = {
                 bookingId,
                 location: { lat, lng },
                 heading: heading || 0,
                 speed: speed || 0,
                 timestamp: tripLocationData.timestamp
-            });
+            };
+
+            // Notificar somente partes da corrida (evita broadcast global).
+            const redis = redisPool.getConnection();
+            const { customerId, driverId } = await resolveBookingParties(redis, bookingId);
+            if (customerId) {
+                io.to(`customer_${customerId}`).emit('tripLocationUpdated', payload);
+            }
+            if (driverId && driverId !== socket.userId) {
+                io.to(`driver_${driverId}`).emit('tripLocationUpdated', payload);
+            }
 
             // Log apenas a cada 10 atualizações para não poluir logs
             if (Math.random() < 0.1) {
@@ -4419,6 +7114,8 @@ io.on('connection', async (socket) => {
 
                 // Usar dados sanitizados
                 const { bookingId, endLocation, distance, fare } = validation.sanitized;
+                clearBoardingWindowTimeout(bookingId);
+                clearTripIntegrityConfirmationTimeout(bookingId);
 
                 // ✅ REFATORAÇÃO: Usar CompleteTripCommand
                 logStructured('info', 'Executando CompleteTripCommand', {
@@ -4469,11 +7166,9 @@ io.on('connection', async (socket) => {
 
                     // ✅ MÉTRICAS: Registrar latência do command
                     const commandLatency = (Date.now() - commandStartTime) / 1000;
-                    metrics.recordCommand('complete_trip', commandLatency, result.success);
                 } catch (error) {
                     endSpanError(commandSpan, error);
                     const commandLatency = (Date.now() - commandStartTime) / 1000;
-                    metrics.recordCommand('complete_trip', commandLatency, false);
                     throw error;
                 }
 
@@ -4500,295 +7195,204 @@ io.on('connection', async (socket) => {
                 }
 
                 // Command executado com sucesso (já processou pagamento e atualizou estado)
-                const { bookingId: resultBookingId, driverId: resultDriverId, customerId, event, endLocation: resultEndLocation, finalFare, distance: resultDistance, duration: resultDuration, paymentDistribution } = result.data;
+                const {
+                    bookingId: resultBookingId,
+                    driverId: resultDriverId,
+                    customerId,
+                    city = 'unknown',
+                    serviceType = 'standard',
+                    event,
+                    endLocation: resultEndLocation,
+                    finalFare,
+                    tollFee: resultTollFee,
+                    distance: resultDistance,
+                    duration: resultDuration,
+                    paymentDistribution
+                } = result.data;
 
-                // ✅ REFATORAÇÃO: Publicar evento no EventBus (listeners vão processar notificações)
-                if (event) {
-                    // ✅ FASE 1.3: Criar span para Event publish
-                    const eventSpan = createEventSpan(tracer, 'ride.completed', activeSpan, {
-                        'event.booking_id': bookingId,
-                        'correlation.id': correlationId
-                    });
+                const PaymentService = require('./services/payment-service');
+                const paymentService = new PaymentService();
+                const fareReais = Number(finalFare || fare || 0);
+                const tollFeeReais = Number(resultTollFee || 0);
+                const fareBreakdown = paymentService.calculateFareBreakdownFromReais(fareReais, tollFeeReais);
 
-                    const eventStartTime = Date.now();
-                    try {
-                        await runInSpan(eventSpan, async () => {
-                            await eventBus.publish({
-                                eventType: 'ride.completed',
-                                data: event
-                            });
-                        });
-
-                        // ✅ Salvar contexto do evento para linkar com listeners
-                        const eventSpanContext = eventSpan.spanContext();
-                        if (event.data) {
-                            event.data._otelSpanContext = eventSpanContext;
-                        }
-
-                        const eventLatency = Date.now() - eventStartTime;
-                        logEvent('ride.completed', 'published', {
-                            bookingId,
-                            latency_ms: eventLatency
-                        });
-                    } catch (error) {
-                        endSpanError(eventSpan, error);
-                        throw error;
-                    }
+                metrics.recordRideCompleted(city, serviceType || 'standard');
+                if (Number.isFinite(Number(resultDuration)) && Number(resultDuration) >= 0) {
+                    metrics.recordRideTotalDuration(Number(resultDuration), city);
                 }
 
-                const finalRideSnapshot = {
-                    fare: fare,
-                    netFare: null,
-                    distance: distance,
-                    duration: null,
-                    endLocation: endLocation,
-                    driverEarnings: null,
-                    financialBreakdown: null
-                };
-
-                // ✅ NOVO: Processar distribuição de pagamento líquido para o motorista (já feito pelo command, mas manter compatibilidade)
-                try {
-                    const PaymentService = require('./services/payment-service');
-                    const paymentService = new PaymentService();
-
-                    // Buscar dados do booking para obter informações do motorista e pagamento
-                    const bookingData = io.activeBookings?.get(bookingId);
-
-                    if (bookingData && fare) {
-                        // ✅ Buscar wooviAccountId do motorista (do booking ou do banco de dados)
-                        let wooviAccountId = bookingData.driverWooviAccountId || bookingData.wooviAccountId;
-                        let wooviClientId = bookingData.driverWooviClientId || bookingData.wooviClientId;
-
-                        // Se não encontrou no booking, buscar do banco de dados
-                        if (!wooviAccountId && driverId) {
-                            try {
-                                const DriverApprovalService = require('./services/driver-approval-service');
-                                const driverApprovalService = new DriverApprovalService();
-                                const accountData = await driverApprovalService.getDriverWooviAccountId(driverId);
-
-                                if (accountData) {
-                                    wooviAccountId = accountData.wooviAccountId;
-                                    wooviClientId = accountData.wooviClientId;
-                                    logStructured('info', 'wooviAccountId encontrado do banco de dados', {
-                                        driverId,
-                                        bookingId,
-                                        eventType: 'completeTrip'
-                                    });
-                                } else {
-                                    logStructured('warn', 'wooviAccountId não encontrado', {
-                                        driverId,
-                                        bookingId,
-                                        eventType: 'completeTrip'
-                                    });
-                                }
-                            } catch (accountError) {
-                                logStructured('error', 'Erro ao buscar wooviAccountId do banco', {
-                                    driverId,
-                                    bookingId,
-                                    eventType: 'completeTrip',
-                                    error: accountError.message
-                                });
-                            }
-                        }
-
-                        // ✅ MVP: Sempre processar distribuição (usa saldo no Firestore)
-                        // Converter fare para centavos
-                        const fareInCents = Math.round(parseFloat(fare) * 100);
-
-                        logStructured('info', 'Processando distribuição de pagamento', {
-                            bookingId,
-                            driverId,
-                            fare: fareInCents,
-                            eventType: 'completeTrip'
-                        });
-
-                        const distributionResult = await paymentService.processNetDistribution({
-                            rideId: bookingId,
-                            driverId: driverId, // ✅ Sempre disponível - usado para creditar saldo
-                            wooviAccountId: wooviAccountId, // Opcional (para BaaS futuro)
-                            wooviClientId: wooviClientId, // Opcional (para BaaS futuro)
-                            totalAmount: fareInCents
-                        });
-
-                        if (distributionResult.success) {
-                            finalRideSnapshot.netFare = distributionResult.netAmount ? (distributionResult.netAmount / 100) : null;
-                            finalRideSnapshot.driverEarnings = distributionResult.netAmount ? (distributionResult.netAmount / 100) : null;
-                            finalRideSnapshot.financialBreakdown = distributionResult.calculation || null;
-
-                            logStructured('info', 'Pagamento distribuído com sucesso', {
-                                bookingId,
-                                driverId,
-                                netAmount: distributionResult.netAmount,
-                                eventType: 'completeTrip'
-                            });
-
-                            // Notificar motorista sobre o pagamento
-                            socket.emit('paymentDistributed', {
-                                success: true,
-                                bookingId,
-                                netAmount: distributionResult.netAmount,
-                                netAmountInReais: (distributionResult.netAmount / 100).toFixed(2),
-                                transferId: distributionResult.transferId || null,
-                                balanceCreditId: distributionResult.balanceCreditId || driverId,
-                                retainedFees: distributionResult.retainedFees,
-                                message: 'Saldo creditado com sucesso'
-                            });
-                        } else {
-                            logStructured('error', 'Erro ao distribuir pagamento', {
-                                bookingId,
-                                driverId,
-                                eventType: 'completeTrip',
-                                error: distributionResult.error
-                            });
-                            // Não bloquear finalização da viagem se distribuição falhar
-                            // Mas logar o erro para investigação
-                            socket.emit('paymentDistributed', {
-                                success: false,
-                                bookingId,
-                                error: distributionResult.error
-                            });
-                        }
-                    } else {
-                        logStructured('warn', 'Dados do booking ou fare não disponíveis', {
-                            bookingId,
-                            eventType: 'completeTrip'
-                        });
-                    }
-                } catch (paymentError) {
-                    logStructured('error', 'Erro ao processar distribuição de pagamento', {
-                        bookingId,
-                        driverId,
-                        eventType: 'completeTrip',
-                        error: paymentError.message
-                    });
-                    // Não bloquear finalização da viagem se distribuição falhar
-                }
-
-                // Persistencia garantida: tenta Firestore primeiro e usa outbox se indisponivel.
-                const ridePersistenceService = require('./services/ride-persistence-service');
-                const persistFinalResult = await ridePersistenceService.persistFinalRideDataWithOutbox(
-                    bookingId,
-                    finalRideSnapshot
-                );
-
-                if (!persistFinalResult.success) {
-                    logStructured('error', 'Falha ao persistir finalizacao da corrida', {
-                        bookingId,
-                        eventType: 'completeTrip',
-                        error: persistFinalResult.error || 'persist_final_failed'
-                    });
-                    socket.emit('tripCompleteError', {
-                        error: 'Falha ao persistir finalização da corrida. Tente novamente.',
-                        code: 'FINAL_PERSISTENCE_FAILED',
-                        retryAfterSec: 2
-                    });
-                    return;
-                }
-
-                if (persistFinalResult.deferred) {
-                    logStructured('warn', 'Finalizacao enfileirada em outbox para retry', {
-                        bookingId,
-                        eventType: 'completeTrip'
-                    });
-                }
-
-                // ✅ Gerar e salvar recibo da corrida em background
-                setImmediate(async () => {
-                    try {
-                        const ReceiptService = require('./services/receipt-service');
-                        const receiptService = new ReceiptService();
-
-                        // Buscar dados completos da corrida
-                        const bookingDataForReceipt = io.activeBookings?.get(bookingId);
-                        if (bookingDataForReceipt) {
-                            const receiptData = {
-                                ...bookingDataForReceipt,
-                                finalPrice: fare,
-                                distance: distance,
-                                endTime: new Date().toISOString(),
-                                completedAt: new Date().toISOString(),
-                                status: 'COMPLETED'
-                            };
-
-                            // Gerar e salvar recibo
-                            const firebaseDb = firebaseConfig?.getRealtimeDB?.();
-                            await receiptService.generateAndSaveReceipt(bookingId, receiptData, firebaseDb);
-                            logStructured('info', 'Recibo gerado e salvo', {
-                                bookingId,
-                                eventType: 'completeTrip'
-                            });
-                        }
-                    } catch (receiptError) {
-                        logStructured('warn', 'Erro ao gerar recibo', {
-                            bookingId,
-                            eventType: 'completeTrip',
-                            error: receiptError.message
-                        });
-                        // Não bloquear finalização se recibo falhar
-                    }
-                });
-
-                // Emitir confirmação para o driver
-                // ✅ Padronizar uso de rooms para alta escalabilidade
+                // Emitir confirmação imediatamente para reduzir latência no caminho crítico
                 const tripCompletedData = {
                     success: true,
                     bookingId,
                     message: 'Viagem finalizada com sucesso',
-                    endLocation,
-                    distance,
-                    fare,
-                    persistence: persistFinalResult.deferred ? 'deferred_outbox' : 'confirmed_firestore',
+                    endLocation: resultEndLocation || endLocation,
+                    distance: resultDistance || distance,
+                    fare: fareBreakdown.totalFare,
+                    operationalFee: fareBreakdown.operationalFee,
+                    paymentIntermediationFee: fareBreakdown.paymentIntermediationFee,
+                    totalFees: fareBreakdown.totalFees,
+                    driverNetAmount: fareBreakdown.driverNetAmount,
+                    persistence: 'accepted_background',
                     timestamp: new Date().toISOString()
                 };
 
-                // ✅ Notificar driver via room (escalável e confiável)
                 io.to(`driver_${driverId}`).emit('tripCompleted', tripCompletedData);
 
-                // ✅ Buscar customerId do booking para notificar o customer correto via room
-                const bookingKey = `booking:${bookingId}`;
-                const bookingDataRedis = await redis.hgetall(bookingKey);
-                const customerIdToNotify = bookingDataRedis?.customerId || bookingDataRedis?.customer ||
-                    io.activeBookings?.get(bookingId)?.customerId;
+                let customerIdToNotify = customerId || io.activeBookings?.get(bookingId)?.customerId || null;
 
-                // ✅ Notificar customer via room (escalável e confiável)
                 if (customerIdToNotify) {
                     io.to(`customer_${customerIdToNotify}`).emit('tripCompleted', {
                         ...tripCompletedData,
                         message: 'Viagem finalizada'
                     });
-                    logStructured('info', 'tripCompleted enviado para customer', {
-                        bookingId,
-                        customerId: customerIdToNotify,
-                        eventType: 'completeTrip'
-                    });
                 } else {
-                    logStructured('warn', 'CustomerId não encontrado', {
+                    logStructured('warn', 'CustomerId não encontrado para tripCompleted', {
                         bookingId,
                         eventType: 'completeTrip'
                     });
                 }
 
-                // ✅ NOVO: Atualizar Live Activity/Foreground Service (Silent Push)
-                try {
-                    const payloadData = {
-                        bookingId: bookingId,
-                        status: 'completed',
-                        distance: String(distance || '0'),
-                        fare: String(fare || '0')
-                    };
+                // Pós-processamento assíncrono para não bloquear ack da finalização
+                setImmediate(async () => {
+                    try {
+                        if (event) {
+                            const eventSpan = createEventSpan(tracer, 'ride.completed', activeSpan, {
+                                'event.booking_id': bookingId,
+                                'correlation.id': correlationId
+                            });
 
-                    if (customerIdToNotify) {
-                        await fcmService.sendRideStatusUpdate(customerIdToNotify, { ...payloadData, userType: 'customer' });
+                            const eventStartTime = Date.now();
+                            try {
+                                await runInSpan(eventSpan, async () => {
+                                    await eventBus.publish({
+                                        eventType: 'ride.completed',
+                                        data: event
+                                    });
+                                });
+
+                                const eventSpanContext = eventSpan.spanContext();
+                                if (event.data) {
+                                    event.data._otelSpanContext = eventSpanContext;
+                                }
+
+                                const eventLatency = Date.now() - eventStartTime;
+                                logEvent('ride.completed', 'published', {
+                                    bookingId,
+                                    latency_ms: eventLatency
+                                });
+                            } catch (eventError) {
+                                endSpanError(eventSpan, eventError);
+                                throw eventError;
+                            }
+                        }
+
+                        if (!customerIdToNotify) {
+                            const bookingDataRedisForCustomer = await redis.hgetall(`booking:${bookingId}`);
+                            const customerIdFallback =
+                                bookingDataRedisForCustomer?.customerId ||
+                                bookingDataRedisForCustomer?.customer ||
+                                null;
+                            if (customerIdFallback) {
+                                customerIdToNotify = customerIdFallback;
+                                io.to(`customer_${customerIdToNotify}`).emit('tripCompleted', {
+                                    ...tripCompletedData,
+                                    message: 'Viagem finalizada'
+                                });
+                            }
+                        }
+
+                        const finalRideSnapshot = {
+                            fare: finalFare || fare,
+                            netFare: null,
+                            distance: resultDistance || distance,
+                            duration: resultDuration || duration || null,
+                            endLocation: resultEndLocation || endLocation,
+                            driverEarnings: null,
+                            financialBreakdown: paymentDistribution || null
+                        };
+
+                        io.to(`driver_${driverId}`).emit('paymentDistributed', {
+                            success: true,
+                            bookingId,
+                            pending: true,
+                            message: 'Distribuição financeira em processamento assíncrono'
+                        });
+
+                        const ridePersistenceService = require('./services/ride-persistence-service');
+                        const persistFinalResult = await ridePersistenceService.persistFinalRideDataWithOutbox(
+                            bookingId,
+                            finalRideSnapshot
+                        );
+
+                        if (!persistFinalResult.success) {
+                            logStructured('error', 'Falha ao persistir finalizacao da corrida (background)', {
+                                bookingId,
+                                eventType: 'completeTrip',
+                                error: persistFinalResult.error || 'persist_final_failed'
+                            });
+                        } else if (persistFinalResult.deferred) {
+                            logStructured('warn', 'Finalizacao enfileirada em outbox para retry', {
+                                bookingId,
+                                eventType: 'completeTrip'
+                            });
+                        }
+
+                        clearTripIntegrityConfirmationTimeout(bookingId);
+                        await redis.del(`trip_integrity:${bookingId}`);
+
+                        try {
+                            const ReceiptService = require('./services/receipt-service');
+                            const receiptService = new ReceiptService();
+                            const bookingDataForReceipt = io.activeBookings?.get(bookingId);
+                            if (bookingDataForReceipt) {
+                                const receiptData = {
+                                    ...bookingDataForReceipt,
+                                    finalPrice: finalFare || fare,
+                                    distance: resultDistance || distance,
+                                    endTime: new Date().toISOString(),
+                                    completedAt: new Date().toISOString(),
+                                    status: 'COMPLETED'
+                                };
+                                const firebaseDb = firebaseConfig?.getRealtimeDB?.();
+                                await receiptService.generateAndSaveReceipt(bookingId, receiptData, firebaseDb);
+                            }
+                        } catch (receiptError) {
+                            logStructured('warn', 'Erro ao gerar recibo', {
+                                bookingId,
+                                eventType: 'completeTrip',
+                                error: receiptError.message
+                            });
+                        }
+
+                        try {
+                            const payloadData = {
+                                bookingId: bookingId,
+                                status: 'completed',
+                                distance: String(resultDistance || distance || '0'),
+                                fare: String(finalFare || fare || '0')
+                            };
+
+                            if (customerIdToNotify) {
+                                await fcmService.sendRideStatusUpdate(customerIdToNotify, { ...payloadData, userType: 'customer' });
+                            }
+                            await fcmService.sendRideStatusUpdate(driverId, { ...payloadData, userType: 'driver' });
+                        } catch (silentPushError) {
+                            logStructured('error', 'Erro ao enviar silent push em completeTrip', { error: silentPushError.message });
+                        }
+                    } catch (backgroundError) {
+                        logStructured('error', 'Erro no pós-processamento assíncrono do completeTrip', {
+                            bookingId,
+                            driverId,
+                            eventType: 'completeTrip',
+                            error: backgroundError.message
+                        });
+                    } finally {
+                        if (io.activeBookings) {
+                            io.activeBookings.delete(bookingId);
+                        }
                     }
-                    await fcmService.sendRideStatusUpdate(driverId, { ...payloadData, userType: 'driver' });
-                } catch (silentPushError) {
-                    logStructured('error', 'Erro ao enviar silent push em completeTrip', { error: silentPushError.message });
-                }
-
-                // ✅ NOVO: Limpar activeBookings (Memória)
-                if (io.activeBookings) {
-                    io.activeBookings.delete(bookingId);
-                }
+                });
 
             } catch (error) {
                 logStructured('error', 'Erro ao finalizar viagem', {
@@ -4821,15 +7425,38 @@ io.on('connection', async (socket) => {
 
             const redis = redisPool.getConnection();
 
-            // Buscar dados da corrida
-            const bookingData = await redis.hget('bookings:active', tripId);
-            if (!bookingData) {
-                // Tentar buscar em bookings:completed
+            // Buscar dados da corrida em múltiplas estruturas (legado + fluxo atual)
+            let bookingExists = false;
+
+            const activeBooking = await redis.hget('bookings:active', tripId);
+            if (activeBooking) {
+                bookingExists = true;
+            }
+
+            if (!bookingExists) {
                 const completedBooking = await redis.hget('bookings:completed', tripId);
-                if (!completedBooking) {
-                    socket.emit('ratingError', { error: 'Corrida não encontrada' });
-                    return;
+                if (completedBooking) {
+                    bookingExists = true;
                 }
+            }
+
+            if (!bookingExists) {
+                const bookingHash = await redis.hgetall(`booking:${tripId}`);
+                if (bookingHash && Object.keys(bookingHash).length > 0) {
+                    bookingExists = true;
+                }
+            }
+
+            if (!bookingExists && tripData && typeof tripData === 'object') {
+                const tripDataId = tripData.bookingId || tripData.tripId;
+                if (tripDataId && String(tripDataId) === String(tripId)) {
+                    bookingExists = true;
+                }
+            }
+
+            if (!bookingExists) {
+                socket.emit('ratingError', { error: 'Corrida não encontrada' });
+                return;
             }
 
             // Obter userId do socket ou dos dados
@@ -4951,8 +7578,23 @@ io.on('connection', async (socket) => {
                     });
 
                     // Atualizar status da corrida
-                    booking.status = 'DRIVER_ARRIVED';
+                    booking.status = 'ARRIVED';
                     booking.driverArrivedAt = Date.now();
+                    const boardingDeadlineAtMs = booking.driverArrivedAt + (DRIVER_BOARDING_WINDOW_SECONDS * 1000);
+                    booking.boardingDeadlineAt = boardingDeadlineAtMs;
+                    booking.boardingWindowSec = DRIVER_BOARDING_WINDOW_SECONDS;
+                    await RideStateManager.updateBookingState(
+                        redis,
+                        bookingId,
+                        RideStateManager.STATES.ARRIVED,
+                        {
+                            status: 'ARRIVED',
+                            driverId,
+                            driverArrivedAt: String(booking.driverArrivedAt),
+                            boardingDeadlineAt: String(boardingDeadlineAtMs),
+                            boardingWindowSec: String(DRIVER_BOARDING_WINDOW_SECONDS)
+                        }
+                    );
                     await redis.hset('bookings:active', bookingId, JSON.stringify(booking));
 
                     // Notificar passageiro
@@ -4963,6 +7605,8 @@ io.on('connection', async (socket) => {
                             driverId,
                             message: `Dirija-se ao local de embarque em ${pickupAddress}`,
                             pickupAddress: pickupAddress,
+                            boardingWindowSec: DRIVER_BOARDING_WINDOW_SECONDS,
+                            boardingDeadlineAt: new Date(boardingDeadlineAtMs).toISOString(),
                             timestamp: new Date().toISOString()
                         });
 
@@ -5061,10 +7705,27 @@ io.on('connection', async (socket) => {
                     }
 
                     // Notificar motorista (confirmação)
+                    io.to(`driver_${driverId}`).emit('arrivedAtPickup', {
+                        success: true,
+                        bookingId,
+                        message: 'Chegada registrada. Aguardando embarque do passageiro.',
+                        boardingWindowSec: DRIVER_BOARDING_WINDOW_SECONDS,
+                        boardingDeadlineAt: new Date(boardingDeadlineAtMs).toISOString(),
+                        timestamp: new Date().toISOString()
+                    });
                     socket.emit('notificationActionSuccess', {
                         action,
                         bookingId,
                         message: 'Você informou que chegou ao local de embarque'
+                    });
+
+                    scheduleBoardingWindowTimeout({
+                        io,
+                        bookingId,
+                        customerId: booking.customerId,
+                        driverId,
+                        pickupAddress: booking.pickupLocation?.address || booking.pickup?.add || 'local de embarque',
+                        deadlineAtMs: boardingDeadlineAtMs
                     });
 
                     break;
@@ -5080,6 +7741,9 @@ io.on('connection', async (socket) => {
                     });
 
                     // Liberar lock do motorista
+                    clearBoardingWindowTimeout(bookingId);
+                    clearTripIntegrityConfirmationTimeout(bookingId);
+                    await redis.set(`driver_soft_ban:${driverId}`, String(Date.now()), 'EX', 300);
                     await driverLockManager.releaseLock(driverId);
 
                     // Atualizar status da corrida
@@ -5087,6 +7751,7 @@ io.on('connection', async (socket) => {
                     booking.canceledBy = 'driver';
                     booking.canceledAt = Date.now();
                     await redis.hset('bookings:active', bookingId, JSON.stringify(booking));
+                    await redis.del(`trip_integrity:${bookingId}`);
 
                     // Notificar passageiro
                     if (booking.customerId && io) {
@@ -5139,7 +7804,7 @@ io.on('connection', async (socket) => {
     // ==================== NOVOS EVENTOS - GERENCIAMENTO DE STATUS DO DRIVER ====================
 
     const enforceDailyKYCForOnline = async (driverId) => {
-        const requiresDailyKYC = process.env.KYC_DAILY_VERIFICATION_REQUIRED !== 'false';
+        const requiresDailyKYC = process.env.KYC_DAILY_VERIFICATION_REQUIRED === 'true';
         if (!requiresDailyKYC) {
             return { allowed: true };
         }
@@ -5171,8 +7836,29 @@ io.on('connection', async (socket) => {
                 });
             }
 
-            const driverId = socket.userId || data.driverId;
-            const { status, isOnline } = data;
+            const driverId = socket.userId || data?.driverId;
+            const {
+                status,
+                isOnline,
+                lat: statusLat,
+                lng: statusLng,
+                heading: statusHeading,
+                speed: statusSpeed
+            } = data || {};
+
+            recordRealtimeMetricSafe('set_driver_status', 'attempt');
+
+            const emitDriverStatusError = (payload = {}, metricResult) => {
+                const normalizedCode = String(metricResult || payload?.code || payload?.reason || payload?.error || 'unknown')
+                    .trim()
+                    .toLowerCase()
+                    .replace(/[^a-z0-9_]+/g, '_')
+                    .replace(/_+/g, '_')
+                    .replace(/^_+|_+$/g, '');
+                const metricLabel = normalizedCode ? `error_${normalizedCode}` : 'error_unknown';
+                recordRealtimeMetricSafe('set_driver_status', metricLabel);
+                socket.emit('driverStatusError', payload);
+            };
 
             if (!driverId || socket.userType !== 'driver') {
                 logStructured('warn', 'Tentativa de atualizar status por não-motorista', {
@@ -5182,7 +7868,7 @@ io.on('connection', async (socket) => {
                     userType: socket.userType,
                     socketId: socket.id
                 });
-                socket.emit('driverStatusError', { error: 'Apenas motoristas podem atualizar status' });
+                emitDriverStatusError({ error: 'Apenas motoristas podem atualizar status' }, 'non_driver');
                 return;
             }
 
@@ -5196,7 +7882,7 @@ io.on('connection', async (socket) => {
                     status: status,
                     validStatuses: validStatuses
                 });
-                socket.emit('driverStatusError', { error: 'Status inválido' });
+                emitDriverStatusError({ error: 'Status inválido' }, 'invalid_status');
                 return;
             }
 
@@ -5215,11 +7901,11 @@ io.on('connection', async (socket) => {
                             reason: blockStatus.reason || 'KYC não aprovado',
                             socketId: socket.id
                         });
-                        socket.emit('driverStatusError', {
+                        emitDriverStatusError({
                             error: 'Sua conta está bloqueada. Entre em contato com o suporte.',
                             reason: blockStatus.reason || 'KYC não aprovado',
                             blocked: true
-                        });
+                        }, 'kyc_blocked');
                         return;
                     }
 
@@ -5232,12 +7918,12 @@ io.on('connection', async (socket) => {
                             reason: dailyKYC.reason,
                             socketId: socket.id
                         });
-                        socket.emit('driverStatusError', {
+                        emitDriverStatusError({
                             error: 'Verificação facial diária necessária para ficar online.',
                             reason: dailyKYC.reason,
                             code: dailyKYC.code,
                             kycRequired: true
-                        });
+                        }, dailyKYC.code || 'kyc_required');
                         return;
                     }
                 } catch (kycError) {
@@ -5248,12 +7934,12 @@ io.on('connection', async (socket) => {
                         driverId: driverId,
                         error: kycError.message
                     });
-                    socket.emit('driverStatusError', {
+                    emitDriverStatusError({
                         error: 'Não foi possível validar KYC agora. Tente novamente.',
                         reason: kycError.message,
                         code: 'kycCheckFailed',
                         kycRequired: true
-                    });
+                    }, 'kyc_check_failed');
                     return;
                 }
             }
@@ -5320,9 +8006,9 @@ io.on('connection', async (socket) => {
                             operation: 'setDriverStatus',
                             driverId: driverId
                         });
-                        socket.emit('driverStatusError', {
+                        emitDriverStatusError({
                             error: 'Você precisa ter um veículo ativo cadastrado para ficar online'
-                        });
+                        }, 'vehicle_required');
                         return;
                     }
 
@@ -5336,9 +8022,9 @@ io.on('connection', async (socket) => {
                             driverId,
                             error: lockResult.error
                         });
-                        socket.emit('driverStatusError', {
+                        emitDriverStatusError({
                             error: lockResult.error || 'Este veículo já está sendo utilizado por outro motorista no momento.'
-                        });
+                        }, 'vehicle_lock_failed');
                         return;
                     }
 
@@ -5359,9 +8045,9 @@ io.on('connection', async (socket) => {
                         stack: lockError.stack,
                         eventType: 'setDriverStatus'
                     });
-                    socket.emit('driverStatusError', {
+                    emitDriverStatusError({
                         error: 'Erro ao verificar disponibilidade do veículo. Tente novamente.'
-                    });
+                    }, 'vehicle_lock_error');
                     return;
                 }
             } else {
@@ -5411,6 +8097,18 @@ io.on('connection', async (socket) => {
             }
 
             const driverData = await redis.hgetall(`driver:${driverId}`);
+            const resolvedIsOnline = isOnline !== undefined ? isOnline : (status === 'online' || status === 'available');
+
+            if (resolvedIsOnline) {
+                clearPendingDriverDisconnectCleanup(driverId, 'set_driver_status_online');
+            }
+
+            const payloadLat = Number.parseFloat(statusLat);
+            const payloadLng = Number.parseFloat(statusLng);
+            const payloadHeading = Number.parseFloat(statusHeading);
+            const payloadSpeed = Number.parseFloat(statusSpeed);
+            const hasPayloadLocation = Number.isFinite(payloadLat) && Number.isFinite(payloadLng);
+
             if (process.env.NODE_ENV === 'development' || process.env.DEBUG_DRIVER_STATUS === 'true') {
                 logStructured('debug', 'Dados do motorista no Redis', {
                     service: 'server',
@@ -5421,41 +8119,175 @@ io.on('connection', async (socket) => {
                 });
             }
 
-            if (driverData && driverData.lat && driverData.lng) {
+            const persistedLat = Number.parseFloat(driverData?.lat);
+            const persistedLng = Number.parseFloat(driverData?.lng);
+            const persistedHeading = Number.parseFloat(driverData?.heading || 0);
+            const persistedSpeed = Number.parseFloat(driverData?.speed || 0);
+            const hasPersistedLocation = Number.isFinite(persistedLat) && Number.isFinite(persistedLng);
+
+            let locationToPersist = null;
+            let locationSource = null;
+
+            if (hasPersistedLocation) {
+                locationToPersist = {
+                    lat: persistedLat,
+                    lng: persistedLng,
+                    heading: Number.isFinite(payloadHeading) ? payloadHeading : persistedHeading,
+                    speed: Number.isFinite(payloadSpeed) ? payloadSpeed : persistedSpeed
+                };
+                locationSource = 'redis_state';
+            } else if (resolvedIsOnline && hasPayloadLocation) {
+                locationToPersist = {
+                    lat: payloadLat,
+                    lng: payloadLng,
+                    heading: Number.isFinite(payloadHeading) ? payloadHeading : 0,
+                    speed: Number.isFinite(payloadSpeed) ? payloadSpeed : 0
+                };
+                locationSource = 'payload';
+            }
+
+            if (locationToPersist) {
                 // Atualizar localização com novo status
-                const newIsOnline = isOnline !== undefined ? isOnline : (status === 'online' || status === 'available');
                 if (process.env.NODE_ENV === 'development' || process.env.DEBUG_DRIVER_STATUS === 'true') {
                     logStructured('debug', 'Salvando localização com status', {
                         service: 'websocket',
                         operation: 'setDriverStatus',
                         driverId,
-                        isOnline: newIsOnline,
-                        lat: driverData.lat,
-                        lng: driverData.lng
+                        isOnline: resolvedIsOnline,
+                        lat: locationToPersist.lat,
+                        lng: locationToPersist.lng,
+                        source: locationSource
                     });
                 }
 
                 await saveDriverLocation(
                     driverId,
-                    parseFloat(driverData.lat),
-                    parseFloat(driverData.lng),
-                    parseFloat(driverData.heading || 0),
-                    parseFloat(driverData.speed || 0),
+                    locationToPersist.lat,
+                    locationToPersist.lng,
+                    locationToPersist.heading,
+                    locationToPersist.speed,
                     Date.now(),
-                    newIsOnline
+                    resolvedIsOnline
                 );
 
                 logStructured('info', 'Localização salva para driver com status', {
                     service: 'websocket',
                     operation: 'setDriverStatus',
                     driverId,
-                    status: newIsOnline ? 'ONLINE' : 'OFFLINE'
+                    status: resolvedIsOnline ? 'ONLINE' : 'OFFLINE'
                 });
-            } else {
+
+                if (resolvedIsOnline) {
+                    const eligibleDriverGeoKey = process.env.ELIGIBLE_DRIVER_GEO_KEY || 'driver_locations_eligible';
+                    let onlineReady = false;
+                    let activeGeoScore = null;
+                    let eligibleGeoScore = null;
+
+                    for (let attempt = 0; attempt < 3; attempt += 1) {
+                        [activeGeoScore, eligibleGeoScore] = await Promise.all([
+                            redis.zscore('driver_locations', driverId),
+                            redis.zscore(eligibleDriverGeoKey, driverId)
+                        ]);
+
+                        if (activeGeoScore !== null) {
+                            onlineReady = true;
+                            break;
+                        }
+
+                        await sleepMs(90 * (attempt + 1));
+                    }
+
+                    if (!onlineReady) {
+                        if (socket.vehiclePlate) {
+                            try {
+                                await vehicleLockManager.releaseLock(socket.vehiclePlate, driverId);
+                            } catch (_releaseError) {
+                                // best-effort
+                            }
+                            delete socket.vehiclePlate;
+                        }
+
+                        const nowIso = new Date().toISOString();
+                        await redis.hset(`driver:${driverId}`, {
+                            vehiclePlate: '',
+                            vehicleLockValidated: 'false',
+                            vehicleLockValidatedAt: nowIso,
+                            isOnline: 'false',
+                            updatedAt: nowIso
+                        });
+
+                        emitDriverStatusError({
+                            error: 'Não foi possível finalizar o modo online agora. Tente novamente.',
+                            code: 'ONLINE_NOT_READY',
+                            onlineRedis: false,
+                            eligibleGeo: eligibleGeoScore !== null,
+                            retryAfterSec: 1
+                        }, 'online_not_ready');
+                        return;
+                    }
+                }
+            } else if (resolvedIsOnline) {
                 logStructured('warn', 'Motorista não tem localização salva no Redis. Aguardando updateLocation', {
                     service: 'websocket',
                     operation: 'setDriverStatus',
                     driverId
+                });
+
+                if (socket.vehiclePlate) {
+                    try {
+                        await vehicleLockManager.releaseLock(socket.vehiclePlate, driverId);
+                    } catch (_releaseError) {
+                        // best-effort
+                    }
+                    delete socket.vehiclePlate;
+                }
+
+                const nowIso = new Date().toISOString();
+                await redis.hset(`driver:${driverId}`, {
+                    vehiclePlate: '',
+                    vehicleLockValidated: 'false',
+                    vehicleLockValidatedAt: nowIso,
+                    isOnline: 'false',
+                    updatedAt: nowIso
+                });
+
+                emitDriverStatusError({
+                    error: 'Localização inicial necessária para ativar o modo online.',
+                    message: 'Envie uma localização válida e tente novamente.',
+                    code: 'LOCATION_REQUIRED',
+                    retryAfterSec: 1
+                }, 'location_required');
+                return;
+            }
+
+            // Persistir contexto de lock para garantir que updateLocation não coloque online
+            // motoristas sem veículo válido/lock ativo.
+            try {
+                const nowIso = new Date().toISOString();
+                const persistedVehiclePlate = resolvedIsOnline
+                    ? (socket.vehiclePlate || driverData?.vehiclePlate || '')
+                    : '';
+                const hasValidatedLock = resolvedIsOnline && Boolean(persistedVehiclePlate);
+
+                await redis.hset(`driver:${driverId}`, {
+                    vehiclePlate: persistedVehiclePlate,
+                    vehicleLockValidated: hasValidatedLock ? 'true' : 'false',
+                    vehicleLockValidatedAt: nowIso,
+                    updatedAt: nowIso
+                });
+                setCachedDriverState(driverId, {
+                    ...(driverData || {}),
+                    vehiclePlate: persistedVehiclePlate,
+                    vehicleLockValidated: hasValidatedLock ? 'true' : 'false',
+                    vehicleLockValidatedAt: nowIso,
+                    updatedAt: nowIso
+                });
+            } catch (driverLockStateError) {
+                logStructured('warn', 'Falha ao persistir estado de lock do motorista', {
+                    service: 'websocket',
+                    operation: 'setDriverStatus',
+                    driverId,
+                    error: driverLockStateError.message
                 });
             }
 
@@ -5463,17 +8295,20 @@ io.on('connection', async (socket) => {
             socket.emit('driverStatusUpdated', {
                 success: true,
                 driverId,
-                status: status || (isOnline ? 'online' : 'offline'),
-                isOnline: isOnline !== undefined ? isOnline : true,
+                status: status || (resolvedIsOnline ? 'online' : 'offline'),
+                isOnline: resolvedIsOnline,
+                ready: true,
+                onlineRedis: resolvedIsOnline ? true : false,
                 message: 'Status atualizado com sucesso'
             });
+            recordRealtimeMetricSafe('set_driver_status', resolvedIsOnline ? 'success_online' : 'success_offline');
 
             if (process.env.DEBUG_DRIVER_STATUS === 'true') {
                 logStructured('debug', 'Status do driver atualizado', {
                     service: 'websocket',
                     operation: 'setDriverStatus',
                     driverId,
-                    status: status || (isOnline ? 'online' : 'offline')
+                    status: status || (resolvedIsOnline ? 'online' : 'offline')
                 });
             }
 
@@ -5484,6 +8319,7 @@ io.on('connection', async (socket) => {
                 driverId: socket.userId || socket.id,
                 error: error.message
             });
+            recordRealtimeMetricSafe('set_driver_status', 'error_internal_server_error');
             socket.emit('driverStatusError', { error: 'Erro interno do servidor' });
         }
     });
@@ -5569,13 +8405,19 @@ io.on('connection', async (socket) => {
 
     // 10. DriverHeartbeat (crítico - heartbeat GPS)
     socket.on('driverHeartbeat', async (data) => {
+        const heartbeatStartedAt = Date.now();
         try {
             const driverId = socket.userId || data.uid || data.driverId;
             const { lat, lng, tripStatus, isInTrip } = data;
+            const latNum = Number(lat);
+            const lngNum = Number(lng);
 
-            if (!driverId || !lat || !lng || socket.userType !== 'driver') {
+            if (!driverId || !Number.isFinite(latNum) || !Number.isFinite(lngNum) || socket.userType !== 'driver') {
                 return; // Dados inválidos, ignorar silenciosamente
             }
+
+            socket.lastHeartbeat = Date.now();
+            socket.lastDriverHeartbeatAt = socket.lastHeartbeat;
 
             // ✅ CAOS SCENARIO: Registrar Heartbeat para calcular tempo offline/resiliência de billing
             try {
@@ -5588,9 +8430,10 @@ io.on('connection', async (socket) => {
             // ✅ Heartbeat: apenas renovar TTL usando última localização conhecida
             const isInTripState = isInTrip || tripStatus === 'started' || tripStatus === 'accepted';
             const redis = redisPool.getConnection();
+            const eligibleDriverGeoKey = process.env.ELIGIBLE_DRIVER_GEO_KEY || 'driver_locations_eligible';
 
             // Aplicar validação KYC diária na transição offline -> online via updateLocation
-            const existingDriverState = await redis.hgetall(`driver:${driverId}`);
+            const existingDriverState = await getDriverStateHot(redis, driverId);
             const wasOnline = existingDriverState?.isOnline === 'true';
             if (!wasOnline) {
                 try {
@@ -5614,10 +8457,7 @@ io.on('connection', async (socket) => {
                     return;
                 }
             }
-            // Verificar se motorista já está no Redis
-            const existingData = await redis.hgetall(`driver:${driverId}`);
-
-            if (existingData && existingData.id) {
+            if (existingDriverState && existingDriverState.id) {
                 // ✅ Motorista existe: apenas renovar TTL e garantir que está no GEO
                 // TTL alinhado com saveDriverLocation: 60s em viagem, 120s online
                 // Heartbeat a cada 30s garante que nunca expire se motorista estiver online
@@ -5625,18 +8465,46 @@ io.on('connection', async (socket) => {
                 const ttl = isInTripState
                     ? getTTL('DRIVER_LOCATION', 'IN_TRIP')
                     : getTTL('DRIVER_LOCATION', 'ONLINE');
-                await redis.expire(`driver:${driverId}`, ttl);
-
-                // Garantir que está no GEO ativo (pode ter expirado)
-                const isInGeo = await redis.zscore('driver_locations', driverId);
-                if (!isInGeo) {
-                    // Re-adicionar ao GEO se não estiver
-                    await redis.geoadd('driver_locations', parseFloat(existingData.lng || lng), parseFloat(existingData.lat || lat), driverId);
-                    await redis.zrem('driver_offline_locations', driverId);
+                const geoLng = Number.parseFloat(existingDriverState.lng || lngNum);
+                const geoLat = Number.parseFloat(existingDriverState.lat || latNum);
+                const heartbeatTs = Date.now();
+                const nowIso = new Date().toISOString();
+                const heartbeatPipeline = redis.pipeline();
+                heartbeatPipeline.expire(`driver:${driverId}`, ttl);
+                heartbeatPipeline.hset(`driver:${driverId}`, {
+                    lastSeen: nowIso,
+                    lastHeartbeatAt: nowIso,
+                    lastUpdate: String(heartbeatTs),
+                    timestamp: String(heartbeatTs),
+                    lat: String(geoLat),
+                    lng: String(geoLng)
+                });
+                heartbeatPipeline.geoadd('driver_locations', geoLng, geoLat, driverId);
+                heartbeatPipeline.zrem('driver_offline_locations', driverId);
+                if (existingDriverState.dispatchEligible === 'true') {
+                    heartbeatPipeline.geoadd(eligibleDriverGeoKey, geoLng, geoLat, driverId);
+                } else {
+                    heartbeatPipeline.zrem(eligibleDriverGeoKey, driverId);
                 }
+                const heartbeatPipelineResult = await heartbeatPipeline.exec();
+                const heartbeatPipelineError = heartbeatPipelineResult?.find(([cmdErr]) => cmdErr)?.[0];
+                if (heartbeatPipelineError) {
+                    throw heartbeatPipelineError;
+                }
+                runtimeMetrics.recordRedisHotpathOp('driver_heartbeat', 'pipeline_ops', 5);
 
-                // Atualizar lastSeen
-                await redis.hset(`driver:${driverId}`, 'lastSeen', new Date().toISOString());
+                setCachedDriverState(driverId, {
+                    ...existingDriverState,
+                    lat: String(geoLat),
+                    lng: String(geoLng),
+                    isOnline: 'true',
+                    status: isInTripState ? 'IN_TRIP' : (existingDriverState.status || 'AVAILABLE'),
+                    lastSeen: nowIso,
+                    lastHeartbeatAt: nowIso,
+                    lastUpdate: String(heartbeatTs),
+                    timestamp: String(heartbeatTs)
+                });
+                runtimeMetrics.recordRealtimeUpdate('driverHeartbeat', 'processed');
 
                 // ✅ HEARTBEAT: Renovar lock de veículo (se motorista estiver online)
                 if (socket.vehiclePlate) {
@@ -5662,10 +8530,15 @@ io.on('connection', async (socket) => {
                 }
             } else {
                 // Se não existe, criar com dados do heartbeat
-                await saveDriverLocation(driverId, lat, lng, 0, 0, Date.now(), true, isInTripState);
+                await saveDriverLocation(driverId, latNum, lngNum, 0, 0, Date.now(), true, isInTripState);
+                runtimeMetrics.recordRealtimeUpdate('driverHeartbeat', 'processed');
             }
 
+            runtimeMetrics.recordHotpathLatency('driverHeartbeat', (Date.now() - heartbeatStartedAt) / 1000, true);
+
         } catch (error) {
+            runtimeMetrics.recordRealtimeUpdate('driverHeartbeat', 'failed');
+            runtimeMetrics.recordHotpathLatency('driverHeartbeat', (Date.now() - heartbeatStartedAt) / 1000, false);
             // Ignorar erros de heartbeat silenciosamente (não é crítico)
             logStructured('debug', `Erro ao processar heartbeat`, {
                 service: 'driverHeartbeat',
@@ -5676,25 +8549,13 @@ io.on('connection', async (socket) => {
 
     // 11. UpdateLocation (crítico - GPS genérico)
     socket.on('updateLocation', async (data) => {
+        const updateStartedAt = Date.now();
         try {
             // Obter driverId do socket (autenticado) ou dos dados
             const driverId = socket.userId || data.uid || data.driverId;
-
-            // ✅ NOVO: Rate Limiting (leve para não afetar GPS)
-            const rateLimitCheck = await rateLimiterService.checkRateLimit(driverId, 'updateLocation');
-
-            if (!rateLimitCheck.allowed) {
-                // Para GPS, apenas logar mas não bloquear (fail-open para não afetar rastreamento)
-                logStructured('warn', 'updateLocation excedido por rate limiter, mas permitindo (GPS crítico)', {
-                    service: 'websocket',
-                    operation: 'updateLocation',
-                    driverId,
-                    limit: rateLimitCheck.limit
-                });
-                // Continuar processamento (GPS é crítico)
-            }
-
             const { lat, lng, tripStatus, isInTrip } = data;
+            const latNum = Number(lat);
+            const lngNum = Number(lng);
 
             if (process.env.NODE_ENV === 'development' || process.env.DEBUG_LOCATION === 'true') {
                 logStructured('debug', 'updateLocation recebido do cliente', {
@@ -5705,24 +8566,25 @@ io.on('connection', async (socket) => {
                     dataUid: data.uid,
                     dataDriverId: data.driverId,
                     userType: socket.userType,
-                    lat,
-                    lng,
+                    lat: latNum,
+                    lng: lngNum,
                     tripStatus,
                     isInTrip
                 });
             }
 
-            if (!driverId || !lat || !lng) {
+            if (!driverId || !Number.isFinite(latNum) || !Number.isFinite(lngNum)) {
                 logStructured('error', 'Dados incompletos para updateLocation', {
                     service: 'websocket',
                     operation: 'updateLocation',
                     driverId,
-                    lat,
-                    lng,
+                    lat: latNum,
+                    lng: lngNum,
                     socketUserId: socket.userId,
                     dataUid: data.uid,
                     dataDriverId: data.driverId
                 });
+                runtimeMetrics.recordRealtimeUpdate('updateLocation', 'invalid');
                 socket.emit('error', { message: 'Dados de localização incompletos ou motorista não autenticado' });
                 return;
             }
@@ -5736,9 +8598,12 @@ io.on('connection', async (socket) => {
                     driverId,
                     socketId: socket.id
                 });
+                runtimeMetrics.recordRealtimeUpdate('updateLocation', 'rejected_non_driver');
                 socket.emit('error', { message: 'Apenas motoristas podem atualizar localização' });
                 return;
             }
+
+            clearPendingDriverDisconnectCleanup(driverId, 'update_location_received');
 
             // ✅ OTIMIZAÇÃO 4: TTL diferenciado por estado
             // - Em viagem: 30 segundos (dados críticos, precisa ser muito atualizado)
@@ -5746,8 +8611,45 @@ io.on('connection', async (socket) => {
             const isInTripState = isInTrip || tripStatus === 'started' || tripStatus === 'accepted';
             const redis = redisPool.getConnection();
 
+            // Debounce/coalescing para reduzir spam de updates sem mudar semântica útil.
+            const updateGate = shouldSkipRealtimeUpdate(driverId, {
+                lat: latNum,
+                lng: lngNum,
+                timestamp: Date.now(),
+                isInTrip: isInTripState,
+                tripStatus: tripStatus || '',
+                isOnline: true
+            });
+            if (updateGate.skip) {
+                runtimeMetrics.recordRealtimeUpdate('updateLocation', updateGate.reason || 'coalesced');
+                runtimeMetrics.recordHotpathLatency('updateLocation', (Date.now() - updateStartedAt) / 1000, true);
+                socket.emit('locationUpdated', {
+                    message: 'Localização atualizada',
+                    location: { lat: latNum, lng: lngNum },
+                    driverId,
+                    coalesced: true
+                });
+                return;
+            }
+
+            // Rate limit cache local curto para cortar round-trips Redis em picos de GPS.
+            if (shouldRunUpdateLocationRateLimit(driverId)) {
+                const rateLimitCheck = await rateLimiterService.checkRateLimit(driverId, 'updateLocation');
+                if (!rateLimitCheck.allowed) {
+                    logStructured('warn', 'updateLocation excedido por rate limiter, mas permitindo (GPS crítico)', {
+                        service: 'websocket',
+                        operation: 'updateLocation',
+                        driverId,
+                        limit: rateLimitCheck.limit
+                    });
+                }
+                runtimeMetrics.recordRedisHotpathOp('updateLocation_rate_limit', 'checkRateLimit', 1);
+            } else {
+                runtimeMetrics.recordRealtimeUpdate('updateLocation_rate_limit', 'cache_hit');
+            }
+
             // Aplicar validação KYC diária na transição offline -> online via updateLocation
-            const existingDriverState = await redis.hgetall(`driver:${driverId}`);
+            const existingDriverState = await getDriverStateHot(redis, driverId);
             const wasOnline = existingDriverState?.isOnline === 'true';
             if (!wasOnline) {
                 try {
@@ -5772,24 +8674,81 @@ io.on('connection', async (socket) => {
                 }
             }
 
+            // Segurança operacional: updateLocation não pode tornar motorista online sem lock/veículo válido.
+            const enforceVehicleLockOnUpdateLocation =
+                String(process.env.ENFORCE_VEHICLE_LOCK_ON_UPDATE_LOCATION || 'true').toLowerCase() !== 'false';
+            const hasVehicleContext =
+                Boolean(socket.vehiclePlate) ||
+                existingDriverState?.vehicleLockValidated === 'true' ||
+                Boolean(existingDriverState?.vehiclePlate);
+
+            if (enforceVehicleLockOnUpdateLocation && !isInTripState && !hasVehicleContext) {
+                let lockRecovered = false;
+
+                if (shouldAttemptVehicleLockRecovery(driverId)) {
+                    try {
+                        const lockRecovery = await tryRecoverVehicleLockContext({
+                            driverId,
+                            socket,
+                            existingDriverState,
+                            redis,
+                            logStructured
+                        });
+                        lockRecovered = lockRecovery.recovered === true;
+                    } catch (lockRecoveryError) {
+                        logStructured('warn', 'Falha ao recuperar lock de veículo no updateLocation', {
+                            service: 'websocket',
+                            operation: 'updateLocation',
+                            driverId,
+                            error: lockRecoveryError.message,
+                            eventType: 'updateLocation'
+                        });
+                    }
+                }
+
+                if (!lockRecovered) {
+                    logStructured('warn', 'updateLocation bloqueado: motorista sem lock de veículo validado', {
+                        service: 'websocket',
+                        operation: 'updateLocation',
+                        driverId,
+                        eventType: 'updateLocation'
+                    });
+                    socket.emit('driverStatusError', {
+                        error: 'Ative o modo online antes de compartilhar localização.',
+                        message: 'Você precisa ativar seu status com veículo válido para ficar disponível.',
+                        code: 'VEHICLE_LOCK_REQUIRED'
+                    });
+                    return;
+                }
+            }
+
             if (process.env.NODE_ENV === 'development' || process.env.DEBUG_LOCATION === 'true') {
                 logStructured('debug', 'Salvando localização do driver no Redis', {
                     service: 'websocket',
                     operation: 'updateLocation',
                     driverId,
-                    lat,
-                    lng,
+                    lat: latNum,
+                    lng: lngNum,
                     isInTrip: isInTripState,
                     tripStatus: tripStatus,
                     isOnline: true
                 });
             }
 
-            await saveDriverLocation(driverId, lat, lng, 0, 0, Date.now(), true, isInTripState);
+            await saveDriverLocation(driverId, latNum, lngNum, 0, 0, Date.now(), true, isInTripState, existingDriverState);
+            runtimeMetrics.recordRealtimeUpdate('updateLocation', 'processed');
+            markRealtimeUpdateProcessed(driverId, {
+                lat: latNum,
+                lng: lngNum,
+                timestamp: Date.now(),
+                isInTrip: isInTripState,
+                tripStatus: tripStatus || '',
+                isOnline: true
+            });
 
-            // Verificar se foi salvo corretamente no GEO
-            const isInGeo = await redis.zscore('driver_locations', driverId);
             if (process.env.NODE_ENV === 'development' || process.env.DEBUG_LOCATION === 'true') {
+                // Verificação de GEO é custosa, manter apenas em modo debug.
+                const isInGeo = await redis.zscore('driver_locations', driverId);
                 logStructured('debug', 'Verificação pós-salvamento de localização', {
                     service: 'websocket',
                     operation: 'updateLocation',
@@ -5802,42 +8761,61 @@ io.on('connection', async (socket) => {
             // ✅ NOVO: Se motorista está em uma corrida ativa, enviar localização para o passageiro
             if (isInTripState) {
                 try {
-                    // Buscar booking ativo do motorista no Redis
-                    const driverBookings = await redis.keys(`booking:*`);
-                    for (const bookingKey of driverBookings) {
-                        const bookingData = await redis.hgetall(bookingKey);
-                        const bookingDriverId = bookingData.driverId;
-                        const bookingStatus = bookingData.status;
+                    // O(1): resolver corrida ativa por motorista via índice dedicado.
+                    // Fallback mínimo para compatibilidade com dados legados sem varredura global.
+                    const activeTrip = await resolveActiveTripForDriver(redis, driverId);
+                    let activeBookingId = activeTrip?.tripId || existingDriverState?.activeTripId || null;
+                    let customerId = activeTrip?.customerId || null;
 
-                        // Verificar se é uma corrida ativa deste motorista
-                        if (bookingDriverId === driverId &&
-                            (bookingStatus === 'ACCEPTED' || bookingStatus === 'SEARCHING' || bookingStatus === 'STARTED')) {
-                            const bookingId = bookingKey.replace('booking:', '');
-                            const customerId = bookingData.customerId || bookingData.customer;
+                    if (activeBookingId && !customerId) {
+                        const activeBookingData = await redis.hgetall(`booking:${activeBookingId}`);
+                        customerId = activeBookingData?.customerId || activeBookingData?.customer || null;
+                    }
 
-                            if (customerId) {
-                                // ✅ Enviar localização do motorista para o passageiro via room
-                                io.to(`customer_${customerId}`).emit('driverLocation', {
-                                    bookingId,
+                    if (activeBookingId && customerId) {
+                        io.to(`customer_${customerId}`).emit('driverLocation', {
+                            bookingId: activeBookingId,
+                            driverId,
+                            location: {
+                                lat: parseFloat(latNum),
+                                lng: parseFloat(lngNum),
+                                heading: 0,
+                                speed: 0,
+                                timestamp: Date.now()
+                            }
+                        });
+                        if (process.env.NODE_ENV === 'development' || process.env.DEBUG_LOCATION === 'true') {
+                            logStructured('debug', 'Localização do motorista enviada para passageiro', {
+                                service: 'websocket',
+                                operation: 'updateLocation',
+                                driverId,
+                                customerId,
+                                bookingId: activeBookingId
+                            });
+                        }
+
+                        if (TRIP_INTEGRITY_ENABLED) {
+                            try {
+                                await registerTripIntegrityLocationUpdate({
+                                    io,
+                                    redis,
+                                    bookingId: activeBookingId,
                                     driverId,
-                                    location: {
-                                        lat: parseFloat(lat),
-                                        lng: parseFloat(lng),
-                                        heading: 0,
-                                        speed: 0,
+                                    customerId,
+                                    driverLocation: {
+                                        lat: latNum,
+                                        lng: lngNum,
                                         timestamp: Date.now()
                                     }
                                 });
-                                if (process.env.NODE_ENV === 'development' || process.env.DEBUG_LOCATION === 'true') {
-                                    logStructured('debug', 'Localização do motorista enviada para passageiro', {
-                                        service: 'websocket',
-                                        operation: 'updateLocation',
-                                        driverId,
-                                        customerId,
-                                        bookingId
-                                    });
-                                }
-                                break; // Encontrou a corrida ativa, não precisa continuar
+                            } catch (tripIntegrityError) {
+                                logStructured('warn', 'Falha ao atualizar tripIntegrity com localização do motorista', {
+                                    service: 'trip-integrity',
+                                    bookingId: activeBookingId,
+                                    driverId,
+                                    customerId,
+                                    error: tripIntegrityError.message
+                                });
                             }
                         }
                     }
@@ -5854,7 +8832,7 @@ io.on('connection', async (socket) => {
             // Emitir confirmação
             socket.emit('locationUpdated', {
                 message: 'Localização atualizada',
-                location: { lat, lng },
+                location: { lat: latNum, lng: lngNum },
                 driverId: driverId
             });
 
@@ -5863,13 +8841,16 @@ io.on('connection', async (socket) => {
                     service: 'websocket',
                     operation: 'updateLocation',
                     driverId,
-                    lat,
-                    lng,
+                    lat: latNum,
+                    lng: lngNum,
                     status: isInTripState ? 'em viagem' : 'online'
                 });
             }
+            runtimeMetrics.recordHotpathLatency('updateLocation', (Date.now() - updateStartedAt) / 1000, true);
 
         } catch (error) {
+            runtimeMetrics.recordRealtimeUpdate('updateLocation', 'failed');
+            runtimeMetrics.recordHotpathLatency('updateLocation', (Date.now() - updateStartedAt) / 1000, false);
             logStructured('error', 'Erro ao atualizar localização (updateLocation)', {
                 service: 'websocket',
                 operation: 'updateLocation',
@@ -5879,6 +8860,245 @@ io.on('connection', async (socket) => {
             });
             // Stack já está incluído no logStructured acima
             socket.emit('error', { message: 'Erro ao atualizar localização' });
+        }
+    });
+
+    // Localização periódica do passageiro durante corrida ativa (tripulação)
+    socket.on('passengerLocationUpdate', async (data = {}) => {
+        const updateStartedAt = Date.now();
+        try {
+            if (!TRIP_INTEGRITY_ENABLED) {
+                socket.emit('passengerLocationUpdated', {
+                    success: true,
+                    skipped: true,
+                    reason: 'TRIP_INTEGRITY_DISABLED'
+                });
+                return;
+            }
+
+            const customerId = socket.userId || data.customerId || data.uid || null;
+            const socketUserType = String(socket.userType || '').trim().toLowerCase();
+            if (!customerId || (socketUserType !== 'customer' && socketUserType !== 'passenger')) {
+                socket.emit('passengerLocationError', {
+                    error: 'Apenas passageiros podem enviar localização de tripulação.',
+                    code: 'PASSENGER_ONLY'
+                });
+                return;
+            }
+
+            const bookingIdRaw = data.bookingId || null;
+            const lat = Number(data.lat);
+            const lng = Number(data.lng);
+            if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+                socket.emit('passengerLocationError', {
+                    error: 'Latitude e longitude válidas são obrigatórias.',
+                    code: 'LOCATION_REQUIRED'
+                });
+                return;
+            }
+
+            await redisPool.ensureConnection();
+            const redis = redisPool.getConnection();
+
+            let bookingId = bookingIdRaw;
+            if (!bookingId) {
+                bookingId = await redis.get(`customer_active_booking:${customerId}`);
+            }
+
+            if (!bookingId) {
+                socket.emit('passengerLocationError', {
+                    error: 'Nenhuma corrida ativa encontrada para este passageiro.',
+                    code: 'ACTIVE_BOOKING_REQUIRED'
+                });
+                return;
+            }
+
+            const bookingData = await redis.hgetall(`booking:${bookingId}`);
+            if (!bookingData || Object.keys(bookingData).length === 0) {
+                socket.emit('passengerLocationError', {
+                    error: 'Corrida não encontrada.',
+                    code: 'BOOKING_NOT_FOUND'
+                });
+                return;
+            }
+
+            if (String(bookingData.customerId || '') !== String(customerId)) {
+                socket.emit('passengerLocationError', {
+                    error: 'Passageiro não autorizado para esta corrida.',
+                    code: 'BOOKING_CUSTOMER_MISMATCH'
+                });
+                return;
+            }
+
+            const bookingState = await RideStateManager.getBookingState(redis, bookingId);
+            const bookingStatus = String(bookingData.status || '').trim().toUpperCase();
+            if (!isTripIntegrityMonitoringState(bookingState) && !isTripIntegrityMonitoringState(bookingStatus)) {
+                socket.emit('passengerLocationUpdated', {
+                    success: true,
+                    bookingId,
+                    skipped: true,
+                    reason: 'BOOKING_NOT_IN_MONITORED_STATE'
+                });
+                return;
+            }
+
+            await registerTripIntegrityLocationUpdate({
+                io,
+                redis,
+                bookingId,
+                customerId,
+                driverId: bookingData.driverId || null,
+                passengerLocation: {
+                    lat,
+                    lng,
+                    timestamp: data.timestamp || Date.now()
+                }
+            });
+
+            recordRealtimeMetricSafe('trip_integrity', 'passenger_location_update');
+            recordHotpathLatencySafe('passenger_location_update', Date.now() - updateStartedAt, true);
+
+            socket.emit('passengerLocationUpdated', {
+                success: true,
+                bookingId,
+                location: {
+                    lat,
+                    lng,
+                    timestamp: Date.now()
+                }
+            });
+        } catch (error) {
+            recordRealtimeMetricSafe('trip_integrity', 'passenger_location_error');
+            recordHotpathLatencySafe('passenger_location_update', Date.now() - updateStartedAt, false);
+            logStructured('error', 'Erro ao processar passengerLocationUpdate', {
+                service: 'trip-integrity',
+                customerId: socket.userId || null,
+                socketUserType: socket.userType || null,
+                error: error.message
+            });
+            socket.emit('passengerLocationError', {
+                error: 'Falha ao atualizar localização do passageiro.',
+                code: 'PASSENGER_LOCATION_UPDATE_ERROR'
+            });
+        }
+    });
+
+    // Confirmação de embarque após alerta de divergência (tripulação)
+    socket.on('confirmBoardingStatus', async (data = {}) => {
+        try {
+            if (!TRIP_INTEGRITY_ENABLED) {
+                socket.emit('boardingStatusConfirmed', {
+                    success: true,
+                    skipped: true,
+                    reason: 'TRIP_INTEGRITY_DISABLED'
+                });
+                return;
+            }
+
+            const customerId = socket.userId || data.customerId || data.uid || null;
+            const socketUserType = String(socket.userType || '').trim().toLowerCase();
+            if (!customerId || (socketUserType !== 'customer' && socketUserType !== 'passenger')) {
+                socket.emit('boardingStatusError', {
+                    error: 'Apenas passageiros podem confirmar embarque.',
+                    code: 'PASSENGER_ONLY'
+                });
+                return;
+            }
+
+            const bookingId = data.bookingId || null;
+            if (!bookingId) {
+                socket.emit('boardingStatusError', {
+                    error: 'ID da corrida é obrigatório.',
+                    code: 'BOOKING_ID_REQUIRED'
+                });
+                return;
+            }
+
+            const boarded = Boolean(data.boarded);
+            await redisPool.ensureConnection();
+            const redis = redisPool.getConnection();
+            const bookingData = await redis.hgetall(`booking:${bookingId}`);
+
+            if (!bookingData || Object.keys(bookingData).length === 0) {
+                socket.emit('boardingStatusError', {
+                    error: 'Corrida não encontrada.',
+                    code: 'BOOKING_NOT_FOUND'
+                });
+                return;
+            }
+
+            if (String(bookingData.customerId || '') !== String(customerId)) {
+                socket.emit('boardingStatusError', {
+                    error: 'Passageiro não autorizado para esta corrida.',
+                    code: 'BOOKING_CUSTOMER_MISMATCH'
+                });
+                return;
+            }
+
+            const integrityKey = `trip_integrity:${bookingId}`;
+            const nowTs = Date.now();
+            const driverId = bookingData.driverId || null;
+
+            if (boarded) {
+                clearTripIntegrityConfirmationTimeout(bookingId);
+                await redis.hset(integrityKey, {
+                    divergenceCount: '0',
+                    alertOpenAt: '',
+                    alertResolvedAt: String(nowTs),
+                    boardingConfirmedAt: String(nowTs)
+                });
+                await redis.expire(integrityKey, 6 * 60 * 60);
+                recordRealtimeMetricSafe('trip_integrity', 'boarding_confirmed');
+
+                const payload = {
+                    success: true,
+                    bookingId,
+                    boarded: true,
+                    message: 'Confirmação de embarque recebida.',
+                    timestamp: new Date().toISOString()
+                };
+                io.to(`customer_${customerId}`).emit('boardingStatusConfirmed', payload);
+                if (driverId) {
+                    io.to(`driver_${driverId}`).emit('boardingStatusConfirmed', payload);
+                }
+                return;
+            }
+
+            await redis.hset(integrityKey, {
+                passengerReportedIssueAt: String(nowTs),
+                alertOpenAt: String(nowTs)
+            });
+            await redis.expire(integrityKey, 6 * 60 * 60);
+            recordRealtimeMetricSafe('trip_integrity', 'boarding_not_confirmed');
+
+            await cancelRideForTripIntegrityViolation({
+                io,
+                redis,
+                bookingId,
+                driverId,
+                customerId,
+                reasonCode: 'PASSENGER_REPORTED_NOT_BOARDED',
+                reasonMessage: 'Corrida cancelada após passageiro informar embarque incorreto.'
+            });
+
+            socket.emit('boardingStatusConfirmed', {
+                success: true,
+                bookingId,
+                boarded: false,
+                message: 'Corrida cancelada por inconsistência de embarque.',
+                timestamp: new Date().toISOString()
+            });
+        } catch (error) {
+            logStructured('error', 'Erro ao processar confirmação de embarque (tripIntegrity)', {
+                service: 'trip-integrity',
+                customerId: socket.userId || null,
+                error: error.message
+            });
+            recordRealtimeMetricSafe('trip_integrity', 'boarding_confirm_error');
+            socket.emit('boardingStatusError', {
+                error: 'Falha ao confirmar status de embarque.',
+                code: 'BOARDING_CONFIRMATION_ERROR'
+            });
         }
     });
 
@@ -6041,6 +9261,8 @@ io.on('connection', async (socket) => {
         await traceContext.runWithTraceId(traceId, async () => {
             try {
                 const { bookingId, reason, cancellationFee } = data;
+                clearBoardingWindowTimeout(bookingId);
+                clearTripIntegrityConfirmationTimeout(bookingId);
                 const userId = socket.userId || socket.id;
 
                 logStructured('info', 'cancelRide iniciado', {
@@ -6131,11 +9353,15 @@ io.on('connection', async (socket) => {
 
                 // ✅ NOVO: Identificar motorista que cancelou (se for motorista)
                 const cancellingDriverId = socket.userId && socket.userType === 'driver' ? socket.userId : null;
+                if (cancellingDriverId) {
+                    await redis.set(`driver_soft_ban:${cancellingDriverId}`, String(Date.now()), 'EX', 300);
+                }
 
                 for (const driverId of notifiedDrivers) {
                     try {
                         await driverLockManager.releaseLock(driverId);
                         dispatcher.cancelDriverTimeout(driverId, bookingId);
+                        await redis.del(`driver_active_notification:${driverId}`);
 
                         // ✅ NOVO: Se este motorista cancelou, adicionar à lista de exclusão permanente
                         if (cancellingDriverId && driverId === cancellingDriverId) {
@@ -6149,6 +9375,19 @@ io.on('connection', async (socket) => {
                         }
                     } catch (e) {
                         // Ignorar erros de lock não existente
+                    }
+                }
+
+                // Garantia adicional: se houver motorista associado no booking,
+                // limpar lock/notificação mesmo que não esteja em ride_notifications.
+                const bookingDriverId = bookingData.driverId || null;
+                if (bookingDriverId) {
+                    try {
+                        await driverLockManager.releaseLock(bookingDriverId);
+                        dispatcher.cancelDriverTimeout(bookingDriverId, bookingId);
+                        await redis.del(`driver_active_notification:${bookingDriverId}`);
+                    } catch (_cleanupDriverError) {
+                        // best effort
                     }
                 }
 
@@ -6195,11 +9434,18 @@ io.on('connection', async (socket) => {
 
                 let result;
                 try {
+                    const providedCancellationFeeRaw = Number(cancellationFee);
+                    const providedCancellationFeeCents = Number.isFinite(providedCancellationFeeRaw) && providedCancellationFeeRaw > 0
+                        ? (providedCancellationFeeRaw >= 50
+                            ? Math.round(providedCancellationFeeRaw)
+                            : Math.round(providedCancellationFeeRaw * 100))
+                        : 0;
+
                     const command = new CancelRideCommand({
                         bookingId,
                         canceledBy: userId,
                         reason: reason || 'Cancelado pelo usuário',
-                        cancellationFee: cancellationFee || 0,
+                        cancellationFee: providedCancellationFeeCents,
                         traceId, // ✅ Passar traceId para o command
                         correlationId, // ✅ Passar correlationId para o command
                         userType: socket.userType // Tipo de usuário (customer/driver)
@@ -6211,11 +9457,9 @@ io.on('connection', async (socket) => {
 
                     // ✅ MÉTRICAS: Registrar latência do command
                     const commandLatency = (Date.now() - commandStartTime) / 1000;
-                    metrics.recordCommand('cancel_ride', commandLatency, result.success);
                 } catch (error) {
                     endSpanError(commandSpan, error);
                     const commandLatency = (Date.now() - commandStartTime) / 1000;
-                    metrics.recordCommand('cancel_ride', commandLatency, false);
                     throw error;
                 }
 
@@ -6243,6 +9487,7 @@ io.on('connection', async (socket) => {
 
                 // Command executado com sucesso (já processou reembolso e atualizou estado)
                 const { bookingId: resultBookingId, canceledBy, reason: resultReason, cancellationFee: resultCancellationFee, event, refundResult } = result.data;
+                const effectiveCancellationFeeCents = Math.max(0, Number(resultCancellationFee || 0));
 
                 // ✅ REFATORAÇÃO: Publicar evento no EventBus (listeners vão processar notificações)
                 if (event) {
@@ -6300,8 +9545,7 @@ io.on('connection', async (socket) => {
                 const paymentRecord = await paymentService.getStoredPayment(bookingId);
                 const estimatedFare = parseFloat(bookingData.estimatedFare || bookingData.totalAmount || 0) || 0;
                 const chargeId = paymentRecord?.chargeId || bookingData.paymentChargeId || null;
-                const cancellationFeeValue = parseFloat(cancellationFee || 0) || 0;
-                const cancellationFeeInCents = Math.max(0, Math.round(cancellationFeeValue * 100));
+                const cancellationFeeInCents = effectiveCancellationFeeCents;
 
                 let refundSummary = {
                     status: 'NO_PAYMENT_FOUND',
@@ -6479,19 +9723,7 @@ io.on('connection', async (socket) => {
                 // 9. Limpar dados de busca
                 await redis.del(`booking_search:${bookingId}`);
                 await redis.del(`ride_notifications:${bookingId}`);
-
-                // 10. Registrar evento
-                const eventSourcing = require('./services/event-sourcing');
-                const { EVENT_TYPES } = require('./services/event-sourcing');
-                await eventSourcing.recordEvent(
-                    EVENT_TYPES.RIDE_CANCELED,
-                    {
-                        bookingId,
-                        reason: reason || 'Cancelado pelo usuário',
-                        canceledBy: socket.userId || socket.id,
-                        canceledAt: Date.now()
-                    }
-                );
+                await redis.del(`trip_integrity:${bookingId}`);
 
                 logStructured('info', 'Corrida cancelada - Reembolso automático processado', {
                     service: 'server',
@@ -6516,12 +9748,13 @@ io.on('connection', async (socket) => {
                 socket.emit('rideCancellationError', { error: 'Erro interno do servidor' });
             }
         });
-        // =========================================================================================
+    });
+    // =========================================================================================
 
-        // ==================== NOVOS EVENTOS - SISTEMA DE SEGURANÇA ====================
+    // ==================== NOVOS EVENTOS - SISTEMA DE SEGURANÇA ====================
 
-        // Reportar incidente
-        socket.on('reportIncident', async (data) => {
+    // Reportar incidente
+    socket.on('reportIncident', async (data) => {
             try {
                 logStructured('info', 'Incidente reportado', {
                     service: 'server',
@@ -7538,6 +10771,14 @@ io.on('connection', async (socket) => {
         const gracefulShutdown = (signal) => {
             logStructured('info', `Recebido ${signal}, fechando servidor`, { service: 'server' });
             server.close(async () => {
+                if (socketIoAdapterPubClient) {
+                    socketIoAdapterPubClient.disconnect();
+                    socketIoAdapterPubClient = null;
+                }
+                if (socketIoAdapterSubClient) {
+                    socketIoAdapterSubClient.disconnect();
+                    socketIoAdapterSubClient = null;
+                }
                 await shutdownTracer();
                 process.exit(0);
             });
@@ -7546,4 +10787,4 @@ io.on('connection', async (socket) => {
         process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
         process.on('SIGINT', () => gracefulShutdown('SIGINT'));
     }
-}); // Fecha bloco else (linha 147)
+}

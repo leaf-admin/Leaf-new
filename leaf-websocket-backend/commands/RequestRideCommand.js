@@ -26,6 +26,10 @@ const { metrics } = require('../utils/prometheus-metrics');
 const { validateAndEnsureTraceIdInCommand } = require('../utils/trace-validator');
 const geofenceService = require('../services/geofence-service');
 const fareEstimationService = require('../services/fare-estimation-service');
+const PaymentService = require('../services/payment-service');
+const { resolveEstimatedFareSnapshot } = require('../utils/fare-snapshot-utils');
+
+const paymentService = new PaymentService();
 
 class RequestRideCommand extends Command {
     constructor(data) {
@@ -39,6 +43,12 @@ class RequestRideCommand extends Command {
         this.tollFee = data.tollFee || 0;
         this.carType = data.carType || null;
         this.paymentMethod = data.paymentMethod || 'pix';
+        this.paymentStatus = data.paymentStatus || 'pending_payment';
+        this.paymentId = data.paymentId || null;
+        this.paymentData =
+            data.paymentData && typeof data.paymentData === 'object'
+                ? { ...data.paymentData }
+                : null;
         this.pricingContext = data.pricingContext || data.operational || null;
         // ✅ VALIDAÇÃO: Garantir traceId válido
         this.traceId = validateAndEnsureTraceIdInCommand(data, 'RequestRide');
@@ -89,6 +99,32 @@ class RequestRideCommand extends Command {
         const startTime = Date.now();
         // ✅ OBSERVABILIDADE: Executar com traceId
         return await traceContext.runWithTraceId(this.traceId, async () => {
+            let currentStage = 'validate';
+            let stageStartedAt = Date.now();
+            const perfBreakdownMs = {};
+            const perfKeyMap = {
+                fare_estimation: 'fareEstimation',
+                booking_payload: 'bookingPayload',
+                state_update: 'stateUpdate',
+                event_build: 'eventBuild'
+            };
+            const beginStage = (stage) => {
+                currentStage = stage;
+                stageStartedAt = Date.now();
+            };
+            const recordStage = (stage, completedAt = Date.now(), success = true) => {
+                const durationMs = Math.max(0, completedAt - stageStartedAt);
+                perfBreakdownMs[perfKeyMap[stage] || stage] = durationMs;
+                metrics.recordHotpathStageLatency(
+                    'create_booking',
+                    `command_${stage}`,
+                    durationMs / 1000,
+                    success
+                );
+                stageStartedAt = completedAt;
+                currentStage = stage;
+                return completedAt;
+            };
             try {
                 logStructured('info', 'RequestRideCommand.execute iniciado', {
                     customerId: this.customerId,
@@ -96,9 +132,12 @@ class RequestRideCommand extends Command {
                 });
 
                 // Validar
+                beginStage('validate');
                 this.validate();
+                recordStage('validate');
 
                 // Garantir conexão Redis
+                beginStage('prepare');
                 await redisPool.ensureConnection();
                 const redis = redisPool.getConnection();
 
@@ -111,10 +150,12 @@ class RequestRideCommand extends Command {
                     this.pickupLocation.lng,
                     5 // Precisão 5 = ~5km x 5km
                 );
+                recordStage('prepare');
 
                 // Tarifa server-authoritative para evitar divergência de cálculo no cliente.
-                const fareEstimation = await fareEstimationService.estimateRideFare({
-                    redis,
+                beginStage('fare_estimation');
+	                const fareEstimation = await fareEstimationService.estimateRideFare({
+	                    redis,
                     pickupLocation: this.pickupLocation,
                     destinationLocation: this.destinationLocation,
                     carType: this.carType,
@@ -122,10 +163,63 @@ class RequestRideCommand extends Command {
                     routeDurationSecs: this.routeDurationSecs,
                     tollFee: this.tollFee,
                     clientEstimatedFare: this.estimatedFare,
-                    pricingContext: this.pricingContext
+	                    pricingContext: this.pricingContext
+	                });
+	                const farePerfBreakdownMs = fareEstimation?.perfBreakdownMs || {};
+	                const farePerfMapping = {
+	                    buildPricingContext: 'fareEstimationBuildPricingContext',
+	                    contextLoadRedisPricingState: 'fareEstimationContextLoadRedisPricingState',
+	                    contextCollectSnapshot: 'fareEstimationContextCollectSnapshot',
+	                    contextAggregateCells: 'fareEstimationContextAggregateCells',
+	                    contextDeriveContext: 'fareEstimationContextDeriveContext',
+	                    contextTotal: 'fareEstimationContextTotal',
+	                    runDynamicPricingEngine: 'fareEstimationRunDynamicPricingEngine',
+	                    total: 'fareEstimationTotalInternal'
+	                };
+	                Object.entries(farePerfMapping).forEach(([sourceKey, targetKey]) => {
+	                    const value = Number(farePerfBreakdownMs[sourceKey]);
+	                    if (Number.isFinite(value) && value >= 0) {
+	                        perfBreakdownMs[targetKey] = value;
+	                    }
+	                });
+	                recordStage('fare_estimation');
+	                const pricingSnapshotLockedAt = new Date().toISOString();
+                const estimatedFareSnapshot = resolveEstimatedFareSnapshot({
+                    paymentService,
+                    estimatedFare: fareEstimation.estimatedFare,
+                    tollFee: fareEstimation.tollFee
                 });
+                const normalizedPaymentStatus = String(
+                    this.paymentData?.paymentStatus ||
+                    this.paymentStatus ||
+                    'pending_payment'
+                ).trim().toLowerCase();
+                const hasConfirmedPayment = ['confirmed', 'paid', 'in_holding'].includes(normalizedPaymentStatus);
+                const initialRideState = hasConfirmedPayment
+                    ? RideStateManager.STATES.PENDING
+                    : RideStateManager.STATES.AWAITING_PAYMENT;
+                const initialRideStatus = hasConfirmedPayment ? 'REQUESTED' : 'AWAITING_PAYMENT';
+                const paymentChargeId = String(
+                    this.paymentData?.chargeId ||
+                    this.paymentId ||
+                    ''
+                ).trim();
+                const paymentReferenceRideId = String(
+                    this.paymentData?.rideId ||
+                    ''
+                ).trim();
+                const parsedPaymentAmountInCents = Number.parseInt(
+                    String(this.paymentData?.amountInCents ?? ''),
+                    10
+                );
+                const paymentAmountInCents =
+                    Number.isFinite(parsedPaymentAmountInCents) && parsedPaymentAmountInCents > 0
+                        ? parsedPaymentAmountInCents
+                        : null;
+                const paymentConfirmedAt = this.paymentData?.confirmedAt || null;
 
                 // Criar dados da corrida
+                beginStage('booking_payload');
                 const bookingData = {
                     bookingId,
                     customerId: this.customerId,
@@ -143,20 +237,47 @@ class RequestRideCommand extends Command {
                     scoreExcecao: fareEstimation.scoreExcecao,
                     carType: this.carType,
                     paymentMethod: this.paymentMethod,
-                    regionHash
+                    paymentStatus: normalizedPaymentStatus,
+                    paymentChargeId,
+                    paymentReferenceRideId,
+                    paymentAmountInCents: paymentAmountInCents || '',
+                    paymentConfirmedAt,
+                    regionHash,
+                    state: initialRideState,
+                    status: initialRideStatus,
+                    ...(estimatedFareSnapshot || {}),
+                    pricingSnapshotLocked: Boolean(estimatedFareSnapshot),
+                    pricingSnapshotLockedAt
                 };
+                recordStage('booking_payload');
 
                 // Adicionar à fila (isso também cria o booking no Redis)
-                await rideQueueManager.enqueueRide(bookingData);
+                beginStage('enqueue');
+                await rideQueueManager.enqueueRide(bookingData, {
+                    deferEventSourcing: true
+                });
+                recordStage('enqueue');
 
-                // Atualizar estado para SEARCHING
-                await RideStateManager.updateBookingState(
-                    redis,
-                    bookingId,
-                    RideStateManager.STATES.SEARCHING
-                );
+                // Corrida sem pagamento confirmado fica bloqueada em AWAITING_PAYMENT.
+                // O webhook/confirmPayment validado promove para SEARCHING e dispara dispatch.
+                beginStage('state_update');
+                if (hasConfirmedPayment) {
+                    await RideStateManager.updateBookingState(
+                        redis,
+                        bookingId,
+                        RideStateManager.STATES.SEARCHING,
+                        {},
+                        {
+                            deferSideEffects: true
+                        }
+                    );
+                    bookingData.state = RideStateManager.STATES.SEARCHING;
+                    bookingData.status = 'SEARCHING';
+                }
+                recordStage('state_update');
 
                 // Criar evento canônico
+                beginStage('event_build');
                 const event = new RideRequestedEvent({
                     bookingId,
                     customerId: this.customerId,
@@ -165,9 +286,15 @@ class RequestRideCommand extends Command {
                     estimatedFare: fareEstimation.estimatedFare,
                     carType: this.carType,
                     paymentMethod: this.paymentMethod,
+                    paymentStatus: normalizedPaymentStatus,
+                    ...(estimatedFareSnapshot || {}),
+                    pricingSnapshotLocked: Boolean(estimatedFareSnapshot),
+                    pricingSnapshotLockedAt,
                     traceId: this.traceId, // ✅ Incluir traceId no evento
                     correlationId: this.correlationId || bookingId // ✅ Incluir correlationId no evento
                 });
+                recordStage('event_build');
+                perfBreakdownMs.total = Math.max(0, Date.now() - startTime);
 
                 logStructured('info', 'RequestRideCommand executado com sucesso', {
                     bookingId,
@@ -183,10 +310,17 @@ class RequestRideCommand extends Command {
                     bookingId,
                     bookingData,
                     event: event.toJSON(),
-                    regionHash
+                    regionHash,
+                    perfBreakdownMs
                 });
 
             } catch (error) {
+                metrics.recordHotpathStageLatency(
+                    'create_booking',
+                    `command_${currentStage}`,
+                    Math.max(0, (Date.now() - stageStartedAt) / 1000),
+                    false
+                );
                 logStructured('error', 'RequestRideCommand falhou', {
                     customerId: this.customerId,
                     command: 'RequestRideCommand',
