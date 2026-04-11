@@ -30,7 +30,14 @@ export function createAxiosInstance(config = {}) {
 
     // Interceptor de requisição - adiciona headers padrão
     instance.interceptors.request.use(
-        (requestConfig) => {
+        async (requestConfig) => {
+            const currentUser = auth().currentUser;
+            if (currentUser && !requestConfig.headers?.Authorization) {
+                const token = await currentUser.getIdToken(false);
+                requestConfig.headers = requestConfig.headers || {};
+                requestConfig.headers.Authorization = `Bearer ${token}`;
+            }
+
             // Log apenas em desenvolvimento
             if (__DEV__) {
                 Logger.log(`🌐 [Axios] ${requestConfig.method?.toUpperCase()} ${requestConfig.url}`);

@@ -59,11 +59,13 @@ import {
   updateDriverOnboardingChecklist,
 } from "../../services/DriverOnboardingService";
 import driverActivationService from "../../services/DriverActivationService";
+import rideCostTelemetryService from "../../services/RideCostTelemetryService";
 import { getApiURL } from "../../config/NetworkConfig";
 import { getPrototypePlaybackConfigSnapshot } from "../../config/prototypePlaybackConfig";
 import {
   allowCustomOtpFallback,
   allowForcedPaymentBypass,
+  allowTestUserTools,
 } from "../../config/runtimeAccessPolicy";
 import { restoreQaSeedProfile } from "../../utils/qaSeedProfile";
 
@@ -80,6 +82,11 @@ const RUNTIME_QA_SEED_STORAGE_PREFIX = "@prototype_runtime_qa_seed_";
 const CONFIRMED_DESTINATIONS_STORAGE_KEY = "confirmedDestinations";
 const DRIVER_LOCATION_HEARTBEAT_MS = 5000;
 const PASSENGER_LOCATION_HEARTBEAT_MS = 2000;
+const PASSENGER_LOCATION_STATIONARY_HEARTBEAT_MS = 4500;
+const PASSENGER_LOCATION_STARTED_HEARTBEAT_MS = 3000;
+const PASSENGER_LOCATION_MIN_SEND_GAP_MS = 900;
+const PASSENGER_LOCATION_MIN_MOVEMENT_METERS = 6;
+const PASSENGER_LOCATION_MIN_HEADING_DELTA_DEG = 8;
 const RUNTIME_ACTIVE_RIDE_RESYNC_INTERVAL_MS = 6000;
 const DRIVER_ROUTE_PLAYBACK_TICK_MS = 2500;
 const PASSENGER_ROUTE_PLAYBACK_TICK_MS = 2500;
@@ -87,10 +94,12 @@ const PASSENGER_ROUTE_PLAYBACK_STALE_MS = 4500;
 const DRIVER_TRANSIENT_CARD_DURATION_MS = 3600;
 const DRIVER_COMPETITIVE_TRANSIENT_CARD_DURATION_MS = 8000;
 const SUPPRESSED_BOOKING_EVENT_WINDOW_MS = 15000;
+const RUNTIME_LIFECYCLE_EVENT_DEDUP_WINDOW_MS = 1500;
+const ACTIVE_RIDE_SNAPSHOT_COORDINATE_PRECISION = 4;
 const DRIVER_STATUS_RETRY_ATTEMPTS = 2;
 const DRIVER_ACTIVATION_REMOTE_SYNC_INTERVAL_MS = 12000;
 const DRIVER_ACTIVATION_SYNC_MIN_GAP_MS = 6000;
-const SESSION_RESTORE_OTP_CODE = "000000";
+const SESSION_RESTORE_OTP_CODE = "0".repeat(6);
 const SESSION_RESTORE_REQUEST_ENDPOINTS = Object.freeze([
   "/api/custom-otp/request-otp",
   "/custom-otp/request-otp",
@@ -104,6 +113,13 @@ const RUNTIME_DEBUG_HISTORY_KEY = "@prototype_runtime_debug_history";
 const DRIVER_OFFER_IDLE_SYNC_GRACE_MS = 12000;
 const SHOULD_BYPASS_BOOT_LOCATION_PROMPT =
   Platform.OS === "ios" && Device.isDevice === false;
+
+function createId(prefix = "runtime") {
+  return `${prefix}_${Date.now().toString(36)}_${Math.random()
+    .toString(36)
+    .slice(2, 8)}`;
+}
+
 const RUNTIME_PERSISTED_FIELDS = Object.freeze([
   "activeRole",
   "isSocketConnected",
@@ -250,6 +266,7 @@ const DEFAULT_DRIVER_TRANSIENT_CARD = Object.freeze({
 const DEFAULT_RUNTIME_STATE = Object.freeze({
   ready: false,
   initializing: false,
+  presentationSyncing: false,
   connecting: false,
   isSocketConnected: false,
   isSocketAuthenticated: false,
@@ -366,6 +383,7 @@ const DEFAULT_RUNTIME_STATE = Object.freeze({
 let runtimeState = { ...DEFAULT_RUNTIME_STATE };
 const runtimeListeners = new Set();
 let runtimeBootstrapPromise = null;
+let runtimePresentationSyncCount = 0;
 let runtimeSearchTimer = null;
 let runtimeSocketListenersAttached = false;
 let runtimeChatListenersAttached = false;
@@ -380,6 +398,16 @@ let runtimePassengerRoutePlaybackInterval = null;
 let runtimePassengerRoutePlaybackActive = false;
 let runtimePassengerHeartbeatInterval = null;
 let runtimePassengerHeartbeatInFlight = false;
+let runtimePassengerHeartbeatStartPromise = null;
+let runtimePassengerHeartbeatStartKey = "";
+let runtimePassengerHeartbeatActiveBookingId = null;
+let runtimePassengerHeartbeatActiveProfileUid = null;
+let runtimeLastPassengerHeartbeatSentAt = 0;
+let runtimeLastPassengerHeartbeatAttemptAt = 0;
+let runtimeLastPassengerHeartbeatBookingId = null;
+let runtimeLastPassengerHeartbeatStatus = "";
+let runtimeLastPassengerHeartbeatLocation = null;
+let runtimeLastPassengerHeartbeatHeading = 0;
 let runtimeSessionPersistTimer = null;
 let runtimeActivationRemoteSyncTimer = null;
 let runtimeBoardingCountdownTimer = null;
@@ -392,6 +420,270 @@ let runtimeDriverOnlineEnablePromise = null;
 let runtimeLastSocketConnectAt = 0;
 let runtimeLastDriverCoordinateUpdateAt = 0;
 let runtimeSuppressedBookingIds = new Map();
+let runtimeRideTelemetryDraftContextId = null;
+let runtimeLastLifecycleEventKey = "";
+let runtimeLastLifecycleEventAt = 0;
+const runtimeAppliedLifecycleEventKeysByBooking = new Map();
+let runtimeLastSyncedActiveRideFingerprint = "";
+let runtimeEffectOwnerId = null;
+const runtimeEffectConsumers = new Set();
+const runtimeEffectOwnerListeners = new Set();
+
+function notifyRuntimeEffectOwnerChanged() {
+  runtimeEffectOwnerListeners.forEach((listener) => {
+    try {
+      listener(runtimeEffectOwnerId);
+    } catch (error) {
+      Logger.warn(
+        "⚠️ [PrototypeRuntime] Falha ao notificar owner de efeitos do runtime:",
+        error?.message || error,
+      );
+    }
+  });
+}
+
+function setRuntimeEffectOwner(nextOwnerId = null) {
+  const normalizedOwnerId = String(nextOwnerId || "").trim() || null;
+  if (runtimeEffectOwnerId === normalizedOwnerId) {
+    return;
+  }
+  runtimeEffectOwnerId = normalizedOwnerId;
+  notifyRuntimeEffectOwnerChanged();
+}
+
+function registerRuntimeEffectConsumer(consumerId) {
+  const normalizedConsumerId = String(consumerId || "").trim();
+  if (!normalizedConsumerId) {
+    return () => {};
+  }
+
+  runtimeEffectConsumers.add(normalizedConsumerId);
+  if (!runtimeEffectOwnerId) {
+    setRuntimeEffectOwner(normalizedConsumerId);
+  } else {
+    notifyRuntimeEffectOwnerChanged();
+  }
+
+  return () => {
+    runtimeEffectConsumers.delete(normalizedConsumerId);
+    if (runtimeEffectOwnerId === normalizedConsumerId) {
+      const nextOwnerId = runtimeEffectConsumers.values().next().value || null;
+      setRuntimeEffectOwner(nextOwnerId);
+      return;
+    }
+    notifyRuntimeEffectOwnerChanged();
+  };
+}
+
+function subscribeRuntimeEffectOwner(listener) {
+  if (typeof listener !== "function") {
+    return () => {};
+  }
+  runtimeEffectOwnerListeners.add(listener);
+  try {
+    listener(runtimeEffectOwnerId);
+  } catch (_error) {
+    // ignore listener bootstrap issues
+  }
+  return () => {
+    runtimeEffectOwnerListeners.delete(listener);
+  };
+}
+
+function reserveRuntimeEffectConsumer(consumerId) {
+  const normalizedConsumerId = String(consumerId || "").trim();
+  if (!normalizedConsumerId) {
+    return null;
+  }
+
+  runtimeEffectConsumers.add(normalizedConsumerId);
+  if (!runtimeEffectOwnerId) {
+    runtimeEffectOwnerId = normalizedConsumerId;
+  }
+
+  return runtimeEffectOwnerId;
+}
+
+function shouldIgnoreDuplicateLifecycleEvent(eventName, bookingId, status) {
+  const normalizedEventName = String(eventName || "").trim().toLowerCase();
+  const normalizedBookingId = String(
+    bookingId ||
+      runtimeState.activeBookingId ||
+      runtimeState.driverActiveRide?.bookingId ||
+      "",
+  ).trim();
+  const normalizedStatus = String(status || "").trim().toLowerCase();
+
+  if (!normalizedEventName || !normalizedBookingId || !normalizedStatus) {
+    return false;
+  }
+
+  const eventKey = `${normalizedEventName}:${normalizedBookingId}:${normalizedStatus}`;
+  const lastAppliedEventKey =
+    runtimeAppliedLifecycleEventKeysByBooking.get(normalizedBookingId) || "";
+  if (lastAppliedEventKey === eventKey) {
+    return true;
+  }
+
+  const now = Date.now();
+  if (
+    runtimeLastLifecycleEventKey === eventKey &&
+    now - runtimeLastLifecycleEventAt < RUNTIME_LIFECYCLE_EVENT_DEDUP_WINDOW_MS
+  ) {
+    return true;
+  }
+
+  runtimeAppliedLifecycleEventKeysByBooking.set(normalizedBookingId, eventKey);
+  runtimeLastLifecycleEventKey = eventKey;
+  runtimeLastLifecycleEventAt = now;
+  return false;
+}
+
+function normalizeSnapshotFingerprintCoordinate(value) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) {
+    return null;
+  }
+
+  const precision = 10 ** ACTIVE_RIDE_SNAPSHOT_COORDINATE_PRECISION;
+  return Math.round(numeric * precision) / precision;
+}
+
+function buildActiveRideSnapshotFingerprint(snapshot, bookingStatus) {
+  const normalizedBookingId = String(snapshot?.bookingId || "").trim();
+  const normalizedStatus = String(bookingStatus || "").trim().toLowerCase();
+  if (!normalizedBookingId || !normalizedStatus) {
+    return "";
+  }
+
+  return JSON.stringify({
+    bookingId: normalizedBookingId,
+    status: normalizedStatus,
+    hasActiveRide: snapshot?.hasActiveRide === true,
+    fare: Number(
+      snapshot?.finalFare ??
+        snapshot?.estimatedFare ??
+        snapshot?.driverAmount ??
+        snapshot?.driverPayout ??
+        0,
+    ),
+    paymentStatus: String(snapshot?.paymentStatus || "").trim().toUpperCase(),
+    extensionStatus: String(
+      snapshot?.extensionRequest?.status || snapshot?.extensionPaymentStatus || "",
+    )
+      .trim()
+      .toUpperCase(),
+    pickupAddress: String(snapshot?.pickupLocation?.add || "").trim(),
+    destinationAddress: String(snapshot?.destinationLocation?.add || "").trim(),
+    pickupLat: normalizeSnapshotFingerprintCoordinate(snapshot?.pickupLocation?.lat),
+    pickupLng: normalizeSnapshotFingerprintCoordinate(snapshot?.pickupLocation?.lng),
+    destinationLat: normalizeSnapshotFingerprintCoordinate(
+      snapshot?.destinationLocation?.lat,
+    ),
+    destinationLng: normalizeSnapshotFingerprintCoordinate(
+      snapshot?.destinationLocation?.lng,
+    ),
+    driverLat: normalizeSnapshotFingerprintCoordinate(snapshot?.driverLocation?.lat),
+    driverLng: normalizeSnapshotFingerprintCoordinate(snapshot?.driverLocation?.lng),
+    boardingDeadlineAt: String(
+      snapshot?.boardingDeadlineAt ||
+        snapshot?.boardingWindow?.deadlineAt ||
+        snapshot?.deadlineAt ||
+        "",
+    ).trim(),
+  });
+}
+
+function shouldSkipSyncedActiveRideSnapshot(snapshot, bookingStatus) {
+  const fingerprint = buildActiveRideSnapshotFingerprint(snapshot, bookingStatus);
+  if (!fingerprint) {
+    return {
+      fingerprint,
+      skip: false,
+    };
+  }
+
+  const normalizedBookingId = String(snapshot?.bookingId || "").trim();
+  const normalizedStatus = String(bookingStatus || "").trim().toLowerCase();
+  const runtimeBookingId = String(runtimeState.activeBookingId || "").trim();
+  const runtimeStatus = String(runtimeState.bookingStatus || "")
+    .trim()
+    .toLowerCase();
+  const alreadyHydrated =
+    normalizedBookingId &&
+    runtimeBookingId === normalizedBookingId &&
+    runtimeStatus === normalizedStatus;
+
+  return {
+    fingerprint,
+    skip: alreadyHydrated && runtimeLastSyncedActiveRideFingerprint === fingerprint,
+  };
+}
+
+function resolveRuntimeRideTelemetrySourceMeta(overrides = {}) {
+  const role = String(overrides.role || runtimeState.activeRole || "passenger")
+    .trim()
+    .toLowerCase();
+  const userType =
+    overrides.userType ||
+    (role === "driver" ? "driver" : "customer");
+
+  return {
+    userId: overrides.userId || runtimeState.profileUid || null,
+    userType,
+    platform: Platform.OS,
+    flow: "prototype",
+    scenario: "robotaxi_prototype",
+    surface: overrides.surface || "prototype_runtime",
+  };
+}
+
+function resolveRuntimeRideTelemetryContext(overrides = {}) {
+  const sourceMeta = resolveRuntimeRideTelemetrySourceMeta(overrides);
+  const bookingId =
+    overrides.bookingId ||
+    runtimeState.activeBookingId ||
+    runtimeState.driverActiveRide?.bookingId ||
+    null;
+
+  if (bookingId) {
+    return rideCostTelemetryService.ensureContext({
+      bookingId,
+      sourceMeta,
+      sourceKey: overrides.sourceKey || null,
+    });
+  }
+
+  if (!runtimeRideTelemetryDraftContextId) {
+    runtimeRideTelemetryDraftContextId = rideCostTelemetryService.ensureContext({
+      sourceMeta,
+      sourceKey: overrides.sourceKey || null,
+    }).contextId;
+  }
+
+  return rideCostTelemetryService.ensureContext({
+    contextId: runtimeRideTelemetryDraftContextId,
+    sourceMeta,
+    sourceKey: overrides.sourceKey || null,
+  });
+}
+
+function bindRuntimeRideTelemetryToBooking(bookingId, overrides = {}) {
+  const normalizedBookingId = String(bookingId || "").trim();
+  if (!normalizedBookingId) {
+    return null;
+  }
+
+  const sourceMeta = resolveRuntimeRideTelemetrySourceMeta(overrides);
+  const boundContext = rideCostTelemetryService.bindContextToBooking({
+    contextId: runtimeRideTelemetryDraftContextId,
+    bookingId: normalizedBookingId,
+    sourceMeta,
+    sourceKey: overrides.sourceKey || null,
+  });
+  runtimeRideTelemetryDraftContextId = null;
+  return boundContext;
+}
 
 function cleanupSuppressedBookingIds(now = Date.now()) {
   runtimeSuppressedBookingIds.forEach((expiresAt, bookingId) => {
@@ -780,6 +1072,13 @@ async function ensureFirebaseSessionForPrototype(profile = null) {
     },
   );
 
+  if (!allowCustomOtpFallback() && !allowTestUserTools()) {
+    Logger.warn(
+      "🚫 [PrototypeRuntime] Restauração de sessão por OTP customizado bloqueada fora de dev/review/E2E.",
+    );
+    return false;
+  }
+
   const requestResponse = await postSessionRestoreRequest(
     SESSION_RESTORE_REQUEST_ENDPOINTS,
     {
@@ -1050,6 +1349,94 @@ function mergeDriverActivation(a, b) {
   const dateA = new Date(stateA?.updatedAt || 0).getTime();
   const dateB = new Date(stateB?.updatedAt || 0).getTime();
   return dateB >= dateA ? stateB : stateA;
+}
+
+function shouldPreferQaDriverActivation(profile = null) {
+  return Boolean(
+    allowTestUserTools() &&
+      profile?.isTestUser === true &&
+      resolveExplicitProfileRole(profile) === "driver" &&
+      sanitizeText(profile?.uid, "").length > 0,
+  );
+}
+
+function createApprovedDriverActivationState(seedState = null) {
+  const timestamp = new Date().toISOString();
+  const baseState = computeDriverOnboardingState(
+    seedState || createInitialDriverOnboardingState(),
+  );
+  const existingNotifications = Array.isArray(baseState.notifications)
+    ? baseState.notifications.filter(
+        (item) => item?.id !== "driver-onboarding-started",
+      )
+    : [];
+
+  return computeDriverOnboardingState({
+    ...baseState,
+    preRegistrationCompleted: true,
+    driverProfileStatus: "approved",
+    vehicleProfileStatus: "approved",
+    stages: {
+      ...baseState.stages,
+      [DRIVER_ONBOARDING_STAGE_KEYS.DRIVER_DATA]: {
+        ...baseState.stages?.[DRIVER_ONBOARDING_STAGE_KEYS.DRIVER_DATA],
+        status: "approved",
+        completedAt:
+          baseState.stages?.[DRIVER_ONBOARDING_STAGE_KEYS.DRIVER_DATA]
+            ?.completedAt || timestamp,
+        updatedAt: timestamp,
+        checklist: {
+          ...baseState.stages?.[DRIVER_ONBOARDING_STAGE_KEYS.DRIVER_DATA]
+            ?.checklist,
+          cnhEar: true,
+          vehicleRegistration: true,
+          inssOrMei: true,
+          backgroundCheckConsent: true,
+        },
+      },
+      [DRIVER_ONBOARDING_STAGE_KEYS.FACE_VALIDATION]: {
+        ...baseState.stages?.[DRIVER_ONBOARDING_STAGE_KEYS.FACE_VALIDATION],
+        status: "approved",
+        completedAt:
+          baseState.stages?.[DRIVER_ONBOARDING_STAGE_KEYS.FACE_VALIDATION]
+            ?.completedAt || timestamp,
+        updatedAt: timestamp,
+        checklist: {
+          ...baseState.stages?.[DRIVER_ONBOARDING_STAGE_KEYS.FACE_VALIDATION]
+            ?.checklist,
+          facialValidation: true,
+        },
+      },
+      [DRIVER_ONBOARDING_STAGE_KEYS.VEHICLE_DATA]: {
+        ...baseState.stages?.[DRIVER_ONBOARDING_STAGE_KEYS.VEHICLE_DATA],
+        status: "approved",
+        completedAt:
+          baseState.stages?.[DRIVER_ONBOARDING_STAGE_KEYS.VEHICLE_DATA]
+            ?.completedAt || timestamp,
+        updatedAt: timestamp,
+        checklist: {
+          ...baseState.stages?.[DRIVER_ONBOARDING_STAGE_KEYS.VEHICLE_DATA]
+            ?.checklist,
+          crlv: true,
+        },
+      },
+    },
+    notifications:
+      existingNotifications.length > 0
+        ? existingNotifications
+        : [
+            {
+              id: "seed-driver-activation-approved",
+              title: "Ativação aprovada",
+              message: "Motorista liberado para ficar online.",
+              kind: "driver",
+              scope: "driver",
+              read: false,
+              createdAt: timestamp,
+            },
+          ],
+    updatedAt: timestamp,
+  });
 }
 
 async function loadPersistedDriverActivation(uid) {
@@ -1582,6 +1969,24 @@ function setRuntimeState(next) {
   notifyRuntime();
 }
 
+function beginRuntimePresentationSync() {
+  runtimePresentationSyncCount += 1;
+  if (runtimePresentationSyncCount === 1) {
+    setRuntimeState({
+      presentationSyncing: true,
+    });
+  }
+}
+
+function endRuntimePresentationSync() {
+  runtimePresentationSyncCount = Math.max(0, runtimePresentationSyncCount - 1);
+  if (runtimePresentationSyncCount === 0) {
+    setRuntimeState({
+      presentationSyncing: false,
+    });
+  }
+}
+
 function buildDriverTransientCard(payload = {}) {
   const now = Date.now();
   const type = String(payload.type || "").trim();
@@ -1765,6 +2170,58 @@ function formatCurrencyBR(value) {
 function sanitizeText(value, fallback = "") {
   const text = String(value || "").trim();
   return text || fallback;
+}
+
+function resolveCompletedReceiptPickupLabel(
+  source = {},
+  previousState = runtimeState,
+) {
+  return (
+    resolveMeaningfulAddress(
+      source?.pickupAddress,
+      source?.pickupLocation?.add,
+      source?.pickup,
+      previousState?.driverActiveRide?.pickupAddress,
+      previousState?.driverActiveRide?.pickup,
+      previousState?.driverTripMeta?.pickupAddress,
+      previousState?.activeBooking?.pickupLocation?.add,
+      previousState?.currentAddress,
+    ) || "Origem"
+  );
+}
+
+function resolveCompletedReceiptDropoffLabel(
+  source = {},
+  previousState = runtimeState,
+) {
+  return (
+    resolveMeaningfulAddress(
+      source?.destinationAddress,
+      source?.destinationLocation?.add,
+      source?.destinationLocation?.address,
+      source?.dropoffAddress,
+      source?.drop,
+      previousState?.driverActiveRide?.dropoffAddress,
+      previousState?.driverActiveRide?.dropoff,
+      previousState?.driverTripMeta?.destinationAddress,
+      previousState?.activeBooking?.destinationLocation?.add,
+      previousState?.selectedDestination?.address,
+      previousState?.selectedDestination?.name,
+    ) || "Destino"
+  );
+}
+
+function buildCompletedReceiptRouteLabel(
+  source = {},
+  previousState = runtimeState,
+) {
+  const pickupLabel = resolveCompletedReceiptPickupLabel(source, previousState);
+  const dropoffLabel = resolveCompletedReceiptDropoffLabel(
+    source,
+    previousState,
+  );
+
+  return `${pickupLabel} -> ${dropoffLabel}`;
 }
 
 function toFiniteRuntimeMoney(value) {
@@ -2080,6 +2537,152 @@ function normalizeRemainingDistanceKm(remainingMeters) {
   return Number(remainingKm.toFixed(precision));
 }
 
+function doesRouteDestinationMatchTarget(routeDestination, targetCoordinate) {
+  if (!routeDestination || !targetCoordinate) {
+    return false;
+  }
+
+  const distanceToTarget = calculateDistanceMeters(routeDestination, targetCoordinate);
+  return Number.isFinite(distanceToTarget) && distanceToTarget <= 80;
+}
+
+function projectCoordinateOntoSegment(coordinate, start, end) {
+  if (!coordinate || !start || !end) {
+    return null;
+  }
+
+  const averageLatitudeRad =
+    (((start.latitude + end.latitude + coordinate.latitude) / 3) * Math.PI) / 180;
+  const longitudeScale = Math.cos(averageLatitudeRad) || 1;
+
+  const startX = Number(start.longitude) * longitudeScale;
+  const startY = Number(start.latitude);
+  const endX = Number(end.longitude) * longitudeScale;
+  const endY = Number(end.latitude);
+  const pointX = Number(coordinate.longitude) * longitudeScale;
+  const pointY = Number(coordinate.latitude);
+
+  const deltaX = endX - startX;
+  const deltaY = endY - startY;
+  const segmentLengthSquared = deltaX * deltaX + deltaY * deltaY;
+
+  if (segmentLengthSquared <= 0) {
+    return null;
+  }
+
+  const rawRatio =
+    ((pointX - startX) * deltaX + (pointY - startY) * deltaY) /
+    segmentLengthSquared;
+  const ratio = clamp(rawRatio, 0, 1);
+  const projectedX = startX + deltaX * ratio;
+  const projectedY = startY + deltaY * ratio;
+  const projectedCoordinate = {
+    latitude: projectedY,
+    longitude: projectedX / longitudeScale,
+  };
+
+  return {
+    ratio,
+    projectedCoordinate,
+    squaredDistance:
+      (pointX - projectedX) * (pointX - projectedX) +
+      (pointY - projectedY) * (pointY - projectedY),
+  };
+}
+
+function calculateRemainingMetersAlongRoute(currentCoordinate, routeCoordinates = []) {
+  if (
+    !currentCoordinate ||
+    !Array.isArray(routeCoordinates) ||
+    routeCoordinates.length < 2
+  ) {
+    return null;
+  }
+
+  let bestMatch = null;
+
+  for (let index = 0; index < routeCoordinates.length - 1; index += 1) {
+    const start = routeCoordinates[index];
+    const end = routeCoordinates[index + 1];
+    const projection = projectCoordinateOntoSegment(currentCoordinate, start, end);
+
+    if (!projection) {
+      continue;
+    }
+
+    if (
+      !bestMatch ||
+      projection.squaredDistance < bestMatch.squaredDistance
+    ) {
+      bestMatch = {
+        ...projection,
+        segmentIndex: index,
+      };
+    }
+  }
+
+  if (!bestMatch?.projectedCoordinate) {
+    return null;
+  }
+
+  let remainingMeters = calculateDistanceMeters(
+    bestMatch.projectedCoordinate,
+    routeCoordinates[bestMatch.segmentIndex + 1],
+  );
+
+  for (
+    let index = bestMatch.segmentIndex + 1;
+    index < routeCoordinates.length - 1;
+    index += 1
+  ) {
+    remainingMeters += calculateDistanceMeters(
+      routeCoordinates[index],
+      routeCoordinates[index + 1],
+    );
+  }
+
+  return Number.isFinite(remainingMeters)
+    ? Math.max(0, remainingMeters)
+    : null;
+}
+
+function resolveRouteProgressMetrics({
+  currentCoordinate,
+  targetCoordinate,
+  baselineMeters,
+  baselineEtaMinutes,
+}) {
+  const routeSnapshot = getPrototypeMapRoute();
+  const routeCoordinates = Array.isArray(routeSnapshot?.coordinates)
+    ? routeSnapshot.coordinates
+    : [];
+  const canUseRoutePath =
+    routeCoordinates.length >= 2 &&
+    doesRouteDestinationMatchTarget(routeSnapshot?.destination, targetCoordinate);
+  const routeRemainingMeters = canUseRoutePath
+    ? calculateRemainingMetersAlongRoute(currentCoordinate, routeCoordinates)
+    : null;
+  const linearRemainingMeters = calculateDistanceMeters(
+    currentCoordinate,
+    targetCoordinate,
+  );
+  const remainingMeters = Number.isFinite(routeRemainingMeters)
+    ? routeRemainingMeters
+    : linearRemainingMeters;
+  const etaMinutes = computeDynamicEtaMinutes(
+    remainingMeters,
+    baselineMeters,
+    baselineEtaMinutes,
+  );
+
+  return {
+    remainingMeters,
+    distanceKm: normalizeRemainingDistanceKm(remainingMeters),
+    etaMinutes,
+    usesRoutePath: Number.isFinite(routeRemainingMeters),
+  };
+}
+
 function buildLiveTripProgressModel(snapshot, role) {
   const activeRide =
     snapshot?.driverActiveRide && typeof snapshot.driverActiveRide === "object"
@@ -2115,14 +2718,6 @@ function buildLiveTripProgressModel(snapshot, role) {
       ? snapshot?.currentCoordinate || snapshot?.driverCoordinate || null
       : snapshot?.driverCoordinate || null;
 
-  const remainingMeters = calculateDistanceMeters(
-    movingCoordinate,
-    targetCoordinate,
-  );
-  if (!Number.isFinite(remainingMeters) || remainingMeters < 0) {
-    return null;
-  }
-
   const baselineMeters = Number(
     snapshot?.driverTripMeta?.initialMeters ||
       (Number.isFinite(Number(snapshot?.tripDistanceKm))
@@ -2134,22 +2729,28 @@ function buildLiveTripProgressModel(snapshot, role) {
       snapshot?.tripDurationMin ||
       0,
   );
-  const etaMinutes = computeDynamicEtaMinutes(
-    remainingMeters,
+  const routeProgress = resolveRouteProgressMetrics({
+    currentCoordinate: movingCoordinate,
+    targetCoordinate,
     baselineMeters,
     baselineEtaMinutes,
-  );
-  const distanceKm = normalizeRemainingDistanceKm(remainingMeters);
+  });
+  const remainingMeters = routeProgress.remainingMeters;
+  if (!Number.isFinite(remainingMeters) || remainingMeters < 0) {
+    return null;
+  }
 
   return {
     status: normalizedStatus,
     targetCoordinate,
     movingCoordinate,
     remainingMeters,
-    distanceKm,
-    etaMinutes,
+    distanceKm: routeProgress.distanceKm,
+    etaMinutes: routeProgress.etaMinutes,
     arrivalText:
-      etaMinutes > 0 ? `Chegada estimada em ${etaMinutes} min` : "",
+      routeProgress.etaMinutes > 0
+        ? `Chegada estimada em ${routeProgress.etaMinutes} min`
+        : "",
   };
 }
 
@@ -2183,14 +2784,17 @@ function buildDriverTripAssistModel(snapshot) {
     status === "started" ? destinationCoordinate : pickupCoordinate;
   const currentCoordinate =
     snapshot?.currentCoordinate || snapshot?.driverCoordinate || null;
-  const remainingMeters = calculateDistanceMeters(
-    currentCoordinate,
-    targetCoordinate,
-  );
   const baselineMeters = Number(snapshot?.driverTripMeta?.initialMeters || 0);
   const baselineEtaMinutes = Number(
     snapshot?.driverTripMeta?.initialEtaMinutes || 0,
   );
+  const routeProgress = resolveRouteProgressMetrics({
+    currentCoordinate,
+    targetCoordinate,
+    baselineMeters,
+    baselineEtaMinutes,
+  });
+  const remainingMeters = routeProgress.remainingMeters;
   const progressRatio =
     Number.isFinite(remainingMeters) && baselineMeters > 0
       ? clamp(1 - remainingMeters / baselineMeters, 0, 1)
@@ -2200,11 +2804,7 @@ function buildDriverTripAssistModel(snapshot) {
   const etaMinutes =
     status === "arrived"
       ? 0
-      : computeDynamicEtaMinutes(
-          remainingMeters,
-          baselineMeters,
-          baselineEtaMinutes,
-        );
+      : routeProgress.etaMinutes;
   const pickupAddress = sanitizeText(
     activeRide?.pickup ||
       activeRide?.pickupAddress ||
@@ -2272,6 +2872,7 @@ function buildDriverTripAssistModel(snapshot) {
           ? "O passageiro foi avisado e tem 2 minutos para embarcar."
           : "Siga para o destino com a navegação externa e encerre ao desembarque.",
     navigationPhase: status === "started" ? "destination" : "pickup",
+    usesRoutePath: routeProgress.usesRoutePath,
   };
 }
 
@@ -2678,20 +3279,21 @@ function buildReceiptFromSyncedSnapshot(
           }
         : null,
   });
-  const pickupLabel =
-    snapshot?.pickupLocation?.add ||
-    previousState?.driverActiveRide?.pickup ||
-    previousState?.driverTripMeta?.pickupAddress ||
-    previousState?.currentAddress ||
-    "Origem";
-  const dropLabel =
-    snapshot?.destinationLocation?.add ||
-    previousState?.driverActiveRide?.dropoffAddress ||
-    destination?.address ||
-    destination?.name ||
-    previousState?.selectedDestination?.address ||
-    previousState?.selectedDestination?.name ||
-    "Destino";
+  const pickupLabel = resolveCompletedReceiptPickupLabel(
+    {
+      pickupAddress: snapshot?.pickupLocation?.add,
+      pickup: snapshot?.pickup,
+    },
+    previousState,
+  );
+  const dropLabel = resolveCompletedReceiptDropoffLabel(
+    {
+      destinationAddress: destination?.address,
+      destinationLocation: snapshot?.destinationLocation,
+      drop: snapshot?.drop,
+    },
+    previousState,
+  );
   const completedPricingSnapshot = resolveCompletedTripFinancialSnapshot(
     snapshot,
     previousState,
@@ -2710,7 +3312,13 @@ function buildReceiptFromSyncedSnapshot(
       hour: "2-digit",
       minute: "2-digit",
     }),
-    route: `${pickupLabel} -> ${dropLabel}`,
+    route: buildCompletedReceiptRouteLabel(
+      {
+        pickupAddress: pickupLabel,
+        destinationAddress: dropLabel,
+      },
+      previousState,
+    ),
     value: formatCurrencyBRL(finalFare),
     fare: finalFare,
     distanceKm: Number(previousState?.tripDistanceKm || 0),
@@ -2724,7 +3332,10 @@ function buildReceiptFromSyncedSnapshot(
     passengerId: snapshot?.customerId || previousState?.profileUid || null,
     passengerName: previousState?.profileName || null,
     pickup: pickupLabel,
+    pickupAddress: pickupLabel,
     drop: dropLabel,
+    dropoffAddress: dropLabel,
+    destinationAddress: dropLabel,
     ...(Number.isFinite(snapshot?.pickupLocation?.lat) &&
     Number.isFinite(snapshot?.pickupLocation?.lng)
       ? {
@@ -2751,6 +3362,13 @@ function clearRuntimeRideStateFromSync() {
   stopSearchingTimer();
   stopBoardingCountdownTimer();
   stopPassengerLocationHeartbeat();
+
+  const bookingIdToClear = String(
+    runtimeState.activeBookingId || runtimeState.driverActiveRide?.bookingId || "",
+  ).trim();
+  if (bookingIdToClear) {
+    runtimeAppliedLifecycleEventKeysByBooking.delete(bookingIdToClear);
+  }
 
   setRuntimeState((previous) => ({
     bookingStatus: "idle",
@@ -2783,6 +3401,13 @@ function dismissCompletedReceiptState() {
   stopSearchingTimer();
   stopBoardingCountdownTimer();
   stopPassengerLocationHeartbeat();
+
+  const bookingIdToClear = String(
+    runtimeState.activeBookingId || runtimeState.driverActiveRide?.bookingId || "",
+  ).trim();
+  if (bookingIdToClear) {
+    runtimeAppliedLifecycleEventKeysByBooking.delete(bookingIdToClear);
+  }
 
   setRuntimeState((previous) => ({
     bookingStatus: "idle",
@@ -4002,6 +4627,24 @@ function attachSocketListeners() {
   };
 
   const handleDriverArrived = (payload) => {
+    const bookingId = String(
+      payload?.bookingId ||
+        payload?.rideId ||
+        runtimeState.activeBookingId ||
+        runtimeState.driverActiveRide?.bookingId ||
+        "",
+    ).trim();
+    const alreadyArrivedForSameBooking =
+      Boolean(bookingId) &&
+      String(runtimeState.activeBookingId || "").trim() === bookingId &&
+      String(runtimeState.bookingStatus || "").trim().toLowerCase() === "arrived";
+    if (alreadyArrivedForSameBooking) {
+      return;
+    }
+    if (shouldIgnoreDuplicateLifecycleEvent("driverArrived", bookingId, "arrived")) {
+      return;
+    }
+
     const configuredWindowSec = Number(payload?.boardingWindowSec || 120);
     const normalizedWindowSec = Math.max(
       30,
@@ -4095,13 +4738,42 @@ function attachSocketListeners() {
     );
   };
 
-  const handleTripStarted = () => {
+  const handleTripStarted = (payload) => {
+    const bookingId = String(
+      payload?.bookingId ||
+        payload?.rideId ||
+        runtimeState.activeBookingId ||
+        runtimeState.driverActiveRide?.bookingId ||
+        "",
+    ).trim();
+    const alreadyStartedForSameBooking =
+      Boolean(bookingId) &&
+      String(runtimeState.activeBookingId || "").trim() === bookingId &&
+      String(runtimeState.bookingStatus || "").trim().toLowerCase() === "started";
+    if (alreadyStartedForSameBooking) {
+      return;
+    }
+    if (shouldIgnoreDuplicateLifecycleEvent("tripStarted", bookingId, "started")) {
+      return;
+    }
+
     writeRuntimeDebugProbe("event_trip_started", {
-      bookingId: runtimeState.activeBookingId || null,
+      bookingId: bookingId || runtimeState.activeBookingId || null,
+      source:
+        payload?.__source ||
+        (payload?.rehydrated ? "active_ride_rehydrated" : "unknown"),
+      rideId: payload?.rideId || null,
+      payloadStatus: payload?.status || null,
+      rehydrated: payload?.rehydrated === true,
+      localBookingStatusBefore: runtimeState.bookingStatus || null,
+      localActiveBookingIdBefore: runtimeState.activeBookingId || null,
+      localDriverRideBookingIdBefore:
+        runtimeState.driverActiveRide?.bookingId || null,
     });
     stopBoardingCountdownTimer();
     setRuntimeState({
       bookingStatus: "started",
+      activeBookingId: bookingId || runtimeState.activeBookingId || null,
       boardingDeadlineAt: null,
       boardingRemainingSec: 0,
       tripIntegrityAlert: {
@@ -4191,6 +4863,11 @@ function attachSocketListeners() {
         : [];
 
     const receipt = {
+      pickupAddress: resolveCompletedReceiptPickupLabel(payload, runtimeState),
+      destinationAddress: resolveCompletedReceiptDropoffLabel(
+        payload,
+        runtimeState,
+      ),
       completedAt: new Date().toISOString(),
       id:
         payload?.bookingId ||
@@ -4202,13 +4879,7 @@ function attachSocketListeners() {
         hour: "2-digit",
         minute: "2-digit",
       }),
-      route:
-        payload?.pickup && payload?.drop
-          ? `${payload.pickup} -> ${payload.drop}`
-          : runtimeState.selectedDestination?.name &&
-              runtimeState.currentAddress
-            ? `${runtimeState.currentAddress} -> ${runtimeState.selectedDestination.name}`
-            : runtimeState.selectedDestination?.name || "Corrida finalizada",
+      route: buildCompletedReceiptRouteLabel(payload, runtimeState),
       value: formatCurrencyBRL(finalFare),
       fare: finalFare,
       distanceKm: Number.isFinite(distance) ? distance : 0,
@@ -4219,18 +4890,9 @@ function attachSocketListeners() {
       driverName: receiptParticipants.driverName || null,
       passengerId: receiptParticipants.passengerId || null,
       passengerName: receiptParticipants.passengerName || null,
-      pickup:
-        payload?.pickup ||
-        runtimeState.driverActiveRide?.pickup ||
-        runtimeState.driverTripMeta?.pickupAddress ||
-        runtimeState.currentAddress ||
-        "Origem",
-      drop:
-        payload?.drop ||
-        runtimeState.driverActiveRide?.dropoffAddress ||
-        runtimeState.selectedDestination?.address ||
-        runtimeState.selectedDestination?.name ||
-        "Destino",
+      pickup: resolveCompletedReceiptPickupLabel(payload, runtimeState),
+      drop: resolveCompletedReceiptDropoffLabel(payload, runtimeState),
+      dropoffAddress: resolveCompletedReceiptDropoffLabel(payload, runtimeState),
       ...(payload?.pickupCoordinate
         ? { pickupCoordinate: payload.pickupCoordinate }
         : receiptPickupCoordinate
@@ -5208,6 +5870,13 @@ function applySyncedActiveRideSnapshot(snapshot) {
   if (bookingStatus === "idle") {
     return false;
   }
+  const { fingerprint, skip } = shouldSkipSyncedActiveRideSnapshot(
+    snapshot,
+    bookingStatus,
+  );
+  if (skip) {
+    return false;
+  }
 
   const destination = normalizeDestinationItem({
     name: parseNameFromDescription(snapshot?.destinationLocation?.add || ""),
@@ -5557,6 +6226,8 @@ function applySyncedActiveRideSnapshot(snapshot) {
     stopBoardingCountdownTimer();
   }
 
+  runtimeLastSyncedActiveRideFingerprint = fingerprint;
+
   return true;
 }
 
@@ -5573,20 +6244,29 @@ async function refreshPrototypeRealtimeSession(
     return false;
   }
 
-  const ready = await ensureSocketReady(profile);
-  if (!ready) {
-    return false;
-  }
-
-  if (!syncActiveRide) {
-    await writeRuntimeDebugProbe("socket_keepalive", {
-      userId,
+  const shouldHoldPresentation =
+    syncActiveRide &&
+    ["appstate_active", "driver_online_initial_sync", "active_flow_initial"].includes(
       reason,
-    });
-    return true;
+    );
+  if (shouldHoldPresentation) {
+    beginRuntimePresentationSync();
   }
 
   try {
+    const ready = await ensureSocketReady(profile);
+    if (!ready) {
+      return false;
+    }
+
+    if (!syncActiveRide) {
+      await writeRuntimeDebugProbe("socket_keepalive", {
+        userId,
+        reason,
+      });
+      return true;
+    }
+
     const socket = WebSocketManager.getInstance();
     const activeRideSnapshot = await socket.syncActiveRideWithAck(timeoutMs);
     const applied = applySyncedActiveRideSnapshot(activeRideSnapshot);
@@ -5606,6 +6286,10 @@ async function refreshPrototypeRealtimeSession(
       message: error?.message || String(error),
     });
     throw error;
+  } finally {
+    if (shouldHoldPresentation) {
+      endRuntimePresentationSync();
+    }
   }
 }
 
@@ -5827,18 +6511,9 @@ async function ensureSocketReady(profile) {
       stopDriverLocationHeartbeat();
     }
 
-    if (targetUserType === "customer" && shouldMonitorPassengerTripulation()) {
-      try {
-        await startPassengerLocationHeartbeat(profile, socket);
-      } catch (passengerHeartbeatError) {
-        Logger.warn(
-          "⚠️ [PrototypeRuntime] Falha ao restabelecer heartbeat de localização do passageiro:",
-          passengerHeartbeatError?.message || passengerHeartbeatError,
-        );
-      }
-    } else if (targetUserType !== "customer") {
-      stopPassengerLocationHeartbeat();
-    }
+    // O heartbeat do passageiro é mantido pelo effect dedicado do runtime.
+    // Mantê-lo aqui também faz o mesmo ciclo nascer de múltiplos gatilhos
+    // (connect/auth/resync + mudança de fase), o que gera bursts artificiais.
 
     return true;
   } catch (error) {
@@ -5863,64 +6538,71 @@ async function bootstrapRuntime(profile) {
   }
 
   runtimeBootstrapPromise = (async () => {
+    beginRuntimePresentationSync();
     setRuntimeState({ initializing: true });
-    const initialLocationPromise = ensureCurrentLocation({
-      allowCurrentPosition: Platform.OS !== "android",
-    }).catch((error) => {
-      Logger.warn(
-        "⚠️ [PrototypeRuntime] Falha ao resolver localização no bootstrap:",
-        error?.message || error,
-      );
-      return null;
-    });
-    let qaSeedLock = null;
-    if (profile?.uid) {
-      qaSeedLock = await loadPersistedRuntimeQaSeed(profile.uid);
-      const bootstrapFreezeUntil = Number(qaSeedLock?.freezeUntil || 0);
-      if (bootstrapFreezeUntil > Date.now()) {
-        runtimeQALockUntil = bootstrapFreezeUntil;
-      }
+    try {
+      const initialLocationPromise = ensureCurrentLocation({
+        allowCurrentPosition: Platform.OS !== "android",
+      }).catch((error) => {
+        Logger.warn(
+          "⚠️ [PrototypeRuntime] Falha ao resolver localização no bootstrap:",
+          error?.message || error,
+        );
+        return null;
+      });
+      let qaSeedLock = null;
+      if (profile?.uid) {
+        qaSeedLock = await loadPersistedRuntimeQaSeed(profile.uid);
+        const bootstrapFreezeUntil = Number(qaSeedLock?.freezeUntil || 0);
+        if (bootstrapFreezeUntil > Date.now()) {
+          runtimeQALockUntil = bootstrapFreezeUntil;
+        }
 
-      const persistedSession = await loadPersistedRuntimeSession(profile.uid);
-      await writeRuntimeDebugProbe("bootstrap_persisted_session_loaded", {
-        userId: profile.uid,
-        hasSession: Boolean(persistedSession),
-        bookingStatus: persistedSession?.bookingStatus || null,
-        activeBookingId: persistedSession?.activeBookingId || null,
-      });
-      if (persistedSession && typeof persistedSession === "object") {
-        const sanitizedPersistedSession =
-          sanitizePersistedRuntimeSessionForProfile(persistedSession, profile);
-        setRuntimeState({
-          ...sanitizedPersistedSession,
-          profileUid: profile.uid,
-          activeRole: resolveRuntimeRole(profile),
+        const persistedSession = await loadPersistedRuntimeSession(profile.uid);
+        await writeRuntimeDebugProbe("bootstrap_persisted_session_loaded", {
+          userId: profile.uid,
+          hasSession: Boolean(persistedSession),
+          bookingStatus: persistedSession?.bookingStatus || null,
+          activeBookingId: persistedSession?.activeBookingId || null,
         });
+        if (persistedSession && typeof persistedSession === "object") {
+          const sanitizedPersistedSession =
+            sanitizePersistedRuntimeSessionForProfile(persistedSession, profile);
+          setRuntimeState({
+            ...sanitizedPersistedSession,
+            profileUid: profile.uid,
+            activeRole: resolveRuntimeRole(profile),
+          });
+        }
+        await writeRuntimeDebugProbe("bootstrap_qa_seed_loaded", {
+          userId: profile.uid,
+          hasSeed: Boolean(qaSeedLock),
+          freezeUntil: Number(qaSeedLock?.freezeUntil || 0) || null,
+          scenario: qaSeedLock?.scenario || null,
+        });
+        const freezeUntil = Number(qaSeedLock?.freezeUntil || 0);
+        if (freezeUntil > 0 && freezeUntil <= Date.now()) {
+          await clearPersistedRuntimeQaSeed(profile.uid);
+          qaSeedLock = null;
+        }
       }
-      await writeRuntimeDebugProbe("bootstrap_qa_seed_loaded", {
-        userId: profile.uid,
-        hasSeed: Boolean(qaSeedLock),
-        freezeUntil: Number(qaSeedLock?.freezeUntil || 0) || null,
-        scenario: qaSeedLock?.scenario || null,
+      await initialLocationPromise;
+      if (profile?.uid && Number(qaSeedLock?.freezeUntil || 0) > Date.now()) {
+        scheduleDeferredSocketBootstrap(profile, Number(qaSeedLock.freezeUntil));
+      } else if (profile?.uid) {
+        runtimeQALockUntil = 0;
+        clearDeferredSocketBootstrapTimer();
+        await ensureSocketReady(profile);
+      }
+      setRuntimeState({
+        ready: true,
       });
-      const freezeUntil = Number(qaSeedLock?.freezeUntil || 0);
-      if (freezeUntil > 0 && freezeUntil <= Date.now()) {
-        await clearPersistedRuntimeQaSeed(profile.uid);
-        qaSeedLock = null;
-      }
+    } finally {
+      setRuntimeState({
+        initializing: false,
+      });
+      endRuntimePresentationSync();
     }
-    await initialLocationPromise;
-    if (profile?.uid && Number(qaSeedLock?.freezeUntil || 0) > Date.now()) {
-      scheduleDeferredSocketBootstrap(profile, Number(qaSeedLock.freezeUntil));
-    } else if (profile?.uid) {
-      runtimeQALockUntil = 0;
-      clearDeferredSocketBootstrapTimer();
-      await ensureSocketReady(profile);
-    }
-    setRuntimeState({
-      initializing: false,
-      ready: true,
-    });
   })();
 
   try {
@@ -5944,7 +6626,13 @@ async function resolveDestinationCoordinate(destination) {
   }
 
   try {
-    const details = await fetchCoordsfromPlace(destination.place_id);
+    const telemetryContext = resolveRuntimeRideTelemetryContext({
+      surface: "destination_resolution",
+    });
+    const details = await fetchCoordsfromPlace(
+      destination.place_id,
+      telemetryContext,
+    );
     if (!Number.isFinite(details?.lat) || !Number.isFinite(details?.lng)) {
       return destination;
     }
@@ -5983,7 +6671,15 @@ async function previewDestinationOnMap(destination) {
   try {
     const startLoc = `${origin.latitude},${origin.longitude}`;
     const destLoc = `${destination.coordinate.latitude},${destination.coordinate.longitude}`;
-    const route = await getDirectionsApi(startLoc, destLoc);
+    const telemetryContext = resolveRuntimeRideTelemetryContext({
+      surface: "destination_preview",
+    });
+    const route = await getDirectionsApi(
+      startLoc,
+      destLoc,
+      null,
+      telemetryContext,
+    );
     coordinates = decodePolylineToCoordinates(route?.polylinePoints);
 
     if (route?.distance_in_km || route?.time_in_secs) {
@@ -6046,7 +6742,18 @@ async function previewDriverPickupRoute({ origin, pickup, pickupAddress }) {
   try {
     const startLoc = `${origin.latitude},${origin.longitude}`;
     const pickupLoc = `${pickup.latitude},${pickup.longitude}`;
-    const route = await getDirectionsApi(startLoc, pickupLoc);
+    const telemetryContext = resolveRuntimeRideTelemetryContext({
+      bookingId:
+        runtimeState.driverActiveRide?.bookingId || runtimeState.activeBookingId,
+      role: "driver",
+      surface: "driver_pickup_preview",
+    });
+    const route = await getDirectionsApi(
+      startLoc,
+      pickupLoc,
+      null,
+      telemetryContext,
+    );
     coordinates = decodePolylineToCoordinates(route?.polylinePoints);
     if (route?.distance_in_km || route?.time_in_secs) {
       distanceKm = Number(Number(route.distance_in_km || 0).toFixed(1));
@@ -6101,7 +6808,18 @@ async function previewDriverDestinationRoute({
   try {
     const startLoc = `${origin.latitude},${origin.longitude}`;
     const destLoc = `${destination.latitude},${destination.longitude}`;
-    const route = await getDirectionsApi(startLoc, destLoc);
+    const telemetryContext = resolveRuntimeRideTelemetryContext({
+      bookingId:
+        runtimeState.driverActiveRide?.bookingId || runtimeState.activeBookingId,
+      role: "driver",
+      surface: "driver_destination_preview",
+    });
+    const route = await getDirectionsApi(
+      startLoc,
+      destLoc,
+      null,
+      telemetryContext,
+    );
     coordinates = decodePolylineToCoordinates(route?.polylinePoints);
     if (route?.distance_in_km || route?.time_in_secs) {
       distanceKm = Number(Number(route.distance_in_km || 0).toFixed(1));
@@ -6149,7 +6867,15 @@ async function getRouteMetricsBetween(origin, destination) {
   try {
     const startLoc = `${origin.latitude},${origin.longitude}`;
     const destLoc = `${destination.latitude},${destination.longitude}`;
-    const route = await getDirectionsApi(startLoc, destLoc);
+    const telemetryContext = resolveRuntimeRideTelemetryContext({
+      surface: "route_metrics",
+    });
+    const route = await getDirectionsApi(
+      startLoc,
+      destLoc,
+      null,
+      telemetryContext,
+    );
     return {
       distanceKm: Math.max(
         0,
@@ -6254,6 +6980,9 @@ async function findDestinations(query) {
         lng: runtimeState.currentCoordinate.longitude,
       }
     : null;
+  const telemetryContext = resolveRuntimeRideTelemetryContext({
+    surface: "destination_search",
+  });
 
   const inputType = detectInputType(normalizedQuery);
   const sessionToken = `proto-${Date.now()}`;
@@ -6264,6 +6993,7 @@ async function findDestinations(query) {
       normalizedQuery,
       sessionToken,
       location,
+      telemetryContext,
     );
   } catch (error) {
     Logger.warn(
@@ -6274,7 +7004,11 @@ async function findDestinations(query) {
 
   if ((!Array.isArray(predictions) || predictions.length === 0)) {
     try {
-      predictions = await fetchGeocodeAddress(normalizedQuery, location);
+      predictions = await fetchGeocodeAddress(
+        normalizedQuery,
+        location,
+        telemetryContext,
+      );
     } catch (error) {
       Logger.warn(
         `⚠️ [PrototypeRuntime] Falha no fallback geocode (${inputType}):`,
@@ -6313,6 +7047,11 @@ async function findDestinations(query) {
 }
 
 async function requestPrototypeRide(profile, payload) {
+  const telemetryContext = resolveRuntimeRideTelemetryContext({
+    userId: profile?.uid,
+    role: resolveRuntimeRole(profile),
+    surface: "ride_request",
+  });
   const destinationInput = normalizeDestinationItem(
     payload?.destination || runtimeState.selectedDestination || {},
   );
@@ -6483,7 +7222,9 @@ async function requestPrototypeRide(profile, payload) {
 
   let response = null;
   try {
-    response = await socket.createBooking(bookingData);
+    response = await socket.createBooking(bookingData, {
+      telemetryContext,
+    });
   } catch (error) {
     await writeRuntimeDebugProbe("create_booking_error", {
       userId,
@@ -6509,6 +7250,11 @@ async function requestPrototypeRide(profile, payload) {
     response?.data?.bookingId ||
     response?.booking?.bookingId ||
     null;
+  bindRuntimeRideTelemetryToBooking(bookingId, {
+    userId: profile?.uid,
+    role: resolveRuntimeRole(profile),
+    surface: "ride_request",
+  });
   const bookingTimestamp =
     response?.booking?.timestamp ||
     response?.data?.timestamp ||
@@ -6577,6 +7323,11 @@ async function requestPrototypeRide(profile, payload) {
 }
 
 async function checkPrototypeRideAvailability(profile, payload) {
+  const telemetryContext = resolveRuntimeRideTelemetryContext({
+    userId: profile?.uid,
+    role: resolveRuntimeRole(profile),
+    surface: "availability_check",
+  });
   const destinationInput = normalizeDestinationItem(
     payload?.destination || runtimeState.selectedDestination || {},
   );
@@ -6613,6 +7364,8 @@ async function checkPrototypeRideAvailability(profile, payload) {
         }
       : null,
     carType: operationalVehicleType,
+  }, {
+    telemetryContext,
   });
 }
 
@@ -7073,6 +7826,11 @@ async function completePrototypeTrip(options = {}) {
   }
 
   const fallbackReceipt = {
+    pickupAddress: resolveCompletedReceiptPickupLabel({}, runtimeState),
+    destinationAddress: resolveCompletedReceiptDropoffLabel(
+      {},
+      runtimeState,
+    ),
     completedAt: new Date().toISOString(),
     id: bookingId || `local-${Date.now()}`,
     date: new Date().toLocaleString("pt-BR", {
@@ -7081,10 +7839,7 @@ async function completePrototypeTrip(options = {}) {
       hour: "2-digit",
       minute: "2-digit",
     }),
-    route:
-      runtimeState.selectedDestination?.name && runtimeState.currentAddress
-        ? `${runtimeState.currentAddress} -> ${runtimeState.selectedDestination.name}`
-        : runtimeState.selectedDestination?.name || "Corrida finalizada",
+    route: buildCompletedReceiptRouteLabel({}, runtimeState),
     value: formatCurrencyBRL(fare),
     fare,
     distanceKm,
@@ -7095,16 +7850,9 @@ async function completePrototypeTrip(options = {}) {
     passengerId: receiptParticipants.passengerId || null,
     passengerName: receiptParticipants.passengerName || null,
     ...completedPricingSnapshot,
-    pickup:
-      runtimeState.driverActiveRide?.pickup ||
-      runtimeState.driverTripMeta?.pickupAddress ||
-      runtimeState.currentAddress ||
-      "Origem",
-    drop:
-      runtimeState.driverActiveRide?.dropoffAddress ||
-      runtimeState.selectedDestination?.address ||
-      runtimeState.selectedDestination?.name ||
-      "Destino",
+    pickup: resolveCompletedReceiptPickupLabel({}, runtimeState),
+    drop: resolveCompletedReceiptDropoffLabel({}, runtimeState),
+    dropoffAddress: resolveCompletedReceiptDropoffLabel({}, runtimeState),
     ...(receiptPickupCoordinate
       ? { pickupCoordinate: receiptPickupCoordinate }
       : {}),
@@ -7737,6 +8485,11 @@ async function syncDriverActivationWithProfile(profile, options = {}) {
   const force = Boolean(options?.force);
   const source = sanitizeText(options?.source, "unspecified");
   const uid = sanitizeText(profile?.uid, "");
+  const profileCanGoOnline = Boolean(
+    profile?.canGoOnline ??
+      profile?.profile?.canGoOnline ??
+      runtimeState.driverCanGoOnline,
+  );
   const now = Date.now();
   const lastSyncAt = uid
     ? Number(runtimeActivationLastSyncAtByUid[uid] || 0)
@@ -7806,10 +8559,46 @@ async function syncDriverActivationWithProfile(profile, options = {}) {
       return fallbackState;
     }
 
+    if (shouldPreferQaDriverActivation(profile)) {
+      const approvedState = createApprovedDriverActivationState(
+        mergeDriverActivation(
+          profile?.driverActivation ||
+            profile?.profile?.driverActivation ||
+            runtimeState.driverActivation ||
+            createInitialDriverOnboardingState(),
+          persistedState,
+        ),
+      );
+
+      setRuntimeState({
+        driverActivation: approvedState,
+        driverActivationResolved: true,
+        driverCanGoOnline: true,
+        driverActivationRemote: null,
+      });
+      await persistDriverActivation(uid, approvedState);
+      await persistPrototypeProfilePatch(
+        {
+          canGoOnline: true,
+          driverActivation: approvedState,
+        },
+        profile,
+      );
+      return approvedState;
+    }
+
     const profileState = computeDriverOnboardingState(
-      profile?.driverActivation || createInitialDriverOnboardingState(),
+      profile?.driverActivation ||
+        profile?.profile?.driverActivation ||
+        createInitialDriverOnboardingState(),
     );
     let mergedState = mergeDriverActivation(profileState, persistedState);
+    if (profileCanGoOnline) {
+      mergedState = {
+        ...mergedState,
+        canGoOnline: true,
+      };
+    }
     const remoteSnapshot = await fetchRemoteDriverActivationSnapshot(profile);
 
     if (remoteSnapshot) {
@@ -7825,7 +8614,11 @@ async function syncDriverActivationWithProfile(profile, options = {}) {
         : null;
     const nextCanGoOnline =
       remoteCanGoOnline === null
-        ? Boolean(mergedState?.canGoOnline)
+        ? Boolean(
+            profileCanGoOnline ||
+              mergedState?.canGoOnline ||
+              runtimeState.driverCanGoOnline,
+          )
         : Boolean(remoteCanGoOnline);
     const nextDocAnalysisState = remoteSnapshot
       ? buildDriverDocumentAnalysisState(remoteSnapshot)
@@ -8111,12 +8904,20 @@ function getPassengerLocationPayload() {
   };
 }
 
-function stopPassengerLocationHeartbeat() {
+function stopPassengerLocationHeartbeat(options = {}) {
+  const preservePendingStart = options?.preservePendingStart === true;
   if (runtimePassengerHeartbeatInterval) {
     clearInterval(runtimePassengerHeartbeatInterval);
     runtimePassengerHeartbeatInterval = null;
   }
   runtimePassengerHeartbeatInFlight = false;
+  if (!preservePendingStart) {
+    runtimePassengerHeartbeatStartPromise = null;
+    runtimePassengerHeartbeatStartKey = "";
+  }
+  runtimePassengerHeartbeatActiveBookingId = null;
+  runtimePassengerHeartbeatActiveProfileUid = null;
+  runtimeLastPassengerHeartbeatAttemptAt = 0;
 
   setRuntimeState((previous) => ({
     passengerLocationHeartbeat: {
@@ -8126,7 +8927,79 @@ function stopPassengerLocationHeartbeat() {
   }));
 }
 
-async function pushPassengerLocationNow(profile, socketInstance = null) {
+function normalizeHeadingDegrees(value) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) {
+    return 0;
+  }
+
+  const normalized = numeric % 360;
+  return normalized < 0 ? normalized + 360 : normalized;
+}
+
+function calculateHeadingDeltaDegrees(previousHeading, nextHeading) {
+  const start = normalizeHeadingDegrees(previousHeading);
+  const end = normalizeHeadingDegrees(nextHeading);
+  const rawDelta = Math.abs(end - start);
+  return Math.min(rawDelta, 360 - rawDelta);
+}
+
+function shouldThrottlePassengerLocationPush({
+  bookingId,
+  bookingStatus,
+  location,
+  force = false,
+}) {
+  if (force || !runtimeLastPassengerHeartbeatSentAt) {
+    return false;
+  }
+
+  const normalizedStatus = String(bookingStatus || "").trim().toLowerCase();
+  if (
+    String(runtimeLastPassengerHeartbeatBookingId || "") !==
+      String(bookingId || "") ||
+    runtimeLastPassengerHeartbeatStatus !== normalizedStatus
+  ) {
+    return false;
+  }
+
+  const elapsedMs = Date.now() - runtimeLastPassengerHeartbeatSentAt;
+  const minIntervalMs =
+    normalizedStatus === "started"
+      ? PASSENGER_LOCATION_STARTED_HEARTBEAT_MS
+      : PASSENGER_LOCATION_STATIONARY_HEARTBEAT_MS;
+
+  if (elapsedMs >= minIntervalMs) {
+    return false;
+  }
+
+  const movedMeters = calculateDistanceMeters(
+    runtimeLastPassengerHeartbeatLocation,
+    location,
+  );
+  if (
+    Number.isFinite(movedMeters) &&
+    movedMeters >= PASSENGER_LOCATION_MIN_MOVEMENT_METERS
+  ) {
+    return false;
+  }
+
+  const headingDelta = calculateHeadingDeltaDegrees(
+    runtimeLastPassengerHeartbeatHeading,
+    location?.heading,
+  );
+  if (headingDelta >= PASSENGER_LOCATION_MIN_HEADING_DELTA_DEG) {
+    return false;
+  }
+
+  return true;
+}
+
+async function pushPassengerLocationNow(
+  profile,
+  socketInstance = null,
+  options = {},
+) {
   if (!profile?.uid) {
     return { success: false, code: "PROFILE_REQUIRED" };
   }
@@ -8150,7 +9023,38 @@ async function pushPassengerLocationNow(profile, socketInstance = null) {
     return { success: false, code: "LOCATION_REQUIRED" };
   }
 
+  if (runtimePassengerHeartbeatInFlight && options?.force !== true) {
+    return { success: false, code: "IN_FLIGHT" };
+  }
+
+  const normalizedStatus = String(runtimeState?.bookingStatus || "")
+    .trim()
+    .toLowerCase();
+  if (
+    shouldThrottlePassengerLocationPush({
+      bookingId,
+      bookingStatus: normalizedStatus,
+      location,
+      force: options?.force === true,
+    })
+  ) {
+    return { success: false, code: "THROTTLED" };
+  }
+
+  const now = Date.now();
+  if (
+    options?.force !== true &&
+    String(runtimeLastPassengerHeartbeatBookingId || "") ===
+      String(bookingId || "") &&
+    runtimeLastPassengerHeartbeatAttemptAt > 0 &&
+    now - runtimeLastPassengerHeartbeatAttemptAt <
+      PASSENGER_LOCATION_MIN_SEND_GAP_MS
+  ) {
+    return { success: false, code: "COALESCED" };
+  }
+
   runtimePassengerHeartbeatInFlight = true;
+  runtimeLastPassengerHeartbeatAttemptAt = now;
   try {
     const socket =
       socketInstance ||
@@ -8175,6 +9079,15 @@ async function pushPassengerLocationNow(profile, socketInstance = null) {
       },
     }));
 
+    runtimeLastPassengerHeartbeatSentAt = Date.now();
+    runtimeLastPassengerHeartbeatBookingId = bookingId;
+    runtimeLastPassengerHeartbeatStatus = normalizedStatus;
+    runtimeLastPassengerHeartbeatLocation = {
+      latitude: location.lat,
+      longitude: location.lng,
+    };
+    runtimeLastPassengerHeartbeatHeading = Number(location.heading || 0);
+
     return { success: true, location, bookingId };
   } finally {
     runtimePassengerHeartbeatInFlight = false;
@@ -8182,7 +9095,6 @@ async function pushPassengerLocationNow(profile, socketInstance = null) {
 }
 
 async function startPassengerLocationHeartbeat(profile, socketInstance = null) {
-  stopPassengerLocationHeartbeat();
   if (!profile?.uid) {
     return;
   }
@@ -8192,40 +9104,86 @@ async function startPassengerLocationHeartbeat(profile, socketInstance = null) {
     return;
   }
 
-  runtimePassengerHeartbeatInterval = setInterval(() => {
-    pushPassengerLocationNow(profile, socketInstance).catch((error) => {
+  const bookingId = runtimeState?.activeBookingId || null;
+  if (!bookingId) {
+    stopPassengerLocationHeartbeat();
+    return;
+  }
+
+  const startKey = `${profile.uid}:${bookingId}`;
+  const hasMatchingActiveHeartbeat =
+    Boolean(runtimePassengerHeartbeatInterval) &&
+    runtimePassengerHeartbeatActiveProfileUid === profile.uid &&
+    runtimePassengerHeartbeatActiveBookingId === bookingId;
+
+  if (hasMatchingActiveHeartbeat) {
+    setRuntimeState((previous) => ({
+      passengerLocationHeartbeat: {
+        ...previous.passengerLocationHeartbeat,
+        running: true,
+        lastError: "",
+      },
+    }));
+    return;
+  }
+
+  if (
+    runtimePassengerHeartbeatStartPromise &&
+    runtimePassengerHeartbeatStartKey === startKey
+  ) {
+    return runtimePassengerHeartbeatStartPromise;
+  }
+
+  runtimePassengerHeartbeatStartKey = startKey;
+  runtimePassengerHeartbeatStartPromise = (async () => {
+    stopPassengerLocationHeartbeat({ preservePendingStart: true });
+    runtimePassengerHeartbeatActiveProfileUid = profile.uid;
+    runtimePassengerHeartbeatActiveBookingId = bookingId;
+
+    runtimePassengerHeartbeatInterval = setInterval(() => {
+      pushPassengerLocationNow(profile, socketInstance).catch((error) => {
+        setRuntimeState((previous) => ({
+          passengerLocationHeartbeat: {
+            ...previous.passengerLocationHeartbeat,
+            running: true,
+            lastError:
+              error?.message ||
+              "Falha no envio periódico de localização do passageiro.",
+          },
+        }));
+      });
+    }, PASSENGER_LOCATION_HEARTBEAT_MS);
+
+    setRuntimeState((previous) => ({
+      passengerLocationHeartbeat: {
+        ...previous.passengerLocationHeartbeat,
+        running: true,
+        lastError: "",
+      },
+    }));
+
+    try {
+      await pushPassengerLocationNow(profile, socketInstance);
+    } catch (error) {
       setRuntimeState((previous) => ({
         passengerLocationHeartbeat: {
           ...previous.passengerLocationHeartbeat,
           running: true,
           lastError:
             error?.message ||
-            "Falha no envio periódico de localização do passageiro.",
+            "Falha no envio inicial de localização do passageiro.",
         },
       }));
-    });
-  }, PASSENGER_LOCATION_HEARTBEAT_MS);
-
-  setRuntimeState((previous) => ({
-    passengerLocationHeartbeat: {
-      ...previous.passengerLocationHeartbeat,
-      running: true,
-      lastError: "",
-    },
-  }));
+    }
+  })();
 
   try {
-    await pushPassengerLocationNow(profile, socketInstance);
-  } catch (error) {
-    setRuntimeState((previous) => ({
-      passengerLocationHeartbeat: {
-        ...previous.passengerLocationHeartbeat,
-        running: true,
-        lastError:
-          error?.message ||
-          "Falha no envio inicial de localização do passageiro.",
-      },
-    }));
+    await runtimePassengerHeartbeatStartPromise;
+  } finally {
+    if (runtimePassengerHeartbeatStartKey === startKey) {
+      runtimePassengerHeartbeatStartPromise = null;
+      runtimePassengerHeartbeatStartKey = "";
+    }
   }
 }
 
@@ -9121,11 +10079,36 @@ export function usePrototypeRideRuntime() {
   const authUid = useSelector((state) => state?.auth?.uid);
   const [snapshot, setSnapshot] = useState(runtimeState);
   const [persistedProfile, setPersistedProfile] = useState(null);
+  const runtimeConsumerIdRef = useRef(createId("runtime_consumer"));
+  const reservedRuntimeEffectOwnerId = reserveRuntimeEffectConsumer(
+    runtimeConsumerIdRef.current,
+  );
+  const [isRuntimeEffectOwner, setIsRuntimeEffectOwner] = useState(
+    () =>
+      String(reservedRuntimeEffectOwnerId || "") ===
+      String(runtimeConsumerIdRef.current),
+  );
   const lastPassengerQuotePreviewKeyRef = useRef("");
   const lastPassengerQuoteAddressKeyRef = useRef("");
   const lastDriverRoutePreviewKeyRef = useRef("");
   const lastPassengerRoutePreviewKeyRef = useRef("");
   const bootstrapPersistKeyRef = useRef("");
+
+  useEffect(() => {
+    const consumerId = runtimeConsumerIdRef.current;
+    const syncOwnerState = (ownerId) => {
+      setIsRuntimeEffectOwner(String(ownerId || "") === String(consumerId));
+    };
+
+    const unsubscribeOwner = subscribeRuntimeEffectOwner(syncOwnerState);
+    const unregisterConsumer = registerRuntimeEffectConsumer(consumerId);
+    syncOwnerState(runtimeEffectOwnerId);
+
+    return () => {
+      unsubscribeOwner();
+      unregisterConsumer();
+    };
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -9256,6 +10239,10 @@ export function usePrototypeRideRuntime() {
   }, []);
 
   useEffect(() => {
+    if (!isRuntimeEffectOwner) {
+      return;
+    }
+
     const incomingName = sanitizeText(profile?.name || profile?.firstName, "");
     const incomingEmail = sanitizeText(profile?.email, "");
     const incomingPhone = sanitizeText(
@@ -9274,6 +10261,7 @@ export function usePrototypeRideRuntime() {
       },
     }));
   }, [
+    isRuntimeEffectOwner,
     profile?.email,
     profile?.firstName,
     profile?.name,
@@ -9283,6 +10271,10 @@ export function usePrototypeRideRuntime() {
   ]);
 
   useEffect(() => {
+    if (!isRuntimeEffectOwner) {
+      return;
+    }
+
     const activeRole = resolveRuntimeRole(profile);
     setRuntimeState({
       activeRole,
@@ -9318,6 +10310,7 @@ export function usePrototypeRideRuntime() {
       stopDriverActivationRemoteSync();
     }
   }, [
+    isRuntimeEffectOwner,
     profile?.uid,
     profile?.usertype,
     profile?.userType,
@@ -9327,6 +10320,10 @@ export function usePrototypeRideRuntime() {
   ]);
 
   useEffect(() => {
+    if (!isRuntimeEffectOwner) {
+      return;
+    }
+
     if (!runtimeState.ready && !runtimeState.initializing) {
       bootstrapRuntime(profile).catch((error) => {
         Logger.warn(
@@ -9345,9 +10342,13 @@ export function usePrototypeRideRuntime() {
         );
       });
     }
-  }, [profile, profile?.uid]);
+  }, [isRuntimeEffectOwner, profile, profile?.uid]);
 
   useEffect(() => {
+    if (!isRuntimeEffectOwner) {
+      return;
+    }
+
     const profileUid = String(snapshot.profileUid || "").trim();
     const canPersistBootstrapSnapshot =
       Boolean(profileUid) && snapshot.ready && !snapshot.initializing;
@@ -9368,9 +10369,18 @@ export function usePrototypeRideRuntime() {
         error?.message || error,
       );
     });
-  }, [snapshot.initializing, snapshot.profileUid, snapshot.ready]);
+  }, [
+    isRuntimeEffectOwner,
+    snapshot.initializing,
+    snapshot.profileUid,
+    snapshot.ready,
+  ]);
 
   useEffect(() => {
+    if (!isRuntimeEffectOwner) {
+      return undefined;
+    }
+
     if (!profile?.uid) {
       return undefined;
     }
@@ -9414,9 +10424,13 @@ export function usePrototypeRideRuntime() {
     return () => {
       subscription.remove();
     };
-  }, [profile, profile?.uid]);
+  }, [isRuntimeEffectOwner, profile, profile?.uid]);
 
   useEffect(() => {
+    if (!isRuntimeEffectOwner) {
+      return undefined;
+    }
+
     const normalizedStatus = String(snapshot.bookingStatus || "")
       .trim()
       .toLowerCase();
@@ -9431,9 +10445,13 @@ export function usePrototypeRideRuntime() {
 
     startSearchingTimer({ preserveElapsed: true });
     return undefined;
-  }, [snapshot.bookingStatus]);
+  }, [isRuntimeEffectOwner, snapshot.bookingStatus]);
 
   useEffect(() => {
+    if (!isRuntimeEffectOwner) {
+      return undefined;
+    }
+
     const role = resolveRuntimeRole(profile);
     const shouldRefreshDriverLocation =
       role === "driver" &&
@@ -9468,9 +10486,13 @@ export function usePrototypeRideRuntime() {
     return () => {
       clearInterval(interval);
     };
-  }, [driverTripAssist?.status, profile]);
+  }, [isRuntimeEffectOwner, driverTripAssist?.status, profile]);
 
   useEffect(() => {
+    if (!isRuntimeEffectOwner) {
+      return undefined;
+    }
+
     const role = resolveRuntimeRole(profile);
     const destination = snapshot.selectedDestination;
     const destinationCoordinate = destination?.coordinate || null;
@@ -9552,6 +10574,7 @@ export function usePrototypeRideRuntime() {
       clearTimeout(timer);
     };
   }, [
+    isRuntimeEffectOwner,
     profile,
     profile?.uid,
     profile?.usertype,
@@ -9566,6 +10589,10 @@ export function usePrototypeRideRuntime() {
   ]);
 
   useEffect(() => {
+    if (!isRuntimeEffectOwner) {
+      return undefined;
+    }
+
     if (!profile?.uid) {
       return undefined;
     }
@@ -9606,6 +10633,7 @@ export function usePrototypeRideRuntime() {
       clearInterval(interval);
     };
   }, [
+    isRuntimeEffectOwner,
     profile,
     profile?.uid,
     profile?.usertype,
@@ -9619,6 +10647,10 @@ export function usePrototypeRideRuntime() {
   ]);
 
   useEffect(() => {
+    if (!isRuntimeEffectOwner) {
+      return;
+    }
+
     const role = resolveRuntimeRole(profile);
     const shouldKeepHeartbeat =
       role === "driver" &&
@@ -9650,6 +10682,7 @@ export function usePrototypeRideRuntime() {
         );
       });
   }, [
+    isRuntimeEffectOwner,
     profile,
     profile?.uid,
     profile?.usertype,
@@ -9661,6 +10694,10 @@ export function usePrototypeRideRuntime() {
   ]);
 
   useEffect(() => {
+    if (!isRuntimeEffectOwner) {
+      return;
+    }
+
     const role = resolveRuntimeRole(profile);
     const shouldKeepPassengerHeartbeat =
       role === "customer" &&
@@ -9695,6 +10732,7 @@ export function usePrototypeRideRuntime() {
         );
       });
   }, [
+    isRuntimeEffectOwner,
     profile,
     profile?.uid,
     profile?.usertype,
@@ -9707,6 +10745,10 @@ export function usePrototypeRideRuntime() {
   ]);
 
   useEffect(() => {
+    if (!isRuntimeEffectOwner) {
+      return;
+    }
+
     const role = resolveRuntimeRole(profile);
     if (role !== "driver") {
       return;
@@ -9732,6 +10774,7 @@ export function usePrototypeRideRuntime() {
       );
     });
   }, [
+    isRuntimeEffectOwner,
     profile,
     profile?.uid,
     profile?.usertype,
@@ -9745,6 +10788,10 @@ export function usePrototypeRideRuntime() {
   ]);
 
   useEffect(() => {
+    if (!isRuntimeEffectOwner) {
+      return undefined;
+    }
+
     const role = resolveRuntimeRole(profile);
     if (role !== "driver") {
       interactiveNotificationService.clearActionExecutor();
@@ -9788,9 +10835,13 @@ export function usePrototypeRideRuntime() {
     return () => {
       interactiveNotificationService.clearActionExecutor();
     };
-  }, [profile]);
+  }, [isRuntimeEffectOwner, profile]);
 
   useEffect(() => {
+    if (!isRuntimeEffectOwner) {
+      return;
+    }
+
     const role = resolveRuntimeRole(profile);
     if (role !== "driver") {
       prototypeDriverTripAssistantService.clearSession().catch((error) => {
@@ -9834,6 +10885,7 @@ export function usePrototypeRideRuntime() {
           (Number.isFinite(Number(snapshot.tripDurationMin))
             ? Math.max(1, Math.round(Number(snapshot.tripDurationMin)))
             : null),
+        remainingMeters: driverTripAssist.remainingMeters,
         etaMinutes: driverTripAssist.etaMinutes,
         boardingRemainingSec: snapshot.boardingRemainingSec,
         passengerName:
@@ -9855,6 +10907,7 @@ export function usePrototypeRideRuntime() {
         );
       });
   }, [
+    isRuntimeEffectOwner,
     driverTripAssist,
     profile,
     snapshot.activeBooking?.customerName,
@@ -9872,6 +10925,10 @@ export function usePrototypeRideRuntime() {
   ]);
 
   useEffect(() => {
+    if (!isRuntimeEffectOwner) {
+      return undefined;
+    }
+
     const cardId = String(snapshot.driverTransientCard?.id || "").trim();
     const visibleUntil = snapshot.driverTransientCard?.visibleUntil;
 
@@ -9892,9 +10949,17 @@ export function usePrototypeRideRuntime() {
     return () => {
       clearTimeout(timer);
     };
-  }, [snapshot.driverTransientCard?.id, snapshot.driverTransientCard?.visibleUntil]);
+  }, [
+    isRuntimeEffectOwner,
+    snapshot.driverTransientCard?.id,
+    snapshot.driverTransientCard?.visibleUntil,
+  ]);
 
   useEffect(() => {
+    if (!isRuntimeEffectOwner) {
+      return;
+    }
+
     if (!liveTripProgress) {
       return;
     }
@@ -9929,7 +10994,7 @@ export function usePrototypeRideRuntime() {
         tripArrivalText: nextArrivalText,
       };
     });
-  }, [liveTripProgress]);
+  }, [isRuntimeEffectOwner, liveTripProgress]);
 
   const prototypePlaybackConfig = useMemo(
     () => getPrototypePlaybackConfigSnapshot(),
@@ -9937,6 +11002,10 @@ export function usePrototypeRideRuntime() {
   );
 
   useEffect(() => {
+    if (!isRuntimeEffectOwner) {
+      return undefined;
+    }
+
     const role = resolveRuntimeRole(profile);
     const playbackStatus = String(driverTripAssist?.status || "")
       .trim()
@@ -10033,6 +11102,7 @@ export function usePrototypeRideRuntime() {
       stopDriverRoutePlayback();
     };
   }, [
+    isRuntimeEffectOwner,
     profile,
     profile?.uid,
     profile?.usertype,
@@ -10055,6 +11125,10 @@ export function usePrototypeRideRuntime() {
   ]);
 
   useEffect(() => {
+    if (!isRuntimeEffectOwner) {
+      return undefined;
+    }
+
     const role = resolveRuntimeRole(profile);
     const playbackStatus = String(liveTripProgress?.status || "")
       .trim()
@@ -10145,6 +11219,7 @@ export function usePrototypeRideRuntime() {
       stopPassengerRoutePlayback();
     };
   }, [
+    isRuntimeEffectOwner,
     profile,
     prototypePlaybackConfig.pickupSpeedMetersPerSecond,
     prototypePlaybackConfig.qaMultiplier,
@@ -10161,6 +11236,10 @@ export function usePrototypeRideRuntime() {
   ]);
 
   useEffect(() => {
+    if (!isRuntimeEffectOwner) {
+      return;
+    }
+
     const role = resolveRuntimeRole(profile);
     if (role !== "driver") {
       lastDriverRoutePreviewKeyRef.current = "";
@@ -10225,6 +11304,7 @@ export function usePrototypeRideRuntime() {
       });
     });
   }, [
+    isRuntimeEffectOwner,
     driverTripAssist,
     profile,
     snapshot.currentCoordinate,
@@ -10232,6 +11312,10 @@ export function usePrototypeRideRuntime() {
   ]);
 
   useEffect(() => {
+    if (!isRuntimeEffectOwner) {
+      return;
+    }
+
     const role = resolveRuntimeRole(profile);
     if (role !== "customer") {
       lastPassengerRoutePreviewKeyRef.current = "";
@@ -10341,6 +11425,7 @@ export function usePrototypeRideRuntime() {
       });
     });
   }, [
+    isRuntimeEffectOwner,
     profile,
     snapshot.bookingStatus,
     snapshot.activeBooking?.pickupLocation?.add,

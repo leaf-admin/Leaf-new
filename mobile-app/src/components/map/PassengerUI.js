@@ -218,6 +218,27 @@ function PassengerUI(props) {
     const t = (key) => key;
     const DEV_MODE = __DEV__;
 
+    const normalizeDriverCarType = useCallback((value) => {
+        if (!value) return '';
+        return value
+            .toString()
+            .toLowerCase()
+            .trim()
+            .replace(/[_-]+/g, ' ')
+            .replace(/\s+/g, ' ');
+    }, []);
+
+    const driverMatchesCarType = useCallback((driverCarTypeValue, carNameValue) => {
+        const driverCarType = normalizeDriverCarType(driverCarTypeValue);
+        const carName = normalizeDriverCarType(carNameValue);
+
+        if (!driverCarType) {
+            return true;
+        }
+
+        return driverCarType === carName;
+    }, [normalizeDriverCarType]);
+
     const { theme, navigation, pickupAddress, currentLocation, setRoutePolyline, mapRef, onDriverLocationUpdate, onNearbyDriversUpdate, onResetManualPickup, onPickupManuallySelectedChange, locationDenied, onRequestLocationPermission } = props; // ✅ Callback para atualizar localização do motorista no mapa e motoristas próximos
 
     // ✅ Garantir que theme sempre tenha valores válidos
@@ -993,11 +1014,11 @@ function PassengerUI(props) {
         {
             name: 'Leaf Moto',
             image: 'https://cdn.pixabay.com/photo/2013/07/13/12/46/motorcycle-160175_640.png',
-            min_fare: 6.90,
-            base_fare: 2.18,
-            fixed_fee: 0.86,
-            rate_per_hour: 12.17,
-            rate_per_unit_distance: 1.19,
+            min_fare: 4.00,
+            base_fare: 0.60,
+            fixed_fee: 0.80,
+            rate_per_hour: 7.80,
+            rate_per_unit_distance: 0.99,
             convenience_fee_type: 'flat',
             convenience_fees: 0,
             extra_info: 'Capacity: 1, Type: Moto',
@@ -1190,14 +1211,19 @@ function PassengerUI(props) {
                         return [carName, estimate];
                     }
 
+                    const backendFare = Number(quote?.estimatedFare);
+                    const hasBackendFare = Number.isFinite(backendFare) && backendFare > 0;
+
                     return [
                         carName,
                         {
                             ...estimate,
-                            estimateFare: Number(quote?.estimatedFare || clientEstimatedFare || estimate?.estimateFare || 0),
+                            estimateFare: hasBackendFare ? backendFare : null,
+                            fare: hasBackendFare ? backendFare : null,
                             estimateDistance: Number(quote?.routeDistanceKm || routeDistanceKm || estimate?.estimateDistance || 0),
                             estimateTime: Number(quote?.routeDurationSecs || routeDurationSecs || estimate?.estimateTime || 0),
                             tollFee: Number(quote?.tollFee || tollFee || estimate?.tollFee || 0),
+                            rateCardVersion: quote?.rateCardVersion || estimate?.rateCardVersion || null,
                             pricingPayload: quote?.pricingPayload || estimate?.pricingPayload || null,
                             passengerNotice:
                                 quote?.pricingPayload?.passenger_notice ||
@@ -1218,7 +1244,8 @@ function PassengerUI(props) {
                                 quote?.pricingPayload?.driver_region_status ||
                                 estimate?.driverRegionStatus ||
                                 null,
-                            pricingSource: 'backend_dynamic'
+                            pricingSource: 'backend_dynamic',
+                            pricingUnavailable: !hasBackendFare
                         }
                     ];
                 } catch (quoteError) {
@@ -1226,7 +1253,17 @@ function PassengerUI(props) {
                         `⚠️ [PassengerUI] Falha ao enriquecer cotação dinâmica para ${carName}:`,
                         quoteError?.message || quoteError
                     );
-                    return [carName, estimate];
+                    return [
+                        carName,
+                        {
+                            ...estimate,
+                            estimateFare: null,
+                            fare: null,
+                            pricingSource: 'backend_unavailable',
+                            pricingUnavailable: true,
+                            pricingError: quoteError?.message || 'pricing_quote_failed'
+                        }
+                    ];
                 }
             })
         );
@@ -4134,7 +4171,7 @@ function PassengerUI(props) {
 
     // ✅ NOVO FLUXO: Abrir modal de pagamento ao invés de criar booking diretamente
     // O booking só será criado APÓS confirmação do pagamento
-    const initiateBooking = () => {
+    const initiateBooking = async () => {
         // ✅ Prevenir duplo clique
         if (isBookingInProgressRef.current) {
             Logger.log('⏸️ Reserva já em andamento, ignorando clique duplo');
@@ -4186,7 +4223,25 @@ function PassengerUI(props) {
             return;
         }
 
-        if (!hasDriversForSelectedCar) {
+        let canRequestSelectedCar = hasDriversForSelectedCar;
+
+        if (!canRequestSelectedCar && tripdata.pickup?.lat && tripdata.pickup?.lng) {
+            try {
+                await DriverAvailabilityService.updateDrivers();
+                const refreshedDrivers = DriverAvailabilityService.getCurrentDrivers();
+                setNearbyDrivers(refreshedDrivers);
+                canRequestSelectedCar = refreshedDrivers.some(driver =>
+                    driverMatchesCarType(driver?.carType, selectedCarType?.name)
+                );
+            } catch (availabilityRefreshError) {
+                Logger.warn(
+                    '⚠️ [PASSENGER] Falha ao revalidar disponibilidade antes do booking:',
+                    availabilityRefreshError?.message || availabilityRefreshError
+                );
+            }
+        }
+
+        if (!canRequestSelectedCar) {
             Alert.alert(
                 'Sem motoristas disponíveis',
                 'Não há motoristas disponíveis para este tipo de corrida na sua região agora.',
@@ -5898,21 +5953,7 @@ function PassengerUI(props) {
                 return false;
             }
 
-            // ✅ Comparação flexível de carType (case-insensitive, remove espaços)
-            const normalizeCarType = (str) => {
-                if (!str) return '';
-                return str.toString().toLowerCase().trim().replace(/\s+/g, ' ');
-            };
-
-            const driverCarType = normalizeCarType(driver.carType);
-            const carName = normalizeCarType(car.name);
-
-            // ✅ Aceitar se corresponder exatamente OU se driver não tem carType definido (mostrar todos os motoristas)
-            // Isso permite que motoristas sem carType específico apareçam em todos os tipos
-            if (!driverCarType) {
-                return true; // Motorista sem carType - mostrar em todos os tipos
-            }
-            return driverCarType === carName;
+            return driverMatchesCarType(driver.carType, car.name);
         });
 
         // Se não há motoristas com o mesmo tipo de carro, retornar null
@@ -5970,7 +6011,7 @@ function PassengerUI(props) {
         });
 
         return finalTime;
-    }, [nearbyDrivers, tripdata.pickup]);
+    }, [driverMatchesCarType, nearbyDrivers, tripdata.pickup]);
 
     const hasDriversForSelectedCar = useMemo(() => {
         if (!selectedCarType || !tripdata.pickup?.lat || !tripdata.pickup?.lng) {

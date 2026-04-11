@@ -17,6 +17,7 @@
     }
   },
   "scripts": {
+    "postinstall": "node scripts/fix-react-native-maps-ios-modules.js",
     "start": "node node_modules/expo/bin/cli start",
     "android": "node node_modules/expo/bin/cli run:android",
     "android:dev": "node node_modules/expo/bin/cli start --dev-client",
@@ -49,6 +50,8 @@
     "build:local:android:debug": "bash scripts/build-local-android.sh debug",
     "build:local:android:release": "bash scripts/build-local-android.sh release",
     "build:local:android:aab": "bash scripts/build-local-android.sh aab",
+    "build:local:android:review:release": "bash scripts/build-local-android-review.sh release",
+    "build:local:android:review:aab": "bash scripts/build-local-android-review.sh aab",
     "build:local:ios:simulator": "bash scripts/build-local-ios.sh simulator",
     "build:local:ios:archive": "bash scripts/build-local-ios.sh archive",
     "build:local:ios:ipa": "bash scripts/export-local-ios-ipa.sh",
@@ -58,7 +61,8 @@
     "qa:permissions": "bash scripts/check-permissions-hardening.sh",
     "qa:phase6:manual": "bash scripts/phase6-manual-evidence.sh",
     "qa:phase6:cross": "bash scripts/phase6-cross-platform-evidence.sh",
-    "qa:asserts": "bash scripts/qa-asserts.sh"
+    "qa:asserts": "bash scripts/qa-asserts.sh",
+    "qa:production-guards": "bash scripts/production-guard-asserts.sh"
   },
   "dependencies": {
     "@gorhom/bottom-sheet": "^5.2.8",
@@ -106,6 +110,7 @@
     "expo-print": "~15.0.8",
     "expo-screen-orientation": "~9.0.8",
     "expo-sharing": "~14.0.8",
+    "expo-speech-recognition": "^3.1.2",
     "expo-splash-screen": "~31.0.13",
     "expo-status-bar": "~3.0.9",
     "expo-task-manager": "~14.0.9",
