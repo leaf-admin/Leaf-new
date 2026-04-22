@@ -21,8 +21,22 @@ function safeNumber(value, fallback = 0) {
   return Number.isFinite(parsed) ? parsed : fallback;
 }
 
+function readPositiveNumberFromEnv(...candidates) {
+  for (const candidate of candidates) {
+    const parsed = Number(candidate);
+    if (Number.isFinite(parsed) && parsed >= 0) {
+      return parsed;
+    }
+  }
+  return 0;
+}
+
 function roundCurrency(value) {
   return Number(safeNumber(value, 0).toFixed(6));
+}
+
+function roundUnits(value) {
+  return Number(safeNumber(value, 0).toFixed(3));
 }
 
 function safeJsonClone(value, fallback = null) {
@@ -57,6 +71,164 @@ function normalizeSourceMeta(meta = {}) {
   };
 }
 
+function normalizeUserType(userType) {
+  const normalized = sanitizeText(userType, 'unknown').toLowerCase();
+  if (normalized === 'driver') {
+    return 'driver';
+  }
+  if (normalized === 'customer' || normalized === 'passenger') {
+    return 'customer';
+  }
+  return 'unknown';
+}
+
+function createEmptySkuBreakdown() {
+  return {
+    bySurface: {},
+    byRouteScope: {},
+    byCaller: {},
+    byCacheMode: {},
+  };
+}
+
+function createEmptyDimensionBucket() {
+  return {
+    requestCount: 0,
+    billableUnits: 0,
+    estimatedCostUsd: 0,
+  };
+}
+
+function truncateDimensionValue(value, maxLength = 140) {
+  const normalized = sanitizeText(value, '');
+  if (!normalized) {
+    return '';
+  }
+  if (normalized.length <= maxLength) {
+    return normalized;
+  }
+  return `${normalized.slice(0, maxLength - 1)}…`;
+}
+
+function normalizeDimensionKey(rawValue, fallback = 'unknown') {
+  const normalized = truncateDimensionValue(rawValue);
+  return normalized || fallback;
+}
+
+function incrementDimensionBucket(targetMap, key, { requestCount = 0, billableUnits = 0, estimatedCostUsd = 0 } = {}) {
+  const normalizedKey = normalizeDimensionKey(key);
+  const existing = targetMap[normalizedKey] || createEmptyDimensionBucket();
+  existing.requestCount += Math.max(0, Math.round(safeNumber(requestCount, 0)));
+  existing.billableUnits = roundUnits(safeNumber(existing.billableUnits, 0) + safeNumber(billableUnits, 0));
+  existing.estimatedCostUsd = roundCurrency(
+    safeNumber(existing.estimatedCostUsd, 0) + safeNumber(estimatedCostUsd, 0),
+  );
+  targetMap[normalizedKey] = existing;
+}
+
+function mergeBreakdownMaps(targetMap = {}, incomingMap = {}) {
+  Object.entries(incomingMap || {}).forEach(([rawKey, rawEntry]) => {
+    const entry = rawEntry || {};
+    incrementDimensionBucket(targetMap, rawKey, {
+      requestCount: entry.requestCount,
+      billableUnits: entry.billableUnits,
+      estimatedCostUsd: entry.estimatedCostUsd,
+    });
+  });
+  return targetMap;
+}
+
+function mergeSkuBreakdown(currentBreakdown = {}, incomingBreakdown = {}) {
+  const merged = {
+    ...createEmptySkuBreakdown(),
+    ...(currentBreakdown || {}),
+  };
+
+  Object.keys(createEmptySkuBreakdown()).forEach((bucketName) => {
+    merged[bucketName] = mergeBreakdownMaps(
+      safeJsonClone(merged[bucketName], {}),
+      incomingBreakdown?.[bucketName] || {},
+    );
+  });
+
+  return merged;
+}
+
+function readCounterFromAliases(section = {}, aliases = []) {
+  for (const alias of aliases) {
+    const rawValue = section?.[alias];
+    const parsed = Number(rawValue);
+    if (Number.isFinite(parsed)) {
+      return Math.max(0, Math.round(parsed));
+    }
+  }
+  return 0;
+}
+
+function readCostFromAliases(section = {}, aliases = []) {
+  for (const alias of aliases) {
+    const rawValue = section?.[alias];
+    const parsed = Number(rawValue);
+    if (Number.isFinite(parsed) && parsed >= 0) {
+      return roundCurrency(parsed);
+    }
+  }
+  return null;
+}
+
+function normalizeOperationSection(section = {}) {
+  return {
+    reads: readCounterFromAliases(section, ['reads', 'readOps', 'readCount']),
+    writes: readCounterFromAliases(section, ['writes', 'writeOps', 'writeCount']),
+    estimatedCostUsd: readCostFromAliases(section, ['estimatedCostUsd', 'totalEstimatedCostUsd']),
+  };
+}
+
+const TELEMETRY_EXCHANGE_RATE_USD_BRL = readPositiveNumberFromEnv(
+  process.env.RIDE_COST_TELEMETRY_USD_BRL_RATE,
+  process.env.USD_BRL_EXCHANGE_RATE,
+  '5.18',
+);
+
+const TELEMETRY_BUDGET_USD = readPositiveNumberFromEnv(
+  process.env.RIDE_COST_TELEMETRY_BUDGET_USD,
+  process.env.RIDE_COST_BUDGET_USD,
+  '0.03',
+);
+
+const TELEMETRY_OPERATION_RATES = Object.freeze({
+  backendAttemptUsd: readPositiveNumberFromEnv(
+    process.env.RIDE_COST_TELEMETRY_BACKEND_ATTEMPT_USD,
+    '0',
+  ),
+  redisReadUsd: readPositiveNumberFromEnv(
+    process.env.RIDE_COST_TELEMETRY_REDIS_READ_USD,
+    '0',
+  ),
+  redisWriteUsd: readPositiveNumberFromEnv(
+    process.env.RIDE_COST_TELEMETRY_REDIS_WRITE_USD,
+    '0',
+  ),
+  firebaseReadUsd: readPositiveNumberFromEnv(
+    process.env.RIDE_COST_TELEMETRY_FIREBASE_READ_USD,
+    '0',
+  ),
+  firebaseWriteUsd: readPositiveNumberFromEnv(
+    process.env.RIDE_COST_TELEMETRY_FIREBASE_WRITE_USD,
+    '0',
+  ),
+  databaseReadUsd: readPositiveNumberFromEnv(
+    process.env.RIDE_COST_TELEMETRY_DATABASE_READ_USD,
+    process.env.RIDE_COST_TELEMETRY_DB_READ_USD,
+    '0',
+  ),
+  databaseWriteUsd: readPositiveNumberFromEnv(
+    process.env.RIDE_COST_TELEMETRY_DATABASE_WRITE_USD,
+    process.env.RIDE_COST_TELEMETRY_DB_WRITE_USD,
+    '0',
+  ),
+});
+
 class RideCostTelemetryService {
   buildReportKey(bookingId) {
     return `${RIDE_COST_TELEMETRY_PREFIX}:${bookingId}`;
@@ -77,6 +249,7 @@ class RideCostTelemetryService {
       bookingId,
       createdAt: now,
       updatedAt: now,
+      schemaVersion: 2,
       pricingSheet: null,
       sources: {},
       totals: {
@@ -86,6 +259,20 @@ class RideCostTelemetryService {
           billableUnits: 0,
           estimatedCostUsd: 0,
           skus: {},
+          directions: {
+            requestCount: 0,
+            billableUnits: 0,
+            estimatedCostUsd: 0,
+            byUserType: {
+              driver: 0,
+              customer: 0,
+              unknown: 0,
+            },
+            bySurface: {},
+            byRouteScope: {},
+            byCaller: {},
+            byCacheMode: {},
+          },
         },
         backend: {
           attempts: 0,
@@ -93,7 +280,40 @@ class RideCostTelemetryService {
           successes: 0,
           errors: 0,
           totalLatencyMs: 0,
+          estimatedCostUsd: 0,
           commands: {},
+        },
+        infrastructure: {
+          redis: {
+            reads: 0,
+            writes: 0,
+            estimatedCostUsd: 0,
+          },
+          firebase: {
+            reads: 0,
+            writes: 0,
+            estimatedCostUsd: 0,
+          },
+          database: {
+            reads: 0,
+            writes: 0,
+            estimatedCostUsd: 0,
+          },
+          estimatedCostUsd: 0,
+        },
+        cost: {
+          exchangeRateUsdBrl: TELEMETRY_EXCHANGE_RATE_USD_BRL,
+          budgetUsd: TELEMETRY_BUDGET_USD,
+          budgetBrl: roundCurrency(TELEMETRY_BUDGET_USD * TELEMETRY_EXCHANGE_RATE_USD_BRL),
+          googleUsd: 0,
+          backendUsd: 0,
+          infrastructureUsd: 0,
+          totalUsd: 0,
+          totalBrl: 0,
+          budgetStatus: TELEMETRY_BUDGET_USD > 0 ? 'within_budget' : 'unconfigured',
+          budgetOverrunUsd: 0,
+          budgetOverrunBrl: 0,
+          operationRates: safeJsonClone(TELEMETRY_OPERATION_RATES, {}),
         },
       },
     };
@@ -106,6 +326,8 @@ class RideCostTelemetryService {
 
     sourceEntries.forEach((sourceEntry) => {
       const snapshot = sourceEntry?.snapshot || {};
+      const sourceMeta = normalizeSourceMeta(sourceEntry?.sourceMeta || {});
+      const normalizedUserType = normalizeUserType(sourceMeta.userType);
       const googleSkus = snapshot?.google?.skus || {};
       Object.entries(googleSkus).forEach(([skuKey, skuEntry]) => {
         const aggregateSku = totals.google.skus[skuKey] || {
@@ -115,16 +337,84 @@ class RideCostTelemetryService {
           requestCount: 0,
           billableUnits: 0,
           estimatedCostUsd: 0,
+          breakdown: createEmptySkuBreakdown(),
         };
 
-        aggregateSku.requestCount += Math.max(0, Math.round(safeNumber(skuEntry?.requestCount, 0)));
-        aggregateSku.billableUnits = Number(
-          (safeNumber(aggregateSku.billableUnits, 0) + safeNumber(skuEntry?.billableUnits, 0)).toFixed(3),
+        const requestCount = Math.max(0, Math.round(safeNumber(skuEntry?.requestCount, 0)));
+        const billableUnits = safeNumber(skuEntry?.billableUnits, 0);
+        const estimatedCostUsd = safeNumber(skuEntry?.estimatedCostUsd, 0);
+
+        aggregateSku.requestCount += requestCount;
+        aggregateSku.billableUnits = roundUnits(
+          safeNumber(aggregateSku.billableUnits, 0) + billableUnits,
         );
         aggregateSku.estimatedCostUsd = roundCurrency(
-          safeNumber(aggregateSku.estimatedCostUsd, 0) + safeNumber(skuEntry?.estimatedCostUsd, 0),
+          safeNumber(aggregateSku.estimatedCostUsd, 0) + estimatedCostUsd,
+        );
+        aggregateSku.breakdown = mergeSkuBreakdown(
+          aggregateSku.breakdown,
+          skuEntry?.breakdown || {},
         );
         totals.google.skus[skuKey] = aggregateSku;
+
+        if (skuKey === 'directionsLegacy') {
+          totals.google.directions.requestCount += requestCount;
+          totals.google.directions.billableUnits = roundUnits(
+            totals.google.directions.billableUnits + billableUnits,
+          );
+          totals.google.directions.estimatedCostUsd = roundCurrency(
+            totals.google.directions.estimatedCostUsd + estimatedCostUsd,
+          );
+          totals.google.directions.byUserType[normalizedUserType] += requestCount;
+
+          const breakdown = skuEntry?.breakdown || {};
+          const hasBreakdown = Object.keys(breakdown || {}).length > 0;
+          if (hasBreakdown) {
+            totals.google.directions.bySurface = mergeBreakdownMaps(
+              totals.google.directions.bySurface,
+              breakdown.bySurface || {},
+            );
+            totals.google.directions.byRouteScope = mergeBreakdownMaps(
+              totals.google.directions.byRouteScope,
+              breakdown.byRouteScope || {},
+            );
+            totals.google.directions.byCaller = mergeBreakdownMaps(
+              totals.google.directions.byCaller,
+              breakdown.byCaller || {},
+            );
+            totals.google.directions.byCacheMode = mergeBreakdownMaps(
+              totals.google.directions.byCacheMode,
+              breakdown.byCacheMode || {},
+            );
+          } else {
+            const lastMetadata = skuEntry?.lastMetadata || {};
+            const fallbackBucketPayload = {
+              requestCount,
+              billableUnits,
+              estimatedCostUsd,
+            };
+            incrementDimensionBucket(
+              totals.google.directions.bySurface,
+              lastMetadata?.telemetrySurface || lastMetadata?.surface || sourceMeta?.surface || 'unknown',
+              fallbackBucketPayload,
+            );
+            incrementDimensionBucket(
+              totals.google.directions.byRouteScope,
+              lastMetadata?.routeScope || lastMetadata?.routeFamily || 'unknown',
+              fallbackBucketPayload,
+            );
+            incrementDimensionBucket(
+              totals.google.directions.byCaller,
+              lastMetadata?.callerFrame || lastMetadata?.caller || 'unknown',
+              fallbackBucketPayload,
+            );
+            incrementDimensionBucket(
+              totals.google.directions.byCacheMode,
+              lastMetadata?.cacheMode || 'unknown',
+              fallbackBucketPayload,
+            );
+          }
+        }
       });
 
       const backendCommands = snapshot?.backend?.commands || {};
@@ -144,6 +434,43 @@ class RideCostTelemetryService {
         aggregateCommand.totalLatencyMs += Math.max(0, Math.round(safeNumber(commandEntry?.totalLatencyMs, 0)));
         totals.backend.commands[commandName] = aggregateCommand;
       });
+
+      const redisSection = normalizeOperationSection(snapshot?.redis || {});
+      const firebaseSection = normalizeOperationSection(snapshot?.firebase || {});
+      const databaseSection = normalizeOperationSection(snapshot?.database || snapshot?.db || {});
+
+      totals.infrastructure.redis.reads += redisSection.reads;
+      totals.infrastructure.redis.writes += redisSection.writes;
+      totals.infrastructure.firebase.reads += firebaseSection.reads;
+      totals.infrastructure.firebase.writes += firebaseSection.writes;
+      totals.infrastructure.database.reads += databaseSection.reads;
+      totals.infrastructure.database.writes += databaseSection.writes;
+
+      const redisEstimatedFromRates = roundCurrency(
+        (redisSection.reads * TELEMETRY_OPERATION_RATES.redisReadUsd) +
+        (redisSection.writes * TELEMETRY_OPERATION_RATES.redisWriteUsd),
+      );
+      const firebaseEstimatedFromRates = roundCurrency(
+        (firebaseSection.reads * TELEMETRY_OPERATION_RATES.firebaseReadUsd) +
+        (firebaseSection.writes * TELEMETRY_OPERATION_RATES.firebaseWriteUsd),
+      );
+      const databaseEstimatedFromRates = roundCurrency(
+        (databaseSection.reads * TELEMETRY_OPERATION_RATES.databaseReadUsd) +
+        (databaseSection.writes * TELEMETRY_OPERATION_RATES.databaseWriteUsd),
+      );
+
+      totals.infrastructure.redis.estimatedCostUsd = roundCurrency(
+        totals.infrastructure.redis.estimatedCostUsd +
+        (redisSection.estimatedCostUsd !== null ? redisSection.estimatedCostUsd : redisEstimatedFromRates),
+      );
+      totals.infrastructure.firebase.estimatedCostUsd = roundCurrency(
+        totals.infrastructure.firebase.estimatedCostUsd +
+        (firebaseSection.estimatedCostUsd !== null ? firebaseSection.estimatedCostUsd : firebaseEstimatedFromRates),
+      );
+      totals.infrastructure.database.estimatedCostUsd = roundCurrency(
+        totals.infrastructure.database.estimatedCostUsd +
+        (databaseSection.estimatedCostUsd !== null ? databaseSection.estimatedCostUsd : databaseEstimatedFromRates),
+      );
     });
 
     totals.google.requestCount = Object.values(totals.google.skus).reduce(
@@ -182,6 +509,38 @@ class RideCostTelemetryService {
       (acc, commandEntry) => acc + Math.max(0, Math.round(safeNumber(commandEntry?.totalLatencyMs, 0))),
       0,
     );
+    totals.backend.estimatedCostUsd = roundCurrency(
+      totals.backend.attempts * TELEMETRY_OPERATION_RATES.backendAttemptUsd,
+    );
+
+    totals.infrastructure.estimatedCostUsd = roundCurrency(
+      totals.infrastructure.redis.estimatedCostUsd +
+      totals.infrastructure.firebase.estimatedCostUsd +
+      totals.infrastructure.database.estimatedCostUsd,
+    );
+
+    totals.cost.googleUsd = totals.google.estimatedCostUsd;
+    totals.cost.backendUsd = totals.backend.estimatedCostUsd;
+    totals.cost.infrastructureUsd = totals.infrastructure.estimatedCostUsd;
+    totals.cost.totalUsd = roundCurrency(
+      totals.cost.googleUsd + totals.cost.backendUsd + totals.cost.infrastructureUsd,
+    );
+    totals.cost.totalBrl = roundCurrency(totals.cost.totalUsd * TELEMETRY_EXCHANGE_RATE_USD_BRL);
+    totals.cost.budgetBrl = roundCurrency(TELEMETRY_BUDGET_USD * TELEMETRY_EXCHANGE_RATE_USD_BRL);
+    if (TELEMETRY_BUDGET_USD > 0) {
+      totals.cost.budgetStatus =
+        totals.cost.totalUsd > TELEMETRY_BUDGET_USD ? 'above_budget' : 'within_budget';
+      totals.cost.budgetOverrunUsd = roundCurrency(
+        Math.max(0, totals.cost.totalUsd - TELEMETRY_BUDGET_USD),
+      );
+      totals.cost.budgetOverrunBrl = roundCurrency(
+        totals.cost.budgetOverrunUsd * TELEMETRY_EXCHANGE_RATE_USD_BRL,
+      );
+    } else {
+      totals.cost.budgetStatus = 'unconfigured';
+      totals.cost.budgetOverrunUsd = 0;
+      totals.cost.budgetOverrunBrl = 0;
+    }
 
     return totals;
   }
@@ -211,6 +570,7 @@ class RideCostTelemetryService {
 
     report.bookingId = normalizedBookingId;
     report.updatedAt = now;
+    report.schemaVersion = 2;
     if (!report.createdAt) {
       report.createdAt = now;
     }
@@ -237,6 +597,12 @@ class RideCostTelemetryService {
       costTelemetryGoogleUsd: String(report.totals?.google?.estimatedCostUsd || 0),
       costTelemetryGoogleBillableUnits: String(report.totals?.google?.billableUnits || 0),
       costTelemetrySourceCount: String(report.totals?.sourceCount || 0),
+      costTelemetryTotalUsd: String(report.totals?.cost?.totalUsd || 0),
+      costTelemetryTotalBrl: String(report.totals?.cost?.totalBrl || 0),
+      costTelemetryBudgetStatus: String(report.totals?.cost?.budgetStatus || 'unknown'),
+      costTelemetryDirectionsRequests: String(report.totals?.google?.directions?.requestCount || 0),
+      costTelemetryDriverDirectionsRequests: String(report.totals?.google?.directions?.byUserType?.driver || 0),
+      costTelemetryPassengerDirectionsRequests: String(report.totals?.google?.directions?.byUserType?.customer || 0),
     });
 
     logStructured('info', 'Telemetria de custo da corrida atualizada', {
@@ -245,6 +611,9 @@ class RideCostTelemetryService {
       eventType: 'rideCostTelemetry',
       googleUsd: report.totals?.google?.estimatedCostUsd || 0,
       googleUnits: report.totals?.google?.billableUnits || 0,
+      totalUsd: report.totals?.cost?.totalUsd || 0,
+      totalBrl: report.totals?.cost?.totalBrl || 0,
+      budgetStatus: report.totals?.cost?.budgetStatus || 'unknown',
     });
 
     return report;

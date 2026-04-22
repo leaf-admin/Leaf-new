@@ -16,6 +16,31 @@ function roundCurrency(value) {
   return Number(safeNumber(value, 0).toFixed(6));
 }
 
+function roundUnits(value) {
+  return Number(safeNumber(value, 0).toFixed(3));
+}
+
+function mergeBreakdownMap(target = {}, source = {}) {
+  Object.entries(source || {}).forEach(([rawKey, rawEntry]) => {
+    const key = String(rawKey || '').trim() || 'unknown';
+    const entry = rawEntry || {};
+    const current = target[key] || {
+      requestCount: 0,
+      billableUnits: 0,
+      estimatedCostUsd: 0,
+    };
+    current.requestCount += Math.max(0, Math.round(safeNumber(entry.requestCount, 0)));
+    current.billableUnits = roundUnits(
+      safeNumber(current.billableUnits, 0) + safeNumber(entry.billableUnits, 0),
+    );
+    current.estimatedCostUsd = roundCurrency(
+      safeNumber(current.estimatedCostUsd, 0) + safeNumber(entry.estimatedCostUsd, 0),
+    );
+    target[key] = current;
+  });
+  return target;
+}
+
 function normalizeUserType(value) {
   const normalized = String(value || '').trim().toLowerCase();
   if (!normalized) {
@@ -68,6 +93,9 @@ function normalizeReportEntry(entry) {
     billableUnits: safeNumber(skuEntry?.billableUnits, 0),
     unitCostUsd: safeNumber(skuEntry?.unitPriceUsd, 0),
     totalCostUsd: roundCurrency(skuEntry?.estimatedCostUsd),
+    breakdown: skuEntry?.breakdown && typeof skuEntry.breakdown === 'object'
+      ? skuEntry.breakdown
+      : {},
     metadata: skuEntry?.lastMetadata || null,
     lastUpdatedAt: skuEntry?.lastUpdatedAt || null,
   }));
@@ -83,6 +111,21 @@ function normalizeReportEntry(entry) {
     lineItems.reduce((acc, item) => acc + safeNumber(item?.totalCostUsd, 0), 0),
   );
   const directionsLineItems = lineItems.filter((item) => item?.skuKey === 'directionsLegacy');
+  const directionsBreakdown = directionsLineItems.reduce(
+    (acc, item) => {
+      mergeBreakdownMap(acc.bySurface, item?.breakdown?.bySurface || {});
+      mergeBreakdownMap(acc.byRouteScope, item?.breakdown?.byRouteScope || {});
+      mergeBreakdownMap(acc.byCaller, item?.breakdown?.byCaller || {});
+      mergeBreakdownMap(acc.byCacheMode, item?.breakdown?.byCacheMode || {});
+      return acc;
+    },
+    {
+      bySurface: {},
+      byRouteScope: {},
+      byCaller: {},
+      byCacheMode: {},
+    },
+  );
   const directionsRequestCount = directionsLineItems.reduce(
     (acc, item) => acc + Math.max(0, Math.round(safeNumber(item?.requestCount, 0))),
     0,
@@ -114,6 +157,7 @@ function normalizeReportEntry(entry) {
       directionsRequests: directionsRequestCount,
       directionsBillableUnits,
       directionsEstimatedCostUsd,
+      directionsBreakdown,
       backendAttempts: Math.max(0, Math.round(safeNumber(backend?.totalAttempts, 0))),
       backendSuccesses: Math.max(0, Math.round(safeNumber(backend?.totalSuccesses, 0))),
       backendErrors: Math.max(0, Math.round(safeNumber(backend?.totalErrors, 0))),

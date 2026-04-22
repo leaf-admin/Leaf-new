@@ -167,6 +167,16 @@ const resolveDirectionsCachePolicy = ({
         )
     };
 };
+
+const buildRideTelemetryMetadata = (telemetryContext = null, extras = {}) => ({
+    telemetrySurface: telemetryContext?.sourceMeta?.surface || telemetryContext?.surface || null,
+    telemetrySourceKey: telemetryContext?.sourceKey || null,
+    routeScope: telemetryContext?.routeScope || telemetryContext?.routeFamily || null,
+    routeFamily: telemetryContext?.routeFamily || telemetryContext?.routeScope || null,
+    cacheMode: telemetryContext?.cacheMode || null,
+    ...extras
+});
+
 const haversineKm = (aLat, aLng, bLat, bLng) => {
     const toRad = (deg) => (deg * Math.PI) / 180;
     const R = 6371;
@@ -812,15 +822,13 @@ export const getDirectionsApi = (startLoc, destLoc, waypoints, telemetryContext 
         const cached = getCached(cacheKey, MAPS_CACHE_TTL_MS.directions);
         if (cached) {
             rideCostTelemetryService.recordGoogleCache('directionsMemoryHit', {
-                metadata: {
+                metadata: buildRideTelemetryMetadata(telemetryContext, {
                     waypointsCount: waypoints ? String(waypoints).split('|').filter(Boolean).length : 0,
                     trafficEnabled,
                     alternativesEnabled,
                     cacheMode: cachePolicy.mode,
-                    telemetrySurface: telemetryContext?.sourceMeta?.surface || telemetryContext?.surface || null,
-                    telemetrySourceKey: telemetryContext?.sourceKey || null,
                     callerFrame
-                }
+                })
             }, telemetryContext);
             resolve(cached);
             return;
@@ -848,16 +856,14 @@ export const getDirectionsApi = (startLoc, destLoc, waypoints, telemetryContext 
                         {
                             billableUnits: 1,
                             requestCount: 1,
-                            metadata: {
+                            metadata: buildRideTelemetryMetadata(telemetryContext, {
                                 routeCount: json.routes.length,
                                 waypointsCount: waypoints ? String(waypoints).split('|').filter(Boolean).length : 0,
                                 trafficEnabled,
                                 alternativesEnabled,
                                 cacheMode: cachePolicy.mode,
-                                telemetrySurface: telemetryContext?.sourceMeta?.surface || telemetryContext?.surface || null,
-                                telemetrySourceKey: telemetryContext?.sourceKey || null,
                                 callerFrame
-                            }
+                            })
                         },
                         telemetryContext
                     );

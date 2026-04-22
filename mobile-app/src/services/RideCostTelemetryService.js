@@ -144,6 +144,76 @@ function createEmptyBackendSection() {
   };
 }
 
+function createEmptySkuBreakdownEntry() {
+  return {
+    requestCount: 0,
+    billableUnits: 0,
+    estimatedCostUsd: 0,
+  };
+}
+
+function createEmptySkuBreakdown() {
+  return {
+    bySurface: {},
+    byRouteScope: {},
+    byCaller: {},
+    byCacheMode: {},
+  };
+}
+
+function normalizeDimensionValue(rawValue, fallback = 'unknown') {
+  const normalized = sanitizeText(rawValue, fallback);
+  if (!normalized) {
+    return fallback;
+  }
+  if (normalized.length <= 140) {
+    return normalized;
+  }
+  return `${normalized.slice(0, 139)}…`;
+}
+
+function incrementBreakdownBucket(targetBucket = {}, rawKey, payload = {}) {
+  const key = normalizeDimensionValue(rawKey, 'unknown');
+  const currentEntry = targetBucket[key] || createEmptySkuBreakdownEntry();
+  currentEntry.requestCount += Math.max(0, Math.round(safeNumber(payload.requestCount, 0)));
+  currentEntry.billableUnits = Number(
+    (safeNumber(currentEntry.billableUnits, 0) + safeNumber(payload.billableUnits, 0)).toFixed(3),
+  );
+  currentEntry.estimatedCostUsd = roundCurrency(
+    safeNumber(currentEntry.estimatedCostUsd, 0) + safeNumber(payload.estimatedCostUsd, 0),
+  );
+  targetBucket[key] = currentEntry;
+  return targetBucket;
+}
+
+function mergeBreakdownBucketMaps(currentBucket = {}, incomingBucket = {}) {
+  const merged = clone(currentBucket || {});
+  Object.entries(incomingBucket || {}).forEach(([rawKey, rawEntry]) => {
+    incrementBreakdownBucket(merged, rawKey, {
+      requestCount: rawEntry?.requestCount,
+      billableUnits: rawEntry?.billableUnits,
+      estimatedCostUsd: rawEntry?.estimatedCostUsd,
+    });
+  });
+  return merged;
+}
+
+function mergeSkuBreakdown(currentBreakdown = {}, incomingBreakdown = {}) {
+  const merged = {
+    ...createEmptySkuBreakdown(),
+    ...(currentBreakdown || {}),
+  };
+
+  Object.keys(createEmptySkuBreakdown()).forEach((bucketName) => {
+    merged[bucketName] = mergeBreakdownBucketMaps(
+      merged[bucketName] || {},
+      incomingBreakdown?.[bucketName] || {},
+    );
+  });
+
+  return merged;
+}
+
 function createEmptyContextReport({ contextId, bookingId = null, sourceKey, sourceMeta = {} }) {
   const now = new Date().toISOString();
   return {
@@ -219,6 +289,7 @@ function mergeGoogleSkuMaps(current = {}, incoming = {}) {
       requestCount: 0,
       billableUnits: 0,
       estimatedCostUsd: 0,
+      breakdown: createEmptySkuBreakdown(),
       lastMetadata: null,
       lastUpdatedAt: null,
     };
@@ -236,6 +307,10 @@ function mergeGoogleSkuMaps(current = {}, incoming = {}) {
     existingEntry.estimatedCostUsd = roundCurrency(
       safeNumber(existingEntry.estimatedCostUsd, 0) +
         safeNumber(incomingEntry.estimatedCostUsd, 0),
+    );
+    existingEntry.breakdown = mergeSkuBreakdown(
+      existingEntry.breakdown,
+      incomingEntry.breakdown || {},
     );
     existingEntry.lastMetadata =
       incomingEntry.lastMetadata !== null && incomingEntry.lastMetadata !== undefined
@@ -602,9 +677,11 @@ class RideCostTelemetryService {
       requestCount: 0,
       billableUnits: 0,
       estimatedCostUsd: 0,
+      breakdown: createEmptySkuBreakdown(),
       lastMetadata: null,
       lastUpdatedAt: null,
     };
+    existingSku.breakdown = mergeSkuBreakdown(existingSku.breakdown, {});
 
     const requestCount = Math.max(1, Math.round(safeNumber(options.requestCount, 1)));
     const billableUnits = Math.max(0, safeNumber(options.billableUnits, 1));
@@ -619,7 +696,29 @@ class RideCostTelemetryService {
     existingSku.estimatedCostUsd = roundCurrency(
       safeNumber(existingSku.estimatedCostUsd, 0) + estimatedCostUsd,
     );
-    existingSku.lastMetadata = options.metadata ? clone(options.metadata) : null;
+    const metadata = options.metadata ? clone(options.metadata) : null;
+    const breakdownPayload = { requestCount, billableUnits, estimatedCostUsd };
+    incrementBreakdownBucket(
+      existingSku.breakdown.bySurface,
+      metadata?.telemetrySurface || metadata?.surface || context?.sourceMeta?.surface || context?.surface || 'unknown',
+      breakdownPayload,
+    );
+    incrementBreakdownBucket(
+      existingSku.breakdown.byRouteScope,
+      metadata?.routeScope || metadata?.routeFamily || context?.routeScope || context?.routeFamily || 'unknown',
+      breakdownPayload,
+    );
+    incrementBreakdownBucket(
+      existingSku.breakdown.byCaller,
+      metadata?.callerFrame || metadata?.caller || 'unknown',
+      breakdownPayload,
+    );
+    incrementBreakdownBucket(
+      existingSku.breakdown.byCacheMode,
+      metadata?.cacheMode || context?.cacheMode || 'unknown',
+      breakdownPayload,
+    );
+    existingSku.lastMetadata = metadata;
     existingSku.lastUpdatedAt = new Date().toISOString();
 
     report.google.skus[skuKey] = existingSku;

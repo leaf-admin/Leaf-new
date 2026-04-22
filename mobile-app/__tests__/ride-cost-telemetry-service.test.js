@@ -31,7 +31,16 @@ describe('RideCostTelemetryService', () => {
     );
     rideCostTelemetryService.recordGoogleUsage(
       RIDE_TELEMETRY_GOOGLE_SKUS.DIRECTIONS_LEGACY,
-      { requestCount: 2, billableUnits: 2, metadata: { leg: 'pickup' } },
+      {
+        requestCount: 2,
+        billableUnits: 2,
+        metadata: {
+          leg: 'pickup',
+          telemetrySurface: 'driver_enroute_pickup',
+          routeScope: 'driver_to_pickup',
+          callerFrame: 'prototypeRideRuntime.js:8456',
+        },
+      },
       context,
     );
     rideCostTelemetryService.recordGoogleCache(
@@ -60,6 +69,12 @@ describe('RideCostTelemetryService', () => {
     expect(snapshot.google.totalBillableUnits).toBe(3);
     expect(snapshot.google.totalEstimatedCostUsd).toBeCloseTo(0.01283, 5);
     expect(snapshot.google.skus.directionsLegacy.requestCount).toBe(2);
+    expect(
+      snapshot.google.skus.directionsLegacy.breakdown.bySurface.driver_enroute_pickup.requestCount,
+    ).toBe(2);
+    expect(
+      snapshot.google.skus.directionsLegacy.breakdown.byRouteScope.driver_to_pickup.billableUnits,
+    ).toBe(2);
     expect(snapshot.google.cache.directionsMemoryHit).toBe(1);
     expect(snapshot.backend.commands.createBooking.attempts).toBe(1);
     expect(snapshot.backend.commands.createBooking.successes).toBe(1);

@@ -100,14 +100,21 @@ describe('ride-cost-telemetry-service', () => {
     expect(report.totals.google.requestCount).toBe(2);
     expect(report.totals.google.billableUnits).toBe(2);
     expect(report.totals.google.estimatedCostUsd).toBe(0.01);
+    expect(report.totals.google.directions.requestCount).toBe(2);
+    expect(report.totals.google.directions.byUserType.customer).toBe(2);
     expect(report.totals.backend.attempts).toBe(1);
     expect(report.totals.backend.successes).toBe(1);
     expect(report.totals.backend.totalLatencyMs).toBe(812);
+    expect(report.totals.cost.totalUsd).toBeCloseTo(0.01, 6);
+    expect(report.totals.cost.budgetStatus).toBe('within_budget');
     expect(redisHashes.get('booking:booking_123')).toEqual(
       expect.objectContaining({
         costTelemetryGoogleUsd: '0.01',
         costTelemetryGoogleBillableUnits: '2',
         costTelemetrySourceCount: '1',
+        costTelemetryTotalUsd: '0.01',
+        costTelemetryDirectionsRequests: '2',
+        costTelemetryPassengerDirectionsRequests: '2',
       }),
     );
   });
@@ -215,6 +222,9 @@ describe('ride-cost-telemetry-service', () => {
     expect(report.totals.sourceCount).toBe(2);
     expect(report.totals.google.requestCount).toBe(3);
     expect(report.totals.google.estimatedCostUsd).toBeCloseTo(0.01066, 5);
+    expect(report.totals.google.directions.requestCount).toBe(1);
+    expect(report.totals.google.directions.byUserType.driver).toBe(1);
+    expect(report.totals.google.directions.byUserType.customer).toBe(0);
     expect(report.totals.backend.attempts).toBe(2);
     expect(report.totals.backend.successes).toBe(2);
     expect(report.totals.backend.errors).toBe(0);
@@ -222,5 +232,70 @@ describe('ride-cost-telemetry-service', () => {
     expect(Object.keys(report.sources)).toEqual(
       expect.arrayContaining(['customer:customer_1', 'driver:driver_7']),
     );
+  });
+
+  it('aggregates directions dimensions to explain where requests came from', async () => {
+    const report = await service.ingestSnapshot({
+      bookingId: 'booking_dimensions',
+      sourceMeta: {
+        userId: 'driver_42',
+        userType: 'driver',
+        surface: 'driver_map',
+      },
+      snapshot: {
+        google: {
+          skus: {
+            directionsLegacy: {
+              label: 'Directions',
+              family: 'Routes APIs Legacy',
+              unit: 'request',
+              requestCount: 3,
+              billableUnits: 3,
+              estimatedCostUsd: 0.015,
+              breakdown: {
+                bySurface: {
+                  driver_enroute_pickup: {
+                    requestCount: 2,
+                    billableUnits: 2,
+                    estimatedCostUsd: 0.01,
+                  },
+                  driver_active_trip: {
+                    requestCount: 1,
+                    billableUnits: 1,
+                    estimatedCostUsd: 0.005,
+                  },
+                },
+                byRouteScope: {
+                  driver_to_pickup: {
+                    requestCount: 2,
+                    billableUnits: 2,
+                    estimatedCostUsd: 0.01,
+                  },
+                  pickup_to_destination: {
+                    requestCount: 1,
+                    billableUnits: 1,
+                    estimatedCostUsd: 0.005,
+                  },
+                },
+                byCaller: {
+                  'prototypeRideRuntime.js:enroute': {
+                    requestCount: 3,
+                    billableUnits: 3,
+                    estimatedCostUsd: 0.015,
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    });
+
+    expect(report.totals.google.directions.requestCount).toBe(3);
+    expect(report.totals.google.directions.byUserType.driver).toBe(3);
+    expect(report.totals.google.directions.bySurface.driver_enroute_pickup.requestCount).toBe(2);
+    expect(report.totals.google.directions.bySurface.driver_active_trip.requestCount).toBe(1);
+    expect(report.totals.google.directions.byRouteScope.driver_to_pickup.billableUnits).toBe(2);
+    expect(report.totals.google.directions.byRouteScope.pickup_to_destination.billableUnits).toBe(1);
   });
 });
