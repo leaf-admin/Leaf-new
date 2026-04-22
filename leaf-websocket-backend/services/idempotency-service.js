@@ -13,6 +13,8 @@ class IdempotencyService {
     constructor() {
         this.redis = null;
         this.defaultTTL = 60; // 60 segundos (ajustável)
+        this.defaultJoinWaitMs = 1500;
+        this.defaultPollIntervalMs = 75;
     }
 
     /**
@@ -74,6 +76,124 @@ class IdempotencyService {
         }
     }
 
+    getIdempotencyStorageKeys(key) {
+        return {
+            idempotencyKey: `idempotency:${key}`,
+            cacheKey: `idempotency:result:${key}`
+        };
+    }
+
+    async getCachedResult(key) {
+        await this.ensureConnection();
+        const { cacheKey } = this.getIdempotencyStorageKeys(key);
+        const cachedResult = await this.redis.get(cacheKey);
+        if (!cachedResult) {
+            return null;
+        }
+
+        try {
+            return JSON.parse(cachedResult);
+        } catch (_parseError) {
+            return null;
+        }
+    }
+
+    async waitForCachedResult(key, {
+        waitMs = this.defaultJoinWaitMs,
+        pollIntervalMs = this.defaultPollIntervalMs
+    } = {}) {
+        const startedAt = Date.now();
+
+        while (Date.now() - startedAt < waitMs) {
+            const cachedResult = await this.getCachedResult(key);
+            if (cachedResult) {
+                return cachedResult;
+            }
+
+            const { idempotencyKey } = this.getIdempotencyStorageKeys(key);
+            const stillInFlight = await this.redis.exists(idempotencyKey);
+            if (!stillInFlight) {
+                return null;
+            }
+
+            await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
+        }
+
+        return null;
+    }
+
+    async beginRequest(key, options = {}) {
+        const {
+            ttl = null,
+            joinWaitMs = this.defaultJoinWaitMs,
+            pollIntervalMs = this.defaultPollIntervalMs,
+            allowJoin = true
+        } = options || {};
+
+        try {
+            await this.ensureConnection();
+
+            const operation = this.extractOperationFromKey(key);
+            const ttlToUse = ttl || this.defaultTTL;
+            const { idempotencyKey } = this.getIdempotencyStorageKeys(key);
+            const marker = JSON.stringify({
+                status: 'processing',
+                startedAt: new Date().toISOString(),
+                pid: process.pid
+            });
+
+            const result = await this.redis.set(idempotencyKey, marker, 'EX', ttlToUse, 'NX');
+            if (result === 'OK' || result === true) {
+                metrics.recordIdempotency(operation, 'miss');
+                return {
+                    isNew: true,
+                    disposition: 'started',
+                    cachedResult: null
+                };
+            }
+
+            const cachedResult = await this.getCachedResult(key);
+            if (cachedResult) {
+                metrics.recordIdempotency(operation, 'hit');
+                return {
+                    isNew: false,
+                    disposition: 'cached',
+                    cachedResult
+                };
+            }
+
+            if (allowJoin) {
+                const joinedResult = await this.waitForCachedResult(key, {
+                    waitMs: joinWaitMs,
+                    pollIntervalMs
+                });
+
+                if (joinedResult) {
+                    metrics.recordIdempotency(operation, 'joined');
+                    return {
+                        isNew: false,
+                        disposition: 'joined',
+                        cachedResult: joinedResult
+                    };
+                }
+            }
+
+            metrics.recordIdempotency(operation, 'inflight');
+            return {
+                isNew: false,
+                disposition: 'inflight',
+                cachedResult: null
+            };
+        } catch (error) {
+            logger.error(`❌ [Idempotency] Erro ao iniciar requisição idempotente: ${error.message}`);
+            return {
+                isNew: true,
+                disposition: 'started',
+                cachedResult: null
+            };
+        }
+    }
+
     /**
      * Armazenar resultado para requisição idempotente
      * @param {string} key - Chave de idempotency
@@ -84,7 +204,7 @@ class IdempotencyService {
         try {
             await this.ensureConnection();
             
-            const cacheKey = `idempotency:result:${key}`;
+            const { cacheKey, idempotencyKey } = this.getIdempotencyStorageKeys(key);
             const ttlToUse = ttl || this.defaultTTL;
             
             await this.redis.setex(
@@ -92,11 +212,23 @@ class IdempotencyService {
                 ttlToUse,
                 JSON.stringify(result)
             );
+            await this.redis.expire(idempotencyKey, ttlToUse).catch(() => null);
             
             logger.debug(`✅ [Idempotency] Resultado cached para: ${key}`);
         } catch (error) {
             logger.error(`❌ [Idempotency] Erro ao cachear resultado: ${error.message}`);
             // Não falhar se cache falhar
+        }
+    }
+
+    async releaseInflight(key) {
+        try {
+            await this.ensureConnection();
+            const { idempotencyKey } = this.getIdempotencyStorageKeys(key);
+            await this.redis.del(idempotencyKey);
+            logger.debug(`✅ [Idempotency] Lock em voo liberado: ${key}`);
+        } catch (error) {
+            logger.error(`❌ [Idempotency] Erro ao liberar lock em voo: ${error.message}`);
         }
     }
 
@@ -156,8 +288,7 @@ class IdempotencyService {
         try {
             await this.ensureConnection();
             
-            const idempotencyKey = `idempotency:${key}`;
-            const cacheKey = `idempotency:result:${key}`;
+            const { idempotencyKey, cacheKey } = this.getIdempotencyStorageKeys(key);
             
             await this.redis.del(idempotencyKey);
             await this.redis.del(cacheKey);

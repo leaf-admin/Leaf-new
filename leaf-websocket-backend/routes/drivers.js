@@ -2,7 +2,9 @@ const express = require('express');
 const router = express.Router();
 const redisPool = require('../utils/redis-pool');
 const driverLockManager = require('../services/driver-lock-manager');
+const PaymentService = require('../services/payment-service');
 const { logger } = require('../utils/logger');
+const paymentService = new PaymentService();
 
 // Firebase integration
 let firebaseConfig = null;
@@ -751,49 +753,134 @@ router.get('/api/drivers/:id/earnings', requireFirebase, async (req, res) => {
     // 3. Buscar viagens
     const bookingsSnapshot = await db.ref('bookings').orderByChild('driver').equalTo(id).once('value');
     const bookings = bookingsSnapshot.val() || {};
-    const driverBookings = Object.values(bookings).filter(b => b.status === 'COMPLETED');
+    const allDriverBookings = Object.values(bookings);
 
-    // Mapeamentos de datas locais (usando UTC/Timezone do servidor como base)
     const now = new Date();
-
-    // Zera horas de hoje
     const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const dailyWindowDays = 30;
+    const safeNumber = value => {
+      const numeric = Number(value);
+      return Number.isFinite(numeric) ? numeric : NaN;
+    };
 
-    // Corridas de Hoje
-    let tripsTodayCount = 0;
+    const toDateKey = date => {
+      const year = date.getFullYear();
+      const month = String(date.getMonth() + 1).padStart(2, '0');
+      const day = String(date.getDate()).padStart(2, '0');
+      return `${year}-${month}-${day}`;
+    };
 
-    // Ganhos diários dos últimos 7 dias
-    const dailyEarningsMap = {};
-    for (let i = 6; i >= 0; i--) {
+    const dailySeriesMap = {};
+    for (let i = dailyWindowDays - 1; i >= 0; i--) {
       const targetDate = new Date(startOfToday);
       targetDate.setDate(targetDate.getDate() - i);
-      const dayStr = String(targetDate.getDate()).padStart(2, '0');
-      dailyEarningsMap[dayStr] = {
-        day: dayStr,
+      const dateKey = toDateKey(targetDate);
+      dailySeriesMap[dateKey] = {
+        date: dateKey,
+        day: String(targetDate.getDate()).padStart(2, '0'),
         amount: 0,
+        grossAmount: 0,
+        feeAmount: 0,
+        completedCount: 0,
+        cancelledCount: 0,
         color: '#A5D6A7'
       };
     }
 
-    driverBookings.forEach(booking => {
-      const tripDate = booking.tripdate ? new Date(booking.tripdate) : null;
-      if (!tripDate) return;
+    let tripsTodayCount = 0;
+    let totalCompletedRides = 0;
+    let totalCancellations = 0;
+    let totalGrossAmount = 0;
+    let totalNetAmount = 0;
+    let totalFeeAmount = 0;
 
-      const tripAmount = parseFloat(booking.driver_share || booking.estimate * 0.85 || booking.fare || 0);
-
-      // É de hoje?
-      if (tripDate >= startOfToday) {
-        tripsTodayCount++;
+    allDriverBookings.forEach(booking => {
+      const status = String(booking?.status || '').toUpperCase();
+      const isCompleted = status === 'COMPLETED';
+      const isCancelled = status.includes('CANCEL');
+      if (!isCompleted && !isCancelled) {
+        return;
       }
 
-      // Adicionar no mapa dos 7 dias, se cair no range
-      const dayStr = String(tripDate.getDate()).padStart(2, '0');
-      if (dailyEarningsMap[dayStr]) {
-        dailyEarningsMap[dayStr].amount += tripAmount;
+      const rawDate =
+        booking?.tripdate ||
+        booking?.updatedAt ||
+        booking?.createdAt ||
+        booking?.created_on ||
+        booking?.timestamp ||
+        null;
+      const tripDate = rawDate ? new Date(rawDate) : null;
+      if (!tripDate || Number.isNaN(tripDate.getTime())) {
+        return;
+      }
+
+      const dateKey = toDateKey(tripDate);
+      const seriesSlot = dailySeriesMap[dateKey];
+      if (!seriesSlot) {
+        return;
+      }
+
+      if (isCancelled) {
+        seriesSlot.cancelledCount += 1;
+        totalCancellations += 1;
+        return;
+      }
+
+      const grossAmountRaw = safeNumber(
+        booking?.estimate ??
+          booking?.finalFare ??
+          booking?.fare ??
+          booking?.grossAmount ??
+          booking?.totalAmount ??
+          booking?.trip_cost ??
+          booking?.amount ??
+          booking?.customer_paid ??
+          booking?.finalPrice ??
+          0
+      );
+      const grossAmount = Number.isFinite(grossAmountRaw) ? Math.max(0, grossAmountRaw) : 0;
+      const tollFeeRaw = safeNumber(booking?.tollFee ?? booking?.toll_fee ?? booking?.pedagio ?? 0);
+      const tollFee = Number.isFinite(tollFeeRaw) ? Math.max(0, tollFeeRaw) : 0;
+
+      let netAmount = safeNumber(booking?.driverNetAmount ?? booking?.driver_share ?? booking?.netAmount);
+      let feeAmount = safeNumber(booking?.totalFees ?? booking?.feeAmount ?? booking?.fees?.total);
+
+      if (!Number.isFinite(netAmount) || !Number.isFinite(feeAmount)) {
+        const breakdown = paymentService.calculateFareBreakdownFromReais(grossAmount, tollFee);
+        if (!Number.isFinite(netAmount)) {
+          netAmount = safeNumber(breakdown?.driverNetAmount);
+        }
+        if (!Number.isFinite(feeAmount)) {
+          feeAmount = safeNumber(breakdown?.totalFees);
+        }
+      }
+
+      netAmount = Number.isFinite(netAmount) ? Math.max(0, netAmount) : 0;
+      feeAmount = Number.isFinite(feeAmount) ? Math.max(0, feeAmount) : 0;
+      const effectiveGrossAmount = grossAmount > 0 ? grossAmount : Math.max(0, netAmount + feeAmount);
+
+      seriesSlot.amount += netAmount;
+      seriesSlot.grossAmount += effectiveGrossAmount;
+      seriesSlot.feeAmount += feeAmount;
+      seriesSlot.completedCount += 1;
+
+      totalCompletedRides += 1;
+      totalGrossAmount += effectiveGrossAmount;
+      totalNetAmount += netAmount;
+      totalFeeAmount += feeAmount;
+
+      if (tripDate >= startOfToday) {
+        tripsTodayCount += 1;
       }
     });
 
-    const dailyEarningsArray = Object.values(dailyEarningsMap);
+    const dailySeries = Object.values(dailySeriesMap).sort((a, b) => String(a.date).localeCompare(String(b.date)));
+    const dailyEarningsArray = dailySeries.slice(-7).map(item => ({
+      day: item.day,
+      amount: item.amount,
+      color: item.color
+    }));
+    const effectiveFeePct = totalGrossAmount > 0 ? (totalFeeAmount / totalGrossAmount) * 100 : 0;
 
     const report = {
       balance: parseFloat(user.walletBalance || 0),
@@ -806,7 +893,15 @@ router.get('/api/drivers/:id/earnings', requireFirebase, async (req, res) => {
         year: driverCar.carYear || '',
         engine: driverCar.carType || ''
       } : null,
-      dailyEarnings: dailyEarningsArray
+      dailyEarnings: dailyEarningsArray,
+      dailySeries,
+      totalCompletedRides,
+      totalCancellations,
+      totalGrossAmount,
+      totalNetAmount,
+      totalFeeAmount,
+      effectiveFeePct,
+      dailySeriesWindowDays: dailyWindowDays
     };
 
     res.json({ success: true, report });

@@ -114,11 +114,27 @@ class ConnectionCleanupService {
             const now = Date.now();
             const timeout = this.config.heartbeatTimeout;
 
-            // Verificar todas as conexões ativas
-            const sockets = await this.io.sockets.fetchSockets();
-            
+            // Fast-path local: evita varredura cluster-wide em cada ciclo.
+            const connectedUsers = this.io?.connectedUsers instanceof Map
+                ? Array.from(this.io.connectedUsers.values()).filter(Boolean)
+                : [];
+            const sockets = connectedUsers.length > 0
+                ? connectedUsers
+                : await this.io.sockets.fetchSockets();
+
             for (const socket of sockets) {
-                const lastHeartbeat = socket.lastHeartbeat || socket.handshake.time || now;
+                // Aplicar regra apenas para motoristas (passageiro não envia heartbeat de localização)
+                if (socket?.userType !== 'driver') {
+                    continue;
+                }
+
+                const lastHeartbeatRaw = socket.lastHeartbeat || socket.lastDriverHeartbeatAt || socket.lastLocationAt || 0;
+                const lastHeartbeat = Number.parseInt(String(lastHeartbeatRaw || '0'), 10);
+                if (!Number.isFinite(lastHeartbeat) || lastHeartbeat <= 0) {
+                    // Sem heartbeat conhecido: não derrubar conexão por heurística agressiva.
+                    continue;
+                }
+
                 const timeSinceHeartbeat = now - lastHeartbeat;
 
                 if (timeSinceHeartbeat > timeout) {
@@ -245,9 +261,16 @@ class ConnectionCleanupService {
                 const lastUpdate = Number.parseInt(lastUpdateRaw || timestampRaw || '0', 10);
                 const stale = !Number.isFinite(lastUpdate) || lastUpdate <= 0 || (now - lastUpdate > staleThresholdMs);
 
-                if (!isOnline || !dispatchEligible || stale) {
+                const localSocket = this.io?.connectedUsers?.get?.(String(driverId));
+                const hasLocalConnectedDriver = Boolean(
+                    localSocket &&
+                    localSocket.userType === 'driver' &&
+                    localSocket.id
+                );
+                const shouldRemoveForStale = stale && !hasLocalConnectedDriver;
+                if (!isOnline || !dispatchEligible || shouldRemoveForStale) {
                     cleanupPipeline.zrem(eligibleDriverGeoKey, driverId);
-                    if (!isOnline || stale) {
+                    if (!isOnline || shouldRemoveForStale) {
                         cleanupPipeline.srem('online_drivers', driverId);
                     }
                     removed += 1;

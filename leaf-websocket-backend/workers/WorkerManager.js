@@ -37,6 +37,7 @@ class WorkerManager {
             processed: 0,
             failed: 0,
             retried: 0,
+            reclaimed: 0,
             dlq: 0,
             startTime: Date.now()
         };
@@ -48,6 +49,20 @@ class WorkerManager {
                 .map((value) => value.trim())
                 .filter(Boolean)
         );
+        this.pendingClaimEnabled = String(process.env.WORKER_PENDING_CLAIM_ENABLED || 'true') !== 'false';
+        this.pendingClaimMinIdleMs = Math.max(
+            1000,
+            Number.parseInt(process.env.WORKER_PENDING_CLAIM_MIN_IDLE_MS || '120000', 10) || 120000
+        );
+        this.pendingClaimBatchSize = Math.max(
+            1,
+            Number.parseInt(process.env.WORKER_PENDING_CLAIM_BATCH_SIZE || '20', 10) || 20
+        );
+        this.pendingClaimIntervalMs = Math.max(
+            1000,
+            Number.parseInt(process.env.WORKER_PENDING_CLAIM_INTERVAL_MS || '30000', 10) || 30000
+        );
+        this.pendingClaimLastRunAt = 0;
     }
 
     /**
@@ -348,6 +363,101 @@ class WorkerManager {
         }
     }
 
+    parseStreamFields(fields = []) {
+        const eventData = {};
+        for (let i = 0; i < fields.length; i += 2) {
+            eventData[fields[i]] = fields[i + 1];
+        }
+        return eventData;
+    }
+
+    async reclaimStalePendingMessages() {
+        if (!this.pendingClaimEnabled || !this.redis) {
+            return;
+        }
+
+        const now = Date.now();
+        if ((now - this.pendingClaimLastRunAt) < this.pendingClaimIntervalMs) {
+            return;
+        }
+        this.pendingClaimLastRunAt = now;
+
+        let startId = '0-0';
+        let totalClaimed = 0;
+        let totalAcked = 0;
+
+        try {
+            // Evita monopolizar o loop em cenários de backlog muito alto.
+            for (let attempt = 0; attempt < 5; attempt += 1) {
+                const result = await this.redis.call(
+                    'XAUTOCLAIM',
+                    this.streamName,
+                    this.groupName,
+                    this.consumerName,
+                    String(this.pendingClaimMinIdleMs),
+                    startId,
+                    'COUNT',
+                    String(this.pendingClaimBatchSize)
+                );
+
+                if (!Array.isArray(result) || result.length < 2) {
+                    break;
+                }
+
+                const nextStartId = typeof result[0] === 'string' ? result[0] : startId;
+                const claimedEntries = Array.isArray(result[1]) ? result[1] : [];
+
+                if (claimedEntries.length === 0) {
+                    break;
+                }
+
+                for (const entry of claimedEntries) {
+                    const eventId = entry?.[0];
+                    const fields = Array.isArray(entry?.[1]) ? entry[1] : [];
+                    if (!eventId || fields.length === 0) {
+                        continue;
+                    }
+
+                    const eventData = this.parseStreamFields(fields);
+                    const processResult = await this.processWithRetry(eventId, eventData);
+
+                    if (processResult.success || processResult.skipped || processResult.dlq) {
+                        await this.redis.xack(this.streamName, this.groupName, eventId);
+                        totalAcked += 1;
+                    }
+
+                    totalClaimed += 1;
+                }
+
+                startId = nextStartId;
+                if (claimedEntries.length < this.pendingClaimBatchSize) {
+                    break;
+                }
+            }
+
+            if (totalClaimed > 0) {
+                this.stats.reclaimed += totalClaimed;
+                logStructured('warn', 'Mensagens pendentes órfãs foram recuperadas', {
+                    service: 'worker-manager',
+                    consumerName: this.consumerName,
+                    streamName: this.streamName,
+                    groupName: this.groupName,
+                    minIdleMs: this.pendingClaimMinIdleMs,
+                    claimed: totalClaimed,
+                    acked: totalAcked
+                });
+            }
+        } catch (error) {
+            logStructured('warn', 'Falha ao recuperar mensagens pendentes órfãs', {
+                service: 'worker-manager',
+                consumerName: this.consumerName,
+                streamName: this.streamName,
+                groupName: this.groupName,
+                error: error.message
+            });
+        }
+    }
+
     /**
      * Consumir eventos do stream
      */
@@ -357,6 +467,8 @@ class WorkerManager {
         }
 
         try {
+            await this.reclaimStalePendingMessages();
+
             // Ler eventos do Consumer Group
             const readClient = this.blockingRedis || this.redis;
             const results = await readClient.xreadgroup(
@@ -373,11 +485,7 @@ class WorkerManager {
             const [, events] = results[0]; // [streamName, [event1, event2, ...]]
 
             for (const [eventId, fields] of events) {
-                // Converter campos array para objeto
-                const eventData = {};
-                for (let i = 0; i < fields.length; i += 2) {
-                    eventData[fields[i]] = fields[i + 1];
-                }
+                const eventData = this.parseStreamFields(fields);
 
                 // Processar com retry
                 const result = await this.processWithRetry(eventId, eventData);

@@ -2,6 +2,7 @@ const {
     isRideExtensionFlowEnabled,
     isOperationalReassignmentEnabled
 } = require('../utils/ride-lifecycle-feature-flags');
+const { buildActiveRideSnapshotForUser } = require('./active-ride-sync-utils');
 
 function registerSocketActiveRideHandlers({
     socket,
@@ -11,6 +12,50 @@ function registerSocketActiveRideHandlers({
     logError
 }) {
     // ==================== NOVOS EVENTOS - GERENCIAMENTO DE CORRIDA EM ANDAMENTO ====================
+
+    socket.on('syncActiveRide', async (data = {}) => {
+        try {
+            const userId = socket.userId || data.uid || data.userId;
+            const userType = socket.userType || data.userType || data.usertype;
+
+            if (!userId || !userType) {
+                socket.emit('activeRideSync', {
+                    success: false,
+                    code: 'NOT_AUTHENTICATED',
+                    message: 'Usuário não autenticado para sincronização de corrida ativa'
+                });
+                return;
+            }
+
+            const redis = redisPool.getConnection();
+            if (redis.status !== 'ready' && redis.status !== 'connect') {
+                await redis.connect().catch(() => { });
+            }
+
+            const activeRideSnapshot = await buildActiveRideSnapshotForUser(redis, userId, userType);
+
+            socket.emit('activeRideSync', {
+                success: true,
+                source: 'explicit_sync',
+                ...activeRideSnapshot,
+                syncedAt: new Date().toISOString()
+            });
+        } catch (error) {
+            logStructured('error', 'Erro ao sincronizar corrida ativa para reconexão', {
+                service: 'websocket',
+                socketId: socket.id,
+                userId: socket.userId || 'unknown',
+                userType: socket.userType || 'unknown',
+                error: error.message
+            });
+
+            socket.emit('activeRideSync', {
+                success: false,
+                code: 'SYNC_FAILED',
+                message: 'Não foi possível sincronizar a corrida ativa agora'
+            });
+        }
+    });
 
     // Reportar problema durante corrida
     socket.on('reportProblem', async (data) => {

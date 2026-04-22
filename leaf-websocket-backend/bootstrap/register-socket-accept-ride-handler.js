@@ -1,3 +1,21 @@
+const PaymentService = require('../services/payment-service');
+const pricingH3ReadModelService = require('../services/pricing-h3-read-model-service');
+const { resolveAcceptRidePayload, toFiniteNumber } = require('../utils/accept-ride-payload');
+const { metrics } = require('../utils/prometheus-metrics');
+const { recordDispatchWaveAcceptance } = require('../services/dispatch-wave-trace-service');
+
+const paymentService = new PaymentService();
+
+function mapAcceptRideReason(errorMessage = '') {
+    const normalized = String(errorMessage || '').toLowerCase();
+    if (normalized.includes('outra corrida')) return 'driver_already_busy';
+    if (normalized.includes('não encontrada') || normalized.includes('nao encontrada')) return 'booking_not_found';
+    if (normalized.includes('já foi aceita') || normalized.includes('nao esta mais disponivel') || normalized.includes('não está mais disponível')) {
+        return 'duplicate_rejected';
+    }
+    return 'command_error';
+}
+
 function registerSocketAcceptRideHandler({
     socket,
     io,
@@ -25,6 +43,8 @@ function registerSocketAcceptRideHandler({
     socket.on('acceptRide', async (data) => {
         // ✅ OBSERVABILIDADE: Gerar traceId no início do handler
         const traceId = extractTraceIdFromEvent(data, socket);
+        let outerIdempotencyKey = null;
+        let outerIdempotencyOwner = false;
         await traceContext.runWithTraceId(traceId, async () => {
             try {
                 logStructured('info', 'acceptRide iniciado', {
@@ -33,32 +53,11 @@ function registerSocketAcceptRideHandler({
                 });
 
                 const startTime = Date.now();
+                const hotpathPath = 'accept_ride';
 
-                // ✅ NOVO: Rate Limiting
                 const driverId = socket.userId || socket.id;
                 const correlationId = data?.correlationId || data?.bookingId;
                 const metadata = getSocketMetadata(socket);
-                const rateLimitCheck = await rateLimiterService.checkRateLimit(driverId, 'acceptRide', {
-                    ip: metadata.ip
-                });
-
-                if (!rateLimitCheck.allowed) {
-                    socket.emit('acceptRideError', {
-                        error: 'Muitas requisições',
-                        message: `Você excedeu o limite de ${rateLimitCheck.limit} requisições por minuto. Tente novamente em ${Math.ceil((rateLimitCheck.resetAt - Date.now()) / 1000)} segundos.`,
-                        code: 'RATE_LIMIT_EXCEEDED',
-                        limit: rateLimitCheck.limit,
-                        remaining: rateLimitCheck.remaining,
-                        resetAt: rateLimitCheck.resetAt
-                    });
-                    logStructured('warn', 'acceptRide bloqueado por rate limiter', {
-                        service: 'websocket',
-                        driverId,
-                        limit: rateLimitCheck.limit,
-                        window: '1min'
-                    });
-                    return;
-                }
 
                 if (process.env.NODE_ENV === 'development' || process.env.DEBUG_WEBSOCKET === 'true') {
                     logStructured('debug', 'Aceitar corrida', {
@@ -109,8 +108,16 @@ function registerSocketAcceptRideHandler({
                     'acceptRide',
                     bookingIdToUse
                 );
+                outerIdempotencyKey = idempotencyKey;
 
-                const idempotencyCheck = await idempotencyService.checkAndSet(idempotencyKey);
+                const idempotencyCheck = await idempotencyService.beginRequest(idempotencyKey, {
+                    joinWaitMs: Number.parseInt(
+                        process.env.IDEMPOTENCY_ACCEPT_RIDE_JOIN_WAIT_MS
+                        || process.env.IDEMPOTENCY_JOIN_WAIT_MS
+                        || '8000',
+                        10
+                    )
+                });
 
                 if (!idempotencyCheck.isNew) {
                     // Requisição duplicada - retornar resultado cached ou erro
@@ -124,6 +131,8 @@ function registerSocketAcceptRideHandler({
                             action: 'return_cached'
                         });
                         socket.emit('rideAccepted', idempotencyCheck.cachedResult);
+                        metrics.recordHotpathReason(hotpathPath, 'duplicate_joined');
+                        metrics.recordHotpathLatency(hotpathPath, Math.max(0, (Date.now() - startTime) / 1000), true);
                         return;
                     } else {
                         // Requisição duplicada mas sem resultado cached (ainda processando)
@@ -139,8 +148,35 @@ function registerSocketAcceptRideHandler({
                             driverId,
                             idempotencyKey
                         });
+                        metrics.recordHotpathReason(hotpathPath, 'duplicate_rejected');
+                        metrics.recordHotpathLatency(hotpathPath, Math.max(0, (Date.now() - startTime) / 1000), false);
                         return;
                     }
+                }
+                outerIdempotencyOwner = true;
+
+                const rateLimitCheck = await rateLimiterService.checkRateLimit(driverId, 'acceptRide', {
+                    ip: metadata.ip
+                });
+
+                if (!rateLimitCheck.allowed) {
+                    socket.emit('acceptRideError', {
+                        error: 'Muitas requisições',
+                        message: `Você excedeu o limite de ${rateLimitCheck.limit} requisições por minuto. Tente novamente em ${Math.ceil((rateLimitCheck.resetAt - Date.now()) / 1000)} segundos.`,
+                        code: 'RATE_LIMIT_EXCEEDED',
+                        limit: rateLimitCheck.limit,
+                        remaining: rateLimitCheck.remaining,
+                        resetAt: rateLimitCheck.resetAt
+                    });
+                    logStructured('warn', 'acceptRide bloqueado por rate limiter', {
+                        service: 'websocket',
+                        driverId,
+                        limit: rateLimitCheck.limit,
+                        window: '1min'
+                    });
+                    outerIdempotencyOwner = false;
+                    await idempotencyService.releaseInflight(idempotencyKey);
+                    return;
                 }
 
                 // ✅ REFATORAÇÃO: Usar AcceptRideCommand
@@ -162,7 +198,6 @@ function registerSocketAcceptRideHandler({
                 });
 
                 // ✅ MÉTRICAS: Preparar para registrar corrida aceita
-                const { metrics } = require('../utils/prometheus-metrics');
                 const city = data.city || 'unknown';
                 const acceptStartTime = Date.now(); // Para calcular tempo até aceite
 
@@ -181,7 +216,6 @@ function registerSocketAcceptRideHandler({
 
                     // ✅ MÉTRICAS: Registrar latência do command
                     const commandLatency = (Date.now() - acceptStartTime) / 1000;
-                    metrics.recordCommand('accept_ride', commandLatency, result.success);
 
                     // ✅ MÉTRICAS: Registrar corrida aceita
                     if (result.success) {
@@ -192,8 +226,6 @@ function registerSocketAcceptRideHandler({
                     }
                 } catch (error) {
                     endSpanError(commandSpan, error);
-                    const commandLatency = (Date.now() - acceptStartTime) / 1000;
-                    metrics.recordCommand('accept_ride', commandLatency, false);
                     throw error;
                 }
 
@@ -208,13 +240,57 @@ function registerSocketAcceptRideHandler({
                     socket.emit('acceptRideError', {
                         error: result.error || 'Erro ao processar aceitação'
                     });
+                    metrics.recordHotpathReason(hotpathPath, mapAcceptRideReason(result.error));
+                    metrics.recordHotpathStageLatency(hotpathPath, 'command', Math.max(0, (Date.now() - acceptStartTime) / 1000), false);
+                    metrics.recordHotpathLatency(hotpathPath, Math.max(0, (Date.now() - startTime) / 1000), false);
+                    if (outerIdempotencyOwner && outerIdempotencyKey) {
+                        outerIdempotencyOwner = false;
+                        await idempotencyService.releaseInflight(outerIdempotencyKey);
+                    }
                     return;
                 }
 
                 // Command executado com sucesso
-                const { bookingId: resultBookingId, driverId: resultDriverId, customerId, event, pickupLocation } = result.data;
+                const { bookingId: resultBookingId, driverId: resultDriverId, customerId, event } = result.data;
+                const {
+                    pickupLocation,
+                    destinationLocation,
+                    estimatedFare,
+                    driverAcceptedLocation,
+                    driverDistanceToPickupKm,
+                    estimatedArrivalToPickupMin
+                } = await resolveAcceptRidePayload(redisPool.getConnection(), bookingIdToUse, result.data);
+
+                // Encerrar imediatamente a busca desta corrida e liberar motoristas concorrentes.
+                // Mantém o lock do motorista vencedor para evitar corrida com outras ofertas.
+                setImmediate(async () => {
+                    try {
+                        const GradualRadiusExpander = require('../services/gradual-radius-expander');
+                        const expander = new GradualRadiusExpander(io);
+                        await expander.stopSearch(bookingIdToUse, {
+                            preserveDriverId: driverId
+                        });
+                    } catch (stopSearchError) {
+                        logStructured('warn', 'acceptRide: falha ao encerrar busca pós-aceite', {
+                            driverId,
+                            bookingId: bookingIdToUse,
+                            eventType: 'acceptRide',
+                            error: stopSearchError.message
+                        });
+                    }
+                });
 
                 let eventPublished = false;
+                if (event?.data) {
+                    if (!event.data.metadata || typeof event.data.metadata !== 'object') {
+                        event.data.metadata = {};
+                    }
+                    if (!event.data.metadata.socketDelivery || typeof event.data.metadata.socketDelivery !== 'object') {
+                        event.data.metadata.socketDelivery = {};
+                    }
+                    event.data.metadata.socketDelivery.driverRideAcceptedEmitted = true;
+                    event.data.metadata.socketDelivery.passengerRideAcceptedEmitted = Boolean(customerId);
+                }
 
                 // ✅ REFATORAÇÃO: Publicar evento no EventBus (listeners vão notificar passageiro e motorista)
                 if (event) {
@@ -246,8 +322,6 @@ function registerSocketAcceptRideHandler({
                             event.data.metadata.spanId = eventSpanContext.spanId;
                         }
 
-                        // ✅ MÉTRICAS: Registrar evento publicado
-                        metrics.recordEventPublished('ride.accepted');
                         eventPublished = true;
 
                         endSpanSuccess(eventSpan, {
@@ -287,13 +361,103 @@ function registerSocketAcceptRideHandler({
                     // Não bloquear aceitação se persistência falhar
                 }
 
+                let driverRedisProfile = {};
+                try {
+                    driverRedisProfile = await redisPool.getConnection().hgetall(`driver:${driverId}`);
+                } catch (_driverProfileError) {
+                    driverRedisProfile = {};
+                }
+
+                const driverNamePayload = String(
+                    driverData?.driver?.name ||
+                    driverData?.driverName ||
+                    driverRedisProfile?.name ||
+                    driverRedisProfile?.driverName ||
+                    driverRedisProfile?.displayName ||
+                    socket?.driverName ||
+                    'Motorista Leaf'
+                ).trim();
+                const driverVehicleModel = String(
+                    driverData?.driver?.vehicle?.model ||
+                    driverData?.vehicle?.model ||
+                    driverData?.driver?.vehicle?.type ||
+                    driverData?.vehicle?.type ||
+                    driverData?.carType ||
+                    driverRedisProfile?.vehicleModel ||
+                    driverRedisProfile?.model ||
+                    driverRedisProfile?.carModel ||
+                    driverRedisProfile?.carType ||
+                    driverRedisProfile?.vehicleType ||
+                    driverRedisProfile?.vehicleCategory ||
+                    socket?.vehicleModel ||
+                    ''
+                ).trim();
+                const driverVehiclePlate = String(
+                    driverData?.driver?.vehicle?.plate ||
+                    driverData?.vehicle?.plate ||
+                    driverData?.vehiclePlate ||
+                    driverData?.carPlate ||
+                    driverRedisProfile?.vehiclePlate ||
+                    driverRedisProfile?.vehicleNumber ||
+                    driverRedisProfile?.carPlate ||
+                    socket?.vehiclePlate ||
+                    ''
+                ).trim();
+                const acceptedLat = toFiniteNumber(
+                    driverData?.driver?.location?.lat ??
+                    driverData?.location?.lat ??
+                    driverAcceptedLocation?.lat
+                );
+                const acceptedLng = toFiniteNumber(
+                    driverData?.driver?.location?.lng ??
+                    driverData?.location?.lng ??
+                    driverAcceptedLocation?.lng
+                );
+                const acceptedLocation = (acceptedLat !== null && acceptedLng !== null)
+                    ? { lat: acceptedLat, lng: acceptedLng }
+                    : null;
+
+                let estimatedBreakdown = null;
+                if (Number.isFinite(estimatedFare) && estimatedFare >= 0) {
+                    estimatedBreakdown = paymentService.calculateFareBreakdownFromReais(estimatedFare, 0);
+                }
+
                 // Preparar resposta de sucesso para driver
                 const acceptRideResponse = {
                     success: true,
                     bookingId: bookingIdToUse,
                     driverId: driverId,
                     message: 'Corrida aceita com sucesso',
-                    timestamp: new Date().toISOString()
+                    timestamp: new Date().toISOString(),
+                    pickupLocation: pickupLocation || null,
+                    destinationLocation: destinationLocation || null,
+                    estimatedFare: Number.isFinite(estimatedFare) ? estimatedFare : null,
+                    driverDistanceToPickupKm: Number.isFinite(driverDistanceToPickupKm)
+                        ? driverDistanceToPickupKm
+                        : null,
+                    estimatedArrivalToPickupMin: Number.isFinite(estimatedArrivalToPickupMin)
+                        ? estimatedArrivalToPickupMin
+                        : null,
+                    ...(estimatedBreakdown ? {
+                        estimatedOperationalFee: estimatedBreakdown.operationalFee,
+                        estimatedPaymentIntermediationFee: estimatedBreakdown.paymentIntermediationFee,
+                        estimatedTotalFees: estimatedBreakdown.totalFees,
+                        estimatedDriverNetAmount: estimatedBreakdown.driverNetAmount
+                    } : {}),
+                    driver: {
+                        id: driverId,
+                        name: driverNamePayload || 'Motorista Leaf',
+                        vehicle: {
+                            model: driverVehicleModel,
+                            plate: driverVehiclePlate
+                        },
+                        ...(acceptedLocation ? { location: acceptedLocation } : {})
+                    },
+                    ...(acceptedLocation ? { location: acceptedLocation } : {}),
+                    vehicle: {
+                        model: driverVehicleModel,
+                        plate: driverVehiclePlate
+                    }
                 };
 
                 // ✅ Emitir confirmação IMEDIATAMENTE para o motorista que solicitou o aceite
@@ -308,6 +472,17 @@ function registerSocketAcceptRideHandler({
                         customerId,
                         message: 'Motorista aceitou sua corrida',
                         timestamp: new Date().toISOString(),
+                        pickupLocation: pickupLocation || null,
+                        destinationLocation: destinationLocation || null,
+                        driverDistanceToPickupKm: Number.isFinite(driverDistanceToPickupKm)
+                            ? driverDistanceToPickupKm
+                            : null,
+                        estimatedArrivalToPickupMin: Number.isFinite(estimatedArrivalToPickupMin)
+                            ? estimatedArrivalToPickupMin
+                            : null,
+                        driver: acceptRideResponse.driver,
+                        ...(acceptedLocation ? { location: acceptedLocation } : {}),
+                        vehicle: acceptRideResponse.vehicle,
                         source: eventPublished ? 'listener_plus_fallback' : 'direct_fallback'
                     });
                 } else {
@@ -324,6 +499,10 @@ function registerSocketAcceptRideHandler({
                         throw new Error('redisPool indisponível no acceptRide');
                     }
                     const redis = redisPool.getConnection();
+                    await recordDispatchWaveAcceptance(redis, bookingIdToUse, {
+                        driverId,
+                        timestampMs: Date.now()
+                    });
                     const bookingData = await redis.hgetall(`booking:${bookingIdToUse}`);
                     if (bookingData && Object.keys(bookingData).length > 0) {
                         // Preparar dados para o Hash de corridas ativas (mantendo compatibilidade legada)
@@ -373,6 +552,24 @@ function registerSocketAcceptRideHandler({
                             });
                         }
 
+                        await pricingH3ReadModelService.applyBookingSnapshot(redis, {
+                            bookingId: bookingIdToUse,
+                            ...activeBookingData
+                        }).catch(() => null);
+
+                        const driverState = await redis.hgetall(`driver:${driverId}`);
+                        const driverLat = Number(driverState?.lat);
+                        const driverLng = Number(driverState?.lng);
+                        if (Number.isFinite(driverLat) && Number.isFinite(driverLng)) {
+                            await pricingH3ReadModelService.applyDriverSnapshot(redis, {
+                                driverId,
+                                lat: driverLat,
+                                lng: driverLng,
+                                isOnline: String(driverState?.isOnline || 'true') === 'true',
+                                available: false
+                            }).catch(() => null);
+                        }
+
                         // ✅ Sincronizar activeBookings
                         if (io.activeBookings) {
                             io.activeBookings.set(bookingIdToUse, {
@@ -392,6 +589,7 @@ function registerSocketAcceptRideHandler({
 
                 // ✅ Cachear resultado para idempotency
                 await idempotencyService.cacheResult(idempotencyKey, acceptRideResponse);
+                outerIdempotencyOwner = false;
 
                 try {
                     // FASE 10: Registrar fim de match e aceitação para métricas
@@ -408,6 +606,8 @@ function registerSocketAcceptRideHandler({
 
                 // ✅ NOTIFICAÇÃO JÁ FOI ENVIADA PARA PASSAGEIRO PELOS LISTENERS via EventBus
                 const totalLatency = Date.now() - startTime;
+                metrics.recordHotpathStageLatency(hotpathPath, 'command', Math.max(0, (Date.now() - acceptStartTime) / 1000), true);
+                metrics.recordHotpathLatency(hotpathPath, Math.max(0, totalLatency / 1000), true);
                 logStructured('info', 'acceptRide concluído com sucesso (Emissão Adiantada)', {
                     driverId,
                     bookingId: bookingIdToUse,
@@ -416,6 +616,10 @@ function registerSocketAcceptRideHandler({
                 });
 
             } catch (error) {
+                if (outerIdempotencyOwner && outerIdempotencyKey) {
+                    outerIdempotencyOwner = false;
+                    await idempotencyService.releaseInflight(outerIdempotencyKey).catch(() => null);
+                }
                 console.error('[ACCEPT_RIDE_FATAL] Error not formatted properly:', error);
 
                 let safeErrorMsg = 'Erro desconhecido';
@@ -434,6 +638,7 @@ function registerSocketAcceptRideHandler({
                     stack: error?.stack || null,
                     rawError: safeErrorMsg
                 });
+                metrics.recordHotpathReason('accept_ride', 'unexpected_error');
                 socket.emit('acceptRideError', { error: 'Erro ao processar aceitação' });
             }
         });

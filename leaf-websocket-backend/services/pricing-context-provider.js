@@ -1,6 +1,7 @@
 const h3 = require('h3-js');
 const h3MapService = require('./h3-map-service');
 const pricingContextStore = require('./pricing-context-store');
+const pricingH3ReadModelService = require('./pricing-h3-read-model-service');
 
 const PRICING_H3_RESOLUTION = Number.parseInt(process.env.PRICING_H3_RESOLUTION || '9', 10);
 const PRICING_H3_RING_SIZE = Number.parseInt(process.env.PRICING_H3_RING_SIZE || '1', 10);
@@ -10,6 +11,15 @@ const PRICING_H3_BASELINE_RING_SIZE = Math.max(
 );
 const BASELINE_ALPHA = clamp(process.env.PRICING_BASELINE_ALPHA || 0.18, 0.05, 0.5);
 const STATE_CACHE_TTL_MS = Number.parseInt(process.env.PRICING_STATE_CACHE_TTL_MS || String(20 * 60 * 1000), 10);
+const SNAPSHOT_CACHE_TTL_MS = Math.max(
+  250,
+  Number.parseInt(process.env.PRICING_SNAPSHOT_CACHE_TTL_MS || '1500', 10) || 1500
+);
+const PRICING_USE_H3_READMODEL = String(process.env.PRICING_USE_H3_READMODEL || 'true').toLowerCase() !== 'false';
+const PRICING_READMODEL_MAX_STALE_MS = Math.max(
+  1000,
+  Number.parseInt(process.env.PRICING_H3_READMODEL_MAX_STALE_MS || '15000', 10) || 15000
+);
 const HISTORY_WINDOW_MS = pricingContextStore.DEFAULT_HISTORY_WINDOW_MS;
 const HISTORY_MAX_POINTS = Number.parseInt(process.env.PRICING_HISTORY_MAX_POINTS || '20', 10);
 
@@ -52,6 +62,7 @@ const DEFAULT_ZONE_BASELINES = {
 };
 
 const stateCache = new Map();
+const snapshotCache = new Map();
 
 function clamp(value, min, max) {
   const parsed = Number(value);
@@ -184,6 +195,48 @@ function estimatePickupEtaMin({ pickupLocation, drivers = [], zoneBaseline }) {
   return clamp(etaMin, 2, 12);
 }
 
+function estimatePickupEtaMinFromCells({ pickupLocation, trackedCells = [], cellMap, zoneBaseline }) {
+  const candidates = trackedCells
+    .map((cell) => {
+      const metrics = cellMap.get(cell)?.metrics || {};
+      const availableDrivers = Number(metrics.availableDrivers || 0);
+      if (availableDrivers <= 0) return null;
+
+      const [lat, lng] = h3.cellToLatLng(cell);
+      return {
+        availableDrivers,
+        distanceKm: haversineDistanceKm(
+          pickupLocation.lat,
+          pickupLocation.lng,
+          lat,
+          lng
+        )
+      };
+    })
+    .filter((candidate) => Number.isFinite(candidate?.distanceKm))
+    .sort((left, right) => left.distanceKm - right.distanceKm);
+
+  if (!candidates.length) {
+    return clamp(zoneBaseline.pickupEtaMin + 3, 3, 12);
+  }
+
+  const weightedDistances = [];
+  candidates.slice(0, 3).forEach((candidate) => {
+    const weight = Math.max(1, Math.min(3, Math.round(candidate.availableDrivers)));
+    for (let index = 0; index < weight; index += 1) {
+      weightedDistances.push(candidate.distanceKm);
+    }
+  });
+
+  const avgDistanceKm = average(
+    weightedDistances.length ? weightedDistances : candidates.slice(0, 3).map((candidate) => candidate.distanceKm),
+    0
+  );
+  const effectiveSpeedKmh = 22;
+  const etaMin = 1.2 + ((avgDistanceKm / effectiveSpeedKmh) * 60);
+  return clamp(etaMin, 2, 12);
+}
+
 function deriveBehaviorRates({ activeRequests5m, idleDrivers, busyDrivers, avgPickupEtaMin }) {
   const pressureGap = Math.max(0, activeRequests5m - idleDrivers);
   const demandShare = safeDivide(activeRequests5m, activeRequests5m + idleDrivers + busyDrivers, 0);
@@ -261,11 +314,21 @@ function buildDerivedCurrent({ trackedCells, cellMap, snapshot, pickupLocation, 
   const activeRequests5m = trackedMetrics.reduce((sum, cell) => sum + (cell.metrics?.openRequests || 0), 0);
   const idleDrivers = trackedMetrics.reduce((sum, cell) => sum + (cell.metrics?.availableDrivers || 0), 0);
   const busyDrivers = trackedMetrics.reduce((sum, cell) => sum + (cell.metrics?.busyDrivers || 0), 0);
-  const avgPickupEtaMin = estimatePickupEtaMin({
-    pickupLocation,
-    drivers: snapshot.drivers.filter((driver) => trackedCells.includes(h3.latLngToCell(driver.location.lat, driver.location.lng, PRICING_H3_RESOLUTION))),
-    zoneBaseline
-  });
+  const trackedDrivers = Array.isArray(snapshot?.drivers)
+    ? snapshot.drivers.filter((driver) => trackedCells.includes(h3.latLngToCell(driver.location.lat, driver.location.lng, PRICING_H3_RESOLUTION)))
+    : [];
+  const avgPickupEtaMin = trackedDrivers.length > 0
+    ? estimatePickupEtaMin({
+        pickupLocation,
+        drivers: trackedDrivers,
+        zoneBaseline
+      })
+    : estimatePickupEtaMinFromCells({
+        pickupLocation,
+        trackedCells,
+        cellMap,
+        zoneBaseline
+      });
   const traffic = deriveTrafficMetrics({ routeDistanceKm, routeDurationSecs, zoneBaseline });
   const behavior = deriveBehaviorRates({
     activeRequests5m,
@@ -307,6 +370,30 @@ function cleanupStateCache(nowMs = Date.now()) {
       stateCache.delete(key);
     }
   }
+}
+
+function cleanupSnapshotCache(nowMs = Date.now()) {
+  for (const [key, value] of snapshotCache.entries()) {
+    if (!value?.expiresAt || value.expiresAt <= nowMs) {
+      snapshotCache.delete(key);
+    }
+  }
+}
+
+function getCachedSnapshot(originCell, nowMs = Date.now()) {
+  cleanupSnapshotCache(nowMs);
+  const cached = snapshotCache.get(originCell);
+  if (!cached || cached.expiresAt <= nowMs) {
+    return null;
+  }
+  return cached;
+}
+
+function setCachedSnapshot(originCell, payload, nowMs = Date.now()) {
+  snapshotCache.set(originCell, {
+    ...payload,
+    expiresAt: nowMs + SNAPSHOT_CACHE_TTL_MS
+  });
 }
 
 function getCachedState(originCell, nowIso) {
@@ -422,11 +509,17 @@ async function buildDerivedPricingContext({
   routeDurationSecs,
   explicitPricingContext = null
 }) {
+  const providerStartedAt = Date.now();
+  const perfBreakdownMs = {};
+  const recordPerf = (key, startedAt) => {
+    perfBreakdownMs[key] = Math.max(0, Date.now() - startedAt);
+  };
   const pickupLat = toNumber(pickupLocation?.lat, NaN);
   const pickupLng = toNumber(pickupLocation?.lng, NaN);
   const nowIso = new Date().toISOString();
 
   if (!redis || !Number.isFinite(pickupLat) || !Number.isFinite(pickupLng)) {
+    perfBreakdownMs.total = Math.max(0, Date.now() - providerStartedAt);
     return {
       pricingContext: mergePricingContext({
         trip: {
@@ -442,7 +535,20 @@ async function buildDerivedPricingContext({
           }
         }
       }, explicitPricingContext || {}),
-      metadata: null
+      metadata: {
+        perfBreakdownMs,
+        originCell: null,
+        resolution: PRICING_H3_RESOLUTION,
+        nowIso,
+        zoneType: null,
+        trackedCells: [],
+        degradedNeighborCount: 0,
+        derivedCurrent: {},
+        derivedBaseline: {},
+        baselineSource: 'unavailable',
+        stateSource: 'unavailable',
+        historySource: 'unavailable'
+      }
     };
   }
 
@@ -453,23 +559,77 @@ async function buildDerivedPricingContext({
   const bbox = buildBBoxFromCells(baselineDisk.length ? baselineDisk : trackedCells);
   const zoneType = resolveZoneType({ pickupLocation, destinationLocation });
   const zoneBaseline = getZoneBaseline(zoneType);
+  const redisStateStartedAt = Date.now();
   const redisSnapshots = await loadRedisPricingState(redis, originCell, nowIso);
+  recordPerf('loadRedisPricingState', redisStateStartedAt);
+  const nowMs = Date.parse(nowIso) || Date.now();
+  const cachedSnapshot = getCachedSnapshot(originCell, nowMs);
 
-  const snapshot = bbox
-    ? await h3MapService.collectSnapshot(redis, bbox)
-    : { drivers: [], openRequests: [], activeTrips: [] };
-  const aggregated = bbox
-    ? h3MapService.aggregateCells({
-        bbox,
-        resolution: PRICING_H3_RESOLUTION,
-        surface: 'driver',
-        includeEmpty: true,
-        includeBoundary: false,
-        snapshot
-      })
-    : { cells: [] };
+  let snapshot = cachedSnapshot?.snapshot || null;
+  let aggregated = cachedSnapshot?.aggregated || null;
+  let readModelMetadata = null;
+
+  if (!aggregated && PRICING_USE_H3_READMODEL && bbox) {
+    const readModelStartedAt = Date.now();
+    const readModelSnapshot = await pricingH3ReadModelService.getAggregatedCells(redis, {
+      cells: baselineDisk.length ? baselineDisk : trackedCells,
+      resolution: PRICING_H3_RESOLUTION,
+      maxStaleMs: PRICING_READMODEL_MAX_STALE_MS
+    });
+    recordPerf('loadReadModel', readModelStartedAt);
+
+    if (readModelSnapshot?.usable) {
+      aggregated = { cells: readModelSnapshot.cells };
+      readModelMetadata = {
+        source: 'h3_read_model',
+        touchedCells: readModelSnapshot.touchedCells,
+        staleCells: readModelSnapshot.staleCells,
+        lastMutationAt: readModelSnapshot.lastMutationAt
+      };
+    } else {
+      readModelMetadata = {
+        source: 'fallback_full_snapshot',
+        touchedCells: readModelSnapshot?.touchedCells || 0,
+        staleCells: readModelSnapshot?.staleCells || 0,
+        lastMutationAt: readModelSnapshot?.lastMutationAt || null,
+        reason: readModelSnapshot?.reason || 'unavailable'
+      };
+    }
+  }
+
+  if (!aggregated) {
+    if (!snapshot) {
+      const snapshotStartedAt = Date.now();
+      snapshot = bbox
+        ? await h3MapService.collectSnapshot(redis, bbox)
+        : { drivers: [], openRequests: [], activeTrips: [] };
+      recordPerf('collectSnapshot', snapshotStartedAt);
+    }
+
+    const aggregateStartedAt = Date.now();
+    aggregated = bbox
+      ? h3MapService.aggregateCells({
+          bbox,
+          resolution: PRICING_H3_RESOLUTION,
+          surface: 'driver',
+          includeEmpty: true,
+          includeBoundary: false,
+          snapshot
+        })
+      : { cells: [] };
+    recordPerf('aggregateCells', aggregateStartedAt);
+  }
+
+  if (!cachedSnapshot) {
+    setCachedSnapshot(originCell, {
+      bbox,
+      snapshot,
+      aggregated
+    }, nowMs);
+  }
 
   const cellMap = buildCellMap(aggregated.cells);
+  const deriveStartedAt = Date.now();
   const derivedCurrent = buildDerivedCurrent({
     trackedCells,
     cellMap,
@@ -486,6 +646,7 @@ async function buildDerivedPricingContext({
   });
   const cachedState = redisSnapshots.state || getCachedState(originCell, nowIso);
   const degradedNeighborCount = countDegradedNeighbors({ originCell, cellMap });
+  recordPerf('deriveContext', deriveStartedAt);
 
   const derivedContext = {
     trip: {
@@ -509,6 +670,7 @@ async function buildDerivedPricingContext({
     }
   };
 
+  perfBreakdownMs.total = Math.max(0, Date.now() - providerStartedAt);
   return {
     pricingContext: mergePricingContext(derivedContext, explicitPricingContext || {}),
     metadata: {
@@ -523,7 +685,13 @@ async function buildDerivedPricingContext({
       derivedBaseline: derivedContext.operational.baseline,
       baselineSource: redisSnapshots.baselineSource || 'derived_heuristic',
       stateSource: redisSnapshots.stateSource || 'derived_fallback',
-      historySource: redisSnapshots.historySource || 'derived_fallback'
+      historySource: redisSnapshots.historySource || 'derived_fallback',
+      perfBreakdownMs,
+      readModel: readModelMetadata,
+      snapshotSource: readModelMetadata?.source || 'full_snapshot',
+      readModelTouchedCells: readModelMetadata?.touchedCells || 0,
+      readModelStaleCells: readModelMetadata?.staleCells || 0,
+      readModelLastMutationAt: readModelMetadata?.lastMutationAt || null
     }
   };
 }
@@ -628,6 +796,10 @@ async function recordPricingEvaluation(metadata, engineResult) {
 module.exports = {
   buildDerivedPricingContext,
   recordPricingEvaluation,
+  __resetCachesForTests: () => {
+    stateCache.clear();
+    snapshotCache.clear();
+  },
   helpers: {
     resolveZoneType,
     getZoneBaseline,

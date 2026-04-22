@@ -8,7 +8,7 @@ const RedisScan = require('../utils/redis-scan');
 const { authenticateJWT, requireRole } = require('../middleware/jwt-auth');
 
 const fcmService = new FCMService();
-const ADMIN_ROLES = ['admin', 'super-admin', 'manager'];
+const ADMIN_ROLES = ['admin', 'super-admin', 'manager', 'development'];
 const ALLOW_PUBLIC_DIRECT_FCM_SEND = String(process.env.ALLOW_PUBLIC_DIRECT_FCM_SEND || 'false').toLowerCase() === 'true';
 
 function bindRedisToFcmService() {
@@ -30,6 +30,8 @@ function bindRedisToFcmService() {
 
 // Middleware para verificar autenticação (obrigatório)
 const requireAuth = (req, res, next) => authenticateJWT(req, res, next);
+const requireSuperAdmin = (req, res, next) =>
+    authenticateJWT(req, res, () => requireRole(['super-admin'])(req, res, next));
 
 function isDirectTokenOnlyRequest(body = {}) {
     const hasFcmToken = Boolean(body.fcmToken);
@@ -519,7 +521,7 @@ router.get('/scheduled', requireAuth, async (req, res) => {
 });
 
 // DELETE - Cancelar notificação programada
-router.delete('/scheduled/:id', requireAuth, async (req, res) => {
+router.delete('/scheduled/:id', requireSuperAdmin, async (req, res) => {
     try {
         const { id } = req.params;
         const key = `scheduled_notifications:${id}`;

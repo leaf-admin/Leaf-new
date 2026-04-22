@@ -816,17 +816,17 @@ class KYCPolicyService {
       });
     });
 
-    await this.redis.hset(`driver:${driverId}`, {
+    await Promise.resolve().then(() => this.redis.hset(`driver:${driverId}`, {
       kyc_reverify_required: String(true),
       kyc_reverify_source: 'passenger_photo_mismatch_report',
       dispatchEligible: String(false),
       dispatchEligibilityCode: 'KYC_REVERIFY_REQUIRED'
-    }).catch(() => null);
+    })).catch(() => null);
 
-    await this.redis.zrem(
+    await Promise.resolve().then(() => this.redis.zrem(
       process.env.ELIGIBLE_DRIVER_GEO_KEY || 'driver_locations_eligible',
       driverId
-    ).catch(() => null);
+    )).catch(() => null);
 
     logStructured('warn', 'Motorista marcado para revalidacao facial por denuncia', {
       service: 'kyc-policy-service',

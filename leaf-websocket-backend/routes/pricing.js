@@ -1,6 +1,7 @@
 const express = require('express');
 const redisPool = require('../utils/redis-pool');
 const fareEstimationService = require('../services/fare-estimation-service');
+const { getPublicRateCards, RATE_CARD_VERSION } = require('../services/pricing/calculateFare');
 const { metrics } = require('../utils/prometheus-metrics');
 const { logStructured } = require('../utils/logger');
 
@@ -18,6 +19,14 @@ function toNumber(value, fallback = 0) {
 function hasCoordinate(location = {}) {
   return Number.isFinite(toNumber(location?.lat, NaN)) && Number.isFinite(toNumber(location?.lng, NaN));
 }
+
+router.get('/pricing/categories', (_req, res) => {
+  return res.json({
+    success: true,
+    version: RATE_CARD_VERSION,
+    categories: getPublicRateCards()
+  });
+});
 
 router.post('/pricing/quote', async (req, res) => {
   const body = req.body || {};
@@ -47,6 +56,8 @@ router.post('/pricing/quote', async (req, res) => {
 
     return res.json({
       estimatedFare: result.estimatedFare,
+      carType: result.normalizedCarType,
+      rateCardVersion: result.rateCardVersion,
       routeDistanceKm: result.routeMetrics?.distanceKm || 0,
       routeDurationSecs: result.routeMetrics?.durationSecs || 0,
       tollFee: result.tollFee || 0,

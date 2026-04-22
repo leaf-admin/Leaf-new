@@ -16,6 +16,8 @@ const TRACKED_STATES = {
   EARLY_ENDED_REVIEW: EARLY_ENDED_REVIEW_KEY
 };
 
+const TRACKED_STATE_VALUES = new Set(Object.keys(TRACKED_STATES));
+
 function toNumber(value, fallback = 0) {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : fallback;
@@ -35,6 +37,15 @@ function isRedisRideHealthUsable(redis) {
       && typeof redis.zcount === 'function'
       && typeof redis.zrange === 'function'
       && typeof redis.zrangebyscore === 'function'
+  );
+}
+
+function isRedisRideHealthBackfillUsable(redis) {
+  return Boolean(
+    isRedisRideHealthUsable(redis)
+      && typeof redis.scan === 'function'
+      && typeof redis.hgetall === 'function'
+      && typeof redis.del === 'function'
   );
 }
 
@@ -98,6 +109,119 @@ function formatDurationMs(durationMs) {
     return `${hours} h`;
   }
   return `${hours} h ${minutes} min`;
+}
+
+function resolveTrackedRideState(bookingHash = {}) {
+  const stateCandidates = [
+    bookingHash.state,
+    bookingHash.status,
+    bookingHash.completionType
+  ]
+    .map((value) => String(value || '').trim().toUpperCase())
+    .filter(Boolean);
+
+  return stateCandidates.find((value) => TRACKED_STATE_VALUES.has(value)) || null;
+}
+
+function resolveTrackedRideTimestampMs(bookingHash = {}, nowIso = new Date().toISOString()) {
+  const candidates = [
+    bookingHash.updatedAt,
+    bookingHash.completedAt,
+    bookingHash.reassignmentRequestedAt,
+    bookingHash.endedAt,
+    bookingHash.createdAt,
+    nowIso
+  ];
+
+  for (const candidate of candidates) {
+    const parsed = Date.parse(candidate);
+    if (Number.isFinite(parsed)) {
+      return parsed;
+    }
+  }
+
+  return normalizeNowMs(nowIso);
+}
+
+async function backfillRideHealthIndex(redis, options = {}) {
+  if (!isRedisRideHealthBackfillUsable(redis)) {
+    return {
+      success: false,
+      skipped: true,
+      reason: 'redis_unavailable'
+    };
+  }
+
+  const nowIso = options.nowIso || new Date().toISOString();
+  const scanCount = Math.max(50, toNumber(options.scanCount, 250));
+  const maxKeys = Math.max(100, toNumber(options.maxKeys, 10000));
+  const trackedEntries = {
+    REASSIGNMENT_PENDING: [],
+    EARLY_ENDED_REVIEW: []
+  };
+
+  let cursor = '0';
+  let scannedKeys = 0;
+
+  do {
+    const response = await redis.scan(cursor, 'MATCH', 'booking:*', 'COUNT', scanCount);
+    cursor = Array.isArray(response) ? String(response[0] || '0') : '0';
+    const keys = Array.isArray(response?.[1]) ? response[1] : [];
+
+    if (keys.length > 0) {
+      const bookingHashes = await Promise.all(
+        keys.map((key) => redis.hgetall(key).catch(() => null))
+      );
+
+      for (const bookingHash of bookingHashes) {
+        scannedKeys += 1;
+        if (!bookingHash || Object.keys(bookingHash).length === 0) {
+          if (scannedKeys >= maxKeys) break;
+          continue;
+        }
+
+        const trackedState = resolveTrackedRideState(bookingHash);
+        if (!trackedState) {
+          if (scannedKeys >= maxKeys) break;
+          continue;
+        }
+
+        const bookingId = bookingHash.id || bookingHash.bookingId || bookingHash.tripId;
+        if (!bookingId) {
+          if (scannedKeys >= maxKeys) break;
+          continue;
+        }
+
+        trackedEntries[trackedState].push({
+          bookingId: String(bookingId),
+          scoreMs: resolveTrackedRideTimestampMs(bookingHash, nowIso)
+        });
+
+        if (scannedKeys >= maxKeys) break;
+      }
+    }
+  } while (cursor !== '0' && scannedKeys < maxKeys);
+
+  const pipeline = redis.pipeline();
+  pipeline.del(REASSIGNMENT_PENDING_KEY);
+  pipeline.del(EARLY_ENDED_REVIEW_KEY);
+
+  trackedEntries.REASSIGNMENT_PENDING.forEach((entry) => {
+    pipeline.zadd(REASSIGNMENT_PENDING_KEY, entry.scoreMs, entry.bookingId);
+  });
+  trackedEntries.EARLY_ENDED_REVIEW.forEach((entry) => {
+    pipeline.zadd(EARLY_ENDED_REVIEW_KEY, entry.scoreMs, entry.bookingId);
+  });
+
+  await pipeline.exec();
+
+  return {
+    success: true,
+    scannedKeys,
+    maxKeys,
+    reassignmentPending: trackedEntries.REASSIGNMENT_PENDING.length,
+    earlyEndedReview: trackedEntries.EARLY_ENDED_REVIEW.length
+  };
 }
 
 async function syncTrackedRideState(redis, { bookingId, previousState = null, newState = null, updatedAt = null } = {}) {
@@ -303,10 +427,14 @@ module.exports = {
   TRACKED_STATES,
   buildReviewAlert,
   buildReassignmentAlert,
+  backfillRideHealthIndex,
   evaluateRideOperationsAlerts,
   formatDurationMs,
   getRideOperationsSnapshot,
+  isRedisRideHealthBackfillUsable,
   isRedisRideHealthUsable,
   parseSortedSetRows,
+  resolveTrackedRideState,
+  resolveTrackedRideTimestampMs,
   syncTrackedRideState
 };

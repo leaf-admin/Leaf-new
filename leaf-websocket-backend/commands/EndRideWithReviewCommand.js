@@ -25,6 +25,14 @@ const {
   buildAuthoritativeCompletionArtifacts
 } = require('../services/ride-settlement-service');
 
+function createNoopSpan() {
+  return {
+    setStatus: () => {},
+    recordException: () => {},
+    end: () => {}
+  };
+}
+
 class EndRideWithReviewCommand extends Command {
   constructor(data) {
     super(data);
@@ -57,13 +65,15 @@ class EndRideWithReviewCommand extends Command {
   async execute() {
     const startTime = Date.now();
     const tracer = getTracer();
-    const span = tracer.startSpan('EndRideWithReviewCommand.execute', {
-      attributes: {
-        'command.name': 'EndRideWithReviewCommand',
-        'booking.id': this.bookingId,
-        'trace.id': this.traceId
-      }
-    });
+    const span = typeof tracer?.startSpan === 'function'
+      ? tracer.startSpan('EndRideWithReviewCommand.execute', {
+          attributes: {
+            'command.name': 'EndRideWithReviewCommand',
+            'booking.id': this.bookingId,
+            'trace.id': this.traceId
+          }
+        })
+      : createNoopSpan();
 
     return traceContext.runWithTraceId(this.traceId, async () => {
       try {

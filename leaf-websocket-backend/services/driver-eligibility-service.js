@@ -1,6 +1,10 @@
 const redisPool = require('../utils/redis-pool');
 const firebaseConfig = require('../firebase-config');
 const { logStructured } = require('../utils/logger');
+const {
+    normalizeOperationalCarType,
+    resolveOperationalCarTypeLabel
+} = require('../utils/operational-car-type');
 
 const PROFILE_CACHE_TTL_SECONDS = 90;
 const PROFILE_CACHE_FALLBACK_TTL_SECONDS = Number.parseInt(
@@ -267,15 +271,24 @@ class DriverEligibilityService {
             : true;
 
         const catalogCategory = await this._resolveCategoryFromCatalog(vehicle);
-        const carType =
+        const rawCarType =
             catalogCategory ||
             vehicle?.manualCategory ||
-            vehicle?.carType ||
             vehicle?.category ||
+            vehicle?.carType ||
             user?.carType ||
             fallbackDriverData.carType ||
             null;
-        const vehicleCategory = normalizeCategory(carType);
+        const normalizedOperationalType = normalizeOperationalCarType(
+            vehicle?.category ||
+            vehicle?.manualCategory ||
+            catalogCategory ||
+            rawCarType
+        );
+        const vehicleCategory = normalizeCategory(normalizedOperationalType || rawCarType);
+        const carType =
+            resolveOperationalCarTypeLabel(normalizedOperationalType, null) ||
+            rawCarType;
 
         const acceptsPlusWithElite = toBoolean(
             user?.acceptPlusWithElite ??

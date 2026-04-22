@@ -2,10 +2,13 @@ const express = require('express');
 const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
 const { logStructured, logError } = require('../utils/logger');
+const { resolveJwtSecret } = require('../utils/jwt-secret-resolver');
 const router = express.Router();
 
 // Configurações
-const JWT_SECRET = process.env.JWT_SECRET || 'leaf-dashboard-secret-key-2025';
+const JWT_SECRET = resolveJwtSecret(['JWT_SECRET', 'ADMIN_JWT_SECRET'], {
+  context: 'legacy-auth-routes'
+});
 const JWT_EXPIRES_IN = '24h';
 
 // Usuários padrão (em produção, usar banco de dados)

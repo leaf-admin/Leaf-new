@@ -14,7 +14,7 @@ try {
     });
 }
 
-const ADMIN_ROLES = ['admin', 'super-admin', 'manager'];
+const ADMIN_ROLES = ['admin', 'super-admin', 'manager', 'development'];
 const CITY_ACTIVATION_DB_PATH = 'operations/geography/cityActivation';
 const GEOFENCE_ADMIN_DB_PATH = 'operations/geography/geofenceConfig';
 const DEFAULT_MAX_ACTIVE_DRIVERS_PER_CITY = Number.parseInt(

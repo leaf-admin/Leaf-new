@@ -28,6 +28,7 @@ const { SpanStatusCode } = require('@opentelemetry/api');
 const { validateAndEnsureTraceIdInCommand } = require('../utils/trace-validator');
 const { clearActiveTripForDriver } = require('../utils/active-trip-index');
 const tripLocationPersistenceService = require('../services/trip-location-persistence-service');
+const pricingH3ReadModelService = require('../services/pricing-h3-read-model-service');
 const {
     resolveRideLegs,
     resolveOperationalContinuation,
@@ -126,6 +127,11 @@ class CompleteTripCommand extends Command {
                 const customerId = bookingData.customerId;
                 const rideCity = bookingData.city || bookingData.pickupCity || bookingData.destinationCity || 'unknown';
                 const rideServiceType = bookingData.carType || bookingData.serviceType || 'standard';
+                const paymentService = new PaymentService();
+                const completedFareBreakdown = paymentService.calculateFareBreakdownFromReais(
+                    Number(this.finalFare || 0),
+                    Number(this.tollFee || 0)
+                );
                 const existingRideLegs = resolveRideLegs(bookingData);
                 const operationalContinuation = resolveOperationalContinuation(bookingData);
                 const completedAt = new Date().toISOString();
@@ -217,6 +223,14 @@ class CompleteTripCommand extends Command {
                         tollFee: this.tollFee,
                         distance: this.distance,
                         duration: this.duration,
+                        routeDistanceKm: this.distance,
+                        routeDurationSecs: this.duration,
+                        operationalFee: completedFareBreakdown.operationalFee,
+                        paymentIntermediationFee: completedFareBreakdown.paymentIntermediationFee,
+                        totalFees: completedFareBreakdown.totalFees,
+                        driverNetAmount: completedFareBreakdown.driverNetAmount,
+                        authoritativeSnapshot: true,
+                        financialSnapshotSource: 'backend_final',
                         completedAt,
                         rideLegs: rideLegSettlements,
                         operationalContinuation: completedContinuation,
@@ -231,7 +245,15 @@ class CompleteTripCommand extends Command {
                     finalFare: String(this.finalFare),
                     tollFee: String(this.tollFee),
                     distance: String(this.distance),
+                    routeDistanceKm: String(this.distance),
                     duration: String(this.duration),
+                    routeDurationSecs: String(this.duration),
+                    operationalFee: String(completedFareBreakdown.operationalFee || 0),
+                    paymentIntermediationFee: String(completedFareBreakdown.paymentIntermediationFee || 0),
+                    totalFees: String(completedFareBreakdown.totalFees || 0),
+                    driverNetAmount: String(completedFareBreakdown.driverNetAmount || 0),
+                    authoritativeSnapshot: 'true',
+                    financialSnapshotSource: 'backend_final',
                     completedAt,
                     ...(rideLegSettlements.length > 0 ? { rideLegs: JSON.stringify(rideLegSettlements) } : {}),
                     ...(completedContinuation ? { operationalContinuation: JSON.stringify(completedContinuation) } : {})
@@ -254,6 +276,20 @@ class CompleteTripCommand extends Command {
                 // ✅ NOVO: Remover da lista de corridas ativas
                 await redis.hdel('bookings:active', this.bookingId);
                 await clearActiveTripForDriver(redis, this.driverId, this.bookingId);
+                await pricingH3ReadModelService.clearBookingSnapshot(redis, this.bookingId).catch(() => null);
+
+                const refreshedDriverState = await redis.hgetall(`driver:${this.driverId}`);
+                const driverLat = Number(refreshedDriverState?.lat);
+                const driverLng = Number(refreshedDriverState?.lng);
+                if (Number.isFinite(driverLat) && Number.isFinite(driverLng)) {
+                    await pricingH3ReadModelService.applyDriverSnapshot(redis, {
+                        driverId: this.driverId,
+                        lat: driverLat,
+                        lng: driverLng,
+                        isOnline: String(refreshedDriverState?.isOnline || 'true') === 'true',
+                        available: String(refreshedDriverState?.isOnline || 'true') === 'true'
+                    }).catch(() => null);
+                }
 
                 // Flush final da trilha de localização fora do caminho crítico.
                 // Persistência de trilha é best-effort e não deve atrasar ACK de completeTrip.

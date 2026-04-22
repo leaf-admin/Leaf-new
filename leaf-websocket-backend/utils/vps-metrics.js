@@ -8,13 +8,13 @@ const { logStructured, logError } = require('./logger');
 const VPS_CONFIGS = {
   vultr: {
     name: 'VPS Vultr (Principal)',
-    ip: '216.238.107.59',
+    ip: '147.182.204.181',
     location: 'São Paulo, BR',
     provider: 'Vultr'
   },
   hostinger: {
     name: 'VPS Hostinger (Backup)',
-    ip: '147.93.66.253',
+    ip: '147.182.204.181',
     location: 'São Paulo, BR',
     provider: 'Hostinger'
   }
@@ -250,7 +250,8 @@ function getWebSocketMetrics(io) {
   let totalClientsInRooms = 0;
   
   rooms.forEach((clients, room) => {
-    if (room !== room) { // Ignorar salas que são IDs de socket
+    // Ignorar salas privadas de socket (room === socketId).
+    if (!clients.has(room)) {
       totalRooms++;
       totalClientsInRooms += clients.size;
     }

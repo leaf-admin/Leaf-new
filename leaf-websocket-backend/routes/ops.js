@@ -5,6 +5,7 @@ const passengerTrustService = require('../services/passenger-trust-service');
 const operationalAreaPolicyService = require('../services/operational-area-policy-service');
 const disputeReviewService = require('../services/dispute-review-service');
 const opsOverviewService = require('../services/ops-overview-service');
+const rideCostTelemetryService = require('../services/ride-cost-telemetry-service');
 const { logError } = require('../utils/logger');
 
 const router = express.Router();
@@ -32,6 +33,51 @@ router.get('/alerts', async (req, res) => {
   } catch (error) {
     logError(error, { service: 'ops-routes', operation: 'alerts' });
     res.status(500).json({ success: false, error: 'Erro ao buscar alertas operacionais' });
+  }
+});
+
+router.get('/ride-cost-telemetry', async (req, res) => {
+  try {
+    const limit = Math.max(
+      1,
+      Math.min(50, Number.parseInt(req.query?.limit || '10', 10) || 10)
+    );
+    const reports = await rideCostTelemetryService.getRecentReports(limit);
+    return res.json({
+      success: true,
+      count: reports.length,
+      reports
+    });
+  } catch (error) {
+    logError(error, { service: 'ops-routes', operation: 'listRideCostTelemetry' });
+    return res.status(500).json({ success: false, error: 'Erro ao listar telemetria de custo' });
+  }
+});
+
+router.get('/ride-cost-telemetry/:bookingId', async (req, res) => {
+  try {
+    const bookingId = String(req.params?.bookingId || '').trim();
+    if (!bookingId) {
+      return res.status(400).json({ success: false, error: 'bookingId é obrigatório' });
+    }
+
+    const report = await rideCostTelemetryService.getReport(bookingId);
+    if (!report) {
+      return res.status(404).json({
+        success: false,
+        bookingId,
+        found: false
+      });
+    }
+
+    return res.json({
+      success: true,
+      bookingId,
+      report
+    });
+  } catch (error) {
+    logError(error, { service: 'ops-routes', operation: 'getRideCostTelemetry' });
+    return res.status(500).json({ success: false, error: 'Erro ao buscar telemetria da corrida' });
   }
 });
 

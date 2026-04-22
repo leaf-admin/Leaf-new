@@ -2,9 +2,47 @@ const express = require('express');
 const admin = require('firebase-admin');
 // const graphqlAuth = require('../middleware/graphql-auth');
 // const firebaseConfig = require('../firebase-config');
-const { logger } = require('../utils/logger');
+const { logger, logStructured } = require('../utils/logger');
 
 const router = express.Router();
+
+function shouldLoadFirestoreUserProfile(req) {
+  const requestFlag = req.method === 'GET'
+    ? req.query?.includeFirestoreProfile
+    : req.body?.includeFirestoreProfile;
+  const normalizedRequestFlag = String(requestFlag || '').toLowerCase();
+
+  if (normalizedRequestFlag === 'true' || normalizedRequestFlag === '1') {
+    return true;
+  }
+
+  return String(process.env.AUTH_VERIFY_INCLUDE_FIRESTORE_PROFILE || '').toLowerCase() === 'true';
+}
+
+async function resolveOptionalFirestoreUserData(uid, req) {
+  if (!shouldLoadFirestoreUserProfile(req)) {
+    return null;
+  }
+
+  try {
+    const userDoc = await admin.firestore().collection('users').doc(uid).get();
+    if (!userDoc.exists) {
+      logStructured('warn', 'Firestore users doc ausente em auth verify', {
+        service: 'auth-routes',
+        firestore_collection: 'users',
+        firestore_result: 'NOT_FOUND',
+        userId: String(uid),
+        source: `auth-routes.${req.method.toLowerCase()}.verify`
+      });
+      return null;
+    }
+
+    return userDoc.data() || null;
+  } catch (firestoreError) {
+    logger.warn(`Erro ao buscar dados do usuário ${uid}:`, firestoreError);
+    return null;
+  }
+}
 
 // Endpoint para login e geração de token
 router.post('/login', async (req, res) => {
@@ -80,17 +118,8 @@ router.get('/verify', async (req, res) => {
       // Verificar token Firebase
       const decodedToken = await admin.auth().verifyIdToken(token);
 
-      // Buscar dados adicionais do usuário no Firestore (opcional)
-      let userData = null;
-      try {
-        const userDoc = await admin.firestore().collection('users').doc(decodedToken.uid).get();
-        if (userDoc.exists) {
-          userData = userDoc.data();
-        }
-      } catch (firestoreError) {
-        logger.warn(`Erro ao buscar dados do usuário ${decodedToken.uid}:`, firestoreError);
-        // Continuar mesmo se não conseguir buscar dados do Firestore
-      }
+      // Buscar dados adicionais do usuário no Firestore apenas quando explicitamente necessário
+      const userData = await resolveOptionalFirestoreUserData(decodedToken.uid, req);
 
       res.json({
         authenticated: true,
@@ -146,15 +175,7 @@ router.post('/verify', async (req, res) => {
     try {
       const decodedToken = await admin.auth().verifyIdToken(token);
 
-      let userData = null;
-      try {
-        const userDoc = await admin.firestore().collection('users').doc(decodedToken.uid).get();
-        if (userDoc.exists) {
-          userData = userDoc.data();
-        }
-      } catch (firestoreError) {
-        logger.warn(`Erro ao buscar dados do usuário ${decodedToken.uid}:`, firestoreError);
-      }
+      const userData = await resolveOptionalFirestoreUserData(decodedToken.uid, req);
 
       res.json({
         authenticated: true,

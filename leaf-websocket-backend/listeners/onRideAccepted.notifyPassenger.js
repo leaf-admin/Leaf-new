@@ -30,6 +30,10 @@ function normalizeAcceptedPayload(event) {
     };
 }
 
+function passengerSocketAlreadyDelivered(metadata) {
+    return Boolean(metadata?.socketDelivery?.passengerRideAcceptedEmitted);
+}
+
 /**
  * Notificar passageiro via WebSocket
  */
@@ -112,6 +116,16 @@ async function notifyPassenger(event, io) {
 
                 if (!io) {
                     logger.warn('⚠️ [notifyPassenger] Socket.IO não disponível');
+                    return;
+                }
+
+                if (passengerSocketAlreadyDelivered(normalized.metadata)) {
+                    logStructured('debug', 'notifyPassenger pulou emissão duplicada', {
+                        customerId,
+                        bookingId,
+                        listener: 'notifyPassenger',
+                        reason: 'passenger_socket_already_emitted'
+                    });
                     return;
                 }
 

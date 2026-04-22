@@ -1,16 +1,375 @@
 const express = require('express');
+const admin = require('firebase-admin');
+const bcrypt = require('bcryptjs');
+const crypto = require('crypto');
+const jwt = require('jsonwebtoken');
 const PaymentService = require('../services/payment-service');
 const kycPolicyService = require('../services/kyc-policy-service');
+const firebaseConfig = require('../firebase-config');
 const { logStructured, logError } = require('../utils/logger');
+const { resolveJwtSecret } = require('../utils/jwt-secret-resolver');
+const { getAdminUser } = require('../utils/admin-user-cache');
+const {
+  isLaunchFeatureEnabled,
+  buildLaunchFeatureDisabledPayload
+} = require('../utils/pilot-launch-flags');
 const router = express.Router();
 
 const paymentService = new PaymentService();
+const PAYMENT_JWT_SECRET = resolveJwtSecret(['JWT_SECRET', 'ADMIN_JWT_SECRET'], {
+  context: 'payment-routes'
+});
+const PAYMENT_ADMIN_ROLES = ['admin', 'super-admin', 'manager'];
+const APP_PASSWORD_COLLECTION = 'auth_password_credentials';
+const WITHDRAWAL_PASSWORD_FAILED_ATTEMPTS_LIMIT = Number.parseInt(
+  process.env.AUTH_PASSWORD_FAILED_ATTEMPTS_LIMIT || '5',
+  10
+);
+const WITHDRAWAL_PASSWORD_LOCKOUT_SECONDS = Number.parseInt(
+  process.env.AUTH_PASSWORD_LOCKOUT_SECONDS || '900',
+  10
+);
+
+function extractBearerToken(req) {
+  const header = req.headers.authorization || '';
+  if (!header.startsWith('Bearer ')) return null;
+  return header.slice('Bearer '.length).trim();
+}
+
+function normalizeDigits(value) {
+  return String(value || '').replace(/\D/g, '');
+}
+
+function hashPhoneForPasswordLookup(phoneDigits) {
+  const pepper = process.env.AUTH_PASSWORD_PHONE_HASH_PEPPER || process.env.JWT_SECRET || 'leaf-phone-hash';
+  return crypto.createHmac('sha256', pepper).update(String(phoneDigits || '')).digest('hex');
+}
+
+function timestampToDate(value) {
+  if (!value) return null;
+  if (typeof value.toDate === 'function') return value.toDate();
+  const parsed = new Date(value);
+  return Number.isFinite(parsed.getTime()) ? parsed : null;
+}
+
+function buildActorIdentifiers(actor = {}) {
+  const identifiers = new Set();
+  [
+    actor.uid,
+    actor.id,
+    actor.userId,
+    actor.phoneNumber,
+    actor.phone_number,
+    actor.phone
+  ].forEach((value) => {
+    if (!value) return;
+    const stringValue = String(value);
+    identifiers.add(stringValue);
+    const digits = normalizeDigits(stringValue);
+    if (digits) identifiers.add(digits);
+  });
+  return identifiers;
+}
+
+function actorMatchesId(actor, candidateId) {
+  if (!candidateId) return false;
+  const identifiers = buildActorIdentifiers(actor);
+  const candidate = String(candidateId);
+  return identifiers.has(candidate) || identifiers.has(normalizeDigits(candidate));
+}
+
+function isPaymentAdmin(actor, roles = PAYMENT_ADMIN_ROLES) {
+  return Boolean(actor && actor.type === 'admin' && roles.includes(actor.role));
+}
+
+async function authenticatePaymentActor(req, res, next) {
+  const token = extractBearerToken(req);
+  if (!token) {
+    return res.status(401).json({
+      success: false,
+      error: 'Token não fornecido'
+    });
+  }
+
+  try {
+    const decoded = await admin.auth().verifyIdToken(token);
+    const actor = {
+      type: 'firebase',
+      uid: decoded.uid,
+      id: decoded.uid,
+      phoneNumber: decoded.phone_number || decoded.phoneNumber || null,
+      email: decoded.email || null,
+      role: decoded.role || decoded.userType || decoded.user_type || 'user'
+    };
+    req.paymentActor = actor;
+    req.user = req.user || actor;
+    return next();
+  } catch (firebaseError) {
+    // Admin dashboard uses its own JWT. We only fall through to that verifier here.
+  }
+
+  try {
+    const decoded = jwt.verify(token, PAYMENT_JWT_SECRET);
+    const userId = decoded.userId || decoded.id || decoded.sub;
+    if (!userId) {
+      return res.status(401).json({
+        success: false,
+        error: 'Token inválido'
+      });
+    }
+
+    const userRecord = await getAdminUser(userId, {
+      source: 'payment-routes.authenticatePaymentActor',
+      maxAgeMs: 15 * 1000
+    });
+    if (!userRecord.exists || userRecord.data?.active === false) {
+      return res.status(403).json({
+        success: false,
+        error: 'Usuário não encontrado ou inativo'
+      });
+    }
+
+    const userData = userRecord.data || {};
+    const actor = {
+      type: 'admin',
+      uid: userId,
+      id: userId,
+      email: decoded.email || userData.email || null,
+      role: decoded.role || userData.role || 'viewer',
+      permissions: decoded.permissions || userData.permissions || []
+    };
+    req.paymentActor = actor;
+    req.user = actor;
+    return next();
+  } catch (jwtError) {
+    return res.status(401).json({
+      success: false,
+      error: 'Token inválido ou expirado'
+    });
+  }
+}
+
+function requirePaymentAdmin(roles = PAYMENT_ADMIN_ROLES) {
+  return (req, res, next) => {
+    if (!req.paymentActor) {
+      return res.status(401).json({
+        success: false,
+        error: 'Não autenticado'
+      });
+    }
+
+    if (!isPaymentAdmin(req.paymentActor, roles)) {
+      return res.status(403).json({
+        success: false,
+        error: 'Acesso financeiro negado',
+        required: roles,
+        userRole: req.paymentActor.role || 'unknown'
+      });
+    }
+
+    return next();
+  };
+}
+
+function requirePassengerScope(req, res, next) {
+  const passengerId = req.body?.passengerId;
+  if (isPaymentAdmin(req.paymentActor) || actorMatchesId(req.paymentActor, passengerId)) {
+    return next();
+  }
+
+  return res.status(403).json({
+    success: false,
+    error: 'Passageiro não autorizado para esta operação'
+  });
+}
+
+function requireDriverScopeFromParam(req, res, next) {
+  const driverId = req.params?.driverId;
+  if (isPaymentAdmin(req.paymentActor) || actorMatchesId(req.paymentActor, driverId)) {
+    return next();
+  }
+
+  return res.status(403).json({
+    success: false,
+    error: 'Motorista não autorizado para esta operação'
+  });
+}
+
+function blockManualPaymentConfirmationInProduction(req, res, next) {
+  const manualConfirmationEnabled =
+    String(process.env.ENABLE_MANUAL_PAYMENT_CONFIRMATION || 'false').toLowerCase() === 'true';
+
+  if (process.env.NODE_ENV === 'production' && !manualConfirmationEnabled) {
+    return res.status(403).json({
+      success: false,
+      error: 'Confirmação manual de pagamento desabilitada em produção',
+      code: 'MANUAL_PAYMENT_CONFIRMATION_DISABLED'
+    });
+  }
+
+  return next();
+}
+
+function respondWithdrawalsDisabled(res) {
+  return res.status(503).json(
+    buildLaunchFeatureDisabledPayload(
+      'driver_withdrawals',
+      'Saque do motorista esta desativado neste perfil de lancamento'
+    )
+  );
+}
+
+async function resolveWithdrawalActorPhoneDigits(actor, driverId) {
+  const actorPhoneDigits = normalizeDigits(actor?.phoneNumber || actor?.phone_number || actor?.phone);
+  if (actorPhoneDigits) return actorPhoneDigits;
+
+  try {
+    const authUser = await admin.auth().getUser(driverId);
+    return normalizeDigits(authUser?.phoneNumber || authUser?.phone_number);
+  } catch (error) {
+    logStructured('warn', 'Nao foi possivel resolver telefone para validar senha de saque', {
+      service: 'payment-routes',
+      driverId,
+      error: error.message
+    });
+    return '';
+  }
+}
+
+async function verifyWithdrawalAppPassword({ actor, driverId, password }) {
+  const appPassword = String(password || '');
+  if (!appPassword) {
+    return {
+      ok: false,
+      statusCode: 400,
+      payload: {
+        success: false,
+        error: 'Senha do app é obrigatória para solicitar saque',
+        code: 'WITHDRAWAL_PASSWORD_REQUIRED'
+      }
+    };
+  }
+
+  const firestore = firebaseConfig.getFirestore();
+  if (!firestore) {
+    return {
+      ok: false,
+      statusCode: 500,
+      payload: {
+        success: false,
+        error: 'Firestore não disponível para validar senha do app',
+        code: 'WITHDRAWAL_PASSWORD_UNAVAILABLE'
+      }
+    };
+  }
+
+  const phoneDigits = await resolveWithdrawalActorPhoneDigits(actor, driverId);
+  if (!phoneDigits) {
+    return {
+      ok: false,
+      statusCode: 400,
+      payload: {
+        success: false,
+        error: 'Telefone do motorista não disponível para validar senha do app',
+        code: 'WITHDRAWAL_PASSWORD_PHONE_REQUIRED'
+      }
+    };
+  }
+
+  const phoneHash = hashPhoneForPasswordLookup(phoneDigits);
+  const credentialRef = firestore.collection(APP_PASSWORD_COLLECTION).doc(phoneHash);
+  const credentialDoc = await credentialRef.get();
+  const credential = credentialDoc.exists ? credentialDoc.data() : null;
+
+  if (!credential?.passwordHash || !credential?.uid) {
+    return {
+      ok: false,
+      statusCode: 403,
+      payload: {
+        success: false,
+        error: 'Senha do app não configurada. Configure a senha antes de solicitar saque.',
+        code: 'WITHDRAWAL_PASSWORD_NOT_CONFIGURED'
+      }
+    };
+  }
+
+  if (!actorMatchesId({ ...actor, uid: credential.uid, id: credential.uid }, driverId)) {
+    return {
+      ok: false,
+      statusCode: 403,
+      payload: {
+        success: false,
+        error: 'Senha do app não pertence ao motorista autenticado',
+        code: 'WITHDRAWAL_PASSWORD_OWNER_MISMATCH'
+      }
+    };
+  }
+
+  const lockedUntil = timestampToDate(credential.lockedUntil);
+  if (lockedUntil && lockedUntil.getTime() > Date.now()) {
+    return {
+      ok: false,
+      statusCode: 423,
+      payload: {
+        success: false,
+        error: 'Conta temporariamente bloqueada por tentativas inválidas',
+        code: 'WITHDRAWAL_PASSWORD_LOCKED',
+        lockedUntil: lockedUntil.toISOString()
+      }
+    };
+  }
+
+  const passwordMatches = await bcrypt.compare(appPassword, credential.passwordHash);
+  if (!passwordMatches) {
+    const failedAttempts = Number(credential.failedAttempts || 0) + 1;
+    const shouldLock = failedAttempts >= WITHDRAWAL_PASSWORD_FAILED_ATTEMPTS_LIMIT;
+    await credentialRef.set({
+      failedAttempts,
+      lockedUntil: shouldLock
+        ? admin.firestore.Timestamp.fromDate(new Date(Date.now() + WITHDRAWAL_PASSWORD_LOCKOUT_SECONDS * 1000))
+        : null,
+      lastFailedWithdrawalPasswordAt: admin.firestore.FieldValue.serverTimestamp()
+    }, { merge: true });
+
+    logStructured('warn', 'Senha do app invalida para saque', {
+      service: 'payment-routes',
+      driverId,
+      phoneLast4: phoneDigits.slice(-4),
+      failedAttempts,
+      locked: shouldLock
+    });
+
+    return {
+      ok: false,
+      statusCode: 401,
+      payload: {
+        success: false,
+        error: 'Senha do app inválida',
+        code: shouldLock ? 'WITHDRAWAL_PASSWORD_LOCKED' : 'WITHDRAWAL_PASSWORD_INVALID'
+      }
+    };
+  }
+
+  await credentialRef.set({
+    failedAttempts: 0,
+    lockedUntil: null,
+    lastWithdrawalPasswordVerifiedAt: admin.firestore.FieldValue.serverTimestamp()
+  }, { merge: true });
+
+  logStructured('info', 'Senha do app validada para saque', {
+    service: 'payment-routes',
+    driverId,
+    phoneLast4: phoneDigits.slice(-4)
+  });
+
+  return { ok: true };
+}
 
 /**
  * POST /api/payment/advance
  * Processa pagamento antecipado do passageiro
  */
-router.post('/payment/advance', async (req, res) => {
+router.post('/payment/advance', authenticatePaymentActor, requirePassengerScope, async (req, res) => {
   try {
     const { passengerId, amount, rideId, rideDetails, passengerName, passengerEmail } = req.body;
 
@@ -86,7 +445,12 @@ router.post('/payment/advance', async (req, res) => {
  * POST /api/payment/confirm
  * Confirma pagamento e credita saldo no motorista
  */
-router.post('/payment/confirm', async (req, res) => {
+router.post(
+  '/payment/confirm',
+  authenticatePaymentActor,
+  requirePaymentAdmin(),
+  blockManualPaymentConfirmationInProduction,
+  async (req, res) => {
   try {
     const { chargeId, rideId, driverId } = req.body;
 
@@ -113,13 +477,14 @@ router.post('/payment/confirm', async (req, res) => {
       details: error.message
     });
   }
-});
+  }
+);
 
 /**
  * POST /api/payment/refund
  * Processa reembolso quando não encontra motorista
  */
-router.post('/payment/refund', async (req, res) => {
+router.post('/payment/refund', authenticatePaymentActor, requirePaymentAdmin(), async (req, res) => {
   try {
     const { chargeId, amount, reason } = req.body;
 
@@ -152,7 +517,7 @@ router.post('/payment/refund', async (req, res) => {
  * POST /api/payment/distribute
  * Processa distribuição líquida para o motorista
  */
-router.post('/payment/distribute', async (req, res) => {
+router.post('/payment/distribute', authenticatePaymentActor, requirePaymentAdmin(), async (req, res) => {
   try {
     const { rideId, driverId, wooviClientId, totalAmount } = req.body;
 
@@ -193,7 +558,7 @@ router.post('/payment/distribute', async (req, res) => {
  * GET /api/payment/status/:chargeId
  * Verifica status de um pagamento via chargeId da Woovi
  */
-router.get('/payment/status/:chargeId', async (req, res) => {
+router.get('/payment/status/:chargeId', authenticatePaymentActor, async (req, res) => {
   try {
     const { chargeId } = req.params;
 
@@ -226,7 +591,7 @@ router.get('/payment/status/:chargeId', async (req, res) => {
  * GET /api/payment/driver-balance/:driverId
  * Obtém saldo atual do motorista
  */
-router.get('/payment/driver-balance/:driverId', async (req, res) => {
+router.get('/payment/driver-balance/:driverId', authenticatePaymentActor, requireDriverScopeFromParam, async (req, res) => {
   try {
     const { driverId } = req.params;
     
@@ -243,9 +608,20 @@ router.get('/payment/driver-balance/:driverId', async (req, res) => {
       res.status(200).json({
         success: true,
         balance: result.balance,
+        balanceCents: result.balanceCents,
         totalEarnings: result.totalEarnings,
         lastUpdated: result.lastUpdated,
         lastRideId: result.lastRideId,
+        subscriptionPendingFeeCents: result.subscriptionPendingFeeCents || 0,
+        subscriptionPendingFee: result.subscriptionPendingFee || 0,
+        subscriptionStatus: result.subscriptionStatus || 'active',
+        billingStatus: result.billingStatus || 'active',
+        subscriptionCollectionMode: result.subscriptionCollectionMode || 'withdrawal',
+        subscriptionDailyFeeCents: result.subscriptionDailyFeeCents || 0,
+        subscriptionDailyFee: result.subscriptionDailyFee || 0,
+        subscriptionWaveId: result.subscriptionWaveId || null,
+        availableAfterSubscriptionCents: result.availableAfterSubscriptionCents || 0,
+        availableAfterSubscription: result.availableAfterSubscription || 0,
         message: result.message || null
       });
     } else {
@@ -269,7 +645,11 @@ router.get('/payment/driver-balance/:driverId', async (req, res) => {
  * GET /api/payment/driver-balance/:driverId/transactions
  * Obtém histórico de transações do motorista
  */
-router.get('/payment/driver-balance/:driverId/transactions', async (req, res) => {
+router.get(
+  '/payment/driver-balance/:driverId/transactions',
+  authenticatePaymentActor,
+  requireDriverScopeFromParam,
+  async (req, res) => {
   try {
     const { driverId } = req.params;
     const limit = parseInt(req.query.limit) || 50;
@@ -329,17 +709,32 @@ router.get('/payment/driver-balance/:driverId/transactions', async (req, res) =>
       details: error.message
     });
   }
-});
+  }
+);
 
 /**
  * POST /api/payment/driver-balance/:driverId/withdraw
  * Solicita saque do motorista com regra de taxa:
  * - abaixo de R$500, cobra R$1,00
  */
-router.post('/payment/driver-balance/:driverId/withdraw', async (req, res) => {
+router.post(
+  '/payment/driver-balance/:driverId/withdraw',
+  authenticatePaymentActor,
+  requireDriverScopeFromParam,
+  async (req, res) => {
   try {
+    if (!isLaunchFeatureEnabled('driverWithdrawalsEnabled', false)) {
+      return respondWithdrawalsDisabled(res);
+    }
+
     const { driverId } = req.params;
     const { amount, pixKey } = req.body || {};
+    const requestId = String(
+      req.body?.requestId ||
+      req.headers['idempotency-key'] ||
+      req.headers['x-idempotency-key'] ||
+      ''
+    ).trim();
 
     if (!driverId) {
       return res.status(400).json({
@@ -360,6 +755,26 @@ router.post('/payment/driver-balance/:driverId/withdraw', async (req, res) => {
         success: false,
         error: 'pixKey é obrigatório'
       });
+    }
+
+    if (!requestId || requestId.length < 8) {
+      return res.status(400).json({
+        success: false,
+        error: 'requestId/idempotency-key é obrigatório para saque',
+        code: 'WITHDRAWAL_IDEMPOTENCY_KEY_REQUIRED'
+      });
+    }
+
+    const passwordVerification = await verifyWithdrawalAppPassword({
+      actor: req.paymentActor,
+      driverId,
+      password: req.body?.appPassword || req.body?.password
+    });
+
+    if (!passwordVerification.ok) {
+      return res
+        .status(passwordVerification.statusCode || 403)
+        .json(passwordVerification.payload);
     }
 
     const amountCents = Math.round(Number(amount) * 100);
@@ -389,7 +804,8 @@ router.post('/payment/driver-balance/:driverId/withdraw', async (req, res) => {
     const result = await paymentService.requestDriverWithdrawal({
       driverId,
       amountCents,
-      pixKey: String(pixKey).trim()
+      pixKey: String(pixKey).trim(),
+      requestId
     });
 
     if (result.success) {
@@ -399,10 +815,17 @@ router.post('/payment/driver-balance/:driverId/withdraw', async (req, res) => {
       });
     }
 
-    const statusCode = String(result.error || '').toLowerCase().includes('saldo insuficiente') ? 400 : 500;
+    const insufficientBalanceCodes = new Set(['WITHDRAWAL_INSUFFICIENT_BALANCE']);
+    const statusCode =
+      insufficientBalanceCodes.has(String(result.code || '')) ||
+      String(result.error || '').toLowerCase().includes('saldo insuficiente')
+        ? 400
+        : 500;
     return res.status(statusCode).json({
       success: false,
-      error: result.error || 'Erro ao processar saque'
+      error: result.error || 'Erro ao processar saque',
+      code: result.code || null,
+      details: result.details || null
     });
   } catch (error) {
     logError(error, '❌ Erro na rota de saque do motorista:', { service: 'payment-routes' });
@@ -412,14 +835,19 @@ router.post('/payment/driver-balance/:driverId/withdraw', async (req, res) => {
       details: error.message
     });
   }
-});
+  }
+);
 
 /**
  * GET /api/payment/withdrawals/pending
  * Lista saques pendentes para processamento
  */
-router.get('/payment/withdrawals/pending', async (req, res) => {
+router.get('/payment/withdrawals/pending', authenticatePaymentActor, requirePaymentAdmin(), async (req, res) => {
   try {
+    if (!isLaunchFeatureEnabled('driverWithdrawalsEnabled', false)) {
+      return respondWithdrawalsDisabled(res);
+    }
+
     const limit = Number(req.query.limit || 50);
     const result = await paymentService.listPendingWithdrawals(limit);
 
@@ -442,8 +870,12 @@ router.get('/payment/withdrawals/pending', async (req, res) => {
  * POST /api/payment/withdrawals/:withdrawalId/process
  * Processa saque pendente via Woovi Pix Out.
  */
-router.post('/payment/withdrawals/:withdrawalId/process', async (req, res) => {
+router.post('/payment/withdrawals/:withdrawalId/process', authenticatePaymentActor, requirePaymentAdmin(), async (req, res) => {
   try {
+    if (!isLaunchFeatureEnabled('driverWithdrawalsEnabled', false)) {
+      return respondWithdrawalsDisabled(res);
+    }
+
     const { withdrawalId } = req.params;
     const actorId = req.body?.actorId || 'system';
 
@@ -467,7 +899,7 @@ router.post('/payment/withdrawals/:withdrawalId/process', async (req, res) => {
  * GET /api/payment/calculate-net
  * Calcula valor líquido para uma corrida
  */
-router.get('/payment/calculate-net', async (req, res) => {
+router.get('/payment/calculate-net', authenticatePaymentActor, requirePaymentAdmin(), async (req, res) => {
   try {
     const { amount } = req.query;
 
@@ -496,8 +928,3 @@ router.get('/payment/calculate-net', async (req, res) => {
 });
 
 module.exports = router;
-
-
-
-
-

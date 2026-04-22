@@ -256,34 +256,8 @@ class QueueWorker {
      */
     async getActiveRegions() {
         try {
-            // Buscar todas as chaves de filas pendentes com SCAN para evitar bloqueio do Redis.
-            const RedisScan = require('../utils/redis-scan');
-            const queueKeys = await RedisScan.scanKeys(this.redis, 'ride_queue:*:pending');
-
-            if (!queueKeys || queueKeys.length === 0) {
-                return [];
-            }
-
-            const regions = [];
-            const regionSet = new Set(); // Para evitar duplicatas
-
-            for (const key of queueKeys) {
-                // Extrair regionHash da chave
-                // Exemplo: ride_queue:75cmd:pending → 75cmd
-                const match = key.match(/ride_queue:([^:]+):pending/);
-                if (match && match[1]) {
-                    const regionHash = match[1];
-                    
-                    // Verificar se há corridas pendentes nesta região
-                    const count = await this.redis.zcard(key);
-                    if (count > 0 && !regionSet.has(regionHash)) {
-                        regionSet.add(regionHash);
-                        regions.push(regionHash);
-                    }
-                }
-            }
-
-            return regions;
+            // Hotfix de performance: reutiliza índice/cache do manager para evitar SCAN redundante em loop.
+            return await rideQueueManager.getActiveRegions();
         } catch (error) {
             logger.error(`❌ [QueueWorker] Erro ao buscar regiões ativas:`, error);
             return [];

@@ -1,4 +1,5 @@
 function createSocketServer({ server, socketIo, corsOptions, app, logStructured }) {
+    const enableRedisAdapter = String(process.env.ENABLE_SOCKETIO_REDIS_ADAPTER || 'false').toLowerCase() === 'true';
     // Configurações de Socket.IO alinhadas com a política CORS central do server.js
     const socketConnectTimeoutMs = Number.parseInt(process.env.SOCKET_CONNECT_TIMEOUT_MS || '60000', 10);
     const socketPingTimeoutMs = Number.parseInt(process.env.SOCKET_PING_TIMEOUT_MS || '45000', 10);
@@ -66,6 +67,27 @@ function createSocketServer({ server, socketIo, corsOptions, app, logStructured 
 
     // ✅ Expor io globalmente para health checks e workers
     global.io = io;
+
+    if (enableRedisAdapter) {
+        const SocketIORedisAdapter = require('../services/socket-io-adapter');
+        const adapter = new SocketIORedisAdapter(process.env.REDIS_URL);
+        adapter.initialize(io).then(() => {
+            app.locals.socketIoRedisAdapter = adapter;
+            global.socketIoRedisAdapter = adapter;
+            logStructured('info', 'Socket.IO Redis Adapter ativo no processo realtime', {
+                service: 'websocket'
+            });
+        }).catch((error) => {
+            logStructured('warn', 'Falha ao ativar Socket.IO Redis Adapter no processo realtime', {
+                service: 'websocket',
+                error: error.message
+            });
+        });
+    } else {
+        logStructured('info', 'Socket.IO Redis Adapter desabilitado por configuração', {
+            service: 'websocket'
+        });
+    }
 
     return io;
 }

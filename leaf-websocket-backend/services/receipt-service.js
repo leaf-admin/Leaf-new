@@ -12,17 +12,12 @@
 const { logger } = require('../utils/logger');
 const crypto = require('crypto');
 const PDFDocument = require('pdfkit');
+const PaymentService = require('./payment-service');
 
 class ReceiptService {
     constructor() {
         this.GOOGLE_MAPS_API_KEY = process.env.GOOGLE_MAPS_API_KEY || process.env.GEO_KEY;
-        this.OPERATIONAL_FEES = {
-            low: 0.79,    // Corridas até R$ 10,00
-            medium: 0.99, // Corridas acima de R$ 10,00 e abaixo de R$ 25,00
-            high: 1.49    // Corridas acima de R$ 25,00
-        };
-        this.WOOVI_FEE_PERCENTAGE = 0.008; // 0,8% da transação
-        this.WOOVI_FEE_MINIMUM = 0.50; // R$ 0,50 mínimo
+        this.paymentService = new PaymentService();
     }
 
     /**
@@ -256,25 +251,15 @@ class ReceiptService {
      */
     calculateFinancialBreakdown(rideData) {
         const totalFare = parseFloat(rideData.finalPrice || rideData.customer_paid || rideData.estimate || 0);
-
-        // Calcular taxa operacional baseada no valor (3 faixas)
-        let operationalFee;
-        if (totalFare <= 10.00) {
-            // Até R$ 10,00
-            operationalFee = this.OPERATIONAL_FEES.low;
-        } else if (totalFare <= 25.00) {
-            // Acima de R$ 10,00 e abaixo de R$ 25,00
-            operationalFee = this.OPERATIONAL_FEES.medium;
-        } else {
-            // Acima de R$ 25,00
-            operationalFee = this.OPERATIONAL_FEES.high;
-        }
-
-        // Taxa Woovi: 0,8% com mínimo de R$ 0,50
-        const wooviFee = Math.max(totalFare * this.WOOVI_FEE_PERCENTAGE, this.WOOVI_FEE_MINIMUM);
-
-        // Calcular valor líquido para o motorista
-        const driverAmount = Math.max(0, totalFare - operationalFee - wooviFee);
+        const tollFee = parseFloat(rideData.tollFee || rideData.toll_fee || rideData.pedagio || 0);
+        const breakdown = this.paymentService.calculateFareBreakdownFromReais(totalFare, tollFee);
+        const operationalFee = Number.isFinite(Number(breakdown?.operationalFee)) ? Number(breakdown.operationalFee) : 0;
+        const wooviFee = Number.isFinite(Number(breakdown?.paymentIntermediationFee))
+            ? Number(breakdown.paymentIntermediationFee)
+            : 0;
+        const driverAmount = Number.isFinite(Number(breakdown?.driverNetAmount))
+            ? Number(breakdown.driverNetAmount)
+            : Math.max(0, totalFare - operationalFee - wooviFee);
 
         return {
             // Valor pago pelo passageiro
@@ -650,5 +635,4 @@ class ReceiptService {
 }
 
 module.exports = ReceiptService;
-
 

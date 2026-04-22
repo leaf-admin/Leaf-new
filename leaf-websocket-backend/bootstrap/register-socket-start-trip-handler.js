@@ -1,3 +1,14 @@
+const { metrics } = require('../utils/prometheus-metrics');
+const pricingH3ReadModelService = require('../services/pricing-h3-read-model-service');
+
+function mapStartTripReason(errorMessage = '') {
+    const normalized = String(errorMessage || '').toLowerCase();
+    if (normalized.includes('não encontrada') || normalized.includes('nao encontrada')) return 'booking_not_found';
+    if (normalized.includes('após registrar chegada') || normalized.includes('arrival')) return 'arrival_not_registered';
+    if (normalized.includes('pagamento não confirmado') || normalized.includes('pagamento não encontrado')) return 'payment_not_confirmed';
+    return 'command_error';
+}
+
 function registerSocketStartTripHandler({
     socket,
     io,
@@ -9,6 +20,7 @@ function registerSocketStartTripHandler({
     getSocketMetadata,
     auditService,
     redisPool,
+    idempotencyService,
     StartTripCommand,
     getTracer,
     createCommandSpan,
@@ -24,6 +36,8 @@ function registerSocketStartTripHandler({
     socket.on('startTrip', async (data) => {
         // ✅ OBSERVABILIDADE: Gerar traceId no início do handler
         const traceId = extractTraceIdFromEvent(data, socket);
+        let outerIdempotencyKey = null;
+        let outerIdempotencyOwner = false;
         await traceContext.runWithTraceId(traceId, async () => {
             try {
                 // ✅ Obter driverId do socket (autenticado)
@@ -36,26 +50,7 @@ function registerSocketStartTripHandler({
                 });
 
                 const startTime = Date.now();
-
-                // ✅ NOVO: Rate Limiting (antes de validação de pagamento)
-                const rateLimitCheck = await rateLimiterService.checkRateLimit(driverId, 'startTrip');
-
-                if (!rateLimitCheck.allowed) {
-                    socket.emit('tripStartError', {
-                        error: 'Muitas requisições',
-                        message: `Você excedeu o limite de ${rateLimitCheck.limit} requisições por minuto. Tente novamente em ${Math.ceil((rateLimitCheck.resetAt - Date.now()) / 1000)} segundos.`,
-                        code: 'RATE_LIMIT_EXCEEDED',
-                        limit: rateLimitCheck.limit,
-                        remaining: rateLimitCheck.remaining,
-                        resetAt: rateLimitCheck.resetAt
-                    });
-                    logStructured('warn', 'Rate limit excedido', {
-                        driverId,
-                        eventType: 'startTrip',
-                        limit: rateLimitCheck.limit
-                    });
-                    return;
-                }
+                const hotpathPath = 'start_trip';
 
                 logStructured('info', 'Início de viagem recebido', {
                     driverId,
@@ -94,6 +89,63 @@ function registerSocketStartTripHandler({
 
                 if (!driverId) {
                     socket.emit('tripStartError', { error: 'Motorista não autenticado' });
+                    return;
+                }
+
+                const idempotencyKey = data.idempotencyKey || idempotencyService.generateKey(
+                    driverId,
+                    'startTrip',
+                    bookingId
+                );
+                outerIdempotencyKey = idempotencyKey;
+
+                const idempotencyCheck = await idempotencyService.beginRequest(idempotencyKey, {
+                    joinWaitMs: Number.parseInt(
+                        process.env.IDEMPOTENCY_START_TRIP_JOIN_WAIT_MS
+                        || process.env.IDEMPOTENCY_JOIN_WAIT_MS
+                        || '10000',
+                        10
+                    )
+                });
+
+                if (!idempotencyCheck.isNew) {
+                    if (idempotencyCheck.cachedResult) {
+                        socket.emit('tripStarted', idempotencyCheck.cachedResult);
+                        metrics.recordHotpathReason(hotpathPath, 'duplicate_joined');
+                        metrics.recordHotpathLatency(hotpathPath, Math.max(0, (Date.now() - startTime) / 1000), true);
+                        return;
+                    }
+
+                    socket.emit('tripStartError', {
+                        error: 'Requisição duplicada',
+                        message: 'Esta ação já está sendo processada. Aguarde...',
+                        code: 'DUPLICATE_REQUEST',
+                        retryAfterSec: 1
+                    });
+                    metrics.recordHotpathReason(hotpathPath, 'duplicate_rejected');
+                    metrics.recordHotpathLatency(hotpathPath, Math.max(0, (Date.now() - startTime) / 1000), false);
+                    return;
+                }
+                outerIdempotencyOwner = true;
+
+                const rateLimitCheck = await rateLimiterService.checkRateLimit(driverId, 'startTrip');
+
+                if (!rateLimitCheck.allowed) {
+                    socket.emit('tripStartError', {
+                        error: 'Muitas requisições',
+                        message: `Você excedeu o limite de ${rateLimitCheck.limit} requisições por minuto. Tente novamente em ${Math.ceil((rateLimitCheck.resetAt - Date.now()) / 1000)} segundos.`,
+                        code: 'RATE_LIMIT_EXCEEDED',
+                        limit: rateLimitCheck.limit,
+                        remaining: rateLimitCheck.remaining,
+                        resetAt: rateLimitCheck.resetAt
+                    });
+                    logStructured('warn', 'Rate limit excedido', {
+                        driverId,
+                        eventType: 'startTrip',
+                        limit: rateLimitCheck.limit
+                    });
+                    outerIdempotencyOwner = false;
+                    await idempotencyService.releaseInflight(idempotencyKey);
                     return;
                 }
 
@@ -284,7 +336,6 @@ function registerSocketStartTripHandler({
                 });
 
                 // ✅ MÉTRICAS: Preparar para registrar viagem iniciada
-                const { metrics } = require('../utils/prometheus-metrics');
                 const commandStartTime = Date.now();
 
                 let result;
@@ -327,6 +378,13 @@ function registerSocketStartTripHandler({
                     socket.emit('tripStartError', {
                         error: result.error || 'Erro ao iniciar viagem'
                     });
+                    metrics.recordHotpathReason(hotpathPath, mapStartTripReason(result.error));
+                    metrics.recordHotpathStageLatency(hotpathPath, 'command', Math.max(0, (Date.now() - commandStartTime) / 1000), false);
+                    metrics.recordHotpathLatency(hotpathPath, Math.max(0, (Date.now() - startTime) / 1000), false);
+                    if (outerIdempotencyOwner && outerIdempotencyKey) {
+                        outerIdempotencyOwner = false;
+                        await idempotencyService.releaseInflight(outerIdempotencyKey);
+                    }
                     return;
                 }
 
@@ -416,6 +474,11 @@ function registerSocketStartTripHandler({
                             });
                         }
 
+                        await pricingH3ReadModelService.applyBookingSnapshot(redis, {
+                            bookingId,
+                            ...activeBookingData
+                        }).catch(() => null);
+
                         if (io.activeBookings && io.activeBookings.has(bookingId)) {
                             io.activeBookings.set(bookingId, {
                                 ...io.activeBookings.get(bookingId),
@@ -440,6 +503,8 @@ function registerSocketStartTripHandler({
                     startLocation: resultStartLocation,
                     timestamp: new Date().toISOString()
                 };
+                await idempotencyService.cacheResult(idempotencyKey, tripStartedData);
+                outerIdempotencyOwner = false;
 
                 // ✅ Notificar driver via room (escalável e confiável)
                 io.to(`driver_${driverId}`).emit('tripStarted', tripStartedData);
@@ -450,6 +515,8 @@ function registerSocketStartTripHandler({
                 });
 
                 const totalLatency = Date.now() - startTime;
+                metrics.recordHotpathStageLatency(hotpathPath, 'command', Math.max(0, (Date.now() - commandStartTime) / 1000), true);
+                metrics.recordHotpathLatency(hotpathPath, Math.max(0, totalLatency / 1000), true);
                 logStructured('info', 'startTrip concluído com sucesso', {
                     driverId,
                     bookingId,
@@ -586,6 +653,10 @@ function registerSocketStartTripHandler({
                 }
 
             } catch (error) {
+                if (outerIdempotencyOwner && outerIdempotencyKey) {
+                    outerIdempotencyOwner = false;
+                    await idempotencyService.releaseInflight(outerIdempotencyKey).catch(() => null);
+                }
                 logStructured('error', 'Erro ao iniciar viagem', {
                     service: 'websocket',
                     operation: 'startTrip',
@@ -594,6 +665,7 @@ function registerSocketStartTripHandler({
                     error: error.message,
                     stack: error.stack
                 });
+                metrics.recordHotpathReason('start_trip', 'unexpected_error');
                 socket.emit('tripStartError', { error: 'Erro ao iniciar viagem' });
             }
         }); // Fecha traceContext.runWithTraceId

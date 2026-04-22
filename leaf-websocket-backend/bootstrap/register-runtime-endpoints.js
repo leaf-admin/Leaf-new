@@ -1,16 +1,36 @@
 function registerRuntimeEndpoints({ app, io, VPS_CONFIG, logStructured }) {
     const legacyRuntimeEndpointsEnabled =
         String(process.env.ENABLE_LEGACY_RUNTIME_ENDPOINTS || 'false').toLowerCase() === 'true';
+    const runtimeAccessToken = String(
+        process.env.RUNTIME_ADMIN_TOKEN || process.env.RESTART_TOKEN || ''
+    ).trim();
+    const runtimeAccessTokenConfigured = runtimeAccessToken.length > 0;
 
-    // ✅ Endpoint de restart (apenas em desenvolvimento ou com token)
-    app.post('/restart', async (req, res) => {
-        const restartToken = req.headers['x-restart-token'] || req.query.token;
-        const validToken = process.env.RESTART_TOKEN || 'dev-restart-token-123';
-
-        if (restartToken !== validToken && process.env.NODE_ENV === 'production') {
-            return res.status(403).json({ error: 'Token inválido' });
+    const enforceRuntimeAccess = (req, res, next) => {
+        if (!runtimeAccessTokenConfigured) {
+            if (process.env.NODE_ENV === 'production') {
+                return res.status(503).json({
+                    error: 'Token de runtime nao configurado',
+                    hint: 'Configure RUNTIME_ADMIN_TOKEN no ambiente'
+                });
+            }
+            return next();
         }
 
+        const providedToken =
+            req.headers['x-runtime-token'] ||
+            req.headers['x-restart-token'] ||
+            req.query.token;
+
+        if (providedToken !== runtimeAccessToken) {
+            return res.status(403).json({ error: 'Token invalido' });
+        }
+
+        return next();
+    };
+
+    // ✅ Endpoint de restart (apenas em desenvolvimento ou com token)
+    app.post('/restart', enforceRuntimeAccess, async (req, res) => {
         res.json({
             message: 'Reiniciando servidor...',
             timestamp: new Date().toISOString()
@@ -25,7 +45,7 @@ function registerRuntimeEndpoints({ app, io, VPS_CONFIG, logStructured }) {
 
     // Metrics endpoint ultra-otimizado
     // ✅ FASE 2.1: Endpoint Prometheus (formato padrão)
-    app.get('/metrics', async (req, res) => {
+    app.get('/metrics', enforceRuntimeAccess, async (req, res) => {
         try {
             const { getMetrics } = require('../utils/prometheus-metrics');
             const metrics = await getMetrics();
@@ -43,7 +63,7 @@ function registerRuntimeEndpoints({ app, io, VPS_CONFIG, logStructured }) {
 
     if (legacyRuntimeEndpointsEnabled) {
         // Endpoint antigo (mantido apenas quando legado estiver explicitamente habilitado).
-        app.get('/metrics-old', async (req, res) => {
+        app.get('/metrics-old', enforceRuntimeAccess, async (req, res) => {
             try {
                 const metrics = {
                     timestamp: new Date().toISOString(),
@@ -80,7 +100,7 @@ function registerRuntimeEndpoints({ app, io, VPS_CONFIG, logStructured }) {
             }
         });
 
-        app.get('/stats', async (req, res) => {
+        app.get('/stats', enforceRuntimeAccess, async (req, res) => {
             try {
                 const stats = {
                     timestamp: new Date().toISOString(),

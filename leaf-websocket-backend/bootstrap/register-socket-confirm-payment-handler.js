@@ -16,6 +16,8 @@ function registerSocketConfirmPaymentHandler({
     socket.on('confirmPayment', async (data) => {
         // ✅ OBSERVABILIDADE: Gerar traceId no início do handler
         const traceId = extractTraceIdFromEvent(data, socket);
+        let outerIdempotencyKey = null;
+        let outerIdempotencyOwner = false;
         await traceContext.runWithTraceId(traceId, async () => {
             try {
                 logStructured('info', 'confirmPayment iniciado', {
@@ -158,8 +160,11 @@ function registerSocketConfirmPaymentHandler({
                     'confirmPayment',
                     `${bookingId}_${paymentId || Date.now()}`
                 );
+                outerIdempotencyKey = idempotencyKey;
 
-                const idempotencyCheck = await idempotencyService.checkAndSet(idempotencyKey);
+                const idempotencyCheck = await idempotencyService.beginRequest(idempotencyKey, {
+                    joinWaitMs: Number.parseInt(process.env.IDEMPOTENCY_JOIN_WAIT_MS || '1500', 10)
+                });
 
                 if (!idempotencyCheck.isNew) {
                     // Requisição duplicada - retornar resultado cached ou erro
@@ -187,6 +192,7 @@ function registerSocketConfirmPaymentHandler({
                         return;
                     }
                 }
+                outerIdempotencyOwner = true;
 
                 // ✅ NOVO: Salvar payment holding como "in_holding" para permitir startTrip
                 try {
@@ -328,6 +334,13 @@ function registerSocketConfirmPaymentHandler({
                     amount,
                     latency_ms: totalLatency
                 });
+                await idempotencyService.cacheResult(idempotencyKey, {
+                    success: true,
+                    bookingId,
+                    message: 'Pagamento confirmado com sucesso',
+                    data: paymentData
+                });
+                outerIdempotencyOwner = false;
 
                 // ======================== TESTE AUTOMÁTICO ========================
                 // Simular fluxo completo automaticamente após pagamento confirmado
@@ -405,6 +418,10 @@ function registerSocketConfirmPaymentHandler({
                 }
 
             } catch (error) {
+                if (outerIdempotencyOwner && outerIdempotencyKey) {
+                    outerIdempotencyOwner = false;
+                    await idempotencyService.releaseInflight(outerIdempotencyKey).catch(() => null);
+                }
                 logStructured('error', 'Erro ao confirmar pagamento', {
                     userId: socket.userId || data?.customerId || socket.id,
                     eventType: 'confirmPayment',

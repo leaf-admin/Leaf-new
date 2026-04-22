@@ -10,6 +10,19 @@
 const redisPool = require('../utils/redis-pool');
 const { logger } = require('../utils/logger');
 
+const TERMINAL_BOOKING_STATES = new Set([
+    'COMPLETED',
+    'CANCELED',
+    'CANCELLED',
+    'REJECTED',
+    'EXPIRED',
+    'NO_DRIVERS_FOUND'
+]);
+
+function normalizeBookingState(value) {
+    return String(value || '').trim().toUpperCase();
+}
+
 class DriverLockManager {
     constructor() {
         this.redis = redisPool.getConnection();
@@ -85,9 +98,40 @@ class DriverLockManager {
         try {
             const lockKey = `driver_lock:${driverId}`;
             const bookingId = await this.redis.get(lockKey);
-            
+
+            if (!bookingId) {
+                return {
+                    isLocked: false,
+                    bookingId: null
+                };
+            }
+
+            const [bookingStateRaw, bookingStatusRaw] = await this.redis.hmget(
+                `booking:${bookingId}`,
+                'state',
+                'status'
+            );
+            const bookingState = normalizeBookingState(bookingStateRaw);
+            const bookingStatus = normalizeBookingState(bookingStatusRaw);
+            const staleLockDetected = (
+                (!bookingState && !bookingStatus) ||
+                TERMINAL_BOOKING_STATES.has(bookingState) ||
+                TERMINAL_BOOKING_STATES.has(bookingStatus)
+            );
+
+            if (staleLockDetected) {
+                await this.redis.del(lockKey);
+                logger.warn(`⚠️ Lock stale auto-liberado para driver ${driverId} (booking: ${bookingId}, state: ${bookingState || bookingStatus || 'MISSING'})`);
+                return {
+                    isLocked: false,
+                    bookingId: null,
+                    recovered: true,
+                    staleBookingId: bookingId
+                };
+            }
+
             return {
-                isLocked: bookingId !== null,
+                isLocked: true,
                 bookingId: bookingId
             };
         } catch (error) {
@@ -212,5 +256,4 @@ class DriverLockManager {
 const driverLockManager = new DriverLockManager();
 
 module.exports = driverLockManager;
-
 

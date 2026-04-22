@@ -1,8 +1,12 @@
 const jwt = require('jsonwebtoken');
 const admin = require('firebase-admin');
 const { logError } = require('../utils/logger');
+const { resolveJwtSecret } = require('../utils/jwt-secret-resolver');
+const { getAdminUser } = require('../utils/admin-user-cache');
 
-const JWT_SECRET = process.env.JWT_SECRET || process.env.ADMIN_JWT_SECRET || 'leaf-admin-secret-key-change-in-production';
+const JWT_SECRET = resolveJwtSecret(['JWT_SECRET', 'ADMIN_JWT_SECRET'], {
+  context: 'jwt-auth'
+});
 
 /**
  * Middleware para autenticar requisições usando JWT
@@ -30,17 +34,19 @@ const authenticateJWT = async (req, res, next) => {
     }
 
     // Verificar se usuário ainda existe e está ativo
-    const firestore = admin.firestore();
-    const userDoc = await firestore.collection('adminUsers').doc(decoded.userId).get();
-    
-    if (!userDoc.exists || userDoc.data().active === false) {
+    const userRecord = await getAdminUser(decoded.userId, {
+      source: 'jwt-auth.authenticateJWT',
+      maxAgeMs: 15 * 1000
+    });
+
+    if (!userRecord.exists || userRecord.data?.active === false) {
       return res.status(403).json({
         success: false,
         error: 'Usuário não encontrado ou inativo'
       });
     }
 
-    const userData = userDoc.data();
+    const userData = userRecord.data || {};
 
     // Adicionar dados do usuário ao request
     req.user = {
@@ -126,6 +132,3 @@ module.exports = {
   requirePermission,
   requireRole
 };
-
-
-

@@ -240,6 +240,21 @@ const hotpathDuration = new promClient.Histogram({
     registers: [register]
 });
 
+const hotpathStageDuration = new promClient.Histogram({
+    name: 'leaf_hotpath_stage_duration_seconds',
+    help: 'Latência por estágio das operações críticas do hot path',
+    labelNames: ['path', 'stage', 'status'],
+    buckets: [0.0005, 0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5],
+    registers: [register]
+});
+
+const hotpathReasonTotal = new promClient.Counter({
+    name: 'leaf_hotpath_reason_total',
+    help: 'Total de reason codes canônicos observados no hot path',
+    labelNames: ['path', 'reason'],
+    registers: [register]
+});
+
 // Volume de operações Redis no hot path
 const redisHotpathOps = new promClient.Counter({
     name: 'leaf_redis_hotpath_ops_total',
@@ -450,7 +465,9 @@ const metrics = {
     
     // Idempotency
     recordIdempotency: (operation, hit) => {
-        const result = hit ? 'hit' : 'miss';
+        const result = typeof hit === 'string'
+            ? sanitizeLabelValue(hit, 'unknown')
+            : (hit ? 'hit' : 'miss');
         idempotencyTotal.inc({
             operation: sanitizeLabelValue(operation, 'unknown'),
             result
@@ -517,6 +534,21 @@ const metrics = {
             path: sanitizeLabelValue(path, 'unknown'),
             status: success ? 'success' : 'failure'
         }, Number.isFinite(durationSeconds) && durationSeconds >= 0 ? durationSeconds : 0);
+    },
+
+    recordHotpathStageLatency: (path, stage, durationSeconds, success = true) => {
+        hotpathStageDuration.observe({
+            path: sanitizeLabelValue(path, 'unknown'),
+            stage: sanitizeLabelValue(stage, 'unknown'),
+            status: success ? 'success' : 'failure'
+        }, Number.isFinite(durationSeconds) && durationSeconds >= 0 ? durationSeconds : 0);
+    },
+
+    recordHotpathReason: (path, reason, count = 1) => {
+        hotpathReasonTotal.inc({
+            path: sanitizeLabelValue(path, 'unknown'),
+            reason: sanitizeLabelValue(reason, 'unknown')
+        }, Number.isFinite(count) && count > 0 ? count : 1);
     },
 
     // Redis ops in hot path

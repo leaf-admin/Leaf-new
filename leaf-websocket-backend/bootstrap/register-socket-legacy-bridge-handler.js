@@ -2,6 +2,7 @@ const firebaseConfig = require('../firebase-config');
 const chatPersistenceService = require('../services/chat-persistence-service');
 const promotionService = require('../services/promotion-service');
 const ratingService = require('../services/rating-service');
+const { assessDriverArrivalAtPickup } = require('../utils/pickup-arrival-policy');
 
 function registerSocketLegacyBridgeHandler({
     socket,
@@ -172,19 +173,47 @@ function registerSocketLegacyBridgeHandler({
             const rideId = data.rideId || data.bookingId || null;
             const location = data.location || null;
 
-            socket.emit('arrivedAtPickup', {
-                success: true,
-                rideId,
-                bookingId: rideId,
-                location,
-                timestamp: new Date().toISOString(),
-                bridgeMode: 'compat'
-            });
-
             if (rideId) {
                 const redis = redisPool.getConnection();
                 const bookingData = await redis.hgetall(`booking:${rideId}`);
+                const arrivalAssessment = await assessDriverArrivalAtPickup({
+                    redis,
+                    driverId: socket.userId || null,
+                    booking: bookingData,
+                    location
+                });
+
+                if (!arrivalAssessment.allowed) {
+                    socket.emit('arrivedAtPickup', {
+                        success: false,
+                        error: arrivalAssessment.message,
+                        code: arrivalAssessment.code,
+                        bookingId: rideId,
+                        bridgeMode: 'compat',
+                        details: {
+                            distanceMeters: arrivalAssessment.distanceMeters ?? null,
+                            toleranceMeters: arrivalAssessment.toleranceMeters ?? null
+                        }
+                    });
+                    return;
+                }
+
                 const customerId = bookingData?.customerId || bookingData?.customer || null;
+                const boardingDeadlineAt = new Date(Date.now() + 120000).toISOString();
+
+                socket.emit('arrivedAtPickup', {
+                    success: true,
+                    rideId,
+                    bookingId: rideId,
+                    location,
+                    pickupToleranceReached: true,
+                    distanceMeters: arrivalAssessment.distanceMeters,
+                    toleranceMeters: arrivalAssessment.toleranceMeters,
+                    boardingWindowSec: 120,
+                    boardingDeadlineAt,
+                    timestamp: new Date().toISOString(),
+                    bridgeMode: 'compat'
+                });
                 if (customerId) {
                     io.to(`customer_${customerId}`).emit('arrivedAtPickup', {
                         success: true,
@@ -192,6 +221,11 @@ function registerSocketLegacyBridgeHandler({
                         bookingId: rideId,
                         location,
                         driverId: socket.userId || null,
+                        pickupToleranceReached: true,
+                        distanceMeters: arrivalAssessment.distanceMeters,
+                        toleranceMeters: arrivalAssessment.toleranceMeters,
+                        boardingWindowSec: 120,
+                        boardingDeadlineAt,
                         timestamp: new Date().toISOString(),
                         bridgeMode: 'compat'
                     });

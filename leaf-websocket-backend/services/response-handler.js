@@ -23,6 +23,24 @@ const eventSourcing = require('./event-sourcing');
 const { EVENT_TYPES } = require('./event-sourcing');
 const { logger } = require('../utils/logger');
 const FCMService = require('./fcm-service');
+const { getDriverResponseTimeoutSeconds } = require('../utils/dispatch-config');
+
+const parsePositiveInt = (value, fallback) => {
+    const parsed = Number.parseInt(value, 10);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+};
+const parsedDriverReofferCooldownSeconds = parsePositiveInt(
+    process.env.DRIVER_REOFFER_COOLDOWN_SECONDS,
+    30
+);
+const DRIVER_REOFFER_COOLDOWN_SECONDS = process.env.NODE_ENV === 'test'
+    ? parsedDriverReofferCooldownSeconds
+    : Math.max(30, parsedDriverReofferCooldownSeconds);
+const DRIVER_REOFFER_MAX_REJECTIONS = parsePositiveInt(
+    process.env.DRIVER_REOFFER_MAX_REJECTIONS,
+    2
+);
+const DRIVER_RESPONSE_TIMEOUT_SECONDS = getDriverResponseTimeoutSeconds();
 
 class ResponseHandler {
     constructor(io) {
@@ -32,6 +50,57 @@ class ResponseHandler {
         this.dispatcher = new DriverNotificationDispatcher(this.redis, io);
         this.fcmService = new FCMService();
         this.rejectionTimers = new Map(); // ✅ Map para armazenar timers de rejeição: bookingId_driverId -> timeoutId
+    }
+
+    getRideExcludedDriversKey(bookingId) {
+        return `ride_excluded_drivers:${bookingId}`;
+    }
+
+    getRideNotificationsKey(bookingId) {
+        return `ride_notifications:${bookingId}`;
+    }
+
+    getRideRejectionCountKey(bookingId) {
+        return `ride_rejection_count:${bookingId}`;
+    }
+
+    getRideReofferCooldownKey(bookingId, driverId) {
+        return `ride_reoffer_cooldown:${bookingId}:${driverId}`;
+    }
+
+    normalizeAwaitingResponseResumeState(state) {
+        switch (state) {
+        case RideStateManager.STATES.EXPANDED:
+            return RideStateManager.STATES.EXPANDED;
+        case RideStateManager.STATES.REASSIGNMENT_PENDING:
+            return RideStateManager.STATES.REASSIGNMENT_PENDING;
+        case RideStateManager.STATES.SEARCHING:
+            return RideStateManager.STATES.SEARCHING;
+        case RideStateManager.STATES.PENDING:
+            return RideStateManager.STATES.SEARCHING;
+        default:
+            return RideStateManager.STATES.SEARCHING;
+        }
+    }
+
+    async getDriverRideRejectionMeta(bookingId, driverId) {
+        const [cooldownTtlRaw, rejectionCountRaw, excludedRaw] = await Promise.all([
+            this.redis.ttl(this.getRideReofferCooldownKey(bookingId, driverId)),
+            this.redis.hget(this.getRideRejectionCountKey(bookingId), driverId),
+            this.redis.sismember(this.getRideExcludedDriversKey(bookingId), driverId)
+        ]);
+
+        const cooldownTtlSeconds = Number(cooldownTtlRaw);
+        const rejectionCount = Number(rejectionCountRaw || 0);
+        const permanentlyExcluded = Number(excludedRaw || 0) === 1
+            || rejectionCount >= DRIVER_REOFFER_MAX_REJECTIONS;
+
+        return {
+            cooldownActive: Number.isFinite(cooldownTtlSeconds) && cooldownTtlSeconds > 0,
+            cooldownTtlSeconds: Number.isFinite(cooldownTtlSeconds) ? cooldownTtlSeconds : -2,
+            rejectionCount: Number.isFinite(rejectionCount) ? rejectionCount : 0,
+            permanentlyExcluded
+        };
     }
 
     /**
@@ -730,10 +799,38 @@ class ResponseHandler {
             // 2. Cancelar timeout de resposta deste motorista
             this.dispatcher.cancelDriverTimeout(driverId, bookingId);
 
-            // ✅ NOVO: Adicionar motorista à lista de exclusão permanente para esta corrida
-            await this.redis.sadd(`ride_excluded_drivers:${bookingId}`, driverId);
-            await this.redis.expire(`ride_excluded_drivers:${bookingId}`, 3600); // Expirar após 1 hora
-            logger.info(`🚫 [ResponseHandler] Motorista ${driverId} adicionado à lista de exclusão para ${bookingId} (rejeitou)`);
+            const rejectionCountKey = this.getRideRejectionCountKey(bookingId);
+            const excludedDriversKey = this.getRideExcludedDriversKey(bookingId);
+            const notificationsKey = this.getRideNotificationsKey(bookingId);
+            const cooldownKey = this.getRideReofferCooldownKey(bookingId, driverId);
+            const rejectionCount = await this.redis.hincrby(
+                rejectionCountKey,
+                driverId,
+                1
+            );
+            await this.redis.expire(rejectionCountKey, 3600);
+
+            const shouldPermanentlyExclude =
+                Number(rejectionCount) >= DRIVER_REOFFER_MAX_REJECTIONS;
+
+            if (shouldPermanentlyExclude) {
+                await this.redis.sadd(excludedDriversKey, driverId);
+                await this.redis.expire(excludedDriversKey, 3600);
+                await this.redis.del(cooldownKey);
+                logger.info(
+                    `🚫 [ResponseHandler] Motorista ${driverId} excluído definitivamente de ${bookingId} após ${rejectionCount} recusas`
+                );
+            } else {
+                await this.redis.set(
+                    cooldownKey,
+                    String(rejectionCount),
+                    'EX',
+                    DRIVER_REOFFER_COOLDOWN_SECONDS
+                );
+                logger.info(
+                    `⏳ [ResponseHandler] Cooldown de ${DRIVER_REOFFER_COOLDOWN_SECONDS}s aplicado ao motorista ${driverId} para ${bookingId} após ${rejectionCount} recusa`
+                );
+            }
 
             // 3. Registrar evento
             await eventSourcing.recordEvent(
@@ -760,68 +857,97 @@ class ResponseHandler {
             await driverLockManager.releaseLock(driverId);
             logger.debug(`🔓 [ResponseHandler] Lock liberado para motorista ${driverId} após rejeição`);
 
+            const bookingKey = `booking:${bookingId}`;
+            const currentState = await RideStateManager.getBookingState(this.redis, bookingId);
+            const resumeStateRaw = await this.redis.hget(bookingKey, 'awaitingResponsePreviousState');
+            const resumeState = this.normalizeAwaitingResponseResumeState(resumeStateRaw);
+
+            if (
+                currentState === RideStateManager.STATES.NOTIFIED ||
+                currentState === RideStateManager.STATES.AWAITING_RESPONSE
+            ) {
+                await RideStateManager.updateBookingState(
+                    this.redis,
+                    bookingId,
+                    resumeState,
+                    {
+                        rejectedBy: driverId,
+                        rejectedAt: new Date().toISOString()
+                    }
+                );
+                await this.redis.hdel(
+                    bookingKey,
+                    'awaitingResponseDriverId',
+                    'awaitingResponseAt'
+                );
+                logger.info(
+                    `🔍 [ResponseHandler] Motorista ${driverId} rejeitou ${bookingId} (retomando ${resumeState})`
+                );
+            } else if (
+                currentState === RideStateManager.STATES.SEARCHING ||
+                currentState === RideStateManager.STATES.EXPANDED ||
+                currentState === RideStateManager.STATES.REASSIGNMENT_PENDING
+            ) {
+                await this.redis.hset(bookingKey, {
+                    rejectedBy: driverId,
+                    rejectedAt: new Date().toISOString()
+                });
+                logger.info(`🔍 [ResponseHandler] Motorista ${driverId} rejeitou ${bookingId} (busca continua em ${currentState})`);
+            } else {
+                logger.debug(`ℹ️ [ResponseHandler] Rejeição de ${driverId} para ${bookingId}, mas estado já é ${currentState}`);
+            }
+
             // Pequeno delay para garantir processamento assíncrono
             await new Promise(resolve => setTimeout(resolve, 50));
 
             // 5. Buscar próxima corrida da fila para o motorista
             const nextRide = await this.sendNextRideToDriver(driverId);
 
-            // 6. ✅ CORREÇÃO: Estado sempre permanece SEARCHING (não muda)
-            // Apenas registrar metadata da rejeição
-            const currentState = await RideStateManager.getBookingState(this.redis, bookingId);
-            if (currentState === RideStateManager.STATES.SEARCHING ||
-                currentState === RideStateManager.STATES.EXPANDED) {
-                // ✅ Estado permanece SEARCHING, apenas registrar metadata
-                await this.redis.hset(`booking:${bookingId}`, {
-                    rejectedBy: driverId,
-                    rejectedAt: new Date().toISOString()
-                });
-                logger.info(`🔍 [ResponseHandler] Motorista ${driverId} rejeitou ${bookingId} (estado permanece SEARCHING, busca continua)`);
-            } else {
-                // Estado já mudou (corrida aceita, cancelada, etc.)
-                logger.debug(`ℹ️ [ResponseHandler] Rejeição de ${driverId} para ${bookingId}, mas estado já é ${currentState}`);
-            }
-
-            // 7. ✅ AGENDAR REMOÇÃO DA LISTA DE NOTIFICADOS APÓS 30 SEGUNDOS
-            // Se nenhum outro motorista aceitar em 30s, o motorista que rejeitou pode receber novamente
             const timerKey = `${bookingId}_${driverId}`;
 
-            // Cancelar timer anterior se existir
             const existingTimer = this.rejectionTimers.get(timerKey);
             if (existingTimer) {
                 clearTimeout(existingTimer);
             }
 
-            // Agendar remoção da lista de notificados após 30 segundos
-            const timeoutId = setTimeout(async () => {
-                try {
-                    // Verificar se a corrida ainda está em busca (não foi aceita por outro motorista)
-                    const currentState = await RideStateManager.getBookingState(this.redis, bookingId);
-                    if (currentState === RideStateManager.STATES.SEARCHING ||
-                        currentState === RideStateManager.STATES.NOTIFIED ||
-                        currentState === RideStateManager.STATES.AWAITING_RESPONSE ||
-                        currentState === RideStateManager.STATES.REASSIGNMENT_PENDING ||
-                        currentState === RideStateManager.STATES.EXPANDED) {
+            if (!shouldPermanentlyExclude) {
+                const timeoutId = setTimeout(async () => {
+                    try {
+                        const currentState = await RideStateManager.getBookingState(this.redis, bookingId);
+                        if (currentState === RideStateManager.STATES.SEARCHING ||
+                            currentState === RideStateManager.STATES.NOTIFIED ||
+                            currentState === RideStateManager.STATES.AWAITING_RESPONSE ||
+                            currentState === RideStateManager.STATES.REASSIGNMENT_PENDING ||
+                            currentState === RideStateManager.STATES.EXPANDED) {
+                            await this.redis.srem(notificationsKey, driverId);
+                            logger.info(
+                                `🔄 [ResponseHandler] Cooldown encerrado: motorista ${driverId} pode receber ${bookingId} novamente`
+                            );
 
-                        // Remover motorista da lista de notificados para que possa receber novamente
-                        await this.redis.srem(`ride_notifications:${bookingId}`, driverId);
-                        logger.info(`🔄 [ResponseHandler] Motorista ${driverId} removido da lista de notificados para ${bookingId} (pode receber novamente após 30s)`);
-
-                        // Remover timer do Map
-                        this.rejectionTimers.delete(timerKey);
-                    } else {
-                        // Corrida foi aceita ou cancelada, apenas limpar timer
-                        logger.debug(`ℹ️ [ResponseHandler] Corrida ${bookingId} não está mais em busca, não removendo ${driverId} da lista`);
+                            const redeliveredRide = await this.sendNextRideToDriver(driverId);
+                            logger.info(
+                                `📣 [ResponseHandler] Tentativa automática de reoferta após cooldown para ${driverId} (${bookingId}): ${redeliveredRide ? 'enviada' : 'sem corrida elegível no momento'}`
+                            );
+                        } else {
+                            logger.debug(
+                                `ℹ️ [ResponseHandler] Corrida ${bookingId} não está mais em busca, mantendo fim do cooldown apenas para limpeza`
+                            );
+                        }
+                    } catch (error) {
+                        logger.error(`❌ [ResponseHandler] Erro ao finalizar cooldown de rejeição:`, error);
+                    } finally {
                         this.rejectionTimers.delete(timerKey);
                     }
-                } catch (error) {
-                    logger.error(`❌ [ResponseHandler] Erro ao remover motorista da lista de notificados:`, error);
-                    this.rejectionTimers.delete(timerKey);
-                }
-            }, 30000); // 30 segundos
+                }, DRIVER_REOFFER_COOLDOWN_SECONDS * 1000);
 
-            this.rejectionTimers.set(timerKey, timeoutId);
-            logger.info(`⏰ [ResponseHandler] Timer de 30s agendado para ${driverId} poder receber ${bookingId} novamente`);
+                this.rejectionTimers.set(timerKey, timeoutId);
+                logger.info(
+                    `⏰ [ResponseHandler] Timer de ${DRIVER_REOFFER_COOLDOWN_SECONDS}s agendado para ${driverId} poder receber ${bookingId} novamente`
+                );
+            } else {
+                this.rejectionTimers.delete(timerKey);
+                await this.redis.srem(notificationsKey, driverId).catch(() => null);
+            }
 
             logger.info(`✅ [ResponseHandler] Rejeição processada para ${driverId}, próxima corrida: ${nextRide ? 'encontrada' : 'nenhuma'}`);
 
@@ -830,6 +956,8 @@ class ResponseHandler {
                 bookingId,
                 driverId,
                 reason,
+                rejectionCount,
+                permanentlyExcluded: shouldPermanentlyExclude,
                 nextRide: nextRide || null
             };
         } catch (error) {
@@ -917,14 +1045,18 @@ class ResponseHandler {
                                 }
 
                                 // ✅ Verificar se motorista pode receber esta corrida
-                                const [alreadyNotified, isExcluded] = await Promise.all([
-                                    this.redis.sismember(`ride_notifications:${bookingId}`, driverId),
-                                    this.redis.sismember(`ride_excluded_drivers:${bookingId}`, driverId)
+                                const [alreadyNotified, rejectionMeta] = await Promise.all([
+                                    this.redis.sismember(this.getRideNotificationsKey(bookingId), driverId),
+                                    this.getDriverRideRejectionMeta(bookingId, driverId)
                                 ]);
 
-                                // ✅ CORREÇÃO: Motorista pode receber se não está excluído E não foi notificado ainda
-                                if (isExcluded) {
-                                    logger.debug(`🚫 [ResponseHandler] Motorista ${driverId} está excluído da corrida pendente ${bookingId} (rejeitou anteriormente) - buscar próxima`);
+                                if (rejectionMeta.permanentlyExcluded) {
+                                    logger.debug(`🚫 [ResponseHandler] Motorista ${driverId} está excluído da corrida pendente ${bookingId} após múltiplas recusas - buscar próxima`);
+                                    continue;
+                                }
+
+                                if (rejectionMeta.cooldownActive) {
+                                    logger.debug(`⏳ [ResponseHandler] Motorista ${driverId} está em cooldown (${rejectionMeta.cooldownTtlSeconds}s) para ${bookingId} - buscar próxima`);
                                     continue; // Buscar próxima corrida
                                 }
 
@@ -1031,22 +1163,21 @@ class ResponseHandler {
                         }
 
                         // ✅ Verificar se motorista pode receber esta corrida
-                        const [alreadyNotified, isExcluded] = await Promise.all([
-                            this.redis.sismember(`ride_notifications:${bookingId}`, driverId),
-                            this.redis.sismember(`ride_excluded_drivers:${bookingId}`, driverId)
+                        const [alreadyNotified, rejectionMeta] = await Promise.all([
+                            this.redis.sismember(this.getRideNotificationsKey(bookingId), driverId),
+                            this.getDriverRideRejectionMeta(bookingId, driverId)
                         ]);
 
-                        // ✅ CORREÇÃO: Motorista pode receber corrida se:
-                        // 1. Não está excluído (não rejeitou esta corrida)
-                        // 2. Se já foi notificado, verificar se tem notificação ativa na tela
-                        //    - Se não tem notificação ativa, pode receber novamente (busca gradual pode ter notificado antes)
-                        if (isExcluded) {
-                            logger.debug(`🚫 [ResponseHandler] Motorista ${driverId} está excluído da corrida ${bookingId} (rejeitou anteriormente) - buscar próxima`);
+                        if (rejectionMeta.permanentlyExcluded) {
+                            logger.debug(`🚫 [ResponseHandler] Motorista ${driverId} está excluído da corrida ${bookingId} após múltiplas recusas - buscar próxima`);
                             continue; // Buscar próxima corrida
                         }
 
-                        // ✅ CORREÇÃO: Se já foi notificado, verificar se tem notificação ativa na tela
-                        // Se não tem notificação ativa, pode receber novamente (busca gradual pode ter notificado antes da rejeição)
+                        if (rejectionMeta.cooldownActive) {
+                            logger.debug(`⏳ [ResponseHandler] Motorista ${driverId} está em cooldown (${rejectionMeta.cooldownTtlSeconds}s) para ${bookingId} - buscar próxima`);
+                            continue; // Buscar próxima corrida
+                        }
+
                         if (alreadyNotified) {
                             const activeNotificationKey = `driver_active_notification:${driverId}`;
                             const activeBookingId = await this.redis.get(activeNotificationKey);
@@ -1113,9 +1244,14 @@ class ResponseHandler {
             }
 
             // ✅ NOVO: Verificar se motorista está excluído (cancelou/rejeitou esta corrida)
-            const isExcluded = await this.redis.sismember(`ride_excluded_drivers:${bookingId}`, driverId);
-            if (isExcluded) {
-                logger.info(`🚫 [ResponseHandler] Motorista ${driverId} está excluído para ${bookingId} (cancelou/rejeitou anteriormente)`);
+            const rejectionMeta = await this.getDriverRideRejectionMeta(bookingId, driverId);
+            if (rejectionMeta.permanentlyExcluded) {
+                logger.info(`🚫 [ResponseHandler] Motorista ${driverId} está excluído para ${bookingId} após múltiplas recusas`);
+                return await this.sendNextRideToDriver(driverId);
+            }
+
+            if (rejectionMeta.cooldownActive) {
+                logger.info(`⏳ [ResponseHandler] Motorista ${driverId} segue em cooldown (${rejectionMeta.cooldownTtlSeconds}s) para ${bookingId}`);
                 // Buscar próxima (recursivo)
                 return await this.sendNextRideToDriver(driverId);
             }
@@ -1129,7 +1265,7 @@ class ResponseHandler {
                 destinationLocation: this.safeJSONParse(bookingData.destinationLocation),
                 estimatedFare: parseFloat(bookingData.estimatedFare || 0),
                 paymentMethod: bookingData.paymentMethod || 'pix',
-                timeout: 20, // ✅ REFATORAÇÃO: Alinhado com lock TTL (20s)
+                timeout: DRIVER_RESPONSE_TIMEOUT_SECONDS,
                 timestamp: new Date().toISOString()
             };
 
@@ -1162,14 +1298,16 @@ class ResponseHandler {
             // Se busca já está ativa, a busca gradual pode não notificar este motorista novamente
 
             // ✅ CORREÇÃO: Verificar condições antes de notificar (sem verificar lock)
-            const alreadyNotifiedCheck = await this.redis.sismember(`ride_notifications:${bookingId}`, driverId);
-            const isExcludedCheck = await this.redis.sismember(`ride_excluded_drivers:${bookingId}`, driverId);
+            const alreadyNotifiedCheck = await this.redis.sismember(this.getRideNotificationsKey(bookingId), driverId);
+            const rejectionMetaCheck = await this.getDriverRideRejectionMeta(bookingId, driverId);
             const activeNotificationKey = `driver_active_notification:${driverId}`;
             const activeBookingId = await this.redis.get(activeNotificationKey);
 
             logger.info(`🔍 [ResponseHandler] Verificações antes de notificar ${driverId} para ${bookingId}:`, {
                 alreadyNotified: alreadyNotifiedCheck === 1,
-                isExcluded: isExcludedCheck === 1,
+                isExcluded: rejectionMetaCheck.permanentlyExcluded,
+                cooldownActive: rejectionMetaCheck.cooldownActive,
+                rejectionCount: rejectionMetaCheck.rejectionCount,
                 activeBookingId: activeBookingId,
                 searchActive: searchAlreadyActive,
                 currentState
@@ -1179,12 +1317,20 @@ class ResponseHandler {
                 driverId,
                 bookingId,
                 {
+                    ...bookingData,
                     bookingId,
                     customerId: bookingData.customerId,
                     pickupLocation: parsedPickupLocation,
-                    destinationLocation: JSON.parse(bookingData.destinationLocation || '{}'),
+                    destinationLocation: this.safeJSONParse(bookingData.destinationLocation),
                     estimatedFare: parseFloat(bookingData.estimatedFare || 0),
                     paymentMethod: bookingData.paymentMethod || 'pix'
+                },
+                {
+                    dispatchTrace: {
+                        type: 'direct',
+                        source: 'response_handler',
+                        bookingState: currentState
+                    }
                 }
             );
 

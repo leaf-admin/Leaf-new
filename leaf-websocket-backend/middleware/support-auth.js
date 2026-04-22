@@ -2,17 +2,15 @@ const jwt = require('jsonwebtoken');
 const admin = require('firebase-admin');
 const { logError } = require('../utils/logger');
 const firebaseConfig = require('../firebase-config');
+const { resolveJwtSecretList } = require('../utils/jwt-secret-resolver');
+const { getAdminUser } = require('../utils/admin-user-cache');
 
-const ADMIN_ROLES = new Set(['admin', 'manager', 'super-admin', 'viewer']);
-const AGENT_ROLES = new Set(['admin', 'manager', 'super-admin']);
+const ADMIN_ROLES = new Set(['admin', 'manager', 'super-admin', 'viewer', 'support', 'development']);
+const AGENT_ROLES = new Set(['admin', 'manager', 'super-admin', 'support', 'development']);
 
-const JWT_SECRETS = Array.from(
-  new Set([
-    process.env.JWT_SECRET,
-    process.env.ADMIN_JWT_SECRET,
-    'leaf-admin-secret-key-change-in-production',
-    'leaf-dashboard-secret-key-2025'
-  ].filter(Boolean))
+const JWT_SECRETS = resolveJwtSecretList(
+  ['JWT_SECRET', 'ADMIN_JWT_SECRET'],
+  { context: 'support-auth' }
 );
 
 function extractBearerToken(req) {
@@ -54,10 +52,12 @@ async function verifyAdminToken(token) {
 
       // Se existir cadastro admin no Firestore, respeita status/role.
       try {
-        const firestore = admin.firestore();
-        const adminDoc = await firestore.collection('adminUsers').doc(user.id).get();
-        if (adminDoc.exists) {
-          const data = adminDoc.data() || {};
+        const adminRecord = await getAdminUser(user.id, {
+          source: 'support-auth.verifyAdminToken',
+          maxAgeMs: 15 * 1000
+        });
+        if (adminRecord.exists) {
+          const data = adminRecord.data || {};
           if (data.active === false) return null;
 
           if (data.role) {

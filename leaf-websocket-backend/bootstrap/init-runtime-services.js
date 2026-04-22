@@ -8,6 +8,8 @@ function initializeRuntimeServices({
     redisPool,
     logStructured
 }) {
+    const runQueueWorkerInProcess =
+        String(process.env.RUNTIME_ENABLE_QUEUE_WORKER || (process.env.ENABLE_DEDICATED_QUEUE_WORKER === 'true' ? 'false' : 'true')).toLowerCase() !== 'false';
     // ==================== INICIALIZAÇÃO FASE 7: SISTEMA DE FILAS E MATCHING ====================
     // Inicializar instâncias dos serviços
     const responseHandler = new ResponseHandler(io);
@@ -26,11 +28,17 @@ function initializeRuntimeServices({
 
     // ==================== INICIALIZAÇÃO FASE 8: QUEUE WORKER ====================
     // Inicializar worker para processar filas continuamente
-    const queueWorker = new QueueWorker(io);
-
-    // Iniciar worker (processa filas a cada 3 segundos)
-    queueWorker.start();
-    logStructured('info', 'QueueWorker iniciado (processamento contínuo de filas)', { service: 'server', phase: 'fase8' });
+    let queueWorker = null;
+    if (runQueueWorkerInProcess) {
+        queueWorker = new QueueWorker(io);
+        queueWorker.start();
+        logStructured('info', 'QueueWorker iniciado (processamento contínuo de filas)', { service: 'server', phase: 'fase8' });
+    } else {
+        logStructured('info', 'QueueWorker desabilitado neste processo (modo dedicado)', {
+            service: 'server',
+            phase: 'fase8'
+        });
+    }
 
     // FASE 10: Injetar instância do worker nas rotas de monitoramento
     queueMonitoringRoutes.setQueueWorker(queueWorker);

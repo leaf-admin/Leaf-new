@@ -26,6 +26,14 @@ const { metrics } = require('../utils/prometheus-metrics');
 const { validateAndEnsureTraceIdInCommand } = require('../utils/trace-validator');
 const { setActiveTripForDriver } = require('../utils/active-trip-index');
 const { resolveAcceptRidePayload } = require('../utils/accept-ride-payload');
+const {
+    rehydratePrimaryBooking,
+    writeVisibleBookingSnapshot
+} = require('../services/booking-visibility-service');
+const {
+    hasOfferReservation,
+    clearOfferReservationsForBooking
+} = require('../services/offer-reservation-service');
 
 function toFiniteNumber(value) {
     const parsed = Number(value);
@@ -121,6 +129,51 @@ class AcceptRideCommand extends Command {
 
                 const bookingKey = `booking:${this.bookingId}`;
                 const normalizeState = (value) => String(value || '').trim().toUpperCase();
+                const bookingExists = await redis.exists(bookingKey);
+                if (!bookingExists) {
+                    await rehydratePrimaryBooking(redis, this.bookingId, {
+                        state: RideStateManager.STATES.PENDING,
+                        status: 'PENDING'
+                    });
+                }
+
+                const activeNotificationKey = `driver_active_notification:${this.driverId}`;
+                const [activeBookingId, bookingTuple] = await Promise.all([
+                    redis.get(activeNotificationKey),
+                    redis.hmget(bookingKey, 'driverId', 'state', 'status')
+                ]);
+                const reservationActive = await hasOfferReservation(redis, this.bookingId, this.driverId);
+                const currentDriverId = String(bookingTuple?.[0] || '');
+                const currentStateUpper = normalizeState(bookingTuple?.[1]);
+                const currentStatusUpper = normalizeState(bookingTuple?.[2]);
+                const alreadyOwnedBySameDriver =
+                    (
+                        currentStateUpper === 'ACCEPTED' ||
+                        currentStatusUpper === 'ACCEPTED' ||
+                        currentStateUpper === 'IN_PROGRESS' ||
+                        currentStatusUpper === 'IN_PROGRESS' ||
+                        currentStatusUpper === 'STARTED'
+                    ) &&
+                    currentDriverId === String(this.driverId);
+
+                if (
+                    !alreadyOwnedBySameDriver &&
+                    activeBookingId !== this.bookingId &&
+                    !reservationActive
+                ) {
+                    logStructured('warn', 'AcceptRideCommand bloqueado por oferta indisponivel', {
+                        command: 'AcceptRideCommand',
+                        driverId: this.driverId,
+                        bookingId: this.bookingId,
+                        activeBookingId: activeBookingId || null,
+                        reservationActive,
+                        currentDriverId: currentDriverId || null,
+                        currentState: currentStateUpper || null,
+                        currentStatus: currentStatusUpper || null
+                    });
+                    metrics.recordCommand('AcceptRide', (Date.now() - startTime) / 1000, false);
+                    return CommandResult.failure('A corrida já foi aceita por outro motorista ou não está mais disponível.');
+                }
 
                 // Garantir lock da corrida aceita (evita re-oferta até completeTrip/cancelRide).
                 const lockStatus = await driverLockManager.isDriverLocked(this.driverId);
@@ -184,6 +237,7 @@ class AcceptRideCommand extends Command {
 
                 const newState = RideStateManager.STATES.ACCEPTED;
                 const updatedAt = new Date().toISOString();
+                const bookingOwnershipToken = `${this.bookingId}:${this.driverId}:${Date.now()}`;
 
                 // LUA Script Atômico para garantir lock transacional absoluto do Booking
                 const luaScript = `
@@ -211,12 +265,27 @@ class AcceptRideCommand extends Command {
                         return 'OK_ALREADY_ACCEPTED|||' .. (customerId or '') .. '|||' .. (pickupLoc or '')
                     end
 
-                    if currentStateUpper ~= 'PENDING'
-                        and currentStateUpper ~= 'REQUESTED'
-                        and currentStateUpper ~= 'SEARCHING'
-                        and currentStateUpper ~= 'REASSIGNMENT_PENDING'
-                        and currentStatusUpper ~= 'PENDING'
-                        and currentStatusUpper ~= 'REASSIGNMENT_PENDING' then
+                    local acceptAllowedState =
+                        currentStateUpper == 'PENDING' or
+                        currentStateUpper == 'REQUESTED' or
+                        currentStateUpper == 'SEARCHING' or
+                        currentStateUpper == 'NOTIFIED' or
+                        currentStateUpper == 'AWAITING_RESPONSE' or
+                        currentStateUpper == 'EXPANDED' or
+                        currentStateUpper == 'MATCHED' or
+                        currentStateUpper == 'REASSIGNMENT_PENDING'
+
+                    local acceptAllowedStatus =
+                        currentStatusUpper == 'PENDING' or
+                        currentStatusUpper == 'REQUESTED' or
+                        currentStatusUpper == 'SEARCHING' or
+                        currentStatusUpper == 'NOTIFIED' or
+                        currentStatusUpper == 'AWAITING_RESPONSE' or
+                        currentStatusUpper == 'EXPANDED' or
+                        currentStatusUpper == 'MATCHED' or
+                        currentStatusUpper == 'REASSIGNMENT_PENDING'
+
+                    if not acceptAllowedState and not acceptAllowedStatus then
                         return 'ERR_INVALID_STATE_' .. (currentStateUpper ~= '' and currentStateUpper or 'NULL')
                     end
 
@@ -225,6 +294,8 @@ class AcceptRideCommand extends Command {
                         'state', newState, 
                         'status', 'ACCEPTED', 
                         'driverId', driverId, 
+                        'ownerDriverId', driverId,
+                        'bookingOwnershipToken', ARGV[4],
                         'updatedAt', updatedAt, 
                         'acceptedAt', updatedAt
                     )
@@ -236,9 +307,26 @@ class AcceptRideCommand extends Command {
                 `;
 
                 // Executar o LUA no redis
-                const redisResult = await redis.eval(luaScript, 1, bookingKey, this.driverId, newState, updatedAt);
+                const redisResult = await redis.eval(
+                    luaScript,
+                    1,
+                    bookingKey,
+                    this.driverId,
+                    newState,
+                    updatedAt,
+                    bookingOwnershipToken
+                );
 
                 if (typeof redisResult === 'string' && redisResult.startsWith('ERR_')) {
+                    logStructured('warn', 'AcceptRideCommand rejeitado no CAS do booking', {
+                        command: 'AcceptRideCommand',
+                        driverId: this.driverId,
+                        bookingId: this.bookingId,
+                        redisResult,
+                        currentDriverId: currentDriverId || null,
+                        currentState: currentStateUpper || null,
+                        currentStatus: currentStatusUpper || null
+                    });
                     metrics.recordCommand('AcceptRide', (Date.now() - startTime) / 1000, false);
                     if (redisResult === 'ERR_NOT_FOUND') {
                         return CommandResult.failure('Corrida não encontrada');
@@ -322,6 +410,7 @@ class AcceptRideCommand extends Command {
                 }
                 if (Object.keys(bookingPatch).length > 0) {
                     await redis.hset(bookingKey, bookingPatch);
+                    await writeVisibleBookingSnapshot(redis, this.bookingId, bookingPatch);
                 }
 
                 if (isReassignment && operationalContinuation) {
@@ -336,7 +425,22 @@ class AcceptRideCommand extends Command {
                         reassignedDriverId: this.driverId,
                         reassignedAcceptedAt: updatedAt
                     });
+                    await writeVisibleBookingSnapshot(redis, this.bookingId, {
+                        operationalContinuation: JSON.stringify(continuationPatch),
+                        reassignedDriverId: this.driverId,
+                        reassignedAcceptedAt: updatedAt
+                    });
                 }
+
+                await writeVisibleBookingSnapshot(redis, this.bookingId, {
+                    state: RideStateManager.STATES.ACCEPTED,
+                    status: 'ACCEPTED',
+                    driverId: this.driverId,
+                    ownerDriverId: this.driverId,
+                    bookingOwnershipToken,
+                    acceptedAt: updatedAt,
+                    updatedAt
+                });
 
                 const enrichedPayload = await resolveAcceptRidePayload(redis, this.bookingId, {
                     pickupLocation,
@@ -354,6 +458,7 @@ class AcceptRideCommand extends Command {
 
                 // Limpar corrida ativa na tela do motorista após aceite bem-sucedido.
                 await redis.del(`driver_active_notification:${this.driverId}`);
+                await clearOfferReservationsForBooking(redis, this.bookingId).catch(() => null);
 
                 // Indexar corrida ativa por motorista para lookup O(1) no tracking
                 await setActiveTripForDriver(redis, this.driverId, this.bookingId, customerId);

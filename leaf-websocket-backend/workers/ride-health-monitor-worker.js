@@ -3,12 +3,13 @@
 const redisPool = require('../utils/redis-pool');
 const { logStructured, logError } = require('../utils/logger');
 const { metrics } = require('../utils/prometheus-metrics');
-const { evaluateRideOperationsAlerts } = require('../services/ride-health-monitor');
+const { backfillRideHealthIndex, evaluateRideOperationsAlerts } = require('../services/ride-health-monitor');
 
 const DEFAULT_INTERVAL_MS = Number.parseInt(process.env.RIDE_HEALTH_MONITOR_INTERVAL_MS || '60000', 10);
 
 function getWorkerConfig(env = process.env, argv = process.argv.slice(2)) {
   const runOnce = argv.includes('--once') || String(env.RIDE_HEALTH_MONITOR_EXIT_AFTER_RUN || 'false') === 'true';
+  const backfillOnBoot = argv.includes('--backfill') || String(env.RIDE_HEALTH_MONITOR_BACKFILL_ON_BOOT || 'false') === 'true';
 
   return {
     enabled: String(env.ENABLE_RIDE_HEALTH_MONITOR_WORKER || 'false') === 'true',
@@ -17,6 +18,7 @@ function getWorkerConfig(env = process.env, argv = process.argv.slice(2)) {
       Number.parseInt(env.RIDE_HEALTH_MONITOR_INTERVAL_MS || `${DEFAULT_INTERVAL_MS}`, 10) || DEFAULT_INTERVAL_MS
     ),
     runOnBoot: String(env.RIDE_HEALTH_MONITOR_RUN_ON_BOOT || 'true') !== 'false',
+    backfillOnBoot,
     runOnce
   };
 }
@@ -42,6 +44,15 @@ async function runRideHealthMonitorCycle(reason = 'interval') {
   try {
     await redisPool.ensureConnection();
     const redis = redisPool.getConnection();
+    const config = getWorkerConfig();
+    let backfill = null;
+
+    if (config.backfillOnBoot && (reason === 'boot' || reason === 'manual_once')) {
+      backfill = await backfillRideHealthIndex(redis, {
+        nowIso: new Date().toISOString()
+      });
+    }
+
     const result = await evaluateRideOperationsAlerts(redis, {
       nowIso: new Date().toISOString()
     });
@@ -52,11 +63,13 @@ async function runRideHealthMonitorCycle(reason = 'interval') {
       reassignmentPending: result.snapshot.reassignmentPending.total,
       reassignmentPendingStuck: result.snapshot.reassignmentPending.stuck,
       earlyEndedReviewRecent: result.snapshot.earlyEndedReview.recent,
+      backfill,
       alerts: result.alerts.length
     });
 
     return {
       success: true,
+      backfill,
       ...result
     };
   } catch (error) {

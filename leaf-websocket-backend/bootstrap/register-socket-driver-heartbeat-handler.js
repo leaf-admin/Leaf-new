@@ -1,3 +1,23 @@
+const driverEligibilityService = require('../services/driver-eligibility-service');
+
+const parseTimestampMs = (rawValue) => {
+    if (!rawValue) return 0;
+    if (typeof rawValue === 'number' && Number.isFinite(rawValue)) return rawValue;
+
+    const numeric = Number.parseInt(String(rawValue), 10);
+    if (Number.isFinite(numeric) && numeric > 0) {
+        return numeric;
+    }
+
+    const parsedDate = Date.parse(String(rawValue));
+    return Number.isFinite(parsedDate) ? parsedDate : 0;
+};
+
+const DISPATCH_ELIGIBILITY_RECHECK_MIN_MS = Math.max(
+    3000,
+    Number.parseInt(process.env.DISPATCH_ELIGIBILITY_RECHECK_MIN_MS || '15000', 10) || 15000
+);
+
 function registerSocketDriverHeartbeatHandler({
     socket,
     redisPool,
@@ -18,6 +38,9 @@ function registerSocketDriverHeartbeatHandler({
             if (!driverId || !Number.isFinite(latNum) || !Number.isFinite(lngNum) || socket.userType !== 'driver') {
                 return; // Dados inválidos, ignorar silenciosamente
             }
+
+            socket.lastHeartbeat = Date.now();
+            socket.lastDriverHeartbeatAt = socket.lastHeartbeat;
 
             // ✅ CAOS SCENARIO: Registrar Heartbeat para calcular tempo offline/resiliência de billing
             try {
@@ -107,12 +130,68 @@ function registerSocketDriverHeartbeatHandler({
                     }
                     await redis.sadd('online_drivers', driverId);
 
-                // Atualizar lastSeen
-                await redis.hset(`driver:${driverId}`, 'lastSeen', new Date().toISOString());
-
                 const effectiveLat = Number.parseFloat(existingData.lat || lat);
                 const effectiveLng = Number.parseFloat(existingData.lng || lng);
-                const shouldBeEligible = !isInTripState && existingData.dispatchEligible === 'true';
+                // Atualizar lastSeen/heartbeat com timestamp numérico recente para evitar stale cleanup
+                const nowIso = new Date().toISOString();
+                const heartbeatTs = Date.now();
+                await redis.hset(`driver:${driverId}`, {
+                    lastSeen: nowIso,
+                    lastHeartbeatAt: nowIso,
+                    lastUpdate: String(heartbeatTs),
+                    timestamp: String(heartbeatTs),
+                    lat: String(effectiveLat),
+                    lng: String(effectiveLng)
+                });
+                const currentEligibilityCode = String(existingData.dispatchEligibilityCode || '').toUpperCase();
+                const isCurrentlyEligible = existingData.dispatchEligible === 'true';
+                let shouldBeEligible = !isInTripState && isCurrentlyEligible;
+
+                // Heartbeat também precisa recuperar elegibilidade quando o driver ficou preso em estado residual
+                // (ex.: IN_TRIP/AWAITING_LOCATION_SYNC) sem depender exclusivamente do updateLocation.
+                if (!isInTripState && !shouldBeEligible) {
+                    const recheckCandidates = new Set([
+                        '',
+                        'UNKNOWN',
+                        'CACHED',
+                        'IN_TRIP',
+                        'AWAITING_LOCATION_SYNC'
+                    ]);
+                    const lastCheckedAtMs = parseTimestampMs(existingData.dispatchEligibilityCheckedAt);
+                    const canRecheckNow = (Date.now() - lastCheckedAtMs) >= DISPATCH_ELIGIBILITY_RECHECK_MIN_MS;
+
+                    if (canRecheckNow && recheckCandidates.has(currentEligibilityCode)) {
+                        try {
+                            const eligibility = await driverEligibilityService.isDriverEligibleForRide(
+                                driverId,
+                                null,
+                                existingData || {}
+                            );
+                            shouldBeEligible = eligibility.eligible === true;
+
+                            if (shouldBeEligible) {
+                                await redis.hset(`driver:${driverId}`, {
+                                    dispatchEligible: 'true',
+                                    dispatchEligibilityCode: eligibility.code || 'ELIGIBLE',
+                                    dispatchEligibilityCheckedAt: new Date().toISOString()
+                                });
+                            } else {
+                                await redis.hset(`driver:${driverId}`, {
+                                    dispatchEligible: 'false',
+                                    dispatchEligibilityCode: eligibility.code || 'NOT_ELIGIBLE',
+                                    dispatchEligibilityCheckedAt: new Date().toISOString()
+                                });
+                            }
+                        } catch (eligibilityError) {
+                            logStructured('debug', 'Heartbeat: falha ao revalidar elegibilidade de dispatch', {
+                                service: 'driverHeartbeat',
+                                driverId,
+                                error: eligibilityError.message
+                            });
+                        }
+                    }
+                }
+
                 if (shouldBeEligible && Number.isFinite(effectiveLat) && Number.isFinite(effectiveLng)) {
                     await redis.geoadd(ELIGIBLE_DRIVER_GEO_KEY, effectiveLng, effectiveLat, driverId);
                 } else {

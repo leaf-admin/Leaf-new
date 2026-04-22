@@ -20,6 +20,53 @@ class HealthCheckService {
     this.redisHealthCache = null;
   }
 
+  getSystemThresholds() {
+    const isProduction = process.env.NODE_ENV === 'production';
+    const parsePercent = (value, fallback) => {
+      const parsed = Number.parseFloat(value);
+      return Number.isFinite(parsed) ? parsed : fallback;
+    };
+
+    const thresholds = {
+      memoryWarningPercent: parsePercent(
+        process.env.HEALTH_SYSTEM_MEMORY_WARNING_PERCENT,
+        isProduction ? 80 : 75
+      ),
+      memoryCriticalPercent: parsePercent(
+        process.env.HEALTH_SYSTEM_MEMORY_CRITICAL_PERCENT,
+        isProduction ? 92 : 90
+      ),
+      cpuWarningPercent: parsePercent(
+        process.env.HEALTH_SYSTEM_CPU_WARNING_PERCENT,
+        isProduction ? 120 : 75
+      ),
+      cpuCriticalPercent: parsePercent(
+        process.env.HEALTH_SYSTEM_CPU_CRITICAL_PERCENT,
+        isProduction ? 200 : 100
+      ),
+      cpuSustainedCriticalPercent: parsePercent(
+        process.env.HEALTH_SYSTEM_CPU_SUSTAINED_CRITICAL_PERCENT,
+        isProduction ? 140 : 90
+      )
+    };
+
+    return {
+      ...thresholds,
+      memoryCriticalPercent: Math.max(
+        thresholds.memoryCriticalPercent,
+        thresholds.memoryWarningPercent
+      ),
+      cpuCriticalPercent: Math.max(
+        thresholds.cpuCriticalPercent,
+        thresholds.cpuWarningPercent
+      ),
+      cpuSustainedCriticalPercent: Math.max(
+        thresholds.cpuSustainedCriticalPercent,
+        thresholds.cpuWarningPercent
+      )
+    };
+  }
+
   getRedisThresholds() {
     return {
       warningThresholdMs: Number.parseInt(
@@ -479,16 +526,31 @@ class HealthCheckService {
       const loadAvg = os.loadavg();
       const cpuCount = os.cpus().length;
       const cpuUsagePercent = (loadAvg[0] / cpuCount) * 100;
+      const cpuUsagePercent5m = (loadAvg[1] / cpuCount) * 100;
+      const cpuUsagePercent15m = (loadAvg[2] / cpuCount) * 100;
+      const thresholds = this.getSystemThresholds();
+
+      const memoryCritical =
+        memoryUsagePercent >= thresholds.memoryCriticalPercent;
+      const memoryWarning =
+        memoryUsagePercent >= thresholds.memoryWarningPercent;
+      const cpuCritical =
+        cpuUsagePercent >= thresholds.cpuCriticalPercent &&
+        cpuUsagePercent5m >= thresholds.cpuSustainedCriticalPercent;
+      const cpuWarning =
+        cpuUsagePercent >= thresholds.cpuWarningPercent ||
+        cpuUsagePercent5m >= thresholds.cpuWarningPercent;
 
       let status = 'healthy';
-      if (memoryUsagePercent > 90 || cpuUsagePercent > 90) {
+      if (memoryCritical || cpuCritical) {
         status = 'critical';
-      } else if (memoryUsagePercent > 75 || cpuUsagePercent > 75) {
+      } else if (memoryWarning || cpuWarning) {
         status = 'warning';
       }
 
       return {
         status,
+        thresholds,
         memory: {
           total: `${(totalMem / 1024 / 1024 / 1024).toFixed(2)}GB`,
           used: `${(usedMem / 1024 / 1024 / 1024).toFixed(2)}GB`,
@@ -498,6 +560,8 @@ class HealthCheckService {
         cpu: {
           loadAvg: loadAvg.map(l => l.toFixed(2)),
           usagePercent: `${cpuUsagePercent.toFixed(1)}%`,
+          usagePercent5m: `${cpuUsagePercent5m.toFixed(1)}%`,
+          usagePercent15m: `${cpuUsagePercent15m.toFixed(1)}%`,
           cores: cpuCount
         },
         uptime: {
@@ -506,7 +570,9 @@ class HealthCheckService {
         },
         message: status === 'healthy'
           ? 'Sistema está saudável'
-          : `Sistema com alta utilização (CPU: ${cpuUsagePercent.toFixed(1)}%, RAM: ${memoryUsagePercent.toFixed(1)}%)`
+          : status === 'critical'
+            ? `Sistema com pressão sustentada (CPU 1m: ${cpuUsagePercent.toFixed(1)}%, CPU 5m: ${cpuUsagePercent5m.toFixed(1)}%, RAM: ${memoryUsagePercent.toFixed(1)}%)`
+            : `Sistema com pressão moderada (CPU 1m: ${cpuUsagePercent.toFixed(1)}%, CPU 5m: ${cpuUsagePercent5m.toFixed(1)}%, RAM: ${memoryUsagePercent.toFixed(1)}%)`
       };
     } catch (error) {
       logError(error, 'System health check falhou', {

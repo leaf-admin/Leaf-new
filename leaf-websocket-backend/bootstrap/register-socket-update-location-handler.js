@@ -3,6 +3,7 @@ const {
     setActiveTripForDriver
 } = require('../utils/active-trip-index');
 const driverEligibilityService = require('../services/driver-eligibility-service');
+const pricingH3ReadModelService = require('../services/pricing-h3-read-model-service');
 const { scheduleMapH3Refresh } = require('../utils/map-h3-refresh-broadcaster');
 
 const ENABLE_ACTIVE_TRIP_INDEX = process.env.ENABLE_ACTIVE_TRIP_INDEX !== 'false';
@@ -12,6 +13,61 @@ const TRIP_LOCATION_DEDUP_TTL_SECONDS = Number.parseInt(process.env.TRIP_LOCATIO
 const ELIGIBLE_DRIVER_GEO_KEY = process.env.ELIGIBLE_DRIVER_GEO_KEY || 'driver_locations_eligible';
 const ENABLE_LEGACY_UPDATE_DRIVER_LOCATION_EVENT =
     String(process.env.ENABLE_LEGACY_UPDATE_DRIVER_LOCATION_EVENT || 'false').toLowerCase() === 'true';
+const MAX_SHARED_ROUTE_COORDINATES = Number.parseInt(
+    process.env.MAX_SHARED_ROUTE_COORDINATES || '700',
+    10
+);
+
+function normalizeSharedRouteCoordinate(coordinate) {
+    const latitude = Number(coordinate?.latitude ?? coordinate?.lat);
+    const longitude = Number(coordinate?.longitude ?? coordinate?.lng);
+    if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
+        return null;
+    }
+    return { latitude, longitude };
+}
+
+function normalizeSharedRouteCoordinates(coordinates) {
+    if (!Array.isArray(coordinates)) {
+        return [];
+    }
+    return coordinates
+        .slice(0, Math.max(2, MAX_SHARED_ROUTE_COORDINATES))
+        .map(normalizeSharedRouteCoordinate)
+        .filter(Boolean);
+}
+
+function normalizeSharedRouteMetric(value) {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) && parsed >= 0 ? parsed : null;
+}
+
+function normalizeSharedRoutePlan(routePlan) {
+    if (!routePlan || typeof routePlan !== 'object') {
+        return null;
+    }
+
+    const pickupCoordinates = normalizeSharedRouteCoordinates(routePlan.pickupCoordinates);
+    const destinationCoordinates = normalizeSharedRouteCoordinates(routePlan.destinationCoordinates);
+    const combinedCoordinates = normalizeSharedRouteCoordinates(routePlan.combinedCoordinates);
+
+    if (pickupCoordinates.length < 2 || destinationCoordinates.length < 2) {
+        return null;
+    }
+
+    return {
+        pickupCoordinates,
+        destinationCoordinates,
+        combinedCoordinates:
+            combinedCoordinates.length >= 2
+                ? combinedCoordinates
+                : [...pickupCoordinates, ...destinationCoordinates.slice(1)],
+        pickupDistanceKm: normalizeSharedRouteMetric(routePlan.pickupDistanceKm),
+        pickupDurationMinutes: normalizeSharedRouteMetric(routePlan.pickupDurationMinutes),
+        destinationDistanceKm: normalizeSharedRouteMetric(routePlan.destinationDistanceKm),
+        destinationDurationMinutes: normalizeSharedRouteMetric(routePlan.destinationDurationMinutes)
+    };
+}
 
 function registerSocketUpdateLocationHandler({
     socket,
@@ -133,7 +189,17 @@ function registerSocketUpdateLocationHandler({
             // ✅ OTIMIZAÇÃO 4: TTL diferenciado por estado
             // - Em viagem: 30 segundos (dados críticos, precisa ser muito atualizado)
             // - Online disponível: 90 segundos (balanceia responsividade e tolerância a falhas)
-            const isInTripState = isInTrip || tripStatus === 'started' || tripStatus === 'accepted';
+            const sharedRouteBookingId = String(data.bookingId || tripIdFromClient || '').trim();
+            const hasSharedRoutePlanCandidate = Boolean(
+                sharedRouteBookingId &&
+                data.routePlan &&
+                typeof data.routePlan === 'object'
+            );
+            const isInTripState =
+                isInTrip ||
+                tripStatus === 'started' ||
+                tripStatus === 'accepted' ||
+                hasSharedRoutePlanCandidate;
             const redis = redisPool.getConnection();
 
             // Aplicar validação KYC diária na transição offline -> online via updateLocation
@@ -335,7 +401,7 @@ function registerSocketUpdateLocationHandler({
                     const capturedAtValue = Number.isFinite(Number(capturedAt)) ? Number(capturedAt) : Date.now();
                     let orderStatus = 'no_seq';
                     let lastAcceptedSeq = null;
-                    activeTripId = tripIdFromClient;
+                    activeTripId = tripIdFromClient || sharedRouteBookingId;
                     const indexedTrip = ENABLE_ACTIVE_TRIP_INDEX
                         ? await resolveActiveTripForDriver(redis, driverId)
                         : { tripId: null, customerId: null };
@@ -373,6 +439,19 @@ function registerSocketUpdateLocationHandler({
                             if (ENABLE_ACTIVE_TRIP_INDEX && (tripChanged || customerChanged)) {
                                 await setActiveTripForDriver(redis, driverId, activeTripId, customerId);
                             }
+
+                            await pricingH3ReadModelService.applyBookingSnapshot(redis, {
+                                bookingId: activeTripId,
+                                ...bookingData,
+                                currentLocation: {
+                                    lat: latNum,
+                                    lng: lngNum
+                                },
+                                driverLocation: {
+                                    lat: latNum,
+                                    lng: lngNum
+                                }
+                            }).catch(() => null);
                         } else {
                             activeTripId = null;
                             customerId = null;
@@ -463,7 +542,8 @@ function registerSocketUpdateLocationHandler({
                         );
 
                         if (customerId) {
-                            io.to(`customer_${customerId}`).emit('driverLocation', {
+                            const sharedRoutePlan = normalizeSharedRoutePlan(data.routePlan);
+                            const driverLocationPayload = {
                                 bookingId: activeTripId,
                                 driverId,
                                 seq: seqIsValid ? parsedSeq : null,
@@ -476,7 +556,38 @@ function registerSocketUpdateLocationHandler({
                                     accuracy: Number.isFinite(Number(accuracy)) ? Number(accuracy) : null,
                                     timestamp: Date.now()
                                 }
-                            });
+                            };
+
+                            if (sharedRoutePlan) {
+                                driverLocationPayload.routePlan = sharedRoutePlan;
+                                driverLocationPayload.routePlanPhase =
+                                    String(data.routePlanPhase || '').trim() || null;
+                                driverLocationPayload.routePlanSharedAt =
+                                    String(data.routePlanSharedAt || '').trim() || null;
+                                driverLocationPayload.pickupCoordinate =
+                                    normalizeSharedRouteCoordinate(data.pickupCoordinate);
+                                driverLocationPayload.destinationCoordinate =
+                                    normalizeSharedRouteCoordinate(data.destinationCoordinate);
+                                driverLocationPayload.pickupAddress =
+                                    String(data.pickupAddress || '').trim();
+                                driverLocationPayload.destinationAddress =
+                                    String(data.destinationAddress || '').trim();
+                                logStructured('info', 'RoutePlan compartilhado com passageiro', {
+                                    service: 'websocket',
+                                    operation: 'updateLocation',
+                                    driverId,
+                                    customerId,
+                                    bookingId: activeTripId,
+                                    pickupPoints: Array.isArray(sharedRoutePlan.pickupCoordinates)
+                                        ? sharedRoutePlan.pickupCoordinates.length
+                                        : 0,
+                                    destinationPoints: Array.isArray(sharedRoutePlan.destinationCoordinates)
+                                        ? sharedRoutePlan.destinationCoordinates.length
+                                        : 0
+                                });
+                            }
+
+                            io.to(`customer_${customerId}`).emit('driverLocation', driverLocationPayload);
                         }
                     }
                 } catch (locationError) {

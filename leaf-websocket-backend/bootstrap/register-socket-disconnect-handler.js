@@ -10,10 +10,22 @@ function registerSocketDisconnectHandler({
     releaseAdmissionSlotIfNeeded
 }) {
     const ELIGIBLE_DRIVER_GEO_KEY = process.env.ELIGIBLE_DRIVER_GEO_KEY || 'driver_locations_eligible';
+    const DRIVER_DISCONNECT_GRACE_MS = Math.max(
+        0,
+        Number.parseInt(process.env.DRIVER_DISCONNECT_GRACE_MS || '0', 10) || 0
+    );
+    const DRIVER_DISCONNECT_GRACE_TIMERS_KEY = '__driverDisconnectGraceTimers';
     const {
         resolveAcceptedBookingCandidatesForDriver,
         recoverAcceptedBooking
     } = require('../services/accepted-ride-recovery-service');
+
+    const getDisconnectGraceTimers = () => {
+        if (!io[DRIVER_DISCONNECT_GRACE_TIMERS_KEY]) {
+            io[DRIVER_DISCONNECT_GRACE_TIMERS_KEY] = new Map();
+        }
+        return io[DRIVER_DISCONNECT_GRACE_TIMERS_KEY];
+    };
 
     const recoverAcceptedRideOnDriverDisconnect = async ({ redis, driverData }) => {
         try {
@@ -76,6 +88,97 @@ function registerSocketDisconnectHandler({
         }
     };
 
+    const finalizeDriverDisconnect = async () => {
+        // ✅ FASE 1: Liberar lock de veículo ao desconectar
+        if (socket.vehiclePlate) {
+            logStructured('info', 'Liberando lock de veículo na desconexão', {
+                service: 'websocket',
+                socketId: socket.id,
+                userId: socket.userId,
+                vehiclePlate: socket.vehiclePlate
+            });
+            try {
+                await vehicleLockManager.releaseLock(socket.vehiclePlate, socket.userId);
+                logStructured('info', 'Lock de veículo liberado', {
+                    service: 'websocket',
+                    userId: socket.userId,
+                    vehiclePlate: socket.vehiclePlate
+                });
+            } catch (lockError) {
+                logStructured('error', 'Erro ao liberar lock de veículo', {
+                    service: 'websocket',
+                    userId: socket.userId,
+                    vehiclePlate: socket.vehiclePlate,
+                    error: lockError.message
+                });
+            }
+        }
+
+        const redis = redisPool.getConnection();
+
+        if (redis.status !== 'ready' && redis.status !== 'connect') {
+            try {
+                await redis.connect();
+            } catch (connectError) {
+                if (!connectError.message.includes('already connecting') &&
+                    !connectError.message.includes('already connected')) {
+                    logStructured('error', 'Erro ao conectar Redis na desconexão', {
+                        service: 'websocket',
+                        socketId: socket.id,
+                        userId: socket.userId,
+                        error: connectError.message
+                    });
+                    return;
+                }
+            }
+        }
+
+        const driverData = await redis.hgetall(`driver:${socket.userId}`);
+
+        if (driverData && driverData.lat && driverData.lng) {
+            await saveDriverLocation(
+                socket.userId,
+                parseFloat(driverData.lat),
+                parseFloat(driverData.lng),
+                parseFloat(driverData.heading || 0),
+                parseFloat(driverData.speed || 0),
+                Date.now(),
+                false
+            );
+            logStructured('info', 'Motorista desconectado - salvo como OFFLINE com última localização', {
+                service: 'websocket',
+                socketId: socket.id,
+                userId: socket.userId
+            });
+        } else {
+            try {
+                await redis.zrem('driver_locations', socket.userId);
+                logStructured('info', 'Motorista desconectado - removido do GEO ativo', {
+                    service: 'websocket',
+                    socketId: socket.id,
+                    userId: socket.userId
+                });
+            } catch (error) {
+                logStructured('warn', 'Erro ao remover do GEO', {
+                    service: 'websocket',
+                    socketId: socket.id,
+                    userId: socket.userId,
+                    error: error.message
+                });
+            }
+        }
+
+        await redis.zrem(ELIGIBLE_DRIVER_GEO_KEY, socket.userId);
+        await redis.srem('online_drivers', socket.userId);
+        await redis.hset(`driver:${socket.userId}`, {
+            dispatchEligible: 'false',
+            dispatchEligibilityCode: 'OFFLINE',
+            dispatchEligibilityCheckedAt: new Date().toISOString()
+        });
+
+        await recoverAcceptedRideOnDriverDisconnect({ redis, driverData });
+    };
+
     // 1. Disconnect (crítico - deve estar sempre pronto)
     socket.on('disconnect', async (reason) => {
         releaseAdmissionSlotIfNeeded();
@@ -99,100 +202,54 @@ function registerSocketDisconnectHandler({
         // Se for motorista, salvar última localização como offline e liberar lock de veículo
         if (socket.userId && socket.userType === 'driver') {
             try {
-                // ✅ FASE 1: Liberar lock de veículo ao desconectar
-                if (socket.vehiclePlate) {
-                    logStructured('info', 'Liberando lock de veículo na desconexão', {
+                const redis = redisPool.getConnection();
+                const acceptedRideCandidates = await resolveAcceptedBookingCandidatesForDriver(redis, socket.userId, {
+                    scanLimit: 300
+                }).catch(() => ({ bookingIds: [] }));
+                const hasAcceptedRideCandidates = Array.isArray(acceptedRideCandidates?.bookingIds) &&
+                    acceptedRideCandidates.bookingIds.length > 0;
+                const shouldDelayOffline = DRIVER_DISCONNECT_GRACE_MS > 0 && !hasAcceptedRideCandidates;
+
+                if (shouldDelayOffline) {
+                    const disconnectGraceTimers = getDisconnectGraceTimers();
+                    const existingTimer = disconnectGraceTimers.get(socket.userId);
+                    if (existingTimer?.timeout) {
+                        clearTimeout(existingTimer.timeout);
+                    }
+
+                    const timeout = setTimeout(() => {
+                        finalizeDriverDisconnect()
+                            .catch((error) => {
+                                logStructured('error', 'Erro ao finalizar grace de desconexão do motorista', {
+                                    service: 'websocket',
+                                    socketId: socket.id,
+                                    userId: socket.userId,
+                                    error: error.message
+                                });
+                            })
+                            .finally(() => {
+                                const activeTimers = getDisconnectGraceTimers();
+                                activeTimers.delete(socket.userId);
+                            });
+                    }, DRIVER_DISCONNECT_GRACE_MS);
+
+                    disconnectGraceTimers.set(socket.userId, {
+                        timeout,
+                        socketId: socket.id,
+                        graceMs: DRIVER_DISCONNECT_GRACE_MS,
+                        disconnectedAt: new Date().toISOString()
+                    });
+
+                    logStructured('info', 'Motorista desconectado - preservando ONLINE durante janela de graça', {
                         service: 'websocket',
                         socketId: socket.id,
                         userId: socket.userId,
-                        vehiclePlate: socket.vehiclePlate
-                    });
-                    try {
-                        await vehicleLockManager.releaseLock(socket.vehiclePlate, socket.userId);
-                        logStructured('info', 'Lock de veículo liberado', {
-                            service: 'websocket',
-                            userId: socket.userId,
-                            vehiclePlate: socket.vehiclePlate
-                        });
-                    } catch (lockError) {
-                        logStructured('error', 'Erro ao liberar lock de veículo', {
-                            service: 'websocket',
-                            userId: socket.userId,
-                            vehiclePlate: socket.vehiclePlate,
-                            error: lockError.message
-                        });
-                        // Não bloquear desconexão por erro no lock
-                    }
-                }
-
-                const redis = redisPool.getConnection();
-
-                // Garantir conexão Redis
-                if (redis.status !== 'ready' && redis.status !== 'connect') {
-                    try {
-                        await redis.connect();
-                    } catch (connectError) {
-                        if (!connectError.message.includes('already connecting') &&
-                            !connectError.message.includes('already connected')) {
-                            logStructured('error', 'Erro ao conectar Redis na desconexão', {
-                                service: 'websocket',
-                                socketId: socket.id,
-                                userId: socket.userId,
-                                error: connectError.message
-                            });
-                            return; // Continuar sem salvar como offline
-                        }
-                    }
-                }
-
-                // Buscar última localização conhecida
-                const driverData = await redis.hgetall(`driver:${socket.userId}`);
-
-                if (driverData && driverData.lat && driverData.lng) {
-                    // Salvar como offline com última localização
-                    await saveDriverLocation(
-                        socket.userId,
-                        parseFloat(driverData.lat),
-                        parseFloat(driverData.lng),
-                        parseFloat(driverData.heading || 0),
-                        parseFloat(driverData.speed || 0),
-                        Date.now(),
-                        false // offline
-                    );
-                    logStructured('info', 'Motorista desconectado - salvo como OFFLINE com última localização', {
-                        service: 'websocket',
-                        socketId: socket.id,
-                        userId: socket.userId
+                        reason,
+                        graceMs: DRIVER_DISCONNECT_GRACE_MS
                     });
                 } else {
-                    // Se não tem localização, apenas remover do GEO ativo
-                    try {
-                        await redis.zrem('driver_locations', socket.userId);
-                        logStructured('info', 'Motorista desconectado - removido do GEO ativo', {
-                            service: 'websocket',
-                            socketId: socket.id,
-                            userId: socket.userId
-                        });
-                    } catch (error) {
-                        // Ignorar erro se Redis não disponível
-                        logStructured('warn', 'Erro ao remover do GEO', {
-                            service: 'websocket',
-                            socketId: socket.id,
-                            userId: socket.userId,
-                            error: error.message
-                        });
-                    }
+                    await finalizeDriverDisconnect();
                 }
-
-                await redis.zrem(ELIGIBLE_DRIVER_GEO_KEY, socket.userId);
-                await redis.srem('online_drivers', socket.userId);
-                await redis.hset(`driver:${socket.userId}`, {
-                    dispatchEligible: 'false',
-                    dispatchEligibilityCode: 'OFFLINE',
-                    dispatchEligibilityCheckedAt: new Date().toISOString()
-                });
-
-                await recoverAcceptedRideOnDriverDisconnect({ redis, driverData });
             } catch (error) {
                 logStructured('error', 'Erro ao processar desconexão do motorista', {
                     service: 'websocket',

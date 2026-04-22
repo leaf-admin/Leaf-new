@@ -26,6 +26,10 @@ const { getTracer } = require('../utils/tracer');
 const { SpanStatusCode } = require('@opentelemetry/api');
 const { validateAndEnsureTraceIdInCommand } = require('../utils/trace-validator');
 const { setActiveTripForDriver } = require('../utils/active-trip-index');
+const {
+    rehydratePrimaryBooking,
+    writeVisibleBookingSnapshot
+} = require('../services/booking-visibility-service');
 
 class StartTripCommand extends Command {
     constructor(data) {
@@ -84,7 +88,13 @@ class StartTripCommand extends Command {
             // Buscar dados da corrida
             span.addEvent('Fetching booking data');
             const bookingKey = `booking:${this.bookingId}`;
-            const bookingData = await redis.hgetall(bookingKey);
+            let bookingData = await redis.hgetall(bookingKey);
+
+            if (!bookingData || Object.keys(bookingData).length === 0) {
+                bookingData = await rehydratePrimaryBooking(redis, this.bookingId, {
+                    rehydratedFor: 'start_trip'
+                });
+            }
 
             if (!bookingData || Object.keys(bookingData).length === 0) {
                 span.setStatus({ code: SpanStatusCode.ERROR, message: 'Corrida não encontrada' });
@@ -101,6 +111,13 @@ class StartTripCommand extends Command {
                 return CommandResult.failure('Motorista não autorizado para iniciar esta corrida')
             }
 
+            if (bookingData.ownerDriverId && bookingData.ownerDriverId !== this.driverId) {
+                span.setStatus({ code: SpanStatusCode.ERROR, message: 'Ownership token inválido' });
+                span.end();
+                metrics.recordCommand('StartTrip', (Date.now() - startTime) / 1000, false);
+                return CommandResult.failure('Motorista não autorizado para iniciar esta corrida');
+            }
+
             // Verificar estado atual
             span.addEvent('Validating state transition');
             const currentState = await RideStateManager.getBookingState(redis, this.bookingId);
@@ -108,6 +125,20 @@ class StartTripCommand extends Command {
             if (currentState === RideStateManager.STATES.ACCEPTED) {
                 span.setStatus({ code: SpanStatusCode.ERROR, message: 'Chegada ao embarque obrigatória' });
                 span.setAttribute('state.current', currentState);
+                span.end();
+                metrics.recordCommand('StartTrip', (Date.now() - startTime) / 1000, false);
+                return CommandResult.failure(
+                    'A corrida só pode ser iniciada após registrar chegada ao embarque.'
+                );
+            }
+
+            const arrivalRegisteredAt =
+                bookingData.arrivalRegisteredAt ||
+                bookingData.driverArrivedAt ||
+                bookingData.arrivedAt ||
+                null;
+            if (!arrivalRegisteredAt) {
+                span.setStatus({ code: SpanStatusCode.ERROR, message: 'Chegada ao embarque não persistida' });
                 span.end();
                 metrics.recordCommand('StartTrip', (Date.now() - startTime) / 1000, false);
                 return CommandResult.failure(
@@ -197,7 +228,8 @@ class StartTripCommand extends Command {
             const bookingPatch = {
                 status: targetState,
                 startLocation: JSON.stringify(this.startLocation),
-                startedAt: new Date().toISOString()
+                startedAt: new Date().toISOString(),
+                arrivalRegisteredAt
             };
 
             if (targetState === RideStateManager.STATES.REASSIGNED_IN_PROGRESS && operationalContinuation) {
@@ -211,6 +243,7 @@ class StartTripCommand extends Command {
             }
 
             await redis.hset(bookingKey, bookingPatch);
+            await writeVisibleBookingSnapshot(redis, this.bookingId, bookingPatch);
 
                 // Criar evento canônico
                 span.addEvent('Creating RideStartedEvent');

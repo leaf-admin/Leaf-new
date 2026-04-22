@@ -8,10 +8,22 @@ const MAX_CELLS = Number.parseInt(process.env.H3_MAP_MAX_CELLS || '500', 10);
 const BBOX_MAX_SPAN_DEGREES = Number.parseFloat(process.env.H3_MAP_MAX_BBOX_SPAN_DEGREES || '5');
 const SEARCH_SCAN_COUNT = Number.parseInt(process.env.H3_MAP_SCAN_COUNT || '250', 10);
 const OPEN_REQUEST_ACTIVE_WINDOW_MS = Number.parseInt(process.env.H3_MAP_OPEN_REQUEST_WINDOW_MS || String(10 * 60 * 1000), 10);
+const ACTIVE_BOOKING_STALE_MS = Number.parseInt(process.env.H3_MAP_ACTIVE_BOOKING_STALE_MS || String(12 * 60 * 60 * 1000), 10);
 const SUPPORTED_SURFACES = new Set(['driver', 'dashboard']);
 const SUPPORTED_MODES = new Set(['supply_demand']);
 const SEARCHABLE_STATES = new Set(['SEARCHING', 'PENDING', 'EXPANDED', 'NOTIFIED', 'AWAITING_RESPONSE', 'REASSIGNMENT_PENDING']);
 const ACTIVE_TRIP_STATES = new Set(['MATCHED', 'ACCEPTED', 'ARRIVED', 'IN_PROGRESS', 'REASSIGNED_IN_PROGRESS', 'STARTED']);
+const TERMINAL_TRIP_STATES = new Set([
+  'COMPLETED',
+  'CANCELED',
+  'CANCELLED',
+  'EXPIRED',
+  'FAILED',
+  'REJECTED',
+  'EARLY_ENDED_BY_RIDER',
+  'INTERRUPTED_OPERATIONAL_ENDED',
+  'EARLY_ENDED_REVIEW'
+]);
 
 function createHttpError(statusCode, message, details = {}) {
   const error = new Error(message);
@@ -127,6 +139,44 @@ function normalizeBookingStatus(rawStatus, rawState) {
   const status = String(rawStatus || '').trim().toUpperCase();
   const state = String(rawState || '').trim().toUpperCase();
   return status || state || 'UNKNOWN';
+}
+
+function parseBookingTimestampMs(value) {
+  if (value == null || value === '') return null;
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return value > 0 ? value : null;
+  }
+
+  const asNumber = Number(value);
+  if (Number.isFinite(asNumber) && asNumber > 0) {
+    return asNumber;
+  }
+
+  const asDate = Date.parse(String(value));
+  return Number.isFinite(asDate) ? asDate : null;
+}
+
+function resolveBookingFreshnessMs(booking = {}) {
+  const candidates = [
+    booking.updatedAt,
+    booking.completedAt,
+    booking.cancelledAt,
+    booking.canceledAt,
+    booking.endedAt,
+    booking.finishedAt,
+    booking.startedAt,
+    booking.acceptedAt,
+    booking.createdAt,
+    booking.timestamp
+  ]
+    .map(parseBookingTimestampMs)
+    .filter((value) => Number.isFinite(value));
+
+  if (!candidates.length) {
+    return null;
+  }
+
+  return Math.max(...candidates);
 }
 
 function resolveDemandLevel({ demand, availableDrivers, imbalance }) {
@@ -542,6 +592,8 @@ class H3MapService {
     }
 
     const trips = [];
+    const staleBookingIds = [];
+    const nowMs = Date.now();
     for (const [bookingId, rawBooking] of entries) {
       let booking = null;
       try {
@@ -552,7 +604,18 @@ class H3MapService {
       if (!booking || typeof booking !== 'object') continue;
 
       const normalizedStatus = normalizeBookingStatus(booking.status, booking.state);
+      const normalizedState = String(booking.state || '').trim().toUpperCase();
+      if (TERMINAL_TRIP_STATES.has(normalizedStatus) || TERMINAL_TRIP_STATES.has(normalizedState)) {
+        staleBookingIds.push(bookingId);
+        continue;
+      }
       if (!ACTIVE_TRIP_STATES.has(normalizedStatus)) continue;
+
+      const freshnessMs = resolveBookingFreshnessMs(booking);
+      if (Number.isFinite(freshnessMs) && (nowMs - freshnessMs) > ACTIVE_BOOKING_STALE_MS) {
+        staleBookingIds.push(bookingId);
+        continue;
+      }
 
       const location =
         parseLocation(booking.currentLocation) ||
@@ -570,6 +633,31 @@ class H3MapService {
         location,
         status: normalizedStatus
       });
+    }
+
+    if (staleBookingIds.length > 0) {
+      try {
+        if (typeof redis.pipeline === 'function') {
+          const pipeline = redis.pipeline();
+          staleBookingIds.forEach((bookingId) => {
+            pipeline.hdel('bookings:active', bookingId);
+          });
+          await pipeline.exec();
+        } else if (typeof redis.hdel === 'function') {
+          await Promise.all(staleBookingIds.map((bookingId) => redis.hdel('bookings:active', bookingId)));
+        }
+
+        logStructured('info', 'H3 map cleanup removeu bookings ativos stale/terminais', {
+          service: 'h3-map-service',
+          removedBookings: staleBookingIds.length
+        });
+      } catch (cleanupError) {
+        logStructured('warn', 'Falha ao limpar bookings:active stale durante snapshot H3', {
+          service: 'h3-map-service',
+          removedBookings: staleBookingIds.length,
+          error: cleanupError.message
+        });
+      }
     }
 
     return trips;

@@ -17,6 +17,9 @@ const { EVENT_TYPES } = require('./event-sourcing');
 const driverLockManager = require('./driver-lock-manager');
 const DriverNotificationDispatcher = require('./driver-notification-dispatcher');
 const { logger } = require('../utils/logger');
+const { clearOfferReservationsForBooking } = require('./offer-reservation-service');
+const { recordDispatchWave } = require('./dispatch-wave-trace-service');
+const { getDriverResponseTimeoutSeconds } = require('../utils/dispatch-config');
 
 // ✅ Compartilhar intervalos entre instâncias para permitir cancelamento global
 const globalExpansionIntervals = new Map();
@@ -36,6 +39,11 @@ const parsePositiveNumber = (value, fallback) => {
     return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
 };
 
+const parsePositiveInt = (value, fallback) => {
+    const parsed = Number.parseInt(value, 10);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+};
+
 class GradualRadiusExpander {
     constructor(io) {
         this.redis = redisPool.getConnection();
@@ -51,12 +59,28 @@ class GradualRadiusExpander {
             maxRadius: parsePositiveNumber(process.env.MATCH_MAX_RADIUS_KM, isTest ? 30 : 5.0),
             expansionStep: parsePositiveNumber(process.env.MATCH_EXPANSION_STEP_KM, isTest ? 5.0 : 2.5),
             expansionInterval: parsePositiveNumber(process.env.MATCH_EXPANSION_INTERVAL_MS, isTest ? 1000 : 8000),
+            emptyWaveExpansionInterval: parsePositiveNumber(
+                process.env.MATCH_EMPTY_WAVE_INTERVAL_MS,
+                isTest ? 100 : Math.max(1000, parsePositiveNumber(process.env.MATCH_EXPANSION_INTERVAL_MS, 8000))
+            ),
             maxWaves: 60,
             searchStateTTL: 3600, // 1h
+            maxRadiusRetryIntervalMs: parsePositiveNumber(
+                process.env.MATCH_MAX_RADIUS_RETRY_INTERVAL_MS,
+                isTest ? 200 : 10000
+            ),
+            minimumSearchDurationMs: parsePositiveNumber(
+                process.env.MATCH_MINIMUM_SEARCH_DURATION_MS,
+                isTest ? 0 : 180000
+            ),
             driversPerWave: Number.parseInt(process.env.MATCH_DRIVERS_PER_WAVE || (isTest ? '1' : '12'), 10),
+            responsePauseMinUniqueDrivers: parsePositiveInt(
+                process.env.MATCH_RESPONSE_PAUSE_MIN_UNIQUE_DRIVERS,
+                1
+            ),
             driverResponseWaitMs: Math.max(
                 1000,
-                parsePositiveNumber(process.env.DISPATCH_DRIVER_RESPONSE_TIMEOUT_SECONDS, 8) * 1000
+                getDriverResponseTimeoutSeconds() * 1000
             )
         };
     }
@@ -73,6 +97,42 @@ class GradualRadiusExpander {
         } catch (error) {
             return defaultValue;
         }
+    }
+
+    async getUniqueNotifiedDriversCount(bookingId) {
+        try {
+            const rawCount = await this.redis.scard(`ride_notifications:${bookingId}`);
+            const count = Number.parseInt(rawCount, 10);
+            return Number.isFinite(count) && count >= 0 ? count : 0;
+        } catch (error) {
+            logger.warn(`⚠️ [GradualExpander] Falha ao contar motoristas únicos notificados para ${bookingId}: ${error.message}`);
+            return 0;
+        }
+    }
+
+    async shouldPauseForDriverResponse(bookingId) {
+        const uniqueNotifiedDrivers = await this.getUniqueNotifiedDriversCount(bookingId);
+        return {
+            pause: uniqueNotifiedDrivers >= this.config.responsePauseMinUniqueDrivers,
+            uniqueNotifiedDrivers
+        };
+    }
+
+    scheduleBookingTimeout(bookingId, delayMs, callback) {
+        const existingTimeout = this.expansionIntervals.get(bookingId);
+        if (existingTimeout) {
+            clearTimeout(existingTimeout);
+        }
+
+        const timeout = setTimeout(async () => {
+            try {
+                await callback();
+            } catch (error) {
+                logger.error(`❌ Erro em timeout agendado para ${bookingId}:`, error);
+            }
+        }, delayMs);
+
+        this.expansionIntervals.set(bookingId, timeout);
     }
 
     async getSearchDispatchability(bookingId, bookingData = null) {
@@ -141,6 +201,8 @@ class GradualRadiusExpander {
      */
     async startGradualSearch(bookingId, pickupLocation) {
         try {
+            const searchStartedAt = Date.now();
+
             // ✅ REFATORAÇÃO: Verificar se busca já está ativa (evitar duplicação)
             const searchKey = `booking_search:${bookingId}`;
             const existingSearch = await this.redis.hgetall(searchKey);
@@ -179,7 +241,10 @@ class GradualRadiusExpander {
                 logger.info(`ℹ️ [GradualExpander] Corrida ${bookingId}: sem motoristas elegíveis ativos no raio ${this.config.maxRadius}km`);
                 await this.handleMaxRadiusReached(bookingId, {
                     reason: 'NO_ELIGIBLE_DRIVERS_IN_REGION',
-                    searchedRadius: this.config.maxRadius
+                    searchedRadius: this.config.maxRadius,
+                    pickupLocation,
+                    limit: this.config.driversPerWave,
+                    searchStartedAt
                 });
                 return;
             }
@@ -190,7 +255,7 @@ class GradualRadiusExpander {
                 maxRadius: this.config.maxRadius,
                 expansionInterval: this.config.expansionInterval,
                 pickupLocation: typeof pickupLocation === 'string' ? pickupLocation : JSON.stringify(pickupLocation),
-                createdAt: Date.now(),
+                createdAt: searchStartedAt,
                 lastExpansion: Date.now(),
                 state: 'SEARCHING'
             });
@@ -217,13 +282,20 @@ class GradualRadiusExpander {
             // For now, I'm only adding the log as requested and omitting the structural changes that would break the current flow.
 
             // Agendar próxima expansão
-            const nextInterval = initialResult.notified > 0
+            const initialPauseDecision = initialResult.notified > 0
+                ? await this.shouldPauseForDriverResponse(bookingId)
+                : { pause: false, uniqueNotifiedDrivers: 0 };
+            const nextInterval = initialPauseDecision.pause
                 ? this.config.driverResponseWaitMs
                 : this.config.expansionInterval;
 
-            if (initialResult.notified > 0) {
+            if (initialResult.notified > 0 && initialPauseDecision.pause) {
                 logger.info(
                     `⏸️ [GradualExpander] ${initialResult.notified} motorista(s) já foram notificados para ${bookingId}. Aguardando ${nextInterval}ms antes da próxima wave.`
+                );
+            } else if (initialResult.notified > 0) {
+                logger.info(
+                    `⚡ [GradualExpander] ${initialPauseDecision.uniqueNotifiedDrivers} motorista(s) únicos notificados para ${bookingId}; continuando expansão até atingir o mínimo de ${this.config.responsePauseMinUniqueDrivers}.`
                 );
             }
 
@@ -286,6 +358,16 @@ class GradualRadiusExpander {
             );
 
             if (scoredDrivers.length === 0) {
+                await recordDispatchWave(this.redis, bookingId, {
+                    radiusKm: radius,
+                    candidateCount: 0,
+                    notifiedCount: 0,
+                    failedCount: 0,
+                    limit,
+                    bookingState: dispatchability.state,
+                    source: 'gradual_expander',
+                    timestampMs: Date.now()
+                });
                 return { notified: 0, total: 0 };
             }
 
@@ -326,12 +408,29 @@ class GradualRadiusExpander {
                 scoredDrivers,
                 bookingId,
                 bookingInfo,
-                limit
+                limit,
+                {
+                    dispatchTrace: {
+                        type: 'wave',
+                        source: 'gradual_expander',
+                        radiusKm: radius,
+                        candidateCount: scoredDrivers.length,
+                        bookingState: dispatchability.state
+                    }
+                }
             );
 
-            logger.info(`✅ [GradualExpander] ${result.notified}/${scoredDrivers.length} motoristas notificados em ${radius}km`);
+            logger.info(`✅ [GradualExpander] ${result.notified}/${scoredDrivers.length} motoristas notificados em ${radius}km`, {
+                bookingId,
+                radiusKm: radius,
+                failedCount: result.failed
+            });
 
-            return { notified: result.notified, total: scoredDrivers.length };
+            return {
+                notified: result.notified,
+                total: scoredDrivers.length,
+                failed: result.failed
+            };
         } catch (error) {
             logger.error(`❌ Erro ao buscar e notificar motoristas para ${bookingId}:`, error);
             return { notified: 0, total: 0 };
@@ -345,133 +444,164 @@ class GradualRadiusExpander {
      */
     scheduleNextExpansion(bookingId, pickupLocation, nextRadius, maxRadius, interval, limit) {
         // Cancelar expansão anterior se existir
-        const existingTimeout = this.expansionIntervals.get(bookingId);
-        if (existingTimeout) {
-            clearTimeout(existingTimeout);
-        }
-
         // Verificar se atingiu raio máximo
         if (nextRadius > maxRadius) {
             logger.info(`🏁 [GradualExpander] Raio máximo (${maxRadius}km) atingido para ${bookingId}.`);
             this.expansionIntervals.delete(bookingId);
-            this.handleMaxRadiusReached(bookingId);
+            this.handleMaxRadiusReached(bookingId, {
+                pickupLocation,
+                searchedRadius: maxRadius,
+                limit
+            });
             return;
         }
 
         logger.info(`📡 [GradualExpander] Agendada WAVE para ${bookingId}: próximo raio ${nextRadius}km em ${interval}ms`);
 
         // Agendar próxima expansão
-        const expansionTimeout = setTimeout(async () => {
-            try {
-                // ✅ PROTEÇÃO CONTRA RACE CONDITION: Se a busca foi parada localmente, abortar
-                if (!this.expansionIntervals.has(bookingId)) {
-                    logger.debug(`🛑 [GradualExpander] Wave para ${bookingId} cancelada (não está no Map local)`);
-                    return;
-                }
+        this.scheduleBookingTimeout(bookingId, interval, async () => {
+            // ✅ PROTEÇÃO CONTRA RACE CONDITION: Se a busca foi parada localmente, abortar
+            if (!this.expansionIntervals.has(bookingId)) {
+                logger.debug(`🛑 [GradualExpander] Wave para ${bookingId} cancelada (não está no Map local)`);
+                return;
+            }
 
-                // ✅ CORREÇÃO: Estado sempre é SEARCHING enquanto busca motoristas
-                const state = await RideStateManager.getBookingState(this.redis, bookingId);
+            // ✅ CORREÇÃO: Estado sempre é SEARCHING enquanto busca motoristas
+            const state = await RideStateManager.getBookingState(this.redis, bookingId);
 
-                // Se estado é SEARCHING ou EXPANDED, continuar expansão normalmente
-                if (state === RideStateManager.STATES.SEARCHING || state === RideStateManager.STATES.EXPANDED) {
-                    // Continuar normalmente - buscar e notificar no novo raio
-                } else {
-                    // Corrida já foi aceita ou cancelada
-                    logger.debug(`🛑 [GradualExpander] Busca parada para ${bookingId} (state: ${state})`);
-                    this.expansionIntervals.delete(bookingId);
-                    return;
-                }
-
-                const dispatchability = await this.getSearchDispatchability(bookingId);
-                if (!dispatchability.ok) {
-                    logger.info(`🛑 [GradualExpander] Encerrando wave de ${bookingId}: ${dispatchability.reason}`);
-                    await this.stopSearch(bookingId);
-                    this.expansionIntervals.delete(bookingId);
-                    return;
-                }
-
-                // Buscar e notificar no novo raio
-                const result = await this.searchAndNotify(
-                    bookingId,
-                    pickupLocation,
-                    nextRadius,
-                    limit
-                );
-
-                // ✅ PROTEÇÃO PÓS-NOTIFY: Verificar novamente se não foi parado durante o await
-                if (!this.expansionIntervals.has(bookingId)) {
-                    logger.debug(`🛑 [GradualExpander] Wave para ${bookingId} descartada (parada durante busca)`);
-                    return;
-                }
-
-                // Atualizar estado
-                const searchKey = `booking_search:${bookingId}`;
-                await this.redis.hset(searchKey, {
-                    currentRadius: nextRadius,
-                    lastExpansion: Date.now()
-                });
-
-                // FASE 10: Registrar expansão para métricas
-                const metricsCollector = require('./metrics-collector');
-                await metricsCollector.recordRadiusExpansion(bookingId, nextRadius, Date.now());
-
-                // Registrar evento
-                await eventSourcing.recordEvent(
-                    EVENT_TYPES.RADIUS_EXPANDED,
-                    {
-                        bookingId,
-                        newRadius: nextRadius,
-                        notified: result.notified,
-                        total: result.total
-                    }
-                );
-
-                const hasPendingDrivers = result.notified > 0;
-
-                if (hasPendingDrivers && nextRadius < maxRadius) {
-                    logger.info(
-                        `⏸️ [GradualExpander] ${result.notified} motorista(s) aguardando resposta para ${bookingId}. Próxima wave em ${this.config.driverResponseWaitMs}ms.`
+            const awaitingResponseState =
+                state === RideStateManager.STATES.NOTIFIED ||
+                state === RideStateManager.STATES.AWAITING_RESPONSE;
+            if (awaitingResponseState) {
+                const pauseDecision = await this.shouldPauseForDriverResponse(bookingId);
+                if (pauseDecision.pause) {
+                    logger.debug(
+                        `⏸️ [GradualExpander] Corrida ${bookingId} aguardando resposta com ${pauseDecision.uniqueNotifiedDrivers} motorista(s) únicos notificados. Reagendando wave em ${this.config.driverResponseWaitMs}ms`
                     );
                     this.scheduleNextExpansion(
                         bookingId,
                         pickupLocation,
-                        nextRadius + this.config.expansionStep,
+                        nextRadius,
                         maxRadius,
                         this.config.driverResponseWaitMs,
                         limit
                     );
-                // Se nenhum motorista foi encontrado, expandir mais rápido (100ms em vez de 0 para evitar starvation)
-                } else if (result.total === 0 && nextRadius < maxRadius) {
-                    logger.debug(`⚡ [GradualExpander] Raio vazio em ${nextRadius}km, expandindo em 100ms`);
-                    this.scheduleNextExpansion(
-                        bookingId,
-                        pickupLocation,
-                        nextRadius + this.config.expansionStep,
-                        maxRadius,
-                        100, // 100ms
-                        limit
-                    );
-                } else {
-                    // Agendar próxima expansão normal
-                    this.scheduleNextExpansion(
-                        bookingId,
-                        pickupLocation,
-                        nextRadius + this.config.expansionStep,
-                        maxRadius,
-                        interval,
-                        limit
-                    );
+                    return;
                 }
 
-                // Próxima expansão já foi agendada por scheduleNextExpansion dentro dos blocos acima.
-                // Não deletar daqui, pois deletaria a próxima wave agendada!
-            } catch (error) {
-                logger.error(`❌ Erro na expansão agendada para ${bookingId}:`, error);
-                this.expansionIntervals.delete(bookingId);
+                logger.info(
+                    `⚡ [GradualExpander] Corrida ${bookingId} ainda não atingiu o mínimo de ${this.config.responsePauseMinUniqueDrivers} motorista(s) únicos notificados (${pauseDecision.uniqueNotifiedDrivers} atuais). Continuando expansão.`
+                );
             }
-        }, interval); // ✅ FIX: Removido * 1000, interval já está em ms
 
-        this.expansionIntervals.set(bookingId, expansionTimeout);
+            // Se estado é SEARCHING ou EXPANDED, continuar expansão normalmente
+            const canContinueExpansion =
+                state === RideStateManager.STATES.SEARCHING ||
+                state === RideStateManager.STATES.EXPANDED ||
+                awaitingResponseState;
+            if (!canContinueExpansion) {
+                logger.debug(`🛑 [GradualExpander] Busca parada para ${bookingId} (state: ${state})`);
+                this.expansionIntervals.delete(bookingId);
+                return;
+            }
+
+            const dispatchability = await this.getSearchDispatchability(bookingId);
+            if (!dispatchability.ok) {
+                logger.info(`🛑 [GradualExpander] Encerrando wave de ${bookingId}: ${dispatchability.reason}`);
+                await this.stopSearch(bookingId);
+                this.expansionIntervals.delete(bookingId);
+                return;
+            }
+
+            // Buscar e notificar no novo raio
+            const result = await this.searchAndNotify(
+                bookingId,
+                pickupLocation,
+                nextRadius,
+                limit
+            );
+
+            // ✅ PROTEÇÃO PÓS-NOTIFY: Verificar novamente se não foi parado durante o await
+            if (!this.expansionIntervals.has(bookingId)) {
+                logger.debug(`🛑 [GradualExpander] Wave para ${bookingId} descartada (parada durante busca)`);
+                return;
+            }
+
+            // Atualizar estado
+            const searchKey = `booking_search:${bookingId}`;
+            await this.redis.hset(searchKey, {
+                currentRadius: nextRadius,
+                lastExpansion: Date.now()
+            });
+
+            // FASE 10: Registrar expansão para métricas
+            const metricsCollector = require('./metrics-collector');
+            await metricsCollector.recordRadiusExpansion(bookingId, nextRadius, Date.now());
+
+            // Registrar evento
+            await eventSourcing.recordEvent(
+                EVENT_TYPES.RADIUS_EXPANDED,
+                {
+                    bookingId,
+                    newRadius: nextRadius,
+                    notified: result.notified,
+                    total: result.total
+                }
+            );
+
+            const hasPendingDrivers = result.notified > 0;
+            const pauseDecision = hasPendingDrivers
+                ? await this.shouldPauseForDriverResponse(bookingId)
+                : { pause: false, uniqueNotifiedDrivers: 0 };
+
+            if (hasPendingDrivers && nextRadius < maxRadius && pauseDecision.pause) {
+                logger.info(
+                    `⏸️ [GradualExpander] ${result.notified} motorista(s) aguardando resposta para ${bookingId}. Próxima wave em ${this.config.driverResponseWaitMs}ms.`
+                );
+                this.scheduleNextExpansion(
+                    bookingId,
+                    pickupLocation,
+                    nextRadius + this.config.expansionStep,
+                    maxRadius,
+                    this.config.driverResponseWaitMs,
+                    limit
+                );
+            } else if (hasPendingDrivers && nextRadius < maxRadius) {
+                logger.info(
+                    `⚡ [GradualExpander] ${pauseDecision.uniqueNotifiedDrivers} motorista(s) únicos notificados para ${bookingId}; expandindo novamente antes de pausar.`
+                );
+                this.scheduleNextExpansion(
+                    bookingId,
+                    pickupLocation,
+                    nextRadius + this.config.expansionStep,
+                    maxRadius,
+                    interval,
+                    limit
+                );
+            } else if (result.total === 0 && nextRadius < maxRadius) {
+                logger.debug(
+                    `⚡ [GradualExpander] Raio vazio em ${nextRadius}km, expandindo em ${this.config.emptyWaveExpansionInterval}ms`
+                );
+                this.scheduleNextExpansion(
+                    bookingId,
+                    pickupLocation,
+                    nextRadius + this.config.expansionStep,
+                    maxRadius,
+                    this.config.emptyWaveExpansionInterval,
+                    limit
+                );
+            } else {
+                // Agendar próxima expansão normal
+                this.scheduleNextExpansion(
+                    bookingId,
+                    pickupLocation,
+                    nextRadius + this.config.expansionStep,
+                    maxRadius,
+                    interval,
+                    limit
+                );
+            }
+        });
 
         logger.debug(`⏰ [GradualExpander] Próxima expansão agendada para ${bookingId} (raio: ${nextRadius}km em ${interval}ms)`);
     }
@@ -526,6 +656,10 @@ class GradualRadiusExpander {
                 }
             }
 
+            await clearOfferReservationsForBooking(this.redis, bookingId, {
+                preserveDriverId
+            }).catch(() => null);
+
             // ✅ CORREÇÃO: Deletar a chave em vez de apenas marcar STOPPED para evitar vazamento
             const searchKey = `booking_search:${bookingId}`;
             await this.redis.del(searchKey);
@@ -556,11 +690,24 @@ class GradualRadiusExpander {
         const searchedRadius = Number.isFinite(Number(options?.searchedRadius))
             ? Number(options.searchedRadius)
             : this.config.maxRadius;
+        const limit = Number.isFinite(Number(options?.limit))
+            ? Number(options.limit)
+            : this.config.driversPerWave;
         const userMessage = reasonCode === 'NO_ELIGIBLE_DRIVERS_IN_REGION'
             ? 'Não há motoristas ativos na sua região neste momento'
             : 'Nenhum motorista disponível no momento';
         const bookingKey = `booking:${bookingId}`;
-        const bookingData = await this.redis.hgetall(bookingKey);
+        const bookingData = options?.bookingData && Object.keys(options.bookingData).length > 0
+            ? options.bookingData
+            : await this.redis.hgetall(bookingKey);
+        const searchMeta = await this.redis.hgetall(`booking_search:${bookingId}`);
+        const searchStartedAt = Number(
+            options?.searchStartedAt ||
+            searchMeta?.createdAt ||
+            bookingData?.createdAt ||
+            0
+        );
+        const skipMinimumSearchDuration = options?.skipMinimumSearchDuration === true;
 
         // Se corrida já foi aceita/cancelada durante a expansão, não emitir falha de busca.
         const currentState = await RideStateManager.getBookingState(this.redis, bookingId);
@@ -578,11 +725,104 @@ class GradualRadiusExpander {
             return;
         }
 
+        if (
+            currentState === RideStateManager.STATES.NOTIFIED ||
+            currentState === RideStateManager.STATES.AWAITING_RESPONSE
+        ) {
+            logger.info(
+                `⏸️ [GradualExpander] Raio máximo atingido para ${bookingId}, mas ainda há motorista(s) em janela de resposta. Rechecando em ${this.config.driverResponseWaitMs}ms.`
+            );
+            this.scheduleBookingTimeout(bookingId, this.config.driverResponseWaitMs, async () => {
+                await this.handleMaxRadiusReached(bookingId, {
+                    ...options,
+                    bookingData,
+                    searchedRadius,
+                    limit,
+                    searchStartedAt,
+                    skipMinimumSearchDuration
+                });
+            });
+            return;
+        }
+
         const dispatchability = await this.getSearchDispatchability(bookingId, bookingData);
         if (!dispatchability.ok && dispatchability.reason === 'STALE_CUSTOMER_ACTIVE_BOOKING') {
             await this.stopSearch(bookingId);
             logger.info(`ℹ️ [GradualExpander] Corrida ${bookingId} já supersedida por ${dispatchability.activeBookingId}, encerrando sem notificar cliente.`);
             return;
+        }
+
+        if (
+            !skipMinimumSearchDuration &&
+            this.config.minimumSearchDurationMs > 0 &&
+            Number.isFinite(searchStartedAt) &&
+            searchStartedAt > 0
+        ) {
+            const elapsedMs = Math.max(0, Date.now() - searchStartedAt);
+            if (elapsedMs < this.config.minimumSearchDurationMs) {
+                const remainingMs = this.config.minimumSearchDurationMs - elapsedMs;
+                const retryPickupLocation = this.safeJSONParse(
+                    options?.pickupLocation || bookingData.pickupLocation,
+                    null
+                );
+
+                logger.info(
+                    `⏳ [GradualExpander] Aguardando janela mínima de busca para ${bookingId} antes de emitir noDriversFound (${remainingMs}ms restantes).`
+                );
+
+                const nextRetryDelayMs = Math.min(
+                    remainingMs,
+                    this.config.maxRadiusRetryIntervalMs
+                );
+
+                this.scheduleBookingTimeout(bookingId, nextRetryDelayMs, async () => {
+                    const refreshedBookingData = await this.redis.hgetall(bookingKey);
+                    const refreshedDispatchability = await this.getSearchDispatchability(bookingId, refreshedBookingData);
+                    if (!refreshedDispatchability.ok) {
+                        logger.info(`ℹ️ [GradualExpander] Busca ${bookingId} encerrada durante janela mínima: ${refreshedDispatchability.reason}`);
+                        await this.stopSearch(bookingId);
+                        this.expansionIntervals.delete(bookingId);
+                        return;
+                    }
+
+                    if (retryPickupLocation) {
+                        const finalResult = await this.searchAndNotify(
+                            bookingId,
+                            retryPickupLocation,
+                            searchedRadius,
+                            limit
+                        );
+
+                        if (finalResult.notified > 0) {
+                            logger.info(
+                                `⏸️ [GradualExpander] ${finalResult.notified} motorista(s) notificados na checagem final de ${bookingId}. Aguardando ${this.config.driverResponseWaitMs}ms antes de encerrar.`
+                            );
+
+                            this.scheduleBookingTimeout(bookingId, this.config.driverResponseWaitMs, async () => {
+                                await this.handleMaxRadiusReached(bookingId, {
+                                    ...options,
+                                    bookingData: refreshedBookingData,
+                                    searchedRadius,
+                                    pickupLocation: retryPickupLocation,
+                                    limit,
+                                    searchStartedAt
+                                });
+                            });
+                            return;
+                        }
+                    }
+
+                    await this.handleMaxRadiusReached(bookingId, {
+                        ...options,
+                        bookingData: refreshedBookingData,
+                        searchedRadius,
+                        pickupLocation: retryPickupLocation,
+                        limit,
+                        searchStartedAt
+                    });
+                });
+                return;
+            }
         }
 
         // Notificar customer sobre busca expandida + finalização sem motoristas

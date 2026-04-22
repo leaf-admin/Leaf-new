@@ -11,6 +11,7 @@ const redisPool = require('../utils/redis-pool');
 const firebaseConfig = require('../firebase-config');
 const admin = require('firebase-admin');
 const { logger } = require('../utils/logger');
+const supportTicketService = require('./support-ticket-service');
 
 class SupportChatService {
     constructor() {
@@ -259,27 +260,7 @@ class SupportChatService {
      */
     async reopenChatForOpenTicket(userId, reason = 'incoming_message') {
         try {
-            const db = firebaseConfig.getRealtimeDB();
-            if (!db) {
-                return {
-                    reopened: false,
-                    reason: 'realtime_db_unavailable'
-                };
-            }
-
-            const snapshot = await db.ref('support_tickets').orderByChild('userId').equalTo(String(userId)).once('value');
-            const tickets = snapshot.val() ? Object.values(snapshot.val()) : [];
-            if (tickets.length === 0) {
-                return {
-                    reopened: false,
-                    reason: 'no_tickets'
-                };
-            }
-
-            const activeStatuses = new Set(['open', 'assigned', 'in_progress', 'escalated', 'pending']);
-            tickets.sort((a, b) => new Date(b.updatedAt || b.createdAt || 0) - new Date(a.updatedAt || a.createdAt || 0));
-
-            const openTicket = tickets.find((ticket) => activeStatuses.has(String(ticket.status || '').toLowerCase()));
+            const openTicket = await supportTicketService.findLatestOpenTicketForUser(String(userId));
             if (!openTicket) {
                 return {
                     reopened: false,

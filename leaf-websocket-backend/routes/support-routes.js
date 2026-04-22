@@ -2,6 +2,13 @@ const express = require('express');
 const { logStructured, logError } = require('../utils/logger');
 const router = express.Router();
 
+function shouldSkipLegacyUserTicketRoute(identifier) {
+    const value = String(identifier || '').trim();
+    if (!value) return false;
+
+    return /^(TICKET-|ticket_|sos_|complain_|support_)/i.test(value);
+}
+
 /**
  * GET /api/support/chat/:userId
  * Buscar mensagens do chat de suporte
@@ -21,8 +28,13 @@ router.get('/chat/:userId', async (req, res) => {
  * POST /api/support/chat/:userId/message
  * Enviar mensagem no chat de suporte
  */
-router.post('/chat/:userId/message', async (req, res) => {
+router.post('/chat/:userId/message', async (req, res, next) => {
     try {
+        const authHeader = String(req.headers.authorization || '').trim();
+        if (authHeader) {
+            return next('route');
+        }
+
         const { userId } = req.params;
         const { text } = req.body;
 
@@ -53,9 +65,12 @@ router.post('/chat/:userId/message', async (req, res) => {
  * GET /api/support/tickets/:userId
  * Buscar tickets de suporte do usuário
  */
-router.get('/tickets/:userId', async (req, res) => {
+router.get('/tickets/:userId', async (req, res, next) => {
     try {
         const { userId } = req.params;
+        if (shouldSkipLegacyUserTicketRoute(userId)) {
+            return next('route');
+        }
         // TODO: Buscar tickets do Firestore ou banco de dados
         res.json({ tickets: [] });
     } catch (error) {
@@ -68,9 +83,12 @@ router.get('/tickets/:userId', async (req, res) => {
  * POST /api/support/tickets/:userId
  * Criar novo ticket de suporte
  */
-router.post('/tickets/:userId', async (req, res) => {
+router.post('/tickets/:userId', async (req, res, next) => {
     try {
         const { userId } = req.params;
+        if (shouldSkipLegacyUserTicketRoute(userId)) {
+            return next('route');
+        }
         const { type, priority, description, attachments } = req.body;
 
         if (!type || !description) {
@@ -119,4 +137,3 @@ router.get('/faq', async (req, res) => {
 });
 
 module.exports = router;
-

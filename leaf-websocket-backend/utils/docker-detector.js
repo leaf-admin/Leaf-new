@@ -97,11 +97,16 @@ class DockerDetector {
 
         const host = this.getRedisHost();
         const port = process.env.REDIS_PORT || '6379';
-        const password = process.env.REDIS_PASSWORD || 'leaf_redis_2024';
+        const password = process.env.REDIS_PASSWORD;
         const db = process.env.REDIS_DB || '0';
 
-        // Formato: redis://:password@host:port/db
-        return `redis://:${password}@${host}:${port}/${db}`;
+        if (String(password || '').trim()) {
+            // Formato autenticado: redis://:password@host:port/db
+            return `redis://:${password}@${host}:${port}/${db}`;
+        }
+
+        // Formato sem autenticação
+        return `redis://${host}:${port}/${db}`;
     }
 
     /**
@@ -112,7 +117,7 @@ class DockerDetector {
         const parsed = this.parseRedisUrl();
         const host = this.getRedisHost();
         const port = parsed?.port || parseInt(process.env.REDIS_PORT || '6379');
-        const password = parsed?.password || process.env.REDIS_PASSWORD || 'leaf_redis_2024';
+        const password = parsed?.password || process.env.REDIS_PASSWORD || undefined;
         const username = parsed?.username || process.env.REDIS_USERNAME || undefined;
         const db = Number.isInteger(parsed?.db) ? parsed.db : parseInt(process.env.REDIS_DB || '0');
         const protocol = parsed?.protocol || (String(process.env.REDIS_USE_TLS || '').toLowerCase() === 'true' ? 'rediss' : 'redis');

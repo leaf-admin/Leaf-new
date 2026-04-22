@@ -194,6 +194,46 @@ router.get('/terms-of-service', (req, res) => {
   );
 });
 
+router.get('/refund-policy', (req, res) => {
+  res.type('html').send(
+    renderPage({
+      title: 'Política de Reembolso',
+      subtitle: 'Diretrizes de análise e processamento de reembolsos na plataforma Leaf.',
+      req,
+      sections: [
+        {
+          title: '1. Elegibilidade',
+          paragraphs: [
+            'Solicitações de reembolso podem ser analisadas em casos de cobrança indevida, falha comprovada na execução do serviço ou cancelamento em condições previstas.',
+            'Cada solicitação é avaliada com base em registros de corrida, horários, eventos operacionais e política antifraude.'
+          ]
+        },
+        {
+          title: '2. Como solicitar',
+          paragraphs: [
+            'A solicitação pode ser feita pelo suporte no aplicativo ou por e-mail em suporte@leaf.app.br.',
+            'Sempre informe número da corrida, telefone da conta e motivo detalhado para agilizar a análise.'
+          ]
+        },
+        {
+          title: '3. Prazo de análise',
+          paragraphs: [
+            'O prazo padrão de análise é de até 7 dias corridos, podendo variar conforme complexidade do caso e necessidade de validações adicionais.',
+            'Em casos aprovados, o estorno será processado conforme o meio de pagamento e prazos das instituições envolvidas.'
+          ]
+        },
+        {
+          title: '4. Limitações e prevenção a abuso',
+          paragraphs: [
+            'A Leaf pode negar solicitações sem evidência mínima ou em casos de uso indevido da política de reembolso.',
+            'Medidas de segurança e conformidade podem incluir revisão manual, bloqueio preventivo ou auditoria de conta.'
+          ]
+        }
+      ]
+    })
+  );
+});
+
 router.get('/account-deletion', (req, res) => {
   const baseUrl = getBaseUrl(req);
   const appDeleteEndpoint = `${baseUrl}/api/account/delete`;
@@ -222,7 +262,7 @@ router.get('/account-deletion', (req, res) => {
           title: '3. Endpoint oficial',
           paragraphs: [
             `Endpoint de backend utilizado pela aplicação: ${appDeleteEndpoint}.`,
-            'Após a solicitação, a conta é desabilitada e o processo de remoção de dados segue a política de retenção legal.'
+            'Após a solicitação, a conta é desativada e os dados pessoais são removidos/anonimizados de forma imediata, preservando apenas registros estritamente necessários por obrigação legal.'
           ]
         }
       ]
@@ -235,6 +275,7 @@ router.get('/api/legal/links', (req, res) => {
   res.json({
     privacyPolicyUrl: `${baseUrl}/privacy-policy`,
     termsOfServiceUrl: `${baseUrl}/terms-of-service`,
+    refundPolicyUrl: `${baseUrl}/refund-policy`,
     accountDeletionUrl: `${baseUrl}/account-deletion`
   });
 });

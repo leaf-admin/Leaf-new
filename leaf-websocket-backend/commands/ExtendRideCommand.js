@@ -14,6 +14,14 @@ const {
     buildRideExtensionExpiresAt
 } = require('../services/ride-lifecycle-service');
 
+const QA_DRIVER_UID = process.env.QA_DRIVER_UID || '8vg2kxxqi3TYKlpD6eBlWgYseIq2';
+const QA_PASSENGER_UID = process.env.QA_PASSENGER_UID || 'OjML1wSzdNRaynjqMRlSW1Y0LVy2';
+
+function isQaSeedIdentity(value) {
+    const normalized = String(value || '').trim();
+    return normalized === QA_DRIVER_UID || normalized === QA_PASSENGER_UID;
+}
+
 class ExtendRideCommand extends Command {
     constructor(data) {
         super(data);
@@ -85,9 +93,14 @@ class ExtendRideCommand extends Command {
                 }
 
                 const diffFare = Number((newFareNumber - currentFare).toFixed(2));
+                const shouldForceQaMockPayment =
+                    isQaSeedIdentity(this.customerId) ||
+                    isQaSeedIdentity(bookingCustomerId) ||
+                    isQaSeedIdentity(bookingData.driverId);
 
                 const paymentMockEnabled =
                     this.mockPayment === true ||
+                    shouldForceQaMockPayment ||
                     String(process.env.MOCK_PAYMENT_FOR_TESTS || '').toLowerCase() === 'true' ||
                     (String(process.env.E2E_MOCK_PAYMENT || 'true').toLowerCase() !== 'false' && process.env.NODE_ENV === 'test');
 

@@ -11,6 +11,37 @@
 
 const { logger } = require('./logger');
 
+const DEFAULT_SCAN_COUNT = (() => {
+    const parsed = Number.parseInt(process.env.REDIS_SCAN_COUNT || '1000', 10);
+    if (!Number.isFinite(parsed)) {
+        return 1000;
+    }
+
+    return Math.min(Math.max(parsed, 100), 50000);
+})();
+
+function normalizeScanCount(count) {
+    const parsed = Number.parseInt(count, 10);
+    if (!Number.isFinite(parsed)) {
+        return DEFAULT_SCAN_COUNT;
+    }
+
+    return Math.min(Math.max(parsed, 1), 50000);
+}
+
+function normalizeMaxKeys(maxKeys) {
+    if (maxKeys === null || maxKeys === undefined) {
+        return null;
+    }
+
+    const parsed = Number.parseInt(maxKeys, 10);
+    if (!Number.isFinite(parsed) || parsed <= 0) {
+        return null;
+    }
+
+    return parsed;
+}
+
 class RedisScan {
     /**
      * Escanear todas as chaves que correspondem a um padrão
@@ -19,20 +50,26 @@ class RedisScan {
      * @param {number} count - Número de chaves por iteração (padrão 100)
      * @returns {Promise<string[]>} Array de chaves encontradas
      */
-    static async scanKeys(redis, pattern, count = 100) {
+    static async scanKeys(redis, pattern, count = DEFAULT_SCAN_COUNT, maxKeys = null) {
         try {
             const keys = [];
             let cursor = '0';
+            const scanCount = normalizeScanCount(count);
+            const maxResults = normalizeMaxKeys(maxKeys);
 
             do {
                 const result = await redis.scan(
                     cursor,
                     'MATCH', pattern,
-                    'COUNT', count
+                    'COUNT', scanCount
                 );
                 
                 cursor = result[0];
                 keys.push(...result[1]);
+
+                if (maxResults !== null && keys.length >= maxResults) {
+                    return keys.slice(0, maxResults);
+                }
             } while (cursor !== '0');
 
             return keys;
@@ -49,16 +86,17 @@ class RedisScan {
      * @param {number} count - Número de chaves por iteração
      * @returns {Promise<number>} Número de chaves encontradas
      */
-    static async countKeys(redis, pattern, count = 100) {
+    static async countKeys(redis, pattern, count = DEFAULT_SCAN_COUNT) {
         try {
             let totalCount = 0;
             let cursor = '0';
+            const scanCount = normalizeScanCount(count);
 
             do {
                 const result = await redis.scan(
                     cursor,
                     'MATCH', pattern,
-                    'COUNT', count
+                    'COUNT', scanCount
                 );
                 
                 cursor = result[0];
@@ -80,23 +118,24 @@ class RedisScan {
      * @param {number} batchSize - Tamanho do lote (padrão 100)
      * @returns {Promise<void>}
      */
-    static async scanAndProcess(redis, pattern, processor, batchSize = 100) {
+    static async scanAndProcess(redis, pattern, processor, batchSize = DEFAULT_SCAN_COUNT) {
         try {
             let cursor = '0';
             let batch = [];
+            const normalizedBatchSize = normalizeScanCount(batchSize);
 
             do {
                 const result = await redis.scan(
                     cursor,
                     'MATCH', pattern,
-                    'COUNT', batchSize
+                    'COUNT', normalizedBatchSize
                 );
                 
                 cursor = result[0];
                 batch.push(...result[1]);
 
                 // Processar quando lote estiver cheio
-                if (batch.length >= batchSize) {
+                if (batch.length >= normalizedBatchSize) {
                     await processor(batch);
                     batch = [];
                 }
@@ -119,9 +158,9 @@ class RedisScan {
      * @param {string} prefix - Prefixo a remover (ex: 'driver:')
      * @returns {Promise<string[]>} Array de IDs
      */
-    static async scanIds(redis, pattern, prefix) {
+    static async scanIds(redis, pattern, prefix, count = DEFAULT_SCAN_COUNT, maxKeys = null) {
         try {
-            const keys = await this.scanKeys(redis, pattern);
+            const keys = await this.scanKeys(redis, pattern, count, maxKeys);
             return keys.map(key => key.replace(prefix, ''));
         } catch (error) {
             logger.error(`❌ [RedisScan] Erro ao escanear IDs com padrão ${pattern}:`, error);
@@ -147,4 +186,3 @@ class RedisScan {
 }
 
 module.exports = RedisScan;
-

@@ -2,6 +2,11 @@ const express = require('express');
 const admin = require('firebase-admin');
 const { authenticateJWT, requireRole } = require('../middleware/jwt-auth');
 const { logError } = require('../utils/logger');
+const referralProgramStateService = require('../services/referral-program-state-service');
+const {
+  isLaunchFeatureEnabled,
+  buildLaunchFeatureDisabledPayload
+} = require('../utils/pilot-launch-flags');
 
 const router = express.Router();
 
@@ -10,7 +15,7 @@ try {
   firebaseConfig = require('../firebase-config');
 } catch (_error) {}
 
-const ADMIN_ROLES = ['admin', 'super-admin', 'manager'];
+const ADMIN_ROLES = ['admin', 'super-admin', 'manager', 'development'];
 const PROGRAM_ROOT_PATH = 'operations/programs/referrals';
 const CONFIG_PATH = `${PROGRAM_ROOT_PATH}/config`;
 const CAMPAIGNS_PATH = `${PROGRAM_ROOT_PATH}/campaigns`;
@@ -23,11 +28,13 @@ const DEFAULT_PASSENGER_DISCOUNT_PERCENT = Number.parseFloat(process.env.REFERRA
 const DEFAULT_PASSENGER_MAX_RIDES = Number.parseInt(process.env.REFERRAL_PASSENGER_MAX_RIDES || '3', 10);
 const DEFAULT_FOUNDER_MONTHS = Number.parseInt(process.env.FOUNDER_DEFAULT_FREE_MONTHS || '6', 10);
 
-function getRealtimeDB() {
-  if (!firebaseConfig || typeof firebaseConfig.getRealtimeDB !== 'function') {
-    return null;
-  }
-  return firebaseConfig.getRealtimeDB();
+function respondReferralProgramsDisabled(res) {
+  return res.status(503).json(
+    buildLaunchFeatureDisabledPayload(
+      'referral_programs',
+      'Programa de convites esta desativado neste perfil de lancamento'
+    )
+  );
 }
 
 function nowIso() {
@@ -133,47 +140,28 @@ function getDefaultProgramConfig() {
 }
 
 async function loadProgramConfig() {
-  const db = getRealtimeDB();
-  if (!db) {
-    return getDefaultProgramConfig();
-  }
-
-  const snapshot = await db.ref(CONFIG_PATH).once('value');
-  const existing = snapshot.val();
-  if (!existing) {
-    const defaults = getDefaultProgramConfig();
-    await db.ref(CONFIG_PATH).set(defaults);
-    return defaults;
-  }
-
-  const merged = {
-    ...getDefaultProgramConfig(),
+  const defaults = getDefaultProgramConfig();
+  const existing = await referralProgramStateService.getConfig(defaults);
+  return {
+    ...defaults,
     ...existing,
     driver: {
-      ...getDefaultProgramConfig().driver,
+      ...defaults.driver,
       ...(existing.driver || {})
     },
     passenger: {
-      ...getDefaultProgramConfig().passenger,
+      ...defaults.passenger,
       ...(existing.passenger || {})
     },
     founder: {
-      ...getDefaultProgramConfig().founder,
+      ...defaults.founder,
       ...(existing.founder || {})
     }
   };
-
-  return merged;
 }
 
 async function loadCampaigns() {
-  const db = getRealtimeDB();
-  if (!db) return [];
-  const snapshot = await db.ref(CAMPAIGNS_PATH).once('value');
-  const raw = snapshot.val() || {};
-  return Object.keys(raw)
-    .map((id) => ({ id, ...raw[id] }))
-    .sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
+  return referralProgramStateService.listCampaigns();
 }
 
 function campaignIsActive(campaign, nowTs = Date.now()) {
@@ -195,11 +183,7 @@ async function resolveCampaignForType(type) {
 }
 
 async function loadInvites() {
-  const db = getRealtimeDB();
-  if (!db) return [];
-  const snapshot = await db.ref(INVITES_PATH).once('value');
-  const raw = snapshot.val() || {};
-  return Object.keys(raw).map((id) => ({ id, ...raw[id] }));
+  return referralProgramStateService.listInvites();
 }
 
 function sameInviteTarget(invite, inviteeEmail, inviteePhone) {
@@ -214,42 +198,18 @@ function sameInviteTarget(invite, inviteeEmail, inviteePhone) {
 }
 
 async function saveInvite(inviteId, payload) {
-  const db = getRealtimeDB();
-  if (!db) throw new Error('Realtime DB indisponível');
-  await db.ref(`${INVITES_PATH}/${inviteId}`).set(payload);
+  return referralProgramStateService.createInvite({
+    id: inviteId,
+    ...payload
+  });
 }
 
 async function updateInvite(inviteId, payload) {
-  const db = getRealtimeDB();
-  if (!db) throw new Error('Realtime DB indisponível');
-  await db.ref(`${INVITES_PATH}/${inviteId}`).update(payload);
+  return referralProgramStateService.updateInvite(inviteId, payload);
 }
 
 async function extendFreeMonthsForUser(userId, months, metadata = {}) {
-  const db = getRealtimeDB();
-  if (!db) throw new Error('Realtime DB indisponível');
-
-  const userRef = db.ref(`users/${userId}`);
-  const snapshot = await userRef.once('value');
-  const user = snapshot.val() || {};
-
-  const currentFreeEndTs = parseTimestamp(user.free_months_end || user.freeMonthsEnd);
-  const baseDate = currentFreeEndTs && currentFreeEndTs > Date.now()
-    ? new Date(currentFreeEndTs)
-    : new Date();
-
-  const nextEnd = monthsFromNow(baseDate, months);
-
-  await userRef.update({
-    free_months_end: nextEnd.toISOString(),
-    referralRewardUpdatedAt: nowIso(),
-    referralRewardMeta: {
-      ...(user.referralRewardMeta || {}),
-      ...metadata
-    }
-  });
-
-  return nextEnd.toISOString();
+  return referralProgramStateService.extendFreeMonthsForUser(userId, months, metadata);
 }
 
 function bookingStatusIsCompleted(status) {
@@ -258,11 +218,40 @@ function bookingStatusIsCompleted(status) {
 }
 
 async function countDriverTripsWithinWindow(driverId, startTs, endTs) {
-  const db = getRealtimeDB();
-  if (!db) return 0;
+  const firestore = firebaseConfig && typeof firebaseConfig.getFirestore === 'function'
+    ? firebaseConfig.getFirestore()
+    : null;
 
-  const snapshot = await db.ref('bookings').once('value');
-  const bookings = snapshot.val() || {};
+  if (firestore) {
+    const snapshot = await firestore
+      .collection('rides')
+      .where('driverId', '==', normalizeIdentifier(driverId))
+      .get();
+
+    const rides = snapshot.docs.map((doc) => doc.data() || {});
+    if (rides.length > 0) {
+      return rides.filter((ride) => {
+        if (!bookingStatusIsCompleted(ride.status || ride.currentStatus)) return false;
+        const ts = parseTimestamp(
+          ride.completedAt ||
+          ride.paidAt ||
+          ride.tripdate ||
+          ride.startedAt ||
+          ride.createdAt
+        );
+        if (!Number.isFinite(ts)) return false;
+        if (ts < startTs) return false;
+        if (endTs && ts > endTs) return false;
+        return true;
+      }).length;
+    }
+  }
+
+  if (!firebaseConfig || typeof firebaseConfig.getFromRealtimeDB !== 'function') {
+    return 0;
+  }
+
+  const bookings = await firebaseConfig.getFromRealtimeDB('bookings') || {};
 
   return Object.values(bookings).filter((booking) => {
     const bookingDriver = normalizeIdentifier(booking.driver || booking.driverId);
@@ -277,9 +266,6 @@ async function countDriverTripsWithinWindow(driverId, startTs, endTs) {
 }
 
 async function applyPassengerBenefit(invite, config) {
-  const db = getRealtimeDB();
-  if (!db) return null;
-
   const inviteeId = normalizeIdentifier(invite.acceptedBy || invite.inviteeId);
   if (!inviteeId) return null;
 
@@ -304,8 +290,7 @@ async function applyPassengerBenefit(invite, config) {
     createdAt: nowIso()
   };
 
-  await db.ref(`users/${inviteeId}/passengerDiscountBenefits/${invite.id}`).set(benefitPayload);
-  return benefitPayload;
+  return referralProgramStateService.savePassengerBenefit(inviteeId, invite.id, benefitPayload);
 }
 
 function resolveInviterId(req, body) {
@@ -324,6 +309,14 @@ function resolveInviteeIdentity(body) {
   };
 }
 
+router.use((req, res, next) => {
+  if (isLaunchFeatureEnabled('referralProgramsEnabled', true)) {
+    return next();
+  }
+
+  return respondReferralProgramsDisabled(res);
+});
+
 router.get('/config', authenticateJWT, requireRole(ADMIN_ROLES), async (req, res) => {
   try {
     const config = await loadProgramConfig();
@@ -336,11 +329,6 @@ router.get('/config', authenticateJWT, requireRole(ADMIN_ROLES), async (req, res
 
 router.patch('/config', authenticateJWT, requireRole(ADMIN_ROLES), async (req, res) => {
   try {
-    const db = getRealtimeDB();
-    if (!db) {
-      return res.status(500).json({ error: 'Realtime DB indisponível' });
-    }
-
     const current = await loadProgramConfig();
     const payload = req.body || {};
     const next = {
@@ -371,7 +359,7 @@ router.patch('/config', authenticateJWT, requireRole(ADMIN_ROLES), async (req, r
 
     next.founder.freeMonths = toPositiveInt(next.founder.freeMonths, DEFAULT_FOUNDER_MONTHS);
 
-    await db.ref(CONFIG_PATH).set(next);
+    await referralProgramStateService.saveConfig(next, getDefaultProgramConfig());
 
     res.json({ success: true, config: next });
   } catch (error) {
@@ -392,11 +380,6 @@ router.get('/campaigns', authenticateJWT, requireRole(ADMIN_ROLES), async (_req,
 
 router.post('/campaigns', authenticateJWT, requireRole(ADMIN_ROLES), async (req, res) => {
   try {
-    const db = getRealtimeDB();
-    if (!db) {
-      return res.status(500).json({ error: 'Realtime DB indisponível' });
-    }
-
     const {
       name,
       type = 'driver_referral',
@@ -433,7 +416,7 @@ router.post('/campaigns', authenticateJWT, requireRole(ADMIN_ROLES), async (req,
       updatedAt: nowIso()
     };
 
-    await db.ref(`${CAMPAIGNS_PATH}/${id}`).set(campaignPayload);
+    await referralProgramStateService.createCampaign(campaignPayload);
     res.json({ success: true, campaign: campaignPayload });
   } catch (error) {
     logError(error, 'Erro ao criar campanha de referral programs', { service: 'referral-programs' });
@@ -443,23 +426,16 @@ router.post('/campaigns', authenticateJWT, requireRole(ADMIN_ROLES), async (req,
 
 router.patch('/campaigns/:campaignId', authenticateJWT, requireRole(ADMIN_ROLES), async (req, res) => {
   try {
-    const db = getRealtimeDB();
-    if (!db) {
-      return res.status(500).json({ error: 'Realtime DB indisponível' });
-    }
-
     const campaignId = normalizeIdentifier(req.params.campaignId);
     if (!campaignId) {
       return res.status(400).json({ error: 'campaignId inválido' });
     }
 
-    const campaignRef = db.ref(`${CAMPAIGNS_PATH}/${campaignId}`);
-    const snapshot = await campaignRef.once('value');
-    if (!snapshot.exists()) {
+    const current = await referralProgramStateService.getCampaign(campaignId);
+    if (!current) {
       return res.status(404).json({ error: 'Campanha não encontrada' });
     }
 
-    const current = snapshot.val() || {};
     const incoming = req.body || {};
     const merged = {
       ...current,
@@ -481,7 +457,7 @@ router.patch('/campaigns/:campaignId', authenticateJWT, requireRole(ADMIN_ROLES)
     merged.params.discountPercent = toPercent(merged.params.discountPercent, DEFAULT_PASSENGER_DISCOUNT_PERCENT);
     merged.params.maxDiscountRides = toPositiveInt(merged.params.maxDiscountRides, DEFAULT_PASSENGER_MAX_RIDES);
 
-    await campaignRef.set(merged);
+    await referralProgramStateService.updateCampaign(campaignId, merged);
     res.json({ success: true, campaign: merged });
   } catch (error) {
     logError(error, 'Erro ao atualizar campanha de referral programs', { service: 'referral-programs' });
@@ -654,8 +630,7 @@ router.post('/invites/accept', ensureUserFromFirebaseToken, async (req, res) => 
       return res.status(400).json({ error: 'inviteeId é obrigatório' });
     }
 
-    const allInvites = await loadInvites();
-    const invite = allInvites.find((row) => normalizeIdentifier(row.code).toUpperCase() === code);
+    const invite = await referralProgramStateService.findInviteByCode(code);
     if (!invite) {
       return res.status(404).json({ error: 'Convite não encontrado' });
     }
@@ -689,27 +664,24 @@ router.post('/invites/accept', ensureUserFromFirebaseToken, async (req, res) => 
       };
     }
 
-    await updateInvite(invite.id, acceptancePatch);
+    const updatedInvite = await updateInvite(invite.id, acceptancePatch);
 
     let passengerBenefit = null;
     if (normalizeCampaignType(invite.type) === 'passenger_referral') {
       const config = await loadProgramConfig();
-      passengerBenefit = await applyPassengerBenefit({ ...invite, ...acceptancePatch, id: invite.id }, config);
+      passengerBenefit = await applyPassengerBenefit({ ...invite, ...(updatedInvite || acceptancePatch), id: invite.id }, config);
     }
 
-    const db = getRealtimeDB();
-    if (db && inviteeId) {
-      await db.ref(`users/${inviteeId}`).update({
-        invitedBy: normalizeIdentifier(invite.inviterId),
-        inviteAcceptedAt: acceptedAt
-      });
-    }
+    await referralProgramStateService.updateUserProfile(inviteeId, {
+      invitedBy: normalizeIdentifier(invite.inviterId),
+      inviteAcceptedAt: acceptedAt
+    });
 
     res.json({
       success: true,
       invite: {
         ...invite,
-        ...acceptancePatch,
+        ...(updatedInvite || acceptancePatch),
         id: invite.id
       },
       passengerBenefit
@@ -727,18 +699,10 @@ router.post('/invites/driver/evaluate', authenticateJWT, requireRole(ADMIN_ROLES
       return res.status(400).json({ error: 'inviteId é obrigatório' });
     }
 
-    const db = getRealtimeDB();
-    if (!db) {
-      return res.status(500).json({ error: 'Realtime DB indisponível' });
-    }
-
-    const inviteRef = db.ref(`${INVITES_PATH}/${inviteId}`);
-    const snapshot = await inviteRef.once('value');
-    if (!snapshot.exists()) {
+    const invite = await referralProgramStateService.getInvite(inviteId);
+    if (!invite) {
       return res.status(404).json({ error: 'Convite não encontrado' });
     }
-
-    const invite = snapshot.val() || {};
     if (normalizeCampaignType(invite.type) !== 'driver_referral') {
       return res.status(400).json({ error: 'Convite informado não é de motorista' });
     }
@@ -798,7 +762,7 @@ router.post('/invites/driver/evaluate', authenticateJWT, requireRole(ADMIN_ROLES
       reward = patch.reward;
     }
 
-    await inviteRef.update(patch);
+    await referralProgramStateService.updateInvite(inviteId, patch);
 
     res.json({
       success: true,
@@ -833,19 +797,16 @@ router.post('/founder/assign', authenticateJWT, requireRole(ADMIN_ROLES), async 
       grantedAt: nowIso()
     });
 
-    const db = getRealtimeDB();
-    if (db) {
-      await db.ref(`users/${driverId}`).update({
-        founderPlan: {
-          active: true,
-          waveTag: req.body?.waveTag || config.founder.waveTag,
-          freeMonths: months,
-          assignedAt: nowIso(),
-          assignedBy: req.user?.id || req.user?.email || 'admin',
-          freeUntil
-        }
-      });
-    }
+    await referralProgramStateService.updateUserProfile(driverId, {
+      founderPlan: {
+        active: true,
+        waveTag: req.body?.waveTag || config.founder.waveTag,
+        freeMonths: months,
+        assignedAt: nowIso(),
+        assignedBy: req.user?.id || req.user?.email || 'admin',
+        freeUntil
+      }
+    });
 
     res.json({
       success: true,

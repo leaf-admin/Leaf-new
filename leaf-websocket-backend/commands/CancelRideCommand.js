@@ -28,6 +28,7 @@ const { SpanStatusCode } = require('@opentelemetry/api');
 const { validateAndEnsureTraceIdInCommand } = require('../utils/trace-validator');
 const { clearActiveTripForDriver } = require('../utils/active-trip-index');
 const tripLocationPersistenceService = require('../services/trip-location-persistence-service');
+const pricingH3ReadModelService = require('../services/pricing-h3-read-model-service');
 
 const PASSENGER_CANCEL_FIXED_FEE_CENTS = Math.max(
     0,
@@ -384,8 +385,21 @@ class CancelRideCommand extends Command {
 
                 // ✅ NOVO: Remover da lista de corridas ativas
                 await redis.hdel('bookings:active', this.bookingId);
+                await pricingH3ReadModelService.clearBookingSnapshot(redis, this.bookingId).catch(() => null);
                 if (driverId) {
                     await clearActiveTripForDriver(redis, driverId, this.bookingId);
+                    const refreshedDriverState = await redis.hgetall(`driver:${driverId}`);
+                    const driverLat = Number(refreshedDriverState?.lat);
+                    const driverLng = Number(refreshedDriverState?.lng);
+                    if (Number.isFinite(driverLat) && Number.isFinite(driverLng)) {
+                        await pricingH3ReadModelService.applyDriverSnapshot(redis, {
+                            driverId,
+                            lat: driverLat,
+                            lng: driverLng,
+                            isOnline: String(refreshedDriverState?.isOnline || 'true') === 'true',
+                            available: String(refreshedDriverState?.isOnline || 'true') === 'true'
+                        }).catch(() => null);
+                    }
                 }
 
                 // Flush final da trilha de localização (se existirem pontos) para manter integridade histórica

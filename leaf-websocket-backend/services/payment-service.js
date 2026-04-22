@@ -1,36 +1,66 @@
 const WooviDriverService = require('./woovi-driver-service');
 const firebaseConfig = require('../firebase-config');
 const admin = require('firebase-admin');
+const crypto = require('crypto');
 const circuitBreakerService = require('./circuit-breaker-service');
+const subscriptionStateService = require('./subscription-state-service');
 const { logStructured, logError } = require('../utils/logger');
 const traceContext = require('../utils/trace-context');
 const redisPool = require('../utils/redis-pool');
 
 class PaymentService {
   constructor() {
+    const appReviewMode = String(process.env.APP_REVIEW || '').toLowerCase() === 'true';
+    const productionRuntime = [
+      process.env.NODE_ENV,
+      process.env.APP_ENV,
+      process.env.LEAF_ENV,
+      process.env.ENVIRONMENT
+    ].some((value) => ['production', 'prod'].includes(String(value || '').toLowerCase()));
     this.LEAF_ACCOUNT_ID = process.env.LEAF_WOOVI_ACCOUNT_ID || 'leaf-main-account';
     // Chave Pix da conta Leaf (origem das transferências)
     // ⚠️ ATENÇÃO: Configurar LEAF_PIX_KEY em produção via variável de ambiente
     this.LEAF_PIX_KEY = process.env.LEAF_PIX_KEY || 'test@leaf.app.br'; // ⚠️ Valor de teste - configurar em produção
     // Criar instância do WooviDriverService
     this.wooviDriverService = new WooviDriverService();
-    // Taxas operacionais por faixa de valor
-    this.OPERATIONAL_FEE_UP_TO_10 = 79; // R$ 0,79 para corridas até R$ 10,00 (em centavos)
-    this.OPERATIONAL_FEE_10_TO_25 = 99; // R$ 0,99 para corridas acima de R$ 10,00 e abaixo de R$ 25,00 (em centavos)
-    this.OPERATIONAL_FEE_ABOVE_25 = 149; // R$ 1,49 para corridas acima de R$ 25,00 (em centavos)
-    this.THRESHOLD_10 = 1000; // R$ 10,00 em centavos
-    this.THRESHOLD_25 = 2500; // R$ 25,00 em centavos
+    // Taxas operacionais por faixa de valor (regra vigente)
+    this.OPERATIONAL_FEE_UP_TO_20 = 99; // R$ 0,99 para corridas até R$ 20,00 (em centavos)
+    this.OPERATIONAL_FEE_20_TO_50 = 149; // R$ 1,49 para corridas acima de R$ 20,00 até R$ 50,00 (em centavos)
+    this.OPERATIONAL_FEE_ABOVE_50_PERCENTAGE = 0.03; // 3% para corridas acima de R$ 50,00
+    this.THRESHOLD_20 = 2000; // R$ 20,00 em centavos
+    this.THRESHOLD_50 = 5000; // R$ 50,00 em centavos
     this.WOOVI_FEE_PERCENTAGE = 0.008; // 0,8% da transação
     this.WOOVI_FEE_MINIMUM = 50; // R$ 0,50 mínimo (em centavos)
     this.WITHDRAW_FEE_THRESHOLD_CENTS = 50000; // R$ 500,00
     this.WITHDRAW_FEE_BELOW_THRESHOLD_CENTS = 100; // R$ 1,00
+    this.SUBSCRIPTION_SETTLE_ON_WITHDRAW =
+      String(process.env.SUBSCRIPTION_SETTLE_ON_WITHDRAW || 'true').toLowerCase() !== 'false';
+    this.SUBSCRIPTION_SPLIT_RETENTION_ENABLED =
+      String(process.env.SUBSCRIPTION_SPLIT_RETENTION_ENABLED || 'false').toLowerCase() === 'true';
     this.PAYMENT_BYPASS_ON_WOOVI_FAILURE =
-      String(process.env.PAYMENT_BYPASS_ON_WOOVI_FAILURE || '').toLowerCase() === 'true' ||
-      String(process.env.APP_REVIEW || '').toLowerCase() === 'true';
+      appReviewMode ||
+      (!productionRuntime && String(process.env.PAYMENT_BYPASS_ON_WOOVI_FAILURE || '').toLowerCase() === 'true');
+    this.PAYMENT_FORCE_BYPASS =
+      appReviewMode ||
+      (!productionRuntime && String(process.env.PAYMENT_FORCE_BYPASS || '').toLowerCase() === 'true');
+    const bypassPassengersRaw =
+      process.env.PAYMENT_FORCE_BYPASS_PASSENGERS ||
+      process.env.PAYMENT_FORCE_BYPASS_USER_IDS ||
+      '';
+    this.PAYMENT_FORCE_BYPASS_PASSENGERS = new Set(
+      String(bypassPassengersRaw)
+        .split(',')
+        .map((value) => value.trim())
+        .filter(Boolean)
+    );
 
     // Configuração de retry
     this.maxRetries = 3;
     this.retryDelay = 1000; // 1 segundo
+    this.PAYMENT_STATUS_CACHE_TTL_SECONDS = Number.parseInt(
+      process.env.PAYMENT_STATUS_CACHE_TTL_SECONDS || '900',
+      10
+    );
 
     // Estados válidos de payment holding
     this.PAYMENT_STATES = {
@@ -48,6 +78,44 @@ class PaymentService {
       [this.PAYMENT_STATES.DISTRIBUTED]: [], // Estado final
       [this.PAYMENT_STATES.REFUNDED]: [], // Estado final
       [this.PAYMENT_STATES.CANCELLED]: [] // Estado final
+    };
+  }
+
+  isPassengerAllowedForForcedBypass(passengerId) {
+    if (this.PAYMENT_FORCE_BYPASS_PASSENGERS.size === 0) {
+      return true;
+    }
+
+    const normalizedPassengerId = String(passengerId || '').trim();
+    if (!normalizedPassengerId) {
+      return false;
+    }
+
+    return this.PAYMENT_FORCE_BYPASS_PASSENGERS.has(normalizedPassengerId);
+  }
+
+  shouldForceBypass(paymentData = {}) {
+    if (!this.PAYMENT_FORCE_BYPASS) {
+      return false;
+    }
+
+    return this.isPassengerAllowedForForcedBypass(paymentData.passengerId);
+  }
+
+  buildBypassAdvancePaymentResult(paymentData = {}, bypassReason = 'forced_bypass') {
+    const rideId = paymentData.rideId || `ride_${Date.now()}`;
+    const mockChargeId = `mock_review_${rideId}_${Date.now()}`;
+
+    return {
+      success: true,
+      bypass: true,
+      bypassReason,
+      message: 'Pagamento em modo review (bypass controlado)',
+      chargeId: mockChargeId,
+      qrCode: null,
+      paymentLink: 'leaf://payment/review-bypass',
+      rideId,
+      amount: paymentData.amount
     };
   }
 
@@ -205,6 +273,70 @@ class PaymentService {
     }
   }
 
+  async writePaymentStatusCache(reference, payload = {}) {
+    const normalizedReference = String(reference || '').trim();
+    if (!normalizedReference) {
+      return false;
+    }
+
+    try {
+      await redisPool.ensureConnection();
+      const redis = redisPool.getConnection();
+      const cacheKey = `payment_status_cache:${normalizedReference}`;
+      const cachePayload = {
+        ...payload,
+        updatedAt: new Date().toISOString()
+      };
+
+      await redis.set(
+        cacheKey,
+        JSON.stringify(cachePayload),
+        'EX',
+        this.PAYMENT_STATUS_CACHE_TTL_SECONDS
+      );
+      return true;
+    } catch (error) {
+      logStructured('debug', 'Falha ao gravar payment status cache', {
+        service: 'payment-service',
+        reference: normalizedReference,
+        error: error.message
+      });
+      return false;
+    }
+  }
+
+  async readPaymentStatusCache(reference) {
+    const normalizedReference = String(reference || '').trim();
+    if (!normalizedReference) {
+      return null;
+    }
+
+    try {
+      await redisPool.ensureConnection();
+      const redis = redisPool.getConnection();
+      const cacheKey = `payment_status_cache:${normalizedReference}`;
+      const raw = await redis.get(cacheKey);
+
+      if (!raw) {
+        return null;
+      }
+
+      const parsed = JSON.parse(raw);
+      if (!parsed || typeof parsed !== 'object') {
+        return null;
+      }
+
+      return parsed;
+    } catch (error) {
+      logStructured('debug', 'Falha ao ler payment status cache', {
+        service: 'payment-service',
+        reference: normalizedReference,
+        error: error.message
+      });
+      return null;
+    }
+  }
+
   /**
    * Processa pagamento antecipado do passageiro
    * @param {Object} paymentData - Dados do pagamento
@@ -224,6 +356,17 @@ class PaymentService {
         passengerName: paymentData.passengerName,
         passengerEmail: paymentData.passengerEmail
       });
+
+      if (this.shouldForceBypass(paymentData)) {
+        const bypassResult = this.buildBypassAdvancePaymentResult(paymentData, 'force_bypass_enabled');
+        logStructured('warn', 'Bypass de pagamento forçado por configuração', {
+          service: 'PaymentService',
+          rideId: paymentData.rideId,
+          passengerId: paymentData.passengerId,
+          chargeId: bypassResult.chargeId
+        });
+        return bypassResult;
+      }
 
       // 1. Criar cobrança PIX para o passageiro
       const commentRaw = `Corrida Leaf - ${paymentData.rideDetails.origin} para ${paymentData.rideDetails.destination}`;
@@ -287,25 +430,18 @@ class PaymentService {
           wooviMessage.includes('não estão habilitados');
 
         if (this.PAYMENT_BYPASS_ON_WOOVI_FAILURE) {
-          const mockChargeId = `mock_review_${paymentData.rideId}_${Date.now()}`;
+          const bypassResult = this.buildBypassAdvancePaymentResult(
+            paymentData,
+            'woovi_feature_or_auth_unavailable'
+          );
           logStructured('warn', 'Bypass de pagamento ativado para review', {
             service: 'PaymentService',
             rideId: paymentData.rideId,
-            mockChargeId,
+            mockChargeId: bypassResult.chargeId,
             wooviStatus,
             featureBlocked
           });
-          return {
-            success: true,
-            bypass: true,
-            bypassReason: 'woovi_feature_or_auth_unavailable',
-            message: 'Pagamento em modo review (bypass controlado)',
-            chargeId: mockChargeId,
-            qrCode: null,
-            paymentLink: 'leaf://payment/review-bypass',
-            rideId: paymentData.rideId,
-            amount: paymentData.amount
-          };
+          return bypassResult;
         }
         return {
           success: false,
@@ -847,6 +983,32 @@ class PaymentService {
         };
       }
 
+      if (String(chargeId || '').startsWith('mock_review_')) {
+        if (String(process.env.APP_REVIEW || '').toLowerCase() !== 'true') {
+          return {
+            success: false,
+            error: 'Cobrança mock permitida apenas em APP_REVIEW=true'
+          };
+        }
+
+        const mockRefundId = `mock_refund_${Date.now()}`;
+        logStructured('warn', 'Reembolso em modo review/bypass processado localmente', {
+          service: 'PaymentService',
+          chargeId,
+          amount,
+          reason,
+          refundId: mockRefundId
+        });
+
+        return {
+          success: true,
+          bypass: true,
+          message: 'Reembolso em modo review processado com sucesso',
+          refundId: mockRefundId,
+          amount
+        };
+      }
+
       // Processar reembolso diretamente na Woovi (com circuit breaker)
       const refundResult = await circuitBreakerService.execute(
         'woovi_refund',
@@ -915,18 +1077,18 @@ class PaymentService {
     let operationalFee;
     let operationalFeeType;
 
-    if (grossFare <= this.THRESHOLD_10) {
-      // Até R$ 10,00
-      operationalFee = this.OPERATIONAL_FEE_UP_TO_10;
-      operationalFeeType = 'up_to_10';
-    } else if (grossFare <= this.THRESHOLD_25) {
-      // Acima de R$ 10,00 e abaixo de R$ 25,00
-      operationalFee = this.OPERATIONAL_FEE_10_TO_25;
-      operationalFeeType = '10_to_25';
+    if (grossFare <= this.THRESHOLD_20) {
+      // Até R$ 20,00
+      operationalFee = this.OPERATIONAL_FEE_UP_TO_20;
+      operationalFeeType = 'up_to_20';
+    } else if (grossFare <= this.THRESHOLD_50) {
+      // Acima de R$ 20,00 até R$ 50,00
+      operationalFee = this.OPERATIONAL_FEE_20_TO_50;
+      operationalFeeType = '20_to_50';
     } else {
-      // Acima de R$ 25,00
-      operationalFee = this.OPERATIONAL_FEE_ABOVE_25;
-      operationalFeeType = 'above_25';
+      // Acima de R$ 50,00
+      operationalFee = Math.round(grossFare * this.OPERATIONAL_FEE_ABOVE_50_PERCENTAGE);
+      operationalFeeType = 'above_50_percent';
     }
 
     // Taxa Woovi: 0,8% com mínimo de R$ 0,50 (calculada livre de pedágio)
@@ -951,6 +1113,34 @@ class PaymentService {
         wooviFee: (wooviFee / 100).toFixed(2),
         net: (Math.max(0, netAmount) / 100).toFixed(2)
       }
+    };
+  }
+
+  /**
+   * Constrói breakdown financeiro em reais a partir do valor total da corrida.
+   * Usa o cálculo central em centavos e devolve valores em reais para payload.
+   * @param {number} totalFareReais
+   * @param {number} tollFeeReais
+   */
+  calculateFareBreakdownFromReais(totalFareReais, tollFeeReais = 0) {
+    const normalizedFareReais = Number.isFinite(Number(totalFareReais)) ? Math.max(0, Number(totalFareReais)) : 0;
+    const normalizedTollReais = Number.isFinite(Number(tollFeeReais)) ? Math.max(0, Number(tollFeeReais)) : 0;
+    const totalAmountCents = this.toCents(normalizedFareReais);
+    const tollFeeCents = this.toCents(normalizedTollReais);
+    const calculation = this.calculateNetAmount(totalAmountCents, tollFeeCents);
+
+    const operationalFee = this.toReais(calculation.operationalFee);
+    const paymentIntermediationFee = this.toReais(calculation.wooviFee);
+    const totalFees = this.toReais(calculation.operationalFee + calculation.wooviFee);
+    const driverNetAmount = this.toReais(calculation.netAmount);
+
+    return {
+      totalFare: this.toReais(totalAmountCents),
+      operationalFee,
+      paymentIntermediationFee,
+      totalFees,
+      driverNetAmount,
+      calculation
     };
   }
 
@@ -1011,54 +1201,49 @@ class PaymentService {
         };
       }
 
-      // 1.5. Lógica de Retenção Punitiva (Split de Carência - 50%)
-      // Fonte canônica: Realtime DB em subscriptions/{driverId}
+      // 1.5. Lógica de retenção em corridas (desabilitada por padrão).
+      // O modelo vigente prioriza liquidação de assinatura no saque.
       let retainedFees = 0;
-      if (rideData.driverId) {
+      if (this.SUBSCRIPTION_SPLIT_RETENTION_ENABLED && rideData.driverId) {
         try {
-          const db = firebaseConfig.getRealtimeDB();
-          if (db) {
-            const subscriptionRef = db.ref(`subscriptions/${rideData.driverId}`);
-            const userRef = db.ref(`users/${rideData.driverId}`);
-            const subscriptionSnapshot = await subscriptionRef.once('value');
-            const subscription = subscriptionSnapshot.val() || {};
+          const subscriptionBilling = await subscriptionStateService.getBillingData(rideData.driverId);
+          if (subscriptionBilling.subscriptionStatus === 'grace_period' && subscriptionBilling.pendingFeeCents > 0) {
+            // Retém até 50% do valor líquido ou total da dívida, o que for menor
+            const maxSplit = Math.floor(netCalculation.netAmount / 2);
+            retainedFees = Math.min(maxSplit, subscriptionBilling.pendingFeeCents);
 
-            const status = String(subscription.status || '').toLowerCase();
-            const pendingFeeCents = Number(subscription.pendingFeeCents || 0);
-
-            if (status === 'grace_period' && pendingFeeCents > 0) {
-              // Retém até 50% do valor líquido ou total da dívida, o que for menor
-              const maxSplit = Math.floor(netCalculation.netAmount / 2);
-              retainedFees = Math.min(maxSplit, pendingFeeCents);
-
-              const remainingDebt = Math.max(0, pendingFeeCents - retainedFees);
+            const retentionResult = await subscriptionStateService.runTransaction(rideData.driverId, (current) => {
+              const pendingFeeCents = Math.max(0, Number(current.pendingFeeCents || 0));
+              const debit = Math.min(pendingFeeCents, retainedFees);
+              const remainingDebt = Math.max(0, pendingFeeCents - debit);
               const nextStatus = remainingDebt === 0 ? 'active' : 'grace_period';
               const nextBillingStatus = remainingDebt === 0 ? 'active' : 'overdue';
+              const nowIso = new Date().toISOString();
 
-              await subscriptionRef.update({
+              return {
                 pendingFeeCents: remainingDebt,
                 status: nextStatus,
-                updatedAt: new Date().toISOString(),
-                lastRetentionAt: new Date().toISOString(),
-                lastRetentionAmountCents: retainedFees
-              });
+                billingStatus: nextBillingStatus,
+                lastRetentionAt: nowIso,
+                lastRetentionAmountCents: debit,
+                updatedAt: nowIso
+              };
+            });
 
-              await userRef.update({
-                billing_status: nextBillingStatus,
-                subscriptionStatus: nextStatus,
-                subscription_pending_fee_cents: remainingDebt
-              });
-
-              netCalculation.netAmount -= retainedFees; // Atualiza o valor que vai pro motorista
-
-              logStructured('info', 'Retenção de Carência Aplicada', {
-                service: 'PaymentService',
-                driverId: rideData.driverId,
-                retainedAmount: retainedFees,
-                remainingDebt,
-                newNetAmount: netCalculation.netAmount
-              });
+            if (!retentionResult.success) {
+              throw new Error(retentionResult.error || 'Falha ao registrar retenção de assinatura');
             }
+
+            retainedFees = Math.max(0, Number(retentionResult.subscription?.lastRetentionAmountCents || retainedFees) || 0);
+            netCalculation.netAmount -= retainedFees; // Atualiza o valor que vai pro motorista
+
+            logStructured('info', 'Retenção de Carência Aplicada', {
+              service: 'PaymentService',
+              driverId: rideData.driverId,
+              retainedAmount: retainedFees,
+              remainingDebt: Number(retentionResult.subscription?.pendingFeeCents || 0),
+              newNetAmount: netCalculation.netAmount
+            });
           }
         } catch (err) {
           logStructured('warn', 'Falha ao processar Split Punitivo', { service: 'PaymentService', error: err.message });
@@ -1451,24 +1636,51 @@ class PaymentService {
 
       const balanceRef = firestore.collection('driver_balances').doc(driverId);
       const balanceDoc = await balanceRef.get();
+      const subscriptionBilling = await this.getDriverSubscriptionBillingData(driverId);
 
       if (!balanceDoc.exists) {
+        const availableAfterSubscriptionCents = Math.max(0, 0 - Number(subscriptionBilling.pendingFeeCents || 0));
         return {
           success: true,
           balance: 0,
+          balanceCents: 0,
           totalEarnings: 0,
+          subscriptionPendingFeeCents: Number(subscriptionBilling.pendingFeeCents || 0),
+          subscriptionPendingFee: this.toReais(subscriptionBilling.pendingFeeCents || 0),
+          subscriptionStatus: subscriptionBilling.subscriptionStatus || 'active',
+          billingStatus: subscriptionBilling.billingStatus || 'active',
+          subscriptionCollectionMode: subscriptionBilling.collectionMode || 'withdrawal',
+          subscriptionDailyFeeCents: Number(subscriptionBilling.dailyFeeCents || 0),
+          subscriptionDailyFee: this.toReais(subscriptionBilling.dailyFeeCents || 0),
+          subscriptionWaveId: subscriptionBilling.waveId || null,
+          availableAfterSubscriptionCents,
+          availableAfterSubscription: this.toReais(availableAfterSubscriptionCents),
           message: 'Motorista ainda não possui saldo'
         };
       }
 
       const data = balanceDoc.data();
+      const balanceCents = this.toCents(data.balance || 0);
+      const pendingFeeCents = Number(subscriptionBilling.pendingFeeCents || 0);
+      const availableAfterSubscriptionCents = Math.max(0, balanceCents - pendingFeeCents);
 
       return {
         success: true,
         balance: data.balance || 0,
+        balanceCents,
         totalEarnings: data.totalEarnings || 0,
         lastUpdated: data.lastUpdated?.toDate?.() || null,
-        lastRideId: data.lastRideId || null
+        lastRideId: data.lastRideId || null,
+        subscriptionPendingFeeCents: pendingFeeCents,
+        subscriptionPendingFee: this.toReais(pendingFeeCents),
+        subscriptionStatus: subscriptionBilling.subscriptionStatus || 'active',
+        billingStatus: subscriptionBilling.billingStatus || 'active',
+        subscriptionCollectionMode: subscriptionBilling.collectionMode || 'withdrawal',
+        subscriptionDailyFeeCents: Number(subscriptionBilling.dailyFeeCents || 0),
+        subscriptionDailyFee: this.toReais(subscriptionBilling.dailyFeeCents || 0),
+        subscriptionWaveId: subscriptionBilling.waveId || null,
+        availableAfterSubscriptionCents,
+        availableAfterSubscription: this.toReais(availableAfterSubscriptionCents)
       };
 
     } catch (error) {
@@ -1495,6 +1707,22 @@ class PaymentService {
     return 0;
   }
 
+  toReais(cents) {
+    return Number((Number(cents || 0) / 100).toFixed(2));
+  }
+
+  toCents(valueInReais) {
+    return Math.round(Number(valueInReais || 0) * 100);
+  }
+
+  async getDriverSubscriptionBillingData(driverId) {
+    return subscriptionStateService.getBillingData(driverId);
+  }
+
+  async settleSubscriptionPendingOnWithdrawal(driverId, settlementCents) {
+    return subscriptionStateService.settlePendingOnWithdrawal(driverId, settlementCents);
+  }
+
   /**
    * Solicita saque do saldo do motorista.
    * Debita imediatamente do saldo e registra pedido para processamento.
@@ -1512,31 +1740,76 @@ class PaymentService {
     const driverId = data?.driverId;
     const amountCents = Number.parseInt(data?.amountCents, 10);
     const pixKey = String(data?.pixKey || '').trim();
+    const requestId = String(data?.requestId || '').trim();
 
-    if (!driverId || !Number.isFinite(amountCents) || amountCents <= 0 || !pixKey) {
+    if (!driverId || !Number.isFinite(amountCents) || amountCents <= 0 || !pixKey || !requestId) {
       return { success: false, error: 'Dados inválidos para saque' };
     }
 
+    const subscriptionBilling = await this.getDriverSubscriptionBillingData(driverId);
+    const shouldSettleSubscriptionNow =
+      this.SUBSCRIPTION_SETTLE_ON_WITHDRAW &&
+      String(subscriptionBilling.collectionMode || 'withdrawal') === 'withdrawal';
+
     const withdrawFeeCents = this.calculateWithdrawFee(amountCents);
-    const totalDebitCents = amountCents + withdrawFeeCents;
-    const amountInReais = amountCents / 100;
-    const feeInReais = withdrawFeeCents / 100;
-    const totalDebitInReais = totalDebitCents / 100;
+    const subscriptionSettlementCents = shouldSettleSubscriptionNow
+      ? Math.max(0, Number(subscriptionBilling.pendingFeeCents || 0))
+      : 0;
+    const totalDebitCents = amountCents + withdrawFeeCents + subscriptionSettlementCents;
+    const amountInReais = this.toReais(amountCents);
+    const feeInReais = this.toReais(withdrawFeeCents);
+    const subscriptionSettlementInReais = this.toReais(subscriptionSettlementCents);
+    const totalDebitInReais = this.toReais(totalDebitCents);
 
     const balanceRef = firestore.collection('driver_balances').doc(driverId);
     const withdrawalRef = firestore.collection('driver_withdrawals').doc();
+    const idempotencyKey = crypto
+      .createHash('sha256')
+      .update(`${driverId}:${amountCents}:${requestId}`)
+      .digest('hex');
+    const idempotencyRef = firestore.collection('driver_withdrawal_idempotency').doc(idempotencyKey);
 
     try {
       const transactionResult = await firestore.runTransaction(async (transaction) => {
-        const balanceDoc = await transaction.get(balanceRef);
-        const balanceData = balanceDoc.exists ? balanceDoc.data() : {};
-        const currentBalance = Number.parseFloat(balanceData.balance || 0);
-
-        if (currentBalance < totalDebitInReais) {
-          throw new Error('Saldo insuficiente para saque + taxa');
+        const idempotencyDoc = await transaction.get(idempotencyRef);
+        if (idempotencyDoc.exists) {
+          const existing = idempotencyDoc.data() || {};
+          return {
+            idempotentReplay: true,
+            withdrawalId: existing.withdrawalId || null,
+            previousBalance: existing.previousBalance || null,
+            newBalance: existing.newBalance || null,
+            withdrawFeeCents: Number(existing.withdrawFeeCents || 0),
+            subscriptionSettlementCents: Number(existing.subscriptionSettlementCents || 0),
+            totalDebitCents: Number(existing.totalDebitCents || 0),
+            status: existing.status || 'pending'
+          };
         }
 
-        const newBalance = currentBalance - totalDebitInReais;
+        const balanceDoc = await transaction.get(balanceRef);
+        const balanceData = balanceDoc.exists ? balanceDoc.data() : {};
+        const currentBalanceCents = this.toCents(balanceData.balance || 0);
+        const currentBalance = this.toReais(currentBalanceCents);
+
+        if (currentBalanceCents < totalDebitCents) {
+          const maxWithdrawableCents = Math.max(0, currentBalanceCents - withdrawFeeCents - subscriptionSettlementCents);
+          const error = new Error('Saldo insuficiente para saque + taxa + assinatura pendente');
+          error.code = 'WITHDRAWAL_INSUFFICIENT_BALANCE';
+          error.details = {
+            currentBalanceCents,
+            amountCents,
+            withdrawFeeCents,
+            subscriptionSettlementCents,
+            totalDebitCents,
+            shortfallCents: totalDebitCents - currentBalanceCents,
+            maxWithdrawableCents,
+            maxWithdrawableInReais: this.toReais(maxWithdrawableCents).toFixed(2)
+          };
+          throw error;
+        }
+
+        const newBalanceCents = currentBalanceCents - totalDebitCents;
+        const newBalance = this.toReais(newBalanceCents);
 
         transaction.set(balanceRef, {
           driverId,
@@ -1544,12 +1817,15 @@ class PaymentService {
           lastUpdated: admin.firestore.FieldValue.serverTimestamp(),
           lastWithdrawalAt: admin.firestore.FieldValue.serverTimestamp(),
           lastWithdrawalAmount: amountInReais,
-          lastWithdrawalFee: feeInReais
+          lastWithdrawalFee: feeInReais,
+          lastWithdrawalSubscriptionSettlement: subscriptionSettlementInReais
         }, { merge: true });
 
         const baseTransactionData = {
           createdAt: admin.firestore.FieldValue.serverTimestamp(),
           withdrawalId: withdrawalRef.id,
+          requestId,
+          idempotencyKey,
           pixKey
         };
 
@@ -1572,61 +1848,192 @@ class PaymentService {
             type: 'withdrawal_fee',
             amount: -feeInReais,
             amountInCents: -withdrawFeeCents,
-            previousBalance: currentBalance - amountInReais,
+            previousBalance: this.toReais(currentBalanceCents - amountCents),
             newBalance: newBalance,
             description: 'Taxa de saque abaixo de R$ 500,00'
           });
         }
 
+        if (subscriptionSettlementCents > 0) {
+          const settlementTxRef = txCollection.doc();
+          transaction.set(settlementTxRef, {
+            ...baseTransactionData,
+            type: 'subscription_settlement',
+            amount: -subscriptionSettlementInReais,
+            amountInCents: -subscriptionSettlementCents,
+            previousBalance: this.toReais(currentBalanceCents - amountCents - withdrawFeeCents),
+            newBalance,
+            description: 'Liquidação de assinatura diária pendente no saque'
+          });
+        }
+
         transaction.set(withdrawalRef, {
           driverId,
+          requestId,
+          idempotencyKey,
           pixKey,
           amountCents,
           amountInReais,
           feeCents: withdrawFeeCents,
           feeInReais,
+          subscriptionSettlementCents,
+          subscriptionSettlementInReais,
           totalDebitCents,
           totalDebitInReais,
           status: 'pending',
           source: 'mobile_app',
+          subscriptionCollectionMode: subscriptionBilling.collectionMode || 'withdrawal',
+          createdAt: admin.firestore.FieldValue.serverTimestamp(),
+          updatedAt: admin.firestore.FieldValue.serverTimestamp()
+        });
+
+        transaction.set(idempotencyRef, {
+          driverId,
+          requestId,
+          amountCents,
+          pixKey,
+          withdrawalId: withdrawalRef.id,
+          withdrawFeeCents,
+          subscriptionSettlementCents,
+          totalDebitCents,
+          previousBalance: currentBalance,
+          newBalance,
+          status: 'pending',
           createdAt: admin.firestore.FieldValue.serverTimestamp(),
           updatedAt: admin.firestore.FieldValue.serverTimestamp()
         });
 
         return {
+          idempotentReplay: false,
+          withdrawalId: withdrawalRef.id,
           previousBalance: currentBalance,
           newBalance,
           withdrawFeeCents,
+          subscriptionSettlementCents,
           totalDebitCents
         };
+      });
+
+      if (transactionResult.idempotentReplay) {
+        return {
+          success: true,
+          idempotentReplay: true,
+          withdrawalId: transactionResult.withdrawalId,
+          requestId,
+          amountCents,
+          withdrawFeeCents: transactionResult.withdrawFeeCents || 0,
+          subscriptionSettlementCents: transactionResult.subscriptionSettlementCents || 0,
+          totalDebitCents: transactionResult.totalDebitCents || amountCents,
+          amountInReais: amountInReais.toFixed(2),
+          withdrawFeeInReais: this.toReais(transactionResult.withdrawFeeCents || 0).toFixed(2),
+          subscriptionSettlementInReais: this.toReais(transactionResult.subscriptionSettlementCents || 0).toFixed(2),
+          totalDebitInReais: this.toReais(transactionResult.totalDebitCents || amountCents).toFixed(2),
+          previousBalance: transactionResult.previousBalance,
+          newBalance: transactionResult.newBalance,
+          subscriptionCollectionMode: subscriptionBilling.collectionMode || 'withdrawal',
+          settlementSyncStatus: 'unchanged'
+        };
+      }
+
+      let settlementSync = {
+        success: true,
+        settledCents: 0,
+        remainingCents: 0
+      };
+
+      if (transactionResult.subscriptionSettlementCents > 0) {
+        try {
+          settlementSync = await this.settleSubscriptionPendingOnWithdrawal(
+            driverId,
+            transactionResult.subscriptionSettlementCents
+          );
+        } catch (syncError) {
+          settlementSync = {
+            success: false,
+            error: syncError.message || 'Erro ao sincronizar assinatura'
+          };
+        }
+
+        try {
+          if (!settlementSync.success) {
+            await withdrawalRef.set({
+              settlementSyncStatus: 'pending_retry',
+              settlementSyncError: settlementSync.error || 'Erro ao sincronizar assinatura',
+              settlementSyncUpdatedAt: admin.firestore.FieldValue.serverTimestamp()
+            }, { merge: true });
+          } else {
+            await withdrawalRef.set({
+              settlementSyncStatus: 'synced',
+              subscriptionPendingRemainingCents: settlementSync.remainingCents,
+              settlementSyncUpdatedAt: admin.firestore.FieldValue.serverTimestamp()
+            }, { merge: true });
+          }
+        } catch (syncPersistError) {
+          logStructured('warn', 'Falha ao persistir status de sincronização da assinatura no saque', {
+            service: 'payment-service',
+            driverId,
+            withdrawalId: withdrawalRef.id,
+            error: syncPersistError.message
+          });
+        }
+      }
+
+      await idempotencyRef.set({
+        status: 'pending',
+        settlementSyncStatus: settlementSync.success ? 'synced' : 'pending_retry',
+        subscriptionPendingRemainingCents: settlementSync.remainingCents || 0,
+        updatedAt: admin.firestore.FieldValue.serverTimestamp()
+      }, { merge: true }).catch((syncPersistError) => {
+        logStructured('warn', 'Falha ao persistir status da idempotencia do saque', {
+          service: 'payment-service',
+          driverId,
+          withdrawalId: transactionResult.withdrawalId || withdrawalRef.id,
+          error: syncPersistError.message
+        });
       });
 
       logStructured('info', 'Saque solicitado com sucesso', {
         service: 'payment-service',
         driverId,
-        withdrawalId: withdrawalRef.id,
+        withdrawalId: transactionResult.withdrawalId || withdrawalRef.id,
+        requestId,
         amountCents,
         withdrawFeeCents,
+        subscriptionSettlementCents: transactionResult.subscriptionSettlementCents || 0,
         totalDebitCents
       });
 
       return {
         success: true,
-        withdrawalId: withdrawalRef.id,
+        withdrawalId: transactionResult.withdrawalId || withdrawalRef.id,
+        requestId,
         amountCents,
         withdrawFeeCents,
+        subscriptionSettlementCents: transactionResult.subscriptionSettlementCents || 0,
         totalDebitCents,
         amountInReais: amountInReais.toFixed(2),
         withdrawFeeInReais: feeInReais.toFixed(2),
+        subscriptionSettlementInReais: this.toReais(transactionResult.subscriptionSettlementCents || 0).toFixed(2),
         totalDebitInReais: totalDebitInReais.toFixed(2),
         previousBalance: transactionResult.previousBalance,
-        newBalance: transactionResult.newBalance
+        newBalance: transactionResult.newBalance,
+        subscriptionCollectionMode: subscriptionBilling.collectionMode || 'withdrawal',
+        settlementSyncStatus: settlementSync.success ? 'synced' : 'pending_retry'
       };
     } catch (error) {
       logError(error, 'Erro ao solicitar saque', { service: 'payment-service', driverId });
+      if (error?.code === 'WITHDRAWAL_INSUFFICIENT_BALANCE') {
+        return {
+          success: false,
+          error: error.message || 'Saldo insuficiente para saque',
+          code: error.code,
+          details: error.details || null
+        };
+      }
       return {
         success: false,
-        error: error.message || 'Erro ao solicitar saque'
+        error: error.message || 'Erro ao solicitar saque',
+        code: error?.code || null
       };
     }
   }
@@ -1772,6 +2179,15 @@ class PaymentService {
   async getPaymentStatus(chargeId) {
     try {
       if (String(chargeId || '').startsWith('mock_review_')) {
+        if (String(process.env.APP_REVIEW || '').toLowerCase() !== 'true') {
+          return {
+            success: false,
+            error: 'Cobrança mock permitida apenas em APP_REVIEW=true',
+            status: null,
+            chargeId
+          };
+        }
+
         return {
           success: true,
           status: 'in_holding',
@@ -1787,6 +2203,27 @@ class PaymentService {
         return {
           success: false,
           error: 'chargeId é obrigatório'
+        };
+      }
+
+      const cachedPaymentStatus = await this.readPaymentStatusCache(chargeId);
+      if (cachedPaymentStatus) {
+        const cachedAmountInCents = Number.isFinite(Number(cachedPaymentStatus.amount))
+          ? Math.round(Number(cachedPaymentStatus.amount))
+          : 0;
+
+        return {
+          success: true,
+          status: String(cachedPaymentStatus.status || 'in_holding').trim().toLowerCase(),
+          amount: cachedAmountInCents,
+          amountInReais: cachedAmountInCents > 0 ? (cachedAmountInCents / 100) : 0,
+          chargeId,
+          paidAt:
+            cachedPaymentStatus.paidAt ||
+            cachedPaymentStatus.confirmedAt ||
+            cachedPaymentStatus.updatedAt ||
+            null,
+          source: 'payment_status_cache'
         };
       }
 
@@ -1820,6 +2257,23 @@ class PaymentService {
         });
       }
 
+      const buildPaymentStatusResponseFromRecord = (record = {}, source = null) => {
+        const normalizedStatus = String(record.status || '').trim().toLowerCase();
+        const amountInCents = Number.isFinite(Number(record.amount))
+          ? Math.round(Number(record.amount))
+          : 0;
+
+        return {
+          success: true,
+          status: normalizedStatus || 'in_holding',
+          amount: amountInCents,
+          amountInReais: amountInCents > 0 ? (amountInCents / 100) : 0,
+          chargeId: chargeId,
+          paidAt: record.paidAt || record.confirmedAt || record.updatedAt || null,
+          ...(source ? { source } : {})
+        };
+      };
+
       // ✅ NOVO: Primeiro verificar se existe payment holding no Firestore (para testes)
       try {
         const firestore = firebaseConfig.getFirestore();
@@ -1830,15 +2284,60 @@ class PaymentService {
           if (holdingDoc.exists) {
             const holdingData = holdingDoc.data();
             logStructured('info', 'Payment holding encontrado no Firestore', { service: 'payment-service', chargeId, status: holdingData.status });
-            return {
-              success: true,
-              status: holdingData.status, // in_holding, distributed, etc
-              amount: holdingData.amount || 0,
-              amountInReais: holdingData.amount ? (holdingData.amount / 100) : 0,
-              chargeId: chargeId,
-              paidAt: holdingData.paidAt || null
-            };
+            return buildPaymentStatusResponseFromRecord(holdingData, 'payment_holding_doc');
           } else {
+            const [holdingByPaymentIdSnapshot, holdingByChargeIdSnapshot] = await Promise.all([
+              firestore
+                .collection('payment_holdings')
+                .where('paymentId', '==', chargeId)
+                .limit(1)
+                .get(),
+              firestore
+                .collection('payment_holdings')
+                .where('chargeId', '==', chargeId)
+                .limit(1)
+                .get()
+            ]);
+
+            const holdingByFieldDoc = !holdingByPaymentIdSnapshot.empty
+              ? holdingByPaymentIdSnapshot.docs[0]
+              : (!holdingByChargeIdSnapshot.empty ? holdingByChargeIdSnapshot.docs[0] : null);
+
+            if (holdingByFieldDoc) {
+              const holdingData = holdingByFieldDoc.data();
+              logStructured('info', 'Payment holding encontrado no Firestore por campo', {
+                service: 'payment-service',
+                chargeId,
+                rideId: holdingData.rideId || holdingByFieldDoc.id,
+                status: holdingData.status
+              });
+              return buildPaymentStatusResponseFromRecord(holdingData, 'payment_holding_query');
+            }
+
+            const ridePaymentSnapshot = await firestore
+              .collection('ride_payments')
+              .where('chargeId', '==', chargeId)
+              .limit(1)
+              .get();
+
+            if (!ridePaymentSnapshot.empty) {
+              const ridePaymentData = ridePaymentSnapshot.docs[0].data();
+              const normalizedRidePaymentStatus = String(ridePaymentData.status || '').trim().toUpperCase();
+              if (['CONFIRMED', 'CREDITED', 'DISTRIBUTED', 'IN_HOLDING'].includes(normalizedRidePaymentStatus)) {
+                logStructured('info', 'Pagamento confirmado encontrado em ride_payments', {
+                  service: 'payment-service',
+                  chargeId,
+                  rideId: ridePaymentData.rideId || ridePaymentSnapshot.docs[0].id,
+                  status: normalizedRidePaymentStatus
+                });
+                return buildPaymentStatusResponseFromRecord({
+                  ...ridePaymentData,
+                  status: normalizedRidePaymentStatus === 'CONFIRMED' ? 'in_holding' : normalizedRidePaymentStatus.toLowerCase(),
+                  paidAt: ridePaymentData.confirmedAt || ridePaymentData.updatedAt || null
+                }, 'ride_payments_query');
+              }
+            }
+
             // Sem holding local: continua para consulta direta na Woovi.
             logStructured('warn', 'Payment holding não encontrado no Firestore', { service: 'payment-service', chargeId });
           }
@@ -1925,6 +2424,28 @@ class PaymentService {
    */
   async savePaymentHolding(rideId, holdingData) {
     try {
+      const cachePayload = {
+        status: holdingData.status || this.PAYMENT_STATES.PENDING,
+        amount: Number.isFinite(Number(holdingData.amount))
+          ? Math.round(Number(holdingData.amount))
+          : 0,
+        paymentId: holdingData.paymentId || null,
+        chargeId: holdingData.chargeId || holdingData.paymentId || null,
+        paidAt: holdingData.paidAt || null,
+        confirmedAt: holdingData.confirmedAt || null,
+        rideId
+      };
+
+      await Promise.allSettled([
+        this.writePaymentStatusCache(rideId, cachePayload),
+        cachePayload.chargeId
+          ? this.writePaymentStatusCache(cachePayload.chargeId, cachePayload)
+          : Promise.resolve(false),
+        cachePayload.paymentId && cachePayload.paymentId !== cachePayload.chargeId
+          ? this.writePaymentStatusCache(cachePayload.paymentId, cachePayload)
+          : Promise.resolve(false)
+      ]);
+
       const firestore = firebaseConfig.getFirestore();
 
       if (!firestore) {
