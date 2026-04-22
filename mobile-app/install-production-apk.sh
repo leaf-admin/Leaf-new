@@ -35,7 +35,7 @@ if [ $? -eq 0 ]; then
     echo "3. Teste com usuário CUSTOMER: 11888888888"
     echo ""
     echo "🔧 CONFIGURAÇÕES:"
-    echo "- Servidor VPS: 216.238.107.59:3001"
+    echo "- Servidor VPS: 147.182.204.181:3001"
     echo "- Todos os bypasses ativos"
     echo "- Status online persistente"
     echo ""

@@ -61,18 +61,13 @@ const withGoogleMapsApiKey = (config) => {
     const currentAts = config.modResults.NSAppTransportSecurity || {};
     const currentExceptionDomains = currentAts.NSExceptionDomains || {};
     config.modResults.NSAppTransportSecurity = {
-      ...currentAts,
-      NSAllowsArbitraryLoads: allowInsecureHttp,
-      NSAllowsLocalNetworking: true,
-      NSExceptionDomains: {
-        ...currentExceptionDomains,
-        '147.182.204.181': {
-          ...(currentExceptionDomains['147.182.204.181'] || {}),
-          NSExceptionAllowsInsecureHTTPLoads: true,
-          NSIncludesSubdomains: true
-        },
-        '147.93.66.253': {
-          ...(currentExceptionDomains['147.93.66.253'] || {}),
+        ...currentAts,
+        NSAllowsArbitraryLoads: allowInsecureHttp,
+        NSAllowsLocalNetworking: true,
+        NSExceptionDomains: {
+          ...currentExceptionDomains,
+        '62.169.31.231': {
+          ...(currentExceptionDomains['62.169.31.231'] || {}),
           NSExceptionAllowsInsecureHTTPLoads: true,
           NSIncludesSubdomains: true
         }

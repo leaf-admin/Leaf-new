@@ -6,19 +6,42 @@ const crypto = require('crypto');
 const { execFileSync } = require('child_process');
 
 const APP_ID = 'br.com.leaf.ride';
+const ROOT_DIR = path.resolve(__dirname, '../../..');
 const DEVICE_MAP = {
   '17pro': '195D2C57-87DC-4953-ABF1-4FD351ADBBEF',
   '17promax': '2E44BC8E-9AA8-43BE-BD5E-D0B5A73E543C',
   'driver': '2E44BC8E-9AA8-43BE-BD5E-D0B5A73E543C',
   '16e': '2E44BC8E-9AA8-43BE-BD5E-D0B5A73E543C'
 };
-const PASSENGER_UID = 'OjML1wSzdNRaynjqMRlSW1Y0LVy2';
-const DRIVER_UID = '8vg2kxxqi3TYKlpD6eBlWgYseIq2';
 const PREFIX = '@prototype_runtime_session_';
 const QA_PREFIX = '@prototype_runtime_qa_seed_';
+const DRIVER_ACTIVATION_STORAGE_PREFIX = '@prototype_driver_activation_';
+const CONFIRMED_DESTINATIONS_STORAGE_KEY = 'confirmedDestinations';
 const AUTH_UID_STORAGE_KEY = '@auth_uid';
 const USER_DATA_STORAGE_KEY = '@user_data';
 const TEST_MODE_STORAGE_KEY = '@test_mode';
+
+function readJsonIfExists(filePath, fallbackValue = {}) {
+  try {
+    if (!fs.existsSync(filePath)) {
+      return fallbackValue;
+    }
+    return JSON.parse(fs.readFileSync(filePath, 'utf8'));
+  } catch (_error) {
+    return fallbackValue;
+  }
+}
+
+const QA_PREFLIGHT_USERS = readJsonIfExists(
+  path.join(ROOT_DIR, 'mobile-app', 'test-results', 'qa-preflight', 'ensure-users.json'),
+  {},
+);
+const PASSENGER_UID = String(
+  QA_PREFLIGHT_USERS?.passenger?.uid || 'OjML1wSzdNRaynjqMRlSW1Y0LVy2'
+).trim();
+const DRIVER_UID = String(
+  QA_PREFLIGHT_USERS?.driver?.uid || '8vg2kxxqi3TYKlpD6eBlWgYseIq2'
+).trim();
 
 const BASE_COORDS = {
   pickup: { latitude: 37.779026, longitude: -122.419906 },
@@ -42,6 +65,44 @@ function arg(name, fallback = '') {
     return process.argv[index + 1];
   }
   return fallback;
+}
+
+function hasFlag(name) {
+  return process.argv.includes(name);
+}
+
+function parseCoordinateOverride(latitudeArg, longitudeArg) {
+  const latitude = Number(latitudeArg);
+  const longitude = Number(longitudeArg);
+
+  if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
+    return null;
+  }
+
+  return {
+    latitude,
+    longitude,
+  };
+}
+
+function buildDestinationOverride(nameArg, addressArg, latitudeArg, longitudeArg) {
+  const coordinate = parseCoordinateOverride(latitudeArg, longitudeArg);
+  const name = String(nameArg || '').trim();
+  const address = String(addressArg || '').trim();
+
+  if (!coordinate || (!name && !address)) {
+    return null;
+  }
+
+  return {
+    id: `${name || address}-${coordinate.latitude},${coordinate.longitude}`,
+    name: name || address,
+    address: address || name,
+    coordinate,
+    sourceType: 'confirmed_destination',
+    previewMode: 'local_only',
+    skipGooglePreview: true
+  };
 }
 
 function sleep(ms) {
@@ -383,6 +444,13 @@ function getQaSeedFilePath(dataContainer, uid) {
   return getStorageFilePath(dataContainer, `${QA_PREFIX}${uid}`);
 }
 
+function getDriverActivationFilePath(dataContainer, uid) {
+  return getStorageFilePath(
+    dataContainer,
+    `${DRIVER_ACTIVATION_STORAGE_PREFIX}${uid}`
+  );
+}
+
 function getAuthUidFilePath(dataContainer) {
   return getStorageFilePath(dataContainer, AUTH_UID_STORAGE_KEY);
 }
@@ -511,9 +579,63 @@ function buildPassengerReceipt() {
   };
 }
 
+function buildApprovedDriverActivation() {
+  const timestamp = new Date().toISOString();
+  return {
+    version: 2,
+    preRegistrationCompleted: true,
+    currentStage: 'vehicle_activation',
+    canGoOnline: true,
+    driverProfileStatus: 'approved',
+    vehicleProfileStatus: 'approved',
+    stages: {
+      driver_data_activation: {
+        status: 'approved',
+        completedAt: timestamp,
+        updatedAt: timestamp,
+        checklist: {
+          cnhEar: true,
+          vehicleRegistration: true,
+          inssOrMei: true,
+          backgroundCheckConsent: true,
+        },
+      },
+      face_validation: {
+        status: 'approved',
+        completedAt: timestamp,
+        updatedAt: timestamp,
+        checklist: {
+          facialValidation: true,
+        },
+      },
+      vehicle_activation: {
+        status: 'approved',
+        completedAt: timestamp,
+        updatedAt: timestamp,
+        checklist: {
+          crlv: true,
+        },
+      },
+    },
+    notifications: [
+      {
+        id: 'seed-driver-activation-approved',
+        title: 'Ativação aprovada',
+        message: 'Motorista liberado para ficar online.',
+        kind: 'driver',
+        scope: 'driver',
+        read: false,
+        createdAt: timestamp,
+      },
+    ],
+    updatedAt: timestamp,
+  };
+}
+
 function buildSeedUserData(uid, isDriverScenario) {
   if (isDriverScenario) {
-    return {
+    const driverActivation = buildApprovedDriverActivation();
+    const baseProfile = {
       uid,
       id: uid,
       phone: '+5511888888888',
@@ -528,11 +650,20 @@ function buildSeedUserData(uid, isDriverScenario) {
       approved: true,
       isApproved: true,
       canGoOnline: true,
-      isTestUser: true
+      isTestUser: true,
+    };
+
+    return {
+      ...baseProfile,
+      driverActivation,
+      profile: {
+        ...baseProfile,
+        driverActivation,
+      },
     };
   }
 
-  return {
+  const baseProfile = {
     uid,
     id: uid,
     phone: '+5511999999999',
@@ -547,7 +678,14 @@ function buildSeedUserData(uid, isDriverScenario) {
     approved: true,
     isApproved: true,
     canGoOnline: true,
-    isTestUser: true
+    isTestUser: true,
+  };
+
+  return {
+    ...baseProfile,
+    profile: {
+      ...baseProfile,
+    },
   };
 }
 
@@ -857,6 +995,18 @@ function main() {
   const deviceKey = String(arg('--device', '17pro')).toLowerCase();
   const scenario = String(arg('--scenario', 'passenger-home')).trim();
   const screenshotPath = arg('--screenshot', '');
+  const skipLaunch = hasFlag('--skip-launch');
+  const currentCoordinateOverride = parseCoordinateOverride(
+    arg('--current-lat', ''),
+    arg('--current-lng', '')
+  );
+  const currentAddressOverride = String(arg('--current-address', '')).trim();
+  const destinationOverride = buildDestinationOverride(
+    arg('--destination-name', ''),
+    arg('--destination-address', ''),
+    arg('--destination-lat', ''),
+    arg('--destination-lng', '')
+  );
   const artifactDir = path.resolve(
     arg(
       '--artifact-dir',
@@ -866,15 +1016,31 @@ function main() {
   const freezeMs = Math.max(0, Number(arg('--freeze-ms', '14000')) || 14000);
   const deviceId = DEVICE_MAP[deviceKey] || deviceKey;
   const isDriverScenario = scenario.startsWith('driver-');
-  const uid = isDriverScenario ? DRIVER_UID : PASSENGER_UID;
+  const defaultUid = isDriverScenario ? DRIVER_UID : PASSENGER_UID;
+  const uid = String(arg('--uid', defaultUid)).trim() || defaultUid;
   const dataContainer = getContainerData(deviceId);
   const runtimeFilePath = getRuntimeFilePath(dataContainer, uid);
   const qaSeedFilePath = getQaSeedFilePath(dataContainer, uid);
+  const driverActivationFilePath = getDriverActivationFilePath(dataContainer, uid);
   const authUidFilePath = getAuthUidFilePath(dataContainer);
   const userDataFilePath = getUserDataFilePath(dataContainer);
   const testModeFilePath = getTestModeFilePath(dataContainer);
   const baseline = loadRuntimeSnapshot(runtimeFilePath);
   const nextSnapshot = deepMerge(baseline, scenarioPatch(scenario));
+  if (currentCoordinateOverride) {
+    nextSnapshot.currentCoordinate = currentCoordinateOverride;
+    if (isDriverScenario) {
+      nextSnapshot.driverCoordinate = currentCoordinateOverride;
+    } else if (!nextSnapshot.driverCoordinate) {
+      nextSnapshot.driverCoordinate = currentCoordinateOverride;
+    }
+  }
+  if (currentAddressOverride) {
+    nextSnapshot.currentAddress = currentAddressOverride;
+  }
+  if (destinationOverride) {
+    nextSnapshot.selectedDestination = destinationOverride;
+  }
   const route = scenarioRoute(scenario);
   const qaSeedSnapshot = {
     scenario,
@@ -885,8 +1051,21 @@ function main() {
 
   saveRuntimeSnapshot(runtimeFilePath, nextSnapshot);
   saveRuntimeSnapshot(qaSeedFilePath, qaSeedSnapshot);
+  if (isDriverScenario) {
+    saveRuntimeSnapshot(driverActivationFilePath, buildApprovedDriverActivation());
+    saveAsyncStorageValue(
+      dataContainer,
+      `${DRIVER_ACTIVATION_STORAGE_PREFIX}${uid}`,
+      buildApprovedDriverActivation()
+    );
+  }
   saveAsyncStorageValue(dataContainer, `${PREFIX}${uid}`, nextSnapshot);
   saveAsyncStorageValue(dataContainer, `${QA_PREFIX}${uid}`, qaSeedSnapshot);
+  if (destinationOverride) {
+    saveAsyncStorageValue(dataContainer, CONFIRMED_DESTINATIONS_STORAGE_KEY, [
+      destinationOverride
+    ]);
+  }
   saveAsyncStorageValue(dataContainer, AUTH_UID_STORAGE_KEY, uid);
   saveAsyncStorageValue(
     dataContainer,
@@ -897,73 +1076,75 @@ function main() {
   fs.mkdirSync(artifactDir, { recursive: true });
 
   let launchPid = null;
-  const maxLaunchAttempts = 2;
+  if (!skipLaunch) {
+    const maxLaunchAttempts = 2;
 
-  for (let attempt = 1; attempt <= maxLaunchAttempts; attempt += 1) {
-    const baselineCrash = latestCrashReport('Leaf');
+    for (let attempt = 1; attempt <= maxLaunchAttempts; attempt += 1) {
+      const baselineCrash = latestCrashReport('Leaf');
 
-    if (attempt > 1) {
-      process.stderr.write(
-        `[ios-seed][retry] restarting simulator runtime before retry ${attempt}/${maxLaunchAttempts}\n`
-      );
-      recoverSimulatorRuntime(deviceId);
-    }
-
-    ensureSimulatorReady(deviceId);
-    runBestEffort('xcrun', ['simctl', 'terminate', deviceId, APP_ID]);
-    let launchOutput = '';
-    try {
-      launchOutput = run('xcrun', ['simctl', 'launch', deviceId, APP_ID]);
-    } catch (error) {
-      const retryableLaunchFailure =
-        isRetryableLaunchError(error) && attempt < maxLaunchAttempts;
-      if (retryableLaunchFailure) {
+      if (attempt > 1) {
         process.stderr.write(
-          `[ios-seed][retry] simulator denied app launch; retrying after runtime recovery (${attempt}/${maxLaunchAttempts})\n`
+          `[ios-seed][retry] restarting simulator runtime before retry ${attempt}/${maxLaunchAttempts}\n`
         );
-        continue;
+        recoverSimulatorRuntime(deviceId);
       }
-      throw error;
-    }
-    launchPid = parseLaunchPid(launchOutput);
 
-    try {
-      waitForProcessOrCrash({
-        pid: launchPid,
-        deviceId,
-        waitMs: 6500,
-        artifactDir,
-        baselineCrash
-      });
+      ensureSimulatorReady(deviceId);
+      runBestEffort('xcrun', ['simctl', 'terminate', deviceId, APP_ID]);
+      let launchOutput = '';
+      try {
+        launchOutput = run('xcrun', ['simctl', 'launch', deviceId, APP_ID]);
+      } catch (error) {
+        const retryableLaunchFailure =
+          isRetryableLaunchError(error) && attempt < maxLaunchAttempts;
+        if (retryableLaunchFailure) {
+          process.stderr.write(
+            `[ios-seed][retry] simulator denied app launch; retrying after runtime recovery (${attempt}/${maxLaunchAttempts})\n`
+          );
+          continue;
+        }
+        throw error;
+      }
+      launchPid = parseLaunchPid(launchOutput);
 
-      if (route) {
-        run('xcrun', ['simctl', 'openurl', deviceId, route]);
-        sleep(1200);
-        acceptOpenPromptIfNeeded(deviceId);
+      try {
         waitForProcessOrCrash({
           pid: launchPid,
           deviceId,
-          waitMs: 4000,
+          waitMs: 6500,
           artifactDir,
           baselineCrash
         });
+
+        if (route) {
+          run('xcrun', ['simctl', 'openurl', deviceId, route]);
+          sleep(1200);
+          acceptOpenPromptIfNeeded(deviceId);
+          waitForProcessOrCrash({
+            pid: launchPid,
+            deviceId,
+            waitMs: 4000,
+            artifactDir,
+            baselineCrash
+          });
+        }
+
+        break;
+      } catch (error) {
+        const retryableSimulatorCrash =
+          error?.code === 'IOS_SIM_APP_CRASH' &&
+          error?.crashKind === 'simulator_runtime' &&
+          attempt < maxLaunchAttempts;
+
+        if (retryableSimulatorCrash) {
+          process.stderr.write(
+            `[ios-seed][retry] detected simulator runtime crash (${error.crashReportPath || 'unknown report'})\n`
+          );
+          continue;
+        }
+
+        throw error;
       }
-
-      break;
-    } catch (error) {
-      const retryableSimulatorCrash =
-        error?.code === 'IOS_SIM_APP_CRASH' &&
-        error?.crashKind === 'simulator_runtime' &&
-        attempt < maxLaunchAttempts;
-
-      if (retryableSimulatorCrash) {
-        process.stderr.write(
-          `[ios-seed][retry] detected simulator runtime crash (${error.crashReportPath || 'unknown report'})\n`
-        );
-        continue;
-      }
-
-      throw error;
     }
   }
 
@@ -973,7 +1154,7 @@ function main() {
   }
 
   process.stdout.write(
-    `${JSON.stringify({ ok: true, deviceId, scenario, screenshotPath: screenshotPath ? path.resolve(screenshotPath) : null, launchPid }, null, 2)}\n`
+    `${JSON.stringify({ ok: true, deviceId, scenario, screenshotPath: screenshotPath ? path.resolve(screenshotPath) : null, launchPid, skipLaunch }, null, 2)}\n`
   );
 }
 

@@ -3,9 +3,8 @@ appId: br.com.leaf.ride
 ---
 - launchApp
 - takeScreenshot: "01-app-opened"
-- waitForAnimationToEnd: 3000
+- waitForAnimationToEnd
 - takeScreenshot: "02-app-loaded"
 - assertVisible: 
     text: "Telefone"
     optional: true
-

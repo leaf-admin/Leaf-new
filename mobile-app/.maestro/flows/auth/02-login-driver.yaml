@@ -10,7 +10,7 @@ appId: br.com.leaf.ride
 - assertVisible: 
     text: "Telefone"
     timeout: 3000
-- inputText: "11999999999"  # Número de teste para driver
+- inputText: "11888888888"  # Número de teste para driver
 - tapOn: 
     text: "Continuar"
     timeout: 2000
@@ -23,7 +23,6 @@ appId: br.com.leaf.ride
 - assertVisible: 
     text: "Ficar Online"
     timeout: 5000
-
 
 
 

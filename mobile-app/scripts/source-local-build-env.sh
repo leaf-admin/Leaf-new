@@ -46,6 +46,31 @@ load_env_file "${PROJECT_DIR}/.env.local"
 load_env_file "${PROJECT_DIR}/.env.production"
 load_env_file "${PROJECT_DIR}/.env.production.local"
 
+ensure_xcode_developer_dir() {
+  local preferred_developer_dir="/Applications/Xcode.app/Contents/Developer"
+  local current_developer_dir=""
+
+  current_developer_dir="$(xcode-select -p 2>/dev/null || true)"
+
+  if [[ -n "${DEVELOPER_DIR:-}" && -d "${DEVELOPER_DIR}" ]]; then
+    return 0
+  fi
+
+  if [[ -d "${preferred_developer_dir}" ]]; then
+    if [[ "${current_developer_dir}" == "/Library/Developer/CommandLineTools" || -z "${current_developer_dir}" ]]; then
+      export DEVELOPER_DIR="${preferred_developer_dir}"
+      return 0
+    fi
+
+    if ! xcrun simctl help >/dev/null 2>&1; then
+      export DEVELOPER_DIR="${preferred_developer_dir}"
+      return 0
+    fi
+  fi
+}
+
+ensure_xcode_developer_dir
+
 if [[ -z "${EXPO_PUBLIC_GOOGLE_MAPS_API_KEY:-}" && -n "${GOOGLE_MAPS_API_KEY:-}" ]]; then
   export EXPO_PUBLIC_GOOGLE_MAPS_API_KEY="${GOOGLE_MAPS_API_KEY}"
 fi

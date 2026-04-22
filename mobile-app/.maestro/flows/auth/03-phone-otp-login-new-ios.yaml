@@ -6,19 +6,79 @@ env:
 - launchApp:
     clearState: true
 
-- openLink: "leafapp://"
+- runFlow:
+    when:
+      visible: ".*Deseja Enviar Notificações.*"
+    commands:
+      - tapOn: "Não Permitir"
 
-- extendedWaitUntil:
-    visible: "Abrir"
-    timeout: 20000
+- runFlow:
+    when:
+      visible: "Sign in to view updates"
+    commands:
+      - tapOn: "Home"
 
-- tapOn: "Abrir"
+- runFlow:
+    when:
+      visible: "http://.*:8081"
+    commands:
+      - tapOn: "http://.*:8081"
+
+- runFlow:
+    when:
+      visible: "http://.*:8081"
+    commands:
+      - tapOn: "http://.*:8081"
+      - runFlow:
+          when:
+            visible: "Abrir"
+          commands:
+            - tapOn: "Abrir"
+
+- runFlow:
+    when:
+      visible: "No development servers found"
+    commands:
+      - tapOn: "Enter URL manually"
+      - inputText: "http://localhost:8081"
+      - pressKey: Enter
+      - runFlow:
+          when:
+            visible: "Connect"
+          commands:
+            - tapOn: "Connect"
+      - runFlow:
+          when:
+            visible: "Abrir"
+          commands:
+            - tapOn: "Abrir"
+
+- runFlow:
+    when:
+      visible: "Abrir"
+    commands:
+      - tapOn: "Abrir"
+
+- runFlow:
+    when:
+      visible: "Connected to:"
+    commands:
+      - tapOn:
+          point: "88%,44%"
+
+- runFlow:
+    when:
+      visible: "This is the developer menu"
+    commands:
+      - tapOn: "Continue"
 
 - runFlow:
     when:
       visible: "Continue"
     commands:
       - tapOn: "Continue"
+
+- waitForAnimationToEnd
 
 - extendedWaitUntil:
     visible:
@@ -31,14 +91,41 @@ env:
 - inputText: ${TEST_PHONE}
 - pressKey: Enter
 
-- extendedWaitUntil:
-    visible: "Verificação"
-    timeout: 30000
+- runFlow:
+    when:
+      visible: "Verificação"
+    commands:
+      - inputText: ${TEST_OTP}
+      - extendedWaitUntil:
+          notVisible: "Verificação"
+          timeout: 30000
 
-- inputText: ${TEST_OTP}
+- runFlow:
+    when:
+      visible: "Como você quer usar a Leaf?"
+    commands:
+      - tapOn: "Quero viajar"
+      - tapOn: "Continuar"
 
-- extendedWaitUntil:
-    notVisible: "Verificação"
-    timeout: 30000
+- runFlow:
+    when:
+      visible: "Quero viajar"
+    commands:
+      - tapOn: "Quero viajar"
+      - tapOn: "Continuar"
+
+- runFlow:
+    when:
+      visible: "This is the developer menu"
+    commands:
+      - tapOn: "Continue"
+
+- runFlow:
+    when:
+      visible: "Continue"
+    commands:
+      - tapOn: "Continue"
+
+- waitForAnimationToEnd
 
 - takeScreenshot: "ios-auth-login-success"

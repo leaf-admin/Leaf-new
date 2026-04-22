@@ -8,11 +8,10 @@ const DEV_HTTP_HOSTS = [
   '127.0.0.1',
   '10.0.2.2',
   '192.168.0.37',
-  '147.93.66.253',
-  '147.182.204.181',
+  '62.169.31.231',
 ];
 
-const DEFAULT_INSECURE_PROD_HTTP_HOSTS = ['147.93.66.253', '147.182.204.181'];
+const DEFAULT_INSECURE_PROD_HTTP_HOSTS = ['62.169.31.231'];
 const insecureProdHttpHostsFromEnv = String(process.env.EXPO_PUBLIC_INSECURE_HTTP_HOSTS || '')
   .split(',')
   .map((host) => host.trim())

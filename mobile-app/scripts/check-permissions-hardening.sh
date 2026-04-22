@@ -21,6 +21,11 @@ fail() {
 
 APP_CONFIG="${PROJECT_DIR}/app.config.js"
 ANDROID_MANIFEST="${PROJECT_DIR}/android/app/src/main/AndroidManifest.xml"
+VOICE_PLUGIN_ENABLED=0
+
+if rg -q '"expo-speech-recognition"' "${APP_CONFIG}"; then
+  VOICE_PLUGIN_ENABLED=1
+fi
 
 if rg -q '"microphonePermission"\s*:\s*false' "${APP_CONFIG}"; then
   ok "expo-audio: microphonePermission=false configurado"
@@ -34,10 +39,18 @@ else
   fail "expo-audio: recordAudioAndroid=false ausente em app.config.js"
 fi
 
-if rg -q 'android.permission.RECORD_AUDIO" tools:node="remove"' "${ANDROID_MANIFEST}"; then
-  ok "AndroidManifest remove RECORD_AUDIO"
+if [[ "${VOICE_PLUGIN_ENABLED}" -eq 1 ]]; then
+  if rg -q 'android.permission.RECORD_AUDIO"' "${ANDROID_MANIFEST}"; then
+    ok "AndroidManifest mantém RECORD_AUDIO (voz habilitada)"
+  else
+    fail "AndroidManifest sem RECORD_AUDIO apesar de voz habilitada"
+  fi
 else
-  fail "AndroidManifest não remove RECORD_AUDIO"
+  if rg -q 'android.permission.RECORD_AUDIO" tools:node="remove"' "${ANDROID_MANIFEST}"; then
+    ok "AndroidManifest remove RECORD_AUDIO (voz desabilitada)"
+  else
+    fail "AndroidManifest não remove RECORD_AUDIO com voz desabilitada"
+  fi
 fi
 
 if ! command -v npx >/dev/null 2>&1; then
@@ -47,16 +60,48 @@ else
   npx expo config --type prebuild --json > "${TMP_JSON}"
 
   MICROPHONE_VALUE="$(jq -r '.ios.infoPlist.NSMicrophoneUsageDescription // "<none>"' "${TMP_JSON}")"
-  if [[ "${MICROPHONE_VALUE}" == "<none>" ]]; then
-    ok "Expo config final iOS sem NSMicrophoneUsageDescription"
-  else
-    fail "Expo config final iOS ainda contém NSMicrophoneUsageDescription (${MICROPHONE_VALUE})"
+  SPEECH_VALUE="$(jq -r '.ios.infoPlist.NSSpeechRecognitionUsageDescription // "<none>"' "${TMP_JSON}")"
+  ANDROID_HAS_RECORD_AUDIO=0
+  if jq -r '.android.permissions[]?' "${TMP_JSON}" | rg -q '^android.permission.RECORD_AUDIO$'; then
+    ANDROID_HAS_RECORD_AUDIO=1
   fi
 
-  if jq -r '.android.permissions[]?' "${TMP_JSON}" | rg -q '^android.permission.RECORD_AUDIO$'; then
-    fail "Expo config final Android ainda contém RECORD_AUDIO"
+  if [[ "${VOICE_PLUGIN_ENABLED}" -eq 1 ]]; then
+    if [[ "${MICROPHONE_VALUE}" != "<none>" ]]; then
+      ok "Expo config final iOS contém NSMicrophoneUsageDescription (voz habilitada)"
+    else
+      fail "Expo config final iOS sem NSMicrophoneUsageDescription com voz habilitada"
+    fi
+
+    if [[ "${SPEECH_VALUE}" != "<none>" ]]; then
+      ok "Expo config final iOS contém NSSpeechRecognitionUsageDescription (voz habilitada)"
+    else
+      fail "Expo config final iOS sem NSSpeechRecognitionUsageDescription com voz habilitada"
+    fi
+
+    if [[ "${ANDROID_HAS_RECORD_AUDIO}" -eq 1 ]]; then
+      ok "Expo config final Android contém RECORD_AUDIO (voz habilitada)"
+    else
+      fail "Expo config final Android sem RECORD_AUDIO com voz habilitada"
+    fi
   else
-    ok "Expo config final Android sem RECORD_AUDIO"
+    if [[ "${MICROPHONE_VALUE}" == "<none>" ]]; then
+      ok "Expo config final iOS sem NSMicrophoneUsageDescription (voz desabilitada)"
+    else
+      fail "Expo config final iOS contém NSMicrophoneUsageDescription com voz desabilitada (${MICROPHONE_VALUE})"
+    fi
+
+    if [[ "${SPEECH_VALUE}" == "<none>" ]]; then
+      ok "Expo config final iOS sem NSSpeechRecognitionUsageDescription (voz desabilitada)"
+    else
+      fail "Expo config final iOS contém NSSpeechRecognitionUsageDescription com voz desabilitada (${SPEECH_VALUE})"
+    fi
+
+    if [[ "${ANDROID_HAS_RECORD_AUDIO}" -eq 1 ]]; then
+      fail "Expo config final Android contém RECORD_AUDIO com voz desabilitada"
+    else
+      ok "Expo config final Android sem RECORD_AUDIO (voz desabilitada)"
+    fi
   fi
 
   rm -f "${TMP_JSON}"

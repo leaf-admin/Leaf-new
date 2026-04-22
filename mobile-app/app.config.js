@@ -5,17 +5,88 @@ const AppConfig = require('./config/AppConfig').AppConfig;
 const GoogleMapApiConfig = require('./config/GoogleMapApiConfig').GoogleMapApiConfig;
 const fs = require('fs');
 const path = require('path');
+const TRUTHY_VALUES = new Set(['1', 'true', 'yes', 'on']);
 const allowInsecureHttp = String(process.env.EXPO_PUBLIC_ALLOW_INSECURE_HTTP || 'false').toLowerCase() === 'true';
+const disableUpdatesForLocalSimulator =
+    String(process.env.LEAF_DISABLE_UPDATES_FOR_SIMULATOR || 'false').toLowerCase() === 'true';
+const normalizeFlag = (value, defaultValue = false) => {
+    if (value === undefined || value === null || value === '') {
+        return defaultValue;
+    }
+
+    return TRUTHY_VALUES.has(String(value).trim().toLowerCase());
+};
+const firstDefined = (...values) => values.find(value => value !== undefined && value !== null && value !== '');
+const resolveNumber = (value, defaultValue) => {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : defaultValue;
+};
+const resolveLaunchProfile = () => {
+    const rawProfile = firstDefined(
+        process.env.EXPO_PUBLIC_LEAF_LAUNCH_PROFILE,
+        process.env.LEAF_LAUNCH_PROFILE
+    );
+
+    const normalized = String(rawProfile || 'full')
+        .trim()
+        .toLowerCase();
+
+    if (['pilot', 'pilot_controlled', 'controlled_pilot'].includes(normalized)) {
+        return 'pilot_controlled';
+    }
+
+    return normalized || 'full';
+};
+const launchProfile = resolveLaunchProfile();
+const pilotControlled =
+    launchProfile === 'pilot_controlled' ||
+    normalizeFlag(firstDefined(process.env.EXPO_PUBLIC_PILOT_CONTROLLED, process.env.LEAF_PILOT_CONTROLLED), false);
+const resolvePilotFeature = (publicKey, privateKey, enabledOutsidePilot = true) => {
+    const fallback = pilotControlled ? false : enabledOutsidePilot;
+    return normalizeFlag(firstDefined(process.env[publicKey], process.env[privateKey]), fallback);
+};
+const pilotFeatureFlags = {
+    driverWithdrawalsEnabled: resolvePilotFeature('EXPO_PUBLIC_ENABLE_DRIVER_WITHDRAWALS', 'LEAF_ENABLE_DRIVER_WITHDRAWALS', false),
+    referralProgramsEnabled: resolvePilotFeature('EXPO_PUBLIC_ENABLE_REFERRAL_PROGRAMS', 'LEAF_ENABLE_REFERRAL_PROGRAMS', true),
+    softBanEnforcementEnabled: resolvePilotFeature('EXPO_PUBLIC_ENABLE_SOFT_BAN_ENFORCEMENT', 'LEAF_ENABLE_SOFT_BAN_ENFORCEMENT', true),
+    adminMutationsEnabled: resolvePilotFeature('EXPO_PUBLIC_ENABLE_ADMIN_MUTATIONS', 'LEAF_ENABLE_ADMIN_MUTATIONS', true),
+};
+const prototypePlayback = {
+    tickMs: resolveNumber(
+        firstDefined(
+            process.env.EXPO_PUBLIC_PROTOTYPE_ROUTE_PLAYBACK_TICK_MS,
+            process.env.LEAF_PROTOTYPE_ROUTE_PLAYBACK_TICK_MS
+        ),
+        2500
+    ),
+    pickupSpeedMetersPerSecond: resolveNumber(
+        firstDefined(
+            process.env.EXPO_PUBLIC_PROTOTYPE_PICKUP_SPEED_MPS,
+            process.env.LEAF_PROTOTYPE_PICKUP_SPEED_MPS
+        ),
+        8
+    ),
+    tripSpeedMetersPerSecond: resolveNumber(
+        firstDefined(
+            process.env.EXPO_PUBLIC_PROTOTYPE_TRIP_SPEED_MPS,
+            process.env.LEAF_PROTOTYPE_TRIP_SPEED_MPS
+        ),
+        10
+    ),
+    qaMultiplier: resolveNumber(
+        firstDefined(
+            process.env.EXPO_PUBLIC_PROTOTYPE_ROUTE_PLAYBACK_QA_MULTIPLIER,
+            process.env.LEAF_PROTOTYPE_ROUTE_PLAYBACK_QA_MULTIPLIER
+        ),
+        1.75
+    ),
+};
 const iosTransportSecurity = allowInsecureHttp
     ? {
         NSAllowsArbitraryLoads: true,
         NSAllowsLocalNetworking: true,
         NSExceptionDomains: {
-            "147.182.204.181": {
-                NSExceptionAllowsInsecureHTTPLoads: true,
-                NSIncludesSubdomains: true
-            },
-            "147.93.66.253": {
+            "62.169.31.231": {
                 NSExceptionAllowsInsecureHTTPLoads: true,
                 NSIncludesSubdomains: true
             }
@@ -43,18 +114,30 @@ module.exports = {
         resizeMode: "cover",
         backgroundColor: "#003002"
     },
-    updates: {
-        "fallbackToCacheTimeout": 0,
-        "url": "https://u.expo.dev/" + AppConfig.expo_project_id,
-    },
+    updates: disableUpdatesForLocalSimulator
+        ? {
+            enabled: false,
+            checkAutomatically: 'NEVER',
+            fallbackToCacheTimeout: 0
+        }
+        : {
+            "fallbackToCacheTimeout": 0,
+            "url": "https://u.expo.dev/" + AppConfig.expo_project_id,
+        },
     extra: {
         eas: {
           projectId: AppConfig.expo_project_id
         },
         privacyPolicyUrl: AppConfig.privacy_policy_url,
         termsOfServiceUrl: AppConfig.terms_of_service_url,
+        refundPolicyUrl: AppConfig.refund_policy_url,
+        accountDeletionUrl: AppConfig.account_deletion_url,
         supportEmail: AppConfig.support_email,
-        isReview: process.env.APP_REVIEW === 'true'
+        isReview: process.env.APP_REVIEW === 'true',
+        launchProfile,
+        pilotControlled,
+        pilotFeatureFlags,
+        prototypePlayback
     },
     assetBundlePatterns: [
         "**/*"
@@ -73,15 +156,14 @@ module.exports = {
             "FOREGROUND_SERVICE",
             "FOREGROUND_SERVICE_LOCATION",
             "CAMERA",
+            "RECORD_AUDIO",
             "INTERNET",
             "VIBRATE"
         ],
         blockedPermissions: [
             "android.permission.SYSTEM_ALERT_WINDOW",
             "android.permission.READ_EXTERNAL_STORAGE",
-            "android.permission.WRITE_EXTERNAL_STORAGE",
-            "android.permission.RECORD_AUDIO",
-            "android.permission.MODIFY_AUDIO_SETTINGS"
+            "android.permission.WRITE_EXTERNAL_STORAGE"
         ],
         icon: "./assets/icon.png",
         adaptiveIcon: {
@@ -125,6 +207,14 @@ module.exports = {
                 "microphonePermission": false,
                 "recordAudioAndroid": false,
                 "enableBackgroundRecording": false
+            }
+        ],
+        [
+            "expo-speech-recognition",
+            {
+                "microphonePermission": "A Leaf usa o microfone para capturar o destino por voz quando você tocar no ícone de microfone.",
+                "speechRecognitionPermission": "A Leaf converte sua fala em texto para preencher o destino com mais rapidez.",
+                "androidSpeechServicePackages": ["com.google.android.googlequicksearchbox"]
             }
         ],
         "expo-apple-authentication",
