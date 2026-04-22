@@ -7,54 +7,50 @@ import { useAuth } from "@/src/contexts/AuthContext";
 
 const groups = [
   {
-    id: "operacao",
-    label: "Operacao",
+    id: "settings",
+    section: "Settings",
+    label: "Your profile",
     href: "/dashboard",
     items: [
       { href: "/dashboard", label: "Dashboard" },
-      { href: "/maps", label: "Mapas e Geofence" },
-      { href: "/drivers", label: "Motoristas" },
-      { href: "/drivers/review-queue", label: "Fila de Documentos" },
-      { href: "/users", label: "Usuarios" },
+      { href: "/observability", label: "Usage", blockedRoles: ["support"] },
+      { href: "/metrics", label: "Metrics", blockedRoles: ["support"] },
+      { href: "/metrics/history", label: "History", blockedRoles: ["support"] },
+      { href: "/metrics/marketplace", label: "Service health", blockedRoles: ["support"] },
+    ],
+  },
+  {
+    id: "organization",
+    section: "Organization",
+    label: "General",
+    href: "/drivers",
+    items: [
+      { href: "/drivers", label: "Drivers" },
+      { href: "/drivers/review-queue", label: "Review queue" },
+      { href: "/users", label: "People" },
+      { href: "/maps", label: "Projects" },
+      { href: "/subscriptions", label: "Billing", blockedRoles: ["support", "development"] },
+      { href: "/programs", label: "Limits" },
+    ],
+  },
+  {
+    id: "project",
+    section: "Project",
+    label: "General",
+    href: "/support",
+    items: [
+      { href: "/support", label: "Support" },
+      { href: "/notifications", label: "Notifications" },
+      { href: "/reports", label: "Reports" },
+      { href: "/promotions", label: "Promotions" },
+      { href: "/financial-simulator", label: "Simulator", blockedRoles: ["support", "development"] },
       { href: "/waitlist", label: "Waitlist" },
-      { href: "/support", label: "Suporte" },
-    ],
-  },
-  {
-    id: "performance",
-    label: "Performance",
-    href: "/metrics",
-    items: [
-      { href: "/metrics", label: "Metricas" },
-      { href: "/metrics/marketplace", label: "Marketplace Health" },
-      { href: "/metrics/history", label: "Historico" },
-      { href: "/observability", label: "Observability" },
-    ],
-  },
-  {
-    id: "monetizacao",
-    label: "Monetizacao",
-    href: "/subscriptions",
-    items: [
-      { href: "/subscriptions", label: "Assinaturas" },
-      { href: "/promotions", label: "Promocoes" },
-      { href: "/programs", label: "Convites" },
-      { href: "/financial-simulator", label: "Simulador" },
-    ],
-  },
-  {
-    id: "comunicacao",
-    label: "Comunicacao",
-    href: "/notifications",
-    items: [
-      { href: "/notifications", label: "Notificacoes" },
-      { href: "/reports", label: "Relatorios" },
     ],
   },
 ];
 
-function resolveActiveItem(pathname) {
-  const allItems = groups.flatMap((group) =>
+function resolveActiveItem(pathname, navGroups) {
+  const allItems = navGroups.flatMap((group) =>
     group.items.map((item) => ({ ...item, groupId: group.id })),
   );
 
@@ -69,20 +65,40 @@ function resolveActiveItem(pathname) {
   return matches.sort((a, b) => b.href.length - a.href.length)[0];
 }
 
+function canAccessItem(item, role) {
+  const blockedRoles = Array.isArray(item?.blockedRoles) ? item.blockedRoles : [];
+  if (!role) return true;
+  return !blockedRoles.includes(role);
+}
+
 export default function AppNav() {
   const pathname = usePathname();
   const router = useRouter();
   const { user, signOut } = useAuth();
   const [mobileOpen, setMobileOpen] = useState(false);
+  const apiDocsHref = process.env.NEXT_PUBLIC_API_DOCS_URL || "/reports";
+  const isApiDocsExternal = /^https?:\/\//i.test(apiDocsHref);
+  const userRole = String(user?.role || "").toLowerCase();
 
-  const activeItem = useMemo(() => resolveActiveItem(pathname), [pathname]);
+  const visibleGroups = useMemo(
+    () =>
+      groups
+        .map((group) => ({
+          ...group,
+          items: group.items.filter((item) => canAccessItem(item, userRole)),
+        }))
+        .filter((group) => group.items.length > 0),
+    [userRole],
+  );
+
+  const activeItem = useMemo(() => resolveActiveItem(pathname, visibleGroups), [pathname, visibleGroups]);
 
   const activeGroup = useMemo(() => {
     if (activeItem) {
-      return groups.find((group) => group.id === activeItem.groupId) || groups[0];
+      return visibleGroups.find((group) => group.id === activeItem.groupId) || visibleGroups[0] || groups[0];
     }
-    return groups[0];
-  }, [activeItem]);
+    return visibleGroups[0] || groups[0];
+  }, [activeItem, visibleGroups]);
 
   const userInitials = useMemo(() => {
     const name = String(user?.name || user?.email || "Leaf").trim();
@@ -118,15 +134,27 @@ export default function AppNav() {
           >
             Menu
           </button>
-          <span className="app-topbar-pill">Leaf Platform</span>
-          <span className="app-topbar-project">{activeGroup.label}</span>
+          <span className="app-topbar-avatar app-topbar-avatar-compact">{userInitials.slice(0, 1)}</span>
+          <span className="app-topbar-crumb">Personal</span>
+          <span className="app-topbar-separator">•</span>
+          <span className="app-topbar-project">Default project</span>
+          <span className="app-topbar-separator">/</span>
+          <span className="app-topbar-page">{activeItem?.label || activeGroup.label}</span>
         </div>
         <div className="app-topbar-right">
           <Link href="/dashboard" className="app-topbar-link">
             Dashboard
           </Link>
-          <Link href="/reports" className="app-topbar-link">
-            Relatórios
+          <Link
+            href={apiDocsHref}
+            className="app-topbar-link"
+            target={isApiDocsExternal ? "_blank" : undefined}
+            rel={isApiDocsExternal ? "noreferrer" : undefined}
+          >
+            API Docs
+          </Link>
+          <Link href="/support" className="app-topbar-link">
+            Settings
           </Link>
           <div className="app-topbar-avatar" title={user?.name || user?.email || "Admin"}>
             {userInitials}
@@ -144,16 +172,17 @@ export default function AppNav() {
         <div className="app-sidebar-head">
           <div className="app-logo">L</div>
           <div>
-            <p className="app-sidebar-title">Leaf Ops</p>
-            <p className="app-sidebar-subtitle">Controle operacional</p>
+            <p className="app-sidebar-title">Personal</p>
+            <p className="app-sidebar-subtitle">Default project</p>
           </div>
         </div>
 
         <nav className="app-sidebar-nav" aria-label="Navegacao principal">
-          {groups.map((group) => {
+          {visibleGroups.map((group) => {
             const groupActive = group.id === activeGroup.id;
             return (
               <section key={group.id} className="app-sidebar-group">
+                <p className="app-sidebar-section">{group.section}</p>
                 <h3 className={groupActive ? "app-sidebar-group-title app-sidebar-group-title-active" : "app-sidebar-group-title"}>
                   {group.label}
                 </h3>
@@ -177,6 +206,10 @@ export default function AppNav() {
         </nav>
 
         <div className="app-sidebar-foot">
+          <div className="app-sidebar-card">
+            <p className="app-sidebar-card-title">Live observability</p>
+            <p className="app-sidebar-card-text">Atualização contínua a cada 5s.</p>
+          </div>
           <div className="app-sidebar-user">
             <div className="app-sidebar-avatar">{userInitials}</div>
             <div>

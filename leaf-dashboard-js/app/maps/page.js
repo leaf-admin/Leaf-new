@@ -1,12 +1,10 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { io } from "socket.io-client";
 import ProtectedRoute from "@/src/components/ProtectedRoute";
 import AppNav from "@/src/components/AppNav";
 import { leafAPI } from "@/src/services/api";
-import { authService } from "@/src/services/auth-service";
-import config from "@/src/config";
+import { wsService } from "@/src/services/websocket-service";
 import KpiCard from "@/src/components/ui/KpiCard";
 import Panel from "@/src/components/ui/Panel";
 import { ErrorText, LoadingState } from "@/src/components/ui/PageFeedback";
@@ -177,36 +175,7 @@ export default function MapsPage() {
   }, [locations]);
 
   useEffect(() => {
-    const token = authService.getAccessToken();
-    if (!token) {
-      setWsStatus("sem-token");
-      return;
-    }
-
-    const socket = io(`${config.ws.baseUrl}/dashboard`, {
-      auth: { jwtToken: token },
-      transports: ["websocket", "polling"],
-      reconnection: true,
-      reconnectionAttempts: 10,
-    });
-
-    socket.on("connect", () => {
-      setWsStatus("conectado");
-      socket.emit("authenticate", { jwtToken: token });
-    });
-
-    socket.on("authenticated", () => {
-      socket.emit("request_live_data");
-    });
-
-    socket.on("authentication_error", () => {
-      setWsStatus("auth-erro");
-    });
-
-    socket.on("connect_error", () => {
-      setWsStatus("erro");
-    });
-
+    let active = true;
     const onLiveStats = (stats) => {
       if (!stats) return;
       setLocations((prev) => ({
@@ -257,19 +226,43 @@ export default function MapsPage() {
       scheduleH3Refresh();
     };
 
-    socket.on("live_stats", onLiveStats);
-    socket.on("live_stats_update", onLiveStats);
-    socket.on("driver_location_update", onDrivers);
-    socket.on("trip_update", onTrips);
-    socket.on("map_h3_refresh", onH3Refresh);
+    const onAuthError = () => {
+      if (active) setWsStatus("auth-erro");
+    };
+    const onConnectError = () => {
+      if (active) setWsStatus("erro");
+    };
+
+    wsService.on("live_stats", onLiveStats);
+    wsService.on("live_stats_update", onLiveStats);
+    wsService.on("driver_location_update", onDrivers);
+    wsService.on("trip_update", onTrips);
+    wsService.on("map_h3_refresh", onH3Refresh);
+    wsService.on("authentication_error", onAuthError);
+    wsService.on("connect_error", onConnectError);
+
+    wsService
+      .connect({ namespace: "/dashboard" })
+      .then(() => {
+        if (!active) return;
+        setWsStatus("conectado");
+        wsService.emit("request_live_data");
+      })
+      .catch((error) => {
+        if (!active) return;
+        setWsStatus(error?.message?.includes("token") ? "sem-token" : "erro");
+      });
 
     return () => {
-      socket.off("live_stats", onLiveStats);
-      socket.off("live_stats_update", onLiveStats);
-      socket.off("driver_location_update", onDrivers);
-      socket.off("trip_update", onTrips);
-      socket.off("map_h3_refresh", onH3Refresh);
-      socket.disconnect();
+      active = false;
+      wsService.off("live_stats", onLiveStats);
+      wsService.off("live_stats_update", onLiveStats);
+      wsService.off("driver_location_update", onDrivers);
+      wsService.off("trip_update", onTrips);
+      wsService.off("map_h3_refresh", onH3Refresh);
+      wsService.off("authentication_error", onAuthError);
+      wsService.off("connect_error", onConnectError);
+      wsService.disconnect();
       setWsStatus("desconectado");
     };
   }, [scheduleH3Refresh]);

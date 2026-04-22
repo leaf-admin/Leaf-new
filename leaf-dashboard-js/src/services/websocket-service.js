@@ -7,29 +7,58 @@ class DashboardWsService {
     this.socket = null;
     this.listeners = new Map();
     this.isAuthenticated = false;
+    this.namespace = "";
+    this.pendingConnectPromise = null;
   }
 
-  connect() {
-    if (this.socket?.connected) return Promise.resolve();
+  resolveSocketUrl(namespace = "") {
+    const normalizedNamespace = namespace && namespace !== "/" ? namespace : "";
+    return `${config.ws.baseUrl}${normalizedNamespace}`;
+  }
+
+  attachStoredListeners() {
+    this.listeners.forEach((callbacks, event) => {
+      callbacks.forEach((cb) => this.socket?.on(event, cb));
+    });
+  }
+
+  connect(options = {}) {
+    const namespace = options.namespace && options.namespace !== "/" ? options.namespace : "";
+
+    if (this.socket?.connected && this.namespace === namespace && this.isAuthenticated) {
+      return Promise.resolve(this.socket);
+    }
+
+    if (this.socket && this.namespace !== namespace) {
+      this.disconnect();
+    }
+
+    if (this.pendingConnectPromise && this.namespace === namespace) {
+      return this.pendingConnectPromise;
+    }
 
     const token = authService.getAccessToken();
     if (!token) return Promise.reject(new Error("Sem token para websocket"));
 
-    return new Promise((resolve, reject) => {
-      this.socket = io(config.ws.baseUrl, {
+    this.namespace = namespace;
+    this.pendingConnectPromise = new Promise((resolve, reject) => {
+      this.socket = io(this.resolveSocketUrl(namespace), {
         auth: { jwtToken: token },
         transports: ["websocket", "polling"],
         reconnection: true,
         reconnectionAttempts: 5,
       });
 
+      this.attachStoredListeners();
+
       this.socket.on("connect", () => {
+        this.isAuthenticated = false;
         this.socket.emit("authenticate", { jwtToken: token });
-        resolve();
       });
 
       this.socket.on("authenticated", () => {
         this.isAuthenticated = true;
+        resolve(this.socket);
       });
 
       this.socket.on("authentication_error", (error) => {
@@ -40,17 +69,19 @@ class DashboardWsService {
       this.socket.on("connect_error", (error) => {
         reject(error);
       });
-
-      this.listeners.forEach((callbacks, event) => {
-        callbacks.forEach((cb) => this.socket.on(event, cb));
-      });
+    }).finally(() => {
+      this.pendingConnectPromise = null;
     });
+
+    return this.pendingConnectPromise;
   }
 
   disconnect() {
     if (this.socket) this.socket.disconnect();
     this.socket = null;
     this.isAuthenticated = false;
+    this.namespace = "";
+    this.pendingConnectPromise = null;
   }
 
   on(event, cb) {

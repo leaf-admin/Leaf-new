@@ -15,6 +15,8 @@ export default function SubscriptionsPage() {
   const [summary, setSummary] = useState(null);
   const [busyId, setBusyId] = useState("");
   const [freeDays, setFreeDays] = useState(7);
+  const [waveDraft, setWaveDraft] = useState("wave_1");
+  const [dailyFeeDraft, setDailyFeeDraft] = useState(990);
   const [searchTerm, setSearchTerm] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
   const [paymentFilter, setPaymentFilter] = useState("all");
@@ -52,14 +54,30 @@ export default function SubscriptionsPage() {
   const grantFree = async (driverId) => {
     try {
       setBusyId(driverId);
-      await leafAPI.extendDriverFreePeriod(driverId, {
-        type: "promotion",
-        days: Number(freeDays) || 7,
-        reason: "beneficio manual via dashboard",
+      const days = Math.max(1, Number(freeDays) || 7);
+      const until = new Date(Date.now() + days * 24 * 60 * 60 * 1000).toISOString();
+      await leafAPI.updateDriverSubscription(driverId, {
+        feeExemptUntil: until,
+        isFeeExempt: false,
       });
       await load();
     } catch (err) {
-      setError(err?.message || "Falha ao estender periodo gratis");
+      setError(err?.message || "Falha ao isentar taxa diaria");
+    } finally {
+      setBusyId("");
+    }
+  };
+
+  const applyWavePricing = async (driverId) => {
+    try {
+      setBusyId(driverId);
+      await leafAPI.updateDriverSubscription(driverId, {
+        waveId: waveDraft,
+        dailyFeeCents: Number(dailyFeeDraft) || 0,
+      });
+      await load();
+    } catch (err) {
+      setError(err?.message || "Falha ao aplicar onda/taxa");
     } finally {
       setBusyId("");
     }
@@ -80,6 +98,7 @@ export default function SubscriptionsPage() {
         item?.driver?.name,
         item?.driver?.email,
         item?.subscription?.planType,
+        item?.subscription?.waveId,
         subscriptionStatus,
         paymentStatus,
       ]
@@ -122,6 +141,21 @@ export default function SubscriptionsPage() {
               onChange={(e) => setFreeDays(e.target.value)}
               style={{ width: 120 }}
             />
+            <input
+              placeholder="onda (wave_1)"
+              value={waveDraft}
+              onChange={(e) => setWaveDraft(e.target.value)}
+              style={{ width: 140 }}
+            />
+            <input
+              type="number"
+              min="0"
+              step="10"
+              value={dailyFeeDraft}
+              onChange={(e) => setDailyFeeDraft(e.target.value)}
+              style={{ width: 130 }}
+              title="Taxa diária em centavos"
+            />
             <button onClick={load}>Atualizar</button>
           </div>
         </header>
@@ -145,6 +179,8 @@ export default function SubscriptionsPage() {
                   <tr>
                     <th>Motorista</th>
                     <th>Plano</th>
+                    <th>Diária</th>
+                    <th>Pendente</th>
                     <th>Status</th>
                     <th>Pagamento</th>
                     <th>Acoes</th>
@@ -153,7 +189,7 @@ export default function SubscriptionsPage() {
                 <tbody>
                   {filteredRows.length === 0 ? (
                     <tr>
-                      <td colSpan={5}>Nenhuma assinatura encontrada para os filtros atuais.</td>
+                      <td colSpan={7}>Nenhuma assinatura encontrada para os filtros atuais.</td>
                     </tr>
                   ) : (
                     filteredRows.map((item, idx) => {
@@ -166,6 +202,11 @@ export default function SubscriptionsPage() {
                             <span className="table-muted">{item?.driver?.email || "-"}</span>
                           </td>
                           <td>{item?.subscription?.planType || "plus"}</td>
+                          <td>
+                            {`R$ ${Number(item?.subscription?.dailyFee || 0).toFixed(2)}`}
+                            <span className="table-muted">{item?.subscription?.waveId || "-"}</span>
+                          </td>
+                          <td>{`R$ ${Number(item?.subscription?.pendingFee || 0).toFixed(2)}`}</td>
                           <td>{item?.subscription?.status || "-"}</td>
                           <td>{item?.currentPeriod?.paymentStatus || "-"}</td>
                           <td>
@@ -173,8 +214,11 @@ export default function SubscriptionsPage() {
                               <button disabled={!id || isBusy} onClick={() => setBillingStatus(id, "active")}>Ativar</button>
                               <button disabled={!id || isBusy} onClick={() => setBillingStatus(id, "overdue")}>Overdue</button>
                               <button disabled={!id || isBusy} onClick={() => setBillingStatus(id, "suspended")}>Suspender</button>
+                              <button disabled={!id || isBusy} onClick={() => applyWavePricing(id)}>
+                                Aplicar onda
+                              </button>
                               <button disabled={!id || isBusy} onClick={() => grantFree(id)}>
-                                {`Gratis ${freeDays}d`}
+                                {`Isentar ${freeDays}d`}
                               </button>
                             </div>
                           </td>

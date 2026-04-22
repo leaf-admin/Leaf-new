@@ -54,7 +54,8 @@ const METRIC_CONFIG = [
   { id: "mlr", group: "Resumo Ideal", title: "MLR", path: "metrics.liquidity.mlr", format: "decimal", formula: "corridas aceitas / corridas solicitadas", targetType: "gte", target: 1.1, critical: true, rawPath: "raw.numeratorDenominator.mlr" },
   { id: "wait", group: "Resumo Ideal", title: "Tempo de espera", path: "metrics.liquidity.averageWaitMinutes", format: "minutes", formula: "média do tempo entre pedido e aceite", targetType: "lte", target: 4, critical: true },
   { id: "pickup", group: "Resumo Ideal", title: "Pickup médio", path: "metrics.liquidity.averagePickupMinutes", format: "minutes", formula: "média do tempo entre aceite e chegada", targetType: "lte", target: 7 },
-  { id: "ridesPerDriver", group: "Resumo Ideal", title: "Corridas/motorista/dia", path: "metrics.drivers.ridesPerDriverPerDay", format: "decimal", formula: "corridas totais / motoristas ativos / dias", targetType: "gte", target: 10, critical: true, rawPath: "raw.numeratorDenominator.ridesPerDriverPerDay" },
+  { id: "paymentToPickup", group: "Resumo Ideal", title: "Pagamento -> embarque", path: "metrics.liquidity.averagePaymentApprovalToPickupMinutes", format: "minutes", formula: "média do tempo entre aprovação do pagamento e chegada do motorista ao embarque" },
+  { id: "ridesPerDriver", group: "Resumo Ideal", title: "Qtd. corridas/motorista/dia", path: "metrics.drivers.ridesPerDriverPerDay", format: "decimal", formula: "corridas totais / motoristas ativos / dias", targetType: "gte", target: 10, critical: true, rawPath: "raw.numeratorDenominator.ridesPerDriverPerDay" },
   { id: "cancelRate", group: "Resumo Ideal", title: "Cancelamento", path: "metrics.liquidity.cancellationRate", format: "percent", formula: "cancelamentos / corridas solicitadas", targetType: "lte", target: 0.07, rawPath: "raw.numeratorDenominator.cancellation" },
   { id: "revenueTotal", group: "Resumo Ideal", title: "Receita (período)", path: "metrics.financial.totalRevenue", format: "brl", formula: "receita total do período" },
   { id: "costPerRide", group: "Resumo Ideal", title: "Custo por corrida", path: "metrics.financial.costPerRide", format: "brl", formula: "(infra + APIs + pagamento) / corridas", targetType: "lte", target: 0.3 },
@@ -79,6 +80,7 @@ const METRIC_CONFIG = [
 ];
 
 const GROUP_ORDER = ["Resumo Ideal", "Atividade Motoristas", "Atividade Passageiros", "Financeiro", "Crescimento"];
+const DASHBOARD_REFRESH_MS = 60000;
 
 export default function MarketplaceMetricsPage() {
   const [period, setPeriod] = useState("month");
@@ -87,11 +89,16 @@ export default function MarketplaceMetricsPage() {
   const [error, setError] = useState("");
   const [selectedId, setSelectedId] = useState("mlr");
   const [seriesFilter, setSeriesFilter] = useState("");
+  const [driverFilter, setDriverFilter] = useState("");
 
   useEffect(() => {
     let mounted = true;
 
     const load = async () => {
+      if (typeof document !== "undefined" && document.hidden) {
+        return;
+      }
+
       try {
         if (mounted) {
           setLoading(true);
@@ -107,7 +114,7 @@ export default function MarketplaceMetricsPage() {
     };
 
     load();
-    const timer = setInterval(load, 30000);
+    const timer = setInterval(load, DASHBOARD_REFRESH_MS);
     return () => {
       mounted = false;
       clearInterval(timer);
@@ -153,6 +160,16 @@ export default function MarketplaceMetricsPage() {
       `${point?.date || ""} ${String(point?.value ?? "")}`.toLowerCase().includes(term),
     );
   }, [series, seriesFilter]);
+  const driverRows = useMemo(() => {
+    return Array.isArray(data?.breakdowns?.drivers) ? data.breakdowns.drivers : [];
+  }, [data]);
+  const filteredDriverRows = useMemo(() => {
+    const term = driverFilter.trim().toLowerCase();
+    if (!term) return driverRows;
+    return driverRows.filter((row) =>
+      `${row?.displayName || ""} ${row?.driverId || ""} ${row?.phone || ""}`.toLowerCase().includes(term),
+    );
+  }, [driverRows, driverFilter]);
 
   return (
     <ProtectedRoute>
@@ -308,11 +325,56 @@ export default function MarketplaceMetricsPage() {
           )}
         </Panel>
 
+        <Panel title="Corridas por Motorista">
+          <div className="filters">
+            <input
+              placeholder="Filtrar por motorista, telefone ou ID"
+              value={driverFilter}
+              onChange={(e) => setDriverFilter(e.target.value)}
+            />
+          </div>
+          {filteredDriverRows.length === 0 ? (
+            <p className="text-muted">Sem motoristas ativos no período.</p>
+          ) : (
+            <div className="table-shell table-shell-tall">
+              <table className="table table-compact">
+                <thead>
+                  <tr>
+                    <th>Motorista</th>
+                    <th>Corridas</th>
+                    <th>Concluídas</th>
+                    <th>Canceladas</th>
+                    <th>Corridas/dia</th>
+                    <th>Corridas/dia ativo</th>
+                    <th>Receita</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredDriverRows.map((row) => (
+                    <tr key={row.driverId}>
+                      <td>
+                        <div>{row.displayName || row.driverId}</div>
+                        <div className="table-muted">{row.phone || row.driverId}</div>
+                      </td>
+                      <td>{Number(row.rides || 0).toLocaleString("pt-BR")}</td>
+                      <td>{Number(row.completedRides || 0).toLocaleString("pt-BR")}</td>
+                      <td>{Number(row.cancelledRides || 0).toLocaleString("pt-BR")}</td>
+                      <td>{formatValue(row.ridesPerCalendarDay, "decimal")}</td>
+                      <td>{formatValue(row.ridesPerActiveDay, "decimal")}</td>
+                      <td>{formatValue(row.fareTotal, "brl")}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </Panel>
+
         <Panel title="Notas de qualidade de dados">
           <ul>
             <li>Utilização de motorista está marcada como estimada quando não existe sessão online explícita.</li>
             <li>Custo por corrida usa modelo estimado (infra + APIs + processamento) para dar referência operacional.</li>
-            <li>As métricas são recarregadas automaticamente a cada 30 segundos.</li>
+            <li>As métricas são recarregadas automaticamente a cada 60 segundos e usam cache curto no backend.</li>
           </ul>
         </Panel>
 
