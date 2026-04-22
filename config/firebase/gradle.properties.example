@@ -1,0 +1,6 @@
+# Template sem segredos para assinatura Android.
+# Configure estes valores via EAS/CI secrets ou em um gradle.properties local ignorado.
+MYAPP_UPLOAD_STORE_FILE=
+MYAPP_UPLOAD_KEY_ALIAS=
+MYAPP_UPLOAD_STORE_PASSWORD=
+MYAPP_UPLOAD_KEY_PASSWORD=
