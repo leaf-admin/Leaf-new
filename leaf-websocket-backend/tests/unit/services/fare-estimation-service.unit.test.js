@@ -1,9 +1,16 @@
 const {
   estimateRideFare,
-  normalizeCarType
+  normalizeCarType,
+  __resetEstimateCacheForTests
 } = require('../../../services/fare-estimation-service');
+const pricingContextProvider = require('../../../services/pricing-context-provider');
 
 describe('fare-estimation-service', () => {
+  beforeEach(() => {
+    __resetEstimateCacheForTests();
+    jest.restoreAllMocks();
+  });
+
   test('normalizeCarType deve mapear categorias legadas', () => {
     expect(normalizeCarType('Leaf Plus')).toBe('leaf_plus');
     expect(normalizeCarType('Leaf Elite')).toBe('leaf_elite');
@@ -87,5 +94,29 @@ describe('fare-estimation-service', () => {
     expect(result.routeMetrics.durationSecs).toBeGreaterThan(0);
     expect(result.estimatedFare).toBeGreaterThanOrEqual(8.5);
     expect(result.pricingPayload.final_price).toBe(result.estimatedFare);
+  });
+
+  test('estimateRideFare deve reaproveitar cache quente para inputs equivalentes', async () => {
+    const spy = jest.spyOn(pricingContextProvider, 'buildDerivedPricingContext');
+    const payload = {
+      pickupLocation: { lat: -22.9075, lng: -43.1736 },
+      destinationLocation: { lat: -22.9121, lng: -43.1825 },
+      carType: 'Leaf Plus',
+      routeDistanceKm: 5.04,
+      routeDurationSecs: 912,
+      tollFee: 2.5,
+      clientEstimatedFare: 0
+    };
+
+    const first = await estimateRideFare(payload);
+    const second = await estimateRideFare({
+      ...payload,
+      routeDistanceKm: 5.01,
+      routeDurationSecs: 900
+    });
+
+    expect(spy).toHaveBeenCalledTimes(1);
+    expect(second.estimatedFare).toBe(first.estimatedFare);
+    expect(second.pricingAudit.cacheSource).toBe('fare_estimation_hot_cache');
   });
 });

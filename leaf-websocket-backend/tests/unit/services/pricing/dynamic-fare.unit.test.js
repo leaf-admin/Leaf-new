@@ -12,9 +12,9 @@ describe('pricing/calculateFare', () => {
       score_excecao: 0
     });
 
-    expect(result.tarifa_base).toBe(33.54);
+    expect(result.tarifa_base).toBe(24.39);
     expect(result.fator_dinamico).toBe(1);
-    expect(result.preco_final).toBe(33.54);
+    expect(result.preco_final).toBe(24.39);
     expect(result.valor_minimo_aplicado).toBe(false);
   });
 

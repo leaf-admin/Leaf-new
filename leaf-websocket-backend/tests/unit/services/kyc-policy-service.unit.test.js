@@ -35,7 +35,7 @@ jest.mock('../../../firebase-config', () => ({
   getFirestore: jest.fn(() => null),
   getRealtimeDB: jest.fn(() => null),
   getFromRealtimeDB: jest.fn(() => null),
-  updateRealtimeDB: jest.fn(() => true)
+  updateRealtimeDB: jest.fn().mockResolvedValue(true)
 }));
 
 jest.mock('../../../services/kyc-driver-status-service', () => ({
@@ -136,5 +136,53 @@ describe('kyc-policy-service', () => {
       requirement: 'LIVENESS_REQUIRED'
     });
     expect(result.signals.some((item) => item.code === 'REVERIFY_REQUIRED')).toBe(true);
+  });
+
+  test('markDriverForPhotoMismatch blocks dispatch eligibility and removes the driver from eligible GEO', async () => {
+    const firebaseConfig = require('../../../firebase-config');
+    const kycDriverStatusService = require('../../../services/kyc-driver-status-service');
+
+    const result = await service.markDriverForPhotoMismatch({
+      driverId: 'driver-kyc-blocked',
+      tripId: 'trip_1',
+      reporterId: 'customer_1',
+      payload: {
+        selectedOptions: ['Motorista diferente da foto'],
+      },
+    });
+
+    expect(result).toEqual(
+      expect.objectContaining({
+        success: true,
+        driverId: 'driver-kyc-blocked',
+        reverifyRequired: true,
+      }),
+    );
+    expect(firebaseConfig.updateRealtimeDB).toHaveBeenCalledWith(
+      'users/driver-kyc-blocked',
+      expect.objectContaining({
+        kycReverifyRequired: true,
+        kycBlocked: true,
+        kycStatus: 'pending_reverify',
+      }),
+    );
+    expect(kycDriverStatusService.blockDriver).toHaveBeenCalledWith(
+      'driver-kyc-blocked',
+      expect.stringContaining('Denuncia de divergencia facial'),
+      expect.objectContaining({
+        verificationAttempts: 1,
+      }),
+    );
+    expect(mockRedis.hset).toHaveBeenCalledWith(
+      'driver:driver-kyc-blocked',
+      expect.objectContaining({
+        dispatchEligible: 'false',
+        dispatchEligibilityCode: 'KYC_REVERIFY_REQUIRED',
+      }),
+    );
+    expect(mockRedis.zrem).toHaveBeenCalledWith(
+      'driver_locations_eligible',
+      'driver-kyc-blocked',
+    );
   });
 });

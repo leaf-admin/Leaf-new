@@ -7,7 +7,19 @@
 
 const io = require('socket.io-client');
 const { getIdTokenForUid } = require('./firebase-id-token');
+const { buildCanonicalCreateBookingIdempotencyKey } = require('../../../../services/create-booking-idempotency-service');
 const E2E_VERBOSE = String(process.env.E2E_VERBOSE || 'false').toLowerCase() === 'true';
+
+function extractEventIdempotencyKey(payload = {}) {
+  if (!payload || typeof payload !== 'object') return null;
+  return (
+    payload.idempotencyKey ||
+    payload?.data?.idempotencyKey ||
+    payload?.booking?.idempotencyKey ||
+    payload?.meta?.idempotencyKey ||
+    null
+  );
+}
 
 class WebSocketTestClient {
   constructor(url, options = {}) {
@@ -152,29 +164,191 @@ class WebSocketTestClient {
    * @returns {Promise<Object>}
    */
   async createBooking(data) {
-    return new Promise((resolve, reject) => {
-      const timeout = setTimeout(() => {
-        reject(new Error('Timeout ao criar booking'));
-      }, 20000); // Aumentado para 20 segundos
+    const options =
+      arguments.length > 1 && arguments[1] && typeof arguments[1] === 'object'
+        ? arguments[1]
+        : {};
+    const timeoutMs = Math.max(1000, Number.parseInt(options.timeoutMs || '20000', 10) || 20000);
+    const lateEventGraceMs = Math.max(0, Number.parseInt(options.lateEventGraceMs || '250', 10) || 250);
+    const expectedIdempotencyKey = data?.idempotencyKey || null;
+    const canonicalIdempotencyKey = buildCanonicalCreateBookingIdempotencyKey({
+      userId: data?.customerId || this.userId || 'anonymous',
+      data,
+      fallbackIdempotencyKey: expectedIdempotencyKey
+    });
+    const acceptedIdempotencyKeys = new Set(
+      [expectedIdempotencyKey, canonicalIdempotencyKey]
+        .map((value) => String(value || '').trim())
+        .filter(Boolean)
+    );
 
-      // Registrar listeners ANTES de emitir o evento
-      const successHandler = (response) => {
-        clearTimeout(timeout);
+    return new Promise((resolve, reject) => {
+      const matchesSuccessPayload = (payload = {}) => {
+        if (acceptedIdempotencyKeys.size === 0) return true;
+        const eventKey = extractEventIdempotencyKey(payload);
+        return acceptedIdempotencyKeys.has(String(eventKey || '').trim());
+      };
+
+      const matchesErrorPayload = (payload = {}) => {
+        if (acceptedIdempotencyKeys.size === 0) return true;
+        const eventKey = extractEventIdempotencyKey(payload);
+        return !eventKey || acceptedIdempotencyKeys.has(String(eventKey || '').trim());
+      };
+
+      const findRecordedEvent = (eventName, matcher) => {
+        const events = this.getEvents(eventName) || [];
+        for (let index = events.length - 1; index >= 0; index -= 1) {
+          const eventData = events[index]?.data || {};
+          try {
+            if (matcher(eventData)) return eventData;
+          } catch (_error) {
+            // ignore matcher errors and continue scanning
+          }
+        }
+        return null;
+      };
+
+      const summarizeRecentEvents = () => {
+        const collected = ['bookingCreated', 'bookingError']
+          .flatMap((eventName) => {
+            const events = (this.getEvents(eventName) || []).slice(-3);
+            return events.map((entry) => {
+              const payload = entry?.data || {};
+              return {
+                eventName,
+                at: entry?.timestamp || null,
+                idempotencyKey: extractEventIdempotencyKey(payload),
+                bookingId: payload?.bookingId || payload?.data?.bookingId || null,
+                code: payload?.code || null,
+                message: payload?.error || payload?.message || null
+              };
+            });
+          })
+          .slice(-6);
+
+        return JSON.stringify(collected);
+      };
+
+      let timeout = null;
+
+      const cleanup = () => {
+        if (timeout) {
+          clearTimeout(timeout);
+        }
+        this.socket.removeListener('bookingCreated', successHandler);
         this.socket.removeListener('bookingError', errorHandler);
+      };
+
+      const successHandler = (response) => {
+        if (!matchesSuccessPayload(response)) return;
+        cleanup();
         resolve(response);
       };
 
       const errorHandler = (error) => {
-        clearTimeout(timeout);
-        this.socket.removeListener('bookingCreated', successHandler);
+        if (!matchesErrorPayload(error)) return;
+        cleanup();
         reject(new Error(error.error || error.message || 'Erro ao criar booking'));
       };
 
-      this.socket.once('bookingCreated', successHandler);
-      this.socket.once('bookingError', errorHandler);
+      timeout = setTimeout(async () => {
+        const immediateSuccess = findRecordedEvent('bookingCreated', matchesSuccessPayload);
+        if (immediateSuccess) {
+          cleanup();
+          resolve(immediateSuccess);
+          return;
+        }
 
-      // Emitir evento após registrar listeners
+        const immediateError = findRecordedEvent('bookingError', matchesErrorPayload);
+        if (immediateError) {
+          cleanup();
+          reject(new Error(immediateError.error || immediateError.message || 'Erro ao criar booking'));
+          return;
+        }
+
+        if (lateEventGraceMs > 0) {
+          await new Promise((resolveGrace) => setTimeout(resolveGrace, lateEventGraceMs));
+          const lateSuccess = findRecordedEvent('bookingCreated', matchesSuccessPayload);
+          if (lateSuccess) {
+            cleanup();
+            resolve(lateSuccess);
+            return;
+          }
+
+          const lateError = findRecordedEvent('bookingError', matchesErrorPayload);
+          if (lateError) {
+            cleanup();
+            reject(new Error(lateError.error || lateError.message || 'Erro ao criar booking'));
+            return;
+          }
+        }
+
+        const socketId = this.socket?.id || 'unknown';
+        const socketState = this.socket?.connected ? 'connected' : 'disconnected';
+        const suffix = [
+          `idempotencyKeys=${Array.from(acceptedIdempotencyKeys).join(',') || 'none'}`,
+          `socketId=${socketId}`,
+          `socketState=${socketState}`,
+          `recentEvents=${summarizeRecentEvents()}`
+        ].join(' ');
+        cleanup();
+        reject(new Error(`Timeout ao criar booking (${suffix})`));
+      }, timeoutMs);
+
+      this.socket.on('bookingCreated', successHandler);
+      this.socket.on('bookingError', errorHandler);
+
       this.socket.emit('createBooking', data);
+    });
+  }
+
+  async emitAndWait({
+    emitEvent,
+    emitPayload,
+    successEvent,
+    errorEvent = null,
+    timeoutMs = 20000,
+    predicate = null
+  }) {
+    const matcher = typeof predicate === 'function' ? predicate : (() => true);
+
+    return new Promise((resolve, reject) => {
+      const cleanup = () => {
+        this.socket.removeListener(successEvent, successHandler);
+        if (errorEvent) {
+          this.socket.removeListener(errorEvent, errorHandler);
+        }
+      };
+
+      const timeout = setTimeout(() => {
+        cleanup();
+        reject(new Error(`Timeout aguardando evento: ${emitEvent}`));
+      }, timeoutMs);
+
+      const successHandler = (payload = {}) => {
+        try {
+          if (!matcher(payload)) return;
+        } catch (_error) {
+          return;
+        }
+
+        clearTimeout(timeout);
+        cleanup();
+        resolve(payload);
+      };
+
+      const errorHandler = (error = {}) => {
+        clearTimeout(timeout);
+        cleanup();
+        reject(new Error(error.error || error.message || `Erro ao executar ${emitEvent}`));
+      };
+
+      this.socket.on(successEvent, successHandler);
+      if (errorEvent) {
+        this.socket.on(errorEvent, errorHandler);
+      }
+
+      this.socket.emit(emitEvent, emitPayload);
     });
   }
 
@@ -277,24 +451,73 @@ class WebSocketTestClient {
    * @param {string} bookingId - ID da corrida
    * @returns {Promise<Object>}
    */
-  async arrivedAtPickup(bookingId) {
-    return new Promise((resolve, reject) => {
+  async arrivedAtPickup(bookingId, options = {}) {
+    const timeoutMs = Math.max(1000, Number.parseInt(options.timeoutMs || '15000', 10) || 15000);
+    const location =
+      options.location && typeof options.location === 'object'
+        ? {
+            lat: options.location.lat,
+            lng: options.location.lng
+          }
+        : undefined;
+
+    const emitPayload = {
+      bookingId,
+      ...(location ? { location } : {})
+    };
+
+    const waitForArriveAtPickup = () => new Promise((resolve, reject) => {
+      const cleanup = () => {
+        this.socket.removeListener('arrivedAtPickup', handler);
+      };
+
       const timeout = setTimeout(() => {
-        reject(new Error('Timeout ao notificar chegada ao local de embarque'));
-      }, 10000);
+        cleanup();
+        reject(new Error('Timeout aguardando evento: arriveAtPickup'));
+      }, timeoutMs);
 
-      this.socket.emit('notificationAction', {
-        action: 'arrived_at_pickup',
-        bookingId
-      });
+      const handler = (payload = {}) => {
+        if (String(payload?.bookingId || payload?.rideId || '') !== String(bookingId)) {
+          return;
+        }
 
-      // O servidor geralmente não retorna evento imediato para o motorista,
-      // mas podemos aguardar um pouco ou observar logs
-      setTimeout(() => {
         clearTimeout(timeout);
-        resolve({ success: true });
-      }, 1500);
+        cleanup();
+
+        if (payload?.success === false || payload?.error) {
+          reject(new Error(payload.error || payload.message || 'Erro ao registrar chegada no pickup'));
+          return;
+        }
+
+        resolve(payload);
+      };
+
+      this.socket.on('arrivedAtPickup', handler);
+      this.socket.emit('arriveAtPickup', emitPayload);
     });
+
+    try {
+      return await waitForArriveAtPickup();
+    } catch (error) {
+      if (!String(error?.message || '').includes('Timeout aguardando evento: arriveAtPickup')) {
+        throw error;
+      }
+
+      return this.emitAndWait({
+        emitEvent: 'notificationAction',
+        emitPayload: {
+          action: 'arrived_at_pickup',
+          bookingId,
+          ...(location ? { location } : {})
+        },
+        successEvent: 'notificationActionSuccess',
+        errorEvent: 'notificationActionError',
+        timeoutMs,
+        predicate: (payload = {}) =>
+          String(payload?.bookingId || '') === String(bookingId) &&
+          String(payload?.action || 'arrived_at_pickup') === 'arrived_at_pickup'
+      });
+    }
   }
 
   /**
@@ -455,6 +678,58 @@ class WebSocketTestClient {
       this.socket.once('changeDestinationError', errorHandler);
 
       this.socket.emit('changeDestination', data);
+    });
+  }
+
+  async interruptRideOperational(data) {
+    return new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        reject(new Error('Timeout ao interromper corrida operacionalmente'));
+      }, 20000);
+
+      const successHandler = (response) => {
+        clearTimeout(timeout);
+        this.socket.removeListener('rideOperationalInterruptionError', errorHandler);
+        resolve(response);
+      };
+
+      const errorHandler = (error) => {
+        clearTimeout(timeout);
+        this.socket.removeListener('rideOperationalInterrupted', successHandler);
+        reject(new Error(error.error || error.message || 'Erro ao interromper corrida operacionalmente'));
+      };
+
+      this.socket.once('rideOperationalInterrupted', successHandler);
+      this.socket.once('rideOperationalInterruptionError', errorHandler);
+      this.socket.emit('interruptRideOperational', data);
+    });
+  }
+
+  async respondOperationalContinuation(data) {
+    return new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        reject(new Error('Timeout ao responder continuidade operacional'));
+      }, 25000);
+
+      const errorHandler = (error) => {
+        clearTimeout(timeout);
+        this.socket.removeListener('rideOperationalContinuationSearching', successHandler);
+        this.socket.removeListener('tripCompleted', successHandler);
+        reject(new Error(error.error || error.message || 'Erro ao responder continuidade operacional'));
+      };
+
+      const successHandler = (response) => {
+        clearTimeout(timeout);
+        this.socket.removeListener('rideOperationalContinuationError', errorHandler);
+        this.socket.removeListener('rideOperationalContinuationSearching', successHandler);
+        this.socket.removeListener('tripCompleted', successHandler);
+        resolve(response);
+      };
+
+      this.socket.once('rideOperationalContinuationSearching', successHandler);
+      this.socket.once('tripCompleted', successHandler);
+      this.socket.once('rideOperationalContinuationError', errorHandler);
+      this.socket.emit('respondOperationalContinuation', data);
     });
   }
 

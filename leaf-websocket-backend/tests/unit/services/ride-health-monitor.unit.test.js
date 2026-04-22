@@ -19,6 +19,7 @@ jest.mock('../../../utils/logger', () => ({
 const alertService = require('../../../services/alert-service');
 const { metrics } = require('../../../utils/prometheus-metrics');
 const {
+  backfillRideHealthIndex,
   evaluateRideOperationsAlerts,
   getRideOperationsSnapshot,
   syncTrackedRideState
@@ -26,6 +27,7 @@ const {
 
 function createRedisMock() {
   const zsets = new Map();
+  const hashes = new Map();
 
   const ensureKey = (key) => {
     if (!zsets.has(key)) {
@@ -46,9 +48,16 @@ function createRedisMock() {
   };
 
   const redis = {
+    seedHash(key, value) {
+      hashes.set(key, { ...value });
+    },
     pipeline() {
       const operations = [];
       return {
+        del(...keys) {
+          operations.push(() => redis.del(...keys));
+          return this;
+        },
         zrem(key, member) {
           operations.push(() => redis.zrem(key, member));
           return this;
@@ -61,6 +70,28 @@ function createRedisMock() {
           return Promise.all(operations.map((operation) => operation()));
         }
       };
+    },
+    async scan(cursor, _matchKeyword, matchPattern, _countKeyword, countValue) {
+      const allKeys = [...hashes.keys()].filter((key) => {
+        if (matchPattern === 'booking:*') {
+          return key.startsWith('booking:');
+        }
+        return true;
+      });
+      const offset = Number(cursor) || 0;
+      const count = Number(countValue) || allKeys.length;
+      const chunk = allKeys.slice(offset, offset + count);
+      const nextCursor = offset + count >= allKeys.length ? '0' : String(offset + count);
+      return [nextCursor, chunk];
+    },
+    async hgetall(key) {
+      return hashes.get(key) || {};
+    },
+    async del(...keys) {
+      keys.forEach((key) => {
+        zsets.delete(key);
+      });
+      return keys.length;
     },
     async zadd(key, score, member) {
       const list = ensureKey(key).filter((entry) => entry.member !== member);
@@ -232,5 +263,44 @@ describe('ride-health-monitor', () => {
     expect(alertService.sendAlert).toHaveBeenCalledTimes(2);
     expect(metrics.recordRideHealthAlert).toHaveBeenCalledWith('reassignment_pending_stuck', 'critical');
     expect(metrics.recordRideHealthAlert).toHaveBeenCalledWith('early_ended_review_volume', 'critical');
+  });
+
+  it('faz backfill do índice a partir de booking hashes persistidos', async () => {
+    const redis = createRedisMock();
+    redis.seedHash('booking:reassign-a', {
+      id: 'reassign-a',
+      state: 'REASSIGNMENT_PENDING',
+      updatedAt: '2026-03-30T11:40:00.000Z'
+    });
+    redis.seedHash('booking:review-a', {
+      id: 'review-a',
+      status: 'EARLY_ENDED_REVIEW',
+      completedAt: '2026-03-30T11:55:00.000Z'
+    });
+    redis.seedHash('booking:completed-a', {
+      id: 'completed-a',
+      status: 'COMPLETED',
+      updatedAt: '2026-03-30T11:59:00.000Z'
+    });
+
+    const backfill = await backfillRideHealthIndex(redis, {
+      nowIso: '2026-03-30T12:00:00.000Z',
+      scanCount: 2,
+      maxKeys: 10
+    });
+
+    expect(backfill.success).toBe(true);
+    expect(backfill.reassignmentPending).toBe(1);
+    expect(backfill.earlyEndedReview).toBe(1);
+
+    const snapshot = await getRideOperationsSnapshot(redis, {
+      nowIso: '2026-03-30T12:00:00.000Z',
+      stuckThresholdMs: 5 * 60 * 1000,
+      reviewWindowMs: 15 * 60 * 1000
+    });
+
+    expect(snapshot.reassignmentPending.total).toBe(1);
+    expect(snapshot.earlyEndedReview.total).toBe(1);
+    expect(snapshot.earlyEndedReview.bookingIds).toEqual(['review-a']);
   });
 });

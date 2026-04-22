@@ -1,16 +1,11 @@
 jest.mock('../../../utils/redis-pool', () => ({
-  ensureConnection: jest.fn().mockResolvedValue(true),
-  getConnection: jest.fn().mockReturnValue({ kind: 'redis' })
+  ensureConnection: jest.fn(),
+  getConnection: jest.fn()
 }));
 
 jest.mock('../../../services/ride-health-monitor', () => ({
-  evaluateRideOperationsAlerts: jest.fn().mockResolvedValue({
-    snapshot: {
-      reassignmentPending: { total: 2, stuck: 1 },
-      earlyEndedReview: { total: 3, recent: 2 }
-    },
-    alerts: [{ metric: 'reassignment_pending_stuck', severity: 'warning' }]
-  })
+  backfillRideHealthIndex: jest.fn(),
+  evaluateRideOperationsAlerts: jest.fn()
 }));
 
 jest.mock('../../../utils/logger', () => ({
@@ -32,6 +27,19 @@ const worker = require('../../../workers/ride-health-monitor-worker');
 describe('ride-health-monitor-worker', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    redisPool.ensureConnection.mockResolvedValue(true);
+    redisPool.getConnection.mockReturnValue({ kind: 'redis' });
+    rideHealthMonitor.backfillRideHealthIndex.mockResolvedValue({
+      scanned: 0,
+      tracked: 0
+    });
+    rideHealthMonitor.evaluateRideOperationsAlerts.mockResolvedValue({
+      snapshot: {
+        reassignmentPending: { total: 2, stuck: 1 },
+        earlyEndedReview: { total: 3, recent: 2 }
+      },
+      alerts: [{ metric: 'reassignment_pending_stuck', severity: 'warning' }]
+    });
     worker.stopRideHealthMonitorWorker();
   });
 

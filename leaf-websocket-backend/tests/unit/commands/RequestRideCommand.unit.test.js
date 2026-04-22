@@ -78,7 +78,8 @@ jest.mock('../../../utils/trace-validator', () => ({
 
 jest.mock('../../../utils/prometheus-metrics', () => ({
   metrics: {
-    recordCommand: jest.fn()
+    recordCommand: jest.fn(),
+    recordHotpathStageLatency: jest.fn()
   }
 }));
 
@@ -142,6 +143,7 @@ describe('RequestRideCommand', () => {
     });
     traceContext.runWithTraceId.mockImplementation(async (_traceId, fn) => fn());
     metrics.recordCommand.mockImplementation(() => {});
+    metrics.recordHotpathStageLatency.mockImplementation(() => {});
   });
 
   test('deve enriquecer bookingData com pricingPayload sem quebrar ride.requested', async () => {
@@ -173,25 +175,42 @@ describe('RequestRideCommand', () => {
         }
       }
     }));
-    expect(rideQueueManager.enqueueRide).toHaveBeenCalledWith(expect.objectContaining({
-      bookingId: expect.stringMatching(/^booking_/),
-      estimatedFare: 18.4,
-      routeDistanceKm: 5.2,
-      routeDurationSecs: 780,
-      pricingPayload: expect.objectContaining({
-        final_price: 18.4,
-        operational_state: 'PRESSAO'
+    expect(rideQueueManager.enqueueRide).toHaveBeenCalledWith(
+      expect.objectContaining({
+        bookingId: expect.stringMatching(/^booking_/),
+        estimatedFare: 18.4,
+        estimatedOperationalFee: expect.any(Number),
+        estimatedPaymentIntermediationFee: expect.any(Number),
+        estimatedTotalFees: expect.any(Number),
+        estimatedDriverNetAmount: expect.any(Number),
+        pricingSnapshotLocked: true,
+        pricingSnapshotLockedAt: expect.any(String),
+        routeDistanceKm: 5.2,
+        routeDurationSecs: 780,
+        pricingPayload: expect.objectContaining({
+          final_price: 18.4,
+          operational_state: 'PRESSAO'
+        }),
+        pricingAudit: expect.objectContaining({
+          originCell: '89a81082813ffff',
+          baselineSource: 'redis_materialized'
+        }),
+        operationalState: 'PRESSAO',
+        scorePressao: 0.32,
+        scoreExcecao: 0.11
       }),
-      pricingAudit: expect.objectContaining({
-        originCell: '89a81082813ffff',
-        baselineSource: 'redis_materialized'
-      }),
-      operationalState: 'PRESSAO',
-      scorePressao: 0.32,
-      scoreExcecao: 0.11
-    }));
+      expect.objectContaining({
+        deferEventSourcing: true
+      })
+    );
     expect(result.data.bookingData).toEqual(expect.objectContaining({
       estimatedFare: 18.4,
+      estimatedOperationalFee: expect.any(Number),
+      estimatedPaymentIntermediationFee: expect.any(Number),
+      estimatedTotalFees: expect.any(Number),
+      estimatedDriverNetAmount: expect.any(Number),
+      pricingSnapshotLocked: true,
+      pricingSnapshotLockedAt: expect.any(String),
       pricingPayload: expect.objectContaining({
         passenger_notice: 'Alta demanda nesta região'
       }),
@@ -200,6 +219,65 @@ describe('RequestRideCommand', () => {
       }),
       operationalState: 'PRESSAO'
     }));
+    expect(result.data.perfBreakdownMs).toEqual(expect.objectContaining({
+      validate: expect.any(Number),
+      prepare: expect.any(Number),
+      fareEstimation: expect.any(Number),
+      bookingPayload: expect.any(Number),
+      enqueue: expect.any(Number),
+      stateUpdate: expect.any(Number),
+      eventBuild: expect.any(Number),
+      total: expect.any(Number)
+    }));
     expect(result.data.event.type).toBe('ride.requested');
+  });
+
+  test('deve preservar metadados de pagamento embedado no bookingData ativo', async () => {
+    const command = new RequestRideCommand({
+      customerId: 'customer_123',
+      pickupLocation: { lat: -22.9, lng: -43.17 },
+      destinationLocation: { lat: -22.91, lng: -43.18 },
+      estimatedFare: 17,
+      routeDistanceKm: 5,
+      routeDurationSecs: 780,
+      tollFee: 0,
+      carType: 'Leaf Plus',
+      paymentMethod: 'pix',
+      paymentStatus: 'confirmed',
+      paymentId: 'charge_123',
+      paymentData: {
+        chargeId: 'charge_123',
+        rideId: 'ride_123',
+        amountInCents: 1840,
+        paymentStatus: 'confirmed',
+        confirmedAt: '2026-04-07T23:59:00.000Z'
+      }
+    });
+
+    const result = await command.execute();
+
+    expect(result.success).toBe(true);
+    expect(rideQueueManager.enqueueRide).toHaveBeenCalledWith(
+      expect.objectContaining({
+        paymentStatus: 'confirmed',
+        paymentChargeId: 'charge_123',
+        paymentReferenceRideId: 'ride_123',
+        paymentAmountInCents: 1840,
+        paymentConfirmedAt: '2026-04-07T23:59:00.000Z'
+      }),
+      expect.objectContaining({
+        deferEventSourcing: true
+      })
+    );
+    expect(result.data.bookingData).toEqual(expect.objectContaining({
+      paymentStatus: 'confirmed',
+      paymentChargeId: 'charge_123',
+      paymentReferenceRideId: 'ride_123',
+      paymentAmountInCents: 1840,
+      paymentConfirmedAt: '2026-04-07T23:59:00.000Z'
+    }));
+    expect(result.data.event).toEqual(expect.objectContaining({
+      paymentStatus: 'confirmed'
+    }));
   });
 });

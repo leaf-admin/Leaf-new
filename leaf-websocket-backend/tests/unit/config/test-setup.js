@@ -33,7 +33,6 @@ afterAll(() => {
 // Limpar todos os mocks após cada teste
 afterEach(() => {
   jest.clearAllMocks();
-  jest.resetAllMocks();
   jest.restoreAllMocks();
 });
 
