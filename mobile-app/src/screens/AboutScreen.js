@@ -12,15 +12,17 @@ import {
     Alert,
     ActivityIndicator,
 } from 'react-native';
-import { Icon } from 'react-native-elements';
 import { Ionicons } from '@expo/vector-icons';
-import { colors } from '../common-local/theme';
-import { fonts } from '../common-local/font';
-import { MAIN_COLOR } from '../common-local/sharedFunctions';
+import { colors } from '../theme/runtimeTokens';
+import { fonts } from '../theme/runtimeTokens';
 import AppInfoService from '../services/AppInfoService';
+import robotaxiPrototypeTokens from '../components/design-system/robotaxiPrototypeTokens';
+
+const { color, typography } = robotaxiPrototypeTokens;
+const MAIN_COLOR = color.accent.primary;
 
 export default function AboutScreen({ navigation }) {
-    const [isDarkMode, setIsDarkMode] = useState(false);
+    const isDarkMode = false;
     const [selectedTab, setSelectedTab] = useState('overview');
     const [appInfo, setAppInfo] = useState(null);
     const [isLoading, setIsLoading] = useState(true);
@@ -198,6 +200,7 @@ export default function AboutScreen({ navigation }) {
                 </View>
             </View>
         );
+    };
 
     const renderFeatures = () => (
         <View style={styles.tabContent}>
@@ -266,10 +269,10 @@ export default function AboutScreen({ navigation }) {
                     Informações da Aplicação
                 </Text>
                 <Text style={[styles.legalInfoText, { color: isDarkMode ? '#999' : colors.GRAY }]}>
-                    Versão: 1.0.0
+                    Versão: {appInfo?.version || '1.0.1'}
                 </Text>
                 <Text style={[styles.legalInfoText, { color: isDarkMode ? '#999' : colors.GRAY }]}>
-                    Build: 1
+                    Build: {appInfo?.buildNumber || '5'}
                 </Text>
                 <Text style={[styles.legalInfoText, { color: isDarkMode ? '#999' : colors.GRAY }]}>
                     © 2025 Leaf. Todos os direitos reservados.
@@ -292,8 +295,8 @@ export default function AboutScreen({ navigation }) {
     };
 
     return (
-        <View style={[styles.container, { backgroundColor: isDarkMode ? '#1a1a1a' : '#f5f5f5' }]}>
-            <StatusBar barStyle={isDarkMode ? "light-content" : "dark-content"} backgroundColor={isDarkMode ? '#1a1a1a' : '#fff'} />
+        <View style={styles.container}>
+            <StatusBar barStyle="dark-content" backgroundColor="transparent" translucent={Platform.OS === 'android'} />
             
             <Header />
             <Tabs />
@@ -311,43 +314,38 @@ export default function AboutScreen({ navigation }) {
 const styles = StyleSheet.create({
     container: {
         flex: 1,
+        backgroundColor: color.bg.app
     },
     header: {
         flexDirection: 'row',
         justifyContent: 'space-between',
         alignItems: 'center',
-        paddingHorizontal: 20,
-        paddingTop: Platform.OS === 'ios' ? 50 : 24,
-        paddingBottom: 16,
-        borderBottomWidth: 0.5,
-        borderBottomColor: '#f0f0f0',
+        paddingHorizontal: 14,
+        paddingTop: Platform.OS === 'ios' ? 54 : 34,
+        paddingBottom: 10,
+        borderBottomWidth: 1,
+        borderBottomColor: color.border.subtle
     },
     headerButton: {
-        width: 40,
-        height: 40,
-        borderRadius: 20,
+        width: 38,
+        height: 38,
+        borderRadius: 19,
         justifyContent: 'center',
         alignItems: 'center',
-        shadowColor: '#000',
-        shadowOffset: {
-            width: 0,
-            height: 1,
-        },
-        shadowOpacity: 0.1,
-        shadowRadius: 2,
-        elevation: 2,
+        borderWidth: 1,
+        borderColor: color.border.subtle
     },
     headerTitle: {
-        fontSize: 18,
-        fontWeight: 'bold',
-        fontFamily: fonts.Bold,
+        fontSize: typography.subtitle.size,
+        lineHeight: typography.subtitle.lineHeight,
+        fontFamily: fonts.SemiBold
     },
     tabsContainer: {
         flexDirection: 'row',
-        paddingHorizontal: 16,
-        paddingVertical: 12,
-        borderBottomWidth: 0.5,
-        borderBottomColor: '#f0f0f0',
+        paddingHorizontal: 14,
+        paddingVertical: 10,
+        borderBottomWidth: 1,
+        borderBottomColor: color.border.subtle,
         gap: 8,
     },
     tab: {
@@ -357,32 +355,32 @@ const styles = StyleSheet.create({
         justifyContent: 'center',
         paddingVertical: 8,
         paddingHorizontal: 12,
-        borderRadius: 20,
+        borderRadius: 12,
         gap: 6,
+        borderWidth: 1,
+        borderColor: color.border.subtle
     },
     tabActive: {
         // backgroundColor já definido inline
     },
     tabText: {
-        fontSize: 14,
+        fontSize: typography.caption.size,
+        lineHeight: typography.caption.lineHeight,
         fontFamily: fonts.Medium,
     },
     content: {
         flex: 1,
     },
     tabContent: {
-        padding: 16,
+        padding: 14,
     },
     appHeader: {
         alignItems: 'center',
-        padding: 24,
+        padding: 18,
         borderRadius: 16,
-        marginBottom: 16,
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.1,
-        shadowRadius: 4,
-        elevation: 3,
+        marginBottom: 12,
+        borderWidth: 1,
+        borderColor: color.border.subtle
     },
     appLogo: {
         width: 80,
@@ -390,7 +388,7 @@ const styles = StyleSheet.create({
         borderRadius: 40,
         justifyContent: 'center',
         alignItems: 'center',
-        marginBottom: 16,
+        marginBottom: 14
     },
     appName: {
         fontSize: 28,
@@ -409,12 +407,9 @@ const styles = StyleSheet.create({
     descriptionCard: {
         padding: 16,
         borderRadius: 16,
-        marginBottom: 16,
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.1,
-        shadowRadius: 4,
-        elevation: 3,
+        marginBottom: 12,
+        borderWidth: 1,
+        borderColor: color.border.subtle
     },
     descriptionText: {
         fontSize: 14,
@@ -424,24 +419,22 @@ const styles = StyleSheet.create({
     },
     statsContainer: {
         flexDirection: 'row',
-        gap: 12,
-        marginBottom: 16,
+        gap: 8,
+        marginBottom: 12
     },
     statCard: {
         flex: 1,
         alignItems: 'center',
-        padding: 16,
+        padding: 12,
         borderRadius: 16,
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.1,
-        shadowRadius: 4,
-        elevation: 3,
+        borderWidth: 1,
+        borderColor: color.border.subtle
     },
     statNumber: {
-        fontSize: 20,
+        fontSize: typography.subtitle.size,
+        lineHeight: typography.subtitle.lineHeight,
         fontFamily: fonts.Bold,
-        marginBottom: 4,
+        marginBottom: 3
     },
     statLabel: {
         fontSize: 12,
@@ -451,11 +444,8 @@ const styles = StyleSheet.create({
     contactCard: {
         padding: 16,
         borderRadius: 16,
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.1,
-        shadowRadius: 4,
-        elevation: 3,
+        borderWidth: 1,
+        borderColor: color.border.subtle
     },
     sectionTitle: {
         fontSize: 18,
@@ -476,14 +466,11 @@ const styles = StyleSheet.create({
     featureCard: {
         flexDirection: 'row',
         alignItems: 'center',
-        padding: 16,
+        padding: 12,
         borderRadius: 16,
-        marginBottom: 12,
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.1,
-        shadowRadius: 4,
-        elevation: 3,
+        marginBottom: 10,
+        borderWidth: 1,
+        borderColor: color.border.subtle
     },
     featureIcon: {
         width: 48,
@@ -509,11 +496,8 @@ const styles = StyleSheet.create({
     legalCard: {
         borderRadius: 16,
         marginBottom: 16,
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.1,
-        shadowRadius: 4,
-        elevation: 3,
+        borderWidth: 1,
+        borderColor: color.border.subtle,
         overflow: 'hidden',
     },
     legalItem: {
@@ -532,11 +516,8 @@ const styles = StyleSheet.create({
     legalInfo: {
         padding: 16,
         borderRadius: 16,
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.1,
-        shadowRadius: 4,
-        elevation: 3,
+        borderWidth: 1,
+        borderColor: color.border.subtle
     },
     legalInfoTitle: {
         fontSize: 16,
@@ -549,4 +530,3 @@ const styles = StyleSheet.create({
         marginBottom: 4,
     },
 });
-};

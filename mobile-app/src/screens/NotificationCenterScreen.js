@@ -14,7 +14,7 @@ import {
 } from 'react-native';
 import { Icon } from 'react-native-elements';
 import { useSelector } from 'react-redux';
-import { api } from '../common-local';
+import { apiClient } from '../services/httpClient';
 import { useTranslation } from '../components/i18n/LanguageProvider';
 
 
@@ -49,7 +49,7 @@ const NotificationCenterScreen = ({ navigation, route }) => {
     try {
       setIsLoading(true);
       
-      const response = await api.get(`/api/notifications/${currentUser.id}`);
+      const response = await apiClient.get(`/api/notifications/${currentUser.id}`);
       setNotifications(response.data.notifications || []);
       
     } catch (error) {
@@ -79,7 +79,7 @@ const NotificationCenterScreen = ({ navigation, route }) => {
 
   const markAsRead = async (notificationId) => {
     try {
-      await api.put(`/api/notifications/${notificationId}/read`);
+      await apiClient.put(`/api/notifications/${notificationId}/read`);
       
       setNotifications(prev => 
         prev.map(notification => 
@@ -96,7 +96,7 @@ const NotificationCenterScreen = ({ navigation, route }) => {
 
   const markAllAsRead = async () => {
     try {
-      await api.put(`/api/notifications/${currentUser.id}/read-all`);
+      await apiClient.put(`/api/notifications/${currentUser.id}/read-all`);
       
       setNotifications(prev => 
         prev.map(notification => ({ ...notification, read: true }))
@@ -109,7 +109,7 @@ const NotificationCenterScreen = ({ navigation, route }) => {
 
   const deleteNotification = async (notificationId) => {
     try {
-      await api.delete(`/api/notifications/${notificationId}`);
+      await apiClient.delete(`/api/notifications/${notificationId}`);
       
       setNotifications(prev => 
         prev.filter(notification => notification.id !== notificationId)

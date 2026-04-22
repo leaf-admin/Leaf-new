@@ -3,7 +3,7 @@ import React, { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Dimensions } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { useSelector, useDispatch } from 'react-redux';
-import { setBooking, clearBooking } from '../common-local/actions/bookingactions';
+import { setBooking, clearBooking } from '../services/runtime/bookingStateBridge';
 
 
 const { width, height } = Dimensions.get('window');

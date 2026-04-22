@@ -19,11 +19,12 @@ import { useSelector } from 'react-redux';
 import { GiftedChat, Bubble, InputToolbar, Composer, Send } from 'react-native-gifted-chat';
 import SupportTicketService from '../services/SupportTicketService';
 import AuthService from '../services/AuthService';
-import { colors } from '../common-local/theme';
-import { fonts } from '../common-local/font';
+import { fonts } from '../theme/runtimeTokens';
 import { SkeletonLoader, LoadingSpinner } from '../components/LoadingStates';
 import { useResponsiveLayout } from '../components/ResponsiveLayout';
+import robotaxiPrototypeTokens from '../components/design-system/robotaxiPrototypeTokens';
 
+const { color, typography } = robotaxiPrototypeTokens;
 
 const SupportTicketScreen = ({ navigation, route }) => {
   const [tickets, setTickets] = useState([]);
@@ -94,7 +95,7 @@ const SupportTicketScreen = ({ navigation, route }) => {
       const isAuthenticated = await AuthService.isAuthenticated();
       if (!isAuthenticated) {
         Alert.alert('Erro', 'Sessão expirada. Faça login novamente.');
-        navigation.navigate('Login');
+        navigation.navigate('PhoneInputScreen');
         return;
       }
       
@@ -283,7 +284,7 @@ const SupportTicketScreen = ({ navigation, route }) => {
       <View style={styles.modalContainer}>
         <View style={styles.modalHeader}>
           <TouchableOpacity onPress={() => setShowCreateModal(false)}>
-            <Icon name="close" size={24} color={colors.primary} />
+            <Icon name="close" size={24} color={color.text.primary} />
           </TouchableOpacity>
           <Text style={styles.modalTitle}>Novo Ticket</Text>
           <TouchableOpacity
@@ -323,7 +324,7 @@ const SupportTicketScreen = ({ navigation, route }) => {
                   ]}
                   onPress={() => setNewTicket(prev => ({ ...prev, category: category.id }))}
                 >
-                  <Icon name={category.icon} size={20} color={newTicket.category === category.id ? '#fff' : colors.primary} />
+                  <Icon name={category.icon} size={20} color={newTicket.category === category.id ? '#fff' : color.accent.primary} />
                   <Text style={[
                     styles.categoryButtonText,
                     newTicket.category === category.id && styles.categoryButtonTextSelected
@@ -385,7 +386,7 @@ const SupportTicketScreen = ({ navigation, route }) => {
       <View style={styles.modalContainer}>
         <View style={styles.modalHeader}>
           <TouchableOpacity onPress={() => setShowTicketModal(false)}>
-            <Icon name="close" size={24} color={colors.primary} />
+            <Icon name="close" size={24} color={color.text.primary} />
           </TouchableOpacity>
           <Text style={styles.modalTitle} numberOfLines={1}>
             {selectedTicket?.subject}
@@ -410,10 +411,10 @@ const SupportTicketScreen = ({ navigation, route }) => {
                 {...props}
                 wrapperStyle={{
                   right: {
-                    backgroundColor: colors.primary
+                    backgroundColor: color.accent.primary
                   },
                   left: {
-                    backgroundColor: '#f0f0f0'
+                    backgroundColor: color.surface.secondary
                   }
                 }}
               />
@@ -447,7 +448,7 @@ const SupportTicketScreen = ({ navigation, route }) => {
   if (isLoading) {
     return (
       <View style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color={colors.primary} />
+        <ActivityIndicator size="large" color={color.accent.primary} />
         <Text style={styles.loadingText}>Carregando tickets...</Text>
       </View>
     );
@@ -455,15 +456,15 @@ const SupportTicketScreen = ({ navigation, route }) => {
 
   return (
     <View style={styles.container}>
-      <StatusBar barStyle="dark-content" backgroundColor="#fff" />
+      <StatusBar barStyle="dark-content" backgroundColor="transparent" translucent={Platform.OS === 'android'} />
       
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => navigation.goBack()}>
-          <Icon name="arrow-back" size={24} color={colors.primary} />
+        <TouchableOpacity style={styles.headerButton} onPress={() => navigation.goBack()}>
+          <Icon name="arrow-back" size={18} color={color.text.primary} />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Suporte</Text>
-        <TouchableOpacity onPress={() => setShowCreateModal(true)}>
-          <Icon name="add" size={24} color={colors.primary} />
+        <TouchableOpacity style={styles.headerButton} onPress={() => setShowCreateModal(true)}>
+          <Icon name="add" size={18} color={color.text.primary} />
         </TouchableOpacity>
       </View>
 
@@ -471,7 +472,7 @@ const SupportTicketScreen = ({ navigation, route }) => {
         <View style={styles.skeletonContainer}>
           <LoadingSpinner 
             message="Carregando tickets de suporte..." 
-            color={colors.primary} 
+            color={color.accent.primary} 
           />
           <SkeletonLoader width="100%" height={80} style={styles.skeletonTicket} />
           <SkeletonLoader width="100%" height={80} style={styles.skeletonTicket} />
@@ -511,18 +512,20 @@ const SupportTicketScreen = ({ navigation, route }) => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#f5f5f5'
+    backgroundColor: color.bg.app
   },
   loadingContainer: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: '#f5f5f5'
+    backgroundColor: color.bg.app
   },
   loadingText: {
-    marginTop: 16,
-    fontSize: 16,
-    color: '#666'
+    marginTop: 10,
+    fontFamily: fonts.Regular,
+    fontSize: typography.caption.size,
+    lineHeight: typography.caption.lineHeight,
+    color: color.text.secondary
   },
   skeletonContainer: {
     flex: 1,
@@ -536,16 +539,28 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    backgroundColor: '#fff',
+    paddingHorizontal: 14,
+    paddingTop: Platform.OS === 'ios' ? 54 : 34,
+    paddingBottom: 10,
+    backgroundColor: color.bg.app,
     borderBottomWidth: 1,
-    borderBottomColor: '#e0e0e0'
+    borderBottomColor: color.border.subtle
+  },
+  headerButton: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    borderWidth: 1,
+    borderColor: color.border.subtle,
+    backgroundColor: color.surface.primary,
+    alignItems: 'center',
+    justifyContent: 'center'
   },
   headerTitle: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: '#333'
+    fontSize: typography.subtitle.size,
+    lineHeight: typography.subtitle.lineHeight,
+    color: color.text.primary,
+    fontFamily: fonts.SemiBold
   },
   emptyContainer: {
     flex: 1,
@@ -567,29 +582,27 @@ const styles = StyleSheet.create({
     marginBottom: 24
   },
   createButton: {
-    backgroundColor: colors.primary,
+    backgroundColor: color.accent.primary,
     paddingHorizontal: 24,
     paddingVertical: 12,
-    borderRadius: 8
+    borderRadius: 12
   },
   createButtonText: {
     color: '#fff',
-    fontSize: 16,
-    fontWeight: '600'
+    fontSize: typography.caption.size,
+    lineHeight: typography.caption.lineHeight,
+    fontFamily: fonts.SemiBold
   },
   ticketsList: {
-    padding: 16
+    padding: 14
   },
   ticketCard: {
-    backgroundColor: '#fff',
-    borderRadius: 8,
-    padding: 16,
-    marginBottom: 12,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3
+    backgroundColor: color.surface.primary,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: color.border.subtle,
+    padding: 12,
+    marginBottom: 10
   },
   ticketHeader: {
     flexDirection: 'row',
@@ -598,9 +611,10 @@ const styles = StyleSheet.create({
     marginBottom: 8
   },
   ticketSubject: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#333',
+    fontSize: typography.body.size,
+    lineHeight: typography.body.lineHeight,
+    color: color.text.primary,
+    fontFamily: fonts.SemiBold,
     flex: 1,
     marginRight: 8
   },
@@ -610,29 +624,33 @@ const styles = StyleSheet.create({
   },
   priorityBadge: {
     paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 12
+    paddingVertical: 3,
+    borderRadius: 999
   },
   priorityText: {
     color: '#fff',
-    fontSize: 12,
-    fontWeight: '600'
+    fontSize: typography.micro.size,
+    lineHeight: typography.micro.lineHeight,
+    fontFamily: fonts.SemiBold
   },
   statusBadge: {
     paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 12
+    paddingVertical: 3,
+    borderRadius: 999
   },
   statusText: {
     color: '#fff',
-    fontSize: 12,
-    fontWeight: '600'
+    fontSize: typography.micro.size,
+    lineHeight: typography.micro.lineHeight,
+    fontFamily: fonts.SemiBold
   },
   ticketDescription: {
-    fontSize: 14,
-    color: '#666',
+    fontSize: typography.caption.size,
+    lineHeight: typography.caption.lineHeight,
+    color: color.text.secondary,
+    fontFamily: fonts.Regular,
     marginBottom: 12,
-    lineHeight: 20
+    minHeight: 34
   },
   ticketFooter: {
     flexDirection: 'row',
@@ -640,44 +658,50 @@ const styles = StyleSheet.create({
     alignItems: 'center'
   },
   ticketCategory: {
-    fontSize: 12,
-    color: colors.primary,
-    fontWeight: '500'
+    fontSize: typography.micro.size,
+    lineHeight: typography.micro.lineHeight,
+    color: color.text.primary,
+    fontFamily: fonts.Medium
   },
   ticketDate: {
-    fontSize: 12,
-    color: '#999'
+    fontSize: typography.micro.size,
+    lineHeight: typography.micro.lineHeight,
+    color: color.text.muted,
+    fontFamily: fonts.Regular
   },
   modalContainer: {
     flex: 1,
-    backgroundColor: '#fff'
+    backgroundColor: color.bg.app
   },
   modalHeader: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: 16,
-    paddingVertical: 12,
+    paddingVertical: 10,
+    paddingTop: Platform.OS === 'ios' ? 18 : 10,
     borderBottomWidth: 1,
-    borderBottomColor: '#e0e0e0'
+    borderBottomColor: color.border.subtle
   },
   modalTitle: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: '#333',
+    fontSize: typography.subtitle.size,
+    lineHeight: typography.subtitle.lineHeight,
+    color: color.text.primary,
+    fontFamily: fonts.SemiBold,
     flex: 1,
     marginHorizontal: 16
   },
   saveButton: {
-    backgroundColor: colors.primary,
+    backgroundColor: color.accent.primary,
     paddingHorizontal: 16,
     paddingVertical: 8,
-    borderRadius: 6
+    borderRadius: 10
   },
   saveButtonText: {
     color: '#fff',
-    fontSize: 14,
-    fontWeight: '600'
+    fontSize: typography.micro.size,
+    lineHeight: typography.micro.lineHeight,
+    fontFamily: fonts.SemiBold
   },
   modalContent: {
     flex: 1,
@@ -687,19 +711,23 @@ const styles = StyleSheet.create({
     marginBottom: 20
   },
   inputLabel: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#333',
+    fontSize: typography.caption.size,
+    lineHeight: typography.caption.lineHeight,
+    color: color.text.primary,
+    fontFamily: fonts.SemiBold,
     marginBottom: 8
   },
   textInput: {
     borderWidth: 1,
-    borderColor: '#e0e0e0',
-    borderRadius: 8,
+    borderColor: color.border.subtle,
+    borderRadius: 12,
     paddingHorizontal: 12,
     paddingVertical: 12,
-    fontSize: 16,
-    backgroundColor: '#fff'
+    fontSize: typography.caption.size,
+    lineHeight: typography.caption.lineHeight,
+    fontFamily: fonts.Regular,
+    backgroundColor: color.surface.primary,
+    color: color.text.primary
   },
   textArea: {
     height: 120,
@@ -717,17 +745,18 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
     borderRadius: 20,
     borderWidth: 1,
-    borderColor: colors.primary,
-    backgroundColor: '#fff'
+    borderColor: color.border.strong,
+    backgroundColor: color.surface.primary
   },
   categoryButtonSelected: {
-    backgroundColor: colors.primary
+    backgroundColor: color.accent.primary,
+    borderColor: color.accent.primary
   },
   categoryButtonText: {
     marginLeft: 6,
     fontSize: 12,
-    color: colors.primary,
-    fontWeight: '500'
+    color: color.text.primary,
+    fontFamily: fonts.Medium
   },
   categoryButtonTextSelected: {
     color: '#fff'
@@ -741,11 +770,11 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
     borderRadius: 20,
     borderWidth: 1,
-    backgroundColor: '#fff'
+    backgroundColor: color.surface.primary
   },
   priorityButtonText: {
     fontSize: 12,
-    fontWeight: '600'
+    fontFamily: fonts.SemiBold
   },
   ticketInfo: {
     flexDirection: 'row',
@@ -755,19 +784,21 @@ const styles = StyleSheet.create({
     flex: 1
   },
   inputToolbar: {
-    backgroundColor: '#fff',
+    backgroundColor: color.surface.primary,
     borderTopWidth: 1,
-    borderTopColor: '#e0e0e0'
+    borderTopColor: color.border.subtle
   },
   composerText: {
-    fontSize: 16,
-    color: '#333'
+    fontSize: typography.caption.size,
+    lineHeight: typography.caption.lineHeight,
+    fontFamily: fonts.Regular,
+    color: color.text.primary
   },
   sendButton: {
-    backgroundColor: colors.primary,
-    borderRadius: 20,
-    width: 40,
-    height: 40,
+    backgroundColor: color.accent.primary,
+    borderRadius: 17,
+    width: 34,
+    height: 34,
     justifyContent: 'center',
     alignItems: 'center',
     marginRight: 8,

@@ -84,6 +84,18 @@ removeListener();
   - `true`: abre fluxo `RobotaxiPrototype`
   - `false`: volta para fluxo legado (`Splash/Map`)
 
+### PILOT_CONTROLLED_LAUNCH
+- **Descrição**: Identifica se o build foi preparado para piloto controlado
+- **Valor padrão**: derivado de `EXPO_PUBLIC_LEAF_LAUNCH_PROFILE`
+
+### PILOT_DRIVER_WITHDRAWALS_ENABLED
+- **Descrição**: Controla se saque do motorista fica disponivel no app
+- **Valor padrão**: `false` em `pilot_controlled`
+
+### PILOT_REFERRAL_PROGRAMS_ENABLED
+- **Descrição**: Controla convites e growth surfaces
+- **Valor padrão**: `false` em `pilot_controlled`
+
 ## ➕ Adicionar Nova Feature Flag
 
 1. **Adicionar no FeatureFlagService.js**:

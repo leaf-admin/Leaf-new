@@ -13,7 +13,7 @@ var { width, height } = Dimensions.get('window');
 import { DriverEarningRidelist } from '../components';
 import { fonts } from '../common/font';
 import Typography from '../components/design-system/Typography';
-import { useTheme } from '../common-local/theme';
+import { useTheme } from '../theme/runtimeTokens';
 
 export default function DriverIncomeScreen(props) {
 

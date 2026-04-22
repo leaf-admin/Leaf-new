@@ -12,11 +12,11 @@ import {
     StatusBar
 } from 'react-native';
 import { Icon } from 'react-native-elements';
-import { colors } from '../common-local/theme';
+import { colors } from '../theme/runtimeTokens';
 import { getSelfHostedApiUrl } from '../config/ApiConfig';
 import { useSelector, useDispatch } from 'react-redux';
-import { api } from '../common-local';
 import Logger from '../utils/Logger';
+import { addPaymentMethod } from '../services/runtime/paymentMethodsService';
 
 const MAIN_COLOR = colors.TAXIPRIMARY;
 
@@ -28,7 +28,6 @@ export default function AddPaymentMethod({ navigation }) {
     const [loading, setLoading] = useState(false);
 
     const auth = useSelector(state => state.auth);
-    const { addPaymentMethod } = api;
 
     const formatCardNumber = (text) => {
         const cleaned = text.replace(/\D/g, '');

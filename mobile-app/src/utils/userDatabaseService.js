@@ -1,6 +1,6 @@
 import Logger from './Logger';
-import database from '@react-native-firebase/database';
 import auth from '@react-native-firebase/auth';
+import mobileProfileService from '../services/MobileProfileService';
 import {
   computeDriverOnboardingState,
   createInitialDriverOnboardingState
@@ -137,7 +137,7 @@ function resolveCnhIdentity(documentData = {}, userData = {}) {
 }
 
 /**
- * Serviço para gerenciar dados do usuário no Realtime Database
+ * Serviço para gerenciar dados do usuário no backend moderno
  */
 export class UserDatabaseService {
   static buildProfilePayload(userData = {}, options = {}) {
@@ -244,7 +244,7 @@ export class UserDatabaseService {
   }
 
   /**
-   * Cria/atualiza o perfil do usuário no Realtime Database
+   * Cria/atualiza o perfil do usuário na fonte moderna de perfil
    * @param {Object} userData - Dados completos do usuário
    * @returns {Promise<{success: boolean, profile: Object|null}>}
    */
@@ -258,10 +258,9 @@ export class UserDatabaseService {
         return { success: false, profile: null };
       }
 
-      Logger.log('💾 Salvando perfil do usuário no Realtime Database:', resolvedUid);
+      Logger.log('💾 Salvando perfil do usuário no backend moderno:', resolvedUid);
 
-      const existingSnapshot = await database().ref(`users/${resolvedUid}`).once('value');
-      const existingProfile = existingSnapshot.exists() ? existingSnapshot.val() : {};
+      const existingProfile = (await mobileProfileService.getCurrentProfile({ suppressErrors: true })) || {};
 
       const payload = this.buildProfilePayload(userData, {
         uid: resolvedUid,
@@ -276,8 +275,6 @@ export class UserDatabaseService {
         updatedAt: new Date().toISOString()
       };
 
-      await database().ref(`users/${resolvedUid}`).set(mergedProfile);
-
       const onboardingDocumentData = userData?.documentData || {};
       const cnhExtraction = onboardingDocumentData?.cnhExtraction || null;
       const vehicleExtraction = onboardingDocumentData?.vehicleExtraction || null;
@@ -288,68 +285,81 @@ export class UserDatabaseService {
       if (profileUserType === 'driver') {
         const now = new Date().toISOString();
         const cnhIdentity = resolveCnhIdentity(onboardingDocumentData, mergedProfile);
+        const nextDocuments = { ...(existingProfile?.documents || {}) };
+        const nextVehicles = { ...(existingProfile?.vehicles || {}) };
 
         if (cnhExtraction?.success && cnhExtraction?.data) {
-          await database()
-            .ref(`users/${resolvedUid}/documents/cnh`)
-            .update({
-              type: 'cnh',
-              status: 'analyzing',
-              fileType: 'application/pdf',
-              source: cnhExtraction?.source || 'unknown',
-              model: cnhExtraction?.model || null,
-              usedFallback: Boolean(cnhExtraction?.usedFallback),
-              extractedData: cnhExtraction?.data || null,
-              confidence: Number(cnhExtraction?.data?.confidence || 0),
-              uploadedAt: cnhPdfMeta?.updatedAt || now,
-              updatedAt: now,
-              extractedIdentity: {
-                birthDate: cnhIdentity.birthDate || null,
-                motherName: cnhIdentity.motherName || null,
-                gender: cnhIdentity.genderCode || null
-              },
-              fileMeta: cnhPdfMeta
-                ? {
-                    name: cnhPdfMeta?.name || null,
-                    size: Number(cnhPdfMeta?.size || 0),
-                    mimeType: cnhPdfMeta?.mimeType || 'application/pdf'
-                  }
-                : null
-            });
+          nextDocuments.cnh = {
+            type: 'cnh',
+            status: 'analyzing',
+            fileType: 'application/pdf',
+            source: cnhExtraction?.source || 'unknown',
+            model: cnhExtraction?.model || null,
+            usedFallback: Boolean(cnhExtraction?.usedFallback),
+            extractedData: cnhExtraction?.data || null,
+            confidence: Number(cnhExtraction?.data?.confidence || 0),
+            uploadedAt: cnhPdfMeta?.updatedAt || now,
+            updatedAt: now,
+            extractedIdentity: {
+              birthDate: cnhIdentity.birthDate || null,
+              motherName: cnhIdentity.motherName || null,
+              gender: cnhIdentity.genderCode || null
+            },
+            fileMeta: cnhPdfMeta
+              ? {
+                  name: cnhPdfMeta?.name || null,
+                  size: Number(cnhPdfMeta?.size || 0),
+                  mimeType: cnhPdfMeta?.mimeType || 'application/pdf'
+                }
+              : null
+          };
         }
 
         if (vehicleExtraction?.success && vehicleExtraction?.data) {
-          await database()
-            .ref(`users/${resolvedUid}/vehicles/current`)
-            .update({
-              type: 'crlv',
-              status: 'analyzing',
-              fileType: 'application/pdf',
-              source: vehicleExtraction?.source || 'unknown',
-              extractionModel: vehicleExtraction?.model || null,
-              usedFallback: Boolean(vehicleExtraction?.usedFallback),
-              extractedData: vehicleExtraction?.data || null,
-              confidence: Number(vehicleExtraction?.data?.confidence || 0),
-              plate: vehicleExtraction?.data?.placa || null,
-              brand: vehicleExtraction?.data?.marca || null,
-              model: vehicleExtraction?.data?.modelo || null,
-              color: vehicleExtraction?.data?.cor || null,
-              year: vehicleExtraction?.data?.anoModelo || vehicleExtraction?.data?.anoFabricacao || null,
-              uploadedAt: vehiclePdfMeta?.updatedAt || now,
-              updatedAt: now,
-              fileMeta: vehiclePdfMeta
-                ? {
-                    name: vehiclePdfMeta?.name || null,
-                    size: Number(vehiclePdfMeta?.size || 0),
-                    mimeType: vehiclePdfMeta?.mimeType || 'application/pdf'
-                  }
-                : null
-            });
+          nextVehicles.current = {
+            type: 'crlv',
+            status: 'analyzing',
+            fileType: 'application/pdf',
+            source: vehicleExtraction?.source || 'unknown',
+            extractionModel: vehicleExtraction?.model || null,
+            usedFallback: Boolean(vehicleExtraction?.usedFallback),
+            extractedData: vehicleExtraction?.data || null,
+            confidence: Number(vehicleExtraction?.data?.confidence || 0),
+            plate: vehicleExtraction?.data?.placa || null,
+            brand: vehicleExtraction?.data?.marca || null,
+            model: vehicleExtraction?.data?.modelo || null,
+            color: vehicleExtraction?.data?.cor || null,
+            year: vehicleExtraction?.data?.anoModelo || vehicleExtraction?.data?.anoFabricacao || null,
+            uploadedAt: vehiclePdfMeta?.updatedAt || now,
+            updatedAt: now,
+            fileMeta: vehiclePdfMeta
+              ? {
+                  name: vehiclePdfMeta?.name || null,
+                  size: Number(vehiclePdfMeta?.size || 0),
+                  mimeType: vehiclePdfMeta?.mimeType || 'application/pdf'
+                }
+              : null
+          };
+        }
+
+        if (Object.keys(nextDocuments).length > 0) {
+          mergedProfile.documents = nextDocuments;
+        }
+
+        if (Object.keys(nextVehicles).length > 0) {
+          mergedProfile.vehicles = nextVehicles;
         }
       }
 
-      Logger.log('✅ Perfil do usuário salvo com sucesso no Realtime Database');
-      return { success: true, profile: mergedProfile };
+      const savedProfile = await mobileProfileService.upsertCurrentProfile(mergedProfile);
+
+      if (!savedProfile) {
+        Logger.error('❌ Falha ao persistir perfil no backend moderno');
+        return { success: false, profile: null };
+      }
+
+      Logger.log('✅ Perfil do usuário salvo com sucesso no backend moderno');
+      return { success: true, profile: savedProfile };
     } catch (error) {
       Logger.error('❌ Erro ao salvar perfil do usuário:', error);
       return { success: false, profile: null, error };
@@ -357,14 +367,18 @@ export class UserDatabaseService {
   }
 
   /**
-   * Verifica se o usuário já existe no Realtime Database
+   * Verifica se o usuário já existe na fonte moderna
    * @param {string} uid - UID do usuário
    * @returns {Promise<boolean>} - Se o usuário existe
    */
   static async userExists(uid) {
     try {
-      const snapshot = await database().ref(`users/${uid}`).once('value');
-      return snapshot.exists();
+      const currentUid = auth().currentUser?.uid;
+      if (currentUid && currentUid !== uid) {
+        return false;
+      }
+      const profile = await mobileProfileService.getCurrentProfile({ suppressErrors: true });
+      return Boolean(profile?.uid && profile.uid === uid);
     } catch (error) {
       Logger.error('❌ Erro ao verificar se usuário existe:', error);
       return false;
@@ -372,14 +386,17 @@ export class UserDatabaseService {
   }
 
   /**
-   * Obtém dados do usuário do Realtime Database
+   * Obtém dados do usuário da fonte moderna
    * @param {string} uid - UID do usuário
    * @returns {Promise<Object|null>} - Dados do usuário
    */
   static async getUserProfile(uid) {
     try {
-      const snapshot = await database().ref(`users/${uid}`).once('value');
-      return snapshot.exists() ? snapshot.val() : null;
+      const currentUid = auth().currentUser?.uid;
+      if (currentUid && currentUid !== uid) {
+        return null;
+      }
+      return await mobileProfileService.getCurrentProfile({ suppressErrors: true });
     } catch (error) {
       Logger.error('❌ Erro ao obter perfil do usuário:', error);
       return null;

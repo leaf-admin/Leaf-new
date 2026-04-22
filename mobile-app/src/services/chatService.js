@@ -1,5 +1,5 @@
 import Logger from '../utils/Logger';
-import api from '../common-local/api';
+import { apiClient } from './httpClient';
 import { useState, useEffect } from 'react';
 
 
@@ -14,7 +14,7 @@ export const chatService = {
   // Criar novo chat
   async createChat(chatData) {
     try {
-      const response = await api.post('/api/chat/create', chatData);
+      const response = await apiClient.post('/api/chat/create', chatData);
       return response.data;
     } catch (error) {
       Logger.error('Erro ao criar chat:', error);
@@ -25,7 +25,7 @@ export const chatService = {
   // Buscar chat existente
   async getChat(chatId) {
     try {
-      const response = await api.get(`/api/chat/${chatId}`);
+      const response = await apiClient.get(`/api/chat/${chatId}`);
       return response.data;
     } catch (error) {
       Logger.error('Erro ao buscar chat:', error);
@@ -36,7 +36,7 @@ export const chatService = {
   // Buscar mensagens do chat
   async getChatMessages(chatId, limit = 50, offset = 0) {
     try {
-      const response = await api.get(`/api/chat/${chatId}/messages`, {
+      const response = await apiClient.get(`/api/chat/${chatId}/messages`, {
         params: { limit, offset }
       });
       return response.data.messages;
@@ -49,7 +49,7 @@ export const chatService = {
   // Enviar mensagem
   async sendMessage(messageData) {
     try {
-      const response = await api.post('/api/chat/message/send', messageData);
+      const response = await apiClient.post('/api/chat/message/send', messageData);
       return response.data;
     } catch (error) {
       Logger.error('Erro ao enviar mensagem:', error);
@@ -60,7 +60,7 @@ export const chatService = {
   // Marcar mensagens como lidas
   async markAsRead(chatId, messageIds) {
     try {
-      const response = await api.post(`/api/chat/${chatId}/read`, {
+      const response = await apiClient.post(`/api/chat/${chatId}/read`, {
         messageIds
       });
       return response.data;
@@ -73,7 +73,7 @@ export const chatService = {
   // Buscar chats ativos do usuário
   async getUserChats(userId) {
     try {
-      const response = await api.get(`/api/user/${userId}/chats`);
+      const response = await apiClient.get(`/api/user/${userId}/chats`);
       return response.data.chats;
     } catch (error) {
       Logger.error('Erro ao buscar chats do usuário:', error);
@@ -84,7 +84,7 @@ export const chatService = {
   // Finalizar chat (quando viagem termina)
   async endChat(chatId) {
     try {
-      const response = await api.post(`/api/chat/${chatId}/end`);
+      const response = await apiClient.post(`/api/chat/${chatId}/end`);
       return response.data;
     } catch (error) {
       Logger.error('Erro ao finalizar chat:', error);
@@ -95,7 +95,7 @@ export const chatService = {
   // Deletar chat (após período de retenção)
   async deleteChat(chatId) {
     try {
-      const response = await api.delete(`/api/chat/${chatId}`);
+      const response = await apiClient.delete(`/api/chat/${chatId}`);
       return response.data;
     } catch (error) {
       Logger.error('Erro ao deletar chat:', error);
@@ -106,7 +106,7 @@ export const chatService = {
   // Buscar estatísticas do chat
   async getChatStats(chatId) {
     try {
-      const response = await api.get(`/api/chat/${chatId}/stats`);
+      const response = await apiClient.get(`/api/chat/${chatId}/stats`);
       return response.data;
     } catch (error) {
       Logger.error('Erro ao buscar estatísticas:', error);

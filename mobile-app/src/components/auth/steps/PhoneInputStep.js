@@ -1,16 +1,22 @@
 import React, { useState } from 'react';
 import { View, TouchableOpacity, Alert as NativeAlert, StyleSheet, Text, TextInput } from 'react-native';
 import auth from '@react-native-firebase/auth';
-import { fonts } from '../../../common-local/font';
+import { fonts } from '../../../theme/runtimeTokens';
 import { isReviewAccount, getReviewAccountInfo } from '../../../config/reviewAccounts';
+import {
+    allowCustomOtpFallback,
+    allowQaOtpForceFlow,
+    allowReviewAccess
+} from '../../../config/runtimeAccessPolicy';
+import apiClient from '../../../services/httpClient';
 import { saveStepData } from '../../../utils/secureOnboardingStorage';
 import Logger from '../../../utils/Logger';
-import Constants from 'expo-constants';
 import onboardingTheme from '../common/onboardingTheme';
 import ContinueButton from '../common/ContinueButton';
-import { toUserFriendlyMessage } from '../../../utils/friendlyErrorMessages';
+import { toUserFriendlyError, toUserFriendlyMessage } from '../../../utils/friendlyErrorMessages';
 
 const { color, radius, spacing } = onboardingTheme;
+const REVIEW_OTP_CODE = '0'.repeat(6);
 
 const Alert = {
     ...NativeAlert,
@@ -26,19 +32,68 @@ const Alert = {
         )
 };
 
-const PhoneInputStep = ({ onSwitchToRegister, onVerificationSent }) => {
+function resolveAuthAlertTitle(error, friendlyMessage = '') {
+    const normalizedCode = String(
+        error?.code ||
+        error?.nativeErrorCode ||
+        error?.userInfo?.code ||
+        error?.userInfo?.nativeErrorCode ||
+        ''
+    ).toUpperCase();
+    const normalizedText = [
+        error?.message,
+        error?.rawMessage,
+        friendlyMessage
+    ]
+        .filter(Boolean)
+        .join(' ')
+        .toLowerCase();
+
+    if (
+        normalizedCode === '17010' ||
+        normalizedCode === 'AUTH/TOO-MANY-REQUESTS' ||
+        /17010|too many requests|muitas tentativas|rate limit/.test(normalizedText)
+    ) {
+        return 'Limite de Tentativas';
+    }
+
+    if (
+        normalizedCode === 'AUTH/INVALID-PHONE-NUMBER' ||
+        /invalid phone|numero de telefone invalido|telefone invalido/.test(normalizedText)
+    ) {
+        return 'Telefone Invalido';
+    }
+
+    if (
+        normalizedCode === 'AUTH/QUOTA-EXCEEDED' ||
+        /quota|limite de sms|limite de envios/.test(normalizedText)
+    ) {
+        return 'Limite de Envios';
+    }
+
+    if (
+        normalizedCode === 'NETWORK_ERROR' ||
+        normalizedCode === 'AUTH/NETWORK-REQUEST-FAILED' ||
+        /network|internet|conexao|connection/.test(normalizedText)
+    ) {
+        return 'Erro de Conexao';
+    }
+
+    return 'Erro de Autenticacao';
+}
+
+const PhoneInputStep = ({ onSwitchToRegister, onVerificationSent, onPasswordLoginRequested }) => {
     const [phoneNumber, setPhoneNumber] = useState('');
     const [loading, setLoading] = useState(false);
     const [checking, setChecking] = useState(false);
 
-    const IS_REVIEW_ENV = Constants.expoConfig?.extra?.isReview === true;
-    const ENABLE_CUSTOM_OTP_FALLBACK =
-        Constants.expoConfig?.extra?.enableCustomOtpFallback === true ||
-        IS_REVIEW_ENV ||
-        __DEV__;
+    const isReviewEnv = allowReviewAccess();
+    const enableCustomOtpFallback = allowCustomOtpFallback();
+    const allowReviewOtpBypass = isReviewEnv;
+    const allowForcedQaOtpFlow = allowQaOtpForceFlow();
+    const FORCE_CUSTOM_OTP_NUMBERS = new Set(['11999999999', '11888888888']);
 
     const requestOtpWithFallback = async (fullPhoneNumber) => {
-        const { api } = require('../../../common-local/api');
         const endpoints = [
             '/api/custom-otp/request-otp',
             '/custom-otp/request-otp'
@@ -48,7 +103,7 @@ const PhoneInputStep = ({ onSwitchToRegister, onVerificationSent }) => {
 
         for (const endpoint of endpoints) {
             try {
-                return await api.post(endpoint, { phone: fullPhoneNumber });
+                return await apiClient.post(endpoint, { phone: fullPhoneNumber });
             } catch (error) {
                 lastError = error;
                 // Se não for 404, não faz sentido tentar fallback
@@ -72,20 +127,22 @@ const PhoneInputStep = ({ onSwitchToRegister, onVerificationSent }) => {
 
         try {
             const fullPhoneNumber = `+55${phoneNumber}`;
+            const forceCustomOtpFlow =
+                allowForcedQaOtpFlow && FORCE_CUSTOM_OTP_NUMBERS.has(phoneNumber);
 
             // ✅ BYPASS PARA CONTAS DE REVIEW
-            // IMPORTANTE: Bypass só funciona se IS_REVIEW_ENV for true
+            // IMPORTANTE: permitido apenas em ambiente explícito de review
             if (isReviewAccount(phoneNumber)) {
                 // ✅ Verificar se bypass está habilitado
-                if (!IS_REVIEW_ENV && !__DEV__) {
-                    Logger.warn('🚫 Bypass de OTP bloqueado: ambiente de produção detectado');
+                if (!allowReviewOtpBypass) {
+                    Logger.warn('🚫 Bypass de OTP bloqueado: ambiente sem modo review');
                     // Continuar com fluxo normal de OTP
                 } else {
                     const reviewAccount = getReviewAccountInfo(phoneNumber);
                     Logger.log('🔐 REVIEW ACCESS: Conta de review detectada - pulando OTP', {
                         phoneNumber,
                         userType: reviewAccount?.userType,
-                        isReviewEnv: IS_REVIEW_ENV,
+                        isReviewEnv,
                         isDev: __DEV__
                     });
 
@@ -110,16 +167,15 @@ const PhoneInputStep = ({ onSwitchToRegister, onVerificationSent }) => {
                             isReviewAccount: true,
                             reviewUser: reviewUser,
                             confirm: async (otpCode) => {
-                                // Aceitar OTP fixo 000000 para contas de review
-                                if (otpCode === '000000') {
-                                    Logger.log('✅ OTP fixo 000000 aceito para conta de review.');
+                                if (otpCode === REVIEW_OTP_CODE) {
+                                    Logger.log('✅ OTP de review aceito para conta de review.');
                                     return { user: reviewUser };
                                 }
                                 throw new Error('Código OTP inválido para conta de review.');
                             }
                         };
                         // ✅ Passar skipOTP=true apenas se bypass estiver habilitado
-                        onVerificationSent(reviewConfirmation, fullPhoneNumber, false, IS_REVIEW_ENV || __DEV__);
+                        onVerificationSent(reviewConfirmation, fullPhoneNumber, false, allowReviewOtpBypass);
                     }
 
                     setLoading(false);
@@ -129,6 +185,24 @@ const PhoneInputStep = ({ onSwitchToRegister, onVerificationSent }) => {
             }
 
             // 📱 Fluxo principal: Firebase Phone Auth (produção)
+            if (forceCustomOtpFlow) {
+                Logger.log('📲 Forçando fluxo OTP customizado para conta QA controlada.');
+                const response = await requestOtpWithFallback(fullPhoneNumber);
+                if (!response.data || !response.data.success) {
+                    throw new Error(response.data?.error || 'Erro ao enviar OTP');
+                }
+
+                const confirmation = {
+                    verificationId: response.data.verificationId,
+                    isCustomOtp: true
+                };
+
+                if (onVerificationSent) {
+                    onVerificationSent(confirmation, fullPhoneNumber, false);
+                }
+                return;
+            }
+
             Logger.log('📱 Enviando OTP via Firebase Auth...');
             try {
                 const firebaseConfirmation = await auth().signInWithPhoneNumber(fullPhoneNumber);
@@ -138,7 +212,7 @@ const PhoneInputStep = ({ onSwitchToRegister, onVerificationSent }) => {
                 return;
             } catch (firebaseError) {
                 Logger.error('❌ Falha no envio OTP via Firebase:', firebaseError);
-                if (!ENABLE_CUSTOM_OTP_FALLBACK) {
+                if (!enableCustomOtpFallback) {
                     throw firebaseError;
                 }
                 Logger.warn('⚠️ Aplicando fallback de OTP customizado para ambiente de suporte.');
@@ -160,33 +234,29 @@ const PhoneInputStep = ({ onSwitchToRegister, onVerificationSent }) => {
             }
         } catch (error) {
             Logger.error("Erro no handleContinue:", error);
+            const friendlyError = toUserFriendlyError(error, {
+                context: 'auth',
+                fallbackMessage: 'Nao foi possivel concluir a autenticacao agora. Tente novamente.'
+            });
 
-            // ✅ Mensagens de erro específicas e humanas
-            let errorTitle = 'Erro de Autenticação';
-            let errorMessage = 'Não foi possível verificar o número. Verifique se ele está correto e tente novamente.';
-
-            if (error.message) {
-                if (error.message.includes('Muitas tentativas') || error.message.includes('rate limit')) {
-                    errorTitle = 'Limite de Tentativas';
-                    errorMessage = 'Você excedeu o limite de tentativas. Por favor, aguarde alguns minutos antes de tentar novamente.';
-                } else if (error.message.includes('invalid') || error.message.includes('inválido')) {
-                    errorMessage = 'Número de telefone inválido. Verifique se o número está correto e tente novamente.';
-                } else if (error.message.includes('network') || error.message.includes('rede') || error.message.includes('connection')) {
-                    errorMessage = 'Erro de conexão. Verifique sua internet e tente novamente.';
-                } else if (error.message.includes('quota') || error.message.includes('cota')) {
-                    errorMessage = 'Limite de SMS atingido. Tente novamente mais tarde.';
-                } else if (error.message.includes('timeout')) {
-                    errorMessage = 'Tempo limite excedido. Verifique sua conexão e tente novamente.';
-                } else {
-                    errorMessage = `Erro: ${error.message}`;
-                }
-            }
-
-            Alert.alert(errorTitle, errorMessage);
+            Alert.alert(
+                resolveAuthAlertTitle(error, friendlyError.message),
+                friendlyError.message
+            );
         } finally {
             setLoading(false);
             setChecking(false);
         }
+    };
+
+    const handlePasswordLogin = async () => {
+        if (phoneNumber.length < 10) {
+            Alert.alert('Erro', 'Informe seu telefone para entrar com senha.');
+            return;
+        }
+
+        const fullPhoneNumber = `+55${phoneNumber}`;
+        onPasswordLoginRequested?.(fullPhoneNumber);
     };
 
     return (
@@ -233,6 +303,15 @@ const PhoneInputStep = ({ onSwitchToRegister, onVerificationSent }) => {
 
                 <TouchableOpacity
                     activeOpacity={0.82}
+                    onPress={handlePasswordLogin}
+                    disabled={loading || checking || phoneNumber.length < 10}
+                    style={styles.passwordLoginButton}
+                >
+                    <Text style={styles.passwordLoginButtonText}>Já tenho senha</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                    activeOpacity={0.82}
                     onPress={() => onSwitchToRegister?.(phoneNumber)}
                     disabled={loading || checking}
                     style={styles.registerButton}
@@ -273,34 +352,31 @@ const styles = StyleSheet.create({
         textAlign: 'center'
     },
     contentCard: {
-        backgroundColor: color.panelSoft,
-        borderWidth: 1,
-        borderColor: color.glassStroke,
-        borderRadius: radius.lg,
-        padding: spacing.sm,
-        shadowColor: '#0E1522',
-        shadowOffset: { width: 0, height: 12 },
-        shadowOpacity: 0.16,
-        shadowRadius: 20,
-        elevation: 9,
-        marginBottom: spacing.md
+        paddingHorizontal: 2,
+        marginTop: spacing.md,
+        marginBottom: spacing.lg
     },
     inputContainer: {
         flexDirection: 'row',
         alignItems: 'center',
-        backgroundColor: color.surfaceMuted,
+        backgroundColor: 'rgba(255,255,255,0.84)',
         borderWidth: 1,
-        borderColor: color.border,
-        borderRadius: radius.md,
-        paddingRight: 4,
-        minHeight: 48
+        borderColor: 'rgba(255,255,255,0.92)',
+        borderRadius: radius.pill,
+        paddingRight: spacing.sm,
+        minHeight: 58,
+        shadowColor: '#0E1522',
+        shadowOffset: { width: 0, height: 12 },
+        shadowOpacity: 0.12,
+        shadowRadius: 20,
+        elevation: 8
     },
     countrySelector: {
         paddingHorizontal: spacing.sm,
         justifyContent: 'center',
         borderRightWidth: 1,
-        borderRightColor: color.border,
-        height: 48
+        borderRightColor: 'rgba(15,23,34,0.08)',
+        height: 58
     },
     countryCode: {
         marginTop: 1,
@@ -311,7 +387,7 @@ const styles = StyleSheet.create({
     },
     input: {
         flex: 1,
-        height: 48,
+        height: 58,
         paddingHorizontal: spacing.sm,
         fontSize: 15,
         lineHeight: 20,
@@ -320,10 +396,23 @@ const styles = StyleSheet.create({
         fontFamily: fonts.Medium
     },
     footer: {
-        marginTop: spacing.sm
+        marginTop: spacing.md
     },
     continueButton: {
         marginBottom: spacing.xs
+    },
+    passwordLoginButton: {
+        marginTop: 2,
+        alignSelf: 'center',
+        paddingHorizontal: spacing.sm,
+        paddingVertical: spacing.xs
+    },
+    passwordLoginButtonText: {
+        color: color.textPrimary,
+        fontSize: 13,
+        lineHeight: 18,
+        fontFamily: fonts.SemiBold,
+        textDecorationLine: 'underline'
     },
     registerButton: {
         marginTop: 4,

@@ -14,7 +14,7 @@ import {
 import { Icon } from 'react-native-elements';
 // Temporariamente removido: import BottomSheet from '@gorhom/bottom-sheet';
 import { useSelector, useDispatch } from 'react-redux';
-import { api } from '../common-local';
+import { apiClient } from '../services/httpClient';
 import { useTranslation } from '../components/i18n/LanguageProvider';
 import WebSocketManager from '../services/WebSocketManager';
 
@@ -163,7 +163,7 @@ const DriverSearchScreen = ({ navigation, route }) => {
 
   const searchNearbyDrivers = async () => {
     try {
-      const response = await api.post('/api/drivers/nearby', {
+      const response = await apiClient.post('/api/drivers/nearby', {
         latitude: tripData.pickup.latitude,
         longitude: tripData.pickup.longitude,
         radius: searchRadius,
@@ -216,7 +216,7 @@ const DriverSearchScreen = ({ navigation, route }) => {
 
   const notifyDriver = async (driverId, tripData) => {
     try {
-      await api.post(`/api/drivers/${driverId}/notify`, {
+      await apiClient.post(`/api/drivers/${driverId}/notify`, {
         tripId: tripData.id,
         pickup: tripData.pickup,
         destination: tripData.destination,

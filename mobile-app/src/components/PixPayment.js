@@ -9,8 +9,8 @@ import {
     Alert
 } from 'react-native';
 import QRCode from 'react-native-qrcode-svg';
-import { colors } from '../common-local/theme';
-import { fonts } from '../common-local/font';
+import { colors } from '../theme/runtimeTokens';
+import { fonts } from '../theme/runtimeTokens';
 import WooviService from '../services/WooviService';
 import { useTranslation } from './i18n/LanguageProvider';
 

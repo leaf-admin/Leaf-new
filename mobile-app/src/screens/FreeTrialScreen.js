@@ -14,7 +14,7 @@ import {
 } from 'react-native';
 import { Icon } from 'react-native-elements';
 import { useSelector } from 'react-redux';
-import { api } from '../common-local';
+import { apiClient } from '../services/httpClient';
 import { useTranslation } from '../components/i18n/LanguageProvider';
 
 const { width } = Dimensions.get('window');
@@ -52,7 +52,7 @@ const FreeTrialScreen = ({ navigation, route }) => {
     try {
       setIsLoading(true);
       
-      const response = await api.get(`/api/baas/trial/${currentUser.id}`);
+      const response = await apiClient.get(`/api/baas/trial/${currentUser.id}`);
       const data = response.data;
       
       setTrialData(data);

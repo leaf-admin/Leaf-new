@@ -1,14 +1,19 @@
-import React, { useCallback, useEffect, useState } from 'react';
-import { Alert, StatusBar, StyleSheet, Text, View } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { fonts } from '../../common-local/font';
-import PrototypeScreenTransition from '../../components/prototype/PrototypeScreenTransition';
-import PrototypeDismissibleSheet from '../../components/prototype/PrototypeDismissibleSheet';
-import { CardHandle, PrototypeCard, PrototypePrimaryButton } from '../../components/prototype/PrototypeUI';
-import WooviPaymentModal from '../../components/payment/WooviPaymentModal';
-import robotaxiPrototypeTokens from '../../components/design-system/robotaxiPrototypeTokens';
-import { usePrototypeMapOcclusion } from './prototypeMapOcclusion';
-import { usePrototypeRideRuntime } from './prototypeRideRuntime';
+import React, { useCallback, useEffect, useState } from "react";
+import { Alert, StatusBar, StyleSheet, Text, View } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { fonts } from "../../theme/runtimeTokens";
+import PrototypeScreenTransition from "../../components/prototype/PrototypeScreenTransition";
+import PrototypeDismissibleSheet from "../../components/prototype/PrototypeDismissibleSheet";
+import {
+  CardHandle,
+  PrototypeCard,
+  PrototypePrimaryButton,
+} from "../../components/prototype/PrototypeUI";
+import WooviPaymentModal from "../../components/payment/WooviPaymentModal";
+import robotaxiPrototypeTokens from "../../components/design-system/robotaxiPrototypeTokens";
+import { usePrototypeMapOcclusion } from "./prototypeMapOcclusion";
+import { usePrototypeRideRuntime } from "./prototypeRideRuntime";
+import { resolveMeaningfulAddress } from "./addressLabelUtils";
 
 const { color, typography } = robotaxiPrototypeTokens;
 const SHEET_BOTTOM_OFFSET = 98;
@@ -21,31 +26,45 @@ export default function RobotaxiPaymentScreen({ navigation, route }) {
     currentCoordinate,
     profileUid,
     riderProfile,
+    checkRideAvailability,
     paymentState,
-    requestRide
+    requestRide,
   } = usePrototypeRideRuntime();
   const insets = useSafeAreaInsets();
   const [cardHeight, setCardHeight] = useState(FALLBACK_CARD_HEIGHT);
-  const [isPixModalVisible, setPixModalVisible] = useState(Boolean(route?.params?.autoOpenPix));
+  const [isPixModalVisible, setPixModalVisible] = useState(
+    Boolean(route?.params?.autoOpenPix),
+  );
+  const [checkingAvailability, setCheckingAvailability] = useState(false);
+  const [availabilityNotice, setAvailabilityNotice] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const sheetBottom = insets.bottom + SHEET_BOTTOM_OFFSET;
 
-  const destination = route?.params?.destination || 'Destino';
-  const destinationAddress = route?.params?.destinationAddress || selectedDestination?.address || '';
-  const destinationCoordinate = route?.params?.destinationCoordinate || selectedDestination?.coordinate || null;
-  const originAddress = route?.params?.originAddress || currentAddress || 'Origem atual';
-  const vehicle = route?.params?.vehicle || 'Leaf Plus';
+  const destination = route?.params?.destination || "Destino";
+  const destinationAddress =
+    route?.params?.destinationAddress || selectedDestination?.address || "";
+  const destinationCoordinate =
+    route?.params?.destinationCoordinate ||
+    selectedDestination?.coordinate ||
+    null;
+  const originAddress =
+    resolveMeaningfulAddress(route?.params?.originAddress, currentAddress) ||
+    "Origem atual";
+  const vehicle = route?.params?.vehicle || "Leaf Plus";
   const fare = route?.params?.fare || 22.43;
   const canRequestRide = Boolean(
     destinationCoordinate &&
-      Number.isFinite(destinationCoordinate?.latitude) &&
-      Number.isFinite(destinationCoordinate?.longitude)
+    Number.isFinite(destinationCoordinate?.latitude) &&
+    Number.isFinite(destinationCoordinate?.longitude),
   );
+  // The prototype payment screen should always auto-confirm PIX in QA/dev so
+  // the UI can exercise the real ride lifecycle without waiting on manual PIX.
+  const qaAutoConfirmPix = true;
 
   usePrototypeMapOcclusion({
     routeKey: route?.key,
-    layerId: route?.key || 'prototype-payment',
-    occludedBottom: sheetBottom + cardHeight
+    layerId: route?.key || "prototype-payment",
+    occludedBottom: sheetBottom + cardHeight,
   });
 
   const handleDismiss = () => {
@@ -53,10 +72,10 @@ export default function RobotaxiPaymentScreen({ navigation, route }) {
       navigation.goBack();
       return;
     }
-    navigation.navigate('RobotaxiPrototype');
+    navigation.navigate("RobotaxiPrototype");
   };
 
-  const handleCardLayout = useCallback(event => {
+  const handleCardLayout = useCallback((event) => {
     const nextHeight = event?.nativeEvent?.layout?.height;
     if (Number.isFinite(nextHeight) && nextHeight > 0) {
       setCardHeight(nextHeight);
@@ -75,14 +94,55 @@ export default function RobotaxiPaymentScreen({ navigation, route }) {
     setPixModalVisible(true);
   }, [canRequestRide, route?.params?.autoOpenPix]);
 
-  const handleOpenPixModal = useCallback(() => {
+  const handleOpenPixModal = useCallback(async () => {
     if (!canRequestRide) {
-      Alert.alert('Selecione um destino', 'Defina um destino válido antes de confirmar o pagamento.');
+      Alert.alert(
+        "Selecione um destino",
+        "Defina um destino válido antes de confirmar o pagamento.",
+      );
       return;
     }
 
-    setPixModalVisible(true);
-  }, [canRequestRide]);
+    if (checkingAvailability || submitting) {
+      return;
+    }
+
+    try {
+      setCheckingAvailability(true);
+      setAvailabilityNotice("");
+
+      const availability = await checkRideAvailability({
+        destination: {
+          name: destination,
+          address: destinationAddress,
+          coordinate: destinationCoordinate,
+        },
+        vehicle,
+      });
+
+      if (!availability?.available) {
+        setAvailabilityNotice("Não há motoristas disponíveis");
+        return;
+      }
+
+      setPixModalVisible(true);
+    } catch (error) {
+      setAvailabilityNotice(
+        error?.message || "Não foi possível validar disponibilidade agora.",
+      );
+    } finally {
+      setCheckingAvailability(false);
+    }
+  }, [
+    canRequestRide,
+    checkRideAvailability,
+    checkingAvailability,
+    destination,
+    destinationAddress,
+    destinationCoordinate,
+    submitting,
+    vehicle,
+  ]);
 
   const handleClosePixModal = useCallback(() => {
     if (submitting) {
@@ -91,73 +151,113 @@ export default function RobotaxiPaymentScreen({ navigation, route }) {
     setPixModalVisible(false);
   }, [submitting]);
 
-  const handlePixPaymentConfirmed = useCallback(async () => {
-    if (!canRequestRide) {
-      Alert.alert('Selecione um destino', 'Defina um destino válido antes de confirmar o pagamento.');
-      return;
-    }
+  const handlePixPaymentConfirmed = useCallback(
+    async (paymentConfirmation = null) => {
+      if (!canRequestRide) {
+        Alert.alert(
+          "Selecione um destino",
+          "Defina um destino válido antes de confirmar o pagamento.",
+        );
+        return;
+      }
 
-    try {
-      setSubmitting(true);
-      setPixModalVisible(false);
-      await requestRide({
-        destination: {
-          name: destination,
-          address: destinationAddress,
-          coordinate: destinationCoordinate
-        },
-        vehicle,
-        fare,
-        paymentMethod: 'pix'
-      });
-
-      navigation.replace('RobotaxiPrototypePaymentSuccess', {
-        destination,
-        vehicle,
-        autoAdvance: true
-      });
-    } catch (error) {
-      navigation.replace('RobotaxiPrototypePaymentFailed', {
-        errorMessage: error?.message || 'Falha ao enviar a corrida para o servidor.',
-        retryRouteName: 'RobotaxiPrototypePayment',
-        retryParams: {
-          ...route?.params,
-          destination,
-          destinationAddress,
-          destinationCoordinate,
+      try {
+        setSubmitting(true);
+        setPixModalVisible(false);
+        await requestRide({
+          destination: {
+            name: destination,
+            address: destinationAddress,
+            coordinate: destinationCoordinate,
+          },
           originAddress,
           vehicle,
           fare,
-          autoOpenPix: true
+          paymentMethod: "pix",
+          paymentConfirmation,
+        });
+
+        navigation.replace("RobotaxiPrototypePaymentSuccess", {
+          destination,
+          destinationAddress,
+          originAddress,
+          vehicle,
+          autoAdvance: true,
+        });
+      } catch (error) {
+        const normalizedCode = String(error?.code || "")
+          .trim()
+          .toUpperCase();
+        const normalizedMessage = String(error?.message || "").toLowerCase();
+        if (
+          normalizedCode === "NO_DRIVERS_AVAILABLE" ||
+          normalizedMessage.includes("não há motoristas") ||
+          normalizedMessage.includes("nao ha motoristas")
+        ) {
+          const refundPayload = error?.payload || {};
+          navigation.replace("RobotaxiPrototypeNoDrivers", {
+            reason: error?.message || "Nenhum motorista disponível no momento.",
+            refundStatus: refundPayload?.refundStatus || null,
+            refundAmount: Number(refundPayload?.refundAmount || 0),
+            cancellationFee: Number(refundPayload?.cancellationFee || 0),
+            chargeId: refundPayload?.chargeId || null,
+          });
+          return;
         }
-      });
-    } finally {
-      setSubmitting(false);
-    }
-  }, [
-    canRequestRide,
-    destination,
-    destinationAddress,
-    destinationCoordinate,
-    fare,
-    navigation,
-    originAddress,
-    requestRide,
-    route?.params,
-    vehicle
-  ]);
+
+        navigation.replace("RobotaxiPrototypePaymentFailed", {
+          errorMessage:
+            error?.message || "Falha ao enviar a corrida para o servidor.",
+          retryRouteName: "RobotaxiPrototypePayment",
+          retryParams: {
+            ...route?.params,
+            destination,
+            destinationAddress,
+            destinationCoordinate,
+            originAddress,
+            vehicle,
+            fare,
+            autoOpenPix: true,
+          },
+        });
+      } finally {
+        setSubmitting(false);
+      }
+    },
+    [
+      canRequestRide,
+      destination,
+      destinationAddress,
+      destinationCoordinate,
+      fare,
+      navigation,
+      originAddress,
+      requestRide,
+      route?.params,
+      vehicle,
+    ],
+  );
 
   return (
     <PrototypeScreenTransition>
       <View style={styles.container} pointerEvents="box-none">
-        <StatusBar translucent backgroundColor="transparent" barStyle="dark-content" />
+        <StatusBar
+          translucent
+          backgroundColor="transparent"
+          barStyle="dark-content"
+        />
 
-        <PrototypeDismissibleSheet onClose={handleDismiss} sheetStyle={[styles.sheetWrap, { bottom: sheetBottom }]}>
+        <PrototypeDismissibleSheet
+          onClose={handleDismiss}
+          sheetStyle={[styles.sheetWrap, { bottom: sheetBottom }]}
+        >
           <PrototypeCard onLayout={handleCardLayout} style={styles.paymentCard}>
             <CardHandle />
 
             <Text style={styles.title}>Pagamento PIX</Text>
-            <Text style={styles.subtitle}>PIX é o único método disponível neste fluxo</Text>
+            <Text style={styles.subtitle}>
+              PIX é o único método disponível neste fluxo
+            </Text>
 
             <View style={styles.summaryBox}>
               <View style={styles.summaryRow}>
@@ -170,23 +270,50 @@ export default function RobotaxiPaymentScreen({ navigation, route }) {
               </View>
               <View style={[styles.summaryRow, styles.summaryRowLast]}>
                 <Text style={styles.summaryLabelStrong}>Total</Text>
-                <Text style={styles.summaryValueStrong}>R$ {Number(fare).toFixed(2)}</Text>
+                <Text style={styles.summaryValueStrong}>
+                  R$ {Number(fare).toFixed(2)}
+                </Text>
               </View>
             </View>
 
-            <Text style={styles.pixHint}>A cobrança será gerada em QR Code PIX para confirmação imediata.</Text>
+            <Text style={styles.pixHint}>
+              A cobrança será gerada em QR Code PIX para confirmação imediata.
+            </Text>
 
             <PrototypePrimaryButton
-              label={submitting ? 'Enviando solicitação...' : canRequestRide ? 'Pagar com PIX' : 'Selecione um destino'}
+              label={
+                submitting
+                  ? "Enviando solicitação..."
+                  : checkingAvailability
+                    ? "Verificando motoristas..."
+                    : canRequestRide
+                      ? "Pagar com PIX"
+                      : "Selecione um destino"
+              }
               icon="shield-checkmark-outline"
-              onPress={submitting ? undefined : handleOpenPixModal}
+              testID="passenger-payment-pay-pix-button"
+              accessibilityLabel="passenger-payment-pay-pix-button"
+              onPress={
+                submitting || checkingAvailability
+                  ? undefined
+                  : handleOpenPixModal
+              }
               style={styles.ctaButton}
             />
 
-            {!canRequestRide ? <Text style={styles.pendingText}>Abra “Para onde?” e escolha o destino antes de pagar.</Text> : null}
+            {!canRequestRide ? (
+              <Text style={styles.pendingText}>
+                Abra “Para onde?” e escolha o destino antes de pagar.
+              </Text>
+            ) : null}
+            {availabilityNotice ? (
+              <Text style={styles.pendingText}>{availabilityNotice}</Text>
+            ) : null}
 
-            {paymentState?.status === 'pending' && paymentState?.error ? (
-              <Text style={styles.pendingText}>Pagamento pendente de confirmação: {paymentState.error}</Text>
+            {paymentState?.status === "pending" && paymentState?.error ? (
+              <Text style={styles.pendingText}>
+                Pagamento pendente de confirmação: {paymentState.error}
+              </Text>
             ) : null}
           </PrototypeCard>
         </PrototypeDismissibleSheet>
@@ -199,20 +326,21 @@ export default function RobotaxiPaymentScreen({ navigation, route }) {
             pickup: {
               add: originAddress,
               lat: currentCoordinate?.latitude,
-              lng: currentCoordinate?.longitude
+              lng: currentCoordinate?.longitude,
             },
             drop: {
               add: destinationAddress || destination,
               lat: destinationCoordinate?.latitude,
-              lng: destinationCoordinate?.longitude
+              lng: destinationCoordinate?.longitude,
             },
             carType: vehicle,
-            estimatedFare: Number(fare)
+            estimatedFare: Number(fare),
           }}
           estimates={{ estimateFare: Number(fare) }}
-          passengerId={profileUid || 'prototype-passenger'}
-          passengerName={riderProfile?.name || 'Passageira Leaf'}
-          passengerEmail={riderProfile?.email || 'passageiro@leaf.app.br'}
+          passengerId={profileUid || "prototype-passenger"}
+          passengerName={riderProfile?.name || "Passageira Leaf"}
+          passengerEmail={riderProfile?.email || "passageiro@leaf.app.br"}
+          qaAutoConfirm={qaAutoConfirmPix}
         />
       </View>
     </PrototypeScreenTransition>
@@ -222,30 +350,30 @@ export default function RobotaxiPaymentScreen({ navigation, route }) {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: 'transparent'
+    backgroundColor: "transparent",
   },
   sheetWrap: {
-    position: 'absolute',
+    position: "absolute",
     left: 10,
-    right: 10
+    right: 10,
   },
   paymentCard: {
     paddingHorizontal: 12,
     paddingTop: 10,
-    paddingBottom: 12
+    paddingBottom: 12,
   },
   title: {
     color: color.text.primary,
     fontFamily: fonts.SemiBold,
     fontSize: typography.subtitle.size,
-    lineHeight: typography.subtitle.lineHeight
+    lineHeight: typography.subtitle.lineHeight,
   },
   subtitle: {
     marginTop: 1,
     color: color.text.secondary,
     fontFamily: fonts.Regular,
     fontSize: typography.caption.size,
-    lineHeight: typography.caption.lineHeight
+    lineHeight: typography.caption.lineHeight,
   },
   summaryBox: {
     marginTop: 10,
@@ -253,59 +381,59 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: color.border.subtle,
     backgroundColor: color.surface.secondary,
-    overflow: 'hidden'
+    overflow: "hidden",
   },
   summaryRow: {
     minHeight: 42,
     paddingHorizontal: 10,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
     borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: color.border.separator
+    borderBottomColor: color.border.separator,
   },
   summaryRowLast: {
-    borderBottomWidth: 0
+    borderBottomWidth: 0,
   },
   summaryLabel: {
     color: color.text.secondary,
     fontFamily: fonts.Medium,
     fontSize: typography.caption.size,
-    lineHeight: typography.caption.lineHeight
+    lineHeight: typography.caption.lineHeight,
   },
   summaryValue: {
     color: color.text.primary,
     fontFamily: fonts.Medium,
     fontSize: typography.caption.size,
-    lineHeight: typography.caption.lineHeight
+    lineHeight: typography.caption.lineHeight,
   },
   summaryLabelStrong: {
     color: color.text.primary,
     fontFamily: fonts.SemiBold,
     fontSize: typography.body.size,
-    lineHeight: typography.body.lineHeight
+    lineHeight: typography.body.lineHeight,
   },
   summaryValueStrong: {
     color: color.accent.primary,
     fontFamily: fonts.SemiBold,
     fontSize: typography.body.size,
-    lineHeight: typography.body.lineHeight
+    lineHeight: typography.body.lineHeight,
   },
   pixHint: {
     marginTop: 10,
     color: color.text.secondary,
     fontFamily: fonts.Regular,
     fontSize: typography.caption.size,
-    lineHeight: typography.caption.lineHeight
+    lineHeight: typography.caption.lineHeight,
   },
   ctaButton: {
-    marginTop: 10
+    marginTop: 10,
   },
   pendingText: {
     marginTop: 8,
     color: color.text.secondary,
     fontFamily: fonts.Regular,
     fontSize: typography.caption.size,
-    lineHeight: typography.caption.lineHeight
-  }
+    lineHeight: typography.caption.lineHeight,
+  },
 });

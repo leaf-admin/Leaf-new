@@ -15,7 +15,7 @@ import {
 } from 'react-native';
 import { Icon } from 'react-native-elements';
 import { useSelector } from 'react-redux';
-import { api } from '../common-local';
+import { apiClient } from '../services/httpClient';
 import { useTranslation } from '../components/i18n/LanguageProvider';
 
 
@@ -56,7 +56,7 @@ const FeedbackScreen = ({ navigation, route }) => {
     try {
       setIsLoading(true);
       
-      const response = await api.get(`/api/feedback/${currentUser.id}`);
+      const response = await apiClient.get(`/api/feedback/${currentUser.id}`);
       setPreviousFeedback(response.data.feedback || []);
       
     } catch (error) {
@@ -92,7 +92,7 @@ const FeedbackScreen = ({ navigation, route }) => {
         timestamp: new Date().toISOString()
       };
       
-      await api.post('/api/feedback', feedbackData);
+      await apiClient.post('/api/feedback', feedbackData);
       
       Alert.alert(
         t('feedback.submitted'),

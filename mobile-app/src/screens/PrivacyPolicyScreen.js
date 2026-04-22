@@ -16,7 +16,7 @@ import {
 import { Icon } from 'react-native-elements';
 import { useSelector } from 'react-redux';
 import firebaseAuth from '@react-native-firebase/auth';
-import { api } from '../common-local';
+import { apiClient } from '../services/httpClient';
 
 
 const PrivacyPolicyScreen = ({ navigation, route }) => {
@@ -52,7 +52,7 @@ const PrivacyPolicyScreen = ({ navigation, route }) => {
     try {
       setIsLoading(true);
       
-      const response = await api.get(`/api/privacy/settings/${currentUser.id}`);
+      const response = await apiClient.get(`/api/privacy/settings/${currentUser.id}`);
       setPrivacySettings(response.data.settings || privacySettings);
       
     } catch (error) {
@@ -64,7 +64,7 @@ const PrivacyPolicyScreen = ({ navigation, route }) => {
 
   const updatePrivacySetting = async (setting, value) => {
     try {
-      await api.put(`/api/privacy/settings/${currentUser.id}`, {
+      await apiClient.put(`/api/privacy/settings/${currentUser.id}`, {
         setting,
         value
       });
@@ -107,7 +107,7 @@ const PrivacyPolicyScreen = ({ navigation, route }) => {
         [{ text: 'OK' }]
       );
       
-      await api.post(`/api/privacy/download-data/${currentUser.id}`);
+      await apiClient.post(`/api/privacy/download-data/${currentUser.id}`);
       
     } catch (error) {
       Logger.error('Erro ao solicitar download:', error);
@@ -126,6 +126,19 @@ const PrivacyPolicyScreen = ({ navigation, route }) => {
     );
   };
 
+  const finalizeDeletionAndResetSession = async () => {
+    try {
+      await firebaseAuth().signOut();
+    } catch (signOutError) {
+      Logger.warn('⚠️ Falha ao encerrar sessão após exclusão:', signOutError);
+    }
+
+    navigation.reset({
+      index: 0,
+      routes: [{ name: 'PhoneInputScreen' }]
+    });
+  };
+
   const confirmDeleteData = async () => {
     try {
       const firebaseUser = firebaseAuth().currentUser;
@@ -142,7 +155,7 @@ const PrivacyPolicyScreen = ({ navigation, route }) => {
         firebaseUser?.phoneNumber ||
         '';
 
-      await api.post(
+      await apiClient.post(
         '/api/account/delete',
         {
           reason: 'user_requested_mobile_app',
@@ -160,7 +173,7 @@ const PrivacyPolicyScreen = ({ navigation, route }) => {
       Alert.alert(
         'Dados Excluídos',
         'Seus dados pessoais foram excluídos com sucesso.',
-        [{ text: 'OK', onPress: () => navigation.navigate('AuthScreen') }]
+        [{ text: 'OK', onPress: finalizeDeletionAndResetSession }]
       );
       
     } catch (error) {
@@ -171,7 +184,7 @@ const PrivacyPolicyScreen = ({ navigation, route }) => {
       // Compatibilidade com ambientes ainda não atualizados no endpoint novo.
       if (token && fallbackUserId && error?.response?.status === 404) {
         try {
-          await api.delete(`/api/privacy/delete-data/${fallbackUserId}`, {
+          await apiClient.delete(`/api/privacy/delete-data/${fallbackUserId}`, {
             headers: {
               Authorization: `Bearer ${token}`
             }
@@ -180,7 +193,7 @@ const PrivacyPolicyScreen = ({ navigation, route }) => {
           Alert.alert(
             'Dados Excluídos',
             'Seus dados pessoais foram excluídos com sucesso.',
-            [{ text: 'OK', onPress: () => navigation.navigate('AuthScreen') }]
+            [{ text: 'OK', onPress: finalizeDeletionAndResetSession }]
           );
           return;
         } catch (fallbackError) {

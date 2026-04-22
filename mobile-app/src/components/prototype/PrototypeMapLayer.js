@@ -151,6 +151,32 @@ const FloatingUserOverlay = React.memo(function FloatingUserOverlay({
   );
 });
 
+const MapAvatarMarker = React.memo(function MapAvatarMarker({
+  letter = 'L',
+  tone = 'driver'
+}) {
+  const isDriverTone = tone === 'driver';
+  return (
+    <View
+      style={[
+        styles.tripAvatarMarker,
+        isDriverTone ? styles.tripAvatarMarkerDriver : styles.tripAvatarMarkerPassenger
+      ]}
+    >
+      <Text
+        style={[
+          styles.tripAvatarMarkerLetter,
+          isDriverTone
+            ? styles.tripAvatarMarkerLetterDriver
+            : styles.tripAvatarMarkerLetterPassenger
+        ]}
+      >
+        {resolveAvatarInitial(letter)}
+      </Text>
+    </View>
+  );
+});
+
 function PrototypeMapLayer({
   mapRef,
   region,
@@ -177,7 +203,16 @@ function PrototypeMapLayer({
   mapChildren,
   children,
   mapSafetyProfile = 'default',
-  interactionEnabled = true
+  interactionEnabled = true,
+  hideUserMarker = false,
+  animateRoute = true,
+  routeMainColor = null,
+  routeShadowColor = null,
+  routeHighlightColor = null,
+  driverMarkerMode = 'car',
+  driverMarkerLetter = 'D',
+  destinationMarkerMode = 'place',
+  destinationMarkerLetter = 'P'
 }) {
   const iosMapSafeMode = Platform.OS === 'ios' && mapSafetyProfile === 'driver';
   const mapProvider =
@@ -218,6 +253,19 @@ function PrototypeMapLayer({
   const useSimplifiedIosMap = iosMapSafeMode || iosLifecycleSafeMode;
   const hasDestination = Boolean(destinationCoordinate) && Number.isFinite(destinationCoordinate?.latitude) && Number.isFinite(destinationCoordinate?.longitude);
   const denseRoute = useMemo(() => densifyPath(routeCoordinates), [routeCoordinates]);
+  const staticRouteCoordinates = useMemo(() => {
+    if (denseRoute.length >= 2) {
+      return denseRoute;
+    }
+
+    if (!Array.isArray(routeCoordinates)) {
+      return [];
+    }
+
+    return routeCoordinates.filter(item => {
+      return Number.isFinite(item?.latitude) && Number.isFinite(item?.longitude);
+    });
+  }, [denseRoute, routeCoordinates]);
   const normalizedNearbyVehicles = useMemo(() => {
     if (!Array.isArray(nearbyVehicles)) {
       return [];
@@ -240,6 +288,17 @@ function PrototypeMapLayer({
     return shouldRenderAvatarImage ? { uri: normalizedAvatarUri } : null;
   }, [normalizedAvatarUri, shouldRenderAvatarImage]);
   const userMarkerTracksViewChanges = Platform.OS === 'android';
+  const displayedRouteCoordinates = animateRoute
+    ? animatedRouteCoordinates
+    : staticRouteCoordinates;
+  const effectiveRouteShadowColor =
+    routeShadowColor || 'rgba(7,22,39,0.24)';
+  const effectiveRouteMainColor =
+    routeMainColor || (useSimplifiedIosMap ? '#E85D04' : '#F97316');
+  const effectiveRouteHighlightColor =
+    routeHighlightColor === undefined
+      ? '#FED7AA'
+      : routeHighlightColor;
   const handleAvatarError = useCallback(() => {
     setUserAvatarFailed(true);
   }, []);
@@ -350,6 +409,11 @@ function PrototypeMapLayer({
       return undefined;
     }
 
+    if (!animateRoute) {
+      setAnimatedRouteCoordinates(denseRoute);
+      return undefined;
+    }
+
     let frameId = null;
     const startTime = Date.now();
 
@@ -374,7 +438,7 @@ function PrototypeMapLayer({
         cancelAnimationFrame(frameId);
       }
     };
-  }, [denseRoute, hasRoute]);
+  }, [animateRoute, denseRoute, hasRoute]);
 
   return (
     <View style={styles.mapArea}>
@@ -443,40 +507,43 @@ function PrototypeMapLayer({
             />
           ) : null}
 
-          {!useSimplifiedIosMap && hasRoute && animatedRouteCoordinates.length >= 2 ? (
+          {!useSimplifiedIosMap && hasRoute && displayedRouteCoordinates.length >= 2 ? (
             <Polyline
               key="route-shadow"
-              coordinates={animatedRouteCoordinates}
-              strokeColor="rgba(7,22,39,0.24)"
+              coordinates={displayedRouteCoordinates}
+              strokeColor={effectiveRouteShadowColor}
               strokeWidth={12}
               lineCap="round"
               lineJoin="round"
             />
           ) : null}
 
-          {hasRoute && animatedRouteCoordinates.length >= 2 ? (
+          {hasRoute && displayedRouteCoordinates.length >= 2 ? (
             <Polyline
               key="route-main"
-              coordinates={animatedRouteCoordinates}
-              strokeColor={useSimplifiedIosMap ? "#E85D04" : "#F97316"}
+              coordinates={displayedRouteCoordinates}
+              strokeColor={effectiveRouteMainColor}
               strokeWidth={useSimplifiedIosMap ? 5 : 7}
               lineCap="round"
               lineJoin="round"
             />
           ) : null}
 
-          {!useSimplifiedIosMap && hasRoute && animatedRouteCoordinates.length >= 2 ? (
+          {!useSimplifiedIosMap &&
+          hasRoute &&
+          displayedRouteCoordinates.length >= 2 &&
+          effectiveRouteHighlightColor ? (
             <Polyline
               key="route-highlight"
-              coordinates={animatedRouteCoordinates}
-              strokeColor="#FED7AA"
+              coordinates={displayedRouteCoordinates}
+              strokeColor={effectiveRouteHighlightColor}
               strokeWidth={2.6}
               lineCap="round"
               lineJoin="round"
             />
           ) : null}
 
-          {hasDestination && !useSimplifiedIosMap ? (
+          {hasDestination ? (
             <Marker
               key="destination-marker"
               coordinate={{ latitude: destinationCoordinate.latitude, longitude: destinationCoordinate.longitude }}
@@ -486,9 +553,16 @@ function PrototypeMapLayer({
             >
               <>
                 <View style={styles.destinationMarkerWrap}>
-                  <View style={styles.destinationAvatar}>
-                    <Ionicons name="business-outline" size={16} color="#667180" />
-                  </View>
+                  {destinationMarkerMode === 'avatar' ? (
+                    <MapAvatarMarker
+                      letter={destinationMarkerLetter}
+                      tone="passenger"
+                    />
+                  ) : (
+                    <View style={styles.destinationAvatar}>
+                      <Ionicons name="business-outline" size={16} color="#667180" />
+                    </View>
+                  )}
                 </View>
 
                 {showMarkerCallouts ? (
@@ -501,7 +575,7 @@ function PrototypeMapLayer({
             </Marker>
           ) : null}
 
-          {hasDriverCoordinate && !useSimplifiedIosMap ? (
+          {hasDriverCoordinate ? (
             <Marker
               key="driver-marker"
               coordinate={{ latitude: driverCoordinate.latitude, longitude: driverCoordinate.longitude }}
@@ -510,9 +584,13 @@ function PrototypeMapLayer({
               tracksViewChanges={false}
               pinColor={undefined}
             >
-              <View style={styles.driverMarker}>
-                <Ionicons name="car-sport" size={16} color="#22303D" />
-              </View>
+              {driverMarkerMode === 'avatar' ? (
+                <MapAvatarMarker letter={driverMarkerLetter} tone="driver" />
+              ) : (
+                <View style={styles.driverMarker}>
+                  <Ionicons name="car-sport" size={16} color="#22303D" />
+                </View>
+              )}
             </Marker>
           ) : null}
 
@@ -541,7 +619,7 @@ function PrototypeMapLayer({
               })
             : null}
 
-          {Platform.OS !== 'android' ? (
+          {!hideUserMarker && Platform.OS !== 'android' ? (
             <Marker
               key="user-marker"
               coordinate={{ latitude: markerCoordinate.latitude, longitude: markerCoordinate.longitude }}
@@ -572,7 +650,9 @@ function PrototypeMapLayer({
         </MapView>
       </View>
 
-      {shouldRenderProjectedUserOverlay && projectedUserOverlayPoint ? (
+      {!hideUserMarker &&
+      shouldRenderProjectedUserOverlay &&
+      projectedUserOverlayPoint ? (
         <FloatingUserOverlay
           pointX={projectedUserOverlayPoint.x}
           pointY={projectedUserOverlayPoint.y}
@@ -749,6 +829,38 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.2,
     shadowRadius: 10,
     elevation: 8
+  },
+  tripAvatarMarker: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 2,
+    shadowColor: color.shadow.base,
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.18,
+    shadowRadius: 10,
+    elevation: 8
+  },
+  tripAvatarMarkerDriver: {
+    backgroundColor: '#1A7F37',
+    borderColor: 'rgba(255,255,255,0.96)'
+  },
+  tripAvatarMarkerPassenger: {
+    backgroundColor: '#F2E8C9',
+    borderColor: 'rgba(255,255,255,0.96)'
+  },
+  tripAvatarMarkerLetter: {
+    fontSize: 15,
+    lineHeight: 17,
+    fontWeight: '700'
+  },
+  tripAvatarMarkerLetterDriver: {
+    color: '#FFFFFF'
+  },
+  tripAvatarMarkerLetterPassenger: {
+    color: '#314225'
   },
   nearbyVehicleMarker: {
     width: 30,

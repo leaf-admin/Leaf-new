@@ -1,4 +1,4 @@
-import React, { useCallback } from 'react';
+import React, { useCallback, useEffect } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, { Easing, runOnJS, useAnimatedStyle, useSharedValue, withSpring, withTiming } from 'react-native-reanimated';
@@ -8,8 +8,11 @@ const { motion } = robotaxiPrototypeTokens;
 const CLOSE_DISTANCE = 116;
 const CLOSE_VELOCITY = 960;
 const CLOSE_TRANSLATE_Y = 640;
+const OPEN_TRANSLATE_Y = 18;
 const MAX_PULL_UP = 16;
 const closeEasing = Easing.bezier(...motion.bezier.smoothIn);
+const openEasing = Easing.bezier(...motion.bezier.smoothOut);
+const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
 
 export default function PrototypeDismissibleSheet({
   onClose,
@@ -17,29 +20,38 @@ export default function PrototypeDismissibleSheet({
   sheetStyle,
   backdropColor = 'transparent',
   dragFromTopOnly = true,
-  dragHandleZoneHeight = 88
+  dragHandleZoneHeight = 88,
+  dragEnabled = true
 }) {
-  const translateY = useSharedValue(0);
-  const canDrag = useSharedValue(!dragFromTopOnly);
+  const translateY = useSharedValue(OPEN_TRANSLATE_Y);
+  const backdropOpacity = useSharedValue(0);
+  const surfaceOpacity = useSharedValue(0);
+
+  useEffect(() => {
+    translateY.value = withSpring(0, motion.spring.sheet);
+    backdropOpacity.value = withTiming(1, {
+      duration: motion.timing.standard,
+      easing: openEasing
+    });
+    surfaceOpacity.value = withTiming(1, {
+      duration: motion.timing.standard,
+      easing: openEasing
+    });
+  }, [backdropOpacity, surfaceOpacity, translateY]);
 
   const closeSheet = useCallback((velocityY = 0) => {
     const closeDuration = velocityY > 1450 ? motion.timing.quick : motion.timing.standard;
+    backdropOpacity.value = withTiming(0, { duration: closeDuration, easing: closeEasing });
+    surfaceOpacity.value = withTiming(0, { duration: closeDuration, easing: closeEasing });
     translateY.value = withTiming(CLOSE_TRANSLATE_Y, { duration: closeDuration, easing: closeEasing }, finished => {
       if (finished && onClose) {
         runOnJS(onClose)();
       }
     });
-  }, [onClose, translateY]);
+  }, [backdropOpacity, onClose, surfaceOpacity, translateY]);
 
   const panGesture = Gesture.Pan()
-    .onStart(event => {
-      canDrag.value = dragFromTopOnly ? event.y <= dragHandleZoneHeight : true;
-    })
     .onUpdate(event => {
-      if (!canDrag.value) {
-        return;
-      }
-
       if (event.translationY < 0) {
         translateY.value = Math.max(event.translationY * 0.18, -MAX_PULL_UP);
         return;
@@ -48,11 +60,6 @@ export default function PrototypeDismissibleSheet({
       translateY.value = event.translationY;
     })
     .onEnd(event => {
-      if (!canDrag.value) {
-        translateY.value = withSpring(0, motion.spring.sheet);
-        return;
-      }
-
       const shouldClose = event.translationY > CLOSE_DISTANCE || event.velocityY > CLOSE_VELOCITY;
 
       if (shouldClose) {
@@ -76,18 +83,44 @@ export default function PrototypeDismissibleSheet({
 
   const animatedSheetStyle = useAnimatedStyle(() => {
     return {
-      transform: [{ translateY: translateY.value }]
+      opacity: surfaceOpacity.value,
+      transform: [
+        { translateY: translateY.value },
+        { scale: 0.992 + surfaceOpacity.value * 0.008 }
+      ]
+    };
+  });
+
+  const animatedBackdropStyle = useAnimatedStyle(() => {
+    return {
+      opacity: backdropOpacity.value
     };
   });
 
   return (
     <View style={styles.overlay} pointerEvents="box-none">
-      <Pressable style={[styles.backdrop, { backgroundColor: backdropColor }]} onPress={() => closeSheet(0)} />
-      <GestureDetector gesture={panGesture}>
-        <Animated.View style={[animatedSheetStyle, sheetStyle]}>
-          {children}
-        </Animated.View>
-      </GestureDetector>
+      <AnimatedPressable
+        style={[styles.backdrop, { backgroundColor: backdropColor }, animatedBackdropStyle]}
+        onPress={() => closeSheet(0)}
+      />
+      <Animated.View
+        style={[styles.sheetLayer, animatedSheetStyle, sheetStyle]}
+      >
+        {children}
+        {dragEnabled
+          ? dragFromTopOnly
+            ? (
+              <GestureDetector gesture={panGesture}>
+                <View style={[styles.dragHandleZone, { height: dragHandleZoneHeight }]} />
+              </GestureDetector>
+            )
+            : (
+              <GestureDetector gesture={panGesture}>
+                <View style={styles.fullSheetGestureLayer} />
+              </GestureDetector>
+            )
+          : null}
+      </Animated.View>
     </View>
   );
 }
@@ -98,6 +131,21 @@ const styles = StyleSheet.create({
     zIndex: 18
   },
   backdrop: {
-    ...StyleSheet.absoluteFillObject
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 1
+  },
+  sheetLayer: {
+    zIndex: 2
+  },
+  dragHandleZone: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    zIndex: 4
+  },
+  fullSheetGestureLayer: {
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 4
   }
 });

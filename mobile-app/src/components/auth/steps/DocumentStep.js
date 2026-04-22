@@ -10,7 +10,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as DocumentPicker from 'expo-document-picker';
-import { fonts } from '../../../common-local/font';
+import { fonts } from '../../../theme/runtimeTokens';
 import ContinueButton from '../common/ContinueButton';
 import onboardingTheme from '../common/onboardingTheme';
 import driverDocumentExtractionService from '../../../services/DriverDocumentExtractionService';

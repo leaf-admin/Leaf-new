@@ -2,12 +2,121 @@ import Logger from '../utils/Logger';
 import React, { useEffect, useState, useRef, useCallback } from 'react';
 import { useDispatch } from 'react-redux';
 import { useAuth } from '../hooks/useAuth';
-import { FETCH_USER_SUCCESS } from '../common-local/types';
-import database from '@react-native-firebase/database';
+import { FETCH_USER_SUCCESS } from '../state/actionTypes';
 import interactiveNotificationService from '../services/InteractiveNotificationService';
 import persistentRideNotificationService from '../services/PersistentRideNotificationService';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { Platform } from 'react-native';
+import { ActivityIndicator, Image, Platform, StyleSheet, Text, View } from 'react-native';
+import { allowTestUserTools } from '../config/runtimeAccessPolicy';
+import mobileProfileService from '../services/MobileProfileService';
+import { restoreQaSeedProfile } from '../utils/qaSeedProfile';
+
+const AUTH_UID_STORAGE_KEY = '@auth_uid';
+const USER_DATA_STORAGE_KEY = '@user_data';
+const TEST_MODE_STORAGE_KEY = '@test_mode';
+
+const normalizeUserType = (userType) => {
+  if (userType === 'passenger') {
+    return 'customer';
+  }
+  return userType === 'driver' ? 'driver' : userType === 'customer' ? 'customer' : null;
+};
+
+const normalizePersistedProfile = (profile) => {
+  if (!profile || typeof profile !== 'object') {
+    return null;
+  }
+
+  const uid = String(profile.uid || '').trim();
+  if (!uid) {
+    return null;
+  }
+
+  const normalizedUserType = normalizeUserType(
+    profile.usertype || profile.userType || profile?.profile?.usertype || profile?.profile?.userType
+  );
+
+  return {
+    ...profile,
+    uid,
+    ...(normalizedUserType ? { usertype: normalizedUserType, userType: normalizedUserType } : {})
+  };
+};
+
+const resolveStoredProfileRole = (profile) =>
+  normalizeUserType(
+    profile?.usertype ||
+      profile?.userType ||
+      profile?.role ||
+      profile?.profile?.usertype ||
+      profile?.profile?.userType ||
+      profile?.profile?.role
+  );
+
+const buildCompleteUserDataFromProfile = (firebaseUser, profile) => {
+  const normalizedProfile = normalizePersistedProfile(profile);
+  if (!normalizedProfile?.uid) {
+    return null;
+  }
+
+  return {
+    uid: normalizedProfile.uid,
+    email: normalizedProfile.email || firebaseUser?.email,
+    phoneNumber:
+      normalizedProfile.phoneNumber ||
+      normalizedProfile.mobile ||
+      firebaseUser?.phoneNumber,
+    phone:
+      normalizedProfile.phone ||
+      normalizedProfile.mobile ||
+      normalizedProfile.phoneNumber ||
+      firebaseUser?.phoneNumber,
+    firstName: normalizedProfile.firstName || '',
+    lastName: normalizedProfile.lastName || '',
+    usertype: resolveStoredProfileRole(normalizedProfile) || 'customer',
+    mobile: normalizedProfile.mobile || firebaseUser?.phoneNumber,
+    profileImage: normalizedProfile.profileImage || null,
+    walletBalance: normalizedProfile.walletBalance || 0,
+    ...normalizedProfile,
+    profile: {
+      uid: normalizedProfile.uid,
+      email: normalizedProfile.email || firebaseUser?.email,
+      phoneNumber:
+        normalizedProfile.phoneNumber ||
+        normalizedProfile.mobile ||
+        firebaseUser?.phoneNumber,
+      firstName: normalizedProfile.firstName || '',
+      lastName: normalizedProfile.lastName || '',
+      usertype: resolveStoredProfileRole(normalizedProfile) || 'customer',
+      mobile: normalizedProfile.mobile || firebaseUser?.phoneNumber,
+      profileImage: normalizedProfile.profileImage || null,
+      walletBalance: normalizedProfile.walletBalance || 0,
+      ...normalizedProfile,
+    },
+  };
+};
+
+const AuthBootstrapShell = ({ syncing }) => (
+  <View style={styles.bootstrapContainer}>
+    <Image
+      source={require('../../assets/images/splash.png')}
+      style={styles.bootstrapImage}
+      resizeMode="cover"
+    />
+    <View style={styles.bootstrapScrim} />
+    <View style={styles.bootstrapContent}>
+      <ActivityIndicator size="large" color="#9FE870" />
+      <Text style={styles.bootstrapTitle}>
+        {syncing ? 'Sincronizando sua sessão...' : 'Preparando sua experiência...'}
+      </Text>
+      <Text style={styles.bootstrapSubtitle}>
+        {syncing
+          ? 'Estamos reconciliando seus dados antes de abrir o mapa.'
+          : 'Estamos restaurando sua sessão com segurança.'}
+      </Text>
+    </View>
+  </View>
+);
 
 
 const AuthProvider = ({ children }) => {
@@ -22,10 +131,14 @@ const AuthProvider = ({ children }) => {
 
     setIsSyncing(true);
     try {
-      Logger.log('🔄 Sincronizando dados do usuário no Realtime Database...');
+      Logger.log('🔄 Sincronizando dados do usuário na fonte moderna...');
 
       // 🚀 BYPASS PARA USUÁRIO DE TESTE - Permitir acesso total
-      if (firebaseUser.uid && firebaseUser.uid.includes('test-user-dev')) {
+      if (
+        allowTestUserTools() &&
+        firebaseUser.uid &&
+        (firebaseUser.uid.includes('test-user-dev') || firebaseUser.uid.includes('test-customer-dev'))
+      ) {
         Logger.log('🧪 BYPASS: Usuário de teste detectado - permitindo acesso total ao database');
 
         // Verificar se é customer de teste
@@ -96,20 +209,101 @@ const AuthProvider = ({ children }) => {
         return;
       }
 
-      // Buscar dados do usuário no Realtime Database
-      const userRef = database().ref(`users/${firebaseUser.uid}`);
-      const snapshot = await userRef.once('value');
+      let cachedProfile = null;
+      let testModeEnabled = false;
+      try {
+        const [[, storedUidValue], [, cachedProfileRaw], [, testModeValue]] =
+          await AsyncStorage.multiGet([
+            AUTH_UID_STORAGE_KEY,
+            USER_DATA_STORAGE_KEY,
+            TEST_MODE_STORAGE_KEY,
+          ]);
+        const storedUid = String(storedUidValue || '').trim();
+        testModeEnabled = String(testModeValue || '').trim() === 'true';
+        cachedProfile = cachedProfileRaw
+          ? normalizePersistedProfile(JSON.parse(cachedProfileRaw))
+          : null;
 
-      if (snapshot.exists()) {
-        const userData = snapshot.val();
-        Logger.log('✅ Dados encontrados no Realtime Database:', userData);
+        if (!cachedProfile && storedUid) {
+          const rebuiltQaProfile = await restoreQaSeedProfile({
+            AsyncStorage,
+            authUidKey: AUTH_UID_STORAGE_KEY,
+            userDataKey: USER_DATA_STORAGE_KEY,
+            driverActivationKey: `@prototype_driver_activation_${storedUid}`
+          });
 
-        // Criar payload completo com dados do Firebase Auth + Realtime Database
+          if (rebuiltQaProfile?.uid) {
+            cachedProfile = normalizePersistedProfile(rebuiltQaProfile);
+            Logger.log('🧪 AuthProvider - perfil QA reconstruído do cache local:', {
+              uid: cachedProfile.uid,
+              usertype: cachedProfile.usertype || cachedProfile.userType || null
+            });
+          }
+        }
+      } catch (cacheError) {
+        Logger.warn('⚠️ Erro ao restaurar perfil local no AuthProvider:', cacheError?.message || cacheError);
+        await AsyncStorage.multiRemove([USER_DATA_STORAGE_KEY, AUTH_UID_STORAGE_KEY]);
+      }
+
+      const cachedProfileRole = resolveStoredProfileRole(cachedProfile);
+      const firebaseUid = String(firebaseUser?.uid || '').trim();
+      if (
+        testModeEnabled &&
+        cachedProfile?.uid &&
+        cachedProfileRole &&
+        firebaseUid &&
+        cachedProfile.uid !== firebaseUid
+      ) {
+        Logger.warn('🧪 AuthProvider - sessão Firebase divergente do perfil QA semeado; priorizando cache local do simulador', {
+          firebaseUid,
+          seededUid: cachedProfile.uid,
+          seededRole: cachedProfileRole,
+        });
+
+        const seededUserData = buildCompleteUserDataFromProfile(firebaseUser, cachedProfile);
+        if (seededUserData) {
+          dispatch({
+            type: FETCH_USER_SUCCESS,
+            payload: seededUserData
+          });
+          await AsyncStorage.multiSet([
+            [AUTH_UID_STORAGE_KEY, seededUserData.uid],
+            [USER_DATA_STORAGE_KEY, JSON.stringify(seededUserData)]
+          ]);
+          hasSynced.current = true;
+          setIsSyncing(false);
+          return;
+        }
+      }
+
+      const remoteProfile = await mobileProfileService.getCurrentProfile({ suppressErrors: true });
+      const normalizedRemoteProfile = normalizePersistedProfile(remoteProfile);
+      const remoteProfileRole = resolveStoredProfileRole(normalizedRemoteProfile);
+      const shouldPreferCachedProfile =
+        testModeEnabled &&
+        cachedProfile?.uid &&
+        cachedProfileRole &&
+        (!normalizedRemoteProfile?.uid ||
+          normalizedRemoteProfile.uid !== cachedProfile.uid ||
+          (remoteProfileRole && remoteProfileRole !== cachedProfileRole));
+
+      const userData = shouldPreferCachedProfile
+        ? cachedProfile
+        : normalizedRemoteProfile || cachedProfile;
+
+      if (userData?.uid) {
+        Logger.log('✅ Dados encontrados na fonte moderna:', {
+          uid: userData.uid,
+          usertype: userData.usertype || userData.userType || null
+        });
+
+        // Criar payload completo com dados do Firebase Auth + perfil moderno
         const completeUserData = {
           uid: firebaseUser.uid,
           email: firebaseUser.email || userData.email,
-          phoneNumber: firebaseUser.phoneNumber || userData.mobile,
-          // Dados do Realtime Database
+          phoneNumber: firebaseUser.phoneNumber || userData.mobile || userData.phoneNumber,
+          phone: firebaseUser.phoneNumber || userData.phone || userData.mobile || userData.phoneNumber,
+          // Dados do perfil moderno
           firstName: userData.firstName || '',
           lastName: userData.lastName || '',
           usertype: userData.usertype || 'customer',
@@ -138,6 +332,10 @@ const AuthProvider = ({ children }) => {
           type: FETCH_USER_SUCCESS,
           payload: completeUserData
         });
+        await AsyncStorage.multiSet([
+          [AUTH_UID_STORAGE_KEY, firebaseUser.uid],
+          [USER_DATA_STORAGE_KEY, JSON.stringify(completeUserData)]
+        ]);
 
         Logger.log('✅ Usuário sincronizado com sucesso no Redux');
 
@@ -154,22 +352,23 @@ const AuthProvider = ({ children }) => {
         try {
           const fcmToken = await AsyncStorage.getItem('fcmToken');
           if (fcmToken) {
-            Logger.log('📱 Token FCM encontrado, salvando no Firebase:', fcmToken.substring(0, 20) + '...');
+            Logger.log('📱 Token FCM encontrado, atualizando perfil moderno:', fcmToken.substring(0, 20) + '...');
 
-            await userRef.update({
+            await mobileProfileService.upsertCurrentProfile({
               fcmToken: fcmToken,
               pushToken: fcmToken,
               platform: Platform.OS,
               lastSeen: new Date().toISOString()
             });
 
-            Logger.log('✅ Token FCM salvo no Firebase Realtime Database');
+            Logger.log('✅ Token FCM salvo no backend moderno');
           }
         } catch (fcmError) {
           Logger.error('❌ Erro ao salvar token FCM:', fcmError);
         }
+        hasSynced.current = true;
       } else {
-        Logger.log('⚠️ Usuário não encontrado no Realtime Database - NÃO criando perfil básico');
+        Logger.log('⚠️ Usuário não encontrado na fonte moderna - NÃO criando perfil básico');
         Logger.log('⚠️ Deixando AppCommon controlar o fluxo de onboarding');
 
         // NÃO criar perfil básico - deixar AppCommon controlar
@@ -194,12 +393,9 @@ const AuthProvider = ({ children }) => {
           payload: minimalUserData
         });
 
-        // NÃO marcar como sincronizado para permitir onboarding
         hasSynced.current = false;
       }
 
-      // Marcar como sincronizado
-      // hasSynced.current = true; // Manter como não sincronizado
     } catch (error) {
       Logger.error('❌ Erro ao sincronizar dados do usuário:', error);
 
@@ -227,21 +423,58 @@ const AuthProvider = ({ children }) => {
     } finally {
       setIsSyncing(false);
     }
-  }, [dispatch]);
+  }, [dispatch, isSyncing]);
 
   useEffect(() => {
     if (user && !loading && !hasSynced.current) {
       // Usuário autenticado no Firebase, sincronizar dados completos apenas uma vez
       syncUserData(user);
     }
-  }, [user, loading]);
+  }, [user, loading, syncUserData]);
 
-  // Não renderizar nada enquanto carrega
-  if (loading) {
-    return null;
+  const shouldRenderBootstrapShell = loading || (Boolean(user) && isSyncing);
+
+  if (shouldRenderBootstrapShell) {
+    return <AuthBootstrapShell syncing={Boolean(user) && isSyncing} />;
   }
 
   return children;
 };
+
+const styles = StyleSheet.create({
+  bootstrapContainer: {
+    flex: 1,
+    backgroundColor: '#0C2010',
+  },
+  bootstrapImage: {
+    ...StyleSheet.absoluteFillObject,
+    width: '100%',
+    height: '100%',
+  },
+  bootstrapScrim: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(4, 16, 7, 0.42)',
+  },
+  bootstrapContent: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 32,
+  },
+  bootstrapTitle: {
+    marginTop: 18,
+    color: '#F5F7F7',
+    fontSize: 18,
+    fontWeight: '700',
+    textAlign: 'center',
+  },
+  bootstrapSubtitle: {
+    marginTop: 8,
+    color: 'rgba(245, 247, 247, 0.82)',
+    fontSize: 14,
+    lineHeight: 20,
+    textAlign: 'center',
+  },
+});
 
 export default AuthProvider; 

@@ -1,9 +1,10 @@
 import React, { useMemo, useState } from 'react';
-import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { Alert, Linking, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { fonts } from '../../../common-local/font';
+import { fonts } from '../../../theme/runtimeTokens';
 import ContinueButton from '../common/ContinueButton';
 import onboardingTheme from '../common/onboardingTheme';
+import { AppConfig } from '../../../../config/AppConfig';
 
 const { color, radius, spacing, elevation } = onboardingTheme;
 
@@ -63,6 +64,26 @@ const CredentialsStep = ({ onCreated, onBack, initialData = {} }) => {
     onCreated(consents);
   };
 
+  const openLegalLink = async (url, label) => {
+    try {
+      const normalizedUrl = String(url || '').trim();
+      if (!normalizedUrl) {
+        Alert.alert('Indisponível', `URL de ${label} não configurada.`);
+        return;
+      }
+
+      const supported = await Linking.canOpenURL(normalizedUrl);
+      if (!supported) {
+        Alert.alert('Indisponível', `Não foi possível abrir ${label} agora.`);
+        return;
+      }
+
+      await Linking.openURL(normalizedUrl);
+    } catch (_error) {
+      Alert.alert('Erro', `Não foi possível abrir ${label}.`);
+    }
+  };
+
   return (
     <ScrollView style={styles.container} showsVerticalScrollIndicator={false} contentContainerStyle={styles.content}>
       <View style={styles.header}>
@@ -77,6 +98,15 @@ const CredentialsStep = ({ onCreated, onBack, initialData = {} }) => {
           ? 'Revise e confirme os consentimentos obrigatórios para ativação do motorista.'
           : 'Revise e confirme os termos para finalizar sua conta de passageiro.'}
       </Text>
+
+      <View style={styles.legalLinksRow}>
+        <TouchableOpacity onPress={() => openLegalLink(AppConfig.terms_of_service_url, 'Termos de Uso')}>
+          <Text style={styles.legalLinkText}>Ler Termos de Uso</Text>
+        </TouchableOpacity>
+        <TouchableOpacity onPress={() => openLegalLink(AppConfig.privacy_policy_url, 'Política de Privacidade')}>
+          <Text style={styles.legalLinkText}>Ler Política de Privacidade</Text>
+        </TouchableOpacity>
+      </View>
 
       <View style={styles.block}>
         <ConsentRow
@@ -159,6 +189,18 @@ const styles = StyleSheet.create({
     color: color.textSecondary,
     fontFamily: fonts.Regular,
     marginBottom: spacing.sm
+  },
+  legalLinksRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: spacing.sm
+  },
+  legalLinkText: {
+    fontSize: 12,
+    lineHeight: 16,
+    color: color.accent,
+    textDecorationLine: 'underline',
+    fontFamily: fonts.Medium
   },
   block: {
     borderWidth: 1,

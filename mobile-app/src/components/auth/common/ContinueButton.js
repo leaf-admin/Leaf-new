@@ -1,6 +1,6 @@
 import React from 'react';
 import { TouchableOpacity, Text, StyleSheet } from 'react-native';
-import { fonts } from '../../../common-local/font';
+import { fonts } from '../../../theme/runtimeTokens';
 import onboardingTheme from './onboardingTheme';
 
 const { color, radius, spacing } = onboardingTheme;

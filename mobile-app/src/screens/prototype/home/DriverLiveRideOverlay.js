@@ -31,12 +31,41 @@ function formatCurrency(value) {
   return `R$ ${toNumber(value, 0).toFixed(2).replace(".", ",")}`;
 }
 
+function resolveDisplayNetAmount(activeRide, driverTripMeta) {
+  const preferredPositiveAmount =
+    [
+      activeRide?.driverNetAmountLocked,
+      activeRide?.lockedDriverNetAmount,
+      activeRide?.estimatedDriverNetAmount,
+      activeRide?.driverNetAmount,
+      driverTripMeta?.fare,
+      activeRide?.fare,
+    ].find((value) => Number.isFinite(Number(value)) && Number(value) > 0) ?? null;
+
+  if (preferredPositiveAmount !== null) {
+    return Number(preferredPositiveAmount);
+  }
+
+  const firstKnownAmount =
+    [
+      activeRide?.driverNetAmountLocked,
+      activeRide?.lockedDriverNetAmount,
+      activeRide?.estimatedDriverNetAmount,
+      activeRide?.driverNetAmount,
+      driverTripMeta?.fare,
+      activeRide?.fare,
+    ].find((value) => Number.isFinite(Number(value))) ?? 0;
+
+  return Number(firstKnownAmount || 0);
+}
+
 function formatDistanceKm(value) {
   const numeric = Number(value);
   if (!Number.isFinite(numeric) || numeric <= 0) {
     return "Em cálculo";
   }
-  return `${numeric.toFixed(numeric >= 10 ? 0 : 1).replace(".", ",")} km`;
+  const fractionDigits = numeric >= 10 ? 0 : numeric >= 2 ? 1 : 2;
+  return `${numeric.toFixed(fractionDigits).replace(".", ",")} km`;
 }
 
 function formatPaymentMethod(method, compact = false) {
@@ -320,15 +349,7 @@ function DriverLiveRideOverlay({
         "",
     ).trim() || "Destino indisponível";
   const fareLabel = hasActiveRide
-    ? formatCurrency(
-        activeRide?.driverNetAmountLocked ??
-          activeRide?.lockedDriverNetAmount ??
-          activeRide?.estimatedDriverNetAmount ??
-          activeRide?.driverNetAmount ??
-          driverTripMeta?.fare ??
-          activeRide?.fare ??
-          0,
-      )
+    ? formatCurrency(resolveDisplayNetAmount(activeRide, driverTripMeta))
     : getDriverOfferPayoutLabel(offer) || "--";
   const passengerLabel = String(
     offer?.passenger ||
@@ -378,11 +399,21 @@ function DriverLiveRideOverlay({
       : true;
   const showNavigationButton = Boolean(
     onOpenNavigation &&
-    ["accepted", "started"].includes(normalizedActiveStatus),
+    ["accepted", "arrived", "started"].includes(normalizedActiveStatus),
+  );
+  const showCompactNavigationButton = Boolean(
+    showNavigationButton &&
+      ["accepted", "started"].includes(normalizedActiveStatus),
   );
   const canInterruptOperational =
     typeof interruptRideOperationalFlow === "function" &&
     normalizedActiveStatus === "started";
+  const showCompactProblemButton = Boolean(
+    normalizedActiveStatus === "started" && canInterruptOperational,
+  );
+  const shouldStackCompactPrimaryAction = Boolean(
+    showCompactNavigationButton && showCompactProblemButton,
+  );
   const hasPendingExtensionDecision = [
     "driver_decision_pending",
     "pending_payment",
@@ -585,49 +616,69 @@ function DriverLiveRideOverlay({
         </View>
       </TouchableOpacity>
 
-      <View style={styles.compactActionsRow}>
-        {normalizedActiveStatus === "accepted" && showNavigationButton ? (
-          <PrototypePrimaryButton
-            label="Navegar"
-            icon="navigate-outline"
-            onPress={onOpenNavigation}
-            style={[styles.compactSecondaryButton, styles.compactHalfButton]}
-          />
-        ) : null}
+      <View style={styles.compactActionsGroup}>
+        <View style={styles.compactActionsRow}>
+          {showCompactNavigationButton ? (
+            <PrototypePrimaryButton
+              label="Navegar"
+              icon="navigate-outline"
+              onPress={onOpenNavigation}
+              style={[styles.compactSecondaryButton, styles.compactHalfButton]}
+            />
+          ) : null}
 
-        {normalizedActiveStatus === "started" && canInterruptOperational ? (
-          <TouchableOpacity
-            activeOpacity={0.82}
-            style={[styles.compactProblemButton, styles.compactHalfButton]}
-            onPress={handleInterruptOperational}
-            disabled={busyAction === "interrupt"}
-            testID="driver-live-trip-report-problem-button"
-            accessibilityLabel="driver-live-trip-report-problem-button"
-          >
-            <Ionicons name="warning-outline" size={15} color="#8A1F2B" />
-            <Text style={styles.compactProblemButtonText}>
-              {busyAction === "interrupt" ? "Reportando..." : "Reportar problema"}
-            </Text>
-          </TouchableOpacity>
-        ) : null}
+          {showCompactProblemButton ? (
+            <TouchableOpacity
+              activeOpacity={0.82}
+              style={[styles.compactProblemButton, styles.compactHalfButton]}
+              onPress={handleInterruptOperational}
+              disabled={busyAction === "interrupt"}
+              testID="driver-live-trip-report-problem-button"
+              accessibilityLabel="driver-live-trip-report-problem-button"
+            >
+              <Ionicons name="warning-outline" size={15} color="#8A1F2B" />
+              <Text style={styles.compactProblemButtonText}>
+                {busyAction === "interrupt" ? "Reportando..." : "Reportar problema"}
+              </Text>
+            </TouchableOpacity>
+          ) : null}
 
-        {primaryActionLabel ? (
+          {primaryActionLabel && !shouldStackCompactPrimaryAction ? (
+            <PrototypePrimaryButton
+              label={busyAction === "trip" ? "Atualizando..." : primaryActionLabel}
+              icon={
+                normalizedActiveStatus === "started"
+                  ? "flag-outline"
+                  : "checkmark-circle-outline"
+              }
+              disabled={busyAction === "trip" || !primaryActionEnabled}
+              onPress={handleTripPrimaryAction}
+              style={[
+                styles.tripPrimaryButton,
+                styles.compactPrimaryButton,
+                (showCompactNavigationButton || showCompactProblemButton)
+                  ? styles.compactHalfButton
+                  : styles.compactPrimaryButtonFull,
+              ]}
+              testID={primaryActionTestID}
+              accessibilityLabel={
+                busyAction === "trip" ? "Atualizando..." : primaryActionLabel
+              }
+            />
+          ) : null}
+        </View>
+
+        {primaryActionLabel && shouldStackCompactPrimaryAction ? (
           <PrototypePrimaryButton
             label={busyAction === "trip" ? "Atualizando..." : primaryActionLabel}
-            icon={
-              normalizedActiveStatus === "started"
-                ? "flag-outline"
-                : "checkmark-circle-outline"
-            }
+            icon="flag-outline"
             disabled={busyAction === "trip" || !primaryActionEnabled}
             onPress={handleTripPrimaryAction}
             style={[
               styles.tripPrimaryButton,
               styles.compactPrimaryButton,
-              (normalizedActiveStatus === "accepted" && !showNavigationButton) ||
-              (normalizedActiveStatus === "started" && !canInterruptOperational)
-                ? styles.compactPrimaryButtonFull
-                : styles.compactHalfButton,
+              styles.compactPrimaryButtonStacked,
+              styles.compactPrimaryButtonFull,
             ]}
             testID={primaryActionTestID}
             accessibilityLabel={
@@ -1552,8 +1603,11 @@ const styles = StyleSheet.create({
     color: color.text.primary,
   },
   compactActionsRow: {
-    marginTop: 12,
     flexDirection: "row",
+    gap: 10,
+  },
+  compactActionsGroup: {
+    marginTop: 12,
     gap: 10,
   },
   compactHalfButton: {
@@ -1566,6 +1620,9 @@ const styles = StyleSheet.create({
   },
   compactPrimaryButtonFull: {
     flex: 1,
+  },
+  compactPrimaryButtonStacked: {
+    marginTop: 0,
   },
   compactSecondaryButton: {
     marginTop: 0,

@@ -3,9 +3,12 @@ import messaging from '@react-native-firebase/messaging';
 import { Platform } from 'react-native';
 import * as Device from 'expo-device';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { store } from '../common-local/store';
+import { store } from '../state/appStore';
 import WebSocketManager from './WebSocketManager';
 import TestUserService from './TestUserService';
+
+const SHOULD_DISABLE_SIMULATOR_LOCAL_NOTIFICATIONS =
+    Platform.OS === 'ios' && !Device.isDevice;
 
 class FCMNotificationService {
     constructor() {
@@ -377,7 +380,7 @@ class FCMNotificationService {
             Logger.log('📱 Notificação padrão processada:', notification?.title);
 
             // Mostrar notificação local usando expo-notifications
-            if (notification) {
+            if (notification && !SHOULD_DISABLE_SIMULATOR_LOCAL_NOTIFICATIONS) {
                 const { scheduleNotificationAsync } = await import('expo-notifications');
 
                 await scheduleNotificationAsync({

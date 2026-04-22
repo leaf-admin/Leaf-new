@@ -14,13 +14,15 @@ import {
   Image,
   KeyboardAvoidingView,
   Keyboard,
-  ScrollView
+  ScrollView,
+  Linking
 } from 'react-native';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import hybridOTPService from '../services/HybridOTPService';
-import { fonts } from '../common-local/font';
+import { fonts } from '../theme/runtimeTokens';
 import onboardingTheme from '../components/auth/common/onboardingTheme';
+import { AppConfig } from '../../config/AppConfig';
 
 const { color, radius, spacing, elevation } = onboardingTheme;
 
@@ -150,8 +152,7 @@ export default function PhoneInputScreen() {
           name,
           userType,
           verificationId: result.verificationId,
-          otpProvider: result.provider,
-          otpCode: result.otp // Para debug/teste
+          otpProvider: result.provider
         };
         await AsyncStorage.setItem('@temp_user_data', JSON.stringify(tempData));
 
@@ -203,14 +204,35 @@ export default function PhoneInputScreen() {
     // Implementar login com Facebook
   };
 
+  const openLegalUrl = async (url, label) => {
+    try {
+      const normalizedUrl = String(url || '').trim();
+      if (!normalizedUrl) {
+        Alert.alert("Indisponível", `URL de ${label} não configurada.`);
+        return;
+      }
+
+      const supported = await Linking.canOpenURL(normalizedUrl);
+      if (!supported) {
+        Alert.alert("Indisponível", `Não foi possível abrir ${label} agora.`);
+        return;
+      }
+
+      await Linking.openURL(normalizedUrl);
+    } catch (error) {
+      Logger.error(`PhoneInputScreen - Erro ao abrir ${label}:`, error);
+      Alert.alert("Erro", `Não foi possível abrir ${label}. Tente novamente.`);
+    }
+  };
+
   const openTerms = () => {
     Logger.log("PhoneInputScreen - Abrindo Termos de Uso");
-    // Abrir termos de uso
+    openLegalUrl(AppConfig.terms_of_service_url, "Termos de Uso");
   };
 
   const openPrivacy = () => {
     Logger.log("PhoneInputScreen - Abrindo Política de Privacidade");
-    // Abrir política de privacidade
+    openLegalUrl(AppConfig.privacy_policy_url, "Política de Privacidade");
   };
 
   return (

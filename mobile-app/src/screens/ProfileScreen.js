@@ -20,15 +20,17 @@ import {
 import { Icon } from 'react-native-elements';
 import { Ionicons } from '@expo/vector-icons';
 import { useSelector, useDispatch } from 'react-redux';
-import { colors } from '../common-local/theme';
-import { fonts } from '../common-local/font';
+import { colors } from '../theme/runtimeTokens';
+import { fonts } from '../theme/runtimeTokens';
 import { cardTypography } from '../common-local/typography';
-import { MAIN_COLOR } from '../common-local/sharedFunctions';
+import { MAIN_COLOR } from '../common/sharedFunctions';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { SkeletonLoader, LoadingSpinner } from '../components/LoadingStates';
 import { useResponsiveLayout } from '../components/ResponsiveLayout';
-import { signOff } from '../common-local/actions/authactions';
+import { signOff } from '../services/runtime/profileActionsBridge';
+import robotaxiPrototypeTokens from '../components/design-system/robotaxiPrototypeTokens';
 
+const { color, typography } = robotaxiPrototypeTokens;
 
 const { width, height } = Dimensions.get('window');
 
@@ -942,88 +944,88 @@ export default function ProfileScreen({ navigation }) {
 const styles = StyleSheet.create({
     container: {
         flex: 1,
-        backgroundColor: '#fff',
+        backgroundColor: color.bg.app
     },
     header: {
         flexDirection: 'row',
         justifyContent: 'space-between',
         alignItems: 'center',
-        paddingHorizontal: 20,
-        paddingTop: 45,
-        paddingBottom: 16,
+        paddingHorizontal: 14,
+        paddingTop: Platform.OS === 'ios' ? 54 : 34,
+        paddingBottom: 10
     },
     headerButton: {
-        width: 40,
-        height: 40,
-        borderRadius: 20,
+        width: 38,
+        height: 38,
+        borderRadius: 19,
         justifyContent: 'center',
         alignItems: 'center',
-        shadowColor: '#000',
-        shadowOffset: {
-            width: 0,
-            height: 1,
-        },
-        shadowOpacity: 0.1,
-        shadowRadius: 2,
-        elevation: 2,
+        backgroundColor: color.surface.primary,
+        borderWidth: 1,
+        borderColor: color.border.subtle
     },
     headerTitle: {
-        fontSize: 18,
-        fontWeight: 'bold',
+        fontSize: typography.subtitle.size,
+        lineHeight: typography.subtitle.lineHeight,
         color: colors.BLACK,
-        fontFamily: fonts.Bold,
+        fontFamily: fonts.SemiBold
     },
     headerRightContainer: {
         flexDirection: 'row',
         alignItems: 'center',
-        gap: 12,
+        gap: 8
     },
     themeSwitchTouchable: {
-        width: 72,
-        height: 40,
-        borderRadius: 20,
+        width: 52,
+        height: 32,
+        borderRadius: 16,
         justifyContent: 'center',
-        alignItems: 'center',
+        alignItems: 'center'
     },
     themeSwitchTrack: {
-        width: 72,
-        height: 40,
-        borderRadius: 20,
-        borderWidth: 1.5,
+        width: 52,
+        height: 32,
+        borderRadius: 16,
+        borderWidth: 1,
         flexDirection: 'row',
         alignItems: 'center',
         position: 'relative',
         justifyContent: 'space-between',
-        paddingHorizontal: 6,
-        backgroundColor: '#fff',
-        borderColor: '#ddd',
+        paddingHorizontal: 4,
+        backgroundColor: color.surface.primary,
+        borderColor: color.border.subtle
     },
     themeSwitchIconBubble: {
-        width: 28,
-        height: 28,
-        borderRadius: 14,
+        width: 22,
+        height: 22,
+        borderRadius: 11,
         justifyContent: 'center',
         alignItems: 'center',
-        backgroundColor: '#111',
+        backgroundColor: '#1A1A1A'
     },
     content: {
         flex: 1,
-        paddingHorizontal: 20,
-        paddingTop: 10,
+        paddingHorizontal: 14,
+        paddingTop: 8
     },
     profileSection: {
         flexDirection: 'row',
         alignItems: 'center',
-        marginTop: 25,
-        marginBottom: 20,
+        marginTop: 10,
+        marginBottom: 12,
+        backgroundColor: color.surface.primary,
+        borderWidth: 1,
+        borderColor: color.border.subtle,
+        borderRadius: 18,
+        padding: 12
     },
     profileImageContainer: {
         marginRight: 16,
     },
     profileImage: {
-        width: 60,
-        height: 60,
-        borderRadius: 30,
+        width: 64,
+        height: 64,
+        borderRadius: 32
     },
     profileInfo: {
         flex: 1,
@@ -1032,11 +1034,12 @@ const styles = StyleSheet.create({
         // Usa cardTypography.subtitle via style prop
     },
     userName: {
-        fontSize: 20,
+        fontSize: typography.subtitle.size,
+        lineHeight: typography.subtitle.lineHeight,
         fontWeight: 'bold',
         color: colors.BLACK,
-        fontFamily: fonts.Bold,
-        marginBottom: 2,
+        fontFamily: fonts.SemiBold,
+        marginBottom: 1
     },
     partnerInfoRow: {
         flexDirection: 'row',
@@ -1069,16 +1072,22 @@ const styles = StyleSheet.create({
         fontWeight: 'bold',
     },
     menuContainer: {
-        marginBottom: 15,
+        marginBottom: 12,
+        backgroundColor: color.surface.primary,
+        borderWidth: 1,
+        borderColor: color.border.subtle,
+        borderRadius: 18,
+        overflow: 'hidden'
     },
     menuItem: {
         flexDirection: 'row',
         justifyContent: 'space-between',
         alignItems: 'center',
-        paddingVertical: 16,
-        paddingHorizontal: 0,
+        minHeight: 52,
+        paddingVertical: 0,
+        paddingHorizontal: 12,
         borderBottomWidth: 1,
-        borderBottomColor: '#e8e8e8',
+        borderBottomColor: color.border.subtle
     },
     menuItemLeft: {
         flexDirection: 'row',
@@ -1086,7 +1095,7 @@ const styles = StyleSheet.create({
         flex: 1,
     },
     menuIcon: {
-        marginRight: 12,
+        marginRight: 10
     },
     menuItemText: {
         // Usa cardTypography.title via style prop
@@ -1094,8 +1103,8 @@ const styles = StyleSheet.create({
     },
     logoutContainer: {
         alignItems: 'center',
-        marginTop: 20,
-        marginBottom: 40,
+        marginTop: 10,
+        marginBottom: 30
     },
     skeletonContainer: {
         flex: 1,
@@ -1113,35 +1122,32 @@ const styles = StyleSheet.create({
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'center',
-        backgroundColor: '#FFF5F5',
+        backgroundColor: 'rgba(138,42,42,0.08)',
         borderWidth: 1,
-        borderColor: '#FFE5E5',
-        borderRadius: 12,
-        paddingVertical: 14,
-        paddingHorizontal: 24,
-        minWidth: 140,
+        borderColor: 'rgba(138,42,42,0.25)',
+        borderRadius: 14,
+        paddingVertical: 12,
+        paddingHorizontal: 20,
+        minWidth: 160
     },
     logoutIcon: {
         marginRight: 8,
     },
     logoutText: {
-        fontSize: 16,
-        color: '#FF3B30',
-        fontFamily: fonts.Bold,
-        fontWeight: '600',
+        fontSize: typography.caption.size,
+        lineHeight: typography.caption.lineHeight,
+        color: '#8A2A2A',
+        fontFamily: fonts.SemiBold
     },
     // Card de Saldo
     balanceCard: {
-        marginHorizontal: 20,
-        marginTop: 20,
+        marginHorizontal: 0,
+        marginTop: 8,
         marginBottom: 10,
-        padding: 20,
+        padding: 14,
         borderRadius: 16,
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.1,
-        shadowRadius: 8,
-        elevation: 4,
+        borderWidth: 1,
+        borderColor: color.border.subtle
     },
     balanceCardHeader: {
         flexDirection: 'row',
@@ -1149,15 +1155,16 @@ const styles = StyleSheet.create({
         marginBottom: 12,
     },
     balanceCardTitle: {
-        fontSize: 18,
+        fontSize: typography.body.size,
+        lineHeight: typography.body.lineHeight,
         fontFamily: fonts.Bold,
-        marginLeft: 12,
+        marginLeft: 10
     },
     balanceCardAmount: {
-        fontSize: 32,
+        fontSize: 30,
         fontFamily: fonts.Bold,
         color: '#1A330E',
-        marginBottom: 8,
+        marginBottom: 6
     },
     balanceCardSubtitle: {
         fontSize: 14,

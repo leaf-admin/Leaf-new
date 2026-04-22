@@ -1,5 +1,5 @@
 import Logger from '../utils/Logger';
-import { store } from '../common-local/store';
+import { store } from '../state/appStore';
 
 
 class FCMSenderService {

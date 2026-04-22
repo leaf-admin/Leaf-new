@@ -15,7 +15,7 @@ import { Icon } from 'react-native-elements';
 import { colors } from '../common/theme';
 import i18n from '../i18n';
 import { useSelector, useDispatch } from 'react-redux';
-import { api } from '../common-local/api';
+import { getNotifications } from '../services/runtime/notificationsRuntimeBridge';
 import moment from 'moment/min/moment-with-locales';
 import { MAIN_COLOR } from '../common/sharedFunctions';
 import { fonts } from '../common/font';
@@ -23,7 +23,6 @@ import { fonts } from '../common/font';
 
 export default function Notifications(props) {
     const { t } = i18n;
-    const { getNotifications } = api;
     const dispatch = useDispatch();
     const auth = useSelector(state => state.auth);
     const [loading, setLoading] = useState(true);

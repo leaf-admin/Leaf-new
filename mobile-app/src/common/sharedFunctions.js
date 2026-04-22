@@ -5,7 +5,7 @@ import { colors } from './theme';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import i18n from '../i18n';
 import { api } from '../../common';
-import { getDirectionsApi as getDirectionsApiLocal, getDistanceMatrix as getDistanceMatrixLocal } from '../common-local/GoogleAPIFunctions';
+import { getDirectionsApi as getDirectionsApiLocal, getDistanceMatrix as getDistanceMatrixLocal } from '../services/runtime/locationRouteBridge';
 import TaxiModal from '../components/TaxiModal';
 var { height, width } = Dimensions.get('window');
 import { fonts } from './font';

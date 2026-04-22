@@ -29,8 +29,9 @@ const DEFAULT_DRIVER_ONBOARDING_STATE = Object.freeze({
       updatedAt: null,
       checklist: {
         cnhEar: false,
-        criminalRecord: false,
-        inssOrMei: false
+        vehicleRegistration: false,
+        inssOrMei: false,
+        backgroundCheckConsent: false
       }
     },
     [DRIVER_ONBOARDING_STAGE_KEYS.FACE_VALIDATION]: {
@@ -46,9 +47,7 @@ const DEFAULT_DRIVER_ONBOARDING_STATE = Object.freeze({
       completedAt: null,
       updatedAt: null,
       checklist: {
-        crlv: false,
-        vehicleInsurance: false,
-        vehiclePhoto: false
+        crlv: false
       }
     }
   },
@@ -78,6 +77,15 @@ function getStorageKey(uid) {
 function mergeChecklist(defaultChecklist = {}, inputChecklist = {}) {
   const nextChecklist = { ...defaultChecklist };
   Object.keys(defaultChecklist).forEach(fieldKey => {
+    if (
+      fieldKey === 'vehicleRegistration' &&
+      typeof inputChecklist.vehicleRegistration !== 'boolean' &&
+      typeof inputChecklist.criminalRecord === 'boolean'
+    ) {
+      nextChecklist[fieldKey] = inputChecklist.criminalRecord;
+      return;
+    }
+
     if (typeof inputChecklist[fieldKey] === 'boolean') {
       nextChecklist[fieldKey] = inputChecklist[fieldKey];
     }

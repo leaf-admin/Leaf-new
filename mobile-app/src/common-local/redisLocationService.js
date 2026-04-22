@@ -4,7 +4,7 @@ import { Platform } from 'react-native';
 const API_BASE_URL = String(
     process.env.EXPO_PUBLIC_API_URL ||
     process.env.EXPO_PUBLIC_BACKEND_URL ||
-    'https://api.147.182.204.181.sslip.io'
+    'https://api.62.169.31.231.sslip.io'
 )
     .trim()
     .replace(/\/+$/, '')

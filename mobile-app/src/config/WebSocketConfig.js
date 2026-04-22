@@ -1,22 +1,65 @@
-import Logger from '../utils/Logger';
-import { Platform } from 'react-native';
+import Logger from "../utils/Logger";
+import { Platform } from "react-native";
 
-const DEFAULT_WS_URL =
+const normalizeBaseUrl = (rawUrl, fallback) => {
+  const raw = String(rawUrl || "").trim();
+  if (!raw) return fallback;
+  return raw.replace(/\/+$/, "").replace(/\/api$/i, "");
+};
+
+const deriveSocketBaseUrlFromApi = (
+  rawUrl,
+  fallback = "https://socket.62.169.31.231.sslip.io",
+) => {
+  const normalized = normalizeBaseUrl(rawUrl, fallback);
+  try {
+    const parsed = new URL(normalized);
+    if (/^api(?=[.-])/i.test(parsed.hostname)) {
+      parsed.hostname = parsed.hostname.replace(/^api(?=[.-])/i, "socket");
+    }
+    parsed.pathname = "";
+    parsed.search = "";
+    parsed.hash = "";
+    return parsed.toString().replace(/\/$/, "");
+  } catch (_error) {
+    return fallback;
+  }
+};
+
+const normalizeSocketBaseUrl = (
+  rawUrl,
+  fallback = "https://socket.62.169.31.231.sslip.io",
+) => {
+  const normalized = normalizeBaseUrl(rawUrl, fallback);
+  try {
+    const parsed = new URL(normalized);
+    parsed.pathname = "";
+    parsed.search = "";
+    parsed.hash = "";
+    return parsed.toString().replace(/\/$/, "");
+  } catch (_error) {
+    return fallback;
+  }
+};
+
+const DEFAULT_WS_URL = normalizeSocketBaseUrl(
   process.env.EXPO_PUBLIC_WS_URL ||
-  process.env.EXPO_PUBLIC_SOCKET_URL ||
-  process.env.EXPO_PUBLIC_API_URL ||
-  'https://socket.147.182.204.181.sslip.io';
+    process.env.EXPO_PUBLIC_SOCKET_URL ||
+    process.env.MOBILE_TEST_WS_URL,
+  deriveSocketBaseUrlFromApi(
+    process.env.EXPO_PUBLIC_API_URL || process.env.MOBILE_TEST_BACKEND_URL,
+    "https://socket.62.169.31.231.sslip.io",
+  ),
+);
 
 // Configurações do WebSocket
 const WEBSOCKET_CONFIG = {
   // Para desenvolvimento local (opcional via env vars)
   LOCAL: {
     ANDROID_EMULATOR:
-      process.env.EXPO_PUBLIC_ANDROID_EMULATOR_WS_URL ||
-      DEFAULT_WS_URL,
+      process.env.EXPO_PUBLIC_ANDROID_EMULATOR_WS_URL || DEFAULT_WS_URL,
     IOS_SIMULATOR:
-      process.env.EXPO_PUBLIC_IOS_SIMULATOR_WS_URL ||
-      DEFAULT_WS_URL,
+      process.env.EXPO_PUBLIC_IOS_SIMULATOR_WS_URL || DEFAULT_WS_URL,
     DEVICE: DEFAULT_WS_URL,
   },
 
@@ -36,7 +79,7 @@ const WEBSOCKET_CONFIG = {
   // Configurações de localização
   LOCATION: {
     UPDATE_INTERVAL: 2000, // 2 segundos
-    ACCURACY: 'high', // 'high', 'balanced', 'low'
+    ACCURACY: "high", // 'high', 'balanced', 'low'
     DISTANCE_FILTER: 10, // metros
   },
 
@@ -71,7 +114,7 @@ const getWebSocketURL = () => {
 // Obter configurações de conexão
 const getConnectionOptions = () => {
   return {
-    transports: ['websocket'],
+    transports: ["websocket"],
     autoConnect: true,
     reconnection: true,
     reconnectionAttempts: WEBSOCKET_CONFIG.CONNECTION.RECONNECTION_ATTEMPTS,
@@ -106,7 +149,7 @@ const getLocalIP = async () => {
     // Por enquanto, retorna o IP configurado
     return WEBSOCKET_CONFIG.LOCAL.DEVICE;
   } catch (error) {
-    Logger.error('Erro ao obter IP local:', error);
+    Logger.error("Erro ao obter IP local:", error);
     return WEBSOCKET_CONFIG.LOCAL.DEVICE;
   }
 };
@@ -117,13 +160,13 @@ const validateConfig = () => {
   const issues = [];
 
   if (__DEV__) {
-    if (url.includes('your-backend-domain.com')) {
-      issues.push('⚠️ Configure EXPO_PUBLIC_WS_URL com a URL real do backend');
+    if (url.includes("your-backend-domain.com")) {
+      issues.push("⚠️ Configure EXPO_PUBLIC_WS_URL com a URL real do backend");
     }
   }
 
   if (!__DEV__ && /(localhost|127\.0\.0\.1|10\.0\.2\.2)/i.test(url)) {
-    issues.push('⚠️ URL local de WebSocket detectada fora de dev');
+    issues.push("⚠️ URL local de WebSocket detectada fora de dev");
   }
 
   return {
@@ -156,5 +199,5 @@ export const getWebSocketUrl = () => {
 // Instruções para configurar via env:
 /*
 Defina EXPO_PUBLIC_WS_URL no ambiente:
-EXPO_PUBLIC_WS_URL=https://socket.147.182.204.181.sslip.io
+EXPO_PUBLIC_WS_URL=https://socket.62.169.31.231.sslip.io
 */

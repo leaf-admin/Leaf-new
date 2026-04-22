@@ -11,7 +11,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useTranslation } from 'react-i18next';
-import { useTheme } from '../../common-local/theme';
+import { useTheme } from '../../theme/runtimeTokens';
 import Typography from '../design-system/Typography';
 import AnimatedButton from '../design-system/AnimatedButton';
 
@@ -60,7 +60,11 @@ export default function PassengerWaitingUI({ booking, onCancel }) {
       <View style={styles.header}>
         <View style={styles.driverInfo}>
           <Image
-            source={booking?.driver_image ? { uri: booking.driver_image } : require('../../assets/images/default-avatar.png')}
+            source={
+              booking?.driver_image
+                ? { uri: booking.driver_image }
+                : require("../../../assets/images/profilePic.png")
+            }
             style={styles.driverAvatar}
           />
           <View style={styles.driverDetails}>

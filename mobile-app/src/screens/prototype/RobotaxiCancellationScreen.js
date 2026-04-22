@@ -2,7 +2,7 @@ import React, { useCallback, useState } from 'react';
 import { Alert, StatusBar, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { fonts } from '../../common-local/font';
+import { fonts } from '../../theme/runtimeTokens';
 import PrototypeScreenTransition from '../../components/prototype/PrototypeScreenTransition';
 import PrototypeDismissibleSheet from '../../components/prototype/PrototypeDismissibleSheet';
 import { CardHandle, PrototypeCard, PrototypePrimaryButton } from '../../components/prototype/PrototypeUI';
@@ -88,12 +88,16 @@ export default function RobotaxiCancellationScreen({ navigation, route }) {
               icon="close-outline"
               onPress={isCancelling ? undefined : handleConfirmCancellation}
               style={styles.cancelButton}
+              testID="passenger-cancellation-confirm-button"
+              accessibilityLabel="passenger-cancellation-confirm-button"
             />
 
             <TouchableOpacity
               style={styles.keepButton}
               activeOpacity={0.86}
               onPress={handleDismiss}
+              testID="passenger-cancellation-keep-button"
+              accessibilityLabel="passenger-cancellation-keep-button"
             >
               <Text style={styles.keepButtonText}>Continuar corrida</Text>
             </TouchableOpacity>

@@ -13,7 +13,7 @@ import {
 } from 'react-native';
 import { Icon } from 'react-native-elements';
 import { useSelector } from 'react-redux';
-import { api } from '../common-local';
+import { apiClient } from '../services/httpClient';
 import WebSocketManager from '../services/WebSocketManager';
 import useWebSocketListeners from '../hooks/useWebSocketListeners';
 
@@ -101,7 +101,7 @@ const DriverDashboardScreen = ({ navigation, route }) => {
     try {
       setIsLoading(true);
       
-      const response = await api.get(`/api/drivers/${currentUser.id}/dashboard`);
+      const response = await apiClient.get(`/api/drivers/${currentUser.id}/dashboard`);
       setDriverData(response.data);
       
     } catch (error) {

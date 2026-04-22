@@ -99,6 +99,44 @@ class WooviService {
         }
     }
 
+    async simulateTestWebhook({
+        chargeId,
+        rideId,
+        passengerId,
+        amountInCents,
+        paymentType = 'advance_payment'
+    }) {
+        try {
+            const paidAt = new Date().toISOString();
+            const payload = {
+                event: 'OPENPIX:CHARGE_COMPLETED',
+                charge: {
+                    identifier: chargeId,
+                    transactionID: chargeId,
+                    correlationID: rideId || chargeId,
+                    status: 'COMPLETED',
+                    value: Number(amountInCents || 0),
+                    paidAt,
+                    additionalInfo: [
+                        { key: 'passenger_id', value: passengerId || '' },
+                        { key: 'ride_id', value: rideId || '' },
+                        { key: 'payment_type', value: paymentType },
+                        { key: 'service', value: 'ride_sharing' }
+                    ]
+                },
+                pix: {
+                    status: 'COMPLETED'
+                }
+            };
+
+            const response = await this.backendApi.post('/api/woovi/test-webhook', payload);
+            return response.data;
+        } catch (error) {
+            Logger.error('Erro ao simular webhook de pagamento:', error);
+            throw error;
+        }
+    }
+
     // NOVO SISTEMA: Calcular valor líquido
     async calculateNetAmount(amount) {
         try {

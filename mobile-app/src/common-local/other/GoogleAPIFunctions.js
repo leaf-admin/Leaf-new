@@ -24,6 +24,17 @@ const sanitizeSensitiveUrl = (url = '') =>
         .replace(/([?&]key=)[^&]+/gi, '$1***')
         .replace(/([?&]sessiontoken=)[^&]+/gi, '$1***');
 
+const isBrazilCoordinate = (location) => {
+    const lat = Number(location?.lat);
+    const lng = Number(location?.lng);
+
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+        return false;
+    }
+
+    return lat >= -34 && lat <= 6 && lng >= -74.5 && lng <= -28;
+};
+
 // Cache curto para reduzir custo de APIs durante corrida ativa.
 const MAPS_CACHE = new Map();
 const MAPS_INFLIGHT = new Map();
@@ -129,7 +140,10 @@ export const fetchPlacesAutocomplete = (searchKeyword, sessionToken, location = 
         const apiKey = process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY || process.env.GOOGLE_MAPS_API_KEY || ''; // Chave real do projeto (sem restrições)
         
         // Construir URL da API Places Autocomplete
-        let url = `https://maps.googleapis.com/maps/api/place/autocomplete/json?input=${encodeURIComponent(searchKeyword)}&key=${apiKey}&language=pt-BR&components=country:br`;
+        let url = `https://maps.googleapis.com/maps/api/place/autocomplete/json?input=${encodeURIComponent(searchKeyword)}&key=${apiKey}&language=pt-BR`;
+        if (isBrazilCoordinate(location)) {
+            url += `&components=country:br`;
+        }
         
         // ✅ Compatibilidade máxima com Places Autocomplete (Legacy): location + radius
         if (location && location.lat && location.lng) {
@@ -342,11 +356,10 @@ export const fetchGeocodeAddress = (address, location = null) => {
         const apiKey = process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY || process.env.GOOGLE_MAPS_API_KEY || ''; // Chave real do projeto (sem restrições)
         
         // Construir URL da API Geocoding (Forward)
-        let url = `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(address)}&key=${apiKey}&language=pt-BR&components=country:br`;
-        
-        // ✅ Evitar bounds agressivo para não filtrar resultados válidos.
-        // `region=br` mantém preferência por Brasil sem restringir por cidade.
-        url += '&region=br';
+        let url = `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(address)}&key=${apiKey}&language=pt-BR`;
+        if (isBrazilCoordinate(location)) {
+            url += `&components=country:br&region=br`;
+        }
         
         Logger.log('🌐 URL da API Geocoding (Forward):', sanitizeSensitiveUrl(url));
         

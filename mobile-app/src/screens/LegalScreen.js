@@ -15,7 +15,7 @@ import {
 } from 'react-native';
 import { Icon } from 'react-native-elements';
 import { useSelector } from 'react-redux';
-import { api } from '../common-local';
+import { apiClient } from '../services/httpClient';
 
 const LegalScreen = ({ navigation, route }) => {
   const [selectedSection, setSelectedSection] = useState('terms');
@@ -51,7 +51,7 @@ const LegalScreen = ({ navigation, route }) => {
       
       // ✅ Tentar carregar do backend, mas não falhar se não conseguir
       try {
-      const response = await api.get('/api/legal/content');
+      const response = await apiClient.get('/api/legal/content');
         if (response.data) {
       setLegalData(response.data);
         }

@@ -11,19 +11,16 @@ import {
     ActivityIndicator,
     Dimensions,
 } from 'react-native';
-import { Icon } from 'react-native-elements';
 import { Ionicons } from '@expo/vector-icons';
-import { useSelector } from 'react-redux';
-import { colors } from '../common-local/theme';
-import { fonts } from '../common-local/font';
-import { MAIN_COLOR } from '../common-local/sharedFunctions';
+import { fonts } from '../theme/runtimeTokens';
 import HelpService from '../services/HelpService';
+import robotaxiPrototypeTokens from '../components/design-system/robotaxiPrototypeTokens';
 
+const { color, typography } = robotaxiPrototypeTokens;
 
 const { width } = Dimensions.get('window');
 
 export default function HelpScreen({ navigation }) {
-    const [isDarkMode, setIsDarkMode] = useState(false);
     const [selectedCategory, setSelectedCategory] = useState('getting-started');
     const [expandedItem, setExpandedItem] = useState(null);
     const [isLoading, setIsLoading] = useState(true);
@@ -68,41 +65,13 @@ export default function HelpScreen({ navigation }) {
     };
 
     const Header = () => (
-        <View style={[styles.header, { backgroundColor: isDarkMode ? '#1a1a1a' : '#fff' }]}>
-            <TouchableOpacity 
-                style={[
-                    styles.headerButton, 
-                    { 
-                        backgroundColor: isDarkMode ? '#2d2d2d' : '#e8e8e8',
-                        borderWidth: 1,
-                        borderColor: isDarkMode ? '#404040' : '#d0d0d0',
-                    }
-                ]}
-                onPress={() => navigation.goBack()}
-                activeOpacity={0.7}
-            >
-                <Ionicons 
-                    name="arrow-back" 
-                    color={isDarkMode ? '#fff' : '#1a1a1a'} 
-                    size={22} 
-                />
+        <View style={styles.header}>
+            <TouchableOpacity style={styles.headerButton} onPress={() => navigation.goBack()} activeOpacity={0.86}>
+                <Ionicons name="arrow-back" color={color.text.primary} size={18} />
             </TouchableOpacity>
-            <Text style={[styles.headerTitle, { color: isDarkMode ? '#fff' : colors.BLACK }]}>
-                Ajuda
-            </Text>
-            <TouchableOpacity 
-                style={[
-                    styles.headerButton, 
-                    { 
-                        backgroundColor: isDarkMode ? '#2d2d2d' : '#e8e8e8',
-                        borderWidth: 1,
-                        borderColor: isDarkMode ? '#404040' : '#d0d0d0',
-                    }
-                ]}
-                onPress={() => navigation.navigate('Support')}
-                activeOpacity={0.7}
-            >
-                <Ionicons name="chatbubbles-outline" size={22} color={isDarkMode ? '#fff' : '#1a1a1a'} />
+            <Text style={styles.headerTitle}>Ajuda</Text>
+            <TouchableOpacity style={styles.headerButton} onPress={() => navigation.navigate('Support')} activeOpacity={0.86}>
+                <Ionicons name="chatbubbles-outline" size={18} color={color.text.primary} />
             </TouchableOpacity>
         </View>
     );
@@ -112,7 +81,7 @@ export default function HelpScreen({ navigation }) {
         const cardWidth = (width - 32 - 24) / 3; // 32 = padding horizontal (16*2), 24 = gaps (12*2)
         
         return (
-            <View style={[styles.tabsContainer, { backgroundColor: isDarkMode ? '#1a1a1a' : '#fff' }]}>
+            <View style={styles.tabsContainer}>
                 <View style={styles.tabsContent}>
                     {categories.map((category) => (
                         <TouchableOpacity
@@ -121,9 +90,9 @@ export default function HelpScreen({ navigation }) {
                                 styles.categoryCard,
                                 { width: cardWidth },
                                 selectedCategory === category.id && styles.categoryCardActive,
-                                { 
-                                    backgroundColor: selectedCategory === category.id ? MAIN_COLOR : (isDarkMode ? '#2a2a2a' : '#fff'),
-                                    borderColor: selectedCategory === category.id ? MAIN_COLOR : (isDarkMode ? '#444' : '#e0e0e0')
+                                {
+                                    backgroundColor: selectedCategory === category.id ? color.accent.primary : color.surface.primary,
+                                    borderColor: selectedCategory === category.id ? color.accent.primary : color.border.subtle
                                 }
                             ]}
                             onPress={() => setSelectedCategory(category.id)}
@@ -131,17 +100,17 @@ export default function HelpScreen({ navigation }) {
                         >
                             <View style={[
                                 styles.categoryIconContainer,
-                                { backgroundColor: selectedCategory === category.id ? 'rgba(255,255,255,0.2)' : (isDarkMode ? '#333' : '#f8f8f8') }
+                                { backgroundColor: selectedCategory === category.id ? 'rgba(255,255,255,0.24)' : color.surface.secondary }
                             ]}>
                                 <Ionicons 
                                     name={category.icon} 
                                     size={24} 
-                                    color={selectedCategory === category.id ? '#fff' : (isDarkMode ? '#ccc' : colors.GRAY)} 
+                                    color={selectedCategory === category.id ? '#fff' : color.text.secondary} 
                                 />
                             </View>
                             <Text style={[
                                 styles.categoryText,
-                                { color: selectedCategory === category.id ? '#fff' : (isDarkMode ? '#fff' : colors.BLACK) }
+                                { color: selectedCategory === category.id ? '#fff' : color.text.primary }
                             ]} numberOfLines={2}>
                                 {category.label}
                             </Text>
@@ -155,23 +124,23 @@ export default function HelpScreen({ navigation }) {
     const FAQItem = ({ item, index }) => {
         const isExpanded = expandedItem === index;
         return (
-            <View style={[styles.faqCard, { backgroundColor: isDarkMode ? '#2a2a2a' : '#fff' }]}>
+            <View style={styles.faqCard}>
                 <TouchableOpacity
                     style={styles.faqHeader}
                     onPress={() => setExpandedItem(isExpanded ? null : index)}
                     activeOpacity={0.7}
                 >
-                    <Text style={[styles.faqQuestion, { color: isDarkMode ? '#fff' : colors.BLACK }]}>
+                    <Text style={styles.faqQuestion}>
                         {item.question}
                     </Text>
                     <Ionicons 
                         name={isExpanded ? "chevron-up" : "chevron-down"} 
                         size={20} 
-                        color={isDarkMode ? '#999' : colors.GRAY} 
+                        color={color.text.secondary} 
                     />
                 </TouchableOpacity>
                 {isExpanded && (
-                    <Text style={[styles.faqAnswer, { color: isDarkMode ? '#ccc' : colors.GRAY }]}>
+                    <Text style={styles.faqAnswer}>
                         {item.answer}
                     </Text>
                 )}
@@ -181,43 +150,43 @@ export default function HelpScreen({ navigation }) {
 
     const GettingStartedSteps = () => (
         <View style={styles.stepsContainer}>
-            <View style={[styles.stepCard, { backgroundColor: isDarkMode ? '#2a2a2a' : '#fff' }]}>
-                <View style={[styles.stepNumber, { backgroundColor: MAIN_COLOR }]}>
+            <View style={styles.stepCard}>
+                <View style={styles.stepNumber}>
                     <Text style={styles.stepNumberText}>1</Text>
                 </View>
                 <View style={styles.stepContent}>
-                    <Text style={[styles.stepTitle, { color: isDarkMode ? '#fff' : colors.BLACK }]}>
+                    <Text style={styles.stepTitle}>
                         Criar Conta
                     </Text>
-                    <Text style={[styles.stepDescription, { color: isDarkMode ? '#ccc' : colors.GRAY }]}>
+                    <Text style={styles.stepDescription}>
                         Registre-se com seu telefone e complete seu perfil
                     </Text>
                 </View>
             </View>
 
-            <View style={[styles.stepCard, { backgroundColor: isDarkMode ? '#2a2a2a' : '#fff' }]}>
-                <View style={[styles.stepNumber, { backgroundColor: MAIN_COLOR }]}>
+            <View style={styles.stepCard}>
+                <View style={styles.stepNumber}>
                     <Text style={styles.stepNumberText}>2</Text>
                 </View>
                 <View style={styles.stepContent}>
-                    <Text style={[styles.stepTitle, { color: isDarkMode ? '#fff' : colors.BLACK }]}>
+                    <Text style={styles.stepTitle}>
                         Definir Destino
                     </Text>
-                    <Text style={[styles.stepDescription, { color: isDarkMode ? '#ccc' : colors.GRAY }]}>
+                    <Text style={styles.stepDescription}>
                         Digite seu destino no mapa ou escolha um local salvo
                     </Text>
                 </View>
             </View>
 
-            <View style={[styles.stepCard, { backgroundColor: isDarkMode ? '#2a2a2a' : '#fff' }]}>
-                <View style={[styles.stepNumber, { backgroundColor: MAIN_COLOR }]}>
+            <View style={styles.stepCard}>
+                <View style={styles.stepNumber}>
                     <Text style={styles.stepNumberText}>3</Text>
                 </View>
                 <View style={styles.stepContent}>
-                    <Text style={[styles.stepTitle, { color: isDarkMode ? '#fff' : colors.BLACK }]}>
+                    <Text style={styles.stepTitle}>
                         Pagar e Viajar
                     </Text>
-                    <Text style={[styles.stepDescription, { color: isDarkMode ? '#ccc' : colors.GRAY }]}>
+                    <Text style={styles.stepDescription}>
                         Pague via PIX e aguarde o motorista chegar
                     </Text>
                 </View>
@@ -229,10 +198,10 @@ export default function HelpScreen({ navigation }) {
         if (selectedCategory === 'getting-started') {
             return (
                 <View style={styles.contentSection}>
-                    <Text style={[styles.sectionTitle, { color: isDarkMode ? '#fff' : colors.BLACK }]}>
+                    <Text style={styles.sectionTitle}>
                         Bem-vindo à Leaf!
                     </Text>
-                    <Text style={[styles.sectionDescription, { color: isDarkMode ? '#ccc' : colors.GRAY }]}>
+                    <Text style={styles.sectionDescription}>
                         Aprenda como usar o app Leaf para suas viagens de forma segura e eficiente.
                     </Text>
                     <GettingStartedSteps />
@@ -241,22 +210,9 @@ export default function HelpScreen({ navigation }) {
         }
 
         const faqs = faqData[selectedCategory] || [];
-        if (selectedCategory === 'getting-started') {
-            return (
-                <View style={styles.contentSection}>
-                    <Text style={[styles.sectionTitle, { color: isDarkMode ? '#fff' : colors.BLACK }]}>
-                        Bem-vindo à Leaf!
-                    </Text>
-                    <Text style={[styles.sectionDescription, { color: isDarkMode ? '#ccc' : colors.GRAY }]}>
-                        Aprenda como usar o app Leaf para suas viagens de forma segura e eficiente.
-                    </Text>
-                    <GettingStartedSteps />
-                </View>
-            );
-        }
         return (
             <View style={styles.contentSection}>
-                <Text style={[styles.sectionTitle, { color: isDarkMode ? '#fff' : colors.BLACK }]}>
+                <Text style={styles.sectionTitle}>
                     Perguntas Frequentes
                 </Text>
                 {faqs.length > 0 ? (
@@ -264,7 +220,7 @@ export default function HelpScreen({ navigation }) {
                         <FAQItem key={index} item={item} index={index} />
                     ))
                 ) : (
-                    <Text style={[styles.emptyText, { color: isDarkMode ? '#999' : colors.GRAY }]}>
+                    <Text style={styles.emptyText}>
                         Nenhuma pergunta frequente disponível para esta categoria.
                     </Text>
                 )}
@@ -274,18 +230,18 @@ export default function HelpScreen({ navigation }) {
 
     if (isLoading) {
         return (
-            <View style={[styles.container, { backgroundColor: isDarkMode ? '#1a1a1a' : '#f5f5f5' }]}>
+            <View style={styles.container}>
                 <Header />
                 <View style={styles.loadingContainer}>
-                    <ActivityIndicator size="large" color={MAIN_COLOR} />
+                    <ActivityIndicator size="large" color={color.accent.primary} />
                 </View>
             </View>
         );
     }
 
     return (
-        <View style={[styles.container, { backgroundColor: isDarkMode ? '#1a1a1a' : '#f5f5f5' }]}>
-            <StatusBar barStyle={isDarkMode ? "light-content" : "dark-content"} backgroundColor={isDarkMode ? '#1a1a1a' : '#fff'} />
+        <View style={styles.container}>
+            <StatusBar barStyle="dark-content" backgroundColor="transparent" translucent={Platform.OS === 'android'} />
             
             <Header />
             <CategoryTabs />
@@ -303,60 +259,53 @@ export default function HelpScreen({ navigation }) {
 const styles = StyleSheet.create({
     container: {
         flex: 1,
+        backgroundColor: color.bg.app
     },
     header: {
         flexDirection: 'row',
         justifyContent: 'space-between',
         alignItems: 'center',
-        paddingHorizontal: 20,
-        paddingTop: Platform.OS === 'ios' ? 50 : 24,
-        paddingBottom: 16,
-        borderBottomWidth: 0.5,
-        borderBottomColor: '#f0f0f0',
+        paddingHorizontal: 14,
+        paddingTop: Platform.OS === 'ios' ? 54 : 34,
+        paddingBottom: 10,
+        borderBottomWidth: 1,
+        borderBottomColor: color.border.subtle
     },
     headerButton: {
-        width: 40,
-        height: 40,
-        borderRadius: 20,
+        width: 38,
+        height: 38,
+        borderRadius: 19,
         justifyContent: 'center',
         alignItems: 'center',
-        shadowColor: '#000',
-        shadowOffset: {
-            width: 0,
-            height: 1,
-        },
-        shadowOpacity: 0.1,
-        shadowRadius: 2,
-        elevation: 2,
+        backgroundColor: color.surface.primary,
+        borderWidth: 1,
+        borderColor: color.border.subtle
     },
     headerTitle: {
-        fontSize: 18,
-        fontWeight: 'bold',
-        fontFamily: fonts.Bold,
+        fontSize: typography.subtitle.size,
+        lineHeight: typography.subtitle.lineHeight,
+        fontFamily: fonts.SemiBold,
+        color: color.text.primary
     },
     tabsContainer: {
-        borderBottomWidth: 0.5,
-        borderBottomColor: '#f0f0f0',
+        borderBottomWidth: 1,
+        borderBottomColor: color.border.subtle,
+        backgroundColor: color.surface.primary
     },
     tabsContent: {
         flexDirection: 'row',
         flexWrap: 'wrap',
-        paddingHorizontal: 16,
-        paddingVertical: 16,
-        gap: 12,
+        paddingHorizontal: 14,
+        paddingVertical: 12,
+        gap: 8,
     },
     categoryCard: {
-        height: 100,
+        height: 94,
         borderRadius: 16,
-        padding: 12,
+        padding: 10,
         alignItems: 'center',
         justifyContent: 'center',
-        borderWidth: 1.5,
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.1,
-        shadowRadius: 4,
-        elevation: 3,
+        borderWidth: 1
     },
     categoryCardActive: {
         // backgroundColor já definido inline
@@ -367,13 +316,13 @@ const styles = StyleSheet.create({
         borderRadius: 24,
         alignItems: 'center',
         justifyContent: 'center',
-        marginBottom: 8,
+        marginBottom: 7,
     },
     categoryText: {
-        fontSize: 13,
-        fontFamily: fonts.Bold,
+        fontSize: typography.micro.size,
+        lineHeight: typography.micro.lineHeight,
+        fontFamily: fonts.SemiBold,
         textAlign: 'center',
-        lineHeight: 16,
     },
     content: {
         flex: 1,
@@ -385,18 +334,21 @@ const styles = StyleSheet.create({
         paddingVertical: 40,
     },
     contentSection: {
-        padding: 16,
+        padding: 14,
     },
     sectionTitle: {
-        fontSize: 20,
-        fontFamily: fonts.Bold,
-        marginBottom: 8,
+        fontSize: typography.subtitle.size,
+        lineHeight: typography.subtitle.lineHeight,
+        fontFamily: fonts.SemiBold,
+        marginBottom: 6,
+        color: color.text.primary
     },
     sectionDescription: {
-        fontSize: 14,
+        fontSize: typography.caption.size,
+        lineHeight: typography.caption.lineHeight,
         fontFamily: fonts.Regular,
-        lineHeight: 20,
-        marginBottom: 24,
+        color: color.text.secondary,
+        marginBottom: 16
     },
     stepsContainer: {
         gap: 12,
@@ -404,67 +356,77 @@ const styles = StyleSheet.create({
     stepCard: {
         flexDirection: 'row',
         alignItems: 'center',
-        padding: 16,
+        padding: 12,
         borderRadius: 16,
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.1,
-        shadowRadius: 4,
-        elevation: 3,
+        borderWidth: 1,
+        borderColor: color.border.subtle,
+        backgroundColor: color.surface.primary
     },
     stepNumber: {
-        width: 40,
-        height: 40,
-        borderRadius: 20,
+        width: 34,
+        height: 34,
+        borderRadius: 17,
         justifyContent: 'center',
         alignItems: 'center',
-        marginRight: 16,
+        marginRight: 10,
+        backgroundColor: color.accent.primary
     },
     stepNumberText: {
         color: '#fff',
-        fontSize: 18,
-        fontFamily: fonts.Bold,
+        fontSize: typography.caption.size,
+        lineHeight: typography.caption.lineHeight,
+        fontFamily: fonts.SemiBold
     },
     stepContent: {
         flex: 1,
     },
     stepTitle: {
-        fontSize: 16,
-        fontFamily: fonts.Bold,
-        marginBottom: 4,
+        fontSize: typography.caption.size,
+        lineHeight: typography.caption.lineHeight,
+        fontFamily: fonts.SemiBold,
+        color: color.text.primary,
+        marginBottom: 3
     },
     stepDescription: {
-        fontSize: 14,
+        fontSize: typography.micro.size,
+        lineHeight: typography.micro.lineHeight,
         fontFamily: fonts.Regular,
-        lineHeight: 20,
+        color: color.text.secondary
     },
     faqCard: {
         borderRadius: 16,
         marginBottom: 12,
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.1,
-        shadowRadius: 4,
-        elevation: 3,
+        borderWidth: 1,
+        borderColor: color.border.subtle,
+        backgroundColor: color.surface.primary,
         overflow: 'hidden',
     },
     faqHeader: {
         flexDirection: 'row',
         justifyContent: 'space-between',
         alignItems: 'center',
-        padding: 16,
+        padding: 12
     },
     faqQuestion: {
         flex: 1,
-        fontSize: 15,
+        fontSize: typography.caption.size,
+        lineHeight: typography.caption.lineHeight,
         fontFamily: fonts.Medium,
-        marginRight: 12,
+        color: color.text.primary,
+        marginRight: 10
     },
     faqAnswer: {
-        fontSize: 14,
+        fontSize: typography.micro.size,
+        lineHeight: typography.micro.lineHeight,
         fontFamily: fonts.Regular,
-        lineHeight: 20,
-        paddingHorizontal: 16,
-        paddingBottom: 16,
+        color: color.text.secondary,
+        paddingHorizontal: 12,
+        paddingBottom: 12
     },
+    emptyText: {
+        fontSize: typography.caption.size,
+        lineHeight: typography.caption.lineHeight,
+        fontFamily: fonts.Regular,
+        color: color.text.muted
+    }
 });

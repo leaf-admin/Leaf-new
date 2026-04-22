@@ -11,7 +11,7 @@ import { TextInputMask } from 'react-native-masked-text';
 import rnauth from '@react-native-firebase/auth';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import OnboardingLayout from '../components/OnboardingLayout';
-import { fonts } from '../common-local/font';
+import { fonts } from '../theme/runtimeTokens';
 import onboardingTheme from '../components/auth/common/onboardingTheme';
 
 const { color, radius, spacing } = onboardingTheme;

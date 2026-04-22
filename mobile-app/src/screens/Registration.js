@@ -3,15 +3,14 @@ import { Registration } from '../components';
 import { StyleSheet, View, Animated, Text } from 'react-native';
 import { useSelector,useDispatch } from 'react-redux';
 import i18n from '../i18n';
-import { api } from '../common-local/api';
+import {
+  mainSignUp,
+  validateReferer,
+  checkUserExists,
+  editreferral
+} from '../services/runtime/registrationRuntimeBridge';
 
 export default function RegistrationPage(props) {
-  const {
-    mainSignUp, 
-    validateReferer,
-    checkUserExists,
-    editreferral
-  } = api;
   const [loading, setLoading] = useState(false);
   const [snackbar, setSnackbar] = useState({ visible: false, message: '', type: 'error' });
   const snackbarAnim = useRef(new Animated.Value(0)).current;

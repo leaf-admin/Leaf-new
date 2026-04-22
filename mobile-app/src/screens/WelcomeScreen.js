@@ -1,7 +1,7 @@
 import Logger from '../utils/Logger';
 import React, { useEffect, useRef, useState } from 'react';
 import { View, Image, StyleSheet, StatusBar, Animated, TouchableOpacity } from 'react-native';
-import { fonts } from '../common-local/font';
+import { fonts } from '../theme/runtimeTokens';
 import onboardingTheme from '../components/auth/common/onboardingTheme';
 
 const { color, radius, spacing, elevation } = onboardingTheme;

@@ -13,7 +13,7 @@ import {
 } from 'react-native';
 import { Icon } from 'react-native-elements';
 import { useSelector } from 'react-redux';
-import { api } from '../common-local';
+import { apiClient } from '../services/httpClient';
 import { useTranslation } from '../components/i18n/LanguageProvider';
 
 
@@ -97,7 +97,7 @@ const PlanSelectionScreen = ({ navigation, route }) => {
 
   const checkCurrentPlan = async () => {
     try {
-      const response = await api.get(`/api/user/${currentUser.id}/plan`);
+      const response = await apiClient.get(`/api/user/${currentUser.id}/plan`);
       return response.data.plan;
     } catch (error) {
       Logger.error('Erro ao verificar plano atual:', error);
@@ -124,7 +124,7 @@ const PlanSelectionScreen = ({ navigation, route }) => {
 
   const createWeeklyPlanCharge = async (plan) => {
     try {
-      const response = await api.post('/api/plans/create-charge', {
+      const response = await apiClient.post('/api/plans/create-charge', {
         planId: plan.id,
         userId: currentUser.id,
         amount: plan.price,

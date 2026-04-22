@@ -5,14 +5,20 @@ const DEFAULT_FALLBACK = 'Nao foi possivel concluir agora. Tente novamente em in
 const FRIENDLY_BY_CODE = {
   ECONNABORTED: 'A conexao demorou mais que o esperado. Tente novamente.',
   NETWORK_ERROR: 'Sem conexao com a internet. Verifique sua rede e tente novamente.',
+  'AUTH/NETWORK-REQUEST-FAILED': 'Sem conexao com a internet. Verifique sua rede e tente novamente.',
   BOOKING_TIMEOUT: 'Estamos com alta demanda no momento. Tente solicitar a viagem novamente.',
   RATE_LIMIT_EXCEEDED: 'Voce fez muitas tentativas em pouco tempo. Aguarde um pouco e tente novamente.',
+  'AUTH/TOO-MANY-REQUESTS': 'Voce fez muitas tentativas em pouco tempo. Aguarde um pouco e tente novamente.',
+  '17010': 'Voce fez muitas tentativas em pouco tempo. Aguarde um pouco e tente novamente.',
   NO_DRIVERS_AVAILABLE: 'Nao encontramos motoristas disponiveis agora. Tente novamente em instantes.',
   OUT_OF_COVERAGE: 'A Leaf ainda nao esta disponivel nessa regiao.',
   GEOFENCE_OUT_OF_COVERAGE: 'A Leaf ainda nao esta disponivel nessa regiao.',
   PAYMENT_REQUIRED: 'Para continuar, confirme o pagamento via Pix.',
   PAYMENT_NOT_CONFIRMED: 'Ainda nao confirmamos seu pagamento. Assim que confirmar, seguimos com a viagem.',
   INVALID_OTP: 'Codigo invalido. Confira o SMS e tente novamente.',
+  'AUTH/INVALID-VERIFICATION-CODE': 'Codigo invalido. Confira o SMS e tente novamente.',
+  'AUTH/INVALID-PHONE-NUMBER': 'Numero de telefone invalido. Verifique se o numero esta correto e tente novamente.',
+  'AUTH/QUOTA-EXCEEDED': 'Limite de SMS atingido. Tente novamente mais tarde.',
   UNAUTHORIZED: 'Sua sessao expirou. Entre novamente para continuar.',
   TOKEN_EXPIRED: 'Sua sessao expirou. Entre novamente para continuar.',
   FORBIDDEN: 'Voce nao tem permissao para esta acao.',
@@ -76,7 +82,11 @@ function extractStatus(error) {
 function extractCode(error) {
   return asString(
     error?.code ||
+      error?.nativeErrorCode ||
+      error?.userInfo?.code ||
+      error?.userInfo?.nativeErrorCode ||
       error?.response?.data?.code ||
+      error?.response?.data?.error?.code ||
       error?.payload?.code ||
       error?.data?.code ||
       ''

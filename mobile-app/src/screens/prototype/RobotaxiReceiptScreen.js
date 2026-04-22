@@ -15,10 +15,10 @@ import { StackActions } from "@react-navigation/native";
 import { fonts } from "../../theme/runtimeTokens";
 import PrototypeScreenTransition from "../../components/prototype/PrototypeScreenTransition";
 import {
-  CardHandle,
   PrototypeCard,
   PrototypePrimaryButton,
 } from "../../components/prototype/PrototypeUI";
+import { PrototypeMenuCloseButton } from "../../components/prototype/PrototypeMenuSurface";
 import robotaxiPrototypeTokens from "../../components/design-system/robotaxiPrototypeTokens";
 import { usePrototypeMapOcclusion } from "./prototypeMapOcclusion";
 import { usePrototypeRideRuntime } from "./prototypeRideRuntime";
@@ -48,7 +48,8 @@ function formatDistanceKm(value) {
   if (!Number.isFinite(numeric) || numeric <= 0) {
     return "Em cálculo";
   }
-  return `${numeric.toFixed(numeric >= 10 ? 0 : 1).replace(".", ",")} km`;
+  const fractionDigits = numeric >= 10 ? 0 : numeric >= 2 ? 1 : 2;
+  return `${numeric.toFixed(fractionDigits).replace(".", ",")} km`;
 }
 
 function formatDurationMin(value) {
@@ -100,8 +101,12 @@ function splitLocationLabel(label = "") {
 }
 
 function buildReceiptHistoryRouteParts(item = {}) {
-  const directPickup = String(item?.pickup || "").trim();
-  const directDrop = String(item?.drop || "").trim();
+  const directPickup = String(
+    item?.pickupAddress || item?.pickup || "",
+  ).trim();
+  const directDrop = String(
+    item?.destinationAddress || item?.dropoffAddress || item?.drop || "",
+  ).trim();
   if (directPickup || directDrop) {
     return {
       pickup: directPickup || "Origem indisponível",
@@ -334,9 +339,16 @@ export default function RobotaxiReceiptScreen({ navigation, route }) {
     Math.round(toNumber(selected?.passengerCount, 1)),
   );
   const pickupLabel =
-    selected?.pickup || selected?.route?.split("->")?.[0]?.trim() || "Origem";
+    selected?.pickupAddress ||
+    selected?.pickup ||
+    selected?.route?.split("->")?.[0]?.trim() ||
+    "Origem";
   const dropoffLabel =
-    selected?.drop || selected?.route?.split("->")?.[1]?.trim() || "Destino";
+    selected?.destinationAddress ||
+    selected?.dropoffAddress ||
+    selected?.drop ||
+    selected?.route?.split("->")?.[1]?.trim() ||
+    "Destino";
   const pickupLocation = splitLocationLabel(pickupLabel);
   const dropoffLocation = splitLocationLabel(dropoffLabel);
   const driverRouteDensity = [
@@ -402,13 +414,38 @@ export default function RobotaxiReceiptScreen({ navigation, route }) {
       : tightDriverLayout
         ? "Indisponível"
         : "Avaliação indisponível";
-  const driverBackButtonLabel = "Voltar";
   const driverSummaryAsideSecondaryLabel = Number.isFinite(finalTotalFees)
     ? "Taxas"
     : "Passag.";
   const driverSummaryAsideSecondaryValue = Number.isFinite(finalTotalFees)
     ? formatCurrency(finalTotalFees)
     : `${passengersCount}`;
+  const closeButtonTestId = isDriverView
+    ? "driver-receipt-back-to-map-button"
+    : "passenger-receipt-back-to-map-button";
+  const headerTitle = isDriverView ? "Corrida finalizada" : "Resumo da viagem";
+  const headerSubtitle = isDriverView
+    ? "Ganhos, rota e próximos passos em um só lugar."
+    : "Pagamento, rota e suporte em um layout mais direto.";
+  const heroTitle = isDriverView
+    ? selected?.passengerName
+      ? `Viagem com ${selected.passengerName}`
+      : "Recebimento concluído"
+    : selected?.driverName
+      ? `Viagem com ${selected.driverName}`
+      : "Corrida concluída";
+  const heroSubtitle = [selected?.date, paymentStatusLabel]
+    .filter(Boolean)
+    .join(" • ");
+  const driverReceivedAmount = formatCurrency(
+    Number.isFinite(finalDriverNetAmount) ? finalDriverNetAmount : totalAmount,
+  );
+  const passengerRecentHistory = runtimeHistory.filter(
+    (item) => item.id !== selected?.id,
+  );
+  const driverRecentHistory = runtimeHistory.filter(
+    (item) => item.id !== selected?.id,
+  );
 
   usePrototypeMapOcclusion({
     routeKey: route?.key,
@@ -416,21 +453,34 @@ export default function RobotaxiReceiptScreen({ navigation, route }) {
     occludedBottom: sheetBottom + cardHeight,
   });
 
-  const handleDismiss = () => {
-    if (route?.params?.fromRating) {
-      navigation.navigate("RobotaxiPrototypeReceipt", { fromTrip: true });
+  const navigateBackToPrototype = useCallback(() => {
+    if (typeof navigation.dispatch === "function") {
+      navigation.dispatch(StackActions.replace("RobotaxiPrototype"));
       return;
     }
 
+    navigation.navigate("RobotaxiPrototype");
+  }, [navigation]);
+
+  const handleDismiss = () => {
     if (!isDriverView) {
       dismissCompletedReceipt();
     }
 
-    if (navigation.canGoBack()) {
+    const shouldReturnToPrototypeHome =
+      fromTrip && Boolean(route?.params?.fromRating);
+
+    if (shouldReturnToPrototypeHome) {
+      navigateBackToPrototype();
+      return;
+    }
+
+    if (typeof navigation.canGoBack === "function" && navigation.canGoBack()) {
       navigation.goBack();
       return;
     }
-    navigation.navigate("RobotaxiPrototype");
+
+    navigateBackToPrototype();
   };
 
   const handleCardLayout = useCallback((event) => {
@@ -439,6 +489,204 @@ export default function RobotaxiReceiptScreen({ navigation, route }) {
       setCardHeight(nextHeight);
     }
   }, []);
+
+  const renderRecentHistorySection = useCallback(
+    (items) => {
+      if (!Array.isArray(items) || items.length === 0) {
+        return null;
+      }
+
+      return (
+        <>
+          <View style={styles.receiptSectionHeader}>
+            <Text style={styles.receiptSectionTitle}>Corridas recentes</Text>
+            <View style={styles.receiptSectionBadge}>
+              <Text style={styles.receiptSectionBadgeText}>{items.length}</Text>
+            </View>
+          </View>
+
+          <View style={styles.historyWrap}>
+            {items.map((item) => {
+              const active = selected?.id === item.id;
+              const valueLabel = formatCurrency(resolveTripGrossAmount(item));
+              const routeParts = buildReceiptHistoryRouteParts(item);
+
+              return (
+                <TouchableOpacity
+                  key={item.id}
+                  activeOpacity={0.88}
+                  onPress={() => setSelectedId(item.id)}
+                  style={[
+                    styles.historyRow,
+                    active && styles.historyRowActive,
+                  ]}
+                >
+                  <View style={styles.historyHeaderRow}>
+                    <View style={styles.historyHeaderMeta}>
+                      <Text style={styles.historyDate}>{item.date || "--"}</Text>
+                      <View style={styles.historyStatusPill}>
+                        <Text style={styles.historyStatusPillText}>
+                          Concluída
+                        </Text>
+                      </View>
+                    </View>
+                    <View style={styles.historyValuePill}>
+                      <Text style={styles.historyValuePillText}>
+                        {valueLabel}
+                      </Text>
+                    </View>
+                  </View>
+
+                  <View style={styles.historyRouteStack}>
+                    <View style={styles.historyStopRow}>
+                      <View
+                        style={[
+                          styles.historyStopDot,
+                          styles.historyStopDotPickup,
+                        ]}
+                      />
+                      <Text style={styles.historyStopLabel}>Embarque</Text>
+                      <Text numberOfLines={2} style={styles.historyRoute}>
+                        {routeParts.pickup}
+                      </Text>
+                    </View>
+
+                    <View style={styles.historyStopRow}>
+                      <View
+                        style={[
+                          styles.historyStopDot,
+                          styles.historyStopDotDropoff,
+                        ]}
+                      />
+                      <Text style={styles.historyStopLabel}>Destino</Text>
+                      <Text numberOfLines={2} style={styles.historyRoute}>
+                        {routeParts.drop}
+                      </Text>
+                    </View>
+                  </View>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+        </>
+      );
+    },
+    [selected?.id],
+  );
+
+  const driverReceiptFooter =
+    isDriverView && selected ? (
+      <View
+        style={[
+          styles.driverStickyFooter,
+          compactDriverLayout && styles.driverStickyFooterCompact,
+          tightDriverLayout && styles.driverStickyFooterTight,
+          { paddingBottom: Math.max(insets.bottom, 10) },
+        ]}
+      >
+        <View
+          style={[
+            styles.driverActionStack,
+            styles.driverActionStackPinned,
+            styles.driverActionStackSingle,
+          ]}
+        >
+          <PrototypePrimaryButton
+            label={driverRateButtonLabel}
+            icon="star-outline"
+            disabled={driverRatingSubmitted || !canDriverRatePassenger}
+            accessible
+            accessibilityRole="button"
+            testID="driver-receipt-rate-passenger-button"
+            accessibilityLabel="driver-receipt-rate-passenger-button"
+            onPress={openDriverReceiptRating}
+            onAccessibilityTap={openDriverReceiptRating}
+            style={[
+              styles.driverRateButton,
+              compactDriverLayout && styles.driverRateButtonCompact,
+              tightDriverLayout && styles.driverRateButtonTight,
+            ]}
+          />
+        </View>
+      </View>
+    ) : null;
+
+  const passengerRateButtonLabel = passengerRatingSubmitted
+    ? "Avaliação enviada"
+    : canPassengerRateDriver
+      ? "Avaliar viagem"
+      : "Avaliação indisponível";
+
+  const passengerReceiptFooter =
+    !isDriverView && selected ? (
+      <View
+        style={[
+          styles.passengerStickyFooter,
+          { paddingBottom: Math.max(insets.bottom, 10) },
+        ]}
+      >
+        <TouchableOpacity
+          style={[
+            styles.passengerPrimaryAction,
+            (passengerRatingSubmitted || !canPassengerRateDriver) &&
+              styles.secondaryActionDisabled,
+          ]}
+          activeOpacity={0.86}
+          accessible
+          accessibilityRole="button"
+          accessibilityState={{
+            disabled: passengerRatingSubmitted || !canPassengerRateDriver,
+          }}
+          focusable
+          hitSlop={{ top: 6, right: 6, bottom: 6, left: 6 }}
+          disabled={passengerRatingSubmitted || !canPassengerRateDriver}
+          onPressIn={() => setLastTouchProbe("avaliar_viagem")}
+          testID="passenger-receipt-rate-trip-button"
+          nativeID="passenger-receipt-rate-trip-button"
+          accessibilityLabel={passengerRateButtonLabel}
+          accessibilityHint="Abre a tela de avaliação da viagem concluída."
+          onPress={openPassengerReceiptRating}
+          onAccessibilityTap={openPassengerReceiptRating}
+        >
+          <Ionicons
+            name="star-outline"
+            size={16}
+            color="#1A330E"
+          />
+          <Text style={styles.passengerPrimaryActionText}>
+            {passengerRateButtonLabel}
+          </Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={styles.passengerSecondaryAction}
+          activeOpacity={0.86}
+          accessible
+          accessibilityRole="button"
+          accessibilityState={{ disabled: false }}
+          focusable
+          hitSlop={{ top: 6, right: 6, bottom: 6, left: 6 }}
+          onPressIn={() => setLastTouchProbe("reportar_problema")}
+          accessibilityLabel="passenger-receipt-report-issue-button"
+          testID="passenger-receipt-report-issue-button"
+          onPress={() =>
+            navigation.navigate("RobotaxiPrototypeComplain", {
+              fromReceipt: true,
+              receipt: selected,
+            })
+          }
+        >
+          <Ionicons
+            name="warning-outline"
+            size={15}
+            color={color.text.primary}
+          />
+          <Text style={styles.secondaryActionText}>
+            Reportar problema
+          </Text>
+        </TouchableOpacity>
+      </View>
+    ) : null;
 
   return (
     <PrototypeScreenTransition>
@@ -460,12 +708,8 @@ export default function RobotaxiReceiptScreen({ navigation, route }) {
             testID={isDriverView ? "driver-receipt-screen" : "passenger-receipt-screen"}
             accessibilityLabel={isDriverView ? "driver-receipt-screen" : "passenger-receipt-screen"}
           >
-            {tightDriverLayout ? (
-              <View style={styles.cardHandleTight} />
-            ) : (
-              <CardHandle />
-            )}
             <ScrollView
+              style={styles.scrollViewport}
               bounces={false}
               showsVerticalScrollIndicator={false}
               contentContainerStyle={[
@@ -474,6 +718,24 @@ export default function RobotaxiReceiptScreen({ navigation, route }) {
                 tightDriverLayout && styles.scrollContentTight,
               ]}
             >
+              <View style={styles.receiptHeaderRow}>
+                <View style={styles.receiptHeaderCopy}>
+                  <Text style={styles.receiptHeaderEyebrow}>Recibo</Text>
+                  <Text style={styles.receiptHeaderTitle}>{headerTitle}</Text>
+                  <Text style={styles.receiptHeaderSubtitle}>
+                    {headerSubtitle}
+                  </Text>
+                </View>
+                <PrototypeMenuCloseButton
+                  onPress={() => {
+                    setLastTouchProbe("fechar_recibo");
+                    handleDismiss();
+                  }}
+                  testID={closeButtonTestId}
+                  accessibilityLabel={closeButtonTestId}
+                />
+              </View>
+
               {isDriverView ? (
                 selected ? (
                   <>
@@ -484,34 +746,26 @@ export default function RobotaxiReceiptScreen({ navigation, route }) {
                         tightDriverLayout && styles.driverSummaryHeroTight,
                       ]}
                     >
-                      <View
-                        style={[
-                          styles.driverSuccessHalo,
-                          compactDriverLayout &&
-                            styles.driverSuccessHaloCompact,
-                          tightDriverLayout && styles.driverSuccessHaloTight,
-                        ]}
-                      >
-                        <View
-                          style={[
-                            styles.driverSuccessCenter,
-                            compactDriverLayout &&
-                              styles.driverSuccessCenterCompact,
-                            tightDriverLayout &&
-                              styles.driverSuccessCenterTight,
-                          ]}
-                        >
+                      <View style={styles.driverHeroBadgeRow}>
+                        <View style={styles.driverHeroBadge}>
                           <Ionicons
-                            name="checkmark"
-                            size={
-                              tightDriverLayout
-                                ? 18
-                                : compactDriverLayout
-                                  ? 20
-                                  : 24
-                            }
-                            color="#FFFFFF"
+                            name="checkmark-circle"
+                            size={16}
+                            color="#1A7F37"
                           />
+                          <Text style={styles.driverHeroBadgeText}>
+                            Corrida concluída
+                          </Text>
+                        </View>
+                        <View style={styles.driverHeroMetaPill}>
+                          <Ionicons
+                            name="wallet-outline"
+                            size={13}
+                            color="#6C651B"
+                          />
+                          <Text style={styles.driverHeroMetaPillText}>
+                            {paymentStatusLabel}
+                          </Text>
                         </View>
                       </View>
                       <Text
@@ -548,69 +802,71 @@ export default function RobotaxiReceiptScreen({ navigation, route }) {
                     >
                       <View
                         style={[
-                          styles.driverSummaryAmountRow,
+                          styles.driverSummaryAmountHighlight,
                           compactDriverLayout &&
-                            styles.driverSummaryAmountRowCompact,
+                            styles.driverSummaryAmountHighlightCompact,
                           tightDriverLayout &&
-                            styles.driverSummaryAmountRowTight,
+                            styles.driverSummaryAmountHighlightTight,
                         ]}
                       >
-                        <View style={styles.driverSummaryAmountMain}>
-                          <Text
-                            style={[
-                              styles.driverSummaryAmountLabel,
-                              compactDriverLayout &&
-                                styles.driverSummaryAmountLabelCompact,
-                              tightDriverLayout &&
-                                styles.driverSummaryAmountLabelTight,
-                            ]}
-                          >
-                            {Number.isFinite(finalDriverNetAmount)
-                              ? "Ganho líquido"
-                              : "Valor da corrida"}
-                          </Text>
-                          <Text
-                            style={[
-                              styles.driverSummaryAmountValue,
-                              compactDriverLayout &&
-                                styles.driverSummaryAmountValueCompact,
-                              tightDriverLayout &&
-                                styles.driverSummaryAmountValueTight,
-                            ]}
-                            adjustsFontSizeToFit
-                          >
-                            {formatCurrency(
-                              Number.isFinite(finalDriverNetAmount)
-                                ? finalDriverNetAmount
-                                : totalAmount,
-                            )}
-                          </Text>
-                        </View>
+                        <Text
+                          style={[
+                            styles.driverSummaryAmountLabel,
+                            compactDriverLayout &&
+                              styles.driverSummaryAmountLabelCompact,
+                            tightDriverLayout &&
+                              styles.driverSummaryAmountLabelTight,
+                          ]}
+                        >
+                          Valor recebido
+                        </Text>
+                        <Text
+                          style={[
+                            styles.driverSummaryAmountValue,
+                            compactDriverLayout &&
+                              styles.driverSummaryAmountValueCompact,
+                            tightDriverLayout &&
+                              styles.driverSummaryAmountValueTight,
+                          ]}
+                          adjustsFontSizeToFit
+                        >
+                          {driverReceivedAmount}
+                        </Text>
+                        <Text
+                          style={[
+                            styles.driverSummaryAmountCaption,
+                            compactDriverLayout &&
+                              styles.driverSummaryAmountCaptionCompact,
+                            tightDriverLayout &&
+                              styles.driverSummaryAmountCaptionTight,
+                          ]}
+                        >
+                          Disponível após as taxas aplicadas à corrida
+                        </Text>
+                      </View>
 
+                      <View
+                        style={[
+                          styles.driverSummaryBreakdownRow,
+                          compactDriverLayout &&
+                            styles.driverSummaryBreakdownRowCompact,
+                          tightDriverLayout &&
+                            styles.driverSummaryBreakdownRowTight,
+                        ]}
+                      >
                         <View
                           style={[
-                            styles.driverSummaryAside,
+                            styles.driverSummaryBreakdownCard,
                             compactDriverLayout &&
-                              styles.driverSummaryAsideCompact,
-                            tightDriverLayout && styles.driverSummaryAsideTight,
+                              styles.driverSummaryBreakdownCardCompact,
+                            tightDriverLayout &&
+                              styles.driverSummaryBreakdownCardTight,
                           ]}
                         >
                           <View
                             style={[
-                              styles.driverSummaryAsideDivider,
-                              compactDriverLayout &&
-                                styles.driverSummaryAsideDividerCompact,
-                              tightDriverLayout &&
-                                styles.driverSummaryAsideDividerTight,
-                            ]}
-                          />
-                          <View
-                            style={[
                               styles.driverSummaryAsideMetric,
-                              compactDriverLayout &&
-                                styles.driverSummaryAsideMetricCompact,
-                              tightDriverLayout &&
-                                styles.driverSummaryAsideMetricTight,
+                              styles.driverSummaryAsideMetricCard,
                             ]}
                           >
                             <Text
@@ -637,19 +893,26 @@ export default function RobotaxiReceiptScreen({ navigation, route }) {
                               {formatCurrency(totalAmount)}
                             </Text>
                           </View>
+                        </View>
 
-                          {Number.isFinite(finalTotalFees) ? (
-                            <TouchableOpacity
-                              activeOpacity={0.78}
-                              onPress={() =>
-                                setShowFeeBreakdown((previous) => !previous)
-                              }
+                        {Number.isFinite(finalTotalFees) ? (
+                          <TouchableOpacity
+                            activeOpacity={0.78}
+                            onPress={() =>
+                              setShowFeeBreakdown((previous) => !previous)
+                            }
+                            style={[
+                              styles.driverSummaryBreakdownCard,
+                              compactDriverLayout &&
+                                styles.driverSummaryBreakdownCardCompact,
+                              tightDriverLayout &&
+                                styles.driverSummaryBreakdownCardTight,
+                            ]}
+                          >
+                            <View
                               style={[
                                 styles.driverSummaryAsideMetric,
-                                compactDriverLayout &&
-                                  styles.driverSummaryAsideMetricCompact,
-                                tightDriverLayout &&
-                                  styles.driverSummaryAsideMetricTight,
+                                styles.driverSummaryAsideMetricCard,
                               ]}
                             >
                               <View style={styles.driverSummaryAsideLabelRow}>
@@ -686,15 +949,22 @@ export default function RobotaxiReceiptScreen({ navigation, route }) {
                               >
                                 {driverSummaryAsideSecondaryValue}
                               </Text>
-                            </TouchableOpacity>
-                          ) : (
+                            </View>
+                          </TouchableOpacity>
+                        ) : (
+                          <View
+                            style={[
+                              styles.driverSummaryBreakdownCard,
+                              compactDriverLayout &&
+                                styles.driverSummaryBreakdownCardCompact,
+                              tightDriverLayout &&
+                                styles.driverSummaryBreakdownCardTight,
+                            ]}
+                          >
                             <View
                               style={[
                                 styles.driverSummaryAsideMetric,
-                                compactDriverLayout &&
-                                  styles.driverSummaryAsideMetricCompact,
-                                tightDriverLayout &&
-                                  styles.driverSummaryAsideMetricTight,
+                                styles.driverSummaryAsideMetricCard,
                               ]}
                             >
                               <Text
@@ -721,8 +991,8 @@ export default function RobotaxiReceiptScreen({ navigation, route }) {
                                 {driverSummaryAsideSecondaryValue}
                               </Text>
                             </View>
-                          )}
-                        </View>
+                          </View>
+                        )}
                       </View>
 
                       <View
@@ -813,6 +1083,15 @@ export default function RobotaxiReceiptScreen({ navigation, route }) {
                         ) : null}
                       </View>
                     ) : null}
+
+                    <View style={styles.driverSectionHeaderInline}>
+                      <Text style={styles.driverSectionEyebrow}>
+                        Trajeto
+                      </Text>
+                      <Text style={styles.driverSectionTitleInline}>
+                        Rota final da corrida
+                      </Text>
+                    </View>
 
                     {routePreviewRegion &&
                     routePreviewCoordinates.length >= 2 ? (
@@ -1073,6 +1352,15 @@ export default function RobotaxiReceiptScreen({ navigation, route }) {
                       </View>
                     </View>
 
+                    <View style={styles.driverSectionHeaderInline}>
+                      <Text style={styles.driverSectionEyebrow}>
+                        Resumo operacional
+                      </Text>
+                      <Text style={styles.driverSectionTitleInline}>
+                        Tempo e distância finais
+                      </Text>
+                    </View>
+
                     <View
                       style={[
                         styles.driverMetricGrid,
@@ -1191,179 +1479,197 @@ export default function RobotaxiReceiptScreen({ navigation, route }) {
                       </View>
                     </View>
 
-                    <View
-                      style={[
-                        styles.driverActionStack,
-                        tightDriverLayout && styles.driverActionRow,
-                        tightDriverLayout && styles.driverActionRowTight,
-                      ]}
-                    >
-                      <PrototypePrimaryButton
-                        label={driverRateButtonLabel}
-                        icon="star-outline"
-                        disabled={
-                          driverRatingSubmitted || !canDriverRatePassenger
-                        }
-                        accessible
-                        accessibilityRole="button"
-                        testID="driver-receipt-rate-passenger-button"
-                        accessibilityLabel="driver-receipt-rate-passenger-button"
-                        onPress={openDriverReceiptRating}
-                        onAccessibilityTap={openDriverReceiptRating}
-                        style={[
-                          styles.driverRateButton,
-                          compactDriverLayout && styles.driverRateButtonCompact,
-                          tightDriverLayout && styles.driverRateButtonTight,
-                        ]}
-                      />
-
-                      <TouchableOpacity
-                        activeOpacity={0.86}
-                        style={[
-                          styles.driverBackSecondaryButton,
-                          compactDriverLayout &&
-                            styles.driverBackSecondaryButtonCompact,
-                          tightDriverLayout &&
-                            styles.driverBackSecondaryButtonTight,
-                        ]}
-                        onPress={() => navigation.navigate("RobotaxiPrototype")}
-                      >
-                        <Ionicons
-                          name="arrow-back-outline"
-                          size={tightDriverLayout ? 15 : 17}
-                          color="#4F5A63"
-                        />
-                        <Text
-                          style={[
-                            styles.driverBackSecondaryText,
-                            compactDriverLayout &&
-                              styles.driverBackSecondaryTextCompact,
-                            tightDriverLayout &&
-                              styles.driverBackSecondaryTextTight,
-                          ]}
-                        >
-                          {driverBackButtonLabel}
-                        </Text>
-                      </TouchableOpacity>
-                    </View>
+                    {renderRecentHistorySection(driverRecentHistory)}
                   </>
                 ) : (
                   <View style={styles.emptyWrap}>
                     <Text style={styles.emptyText}>
                       Nenhuma corrida concluída para exibir recibo.
                     </Text>
-                    <PrototypePrimaryButton
-                      label="Voltar para o mapa"
-                      icon="map-outline"
-                      onPress={() => navigation.navigate("RobotaxiPrototype")}
-                      style={styles.closeButton}
-                    />
                   </View>
                 )
               ) : (
                 <>
-                  <Text style={styles.title}>Recibos</Text>
-                  <Text style={styles.subtitle}>
-                    Resumo financeiro e histórico recente
-                  </Text>
-                  {lastTouchProbe ? (
-                    <Text style={styles.touchProbeText}>
-                      Toque detectado: {lastTouchProbe}
-                    </Text>
-                  ) : null}
-
-                  <View style={styles.historyWrap}>
-                    {runtimeHistory.length > 0 ? (
-                      runtimeHistory.map((item) => {
-                        const active = selected?.id === item.id;
-                        const valueLabel = formatCurrency(resolveTripGrossAmount(item));
-                        const routeParts = buildReceiptHistoryRouteParts(item);
-                        return (
-                          <TouchableOpacity
-                            key={item.id}
-                            activeOpacity={0.88}
-                            onPress={() => setSelectedId(item.id)}
-                            style={[
-                              styles.historyRow,
-                              active && styles.historyRowActive,
-                            ]}
-                          >
-                            <View style={styles.historyTextWrap}>
-                              <View style={styles.historyHeaderRow}>
-                                <Text style={styles.historyDate}>
-                                  {item.date || "--"}
-                                </Text>
-                                <Text style={styles.historyValue}>
-                                  {valueLabel}
-                                </Text>
-                              </View>
-
-                              <View style={styles.historyRouteStack}>
-                                <View style={styles.historyStopRow}>
-                                  <View
-                                    style={[
-                                      styles.historyStopDot,
-                                      styles.historyStopDotPickup,
-                                    ]}
-                                  />
-                                  <Text style={styles.historyStopLabel}>
-                                    Embarque
-                                  </Text>
-                                  <Text
-                                    numberOfLines={2}
-                                    style={styles.historyRoute}
-                                  >
-                                    {routeParts.pickup}
-                                  </Text>
-                                </View>
-
-                                <View style={styles.historyStopRow}>
-                                  <View
-                                    style={[
-                                      styles.historyStopDot,
-                                      styles.historyStopDotDropoff,
-                                    ]}
-                                  />
-                                  <Text style={styles.historyStopLabel}>
-                                    Destino
-                                  </Text>
-                                  <Text
-                                    numberOfLines={2}
-                                    style={styles.historyRoute}
-                                  >
-                                    {routeParts.drop}
-                                  </Text>
-                                </View>
-                              </View>
-                            </View>
-                          </TouchableOpacity>
-                        );
-                      })
-                    ) : (
-                      <View style={styles.emptyWrap}>
-                        <Text style={styles.emptyText}>
-                          Ainda não há recibos gerados para esta conta.
-                        </Text>
-                      </View>
-                    )}
-                  </View>
-
                   {selected ? (
                     <>
+                      <View style={styles.passengerHeroCard}>
+                        <View style={styles.passengerHeroTopRow}>
+                          <View style={styles.passengerHeroBadge}>
+                            <Ionicons
+                              name="checkmark-circle"
+                              size={16}
+                              color="#1A7F37"
+                            />
+                            <Text style={styles.passengerHeroBadgeText}>
+                              Corrida concluída
+                            </Text>
+                          </View>
+                          <View style={styles.passengerHeroMetaPill}>
+                            <Ionicons
+                              name="wallet-outline"
+                              size={13}
+                              color="#445062"
+                            />
+                            <Text style={styles.passengerHeroMetaPillText}>
+                              {paymentStatusLabel}
+                            </Text>
+                          </View>
+                        </View>
+                        <Text style={styles.passengerHeroAmountLabel}>
+                          Total pago
+                        </Text>
+                        <Text style={styles.passengerHeroAmount}>
+                          {totalAmountLabel}
+                        </Text>
+                        <Text style={styles.passengerHeroTitle}>
+                          {heroTitle}
+                        </Text>
+                        <Text style={styles.passengerHeroSubtitle}>
+                          {heroSubtitle ||
+                            "Tudo certo com o encerramento da viagem."}
+                        </Text>
+
+                        <View style={styles.passengerHeroDriverRow}>
+                          <View style={styles.passengerHeroDriverAvatar}>
+                            <Ionicons
+                              name="person"
+                              size={16}
+                              color="#1A330E"
+                            />
+                          </View>
+                          <View style={styles.passengerHeroDriverCopy}>
+                            <Text style={styles.passengerHeroDriverLabel}>
+                              Motorista
+                            </Text>
+                            <Text style={styles.passengerHeroDriverName}>
+                              {selected?.driverName || "Motorista Leaf"}
+                            </Text>
+                          </View>
+                          <Ionicons
+                            name="shield-checkmark-outline"
+                            size={16}
+                            color="#1A7F37"
+                          />
+                        </View>
+
+                        <View style={styles.passengerHeroStatsRow}>
+                          <View style={styles.passengerHeroStatCard}>
+                            <Text style={styles.passengerHeroStatLabel}>
+                              Duração
+                            </Text>
+                            <Text style={styles.passengerHeroStatValue}>
+                              {tripDurationLabel}
+                            </Text>
+                          </View>
+                          <View style={styles.passengerHeroStatCard}>
+                            <Text style={styles.passengerHeroStatLabel}>
+                              Distância
+                            </Text>
+                            <Text style={styles.passengerHeroStatValue}>
+                              {tripDistanceLabel}
+                            </Text>
+                          </View>
+                        </View>
+                      </View>
+
+                      <View style={styles.passengerRouteCard}>
+                        <View style={styles.passengerRouteTimeline}>
+                          <View style={styles.passengerRouteDotOuter}>
+                            <View
+                              style={[
+                                styles.passengerRouteDotInner,
+                                styles.passengerRouteDotPickup,
+                              ]}
+                            />
+                          </View>
+                          <View style={styles.passengerRouteLine} />
+                          <View style={styles.passengerRouteDotOuter}>
+                            <View
+                              style={[
+                                styles.passengerRouteDotInner,
+                                styles.passengerRouteDotDropoff,
+                              ]}
+                            />
+                          </View>
+                        </View>
+
+                        <View style={styles.passengerRouteContent}>
+                          <View style={styles.passengerRouteStop}>
+                            <Text style={styles.passengerRouteStopLabel}>
+                              Embarque
+                            </Text>
+                            <Text style={styles.passengerRouteStopTitle}>
+                              {pickupLocation.title}
+                            </Text>
+                            {pickupLocation.subtitle ? (
+                              <Text
+                                style={styles.passengerRouteStopSubtitle}
+                                numberOfLines={2}
+                              >
+                                {pickupLocation.subtitle}
+                              </Text>
+                            ) : null}
+                          </View>
+
+                          <View style={styles.passengerRouteDivider} />
+
+                          <View style={styles.passengerRouteStop}>
+                            <Text
+                              style={[
+                                styles.passengerRouteStopLabel,
+                                styles.passengerRouteStopLabelDestination,
+                              ]}
+                            >
+                              Destino
+                            </Text>
+                            <Text style={styles.passengerRouteStopTitle}>
+                              {dropoffLocation.title}
+                            </Text>
+                            {dropoffLocation.subtitle ? (
+                              <Text
+                                style={styles.passengerRouteStopSubtitle}
+                                numberOfLines={2}
+                              >
+                                {dropoffLocation.subtitle}
+                              </Text>
+                            ) : null}
+                          </View>
+                        </View>
+                      </View>
+
+                      <View style={styles.passengerSectionHeaderInline}>
+                        <Text style={styles.passengerSectionEyebrow}>
+                          Pagamento
+                        </Text>
+                        <Text style={styles.passengerSectionTitleInline}>
+                          Detalhes do valor
+                        </Text>
+                      </View>
+
                       <View style={styles.detailsBox}>
                         <View style={styles.detailRow}>
-                          <Text style={styles.detailLabel}>Tarifa base</Text>
+                          <Text style={styles.detailLabel}>Tarifa inicial</Text>
                           <Text style={styles.detailValue}>
                             {formatCurrency(fareAmount)}
                           </Text>
                         </View>
                         <View style={styles.detailRow}>
                           <Text style={styles.detailLabel}>
-                            Distância e tempo
+                            Deslocamento e tempo
                           </Text>
                           <Text style={styles.detailValue}>
                             {formatCurrency(variableAmount)}
                           </Text>
+                        </View>
+                        <View style={styles.detailRow}>
+                          <Text style={styles.detailLabel}>
+                            Método de pagamento
+                          </Text>
+                          <View style={styles.detailValuePill}>
+                            <Text style={styles.detailValuePillText}>
+                              {paymentStatusLabel}
+                            </Text>
+                          </View>
                         </View>
                         <View style={[styles.detailRow, styles.detailRowLast]}>
                           <Text style={styles.detailLabelStrong}>
@@ -1375,99 +1681,21 @@ export default function RobotaxiReceiptScreen({ navigation, route }) {
                         </View>
                       </View>
 
-                      <View style={styles.actionsRow}>
-                      <TouchableOpacity
-                        style={[
-                          styles.secondaryAction,
-                          (passengerRatingSubmitted ||
-                              !canPassengerRateDriver) &&
-                              styles.secondaryActionDisabled,
-                        ]}
-                        activeOpacity={0.86}
-                        accessible
-                        accessibilityRole="button"
-                        accessibilityState={{
-                          disabled:
-                            passengerRatingSubmitted || !canPassengerRateDriver,
-                        }}
-                        focusable
-                        hitSlop={{ top: 6, right: 6, bottom: 6, left: 6 }}
-                        disabled={
-                          passengerRatingSubmitted || !canPassengerRateDriver
-                        }
-                        onPressIn={() => setLastTouchProbe("avaliar_viagem")}
-                        testID="passenger-receipt-rate-trip-button"
-                        accessibilityLabel="passenger-receipt-rate-trip-button"
-                        onPress={openPassengerReceiptRating}
-                        onAccessibilityTap={openPassengerReceiptRating}
-                        >
-                          <Ionicons
-                            name="star-outline"
-                            size={15}
-                            color={color.text.primary}
-                          />
-                          <Text style={styles.secondaryActionText}>
-                            {passengerRatingSubmitted
-                              ? "Avaliação enviada"
-                              : canPassengerRateDriver
-                                ? "Avaliar viagem"
-                                : "Avaliação indisponível"}
-                          </Text>
-                        </TouchableOpacity>
-
-                      <TouchableOpacity
-                        style={styles.secondaryAction}
-                        activeOpacity={0.86}
-                        accessible
-                        accessibilityRole="button"
-                        accessibilityState={{ disabled: false }}
-                        focusable
-                        hitSlop={{ top: 6, right: 6, bottom: 6, left: 6 }}
-                        onPressIn={() => setLastTouchProbe("reportar_problema")}
-                        accessibilityLabel="passenger-receipt-report-issue-button"
-                        testID="passenger-receipt-report-issue-button"
-                        onPress={() =>
-                            navigation.navigate("RobotaxiPrototypeComplain", {
-                              fromReceipt: true,
-                              receipt: selected,
-                            })
-                          }
-                        >
-                          <Ionicons
-                            name="warning-outline"
-                            size={15}
-                            color={color.text.primary}
-                          />
-                          <Text style={styles.secondaryActionText}>
-                            Reportar problema
-                          </Text>
-                        </TouchableOpacity>
-                      </View>
                     </>
-                  ) : null}
+                  ) : (
+                    <View style={styles.emptyWrap}>
+                      <Text style={styles.emptyText}>
+                        Ainda não há recibos gerados para esta conta.
+                      </Text>
+                    </View>
+                  )}
 
-                  <PrototypePrimaryButton
-                    label="Voltar para o mapa"
-                    icon="map-outline"
-                    onPress={() => {
-                      setLastTouchProbe("voltar_mapa");
-                      handleDismiss();
-                    }}
-                    style={styles.closeButton}
-                    testID={
-                      isDriverView
-                        ? "driver-receipt-back-to-map-button"
-                        : "passenger-receipt-back-to-map-button"
-                    }
-                    accessibilityLabel={
-                      isDriverView
-                        ? "driver-receipt-back-to-map-button"
-                        : "passenger-receipt-back-to-map-button"
-                    }
-                  />
+                  {renderRecentHistorySection(passengerRecentHistory)}
                 </>
               )}
             </ScrollView>
+            {driverReceiptFooter}
+            {passengerReceiptFooter}
           </PrototypeCard>
         </View>
       </View>
@@ -1504,6 +1732,10 @@ const styles = StyleSheet.create({
   scrollContent: {
     paddingBottom: 8,
   },
+  scrollViewport: {
+    flex: 1,
+    minHeight: 0,
+  },
   scrollContentCompact: {
     paddingTop: 6,
     paddingBottom: 6,
@@ -1521,14 +1753,52 @@ const styles = StyleSheet.create({
     marginBottom: 6,
   },
   driverSummaryHero: {
-    alignItems: "center",
+    gap: 8,
     marginTop: 2,
   },
   driverSummaryHeroCompact: {
-    marginTop: 4,
+    gap: 6,
+    marginTop: 2,
   },
   driverSummaryHeroTight: {
-    marginTop: 6,
+    gap: 4,
+    marginTop: 1,
+  },
+  driverHeroBadgeRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 8,
+  },
+  driverHeroBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    borderRadius: 999,
+    backgroundColor: "rgba(232,239,227,0.96)",
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+  },
+  driverHeroBadgeText: {
+    color: "#1A330E",
+    fontFamily: fonts.Bold,
+    fontSize: 12,
+    lineHeight: 15,
+  },
+  driverHeroMetaPill: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    borderRadius: 999,
+    backgroundColor: "#F5EEB3",
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+  },
+  driverHeroMetaPillText: {
+    color: "#6C651B",
+    fontFamily: fonts.Bold,
+    fontSize: 12,
+    lineHeight: 15,
   },
   driverSuccessWrap: {
     alignItems: "center",
@@ -1571,41 +1841,37 @@ const styles = StyleSheet.create({
     borderRadius: 20,
   },
   driverTitle: {
-    marginTop: 12,
+    marginTop: 0,
     color: color.text.primary,
     fontFamily: fonts.Bold,
-    fontSize: 24,
-    lineHeight: 28,
-    letterSpacing: -0.6,
-    textAlign: "center",
-  },
-  driverTitleCompact: {
-    marginTop: 9,
     fontSize: 21,
     lineHeight: 25,
+    letterSpacing: -0.6,
+    textAlign: "left",
+  },
+  driverTitleCompact: {
+    fontSize: 19,
+    lineHeight: 22,
   },
   driverTitleTight: {
-    marginTop: 7,
-    fontSize: 18,
-    lineHeight: 21,
+    fontSize: 17,
+    lineHeight: 20,
   },
   driverSubtitle: {
-    marginTop: 4,
+    marginTop: 0,
     color: color.text.secondary,
     fontFamily: fonts.Medium,
-    fontSize: 15,
-    lineHeight: 20,
-    textAlign: "center",
-    paddingHorizontal: 12,
+    fontSize: 13.5,
+    lineHeight: 18,
+    textAlign: "left",
+    paddingHorizontal: 0,
   },
   driverSubtitleCompact: {
-    marginTop: 3,
-    fontSize: 13,
-    lineHeight: 17,
-    paddingHorizontal: 4,
+    fontSize: 12.5,
+    lineHeight: 16,
+    paddingHorizontal: 0,
   },
   driverSubtitleTight: {
-    marginTop: 2,
     fontSize: 11.5,
     lineHeight: 14,
     paddingHorizontal: 0,
@@ -1636,21 +1902,14 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingVertical: 11,
   },
-  driverSummaryAmountRow: {
-    flexDirection: "row",
-    alignItems: "flex-start",
+  driverSummaryAmountHighlight: {
+    gap: 6,
   },
-  driverSummaryAmountRowCompact: {
-    flexWrap: "wrap",
-    rowGap: 12,
+  driverSummaryAmountHighlightCompact: {
+    gap: 5,
   },
-  driverSummaryAmountRowTight: {
-    flexWrap: "wrap",
-    rowGap: 10,
-  },
-  driverSummaryAmountMain: {
-    flex: 1,
-    minWidth: 0,
+  driverSummaryAmountHighlightTight: {
+    gap: 4,
   },
   driverSummaryAmountLabel: {
     color: color.text.secondary,
@@ -1685,6 +1944,49 @@ const styles = StyleSheet.create({
     marginTop: 4,
     fontSize: 24,
     lineHeight: 28,
+  },
+  driverSummaryAmountCaption: {
+    marginTop: 6,
+    color: "#6B7178",
+    fontFamily: fonts.Medium,
+    fontSize: 12,
+    lineHeight: 16,
+  },
+  driverSummaryAmountCaptionCompact: {
+    marginTop: 5,
+    fontSize: 11,
+    lineHeight: 14,
+  },
+  driverSummaryAmountCaptionTight: {
+    marginTop: 4,
+    fontSize: 10,
+    lineHeight: 13,
+  },
+  driverSummaryBreakdownRow: {
+    marginTop: 14,
+    flexDirection: "row",
+    gap: 10,
+  },
+  driverSummaryBreakdownRowCompact: {
+    marginTop: 12,
+    gap: 8,
+  },
+  driverSummaryBreakdownRowTight: {
+    marginTop: 10,
+    gap: 8,
+  },
+  driverSummaryBreakdownCard: {
+    flex: 1,
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: "rgba(68,85,93,0.08)",
+    backgroundColor: "rgba(255,255,255,0.84)",
+  },
+  driverSummaryBreakdownCardCompact: {
+    borderRadius: 16,
+  },
+  driverSummaryBreakdownCardTight: {
+    borderRadius: 14,
   },
   driverSummaryAside: {
     width: 112,
@@ -1744,6 +2046,10 @@ const styles = StyleSheet.create({
   },
   driverSummaryAsideMetric: {
     paddingVertical: 1,
+  },
+  driverSummaryAsideMetricCard: {
+    paddingHorizontal: 12,
+    paddingVertical: 11,
   },
   driverSummaryAsideMetricCompact: {
     flexGrow: 1,
@@ -2075,6 +2381,24 @@ const styles = StyleSheet.create({
     letterSpacing: 0.5,
     textTransform: "uppercase",
   },
+  driverSectionHeaderInline: {
+    marginTop: 14,
+    gap: 2,
+  },
+  driverSectionEyebrow: {
+    color: "#6B7178",
+    fontFamily: fonts.SemiBold,
+    fontSize: 10,
+    lineHeight: 12,
+    textTransform: "uppercase",
+    letterSpacing: 0.8,
+  },
+  driverSectionTitleInline: {
+    color: color.text.primary,
+    fontFamily: fonts.SemiBold,
+    fontSize: 17,
+    lineHeight: 22,
+  },
   driverRoutePanel: {
     marginTop: 12,
     borderRadius: 26,
@@ -2335,6 +2659,12 @@ const styles = StyleSheet.create({
   driverActionStack: {
     marginTop: 14,
   },
+  driverActionStackPinned: {
+    marginTop: 0,
+  },
+  driverActionStackSingle: {
+    marginTop: 0,
+  },
   driverActionRow: {
     flexDirection: "row",
     gap: 8,
@@ -2344,16 +2674,16 @@ const styles = StyleSheet.create({
     marginTop: 10,
   },
   driverRateButton: {
-    minHeight: 62,
-    borderRadius: 24,
+    minHeight: 56,
+    borderRadius: 22,
   },
   driverRateButtonCompact: {
-    minHeight: 54,
-    borderRadius: 20,
+    minHeight: 50,
+    borderRadius: 18,
   },
   driverRateButtonTight: {
     flex: 1,
-    minHeight: 46,
+    minHeight: 44,
     borderRadius: 16,
   },
   driverBackSecondaryButton: {
@@ -2393,6 +2723,357 @@ const styles = StyleSheet.create({
   driverBackSecondaryTextTight: {
     fontSize: 13,
     lineHeight: 15,
+  },
+  driverStickyFooter: {
+    flexShrink: 0,
+    paddingTop: 12,
+    marginTop: 10,
+    borderTopWidth: 1,
+    borderTopColor: "rgba(68,85,93,0.08)",
+    backgroundColor: "rgba(248,250,249,0.96)",
+  },
+  driverStickyFooterCompact: {
+    paddingTop: 10,
+    marginTop: 8,
+  },
+  driverStickyFooterTight: {
+    paddingTop: 8,
+    marginTop: 6,
+  },
+  receiptHeaderRow: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    justifyContent: "space-between",
+    gap: 12,
+    marginBottom: 12,
+  },
+  receiptHeaderCopy: {
+    flex: 1,
+    minWidth: 0,
+    paddingRight: 8,
+  },
+  receiptHeaderEyebrow: {
+    color: color.text.secondary,
+    fontFamily: fonts.SemiBold,
+    fontSize: 11,
+    lineHeight: 14,
+    textTransform: "uppercase",
+    letterSpacing: 1,
+  },
+  receiptHeaderTitle: {
+    marginTop: 4,
+    color: color.text.primary,
+    fontFamily: fonts.Bold,
+    fontSize: 24,
+    lineHeight: 28,
+  },
+  receiptHeaderSubtitle: {
+    marginTop: 4,
+    color: color.text.secondary,
+    fontFamily: fonts.Regular,
+    fontSize: 13,
+    lineHeight: 18,
+  },
+  passengerHeroCard: {
+    borderRadius: 22,
+    borderWidth: 1,
+    borderColor: "rgba(17,26,39,0.08)",
+    backgroundColor: "rgba(255,255,255,0.96)",
+    paddingHorizontal: 16,
+    paddingVertical: 16,
+  },
+  passengerHeroTopRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 10,
+    flexWrap: "wrap",
+  },
+  passengerHeroBadge: {
+    alignSelf: "flex-start",
+    minHeight: 30,
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    backgroundColor: "rgba(26,127,55,0.10)",
+    borderWidth: 1,
+    borderColor: "rgba(26,127,55,0.14)",
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+  },
+  passengerHeroMetaPill: {
+    minHeight: 28,
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    backgroundColor: "rgba(236,242,246,0.92)",
+    borderWidth: 1,
+    borderColor: "rgba(17,26,39,0.08)",
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+  },
+  passengerHeroMetaPillText: {
+    color: "#445062",
+    fontFamily: fonts.SemiBold,
+    fontSize: 11,
+    lineHeight: 14,
+  },
+  passengerHeroBadgeText: {
+    color: "#1A7F37",
+    fontFamily: fonts.SemiBold,
+    fontSize: 11,
+    lineHeight: 14,
+    textTransform: "uppercase",
+    letterSpacing: 0.7,
+  },
+  passengerHeroAmountLabel: {
+    marginTop: 16,
+    color: color.text.secondary,
+    fontFamily: fonts.SemiBold,
+    fontSize: 11,
+    lineHeight: 14,
+    textTransform: "uppercase",
+    letterSpacing: 0.9,
+  },
+  passengerHeroAmount: {
+    marginTop: 6,
+    color: color.text.primary,
+    fontFamily: fonts.Bold,
+    fontSize: 32,
+    lineHeight: 36,
+  },
+  passengerHeroTitle: {
+    marginTop: 10,
+    color: color.text.primary,
+    fontFamily: fonts.SemiBold,
+    fontSize: 18,
+    lineHeight: 24,
+  },
+  passengerHeroSubtitle: {
+    marginTop: 4,
+    color: color.text.secondary,
+    fontFamily: fonts.Regular,
+    fontSize: 13,
+    lineHeight: 18,
+  },
+  passengerHeroDriverRow: {
+    marginTop: 14,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: "rgba(17,26,39,0.08)",
+    backgroundColor: "rgba(244,247,250,0.92)",
+    paddingHorizontal: 12,
+    paddingVertical: 11,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+  },
+  passengerHeroDriverAvatar: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(26,51,14,0.10)",
+  },
+  passengerHeroDriverCopy: {
+    flex: 1,
+    minWidth: 0,
+  },
+  passengerHeroDriverLabel: {
+    color: color.text.secondary,
+    fontFamily: fonts.SemiBold,
+    fontSize: 10,
+    lineHeight: 12,
+    textTransform: "uppercase",
+    letterSpacing: 0.8,
+  },
+  passengerHeroDriverName: {
+    marginTop: 2,
+    color: color.text.primary,
+    fontFamily: fonts.SemiBold,
+    fontSize: 14,
+    lineHeight: 18,
+  },
+  passengerHeroStatsRow: {
+    marginTop: 12,
+    flexDirection: "row",
+    gap: 10,
+  },
+  passengerHeroStatCard: {
+    flex: 1,
+    borderRadius: 16,
+    backgroundColor: "rgba(248,250,252,0.96)",
+    borderWidth: 1,
+    borderColor: "rgba(17,26,39,0.08)",
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
+  passengerHeroStatLabel: {
+    color: color.text.secondary,
+    fontFamily: fonts.SemiBold,
+    fontSize: 10,
+    lineHeight: 12,
+    textTransform: "uppercase",
+    letterSpacing: 0.8,
+  },
+  passengerHeroStatValue: {
+    marginTop: 4,
+    color: color.text.primary,
+    fontFamily: fonts.Bold,
+    fontSize: 15,
+    lineHeight: 18,
+  },
+  passengerRouteCard: {
+    marginTop: 12,
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: color.border.subtle,
+    backgroundColor: color.surface.secondary,
+    paddingHorizontal: 14,
+    paddingVertical: 14,
+    flexDirection: "row",
+    gap: 12,
+  },
+  passengerRouteTimeline: {
+    width: 16,
+    alignItems: "center",
+    paddingTop: 4,
+    paddingBottom: 4,
+  },
+  passengerRouteDotOuter: {
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+    backgroundColor: "#FFFFFF",
+    borderWidth: 1,
+    borderColor: "rgba(17,26,39,0.08)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  passengerRouteDotInner: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+  },
+  passengerRouteDotPickup: {
+    backgroundColor: "#1A7F37",
+  },
+  passengerRouteDotDropoff: {
+    backgroundColor: "#7A8894",
+  },
+  passengerRouteLine: {
+    flex: 1,
+    width: 1,
+    marginVertical: 4,
+    backgroundColor: "rgba(122,136,148,0.32)",
+  },
+  passengerRouteContent: {
+    flex: 1,
+  },
+  passengerRouteStop: {
+    gap: 4,
+  },
+  passengerRouteDivider: {
+    height: 1,
+    marginVertical: 12,
+    backgroundColor: "rgba(17,26,39,0.08)",
+  },
+  passengerRouteStopLabel: {
+    color: color.text.secondary,
+    fontFamily: fonts.SemiBold,
+    fontSize: 10,
+    lineHeight: 12,
+    textTransform: "uppercase",
+    letterSpacing: 0.8,
+  },
+  passengerRouteStopLabelDestination: {
+    color: "#445062",
+  },
+  passengerRouteStopTitle: {
+    color: color.text.primary,
+    fontFamily: fonts.SemiBold,
+    fontSize: 15,
+    lineHeight: 20,
+  },
+  passengerRouteStopSubtitle: {
+    color: color.text.secondary,
+    fontFamily: fonts.Regular,
+    fontSize: 12,
+    lineHeight: 17,
+  },
+  passengerSectionHeaderInline: {
+    marginTop: 14,
+    gap: 2,
+  },
+  passengerSectionEyebrow: {
+    color: color.text.secondary,
+    fontFamily: fonts.SemiBold,
+    fontSize: 10,
+    lineHeight: 12,
+    textTransform: "uppercase",
+    letterSpacing: 0.8,
+  },
+  passengerSectionTitleInline: {
+    color: color.text.primary,
+    fontFamily: fonts.SemiBold,
+    fontSize: 17,
+    lineHeight: 22,
+  },
+  passengerStatsRow: {
+    marginTop: 10,
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
+  },
+  passengerStatPill: {
+    minHeight: 34,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: "rgba(17,26,39,0.08)",
+    backgroundColor: "rgba(236,242,246,0.92)",
+    paddingHorizontal: 10,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+  },
+  passengerStatPillText: {
+    color: color.text.primary,
+    fontFamily: fonts.Medium,
+    fontSize: 12,
+    lineHeight: 16,
+  },
+  receiptSectionHeader: {
+    marginTop: 16,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 12,
+  },
+  receiptSectionTitle: {
+    color: color.text.primary,
+    fontFamily: fonts.SemiBold,
+    fontSize: 16,
+    lineHeight: 22,
+  },
+  receiptSectionBadge: {
+    minWidth: 28,
+    height: 28,
+    borderRadius: 14,
+    paddingHorizontal: 8,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(230,237,244,0.92)",
+    borderWidth: 1,
+    borderColor: "rgba(17,26,39,0.08)",
+  },
+  receiptSectionBadgeText: {
+    color: color.text.secondary,
+    fontFamily: fonts.SemiBold,
+    fontSize: 12,
+    lineHeight: 14,
   },
   earningsCard: {
     marginTop: 12,
@@ -2572,29 +3253,29 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   historyRow: {
-    minHeight: 84,
-    borderRadius: 14,
+    minHeight: 96,
+    borderRadius: 16,
     borderWidth: 1,
     borderColor: color.border.subtle,
     backgroundColor: color.surface.secondary,
-    paddingHorizontal: 10,
-    paddingVertical: 10,
-    justifyContent: "center",
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+    justifyContent: "flex-start",
   },
   historyRowActive: {
     borderColor: "rgba(26,51,14,0.34)",
     backgroundColor: color.surface.activeSoft,
   },
-  historyTextWrap: {
-    flex: 1,
-    marginRight: 10,
-    minWidth: 0,
-  },
   historyHeaderRow: {
     flexDirection: "row",
-    alignItems: "center",
+    alignItems: "flex-start",
     justifyContent: "space-between",
     gap: 10,
+  },
+  historyHeaderMeta: {
+    flex: 1,
+    minWidth: 0,
+    gap: 6,
   },
   historyDate: {
     color: color.text.primary,
@@ -2602,8 +3283,43 @@ const styles = StyleSheet.create({
     fontSize: 13,
     lineHeight: 18,
   },
+  historyStatusPill: {
+    alignSelf: "flex-start",
+    minHeight: 24,
+    borderRadius: 999,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderWidth: 1,
+    borderColor: "rgba(26,127,55,0.16)",
+    backgroundColor: "rgba(26,127,55,0.08)",
+  },
+  historyStatusPillText: {
+    color: "#1A7F37",
+    fontFamily: fonts.SemiBold,
+    fontSize: 10,
+    lineHeight: 12,
+    textTransform: "uppercase",
+    letterSpacing: 0.6,
+  },
+  historyValuePill: {
+    minHeight: 28,
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderWidth: 1,
+    borderColor: "rgba(17,26,39,0.08)",
+    backgroundColor: "rgba(244,247,250,0.92)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  historyValuePillText: {
+    color: color.text.primary,
+    fontFamily: fonts.SemiBold,
+    fontSize: 13,
+    lineHeight: 16,
+  },
   historyRouteStack: {
-    marginTop: 6,
+    marginTop: 10,
     gap: 5,
   },
   historyStopRow: {
@@ -2679,6 +3395,20 @@ const styles = StyleSheet.create({
     fontSize: 13,
     lineHeight: 18,
   },
+  detailValuePill: {
+    borderRadius: 999,
+    backgroundColor: "rgba(236,242,246,0.92)",
+    borderWidth: 1,
+    borderColor: "rgba(17,26,39,0.08)",
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+  },
+  detailValuePillText: {
+    color: "#445062",
+    fontFamily: fonts.SemiBold,
+    fontSize: 11,
+    lineHeight: 14,
+  },
   detailLabelStrong: {
     color: color.text.primary,
     fontFamily: fonts.SemiBold,
@@ -2695,6 +3425,47 @@ const styles = StyleSheet.create({
     marginTop: 10,
     flexDirection: "row",
     gap: 8,
+  },
+  passengerActionStack: {
+    marginTop: 10,
+    gap: 8,
+  },
+  passengerStickyFooter: {
+    flexShrink: 0,
+    paddingTop: 12,
+    marginTop: 10,
+    gap: 8,
+    borderTopWidth: 1,
+    borderTopColor: "rgba(68,85,93,0.08)",
+    backgroundColor: "rgba(248,250,249,0.96)",
+  },
+  passengerPrimaryAction: {
+    minHeight: 48,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: "rgba(26,51,14,0.16)",
+    backgroundColor: "rgba(232,239,227,0.96)",
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 7,
+  },
+  passengerPrimaryActionText: {
+    color: "#1A330E",
+    fontFamily: fonts.SemiBold,
+    fontSize: 14,
+    lineHeight: 18,
+  },
+  passengerSecondaryAction: {
+    minHeight: 44,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: color.border.strong,
+    backgroundColor: color.surface.secondary,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
   },
   secondaryAction: {
     flex: 1,

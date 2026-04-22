@@ -1,11 +1,11 @@
 import Logger from '../utils/Logger';
-import axios from 'axios';
+import { createAxiosInstance } from '../utils/axiosInterceptor';
 import { getSelfHostedApiUrl } from '../config/ApiConfig';
 import { toUserFriendlyError } from '../utils/friendlyErrorMessages';
 
 const API_BASE_URL = getSelfHostedApiUrl('');
 
-const api = axios.create({
+const api = createAxiosInstance({
   baseURL: API_BASE_URL,
   timeout: 30000,
   headers: {

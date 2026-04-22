@@ -7,9 +7,8 @@ import Logger from '../../../utils/Logger';
 
 import React, { useState, useCallback, useRef, useEffect } from 'react';
 import { View, Text, TextInput, TouchableOpacity, StyleSheet, Alert, KeyboardAvoidingView, Platform } from 'react-native';
-import { fonts } from '../../../common-local/font';
+import { fonts } from '../../../theme/runtimeTokens';
 import auth from '@react-native-firebase/auth';
-import database from '@react-native-firebase/database';
 import { Ionicons } from '@expo/vector-icons';
 import ContinueButton from '../common/ContinueButton';
 import UserAuthService from '../../../services/UserAuthService';
@@ -151,22 +150,14 @@ const ForgotPasswordStep = ({ phoneNumber, onPasswordReset, onBack }) => {
             return;
         }
 
-        setLoading(true);
-        try {
-            // Resetar senha
-            const currentUser = auth().currentUser;
-            if (currentUser) {
-                // Atualizar senha no Firebase Auth
-                await currentUser.updatePassword(newPassword);
-                
-                // Marcar que tem senha no banco
-                await database().ref(`users/${currentUser.uid}`).update({
-                    hasPassword: true,
-                    passwordUpdatedAt: new Date().toISOString()
-                });
-                
-                // Registrar sucesso
-                await UserAuthService.recordAttempt(phoneNumber, true);
+	        setLoading(true);
+	        try {
+	            const currentUser = auth().currentUser;
+	            if (currentUser) {
+	                await UserAuthService.setupPassword(phoneNumber, newPassword);
+	                
+	                // Registrar sucesso
+	                await UserAuthService.recordAttempt(phoneNumber, true);
                 
                 Alert.alert('Sucesso', 'Senha alterada com sucesso!');
                 

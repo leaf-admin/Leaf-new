@@ -1,7 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import { ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { fonts } from '../../../common-local/font';
+import { fonts } from '../../../theme/runtimeTokens';
 import ContinueButton from '../common/ContinueButton';
 import onboardingTheme from '../common/onboardingTheme';
 
@@ -59,12 +59,26 @@ const DriverEmailStep = ({ onSubmitted, onBack, initialData = {} }) => {
           keyboardType="email-address"
           autoCapitalize="none"
           autoCorrect={false}
+          testID="driver-email-input"
+          accessibilityLabel="driver-email-input"
         />
         {error ? <Text style={styles.errorText}>{error}</Text> : null}
       </View>
 
-      <ContinueButton onPress={() => handleSubmit(false)} disabled={!isEmailValid} text="Finalizar cadastro" />
-      <TouchableOpacity style={styles.skipButton} onPress={() => handleSubmit(true)} activeOpacity={0.86}>
+      <ContinueButton
+        onPress={() => handleSubmit(false)}
+        disabled={!isEmailValid}
+        text="Finalizar cadastro"
+        testID="driver-email-continue-btn"
+        accessibilityLabel="driver-email-continue-btn"
+      />
+      <TouchableOpacity
+        style={styles.skipButton}
+        onPress={() => handleSubmit(true)}
+        activeOpacity={0.86}
+        testID="driver-email-skip-btn"
+        accessibilityLabel="driver-email-skip-btn"
+      >
         <Text style={styles.skipLabel}>Preencher depois</Text>
       </TouchableOpacity>
     </ScrollView>

@@ -13,8 +13,8 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useSelector } from 'react-redux';
-import { fonts } from '../../common-local/font';
-import { useTheme } from '../../common-local/theme';
+import { fonts } from '../../theme/runtimeTokens';
+import { useTheme } from '../../theme/runtimeTokens';
 import Typography from '../design-system/Typography';
 import AnimatedButton from '../design-system/AnimatedButton';
 import BottomSheet, { BottomSheetView, BottomSheetBackdrop } from '@gorhom/bottom-sheet';

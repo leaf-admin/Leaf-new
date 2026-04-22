@@ -2,7 +2,7 @@ import React, { useCallback, useMemo, useState } from 'react';
 import { Alert, StatusBar, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { fonts } from '../../common-local/font';
+import { fonts } from '../../theme/runtimeTokens';
 import PrototypeScreenTransition from '../../components/prototype/PrototypeScreenTransition';
 import PrototypeDismissibleSheet from '../../components/prototype/PrototypeDismissibleSheet';
 import { CardHandle, PrototypeCard, PrototypePrimaryButton } from '../../components/prototype/PrototypeUI';
@@ -88,7 +88,7 @@ export default function RobotaxiComplainScreen({ navigation, route }) {
 
       const localTicket = {
         id: `local-${Date.now()}`,
-        status: 'Enviado no prototipo',
+        status: 'Enviado',
         createdAt: new Date().toISOString()
       };
       setLocalHistory(previous => [localTicket, ...previous].slice(0, 3));

@@ -98,7 +98,7 @@ const Alert = {
 };
 
 // ✅ Componente COMPLETAMENTE INDEPENDENTE para o timer - gerencia seu próprio estado
-const SearchingTimer = ({ tripStatus, style }) => {
+const SearchingTimer = ({ tripStatus, style, testID }) => {
     const [time, setTime] = useState(0);
     const intervalRef = useRef(null);
     const startTimeRef = useRef(null);
@@ -143,7 +143,7 @@ const SearchingTimer = ({ tripStatus, style }) => {
 
     const formatted = `${Math.floor(time / 60)}:${(time % 60).toString().padStart(2, '0')}`;
     return (
-        <Typography variant="h2" style={style}>
+        <Typography variant="h2" style={style} testID={testID}>
             {formatted}
         </Typography>
     );
@@ -217,6 +217,27 @@ function PassengerUI(props) {
     // Função de tradução temporária
     const t = (key) => key;
     const DEV_MODE = __DEV__;
+
+    const normalizeDriverCarType = useCallback((value) => {
+        if (!value) return '';
+        return value
+            .toString()
+            .toLowerCase()
+            .trim()
+            .replace(/[_-]+/g, ' ')
+            .replace(/\s+/g, ' ');
+    }, []);
+
+    const driverMatchesCarType = useCallback((driverCarTypeValue, carNameValue) => {
+        const driverCarType = normalizeDriverCarType(driverCarTypeValue);
+        const carName = normalizeDriverCarType(carNameValue);
+
+        if (!driverCarType) {
+            return true;
+        }
+
+        return driverCarType === carName;
+    }, [normalizeDriverCarType]);
 
     const { theme, navigation, pickupAddress, currentLocation, setRoutePolyline, mapRef, onDriverLocationUpdate, onNearbyDriversUpdate, onResetManualPickup, onPickupManuallySelectedChange, locationDenied, onRequestLocationPermission } = props; // ✅ Callback para atualizar localização do motorista no mapa e motoristas próximos
 
@@ -371,7 +392,7 @@ function PassengerUI(props) {
             keyboardWillShowListener.remove();
             keyboardWillHideListener.remove();
         };
-    }, []);
+    }, [buildLiveRouteTelemetryContext]);
 
     // Estados para gerenciar a viagem
     const [currentBooking, setCurrentBooking] = useState(null);
@@ -823,16 +844,65 @@ function PassengerUI(props) {
     const searchTimeoutRef = useRef(null);
     const placesSessionTokenRef = useRef(null);
     const routeRecalcRef = useRef({
-        pickup: { lastAt: 0, origin: null, destination: null },
-        destination: { lastAt: 0, origin: null, destination: null }
+        pickup: { lastAt: 0, origin: null, destination: null, routeKey: '' },
+        destination: { lastAt: 0, origin: null, destination: null, routeKey: '' }
     });
 
     const resetRouteRecalcState = useCallback(() => {
         routeRecalcRef.current = {
-            pickup: { lastAt: 0, origin: null, destination: null },
-            destination: { lastAt: 0, origin: null, destination: null }
+            pickup: { lastAt: 0, origin: null, destination: null, routeKey: '' },
+            destination: { lastAt: 0, origin: null, destination: null, routeKey: '' }
         };
     }, []);
+
+    const buildActiveRouteKey = useCallback((routeType, destination) => {
+        const bookingToken = String(
+            currentBooking?.bookingId ||
+            currentBooking?.id ||
+            tripdata?.bookingId ||
+            ''
+        ).trim() || 'no-booking';
+
+        return [
+            routeType,
+            bookingToken,
+            Number(destination?.lat || 0).toFixed(5),
+            Number(destination?.lng || 0).toFixed(5),
+            routeType === 'pickup' ? Number(tripdata?.drop?.lat || 0).toFixed(5) : 'no-drop-lat',
+            routeType === 'pickup' ? Number(tripdata?.drop?.lng || 0).toFixed(5) : 'no-drop-lng'
+        ].join(':');
+    }, [
+        currentBooking?.bookingId,
+        currentBooking?.id,
+        tripdata?.bookingId,
+        tripdata?.drop?.lat,
+        tripdata?.drop?.lng
+    ]);
+
+    const buildLiveRouteTelemetryContext = useCallback((routeType) => ({
+        bookingId: currentBooking?.bookingId || currentBooking?.id || tripdata?.bookingId || null,
+        sourceKey: [
+            auth?.profile?.usertype || 'customer',
+            auth?.profile?.uid || 'anonymous',
+            routeType
+        ].join(':'),
+        sourceMeta: {
+            userId: auth?.profile?.uid || null,
+            userType: auth?.profile?.usertype || 'customer',
+            platform: Platform.OS,
+            flow: 'legacy_mobile',
+            scenario: 'active_trip_fixed_route',
+            surface: `passenger_live_route_${routeType}`
+        },
+        cacheMode: 'sticky_destination',
+        routeScope: routeType
+    }), [
+        auth?.profile?.uid,
+        auth?.profile?.usertype,
+        currentBooking?.bookingId,
+        currentBooking?.id,
+        tripdata?.bookingId
+    ]);
 
     const createPlacesSessionToken = useCallback(() => {
         return `leaf-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
@@ -855,6 +925,15 @@ function PassengerUI(props) {
         if (!origin || !destination) return true;
 
         const state = routeRecalcRef.current[routeType];
+        const routeKey = buildActiveRouteKey(routeType, destination);
+        const hasExistingRoute = routeType === 'pickup'
+            ? Array.isArray(driverToPickupPolyline) && driverToPickupPolyline.length > 1
+            : Array.isArray(routeToDestinationPolyline) && routeToDestinationPolyline.length > 1;
+
+        if (state?.routeKey && state.routeKey === routeKey && hasExistingRoute) {
+            return false;
+        }
+
         if (!state?.lastAt || !state.origin || !state.destination) {
             return true;
         }
@@ -879,15 +958,20 @@ function PassengerUI(props) {
         const enoughTime = Date.now() - state.lastAt >= config.minIntervalMs;
         const enoughMovement = Number.isFinite(movedKm) && movedKm >= config.minMovementKm;
         return enoughTime && enoughMovement;
-    }, []);
+    }, [
+        buildActiveRouteKey,
+        driverToPickupPolyline,
+        routeToDestinationPolyline
+    ]);
 
     const registerRouteRecalc = useCallback((routeType, origin, destination) => {
         routeRecalcRef.current[routeType] = {
             lastAt: Date.now(),
             origin: { lat: origin.lat, lng: origin.lng },
-            destination: { lat: destination.lat, lng: destination.lng }
+            destination: { lat: destination.lat, lng: destination.lng },
+            routeKey: buildActiveRouteKey(routeType, destination)
         };
-    }, []);
+    }, [buildActiveRouteKey]);
 
     // Preencher endereço de embarque automaticamente (apenas se não estiver editando manualmente E não foi selecionado manualmente)
     useEffect(() => {
@@ -993,11 +1077,11 @@ function PassengerUI(props) {
         {
             name: 'Leaf Moto',
             image: 'https://cdn.pixabay.com/photo/2013/07/13/12/46/motorcycle-160175_640.png',
-            min_fare: 6.90,
-            base_fare: 2.18,
-            fixed_fee: 0.86,
-            rate_per_hour: 12.17,
-            rate_per_unit_distance: 1.19,
+            min_fare: 4.00,
+            base_fare: 0.60,
+            fixed_fee: 0.80,
+            rate_per_hour: 7.80,
+            rate_per_unit_distance: 0.99,
             convenience_fee_type: 'flat',
             convenience_fees: 0,
             extra_info: 'Capacity: 1, Type: Moto',
@@ -1190,14 +1274,19 @@ function PassengerUI(props) {
                         return [carName, estimate];
                     }
 
+                    const backendFare = Number(quote?.estimatedFare);
+                    const hasBackendFare = Number.isFinite(backendFare) && backendFare > 0;
+
                     return [
                         carName,
                         {
                             ...estimate,
-                            estimateFare: Number(quote?.estimatedFare || clientEstimatedFare || estimate?.estimateFare || 0),
+                            estimateFare: hasBackendFare ? backendFare : null,
+                            fare: hasBackendFare ? backendFare : null,
                             estimateDistance: Number(quote?.routeDistanceKm || routeDistanceKm || estimate?.estimateDistance || 0),
                             estimateTime: Number(quote?.routeDurationSecs || routeDurationSecs || estimate?.estimateTime || 0),
                             tollFee: Number(quote?.tollFee || tollFee || estimate?.tollFee || 0),
+                            rateCardVersion: quote?.rateCardVersion || estimate?.rateCardVersion || null,
                             pricingPayload: quote?.pricingPayload || estimate?.pricingPayload || null,
                             passengerNotice:
                                 quote?.pricingPayload?.passenger_notice ||
@@ -1218,7 +1307,8 @@ function PassengerUI(props) {
                                 quote?.pricingPayload?.driver_region_status ||
                                 estimate?.driverRegionStatus ||
                                 null,
-                            pricingSource: 'backend_dynamic'
+                            pricingSource: 'backend_dynamic',
+                            pricingUnavailable: !hasBackendFare
                         }
                     ];
                 } catch (quoteError) {
@@ -1226,7 +1316,17 @@ function PassengerUI(props) {
                         `⚠️ [PassengerUI] Falha ao enriquecer cotação dinâmica para ${carName}:`,
                         quoteError?.message || quoteError
                     );
-                    return [carName, estimate];
+                    return [
+                        carName,
+                        {
+                            ...estimate,
+                            estimateFare: null,
+                            fare: null,
+                            pricingSource: 'backend_unavailable',
+                            pricingUnavailable: true,
+                            pricingError: quoteError?.message || 'pricing_quote_failed'
+                        }
+                    ];
                 }
             })
         );
@@ -3052,7 +3152,12 @@ function PassengerUI(props) {
             Logger.log('🗺️ [Route] Calculando rota completa com waypoints:', { origin, waypoint, destination });
 
             // ✅ Chamar API com waypoint (1 única chamada)
-            const routeDetails = await getDirectionsApi(origin, destination, waypoint);
+            const routeDetails = await getDirectionsApi(
+                origin,
+                destination,
+                waypoint,
+                buildLiveRouteTelemetryContext('pickup')
+            );
 
             if (routeDetails && routeDetails.hasWaypoints && routeDetails.legs && routeDetails.legs.length >= 2) {
                 // ✅ Extrair legs separadamente
@@ -3185,7 +3290,12 @@ function PassengerUI(props) {
 
             Logger.log('🗺️ [Polyline] Calculando rota do motorista até pickup (fallback):', { origin, destination });
 
-            const routeDetails = await getDirectionsApi(origin, destination);
+            const routeDetails = await getDirectionsApi(
+                origin,
+                destination,
+                null,
+                buildLiveRouteTelemetryContext('pickup')
+            );
 
             if (routeDetails && routeDetails.polylinePoints) {
                 try {
@@ -3214,7 +3324,14 @@ function PassengerUI(props) {
         } catch (error) {
             Logger.error('❌ [Polyline] Erro ao calcular rota do motorista:', error);
         }
-    }, [setRoutePolyline, calculateCompleteRouteWithWaypoints, tripdata?.drop, shouldRequestRouteRecalc, registerRouteRecalc]);
+    }, [
+        setRoutePolyline,
+        calculateCompleteRouteWithWaypoints,
+        tripdata?.drop,
+        shouldRequestRouteRecalc,
+        registerRouteRecalc,
+        buildLiveRouteTelemetryContext
+    ]);
 
     // ✅ NOVO: Função para atualizar rota até o destino quando corrida inicia
     const updateRouteToDestination = useCallback(async (driverLoc, destinationLoc) => {
@@ -3239,7 +3356,12 @@ function PassengerUI(props) {
 
             Logger.log('🗺️ [Polyline] Calculando rota até destino:', { origin, destination });
 
-            const routeDetails = await getDirectionsApi(origin, destination);
+            const routeDetails = await getDirectionsApi(
+                origin,
+                destination,
+                null,
+                buildLiveRouteTelemetryContext('destination')
+            );
 
             if (routeDetails && routeDetails.polylinePoints) {
                 try {
@@ -3268,7 +3390,12 @@ function PassengerUI(props) {
         } catch (error) {
             Logger.error('❌ [Polyline] Erro ao calcular rota até destino:', error);
         }
-    }, [setRoutePolyline, shouldRequestRouteRecalc, registerRouteRecalc]);
+    }, [
+        setRoutePolyline,
+        shouldRequestRouteRecalc,
+        registerRouteRecalc,
+        buildLiveRouteTelemetryContext
+    ]);
 
     // ✅ useEffect para atualizar polyline do motorista a cada segundo quando aceito
     useEffect(() => {
@@ -4134,7 +4261,7 @@ function PassengerUI(props) {
 
     // ✅ NOVO FLUXO: Abrir modal de pagamento ao invés de criar booking diretamente
     // O booking só será criado APÓS confirmação do pagamento
-    const initiateBooking = () => {
+    const initiateBooking = async () => {
         // ✅ Prevenir duplo clique
         if (isBookingInProgressRef.current) {
             Logger.log('⏸️ Reserva já em andamento, ignorando clique duplo');
@@ -4186,7 +4313,25 @@ function PassengerUI(props) {
             return;
         }
 
-        if (!hasDriversForSelectedCar) {
+        let canRequestSelectedCar = hasDriversForSelectedCar;
+
+        if (!canRequestSelectedCar && tripdata.pickup?.lat && tripdata.pickup?.lng) {
+            try {
+                await DriverAvailabilityService.updateDrivers();
+                const refreshedDrivers = DriverAvailabilityService.getCurrentDrivers();
+                setNearbyDrivers(refreshedDrivers);
+                canRequestSelectedCar = refreshedDrivers.some(driver =>
+                    driverMatchesCarType(driver?.carType, selectedCarType?.name)
+                );
+            } catch (availabilityRefreshError) {
+                Logger.warn(
+                    '⚠️ [PASSENGER] Falha ao revalidar disponibilidade antes do booking:',
+                    availabilityRefreshError?.message || availabilityRefreshError
+                );
+            }
+        }
+
+        if (!canRequestSelectedCar) {
             Alert.alert(
                 'Sem motoristas disponíveis',
                 'Não há motoristas disponíveis para este tipo de corrida na sua região agora.',
@@ -5898,21 +6043,7 @@ function PassengerUI(props) {
                 return false;
             }
 
-            // ✅ Comparação flexível de carType (case-insensitive, remove espaços)
-            const normalizeCarType = (str) => {
-                if (!str) return '';
-                return str.toString().toLowerCase().trim().replace(/\s+/g, ' ');
-            };
-
-            const driverCarType = normalizeCarType(driver.carType);
-            const carName = normalizeCarType(car.name);
-
-            // ✅ Aceitar se corresponder exatamente OU se driver não tem carType definido (mostrar todos os motoristas)
-            // Isso permite que motoristas sem carType específico apareçam em todos os tipos
-            if (!driverCarType) {
-                return true; // Motorista sem carType - mostrar em todos os tipos
-            }
-            return driverCarType === carName;
+            return driverMatchesCarType(driver.carType, car.name);
         });
 
         // Se não há motoristas com o mesmo tipo de carro, retornar null
@@ -5970,7 +6101,7 @@ function PassengerUI(props) {
         });
 
         return finalTime;
-    }, [nearbyDrivers, tripdata.pickup]);
+    }, [driverMatchesCarType, nearbyDrivers, tripdata.pickup]);
 
     const hasDriversForSelectedCar = useMemo(() => {
         if (!selectedCarType || !tripdata.pickup?.lat || !tripdata.pickup?.lng) {
@@ -6097,7 +6228,11 @@ function PassengerUI(props) {
 
                         <View style={styles.searchingContainer}>
                             {/* ✅ Timer COMPLETAMENTE INDEPENDENTE - gerencia seu próprio estado */}
-                            <SearchingTimer tripStatus={tripStatus} style={styles.searchingTimer} />
+                            <SearchingTimer
+                                tripStatus={tripStatus}
+                                style={styles.searchingTimer}
+                                testID="passenger-driver-search-elapsed"
+                            />
                             {/* ✅ Mensagens rotativas COMPLETAMENTE INDEPENDENTES */}
                             <SearchingMessage
                                 tripStatus={tripStatus}

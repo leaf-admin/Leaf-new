@@ -2,7 +2,7 @@ import Logger from '../../../utils/Logger';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Animated, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { fonts } from '../../../common-local/font';
+import { fonts } from '../../../theme/runtimeTokens';
 import { saveStepData } from '../../../utils/secureOnboardingStorage';
 import ContinueButton from '../common/ContinueButton';
 import onboardingTheme from '../common/onboardingTheme';
@@ -113,6 +113,8 @@ const ProfileSelectionStep = ({ onProfileSelected, onBack, initialData = {} }) =
             style={[styles.dropdownButton, selected ? styles.dropdownButtonSelected : null]}
             activeOpacity={0.88}
             onPress={toggleDropdown}
+            testID="auth-profile-selection-trigger"
+            accessibilityLabel="auth-profile-selection-trigger"
           >
             <Text style={[styles.dropdownButtonText, selected ? styles.dropdownButtonTextSelected : null]}>
               {selected ? selected.title : 'Selecione um perfil'}
@@ -153,6 +155,8 @@ const ProfileSelectionStep = ({ onProfileSelected, onBack, initialData = {} }) =
                   style={[styles.optionRow, selectedOption ? styles.optionRowSelected : null]}
                   onPress={() => handleOptionSelect(option)}
                   activeOpacity={0.9}
+                  testID={`auth-profile-option-${option.key}`}
+                  accessibilityLabel={`auth-profile-option-${option.key}`}
                 >
                   <Ionicons
                     name={option.icon}
@@ -179,9 +183,20 @@ const ProfileSelectionStep = ({ onProfileSelected, onBack, initialData = {} }) =
         </View>
       </View>
 
-      <ContinueButton onPress={handleContinue} disabled={!selected} text="Continuar" />
+      <ContinueButton
+        onPress={handleContinue}
+        disabled={!selected}
+        text="Continuar"
+        testID="auth-profile-selection-continue-btn"
+        accessibilityLabel="auth-profile-selection-continue-btn"
+      />
 
-      <TouchableOpacity style={styles.backButton} onPress={onBack}>
+      <TouchableOpacity
+        style={styles.backButton}
+        onPress={onBack}
+        testID="auth-profile-selection-back-btn"
+        accessibilityLabel="auth-profile-selection-back-btn"
+      >
         <Text style={styles.backButtonText}>Voltar</Text>
       </TouchableOpacity>
     </View>

@@ -14,6 +14,7 @@ import {
 import QRCode from 'react-native-qrcode-svg';
 import { Ionicons } from '@expo/vector-icons';
 import { useTranslation } from './i18n/LanguageProvider';
+import { createPixCharge as createPixChargeRequest } from '../services/paymentService';
 
 const { width } = Dimensions.get('window');
 
@@ -62,28 +63,25 @@ const PixPaymentModal = ({
         setError(null);
 
         try {
-            const response = await fetch('https://us-central1-leaf-reactnative.cloudfunctions.net/woovi_create_charge', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({
-                    amount: amount,
-                    customerName: customerName,
-                    customerId: customerId,
-                    bookingId: bookingId,
-                    driverId: driverId,
-                    comment: `Pagamento LEAF - ${customerName}`
-                })
+            const result = await createPixChargeRequest({
+                amount,
+                value: amount,
+                passengerName: customerName,
+                passengerId: customerId,
+                rideId: bookingId,
+                driverId,
+                rideDetails: {
+                    origin: 'Origem',
+                    destination: 'Destino'
+                }
             });
 
-            const result = await response.json();
-
-            if (result.success) {
-                setQrCodeData(result.data);
-            } else {
-                setError(result.error || 'Erro ao gerar PIX');
-            }
+            const charge = result?.data?.charge || {};
+            setQrCodeData({
+                qrCode: charge.qrCodeImage || null,
+                paymentLink: charge.paymentLinkUrl || null,
+                chargeId: charge.id || null
+            });
         } catch (error) {
             setError('Erro de conexão. Tente novamente.');
             Logger.error('Erro ao criar PIX:', error);
@@ -93,16 +91,15 @@ const PixPaymentModal = ({
     };
 
     const copyPixCode = () => {
-        if (qrCodeData?.pixCopyPaste) {
+        if (qrCodeData?.paymentLink) {
             // Aqui você pode usar uma biblioteca de clipboard
             Alert.alert(t('payment.pixCopied'), t('payment.pixCopiedMessage'));
         }
     };
 
     const openPixApp = () => {
-        if (qrCodeData?.pixCopyPaste) {
-            // Tentar abrir app do banco
-            Linking.openURL(`pix://${qrCodeData.pixCopyPaste}`);
+        if (qrCodeData?.paymentLink) {
+            Linking.openURL(qrCodeData.paymentLink);
         }
     };
 

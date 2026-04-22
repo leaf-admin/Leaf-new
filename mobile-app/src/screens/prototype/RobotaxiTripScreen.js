@@ -24,6 +24,16 @@ function formatCurrency(value) {
   return formatCurrencyBRL(amount);
 }
 
+function formatDistanceLabel(value) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric) || numeric <= 0) {
+    return ' -- ';
+  }
+
+  const fractionDigits = numeric >= 10 ? 0 : numeric >= 2 ? 1 : 2;
+  return `${numeric.toFixed(fractionDigits).replace('.', ',')} km`;
+}
+
 function formatStatusLabel(status) {
   const normalized = String(status || '').trim().toLowerCase();
   if (normalized === 'accepted') {
@@ -133,9 +143,7 @@ export default function RobotaxiTripScreen({ navigation, route }) {
   const vehicleModel =
     String(driverInfo?.model || fallbackVehicleModel || vehicle).trim() || 'Leaf Plus';
   const vehiclePlate = String(driverInfo?.plate || fallbackVehiclePlate || '').trim();
-  const distanceLabel = Number.isFinite(resolvedTripDistanceKm)
-    ? `${resolvedTripDistanceKm.toFixed(1)} km`
-    : ' -- ';
+  const distanceLabel = formatDistanceLabel(resolvedTripDistanceKm);
   const fareLabel = Number.isFinite(resolvedFare) ? formatCurrency(resolvedFare) : '--';
   const normalizedStatus = String(
     bookingStatus ||

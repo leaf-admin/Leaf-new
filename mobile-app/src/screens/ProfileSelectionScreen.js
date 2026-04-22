@@ -3,7 +3,7 @@ import { View, Text, TouchableOpacity, StyleSheet, Animated } from 'react-native
 import { useNavigation } from '@react-navigation/native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Ionicons } from '@expo/vector-icons';
-import { fonts } from '../common-local/font';
+import { fonts } from '../theme/runtimeTokens';
 import OnboardingLayout from '../components/OnboardingLayout';
 import onboardingTheme from '../components/auth/common/onboardingTheme';
 

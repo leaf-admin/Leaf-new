@@ -3,7 +3,8 @@ import Logger from '../utils/Logger';
 // Intercepta erros de permissão e permite acesso total para usuários de teste
 
 import database from '@react-native-firebase/database';
-import { store } from '../common-local/store';
+import { store } from '../state/appStore';
+import { allowTestUserTools } from '../config/runtimeAccessPolicy';
 
 
 class DatabaseBypass {
@@ -14,6 +15,9 @@ class DatabaseBypass {
     // Verificar se é usuário de teste
     isTestUser() {
         try {
+            if (!allowTestUserTools()) {
+                return false;
+            }
             const state = store.getState();
             const user = state.auth?.profile || state.user;
             return user?.isTestUser || user?.uid?.includes('test-user-dev') || false;
@@ -102,5 +106,4 @@ const databaseBypass = new DatabaseBypass();
 
 // Exportar wrapper que substitui o database original
 export default () => databaseBypass;
-
 

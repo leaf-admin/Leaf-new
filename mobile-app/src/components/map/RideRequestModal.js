@@ -1,8 +1,8 @@
 import React from 'react';
 import { View, Text, StyleSheet, Modal, TouchableOpacity } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { fonts } from '../../common-local/font';
-import { MAIN_COLOR, SECONDORY_COLOR } from '../../common-local/sharedFunctions';
+import { fonts } from '../../theme/runtimeTokens';
+import { MAIN_COLOR, SECONDORY_COLOR } from '../../common/sharedFunctions';
 
 export default function RideRequestModal({ isVisible, rideDetails, onAccept, onDecline }) {
     if (!isVisible || !rideDetails) {

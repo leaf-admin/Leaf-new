@@ -1,18 +1,27 @@
 import Logger from '../../utils/Logger';
 import React, { useState, useCallback } from 'react';
-import { StatusBar, View, StyleSheet, ImageBackground, TouchableOpacity, Text } from 'react-native';
-import Constants from 'expo-constants';
-import { FETCH_USER_SUCCESS } from '../../common-local/types';
-import store from '../../common-local/store';
+import { StatusBar, View, StyleSheet, ImageBackground, Platform } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { FETCH_USER_SUCCESS } from '../../state/actionTypes';
+import store from '../../state/appStore';
 import { saveStepData, completeStep, saveCurrentStep, loadStepData } from '../../utils/secureOnboardingStorage';
 import testUserService from '../../services/TestUserService';
+import UserAuthService from '../../services/UserAuthService';
 import UserDatabaseService from '../../utils/userDatabaseService';
 import { createInitialDriverOnboardingState } from '../../services/DriverOnboardingService';
+import { allowReviewAccess } from '../../config/runtimeAccessPolicy';
 import onboardingTheme from './common/onboardingTheme';
+import {
+  buildRestoredAuthFlowData,
+  normalizeAuthFlowProfileData,
+  normalizeAuthFlowUserType,
+  resolveAuthFlowInitialStep,
+} from './authFlowRecovery';
 
 const { color, radius } = onboardingTheme;
-const onboardingBackground = require('../../../assets/images/onboarding-city-bg.jpg');
-const ONBOARDING_AB_DEFAULT = 'B';
+const onboardingBackground = require('../../../assets/images/onboarding-city-bg-auth.png');
+const AUTH_UID_STORAGE_KEY = '@auth_uid';
+const USER_DATA_STORAGE_KEY = '@user_data';
 
 const ONBOARDING_AB_VARIANTS = {
   A: {
@@ -32,11 +41,17 @@ const ONBOARDING_AB_VARIANTS = {
     frameShadowOpacity: 0.24,
     frameShadowRadius: 28,
     frameElevation: 14
+  },
+  ANDROID: {
+    backgroundTint: 'rgba(255,255,255,0.14)',
+    softMask: 'rgba(255,255,255,0.02)',
+    frameBorder: 'rgba(255,255,255,0.90)',
+    frameBackground: 'rgba(255,255,255,0.72)',
+    frameShadowOpacity: 0.16,
+    frameShadowRadius: 22,
+    frameElevation: 10
   }
 };
-
-// ✅ CRÍTICO: Flag de ambiente de review (App Store compliance)
-const IS_REVIEW_ENV = Constants.expoConfig?.extra?.isReview === true;
 
 // Steps de autenticação
 import PhoneInputStep from './steps/PhoneInputStep';
@@ -48,115 +63,46 @@ import ProfileDataStep from './steps/ProfileDataStep';
 import DocumentStep from './steps/DocumentStep';
 import CredentialsStep from './steps/CredentialsStep';
 import DriverEmailStep from './steps/DriverEmailStep';
-
-function normalizeUserType(userType) {
-  if (userType === 'passenger') {
-    return 'customer';
-  }
-  return userType === 'driver' ? 'driver' : 'customer';
-}
-
-function splitFullName(fullName) {
-  const clean = String(fullName || '').trim();
-  if (!clean) {
-    return {
-      firstName: '',
-      lastName: ''
-    };
-  }
-
-  const parts = clean.split(/\s+/).filter(Boolean);
-  if (parts.length === 1) {
-    return {
-      firstName: parts[0],
-      lastName: ''
-    };
-  }
-
-  return {
-    firstName: parts[0],
-    lastName: parts.slice(1).join(' ')
-  };
-}
-
-function normalizeProfileData(profileData = {}) {
-  const fullNameCandidate =
-    profileData.fullName ||
-    [profileData.firstName, profileData.lastName].filter(Boolean).join(' ').trim();
-  const { firstName, lastName } = splitFullName(fullNameCandidate);
-
-  return {
-    fullName: fullNameCandidate || '',
-    firstName,
-    lastName
-  };
-}
+import onboardingBackgroundDataUri from './common/onboardingBackgroundDataUri';
 
 const AuthFlow = ({ visible, onComplete, onClose, onboardingProgress }) => {
-  const [abVariant, setAbVariant] = useState(ONBOARDING_AB_DEFAULT);
   const [currentStep, setCurrentStep] = useState(0);
   const [authData, setAuthData] = useState({});
-  const [pendingUserData, setPendingUserData] = useState(null); // ✅ Estado para armazenar dados do usuário que precisam ser dispatchados
-  const [isPasswordLogin, setIsPasswordLogin] = useState(false); // ✅ Flag para login com senha
-  const [isForgotPassword, setIsForgotPassword] = useState(false); // ✅ Flag para esqueci senha
+  const [authMode, setAuthMode] = useState('phone');
+  const isReviewEnv = allowReviewAccess();
 
-  // ✅ Dispatch de dados do usuário de teste quando disponível
-  // Usar store.dispatch diretamente para evitar problemas com hooks
-  React.useEffect(() => {
-    if (pendingUserData) {
-      // Usar setTimeout para garantir que aconteça após renderização completa
-      const timeoutId = setTimeout(() => {
-        try {
-          // ✅ Usar store.dispatch diretamente em vez de useDispatch para evitar problemas de contexto
-          store.dispatch({
-            type: FETCH_USER_SUCCESS,
-            payload: pendingUserData
-          });
-          Logger.log('✅ Redux store atualizado com dados do usuário de teste');
-          setPendingUserData(null); // Limpar após dispatch
-        } catch (error) {
-          Logger.error('❌ Erro ao atualizar Redux store:', error);
-        }
-      }, 200);
-
-      return () => clearTimeout(timeoutId);
-    }
-  }, [pendingUserData]);
-
-  const resolveInitialStep = useCallback((completedSteps = [], fallbackStep = 0, userType = null) => {
-    const normalizedType = normalizeUserType(userType);
-
-    if (completedSteps.includes('driver_contact')) {
-      return 6;
-    }
-
-    if (completedSteps.includes('credentials')) {
-      if (normalizedType === 'driver') {
-        return 6;
+  const persistAuthenticatedProfile = useCallback(async (profile, fallbackUserType = null) => {
+    try {
+      const uid = String(profile?.uid || profile?.user?.uid || '').trim();
+      if (!uid) {
+        return null;
       }
-      return 5;
-    }
 
-    if (completedSteps.includes('document_data')) {
-      return 4;
-    }
+      const rawUserType =
+        profile?.usertype ||
+        profile?.userType ||
+        profile?.profile?.usertype ||
+        profile?.profile?.userType ||
+        fallbackUserType ||
+        null;
+      const normalizedUserType = rawUserType ? normalizeAuthFlowUserType(rawUserType) : null;
 
-    if (completedSteps.includes('profile_data')) {
-      return 4;
-    }
+      const normalizedProfile = {
+        ...profile,
+        uid,
+        ...(normalizedUserType ? { usertype: normalizedUserType, userType: normalizedUserType } : {})
+      };
 
-    if (completedSteps.includes('profile_selection')) {
-      if (normalizedType === 'driver') {
-        return 4;
-      }
-      return 3;
-    }
+      await AsyncStorage.multiSet([
+        [AUTH_UID_STORAGE_KEY, uid],
+        [USER_DATA_STORAGE_KEY, JSON.stringify(normalizedProfile)]
+      ]);
 
-    if (completedSteps.includes('phone_validation')) {
-      return 2;
+      return normalizedProfile;
+    } catch (error) {
+      Logger.warn('⚠️ AuthFlow - Falha ao persistir sessão local:', error?.message || error);
+      return null;
     }
-
-    return fallbackStep;
   }, []);
 
   // 🔍 DETERMINAR STEP INICIAL BASEADO NO PROGRESSO E CARREGAR DADOS SALVOS
@@ -179,10 +125,14 @@ const AuthFlow = ({ visible, onComplete, onClose, onboardingProgress }) => {
         let resolvedUserType = null;
         if (completedSteps.includes('profile_selection')) {
           const profileSelectionData = await loadStepData('profile_selection');
-          resolvedUserType = normalizeUserType(profileSelectionData?.userType);
+          resolvedUserType = normalizeAuthFlowUserType(profileSelectionData?.userType);
         }
 
-        const initialStep = resolveInitialStep(completedSteps, fallbackStep, resolvedUserType);
+        const initialStep = resolveAuthFlowInitialStep(
+          completedSteps,
+          fallbackStep,
+          resolvedUserType,
+        );
         if (!isMounted) {
           return;
         }
@@ -191,77 +141,35 @@ const AuthFlow = ({ visible, onComplete, onClose, onboardingProgress }) => {
         await saveCurrentStep(initialStep);
         Logger.log('AuthFlow - 🔄 Step inicial definido:', initialStep);
 
-        const savedData = {};
+        const phoneData = completedSteps.includes('phone_validation')
+          ? await loadStepData('phone_validation')
+          : null;
+        const profileSelectionData = completedSteps.includes('profile_selection')
+          ? await loadStepData('profile_selection')
+          : null;
+        const profileData = completedSteps.includes('profile_data')
+          ? await loadStepData('profile_data')
+          : null;
+        const documentData = completedSteps.includes('document_data')
+          ? await loadStepData('document_data')
+          : null;
+        const driverContactData = completedSteps.includes('driver_contact')
+          ? await loadStepData('driver_contact')
+          : null;
 
-        // Carregar dados do telefone se disponível
-        if (completedSteps.includes('phone_validation')) {
-          const phoneData = await loadStepData('phone_validation');
-          Logger.log('📱 Dados do telefone carregados:', phoneData);
-          if (phoneData.phoneNumber) {
-            savedData.phoneNumber = phoneData.phoneNumber;
-          }
-          if (phoneData.confirmation) {
-            savedData.confirmation = phoneData.confirmation;
-          }
-        }
+        Logger.log('📱 Dados do telefone carregados:', phoneData);
+        Logger.log('👤 Dados da seleção de perfil carregados:', profileSelectionData);
+        Logger.log('📝 Dados pessoais carregados:', profileData);
+        Logger.log('📄 Dados de documentos carregados:', documentData);
 
-        // Carregar dados da seleção de perfil se disponível
-        if (completedSteps.includes('profile_selection')) {
-          const profileSelectionData = await loadStepData('profile_selection');
-          Logger.log('👤 Dados da seleção de perfil carregados:', profileSelectionData);
-          if (profileSelectionData.userType) {
-            savedData.profileSelection = {
-              userType: normalizeUserType(profileSelectionData.userType),
-              timestamp: profileSelectionData.timestamp
-            };
-          }
-        }
-
-        // Carregar dados pessoais se disponível
-        if (completedSteps.includes('profile_data')) {
-          const profileData = await loadStepData('profile_data');
-          Logger.log('📝 Dados pessoais carregados:', profileData);
-          const normalizedProfile = normalizeProfileData(profileData);
-          if (normalizedProfile.firstName || normalizedProfile.lastName || normalizedProfile.fullName) {
-            savedData.profileData = normalizedProfile;
-          }
-        }
-
-        // Carregar dados de documentos se disponível
-        if (completedSteps.includes('document_data')) {
-          const documentData = await loadStepData('document_data');
-          Logger.log('📄 Dados de documentos carregados:', documentData);
-          if (
-            documentData.cpf ||
-            documentData.email ||
-            documentData.city ||
-            documentData.cnhExtraction ||
-            documentData.vehicleExtraction
-          ) {
-            savedData.documentData = {
-              cpf: documentData.cpf || '',
-              email: documentData.email || '',
-              city: documentData.city || '',
-              cnhExtraction: documentData.cnhExtraction || null,
-              vehicleExtraction: documentData.vehicleExtraction || null,
-              cnhPdfMeta: documentData.cnhPdfMeta || null,
-              vehiclePdfMeta: documentData.vehiclePdfMeta || null
-            };
-          }
-        }
-
-        if (completedSteps.includes('driver_contact')) {
-          const driverContactData = await loadStepData('driver_contact');
-          if (driverContactData?.email) {
-            savedData.driverContactData = {
-              email: driverContactData.email
-            };
-            savedData.documentData = {
-              ...(savedData.documentData || {}),
-              email: driverContactData.email
-            };
-          }
-        }
+        const savedData = buildRestoredAuthFlowData({
+          completedSteps,
+          phoneData,
+          profileSelectionData,
+          profileData,
+          documentData,
+          driverContactData,
+        });
 
         // Aplicar dados carregados
         if (isMounted && Object.keys(savedData).length > 0) {
@@ -278,7 +186,7 @@ const AuthFlow = ({ visible, onComplete, onClose, onboardingProgress }) => {
     return () => {
       isMounted = false;
     };
-  }, [onboardingProgress, resolveInitialStep]);
+  }, [onboardingProgress]);
 
   // Função para obter o nome do step baseado no índice
   const getStepNameByIndex = useCallback((index) => {
@@ -309,7 +217,7 @@ const AuthFlow = ({ visible, onComplete, onClose, onboardingProgress }) => {
 
   // Função para voltar ao step anterior
   const goToPreviousStep = useCallback(async () => {
-    const isDriver = normalizeUserType(authData?.profileSelection?.userType) === 'driver';
+    const isDriver = normalizeAuthFlowUserType(authData?.profileSelection?.userType) === 'driver';
     let prevStep = Math.max(0, currentStep - 1);
 
     // Fluxo motorista: pula o step de nome manual
@@ -336,7 +244,7 @@ const AuthFlow = ({ visible, onComplete, onClose, onboardingProgress }) => {
   // Função para lidar com a verificação do OTP (precisa estar antes de handlePhoneVerificationSent)
   const handleOTPVerified = useCallback(async (user) => {
     // ✅ REVIEW ACCESS: Verificar se é conta de review (pula OTP)
-    if (user && user.isReviewAccount) {
+    if (user && user.isReviewAccount && isReviewEnv) {
       const phoneNumber = authData.phoneNumber || user.phoneNumber;
       const userType = user.userType || 'customer'; // ✅ CORRIGIDO: projeto usa 'customer', não 'passenger'
 
@@ -386,17 +294,21 @@ const AuthFlow = ({ visible, onComplete, onClose, onboardingProgress }) => {
 
           Logger.log('🔐 REVIEW ACCESS: Usuário simulado criado:', mockUser.uid);
 
+          const reviewAuthPayload = {
+            ...reviewUserData.user,
+            ...mockUser,
+            phoneNumber: phoneNumber,
+            usertype: userType,
+            userType: userType,
+            authenticated: true
+          };
+          const persistedReviewPayload =
+            await persistAuthenticatedProfile(reviewAuthPayload, userType) || reviewAuthPayload;
+
           // Atualizar Redux com usuário simulado
           store.dispatch({
             type: FETCH_USER_SUCCESS,
-            payload: {
-              ...reviewUserData.user,
-              ...mockUser,
-              phoneNumber: phoneNumber,
-              usertype: userType,
-              userType: userType,
-              authenticated: true
-            }
+            payload: persistedReviewPayload
           });
 
           Logger.log('✅ REVIEW ACCESS: Redux atualizado com usuário simulado');
@@ -423,8 +335,8 @@ const AuthFlow = ({ visible, onComplete, onClose, onboardingProgress }) => {
       }
     }
 
-    // 🚀 VERIFICAR SE É USUÁRIO DE TESTE (legado - manter para compatibilidade)
-    if (user && user.isTestUser) {
+    // Compatibilidade de usuário de teste restrita a ambiente controlado
+    if (user && user.isTestUser && testUserService.isTestMode()) {
       const phoneNumber = authData.phoneNumber || user.phoneNumber;
       const isCustomer = user.isTestCustomer || user.userType === 'customer';
       const userType = isCustomer ? 'customer' : 'driver';
@@ -456,8 +368,6 @@ const AuthFlow = ({ visible, onComplete, onClose, onboardingProgress }) => {
         }
 
         if (testUserData) {
-          setPendingUserData(testUserData);
-
           const testUserDataComplete = {
             phoneNumber: phoneNumber,
             user: {
@@ -505,14 +415,18 @@ const AuthFlow = ({ visible, onComplete, onClose, onboardingProgress }) => {
           // ✅ CRÍTICO: Atualizar Redux antes de chamar onComplete
           // O AppNavigator depende do Redux para redirecionar automaticamente
           try {
+            const testAuthPayload = {
+              ...testUserDataComplete.user,
+              phoneNumber: phoneNumber,
+              usertype: userType,
+              userType: userType
+            };
+            const persistedTestPayload =
+              await persistAuthenticatedProfile(testAuthPayload, userType) || testAuthPayload;
+
             store.dispatch({
               type: FETCH_USER_SUCCESS,
-              payload: {
-                ...testUserDataComplete.user,
-                phoneNumber: phoneNumber,
-                usertype: userType,
-                userType: userType
-              }
+              payload: persistedTestPayload
             });
             Logger.log('✅ Redux atualizado com dados de usuário de teste');
           } catch (reduxError) {
@@ -544,7 +458,7 @@ const AuthFlow = ({ visible, onComplete, onClose, onboardingProgress }) => {
     // App Store compliance: OTP não pode ser pulado fora do ambiente de review
     // Verificação em múltiplas camadas para segurança
     const canBypass = skipOTP &&
-      (IS_REVIEW_ENV || __DEV__) &&
+      isReviewEnv &&
       confirmation &&
       confirmation.isReviewAccount &&
       confirmation.reviewUser;
@@ -553,7 +467,7 @@ const AuthFlow = ({ visible, onComplete, onClose, onboardingProgress }) => {
       Logger.log('🔐 REVIEW ACCESS: Pulando OTP e fazendo login direto', {
         phoneNumber,
         userType: confirmation.reviewUser.userType,
-        isReviewEnv: IS_REVIEW_ENV,
+        isReviewEnv,
         isDev: __DEV__,
         skipOTP: skipOTP
       });
@@ -561,71 +475,80 @@ const AuthFlow = ({ visible, onComplete, onClose, onboardingProgress }) => {
       // Chamar handleOTPVerified diretamente com o usuário de review
       await handleOTPVerified(confirmation.reviewUser);
       return;
-    } else if (skipOTP && (!IS_REVIEW_ENV && !__DEV__)) {
+    } else if (skipOTP && !isReviewEnv) {
       // ✅ Bloquear bypass em produção
       Logger.error('🚫 Tentativa de bypass bloqueada: ambiente de produção', {
         phoneNumber,
-        isReviewEnv: IS_REVIEW_ENV,
+        isReviewEnv,
         isDev: __DEV__
       });
       // Continuar com fluxo normal de OTP
     }
 
-    // ✅ Fluxo normal: Mostrar tela de OTP
-    await saveStepDataLocal({ phoneNumber, confirmation, isExistingUser });
+      // ✅ Fluxo normal: Mostrar tela de OTP
+      setAuthMode('otp');
+      await saveStepDataLocal({ phoneNumber, confirmation, isExistingUser });
     // Marcar telefone como validado
     await completeStep('phone_validation');
     goToNextStep();
   }, [saveStepDataLocal, completeStep, goToNextStep, handleOTPVerified]);
 
-  // ✅ Função para quando usuário existe e tem senha
-  const handleUserExists = useCallback(async (existingUser, phoneNumber) => {
-    await saveStepDataLocal({ existingUser, phoneNumber });
-    setIsPasswordLogin(true);
+  const handlePasswordLoginRequested = useCallback(async (phoneNumber) => {
+    const normalizedPhone = UserAuthService.normalizePhone(phoneNumber);
+    setAuthData(prev => ({ ...prev, phoneNumber: normalizedPhone, authMethod: 'phone_password' }));
+    await saveStepDataLocal({ phoneNumber: normalizedPhone, authMethod: 'phone_password' });
+    setAuthMode('password_login');
   }, [saveStepDataLocal]);
 
-  // ✅ Função para login com senha bem-sucedido
   const handlePasswordLoginSuccess = useCallback(async (userData) => {
-    Logger.log('✅ Login com senha bem-sucedido:', userData);
+    const normalizedUserType = normalizeAuthFlowUserType(userData?.userType || userData?.usertype || 'customer');
+    const loginPayload = {
+      ...userData,
+      phoneNumber: userData?.phoneNumber || authData?.phoneNumber,
+      usertype: normalizedUserType,
+      userType: normalizedUserType,
+      authMethod: 'phone_password',
+      authenticated: true
+    };
 
-    // Salvar dados do usuário
-    await saveStepDataLocal({ user: userData });
+    const persistedLoginPayload =
+      await persistAuthenticatedProfile(loginPayload, normalizedUserType) || loginPayload;
+
+    store.dispatch({
+      type: FETCH_USER_SUCCESS,
+      payload: persistedLoginPayload
+    });
+
+    store.dispatch({
+      type: 'SET_AUTH_STATUS',
+      payload: { authenticated: true, user: persistedLoginPayload }
+    });
+
     await completeStep('phone_validation');
 
-    // Resetar flags
-    setIsPasswordLogin(false);
-
-    // Completar autenticação
     if (onComplete) {
       onComplete({
-        ...authData,
-        user: userData,
+        ...persistedLoginPayload,
         phoneValidated: true,
-        isExistingUser: true
+        authMethod: 'phone_password'
       });
     }
-  }, [saveStepDataLocal, completeStep, authData, onComplete]);
+  }, [authData?.phoneNumber, onComplete, persistAuthenticatedProfile]);
 
-  // ✅ Função para esqueci a senha
-  const handleForgotPassword = useCallback(() => {
-    setIsPasswordLogin(false);
-    setIsForgotPassword(true);
+  const handlePasswordLoginBack = useCallback(() => {
+    setAuthMode('phone');
+    setCurrentStep(0);
   }, []);
 
-  // ✅ Função para reset de senha completo
-  const handlePasswordReset = useCallback(async (userData) => {
-    Logger.log('✅ Senha resetada com sucesso:', userData);
-
-    // Voltar para login com senha
-    setIsForgotPassword(false);
-    setIsPasswordLogin(true);
+  const handleForgotPassword = useCallback(() => {
+    setAuthMode('forgot_password');
   }, []);
 
   // Função para lidar com a seleção do perfil
   const handleProfileSelected = useCallback(async (profileSelection) => {
     const normalizedSelection = {
       ...profileSelection,
-      userType: normalizeUserType(profileSelection?.userType)
+      userType: normalizeAuthFlowUserType(profileSelection?.userType)
     };
     await saveStepDataLocal({ profileSelection: normalizedSelection });
     // Marcar seleção de perfil como completa
@@ -641,20 +564,55 @@ const AuthFlow = ({ visible, onComplete, onClose, onboardingProgress }) => {
 
   // Função para lidar com o envio dos dados do perfil
   const handleProfileDataSubmitted = useCallback(async (profileData) => {
-    const normalizedProfile = normalizeProfileData(profileData);
-    await saveStepDataLocal({ profileData: normalizedProfile });
+    const normalizedProfile = normalizeAuthFlowProfileData(profileData);
+    const normalizedUserType = normalizeAuthFlowUserType(authData?.profileSelection?.userType);
+    const isDriver = normalizedUserType === 'driver';
+
+    const nextDocumentData = isDriver
+      ? (authData?.documentData || {})
+      : {
+          ...(authData?.documentData || {}),
+          email: String(profileData?.email || '').trim().toLowerCase()
+        };
+
+    const nextCredentials = isDriver
+      ? (authData?.credentials || {})
+      : {
+	          ...(authData?.credentials || {}),
+	          password: profileData?.password,
+	          confirmPassword: profileData?.confirmPassword,
+	          acceptTerms: Boolean(profileData?.acceptTerms),
+	          acceptPrivacy: Boolean(profileData?.acceptPrivacy)
+	        };
+
+    await saveStepDataLocal({
+      profileData: normalizedProfile,
+      ...(isDriver ? {} : { documentData: nextDocumentData, credentials: nextCredentials })
+    });
+
     // Marcar dados pessoais como completos
     await completeStep('profile_data');
-    goToNextStep();
-  }, [saveStepDataLocal, completeStep, goToNextStep]);
+
+    if (isDriver) {
+      goToNextStep();
+      return;
+    }
+
+    await completeStep('document_data');
+    await completeStep('credentials');
+    await finalizeOnboarding({
+      documentDataOverride: nextDocumentData,
+      credentialsOverride: nextCredentials
+    });
+  }, [authData?.credentials, authData?.documentData, authData?.profileSelection?.userType, completeStep, finalizeOnboarding, goToNextStep, saveStepDataLocal]);
 
   // Função para lidar com o envio do documento
   const handleDocumentSubmitted = useCallback(async (documentData) => {
-    const profileSelectionType = normalizeUserType(authData?.profileSelection?.userType);
+    const profileSelectionType = normalizeAuthFlowUserType(authData?.profileSelection?.userType);
     const cnhFullName = documentData?.cnhExtraction?.data?.nome || '';
     const normalizedProfile =
       profileSelectionType === 'driver' && cnhFullName
-        ? normalizeProfileData({ fullName: cnhFullName })
+        ? normalizeAuthFlowProfileData({ fullName: cnhFullName })
         : authData?.profileData || {};
 
     await saveStepDataLocal({
@@ -669,9 +627,9 @@ const AuthFlow = ({ visible, onComplete, onClose, onboardingProgress }) => {
     goToNextStep();
   }, [saveStepDataLocal, completeStep, goToNextStep, authData?.profileSelection?.userType, authData?.profileData]);
 
-  const finalizeOnboarding = useCallback(async ({ credentialsOverride, documentDataOverride = {} } = {}) => {
-    const normalizedUserType = normalizeUserType(authData?.profileSelection?.userType);
-    const normalizedProfile = normalizeProfileData(authData?.profileData || {});
+  async function finalizeOnboarding({ credentialsOverride, documentDataOverride = {} } = {}) {
+    const normalizedUserType = normalizeAuthFlowUserType(authData?.profileSelection?.userType);
+    const normalizedProfile = normalizeAuthFlowProfileData(authData?.profileData || {});
     const normalizedSelection = {
       ...(authData?.profileSelection || {}),
       userType: normalizedUserType,
@@ -707,11 +665,25 @@ const AuthFlow = ({ visible, onComplete, onClose, onboardingProgress }) => {
 
     const fallbackPayload = UserDatabaseService.buildProfilePayload(onboardingData);
     const profilePayload = savedProfilePayload || fallbackPayload;
+	    const persistedProfilePayload =
+	      await persistAuthenticatedProfile(profilePayload, normalizedUserType) || profilePayload;
 
-    if (profilePayload?.uid) {
+	    if (normalizedUserType === 'customer' && onboardingData?.credentials?.password) {
+	      try {
+	        await UserAuthService.setupPassword(
+	          onboardingData.phoneNumber || profilePayload.phoneNumber || profilePayload.mobile,
+	          onboardingData.credentials.password
+	        );
+	      } catch (error) {
+	        Logger.error('❌ Falha ao configurar senha do passageiro:', error);
+	        throw error;
+	      }
+	    }
+
+    if (persistedProfilePayload?.uid) {
       store.dispatch({
         type: FETCH_USER_SUCCESS,
-        payload: profilePayload
+        payload: persistedProfilePayload
       });
     }
 
@@ -720,15 +692,15 @@ const AuthFlow = ({ visible, onComplete, onClose, onboardingProgress }) => {
         ...onboardingData,
         usertype: normalizedUserType,
         userType: normalizedUserType,
-        persistedProfile: profilePayload,
+        persistedProfile: persistedProfilePayload,
         needsDocumentUpload: normalizedUserType === 'driver'
       });
     }
-  }, [authData, onComplete]);
+  }
 
   // Função para lidar com a criação das credenciais
   const handleCredentialsCreated = useCallback(async (credentials) => {
-    const normalizedUserType = normalizeUserType(authData?.profileSelection?.userType);
+    const normalizedUserType = normalizeAuthFlowUserType(authData?.profileSelection?.userType);
     await saveStepDataLocal({ credentials });
 
     // Marcar credenciais como completo
@@ -774,39 +746,30 @@ const AuthFlow = ({ visible, onComplete, onClose, onboardingProgress }) => {
     if (phoneNumber) {
       saveStepDataLocal({ phoneNumber });
     }
+    setAuthMode('phone');
     // Aqui você pode implementar a lógica para alternar para o fluxo de registro
     // Por enquanto, vamos continuar com o fluxo de login
   }, [saveStepDataLocal]);
 
   // Renderizar o step atual
   const renderCurrentStep = () => {
-    // ✅ Tela de esqueci senha
-    if (isForgotPassword) {
+    if (authMode === 'password_login') {
       return (
-        <ForgotPasswordStep
+        <PasswordLoginStep
           phoneNumber={authData.phoneNumber}
-          existingUser={authData.existingUser}
-          onPasswordReset={handlePasswordReset}
-          onBack={() => {
-            setIsForgotPassword(false);
-            setIsPasswordLogin(true);
-          }}
+          onLoginSuccess={handlePasswordLoginSuccess}
+          onForgotPassword={handleForgotPassword}
+          onBack={handlePasswordLoginBack}
         />
       );
     }
 
-    // ✅ Tela de login com senha
-    if (isPasswordLogin) {
+    if (authMode === 'forgot_password') {
       return (
-        <PasswordLoginStep
+        <ForgotPasswordStep
           phoneNumber={authData.phoneNumber}
-          existingUser={authData.existingUser}
-          onLoginSuccess={handlePasswordLoginSuccess}
-          onForgotPassword={handleForgotPassword}
-          onBack={() => {
-            setIsPasswordLogin(false);
-            setCurrentStep(0);
-          }}
+          onPasswordReset={handlePasswordLoginSuccess}
+          onBack={() => setAuthMode('password_login')}
         />
       );
     }
@@ -818,7 +781,7 @@ const AuthFlow = ({ visible, onComplete, onClose, onboardingProgress }) => {
           <PhoneInputStep
             onVerificationSent={handlePhoneVerificationSent}
             onSwitchToRegister={handleSwitchToRegister}
-            onUserExists={handleUserExists}
+            onPasswordLoginRequested={handlePasswordLoginRequested}
           />
         );
       case 1:
@@ -845,7 +808,9 @@ const AuthFlow = ({ visible, onComplete, onClose, onboardingProgress }) => {
             onBack={goToPreviousStep}
             initialData={{
               ...(authData.profileData || {}),
-              profileSelection: authData.profileSelection || {}
+              profileSelection: authData.profileSelection || {},
+              documentData: authData.documentData || {},
+              credentials: authData.credentials || {}
             }}
           />
         );
@@ -894,12 +859,21 @@ const AuthFlow = ({ visible, onComplete, onClose, onboardingProgress }) => {
     return null;
   }
 
-  const variantTokens = ONBOARDING_AB_VARIANTS[abVariant] || ONBOARDING_AB_VARIANTS.A;
+  const variantTokens = Platform.OS === 'android' ? ONBOARDING_AB_VARIANTS.ANDROID : ONBOARDING_AB_VARIANTS.B;
+  const backgroundSource = Platform.OS === 'android'
+    ? { uri: onboardingBackgroundDataUri }
+    : onboardingBackground;
 
   return (
     <View style={styles.safeArea}>
       <StatusBar translucent backgroundColor="transparent" barStyle="dark-content" />
-      <ImageBackground source={onboardingBackground} style={styles.backgroundImage} resizeMode="cover">
+      <ImageBackground
+        source={backgroundSource}
+        style={styles.backgroundImage}
+        imageStyle={styles.backgroundImageAsset}
+        resizeMode="cover"
+        fadeDuration={0}
+      >
         <View style={[styles.backgroundTint, { backgroundColor: variantTokens.backgroundTint }]} pointerEvents="none" />
         <View style={[styles.backgroundSoftMask, { backgroundColor: variantTokens.softMask }]} pointerEvents="none" />
         <View style={styles.contentHost}>
@@ -918,22 +892,6 @@ const AuthFlow = ({ visible, onComplete, onClose, onboardingProgress }) => {
             {renderCurrentStep()}
           </View>
         </View>
-        <View style={styles.variantSwitcher}>
-          <TouchableOpacity
-            activeOpacity={0.88}
-            onPress={() => setAbVariant('A')}
-            style={[styles.variantButton, abVariant === 'A' ? styles.variantButtonActive : null]}
-          >
-            <Text style={[styles.variantButtonText, abVariant === 'A' ? styles.variantButtonTextActive : null]}>A</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            activeOpacity={0.88}
-            onPress={() => setAbVariant('B')}
-            style={[styles.variantButton, abVariant === 'B' ? styles.variantButtonActive : null]}
-          >
-            <Text style={[styles.variantButtonText, abVariant === 'B' ? styles.variantButtonTextActive : null]}>B</Text>
-          </TouchableOpacity>
-        </View>
       </ImageBackground>
     </View>
   );
@@ -945,7 +903,11 @@ const styles = StyleSheet.create({
     backgroundColor: color.background
   },
   backgroundImage: {
-    flex: 1
+    flex: 1,
+    backgroundColor: '#E7ECF1'
+  },
+  backgroundImageAsset: {
+    opacity: Platform.OS === 'android' ? 1 : 1
   },
   backgroundTint: {
     ...StyleSheet.absoluteFillObject,
@@ -958,14 +920,14 @@ const styles = StyleSheet.create({
   contentHost: {
     flex: 1,
     justifyContent: 'center',
-    paddingHorizontal: 14,
-    paddingVertical: 14
+    paddingHorizontal: Platform.OS === 'android' ? 18 : 14,
+    paddingVertical: Platform.OS === 'android' ? 22 : 14
   },
   contentFrame: {
     width: '100%',
-    maxWidth: 392,
+    maxWidth: Platform.OS === 'android' ? 404 : 392,
     alignSelf: 'center',
-    minHeight: 360,
+    minHeight: Platform.OS === 'android' ? 388 : 360,
     maxHeight: '86%',
     borderRadius: radius.xl,
     borderWidth: 1,
@@ -977,41 +939,6 @@ const styles = StyleSheet.create({
     shadowRadius: 28,
     elevation: 14,
     overflow: 'hidden'
-  },
-  variantSwitcher: {
-    position: 'absolute',
-    top: 54,
-    right: 14,
-    flexDirection: 'row',
-    borderRadius: 999,
-    borderWidth: 1,
-    borderColor: 'rgba(15,23,34,0.16)',
-    backgroundColor: 'rgba(255,255,255,0.82)',
-    shadowColor: '#0E1522',
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.12,
-    shadowRadius: 12,
-    elevation: 5,
-    overflow: 'hidden'
-  },
-  variantButton: {
-    minWidth: 34,
-    paddingHorizontal: 12,
-    height: 30,
-    alignItems: 'center',
-    justifyContent: 'center'
-  },
-  variantButtonActive: {
-    backgroundColor: 'rgba(15,23,34,0.92)'
-  },
-  variantButtonText: {
-    color: '#4D5868',
-    fontSize: 13,
-    lineHeight: 16,
-    fontWeight: '700'
-  },
-  variantButtonTextActive: {
-    color: '#FFFFFF'
   }
 });
 

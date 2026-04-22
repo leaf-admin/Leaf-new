@@ -6,7 +6,7 @@ import PaymentWebView from '../components/PaymentWebView';
 import { ScrollView } from 'react-native-gesture-handler';
 import { useDispatch, useSelector } from 'react-redux';
 import { api } from '../../common';
-import { FirebaseConfig } from '../../config/FirebaseConfig';
+import { API_URLS } from '../config/ApiConfig';
 import { CommonActions } from '@react-navigation/native';
 
 export default function SelectGatewayPage(props) {
@@ -15,8 +15,7 @@ export default function SelectGatewayPage(props) {
     RequestPushMsg
   } = api;
   const dispatch = useDispatch();
-  const url = FirebaseConfig.databaseURL.split('.').length===4?FirebaseConfig.databaseURL.split('.')[1]:'us-central1';
-  const serverUrl = `https://${url}-${FirebaseConfig.projectId}.cloudfunctions.net`;
+  const serverUrl = API_URLS.firebaseFunctions || null;
 
   const { t } = i18n;
   const isRTL = i18n.locale.indexOf('he') === 0 || i18n.locale.indexOf('ar') === 0;
@@ -114,6 +113,10 @@ export default function SelectGatewayPage(props) {
 
 
   const selectProvider = (provider) => {
+    if (!serverUrl) {
+      Alert.alert(t('alert'), 'Gateways legados estão desativados neste runtime.');
+      return;
+    }
     if((provider && provider.name == 'slickpay') && (state.payData && state.payData.amount <=100)){
       Alert.alert(t('alert'), t('amount_must_be_gereater_than_100'));
     }else{

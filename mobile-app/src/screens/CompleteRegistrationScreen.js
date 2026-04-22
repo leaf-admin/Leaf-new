@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { View, Text, TextInput, TouchableOpacity, StyleSheet, ScrollView, Alert } from 'react-native';
 import { useNavigation, useRoute } from '@react-navigation/native';
-import { fonts } from '../common-local/font';
+import { fonts } from '../theme/runtimeTokens';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import OnboardingLayout from '../components/OnboardingLayout';
 import onboardingTheme from '../components/auth/common/onboardingTheme';

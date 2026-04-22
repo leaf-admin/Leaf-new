@@ -13,7 +13,6 @@ import AboutPage from './About';
 import OnlineChat from './OnlineChat';
 import WalletDetails from './WalletDetails';
 import AddMoneyScreen from './AddMoney';
-import SelectGatewayPage from './SelectGatewayScreen';
 import LoginScreen from './LoginScreen';
 import DriverTrips from './DriverTrips';
 import WithdrawMoneyScreen from './WithdrawMoney';
@@ -43,7 +42,6 @@ export {
     AddPaymentMethod,
     WalletDetails,
     AddMoneyScreen,
-    SelectGatewayPage,
     LoginScreen,
     DriverTrips,
     WithdrawMoneyScreen,

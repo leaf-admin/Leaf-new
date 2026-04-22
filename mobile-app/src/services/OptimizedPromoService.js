@@ -1,6 +1,6 @@
 import Logger from '../utils/Logger';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { store } from '../common-local/store';
+import { store } from '../state/appStore';
 
 
 // Configurações do serviço de promoções

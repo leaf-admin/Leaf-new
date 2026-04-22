@@ -25,7 +25,7 @@ import * as ImagePicker from 'expo-image-picker';
 import { MaterialCommunityIcons, Entypo } from '@expo/vector-icons';
 import { FontAwesome5, Ionicons } from '@expo/vector-icons';
 import { fonts } from '../common/font';
-import { MAIN_COLOR } from '../common-local/sharedFunctions';
+import { MAIN_COLOR } from '../common/sharedFunctions';
 import rnauth from '@react-native-firebase/auth';
 
 

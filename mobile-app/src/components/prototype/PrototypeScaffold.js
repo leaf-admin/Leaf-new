@@ -7,6 +7,38 @@ import robotaxiPrototypeTokens from '../design-system/robotaxiPrototypeTokens';
 const { color, touch, motion } = robotaxiPrototypeTokens;
 const islandEasing = Easing.bezier(...motion.bezier.snappy);
 
+function PrototypeTopControlGlyph({ name, tintColor }) {
+  if (name === 'menu') {
+    return (
+      <View style={styles.menuGlyphWrap}>
+        <View style={[styles.menuGlyphBar, { backgroundColor: tintColor }]} />
+        <View style={[styles.menuGlyphBar, styles.menuGlyphBarShort, { backgroundColor: tintColor }]} />
+        <View style={[styles.menuGlyphBar, { backgroundColor: tintColor }]} />
+      </View>
+    );
+  }
+
+  if (name === 'locate') {
+    return (
+      <View style={styles.locateGlyphWrap}>
+        <View style={[styles.locateGlyphOuter, { borderColor: tintColor }]} />
+        <View style={[styles.locateGlyphInner, { backgroundColor: tintColor }]} />
+      </View>
+    );
+  }
+
+  if (name === 'arrow-back') {
+    return (
+      <View style={styles.chevronGlyphWrap}>
+        <View style={[styles.chevronGlyphStroke, styles.chevronGlyphStrokeTop, { backgroundColor: tintColor }]} />
+        <View style={[styles.chevronGlyphStroke, styles.chevronGlyphStrokeBottom, { backgroundColor: tintColor }]} />
+      </View>
+    );
+  }
+
+  return <View style={[styles.glyphFallbackDot, { backgroundColor: tintColor }]} />;
+}
+
 export function PrototypeTopControls({
   insets,
   onPressLeft,
@@ -18,11 +50,11 @@ export function PrototypeTopControls({
   return (
     <View style={[styles.topRow, { top: insets.top + 8 }]}>
       <TouchableOpacity style={styles.topButton} activeOpacity={0.85} onPress={onPressLeft}>
-        <Ionicons name={leftIcon} size={25} color={color.text.primary} />
+        <PrototypeTopControlGlyph name={leftIcon} tintColor={color.text.primary} />
       </TouchableOpacity>
 
       <TouchableOpacity style={styles.topButton} activeOpacity={0.85} onPress={onPressRight}>
-        <Ionicons name={rightIcon} size={25} color={color.text.primary} />
+        <PrototypeTopControlGlyph name={rightIcon} tintColor={color.text.primary} />
         {showRightBadge ? <View style={styles.notificationDot} /> : null}
       </TouchableOpacity>
     </View>
@@ -73,27 +105,28 @@ export function PrototypeBottomIsland({ insets, active = 'home', onPressProfile,
 const styles = StyleSheet.create({
   topRow: {
     position: 'absolute',
-    left: 20,
-    right: 20,
-    zIndex: 20,
+    left: 18,
+    right: 18,
+    zIndex: 80,
+    elevation: 80,
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center'
   },
   topButton: {
-    width: 58,
-    height: 58,
-    borderRadius: 29,
+    width: 52,
+    height: 52,
+    borderRadius: 26,
     backgroundColor: color.surface.primary,
     borderWidth: 1,
     borderColor: color.border.strong,
     alignItems: 'center',
     justifyContent: 'center',
     shadowColor: color.shadow.base,
-    shadowOffset: { width: 0, height: 14 },
-    shadowOpacity: 0.24,
-    shadowRadius: 24,
-    elevation: 13,
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.2,
+    shadowRadius: 18,
+    elevation: 10,
     position: 'relative'
   },
   notificationDot: {
@@ -106,6 +139,64 @@ const styles = StyleSheet.create({
     backgroundColor: '#D61F2D',
     borderWidth: 1,
     borderColor: '#FFFFFF'
+  },
+  menuGlyphWrap: {
+    width: 26,
+    height: 20,
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  menuGlyphBar: {
+    width: 22,
+    height: 3.5,
+    borderRadius: 2,
+  },
+  menuGlyphBarShort: {
+    width: 16,
+  },
+  locateGlyphWrap: {
+    width: 24,
+    height: 24,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  locateGlyphOuter: {
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    borderWidth: 2.8,
+  },
+  locateGlyphInner: {
+    position: 'absolute',
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+  },
+  chevronGlyphWrap: {
+    width: 20,
+    height: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  chevronGlyphStroke: {
+    position: 'absolute',
+    width: 14,
+    height: 3.5,
+    borderRadius: 2,
+    left: 2,
+  },
+  chevronGlyphStrokeTop: {
+    transform: [{ rotate: '-45deg' }],
+    top: 5,
+  },
+  chevronGlyphStrokeBottom: {
+    transform: [{ rotate: '45deg' }],
+    bottom: 5,
+  },
+  glyphFallbackDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
   },
   islandWrap: {
     position: 'absolute',

@@ -11,7 +11,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useTranslation } from '../i18n/LanguageProvider';
-import { useTheme } from '../../common-local/theme';
+import { useTheme } from '../../theme/runtimeTokens';
 import Typography from '../design-system/Typography';
 import AnimatedButton from '../design-system/AnimatedButton';
 

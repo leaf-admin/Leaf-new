@@ -1,23 +1,22 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, Alert, FlatList, StatusBar, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import React, { useCallback, useEffect, useState } from 'react';
+import { ActivityIndicator, Alert, FlatList, StatusBar, StyleSheet, Text, TextInput, TouchableOpacity, View, useWindowDimensions } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { fonts } from '../../common-local/font';
+import { fonts } from '../../theme/runtimeTokens';
 import PrototypeScreenTransition from '../../components/prototype/PrototypeScreenTransition';
 import PrototypeDismissibleSheet from '../../components/prototype/PrototypeDismissibleSheet';
-import { CardHandle, PrototypeCard } from '../../components/prototype/PrototypeUI';
+import {
+  PrototypeMenuCloseButton,
+  PrototypeMenuSurface,
+} from '../../components/prototype/PrototypeMenuSurface';
 import robotaxiPrototypeTokens from '../../components/design-system/robotaxiPrototypeTokens';
 import { usePrototypeMapOcclusion } from './prototypeMapOcclusion';
 import { usePrototypeRideRuntime } from './prototypeRideRuntime';
 
 const { color, typography } = robotaxiPrototypeTokens;
-const SHEET_BOTTOM_OFFSET = 96;
-const FALLBACK_CARD_HEIGHT = 386;
-
-const FALLBACK_CHAT_MESSAGES = [
-  { id: 'm1', author: 'driver', text: 'Oi! Estou a 4 min do embarque.', timestamp: new Date().toISOString() },
-  { id: 'm2', author: 'you', text: 'Perfeito, estou na entrada principal.', timestamp: new Date().toISOString() }
-];
+const SURFACE_TOP_PADDING = 16;
+const SURFACE_BOTTOM_PADDING = 18;
+const BACKDROP_COLOR = 'transparent';
 
 function formatTimestamp(timestamp) {
   if (!timestamp) {
@@ -31,46 +30,36 @@ function formatTimestamp(timestamp) {
 
   return date.toLocaleTimeString('pt-BR', {
     hour: '2-digit',
-    minute: '2-digit'
+    minute: '2-digit',
   });
 }
 
 export default function RobotaxiChatScreen({ navigation, route }) {
   const { loadChatSession, sendChatMessage, chatMessages, chatLoading, chatSending, chatError } = usePrototypeRideRuntime();
   const insets = useSafeAreaInsets();
-  const [cardHeight, setCardHeight] = useState(FALLBACK_CARD_HEIGHT);
+  const { height: windowHeight } = useWindowDimensions();
+  const [panelHeight, setPanelHeight] = useState(windowHeight);
   const [draft, setDraft] = useState('');
-  const sheetBottom = insets.bottom + SHEET_BOTTOM_OFFSET;
+  const messages = Array.isArray(chatMessages) ? chatMessages : [];
 
   usePrototypeMapOcclusion({
     routeKey: route?.key,
     layerId: route?.key || 'prototype-chat',
-    occludedBottom: sheetBottom + cardHeight
+    occludedBottom: panelHeight,
   });
 
   useEffect(() => {
     loadChatSession().catch(() => {});
   }, [loadChatSession]);
 
-  const messages = useMemo(() => {
-    if (Array.isArray(chatMessages) && chatMessages.length > 0) {
-      return chatMessages;
-    }
-    return FALLBACK_CHAT_MESSAGES;
-  }, [chatMessages]);
-
-  const handleDismiss = () => {
-    if (navigation.canGoBack()) {
-      navigation.goBack();
-      return;
-    }
+  const handleDismiss = useCallback(() => {
     navigation.navigate('RobotaxiPrototype');
-  };
+  }, [navigation]);
 
-  const handleCardLayout = useCallback(event => {
+  const handlePanelLayout = useCallback(event => {
     const nextHeight = event?.nativeEvent?.layout?.height;
     if (Number.isFinite(nextHeight) && nextHeight > 0) {
-      setCardHeight(nextHeight);
+      setPanelHeight(nextHeight);
     }
   }, []);
 
@@ -84,7 +73,7 @@ export default function RobotaxiChatScreen({ navigation, route }) {
     try {
       await sendChatMessage(text);
     } catch (error) {
-      Alert.alert('Não foi possível enviar', error?.message || 'Falha ao enviar mensagem.');
+      Alert.alert('Nao foi possivel enviar', error?.message || 'Falha ao enviar mensagem.');
       setDraft(text);
     }
   }, [draft, sendChatMessage]);
@@ -93,18 +82,31 @@ export default function RobotaxiChatScreen({ navigation, route }) {
     <PrototypeScreenTransition>
       <View style={styles.container} pointerEvents="box-none">
         <StatusBar translucent backgroundColor="transparent" barStyle="dark-content" />
-
-        <PrototypeDismissibleSheet onClose={handleDismiss} sheetStyle={[styles.sheetWrap, { bottom: sheetBottom }]}>
-          <PrototypeCard onLayout={handleCardLayout} style={styles.chatCard}>
-            <CardHandle />
-            <Text style={styles.title}>Chat da viagem</Text>
-            <Text style={styles.subtitle}>Canal direto com motorista e suporte</Text>
-
+        <PrototypeDismissibleSheet
+          onClose={handleDismiss}
+          backdropColor={BACKDROP_COLOR}
+          dragEnabled={false}
+          sheetStyle={styles.sheetWrap}
+        >
+          <PrototypeMenuSurface
+            onLayout={handlePanelLayout}
+            eyebrow="Canal direto"
+            title="Chat"
+            subtitle="Converse com motorista e suporte sem sair do contexto da viagem."
+            fullScreen
+            style={{
+              paddingTop: insets.top + SURFACE_TOP_PADDING,
+              paddingBottom: Math.max(insets.bottom, SURFACE_BOTTOM_PADDING),
+            }}
+            bodyStyle={styles.body}
+            headerAccessory={<PrototypeMenuCloseButton onPress={handleDismiss} />}
+          >
             <FlatList
               data={messages}
-              keyExtractor={item => item.id}
+              keyExtractor={(item, index) => String(item?.id || item?.messageId || `chat-${index}`)}
               style={styles.list}
               contentContainerStyle={styles.listContent}
+              showsVerticalScrollIndicator={false}
               renderItem={({ item }) => {
                 const fromYou = item.author === 'you';
                 return (
@@ -119,15 +121,13 @@ export default function RobotaxiChatScreen({ navigation, route }) {
               ListEmptyComponent={
                 <View style={styles.emptyWrap}>
                   {chatLoading ? <ActivityIndicator size="small" color={color.accent.primary} /> : null}
-                  <Text style={styles.emptyText}>
-                    {chatLoading ? 'Carregando mensagens...' : 'Sem mensagens para esta corrida.'}
-                  </Text>
+                  <Text style={styles.emptyText}>{chatLoading ? 'Carregando mensagens...' : 'Sem mensagens para esta corrida.'}</Text>
                 </View>
               }
             />
 
             <View style={styles.inputRow}>
-              <View style={styles.inputMock}>
+              <View style={styles.inputWrap}>
                 <Ionicons name="chatbubble-ellipses-outline" size={16} color={color.text.muted} />
                 <TextInput
                   style={styles.inputText}
@@ -141,12 +141,7 @@ export default function RobotaxiChatScreen({ navigation, route }) {
                 />
               </View>
 
-              <TouchableOpacity
-                style={[styles.sendButton, chatSending && styles.sendButtonDisabled]}
-                activeOpacity={0.88}
-                onPress={handleSend}
-                disabled={chatSending}
-              >
+              <TouchableOpacity style={[styles.sendButton, chatSending && styles.sendButtonDisabled]} activeOpacity={0.82} onPress={handleSend} disabled={chatSending}>
                 {chatSending ? (
                   <ActivityIndicator size="small" color={color.accent.contrast} />
                 ) : (
@@ -156,7 +151,7 @@ export default function RobotaxiChatScreen({ navigation, route }) {
             </View>
 
             {chatError ? <Text style={styles.errorText}>{chatError}</Text> : null}
-          </PrototypeCard>
+          </PrototypeMenuSurface>
         </PrototypeDismissibleSheet>
       </View>
     </PrototypeScreenTransition>
@@ -166,93 +161,84 @@ export default function RobotaxiChatScreen({ navigation, route }) {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: 'transparent'
+    backgroundColor: 'transparent',
   },
   sheetWrap: {
-    position: 'absolute',
-    left: 10,
-    right: 10
+    ...StyleSheet.absoluteFillObject,
   },
-  chatCard: {
-    paddingHorizontal: 12,
-    paddingTop: 10,
-    paddingBottom: 12
-  },
-  title: {
-    color: color.text.primary,
-    fontFamily: fonts.SemiBold,
-    fontSize: typography.subtitle.size,
-    lineHeight: typography.subtitle.lineHeight
-  },
-  subtitle: {
-    marginTop: 1,
-    color: color.text.secondary,
-    fontFamily: fonts.Regular,
-    fontSize: typography.caption.size,
-    lineHeight: typography.caption.lineHeight
+  body: {
+    flex: 1,
   },
   list: {
-    marginTop: 8,
-    maxHeight: 232
+    flex: 1,
   },
   listContent: {
-    paddingBottom: 6,
-    gap: 8
+    paddingBottom: 8,
+    gap: 8,
   },
   messageRow: {
-    flexDirection: 'row'
+    flexDirection: 'row',
   },
   messageRowLeft: {
-    justifyContent: 'flex-start'
+    justifyContent: 'flex-start',
   },
   messageRowRight: {
-    justifyContent: 'flex-end'
+    justifyContent: 'flex-end',
   },
   bubble: {
-    maxWidth: '86%',
-    borderRadius: 14,
+    maxWidth: '88%',
+    borderRadius: 18,
+    paddingHorizontal: 12,
+    paddingVertical: 9,
     borderWidth: 1,
-    paddingHorizontal: 10,
-    paddingVertical: 8
   },
   bubbleDriver: {
-    backgroundColor: color.surface.primary,
-    borderColor: color.border.subtle
+    backgroundColor: 'rgba(255,255,255,0.72)',
+    borderColor: 'rgba(17,26,39,0.08)',
   },
   bubbleYou: {
-    backgroundColor: color.surface.activeSoft,
-    borderColor: 'rgba(26,51,14,0.28)'
+    backgroundColor: 'rgba(218,232,210,0.5)',
+    borderColor: 'rgba(42,77,29,0.18)',
   },
   bubbleText: {
     color: color.text.primary,
     fontFamily: fonts.Medium,
     fontSize: typography.caption.size,
-    lineHeight: typography.caption.lineHeight
+    lineHeight: typography.caption.lineHeight,
   },
   bubbleMeta: {
-    marginTop: 2,
+    marginTop: 3,
     color: color.text.secondary,
     fontFamily: fonts.Regular,
     fontSize: typography.micro.size,
-    lineHeight: typography.micro.lineHeight
+    lineHeight: typography.micro.lineHeight,
+  },
+  emptyWrap: {
+    paddingVertical: 18,
+    alignItems: 'center',
+    gap: 8,
+  },
+  emptyText: {
+    color: color.text.secondary,
+    fontFamily: fonts.Regular,
+    fontSize: typography.caption.size,
+    lineHeight: typography.caption.lineHeight,
   },
   inputRow: {
     marginTop: 8,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8
+    gap: 8,
   },
-  inputMock: {
+  inputWrap: {
     flex: 1,
-    minHeight: 48,
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: color.border.subtle,
-    backgroundColor: color.surface.secondary,
-    paddingHorizontal: 12,
+    minHeight: 50,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(17,26,39,0.12)',
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8
+    gap: 8,
+    paddingHorizontal: 2,
   },
   inputText: {
     flex: 1,
@@ -260,36 +246,24 @@ const styles = StyleSheet.create({
     fontFamily: fonts.Regular,
     fontSize: typography.caption.size,
     lineHeight: typography.caption.lineHeight,
-    paddingVertical: 0
+    paddingVertical: 0,
   },
   sendButton: {
-    width: 48,
-    height: 48,
-    borderRadius: 14,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: color.accent.primary
+    backgroundColor: color.accent.primary,
   },
   sendButtonDisabled: {
-    opacity: 0.75
+    opacity: 0.72,
   },
   errorText: {
     marginTop: 8,
-    color: '#8A1F2B',
+    color: color.feedback.danger,
     fontFamily: fonts.Medium,
     fontSize: typography.caption.size,
-    lineHeight: typography.caption.lineHeight
+    lineHeight: typography.caption.lineHeight,
   },
-  emptyWrap: {
-    minHeight: 52,
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 6
-  },
-  emptyText: {
-    color: color.text.secondary,
-    fontFamily: fonts.Regular,
-    fontSize: typography.caption.size,
-    lineHeight: typography.caption.lineHeight
-  }
 });

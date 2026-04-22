@@ -1,5 +1,5 @@
 import React from 'react';
-import { StyleSheet } from 'react-native';
+import { StyleSheet, View } from 'react-native';
 import Animated, { Easing, FadeIn, FadeOut } from 'react-native-reanimated';
 import robotaxiPrototypeTokens from '../design-system/robotaxiPrototypeTokens';
 
@@ -7,7 +7,15 @@ const { motion } = robotaxiPrototypeTokens;
 const enterEasing = Easing.bezier(...motion.bezier.smoothOut);
 const exitEasing = Easing.bezier(...motion.bezier.smoothIn);
 
-export default function PrototypeScreenTransition({ children, style }) {
+export default function PrototypeScreenTransition({
+  children,
+  style,
+  animated = true
+}) {
+  if (!animated) {
+    return <View style={[styles.container, style]}>{children}</View>;
+  }
+
   return (
     <Animated.View
       entering={FadeIn.duration(motion.timing.quick).easing(enterEasing)}

@@ -14,9 +14,9 @@ import {
 import { Icon } from 'react-native-elements';
 import { Ionicons } from '@expo/vector-icons';
 import { useSelector } from 'react-redux';
-import { colors } from '../common-local/theme';
-import { fonts } from '../common-local/font';
-import { MAIN_COLOR } from '../common-local/sharedFunctions';
+import { colors } from '../theme/runtimeTokens';
+import { fonts } from '../theme/runtimeTokens';
+import { MAIN_COLOR } from '../common/sharedFunctions';
 import moment from 'moment';
 import 'moment/locale/pt-br';
 import BookingHistoryService from '../services/BookingHistoryService';

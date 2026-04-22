@@ -7,7 +7,7 @@ import Logger from '../../../utils/Logger';
 
 import React, { useState, useCallback } from 'react';
 import { View, Text, TextInput, TouchableOpacity, StyleSheet } from 'react-native';
-import { fonts } from '../../../common-local/font';
+import { fonts } from '../../../theme/runtimeTokens';
 import { Ionicons } from '@expo/vector-icons';
 import ContinueButton from '../common/ContinueButton';
 import UserAuthService from '../../../services/UserAuthService';

@@ -3,19 +3,12 @@ import { firebase } from '../common-local/configureFirebase';
 import auth from '@react-native-firebase/auth';
 import { Platform } from 'react-native';
 import { toUserFriendlyError } from '../utils/friendlyErrorMessages';
+import { buildBackendUrl } from '../config/backendBaseUrl';
 
 
 class AuthService {
     constructor() {
-        const baseUrl = String(
-            process.env.EXPO_PUBLIC_API_URL ||
-            process.env.EXPO_PUBLIC_BACKEND_URL ||
-            'https://api.147.182.204.181.sslip.io'
-        )
-            .trim()
-            .replace(/\/+$/, '')
-            .replace(/\/api$/i, '');
-        this.baseURL = `${baseUrl}/api`;
+        this.baseURL = buildBackendUrl('/api');
         this.currentUser = null;
         this.idToken = null;
     }
@@ -288,4 +281,3 @@ class AuthService {
 }
 
 export default new AuthService();
-

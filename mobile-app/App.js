@@ -4,7 +4,7 @@ import { Provider } from 'react-redux';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import * as SplashScreen from 'expo-splash-screen';
 import * as DevClient from 'expo-dev-client';
-import { store } from './src/common-local/store';
+import { store } from './src/state/appStore';
 import AppNavigator from './src/navigation/AppNavigator';
 import AuthProvider from './src/components/AuthProvider';
 import { LanguageProvider } from './src/components/i18n/LanguageProvider';

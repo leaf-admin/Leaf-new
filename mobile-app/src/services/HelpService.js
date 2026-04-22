@@ -26,10 +26,16 @@ class HelpService {
             };
         } catch (error) {
             Logger.error('❌ Erro ao buscar conteúdo de ajuda:', error);
-            // Retornar dados mockados em caso de erro
+            if (__DEV__) {
+                return {
+                    success: true,
+                    data: this.getMockHelpData(category)
+                };
+            }
+
             return {
-                success: true,
-                data: this.getMockHelpData(category)
+                success: false,
+                error: 'Conteúdo de ajuda indisponível no momento.'
             };
         }
     }
@@ -50,9 +56,17 @@ class HelpService {
             };
         } catch (error) {
             Logger.error('❌ Erro ao buscar FAQ:', error);
+            if (__DEV__) {
+                return {
+                    success: true,
+                    faqs: this.getMockFAQ(category)
+                };
+            }
+
             return {
-                success: true,
-                faqs: this.getMockFAQ(category)
+                success: false,
+                error: 'FAQ indisponível no momento.',
+                faqs: []
             };
         }
     }
@@ -73,7 +87,11 @@ class HelpService {
             };
         } catch (error) {
             Logger.error('❌ Erro ao buscar tutoriais:', error);
-            return { success: true, tutorials: [] };
+            return {
+                success: false,
+                error: 'Tutoriais indisponíveis no momento.',
+                tutorials: []
+            };
         }
     }
 
@@ -120,4 +138,3 @@ class HelpService {
 }
 
 export default new HelpService();
-

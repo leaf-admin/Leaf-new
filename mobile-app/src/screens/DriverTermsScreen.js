@@ -10,7 +10,7 @@ import {
 } from 'react-native';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { fonts } from '../common-local/font';
+import { fonts } from '../theme/runtimeTokens';
 import onboardingTheme from '../components/auth/common/onboardingTheme';
 
 const { color, radius, spacing, elevation } = onboardingTheme;

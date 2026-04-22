@@ -19,30 +19,50 @@ import {
 } from 'react-native';
 import { TouchableOpacity } from 'react-native-gesture-handler';
 import { Icon } from 'react-native-elements';
-import { colors, darkTheme, lightTheme } from '../common-local/theme';
+import { colors, darkTheme, lightTheme } from '../theme/runtimeTokens';
 import * as Location from 'expo-location';
 var { height, width } = Dimensions.get('window');
 import i18n from '../i18n';
 import DatePicker from 'react-native-date-picker';
 import { useSelector, useDispatch } from 'react-redux';
-import { api, FirebaseContext } from '../common-local';
+import { FirebaseContext } from '../services/runtime/firebaseCompatBridge';
+import {
+    fetchAddressfromCoords,
+    fetchDrivers,
+    fetchNearbyDrivers,
+    updateTripPickup,
+    updateTripDrop,
+    updatSelPointType,
+    getDistanceMatrix,
+    MinutesPassed,
+    updateTripCar,
+    getEstimate,
+    clearEstimate,
+    addBooking,
+    clearBooking,
+    clearTripPoints,
+    GetDistance,
+    updateProfile,
+    updateProfileWithEmail,
+    checkUserExists,
+    storeAddresses
+} from '../services/runtime/mapRuntimeBridge';
 import { OptionModal } from '../components/OptionModal';
-import BookingModal, { appConsts } from '../common-local/sharedFunctions';
-import { prepareEstimateObject } from '../common/sharedFunctions';
+import BookingModal, { appConsts, prepareEstimateObject, FareCalculator } from '../common/sharedFunctions';
 import MapView, { PROVIDER_GOOGLE, Marker, Polyline, UrlTile } from 'react-native-maps';
 import { startActivityAsync, ActivityAction } from 'expo-intent-launcher';
 import Button from '../components/Button';
-import { fonts } from "../common-local/font";
+import { fonts } from "../theme/runtimeTokens";
 import DeviceInfo from 'react-native-device-info';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useTranslation } from 'react-i18next';
-import { fetchPlacesAutocomplete, fetchCoordsfromPlace } from '../common-local/sharedFunctions';
+import { fetchPlacesAutocomplete, fetchCoordsfromPlace } from '../services/runtime/locationRouteBridge';
+import { BACKEND_BASE_URL } from '../config/backendBaseUrl';
 import uuid from 'react-native-uuid';
-import { FareCalculator } from '../common-local/sharedFunctions';
 import database from '@react-native-firebase/database';
 import * as DecodePolyLine from '@mapbox/polyline';
-import { tollData } from '../common-local/actions/estimateactions'; // ajuste o caminho se necessário
-import { calcularPedagiosPorPolyline } from '../common-local/other/TollUtils';
+import { tollData } from '../services/runtime/passengerMapBridge';
+import { calcularPedagiosPorPolyline } from '../services/runtime/mapGeoService';
 import * as SplashScreen from 'expo-splash-screen';
 import { GoogleMapApiConfig } from '../../config/GoogleMapApiConfig';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
@@ -266,29 +286,6 @@ async function fetchPlaceName(placeId) {
 }
 
 export default function MapScreen(props) {
-    const {
-        fetchAddressfromCoords,
-        fetchDrivers,
-        fetchNearbyDrivers,
-        updateTripPickup,
-        updateTripDrop,
-        updatSelPointType,
-        getDistanceMatrix,
-        MinutesPassed,
-        updateTripCar,
-        getEstimate,
-        clearEstimate,
-        addBooking,
-        clearBooking,
-        clearTripPoints,
-        GetDistance,
-        updateProfile,
-        updateProfileWithEmail,
-        checkUserExists,
-        storeAddresses,
-        fetchPlacesAutocomplete,
-        fetchCoordsfromPlace
-    } = api;
     const dispatch = useDispatch();
 
     // Verificar se o FirebaseContext está disponível antes de usar
@@ -1980,10 +1977,7 @@ export default function MapScreen(props) {
                 const plat = tripdata.pickup?.lat || location.coords.latitude;
                 const plng = tripdata.pickup?.lng || location.coords.longitude;
 
-                const backendUrl =
-                    process.env.EXPO_PUBLIC_BACKEND_URL ||
-                    process.env.EXPO_PUBLIC_API_URL ||
-                    'https://api.147.182.204.181.sslip.io';
+                const backendUrl = BACKEND_BASE_URL;
 
                 const response = await fetch(`${backendUrl}/api/geofence/check?lat=${plat}&lng=${plng}`);
                 if (response.ok) {

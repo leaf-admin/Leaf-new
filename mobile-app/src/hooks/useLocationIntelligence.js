@@ -13,8 +13,7 @@ export const useLocationIntelligence = () => {
   const [error, setError] = useState(null);
   const [lastResult, setLastResult] = useState(null);
   const [connectivity, setConnectivity] = useState({
-    vultr: false,
-    hostinger: false,
+    backend: false,
     timestamp: null
   });
 
@@ -166,8 +165,7 @@ export const useLocationIntelligence = () => {
     setError(null);
     setLastResult(null);
     setConnectivity({
-      vultr: false,
-      hostinger: false,
+      backend: false,
       timestamp: null
     });
   }, []);

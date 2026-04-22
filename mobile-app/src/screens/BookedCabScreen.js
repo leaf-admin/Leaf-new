@@ -31,7 +31,7 @@ import * as ImagePicker from 'expo-image-picker';
 import moment from 'moment/min/moment-with-locales';
 import { CommonActions } from '@react-navigation/native';
 import { appConsts, MAIN_COLOR, SECONDORY_COLOR, FareCalculator } from '../common/sharedFunctions';
-import { getDirectionsApi } from '../common-local/GoogleAPIFunctions';
+import { getDirectionsApi } from '../services/runtime/locationRouteBridge';
 import { Ionicons } from '@expo/vector-icons';
 import { fonts } from '../common/font';
 import { getLangKey } from '../common-local/other/getLangKey';
@@ -39,10 +39,6 @@ import DeviceInfo from 'react-native-device-info';
 
 
 const hasNotch = DeviceInfo.hasNotch();
-const LIVE_ROUTE_RECALC_MIN_INTERVAL_MS = 45 * 1000;
-const LIVE_ROUTE_RECALC_MIN_MOVE_KM = 0.12;
-const LIVE_ROUTE_RECALC_DEST_FORCE_KM = 0.08;
-
 const toRad = (deg) => (deg * Math.PI) / 180;
 const distanceKmBetweenPoints = (a, b) => {
     if (!a || !b) return Number.POSITIVE_INFINITY;
@@ -54,6 +50,48 @@ const distanceKmBetweenPoints = (a, b) => {
         Math.cos(toRad(a.lat || 0)) * Math.cos(toRad(b.lat || 0)) *
         Math.sin(dLng / 2) * Math.sin(dLng / 2);
     return earthRadiusKm * (2 * Math.atan2(Math.sqrt(aa), Math.sqrt(1 - aa)));
+};
+const estimateMinutesForRoute = (coordinates = [], fallbackStart = null, fallbackEnd = null) => {
+    const routePoints = Array.isArray(coordinates) ? coordinates : [];
+    let distanceKm = 0;
+
+    if (routePoints.length > 1) {
+        for (let index = 1; index < routePoints.length; index += 1) {
+            const previous = routePoints[index - 1];
+            const current = routePoints[index];
+            distanceKm += distanceKmBetweenPoints(
+                { lat: previous.latitude, lng: previous.longitude },
+                { lat: current.latitude, lng: current.longitude }
+            );
+        }
+    } else if (fallbackStart && fallbackEnd) {
+        distanceKm = distanceKmBetweenPoints(fallbackStart, fallbackEnd);
+    }
+
+    return Math.max(1, Math.round((distanceKm / 30) * 60));
+};
+const buildLocalRoutePreview = (point1, point2) => {
+    const middleLatitude = Number(((point1.lat + point2.lat) / 2).toFixed(6));
+    const middleLongitude = Number((((point1.lng + point2.lng) / 2) + ((point2.lat - point1.lat) * 0.08)).toFixed(6));
+    return [
+        { latitude: point1.lat, longitude: point1.lng },
+        { latitude: middleLatitude, longitude: middleLongitude },
+        { latitude: point2.lat, longitude: point2.lng }
+    ];
+};
+const decodePolylinePoints = (polylinePoints) => {
+    if (!polylinePoints) {
+        return [];
+    }
+    try {
+        const points = DecodePolyLine.decode(polylinePoints);
+        return points.map((point) => ({
+            latitude: point[0],
+            longitude: point[1]
+        }));
+    } catch (_error) {
+        return [];
+    }
 };
 
 export default function BookedCabScreen(props) {
@@ -76,7 +114,7 @@ export default function BookedCabScreen(props) {
     const [liveRouteCoords, setLiveRouteCoords] = useState(null);
     const mapRef = useRef();
     const pageActive = useRef();
-    const liveRouteGuardRef = useRef({ lastAt: 0, origin: null, destination: null, inFlight: false });
+    const liveRouteGuardRef = useRef({ routeKey: '', inFlight: false });
     const [lastCoords, setlastCoords] = useState();
     const [arrivalTime, setArrivalTime] = useState(0);
     const [loading, setLoading] = useState(false);
@@ -158,6 +196,24 @@ export default function BookedCabScreen(props) {
     const fitMap = (point1, point2) => {
         let startLoc = point1.lat + ',' + point1.lng;
         let destLoc = point2.lat + ',' + point2.lng;
+        const buildLiveRouteTelemetryContext = (routePhase) => ({
+            bookingId: curBooking?.bookingId || curBooking?.id || bookingId || null,
+            sourceKey: [
+                role || auth?.profile?.usertype || 'customer',
+                auth?.profile?.uid || 'anonymous',
+                routePhase
+            ].join(':'),
+            sourceMeta: {
+                userId: auth?.profile?.uid || null,
+                userType: role || auth?.profile?.usertype || 'customer',
+                platform: Platform.OS,
+                flow: 'legacy_mobile',
+                scenario: 'active_trip_fixed_route',
+                surface: `booked_cab_live_route_${routePhase}`
+            },
+            cacheMode: 'sticky_destination',
+            routeScope: routePhase
+        });
         const fitBounds = () => {
             if (mapRef.current) {
                 mapRef.current.fitToCoordinates([{ latitude: point1.lat, longitude: point1.lng }, { latitude: point2.lat, longitude: point2.lng }], {
@@ -169,27 +225,38 @@ export default function BookedCabScreen(props) {
 
         if (settings.showLiveRoute) {
             const guard = liveRouteGuardRef.current;
-            const now = Date.now();
-            const origin = { lat: point1.lat, lng: point1.lng };
-            const destination = { lat: point2.lat, lng: point2.lng };
-            const movedKm = distanceKmBetweenPoints(origin, guard.origin);
-            const destinationMovedKm = distanceKmBetweenPoints(destination, guard.destination);
-            const enoughTime = now - guard.lastAt >= LIVE_ROUTE_RECALC_MIN_INTERVAL_MS;
-            const enoughMovement = movedKm >= LIVE_ROUTE_RECALC_MIN_MOVE_KM;
-            const forceRecalcByDestination = destinationMovedKm >= LIVE_ROUTE_RECALC_DEST_FORCE_KM;
+            const routePhase = curBooking?.status === 'STARTED' ? 'destination' : 'pickup';
+            const waypointKey = Array.isArray(curBooking?.waypoints)
+                ? curBooking.waypoints
+                    .map((item) => `${item?.lat || 0},${item?.lng || 0}`)
+                    .join('|')
+                : '';
+            const routeKey = [
+                routePhase,
+                Number(point2.lat || 0).toFixed(5),
+                Number(point2.lng || 0).toFixed(5),
+                waypointKey,
+            ].join(':');
 
-            if (
-                guard.inFlight ||
-                (guard.lastAt > 0 && !forceRecalcByDestination && !(enoughTime && enoughMovement))
-            ) {
+            if (guard.inFlight || (guard.routeKey === routeKey && Array.isArray(liveRouteCoords) && liveRouteCoords.length > 1)) {
                 fitBounds();
                 return;
             }
 
             guard.inFlight = true;
-            guard.lastAt = now;
-            guard.origin = origin;
-            guard.destination = destination;
+            guard.routeKey = routeKey;
+
+            const storedPolyline = routePhase === 'pickup'
+                ? curBooking?.driver_to_pickup_polyline
+                : curBooking?.trip_polyline;
+            const storedCoords = decodePolylinePoints(storedPolyline);
+            if (storedCoords.length > 1) {
+                setArrivalTime(estimateMinutesForRoute(storedCoords, point1, point2));
+                setLiveRouteCoords(storedCoords);
+                fitBounds();
+                liveRouteGuardRef.current.inFlight = false;
+                return;
+            }
 
             let waypoints = "";
             if (curBooking.waypoints && curBooking.waypoints.length > 0) {
@@ -201,20 +268,26 @@ export default function BookedCabScreen(props) {
                     }
                 }
             }
-            getDirectionsApi(startLoc, destLoc, waypoints).then((details) => {
-                setArrivalTime(details?.time_in_secs ? parseFloat(details.time_in_secs / 60).toFixed(0) : 0);
+            getDirectionsApi(
+                startLoc,
+                destLoc,
+                waypoints,
+                buildLiveRouteTelemetryContext(routePhase)
+            ).then((details) => {
+                const decodedCoords = decodePolylinePoints(details?.polylinePoints);
+                setArrivalTime(
+                    details?.time_in_secs
+                        ? parseFloat(details.time_in_secs / 60).toFixed(0)
+                        : estimateMinutesForRoute(decodedCoords, point1, point2)
+                );
                 if (details?.polylinePoints) {
-                    let points = DecodePolyLine.decode(details.polylinePoints);
-                    let coords = points.map((point) => {
-                        return {
-                            latitude: point[0],
-                            longitude: point[1]
-                        };
-                    });
-                    setLiveRouteCoords(coords);
+                    setLiveRouteCoords(decodedCoords);
                 }
                 fitBounds();
             }).catch(() => {
+                const fallbackCoords = buildLocalRoutePreview(point1, point2);
+                setArrivalTime(estimateMinutesForRoute(fallbackCoords, point1, point2));
+                setLiveRouteCoords(fallbackCoords);
                 fitBounds();
             }).finally(() => {
                 liveRouteGuardRef.current.inFlight = false;

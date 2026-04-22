@@ -1,46 +1,75 @@
 import React, { useCallback, useState } from 'react';
-import { StatusBar, StyleSheet, Switch, Text, TouchableOpacity, View } from 'react-native';
+import { StatusBar, StyleSheet, Switch, Text, View, useWindowDimensions } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { fonts } from '../../common-local/font';
+import { fonts } from '../../theme/runtimeTokens';
 import PrototypeScreenTransition from '../../components/prototype/PrototypeScreenTransition';
 import PrototypeDismissibleSheet from '../../components/prototype/PrototypeDismissibleSheet';
-import { CardHandle, PrototypeCard, PrototypePrimaryButton } from '../../components/prototype/PrototypeUI';
+import {
+  PrototypeMenuCloseButton,
+  PrototypeMenuRow,
+  PrototypeMenuSection,
+  PrototypeMenuSurface,
+} from '../../components/prototype/PrototypeMenuSurface';
 import robotaxiPrototypeTokens from '../../components/design-system/robotaxiPrototypeTokens';
 import { usePrototypeMapOcclusion } from './prototypeMapOcclusion';
 import { usePrototypeRideRuntime } from './prototypeRideRuntime';
-import useFeatureFlag from '../../hooks/useFeatureFlag';
-import featureFlagService from '../../services/FeatureFlagService';
 
 const { color, typography } = robotaxiPrototypeTokens;
-const SHEET_BOTTOM_OFFSET = 100;
-const FALLBACK_CARD_HEIGHT = 264;
+const SURFACE_TOP_PADDING = 16;
+const SURFACE_BOTTOM_PADDING = 18;
+const BACKDROP_COLOR = 'transparent';
+const SWITCH_TRACK_COLORS = { false: '#D9DFE6', true: '#9BB38E' };
+const SWITCH_THUMB_COLOR = '#FFFFFF';
+
+function SettingRow({ icon, title, subtitle, value, onValueChange, last = false }) {
+  return (
+    <View style={[styles.settingRow, last && styles.settingRowLast]}>
+      <View style={styles.settingCopyWrap}>
+        <View style={styles.settingIconSlot}>
+          <Ionicons name={icon} size={18} color={color.text.primary} />
+        </View>
+        <View style={styles.settingTextWrap}>
+          <Text style={styles.settingTitle}>{title}</Text>
+          <Text style={styles.settingSubtitle}>{subtitle}</Text>
+        </View>
+      </View>
+
+      <Switch
+        value={value}
+        onValueChange={onValueChange}
+        trackColor={SWITCH_TRACK_COLORS}
+        thumbColor={SWITCH_THUMB_COLOR}
+        ios_backgroundColor={SWITCH_TRACK_COLORS.false}
+        style={styles.toggleSwitch}
+      />
+    </View>
+  );
+}
 
 export default function RobotaxiSettingsScreen({ navigation, route }) {
   const insets = useSafeAreaInsets();
-  const { notificationsEnabled, trafficLayerEnabled, voiceGuidanceEnabled, updateSettings } = usePrototypeRideRuntime();
-  const prototypeUiEnabled = useFeatureFlag('PROTOTYPE_ROBOTAXI_UI_ENABLED', true);
-  const [cardHeight, setCardHeight] = useState(FALLBACK_CARD_HEIGHT);
-  const sheetBottom = insets.bottom + SHEET_BOTTOM_OFFSET;
-
-  const handleDismiss = () => {
-    if (navigation.canGoBack()) {
-      navigation.goBack();
-      return;
-    }
-    navigation.navigate('RobotaxiPrototype');
-  };
+  const { height: windowHeight } = useWindowDimensions();
+  const { riderProfile, activeRole, notificationsEnabled, trafficLayerEnabled, voiceGuidanceEnabled, updateSettings } =
+    usePrototypeRideRuntime();
+  const [panelHeight, setPanelHeight] = useState(windowHeight);
+  const isDriverRole = activeRole === 'driver';
+  const profileName = riderProfile?.name || (isDriverRole ? 'Motorista Leaf' : 'Passageiro Leaf');
 
   usePrototypeMapOcclusion({
     routeKey: route?.key,
     layerId: route?.key || 'prototype-settings',
-    occludedBottom: sheetBottom + cardHeight
+    occludedBottom: panelHeight,
   });
 
-  const handleCardLayout = useCallback(event => {
+  const handleDismiss = useCallback(() => {
+    navigation.navigate('RobotaxiPrototype');
+  }, [navigation]);
+
+  const handlePanelLayout = useCallback(event => {
     const nextHeight = event?.nativeEvent?.layout?.height;
     if (Number.isFinite(nextHeight) && nextHeight > 0) {
-      setCardHeight(nextHeight);
+      setPanelHeight(nextHeight);
     }
   }, []);
 
@@ -50,85 +79,65 @@ export default function RobotaxiSettingsScreen({ navigation, route }) {
         <StatusBar translucent backgroundColor="transparent" barStyle="dark-content" />
         <PrototypeDismissibleSheet
           onClose={handleDismiss}
-          sheetStyle={[styles.sheetWrap, { bottom: sheetBottom }]}
+          backdropColor={BACKDROP_COLOR}
+          dragEnabled={false}
+          sheetStyle={styles.sheetWrap}
         >
-          <PrototypeCard onLayout={handleCardLayout} style={styles.settingsCard}>
-            <CardHandle />
-
-            <Text style={styles.title}>Configurações</Text>
-
-            <View style={styles.optionRow}>
-              <View style={styles.optionLabelWrap}>
-                <Ionicons name="notifications-outline" size={16} color={color.text.primary} />
-                <Text style={styles.optionText}>Alertas de corrida</Text>
-              </View>
-              <Switch
+          <PrototypeMenuSurface
+            onLayout={handlePanelLayout}
+            eyebrow={isDriverRole ? 'Ajustes do motorista' : 'Ajustes da conta'}
+            title="Configuracoes"
+            subtitle={
+              isDriverRole
+                ? `Preferencias operacionais para ${profileName}.`
+                : `Preferencias de notificacao, mapa e acessibilidade para ${profileName}.`
+            }
+            fullScreen
+            style={{
+              paddingTop: insets.top + SURFACE_TOP_PADDING,
+              paddingBottom: Math.max(insets.bottom, SURFACE_BOTTOM_PADDING),
+            }}
+            headerAccessory={<PrototypeMenuCloseButton onPress={handleDismiss} />}
+          >
+            <PrototypeMenuSection title="Preferencias">
+              <SettingRow
+                icon="notifications-outline"
+                title="Alertas de corrida"
+                subtitle={
+                  isDriverRole
+                    ? 'Avisos de novas solicitacoes, aceite e atualizacoes de rota.'
+                    : 'Avisos sobre motorista, chegada e status da viagem.'
+                }
                 value={notificationsEnabled}
                 onValueChange={value => updateSettings({ notificationsEnabled: value })}
-                trackColor={{ false: '#C7D0DA', true: '#2A4D1D' }}
-                thumbColor={notificationsEnabled ? '#1A330E' : '#F7F9FC'}
               />
-            </View>
-
-            <View style={styles.optionRow}>
-              <View style={styles.optionLabelWrap}>
-                <Ionicons name="map-outline" size={16} color={color.text.primary} />
-                <Text style={styles.optionText}>Camada de trânsito</Text>
-              </View>
-              <Switch
+              <SettingRow
+                icon="map-outline"
+                title="Camada de transito"
+                subtitle="Mostra trafego no mapa para facilitar leitura da rota."
                 value={trafficLayerEnabled}
                 onValueChange={value => updateSettings({ trafficLayerEnabled: value })}
-                trackColor={{ false: '#C7D0DA', true: '#2A4D1D' }}
-                thumbColor={trafficLayerEnabled ? '#1A330E' : '#F7F9FC'}
               />
-            </View>
-
-            <View style={styles.optionRow}>
-              <View style={styles.optionLabelWrap}>
-                <Ionicons name="volume-high-outline" size={16} color={color.text.primary} />
-                <Text style={styles.optionText}>Instruções por voz</Text>
-              </View>
-              <Switch
+              <SettingRow
+                icon="volume-high-outline"
+                title="Instrucoes por voz"
+                subtitle="Ativa orientacoes de audio durante deslocamento."
                 value={voiceGuidanceEnabled}
                 onValueChange={value => updateSettings({ voiceGuidanceEnabled: value })}
-                trackColor={{ false: '#C7D0DA', true: '#2A4D1D' }}
-                thumbColor={voiceGuidanceEnabled ? '#1A330E' : '#F7F9FC'}
+                last
               />
-            </View>
+            </PrototypeMenuSection>
 
-            <View style={styles.optionRow}>
-              <View style={styles.optionLabelWrap}>
-                <Ionicons name="layers-outline" size={16} color={color.text.primary} />
-                <Text style={styles.optionText}>UI protótipo ativa</Text>
-              </View>
-              <Switch
-                value={prototypeUiEnabled}
-                onValueChange={value => {
-                  featureFlagService.setFlag('PROTOTYPE_ROBOTAXI_UI_ENABLED', value).catch(() => {});
-                }}
-                trackColor={{ false: '#C7D0DA', true: '#2A4D1D' }}
-                thumbColor={prototypeUiEnabled ? '#1A330E' : '#F7F9FC'}
+            <PrototypeMenuSection title="Ajuda">
+              <PrototypeMenuRow
+                icon="chatbubble-ellipses-outline"
+                title="Falar com suporte"
+                subtitle="Abra o canal de ajuda sem sair do fluxo atual."
+                last
+                onPress={() => navigation.replace('RobotaxiPrototypeSupport')}
               />
-            </View>
-
-            <Text style={styles.footnote}>Preferências aplicadas em toda a interface do protótipo.</Text>
-
-            <TouchableOpacity
-              style={styles.driverShortcut}
-              activeOpacity={0.88}
-              onPress={() => navigation.navigate('RobotaxiPrototypeDriverPanel')}
-            >
-              <Ionicons name="speedometer-outline" size={16} color={color.text.primary} />
-              <Text style={styles.driverShortcutText}>Abrir painel do motorista</Text>
-            </TouchableOpacity>
-
-            <PrototypePrimaryButton
-              label="Abrir suporte"
-              icon="chatbubble-ellipses-outline"
-              onPress={() => navigation.navigate('RobotaxiPrototypeSupport')}
-              style={styles.supportButton}
-            />
-          </PrototypeCard>
+            </PrototypeMenuSection>
+          </PrototypeMenuSurface>
         </PrototypeDismissibleSheet>
       </View>
     </PrototypeScreenTransition>
@@ -138,74 +147,51 @@ export default function RobotaxiSettingsScreen({ navigation, route }) {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: 'transparent'
+    backgroundColor: 'transparent',
   },
   sheetWrap: {
-    position: 'absolute',
-    left: 10,
-    right: 10
+    ...StyleSheet.absoluteFillObject,
   },
-  settingsCard: {
-    paddingHorizontal: 12,
-    paddingTop: 10,
-    paddingBottom: 12
-  },
-  title: {
-    color: color.text.primary,
-    fontFamily: fonts.SemiBold,
-    fontSize: typography.subtitle.size,
-    lineHeight: typography.subtitle.lineHeight,
-    marginBottom: 4
-  },
-  optionRow: {
-    minHeight: 52,
-    borderRadius: 14,
-    marginTop: 8,
-    paddingHorizontal: 10,
+  settingRow: {
+    minHeight: 64,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    backgroundColor: color.surface.secondary,
-    borderWidth: 1,
-    borderColor: color.border.subtle
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(17,26,39,0.08)',
   },
-  optionLabelWrap: {
+  settingRowLast: {
+    borderBottomWidth: 0,
+    paddingBottom: 4,
+  },
+  settingCopyWrap: {
+    flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8
+    paddingRight: 12,
   },
-  optionText: {
+  settingIconSlot: {
+    width: 28,
+    alignItems: 'flex-start',
+  },
+  settingTextWrap: {
+    flex: 1,
+  },
+  settingTitle: {
     color: color.text.primary,
-    fontFamily: fonts.Medium,
-    fontSize: typography.body.size,
-    lineHeight: typography.body.lineHeight
+    fontFamily: fonts.SemiBold,
+    fontSize: 16,
+    lineHeight: 22,
   },
-  footnote: {
-    marginTop: 10,
+  settingSubtitle: {
+    marginTop: 1,
     color: color.text.secondary,
     fontFamily: fonts.Regular,
     fontSize: typography.micro.size,
-    lineHeight: typography.micro.lineHeight
+    lineHeight: typography.micro.lineHeight,
   },
-  driverShortcut: {
-    marginTop: 10,
-    minHeight: 48,
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: color.border.subtle,
-    backgroundColor: color.surface.secondary,
-    paddingHorizontal: 10,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8
+  toggleSwitch: {
+    transform: [{ scaleX: 0.82 }, { scaleY: 0.82 }],
   },
-  driverShortcutText: {
-    color: color.text.primary,
-    fontFamily: fonts.Medium,
-    fontSize: typography.caption.size,
-    lineHeight: typography.caption.lineHeight
-  },
-  supportButton: {
-    marginTop: 10
-  }
 });

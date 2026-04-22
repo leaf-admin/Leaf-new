@@ -6,7 +6,14 @@ import MapView, { Polyline, PROVIDER_GOOGLE, Marker } from 'react-native-maps';
 import { colors } from '../common/theme';
 import i18n from '../i18n';
 import { useDispatch, useSelector } from 'react-redux';
-import { api } from '../common-local/api';
+import {
+    acceptTask,
+    cancelTask,
+    updateProfile,
+    updateBooking,
+    fetchTasks,
+    RequestPushMsg
+} from '../services/runtime/driverTripsRuntimeBridge';
 import { Alert } from 'react-native';
 import moment from 'moment/min/moment-with-locales';
 import carImageIcon from '../../assets/images/track_Car.png';
@@ -22,18 +29,10 @@ import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Typography from '../components/design-system/Typography';
 import AnimatedButton from '../components/design-system/AnimatedButton';
-import { useTheme } from '../common-local/theme';
+import { useTheme } from '../theme/runtimeTokens';
 
 
 export default function DriverTrips(props) {
-    const {
-        acceptTask,
-        cancelTask,
-        updateProfile,
-        updateBooking,
-        fetchTasks,
-        RequestPushMsg
-    } = api;
     const dispatch = useDispatch();
     const tasks = useSelector(state => state.taskdata.tasks);
     const settings = useSelector(state => state.settingsdata.settings) || {};
@@ -418,6 +417,23 @@ export default function DriverTrips(props) {
     }, []);
 
     const changePermission = async () => {
+        const disclosureAccepted = await new Promise(resolve => {
+            Alert.alert(
+                'Receba corridas com o app em segundo plano',
+                'Este app coleta sua localização em segundo plano apenas enquanto você estiver online como motorista para despacho de corridas, navegação ativa e segurança operacional. A Leaf não usa essa permissão para anúncios.',
+                [
+                    { text: 'Agora não', style: 'cancel', onPress: () => resolve(false) },
+                    { text: 'Permitir', onPress: () => resolve(true) }
+                ]
+            );
+        });
+
+        if (!disclosureAccepted) {
+            return;
+        }
+
+        await AsyncStorage.setItem('has_shown_background_location_modal', 'true');
+
         let permResp = await Location.requestForegroundPermissionsAsync();
         if (permResp.status == 'granted') {
             let { status } = await Location.requestBackgroundPermissionsAsync();

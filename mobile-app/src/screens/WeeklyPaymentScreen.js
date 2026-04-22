@@ -15,7 +15,7 @@ import {
 import { Icon } from 'react-native-elements';
 import QRCode from 'react-native-qrcode-svg';
 import { useSelector } from 'react-redux';
-import { api } from '../common-local';
+import { apiClient } from '../services/httpClient';
 import { useTranslation } from '../components/i18n/LanguageProvider';
 
 
@@ -60,7 +60,7 @@ const WeeklyPaymentScreen = ({ navigation, route }) => {
 
   const createPixCharge = async () => {
     try {
-      const response = await api.post('/api/payments/create-weekly-plan', {
+      const response = await apiClient.post('/api/payments/create-weekly-plan', {
         planId: plan.id,
         userId: currentUser.id,
         amount: plan.price,
@@ -101,7 +101,7 @@ const WeeklyPaymentScreen = ({ navigation, route }) => {
 
   const checkPaymentStatus = async (chargeId) => {
     try {
-      const response = await api.get(`/api/payments/status/${chargeId}`);
+      const response = await apiClient.get(`/api/payments/status/${chargeId}`);
       return response.data.status;
     } catch (error) {
       Logger.error('Erro ao verificar status:', error);
@@ -151,7 +151,7 @@ const WeeklyPaymentScreen = ({ navigation, route }) => {
 
   const activateUserPlan = async () => {
     try {
-      await api.post('/api/plans/activate', {
+      await apiClient.post('/api/plans/activate', {
         userId: currentUser.id,
         planId: plan.id,
         paymentId: paymentData.id

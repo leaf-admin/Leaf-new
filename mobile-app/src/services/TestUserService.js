@@ -4,8 +4,7 @@ import Logger from '../utils/Logger';
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Platform } from 'react-native';
-import { store } from '../common-local/store';
-import { FETCH_USER_SUCCESS } from '../common-local/types';
+import { allowTestUserTools } from '../config/runtimeAccessPolicy';
 
 
 class TestUserService {
@@ -24,9 +23,8 @@ class TestUserService {
     }
 
     // Verificar se estamos em modo de teste
-    // SEMPRE permite usuários de teste (mesmo em produção)
     isTestMode() {
-        return true; // Permite usuários de teste em produção
+        return allowTestUserTools();
     }
 
     // Obter dados do usuário de teste

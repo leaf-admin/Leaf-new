@@ -12,6 +12,21 @@ import { formatBookingObject } from '../other/sharedFunctions';
 import { Alert } from 'react-native';
 import { get } from '@react-native-firebase/database';
 import { getSelfHostedApiUrl } from '../../config/ApiConfig';
+import { isDevelopmentBuild, isE2ETestBuild } from '../../config/runtimeAccessPolicy';
+
+const LEGACY_BOOKING_WRITE_ERROR =
+    'Fluxo legado de criação de corrida bloqueado. Solicitações devem passar pelo backend canônico após confirmação de pagamento.';
+
+const canUseLegacyBookingWrite = () =>
+    isDevelopmentBuild() ||
+    isE2ETestBuild() ||
+    String(process.env.EXPO_PUBLIC_ALLOW_LEGACY_FIREBASE_BOOKING || '').trim().toLowerCase() === 'true';
+
+const assertCanonicalBookingPath = () => {
+    if (!canUseLegacyBookingWrite()) {
+        throw new Error(LEGACY_BOOKING_WRITE_ERROR);
+    }
+};
 
 export const clearBooking = () => (dispatch) => {
     dispatch({
@@ -53,6 +68,7 @@ export const fetchBooking = (bookingId) => (dispatch) => {
 
 export const createBooking = (bookingData) => async (dispatch) => {
     try {
+        assertCanonicalBookingPath();
         const { database } = firebase;
         const newBookingRef = database.ref('bookings').push();
         const bookingId = newBookingRef.key;
@@ -79,6 +95,13 @@ export const createBooking = (bookingData) => async (dispatch) => {
 };
 
 export const addBooking = (bookingData) => async (dispatch) => {
+    if (!canUseLegacyBookingWrite()) {
+        dispatch({
+            type: CONFIRM_BOOKING_FAILED,
+            payload: LEGACY_BOOKING_WRITE_ERROR,
+        });
+        throw new Error(LEGACY_BOOKING_WRITE_ERROR);
+    }
 
     const {
         bookingRef,
@@ -152,4 +175,3 @@ export const addBooking = (bookingData) => async (dispatch) => {
         });
     });
 };
-

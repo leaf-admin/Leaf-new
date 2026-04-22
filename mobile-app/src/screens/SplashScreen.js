@@ -1,9 +1,40 @@
 import Logger from '../utils/Logger';
 import React, { useEffect, useRef, useState } from 'react';
 import { View, Image, StyleSheet, StatusBar, Animated, Text, ActivityIndicator, Dimensions } from 'react-native';
-import { useSelector } from 'react-redux';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { useDispatch, useSelector } from 'react-redux';
+import { FETCH_USER_SUCCESS } from '../state/actionTypes';
 import { useOnboardingPersistence } from '../hooks/useOnboardingPersistence';
 import AuthFlow from '../components/auth/AuthFlow';
+import { restoreQaSeedProfile } from '../utils/qaSeedProfile';
+
+const AUTH_UID_STORAGE_KEY = '@auth_uid';
+const USER_DATA_STORAGE_KEY = '@user_data';
+
+const normalizePersistedProfile = (profile) => {
+  if (!profile || typeof profile !== 'object') {
+    return null;
+  }
+
+  const uid = String(profile.uid || '').trim();
+  if (!uid) {
+    return null;
+  }
+
+  const userTypeCandidate =
+    profile.usertype ||
+    profile.userType ||
+    profile?.profile?.usertype ||
+    profile?.profile?.userType ||
+    null;
+  const normalizedUserType = userTypeCandidate === 'passenger' ? 'customer' : userTypeCandidate;
+
+  return {
+    ...profile,
+    uid,
+    ...(normalizedUserType ? { usertype: normalizedUserType, userType: normalizedUserType } : {})
+  };
+};
 
 const resolveInitialStep = (completedSteps = []) => {
   if (completedSteps.includes('credentials') || completedSteps.includes('document_data')) {
@@ -33,6 +64,7 @@ export default function SplashScreen({ navigation }) {
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const scaleAnim = useRef(new Animated.Value(0.8)).current;
   const loadingOpacity = useRef(new Animated.Value(0)).current;
+  const dispatch = useDispatch();
 
   // Estados para controle da verificação
   const [isChecking, setIsChecking] = useState(true);
@@ -60,13 +92,110 @@ export default function SplashScreen({ navigation }) {
 
       try {
         Logger.log('SplashScreen - 🔍 Verificando status do usuário nos bastidores...');
-        
-        // Verificar se o usuário está autenticado no Firebase
-        const hasFirebaseAuth = auth.profile && auth.profile.uid;
-        Logger.log('SplashScreen - 🔐 Usuário autenticado no Firebase?', !!hasFirebaseAuth);
-        
+
+        let resolvedProfile = auth.profile && auth.profile.uid ? auth.profile : null;
+
+        if (!resolvedProfile) {
+          try {
+            const [storedUserDataRaw, storedUidRaw] = await AsyncStorage.multiGet([
+              USER_DATA_STORAGE_KEY,
+              AUTH_UID_STORAGE_KEY
+            ]);
+            const storedUserData = storedUserDataRaw?.[1];
+            const storedUid = String(storedUidRaw?.[1] || '').trim();
+
+            if (storedUserData) {
+              try {
+                const parsedProfile = JSON.parse(storedUserData);
+                const normalizedProfile = normalizePersistedProfile(parsedProfile);
+                if (normalizedProfile?.uid) {
+                  resolvedProfile = normalizedProfile;
+                  dispatch({
+                    type: FETCH_USER_SUCCESS,
+                    payload: normalizedProfile
+                  });
+                  Logger.log('SplashScreen - ♻️ Sessão restaurada do AsyncStorage:', {
+                    uid: normalizedProfile.uid,
+                    usertype: normalizedProfile.usertype || normalizedProfile.userType || null
+                  });
+                }
+                if (!resolvedProfile && storedUid) {
+                  const rebuiltQaProfile = await restoreQaSeedProfile({
+                    AsyncStorage,
+                    authUidKey: AUTH_UID_STORAGE_KEY,
+                    userDataKey: USER_DATA_STORAGE_KEY,
+                    driverActivationKey: `@prototype_driver_activation_${storedUid}`
+                  });
+
+                  if (rebuiltQaProfile?.uid) {
+                    resolvedProfile = normalizePersistedProfile(rebuiltQaProfile);
+                    dispatch({
+                      type: FETCH_USER_SUCCESS,
+                      payload: resolvedProfile
+                    });
+                    Logger.log('SplashScreen - 🧪 Perfil QA reconstruído do UID persistido:', {
+                      uid: resolvedProfile.uid,
+                      usertype: resolvedProfile.usertype || resolvedProfile.userType || null
+                    });
+                  }
+                }
+              } catch (parseError) {
+                Logger.warn('SplashScreen - ⚠️ @user_data inválido, limpando cache local');
+                const rebuiltQaProfile = storedUid
+                  ? await restoreQaSeedProfile({
+                      AsyncStorage,
+                      authUidKey: AUTH_UID_STORAGE_KEY,
+                      userDataKey: USER_DATA_STORAGE_KEY,
+                      driverActivationKey: `@prototype_driver_activation_${storedUid}`
+                    })
+                  : null;
+
+                if (rebuiltQaProfile?.uid) {
+                  resolvedProfile = normalizePersistedProfile(rebuiltQaProfile);
+                  dispatch({
+                    type: FETCH_USER_SUCCESS,
+                    payload: resolvedProfile
+                  });
+                  Logger.log('SplashScreen - 🧪 Cache QA reconstruído após parse inválido:', {
+                    uid: resolvedProfile.uid,
+                    usertype: resolvedProfile.usertype || resolvedProfile.userType || null
+                  });
+                } else {
+                  await AsyncStorage.multiRemove([USER_DATA_STORAGE_KEY, AUTH_UID_STORAGE_KEY]);
+                }
+              }
+            } else if (storedUid) {
+              const rebuiltQaProfile = await restoreQaSeedProfile({
+                AsyncStorage,
+                authUidKey: AUTH_UID_STORAGE_KEY,
+                userDataKey: USER_DATA_STORAGE_KEY,
+                driverActivationKey: `@prototype_driver_activation_${storedUid}`
+              });
+
+              if (rebuiltQaProfile?.uid) {
+                resolvedProfile = normalizePersistedProfile(rebuiltQaProfile);
+                dispatch({
+                  type: FETCH_USER_SUCCESS,
+                  payload: resolvedProfile
+                });
+                Logger.log('SplashScreen - 🧪 Perfil QA reconstruído sem @user_data:', {
+                  uid: resolvedProfile.uid,
+                  usertype: resolvedProfile.usertype || resolvedProfile.userType || null
+                });
+              } else {
+                Logger.log('SplashScreen - ℹ️ UID persistido encontrado sem perfil completo:', storedUid);
+              }
+            }
+          } catch (storageError) {
+            Logger.warn('SplashScreen - ⚠️ Falha ao restaurar sessão local:', storageError?.message || storageError);
+          }
+        }
+
+        const hasAnyAuthSession = Boolean(resolvedProfile?.uid);
+        Logger.log('SplashScreen - 🔐 Sessão autenticada disponível?', hasAnyAuthSession);
+
         // Se não está autenticado, mostrar onboarding
-        if (!hasFirebaseAuth) {
+        if (!hasAnyAuthSession) {
           clearTimeout(timeoutId);
           Logger.log('SplashScreen - 🔐 Usuário não autenticado, preparando onboarding');
           setShouldShowOnboarding(true);
@@ -91,7 +220,10 @@ export default function SplashScreen({ navigation }) {
         }
 
         // Verificar se o usuário tem dados completos no Realtime Database
-        const hasCompleteProfile = auth.profile && auth.profile.usertype;
+        const hasCompleteProfile = Boolean(
+          resolvedProfile &&
+          (resolvedProfile.usertype || resolvedProfile.userType)
+        );
         Logger.log('SplashScreen - 📊 Perfil completo no Realtime Database?', !!hasCompleteProfile);
 
         clearTimeout(timeoutId);
@@ -102,7 +234,7 @@ export default function SplashScreen({ navigation }) {
           setShouldShowOnboarding(false);
           setIsChecking(false);
           
-          // Navegar para Map após 4 segundos
+          // Navegar para Map após transição curta
           // ✅ Verificar se o navigator está pronto antes de navegar
           setTimeout(() => {
             if (navigation.isReady && navigation.isReady()) {
@@ -115,7 +247,7 @@ export default function SplashScreen({ navigation }) {
                 }
               }, 1000);
             }
-          }, 4000);
+          }, 1200);
           return;
         } else {
           // 🔄 SITUAÇÃO 2: Usuário autenticado mas incompleto - continuar onboarding
@@ -139,7 +271,7 @@ export default function SplashScreen({ navigation }) {
 
     // Executar verificação imediatamente
     checkUserStatus();
-  }, [auth.profile, navigation, isChecking]);
+  }, [auth.profile, navigation, isChecking, dispatch]);
 
   useEffect(() => {
     // Animação simples e rápida
@@ -169,8 +301,29 @@ export default function SplashScreen({ navigation }) {
     return (
       <AuthFlow
         visible={true}
-        onComplete={(authData) => {
+        onComplete={async (authData) => {
           Logger.log('SplashScreen - ✅ Onboarding completado:', authData);
+          const completionProfile = normalizePersistedProfile(
+            authData?.persistedProfile ||
+            authData?.user ||
+            authData
+          );
+
+          if (completionProfile?.uid) {
+            dispatch({
+              type: FETCH_USER_SUCCESS,
+              payload: completionProfile
+            });
+            try {
+              await AsyncStorage.multiSet([
+                [USER_DATA_STORAGE_KEY, JSON.stringify(completionProfile)],
+                [AUTH_UID_STORAGE_KEY, completionProfile.uid]
+              ]);
+            } catch (error) {
+              Logger.warn('SplashScreen - ⚠️ Falha ao persistir sessão após onboarding:', error?.message || error);
+            }
+          }
+
           // Navegar para a tela principal após onboarding completo
           // ✅ Verificar se o navigator está pronto antes de navegar
           if (navigation.isReady && navigation.isReady()) {

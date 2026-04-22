@@ -4,6 +4,7 @@ import storage from '@react-native-firebase/storage';
 import auth from '@react-native-firebase/auth';
 import { Platform, Alert } from 'react-native';
 import VehicleNotificationService from './VehicleNotificationService';
+import { allowTestUserTools } from '../config/runtimeAccessPolicy';
 
 
 class VehicleService {
@@ -295,7 +296,11 @@ class VehicleService {
      * Verificar se é usuário de teste
      */
     isTestUser(userId) {
-        return userId && (userId.includes('test-user-dev') || userId.includes('test-customer-dev'));
+        return (
+            allowTestUserTools() &&
+            userId &&
+            (userId.includes('test-user-dev') || userId.includes('test-customer-dev'))
+        );
     }
 
     /**

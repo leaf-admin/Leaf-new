@@ -1,6 +1,6 @@
 import Logger from './Logger';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { store } from '../common-local/store';
+import { store } from '../state/appStore';
 import { firebase } from '../common-local/config/configureFirebase';
 
 

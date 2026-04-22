@@ -1,17 +1,22 @@
 import Logger from '../../../utils/Logger';
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { View, TextInput, TouchableOpacity, StyleSheet, Alert as NativeAlert, KeyboardAvoidingView, Platform, Text } from 'react-native';
-import Constants from 'expo-constants';
-import { fonts } from '../../../common-local/font';
+import { fonts } from '../../../theme/runtimeTokens';
 import auth from '@react-native-firebase/auth';
 import { saveStepData } from '../../../utils/secureOnboardingStorage';
 import ContinueButton from '../common/ContinueButton';
 import { AnimatedButton } from '../../design-system/AnimatedButton';
+import {
+    allowQaOtpForceFlow,
+    allowReviewAccess,
+    isDevelopmentBuild
+} from '../../../config/runtimeAccessPolicy';
+import apiClient from '../../../services/httpClient';
 import onboardingTheme from '../common/onboardingTheme';
 import { toUserFriendlyMessage } from '../../../utils/friendlyErrorMessages';
 
-// ✅ CRÍTICO: Flag de ambiente de review (App Store compliance)
-const IS_REVIEW_ENV = Constants.expoConfig?.extra?.isReview === true;
+const QA_OTP_FORCE_NUMBERS = new Set(['+5511999999999', '+5511888888888']);
+const QA_FIXED_OTP = '0'.repeat(6);
 
 const { color, radius, spacing, elevation } = onboardingTheme;
 
@@ -42,7 +47,6 @@ const OTPStep = ({ phoneNumber, confirmation, onVerified, onBack }) => {
     }, [confirmation]);
 
     const requestOtpWithFallback = useCallback(async (phone) => {
-        const { api } = require('../../../common-local/api');
         const endpoints = [
             '/api/custom-otp/request-otp',
             '/custom-otp/request-otp'
@@ -51,7 +55,7 @@ const OTPStep = ({ phoneNumber, confirmation, onVerified, onBack }) => {
         let lastError = null;
         for (const endpoint of endpoints) {
             try {
-                return await api.post(endpoint, { phone });
+                return await apiClient.post(endpoint, { phone });
             } catch (error) {
                 lastError = error;
                 if (error?.response?.status !== 404) {
@@ -64,7 +68,6 @@ const OTPStep = ({ phoneNumber, confirmation, onVerified, onBack }) => {
     }, []);
 
     const verifyOtpWithFallback = useCallback(async ({ phone, verificationId, otp }) => {
-        const { api } = require('../../../common-local/api');
         const endpoints = [
             '/api/custom-otp/verify-otp',
             '/custom-otp/verify-otp'
@@ -73,7 +76,7 @@ const OTPStep = ({ phoneNumber, confirmation, onVerified, onBack }) => {
         let lastError = null;
         for (const endpoint of endpoints) {
             try {
-                return await api.post(endpoint, {
+                return await apiClient.post(endpoint, {
                     phone,
                     verificationId,
                     otp
@@ -117,14 +120,14 @@ const OTPStep = ({ phoneNumber, confirmation, onVerified, onBack }) => {
         // ✅ CRÍTICO: Guard para ambiente de produção - OTP sempre obrigatório
         // Apenas em ambiente de review (APP_REVIEW=true) o OTP pode ser pulado
         // Nota: O bypass real é tratado em AuthFlow.js antes de chegar aqui
-        if (!IS_REVIEW_ENV && !__DEV__) {
+        if (!allowReviewAccess() && !isDevelopmentBuild()) {
             // Em produção: OTP sempre obrigatório, nunca permitir bypass
             Logger.log('🔐 Ambiente de produção: OTP obrigatório');
             // Se chegou aqui, é porque não houve bypass (correto para produção)
         }
 
         // ✅ Validação adicional: Bloquear tentativas de bypass em produção
-        if (currentConfirmation?.isReviewAccount && !IS_REVIEW_ENV && !__DEV__) {
+        if (currentConfirmation?.isReviewAccount && !allowReviewAccess()) {
             Logger.error('🚫 Tentativa de bypass bloqueada em produção');
             Alert.alert('Erro', 'Bypass de OTP não permitido em produção');
             setLoading(false);
@@ -133,13 +136,47 @@ const OTPStep = ({ phoneNumber, confirmation, onVerified, onBack }) => {
 
         setLoading(true);
         try {
+            const normalizedPhone = String(phoneNumber || '').trim();
+            const shouldForceCustomOtpForQa =
+                allowQaOtpForceFlow() &&
+                otpString === QA_FIXED_OTP &&
+                QA_OTP_FORCE_NUMBERS.has(normalizedPhone) &&
+                !(currentConfirmation && currentConfirmation.isCustomOtp);
+
+            if (shouldForceCustomOtpForQa) {
+                const requestResponse = await requestOtpWithFallback(normalizedPhone);
+                if (!requestResponse?.data?.success || !requestResponse?.data?.verificationId) {
+                    throw new Error(requestResponse?.data?.error || 'Falha ao preparar OTP para conta QA.');
+                }
+
+                const verificationResponse = await verifyOtpWithFallback({
+                    phone: normalizedPhone,
+                    verificationId: requestResponse.data.verificationId,
+                    otp: otpString
+                });
+
+                if (verificationResponse?.data?.success && verificationResponse?.data?.customToken) {
+                    const userCredential = await auth().signInWithCustomToken(verificationResponse.data.customToken);
+                    if (userCredential?.user) {
+                        onVerified(userCredential.user);
+                        return;
+                    }
+                }
+
+                throw new Error(verificationResponse?.data?.error || 'Código inválido para conta QA.');
+            }
+
             // 🚀 VERIFICAR SE É NÚMERO DE TESTE COM CÓDIGO FIXO
             if (currentConfirmation && currentConfirmation.isTestNumber) {
+                if (!allowQaOtpForceFlow() && !allowReviewAccess()) {
+                    Logger.error('🚫 OTP de número de teste bloqueado fora de QA/review');
+                    throw new Error('Código de teste não permitido neste ambiente.');
+                }
+
                 Logger.log('🧪 Verificando código de teste:', otpString);
-                Logger.log('🔑 Código esperado:', currentConfirmation.expectedOtp || '000000');
 
                 // Aceitar código fixo para números de teste
-                const expectedCode = currentConfirmation.expectedOtp || '000000';
+                const expectedCode = currentConfirmation.expectedOtp || QA_FIXED_OTP;
                 if (otpString === expectedCode) {
                     Logger.log('✅ Código de teste aceito!');
                     const credential = await currentConfirmation.confirm(otpString);
@@ -147,7 +184,7 @@ const OTPStep = ({ phoneNumber, confirmation, onVerified, onBack }) => {
                         onVerified(credential.user);
                     }
                 } else {
-                    throw new Error('Código inválido. Para números de teste, use: ' + expectedCode);
+                    throw new Error('Código inválido.');
                 }
             } else {
                 // Fluxo normal com Firebase ou Custom API
@@ -186,6 +223,13 @@ const OTPStep = ({ phoneNumber, confirmation, onVerified, onBack }) => {
                     errorMessage = 'Código inválido. Verifique o código recebido por SMS e tente novamente.';
                 } else if (error.message.includes('expired') || error.message.includes('expirado')) {
                     errorMessage = 'Código expirado. Solicite um novo código.';
+                } else if (
+                    error.message.includes('already used') ||
+                    error.message.includes('already been used') ||
+                    error.message.includes('code used') ||
+                    error.message.includes('reutilizado')
+                ) {
+                    errorMessage = 'Esse código já foi utilizado. Solicite um novo código.';
                 } else if (error.message.includes('network') || error.message.includes('rede')) {
                     errorMessage = 'Erro de conexão. Verifique sua internet e tente novamente.';
                 } else if (error.message.includes('timeout')) {
@@ -300,6 +344,8 @@ const OTPStep = ({ phoneNumber, confirmation, onVerified, onBack }) => {
                                 maxLength={1}
                                 selectTextOnFocus
                                 autoFocus={index === 0}
+                                testID={`auth-otp-digit-${index}`}
+                                accessibilityLabel={`auth-otp-digit-${index}`}
                             />
                         ))}
                     </View>
@@ -310,6 +356,8 @@ const OTPStep = ({ phoneNumber, confirmation, onVerified, onBack }) => {
                             onPress={handleVerifyOTP}
                             disabled={!otp.every(digit => digit) || loading}
                             text={loading ? 'Verificando...' : 'Verificar'}
+                            testID="auth-otp-verify-btn"
+                            accessibilityLabel="auth-otp-verify-btn"
                         />
                     </View>
                 </View>
@@ -320,7 +368,12 @@ const OTPStep = ({ phoneNumber, confirmation, onVerified, onBack }) => {
                         Não recebeu o código?{' '}
                     </Text>
                     {canResend ? (
-                        <TouchableOpacity onPress={handleResendCode} disabled={loading}>
+                        <TouchableOpacity
+                            onPress={handleResendCode}
+                            disabled={loading}
+                            testID="auth-otp-resend-btn"
+                            accessibilityLabel="auth-otp-resend-btn"
+                        >
                             <Text style={styles.resendLink}>Reenviar</Text>
                         </TouchableOpacity>
                     ) : (
@@ -335,6 +388,8 @@ const OTPStep = ({ phoneNumber, confirmation, onVerified, onBack }) => {
                         title="Voltar"
                         onPress={onBack}
                         style={styles.backButton}
+                        testID="auth-otp-back-btn"
+                        accessibilityLabel="auth-otp-back-btn"
                     />
                 </View>
             </View>

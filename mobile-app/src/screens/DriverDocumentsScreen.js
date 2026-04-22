@@ -83,7 +83,7 @@ const DriverDocumentsScreen = ({ navigation }) => {
                     [
                         {
                             text: 'OK',
-                            onPress: () => navigation.navigate('Login')
+                            onPress: () => navigation.navigate('PhoneInputScreen')
                         }
                     ]
                 );
@@ -96,7 +96,7 @@ const DriverDocumentsScreen = ({ navigation }) => {
                 [
                     {
                         text: 'OK',
-                        onPress: () => navigation.navigate('Login')
+                        onPress: () => navigation.navigate('PhoneInputScreen')
                     }
                 ]
             );

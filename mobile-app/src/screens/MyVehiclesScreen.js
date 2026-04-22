@@ -18,9 +18,9 @@ import {
 import { Icon } from 'react-native-elements';
 import { Ionicons } from '@expo/vector-icons';
 import { useSelector, useDispatch } from 'react-redux';
-import { colors } from '../common-local/theme';
-import { fonts } from '../common-local/font';
-import { MAIN_COLOR } from '../common-local/sharedFunctions';
+import { colors } from '../theme/runtimeTokens';
+import { fonts } from '../theme/runtimeTokens';
+import { MAIN_COLOR } from '../common/sharedFunctions';
 import database from '@react-native-firebase/database';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';

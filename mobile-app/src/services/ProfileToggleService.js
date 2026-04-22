@@ -1,7 +1,7 @@
 import Logger from '../utils/Logger';
 // ProfileToggleService.js - Serviço para toggle entre passageiro e motorista
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { api } from '../common-local';
+import { apiClient } from '../services/httpClient';
 
 class ProfileToggleService {
   constructor() {
@@ -140,7 +140,7 @@ class ProfileToggleService {
 
   async fetchProfileData(userId, mode) {
     try {
-      const response = await api.get(`/user/profile/${mode}`, {
+      const response = await apiClient.get(`/user/profile/${mode}`, {
         params: { userId }
       });
       
@@ -237,7 +237,7 @@ class ProfileToggleService {
   // ===== API CALLS =====
   async updateUserMode(userId, mode) {
     try {
-      const response = await api.post('/user/mode', {
+      const response = await apiClient.post('/user/mode', {
         userId,
         mode
       });
@@ -258,7 +258,7 @@ class ProfileToggleService {
   // ===== VALIDAÇÕES =====
   async canSwitchToMode(userId, mode) {
     try {
-      const response = await api.get(`/user/permissions/${userId}`);
+      const response = await apiClient.get(`/user/permissions/${userId}`);
       
       if (response.data.success) {
         const permissions = response.data.permissions;

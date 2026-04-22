@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo } from 'react';
-import { Image, StyleSheet, Text, View } from 'react-native';
+import { Image, StyleSheet, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import Animated, {
   Easing,
@@ -8,7 +8,6 @@ import Animated, {
   withRepeat,
   withTiming
 } from 'react-native-reanimated';
-import { fonts } from '../../common-local/font';
 import robotaxiPrototypeTokens from '../design-system/robotaxiPrototypeTokens';
 
 const { color } = robotaxiPrototypeTokens;
@@ -28,13 +27,7 @@ function RadarRing({ progress, offset }) {
   return <Animated.View style={[styles.ring, ringStyle]} />;
 }
 
-function formatElapsed(seconds) {
-  const mins = String(Math.floor(seconds / 60)).padStart(2, '0');
-  const secs = String(seconds % 60).padStart(2, '0');
-  return `${mins}:${secs}`;
-}
-
-export default function DriverSearchRadar({ elapsedSeconds = 0 }) {
+export default function DriverSearchRadar() {
   const progress = useSharedValue(0);
 
   useEffect(() => {
@@ -56,11 +49,6 @@ export default function DriverSearchRadar({ elapsedSeconds = 0 }) {
             <Ionicons name="car-sport" size={10} color={color.accent.contrast} />
           </View>
         </View>
-      </View>
-
-      <View style={styles.timerPill}>
-        <Ionicons name="time-outline" size={14} color={color.text.primary} />
-        <Text style={styles.timerText}>{formatElapsed(elapsedSeconds)}</Text>
       </View>
     </View>
   );
@@ -119,29 +107,5 @@ const styles = StyleSheet.create({
     backgroundColor: color.accent.primary,
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.84)'
-  },
-  timerPill: {
-    marginTop: 14,
-    minWidth: 112,
-    height: 36,
-    borderRadius: 18,
-    paddingHorizontal: 12,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: color.bg.panel,
-    borderWidth: 1,
-    borderColor: color.border.subtle,
-    gap: 6,
-    shadowColor: color.shadow.base,
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.35,
-    shadowRadius: 16,
-    elevation: 10
-  },
-  timerText: {
-    color: color.text.primary,
-    fontFamily: fonts.SemiBold,
-    fontSize: 13
   }
 });

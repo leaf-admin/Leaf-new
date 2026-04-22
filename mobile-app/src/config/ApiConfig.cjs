@@ -1,29 +1,73 @@
 // ApiConfig.cjs - Configuração centralizada para URLs da API (versão Node.js)
 // Compatível com testes CommonJS
 
-const normalizeBaseUrl = (url, fallback = 'https://api.147.182.204.181.sslip.io') => {
+const normalizeBaseUrl = (url, fallback = 'https://api.62.169.31.231.sslip.io') => {
   const raw = String(url || '').trim();
   if (!raw) return fallback;
   const withoutTrailingSlash = raw.replace(/\/+$/, '');
   return withoutTrailingSlash.replace(/\/api$/i, '');
 };
 
+const deriveSocketBaseUrlFromApi = (url, fallback = 'https://socket.62.169.31.231.sslip.io') => {
+  const normalized = normalizeBaseUrl(url, fallback);
+  try {
+    const parsed = new URL(normalized);
+    if (/^api(?=[.-])/i.test(parsed.hostname)) {
+      parsed.hostname = parsed.hostname.replace(/^api(?=[.-])/i, 'socket');
+    }
+    parsed.pathname = '';
+    parsed.search = '';
+    parsed.hash = '';
+    return parsed.toString().replace(/\/$/, '');
+  } catch (_error) {
+    return fallback;
+  }
+};
+
+const normalizeSocketBaseUrl = (url, fallback = 'https://socket.62.169.31.231.sslip.io') => {
+  const normalized = normalizeBaseUrl(url, fallback);
+  try {
+    const parsed = new URL(normalized);
+    parsed.pathname = '';
+    parsed.search = '';
+    parsed.hash = '';
+    return parsed.toString().replace(/\/$/, '');
+  } catch (_error) {
+    return fallback;
+  }
+};
+
 const DEFAULT_BACKEND_URL = normalizeBaseUrl(
   process.env.EXPO_PUBLIC_API_URL ||
   process.env.EXPO_PUBLIC_BACKEND_URL ||
   process.env.MOBILE_TEST_BACKEND_URL ||
-  'https://api.147.182.204.181.sslip.io'
+  'https://api.62.169.31.231.sslip.io'
 );
 const DEFAULT_WS_URL =
-  process.env.EXPO_PUBLIC_WS_URL ||
-  process.env.EXPO_PUBLIC_SOCKET_URL ||
-  process.env.MOBILE_TEST_WS_URL ||
-  process.env.EXPO_PUBLIC_API_URL ||
-  process.env.EXPO_PUBLIC_BACKEND_URL ||
-  process.env.MOBILE_TEST_BACKEND_URL ||
-  'https://socket.147.182.204.181.sslip.io';
+  normalizeSocketBaseUrl(
+    process.env.EXPO_PUBLIC_WS_URL ||
+    process.env.EXPO_PUBLIC_SOCKET_URL ||
+    process.env.MOBILE_TEST_WS_URL,
+    deriveSocketBaseUrlFromApi(
+      process.env.EXPO_PUBLIC_API_URL ||
+      process.env.EXPO_PUBLIC_BACKEND_URL ||
+      process.env.MOBILE_TEST_BACKEND_URL,
+      'https://socket.62.169.31.231.sslip.io'
+    )
+  );
 const DEFAULT_DASHBOARD_URL =
-  process.env.EXPO_PUBLIC_DASHBOARD_URL || 'https://dashboard.147.182.204.181.sslip.io';
+  process.env.EXPO_PUBLIC_DASHBOARD_URL || 'https://dashboard.62.169.31.231.sslip.io';
+const DEFAULT_FIREBASE_FUNCTIONS_BASE_URL = normalizeBaseUrl(
+  process.env.EXPO_PUBLIC_FIREBASE_FUNCTIONS_URL ||
+  process.env.FIREBASE_FUNCTIONS_URL ||
+  '',
+  ''
+);
+const FIREBASE_FALLBACK_ENABLED =
+  String(process.env.EXPO_PUBLIC_ENABLE_FIREBASE_FALLBACK || process.env.ENABLE_FIREBASE_FALLBACK || '')
+    .trim()
+    .toLowerCase() === 'true' &&
+  Boolean(DEFAULT_FIREBASE_FUNCTIONS_BASE_URL);
 
 // Configurações por ambiente
 const ENV = {
@@ -39,8 +83,8 @@ const ENV = {
     },
     // 🔄 FALLBACK - Firebase Functions (se necessário)
     firebaseFunctions: {
-      web: 'https://us-central1-leaf-app-91dfdce0.cloudfunctions.net',
-      mobile: 'https://us-central1-leaf-app-91dfdce0.cloudfunctions.net'
+      web: FIREBASE_FALLBACK_ENABLED ? DEFAULT_FIREBASE_FUNCTIONS_BASE_URL : '',
+      mobile: FIREBASE_FALLBACK_ENABLED ? DEFAULT_FIREBASE_FUNCTIONS_BASE_URL : ''
     },
     // 📊 Dashboard local
     dashboard: {
@@ -60,8 +104,8 @@ const ENV = {
     },
     // 🔄 FALLBACK - Firebase Functions
     firebaseFunctions: {
-      web: 'https://us-central1-leaf-app-91dfdce0.cloudfunctions.net',
-      mobile: 'https://us-central1-leaf-app-91dfdce0.cloudfunctions.net'
+      web: FIREBASE_FALLBACK_ENABLED ? DEFAULT_FIREBASE_FUNCTIONS_BASE_URL : '',
+      mobile: FIREBASE_FALLBACK_ENABLED ? DEFAULT_FIREBASE_FUNCTIONS_BASE_URL : ''
     },
     // 📊 Dashboard
     dashboard: {
@@ -159,6 +203,9 @@ const getSelfHostedApiUrl = (endpoint) => {
 
 // Função para obter URL completa - FIREBASE (fallback)
 const getFirebaseApiUrl = (endpoint) => {
+  if (!API_URLS.firebaseFunctions) {
+    throw new Error('Firebase Functions fallback is disabled for the current runtime.');
+  }
   return `${API_URLS.firebaseFunctions}${endpoint}`;
 };
 
@@ -191,6 +238,9 @@ const getApiUrl = (endpoint, useFallback = false) => {
 // 🔄 Função inteligente para escolher WebSocket
 const getWebSocketUrl = (useFallback = false) => {
   if (useFallback) {
+    if (!API_URLS.firebaseFunctions) {
+      throw new Error('Firebase Functions fallback is disabled for the current runtime.');
+    }
     return API_URLS.firebaseFunctions; // Fallback para Firebase
   }
   return getSelfHostedWebSocketUrl();

@@ -262,52 +262,21 @@ export default function UserInfoScreen() {
                 }
             }
             
-            // MÉTODO 6: Simulação inteligente (fallback)
+            // MÉTODO 6: Fallback seguro para entrada manual
             if (!detectedNumber) {
                 try {
-                    Logger.log('🔍 MÉTODO 6 - Simulação inteligente...');
-                    
-                    // Tentar obter informações do dispositivo para simular um número realista
-                    const brand = await DeviceInfo.getBrand();
-                    const model = await DeviceInfo.getModel();
-                    const deviceId = await DeviceInfo.getUniqueId();
-                    
-                    // Gerar um número baseado no deviceId para ser consistente
-                    const hash = deviceId.split('').reduce((a, b) => {
-                        a = ((a << 5) - a) + b.charCodeAt(0);
-                        return a & a;
-                    }, 0);
-                    
-                    // Usar o hash para gerar um número consistente para este dispositivo
-                    const ddd = 11 + (Math.abs(hash) % 20); // DDD entre 11 e 30
-                    const numero = 900000000 + (Math.abs(hash) % 99999999); // Número entre 900000000 e 999999999
-                    
-                    const simulatedNumber = `${ddd.toString().padStart(2, '0')} ${numero.toString().slice(0, 5)}-${numero.toString().slice(5)}`;
-                    
-                    Logger.log('📱 Dispositivo:', { brand, model, deviceId });
-                    Logger.log('📱 Número simulado:', simulatedNumber);
-                    
-                    // Perguntar se o usuário quer usar o número simulado
+                    Logger.log('🔍 MÉTODO 6 - Fallback para entrada manual');
                     Alert.alert(
-                        'Número simulado detectado',
-                        `Detectamos um número para teste: ${simulatedNumber}\n\nEste é um número simulado baseado no seu dispositivo. Deseja usar este número para teste?`,
+                        'Número não detectado',
+                        'Não foi possível preencher seu número automaticamente. Digite manualmente para continuar.',
                         [
-                            { 
-                                text: 'Usar para teste', 
-                                onPress: () => {
-                                    setPhone(simulatedNumber);
-                                    Logger.log('✅ Usando número simulado:', simulatedNumber);
-                                }
-                            },
-                            { 
-                                text: 'Digitar manualmente', 
-                                onPress: () => setPhone('') 
+                            {
+                                text: 'OK',
+                                onPress: () => setPhone('')
                             }
                         ]
                     );
-                    
-                    return; // Não continuar com o erro
-                    
+                    return;
                 } catch (error) {
                     Logger.log('❌ Erro no MÉTODO 6:', error);
                 }

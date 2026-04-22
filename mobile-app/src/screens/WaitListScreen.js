@@ -14,8 +14,8 @@ import {
 } from 'react-native';
 import { Icon } from 'react-native-elements';
 import { useSelector } from 'react-redux';
-import { colors } from '../common-local/theme';
-import { fonts } from '../common-local/font';
+import { colors } from '../theme/runtimeTokens';
+import { fonts } from '../theme/runtimeTokens';
 import { SkeletonLoader, LoadingSpinner } from '../components/LoadingStates';
 import { useResponsiveLayout } from '../components/ResponsiveLayout';
 import AuthService from '../services/AuthService';
@@ -44,7 +44,7 @@ const WaitListScreen = ({ navigation }) => {
       const isAuthenticated = await AuthService.isAuthenticated();
       if (!isAuthenticated) {
         Alert.alert(t('messages.error'), t('waitList.sessionExpired'));
-        navigation.navigate('Login');
+        navigation.navigate('PhoneInputScreen');
         return;
       }
 
@@ -587,7 +587,6 @@ const styles = StyleSheet.create({
 });
 
 export default WaitListScreen;
-
 
 
 

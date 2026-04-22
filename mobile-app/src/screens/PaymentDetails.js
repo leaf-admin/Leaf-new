@@ -12,22 +12,24 @@ import {
     Dimensions
 } from 'react-native';
 import { Icon } from 'react-native-elements';
-import { colors } from '../common-local/theme';
+import { colors } from '../theme/runtimeTokens';
 import i18n from '../i18n';
 import { useSelector, useDispatch } from 'react-redux';
-import { api } from '../common-local';
-import { MAIN_COLOR } from '../common-local/sharedFunctions';
-import { fonts } from '../common-local/font';
+import { MAIN_COLOR } from '../common/sharedFunctions';
+import { fonts } from '../theme/runtimeTokens';
 import { PromoComp } from "../components";
 import { SkeletonLoader, LoadingSpinner } from '../components/LoadingStates';
 import { useResponsiveLayout } from '../components/ResponsiveLayout';
 import WebSocketManager from '../services/WebSocketManager';
 import useWebSocketListeners from '../hooks/useWebSocketListeners';
+import {
+  getPaymentMethods,
+  removePaymentMethod
+} from '../services/runtime/paymentMethodsService';
 
 
 export default function PaymentDetails(props) {
     const { t } = i18n;
-    const { getPaymentMethods, addPaymentMethod, removePaymentMethod } = api;
   const dispatch = useDispatch();
   const auth = useSelector(state => state.auth);
     const [loading, setLoading] = useState(true);
@@ -99,7 +101,7 @@ export default function PaymentDetails(props) {
     const handleRemovePaymentMethod = async (methodId) => {
         try {
             setLoading(true);
-            await removePaymentMethod(methodId);
+            await removePaymentMethod(auth.profile.uid, methodId);
             await loadPaymentMethods();
         } catch (error) {
             Logger.error('Erro ao remover método de pagamento:', error);

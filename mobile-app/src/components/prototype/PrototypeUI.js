@@ -1,9 +1,16 @@
-import React from 'react';
-import { StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
-import Animated, { Easing, FadeInUp } from 'react-native-reanimated';
-import { fonts } from '../../common-local/font';
-import robotaxiPrototypeTokens from '../design-system/robotaxiPrototypeTokens';
+import React from "react";
+import {
+  ActivityIndicator,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
+} from "react-native";
+import { Ionicons } from "@expo/vector-icons";
+import Animated, { Easing, FadeInUp } from "react-native-reanimated";
+import { fonts } from "../../theme/runtimeTokens";
+import robotaxiPrototypeTokens from "../design-system/robotaxiPrototypeTokens";
 
 const { color, typography, motion } = robotaxiPrototypeTokens;
 const cardEnterEasing = Easing.bezier(...motion.bezier.snappy);
@@ -25,29 +32,98 @@ export function PrototypeCard({ style, children, ...viewProps }) {
 export function DestinationInput({
   value,
   onChangeText,
-  placeholder = 'Para onde?',
+  placeholder = "Para onde?",
   onPress,
   editable = true,
-  rightIcon = 'mic'
+  autoFocus = false,
+  inputRef,
+  onFocus,
+  onBlur,
+  rightIcon = "mic",
+  onPressRightIcon,
+  rightIconDisabled = false,
+  rightIconLoading = false,
+  testID,
+  accessibilityLabel,
+  rightIconTestID,
+  rightIconAccessibilityLabel,
 }) {
+  const handlePress = React.useCallback(() => {
+    if (__DEV__) {
+      console.log("[DestinationInput] press", {
+        testID,
+        accessibilityLabel,
+        value,
+        placeholder,
+      });
+    }
+    onPress?.();
+  }, [accessibilityLabel, onPress, placeholder, testID, value]);
+
+  const trailingIcon = (
+    <View
+      style={[
+        styles.trailingButton,
+        rightIconDisabled && styles.trailingButtonDisabled,
+      ]}
+    >
+      {rightIconLoading ? (
+        <ActivityIndicator size="small" color={color.accent.contrast} />
+      ) : (
+        <Ionicons name={rightIcon} size={18} color={color.accent.contrast} />
+      )}
+    </View>
+  );
+
   const content = (
     <View style={styles.destinationInput}>
       <View style={styles.leadingIconWrap}>
         <Ionicons name="search" size={18} color={color.text.muted} />
       </View>
-      <TextInput
-        value={value}
-        onChangeText={onChangeText}
-        placeholder={placeholder}
-        placeholderTextColor={color.text.muted}
-        style={styles.destinationField}
-        editable={editable}
-        pointerEvents={editable ? 'auto' : 'none'}
-      />
+      {onPress ? (
+        <View style={styles.destinationFieldStaticWrap} pointerEvents="none">
+          <Text
+            style={[
+              styles.destinationFieldText,
+              !value && styles.destinationPlaceholderText,
+            ]}
+            numberOfLines={1}
+          >
+            {value || placeholder}
+          </Text>
+        </View>
+      ) : (
+        <TextInput
+          ref={inputRef}
+          value={value}
+          onChangeText={onChangeText}
+          placeholder={placeholder}
+          placeholderTextColor={color.text.muted}
+          style={styles.destinationField}
+          editable={editable}
+          autoFocus={autoFocus}
+          onFocus={onFocus}
+          onBlur={onBlur}
+          pointerEvents={editable ? "auto" : "none"}
+          testID={!onPress ? testID : undefined}
+          accessibilityLabel={!onPress ? accessibilityLabel : undefined}
+        />
+      )}
 
-      <View style={styles.trailingButton}>
-        <Ionicons name={rightIcon} size={18} color={color.accent.contrast} />
-      </View>
+      {typeof onPressRightIcon === "function" ? (
+        <TouchableOpacity
+          activeOpacity={0.86}
+          onPress={onPressRightIcon}
+          disabled={rightIconDisabled}
+          style={styles.trailingButtonTouchArea}
+          testID={rightIconTestID}
+          accessibilityLabel={rightIconAccessibilityLabel}
+        >
+          {trailingIcon}
+        </TouchableOpacity>
+      ) : (
+        trailingIcon
+      )}
     </View>
   );
 
@@ -56,16 +132,49 @@ export function DestinationInput({
   }
 
   return (
-    <TouchableOpacity onPress={onPress} activeOpacity={0.9}>
+    <TouchableOpacity
+      onPress={handlePress}
+      activeOpacity={0.9}
+      accessible
+      accessibilityRole="button"
+      testID={testID}
+      accessibilityLabel={accessibilityLabel}
+    >
       {content}
     </TouchableOpacity>
   );
 }
 
-export function PrototypePrimaryButton({ label, onPress, icon, style }) {
+export function PrototypePrimaryButton({
+  label,
+  onPress,
+  icon,
+  style,
+  disabled = false,
+  testID,
+  accessibilityLabel,
+}) {
   return (
-    <TouchableOpacity style={[styles.primaryButton, style]} activeOpacity={0.86} onPress={onPress}>
-      {icon ? <Ionicons name={icon} size={16} color={color.accent.contrast} /> : null}
+    <TouchableOpacity
+      style={[
+        styles.primaryButton,
+        disabled && styles.primaryButtonDisabled,
+        style,
+      ]}
+      activeOpacity={disabled ? 1 : 0.86}
+      onPress={disabled ? undefined : onPress}
+      disabled={disabled}
+      accessible
+      accessibilityRole="button"
+      accessibilityState={{ disabled }}
+      focusable
+      hitSlop={{ top: 6, right: 6, bottom: 6, left: 6 }}
+      testID={testID}
+      accessibilityLabel={accessibilityLabel}
+    >
+      {icon ? (
+        <Ionicons name={icon} size={16} color={color.accent.contrast} />
+      ) : null}
       <Text style={styles.primaryButtonText}>{label}</Text>
     </TouchableOpacity>
   );
@@ -85,15 +194,15 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 18 },
     shadowOpacity: 0.22,
     shadowRadius: 30,
-    elevation: 15
+    elevation: 15,
   },
   handle: {
     width: 46,
     height: 5,
     borderRadius: 999,
-    backgroundColor: 'rgba(142,154,169,0.64)',
-    alignSelf: 'center',
-    marginBottom: 10
+    backgroundColor: "rgba(142,154,169,0.64)",
+    alignSelf: "center",
+    marginBottom: 10,
   },
   destinationInput: {
     minHeight: 58,
@@ -101,15 +210,15 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: color.border.subtle,
     backgroundColor: color.surface.primary,
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 10
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 10,
   },
   leadingIconWrap: {
     width: 26,
     height: 26,
-    alignItems: 'center',
-    justifyContent: 'center'
+    alignItems: "center",
+    justifyContent: "center",
   },
   destinationField: {
     flex: 1,
@@ -120,41 +229,66 @@ const styles = StyleSheet.create({
     fontFamily: fonts.Medium,
     fontSize: typography.body.size,
     lineHeight: typography.body.lineHeight,
-    textAlignVertical: 'center',
+    textAlignVertical: "center",
     includeFontPadding: false,
     paddingVertical: 0,
     paddingTop: 0,
-    paddingBottom: 0
+    paddingBottom: 0,
+  },
+  destinationFieldStaticWrap: {
+    flex: 1,
+    marginLeft: 10,
+    marginRight: 10,
+    minHeight: 24,
+    justifyContent: "center",
+  },
+  destinationFieldText: {
+    color: color.text.primary,
+    fontFamily: fonts.Medium,
+    fontSize: typography.body.size,
+    lineHeight: typography.body.lineHeight,
+  },
+  destinationPlaceholderText: {
+    color: color.text.muted,
   },
   trailingButton: {
     width: 46,
     height: 46,
     borderRadius: 23,
-    alignItems: 'center',
-    justifyContent: 'center',
+    alignItems: "center",
+    justifyContent: "center",
     backgroundColor: color.accent.primary,
     shadowColor: color.shadow.accent,
     shadowOffset: { width: 0, height: 8 },
     shadowOpacity: 0.24,
     shadowRadius: 14,
-    elevation: 7
+    elevation: 7,
+  },
+  trailingButtonTouchArea: {
+    borderRadius: 24,
+  },
+  trailingButtonDisabled: {
+    opacity: 0.68,
   },
   primaryButton: {
     minHeight: 50,
     borderRadius: 16,
     backgroundColor: color.accent.primary,
-    alignItems: 'center',
-    justifyContent: 'center',
-    flexDirection: 'row',
+    alignItems: "center",
+    justifyContent: "center",
+    flexDirection: "row",
     gap: 8,
     paddingHorizontal: 18,
     borderWidth: 1,
-    borderColor: color.border.strong
+    borderColor: color.border.strong,
+  },
+  primaryButtonDisabled: {
+    opacity: 0.56,
   },
   primaryButtonText: {
     color: color.accent.contrast,
     fontFamily: fonts.SemiBold,
     fontSize: typography.body.size,
-    lineHeight: typography.body.lineHeight
-  }
+    lineHeight: typography.body.lineHeight,
+  },
 });

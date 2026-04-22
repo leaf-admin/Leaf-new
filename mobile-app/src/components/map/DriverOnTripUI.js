@@ -10,7 +10,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useTranslation } from 'react-i18next';
-import { useTheme } from '../../common-local/theme';
+import { useTheme } from '../../theme/runtimeTokens';
 import Typography from '../design-system/Typography';
 import AnimatedButton from '../design-system/AnimatedButton';
 
@@ -66,7 +66,11 @@ export default function DriverOnTripUI({ booking, onFinishTrip }) {
       <View style={styles.header}>
         <View style={styles.passengerInfo}>
           <Image
-            source={booking?.customer_image ? { uri: booking.customer_image } : require('../../assets/images/default-avatar.png')}
+            source={
+              booking?.customer_image
+                ? { uri: booking.customer_image }
+                : require("../../../assets/images/profilePic.png")
+            }
             style={styles.passengerAvatar}
           />
           <View style={styles.passengerDetails}>

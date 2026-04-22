@@ -2,6 +2,7 @@ import Logger from '../utils/Logger';
 import * as Location from 'expo-location';
 import { Platform, Alert, Linking, AppState } from 'react-native';
 import * as TaskManager from 'expo-task-manager';
+import * as Device from 'expo-device';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 // Nome da task de background
@@ -208,6 +209,11 @@ class BackgroundLocationService {
                 return;
             }
 
+            if (Device.isDevice === false) {
+                this.isTracking = false;
+                return;
+            }
+
             const isRunning = await Location.hasStartedLocationUpdatesAsync(LOCATION_TASK_NAME);
             if (isRunning) {
                 await Location.stopLocationUpdatesAsync(LOCATION_TASK_NAME);
@@ -216,6 +222,10 @@ class BackgroundLocationService {
             this.isTracking = false;
             Logger.log('✅ Tracking de background parado');
         } catch (error) {
+            this.isTracking = false;
+            if (Device.isDevice === false) {
+                return;
+            }
             Logger.error('❌ Erro ao parar tracking de background:', error);
         }
     }

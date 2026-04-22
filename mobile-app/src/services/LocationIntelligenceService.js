@@ -5,22 +5,12 @@ import Logger from '../utils/Logger';
  */
 
 import { Alert } from 'react-native';
+import BACKEND_BASE_URL from '../config/backendBaseUrl';
 
 
 class LocationIntelligenceService {
   constructor() {
-    const baseUrl = String(
-      process.env.EXPO_PUBLIC_API_URL ||
-      process.env.EXPO_PUBLIC_BACKEND_URL ||
-      'https://api.147.182.204.181.sslip.io'
-    )
-      .trim()
-      .replace(/\/+$/, '')
-      .replace(/\/api$/i, '');
-
-    // URLs dos serviços
-    this.vultrUrl = baseUrl;
-    this.hostingerUrl = 'https://seu-dominio-hostinger.com'; // TODO: Configurar
+    this.backendUrl = BACKEND_BASE_URL;
     
     // Timeout mais agressivo para não atrasar o Google Places
     this.timeout = 2000; // 2 segundos máximo
@@ -35,26 +25,15 @@ class LocationIntelligenceService {
     try {
       Logger.log(`🔍 Resolvendo localização: "${query}" (${context})`);
 
-      // 1. Tentar Vultr primeiro (mais rápido)
+      // 1. Tentar backend principal (mais rápido)
       try {
-        const vultrResult = await this.resolveFromVultr(query, coordinates, context);
-        if (vultrResult) {
-          Logger.log('✅ Resolvido via Vultr');
-          return vultrResult;
+        const backendResult = await this.resolveFromBackend(query, coordinates, context);
+        if (backendResult) {
+          Logger.log('✅ Resolvido via backend principal');
+          return backendResult;
         }
       } catch (error) {
-        Logger.warn('⚠️ Vultr falhou, tentando Hostinger:', error.message);
-      }
-
-      // 2. Tentar Hostinger como fallback
-      try {
-        const hostingerResult = await this.resolveFromHostinger(query, coordinates, context);
-        if (hostingerResult) {
-          Logger.log('✅ Resolvido via Hostinger');
-          return hostingerResult;
-        }
-      } catch (error) {
-        Logger.warn('⚠️ Hostinger falhou:', error.message);
+        Logger.warn('⚠️ Backend principal falhou:', error.message);
       }
 
       Logger.log('❌ Localização não encontrada em nenhuma fonte');
@@ -67,9 +46,9 @@ class LocationIntelligenceService {
   }
 
   /**
-   * Resolve localização via Vultr
+   * Resolve localização via backend principal
    */
-  async resolveFromVultr(query, coordinates, context) {
+  async resolveFromBackend(query, coordinates, context) {
     try {
       const params = new URLSearchParams();
       
@@ -78,7 +57,7 @@ class LocationIntelligenceService {
       if (coordinates?.lng) params.append('lng', coordinates.lng);
       if (context) params.append('context', context);
 
-      const response = await fetch(`${this.vultrUrl}/api/location/resolve?${params}`, {
+      const response = await fetch(`${this.backendUrl}/api/location/resolve?${params}`, {
         method: 'GET',
         headers: {
           'Content-Type': 'application/json',
@@ -98,22 +77,7 @@ class LocationIntelligenceService {
       
       return null;
     } catch (error) {
-      Logger.error('❌ Erro ao resolver via Vultr:', error);
-      throw error;
-    }
-  }
-
-  /**
-   * Resolve localização via Hostinger (fallback)
-   */
-  async resolveFromHostinger(query, coordinates, context) {
-    try {
-      // TODO: Implementar integração com Hostinger
-      // Por enquanto, retorna null para forçar Google Places
-      Logger.log('🔄 Hostinger não implementado ainda');
-      return null;
-    } catch (error) {
-      Logger.error('❌ Erro ao resolver via Hostinger:', error);
+      Logger.error('❌ Erro ao resolver via backend principal:', error);
       throw error;
     }
   }
@@ -129,21 +93,21 @@ class LocationIntelligenceService {
 
       Logger.log(`🔍 Buscando sugestões para: "${query}"`);
 
-      // 1. Tentar Vultr primeiro (com timeout agressivo de 2s)
+      // 1. Tentar backend principal primeiro (com timeout agressivo de 2s)
       try {
-        Logger.log('🚀 Tentando Vultr (timeout: 2s)...');
-        const vultrSuggestions = await this.getSuggestionsFromVultr(query, context);
-        if (vultrSuggestions && vultrSuggestions.length > 0) {
-          Logger.log('✅ Sugestões obtidas via Vultr:', vultrSuggestions.length);
-          return vultrSuggestions;
+        Logger.log('🚀 Tentando backend principal (timeout: 2s)...');
+        const backendSuggestions = await this.getSuggestionsFromBackend(query, context);
+        if (backendSuggestions && backendSuggestions.length > 0) {
+          Logger.log('✅ Sugestões obtidas via backend principal:', backendSuggestions.length);
+          return backendSuggestions;
         }
-        Logger.log('⚠️ Vultr retornou vazio');
+        Logger.log('⚠️ Backend principal retornou vazio');
       } catch (error) {
-        Logger.warn('⚠️ Vultr falhou para sugestões:', error.message);
+        Logger.warn('⚠️ Backend principal falhou para sugestões:', error.message);
       }
 
-      // 2. Fallback imediato para Google Places (sem esperar Hostinger)
-      Logger.log('🔄 Vultr falhou, retornando vazio para forçar Google Places');
+      // 2. Fallback imediato para Google Places
+      Logger.log('🔄 Backend principal falhou, retornando vazio para forçar Google Places');
       return [];
 
     } catch (error) {
@@ -153,17 +117,17 @@ class LocationIntelligenceService {
   }
 
   /**
-   * Busca sugestões via Vultr
+   * Busca sugestões via backend principal
    */
-  async getSuggestionsFromVultr(query, context) {
+  async getSuggestionsFromBackend(query, context) {
     try {
       const params = new URLSearchParams({
         query: query,
         context: context || 'passenger'
       });
 
-      const url = `${this.vultrUrl}/api/location/suggestions?${params}`;
-      Logger.log('🌐 Chamando API Vultr:', url);
+      const url = `${this.backendUrl}/api/location/suggestions?${params}`;
+      Logger.log('🌐 Chamando API de localização:', url);
 
       // Criar AbortController para timeout mais agressivo
       const controller = new AbortController();
@@ -197,24 +161,10 @@ class LocationIntelligenceService {
       return [];
     } catch (error) {
       if (error.name === 'AbortError') {
-        Logger.warn('⏰ Timeout ao buscar sugestões via Vultr (2s)');
+        Logger.warn('⏰ Timeout ao buscar sugestões via backend principal (2s)');
       } else {
-        Logger.error('❌ Erro ao buscar sugestões via Vultr:', error);
+        Logger.error('❌ Erro ao buscar sugestões via backend principal:', error);
       }
-      throw error;
-    }
-  }
-
-  /**
-   * Busca sugestões via Hostinger
-   */
-  async getSuggestionsFromHostinger(query, context) {
-    try {
-      // TODO: Implementar integração com Hostinger
-      Logger.log('🔄 Hostinger não implementado ainda');
-      return [];
-    } catch (error) {
-      Logger.error('❌ Erro ao buscar sugestões via Hostinger:', error);
       throw error;
     }
   }
@@ -224,7 +174,7 @@ class LocationIntelligenceService {
    */
   async getStats() {
     try {
-      const response = await fetch(`${this.vultrUrl}/api/location/stats`, {
+      const response = await fetch(`${this.backendUrl}/api/location/stats`, {
         method: 'GET',
         headers: {
           'Content-Type': 'application/json',
@@ -254,7 +204,7 @@ class LocationIntelligenceService {
    */
   async clearCache() {
     try {
-      const response = await fetch(`${this.vultrUrl}/api/location/cache/clear`, {
+      const response = await fetch(`${this.backendUrl}/api/location/cache/clear`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -285,30 +235,20 @@ class LocationIntelligenceService {
    */
   async testConnectivity() {
     const results = {
-      vultr: false,
-      hostinger: false,
+      backend: false,
       timestamp: new Date().toISOString()
     };
 
-    // Testar Vultr
+    // Testar backend principal
     try {
-      const response = await fetch(`${this.vultrUrl}/health`, {
+      const response = await fetch(`${this.backendUrl}/health`, {
         method: 'GET',
         timeout: 5000,
       });
-      results.vultr = response.ok;
-      Logger.log('✅ Vultr conectado:', response.ok);
+      results.backend = response.ok;
+      Logger.log('✅ Backend principal conectado:', response.ok);
     } catch (error) {
-      Logger.log('❌ Vultr não conectado:', error.message);
-    }
-
-    // Testar Hostinger
-    try {
-      // TODO: Implementar teste de conectividade com Hostinger
-      results.hostinger = false;
-      Logger.log('⚠️ Hostinger não testado ainda');
-    } catch (error) {
-      Logger.log('❌ Hostinger não conectado:', error.message);
+      Logger.log('❌ Backend principal não conectado:', error.message);
     }
 
     return results;
@@ -319,15 +259,10 @@ class LocationIntelligenceService {
    */
   getConnectivityInfo() {
     return {
-      vultr: {
-        url: this.vultrUrl,
+      backend: {
+        url: this.backendUrl,
         status: 'active',
-        description: 'Servidor principal (Vultr)'
-      },
-      hostinger: {
-        url: this.hostingerUrl,
-        status: 'pending',
-        description: 'Servidor de fallback (Hostinger)'
+        description: 'Servidor principal'
       }
     };
   }
@@ -339,7 +274,7 @@ class LocationIntelligenceService {
     try {
       Logger.log('🔍 Buscando sugestões no Redis:', query);
       
-      const response = await fetch(`${this.vultrUrl}/api/location/suggestions/redis?query=${encodeURIComponent(query)}`, {
+      const response = await fetch(`${this.backendUrl}/api/location/suggestions/redis?query=${encodeURIComponent(query)}`, {
         method: 'GET',
         headers: {
           'Content-Type': 'application/json',
@@ -372,7 +307,7 @@ class LocationIntelligenceService {
     try {
       Logger.log('🔍 Buscando sugestões no Firebase:', query);
       
-      const response = await fetch(`${this.vultrUrl}/api/location/suggestions/firebase?query=${encodeURIComponent(query)}`, {
+      const response = await fetch(`${this.backendUrl}/api/location/suggestions/firebase?query=${encodeURIComponent(query)}`, {
         method: 'GET',
         headers: {
           'Content-Type': 'application/json',
@@ -405,7 +340,7 @@ class LocationIntelligenceService {
     try {
       Logger.log('💾 Salvando sugestões no cache:', query, suggestions.length);
       
-      const response = await fetch(`${this.vultrUrl}/api/location/cache/save`, {
+      const response = await fetch(`${this.backendUrl}/api/location/cache/save`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

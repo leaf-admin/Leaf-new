@@ -2,11 +2,14 @@ import Logger from '../utils/Logger';
 import React, { useEffect, useState } from 'react';
 import { NavigationContainer } from '@react-navigation/native';
 import { TransitionPresets, createStackNavigator } from '@react-navigation/stack';
+import Constants from 'expo-constants';
 
-import { useSelector, useDispatch } from 'react-redux';
+import { useSelector } from 'react-redux';
 
 import { Platform, View, Text, ActivityIndicator } from 'react-native';
 import featureFlagService from '../services/FeatureFlagService';
+import { isE2ETestBuild } from '../config/runtimeAccessPolicy';
+import { getPilotLaunchFeatureSnapshot } from '../config/pilotLaunchProfile';
 
 // Telas de Autenticação
 import LoginScreen from '../screens/LoginScreen';
@@ -36,6 +39,7 @@ import HelpScreen from '../screens/HelpScreen';
 import AboutScreen from '../screens/AboutScreen';
 import LegalScreen from '../screens/LegalScreen';
 import PrivacyPolicyScreen from '../screens/PrivacyPolicyScreen';
+import PilotFeatureUnavailableScreen from '../screens/PilotFeatureUnavailableScreen';
 
 // Telas de Motorista
 import DriverDashboardScreen from '../screens/DriverDashboardScreen';
@@ -52,7 +56,6 @@ import SubscriptionManagementScreen from '../screens/SubscriptionManagementScree
 // Telas de Pagamento
 import PaymentSuccessScreen from '../screens/PaymentSuccessScreen';
 import PaymentFailedScreen from '../screens/PaymentFailedScreen';
-import SelectGatewayScreen from '../screens/SelectGatewayScreen';
 import PaymentDetails from '../screens/PaymentDetails';
 import AddPaymentMethod from '../screens/AddPaymentMethod';
 import AddMoney from '../screens/AddMoney';
@@ -85,12 +88,7 @@ import AuthLoadingScreen from '../screens/AuthLoadingScreen';
 import FreeTrialScreen from '../screens/FreeTrialScreen';
 import PlanSelectionScreen from '../screens/PlanSelectionScreen';
 import ReferralScreen from '../screens/ReferralScreen';
-import BaaSAccountScreen from '../screens/BaaSAccountScreen';
 
-// Telas de Teste
-import ProfileToggleTestScreen from '../screens/ProfileToggleTestScreen';
-import ToggleTestScreen from '../screens/ToggleTestScreen';
-import RideFlowTestScreen from '../screens/RideFlowTestScreen';
 import RobotaxiPrototypeScreen from '../screens/RobotaxiPrototypeScreen';
 import RobotaxiDestinationScreen from '../screens/prototype/RobotaxiDestinationScreen';
 import RobotaxiBookingScreen from '../screens/prototype/RobotaxiBookingScreen';
@@ -99,7 +97,7 @@ import RobotaxiTripScreen from '../screens/prototype/RobotaxiTripScreen';
 import RobotaxiProfileScreen from '../screens/prototype/RobotaxiProfileScreen';
 import RobotaxiSettingsScreen from '../screens/prototype/RobotaxiSettingsScreen';
 import RobotaxiMenuScreen from '../screens/prototype/RobotaxiMenuScreen';
-import RobotaxiMenuDetailScreen from '../screens/prototype/RobotaxiMenuDetailScreen';
+import RobotaxiTripHistoryScreen from '../screens/prototype/RobotaxiTripHistoryScreen';
 import RobotaxiPaymentScreen from '../screens/prototype/RobotaxiPaymentScreen';
 import RobotaxiPaymentSuccessScreen from '../screens/prototype/RobotaxiPaymentSuccessScreen';
 import RobotaxiPaymentFailedScreen from '../screens/prototype/RobotaxiPaymentFailedScreen';
@@ -110,7 +108,6 @@ import RobotaxiReceiptScreen from '../screens/prototype/RobotaxiReceiptScreen';
 import RobotaxiCancellationScreen from '../screens/prototype/RobotaxiCancellationScreen';
 import RobotaxiRatingScreen from '../screens/prototype/RobotaxiRatingScreen';
 import RobotaxiComplainScreen from '../screens/prototype/RobotaxiComplainScreen';
-import RobotaxiDriverPanelScreen from '../screens/prototype/RobotaxiDriverPanelScreen';
 import RobotaxiDriverOfferScreen from '../screens/prototype/RobotaxiDriverOfferScreen';
 import RobotaxiDriverTripScreen from '../screens/prototype/RobotaxiDriverTripScreen';
 import RobotaxiDriverActivationScreen from '../screens/prototype/RobotaxiDriverActivationScreen';
@@ -123,12 +120,12 @@ const Stack = createStackNavigator();
 const verticalScreenOptions = {
   headerShown: false,
   animationEnabled: true,
-  ...(Platform.OS === 'ios' ? TransitionPresets.ModalPresentationIOS : TransitionPresets.DefaultTransition)
+  ...(Platform.OS === 'ios' ? TransitionPresets.DefaultTransition : TransitionPresets.DefaultTransition)
 };
 
 const prototypeOverlayScreenOptions = {
   headerShown: false,
-  presentation: 'transparentModal',
+  presentation: 'card',
   animationEnabled: false,
   gestureEnabled: false,
   cardOverlayEnabled: false,
@@ -136,19 +133,530 @@ const prototypeOverlayScreenOptions = {
   detachPreviousScreen: false
 };
 
-// Navegação direta sem menu inferior
+const prototypeTransparentOverlayScreenOptions = {
+  ...prototypeOverlayScreenOptions,
+  presentation: 'transparentModal'
+};
+
+const prototypeInteractiveOverlayScreenOptions = {
+  ...prototypeTransparentOverlayScreenOptions,
+  detachPreviousScreen: true
+};
+
+const pilotLaunchFeatures = getPilotLaunchFeatureSnapshot();
+const referralEntryComponent = pilotLaunchFeatures.referralProgramsEnabled ? ReferralScreen : PilotFeatureUnavailableScreen;
+const withdrawalEntryComponent = pilotLaunchFeatures.driverWithdrawalsEnabled ? WithdrawMoney : PilotFeatureUnavailableScreen;
+const driverPayoutEntryComponent = pilotLaunchFeatures.driverWithdrawalsEnabled ? WooviDriverBalanceScreen : PilotFeatureUnavailableScreen;
+
+const referralScreenParams = {
+  title: 'Convites fora do piloto',
+  message: 'Convites e campanhas de growth ficam desativados durante o piloto controlado.',
+  targetRoute: 'Map'
+};
+
+const withdrawalScreenParams = {
+  title: 'Saque operado manualmente',
+  message: 'Saque e repasse do motorista ficam fora do app nesta fase e serao tratados pela operacao assistida.',
+  targetRoute: 'Map'
+};
+
+const driverPayoutScreenParams = {
+  title: 'Repasse fora do piloto',
+  message: 'Conta Woovi e repasses avancados ficam bloqueados no app durante o piloto controlado.',
+  targetRoute: 'Map'
+};
+
+const appLinking = {
+  prefixes: ['leafapp://', 'br.com.leaf.ride://'],
+  config: {
+    screens: {
+      RobotaxiPrototype: {
+        path: 'robotaxi/home',
+        parse: {
+          automation: String,
+          e2e: String,
+          qaAutomation: String,
+          qaDriverAction: String,
+          qaBookingId: String,
+          qaPassengerAction: String,
+          qaNonce: String,
+          qaConnectionScenario: String,
+          qaTriggerState: String,
+          qaRecoveryMs: String,
+          qaDelayMs: String,
+        },
+      },
+      RobotaxiPrototypeDestination: 'robotaxi/destination',
+      RobotaxiPrototypeBooking: 'robotaxi/booking',
+      RobotaxiPrototypeDriverSearch: 'robotaxi/driver/search',
+      RobotaxiPrototypeTrip: 'robotaxi/trip',
+      RobotaxiPrototypePayment: 'robotaxi/payment',
+      RobotaxiPrototypePaymentSuccess: 'robotaxi/payment/success',
+      RobotaxiPrototypePaymentFailed: 'robotaxi/payment/failed',
+      RobotaxiPrototypeNoDrivers: 'robotaxi/no-drivers',
+      RobotaxiPrototypeChat: 'robotaxi/chat',
+      RobotaxiPrototypeSupport: 'robotaxi/support',
+      RobotaxiPrototypeReceipt: 'robotaxi/receipt',
+      RobotaxiPrototypeCancellation: 'robotaxi/cancellation',
+      RobotaxiPrototypeRating: 'robotaxi/rating',
+      RobotaxiPrototypeComplain: 'robotaxi/complain',
+      RobotaxiPrototypeDriverPanel: 'robotaxi/driver/panel',
+      RobotaxiPrototypeDriverActivation: 'robotaxi/driver/activation',
+      RobotaxiPrototypeDriverOffer: 'robotaxi/driver/offer',
+      RobotaxiPrototypeDriverTrip: 'robotaxi/driver/trip',
+      RobotaxiPrototypeProfile: 'robotaxi/profile',
+      RobotaxiPrototypeSettings: 'robotaxi/settings',
+      RobotaxiPrototypeMenu: 'robotaxi/menu',
+      RobotaxiMenuEditProfile: 'robotaxi/menu/profile',
+      RobotaxiMenuTripHistory: 'robotaxi/menu/history',
+      RobotaxiMenuMessages: 'robotaxi/menu/messages',
+      RobotaxiMenuHelp: 'robotaxi/menu/help',
+      RobotaxiMenuSettings: 'robotaxi/menu/settings',
+      EarningsReport: 'driver/earnings'
+    }
+  }
+};
+
+function normalizeNavigatorRole(rawRole) {
+  const normalized = String(rawRole || '')
+    .trim()
+    .toLowerCase();
+  if (!normalized) {
+    return null;
+  }
+
+  if (['passenger', 'customer', 'rider', 'cliente'].includes(normalized)) {
+    return 'customer';
+  }
+
+  if (['driver', 'motorista', 'partner', 'parceiro'].includes(normalized)) {
+    return 'driver';
+  }
+
+  return null;
+}
+
+function renderPublicScreens() {
+  return (
+    <>
+      <Stack.Screen
+        name="Splash"
+        component={SplashScreen}
+        options={{ headerShown: false }}
+      />
+      <Stack.Screen name="AuthLoading" component={AuthLoadingScreen} options={{ headerShown: false }} />
+      <Stack.Screen name="LoginScreen" component={LoginScreen} options={{ headerShown: false }} />
+      <Stack.Screen name="Registration" component={Registration} options={{ headerShown: false }} />
+      <Stack.Screen name="WelcomeScreen" component={WelcomeScreen} options={{ headerShown: false }} />
+      <Stack.Screen name="ProfileSelectionScreen" component={ProfileSelectionScreen} options={{ headerShown: false }} />
+      <Stack.Screen name="CompleteRegistration" component={CompleteRegistrationScreen} options={{ headerShown: false }} />
+      <Stack.Screen name="DriverTerms" component={DriverTermsScreen} options={{ headerShown: false }} />
+      <Stack.Screen name="CNHUploadScreen" component={CNHUploadScreen} options={{ headerShown: false }} />
+      <Stack.Screen name="CRLVUploadScreen" component={CRLVUploadScreen} options={{ headerShown: false }} />
+      <Stack.Screen name="CNHUpload" component={CNHUploadScreen} options={{ headerShown: false }} />
+      <Stack.Screen name="CRLVUpload" component={CRLVUploadScreen} options={{ headerShown: false }} />
+      <Stack.Screen name="OTP" component={OTPScreen} options={{ headerShown: false }} />
+      <Stack.Screen name="PhoneInputScreen" component={PhoneInputScreen} options={{ headerShown: false }} />
+      <Stack.Screen name="PhoneScreen" component={PhoneInputScreen} options={{ headerShown: false }} />
+      <Stack.Screen name="Login" component={PhoneInputScreen} options={{ headerShown: false }} />
+      <Stack.Screen name="AuthScreen" component={PhoneInputScreen} options={{ headerShown: false }} />
+      <Stack.Screen name="ProfileSelection" component={ProfileSelectionScreen} options={{ headerShown: false }} />
+      <Stack.Screen name="FreeTrial" component={FreeTrialScreen} options={{ headerShown: false }} />
+      <Stack.Screen name="PlanSelection" component={PlanSelectionScreen} options={{ headerShown: false }} />
+      <Stack.Screen
+        name="Referral"
+        component={referralEntryComponent}
+        initialParams={referralScreenParams}
+        options={{ headerShown: false }}
+      />
+      <Stack.Screen
+        name="ReferralScreen"
+        component={referralEntryComponent}
+        initialParams={referralScreenParams}
+        options={{ headerShown: false }}
+      />
+      <Stack.Screen
+        name="BaaSAccount"
+        component={driverPayoutEntryComponent}
+        initialParams={driverPayoutScreenParams}
+        options={{ headerShown: false }}
+      />
+      <Stack.Screen
+        name="BaaSAccountScreen"
+        component={driverPayoutEntryComponent}
+        initialParams={driverPayoutScreenParams}
+        options={{ headerShown: false }}
+      />
+      <Stack.Screen
+        name="Legal"
+        component={LegalScreen}
+        options={{ headerShown: true, title: 'Informações Legais' }}
+      />
+      <Stack.Screen
+        name="PrivacyPolicy"
+        component={PrivacyPolicyScreen}
+        options={{ headerShown: true, title: 'Política de Privacidade' }}
+      />
+    </>
+  );
+}
+
+function renderSharedPrivateScreens() {
+  return (
+    <>
+      <Stack.Screen name="Search" component={SearchScreen} />
+      <Stack.Screen name="Chat" component={ChatScreen} />
+      <Stack.Screen name="Notifications" component={Notifications} />
+      <Stack.Screen name="Settings" component={SettingsScreen} />
+      <Stack.Screen name="Help" component={HelpScreen} />
+      <Stack.Screen name="About" component={AboutScreen} />
+      <Stack.Screen name="Legal" component={LegalScreen} />
+      <Stack.Screen name="PrivacyPolicy" component={PrivacyPolicyScreen} />
+      <Stack.Screen name="Profile" component={ProfileScreen} />
+      <Stack.Screen name="Support" component={SupportScreen} />
+      <Stack.Screen name="SupportTicket" component={SupportTicketScreen} />
+      <Stack.Screen name="SupportChat" component={SupportChatScreen} />
+      <Stack.Screen name="WaitList" component={WaitListScreen} />
+      <Stack.Screen name="EditProfile" component={EditProfile} />
+      <Stack.Screen name="EditProfileScreen" component={EditProfileScreen} />
+      <Stack.Screen name="PersonalData" component={PersonalDataScreen} />
+      <Stack.Screen name="UserInfo" component={UserInfoScreen} />
+      <Stack.Screen name="PaymentDetails" component={PaymentDetails} />
+      <Stack.Screen name="AddPaymentMethod" component={AddPaymentMethod} />
+      <Stack.Screen name="AddMoney" component={AddMoney} />
+      <Stack.Screen
+        name="WithdrawMoney"
+        component={withdrawalEntryComponent}
+        initialParams={withdrawalScreenParams}
+      />
+      <Stack.Screen name="WalletDetails" component={WalletDetails} />
+      <Stack.Screen name="OTP" component={OTPScreen} options={{ headerShown: false }} />
+      <Stack.Screen name="PhoneInputScreen" component={PhoneInputScreen} options={{ headerShown: false }} />
+      <Stack.Screen name="PhoneScreen" component={PhoneInputScreen} options={{ headerShown: false }} />
+      <Stack.Screen name="Login" component={PhoneInputScreen} options={{ headerShown: false }} />
+      <Stack.Screen name="AuthScreen" component={PhoneInputScreen} options={{ headerShown: false }} />
+      <Stack.Screen name="WelcomeScreen" component={WelcomeScreen} options={{ headerShown: false }} />
+      <Stack.Screen name="ProfileSelectionScreen" component={ProfileSelectionScreen} options={{ headerShown: false }} />
+      <Stack.Screen name="ProfileSelection" component={ProfileSelectionScreen} options={{ headerShown: false }} />
+      <Stack.Screen name="CompleteRegistration" component={CompleteRegistrationScreen} options={{ headerShown: false }} />
+      <Stack.Screen name="DriverTerms" component={DriverTermsScreen} options={{ headerShown: false }} />
+      <Stack.Screen name="CNHUploadScreen" component={CNHUploadScreen} options={{ headerShown: false }} />
+      <Stack.Screen name="CRLVUploadScreen" component={CRLVUploadScreen} options={{ headerShown: false }} />
+      <Stack.Screen name="CNHUpload" component={CNHUploadScreen} options={{ headerShown: false }} />
+      <Stack.Screen name="CRLVUpload" component={CRLVUploadScreen} options={{ headerShown: false }} />
+      <Stack.Screen
+        name="Referral"
+        component={referralEntryComponent}
+        initialParams={referralScreenParams}
+        options={{ headerShown: false }}
+      />
+      <Stack.Screen
+        name="ReferralScreen"
+        component={referralEntryComponent}
+        initialParams={referralScreenParams}
+        options={{ headerShown: false }}
+      />
+      <Stack.Screen
+        name="BaaSAccount"
+        component={driverPayoutEntryComponent}
+        initialParams={driverPayoutScreenParams}
+        options={{ headerShown: false }}
+      />
+      <Stack.Screen
+        name="BaaSAccountScreen"
+        component={driverPayoutEntryComponent}
+        initialParams={driverPayoutScreenParams}
+        options={{ headerShown: false }}
+      />
+      <Stack.Screen name="Messages" component={ChatScreen} />
+      <Stack.Screen name="AccountSettings" component={SettingsScreen} />
+      <Stack.Screen name="SettingsScreen" component={SettingsScreen} />
+      <Stack.Screen name="HelpScreen" component={HelpScreen} />
+      <Stack.Screen name="AccountStatement" component={WalletDetails} />
+      <Stack.Screen name="addMoney" component={AddMoney} />
+      <Stack.Screen name="paymentMethod" component={AddPaymentMethod} />
+      <Stack.Screen name="onlineChat" component={SupportChatScreen} />
+    </>
+  );
+}
+
+function renderPrototypeCompanionScreens(activeRole) {
+  return (
+    <>
+      <Stack.Screen name="Legal" component={LegalScreen} />
+      <Stack.Screen name="PrivacyPolicy" component={PrivacyPolicyScreen} />
+      {activeRole === 'driver' ? (
+        <>
+          <Stack.Screen name="EarningsReport" component={EarningsReportScreen} />
+          <Stack.Screen
+            name="WooviDriverBalance"
+            component={driverPayoutEntryComponent}
+            initialParams={driverPayoutScreenParams}
+          />
+        </>
+      ) : null}
+    </>
+  );
+}
+
+function renderCustomerPrivateScreens() {
+  return (
+    <>
+      <Stack.Screen name="Rides" component={RideListScreen} />
+      <Stack.Screen name="RideListScreen" component={RideListScreen} />
+      <Stack.Screen name="BookedCab" component={BookedCabScreen} />
+      <Stack.Screen name="TripTracking" component={TripTrackingScreen} />
+      <Stack.Screen name="RideDetails" component={RideDetails} />
+      <Stack.Screen name="TripDetails" component={RideDetails} />
+      <Stack.Screen name="Receipt" component={ReceiptScreen} />
+      <Stack.Screen name="ReceiptDetails" component={ReceiptScreen} />
+      <Stack.Screen name="Cancellation" component={CancellationScreen} />
+      <Stack.Screen name="CancellationSuccess" component={CancellationScreen} />
+      <Stack.Screen name="Feedback" component={FeedbackScreen} />
+      <Stack.Screen name="Complain" component={Complain} />
+      <Stack.Screen name="PaymentSuccess" component={PaymentSuccessScreen} />
+      <Stack.Screen name="PaymentFailed" component={PaymentFailedScreen} />
+      <Stack.Screen name="PaymentSuccessScreen" component={PaymentSuccessScreen} />
+      <Stack.Screen name="BookingConfirmation" component={BookedCabScreen} />
+      <Stack.Screen name="PixPayment" component={PaymentDetails} />
+      <Stack.Screen name="TransactionHistory" component={RideListScreen} />
+    </>
+  );
+}
+
+function renderDriverPrivateScreens() {
+  return (
+    <>
+      <Stack.Screen name="Dashboard" component={DriverDashboardScreen} />
+      <Stack.Screen
+        name="Trips"
+        component={DriverTrips}
+        options={{ headerShown: true }}
+      />
+      <Stack.Screen name="DriverBalance" component={DriverBalanceScreen} />
+      <Stack.Screen name="DriverRating" component={DriverRating} />
+      <Stack.Screen name="DriverDocuments" component={DriverDocumentsScreen} options={{ gestureEnabled: false, headerShown: false }} />
+      <Stack.Screen name="DriverSearch" component={DriverSearchScreen} />
+      <Stack.Screen name="DriverIncome" component={DriverIncomeScreen} />
+      <Stack.Screen name="WeeklyPayment" component={WeeklyPaymentScreen} />
+      <Stack.Screen
+        name="WooviDriverBalance"
+        component={driverPayoutEntryComponent}
+        initialParams={driverPayoutScreenParams}
+      />
+      <Stack.Screen name="EarningsReport" component={EarningsReportScreen} />
+      <Stack.Screen name="SubscriptionManagement" component={SubscriptionManagementScreen} />
+      <Stack.Screen name="AddVehicle" component={AddVehicleScreen} />
+      <Stack.Screen name="MyVehicles" component={MyVehiclesScreen} />
+      <Stack.Screen name="CarEdit" component={CarEditScreen} />
+      <Stack.Screen name="Cars" component={CarsScreen} />
+      <Stack.Screen name="DriverDashboard" component={DriverDashboardScreen} />
+      <Stack.Screen name="DriverTrips" component={DriverTrips} />
+      <Stack.Screen name="MyEarning" component={EarningsReportScreen} />
+      <Stack.Screen
+        name="UpdateBankInfo"
+        component={driverPayoutEntryComponent}
+        initialParams={driverPayoutScreenParams}
+      />
+      <Stack.Screen name="VehicleRegistration" component={AddVehicleScreen} />
+      <Stack.Screen name="WeeklyPaymentScreen" component={WeeklyPaymentScreen} />
+      <Stack.Screen name="EarningsReportScreen" component={EarningsReportScreen} />
+      <Stack.Screen
+        name="TransferMoney"
+        component={withdrawalEntryComponent}
+        initialParams={withdrawalScreenParams}
+      />
+      <Stack.Screen name="CarEditScreen" component={CarEditScreen} />
+      <Stack.Screen name="MyVehiclesScreen" component={MyVehiclesScreen} />
+    </>
+  );
+}
+
+function renderSharedPrototypeScreens() {
+  return (
+    <>
+      <Stack.Screen
+        name="RobotaxiPrototype"
+        component={RobotaxiPrototypeScreen}
+        options={{ headerShown: false }}
+      />
+      <Stack.Screen
+        name="RobotaxiPrototypeChat"
+        component={RobotaxiChatScreen}
+        options={prototypeTransparentOverlayScreenOptions}
+      />
+      <Stack.Screen
+        name="RobotaxiPrototypeSupport"
+        component={RobotaxiSupportScreen}
+        options={prototypeTransparentOverlayScreenOptions}
+      />
+      <Stack.Screen
+        name="RobotaxiPrototypeReceipt"
+        component={RobotaxiReceiptScreen}
+        options={prototypeTransparentOverlayScreenOptions}
+      />
+      <Stack.Screen
+        name="RobotaxiPrototypeRating"
+        component={RobotaxiRatingScreen}
+        options={prototypeTransparentOverlayScreenOptions}
+      />
+      <Stack.Screen
+        name="RobotaxiPrototypeProfile"
+        component={RobotaxiProfileScreen}
+        options={prototypeOverlayScreenOptions}
+      />
+      <Stack.Screen
+        name="RobotaxiPrototypeSettings"
+        component={RobotaxiSettingsScreen}
+        options={prototypeOverlayScreenOptions}
+      />
+      <Stack.Screen
+        name="RobotaxiPrototypeMenu"
+        component={RobotaxiMenuScreen}
+        options={prototypeOverlayScreenOptions}
+      />
+      <Stack.Screen
+        name="RobotaxiMenuEditProfile"
+        component={RobotaxiProfileScreen}
+        options={prototypeOverlayScreenOptions}
+      />
+      <Stack.Screen
+        name="RobotaxiMenuTripHistory"
+        component={RobotaxiTripHistoryScreen}
+        options={prototypeOverlayScreenOptions}
+      />
+      <Stack.Screen
+        name="RobotaxiMenuMessages"
+        component={RobotaxiChatScreen}
+        options={prototypeOverlayScreenOptions}
+      />
+      <Stack.Screen
+        name="RobotaxiMenuHelp"
+        component={RobotaxiSupportScreen}
+        options={prototypeOverlayScreenOptions}
+      />
+      <Stack.Screen
+        name="RobotaxiMenuSettings"
+        component={RobotaxiSettingsScreen}
+        options={prototypeOverlayScreenOptions}
+      />
+    </>
+  );
+}
+
+function renderCustomerPrototypeScreens() {
+  return (
+    <>
+      <Stack.Screen
+        name="RobotaxiPrototypeDestination"
+        component={RobotaxiDestinationScreen}
+        options={prototypeTransparentOverlayScreenOptions}
+      />
+      <Stack.Screen
+        name="RobotaxiPrototypeBooking"
+        component={RobotaxiBookingScreen}
+        options={prototypeTransparentOverlayScreenOptions}
+      />
+      <Stack.Screen
+        name="RobotaxiPrototypeDriverSearch"
+        component={RobotaxiDriverSearchScreen}
+        options={prototypeTransparentOverlayScreenOptions}
+      />
+      <Stack.Screen
+        name="RobotaxiPrototypeTrip"
+        component={RobotaxiTripScreen}
+        options={prototypeTransparentOverlayScreenOptions}
+      />
+      <Stack.Screen
+        name="RobotaxiPrototypePayment"
+        component={RobotaxiPaymentScreen}
+        options={prototypeTransparentOverlayScreenOptions}
+      />
+      <Stack.Screen
+        name="RobotaxiPrototypePaymentSuccess"
+        component={RobotaxiPaymentSuccessScreen}
+        options={prototypeTransparentOverlayScreenOptions}
+      />
+      <Stack.Screen
+        name="RobotaxiPrototypePaymentFailed"
+        component={RobotaxiPaymentFailedScreen}
+        options={prototypeTransparentOverlayScreenOptions}
+      />
+      <Stack.Screen
+        name="RobotaxiPrototypeNoDrivers"
+        component={RobotaxiNoDriversScreen}
+        options={prototypeTransparentOverlayScreenOptions}
+      />
+      <Stack.Screen
+        name="RobotaxiPrototypeCancellation"
+        component={RobotaxiCancellationScreen}
+        options={prototypeTransparentOverlayScreenOptions}
+      />
+      <Stack.Screen
+        name="RobotaxiPrototypeComplain"
+        component={RobotaxiComplainScreen}
+        options={prototypeTransparentOverlayScreenOptions}
+      />
+    </>
+  );
+}
+
+function renderDriverPrototypeScreens() {
+  return (
+    <>
+      <Stack.Screen
+        name="RobotaxiPrototypeDriverPanel"
+        component={RobotaxiProfileScreen}
+        options={prototypeOverlayScreenOptions}
+      />
+      <Stack.Screen
+        name="RobotaxiPrototypeDriverActivation"
+        component={RobotaxiDriverActivationScreen}
+        options={prototypeTransparentOverlayScreenOptions}
+      />
+      <Stack.Screen
+        name="RobotaxiPrototypeDriverOffer"
+        component={RobotaxiDriverOfferScreen}
+        options={prototypeTransparentOverlayScreenOptions}
+      />
+      <Stack.Screen
+        name="RobotaxiPrototypeDriverTrip"
+        component={RobotaxiDriverTripScreen}
+        options={prototypeTransparentOverlayScreenOptions}
+      />
+    </>
+  );
+}
+
+function renderSharedLegacyAliases(mapComponent) {
+  return (
+    <>
+      {/* Legacy compatibility aliases kept only because older screens still navigate to them. */}
+      <Stack.Screen name="MapScreen" component={mapComponent} />
+      <Stack.Screen name="TabRoot" component={mapComponent} />
+    </>
+  );
+}
 
 // Navegação principal do app
 function MainNavigator() {
   const auth = useSelector(state => state.auth);
-  const profileToggle = useSelector(state => state.profileToggle);
   const [authCompleted, setAuthCompleted] = useState(false);
   const [prototypeUiEnabled, setPrototypeUiEnabled] = useState(true);
-  const [flagsReady, setFlagsReady] = useState(false);
+  const [flagsReady, setFlagsReady] = useState(true);
+  const isReviewEnv = Constants?.expoConfig?.extra?.isReview === true;
+  const forceLegacyMapUi =
+    String(process.env.EXPO_PUBLIC_FORCE_LEGACY_MAP_UI || '').trim().toLowerCase() === 'true';
 
   useEffect(() => {
     // Resetar o estado quando a autenticação for completada
-    if (auth.profile && auth.profile.usertype) {
+    const roleSource =
+      auth?.profile?.usertype ??
+      auth?.profile?.userType ??
+      auth?.profile?.role ??
+      auth?.profile?.user_role ??
+      auth?.profile?.accountType;
+    if (normalizeNavigatorRole(roleSource)) {
       setAuthCompleted(true);
     }
   }, [auth.profile]);
@@ -160,7 +668,7 @@ function MainNavigator() {
     const loadPrototypeFlag = async () => {
       try {
         await featureFlagService.initialize();
-        const enabled = await featureFlagService.getFlag('PROTOTYPE_ROBOTAXI_UI_ENABLED', true);
+        const enabled = await featureFlagService.getFlag('PROTOTYPE_ROBOTAXI_UI_ENABLED', false);
 
         if (isMounted) {
           setPrototypeUiEnabled(Boolean(enabled));
@@ -175,7 +683,7 @@ function MainNavigator() {
       } catch (error) {
         Logger.error('❌ [AppNavigator] Erro ao carregar flag de protótipo:', error);
         if (isMounted) {
-          setPrototypeUiEnabled(true);
+          setPrototypeUiEnabled(false);
           setFlagsReady(true);
         }
       }
@@ -190,6 +698,10 @@ function MainNavigator() {
       }
     };
   }, []);
+
+  const allowPrototypePrivateScreens =
+    !forceLegacyMapUi && (isReviewEnv || isE2ETestBuild() || prototypeUiEnabled);
+  const mapComponent = allowPrototypePrivateScreens ? RobotaxiPrototypeScreen : NewMapScreen;
 
   if (!flagsReady) {
     return (
@@ -211,162 +723,26 @@ function MainNavigator() {
   if (!auth.profile) {
     return (
       <Stack.Navigator
-        key={prototypeUiEnabled ? 'public-prototype' : 'public-legacy'}
-        initialRouteName={'RobotaxiPrototypePayment'}
+        key="public-safe"
+        initialRouteName="Splash"
         screenOptions={verticalScreenOptions}
       >
-        <Stack.Screen
-          name="RobotaxiPrototype"
-          component={RobotaxiPrototypeScreen}
-          options={{ headerShown: false }}
-        />
-        <Stack.Screen
-          name="RobotaxiPrototypeDestination"
-          component={RobotaxiDestinationScreen}
-          options={prototypeOverlayScreenOptions}
-        />
-        <Stack.Screen
-          name="RobotaxiPrototypeBooking"
-          component={RobotaxiBookingScreen}
-          options={prototypeOverlayScreenOptions}
-        />
-        <Stack.Screen
-          name="RobotaxiPrototypeDriverSearch"
-          component={RobotaxiDriverSearchScreen}
-          options={prototypeOverlayScreenOptions}
-        />
-        <Stack.Screen
-          name="RobotaxiPrototypeTrip"
-          component={RobotaxiTripScreen}
-          options={prototypeOverlayScreenOptions}
-        />
-        <Stack.Screen
-          name="RobotaxiPrototypePayment"
-          component={RobotaxiPaymentScreen}
-          options={prototypeOverlayScreenOptions}
-        />
-        <Stack.Screen
-          name="RobotaxiPrototypePaymentSuccess"
-          component={RobotaxiPaymentSuccessScreen}
-          options={prototypeOverlayScreenOptions}
-        />
-        <Stack.Screen
-          name="RobotaxiPrototypePaymentFailed"
-          component={RobotaxiPaymentFailedScreen}
-          options={prototypeOverlayScreenOptions}
-        />
-        <Stack.Screen
-          name="RobotaxiPrototypeNoDrivers"
-          component={RobotaxiNoDriversScreen}
-          options={prototypeOverlayScreenOptions}
-        />
-        <Stack.Screen
-          name="RobotaxiPrototypeChat"
-          component={RobotaxiChatScreen}
-          options={prototypeOverlayScreenOptions}
-        />
-        <Stack.Screen
-          name="RobotaxiPrototypeSupport"
-          component={RobotaxiSupportScreen}
-          options={prototypeOverlayScreenOptions}
-        />
-        <Stack.Screen
-          name="RobotaxiPrototypeReceipt"
-          component={RobotaxiReceiptScreen}
-          options={prototypeOverlayScreenOptions}
-        />
-        <Stack.Screen
-          name="RobotaxiPrototypeCancellation"
-          component={RobotaxiCancellationScreen}
-          options={prototypeOverlayScreenOptions}
-        />
-        <Stack.Screen
-          name="RobotaxiPrototypeRating"
-          component={RobotaxiRatingScreen}
-          options={prototypeOverlayScreenOptions}
-        />
-        <Stack.Screen
-          name="RobotaxiPrototypeComplain"
-          component={RobotaxiComplainScreen}
-          options={prototypeOverlayScreenOptions}
-        />
-        <Stack.Screen
-          name="RobotaxiPrototypeDriverPanel"
-          component={RobotaxiDriverPanelScreen}
-          options={prototypeOverlayScreenOptions}
-        />
-        <Stack.Screen
-          name="RobotaxiPrototypeDriverActivation"
-          component={RobotaxiDriverActivationScreen}
-          options={prototypeOverlayScreenOptions}
-        />
-        <Stack.Screen
-          name="RobotaxiPrototypeDriverOffer"
-          component={RobotaxiDriverOfferScreen}
-          options={prototypeOverlayScreenOptions}
-        />
-        <Stack.Screen
-          name="RobotaxiPrototypeDriverTrip"
-          component={RobotaxiDriverTripScreen}
-          options={prototypeOverlayScreenOptions}
-        />
-        <Stack.Screen
-          name="RobotaxiPrototypeProfile"
-          component={RobotaxiProfileScreen}
-          options={prototypeOverlayScreenOptions}
-        />
-        <Stack.Screen
-          name="RobotaxiPrototypeSettings"
-          component={RobotaxiSettingsScreen}
-          options={prototypeOverlayScreenOptions}
-        />
-        <Stack.Screen
-          name="RobotaxiPrototypeMenu"
-          component={RobotaxiMenuScreen}
-          options={prototypeOverlayScreenOptions}
-        />
-        <Stack.Screen
-          name="RobotaxiMenuEditProfile"
-          component={RobotaxiMenuDetailScreen}
-          options={prototypeOverlayScreenOptions}
-        />
-        <Stack.Screen
-          name="RobotaxiMenuTripHistory"
-          component={RobotaxiMenuDetailScreen}
-          options={prototypeOverlayScreenOptions}
-        />
-        <Stack.Screen
-          name="RobotaxiMenuMessages"
-          component={RobotaxiMenuDetailScreen}
-          options={prototypeOverlayScreenOptions}
-        />
-        <Stack.Screen
-          name="RobotaxiMenuHelp"
-          component={RobotaxiMenuDetailScreen}
-          options={prototypeOverlayScreenOptions}
-        />
-        <Stack.Screen
-          name="Splash"
-          component={SplashScreen}
-          options={{ headerShown: false }}
-        />
-        {/* ✅ Rotas públicas - acessíveis sem login */}
-        <Stack.Screen
-          name="Legal"
-          component={LegalScreen}
-          options={{ headerShown: true, title: 'Informações Legais' }}
-        />
-        <Stack.Screen
-          name="PrivacyPolicy"
-          component={PrivacyPolicyScreen}
-          options={{ headerShown: true, title: 'Política de Privacidade' }}
-        />
+        {renderPublicScreens()}
       </Stack.Navigator>
     );
   }
 
-  // 🔍 VERIFICAR SE USUÁRIO ESTÁ COMPLETO (tem usertype)
-  if (!auth.profile.usertype) {
+  const profileRoleSource =
+    auth.profile.usertype ??
+    auth.profile.userType ??
+    auth.profile.role ??
+    auth.profile.user_role ??
+    auth.profile.accountType ??
+    null;
+  const normalizedProfileRole = normalizeNavigatorRole(profileRoleSource);
+
+  // 🔍 VERIFICAR SE USUÁRIO ESTÁ COMPLETO (tem role válida)
+  if (!normalizedProfileRole) {
     Logger.log('AppNavigator - 🔍 Usuário autenticado mas incompleto, mostrando SplashScreen');
     return (
       <Stack.Navigator screenOptions={verticalScreenOptions}>
@@ -380,299 +756,41 @@ function MainNavigator() {
   }
 
   // Se há usuário autenticado, mostrar navegação principal baseada no tipo
-  const authUserType = auth.profile.usertype;
-
-  // Feature Toggle: Usar o Redux state (passenger -> customer para manter compatibilidade no Navigator)
-  const toggleMode = profileToggle?.currentMode === 'passenger' ? 'customer' : profileToggle?.currentMode;
-
-  // Prioridade de Role: O estado do Toggle é o ativo, senão fallback para o Cadastro Original
-  const activeRole = toggleMode || authUserType;
+  const activeRole = normalizedProfileRole || 'customer';
 
   return (
     <Stack.Navigator
-      key={prototypeUiEnabled ? 'private-prototype' : 'private-legacy'}
-      initialRouteName={prototypeUiEnabled ? 'RobotaxiPrototype' : 'Map'}
+      key={activeRole === 'driver' ? 'private-driver' : 'private-customer'}
+      initialRouteName="Map"
       screenOptions={verticalScreenOptions}
     >
-      {/* Tela principal baseada no tipo de usuário */}
-      {activeRole === 'customer' ? (
-        <Stack.Screen
-          name="Map"
-          component={NewMapScreen}
-          options={{
-            // ✅ Prevenir ajuste quando teclado abre
-            keyboardHandlingEnabled: false
-          }}
-        />
-      ) : activeRole === 'driver' ? (
-        <Stack.Screen
-          name="Map"
-          component={NewMapScreen}
-          options={{
-            keyboardHandlingEnabled: false
-          }}
-        />
-      ) : (
-        // Fallback para usuários sem tipo definido
-        <Stack.Screen
-          name="Map"
-          component={NewMapScreen}
-          options={{
-            keyboardHandlingEnabled: false
-          }}
-        />
-      )}
-
-      {/* Telas compartilhadas */}
-      <Stack.Screen name="Search" component={SearchScreen} />
-      <Stack.Screen name="Chat" component={ChatScreen} />
-      <Stack.Screen name="Notifications" component={Notifications} />
-      <Stack.Screen name="Settings" component={SettingsScreen} />
-      <Stack.Screen name="Help" component={HelpScreen} />
-      <Stack.Screen name="About" component={AboutScreen} />
-      <Stack.Screen name="Legal" component={LegalScreen} />
-      <Stack.Screen name="PrivacyPolicy" component={PrivacyPolicyScreen} />
-
-      {/* Telas do menu inferior (agora acessíveis via menu sanduíche) */}
-      <Stack.Screen name="Rides" component={RideListScreen} />
-      <Stack.Screen name="Profile" component={ProfileScreen} />
-      <Stack.Screen name="Support" component={SupportScreen} />
-      <Stack.Screen name="Dashboard" component={DriverDashboardScreen} />
       <Stack.Screen
-        name="Trips"
-        component={DriverTrips}
-        options={{
-          headerShown: true,
-        }}
+        name="Map"
+        component={mapComponent}
+        options={{ keyboardHandlingEnabled: false }}
       />
 
-      {/* Telas de perfil */}
-      <Stack.Screen name="EditProfile" component={EditProfile} />
-      <Stack.Screen name="EditProfileScreen" component={EditProfileScreen} />
-      <Stack.Screen name="PersonalData" component={PersonalDataScreen} />
-      <Stack.Screen name="UserInfo" component={UserInfoScreen} />
+      {renderSharedLegacyAliases(mapComponent)}
 
-      {/* Telas de veículos */}
-      <Stack.Screen name="AddVehicle" component={AddVehicleScreen} />
-      <Stack.Screen name="MyVehicles" component={MyVehiclesScreen} />
-      <Stack.Screen name="CarEdit" component={CarEditScreen} />
-      <Stack.Screen name="Cars" component={CarsScreen} />
-
-      {/* Telas de viagem */}
-      <Stack.Screen name="BookedCab" component={BookedCabScreen} />
-      <Stack.Screen name="TripTracking" component={TripTrackingScreen} />
-      <Stack.Screen name="RideDetails" component={RideDetails} />
-      <Stack.Screen name="Receipt" component={ReceiptScreen} />
-      <Stack.Screen name="Cancellation" component={CancellationScreen} />
-      <Stack.Screen name="Feedback" component={FeedbackScreen} />
-      <Stack.Screen name="Complain" component={Complain} />
-
-      {/* Telas de pagamento */}
-      <Stack.Screen name="PaymentSuccess" component={PaymentSuccessScreen} />
-      <Stack.Screen name="PaymentFailed" component={PaymentFailedScreen} />
-      <Stack.Screen name="SelectGateway" component={SelectGatewayScreen} />
-      <Stack.Screen name="PaymentDetails" component={PaymentDetails} />
-      <Stack.Screen name="AddPaymentMethod" component={AddPaymentMethod} />
-      <Stack.Screen name="AddMoney" component={AddMoney} />
-      <Stack.Screen name="WithdrawMoney" component={WithdrawMoney} />
-      <Stack.Screen name="WalletDetails" component={WalletDetails} />
-
-      {/* Telas de suporte */}
-      <Stack.Screen name="SupportTicket" component={SupportTicketScreen} />
-      <Stack.Screen name="SupportChat" component={SupportChatScreen} />
-      <Stack.Screen name="WaitList" component={WaitListScreen} />
-      <Stack.Screen name="WooviDriverBalance" component={WooviDriverBalanceScreen} />
-
-      {/* Telas de relatórios e ganhos (disponível para todos) */}
-      <Stack.Screen name="EarningsReport" component={EarningsReportScreen} />
-
-      {/* Telas específicas de motorista */}
-      {activeRole === 'driver' && (
+      {allowPrototypePrivateScreens ? (
         <>
-          <Stack.Screen name="DriverBalance" component={DriverBalanceScreen} />
-          <Stack.Screen name="DriverRating" component={DriverRating} />
-          <Stack.Screen name="DriverSearch" component={DriverSearchScreen} />
-          <Stack.Screen name="DriverIncome" component={DriverIncomeScreen} />
-          <Stack.Screen name="WeeklyPayment" component={WeeklyPaymentScreen} />
-          <Stack.Screen name="SubscriptionManagement" component={SubscriptionManagementScreen} />
+          {renderPrototypeCompanionScreens(activeRole)}
+          {renderSharedPrototypeScreens()}
+          {activeRole === 'driver' ? renderDriverPrototypeScreens() : renderCustomerPrototypeScreens()}
+        </>
+      ) : (
+        <>
+          {renderSharedPrivateScreens()}
+          {activeRole === 'driver' ? renderDriverPrivateScreens() : renderCustomerPrivateScreens()}
         </>
       )}
-
-      {/* Tela de upload de documentos (disponível durante onboarding para drivers) */}
-      <Stack.Screen
-        name="DriverDocuments"
-        component={DriverDocumentsScreen}
-        options={{
-          // Só permite acesso se for driver ou se estiver no contexto de onboarding
-          gestureEnabled: false,
-          headerShown: false
-        }}
-      />
-
-      {/* Telas de onboarding antigas (mantidas para compatibilidade) */}
-      <Stack.Screen name="WelcomeScreen" component={WelcomeScreen} />
-      <Stack.Screen name="ProfileSelectionScreen" component={ProfileSelectionScreen} />
-      <Stack.Screen name="CompleteRegistration" component={CompleteRegistrationScreen} />
-      <Stack.Screen name="DriverTerms" component={DriverTermsScreen} />
-      <Stack.Screen name="CNHUploadScreen" component={CNHUploadScreen} />
-      <Stack.Screen name="CRLVUploadScreen" component={CRLVUploadScreen} />
-      <Stack.Screen name="CNHUpload" component={CNHUploadScreen} />
-      <Stack.Screen name="CRLVUpload" component={CRLVUploadScreen} />
-      <Stack.Screen name="OTP" component={OTPScreen} options={{ headerShown: false }} />
-      <Stack.Screen name="Referral" component={ReferralScreen} />
-      <Stack.Screen name="BaaSAccount" component={BaaSAccountScreen} />
-      <Stack.Screen
-        name="PhoneInputScreen"
-        component={PhoneInputScreen}
-        options={{ headerShown: false }}
-      />
-      <Stack.Screen
-        name="PhoneScreen"
-        component={PhoneInputScreen}
-        options={{ headerShown: false }}
-      />
-
-      {/* Telas de teste */}
-      <Stack.Screen name="ProfileToggleTest" component={ProfileToggleTestScreen} />
-      <Stack.Screen name="ToggleTest" component={ToggleTestScreen} />
-      <Stack.Screen name="RideFlowTest" component={RideFlowTestScreen} />
-      <Stack.Screen
-        name="RobotaxiPrototype"
-        component={RobotaxiPrototypeScreen}
-        options={{ headerShown: false }}
-      />
-      <Stack.Screen
-        name="RobotaxiPrototypeDestination"
-        component={RobotaxiDestinationScreen}
-        options={prototypeOverlayScreenOptions}
-      />
-      <Stack.Screen
-        name="RobotaxiPrototypeBooking"
-        component={RobotaxiBookingScreen}
-        options={prototypeOverlayScreenOptions}
-      />
-      <Stack.Screen
-        name="RobotaxiPrototypeDriverSearch"
-        component={RobotaxiDriverSearchScreen}
-        options={prototypeOverlayScreenOptions}
-      />
-      <Stack.Screen
-        name="RobotaxiPrototypeTrip"
-        component={RobotaxiTripScreen}
-        options={prototypeOverlayScreenOptions}
-      />
-      <Stack.Screen
-        name="RobotaxiPrototypePayment"
-        component={RobotaxiPaymentScreen}
-        options={prototypeOverlayScreenOptions}
-      />
-      <Stack.Screen
-        name="RobotaxiPrototypePaymentSuccess"
-        component={RobotaxiPaymentSuccessScreen}
-        options={prototypeOverlayScreenOptions}
-      />
-      <Stack.Screen
-        name="RobotaxiPrototypePaymentFailed"
-        component={RobotaxiPaymentFailedScreen}
-        options={prototypeOverlayScreenOptions}
-      />
-      <Stack.Screen
-        name="RobotaxiPrototypeNoDrivers"
-        component={RobotaxiNoDriversScreen}
-        options={prototypeOverlayScreenOptions}
-      />
-      <Stack.Screen
-        name="RobotaxiPrototypeChat"
-        component={RobotaxiChatScreen}
-        options={prototypeOverlayScreenOptions}
-      />
-      <Stack.Screen
-        name="RobotaxiPrototypeSupport"
-        component={RobotaxiSupportScreen}
-        options={prototypeOverlayScreenOptions}
-      />
-      <Stack.Screen
-        name="RobotaxiPrototypeReceipt"
-        component={RobotaxiReceiptScreen}
-        options={prototypeOverlayScreenOptions}
-      />
-      <Stack.Screen
-        name="RobotaxiPrototypeCancellation"
-        component={RobotaxiCancellationScreen}
-        options={prototypeOverlayScreenOptions}
-      />
-      <Stack.Screen
-        name="RobotaxiPrototypeRating"
-        component={RobotaxiRatingScreen}
-        options={prototypeOverlayScreenOptions}
-      />
-      <Stack.Screen
-        name="RobotaxiPrototypeComplain"
-        component={RobotaxiComplainScreen}
-        options={prototypeOverlayScreenOptions}
-      />
-      <Stack.Screen
-        name="RobotaxiPrototypeDriverPanel"
-        component={RobotaxiDriverPanelScreen}
-        options={prototypeOverlayScreenOptions}
-      />
-      <Stack.Screen
-        name="RobotaxiPrototypeDriverActivation"
-        component={RobotaxiDriverActivationScreen}
-        options={prototypeOverlayScreenOptions}
-      />
-      <Stack.Screen
-        name="RobotaxiPrototypeDriverOffer"
-        component={RobotaxiDriverOfferScreen}
-        options={prototypeOverlayScreenOptions}
-      />
-      <Stack.Screen
-        name="RobotaxiPrototypeDriverTrip"
-        component={RobotaxiDriverTripScreen}
-        options={prototypeOverlayScreenOptions}
-      />
-      <Stack.Screen
-        name="RobotaxiPrototypeProfile"
-        component={RobotaxiProfileScreen}
-        options={prototypeOverlayScreenOptions}
-      />
-      <Stack.Screen
-        name="RobotaxiPrototypeSettings"
-        component={RobotaxiSettingsScreen}
-        options={prototypeOverlayScreenOptions}
-      />
-      <Stack.Screen
-        name="RobotaxiPrototypeMenu"
-        component={RobotaxiMenuScreen}
-        options={prototypeOverlayScreenOptions}
-      />
-      <Stack.Screen
-        name="RobotaxiMenuEditProfile"
-        component={RobotaxiMenuDetailScreen}
-        options={prototypeOverlayScreenOptions}
-      />
-      <Stack.Screen
-        name="RobotaxiMenuTripHistory"
-        component={RobotaxiMenuDetailScreen}
-        options={prototypeOverlayScreenOptions}
-      />
-      <Stack.Screen
-        name="RobotaxiMenuMessages"
-        component={RobotaxiMenuDetailScreen}
-        options={prototypeOverlayScreenOptions}
-      />
-      <Stack.Screen
-        name="RobotaxiMenuHelp"
-        component={RobotaxiMenuDetailScreen}
-        options={prototypeOverlayScreenOptions}
-      />
     </Stack.Navigator>
   );
 }
 
 export default function AppNavigator() {
   return (
-    <NavigationContainer>
+    <NavigationContainer linking={appLinking}>
       <MainNavigator />
     </NavigationContainer>
   );

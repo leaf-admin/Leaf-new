@@ -8,11 +8,27 @@ import Logger from '../utils/Logger';
 import database from '@react-native-firebase/database';
 import auth from '@react-native-firebase/auth';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { apiClient } from './httpClient';
 
 
 class UserAuthService {
+  static normalizePhone(phoneNumber) {
+    const digits = String(phoneNumber || '').replace(/\D/g, '');
+    if (!digits) return '';
+    return digits.startsWith('55') ? `+${digits}` : `+55${digits}`;
+  }
+
+  static async setupPassword(phoneNumber, password) {
+    const normalizedPhone = this.normalizePhone(phoneNumber);
+    const response = await apiClient.post('/api/auth/password/setup', {
+      phone: normalizedPhone,
+      password,
+      confirmPassword: password
+    });
+    return response?.data || { success: false };
+  }
+
   static async postCustomOtpWithFallback(pathSuffix, payload) {
-    const { api } = require('../common-local/api');
     const endpoints = [
       `/api/custom-otp/${pathSuffix}`,
       `/custom-otp/${pathSuffix}`
@@ -22,7 +38,7 @@ class UserAuthService {
 
     for (const endpoint of endpoints) {
       try {
-        return await api.post(endpoint, payload);
+        return await apiClient.post(endpoint, payload);
       } catch (error) {
         lastError = error;
         if (error?.response?.status !== 404) {
@@ -191,59 +207,29 @@ class UserAuthService {
       // Verificar rate limit
       await this.checkRateLimit(phoneNumber);
 
-      // Buscar usuário pelo telefone
-      const user = await this.checkUserExistsByPhone(phoneNumber);
-
-      if (!user) {
+      const response = await apiClient.post('/api/auth/password/login', {
+        phone: this.normalizePhone(phoneNumber),
+        password
+      });
+      const data = response?.data || {};
+      if (!data.success || !data.customToken) {
         await this.recordAttempt(phoneNumber, false);
-        throw new Error('Usuário não encontrado');
+        throw new Error(data.error || 'Senha incorreta');
       }
 
-      // Verificar se tem senha cadastrada
-      const hasPassword = await this.hasPassword(user.uid);
+      await auth().signInWithCustomToken(data.customToken);
+      await this.recordAttempt(phoneNumber, true);
 
-      if (!hasPassword) {
-        // Se não tem senha, tentar autenticar via Firebase Auth
-        // Usar email baseado no telefone: phone@leaf.com
-        const email = `${phoneNumber.replace(/\D/g, '')}@leaf.com`;
-
-        try {
-          await auth().signInWithEmailAndPassword(email, password);
-          await this.recordAttempt(phoneNumber, true);
-
-          // Obter dados atualizados do usuário
-          const currentUser = auth().currentUser;
-          return {
-            uid: currentUser.uid,
-            ...user,
-            phoneNumber: currentUser.phoneNumber || phoneNumber
-          };
-        } catch (authError) {
-          await this.recordAttempt(phoneNumber, false);
-          throw new Error('Senha incorreta');
-        }
-      } else {
-        // Se tem senha no banco, verificar hash (implementar se necessário)
-        // Por enquanto, usar Firebase Auth como fallback
-        const email = `${phoneNumber.replace(/\D/g, '')}@leaf.com`;
-
-        try {
-          await auth().signInWithEmailAndPassword(email, password);
-          await this.recordAttempt(phoneNumber, true);
-
-          const currentUser = auth().currentUser;
-          return {
-            uid: currentUser.uid,
-            ...user,
-            phoneNumber: currentUser.phoneNumber || phoneNumber
-          };
-        } catch (authError) {
-          await this.recordAttempt(phoneNumber, false);
-          throw new Error('Senha incorreta');
-        }
-      }
+      const currentUser = auth().currentUser;
+      return {
+        uid: currentUser?.uid || data.uid,
+        phoneNumber: currentUser?.phoneNumber || this.normalizePhone(phoneNumber),
+        usertype: data.userType || 'customer',
+        userType: data.userType || 'customer'
+      };
     } catch (error) {
       Logger.error('❌ Erro no login com senha:', error);
+      await this.recordAttempt(phoneNumber, false);
       throw error;
     }
   }
@@ -298,14 +284,7 @@ class UserAuthService {
       // Atualizar senha
       const currentUser = auth().currentUser;
       if (currentUser) {
-        // Atualizar senha no Firebase Auth
-        await currentUser.updatePassword(newPassword);
-
-        // Marcar que tem senha no banco
-        await database().ref(`users/${currentUser.uid}`).update({
-          hasPassword: true,
-          passwordUpdatedAt: new Date().toISOString()
-        });
+        await this.setupPassword(phoneNumber, newPassword);
 
         // Registrar sucesso
         await this.recordAttempt(phoneNumber, true);

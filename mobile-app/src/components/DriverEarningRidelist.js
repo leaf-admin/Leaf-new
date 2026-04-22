@@ -10,7 +10,7 @@ import moment from 'moment/min/moment-with-locales';
 import { fonts } from '../common/font';
 import { Ionicons, AntDesign, Feather, MaterialCommunityIcons } from '@expo/vector-icons';
 import Typography from './design-system/Typography';
-import { useTheme } from '../common-local/theme';
+import { useTheme } from '../theme/runtimeTokens';
 
 export default function DriverEarningRidelist(props) {
     const { t } = i18n;
