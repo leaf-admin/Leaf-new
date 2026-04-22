@@ -63,7 +63,7 @@ class SSLConfig {
           name: 'subjectAltName',
           altNames: [
             { type: 2, value: 'localhost' },
-            { type: 2, value: '216.238.107.59' },
+            { type: 2, value: '147.182.204.181' },
             { type: 2, value: 'leaf.app.br' }
           ]
         }

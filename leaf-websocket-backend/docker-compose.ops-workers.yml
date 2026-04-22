@@ -13,9 +13,9 @@ services:
       - LEAF_SERVER_RUNTIME=vps
       - REDIS_HOST=redis
       - REDIS_PORT=6379
-      - REDIS_PASSWORD=leaf_redis_2024
-      - REDIS_DB=0
-      - REDIS_URL=redis://:leaf_redis_2024@redis:6379/0
+      - REDIS_PASSWORD=${REDIS_PASSWORD:?REDIS_PASSWORD is required}
+      - REDIS_DB=${REDIS_DB:-0}
+      - REDIS_URL=redis://:${REDIS_PASSWORD:?REDIS_PASSWORD is required}@redis:6379/${REDIS_DB:-0}
       - LOG_LEVEL=${LOG_LEVEL:-info}
       - ENABLE_METRICS=${ENABLE_METRICS:-true}
       - ENABLE_PRICING_BASELINE_WORKER=${ENABLE_PRICING_BASELINE_WORKER:-true}
@@ -65,9 +65,9 @@ services:
       - LEAF_SERVER_RUNTIME=vps
       - REDIS_HOST=redis
       - REDIS_PORT=6379
-      - REDIS_PASSWORD=leaf_redis_2024
-      - REDIS_DB=0
-      - REDIS_URL=redis://:leaf_redis_2024@redis:6379/0
+      - REDIS_PASSWORD=${REDIS_PASSWORD:?REDIS_PASSWORD is required}
+      - REDIS_DB=${REDIS_DB:-0}
+      - REDIS_URL=redis://:${REDIS_PASSWORD:?REDIS_PASSWORD is required}@redis:6379/${REDIS_DB:-0}
       - LOG_LEVEL=${LOG_LEVEL:-info}
       - ENABLE_METRICS=${ENABLE_METRICS:-true}
       - ENABLE_RIDE_HEALTH_MONITOR_WORKER=${ENABLE_RIDE_HEALTH_MONITOR_WORKER:-true}

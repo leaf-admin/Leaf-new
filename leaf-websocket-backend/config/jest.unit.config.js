@@ -70,8 +70,9 @@ module.exports = {
   // Clear mocks entre testes
   clearMocks: true,
 
-  // Reset mocks entre testes
-  resetMocks: true,
+  // Não resetar implementações de factories declaradas com jest.mock().
+  // O reset global torna suites dependentes da ordem ao apagar defaults de mocks compartilhados.
+  resetMocks: false,
 
   // Restore mocks entre testes
   restoreMocks: true,

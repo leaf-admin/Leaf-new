@@ -5,15 +5,16 @@ services:
   redis:
     image: redis:7-alpine
     container_name: leaf-redis
-    command: redis-server --appendonly yes --maxmemory 2gb --maxmemory-policy allkeys-lru --requirepass leaf_redis_2024
+    command: redis-server --appendonly yes --maxmemory 2304mb --maxmemory-policy allkeys-lru --requirepass ${REDIS_PASSWORD:?REDIS_PASSWORD must be set}
     volumes:
       - redis_data:/data
-    # Redis não precisa expor porta externamente (apenas dentro da rede Docker)
-    # ports:
-    #   - "6379:6379"
+    # Expõe Redis apenas no loopback do host principal para permitir túnel SSH
+    # a partir de um segundo host realtime sem abrir a porta publicamente.
+    ports:
+      - "127.0.0.1:6379:6379"
     restart: unless-stopped
-    mem_limit: 1536m
-    cpus: "0.50"
+    mem_limit: 3072m
+    cpus: "2.00"
     pids_limit: 256
     ulimits:
       nofile:
@@ -44,22 +45,37 @@ services:
       - ENABLE_EMBEDDED_LISTENER_WORKERS=false
       - ENABLE_DIRECT_RIDE_REQUESTED_DISPATCH=true
       - LEAF_SERVER_RUNTIME=vps
+      - AUTO_TEST_MODE=${AUTO_TEST_MODE:-false}
+      - QA_SOCKET_BYPASS_UIDS=${QA_SOCKET_BYPASS_UIDS:-}
       - LEAF_CLUSTER_ENABLED=${LEAF_CLUSTER_ENABLED:-true}
-      - LEAF_CLUSTER_WORKERS=${LEAF_CLUSTER_WORKERS:-2}
+      - ENABLE_SOCKETIO_REDIS_ADAPTER=${ENABLE_SOCKETIO_REDIS_ADAPTER:-true}
+      - LEAF_CLUSTER_WORKERS=${LEAF_CLUSTER_WORKERS:-6}
       - LEAF_CLUSTER_SCHEDULER_LEADER_ID=${LEAF_CLUSTER_SCHEDULER_LEADER_ID:-1}
       - SOCKET_ALLOW_POLLING=${SOCKET_ALLOW_POLLING:-false}
       - SOCKET_ADMISSION_ENABLED=${SOCKET_ADMISSION_ENABLED:-true}
-      - SOCKET_ADMISSION_MAX_INFLIGHT=${SOCKET_ADMISSION_MAX_INFLIGHT:-320}
-      - SOCKET_ADMISSION_MAX_QUEUE=${SOCKET_ADMISSION_MAX_QUEUE:-5000}
-      - SOCKET_ADMISSION_MAX_WAIT_MS=${SOCKET_ADMISSION_MAX_WAIT_MS:-12000}
-      - SOCKET_ADMISSION_HOLD_MS=${SOCKET_ADMISSION_HOLD_MS:-6000}
+      - SOCKET_ADMISSION_MAX_INFLIGHT=${SOCKET_ADMISSION_MAX_INFLIGHT:-1200}
+      - SOCKET_ADMISSION_MAX_QUEUE=${SOCKET_ADMISSION_MAX_QUEUE:-16000}
+      - SOCKET_ADMISSION_MAX_WAIT_MS=${SOCKET_ADMISSION_MAX_WAIT_MS:-25000}
+      - SOCKET_ADMISSION_HOLD_MS=${SOCKET_ADMISSION_HOLD_MS:-4000}
       - AUTH_VERIFY_ADMISSION_ENABLED=${AUTH_VERIFY_ADMISSION_ENABLED:-true}
-      - AUTH_VERIFY_MAX_INFLIGHT=${AUTH_VERIFY_MAX_INFLIGHT:-240}
-      - AUTH_VERIFY_MAX_QUEUE=${AUTH_VERIFY_MAX_QUEUE:-5000}
-      - AUTH_VERIFY_MAX_WAIT_MS=${AUTH_VERIFY_MAX_WAIT_MS:-12000}
+      - AUTH_VERIFY_MAX_INFLIGHT=${AUTH_VERIFY_MAX_INFLIGHT:-720}
+      - AUTH_VERIFY_MAX_QUEUE=${AUTH_VERIFY_MAX_QUEUE:-16000}
+      - AUTH_VERIFY_MAX_WAIT_MS=${AUTH_VERIFY_MAX_WAIT_MS:-25000}
+      - AUTH_VERIFY_BUSY_RETRY_ATTEMPTS=${AUTH_VERIFY_BUSY_RETRY_ATTEMPTS:-2}
+      - AUTH_VERIFY_BUSY_RETRY_DELAY_MS=${AUTH_VERIFY_BUSY_RETRY_DELAY_MS:-200}
       - TRUST_PROXY_HOPS=${TRUST_PROXY_HOPS:-1}
-      - DISPATCH_NOTIFY_CONCURRENCY=${DISPATCH_NOTIFY_CONCURRENCY:-6}
+      - DISPATCH_NOTIFY_CONCURRENCY=${DISPATCH_NOTIFY_CONCURRENCY:-36}
+      - DISPATCH_DRIVER_RESPONSE_TIMEOUT_SECONDS=${DISPATCH_DRIVER_RESPONSE_TIMEOUT_SECONDS:-20}
       - DISPATCH_VERIFY_SOCKET_ROOM=${DISPATCH_VERIFY_SOCKET_ROOM:-false}
+      - MATCH_DRIVERS_PER_WAVE=${MATCH_DRIVERS_PER_WAVE:-48}
+      - MATCH_EXPANSION_INTERVAL_MS=${MATCH_EXPANSION_INTERVAL_MS:-250}
+      - MATCH_EMPTY_WAVE_INTERVAL_MS=${MATCH_EMPTY_WAVE_INTERVAL_MS:-100}
+      - MATCH_INITIAL_RADIUS_KM=${MATCH_INITIAL_RADIUS_KM:-2.0}
+      - MATCH_EXPANSION_STEP_KM=${MATCH_EXPANSION_STEP_KM:-1.5}
+      - DISPATCH_GEO_CANDIDATE_MIN=${DISPATCH_GEO_CANDIDATE_MIN:-384}
+      - DISPATCH_GEO_CANDIDATE_MAX=${DISPATCH_GEO_CANDIDATE_MAX:-1200}
+      - DISPATCH_SCORE_POOL_MIN=${DISPATCH_SCORE_POOL_MIN:-96}
+      - DISPATCH_SCORE_POOL_MAX=${DISPATCH_SCORE_POOL_MAX:-320}
       - ENABLE_LEGACY_RUNTIME_ENDPOINTS=${ENABLE_LEGACY_RUNTIME_ENDPOINTS:-false}
       - ENABLE_LEGACY_UPDATE_DRIVER_LOCATION_EVENT=${ENABLE_LEGACY_UPDATE_DRIVER_LOCATION_EVENT:-false}
       - ENABLE_LEGACY_NO_DRIVERS_FOUND_EVENT=${ENABLE_LEGACY_NO_DRIVERS_FOUND_EVENT:-false}
@@ -68,13 +84,18 @@ services:
       - ENABLE_LEGACY_SOCKET_BRIDGE=${ENABLE_LEGACY_SOCKET_BRIDGE:-false}
       - ENABLE_LEGACY_SOCKET_NOTIFICATIONS=${ENABLE_LEGACY_SOCKET_NOTIFICATIONS:-false}
       - ENABLE_LEGACY_PROMOTIONS_ROUTES=${ENABLE_LEGACY_PROMOTIONS_ROUTES:-false}
+      - ENABLE_RIDE_EXTENSION_FLOW=${ENABLE_RIDE_EXTENSION_FLOW:-true}
+      - ENABLE_RIDER_EARLY_END=${ENABLE_RIDER_EARLY_END:-true}
+      - ENABLE_OPERATIONAL_REASSIGNMENT=${ENABLE_OPERATIONAL_REASSIGNMENT:-false}
+      - ENABLE_MULTI_LEG_BILLING=${ENABLE_MULTI_LEG_BILLING:-false}
+      - RIDE_EXTENSION_PAYMENT_TIMEOUT_SEC=${RIDE_EXTENSION_PAYMENT_TIMEOUT_SEC:-300}
       
       # Redis
       - REDIS_HOST=redis
       - REDIS_PORT=6379
-      - REDIS_PASSWORD=leaf_redis_2024
+      - REDIS_PASSWORD=${REDIS_PASSWORD:?REDIS_PASSWORD must be set}
       - REDIS_DB=0
-      - REDIS_URL=redis://:leaf_redis_2024@redis:6379/0
+      - REDIS_URL=redis://:${REDIS_PASSWORD:?REDIS_PASSWORD must be set}@redis:6379/0
       
       # Firebase (configurar via .env ou variáveis)
       - FIREBASE_PROJECT_ID=${FIREBASE_PROJECT_ID:-leaf-app-91dfdce0}
@@ -82,16 +103,24 @@ services:
       - GOOGLE_APPLICATION_CREDENTIALS=/app/firebase-credentials.json
       
       # Woovi
-      - WOOVI_WEBHOOK_URL=${WOOVI_WEBHOOK_URL:-http://147.93.66.253/api/woovi/webhook}
-      - SERVER_URL=${SERVER_URL:-http://147.93.66.253}
+      - WOOVI_WEBHOOK_URL=${WOOVI_WEBHOOK_URL:-https://api.62.169.31.231.sslip.io/api/woovi/webhook}
+      - SERVER_URL=${SERVER_URL:-https://api.62.169.31.231.sslip.io}
       - WOOVI_ENVIRONMENT=${WOOVI_ENVIRONMENT:-production}
       - WOOVI_API_TOKEN=${WOOVI_API_TOKEN}
       - WOOVI_APP_ID=${WOOVI_APP_ID}
       - WOOVI_CLIENT_ID=${WOOVI_CLIENT_ID}
       - WOOVI_CLIENT_SECRET=${WOOVI_CLIENT_SECRET}
-      - WOOVI_BASE_URL=${WOOVI_BASE_URL:-https://api-sandbox.woovi.com}
+      - WOOVI_BASE_URL=${WOOVI_BASE_URL:-https://api.woovi.com/api/v1}
       - WOOVI_MASTER_API_TOKEN=${WOOVI_MASTER_API_TOKEN}
       - WOOVI_MASTER_APP_ID=${WOOVI_MASTER_APP_ID}
+      - WOOVI_WEBHOOK_REQUIRE_SIGNATURE=${WOOVI_WEBHOOK_REQUIRE_SIGNATURE:-true}
+      - WOOVI_WEBHOOK_ALLOW_UNSIGNED=${WOOVI_WEBHOOK_ALLOW_UNSIGNED:-false}
+      - WOOVI_WEBHOOK_PUBLIC_KEY=${WOOVI_WEBHOOK_PUBLIC_KEY:-}
+      - OPENPIX_WEBHOOK_PUBLIC_KEY=${OPENPIX_WEBHOOK_PUBLIC_KEY:-}
+      - WOOVI_WEBHOOK_SIGNATURE_SECRET=${WOOVI_WEBHOOK_SIGNATURE_SECRET:-}
+      - OPENPIX_WEBHOOK_SIGNATURE_SECRET=${OPENPIX_WEBHOOK_SIGNATURE_SECRET:-}
+      - WOOVI_WEBHOOK_HMAC_SECRET=${WOOVI_WEBHOOK_HMAC_SECRET:-}
+      - OPENPIX_WEBHOOK_HMAC_SECRET=${OPENPIX_WEBHOOK_HMAC_SECRET:-}
       
       # API Keys
       - GOOGLE_MAPS_API_KEY=${GOOGLE_MAPS_API_KEY}
@@ -99,8 +128,16 @@ services:
       - LOCATIONIQ_API_KEY=${LOCATIONIQ_API_KEY}
       
       # Segurança
-      - CORS_ORIGIN=${CORS_ORIGIN:-*}
-      - JWT_SECRET=${JWT_SECRET:-leaf_jwt_secret_change_in_production_2024}
+      - CORS_ORIGIN=${CORS_ORIGIN:?CORS_ORIGIN must be set}
+      - JWT_SECRET=${JWT_SECRET:?JWT_SECRET must be set}
+      - ADMIN_JWT_SECRET=${ADMIN_JWT_SECRET}
+      - JWT_REFRESH_SECRET=${JWT_REFRESH_SECRET}
+      - ADMIN_JWT_REFRESH_SECRET=${ADMIN_JWT_REFRESH_SECRET}
+      - RUNTIME_ADMIN_TOKEN=${RUNTIME_ADMIN_TOKEN}
+      - RESTART_TOKEN=${RESTART_TOKEN}
+      - RATE_LIMIT_HTTP_DRIVER_STATUS_DEBUG=${RATE_LIMIT_HTTP_DRIVER_STATUS_DEBUG:-25000}
+      - RATE_LIMIT_HTTP_DRIVER_STATUS_DEBUG_WINDOW_SECONDS=${RATE_LIMIT_HTTP_DRIVER_STATUS_DEBUG_WINDOW_SECONDS:-60}
+      - DRIVER_STATUS_REQUIRE_LOCAL_SOCKET=${DRIVER_STATUS_REQUIRE_LOCAL_SOCKET:-false}
       
       # Monitoramento
       - LOG_LEVEL=${LOG_LEVEL:-info}
@@ -109,6 +146,10 @@ services:
       # Leaf específico
       - LEAF_WOOVI_ACCOUNT_ID=${LEAF_WOOVI_ACCOUNT_ID}
       - LEAF_PIX_KEY=${LEAF_PIX_KEY}
+      - PAYMENT_BYPASS_ON_WOOVI_FAILURE=${PAYMENT_BYPASS_ON_WOOVI_FAILURE:-false}
+      - PAYMENT_FORCE_BYPASS=${PAYMENT_FORCE_BYPASS:-false}
+      - PAYMENT_FORCE_BYPASS_PASSENGERS=${PAYMENT_FORCE_BYPASS_PASSENGERS:-}
+      - PAYMENT_FORCE_BYPASS_USER_IDS=${PAYMENT_FORCE_BYPASS_USER_IDS:-}
 
       # AWS Rekognition Face Liveness (KYC)
       - KYC_AWS_LIVENESS_ENABLED=${KYC_AWS_LIVENESS_ENABLED:-false}
@@ -136,8 +177,8 @@ services:
       redis:
         condition: service_healthy
     restart: unless-stopped
-    mem_limit: 3g
-    cpus: "1.75"
+    mem_limit: 6g
+    cpus: "5.50"
     pids_limit: 512
     ulimits:
       nofile:
@@ -151,6 +192,7 @@ services:
       start_period: 40s
     networks:
       - leaf-network
+
 
   # ===== SIDE EFFECTS WORKER =====
   sideeffects-worker:
@@ -169,9 +211,9 @@ services:
       # Redis
       - REDIS_HOST=redis
       - REDIS_PORT=6379
-      - REDIS_PASSWORD=leaf_redis_2024
+      - REDIS_PASSWORD=${REDIS_PASSWORD:?REDIS_PASSWORD must be set}
       - REDIS_DB=0
-      - REDIS_URL=redis://:leaf_redis_2024@redis:6379/0
+      - REDIS_URL=redis://:${REDIS_PASSWORD:?REDIS_PASSWORD must be set}@redis:6379/0
 
       # Firebase (push notifications)
       - FIREBASE_PROJECT_ID=${FIREBASE_PROJECT_ID:-leaf-app-91dfdce0}
@@ -187,6 +229,11 @@ services:
       - WORKER_BLOCK_TIME=150
       - WORKER_UNHANDLED_QUIET_EVENTS=ride.requested,ride.queued,state.changed,driver.notified,driver.search.started,ride.completed,ride.dequeued,queue.processed
       - WORKER_MAX_RETRIES=3
+      - ENABLE_RIDE_EXTENSION_FLOW=${ENABLE_RIDE_EXTENSION_FLOW:-true}
+      - ENABLE_RIDER_EARLY_END=${ENABLE_RIDER_EARLY_END:-true}
+      - ENABLE_OPERATIONAL_REASSIGNMENT=${ENABLE_OPERATIONAL_REASSIGNMENT:-false}
+      - ENABLE_MULTI_LEG_BILLING=${ENABLE_MULTI_LEG_BILLING:-false}
+      - RIDE_EXTENSION_PAYMENT_TIMEOUT_SEC=${RIDE_EXTENSION_PAYMENT_TIMEOUT_SEC:-300}
     volumes:
       - ./firebase-credentials.json:/app/firebase-credentials.json:ro
       - ./logs:/app/logs
@@ -196,8 +243,58 @@ services:
       websocket:
         condition: service_healthy
     restart: unless-stopped
-    mem_limit: 1024m
-    cpus: "0.75"
+    mem_limit: 2048m
+    cpus: "1.25"
+    pids_limit: 256
+    ulimits:
+      nofile:
+        soft: 131072
+        hard: 131072
+    healthcheck:
+      test: ["CMD", "node", "-e", "const redis=require('./utils/redis-pool'); redis.ensureConnection().then(()=>process.exit(0)).catch(()=>process.exit(1));"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    networks:
+      - leaf-network
+
+  # ===== BILLING WORKER =====
+  billing-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: leaf-billing-worker
+    command: ["node", "workers/worker-billing.js"]
+    environment:
+      - NODE_ENV=production
+      - RUNTIME_ROLE=billing
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REDIS_PASSWORD=${REDIS_PASSWORD:?REDIS_PASSWORD must be set}
+      - REDIS_DB=0
+      - REDIS_URL=redis://:${REDIS_PASSWORD:?REDIS_PASSWORD must be set}@redis:6379/0
+      - FIREBASE_PROJECT_ID=${FIREBASE_PROJECT_ID:-leaf-app-91dfdce0}
+      - FIREBASE_DATABASE_URL=${FIREBASE_DATABASE_URL:-https://leaf-reactnative-default-rtdb.firebaseio.com}
+      - GOOGLE_APPLICATION_CREDENTIALS=/app/firebase-credentials.json
+      - LOG_LEVEL=${LOG_LEVEL:-info}
+      - ENABLE_METRICS=${ENABLE_METRICS:-true}
+      - ENABLE_RIDE_EXTENSION_FLOW=${ENABLE_RIDE_EXTENSION_FLOW:-true}
+      - ENABLE_RIDER_EARLY_END=${ENABLE_RIDER_EARLY_END:-true}
+      - ENABLE_OPERATIONAL_REASSIGNMENT=${ENABLE_OPERATIONAL_REASSIGNMENT:-false}
+      - ENABLE_MULTI_LEG_BILLING=${ENABLE_MULTI_LEG_BILLING:-false}
+      - RIDE_EXTENSION_PAYMENT_TIMEOUT_SEC=${RIDE_EXTENSION_PAYMENT_TIMEOUT_SEC:-300}
+    volumes:
+      - ./firebase-credentials.json:/app/firebase-credentials.json:ro
+      - ./logs:/app/logs
+    depends_on:
+      redis:
+        condition: service_healthy
+      websocket:
+        condition: service_healthy
+    restart: unless-stopped
+    mem_limit: 1280m
+    cpus: "1.00"
     pids_limit: 256
     ulimits:
       nofile:
@@ -222,12 +319,18 @@ services:
     volumes:
       - ./nginx.conf:/etc/nginx/nginx.conf:ro
       - ./ssl:/etc/nginx/ssl:ro
+      - ./certbot/www:/var/www/certbot:ro
+      - ./certbot/conf:/etc/letsencrypt:ro
     depends_on:
       websocket:
         condition: service_healthy
     restart: unless-stopped
+    ulimits:
+      nofile:
+        soft: 262144
+        hard: 262144
     healthcheck:
-      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost/health/liveness"]
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://127.0.0.1/health/liveness"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -236,6 +339,7 @@ services:
 
 volumes:
   redis_data:
+
     driver: local
 
 networks:
