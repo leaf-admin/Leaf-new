@@ -35,6 +35,7 @@ ios/build/
 .expo-shared/
 
 # Firebase credentials
+config/firebase/gradle.properties
 leaf-reactnative-firebase-adminsdk-fbsvc-94a09a2472.json
 leaf-reactnative-firebase-adminsdk-*.json
 firebase-credentials.json
@@ -75,6 +76,8 @@ mobile-app/reports/
 *.dmg
 .local-tools/
 .tmp/
+.tmp-*/
+.tmp-*
 tmp/
 leaf-websocket-backend/coverage/
 leaf-websocket-backend/tmp/
@@ -82,3 +85,50 @@ mobile-app/.tmp-*
 mobile-app/.tmp-qa-evidence/
 mobile-app/.maestro/
 mobile-app/tmp/
+mobile-app/android/.gradle/
+mobile-app/android/app/.cxx/
+mobile-app/android/app/build/
+mobile-app/ios/Pods/
+mobile-app/ios/build/
+mobile-app/screenshots-*/
+mobile-app/scrcpy-*/
+mobile-app/dist-export-android/
+mobile-app/dist-export-android-bytecode/
+mobile-app/apk/
+mobile-app/test-build-*/
+mobile-app/playwright-report/
+mobile-app/mobile-app/test-results/
+mobile-app/*.png
+mobile-app/*.jpg
+mobile-app/*.jpeg
+mobile-app/debug-*.png
+mobile-app/qa-*.png
+mobile-app/e2e-*.png
+mobile-app/passenger-*.png
+mobile-app/driver-*.png
+mobile-app/leaf-proto-*.png
+mobile-app/live-*.png
+mobile-app/prototype-*.png
+mobile-app/ideal-*.png
+mobile-app/google-maps-ios-check.png
+mobile-app/diag-*.png
+mobile-app/01-*.png
+mobile-app/02-*.png
+mobile-app/07-*.png
+
+# Workspace-level test artifacts
+reports/
+driver-*.png
+passenger-*.png
+rating-*.png
+qa-*.png
+e2e-*.png
+ideal-*.png
+live-*.png
+01-*.png
+02-*.png
+03-*.png
+04-*.png
+05-*.png
+06-*.png
+07-*.png
