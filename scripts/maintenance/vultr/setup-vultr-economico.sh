@@ -17,7 +17,7 @@ fi
 # Configurações
 APP_USER="leaf"
 APP_DIR="/home/$APP_USER"
-BACKUP_IP="147.93.66.253"  # Hostinger como fallback
+BACKUP_IP="147.182.204.181"  # Hostinger como fallback
 
 echo "📦 Atualizando sistema..."
 apt update && apt upgrade -y
@@ -46,7 +46,7 @@ fi
 echo "🔴 Configurando Redis otimizado (econômico)..."
 cat > /etc/redis/redis.conf << 'EOF'
 # Redis Configuration for Leaf App (4GB RAM - Econômico)
-bind 216.238.107.59
+bind 147.182.204.181
 port 6379
 timeout 300
 tcp-keepalive 60
@@ -201,7 +201,7 @@ server {
     location /lb-status {
         access_log off;
         stub_status on;
-        allow 216.238.107.59;
+        allow 147.182.204.181;
         deny all;
     }
     
@@ -252,7 +252,7 @@ RATE_LIMIT_MAX=500
 
 # Primary Configuration
 PRIMARY_MODE=true
-BACKUP_SERVER=147.93.66.253
+BACKUP_SERVER=147.182.204.181
 FAILOVER_ENABLED=true
 
 # Otimizações econômicas
@@ -415,7 +415,7 @@ cp /var/lib/redis/dump.rdb $BACKUP_DIR/redis-$DATE.rdb
 gzip $BACKUP_DIR/redis-$DATE.rdb
 
 # Criar backup da aplicação (comprimido)
-tar -czf $BACKUP_DIR/app-$DATE.tar.gz /home/leaf/leaf-websocket-backend/
+tar -czf $BACKUP_DIR/app-$DATE.tar.gz /opt/leaf-app/
 
 # Limpar backups antigos (manter últimos 5 dias)
 find $BACKUP_DIR -name "*.rdb.gz" -mtime +5 -delete

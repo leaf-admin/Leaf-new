@@ -57,6 +57,10 @@ function md5(value) {
   return crypto.createHash("md5").update(String(value)).digest("hex");
 }
 
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 function writeStorageValue(storageDir, manifest, key, value) {
   const filePath = path.join(storageDir, md5(key));
   const serialized = typeof value === "string" ? value : JSON.stringify(value);
@@ -78,6 +82,26 @@ function resolveStorageDir(udid, appId) {
     appId,
     "RCTAsyncLocalStorage_V1",
   );
+}
+
+async function resetStorageDir(storageDir) {
+  const maxAttempts = 8;
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    try {
+      fs.rmSync(storageDir, {
+        recursive: true,
+        force: true,
+      });
+      fs.mkdirSync(storageDir, { recursive: true });
+      return;
+    } catch (error) {
+      if (attempt >= maxAttempts) {
+        throw error;
+      }
+      await sleep(250 * attempt);
+    }
+  }
 }
 
 function buildApprovedDriverActivation(nowIso) {
@@ -248,8 +272,7 @@ async function main() {
   const qaSocketIdToken = await getIdTokenForUid(authUid);
 
   const storageDir = resolveStorageDir(udid, appId);
-  fs.rmSync(storageDir, { recursive: true, force: true });
-  fs.mkdirSync(storageDir, { recursive: true });
+  await resetStorageDir(storageDir);
 
   const manifestPath = path.join(storageDir, "manifest.json");
   const manifest = {};

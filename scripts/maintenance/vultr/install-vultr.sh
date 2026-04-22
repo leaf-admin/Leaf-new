@@ -7,7 +7,7 @@
 set -e
 
 echo "🏆 INICIANDO INSTALAÇÃO DO LEAF APP NA VULTR..."
-echo "📊 IP: 216.238.107.59"
+echo "📊 IP: 147.182.204.181"
 echo "💾 CPU: 4 vCPUs, RAM: 8GB, Storage: 160GB SSD"
 
 # Verificar se está rodando como root
@@ -19,8 +19,8 @@ fi
 # Configurações
 APP_USER="leaf"
 APP_DIR="/home/$APP_USER"
-VULTR_IP="216.238.107.59"
-BACKUP_IP="147.93.66.253"
+VULTR_IP="147.182.204.181"
+BACKUP_IP="147.182.204.181"
 
 echo "📦 Atualizando sistema..."
 apt update && apt upgrade -y
@@ -49,7 +49,7 @@ fi
 echo "🔴 Configurando Redis otimizado..."
 cat > /etc/redis/redis.conf << 'EOF'
 # Redis Configuration for Leaf App (8GB RAM)
-bind 216.238.107.59
+bind 147.182.204.181
 port 6379
 timeout 300
 tcp-keepalive 60
@@ -140,7 +140,7 @@ EOF
 cat > /etc/nginx/sites-available/leaf-primary << 'EOF'
 server {
     listen 80;
-    server_name leafapp.com www.leafapp.com 216.238.107.59;
+    server_name leafapp.com www.leafapp.com 147.182.204.181;
     
     # Health Check Endpoint
     location /health {
@@ -189,7 +189,7 @@ server {
     location /lb-status {
         access_log off;
         stub_status on;
-        allow 216.238.107.59;
+        allow 147.182.204.181;
         deny all;
     }
     
@@ -240,7 +240,7 @@ RATE_LIMIT_MAX=1000
 
 # Primary Configuration
 PRIMARY_MODE=true
-BACKUP_SERVER=147.93.66.253
+BACKUP_SERVER=147.182.204.181
 FAILOVER_ENABLED=true
 
 # Otimizações
@@ -331,8 +331,8 @@ cat > /usr/local/bin/vultr-monitor.sh << 'EOF'
 # Monitoramento para Vultr
 LOG_FILE="/var/log/leaf-app/monitor.log"
 ALERT_EMAIL="admin@leafapp.com"
-VULTR_IP="216.238.107.59"
-BACKUP_IP="147.93.66.253"
+VULTR_IP="147.182.204.181"
+BACKUP_IP="147.182.204.181"
 
 # Função de logging
 log_message() {
@@ -394,7 +394,7 @@ sleep 5
 cp /var/lib/redis/dump.rdb $BACKUP_DIR/redis-$DATE.rdb
 
 # Criar backup da aplicação
-tar -czf $BACKUP_DIR/app-$DATE.tar.gz /home/leaf/leaf-websocket-backend/
+tar -czf $BACKUP_DIR/app-$DATE.tar.gz /opt/leaf-app/
 
 # Limpar backups antigos (manter últimos 7 dias)
 find $BACKUP_DIR -name "*.rdb" -mtime +7 -delete
@@ -417,12 +417,12 @@ echo ""
 echo "🔧 Comandos úteis:"
 echo "  - systemctl status leaf-primary"
 echo "  - journalctl -u leaf-primary -f"
-echo "  - curl http://216.238.107.59/health"
+echo "  - curl http://147.182.204.181/health"
 echo "  - redis-cli info"
 echo "  - nginx -t"
 echo ""
 echo "🌐 Teste a aplicação:"
-echo "  curl http://216.238.107.59/health"
+echo "  curl http://147.182.204.181/health"
 echo ""
 echo "📊 Monitoramento:"
 echo "  tail -f /var/log/leaf-app/monitor.log"

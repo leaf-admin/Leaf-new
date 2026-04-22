@@ -38,7 +38,7 @@ echo ""
 
 # 1. Verificar status da VPS
 log "1. Verificando status da VPS..."
-if curl -s http://147.93.66.253:3000/api/health > /dev/null; then
+if curl -s http://147.182.204.181:3000/api/health > /dev/null; then
     log "✅ VPS online e funcionando"
 else
     error "❌ VPS offline! Verifique a conexão."
@@ -86,8 +86,8 @@ if [ -f "mobile-app/build/android-release.apk" ]; then
     echo "   3. Execute: cd mobile-app && ./install-leaf-app.sh"
     echo ""
     echo "📊 MONITORAMENTO:"
-    echo "   - API Status: http://147.93.66.253:3000/api/health"
-    echo "   - VPS Logs: ssh root@147.93.66.253 'pm2 logs leaf-api'"
+    echo "   - API Status: http://147.182.204.181:3000/api/health"
+    echo "   - VPS Logs: ssh root@147.182.204.181 'pm2 logs leaf-api'"
     echo ""
     echo "📚 DOCUMENTAÇÃO:"
     echo "   mobile-app/DEPLOY_GUIDE.md"

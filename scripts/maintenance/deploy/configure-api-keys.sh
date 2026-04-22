@@ -81,8 +81,8 @@ cp .env.production .env.production.backup
 # Criar template para edição
 cat > .env.production.template << 'EOF'
 # API URLs
-API_BASE_URL=http://147.93.66.253:3000
-WEBSOCKET_URL=ws://147.93.66.253:3001
+API_BASE_URL=http://147.182.204.181:3000
+WEBSOCKET_URL=ws://147.182.204.181:3001
 FIREBASE_FALLBACK_URL=https://us-central1-leaf-app-91dfdce0.cloudfunctions.net
 
 # API Keys

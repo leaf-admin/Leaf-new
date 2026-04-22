@@ -36,6 +36,16 @@ if [ "$EUID" -ne 0 ]; then
     exit 1
 fi
 
+generate_secret() {
+    if command -v openssl >/dev/null 2>&1; then
+        openssl rand -hex 24
+    else
+        head -c 64 /dev/urandom | base64 | tr -dc 'A-Za-z0-9' | head -c 48
+    fi
+}
+
+REDIS_PASSWORD="${REDIS_PASSWORD:-$(generate_secret)}"
+
 # ===== PASSO 1: ATUALIZAR SISTEMA =====
 log "Atualizando sistema..."
 apt update && apt upgrade -y
@@ -62,14 +72,14 @@ apt install -y redis-server
 log "Configurando Redis..."
 cat > /etc/redis/redis.conf << EOF
 # Configuração Redis para Leaf App
-bind 216.238.107.59
+bind 147.182.204.181
 port 6379
 maxmemory 512mb
 maxmemory-policy allkeys-lru
 save 900 1
 save 300 10
 save 60 10000
-requirepass leaf_redis_2024
+requirepass ${REDIS_PASSWORD}
 timeout 300
 tcp-keepalive 60
 EOF
@@ -79,7 +89,7 @@ systemctl restart redis-server
 systemctl enable redis-server
 
 # Testar Redis
-if REDISCLI_AUTH=leaf_redis_2024 redis-cli ping | grep -q "PONG"; then
+if REDISCLI_AUTH="${REDIS_PASSWORD}" redis-cli ping | grep -q "PONG"; then
     success "Redis configurado e funcionando"
 else
     error "Falha na configuração do Redis"
@@ -202,11 +212,11 @@ EOF
 
 # ===== PASSO 9: CRIAR ARQUIVO .ENV =====
 log "Criando arquivo .env..."
-cat > .env << 'EOF'
+cat > .env << EOF
 # Configurações do Redis
 REDIS_HOST=localhost
 REDIS_PORT=6379
-REDIS_PASSWORD=leaf_redis_2024
+REDIS_PASSWORD=${REDIS_PASSWORD}
 
 # Configurações da API
 PORT=3000
@@ -654,7 +664,7 @@ echo "  - Ver logs: pm2 logs leaf-api"
 echo "  - Reiniciar: pm2 restart leaf-api"
 echo "  - Deploy: /home/leaf/leaf-app/deploy.sh"
 echo ""
-echo "🔑 Redis Password: leaf_redis_2024"
+echo "🔑 Redis Password: ${REDIS_PASSWORD}"
 echo ""
 echo "📱 Próximo passo: Atualizar mobile app com as novas URLs"
 echo ""

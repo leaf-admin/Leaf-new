@@ -13,9 +13,9 @@ RED='\033[0;31m'
 NC='\033[0m'
 
 # Configurações VPS
-VPS_IP="216.238.107.59"
+VPS_IP="147.182.204.181"
 VPS_USER="root"
-VPS_PATH="/root/leaf-websocket-backend"  # Ajustar se necessário
+VPS_PATH="/opt/leaf-app"  # Ajustar se necessário
 
 echo -e "${BLUE}🚀 DEPLOY PLACES CACHE PARA VPS${NC}"
 echo "=================================="

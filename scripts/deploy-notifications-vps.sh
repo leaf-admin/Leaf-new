@@ -5,9 +5,9 @@
 
 set -e
 
-VPS_IP="216.238.107.59"
+VPS_IP="147.182.204.181"
 VPS_USER="root"
-VPS_PATH="/root/leaf-websocket-backend"
+VPS_PATH="/opt/leaf-app"
 
 echo "🚀 DEPLOY DA ROTA DE NOTIFICAÇÕES PARA VPS"
 echo "=========================================="
@@ -35,7 +35,7 @@ echo ""
 
 echo "🔄 Reiniciando servidor na VPS..."
 ssh $VPS_USER@$VPS_IP << 'EOF'
-cd /root/leaf-websocket-backend
+cd /opt/leaf-app
 
 # Fazer backup do server.js atual
 if [ -f "server.js" ]; then

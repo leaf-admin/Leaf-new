@@ -28,7 +28,11 @@ const io = new Server(server, {
 const PORT = process.env.PORT || 3001;
 const INSTANCE_ID = process.env.INSTANCE_ID || 'main';
 const CLUSTER_MODE = process.env.CLUSTER_MODE === 'true';
-const JWT_SECRET = process.env.JWT_SECRET || 'leaf-secret-key-vps';
+const JWT_SECRET = process.env.JWT_SECRET;
+
+if (!JWT_SECRET) {
+    throw new Error('JWT_SECRET é obrigatório para iniciar server-complete-final.js');
+}
 
 // Middleware básico
 app.use(express.json({ limit: '10mb' }));
@@ -767,9 +771,9 @@ function getDistance(lat1, lng1, lat2, lng2) {
 
 server.listen(PORT, () => {
     console.log(`🚀 Servidor Leaf WebSocket rodando na porta ${PORT}`);
-    console.log(`🔌 WebSocket: ws://216.238.107.59:${PORT}`);
-    console.log(`📊 APIs: http://216.238.107.59:${PORT}/api`);
-    console.log(`❤️ Health: http://216.238.107.59:${PORT}/health`);
+    console.log(`🔌 WebSocket: ws://147.182.204.181:${PORT}`);
+    console.log(`📊 APIs: http://147.182.204.181:${PORT}/api`);
+    console.log(`❤️ Health: http://147.182.204.181:${PORT}/health`);
     console.log(`🏷️ Instance: ${INSTANCE_ID}`);
     
     // Inicializar monitoramento (se disponível)
@@ -854,7 +858,6 @@ process.on('SIGINT', () => {
         process.exit(0);
     });
 });
-
 
 
 

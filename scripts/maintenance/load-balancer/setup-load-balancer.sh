@@ -25,7 +25,7 @@ fi
 cat > /etc/nginx/sites-available/leaf-load-balancer << 'EOF'
 upstream leaf_backend {
     # VPS Principal (Hostinger)
-    server 147.93.66.253:3000 weight=3 max_fails=3 fail_timeout=30s;
+    server 147.182.204.181:3000 weight=3 max_fails=3 fail_timeout=30s;
     
     # VPS de Backup (Vultr São Paulo)
     server BACKUP_VPS_IP:3000 weight=1 max_fails=3 fail_timeout=30s backup;
@@ -36,7 +36,7 @@ upstream leaf_backend {
 
 upstream leaf_websocket {
     # VPS Principal (Hostinger)
-    server 147.93.66.253:3001 weight=3 max_fails=3 fail_timeout=30s;
+    server 147.182.204.181:3001 weight=3 max_fails=3 fail_timeout=30s;
     
     # VPS de Backup (Vultr São Paulo)
     server BACKUP_VPS_IP:3001 weight=1 max_fails=3 fail_timeout=30s backup;
@@ -121,7 +121,7 @@ server {
     location /lb-status {
         access_log off;
         stub_status on;
-        allow 216.238.107.59;
+        allow 147.182.204.181;
         deny all;
     }
     

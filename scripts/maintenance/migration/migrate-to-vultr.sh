@@ -15,7 +15,7 @@ if [ "$EUID" -ne 0 ]; then
 fi
 
 # Configurações
-HOSTINGER_IP="147.93.66.253"
+HOSTINGER_IP="147.182.204.181"
 VULTR_IP="VULTR_IP"  # Será substituído pelo IP da Vultr
 APP_USER="leaf"
 APP_DIR="/home/$APP_USER"
@@ -47,7 +47,7 @@ backup_hostinger_data() {
     
     # Copiar configurações
     echo "📦 Backup das configurações..."
-    rsync -avz $APP_USER@$HOSTINGER_IP:/home/leaf/leaf-websocket-backend/config.env /tmp/hostinger-config.env
+    rsync -avz $APP_USER@$HOSTINGER_IP:/opt/leaf-app/config.env /tmp/hostinger-config.env
     
     echo "✅ Backup dos dados concluído"
 }

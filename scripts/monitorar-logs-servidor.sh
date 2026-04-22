@@ -66,7 +66,7 @@ format_log() {
 echo -e "${BLUE}Conectando ao servidor na VPS...${NC}"
 echo ""
 
-ssh -o StrictHostKeyChecking=no root@216.238.107.59 "tail -f /home/leaf/leaf-websocket-backend/server.log 2>/dev/null || pm2 logs server --lines 0 --raw 2>&1" 2>/dev/null | while IFS= read -r line; do
+ssh -o StrictHostKeyChecking=no root@147.182.204.181 "tail -f /opt/leaf-app/server.log 2>/dev/null || pm2 logs server --lines 0 --raw 2>&1" 2>/dev/null | while IFS= read -r line; do
     # Filtrar apenas linhas relevantes
     if echo "$line" | grep -qE "(authenticate|createBooking|QueueWorker|Dispatcher|newRideRequest|updateLocation|Motorista|Driver|test_driver|test-user-dev|booking_|corrida|notificar|error|Error|❌|✅|⚠️)"; then
         format_log "$line"

@@ -60,10 +60,10 @@ format_line() {
 
 # Verificar conexão primeiro
 echo -e "${CYAN}Verificando conexão com servidor...${NC}"
-if ! ssh -o StrictHostKeyChecking=no -o ConnectTimeout=5 root@216.238.107.59 "test -f /home/leaf/leaf-websocket-backend/server.log" 2>/dev/null; then
+if ! ssh -o StrictHostKeyChecking=no -o ConnectTimeout=5 root@147.182.204.181 "test -f /opt/leaf-app/server.log" 2>/dev/null; then
     echo -e "${RED}❌ Erro: Não foi possível acessar o arquivo de log${NC}"
     echo -e "${YELLOW}Tentando localizar arquivo de log...${NC}"
-    ssh -o StrictHostKeyChecking=no root@216.238.107.59 "find /home/leaf /root -name 'server.log' 2>/dev/null | head -1" 2>/dev/null
+    ssh -o StrictHostKeyChecking=no root@147.182.204.181 "find /home/leaf /root -name 'server.log' 2>/dev/null | head -1" 2>/dev/null
     exit 1
 fi
 
@@ -71,7 +71,7 @@ echo -e "${GREEN}✅ Conectado! Monitorando logs...${NC}"
 echo ""
 
 # Monitorar logs via SSH (redirecionando stderr para ignorar erros de conexão)
-ssh -o StrictHostKeyChecking=no -o ConnectTimeout=10 root@216.238.107.59 "tail -f /home/leaf/leaf-websocket-backend/server.log" 2>/dev/null | while IFS= read -r line || [ -n "$line" ]; do
+ssh -o StrictHostKeyChecking=no -o ConnectTimeout=10 root@147.182.204.181 "tail -f /opt/leaf-app/server.log" 2>/dev/null | while IFS= read -r line || [ -n "$line" ]; do
     # Filtrar apenas linhas relevantes e não vazias
     if [ -n "$line" ] && echo "$line" | grep -qiE "(authenticate|createBooking|QueueWorker|Dispatcher|newRideRequest|updateLocation|Motorista|Driver|test_driver|test-user-dev|booking_|corrida|notificar|error|Error|❌|✅|⚠️|Fase 7|GradualRadiusExpander|Servidor|WebSocket)"; then
         format_line "$line"

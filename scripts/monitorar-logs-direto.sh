@@ -51,7 +51,7 @@ format_line() {
 echo -e "${BLUE}Conectando ao servidor...${NC}"
 echo ""
 
-ssh -o StrictHostKeyChecking=no -o ConnectTimeout=10 root@216.238.107.59 "cd /home/leaf/leaf-websocket-backend 2>/dev/null || cd /root/leaf-websocket-backend 2>/dev/null; if [ -f server.log ]; then tail -f server.log; else echo 'Arquivo server.log não encontrado. Verificando processos...'; ps aux | grep 'node.*server' | grep -v grep | head -3; fi" 2>&1 | grep --line-buffered -E "(authenticate|createBooking|QueueWorker|Dispatcher|newRideRequest|updateLocation|Motorista|Driver|test_driver|test-user-dev|booking_|corrida|notificar|error|Error|❌|✅|⚠️|Fase 7|GradualRadiusExpander|Servidor|WebSocket)" | while read line; do
+ssh -o StrictHostKeyChecking=no -o ConnectTimeout=10 root@147.182.204.181 "cd /opt/leaf-app 2>/dev/null || cd /opt/leaf-app 2>/dev/null; if [ -f server.log ]; then tail -f server.log; else echo 'Arquivo server.log não encontrado. Verificando processos...'; ps aux | grep 'node.*server' | grep -v grep | head -3; fi" 2>&1 | grep --line-buffered -E "(authenticate|createBooking|QueueWorker|Dispatcher|newRideRequest|updateLocation|Motorista|Driver|test_driver|test-user-dev|booking_|corrida|notificar|error|Error|❌|✅|⚠️|Fase 7|GradualRadiusExpander|Servidor|WebSocket)" | while read line; do
     format_line "$line"
 done
 

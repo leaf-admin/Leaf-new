@@ -21,7 +21,7 @@ async function testDashboardFix() {
             // Tentar diretamente no servidor
             console.log('\n3. Testando diretamente no servidor:');
             try {
-                const directResponse = await axios.get('http://216.238.107.59:3001/dashboard/overview');
+                const directResponse = await axios.get('http://147.182.204.181:3001/dashboard/overview');
                 console.log('✅ Dashboard direto:', directResponse.data);
             } catch (directError) {
                 console.log('❌ Dashboard direto falhou:', directError.message);

@@ -11,7 +11,7 @@ const WOOVI_SANDBOX_CONFIG = {
   clientSecret: 'Client_Secret_oVXw4Mrnny9kD8GyZSWWWMQ8++8vkLaGAeVDTfsrxw=',
   apiToken: 'Q2xpZW50X0lkXzE4YzBkYzI3LTYzMDYtNDFkYy1hMmRlLWI2MzAzMzQ3YzNhZTpDbGllbnRfU2VjcmV0X29WWHc0TXJubnk5a0Q4R3laU1dXV01ROCsrbzh2a0xhR0FlVkRUZnNyeHc9',
   baseUrl: 'https://api-sandbox.woovi.com',
-  webhookUrl: 'https://216.238.107.59:3001/api/woovi/webhooks'
+  webhookUrl: 'https://147.182.204.181:3001/api/woovi/webhooks'
 };
 
 // Webhooks disponíveis

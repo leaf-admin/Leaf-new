@@ -5,9 +5,9 @@
 
 set -e
 
-VPS_IP="216.238.107.59"
+VPS_IP="147.182.204.181"
 VPS_USER="root"
-VPS_PATH="/root/leaf-websocket-backend"
+VPS_PATH="/opt/leaf-app"
 
 echo "🚀 Deploy do Places Cache para VPS..."
 
@@ -42,7 +42,7 @@ echo "📦 Instalando dependências na VPS..."
 
 # Instalar dependências e reiniciar
 ssh ${VPS_USER}@${VPS_IP} << 'ENDSSH'
-cd /root/leaf-websocket-backend
+cd /opt/leaf-app
 
 # Instalar dependências se necessário
 if [ ! -d "node_modules" ] || [ "package.json" -nt "node_modules/.package-lock.json" ]; then

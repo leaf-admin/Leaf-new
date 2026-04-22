@@ -39,7 +39,7 @@ console.log('');
 
 console.log('PASSO 2: CONFIGURAR VPS');
 console.log('------------------------');
-console.log('✅ Conectar na VPS (216.238.107.59)');
+console.log('✅ Conectar na VPS (147.182.204.181)');
 console.log('✅ Instalar Node.js e dependências');
 console.log('✅ Configurar Redis');
 console.log('✅ Configurar PostgreSQL');
@@ -77,7 +77,7 @@ console.log('====================');
 console.log('');
 
 console.log('1. CONECTAR NA VPS:');
-console.log('ssh root@216.238.107.59');
+console.log('ssh root@147.182.204.181');
 console.log('');
 
 console.log('2. INSTALAR DEPENDÊNCIAS:');
@@ -95,11 +95,11 @@ console.log('systemctl enable postgresql');
 console.log('');
 
 console.log('4. UPLOAD DO CÓDIGO:');
-console.log('scp -r leaf-websocket-backend/ root@216.238.107.59:/root/');
+console.log('scp -r leaf-websocket-backend/ root@147.182.204.181:/root/');
 console.log('');
 
 console.log('5. INSTALAR DEPENDÊNCIAS DO PROJETO:');
-console.log('cd /root/leaf-websocket-backend');
+console.log('cd /opt/leaf-app');
 console.log('npm install');
 console.log('');
 
@@ -119,7 +119,7 @@ console.log('🎯 CONFIGURAÇÕES IMPORTANTES:');
 console.log('=============================');
 console.log('');
 
-console.log('VPS IP: 216.238.107.59');
+console.log('VPS IP: 147.182.204.181');
 console.log('Porta Servidor: 3001');
 console.log('Porta Redis: 6379');
 console.log('Porta PostgreSQL: 5432');
@@ -130,10 +130,10 @@ console.log('📊 MONITORAMENTO:');
 console.log('================');
 console.log('');
 
-console.log('Health Check: http://216.238.107.59:3001/health');
-console.log('GraphQL: http://216.238.107.59:3001/graphql');
-console.log('WebSocket: ws://216.238.107.59:3001');
-console.log('Nginx: http://216.238.107.59');
+console.log('Health Check: http://147.182.204.181:3001/health');
+console.log('GraphQL: http://147.182.204.181:3001/graphql');
+console.log('WebSocket: ws://147.182.204.181:3001');
+console.log('Nginx: http://147.182.204.181');
 console.log('');
 
 console.log('🚀 PRONTO PARA DEPLOY!');

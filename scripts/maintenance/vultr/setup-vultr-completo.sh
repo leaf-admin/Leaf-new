@@ -17,8 +17,8 @@ fi
 # Configurações
 APP_USER="leaf"
 APP_DIR="/home/$APP_USER"
-VULTR_IP="216.238.107.59"
-BACKUP_IP="147.93.66.253"  # Hostinger como fallback
+VULTR_IP="147.182.204.181"
+BACKUP_IP="147.182.204.181"  # Hostinger como fallback
 
 echo "📦 Atualizando sistema..."
 apt update && apt upgrade -y
@@ -47,7 +47,7 @@ fi
 echo "🔴 Configurando Redis otimizado (completo)..."
 cat > /etc/redis/redis.conf << 'EOF'
 # Redis Configuration for Leaf App (8GB RAM - Completo)
-bind 216.238.107.59
+bind 147.182.204.181
 port 6379
 timeout 300
 tcp-keepalive 60
@@ -210,7 +210,7 @@ server {
     location /lb-status {
         access_log off;
         stub_status on;
-        allow 216.238.107.59;
+        allow 147.182.204.181;
         deny all;
     }
     
@@ -261,7 +261,7 @@ RATE_LIMIT_MAX=1000
 
 # Primary Configuration
 PRIMARY_MODE=true
-BACKUP_SERVER=147.93.66.253
+BACKUP_SERVER=147.182.204.181
 FAILOVER_ENABLED=true
 
 # Otimizações completas
@@ -359,8 +359,8 @@ cat > /usr/local/bin/vultr-monitor-completo.sh << 'EOF'
 # Monitoramento avançado para Vultr (completo)
 LOG_FILE="/var/log/leaf-app/monitor.log"
 ALERT_EMAIL="admin@leafapp.com"
-VULTR_IP="216.238.107.59"
-BACKUP_IP="147.93.66.253"
+VULTR_IP="147.182.204.181"
+BACKUP_IP="147.182.204.181"
 
 # Função de logging
 log_message() {
@@ -439,7 +439,7 @@ sleep 5
 cp /var/lib/redis/dump.rdb $BACKUP_DIR/redis-$DATE.rdb
 
 # Criar backup da aplicação
-tar -czf $BACKUP_DIR/app-$DATE.tar.gz /home/leaf/leaf-websocket-backend/
+tar -czf $BACKUP_DIR/app-$DATE.tar.gz /opt/leaf-app/
 
 # Criar backup das configurações
 tar -czf $BACKUP_DIR/config-$DATE.tar.gz /etc/nginx/ /etc/systemd/system/leaf-primary.service

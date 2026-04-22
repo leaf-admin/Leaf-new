@@ -17,8 +17,8 @@ YELLOW='\033[1;33m'
 NC='\033[0m'
 
 # Monitorar via SSH direto
-ssh -o StrictHostKeyChecking=no root@216.238.107.59 << 'ENDSSH'
-    cd /home/leaf/leaf-websocket-backend
+ssh -o StrictHostKeyChecking=no root@147.182.204.181 << 'ENDSSH'
+    cd /opt/leaf-app
     
     # Verificar qual método usar
     if [ -f server.log ]; then
