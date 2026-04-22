@@ -121,6 +121,9 @@ jest.mock('../src/services/WebSocketManager', () => ({
 function buildDriverRuntime(overrides = {}) {
   return {
     activeRole: 'driver',
+    ready: true,
+    initializing: false,
+    presentationSyncing: false,
     profile: {
       uid: 'driver_1',
       userType: 'driver',
@@ -142,6 +145,7 @@ function buildDriverRuntime(overrides = {}) {
     driverOnline: false,
     driverOnlinePending: false,
     driverCanGoOnline: true,
+    driverActivationResolved: true,
     paymentMethod: 'pix',
     driverInfo: { id: 'driver_1', name: 'Driver Test' },
     setDriverOnline: jest.fn().mockResolvedValue({ success: true, isOnline: true }),
@@ -164,6 +168,9 @@ function buildDriverRuntime(overrides = {}) {
 function buildPassengerRuntime(overrides = {}) {
   return {
     activeRole: 'customer',
+    ready: true,
+    initializing: false,
+    presentationSyncing: false,
     profile: {
       uid: 'customer_1',
       userType: 'customer',
@@ -185,6 +192,7 @@ function buildPassengerRuntime(overrides = {}) {
     driverOnline: false,
     driverOnlinePending: false,
     driverCanGoOnline: false,
+    driverActivationResolved: true,
     paymentMethod: 'pix',
     driverInfo: null,
     setDriverOnline: jest.fn(),
@@ -212,6 +220,8 @@ function buildPassengerRuntime(overrides = {}) {
 describe('driver online toggle', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    const { subscribePrototypeMapRoute } = require('../src/screens/prototype/prototypeMapRoute');
+    subscribePrototypeMapRoute.mockImplementation(() => jest.fn());
     mockUseIsFocused.mockReturnValue(true);
     mockUseNavigationState.mockImplementation((selector) =>
       selector({
@@ -259,6 +269,71 @@ describe('driver online toggle', () => {
         'Não foi possível finalizar o modo online agora. Tente novamente.'
       );
     });
+  });
+
+  it('does not render driver home surfaces while the runtime is still stabilizing', () => {
+    usePrototypeRideRuntime.mockReturnValue(
+      buildDriverRuntime({
+        presentationSyncing: true,
+      })
+    );
+
+    const navigation = { navigate: jest.fn(), replace: jest.fn(), canGoBack: jest.fn(() => false), goBack: jest.fn() };
+    const { queryByTestId } = render(
+      <RobotaxiHomeScreen navigation={navigation} route={{ params: {} }} />
+    );
+
+    expect(queryByTestId('driver-home-toggle-online')).toBeNull();
+  });
+
+  it('does not project stale route state into the map while runtime presentation is syncing', async () => {
+    const { subscribePrototypeMapRoute } = require('../src/screens/prototype/prototypeMapRoute');
+    subscribePrototypeMapRoute.mockImplementation((callback) => {
+      callback({
+        coordinates: [
+          { latitude: -23.55, longitude: -46.63 },
+          { latitude: -23.56, longitude: -46.64 },
+        ],
+        destination: { latitude: -23.56, longitude: -46.64 },
+        destinationLabel: 'Destino stale',
+        destinationAddress: 'Rua stale, 123',
+      });
+      return jest.fn();
+    });
+
+    usePrototypeRideRuntime.mockReturnValue(
+      buildDriverRuntime({
+        presentationSyncing: true,
+        bookingStatus: 'started',
+      })
+    );
+
+    const navigation = { navigate: jest.fn(), replace: jest.fn(), canGoBack: jest.fn(() => false), goBack: jest.fn() };
+    render(<RobotaxiHomeScreen navigation={navigation} route={{ params: {} }} />);
+
+    await waitFor(() => {
+      expect(mockPrototypeMapLayer).toHaveBeenCalled();
+    });
+
+    const latestMapProps = mockPrototypeMapLayer.mock.calls.at(-1)?.[0] || {};
+    expect(latestMapProps.routeCoordinates).toEqual([]);
+    expect(latestMapProps.searchingMode).toBe(false);
+    expect(latestMapProps.destinationCoordinate).toBeNull();
+  });
+
+  it('does not render driver home surfaces before activation state resolves on boot', () => {
+    usePrototypeRideRuntime.mockReturnValue(
+      buildDriverRuntime({
+        driverActivationResolved: false,
+      })
+    );
+
+    const navigation = { navigate: jest.fn(), replace: jest.fn(), canGoBack: jest.fn(() => false), goBack: jest.fn() };
+    const { queryByTestId } = render(
+      <RobotaxiHomeScreen navigation={navigation} route={{ params: {} }} />
+    );
+
+    expect(queryByTestId('driver-home-toggle-online')).toBeNull();
   });
 
   it('retries the driver online QA automation when the home is stuck pending', async () => {

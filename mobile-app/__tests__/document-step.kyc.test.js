@@ -97,4 +97,48 @@ describe('DocumentStep (driver KYC docs)', () => {
     expect(payload.gender).toBe('F');
     expect(payload.cnhPdfMeta?.name).toBe('CNH-e.pdf');
   });
+
+  test('accepts vehicle PDF extraction as an optional onboarding artifact for the driver', async () => {
+    DocumentPicker.getDocumentAsync.mockResolvedValueOnce({
+      canceled: false,
+      assets: [
+        {
+          uri: 'file:///tmp/vehicle.pdf',
+          name: 'CRLV-e.pdf',
+          size: 98000,
+          mimeType: 'application/pdf',
+        },
+      ],
+    });
+
+    driverDocumentExtractionService.extractVehicleFromPDF.mockResolvedValueOnce({
+      success: true,
+      model: 'gpt-5.4-mini',
+      data: {
+        plate: 'ABC1D23',
+        renavam: '12345678901',
+      },
+    });
+
+    const { getByText } = render(
+      <DocumentStep
+        {...baseProps}
+        initialData={{
+          ...baseProps.initialData,
+          documentData: {
+            cpf: '123.456.789-01',
+            birthDate: '01/01/1990',
+            motherName: 'Maria da Silva',
+            gender: 'F',
+          },
+        }}
+      />,
+    );
+
+    fireEvent.press(getByText('Enviar agora ou deixar para o cadastro do 1º veículo'));
+    await waitFor(() => {
+      expect(driverDocumentExtractionService.extractVehicleFromPDF).toHaveBeenCalledTimes(1);
+    });
+    expect(getByText('CRLV-e.pdf')).toBeTruthy();
+  });
 });

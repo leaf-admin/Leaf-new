@@ -27,6 +27,22 @@ describe('friendlyErrorMessages', () => {
     expect(msg).toBe('Servico temporariamente indisponivel. Tente novamente em alguns minutos.');
   });
 
+  test('maps firebase auth too-many-requests code to a friendly rate limit message', () => {
+    const msg = toUserFriendlyMessage(
+      { code: 'auth/too-many-requests', message: 'Too many requests' },
+      { context: 'auth' }
+    );
+    expect(msg).toBe('Voce fez muitas tentativas em pouco tempo. Aguarde um pouco e tente novamente.');
+  });
+
+  test('maps native firebase 17010 code to a friendly rate limit message', () => {
+    const msg = toUserFriendlyMessage(
+      { nativeErrorCode: 17010, message: 'SMS verification failed' },
+      { context: 'auth' }
+    );
+    expect(msg).toBe('Voce fez muitas tentativas em pouco tempo. Aguarde um pouco e tente novamente.');
+  });
+
   test('sanitizes technical payload into safe fallback message', () => {
     const msg = toUserFriendlyMessage(
       '{"error":"Unhandled exception","stack":"TypeError: cannot read property x"}',

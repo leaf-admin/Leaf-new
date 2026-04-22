@@ -19,6 +19,7 @@ jest.mock('../src/config/NetworkConfig', () => ({
 }));
 
 import WebSocketManager from '../src/services/WebSocketManager';
+import rideCostTelemetryService from '../src/services/RideCostTelemetryService';
 
 function createSocketMock() {
   const handlers = new Map();
@@ -52,6 +53,7 @@ describe('WebSocketManager acceptRide correlation', () => {
   beforeEach(() => {
     WebSocketManager.instance = null;
     jest.clearAllMocks();
+    rideCostTelemetryService.resetForTests();
   });
 
   it('ignores rideAccepted events from another booking until the requested booking is confirmed', async () => {
@@ -126,6 +128,44 @@ describe('WebSocketManager acceptRide correlation', () => {
         success: true,
         bookingId: 'booking_target',
         driverId: 'driver_one_uid',
+      }),
+    );
+  });
+
+  it('does not leak telemetryContext into the acceptRide socket payload', async () => {
+    const manager = WebSocketManager.getInstance();
+    const socket = createSocketMock();
+    manager.socket = socket;
+    manager.authenticatedUserId = 'driver_one_uid';
+    manager.authenticatedUserType = 'driver';
+
+    const acceptPromise = manager.acceptRide('booking_target', {
+      driverId: 'driver_one_uid',
+      telemetryContext: {
+        bookingId: 'booking_target',
+        sourceMeta: { userId: 'driver_one_uid', userType: 'driver' },
+      },
+    });
+
+    expect(socket.emit).toHaveBeenCalledWith(
+      'acceptRide',
+      expect.objectContaining({
+        rideId: 'booking_target',
+        driverId: 'driver_one_uid',
+      }),
+    );
+    expect(socket.emit.mock.calls[0][1]).not.toHaveProperty('telemetryContext');
+
+    socket.trigger('rideAccepted', {
+      success: true,
+      bookingId: 'booking_target',
+      driverId: 'driver_one_uid',
+    });
+
+    await expect(acceptPromise).resolves.toEqual(
+      expect.objectContaining({
+        success: true,
+        bookingId: 'booking_target',
       }),
     );
   });

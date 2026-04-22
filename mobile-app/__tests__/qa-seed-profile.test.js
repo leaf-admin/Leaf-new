@@ -1,6 +1,32 @@
-import { restoreQaSeedProfile } from '../src/utils/qaSeedProfile';
+import { buildQaSeedProfile, restoreQaSeedProfile } from '../src/utils/qaSeedProfile';
 
 describe('qaSeedProfile', () => {
+  it('builds the canonical QA driver with approved activation by default', () => {
+    const seededDriver = buildQaSeedProfile({
+      uid: '8vg2kxxqi3TYKlpD6eBlWgYseIq2',
+    });
+
+    expect(seededDriver).toEqual(
+      expect.objectContaining({
+        uid: '8vg2kxxqi3TYKlpD6eBlWgYseIq2',
+        canGoOnline: true,
+        driverActivation: expect.objectContaining({
+          canGoOnline: true,
+          driverProfileStatus: 'approved',
+          vehicleProfileStatus: 'approved',
+        }),
+      }),
+    );
+    expect(seededDriver.profile).toEqual(
+      expect.objectContaining({
+        canGoOnline: true,
+        driverActivation: expect.objectContaining({
+          canGoOnline: true,
+        }),
+      }),
+    );
+  });
+
   it('restores generic seeded test users from stored user data', async () => {
     const AsyncStorage = {
       multiGet: jest.fn().mockResolvedValue([

@@ -144,6 +144,8 @@ function buildReceiptRuntime(overrides = {}) {
         fare: 38.4,
         value: 'R$ 38,40',
         route: 'Rua A -> Aeroporto Santos Dumont',
+        pickupAddress: 'Rua A, 10, Centro, Rio de Janeiro',
+        destinationAddress: 'Praça Senador Salgado Filho, Centro, Rio de Janeiro',
         paymentMethod: 'pix',
         driverId: 'driver_1',
         driverName: 'Motorista Leaf',
@@ -156,6 +158,8 @@ function buildReceiptRuntime(overrides = {}) {
       fare: 38.4,
       value: 'R$ 38,40',
       route: 'Rua A -> Aeroporto Santos Dumont',
+      pickupAddress: 'Rua A, 10, Centro, Rio de Janeiro',
+      destinationAddress: 'Praça Senador Salgado Filho, Centro, Rio de Janeiro',
       paymentMethod: 'pix',
       driverId: 'driver_1',
       driverName: 'Motorista Leaf',
@@ -326,9 +330,15 @@ describe('prototype ride screens', () => {
     usePrototypeRideRuntime.mockReturnValue(buildReceiptRuntime());
 
     const navigation = { navigate: jest.fn(), canGoBack: jest.fn(() => false), goBack: jest.fn() };
-    const { getByTestId } = render(
+    const { getByTestId, getByText } = render(
       <RobotaxiReceiptScreen navigation={navigation} route={{ params: {} }} />
     );
+
+    expect(getByText('Corrida concluída')).toBeTruthy();
+    expect(getByText('Detalhes do valor')).toBeTruthy();
+    expect(getByText('Motorista')).toBeTruthy();
+    expect(getByText('Motorista Leaf')).toBeTruthy();
+    expect(getByText('Avaliar viagem')).toBeTruthy();
 
     fireEvent.press(getByTestId('passenger-receipt-rate-trip-button'));
 
@@ -359,9 +369,104 @@ describe('prototype ride screens', () => {
       <RobotaxiReceiptScreen navigation={navigation} route={{ params: {} }} />
     );
 
+    expect(() => getByTestId('passenger-receipt-back-to-map-button')).not.toThrow();
     fireEvent.press(getByTestId('passenger-receipt-back-to-map-button'));
 
     expect(dismissCompletedReceipt).toHaveBeenCalled();
+    expect(navigation.goBack).toHaveBeenCalled();
+  });
+
+  it('closes the passenger receipt after rating without navigating back into itself', () => {
+    const dismissCompletedReceipt = jest.fn();
+    usePrototypeRideRuntime.mockReturnValue(
+      buildReceiptRuntime({ dismissCompletedReceipt })
+    );
+
+    const navigation = {
+      navigate: jest.fn(),
+      canGoBack: jest.fn(() => true),
+      goBack: jest.fn(),
+    };
+
+    const { getByTestId } = render(
+      <RobotaxiReceiptScreen
+        navigation={navigation}
+        route={{ params: { fromTrip: true, fromRating: true } }}
+      />
+    );
+
+    fireEvent.press(getByTestId('passenger-receipt-back-to-map-button'));
+
+    expect(dismissCompletedReceipt).toHaveBeenCalled();
+    expect(navigation.navigate).toHaveBeenCalledWith('RobotaxiPrototype');
+    expect(navigation.goBack).not.toHaveBeenCalled();
+  });
+
+  it('replaces the passenger back CTA with a close affordance in the header', () => {
+    usePrototypeRideRuntime.mockReturnValue(buildReceiptRuntime());
+
+    const navigation = { navigate: jest.fn(), canGoBack: jest.fn(() => false), goBack: jest.fn() };
+    const { getByTestId, queryByText } = render(
+      <RobotaxiReceiptScreen navigation={navigation} route={{ params: {} }} />
+    );
+
+    expect(getByTestId('passenger-receipt-back-to-map-button')).toBeTruthy();
+    expect(queryByText('Voltar para o mapa')).toBeNull();
+  });
+
+  it('renders the driver receipt with the resolved destination address and a visible back action', () => {
+    usePrototypeRideRuntime.mockReturnValue(
+      buildReceiptRuntime({
+        activeRole: 'driver',
+        tripHistory: [
+          buildReceiptRuntime().tripHistory[0],
+          {
+            id: 'trip_2',
+            fare: 24.5,
+            value: 'R$ 24,50',
+            date: '03 abr 2026',
+            pickupAddress: '1540 Mission St',
+            destinationAddress: '1 Ferry Building',
+            passengerId: 'customer_2',
+            passengerName: 'Passageiro 2',
+          },
+        ],
+      })
+    );
+
+    const navigation = { navigate: jest.fn(), canGoBack: jest.fn(() => false), goBack: jest.fn() };
+    const { getByTestId, getByText } = render(
+      <RobotaxiReceiptScreen navigation={navigation} route={{ params: {} }} />
+    );
+
+    expect(getByText('Valor recebido')).toBeTruthy();
+    expect(getByText('Rota final da corrida')).toBeTruthy();
+    expect(getByText('Tempo e distância finais')).toBeTruthy();
+    expect(getByText('Corridas recentes')).toBeTruthy();
+    expect(getByText('1 Ferry Building')).toBeTruthy();
+    expect(getByText('Praça Senador Salgado Filho')).toBeTruthy();
+    expect(getByTestId('driver-receipt-back-to-map-button')).toBeTruthy();
+  });
+
+  it('dismisses the driver receipt through the shared back action', () => {
+    usePrototypeRideRuntime.mockReturnValue(
+      buildReceiptRuntime({
+        activeRole: 'driver',
+      })
+    );
+
+    const navigation = {
+      navigate: jest.fn(),
+      canGoBack: jest.fn(() => true),
+      goBack: jest.fn(),
+    };
+
+    const { getByTestId } = render(
+      <RobotaxiReceiptScreen navigation={navigation} route={{ params: {} }} />
+    );
+
+    fireEvent.press(getByTestId('driver-receipt-back-to-map-button'));
+
     expect(navigation.goBack).toHaveBeenCalled();
   });
 
@@ -392,6 +497,31 @@ describe('prototype ride screens', () => {
     expect(getByText('1540 Mission St')).toBeTruthy();
     expect(getByText('1 Ferry Building')).toBeTruthy();
     expect(getAllByText('R$ 15,01')).toHaveLength(2);
+  });
+
+  it('prefers destinationAddress in trip history rows when dropoffAddress is absent', () => {
+    usePrototypeRideRuntime.mockReturnValue(
+      buildReceiptRuntime({
+        activeRole: 'customer',
+        tripHistory: [
+          {
+            id: 'trip_2',
+            date: '07 abr 2026',
+            value: 'R$ 22,40',
+            pickupAddress: 'Rua A, 10',
+            destinationAddress: 'Praça Senador Salgado Filho, Centro, Rio de Janeiro',
+          },
+        ],
+      })
+    );
+
+    const navigation = { navigate: jest.fn(), canGoBack: jest.fn(() => false), goBack: jest.fn() };
+    const { getByText, queryByText } = render(
+      <RobotaxiTripHistoryScreen navigation={navigation} route={{ key: 'trip-history' }} />
+    );
+
+    expect(getByText('Praça Senador Salgado Filho, Centro, Rio de Janeiro')).toBeTruthy();
+    expect(queryByText('Destino indisponivel')).toBeNull();
   });
 
   it('renders the passenger search card with time progress, rotating status and route summary', () => {

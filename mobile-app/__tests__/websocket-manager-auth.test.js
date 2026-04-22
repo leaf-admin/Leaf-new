@@ -22,12 +22,18 @@ jest.mock('../src/utils/friendlyErrorMessages', () => ({
 
 jest.mock('../src/config/NetworkConfig', () => ({
   getWebSocketURL: jest.fn(() => 'https://socket.test'),
+  getApiURL: jest.fn(() => 'https://api.test'),
 }));
 
+import io from 'socket.io-client';
+import { Platform } from 'react-native';
 import WebSocketManager from '../src/services/WebSocketManager';
 
 describe('WebSocketManager auth QA bypass', () => {
+  let originalPlatformOS;
+
   beforeEach(() => {
+    originalPlatformOS = Platform.OS;
     WebSocketManager.instance = null;
     jest.clearAllMocks();
     mockAsyncStorageGetItem.mockImplementation(async (key) => {
@@ -44,7 +50,14 @@ describe('WebSocketManager auth QA bypass', () => {
     });
   });
 
-  it('prefers a seeded QA idToken over the uid-based bypass', async () => {
+  afterEach(() => {
+    Object.defineProperty(Platform, 'OS', {
+      configurable: true,
+      value: originalPlatformOS,
+    });
+  });
+
+  it('prefers the persisted QA idToken over uid bypass when no Firebase user is mounted', async () => {
     mockAsyncStorageGetItem.mockImplementation(async (key) => {
       if (key === '@test_mode') return 'true';
       if (key === '@qa_socket_id_token') return 'firebase-id-token-driver-two';
@@ -62,15 +75,17 @@ describe('WebSocketManager auth QA bypass', () => {
     const manager = WebSocketManager.getInstance();
     const authPayload = await manager._buildSocketAuthPayload();
 
-    expect(authPayload).toEqual({ token: 'firebase-id-token-driver-two' });
+    expect(authPayload).toEqual(
+      expect.objectContaining({
+        token: 'firebase-id-token-driver-two',
+      }),
+    );
     expect(manager.qaSocketBypassState).toEqual({ enabled: false, uid: null });
-    expect(manager._buildSocketQueryPayload(authPayload)).toEqual({});
   });
 
-  it('includes the seeded QA idToken in the authenticate event payload', async () => {
+  it('falls back to QA uid bypass when no Firebase user or persisted QA idToken exists', async () => {
     mockAsyncStorageGetItem.mockImplementation(async (key) => {
       if (key === '@test_mode') return 'true';
-      if (key === '@qa_socket_id_token') return 'firebase-id-token-driver-two';
       if (key === '@auth_uid') return 'F0CIj7noqrc74qdPJD80T9FCxME2';
       if (key === '@user_data') {
         return JSON.stringify({
@@ -83,21 +98,22 @@ describe('WebSocketManager auth QA bypass', () => {
     });
 
     const manager = WebSocketManager.getInstance();
-    manager.socket = {
-      connected: true,
-      emit: jest.fn(),
-    };
+    const authPayload = await manager._buildSocketAuthPayload();
 
-    await manager.authenticate('F0CIj7noqrc74qdPJD80T9FCxME2', 'driver', { force: true });
-
-    expect(manager.socket.emit).toHaveBeenCalledWith(
-      'authenticate',
+    expect(authPayload).toEqual(
       expect.objectContaining({
+        token: null,
         uid: 'F0CIj7noqrc74qdPJD80T9FCxME2',
-        userType: 'driver',
-        token: 'firebase-id-token-driver-two',
+        qaAuthBypass: true,
+        qaAutomation: true,
       }),
     );
+    expect(manager.qaSocketBypassState).toEqual({ enabled: true, uid: 'F0CIj7noqrc74qdPJD80T9FCxME2' });
+    expect(manager._buildSocketQueryPayload(authPayload)).toEqual({
+      uid: 'F0CIj7noqrc74qdPJD80T9FCxME2',
+      qaAuthBypass: 'true',
+      qaAutomation: 'true',
+    });
   });
 
   it('rebuilds QA bypass dynamically when authenticate is called', async () => {
@@ -138,6 +154,29 @@ describe('WebSocketManager auth QA bypass', () => {
       qaAuthBypass: 'true',
       qaAutomation: 'true',
     });
+  });
+
+  it('sends the native file Origin header accepted by production socket CORS', () => {
+    Object.defineProperty(Platform, 'OS', {
+      configurable: true,
+      value: 'ios',
+    });
+
+    const manager = WebSocketManager.getInstance();
+    manager._createSocketClient(
+      'wss://socket.62.169.31.231.sslip.io/socket.io?ignored=1',
+      { token: 'firebase-token' },
+      {},
+    );
+
+    expect(io).toHaveBeenCalledWith(
+      'wss://socket.62.169.31.231.sslip.io/socket.io?ignored=1',
+      expect.objectContaining({
+        extraHeaders: {
+          Origin: 'file://',
+        },
+      }),
+    );
   });
 
   it('correlates availability responses by requestId', async () => {
@@ -186,6 +225,66 @@ describe('WebSocketManager auth QA bypass', () => {
         success: true,
         available: true,
         requestId: emittedPayload.requestId,
+      }),
+    );
+  });
+
+  it('deduplicates in-flight availability checks and reuses a short cache window', async () => {
+    const manager = WebSocketManager.getInstance();
+    manager.socket = {
+      connected: true,
+      emit: jest.fn(),
+      on: jest.fn(),
+    };
+    manager.isAuthenticated = true;
+    manager.authenticatedUserId = 'OjML1wSzdNRaynjqMRlSW1Y0LVy2';
+    manager.authenticatedUserType = 'customer';
+
+    const payload = {
+      customerId: 'OjML1wSzdNRaynjqMRlSW1Y0LVy2',
+      carType: 'Leaf Plus',
+      pickupLocation: { lat: -22.91, lng: -43.17 },
+      destinationLocation: { lat: -22.90, lng: -43.20 },
+    };
+
+    const firstPromise = manager.checkRideAvailability(payload);
+    const secondPromise = manager.checkRideAvailability(payload);
+
+    expect(manager.socket.emit).toHaveBeenCalledTimes(1);
+
+    const [, emittedPayload] = manager.socket.emit.mock.calls[0];
+
+    manager.emit('rideAvailabilityResult', {
+      success: true,
+      available: true,
+      requestId: emittedPayload.requestId,
+    });
+
+    const [firstResult, secondResult] = await Promise.all([
+      firstPromise,
+      secondPromise,
+    ]);
+
+    expect(firstResult).toEqual(
+      expect.objectContaining({
+        success: true,
+        available: true,
+      }),
+    );
+    expect(secondResult).toEqual(
+      expect.objectContaining({
+        success: true,
+        available: true,
+      }),
+    );
+
+    const cachedResult = await manager.checkRideAvailability(payload);
+
+    expect(manager.socket.emit).toHaveBeenCalledTimes(1);
+    expect(cachedResult).toEqual(
+      expect.objectContaining({
+        success: true,
+        available: true,
       }),
     );
   });

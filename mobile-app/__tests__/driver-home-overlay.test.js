@@ -20,7 +20,7 @@ describe("DriverHomeOverlay", () => {
     expect(getByLabelText("driver-home-toggle-online-pending")).toBeTruthy();
   });
 
-  it('shows "Reconectando..." while the driver is pending and already online', () => {
+  it('keeps "Online" while the driver is already online even if pending flag is stale', () => {
     const { getByLabelText, getByText } = render(
       <DriverHomeOverlay
         driverId="driver_1"
@@ -33,8 +33,8 @@ describe("DriverHomeOverlay", () => {
       />,
     );
 
-    expect(getByText("Reconectando...")).toBeTruthy();
-    expect(getByLabelText("driver-home-toggle-online-pending")).toBeTruthy();
+    expect(getByText("Online")).toBeTruthy();
+    expect(getByLabelText("driver-home-toggle-online-online")).toBeTruthy();
   });
 
   it('does not flash "Ativação pendente" while activation is still resolving', () => {
@@ -50,9 +50,9 @@ describe("DriverHomeOverlay", () => {
       />,
     );
 
-    expect(getByText("Reconectando...")).toBeTruthy();
+    expect(getByText("Online")).toBeTruthy();
     expect(queryByText("Ativação pendente")).toBeNull();
-    expect(getByLabelText("driver-home-toggle-online-pending")).toBeTruthy();
+    expect(getByLabelText("driver-home-toggle-online-online")).toBeTruthy();
   });
 
   it("exposes stable offline and online toggle states for automation", () => {
