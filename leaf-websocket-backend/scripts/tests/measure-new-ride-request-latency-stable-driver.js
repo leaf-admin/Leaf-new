@@ -5,14 +5,15 @@
  * Evita ruído de corrida entre "subir online" e "disparo de booking".
  *
  * Uso:
- *   WS_URL=https://api.147.182.204.181.sslip.io RUNS=10 node scripts/tests/measure-new-ride-request-latency-stable-driver.js
+ *   WS_URL=https://socket.62.169.31.231.sslip.io API_BASE_URL=https://api.62.169.31.231.sslip.io RUNS=10 node scripts/tests/measure-new-ride-request-latency-stable-driver.js
  */
 
-const axios = require('axios');
 const WebSocketTestClient = require('../../tests/e2e/backend/__helpers__/websocket-test-client');
 
-const WS_URL = process.env.WS_URL || 'https://api.147.182.204.181.sslip.io';
+const WS_URL = process.env.WS_URL || 'https://socket.62.169.31.231.sslip.io';
+const API_BASE_URL = process.env.API_BASE_URL || 'https://api.62.169.31.231.sslip.io';
 const RUNS = Number(process.env.RUNS || 10);
+const ONLINE_MAX_ATTEMPTS = Number(process.env.ONLINE_MAX_ATTEMPTS || 5);
 const PASSENGER_UID = process.env.TEST_PASSENGER_UID || 'iDiAKrLjeDWbIOYFEqkHLS3JBGN2';
 const DRIVER_UID = process.env.TEST_DRIVER_UID || '5zgeX92yleYa2wH8JnMvqOU76fX2';
 
@@ -32,6 +33,23 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+async function postJson(url, body, timeoutMs = 20000) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+      signal: controller.signal
+    });
+    const data = await response.json().catch(() => ({}));
+    return { ok: response.ok, status: response.status, data };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 function percentile(sorted, p) {
   if (!sorted.length) return null;
   const k = (sorted.length - 1) * (p / 100);
@@ -41,30 +59,88 @@ function percentile(sorted, p) {
   return sorted[f] * (c - k) + sorted[c] * (k - f);
 }
 
-function httpBaseFromWsUrl(input) {
-  if (input.startsWith('ws://')) return `http://${input.replace(/^ws:\/\//, '')}`;
-  if (input.startsWith('wss://')) return `https://${input.replace(/^wss:\/\//, '')}`;
-  return input;
+function onceStatusAck(driverClient, payload, timeoutMs = 12000) {
+  return new Promise((resolve) => {
+    let resolved = false;
+
+    const done = (result) => {
+      if (resolved) return;
+      resolved = true;
+      driverClient.socket.removeListener('driverStatusUpdated', successHandler);
+      driverClient.socket.removeListener('driverStatusError', errorHandler);
+      resolve(result);
+    };
+
+    const successHandler = (data) => done({ ok: true, data });
+    const errorHandler = (error) => done({ ok: false, error });
+
+    const timeout = setTimeout(() => {
+      clearTimeout(timeout);
+      done({ ok: false, error: { code: 'STATUS_TIMEOUT', error: 'Timeout aguardando driverStatus ack' } });
+    }, timeoutMs);
+
+    driverClient.socket.once('driverStatusUpdated', (data) => {
+      clearTimeout(timeout);
+      successHandler(data);
+    });
+    driverClient.socket.once('driverStatusError', (error) => {
+      clearTimeout(timeout);
+      errorHandler(error);
+    });
+
+    driverClient.socket.emit('setDriverStatus', payload);
+  });
 }
 
-async function waitDriverReady(httpBase, driverId, timeoutMs = 30000) {
-  const started = Date.now();
-  while (Date.now() - started < timeoutMs) {
-    try {
-      const response = await axios.get(`${httpBase}/api/driver-status/${driverId}`, { timeout: 5000 });
-      const canReceiveRequests = response?.data?.canReceiveRequests === true;
-      const inDriverGeo = response?.data?.details?.isOnlineInRedis === true;
-      if (canReceiveRequests && inDriverGeo) return true;
-    } catch (_error) {
-      // retry
+async function ensureDriverOnline(driverClient) {
+  for (let attempt = 1; attempt <= ONLINE_MAX_ATTEMPTS; attempt += 1) {
+    const heading = (Date.now() / 100) % 360;
+    const ack = await onceStatusAck(driverClient, {
+      status: 'online',
+      isOnline: true,
+      lat: PICKUP.lat + (attempt * 0.00001),
+      lng: PICKUP.lng + (attempt * 0.00001),
+      heading,
+      speed: 0
+    }, 12000);
+
+    if (ack.ok) {
+      return { success: true, attempts: attempt, ack: ack.data };
     }
-    await sleep(800);
+
+    const code = String(ack.error?.code || '').toUpperCase();
+    const retryAfter = Number(ack.error?.retryAfterSec || 1);
+
+    if (code === 'LOCATION_REQUIRED' || code === 'ONLINE_NOT_READY') {
+      driverClient.socket.emit('updateLocation', {
+        lat: PICKUP.lat + 0.0002,
+        lng: PICKUP.lng + 0.0002,
+        tripStatus: 'idle',
+        isInTrip: false,
+        seq: Date.now() % 100000
+      });
+      await sleep(Math.max(700, retryAfter * 1000));
+      continue;
+    }
+
+    return {
+      success: false,
+      attempts: attempt,
+      error: ack.error || { code: 'UNKNOWN', error: 'Falha ao colocar driver online' }
+    };
   }
-  return false;
+
+  return {
+    success: false,
+    attempts: ONLINE_MAX_ATTEMPTS,
+    error: {
+      code: 'ONLINE_RETRY_EXHAUSTED',
+      error: 'Tentativas para ficar online esgotadas'
+    }
+  };
 }
 
 async function run() {
-  const httpBase = httpBaseFromWsUrl(WS_URL);
   const driver = new WebSocketTestClient(WS_URL, { transports: ['websocket'], timeout: 30000, reconnection: false });
   const passenger = new WebSocketTestClient(WS_URL, { transports: ['websocket'], timeout: 30000, reconnection: false });
 
@@ -102,21 +178,37 @@ async function run() {
     sendLocation();
     heartbeatTimer = setInterval(sendLocation, 1200);
 
-    const ready = await waitDriverReady(httpBase, DRIVER_UID, 40000);
-    if (!ready) {
-      throw new Error('Driver não ficou pronto para receber corridas em tempo hábil');
+    const online = await ensureDriverOnline(driver);
+    if (!online.success) {
+      throw new Error(`Driver não ficou online: ${online.error?.code || 'unknown'}`);
     }
 
     for (let i = 1; i <= RUNS; i += 1) {
       process.stdout.write(`Run ${i}/${RUNS} ... `);
       let bookingId = null;
       try {
-        const driverReady = await waitDriverReady(httpBase, DRIVER_UID, 45000);
-        if (!driverReady) {
-          throw new Error('Driver não ficou pronto antes da rodada');
+        const onlineRound = await ensureDriverOnline(driver);
+        if (!onlineRound.success) {
+          throw new Error(`Driver não ficou pronto antes da rodada (${onlineRound.error?.code || 'unknown'})`);
         }
 
         const startedAt = Date.now();
+        const rideId = `ride_${Date.now()}_${i}`;
+        const paymentAdvance = await postJson(`${API_BASE_URL}/api/payment/advance`, {
+          passengerId: PASSENGER_UID,
+          amount: 2750,
+          rideId,
+          rideDetails: {
+            origin: PICKUP.address,
+            destination: DESTINATION.address
+          },
+          passengerName: 'Leaf Passageiro Teste',
+          passengerEmail: 'qa@leaf.local'
+        }, 20000);
+        const chargeId = String(paymentAdvance?.data?.chargeId || '').trim();
+        if (!paymentAdvance.ok || !chargeId) {
+          throw new Error(paymentAdvance?.data?.message || 'payment_advance_failed');
+        }
 
         const booking = await passenger.createBooking({
           customerId: PASSENGER_UID,
@@ -126,8 +218,8 @@ async function run() {
           paymentMethod: 'pix',
           paymentStatus: 'confirmed',
           paymentData: {
-            chargeId: `charge_${Date.now()}_${i}`,
-            rideId: `ride_${Date.now()}_${i}`,
+            chargeId,
+            rideId,
             amountInCents: 2750
           },
           idempotencyKey: `stable_latency_${Date.now()}_${i}`

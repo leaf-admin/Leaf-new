@@ -79,6 +79,7 @@ node --check "$BACKEND_LOCAL_DIR/commands/RequestRideCommand.js"
 node --check "$BACKEND_LOCAL_DIR/routes/dashboard.js"
 node --check "$BACKEND_LOCAL_DIR/routes/pricing.js"
 node --check "$BACKEND_LOCAL_DIR/services/fare-estimation-service.js"
+node --check "$BACKEND_LOCAL_DIR/services/create-booking-availability-precheck.js"
 node --check "$BACKEND_LOCAL_DIR/services/gradual-radius-expander.js"
 node --check "$BACKEND_LOCAL_DIR/services/h3-map-service.js"
 node --check "$BACKEND_LOCAL_DIR/services/pricing-context-store.js"
@@ -164,6 +165,7 @@ scp_cmd "$BACKEND_LOCAL_DIR/routes/dashboard.js" "$VPS_USER@$VPS_IP:$REMOTE_BACK
 scp_cmd "$BACKEND_LOCAL_DIR/routes/pricing.js" "$VPS_USER@$VPS_IP:$REMOTE_BACKEND_DIR/routes/pricing.js"
 scp_cmd "$BACKEND_LOCAL_DIR/services/dashboard-websocket.js" "$VPS_USER@$VPS_IP:$REMOTE_BACKEND_DIR/services/dashboard-websocket.js"
 scp_cmd "$BACKEND_LOCAL_DIR/services/fare-estimation-service.js" "$VPS_USER@$VPS_IP:$REMOTE_BACKEND_DIR/services/fare-estimation-service.js"
+scp_cmd "$BACKEND_LOCAL_DIR/services/create-booking-availability-precheck.js" "$VPS_USER@$VPS_IP:$REMOTE_BACKEND_DIR/services/create-booking-availability-precheck.js"
 scp_cmd "$BACKEND_LOCAL_DIR/services/gradual-radius-expander.js" "$VPS_USER@$VPS_IP:$REMOTE_BACKEND_DIR/services/gradual-radius-expander.js"
 scp_cmd "$BACKEND_LOCAL_DIR/services/h3-map-service.js" "$VPS_USER@$VPS_IP:$REMOTE_BACKEND_DIR/services/h3-map-service.js"
 scp_cmd "$BACKEND_LOCAL_DIR/services/pricing-context-store.js" "$VPS_USER@$VPS_IP:$REMOTE_BACKEND_DIR/services/pricing-context-store.js"
@@ -214,9 +216,9 @@ rsync -az --delete \
 
 echo "[deploy] Aplicando env de produção do dashboard..."
 ssh_cmd "cat > '$REMOTE_DASHBOARD_DIR/.env.production.local' <<'ENV_EOF'
-NEXT_PUBLIC_API_URL=https://api.147.182.204.181.sslip.io
-NEXT_PUBLIC_WS_URL=https://socket.147.182.204.181.sslip.io
-NEXT_PUBLIC_API_DOCS_URL=https://api.147.182.204.181.sslip.io/api/docs
+NEXT_PUBLIC_API_URL=https://api.62.169.31.231.sslip.io
+NEXT_PUBLIC_WS_URL=https://socket.62.169.31.231.sslip.io
+NEXT_PUBLIC_API_DOCS_URL=https://api.62.169.31.231.sslip.io/api/docs
 ENV_EOF"
 
 if [[ -n "$GOOGLE_MAPS_PUBLIC_KEY" ]]; then
@@ -332,5 +334,5 @@ ssh_cmd "
 "
 
 echo "[deploy] OK"
-echo "[deploy] Backend:   https://api.147.182.204.181.sslip.io/api/health"
+echo "[deploy] Backend:   https://api.62.169.31.231.sslip.io/api/health"
 echo "[deploy] Dashboard: http://$VPS_IP:$DASHBOARD_PORT/login"

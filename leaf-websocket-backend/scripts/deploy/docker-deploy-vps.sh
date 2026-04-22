@@ -17,7 +17,7 @@ NC='\033[0m' # No Color
 
 # Configurações da VPS
 VPS_USER="${VPS_USER:-root}"
-VPS_IP="${VPS_IP:-147.93.66.253}"
+VPS_IP="${VPS_IP:-147.182.204.181}"
 VPS_PATH="${VPS_PATH:-/opt/leaf-app}"
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 
@@ -166,4 +166,3 @@ echo -e "  Reiniciar: ${BLUE}ssh $VPS_USER@$VPS_IP 'cd $VPS_PATH && docker-compo
 echo -e "  Parar: ${BLUE}ssh $VPS_USER@$VPS_IP 'cd $VPS_PATH && docker-compose down'${NC}"
 echo ""
 echo -e "${GREEN}🎉 Deploy concluído!${NC}"
-

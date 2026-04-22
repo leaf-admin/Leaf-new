@@ -10,7 +10,7 @@
  *
  * Example:
  *   node scripts/stress-test/sustained-active-rides-capacity.cjs \
- *     --url https://api.147.182.204.181.sslip.io \
+ *     --url https://api.62.169.31.231.sslip.io \
  *     --drivers 120 \
  *     --passengers 150 \
  *     --profile production
@@ -24,8 +24,10 @@ const fs = require('fs');
 const path = require('path');
 const axios = require('axios');
 
+const redisPool = require('../../utils/redis-pool');
 const WebSocketTestClient = require('../../tests/e2e/backend/__helpers__/websocket-test-client');
 const { getIdTokenForUid } = require('../../tests/e2e/backend/__helpers__/firebase-id-token');
+const { deriveDispatchWaveSummaryFromTrace } = require('./dispatch-wave-summary.cjs');
 
 const argv = process.argv.slice(2);
 
@@ -74,6 +76,8 @@ Scenario profile:
 Runtime controls:
   --token-concurrency <n>                Firebase token generation concurrency (default: 20)
   --connect-concurrency <n>              Socket connect/auth concurrency (default: 20)
+  --driver-connect-concurrency <n>       Driver connect/auth concurrency (default: connect-concurrency)
+  --passenger-connect-concurrency <n>    Passenger connect/auth concurrency (default: connect-concurrency)
   --readiness-concurrency <n>            Driver readiness checks concurrency (default: 16)
   --driver-status-token <token>          Token para /api/driver-status* (x-driver-status-token)
   --max-start-concurrency <n>            Max parallel ride starts (default: 12)
@@ -81,10 +85,15 @@ Runtime controls:
   --loop-tick-ms <n>                     Main loop tick (default: 250)
   --heartbeat-ms <n>                     Driver location heartbeat (default: 1200)
   --payment-retries <n>                  confirmPayment retries (default: 4)
+  --create-booking-retries <n>           createBooking retries em transientes (default: 2)
+  --create-booking-timeout-ms <n>        Timeout do createBooking (default: 45000)
+  --create-booking-retry-backoff-ms <n>  Backoff base entre retries do createBooking (default: 600)
   --dispatch-timeout-ms <n>              Wait for newRideRequest (default: 45000)
   --readiness-timeout-ms <n>             Wait for canReceiveRequests (default: 30000)
+  --driver-arrived-wait-ms <n>           Grace wait for passenger driverArrived event before startTrip (default: 1500)
   --pre-booking-readiness-recheck-ms <n> Revalidar readiness antes do booking quando stale (default: 0 = desabilitado)
   --drain-timeout-ms <n>                 End-of-test drain timeout (default: 300000)
+  --disable-redis-trace <bool>           Skip Redis dispatch trace enrichment in report (default: false)
   --strict-ready <true|false>            Exclude drivers that never become ready (default: true)
   --force-real-payment <true|false>      Use real payment advance/webhook and mockPayment=false (default: false)
   --mock-complete-payment <true|false>   Use mock on completeTrip only (default: true)
@@ -111,6 +120,10 @@ if (argv.includes('--help') || argv.includes('-h')) {
 
 const WS_URL = arg('--url', process.env.WS_URL || 'http://127.0.0.1:3001');
 const HTTP_BASE = wsToHttp(WS_URL);
+const DISABLE_REDIS_TRACE = argBool(
+  '--disable-redis-trace',
+  String(process.env.STRESS_DISABLE_REDIS_TRACE || '').trim().toLowerCase() === 'true'
+);
 const DRIVER_COUNT = Math.max(1, argInt('--drivers', Number.parseInt(process.env.STRESS_DRIVERS || '40', 10)));
 const PASSENGER_COUNT = Math.max(
   1,
@@ -120,6 +133,14 @@ const UID_PREFIX = arg('--uid-prefix', `capacity_${Date.now()}`);
 const PROFILE = arg('--profile', 'production');
 const TOKEN_CONCURRENCY = Math.max(1, argInt('--token-concurrency', 20));
 const CONNECT_CONCURRENCY = Math.max(1, argInt('--connect-concurrency', 20));
+const DRIVER_CONNECT_CONCURRENCY = Math.max(
+  1,
+  argInt('--driver-connect-concurrency', CONNECT_CONCURRENCY)
+);
+const PASSENGER_CONNECT_CONCURRENCY = Math.max(
+  1,
+  argInt('--passenger-connect-concurrency', CONNECT_CONCURRENCY)
+);
 const READINESS_CONCURRENCY = Math.max(1, argInt('--readiness-concurrency', 16));
 const DRIVER_STATUS_TOKEN = String(
   arg(
@@ -132,11 +153,17 @@ const DRIVER_STATUS_TOKEN = String(
 ).trim();
 const MAX_START_CONCURRENCY = Math.max(1, argInt('--max-start-concurrency', 12));
 const MAX_COMPLETE_CONCURRENCY = Math.max(1, argInt('--max-complete-concurrency', 12));
+const CONNECT_AUTH_TIMEOUT_MS = Math.max(1000, argInt('--connect-auth-timeout-ms', 30000));
+const CONNECT_AUTH_RETRIES = Math.max(0, argInt('--connect-auth-retries', 1));
 const HEARTBEAT_MS = Math.max(500, argInt('--heartbeat-ms', 1200));
 const LOOP_TICK_MS = Math.max(80, argInt('--loop-tick-ms', 250));
 const PAYMENT_RETRIES = Math.max(1, argInt('--payment-retries', 4));
+const CREATE_BOOKING_RETRIES = Math.max(1, argInt('--create-booking-retries', 2));
+const CREATE_BOOKING_TIMEOUT_MS = Math.max(10000, argInt('--create-booking-timeout-ms', 45000));
+const CREATE_BOOKING_RETRY_BACKOFF_MS = Math.max(100, argInt('--create-booking-retry-backoff-ms', 600));
 const DISPATCH_TIMEOUT_MS = Math.max(8000, argInt('--dispatch-timeout-ms', 45000));
 const READINESS_TIMEOUT_MS = Math.max(5000, argInt('--readiness-timeout-ms', 30000));
+const DRIVER_ARRIVED_WAIT_MS = Math.max(0, argInt('--driver-arrived-wait-ms', 1500));
 const PRE_BOOKING_READINESS_RECHECK_MS = Math.max(0, argInt('--pre-booking-readiness-recheck-ms', 0));
 const DRAIN_TIMEOUT_MS = Math.max(10000, argInt('--drain-timeout-ms', 300000));
 const STRICT_READY = argBool('--strict-ready', true);
@@ -197,8 +224,12 @@ const state = {
       loopTickMs: LOOP_TICK_MS,
       heartbeatMs: HEARTBEAT_MS,
       paymentRetries: PAYMENT_RETRIES,
+      createBookingRetries: CREATE_BOOKING_RETRIES,
+      createBookingTimeoutMs: CREATE_BOOKING_TIMEOUT_MS,
+      createBookingRetryBackoffMs: CREATE_BOOKING_RETRY_BACKOFF_MS,
       dispatchTimeoutMs: DISPATCH_TIMEOUT_MS,
       readinessTimeoutMs: READINESS_TIMEOUT_MS,
+      driverArrivedWaitMs: DRIVER_ARRIVED_WAIT_MS,
       driverStatusTokenConfigured: Boolean(DRIVER_STATUS_TOKEN),
       readinessMode: DRIVER_STATUS_TOKEN ? 'driver_status_http' : (ALLOW_PROVISIONAL_READY ? 'provisional_socket_only' : 'driver_status_http_missing_token'),
       preBookingReadinessRecheckMs: PRE_BOOKING_READINESS_RECHECK_MS,
@@ -215,6 +246,7 @@ const state = {
       },
       readyDrivers: 0
     },
+    dispatchRideSamples: [],
     windows: [],
     metrics: {
       startedRides: 0,
@@ -234,6 +266,54 @@ const state = {
         tripDuration: [],
         completeTrip: [],
         fullFlowToStart: []
+      },
+      dispatchWaveMs: {
+        acceptedWave: [],
+        waveCount: [],
+        totalCandidates: [],
+        totalNotified: [],
+        totalFailed: [],
+        acceptedRadiusKm: [],
+        directCount: [],
+        acceptedSourceCounts: {},
+        failureReasonCounts: {}
+      },
+      serverPerfMs: {
+        createBooking: {
+          rateLimit: [],
+          validation: [],
+          activeGuard: [],
+          payment: [],
+          backpressure: [],
+          policy: [],
+          idempotency: [],
+          geofence: [],
+          availability: [],
+          preCommand: [],
+          command: [],
+          bookingMeta: [],
+          responsePrepare: [],
+          postCommandBeforeResponse: [],
+          totalToResponse: [],
+	          commandBreakdown: {
+	            validate: [],
+	            prepare: [],
+	            fareEstimation: [],
+	            fareEstimationBuildPricingContext: [],
+	            fareEstimationContextLoadRedisPricingState: [],
+	            fareEstimationContextCollectSnapshot: [],
+	            fareEstimationContextAggregateCells: [],
+	            fareEstimationContextDeriveContext: [],
+	            fareEstimationContextTotal: [],
+	            fareEstimationRunDynamicPricingEngine: [],
+	            fareEstimationTotalInternal: [],
+	            bookingPayload: [],
+	            enqueue: [],
+	            stateUpdate: [],
+            eventBuild: [],
+            total: []
+          }
+        }
       },
       errors: {},
       errorSamples: {}
@@ -340,6 +420,185 @@ function summarizeLatency(values) {
     p99: percentile(sorted, 0.99),
     max: sorted[sorted.length - 1],
     avg: Number((sum / sorted.length).toFixed(2))
+  };
+}
+
+function parseOptionalRedisNumber(raw) {
+  if (raw === null || raw === undefined || raw === '') {
+    return Number.NaN;
+  }
+  const numeric = Number(raw);
+  return Number.isFinite(numeric) ? numeric : Number.NaN;
+}
+
+function pushFiniteLatency(target, value) {
+  const numeric = Number(value);
+  if (Array.isArray(target) && Number.isFinite(numeric) && numeric >= 0) {
+    target.push(numeric);
+  }
+}
+
+function incrementCounter(target, key) {
+  if (!target || !key) return;
+  target[key] = (target[key] || 0) + 1;
+}
+
+function incrementCounterBy(target, key, amount = 1) {
+  if (!target || !key) return;
+  const numeric = Number(amount);
+  if (!Number.isFinite(numeric) || numeric <= 0) return;
+  target[key] = (target[key] || 0) + numeric;
+}
+
+function incrementCounters(target, counts = null) {
+  if (!target || !counts || typeof counts !== 'object') return;
+  Object.entries(counts).forEach(([key, value]) => {
+    incrementCounterBy(target, key, value);
+  });
+}
+
+function recordDispatchWaveSummary(target, summary = null) {
+  if (!target || !summary) return;
+  pushFiniteLatency(target.acceptedWave, summary.acceptedWave);
+  pushFiniteLatency(target.waveCount, summary.waveCount);
+  pushFiniteLatency(target.totalCandidates, summary.totalCandidates);
+  pushFiniteLatency(target.totalNotified, summary.totalNotified);
+  pushFiniteLatency(target.totalFailed, summary.totalFailed);
+  pushFiniteLatency(target.acceptedRadiusKm, summary.acceptedRadiusKm);
+  pushFiniteLatency(target.directCount, summary.directCount);
+  incrementCounter(target.acceptedSourceCounts, summary.acceptedSource || 'unknown');
+  incrementCounters(target.failureReasonCounts, summary.failureReasonCounts);
+}
+
+function summarizeDispatchWaveMetrics(target = {}) {
+  return {
+    acceptedWave: summarizeLatency(target.acceptedWave || []),
+    waveCount: summarizeLatency(target.waveCount || []),
+    totalCandidates: summarizeLatency(target.totalCandidates || []),
+    totalNotified: summarizeLatency(target.totalNotified || []),
+    totalFailed: summarizeLatency(target.totalFailed || []),
+    acceptedRadiusKm: summarizeLatency(target.acceptedRadiusKm || []),
+    directCount: summarizeLatency(target.directCount || []),
+    acceptedSourceCounts: target.acceptedSourceCounts || {},
+    failureReasonCounts: target.failureReasonCounts || {}
+  };
+}
+
+function buildDispatchDiagnostics(samples = []) {
+  const normalized = (samples || []).filter(Boolean);
+  const withoutTrace = normalized.filter((sample) => !sample?.dispatchWaveSummary);
+  const unknownSource = normalized.filter((sample) => {
+    const source = String(sample?.dispatchWaveSummary?.acceptedSource || '').trim();
+    return sample?.dispatchWaveSummary && (!source || source === 'unknown');
+  });
+  const emptyWaveAttempts = normalized.filter((sample) => {
+    const summary = sample?.dispatchWaveSummary;
+    return summary && Number(summary.waveCount || 0) > 0 && Number(summary.totalCandidates || 0) === 0;
+  });
+  const zeroWave = normalized.filter((sample) => {
+    const summary = sample?.dispatchWaveSummary;
+    return !summary || Number(summary.waveCount || 0) === 0;
+  });
+
+  return {
+    totalSamples: normalized.length,
+    withoutTraceCount: withoutTrace.length,
+    unknownSourceCount: unknownSource.length,
+    emptyWaveAttemptCount: emptyWaveAttempts.length,
+    zeroWaveCount: zeroWave.length,
+    slowest: [...normalized]
+      .sort((a, b) => (Number(b.bookingToDispatchMs) || 0) - (Number(a.bookingToDispatchMs) || 0))
+      .slice(0, 12)
+      .map((sample) => ({
+        bookingId: sample.bookingId,
+        windowName: sample.windowName,
+        bookingToDispatchMs: sample.bookingToDispatchMs,
+        acceptRideMs: sample.acceptRideMs,
+        createBookingMs: sample.createBookingMs,
+        dispatchWaveSummary: sample.dispatchWaveSummary || null
+      }))
+  };
+}
+
+function recordCreateBookingServerPerf(target, bookingResponse) {
+  const perf = bookingResponse?.data?.perfMs;
+  if (!target || !perf || typeof perf !== 'object') {
+    return;
+  }
+
+  pushFiniteLatency(target.rateLimit, perf.rateLimit);
+  pushFiniteLatency(target.validation, perf.validation);
+  pushFiniteLatency(target.activeGuard, perf.activeGuard);
+  pushFiniteLatency(target.payment, perf.payment);
+  pushFiniteLatency(target.backpressure, perf.backpressure);
+  pushFiniteLatency(target.policy, perf.policy);
+  pushFiniteLatency(target.idempotency, perf.idempotency);
+  pushFiniteLatency(target.geofence, perf.geofence);
+  pushFiniteLatency(target.availability, perf.availability);
+  pushFiniteLatency(target.preCommand, perf.preCommand);
+  pushFiniteLatency(target.command, perf.command);
+  pushFiniteLatency(target.bookingMeta, perf.bookingMeta);
+  pushFiniteLatency(target.responsePrepare, perf.responsePrepare);
+  pushFiniteLatency(target.postCommandBeforeResponse, perf.postCommandBeforeResponse);
+  pushFiniteLatency(target.totalToResponse, perf.totalToResponse);
+
+  const commandBreakdown = perf.commandBreakdown || {};
+  if (target.commandBreakdown && typeof target.commandBreakdown === 'object') {
+	    pushFiniteLatency(target.commandBreakdown.validate, commandBreakdown.validate);
+	    pushFiniteLatency(target.commandBreakdown.prepare, commandBreakdown.prepare);
+	    pushFiniteLatency(target.commandBreakdown.fareEstimation, commandBreakdown.fareEstimation);
+	    pushFiniteLatency(target.commandBreakdown.fareEstimationBuildPricingContext, commandBreakdown.fareEstimationBuildPricingContext);
+	    pushFiniteLatency(target.commandBreakdown.fareEstimationContextLoadRedisPricingState, commandBreakdown.fareEstimationContextLoadRedisPricingState);
+	    pushFiniteLatency(target.commandBreakdown.fareEstimationContextCollectSnapshot, commandBreakdown.fareEstimationContextCollectSnapshot);
+	    pushFiniteLatency(target.commandBreakdown.fareEstimationContextAggregateCells, commandBreakdown.fareEstimationContextAggregateCells);
+	    pushFiniteLatency(target.commandBreakdown.fareEstimationContextDeriveContext, commandBreakdown.fareEstimationContextDeriveContext);
+	    pushFiniteLatency(target.commandBreakdown.fareEstimationContextTotal, commandBreakdown.fareEstimationContextTotal);
+	    pushFiniteLatency(target.commandBreakdown.fareEstimationRunDynamicPricingEngine, commandBreakdown.fareEstimationRunDynamicPricingEngine);
+	    pushFiniteLatency(target.commandBreakdown.fareEstimationTotalInternal, commandBreakdown.fareEstimationTotalInternal);
+	    pushFiniteLatency(target.commandBreakdown.bookingPayload, commandBreakdown.bookingPayload);
+	    pushFiniteLatency(target.commandBreakdown.enqueue, commandBreakdown.enqueue);
+	    pushFiniteLatency(target.commandBreakdown.stateUpdate, commandBreakdown.stateUpdate);
+    pushFiniteLatency(target.commandBreakdown.eventBuild, commandBreakdown.eventBuild);
+    pushFiniteLatency(target.commandBreakdown.total, commandBreakdown.total);
+  }
+}
+
+function summarizeCreateBookingServerPerf(target = {}) {
+  const commandBreakdown = target.commandBreakdown || {};
+  return {
+    rateLimit: summarizeLatency(target.rateLimit || []),
+    validation: summarizeLatency(target.validation || []),
+    activeGuard: summarizeLatency(target.activeGuard || []),
+    payment: summarizeLatency(target.payment || []),
+    backpressure: summarizeLatency(target.backpressure || []),
+    policy: summarizeLatency(target.policy || []),
+    idempotency: summarizeLatency(target.idempotency || []),
+    geofence: summarizeLatency(target.geofence || []),
+    availability: summarizeLatency(target.availability || []),
+    preCommand: summarizeLatency(target.preCommand || []),
+    command: summarizeLatency(target.command || []),
+    bookingMeta: summarizeLatency(target.bookingMeta || []),
+    responsePrepare: summarizeLatency(target.responsePrepare || []),
+    postCommandBeforeResponse: summarizeLatency(target.postCommandBeforeResponse || []),
+    totalToResponse: summarizeLatency(target.totalToResponse || []),
+    commandBreakdown: {
+	      validate: summarizeLatency(commandBreakdown.validate || []),
+	      prepare: summarizeLatency(commandBreakdown.prepare || []),
+	      fareEstimation: summarizeLatency(commandBreakdown.fareEstimation || []),
+	      fareEstimationBuildPricingContext: summarizeLatency(commandBreakdown.fareEstimationBuildPricingContext || []),
+	      fareEstimationContextLoadRedisPricingState: summarizeLatency(commandBreakdown.fareEstimationContextLoadRedisPricingState || []),
+	      fareEstimationContextCollectSnapshot: summarizeLatency(commandBreakdown.fareEstimationContextCollectSnapshot || []),
+	      fareEstimationContextAggregateCells: summarizeLatency(commandBreakdown.fareEstimationContextAggregateCells || []),
+	      fareEstimationContextDeriveContext: summarizeLatency(commandBreakdown.fareEstimationContextDeriveContext || []),
+	      fareEstimationContextTotal: summarizeLatency(commandBreakdown.fareEstimationContextTotal || []),
+	      fareEstimationRunDynamicPricingEngine: summarizeLatency(commandBreakdown.fareEstimationRunDynamicPricingEngine || []),
+	      fareEstimationTotalInternal: summarizeLatency(commandBreakdown.fareEstimationTotalInternal || []),
+	      bookingPayload: summarizeLatency(commandBreakdown.bookingPayload || []),
+	      enqueue: summarizeLatency(commandBreakdown.enqueue || []),
+	      stateUpdate: summarizeLatency(commandBreakdown.stateUpdate || []),
+      eventBuild: summarizeLatency(commandBreakdown.eventBuild || []),
+      total: summarizeLatency(commandBreakdown.total || [])
+    }
   };
 }
 
@@ -475,6 +734,10 @@ function randomInt(min, max) {
   return Math.floor(Math.random() * (max - min + 1)) + min;
 }
 
+function estimateWindowRuntimeSec(windowSpecs = []) {
+  return windowSpecs.reduce((acc, spec) => acc + Math.max(0, Number(spec?.durationSec || 0)), 0);
+}
+
 function classifyError(error) {
   const message = String(error?.message || error || '').trim();
   if (!message) return 'unknown';
@@ -533,6 +796,54 @@ function isPaymentBlockedNoPartner(errorPayload) {
   );
 }
 
+function isRetryableCreateBookingError(error) {
+  const message = String(error?.message || error || '').toLowerCase();
+  if (!message) return false;
+  return (
+    message.includes('timeout ao criar booking') ||
+    message.includes('timeout aguardando') ||
+    message.includes('não foi possível validar disponibilidade agora') ||
+    message.includes('nao foi possivel validar disponibilidade agora') ||
+    message.includes('requisição duplicada') ||
+    message.includes('requisicao duplicada') ||
+    message.includes('já está sendo processada') ||
+    message.includes('ja esta sendo processada') ||
+    message.includes('tente novamente') ||
+    message.includes('muitas requisi') ||
+    message.includes('rate limit')
+  );
+}
+
+async function createBookingWithRetries(client, payload, options = {}) {
+  const timeoutMs = Math.max(
+    1000,
+    Number.parseInt(String(options.timeoutMs || CREATE_BOOKING_TIMEOUT_MS), 10) || CREATE_BOOKING_TIMEOUT_MS
+  );
+  const maxAttempts = Math.max(
+    1,
+    Number.parseInt(String(options.maxAttempts || CREATE_BOOKING_RETRIES), 10) || CREATE_BOOKING_RETRIES
+  );
+  const baseBackoffMs = Math.max(
+    50,
+    Number.parseInt(String(options.baseBackoffMs || CREATE_BOOKING_RETRY_BACKOFF_MS), 10) || CREATE_BOOKING_RETRY_BACKOFF_MS
+  );
+
+  let lastError = null;
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    try {
+      return await client.createBooking(payload, { timeoutMs });
+    } catch (error) {
+      lastError = error;
+      if (attempt >= maxAttempts || !isRetryableCreateBookingError(error)) {
+        throw error;
+      }
+      await sleep(baseBackoffMs * attempt);
+    }
+  }
+
+  throw lastError || new Error('create_booking_failed');
+}
+
 async function withConcurrency(items, concurrency, worker) {
   const results = new Array(items.length);
   let cursor = 0;
@@ -557,6 +868,96 @@ async function withConcurrency(items, concurrency, worker) {
   return results;
 }
 
+async function readDispatchWaveSummary(bookingId) {
+  if (!bookingId) return null;
+  if (DISABLE_REDIS_TRACE) return null;
+  try {
+    await redisPool.ensureConnection();
+    const redis = redisPool.getConnection();
+    const [
+      acceptedWaveRaw,
+      acceptedRadiusRaw,
+      waveCountRaw,
+      totalCandidatesRaw,
+      totalNotifiedRaw,
+      totalFailedRaw,
+      directCountRaw,
+      acceptedSourceRaw,
+      acceptedTypeRaw
+    ] = await redis.hmget(
+      `booking:${bookingId}`,
+      'dispatchWaveAcceptedWave',
+      'dispatchWaveAcceptedRadiusKm',
+      'dispatchWaveCount',
+      'dispatchWaveTotalCandidates',
+      'dispatchWaveTotalNotified',
+      'dispatchWaveTotalFailed',
+      'dispatchDirectCount',
+      'dispatchWaveAcceptedSource',
+      'dispatchWaveAcceptedType'
+    );
+
+    const acceptedWave = parseOptionalRedisNumber(acceptedWaveRaw);
+    const acceptedRadiusKm = parseOptionalRedisNumber(acceptedRadiusRaw);
+    const waveCount = parseOptionalRedisNumber(waveCountRaw);
+    const totalCandidates = parseOptionalRedisNumber(totalCandidatesRaw);
+    const totalNotified = parseOptionalRedisNumber(totalNotifiedRaw);
+    const totalFailed = parseOptionalRedisNumber(totalFailedRaw);
+    const directCount = parseOptionalRedisNumber(directCountRaw);
+    const acceptedSource = String(acceptedSourceRaw || '').trim() || 'unknown';
+    const acceptedType = String(acceptedTypeRaw || '').trim() || 'unknown';
+
+    let summaryFromHash = null;
+    if (
+      !Number.isFinite(acceptedWave) &&
+      !Number.isFinite(waveCount) &&
+      !Number.isFinite(totalCandidates) &&
+      !Number.isFinite(directCount) &&
+      acceptedSource === 'unknown'
+    ) {
+      summaryFromHash = null;
+    } else {
+      summaryFromHash = {
+        acceptedWave: Number.isFinite(acceptedWave) ? acceptedWave : 0,
+        acceptedRadiusKm: Number.isFinite(acceptedRadiusKm) ? acceptedRadiusKm : 0,
+        waveCount: Number.isFinite(waveCount) ? waveCount : 0,
+        totalCandidates: Number.isFinite(totalCandidates) ? totalCandidates : 0,
+        totalNotified: Number.isFinite(totalNotified) ? totalNotified : 0,
+        totalFailed: Number.isFinite(totalFailed) ? totalFailed : 0,
+        directCount: Number.isFinite(directCount) ? directCount : 0,
+        acceptedSource,
+        acceptedType
+      };
+    }
+
+    const traceEvents = await redis.lrange(`dispatch_wave_trace:${bookingId}`, 0, -1);
+    const summaryFromTrace = deriveDispatchWaveSummaryFromTrace(traceEvents);
+
+    if (summaryFromTrace && summaryFromHash) {
+      return {
+        ...summaryFromTrace,
+        ...summaryFromHash,
+        acceptedSource: summaryFromHash.acceptedSource !== 'unknown'
+          ? summaryFromHash.acceptedSource
+          : summaryFromTrace.acceptedSource,
+        acceptedType: summaryFromHash.acceptedType !== 'unknown'
+          ? summaryFromHash.acceptedType
+          : summaryFromTrace.acceptedType,
+        waveCount: summaryFromHash.waveCount > 0 ? summaryFromHash.waveCount : summaryFromTrace.waveCount,
+        totalCandidates: summaryFromHash.totalCandidates > 0 ? summaryFromHash.totalCandidates : summaryFromTrace.totalCandidates,
+        totalNotified: summaryFromHash.totalNotified > 0 ? summaryFromHash.totalNotified : summaryFromTrace.totalNotified,
+        totalFailed: summaryFromHash.totalFailed > 0 ? summaryFromHash.totalFailed : summaryFromTrace.totalFailed,
+        failureReasonCounts: summaryFromTrace.failureReasonCounts || {},
+        directCount: summaryFromHash.directCount > 0 ? summaryFromHash.directCount : summaryFromTrace.directCount
+      };
+    }
+
+    return summaryFromHash || summaryFromTrace;
+  } catch (_error) {
+    return null;
+  }
+}
+
 async function connectAndAuthenticate(uid, userType, token) {
   const client = new WebSocketTestClient(WS_URL, {
     transports: ['websocket'],
@@ -566,6 +967,47 @@ async function connectAndAuthenticate(uid, userType, token) {
   await client.connect();
   await client.authenticate(uid, userType, token ? { token } : {});
   return client;
+}
+
+function isTransientConnectAuthError(error) {
+  const message = String(error?.message || error || '').toLowerCase();
+  return (
+    message.includes('connect_auth_timeout') ||
+    message.includes('timeout ao conectar websocket') ||
+    message.includes('timeout ao autenticar') ||
+    message.includes('auth_busy') ||
+    message.includes('sistema autenticando em alta carga') ||
+    message.includes('xhr poll error') ||
+    message.includes('websocket error') ||
+    message.includes('transport close')
+  );
+}
+
+async function connectAndAuthenticateWithRetry(uid, userType, token) {
+  let lastError = null;
+  for (let attempt = 0; attempt <= CONNECT_AUTH_RETRIES; attempt += 1) {
+    let client = null;
+    try {
+      client = await withTimeout(
+        connectAndAuthenticate(uid, userType, token),
+        CONNECT_AUTH_TIMEOUT_MS,
+        `connect_auth_timeout_${userType}:${uid}`
+      );
+      return client;
+    } catch (error) {
+      lastError = error;
+      try {
+        client?.disconnect?.();
+      } catch (_disconnectError) {
+        // noop
+      }
+      if (!isTransientConnectAuthError(error) || attempt >= CONNECT_AUTH_RETRIES) {
+        throw error;
+      }
+      await sleep(250 * (attempt + 1));
+    }
+  }
+  throw lastError || new Error(`connect_auth_failed:${userType}:${uid}`);
 }
 
 function emitDriverStatusAndLocation(driverSession, isInTrip, options = {}) {
@@ -993,6 +1435,54 @@ function createWindowReport(windowSpec, effectiveTarget) {
       fullFlowToStart: [],
       tripDuration: []
     },
+    dispatchWaveMs: {
+      acceptedWave: [],
+      waveCount: [],
+      totalCandidates: [],
+      totalNotified: [],
+      totalFailed: [],
+      acceptedRadiusKm: [],
+      directCount: [],
+      acceptedSourceCounts: {},
+      failureReasonCounts: {}
+    },
+    serverPerfMs: {
+      createBooking: {
+        rateLimit: [],
+        validation: [],
+        activeGuard: [],
+        payment: [],
+        backpressure: [],
+        policy: [],
+        idempotency: [],
+        geofence: [],
+        availability: [],
+        preCommand: [],
+        command: [],
+        bookingMeta: [],
+        responsePrepare: [],
+        postCommandBeforeResponse: [],
+        totalToResponse: [],
+	        commandBreakdown: {
+	          validate: [],
+	          prepare: [],
+	          fareEstimation: [],
+	          fareEstimationBuildPricingContext: [],
+	          fareEstimationContextLoadRedisPricingState: [],
+	          fareEstimationContextCollectSnapshot: [],
+	          fareEstimationContextAggregateCells: [],
+	          fareEstimationContextDeriveContext: [],
+	          fareEstimationContextTotal: [],
+	          fareEstimationRunDynamicPricingEngine: [],
+	          fareEstimationTotalInternal: [],
+	          bookingPayload: [],
+	          enqueue: [],
+	          stateUpdate: [],
+          eventBuild: [],
+          total: []
+        }
+      }
+    },
     startedAt: null,
     finishedAt: null
   };
@@ -1047,6 +1537,7 @@ async function launchRide(windowSpec, windowReport) {
 
     flowMarks.start = nowMs();
     estimatedFare = Number((20 + Math.random() * 35).toFixed(2));
+    const idempotencyKey = `sustain_${windowSpec.name}_${passenger.uid}_${flowMarks.start}`;
     advancePayment = await createAdvancePayment({
       passenger,
       pickup,
@@ -1065,7 +1556,7 @@ async function launchRide(windowSpec, windowReport) {
       });
     }
 
-    const bookingResponse = await passenger.client.createBooking({
+    const bookingRequestPayload = {
       customerId: passenger.uid,
       pickupLocation: {
         ...pickup,
@@ -1087,7 +1578,13 @@ async function launchRide(windowSpec, windowReport) {
         confirmedAt: new Date().toISOString()
       },
       carType: 'plus',
-      idempotencyKey: `sustain_${windowSpec.name}_${passenger.uid}_${flowMarks.start}`
+      idempotencyKey,
+      debugPerf: true
+    };
+    const bookingResponse = await createBookingWithRetries(passenger.client, bookingRequestPayload, {
+      timeoutMs: CREATE_BOOKING_TIMEOUT_MS,
+      maxAttempts: CREATE_BOOKING_RETRIES,
+      baseBackoffMs: CREATE_BOOKING_RETRY_BACKOFF_MS
     });
     flowMarks.bookingDone = nowMs();
     bookingId = bookingResponse?.bookingId;
@@ -1170,7 +1667,21 @@ async function launchRide(windowSpec, windowReport) {
       seq: Date.now() % 100000
     });
     await sleep(250);
-    await assignedDriver.client.arrivedAtPickup(bookingId);
+    await assignedDriver.client.arrivedAtPickup(bookingId, {
+      location: pickup,
+      timeoutMs: 20000
+    });
+    if (DRIVER_ARRIVED_WAIT_MS > 0) {
+      await passenger.client.waitForEvent(
+        'driverArrived',
+        DRIVER_ARRIVED_WAIT_MS,
+        (incoming) => {
+          const incomingBookingId = incoming?.bookingId || incoming?.rideId;
+          return String(incomingBookingId || '') === String(bookingId);
+        }
+      ).catch(() => null);
+    }
+    await sleep(150);
 
     const startStart = nowMs();
     await assignedDriver.client.startTrip({
@@ -1205,15 +1716,24 @@ async function launchRide(windowSpec, windowReport) {
       marks: flowMarks
     };
 
+    const dispatchWaveSummary = await readDispatchWaveSummary(bookingId);
+    if (dispatchWaveSummary) {
+      rideRecord.dispatchWaveSummary = dispatchWaveSummary;
+      recordDispatchWaveSummary(windowReport.dispatchWaveMs, dispatchWaveSummary);
+      recordDispatchWaveSummary(state.report.metrics.dispatchWaveMs, dispatchWaveSummary);
+    }
+
     state.activeRides.set(bookingId, rideRecord);
 
     windowReport.started += 1;
     state.report.metrics.startedRides += 1;
 
     windowReport.latencyMs.createBooking.push(flowMarks.bookingDone - flowMarks.start);
+    recordCreateBookingServerPerf(windowReport.serverPerfMs.createBooking, bookingResponse);
     windowReport.latencyMs.bookingToDispatch.push(flowMarks.dispatchDone - flowMarks.bookingDone);
     windowReport.latencyMs.fullFlowToStart.push(flowMarks.startTripDone - flowMarks.start);
     state.report.metrics.latencyMs.createBooking.push(flowMarks.bookingDone - flowMarks.start);
+    recordCreateBookingServerPerf(state.report.metrics.serverPerfMs.createBooking, bookingResponse);
     state.report.metrics.latencyMs.confirmPayment.push(
       (flowMarks.paymentDone || flowMarks.dispatchWaitStart) - flowMarks.bookingDone
     );
@@ -1221,6 +1741,18 @@ async function launchRide(windowSpec, windowReport) {
     state.report.metrics.latencyMs.acceptRide.push(flowMarks.acceptDone - flowMarks.dispatchDone);
     state.report.metrics.latencyMs.startTrip.push(flowMarks.startTripDone - flowMarks.acceptDone);
     state.report.metrics.latencyMs.fullFlowToStart.push(flowMarks.startTripDone - flowMarks.start);
+    state.report.dispatchRideSamples.push({
+      bookingId,
+      driverUid: assignedDriver.uid,
+      passengerUid: passenger.uid,
+      windowName: windowSpec.name,
+      createBookingMs: flowMarks.bookingDone - flowMarks.start,
+      bookingToDispatchMs: flowMarks.dispatchDone - flowMarks.bookingDone,
+      acceptRideMs: flowMarks.acceptDone - flowMarks.dispatchDone,
+      startTripMs: flowMarks.startTripDone - flowMarks.acceptDone,
+      fullFlowToStartMs: flowMarks.startTripDone - flowMarks.start,
+      dispatchWaveSummary: dispatchWaveSummary || null
+    });
 
     return true;
   } catch (error) {
@@ -1531,16 +2063,12 @@ async function bootstrapPools() {
   logLine(`[setup] connecting/authenticating ${driverSessions.length} drivers...`);
   const connectedDrivers = await withConcurrency(
     driverSessions,
-    CONNECT_CONCURRENCY,
+    DRIVER_CONNECT_CONCURRENCY,
     async (session) => {
       if (!session.token) {
         throw new Error(`missing_token_for_driver:${session.uid}`);
       }
-      session.client = await withTimeout(
-        connectAndAuthenticate(session.uid, 'driver', session.token),
-        20000,
-        `connect_auth_timeout_driver:${session.uid}`
-      );
+      session.client = await connectAndAuthenticateWithRetry(session.uid, 'driver', session.token);
       session.status = 'idle';
       registerDriverDispatchListener(session);
       emitDriverStatusAndLocation(session, false, { forceStatus: true });
@@ -1566,16 +2094,12 @@ async function bootstrapPools() {
   logLine(`[setup] connecting/authenticating ${passengerSessions.length} passengers...`);
   const connectedPassengers = await withConcurrency(
     passengerSessions,
-    CONNECT_CONCURRENCY,
+    PASSENGER_CONNECT_CONCURRENCY,
     async (session) => {
       if (!session.token) {
         throw new Error(`missing_token_for_passenger:${session.uid}`);
       }
-      session.client = await withTimeout(
-        connectAndAuthenticate(session.uid, 'customer', session.token),
-        20000,
-        `connect_auth_timeout_passenger:${session.uid}`
-      );
+      session.client = await connectAndAuthenticateWithRetry(session.uid, 'customer', session.token);
       session.status = 'idle';
       return { ok: true, uid: session.uid };
     }
@@ -1785,12 +2309,17 @@ function finalizeReportAndPrint() {
       tripDuration: summarizeLatency(overall.latencyMs.tripDuration),
       fullFlowToStart: summarizeLatency(overall.latencyMs.fullFlowToStart)
     },
+    dispatchWaveMs: summarizeDispatchWaveMetrics(overall.dispatchWaveMs),
+    serverPerfMs: {
+      createBooking: summarizeCreateBookingServerPerf(overall.serverPerfMs.createBooking)
+    },
     topErrors: Object.entries(overall.errors)
       .sort((a, b) => b[1] - a[1])
       .slice(0, 20)
       .map(([error, count]) => ({ error, count })),
     errorSamples: overall.errorSamples || {}
   };
+  state.report.summary.dispatchDiagnostics = buildDispatchDiagnostics(state.report.dispatchRideSamples);
 
   state.report.windows = state.report.windows.map((windowReport) => {
     const samples = windowReport.activeSamples;
@@ -1818,6 +2347,10 @@ function finalizeReportAndPrint() {
         completeTrip: summarizeLatency(windowReport.latencyMs.completeTrip),
         fullFlowToStart: summarizeLatency(windowReport.latencyMs.fullFlowToStart),
         tripDuration: summarizeLatency(windowReport.latencyMs.tripDuration)
+      },
+      dispatchWaveMs: summarizeDispatchWaveMetrics(windowReport.dispatchWaveMs),
+      serverPerfMs: {
+        createBooking: summarizeCreateBookingServerPerf(windowReport.serverPerfMs.createBooking)
       }
     };
   });
@@ -1853,6 +2386,11 @@ function finalizeReportAndPrint() {
 async function main() {
   logLine(`[run] ws=${WS_URL}`);
   logLine(`[run] windows=${windows.map((w) => `${w.name}:${w.durationSec}s@${w.targetActive}`).join(', ')}`);
+  logLine(
+    `[run] expectedRuntime≈${estimateWindowRuntimeSec(windows)}s + drain<=${Math.round(
+      DRAIN_TIMEOUT_MS / 1000
+    )}s`
+  );
   if (!DRIVER_STATUS_TOKEN) {
     state.report.notes.push(
       'Driver status token não configurado no harness (--driver-status-token ou env DRIVER_STATUS_DEBUG_TOKEN/RUNTIME_ADMIN_TOKEN).'

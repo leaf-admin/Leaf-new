@@ -13,7 +13,7 @@ const httpsAgent = new https.Agent({
     rejectUnauthorized: false
 });
 
-const API_URL = process.env.API_URL || 'http://147.93.66.253:3001';
+const API_URL = process.env.API_URL || 'http://147.182.204.181:3001';
 const NOTIFICATION_ENDPOINT = `${API_URL}/api/notifications/send`;
 
 async function testNotification() {
@@ -89,4 +89,3 @@ async function testNotification() {
 }
 
 testNotification();
-

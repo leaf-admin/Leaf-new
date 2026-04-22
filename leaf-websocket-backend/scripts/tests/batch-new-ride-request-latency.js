@@ -9,14 +9,15 @@
  *
  * Variáveis:
  *   RUNS=10
- *   WS_URL=https://api.147.182.204.181.sslip.io
+ *   WS_URL=https://socket.62.169.31.231.sslip.io
+ *   API_BASE_URL=https://api.62.169.31.231.sslip.io
  */
 
 const path = require('path');
 const { spawnSync } = require('child_process');
 
 const RUNS = Number(process.env.RUNS || 10);
-const WS_URL = process.env.WS_URL || 'https://api.147.182.204.181.sslip.io';
+const WS_URL = process.env.WS_URL || 'https://socket.62.169.31.231.sslip.io';
 const CWD = path.join(__dirname, '..', '..');
 const TARGET = path.join('scripts', 'tests', 'measure-new-ride-request-latency.js');
 
@@ -47,7 +48,8 @@ async function run() {
       cwd: CWD,
       env: {
         ...process.env,
-        WS_URL
+        WS_URL,
+        API_BASE_URL: process.env.API_BASE_URL || 'https://api.62.169.31.231.sslip.io'
       },
       encoding: 'utf8',
       timeout: 70000,

@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+BACKEND_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+cd "$BACKEND_DIR"
+
 RUNTIME_MODE="${LEAF_SERVER_RUNTIME:-modular}"
 CUSTOM_ENTRY="${LEAF_SERVER_ENTRY:-}"
 
@@ -27,6 +30,11 @@ esac
 if [[ ! -f "$ENTRY_FILE" ]]; then
   echo "[runtime][error] Entry file não encontrado: $ENTRY_FILE"
   exit 2
+fi
+
+if [[ "${LEAF_SKIP_RUNTIME_CONFIG_VALIDATION:-false}" != "true" ]] && [[ "${NODE_ENV:-development}" == "production" ]]; then
+  echo "[runtime] validando configuração de runtime (produção)"
+  node "$BACKEND_DIR/scripts/deploy/validate-runtime-config.js"
 fi
 
 echo "[runtime] mode=$RUNTIME_MODE entry=$ENTRY_FILE"

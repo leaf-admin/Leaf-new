@@ -144,21 +144,21 @@ Inclui:
 ```bash
 # Perfil produção (janelas mais longas)
 node scripts/stress-test/sustained-active-rides-capacity.cjs \
-  --url https://api.147.182.204.181.sslip.io \
+  --url https://api.62.169.31.231.sslip.io \
   --drivers 120 \
   --passengers 150 \
   --profile production
 
 # Perfil rápido para validação técnica
 node scripts/stress-test/sustained-active-rides-capacity.cjs \
-  --url https://api.147.182.204.181.sslip.io \
+  --url https://api.62.169.31.231.sslip.io \
   --drivers 40 \
   --passengers 50 \
   --profile quick
 
 # Janelas customizadas (name:durationSec:targetActive:rideMinSec:rideMaxSec)
 node scripts/stress-test/sustained-active-rides-capacity.cjs \
-  --url https://api.147.182.204.181.sslip.io \
+  --url https://api.62.169.31.231.sslip.io \
   --drivers 80 \
   --passengers 100 \
   --windows "warmup:120:12:90:180,normal:240:24:180:360,peak:300:36:240:420,cooldown:120:12:90:180"

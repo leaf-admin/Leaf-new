@@ -247,6 +247,7 @@ async function main() {
   const passengerFourPhone = normalizePhone(process.env.TEST_PASSENGER_FOUR_PHONE || '11999999996');
   const driverPhone = normalizePhone(process.env.TEST_DRIVER_PHONE || '11888888888');
   const driverTwoPhone = normalizePhone(process.env.TEST_DRIVER_TWO_PHONE || '11888888889');
+  const driverThreePhone = normalizePhone(process.env.TEST_DRIVER_THREE_PHONE || '11888888890');
   const nowIso = new Date().toISOString();
 
   if (!admin.apps.length) {
@@ -266,6 +267,7 @@ async function main() {
   const passengerFourAuth = await ensureAuthUserByPhone(auth, passengerFourPhone, 'Leaf Passageiro Teste 4');
   const driverAuth = await ensureAuthUserByPhone(auth, driverPhone, 'Leaf Motorista Teste');
   const driverTwoAuth = await ensureAuthUserByPhone(auth, driverTwoPhone, 'Leaf Motorista Teste 2');
+  const driverThreeAuth = await ensureAuthUserByPhone(auth, driverThreePhone, 'Leaf Motorista Teste 3');
 
   await ensurePassengerProfile({ db, firestore, uid: passengerAuth.uid, phone: passengerPhone, nowIso });
   await ensurePassengerProfile({ db, firestore, uid: passengerTwoAuth.uid, phone: passengerTwoPhone, nowIso });
@@ -277,6 +279,13 @@ async function main() {
     firestore,
     uid: driverTwoAuth.uid,
     phone: driverTwoPhone,
+    nowIso,
+  });
+  const driverThreeDetails = await ensureDriverProfile({
+    db,
+    firestore,
+    uid: driverThreeAuth.uid,
+    phone: driverThreePhone,
     nowIso,
   });
 
@@ -307,6 +316,11 @@ async function main() {
       uid: driverTwoAuth.uid,
       phone: driverTwoPhone,
       ...driverTwoDetails
+    },
+    driverThree: {
+      uid: driverThreeAuth.uid,
+      phone: driverThreePhone,
+      ...driverThreeDetails
     }
   }, null, 2));
 

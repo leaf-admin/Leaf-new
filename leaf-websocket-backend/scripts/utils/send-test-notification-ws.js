@@ -12,7 +12,7 @@ async function sendTestNotification() {
     try {
         console.log('🔔 Enviando notificação de teste via WebSocket...\n');
         
-        const WEBSOCKET_URL = process.env.WEBSOCKET_URL || 'http://216.238.107.59:3001';
+        const WEBSOCKET_URL = process.env.WEBSOCKET_URL || 'http://147.182.204.181:3001';
         
         console.log(`🔌 Conectando ao WebSocket: ${WEBSOCKET_URL}`);
         

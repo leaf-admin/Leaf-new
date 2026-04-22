@@ -7,7 +7,7 @@ const dotenv = require('dotenv');
 dotenv.config();
 
 // Configurações
-const JWT_SECRET = process.env.JWT_SECRET || 'leaf-secret-key-local-test';
+const JWT_SECRET = process.env.JWT_SECRET || process.env.ADMIN_JWT_SECRET;
 const API_URL = 'http://localhost:3001/api';
 const TEST_DRIVER_ID = 'test_driver_' + Date.now();
 // Usando um ID de admin real encontrado no Firestore para passar na verificação do middleware

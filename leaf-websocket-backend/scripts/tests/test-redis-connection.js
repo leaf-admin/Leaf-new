@@ -34,9 +34,9 @@ async function testRedisConnection() {
             }
         },
         {
-            name: '147.93.66.253:6379 (IP VPS)',
+            name: '147.182.204.181:6379 (IP VPS)',
             config: {
-                host: '147.93.66.253',
+                host: '147.182.204.181',
                 port: 6379,
                 password: null,
                 db: 0,
@@ -125,7 +125,7 @@ async function testRedisConnection() {
     console.log(`  2. Acessível pelo servidor Node.js`);
     console.log(`  3. Sem senha (ou senha configurada em REDIS_PASSWORD)`);
     console.log(`\n${colors.yellow}Para verificar na VPS:${colors.reset}`);
-    console.log(`  ssh usuario@147.93.66.253`);
+    console.log(`  ssh usuario@147.182.204.181`);
     console.log(`  redis-cli ping`);
     console.log(`  systemctl status redis`);
 }

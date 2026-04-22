@@ -5,9 +5,9 @@
 
 set -e
 
-VPS_IP="216.238.107.59"
+VPS_IP="147.182.204.181"
 VPS_USER="root"
-PROJECT_DIR="/root/leaf-websocket-backend"
+PROJECT_DIR="/opt/leaf-app"
 
 echo "🚀 DEPLOY DA CORREÇÃO rideAccepted"
 echo "=================================="
@@ -30,7 +30,7 @@ echo ""
 
 echo "🛑 Passo 2: Parando servidor atual..."
 ssh $VPS_USER@$VPS_IP << 'EOF'
-    cd /root/leaf-websocket-backend
+    cd /opt/leaf-app
     
     # Parar processos Node.js do servidor
     echo "🛑 Parando processos do servidor..."
@@ -54,7 +54,7 @@ echo ""
 
 echo "🚀 Passo 3: Iniciando servidor com código corrigido..."
 ssh $VPS_USER@$VPS_IP << 'EOF'
-    cd /root/leaf-websocket-backend
+    cd /opt/leaf-app
     
     echo "🚀 Iniciando servidor..."
     
@@ -80,7 +80,7 @@ echo ""
 
 echo "🔍 Passo 4: Verificando se servidor está rodando..."
 ssh $VPS_USER@$VPS_IP << 'EOF'
-    cd /root/leaf-websocket-backend
+    cd /opt/leaf-app
     
     # Verificar processos
     if pgrep -f "node.*server.js" > /dev/null; then

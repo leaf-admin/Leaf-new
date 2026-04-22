@@ -10,20 +10,35 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BACKEND_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
 
 RUNTIME_MODE="${RUNTIME_MODE:-vps}"
-VPS_HOST="${VPS_HOST:-147.182.204.181}"
+VPS_HOST="${VPS_HOST:-62.169.31.231}"
 VPS_USER="${VPS_USER:-root}"
-VPS_KEY="${VPS_KEY:-$BACKEND_DIR/../digitaloceankey}"
 STRICT="${STRICT:-true}"
 FETCH_REMOTE="${FETCH_REMOTE:-false}"
+
+resolve_default_vps_key() {
+  local candidates=(
+    "$BACKEND_DIR/../contabokey"
+    "$BACKEND_DIR/../digitaloceankey"
+  )
+  for candidate in "${candidates[@]}"; do
+    if [[ -f "$candidate" ]]; then
+      echo "$candidate"
+      return 0
+    fi
+  done
+  echo "$BACKEND_DIR/../digitaloceankey"
+}
+
+VPS_KEY="${VPS_KEY:-$(resolve_default_vps_key)}"
 
 case "$RUNTIME_MODE" in
   vps)
     DEFAULT_LOCAL_RUNTIME_FILE="$BACKEND_DIR/server.vps.js"
-    DEFAULT_REMOTE_RUNTIME_FILE="/opt/leaf-websocket-backend/server.vps.js"
+    DEFAULT_REMOTE_RUNTIME_FILE="/opt/leaf-app/server.vps.js"
     ;;
   modular)
     DEFAULT_LOCAL_RUNTIME_FILE="$BACKEND_DIR/server.js"
-    DEFAULT_REMOTE_RUNTIME_FILE="/opt/leaf-websocket-backend/server.js"
+    DEFAULT_REMOTE_RUNTIME_FILE="/opt/leaf-app/server.js"
     ;;
   *)
     echo "[parity][error] RUNTIME_MODE inválido: $RUNTIME_MODE (use: vps|modular)"
@@ -56,6 +71,11 @@ remote_sum="$(
   ssh "${SSH_OPTS[@]}" "$VPS_USER@$VPS_HOST" \
     "if command -v sha256sum >/dev/null 2>&1; then sha256sum '$REMOTE_RUNTIME_FILE' | awk '{print \$1}'; else shasum -a 256 '$REMOTE_RUNTIME_FILE' | awk '{print \$1}'; fi"
 )"
+
+if [[ -z "${remote_sum// }" ]]; then
+  echo "[parity][error] Não foi possível calcular hash remoto para $REMOTE_RUNTIME_FILE"
+  exit 2
+fi
 
 echo "[parity] local : $LOCAL_RUNTIME_FILE"
 echo "[parity] remote: $VPS_USER@$VPS_HOST:$REMOTE_RUNTIME_FILE"

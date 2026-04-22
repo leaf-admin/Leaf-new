@@ -4,7 +4,7 @@ const { performance } = require('perf_hooks');
 
 class VPSStressTestSystem {
     constructor() {
-        this.vpsUrl = 'http://216.238.107.59:3001';
+        this.vpsUrl = 'http://147.182.204.181:3001';
         this.results = {
             http: { requests: 0, success: 0, errors: 0, times: [] },
             websocket: { connections: 0, success: 0, errors: 0, times: [] }

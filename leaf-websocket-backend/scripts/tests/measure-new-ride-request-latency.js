@@ -7,14 +7,16 @@
  *   node scripts/tests/measure-new-ride-request-latency.js
  *
  * Variáveis úteis:
- *   WS_URL=https://api.147.182.204.181.sslip.io
+ *   WS_URL=https://socket.62.169.31.231.sslip.io
+ *   API_BASE_URL=https://api.62.169.31.231.sslip.io
  *   TEST_PASSENGER_UID=iDiAKrLjeDWbIOYFEqkHLS3JBGN2
  *   TEST_DRIVER_UID=5zgeX92yleYa2wH8JnMvqOU76fX2
  */
 
 const WebSocketTestClient = require('../../tests/e2e/backend/__helpers__/websocket-test-client');
 
-const WS_URL = process.env.WS_URL || 'https://api.147.182.204.181.sslip.io';
+const WS_URL = process.env.WS_URL || 'https://socket.62.169.31.231.sslip.io';
+const API_BASE_URL = process.env.API_BASE_URL || 'https://api.62.169.31.231.sslip.io';
 const PASSENGER_UID = process.env.TEST_PASSENGER_UID || 'iDiAKrLjeDWbIOYFEqkHLS3JBGN2';
 const DRIVER_UID = process.env.TEST_DRIVER_UID || '5zgeX92yleYa2wH8JnMvqOU76fX2';
 
@@ -32,6 +34,23 @@ const DESTINATION = {
 
 function sleep(ms) {
     return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function postJson(url, body, timeoutMs = 20000) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+        const response = await fetch(url, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify(body),
+            signal: controller.signal
+        });
+        const data = await response.json().catch(() => ({}));
+        return { ok: response.ok, status: response.status, data };
+    } finally {
+        clearTimeout(timer);
+    }
 }
 
 async function run() {
@@ -64,6 +83,23 @@ async function run() {
         await sleep(1200);
 
         const startedAt = Date.now();
+        const rideId = `ride_${Date.now()}`;
+        const paymentAdvance = await postJson(`${API_BASE_URL}/api/payment/advance`, {
+            passengerId: PASSENGER_UID,
+            amount: 2750,
+            rideId,
+            rideDetails: {
+                origin: PICKUP.address,
+                destination: DESTINATION.address
+            },
+            passengerName: 'Leaf Passageiro Teste',
+            passengerEmail: 'qa@leaf.local'
+        }, 20000);
+        const chargeId = String(paymentAdvance?.data?.chargeId || '').trim();
+        if (!paymentAdvance.ok || !chargeId) {
+            throw new Error(paymentAdvance?.data?.message || 'payment_advance_failed');
+        }
+
         const booking = await passenger.createBooking({
             customerId: PASSENGER_UID,
             pickupLocation: PICKUP,
@@ -72,8 +108,8 @@ async function run() {
             paymentMethod: 'pix',
             paymentStatus: 'confirmed',
             paymentData: {
-                chargeId: `charge_${Date.now()}`,
-                rideId: `ride_${Date.now()}`,
+                chargeId,
+                rideId,
                 amountInCents: 2750
             },
             idempotencyKey: `latency_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`

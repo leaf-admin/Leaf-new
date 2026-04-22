@@ -1,8 +1,10 @@
 #!/usr/bin/env node
 
 const path = require('path');
+const fs = require('fs');
 const axios = require('axios');
 const dotenv = require('dotenv');
+const admin = require('firebase-admin');
 
 const backendDir = path.resolve(__dirname, '..', '..');
 const workspaceDir = path.resolve(backendDir, '..');
@@ -15,6 +17,7 @@ const SERVER_URL = process.env.SMOKE_SERVER_URL || 'http://127.0.0.1:3001';
 const FIREBASE_API_KEY = process.env.FIREBASE_API_KEY || process.env.EXPO_PUBLIC_FIREBASE_API_KEY;
 const PASSENGER_EMAIL = process.env.SMOKE_PASSENGER_EMAIL || process.env.QA_PASSENGER_EMAIL || 'joao.teste@leaf.com';
 const PASSENGER_PASSWORD = process.env.SMOKE_PASSENGER_PASSWORD || process.env.QA_PASSENGER_PASSWORD || 'teste123';
+const PASSENGER_UID = process.env.SMOKE_PASSENGER_UID || process.env.QA_PASSENGER_UID || 'OjML1wSzdNRaynjqMRlSW1Y0LVy2';
 const ADMIN_EMAIL = process.env.SMOKE_ADMIN_EMAIL;
 const ADMIN_PASSWORD = process.env.SMOKE_ADMIN_PASSWORD;
 
@@ -29,6 +32,32 @@ function assertOrThrow(condition, message) {
   if (!condition) {
     throw new Error(message);
   }
+}
+
+function ensureAdminInitialized() {
+  if (admin.apps.length > 0) return admin.app();
+
+  const databaseURL = process.env.FIREBASE_DATABASE_URL || 'https://leaf-reactnative-default-rtdb.firebaseio.com';
+  const serviceAccountJson =
+    process.env.FIREBASE_SERVICE_ACCOUNT_JSON ||
+    process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON;
+
+  if (serviceAccountJson) {
+    return admin.initializeApp({
+      credential: admin.credential.cert(JSON.parse(serviceAccountJson)),
+      databaseURL
+    });
+  }
+
+  const serviceAccountPath = path.join(backendDir, 'leaf-reactnative-firebase-adminsdk-fbsvc-456a95e2fc.json');
+  if (!fs.existsSync(serviceAccountPath)) {
+    throw new Error('missing_service_account_for_custom_token');
+  }
+
+  return admin.initializeApp({
+    credential: admin.credential.cert(serviceAccountPath),
+    databaseURL
+  });
 }
 
 async function runStep(name, fn) {
@@ -75,6 +104,28 @@ async function signInFirebase(email, password) {
   };
 }
 
+async function signInWithCustomToken(uid) {
+  ensureAdminInitialized();
+  const customToken = await admin.auth().createCustomToken(uid);
+  const url = `https://identitytoolkit.googleapis.com/v1/accounts:signInWithCustomToken?key=${FIREBASE_API_KEY}`;
+  const response = await http.post(url, {
+    token: customToken,
+    returnSecureToken: true
+  });
+
+  if (response.status !== 200) {
+    const apiMessage = response.data?.error?.message || response.data?.error || 'unknown';
+    throw new Error(`firebase_custom_signin_status_${response.status}:${apiMessage}`);
+  }
+
+  assertOrThrow(response.data && response.data.idToken, 'firebase_custom_signin_invalid_payload');
+
+  return {
+    idToken: response.data.idToken,
+    uid: response.data.localId || uid
+  };
+}
+
 async function main() {
   const startedAt = new Date().toISOString();
   const tag = `smoke-${Date.now()}`;
@@ -95,7 +146,22 @@ async function main() {
   const chatMessage = `Chat usuário ${tag}`;
 
   await runStep('firebase user login', async () => {
-    const result = await signInFirebase(PASSENGER_EMAIL, PASSENGER_PASSWORD);
+    let result = null;
+
+    try {
+      result = await signInFirebase(PASSENGER_EMAIL, PASSENGER_PASSWORD);
+    } catch (error) {
+      const canFallbackToCustomToken =
+        PASSENGER_UID &&
+        /INVALID_LOGIN_CREDENTIALS|EMAIL_NOT_FOUND|INVALID_PASSWORD/i.test(String(error.message || ''));
+
+      if (!canFallbackToCustomToken) {
+        throw error;
+      }
+
+      result = await signInWithCustomToken(PASSENGER_UID);
+    }
+
     userToken = result.idToken;
     userId = result.uid;
     return { userId };
@@ -269,7 +335,7 @@ async function main() {
     return {};
   });
 
-  await runStep('user blocked after chat close', async () => {
+  await runStep('user reopens chat after close', async () => {
     const response = await http.post(
       `${SERVER_URL}/api/support/chat/${userId}/message`,
       {
@@ -280,19 +346,20 @@ async function main() {
       }
     );
 
-    assertOrThrow(response.status === 400, `user_message_after_close_status_${response.status}`);
+    assertOrThrow(response.status === 200, `user_message_after_close_status_${response.status}`);
+    assertOrThrow(response.data?.success === true, 'user_message_after_close_unsuccessful');
     return {
-      error: response.data?.error || null
+      reopenedMessageId: response.data?.message?.id || null
     };
   });
 
-  await runStep('admin verify chat closed status', async () => {
+  await runStep('admin verify chat reopened status', async () => {
     const response = await http.get(`${SERVER_URL}/api/support/chat/${userId}/status`, {
       headers: { Authorization: `Bearer ${adminToken}` }
     });
 
     assertOrThrow(response.status === 200, `admin_chat_status_status_${response.status}`);
-    assertOrThrow(response.data?.status?.status === 'closed', `chat_status_expected_closed_got_${response.data?.status?.status || 'undefined'}`);
+    assertOrThrow(response.data?.status?.status === 'active', `chat_status_expected_active_got_${response.data?.status?.status || 'undefined'}`);
     return { chatStatus: response.data.status.status };
   });
 
