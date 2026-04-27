@@ -1,16 +1,14 @@
 const express = require('express');
 const router = express.Router();
 const driverApprovalService = require('../services/driver-approval-service');
+const { authenticateJWT, requireRole } = require('../middleware/jwt-auth');
 const { logStructured, logError } = require('../utils/logger');
 
-// Middleware para autenticação de admin
-const authenticateAdmin = (req, res, next) => {
-  // TODO: Implementar autenticação de admin
-  next();
-};
+const DRIVER_APPROVAL_ADMIN_ROLES = ['admin', 'super-admin', 'manager', 'development'];
+const ADMIN_ROUTE_MIDDLEWARE = [authenticateJWT, requireRole(DRIVER_APPROVAL_ADMIN_ROLES)];
 
 // Aprovar motorista e criar conta Woovi
-router.post('/approve', authenticateAdmin, async (req, res) => {
+router.post('/approve', ...ADMIN_ROUTE_MIDDLEWARE, async (req, res) => {
   try {
     const { driverId, name, email, phone, cpf } = req.body;
     
@@ -53,7 +51,7 @@ router.post('/approve', authenticateAdmin, async (req, res) => {
 });
 
 // Processar ganhos de corrida
-router.post('/process-earnings', async (req, res) => {
+router.post('/process-earnings', ...ADMIN_ROUTE_MIDDLEWARE, async (req, res) => {
   try {
     const { driverId, wooviClientId, earnings, description, rideId } = req.body;
     
@@ -96,7 +94,7 @@ router.post('/process-earnings', async (req, res) => {
 });
 
 // Verificar conta Woovi do motorista
-router.get('/check-account/:driverId', async (req, res) => {
+router.get('/check-account/:driverId', ...ADMIN_ROUTE_MIDDLEWARE, async (req, res) => {
   try {
     const { driverId } = req.params;
     
@@ -120,7 +118,7 @@ router.get('/check-account/:driverId', async (req, res) => {
 });
 
 // Criar conta Woovi para motorista existente
-router.post('/create-woovi-account', async (req, res) => {
+router.post('/create-woovi-account', ...ADMIN_ROUTE_MIDDLEWARE, async (req, res) => {
   try {
     const { driverId, name, email, phone, cpf } = req.body;
     
@@ -162,7 +160,6 @@ router.post('/create-woovi-account', async (req, res) => {
 });
 
 module.exports = router;
-
 
 
 
