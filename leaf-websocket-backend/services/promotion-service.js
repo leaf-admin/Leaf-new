@@ -15,8 +15,14 @@ const PROMOTIONS_COLLECTION = 'promotions';
 const PROMOTION_REDEMPTIONS_COLLECTION = 'promotion_redemptions';
 const LEGACY_PROMOTIONS_PATH = 'promotions';
 const LEGACY_DRIVER_PROMOTIONS_PATH = 'driver_promotions';
-const LEGACY_IMPORT_ENABLED = process.env.PROMOTIONS_ENABLE_LEGACY_IMPORT !== 'false';
-const LEGACY_MIRROR_ENABLED = process.env.PROMOTIONS_ENABLE_LEGACY_RTDB_MIRROR !== 'false';
+const LEGACY_IMPORT_ENABLED = String(
+  process.env.PROMOTIONS_ENABLE_LEGACY_IMPORT ?? 'true'
+).toLowerCase() !== 'false';
+const LEGACY_MIRROR_ENABLED = String(
+  process.env.PROMOTIONS_ENABLE_LEGACY_RTDB_MIRROR ?? 'false'
+).toLowerCase() === 'true';
+
+logger.info(`ℹ️ [PROMOTIONS] compat mode - import=${LEGACY_IMPORT_ENABLED} mirror=${LEGACY_MIRROR_ENABLED}`);
 
 function nowIso() {
   return new Date().toISOString();

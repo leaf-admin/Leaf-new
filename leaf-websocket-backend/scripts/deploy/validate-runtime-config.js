@@ -186,6 +186,16 @@ function main() {
     if (corsOrigin === '*' || /localhost|127\.0\.0\.1|ngrok|trycloudflare/i.test(corsOrigin)) {
       blockers.push(`CORS_ORIGIN inseguro para produção: ${corsOrigin || '(vazio)'}`);
     }
+
+    if (boolEnv('PROMOTIONS_ENABLE_LEGACY_RTDB_MIRROR')) {
+      warnings.push('PROMOTIONS_ENABLE_LEGACY_RTDB_MIRROR=true mantém dual-write legado em produção');
+    }
+    if (boolEnv('REFERRAL_PROGRAMS_ENABLE_LEGACY_RTDB_MIRROR')) {
+      warnings.push('REFERRAL_PROGRAMS_ENABLE_LEGACY_RTDB_MIRROR=true mantém dual-write legado em produção');
+    }
+    if (boolEnv('ENABLE_LEGACY_PROFILE_RTDB_MIRROR')) {
+      warnings.push('ENABLE_LEGACY_PROFILE_RTDB_MIRROR=true mantém espelho de perfil no RTDB em produção');
+    }
   }
 
   const report = {

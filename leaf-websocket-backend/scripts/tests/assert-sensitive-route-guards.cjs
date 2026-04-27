@@ -73,6 +73,22 @@ function main() {
   });
 
   check(() => {
+    const file = 'routes/driver-approval.js';
+    const source = read(file);
+    assert(source.includes('authenticateJWT'), `${file} sem authenticateJWT`);
+    assert(source.includes('requireRole'), `${file} sem requireRole`);
+    assert(!source.includes('TODO: Implementar autenticação de admin'), `${file} com TODO de autenticação`);
+  });
+
+  check(() => {
+    const file = 'routes/woovi-driver.js';
+    const source = read(file);
+    assert(source.includes('authenticateJWT'), `${file} sem authenticateJWT`);
+    assert(source.includes('requireRole'), `${file} sem requireRole`);
+    assert(!source.includes('TODO: Implementar autenticação do motorista'), `${file} com TODO de autenticação`);
+  });
+
+  check(() => {
     const file = 'routes/geofence-routes.js';
     for (const item of routeLines(read(file))) {
       const routePath = extractPath(item.line);
@@ -95,8 +111,15 @@ function main() {
     for (const item of routeLines(read(file))) {
       const routePath = extractPath(item.line);
       if (!routePath || !sensitivePrefixes.some((prefix) => routePath.startsWith(prefix))) continue;
-      assertLineHasToken({ file, ...item, token: 'requireAdmin' });
+      assertLineHasToken({ file, ...item, token: 'authenticateSupport' });
+      assertLineHasToken({ file, ...item, token: 'requireSupportRoles' });
     }
+  });
+
+  check(() => {
+    const file = 'server.vps.js';
+    const source = read(file);
+    assert(!source.includes("require('./routes/support-routes')"), `${file} ainda registra rota placeholder support-routes`);
   });
 
   if (failures.length > 0) {

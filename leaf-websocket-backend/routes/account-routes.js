@@ -3,8 +3,9 @@ const router = express.Router();
 const admin = require('firebase-admin');
 const { logger } = require('../utils/logger');
 
+const legacyProfileMirrorDefault = process.env.NODE_ENV === 'production' ? 'false' : 'true';
 const legacyProfileRtdbMirrorEnabled =
-  String(process.env.ENABLE_LEGACY_PROFILE_RTDB_MIRROR || 'true').toLowerCase() === 'true';
+  String(process.env.ENABLE_LEGACY_PROFILE_RTDB_MIRROR ?? legacyProfileMirrorDefault).toLowerCase() === 'true';
 const DEFAULT_DELETION_REASON = 'user_requested_mobile_app';
 const legacyDeleteDataRoutesEnabled =
   String(process.env.ENABLE_LEGACY_ACCOUNT_DELETE_ROUTES || 'false').toLowerCase() === 'true';

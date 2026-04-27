@@ -11,8 +11,18 @@ const LEGACY_CONFIG_PATH = 'operations/programs/referrals/config';
 const LEGACY_CAMPAIGNS_PATH = 'operations/programs/referrals/campaigns';
 const LEGACY_INVITES_PATH = 'operations/programs/referrals/invites';
 
-const LEGACY_IMPORT_ENABLED = process.env.REFERRAL_PROGRAMS_ENABLE_LEGACY_IMPORT !== 'false';
-const LEGACY_MIRROR_ENABLED = process.env.REFERRAL_PROGRAMS_ENABLE_LEGACY_RTDB_MIRROR !== 'false';
+const LEGACY_IMPORT_ENABLED = String(
+  process.env.REFERRAL_PROGRAMS_ENABLE_LEGACY_IMPORT ?? 'true'
+).toLowerCase() !== 'false';
+const LEGACY_MIRROR_ENABLED = String(
+  process.env.REFERRAL_PROGRAMS_ENABLE_LEGACY_RTDB_MIRROR ?? 'false'
+).toLowerCase() === 'true';
+
+logStructured('info', 'Referral compatibility mode', {
+  service: 'referral-program-state-service',
+  legacyImportEnabled: LEGACY_IMPORT_ENABLED,
+  legacyMirrorEnabled: LEGACY_MIRROR_ENABLED
+});
 
 function nowIso() {
   return new Date().toISOString();
