@@ -73,6 +73,9 @@ const healthRoutes = require('./routes/health');
 
 // Importar logger primeiro (necessário para logs abaixo)
 const { logStructured, logError, logCommand, logEvent } = require('./utils/logger');
+const {
+    buildRuntimeCorsConfig
+} = require('./utils/runtime-cors-config');
 
 // Importar rotas de Places Cache (com feature flag)
 let placesRoutes = null;
@@ -1491,97 +1494,11 @@ app.get('/health/liveness', (_req, res) => {
     });
 });
 
-const parseEnvList = (rawValue) =>
-    String(rawValue || '')
-        .split(',')
-        .map((item) => item.trim())
-        .filter(Boolean);
-
-const isProductionRuntime = process.env.NODE_ENV === 'production';
-const allowLocalCors = String(
-    process.env.ALLOW_LOCAL_CORS || (!isProductionRuntime)
-).toLowerCase() === 'true';
-const allowPrivateCors = String(
-    process.env.ALLOW_PRIVATE_CORS || (!isProductionRuntime)
-).toLowerCase() === 'true';
-const allowNgrokCors = String(
-    process.env.ALLOW_NGROK_CORS || (!isProductionRuntime)
-).toLowerCase() === 'true';
-
-// ✅ Configuração CORS segura - apenas origens permitidas
-const productionAllowedOrigins = [
-    // Produção oficial
-    'https://leaf.app.br',
-    'https://www.leaf.app.br',
-    'https://dashboard.leaf.app.br',
-    'https://api.leaf.app.br',
-    'https://socket.leaf.app.br',
-    // Runtime temporário produção (Contabo + sslip)
-    'https://dashboard.62.169.31.231.sslip.io',
-    'https://api.62.169.31.231.sslip.io',
-    'https://socket.62.169.31.231.sslip.io',
-    'http://62.169.31.231:3001',
-    'https://62.169.31.231:3001',
-];
-
-const localDevAllowedOrigins = [
-    'http://localhost:3000',
-    'http://localhost:3001',
-    'http://localhost:3002',
-    'http://localhost:3020',
-    'http://localhost:8081',
-    'http://127.0.0.1:3000',
-    'http://127.0.0.1:3001',
-    'http://127.0.0.1:3020',
-    'http://127.0.0.1:8081',
-    // IPs Locais do desenvolvedor
-    'http://192.168.0.33:8081',
-    'http://192.168.0.33:3000',
-    'http://192.168.0.33:3001',
-    // Capacitor/React Native (não tem origin tradicional)
-    'capacitor://localhost',
-    'ionic://localhost',
-    'react-native://',
-    'file://',
-];
-
-const baseAllowedOrigins = allowLocalCors
-    ? [...productionAllowedOrigins, ...localDevAllowedOrigins]
-    : productionAllowedOrigins;
-const envAllowedOrigins = parseEnvList(process.env.CORS_ORIGIN);
-const allowedOrigins = Array.from(new Set([...baseAllowedOrigins, ...envAllowedOrigins]));
-
-// Função para validar origem
-const corsOptions = {
-    origin: (origin, callback) => {
-        // ✅ React Native e apps nativos não enviam origin (é null/undefined)
-        const isVpcDirectOrigin = /^https?:\/\/62\.169\.31\.231(?::\d+)?$/.test(origin || '');
-        const isSslipOrigin = /^https?:\/\/(?:api|socket|dashboard)\.62\.169\.31\.231\.sslip\.io$/.test(origin || '');
-        const isLoopbackOrigin = /^http:\/\/(?:localhost|127\.0\.0\.1)(?::\d+)?$/.test(origin || '');
-        const isPrivateNetworkOrigin = /^http:\/\/(192\.168\.|10\.)/.test(origin || '');
-        const isNgrokOrigin = /ngrok-free\.app$/i.test(origin || '');
-        const isExpoOrigin = (origin || '').startsWith('exp://') || (origin || '').includes('.expo.dev');
-
-        if (
-            !origin ||
-            allowedOrigins.includes(origin) ||
-            isVpcDirectOrigin ||
-            isSslipOrigin ||
-            (allowLocalCors && isLoopbackOrigin) ||
-            (allowNgrokCors && isNgrokOrigin) ||
-            (allowPrivateCors && isPrivateNetworkOrigin) ||
-            (allowLocalCors && isExpoOrigin)
-        ) {
-            callback(null, true);
-        } else {
-            logStructured('warn', `CORS bloqueado: ${origin}`, { service: 'server', origin });
-            callback(new Error('Não permitido pelo CORS'));
-        }
-    },
-    credentials: false, // React Native não precisa
-    methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-    allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With"]
-};
+const { corsOptions } = buildRuntimeCorsConfig({
+    env: process.env,
+    logger: logStructured,
+    serviceName: 'server'
+});
 
 // ✅ NOVO: Middleware para gerar traceId automaticamente em requisições HTTP
 app.use(traceIdExpressMiddleware);
@@ -1759,11 +1676,6 @@ logStructured('info', 'Rotas de Woovi registradas', { service: 'server' });
 const helpRoutes = require('./routes/help-routes');
 app.use('/api/help', helpRoutes);
 logStructured('info', 'Rotas de Help registradas', { service: 'server' });
-
-// Rotas de Support
-const supportRoutes = require('./routes/support-routes');
-app.use('/api/support', supportRoutes);
-logStructured('info', 'Rotas de Support registradas', { service: 'server' });
 
 // Rotas de Support (completo com tickets)
 const supportFullRoutes = require('./routes/support');

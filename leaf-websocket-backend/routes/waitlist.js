@@ -4,6 +4,12 @@ const admin = require('firebase-admin');
 const { logger } = require('../utils/logger');
 const rateLimit = require('express-rate-limit');
 const cityActivationStateService = require('../services/city-activation-state-service');
+const { authenticateSupport, requireSupportRoles } = require('../middleware/support-auth');
+const {
+  parseEnvList,
+  resolveRuntimeCorsHosts,
+  buildRuntimeSslipOrigins
+} = require('../utils/runtime-cors-origins');
 
 let firebaseConfig = null;
 try {
@@ -14,6 +20,37 @@ const WAITLIST_DEFAULT_MAX_ACTIVE_DRIVERS = Number.parseInt(
   process.env.WAITLIST_DEFAULT_MAX_ACTIVE_DRIVERS || '300',
   10
 );
+const WAITLIST_ADMIN_ROLES = ['admin', 'manager', 'super-admin'];
+const isProductionRuntime = process.env.NODE_ENV === 'production';
+const allowLocalCors = String(process.env.ALLOW_LOCAL_CORS || (!isProductionRuntime)).toLowerCase() === 'true';
+const waitlistRuntimeHosts = resolveRuntimeCorsHosts({
+  env: process.env,
+  defaultHosts: ['62.169.31.231'],
+  allowLegacyFlagName: 'ALLOW_LEGACY_VULTR_CORS',
+  legacyHost: '147.182.204.181'
+});
+const waitlistBaseAllowedOrigins = [
+  'https://leaf.app.br',
+  'https://www.leaf.app.br'
+];
+waitlistBaseAllowedOrigins.push(...buildRuntimeSslipOrigins(waitlistRuntimeHosts));
+if (allowLocalCors) {
+  waitlistBaseAllowedOrigins.push('http://localhost:3000', 'http://localhost:8080');
+}
+const WAITLIST_ALLOWED_ORIGINS = Array.from(
+  new Set([
+    ...waitlistBaseAllowedOrigins,
+    ...parseEnvList(process.env.CORS_ORIGIN),
+    ...parseEnvList(process.env.WAITLIST_CORS_ORIGIN)
+  ])
+);
+
+function isMissingFirestoreIndexError(error) {
+  if (!error) return false;
+  if (Number(error.code) === 9) return true;
+  const message = String(error.message || '');
+  return message.includes('FAILED_PRECONDITION') && message.includes('requires an index');
+}
 
 const getLandingMetricsRef = () => {
   if (admin.apps.length === 0 && firebaseConfig && firebaseConfig.initializeFirebase) {
@@ -171,19 +208,10 @@ const waitlistLimiter = rateLimit({
 const validateOrigin = (req, res, next) => {
   try {
     const origin = req.headers.origin;
-    const allowedOrigins = [
-      'https://leaf.app.br',
-      'https://www.leaf.app.br',
-      'https://dashboard.147.182.204.181.sslip.io',
-      'https://api.147.182.204.181.sslip.io',
-      'https://socket.147.182.204.181.sslip.io',
-      'http://localhost:3000', // Para desenvolvimento
-      'http://localhost:8080'  // Para desenvolvimento
-    ];
     
     // Configurar headers CORS ANTES de validar
     // Se a origem estiver na lista permitida, definir o header CORS
-    if (origin && allowedOrigins.includes(origin)) {
+    if (origin && WAITLIST_ALLOWED_ORIGINS.includes(origin)) {
       res.setHeader('Access-Control-Allow-Origin', origin);
       res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
       res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
@@ -196,9 +224,7 @@ const validateOrigin = (req, res, next) => {
     }
     
     // Verificar se a origem é permitida
-    const isAllowed = !origin || allowedOrigins.some(allowed => 
-      origin && origin.startsWith(allowed)
-    );
+    const isAllowed = !origin || WAITLIST_ALLOWED_ORIGINS.includes(origin);
     
     // Apenas validar em produção (se NODE_ENV estiver definido)
     const isProduction = process.env.NODE_ENV === 'production';
@@ -298,15 +324,6 @@ const checkDuplicates = async (req, res, next) => {
 // Este middleware sobrescreve a configuração CORS global para garantir headers corretos
 const corsWaitlist = (req, res, next) => {
   const origin = req.headers.origin;
-  const allowedOrigins = [
-    'https://leaf.app.br',
-    'https://www.leaf.app.br',
-    'https://dashboard.147.182.204.181.sslip.io',
-    'https://api.147.182.204.181.sslip.io',
-    'https://socket.147.182.204.181.sslip.io',
-    'http://localhost:3000',
-    'http://localhost:8080'
-  ];
   
   // IMPORTANTE: Remover TODOS os headers CORS que possam ter sido definidos anteriormente
   // Isso garante que não haja conflito com o CORS global do Express
@@ -324,7 +341,7 @@ const corsWaitlist = (req, res, next) => {
   });
   
   // Definir headers CORS corretos - APENAS um valor por header
-  if (origin && allowedOrigins.includes(origin)) {
+  if (origin && WAITLIST_ALLOWED_ORIGINS.includes(origin)) {
     // Definir APENAS a origem específica (não array, não múltiplos valores)
     res.setHeader('Access-Control-Allow-Origin', origin);
   } else if (!origin) {
@@ -349,15 +366,6 @@ const corsWaitlist = (req, res, next) => {
 // Este middleware intercepta TODAS as formas de enviar resposta para garantir headers corretos
 const ensureCorsHeaders = (req, res, next) => {
   const origin = req.headers.origin;
-  const allowedOrigins = [
-    'https://leaf.app.br',
-    'https://www.leaf.app.br',
-    'https://dashboard.147.182.204.181.sslip.io',
-    'https://api.147.182.204.181.sslip.io',
-    'https://socket.147.182.204.181.sslip.io',
-    'http://localhost:3000',
-    'http://localhost:8080'
-  ];
   
   // Interceptar o método json()
   const originalJson = res.json.bind(res);
@@ -377,7 +385,7 @@ const ensureCorsHeaders = (req, res, next) => {
     });
     
     // Definir header CORS correto (apenas um valor, não array)
-    if (origin && allowedOrigins.includes(origin)) {
+    if (origin && WAITLIST_ALLOWED_ORIGINS.includes(origin)) {
       res.setHeader('Access-Control-Allow-Origin', origin);
     } else if (!origin) {
       res.setHeader('Access-Control-Allow-Origin', '*');
@@ -407,7 +415,7 @@ const ensureCorsHeaders = (req, res, next) => {
       res.removeHeader(header);
     });
     
-    if (origin && allowedOrigins.includes(origin)) {
+    if (origin && WAITLIST_ALLOWED_ORIGINS.includes(origin)) {
       res.setHeader('Access-Control-Allow-Origin', origin);
     } else if (!origin) {
       res.setHeader('Access-Control-Allow-Origin', '*');
@@ -497,14 +505,6 @@ const requireFirebase = async (req, res, next) => {
     logger.error('Erro na autenticação Firebase:', error);
     res.status(401).json({ error: 'Token inválido' });
   }
-};
-
-// Middleware para verificar se é admin
-const requireAdmin = (req, res, next) => {
-  if (!req.user || !req.user.role || !['admin', 'manager', 'super-admin'].includes(req.user.role)) {
-    return res.status(403).json({ error: 'Acesso negado. Apenas administradores.' });
-  }
-  next();
 };
 
 // GET /api/waitlist/status - Status da wait list para motorista
@@ -793,7 +793,7 @@ router.delete('/api/waitlist/leave', requireFirebase, async (req, res) => {
 });
 
 // GET /api/waitlist/drivers - Listar motoristas na wait list (admin)
-router.get('/api/waitlist/drivers', requireFirebase, requireAdmin, async (req, res) => {
+router.get('/api/waitlist/drivers', authenticateSupport, requireSupportRoles(WAITLIST_ADMIN_ROLES), async (req, res) => {
   try {
     const { page = 1, limit = 20, status = 'pending', city } = req.query;
     const offset = (page - 1) * limit;
@@ -811,14 +811,33 @@ router.get('/api/waitlist/drivers', requireFirebase, requireAdmin, async (req, r
         .sort((a, b) => Number(a.data()?.position || 0) - Number(b.data()?.position || 0))
         .slice(offset, offset + parseInt(limit, 10));
     } else {
-      const waitListSnapshot = await admin.firestore()
-        .collection('waitList')
-        .where('status', '==', status)
-        .orderBy('position', 'asc')
-        .offset(offset)
-        .limit(parseInt(limit, 10))
-        .get();
-      waitListDocs = waitListSnapshot.docs;
+      try {
+        const waitListSnapshot = await admin.firestore()
+          .collection('waitList')
+          .where('status', '==', status)
+          .orderBy('position', 'asc')
+          .offset(offset)
+          .limit(parseInt(limit, 10))
+          .get();
+        waitListDocs = waitListSnapshot.docs;
+      } catch (queryError) {
+        // Fallback quando o índice composto status+position ainda não foi criado.
+        if (!isMissingFirestoreIndexError(queryError)) {
+          throw queryError;
+        }
+        logger.warn('Waitlist drivers list fallback sem índice composto status+position', {
+          status,
+          page: Number(page),
+          limit: Number(limit)
+        });
+        const fallbackSnapshot = await admin.firestore()
+          .collection('waitList')
+          .where('status', '==', status)
+          .get();
+        waitListDocs = fallbackSnapshot.docs
+          .sort((a, b) => Number(a.data()?.position || 0) - Number(b.data()?.position || 0))
+          .slice(offset, offset + parseInt(limit, 10));
+      }
     }
 
     const drivers = [];
@@ -888,7 +907,7 @@ router.get('/api/waitlist/drivers', requireFirebase, requireAdmin, async (req, r
 });
 
 // POST /api/waitlist/approve - Aprovar motorista da wait list (admin)
-router.post('/api/waitlist/approve', requireFirebase, requireAdmin, async (req, res) => {
+router.post('/api/waitlist/approve', authenticateSupport, requireSupportRoles(WAITLIST_ADMIN_ROLES), async (req, res) => {
   try {
     const { driverId, notes = '' } = req.body;
     const adminId = req.user.uid;
@@ -1009,7 +1028,7 @@ router.post('/api/waitlist/approve', requireFirebase, requireAdmin, async (req, 
 });
 
 // POST /api/waitlist/reject - Rejeitar motorista da wait list (admin)
-router.post('/api/waitlist/reject', requireFirebase, requireAdmin, async (req, res) => {
+router.post('/api/waitlist/reject', authenticateSupport, requireSupportRoles(WAITLIST_ADMIN_ROLES), async (req, res) => {
   try {
     const { driverId, reason = '' } = req.body;
     const adminId = req.user.uid;
@@ -1087,7 +1106,7 @@ router.post('/api/waitlist/reject', requireFirebase, requireAdmin, async (req, r
 });
 
 // PUT /api/waitlist/position - Ajustar posição na wait list (admin)
-router.put('/api/waitlist/position', requireFirebase, requireAdmin, async (req, res) => {
+router.put('/api/waitlist/position', authenticateSupport, requireSupportRoles(WAITLIST_ADMIN_ROLES), async (req, res) => {
   try {
     const { driverId, newPosition } = req.body;
     const adminId = req.user.uid;
@@ -1200,7 +1219,7 @@ router.put('/api/waitlist/position', requireFirebase, requireAdmin, async (req, 
 });
 
 // GET /api/waitlist/stats - Estatísticas da wait list (admin)
-router.get('/api/waitlist/stats', requireFirebase, requireAdmin, async (req, res) => {
+router.get('/api/waitlist/stats', authenticateSupport, requireSupportRoles(WAITLIST_ADMIN_ROLES), async (req, res) => {
   try {
     // Buscar configurações
     const configSnapshot = await admin.firestore().collection('systemConfig').doc('waitList').get();
@@ -1327,7 +1346,7 @@ router.get('/api/waitlist/stats', requireFirebase, requireAdmin, async (req, res
  * GET /api/waitlist/landing/list - Listar todos os cadastros da waitlist (Dashboard)
  * Query params: page, limit, search, status
  */
-router.get('/api/waitlist/landing/list', requireFirebase, requireAdmin, async (req, res) => {
+router.get('/api/waitlist/landing/list', authenticateSupport, requireSupportRoles(WAITLIST_ADMIN_ROLES), async (req, res) => {
   try {
     const {
       page = 1,
@@ -1434,7 +1453,7 @@ router.get('/api/waitlist/landing/list', requireFirebase, requireAdmin, async (r
  * PATCH /api/waitlist/landing/:id/status - Atualizar status de um cadastro
  * Body: { status: 'pending' | 'contacted' | 'converted' }
  */
-router.patch('/api/waitlist/landing/:id/status', requireFirebase, requireAdmin, async (req, res) => {
+router.patch('/api/waitlist/landing/:id/status', authenticateSupport, requireSupportRoles(WAITLIST_ADMIN_ROLES), async (req, res) => {
   try {
     const { id } = req.params;
     const { status } = req.body;
@@ -1470,7 +1489,7 @@ router.patch('/api/waitlist/landing/:id/status', requireFirebase, requireAdmin, 
 /**
  * DELETE /api/waitlist/landing/:id - Remover cadastro da waitlist
  */
-router.delete('/api/waitlist/landing/:id', requireFirebase, requireAdmin, async (req, res) => {
+router.delete('/api/waitlist/landing/:id', authenticateSupport, requireSupportRoles(WAITLIST_ADMIN_ROLES), async (req, res) => {
   try {
     const { id } = req.params;
     const firestore = admin.firestore();

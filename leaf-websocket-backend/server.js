@@ -56,6 +56,9 @@ const registerSocketDriverControlHandlers = require('./bootstrap/register-socket
 
 // Importar logger primeiro (necessário para logs abaixo)
 const { logStructured, logError, logCommand, logEvent } = require('./utils/logger');
+const {
+    buildRuntimeCorsConfig
+} = require('./utils/runtime-cors-config');
 
 // ==================== IMPORTAÇÕES FASE 7: SISTEMA DE FILAS E MATCHING ====================
 // Importar serviços do sistema de filas e matching
@@ -380,89 +383,11 @@ app.get('/health/liveness', (_req, res) => {
     });
 });
 
-const parseEnvList = (rawValue) =>
-    String(rawValue || '')
-        .split(',')
-        .map((item) => item.trim())
-        .filter(Boolean);
-
-// ✅ Configuração CORS segura - apenas origens permitidas
-const baseAllowedOrigins = [
-    // Produção
-    'https://leaf.app.br',
-    'https://www.leaf.app.br',
-    'https://dashboard.leaf.app.br',
-    'https://api.leaf.app.br',
-    'https://socket.leaf.app.br',
-    // Produção temporária (sslip.io)
-    'https://dashboard.147.182.204.181.sslip.io',
-    'https://api.147.182.204.181.sslip.io',
-    'https://socket.147.182.204.181.sslip.io',
-    'https://dashboard.62.169.31.231.sslip.io',
-    'https://api.62.169.31.231.sslip.io',
-    'https://socket.62.169.31.231.sslip.io',
-    'http://147.182.204.181:3001',
-    'https://147.182.204.181:3001',
-    'http://62.169.31.231:3001',
-    'https://62.169.31.231:3001',
-    // Desenvolvimento local
-    'http://localhost:3000',
-    'http://localhost:3001',
-    'http://localhost:3002',
-    'http://localhost:3020',
-    'http://localhost:8081',
-    'http://127.0.0.1:3000',
-    'http://127.0.0.1:3001',
-    'http://127.0.0.1:3020',
-    'http://127.0.0.1:8081',
-    // IPs Locais do desenvolvedor
-    'http://192.168.0.33:8081',
-    'http://192.168.0.33:3000',
-    'http://192.168.0.33:3001',
-    // Capacitor/React Native (não tem origin tradicional)
-    'capacitor://localhost',
-    'ionic://localhost',
-    'react-native://',
-    'file://',
-];
-
-const envAllowedOrigins = parseEnvList(process.env.CORS_ORIGIN);
-const allowedOrigins = Array.from(new Set([...baseAllowedOrigins, ...envAllowedOrigins]));
-const allowPrivateCors = String(process.env.ALLOW_PRIVATE_CORS || (process.env.NODE_ENV !== 'production')).toLowerCase() === 'true';
-const allowNgrokCors = String(process.env.ALLOW_NGROK_CORS || (process.env.NODE_ENV !== 'production')).toLowerCase() === 'true';
-
-// Função para validar origem
-const corsOptions = {
-    origin: (origin, callback) => {
-        // ✅ React Native e apps nativos não enviam origin (é null/undefined)
-        // Permitir se não houver origin (React Native) ou se estiver na whitelist
-        const isVpcDirectOrigin = /^https?:\/\/(?:147\.182\.204\.181|62\.169\.31\.231)(?::\d+)?$/.test(origin || '');
-        const isSslipOrigin = /^https?:\/\/(?:api|socket|dashboard)\.(?:147\.182\.204\.181|62\.169\.31\.231)\.sslip\.io$/.test(origin || '');
-        const isLoopbackOrigin = /^http:\/\/(?:localhost|127\.0\.0\.1)(?::\d+)?$/.test(origin || '');
-        const isPrivateNetworkOrigin = /^http:\/\/(192\.168\.|10\.)/.test(origin || '');
-        const isNgrokOrigin = /ngrok-free\.app$/i.test(origin || '');
-
-        if (
-            !origin ||
-            allowedOrigins.includes(origin) ||
-            isVpcDirectOrigin ||
-            isSslipOrigin ||
-            isLoopbackOrigin ||
-            (allowNgrokCors && isNgrokOrigin) ||
-            (allowPrivateCors && isPrivateNetworkOrigin) ||
-            origin.startsWith('exp://') ||
-            origin.includes('.expo.dev')
-        ) {
-            callback(null, true);
-        } else {
-            logStructured('warn', `CORS bloqueado: ${origin}`, { service: 'server', origin });
-            callback(new Error('Não permitido pelo CORS'));
-        }
-    },
-    credentials: false, // React Native não precisa
-    methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-    allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With"]
-};
+const { corsOptions } = buildRuntimeCorsConfig({
+    env: process.env,
+    logger: logStructured,
+    serviceName: 'server'
+});
 
 configureHttpMiddleware({
     app,
