@@ -177,26 +177,43 @@ class DriverSubscriptionService {
   async syncAllDriverSubscriptions({ db } = {}) {
     const realtimeDb = db || getRealtimeDB();
     const firestore = getFirestore();
-    const [usersSnapshot, rawSubscriptionsSnapshot, subscriptionsSnapshot] = await Promise.all([
+    const [usersSnapshot, usersAltSnapshot, rawSubscriptionsSnapshot, subscriptionsSnapshot, existingReadModelSnapshot] = await Promise.all([
       realtimeDb.ref('users').orderByChild('usertype').equalTo('driver').once('value'),
+      realtimeDb.ref('users').orderByChild('userType').equalTo('driver').once('value').catch(() => null),
       firestore.collection(RAW_COLLECTION).get().catch(() => null),
-      realtimeDb.ref('subscriptions').once('value')
+      realtimeDb.ref('subscriptions').once('value'),
+      firestore.collection(COLLECTION).get().catch(() => null)
     ]);
 
-    const users = usersSnapshot.val() || {};
+    const users = {
+      ...(usersSnapshot?.val() || {}),
+      ...(usersAltSnapshot?.val() || {})
+    };
     const rawSubscriptions = rawSubscriptionsSnapshot
       ? Object.fromEntries(rawSubscriptionsSnapshot.docs.map((doc) => [doc.id, doc.data() || {}]))
       : {};
     const subscriptions = subscriptionsSnapshot.val() || {};
+    const existingReadModelDocIds = new Set(
+      (existingReadModelSnapshot?.docs || []).map((doc) => doc.id)
+    );
+    const activeDriverIds = new Set();
     const rows = [];
 
     Object.keys(users).forEach((driverId) => {
+      const driver = users[driverId] || {};
+      const normalizedUserType = String(driver.usertype || driver.userType || '').toLowerCase();
+      if (normalizedUserType !== 'driver') {
+        return;
+      }
+
+      activeDriverIds.add(driverId);
       rows.push(this.buildRow(
         driverId,
-        users[driverId] || {},
+        driver,
         rawSubscriptions[driverId] || subscriptions[driverId] || {}
       ));
     });
+    const staleReadModelDocIds = Array.from(existingReadModelDocIds).filter((driverId) => !activeDriverIds.has(driverId));
 
     const batches = [];
     for (let index = 0; index < rows.length; index += 400) {
@@ -207,10 +224,19 @@ class DriverSubscriptionService {
       batches.push(batch.commit());
     }
 
+    for (let index = 0; index < staleReadModelDocIds.length; index += 450) {
+      const batch = firestore.batch();
+      staleReadModelDocIds.slice(index, index + 450).forEach((driverId) => {
+        batch.delete(firestore.collection(COLLECTION).doc(driverId));
+      });
+      batches.push(batch.commit());
+    }
+
     await Promise.all(batches);
     logStructured('info', 'Espelho Firestore de subscriptions sincronizado', {
       service: 'driver-subscription-service',
-      total: rows.length
+      total: rows.length,
+      staleRemoved: staleReadModelDocIds.length
     });
 
     return rows;

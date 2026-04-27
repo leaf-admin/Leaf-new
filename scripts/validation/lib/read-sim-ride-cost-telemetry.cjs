@@ -20,6 +20,26 @@ function roundUnits(value) {
   return Number(safeNumber(value, 0).toFixed(3));
 }
 
+function normalizedCounter(section = {}, aliases = []) {
+  for (const alias of aliases) {
+    const parsed = Number(section?.[alias]);
+    if (Number.isFinite(parsed)) {
+      return Math.max(0, Math.round(parsed));
+    }
+  }
+  return 0;
+}
+
+function normalizedCost(section = {}, aliases = []) {
+  for (const alias of aliases) {
+    const parsed = Number(section?.[alias]);
+    if (Number.isFinite(parsed) && parsed >= 0) {
+      return roundCurrency(parsed);
+    }
+  }
+  return 0;
+}
+
 function mergeBreakdownMap(target = {}, source = {}) {
   Object.entries(source || {}).forEach(([rawKey, rawEntry]) => {
     const key = String(rawKey || '').trim() || 'unknown';
@@ -138,6 +158,20 @@ function normalizeReportEntry(entry) {
   );
   const driverDirectionsRequests = normalizedUserType === 'driver' ? directionsRequestCount : 0;
   const passengerDirectionsRequests = normalizedUserType === 'customer' ? directionsRequestCount : 0;
+  const redisReads = normalizedCounter(redis, ['reads', 'readOps', 'readCount']);
+  const redisWrites = normalizedCounter(redis, ['writes', 'writeOps', 'writeCount']);
+  const firebaseReads = normalizedCounter(firebase, ['reads', 'readOps', 'readCount']);
+  const firebaseWrites = normalizedCounter(firebase, ['writes', 'writeOps', 'writeCount']);
+  const databaseReads = normalizedCounter(database, ['reads', 'readOps', 'readCount']);
+  const databaseWrites = normalizedCounter(database, ['writes', 'writeOps', 'writeCount']);
+  const backendProcessingCostUsd = normalizedCost(backend, ['estimatedCostUsd', 'totalEstimatedCostUsd']);
+  const redisCostUsd = normalizedCost(redis, ['estimatedCostUsd', 'totalEstimatedCostUsd']);
+  const firebaseCostUsd = normalizedCost(firebase, ['estimatedCostUsd', 'totalEstimatedCostUsd']);
+  const databaseCostUsd = normalizedCost(database, ['estimatedCostUsd', 'totalEstimatedCostUsd']);
+  const infrastructureCostUsd = roundCurrency(redisCostUsd + firebaseCostUsd + databaseCostUsd);
+  const totalEstimatedCostUsd = roundCurrency(
+    googleEstimatedCostUsd + backendProcessingCostUsd + infrastructureCostUsd,
+  );
 
   return {
     ...entry,
@@ -162,30 +196,18 @@ function normalizeReportEntry(entry) {
       backendSuccesses: Math.max(0, Math.round(safeNumber(backend?.totalSuccesses, 0))),
       backendErrors: Math.max(0, Math.round(safeNumber(backend?.totalErrors, 0))),
       backendLatencyMs: Math.max(0, Math.round(safeNumber(backend?.totalLatencyMs, 0))),
-      redisReads:
-        Math.max(0, Math.round(safeNumber(redis?.reads, 0))) ||
-        Math.max(0, Math.round(safeNumber(redis?.readOps, 0))) ||
-        null,
-      redisWrites:
-        Math.max(0, Math.round(safeNumber(redis?.writes, 0))) ||
-        Math.max(0, Math.round(safeNumber(redis?.writeOps, 0))) ||
-        null,
-      firebaseReads:
-        Math.max(0, Math.round(safeNumber(firebase?.reads, 0))) ||
-        Math.max(0, Math.round(safeNumber(firebase?.readOps, 0))) ||
-        null,
-      firebaseWrites:
-        Math.max(0, Math.round(safeNumber(firebase?.writes, 0))) ||
-        Math.max(0, Math.round(safeNumber(firebase?.writeOps, 0))) ||
-        null,
-      databaseReads:
-        Math.max(0, Math.round(safeNumber(database?.reads, 0))) ||
-        Math.max(0, Math.round(safeNumber(database?.readOps, 0))) ||
-        null,
-      databaseWrites:
-        Math.max(0, Math.round(safeNumber(database?.writes, 0))) ||
-        Math.max(0, Math.round(safeNumber(database?.writeOps, 0))) ||
-        null,
+      redisReads,
+      redisWrites,
+      firebaseReads,
+      firebaseWrites,
+      databaseReads,
+      databaseWrites,
+      backendProcessingCostUsd,
+      redisCostUsd,
+      firebaseCostUsd,
+      databaseCostUsd,
+      infrastructureCostUsd,
+      totalEstimatedCostUsd,
     },
     costSummary: {
       currency: entry?.pricingSheet?.currency || 'USD',
@@ -200,9 +222,12 @@ function normalizeReportEntry(entry) {
       directionsBillableUnits,
       directionsEstimatedCostUsd,
       routesCostUsd: directionsEstimatedCostUsd,
-      backendProcessingCostUsd: null,
-      firebaseCostUsd: null,
-      databaseCostUsd: null,
+      backendProcessingCostUsd,
+      redisCostUsd,
+      firebaseCostUsd,
+      databaseCostUsd,
+      infrastructureCostUsd,
+      totalEstimatedCostUsd,
     },
   };
 }

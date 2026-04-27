@@ -32,6 +32,50 @@ class RidePersistenceService {
         logger.info(`🚀 Ride Persistence Service inicializado (Redis Mode: ${this.redisMode})`);
     }
 
+    createOperationTelemetry() {
+        return {
+            redis: { reads: 0, writes: 0 },
+            firebase: { reads: 0, writes: 0 },
+            database: { reads: 0, writes: 0 }
+        };
+    }
+
+    incrementOperationTelemetry(telemetry, section, operation, count = 1) {
+        if (!telemetry || !telemetry[section]) {
+            return;
+        }
+        const normalizedCount = Number.isFinite(Number(count)) ? Math.max(0, Math.round(Number(count))) : 0;
+        if (normalizedCount <= 0) {
+            return;
+        }
+        if (operation === 'read') {
+            telemetry[section].reads += normalizedCount;
+            return;
+        }
+        if (operation === 'write') {
+            telemetry[section].writes += normalizedCount;
+        }
+    }
+
+    mergeOperationTelemetry(baseTelemetry, incomingTelemetry) {
+        const base = baseTelemetry || this.createOperationTelemetry();
+        const incoming = incomingTelemetry || this.createOperationTelemetry();
+        return {
+            redis: {
+                reads: (base.redis?.reads || 0) + (incoming.redis?.reads || 0),
+                writes: (base.redis?.writes || 0) + (incoming.redis?.writes || 0),
+            },
+            firebase: {
+                reads: (base.firebase?.reads || 0) + (incoming.firebase?.reads || 0),
+                writes: (base.firebase?.writes || 0) + (incoming.firebase?.writes || 0),
+            },
+            database: {
+                reads: (base.database?.reads || 0) + (incoming.database?.reads || 0),
+                writes: (base.database?.writes || 0) + (incoming.database?.writes || 0),
+            }
+        };
+    }
+
     getFinalizationOutboxKey() {
         return 'rides:finalization_outbox';
     }
@@ -94,6 +138,7 @@ class RidePersistenceService {
      */
     async saveRide(rideData) {
         try {
+            const telemetry = this.createOperationTelemetry();
             const {
                 rideId,
                 bookingId,
@@ -127,6 +172,7 @@ class RidePersistenceService {
                         createdAt: Date.now(),
                         timestamp: new Date().toISOString()
                     });
+                    this.incrementOperationTelemetry(telemetry, 'redis', 'write', 1);
                 }
             } catch (redisError) {
                 logger.warn(`⚠️ Erro ao salvar no Redis (continuando): ${redisError.message}`);
@@ -137,7 +183,8 @@ class RidePersistenceService {
                 logger.warn('⚠️ Firestore não disponível - corrida não persistida permanentemente');
                 return {
                     success: false,
-                    error: 'Firestore não disponível'
+                    error: 'Firestore não disponível',
+                    telemetry
                 };
             }
             
@@ -182,19 +229,22 @@ class RidePersistenceService {
                 },
                 'saveRide (Firestore)'
             );
+            this.incrementOperationTelemetry(telemetry, 'database', 'write', 1);
             
             logger.info(`✅ Corrida ${rideId} salva no Firestore (snapshot inicial)`);
             
             return {
                 success: true,
-                rideId: rideId
+                rideId: rideId,
+                telemetry
             };
             
         } catch (error) {
             logger.error(`❌ Erro ao salvar corrida ${rideData?.rideId}: ${error.message}`);
             return {
                 success: false,
-                error: error.message
+                error: error.message,
+                telemetry: this.createOperationTelemetry()
             };
         }
     }
@@ -210,10 +260,11 @@ class RidePersistenceService {
      */
     async updateRideStatus(rideId, status, additionalData = {}) {
         try {
+            const telemetry = this.createOperationTelemetry();
             const redis = redisPool.getConnection();
             if (!redis || (redis.status !== 'ready' && redis.status !== 'connect')) {
                 logger.warn('⚠️ Redis não disponível para atualizar status');
-                return { success: false };
+                return { success: false, telemetry };
             }
             
             const bookingKey = `booking:${rideId}`;
@@ -224,14 +275,15 @@ class RidePersistenceService {
             };
             
             await redis.hset(bookingKey, updateData);
+            this.incrementOperationTelemetry(telemetry, 'redis', 'write', 1);
             
             logger.debug(`✅ Status da corrida ${rideId} atualizado no Redis: ${status}`);
             
-            return { success: true };
+            return { success: true, telemetry };
             
         } catch (error) {
             logger.error(`❌ Erro ao atualizar status da corrida ${rideId}: ${error.message}`);
-            return { success: false };
+            return { success: false, telemetry: this.createOperationTelemetry() };
         }
     }
     
@@ -251,10 +303,12 @@ class RidePersistenceService {
      */
     async saveFinalRideData(rideId, finalData) {
         try {
+            const telemetry = this.createOperationTelemetry();
             if (!rideId) {
                 return {
                     success: false,
-                    error: 'rideId é obrigatório'
+                    error: 'rideId é obrigatório',
+                    telemetry
                 };
             }
             
@@ -271,6 +325,7 @@ class RidePersistenceService {
                         duration: finalData.duration || null,
                         completedAt: Date.now()
                     });
+                    this.incrementOperationTelemetry(telemetry, 'redis', 'write', 1);
                 }
             } catch (redisError) {
                 logger.warn(`⚠️ Erro ao atualizar Redis (continuando): ${redisError.message}`);
@@ -281,7 +336,8 @@ class RidePersistenceService {
                 logger.warn('⚠️ Firestore não disponível - dados finais não persistidos');
                 return {
                     success: false,
-                    error: 'Firestore não disponível'
+                    error: 'Firestore não disponível',
+                    telemetry
                 };
             }
             
@@ -312,28 +368,32 @@ class RidePersistenceService {
                 },
                 'saveFinalRideData (Firestore)'
             );
+            this.incrementOperationTelemetry(telemetry, 'database', 'write', 1);
             
             logger.info(`✅ Dados finais da corrida ${rideId} salvos no Firestore`);
             
             return {
                 success: true,
-                rideId: rideId
+                rideId: rideId,
+                telemetry
             };
             
         } catch (error) {
             logger.error(`❌ Erro ao salvar dados finais da corrida ${rideId}: ${error.message}`);
             return {
                 success: false,
-                error: error.message
+                error: error.message,
+                telemetry: this.createOperationTelemetry()
             };
         }
     }
 
     async queueFinalizationOutbox(rideId, finalData, errorMessage = 'unknown_error') {
         try {
+            const telemetry = this.createOperationTelemetry();
             const redis = redisPool.getConnection();
             if (!redis || (redis.status !== 'ready' && redis.status !== 'connect')) {
-                return { success: false, error: 'Redis indisponivel para outbox' };
+                return { success: false, error: 'Redis indisponivel para outbox', telemetry };
             }
 
             const outboxKey = this.getFinalizationOutboxKey();
@@ -350,18 +410,24 @@ class RidePersistenceService {
             };
 
             await redis.hset(outboxKey, rideId, JSON.stringify(payload));
+            this.incrementOperationTelemetry(telemetry, 'redis', 'write', 1);
             logger.warn(`⚠️ Finalizacao da corrida ${rideId} enviada para outbox`);
-            return { success: true };
+            return { success: true, telemetry };
         } catch (error) {
             logger.error(`❌ Erro ao enfileirar outbox da corrida ${rideId}: ${error.message}`);
-            return { success: false, error: error.message };
+            return { success: false, error: error.message, telemetry: this.createOperationTelemetry() };
         }
     }
 
     async persistFinalRideDataWithOutbox(rideId, finalData) {
         const saveResult = await this.saveFinalRideData(rideId, finalData);
         if (saveResult.success) {
-            return { success: true, persisted: true, deferred: false };
+            return {
+                success: true,
+                persisted: true,
+                deferred: false,
+                telemetry: saveResult.telemetry || this.createOperationTelemetry()
+            };
         }
 
         const queueResult = await this.queueFinalizationOutbox(
@@ -370,15 +436,26 @@ class RidePersistenceService {
             saveResult.error || 'save_final_failed'
         );
 
+        const mergedTelemetry = this.mergeOperationTelemetry(
+            saveResult.telemetry || this.createOperationTelemetry(),
+            queueResult.telemetry || this.createOperationTelemetry()
+        );
+
         if (queueResult.success) {
-            return { success: true, persisted: false, deferred: true };
+            return {
+                success: true,
+                persisted: false,
+                deferred: true,
+                telemetry: mergedTelemetry
+            };
         }
 
         return {
             success: false,
             persisted: false,
             deferred: false,
-            error: queueResult.error || saveResult.error || 'persist_and_outbox_failed'
+            error: queueResult.error || saveResult.error || 'persist_and_outbox_failed',
+            telemetry: mergedTelemetry
         };
     }
 
@@ -598,5 +675,4 @@ class RidePersistenceService {
 const ridePersistenceService = new RidePersistenceService();
 
 module.exports = ridePersistenceService;
-
 

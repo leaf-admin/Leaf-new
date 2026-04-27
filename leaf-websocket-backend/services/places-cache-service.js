@@ -13,6 +13,63 @@ const { logger } = require('../utils/logger');
 const redisPool = require('../utils/redis-pool');
 const { normalizeQuery, isValidQuery } = require('../utils/places-normalizer');
 
+const DIRECTIONS_CACHE_TTL_SECONDS = Number.parseInt(
+  process.env.PLACES_DIRECTIONS_CACHE_TTL_SECONDS || process.env.DIRECTIONS_CACHE_TTL_SECONDS || '120',
+  10,
+);
+
+function normalizeCoordinateNumber(value) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) {
+    return null;
+  }
+  return Number(parsed.toFixed(6));
+}
+
+function parseLatLngPair(rawValue) {
+  const [rawLat, rawLng] = String(rawValue || '').split(',');
+  const lat = normalizeCoordinateNumber(rawLat);
+  const lng = normalizeCoordinateNumber(rawLng);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+    return null;
+  }
+  return { lat, lng };
+}
+
+function serializeLatLngPair(point) {
+  if (!point || !Number.isFinite(point.lat) || !Number.isFinite(point.lng)) {
+    return null;
+  }
+  return `${point.lat.toFixed(6)},${point.lng.toFixed(6)}`;
+}
+
+function normalizeWaypointsInput(waypointsInput) {
+  if (!waypointsInput) {
+    return [];
+  }
+
+  const rawWaypoints = Array.isArray(waypointsInput)
+    ? waypointsInput
+    : String(waypointsInput)
+      .split('|')
+      .map((item) => item.trim())
+      .filter(Boolean);
+
+  return rawWaypoints
+    .map((item) => {
+      if (typeof item === 'string') {
+        return parseLatLngPair(item);
+      }
+      const lat = normalizeCoordinateNumber(item?.lat ?? item?.latitude);
+      const lng = normalizeCoordinateNumber(item?.lng ?? item?.longitude);
+      if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+        return null;
+      }
+      return { lat, lng };
+    })
+    .filter(Boolean);
+}
+
 class PlacesCacheService {
   constructor() {
     // Usar Redis Pool (padrão do projeto)
@@ -251,20 +308,16 @@ class PlacesCacheService {
 
       logger.info(`🌐 [PlacesCache] Buscando no Google Places: "${query}"`);
 
-      // Construir URL da API Places Autocomplete
-      let url = `https://maps.googleapis.com/maps/api/place/autocomplete/json?input=${encodeURIComponent(query)}&key=${this.googleApiKey}&language=pt-BR&components=country:br`;
+      const predictions = await this.fetchAutocompletePredictions(query, {
+        location,
+        limit: 1,
+      });
 
-      // Adicionar location bias se disponível
-      if (location && location.lat && location.lng) {
-        url += `&locationbias=circle:50000@${location.lat},${location.lng}`;
-      }
-
-      const response = await fetch(url);
-      const json = await response.json();
-
-      if (json.status === 'OK' && json.predictions && json.predictions.length > 0) {
-        // Pegar o primeiro resultado e buscar detalhes
-        const placeId = json.predictions[0].place_id;
+      if (Array.isArray(predictions) && predictions.length > 0) {
+        const placeId = predictions[0]?.place_id;
+        if (!placeId) {
+          return null;
+        }
         return await this.getPlaceDetails(placeId);
       }
 
@@ -279,15 +332,25 @@ class PlacesCacheService {
   /**
    * Busca detalhes completos de um lugar (lat/lng)
    * @param {string} placeId - Place ID do Google Places
+   * @param {object} options - Opções adicionais (sessionToken)
    * @returns {Promise<object|null>} - Dados completos do lugar
    */
-  async getPlaceDetails(placeId) {
+  async getPlaceDetails(placeId, options = {}) {
     try {
       if (!this.googleApiKey) {
         return null;
       }
 
-      const url = `https://maps.googleapis.com/maps/api/place/details/json?place_id=${placeId}&key=${this.googleApiKey}&fields=geometry,formatted_address,name,place_id`;
+      const normalizedPlaceId = String(placeId || '').trim();
+      if (!normalizedPlaceId) {
+        return null;
+      }
+      const normalizedSessionToken = String(options?.sessionToken || '').trim();
+
+      let url = `https://maps.googleapis.com/maps/api/place/details/json?place_id=${encodeURIComponent(normalizedPlaceId)}&key=${this.googleApiKey}&fields=geometry,formatted_address,name,place_id&language=pt-BR`;
+      if (normalizedSessionToken) {
+        url += `&sessiontoken=${encodeURIComponent(normalizedSessionToken)}`;
+      }
 
       const response = await fetch(url);
       const json = await response.json();
@@ -306,6 +369,274 @@ class PlacesCacheService {
       return null;
     } catch (error) {
       logger.error(`❌ [PlacesCache] Erro ao buscar detalhes: ${error.message}`);
+      return null;
+    }
+  }
+
+  /**
+   * Busca previsões no Google Places Autocomplete (Legacy)
+   * @param {string} query - Texto de busca
+   * @param {object} options - Opções adicionais (location, sessionToken, limit)
+   * @returns {Promise<Array>} - Lista de previsões
+   */
+  async fetchAutocompletePredictions(query, options = {}) {
+    try {
+      if (!this.googleApiKey) {
+        logger.warn('⚠️ [PlacesCache] GOOGLE_MAPS_API_KEY ausente para autocomplete');
+        return [];
+      }
+
+      const normalizedQuery = String(query || '').trim();
+      if (normalizedQuery.length < 3) {
+        return [];
+      }
+
+      let url = `https://maps.googleapis.com/maps/api/place/autocomplete/json?input=${encodeURIComponent(normalizedQuery)}&key=${this.googleApiKey}&language=pt-BR&components=country:br`;
+
+      const lat = Number(options?.location?.lat);
+      const lng = Number(options?.location?.lng);
+      if (Number.isFinite(lat) && Number.isFinite(lng)) {
+        url += `&location=${lat},${lng}&radius=50000`;
+      }
+
+      const normalizedSessionToken = String(options?.sessionToken || '').trim();
+      if (normalizedSessionToken) {
+        url += `&sessiontoken=${encodeURIComponent(normalizedSessionToken)}`;
+      }
+
+      const response = await fetch(url);
+      const json = await response.json();
+      if (!response.ok) {
+        logger.warn(
+          `⚠️ [PlacesCache] HTTP ${response.status} em autocomplete para "${normalizedQuery}"`,
+        );
+        return [];
+      }
+
+      if (json.status === 'ZERO_RESULTS') {
+        return [];
+      }
+
+      if (json.status !== 'OK' || !Array.isArray(json.predictions)) {
+        logger.warn(
+          `⚠️ [PlacesCache] Google autocomplete retornou status ${json.status || 'unknown'}`,
+        );
+        return [];
+      }
+
+      const normalizedLimit = Math.max(
+        1,
+        Math.min(10, Number.parseInt(options?.limit || '8', 10) || 8),
+      );
+      return json.predictions.slice(0, normalizedLimit).map((prediction = {}) => ({
+        place_id: prediction.place_id || null,
+        description: prediction.description || '',
+        structured_formatting: prediction.structured_formatting || null,
+        types: Array.isArray(prediction.types) ? prediction.types : [],
+        reference: prediction.reference || prediction.place_id || null,
+      }));
+    } catch (error) {
+      logger.error(`❌ [PlacesCache] Erro em autocomplete Google: ${error.message}`);
+      return [];
+    }
+  }
+
+  buildDirectionsCacheKey({
+    origin,
+    destination,
+    waypoints = [],
+    trafficEnabled = false,
+    alternativesEnabled = false,
+  }) {
+    const serializedOrigin = serializeLatLngPair(origin);
+    const serializedDestination = serializeLatLngPair(destination);
+    const serializedWaypoints = waypoints
+      .map((waypoint) => serializeLatLngPair(waypoint))
+      .filter(Boolean)
+      .join('|') || 'none';
+
+    return [
+      'maps:directions',
+      serializedOrigin || 'invalid-origin',
+      serializedDestination || 'invalid-destination',
+      serializedWaypoints,
+      `traffic:${trafficEnabled ? '1' : '0'}`,
+      `alternatives:${alternativesEnabled ? '1' : '0'}`,
+    ].join(':');
+  }
+
+  async fetchDirectionsRoute(options = {}) {
+    try {
+      if (!this.googleApiKey) {
+        logger.warn('⚠️ [PlacesCache] GOOGLE_MAPS_API_KEY ausente para directions');
+        return null;
+      }
+
+      const origin = parseLatLngPair(options?.startLoc);
+      const destination = parseLatLngPair(options?.destLoc);
+      if (!origin || !destination) {
+        return null;
+      }
+
+      const waypoints = normalizeWaypointsInput(options?.waypoints);
+      const trafficEnabled = options?.trafficEnabled === true;
+      const alternativesEnabled = options?.alternativesEnabled === true;
+      const cacheKey = this.buildDirectionsCacheKey({
+        origin,
+        destination,
+        waypoints,
+        trafficEnabled,
+        alternativesEnabled,
+      });
+
+      if (this.isInitialized) {
+        try {
+          const cached = await this.redis.get(cacheKey);
+          if (cached) {
+            const parsed = JSON.parse(cached);
+            if (parsed?.data) {
+              return {
+                ...parsed,
+                cached: true,
+                cacheKey,
+              };
+            }
+          }
+        } catch (cacheError) {
+          logger.warn(`⚠️ [PlacesCache] Falha ao ler cache de directions: ${cacheError.message}`);
+        }
+      }
+
+      const originParam = serializeLatLngPair(origin);
+      const destinationParam = serializeLatLngPair(destination);
+      let url = `https://maps.googleapis.com/maps/api/directions/json?origin=${encodeURIComponent(originParam)}&destination=${encodeURIComponent(destinationParam)}&key=${this.googleApiKey}&language=pt-BR&units=metric`;
+      if (trafficEnabled) {
+        url += '&departure_time=now';
+      }
+      if (alternativesEnabled) {
+        url += '&alternatives=true';
+      }
+      if (waypoints.length > 0) {
+        const waypointsParam = waypoints
+          .map((point) => serializeLatLngPair(point))
+          .filter(Boolean)
+          .join('|');
+        if (waypointsParam) {
+          url += `&waypoints=${encodeURIComponent(waypointsParam)}`;
+        }
+      }
+
+      const response = await fetch(url);
+      const json = await response.json();
+
+      if (!response.ok) {
+        logger.warn(`⚠️ [PlacesCache] HTTP ${response.status} em directions`);
+        return null;
+      }
+
+      if (json.status !== 'OK' || !Array.isArray(json.routes) || json.routes.length === 0) {
+        logger.warn(`⚠️ [PlacesCache] Directions retornou status ${json.status || 'unknown'}`);
+        return {
+          cached: false,
+          routeCount: 0,
+          data: null,
+          status: json.status || 'unknown',
+        };
+      }
+
+      let bestRoute = json.routes[0];
+      let bestTime = null;
+      if (json.routes.length > 1) {
+        for (const route of json.routes) {
+          const routeLegs = Array.isArray(route.legs) ? route.legs : [];
+          const routeTime = routeLegs.reduce((total, currentLeg) => {
+            const durationValue = Number(
+              currentLeg?.duration_in_traffic?.value ??
+              currentLeg?.duration?.value ??
+              0,
+            );
+            return Number.isFinite(durationValue) ? total + durationValue : total;
+          }, 0);
+          if (bestTime === null || routeTime < bestTime) {
+            bestRoute = route;
+            bestTime = routeTime;
+          }
+        }
+      }
+
+      const route = bestRoute || {};
+      const legs = Array.isArray(route.legs) ? route.legs : [];
+      const normalizedLegs = legs.map((leg) => {
+        const legDurationInTraffic = Number(leg?.duration_in_traffic?.value);
+        const legDuration = Number(
+          leg?.duration_in_traffic?.value ??
+          leg?.duration?.value ??
+          0,
+        );
+        return {
+          distance_in_km: Number(leg?.distance?.value || 0) / 1000,
+          time_in_secs: Number.isFinite(legDuration) ? legDuration : 0,
+          duration_in_traffic: Number.isFinite(legDurationInTraffic) ? legDurationInTraffic : null,
+          start_location:
+            Number.isFinite(Number(leg?.start_location?.lat)) &&
+            Number.isFinite(Number(leg?.start_location?.lng))
+              ? {
+                latitude: Number(leg.start_location.lat),
+                longitude: Number(leg.start_location.lng),
+              }
+              : null,
+          end_location:
+            Number.isFinite(Number(leg?.end_location?.lat)) &&
+            Number.isFinite(Number(leg?.end_location?.lng))
+              ? {
+                latitude: Number(leg.end_location.lat),
+                longitude: Number(leg.end_location.lng),
+              }
+              : null,
+          start_address: leg?.start_address || '',
+          end_address: leg?.end_address || '',
+        };
+      });
+
+      const distance_in_km = normalizedLegs.reduce(
+        (acc, leg) => acc + (Number.isFinite(leg.distance_in_km) ? leg.distance_in_km : 0),
+        0,
+      );
+      const time_in_secs = normalizedLegs.reduce(
+        (acc, leg) => acc + (Number.isFinite(leg.time_in_secs) ? leg.time_in_secs : 0),
+        0,
+      );
+      const trafficLegs = normalizedLegs.filter((leg) => Number.isFinite(leg.duration_in_traffic));
+      const duration_in_traffic = trafficLegs.length === normalizedLegs.length && trafficLegs.length > 0
+        ? trafficLegs.reduce((acc, leg) => acc + Number(leg.duration_in_traffic || 0), 0)
+        : null;
+
+      const data = {
+        distance_in_km,
+        time_in_secs,
+        polylinePoints: route?.overview_polyline?.points || null,
+        duration_in_traffic,
+        legs: normalizedLegs,
+      };
+
+      const payload = {
+        cached: false,
+        routeCount: json.routes.length,
+        waypointsCount: waypoints.length,
+        data,
+      };
+
+      if (this.isInitialized) {
+        try {
+          await this.redis.setex(cacheKey, DIRECTIONS_CACHE_TTL_SECONDS, JSON.stringify(payload));
+        } catch (cacheError) {
+          logger.warn(`⚠️ [PlacesCache] Falha ao salvar cache de directions: ${cacheError.message}`);
+        }
+      }
+
+      return payload;
+    } catch (error) {
+      logger.error(`❌ [PlacesCache] Erro em directions Google: ${error.message}`);
       return null;
     }
   }
@@ -441,5 +772,3 @@ class PlacesCacheService {
 const placesCacheService = new PlacesCacheService();
 
 module.exports = placesCacheService;
-
-

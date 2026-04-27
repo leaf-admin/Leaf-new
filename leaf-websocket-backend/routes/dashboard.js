@@ -21,6 +21,9 @@ const driverSubscriptionService = require('../services/driver-subscription-servi
 const subscriptionStateService = require('../services/subscription-state-service');
 const modernMetricsService = require('../services/modern-metrics-service');
 const h3MapService = require('../services/h3-map-service');
+const {
+  recomputeDriverActivationStatus
+} = require('../services/driver-document-analysis-queue');
 const { buildRecentRideActivities } = require('../services/dashboard-ride-monitoring-service');
 const os = require('os');
 
@@ -48,6 +51,19 @@ const DASHBOARD_MONITORING_ROLES = ['admin', 'super-admin', 'manager', 'developm
 const DASHBOARD_JWT_SECRET = resolveJwtSecret(['JWT_SECRET', 'ADMIN_JWT_SECRET'], {
   context: 'dashboard-routes'
 });
+
+function emitDriverActivationUnlockedEvent(req, driverId, payload = {}) {
+  const io = req?.app?.get?.('io') || req?.app?.locals?.io || null;
+  if (!io || !driverId) return;
+  io.to(`driver_${driverId}`).emit('driverDocumentStatusUpdated', {
+    driverId,
+    documentType: 'activation_status',
+    status: 'approved',
+    updatedAt: new Date().toISOString(),
+    canGoOnline: true,
+    ...payload
+  });
+}
 
 function createRouteMiddlewareLayer(handle, name) {
   // Express route stacks use internal Layer instances. Creating the same shape
@@ -1326,6 +1342,33 @@ router.post('/api/drivers/applications/:id/approve', authenticateJWT, requireRol
             );
           }
         }
+
+        const activationUpdatedAt = new Date().toISOString();
+        await Promise.all([
+          db.ref(`users/${id}/driverActivationConsent`).update({
+            backgroundCheck: true,
+            updatedAt: activationUpdatedAt
+          }),
+          db.ref(`driver_activation/${id}/consent/backgroundCheck`).update({
+            accepted: true,
+            acceptedAt: activationUpdatedAt,
+            updatedAt: activationUpdatedAt
+          })
+        ]);
+
+        try {
+          await recomputeDriverActivationStatus(id);
+        } catch (recomputeError) {
+          logStructured('warn', 'Falha ao recomputar ativação após aprovação de aplicação', {
+            service: 'dashboard-routes',
+            driverId: id,
+            error: recomputeError?.message || String(recomputeError)
+          });
+        }
+
+        emitDriverActivationUnlockedEvent(req, id, {
+          activationState: 'ACTIVE'
+        });
 
         // Melhor esforço: liberar bloqueio KYC para refletir aprovação manual.
         try {
@@ -7443,11 +7486,41 @@ router.post('/api/drivers/:driverId/approve', authenticateJWT, requireRole(DASHB
     }
 
     const db = firebaseConfig.getRealtimeDB();
+    const nowIso = new Date().toISOString();
 
     await db.ref(`users/${driverId}`).update({
       approved: true,
-      approvedAt: new Date().toISOString(),
-      kyc_status: 'approved'
+      approvedAt: nowIso,
+      kyc_status: 'approved',
+      kycStatus: 'approved',
+      status: 'approved',
+      updatedAt: nowIso
+    });
+
+    await Promise.all([
+      db.ref(`users/${driverId}/driverActivationConsent`).update({
+        backgroundCheck: true,
+        updatedAt: nowIso
+      }),
+      db.ref(`driver_activation/${driverId}/consent/backgroundCheck`).update({
+        accepted: true,
+        acceptedAt: nowIso,
+        updatedAt: nowIso
+      })
+    ]);
+
+    try {
+      await recomputeDriverActivationStatus(driverId);
+    } catch (recomputeError) {
+      logStructured('warn', 'Falha ao recomputar ativação após aprovação rápida', {
+        service: 'dashboard-routes',
+        driverId,
+        error: recomputeError?.message || String(recomputeError)
+      });
+    }
+
+    emitDriverActivationUnlockedEvent(req, driverId, {
+      activationState: 'ACTIVE'
     });
 
     // Verificar e aplicar promoções elegíveis

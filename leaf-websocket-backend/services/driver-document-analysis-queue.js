@@ -657,33 +657,38 @@ class DriverDocumentAnalysisQueue {
     }
 
     const db = getDbOrThrow();
-    const activationSnapshot = await db.ref(`driver_activation/${safeDriverId}`).once('value');
+    const [activationSnapshot, userSnapshot] = await Promise.all([
+      db.ref(`driver_activation/${safeDriverId}`).once('value'),
+      db.ref(`users/${safeDriverId}`).once('value')
+    ]);
     const activationNode = activationSnapshot.val() || {};
-
-    let statusPayload = activationNode?.status || null;
-    if (!statusPayload || typeof statusPayload !== 'object') {
-      const recomputed = await recomputeDriverActivationStatus(safeDriverId);
-      statusPayload = {
-        checklist: recomputed.checklist,
-        canGoOnline: recomputed.canGoOnline,
-        activationState: recomputed.activationState || null,
-        activationStateLabel: recomputed.activationStateLabel || null,
-        canAttemptOnline: Boolean(recomputed.canAttemptOnline),
-        requiresLiveness: Boolean(recomputed.requiresLiveness),
-        blockingReason: recomputed.blockingReason || null,
-        vehicle: recomputed.vehicle || {},
-        liveness: recomputed.liveness || {},
-        summary: recomputed.summary,
-        updatedAt: recomputed.updatedAt
-      };
-    }
-
+    const userData = userSnapshot.val() || {};
     const docs = activationNode?.documents || {};
+    const consentAcceptedAt = activationNode?.consent?.backgroundCheck?.acceptedAt || null;
+
+    const summary = {
+      inReview: 0,
+      approved: 0,
+      failed: 0,
+      pending: 0
+    };
+
     const byType = {};
     ALLOWED_DRIVER_DOCUMENT_TYPES.forEach(type => {
+      const normalizedStatus = String(docs?.[type]?.status || 'pending').toLowerCase();
+      if (normalizedStatus === 'in_review') {
+        summary.inReview += 1;
+      } else if (normalizedStatus === 'approved') {
+        summary.approved += 1;
+      } else if (normalizedStatus === 'failed') {
+        summary.failed += 1;
+      } else {
+        summary.pending += 1;
+      }
+
       byType[type] = {
         documentType: type,
-        status: String(docs?.[type]?.status || 'pending').toLowerCase(),
+        status: normalizedStatus,
         reason: String(docs?.[type]?.reason || ''),
         updatedAt: docs?.[type]?.updatedAt || null,
         reviewedAt: docs?.[type]?.reviewedAt || null,
@@ -695,13 +700,57 @@ class DriverDocumentAnalysisQueue {
       };
     });
 
-    const consentAcceptedAt = activationNode?.consent?.backgroundCheck?.acceptedAt || null;
+    let canonicalState = null;
+    try {
+      canonicalState = await driverActivationStateService.resolveDriverActivationState({
+        driverId: safeDriverId,
+        db,
+        activationNode,
+        userData
+      });
+    } catch (error) {
+      logStructured('warn', 'Falha ao calcular estado canônico de ativação em tempo real', {
+        service: 'driver-activation-queue',
+        driverId: safeDriverId,
+        error: error?.message || String(error)
+      });
+    }
+
+    const storedStatus = activationNode?.status || {};
+    const statusPayload = {
+      checklist: canonicalState?.checklist || storedStatus?.checklist || {},
+      canGoOnline: Boolean(
+        canonicalState?.canGoOnline ??
+          storedStatus?.canGoOnline
+      ),
+      activationState: canonicalState?.state || storedStatus?.activationState || null,
+      activationStateLabel: canonicalState?.label || storedStatus?.activationStateLabel || null,
+      canAttemptOnline: Boolean(
+        canonicalState?.canAttemptOnline ??
+          storedStatus?.canAttemptOnline
+      ),
+      requiresLiveness: Boolean(
+        canonicalState?.requiresLiveness ??
+          storedStatus?.requiresLiveness
+      ),
+      blockingReason: canonicalState?.blockingReason || storedStatus?.blockingReason || null,
+      vehicle: canonicalState?.vehicle || storedStatus?.vehicle || {},
+      liveness: canonicalState?.liveness || storedStatus?.liveness || {},
+      summary,
+      updatedAt:
+        canonicalState?.updatedAt ||
+        storedStatus?.updatedAt ||
+        activationNode?.updatedAt ||
+        null
+    };
 
     return {
       driverId: safeDriverId,
       checklist: {
         ...(statusPayload?.checklist || {}),
-        backgroundCheckConsent: Boolean(consentAcceptedAt)
+        backgroundCheckConsent:
+          Boolean(consentAcceptedAt) ||
+          Boolean(statusPayload?.checklist?.backgroundCheckConsent)
       },
       canGoOnline: Boolean(statusPayload?.canGoOnline),
       activationState: statusPayload?.activationState || null,
@@ -711,12 +760,7 @@ class DriverDocumentAnalysisQueue {
       blockingReason: statusPayload?.blockingReason || null,
       vehicle: statusPayload?.vehicle || {},
       liveness: statusPayload?.liveness || {},
-      summary: statusPayload?.summary || {
-        inReview: 0,
-        approved: 0,
-        failed: 0,
-        pending: 0
-      },
+      summary,
       documents: byType,
       consent: {
         backgroundCheck: {

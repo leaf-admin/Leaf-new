@@ -184,6 +184,40 @@ function normalizeOperationSection(section = {}) {
   };
 }
 
+function toFiniteInteger(value, fallback = 0) {
+  const parsed = Number.parseInt(value, 10);
+  if (Number.isFinite(parsed)) {
+    return parsed;
+  }
+  return fallback;
+}
+
+function toIsoTimestamp(rawValue) {
+  if (rawValue === null || rawValue === undefined) {
+    return null;
+  }
+
+  const asString = String(rawValue).trim();
+  if (!asString) {
+    return null;
+  }
+
+  if (/^\d{10,16}$/.test(asString)) {
+    const asNumber = Number(asString);
+    if (Number.isFinite(asNumber)) {
+      const millis = asString.length === 10 ? asNumber * 1000 : asNumber;
+      return new Date(millis).toISOString();
+    }
+  }
+
+  const parsedDate = Date.parse(asString);
+  if (Number.isFinite(parsedDate)) {
+    return new Date(parsedDate).toISOString();
+  }
+
+  return null;
+}
+
 const TELEMETRY_EXCHANGE_RATE_USD_BRL = readPositiveNumberFromEnv(
   process.env.RIDE_COST_TELEMETRY_USD_BRL_RATE,
   process.env.USD_BRL_EXCHANGE_RATE,
@@ -229,9 +263,460 @@ const TELEMETRY_OPERATION_RATES = Object.freeze({
   ),
 });
 
+const TELEMETRY_GOOGLE_SKU_DEFINITIONS = Object.freeze({
+  autocompleteLegacyPerRequest: {
+    label: 'Autocomplete - Per Request',
+    family: 'Places API Legacy',
+    unit: 'request',
+    unitPriceUsd: readPositiveNumberFromEnv(
+      process.env.RIDE_COST_TELEMETRY_SKU_AUTOCOMPLETE_USD,
+      process.env.RIDE_COST_TELEMETRY_SKU_PLACE_AUTOCOMPLETE_USD,
+      '0.00283',
+    ),
+  },
+  placeDetailsLegacy: {
+    label: 'Places Details',
+    family: 'Places API Legacy',
+    unit: 'request',
+    unitPriceUsd: readPositiveNumberFromEnv(
+      process.env.RIDE_COST_TELEMETRY_SKU_PLACE_DETAILS_USD,
+      '0.017',
+    ),
+  },
+  geocoding: {
+    label: 'Geocoding',
+    family: 'Geocoding API',
+    unit: 'request',
+    unitPriceUsd: readPositiveNumberFromEnv(
+      process.env.RIDE_COST_TELEMETRY_SKU_GEOCODING_USD,
+      '0.005',
+    ),
+  },
+  directionsLegacy: {
+    label: 'Directions',
+    family: 'Routes APIs Legacy',
+    unit: 'request',
+    unitPriceUsd: readPositiveNumberFromEnv(
+      process.env.RIDE_COST_TELEMETRY_SKU_DIRECTIONS_USD,
+      '0.005',
+    ),
+  },
+  distanceMatrixLegacyElement: {
+    label: 'Distance Matrix',
+    family: 'Routes APIs Legacy',
+    unit: 'element',
+    unitPriceUsd: readPositiveNumberFromEnv(
+      process.env.RIDE_COST_TELEMETRY_SKU_DISTANCE_MATRIX_USD,
+      '0.005',
+    ),
+  },
+});
+
+function normalizeNonNegativeInteger(value, fallback = 0) {
+  if (value === null || value === undefined || value === '') {
+    return Math.max(0, Number.parseInt(fallback, 10) || 0);
+  }
+  const parsed = Number.parseInt(value, 10);
+  if (Number.isFinite(parsed)) {
+    return Math.max(0, parsed);
+  }
+  return Math.max(0, Number.parseInt(fallback, 10) || 0);
+}
+
+function normalizeNonNegativeNumber(value, fallback = 0) {
+  if (value === null || value === undefined || value === '') {
+    return Math.max(0, safeNumber(fallback, 0));
+  }
+  const parsed = Number(value);
+  if (Number.isFinite(parsed)) {
+    return Math.max(0, parsed);
+  }
+  return Math.max(0, safeNumber(fallback, 0));
+}
+
+function buildSkuBreakdownBucket(
+  key,
+  { requestCount = 0, billableUnits = 0, estimatedCostUsd = 0 } = {},
+) {
+  const normalizedKey = normalizeDimensionKey(key);
+  const bucket = {};
+  bucket[normalizedKey] = {
+    requestCount: Math.max(0, Math.round(safeNumber(requestCount, 0))),
+    billableUnits: roundUnits(safeNumber(billableUnits, 0)),
+    estimatedCostUsd: roundCurrency(safeNumber(estimatedCostUsd, 0)),
+  };
+  return bucket;
+}
+
+function buildSkuBreakdownFromMetadata(metadata = {}, sourceMeta = {}, usage = {}) {
+  const telemetrySurface =
+    sanitizeText(metadata?.telemetrySurface, '') ||
+    sanitizeText(metadata?.surface, '') ||
+    sanitizeText(sourceMeta?.surface, '') ||
+    'unknown';
+  const routeScope =
+    sanitizeText(metadata?.routeScope, '') ||
+    sanitizeText(metadata?.routeFamily, '') ||
+    'unknown';
+  const callerFrame =
+    sanitizeText(metadata?.callerFrame, '') ||
+    sanitizeText(metadata?.caller, '') ||
+    'unknown';
+  const cacheMode = sanitizeText(metadata?.cacheMode, 'unknown');
+
+  return {
+    bySurface: buildSkuBreakdownBucket(telemetrySurface, usage),
+    byRouteScope: buildSkuBreakdownBucket(routeScope, usage),
+    byCaller: buildSkuBreakdownBucket(callerFrame, usage),
+    byCacheMode: buildSkuBreakdownBucket(cacheMode, usage),
+  };
+}
+
 class RideCostTelemetryService {
   buildReportKey(bookingId) {
     return `${RIDE_COST_TELEMETRY_PREFIX}:${bookingId}`;
+  }
+
+  resolveGoogleSkuDefinition(skuKey, skuDefinition = {}) {
+    const normalizedSkuKey = sanitizeText(skuKey, '');
+    const preset = TELEMETRY_GOOGLE_SKU_DEFINITIONS[normalizedSkuKey] || {};
+    const normalizedDefinition = {
+      label: sanitizeText(
+        skuDefinition?.label,
+        sanitizeText(preset?.label, normalizedSkuKey || 'custom-sku'),
+      ),
+      family: sanitizeText(skuDefinition?.family, sanitizeText(preset?.family, null)),
+      unit: sanitizeText(skuDefinition?.unit, sanitizeText(preset?.unit, 'request')),
+      unitPriceUsd: roundCurrency(
+        normalizeNonNegativeNumber(
+          skuDefinition?.unitPriceUsd,
+          normalizeNonNegativeNumber(preset?.unitPriceUsd, 0),
+        ),
+      ),
+    };
+    return {
+      normalizedSkuKey,
+      ...normalizedDefinition,
+    };
+  }
+
+  async ingestGoogleSkuUsage({
+    bookingId,
+    skuKey,
+    sourceKey = null,
+    sourceMeta = {},
+    requestCount = 1,
+    billableUnits = null,
+    estimatedCostUsd = null,
+    metadata = {},
+    requestMeta = null,
+    skuDefinition = null,
+  } = {}) {
+    const normalizedBookingId = sanitizeText(bookingId, '');
+    if (!normalizedBookingId) {
+      throw new Error('bookingId obrigatório para telemetria Google por corrida');
+    }
+
+    const resolvedSku = this.resolveGoogleSkuDefinition(skuKey, skuDefinition || {});
+    if (!resolvedSku.normalizedSkuKey) {
+      throw new Error('skuKey obrigatório para telemetria Google por corrida');
+    }
+
+    const normalizedRequestCount = Math.max(
+      1,
+      normalizeNonNegativeInteger(requestCount, 1),
+    );
+    const normalizedBillableUnits = roundUnits(
+      normalizeNonNegativeNumber(
+        billableUnits,
+        normalizedRequestCount,
+      ),
+    );
+    const resolvedEstimatedCostUsd = roundCurrency(
+      normalizeNonNegativeNumber(
+        estimatedCostUsd,
+        normalizedBillableUnits * normalizeNonNegativeNumber(resolvedSku.unitPriceUsd, 0),
+      ),
+    );
+    const usagePayload = {
+      requestCount: normalizedRequestCount,
+      billableUnits: normalizedBillableUnits,
+      estimatedCostUsd: resolvedEstimatedCostUsd,
+    };
+    const normalizedMetadata = safeJsonClone(metadata, {}) || {};
+    const normalizedSourceMeta = normalizeSourceMeta(sourceMeta || {});
+
+    const snapshot = {
+      google: {
+        skus: {
+          [resolvedSku.normalizedSkuKey]: {
+            label: resolvedSku.label,
+            family: resolvedSku.family,
+            unit: resolvedSku.unit,
+            requestCount: normalizedRequestCount,
+            billableUnits: normalizedBillableUnits,
+            estimatedCostUsd: resolvedEstimatedCostUsd,
+            lastMetadata: normalizedMetadata,
+            breakdown: buildSkuBreakdownFromMetadata(
+              normalizedMetadata,
+              normalizedSourceMeta,
+              usagePayload,
+            ),
+          },
+        },
+      },
+    };
+
+    return this.ingestSnapshot({
+      bookingId: normalizedBookingId,
+      sourceKey: sourceKey || null,
+      sourceMeta: normalizedSourceMeta,
+      snapshot,
+      requestMeta: requestMeta || null,
+    });
+  }
+
+  async ingestOperationalUsage({
+    bookingId,
+    sourceKey = null,
+    sourceMeta = {},
+    requestMeta = null,
+    backendCommand = null,
+    backend = {},
+    redis = {},
+    firebase = {},
+    database = {},
+  } = {}) {
+    const normalizedBookingId = sanitizeText(bookingId, '');
+    if (!normalizedBookingId) {
+      throw new Error('bookingId obrigatório para telemetria operacional');
+    }
+
+    const normalizedBackendCommand = sanitizeText(backendCommand, '');
+    const normalizedBackend = {
+      attempts: Math.max(0, readCounterFromAliases(backend, ['attempts'])),
+      emits: Math.max(0, readCounterFromAliases(backend, ['emits'])),
+      successes: Math.max(0, readCounterFromAliases(backend, ['successes'])),
+      errors: Math.max(0, readCounterFromAliases(backend, ['errors'])),
+      totalLatencyMs: Math.max(0, readCounterFromAliases(backend, ['totalLatencyMs', 'latencyMs'])),
+    };
+
+    if (!normalizedBackend.attempts && (normalizedBackend.successes > 0 || normalizedBackend.errors > 0 || normalizedBackend.emits > 0)) {
+      normalizedBackend.attempts = Math.max(1, normalizedBackend.successes + normalizedBackend.errors);
+    }
+
+    const commandName = normalizedBackendCommand || 'unknownCommand';
+    const snapshot = {
+      backend: {
+        commands: {
+          [commandName]: normalizedBackend,
+        },
+      },
+      redis: normalizeOperationSection(redis),
+      firebase: normalizeOperationSection(firebase),
+      database: normalizeOperationSection(database),
+    };
+
+    return this.ingestSnapshot({
+      bookingId: normalizedBookingId,
+      sourceKey: sourceKey || `backend:${commandName}`,
+      sourceMeta: normalizeSourceMeta(sourceMeta || {}),
+      snapshot,
+      requestMeta: requestMeta || null,
+    });
+  }
+
+  buildFallbackReportFromBookingHash(bookingId, bookingHash = {}) {
+    const now = new Date().toISOString();
+    const report = this.createEmptyReport(bookingId);
+
+    const googleUsd = roundCurrency(
+      safeNumber(
+        bookingHash?.costTelemetryGoogleUsd,
+        safeNumber(bookingHash?.costTelemetryTotalUsd, 0),
+      ),
+    );
+    const googleBillableUnits = roundUnits(
+      safeNumber(bookingHash?.costTelemetryGoogleBillableUnits, 0),
+    );
+    const directionsRequests = Math.max(
+      0,
+      toFiniteInteger(bookingHash?.costTelemetryDirectionsRequests, 0),
+    );
+    const driverDirectionsRequests = Math.max(
+      0,
+      toFiniteInteger(bookingHash?.costTelemetryDriverDirectionsRequests, 0),
+    );
+    const passengerDirectionsRequests = Math.max(
+      0,
+      toFiniteInteger(bookingHash?.costTelemetryPassengerDirectionsRequests, 0),
+    );
+    const sourceCount = Math.max(
+      0,
+      toFiniteInteger(bookingHash?.costTelemetrySourceCount, 0),
+    );
+    const backendAttempts = Math.max(
+      0,
+      toFiniteInteger(bookingHash?.costTelemetryBackendAttempts, 0),
+    );
+    const backendSuccesses = Math.max(
+      0,
+      toFiniteInteger(bookingHash?.costTelemetryBackendSuccesses, 0),
+    );
+    const backendErrors = Math.max(
+      0,
+      toFiniteInteger(bookingHash?.costTelemetryBackendErrors, 0),
+    );
+    const backendLatencyMs = Math.max(
+      0,
+      toFiniteInteger(bookingHash?.costTelemetryBackendLatencyMs, 0),
+    );
+    const redisReads = Math.max(
+      0,
+      toFiniteInteger(bookingHash?.costTelemetryRedisReads, 0),
+    );
+    const redisWrites = Math.max(
+      0,
+      toFiniteInteger(bookingHash?.costTelemetryRedisWrites, 0),
+    );
+    const firebaseReads = Math.max(
+      0,
+      toFiniteInteger(bookingHash?.costTelemetryFirebaseReads, 0),
+    );
+    const firebaseWrites = Math.max(
+      0,
+      toFiniteInteger(bookingHash?.costTelemetryFirebaseWrites, 0),
+    );
+    const databaseReads = Math.max(
+      0,
+      toFiniteInteger(bookingHash?.costTelemetryDatabaseReads, 0),
+    );
+    const databaseWrites = Math.max(
+      0,
+      toFiniteInteger(bookingHash?.costTelemetryDatabaseWrites, 0),
+    );
+    const backendUsd = roundCurrency(
+      safeNumber(bookingHash?.costTelemetryBackendUsd, backendAttempts * TELEMETRY_OPERATION_RATES.backendAttemptUsd),
+    );
+    const infrastructureUsdFromHash = roundCurrency(
+      safeNumber(
+        bookingHash?.costTelemetryInfrastructureUsd,
+        (redisReads * TELEMETRY_OPERATION_RATES.redisReadUsd) +
+        (redisWrites * TELEMETRY_OPERATION_RATES.redisWriteUsd) +
+        (firebaseReads * TELEMETRY_OPERATION_RATES.firebaseReadUsd) +
+        (firebaseWrites * TELEMETRY_OPERATION_RATES.firebaseWriteUsd) +
+        (databaseReads * TELEMETRY_OPERATION_RATES.databaseReadUsd) +
+        (databaseWrites * TELEMETRY_OPERATION_RATES.databaseWriteUsd),
+      ),
+    );
+    const totalUsd = roundCurrency(
+      safeNumber(bookingHash?.costTelemetryTotalUsd, googleUsd + backendUsd + infrastructureUsdFromHash),
+    );
+    const totalBrl = roundCurrency(
+      safeNumber(
+        bookingHash?.costTelemetryTotalBrl,
+        totalUsd * TELEMETRY_EXCHANGE_RATE_USD_BRL,
+      ),
+    );
+
+    report.createdAt =
+      toIsoTimestamp(bookingHash?.createdAt) ||
+      toIsoTimestamp(bookingHash?.requestTime) ||
+      now;
+    report.updatedAt =
+      toIsoTimestamp(bookingHash?.costTelemetryUpdatedAt) ||
+      toIsoTimestamp(bookingHash?.updatedAt) ||
+      toIsoTimestamp(bookingHash?.completedAt) ||
+      now;
+    report.schemaVersion = 2;
+    report.fallback = true;
+    report.fallbackSource = 'booking_hash';
+    report.fallbackMode = sourceCount > 0 ? 'summary_from_hash' : 'no_snapshot_recorded';
+    report.bookingSnapshot = {
+      bookingId,
+      status: sanitizeText(bookingHash?.status, null),
+      customerId: sanitizeText(bookingHash?.customerId, null),
+      driverId: sanitizeText(bookingHash?.driverId, null),
+      paymentMethod: sanitizeText(bookingHash?.paymentMethod, null),
+      createdAt: toIsoTimestamp(bookingHash?.createdAt),
+      acceptedAt: toIsoTimestamp(bookingHash?.acceptedAt),
+      arrivedAt: toIsoTimestamp(bookingHash?.arrivedAt),
+      startedAt: toIsoTimestamp(bookingHash?.startedAt),
+      completedAt: toIsoTimestamp(bookingHash?.completedAt),
+      estimatedFare: safeNumber(bookingHash?.estimatedFare, null),
+      finalFare: safeNumber(bookingHash?.finalFare, null),
+      distanceKm: safeNumber(
+        bookingHash?.distanceKm,
+        safeNumber(bookingHash?.distance, null),
+      ),
+      durationMin: safeNumber(
+        bookingHash?.durationMin,
+        safeNumber(bookingHash?.duration, null),
+      ),
+    };
+
+    report.totals.sourceCount = sourceCount;
+    report.totals.google.requestCount = directionsRequests;
+    report.totals.google.billableUnits = googleBillableUnits;
+    report.totals.google.estimatedCostUsd = googleUsd;
+    report.totals.google.directions.requestCount = directionsRequests;
+    report.totals.google.directions.billableUnits = googleBillableUnits;
+    report.totals.google.directions.estimatedCostUsd = googleUsd;
+    report.totals.google.directions.byUserType.driver = driverDirectionsRequests;
+    report.totals.google.directions.byUserType.customer = passengerDirectionsRequests;
+    report.totals.google.directions.byUserType.unknown = Math.max(
+      0,
+      directionsRequests - driverDirectionsRequests - passengerDirectionsRequests,
+    );
+    report.totals.backend.attempts = backendAttempts;
+    report.totals.backend.emits = 0;
+    report.totals.backend.successes = backendSuccesses;
+    report.totals.backend.errors = backendErrors;
+    report.totals.backend.totalLatencyMs = backendLatencyMs;
+    report.totals.backend.estimatedCostUsd = backendUsd;
+    report.totals.infrastructure.redis.reads = redisReads;
+    report.totals.infrastructure.redis.writes = redisWrites;
+    report.totals.infrastructure.redis.estimatedCostUsd = roundCurrency(
+      (redisReads * TELEMETRY_OPERATION_RATES.redisReadUsd) +
+      (redisWrites * TELEMETRY_OPERATION_RATES.redisWriteUsd),
+    );
+    report.totals.infrastructure.firebase.reads = firebaseReads;
+    report.totals.infrastructure.firebase.writes = firebaseWrites;
+    report.totals.infrastructure.firebase.estimatedCostUsd = roundCurrency(
+      (firebaseReads * TELEMETRY_OPERATION_RATES.firebaseReadUsd) +
+      (firebaseWrites * TELEMETRY_OPERATION_RATES.firebaseWriteUsd),
+    );
+    report.totals.infrastructure.database.reads = databaseReads;
+    report.totals.infrastructure.database.writes = databaseWrites;
+    report.totals.infrastructure.database.estimatedCostUsd = roundCurrency(
+      (databaseReads * TELEMETRY_OPERATION_RATES.databaseReadUsd) +
+      (databaseWrites * TELEMETRY_OPERATION_RATES.databaseWriteUsd),
+    );
+    report.totals.infrastructure.estimatedCostUsd = infrastructureUsdFromHash;
+    report.totals.cost.googleUsd = googleUsd;
+    report.totals.cost.backendUsd = backendUsd;
+    report.totals.cost.infrastructureUsd = infrastructureUsdFromHash;
+    report.totals.cost.totalUsd = totalUsd;
+    report.totals.cost.totalBrl = totalBrl;
+    report.totals.cost.budgetBrl = roundCurrency(
+      TELEMETRY_BUDGET_USD * TELEMETRY_EXCHANGE_RATE_USD_BRL,
+    );
+    report.totals.cost.budgetStatus = sanitizeText(
+      bookingHash?.costTelemetryBudgetStatus,
+      TELEMETRY_BUDGET_USD > 0
+        ? totalUsd > TELEMETRY_BUDGET_USD
+          ? 'above_budget'
+          : 'within_budget'
+        : 'unconfigured',
+    );
+    report.totals.cost.budgetOverrunUsd = roundCurrency(
+      Math.max(0, report.totals.cost.totalUsd - TELEMETRY_BUDGET_USD),
+    );
+    report.totals.cost.budgetOverrunBrl = roundCurrency(
+      report.totals.cost.budgetOverrunUsd * TELEMETRY_EXCHANGE_RATE_USD_BRL,
+    );
+
+    return report;
   }
 
   normalizeSourceKey({ sourceKey, userId, userType } = {}) {
@@ -600,6 +1085,18 @@ class RideCostTelemetryService {
       costTelemetryTotalUsd: String(report.totals?.cost?.totalUsd || 0),
       costTelemetryTotalBrl: String(report.totals?.cost?.totalBrl || 0),
       costTelemetryBudgetStatus: String(report.totals?.cost?.budgetStatus || 'unknown'),
+      costTelemetryBackendAttempts: String(report.totals?.backend?.attempts || 0),
+      costTelemetryBackendSuccesses: String(report.totals?.backend?.successes || 0),
+      costTelemetryBackendErrors: String(report.totals?.backend?.errors || 0),
+      costTelemetryBackendLatencyMs: String(report.totals?.backend?.totalLatencyMs || 0),
+      costTelemetryBackendUsd: String(report.totals?.cost?.backendUsd || 0),
+      costTelemetryInfrastructureUsd: String(report.totals?.cost?.infrastructureUsd || 0),
+      costTelemetryRedisReads: String(report.totals?.infrastructure?.redis?.reads || 0),
+      costTelemetryRedisWrites: String(report.totals?.infrastructure?.redis?.writes || 0),
+      costTelemetryFirebaseReads: String(report.totals?.infrastructure?.firebase?.reads || 0),
+      costTelemetryFirebaseWrites: String(report.totals?.infrastructure?.firebase?.writes || 0),
+      costTelemetryDatabaseReads: String(report.totals?.infrastructure?.database?.reads || 0),
+      costTelemetryDatabaseWrites: String(report.totals?.infrastructure?.database?.writes || 0),
       costTelemetryDirectionsRequests: String(report.totals?.google?.directions?.requestCount || 0),
       costTelemetryDriverDirectionsRequests: String(report.totals?.google?.directions?.byUserType?.driver || 0),
       costTelemetryPassengerDirectionsRequests: String(report.totals?.google?.directions?.byUserType?.customer || 0),
@@ -627,8 +1124,62 @@ class RideCostTelemetryService {
 
     await redisPool.ensureConnection();
     const redis = redisPool.getConnection();
-    const rawReport = await redis.get(this.buildReportKey(normalizedBookingId));
-    return safeJsonParse(rawReport, null);
+    const reportKey = this.buildReportKey(normalizedBookingId);
+    const rawReport = await redis.get(reportKey);
+    const parsedReport = safeJsonParse(rawReport, null);
+    if (parsedReport && typeof parsedReport === 'object') {
+      return parsedReport;
+    }
+
+    const bookingHash = await redis.hgetall(`booking:${normalizedBookingId}`);
+    if (!bookingHash || Object.keys(bookingHash).length === 0) {
+      return null;
+    }
+
+    const fallbackReport = this.buildFallbackReportFromBookingHash(
+      normalizedBookingId,
+      bookingHash,
+    );
+
+    await redis.set(
+      reportKey,
+      JSON.stringify(fallbackReport),
+      'EX',
+      RIDE_COST_TELEMETRY_TTL_SECONDS,
+    );
+    await redis.zadd(RIDE_COST_TELEMETRY_RECENT_INDEX, Date.now(), normalizedBookingId);
+    await redis.expire(RIDE_COST_TELEMETRY_RECENT_INDEX, RIDE_COST_TELEMETRY_TTL_SECONDS);
+    await redis.hset(`booking:${normalizedBookingId}`, {
+      costTelemetryKey: reportKey,
+      costTelemetryUpdatedAt: fallbackReport.updatedAt,
+      costTelemetryGoogleUsd: String(fallbackReport.totals?.google?.estimatedCostUsd || 0),
+      costTelemetryGoogleBillableUnits: String(fallbackReport.totals?.google?.billableUnits || 0),
+      costTelemetrySourceCount: String(fallbackReport.totals?.sourceCount || 0),
+      costTelemetryTotalUsd: String(fallbackReport.totals?.cost?.totalUsd || 0),
+      costTelemetryTotalBrl: String(fallbackReport.totals?.cost?.totalBrl || 0),
+      costTelemetryBudgetStatus: String(fallbackReport.totals?.cost?.budgetStatus || 'unknown'),
+      costTelemetryBackendAttempts: String(fallbackReport.totals?.backend?.attempts || 0),
+      costTelemetryBackendSuccesses: String(fallbackReport.totals?.backend?.successes || 0),
+      costTelemetryBackendErrors: String(fallbackReport.totals?.backend?.errors || 0),
+      costTelemetryBackendLatencyMs: String(fallbackReport.totals?.backend?.totalLatencyMs || 0),
+      costTelemetryBackendUsd: String(fallbackReport.totals?.cost?.backendUsd || 0),
+      costTelemetryInfrastructureUsd: String(fallbackReport.totals?.cost?.infrastructureUsd || 0),
+      costTelemetryRedisReads: String(fallbackReport.totals?.infrastructure?.redis?.reads || 0),
+      costTelemetryRedisWrites: String(fallbackReport.totals?.infrastructure?.redis?.writes || 0),
+      costTelemetryFirebaseReads: String(fallbackReport.totals?.infrastructure?.firebase?.reads || 0),
+      costTelemetryFirebaseWrites: String(fallbackReport.totals?.infrastructure?.firebase?.writes || 0),
+      costTelemetryDatabaseReads: String(fallbackReport.totals?.infrastructure?.database?.reads || 0),
+      costTelemetryDatabaseWrites: String(fallbackReport.totals?.infrastructure?.database?.writes || 0),
+      costTelemetryDirectionsRequests: String(fallbackReport.totals?.google?.directions?.requestCount || 0),
+      costTelemetryDriverDirectionsRequests: String(
+        fallbackReport.totals?.google?.directions?.byUserType?.driver || 0,
+      ),
+      costTelemetryPassengerDirectionsRequests: String(
+        fallbackReport.totals?.google?.directions?.byUserType?.customer || 0,
+      ),
+    });
+
+    return fallbackReport;
   }
 
   async getRecentReports(limit = 5) {

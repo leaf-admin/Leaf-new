@@ -8,6 +8,7 @@ const API_BASE_URL = process.env.API_BASE_URL || 'https://api.62.169.31.231.ssli
 const PASSENGER_UID = process.env.TEST_PASSENGER_UID || 'OjML1wSzdNRaynjqMRlSW1Y0LVy2';
 const DRIVER_UID = process.env.TEST_DRIVER_UID || '8vg2kxxqi3TYKlpD6eBlWgYseIq2';
 const ONLINE_MAX_ATTEMPTS = Number(process.env.ONLINE_MAX_ATTEMPTS || 5);
+const TEST_CAR_TYPE = String(process.env.TEST_CAR_TYPE || 'leaf_plus').trim() || 'leaf_plus';
 
 const PICKUP = {
   lat: Number(process.env.TEST_PICKUP_LAT || -22.9075),
@@ -66,15 +67,6 @@ function onceStatusAck(driverClient, payload, timeoutMs = 12000) {
   });
 }
 async function ensureDriverOnline(driverClient) {
-  driverClient.socket.emit('updateLocation', {
-    lat: PICKUP.lat + 0.0002,
-    lng: PICKUP.lng + 0.0002,
-    tripStatus: 'idle',
-    isInTrip: false,
-    seq: Date.now() % 100000
-  });
-  await sleep(1200);
-
   for (let attempt = 1; attempt <= ONLINE_MAX_ATTEMPTS; attempt += 1) {
     const ack = await onceStatusAck(driverClient, {
       status: 'online',
@@ -199,6 +191,7 @@ async function main() {
 
   const passenger = new WebSocketTestClient(WS_URL, { transports: ['websocket'], timeout: 30000, reconnection: false });
   const driver = new WebSocketTestClient(WS_URL, { transports: ['websocket'], timeout: 30000, reconnection: false });
+  let heartbeatTimer = null;
 
   try {
     await passenger.connect();
@@ -210,6 +203,20 @@ async function main() {
     assert(online.success, `driver_online_failed:${online.error?.code || 'unknown'}`);
     report.meta.driverOnline = online;
 
+    const sendDriverIdleLocation = () => {
+      driver.socket.emit('updateLocation', {
+        lat: PICKUP.lat + 0.0002,
+        lng: PICKUP.lng + 0.0002,
+        tripStatus: 'idle',
+        isInTrip: false,
+        seq: Date.now() % 100000
+      });
+    };
+
+    sendDriverIdleLocation();
+    heartbeatTimer = setInterval(sendDriverIdleLocation, 1200);
+    await sleep(1000);
+
     const payment = await createPaymentAdvance(2750);
     await confirmAdvancePaymentByWebhook(payment);
 
@@ -218,6 +225,8 @@ async function main() {
       pickupLocation: PICKUP,
       destinationLocation: DESTINATION,
       estimatedFare: 27.5,
+      carType: TEST_CAR_TYPE,
+      selectedVehicle: TEST_CAR_TYPE,
       paymentMethod: 'pix',
       paymentStatus: 'confirmed',
       paymentData: {
@@ -295,6 +304,9 @@ async function main() {
     report.meta.error = error.message;
     report.meta.stack = error.stack;
   } finally {
+    if (heartbeatTimer) {
+      clearInterval(heartbeatTimer);
+    }
     try { passenger.disconnect(); } catch (_error) {}
     try { driver.disconnect(); } catch (_error) {}
     writeReport(report, reportPath);

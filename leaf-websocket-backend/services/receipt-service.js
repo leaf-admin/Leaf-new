@@ -529,11 +529,32 @@ class ReceiptService {
         try {
             // Gerar recibo
             const receipt = await this.generateReceipt(rideId, rideData);
+            let receiptTelemetry = {
+                firebase: {
+                    reads: 0,
+                    writes: 0
+                }
+            };
 
             // Salvar no Firestore se disponível
             if (firebaseDb) {
-                await this.saveReceiptToFirestore(receipt, firebaseDb);
+                const saved = await this.saveReceiptToFirestore(receipt, firebaseDb);
+                if (saved) {
+                    receiptTelemetry = {
+                        firebase: {
+                            reads: 0,
+                            writes: 2
+                        }
+                    };
+                }
             }
+
+            Object.defineProperty(receipt, '__telemetry', {
+                value: receiptTelemetry,
+                enumerable: false,
+                configurable: false,
+                writable: false
+            });
 
             return receipt;
 
@@ -635,4 +656,3 @@ class ReceiptService {
 }
 
 module.exports = ReceiptService;
-

@@ -31,6 +31,7 @@ const cacheMonitoring = require('./routes/cache-monitoring');
 // Importar rotas de autenticação
 const authRoutes = require('./routes/auth-routes');
 const customOtpRoutes = require('./routes/auth-otp');
+const passwordAuthRoutes = require('./routes/auth-password');
 
 // Importar rotas de autenticação admin (JWT)
 const adminAuthRoutes = require('./routes/admin-auth');
@@ -1591,6 +1592,7 @@ logStructured('info', 'Rotas de cache registradas', { service: 'server' });
 app.use('/auth', authRoutes);
 // Rotas de autenticação também em /api/auth
 app.use('/api/auth', authRoutes);
+app.use('/api/auth/password', passwordAuthRoutes);
 app.use('/api/custom-otp', customOtpRoutes);
 logStructured('info', 'Rotas de Autenticação registradas', { service: 'server' });
 
@@ -1685,12 +1687,17 @@ app.use('/api/support', supportFullRoutes);
 const supportChatRoutes = require('./routes/support-chat');
 app.use('/api/support', supportChatRoutes);
 
+// Rotas de Operações (inclui telemetria de custo por corrida)
+const opsRoutes = require('./routes/ops');
+app.use('/api/ops', opsRoutes);
+
 // ✅ Programas de referral / convites (dashboard moderno)
 const referralProgramsRoutes = require('./routes/referral-programs');
 app.use('/api/programs/referrals', referralProgramsRoutes);
 
 // Nota: injeção de Socket.IO nas rotas de suporte ocorre após criação do io.
-logStructured('info', 'Rotas de Support (completo) registradas', { service: 'server' });
+logStructured('info', 'Rotas de Support (tickets+chat) registradas', { service: 'server' });
+logStructured('info', 'Rotas de Ops registradas', { service: 'server' });
 logStructured('info', 'Rotas de Referral Programs registradas', { service: 'server' });
 
 // ✅ Rotas de KYC Onboarding (CNH + Selfie)
@@ -5739,6 +5746,42 @@ io.on('connection', async (socket) => {
                     }
 
                     const totalLatency = Date.now() - startTime;
+
+                    if (rideCostTelemetryService) {
+                        setImmediate(async () => {
+                            try {
+                                await rideCostTelemetryService.ingestOperationalUsage({
+                                    bookingId,
+                                    sourceKey: 'backend:createBooking',
+                                    sourceMeta: {
+                                        userId: customerId || socket.userId || null,
+                                        userType: socket.userType || 'customer',
+                                        surface: 'create_booking_socket',
+                                        socketId: socket.id
+                                    },
+                                    requestMeta: {
+                                        source: 'createBooking',
+                                        socketId: socket.id,
+                                        receivedAt: new Date().toISOString()
+                                    },
+                                    backendCommand: 'createBooking',
+                                    backend: {
+                                        attempts: 1,
+                                        successes: 1,
+                                        errors: 0,
+                                        totalLatencyMs: totalLatency
+                                    }
+                                });
+                            } catch (backendTelemetryError) {
+                                logStructured('warn', 'Falha ao persistir telemetria operacional de createBooking', {
+                                    bookingId,
+                                    eventType: 'createBooking',
+                                    error: backendTelemetryError.message
+                                });
+                            }
+                        });
+                    }
+
                     recordRealtimeMetricSafe('create_booking', 'success');
                     recordHotpathLatencySafe('create_booking', totalLatency, true);
                     logStructured('info', 'createBooking concluído com sucesso', {
@@ -7870,6 +7913,41 @@ io.on('connection', async (socket) => {
                     });
                 }
 
+                if (rideCostTelemetryService) {
+                    setImmediate(async () => {
+                        try {
+                            await rideCostTelemetryService.ingestOperationalUsage({
+                                bookingId,
+                                sourceKey: 'backend:completeTrip',
+                                sourceMeta: {
+                                    userId: driverId,
+                                    userType: 'driver',
+                                    surface: 'complete_trip_socket',
+                                    socketId: socket.id
+                                },
+                                requestMeta: {
+                                    source: 'completeTrip',
+                                    socketId: socket.id,
+                                    receivedAt: new Date().toISOString()
+                                },
+                                backendCommand: 'completeTrip',
+                                backend: {
+                                    attempts: 1,
+                                    successes: 1,
+                                    errors: 0,
+                                    totalLatencyMs: commandLatency
+                                }
+                            });
+                        } catch (completeTelemetryError) {
+                            logStructured('warn', 'Falha ao persistir telemetria operacional de completeTrip', {
+                                bookingId,
+                                eventType: 'completeTrip',
+                                error: completeTelemetryError.message
+                            });
+                        }
+                    });
+                }
+
                 // Pós-processamento assíncrono para não bloquear ack da finalização
                 setImmediate(async () => {
                     try {
@@ -7955,6 +8033,41 @@ io.on('connection', async (socket) => {
                             });
                         }
 
+                        if (rideCostTelemetryService) {
+                            try {
+                                await rideCostTelemetryService.ingestOperationalUsage({
+                                    bookingId,
+                                    sourceKey: 'backend:ridePersistence',
+                                    sourceMeta: {
+                                        userId: driverId,
+                                        userType: 'driver',
+                                        surface: 'complete_trip_persistence',
+                                        socketId: socket.id
+                                    },
+                                    requestMeta: {
+                                        source: 'completeTrip.persistence',
+                                        socketId: socket.id,
+                                        receivedAt: new Date().toISOString()
+                                    },
+                                    backendCommand: 'persistFinalRideData',
+                                    backend: {
+                                        attempts: 1,
+                                        successes: persistFinalResult.success ? 1 : 0,
+                                        errors: persistFinalResult.success ? 0 : 1
+                                    },
+                                    redis: persistFinalResult?.telemetry?.redis || {},
+                                    firebase: persistFinalResult?.telemetry?.firebase || {},
+                                    database: persistFinalResult?.telemetry?.database || {}
+                                });
+                            } catch (persistenceTelemetryError) {
+                                logStructured('warn', 'Falha ao persistir telemetria operacional de persistência final', {
+                                    bookingId,
+                                    eventType: 'completeTrip',
+                                    error: persistenceTelemetryError.message
+                                });
+                            }
+                        }
+
                         clearTripIntegrityConfirmationTimeout(bookingId);
                         await redis.del(`trip_integrity:${bookingId}`);
 
@@ -7972,7 +8085,52 @@ io.on('connection', async (socket) => {
                                     status: 'COMPLETED'
                                 };
                                 const firebaseDb = firebaseConfig?.getRealtimeDB?.();
-                                await receiptService.generateAndSaveReceipt(bookingId, receiptData, firebaseDb);
+                                const receiptResult = await receiptService.generateAndSaveReceipt(bookingId, receiptData, firebaseDb);
+
+                                const receiptTelemetry = receiptResult?.__telemetry || {};
+                                const receiptFirebaseTelemetry = receiptTelemetry?.firebase || {};
+                                const receiptFirebaseReads = Number.isFinite(Number(receiptFirebaseTelemetry.reads))
+                                    ? Math.max(0, Math.round(Number(receiptFirebaseTelemetry.reads)))
+                                    : 0;
+                                const receiptFirebaseWrites = Number.isFinite(Number(receiptFirebaseTelemetry.writes))
+                                    ? Math.max(0, Math.round(Number(receiptFirebaseTelemetry.writes)))
+                                    : 0;
+
+                                if (rideCostTelemetryService && (receiptFirebaseReads > 0 || receiptFirebaseWrites > 0)) {
+                                    try {
+                                        await rideCostTelemetryService.ingestOperationalUsage({
+                                            bookingId,
+                                            sourceKey: 'backend:receiptPersistence',
+                                            sourceMeta: {
+                                                userId: driverId,
+                                                userType: 'driver',
+                                                surface: 'complete_trip_receipt',
+                                                socketId: socket.id
+                                            },
+                                            requestMeta: {
+                                                source: 'completeTrip.receipt',
+                                                socketId: socket.id,
+                                                receivedAt: new Date().toISOString()
+                                            },
+                                            backendCommand: 'persistReceipt',
+                                            backend: {
+                                                attempts: 1,
+                                                successes: 1,
+                                                errors: 0
+                                            },
+                                            firebase: {
+                                                reads: receiptFirebaseReads,
+                                                writes: receiptFirebaseWrites
+                                            }
+                                        });
+                                    } catch (receiptTelemetryError) {
+                                        logStructured('warn', 'Falha ao persistir telemetria operacional de recibo', {
+                                            bookingId,
+                                            eventType: 'completeTrip',
+                                            error: receiptTelemetryError.message
+                                        });
+                                    }
+                                }
                             }
                         } catch (receiptError) {
                             logStructured('warn', 'Erro ao gerar recibo', {
@@ -8205,7 +8363,51 @@ io.on('connection', async (socket) => {
                                     completionType: 'EARLY_ENDED_BY_RIDER'
                                 };
                                 const firebaseDb = firebaseConfig?.getRealtimeDB?.();
-                                await receiptService.generateAndSaveReceipt(bookingId, receiptData, firebaseDb);
+                                const receiptResult = await receiptService.generateAndSaveReceipt(bookingId, receiptData, firebaseDb);
+                                const receiptTelemetry = receiptResult?.__telemetry || {};
+                                const receiptFirebaseTelemetry = receiptTelemetry?.firebase || {};
+                                const receiptFirebaseReads = Number.isFinite(Number(receiptFirebaseTelemetry.reads))
+                                    ? Math.max(0, Math.round(Number(receiptFirebaseTelemetry.reads)))
+                                    : 0;
+                                const receiptFirebaseWrites = Number.isFinite(Number(receiptFirebaseTelemetry.writes))
+                                    ? Math.max(0, Math.round(Number(receiptFirebaseTelemetry.writes)))
+                                    : 0;
+
+                                if (rideCostTelemetryService && (receiptFirebaseReads > 0 || receiptFirebaseWrites > 0)) {
+                                    try {
+                                        await rideCostTelemetryService.ingestOperationalUsage({
+                                            bookingId,
+                                            sourceKey: 'backend:receiptPersistence',
+                                            sourceMeta: {
+                                                userId: customerId || socket.userId || null,
+                                                userType: socket.userType || 'customer',
+                                                surface: 'end_trip_early_receipt',
+                                                socketId: socket.id
+                                            },
+                                            requestMeta: {
+                                                source: 'endTripEarlyByRider.receipt',
+                                                socketId: socket.id,
+                                                receivedAt: new Date().toISOString()
+                                            },
+                                            backendCommand: 'persistReceipt',
+                                            backend: {
+                                                attempts: 1,
+                                                successes: 1,
+                                                errors: 0
+                                            },
+                                            firebase: {
+                                                reads: receiptFirebaseReads,
+                                                writes: receiptFirebaseWrites
+                                            }
+                                        });
+                                    } catch (receiptTelemetryError) {
+                                        logStructured('warn', 'Falha ao persistir telemetria operacional de recibo (encerramento antecipado)', {
+                                            bookingId,
+                                            eventType: 'endTripEarlyByRider',
+                                            error: receiptTelemetryError.message
+                                        });
+                                    }
+                                }
                             }
                         } catch (receiptError) {
                             logStructured('warn', 'Erro ao gerar recibo de encerramento antecipado', {

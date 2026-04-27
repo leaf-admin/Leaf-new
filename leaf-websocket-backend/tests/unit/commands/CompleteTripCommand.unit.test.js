@@ -14,7 +14,15 @@ jest.mock('../../../services/ride-state-manager', () => ({
 }));
 
 jest.mock('../../../services/payment-service', () => {
-  return jest.fn().mockImplementation(() => ({}));
+  return jest.fn().mockImplementation(() => ({
+    calculateFareBreakdownFromReais: jest.fn((fare = 0, toll = 0) => ({
+      grossAmount: Number(fare || 0) + Number(toll || 0),
+      operationalFee: 1.2,
+      paymentIntermediationFee: 0.6,
+      totalFees: 1.8,
+      driverNetAmount: Math.max(0, Number(fare || 0) - 1.8)
+    }))
+  }));
 });
 
 jest.mock('../../../services/driver-lock-manager', () => ({
@@ -63,6 +71,11 @@ jest.mock('../../../utils/active-trip-index', () => ({
 
 jest.mock('../../../services/trip-location-persistence-service', () => ({
   forceFinalizeTrip: jest.fn().mockResolvedValue(undefined)
+}));
+
+jest.mock('../../../services/pricing-h3-read-model-service', () => ({
+  clearBookingSnapshot: jest.fn().mockResolvedValue(undefined),
+  applyDriverSnapshot: jest.fn().mockResolvedValue(undefined)
 }));
 
 jest.mock('../../../services/ride-lifecycle-service', () => ({

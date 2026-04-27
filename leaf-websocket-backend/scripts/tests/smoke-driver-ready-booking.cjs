@@ -6,6 +6,7 @@ const WS_URL = process.env.WS_URL || 'https://socket.62.169.31.231.sslip.io';
 const API_BASE_URL = process.env.API_BASE_URL || 'https://api.62.169.31.231.sslip.io';
 const PASSENGER_UID = process.env.TEST_PASSENGER_UID;
 const DRIVER_UID = process.env.TEST_DRIVER_UID;
+const TEST_CAR_TYPE = String(process.env.TEST_CAR_TYPE || 'leaf_plus').trim() || 'leaf_plus';
 
 if (!PASSENGER_UID || !DRIVER_UID) {
   console.error(JSON.stringify({
@@ -219,6 +220,8 @@ async function runBooking({ passengerClient, driverClient, label }) {
     pickupLocation: PICKUP,
     destinationLocation: DESTINATION,
     estimatedFare: 27.5,
+    carType: TEST_CAR_TYPE,
+    selectedVehicle: TEST_CAR_TYPE,
     paymentMethod: 'pix',
     paymentStatus: 'confirmed',
     paymentData: {

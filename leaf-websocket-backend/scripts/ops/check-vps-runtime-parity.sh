@@ -17,6 +17,8 @@ FETCH_REMOTE="${FETCH_REMOTE:-false}"
 
 resolve_default_vps_key() {
   local candidates=(
+    "$HOME/.ssh/leaf_contabo_20260412_ed25519"
+    "$HOME/.ssh/serafy_contabo_ed25519"
     "$BACKEND_DIR/../contabokey"
     "$BACKEND_DIR/../digitaloceankey"
   )
@@ -61,6 +63,7 @@ fi
 
 SSH_OPTS=(
   -i "$VPS_KEY"
+  -o IdentitiesOnly=yes
   -o StrictHostKeyChecking=no
   -o UserKnownHostsFile=/dev/null
 )

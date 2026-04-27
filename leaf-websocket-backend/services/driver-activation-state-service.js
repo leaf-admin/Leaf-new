@@ -85,6 +85,7 @@ function resolveLivenessEvidence(userData = {}) {
     boolish(userData?.kyc?.passed) ||
     boolish(userData?.liveness?.passed) ||
     boolish(userData?.kycStatus) ||
+    boolish(userData?.kyc_status) ||
     candidates.length > 0;
 
   return {
@@ -198,7 +199,22 @@ async function resolveDriverActivationState({
   const meiApproved = !meiRequired || isApprovedStatus(meiStatus);
   const docsRejected = isRejectedStatus(cnhStatus) || (meiRequired && isRejectedStatus(meiStatus));
   const docsInReview = isReviewStatus(cnhStatus) || (meiRequired && isReviewStatus(meiStatus));
-  const driverDocsApproved = cnhApproved && meiApproved && backgroundCheckConsent;
+  const explicitApprovedFlag = boolish(
+    resolvedUserData?.approved ??
+      resolvedUserData?.isApproved ??
+      resolvedUserData?.profileApproved ??
+      false
+  );
+  const approvedStatusFlag = ['approved', 'active'].includes(accountStatus);
+  const approvedByLegacyFlow = explicitApprovedFlag || approvedStatusFlag;
+  const allowLegacyDocsBypass = approvedByLegacyFlow && !docsRejected;
+  const effectiveBackgroundConsent = backgroundCheckConsent || allowLegacyDocsBypass;
+  const effectiveCnhApproved = cnhApproved || allowLegacyDocsBypass;
+  const effectiveMeiApproved = meiApproved || allowLegacyDocsBypass;
+  const driverDocsApproved =
+    effectiveCnhApproved &&
+    effectiveMeiApproved &&
+    effectiveBackgroundConsent;
   const liveness = resolveLivenessEvidence(resolvedUserData);
 
   const meta = {
@@ -210,16 +226,21 @@ async function resolveDriverActivationState({
       meiRequired
     },
     checklist: {
-      cnhEar: cnhApproved,
-      inssOrMei: meiApproved,
-      backgroundCheckConsent,
+      cnhEar: effectiveCnhApproved,
+      inssOrMei: effectiveMeiApproved,
+      backgroundCheckConsent: effectiveBackgroundConsent,
       vehicleRegistration: vehicle.approved
     },
     vehicle,
     liveness
   };
 
-  if (!resolvedActivationNode?.documents && !cnhApproved && !backgroundCheckConsent) {
+  if (
+    !resolvedActivationNode?.documents &&
+    !cnhApproved &&
+    !backgroundCheckConsent &&
+    !allowLegacyDocsBypass
+  ) {
     return buildStatePayload(DRIVER_ACTIVATION_STATES.PRE_REGISTERED, {
       ...meta,
       reason: 'Pre-cadastro iniciado; documentos ainda nao enviados.'

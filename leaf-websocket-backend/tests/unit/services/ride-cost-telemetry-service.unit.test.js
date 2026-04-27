@@ -7,6 +7,7 @@ const mockRedis = {
   zadd: jest.fn(),
   expire: jest.fn(),
   hset: jest.fn(),
+  hgetall: jest.fn(),
   zrevrange: jest.fn(),
 };
 
@@ -49,6 +50,7 @@ describe('ride-cost-telemetry-service', () => {
       });
       return 1;
     });
+    mockRedis.hgetall.mockImplementation(async (key) => redisHashes.get(key) || {});
     mockRedis.zrevrange.mockImplementation(async (_key, start, end) => {
       const ordered = Array.from(recentScores.entries())
         .sort((a, b) => b[1] - a[1])
@@ -297,5 +299,123 @@ describe('ride-cost-telemetry-service', () => {
     expect(report.totals.google.directions.bySurface.driver_active_trip.requestCount).toBe(1);
     expect(report.totals.google.directions.byRouteScope.driver_to_pickup.billableUnits).toBe(2);
     expect(report.totals.google.directions.byRouteScope.pickup_to_destination.billableUnits).toBe(1);
+  });
+
+  it('ingests backend-authoritative Google SKU usage for a booking', async () => {
+    const report = await service.ingestGoogleSkuUsage({
+      bookingId: 'booking_backend_authoritative',
+      skuKey: 'placeDetailsLegacy',
+      sourceKey: 'backend:places:details',
+      sourceMeta: {
+        userId: 'customer_backend',
+        userType: 'customer',
+        surface: 'places_details_backend',
+      },
+      requestCount: 1,
+      billableUnits: 1,
+      metadata: {
+        telemetrySurface: 'places_details_backend',
+        routeScope: 'destination_resolution',
+        callerFrame: 'routes/places-routes.js',
+        cacheMode: 'none',
+      },
+    });
+
+    expect(report.bookingId).toBe('booking_backend_authoritative');
+    expect(report.totals.sourceCount).toBe(1);
+    expect(report.totals.google.requestCount).toBe(1);
+    expect(report.totals.google.billableUnits).toBe(1);
+    expect(report.totals.google.estimatedCostUsd).toBe(0.017);
+    expect(report.totals.google.skus.placeDetailsLegacy.estimatedCostUsd).toBe(0.017);
+    expect(report.totals.google.skus.placeDetailsLegacy.breakdown.bySurface.places_details_backend).toEqual(
+      expect.objectContaining({
+        requestCount: 1,
+        billableUnits: 1,
+      }),
+    );
+    expect(report.totals.cost.totalUsd).toBe(0.017);
+    expect(redisHashes.get('booking:booking_backend_authoritative')).toEqual(
+      expect.objectContaining({
+        costTelemetryGoogleUsd: '0.017',
+        costTelemetryGoogleBillableUnits: '1',
+        costTelemetryTotalUsd: '0.017',
+      }),
+    );
+  });
+
+  it('returns a fallback report from booking hash when the main report key is missing', async () => {
+    redisHashes.set('booking:booking_hash_fallback', {
+      status: 'completed',
+      customerId: 'customer_x',
+      driverId: 'driver_x',
+      createdAt: '1776822467016',
+      updatedAt: '2026-04-22T01:49:22.444Z',
+      costTelemetryGoogleUsd: '0.01',
+      costTelemetryGoogleBillableUnits: '2',
+      costTelemetrySourceCount: '0',
+      costTelemetryTotalUsd: '0.01',
+      costTelemetryTotalBrl: '0.0518',
+      costTelemetryBudgetStatus: 'within_budget',
+      costTelemetryDirectionsRequests: '2',
+      costTelemetryDriverDirectionsRequests: '1',
+      costTelemetryPassengerDirectionsRequests: '1',
+    });
+
+    const report = await service.getReport('booking_hash_fallback');
+
+    expect(report).toEqual(
+      expect.objectContaining({
+        bookingId: 'booking_hash_fallback',
+        fallback: true,
+        fallbackSource: 'booking_hash',
+      }),
+    );
+    expect(report.totals.google.estimatedCostUsd).toBe(0.01);
+    expect(report.totals.google.billableUnits).toBe(2);
+    expect(report.totals.google.directions.requestCount).toBe(2);
+    expect(report.totals.google.directions.byUserType.driver).toBe(1);
+    expect(report.totals.google.directions.byUserType.customer).toBe(1);
+    expect(report.totals.cost.totalUsd).toBe(0.01);
+    expect(report.totals.cost.totalBrl).toBe(0.0518);
+    expect(redisData.get('ride_cost_telemetry:booking_hash_fallback')).toBeTruthy();
+  });
+
+  it('ingests operational usage and persists backend/infra counters in report and booking hash', async () => {
+    const report = await service.ingestOperationalUsage({
+      bookingId: 'booking_ops_usage',
+      sourceKey: 'backend:completeTrip',
+      sourceMeta: {
+        userId: 'driver_ops',
+        userType: 'driver',
+      },
+      backendCommand: 'completeTrip',
+      backend: {
+        attempts: 1,
+        successes: 1,
+        totalLatencyMs: 1234,
+      },
+      redis: {
+        writes: 2,
+      },
+      database: {
+        writes: 1,
+      },
+    });
+
+    expect(report.totals.backend.attempts).toBe(1);
+    expect(report.totals.backend.successes).toBe(1);
+    expect(report.totals.backend.totalLatencyMs).toBe(1234);
+    expect(report.totals.infrastructure.redis.writes).toBe(2);
+    expect(report.totals.infrastructure.database.writes).toBe(1);
+    expect(redisHashes.get('booking:booking_ops_usage')).toEqual(
+      expect.objectContaining({
+        costTelemetryBackendAttempts: '1',
+        costTelemetryBackendSuccesses: '1',
+        costTelemetryBackendErrors: '0',
+        costTelemetryBackendLatencyMs: '1234',
+        costTelemetryRedisWrites: '2',
+        costTelemetryDatabaseWrites: '1',
+      }),
+    );
   });
 });

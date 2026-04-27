@@ -116,7 +116,9 @@ async function ensureDriverProfile({ db, firestore, uid, phone, nowIso }) {
     vehicleId,
     kycBlocked: false,
     kyc_status: 'approved',
+    kycStatus: 'approved',
     kycReverifyRequired: false,
+    canGoOnline: true,
     updatedAt: nowIso,
     lastLogin: nowIso
   });
@@ -184,17 +186,35 @@ async function ensureDriverProfile({ db, firestore, uid, phone, nowIso }) {
   });
 
   await db.ref(`driver_activation/${uid}/status`).update({
-    state: 'approved',
+    state: 'ACTIVE',
+    activationState: 'ACTIVE',
+    activationStateLabel: 'Aprovado',
+    canGoOnline: true,
+    canAttemptOnline: true,
+    requiresLiveness: false,
+    blockingReason: null,
     updatedAt: nowIso,
-    approved: 3,
-    pending: 0,
-    failed: 0,
-    allApproved: true,
+    summary: {
+      approved: 3,
+      pending: 0,
+      failed: 0,
+      inReview: 0
+    },
     checklist: {
       cnhEar: true,
       vehicleRegistration: true,
       inssOrMei: true,
       backgroundCheckConsent: true
+    },
+    vehicle: {
+      approved: true,
+      active: true,
+      inReview: false,
+      vehicleId
+    },
+    liveness: {
+      passed: true,
+      lastPassedAt: nowIso
     }
   });
 
@@ -207,6 +227,40 @@ async function ensureDriverProfile({ db, firestore, uid, phone, nowIso }) {
   await db.ref(`driver_activation/${uid}/consent/backgroundCheck`).update({
     accepted: true,
     acceptedAt: nowIso,
+    updatedAt: nowIso
+  });
+
+  await db.ref(`users/${uid}/driverActivation`).update({
+    state: 'ACTIVE',
+    activationState: 'ACTIVE',
+    activationStateLabel: 'Aprovado',
+    canGoOnline: true,
+    canAttemptOnline: true,
+    requiresLiveness: false,
+    blockingReason: null,
+    checklist: {
+      cnhEar: true,
+      vehicleRegistration: true,
+      inssOrMei: true,
+      backgroundCheckConsent: true
+    },
+    vehicle: {
+      approved: true,
+      active: true,
+      inReview: false,
+      vehicleId
+    },
+    liveness: {
+      passed: true,
+      lastPassedAt: nowIso
+    },
+    summary: {
+      approved: 3,
+      pending: 0,
+      failed: 0,
+      inReview: 0
+    },
+    source: 'ensure-leaf-test-users',
     updatedAt: nowIso
   });
 
