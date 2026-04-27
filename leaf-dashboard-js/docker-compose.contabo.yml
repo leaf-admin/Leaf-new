@@ -6,6 +6,7 @@ services:
       args:
         NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-https://api.62.169.31.231.sslip.io/api}
         NEXT_PUBLIC_WS_URL: ${NEXT_PUBLIC_WS_URL:-https://socket.62.169.31.231.sslip.io}
+        NEXT_PUBLIC_GOOGLE_MAPS_API_KEY: ${NEXT_PUBLIC_GOOGLE_MAPS_API_KEY:-}
     image: leaf-dashboard:contabo
     container_name: leaf-dashboard
     restart: unless-stopped

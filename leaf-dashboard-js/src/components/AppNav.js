@@ -28,7 +28,7 @@ const groups = [
       { href: "/drivers", label: "Drivers" },
       { href: "/drivers/review-queue", label: "Review queue" },
       { href: "/users", label: "People" },
-      { href: "/maps", label: "Projects" },
+      { href: "/maps", label: "Mapas" },
       { href: "/subscriptions", label: "Billing", blockedRoles: ["support", "development"] },
       { href: "/programs", label: "Limits" },
     ],

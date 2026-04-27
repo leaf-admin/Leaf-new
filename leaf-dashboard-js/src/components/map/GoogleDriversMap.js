@@ -1,11 +1,11 @@
 "use client";
 
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { GoogleMap, MarkerClustererF, MarkerF, PolygonF, useJsApiLoader } from "@react-google-maps/api";
 
-const MAP_STYLE = {
+const BASE_MAP_STYLE = {
   width: "100%",
-  height: "360px",
+  height: "520px",
   borderRadius: "10px",
 };
 
@@ -41,24 +41,169 @@ function getCenter(drivers = [], h3Cells = []) {
   return { lat: -22.9068, lng: -43.1729 };
 }
 
+function normalizeGeofenceRegion(region = []) {
+  if (!Array.isArray(region)) return [];
+
+  const normalized = [];
+  for (const point of region) {
+    let lng = null;
+    let lat = null;
+
+    if (Array.isArray(point) && point.length >= 2) {
+      lng = Number(point[0]);
+      lat = Number(point[1]);
+    } else if (point && typeof point === "object") {
+      lng = Number(point.lng);
+      lat = Number(point.lat);
+    } else {
+      continue;
+    }
+
+    if (!Number.isFinite(lng) || !Number.isFinite(lat)) {
+      continue;
+    }
+
+    normalized.push([lng, lat]);
+  }
+
+  if (normalized.length < 3) return [];
+  const first = normalized[0];
+  const last = normalized[normalized.length - 1];
+  if (first[0] !== last[0] || first[1] !== last[1]) {
+    normalized.push([first[0], first[1]]);
+  }
+  return normalized;
+}
+
+function getGeofencePointCount(region = []) {
+  if (!Array.isArray(region) || region.length === 0) return 0;
+  if (region.length < 2) return region.length;
+  const first = region[0];
+  const last = region[region.length - 1];
+  const isClosed = first[0] === last[0] && first[1] === last[1];
+  return isClosed ? Math.max(region.length - 1, 0) : region.length;
+}
+
+function extractRegionFromPath(path) {
+  if (!path || typeof path.getLength !== "function" || typeof path.getAt !== "function") {
+    return [];
+  }
+
+  const region = [];
+  for (let index = 0; index < path.getLength(); index += 1) {
+    const point = path.getAt(index);
+    const lng = Number(point?.lng?.());
+    const lat = Number(point?.lat?.());
+    if (!Number.isFinite(lng) || !Number.isFinite(lat)) continue;
+    region.push([lng, lat]);
+  }
+
+  if (region.length < 3) return [];
+  const first = region[0];
+  const last = region[region.length - 1];
+  if (first[0] !== last[0] || first[1] !== last[1]) {
+    region.push([first[0], first[1]]);
+  }
+  return region;
+}
+
+function pathsEqual(current = [], next = []) {
+  if (current.length !== next.length) return false;
+  for (let index = 0; index < current.length; index += 1) {
+    const a = current[index];
+    const b = next[index];
+    if (Math.abs(Number(a.lat) - Number(b.lat)) > 1e-9) return false;
+    if (Math.abs(Number(a.lng) - Number(b.lng)) > 1e-9) return false;
+  }
+  return true;
+}
+
 export default function GoogleDriversMap({
   drivers = [],
   h3Cells = [],
   h3Loading = false,
   h3Error = "",
+  h3LastUpdatedAt = null,
   onViewportChange,
+  mapHeight = "520px",
+  geofenceRegion = [],
+  geofenceEditable = false,
+  onGeofenceChange,
 }) {
   const apiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY || "";
   const hasKey = Boolean(apiKey);
+
+  if (!hasKey) {
+    return <p>Google Maps API key não configurada (NEXT_PUBLIC_GOOGLE_MAPS_API_KEY).</p>;
+  }
+
+  return (
+    <GoogleDriversMapWithKey
+      apiKey={apiKey}
+      drivers={drivers}
+      h3Cells={h3Cells}
+      h3Loading={h3Loading}
+      h3Error={h3Error}
+      h3LastUpdatedAt={h3LastUpdatedAt}
+      onViewportChange={onViewportChange}
+      mapHeight={mapHeight}
+      geofenceRegion={geofenceRegion}
+      geofenceEditable={geofenceEditable}
+      onGeofenceChange={onGeofenceChange}
+    />
+  );
+}
+
+function GoogleDriversMapWithKey({
+  apiKey,
+  drivers = [],
+  h3Cells = [],
+  h3Loading = false,
+  h3Error = "",
+  h3LastUpdatedAt = null,
+  onViewportChange,
+  mapHeight = "520px",
+  geofenceRegion = [],
+  geofenceEditable = false,
+  onGeofenceChange,
+}) {
   const [mapMode, setMapMode] = useState("both");
   const [selectedCell, setSelectedCell] = useState(null);
+  const [isDrawingGeofence, setIsDrawingGeofence] = useState(false);
+  const [drawingRegionDraft, setDrawingRegionDraft] = useState([]);
   const mapRef = useRef(null);
   const lastViewportKeyRef = useRef("");
+  const editableGeofenceRef = useRef(null);
+  const geofencePathListenersRef = useRef([]);
 
   const { isLoaded, loadError } = useJsApiLoader({
     id: "leaf-google-maps",
     googleMapsApiKey: apiKey,
   });
+
+  const mapContainerStyle = useMemo(
+    () => ({
+      ...BASE_MAP_STYLE,
+      height: mapHeight || BASE_MAP_STYLE.height,
+    }),
+    [mapHeight],
+  );
+
+  const normalizedGeofenceRegion = useMemo(() => normalizeGeofenceRegion(geofenceRegion), [geofenceRegion]);
+  const geofencePaths = useMemo(
+    () => normalizedGeofenceRegion.map(([lng, lat]) => ({ lat: Number(lat), lng: Number(lng) })),
+    [normalizedGeofenceRegion],
+  );
+  const geofencePointCount = useMemo(
+    () => getGeofencePointCount(normalizedGeofenceRegion),
+    [normalizedGeofenceRegion],
+  );
+  const h3LastSyncLabel = useMemo(() => {
+    if (!h3LastUpdatedAt) return null;
+    const date = new Date(h3LastUpdatedAt);
+    if (Number.isNaN(date.getTime())) return null;
+    return date.toLocaleTimeString("pt-BR", { hour12: false });
+  }, [h3LastUpdatedAt]);
 
   const validDrivers = useMemo(
     () =>
@@ -84,6 +229,29 @@ export default function GoogleDriversMap({
   );
 
   const center = useMemo(() => getCenter(validDrivers, validCells), [validDrivers, validCells]);
+  const drawingEnabled = geofenceEditable && isDrawingGeofence;
+  const drawingRegionPaths = useMemo(
+    () => normalizeGeofenceRegion(drawingRegionDraft).map(([lng, lat]) => ({ lat: Number(lat), lng: Number(lng) })),
+    [drawingRegionDraft],
+  );
+
+  const clearGeofencePathListeners = useCallback(() => {
+    geofencePathListenersRef.current.forEach((listener) => {
+      if (listener && typeof listener.remove === "function") {
+        listener.remove();
+      }
+    });
+    geofencePathListenersRef.current = [];
+  }, []);
+
+  const emitGeofenceChange = useCallback(
+    (path) => {
+      if (typeof onGeofenceChange !== "function") return;
+      const nextRegion = extractRegionFromPath(path);
+      onGeofenceChange(nextRegion);
+    },
+    [onGeofenceChange],
+  );
 
   const emitViewport = useCallback(() => {
     if (!mapRef.current || typeof onViewportChange !== "function") return;
@@ -93,14 +261,17 @@ export default function GoogleDriversMap({
 
     const northEast = bounds.getNorthEast();
     const southWest = bounds.getSouthWest();
-    const bbox = [southWest.lng(), southWest.lat(), northEast.lng(), northEast.lat()].join(",");
-    const viewportKey = `${bbox}:${zoom}`;
+    const bbox = [southWest.lng(), southWest.lat(), northEast.lng(), northEast.lat()]
+      .map((coord) => Number(coord).toFixed(5))
+      .join(",");
+    const normalizedZoom = Number(Number(zoom).toFixed(2));
+    const viewportKey = `${bbox}:${normalizedZoom}`;
     if (viewportKey === lastViewportKeyRef.current) {
       return;
     }
 
     lastViewportKeyRef.current = viewportKey;
-    onViewportChange({ bbox, zoom: Number(zoom) });
+    onViewportChange({ bbox, zoom: normalizedZoom });
   }, [onViewportChange]);
 
   const handleMapLoad = useCallback(
@@ -111,9 +282,99 @@ export default function GoogleDriversMap({
     [emitViewport],
   );
 
-  if (!hasKey) {
-    return <p>Google Maps API key não configurada (NEXT_PUBLIC_GOOGLE_MAPS_API_KEY).</p>;
-  }
+  const handleGeofencePolygonLoad = useCallback(
+    (polygon) => {
+      editableGeofenceRef.current = polygon;
+      clearGeofencePathListeners();
+
+      if (!geofenceEditable) return;
+      const path = polygon.getPath();
+      if (!path) return;
+
+      const syncPath = () => emitGeofenceChange(path);
+      geofencePathListenersRef.current = [
+        path.addListener("set_at", syncPath),
+        path.addListener("insert_at", syncPath),
+        path.addListener("remove_at", syncPath),
+      ];
+    },
+    [clearGeofencePathListeners, emitGeofenceChange, geofenceEditable],
+  );
+
+  const handleGeofencePolygonUnmount = useCallback(() => {
+    clearGeofencePathListeners();
+    editableGeofenceRef.current = null;
+  }, [clearGeofencePathListeners]);
+
+  useEffect(() => {
+    const polygon = editableGeofenceRef.current;
+    if (!polygon) return;
+
+    const currentPath = polygon.getPath();
+    const currentPoints = [];
+    for (let index = 0; index < currentPath.getLength(); index += 1) {
+      const point = currentPath.getAt(index);
+      currentPoints.push({
+        lat: Number(point?.lat?.()),
+        lng: Number(point?.lng?.()),
+      });
+    }
+
+    if (pathsEqual(currentPoints, geofencePaths)) {
+      return;
+    }
+    polygon.setPath(geofencePaths);
+  }, [geofencePaths]);
+
+  useEffect(
+    () => () => {
+      clearGeofencePathListeners();
+    },
+    [clearGeofencePathListeners],
+  );
+
+  const startDrawingGeofence = useCallback(() => {
+    if (!geofenceEditable) return;
+    setDrawingRegionDraft([]);
+    setIsDrawingGeofence(true);
+  }, [geofenceEditable]);
+
+  const cancelDrawingGeofence = useCallback(() => {
+    setDrawingRegionDraft([]);
+    setIsDrawingGeofence(false);
+  }, []);
+
+  const clearGeofence = useCallback(() => {
+    setDrawingRegionDraft([]);
+    setIsDrawingGeofence(false);
+    if (typeof onGeofenceChange !== "function") return;
+    onGeofenceChange([]);
+  }, [onGeofenceChange]);
+
+  const handleMapClick = useCallback(
+    (event) => {
+      if (!drawingEnabled) return;
+      const lat = Number(event?.latLng?.lat?.());
+      const lng = Number(event?.latLng?.lng?.());
+      if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
+      setDrawingRegionDraft((current) => [...current, [lng, lat]]);
+    },
+    [drawingEnabled],
+  );
+
+  const undoDrawingPoint = useCallback(() => {
+    setDrawingRegionDraft((current) => current.slice(0, -1));
+  }, []);
+
+  const completeDrawingGeofence = useCallback(() => {
+    if (!drawingEnabled) return;
+    if (typeof onGeofenceChange !== "function") return;
+    const normalized = normalizeGeofenceRegion(drawingRegionDraft);
+    if (normalized.length < 4) return;
+    onGeofenceChange(normalized);
+    setDrawingRegionDraft([]);
+    setIsDrawingGeofence(false);
+  }, [drawingEnabled, drawingRegionDraft, onGeofenceChange]);
 
   if (loadError) {
     return <p>Falha ao carregar Google Maps.</p>;
@@ -147,8 +408,53 @@ export default function GoogleDriversMap({
         >
           Ambos
         </button>
-        {h3Loading ? <span style={{ fontSize: 12, color: "#475569" }}>Atualizando H3...</span> : null}
+        {h3Loading && validCells.length === 0 ? (
+          <span style={{ fontSize: 12, color: "#475569" }}>Carregando H3...</span>
+        ) : null}
+        {h3LastSyncLabel ? <span style={{ fontSize: 12, color: "#475569" }}>H3 atualizado: {h3LastSyncLabel}</span> : null}
         {h3Error ? <span style={{ fontSize: 12, color: "#b91c1c" }}>{h3Error}</span> : null}
+        {geofenceEditable ? (
+          <>
+            <button
+              type="button"
+              className={drawingEnabled ? "mode-btn mode-btn-active" : "mode-btn"}
+              onClick={startDrawingGeofence}
+            >
+              Traçar geofence
+            </button>
+            {drawingEnabled ? (
+              <button
+                type="button"
+                className="mode-btn"
+                onClick={completeDrawingGeofence}
+                disabled={drawingRegionPaths.length < 4}
+              >
+                Concluir traçado
+              </button>
+            ) : null}
+            {drawingEnabled ? (
+              <button type="button" className="mode-btn" onClick={undoDrawingPoint} disabled={drawingRegionDraft.length === 0}>
+                Desfazer ponto
+              </button>
+            ) : null}
+            {drawingEnabled ? (
+              <button type="button" className="mode-btn" onClick={cancelDrawingGeofence}>
+                Cancelar traçado
+              </button>
+            ) : null}
+            <button type="button" className="mode-btn" onClick={clearGeofence} disabled={geofencePointCount === 0}>
+              Limpar geofence
+            </button>
+            <span style={{ fontSize: 12, color: "#475569" }}>
+              Geofence:{" "}
+              {drawingEnabled
+                ? `${drawingRegionDraft.length} ponto${drawingRegionDraft.length === 1 ? "" : "s"} no rascunho`
+                : geofencePointCount > 0
+                  ? `${geofencePointCount} pontos`
+                  : "sem polígono"}
+            </span>
+          </>
+        ) : null}
       </div>
 
       {selectedCell ? (
@@ -176,10 +482,11 @@ export default function GoogleDriversMap({
       ) : null}
 
       <GoogleMap
-        mapContainerStyle={MAP_STYLE}
-        center={center}
+        mapContainerStyle={mapContainerStyle}
+        defaultCenter={center}
         zoom={12}
         onLoad={handleMapLoad}
+        onClick={handleMapClick}
         onIdle={emitViewport}
         options={{ streetViewControl: false, mapTypeControl: false, fullscreenControl: false }}
       >
@@ -200,6 +507,58 @@ export default function GoogleDriversMap({
               onClick={() => setSelectedCell(cell)}
             />
           ))}
+
+        {normalizedGeofenceRegion.length >= 4 ? (
+          <PolygonF
+            paths={geofencePaths}
+            options={{
+              clickable: false,
+              fillColor: "#16a34a",
+              fillOpacity: 0.14,
+              strokeColor: "#16a34a",
+              strokeOpacity: 0.92,
+              strokeWeight: 3,
+              editable: geofenceEditable && !drawingEnabled,
+              draggable: geofenceEditable && !drawingEnabled,
+              zIndex: 4,
+            }}
+            onLoad={handleGeofencePolygonLoad}
+            onUnmount={handleGeofencePolygonUnmount}
+          />
+        ) : null}
+
+        {drawingEnabled && drawingRegionPaths.length >= 4 ? (
+          <PolygonF
+            paths={drawingRegionPaths}
+            options={{
+              clickable: false,
+              fillColor: "#22c55e",
+              fillOpacity: 0.1,
+              strokeColor: "#15803d",
+              strokeOpacity: 0.9,
+              strokeWeight: 2,
+              zIndex: 5,
+            }}
+          />
+        ) : null}
+
+        {drawingEnabled
+          ? drawingRegionDraft.map(([lng, lat], pointIndex) => (
+              <MarkerF
+                key={`draft-point-${pointIndex}`}
+                position={{ lat: Number(lat), lng: Number(lng) }}
+                icon={{
+                  path: window.google.maps.SymbolPath.CIRCLE,
+                  scale: 4,
+                  fillColor: "#14532d",
+                  fillOpacity: 1,
+                  strokeColor: "#ffffff",
+                  strokeWeight: 1,
+                }}
+                zIndex={6}
+              />
+            ))
+          : null}
 
         {(mapMode === "drivers" || mapMode === "both") && validDrivers.length ? (
           <MarkerClustererF options={{ maxZoom: 16, minimumClusterSize: 2 }}>

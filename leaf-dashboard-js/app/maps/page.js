@@ -9,14 +9,57 @@ import KpiCard from "@/src/components/ui/KpiCard";
 import Panel from "@/src/components/ui/Panel";
 import { ErrorText, LoadingState } from "@/src/components/ui/PageFeedback";
 import GoogleDriversMap from "@/src/components/map/GoogleDriversMap";
-import { KeyValueGrid, TechnicalDetails } from "@/src/components/ui/DataViews";
+import { TechnicalDetails } from "@/src/components/ui/DataViews";
 
 const H3_VIEWPORT_DEBOUNCE_MS = 400;
-const H3_SOCKET_REFRESH_DEBOUNCE_MS = 900;
+const H3_SOCKET_REFRESH_DEBOUNCE_MS = 1500;
+const H3_SOCKET_REFRESH_MIN_INTERVAL_MS = 12000;
 
 function formatRegionDraft(region) {
   if (!Array.isArray(region)) return "[]";
   return JSON.stringify(region, null, 2);
+}
+
+function parseRegionDraft(regionDraft) {
+  if (typeof regionDraft !== "string") return [];
+
+  let parsed = null;
+  try {
+    parsed = JSON.parse(regionDraft);
+  } catch {
+    return null;
+  }
+
+  if (!Array.isArray(parsed)) return null;
+  if (parsed.length === 0) return [];
+
+  const normalized = [];
+  for (const point of parsed) {
+    let lng = null;
+    let lat = null;
+    if (Array.isArray(point) && point.length >= 2) {
+      lng = Number(point[0]);
+      lat = Number(point[1]);
+    } else if (point && typeof point === "object") {
+      lng = Number(point.lng);
+      lat = Number(point.lat);
+    } else {
+      return null;
+    }
+
+    if (!Number.isFinite(lng) || !Number.isFinite(lat)) {
+      return null;
+    }
+    normalized.push([lng, lat]);
+  }
+
+  if (normalized.length < 3) return null;
+  const first = normalized[0];
+  const last = normalized[normalized.length - 1];
+  if (first[0] !== last[0] || first[1] !== last[1]) {
+    normalized.push([first[0], first[1]]);
+  }
+  return normalized;
 }
 
 export default function MapsPage() {
@@ -24,10 +67,10 @@ export default function MapsPage() {
   const [h3Cells, setH3Cells] = useState([]);
   const [h3Loading, setH3Loading] = useState(false);
   const [h3Error, setH3Error] = useState("");
+  const [h3LastUpdatedAt, setH3LastUpdatedAt] = useState(null);
   const [mapViewport, setMapViewport] = useState(null);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
-  const [normalizedDrivers, setNormalizedDrivers] = useState([]);
   const [wsStatus, setWsStatus] = useState("desconectado");
   const [geoLoading, setGeoLoading] = useState(true);
   const [geoError, setGeoError] = useState("");
@@ -43,7 +86,9 @@ export default function MapsPage() {
   const [geofenceEnabledDraft, setGeofenceEnabledDraft] = useState(true);
   const [geofenceRegionDraft, setGeofenceRegionDraft] = useState("[]");
   const h3ViewportRequestRef = useRef("");
+  const mapViewportRef = useRef(null);
   const h3SocketRefreshTimerRef = useRef(null);
+  const h3SocketRefreshLastAtRef = useRef(0);
   const [h3RefreshNonce, setH3RefreshNonce] = useState(0);
 
   useEffect(() => {
@@ -87,10 +132,21 @@ export default function MapsPage() {
     });
   }, []);
 
+  useEffect(() => {
+    mapViewportRef.current = mapViewport;
+  }, [mapViewport]);
+
   const scheduleH3Refresh = useCallback(() => {
-    if (!mapViewport?.bbox || !Number.isFinite(Number(mapViewport?.zoom))) {
+    const viewport = mapViewportRef.current;
+    if (!viewport?.bbox || !Number.isFinite(Number(viewport?.zoom))) {
       return;
     }
+
+    const now = Date.now();
+    if (now - h3SocketRefreshLastAtRef.current < H3_SOCKET_REFRESH_MIN_INTERVAL_MS) {
+      return;
+    }
+    h3SocketRefreshLastAtRef.current = now;
 
     if (h3SocketRefreshTimerRef.current) {
       clearTimeout(h3SocketRefreshTimerRef.current);
@@ -100,7 +156,7 @@ export default function MapsPage() {
       setH3RefreshNonce((current) => current + 1);
       h3SocketRefreshTimerRef.current = null;
     }, H3_SOCKET_REFRESH_DEBOUNCE_MS);
-  }, [mapViewport]);
+  }, []);
 
   useEffect(() => {
     if (!mapViewport?.bbox || !Number.isFinite(Number(mapViewport?.zoom))) {
@@ -124,6 +180,7 @@ export default function MapsPage() {
           { signal: controller.signal },
         );
         setH3Cells(Array.isArray(response?.cells) ? response.cells : []);
+        setH3LastUpdatedAt(new Date().toISOString());
       } catch (err) {
         if (controller.signal.aborted) return;
         setH3Error(err?.message || "Falha ao carregar células H3");
@@ -149,33 +206,18 @@ export default function MapsPage() {
   }, []);
 
   useEffect(() => {
-    const drivers = (locations?.locations?.drivers || []).filter(
-      (d) => d?.location && Number.isFinite(Number(d.location.lat)) && Number.isFinite(Number(d.location.lng)),
-    );
-    if (drivers.length === 0) {
-      setNormalizedDrivers([]);
-      return;
-    }
-
-    const lats = drivers.map((d) => Number(d.location.lat));
-    const lngs = drivers.map((d) => Number(d.location.lng));
-    const minLat = Math.min(...lats);
-    const maxLat = Math.max(...lats);
-    const minLng = Math.min(...lngs);
-    const maxLng = Math.max(...lngs);
-
-    const mapped = drivers.map((driver) => {
-      const lat = Number(driver.location.lat);
-      const lng = Number(driver.location.lng);
-      const x = maxLng === minLng ? 50 : ((lng - minLng) / (maxLng - minLng)) * 100;
-      const y = maxLat === minLat ? 50 : ((maxLat - lat) / (maxLat - minLat)) * 100;
-      return { ...driver, x, y };
-    });
-    setNormalizedDrivers(mapped);
-  }, [locations]);
-
-  useEffect(() => {
     let active = true;
+    const onWsConnect = () => {
+      if (active) setWsStatus("conectado");
+    };
+    const onWsDisconnect = (reason) => {
+      if (!active) return;
+      if (reason === "io client disconnect") {
+        setWsStatus("desconectado");
+        return;
+      }
+      setWsStatus("reconectando");
+    };
     const onLiveStats = (stats) => {
       if (!stats) return;
       setLocations((prev) => ({
@@ -201,7 +243,6 @@ export default function MapsPage() {
           activeBookings: prev?.locations?.activeBookings || [],
         },
       }));
-      scheduleH3Refresh();
     };
 
     const onTrips = (payload) => {
@@ -219,7 +260,6 @@ export default function MapsPage() {
           activeBookings: trips.length || prev?.summary?.activeBookings || 0,
         },
       }));
-      scheduleH3Refresh();
     };
 
     const onH3Refresh = () => {
@@ -229,7 +269,16 @@ export default function MapsPage() {
     const onAuthError = () => {
       if (active) setWsStatus("auth-erro");
     };
+    const onLegacyAuthError = () => {
+      if (active) setWsStatus("auth-erro");
+    };
     const onConnectError = () => {
+      if (active) setWsStatus("erro");
+    };
+    const onReconnectAttempt = () => {
+      if (active) setWsStatus("reconectando");
+    };
+    const onReconnectFailed = () => {
       if (active) setWsStatus("erro");
     };
 
@@ -239,8 +288,14 @@ export default function MapsPage() {
     wsService.on("trip_update", onTrips);
     wsService.on("map_h3_refresh", onH3Refresh);
     wsService.on("authentication_error", onAuthError);
+    wsService.on("auth_error", onLegacyAuthError);
     wsService.on("connect_error", onConnectError);
+    wsService.on("reconnect_attempt", onReconnectAttempt);
+    wsService.on("reconnect_failed", onReconnectFailed);
+    wsService.on("connect", onWsConnect);
+    wsService.on("disconnect", onWsDisconnect);
 
+    setWsStatus("conectando");
     wsService
       .connect({ namespace: "/dashboard" })
       .then(() => {
@@ -261,7 +316,12 @@ export default function MapsPage() {
       wsService.off("trip_update", onTrips);
       wsService.off("map_h3_refresh", onH3Refresh);
       wsService.off("authentication_error", onAuthError);
+      wsService.off("auth_error", onLegacyAuthError);
       wsService.off("connect_error", onConnectError);
+      wsService.off("reconnect_attempt", onReconnectAttempt);
+      wsService.off("reconnect_failed", onReconnectFailed);
+      wsService.off("connect", onWsConnect);
+      wsService.off("disconnect", onWsDisconnect);
       wsService.disconnect();
       setWsStatus("desconectado");
     };
@@ -357,6 +417,19 @@ export default function MapsPage() {
       `${city?.label || city?.name || ""} ${city?.value || city?.key || ""}`.toLowerCase().includes(term),
     );
   }, [selectedState, citySearch]);
+
+  const geofenceDraftParsed = useMemo(() => parseRegionDraft(geofenceRegionDraft), [geofenceRegionDraft]);
+  const geofenceRegionForMap = useMemo(() => {
+    if (Array.isArray(geofenceDraftParsed)) {
+      return geofenceDraftParsed;
+    }
+    return Array.isArray(geoConfig?.geofence?.region) ? geoConfig.geofence.region : [];
+  }, [geoConfig?.geofence?.region, geofenceDraftParsed]);
+  const geofenceDraftInvalid = geofenceRegionDraft.trim().length > 0 && geofenceDraftParsed === null;
+  const selectedStateCapacity = useMemo(
+    () => (selectedState?.cities || []).reduce((sum, city) => sum + Number(city?.maxActiveDrivers || 0), 0),
+    [selectedState],
+  );
 
   useEffect(() => {
     const cityRows = selectedState?.cities || [];
@@ -461,71 +534,113 @@ export default function MapsPage() {
 
   const allErrors = [error, geoError].filter(Boolean).join(" | ");
 
+  const handleGeofenceMapChange = useCallback((nextRegion) => {
+    const nextDraft = formatRegionDraft(nextRegion);
+    setGeofenceRegionDraft((previous) => (previous === nextDraft ? previous : nextDraft));
+  }, []);
+
   return (
     <ProtectedRoute>
       <main className="page-shell">
         <header className="header">
           <h1>Mapas e Geofence</h1>
-          <div className="filters">
-            <span className={wsStatus === "conectado" ? "status-ok" : "status-warn"}>WS: {wsStatus}</span>
-            <button onClick={refreshMapLocations}>Atualizar mapa</button>
-            <button onClick={loadGeoConfig}>Atualizar geografia</button>
-          </div>
         </header>
         <AppNav />
         {loading ? <LoadingState message="Carregando dados de mapa..." /> : null}
 
         <section className="grid">
           <Panel
-            title="Controle Geografico (Geofence + Cidades)"
-            subtitle="Ative estados/cidades e ajuste capacidade de operação com waitlist."
+            className="panel-span-full map-main-panel"
+            title="Mapa Operacional e Geofence"
+            subtitle="Visual principal da operação com edição de geofence direto no mapa."
           >
-            {geoLoading ? <p>Carregando configuracao geografica...</p> : null}
+            {geoLoading ? <p>Carregando configuração geográfica...</p> : null}
+
             <div className="filters">
+              <span className={wsStatus === "conectado" ? "status-ok" : "status-warn"}>WS: {wsStatus}</span>
               <span className={geoConfig?.geofence?.active ? "status-ok" : "status-warn"}>
                 Geofence runtime: {geoConfig?.geofence?.active ? "ativo" : "inativo"}
               </span>
               <span className={geoConfig?.geofence?.enabled !== false ? "status-ok" : "status-warn"}>
-                Config: {geoConfig?.geofence?.enabled !== false ? "habilitada" : "desabilitada"}
+                Configuração: {geoConfig?.geofence?.enabled !== false ? "habilitada" : "desabilitada"}
               </span>
               <span className={geoConfig?.geofence?.bypassEnabled ? "status-warn" : "status-ok"}>
                 Bypass: {geoConfig?.geofence?.bypassEnabled ? "ligado" : "desligado"}
               </span>
-              <span className="meta-badge">Pontos do poligono: {geoConfig?.geofence?.regionPoints || 0}</span>
-              <span className="meta-badge">Storage cidades: {geoConfig?.storage || "-"}</span>
+              <span className="meta-badge">Pontos: {geoConfig?.geofence?.regionPoints || 0}</span>
               <span className="meta-badge">Storage geofence: {geoConfig?.geofenceStorage || "-"}</span>
-              <span className="meta-badge">Estados: {geoConfig?.cityActivation?.summary?.totalStates || 0}</span>
-              <span className="meta-badge">Cidades ativas: {geoConfig?.cityActivation?.summary?.activeCities || 0}</span>
-              <span className="meta-badge">Capacidade total: {geoConfig?.cityActivation?.summary?.totalCapacity || 0}</span>
             </div>
 
             <div className="filters">
+              <button onClick={refreshMapLocations}>Atualizar mapa</button>
+              <button onClick={loadGeoConfig}>Atualizar geografia</button>
               <button onClick={toggleGeofenceEnabled} disabled={geoLoading || geofenceBusy}>
                 {geoConfig?.geofence?.enabled !== false ? "Desativar geofence" : "Ativar geofence"}
               </button>
               <button onClick={saveGeofenceRegion} disabled={geoLoading || geofenceBusy}>
-                Salvar poligono
+                Salvar geofence
               </button>
               <button onClick={resetGeofenceDraft} disabled={geoLoading || geofenceBusy}>
                 Reverter rascunho
               </button>
             </div>
 
-            <div style={{ marginBottom: 12 }}>
-              <label htmlFor="geofence-region-draft" style={{ display: "block", marginBottom: 6 }}>
-                Poligono da geofence (JSON)
-              </label>
-              <textarea
-                id="geofence-region-draft"
-                value={geofenceRegionDraft}
-                onChange={(event) => setGeofenceRegionDraft(event.target.value)}
-                rows={6}
-                style={{ width: "100%", resize: "vertical", fontFamily: "monospace" }}
-                placeholder='[[-43.8,-23.1],[-43.1,-23.1],[-43.1,-22.7],[-43.8,-22.7],[-43.8,-23.1]]'
-              />
-              <small style={{ color: "#64748b" }}>
-                Dica: o backend aceita array de coordenadas no formato [lng, lat] e fecha o poligono automaticamente.
-              </small>
+            <GoogleDriversMap
+              drivers={locations?.locations?.drivers || []}
+              h3Cells={h3Cells}
+              h3Loading={h3Loading}
+              h3Error={h3Error}
+              h3LastUpdatedAt={h3LastUpdatedAt}
+              onViewportChange={handleMapViewportChange}
+              mapHeight="clamp(700px, 84vh, 1120px)"
+              geofenceRegion={geofenceRegionForMap}
+              geofenceEditable
+              onGeofenceChange={handleGeofenceMapChange}
+            />
+
+            <details className="technical-details">
+              <summary>Editar geofence em JSON (opcional)</summary>
+              <div style={{ padding: "12px" }}>
+                <textarea
+                  id="geofence-region-draft"
+                  value={geofenceRegionDraft}
+                  onChange={(event) => setGeofenceRegionDraft(event.target.value)}
+                  rows={8}
+                  style={{ width: "100%", resize: "vertical", fontFamily: "monospace" }}
+                  placeholder='[[-43.8,-23.1],[-43.1,-23.1],[-43.1,-22.7],[-43.8,-22.7],[-43.8,-23.1]]'
+                />
+                <small style={{ color: "#64748b" }}>
+                  O método recomendado é editar direto no mapa; use JSON só para ajustes finos.
+                </small>
+                {geofenceDraftInvalid ? (
+                  <small style={{ display: "block", color: "#b91c1c", marginTop: 6 }}>
+                    JSON inválido. Ajuste o formato para habilitar visualização no mapa.
+                  </small>
+                ) : null}
+              </div>
+            </details>
+          </Panel>
+        </section>
+
+        <section className="grid grid-kpi">
+          <KpiCard title="Motoristas" value={locations?.summary?.totalDrivers || 0} />
+          <KpiCard title="Disponíveis" value={locations?.summary?.availableDrivers || 0} tone="positive" />
+          <KpiCard title="Passageiros ativos" value={locations?.summary?.activePassengers || 0} />
+          <KpiCard title="Corridas ativas" value={locations?.summary?.activeBookings || 0} />
+        </section>
+
+        <section className="grid">
+          <Panel
+            className="panel-span-full"
+            title="Controle Geografico (Geofence + Cidades)"
+            subtitle="Gestão condensada de estados e cidades para operação."
+          >
+            <div className="filters">
+              <span className="meta-badge">Estado: {selectedState?.stateCode || selectedStateCode}</span>
+              <span className="meta-badge">Cidades ativas: {selectedState?.activeCities || 0}</span>
+              <span className="meta-badge">Total cidades: {selectedState?.totalCities || 0}</span>
+              <span className="meta-badge">Capacidade estado: {selectedStateCapacity}</span>
+              <span className="meta-badge">Storage cidades: {geoConfig?.storage || "-"}</span>
             </div>
 
             <div className="filters">
@@ -543,14 +658,6 @@ export default function MapsPage() {
               <button onClick={toggleStateActivation} disabled={!selectedState || stateBusy}>
                 {selectedState?.enabled ? "Desativar estado" : "Ativar estado"}
               </button>
-              <span className="meta-badge">
-                {selectedState
-                  ? `Ativas ${selectedState.activeCities}/${selectedState.totalCities}`
-                  : "Sem estado selecionado"}
-              </span>
-            </div>
-
-            <div className="filters">
               <input
                 placeholder={`Nova cidade em ${selectedState?.stateCode || "UF"}`}
                 value={newCityName}
@@ -574,7 +681,6 @@ export default function MapsPage() {
                 <thead>
                   <tr>
                     <th>Cidade</th>
-                    <th>Slug</th>
                     <th>Status</th>
                     <th>Capacidade</th>
                     <th>Waitlist</th>
@@ -584,9 +690,9 @@ export default function MapsPage() {
                 <tbody>
                   {filteredCities.map((city) => (
                     <tr key={city.key}>
-                      <td>{city.label || city.name || "-"}</td>
                       <td>
-                        <code>{city.value || city.key || "-"}</code>
+                        {city.label || city.name || "-"}
+                        <span className="table-muted">{city.value || city.key || "-"}</span>
                       </td>
                       <td>
                         <span className={city.active ? "status-ok" : "status-warn"}>
@@ -639,143 +745,20 @@ export default function MapsPage() {
                   ))}
                   {!selectedState || filteredCities.length === 0 ? (
                     <tr>
-                      <td colSpan={6}>Nenhuma cidade cadastrada para este estado.</td>
+                      <td colSpan={5}>Nenhuma cidade cadastrada para este estado.</td>
                     </tr>
                   ) : null}
                 </tbody>
               </table>
             </div>
-          </Panel>
-        </section>
 
-        <section className="grid grid-kpi">
-          <KpiCard title="Motoristas" value={locations?.summary?.totalDrivers || 0} />
-          <KpiCard
-            title="Disponíveis"
-            value={locations?.summary?.availableDrivers || 0}
-            tone="positive"
-          />
-          <KpiCard title="Passageiros Ativos" value={locations?.summary?.activePassengers || 0} />
-          <KpiCard title="Corridas Ativas" value={locations?.summary?.activeBookings || 0} />
-          <KpiCard
-            title="Passageiros/Motorista"
-            value={
-              Number.isFinite(Number(locations?.summary?.passengerDriverRatio))
-                ? Number(locations?.summary?.passengerDriverRatio).toFixed(2)
-                : "N/D"
-            }
-          />
-          <KpiCard
-            title="Motoristas/km²"
-            value={
-              Number.isFinite(Number(locations?.summary?.driverDensityPerKm2))
-                ? Number(locations?.summary?.driverDensityPerKm2).toFixed(2)
-                : "N/D"
-            }
-          />
-        </section>
-
-        <section className="grid">
-          <Panel title="Resumo operacional" subtitle="Indicadores consolidados de oferta, demanda e densidade.">
-            <KeyValueGrid
-              data={{
-                totalDrivers: locations?.summary?.totalDrivers || 0,
-                availableDrivers: locations?.summary?.availableDrivers || 0,
-                busyDrivers: locations?.summary?.busyDrivers || 0,
-                activePassengers: locations?.summary?.activePassengers || 0,
-                activeBookings: locations?.summary?.activeBookings || 0,
-                passengerDriverRatio: Number.isFinite(Number(locations?.summary?.passengerDriverRatio))
-                  ? Number(locations?.summary?.passengerDriverRatio).toFixed(2)
-                  : "N/D",
-                driverDensityPerKm2: Number.isFinite(Number(locations?.summary?.driverDensityPerKm2))
-                  ? Number(locations?.summary?.driverDensityPerKm2).toFixed(2)
-                  : "N/D",
-              }}
-              labels={{
-                totalDrivers: "Motoristas monitorados",
-                availableDrivers: "Motoristas disponíveis",
-                busyDrivers: "Motoristas ocupados",
-                activePassengers: "Passageiros ativos",
-                activeBookings: "Corridas ativas",
-                passengerDriverRatio: "Passageiros por motorista",
-                driverDensityPerKm2: "Motoristas por km²",
-              }}
-            />
-          </Panel>
-          <Panel title="Status do stream de localizacao" subtitle="Saúde do feed em tempo real e contexto geográfico.">
-            <KeyValueGrid
-              data={{
-                driversInStream: (locations?.locations?.drivers || []).length,
-                passengersInStream: (locations?.locations?.passengers || []).length,
-                activeTripsInStream: (locations?.locations?.activeBookings || []).length,
-                wsStatus,
-                selectedState: selectedState?.stateCode || selectedStateCode,
-                citiesLoaded: (selectedState?.cities || []).length,
-              }}
-              labels={{
-                driversInStream: "Motoristas no stream",
-                passengersInStream: "Passageiros no stream",
-                activeTripsInStream: "Corridas no stream",
-                wsStatus: "WebSocket",
-                selectedState: "Estado selecionado",
-                citiesLoaded: "Cidades cadastradas",
-              }}
-            />
             <TechnicalDetails
-              title="Ver payload técnico de localizações"
+              title="Debug técnico (opcional)"
               data={{
-                summary: locations?.summary || {},
-                locations: locations?.locations || {},
+                geofence: geoConfig?.geofence || {},
+                cityActivationSummary: geoConfig?.cityActivation?.summary || {},
+                selectedState: selectedState || {},
               }}
-            />
-          </Panel>
-          <Panel title="Motoristas (amostra)" subtitle="Leitura rápida das últimas posições reportadas.">
-            <div className="table-shell">
-              <table className="table table-compact">
-                <thead>
-                  <tr>
-                    <th>ID</th>
-                    <th>Status</th>
-                    <th>Lat</th>
-                    <th>Lng</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {(locations?.locations?.drivers || []).slice(0, 12).map((driver, idx) => (
-                    <tr key={driver.id || idx}>
-                      <td>{driver.id || "-"}</td>
-                      <td>{driver.status || "-"}</td>
-                      <td>{driver.location?.lat ?? "-"}</td>
-                      <td>{driver.location?.lng ?? "-"}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </Panel>
-          <Panel title="Mapa de dispersão (motoristas)" subtitle="Visão agregada para análise de cobertura.">
-            {normalizedDrivers.length === 0 ? (
-              <p>Sem coordenadas suficientes para renderizar o mapa.</p>
-            ) : (
-              <div className="map-canvas">
-                {normalizedDrivers.map((driver, idx) => (
-                  <div
-                    key={driver.id || idx}
-                    className={driver.status === "online" ? "map-dot map-dot-online" : "map-dot map-dot-offline"}
-                    style={{ left: `${driver.x}%`, top: `${driver.y}%` }}
-                    title={`${driver.id || "driver"} (${driver.status || "unknown"})`}
-                  />
-                ))}
-              </div>
-            )}
-          </Panel>
-          <Panel title="Google Maps (motoristas)" subtitle="Mapa operacional com pontos reais da frota online.">
-            <GoogleDriversMap
-              drivers={locations?.locations?.drivers || []}
-              h3Cells={h3Cells}
-              h3Loading={h3Loading}
-              h3Error={h3Error}
-              onViewportChange={handleMapViewportChange}
             />
           </Panel>
         </section>
