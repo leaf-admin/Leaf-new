@@ -6,7 +6,7 @@ import { FETCH_USER_SUCCESS } from '../state/actionTypes';
 import interactiveNotificationService from '../services/InteractiveNotificationService';
 import persistentRideNotificationService from '../services/PersistentRideNotificationService';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { ActivityIndicator, Image, Platform, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Platform, StyleSheet, Text, View } from 'react-native';
 import { allowTestUserTools } from '../config/runtimeAccessPolicy';
 import mobileProfileService from '../services/MobileProfileService';
 import { restoreQaSeedProfile } from '../utils/qaSeedProfile';
@@ -98,21 +98,13 @@ const buildCompleteUserDataFromProfile = (firebaseUser, profile) => {
 
 const AuthBootstrapShell = ({ syncing }) => (
   <View style={styles.bootstrapContainer}>
-    <Image
-      source={require('../../assets/images/splash.png')}
-      style={styles.bootstrapImage}
-      resizeMode="cover"
-    />
-    <View style={styles.bootstrapScrim} />
     <View style={styles.bootstrapContent}>
       <ActivityIndicator size="large" color="#9FE870" />
       <Text style={styles.bootstrapTitle}>
-        {syncing ? 'Sincronizando sua sessão...' : 'Preparando sua experiência...'}
+        {syncing ? 'Entrando na sua conta...' : 'Preparando o app...'}
       </Text>
       <Text style={styles.bootstrapSubtitle}>
-        {syncing
-          ? 'Estamos reconciliando seus dados antes de abrir o mapa.'
-          : 'Estamos restaurando sua sessão com segurança.'}
+        Isso leva apenas alguns segundos.
       </Text>
     </View>
   </View>
@@ -124,6 +116,7 @@ const AuthProvider = ({ children }) => {
   const dispatch = useDispatch();
   const [isSyncing, setIsSyncing] = useState(false);
   const hasSynced = useRef(false);
+  const lastSyncedUid = useRef(null);
 
   // ✅ Otimização: Memoizar função para evitar recriações desnecessárias
   const syncUserData = useCallback(async (firebaseUser) => {
@@ -393,7 +386,8 @@ const AuthProvider = ({ children }) => {
           payload: minimalUserData
         });
 
-        hasSynced.current = false;
+        // Evita loop infinito de "recuperando dados da conta" quando perfil moderno ainda não existe.
+        hasSynced.current = true;
       }
 
     } catch (error) {
@@ -418,12 +412,20 @@ const AuthProvider = ({ children }) => {
         payload: fallbackUserData
       });
 
-      // NÃO marcar como sincronizado para permitir onboarding
-      hasSynced.current = false;
+      // Evita retrigger infinito de sincronização em caso de falha transitória do backend.
+      hasSynced.current = true;
     } finally {
       setIsSyncing(false);
     }
   }, [dispatch, isSyncing]);
+
+  useEffect(() => {
+    const currentUid = user?.uid || null;
+    if (currentUid !== lastSyncedUid.current) {
+      hasSynced.current = false;
+      lastSyncedUid.current = currentUid;
+    }
+  }, [user?.uid]);
 
   useEffect(() => {
     if (user && !loading && !hasSynced.current) {
@@ -444,35 +446,26 @@ const AuthProvider = ({ children }) => {
 const styles = StyleSheet.create({
   bootstrapContainer: {
     flex: 1,
-    backgroundColor: '#0C2010',
-  },
-  bootstrapImage: {
-    ...StyleSheet.absoluteFillObject,
-    width: '100%',
-    height: '100%',
-  },
-  bootstrapScrim: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(4, 16, 7, 0.42)',
+    backgroundColor: '#041007',
   },
   bootstrapContent: {
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    paddingHorizontal: 32,
+    paddingHorizontal: 28,
   },
   bootstrapTitle: {
-    marginTop: 18,
+    marginTop: 16,
     color: '#F5F7F7',
-    fontSize: 18,
+    fontSize: 17,
     fontWeight: '700',
     textAlign: 'center',
   },
   bootstrapSubtitle: {
-    marginTop: 8,
+    marginTop: 6,
     color: 'rgba(245, 247, 247, 0.82)',
-    fontSize: 14,
-    lineHeight: 20,
+    fontSize: 13,
+    lineHeight: 18,
     textAlign: 'center',
   },
 });

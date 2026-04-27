@@ -232,11 +232,15 @@ function PassengerUI(props) {
         const driverCarType = normalizeDriverCarType(driverCarTypeValue);
         const carName = normalizeDriverCarType(carNameValue);
 
-        if (!driverCarType) {
-            return true;
+        if (!driverCarType || !carName) {
+            return false;
         }
 
-        return driverCarType === carName;
+        return (
+            driverCarType === carName ||
+            driverCarType.includes(carName) ||
+            carName.includes(driverCarType)
+        );
     }, [normalizeDriverCarType]);
 
     const { theme, navigation, pickupAddress, currentLocation, setRoutePolyline, mapRef, onDriverLocationUpdate, onNearbyDriversUpdate, onResetManualPickup, onPickupManuallySelectedChange, locationDenied, onRequestLocationPermission } = props; // ✅ Callback para atualizar localização do motorista no mapa e motoristas próximos
@@ -396,6 +400,7 @@ function PassengerUI(props) {
 
     // Estados para gerenciar a viagem
     const [currentBooking, setCurrentBooking] = useState(null);
+    const currentBookingRef = useRef(null);
     // 🔥 Versionamento simples: rastrear versão do estado atual da corrida
     // 🔥 Versionamento simples: rastrear versão do estado atual
     const bookingVersionRef = useRef(0);
@@ -417,8 +422,10 @@ function PassengerUI(props) {
     const [searchingTime, setSearchingTime] = useState(0); // ✅ Tempo em segundos procurando motoristas
     const searchingTimeIntervalRef = useRef(null); // ✅ Ref para o temporizador (timeout) do contador
     const searchingStartTimeRef = useRef(null); // ✅ Ref para timestamp de início da busca
-    const maxSearchTimeoutRef = useRef(null); // ✅ Ref para timeout máximo (5 minutos)
-    const MAX_SEARCH_TIME = 5 * 60; // ✅ 5 minutos em segundos
+    const maxSearchTimeoutRef = useRef(null); // ✅ Ref para controle de timeout máximo de busca
+    const nearbyDriversRef = useRef([]);
+    const MAX_SEARCH_TIME = 2 * 60; // ✅ Timeout padrão de busca em segundos
+    const NO_DRIVERS_FAST_TIMEOUT = 30; // ✅ Timeout acelerado quando não há motorista online
     const [isCancelModalVisible, setIsCancelModalVisible] = useState(false); // ✅ Modal de confirmação de cancelamento
     const zoomAnimationIntervalRef = useRef(null); // ✅ Ref para intervalo de animação de zoom
     const isZoomedInRef = useRef(false); // ✅ Ref para controlar estado do zoom (in/out)
@@ -430,8 +437,16 @@ function PassengerUI(props) {
     }, [tripStatus]);
 
     useEffect(() => {
+        currentBookingRef.current = currentBooking;
+    }, [currentBooking]);
+
+    useEffect(() => {
         driverArrivedRef.current = driverArrived;
     }, [driverArrived]);
+
+    useEffect(() => {
+        nearbyDriversRef.current = Array.isArray(nearbyDrivers) ? nearbyDrivers : [];
+    }, [nearbyDrivers]);
 
     useEffect(() => {
         if (tripStatus === 'idle' || tripStatus === 'completed' || tripStatus === 'canceled') {
@@ -489,32 +504,62 @@ function PassengerUI(props) {
 
             setSearchingTime(elapsed);
 
-            // ✅ Timeout máximo de 5 minutos - mostrar opção de cancelar
-            if (elapsed >= MAX_SEARCH_TIME && !maxSearchTimeoutRef.current) {
-                Logger.warn(`⏱️ [Timer] Timeout máximo atingido (${MAX_SEARCH_TIME}s)`);
+            const hasOnlineDriversInRadius =
+                Array.isArray(nearbyDriversRef.current) && nearbyDriversRef.current.length > 0;
+            const timeoutLimit = hasOnlineDriversInRadius
+                ? MAX_SEARCH_TIME
+                : NO_DRIVERS_FAST_TIMEOUT;
+
+            // ✅ Timeout máximo de busca - encerrar automaticamente para evitar loop infinito
+            if (elapsed >= timeoutLimit && !maxSearchTimeoutRef.current) {
+                Logger.warn(`⏱️ [Timer] Timeout de busca atingido (${timeoutLimit}s). Encerrando busca.`);
                 maxSearchTimeoutRef.current = true;
 
+                const bookingId = currentBookingRef.current?.bookingId;
+                if (bookingId) {
+                    const webSocketManager = WebSocketManager.getInstance();
+                    if (webSocketManager.isConnected()) {
+                        webSocketManager
+                            .cancelRide(
+                                bookingId,
+                                hasOnlineDriversInRadius
+                                    ? 'Busca encerrada automaticamente por timeout'
+                                    : 'Busca encerrada automaticamente: sem motoristas online na região',
+                                0
+                            )
+                            .catch((cancelError) => {
+                                Logger.warn(
+                                    '⚠️ [PASSENGER] Falha ao cancelar busca por timeout no servidor:',
+                                    cancelError?.message || cancelError
+                                );
+                            });
+                    }
+                }
+
+                if (searchingTimeIntervalRef.current) {
+                    clearTimeout(searchingTimeIntervalRef.current);
+                    searchingTimeIntervalRef.current = null;
+                }
+
+                searchingStartTimeRef.current = null;
+                setTripStatus('idle');
+                setBookModelLoading(false);
+                isBookingInProgressRef.current = false;
+                setSearchingTime(0);
+                setCurrentBooking(null);
+                setDriverInfo(null);
+                setDriverLocation(null);
+                setDriverArrived(false);
+                setEstimatedPickupTime(null);
+                loadingRotation.stopAnimation();
+
                 Alert.alert(
-                    'Busca Demorando',
-                    `A busca está demorando mais do que o esperado (${Math.floor(MAX_SEARCH_TIME / 60)} minutos). Deseja cancelar e tentar novamente?`,
-                    [
-                        {
-                            text: 'Continuar Buscando',
-                            style: 'cancel',
-                            onPress: () => {
-                                maxSearchTimeoutRef.current = false; // Permitir mostrar novamente se necessário
-                            }
-                        },
-                        {
-                            text: 'Cancelar',
-                            style: 'destructive',
-                            onPress: () => {
-                                // Cancelar busca
-                                handleCancelSearch();
-                            }
-                        }
-                    ]
+                    'Sem motoristas disponíveis',
+                    hasOnlineDriversInRadius
+                        ? 'Não encontramos motorista para essa categoria no tempo limite. Tente novamente em instantes.'
+                        : 'No momento não há motoristas online na sua região para essa categoria.'
                 );
+                return;
             }
 
             // ✅ Agendar próxima atualização usando setTimeout recursivo
@@ -535,7 +580,7 @@ function PassengerUI(props) {
             // Limpar timeout máximo também
             maxSearchTimeoutRef.current = false;
         };
-    }, [tripStatus, handleCancelSearch]);
+    }, [tripStatus]);
 
     // ✅ useEffect para logar mudanças no searchingTime (debug)
     useEffect(() => {
@@ -1135,9 +1180,22 @@ function PassengerUI(props) {
         const parsedDistance = parseCoordinateValue(rawDistance);
         const parsedTime = parseCoordinateValue(rawTime);
 
+        const shouldFallbackDistance =
+            !(parsedDistance && parsedDistance > 0) ||
+            (
+                fallbackMetrics.distanceInKm >= 8 &&
+                parsedDistance < fallbackMetrics.distanceInKm * 0.45
+            );
+        const shouldFallbackTime =
+            !(parsedTime && parsedTime > 0) ||
+            (
+                fallbackMetrics.timeInSecs >= 900 &&
+                parsedTime < fallbackMetrics.timeInSecs * 0.45
+            );
+
         return {
-            distanceInKm: parsedDistance && parsedDistance > 0 ? parsedDistance : fallbackMetrics.distanceInKm,
-            timeInSecs: parsedTime && parsedTime > 0 ? parsedTime : fallbackMetrics.timeInSecs
+            distanceInKm: shouldFallbackDistance ? fallbackMetrics.distanceInKm : parsedDistance,
+            timeInSecs: shouldFallbackTime ? fallbackMetrics.timeInSecs : parsedTime
         };
     }, [buildFallbackRouteMetrics, parseCoordinateValue]);
 
@@ -1977,14 +2035,28 @@ function PassengerUI(props) {
 
         // Inscrever-se para receber atualizações
         const unsubscribe = DriverAvailabilityService.subscribe((drivers) => {
-            Logger.log(`🔄 [PassengerUI] Motoristas atualizados em tempo real: ${drivers.length} disponíveis`);
-            Logger.log(`   📋 [PassengerUI] Lista de motoristas recebida:`, drivers.map(d => ({
+            const normalizedDrivers = Array.isArray(drivers)
+                ? drivers
+                    .filter((driver) => !!driver?.id)
+                    .map((driver) => ({
+                        ...driver,
+                        carType:
+                            driver?.carType ||
+                            driver?.vehicleType ||
+                            driver?.vehicleCategory ||
+                            driver?.type ||
+                            null
+                    }))
+                : [];
+
+            Logger.log(`🔄 [PassengerUI] Motoristas atualizados em tempo real: ${normalizedDrivers.length} disponíveis`);
+            Logger.log(`   📋 [PassengerUI] Lista de motoristas recebida:`, normalizedDrivers.map(d => ({
                 id: d.id?.substring(0, 8),
                 carType: d.carType,
                 distance: d.distance,
                 hasLocation: !!(d.location?.lat && d.location?.lng)
             })));
-            setNearbyDrivers(drivers);
+            setNearbyDrivers(normalizedDrivers);
         });
 
         return () => {
@@ -5218,7 +5290,7 @@ function PassengerUI(props) {
     const handleSelectAddress = useCallback(async (address, type) => {
         // ✅ FECHAR dropdown imediatamente ao selecionar
         setSearchState({ visible: false, type: type || 'pickup', inputText: '', results: [], loading: false });
-        resetPlacesSessionToken();
+        const activeSessionToken = getPlacesSessionToken();
         try {
             let coords;
 
@@ -5237,7 +5309,7 @@ function PassengerUI(props) {
                 Logger.log(`✅ Usando coordenadas do cache (${address.source}):`, coords);
             } else if (address.place_id) {
                 // Fallback para Google Places (mais caro, mas necessário)
-                coords = await fetchCoordsfromPlace(address.place_id);
+                coords = await fetchCoordsfromPlace(address.place_id, null, activeSessionToken);
                 Logger.log('🔄 Usando coordenadas do Google Places:', coords);
             } else {
                 throw new Error('Coordenadas não disponíveis');
@@ -5321,8 +5393,10 @@ function PassengerUI(props) {
             Logger.error('❌ Erro ao selecionar endereço:', error);
             // ✅ Não mostrar alerta - apenas logar o erro para não interromper o fluxo
             Logger.warn('⚠️ [PassengerUI] Erro ao processar endereço selecionado');
+        } finally {
+            resetPlacesSessionToken();
         }
-    }, [dispatch, formatAddressSimplified, mapRef, saveToHistory, isChangingDestination, tripStatus, recalculateRideWithNewDestination, resetPlacesSessionToken, emitFareDebug]);
+    }, [dispatch, formatAddressSimplified, mapRef, saveToHistory, isChangingDestination, tripStatus, recalculateRideWithNewDestination, resetPlacesSessionToken, getPlacesSessionToken, emitFareDebug]);
 
     const saveToHistory = async (address) => {
         try {
@@ -5857,8 +5931,58 @@ function PassengerUI(props) {
                                     }}
                                     autoFocus={true}
                                     onBlur={() => {
+                                        const typedAddress = String(searchState.inputText || '').trim();
+                                        const activeSessionToken = getPlacesSessionToken();
                                         // Delay para permitir clique no resultado
-                                        setTimeout(() => {
+                                        setTimeout(async () => {
+                                            if (typedAddress.length > 0) {
+                                                try {
+                                                    const geocodeResults = await Promise.race([
+                                                        fetchGeocodeAddress(
+                                                            typedAddress,
+                                                            currentLocation ? { lat: currentLocation.lat, lng: currentLocation.lng } : null
+                                                        ),
+                                                        new Promise((_, reject) =>
+                                                            setTimeout(() => reject(new Error('Geocode timeout')), 5000)
+                                                        )
+                                                    ]);
+
+                                                    if (Array.isArray(geocodeResults) && geocodeResults.length > 0) {
+                                                        const selectedResult = geocodeResults[0];
+                                                        let coords = null;
+
+                                                        if (selectedResult?.place_id) {
+                                                            coords = await fetchCoordsfromPlace(
+                                                                selectedResult.place_id,
+                                                                null,
+                                                                activeSessionToken
+                                                            );
+                                                        } else if (selectedResult?.location?.lat && selectedResult?.location?.lng) {
+                                                            coords = {
+                                                                lat: selectedResult.location.lat,
+                                                                lng: selectedResult.location.lng
+                                                            };
+                                                        }
+
+                                                        if (coords && Number.isFinite(Number(coords.lat)) && Number.isFinite(Number(coords.lng))) {
+                                                            dispatch(updateTripDrop({
+                                                                lat: Number(coords.lat),
+                                                                lng: Number(coords.lng),
+                                                                add: typedAddress,
+                                                                placeId: selectedResult.place_id || null,
+                                                                source: 'search'
+                                                            }));
+                                                            lastCalculationRef.current = { pickup: null, drop: null };
+                                                        }
+                                                    }
+                                                } catch (error) {
+                                                    Logger.warn(
+                                                        '⚠️ [PassengerUI] Não foi possível resolver destino digitado no blur:',
+                                                        error?.message || error
+                                                    );
+                                                }
+                                            }
+
                                             setSearchState({ visible: false, type: 'drop', inputText: '', results: [], loading: false });
                                             resetPlacesSessionToken();
                                         }, 200);
@@ -5950,7 +6074,8 @@ function PassengerUI(props) {
                 Logger.error('❌ Erro no Places API:', placesError);
             }
 
-            if (!results || results.length === 0) {
+            const shouldUseGeocodeFallback = inputType === 'address' && String(text || '').trim().length >= 6;
+            if ((!results || results.length === 0) && shouldUseGeocodeFallback) {
                 const fallbackReason = inputType === 'address'
                     ? 'sem resultados no Places para input de endereço'
                     : 'fallback padrão após Places sem resultado';

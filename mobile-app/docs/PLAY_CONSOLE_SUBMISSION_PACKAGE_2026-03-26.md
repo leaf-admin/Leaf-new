@@ -21,10 +21,10 @@ Comportamento atual:
 
 ### 1.2 URLs publicas validadas agora
 URLs confirmadas respondendo `200`:
-- `https://api.147.182.204.181.sslip.io/privacy-policy`
-- `https://api.147.182.204.181.sslip.io/terms-of-service`
-- `https://api.147.182.204.181.sslip.io/account-deletion`
-- `https://api.147.182.204.181.sslip.io/api/legal/links`
+- `https://api.62.169.31.231.sslip.io/privacy-policy`
+- `https://api.62.169.31.231.sslip.io/terms-of-service`
+- `https://api.62.169.31.231.sslip.io/account-deletion`
+- `https://api.62.169.31.231.sslip.io/api/legal/links`
 
 Observacao importante:
 - `https://api.leaf.app.br/...` nao resolveu a partir deste ambiente na data de 2026-03-26.
@@ -51,19 +51,19 @@ Nao encontrei no manifesto atual:
 ## 2. URLs para usar no Play Console agora
 
 ### 2.1 App content / Privacy policy URL
-`https://api.147.182.204.181.sslip.io/privacy-policy`
+`https://api.62.169.31.231.sslip.io/privacy-policy`
 
 ### 2.2 App content / Account deletion URL
-`https://api.147.182.204.181.sslip.io/account-deletion`
+`https://api.62.169.31.231.sslip.io/account-deletion`
 
 ### 2.3 Termos / support reference
-`https://api.147.182.204.181.sslip.io/terms-of-service`
+`https://api.62.169.31.231.sslip.io/terms-of-service`
 
 ### 2.4 Support email
 `suporte@leaf.app.br`
 
 ### 2.5 Support website (temporario, se o campo for obrigatorio)
-`https://api.147.182.204.181.sslip.io/privacy-policy`
+`https://api.62.169.31.231.sslip.io/privacy-policy`
 
 ## 3. Main store listing - textos prontos
 
@@ -114,7 +114,7 @@ A disponibilidade de recursos pode variar por cidade, perfil e etapa de liberaca
 ## 4. App content - respostas prontas
 
 ### 4.1 Privacy policy
-- URL: `https://api.147.182.204.181.sslip.io/privacy-policy`
+- URL: `https://api.62.169.31.231.sslip.io/privacy-policy`
 
 ### 4.2 Ads
 - Resposta: `No`
@@ -125,26 +125,29 @@ Usar as instrucoes abaixo em ingles.
 #### Passenger review access
 `Review account (passenger)
 Phone: +55 11 99999-9999
-OTP: 000000
+Password: teste123
 
 This is a persistent review account for passenger flows.
 Use this account to test login, destination entry, fare estimate, category selection, booking, ride tracking, trip completion, support and account settings.
-
-For internal QA and review only, payment is bypassed on the backend for this review account so the reviewer can complete the ride flow without making a real PIX payment.`
+On the first screen, enter the phone number and tap "Ja tenho senha" to sign in with password.
+No account creation is required for review.`
 
 #### Driver review access
 `Review account (driver)
 Phone: +55 11 88888-8888
-OTP: 000000
+Password: teste123
 
 This is a persistent review account for driver flows.
 The driver profile is already activated and vehicle/profile validation is completed.
-Use this account to test login, online/offline status, ride offers, arrival at pickup, trip start, navigation handoff, trip completion, earnings and account settings.`
+Use this account to test login, online/offline status, ride offers, arrival at pickup, trip start, navigation handoff, trip completion, earnings and account settings.
+On the first screen, enter the phone number and tap "Ja tenho senha" to sign in with password.
+No account creation is required for review.`
 
 #### Additional app access notes
 `The app has two roles: passenger and driver.
 Please test both roles using the credentials above.
 If needed, use two devices or two sessions.
+Role switching is done by logging out and logging in with the other review account.
 Background location is only required for the driver flow while the driver is online or on an active trip.`
 
 ### 4.4 Target audience and content
@@ -257,7 +260,7 @@ Use this only if the `Foreground service` declaration appears in App content.
 `Yes`
 
 ### 8.2 Account deletion URL
-`https://api.147.182.204.181.sslip.io/account-deletion`
+`https://api.62.169.31.231.sslip.io/account-deletion`
 
 ### 8.3 Support text if a freeform explanation field appears
 `Users can request account deletion from within the app under Privacy settings. The app also provides a public web page with deletion instructions and support contact information. After a valid request, the account is disabled and personal data is removed or anonymized according to the retention policy and applicable legal obligations.`

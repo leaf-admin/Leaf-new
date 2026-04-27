@@ -15,11 +15,11 @@ export default {
     },
     version: "1.0.0",
     orientation: "portrait",
-    icon: "./assets/images/logo1024x1024.png",
+    icon: "./assets/icon.png",
     splash: {
         "image": "./assets/images/splash.png",
-        "resizeMode":'cover',
-        "backgroundColor": "#ffffff"
+        "resizeMode": "contain",
+        "backgroundColor": "#003002"
     },
     updates: {
         "fallbackToCacheTimeout": 0,
@@ -39,8 +39,8 @@ export default {
     ios: {
         splash: {
             image: "./assets/images/splash_ios.png",
-            resizeMode: "cover",
-            backgroundColor: "#ffffff",
+            resizeMode: "contain",
+            backgroundColor: "#003002",
           },
         supportsTablet: true,
         usesAppleSignIn: true,
@@ -78,7 +78,10 @@ export default {
             "RECEIVE_SMS",
             "READ_SMS"
         ],
-        blockedPermissions:["com.google.android.gms.permission.AD_ID"],
+        blockedPermissions:[
+            "com.google.android.gms.permission.AD_ID",
+            "android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK"
+        ],
         googleServicesFile: "./google-services.json"
     },
     plugins: [

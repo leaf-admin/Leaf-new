@@ -403,6 +403,11 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
         }
         return;
       }
+      if (trimmedQuery.length < 3) {
+        setSearching(false);
+        setResults([]);
+        return;
+      }
 
       try {
         setSearching(true);
@@ -430,7 +435,7 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
       }
     };
 
-    const timer = setTimeout(executeSearch, query.trim() ? 240 : 0);
+    const timer = setTimeout(executeSearch, query.trim() ? 520 : 0);
     return () => {
       cancelled = true;
       clearTimeout(timer);

@@ -54,9 +54,19 @@ Notas:
 
 ## 3) App content > Account deletion
 - In-app deletion disponível: `Yes`
-- URL externa de exclusão: `https://api.147.182.204.181.sslip.io/account-deletion`
+- URL externa de exclusão: `https://api.62.169.31.231.sslip.io/account-deletion`
 
-## 4) Checklist de envio no Play Console
+## 4) App content > App access (texto sugerido)
+
+`The app has two roles in a single binary: passenger and driver.
+Use the pre-provisioned review accounts below (no sign-up required):
+- Passenger account: +55 11 99999-9999 / password: teste123
+- Driver account: +55 11 88888-8888 / password: teste123
+At login, enter the phone number and tap "Ja tenho senha".
+To switch role, log out and log in with the other review account.
+If needed, use two devices or two sessions to validate both flows.`
+
+## 5) Checklist de envio no Play Console
 - [ ] Data Safety enviado sem pendência.
 - [ ] Declaração de background location enviada com vídeo.
 - [ ] URL externa de exclusão cadastrada.

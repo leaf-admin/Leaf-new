@@ -56,8 +56,6 @@ const ONBOARDING_AB_VARIANTS = {
 // Steps de autenticação
 import PhoneInputStep from './steps/PhoneInputStep';
 import OTPStep from './steps/OTPStep';
-import PasswordLoginStep from './steps/PasswordLoginStep';
-import ForgotPasswordStep from './steps/ForgotPasswordStep';
 import ProfileSelectionStep from './steps/ProfileSelectionStep';
 import ProfileDataStep from './steps/ProfileDataStep';
 import DocumentStep from './steps/DocumentStep';
@@ -68,7 +66,6 @@ import onboardingBackgroundDataUri from './common/onboardingBackgroundDataUri';
 const AuthFlow = ({ visible, onComplete, onClose, onboardingProgress }) => {
   const [currentStep, setCurrentStep] = useState(0);
   const [authData, setAuthData] = useState({});
-  const [authMode, setAuthMode] = useState('phone');
   const isReviewEnv = allowReviewAccess();
 
   const persistAuthenticatedProfile = useCallback(async (profile, fallbackUserType = null) => {
@@ -475,6 +472,20 @@ const AuthFlow = ({ visible, onComplete, onClose, onboardingProgress }) => {
       // Chamar handleOTPVerified diretamente com o usuário de review
       await handleOTPVerified(confirmation.reviewUser);
       return;
+    }
+
+    const canTestOtpBypass =
+      skipOTP &&
+      confirmation &&
+      confirmation.isTestOtpBypass === true &&
+      confirmation.bypassUser;
+
+    if (canTestOtpBypass) {
+      Logger.log('🧪 OTP bypass de conta de teste aplicado antes da validação manual.', {
+        phoneNumber
+      });
+      await handleOTPVerified(confirmation.bypassUser);
+      return;
     } else if (skipOTP && !isReviewEnv) {
       // ✅ Bloquear bypass em produção
       Logger.error('🚫 Tentativa de bypass bloqueada: ambiente de produção', {
@@ -485,20 +496,12 @@ const AuthFlow = ({ visible, onComplete, onClose, onboardingProgress }) => {
       // Continuar com fluxo normal de OTP
     }
 
-      // ✅ Fluxo normal: Mostrar tela de OTP
-      setAuthMode('otp');
+      // ✅ Fluxo normal: seguir para tela de OTP
       await saveStepDataLocal({ phoneNumber, confirmation, isExistingUser });
     // Marcar telefone como validado
     await completeStep('phone_validation');
     goToNextStep();
   }, [saveStepDataLocal, completeStep, goToNextStep, handleOTPVerified]);
-
-  const handlePasswordLoginRequested = useCallback(async (phoneNumber) => {
-    const normalizedPhone = UserAuthService.normalizePhone(phoneNumber);
-    setAuthData(prev => ({ ...prev, phoneNumber: normalizedPhone, authMethod: 'phone_password' }));
-    await saveStepDataLocal({ phoneNumber: normalizedPhone, authMethod: 'phone_password' });
-    setAuthMode('password_login');
-  }, [saveStepDataLocal]);
 
   const handlePasswordLoginSuccess = useCallback(async (userData) => {
     const normalizedUserType = normalizeAuthFlowUserType(userData?.userType || userData?.usertype || 'customer');
@@ -534,15 +537,6 @@ const AuthFlow = ({ visible, onComplete, onClose, onboardingProgress }) => {
       });
     }
   }, [authData?.phoneNumber, onComplete, persistAuthenticatedProfile]);
-
-  const handlePasswordLoginBack = useCallback(() => {
-    setAuthMode('phone');
-    setCurrentStep(0);
-  }, []);
-
-  const handleForgotPassword = useCallback(() => {
-    setAuthMode('forgot_password');
-  }, []);
 
   // Função para lidar com a seleção do perfil
   const handleProfileSelected = useCallback(async (profileSelection) => {
@@ -746,34 +740,12 @@ const AuthFlow = ({ visible, onComplete, onClose, onboardingProgress }) => {
     if (phoneNumber) {
       saveStepDataLocal({ phoneNumber });
     }
-    setAuthMode('phone');
     // Aqui você pode implementar a lógica para alternar para o fluxo de registro
     // Por enquanto, vamos continuar com o fluxo de login
   }, [saveStepDataLocal]);
 
   // Renderizar o step atual
   const renderCurrentStep = () => {
-    if (authMode === 'password_login') {
-      return (
-        <PasswordLoginStep
-          phoneNumber={authData.phoneNumber}
-          onLoginSuccess={handlePasswordLoginSuccess}
-          onForgotPassword={handleForgotPassword}
-          onBack={handlePasswordLoginBack}
-        />
-      );
-    }
-
-    if (authMode === 'forgot_password') {
-      return (
-        <ForgotPasswordStep
-          phoneNumber={authData.phoneNumber}
-          onPasswordReset={handlePasswordLoginSuccess}
-          onBack={() => setAuthMode('password_login')}
-        />
-      );
-    }
-
     // Fluxo normal de cadastro
     switch (currentStep) {
       case 0:
@@ -781,7 +753,7 @@ const AuthFlow = ({ visible, onComplete, onClose, onboardingProgress }) => {
           <PhoneInputStep
             onVerificationSent={handlePhoneVerificationSent}
             onSwitchToRegister={handleSwitchToRegister}
-            onPasswordLoginRequested={handlePasswordLoginRequested}
+            onPasswordLoginSuccess={handlePasswordLoginSuccess}
           />
         );
       case 1:

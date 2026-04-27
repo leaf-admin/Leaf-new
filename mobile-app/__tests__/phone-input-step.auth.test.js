@@ -5,6 +5,7 @@ import { fireEvent, render, waitFor } from '@testing-library/react-native';
 import PhoneInputStep from '../src/components/auth/steps/PhoneInputStep';
 
 const mockSignInWithPhoneNumber = jest.fn();
+const mockSignInWithCustomToken = jest.fn();
 
 jest.mock('../src/utils/Logger', () => ({
   __esModule: true,
@@ -17,6 +18,7 @@ jest.mock('../src/utils/Logger', () => ({
 
 jest.mock('@react-native-firebase/auth', () => () => ({
   signInWithPhoneNumber: mockSignInWithPhoneNumber,
+  signInWithCustomToken: mockSignInWithCustomToken,
 }));
 
 jest.mock('../src/config/reviewAccounts', () => ({
@@ -32,6 +34,18 @@ jest.mock('../src/config/runtimeAccessPolicy', () => ({
 
 jest.mock('../src/services/httpClient', () => ({
   post: jest.fn(),
+}));
+
+jest.mock('../src/services/UserAuthService', () => ({
+  __esModule: true,
+  default: {
+    resolvePhoneAuthFlow: jest.fn(async () => ({
+      requiresPassword: false,
+      hasPassword: false,
+      source: 'test',
+    })),
+    loginWithPassword: jest.fn(),
+  },
 }));
 
 jest.mock('../src/utils/secureOnboardingStorage', () => ({
@@ -88,6 +102,49 @@ describe('PhoneInputStep', () => {
         'Voce fez muitas tentativas em pouco tempo. Aguarde um pouco e tente novamente.',
         undefined,
         undefined,
+      );
+    });
+  });
+
+  test('applies backend OTP bypass automatically for controlled test phones', async () => {
+    const onVerificationSent = jest.fn();
+    const apiClient = require('../src/services/httpClient');
+
+    apiClient.post
+      .mockResolvedValueOnce({
+        data: {
+          success: true,
+          verificationId: 'vid_test',
+        },
+      })
+      .mockResolvedValueOnce({
+        data: {
+          success: true,
+          customToken: 'custom_token_test',
+        },
+      });
+
+    mockSignInWithCustomToken.mockResolvedValue({
+      user: { uid: 'firebase_test_user' },
+    });
+
+    const { getByTestId } = render(
+      <PhoneInputStep
+        onSwitchToRegister={jest.fn()}
+        onVerificationSent={onVerificationSent}
+      />,
+    );
+
+    fireEvent.changeText(getByTestId('auth-phone-input'), '11999999999');
+    fireEvent.press(getByTestId('auth-continue-btn'));
+
+    await waitFor(() => {
+      expect(mockSignInWithCustomToken).toHaveBeenCalledWith('custom_token_test');
+      expect(onVerificationSent).toHaveBeenCalledWith(
+        expect.objectContaining({ isTestOtpBypass: true }),
+        '+5511999999999',
+        false,
+        true,
       );
     });
   });

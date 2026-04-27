@@ -1626,8 +1626,7 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
   const runtimeVisualStateReady = Boolean(
     ready &&
       !initializing &&
-      !presentationSyncing &&
-      (!isDriverRole || !profile?.uid || driverActivationResolved)
+      !presentationSyncing
   );
   const shouldRenderRuntimeMapState = runtimeVisualStateReady;
   const presentedSearchingMode = Boolean(

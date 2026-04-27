@@ -111,7 +111,7 @@ module.exports = {
     version: AppConfig.ios_app_version,
     splash: {
         image: "./assets/images/splash.png",
-        resizeMode: "cover",
+        resizeMode: "contain",
         backgroundColor: "#003002"
     },
     updates: disableUpdatesForLocalSimulator
@@ -163,12 +163,13 @@ module.exports = {
         blockedPermissions: [
             "android.permission.SYSTEM_ALERT_WINDOW",
             "android.permission.READ_EXTERNAL_STORAGE",
-            "android.permission.WRITE_EXTERNAL_STORAGE"
+            "android.permission.WRITE_EXTERNAL_STORAGE",
+            "android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK"
         ],
         icon: "./assets/icon.png",
         adaptiveIcon: {
             foregroundImage: "./assets/adaptive-icon.png",
-            backgroundColor: "#1A330E"
+            backgroundColor: "#003002"
         },
         jsEngine: "hermes",
         intentFilters: [{
@@ -195,7 +196,9 @@ module.exports = {
         deploymentTarget: "17.0",
         infoPlist: {
             ITSAppUsesNonExemptEncryption: false,
-            NSAppTransportSecurity: iosTransportSecurity
+            NSAppTransportSecurity: iosTransportSecurity,
+            NSMicrophoneUsageDescription: "A Leaf usa o microfone para capturar o destino por voz quando você tocar no ícone de microfone.",
+            NSSpeechRecognitionUsageDescription: "A Leaf converte sua fala em texto para preencher o destino com mais rapidez."
         }
     },
     plugins: [
@@ -239,6 +242,10 @@ module.exports = {
         [
             "expo-build-properties",
             {
+              "android": {
+                "compileSdkVersion": 36,
+                "targetSdkVersion": 36
+              },
               "ios": {
                 "useFrameworks": "static",
                 "deploymentTarget": "17.0"

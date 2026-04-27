@@ -144,6 +144,14 @@ function createEmptyBackendSection() {
   };
 }
 
+function createEmptyInfrastructureSection() {
+  return {
+    reads: 0,
+    writes: 0,
+    estimatedCostUsd: 0,
+  };
+}
+
 function createEmptySkuBreakdownEntry() {
   return {
     requestCount: 0,
@@ -225,6 +233,9 @@ function createEmptyContextReport({ contextId, bookingId = null, sourceKey, sour
     updatedAt: now,
     google: createEmptyGoogleSection(),
     backend: createEmptyBackendSection(),
+    redis: createEmptyInfrastructureSection(),
+    firebase: createEmptyInfrastructureSection(),
+    database: createEmptyInfrastructureSection(),
     recentEvents: [],
   };
 }
@@ -415,6 +426,21 @@ function mergeContextReports(targetReport, incomingReport, overrides = {}) {
       targetReport.backend?.commands,
       incomingReport.backend?.commands,
     ),
+  };
+  targetReport.redis = {
+    ...createEmptyInfrastructureSection(),
+    ...(targetReport.redis || {}),
+    ...(incomingReport.redis || {}),
+  };
+  targetReport.firebase = {
+    ...createEmptyInfrastructureSection(),
+    ...(targetReport.firebase || {}),
+    ...(incomingReport.firebase || {}),
+  };
+  targetReport.database = {
+    ...createEmptyInfrastructureSection(),
+    ...(targetReport.database || {}),
+    ...(incomingReport.database || {}),
   };
   targetReport.recentEvents = mergeRecentEventLists(
     targetReport.recentEvents,
@@ -835,6 +861,9 @@ class RideCostTelemetryService {
       updatedAt: report.updatedAt,
       google: report.google,
       backend: report.backend,
+      redis: report.redis || createEmptyInfrastructureSection(),
+      firebase: report.firebase || createEmptyInfrastructureSection(),
+      database: report.database || createEmptyInfrastructureSection(),
       recentEvents: report.recentEvents,
     });
   }

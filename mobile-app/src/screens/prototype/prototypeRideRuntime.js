@@ -8675,16 +8675,21 @@ async function bootstrapRuntime(profile) {
         }
       }
       await initialLocationPromise;
+      setRuntimeState({
+        ready: true,
+      });
       if (profile?.uid && Number(qaSeedLock?.freezeUntil || 0) > Date.now()) {
         scheduleDeferredSocketBootstrap(profile, Number(qaSeedLock.freezeUntil));
       } else if (profile?.uid) {
         runtimeQALockUntil = 0;
         clearDeferredSocketBootstrapTimer();
-        await ensureSocketReady(profile);
+        ensureSocketReady(profile).catch((error) => {
+          Logger.warn(
+            "⚠️ [PrototypeRuntime] Falha ao conectar socket durante bootstrap em background:",
+            error?.message || error,
+          );
+        });
       }
-      setRuntimeState({
-        ready: true,
-      });
     } finally {
       setRuntimeState({
         initializing: false,

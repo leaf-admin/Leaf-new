@@ -50,6 +50,32 @@ class UserAuthService {
     throw lastError || new Error(`Falha em ${pathSuffix}`);
   }
 
+  static async resolvePhoneAuthFlow(phoneNumber) {
+    const normalizedPhone = this.normalizePhone(phoneNumber);
+    if (!normalizedPhone) {
+      throw new Error('Telefone inválido');
+    }
+
+    const response = await apiClient.post('/api/auth/password/resolve-phone', {
+      phone: normalizedPhone
+    });
+    const data = response?.data || {};
+    if (!data.success) {
+      throw new Error(data.error || 'Não foi possível validar o telefone');
+    }
+
+    return {
+      phoneNumber: normalizedPhone,
+      exists: Boolean(data.exists),
+      hasPassword: Boolean(data.hasPassword),
+      requiresPassword: Boolean(data.requiresPassword),
+      requiresOtp: Boolean(data.requiresOtp),
+      uid: data.uid || null,
+      userType: data.userType || null,
+      source: data.source || null
+    };
+  }
+
   // ✅ Rate limiting: armazenar tentativas por telefone
   static async checkRateLimit(phoneNumber) {
     try {
@@ -126,47 +152,18 @@ class UserAuthService {
    */
   static async checkUserExistsByPhone(phoneNumber) {
     try {
-      Logger.log('🔍 Verificando se usuário existe:', phoneNumber);
-
-      // Normalizar número de telefone (remover espaços, caracteres especiais)
-      const normalizedPhone = phoneNumber.replace(/\D/g, '');
-
-      // Buscar no Realtime Database
-      // Estrutura: users/{uid}/mobile
-      const usersRef = database().ref('users');
-      const snapshot = await usersRef.once('value');
-
-      if (!snapshot.exists()) {
-        Logger.log('ℹ️ Nenhum usuário encontrado no banco');
+      Logger.log('🔍 Resolvendo existência de usuário via backend:', phoneNumber);
+      const resolution = await this.resolvePhoneAuthFlow(phoneNumber);
+      if (!resolution.exists) {
+        Logger.log('ℹ️ Usuário não encontrado para o telefone informado');
         return null;
       }
 
-      // Iterar sobre todos os usuários para encontrar pelo telefone
-      let foundUser = null;
-      snapshot.forEach((childSnapshot) => {
-        const userData = childSnapshot.val();
-        const userPhone = userData?.mobile || userData?.phoneNumber || '';
-        const userPhoneNormalized = userPhone.replace(/\D/g, '');
-
-        // Comparar números normalizados
-        if (userPhoneNormalized === normalizedPhone ||
-          userPhoneNormalized === normalizedPhone.replace(/^55/, '') ||
-          userPhoneNormalized.replace(/^55/, '') === normalizedPhone) {
-          foundUser = {
-            uid: childSnapshot.key,
-            ...userData
-          };
-          return true; // Parar iteração
-        }
-      });
-
-      if (foundUser) {
-        Logger.log('✅ Usuário encontrado:', foundUser.uid);
-        return foundUser;
-      }
-
-      Logger.log('ℹ️ Usuário não encontrado para o telefone:', phoneNumber);
-      return null;
+      return {
+        uid: resolution.uid,
+        userType: resolution.userType,
+        hasPassword: resolution.hasPassword
+      };
     } catch (error) {
       Logger.error('❌ Erro ao verificar usuário:', error);
       return null;

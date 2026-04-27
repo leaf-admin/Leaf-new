@@ -19,10 +19,10 @@ Objetivo: decisão operacional para submissão pública em loja.
 - [ ] App Privacy/Nutrition Labels revisadas no App Store Connect.
 
 ## 4) URLs oficiais atuais
-- Privacy Policy: `https://api.147.182.204.181.sslip.io/privacy-policy`
-- Terms of Service: `https://api.147.182.204.181.sslip.io/terms-of-service`
-- Refund Policy: `https://api.147.182.204.181.sslip.io/refund-policy`
-- Account Deletion: `https://api.147.182.204.181.sslip.io/account-deletion`
+- Privacy Policy: `https://api.62.169.31.231.sslip.io/privacy-policy`
+- Terms of Service: `https://api.62.169.31.231.sslip.io/terms-of-service`
+- Refund Policy: `https://api.62.169.31.231.sslip.io/refund-policy`
+- Account Deletion: `https://api.62.169.31.231.sslip.io/account-deletion`
 
 ## 5) Pacote de apoio para console
 - [PLAY_CONSOLE_READY_RESPONSES_2026-03-23.md](/Users/izaakdias/Documents/Leaf-new/mobile-app/docs/PLAY_CONSOLE_READY_RESPONSES_2026-03-23.md)

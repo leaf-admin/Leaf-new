@@ -4,9 +4,9 @@ Data: 2026-03-23
 Escopo: metadata, privacy e review notes para submissão.
 
 ## 1) App Information
-- Privacy Policy URL: `https://api.147.182.204.181.sslip.io/privacy-policy`
-- Terms URL (campo complementar, se usado): `https://api.147.182.204.181.sslip.io/terms-of-service`
-- Account deletion support URL (se campo disponível): `https://api.147.182.204.181.sslip.io/account-deletion`
+- Privacy Policy URL: `https://api.62.169.31.231.sslip.io/privacy-policy`
+- Terms URL (campo complementar, se usado): `https://api.62.169.31.231.sslip.io/terms-of-service`
+- Account deletion support URL (se campo disponível): `https://api.62.169.31.231.sslip.io/account-deletion`
 
 ## 2) App Privacy (Nutrition Labels) - preenchimento sugerido
 
@@ -33,10 +33,17 @@ Não marcar:
 ## 3) Account deletion (Guideline 5.1.1)
 - Exclusão disponível dentro do app na tela de privacidade.
 - Após confirmação, app encerra sessão e retorna ao fluxo inicial.
-- URL pública de apoio: `https://api.147.182.204.181.sslip.io/account-deletion`.
+- URL pública de apoio: `https://api.62.169.31.231.sslip.io/account-deletion`.
 
 ## 4) Texto sugerido para App Review Notes
-`Leaf is a ride-hailing app with passenger and driver modes. Background location is required only for drivers while online to receive ride requests and keep trip navigation active when the app is minimized. The app shows an in-app disclosure before requesting background location permission. Account deletion is available in-app under Privacy settings and also documented publicly at https://api.147.182.204.181.sslip.io/account-deletion.`
+`Leaf is a ride-hailing app with passenger and driver modes in one single app.
+Use the pre-provisioned review accounts below (no sign-up required):
+- Passenger account: +55 11 99999-9999 / password: teste123
+- Driver account: +55 11 88888-8888 / password: teste123
+At login, enter the phone number and tap "Ja tenho senha".
+To switch role, log out and sign in with the other review account.
+Background location is required only for drivers while online to receive ride requests and keep trip navigation active when the app is minimized.
+Account deletion is available in-app under Privacy settings and also documented publicly at https://api.62.169.31.231.sslip.io/account-deletion.`
 
 ## 5) Checklist final no App Store Connect
 - [ ] Privacy Policy URL preenchida no app record.

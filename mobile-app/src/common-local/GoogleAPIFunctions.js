@@ -56,6 +56,37 @@ const shouldUseAutocompleteCache = (query = '') => {
     return normalized.length >= 8;
 };
 
+const normalizeOptionalText = (value) => {
+    const normalized = String(value ?? '').trim();
+    return normalized.length > 0 ? normalized : null;
+};
+
+const buildBackendRideTelemetryPayload = (telemetryContext = null, fallbackSurface = 'mobile_google_functions') => {
+    if (!telemetryContext || typeof telemetryContext !== 'object') {
+        return null;
+    }
+
+    const bookingId = normalizeOptionalText(telemetryContext?.bookingId);
+    const sourceKey = normalizeOptionalText(telemetryContext?.sourceKey);
+    const sourceMeta = {
+        ...(telemetryContext?.sourceMeta || {}),
+        surface:
+            normalizeOptionalText(telemetryContext?.surface) ||
+            normalizeOptionalText(telemetryContext?.sourceMeta?.surface) ||
+            fallbackSurface,
+    };
+
+    return {
+        bookingId,
+        sourceKey,
+        sourceMeta,
+        requestMeta: {
+            contextId: normalizeOptionalText(telemetryContext?.contextId),
+            caller: 'mobile-app',
+        },
+    };
+};
+
 const getFromLocalCache = async (query) => {
     try {
         const cacheKey = getLocalCacheKey(query);
@@ -235,77 +266,57 @@ export const fetchPlacesAutocomplete = (searchKeyword, sessionToken, location = 
                 }
             }
 
-            // 1️⃣ Tentar buscar no cache do backend primeiro
-            if (canUseAutocompleteCache) {
-                const backendUrl = getSelfHostedApiUrl('/api/places/search');
-                Logger.log('🔍 [PlacesCache] Tentando buscar no cache do backend...');
-                
-                try {
-                    // Usar AbortController para timeout de 5 segundos
-                    const controller = new AbortController();
-                    const timeoutId = setTimeout(() => controller.abort(), 5000);
-                    
-                    const cacheResponse = await fetch(backendUrl, {
-                        method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json',
-                        },
-                        body: JSON.stringify({
-                            query: searchKeyword,
-                            location: location
-                        }),
-                        signal: controller.signal
-                    });
-                    
-                    clearTimeout(timeoutId);
+            // 1️⃣ Backend autoritativo (cache + Google) para melhor observabilidade
+            const backendAutocompleteUrl = getSelfHostedApiUrl('/api/places/autocomplete');
+            try {
+                const controller = new AbortController();
+                const timeoutId = setTimeout(() => controller.abort(), 6000);
+                const backendTelemetry = buildBackendRideTelemetryPayload(
+                    telemetryContext,
+                    'places_autocomplete_mobile',
+                );
+                const backendResponse = await fetch(backendAutocompleteUrl, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        query: searchKeyword,
+                        sessionToken: sessionToken || null,
+                        location: location || null,
+                        telemetry: backendTelemetry,
+                    }),
+                    signal: controller.signal,
+                });
+                clearTimeout(timeoutId);
 
-                    if (cacheResponse.ok) {
-                        const cacheResult = await cacheResponse.json();
-                        
-                        // Se encontrou no cache, retornar formatado
-                        if (cacheResult.status === 'success' && cacheResult.data) {
-                            Logger.log('✅ [PlacesCache] Cache HIT! Retornando do cache.');
+                if (backendResponse.ok) {
+                    const backendResult = await backendResponse.json();
+                    if (Array.isArray(backendResult?.predictions) && backendResult.predictions.length > 0) {
+                        if (backendResult?.cached === true) {
                             rideCostTelemetryService.recordGoogleCache('autocompleteBackendHit', {
                                 metadata: {
                                     queryLength: String(searchKeyword || '').trim().length
                                 }
                             }, telemetryContext);
-                            
-                            // Converter para formato esperado pelo app
-                            const searchResults = [{
-                                place_id: cacheResult.data.place_id,
-                                description: cacheResult.data.address,
-                                structured_formatting: {
-                                    main_text: cacheResult.data.name,
-                                    secondary_text: cacheResult.data.address
-                                },
-                                types: [],
-                                reference: cacheResult.data.place_id,
-                                location: {
-                                    lat: cacheResult.data.lat,
-                                    lng: cacheResult.data.lng
-                                }
-                            }];
-                            
-                            resolve(searchResults);
-                            return; // ✅ SUCESSO - retornar do cache
                         }
-                        
-                        // Se não encontrou no cache, continuar para Google
-                        Logger.log('❌ [PlacesCache] Cache MISS. Usando Google Places como fallback.');
-                    } else if (cacheResponse.status === 404) {
-                        Logger.log('ℹ️ [PlacesCache] Cache MISS no backend. Usando Google Places.');
-                    } else {
-                        Logger.log(`⚠️ [PlacesCache] Backend retornou ${cacheResponse.status}. Usando Google Places como fallback.`);
+
+                        if (canUseAutocompleteCache) {
+                            await saveToLocalCache(searchKeyword, {
+                                ...backendResult.predictions[0],
+                                location: location || null,
+                            });
+                        }
+
+                        resolve(backendResult.predictions);
+                        return;
                     }
-                } catch (cacheError) {
-                    // Backend offline, timeout ou erro - usar Google direto
-                    if (cacheError.name === 'AbortError') {
-                        Logger.log('⏱️ [PlacesCache] Timeout ao buscar cache. Usando Google Places como fallback.');
-                    } else {
-                        Logger.log('⚠️ [PlacesCache] Erro ao buscar cache:', cacheError.message);
-                        Logger.log('🔄 [PlacesCache] Usando Google Places como fallback.');
-                    }
+                }
+            } catch (backendError) {
+                if (backendError?.name === 'AbortError') {
+                    Logger.log('⏱️ [PlacesCache] Timeout no autocomplete backend. Fallback para Google direto.');
+                } else {
+                    Logger.log('⚠️ [PlacesCache] Falha no autocomplete backend:', backendError?.message || backendError);
                 }
             }
 
@@ -364,7 +375,7 @@ export const fetchPlacesAutocomplete = (searchKeyword, sessionToken, location = 
                 
                 // 3️⃣ Salvar no cache para próxima vez (assíncrono - não bloqueia)
                 if (searchResults.length > 0 && canUseAutocompleteCache) {
-                    saveToCache(searchKeyword, searchResults[0], location, telemetryContext).catch(error => {
+                    saveToCache(searchKeyword, searchResults[0]).catch(error => {
                         Logger.warn('⚠️ [PlacesCache] Erro ao salvar no cache remoto:', error.message);
                     });
                     await saveToLocalCache(searchKeyword, {
@@ -394,43 +405,36 @@ export const fetchPlacesAutocomplete = (searchKeyword, sessionToken, location = 
  * @param {object} placeData - Dados do lugar
  * @param {object} location - Localização do usuário (opcional)
  */
-async function saveToCache(query, placeData, location = null, telemetryContext = null) {
+async function saveToCache(query, placeData) {
     try {
-        // Buscar detalhes completos (lat/lng) se necessário
-        let placeDetails = placeData;
-        
-        // Se não tem lat/lng, buscar detalhes
-        if (!placeData.location && placeData.place_id) {
-            const apiKey = process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY || process.env.GOOGLE_MAPS_API_KEY || '';
-            const detailsUrl = `https://maps.googleapis.com/maps/api/place/details/json?place_id=${placeData.place_id}&key=${apiKey}&fields=geometry,formatted_address,name`;
-            
-            const detailsResponse = await fetch(detailsUrl);
-            const detailsJson = await detailsResponse.json();
-            
-            if (detailsJson.status === 'OK' && detailsJson.result) {
-                rideCostTelemetryService.recordGoogleUsage(
-                    RIDE_TELEMETRY_GOOGLE_SKUS.PLACE_DETAILS_LEGACY,
-                    {
-                        billableUnits: 1,
-                        requestCount: 1,
-                        metadata: {
-                            reason: 'saveToCache',
-                            placeId: placeData.place_id || null
-                        }
-                    },
-                    telemetryContext
-                );
-
-                const loc = detailsJson.result.geometry.location;
-                placeDetails = {
-                    place_id: placeData.place_id,
-                    name: detailsJson.result.name,
-                    address: detailsJson.result.formatted_address,
-                    lat: loc.lat,
-                    lng: loc.lng
-                };
-            }
-        }
+        // Evitar Place Details implícito a cada autocomplete (custo alto).
+        // Persistimos dados básicos e coordenadas apenas quando já disponíveis.
+        const placeDetails = {
+            place_id: placeData?.place_id || null,
+            name:
+                placeData?.name ||
+                placeData?.structured_formatting?.main_text ||
+                placeData?.description ||
+                query,
+            address:
+                placeData?.address ||
+                placeData?.formatted_address ||
+                placeData?.description ||
+                placeData?.structured_formatting?.secondary_text ||
+                query,
+            lat:
+                Number.isFinite(Number(placeData?.lat))
+                    ? Number(placeData.lat)
+                    : Number.isFinite(Number(placeData?.location?.lat))
+                        ? Number(placeData.location.lat)
+                        : null,
+            lng:
+                Number.isFinite(Number(placeData?.lng))
+                    ? Number(placeData.lng)
+                    : Number.isFinite(Number(placeData?.location?.lng))
+                        ? Number(placeData.location.lng)
+                        : null
+        };
         
         // Salvar no cache do backend
         const saveUrl = getSelfHostedApiUrl('/api/places/save');
@@ -462,23 +466,75 @@ async function saveToCache(query, placeData, location = null, telemetryContext =
     }
 }
 
-export const fetchCoordsfromPlace = (place_id, telemetryContext = null) => {
-    return new Promise((resolve,reject)=>{
+export const fetchCoordsfromPlace = (place_id, telemetryContext = null, sessionTokenInput = null) => {
+    return new Promise(async (resolve,reject)=>{
         Logger.log('📍 fetchCoordsfromPlace chamado com place_id:', place_id);
-        
-        // ✅ Usar API do Google Places diretamente
-        const apiKey = process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY || process.env.GOOGLE_MAPS_API_KEY || ''; // Chave real do projeto (sem restrições)
-        
-        // Construir URL da API Place Details
-        const url = `https://maps.googleapis.com/maps/api/place/details/json?place_id=${place_id}&key=${apiKey}&language=pt-BR&fields=geometry,formatted_address,name`;
-        
+        const sessionToken = typeof sessionTokenInput === 'string' ? sessionTokenInput.trim() : '';
+
+        // 1️⃣ Tentar backend autoritativo primeiro
+        try {
+            const backendUrl = getSelfHostedApiUrl('/api/places/details');
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 6000);
+            const backendTelemetry = buildBackendRideTelemetryPayload(
+                telemetryContext,
+                'places_details_mobile',
+            );
+
+            const backendResponse = await fetch(backendUrl, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    placeId: place_id,
+                    sessionToken: sessionToken || null,
+                    telemetry: backendTelemetry,
+                }),
+                signal: controller.signal,
+            });
+
+            clearTimeout(timeoutId);
+
+            if (backendResponse.ok) {
+                const backendJson = await backendResponse.json();
+                const backendLocation = backendJson?.data;
+                if (
+                    Number.isFinite(Number(backendLocation?.lat)) &&
+                    Number.isFinite(Number(backendLocation?.lng))
+                ) {
+                    const coords = {
+                        lat: Number(backendLocation.lat),
+                        lng: Number(backendLocation.lng),
+                        formatted_address: backendLocation.formatted_address || backendLocation.address || '',
+                        name: backendLocation.name || '',
+                    };
+                    Logger.log('✅ Coordenadas obtidas via backend:', coords);
+                    resolve(coords);
+                    return;
+                }
+            }
+        } catch (backendError) {
+            if (backendError?.name === 'AbortError') {
+                Logger.log('⏱️ Timeout no Place Details backend. Fallback para Google direto.');
+            } else {
+                Logger.log('⚠️ Falha no Place Details backend:', backendError?.message || backendError);
+            }
+        }
+
+        // 2️⃣ Fallback: Google direto
+        const apiKey = process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY || process.env.GOOGLE_MAPS_API_KEY || '';
+        let url = `https://maps.googleapis.com/maps/api/place/details/json?place_id=${place_id}&key=${apiKey}&language=pt-BR&fields=geometry,formatted_address,name`;
+        if (sessionToken) {
+            url += `&sessiontoken=${encodeURIComponent(sessionToken)}`;
+        }
         Logger.log('🌐 URL da API Place Details:', sanitizeSensitiveUrl(url));
-        
+
         fetch(url)
             .then(response => response.json())
             .then(json => {
                 Logger.log('📡 Resposta da API Google Place Details:', json);
-                
+
                 if (json.status === 'OK' && json.result && json.result.geometry && json.result.geometry.location) {
                     rideCostTelemetryService.recordGoogleUsage(
                         RIDE_TELEMETRY_GOOGLE_SKUS.PLACE_DETAILS_LEGACY,
@@ -487,10 +543,11 @@ export const fetchCoordsfromPlace = (place_id, telemetryContext = null) => {
                             requestCount: 1,
                             metadata: {
                                 reason: 'fetchCoordsfromPlace',
-                                placeId: place_id || null
-                            }
+                                placeId: place_id || null,
+                                sessionTokenUsed: Boolean(sessionToken),
+                            },
                         },
-                        telemetryContext
+                        telemetryContext,
                     );
 
                     const location = json.result.geometry.location;
@@ -498,9 +555,9 @@ export const fetchCoordsfromPlace = (place_id, telemetryContext = null) => {
                         lat: location.lat,
                         lng: location.lng,
                         formatted_address: json.result.formatted_address,
-                        name: json.result.name
+                        name: json.result.name,
                     };
-                    
+
                     Logger.log('✅ Coordenadas obtidas:', coords);
                     resolve(coords);
                 } else {
@@ -837,6 +894,65 @@ export const getDirectionsApi = (startLoc, destLoc, waypoints, telemetryContext 
         Logger.log('🌐 URL da API Google Directions:', sanitizeSensitiveUrl(url));
         
         withInFlight(cacheKey, async () => {
+            // 1) Backend autoritativo (com cache + telemetria por booking)
+            try {
+                const backendUrl = getSelfHostedApiUrl('/api/places/directions');
+                const backendController = new AbortController();
+                const backendTimeoutId = setTimeout(
+                    () => backendController.abort(),
+                    DIRECTIONS_REQUEST_TIMEOUT_MS,
+                );
+                const backendTelemetry = buildBackendRideTelemetryPayload(
+                    telemetryContext,
+                    'directions_mobile',
+                );
+                const backendResponse = await fetch(backendUrl, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        startLoc,
+                        destLoc,
+                        waypoints: waypoints || null,
+                        trafficEnabled,
+                        alternativesEnabled,
+                        routeScope:
+                            telemetryContext?.routeScope ||
+                            telemetryContext?.routeFamily ||
+                            'unknown',
+                        telemetry: backendTelemetry,
+                    }),
+                    signal: backendController.signal,
+                });
+                clearTimeout(backendTimeoutId);
+
+                if (backendResponse.ok) {
+                    const backendJson = await backendResponse.json();
+                    if (backendJson?.status === 'success' && backendJson?.data) {
+                        if (backendJson?.cached === true) {
+                            rideCostTelemetryService.recordGoogleCache('directionsBackendHit', {
+                                metadata: buildRideTelemetryMetadata(telemetryContext, {
+                                    waypointsCount: waypoints ? String(waypoints).split('|').filter(Boolean).length : 0,
+                                    trafficEnabled,
+                                    alternativesEnabled,
+                                    cacheMode: 'backend_cache',
+                                    callerFrame
+                                })
+                            }, telemetryContext);
+                        }
+                        return backendJson.data;
+                    }
+                }
+            } catch (backendError) {
+                if (backendError?.name === 'AbortError') {
+                    Logger.log('⏱️ getDirectionsApi backend timeout, fallback Google direto');
+                } else {
+                    Logger.log('⚠️ getDirectionsApi backend falhou, fallback Google:', backendError?.message || backendError);
+                }
+            }
+
+            // 2) Fallback Google direto (mantém compatibilidade)
             const controller = new AbortController();
             const timeoutId = setTimeout(() => controller.abort(), DIRECTIONS_REQUEST_TIMEOUT_MS);
             return await fetch(url, { signal: controller.signal })

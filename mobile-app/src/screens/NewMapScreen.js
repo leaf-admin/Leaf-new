@@ -28,6 +28,12 @@ import { fonts } from '../common/font';
 import { colors } from '../common/theme';
 
 const { width, height } = Dimensions.get('window');
+const DEFAULT_MAP_REGION = {
+    latitude: -22.9068,
+    longitude: -43.1729,
+    latitudeDelta: 0.08,
+    longitudeDelta: 0.08,
+};
 
 // Estilos de mapa para modo claro e escuro
 const lightMapStyle = [
@@ -243,6 +249,7 @@ export default function NewMapScreen(props) {
     const [isDarkMode, setIsDarkMode] = useState(false);
     const [currentLocation, setCurrentLocation] = useState(null);
     const [pickupAddress, setPickupAddress] = useState('');
+    const [locationDenied, setLocationDenied] = useState(false);
 
     // Estados para cards de valores (baseado no MapScreen.js antigo)
     const [allCarTypes, setAllCarTypes] = useState([]);
@@ -301,7 +308,7 @@ export default function NewMapScreen(props) {
 
     // Obter localização atual e endereço
     useEffect(() => {
-        getCurrentLocation();
+        getCurrentLocation({ forcePrompt: false, silent: true });
     }, []);
 
     // Keep Google Maps as the only provider on native mobile and surface tile issues in logs
@@ -331,14 +338,24 @@ export default function NewMapScreen(props) {
         }
     }, [currentLocation]);
 
-    const getCurrentLocation = async () => {
+    const getCurrentLocation = async ({ forcePrompt = false, silent = false } = {}) => {
         try {
-            // Verificar permissões
-            let { status } = await Location.requestForegroundPermissionsAsync();
-            if (status !== 'granted') {
-                Alert.alert('Permissão negada', 'Precisamos da sua localização para funcionar.');
-                return;
+            let permission = forcePrompt
+                ? await Location.requestForegroundPermissionsAsync()
+                : await Location.getForegroundPermissionsAsync();
+
+            if (permission.status !== 'granted' && !forcePrompt && permission.canAskAgain) {
+                permission = await Location.requestForegroundPermissionsAsync();
             }
+
+            if (permission.status !== 'granted') {
+                setLocationDenied(true);
+                if (!silent) {
+                    Alert.alert('Permissão negada', 'Precisamos da sua localização para funcionar.');
+                }
+                return null;
+            }
+            setLocationDenied(false);
 
             // Obter localização atual
             let location = await Location.getCurrentPositionAsync({
@@ -378,11 +395,20 @@ export default function NewMapScreen(props) {
                 Logger.log('⚠️ Usando coordenadas como fallback final');
                 setPickupAddress(`Localização(${latitude.toFixed(6)}, ${longitude.toFixed(6)})`);
             }
+            return newLocation;
 
         } catch (error) {
             Logger.error('❌ Erro ao obter localização:', error);
-            Alert.alert('Erro', 'Não foi possível obter sua localização.');
+            setLocationDenied(true);
+            if (!silent) {
+                Alert.alert('Erro', 'Não foi possível obter sua localização.');
+            }
+            return null;
         }
+    };
+
+    const handleRequestLocationPermission = () => {
+        getCurrentLocation({ forcePrompt: true, silent: false });
     };
 
     // Função para obter endereço mais preciso do Google Places
@@ -778,6 +804,8 @@ export default function NewMapScreen(props) {
                     toggleTheme={toggleTheme}
                     pickupAddress={pickupAddress}
                     currentLocation={currentLocation}
+                    locationDenied={locationDenied}
+                    onRequestLocationPermission={handleRequestLocationPermission}
                     allCarTypes={allCarTypes}
                     {...props}
                 />
@@ -809,7 +837,7 @@ export default function NewMapScreen(props) {
         longitude: currentLocation.lng,
         latitudeDelta: 0.01,
         longitudeDelta: 0.01,
-    } : null;
+    } : DEFAULT_MAP_REGION;
 
     return (
         <View style={styles.container}>
@@ -818,7 +846,7 @@ export default function NewMapScreen(props) {
                 style={styles.map}
                 provider={mapProvider}
                 initialRegion={initialRegion}
-                showsUserLocation={true}
+                showsUserLocation={!locationDenied}
                 showsMyLocationButton={false}
                 showsCompass={true}
                 showsScale={true}
