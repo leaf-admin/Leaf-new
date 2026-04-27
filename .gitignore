@@ -118,6 +118,10 @@ mobile-app/07-*.png
 
 # Workspace-level test artifacts
 reports/
+mobile-app/builds/
+book_20_imagens/
+_debug_grid.png
+refinar_book.py
 driver-*.png
 passenger-*.png
 rating-*.png
