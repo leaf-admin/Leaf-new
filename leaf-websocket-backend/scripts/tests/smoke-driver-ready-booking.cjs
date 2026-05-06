@@ -4,15 +4,35 @@ const WebSocketTestClient = require('../../tests/e2e/backend/__helpers__/websock
 
 const WS_URL = process.env.WS_URL || 'https://socket.62.169.31.231.sslip.io';
 const API_BASE_URL = process.env.API_BASE_URL || 'https://api.62.169.31.231.sslip.io';
-const PASSENGER_UID = process.env.TEST_PASSENGER_UID;
-const DRIVER_UID = process.env.TEST_DRIVER_UID;
-const TEST_CAR_TYPE = String(process.env.TEST_CAR_TYPE || 'leaf_plus').trim() || 'leaf_plus';
+const PASSENGER_UID = String(process.env.TEST_PASSENGER_UID || process.env.PASSENGER_UID || '').trim();
+const DRIVER_UID = String(process.env.TEST_DRIVER_UID || process.env.DRIVER_UID || '').trim();
+const LEGACY_PASSENGER_UID = 'OjML1wSzdNRaynjqMRlSW1Y0LVy2';
+const LEGACY_DRIVER_UID = '8vg2kxxqi3TYKlpD6eBlWgYseIq2';
+const TEST_CAR_TYPE = String(process.env.TEST_CAR_TYPE || 'leafplus').trim() || 'leafplus';
 
 if (!PASSENGER_UID || !DRIVER_UID) {
   console.error(JSON.stringify({
     ok: false,
     error: 'missing_uids',
     message: 'Defina TEST_PASSENGER_UID e TEST_DRIVER_UID'
+  }, null, 2));
+  process.exit(1);
+}
+
+if (PASSENGER_UID === DRIVER_UID) {
+  console.error(JSON.stringify({
+    ok: false,
+    error: 'uid_conflict',
+    message: 'TEST_PASSENGER_UID e TEST_DRIVER_UID não podem ser iguais'
+  }, null, 2));
+  process.exit(1);
+}
+
+if (PASSENGER_UID === LEGACY_DRIVER_UID && DRIVER_UID === LEGACY_PASSENGER_UID) {
+  console.error(JSON.stringify({
+    ok: false,
+    error: 'uids_swapped',
+    message: 'Os UIDs parecem invertidos: passageiro recebeu UID legado de motorista e vice-versa'
   }, null, 2));
   process.exit(1);
 }
