@@ -11,9 +11,25 @@ const ROOT_DIR = path.join(__dirname, '..', '..');
 const REPORTS_DIR = path.join(ROOT_DIR, 'reports');
 const WS_URL = process.env.WS_URL || 'https://socket.62.169.31.231.sslip.io';
 const API_BASE_URL = process.env.API_BASE_URL || 'https://api.62.169.31.231.sslip.io';
-const VPS_IP = process.env.VPS_IP || '147.182.204.181';
+const VPS_IP = process.env.VPS_IP || '62.169.31.231';
 const VPS_USER = process.env.VPS_USER || 'root';
-const SSH_KEY_PATH = process.env.SSH_KEY_PATH || path.join(ROOT_DIR, '..', 'digitaloceankey');
+const DEFAULT_SSH_KEY_CANDIDATES = [
+  process.env.SSH_KEY_PATH,
+  process.env.CONTABO_SSH_KEY_PATH,
+  path.join(process.env.HOME || '', '.ssh/leaf_contabo_20260412_ed25519'),
+  path.join(process.env.HOME || '', '.ssh/serafy_contabo_ed25519'),
+  path.join(ROOT_DIR, '..', 'contabokey')
+].filter(Boolean);
+const SSH_KEY_PATH =
+  process.env.SSH_KEY_PATH
+  || DEFAULT_SSH_KEY_CANDIDATES.find((candidate) => {
+    try {
+      return fs.existsSync(candidate);
+    } catch (_error) {
+      return false;
+    }
+  })
+  || path.join(process.env.HOME || '', '.ssh/leaf_contabo_20260412_ed25519');
 const PASSENGER_UID = process.env.TEST_PASSENGER_UID || 'OjML1wSzdNRaynjqMRlSW1Y0LVy2';
 const DRIVER_UID = process.env.TEST_DRIVER_UID || '8vg2kxxqi3TYKlpD6eBlWgYseIq2';
 const ONLINE_MAX_ATTEMPTS = Number(process.env.ONLINE_MAX_ATTEMPTS || 5);

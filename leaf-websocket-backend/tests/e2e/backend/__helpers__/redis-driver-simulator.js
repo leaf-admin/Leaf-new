@@ -9,18 +9,18 @@ const fs = require('fs');
 const path = require('path');
 const { promisify } = require('util');
 const { execFile } = require('child_process');
-const redisPool = require('../../../../utils/redis-pool');
 const execFileAsync = promisify(execFile);
 
 class RedisDriverSimulator {
   constructor() {
     this.redis = null;
+    this.redisPool = null;
+    const resolvedDefaultKeyPath = this.resolveDefaultSshKeyPath();
 
     this.remoteSsh = {
-      host: process.env.E2E_REMOTE_SSH_HOST || '147.182.204.181',
+      host: process.env.E2E_REMOTE_SSH_HOST || '62.169.31.231',
       user: process.env.E2E_REMOTE_SSH_USER || 'root',
-      keyPath: process.env.E2E_REMOTE_SSH_KEY_PATH ||
-        path.join(__dirname, '../../../../../digitaloceankey')
+      keyPath: process.env.E2E_REMOTE_SSH_KEY_PATH || resolvedDefaultKeyPath
     };
     this.remoteRedis = {
       container: process.env.E2E_REMOTE_REDIS_CONTAINER || 'leaf-redis',
@@ -37,6 +37,26 @@ class RedisDriverSimulator {
     this.remoteCommandRetries = Number.parseInt(process.env.E2E_REMOTE_CMD_RETRIES || '3', 10);
     this.remoteCommandRetryDelayMs = Number.parseInt(process.env.E2E_REMOTE_CMD_RETRY_DELAY_MS || '250', 10);
     this.useRemoteRedis = this.shouldUseRemoteRedis();
+  }
+
+  resolveDefaultSshKeyPath() {
+    const candidates = [
+      process.env.E2E_REMOTE_SSH_KEY_PATH,
+      process.env.CONTABO_SSH_KEY_PATH,
+      path.join(process.env.HOME || '', '.ssh/leaf_contabo_20260412_ed25519'),
+      path.join(process.env.HOME || '', '.ssh/serafy_contabo_ed25519'),
+      path.join(__dirname, '../../../../../contabokey')
+    ].filter(Boolean);
+
+    for (const candidate of candidates) {
+      try {
+        if (fs.existsSync(candidate)) return candidate;
+      } catch (_error) {
+        // ignore invalid filesystem paths
+      }
+    }
+
+    return path.join(process.env.HOME || '', '.ssh/leaf_contabo_20260412_ed25519');
   }
 
   shouldUseRemoteRedis() {
@@ -101,7 +121,20 @@ class RedisDriverSimulator {
     return String(rawOutput || '')
       .split('\n')
       .map((line) => line.trim())
-      .filter((line) => line && !line.startsWith('Warning:'));
+      .filter((line) => line && !line.startsWith('Warning:') && !line.startsWith('NOAUTH'));
+  }
+
+  parseRedisKeyValueLines(rawOutput) {
+    const lines = String(rawOutput || '')
+      .replace(/\r/g, '')
+      .split('\n')
+      .filter((line) => !line.startsWith('Warning:') && !line.startsWith('NOAUTH'));
+
+    while (lines.length > 0 && lines[lines.length - 1] === '') {
+      lines.pop();
+    }
+
+    return lines;
   }
 
   parseRedisScalar(rawOutput) {
@@ -155,7 +188,7 @@ class RedisDriverSimulator {
   buildRemoteRedisCli() {
     const { container, password } = this.remoteRedis;
     const escapedPassword = String(password).replace(/'/g, `'\"'\"'`);
-    return `REDISCLI_AUTH='${escapedPassword}' docker exec ${container} redis-cli`;
+    return `docker exec -e REDISCLI_AUTH='${escapedPassword}' ${container} redis-cli`;
   }
 
   async hget(key, field) {
@@ -176,7 +209,7 @@ class RedisDriverSimulator {
       const safeKey = this.sanitizeRedisKey(key, 'key');
       const redisCli = this.buildRemoteRedisCli();
       const raw = await this.runRemoteShell(`${redisCli} --raw HGETALL ${safeKey} || true`);
-      const tokens = this.parseRedisLines(raw);
+      const tokens = this.parseRedisKeyValueLines(raw);
       const data = {};
       for (let i = 0; i < tokens.length; i += 2) {
         const k = tokens[i];
@@ -251,7 +284,13 @@ class RedisDriverSimulator {
    */
   async getRedis() {
     if (!this.redis) {
-      this.redis = redisPool.getConnection();
+      // Lazy-load do pool local para evitar bootstrap de Redis local quando o
+      // simulador está operando via SSH no ambiente remoto.
+      if (!this.redisPool) {
+        // eslint-disable-next-line global-require
+        this.redisPool = require('../../../../utils/redis-pool');
+      }
+      this.redis = this.redisPool.getConnection();
       
       // Garantir conexão
       if (this.redis.status !== 'ready' && this.redis.status !== 'connect') {
@@ -295,10 +334,10 @@ class RedisDriverSimulator {
         const key = `driver:${safeDriverId}`;
         const clearLocksCmd = `${redisCli} DEL driver_lock:${safeDriverId} driver_active_notification:${safeDriverId} active_trip_by_driver:${safeDriverId} active_trip_customer_by_driver:${safeDriverId} >/dev/null`;
 
-        const setHashCmd = `${redisCli} HSET ${key} id ${safeDriverId} isOnline ${isOnline ? 'true' : 'false'} status ${status} lat ${latNum} lng ${lngNum} heading ${headingNum} speed ${speedNum} lastUpdate ${timestamp} timestamp ${timestamp} lastSeen ${new Date().toISOString()} rating 5.0 acceptanceRate 50.0 avgResponseTime 5.0 totalTrips 0 >/dev/null`;
+        const setHashCmd = `${redisCli} HSET ${key} id ${safeDriverId} isOnline ${isOnline ? 'true' : 'false'} status ${status} lat ${latNum} lng ${lngNum} heading ${headingNum} speed ${speedNum} lastUpdate ${timestamp} timestamp ${timestamp} lastSeen ${new Date().toISOString()} rating 5.0 acceptanceRate 50.0 avgResponseTime 5.0 totalTrips 0 driverApproved true vehicleApproved true carType leafplus vehicleCategory plus acceptsPlusWithElite true dispatchEligible ${isOnline ? 'true' : 'false'} dispatchEligibilityCode ${isOnline ? 'ELIGIBLE' : 'OFFLINE'} dispatchEligibilityCheckedAt ${new Date().toISOString()} >/dev/null`;
         const clearActiveTripFieldsCmd = `${redisCli} HDEL ${key} activeTripId activeTripUpdatedAt >/dev/null`;
-        const onlineGeoCmd = `${redisCli} GEOADD driver_locations ${lngNum} ${latNum} ${safeDriverId} >/dev/null && ${redisCli} ZREM driver_offline_locations ${safeDriverId} >/dev/null`;
-        const offlineGeoCmd = `${redisCli} GEOADD driver_offline_locations ${lngNum} ${latNum} ${safeDriverId} >/dev/null && ${redisCli} ZREM driver_locations ${safeDriverId} >/dev/null`;
+        const onlineGeoCmd = `${redisCli} GEOADD driver_locations ${lngNum} ${latNum} ${safeDriverId} >/dev/null && ${redisCli} GEOADD driver_locations_eligible ${lngNum} ${latNum} ${safeDriverId} >/dev/null && ${redisCli} ZREM driver_offline_locations ${safeDriverId} >/dev/null`;
+        const offlineGeoCmd = `${redisCli} GEOADD driver_offline_locations ${lngNum} ${latNum} ${safeDriverId} >/dev/null && ${redisCli} ZREM driver_locations ${safeDriverId} >/dev/null && ${redisCli} ZREM driver_locations_eligible ${safeDriverId} >/dev/null`;
         const expireCmd = `${redisCli} EXPIRE ${key} ${ttl} >/dev/null`;
 
         const script = isOnline
@@ -331,17 +370,26 @@ class RedisDriverSimulator {
         rating: '5.0',
         acceptanceRate: '50.0',
         avgResponseTime: '5.0',
-        totalTrips: '0'
+        totalTrips: '0',
+        driverApproved: 'true',
+        vehicleApproved: 'true',
+        carType: 'leafplus',
+        vehicleCategory: 'plus',
+        acceptsPlusWithElite: 'true',
+        dispatchEligible: isOnline ? 'true' : 'false',
+        dispatchEligibilityCode: isOnline ? 'ELIGIBLE' : 'OFFLINE',
+        dispatchEligibilityCheckedAt: new Date().toISOString()
       };
       
-      await redis.hset(`driver:${driverId}`, driverStatus);
-      await redis.del(`driver_lock:${driverId}`, `driver_active_notification:${driverId}`);
-      await redis.del(`active_trip_by_driver:${driverId}`, `active_trip_customer_by_driver:${driverId}`);
-      await redis.hdel(`driver:${driverId}`, 'activeTripId', 'activeTripUpdatedAt');
+        await redis.hset(`driver:${driverId}`, driverStatus);
+        await redis.del(`driver_lock:${driverId}`, `driver_active_notification:${driverId}`);
+        await redis.del(`active_trip_by_driver:${driverId}`, `active_trip_customer_by_driver:${driverId}`);
+        await redis.hdel(`driver:${driverId}`, 'activeTripId', 'activeTripUpdatedAt');
       
       if (isOnline) {
         // 2. Motorista ONLINE: adicionar/atualizar no GEO ativo (para match rápido)
         await redis.geoadd('driver_locations', lng, lat, driverId);
+        await redis.geoadd('driver_locations_eligible', lng, lat, driverId);
         
         // 3. Remover do GEO offline (se estava offline antes)
         await redis.zrem('driver_offline_locations', driverId);
@@ -357,6 +405,7 @@ class RedisDriverSimulator {
         
         // 3. Remover do GEO ativo
         await redis.zrem('driver_locations', driverId);
+        await redis.zrem('driver_locations_eligible', driverId);
         
         // 4. TTL longo para offline (24 horas)
         await redis.expire(`driver:${driverId}`, 86400);
@@ -420,6 +469,7 @@ class RedisDriverSimulator {
         const redisCli = this.buildRemoteRedisCli();
         const script = [
           `${redisCli} ZREM driver_locations ${safeDriverId} >/dev/null`,
+          `${redisCli} ZREM driver_locations_eligible ${safeDriverId} >/dev/null`,
           `${redisCli} ZREM driver_offline_locations ${safeDriverId} >/dev/null`,
           `${redisCli} DEL driver_lock:${safeDriverId} driver_active_notification:${safeDriverId} >/dev/null`,
           `${redisCli} DEL active_trip_by_driver:${safeDriverId} active_trip_customer_by_driver:${safeDriverId} >/dev/null`,
@@ -435,6 +485,7 @@ class RedisDriverSimulator {
       const redis = await this.getRedis();
       
       await redis.zrem('driver_locations', driverId);
+      await redis.zrem('driver_locations_eligible', driverId);
       await redis.zrem('driver_offline_locations', driverId);
       await redis.del(`driver_lock:${driverId}`, `driver_active_notification:${driverId}`);
       await redis.del(`active_trip_by_driver:${driverId}`, `active_trip_customer_by_driver:${driverId}`);

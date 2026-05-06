@@ -8,9 +8,24 @@ const WebSocketTestClient = require('../../tests/e2e/backend/__helpers__/websock
 
 const WS_URL = process.env.WS_URL || 'https://socket.62.169.31.231.sslip.io';
 const API_BASE_URL = process.env.API_BASE_URL || 'https://api.62.169.31.231.sslip.io';
-const REMOTE_SSH_HOST = process.env.REMOTE_SSH_HOST || 'root@147.182.204.181';
+const REMOTE_SSH_HOST = process.env.REMOTE_SSH_HOST || 'root@62.169.31.231';
+const DEFAULT_REMOTE_SSH_KEY_CANDIDATES = [
+  process.env.REMOTE_SSH_KEY,
+  process.env.CONTABO_SSH_KEY_PATH,
+  path.join(process.env.HOME || '', '.ssh/leaf_contabo_20260412_ed25519'),
+  path.join(process.env.HOME || '', '.ssh/serafy_contabo_ed25519'),
+  path.join(__dirname, '..', '..', '..', 'contabokey')
+].filter(Boolean);
 const REMOTE_SSH_KEY =
-  process.env.REMOTE_SSH_KEY || '/Users/izaakdias/Documents/Leaf-new/digitaloceankey';
+  process.env.REMOTE_SSH_KEY
+  || DEFAULT_REMOTE_SSH_KEY_CANDIDATES.find((candidate) => {
+    try {
+      return fs.existsSync(candidate);
+    } catch (_error) {
+      return false;
+    }
+  })
+  || path.join(process.env.HOME || '', '.ssh/leaf_contabo_20260412_ed25519');
 const PASSENGER_UID = process.env.TEST_PASSENGER_UID || 'OjML1wSzdNRaynjqMRlSW1Y0LVy2';
 const DRIVER1_UID = process.env.TEST_DRIVER_UID || '8vg2kxxqi3TYKlpD6eBlWgYseIq2';
 const DRIVER2_UID = process.env.TEST_DRIVER2_UID || '';

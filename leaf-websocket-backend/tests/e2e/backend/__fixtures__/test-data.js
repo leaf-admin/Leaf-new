@@ -26,28 +26,28 @@ module.exports = {
     }
   },
   
-  // Localizações de teste (São Paulo)
+  // Localizações de teste (Rio de Janeiro - zona ativa de operação)
   locations: {
     pickup: {
-      lat: -23.5505,
-      lng: -46.6333,
-      address: 'Av. Paulista, 1000 - São Paulo, SP'
+      lat: -22.971964,
+      lng: -43.182543,
+      address: 'Copacabana Palace, Rio de Janeiro, RJ'
     },
     destination: {
-      lat: -23.5515,
-      lng: -46.6343,
-      address: 'Av. Brigadeiro Faria Lima, 2000 - São Paulo, SP'
+      lat: -22.984843,
+      lng: -43.221972,
+      address: 'Leblon, Rio de Janeiro, RJ'
     },
     // Localizações alternativas
     pickup2: {
-      lat: -23.5605,
-      lng: -46.6433,
-      address: 'Rua Augusta, 500 - São Paulo, SP'
+      lat: -22.975839,
+      lng: -43.193312,
+      address: 'Ipanema, Rio de Janeiro, RJ'
     },
     destination2: {
-      lat: -23.5615,
-      lng: -46.6443,
-      address: 'Rua Oscar Freire, 1000 - São Paulo, SP'
+      lat: -22.949684,
+      lng: -43.155401,
+      address: 'Botafogo, Rio de Janeiro, RJ'
     }
   },
   
@@ -60,7 +60,9 @@ module.exports = {
         pickupLocation: pickup || testData.locations.pickup,
         destinationLocation: destination || testData.locations.destination,
         estimatedFare: 25.50,
-        paymentMethod: 'pix'
+        paymentMethod: 'pix',
+        carType: 'leafplus',
+        selectedVehicle: 'leafplus'
       };
     }
   },
@@ -116,4 +118,3 @@ module.exports = {
     }
   }
 };
-

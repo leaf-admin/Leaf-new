@@ -21,9 +21,44 @@ function extractEventIdempotencyKey(payload = {}) {
   );
 }
 
+function normalizeBaseUrl(url) {
+  return String(url || '').trim().replace(/\/+$/, '');
+}
+
+function deriveApiBaseUrl(wsUrl) {
+  const fromEnv = normalizeBaseUrl(process.env.API_BASE_URL || '');
+  if (fromEnv) return fromEnv;
+
+  const resolvedWsUrl = String(wsUrl || process.env.WS_URL || '').trim();
+  if (!resolvedWsUrl) {
+    return 'https://api.62.169.31.231.sslip.io';
+  }
+
+  try {
+    const parsed = new URL(resolvedWsUrl);
+    if (parsed.hostname.startsWith('socket.')) {
+      parsed.hostname = parsed.hostname.replace(/^socket\./, 'api.');
+    }
+    return normalizeBaseUrl(parsed.toString());
+  } catch (_error) {
+    return 'https://api.62.169.31.231.sslip.io';
+  }
+}
+
+function toAmountInCents(value) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed <= 0) return null;
+  return Math.round(parsed * 100);
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 class WebSocketTestClient {
   constructor(url, options = {}) {
     this.url = url || process.env.WS_URL || 'http://localhost:3001';
+    this.apiBaseUrl = deriveApiBaseUrl(this.url);
     this.options = {
       transports: ['websocket'],
       reconnection: false, // Desabilitar reconexão automática nos testes
@@ -168,6 +203,37 @@ class WebSocketTestClient {
       arguments.length > 1 && arguments[1] && typeof arguments[1] === 'object'
         ? arguments[1]
         : {};
+    const allowAutoPaymentFallback =
+      options.autoPaymentFallback !== false &&
+      String(process.env.E2E_AUTO_PAYMENT_ON_CREATE_BOOKING || 'true').toLowerCase() !== 'false';
+
+    try {
+      return await this._createBookingOnce(data, options);
+    } catch (error) {
+      if (!allowAutoPaymentFallback) {
+        throw error;
+      }
+
+      const retryablePaymentError = this.isRetryableCreateBookingPaymentError(error);
+      const alreadyHasConfirmedPayment = this.hasBookingPayloadConfirmedPayment(data);
+      if (!retryablePaymentError || alreadyHasConfirmedPayment) {
+        throw error;
+      }
+
+      const payment = await this.provisionAdvancePaymentForBooking(data);
+      const retryPayload = this.injectConfirmedPaymentData(data, payment);
+
+      if (E2E_VERBOSE) {
+        console.log(
+          `⚠️ [TestClient] createBooking exigiu pagamento. Repetindo com cobrança confirmada (${payment.chargeId})`
+        );
+      }
+
+      return this._createBookingOnce(retryPayload, options);
+    }
+  }
+
+  async _createBookingOnce(data, options = {}) {
     const timeoutMs = Math.max(1000, Number.parseInt(options.timeoutMs || '20000', 10) || 20000);
     const lateEventGraceMs = Math.max(0, Number.parseInt(options.lateEventGraceMs || '250', 10) || 250);
     const expectedIdempotencyKey = data?.idempotencyKey || null;
@@ -300,6 +366,126 @@ class WebSocketTestClient {
 
       this.socket.emit('createBooking', data);
     });
+  }
+
+  hasBookingPayloadConfirmedPayment(data = {}) {
+    const normalizedStatus = String(data?.paymentStatus || '').trim().toLowerCase();
+    const isConfirmedStatus = ['confirmed', 'paid', 'in_holding'].includes(normalizedStatus);
+    const hasChargeId = Boolean(String(data?.paymentData?.chargeId || data?.paymentId || '').trim());
+    return isConfirmedStatus && hasChargeId;
+  }
+
+  isRetryableCreateBookingPaymentError(error) {
+    const message = String(error?.message || '').trim().toLowerCase();
+    if (!message) return false;
+    return (
+      message.includes('pagamento obrigatório') ||
+      message.includes('payment required') ||
+      message.includes('referência de pagamento ausente')
+    );
+  }
+
+  async postJson(url, body, timeoutMs = 20000) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(body),
+        signal: controller.signal
+      });
+      const data = await response.json().catch(() => ({}));
+      return { ok: response.ok, status: response.status, data };
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  async provisionAdvancePaymentForBooking(bookingPayload = {}) {
+    const passengerId = String(bookingPayload?.customerId || this.userId || '').trim();
+    if (!passengerId) {
+      throw new Error('payment_bootstrap_missing_passenger');
+    }
+
+    const pickupAddress = bookingPayload?.pickupLocation?.address || bookingPayload?.pickupLocation?.add || 'Origem E2E';
+    const destinationAddress =
+      bookingPayload?.destinationLocation?.address || bookingPayload?.destinationLocation?.add || 'Destino E2E';
+    const inferredAmountInCents =
+      Number.parseInt(String(bookingPayload?.paymentData?.amountInCents || ''), 10) ||
+      Number.parseInt(String(bookingPayload?.amountInCents || ''), 10) ||
+      toAmountInCents(bookingPayload?.estimatedFare) ||
+      2750;
+    const rideId = `ride_e2e_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+
+    const paymentAdvance = await this.postJson(`${this.apiBaseUrl}/api/payment/advance`, {
+      passengerId,
+      amount: inferredAmountInCents,
+      rideId,
+      rideDetails: {
+        origin: pickupAddress,
+        destination: destinationAddress
+      },
+      passengerName: 'Leaf E2E Passenger',
+      passengerEmail: 'qa+e2e@leaf.local'
+    }, 25000);
+
+    const chargeId = String(paymentAdvance?.data?.chargeId || '').trim();
+    if (!paymentAdvance.ok || !chargeId) {
+      throw new Error(
+        `payment_advance_failed:${paymentAdvance?.data?.message || paymentAdvance?.status || 'unknown'}`
+      );
+    }
+
+    const webhookPayload = {
+      event: 'OPENPIX:CHARGE_COMPLETED',
+      charge: {
+        identifier: chargeId,
+        correlationID: `ride_${rideId}_${Date.now()}_e2e`,
+        value: inferredAmountInCents,
+        status: 'COMPLETED',
+        paidAt: new Date().toISOString(),
+        additionalInfo: [
+          { key: 'ride_id', value: rideId },
+          { key: 'passenger_id', value: passengerId },
+          { key: 'payment_type', value: 'advance_payment' }
+        ]
+      },
+      pix: { status: 'COMPLETED' }
+    };
+
+    const webhookResponse = await this.postJson(`${this.apiBaseUrl}/api/woovi/webhook`, webhookPayload, 25000);
+    if (!webhookResponse.ok) {
+      throw new Error(`payment_webhook_failed:${webhookResponse.status}`);
+    }
+
+    await sleep(250);
+    return {
+      chargeId,
+      rideId,
+      amountInCents: inferredAmountInCents
+    };
+  }
+
+  injectConfirmedPaymentData(originalPayload = {}, payment = {}) {
+    const safeOriginal = originalPayload && typeof originalPayload === 'object' ? originalPayload : {};
+    const existingPaymentData = safeOriginal.paymentData && typeof safeOriginal.paymentData === 'object'
+      ? safeOriginal.paymentData
+      : {};
+    const paymentMethod = String(safeOriginal.paymentMethod || 'pix').trim() || 'pix';
+
+    return {
+      ...safeOriginal,
+      paymentMethod,
+      paymentStatus: 'confirmed',
+      paymentData: {
+        ...existingPaymentData,
+        chargeId: payment.chargeId,
+        paymentId: payment.chargeId,
+        rideId: payment.rideId,
+        amountInCents: payment.amountInCents
+      }
+    };
   }
 
   async emitAndWait({
