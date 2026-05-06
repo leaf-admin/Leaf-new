@@ -48,8 +48,9 @@ describe('Advanced Mobility Stress Tests', () => {
     };
 
     beforeAll(async () => {
-        const keys = await driverSim.keys('booking_search:*');
-        if (keys.length > 0) await driverSim.del(...keys);
+        if (driverSim.useRemoteRedis) {
+            console.log('ℹ️ [advanced-mobility] ambiente remoto compartilhado: cleanup global de booking_search desabilitado.');
+        }
     });
 
     afterEach(async () => {

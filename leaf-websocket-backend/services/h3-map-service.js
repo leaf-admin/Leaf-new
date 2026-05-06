@@ -7,8 +7,10 @@ const CACHE_TTL_MS = Number.parseInt(process.env.H3_MAP_CACHE_TTL_MS || '5000', 
 const MAX_CELLS = Number.parseInt(process.env.H3_MAP_MAX_CELLS || '500', 10);
 const BBOX_MAX_SPAN_DEGREES = Number.parseFloat(process.env.H3_MAP_MAX_BBOX_SPAN_DEGREES || '5');
 const SEARCH_SCAN_COUNT = Number.parseInt(process.env.H3_MAP_SCAN_COUNT || '250', 10);
+const SEARCH_SCAN_MAX_KEYS = Number.parseInt(process.env.H3_MAP_SCAN_MAX_KEYS || '4000', 10);
 const OPEN_REQUEST_ACTIVE_WINDOW_MS = Number.parseInt(process.env.H3_MAP_OPEN_REQUEST_WINDOW_MS || String(10 * 60 * 1000), 10);
 const ACTIVE_BOOKING_STALE_MS = Number.parseInt(process.env.H3_MAP_ACTIVE_BOOKING_STALE_MS || String(12 * 60 * 60 * 1000), 10);
+const MIN_GEO_QUERY_KM = 0.1;
 const SUPPORTED_SURFACES = new Set(['driver', 'dashboard']);
 const SUPPORTED_MODES = new Set(['supply_demand']);
 const SEARCHABLE_STATES = new Set(['SEARCHING', 'PENDING', 'EXPANDED', 'NOTIFIED', 'AWAITING_RESPONSE', 'REASSIGNMENT_PENDING']);
@@ -350,15 +352,52 @@ function getViewportH3Cells(bbox, resolution) {
   return h3.polygonToCells(loop, resolution);
 }
 
-async function scanKeys(redis, pattern, count = SEARCH_SCAN_COUNT) {
+function toRadians(value) {
+  return value * (Math.PI / 180);
+}
+
+function bboxToGeoWindow(bbox) {
+  const centerLat = (bbox.minLat + bbox.maxLat) / 2;
+  const centerLng = (bbox.minLng + bbox.maxLng) / 2;
+  const latKmPerDegree = 110.574;
+  const lngKmPerDegree = 111.320 * Math.max(0.01, Math.cos(toRadians(centerLat)));
+  const widthKm = Math.max(MIN_GEO_QUERY_KM, (bbox.maxLng - bbox.minLng) * lngKmPerDegree);
+  const heightKm = Math.max(MIN_GEO_QUERY_KM, (bbox.maxLat - bbox.minLat) * latKmPerDegree);
+  const radiusKm = Math.max(MIN_GEO_QUERY_KM, Math.sqrt((widthKm ** 2) + (heightKm ** 2)) / 2);
+
+  return {
+    centerLat,
+    centerLng,
+    widthKm,
+    heightKm,
+    radiusKm
+  };
+}
+
+function extractRedisReplyValue(reply) {
+  if (Array.isArray(reply)) {
+    return reply[1];
+  }
+  return reply;
+}
+
+async function scanKeys(redis, pattern, count = SEARCH_SCAN_COUNT, maxKeys = SEARCH_SCAN_MAX_KEYS) {
   const keys = [];
+  const safeCount = Math.max(10, Number.parseInt(count, 10) || SEARCH_SCAN_COUNT);
+  const safeMaxKeys = Number.isFinite(Number(maxKeys)) && Number(maxKeys) > 0
+    ? Number(maxKeys)
+    : null;
   let cursor = '0';
 
   do {
-    const response = await redis.scan(cursor, 'MATCH', pattern, 'COUNT', count);
+    const response = await redis.scan(cursor, 'MATCH', pattern, 'COUNT', safeCount);
     cursor = Array.isArray(response) ? String(response[0]) : '0';
     const batch = Array.isArray(response?.[1]) ? response[1] : [];
     keys.push(...batch);
+
+    if (safeMaxKeys !== null && keys.length >= safeMaxKeys) {
+      return keys.slice(0, safeMaxKeys);
+    }
   } while (cursor !== '0');
 
   return keys;
@@ -502,29 +541,127 @@ class H3MapService {
     };
   }
 
+  async collectDriverIdsInBBox(redis, bbox) {
+    const geoWindow = bboxToGeoWindow(bbox);
+
+    if (typeof redis.geosearch === 'function') {
+      try {
+        const members = await redis.geosearch(
+          'driver_locations',
+          'FROMLONLAT',
+          geoWindow.centerLng,
+          geoWindow.centerLat,
+          'BYBOX',
+          geoWindow.widthKm,
+          geoWindow.heightKm,
+          'km'
+        );
+        if (Array.isArray(members)) {
+          return members;
+        }
+      } catch (_error) {
+        // fallback para GEO legacy abaixo
+      }
+    }
+
+    if (typeof redis.georadius === 'function') {
+      try {
+        const members = await redis.georadius(
+          'driver_locations',
+          geoWindow.centerLng,
+          geoWindow.centerLat,
+          geoWindow.radiusKm,
+          'km'
+        );
+        if (Array.isArray(members)) {
+          return members;
+        }
+      } catch (_error) {
+        // fallback para ZRANGE abaixo
+      }
+    }
+
+    return redis.zrange('driver_locations', 0, -1).catch(() => []);
+  }
+
+  async collectEligibleDriversSet(redis, driverIds) {
+    if (!Array.isArray(driverIds) || driverIds.length === 0) {
+      return new Set();
+    }
+
+    if (typeof redis.zmscore === 'function') {
+      try {
+        const scores = await redis.zmscore('driver_locations_eligible', ...driverIds);
+        if (Array.isArray(scores)) {
+          const eligible = new Set();
+          scores.forEach((score, index) => {
+            if (score !== null && score !== undefined) {
+              eligible.add(driverIds[index]);
+            }
+          });
+          return eligible;
+        }
+      } catch (_error) {
+        // fallback para pipeline/zrange
+      }
+    }
+
+    if (typeof redis.pipeline === 'function') {
+      try {
+        const pipeline = redis.pipeline();
+        if (typeof pipeline.zscore === 'function') {
+          driverIds.forEach((driverId) => {
+            pipeline.zscore('driver_locations_eligible', driverId);
+          });
+
+          const rows = await pipeline.exec();
+          const eligible = new Set();
+          rows.forEach((row, index) => {
+            const score = extractRedisReplyValue(row);
+            if (score !== null && score !== undefined) {
+              eligible.add(driverIds[index]);
+            }
+          });
+          return eligible;
+        }
+      } catch (_error) {
+        // fallback para zrange
+      }
+    }
+
+    const eligibleDriverIds = await redis.zrange('driver_locations_eligible', 0, -1).catch(() => []);
+    return new Set(Array.isArray(eligibleDriverIds) ? eligibleDriverIds : []);
+  }
+
   async collectDrivers(redis, bbox) {
-    const [driverIds, eligibleDriverIds] = await Promise.all([
-      redis.zrange('driver_locations', 0, -1).catch(() => []),
-      redis.zrange('driver_locations_eligible', 0, -1).catch(() => [])
-    ]);
+    const driverIds = await this.collectDriverIdsInBBox(redis, bbox);
 
     if (!Array.isArray(driverIds) || driverIds.length === 0) {
       return [];
     }
 
-    const eligibleSet = new Set(Array.isArray(eligibleDriverIds) ? eligibleDriverIds : []);
-    const pipeline = redis.pipeline();
-    driverIds.forEach((driverId) => {
-      pipeline.geopos('driver_locations', driverId);
-      pipeline.hgetall(`driver:${driverId}`);
-    });
-    const rows = await pipeline.exec();
+    const eligibleSet = await this.collectEligibleDriversSet(redis, driverIds);
+    let rows = [];
+    if (typeof redis.pipeline === 'function') {
+      const pipeline = redis.pipeline();
+      driverIds.forEach((driverId) => {
+        pipeline.geopos('driver_locations', driverId);
+        pipeline.hgetall(`driver:${driverId}`);
+      });
+      rows = await pipeline.exec();
+    }
 
     const drivers = [];
     for (let index = 0; index < driverIds.length; index += 1) {
       const driverId = driverIds[index];
-      const geoResult = rows[index * 2]?.[1];
-      const driverHash = rows[index * 2 + 1]?.[1] || {};
+      const geoReply = rows.length > 0
+        ? rows[index * 2]
+        : await redis.geopos('driver_locations', driverId).catch(() => null);
+      const hashReply = rows.length > 0
+        ? rows[index * 2 + 1]
+        : await redis.hgetall(`driver:${driverId}`).catch(() => ({}));
+      const geoResult = extractRedisReplyValue(geoReply);
+      const driverHash = extractRedisReplyValue(hashReply) || {};
       const coords = Array.isArray(geoResult) ? geoResult[0] : null;
       if (!coords || coords.length < 2) continue;
 
@@ -549,27 +686,48 @@ class H3MapService {
   }
 
   async collectOpenRequests(redis, bbox) {
-    const searchKeys = await scanKeys(redis, 'booking_search:*');
+    const searchKeys = await scanKeys(redis, 'booking_search:*', SEARCH_SCAN_COUNT, SEARCH_SCAN_MAX_KEYS);
     if (!Array.isArray(searchKeys) || searchKeys.length === 0) {
       return [];
     }
 
-    const pipeline = redis.pipeline();
-    searchKeys.forEach((key) => pipeline.hgetall(key));
-    const rows = await pipeline.exec();
+    let rows = [];
+    let supportsHmget = false;
+
+    if (typeof redis.pipeline === 'function') {
+      const pipeline = redis.pipeline();
+      supportsHmget = typeof pipeline.hmget === 'function';
+      searchKeys.forEach((key) => {
+        if (supportsHmget) {
+          pipeline.hmget(key, 'state', 'pickupLocation', 'createdAt');
+        } else {
+          pipeline.hgetall(key);
+        }
+      });
+      rows = await pipeline.exec();
+    }
     const now = Date.now();
     const requests = [];
 
     for (let index = 0; index < searchKeys.length; index += 1) {
       const key = searchKeys[index];
-      const hash = rows[index]?.[1] || {};
-      const state = String(hash?.state || '').trim().toUpperCase();
+      const replyValue = rows.length > 0
+        ? extractRedisReplyValue(rows[index])
+        : await redis.hgetall(key).catch(() => ({}));
+      const hash = supportsHmget
+        ? {
+          state: Array.isArray(replyValue) ? replyValue[0] : null,
+          pickupLocation: Array.isArray(replyValue) ? replyValue[1] : null,
+          createdAt: Array.isArray(replyValue) ? replyValue[2] : null
+        }
+        : (replyValue || {});
+      const state = String(hash.state || '').trim().toUpperCase();
       if (!SEARCHABLE_STATES.has(state)) continue;
 
-      const pickupLocation = parseLocation(hash?.pickupLocation);
+      const pickupLocation = parseLocation(hash.pickupLocation);
       if (!isPointInBBox(pickupLocation, bbox)) continue;
 
-      const createdAt = normalizeNumber(hash?.createdAt, now);
+      const createdAt = normalizeNumber(hash.createdAt, now);
       const isRecent = now - createdAt <= OPEN_REQUEST_ACTIVE_WINDOW_MS;
 
       requests.push({

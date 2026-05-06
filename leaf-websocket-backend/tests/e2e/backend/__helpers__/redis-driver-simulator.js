@@ -36,6 +36,7 @@ class RedisDriverSimulator {
     ];
     this.remoteCommandRetries = Number.parseInt(process.env.E2E_REMOTE_CMD_RETRIES || '3', 10);
     this.remoteCommandRetryDelayMs = Number.parseInt(process.env.E2E_REMOTE_CMD_RETRY_DELAY_MS || '250', 10);
+    this.remoteScanCount = Number.parseInt(process.env.E2E_REMOTE_SCAN_COUNT || '500', 10);
     this.useRemoteRedis = this.shouldUseRemoteRedis();
   }
 
@@ -121,14 +122,14 @@ class RedisDriverSimulator {
     return String(rawOutput || '')
       .split('\n')
       .map((line) => line.trim())
-      .filter((line) => line && !line.startsWith('Warning:') && !line.startsWith('NOAUTH'));
+      .filter((line) => line && !line.startsWith('Warning:'));
   }
 
   parseRedisKeyValueLines(rawOutput) {
     const lines = String(rawOutput || '')
       .replace(/\r/g, '')
       .split('\n')
-      .filter((line) => !line.startsWith('Warning:') && !line.startsWith('NOAUTH'));
+      .filter((line) => !line.startsWith('Warning:'));
 
     while (lines.length > 0 && lines[lines.length - 1] === '') {
       lines.pop();
@@ -143,6 +144,27 @@ class RedisDriverSimulator {
     const value = tokens[tokens.length - 1];
     if (value === '(nil)') return null;
     return value;
+  }
+
+  assertNoAuth(rawOutput) {
+    if (/\bNOAUTH\b/i.test(String(rawOutput || ''))) {
+      throw new Error('NOAUTH ao acessar Redis remoto. Verifique E2E_REMOTE_REDIS_PASSWORD e permissões do container.');
+    }
+  }
+
+  parseRedisScanResult(rawOutput) {
+    const tokens = this.parseRedisLines(rawOutput).filter((line) => line !== '(empty array)');
+    if (!tokens.length) {
+      return { cursor: '0', keys: [] };
+    }
+
+    const [cursorRaw, ...keys] = tokens;
+    const cursor = /^[0-9]+$/.test(cursorRaw) ? cursorRaw : '0';
+
+    return {
+      cursor,
+      keys: keys.filter((key) => key && key !== '(nil)')
+    };
   }
 
   async runRemoteShell(script) {
@@ -163,7 +185,9 @@ class RedisDriverSimulator {
 
         // Algumas versões do redis-cli em docker imprimem saída útil em stderr.
         // Para parsing robusto em E2E remoto, unificamos ambos os canais.
-        return `${String(stdout || '')}${String(stderr || '')}`;
+        const combinedOutput = `${String(stdout || '')}${String(stderr || '')}`;
+        this.assertNoAuth(combinedOutput);
+        return combinedOutput;
       } catch (error) {
         lastError = error;
 
@@ -224,15 +248,41 @@ class RedisDriverSimulator {
   }
 
   async keys(pattern) {
+    return this.scanKeys(pattern);
+  }
+
+  async scanKeys(pattern, count = this.remoteScanCount) {
+    const safeCount = Math.max(50, Math.min(Number.parseInt(count, 10) || 500, 5000));
+    const dedupedKeys = new Set();
+
     if (this.useRemoteRedis) {
       const safePattern = this.sanitizeRedisPattern(pattern, 'pattern');
       const redisCli = this.buildRemoteRedisCli();
-      const raw = await this.runRemoteShell(`${redisCli} --raw KEYS '${safePattern}' || true`);
-      return this.parseRedisLines(raw).filter((line) => line !== '(empty array)');
+      let cursor = '0';
+
+      do {
+        const raw = await this.runRemoteShell(
+          `${redisCli} --raw SCAN ${cursor} MATCH '${safePattern}' COUNT ${safeCount} || true`
+        );
+        const parsed = this.parseRedisScanResult(raw);
+        parsed.keys.forEach((key) => dedupedKeys.add(key));
+        cursor = parsed.cursor;
+      } while (cursor !== '0');
+
+      return Array.from(dedupedKeys);
     }
 
     const redis = await this.getRedis();
-    return redis.keys(pattern);
+    let cursor = '0';
+
+    do {
+      const response = await redis.scan(cursor, 'MATCH', pattern, 'COUNT', safeCount);
+      cursor = Array.isArray(response) ? String(response[0]) : '0';
+      const keys = Array.isArray(response?.[1]) ? response[1] : [];
+      keys.forEach((key) => dedupedKeys.add(key));
+    } while (cursor !== '0');
+
+    return Array.from(dedupedKeys);
   }
 
   async del(...keys) {
@@ -346,7 +396,7 @@ class RedisDriverSimulator {
 
         await this.runRemoteShell(script);
 
-        console.log(`✅ [RedisDriverSimulator] Motorista ${safeDriverId} ${isInTrip ? 'EM VIAGEM' : (isOnline ? 'ONLINE' : 'OFFLINE')} salvo no Redis remoto da VPS: ${latNum}, ${lngNum}, TTL: ${ttl}s`);
+        console.log(`✅ [RedisDriverSimulator] Motorista ${safeDriverId} ${isInTrip ? 'EM VIAGEM' : (isOnline ? 'ONLINE' : 'OFFLINE')} salvo no Redis remoto (Contabo): ${latNum}, ${lngNum}, TTL: ${ttl}s`);
         return { success: true, driverId: safeDriverId, lat: latNum, lng: lngNum, isOnline };
       }
 
@@ -478,7 +528,7 @@ class RedisDriverSimulator {
         ].join(' && ');
 
         await this.runRemoteShell(script);
-        console.log(`✅ [RedisDriverSimulator] Motorista ${safeDriverId} removido do Redis remoto da VPS`);
+        console.log(`✅ [RedisDriverSimulator] Motorista ${safeDriverId} removido do Redis remoto (Contabo)`);
         return { success: true };
       }
 

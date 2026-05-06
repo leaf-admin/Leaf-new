@@ -12,6 +12,11 @@ const WS_URL = process.env.WS_URL || 'http://localhost:3001';
 const LOAD_BASE_LAT = Number.parseFloat(process.env.E2E_LOAD_BASE_LAT || '-22.971964');
 const LOAD_BASE_LNG = Number.parseFloat(process.env.E2E_LOAD_BASE_LNG || '-43.182543');
 const LOAD_STEP = Number.parseFloat(process.env.E2E_LOAD_COORD_STEP || '0.001');
+const RUN_TAG = String(process.env.E2E_RUN_ID || Date.now()).replace(/[^a-zA-Z0-9]/g, '');
+const DRIVER_ID_PREFIX = `driver_load_${RUN_TAG}_`;
+const PASSENGER_LOAD_PREFIX = `passenger_load_${RUN_TAG}_`;
+const PASSENGER_STRESS_PREFIX = `passenger_stress_${RUN_TAG}_`;
+const PASSENGER_COMPETITION_ID = `passenger_competition_${RUN_TAG}`;
 
 async function mapWithLimit(items, limit, task) {
     const maxConcurrency = Math.max(1, Number(limit) || 1);
@@ -32,32 +37,36 @@ describe('Testes de Carga e Estresse - Backend Leaf', () => {
     const DRIVER_SETUP_CONCURRENCY = driverSim.useRemoteRedis ? 6 : 20;
 
     beforeAll(async () => {
-        // Isolar cenário para execução em suíte completa:
-        // remove resíduos de filas/locks/trips ativos de testes anteriores.
-        const cleanupPatterns = [
-            'booking:*',
-            'booking_search:*',
-            'ride_notifications:*',
-            'ride_excluded_drivers:*',
-            'ride_queue:*:pending',
-            'ride_queue:*:active',
-            'driver_lock:*',
-            'driver_active_notification:*',
-            'active_trip_by_driver:*',
-            'active_trip_customer_by_driver:*'
-        ];
-        for (const pattern of cleanupPatterns) {
-            const keys = await driverSim.keys(pattern);
-            if (keys.length) {
-                await driverSim.del(...keys);
+        // Redis remoto compartilhado (Contabo): evitar limpeza destrutiva global.
+        // Com RUN_TAG único cada execução fica isolada sem apagar dados de terceiros.
+        if (!driverSim.useRemoteRedis) {
+            const cleanupPatterns = [
+                'booking:*',
+                'booking_search:*',
+                'ride_notifications:*',
+                'ride_excluded_drivers:*',
+                'ride_queue:*:pending',
+                'ride_queue:*:active',
+                'driver_lock:*',
+                'driver_active_notification:*',
+                'active_trip_by_driver:*',
+                'active_trip_customer_by_driver:*'
+            ];
+            for (const pattern of cleanupPatterns) {
+                const keys = await driverSim.keys(pattern);
+                if (keys.length) {
+                    await driverSim.del(...keys);
+                }
             }
+            await driverSim.del('bookings:active', 'activeRides');
+        } else {
+            console.log(`ℹ️ [load-stress] execução remota detectada; cleanup global desabilitado (runTag=${RUN_TAG}).`);
         }
-        await driverSim.del('bookings:active', 'activeRides');
 
         // Inicializar motoristas no Redis (espalhados) em paralelo para evitar timeout de hook.
         const driverEntries = Array.from({ length: NUM_DRIVERS }, (_, index) => {
             const i = index + 1;
-            const driverId = `driver_load_${i}`;
+            const driverId = `${DRIVER_ID_PREFIX}${i}`;
             const latOffset = (Math.floor(i / 10) * LOAD_STEP);
             const lngOffset = ((i % 10) * LOAD_STEP);
             return {
@@ -86,9 +95,9 @@ describe('Testes de Carga e Estresse - Backend Leaf', () => {
         console.log(`\n🚀 Iniciando simulação de ${NUM_SIMULTANEOUS_RIDES} corridas simultâneas...`);
 
         const runSingleRide = async (index) => {
-            const passengerId = `passenger_load_${index}`;
+            const passengerId = `${PASSENGER_LOAD_PREFIX}${index}`;
             // Cada corrida tenta pegar um motorista específico (opcional, o sistema que decide)
-            const driverId = `driver_load_${index}`;
+            const driverId = `${DRIVER_ID_PREFIX}${index}`;
 
             const client = new WebSocketTestClient(WS_URL);
             const dClient = new WebSocketTestClient(WS_URL);
@@ -152,7 +161,7 @@ describe('Testes de Carga e Estresse - Backend Leaf', () => {
         console.log(`   - Sucesso: ${successCount}/${NUM_SIMULTANEOUS_RIDES}`);
         console.log(`   - Duração Total: ${duration}s`);
 
-        // Em ambiente VPS compartilhado aceitamos sucesso parcial no ciclo completo
+        // Em ambiente remoto compartilhado aceitamos sucesso parcial no ciclo completo
         // e focamos estabilidade de criação/pagamento sob concorrência.
         const minSuccessRate = driverSim.useRemoteRedis ? 0.8 : 0.8;
         expect(successCount).toBeGreaterThanOrEqual(Math.ceil(NUM_SIMULTANEOUS_RIDES * minSuccessRate));
@@ -162,7 +171,7 @@ describe('Testes de Carga e Estresse - Backend Leaf', () => {
         console.log(`\n🚀 Iniciando simulação de ${NUM_PASSENGERS_STRESS} solicitações simultâneas...`);
 
         const runRequestOnly = async (index) => {
-            const passengerId = `passenger_stress_${index}`;
+            const passengerId = `${PASSENGER_STRESS_PREFIX}${index}`;
             const client = new WebSocketTestClient(WS_URL);
 
             try {
@@ -225,7 +234,7 @@ describe('Testes de Carga e Estresse - Backend Leaf', () => {
 
         console.log(`\n🚀 Iniciando simulação de 1 corrida vs ${COMPETITION_DRIVERS} motoristas tentando aceitar...`);
 
-        const passengerId = 'passenger_competition_v2';
+        const passengerId = PASSENGER_COMPETITION_ID;
         const client = new WebSocketTestClient(WS_URL);
 
         await client.connect();
@@ -235,7 +244,8 @@ describe('Testes de Carga e Estresse - Backend Leaf', () => {
         const pickup = { lat: LOAD_BASE_LAT + 0.004, lng: LOAD_BASE_LNG - 0.004, address: 'Copacabana - Competição' };
 
         // Isolar o cenário: deixar somente os motoristas da competição ativos
-        const competitionDriverIds = Array.from({ length: COMPETITION_DRIVERS }, (_, i) => `driver_load_${OFFSET + i + 1}`);
+        const competitionDriverIds = drivers.slice(OFFSET, OFFSET + COMPETITION_DRIVERS);
+        expect(competitionDriverIds.length).toBe(COMPETITION_DRIVERS);
         const competitionSet = new Set(competitionDriverIds);
         const otherDrivers = drivers.filter((driverId) => !competitionSet.has(driverId));
         await mapWithLimit(otherDrivers, DRIVER_SETUP_CONCURRENCY, async (driverId) => {
