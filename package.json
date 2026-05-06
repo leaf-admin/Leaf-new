@@ -12,7 +12,11 @@
     "dev:mobile": "npm run start --workspace mobile-app",
     "build:dashboard": "npm run build --workspace leaf-dashboard-js",
     "lint:dashboard": "npm run lint --workspace leaf-dashboard-js",
-    "test:backend": "npm run test --workspace leaf-websocket-backend"
+    "test:profile": "node scripts/tests/print-test-profile.cjs workspace-root",
+    "test:mobile": "npm run test:unit --workspace mobile-app",
+    "test:backend": "npm run test --workspace leaf-websocket-backend",
+    "test:backend:all": "npm run test:all --workspace leaf-websocket-backend",
+    "test:all": "node scripts/tests/run-with-profile.cjs workspace-all \"npm run test:unit --workspace mobile-app && npm run test:all --workspace leaf-websocket-backend\""
   },
   "dependencies": {
     "axios": "^1.12.1",
