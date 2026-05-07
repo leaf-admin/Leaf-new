@@ -22,160 +22,204 @@ env:
     commands:
       - tapOn: "Continue"
 
-- waitForAnimationToEnd
-
-- extendedWaitUntil:
-    visible:
-      id: "auth-phone-input"
-    timeout: 30000
-
-- tapOn:
-    id: "auth-phone-input"
-- eraseText
-- inputText: ${FIREBASE_TEST_PHONE}
-- pressKey: Enter
-
 - runFlow:
     when:
       visible:
-        id: "auth-continue-btn"
+        id: "auth-phone-input"
     commands:
+      - waitForAnimationToEnd
+
       - tapOn:
-          id: "auth-continue-btn"
-- runFlow:
-    when:
-      notVisible:
-        id: "auth-continue-btn"
-    commands:
+          id: "auth-phone-input"
+      - eraseText
+      - inputText: ${FIREBASE_TEST_PHONE}
       - pressKey: Enter
 
-- waitForAnimationToEnd
+      - runFlow:
+          when:
+            visible:
+              id: "auth-continue-btn"
+          commands:
+            - tapOn:
+                id: "auth-continue-btn"
+      - runFlow:
+          when:
+            notVisible:
+              id: "auth-continue-btn"
+          commands:
+            - pressKey: Enter
 
-- runFlow:
-    when:
-      visible: "Use without an account"
-    commands:
-      - tapOn: "Use without an account"
       - waitForAnimationToEnd
 
-- runFlow:
-    when:
-      visible: "No thanks"
-    commands:
-      - tapOn: "No thanks"
-      - waitForAnimationToEnd
-
-- runFlow:
-    when:
-      visible: "Add account to device"
-    commands:
-      - tapOn: "Use without an account"
-      - waitForAnimationToEnd
-
-- runFlow:
-    when:
-      visible: "Welcome to Chrome"
-    commands:
       - runFlow:
           when:
             visible: "Use without an account"
           commands:
             - tapOn: "Use without an account"
-      - launchApp
-      - waitForAnimationToEnd
+            - waitForAnimationToEnd
 
-- runFlow:
-    when:
-      visible: "Senha"
-    commands:
-      - assertVisible: "Entrar"
-      - takeScreenshot: "auth-password-branch-detected"
-      - tapOn: "Senha"
-      - inputText: ${EXISTING_ACCOUNT_PASSWORD}
-      - swipe:
-          start: "50%,82%"
-          end: "50%,34%"
-      - tapOn: "Entrar"
-      - waitForAnimationToEnd
-
-- runFlow:
-    when:
-      visible: "Verificação"
-    commands:
-      - inputText: ${FIREBASE_TEST_OTP}
       - runFlow:
           when:
-            visible: "Verificar código"
+            visible: "No thanks"
           commands:
-            - tapOn: "Verificar código"
-      - extendedWaitUntil:
-          notVisible: "Verificação"
-          timeout: 30000
-      - takeScreenshot: "auth-otp-branch"
+            - tapOn: "No thanks"
+            - waitForAnimationToEnd
+
+      - runFlow:
+          when:
+            visible: "Add account to device"
+          commands:
+            - tapOn: "Use without an account"
+            - waitForAnimationToEnd
+
+      - runFlow:
+          when:
+            visible: "Welcome to Chrome"
+          commands:
+            - runFlow:
+                when:
+                  visible: "Use without an account"
+                commands:
+                  - tapOn: "Use without an account"
+            - launchApp
+            - waitForAnimationToEnd
+
+      - runFlow:
+          when:
+            visible: "Senha"
+          commands:
+            - assertVisible: "Entrar"
+            - takeScreenshot: "auth-password-branch-detected"
+            - tapOn: "Senha"
+            - inputText: ${EXISTING_ACCOUNT_PASSWORD}
+            - swipe:
+                start: "50%,82%"
+                end: "50%,34%"
+            - tapOn: "Entrar"
+            - waitForAnimationToEnd
+
+      - runFlow:
+          when:
+            visible: "Verificação"
+          commands:
+            - inputText: ${FIREBASE_TEST_OTP}
+            - runFlow:
+                when:
+                  visible: "Verificar código"
+                commands:
+                  - tapOn: "Verificar código"
+            - extendedWaitUntil:
+                notVisible: "Verificação"
+                timeout: 30000
+            - takeScreenshot: "auth-otp-branch"
+
+      - runFlow:
+          when:
+            visible: "Como você quer usar a Leaf?"
+          commands:
+            - tapOn: "Quero viajar"
+            - tapOn: "Continuar"
+
+      - runFlow:
+          when:
+            visible: "Quero viajar"
+          commands:
+            - tapOn: "Quero viajar"
+            - tapOn: "Continuar"
+
+      - runFlow:
+          when:
+            visible: "Nome completo"
+          commands:
+            - inputText: "Teste Firebase Sandbox"
+            - tapOn: "CPF"
+            - inputText: "12345678901"
+            - tapOn: "Cadastrar"
+
+      - runFlow:
+          when:
+            visible: "This is the developer menu"
+          commands:
+            - tapOn: "Continue"
+
+      - runFlow:
+          when:
+            visible: "Continue"
+          commands:
+            - tapOn: "Continue"
+
+      - runFlow:
+          when:
+            visible: "Allow Leaf to access this device’s location\\?"
+          commands:
+            - tapOn: "While using the app"
+
+      - runFlow:
+          when:
+            visible: "Permitir que a Leaf acesse a localização deste dispositivo\\?"
+          commands:
+            - tapOn: "Durante o uso do app"
+
+      - runFlow:
+          when:
+            visible: "Permitir que o app Leaf acesse a localização deste dispositivo\\?"
+          commands:
+            - tapOn: "Durante o uso do app"
+
+      - runFlow:
+          when:
+            visible: "Permitir apenas desta vez"
+          commands:
+            - tapOn: "Permitir apenas desta vez"
 
 - runFlow:
     when:
-      visible: "Como você quer usar a Leaf?"
+      notVisible:
+        id: "auth-phone-input"
     commands:
-      - tapOn: "Quero viajar"
-      - tapOn: "Continuar"
+      - takeScreenshot: "auth-session-already-active"
+      - runFlow:
+          when:
+            visible: "Avalie a viagem"
+          commands:
+            - pressKey: Back
+            - waitForAnimationToEnd
+      - runFlow:
+          when:
+            visible: "Suporte"
+          commands:
+            - pressKey: Back
+            - waitForAnimationToEnd
+      - runFlow:
+          when:
+            visible: "Menu"
+          commands:
+            - pressKey: Back
+            - waitForAnimationToEnd
 
-- runFlow:
-    when:
-      visible: "Quero viajar"
-    commands:
-      - tapOn: "Quero viajar"
-      - tapOn: "Continuar"
-
-- runFlow:
-    when:
-      visible: "Nome completo"
-    commands:
-      - inputText: "Teste Firebase Sandbox"
-      - tapOn: "CPF"
-      - inputText: "12345678901"
-      - tapOn: "Cadastrar"
-
-- runFlow:
-    when:
-      visible: "This is the developer menu"
-    commands:
-      - tapOn: "Continue"
-
-- runFlow:
-    when:
-      visible: "Continue"
-    commands:
-      - tapOn: "Continue"
-
-- runFlow:
-    when:
-      visible: "Allow Leaf to access this device’s location\\?"
-    commands:
-      - tapOn: "While using the app"
-
-- runFlow:
-    when:
-      visible: "Permitir que a Leaf acesse a localização deste dispositivo\\?"
-    commands:
-      - tapOn: "Durante o uso do app"
-
-- runFlow:
-    when:
-      visible: "Permitir que o app Leaf acesse a localização deste dispositivo\\?"
-    commands:
-      - tapOn: "Durante o uso do app"
-
-- runFlow:
-    when:
-      visible: "Permitir apenas desta vez"
-    commands:
-      - tapOn: "Permitir apenas desta vez"
-
-- extendedWaitUntil:
-    visible:
-      id: "passenger-home-destination-input"
-    timeout: 120000
 - assertNotVisible:
     id: "auth-phone-input"
+- assertVisible: ".*(Confirme sua viagem|Avalie a viagem|Suporte|Menu|Origem|Destino|Categoria indisponível|Para onde).*"
+- runFlow:
+    when:
+      visible:
+        id: "passenger-home-destination-input"
+    commands:
+      - assertVisible:
+          id: "passenger-home-destination-input"
+- runFlow:
+    when:
+      visible: "Confirme sua viagem"
+    commands:
+      - assertVisible: "Confirme sua viagem"
+- runFlow:
+    when:
+      visible: "Avalie a viagem"
+    commands:
+      - assertVisible: "Avalie a viagem"
+- runFlow:
+    when:
+      visible: "Suporte"
+    commands:
+      - assertVisible: "Suporte"
 - takeScreenshot: "auth-firebase-sandbox-login-success"

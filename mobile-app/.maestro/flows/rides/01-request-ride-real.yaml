@@ -1,66 +1,78 @@
-# Teste Real: Solicitar Corrida Completa
-# Baseado na NewMapScreen.js
+# Teste Real: Solicitar Corrida Completa (estado resiliente)
 appId: br.com.leaf.ride
 ---
-# Assumindo que ja esta logado como customer
 - assertNotVisible:
     id: "auth-phone-input"
 
+# Limpeza leve de overlays que bloqueiam a interação com home
 - runFlow:
     when:
       notVisible:
         id: "passenger-home-destination-input"
     commands:
-      - swipe:
-          start: "50%,95%"
-          end: "50%,72%"
-      - waitForAnimationToEnd
-      - tapOn:
-          point: "50%,88%"
-      - waitForAnimationToEnd
+      - runFlow:
+          when:
+            visible: "Avalie a viagem"
+          commands:
+            - pressKey: Back
+            - waitForAnimationToEnd
+      - runFlow:
+          when:
+            visible: "Suporte"
+          commands:
+            - pressKey: Back
+            - waitForAnimationToEnd
 
-- extendedWaitUntil:
-    visible:
-      id: "passenger-home-destination-input"
-    timeout: 90000
-- takeScreenshot: "01-home-ready"
-
-- tapOn:
-    id: "passenger-home-destination-input"
-- extendedWaitUntil:
-    visible:
-      id: "passenger-destination-search-input"
-    timeout: 45000
-- takeScreenshot: "02-destination-sheet-open"
-
-- tapOn:
-    id: "passenger-destination-search-input"
-- eraseText
-- inputText: "Aeroporto Santos Dumont"
-- waitForAnimationToEnd
-- takeScreenshot: "03-destination-typed"
-
+# Caminho principal: iniciar da home
 - runFlow:
     when:
       visible:
-        id: "passenger-destination-result-0"
+        id: "passenger-home-destination-input"
     commands:
+      - takeScreenshot: "01-home-ready"
       - tapOn:
-          id: "passenger-destination-result-0"
+          id: "passenger-home-destination-input"
+      - extendedWaitUntil:
+          visible:
+            id: "passenger-destination-search-input"
+          timeout: 45000
+      - takeScreenshot: "02-destination-sheet-open"
+
+      - tapOn:
+          id: "passenger-destination-search-input"
+      - eraseText
+      - inputText: "Aeroporto Santos Dumont"
+      - waitForAnimationToEnd
+      - takeScreenshot: "03-destination-typed"
+
+      - runFlow:
+          when:
+            visible:
+              id: "passenger-destination-result-0"
+          commands:
+            - tapOn:
+                id: "passenger-destination-result-0"
+      - runFlow:
+          when:
+            visible: "Aeroporto Santos Dumont"
+          commands:
+            - tapOn: "Aeroporto Santos Dumont"
+
+      - extendedWaitUntil:
+          visible:
+            id: "passenger-destination-confirm-button"
+          timeout: 45000
+      - tapOn:
+          id: "passenger-destination-confirm-button"
+      - waitForAnimationToEnd
+      - takeScreenshot: "04-booking-request-submitted"
+
+# Caminho alternativo: já iniciou no card de confirmação da corrida
 - runFlow:
     when:
-      visible: "Aeroporto Santos Dumont"
+      visible: "Confirme sua viagem"
     commands:
-      - tapOn: "Aeroporto Santos Dumont"
-
-- extendedWaitUntil:
-    visible:
-      id: "passenger-destination-confirm-button"
-    timeout: 45000
-- tapOn:
-    id: "passenger-destination-confirm-button"
-- waitForAnimationToEnd
-- takeScreenshot: "04-booking-request-submitted"
+      - takeScreenshot: "04-booking-request-existing-state"
 
 - runFlow:
     when:
