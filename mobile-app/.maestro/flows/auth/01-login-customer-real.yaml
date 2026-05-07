@@ -1,44 +1,181 @@
-# Teste Real: Login como Customer/Passageiro
-# Baseado na tela real LoginScreen.js
 appId: br.com.leaf.ride
+env:
+  FIREBASE_TEST_PHONE: "21102938475"
+  FIREBASE_TEST_OTP: "992111"
+  EXISTING_ACCOUNT_PASSWORD: "Leaf12345"
 ---
-- launchApp
-- takeScreenshot: "01-app-launched"
-
-# Se estiver deslogado, realiza login
 - runFlow:
     when:
-      visible: "Telefone"
+      visible: "Abrir"
     commands:
-      - takeScreenshot: "02-login-screen"
-      - tapOn: "Telefone"
-      - inputText: "11999999999"
-      - takeScreenshot: "03-phone-entered"
+      - tapOn: "Abrir"
+
+- runFlow:
+    when:
+      visible: "This is the developer menu"
+    commands:
+      - tapOn: "Continue"
+
+- runFlow:
+    when:
+      visible: "Continue"
+    commands:
+      - tapOn: "Continue"
+
+- waitForAnimationToEnd
+
+- extendedWaitUntil:
+    visible:
+      id: "auth-phone-input"
+    timeout: 30000
+
+- tapOn:
+    id: "auth-phone-input"
+- eraseText
+- inputText: ${FIREBASE_TEST_PHONE}
+- pressKey: Enter
+
+- runFlow:
+    when:
+      visible:
+        id: "auth-continue-btn"
+    commands:
+      - tapOn:
+          id: "auth-continue-btn"
+- runFlow:
+    when:
+      notVisible:
+        id: "auth-continue-btn"
+    commands:
+      - pressKey: Enter
+
+- waitForAnimationToEnd
+
+- runFlow:
+    when:
+      visible: "Use without an account"
+    commands:
+      - tapOn: "Use without an account"
       - waitForAnimationToEnd
-      - takeScreenshot: "04-after-phone-check"
-      - runFlow:
-          when:
-            visible: "Senha"
-          commands:
-            - inputText: "senha123"
-            - tapOn: "Entrar"
-            - takeScreenshot: "05-login-complete"
-      - runFlow:
-          when:
-            visible: "Nome completo"
-          commands:
-            - inputText: "Teste Customer"
-            - tapOn: "CPF"
-            - inputText: "12345678901"
-            - tapOn: "Cadastrar"
-            - takeScreenshot: "06-signup-complete"
 
-# Se estiver logado, apenas registra estado atual
 - runFlow:
     when:
-      notVisible: "Telefone"
+      visible: "No thanks"
     commands:
-      - takeScreenshot: "02-already-logged-in"
+      - tapOn: "No thanks"
+      - waitForAnimationToEnd
 
-# Estado final
-- takeScreenshot: "07-dashboard-visible"
+- runFlow:
+    when:
+      visible: "Add account to device"
+    commands:
+      - tapOn: "Use without an account"
+      - waitForAnimationToEnd
+
+- runFlow:
+    when:
+      visible: "Welcome to Chrome"
+    commands:
+      - runFlow:
+          when:
+            visible: "Use without an account"
+          commands:
+            - tapOn: "Use without an account"
+      - launchApp
+      - waitForAnimationToEnd
+
+- runFlow:
+    when:
+      visible: "Senha"
+    commands:
+      - assertVisible: "Entrar"
+      - takeScreenshot: "auth-password-branch-detected"
+      - tapOn: "Senha"
+      - inputText: ${EXISTING_ACCOUNT_PASSWORD}
+      - swipe:
+          start: "50%,82%"
+          end: "50%,34%"
+      - tapOn: "Entrar"
+      - waitForAnimationToEnd
+
+- runFlow:
+    when:
+      visible: "Verificação"
+    commands:
+      - inputText: ${FIREBASE_TEST_OTP}
+      - runFlow:
+          when:
+            visible: "Verificar código"
+          commands:
+            - tapOn: "Verificar código"
+      - extendedWaitUntil:
+          notVisible: "Verificação"
+          timeout: 30000
+      - takeScreenshot: "auth-otp-branch"
+
+- runFlow:
+    when:
+      visible: "Como você quer usar a Leaf?"
+    commands:
+      - tapOn: "Quero viajar"
+      - tapOn: "Continuar"
+
+- runFlow:
+    when:
+      visible: "Quero viajar"
+    commands:
+      - tapOn: "Quero viajar"
+      - tapOn: "Continuar"
+
+- runFlow:
+    when:
+      visible: "Nome completo"
+    commands:
+      - inputText: "Teste Firebase Sandbox"
+      - tapOn: "CPF"
+      - inputText: "12345678901"
+      - tapOn: "Cadastrar"
+
+- runFlow:
+    when:
+      visible: "This is the developer menu"
+    commands:
+      - tapOn: "Continue"
+
+- runFlow:
+    when:
+      visible: "Continue"
+    commands:
+      - tapOn: "Continue"
+
+- runFlow:
+    when:
+      visible: "Allow Leaf to access this device’s location\\?"
+    commands:
+      - tapOn: "While using the app"
+
+- runFlow:
+    when:
+      visible: "Permitir que a Leaf acesse a localização deste dispositivo\\?"
+    commands:
+      - tapOn: "Durante o uso do app"
+
+- runFlow:
+    when:
+      visible: "Permitir que o app Leaf acesse a localização deste dispositivo\\?"
+    commands:
+      - tapOn: "Durante o uso do app"
+
+- runFlow:
+    when:
+      visible: "Permitir apenas desta vez"
+    commands:
+      - tapOn: "Permitir apenas desta vez"
+
+- extendedWaitUntil:
+    visible:
+      id: "passenger-home-destination-input"
+    timeout: 120000
+- assertNotVisible:
+    id: "auth-phone-input"
+- takeScreenshot: "auth-firebase-sandbox-login-success"

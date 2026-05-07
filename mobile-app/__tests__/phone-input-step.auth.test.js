@@ -106,9 +106,12 @@ describe('PhoneInputStep', () => {
     });
   });
 
-  test('applies backend OTP bypass automatically for controlled test phones', async () => {
+  test('routes controlled QA phones through custom OTP without firebase custom token login', async () => {
     const onVerificationSent = jest.fn();
     const apiClient = require('../src/services/httpClient');
+    const runtimeAccessPolicy = require('../src/config/runtimeAccessPolicy');
+
+    runtimeAccessPolicy.allowQaOtpForceFlow.mockReturnValue(true);
 
     apiClient.post
       .mockResolvedValueOnce({
@@ -117,17 +120,6 @@ describe('PhoneInputStep', () => {
           verificationId: 'vid_test',
         },
       })
-      .mockResolvedValueOnce({
-        data: {
-          success: true,
-          customToken: 'custom_token_test',
-        },
-      });
-
-    mockSignInWithCustomToken.mockResolvedValue({
-      user: { uid: 'firebase_test_user' },
-    });
-
     const { getByTestId } = render(
       <PhoneInputStep
         onSwitchToRegister={jest.fn()}
@@ -139,11 +131,44 @@ describe('PhoneInputStep', () => {
     fireEvent.press(getByTestId('auth-continue-btn'));
 
     await waitFor(() => {
-      expect(mockSignInWithCustomToken).toHaveBeenCalledWith('custom_token_test');
+      expect(mockSignInWithCustomToken).not.toHaveBeenCalled();
       expect(onVerificationSent).toHaveBeenCalledWith(
-        expect.objectContaining({ isTestOtpBypass: true }),
+        expect.objectContaining({ isCustomOtp: true }),
         '+5511999999999',
         false,
+      );
+    });
+  });
+
+  test('keeps OTP flow for existing account when password is not configured', async () => {
+    const onVerificationSent = jest.fn();
+    const UserAuthService = require('../src/services/UserAuthService').default;
+    const firebaseConfirmation = { confirm: jest.fn() };
+
+    UserAuthService.resolvePhoneAuthFlow.mockResolvedValueOnce({
+      exists: true,
+      uid: 'firebase-user-123',
+      requiresPassword: true,
+      hasPassword: false,
+      source: 'firebase_auth',
+    });
+    mockSignInWithPhoneNumber.mockResolvedValueOnce(firebaseConfirmation);
+
+    const { getByTestId } = render(
+      <PhoneInputStep
+        onSwitchToRegister={jest.fn()}
+        onVerificationSent={onVerificationSent}
+      />,
+    );
+
+    fireEvent.changeText(getByTestId('auth-phone-input'), '21102938475');
+    fireEvent.press(getByTestId('auth-continue-btn'));
+
+    await waitFor(() => {
+      expect(mockSignInWithPhoneNumber).toHaveBeenCalledWith('+5521102938475');
+      expect(onVerificationSent).toHaveBeenCalledWith(
+        firebaseConfirmation,
+        '+5521102938475',
         true,
       );
     });

@@ -1,5 +1,15 @@
 import React, { useState } from 'react';
-import { View, TouchableOpacity, Alert as NativeAlert, StyleSheet, Text, TextInput } from 'react-native';
+import {
+    View,
+    TouchableOpacity,
+    Alert as NativeAlert,
+    StyleSheet,
+    Text,
+    TextInput,
+    ScrollView,
+    KeyboardAvoidingView,
+    Platform
+} from 'react-native';
 import auth from '@react-native-firebase/auth';
 import { fonts } from '../../../theme/runtimeTokens';
 import { Ionicons } from '@expo/vector-icons';
@@ -15,7 +25,6 @@ import ContinueButton from '../common/ContinueButton';
 import { toUserFriendlyError, toUserFriendlyMessage } from '../../../utils/friendlyErrorMessages';
 
 const { color, radius, spacing } = onboardingTheme;
-const TEST_OTP_BYPASS_CODE = '0'.repeat(6);
 
 const Alert = {
     ...NativeAlert,
@@ -81,7 +90,7 @@ function resolveAuthAlertTitle(error, friendlyMessage = '') {
     return 'Erro de Autenticacao';
 }
 
-const PhoneInputStep = ({ onSwitchToRegister, onVerificationSent, onPasswordLoginSuccess }) => {
+const PhoneInputStep = ({ onVerificationSent, onPasswordLoginSuccess }) => {
     const [phoneNumber, setPhoneNumber] = useState('');
     const [loading, setLoading] = useState(false);
     const [checking, setChecking] = useState(false);
@@ -123,32 +132,6 @@ const PhoneInputStep = ({ onSwitchToRegister, onVerificationSent, onPasswordLogi
         }
 
         throw lastError || new Error('Falha ao enviar OTP');
-    };
-
-    const verifyOtpWithFallback = async ({ phone, verificationId, otp }) => {
-        const endpoints = [
-            '/api/custom-otp/verify-otp',
-            '/custom-otp/verify-otp'
-        ];
-
-        let lastError = null;
-
-        for (const endpoint of endpoints) {
-            try {
-                return await apiClient.post(endpoint, {
-                    phone,
-                    verificationId,
-                    otp
-                });
-            } catch (error) {
-                lastError = error;
-                if (error?.response?.status !== 404) {
-                    throw error;
-                }
-            }
-        }
-
-        throw lastError || new Error('Falha ao verificar OTP');
     };
 
     const resetInlinePasswordState = () => {
@@ -300,65 +283,12 @@ const PhoneInputStep = ({ onSwitchToRegister, onVerificationSent, onPasswordLogi
 
             const forceCustomOtpFlow =
                 allowForcedQaOtpFlow && FORCE_CUSTOM_OTP_NUMBERS.has(phoneNumber);
-            const isControlledTestPhone = FORCE_CUSTOM_OTP_NUMBERS.has(phoneNumber);
-
-            if (isControlledTestPhone) {
-                Logger.log('🧪 Conta de teste detectada: preparando bypass OTP controlado no backend.');
-                try {
-                    let verificationId = null;
-                    let requestOtpError = null;
-
-                    try {
-                        const response = await requestOtpWithFallback(fullPhoneNumber);
-                        if (response?.data?.success) {
-                            verificationId = response?.data?.verificationId || null;
-                        } else {
-                            requestOtpError = response?.data?.error || 'Erro ao preparar OTP da conta de teste';
-                        }
-                    } catch (requestError) {
-                        requestOtpError = requestError?.message || 'Falha ao preparar bypass OTP';
-                    }
-
-                    const verifyResponse = await verifyOtpWithFallback({
-                        phone: fullPhoneNumber,
-                        verificationId,
-                        otp: TEST_OTP_BYPASS_CODE
-                    });
-
-                    if (!verifyResponse?.data?.success || !verifyResponse?.data?.customToken) {
-                        throw new Error(
-                            verifyResponse?.data?.error ||
-                            requestOtpError ||
-                            'Falha no bypass OTP da conta de teste'
-                        );
-                    }
-
-                    const userCredential = await auth().signInWithCustomToken(verifyResponse.data.customToken);
-                    if (userCredential?.user && onVerificationSent) {
-                        onVerificationSent(
-                            {
-                                isTestOtpBypass: true,
-                                bypassUser: userCredential.user
-                            },
-                            fullPhoneNumber,
-                            false,
-                            true
-                        );
-                        return;
-                    }
-
-                    throw new Error('Falha ao autenticar conta de teste para revisão');
-                } catch (testOtpError) {
-                    Logger.warn('⚠️ Falha ao aplicar bypass OTP de conta de teste.', {
-                        error: testOtpError?.message
-                    });
-                    // Não interrompe o fluxo: o backend é a fonte de verdade para liberar ou não o bypass.
-                    // Se o bypass não estiver disponível, seguimos no caminho normal (senha/OTP).
-                }
-            }
 
             const phoneFlow = await UserAuthService.resolvePhoneAuthFlow(fullPhoneNumber);
-            if (phoneFlow.requiresPassword) {
+            const isExistingUser = Boolean(phoneFlow?.exists || phoneFlow?.uid);
+            const hasPasswordConfigured = phoneFlow?.hasPassword === true;
+
+            if (phoneFlow.requiresPassword && hasPasswordConfigured) {
                 Logger.log('🔐 Telefone existente detectado: seguir para senha.', {
                     phoneNumber: fullPhoneNumber,
                     hasPassword: phoneFlow.hasPassword,
@@ -370,6 +300,13 @@ const PhoneInputStep = ({ onSwitchToRegister, onVerificationSent, onPasswordLogi
                 setPassword('');
                 setPasswordError('');
                 return;
+            }
+
+            if (phoneFlow.requiresPassword && !hasPasswordConfigured) {
+                Logger.warn('⚠️ Conta existente sem senha: seguindo fluxo OTP para concluir autenticação.', {
+                    phoneNumber: fullPhoneNumber,
+                    source: phoneFlow.source
+                });
             }
 
             // 📱 Primeiro acesso: OTP + criação de conta
@@ -386,7 +323,7 @@ const PhoneInputStep = ({ onSwitchToRegister, onVerificationSent, onPasswordLogi
                 };
 
                 if (onVerificationSent) {
-                    onVerificationSent(confirmation, fullPhoneNumber, false);
+                    onVerificationSent(confirmation, fullPhoneNumber, isExistingUser);
                 }
                 return;
             }
@@ -395,7 +332,7 @@ const PhoneInputStep = ({ onSwitchToRegister, onVerificationSent, onPasswordLogi
             try {
                 const firebaseConfirmation = await auth().signInWithPhoneNumber(fullPhoneNumber);
                 if (onVerificationSent) {
-                    onVerificationSent(firebaseConfirmation, fullPhoneNumber, false);
+                    onVerificationSent(firebaseConfirmation, fullPhoneNumber, isExistingUser);
                 }
                 return;
             } catch (firebaseError) {
@@ -418,7 +355,7 @@ const PhoneInputStep = ({ onSwitchToRegister, onVerificationSent, onPasswordLogi
             };
 
             if (onVerificationSent) {
-                onVerificationSent(confirmation, fullPhoneNumber, false);
+                onVerificationSent(confirmation, fullPhoneNumber, isExistingUser);
             }
         } catch (error) {
             Logger.error("Erro no handleContinue:", error);
@@ -440,179 +377,187 @@ const PhoneInputStep = ({ onSwitchToRegister, onVerificationSent, onPasswordLogi
     };
 
     return (
-        <View style={styles.container}>
-            <View style={styles.header}>
-                <Text style={styles.title}>Bem-vindo(a) à Leaf</Text>
-                <Text style={styles.subtitle}>
-                    Digite seu número de telefone para continuar
-                </Text>
-            </View>
-
-            <View style={styles.contentCard}>
-                <View style={styles.inputContainer}>
-                    <TouchableOpacity style={styles.countrySelector}>
-                        <Text style={styles.countryCode}>+55</Text>
-                    </TouchableOpacity>
-
-                    <TextInput
-                        testID="auth-phone-input"
-                        placeholder="Número"
-                        placeholderTextColor={color.textMuted}
-                        keyboardType="phone-pad"
-                        value={phoneNumber}
-                        onChangeText={handlePhoneChanged}
-                        maxLength={11}
-                        editable={!loading && !checking}
-                        returnKeyType="done"
-                        onSubmitEditing={handleContinue}
-                        blurOnSubmit={false}
-                        style={styles.input}
-                    />
+        <KeyboardAvoidingView
+            style={styles.keyboardContainer}
+            behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+            keyboardVerticalOffset={Platform.OS === 'ios' ? 12 : 0}
+        >
+            <ScrollView
+                contentContainerStyle={styles.container}
+                keyboardShouldPersistTaps="handled"
+                showsVerticalScrollIndicator={false}
+            >
+                <View style={styles.header}>
+                    <Text style={styles.title}>Bem-vindo(a) à Leaf</Text>
+                    <Text style={styles.subtitle}>
+                        Digite seu número de telefone para continuar
+                    </Text>
                 </View>
 
-                {requiresPassword ? (
-                    <View style={styles.passwordInlineContainer}>
-                        <View style={styles.passwordInputContainer}>
-                            <TextInput
-                                placeholder={forgotPasswordMode ? 'Nova senha' : 'Senha'}
-                                placeholderTextColor={color.textMuted}
-                                value={forgotPasswordMode ? newPassword : password}
-                                onChangeText={(value) => {
-                                    if (forgotPasswordMode) {
-                                        setNewPassword(value);
-                                    } else {
-                                        setPassword(value);
-                                    }
-                                    setPasswordError('');
-                                }}
-                                autoCapitalize="none"
-                                secureTextEntry={forgotPasswordMode ? !showNewPassword : !showPassword}
-                                editable={!loading}
-                                style={styles.passwordInput}
-                            />
-                            <TouchableOpacity
-                                style={styles.passwordEyeButton}
-                                onPress={() => {
-                                    if (forgotPasswordMode) {
-                                        setShowNewPassword((prev) => !prev);
-                                    } else {
-                                        setShowPassword((prev) => !prev);
-                                    }
-                                }}
-                                disabled={loading}
-                            >
-                                <Ionicons
-                                    name={(forgotPasswordMode ? showNewPassword : showPassword) ? 'eye-off' : 'eye'}
-                                    size={20}
-                                    color={color.textMuted}
-                                />
-                            </TouchableOpacity>
-                        </View>
+                <View style={styles.contentCard}>
+                    <View style={styles.inputContainer}>
+                        <TouchableOpacity style={styles.countrySelector}>
+                            <Text style={styles.countryCode}>+55</Text>
+                        </TouchableOpacity>
 
-                        {forgotPasswordMode ? (
-                            <>
+                        <TextInput
+                            testID="auth-phone-input"
+                            placeholder="Número"
+                            placeholderTextColor={color.textMuted}
+                            keyboardType="phone-pad"
+                            value={phoneNumber}
+                            onChangeText={handlePhoneChanged}
+                            maxLength={11}
+                            editable={!loading && !checking}
+                            returnKeyType="done"
+                            onSubmitEditing={handleContinue}
+                            blurOnSubmit={false}
+                            style={styles.input}
+                        />
+                    </View>
+
+                    {requiresPassword ? (
+                        <View style={styles.passwordInlineContainer}>
+                            <View style={styles.passwordInputContainer}>
                                 <TextInput
-                                    placeholder="Código OTP (6 dígitos)"
+                                    placeholder={forgotPasswordMode ? 'Nova senha' : 'Senha'}
                                     placeholderTextColor={color.textMuted}
-                                    value={resetOtp}
+                                    value={forgotPasswordMode ? newPassword : password}
                                     onChangeText={(value) => {
-                                        setResetOtp(String(value || '').replace(/\D/g, '').slice(0, 6));
+                                        if (forgotPasswordMode) {
+                                            setNewPassword(value);
+                                        } else {
+                                            setPassword(value);
+                                        }
                                         setPasswordError('');
                                     }}
-                                    keyboardType="number-pad"
+                                    autoCapitalize="none"
+                                    secureTextEntry={forgotPasswordMode ? !showNewPassword : !showPassword}
                                     editable={!loading}
-                                    style={styles.inlineTextInput}
+                                    style={styles.passwordInput}
                                 />
-                                <View style={styles.passwordInputContainer}>
+                                <TouchableOpacity
+                                    style={styles.passwordEyeButton}
+                                    onPress={() => {
+                                        if (forgotPasswordMode) {
+                                            setShowNewPassword((prev) => !prev);
+                                        } else {
+                                            setShowPassword((prev) => !prev);
+                                        }
+                                    }}
+                                    disabled={loading}
+                                >
+                                    <Ionicons
+                                        name={(forgotPasswordMode ? showNewPassword : showPassword) ? 'eye-off' : 'eye'}
+                                        size={20}
+                                        color={color.textMuted}
+                                    />
+                                </TouchableOpacity>
+                            </View>
+
+                            {forgotPasswordMode ? (
+                                <>
                                     <TextInput
-                                        placeholder="Confirmar nova senha"
+                                        placeholder="Código OTP (6 dígitos)"
                                         placeholderTextColor={color.textMuted}
-                                        value={confirmNewPassword}
+                                        value={resetOtp}
                                         onChangeText={(value) => {
-                                            setConfirmNewPassword(value);
+                                            setResetOtp(String(value || '').replace(/\D/g, '').slice(0, 6));
                                             setPasswordError('');
                                         }}
-                                        autoCapitalize="none"
-                                        secureTextEntry={!showConfirmNewPassword}
+                                        keyboardType="number-pad"
                                         editable={!loading}
-                                        style={styles.passwordInput}
+                                        style={styles.inlineTextInput}
                                     />
-                                    <TouchableOpacity
-                                        style={styles.passwordEyeButton}
-                                        onPress={() => setShowConfirmNewPassword((prev) => !prev)}
-                                        disabled={loading}
-                                    >
-                                        <Ionicons
-                                            name={showConfirmNewPassword ? 'eye-off' : 'eye'}
-                                            size={20}
-                                            color={color.textMuted}
+                                    <View style={styles.passwordInputContainer}>
+                                        <TextInput
+                                            placeholder="Confirmar nova senha"
+                                            placeholderTextColor={color.textMuted}
+                                            value={confirmNewPassword}
+                                            onChangeText={(value) => {
+                                                setConfirmNewPassword(value);
+                                                setPasswordError('');
+                                            }}
+                                            autoCapitalize="none"
+                                            secureTextEntry={!showConfirmNewPassword}
+                                            editable={!loading}
+                                            style={styles.passwordInput}
                                         />
+                                        <TouchableOpacity
+                                            style={styles.passwordEyeButton}
+                                            onPress={() => setShowConfirmNewPassword((prev) => !prev)}
+                                            disabled={loading}
+                                        >
+                                            <Ionicons
+                                                name={showConfirmNewPassword ? 'eye-off' : 'eye'}
+                                                size={20}
+                                                color={color.textMuted}
+                                            />
+                                        </TouchableOpacity>
+                                    </View>
+                                    <TouchableOpacity
+                                        activeOpacity={0.82}
+                                        onPress={() => handleForgotPasswordPressed(`+55${phoneNumber}`)}
+                                        disabled={loading}
+                                        style={styles.inlineLinkButton}
+                                    >
+                                        <Text style={styles.inlineLinkText}>Reenviar código</Text>
                                     </TouchableOpacity>
-                                </View>
+                                </>
+                            ) : (
                                 <TouchableOpacity
                                     activeOpacity={0.82}
                                     onPress={() => handleForgotPasswordPressed(`+55${phoneNumber}`)}
                                     disabled={loading}
                                     style={styles.inlineLinkButton}
                                 >
-                                    <Text style={styles.inlineLinkText}>Reenviar código</Text>
+                                    <Text style={styles.inlineLinkText}>Esqueci minha senha</Text>
                                 </TouchableOpacity>
-                            </>
-                        ) : (
-                            <TouchableOpacity
-                                activeOpacity={0.82}
-                                onPress={() => handleForgotPasswordPressed(`+55${phoneNumber}`)}
-                                disabled={loading}
-                                style={styles.inlineLinkButton}
-                            >
-                                <Text style={styles.inlineLinkText}>Esqueci minha senha</Text>
-                            </TouchableOpacity>
-                        )}
+                            )}
 
-                        {passwordError ? <Text style={styles.passwordErrorText}>{passwordError}</Text> : null}
+                            {passwordError ? <Text style={styles.passwordErrorText}>{passwordError}</Text> : null}
 
-                        {resolvedPhone?.hasPassword === false && !forgotPasswordMode ? (
-                            <Text style={styles.inlineHintText}>
-                                Conta existente sem senha configurada. Use "Esqueci minha senha" para criar agora.
-                            </Text>
-                        ) : null}
-                    </View>
-                ) : null}
-            </View>
+                            {resolvedPhone?.hasPassword === false && !forgotPasswordMode ? (
+                                <Text style={styles.inlineHintText}>
+                                    Conta existente sem senha configurada. Use "Esqueci minha senha" para criar agora.
+                                </Text>
+                            ) : null}
+                        </View>
+                    ) : null}
+                </View>
 
-            <View style={styles.footer}>
-                <ContinueButton
-                    testID="auth-continue-btn"
-                    accessibilityLabel="auth-continue-btn"
-                    onPress={handleContinue}
-                    text={loading || checking
-                        ? 'Continuando...'
-                        : requiresPassword
-                            ? (forgotPasswordMode ? 'Redefinir senha' : 'Entrar')
-                            : 'Continuar'}
-                    disabled={phoneNumber.length < 10}
-                    style={styles.continueButton}
-                />
+                <View style={styles.footer}>
+                    <ContinueButton
+                        testID="auth-continue-btn"
+                        accessibilityLabel="auth-continue-btn"
+                        onPress={handleContinue}
+                        text={loading || checking
+                            ? 'Continuando...'
+                            : requiresPassword
+                                ? (forgotPasswordMode ? 'Redefinir senha' : 'Entrar')
+                                : 'Continuar'}
+                        disabled={phoneNumber.length < 10}
+                        style={styles.continueButton}
+                    />
 
-                <TouchableOpacity
-                    activeOpacity={0.82}
-                    onPress={() => onSwitchToRegister?.(phoneNumber)}
-                    disabled={loading || checking}
-                    style={styles.registerButton}
-                >
-                    <Text style={styles.registerButtonText}>Não tem conta? Cadastre-se</Text>
-                </TouchableOpacity>
-            </View>
-        </View>
+                    <Text style={styles.firstAccessHint}>
+                        Primeiro acesso? Informe seu telefone e toque em Continuar.
+                    </Text>
+                </View>
+            </ScrollView>
+        </KeyboardAvoidingView>
     );
 };
 
 const styles = StyleSheet.create({
+    keyboardContainer: {
+        flex: 1
+    },
     container: {
-        flex: 1,
+        flexGrow: 1,
         paddingHorizontal: spacing.lg,
         paddingTop: spacing.lg,
-        paddingBottom: spacing.md,
+        paddingBottom: spacing.lg,
         justifyContent: 'flex-start'
     },
     header: {
@@ -744,18 +689,15 @@ const styles = StyleSheet.create({
         fontFamily: fonts.Medium
     },
     footer: {
-        marginTop: spacing.md
+        marginTop: 'auto',
+        paddingTop: spacing.md
     },
     continueButton: {
         marginBottom: spacing.xs
     },
-    registerButton: {
-        marginTop: 4,
-        alignSelf: 'center',
-        paddingHorizontal: spacing.sm,
-        paddingVertical: spacing.xs
-    },
-    registerButtonText: {
+    firstAccessHint: {
+        marginTop: spacing.xs,
+        textAlign: 'center',
         color: color.textSecondary,
         fontSize: 13,
         lineHeight: 18,

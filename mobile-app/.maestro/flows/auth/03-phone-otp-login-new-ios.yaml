@@ -1,7 +1,8 @@
 appId: br.com.leaf.ride
 env:
-  TEST_PHONE: "11999999999"
-  TEST_OTP: "000000"
+  TEST_PHONE: "21102938475"
+  TEST_OTP: "992111"
+  EXISTING_ACCOUNT_PASSWORD: "Leaf12345"
 ---
 - launchApp:
     clearState: true
@@ -82,37 +83,95 @@ env:
 
 - extendedWaitUntil:
     visible:
-      id: "auth-phone-input"
+      id: "(auth-phone-input|passenger-home-destination-input)"
     timeout: 30000
 
-- tapOn:
-    id: "auth-phone-input"
-- eraseText
-- inputText: ${TEST_PHONE}
-- pressKey: Enter
-
 - runFlow:
     when:
-      visible: "Verificação"
+      notVisible:
+        id: "passenger-home-destination-input"
     commands:
-      - inputText: ${TEST_OTP}
-      - extendedWaitUntil:
-          notVisible: "Verificação"
-          timeout: 30000
-
-- runFlow:
-    when:
-      visible: "Como você quer usar a Leaf?"
-    commands:
-      - tapOn: "Quero viajar"
-      - tapOn: "Continuar"
-
-- runFlow:
-    when:
-      visible: "Quero viajar"
-    commands:
-      - tapOn: "Quero viajar"
-      - tapOn: "Continuar"
+      - tapOn:
+          id: "auth-phone-input"
+      - eraseText
+      - inputText: ${TEST_PHONE}
+      - pressKey: Enter
+      - runFlow:
+          when:
+            visible:
+              id: "auth-continue-btn"
+          commands:
+            - tapOn:
+                id: "auth-continue-btn"
+      - runFlow:
+          when:
+            notVisible:
+              id: "auth-continue-btn"
+          commands:
+            - pressKey: Enter
+      - waitForAnimationToEnd
+      - runFlow:
+          when:
+            visible: "Senha"
+          commands:
+            - tapOn:
+                point: "50%,52%"
+            - inputText: ${EXISTING_ACCOUNT_PASSWORD}
+            - swipe:
+                start: "50%,82%"
+                end: "50%,34%"
+            - runFlow:
+                when:
+                  visible:
+                    id: "auth-continue-btn"
+                commands:
+                  - tapOn:
+                      id: "auth-continue-btn"
+            - runFlow:
+                when:
+                  visible: "Entrar"
+                commands:
+                  - tapOn: "Entrar"
+            - runFlow:
+                when:
+                  notVisible:
+                    id: "auth-continue-btn"
+                commands:
+                  - pressKey: Enter
+            - waitForAnimationToEnd
+      - runFlow:
+          when:
+            visible: "Verificação"
+          commands:
+            - inputText: ${TEST_OTP}
+            - runFlow:
+                when:
+                  visible: "Verificar código"
+                commands:
+                  - tapOn: "Verificar código"
+            - extendedWaitUntil:
+                notVisible: "Verificação"
+                timeout: 30000
+      - runFlow:
+          when:
+            visible: "Como você quer usar a Leaf?"
+          commands:
+            - tapOn: "Quero viajar"
+            - tapOn: "Continuar"
+      - runFlow:
+          when:
+            visible: "Quero viajar"
+          commands:
+            - tapOn: "Quero viajar"
+            - tapOn: "Continuar"
+      - runFlow:
+          when:
+            visible: "Nome completo"
+          commands:
+            - inputText: "Teste Firebase Sandbox iOS"
+            - tapOn: "CPF"
+            - inputText: "12345678901"
+            - tapOn: "Cadastrar"
 
 - runFlow:
     when:
@@ -128,4 +187,22 @@ env:
 
 - waitForAnimationToEnd
 
+- runFlow:
+    when:
+      visible: "Allow While Using App"
+    commands:
+      - tapOn: "Allow While Using App"
+
+- runFlow:
+    when:
+      visible: "Permitir ao usar o app"
+    commands:
+      - tapOn: "Permitir ao usar o app"
+
+- extendedWaitUntil:
+    visible:
+      id: "passenger-home-destination-input"
+    timeout: 120000
+- assertNotVisible:
+    id: "auth-phone-input"
 - takeScreenshot: "ios-auth-login-success"
