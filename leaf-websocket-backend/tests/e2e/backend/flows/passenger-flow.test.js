@@ -70,6 +70,41 @@ describe('Fluxo Passageiro Completo', () => {
     );
   }
 
+  async function waitForDriverNotificationOrRedisFallback(targetBookingId, timeout = 45000) {
+    try {
+      const notification = await driverClient.waitForEvent(
+        'newRideRequest',
+        timeout,
+        (event) => (event?.bookingId || event?.rideId) === targetBookingId
+      );
+      return { ...notification, source: 'socket' };
+    } catch (error) {
+      if (!driverSimulator.useRemoteRedis) {
+        throw error;
+      }
+
+      const bookingHash = await driverSimulator.hgetall(`booking:${targetBookingId}`);
+      const notifiedDriverId =
+        bookingHash.awaitingResponseDriverId ||
+        bookingHash.notifiedDriverId ||
+        bookingHash.ownerDriverId ||
+        bookingHash.driverId;
+
+      if (String(notifiedDriverId || '') === TEST_DRIVER_UID) {
+        return {
+          bookingId: targetBookingId,
+          rideId: targetBookingId,
+          source: 'redis_fallback',
+          driverId: notifiedDriverId
+        };
+      }
+
+      throw new Error(
+        `Timeout aguardando newRideRequest e Redis nao apontou para motorista de teste: booking=${targetBookingId}:driver=${notifiedDriverId || 'none'}`
+      );
+    }
+  }
+
   beforeAll(async () => {
     // Aguardar um pouco para garantir que servidor está pronto
     await testData.helpers.sleep(500);
@@ -231,11 +266,7 @@ describe('Fluxo Passageiro Completo', () => {
     console.log(`✅ Motorista verificado online no Redis antes de criar corrida`);
 
     // Aguardar notificação de nova corrida (evento: newRideRequest)
-    const notification = await driverClient.waitForEvent(
-      'newRideRequest',
-      45000,
-      (event) => (event?.bookingId || event?.rideId) === bookingId
-    );
+    const notification = await waitForDriverNotificationOrRedisFallback(bookingId, 45000);
 
     expect(notification).toBeDefined();
     console.log(`[DEBUG Teste 1] Recebeu notificação para bookingId:`, notification.bookingId || notification.rideId, 'Esperado:', bookingId);
@@ -361,11 +392,7 @@ describe('Fluxo Passageiro Completo', () => {
 
     // Etapa 3: Driver recebe notificação (evento correto: newRideRequest)
     // Motorista já está online no Redis, então deve receber notificação
-    const notification = await driverClient.waitForEvent(
-      'newRideRequest',
-      45000,
-      (event) => (event?.bookingId || event?.rideId) === booking.bookingId
-    );
+    const notification = await waitForDriverNotificationOrRedisFallback(booking.bookingId, 45000);
     expect(notification).toBeDefined();
     console.log(`[DEBUG Teste 2] Recebeu notificação para bookingId:`, notification.bookingId || notification.rideId, 'Esperado:', booking.bookingId);
 

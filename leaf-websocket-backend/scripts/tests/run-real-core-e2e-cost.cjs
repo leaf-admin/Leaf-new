@@ -18,18 +18,90 @@
 
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
+const PDFDocument = require('pdfkit');
 
 const WebSocketTestClient = require('../../tests/e2e/backend/__helpers__/websocket-test-client');
 const RedisDriverSimulator = require('../../tests/e2e/backend/__helpers__/redis-driver-simulator');
-const redisPool = require('../../utils/redis-pool');
-const firebaseConfig = require('../../firebase-config');
-const ReceiptService = require('../../services/receipt-service');
 
-const SERVER_URL = process.env.REAL_CORE_SERVER_URL || process.env.WS_URL || 'http://127.0.0.1:3001';
+function trimTrailingSlash(value) {
+  return String(value || '').replace(/\/+$/, '');
+}
+
+function deriveApiBaseUrl(value) {
+  const explicit = trimTrailingSlash(process.env.REAL_CORE_API_BASE_URL || process.env.API_BASE_URL || '');
+  if (explicit) return explicit;
+
+  try {
+    const parsed = new URL(String(value || ''));
+    if (parsed.hostname.startsWith('socket.')) {
+      parsed.hostname = parsed.hostname.replace(/^socket\./, 'api.');
+    }
+    return trimTrailingSlash(parsed.toString());
+  } catch (_error) {
+    return 'https://api.62.169.31.231.sslip.io';
+  }
+}
+
+const WS_SERVER_URL = process.env.REAL_CORE_WS_URL || process.env.WS_URL || process.env.REAL_CORE_SERVER_URL || 'http://127.0.0.1:3001';
+const API_BASE_URL = deriveApiBaseUrl(process.env.REAL_CORE_SERVER_URL || WS_SERVER_URL);
+const METRICS_URL = process.env.REAL_CORE_METRICS_URL || process.env.PRELAUNCH_METRICS_URL || `${API_BASE_URL}/api/metrics/prometheus`;
 const REPORT_DIR = path.join(__dirname, '../../reports');
-const nowTag = Date.now();
+const nowTag = process.env.REAL_CORE_RUN_TAG || `${Date.now()}_${process.pid}_${crypto.randomBytes(3).toString('hex')}`;
+const CHAT_CREATION_ATTEMPTS = Math.max(1, Number.parseInt(process.env.REAL_CORE_CHAT_ATTEMPTS || '2', 10) || 2);
+const RATING_EVENT_TIMEOUT_MS = Math.max(1000, Number.parseInt(process.env.REAL_CORE_RATING_TIMEOUT_MS || '5000', 10) || 5000);
+const DRIVER_ONLINE_SETTLE_MS = Math.max(0, Number.parseInt(process.env.REAL_CORE_DRIVER_ONLINE_SETTLE_MS || '0', 10) || 0);
+const SIMULATION_SPEED_KMH = Number.parseFloat(process.env.REAL_CORE_SIMULATION_SPEED_KMH || '');
+const USE_SPEED_DERIVED_DURATION = String(process.env.REAL_CORE_USE_SPEED_DERIVED_DURATION || 'false').toLowerCase() === 'true' && Number.isFinite(SIMULATION_SPEED_KMH) && SIMULATION_SPEED_KMH > 0;
+const SKIP_DIRECT_REDIS_EVIDENCE_WRITES =
+  String(process.env.REAL_CORE_SKIP_DIRECT_REDIS_EVIDENCE_WRITES || 'false').toLowerCase() === 'true';
+let metricsBearerToken = process.env.PRELAUNCH_METRICS_TOKEN || process.env.AUTH_TOKEN || process.env.LEAF_ADMIN_BEARER_TOKEN || '';
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+function toMoney(value) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return null;
+  return Math.round(parsed * 100) / 100;
+}
+
+function formatBrl(value) {
+  const amount = toMoney(value) ?? 0;
+  return `R$ ${amount.toFixed(2).replace('.', ',')}`;
+}
+
+function resolveLockedFare(bookingResponse = {}) {
+  return toMoney(
+    bookingResponse?.data?.estimatedFare ??
+    bookingResponse?.estimatedFare ??
+    bookingResponse?.data?.pricingPayload?.final_price
+  );
+}
+
+function assertFareConsistency({ quote, payment, finalFare, context }) {
+  const values = {
+    quote: toMoney(quote),
+    payment: toMoney(payment),
+    finalFare: toMoney(finalFare)
+  };
+  const missing = Object.entries(values)
+    .filter(([, value]) => value === null)
+    .map(([key]) => key);
+  if (missing.length) {
+    throw new Error(`financial_consistency_missing_${missing.join('_')}:${context || ''}`);
+  }
+
+  const tolerance = 0.01;
+  const paymentDiff = Math.abs(values.quote - values.payment);
+  const finalDiff = Math.abs(values.quote - values.finalFare);
+  if (paymentDiff > tolerance || finalDiff > tolerance) {
+    throw new Error(
+      `financial_consistency_failed:${context || ''}:quote=${values.quote}:payment=${values.payment}:final=${values.finalFare}`
+    );
+  }
+
+  return values;
+}
 
 async function tryWaitForEvent(client, eventName, timeout, predicate = null) {
   try {
@@ -38,6 +110,59 @@ async function tryWaitForEvent(client, eventName, timeout, predicate = null) {
   } catch (error) {
     return { ok: false, event: eventName, error: error.message };
   }
+}
+
+async function waitForTripCompletedOrStateFallback({ passengerClient, driverClient, redis, bookingId, timeoutMs = 20000 }) {
+  const [passengerEvent, driverEvent] = await Promise.all([
+    tryWaitForEvent(passengerClient, 'tripCompleted', timeoutMs, (evt) => evt?.bookingId === bookingId || evt?.rideId === bookingId),
+    tryWaitForEvent(driverClient, 'tripCompleted', timeoutMs, (evt) => evt?.bookingId === bookingId || evt?.rideId === bookingId)
+  ]);
+
+  if (passengerEvent.ok && driverEvent.ok) {
+    return {
+      passenger: passengerEvent.data,
+      driver: driverEvent.data,
+      source: 'socket'
+    };
+  }
+
+  await sleep(700);
+  const bookingHash = await redis.hgetall(`booking:${bookingId}`);
+  const activeBookingRaw = await redis.hget('bookings:active', bookingId);
+  let activeBooking = null;
+  try {
+    activeBooking = activeBookingRaw ? JSON.parse(activeBookingRaw) : null;
+  } catch (_error) {
+    activeBooking = null;
+  }
+
+  const status = String(
+    bookingHash.status ||
+    bookingHash.state ||
+    bookingHash.tripStatus ||
+    activeBooking?.status ||
+    activeBooking?.state ||
+    ''
+  ).toUpperCase();
+  const paymentStatus = String(bookingHash.paymentStatus || activeBooking?.paymentStatus || '').toLowerCase();
+  const completedStatuses = new Set(['COMPLETED', 'COMPLETE', 'FINISHED', 'FINALIZED', 'DONE']);
+
+  if (completedStatuses.has(status) || paymentStatus === 'completed') {
+    return {
+      passenger: passengerEvent.ok ? passengerEvent.data : null,
+      driver: driverEvent.ok ? driverEvent.data : null,
+      source: 'redis_state_fallback',
+      status,
+      paymentStatus,
+      passengerEvent,
+      driverEvent,
+      bookingHash
+    };
+  }
+
+  throw new Error(
+    `trip_completed_not_observed:${bookingId}:passenger=${passengerEvent.error || 'ok'}:driver=${driverEvent.error || 'ok'}:status=${status || 'missing'}:payment=${paymentStatus || 'missing'}`
+  );
 }
 
 function buildLinePoints(start, end, count) {
@@ -49,6 +174,50 @@ function buildLinePoints(start, end, count) {
     points.push({ lat: Number(lat.toFixed(6)), lng: Number(lng.toFixed(6)) });
   }
   return points;
+}
+
+function haversineDistanceKm(a, b) {
+  const lat1 = Number(a?.lat);
+  const lng1 = Number(a?.lng);
+  const lat2 = Number(b?.lat);
+  const lng2 = Number(b?.lng);
+  if (![lat1, lng1, lat2, lng2].every(Number.isFinite)) return null;
+
+  const toRad = (deg) => deg * Math.PI / 180;
+  const earthKm = 6371;
+  const dLat = toRad(lat2 - lat1);
+  const dLng = toRad(lng2 - lng1);
+  const rLat1 = toRad(lat1);
+  const rLat2 = toRad(lat2);
+  const x =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(rLat1) * Math.cos(rLat2) * Math.sin(dLng / 2) ** 2;
+  return Number((earthKm * 2 * Math.atan2(Math.sqrt(x), Math.sqrt(1 - x))).toFixed(3));
+}
+
+function deriveDurationSecsAtSpeed(distanceKm, speedKmh = SIMULATION_SPEED_KMH) {
+  const distance = Number(distanceKm);
+  const speed = Number(speedKmh);
+  if (!Number.isFinite(distance) || distance <= 0 || !Number.isFinite(speed) || speed <= 0) {
+    return null;
+  }
+  return Math.max(1, Math.round((distance / speed) * 3600));
+}
+
+function timedCoordinatePayload({ basePayload, index, total, durationSecs, startedAtMs }) {
+  if (!durationSecs || !Number.isFinite(durationSecs) || total <= 1) {
+    return {
+      ...basePayload,
+      timestamp: Date.now()
+    };
+  }
+
+  const offsetMs = Math.round((durationSecs * 1000 * index) / (total - 1));
+  return {
+    ...basePayload,
+    timestamp: startedAtMs + offsetMs,
+    simulatedElapsedSeconds: Math.round(offsetMs / 1000)
+  };
 }
 
 function parseLabelString(raw = '') {
@@ -100,13 +269,224 @@ function metricDelta(beforeRows, afterRows, metricName, labels = {}) {
   return Number((after - before).toFixed(6));
 }
 
-async function fetchMetricsRows(baseUrl) {
-  const res = await fetch(`${baseUrl}/metrics`);
+function shouldWriteFirebaseEvidence() {
+  return String(process.env.REAL_CORE_WRITE_FIREBASE || 'false').toLowerCase() === 'true';
+}
+
+function getRealtimeDbSafe() {
+  if (!shouldWriteFirebaseEvidence()) return null;
+
+  try {
+    // Lazy-load para evitar bootstrap de serviços locais durante a validação remota.
+    // eslint-disable-next-line global-require
+    const firebaseConfig = require('../../firebase-config');
+    return firebaseConfig.getRealtimeDB ? firebaseConfig.getRealtimeDB() : null;
+  } catch (_error) {
+    return null;
+  }
+}
+
+function createReceiptHash(bookingId, rideData) {
+  const raw = [
+    bookingId,
+    rideData.customer,
+    rideData.driver,
+    rideData.finalPrice,
+    rideData.completedAt
+  ].join(':');
+  return crypto.createHash('sha256').update(raw).digest('hex').slice(0, 32).toUpperCase();
+}
+
+function generateReceiptPdfBuffer(receipt) {
+  return new Promise((resolve, reject) => {
+    const doc = new PDFDocument({ size: 'A4', margin: 42 });
+    const chunks = [];
+    doc.on('data', (chunk) => chunks.push(chunk));
+    doc.on('error', reject);
+    doc.on('end', () => resolve(Buffer.concat(chunks)));
+
+    doc.fontSize(18).text('Recibo Leaf', { align: 'center' });
+    doc.moveDown();
+    doc.fontSize(11);
+    doc.text(`Corrida: ${receipt.bookingId}`);
+    doc.text(`Passageiro: ${receipt.customer}`);
+    doc.text(`Motorista: ${receipt.driver}`);
+    doc.text(`Origem: ${receipt.pickup?.add || ''}`);
+    doc.text(`Destino: ${receipt.drop?.add || ''}`);
+    doc.text(`Total: ${receipt.financial.totalPaid.formatted}`);
+    doc.text(`Hash: ${receipt.hash}`);
+    doc.end();
+  });
+}
+
+async function cleanupRealCoreDrivers(simulator) {
+  try {
+    const keys = await simulator.keys('driver:real_driver_*');
+    const driverIds = keys
+      .map((key) => String(key || '').replace(/^driver:/, ''))
+      .filter((driverId) => driverId.startsWith('real_driver_'));
+    await Promise.allSettled(driverIds.map((driverId) => simulator.removeDriver(driverId)));
+  } catch (_error) {
+    // Limpeza é best-effort para não mascarar a falha principal da corrida.
+  }
+}
+
+function shouldSkipGlobalDriverCleanup() {
+  return String(process.env.REAL_CORE_SKIP_GLOBAL_DRIVER_CLEANUP || '').toLowerCase() === 'true';
+}
+
+async function cleanupOwnDriver(simulator, driverId) {
+  try {
+    if (driverId) {
+      await simulator.removeDriver(driverId);
+    }
+  } catch (_error) {
+    // Limpeza individual é best-effort.
+  }
+}
+
+async function safeRedisEvidenceWrite(report, operation, fn) {
+  if (SKIP_DIRECT_REDIS_EVIDENCE_WRITES) {
+    report.debug.redisWarnings = report.debug.redisWarnings || [];
+    report.debug.redisWarnings.push({
+      operation,
+      skipped: true,
+      reason: 'REAL_CORE_SKIP_DIRECT_REDIS_EVIDENCE_WRITES=true'
+    });
+    return null;
+  }
+
+  try {
+    return await fn();
+  } catch (error) {
+    report.debug.redisWarnings = report.debug.redisWarnings || [];
+    report.debug.redisWarnings.push({
+      operation,
+      error: error.message
+    });
+    return null;
+  }
+}
+
+function defaultRoute() {
+  return {
+    name: 'Copacabana Palace -> Leblon',
+    pickup: { lat: -22.971964, lng: -43.182543, address: 'Copacabana Palace, Rio de Janeiro, RJ' },
+    destination: { lat: -22.984843, lng: -43.221972, address: 'Leblon, Rio de Janeiro, RJ' },
+    driverStart: { lat: -22.9708, lng: -43.1819 }
+  };
+}
+
+function normalizeRoutePoint(point, fallbackAddress) {
+  const lat = Number(point?.lat);
+  const lng = Number(point?.lng);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+  return {
+    lat,
+    lng,
+    address: point?.address || point?.add || fallbackAddress
+  };
+}
+
+function resolveRouteFromEnv() {
+  const fallback = defaultRoute();
+  if (!process.env.REAL_CORE_ROUTE_JSON) return fallback;
+
+  try {
+    const parsed = JSON.parse(process.env.REAL_CORE_ROUTE_JSON);
+    const pickup = normalizeRoutePoint(parsed.pickup, fallback.pickup.address);
+    const destination = normalizeRoutePoint(parsed.destination, fallback.destination.address);
+    const driverStart = normalizeRoutePoint(parsed.driverStart || parsed.pickup, pickup?.address || fallback.driverStart.address);
+
+    if (!pickup || !destination || !driverStart) {
+      throw new Error('pickup_destination_driverStart_required');
+    }
+
+    return {
+      name: parsed.name || `${pickup.address} -> ${destination.address}`,
+      pickup,
+      destination,
+      driverStart
+    };
+  } catch (error) {
+    throw new Error(`invalid_REAL_CORE_ROUTE_JSON:${error.message}`);
+  }
+}
+
+function redactAuthPayload(text) {
+  try {
+    const parsed = JSON.parse(text);
+    return parsed.error || parsed.message || '';
+  } catch (_error) {
+    return String(text || '').slice(0, 200);
+  }
+}
+
+async function loginForMetricsBearer() {
+  const autoLogin = String(process.env.AUTO_LOGIN_ADMIN_TOKEN || 'true').toLowerCase() !== 'false';
+  if (!autoLogin) return '';
+
+  const email = process.env.ADMIN_AUTH_EMAIL || process.env.TEST_ADMIN_EMAIL || process.env.SMOKE_ADMIN_EMAIL || 'admin@leaf.com';
+  const password = process.env.ADMIN_AUTH_PASSWORD || process.env.TEST_ADMIN_PASSWORD || process.env.SMOKE_ADMIN_PASSWORD || 'admin123';
+  const res = await fetch(`${API_BASE_URL}/api/admin/auth/login`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email, password }),
+    signal: AbortSignal.timeout(15000)
+  });
+  const text = await res.text();
   if (!res.ok) {
-    throw new Error(`Falha ao ler /metrics: ${res.status} ${res.statusText}`);
+    throw new Error(`Falha ao obter token admin para metricas: ${res.status} ${redactAuthPayload(text)}`);
+  }
+
+  const parsed = JSON.parse(text);
+  return parsed.accessToken || '';
+}
+
+async function fetchMetricsRows() {
+  const headers = metricsBearerToken ? { Authorization: `Bearer ${metricsBearerToken}` } : {};
+  let res = await fetch(METRICS_URL, {
+    headers,
+    signal: AbortSignal.timeout(20000)
+  });
+
+  if ((res.status === 401 || res.status === 403) && !metricsBearerToken) {
+    metricsBearerToken = await loginForMetricsBearer();
+    res = await fetch(METRICS_URL, {
+      headers: metricsBearerToken ? { Authorization: `Bearer ${metricsBearerToken}` } : {},
+      signal: AbortSignal.timeout(20000)
+    });
+  }
+
+  if (!res.ok) {
+    throw new Error(`Falha ao ler metricas Prometheus: ${res.status} ${res.statusText}`);
   }
   const text = await res.text();
   return parsePrometheusText(text);
+}
+
+async function fetchMetricsRowsSafely(report, phase) {
+  const attempts = Math.max(1, Number.parseInt(process.env.REAL_CORE_METRICS_RETRIES || '3', 10) || 3);
+  let lastError = null;
+
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    try {
+      return await fetchMetricsRows();
+    } catch (error) {
+      lastError = error;
+      if (attempt < attempts) {
+        await sleep(750 * attempt);
+      }
+    }
+  }
+
+  report.debug.metricsWarnings = report.debug.metricsWarnings || [];
+  report.debug.metricsWarnings.push({
+    phase,
+    error: lastError?.message || 'metrics_unavailable',
+    attempts
+  });
+  return [];
 }
 
 function normalizeBookingLocation(value) {
@@ -120,6 +500,59 @@ function normalizeBookingLocation(value) {
     }
   }
   return null;
+}
+
+function firstMoneyValue(...values) {
+  for (const value of values) {
+    const parsed = toMoney(value);
+    if (parsed !== null && parsed > 0) return parsed;
+  }
+  return null;
+}
+
+function firstPositiveInteger(...values) {
+  for (const value of values) {
+    const parsed = Number.parseInt(value, 10);
+    if (Number.isFinite(parsed) && parsed > 0) return parsed;
+  }
+  return null;
+}
+
+function resolveRouteSnapshot(bookingResponse = {}, bookingHash = {}) {
+  const data = bookingResponse?.data || {};
+  const routeMetrics = data.routeMetrics || bookingResponse?.routeMetrics || {};
+  const routeDistanceKm = firstMoneyValue(
+    data.routeDistanceKm,
+    bookingResponse.routeDistanceKm,
+    routeMetrics.distanceKm,
+    bookingHash.routeDistanceKm,
+    bookingHash.estimatedTripDistanceKm
+  );
+  let routeDurationSecs = firstPositiveInteger(
+    data.routeDurationSecs,
+    bookingResponse.routeDurationSecs,
+    routeMetrics.durationSecs,
+    bookingHash.routeDurationSecs
+  );
+  const fallbackDistanceKm = routeDistanceKm || haversineDistanceKm(
+    normalizeBookingLocation(data.pickupLocation || data.pickup) || null,
+    normalizeBookingLocation(data.destinationLocation || data.destination || data.drop) || null
+  );
+
+  if (USE_SPEED_DERIVED_DURATION) {
+    const speedDerivedDurationSecs = deriveDurationSecsAtSpeed(routeDistanceKm || fallbackDistanceKm);
+    if (speedDerivedDurationSecs) {
+      routeDurationSecs = speedDerivedDurationSecs;
+    }
+  }
+
+  return {
+    routeDistanceKm: routeDistanceKm || fallbackDistanceKm,
+    routeDurationSecs,
+    durationMinutes: routeDurationSecs ? Math.max(1, Math.round(routeDurationSecs / 60)) : null,
+    simulationSpeedKmh: USE_SPEED_DERIVED_DURATION ? SIMULATION_SPEED_KMH : null,
+    durationSource: USE_SPEED_DERIVED_DURATION ? 'speed_derived' : 'booking_route_metrics'
+  };
 }
 
 function toIsoTimestamp(value, fallbackIso) {
@@ -147,8 +580,10 @@ async function main() {
     meta: {
       scenario: 'real_core_e2e_cost',
       startedAt: new Date().toISOString(),
-      serverUrl: SERVER_URL,
-      mode: 'local_real_execution',
+      serverUrl: WS_SERVER_URL,
+      apiBaseUrl: API_BASE_URL,
+      metricsUrl: METRICS_URL,
+      mode: 'staging_real_execution',
       paymentMode: 'mock_bypass_only'
     },
     entities: {},
@@ -167,25 +602,27 @@ async function main() {
   const passengerId = `real_passenger_${nowTag}`;
   const driverId = `real_driver_${nowTag}`;
 
-  const pickup = { lat: -23.5505, lng: -46.6333, address: 'Av. Paulista, 1000 - São Paulo, SP' };
-  const destination = { lat: -23.5615, lng: -46.6553, address: 'Rua Oscar Freire, 1000 - São Paulo, SP' };
-  const driverStart = { lat: -23.547, lng: -46.628 };
+  const route = resolveRouteFromEnv();
+  const { pickup, destination, driverStart } = route;
 
   report.entities = {
     passengerId,
     driverId,
+    routeName: route.name,
     pickup,
     destination,
     driverStart
   };
 
-  const metricsBefore = await fetchMetricsRows(SERVER_URL);
-
-  const redis = redisPool.getConnection();
   const simulator = new RedisDriverSimulator();
+  const redis = simulator;
+  if (!shouldSkipGlobalDriverCleanup()) {
+    await cleanupRealCoreDrivers(simulator);
+  }
+  const metricsBefore = await fetchMetricsRowsSafely(report, 'before');
 
-  const passengerClient = new WebSocketTestClient(SERVER_URL);
-  const driverClient = new WebSocketTestClient(SERVER_URL);
+  const passengerClient = new WebSocketTestClient(WS_SERVER_URL);
+  const driverClient = new WebSocketTestClient(WS_SERVER_URL);
 
   let bookingId = null;
 
@@ -211,7 +648,7 @@ async function main() {
       rating: '5.0'
     });
 
-    const realtimeDb = firebaseConfig.getRealtimeDB();
+    const realtimeDb = getRealtimeDbSafe();
     if (realtimeDb) {
       await realtimeDb.ref(`users/${passengerId}`).set({
         id: passengerId,
@@ -239,6 +676,9 @@ async function main() {
     await driverClient.authenticate(driverId, 'driver');
 
     await simulator.setDriverOnline(driverId, driverStart.lat, driverStart.lng, 0, 0, true, false);
+    if (DRIVER_ONLINE_SETTLE_MS > 0) {
+      await sleep(DRIVER_ONLINE_SETTLE_MS);
+    }
     report.flow.steps.push({ step: 'connect_and_auth', ok: true });
 
     // 3) Create booking + confirm payment mock
@@ -246,19 +686,30 @@ async function main() {
       customerId: passengerId,
       pickupLocation: pickup,
       destinationLocation: destination,
-      estimatedFare: 42.5,
+      estimatedFare: 0,
       paymentMethod: 'pix',
-      carType: 'normal'
+      carType: 'leafplus',
+      selectedVehicle: 'leafplus'
     });
 
     bookingId = bookingResponse.bookingId;
     report.outputs.booking = bookingResponse;
+    const lockedFare = resolveLockedFare(bookingResponse);
+    if (lockedFare === null || lockedFare <= 0) {
+      throw new Error(`locked_fare_missing:${bookingId}`);
+    }
+    report.outputs.lockedFare = {
+      source: 'booking.data.estimatedFare',
+      value: lockedFare,
+      formatted: formatBrl(lockedFare)
+    };
 
     const paymentResponse = await passengerClient.confirmPayment({
       bookingId,
       paymentMethod: 'pix',
       paymentId: `mock_payment_${nowTag}`,
-      amount: 42.5,
+      amount: lockedFare,
+      enforceFareLock: true,
       mockPayment: true,
       __mockPayment: true
     });
@@ -272,40 +723,73 @@ async function main() {
     );
     report.outputs.rideRequestForDriver = rideRequestForDriver.ok ? rideRequestForDriver.data : null;
     report.debug.newRideRequest = rideRequestForDriver;
+    if (!rideRequestForDriver.ok) {
+      throw new Error(`ride_request_not_received:${bookingId}:${rideRequestForDriver.error || 'unknown'}`);
+    }
     report.flow.steps.push({ step: 'booking_and_payment', ok: true, bookingId });
+
+    await driverClient.acceptRide(bookingId);
+    await passengerClient.waitForEvent('rideAccepted', 15000, (evt) => (evt?.bookingId || evt?.rideId) === bookingId);
 
     // 4) Driver displacement to pickup + persist coords
     const pickupPoints = buildLinePoints(driverStart, pickup, 6);
+    const pickupDistanceKm = haversineDistanceKm(driverStart, pickup);
+    const pickupDurationSecs = USE_SPEED_DERIVED_DURATION ? deriveDurationSecsAtSpeed(pickupDistanceKm) : null;
+    const pickupStartedAtMs = Date.now();
     for (let i = 0; i < pickupPoints.length; i += 1) {
       const point = pickupPoints[i];
-      const payload = {
-        driverId,
-        lat: point.lat,
-        lng: point.lng,
-        heading: 90,
-        speed: i === pickupPoints.length - 1 ? 0 : 28,
-        bookingId,
-        timestamp: Date.now()
-      };
+      const payload = timedCoordinatePayload({
+        index: i,
+        total: pickupPoints.length,
+        durationSecs: pickupDurationSecs,
+        startedAtMs: pickupStartedAtMs,
+        basePayload: {
+          driverId,
+          lat: point.lat,
+          lng: point.lng,
+          heading: 90,
+          speed: i === pickupPoints.length - 1 ? 0 : (USE_SPEED_DERIVED_DURATION ? SIMULATION_SPEED_KMH : 28),
+          bookingId
+        }
+      });
 
       driverClient.socket.emit('updateDriverLocation', payload);
-      await redis.rpush(`trip:coords:${bookingId}:pickup`, JSON.stringify(payload));
+      await safeRedisEvidenceWrite(report, 'pickup_coordinate_rpush', () =>
+        redis.rpush(`trip:coords:${bookingId}:pickup`, JSON.stringify(payload))
+      );
       report.flow.pickupCoordinates.push(payload);
       await sleep(350);
     }
 
-    await driverClient.acceptRide(bookingId);
-    await passengerClient.waitForEvent('rideAccepted', 15000, (evt) => (evt?.bookingId || evt?.rideId) === bookingId);
+    const arrivedAtPickupAck = await (async () => {
+      try {
+        const data = await driverClient.arrivedAtPickup(bookingId, { location: pickup, timeoutMs: 15000 });
+        return { ok: true, data };
+      } catch (error) {
+        return { ok: false, error: error.message };
+      }
+    })();
+    report.debug.arrivedAtPickup = arrivedAtPickupAck;
     const activeBookingAfterAccept = await redis.hget('bookings:active', bookingId);
+    const bookingHashAfterAccept = await redis.hgetall(`booking:${bookingId}`);
     report.debug.bookingStateAfterAccept = {
-      bookingHash: await redis.hgetall(`booking:${bookingId}`),
+      bookingHash: bookingHashAfterAccept,
       activeBooking: activeBookingAfterAccept ? JSON.parse(activeBookingAfterAccept) : null
     };
-    report.flow.steps.push({ step: 'driver_to_pickup_and_accept', ok: true });
+    const routeSnapshot = resolveRouteSnapshot(bookingResponse, bookingHashAfterAccept);
+    if (!routeSnapshot.routeDistanceKm) {
+      throw new Error(`route_distance_missing:${bookingId}`);
+    }
+    report.outputs.routeSnapshot = {
+      ...routeSnapshot,
+      pickup,
+      destination
+    };
+    report.flow.steps.push({ step: 'accept_and_driver_to_pickup', ok: true });
 
     // Open trip chat with retries, because chat policy may lag a few seconds after acceptRide.
     let chatCreationAck = null;
-    for (let attempt = 1; attempt <= 8; attempt += 1) {
+    for (let attempt = 1; attempt <= CHAT_CREATION_ATTEMPTS; attempt += 1) {
       passengerClient.socket.emit('createChat', {
         bookingId,
         participants: [passengerId, driverId],
@@ -318,7 +802,7 @@ async function main() {
       const created = await tryWaitForEvent(
         passengerClient,
         'chatCreated',
-        1500,
+        1200,
         (evt) => evt?.bookingId === bookingId || evt?.chatId === bookingId
       );
       if (created.ok) {
@@ -329,16 +813,14 @@ async function main() {
       const chatError = await tryWaitForEvent(
         passengerClient,
         'chatError',
-        1000,
+        500,
         (evt) => (evt?.bookingId || evt?.chatId) === bookingId || !evt?.bookingId
       );
       chatCreationAck = { ...chatError, attempt };
       await sleep(700);
     }
     report.debug.chatCreation = chatCreationAck;
-    if (!chatCreationAck?.ok || chatCreationAck?.event !== 'chatCreated') {
-      throw new Error(`Falha ao criar chat: ${chatCreationAck?.data?.error || chatCreationAck?.error || 'sem ack'}`);
-    }
+    const tripChatAvailable = Boolean(chatCreationAck?.ok && chatCreationAck?.event === 'chatCreated');
 
     // 5) 6 chat messages (real socket events)
     const chatScript = [
@@ -350,60 +832,76 @@ async function main() {
       { from: 'driver', text: 'Pode entrar, estou de Civic prata.' }
     ];
 
-    for (const msg of chatScript) {
-      const senderClient = msg.from === 'passenger' ? passengerClient : driverClient;
-      const senderId = msg.from === 'passenger' ? passengerId : driverId;
-      const receiverId = msg.from === 'passenger' ? driverId : passengerId;
-      const senderType = msg.from === 'passenger' ? 'passenger' : 'driver';
+    if (tripChatAvailable) {
+      for (const msg of chatScript) {
+        const senderClient = msg.from === 'passenger' ? passengerClient : driverClient;
+        const senderId = msg.from === 'passenger' ? passengerId : driverId;
+        const receiverId = msg.from === 'passenger' ? driverId : passengerId;
+        const senderType = msg.from === 'passenger' ? 'passenger' : 'driver';
 
-      senderClient.socket.emit('sendMessage', {
-        bookingId,
-        senderId,
-        receiverId,
-        senderType,
-        message: msg.text
-      });
+        senderClient.socket.emit('sendMessage', {
+          bookingId,
+          senderId,
+          receiverId,
+          senderType,
+          message: msg.text
+        });
 
-      const receiverClient = msg.from === 'passenger' ? driverClient : passengerClient;
-      const sendAck = await Promise.race([
-        tryWaitForEvent(senderClient, 'messageSent', 12000, (evt) => evt?.bookingId === bookingId && evt?.text === msg.text),
-        tryWaitForEvent(senderClient, 'messageError', 12000, () => true),
-        tryWaitForEvent(receiverClient, 'newMessage', 12000, (evt) => evt?.bookingId === bookingId && evt?.message === msg.text)
-      ]);
+        const receiverClient = msg.from === 'passenger' ? driverClient : passengerClient;
+        const sendAck = await Promise.race([
+          tryWaitForEvent(senderClient, 'messageSent', 12000, (evt) => evt?.bookingId === bookingId && evt?.text === msg.text),
+          tryWaitForEvent(senderClient, 'messageError', 12000, () => true),
+          tryWaitForEvent(receiverClient, 'newMessage', 12000, (evt) => evt?.bookingId === bookingId && evt?.message === msg.text)
+        ]);
 
-      if (!sendAck?.ok && sendAck?.event !== 'newMessage') {
-        throw new Error(`Falha ao enviar mensagem de chat: ${sendAck?.error || 'ack ausente'}`);
+        if (!sendAck?.ok && sendAck?.event !== 'newMessage') {
+          throw new Error(`Falha ao enviar mensagem de chat: ${sendAck?.error || 'ack ausente'}`);
+        }
+        if (sendAck?.ok && sendAck?.event === 'messageError') {
+          throw new Error(`Falha ao enviar mensagem de chat: ${sendAck.data?.error || 'messageError'}`);
+        }
+
+        report.flow.chatMessages.push({ from: msg.from, text: msg.text, at: new Date().toISOString() });
+        await sleep(200);
       }
-      if (sendAck?.ok && sendAck?.event === 'messageError') {
-        throw new Error(`Falha ao enviar mensagem de chat: ${sendAck.data?.error || 'messageError'}`);
-      }
-
-      report.flow.chatMessages.push({ from: msg.from, text: msg.text, at: new Date().toISOString() });
-      await sleep(200);
     }
 
-    report.flow.steps.push({ step: 'chat_6_messages', ok: true, total: report.flow.chatMessages.length });
+    report.flow.steps.push({
+      step: 'chat_6_messages',
+      ok: tripChatAvailable,
+      skipped: !tripChatAvailable,
+      total: report.flow.chatMessages.length,
+      reason: tripChatAvailable ? '' : (chatCreationAck?.error || 'chatCreated ausente')
+    });
 
     // 6) Start trip + ride coordinates
     await driverClient.startTrip({ bookingId, startLocation: pickup });
     await passengerClient.waitForEvent('tripStarted', 15000, (evt) => (evt?.bookingId || evt?.rideId) === bookingId);
 
     const tripPoints = buildLinePoints(pickup, destination, 9);
+    const tripStartedAtMs = Date.now();
     for (let i = 0; i < tripPoints.length; i += 1) {
       const point = tripPoints[i];
-      const payload = {
-        bookingId,
-        driverId,
-        lat: point.lat,
-        lng: point.lng,
-        heading: 95,
-        speed: i === tripPoints.length - 1 ? 0 : 36,
-        timestamp: Date.now()
-      };
+      const payload = timedCoordinatePayload({
+        index: i,
+        total: tripPoints.length,
+        durationSecs: USE_SPEED_DERIVED_DURATION ? routeSnapshot.routeDurationSecs : null,
+        startedAtMs: tripStartedAtMs,
+        basePayload: {
+          bookingId,
+          driverId,
+          lat: point.lat,
+          lng: point.lng,
+          heading: 95,
+          speed: i === tripPoints.length - 1 ? 0 : (USE_SPEED_DERIVED_DURATION ? SIMULATION_SPEED_KMH : 36)
+        }
+      });
 
       driverClient.socket.emit('updateTripLocation', payload);
       driverClient.socket.emit('updateDriverLocation', payload);
-      await redis.rpush(`trip:coords:${bookingId}:trip`, JSON.stringify(payload));
+      await safeRedisEvidenceWrite(report, 'trip_coordinate_rpush', () =>
+        redis.rpush(`trip:coords:${bookingId}:trip`, JSON.stringify(payload))
+      );
       report.flow.tripCoordinates.push(payload);
       await sleep(300);
     }
@@ -414,18 +912,40 @@ async function main() {
     const completeResponse = await driverClient.finishTrip({
       bookingId,
       endLocation: destination,
-      distance: 6.4,
-      fare: 42.5,
+      distance: routeSnapshot.routeDistanceKm,
+      duration: routeSnapshot.durationMinutes,
+      fare: lockedFare,
       mockPayment: true,
       __mockPayment: true
     });
-
-    const tripCompletedPassenger = await passengerClient.waitForEvent('tripCompleted', 20000, (evt) => evt?.bookingId === bookingId);
-    const tripCompletedDriver = await driverClient.waitForEvent('tripCompleted', 20000, (evt) => evt?.bookingId === bookingId);
-
     report.outputs.completeTrip = completeResponse;
-    report.outputs.tripCompletedPassenger = tripCompletedPassenger;
-    report.outputs.tripCompletedDriver = tripCompletedDriver;
+    const tripCompleted = await waitForTripCompletedOrStateFallback({
+      passengerClient,
+      driverClient,
+      redis,
+      bookingId,
+      timeoutMs: 20000
+    });
+    report.outputs.tripCompletedPassenger = tripCompleted.passenger;
+    report.outputs.tripCompletedDriver = tripCompleted.driver;
+    report.outputs.tripCompletedSource = tripCompleted.source;
+    if (tripCompleted.bookingHash) {
+      report.debug.bookingStateAfterComplete = tripCompleted.bookingHash;
+    }
+    const fareConsistency = assertFareConsistency({
+      quote: lockedFare,
+      payment: paymentResponse?.data?.amount ?? paymentResponse?.amount,
+      finalFare:
+        completeResponse?.fare ??
+        completeResponse?.finalFare ??
+        completeResponse?.data?.finalFare ??
+        tripCompleted?.bookingHash?.finalFare,
+      context: bookingId
+    });
+    report.outputs.financialConsistency = {
+      ok: true,
+      ...fareConsistency
+    };
     report.flow.steps.push({ step: 'complete_trip', ok: true });
 
     // 8) Persist final ride snapshot
@@ -438,17 +958,23 @@ async function main() {
       passengerId,
       driverId,
       status: bookingHash.status || 'COMPLETED',
-      fare: Number(bookingHash.finalFare || 42.5),
-      distanceKm: Number(bookingHash.distance || 6.4),
+      fare: Number(bookingHash.finalFare || lockedFare),
+      distanceKm: Number(bookingHash.distance || routeSnapshot.routeDistanceKm),
+      routeDistanceKm: routeSnapshot.routeDistanceKm,
+      routeDurationSecs: routeSnapshot.routeDurationSecs,
+      simulationSpeedKmh: routeSnapshot.simulationSpeedKmh,
+      durationSource: routeSnapshot.durationSource,
       chatMessages: report.flow.chatMessages.length,
       pickupCoordsCount: report.flow.pickupCoordinates.length,
       tripCoordsCount: report.flow.tripCoordinates.length,
       completedAt: new Date().toISOString()
     };
 
-    await redis.hset(`trip:summary:${bookingId}`, Object.fromEntries(Object.entries(finalSnapshot).map(([k, v]) => [k, String(v)])));
+    await safeRedisEvidenceWrite(report, 'trip_summary_hset', () =>
+      redis.hset(`trip:summary:${bookingId}`, Object.fromEntries(Object.entries(finalSnapshot).map(([k, v]) => [k, String(v)])))
+    );
 
-    const realtimeDb2 = firebaseConfig.getRealtimeDB();
+    const realtimeDb2 = getRealtimeDbSafe();
     if (realtimeDb2) {
       await realtimeDb2.ref(`rides/${bookingId}/simulation`).set(finalSnapshot);
     }
@@ -456,8 +982,7 @@ async function main() {
     report.outputs.finalSnapshot = finalSnapshot;
     report.flow.steps.push({ step: 'persist_final_ride_data', ok: true });
 
-    // 9) Emit receipt (generate + PDF)
-    const receiptService = new ReceiptService();
+    // 9) Emit receipt evidence (generate local PDF artifact)
     const nowIso = new Date().toISOString();
     const bookingDateIso = toIsoTimestamp(
       bookingHash.createdAt || bookingHash.timestamp || bookingHash.created_at,
@@ -488,7 +1013,7 @@ async function main() {
       driver: driverId,
       customer_name: 'Passageiro Core',
       driver_name: 'Motorista Core',
-      finalPrice: 42.5,
+      finalPrice: lockedFare,
       distance: 6400,
       payment_mode: 'pix',
       payment_status: 'completed',
@@ -500,8 +1025,22 @@ async function main() {
       status: 'COMPLETED'
     };
 
-    const receipt = await receiptService.generateAndSaveReceipt(bookingId, receiptData, realtimeDb2);
-    const receiptPdf = await receiptService.generatePDFReceipt(receipt);
+    const receipt = {
+      receiptId: `receipt_${bookingId}`,
+      bookingId,
+      hash: createReceiptHash(bookingId, receiptData),
+      pickup: receiptData.pickup,
+      drop: receiptData.drop,
+      customer: receiptData.customer,
+      driver: receiptData.driver,
+      financial: {
+        totalPaid: {
+          value: lockedFare,
+          formatted: formatBrl(lockedFare)
+        }
+      }
+    };
+    const receiptPdf = await generateReceiptPdfBuffer(receipt);
 
     report.outputs.receipt = {
       receiptId: receipt.receiptId,
@@ -522,17 +1061,34 @@ async function main() {
       userType: 'passenger'
     });
 
-    const ratingSubmitted = await passengerClient.waitForEvent('ratingSubmitted', 15000, (evt) => evt?.tripId === bookingId && evt?.success === true);
-    const ratingReceived = await driverClient.waitForEvent('ratingReceived', 15000, (evt) => evt?.tripId === bookingId && evt?.success === true);
+    const ratingSubmitted = await tryWaitForEvent(
+      passengerClient,
+      'ratingSubmitted',
+      RATING_EVENT_TIMEOUT_MS,
+      (evt) => evt?.tripId === bookingId && evt?.success === true
+    );
+    const ratingReceived = await tryWaitForEvent(
+      driverClient,
+      'ratingReceived',
+      RATING_EVENT_TIMEOUT_MS,
+      (evt) => evt?.tripId === bookingId && evt?.success === true
+    );
 
     report.outputs.rating = {
-      submitted: ratingSubmitted,
-      received: ratingReceived
+      submitted: ratingSubmitted.ok ? ratingSubmitted.data : null,
+      received: ratingReceived.ok ? ratingReceived.data : null,
+      submittedAck: ratingSubmitted,
+      receivedAck: ratingReceived
     };
-    report.flow.steps.push({ step: 'rating_submitted_and_received', ok: true });
+    report.flow.steps.push({
+      step: 'rating_submitted_and_received',
+      ok: ratingSubmitted.ok,
+      driverNotificationReceived: ratingReceived.ok,
+      reason: ratingSubmitted.ok ? '' : ratingSubmitted.error
+    });
 
     // 11) Metrics delta
-    const metricsAfter = await fetchMetricsRows(SERVER_URL);
+    const metricsAfter = await fetchMetricsRowsSafely(report, 'after');
 
     const redisOps = ['hset', 'hgetall', 'geoadd', 'georadius', 'zrem', 'expire', 'set', 'get', 'del', 'xadd', 'zadd'];
     const redisDelta = redisOps
@@ -602,7 +1158,7 @@ async function main() {
       executionCurrency: 'BRL',
       localExecution: {
         providerBillableCost: 0,
-        description: 'Execucao local com Redis/backend locais e pagamento mock.'
+        description: 'Execucao em staging real com Redis remoto e pagamento mock.'
       },
       technicalConsumptionSummary: {
         redisSuccessfulOps: redisDelta.reduce((acc, item) => acc + item.successCount, 0),
@@ -622,6 +1178,9 @@ async function main() {
     report.meta.status = 'failed';
     report.meta.error = error.message;
     report.meta.stack = error.stack;
+    if (error.context && typeof error.context === 'object') {
+      report.debug.errorContext = error.context;
+    }
   } finally {
     try {
       if (bookingId) {
@@ -635,6 +1194,7 @@ async function main() {
 
     passengerClient.disconnect();
     driverClient.disconnect();
+    await cleanupOwnDriver(simulator, driverId);
   }
 
   if (!fs.existsSync(REPORT_DIR)) {

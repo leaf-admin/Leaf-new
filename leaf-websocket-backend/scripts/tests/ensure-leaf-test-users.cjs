@@ -295,13 +295,13 @@ async function ensureDriverProfile({ db, firestore, uid, phone, nowIso }) {
 }
 
 async function main() {
-  const passengerPhone = normalizePhone(process.env.TEST_PASSENGER_PHONE || '11999999999');
-  const passengerTwoPhone = normalizePhone(process.env.TEST_PASSENGER_TWO_PHONE || '11999999998');
-  const passengerThreePhone = normalizePhone(process.env.TEST_PASSENGER_THREE_PHONE || '11999999997');
-  const passengerFourPhone = normalizePhone(process.env.TEST_PASSENGER_FOUR_PHONE || '11999999996');
-  const driverPhone = normalizePhone(process.env.TEST_DRIVER_PHONE || '11888888888');
-  const driverTwoPhone = normalizePhone(process.env.TEST_DRIVER_TWO_PHONE || '11888888889');
-  const driverThreePhone = normalizePhone(process.env.TEST_DRIVER_THREE_PHONE || '11888888890');
+  const passengerPhone = normalizePhone(process.env.TEST_PASSENGER_PHONE || '21102938475');
+  const passengerTwoPhone = normalizePhone(process.env.TEST_PASSENGER_TWO_PHONE || '21102938476');
+  const passengerThreePhone = normalizePhone(process.env.TEST_PASSENGER_THREE_PHONE || '21102938477');
+  const passengerFourPhone = normalizePhone(process.env.TEST_PASSENGER_FOUR_PHONE || '21102938478');
+  const driverPhone = normalizePhone(process.env.TEST_DRIVER_PHONE || '21123456789');
+  const driverTwoPhone = normalizePhone(process.env.TEST_DRIVER_TWO_PHONE || '21123456790');
+  const driverThreePhone = normalizePhone(process.env.TEST_DRIVER_THREE_PHONE || '21123456791');
   const nowIso = new Date().toISOString();
 
   if (!admin.apps.length) {

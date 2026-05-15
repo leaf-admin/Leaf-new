@@ -5,6 +5,7 @@ const fs = require('fs');
 const axios = require('axios');
 const dotenv = require('dotenv');
 const admin = require('firebase-admin');
+const { getIdTokenForUid } = require('../../tests/e2e/backend/__helpers__/firebase-id-token');
 
 const backendDir = path.resolve(__dirname, '..', '..');
 const workspaceDir = path.resolve(backendDir, '..');
@@ -18,8 +19,8 @@ const FIREBASE_API_KEY = process.env.FIREBASE_API_KEY || process.env.EXPO_PUBLIC
 const PASSENGER_EMAIL = process.env.SMOKE_PASSENGER_EMAIL || process.env.QA_PASSENGER_EMAIL || 'joao.teste@leaf.com';
 const PASSENGER_PASSWORD = process.env.SMOKE_PASSENGER_PASSWORD || process.env.QA_PASSENGER_PASSWORD || 'teste123';
 const PASSENGER_UID = process.env.SMOKE_PASSENGER_UID || process.env.QA_PASSENGER_UID || 'OjML1wSzdNRaynjqMRlSW1Y0LVy2';
-const ADMIN_EMAIL = process.env.SMOKE_ADMIN_EMAIL;
-const ADMIN_PASSWORD = process.env.SMOKE_ADMIN_PASSWORD;
+const ADMIN_EMAIL = process.env.SMOKE_ADMIN_EMAIL || process.env.ADMIN_AUTH_EMAIL || process.env.TEST_ADMIN_EMAIL || 'admin@leaf.com';
+const ADMIN_PASSWORD = process.env.SMOKE_ADMIN_PASSWORD || process.env.ADMIN_AUTH_PASSWORD || process.env.TEST_ADMIN_PASSWORD || 'admin123';
 
 const http = axios.create({
   timeout: 25000,
@@ -32,6 +33,11 @@ function assertOrThrow(condition, message) {
   if (!condition) {
     throw new Error(message);
   }
+}
+
+function statusError(label, response) {
+  const details = JSON.stringify(response.data || {}).slice(0, 240);
+  return `${label}_${response.status}${details ? `:${details}` : ''}`;
 }
 
 function ensureAdminInitialized() {
@@ -130,9 +136,6 @@ async function main() {
   const startedAt = new Date().toISOString();
   const tag = `smoke-${Date.now()}`;
 
-  if (!FIREBASE_API_KEY) {
-    throw new Error('missing_firebase_api_key');
-  }
   if (!ADMIN_EMAIL || !ADMIN_PASSWORD) {
     throw new Error('missing_admin_credentials');
   }
@@ -149,17 +152,23 @@ async function main() {
     let result = null;
 
     try {
+      if (!FIREBASE_API_KEY || /YOUR_FIREBASE_API_KEY/i.test(FIREBASE_API_KEY)) {
+        throw new Error('firebase_api_key_placeholder');
+      }
       result = await signInFirebase(PASSENGER_EMAIL, PASSENGER_PASSWORD);
     } catch (error) {
       const canFallbackToCustomToken =
         PASSENGER_UID &&
-        /INVALID_LOGIN_CREDENTIALS|EMAIL_NOT_FOUND|INVALID_PASSWORD/i.test(String(error.message || ''));
+        /INVALID_LOGIN_CREDENTIALS|EMAIL_NOT_FOUND|INVALID_PASSWORD|API key not valid|firebase_api_key_placeholder/i.test(String(error.message || ''));
 
       if (!canFallbackToCustomToken) {
         throw error;
       }
 
-      result = await signInWithCustomToken(PASSENGER_UID);
+      result = {
+        idToken: await getIdTokenForUid(PASSENGER_UID),
+        uid: PASSENGER_UID
+      };
     }
 
     userToken = result.idToken;
@@ -206,11 +215,18 @@ async function main() {
   });
 
   await runStep('user list own tickets', async () => {
-    const response = await http.get(`${SERVER_URL}/api/support/tickets`, {
+    let response = await http.get(`${SERVER_URL}/api/support/tickets`, {
       headers: { Authorization: `Bearer ${userToken}` }
     });
 
-    assertOrThrow(response.status === 200, `list_user_tickets_status_${response.status}`);
+    if (response.status === 401 && userId) {
+      userToken = await getIdTokenForUid(userId);
+      response = await http.get(`${SERVER_URL}/api/support/tickets`, {
+        headers: { Authorization: `Bearer ${userToken}` }
+      });
+    }
+
+    assertOrThrow(response.status === 200, statusError('list_user_tickets_status', response));
     assertOrThrow(Array.isArray(response.data?.tickets), 'list_user_tickets_invalid_payload');
     const hasTicket = response.data.tickets.some((ticket) => ticket.id === ticketId);
     assertOrThrow(hasTicket, 'created_ticket_not_found_for_user');

@@ -452,15 +452,25 @@ function registerSocketEngagementChatHandlers({
             // ✅ NOVO: Salvar mensagem no Firestore com TTL de 90 dias
             try {
                 const chatPersistenceService = require('../services/chat-persistence-service');
-                const saveResult = await chatPersistenceService.saveMessage({
-                    bookingId: bookingId || conversationId,
-                    rideId: rideId || conversationId,
-                    senderId: senderId,
-                    receiverId: receiverId || null,
-                    message: messageText,
-                    senderType: normalizedSenderType || (socket.userType === 'driver' ? 'driver' : 'passenger'),
-                    timestamp: new Date().toISOString()
-                });
+                const persistenceTimeoutMs = Math.max(
+                    500,
+                    Number.parseInt(process.env.CHAT_PERSISTENCE_TIMEOUT_MS || '1500', 10) || 1500
+                );
+                const saveResult = await Promise.race([
+                    chatPersistenceService.saveMessage({
+                        bookingId: bookingId || conversationId,
+                        rideId: rideId || conversationId,
+                        senderId: senderId,
+                        receiverId: receiverId || null,
+                        message: messageText,
+                        senderType: normalizedSenderType || (socket.userType === 'driver' ? 'driver' : 'passenger'),
+                        timestamp: new Date().toISOString()
+                    }),
+                    new Promise((resolve) => setTimeout(() => resolve({
+                        success: false,
+                        error: `timeout_after_${persistenceTimeoutMs}ms`
+                    }), persistenceTimeoutMs))
+                ]);
 
                 if (!saveResult.success) {
                     logStructured('error', 'Erro ao salvar mensagem no Firestore', {

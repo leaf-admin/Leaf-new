@@ -24,7 +24,7 @@ const testMutations = async () => {
           createUser(input: {
             name: "João Silva"
             email: "joao@email.com"
-            phone: "+5511999999999"
+            phone: "+5521102938475"
             userType: CUSTOMER
           }) {
             success
@@ -47,7 +47,7 @@ const testMutations = async () => {
           createDriver(input: {
             name: "Maria Santos"
             email: "maria@email.com"
-            phone: "+5511888888888"
+            phone: "+5521123456789"
             licenseNumber: "123456789"
             vehicle: {
               model: "Honda Civic"

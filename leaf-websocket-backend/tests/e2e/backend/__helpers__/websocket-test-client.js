@@ -6,6 +6,7 @@
  */
 
 const io = require('socket.io-client');
+const crypto = require('crypto');
 const { getIdTokenForUid } = require('./firebase-id-token');
 const { buildCanonicalCreateBookingIdempotencyKey } = require('../../../../services/create-booking-idempotency-service');
 const E2E_VERBOSE = String(process.env.E2E_VERBOSE || 'false').toLowerCase() === 'true';
@@ -55,6 +56,105 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+function positiveIntEnv(name, fallback) {
+  const parsed = Number.parseInt(process.env[name] || '', 10);
+  if (!Number.isFinite(parsed) || parsed <= 0) return fallback;
+  return parsed;
+}
+
+function pickTraceHeaders(headers) {
+  const wanted = new Set([
+    'x-request-id',
+    'x-correlation-id',
+    'x-trace-id',
+    'traceid',
+    'x-amzn-trace-id'
+  ]);
+  const picked = {};
+  if (!headers || typeof headers.forEach !== 'function') return picked;
+  headers.forEach((value, key) => {
+    const normalizedKey = String(key || '').toLowerCase();
+    if (wanted.has(normalizedKey)) {
+      picked[normalizedKey] = value;
+    }
+  });
+  return picked;
+}
+
+function extractChargeId(data = {}) {
+  return String(
+    data.chargeId ||
+    data.paymentId ||
+    data?.charge?.identifier ||
+    data?.charge?.id ||
+    data?.charge?.correlationID ||
+    data?.charge?.transactionID ||
+    data?.charge?.paymentMethods?.pix?.identifier ||
+    data?.charge?.paymentMethods?.pix?.transactionID ||
+    ''
+  ).trim();
+}
+
+function summarizeHttpResponse(response = {}) {
+  const data = response.data && typeof response.data === 'object' ? response.data : {};
+  const details = data.details && typeof data.details === 'object' ? data.details : {};
+  const detailsData = details.data && typeof details.data === 'object' ? details.data : {};
+  const nestedError = data.error && typeof data.error === 'object' ? data.error : {};
+
+  return {
+    ok: Boolean(response.ok),
+    status: response.status || null,
+    statusText: response.statusText || '',
+    traceHeaders: response.traceHeaders || {},
+    code:
+      data.code ||
+      data.errorCode ||
+      details.code ||
+      detailsData.code ||
+      nestedError.code ||
+      null,
+    error:
+      nestedError.message ||
+      data.error ||
+      detailsData.error ||
+      details.error ||
+      null,
+    message:
+      data.message ||
+      detailsData.message ||
+      details.message ||
+      response.rawText ||
+      null,
+    detailsStatus: details.status || null,
+    transportError: response.transportError || null,
+    chargeId: extractChargeId(data) || null
+  };
+}
+
+function stablePaymentRideId(bookingPayload = {}, passengerId = '') {
+  const existing = String(
+    bookingPayload?.paymentData?.rideId ||
+    bookingPayload?.rideId ||
+    ''
+  ).trim();
+  if (existing) return existing;
+
+  const fingerprint = buildCanonicalCreateBookingIdempotencyKey({
+    userId: passengerId || 'anonymous',
+    data: bookingPayload,
+    fallbackIdempotencyKey: bookingPayload?.idempotencyKey
+  });
+  const digest = crypto.createHash('sha1').update(fingerprint).digest('hex').slice(0, 16);
+  const safePassengerId = String(passengerId || 'anonymous').replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 48);
+  return `ride_e2e_${safePassengerId}_${digest}`;
+}
+
+function buildHttpError(message, context) {
+  const error = new Error(message);
+  error.context = context;
+  return error;
+}
+
 class WebSocketTestClient {
   constructor(url, options = {}) {
     this.url = url || process.env.WS_URL || 'http://localhost:3001';
@@ -73,6 +173,7 @@ class WebSocketTestClient {
     this.eventListeners = new Map(); // Listeners registrados
     this.userId = null;
     this.userType = null;
+    this.authToken = null;
   }
 
   /**
@@ -161,6 +262,7 @@ class WebSocketTestClient {
         this.authenticated = true;
         this.userId = uid;
         this.userType = normalizedUserType;
+        this.authToken = token || null;
         this.socket.userId = uid; // Simular comportamento do servidor
         this.socket.userType = normalizedUserType;
 
@@ -203,25 +305,38 @@ class WebSocketTestClient {
       arguments.length > 1 && arguments[1] && typeof arguments[1] === 'object'
         ? arguments[1]
         : {};
+    const bookingPayload = this.ensureCreateBookingIdempotencyKey(data);
     const allowAutoPaymentFallback =
       options.autoPaymentFallback !== false &&
       String(process.env.E2E_AUTO_PAYMENT_ON_CREATE_BOOKING || 'true').toLowerCase() !== 'false';
 
     try {
-      return await this._createBookingOnce(data, options);
+      return await this.createBookingOnceWithRetries(
+        bookingPayload,
+        options,
+        positiveIntEnv('E2E_CREATE_BOOKING_RETRIES', 2),
+        (attempt, maxAttempts) => ({
+          createBooking: {
+            attempt,
+            maxAttempts,
+            idempotencyKey: bookingPayload.idempotencyKey || null,
+            phase: 'initial'
+          }
+        })
+      );
     } catch (error) {
       if (!allowAutoPaymentFallback) {
         throw error;
       }
 
       const retryablePaymentError = this.isRetryableCreateBookingPaymentError(error);
-      const alreadyHasConfirmedPayment = this.hasBookingPayloadConfirmedPayment(data);
+      const alreadyHasConfirmedPayment = this.hasBookingPayloadConfirmedPayment(bookingPayload);
       if (!retryablePaymentError || alreadyHasConfirmedPayment) {
         throw error;
       }
 
-      const payment = await this.provisionAdvancePaymentForBooking(data);
-      const retryPayload = this.injectConfirmedPaymentData(data, payment);
+      const payment = await this.provisionAdvancePaymentForBooking(bookingPayload);
+      const retryPayload = this.injectConfirmedPaymentData(bookingPayload, payment);
 
       if (E2E_VERBOSE) {
         console.log(
@@ -229,14 +344,73 @@ class WebSocketTestClient {
         );
       }
 
-      return this._createBookingOnce(retryPayload, options);
+      const confirmedBookingRetries = positiveIntEnv('E2E_CONFIRMED_BOOKING_RETRIES', 2);
+      return this.createBookingOnceWithRetries(
+        retryPayload,
+        options,
+        confirmedBookingRetries,
+        (attempt, maxAttempts) => ({
+          autoPayment: {
+            attempt,
+            maxAttempts,
+            chargeId: payment.chargeId,
+            rideId: payment.rideId,
+            amountInCents: payment.amountInCents,
+            idempotencyKey: retryPayload.idempotencyKey || null
+          }
+        })
+      );
     }
+  }
+
+  ensureCreateBookingIdempotencyKey(data = {}) {
+    const safeData = data && typeof data === 'object' ? data : {};
+    if (String(safeData.idempotencyKey || '').trim()) {
+      return safeData;
+    }
+
+    const idempotencyKey = buildCanonicalCreateBookingIdempotencyKey({
+      userId: safeData.customerId || this.userId || 'anonymous',
+      data: safeData,
+      fallbackIdempotencyKey: safeData.idempotencyKey
+    });
+
+    return {
+      ...safeData,
+      idempotencyKey
+    };
+  }
+
+  async createBookingOnceWithRetries(data, options, maxAttempts, contextBuilder = null) {
+    let lastError = null;
+    for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+      try {
+        return await this._createBookingOnce(data, options);
+      } catch (error) {
+        lastError = error;
+        if (typeof contextBuilder === 'function') {
+          error.context = {
+            ...(error.context || {}),
+            ...contextBuilder(attempt, maxAttempts)
+          };
+        }
+
+        if (!this.isRetryableConfirmedCreateBookingError(error) || attempt >= maxAttempts) {
+          throw error;
+        }
+
+        await sleep(750 * attempt);
+      }
+    }
+    throw lastError;
   }
 
   async _createBookingOnce(data, options = {}) {
     const timeoutMs = Math.max(1000, Number.parseInt(options.timeoutMs || '20000', 10) || 20000);
     const lateEventGraceMs = Math.max(0, Number.parseInt(options.lateEventGraceMs || '250', 10) || 250);
     const expectedIdempotencyKey = data?.idempotencyKey || null;
+    const requestStartedAt = Date.now();
+    const requestHasConfirmedPayment = this.hasBookingPayloadConfirmedPayment(data);
     const canonicalIdempotencyKey = buildCanonicalCreateBookingIdempotencyKey({
       userId: data?.customerId || this.userId || 'anonymous',
       data,
@@ -258,13 +432,22 @@ class WebSocketTestClient {
       const matchesErrorPayload = (payload = {}) => {
         if (acceptedIdempotencyKeys.size === 0) return true;
         const eventKey = extractEventIdempotencyKey(payload);
+        if (
+          requestHasConfirmedPayment &&
+          !eventKey &&
+          this.isRetryableCreateBookingPaymentError({ message: payload?.error || payload?.message })
+        ) {
+          return false;
+        }
         return !eventKey || acceptedIdempotencyKeys.has(String(eventKey || '').trim());
       };
 
       const findRecordedEvent = (eventName, matcher) => {
         const events = this.getEvents(eventName) || [];
         for (let index = events.length - 1; index >= 0; index -= 1) {
-          const eventData = events[index]?.data || {};
+          const entry = events[index] || {};
+          if ((entry.timestamp || 0) < requestStartedAt) continue;
+          const eventData = entry.data || {};
           try {
             if (matcher(eventData)) return eventData;
           } catch (_error) {
@@ -385,21 +568,132 @@ class WebSocketTestClient {
     );
   }
 
+  isRetryableConfirmedCreateBookingError(error) {
+    const message = String(error?.message || '').trim().toLowerCase();
+    if (!message) return false;
+    return (
+      message.includes('timeout ao criar booking') ||
+      message.includes('socketstate=disconnected') ||
+      message.includes('transport') ||
+      message.includes('temporarily unavailable')
+    );
+  }
+
   async postJson(url, body, timeoutMs = 20000) {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
     try {
+      const headers = { 'content-type': 'application/json' };
+      if (this.authToken) {
+        headers.authorization = `Bearer ${this.authToken}`;
+      }
+
       const response = await fetch(url, {
         method: 'POST',
-        headers: { 'content-type': 'application/json' },
+        headers,
         body: JSON.stringify(body),
         signal: controller.signal
       });
-      const data = await response.json().catch(() => ({}));
-      return { ok: response.ok, status: response.status, data };
+      const rawText = await response.text();
+      let data = {};
+      try {
+        data = rawText ? JSON.parse(rawText) : {};
+      } catch (_error) {
+        data = {};
+      }
+      return {
+        ok: response.ok,
+        status: response.status,
+        statusText: response.statusText,
+        data,
+        rawText: data && Object.keys(data).length ? '' : rawText.slice(0, 1000),
+        traceHeaders: pickTraceHeaders(response.headers)
+      };
     } finally {
       clearTimeout(timer);
     }
+  }
+
+  shouldRetryPaymentAdvance(response, attempt, maxAttempts) {
+    if (attempt >= maxAttempts) return false;
+    const summary = summarizeHttpResponse(response);
+    if (summary.chargeId) return false;
+
+    const status = Number(summary.status || 0);
+    if (status === 0 || summary.transportError) {
+      return true;
+    }
+    if ([408, 409, 425, 429].includes(status) || status >= 500) {
+      return true;
+    }
+
+    if (status !== 400) return false;
+    const text = [summary.error, summary.message, summary.code]
+      .filter(Boolean)
+      .join(' ')
+      .toLowerCase();
+
+    if (
+      text.includes('dados obrigatórios') ||
+      text.includes('valor deve ser maior') ||
+      text.includes('nao autorizado') ||
+      text.includes('não autorizado') ||
+      text.includes('token') ||
+      text.includes('passageiro')
+    ) {
+      return false;
+    }
+
+    return (
+      text.includes('falha ao criar cobrança') ||
+      text.includes('falha ao identificar cobrança') ||
+      text.includes('resposta inválida') ||
+      text.includes('resposta invalida') ||
+      text.includes('woovi') ||
+      text.includes('pix') ||
+      text.includes('erro interno')
+    );
+  }
+
+  async postJsonWithRetry({ url, body, timeoutMs, maxAttempts, baseDelayMs, retryWhen, contextName }) {
+    const attempts = [];
+    let response = null;
+
+    for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+      try {
+        response = await this.postJson(url, body, timeoutMs);
+      } catch (error) {
+        response = {
+          ok: false,
+          status: 0,
+          statusText: 'transport_error',
+          data: {
+            code: error.name || 'transport_error',
+            message: error.message || 'fetch failed'
+          },
+          rawText: '',
+          traceHeaders: {},
+          transportError: error.message || 'fetch failed'
+        };
+      }
+      attempts.push({
+        attempt,
+        ...summarizeHttpResponse(response)
+      });
+
+      const shouldRetry = retryWhen(response, attempt, maxAttempts);
+      if (!shouldRetry) {
+        return { response, attempts };
+      }
+
+      const delay = baseDelayMs * attempt;
+      if (E2E_VERBOSE) {
+        console.log(`⚠️ [TestClient] ${contextName} tentativa ${attempt} falhou; retry em ${delay}ms`);
+      }
+      await sleep(delay);
+    }
+
+    return { response, attempts };
   }
 
   async provisionAdvancePaymentForBooking(bookingPayload = {}) {
@@ -416,24 +710,50 @@ class WebSocketTestClient {
       Number.parseInt(String(bookingPayload?.amountInCents || ''), 10) ||
       toAmountInCents(bookingPayload?.estimatedFare) ||
       2750;
-    const rideId = `ride_e2e_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
-
-    const paymentAdvance = await this.postJson(`${this.apiBaseUrl}/api/payment/advance`, {
+    const rideId = stablePaymentRideId(bookingPayload, passengerId);
+    const paymentIdempotencyKey = `${rideId}:advance:${inferredAmountInCents}`;
+    const paymentRequest = {
       passengerId,
       amount: inferredAmountInCents,
       rideId,
+      idempotencyKey: paymentIdempotencyKey,
       rideDetails: {
         origin: pickupAddress,
         destination: destinationAddress
       },
       passengerName: 'Leaf E2E Passenger',
       passengerEmail: 'qa+e2e@leaf.local'
-    }, 25000);
+    };
 
-    const chargeId = String(paymentAdvance?.data?.chargeId || '').trim();
+    const paymentAdvanceRetries = positiveIntEnv('E2E_PAYMENT_ADVANCE_RETRIES', 3);
+    const paymentAdvanceRetryDelayMs = positiveIntEnv('E2E_PAYMENT_ADVANCE_RETRY_DELAY_MS', 750);
+    const { response: paymentAdvance, attempts: paymentAdvanceAttempts } = await this.postJsonWithRetry({
+      url: `${this.apiBaseUrl}/api/payment/advance`,
+      body: paymentRequest,
+      timeoutMs: 25000,
+      maxAttempts: paymentAdvanceRetries,
+      baseDelayMs: paymentAdvanceRetryDelayMs,
+      contextName: 'payment/advance',
+      retryWhen: (response, attempt, maxAttempts) => this.shouldRetryPaymentAdvance(response, attempt, maxAttempts)
+    });
+
+    const chargeId = extractChargeId(paymentAdvance?.data);
     if (!paymentAdvance.ok || !chargeId) {
-      throw new Error(
-        `payment_advance_failed:${paymentAdvance?.data?.message || paymentAdvance?.status || 'unknown'}`
+      const summary = summarizeHttpResponse(paymentAdvance);
+      throw buildHttpError(
+        `payment_advance_failed:${summary.status || 'unknown'}:${summary.code || summary.error || summary.message || 'unknown'}`,
+        {
+          paymentAdvance: {
+            request: {
+              passengerId,
+              rideId,
+              amount: inferredAmountInCents,
+              idempotencyKey: paymentIdempotencyKey
+            },
+            finalResponse: summary,
+            attempts: paymentAdvanceAttempts
+          }
+        }
       );
     }
 
@@ -454,9 +774,33 @@ class WebSocketTestClient {
       pix: { status: 'COMPLETED' }
     };
 
-    const webhookResponse = await this.postJson(`${this.apiBaseUrl}/api/woovi/webhook`, webhookPayload, 25000);
+    const webhookRetries = positiveIntEnv('E2E_PAYMENT_WEBHOOK_RETRIES', 2);
+    const { response: webhookResponse, attempts: webhookAttempts } = await this.postJsonWithRetry({
+      url: `${this.apiBaseUrl}/api/woovi/webhook`,
+      body: webhookPayload,
+      timeoutMs: 25000,
+      maxAttempts: webhookRetries,
+      baseDelayMs: 750,
+      contextName: 'woovi/webhook',
+      retryWhen: (response, attempt, maxAttempts) => {
+        if (attempt >= maxAttempts) return false;
+        const status = Number(response?.status || 0);
+        if (status === 0 || response?.transportError) return true;
+        return [408, 409, 425, 429].includes(status) || status >= 500;
+      }
+    });
     if (!webhookResponse.ok) {
-      throw new Error(`payment_webhook_failed:${webhookResponse.status}`);
+      throw buildHttpError(`payment_webhook_failed:${webhookResponse.status}`, {
+        paymentWebhook: {
+          request: {
+            rideId,
+            chargeId,
+            amount: inferredAmountInCents
+          },
+          finalResponse: summarizeHttpResponse(webhookResponse),
+          attempts: webhookAttempts
+        }
+      });
     }
 
     await sleep(250);
@@ -474,7 +818,7 @@ class WebSocketTestClient {
       : {};
     const paymentMethod = String(safeOriginal.paymentMethod || 'pix').trim() || 'pix';
 
-    return {
+    const payloadWithPayment = {
       ...safeOriginal,
       paymentMethod,
       paymentStatus: 'confirmed',
@@ -485,6 +829,17 @@ class WebSocketTestClient {
         rideId: payment.rideId,
         amountInCents: payment.amountInCents
       }
+    };
+
+    const idempotencyKey = safeOriginal.idempotencyKey || buildCanonicalCreateBookingIdempotencyKey({
+      userId: safeOriginal.customerId || this.userId || 'anonymous',
+      data: payloadWithPayment,
+      fallbackIdempotencyKey: safeOriginal.idempotencyKey
+    });
+
+    return {
+      ...payloadWithPayment,
+      idempotencyKey
     };
   }
 

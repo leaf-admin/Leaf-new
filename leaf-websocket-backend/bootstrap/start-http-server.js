@@ -65,6 +65,10 @@ function scheduleDailySubscription({ dailySubscriptionService, logStructured, lo
     logStructured('info', 'Cobrança diária de assinaturas agendada', { service: 'daily-subscription', scheduledFor: tomorrow.toISOString() });
 }
 
+function isDailySubscriptionBillingEnabled() {
+    return String(process.env.SUBSCRIPTION_DAILY_BILLING_ENABLED || 'false').toLowerCase() === 'true';
+}
+
 function startHttpServer({
     app,
     server,
@@ -125,9 +129,27 @@ function startHttpServer({
                 connectionCleanupService.start();
                 logStructured('info', 'Serviço de limpeza de conexões iniciado', { service: 'connection-cleanup' });
 
-                // ✅ Iniciar serviço de cobrança diária de assinatura
-                const dailySubscriptionService = require('../services/daily-subscription-service');
-                scheduleDailySubscription({ dailySubscriptionService, logStructured, logError });
+                // ✅ Iniciar serviço de cobrança diária de assinatura somente após estabilização regional
+                if (isDailySubscriptionBillingEnabled()) {
+                    const dailySubscriptionService = require('../services/daily-subscription-service');
+                    scheduleDailySubscription({ dailySubscriptionService, logStructured, logError });
+                } else {
+                    logStructured('info', 'Cobrança diária de assinatura suspensa por configuração', {
+                        service: 'daily-subscription',
+                        reason: 'SUBSCRIPTION_DAILY_BILLING_ENABLED=false'
+                    });
+                }
+
+                // Relatorio diario de earnings/custo por corrida para canal operacional.
+                try {
+                    const dailyEarningsReportService = require('../services/daily-earnings-report-service');
+                    dailyEarningsReportService.startScheduler();
+                } catch (dailyEarningsError) {
+                    logStructured('warn', 'Falha ao iniciar scheduler de earnings diario', {
+                        service: 'daily-earnings-report',
+                        error: dailyEarningsError.message
+                    });
+                }
 
                 // Reprocessa finalizacoes pendentes (outbox) para garantir persistencia no Firestore.
                 try {

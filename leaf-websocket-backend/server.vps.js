@@ -498,6 +498,20 @@ function normalizeVehiclePlate(plate) {
     return String(plate || '').toUpperCase().replace(/[^A-Z0-9]/g, '').trim();
 }
 
+function resolveVehicleLockIdentifier({ plate, vehicleId }) {
+    const normalizedPlate = normalizeVehiclePlate(plate);
+    if (normalizedPlate) {
+        return normalizedPlate;
+    }
+
+    const normalizedVehicleId = normalizeVehiclePlate(vehicleId);
+    if (!normalizedVehicleId) {
+        return '';
+    }
+
+    return `VEHID${normalizedVehicleId}`;
+}
+
 function haversineDistanceMeters(lat1, lng1, lat2, lng2) {
     const nLat1 = toFiniteNumber(lat1);
     const nLng1 = toFiniteNumber(lng1);
@@ -1149,17 +1163,66 @@ async function tryRecoverVehicleLockContext({
     redis,
     logStructured
 }) {
-    let vehiclePlate = normalizeVehiclePlate(socket?.vehiclePlate || existingDriverState?.vehiclePlate || '');
+    let vehiclePlate = resolveVehicleLockIdentifier({
+        plate: socket?.vehiclePlate || existingDriverState?.vehiclePlate || '',
+        vehicleId: existingDriverState?.activeVehicleId || ''
+    });
     let source = vehiclePlate ? 'cached_state' : 'firebase_profile';
 
     if (!vehiclePlate && VEHICLE_LOCK_RECOVERY_FIREBASE_LOOKUP_ENABLED) {
         const db = firebaseConfig?.getRealtimeDB?.();
         if (db) {
-            const userSnapshot = await db.ref(`users/${driverId}`).once('value');
+            const [userSnapshot, userVehiclesSnapshot] = await Promise.all([
+                db.ref(`users/${driverId}`).once('value'),
+                db.ref(`user_vehicles/${driverId}`).once('value')
+            ]);
             const userData = userSnapshot?.val?.() || {};
-            vehiclePlate = normalizeVehiclePlate(
-                userData.carPlate || userData.vehicleNumber || userData.vehiclePlate || ''
-            );
+            const userVehicles = userVehiclesSnapshot?.val?.() || {};
+
+            let activeVehicle = null;
+            let approvedVehicleFallback = null;
+
+            Object.entries(userVehicles).some(([vehicleEntryId, vehicleRaw]) => {
+                const vehicle = vehicleRaw || {};
+                const status = String(vehicle.status || '').toLowerCase();
+                const isApproved = status === 'approved' || status === 'active' || vehicle.approved === true;
+                if (!isApproved) return false;
+
+                const vehicleWithId = { id: vehicleEntryId, ...vehicle };
+                if (!approvedVehicleFallback) {
+                    approvedVehicleFallback = vehicleWithId;
+                }
+                if (vehicle.isActive === true) {
+                    activeVehicle = vehicleWithId;
+                    return true;
+                }
+
+                return false;
+            });
+
+            const selectedVehicle = activeVehicle || approvedVehicleFallback;
+            const selectedVehiclePlate = selectedVehicle
+                ? (selectedVehicle.plate || selectedVehicle.vehicleNumber || selectedVehicle.vehiclePlate || '')
+                : '';
+            const selectedVehicleId = selectedVehicle
+                ? (selectedVehicle.vehicleId || selectedVehicle.id || '')
+                : (userData.activeVehicleId || '');
+            const userProfilePlate = userData.carPlate || userData.vehicleNumber || userData.vehiclePlate || '';
+
+            vehiclePlate = resolveVehicleLockIdentifier({
+                plate: selectedVehiclePlate || userProfilePlate,
+                vehicleId: selectedVehicleId
+            });
+
+            if (vehiclePlate) {
+                if (normalizeVehiclePlate(selectedVehiclePlate)) {
+                    source = activeVehicle ? 'user_vehicles_active' : 'user_vehicles_approved_fallback';
+                } else if (selectedVehicleId) {
+                    source = selectedVehicle ? 'user_vehicle_id_fallback' : 'user_profile_vehicle_id_fallback';
+                } else if (normalizeVehiclePlate(userProfilePlate)) {
+                    source = 'user_profile';
+                }
+            }
         }
     }
 
@@ -1830,6 +1893,12 @@ initializeSocketIoRedisAdapter().catch((error) => {
         error: error.message
     });
 });
+
+setInterval(() => {
+    if (typeof runtimeMetrics.setWebSocketConnections === 'function') {
+        runtimeMetrics.setWebSocketConnections(io.engine?.clientsCount || 0, RUNTIME_ROLE);
+    }
+}, 5000).unref();
 
 // Injetar Socket.IO nas rotas de suporte após inicialização do io
 if (supportFullRoutes.setIOInstance) {
@@ -3317,15 +3386,16 @@ logStructured('info', '🔵 Iniciando processo de inicialização do servidor', 
             const isSchedulerLeaderWorker =
                 !CLUSTER_ENABLED || !cluster.worker || cluster.worker.id === CLUSTER_SCHEDULER_LEADER_ID;
             if (isSchedulerLeaderWorker) {
-                // ✅ Iniciar serviço de cobrança diária de assinatura
-                const dailySubscriptionService = require('./services/daily-subscription-service');
+                if (String(process.env.SUBSCRIPTION_DAILY_BILLING_ENABLED || 'false').toLowerCase() === 'true') {
+                    // ✅ Iniciar serviço de cobrança diária de assinatura
+                    const dailySubscriptionService = require('./services/daily-subscription-service');
 
-                // Agendar cobrança diária (todos os dias às 00:00)
-                const scheduleDailySubscription = () => {
-                    const now = new Date();
-                    const tomorrow = new Date(now);
-                    tomorrow.setDate(tomorrow.getDate() + 1);
-                    tomorrow.setHours(0, 0, 0, 0); // Meia-noite
+                    // Agendar cobrança diária (todos os dias às 00:00)
+                    const scheduleDailySubscription = () => {
+                        const now = new Date();
+                        const tomorrow = new Date(now);
+                        tomorrow.setDate(tomorrow.getDate() + 1);
+                        tomorrow.setHours(0, 0, 0, 0); // Meia-noite
 
                     const msUntilMidnight = tomorrow.getTime() - now.getTime();
 
@@ -3372,7 +3442,14 @@ logStructured('info', '🔵 Iniciando processo de inicialização do servidor', 
                     });
                 };
 
-                scheduleDailySubscription();
+                    scheduleDailySubscription();
+                } else {
+                    logStructured('info', 'Cobrança diária de assinatura suspensa por configuração', {
+                        service: 'daily-subscription',
+                        reason: 'SUBSCRIPTION_DAILY_BILLING_ENABLED=false',
+                        workerId: cluster.worker?.id || null
+                    });
+                }
 
                 // Reprocessa finalizacoes pendentes (outbox) para garantir persistencia no Firestore.
                 try {
@@ -3752,10 +3829,18 @@ io.on('connection', async (socket) => {
                 // Em modo bloqueado, terminamos qualquer sessão anterior pelo room da sessão.
                 if (SESSION_SIMULTANEA_BLOCKED) {
                     io.to(sessionRoom).except(socket.id).emit('sessionTerminated', {
+                        code: 'SESSION_REPLACED',
                         reason: 'Nova sessão iniciada em outro dispositivo',
+                        userId: authUserId,
+                        newSocketId: socket.id,
                         timestamp: new Date().toISOString()
                     });
-                    io.in(sessionRoom).except(socket.id).disconnectSockets(true);
+                    const disconnectTimer = setTimeout(() => {
+                        io.in(sessionRoom).except(socket.id).disconnectSockets(false);
+                    }, 250);
+                    if (typeof disconnectTimer.unref === 'function') {
+                        disconnectTimer.unref();
+                    }
                 }
             } finally {
                 if (SESSION_SIMULTANEA_BLOCKED && sessionLockRef?.acquired && redisForSessionLock) {
@@ -4662,6 +4747,7 @@ io.on('connection', async (socket) => {
 
                     let normalizedPaymentStatus = (data?.paymentStatus || 'pending_payment').toString().toLowerCase();
                     let hasConfirmedPayment = PAID_PAYMENT_STATUSES.has(normalizedPaymentStatus);
+                    let paymentServerValidated = false;
                     const paymentChargeId = String(data?.paymentData?.chargeId || data?.paymentId || '').trim();
                     const paymentReferenceRideId = String(data?.paymentData?.rideId || data?.rideId || '').trim();
                     const parsedPaymentAmountInCents = Number.parseInt(
@@ -4849,6 +4935,7 @@ io.on('connection', async (socket) => {
 
                             normalizedPaymentStatus = verifiedPaymentStatus;
                             hasConfirmedPayment = true;
+                            paymentServerValidated = true;
 
                             const amountFromPaymentStatus = Number(paymentStatusCheck.amount);
                             if (
@@ -5194,9 +5281,10 @@ io.on('connection', async (socket) => {
                                 chargeId: paymentChargeId || '',
                                 rideId: paymentReferenceRideId || '',
                                 amountInCents: Number.isFinite(resolvedPaymentAmountInCents)
-                                    ? String(Math.round(resolvedPaymentAmountInCents))
+                                    ? Math.round(resolvedPaymentAmountInCents)
                                     : '',
                                 paymentStatus: normalizedPaymentStatus,
+                                serverValidated: paymentServerValidated,
                                 confirmedAt: hasConfirmedPayment ? new Date().toISOString() : null
                             },
                             pricingContext: data.pricingContext || data.operational || null,
@@ -9562,47 +9650,136 @@ io.on('connection', async (socket) => {
                 });
 
                 try {
-                    // Buscar veículo ativo do motorista
-                    const db = firebaseConfig?.getRealtimeDB?.();
-                    if (!db) {
-                        throw new Error('Firebase Database não disponível');
-                    }
+                    const driverEligibilityService = require('./services/driver-eligibility-service');
+                    const redisForLockLookup = redisPool.getConnection();
+                    const existingDriverStateForLock = await getDriverStateHot(redisForLockLookup, driverId);
 
-                    // Buscar veículo ativo em user_vehicles
-                    const userVehiclesRef = db.ref(`user_vehicles/${driverId}`);
-                    const userVehiclesSnapshot = await userVehiclesRef.once('value');
+                    let vehiclePlate = resolveVehicleLockIdentifier({
+                        plate: socket?.vehiclePlate || existingDriverStateForLock?.vehiclePlate || '',
+                        vehicleId: existingDriverStateForLock?.activeVehicleId || ''
+                    });
+                    let vehiclePlateSource = vehiclePlate ? 'cached_state' : null;
 
-                    let activeVehicle = null;
-                    let vehiclePlate = null;
+                    if (!vehiclePlate) {
+                        try {
+                            const resolvedProfile = await driverEligibilityService.resolveDriverProfile(
+                                driverId,
+                                existingDriverStateForLock || {}
+                            );
 
-                    if (userVehiclesSnapshot.exists()) {
-                        userVehiclesSnapshot.forEach((childSnapshot) => {
-                            const userVehicle = childSnapshot.val();
-                            if (userVehicle.isActive === true &&
-                                (userVehicle.status === 'approved' || userVehicle.approved === true)) {
-                                activeVehicle = userVehicle;
-                                return true; // Parar iteração
+                            if (resolvedProfile?.assignmentConflict) {
+                                emitDriverStatusError({
+                                    error: 'Este veículo está ativo para outro motorista no momento.',
+                                    code: 'VEHICLE_ASSIGNED_TO_ANOTHER_DRIVER'
+                                }, 'vehicle_assigned_to_another_driver');
+                                return;
                             }
-                        });
+
+                            vehiclePlate = resolveVehicleLockIdentifier({
+                                plate: resolvedProfile?.vehiclePlate || '',
+                                vehicleId: resolvedProfile?.activeVehicleId || ''
+                            });
+                            if (vehiclePlate) {
+                                vehiclePlateSource = 'driver_eligibility_profile';
+                            }
+                        } catch (eligibilityError) {
+                            logStructured('warn', 'Falha ao resolver placa via driver-eligibility-service', {
+                                service: 'server',
+                                driverId,
+                                error: eligibilityError?.message || String(eligibilityError),
+                                eventType: 'setDriverStatus'
+                            });
+                        }
                     }
 
-                    // Se não encontrou em user_vehicles, buscar no perfil do usuário
-                    if (!activeVehicle) {
-                        const userRef = db.ref(`users/${driverId}`);
-                        const userSnapshot = await userRef.once('value');
-                        const userData = userSnapshot.val();
-
-                        if (userData && (userData.carPlate || userData.vehicleNumber || userData.vehiclePlate)) {
-                            vehiclePlate = userData.carPlate || userData.vehicleNumber || userData.vehiclePlate;
+                    if (!vehiclePlate) {
+                        // Fallback final no RTDB bruto para compatibilidade retroativa.
+                        const db = firebaseConfig?.getRealtimeDB?.();
+                        if (!db) {
+                            throw new Error('Firebase Database não disponível');
                         }
-                    } else {
-                        // Buscar placa do veículo
-                        const vehicleRef = db.ref(`vehicles/${activeVehicle.vehicleId}`);
-                        const vehicleSnapshot = await vehicleRef.once('value');
 
-                        if (vehicleSnapshot.exists()) {
-                            const vehicleData = vehicleSnapshot.val();
-                            vehiclePlate = vehicleData.plate || vehicleData.vehicleNumber || vehicleData.vehiclePlate;
+                        const [userVehiclesSnapshot, userSnapshot] = await Promise.all([
+                            db.ref(`user_vehicles/${driverId}`).once('value'),
+                            db.ref(`users/${driverId}`).once('value')
+                        ]);
+                        const userData = userSnapshot?.val?.() || null;
+
+                        let activeVehicle = null;
+                        let approvedVehicleFallback = null;
+
+                        if (userVehiclesSnapshot.exists()) {
+                            userVehiclesSnapshot.forEach((childSnapshot) => {
+                                const userVehicle = childSnapshot.val() || {};
+                                const status = String(userVehicle.status || '').toLowerCase();
+                                const isApproved = status === 'approved' || status === 'active' || userVehicle.approved === true;
+                                if (!isApproved) return false;
+
+                                const withId = { id: childSnapshot.key, ...userVehicle };
+                                if (!approvedVehicleFallback) {
+                                    approvedVehicleFallback = withId;
+                                }
+                                if (userVehicle.isActive === true) {
+                                    activeVehicle = withId;
+                                    return true;
+                                }
+                                return false;
+                            });
+                        }
+
+                        const selectedVehicle = activeVehicle || approvedVehicleFallback;
+                        const selectedVehicleId = selectedVehicle
+                            ? (selectedVehicle.vehicleId || selectedVehicle.id || '')
+                            : (userData?.activeVehicleId || '');
+                        let selectedVehiclePlate = selectedVehicle
+                            ? (
+                                selectedVehicle.plate ||
+                                selectedVehicle.vehicleNumber ||
+                                selectedVehicle.vehiclePlate ||
+                                ''
+                            )
+                            : '';
+
+                        if (selectedVehicle) {
+                            vehiclePlate = normalizeVehiclePlate(selectedVehiclePlate);
+                            if (vehiclePlate) {
+                                vehiclePlateSource = activeVehicle ? 'user_vehicles_active' : 'user_vehicles_approved_fallback';
+                            }
+
+                            if (!vehiclePlate && selectedVehicle.vehicleId) {
+                                const vehicleSnapshot = await db.ref(`vehicles/${selectedVehicle.vehicleId}`).once('value');
+                                const vehicleData = vehicleSnapshot?.val?.() || null;
+                                selectedVehiclePlate =
+                                    vehicleData?.plate ||
+                                    vehicleData?.vehicleNumber ||
+                                    vehicleData?.vehiclePlate ||
+                                    '';
+                                vehiclePlate = normalizeVehiclePlate(selectedVehiclePlate);
+                                if (vehiclePlate) {
+                                    vehiclePlateSource = 'vehicles_catalog';
+                                }
+                            }
+                        }
+
+                        if (!vehiclePlate) {
+                            const userProfilePlate =
+                                userData?.carPlate ||
+                                userData?.vehicleNumber ||
+                                userData?.vehiclePlate ||
+                                '';
+                            vehiclePlate = resolveVehicleLockIdentifier({
+                                plate: userProfilePlate || selectedVehiclePlate || '',
+                                vehicleId: selectedVehicleId
+                            });
+                            if (vehiclePlate) {
+                                if (normalizeVehiclePlate(userProfilePlate)) {
+                                    vehiclePlateSource = 'user_profile';
+                                } else if (selectedVehicleId) {
+                                    vehiclePlateSource = selectedVehicle
+                                        ? 'user_vehicle_id_fallback'
+                                        : 'user_profile_vehicle_id_fallback';
+                                }
+                            }
                         }
                     }
 
@@ -9640,6 +9817,7 @@ io.on('connection', async (socket) => {
                         service: 'server',
                         driverId,
                         vehiclePlate,
+                        source: vehiclePlateSource || 'unknown',
                         eventType: 'setDriverStatus'
                     });
 
@@ -11863,11 +12041,26 @@ io.on('connection', async (socket) => {
                     userId: socket.userId || socket.id
                 });
 
-                const chatId = `chat_${Date.now()}`;
+                const chatId =
+                    data?.chatId ||
+                    data?.bookingId ||
+                    data?.tripId ||
+                    data?.rideId ||
+                    `chat_${Date.now()}`;
+                const conversationId = data?.bookingId || data?.tripId || data?.rideId || chatId;
+                const participants = Array.isArray(data?.participants)
+                    ? data.participants.filter(Boolean)
+                    : [];
+                if (socket.userId && !participants.includes(socket.userId)) {
+                    participants.push(socket.userId);
+                }
 
                 socket.emit('chatCreated', {
                     success: true,
                     chatId,
+                    bookingId: conversationId,
+                    participants,
+                    type: data?.type || 'trip_chat',
                     message: 'Chat criado com sucesso'
                 });
 
@@ -11940,15 +12133,25 @@ io.on('connection', async (socket) => {
                 // ✅ NOVO: Salvar mensagem no Firestore com TTL de 90 dias
                 try {
                     const chatPersistenceService = require('./services/chat-persistence-service');
-                    const saveResult = await chatPersistenceService.saveMessage({
-                        bookingId: bookingId || conversationId,
-                        rideId: rideId || conversationId,
-                        senderId: senderId,
-                        receiverId: receiverId || null,
-                        message: message,
-                        senderType: senderType || (socket.userType === 'driver' ? 'driver' : 'passenger'),
-                        timestamp: new Date().toISOString()
-                    });
+                    const persistenceTimeoutMs = Math.max(
+                        500,
+                        Number.parseInt(process.env.CHAT_PERSISTENCE_TIMEOUT_MS || '1500', 10) || 1500
+                    );
+                    const saveResult = await Promise.race([
+                        chatPersistenceService.saveMessage({
+                            bookingId: bookingId || conversationId,
+                            rideId: rideId || conversationId,
+                            senderId: senderId,
+                            receiverId: receiverId || null,
+                            message: message,
+                            senderType: senderType || (socket.userType === 'driver' ? 'driver' : 'passenger'),
+                            timestamp: new Date().toISOString()
+                        }),
+                        new Promise((resolve) => setTimeout(() => resolve({
+                            success: false,
+                            error: `timeout_after_${persistenceTimeoutMs}ms`
+                        }), persistenceTimeoutMs))
+                    ]);
 
                     if (!saveResult.success) {
                         logStructured('error', 'Erro ao salvar mensagem no Firestore', {
@@ -11993,6 +12196,11 @@ io.on('connection', async (socket) => {
                 socket.emit('messageSent', {
                     success: true,
                     messageId: messageId,
+                    chatId: conversationId,
+                    bookingId: conversationId,
+                    text: message,
+                    senderId,
+                    senderType: senderType || (socket.userType === 'driver' ? 'driver' : 'passenger'),
                     message: 'Mensagem enviada com sucesso',
                     timestamp: new Date().toISOString()
                 });
@@ -12004,8 +12212,10 @@ io.on('connection', async (socket) => {
                         receiverSocket.emit('newMessage', {
                             success: true,
                             messageId: messageId,
+                            chatId: conversationId,
                             bookingId: conversationId,
                             senderId: senderId,
+                            text: message,
                             message: message,
                             senderType: senderType || (socket.userType === 'driver' ? 'driver' : 'passenger'),
                             timestamp: new Date().toISOString()

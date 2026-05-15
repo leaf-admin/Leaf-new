@@ -78,7 +78,7 @@ async function testGraphQLUnauthorizedAccess() {
 async function testAuthenticationLogin() {
     try {
         const loginResponse = await axios.post(LOGIN_URL, {
-            phone: '+5511999999999',
+            phone: '+5521102938475',
             password: '123456',
             userType: 'CUSTOMER'
         });
@@ -287,6 +287,5 @@ async function runAllTests() {
 
 const startTestTime = Date.now();
 runAllTests();
-
 
 

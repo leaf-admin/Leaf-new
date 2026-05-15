@@ -90,7 +90,7 @@ setTimeout(async () => {
     // Teste 2: Login
     try {
         const loginRes = await axios.post(`http://localhost:${PORT}/auth/login`, {
-            phone: '+5511999999999',
+            phone: '+5521102938475',
             password: '123456',
             userType: 'CUSTOMER'
         });

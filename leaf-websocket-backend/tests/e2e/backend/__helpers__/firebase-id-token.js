@@ -65,6 +65,9 @@ function resolveFirebaseApiKey() {
 
   for (const pick of candidates) {
     const value = String(pick() || '').trim();
+    if (/^YOUR_|_HERE$/i.test(value) || /YOUR_FIREBASE_API_KEY/i.test(value)) {
+      continue;
+    }
     if (value) return value;
   }
   return '';

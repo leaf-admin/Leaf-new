@@ -36,6 +36,7 @@ class RedisDriverSimulator {
     ];
     this.remoteCommandRetries = Number.parseInt(process.env.E2E_REMOTE_CMD_RETRIES || '3', 10);
     this.remoteCommandRetryDelayMs = Number.parseInt(process.env.E2E_REMOTE_CMD_RETRY_DELAY_MS || '250', 10);
+    this.remoteCommandTimeoutMs = Number.parseInt(process.env.E2E_REMOTE_CMD_TIMEOUT_MS || '20000', 10);
     this.remoteScanCount = Number.parseInt(process.env.E2E_REMOTE_SCAN_COUNT || '500', 10);
     this.useRemoteRedis = this.shouldUseRemoteRedis();
   }
@@ -114,6 +115,10 @@ class RedisDriverSimulator {
     return normalized;
   }
 
+  quoteRedisArg(value) {
+    return `'${String(value ?? '').replace(/'/g, `'\"'\"'`)}'`;
+  }
+
   sleep(ms) {
     return new Promise((resolve) => setTimeout(resolve, ms));
   }
@@ -180,7 +185,11 @@ class RedisDriverSimulator {
     for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
       try {
         const { stdout, stderr } = await execFileAsync('ssh', args, {
-          maxBuffer: 1024 * 1024 * 8
+          maxBuffer: 1024 * 1024 * 8,
+          timeout: Number.isFinite(this.remoteCommandTimeoutMs) && this.remoteCommandTimeoutMs > 0
+            ? this.remoteCommandTimeoutMs
+            : 20000,
+          killSignal: 'SIGTERM'
         });
 
         // Algumas versões do redis-cli em docker imprimem saída útil em stderr.
@@ -245,6 +254,58 @@ class RedisDriverSimulator {
 
     const redis = await this.getRedis();
     return redis.hgetall(key);
+  }
+
+  async hset(key, values) {
+    if (!values || typeof values !== 'object') return 0;
+
+    if (this.useRemoteRedis) {
+      const safeKey = this.sanitizeRedisKey(key, 'key');
+      const args = Object.entries(values).flatMap(([field, value]) => [
+        this.sanitizeRedisKey(field, 'field'),
+        this.quoteRedisArg(value)
+      ]);
+      if (!args.length) return 0;
+
+      const redisCli = this.buildRemoteRedisCli();
+      const raw = await this.runRemoteShell(`${redisCli} HSET ${safeKey} ${args.join(' ')} || true`);
+      const scalar = this.parseRedisScalar(raw);
+      return scalar ? Number(scalar) : 0;
+    }
+
+    const redis = await this.getRedis();
+    return redis.hset(key, values);
+  }
+
+  async rpush(key, value) {
+    if (this.useRemoteRedis) {
+      const safeKey = this.sanitizeRedisKey(key, 'key');
+      const redisCli = this.buildRemoteRedisCli();
+      const raw = await this.runRemoteShell(`${redisCli} RPUSH ${safeKey} ${this.quoteRedisArg(value)} || true`);
+      const scalar = this.parseRedisScalar(raw);
+      return scalar ? Number(scalar) : 0;
+    }
+
+    const redis = await this.getRedis();
+    return redis.rpush(key, value);
+  }
+
+  async expire(key, seconds) {
+    const ttl = Number.parseInt(seconds, 10);
+    if (!Number.isFinite(ttl) || ttl < 0) {
+      throw new Error(`ttl inválido para expire: ${seconds}`);
+    }
+
+    if (this.useRemoteRedis) {
+      const safeKey = this.sanitizeRedisKey(key, 'key');
+      const redisCli = this.buildRemoteRedisCli();
+      const raw = await this.runRemoteShell(`${redisCli} EXPIRE ${safeKey} ${ttl} || true`);
+      const scalar = this.parseRedisScalar(raw);
+      return scalar ? Number(scalar) : 0;
+    }
+
+    const redis = await this.getRedis();
+    return redis.expire(key, ttl);
   }
 
   async keys(pattern) {
