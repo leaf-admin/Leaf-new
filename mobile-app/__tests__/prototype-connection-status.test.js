@@ -131,4 +131,22 @@ describe('prototypeConnectionStatus', () => {
       }),
     ).toBe(true);
   });
+
+  test('ignores qa connection automation flags in production contexts', () => {
+    const config = resolvePrototypeConnectionAutomationConfig(
+      {
+        qaAutomation: '1',
+        qaConnectionScenario: 'drop_and_recover',
+        qaConnectionTriggerState: 'started',
+      },
+      {
+        activeRole: 'driver',
+        isDev: false,
+        isE2E: false,
+      },
+    );
+
+    expect(config.enabled).toBe(false);
+    expect(config.scenario).toBe('');
+  });
 });

@@ -28,10 +28,38 @@ describe("DriverExternalNavigationService", () => {
     jest.clearAllMocks();
   });
 
+  it("offers Apple Maps on iOS and opens the native Apple Maps URL", async () => {
+    ActionSheetIOS.showActionSheetWithOptions.mockImplementation(
+      (options, onSelect) => {
+        expect(options.options).toEqual([
+          "Cancelar",
+          "Mapas da Apple",
+          "Google Maps",
+          "Waze",
+        ]);
+        onSelect(1);
+      },
+    );
+    Linking.openURL.mockResolvedValue(true);
+
+    await expect(
+      openDriverExternalNavigation({
+        coordinate: { latitude: -22.9711, longitude: -43.1822 },
+        destinationLabel: "Embarque",
+        phase: "pickup",
+      }),
+    ).resolves.toBe("apple_maps");
+
+    expect(Linking.canOpenURL).not.toHaveBeenCalled();
+    expect(Linking.openURL).toHaveBeenCalledWith(
+      "http://maps.apple.com/?daddr=-22.9711,-43.1822&dirflg=d",
+    );
+  });
+
   it("falls back to Google Maps web when the native scheme cannot be queried", async () => {
     ActionSheetIOS.showActionSheetWithOptions.mockImplementation(
       (_options, onSelect) => {
-        onSelect(1);
+        onSelect(2);
       },
     );
     Linking.canOpenURL.mockRejectedValue(
@@ -55,7 +83,7 @@ describe("DriverExternalNavigationService", () => {
   it("falls back to Waze web when the native scheme cannot be queried", async () => {
     ActionSheetIOS.showActionSheetWithOptions.mockImplementation(
       (_options, onSelect) => {
-        onSelect(2);
+        onSelect(3);
       },
     );
     Linking.canOpenURL.mockRejectedValue(

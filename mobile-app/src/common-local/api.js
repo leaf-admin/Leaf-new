@@ -5,7 +5,7 @@ import { API_URLS } from '../config/ApiConfig';
 
 const normalizeBaseUrl = (url) => {
     const raw = String(url || '').trim();
-    if (!raw) return 'https://api.62.169.31.231.sslip.io';
+    if (!raw) return 'https://api.leaf.app.br';
 
     const withoutTrailingSlash = raw.replace(/\/+$/, '');
     // Evita duplicação de rota quando EXPO_PUBLIC_API_URL vier como ".../api"
@@ -17,7 +17,7 @@ const API_BASE_URL =
         process.env.EXPO_PUBLIC_API_URL ||
         process.env.EXPO_PUBLIC_BACKEND_URL ||
         API_URLS?.selfHostedApi ||
-        'https://api.62.169.31.231.sslip.io'
+        'https://api.leaf.app.br'
     );
 
 const httpClient = createAxiosInstance({

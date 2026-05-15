@@ -590,8 +590,9 @@ const DriverEnRouteUI = React.memo(function DriverEnRouteUI({ booking, onArrived
 
       // Verificar se Waze está instalado
       const isWazeInstalled = await Linking.canOpenURL('waze://');
+      const isAppleMapsAvailable = Platform.OS === 'ios';
 
-      if (!isGoogleMapsInstalled && !isWazeInstalled) {
+      if (!isAppleMapsAvailable && !isGoogleMapsInstalled && !isWazeInstalled) {
         // Nenhum app de navegação instalado, abrir no navegador
         const url = `https://www.google.com/maps/dir/?api=1&destination=${latitude},${longitude}`;
         await Linking.openURL(url);
@@ -600,6 +601,22 @@ const DriverEnRouteUI = React.memo(function DriverEnRouteUI({ booking, onArrived
 
       // Mostrar opções de navegação
       const navigationOptions = [];
+
+      if (isAppleMapsAvailable) {
+        navigationOptions.push({
+          text: 'Mapas da Apple',
+          onPress: async () => {
+            try {
+              const url = `http://maps.apple.com/?daddr=${latitude},${longitude}&dirflg=d`;
+              await Linking.openURL(url);
+            } catch (error) {
+              Logger.error('Erro ao abrir Mapas da Apple:', error);
+              const webUrl = `https://www.google.com/maps/dir/?api=1&destination=${latitude},${longitude}`;
+              await Linking.openURL(webUrl);
+            }
+          }
+        });
+      }
 
       if (isGoogleMapsInstalled) {
         navigationOptions.push({

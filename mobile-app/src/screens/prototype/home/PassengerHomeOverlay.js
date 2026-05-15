@@ -30,9 +30,9 @@ function PassengerHomeOverlay({
         onPress={onDestinationPress}
         onPressRightIcon={onMicrophonePress}
         testID="passenger-home-destination-input"
-        accessibilityLabel="passenger-home-destination-input"
+        accessibilityLabel="Escolher destino da viagem"
         rightIconTestID="passenger-home-destination-mic"
-        rightIconAccessibilityLabel="passenger-home-destination-mic"
+        rightIconAccessibilityLabel="Ditar destino por voz"
       />
     </PrototypeCard>
   );

@@ -48,4 +48,25 @@ describe("resolveDriverOnlineLocationSeed", () => {
     });
     expect(refreshCurrentLocation).toHaveBeenCalledTimes(1);
   });
+
+  it("can prefer a fresh location over cached runtime coordinates", async () => {
+    const cachedSeed = { lat: 39.237255, lng: -123.150032, heading: 0, speed: 0 };
+    const refreshedSeed = { lat: -22.971177, lng: -43.182543, heading: 8, speed: 0 };
+    let currentSeed = cachedSeed;
+    const refreshCurrentLocation = jest.fn(async () => {
+      currentSeed = refreshedSeed;
+    });
+
+    await expect(
+      resolveDriverOnlineLocationSeed({
+        getCachedSeed: () => currentSeed,
+        refreshCurrentLocation,
+        preferFresh: true,
+      }),
+    ).resolves.toEqual({
+      statusLocationSeed: refreshedSeed,
+      seedSource: "fresh_current_position",
+    });
+    expect(refreshCurrentLocation).toHaveBeenCalledTimes(1);
+  });
 });

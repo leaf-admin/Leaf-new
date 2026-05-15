@@ -17,7 +17,8 @@ import {
     Animated,
     InteractionManager,
     AppState,
-    Modal
+    Modal,
+    StatusBar
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import BottomSheet, { BottomSheetView, BottomSheetBackdrop } from '@gorhom/bottom-sheet';
@@ -82,6 +83,13 @@ const ROUTE_RECALC_CONFIG = {
     }
 };
 const DESTINATION_CHANGE_FORCE_RECALC_KM = 0.05;
+const MAX_OPERATIONAL_ROUTE_DISTANCE_KM = Math.max(
+    80,
+    Number.parseFloat(process.env.EXPO_PUBLIC_MAX_OPERATIONAL_ROUTE_DISTANCE_KM || '120') || 120
+);
+const LEGACY_ROUTE_GUARD_MESSAGE_REGEX = /origem e destino inconsistentes para a (área|area) de opera(ç|c)ão da leaf/i;
+const REGION_UNAVAILABLE_MESSAGE_REGEX = /regi(ã|a)o indispon(i|í)vel/i;
+const OUT_OF_COVERAGE_MESSAGE = 'Destino fora da area de cobertura da Leaf';
 
 const Alert = {
     ...NativeAlert,
@@ -318,6 +326,44 @@ function PassengerUI(props) {
         socketId: null
     }); // ✅ Status da conexão WebSocket
 
+    const normalizeCoverageMessage = useCallback((message) => {
+        const normalized = String(message || '').trim();
+        if (!normalized) {
+            return '';
+        }
+        if (LEGACY_ROUTE_GUARD_MESSAGE_REGEX.test(normalized)) {
+            return OUT_OF_COVERAGE_MESSAGE;
+        }
+        if (/destino fora da (área|area) de cobertura da leaf/i.test(normalized)) {
+            return OUT_OF_COVERAGE_MESSAGE;
+        }
+        if (REGION_UNAVAILABLE_MESSAGE_REGEX.test(normalized)) {
+            return OUT_OF_COVERAGE_MESSAGE;
+        }
+        return normalized;
+    }, []);
+
+    const hasIntercontinentalAddressConflict = useMemo(() => {
+        const normalizeText = (value) =>
+            String(value || '')
+                .normalize('NFD')
+                .replace(/[\u0300-\u036f]/g, '')
+                .toLowerCase();
+
+        const pickupText = normalizeText(`${tripdata?.pickup?.add || ''} ${tripdata?.pickup?.address || ''}`);
+        const dropText = normalizeText(`${tripdata?.drop?.add || ''} ${tripdata?.drop?.address || ''}`);
+
+        if (!pickupText || !dropText) {
+            return false;
+        }
+
+        const pickupLooksUS = /\b(san francisco|california|united states|usa)\b/.test(pickupText);
+        const dropLooksBrazil = /\b(rio de janeiro|brasil|brazil|santos dumont)\b/.test(dropText);
+        return pickupLooksUS && dropLooksBrazil;
+    }, [tripdata?.pickup?.add, tripdata?.pickup?.address, tripdata?.drop?.add, tripdata?.drop?.address]);
+    const routeOutOfCoverage = geofenceStatus.outOfCoverage || hasIntercontinentalAddressConflict;
+    const routeOutOfCoverageMessage = normalizeCoverageMessage(geofenceStatus.message) || OUT_OF_COVERAGE_MESSAGE;
+
     // Refs para os containers que devem permanecer fixos
     const carOptionsContainerRef = useRef(null);
     const bookButtonContainerRef = useRef(null);
@@ -330,6 +376,10 @@ function PassengerUI(props) {
 
     // Snap points para o BottomSheet - ajustado para caber tudo
     const screenHeight = Dimensions.get('window').height;
+    const androidStatusBarHeight = Platform.OS === 'android' ? Number(StatusBar.currentHeight || 0) : 0;
+    const headerTopOffset = Platform.OS === 'android' ? Math.max(24, androidStatusBarHeight) + 8 : 48;
+    const abSwitchTopOffset = Platform.OS === 'android' ? headerTopOffset + 52 : 96;
+    const routeCalculationTopOffset = Platform.OS === 'android' ? headerTopOffset + 122 : 150;
 
     // ✅ SnapPoints específico para "searching" - ajustado para ficar acima do menu Android (22% + 15% = 25.3% + 20px)
     const searchingSnapPoints = useMemo(() => {
@@ -1148,6 +1198,122 @@ function PassengerUI(props) {
         return Number.isFinite(numeric) ? numeric : null;
     }, []);
 
+    const inferAddressCountry = useCallback((address) => {
+        if (typeof address !== 'string' || !address.trim()) {
+            return null;
+        }
+
+        const normalized = address
+            .normalize('NFD')
+            .replace(/[\u0300-\u036f]/g, '')
+            .toLowerCase();
+
+        if (/\b(united states|usa|california|san francisco)\b/.test(normalized)) {
+            return 'US';
+        }
+
+        if (/\b(brasil|brazil|rio de janeiro|sao paulo|sao paulo|rj)\b/.test(normalized)) {
+            return 'BR';
+        }
+
+        return null;
+    }, []);
+
+    const inferCoordinateCountry = useCallback((lat, lng) => {
+        if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+            return null;
+        }
+
+        // Bounding boxes aproximados para validação de consistência operacional.
+        const isBrazil = lat >= -34.0 && lat <= 6.0 && lng >= -74.0 && lng <= -34.0;
+        if (isBrazil) {
+            return 'BR';
+        }
+
+        const isContinentalUS = lat >= 18.0 && lat <= 50.0 && lng >= -125.0 && lng <= -66.0;
+        if (isContinentalUS) {
+            return 'US';
+        }
+
+        return null;
+    }, []);
+
+    const evaluateTripFeasibility = useCallback((pickup, drop) => {
+        const pickupLat = parseCoordinateValue(pickup?.lat);
+        const pickupLng = parseCoordinateValue(pickup?.lng);
+        const dropLat = parseCoordinateValue(drop?.lat);
+        const dropLng = parseCoordinateValue(drop?.lng);
+        const pickupCountry = inferAddressCountry(pickup?.add || pickup?.address || '');
+        const dropCountry = inferAddressCountry(drop?.add || drop?.address || '');
+
+        if (pickupLat === null || pickupLng === null || dropLat === null || dropLng === null) {
+            return {
+                valid: false,
+                code: 'pending_coordinates',
+                straightDistanceKm: null
+            };
+        }
+
+        const straightDistanceKm = Number(GetDistance(pickupLat, pickupLng, dropLat, dropLng));
+        if (!Number.isFinite(straightDistanceKm) || straightDistanceKm <= 0) {
+            return {
+                valid: false,
+                code: 'invalid_distance',
+                straightDistanceKm: null
+            };
+        }
+
+        const pickupCountryByCoords = inferCoordinateCountry(pickupLat, pickupLng);
+        const dropCountryByCoords = inferCoordinateCountry(dropLat, dropLng);
+        if (pickupCountry && pickupCountryByCoords && pickupCountry !== pickupCountryByCoords) {
+            return {
+                valid: false,
+                code: 'pickup_address_coordinate_mismatch',
+                straightDistanceKm,
+                pickupCountry,
+                pickupCountryByCoords,
+                dropCountry,
+                dropCountryByCoords
+            };
+        }
+
+        if (dropCountry && dropCountryByCoords && dropCountry !== dropCountryByCoords) {
+            return {
+                valid: false,
+                code: 'drop_address_coordinate_mismatch',
+                straightDistanceKm,
+                pickupCountry,
+                pickupCountryByCoords,
+                dropCountry,
+                dropCountryByCoords
+            };
+        }
+
+        if (pickupCountry && dropCountry && pickupCountry !== dropCountry) {
+            return {
+                valid: false,
+                code: 'address_country_mismatch',
+                straightDistanceKm,
+                pickupCountry,
+                dropCountry
+            };
+        }
+
+        if (straightDistanceKm > MAX_OPERATIONAL_ROUTE_DISTANCE_KM) {
+            return {
+                valid: false,
+                code: 'outside_operational_distance',
+                straightDistanceKm
+            };
+        }
+
+        return {
+            valid: true,
+            code: 'ok',
+            straightDistanceKm
+        };
+    }, [parseCoordinateValue, inferAddressCountry, inferCoordinateCountry]);
+
     const buildFallbackRouteMetrics = useCallback((pickup, drop) => {
         const pickupLat = parseCoordinateValue(pickup?.lat);
         const pickupLng = parseCoordinateValue(pickup?.lng);
@@ -1158,6 +1324,16 @@ function PassengerUI(props) {
             return {
                 distanceInKm: 0.8,
                 timeInSecs: 120
+            };
+        }
+
+        const tripFeasibility = evaluateTripFeasibility(pickup, drop);
+        if (!tripFeasibility.valid && tripFeasibility.code === 'outside_operational_distance') {
+            const fallbackDistance = Number(tripFeasibility.straightDistanceKm || 0);
+            return {
+                distanceInKm: fallbackDistance,
+                timeInSecs: Math.max(120, Math.round((fallbackDistance / 70) * 3600)),
+                rejectedByDistanceGuard: true
             };
         }
 
@@ -1173,7 +1349,7 @@ function PassengerUI(props) {
             distanceInKm: routeDistanceKm,
             timeInSecs
         };
-    }, [parseCoordinateValue]);
+    }, [parseCoordinateValue, evaluateTripFeasibility]);
 
     const normalizeRouteMetrics = useCallback((pickup, drop, rawDistance, rawTime) => {
         const fallbackMetrics = buildFallbackRouteMetrics(pickup, drop);
@@ -1222,6 +1398,15 @@ function PassengerUI(props) {
         }
 
         const fallbackMetrics = buildFallbackRouteMetrics(pickup, drop);
+        if (fallbackMetrics?.rejectedByDistanceGuard) {
+            emitFareDebug('fallback_estimate_blocked_by_distance_guard', {
+                reason,
+                car: car?.name,
+                distanceInKm: fallbackMetrics.distanceInKm,
+                maxOperationalDistanceKm: MAX_OPERATIONAL_ROUTE_DISTANCE_KM
+            });
+            return null;
+        }
         const routeDistanceKm = fallbackMetrics.distanceInKm;
         const timeInSecs = fallbackMetrics.timeInSecs;
 
@@ -1426,6 +1611,80 @@ function PassengerUI(props) {
                 Logger.log('🚗 fixedCarTypes:', fixedCarTypes);
 
                 if (tripdata.pickup && tripdata.drop) {
+                    const tripFeasibility = evaluateTripFeasibility(tripdata.pickup, tripdata.drop);
+                    if (!tripFeasibility.valid) {
+                        if (
+                            tripFeasibility.code === 'outside_operational_distance' ||
+                            tripFeasibility.code === 'address_country_mismatch' ||
+                            tripFeasibility.code === 'pickup_address_coordinate_mismatch' ||
+                            tripFeasibility.code === 'drop_address_coordinate_mismatch'
+                        ) {
+                            emitFareDebug('trip_blocked_by_distance_guard', {
+                                pickup: {
+                                    lat: tripdata.pickup?.lat,
+                                    lng: tripdata.pickup?.lng,
+                                    add: tripdata.pickup?.add || null
+                                },
+                                drop: {
+                                    lat: tripdata.drop?.lat,
+                                    lng: tripdata.drop?.lng,
+                                    add: tripdata.drop?.add || null
+                                },
+                                straightDistanceKm: tripFeasibility.straightDistanceKm,
+                                maxOperationalDistanceKm: MAX_OPERATIONAL_ROUTE_DISTANCE_KM,
+                                code: tripFeasibility.code,
+                                pickupCountry: tripFeasibility.pickupCountry || null,
+                                pickupCountryByCoords: tripFeasibility.pickupCountryByCoords || null,
+                                dropCountry: tripFeasibility.dropCountry || null,
+                                dropCountryByCoords: tripFeasibility.dropCountryByCoords || null
+                            });
+                            setGeofenceStatus((prev) => ({
+                                ...prev,
+                                isChecking: false,
+                                outOfCoverage: true,
+                                message: OUT_OF_COVERAGE_MESSAGE,
+                                pickupOutOfCoverage: false,
+                                destinationOutOfCoverage: true,
+                                source: 'distance_guard'
+                            }));
+                        } else {
+                            setGeofenceStatus((prev) =>
+                                prev?.source === 'distance_guard'
+                                    ? {
+                                        ...prev,
+                                        isChecking: false,
+                                        outOfCoverage: false,
+                                        message: '',
+                                        pickupOutOfCoverage: false,
+                                        destinationOutOfCoverage: false,
+                                        source: null
+                                    }
+                                    : prev
+                            );
+                        }
+
+                        setCarEstimates({});
+                        setLocalRoutePolyline([]);
+                        if (props.setRoutePolyline && typeof props.setRoutePolyline === 'function') {
+                            props.setRoutePolyline([]);
+                        }
+                        return;
+                    }
+
+                    setGeofenceStatus((prev) =>
+                        prev?.source === 'distance_guard'
+                            ? {
+                                ...prev,
+                                isChecking: false,
+                                outOfCoverage: false,
+                                message: '',
+                                pickupOutOfCoverage: false,
+                                destinationOutOfCoverage: false,
+                                source: null
+                            }
+                            : prev
+                    );
+
                     let estimates = {};
                     let firstPolyline = null;
 
@@ -1520,34 +1779,29 @@ function PassengerUI(props) {
                                 let estimateFare = null;
                                 let estimateTime = null;
 
-                                // TESTE: Se não temos routeDetails, criar dados de teste para verificar o cálculo
                                 if (!estimateObj.estimateObject.routeDetails) {
-                                    // Dados de teste: 10km, 20 minutos
-                                    const testDistance = 10;
-                                    const testTime = 20 * 60; // 20 minutos em segundos
+                                    const fallbackEstimate = buildFallbackEstimate(
+                                        car,
+                                        tripdata.pickup,
+                                        tripdata.drop,
+                                        'missing_route_details'
+                                    );
+                                    estimates[car.name] = fallbackEstimate || {
+                                        ...estimateObj.estimateObject,
+                                        estimateFare: null,
+                                        fare: null,
+                                        estimateTime: null,
+                                        estimateDistance: null,
+                                        passengerNotice: 'Rota indisponível para este trajeto.',
+                                        routeDetails: {
+                                            ...(estimateObj.estimateObject.routeDetails || {}),
+                                            source: 'missing_route_details'
+                                        }
+                                    };
+                                    continue;
+                                }
 
-                                    // Calcular tarifa de teste
-                                    try {
-                                        const { FareCalculator } = require('../../common/sharedFunctions');
-                                        const testFareResult = FareCalculator(
-                                            testDistance,
-                                            testTime,
-                                            car,
-                                            {}, // instructionData
-                                            2, // decimal
-                                            null, // routePoints
-                                            'car', // vehicleType
-                                            0 // sem pedágio para teste
-                                        );
-
-                                        // Usar dados de teste
-                                        estimateFare = testFareResult.grandTotal;
-                                        estimateTime = testTime;
-
-                                    } catch (error) {
-                                        Logger.error(`❌ Erro no cálculo de teste para ${car.name}:`, error);
-                                    }
-                                } else if (estimateObj.estimateObject.routeDetails) {
+                                if (estimateObj.estimateObject.routeDetails) {
                                     const routeDetails = estimateObj.estimateObject.routeDetails;
                                     const normalizedRoute = normalizeRouteMetrics(
                                         tripdata.pickup,
@@ -1753,7 +2007,7 @@ function PassengerUI(props) {
             tripStatus !== 'accepted' && tripStatus !== 'started' && tripStatus !== 'searching') {
             fetchEstimates();
         }
-    }, [tripdata.pickup?.add, tripdata.pickup?.lat, tripdata.drop?.add, tripdata.drop?.lat, fixedCarTypes, tripStatus, buildFallbackEstimate, normalizeRouteMetrics, emitFareDebug, applyDynamicPricingQuotes]);
+    }, [tripdata.pickup?.add, tripdata.pickup?.lat, tripdata.drop?.add, tripdata.drop?.lat, fixedCarTypes, tripStatus, buildFallbackEstimate, normalizeRouteMetrics, emitFareDebug, applyDynamicPricingQuotes, evaluateTripFeasibility]);
 
     // ✅ ATUALIZAR PREÇO A CADA MINUTO enquanto o card estiver aberto
     // Isso garante que o preço sempre reflita as condições de trânsito atuais
@@ -1766,6 +2020,7 @@ function PassengerUI(props) {
             tripdata.pickup &&
             tripdata.drop &&
             tripdata.drop.add &&
+            !geofenceStatus.outOfCoverage &&
             !isCalculatingRef.current;
 
         if (!shouldUpdate) {
@@ -1781,7 +2036,8 @@ function PassengerUI(props) {
                 tripdata.pickup &&
                 tripdata.drop &&
                 tripdata.drop.add &&
-                !isCalculatingRef.current) {
+                !isCalculatingRef.current &&
+                !routeOutOfCoverage) {
 
                 Logger.log('🔄 [PriceUpdate] Atualizando preço automaticamente (condições de trânsito podem ter mudado)');
 
@@ -1800,6 +2056,51 @@ function PassengerUI(props) {
                         let firstPolyline = null;
 
                         if (tripdata.pickup && tripdata.drop) {
+                            const tripFeasibility = evaluateTripFeasibility(tripdata.pickup, tripdata.drop);
+                            if (!tripFeasibility.valid) {
+                                if (
+                                    tripFeasibility.code === 'outside_operational_distance' ||
+                                    tripFeasibility.code === 'address_country_mismatch' ||
+                                    tripFeasibility.code === 'pickup_address_coordinate_mismatch' ||
+                                    tripFeasibility.code === 'drop_address_coordinate_mismatch'
+                                ) {
+                                    emitFareDebug('price_update_blocked_by_distance_guard', {
+                                        pickup: {
+                                            lat: tripdata.pickup?.lat,
+                                            lng: tripdata.pickup?.lng,
+                                            add: tripdata.pickup?.add || null
+                                        },
+                                        drop: {
+                                            lat: tripdata.drop?.lat,
+                                            lng: tripdata.drop?.lng,
+                                            add: tripdata.drop?.add || null
+                                        },
+                                        straightDistanceKm: tripFeasibility.straightDistanceKm,
+                                        maxOperationalDistanceKm: MAX_OPERATIONAL_ROUTE_DISTANCE_KM,
+                                        code: tripFeasibility.code,
+                                        pickupCountry: tripFeasibility.pickupCountry || null,
+                                        pickupCountryByCoords: tripFeasibility.pickupCountryByCoords || null,
+                                        dropCountry: tripFeasibility.dropCountry || null,
+                                        dropCountryByCoords: tripFeasibility.dropCountryByCoords || null
+                                    });
+                                    setGeofenceStatus((prev) => ({
+                                        ...prev,
+                                        isChecking: false,
+                                        outOfCoverage: true,
+                                        message: OUT_OF_COVERAGE_MESSAGE,
+                                        pickupOutOfCoverage: false,
+                                        destinationOutOfCoverage: true,
+                                        source: 'distance_guard'
+                                    }));
+                                }
+                                setCarEstimates({});
+                                setLocalRoutePolyline([]);
+                                if (props.setRoutePolyline && typeof props.setRoutePolyline === 'function') {
+                                    props.setRoutePolyline([]);
+                                }
+                                return;
+                            }
+
                             let estimates = {};
 
                             for (const car of carTypesToUse) {
@@ -2008,11 +2309,11 @@ function PassengerUI(props) {
             Logger.log('🛑 [PriceUpdate] Parando atualização automática de preço');
             clearInterval(updateInterval);
         };
-    }, [tripStatus, tripdata.pickup, tripdata.drop, fixedCarTypes, normalizeRouteMetrics, emitFareDebug, applyDynamicPricingQuotes]);
+    }, [tripStatus, tripdata.pickup, tripdata.drop, fixedCarTypes, normalizeRouteMetrics, emitFareDebug, applyDynamicPricingQuotes, routeOutOfCoverage, evaluateTripFeasibility]);
 
     // ✅ Serviço de disponibilidade de motoristas em tempo real
     useEffect(() => {
-        if (geofenceStatus.outOfCoverage) {
+        if (routeOutOfCoverage) {
             DriverAvailabilityService.stopMonitoring();
             setNearbyDrivers([]);
             return;
@@ -2063,7 +2364,7 @@ function PassengerUI(props) {
             unsubscribe();
             DriverAvailabilityService.stopMonitoring();
         };
-    }, [tripdata.pickup?.lat, tripdata.pickup?.lng, settings?.driverRadius, geofenceStatus.outOfCoverage]);
+    }, [tripdata.pickup?.lat, tripdata.pickup?.lng, settings?.driverRadius, routeOutOfCoverage]);
 
     const checkGeofencePoint = useCallback(async (lat, lng) => {
         const endpoint = getSelfHostedApiUrl('/api/geofence/check');
@@ -2080,9 +2381,7 @@ function PassengerUI(props) {
 
     useEffect(() => {
         const pickup = tripdata?.pickup;
-        const destination = tripdata?.drop;
         const hasPickup = !!(pickup?.lat && pickup?.lng);
-        const hasDestination = !!(destination?.lat && destination?.lng);
 
         if (!hasPickup) {
             setGeofenceStatus({
@@ -2107,34 +2406,9 @@ function PassengerUI(props) {
                     setGeofenceStatus({
                         isChecking: false,
                         outOfCoverage: true,
-                        message: 'A Leaf ainda não está disponível na sua região',
+                        message: OUT_OF_COVERAGE_MESSAGE,
                         pickupOutOfCoverage: true,
                         destinationOutOfCoverage: false
-                    });
-                    return;
-                }
-
-                if (!hasDestination) {
-                    setGeofenceStatus({
-                        isChecking: false,
-                        outOfCoverage: false,
-                        message: '',
-                        pickupOutOfCoverage: false,
-                        destinationOutOfCoverage: false
-                    });
-                    return;
-                }
-
-                const destinationCheck = await checkGeofencePoint(destination.lat, destination.lng);
-                if (cancelled) return;
-
-                if (!destinationCheck.isAllowed) {
-                    setGeofenceStatus({
-                        isChecking: false,
-                        outOfCoverage: true,
-                        message: 'Destino fora da área de cobertura da Leaf',
-                        pickupOutOfCoverage: false,
-                        destinationOutOfCoverage: true
                     });
                     return;
                 }
@@ -2287,7 +2561,7 @@ function PassengerUI(props) {
         if (code.startsWith('GEOFENCE') || rawMessage.includes('região') || rawMessage.includes('regiao')) {
             return {
                 title: 'Fora da área de cobertura',
-                message: 'A Leaf ainda não está disponível na sua região.'
+                message: `${OUT_OF_COVERAGE_MESSAGE}.`
             };
         }
 
@@ -4376,10 +4650,10 @@ function PassengerUI(props) {
             return;
         }
 
-        if (geofenceStatus.outOfCoverage) {
+        if (routeOutOfCoverage) {
             Alert.alert(
                 'Região indisponível',
-                geofenceStatus.message || 'A Leaf ainda não está disponível na sua região',
+                routeOutOfCoverageMessage,
                 [{ text: 'OK' }]
             );
             return;
@@ -4873,14 +5147,16 @@ function PassengerUI(props) {
             const currentFare = carEstimates[selectedCarType?.name]?.estimateFare || 0;
             const partialValue = currentFare / 2;
 
-            // Taxa operacional baseada no valor (3 faixas)
+            // Taxa operacional baseada no valor
             let operationalFee;
             if (partialValue <= 10.00) {
                 operationalFee = 0.79; // Até R$ 10,00
             } else if (partialValue <= 25.00) {
                 operationalFee = 0.99; // Acima de R$ 10,00 e abaixo de R$ 25,00
+            } else if (partialValue <= 50.00) {
+                operationalFee = 1.49; // Acima de R$ 25,00 até R$ 50,00
             } else {
-                operationalFee = 1.49; // Acima de R$ 25,00
+                operationalFee = partialValue * 0.03; // Acima de R$ 50,00
             }
 
             // Taxa Woovi: 0,8% com mínimo de R$ 0,50
@@ -6005,7 +6281,7 @@ function PassengerUI(props) {
                                     if (geofenceStatus.pickupOutOfCoverage) {
                                         Alert.alert(
                                             'Região indisponível',
-                                            geofenceStatus.message || 'A Leaf ainda não está disponível na sua região',
+                                            routeOutOfCoverageMessage,
                                             [{ text: 'OK' }]
                                         );
                                         return;
@@ -6033,7 +6309,7 @@ function PassengerUI(props) {
                 </View>
             </View>
         );
-    }, [tripdata.pickup, tripdata.drop, theme, t, searchState.visible, searchState.type, searchState.inputText, searchState.results, searchState.loading, debouncedSearch, handleSelectAddress, formatAddressForDropdown, resetPlacesSessionToken, geofenceStatus, props.isDarkMode, isCardVariantB]);
+    }, [tripdata.pickup, tripdata.drop, theme, t, searchState.visible, searchState.type, searchState.inputText, searchState.results, searchState.loading, debouncedSearch, handleSelectAddress, formatAddressForDropdown, resetPlacesSessionToken, geofenceStatus, routeOutOfCoverageMessage, props.isDarkMode, isCardVariantB]);
 
     const performSearch = useCallback(async (text) => {
         Logger.log('🔍 Iniciando busca hierárquica para:', text);
@@ -6233,7 +6509,7 @@ function PassengerUI(props) {
             return false;
         }
         return getPickupTime(selectedCarType) !== null;
-    }, [selectedCarType, tripdata.pickup?.lat, tripdata.pickup?.lng, getPickupTime, geofenceStatus.outOfCoverage]);
+    }, [selectedCarType, tripdata.pickup?.lat, tripdata.pickup?.lng, getPickupTime, routeOutOfCoverage]);
 
     // Backdrop para o BottomSheet - não deve interferir com interações do mapa
     const renderBackdrop = useCallback(
@@ -6280,8 +6556,35 @@ function PassengerUI(props) {
             return estimate && estimate.fare !== null;
         });
 
+        if (tripStatus === 'idle' && routeOutOfCoverage && !isCalculatingRoute) {
+            return (
+                <BottomSheet
+                    ref={bottomSheetRef}
+                    index={0}
+                    snapPoints={snapPoints}
+                    enablePanDownToClose={false}
+                    enableDismissOnClose={false}
+                    enableContentPanningGesture={false}
+                    backdropComponent={renderBackdrop}
+                    backgroundStyle={[styles.bottomSheetBackground, { backgroundColor: '#FFFFFF' }]}
+                    handleIndicatorStyle={styles.bottomSheetIndicator}
+                >
+                    <BottomSheetView style={styles.bottomSheetContent}>
+                        <View style={styles.noCarsMessage}>
+                            <Text style={[styles.noCarsTitle, { color: theme.text || '#111111' }]}>
+                                Região indisponível
+                            </Text>
+                            <Text style={[styles.noCarsSubtitle, { color: theme.textSecondary || '#666666' }]}>
+                                {routeOutOfCoverageMessage}
+                            </Text>
+                        </View>
+                    </BottomSheetView>
+                </BottomSheet>
+            );
+        }
+
         // ✅ Se está calculando OU não tem preços calculados, mostrar loading
-        if (tripStatus === 'idle' && (isCalculatingRoute || !hasCalculatedPrices)) {
+        if (tripStatus === 'idle' && !routeOutOfCoverage && (isCalculatingRoute || !hasCalculatedPrices)) {
             return (
                 <BottomSheet
                     ref={bottomSheetRef}
@@ -7213,7 +7516,7 @@ function PassengerUI(props) {
                             // Verificar primeiro se há motoristas em geral, depois se há motoristas do tipo específico
                             const hasAnyDrivers = nearbyDrivers && nearbyDrivers.length > 0;
                             const hasDriversForThisCarType = pickupTime !== null && pickupTime !== undefined;
-                            const isOutOfCoverage = geofenceStatus.outOfCoverage;
+                            const isOutOfCoverage = routeOutOfCoverage;
                             const noDriversAvailable = !isOutOfCoverage && !hasAnyDrivers; // Só mostrar "não há motoristas" se estiver em área atendida
 
                             // ✅ Log para debug (habilitado temporariamente)
@@ -7272,6 +7575,7 @@ function PassengerUI(props) {
                             if (!hasValidPrice) {
                                 return null; // Não renderizar card até o preço estar calculado
                             }
+                            const showPriceForCard = !isOutOfCoverage && !noDriversAvailable && hasDriversForThisCarType;
 
                             const isLast = index === carTypesToUse.length - 1;
                             const isSelected = selectedCarType?.name === car.name;
@@ -7315,10 +7619,9 @@ function PassengerUI(props) {
                                                         {car.name}
                                                     </Text>
                                                     <Text style={[styles.bottomSheetCarPrice, { color: theme.text }]}>
-                                                        {estimate.fare !== null ?
-                                                            `${settings?.symbol || 'R$'}${estimate.fare}` :
-                                                            '--'
-                                                        }
+                                                        {showPriceForCard && estimate.fare !== null
+                                                            ? `${settings?.symbol || 'R$'}${estimate.fare}`
+                                                            : 'Indisponível'}
                                                     </Text>
                                                 </View>
 
@@ -7327,7 +7630,7 @@ function PassengerUI(props) {
                                                         <View style={styles.bottomSheetCarDetailItem}>
                                                             <Ionicons name="alert-circle-outline" size={16} color={safeTheme.icon} style={styles.iconMarginRight} />
                                                             <Text style={[styles.bottomSheetCarDetailText, { color: theme.textSecondary }]}>
-                                                                A Leaf ainda não está disponível na sua região
+                                                                {routeOutOfCoverageMessage}
                                                             </Text>
                                                         </View>
                                                     ) : noDriversAvailable ? (
@@ -7395,7 +7698,7 @@ function PassengerUI(props) {
                         title={tripStatus === 'idle' ? 'Pedir agora' : tripStatus === 'completed' ? 'Confirmar pagamento' : 'Solicitar'}
                         variant="primary"
                         onPress={tripStatus === 'completed' ? handlePaymentConfirmation : initiateBooking}
-                        disabled={!hasValidTripEndpoints || !selectedCarType || !carEstimates[selectedCarType?.name]?.estimateFare || geofenceStatus.outOfCoverage || geofenceStatus.isChecking || !hasDriversForSelectedCar || tripStatus === 'accepted' || tripStatus === 'started'}
+                        disabled={!hasValidTripEndpoints || !selectedCarType || !carEstimates[selectedCarType?.name]?.estimateFare || routeOutOfCoverage || geofenceStatus.isChecking || !hasDriversForSelectedCar || tripStatus === 'accepted' || tripStatus === 'started'}
                         loading={bookModelLoading}
                     />
                 </BottomSheetView>
@@ -7423,8 +7726,8 @@ function PassengerUI(props) {
                 return 'Validando área de cobertura...';
             }
 
-            if (geofenceStatus.outOfCoverage) {
-                return geofenceStatus.message || 'A Leaf ainda não está disponível na sua região';
+            if (routeOutOfCoverage) {
+                return routeOutOfCoverageMessage;
             }
 
             // Se não há carros disponíveis, mostrar mensagem específica
@@ -7469,7 +7772,7 @@ function PassengerUI(props) {
         };
 
         // ✅ Desabilitar botão se localização foi negada ou outras condições
-        const isDisabled = locationDenied || geofenceStatus.outOfCoverage || geofenceStatus.isChecking || carTypesToUse.length === 0 || !canBook || bookModelLoading || tripStatus === 'accepted' || tripStatus === 'started';
+        const isDisabled = locationDenied || routeOutOfCoverage || geofenceStatus.isChecking || carTypesToUse.length === 0 || !canBook || bookModelLoading || tripStatus === 'accepted' || tripStatus === 'started';
 
         return (
             <View
@@ -7495,7 +7798,7 @@ function PassengerUI(props) {
                 </TouchableOpacity>
             </View>
         );
-    }, [selectedCarType, carEstimates, bookModelLoading, tripStatus, t, initiateBooking, settings?.symbol, locationDenied, hasValidTripEndpoints, geofenceStatus.outOfCoverage, geofenceStatus.isChecking, geofenceStatus.message]);
+    }, [selectedCarType, carEstimates, bookModelLoading, tripStatus, t, initiateBooking, settings?.symbol, locationDenied, hasValidTripEndpoints, routeOutOfCoverage, routeOutOfCoverageMessage, geofenceStatus.isChecking]);
 
     // Função para confirmar pagamento
     // Funções auxiliares para status da viagem
@@ -7933,7 +8236,7 @@ function PassengerUI(props) {
 
             {/* Indicador de cálculo de rota */}
             {isCalculatingRoute && (
-                <View style={styles.routeCalculationIndicator}>
+                <View style={[styles.routeCalculationIndicator, { top: routeCalculationTopOffset }]}>
                     <ActivityIndicator color="#FFFFFF" size="small" />
                     <Text style={styles.routeCalculationText}>
                         Calculando rota e preços...
@@ -7942,7 +8245,7 @@ function PassengerUI(props) {
             )}
 
             {/* Header */}
-            <View style={styles.header}>
+            <View style={[styles.header, { top: headerTopOffset }]}>
                 <TouchableOpacity style={styles.headerButton} onPress={() => {
                     if (navigation && navigation.navigate) {
                         navigation.navigate('Profile');
@@ -7963,7 +8266,7 @@ function PassengerUI(props) {
                 </TouchableOpacity>
             </View>
 
-            <View style={styles.abSwitchContainer}>
+            <View style={[styles.abSwitchContainer, { top: abSwitchTopOffset }]}>
                 <TouchableOpacity
                     style={[styles.abSwitchOption, cardVariant === 'A' && styles.abSwitchOptionActive]}
                     onPress={() => setCardVariant('A')}

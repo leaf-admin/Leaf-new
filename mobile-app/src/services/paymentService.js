@@ -38,7 +38,14 @@ export const createPixCharge = async (chargeData) => {
       rideId,
       rideDetails,
       passengerName: chargeData?.passengerName || 'Passageiro',
-      passengerEmail: chargeData?.passengerEmail || 'passenger@leaf.com'
+      passengerEmail: chargeData?.passengerEmail || 'passenger@leaf.com',
+      driverId: chargeData?.driverId,
+      driverPixKey: chargeData?.driverPixKey,
+      driverSubaccountPixKey: chargeData?.driverSubaccountPixKey,
+      wooviSubaccountPixKey: chargeData?.wooviSubaccountPixKey,
+      subaccountPixKey: chargeData?.subaccountPixKey,
+      tollFee: chargeData?.tollFee,
+      tollFeeCents: chargeData?.tollFeeCents
     });
 
     const payload = response.data || {};

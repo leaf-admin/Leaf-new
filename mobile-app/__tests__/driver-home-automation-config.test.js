@@ -15,7 +15,7 @@ describe('driver home automation config', () => {
         {
           isDriverRole: true,
           isHomeRoute: false,
-          isDev: false,
+          isDev: true,
           isE2E: false,
         }
       )
@@ -60,7 +60,7 @@ describe('driver home automation config', () => {
         {
           isDriverRole: true,
           isHomeRoute: true,
-          isDev: false,
+          isDev: true,
           isE2E: false,
         }
       )
@@ -84,7 +84,7 @@ describe('driver home automation config', () => {
         {
           isDriverRole: true,
           isHomeRoute: true,
-          isDev: false,
+          isDev: true,
           isE2E: false,
         }
       )
@@ -120,7 +120,7 @@ describe('driver home automation config', () => {
         {
           isDriverRole: true,
           isHomeRoute: true,
-          isDev: false,
+          isDev: true,
           isE2E: false,
         }
       )
@@ -151,7 +151,7 @@ describe('driver home automation config', () => {
         {
           isDriverRole: true,
           isHomeRoute: true,
-          isDev: false,
+          isDev: true,
           isE2E: false,
         }
       )
@@ -160,6 +160,29 @@ describe('driver home automation config', () => {
       action: 'accept_offer',
       nonce: 'route-accept',
       bookingId: 'booking_fallback_1',
+    });
+  });
+
+  it('keeps route-param automation disabled in production contexts', () => {
+    expect(
+      resolveDriverHomeAutomationConfig(
+        {
+          qaAutomation: '1',
+          qaDriverAction: 'set_online',
+          qaNonce: 'prod-attempt',
+        },
+        {
+          isDriverRole: true,
+          isHomeRoute: true,
+          isDev: false,
+          isE2E: false,
+        }
+      )
+    ).toEqual({
+      automationEnabled: false,
+      action: '',
+      nonce: '',
+      bookingId: '',
     });
   });
 });

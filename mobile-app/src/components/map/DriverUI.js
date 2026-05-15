@@ -622,7 +622,7 @@ function DriverUI(props) {
     const calculateDriverNetValue = (totalFare) => {
         Logger.log('💰 DriverUI - Calculando valor líquido para motorista:', totalFare);
 
-        // Taxa operacional baseada no valor da corrida (3 faixas)
+        // Taxa operacional baseada no valor da corrida
         let operationalCost;
         if (totalFare <= 10.00) {
             // Até R$ 10,00
@@ -630,9 +630,12 @@ function DriverUI(props) {
         } else if (totalFare <= 25.00) {
             // Acima de R$ 10,00 e abaixo de R$ 25,00
             operationalCost = 0.99;
-        } else {
-            // Acima de R$ 25,00
+        } else if (totalFare <= 50.00) {
+            // Acima de R$ 25,00 até R$ 50,00
             operationalCost = 1.49;
+        } else {
+            // Acima de R$ 50,00
+            operationalCost = totalFare * 0.03;
         }
 
         // Taxa Woovi: 0,8% com mínimo de R$ 0,50
@@ -3894,8 +3897,9 @@ function DriverUI(props) {
 
             // Verificar se Waze está instalado
             const isWazeInstalled = await Linking.canOpenURL('waze://');
+            const isAppleMapsAvailable = Platform.OS === 'ios';
 
-            if (!isGoogleMapsInstalled && !isWazeInstalled) {
+            if (!isAppleMapsAvailable && !isGoogleMapsInstalled && !isWazeInstalled) {
                 // Nenhum app de navegação instalado, abrir no navegador
                 const url = `https://www.google.com/maps/dir/?api=1&destination=${latitude},${longitude}`;
                 await Linking.openURL(url);
@@ -3904,6 +3908,13 @@ function DriverUI(props) {
 
             // Mostrar opções de navegação
             const navigationOptions = [];
+
+            if (isAppleMapsAvailable) {
+                navigationOptions.push({
+                    text: 'Mapas da Apple',
+                    onPress: () => openAppleMaps(latitude, longitude, navigationType)
+                });
+            }
 
             if (isGoogleMapsInstalled) {
                 navigationOptions.push({
@@ -3963,6 +3974,22 @@ function DriverUI(props) {
         } catch (error) {
             Logger.error('❌ Erro ao abrir Google Maps:', error);
             // Fallback para navegador web
+            const webUrl = `https://www.google.com/maps/dir/?api=1&destination=${latitude},${longitude}`;
+            await Linking.openURL(webUrl);
+        }
+    };
+
+    const openAppleMaps = async (latitude, longitude, navigationType) => {
+        try {
+            const label = navigationType === 'pickup' ? 'Local de Embarque' : 'Destino';
+            const url = `http://maps.apple.com/?daddr=${latitude},${longitude}&dirflg=d`;
+
+            await Linking.openURL(url);
+
+            Logger.log(`✅ Mapas da Apple aberto para ${label}: ${latitude}, ${longitude}`);
+
+        } catch (error) {
+            Logger.error('❌ Erro ao abrir Mapas da Apple:', error);
             const webUrl = `https://www.google.com/maps/dir/?api=1&destination=${latitude},${longitude}`;
             await Linking.openURL(webUrl);
         }

@@ -1,6 +1,7 @@
 import React, { memo, useCallback, useEffect, useMemo, useState } from "react";
 import {
   Alert,
+  Modal,
   ScrollView,
   StyleSheet,
   Text,
@@ -29,6 +30,45 @@ function toNumber(value, fallback = 0) {
 
 function formatCurrency(value) {
   return `R$ ${toNumber(value, 0).toFixed(2).replace(".", ",")}`;
+}
+
+function isPlaceholderMetric(value) {
+  const normalized = String(value || "")
+    .trim()
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
+  return !normalized || normalized === "em calculo";
+}
+
+function formatDistanceMeters(value, fallback = "--") {
+  if (value === null || value === undefined || value === "") {
+    return fallback;
+  }
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric) || numeric < 0) {
+    return fallback;
+  }
+
+  if (numeric < 1000) {
+    const roundedMeters =
+      numeric <= 0 ? 0 : Math.max(10, Math.round(numeric / 10) * 10);
+    return `${roundedMeters} m`;
+  }
+
+  return `${Math.max(1, Math.round(numeric / 1000))} km`;
+}
+
+function formatDurationMinutes(value, fallback = "--") {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric) || numeric <= 0) {
+    return fallback;
+  }
+  return `${Math.max(1, Math.round(numeric))} min`;
+}
+
+function resolveFirstUsableLabel(...values) {
+  return values.find((value) => !isPlaceholderMetric(value)) || "";
 }
 
 function resolveDisplayNetAmount(activeRide, driverTripMeta) {
@@ -62,10 +102,9 @@ function resolveDisplayNetAmount(activeRide, driverTripMeta) {
 function formatDistanceKm(value) {
   const numeric = Number(value);
   if (!Number.isFinite(numeric) || numeric <= 0) {
-    return "Em cálculo";
+    return "--";
   }
-  const fractionDigits = numeric >= 10 ? 0 : numeric >= 2 ? 1 : 2;
-  return `${numeric.toFixed(fractionDigits).replace(".", ",")} km`;
+  return formatDistanceMeters(numeric * 1000);
 }
 
 function formatPaymentMethod(method, compact = false) {
@@ -224,6 +263,7 @@ function DriverLiveRideOverlay({
   rejectDriverOffer,
   respondToDriverExtension,
   interruptRideOperationalFlow,
+  cancelActiveRideFlow,
   markDriverArrived,
   startTripFlow,
   completeTripFlow,
@@ -232,6 +272,7 @@ function DriverLiveRideOverlay({
 }) {
   const [busyAction, setBusyAction] = useState("");
   const [isTripExpanded, setIsTripExpanded] = useState(false);
+  const [showCancelPrompt, setShowCancelPrompt] = useState(false);
   const { height: windowHeight } = useWindowDimensions();
   const activeRide = useMemo(() => {
     if (driverActiveRide?.bookingId || driverActiveRide?.id) {
@@ -383,11 +424,24 @@ function DriverLiveRideOverlay({
   const normalizedExtensionStatus = String(driverExtensionRequest?.status || "")
     .trim()
     .toLowerCase();
-  const liveDistanceLabel =
-    driverTripAssist?.remainingDistanceLabel || activeDistanceLabel;
+  const liveDistanceLabel = resolveFirstUsableLabel(
+    formatDistanceMeters(driverTripAssist?.remainingMeters, ""),
+    driverTripAssist?.remainingDistanceLabel,
+    formatDistanceMeters(activeRide?.remainingDistanceMeters, ""),
+    formatDistanceMeters(activeRide?.distanceMeters, ""),
+    activeDistanceLabel,
+  ) || "--";
   const liveEtaLabel =
-    driverTripAssist?.etaLabel ||
-    (normalizedActiveStatus === "arrived" ? "2:00" : etaLabel || "Em cálculo");
+    normalizedActiveStatus === "arrived"
+      ? resolveFirstUsableLabel(driverTripAssist?.etaLabel, "2:00") || "2:00"
+      : resolveFirstUsableLabel(
+          formatDurationMinutes(driverTripAssist?.etaMinutes, ""),
+          driverTripAssist?.etaLabel,
+          formatDurationMinutes(driverTripMeta?.initialEtaMinutes, ""),
+          formatDurationMinutes(activeRide?.estimatedDurationMinutes, ""),
+          formatDurationMinutes(activeRide?.durationMinutes, ""),
+          etaLabel,
+        ) || "--";
   const primaryActionLabel =
     driverTripAssist?.primaryActionLabel || tripPhase.primaryLabel;
   const primaryActionTestID = resolveTripPrimaryActionTestID(
@@ -408,11 +462,13 @@ function DriverLiveRideOverlay({
   const canInterruptOperational =
     typeof interruptRideOperationalFlow === "function" &&
     normalizedActiveStatus === "started";
+  const canCancelActiveRide = Boolean(
+    hasActiveRide &&
+      typeof cancelActiveRideFlow === "function" &&
+      ["accepted", "arrived"].includes(normalizedActiveStatus),
+  );
   const showCompactProblemButton = Boolean(
     normalizedActiveStatus === "started" && canInterruptOperational,
-  );
-  const shouldStackCompactPrimaryAction = Boolean(
-    showCompactNavigationButton && showCompactProblemButton,
   );
   const hasPendingExtensionDecision = [
     "driver_decision_pending",
@@ -424,16 +480,14 @@ function DriverLiveRideOverlay({
     !hasPendingExtensionDecision;
   const activeTripTitle =
     normalizedActiveStatus === "accepted"
-      ? `Dirija até o local de embarque de ${passengerLabel}`
+      ? "A caminho do embarque"
       : normalizedActiveStatus === "started"
-        ? "Viagem em andamento"
+        ? `A caminho de ${dropoffLocation.title}`
         : tripPhase.title;
   const activeTripSubtitle =
-    normalizedActiveStatus === "accepted"
-      ? "Mantenha o mapa visível, acompanhe a aproximação e confirme ao chegar."
-      : normalizedActiveStatus === "started"
-        ? "A rota continua no mapa enquanto você segue com a navegação externa."
-        : tripPhase.subtitle;
+    ["accepted", "started"].includes(normalizedActiveStatus)
+      ? ""
+      : tripPhase.subtitle;
   const activeTripMetrics = useMemo(
     () => [
       {
@@ -463,6 +517,14 @@ function DriverLiveRideOverlay({
     ],
     [fareLabel, liveDistanceLabel, liveEtaLabel],
   );
+  const compactTripMetrics = useMemo(
+    () => activeTripMetrics.filter((metric) => metric.key !== "net"),
+    [activeTripMetrics],
+  );
+  const tripStatusMessage =
+    ["accepted", "started"].includes(normalizedActiveStatus)
+      ? ""
+      : driverTripAssist?.subtitle || tripPhase.subtitle;
 
   useEffect(() => {
     setIsTripExpanded(false);
@@ -546,9 +608,85 @@ function DriverLiveRideOverlay({
     );
   }, [busyAction, canInterruptOperational, interruptRideOperationalFlow]);
 
+  const handleOpenCancelPrompt = useCallback(() => {
+    if (!canCancelActiveRide || busyAction) {
+      return;
+    }
+    setShowCancelPrompt(true);
+  }, [busyAction, canCancelActiveRide]);
+
+  const handleConfirmCancelRide = useCallback(async () => {
+    if (!canCancelActiveRide || busyAction) {
+      return;
+    }
+
+    try {
+      setShowCancelPrompt(false);
+      setBusyAction("cancel");
+      await cancelActiveRideFlow({
+        reason: "Cancelado pelo motorista.",
+      });
+    } catch (error) {
+      Alert.alert(
+        "Não foi possível cancelar",
+        error?.message || "Falha ao cancelar a corrida.",
+      );
+    } finally {
+      setBusyAction("");
+    }
+  }, [busyAction, canCancelActiveRide, cancelActiveRideFlow]);
+
   if (!hasActiveRide && !hasOffer) {
     return null;
   }
+
+  const renderCompactActionButton = ({
+    label,
+    icon,
+    onPress,
+    disabled = false,
+    variant = "secondary",
+    testID,
+    accessibilityLabel,
+  }) => (
+    <TouchableOpacity
+      activeOpacity={0.84}
+      style={[
+        styles.compactActionButton,
+        variant === "primary" && styles.compactActionButtonPrimary,
+        variant === "danger" && styles.compactActionButtonDanger,
+        disabled && styles.compactActionButtonDisabled,
+      ]}
+      onPress={onPress}
+      disabled={disabled}
+      testID={testID}
+      accessibilityLabel={accessibilityLabel || label}
+    >
+      <Ionicons
+        name={icon}
+        size={15}
+        color={
+          variant === "primary"
+            ? "#FFFFFF"
+            : variant === "danger"
+              ? "#8A1F2B"
+              : "#274A36"
+        }
+      />
+      <Text
+        style={[
+          styles.compactActionButtonText,
+          variant === "primary" && styles.compactActionButtonTextPrimary,
+          variant === "danger" && styles.compactActionButtonTextDanger,
+        ]}
+        numberOfLines={1}
+        adjustsFontSizeToFit
+        minimumFontScale={0.82}
+      >
+        {label}
+      </Text>
+    </TouchableOpacity>
+  );
 
   const renderCompactTripCard = () => (
     <>
@@ -562,11 +700,8 @@ function DriverLiveRideOverlay({
         <View style={styles.compactHeaderRow}>
           <View style={styles.compactHeaderCopy}>
             <Text style={styles.eyebrow}>{tripPhase.chip}</Text>
-            <Text style={styles.compactTitle} numberOfLines={3}>
+            <Text style={styles.compactTitle} numberOfLines={2}>
               {activeTripTitle}
-            </Text>
-            <Text style={styles.compactSubtitle} numberOfLines={3}>
-              {activeTripSubtitle}
             </Text>
           </View>
 
@@ -579,24 +714,8 @@ function DriverLiveRideOverlay({
           </View>
         </View>
 
-        <View style={styles.compactRoutePreviewRow}>
-          <View style={styles.compactRoutePreviewCard}>
-            <Text style={styles.compactRoutePreviewLabel}>Embarque</Text>
-            <Text style={styles.compactRoutePreviewValue} numberOfLines={2}>
-              {pickupLocation.title}
-            </Text>
-          </View>
-
-          <View style={styles.compactRoutePreviewCard}>
-            <Text style={styles.compactRoutePreviewLabel}>Destino</Text>
-            <Text style={styles.compactRoutePreviewValue} numberOfLines={2}>
-              {dropoffLocation.title}
-            </Text>
-          </View>
-        </View>
-
         <View style={styles.compactMetricRow}>
-          {activeTripMetrics.map((metric) => (
+          {compactTripMetrics.map((metric) => (
             <View key={metric.key} style={styles.compactMetricPill}>
               <View style={[styles.compactMetricIconWrap, metric.toneStyle]}>
                 <Ionicons
@@ -619,93 +738,248 @@ function DriverLiveRideOverlay({
       <View style={styles.compactActionsGroup}>
         <View style={styles.compactActionsRow}>
           {showCompactNavigationButton ? (
-            <PrototypePrimaryButton
-              label="Navegar"
-              icon="navigate-outline"
-              onPress={onOpenNavigation}
-              style={[styles.compactSecondaryButton, styles.compactHalfButton]}
-            />
+            renderCompactActionButton({
+              label: "Navegar",
+              icon: "navigate-outline",
+              onPress: onOpenNavigation,
+              testID: "driver-live-trip-navigation-button",
+              accessibilityLabel: "Abrir navegação",
+            })
           ) : null}
+
+          {canCancelActiveRide
+            ? renderCompactActionButton({
+                label: busyAction === "cancel" ? "Cancelando" : "Cancelar",
+                icon: "close-circle-outline",
+                onPress: handleOpenCancelPrompt,
+                disabled: busyAction === "cancel",
+                variant: "danger",
+                testID: "driver-live-trip-cancel-button",
+                accessibilityLabel: "Cancelar corrida",
+              })
+            : null}
 
           {showCompactProblemButton ? (
-            <TouchableOpacity
-              activeOpacity={0.82}
-              style={[styles.compactProblemButton, styles.compactHalfButton]}
-              onPress={handleInterruptOperational}
-              disabled={busyAction === "interrupt"}
-              testID="driver-live-trip-report-problem-button"
-              accessibilityLabel="driver-live-trip-report-problem-button"
-            >
-              <Ionicons name="warning-outline" size={15} color="#8A1F2B" />
-              <Text style={styles.compactProblemButtonText}>
-                {busyAction === "interrupt" ? "Reportando..." : "Reportar problema"}
-              </Text>
-            </TouchableOpacity>
+            renderCompactActionButton({
+              label: busyAction === "interrupt" ? "Reportando" : "Problema",
+              icon: "warning-outline",
+              onPress: handleInterruptOperational,
+              disabled: busyAction === "interrupt",
+              variant: "danger",
+              testID: "driver-live-trip-report-problem-button",
+              accessibilityLabel: "Reportar problema",
+            })
           ) : null}
 
-          {primaryActionLabel && !shouldStackCompactPrimaryAction ? (
-            <PrototypePrimaryButton
-              label={busyAction === "trip" ? "Atualizando..." : primaryActionLabel}
-              icon={
-                normalizedActiveStatus === "started"
-                  ? "flag-outline"
-                  : "checkmark-circle-outline"
-              }
-              disabled={busyAction === "trip" || !primaryActionEnabled}
-              onPress={handleTripPrimaryAction}
-              style={[
-                styles.tripPrimaryButton,
-                styles.compactPrimaryButton,
-                (showCompactNavigationButton || showCompactProblemButton)
-                  ? styles.compactHalfButton
-                  : styles.compactPrimaryButtonFull,
-              ]}
-              testID={primaryActionTestID}
-              accessibilityLabel={
-                busyAction === "trip" ? "Atualizando..." : primaryActionLabel
-              }
-            />
-          ) : null}
+          {primaryActionLabel
+            ? renderCompactActionButton({
+                label:
+                  busyAction === "trip"
+                    ? "Atualizando"
+                    : normalizedActiveStatus === "started"
+                      ? "Encerrar"
+                      : normalizedActiveStatus === "accepted"
+                        ? "Cheguei"
+                        : primaryActionLabel,
+                icon:
+                  normalizedActiveStatus === "started"
+                    ? "flag-outline"
+                    : "checkmark-circle-outline",
+                disabled: busyAction === "trip" || !primaryActionEnabled,
+                onPress: handleTripPrimaryAction,
+                variant: "primary",
+                testID: primaryActionTestID,
+                accessibilityLabel:
+                  busyAction === "trip" ? "Atualizando..." : primaryActionLabel,
+              })
+            : null}
+        </View>
+      </View>
+    </>
+  );
+
+  const renderExpandedTripCard = () => (
+    <>
+      <View style={styles.expandedTripHeaderRow}>
+        <View style={styles.expandedTripHeaderCopy}>
+          <Text style={styles.eyebrow}>{tripPhase.chip}</Text>
+          <Text style={styles.expandedTripTitle} numberOfLines={2}>
+            {activeTripTitle}
+          </Text>
+          <Text style={styles.expandedTripPassenger} numberOfLines={1}>
+            {`Passageiro: ${passengerLabel}`}
+          </Text>
         </View>
 
-        {primaryActionLabel && shouldStackCompactPrimaryAction ? (
-          <PrototypePrimaryButton
-            label={busyAction === "trip" ? "Atualizando..." : primaryActionLabel}
-            icon="flag-outline"
-            disabled={busyAction === "trip" || !primaryActionEnabled}
-            onPress={handleTripPrimaryAction}
+        <View style={styles.expandedTripSide}>
+          <Text style={styles.expandedTripFareLabel}>Líquido</Text>
+          <Text
+            style={styles.expandedTripFareValue}
+            numberOfLines={1}
+            adjustsFontSizeToFit
+            minimumFontScale={0.78}
+          >
+            {fareLabel}
+          </Text>
+          <TouchableOpacity
+            activeOpacity={0.82}
+            onPress={() => setIsTripExpanded(false)}
+            style={styles.expandedCollapseButton}
+            testID="driver-live-trip-collapse-button"
+            accessibilityLabel="driver-live-trip-collapse-button"
+          >
+            <Ionicons
+              name="chevron-down-outline"
+              size={17}
+              color={color.text.secondary}
+            />
+          </TouchableOpacity>
+        </View>
+      </View>
+
+      <View style={styles.expandedMetricRow}>
+        {activeTripMetrics.map((metric) => (
+          <View key={metric.key} style={styles.expandedMetricPill}>
+            <View style={[styles.expandedMetricIconWrap, metric.toneStyle]}>
+              <Ionicons
+                name={metric.icon}
+                size={14}
+                color={metric.iconColor}
+              />
+            </View>
+            <Text style={styles.expandedMetricLabel}>{metric.label}</Text>
+            <Text
+              style={styles.expandedMetricValue}
+              numberOfLines={1}
+              adjustsFontSizeToFit
+              minimumFontScale={0.78}
+            >
+              {metric.value}
+            </Text>
+          </View>
+        ))}
+      </View>
+
+      <View style={styles.expandedRoutePanel}>
+        <View style={styles.expandedRouteStop}>
+          <Text style={styles.expandedRouteLabel}>Embarque</Text>
+          <Text style={styles.expandedRouteTitle} numberOfLines={1}>
+            {pickupLocation.title}
+          </Text>
+        </View>
+
+        <View style={styles.expandedRouteArrow}>
+          <Ionicons name="arrow-forward" size={15} color="#60707A" />
+        </View>
+
+        <View style={styles.expandedRouteStop}>
+          <Text
             style={[
-              styles.tripPrimaryButton,
-              styles.compactPrimaryButton,
-              styles.compactPrimaryButtonStacked,
-              styles.compactPrimaryButtonFull,
+              styles.expandedRouteLabel,
+              styles.expandedRouteLabelDestination,
             ]}
-            testID={primaryActionTestID}
-            accessibilityLabel={
-              busyAction === "trip" ? "Atualizando..." : primaryActionLabel
-            }
-          />
-        ) : null}
+          >
+            Destino
+          </Text>
+          <Text style={styles.expandedRouteTitle} numberOfLines={1}>
+            {dropoffLocation.title}
+          </Text>
+        </View>
+      </View>
+
+      {tripStatusMessage ? (
+        <View style={styles.expandedStatusPill}>
+          <Ionicons name="sparkles-outline" size={14} color="#365A6D" />
+          <Text style={styles.expandedStatusText} numberOfLines={1}>
+            {tripStatusMessage}
+          </Text>
+        </View>
+      ) : null}
+
+      <View style={styles.compactActionsGroup}>
+        <View style={styles.compactActionsRow}>
+          {showCompactNavigationButton ? (
+            renderCompactActionButton({
+              label: "Navegar",
+              icon: "navigate-outline",
+              onPress: onOpenNavigation,
+              testID: "driver-live-trip-navigation-button",
+              accessibilityLabel: "Abrir navegação",
+            })
+          ) : null}
+
+          {canCancelActiveRide
+            ? renderCompactActionButton({
+                label: busyAction === "cancel" ? "Cancelando" : "Cancelar",
+                icon: "close-circle-outline",
+                onPress: handleOpenCancelPrompt,
+                disabled: busyAction === "cancel",
+                variant: "danger",
+                testID: "driver-live-trip-cancel-button-expanded",
+                accessibilityLabel: "Cancelar corrida",
+              })
+            : null}
+
+          {showCompactProblemButton ? (
+            renderCompactActionButton({
+              label: busyAction === "interrupt" ? "Reportando" : "Problema",
+              icon: "warning-outline",
+              onPress: handleInterruptOperational,
+              disabled: busyAction === "interrupt",
+              variant: "danger",
+              testID: "driver-live-trip-report-problem-button",
+              accessibilityLabel: "Reportar problema",
+            })
+          ) : null}
+
+          {primaryActionLabel
+            ? renderCompactActionButton({
+                label:
+                  busyAction === "trip"
+                    ? "Atualizando"
+                    : normalizedActiveStatus === "started"
+                      ? "Encerrar"
+                      : normalizedActiveStatus === "accepted"
+                        ? "Cheguei"
+                        : primaryActionLabel,
+                icon:
+                  normalizedActiveStatus === "started"
+                    ? "flag-outline"
+                    : "checkmark-circle-outline",
+                disabled: busyAction === "trip" || !primaryActionEnabled,
+                onPress: handleTripPrimaryAction,
+                variant: "primary",
+                testID: primaryActionTestID,
+                accessibilityLabel:
+                  busyAction === "trip" ? "Atualizando..." : primaryActionLabel,
+              })
+            : null}
+        </View>
       </View>
     </>
   );
 
   return (
-    <View
-      pointerEvents="box-none"
-      onLayout={onCardLayout}
-      style={[styles.wrap, { bottom: insetsBottom + bottomOffset }]}
-    >
-      <PrototypeCard
-        style={[
-          styles.card,
-          shouldUseCompactTripCard && !isTripExpanded
-            ? styles.compactCard
-            : { maxHeight: maxCardHeight },
-        ]}
+    <>
+      <View
+        pointerEvents="box-none"
+        onLayout={onCardLayout}
+        style={[styles.wrap, { bottom: insetsBottom + bottomOffset }]}
       >
+        <PrototypeCard
+          style={[
+            styles.card,
+            shouldUseCompactTripCard && !isTripExpanded
+              ? styles.compactCard
+              : shouldUseCompactTripCard
+                ? styles.expandedTripCard
+              : { maxHeight: maxCardHeight },
+          ]}
+        >
         {shouldUseCompactTripCard && !isTripExpanded ? (
           renderCompactTripCard()
+        ) : shouldUseCompactTripCard ? (
+          renderExpandedTripCard()
         ) : (
           <ScrollView
             bounces={false}
@@ -756,7 +1030,7 @@ function DriverLiveRideOverlay({
                   <View style={styles.metricCopy}>
                     <Text style={styles.metricLabel}>ETA</Text>
                     <Text style={styles.metricValue}>
-                      {etaLabel || "Em cálculo"}
+                      {resolveFirstUsableLabel(etaLabel) || "--"}
                     </Text>
                   </View>
                 </View>
@@ -894,7 +1168,9 @@ function DriverLiveRideOverlay({
                 </View>
               </View>
 
-              <Text style={styles.tripSubtitle}>{activeTripSubtitle}</Text>
+              {activeTripSubtitle ? (
+                <Text style={styles.tripSubtitle}>{activeTripSubtitle}</Text>
+              ) : null}
 
               {normalizedExtensionStatus &&
               normalizedExtensionStatus !== "idle" ? (
@@ -1058,15 +1334,17 @@ function DriverLiveRideOverlay({
                 </View>
               </View>
 
-              <View style={[styles.statusPill, styles.tripStatusPill]}>
-                <Ionicons name="sparkles-outline" size={16} color="#365A6D" />
-                <Text
-                  style={[styles.statusPillText, styles.tripStatusPillText]}
-                  numberOfLines={2}
-                >
-                  {driverTripAssist?.subtitle || tripPhase.subtitle}
-                </Text>
-              </View>
+              {tripStatusMessage ? (
+                <View style={[styles.statusPill, styles.tripStatusPill]}>
+                  <Ionicons name="sparkles-outline" size={16} color="#365A6D" />
+                  <Text
+                    style={[styles.statusPillText, styles.tripStatusPillText]}
+                    numberOfLines={2}
+                  >
+                    {tripStatusMessage}
+                  </Text>
+                </View>
+              ) : null}
 
               {showNavigationButton ? (
                 <PrototypePrimaryButton
@@ -1075,6 +1353,26 @@ function DriverLiveRideOverlay({
                   onPress={onOpenNavigation}
                   style={styles.tripSecondaryButton}
                 />
+              ) : null}
+
+              {canCancelActiveRide ? (
+                <TouchableOpacity
+                  activeOpacity={0.82}
+                  style={styles.tripCancelButton}
+                  onPress={handleOpenCancelPrompt}
+                  disabled={busyAction === "cancel"}
+                  testID="driver-live-trip-cancel-button-expanded"
+                  accessibilityLabel="Cancelar corrida"
+                >
+                  <Ionicons
+                    name="close-circle-outline"
+                    size={16}
+                    color="#8A1F2B"
+                  />
+                  <Text style={styles.tripCancelButtonText}>
+                    {busyAction === "cancel" ? "Cancelando..." : "Cancelar"}
+                  </Text>
+                </TouchableOpacity>
               ) : null}
 
               {primaryActionLabel ? (
@@ -1122,8 +1420,45 @@ function DriverLiveRideOverlay({
           )}
           </ScrollView>
         )}
-      </PrototypeCard>
-    </View>
+        </PrototypeCard>
+      </View>
+
+      <Modal
+        transparent
+        visible={showCancelPrompt}
+        animationType="fade"
+        onRequestClose={() => setShowCancelPrompt(false)}
+      >
+        <View style={styles.cancelPromptScrim}>
+          <View style={styles.cancelPromptCard}>
+            <Text style={styles.cancelPromptTitle}>Cancelar corrida?</Text>
+            <Text style={styles.cancelPromptMessage}>
+              Ao cancelar a corrida cobranças podem ser aplicadas, deseja cancelar?
+            </Text>
+            <View style={styles.cancelPromptActions}>
+              <TouchableOpacity
+                activeOpacity={0.82}
+                style={styles.cancelPromptYesButton}
+                onPress={handleConfirmCancelRide}
+                testID="driver-live-trip-cancel-confirm-button"
+                accessibilityLabel="Sim"
+              >
+                <Text style={styles.cancelPromptYesText}>Sim</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                activeOpacity={0.86}
+                style={styles.cancelPromptNoButton}
+                onPress={() => setShowCancelPrompt(false)}
+                testID="driver-live-trip-cancel-dismiss-button"
+                accessibilityLabel="Não"
+              >
+                <Text style={styles.cancelPromptNoText}>Não</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+    </>
   );
 }
 
@@ -1488,14 +1823,189 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: "#8A1F2B",
   },
+  tripCancelButton: {
+    marginTop: 10,
+    minHeight: 44,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: "rgba(138,31,43,0.18)",
+    backgroundColor: "#FFF7F7",
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+  },
+  tripCancelButtonText: {
+    fontFamily: fonts.SemiBold,
+    fontSize: 13,
+    color: "#8A1F2B",
+  },
   compactCard: {
     borderRadius: 28,
+    paddingHorizontal: 16,
+    paddingTop: 12,
+    paddingBottom: 12,
+  },
+  expandedTripCard: {
+    borderRadius: 30,
     paddingHorizontal: 16,
     paddingTop: 14,
     paddingBottom: 14,
   },
-  compactSummaryPressable: {
+  expandedTripHeaderRow: {
+    flexDirection: "row",
+    alignItems: "flex-start",
     gap: 12,
+  },
+  expandedTripHeaderCopy: {
+    flex: 1,
+    minWidth: 0,
+  },
+  expandedTripTitle: {
+    fontFamily: fonts.Bold,
+    fontSize: 18,
+    lineHeight: 22,
+    color: color.text.primary,
+  },
+  expandedTripPassenger: {
+    marginTop: 4,
+    fontFamily: fonts.Medium,
+    fontSize: 12,
+    lineHeight: 16,
+    color: color.text.secondary,
+  },
+  expandedTripSide: {
+    width: 92,
+    alignItems: "flex-end",
+  },
+  expandedTripFareLabel: {
+    fontFamily: fonts.Bold,
+    fontSize: 10,
+    lineHeight: 12,
+    textTransform: "uppercase",
+    letterSpacing: 0.9,
+    color: "#7A7340",
+  },
+  expandedTripFareValue: {
+    marginTop: 2,
+    fontFamily: fonts.Bold,
+    fontSize: 15,
+    lineHeight: 18,
+    color: "#4A4520",
+  },
+  expandedCollapseButton: {
+    marginTop: 8,
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(244,246,243,0.94)",
+    borderWidth: 1,
+    borderColor: "rgba(68,85,93,0.08)",
+  },
+  expandedMetricRow: {
+    marginTop: 12,
+    flexDirection: "row",
+    gap: 8,
+  },
+  expandedMetricPill: {
+    flex: 1,
+    minWidth: 0,
+    minHeight: 72,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: "rgba(68,85,93,0.06)",
+    backgroundColor: "rgba(255,255,255,0.78)",
+    paddingHorizontal: 9,
+    paddingVertical: 8,
+  },
+  expandedMetricIconWrap: {
+    width: 26,
+    height: 26,
+    borderRadius: 9,
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: 6,
+  },
+  expandedMetricLabel: {
+    fontFamily: fonts.Bold,
+    fontSize: 9,
+    lineHeight: 11,
+    textTransform: "uppercase",
+    color: "#6B7178",
+    letterSpacing: 0.7,
+  },
+  expandedMetricValue: {
+    marginTop: 2,
+    fontFamily: fonts.Bold,
+    fontSize: 14,
+    lineHeight: 17,
+    color: color.text.primary,
+  },
+  expandedRoutePanel: {
+    marginTop: 10,
+    minHeight: 62,
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: "rgba(68,85,93,0.06)",
+    backgroundColor: "rgba(255,255,255,0.74)",
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  expandedRouteStop: {
+    flex: 1,
+    minWidth: 0,
+  },
+  expandedRouteLabel: {
+    fontFamily: fonts.Bold,
+    fontSize: 9,
+    lineHeight: 11,
+    textTransform: "uppercase",
+    letterSpacing: 0.8,
+    color: "#1A7A3E",
+  },
+  expandedRouteLabelDestination: {
+    color: "#4D6575",
+  },
+  expandedRouteTitle: {
+    marginTop: 4,
+    fontFamily: fonts.Bold,
+    fontSize: 13,
+    lineHeight: 16,
+    color: color.text.primary,
+  },
+  expandedRouteArrow: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(244,246,243,0.96)",
+    borderWidth: 1,
+    borderColor: "rgba(68,85,93,0.08)",
+  },
+  expandedStatusPill: {
+    marginTop: 10,
+    minHeight: 34,
+    borderRadius: 17,
+    paddingHorizontal: 12,
+    backgroundColor: "rgba(208,225,236,0.52)",
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+  },
+  expandedStatusText: {
+    flex: 1,
+    fontFamily: fonts.SemiBold,
+    fontSize: 12,
+    color: "#365A6D",
+  },
+  compactSummaryPressable: {
+    gap: 9,
   },
   compactHeaderRow: {
     flexDirection: "row",
@@ -1507,8 +2017,8 @@ const styles = StyleSheet.create({
   },
   compactTitle: {
     fontFamily: fonts.Bold,
-    fontSize: 18,
-    lineHeight: 23,
+    fontSize: 17,
+    lineHeight: 21,
     color: color.text.primary,
   },
   compactSubtitle: {
@@ -1560,26 +2070,24 @@ const styles = StyleSheet.create({
   compactMetricRow: {
     flexDirection: "row",
     gap: 8,
-    flexWrap: "wrap",
   },
   compactMetricPill: {
-    flexGrow: 1,
-    flexBasis: "48%",
+    flex: 1,
     minWidth: 0,
-    minHeight: 58,
-    borderRadius: 18,
+    minHeight: 44,
+    borderRadius: 15,
     borderWidth: 1,
     borderColor: "rgba(68,85,93,0.06)",
     backgroundColor: "rgba(255,255,255,0.78)",
-    paddingHorizontal: 10,
-    paddingVertical: 10,
+    paddingHorizontal: 9,
+    paddingVertical: 8,
     flexDirection: "row",
     alignItems: "center",
   },
   compactMetricIconWrap: {
-    width: 30,
-    height: 30,
-    borderRadius: 10,
+    width: 28,
+    height: 28,
+    borderRadius: 9,
     alignItems: "center",
     justifyContent: "center",
     marginRight: 8,
@@ -1598,53 +2106,52 @@ const styles = StyleSheet.create({
   },
   compactMetricValue: {
     fontFamily: fonts.Bold,
-    fontSize: 13,
+    fontSize: 14,
     lineHeight: 16,
     color: color.text.primary,
   },
   compactActionsRow: {
     flexDirection: "row",
-    gap: 10,
+    gap: 8,
   },
   compactActionsGroup: {
-    marginTop: 12,
-    gap: 10,
+    marginTop: 10,
   },
-  compactHalfButton: {
+  compactActionButton: {
     flex: 1,
-  },
-  compactPrimaryButton: {
-    marginTop: 0,
-    minHeight: 50,
-    borderRadius: 18,
-  },
-  compactPrimaryButtonFull: {
-    flex: 1,
-  },
-  compactPrimaryButtonStacked: {
-    marginTop: 0,
-  },
-  compactSecondaryButton: {
-    marginTop: 0,
-    minHeight: 50,
-    borderRadius: 18,
-    backgroundColor: "#274A36",
-  },
-  compactProblemButton: {
-    minHeight: 50,
-    borderRadius: 18,
+    minWidth: 0,
+    minHeight: 42,
+    borderRadius: 15,
     borderWidth: 1,
-    borderColor: "rgba(138,31,43,0.18)",
-    backgroundColor: "#FFF4F5",
+    borderColor: "rgba(39,74,54,0.14)",
+    backgroundColor: "#F6FAF5",
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
-    gap: 8,
-    paddingHorizontal: 12,
+    gap: 5,
+    paddingHorizontal: 8,
   },
-  compactProblemButtonText: {
-    fontFamily: fonts.SemiBold,
+  compactActionButtonPrimary: {
+    backgroundColor: "#1A7A3E",
+    borderColor: "#1A7A3E",
+  },
+  compactActionButtonDanger: {
+    backgroundColor: "#FFF4F5",
+    borderColor: "rgba(138,31,43,0.18)",
+  },
+  compactActionButtonDisabled: {
+    opacity: 0.54,
+  },
+  compactActionButtonText: {
+    fontFamily: fonts.Bold,
     fontSize: 12,
+    lineHeight: 15,
+    color: "#274A36",
+  },
+  compactActionButtonTextPrimary: {
+    color: "#FFFFFF",
+  },
+  compactActionButtonTextDanger: {
     color: "#8A1F2B",
   },
   collapseControl: {
@@ -1664,5 +2171,73 @@ const styles = StyleSheet.create({
     fontFamily: fonts.SemiBold,
     fontSize: 12,
     color: color.text.secondary,
+  },
+  cancelPromptScrim: {
+    flex: 1,
+    backgroundColor: "rgba(14,24,20,0.42)",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 24,
+  },
+  cancelPromptCard: {
+    width: "100%",
+    maxWidth: 360,
+    borderRadius: 26,
+    backgroundColor: "#FAFBF8",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.76)",
+    paddingHorizontal: 20,
+    paddingVertical: 20,
+    shadowColor: "#183026",
+    shadowOffset: { width: 0, height: 18 },
+    shadowOpacity: 0.22,
+    shadowRadius: 28,
+    elevation: 18,
+  },
+  cancelPromptTitle: {
+    fontFamily: fonts.Bold,
+    fontSize: 20,
+    lineHeight: 25,
+    color: color.text.primary,
+  },
+  cancelPromptMessage: {
+    marginTop: 8,
+    fontFamily: fonts.Medium,
+    fontSize: 14,
+    lineHeight: 20,
+    color: color.text.secondary,
+  },
+  cancelPromptActions: {
+    marginTop: 18,
+    flexDirection: "row",
+    gap: 10,
+  },
+  cancelPromptYesButton: {
+    flex: 1,
+    minHeight: 48,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: "rgba(138,31,43,0.22)",
+    backgroundColor: "#FFF7F7",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  cancelPromptYesText: {
+    fontFamily: fonts.Bold,
+    fontSize: 15,
+    color: "#8A1F2B",
+  },
+  cancelPromptNoButton: {
+    flex: 1.2,
+    minHeight: 48,
+    borderRadius: 16,
+    backgroundColor: "#1A7A3E",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  cancelPromptNoText: {
+    fontFamily: fonts.Bold,
+    fontSize: 15,
+    color: "#FFFFFF",
   },
 });

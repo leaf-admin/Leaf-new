@@ -6,13 +6,13 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 
 /**
  * NavigationService - Navegação Híbrida (Backend + App Externo)
- * 
+ *
  * FLUXO COMPLETO:
  * 1. Calcula rota com trânsito no backend (1x por corrida)
  * 2. Mostra preview no app
- * 3. Abre navegação externa (Waze/Google Maps)
+ * 3. Abre navegação externa (Apple Maps, Google Maps ou Waze)
  * 4. Monitora progresso via GPS (sem recalcular rotas)
- * 
+ *
  * ECONOMIA: 82,4% nos custos de navegação
  */
 
@@ -42,18 +42,18 @@ class NavigationService {
           priority: 3
         }
       },
-      
+
       // Configurações de fallback
       fallbackToBrowser: true,
       showAppSelection: true,
-      
+
       // Cache de preferências
       userPreferences: {
         preferredApp: null,
         lastUsedApp: null
       }
     };
-    
+
     this.isInitialized = false;
     this.stats = {
       totalNavigations: 0,
@@ -74,16 +74,16 @@ class NavigationService {
   async initialize() {
     try {
       Logger.log('🔧 NavigationService - Inicializando...');
-      
+
       // Carregar preferências do usuário
       await this.loadUserPreferences();
-      
+
       // Carregar estatísticas
       await this.loadStats();
-      
+
       this.isInitialized = true;
       Logger.log('✅ NavigationService - Inicializado com sucesso');
-      
+
     } catch (error) {
       Logger.error('❌ NavigationService - Erro na inicialização:', error);
       throw error;
@@ -145,15 +145,15 @@ class NavigationService {
    */
   async calculateRouteWithTraffic(origin, destination) {
     Logger.log('🗺️ NavigationService - Calculando rota com trânsito...');
-    
+
     try {
       // Em produção, seria uma chamada para o backend
       // que calcula a rota com Google Directions API
       const routeData = await this._getRouteWithTraffic(origin, destination);
-      
+
       // Calcula pedágios
       const tolls = await this._calculateTolls(routeData);
-      
+
       return {
         route: routeData,
         tolls: tolls,
@@ -162,7 +162,7 @@ class NavigationService {
         trafficInfo: routeData.trafficInfo,
         timestamp: new Date().toISOString()
       };
-      
+
     } catch (error) {
       Logger.error('❌ NavigationService - Erro ao calcular rota:', error);
       throw error;
@@ -174,7 +174,7 @@ class NavigationService {
    */
   async showRoutePreview(routeData) {
     Logger.log('📱 NavigationService - Mostrando preview da rota...');
-    
+
     return {
       preview: true,
       estimatedTime: routeData.estimatedTime,
@@ -189,14 +189,14 @@ class NavigationService {
    */
   async openExternalNavigation(origin, destination, routeData, options = {}) {
     Logger.log('🚀 NavigationService - Abrindo navegação externa...');
-    
+
     try {
       const { lat: oLat, lng: oLng } = origin;
       const { lat: dLat, lng: dLng } = destination;
-      
+
       // Determinar app preferido
       const preferredApp = options.app || this.config.userPreferences.preferredApp;
-      
+
       // Tentar abrir app preferido primeiro
       if (preferredApp && this.config.navigationApps[preferredApp]) {
         const result = await this._openNavigationApp(preferredApp, origin, destination);
@@ -205,10 +205,10 @@ class NavigationService {
           return result;
         }
       }
-      
+
       // Se não funcionou, tentar apps em ordem de prioridade
       const availableApps = this._getAvailableApps();
-      
+
       for (const app of availableApps) {
         const result = await this._openNavigationApp(app, origin, destination);
         if (result.success) {
@@ -218,16 +218,16 @@ class NavigationService {
           return result;
         }
       }
-      
+
       // Se nenhum app funcionou, usar fallback para browser
       if (this.config.fallbackToBrowser) {
         const result = await this._openBrowserNavigation(origin, destination);
         this._updateStats('browser', result.success);
         return result;
       }
-      
+
       throw new Error('Nenhum app de navegação disponível');
-      
+
     } catch (error) {
       Logger.error('❌ NavigationService - Erro ao abrir navegação:', error);
       this._updateStats('unknown', false);
@@ -243,21 +243,21 @@ class NavigationService {
     if (!app) {
       return { success: false, error: 'App não suportado' };
     }
-    
+
     try {
       const url = this._buildNavigationUrl(appName, origin, destination);
       Logger.log(`📱 NavigationService - Tentando abrir ${app.name}: ${url}`);
-      
+
       const supported = await Linking.canOpenURL(url);
       if (!supported) {
         return { success: false, error: 'App não instalado' };
       }
-      
+
       await Linking.openURL(url);
-      
+
       Logger.log(`✅ NavigationService - ${app.name} aberto com sucesso`);
       return { app: appName, success: true, name: app.name };
-      
+
     } catch (error) {
       Logger.error(`❌ NavigationService - Erro ao abrir ${app.name}:`, error);
       return { success: false, error: error.message };
@@ -271,16 +271,16 @@ class NavigationService {
     try {
       const { lat: oLat, lng: oLng } = origin;
       const { lat: dLat, lng: dLng } = destination;
-      
+
       // Usar Google Maps web como fallback
       const url = `https://www.google.com/maps/dir/?api=1&origin=${oLat},${oLng}&destination=${dLat},${dLng}&travelmode=driving`;
-      
+
       Logger.log('🌐 NavigationService - Abrindo navegação no browser:', url);
-      
+
       await Linking.openURL(url);
-      
+
       return { app: 'browser', success: true, name: 'Google Maps Web' };
-      
+
     } catch (error) {
       Logger.error('❌ NavigationService - Erro ao abrir browser:', error);
       return { success: false, error: error.message };
@@ -293,21 +293,21 @@ class NavigationService {
   _buildNavigationUrl(appName, origin, destination) {
     const { lat: oLat, lng: oLng } = origin;
     const { lat: dLat, lng: dLng } = destination;
-    
+
     switch (appName) {
       case 'waze':
         return `waze://?ll=${dLat},${dLng}&navigate=yes`;
-        
+
       case 'googleMaps':
         if (Platform.OS === 'ios') {
           return `comgooglemaps://?daddr=${dLat},${dLng}&directionsmode=driving`;
         } else {
           return `google.navigation:q=${dLat},${dLng}`;
         }
-        
+
       case 'appleMaps':
         return `http://maps.apple.com/?daddr=${dLat},${dLng}&dirflg=d`;
-        
+
       default:
         throw new Error('App de navegação não suportado');
     }
@@ -318,14 +318,14 @@ class NavigationService {
    */
   _getAvailableApps() {
     const apps = Object.keys(this.config.navigationApps);
-    
+
     // Ordenar por prioridade
     apps.sort((a, b) => {
       const priorityA = this.config.navigationApps[a].priority || 999;
       const priorityB = this.config.navigationApps[b].priority || 999;
       return priorityA - priorityB;
     });
-    
+
     // Filtrar por plataforma
     return apps.filter(app => {
       const appConfig = this.config.navigationApps[app];
@@ -342,12 +342,12 @@ class NavigationService {
    */
   async monitorTripProgress(currentLocation, destination, routeData) {
     Logger.log('📍 NavigationService - Monitorando progresso...');
-    
+
     try {
       const distanceToDestination = this._calculateDistance(currentLocation, destination);
       const progress = this._calculateProgress(currentLocation, destination, routeData);
       const estimatedTimeRemaining = this._estimateTimeRemaining(progress, routeData.estimatedTime);
-      
+
       return {
         distanceToDestination,
         progress: Math.round(progress),
@@ -355,7 +355,7 @@ class NavigationService {
         currentLocation,
         timestamp: new Date().toISOString()
       };
-      
+
     } catch (error) {
       Logger.error('❌ NavigationService - Erro ao monitorar progresso:', error);
       throw error;
@@ -381,7 +381,7 @@ class NavigationService {
   getStats() {
     const total = this.stats.totalNavigations;
     const successRate = total > 0 ? (this.stats.successfulNavigations / total) * 100 : 0;
-    
+
     return {
       ...this.stats,
       successRate: successRate.toFixed(1) + '%',
@@ -395,7 +395,7 @@ class NavigationService {
    */
   _updateStats(app, success) {
     this.stats.totalNavigations++;
-    
+
     if (success) {
       this.stats.successfulNavigations++;
       if (this.stats.appUsage[app] !== undefined) {
@@ -404,7 +404,7 @@ class NavigationService {
     } else {
       this.stats.failedNavigations++;
     }
-    
+
     this.saveStats();
   }
 
@@ -423,7 +423,7 @@ class NavigationService {
         browser: 0
       }
     };
-    
+
     await this.saveStats();
     Logger.log('🔄 NavigationService - Estatísticas resetadas');
   }
@@ -432,7 +432,7 @@ class NavigationService {
   async _getRouteWithTraffic(origin, destination) {
     // Simula chamada para Google Directions API com trânsito
     // Em produção, seria uma chamada real para o backend
-    
+
     return {
       duration: 1800, // 30 minutos
       distance: 15000, // 15km
@@ -451,7 +451,7 @@ class NavigationService {
   async _calculateTolls(routeData) {
     // Simula cálculo de pedágios baseado na rota
     // Em produção, seria uma consulta real
-    
+
     return {
       total: 8.50,
       segments: [
@@ -487,4 +487,4 @@ class NavigationService {
 // Instância singleton
 const navigationService = new NavigationService();
 
-export default navigationService; 
+export default navigationService;

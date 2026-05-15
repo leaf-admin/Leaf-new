@@ -36,6 +36,13 @@ class WooviService {
                 rideDetails: paymentData.rideDetails,
                 passengerName: paymentData.passengerName,
                 passengerEmail: paymentData.passengerEmail,
+                driverId: paymentData.driverId,
+                driverPixKey: paymentData.driverPixKey,
+                driverSubaccountPixKey: paymentData.driverSubaccountPixKey,
+                wooviSubaccountPixKey: paymentData.wooviSubaccountPixKey,
+                subaccountPixKey: paymentData.subaccountPixKey,
+                tollFee: paymentData.tollFee,
+                tollFeeCents: paymentData.tollFeeCents,
                 comment
             });
             

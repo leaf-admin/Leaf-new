@@ -319,10 +319,15 @@ export default function RobotaxiDriverTripScreen({ navigation, route }) {
     const googleWebUrl = `https://maps.google.com/?daddr=${latitude},${longitude}&directionsmode=driving`;
     const wazeAppUrl = `waze://?ll=${latitude},${longitude}&navigate=yes`;
     const wazeWebUrl = `https://waze.com/ul?ll=${latitude},${longitude}&navigate=yes`;
+    const appleMapsUrl = `http://maps.apple.com/?daddr=${latitude},${longitude}&dirflg=d`;
 
     const openGoogleMaps = async () => {
       const canOpenNative = await Linking.canOpenURL(googleAppUrl);
       await Linking.openURL(canOpenNative ? googleAppUrl : googleWebUrl);
+    };
+
+    const openAppleMaps = async () => {
+      await Linking.openURL(appleMapsUrl);
     };
 
     const openWaze = async () => {
@@ -333,14 +338,16 @@ export default function RobotaxiDriverTripScreen({ navigation, route }) {
     if (Platform.OS === "ios") {
       ActionSheetIOS.showActionSheetWithOptions(
         {
-          options: ["Cancelar", "Google Maps", "Waze"],
+          options: ["Cancelar", "Mapas da Apple", "Google Maps", "Waze"],
           cancelButtonIndex: 0,
         },
         async (selectedIndex) => {
           try {
             if (selectedIndex === 1) {
-              await openGoogleMaps();
+              await openAppleMaps();
             } else if (selectedIndex === 2) {
+              await openGoogleMaps();
+            } else if (selectedIndex === 3) {
               await openWaze();
             }
           } catch (error) {

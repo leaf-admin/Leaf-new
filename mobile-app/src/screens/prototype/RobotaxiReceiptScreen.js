@@ -46,16 +46,19 @@ function formatCurrency(value) {
 function formatDistanceKm(value) {
   const numeric = Number(value);
   if (!Number.isFinite(numeric) || numeric <= 0) {
-    return "Em cálculo";
+    return "--";
   }
-  const fractionDigits = numeric >= 10 ? 0 : numeric >= 2 ? 1 : 2;
-  return `${numeric.toFixed(fractionDigits).replace(".", ",")} km`;
+  if (numeric < 1) {
+    const meters = Math.max(10, Math.round((numeric * 1000) / 10) * 10);
+    return `${meters} m`;
+  }
+  return `${Math.max(1, Math.round(numeric))} km`;
 }
 
 function formatDurationMin(value) {
   const numeric = Math.max(0, Math.round(toNumber(value, 0)));
   if (!numeric) {
-    return "Em cálculo";
+    return "--";
   }
   return `${numeric} min`;
 }
@@ -221,7 +224,6 @@ export default function RobotaxiReceiptScreen({ navigation, route }) {
   const { height: windowHeight } = useWindowDimensions();
   const [cardHeight, setCardHeight] = useState(FALLBACK_CARD_HEIGHT);
   const [showFeeBreakdown, setShowFeeBreakdown] = useState(false);
-  const [lastTouchProbe, setLastTouchProbe] = useState("");
   const runtimeHistory = Array.isArray(tripHistory) ? tripHistory : [];
   const [selectedId, setSelectedId] = useState(
     lastReceipt?.id || runtimeHistory[0]?.id || null,
@@ -265,6 +267,11 @@ export default function RobotaxiReceiptScreen({ navigation, route }) {
 
   const openRatingScreen = useCallback(
     (params) => {
+      if (typeof navigation.navigate === "function") {
+        navigation.navigate("RobotaxiPrototypeRating", params);
+        return;
+      }
+
       if (typeof navigation.dispatch === "function") {
         navigation.dispatch(
           StackActions.replace("RobotaxiPrototypeRating", params),
@@ -640,7 +647,6 @@ export default function RobotaxiReceiptScreen({ navigation, route }) {
           focusable
           hitSlop={{ top: 6, right: 6, bottom: 6, left: 6 }}
           disabled={passengerRatingSubmitted || !canPassengerRateDriver}
-          onPressIn={() => setLastTouchProbe("avaliar_viagem")}
           testID="passenger-receipt-rate-trip-button"
           nativeID="passenger-receipt-rate-trip-button"
           accessibilityLabel={passengerRateButtonLabel}
@@ -666,12 +672,12 @@ export default function RobotaxiReceiptScreen({ navigation, route }) {
           accessibilityState={{ disabled: false }}
           focusable
           hitSlop={{ top: 6, right: 6, bottom: 6, left: 6 }}
-          onPressIn={() => setLastTouchProbe("reportar_problema")}
           accessibilityLabel="passenger-receipt-report-issue-button"
           testID="passenger-receipt-report-issue-button"
           onPress={() =>
-            navigation.navigate("RobotaxiPrototypeComplain", {
+            navigation.navigate("RobotaxiPrototypeSupport", {
               fromReceipt: true,
+              initialTopicId: "billing",
               receipt: selected,
             })
           }
@@ -727,10 +733,7 @@ export default function RobotaxiReceiptScreen({ navigation, route }) {
                   </Text>
                 </View>
                 <PrototypeMenuCloseButton
-                  onPress={() => {
-                    setLastTouchProbe("fechar_recibo");
-                    handleDismiss();
-                  }}
+                  onPress={handleDismiss}
                   testID={closeButtonTestId}
                   accessibilityLabel={closeButtonTestId}
                 />

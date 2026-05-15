@@ -101,6 +101,15 @@ function normalizeDriverAction(value) {
   }
 
   if (
+    normalized === "rate_last_receipt" ||
+    normalized === "rate-last-receipt" ||
+    normalized === "rate_receipt" ||
+    normalized === "rate-receipt"
+  ) {
+    return "rate_last_receipt";
+  }
+
+  if (
     normalized === "reject_extension" ||
     normalized === "reject-extension"
   ) {
@@ -128,7 +137,7 @@ function resolveDriverHomeAutomationConfig(
     isTruthyRouteParam(routeParams?.automation) ||
     isTruthyRouteParam(routeParams?.qaAutomation);
 
-  const allowAutomationParams = isDev || isE2E || automationRequested;
+  const allowAutomationParams = (isDev || isE2E) && automationRequested;
   const action = allowAutomationParams
     ? normalizeDriverAction(
         routeParams?.qaDriverAction || routeParams?.driverAction || routeParams?.action,

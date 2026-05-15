@@ -1,5 +1,6 @@
 import React from "react";
-import { render } from "@testing-library/react-native";
+import { ScrollView } from "react-native";
+import { fireEvent, render } from "@testing-library/react-native";
 
 import DriverLiveRideOverlay from "../src/screens/prototype/home/DriverLiveRideOverlay";
 
@@ -50,18 +51,16 @@ describe("DriverLiveRideOverlay", () => {
       />,
     );
 
-    expect(
-      screen.getByText("Dirija até o local de embarque de Passageiro Leaf"),
-    ).toBeTruthy();
+    expect(screen.getByText("A caminho do embarque")).toBeTruthy();
     expect(
       screen.getByLabelText("driver-live-trip-compact-summary"),
     ).toBeTruthy();
-    expect(screen.getByText("R$ 15,01")).toBeTruthy();
-    expect(screen.getByText("Cheguei ao embarque")).toBeTruthy();
+    expect(screen.getByText("2 km")).toBeTruthy();
+    expect(screen.getByText("Cheguei")).toBeTruthy();
     expect(screen.getByLabelText("Cheguei ao embarque")).toBeTruthy();
   });
 
-  it("keeps external navigation visible while the trip is started", () => {
+  it("keeps trip actions compact while the trip is started", () => {
     const screen = render(
       <DriverLiveRideOverlay
         driverActiveRide={{
@@ -76,7 +75,7 @@ describe("DriverLiveRideOverlay", () => {
         paymentMethod="pix"
         driverTripAssist={{
           status: "started",
-          remainingDistanceLabel: "2,6 km",
+          remainingDistanceLabel: "3 km",
           etaLabel: "8 min",
           primaryActionLabel: "Finalizar corrida",
           primaryActionEnabled: true,
@@ -89,9 +88,88 @@ describe("DriverLiveRideOverlay", () => {
       />,
     );
 
-    expect(screen.getByText("Navegar")).toBeTruthy();
-    expect(screen.getByText("Reportar problema")).toBeTruthy();
+    expect(screen.getByText("A caminho de 1 Ferry Building")).toBeTruthy();
+    expect(screen.getByText("Problema")).toBeTruthy();
+    expect(screen.getByText("Encerrar")).toBeTruthy();
     expect(screen.getByLabelText("Finalizar corrida")).toBeTruthy();
+  });
+
+  it("opens the active trip card without using a scroll view", () => {
+    const screen = render(
+      <DriverLiveRideOverlay
+        driverActiveRide={{
+          bookingId: "booking_started_expanded",
+          status: "started",
+          pickupAddress: "1540 Mission St",
+          dropoffAddress: "1 Ferry Building",
+          estimatedDriverNetAmount: 24.9,
+          passengerName: "Passageiro Leaf",
+        }}
+        bookingStatus="started"
+        paymentMethod="pix"
+        driverTripAssist={{
+          status: "started",
+          remainingDistanceLabel: "3 km",
+          etaLabel: "8 min",
+          primaryActionLabel: "Finalizar corrida",
+          primaryActionEnabled: true,
+        }}
+        interruptRideOperationalFlow={jest.fn()}
+        markDriverArrived={jest.fn()}
+        startTripFlow={jest.fn()}
+        completeTripFlow={jest.fn()}
+        onOpenNavigation={jest.fn()}
+      />,
+    );
+
+    fireEvent.press(screen.getByLabelText("driver-live-trip-compact-summary"));
+
+    expect(screen.getByLabelText("driver-live-trip-collapse-button")).toBeTruthy();
+    expect(screen.getAllByText("Líquido").length).toBeGreaterThan(0);
+    expect(screen.getByText("Embarque")).toBeTruthy();
+    expect(screen.getByText("Destino")).toBeTruthy();
+    expect(screen.UNSAFE_queryAllByType(ScrollView)).toHaveLength(0);
+  });
+
+  it("asks for confirmation before canceling an accepted ride", () => {
+    const cancelActiveRideFlow = jest.fn();
+    const screen = render(
+      <DriverLiveRideOverlay
+        driverActiveRide={{
+          bookingId: "booking_cancel",
+          status: "accepted",
+          pickupAddress: "1540 Mission St",
+          dropoffAddress: "1 Ferry Building",
+          estimatedDriverNetAmount: 15.01,
+          passengerName: "Passageiro Leaf",
+        }}
+        bookingStatus="accepted"
+        tripDistanceKm={0.82}
+        paymentMethod="pix"
+        driverTripAssist={{
+          status: "accepted",
+          remainingMeters: 820,
+          etaMinutes: 5,
+          primaryActionLabel: "Cheguei ao embarque",
+          primaryActionEnabled: false,
+        }}
+        cancelActiveRideFlow={cancelActiveRideFlow}
+        markDriverArrived={jest.fn()}
+        startTripFlow={jest.fn()}
+        completeTripFlow={jest.fn()}
+        onOpenNavigation={jest.fn()}
+      />,
+    );
+
+    expect(screen.getByText("820 m")).toBeTruthy();
+    fireEvent.press(screen.getByLabelText("Cancelar corrida"));
+    expect(
+      screen.getByText(
+        "Ao cancelar a corrida cobranças podem ser aplicadas, deseja cancelar?",
+      ),
+    ).toBeTruthy();
+    fireEvent.press(screen.getByLabelText("Não"));
+    expect(cancelActiveRideFlow).not.toHaveBeenCalled();
   });
 
   it("shows external navigation in the arrived state before trip start", () => {

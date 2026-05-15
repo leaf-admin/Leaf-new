@@ -4,7 +4,7 @@ import Logger from '../utils/Logger';
 const API_BASE_URL =
   process.env.EXPO_PUBLIC_API_URL ||
   process.env.EXPO_PUBLIC_BACKEND_URL ||
-  'https://api.62.169.31.231.sslip.io';
+  'https://api.leaf.app.br';
 
 const getApiUrl = (endpoint) => {
     const normalizedEndpoint = endpoint.startsWith('/api/')

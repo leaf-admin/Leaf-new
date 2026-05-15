@@ -1,6 +1,6 @@
 export const PROTOTYPE_REGION = {
-  latitude: 37.7749,
-  longitude: -122.4194,
+  latitude: -22.9711,
+  longitude: -43.1822,
   latitudeDelta: 0.018,
   longitudeDelta: 0.018,
 };
@@ -13,31 +13,31 @@ export const PROTOTYPE_ORIGIN_COORDINATE = {
 export const DESTINATION_HISTORY = [
   {
     id: "h1",
-    name: "Leaf Office",
-    address: "2115 S Lamar Blvd",
+    name: "Copacabana Palace",
+    address: "Av. Atlantica, 1702 - Copacabana",
     eta: "4 min",
-    coordinate: { latitude: 37.7798, longitude: -122.4116 },
+    coordinate: { latitude: -22.96722, longitude: -43.17874 },
   },
   {
     id: "h2",
-    name: "Nomade",
-    address: "1506 S 1st St",
+    name: "Rio Sul",
+    address: "Rua Lauro Muller, 116 - Botafogo",
     eta: "6 min",
-    coordinate: { latitude: 37.7682, longitude: -122.4294 },
+    coordinate: { latitude: -22.95706, longitude: -43.17695 },
   },
   {
     id: "h3",
-    name: "Stanford Shopping Center",
-    address: "660 Stanford Shopping Center",
+    name: "Barra Shopping",
+    address: "Av. das Americas, 4666 - Barra da Tijuca",
     eta: "12 min",
-    coordinate: { latitude: 37.765, longitude: -122.4314 },
+    coordinate: { latitude: -22.99932, longitude: -43.35988 },
   },
   {
     id: "h4",
-    name: "Loro Asian Smokehouse",
-    address: "2115 S Lamar Blvd",
+    name: "Jardim Botanico",
+    address: "Rua Jardim Botanico, 1008",
     eta: "9 min",
-    coordinate: { latitude: 37.7834, longitude: -122.4247 },
+    coordinate: { latitude: -22.9674, longitude: -43.2239 },
   },
 ];
 

@@ -103,6 +103,8 @@ jest.mock('../src/config/runtimeAccessPolicy', () => ({
 }));
 
 const {
+  mergeCompletedReceiptForHistory,
+  normalizeCompletedTripDriverNetAmount,
   resolveCompletedTripFinancialSnapshot,
   resolveDriverPayoutAmount,
 } = require('../src/screens/prototype/prototypeRideRuntime');
@@ -145,6 +147,31 @@ describe('prototype ride runtime financial snapshot', () => {
     expect(snapshot.paymentIntermediationFee).toBeCloseTo(0.5, 2);
   });
 
+  it('keeps the paid gross fare when completion receives a stale lower fare', () => {
+    const snapshot = resolveCompletedTripFinancialSnapshot(
+      { fare: 12.28 },
+      {
+        selectedFare: 12.28,
+        paymentState: {
+          status: 'confirmed',
+          paymentId: 'pay_123',
+          amount: 14.22,
+        },
+        driverActiveRide: {
+          fare: 12.28,
+          grossFare: 14.22,
+          totalFees: 1.49,
+          driverNetAmount: 12.28,
+          pricingSnapshotLocked: true,
+        },
+      },
+    );
+
+    expect(snapshot.finalFare).toBeCloseTo(14.22, 2);
+    expect(snapshot.driverNetAmount).toBeCloseTo(12.73, 2);
+    expect(snapshot.totalFees).toBeCloseTo(1.49, 2);
+  });
+
   it('falls back to the preserved driver payout when a local locked snapshot carries placeholder zeros', () => {
     const snapshot = resolveCompletedTripFinancialSnapshot(
       { fare: 78.73 },
@@ -168,5 +195,68 @@ describe('prototype ride runtime financial snapshot', () => {
     expect(snapshot.finalFare).toBeCloseTo(78.73, 2);
     expect(snapshot.driverNetAmount).toBeCloseTo(75.74, 2);
     expect(snapshot.totalFees).toBeCloseTo(2.99, 2);
+  });
+
+  it('recalculates net from the fee breakdown when a driver receipt repeats gross as payout', () => {
+    const normalizedNet = normalizeCompletedTripDriverNetAmount({
+      finalFare: 14.22,
+      driverNetAmount: 14.22,
+      operationalFee: 0.99,
+      paymentIntermediationFee: 0.5,
+      totalFees: 1.49,
+    });
+
+    expect(normalizedNet).toBeCloseTo(12.73, 2);
+  });
+
+  it('keeps estimated fees when the locked ride also carries a stale gross payout', () => {
+    const snapshot = resolveCompletedTripFinancialSnapshot(
+      { fare: 14.22 },
+      {
+        selectedFare: 14.22,
+        activeBooking: { estimatedFare: 14.22 },
+        driverActiveRide: {
+          fare: 14.22,
+          grossFare: 14.22,
+          driverNetAmount: 14.22,
+          estimatedDriverNetAmount: 12.73,
+          estimatedTotalFees: 1.49,
+          estimatedOperationalFee: 0.99,
+          estimatedPaymentIntermediationFee: 0.5,
+          pricingSnapshotLocked: true,
+        },
+      },
+    );
+
+    expect(snapshot.finalFare).toBeCloseTo(14.22, 2);
+    expect(snapshot.driverNetAmount).toBeCloseTo(12.73, 2);
+    expect(snapshot.totalFees).toBeCloseTo(1.49, 2);
+    expect(snapshot.operationalFee).toBeCloseTo(0.99, 2);
+    expect(snapshot.paymentIntermediationFee).toBeCloseTo(0.5, 2);
+  });
+
+  it('normalizes merged completed receipts with authoritative fees', () => {
+    const mergedReceipt = mergeCompletedReceiptForHistory(
+      {
+        id: 'booking_123',
+        finalFare: 14.22,
+        driverNetAmount: 12.73,
+      },
+      {
+        id: 'booking_123',
+        fare: 14.22,
+        finalFare: 14.22,
+        driverNetAmount: 14.22,
+        operationalFee: 0.99,
+        paymentIntermediationFee: 0.5,
+        totalFees: 1.49,
+        financialSnapshotSource: 'backend_final',
+        authoritativeSnapshot: true,
+      },
+    );
+
+    expect(mergedReceipt.finalFare).toBeCloseTo(14.22, 2);
+    expect(mergedReceipt.driverNetAmount).toBeCloseTo(12.73, 2);
+    expect(mergedReceipt.totalFees).toBeCloseTo(1.49, 2);
   });
 });

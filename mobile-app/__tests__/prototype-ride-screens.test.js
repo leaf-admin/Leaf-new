@@ -1,5 +1,5 @@
 import React from 'react';
-import { act, fireEvent, render, waitFor } from '@testing-library/react-native';
+import { fireEvent, render, waitFor } from '@testing-library/react-native';
 
 import RobotaxiDriverOfferScreen from '../src/screens/prototype/RobotaxiDriverOfferScreen';
 import RobotaxiDriverSearchScreen from '../src/screens/prototype/RobotaxiDriverSearchScreen';
@@ -13,6 +13,10 @@ import RobotaxiTripHistoryScreen from '../src/screens/prototype/RobotaxiTripHist
 import RatingService from '../src/services/RatingService';
 import { usePrototypeRideRuntime } from '../src/screens/prototype/prototypeRideRuntime';
 import { resolveMeaningfulAddress } from '../src/screens/prototype/addressLabelUtils';
+import {
+  allowForcedPaymentBypass,
+  allowTestUserTools,
+} from '../src/config/runtimeAccessPolicy';
 
 jest.mock('../src/screens/prototype/prototypeRideRuntime', () => ({
   usePrototypeRideRuntime: jest.fn(),
@@ -83,6 +87,11 @@ jest.mock('react-native-safe-area-context', () => ({
 
 jest.mock('../src/services/RatingService', () => ({
   submitRating: jest.fn().mockResolvedValue({ success: true }),
+}));
+
+jest.mock('../src/config/runtimeAccessPolicy', () => ({
+  allowForcedPaymentBypass: jest.fn(() => false),
+  allowTestUserTools: jest.fn(() => false),
 }));
 
 function buildPassengerRuntime(overrides = {}) {
@@ -175,7 +184,14 @@ function buildReceiptRuntime(overrides = {}) {
 
 describe('prototype ride screens', () => {
   beforeEach(() => {
+    jest.useRealTimers();
     jest.clearAllMocks();
+    allowForcedPaymentBypass.mockReturnValue(false);
+    allowTestUserTools.mockReturnValue(false);
+  });
+
+  afterEach(() => {
+    jest.useRealTimers();
   });
 
   it('drives the offer screen into the driver trip surface on acceptance', async () => {
@@ -216,8 +232,6 @@ describe('prototype ride screens', () => {
   });
 
   it('auto-dismisses the driver offer screen when only a stale route request remains', async () => {
-    jest.useFakeTimers();
-
     usePrototypeRideRuntime.mockReturnValue({
       driverOffers: [],
       acceptDriverOffer: jest.fn(),
@@ -249,15 +263,12 @@ describe('prototype ride screens', () => {
 
     expect(screen.getByText('Detalhes da corrida')).toBeTruthy();
 
-    act(() => {
-      jest.advanceTimersByTime(1100);
-    });
-
-    await waitFor(() => {
-      expect(navigation.goBack).toHaveBeenCalled();
-    });
-
-    jest.useRealTimers();
+    await waitFor(
+      () => {
+        expect(navigation.goBack).toHaveBeenCalled();
+      },
+      { timeout: 2000 }
+    );
   });
 
   it('keeps driver trip CTAs aligned with accepted, arrived and started states', async () => {
@@ -269,7 +280,9 @@ describe('prototype ride screens', () => {
     );
 
     expect(acceptedScreen.getByText('Dirija até o local de embarque de Passageiro Leaf')).toBeTruthy();
-    fireEvent.press(acceptedScreen.getByText('Cheguei ao embarque'));
+    fireEvent.press(
+      acceptedScreen.getByLabelText('driver-live-primary-action-arrive-button')
+    );
     await waitFor(() => expect(acceptedRuntime.markDriverArrived).toHaveBeenCalled());
 
     const arrivedRuntime = buildDriverRuntime({ bookingStatus: 'arrived' });
@@ -280,7 +293,9 @@ describe('prototype ride screens', () => {
     );
 
     expect(arrivedScreen.getByText('Passageiro em embarque')).toBeTruthy();
-    fireEvent.press(arrivedScreen.getByText('Iniciar viagem'));
+    fireEvent.press(
+      arrivedScreen.getByLabelText('driver-live-primary-action-start-button')
+    );
     await waitFor(() => expect(arrivedRuntime.startTripFlow).toHaveBeenCalled());
 
     const startedRuntime = buildDriverRuntime({ bookingStatus: 'started' });
@@ -291,7 +306,9 @@ describe('prototype ride screens', () => {
     );
 
     expect(startedScreen.getByText('Viagem em andamento')).toBeTruthy();
-    fireEvent.press(startedScreen.getByText('Finalizar corrida'));
+    fireEvent.press(
+      startedScreen.getByLabelText('driver-live-primary-action-complete-button')
+    );
     await waitFor(() => {
       expect(startedRuntime.completeTripFlow).toHaveBeenCalled();
       expect(startedNavigation.navigate).toHaveBeenCalledWith('RobotaxiPrototypeReceipt', { fromTrip: true });
@@ -322,7 +339,7 @@ describe('prototype ride screens', () => {
     expect(screen.getByText('Leaf Plus • LEF-2042')).toBeTruthy();
     expect(screen.getByText('Tempo')).toBeTruthy();
     expect(screen.getByText('Distância')).toBeTruthy();
-    expect(screen.getByText('Valor da corrida')).toBeTruthy();
+    expect(screen.getByText('Valor')).toBeTruthy();
     expect(screen.getByText('Cancelar corrida')).toBeTruthy();
   });
 
@@ -400,6 +417,26 @@ describe('prototype ride screens', () => {
     expect(dismissCompletedReceipt).toHaveBeenCalled();
     expect(navigation.navigate).toHaveBeenCalledWith('RobotaxiPrototype');
     expect(navigation.goBack).not.toHaveBeenCalled();
+  });
+
+  it('routes post-ride issue reporting through support triage', () => {
+    usePrototypeRideRuntime.mockReturnValue(buildReceiptRuntime());
+
+    const navigation = { navigate: jest.fn(), canGoBack: jest.fn(() => false), goBack: jest.fn() };
+    const { getByTestId } = render(
+      <RobotaxiReceiptScreen navigation={navigation} route={{ params: {} }} />
+    );
+
+    fireEvent.press(getByTestId('passenger-receipt-report-issue-button'));
+
+    expect(navigation.navigate).toHaveBeenCalledWith(
+      'RobotaxiPrototypeSupport',
+      expect.objectContaining({
+        fromReceipt: true,
+        initialTopicId: 'billing',
+        receipt: expect.objectContaining({ id: 'trip_1' }),
+      })
+    );
   });
 
   it('replaces the passenger back CTA with a close affordance in the header', () => {
@@ -615,8 +652,12 @@ describe('prototype ride screens', () => {
       })
     );
 
-    jest.useFakeTimers();
-    const navigation = { replace: jest.fn(), navigate: jest.fn(), canGoBack: jest.fn(() => false), goBack: jest.fn() };
+    const navigation = {
+      replace: jest.fn(),
+      navigate: jest.fn(),
+      canGoBack: jest.fn(() => false),
+      goBack: jest.fn(),
+    };
 
     render(
       <RobotaxiPaymentSuccessScreen
@@ -625,21 +666,20 @@ describe('prototype ride screens', () => {
       />
     );
 
-    jest.advanceTimersByTime(800);
-
-    await waitFor(() => {
-      expect(navigation.replace).toHaveBeenCalledWith(
-        'RobotaxiPrototypeDriverSearch',
-        expect.objectContaining({
-          destination: 'Destino',
-          destinationAddress: 'Ferry Building, San Francisco',
-          originAddress: '1540 Mission St, San Francisco',
-          vehicle: 'Leaf Plus',
-        })
-      );
-    });
-
-    jest.useRealTimers();
+    await waitFor(
+      () => {
+        expect(navigation.replace).toHaveBeenCalledWith(
+          'RobotaxiPrototypeDriverSearch',
+          expect.objectContaining({
+            destination: 'Destino',
+            destinationAddress: 'Ferry Building, San Francisco',
+            originAddress: '1540 Mission St, San Francisco',
+            vehicle: 'Leaf Plus',
+          })
+        );
+      },
+      { timeout: 2000 }
+    );
   });
 
   it('ignores generic placeholder labels when resolving an address', () => {
@@ -779,6 +819,8 @@ describe('prototype ride screens', () => {
   });
 
   it('auto-submits the passenger rating when qa params request it', async () => {
+    allowTestUserTools.mockReturnValue(true);
+
     const markTripRating = jest.fn();
     usePrototypeRideRuntime.mockReturnValue({
       activeRole: 'customer',

@@ -1,5 +1,5 @@
 import React from 'react';
-import { Alert, Text, TouchableOpacity, View } from 'react-native';
+import { Alert, Linking, Text, TouchableOpacity, View } from 'react-native';
 import { fireEvent, render, waitFor } from '@testing-library/react-native';
 
 import RobotaxiHomeScreen from '../src/screens/prototype/RobotaxiHomeScreen';
@@ -17,9 +17,16 @@ const mockUseNavigationState = jest.fn((selector) =>
 );
 const mockUseIsFocused = jest.fn(() => true);
 const mockPrototypeMapLayer = jest.fn(({ children }) => <View>{children}</View>);
+const mockGetForegroundPermissionsAsync = jest.fn(() =>
+  Promise.resolve({ status: 'granted' })
+);
 
 jest.mock('../src/screens/prototype/prototypeRideRuntime', () => ({
   usePrototypeRideRuntime: jest.fn(),
+}));
+
+jest.mock('expo-location', () => ({
+  getForegroundPermissionsAsync: (...args) => mockGetForegroundPermissionsAsync(...args),
 }));
 
 jest.mock('@react-navigation/native', () => ({
@@ -231,6 +238,7 @@ describe('driver online toggle', () => {
     );
     resolvePassengerAutoRoute.mockReturnValue(null);
     shouldAutoSyncPassengerRoute.mockReturnValue(false);
+    mockGetForegroundPermissionsAsync.mockResolvedValue({ status: 'granted' });
     jest.spyOn(Alert, 'alert').mockImplementation(() => {});
   });
 
@@ -269,6 +277,56 @@ describe('driver online toggle', () => {
         'Não foi possível finalizar o modo online agora. Tente novamente.'
       );
     });
+  });
+
+  it('shows location guidance and allows opening settings when location permission blocks online mode', async () => {
+    const setDriverOnline = jest.fn().mockResolvedValue({
+      success: false,
+      error: 'Localização inicial não disponível para ativar modo online.',
+    });
+    mockGetForegroundPermissionsAsync.mockResolvedValue({ status: 'denied' });
+    const openSettingsSpy = jest
+      .spyOn(Linking, 'openSettings')
+      .mockResolvedValue(undefined);
+
+    usePrototypeRideRuntime.mockReturnValue(
+      buildDriverRuntime({
+        setDriverOnline,
+      })
+    );
+
+    const navigation = {
+      navigate: jest.fn(),
+      canGoBack: jest.fn(() => false),
+      goBack: jest.fn(),
+    };
+
+    const { getByTestId } = render(
+      <RobotaxiHomeScreen navigation={navigation} route={{ params: {} }} />
+    );
+
+    fireEvent.press(getByTestId('driver-home-toggle-online'));
+
+    await waitFor(() => {
+      expect(setDriverOnline).toHaveBeenCalledWith(true);
+      expect(Alert.alert).toHaveBeenCalledWith(
+        'Ative a localização para ficar online',
+        expect.stringContaining('A Leaf precisa da sua localização'),
+        expect.any(Array),
+        expect.objectContaining({ __skipFriendlyAlertPatch: true })
+      );
+    });
+
+    const [, , buttons] = Alert.alert.mock.calls.at(-1);
+    expect(Array.isArray(buttons)).toBe(true);
+    expect(buttons[1]?.text).toBe('Abrir Ajustes');
+    buttons[1]?.onPress?.();
+
+    await waitFor(() => {
+      expect(openSettingsSpy).toHaveBeenCalled();
+    });
+
+    openSettingsSpy.mockRestore();
   });
 
   it('does not render driver home surfaces while the runtime is still stabilizing', () => {

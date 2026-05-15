@@ -13,6 +13,7 @@ class DriverBalanceService {
     Logger.log('🔗 DriverBalanceService baseUrl:', this.baseUrl);
     this.WITHDRAW_FEE_THRESHOLD = 500;
     this.WITHDRAW_FEE_BELOW_THRESHOLD = 1;
+    this.SUBSCRIPTION_DAILY_FEE_NOMINAL = 9.90;
   }
 
   async getAuthHeaders(extraHeaders = {}) {
@@ -79,11 +80,19 @@ class DriverBalanceService {
           lastRideId: data.lastRideId,
           subscriptionPendingFeeCents: data.subscriptionPendingFeeCents || 0,
           subscriptionPendingFee: data.subscriptionPendingFee || 0,
+          subscriptionPendingFeeRawCents: data.subscriptionPendingFeeRawCents || 0,
+          subscriptionPendingFeeRaw: data.subscriptionPendingFeeRaw || 0,
           subscriptionStatus: data.subscriptionStatus || 'active',
           billingStatus: data.billingStatus || 'active',
           subscriptionCollectionMode: data.subscriptionCollectionMode || 'withdrawal',
           subscriptionDailyFeeCents: data.subscriptionDailyFeeCents || 0,
           subscriptionDailyFee: data.subscriptionDailyFee || 0,
+          subscriptionDailyFeeNominalCents: data.subscriptionDailyFeeNominalCents || Math.round(this.SUBSCRIPTION_DAILY_FEE_NOMINAL * 100),
+          subscriptionDailyFeeNominal: data.subscriptionDailyFeeNominal || this.SUBSCRIPTION_DAILY_FEE_NOMINAL,
+          subscriptionDailyFeeEffectiveCents: data.subscriptionDailyFeeEffectiveCents || data.subscriptionDailyFeeCents || 0,
+          subscriptionDailyFeeEffective: data.subscriptionDailyFeeEffective || data.subscriptionDailyFee || 0,
+          subscriptionDailyFeeSuspended: data.subscriptionDailyFeeSuspended !== false,
+          subscriptionDailyBillingEnabled: data.subscriptionDailyBillingEnabled === true,
           subscriptionWaveId: data.subscriptionWaveId || null,
           availableAfterSubscriptionCents: data.availableAfterSubscriptionCents || 0,
           availableAfterSubscription: data.availableAfterSubscription || 0

@@ -1,7 +1,12 @@
 const mockAsyncStorageGetItem = jest.fn();
+const mockFirebaseAuthState = {
+  currentUser: null,
+};
 
 jest.mock('@react-native-firebase/auth', () => () => ({
-  currentUser: null,
+  get currentUser() {
+    return mockFirebaseAuthState.currentUser;
+  },
 }));
 
 jest.mock('@react-native-async-storage/async-storage', () => ({
@@ -29,12 +34,21 @@ import io from 'socket.io-client';
 import { Platform } from 'react-native';
 import WebSocketManager from '../src/services/WebSocketManager';
 
+function buildJwt(payload) {
+  return [
+    Buffer.from(JSON.stringify({ alg: 'none', typ: 'JWT' })).toString('base64url'),
+    Buffer.from(JSON.stringify(payload)).toString('base64url'),
+    'signature',
+  ].join('.');
+}
+
 describe('WebSocketManager auth QA bypass', () => {
   let originalPlatformOS;
 
   beforeEach(() => {
     originalPlatformOS = Platform.OS;
     WebSocketManager.instance = null;
+    mockFirebaseAuthState.currentUser = null;
     jest.clearAllMocks();
     mockAsyncStorageGetItem.mockImplementation(async (key) => {
       if (key === '@test_mode') return 'true';
@@ -78,6 +92,75 @@ describe('WebSocketManager auth QA bypass', () => {
     expect(authPayload).toEqual(
       expect.objectContaining({
         token: 'firebase-id-token-driver-two',
+      }),
+    );
+    expect(manager.qaSocketBypassState).toEqual({ enabled: false, uid: null });
+  });
+
+  it('prefers the persisted QA idToken over a stale Firebase user in test mode', async () => {
+    const staleGetIdToken = jest.fn(async () => 'stale-passenger-token');
+    mockFirebaseAuthState.currentUser = {
+      uid: 'stale-passenger-uid',
+      getIdToken: staleGetIdToken,
+    };
+    mockAsyncStorageGetItem.mockImplementation(async (key) => {
+      if (key === '@test_mode') return 'true';
+      if (key === '@qa_socket_id_token') return 'firebase-id-token-driver-two';
+      if (key === '@auth_uid') return 'F0CIj7noqrc74qdPJD80T9FCxME2';
+      if (key === '@user_data') {
+        return JSON.stringify({
+          uid: 'F0CIj7noqrc74qdPJD80T9FCxME2',
+          usertype: 'driver',
+          isTestUser: true,
+        });
+      }
+      return null;
+    });
+
+    const manager = WebSocketManager.getInstance();
+    const authPayload = await manager._buildSocketAuthPayload();
+
+    expect(staleGetIdToken).not.toHaveBeenCalled();
+    expect(authPayload).toEqual(
+      expect.objectContaining({
+        token: 'firebase-id-token-driver-two',
+      }),
+    );
+    expect(manager.qaSocketBypassState).toEqual({ enabled: false, uid: null });
+  });
+
+  it('ignores an expired persisted QA idToken and falls back to Firebase refresh', async () => {
+    const freshGetIdToken = jest.fn(async () => 'fresh-firebase-token');
+    mockFirebaseAuthState.currentUser = {
+      uid: 'F0CIj7noqrc74qdPJD80T9FCxME2',
+      getIdToken: freshGetIdToken,
+    };
+    mockAsyncStorageGetItem.mockImplementation(async (key) => {
+      if (key === '@test_mode') return 'true';
+      if (key === '@qa_socket_id_token') {
+        return buildJwt({
+          sub: 'F0CIj7noqrc74qdPJD80T9FCxME2',
+          exp: Math.floor(Date.now() / 1000) - 60,
+        });
+      }
+      if (key === '@auth_uid') return 'F0CIj7noqrc74qdPJD80T9FCxME2';
+      if (key === '@user_data') {
+        return JSON.stringify({
+          uid: 'F0CIj7noqrc74qdPJD80T9FCxME2',
+          usertype: 'driver',
+          isTestUser: true,
+        });
+      }
+      return null;
+    });
+
+    const manager = WebSocketManager.getInstance();
+    const authPayload = await manager._buildSocketAuthPayload({ forceRefresh: true });
+
+    expect(freshGetIdToken).toHaveBeenCalledWith(true);
+    expect(authPayload).toEqual(
+      expect.objectContaining({
+        token: 'fresh-firebase-token',
       }),
     );
     expect(manager.qaSocketBypassState).toEqual({ enabled: false, uid: null });
@@ -285,6 +368,48 @@ describe('WebSocketManager auth QA bypass', () => {
       expect.objectContaining({
         success: true,
         available: true,
+      }),
+    );
+  });
+
+  it('registers sessionTerminated as a first-class server event', () => {
+    const manager = WebSocketManager.getInstance();
+    manager.socket = {
+      connected: true,
+      id: 'socket-old',
+      io: {
+        engine: {
+          transport: {
+            name: 'websocket',
+          },
+        },
+      },
+      on: jest.fn(),
+    };
+
+    manager.setupListeners();
+
+    const registration = manager.socket.on.mock.calls.find(
+      ([eventName]) => eventName === 'sessionTerminated',
+    );
+    expect(registration).toBeTruthy();
+
+    const listener = jest.fn();
+    manager.on('sessionTerminated', listener);
+    registration[1]({
+      code: 'SESSION_REPLACED',
+      userId: 'driver-123',
+      newSocketId: 'socket-new',
+      previousSocketId: 'socket-old',
+    });
+
+    expect(listener).toHaveBeenCalledWith(
+      expect.objectContaining({
+        code: 'SESSION_REPLACED',
+        userId: 'driver-123',
+        newSocketId: 'socket-new',
+        previousSocketId: 'socket-old',
+        __source: 'socket_event',
       }),
     );
   });

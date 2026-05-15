@@ -22,6 +22,7 @@ const TEST_MODE_STORAGE_KEY = "@test_mode";
 const AUTH_UID_STORAGE_KEY = "@auth_uid";
 const USER_DATA_STORAGE_KEY = "@user_data";
 const QA_SOCKET_ID_TOKEN_STORAGE_KEY = "@qa_socket_id_token";
+const QA_SOCKET_ID_TOKEN_MIN_TTL_MS = 60000;
 
 // ✅ CORREÇÃO: Calcular URL dinamicamente para evitar problemas em builds de release
 // Não armazenar como constante, calcular sempre que necessário
@@ -89,6 +90,50 @@ function cloneSocketPayload(payload) {
   } catch (_error) {
     return payload;
   }
+}
+
+function decodeBase64UrlJson(segment) {
+  const normalized = String(segment || "")
+    .replace(/-/g, "+")
+    .replace(/_/g, "/");
+  const padded = normalized.padEnd(Math.ceil(normalized.length / 4) * 4, "=");
+
+  if (typeof globalThis?.atob === "function") {
+    return JSON.parse(globalThis.atob(padded));
+  }
+
+  if (typeof Buffer !== "undefined") {
+    return JSON.parse(Buffer.from(padded, "base64").toString("utf8"));
+  }
+
+  return null;
+}
+
+function getJwtExpirationMs(token) {
+  const parts = String(token || "").split(".");
+  if (parts.length < 2) {
+    return null;
+  }
+
+  try {
+    const payload = decodeBase64UrlJson(parts[1]);
+    const expSeconds = Number(payload?.exp);
+    if (!Number.isFinite(expSeconds) || expSeconds <= 0) {
+      return null;
+    }
+    return expSeconds * 1000;
+  } catch (_error) {
+    return null;
+  }
+}
+
+function isJwtExpiredOrNearExpiry(token, nowMs = Date.now()) {
+  const expirationMs = getJwtExpirationMs(token);
+  if (!Number.isFinite(expirationMs)) {
+    return false;
+  }
+
+  return expirationMs <= nowMs + QA_SOCKET_ID_TOKEN_MIN_TTL_MS;
 }
 
 function normalizeSocketCandidateUrl(rawUrl) {
@@ -332,6 +377,25 @@ class WebSocketManager {
     return bookingId || null;
   }
 
+  _payloadMatchesBookingId(payload = {}, expectedBookingId = null) {
+    const expected = String(expectedBookingId || "").trim();
+    if (!expected) {
+      return true;
+    }
+
+    const actual = String(
+      payload?.bookingId ||
+        payload?.rideId ||
+        payload?.booking?.bookingId ||
+        payload?.booking?.id ||
+        payload?.data?.bookingId ||
+        payload?.data?.rideId ||
+        "",
+    ).trim();
+
+    return !actual || actual === expected;
+  }
+
   _buildLifecycleDispatchKey(eventName, payload = {}) {
     const normalizedEvent = String(eventName || "").trim();
     const bookingId = this._resolveLifecycleBookingId(normalizedEvent, payload);
@@ -418,6 +482,121 @@ class WebSocketManager {
     return true;
   }
 
+  _emitLifecycleCommandWithAck({
+    commandName,
+    eventName,
+    payload,
+    successEvent,
+    errorEvent,
+    bookingId,
+    timeoutMs = 10000,
+    fallbackErrorMessage = "Lifecycle command failed",
+  }) {
+    if (!this.socket?.connected) {
+      throw new Error("WebSocket não conectado");
+    }
+
+    return new Promise((resolve, reject) => {
+      const telemetryContext = this._resolveRideTelemetryContext({}, bookingId);
+      const startedAt = Date.now();
+      let settled = false;
+      let timeout = null;
+
+      const cleanup = () => {
+        if (timeout) {
+          clearTimeout(timeout);
+          timeout = null;
+        }
+        this.off(successEvent, handleSuccess);
+        this.off(errorEvent, handleError);
+      };
+
+      const settleSuccess = (data = {}) => {
+        if (settled || !this._payloadMatchesBookingId(data, bookingId)) {
+          return;
+        }
+        settled = true;
+        cleanup();
+        this._recordRideTelemetryCommand(
+          commandName,
+          {
+            phase: "success",
+            latencyMs: Date.now() - startedAt,
+          },
+          telemetryContext,
+          bookingId,
+        );
+        resolve(data);
+      };
+
+      const settleError = (data = {}, fallbackMessage = fallbackErrorMessage) => {
+        if (settled || !this._payloadMatchesBookingId(data, bookingId)) {
+          return;
+        }
+        settled = true;
+        cleanup();
+        this._recordRideTelemetryCommand(
+          commandName,
+          {
+            phase: "error",
+            latencyMs: Date.now() - startedAt,
+            errorCode: data?.code || null,
+          },
+          telemetryContext,
+          bookingId,
+        );
+        reject(buildSocketError(data, fallbackMessage, "ride_lifecycle"));
+      };
+
+      const handleSuccess = (data = {}) => {
+        if (data?.success === false || data?.error) {
+          settleError(data, fallbackErrorMessage);
+          return;
+        }
+        settleSuccess(data);
+      };
+
+      const handleError = (data = {}) => {
+        settleError(data, fallbackErrorMessage);
+      };
+
+      timeout = setTimeout(() => {
+        const timeoutCode = String(commandName || "LIFECYCLE")
+          .replace(/([a-z])([A-Z])/g, "$1_$2")
+          .toUpperCase();
+        settleError(
+          {
+            code: `${timeoutCode}_TIMEOUT`,
+            bookingId,
+          },
+          `${commandName} timeout`,
+        );
+      }, timeoutMs);
+
+      this.on(successEvent, handleSuccess);
+      this.on(errorEvent, handleError);
+      this._recordRideTelemetryCommand(
+        commandName,
+        {
+          phase: "attempt",
+        },
+        telemetryContext,
+        bookingId,
+      );
+
+      this.socket.emit(eventName, payload, (ack) => {
+        if (!ack) {
+          return;
+        }
+        if (ack?.success === false || ack?.error) {
+          settleError(ack, fallbackErrorMessage);
+        } else {
+          settleSuccess(ack);
+        }
+      });
+    });
+  }
+
   _buildRehydratedRideLifecycleKey(snapshot, normalizedStatus) {
     const bookingId = String(snapshot?.bookingId || "").trim();
     const status = String(normalizedStatus || snapshot?.status || "")
@@ -464,6 +643,13 @@ class WebSocketManager {
 
   async _buildSocketAuthPayload(options = {}) {
     const forceRefresh = options?.forceRefresh === true;
+    const qaSocketIdToken = await this._resolveQaSocketIdToken();
+    if (qaSocketIdToken) {
+      this.qaSocketBypassState = { enabled: false, uid: null };
+      this.lastSocketAuthPayload = { token: qaSocketIdToken };
+      return this.lastSocketAuthPayload;
+    }
+
     let userToken = null;
     try {
       const currentUser = auth().currentUser;
@@ -480,13 +666,6 @@ class WebSocketManager {
     if (userToken) {
       this.qaSocketBypassState = { enabled: false, uid: null };
       this.lastSocketAuthPayload = { token: userToken };
-      return this.lastSocketAuthPayload;
-    }
-
-    const qaSocketIdToken = await this._resolveQaSocketIdToken();
-    if (qaSocketIdToken) {
-      this.qaSocketBypassState = { enabled: false, uid: null };
-      this.lastSocketAuthPayload = { token: qaSocketIdToken };
       return this.lastSocketAuthPayload;
     }
 
@@ -520,6 +699,12 @@ class WebSocketManager {
           .toLowerCase() === "true";
       const qaSocketIdToken = String(qaSocketIdTokenRaw || "").trim();
       if (qaSocketTokenEnabled && qaSocketIdToken) {
+        if (isJwtExpiredOrNearExpiry(qaSocketIdToken)) {
+          Logger.warn(
+            "⚠️ [WebSocketManager] Token QA do socket expirado ou próximo de expirar; usando autenticação alternativa.",
+          );
+          return null;
+        }
         return qaSocketIdToken;
       }
     } catch (qaTokenError) {
@@ -983,6 +1168,8 @@ class WebSocketManager {
   setupListeners() {
     if (!this.socket) return;
 
+    const listenerSocket = this.socket;
+
     // ✅ FASE 2: Registrar eventos do servidor APENAS UMA VEZ
     // Lista de eventos que o servidor pode enviar
     const serverEvents = [
@@ -1038,6 +1225,7 @@ class WebSocketManager {
       "boardingStatusConfirmed",
       "boardingStatusError",
       "activeRideSync",
+      "sessionTerminated",
       "locationUpdated",
       "mapH3Refresh",
       "map_h3_refresh",
@@ -1111,7 +1299,33 @@ class WebSocketManager {
     serverEvents.forEach((eventName) => {
       if (!this.socketListeners.has(eventName)) {
         try {
-          this.socket.on(eventName, (data) => {
+          listenerSocket.on(eventName, (data) => {
+            if (eventName === "sessionTerminated") {
+              const activeSocketId = String(this.socket?.id || "");
+              const sourceSocketId = String(listenerSocket?.id || "");
+              const previousSocketId = String(data?.previousSocketId || "");
+
+              const fromStaleSocket =
+                Boolean(activeSocketId && sourceSocketId) &&
+                activeSocketId !== sourceSocketId;
+              const targetsDifferentSocket =
+                Boolean(previousSocketId && activeSocketId) &&
+                previousSocketId !== activeSocketId;
+
+              if (fromStaleSocket || targetsDifferentSocket) {
+                Logger.warn(
+                  "⚠️ [WebSocketManager] Ignorando sessionTerminated de socket obsoleto",
+                  {
+                    activeSocketId,
+                    sourceSocketId,
+                    previousSocketId,
+                    newSocketId: data?.newSocketId || null,
+                  },
+                );
+                return;
+              }
+            }
+
             if (["auth_error", "authentication_error"].includes(eventName)) {
               this.isAuthenticated = false;
               this.isAuthenticating = false;
@@ -1274,6 +1488,30 @@ class WebSocketManager {
       this.socket.disconnect();
     }
     this.isConnecting = false;
+  }
+
+  clearAuthenticationState(options = {}) {
+    const shouldDisconnect = options.disconnect !== false;
+
+    this.authCredentials = null;
+    this.authAckInFlight = null;
+    this.authAckInFlightKey = null;
+    this.authRecoveryPromise = null;
+    this.isAuthenticated = false;
+    this.isAuthenticating = false;
+    this.authenticatedUserId = null;
+    this.authenticatedUserType = null;
+    this.qaSocketBypassState = { enabled: false, uid: null };
+    this.lastSocketAuthPayload = null;
+
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
+
+    if (shouldDisconnect) {
+      this.disconnect();
+    }
   }
 
   // Método para enviar eventos ao servidor via WebSocket
@@ -2843,64 +3081,19 @@ class WebSocketManager {
   }
 
   async startTrip(bookingId, startLocation) {
-    if (!this.socket?.connected) {
-      throw new Error("WebSocket não conectado");
-    }
-
-    return new Promise((resolve, reject) => {
-      const telemetryContext = this._resolveRideTelemetryContext({}, bookingId);
-      const startedAt = Date.now();
-      const timeout = setTimeout(() => {
-        this._recordRideTelemetryCommand(
-          "startTrip",
-          {
-            phase: "error",
-            latencyMs: Date.now() - startedAt,
-            errorCode: "START_TRIP_TIMEOUT",
-          },
-          telemetryContext,
-          bookingId,
-        );
-        reject(new Error("Start trip timeout"));
-      }, 10000);
-
-      this._recordRideTelemetryCommand(
-        "startTrip",
-        {
-          phase: "attempt",
-        },
-        telemetryContext,
+    return this._emitLifecycleCommandWithAck({
+      commandName: "startTrip",
+      eventName: "startTrip",
+      successEvent: "tripStarted",
+      errorEvent: "tripStartError",
+      bookingId,
+      timeoutMs: 10000,
+      fallbackErrorMessage: "Não foi possível iniciar a corrida",
+      payload: {
         bookingId,
-      );
-      this.socket.emit("startTrip", { bookingId, startLocation });
-
-      this.socket.once("tripStarted", (data) => {
-        clearTimeout(timeout);
-        if (data.success) {
-          this._recordRideTelemetryCommand(
-            "startTrip",
-            {
-              phase: "success",
-              latencyMs: Date.now() - startedAt,
-            },
-            telemetryContext,
-            bookingId,
-          );
-          resolve(data);
-        } else {
-          this._recordRideTelemetryCommand(
-            "startTrip",
-            {
-              phase: "error",
-              latencyMs: Date.now() - startedAt,
-              errorCode: data?.code || null,
-            },
-            telemetryContext,
-            bookingId,
-          );
-          reject(new Error(data.error || "Start trip failed"));
-        }
-      });
+        startLocation,
+        requestId: createSocketRequestId("start_trip"),
+      },
     });
   }
 
@@ -2928,47 +3121,93 @@ class WebSocketManager {
   }
 
   async completeTrip(bookingId, endLocation, distance, fare) {
+    return this._emitLifecycleCommandWithAck({
+      commandName: "completeTrip",
+      eventName: "completeTrip",
+      successEvent: "tripCompleted",
+      errorEvent: "tripCompleteError",
+      bookingId,
+      timeoutMs: 12000,
+      fallbackErrorMessage: "Não foi possível encerrar a corrida",
+      payload: {
+        bookingId,
+        endLocation,
+        distance,
+        fare,
+        requestId: createSocketRequestId("complete_trip"),
+      },
+    });
+  }
+
+  async confirmPayment(bookingIdOrPayload, paymentMethod, paymentId, amount, options = {}) {
     if (!this.socket?.connected) {
       throw new Error("WebSocket não conectado");
+    }
+
+    const payloadInput =
+      bookingIdOrPayload && typeof bookingIdOrPayload === "object"
+        ? bookingIdOrPayload
+        : {
+            bookingId: bookingIdOrPayload,
+            paymentMethod,
+            paymentId,
+            amount,
+            ...(options && typeof options === "object" ? options : {}),
+          };
+    const bookingId =
+      payloadInput.bookingId ||
+      payloadInput.rideId ||
+      payloadInput.temporaryRideId;
+    const resolvedPaymentMethod =
+      payloadInput.paymentMethod || payloadInput.method || paymentMethod || "pix";
+    const resolvedPaymentId =
+      payloadInput.paymentId || payloadInput.chargeId || paymentId;
+    const resolvedAmount = payloadInput.amount ?? amount;
+    const confirmationPayload = {
+      ...payloadInput,
+      bookingId,
+      paymentMethod: resolvedPaymentMethod,
+      paymentId: resolvedPaymentId,
+      amount: resolvedAmount,
+    };
+
+    if (!confirmationPayload.chargeId && resolvedPaymentId) {
+      confirmationPayload.chargeId = resolvedPaymentId;
+    }
+
+    if (!confirmationPayload.rideId && confirmationPayload.temporaryRideId) {
+      confirmationPayload.rideId = confirmationPayload.temporaryRideId;
     }
 
     return new Promise((resolve, reject) => {
       const telemetryContext = this._resolveRideTelemetryContext({}, bookingId);
       const startedAt = Date.now();
-      const timeout = setTimeout(() => {
-        this._recordRideTelemetryCommand(
-          "completeTrip",
-          {
-            phase: "error",
-            latencyMs: Date.now() - startedAt,
-            errorCode: "COMPLETE_TRIP_TIMEOUT",
-          },
-          telemetryContext,
-          bookingId,
-        );
-        reject(new Error("Complete trip timeout"));
-      }, 10000);
-
-      this._recordRideTelemetryCommand(
-        "completeTrip",
-        {
-          phase: "attempt",
-        },
-        telemetryContext,
-        bookingId,
-      );
-      this.socket.emit("completeTrip", {
-        bookingId,
-        endLocation,
-        distance,
-        fare,
-      });
-
-      this.socket.once("tripCompleted", (data) => {
-        clearTimeout(timeout);
+      let settled = false;
+      let timeout = null;
+      const cleanup = () => {
+        if (timeout) {
+          clearTimeout(timeout);
+          timeout = null;
+        }
+        this.socket?.off?.("paymentConfirmed", handleConfirmed);
+        this.socket?.off?.("paymentError", handleError);
+      };
+      const rejectWithPaymentError = (data, fallbackMessage) => {
+        const error = new Error(data?.message || data?.error || fallbackMessage);
+        if (data?.code) {
+          error.code = data.code;
+        }
+        reject(error);
+      };
+      const handleConfirmed = (data) => {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        cleanup();
         if (data.success) {
           this._recordRideTelemetryCommand(
-            "completeTrip",
+            "confirmPayment",
             {
               phase: "success",
               latencyMs: Date.now() - startedAt,
@@ -2979,7 +3218,7 @@ class WebSocketManager {
           resolve(data);
         } else {
           this._recordRideTelemetryCommand(
-            "completeTrip",
+            "confirmPayment",
             {
               phase: "error",
               latencyMs: Date.now() - startedAt,
@@ -2988,21 +3227,34 @@ class WebSocketManager {
             telemetryContext,
             bookingId,
           );
-          reject(new Error(data.error || "Complete trip failed"));
+          rejectWithPaymentError(data, "Confirm payment failed");
         }
-      });
-    });
-  }
+      };
+      const handleError = (data) => {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        cleanup();
+        this._recordRideTelemetryCommand(
+          "confirmPayment",
+          {
+            phase: "error",
+            latencyMs: Date.now() - startedAt,
+            errorCode: data?.code || null,
+          },
+          telemetryContext,
+          bookingId,
+        );
+        rejectWithPaymentError(data, "Confirm payment failed");
+      };
 
-  async confirmPayment(bookingId, paymentMethod, paymentId, amount) {
-    if (!this.socket?.connected) {
-      throw new Error("WebSocket não conectado");
-    }
-
-    return new Promise((resolve, reject) => {
-      const telemetryContext = this._resolveRideTelemetryContext({}, bookingId);
-      const startedAt = Date.now();
-      const timeout = setTimeout(() => {
+      timeout = setTimeout(() => {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        cleanup();
         this._recordRideTelemetryCommand(
           "confirmPayment",
           {
@@ -3024,40 +3276,9 @@ class WebSocketManager {
         telemetryContext,
         bookingId,
       );
-      this.socket.emit("confirmPayment", {
-        bookingId,
-        paymentMethod,
-        paymentId,
-        amount,
-      });
-
-      this.socket.once("paymentConfirmed", (data) => {
-        clearTimeout(timeout);
-        if (data.success) {
-          this._recordRideTelemetryCommand(
-            "confirmPayment",
-            {
-              phase: "success",
-              latencyMs: Date.now() - startedAt,
-            },
-            telemetryContext,
-            bookingId,
-          );
-          resolve(data);
-        } else {
-          this._recordRideTelemetryCommand(
-            "confirmPayment",
-            {
-              phase: "error",
-              latencyMs: Date.now() - startedAt,
-              errorCode: data?.code || null,
-            },
-            telemetryContext,
-            bookingId,
-          );
-          reject(new Error(data.error || "Confirm payment failed"));
-        }
-      });
+      this.socket.once("paymentConfirmed", handleConfirmed);
+      this.socket.once("paymentError", handleError);
+      this.socket.emit("confirmPayment", confirmationPayload);
     });
   }
 

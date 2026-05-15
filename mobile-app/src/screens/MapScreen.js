@@ -1982,7 +1982,7 @@ export default function MapScreen(props) {
                 const response = await fetch(`${backendUrl}/api/geofence/check?lat=${plat}&lng=${plng}`);
                 if (response.ok) {
                     const data = await response.json();
-                    if (!data.allowed) {
+                    if (data.isAllowed === false || data.allowed === false) {
                         setBookModelLoading(false);
                         Alert.alert("Região não atendida", data.reason || "A Leaf ainda não opera neste local.");
                         return; // 🛑 Cancela o processo e não manda firebase request

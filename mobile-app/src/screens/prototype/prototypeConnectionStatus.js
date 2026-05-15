@@ -200,7 +200,7 @@ function resolvePrototypeConnectionAutomationConfig(
     isTruthyRouteParam(routeParams?.automation) ||
     isTruthyRouteParam(routeParams?.qaAutomation);
 
-  const allowAutomationParams = isDev || isE2E || automationRequested;
+  const allowAutomationParams = (isDev || isE2E) && automationRequested;
   const scenario = allowAutomationParams
     ? normalizeConnectionScenario(
         routeParams?.qaConnectionScenario || routeParams?.connectionScenario,

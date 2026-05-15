@@ -58,13 +58,15 @@ function clamp(value, min, max) {
 }
 
 function formatDistance(meters) {
-  if (!Number.isFinite(meters) || meters <= 0) {
-    return 'Em cálculo';
+  if (!Number.isFinite(meters) || meters < 0) {
+    return '--';
   }
   if (meters < 1000) {
-    return `${Math.max(1, Math.round(meters))} m`;
+    const roundedMeters =
+      meters <= 0 ? 0 : Math.max(10, Math.round(meters / 10) * 10);
+    return `${roundedMeters} m`;
   }
-  return `${(meters / 1000).toFixed(meters >= 10000 ? 0 : 1).replace('.', ',')} km`;
+  return `${Math.max(1, Math.round(meters / 1000))} km`;
 }
 
 function formatCurrency(value) {

@@ -70,6 +70,24 @@ function normalizePassengerAction(value) {
     return "dismiss_receipt";
   }
 
+  if (
+    normalized === "open_receipt" ||
+    normalized === "open-receipt" ||
+    normalized === "show_receipt" ||
+    normalized === "show-receipt"
+  ) {
+    return "open_receipt";
+  }
+
+  if (
+    normalized === "rate_last_receipt" ||
+    normalized === "rate-last-receipt" ||
+    normalized === "rate_receipt" ||
+    normalized === "rate-receipt"
+  ) {
+    return "rate_last_receipt";
+  }
+
   return "";
 }
 
@@ -82,6 +100,7 @@ function resolvePassengerHomeAutomationConfig(
       automationEnabled: false,
       action: "",
       nonce: "",
+      bookingId: "",
     };
   }
 
@@ -90,7 +109,7 @@ function resolvePassengerHomeAutomationConfig(
     isTruthyRouteParam(routeParams?.automation) ||
     isTruthyRouteParam(routeParams?.qaAutomation);
 
-  const allowAutomationParams = isDev || isE2E || automationRequested;
+  const allowAutomationParams = (isDev || isE2E) && automationRequested;
   const action = allowAutomationParams
     ? normalizePassengerAction(
         routeParams?.qaPassengerAction ||
@@ -102,6 +121,14 @@ function resolvePassengerHomeAutomationConfig(
   return {
     automationEnabled: Boolean(allowAutomationParams && action),
     action,
+    bookingId: allowAutomationParams
+      ? sanitizeTextParam(
+          routeParams?.qaBookingId ||
+            routeParams?.bookingId ||
+            routeParams?.rideId ||
+            routeParams?.tripId,
+        )
+      : "",
     nonce: allowAutomationParams
       ? sanitizeTextParam(routeParams?.qaNonce || routeParams?.nonce)
       : "",

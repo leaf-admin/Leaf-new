@@ -218,10 +218,11 @@ export const calculateDriverShare = (tripCost, tollFee = 0, decimalPrecision = 2
   let opFee = 0;
   if (rawFare <= 10.00) opFee = 0.79;
   else if (rawFare <= 25.00) opFee = 0.99;
-  else opFee = 1.49;
+  else if (rawFare <= 50.00) opFee = 1.49;
+  else opFee = rawFare * 0.03;
 
   // Taxa Woovi sobre toda a transação
-  let wooviFee = grandTotal * 0.0008; // 0.08%
+  let wooviFee = grandTotal * 0.008; // 0.8%
   if (wooviFee < 0.50) wooviFee = 0.50;
 
   const driverShare = grandTotal - opFee - wooviFee;

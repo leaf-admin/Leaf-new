@@ -27,6 +27,10 @@ jest.mock('../src/config/ApiConfig', () => ({
   getSelfHostedApiUrl: jest.fn((path) => `https://backend.leaf.test${path}`),
 }));
 
+jest.mock('../src/config/runtimeAccessPolicy', () => ({
+  allowClientDirectGoogleFallback: jest.fn(() => true),
+}));
+
 jest.mock('../src/services/RideCostTelemetryService', () => ({
   __esModule: true,
   RIDE_TELEMETRY_GOOGLE_SKUS: {
@@ -96,7 +100,13 @@ describe('GoogleAPIFunctions address search', () => {
   });
 
   it('skips local and backend autocomplete cache for short partial queries', async () => {
-    global.fetch.mockResolvedValueOnce({
+    global.fetch
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 404,
+        json: async () => ({ status: 'miss' }),
+      })
+      .mockResolvedValueOnce({
       json: async () => ({
         status: 'OK',
         predictions: [
@@ -120,8 +130,9 @@ describe('GoogleAPIFunctions address search', () => {
     });
 
     expect(AsyncStorage.getItem).not.toHaveBeenCalled();
-    expect(global.fetch).toHaveBeenCalledTimes(1);
-    expect(global.fetch.mock.calls[0][0]).toContain('maps.googleapis.com/maps/api/place/autocomplete/json');
+    expect(global.fetch).toHaveBeenCalledTimes(2);
+    expect(global.fetch.mock.calls[0][0]).toContain('backend.leaf.test/api/places/autocomplete');
+    expect(global.fetch.mock.calls[1][0]).toContain('maps.googleapis.com/maps/api/place/autocomplete/json');
   });
 
   it('does not apply Brazil geocode bias outside Brazil', async () => {
@@ -188,29 +199,35 @@ describe('GoogleAPIFunctions address search', () => {
   });
 
   it('reuses sticky destination cache for active trip route calls', async () => {
-    global.fetch.mockResolvedValueOnce({
-      ok: true,
-      status: 200,
-      json: async () => ({
-        status: 'OK',
-        routes: [
-          {
-            overview_polyline: { points: 'abc123' },
-            legs: [
-              {
-                distance: { value: 1200, text: '1.2 km' },
-                duration: { value: 240, text: '4 min' },
-                end_address: 'Destino',
-                start_address: 'Origem',
-                end_location: { lat: -22.9, lng: -43.2 },
-                start_location: { lat: -22.8, lng: -43.3 },
-                steps: [],
-              },
-            ],
-          },
-        ],
-      }),
-    });
+    global.fetch
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 404,
+        json: async () => ({ status: 'miss' }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          status: 'OK',
+          routes: [
+            {
+              overview_polyline: { points: 'abc123' },
+              legs: [
+                {
+                  distance: { value: 1200, text: '1.2 km' },
+                  duration: { value: 240, text: '4 min' },
+                  end_address: 'Destino',
+                  start_address: 'Origem',
+                  end_location: { lat: -22.9, lng: -43.2 },
+                  start_location: { lat: -22.8, lng: -43.3 },
+                  steps: [],
+                },
+              ],
+            },
+          ],
+        }),
+      });
 
     const telemetryContext = {
       bookingId: 'booking-sticky-1',
@@ -230,7 +247,7 @@ describe('GoogleAPIFunctions address search', () => {
     await getDirectionsApi('-22.9100,-43.4100', '-22.9200,-43.4200', null, telemetryContext);
     await getDirectionsApi('-22.9150,-43.4150', '-22.9200,-43.4200', null, telemetryContext);
 
-    expect(global.fetch).toHaveBeenCalledTimes(1);
+    expect(global.fetch).toHaveBeenCalledTimes(2);
     expect(rideCostTelemetryService.recordGoogleUsage).toHaveBeenCalledTimes(1);
     expect(rideCostTelemetryService.recordGoogleCache).toHaveBeenCalledWith(
       'directionsMemoryHit',

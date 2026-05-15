@@ -27,11 +27,15 @@ function formatCurrency(value) {
 function formatDistanceLabel(value) {
   const numeric = Number(value);
   if (!Number.isFinite(numeric) || numeric <= 0) {
-    return ' -- ';
+    return '--';
   }
 
-  const fractionDigits = numeric >= 10 ? 0 : numeric >= 2 ? 1 : 2;
-  return `${numeric.toFixed(fractionDigits).replace('.', ',')} km`;
+  if (numeric < 1) {
+    const meters = Math.max(10, Math.round((numeric * 1000) / 10) * 10);
+    return `${meters} m`;
+  }
+
+  return `${Math.max(1, Math.round(numeric))} km`;
 }
 
 function formatStatusLabel(status) {
@@ -186,7 +190,7 @@ export default function RobotaxiTripScreen({ navigation, route }) {
       ? boardingCountdownLabel
       : Number.isFinite(resolvedTripDurationMin) && resolvedTripDurationMin > 0
         ? `${resolvedTripDurationMin} min`
-        : 'Em cálculo';
+        : '--';
   const compactVehicleSummary = [vehicleModel, vehiclePlate].filter(Boolean).join(' • ');
   const compactStatusSummary = isStarted
     ? 'Corrida em andamento com suporte e status visiveis sem sair do mapa.'
@@ -407,7 +411,7 @@ export default function RobotaxiTripScreen({ navigation, route }) {
           <View style={[styles.compactMetricPill, styles.compactMetricPillAccent]}>
             <Ionicons name="wallet-outline" size={15} color="#7A5D16" />
             <View style={styles.compactMetricCopy}>
-              <Text style={styles.compactMetricLabel}>Valor da corrida</Text>
+              <Text style={styles.compactMetricLabel}>Valor</Text>
               <Text style={styles.compactMetricValue}>{fareLabel}</Text>
             </View>
           </View>

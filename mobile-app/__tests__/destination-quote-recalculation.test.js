@@ -12,6 +12,11 @@ jest.mock("../src/screens/prototype/prototypeMapOcclusion", () => ({
   usePrototypeMapOcclusion: jest.fn(),
 }));
 
+jest.mock("../src/screens/prototype/prototypeMapRoute", () => ({
+  clearPrototypeMapRoute: jest.fn(),
+  setPrototypeMapRoute: jest.fn(),
+}));
+
 jest.mock("../src/config/runtimeAccessPolicy", () => ({
   isE2ETestBuild: jest.fn(() => false),
 }));
@@ -102,12 +107,12 @@ describe("RobotaxiDestinationScreen", () => {
 
   it("recalculates origin and fare in the quote before payment when runtime preview changes", async () => {
     const destination = {
-      id: "destination_ferry_building",
-      name: "Ferry Building",
-      address: "1 Ferry Building, San Francisco, CA 94105, EUA",
+      id: "destination_santos_dumont",
+      name: "Aeroporto Santos Dumont",
+      address: "Praça Senador Salgado Filho, Centro, Rio de Janeiro, RJ",
       coordinate: {
-        latitude: 37.7955,
-        longitude: -122.3937,
+        latitude: -22.9104,
+        longitude: -43.1631,
       },
       eta: "5",
     };
@@ -117,10 +122,10 @@ describe("RobotaxiDestinationScreen", () => {
 
     let runtimeSnapshot = {
       bookingStatus: "idle",
-      currentAddress: "1540 Mission St, San Francisco",
+      currentAddress: "Rua das Pastorinhas, Taquara, Rio de Janeiro",
       currentCoordinate: {
-        latitude: 37.7749,
-        longitude: -122.4194,
+        latitude: -22.9711,
+        longitude: -43.1822,
       },
       driverInfo: null,
       profileUid: "customer_1",
@@ -161,23 +166,31 @@ describe("RobotaxiDestinationScreen", () => {
     );
 
     await waitFor(() => {
-      expect(screen.getByText("Ferry Building")).toBeTruthy();
+      expect(screen.getByText("Aeroporto Santos Dumont")).toBeTruthy();
     });
 
-    fireEvent.press(screen.getByText("Ferry Building"));
+    fireEvent.press(screen.getByText("Aeroporto Santos Dumont"));
 
     await waitFor(() => {
+      const { setPrototypeMapRoute } = require("../src/screens/prototype/prototypeMapRoute");
       expect(selectDestination).toHaveBeenCalled();
       expect(screen.getByText("R$ 13,42")).toBeTruthy();
-      expect(screen.getByText("1540 Mission St, San Francisco")).toBeTruthy();
+      expect(screen.getByText("Rua das Pastorinhas, Taquara, Rio de Janeiro")).toBeTruthy();
+      expect(setPrototypeMapRoute).toHaveBeenCalledWith(
+        expect.objectContaining({
+          origin: { latitude: -22.9711, longitude: -43.1822 },
+          destination: { latitude: -22.9104, longitude: -43.1631 },
+          destinationLabel: "Aeroporto Santos Dumont",
+        }),
+      );
     });
 
     runtimeSnapshot = {
       ...runtimeSnapshot,
-      currentAddress: "Pier 39, San Francisco",
+      currentAddress: "Rua Jardim Botânico, 1008, Rio de Janeiro",
       currentCoordinate: {
-        latitude: 37.8087,
-        longitude: -122.4098,
+        latitude: -22.9674,
+        longitude: -43.2239,
       },
       tripDistanceKm: 7.2,
       tripDurationMin: 14,
@@ -192,19 +205,19 @@ describe("RobotaxiDestinationScreen", () => {
     );
 
     await waitFor(() => {
-      expect(screen.getByText("Pier 39, San Francisco")).toBeTruthy();
+      expect(screen.getByText("Rua Jardim Botânico, 1008, Rio de Janeiro")).toBeTruthy();
       expect(screen.getByText("R$ 18,55")).toBeTruthy();
     });
   });
 
   it("surfaces category unavailability when regional quote availability blocks the selected plan", async () => {
     const destination = {
-      id: "destination_ferry_building",
-      name: "Ferry Building",
-      address: "1 Ferry Building, San Francisco, CA 94105, EUA",
+      id: "destination_santos_dumont",
+      name: "Aeroporto Santos Dumont",
+      address: "Praça Senador Salgado Filho, Centro, Rio de Janeiro, RJ",
       coordinate: {
-        latitude: 37.7955,
-        longitude: -122.3937,
+        latitude: -22.9104,
+        longitude: -43.1631,
       },
       eta: "5",
     };
@@ -212,6 +225,81 @@ describe("RobotaxiDestinationScreen", () => {
     const checkRideAvailability = jest.fn().mockResolvedValue({
       available: false,
       message: "Categoria indisponível nesta região no momento.",
+    });
+
+    usePrototypeRideRuntime.mockImplementation(() => ({
+      bookingStatus: "idle",
+      currentAddress: "Rua das Pastorinhas, Taquara, Rio de Janeiro",
+      currentCoordinate: {
+        latitude: -22.9711,
+        longitude: -43.1822,
+      },
+      driverInfo: null,
+      profileUid: "customer_1",
+      riderProfile: {
+        name: "Passageira Leaf",
+        email: "passageira@leaf.app.br",
+      },
+      selectedVehicle: "Leaf Plus",
+      selectedFare: 13.42,
+      selectedDestination: destination,
+      tripDistanceKm: 4.7,
+      tripDurationMin: 9,
+      tripArrivalText: "01:36",
+      loadDestinationSuggestions: jest.fn().mockResolvedValue([destination]),
+      loadRecentDestinations: jest.fn().mockResolvedValue([destination]),
+      resolveDestinationInput: jest.fn().mockImplementation(async (item) => item),
+      selectDestination: jest.fn().mockImplementation(async (item) => item),
+      checkRideAvailability,
+      requestRide: jest.fn(),
+      requestTripExtension: jest.fn(),
+      clearFlowPreview: jest.fn(),
+    }));
+
+    const navigation = {
+      navigate: jest.fn(),
+      replace: jest.fn(),
+      canGoBack: jest.fn(() => false),
+      goBack: jest.fn(),
+    };
+
+    const screen = render(
+      <RobotaxiDestinationScreen
+        navigation={navigation}
+        route={{ params: {} }}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText("Aeroporto Santos Dumont")).toBeTruthy();
+    });
+
+    fireEvent.press(screen.getByText("Aeroporto Santos Dumont"));
+
+    await waitFor(() => {
+      expect(checkRideAvailability).toHaveBeenCalled();
+      expect(screen.getByText("Categoria indisponível")).toBeTruthy();
+      expect(
+        screen.getAllByText("Categoria indisponível nesta região no momento.").length,
+      ).toBeGreaterThanOrEqual(1);
+      expect(screen.getAllByText("Indisponível").length).toBeGreaterThanOrEqual(1);
+    });
+  });
+
+  it("hides fare values when route guard blocks an inconsistent origin/destination pair", async () => {
+    const destination = {
+      id: "destination_sdu",
+      name: "Aeroporto Santos Dumont",
+      address: "Praça Senador Salgado Filho, Centro, Rio de Janeiro, RJ, Brasil",
+      coordinate: {
+        latitude: -22.9104,
+        longitude: -43.1631,
+      },
+      eta: "5",
+    };
+
+    const checkRideAvailability = jest.fn().mockResolvedValue({
+      available: true,
     });
 
     usePrototypeRideRuntime.mockImplementation(() => ({
@@ -258,18 +346,21 @@ describe("RobotaxiDestinationScreen", () => {
     );
 
     await waitFor(() => {
-      expect(screen.getByText("Ferry Building")).toBeTruthy();
+      expect(screen.getByText("Aeroporto Santos Dumont")).toBeTruthy();
     });
 
-    fireEvent.press(screen.getByText("Ferry Building"));
+    fireEvent.press(screen.getByText("Aeroporto Santos Dumont"));
 
-    await waitFor(() => {
-      expect(checkRideAvailability).toHaveBeenCalled();
-      expect(screen.getByText("Categoria indisponível")).toBeTruthy();
-      expect(
-        screen.getAllByText("Categoria indisponível nesta região no momento.").length,
-      ).toBeGreaterThanOrEqual(1);
-      expect(screen.getAllByText("Indisponível").length).toBeGreaterThanOrEqual(1);
-    });
+      await waitFor(() => {
+        expect(
+          screen.getAllByText(
+          "Destino fora da area de cobertura da Leaf",
+          ).length,
+        ).toBeGreaterThanOrEqual(1);
+        expect(screen.getAllByText("Indisponível").length).toBeGreaterThanOrEqual(1);
+      });
+
+    expect(checkRideAvailability).not.toHaveBeenCalled();
+    expect(screen.queryAllByText(/R\$\s/).length).toBe(0);
   });
 });

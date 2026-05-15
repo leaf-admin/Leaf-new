@@ -48,13 +48,13 @@ const ReceiptPreview = ({ receiptData = null }) => {
                     formatted: 'R$ 45,50'
                 },
                 operationalCost: {
-                    formatted: 'R$ 0,79'
+                    formatted: 'R$ 1,49'
                 },
                 wooviFee: {
-                    formatted: 'R$ 0,36'
+                    formatted: 'R$ 0,50'
                 },
                 driverAmount: {
-                    formatted: 'R$ 44,35'
+                    formatted: 'R$ 43,51'
                 }
             }
         },
@@ -447,4 +447,3 @@ const styles = StyleSheet.create({
 });
 
 export default ReceiptPreview;
-

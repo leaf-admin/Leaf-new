@@ -8,6 +8,9 @@ import robotaxiPrototypeTokens from '../design-system/robotaxiPrototypeTokens';
 const { color, motion } = robotaxiPrototypeTokens;
 const ROUTE_ANIMATION_DURATION = motion.timing.map;
 const POINTS_PER_SEGMENT = 18;
+const DRIVER_MARKER_SMOOTH_MS = 850;
+const DRIVER_MARKER_SMOOTH_SNAP_METERS = 3000;
+const EARTH_RADIUS_METERS = 6371000;
 
 function resolveAvatarInitial(value) {
   return String(value || 'L').trim().charAt(0).toUpperCase() || 'L';
@@ -62,6 +65,47 @@ function densifyPath(path = [], pointsPerSegment = POINTS_PER_SEGMENT) {
   }
 
   return result;
+}
+
+function normalizeMapCoordinate(value) {
+  const latitude = Number(value?.latitude);
+  const longitude = Number(value?.longitude);
+
+  if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
+    return null;
+  }
+
+  return { latitude, longitude };
+}
+
+function toRadians(value) {
+  return (Number(value) * Math.PI) / 180;
+}
+
+function calculateCoordinateDistanceMeters(left, right) {
+  const start = normalizeMapCoordinate(left);
+  const end = normalizeMapCoordinate(right);
+
+  if (!start || !end) {
+    return Number.POSITIVE_INFINITY;
+  }
+
+  const latitudeDelta = toRadians(end.latitude - start.latitude);
+  const longitudeDelta = toRadians(end.longitude - start.longitude);
+  const startLatitude = toRadians(start.latitude);
+  const endLatitude = toRadians(end.latitude);
+  const haversine =
+    Math.sin(latitudeDelta / 2) ** 2 +
+    Math.cos(startLatitude) * Math.cos(endLatitude) * Math.sin(longitudeDelta / 2) ** 2;
+  return EARTH_RADIUS_METERS * 2 * Math.atan2(Math.sqrt(haversine), Math.sqrt(1 - haversine));
+}
+
+function interpolateCoordinate(start, end, ratio) {
+  const safeRatio = Math.max(0, Math.min(1, Number(ratio) || 0));
+  return {
+    latitude: start.latitude + (end.latitude - start.latitude) * safeRatio,
+    longitude: start.longitude + (end.longitude - start.longitude) * safeRatio,
+  };
 }
 
 function isValidMapRegion(candidate) {
@@ -221,10 +265,11 @@ function PrototypeMapLayer({
       : undefined;
   const windowLayout = useWindowDimensions();
   const markerCoordinate = userCoordinate || region;
-  const hasDriverCoordinate =
-    Boolean(driverCoordinate) &&
-    Number.isFinite(driverCoordinate?.latitude) &&
-    Number.isFinite(driverCoordinate?.longitude);
+  const normalizedDriverCoordinate = useMemo(
+    () => normalizeMapCoordinate(driverCoordinate),
+    [driverCoordinate?.latitude, driverCoordinate?.longitude],
+  );
+  const hasDriverCoordinate = Boolean(normalizedDriverCoordinate);
   const hasSearchCenter =
     Boolean(searchCenterCoordinate) &&
     Number.isFinite(searchCenterCoordinate?.latitude) &&
@@ -279,8 +324,11 @@ function PrototypeMapLayer({
   const [androidMapLayout, setAndroidMapLayout] = useState({ width: 0, height: 0 });
   const [androidVisibleRegion, setAndroidVisibleRegion] = useState(region);
   const [userAvatarFailed, setUserAvatarFailed] = useState(false);
+  const [smoothedDriverCoordinate, setSmoothedDriverCoordinate] = useState(normalizedDriverCoordinate);
   const androidPendingRegionRef = useRef(region);
   const androidRegionFrameRef = useRef(null);
+  const driverSmoothFrameRef = useRef(null);
+  const smoothedDriverCoordinateRef = useRef(normalizedDriverCoordinate);
   const showMarkerCallouts = false;
   const normalizedAvatarUri = String(userAvatarUri || '').trim();
   const shouldRenderAvatarImage = Boolean(normalizedAvatarUri) && !userAvatarFailed;
@@ -291,16 +339,78 @@ function PrototypeMapLayer({
   const displayedRouteCoordinates = animateRoute
     ? animatedRouteCoordinates
     : staticRouteCoordinates;
+  const routeRenderCoordinates = useMemo(() => {
+    if (!hasRoute) {
+      return [];
+    }
+
+    if (displayedRouteCoordinates.length >= 2) {
+      return displayedRouteCoordinates;
+    }
+
+    return staticRouteCoordinates.slice(0, 2);
+  }, [displayedRouteCoordinates, hasRoute, staticRouteCoordinates]);
+  const hasRenderableRoute = routeRenderCoordinates.length >= 2;
+  const displayedDriverCoordinate = smoothedDriverCoordinate || normalizedDriverCoordinate;
+  const hasDisplayedDriverCoordinate = Boolean(displayedDriverCoordinate);
+  const mapChildrenCount = useMemo(
+    () => React.Children.count(mapChildren),
+    [mapChildren],
+  );
   const effectiveRouteShadowColor =
-    routeShadowColor || 'rgba(7,22,39,0.24)';
+    routeShadowColor || 'rgba(255,255,255,0.78)';
   const effectiveRouteMainColor =
-    routeMainColor || (useSimplifiedIosMap ? '#E85D04' : '#F97316');
+    routeMainColor || '#111719';
   const effectiveRouteHighlightColor =
     routeHighlightColor === undefined
-      ? '#FED7AA'
+      ? null
       : routeHighlightColor;
+  const shouldRenderExternalMapChildren = !useSimplifiedIosMap && !hasRoute;
+  const nativeMapTopologyKey = useMemo(() => {
+    if (Platform.OS !== 'ios') {
+      return 'prototype-map-native';
+    }
+
+    const routeLayerCount =
+      hasRenderableRoute
+        ? 1 +
+          (!useSimplifiedIosMap ? 1 : 0) +
+          (!useSimplifiedIosMap && effectiveRouteHighlightColor ? 1 : 0)
+        : 0;
+
+    return [
+      useSimplifiedIosMap ? 'ios-simple' : 'ios-full',
+      searchingMode && hasSearchCenter && hasSearchPreviewRadius ? 'preview-radius' : 'no-preview-radius',
+      searchingMode && hasSearchCenter && hasSearchRadius ? 'search-radius' : 'no-search-radius',
+      `route:${routeLayerCount}`,
+      hasDestination ? 'destination' : 'no-destination',
+      hasDisplayedDriverCoordinate ? 'driver' : 'no-driver',
+      !useSimplifiedIosMap && searchingMode ? `nearby:${normalizedNearbyVehicles.length}` : 'nearby:0',
+      !hideUserMarker && Platform.OS !== 'android' ? 'user' : 'no-user',
+      shouldRenderExternalMapChildren ? `children:${mapChildrenCount}` : 'children:0',
+    ].join('|');
+  }, [
+    effectiveRouteHighlightColor,
+    hasDestination,
+    hasDisplayedDriverCoordinate,
+    hasRenderableRoute,
+    hasSearchCenter,
+    hasSearchPreviewRadius,
+    hasSearchRadius,
+    hideUserMarker,
+    mapChildrenCount,
+    normalizedNearbyVehicles.length,
+    searchingMode,
+    shouldRenderExternalMapChildren,
+    useSimplifiedIosMap,
+  ]);
   const handleAvatarError = useCallback(() => {
     setUserAvatarFailed(true);
+  }, []);
+
+  const commitSmoothedDriverCoordinate = useCallback((nextCoordinate) => {
+    smoothedDriverCoordinateRef.current = nextCoordinate;
+    setSmoothedDriverCoordinate(nextCoordinate);
   }, []);
 
   useEffect(() => {
@@ -312,8 +422,64 @@ function PrototypeMapLayer({
       if (androidRegionFrameRef.current) {
         cancelAnimationFrame(androidRegionFrameRef.current);
       }
+      if (driverSmoothFrameRef.current) {
+        cancelAnimationFrame(driverSmoothFrameRef.current);
+      }
     };
   }, []);
+
+  useEffect(() => {
+    if (driverSmoothFrameRef.current) {
+      cancelAnimationFrame(driverSmoothFrameRef.current);
+      driverSmoothFrameRef.current = null;
+    }
+
+    if (!normalizedDriverCoordinate) {
+      commitSmoothedDriverCoordinate(null);
+      return undefined;
+    }
+
+    const startCoordinate = smoothedDriverCoordinateRef.current || normalizedDriverCoordinate;
+    const distanceMeters = calculateCoordinateDistanceMeters(
+      startCoordinate,
+      normalizedDriverCoordinate,
+    );
+
+    if (!Number.isFinite(distanceMeters) || distanceMeters < 1 || distanceMeters > DRIVER_MARKER_SMOOTH_SNAP_METERS) {
+      commitSmoothedDriverCoordinate(normalizedDriverCoordinate);
+      return undefined;
+    }
+
+    const startedAt = Date.now();
+    const animateDriverMarker = () => {
+      const progress = Math.min(1, (Date.now() - startedAt) / DRIVER_MARKER_SMOOTH_MS);
+      const eased = 1 - Math.pow(1 - progress, 3);
+      commitSmoothedDriverCoordinate(interpolateCoordinate(
+        startCoordinate,
+        normalizedDriverCoordinate,
+        eased,
+      ));
+
+      if (progress < 1) {
+        driverSmoothFrameRef.current = requestAnimationFrame(animateDriverMarker);
+      } else {
+        driverSmoothFrameRef.current = null;
+        commitSmoothedDriverCoordinate(normalizedDriverCoordinate);
+      }
+    };
+
+    driverSmoothFrameRef.current = requestAnimationFrame(animateDriverMarker);
+
+    return () => {
+      if (driverSmoothFrameRef.current) {
+        cancelAnimationFrame(driverSmoothFrameRef.current);
+        driverSmoothFrameRef.current = null;
+      }
+    };
+  }, [
+    commitSmoothedDriverCoordinate,
+    normalizedDriverCoordinate,
+  ]);
 
   const scheduleAndroidVisibleRegionUpdate = useCallback(nextRegion => {
     if (Platform.OS !== 'android' || !isValidMapRegion(nextRegion)) {
@@ -461,6 +627,10 @@ function PrototypeMapLayer({
         }}
       >
         <MapView
+          // iOS Google Maps can abort in AIRGoogleMap when React inserts/removes
+          // native children during route lifecycle transitions. Remount the map
+          // only when that native child topology changes.
+          key={nativeMapTopologyKey}
           ref={mapRef}
           style={StyleSheet.absoluteFillObject}
           onRegionChange={scheduleAndroidVisibleRegionUpdate}
@@ -507,35 +677,34 @@ function PrototypeMapLayer({
             />
           ) : null}
 
-          {!useSimplifiedIosMap && hasRoute && displayedRouteCoordinates.length >= 2 ? (
+          {!useSimplifiedIosMap && hasRenderableRoute ? (
             <Polyline
               key="route-shadow"
-              coordinates={displayedRouteCoordinates}
+              coordinates={routeRenderCoordinates}
               strokeColor={effectiveRouteShadowColor}
-              strokeWidth={12}
+              strokeWidth={8}
               lineCap="round"
               lineJoin="round"
             />
           ) : null}
 
-          {hasRoute && displayedRouteCoordinates.length >= 2 ? (
+          {hasRenderableRoute ? (
             <Polyline
               key="route-main"
-              coordinates={displayedRouteCoordinates}
+              coordinates={routeRenderCoordinates}
               strokeColor={effectiveRouteMainColor}
-              strokeWidth={useSimplifiedIosMap ? 5 : 7}
+              strokeWidth={useSimplifiedIosMap ? 4.5 : 5}
               lineCap="round"
               lineJoin="round"
             />
           ) : null}
 
           {!useSimplifiedIosMap &&
-          hasRoute &&
-          displayedRouteCoordinates.length >= 2 &&
+          hasRenderableRoute &&
           effectiveRouteHighlightColor ? (
             <Polyline
               key="route-highlight"
-              coordinates={displayedRouteCoordinates}
+              coordinates={routeRenderCoordinates}
               strokeColor={effectiveRouteHighlightColor}
               strokeWidth={2.6}
               lineCap="round"
@@ -548,10 +717,11 @@ function PrototypeMapLayer({
               key="destination-marker"
               coordinate={{ latitude: destinationCoordinate.latitude, longitude: destinationCoordinate.longitude }}
               zIndex={18}
+              anchor={destinationMarkerMode === 'avatar' ? { x: 0.5, y: 0.5 } : { x: 0.5, y: 0.92 }}
               tracksViewChanges={false}
               pinColor={undefined}
             >
-              <>
+              <View collapsable={false}>
                 <View style={styles.destinationMarkerWrap}>
                   {destinationMarkerMode === 'avatar' ? (
                     <MapAvatarMarker
@@ -560,7 +730,7 @@ function PrototypeMapLayer({
                     />
                   ) : (
                     <View style={styles.destinationAvatar}>
-                      <Ionicons name="business-outline" size={16} color="#667180" />
+                      <Ionicons name="location-sharp" size={25} color="#111719" />
                     </View>
                   )}
                 </View>
@@ -571,14 +741,17 @@ function PrototypeMapLayer({
                     <Text style={styles.calloutAddress}>{destinationAddress || 'Endereço de destino'}</Text>
                   </View>
                 ) : null}
-              </>
+              </View>
             </Marker>
           ) : null}
 
-          {hasDriverCoordinate ? (
+          {hasDisplayedDriverCoordinate ? (
             <Marker
               key="driver-marker"
-              coordinate={{ latitude: driverCoordinate.latitude, longitude: driverCoordinate.longitude }}
+              coordinate={{
+                latitude: displayedDriverCoordinate.latitude,
+                longitude: displayedDriverCoordinate.longitude,
+              }}
               zIndex={19}
               anchor={{ x: 0.5, y: 0.5 }}
               tracksViewChanges={false}
@@ -628,7 +801,7 @@ function PrototypeMapLayer({
               tracksViewChanges={userMarkerTracksViewChanges}
               pinColor={undefined}
             >
-              <>
+              <View collapsable={false}>
                 <IOSUserMarkerContent
                   rotationDegrees={normalizedUserHeading}
                   avatarSource={resolvedAvatarSource}
@@ -642,11 +815,11 @@ function PrototypeMapLayer({
                     <Text style={styles.calloutAddress}>{originAddress || 'Sua localização atual'}</Text>
                   </View>
                 ) : null}
-              </>
+              </View>
             </Marker>
           ) : null}
 
-            {!useSimplifiedIosMap ? mapChildren : null}
+          {shouldRenderExternalMapChildren ? mapChildren : null}
         </MapView>
       </View>
 
@@ -730,7 +903,7 @@ const styles = StyleSheet.create({
     top: '44%',
     height: 6,
     borderRadius: 999,
-    backgroundColor: '#E85D04',
+    backgroundColor: '#111719',
     transform: [{ rotate: '-18deg' }],
     shadowColor: color.shadow.base,
     shadowOffset: { width: 0, height: 10 },
@@ -801,14 +974,14 @@ const styles = StyleSheet.create({
     alignItems: 'center'
   },
   destinationAvatar: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+    width: 42,
+    height: 42,
+    borderRadius: 21,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: 'rgba(255,255,255,0.92)',
+    backgroundColor: 'rgba(255,255,255,0.96)',
     borderWidth: 1,
-    borderColor: color.border.strong,
+    borderColor: 'rgba(17,23,25,0.16)',
     shadowColor: color.shadow.base,
     shadowOffset: { width: 0, height: 8 },
     shadowOpacity: 0.18,

@@ -78,11 +78,17 @@ export async function openDriverExternalNavigation({
   const googleWebUrl = `https://maps.google.com/?daddr=${latitude},${longitude}&directionsmode=driving`;
   const wazeAppUrl = `waze://?ll=${latitude},${longitude}&navigate=yes`;
   const wazeWebUrl = `https://waze.com/ul?ll=${latitude},${longitude}&navigate=yes`;
+  const appleMapsUrl = `http://maps.apple.com/?daddr=${latitude},${longitude}&dirflg=d`;
 
   const openGoogleMaps = async () => {
     const canOpenNative = await safeCanOpenURL(googleAppUrl);
     await Linking.openURL(canOpenNative ? googleAppUrl : googleWebUrl);
     return 'google_maps';
+  };
+
+  const openAppleMaps = async () => {
+    await Linking.openURL(appleMapsUrl);
+    return 'apple_maps';
   };
 
   const openWaze = async () => {
@@ -104,7 +110,7 @@ export async function openDriverExternalNavigation({
       beginNavigationPrompt(promptKey);
       ActionSheetIOS.showActionSheetWithOptions(
         {
-          options: ['Cancelar', 'Google Maps', 'Waze'],
+          options: ['Cancelar', 'Mapas da Apple', 'Google Maps', 'Waze'],
           cancelButtonIndex: 0,
           title: `Abrir rota para ${phaseLabel}`,
           message: targetLabel
@@ -112,10 +118,14 @@ export async function openDriverExternalNavigation({
         async selectedIndex => {
           try {
             if (selectedIndex === 1) {
-              resolve(await openGoogleMaps());
+              resolve(await openAppleMaps());
               return;
             }
             if (selectedIndex === 2) {
+              resolve(await openGoogleMaps());
+              return;
+            }
+            if (selectedIndex === 3) {
               resolve(await openWaze());
               return;
             }

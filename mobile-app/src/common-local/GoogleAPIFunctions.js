@@ -4,6 +4,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { firebase } from './config/configureFirebase';
 import AccessKey from './AccessKey';
 import { getSelfHostedApiUrl } from '../config/ApiConfig';
+import { allowClientDirectGoogleFallback } from '../config/runtimeAccessPolicy';
 import rideCostTelemetryService, {
     RIDE_TELEMETRY_GOOGLE_SKUS
 } from '../services/RideCostTelemetryService';
@@ -129,6 +130,53 @@ const parseCoordPair = (coordStr) => {
         lng: Number.parseFloat(lngRaw)
     };
 };
+const stripHtmlInstruction = (value) =>
+    String(value || '')
+        .replace(/<[^>]*>/g, ' ')
+        .replace(/&nbsp;/g, ' ')
+        .replace(/&amp;/g, '&')
+        .replace(/&quot;/g, '"')
+        .replace(/&#39;/g, "'")
+        .replace(/&lt;/g, '<')
+        .replace(/&gt;/g, '>')
+        .replace(/\s+/g, ' ')
+        .trim();
+const normalizeDirectionsStep = (step = {}) => {
+    const startLat = Number(step?.start_location?.lat);
+    const startLng = Number(step?.start_location?.lng);
+    const endLat = Number(step?.end_location?.lat);
+    const endLng = Number(step?.end_location?.lng);
+
+    if (
+        !Number.isFinite(startLat) ||
+        !Number.isFinite(startLng) ||
+        !Number.isFinite(endLat) ||
+        !Number.isFinite(endLng)
+    ) {
+        return null;
+    }
+
+    const distanceMeters = Number(step?.distance?.value);
+    const durationSeconds = Number(step?.duration?.value);
+
+    return {
+        instruction: stripHtmlInstruction(step?.html_instructions) || 'Siga em frente',
+        startLocation: {
+            lat: startLat,
+            lng: startLng
+        },
+        endLocation: {
+            lat: endLat,
+            lng: endLng
+        },
+        distanceMeters: Number.isFinite(distanceMeters) && distanceMeters >= 0 ? distanceMeters : 0,
+        durationSeconds: Number.isFinite(durationSeconds) && durationSeconds >= 0 ? durationSeconds : 0,
+        polylinePoints: step?.polyline?.points || null
+    };
+};
+const normalizeDirectionsSteps = (steps = []) => (
+    Array.isArray(steps) ? steps.map(normalizeDirectionsStep).filter(Boolean) : []
+);
 const getCached = (key, ttlMs) => {
     const cached = MAPS_CACHE.get(key);
     if (!cached) return null;
@@ -245,10 +293,8 @@ export const fetchPlacesAutocomplete = (searchKeyword, sessionToken, location = 
 
         const canUseAutocompleteCache = shouldUseAutocompleteCache(searchKeyword);
         
-        // ✅ ESTRATÉGIA: Cache-first com fallback para Google
-        // 1. Tentar backend cache primeiro
-        // 2. Se não encontrar, usar Google direto (fallback)
-        // 3. Após buscar no Google, salvar no cache
+        // ✅ ESTRATÉGIA: Backend autoritativo no release.
+        // O fallback Google direto só é permitido em runtime de desenvolvimento/teste.
         
         try {
             // 0️⃣ Tentar cache local rápido
@@ -320,7 +366,13 @@ export const fetchPlacesAutocomplete = (searchKeyword, sessionToken, location = 
                 }
             }
 
-            // 2️⃣ Fallback: Usar Google Places diretamente
+            if (!allowClientDirectGoogleFallback()) {
+                Logger.log('⛔ [PlacesCache] Fallback Google direto bloqueado neste runtime.');
+                resolve([]);
+                return;
+            }
+
+            // 2️⃣ Fallback permitido somente em desenvolvimento/teste
             const apiKey = process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY || process.env.GOOGLE_MAPS_API_KEY || ''; // Chave real do projeto (sem restrições)
             
             // Construir URL da API Places Autocomplete
@@ -522,7 +574,12 @@ export const fetchCoordsfromPlace = (place_id, telemetryContext = null, sessionT
             }
         }
 
-        // 2️⃣ Fallback: Google direto
+        if (!allowClientDirectGoogleFallback()) {
+            reject('Place Details backend indisponível no momento.');
+            return;
+        }
+
+        // 2️⃣ Fallback permitido somente em desenvolvimento/teste
         const apiKey = process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY || process.env.GOOGLE_MAPS_API_KEY || '';
         let url = `https://maps.googleapis.com/maps/api/place/details/json?place_id=${place_id}&key=${apiKey}&language=pt-BR&fields=geometry,formatted_address,name`;
         if (sessionToken) {
@@ -839,7 +896,8 @@ export const getDirectionsApi = (startLoc, destLoc, waypoints, telemetryContext 
             }
         })();
         
-        // ✅ CORRIGIDO: Usar API do Google diretamente (endpoint do backend não existe mais)
+        // Montamos a URL do Google apenas para fallback controlado de QA/dev.
+        // O caminho preferencial em release é sempre o backend /api/places/directions.
         const apiKey = process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY || process.env.GOOGLE_MAPS_API_KEY || ''; // Chave real do projeto (sem restrições)
         
         const trafficEnabled = String(process.env.EXPO_PUBLIC_ENABLE_TRAFFIC_ROUTE || 'false').toLowerCase() === 'true';
@@ -941,18 +999,24 @@ export const getDirectionsApi = (startLoc, destLoc, waypoints, telemetryContext 
                                 })
                             }, telemetryContext);
                         }
+                        setCached(cacheKey, backendJson.data);
+                        resolve(backendJson.data);
                         return backendJson.data;
                     }
                 }
             } catch (backendError) {
                 if (backendError?.name === 'AbortError') {
-                    Logger.log('⏱️ getDirectionsApi backend timeout, fallback Google direto');
+                    Logger.log('⏱️ getDirectionsApi backend timeout');
                 } else {
-                    Logger.log('⚠️ getDirectionsApi backend falhou, fallback Google:', backendError?.message || backendError);
+                    Logger.log('⚠️ getDirectionsApi backend falhou:', backendError?.message || backendError);
                 }
             }
 
-            // 2) Fallback Google direto (mantém compatibilidade)
+            if (!allowClientDirectGoogleFallback()) {
+                throw new Error('Directions backend indisponível no momento.');
+            }
+
+            // 2) Fallback permitido somente em desenvolvimento/teste
             const controller = new AbortController();
             const timeoutId = setTimeout(() => controller.abort(), DIRECTIONS_REQUEST_TIMEOUT_MS);
             return await fetch(url, { signal: controller.signal })
@@ -1037,9 +1101,13 @@ export const getDirectionsApi = (startLoc, destLoc, waypoints, telemetryContext 
                                     }
                                     : null,
                             start_address: currentLeg?.start_address || '',
-                            end_address: currentLeg?.end_address || ''
+                            end_address: currentLeg?.end_address || '',
+                            steps: normalizeDirectionsSteps(currentLeg?.steps)
                         };
                     });
+                    const steps = normalizedLegs.flatMap((currentLeg) => (
+                        Array.isArray(currentLeg.steps) ? currentLeg.steps : []
+                    ));
                     const totalDistanceKm = normalizedLegs.reduce(
                         (total, currentLeg) =>
                             Number.isFinite(currentLeg.distance_in_km)
@@ -1070,7 +1138,8 @@ export const getDirectionsApi = (startLoc, destLoc, waypoints, telemetryContext 
                         time_in_secs: totalTimeInSecs, // Tempo em segundos (com trânsito se disponível)
                         polylinePoints: route.overview_polyline.points,
                         duration_in_traffic: totalDurationInTraffic,
-                        legs: normalizedLegs
+                        legs: normalizedLegs,
+                        steps
                     };
                     
                     Logger.log('✅ Dados processados:', {

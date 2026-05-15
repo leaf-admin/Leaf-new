@@ -372,14 +372,29 @@ export default function EarningsReportScreen({ navigation, route }) {
 
   const saldoDisponivel = toNumber(earningsData?.balance, 0);
   const assinaturaPendente = toNumber(earningsData?.subscriptionPendingFee, 0);
+  const subscriptionDailyFeeSuspended = earningsData?.subscriptionDailyFeeSuspended !== false;
+  const subscriptionDailyFeeNominalCents = Math.max(
+    0,
+    Math.round(toNumber(
+      earningsData?.subscriptionDailyFeeNominalCents,
+      DriverBalanceService.SUBSCRIPTION_DAILY_FEE_NOMINAL * 100
+    ))
+  );
+  const subscriptionDailyFeeNominalValue = toNumber(
+    earningsData?.subscriptionDailyFeeNominal,
+    subscriptionDailyFeeNominalCents > 0 ? subscriptionDailyFeeNominalCents / 100 : DriverBalanceService.SUBSCRIPTION_DAILY_FEE_NOMINAL
+  );
   const subscriptionDailyFeeCents = Math.max(0, Math.round(toNumber(earningsData?.subscriptionDailyFeeCents, 0)));
   const subscriptionDailyFeeValue = toNumber(
     earningsData?.subscriptionDailyFee,
     subscriptionDailyFeeCents > 0 ? subscriptionDailyFeeCents / 100 : 0
   );
+  const subscriptionDailyFeeNominalLabel = `R$ ${formatCurrency(subscriptionDailyFeeNominalValue)}`;
   const subscriptionDailyFeeLabel =
-    subscriptionDailyFeeCents === 0
-      ? 'Isenta'
+    subscriptionDailyFeeSuspended
+      ? 'R$ 0,00'
+      : subscriptionDailyFeeCents === 0
+        ? 'Isenta'
       : `R$ ${formatCurrency(subscriptionDailyFeeValue)}`;
 
   useEffect(() => {
@@ -407,6 +422,16 @@ export default function EarningsReportScreen({ navigation, route }) {
               mergedReport.subscriptionPendingFeeCents = toNumber(balanceResult.subscriptionPendingFeeCents, 0);
               mergedReport.subscriptionDailyFee = toNumber(balanceResult.subscriptionDailyFee, 0);
               mergedReport.subscriptionDailyFeeCents = toNumber(balanceResult.subscriptionDailyFeeCents, 0);
+              mergedReport.subscriptionDailyFeeNominal = toNumber(
+                balanceResult.subscriptionDailyFeeNominal,
+                DriverBalanceService.SUBSCRIPTION_DAILY_FEE_NOMINAL
+              );
+              mergedReport.subscriptionDailyFeeNominalCents = toNumber(
+                balanceResult.subscriptionDailyFeeNominalCents,
+                DriverBalanceService.SUBSCRIPTION_DAILY_FEE_NOMINAL * 100
+              );
+              mergedReport.subscriptionDailyFeeSuspended = balanceResult.subscriptionDailyFeeSuspended === true;
+              mergedReport.subscriptionDailyBillingEnabled = balanceResult.subscriptionDailyBillingEnabled === true;
               mergedReport.subscriptionWaveId = balanceResult.subscriptionWaveId || null;
               mergedReport.availableAfterSubscription =
                 toNumber(balanceResult.availableAfterSubscription, NaN)
@@ -526,7 +551,7 @@ export default function EarningsReportScreen({ navigation, route }) {
   function getWithdrawCostBreakdown(amount) {
     const normalizedAmount = toNumber(amount, 0);
     const fee = DriverBalanceService.calculateWithdrawFee(normalizedAmount);
-    const subscriptionSettlement = assinaturaPendente > 0 ? assinaturaPendente : 0;
+    const subscriptionSettlement = !subscriptionDailyFeeSuspended && assinaturaPendente > 0 ? assinaturaPendente : 0;
     const totalDebit = normalizedAmount + fee + subscriptionSettlement;
     return {
       fee,
@@ -1223,7 +1248,19 @@ export default function EarningsReportScreen({ navigation, route }) {
             <Text style={styles.modalLabel}>Saldo disponível</Text>
             <Text style={styles.modalBalance}>R$ {formatCurrency(saldoDisponivel)}</Text>
             <Text style={styles.modalLabel}>Taxa diária da assinatura</Text>
-            <Text style={styles.modalSubscriptionDailyFee}>{subscriptionDailyFeeLabel}</Text>
+            <View style={styles.modalSubscriptionFeeRow}>
+              {subscriptionDailyFeeSuspended ? (
+                <Text style={styles.modalSubscriptionDailyFeeStruck}>
+                  {subscriptionDailyFeeNominalLabel}
+                </Text>
+              ) : null}
+              <Text style={styles.modalSubscriptionDailyFee}>{subscriptionDailyFeeLabel}</Text>
+            </View>
+            {subscriptionDailyFeeSuspended ? (
+              <Text style={styles.modalSubscriptionFeeNote}>
+                Suspensa durante a estabilização do app.
+              </Text>
+            ) : null}
 
             <Text style={styles.modalLabel}>Valor</Text>
             <TextInput
@@ -1260,7 +1297,10 @@ export default function EarningsReportScreen({ navigation, route }) {
               {(() => {
                 const amount = toNumber(String(withdrawValue).replace(',', '.'), 0);
                 const { fee, subscriptionSettlement, totalDebit } = getWithdrawCostBreakdown(amount);
-                return `Taxa de saque: R$ ${formatCurrency(fee)} • Taxa diária: ${subscriptionDailyFeeLabel}${
+                const dailyFeeText = subscriptionDailyFeeSuspended
+                  ? `${subscriptionDailyFeeLabel} (${subscriptionDailyFeeNominalLabel} suspensa)`
+                  : subscriptionDailyFeeLabel;
+                return `Taxa de saque: R$ ${formatCurrency(fee)} • Taxa diária: ${dailyFeeText}${
                   subscriptionSettlement > 0 ? ` • Assinatura: R$ ${formatCurrency(subscriptionSettlement)}` : ''
                 } • Débito total: R$ ${formatCurrency(totalDebit)}`;
               })()}
@@ -1531,6 +1571,25 @@ const styles = StyleSheet.create({
     color: '#0F1728',
     fontFamily: fonts.SemiBold,
     fontSize: 15,
+    marginBottom: 6
+  },
+  modalSubscriptionFeeRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 2
+  },
+  modalSubscriptionDailyFeeStruck: {
+    color: '#7A8699',
+    fontFamily: fonts.Medium,
+    fontSize: 14,
+    textDecorationLine: 'line-through'
+  },
+  modalSubscriptionFeeNote: {
+    color: '#5E6A7B',
+    fontFamily: fonts.Medium,
+    fontSize: 12,
+    lineHeight: 16,
     marginBottom: 6
   },
   modalInput: {

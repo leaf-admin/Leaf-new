@@ -19,11 +19,24 @@ function resolveDestinationAutomationConfig(
   routeParams = {},
   { isExtensionFlow = false, isDev = false, isE2E = false } = {},
 ) {
+  if (isExtensionFlow) {
+    return {
+      automationEnabled: false,
+      autoFlowMode: "",
+      autoSelectFirst: false,
+      autoOpenPix: false,
+      autoConfirmPix: false,
+      nonce: "",
+      presetQuery: "",
+    };
+  }
+
   const automationEnabled =
-    isE2E ||
-    isTruthyRouteParam(routeParams?.e2e) ||
-    isTruthyRouteParam(routeParams?.automation) ||
-    isTruthyRouteParam(routeParams?.qaAutomation);
+    (isDev || isE2E) &&
+    (isE2E ||
+      isTruthyRouteParam(routeParams?.e2e) ||
+      isTruthyRouteParam(routeParams?.automation) ||
+      isTruthyRouteParam(routeParams?.qaAutomation));
 
   const allowAutomationParams = isDev || automationEnabled;
   const autoFlowMode = allowAutomationParams

@@ -92,12 +92,12 @@ export default function WooviPaymentModal({
     };
 
     const shouldBypassPayment = async () => {
-        if (qaAutoConfirmEnabled) {
+        if (allowForcedPaymentBypass()) {
             return true;
         }
 
-        if (allowForcedPaymentBypass()) {
-            return true;
+        if (qaAutoConfirmEnabled) {
+            return false;
         }
 
         try {
@@ -134,7 +134,12 @@ export default function WooviPaymentModal({
             chargeId: normalizedPayload.chargeId,
             rideId: normalizedPayload.rideId,
             amount: normalizedPayload.amount,
-            amountInCents: normalizedPayload.amountInCents
+            amountInCents: normalizedPayload.amountInCents,
+            bypassed: normalizedPayload.bypassed === true,
+            mockPayment:
+                normalizedPayload.mockPayment === true ||
+                normalizedPayload.bypassed === true ||
+                String(normalizedPayload.chargeId || '').startsWith('qa_bypass_')
         };
 
         const notifyDelay = String(source || '').includes('qa') || source === 'bypass'
@@ -342,7 +347,10 @@ export default function WooviPaymentModal({
         setQaDebugStatus('scheduled');
 
         autoConfirmTimerRef.current = setTimeout(async () => {
-            if (String(paymentData.chargeId || '').startsWith('mock_review_')) {
+            if (
+                String(paymentData.chargeId || '').startsWith('mock_review_') ||
+                String(paymentData.chargeId || '').startsWith('qa_bypass_')
+            ) {
                 return;
             }
 
@@ -448,7 +456,7 @@ export default function WooviPaymentModal({
             const bypassEnabled = await shouldBypassPayment();
             if (bypassEnabled) {
                 const bypassPaymentInfo = {
-                    chargeId: `mock_review_${timestamp}_${randomSuffix}`,
+                    chargeId: `qa_bypass_${timestamp}_${randomSuffix}`,
                     rideId: tempRideId,
                     qrCodeImage: null,
                     qrCodeText: 'BYPASS_PAYMENT_ENABLED',
@@ -457,7 +465,8 @@ export default function WooviPaymentModal({
                     amountInCents: amountInCents,
                     expiresAt: new Date(Date.now() + (PAYMENT_TIMEOUT * 1000)),
                     passengerId,
-                    bypassed: true
+                    bypassed: true,
+                    mockPayment: true
                 };
 
                 Logger.log('🧪 [WooviPaymentModal] BYPASS de pagamento habilitado para teste E2E.');

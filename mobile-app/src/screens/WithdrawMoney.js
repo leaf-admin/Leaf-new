@@ -88,7 +88,11 @@ export default function WithdrawMoneyScreen(props) {
   }
 
   return (
-    <View style={styles.mainView}>
+    <View
+      style={styles.mainView}
+      testID="driver-withdraw-screen"
+      accessibilityLabel="driver-withdraw-screen"
+    >
       
       <View style={styles.bodyContainer}>
       {settings?.swipe_symbol === false ?
@@ -103,6 +107,8 @@ export default function WithdrawMoneyScreen(props) {
           keyboardType={'number-pad'}
           onChangeText={(text) => setState({ ...state,amount: text })}
           value={state.amount}
+          testID="driver-withdraw-amount-input"
+          accessibilityLabel="driver-withdraw-amount-input"
         />
         <TextInput
           style={[styles.inputTextStyle,{textAlign: isRTL ? 'right': 'left'}]}
@@ -111,6 +117,8 @@ export default function WithdrawMoneyScreen(props) {
           autoCorrect={false}
           onChangeText={(text) => setState({ ...state,pixKey: text })}
           value={state.pixKey}
+          testID="driver-withdraw-pix-key-input"
+          accessibilityLabel="driver-withdraw-pix-key-input"
         />
         <TextInput
           style={[styles.inputTextStyle,{textAlign: isRTL ? 'right': 'left'}]}
@@ -121,7 +129,14 @@ export default function WithdrawMoneyScreen(props) {
           textContentType="password"
           onChangeText={(text) => setState({ ...state,appPassword: text })}
           value={state.appPassword}
+          testID="driver-withdraw-password-input"
+          accessibilityLabel="driver-withdraw-password-input"
         />
+        <View style={styles.dailyFeeRow}>
+          <Text style={styles.dailyFeeLabel}>Taxa diária</Text>
+          <Text style={styles.dailyFeeStruck}>R$ 9,90</Text>
+          <Text style={styles.dailyFeeFree}>R$ 0,00 agora</Text>
+        </View>
         <Button
             title={t('withdraw')}
             loading={loading}
@@ -129,6 +144,8 @@ export default function WithdrawMoneyScreen(props) {
             onPress={withdrawNow}
             buttonStyle={styles.buttonWrapper2}
             containerStyle={{ height: '100%' }}
+            testID="driver-withdraw-submit-button"
+            accessibilityLabel="driver-withdraw-submit-button"
         />
       </View>
     </View>
@@ -172,6 +189,32 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     fontSize: 30,
     fontFamily:fonts.Regular
+  },
+  dailyFeeRow: {
+    marginTop: 14,
+    padding: 12,
+    borderRadius: 8,
+    backgroundColor: '#EEF8F0',
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  dailyFeeLabel: {
+    fontSize: 14,
+    fontFamily: fonts.Bold,
+    color: '#1F6B37',
+    marginRight: 8,
+  },
+  dailyFeeStruck: {
+    fontSize: 14,
+    fontFamily: fonts.Regular,
+    color: '#6E7D72',
+    textDecorationLine: 'line-through',
+    marginRight: 8,
+  },
+  dailyFeeFree: {
+    fontSize: 14,
+    fontFamily: fonts.Bold,
+    color: MAIN_COLOR,
   },
   buttonWrapper2: {
     marginBottom: 10,

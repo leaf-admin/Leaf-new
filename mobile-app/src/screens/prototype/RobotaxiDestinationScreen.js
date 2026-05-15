@@ -51,6 +51,8 @@ import {
   resolvePrototypeConnectionAutomationConfig,
   shouldRunPrototypeConnectionAutomation,
 } from "./prototypeConnectionStatus";
+import { PROTOTYPE_ORIGIN_COORDINATE } from "./robotaxiPrototypeData";
+import { clearPrototypeMapRoute, setPrototypeMapRoute } from "./prototypeMapRoute";
 
 const { color, typography, touch, motion } = robotaxiPrototypeTokens;
 const SEARCH_STEP = "search";
@@ -62,7 +64,17 @@ const SEARCH_KEYBOARD_CLEARANCE = 64;
 const SEARCH_FALLBACK_HEIGHT = 308;
 const QUOTE_FALLBACK_HEIGHT = 500;
 const PLAN_LIST_VIEWPORT_HEIGHT = 206;
-const ORIGIN_ADDRESS = "1540 Mission St, San Francisco";
+const ORIGIN_ADDRESS = "Rua das Pastorinhas, Taquara, Rio de Janeiro";
+const MAX_OPERATIONAL_ROUTE_DISTANCE_KM = Math.max(
+  80,
+  Number.parseFloat(
+    process.env.EXPO_PUBLIC_MAX_OPERATIONAL_ROUTE_DISTANCE_KM || "120",
+  ) || 120,
+);
+const OUT_OF_COVERAGE_MESSAGE = "Destino fora da area de cobertura da Leaf";
+const LEGACY_ROUTE_GUARD_MESSAGE_REGEX =
+  /origem e destino inconsistentes para a (área|area) de opera(ç|c)ão da leaf/i;
+const REGION_UNAVAILABLE_MESSAGE_REGEX = /regi(ã|a)o indispon(i|í)vel/i;
 const stepEasing = Easing.bezier(...motion.bezier.snappy);
 
 if (
@@ -138,6 +150,93 @@ function calculateBusinessFare(distanceKm, durationMin, rateCard) {
 
 function formatCurrency(value) {
   return `R$ ${Number(value).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
+
+function normalizeCoverageMessage(message) {
+  const normalized = String(message || "").trim();
+  if (!normalized) {
+    return "";
+  }
+  if (LEGACY_ROUTE_GUARD_MESSAGE_REGEX.test(normalized)) {
+    return OUT_OF_COVERAGE_MESSAGE;
+  }
+  if (/destino fora da (área|area) de cobertura da leaf/i.test(normalized)) {
+    return OUT_OF_COVERAGE_MESSAGE;
+  }
+  if (REGION_UNAVAILABLE_MESSAGE_REGEX.test(normalized)) {
+    return OUT_OF_COVERAGE_MESSAGE;
+  }
+  return normalized;
+}
+
+function normalizeAddressText(value) {
+  return String(value || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
+}
+
+function inferCountryFromAddress(addressText) {
+  const normalized = normalizeAddressText(addressText);
+  if (!normalized) {
+    return null;
+  }
+
+  if (/\b(united states|usa|california|san francisco)\b/.test(normalized)) {
+    return "US";
+  }
+
+  if (
+    /\b(brasil|brazil|rio de janeiro|sao paulo|santos dumont|rj)\b/.test(
+      normalized,
+    )
+  ) {
+    return "BR";
+  }
+
+  return null;
+}
+
+function calculateStraightDistanceKm(origin, destination) {
+  const originLat = Number(origin?.latitude);
+  const originLng = Number(origin?.longitude);
+  const destinationLat = Number(destination?.latitude);
+  const destinationLng = Number(destination?.longitude);
+
+  if (
+    !Number.isFinite(originLat) ||
+    !Number.isFinite(originLng) ||
+    !Number.isFinite(destinationLat) ||
+    !Number.isFinite(destinationLng)
+  ) {
+    return null;
+  }
+
+  const earthRadiusKm = 6371;
+  const toRad = (value) => (value * Math.PI) / 180;
+  const dLat = toRad(destinationLat - originLat);
+  const dLng = toRad(destinationLng - originLng);
+  const lat1 = toRad(originLat);
+  const lat2 = toRad(destinationLat);
+  const haversine =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(lat1) *
+      Math.cos(lat2) *
+      Math.sin(dLng / 2) *
+      Math.sin(dLng / 2);
+  const arc = 2 * Math.atan2(Math.sqrt(haversine), Math.sqrt(1 - haversine));
+  return Number((earthRadiusKm * arc).toFixed(2));
+}
+
+function normalizePreviewCoordinate(value) {
+  const latitude = Number(value?.latitude);
+  const longitude = Number(value?.longitude);
+
+  if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
+    return null;
+  }
+
+  return { latitude, longitude };
 }
 
 export default function RobotaxiDestinationScreen({ navigation, route }) {
@@ -665,6 +764,50 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
     resolveMeaningfulAddress(currentAddress, ORIGIN_ADDRESS) || ORIGIN_ADDRESS;
   const destinationCoordinate =
     destinationInfo?.coordinate || selectedDestination?.coordinate || null;
+  const routeGuardState = useMemo(() => {
+    if (!destinationInfo) {
+      return { blocked: false, message: "" };
+    }
+
+    const originCountry = inferCountryFromAddress(originAddress);
+    const destinationCountry = inferCountryFromAddress(
+      `${destinationInfo?.name || ""} ${destinationInfo?.address || ""}`,
+    );
+
+    if (
+      originCountry &&
+      destinationCountry &&
+      originCountry !== destinationCountry
+    ) {
+      return {
+        blocked: true,
+        message: OUT_OF_COVERAGE_MESSAGE,
+      };
+    }
+
+    const straightDistanceKm = calculateStraightDistanceKm(
+      currentCoordinate,
+      destinationCoordinate,
+    );
+    if (
+      Number.isFinite(straightDistanceKm) &&
+      straightDistanceKm > MAX_OPERATIONAL_ROUTE_DISTANCE_KM
+    ) {
+      return {
+        blocked: true,
+        message: OUT_OF_COVERAGE_MESSAGE,
+      };
+    }
+
+    return { blocked: false, message: "" };
+  }, [
+    currentCoordinate,
+    destinationCoordinate,
+    destinationInfo,
+    originAddress,
+  ]);
+  const routeGuardBlocked = routeGuardState.blocked;
+  const routeGuardMessage = normalizeCoverageMessage(routeGuardState.message);
   const livePreviewMatchesSelection = useMemo(() => {
     if (!selectedDestination?.coordinate || !runtimeSelectedDestination?.coordinate) {
       return false;
@@ -804,6 +947,7 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
   }, [distanceKm, durationMin, planRateCards]);
   const selectedPlanData =
     plans.find((item) => item.id === selectedPlan) || plans[0];
+  const selectedPlanFare = routeGuardBlocked ? null : selectedPlanData?.value;
   const extensionPlanId = useMemo(() => {
     const fromSelectedVehicle = getPlanIdFromCarName(selectedVehicle);
     if (fromSelectedVehicle) {
@@ -825,9 +969,19 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
     () => visiblePlans.map((item) => `${item.id}:${item.title}`).join("|"),
     [visiblePlans],
   );
+  const hasCoverageBlockedPlan = useMemo(
+    () =>
+      Object.values(planAvailabilityById || {}).some(
+        (entry) =>
+          entry?.available === false &&
+          normalizeCoverageMessage(entry?.message) === OUT_OF_COVERAGE_MESSAGE,
+      ),
+    [planAvailabilityById],
+  );
   const selectedPlanAvailability =
     planAvailabilityById?.[selectedPlanData?.id] || null;
-  const selectedPlanUnavailable = selectedPlanAvailability?.available === false;
+  const selectedPlanUnavailable =
+    hasCoverageBlockedPlan || selectedPlanAvailability?.available === false;
 
   useEffect(() => {
     if (!isExtensionFlow) {
@@ -876,6 +1030,7 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
     setVoiceListening(false);
     setVoiceStarting(false);
     setPixModalVisible(false);
+    clearPrototypeMapRoute();
     if (!isExtensionFlow) {
       clearFlowPreview();
     }
@@ -921,12 +1076,47 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
     setSheetHeight(SEARCH_FALLBACK_HEIGHT);
     setAvailabilityNotice("");
     setPlanAvailabilityById({});
+    clearPrototypeMapRoute();
     qaAutoPixOpenedRef.current = false;
     qaAutoPixConfirmedRef.current = false;
     if (!isExtensionFlow) {
       clearFlowPreview();
     }
   }, [clearFlowPreview, isExtensionFlow]);
+
+  useEffect(() => {
+    if (step !== QUOTE_STEP) {
+      return undefined;
+    }
+
+    const originCoordinate =
+      normalizePreviewCoordinate(currentCoordinate) ||
+      normalizePreviewCoordinate(PROTOTYPE_ORIGIN_COORDINATE);
+    const previewDestinationCoordinate =
+      normalizePreviewCoordinate(destinationCoordinate);
+
+    if (!originCoordinate || !previewDestinationCoordinate) {
+      return undefined;
+    }
+
+    setPrototypeMapRoute({
+      origin: originCoordinate,
+      destination: previewDestinationCoordinate,
+      destinationLabel: destinationInfo?.name || "Destino",
+      destinationAddress:
+        destinationInfo?.address || destinationInfo?.name || "Destino",
+    });
+
+    return () => {
+      clearPrototypeMapRoute();
+    };
+  }, [
+    currentCoordinate,
+    destinationCoordinate,
+    destinationInfo?.address,
+    destinationInfo?.name,
+    step,
+  ]);
 
   useEffect(() => {
     if (step !== QUOTE_STEP || visiblePlans.length === 0) {
@@ -937,9 +1127,28 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
 
     const validateVisiblePlans = async () => {
       setCheckingPlanAvailability(true);
-      setAvailabilityNotice("");
+      if (!routeGuardBlocked) {
+        setAvailabilityNotice("");
+      }
 
       const nextAvailability = {};
+      let coverageBlockedByAvailability = false;
+
+      if (routeGuardBlocked) {
+        visiblePlans.forEach((plan) => {
+          nextAvailability[plan.id] = {
+            available: false,
+            message: routeGuardMessage,
+            code: "ROUTE_GUARD_BLOCKED",
+          };
+        });
+        if (!cancelled) {
+          setPlanAvailabilityById(nextAvailability);
+          setAvailabilityNotice(routeGuardMessage);
+          setCheckingPlanAvailability(false);
+        }
+        return;
+      }
 
       for (const plan of visiblePlans) {
         try {
@@ -952,18 +1161,29 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
             vehicle: plan.title,
           });
 
+          const normalizedMessage = availability?.available
+            ? ""
+            : normalizeCoverageMessage(
+                availability?.message || "Não há motorista disponível",
+              );
+          if (normalizedMessage === OUT_OF_COVERAGE_MESSAGE) {
+            coverageBlockedByAvailability = true;
+          }
           nextAvailability[plan.id] = {
             available: Boolean(availability?.available),
-            message: availability?.available
-              ? ""
-              : availability?.message || "Não há motorista disponível",
+            message: normalizedMessage,
             code: availability?.code || null,
           };
         } catch (error) {
+          const normalizedMessage = normalizeCoverageMessage(
+            error?.message || "Não foi possível validar disponibilidade.",
+          );
+          if (normalizedMessage === OUT_OF_COVERAGE_MESSAGE) {
+            coverageBlockedByAvailability = true;
+          }
           nextAvailability[plan.id] = {
             available: false,
-            message:
-              error?.message || "Não foi possível validar disponibilidade.",
+            message: normalizedMessage,
             code: error?.code || "AVAILABILITY_CHECK_FAILED",
           };
         }
@@ -973,7 +1193,22 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
         }
       }
 
+      if (coverageBlockedByAvailability) {
+        visiblePlans.forEach((plan) => {
+          nextAvailability[plan.id] = {
+            available: false,
+            message: OUT_OF_COVERAGE_MESSAGE,
+            code:
+              nextAvailability[plan.id]?.code ||
+              "ROUTE_GUARD_BLOCKED_BY_AVAILABILITY",
+          };
+        });
+      }
+
       setPlanAvailabilityById(nextAvailability);
+      if (coverageBlockedByAvailability) {
+        setAvailabilityNotice(OUT_OF_COVERAGE_MESSAGE);
+      }
       setCheckingPlanAvailability(false);
     };
 
@@ -991,6 +1226,8 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
     destinationCoordinate,
     destinationInfo?.address,
     destinationInfo?.name,
+    routeGuardBlocked,
+    routeGuardMessage,
     step,
     visiblePlanSignature,
     visiblePlans,
@@ -1100,8 +1337,17 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
 
       if (selectedPlanUnavailable) {
         setAvailabilityNotice(
-          selectedPlanAvailability?.message ||
-            "Não há motorista disponível para essa categoria.",
+          normalizeCoverageMessage(
+            selectedPlanAvailability?.message ||
+              "Não há motorista disponível para essa categoria.",
+          ),
+        );
+        return;
+      }
+
+      if (routeGuardBlocked) {
+        setAvailabilityNotice(
+          routeGuardMessage || OUT_OF_COVERAGE_MESSAGE,
         );
         return;
       }
@@ -1116,10 +1362,22 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
       });
 
       if (!availability?.available) {
-        setAvailabilityNotice(
+        const normalizedMessage = normalizeCoverageMessage(
           availability?.message ||
             "Não há motorista disponível para essa categoria.",
         );
+        setAvailabilityNotice(normalizedMessage);
+        if (normalizedMessage === OUT_OF_COVERAGE_MESSAGE) {
+          const nextAvailability = {};
+          visiblePlans.forEach((plan) => {
+            nextAvailability[plan.id] = {
+              available: false,
+              message: OUT_OF_COVERAGE_MESSAGE,
+              code: "ROUTE_GUARD_BLOCKED_BY_AVAILABILITY",
+            };
+          });
+          setPlanAvailabilityById(nextAvailability);
+        }
         return;
       }
 
@@ -1143,9 +1401,12 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
     navigation,
     requestTripExtension,
     returnRouteName,
+    routeGuardBlocked,
+    routeGuardMessage,
     selectedPlanData.title,
     selectedPlanAvailability?.message,
     selectedPlanUnavailable,
+    visiblePlans,
     submittingRide,
   ]);
 
@@ -1234,6 +1495,14 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
         return;
       }
 
+      if (routeGuardBlocked) {
+        Alert.alert(
+          "Região indisponível",
+          routeGuardMessage || OUT_OF_COVERAGE_MESSAGE,
+        );
+        return;
+      }
+
       try {
         submittingRideGuardRef.current = true;
         if (confirmedChargeId) {
@@ -1250,7 +1519,7 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
           },
           originAddress,
           vehicle: selectedPlanData.title,
-          fare: selectedPlanData.value,
+          fare: selectedPlanFare,
           paymentMethod: "pix",
           paymentConfirmation,
         });
@@ -1285,8 +1554,10 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
       destinationInfo?.name,
       navigation,
       requestRide,
+      routeGuardBlocked,
+      routeGuardMessage,
       selectedPlanData.title,
-      selectedPlanData.value,
+      selectedPlanFare,
       submittingRide,
     ],
   );
@@ -1534,9 +1805,9 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
                   rightIconDisabled={voiceStarting}
                   rightIconLoading={voiceStarting}
                   testID="passenger-destination-search-input"
-                  accessibilityLabel="passenger-destination-search-input"
+                  accessibilityLabel="Digite o destino da viagem"
                   rightIconTestID="passenger-destination-search-mic"
-                  rightIconAccessibilityLabel="passenger-destination-search-mic"
+                  rightIconAccessibilityLabel="Ditar destino por voz"
                 />
                 <Text style={styles.voiceHint}>
                   {voiceListening
@@ -1680,7 +1951,18 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
                   {visiblePlans.map((item) => {
                     const active = selectedPlan === item.id;
                     const planAvailability = planAvailabilityById?.[item.id];
-                    const planUnavailable = planAvailability?.available === false;
+                    const planUnavailable =
+                      routeGuardBlocked ||
+                      hasCoverageBlockedPlan ||
+                      planAvailability?.available === false;
+                    const unavailableMessage =
+                      routeGuardBlocked || hasCoverageBlockedPlan
+                        ? OUT_OF_COVERAGE_MESSAGE
+                        : normalizeCoverageMessage(
+                            routeGuardMessage ||
+                              planAvailability?.message ||
+                              "Não há motorista disponível",
+                          );
 
                     return (
                       <TouchableOpacity
@@ -1736,23 +2018,32 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
                             </View>
                           ) : null}
                           {planUnavailable ? (
-                            <Text style={styles.planAvailabilityUnavailable}>
-                              {planAvailability?.message ||
-                                "Não há motorista disponível"}
+                            <Text
+                              style={styles.planAvailabilityUnavailable}
+                              testID={`passenger-destination-plan-unavailable-message-${item.id}`}
+                              accessibilityLabel={`passenger-destination-plan-unavailable-message-${item.id}`}
+                            >
+                              {unavailableMessage}
                             </Text>
                           ) : null}
                         </View>
                         <View style={styles.planRightWrap}>
-                          <Text
-                            style={[
-                              styles.planValue,
-                              active && styles.planValueActive,
-                            ]}
-                          >
-                            {formatCurrency(item.value)}
-                          </Text>
+                          {!planUnavailable ? (
+                            <Text
+                              style={[
+                                styles.planValue,
+                                active && styles.planValueActive,
+                              ]}
+                            >
+                              {formatCurrency(item.value)}
+                            </Text>
+                          ) : null}
                           {planUnavailable ? (
-                            <Text style={styles.planArrivalUnavailable}>
+                            <Text
+                              style={styles.planArrivalUnavailable}
+                              testID={`passenger-destination-plan-unavailable-label-${item.id}`}
+                              accessibilityLabel={`passenger-destination-plan-unavailable-label-${item.id}`}
+                            >
                               Indisponível
                             </Text>
                           ) : active ? (
@@ -1774,8 +2065,10 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
                         : `Solicitar novo destino`
                       : checkingPlanAvailability
                         ? "Verificando categorias..."
-                        : checkingAvailability
+                      : checkingAvailability
                         ? "Verificando motoristas..."
+                        : routeGuardBlocked || hasCoverageBlockedPlan
+                          ? "Indisponível"
                         : selectedPlanUnavailable
                           ? "Categoria indisponível"
                         : `Solicitar ${selectedPlanData.title}`
@@ -1786,19 +2079,21 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
                     checkingAvailability ||
                     checkingPlanAvailability ||
                     submittingRide ||
+                    routeGuardBlocked ||
+                    hasCoverageBlockedPlan ||
                     selectedPlanUnavailable
                       ? undefined
                       : handleOpenPixModal
                   }
                   testID="passenger-destination-confirm-button"
-                  accessibilityLabel="passenger-destination-confirm-button"
+                  accessibilityLabel="Confirmar viagem"
                 />
 
                 {availabilityNotice ? (
                   <Text
                     style={styles.availabilityNotice}
                     testID="passenger-destination-availability-notice"
-                    accessibilityLabel="passenger-destination-availability-notice"
+                    accessibilityLabel="Aviso de disponibilidade da categoria"
                   >
                     {availabilityNotice}
                   </Text>
@@ -1828,9 +2123,9 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
                 lng: destinationCoordinate?.longitude,
               },
               carType: selectedPlanData.title,
-              estimatedFare: selectedPlanData.value,
+              estimatedFare: selectedPlanFare,
             }}
-            estimates={{ estimateFare: selectedPlanData.value }}
+            estimates={{ estimateFare: selectedPlanFare }}
             passengerId={profileUid || "prototype-passenger"}
             passengerName={riderProfile?.name || "Passageira Leaf"}
             passengerEmail={riderProfile?.email || "passageiro@leaf.app.br"}
