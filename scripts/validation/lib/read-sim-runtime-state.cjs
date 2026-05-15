@@ -3,6 +3,9 @@
 const fs = require("fs");
 const path = require("path");
 const { execFileSync } = require("child_process");
+const SIMCTL_BIN =
+  process.env.SIMCTL_BIN ||
+  "/Library/Developer/PrivateFrameworks/CoreSimulator.framework/Versions/A/Resources/bin/simctl";
 
 function readArg(flag) {
   const index = process.argv.indexOf(flag);
@@ -87,8 +90,8 @@ function main() {
   let containerPath = "";
   try {
     containerPath = execFileSync(
-      "xcrun",
-      ["simctl", "get_app_container", udid, appId, "data"],
+      SIMCTL_BIN,
+      ["get_app_container", udid, appId, "data"],
       { encoding: "utf8" },
     ).trim();
   } catch (_error) {

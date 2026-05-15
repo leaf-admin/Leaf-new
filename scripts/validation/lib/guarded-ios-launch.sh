@@ -7,6 +7,11 @@ WAIT_SECONDS="${3:-8}"
 ARTIFACTS_DIR="${4:-}"
 APP_NAME="${APP_NAME:-Leaf}"
 MAX_LAUNCH_ATTEMPTS="${MAX_LAUNCH_ATTEMPTS:-2}"
+SIMCTL_BIN="${SIMCTL_BIN:-/Library/Developer/PrivateFrameworks/CoreSimulator.framework/Versions/A/Resources/bin/simctl}"
+
+simctl_cmd() {
+  "${SIMCTL_BIN}" "$@"
+}
 
 latest_crash_report() {
   ls -1t "${HOME}/Library/Logs/DiagnosticReports/${APP_NAME}"-*.ips 2>/dev/null | head -n 1 || true
@@ -50,7 +55,7 @@ copy_crash_artifacts() {
     cp "${report_path}" "${ARTIFACTS_DIR}/$(basename "${report_path}")"
   fi
 
-  xcrun simctl io "${UDID}" screenshot "${ARTIFACTS_DIR}/launch-crash-screen.png" >/dev/null 2>&1 || true
+  simctl_cmd io "${UDID}" screenshot "${ARTIFACTS_DIR}/launch-crash-screen.png" >/dev/null 2>&1 || true
 }
 
 classify_crash_report() {
@@ -135,11 +140,11 @@ EOF
 }
 
 recover_simulator_runtime() {
-  xcrun simctl terminate "${UDID}" "${APP_ID}" >/dev/null 2>&1 || true
-  xcrun simctl shutdown "${UDID}" >/dev/null 2>&1 || true
+  simctl_cmd terminate "${UDID}" "${APP_ID}" >/dev/null 2>&1 || true
+  simctl_cmd shutdown "${UDID}" >/dev/null 2>&1 || true
   sleep 1
-  xcrun simctl boot "${UDID}" >/dev/null 2>&1 || true
-  xcrun simctl bootstatus "${UDID}" -b >/dev/null 2>&1 || true
+  simctl_cmd boot "${UDID}" >/dev/null 2>&1 || true
+  simctl_cmd bootstatus "${UDID}" -b >/dev/null 2>&1 || true
   sleep 1
 }
 
@@ -153,7 +158,7 @@ while (( attempt <= MAX_LAUNCH_ATTEMPTS )); do
     recover_simulator_runtime
   fi
 
-  launch_output="$(xcrun simctl launch "${UDID}" "${APP_ID}" 2>&1)" || {
+  launch_output="$(simctl_cmd launch "${UDID}" "${APP_ID}" 2>&1)" || {
     printf '%s\n' "${launch_output}" >&2
     exit 1
   }

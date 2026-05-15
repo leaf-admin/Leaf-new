@@ -17,6 +17,9 @@ const { getIdTokenForUid } = require(path.join(
   "firebase-id-token.js",
 ));
 const { execFileSync } = require("child_process");
+const SIMCTL_BIN =
+  process.env.SIMCTL_BIN ||
+  "/Library/Developer/PrivateFrameworks/CoreSimulator.framework/Versions/A/Resources/bin/simctl";
 
 function readArg(flag) {
   const index = process.argv.indexOf(flag);
@@ -70,8 +73,8 @@ function writeStorageValue(storageDir, manifest, key, value) {
 
 function resolveStorageDir(udid, appId) {
   const containerPath = execFileSync(
-    "xcrun",
-    ["simctl", "get_app_container", udid, appId, "data"],
+    SIMCTL_BIN,
+    ["get_app_container", udid, appId, "data"],
     { encoding: "utf8" },
   ).trim();
 
@@ -164,7 +167,11 @@ function buildSeedUserData({ role, ensureUsers }) {
   if (role === "driver") {
     const driverActivation = buildApprovedDriverActivation(nowIso);
     const uid = String(driverSeed.uid || "8vg2kxxqi3TYKlpD6eBlWgYseIq2").trim();
-    const phone = String(driverSeed.phone || "+5511888888888").trim();
+    const phone = String(driverSeed.phone || "+5521123456789").trim();
+    const vehicleId = String(driverSeed.vehicleId || `test_vehicle_${uid.slice(0, 12)}`).trim();
+    const userVehicleId = String(driverSeed.userVehicleId || `uv_${vehicleId}`).trim();
+    const carPlate = String(driverSeed.carPlate || "TES8888").trim().toUpperCase();
+    const carType = String(driverSeed.carType || "Leaf Plus").trim();
     const baseProfile = {
       uid,
       id: uid,
@@ -178,11 +185,14 @@ function buildSeedUserData({ role, ensureUsers }) {
       approved: true,
       canGoOnline: true,
       isTestUser: true,
-      vehicleId: driverSeed.vehicleId || "test_vehicle_8vg2kxxqi3TY",
-      userVehicleId: driverSeed.userVehicleId || "uv_test_vehicle_8vg2kxxqi3TY",
-      carPlate: driverSeed.carPlate || "TES8888",
-      carModel: driverSeed.carType || "Model 3",
-      carType: "standard",
+      vehicleId,
+      activeVehicleId: vehicleId,
+      userVehicleId,
+      carPlate,
+      vehiclePlate: carPlate,
+      vehicleNumber: carPlate,
+      carModel: driverSeed.carModel || "Model 3",
+      carType,
       profile_image: "",
       driverActivation,
       createdAt: nowIso,
@@ -202,7 +212,7 @@ function buildSeedUserData({ role, ensureUsers }) {
   }
 
   const uid = String(passengerSeed.uid || "OjML1wSzdNRaynjqMRlSW1Y0LVy2").trim();
-  const phone = String(passengerSeed.phone || "+5511999999999").trim();
+  const phone = String(passengerSeed.phone || "+5521102938475").trim();
   const baseProfile = {
     uid,
     id: uid,
