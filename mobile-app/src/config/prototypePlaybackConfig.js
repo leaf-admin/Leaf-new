@@ -23,7 +23,7 @@ export function getPrototypePlaybackConfigSnapshot() {
         process.env.EXPO_PUBLIC_PROTOTYPE_ROUTE_PLAYBACK_TICK_MS,
         process.env.LEAF_PROTOTYPE_ROUTE_PLAYBACK_TICK_MS,
       ),
-      2500,
+      1000,
     ),
     pickupSpeedMetersPerSecond: resolveNumber(
       firstDefined(

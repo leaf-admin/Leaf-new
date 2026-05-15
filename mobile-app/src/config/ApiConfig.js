@@ -4,7 +4,7 @@ import { Platform } from "react-native";
 
 const normalizeBaseUrl = (
   url,
-  fallback = "https://api.62.169.31.231.sslip.io",
+  fallback = "https://api.leaf.app.br",
 ) => {
   const raw = String(url || "").trim();
   if (!raw) return fallback;
@@ -42,9 +42,9 @@ const normalizeSocketBaseUrl = (url, fallback = DEFAULT_WS_BASE_URL) => {
   }
 };
 
-const DEFAULT_API_BASE_URL = "https://api.62.169.31.231.sslip.io";
-const DEFAULT_WS_BASE_URL = "https://socket.62.169.31.231.sslip.io";
-const DEFAULT_DASHBOARD_URL = "https://dashboard.62.169.31.231.sslip.io";
+const DEFAULT_API_BASE_URL = "https://api.leaf.app.br";
+const DEFAULT_WS_BASE_URL = "https://socket.leaf.app.br";
+const DEFAULT_DASHBOARD_URL = "https://dashboard.leaf.app.br";
 const DEFAULT_FIREBASE_FUNCTIONS_BASE_URL = normalizeBaseUrl(
   process.env.EXPO_PUBLIC_FIREBASE_FUNCTIONS_URL ||
     process.env.FIREBASE_FUNCTIONS_URL ||

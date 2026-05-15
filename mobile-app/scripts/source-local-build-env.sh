@@ -71,6 +71,44 @@ ensure_xcode_developer_dir() {
 
 ensure_xcode_developer_dir
 
+assert_full_xcode_toolchain() {
+  local context="${1:-build iOS}"
+  local require_simctl="${2:-1}"
+  local selected_developer_dir=""
+  local active_developer_dir=""
+  local xcode_version=""
+
+  selected_developer_dir="$(xcode-select -p 2>/dev/null || true)"
+  active_developer_dir="${DEVELOPER_DIR:-${selected_developer_dir}}"
+
+  if [[ -z "${active_developer_dir}" || ! -d "${active_developer_dir}" || "${active_developer_dir}" != *"/Xcode.app/Contents/Developer" ]]; then
+    echo "❌ Xcode completo não está ativo para ${context}."
+    echo "   xcode-select: ${selected_developer_dir:-<vazio>}"
+    echo "   DEVELOPER_DIR: ${DEVELOPER_DIR:-<vazio>}"
+    echo "   Esperado: /Applications/Xcode.app/Contents/Developer"
+    echo "   Não gere build iOS com CommandLineTools."
+    exit 1
+  fi
+
+  if ! xcode_version="$(xcodebuild -version 2>/dev/null | tr '\n' ' ' | sed 's/[[:space:]]*$//')"; then
+    echo "❌ xcodebuild não está funcional para ${context}."
+    echo "   xcode-select: ${selected_developer_dir:-<vazio>}"
+    echo "   DEVELOPER_DIR: ${DEVELOPER_DIR:-<vazio>}"
+    echo "   Use: export DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer"
+    exit 1
+  fi
+
+  if [[ "${require_simctl}" == "1" ]] && ! xcrun --find simctl >/dev/null 2>&1; then
+    echo "❌ simctl não está disponível para ${context}."
+    echo "   xcode-select: ${selected_developer_dir:-<vazio>}"
+    echo "   DEVELOPER_DIR: ${DEVELOPER_DIR:-<vazio>}"
+    echo "   Isso costuma acontecer quando o Mac aponta para CommandLineTools."
+    exit 1
+  fi
+
+  echo "✅ Xcode toolchain ativo (${context}): ${xcode_version}"
+}
+
 if [[ -z "${EXPO_PUBLIC_GOOGLE_MAPS_API_KEY:-}" && -n "${GOOGLE_MAPS_API_KEY:-}" ]]; then
   export EXPO_PUBLIC_GOOGLE_MAPS_API_KEY="${GOOGLE_MAPS_API_KEY}"
 fi

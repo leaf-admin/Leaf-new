@@ -46,6 +46,9 @@ if [ ! -f "package.json" ]; then
     exit 1
 fi
 
+log "🔎 Rodando preflight de release real..."
+bash scripts/release-preflight.sh production
+
 # Verificar se a versão existe
 if ! git tag | grep -q "v$VERSION"; then
     error "Tag v$VERSION não encontrada!"
@@ -122,4 +125,4 @@ info "  Submit iOS: ✅"
 info "  GitHub Release: ✅"
 echo ""
 info "🎉 Release completa!"
-info "Acesse: https://github.com/[seu-usuario]/[seu-repo]/releases" 
+info "Acesse: https://github.com/[seu-usuario]/[seu-repo]/releases"

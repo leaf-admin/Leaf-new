@@ -10,7 +10,7 @@ const normalizeBaseUrl = (rawUrl, fallback) => {
 
 const deriveSocketBaseUrlFromApi = (
   rawUrl,
-  fallback = "https://socket.62.169.31.231.sslip.io",
+  fallback = "https://socket.leaf.app.br",
 ) => {
   const normalized = normalizeBaseUrl(rawUrl, fallback);
   try {
@@ -29,7 +29,7 @@ const deriveSocketBaseUrlFromApi = (
 
 const normalizeSocketBaseUrl = (
   rawUrl,
-  fallback = "https://socket.62.169.31.231.sslip.io",
+  fallback = "https://socket.leaf.app.br",
 ) => {
   const normalized = normalizeBaseUrl(rawUrl, fallback);
   try {
@@ -45,7 +45,7 @@ const normalizeSocketBaseUrl = (
 
 const DEFAULT_API_URL = normalizeBaseUrl(
   process.env.EXPO_PUBLIC_API_URL,
-  "https://api.62.169.31.231.sslip.io",
+  "https://api.leaf.app.br",
 );
 const DEFAULT_WS_URL = normalizeSocketBaseUrl(
   process.env.EXPO_PUBLIC_WS_URL ||
@@ -53,7 +53,7 @@ const DEFAULT_WS_URL = normalizeSocketBaseUrl(
     process.env.MOBILE_TEST_WS_URL,
   deriveSocketBaseUrlFromApi(
     process.env.EXPO_PUBLIC_API_URL || process.env.MOBILE_TEST_BACKEND_URL,
-    "https://socket.62.169.31.231.sslip.io",
+    "https://socket.leaf.app.br",
   ),
 );
 
@@ -61,9 +61,9 @@ const DEFAULT_WS_URL = normalizeSocketBaseUrl(
 const NETWORK_CONFIG = {
   // Hosts canônicos de produção
   HOSTS: {
-    API: "api.62.169.31.231.sslip.io",
-    WEBSOCKET: "socket.62.169.31.231.sslip.io",
-    DASHBOARD: "dashboard.62.169.31.231.sslip.io",
+    API: "api.leaf.app.br",
+    WEBSOCKET: "socket.leaf.app.br",
+    DASHBOARD: "dashboard.leaf.app.br",
   },
 
   // Porta padrão de produção
@@ -137,6 +137,6 @@ export default NETWORK_CONFIG;
 // Instruções para configurar via env:
 /*
 Defina EXPO_PUBLIC_API_URL e EXPO_PUBLIC_WS_URL:
-EXPO_PUBLIC_API_URL=https://api.62.169.31.231.sslip.io
-EXPO_PUBLIC_WS_URL=https://socket.62.169.31.231.sslip.io
+EXPO_PUBLIC_API_URL=https://api.leaf.app.br
+EXPO_PUBLIC_WS_URL=https://socket.leaf.app.br
 */

@@ -1,4 +1,4 @@
-const DEFAULT_BACKEND_BASE_URL = 'https://api.62.169.31.231.sslip.io';
+const DEFAULT_BACKEND_BASE_URL = 'https://api.leaf.app.br';
 
 export const normalizeBackendBaseUrl = (url) => {
   const raw = String(url || '').trim();

@@ -3,6 +3,7 @@ const fs = require('fs');
 const path = require('path');
 
 const MARKER = '# LEAF_BORINGSSL_FIX';
+const DEV_CLIENT_EXCLUDES_MARKER = '# LEAF_PRODUCTION_DEV_CLIENT_EXCLUDES';
 
 const withBoringSSLFix = (config) =>
   withDangerousMod(config, [
@@ -14,11 +15,23 @@ const withBoringSSLFix = (config) =>
       }
 
       let podfile = fs.readFileSync(podfilePath, 'utf8');
-      if (podfile.includes(MARKER)) {
-        return config;
+      let changed = false;
+
+      if (!podfile.includes(DEV_CLIENT_EXCLUDES_MARKER)) {
+        const useExpoModulesPattern = /^(\s*)use_expo_modules!\s*$/m;
+        const match = podfile.match(useExpoModulesPattern);
+        if (match) {
+          const indent = match[1] || '';
+          const replacement = `${indent}${DEV_CLIENT_EXCLUDES_MARKER}
+${indent}leaf_dev_client_excludes = ENV['LEAF_INCLUDE_DEV_CLIENT'] == '1' ? [] : ['expo-dev-client', 'expo-dev-launcher', 'expo-dev-menu', 'expo-dev-menu-interface']
+${indent}use_expo_modules!({ :exclude => leaf_dev_client_excludes })`;
+          podfile = podfile.replace(useExpoModulesPattern, replacement);
+          changed = true;
+        }
       }
 
-      const patch = `
+      if (!podfile.includes(MARKER)) {
+        const patch = `
     ${MARKER}
     # Fix for Xcode 16: BoringSSL-GRPC and others receive an invalid "-G" compiler flag
     # This flag is often injected by older CocoaPods/tools and causes "unsupported option" errors.
@@ -41,22 +54,35 @@ const withBoringSSLFix = (config) =>
         build_config.build_settings['CLANG_ALLOW_NON_MODULAR_INCLUDES_IN_FRAMEWORK_MODULES'] = 'YES'
 
         # Keep RNFirebase pods out of clang modules to avoid macro/protocol resolution breaks.
+        # Google Maps pods must keep modules enabled because GoogleMapsUtils uses @import.
         if target.name.start_with?('RNFB')
           build_config.build_settings['CLANG_ENABLE_MODULES'] = 'NO'
+        end
+
+        # Xcode 26.5 explicit modules can reject react-native-maps headers with
+        # "declaration must be imported from module" while normal clang modules
+        # are still required by GoogleMapsUtils @import usage.
+        if ['react-native-google-maps', 'react-native-maps'].include?(target.name)
+          build_config.build_settings['CLANG_ENABLE_EXPLICIT_MODULES'] = 'NO'
+          build_config.build_settings['DEFINES_MODULE'] = 'NO'
         end
       end
     end
 `;
 
-      const postInstallMarker = 'post_install do |installer|';
-      if (podfile.includes(postInstallMarker)) {
-        podfile = podfile.replace(postInstallMarker, `${postInstallMarker}\n${patch}`);
-      } else {
-        // Fallback or potentially error out if no post_install found
-        podfile += `\npost_install do |installer|\n${patch}\nend\n`;
+        const postInstallMarker = 'post_install do |installer|';
+        if (podfile.includes(postInstallMarker)) {
+          podfile = podfile.replace(postInstallMarker, `${postInstallMarker}\n${patch}`);
+        } else {
+          // Fallback or potentially error out if no post_install found
+          podfile += `\npost_install do |installer|\n${patch}\nend\n`;
+        }
+        changed = true;
       }
 
-      fs.writeFileSync(podfilePath, podfile);
+      if (changed) {
+        fs.writeFileSync(podfilePath, podfile);
+      }
       return config;
     },
   ]);

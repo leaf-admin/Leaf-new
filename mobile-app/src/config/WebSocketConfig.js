@@ -9,7 +9,7 @@ const normalizeBaseUrl = (rawUrl, fallback) => {
 
 const deriveSocketBaseUrlFromApi = (
   rawUrl,
-  fallback = "https://socket.62.169.31.231.sslip.io",
+  fallback = "https://socket.leaf.app.br",
 ) => {
   const normalized = normalizeBaseUrl(rawUrl, fallback);
   try {
@@ -28,7 +28,7 @@ const deriveSocketBaseUrlFromApi = (
 
 const normalizeSocketBaseUrl = (
   rawUrl,
-  fallback = "https://socket.62.169.31.231.sslip.io",
+  fallback = "https://socket.leaf.app.br",
 ) => {
   const normalized = normalizeBaseUrl(rawUrl, fallback);
   try {
@@ -48,7 +48,7 @@ const DEFAULT_WS_URL = normalizeSocketBaseUrl(
     process.env.MOBILE_TEST_WS_URL,
   deriveSocketBaseUrlFromApi(
     process.env.EXPO_PUBLIC_API_URL || process.env.MOBILE_TEST_BACKEND_URL,
-    "https://socket.62.169.31.231.sslip.io",
+    "https://socket.leaf.app.br",
   ),
 );
 
@@ -199,5 +199,5 @@ export const getWebSocketUrl = () => {
 // Instruções para configurar via env:
 /*
 Defina EXPO_PUBLIC_WS_URL no ambiente:
-EXPO_PUBLIC_WS_URL=https://socket.62.169.31.231.sslip.io
+EXPO_PUBLIC_WS_URL=https://socket.leaf.app.br
 */

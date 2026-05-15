@@ -6,6 +6,7 @@ const TRUTHY_VALUES = new Set(['1', 'true', 'yes', 'on']);
 const normalizeFlag = (value) => TRUTHY_VALUES.has(String(value ?? '').trim().toLowerCase());
 
 const expoExtra = () => Constants?.expoConfig?.extra || {};
+const normalizeExtraFlag = (key) => normalizeFlag(expoExtra()?.[key]);
 
 export const isDevelopmentBuild = () => __DEV__ === true;
 export const isSimulatorBuild = () => Device.isDevice === false;
@@ -13,30 +14,54 @@ export const isSimulatorBuild = () => Device.isDevice === false;
 export const isReviewBuild = () =>
     expoExtra().isReview === true || normalizeFlag(process.env.APP_REVIEW);
 
-export const isE2ETestBuild = () => normalizeFlag(process.env.EXPO_PUBLIC_E2E_TEST);
+export const isE2ETestBuild = () =>
+    normalizeFlag(process.env.EXPO_PUBLIC_E2E_TEST) ||
+    normalizeExtraFlag('e2eTest');
 
 export const allowReviewAccess = () => isReviewBuild();
 
+export const hasExplicitCustomOtpFallbackFlag = () =>
+    normalizeFlag(process.env.EXPO_PUBLIC_ENABLE_CUSTOM_OTP_FALLBACK);
+
+export const hasExplicitQaOtpForceFlag = () =>
+    normalizeFlag(process.env.EXPO_PUBLIC_ENABLE_QA_OTP_FORCE_FLOW);
+
+export const hasExplicitTestUserToolsFlag = () =>
+    normalizeFlag(process.env.EXPO_PUBLIC_ENABLE_TEST_USER_TOOLS) ||
+    normalizeExtraFlag('enableTestUserTools');
+
 export const allowCustomOtpFallback = () =>
-    isDevelopmentBuild() ||
     isReviewBuild() ||
-    isE2ETestBuild() ||
-    expoExtra().enableCustomOtpFallback === true;
+    expoExtra().enableCustomOtpFallback === true ||
+    (
+        hasExplicitCustomOtpFallbackFlag() &&
+        (isDevelopmentBuild() || isE2ETestBuild() || isSimulatorBuild())
+    );
 
-export const allowQaOtpForceFlow = () => isDevelopmentBuild() || isE2ETestBuild();
+export const allowQaOtpForceFlow = () =>
+    hasExplicitQaOtpForceFlag() &&
+    (isDevelopmentBuild() || isE2ETestBuild() || isSimulatorBuild());
 
-export const allowTestUserTools = () => isDevelopmentBuild() || isE2ETestBuild();
+export const allowTestUserTools = () =>
+    hasExplicitTestUserToolsFlag() &&
+    (isDevelopmentBuild() || isE2ETestBuild() || isSimulatorBuild());
 
 export const hasExplicitPaymentBypassFlag = () =>
     normalizeFlag(process.env.EXPO_PUBLIC_FORCE_PAYMENT_BYPASS) ||
-    normalizeFlag(process.env.EXPO_PUBLIC_BYPASS_PAYMENTS);
+    normalizeFlag(process.env.EXPO_PUBLIC_BYPASS_PAYMENTS) ||
+    normalizeExtraFlag('forcePaymentBypass') ||
+    normalizeExtraFlag('bypassPayments');
 
-export const allowPaymentBypass = () => allowTestUserTools();
+export const allowPaymentBypass = () => allowTestUserTools() && hasExplicitPaymentBypassFlag();
 
 export const allowForcedPaymentBypass = () =>
+    hasExplicitPaymentBypassFlag() &&
+    (isE2ETestBuild() || isSimulatorBuild() || isDevelopmentBuild());
+
+export const allowClientDirectGoogleFallback = () =>
+    isDevelopmentBuild() ||
     isE2ETestBuild() ||
-    isSimulatorBuild() ||
-    (isDevelopmentBuild() && hasExplicitPaymentBypassFlag());
+    isSimulatorBuild();
 
 export const canUseProfileBypass = (profile) => {
     const uid = String(profile?.uid || '').trim();
@@ -68,5 +93,9 @@ export const getRuntimeAccessPolicySnapshot = () => ({
     allowTestUserTools: allowTestUserTools(),
     allowPaymentBypass: allowPaymentBypass(),
     allowForcedPaymentBypass: allowForcedPaymentBypass(),
-    hasExplicitPaymentBypassFlag: hasExplicitPaymentBypassFlag()
+    hasExplicitCustomOtpFallbackFlag: hasExplicitCustomOtpFallbackFlag(),
+    hasExplicitQaOtpForceFlag: hasExplicitQaOtpForceFlag(),
+    hasExplicitTestUserToolsFlag: hasExplicitTestUserToolsFlag(),
+    hasExplicitPaymentBypassFlag: hasExplicitPaymentBypassFlag(),
+    allowClientDirectGoogleFallback: allowClientDirectGoogleFallback()
 });

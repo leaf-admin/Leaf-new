@@ -1,14 +1,14 @@
 // ApiConfig.cjs - Configuração centralizada para URLs da API (versão Node.js)
 // Compatível com testes CommonJS
 
-const normalizeBaseUrl = (url, fallback = 'https://api.62.169.31.231.sslip.io') => {
+const normalizeBaseUrl = (url, fallback = 'https://api.leaf.app.br') => {
   const raw = String(url || '').trim();
   if (!raw) return fallback;
   const withoutTrailingSlash = raw.replace(/\/+$/, '');
   return withoutTrailingSlash.replace(/\/api$/i, '');
 };
 
-const deriveSocketBaseUrlFromApi = (url, fallback = 'https://socket.62.169.31.231.sslip.io') => {
+const deriveSocketBaseUrlFromApi = (url, fallback = 'https://socket.leaf.app.br') => {
   const normalized = normalizeBaseUrl(url, fallback);
   try {
     const parsed = new URL(normalized);
@@ -24,7 +24,7 @@ const deriveSocketBaseUrlFromApi = (url, fallback = 'https://socket.62.169.31.23
   }
 };
 
-const normalizeSocketBaseUrl = (url, fallback = 'https://socket.62.169.31.231.sslip.io') => {
+const normalizeSocketBaseUrl = (url, fallback = 'https://socket.leaf.app.br') => {
   const normalized = normalizeBaseUrl(url, fallback);
   try {
     const parsed = new URL(normalized);
@@ -41,7 +41,7 @@ const DEFAULT_BACKEND_URL = normalizeBaseUrl(
   process.env.EXPO_PUBLIC_API_URL ||
   process.env.EXPO_PUBLIC_BACKEND_URL ||
   process.env.MOBILE_TEST_BACKEND_URL ||
-  'https://api.62.169.31.231.sslip.io'
+  'https://api.leaf.app.br'
 );
 const DEFAULT_WS_URL =
   normalizeSocketBaseUrl(
@@ -52,11 +52,11 @@ const DEFAULT_WS_URL =
       process.env.EXPO_PUBLIC_API_URL ||
       process.env.EXPO_PUBLIC_BACKEND_URL ||
       process.env.MOBILE_TEST_BACKEND_URL,
-      'https://socket.62.169.31.231.sslip.io'
+      'https://socket.leaf.app.br'
     )
   );
 const DEFAULT_DASHBOARD_URL =
-  process.env.EXPO_PUBLIC_DASHBOARD_URL || 'https://dashboard.62.169.31.231.sslip.io';
+  process.env.EXPO_PUBLIC_DASHBOARD_URL || 'https://dashboard.leaf.app.br';
 const DEFAULT_FIREBASE_FUNCTIONS_BASE_URL = normalizeBaseUrl(
   process.env.EXPO_PUBLIC_FIREBASE_FUNCTIONS_URL ||
   process.env.FIREBASE_FUNCTIONS_URL ||

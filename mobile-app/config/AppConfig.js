@@ -1,4 +1,4 @@
-const DEFAULT_API_BASE_URL = 'https://api.62.169.31.231.sslip.io';
+const DEFAULT_API_BASE_URL = 'https://api.leaf.app.br';
 
 const normalizeBaseUrl = (url) => {
     const raw = String(url || '').trim();
@@ -19,8 +19,8 @@ module.exports.AppConfig = {
     app_description: 'O novo jeito de ir e vir',
     app_identifier: 'br.com.leaf.ride',
     ios_app_version: '1.0.1',
-    ios_build_number: '14',
-    android_app_version: 105,
+    ios_build_number: '21',
+    android_app_version: 108,
     expo_owner: 'leaf-app',
     expo_slug: 'leaf',
     expo_project_id: '91dfdce0-9705-4fde-8417-747273ab7cc2',

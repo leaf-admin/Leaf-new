@@ -168,6 +168,12 @@ else
   bad "check-runtime-endpoints.sh: FAIL"
 fi
 
+if node ../scripts/prelaunch/assert-store-go-static.cjs >/tmp/leaf-store-static-gate.log 2>&1; then
+  ok "assert-store-go-static.cjs: PASS"
+else
+  bad "assert-store-go-static.cjs: FAIL"
+fi
+
 section "Checklist manual obrigatória"
 echo "- [ ] Login OTP real testado em build release Android" | tee -a "$REPORT_FILE"
 echo "- [ ] Login OTP real testado em build release iOS" | tee -a "$REPORT_FILE"

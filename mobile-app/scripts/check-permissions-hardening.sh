@@ -7,6 +7,7 @@ PROJECT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
 # shellcheck source=/dev/null
 source "${SCRIPT_DIR}/source-local-build-env.sh"
+cd "${PROJECT_DIR}"
 
 FAIL=0
 

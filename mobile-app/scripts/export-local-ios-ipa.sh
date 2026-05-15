@@ -7,6 +7,7 @@ PROJECT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
 # shellcheck source=/dev/null
 source "${SCRIPT_DIR}/source-local-build-env.sh"
+assert_full_xcode_toolchain "export IPA iOS" "0"
 
 resolve_default_archive() {
   local signed_archive
@@ -45,6 +46,116 @@ resolve_team_id() {
   fi
 
   echo ""
+}
+
+assert_exported_ipa() {
+  local ipa_path="$1"
+  local tmp_dir
+  local app_config_path
+  local info_plist_path
+  local expo_plist_path
+  local expected_build_number
+  local actual_build_number
+  local microphone_usage
+  local updates_enabled
+  local updates_channel
+
+  tmp_dir="$(mktemp -d "${TMPDIR:-/tmp}/leaf-ios-ipa.XXXXXX")"
+
+  unzip -q "${ipa_path}" -d "${tmp_dir}"
+  app_config_path="$(find "${tmp_dir}/Payload" -path "*/EXConstants.bundle/app.config" -type f | head -n 1)"
+  info_plist_path="$(find "${tmp_dir}/Payload" -maxdepth 2 -path "*/Leaf.app/Info.plist" -type f | head -n 1)"
+  expo_plist_path="$(find "${tmp_dir}/Payload" -maxdepth 2 -path "*/Leaf.app/Expo.plist" -type f | head -n 1)"
+
+  if [[ -z "${app_config_path}" ]]; then
+    echo "❌ EXConstants app.config ausente no IPA exportado."
+    exit 1
+  fi
+
+  expected_build_number="$(node -e "console.log(require('./config/AppConfig').AppConfig.ios_build_number)")"
+
+  LEAF_EXPECTED_IOS_BUILD_NUMBER="${expected_build_number}" node - "${app_config_path}" <<'NODE'
+const fs = require('fs');
+
+const config = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
+const failures = [];
+const expectedBuildNumber = process.env.LEAF_EXPECTED_IOS_BUILD_NUMBER;
+const expected = {
+  name: 'Leaf',
+  slug: 'leafapp-reactnative',
+  version: '1.0.1',
+  runtimeVersion: '1.0.1',
+};
+
+for (const [key, value] of Object.entries(expected)) {
+  if (config[key] !== value) {
+    failures.push(`${key}: esperado ${value}, recebido ${config[key] || '<vazio>'}`);
+  }
+}
+
+if (config.ios?.bundleIdentifier !== 'br.com.leaf.ride') {
+  failures.push(`ios.bundleIdentifier: esperado br.com.leaf.ride, recebido ${config.ios?.bundleIdentifier || '<vazio>'}`);
+}
+
+if (config.ios?.buildNumber !== expectedBuildNumber) {
+  failures.push(`ios.buildNumber: esperado ${expectedBuildNumber}, recebido ${config.ios?.buildNumber || '<vazio>'}`);
+}
+
+if (!config.extra?.eas?.projectId) {
+  failures.push('extra.eas.projectId ausente');
+}
+
+if (failures.length) {
+  console.error('❌ Config Expo inválida no IPA exportado:');
+  for (const failure of failures) {
+    console.error(`   - ${failure}`);
+  }
+  console.error('   Esse IPA foi gerado pelo contexto errado. Não envie ao TestFlight.');
+  process.exit(1);
+}
+
+console.log('✅ Config Expo do IPA exportado confere com o app Leaf.');
+NODE
+
+  if [[ -z "${info_plist_path}" ]]; then
+    echo "❌ Info.plist ausente no IPA exportado."
+    exit 1
+  fi
+
+  actual_build_number="$(/usr/libexec/PlistBuddy -c "Print :CFBundleVersion" "${info_plist_path}" 2>/dev/null || true)"
+  if [[ "${actual_build_number}" != "${expected_build_number}" ]]; then
+    echo "❌ IPA com CFBundleVersion divergente."
+    echo "   Esperado: ${expected_build_number}"
+    echo "   Encontrado: ${actual_build_number:-<vazio>}"
+    echo "   Não envie ao TestFlight."
+    exit 1
+  fi
+  echo "✅ CFBundleVersion do IPA confere: ${actual_build_number}."
+
+  microphone_usage="$(/usr/libexec/PlistBuddy -c "Print :NSMicrophoneUsageDescription" "${info_plist_path}" 2>/dev/null || true)"
+  if [[ -z "${microphone_usage}" ]]; then
+    echo "❌ IPA sem NSMicrophoneUsageDescription."
+    echo "   A Apple rejeita o upload com ITMS-90683 quando SDKs referenciam microfone."
+    echo "   Não envie ao TestFlight."
+    exit 1
+  fi
+  echo "✅ NSMicrophoneUsageDescription do IPA presente."
+
+  if [[ -n "${expo_plist_path}" ]]; then
+    updates_enabled="$(/usr/libexec/PlistBuddy -c "Print :EXUpdatesEnabled" "${expo_plist_path}" 2>/dev/null || true)"
+    if [[ "${updates_enabled}" == "true" || "${updates_enabled}" == "1" ]]; then
+      updates_channel="$(/usr/libexec/PlistBuddy -c "Print :EXUpdatesRequestHeaders:expo-channel-name" "${expo_plist_path}" 2>/dev/null || true)"
+      if [[ "${updates_channel}" != "production" ]]; then
+        echo "❌ IPA com Expo Updates ativo sem canal production."
+        echo "   Canal encontrado: ${updates_channel:-<vazio>}"
+        echo "   Não envie ao TestFlight."
+        exit 1
+      fi
+      echo "✅ Expo Updates do IPA usa canal production."
+    fi
+  fi
+
+  rm -rf "${tmp_dir}"
 }
 
 main() {
@@ -110,6 +221,7 @@ PLIST
     -allowProvisioningUpdates
 
   if [[ -f "${export_path}/Leaf.ipa" ]]; then
+    assert_exported_ipa "${export_path}/Leaf.ipa"
     echo "✅ IPA exportado com sucesso: ${export_path}/Leaf.ipa"
   else
     echo "⚠️  Export finalizado sem Leaf.ipa no diretório esperado"

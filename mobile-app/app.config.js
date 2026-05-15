@@ -38,6 +38,49 @@ const resolveLaunchProfile = () => {
     return normalized || 'full';
 };
 const launchProfile = resolveLaunchProfile();
+const otaUpdatesEnabled = normalizeFlag(
+    firstDefined(process.env.LEAF_ENABLE_OTA_UPDATES, process.env.EXPO_PUBLIC_LEAF_ENABLE_OTA_UPDATES),
+    true
+);
+const buildProfile = String(firstDefined(process.env.EAS_BUILD_PROFILE, process.env.LEAF_BUILD_PROFILE, '') || '')
+    .trim()
+    .toLowerCase();
+const updatesChannel = String(
+    firstDefined(
+        process.env.EXPO_UPDATE_CHANNEL,
+        process.env.EAS_UPDATE_CHANNEL,
+        process.env.LEAF_UPDATES_CHANNEL,
+        buildProfile.includes('production') ? 'production' : '',
+        buildProfile.includes('preview') ? 'preview' : ''
+    ) || ''
+).trim();
+const includeDevClient = normalizeFlag(
+    firstDefined(process.env.LEAF_INCLUDE_DEV_CLIENT, process.env.EXPO_PUBLIC_LEAF_INCLUDE_DEV_CLIENT),
+    buildProfile.includes('development')
+);
+const productionAutolinkingExcludes = includeDevClient
+    ? []
+    : [
+        'expo-dev-client',
+        'expo-dev-launcher',
+        'expo-dev-menu',
+        'expo-dev-menu-interface'
+    ];
+const expoUpdatesConfig = disableUpdatesForLocalSimulator || !otaUpdatesEnabled
+    ? {
+        enabled: false,
+        checkAutomatically: 'NEVER',
+        fallbackToCacheTimeout: 0
+    }
+    : {
+        fallbackToCacheTimeout: 0,
+        url: "https://u.expo.dev/" + AppConfig.expo_project_id,
+        requestHeaders: updatesChannel
+            ? {
+                'expo-channel-name': updatesChannel
+            }
+            : undefined,
+    };
 const pilotControlled =
     launchProfile === 'pilot_controlled' ||
     normalizeFlag(firstDefined(process.env.EXPO_PUBLIC_PILOT_CONTROLLED, process.env.LEAF_PILOT_CONTROLLED), false);
@@ -86,7 +129,7 @@ const iosTransportSecurity = allowInsecureHttp
         NSAllowsArbitraryLoads: true,
         NSAllowsLocalNetworking: true,
         NSExceptionDomains: {
-            "62.169.31.231": {
+            "api.leaf.app.br": {
                 NSExceptionAllowsInsecureHTTPLoads: true,
                 NSIncludesSubdomains: true
             }
@@ -104,26 +147,23 @@ module.exports = {
     slug: "leafapp-reactnative",
     runtimeVersion: AppConfig.ios_app_version,
     scheme: "leafapp",
+    autolinking: productionAutolinkingExcludes.length
+        ? {
+            exclude: productionAutolinkingExcludes
+        }
+        : undefined,
     platforms: [
         "ios",
         "android"
     ],
     version: AppConfig.ios_app_version,
+    icon: "./assets/images/logo1024x1024.png",
     splash: {
         image: "./assets/images/splash.png",
         resizeMode: "contain",
         backgroundColor: "#003002"
     },
-    updates: disableUpdatesForLocalSimulator
-        ? {
-            enabled: false,
-            checkAutomatically: 'NEVER',
-            fallbackToCacheTimeout: 0
-        }
-        : {
-            "fallbackToCacheTimeout": 0,
-            "url": "https://u.expo.dev/" + AppConfig.expo_project_id,
-        },
+    updates: expoUpdatesConfig,
     extra: {
         eas: {
           projectId: AppConfig.expo_project_id
@@ -134,6 +174,15 @@ module.exports = {
         accountDeletionUrl: AppConfig.account_deletion_url,
         supportEmail: AppConfig.support_email,
         isReview: process.env.APP_REVIEW === 'true',
+        e2eTest: process.env.EXPO_PUBLIC_E2E_TEST === 'true' || process.env.EXPO_PUBLIC_E2E_TEST === '1',
+        forcePaymentBypass:
+            process.env.EXPO_PUBLIC_FORCE_PAYMENT_BYPASS === 'true' ||
+            process.env.EXPO_PUBLIC_FORCE_PAYMENT_BYPASS === '1' ||
+            process.env.EXPO_PUBLIC_BYPASS_PAYMENTS === 'true' ||
+            process.env.EXPO_PUBLIC_BYPASS_PAYMENTS === '1',
+        enableTestUserTools:
+            process.env.EXPO_PUBLIC_ENABLE_TEST_USER_TOOLS === 'true' ||
+            process.env.EXPO_PUBLIC_ENABLE_TEST_USER_TOOLS === '1',
         launchProfile,
         pilotControlled,
         pilotFeatureFlags,
@@ -166,10 +215,10 @@ module.exports = {
             "android.permission.WRITE_EXTERNAL_STORAGE",
             "android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK"
         ],
-        icon: "./assets/icon.png",
+        icon: "./assets/images/android-icon.png",
         adaptiveIcon: {
-            foregroundImage: "./assets/adaptive-icon.png",
-            backgroundColor: "#003002"
+            foregroundImage: "./assets/images/android-adaptive-foreground.png",
+            backgroundColor: "#002C00"
         },
         jsEngine: "hermes",
         intentFilters: [{
@@ -187,11 +236,12 @@ module.exports = {
     },
     ios: {
         bundleIdentifier: "br.com.leaf.ride",
+        jsEngine: "hermes",
         config: {
             googleMapsApiKey: GoogleMapApiConfig.ios
         },
         googleServicesFile: process.env.GOOGLE_SERVICES_INFO_PLIST || (fs.existsSync("./GoogleService-Info.plist") ? "./GoogleService-Info.plist" : undefined),
-        icon: "./assets/icon.png",
+        icon: "./assets/images/logo1024x1024.png",
         buildNumber: AppConfig.ios_build_number,
         deploymentTarget: "17.0",
         infoPlist: {
@@ -203,6 +253,17 @@ module.exports = {
     },
     plugins: [
         "expo-asset",
+        [
+            "expo-splash-screen",
+            {
+                android: {
+                    image: "./assets/images/splash_android_icon.png",
+                    resizeMode: "contain",
+                    backgroundColor: "#003002",
+                    imageWidth: 288
+                }
+            }
+        ],
         "expo-font",
         [
             "expo-audio",
