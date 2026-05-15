@@ -1,775 +1,1035 @@
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Leaf • Mobilidade com taxa justa</title>
-    <meta name="description" content="Leaf Mobilidade – um único app para motoristas e passageiros. Taxa justa, visual minimalista e experiência premium.">
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
-    <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
-        
-        :root {
-            --background: 0 0% 100%;
-            --foreground: 222.2 84% 4.9%;
-            --card: 0 0% 100%;
-            --card-foreground: 222.2 84% 4.9%;
-            --popover: 0 0% 100%;
-            --popover-foreground: 222.2 84% 4.9%;
-            --primary: 120 100% 9%;
-            --primary-foreground: 0 0% 100%;
-            --secondary: 210 40% 96.1%;
-            --secondary-foreground: 222.2 47.4% 11.2%;
-            --muted: 210 40% 96.1%;
-            --muted-foreground: 215.4 16.3% 35%;
-            --accent: 210 40% 96.1%;
-            --accent-foreground: 222.2 47.4% 11.2%;
-            --destructive: 0 84.2% 60.2%;
-            --destructive-foreground: 210 40% 98%;
-            --border: 214.3 31.8% 91.4%;
-            --input: 214.3 31.8% 91.4%;
-            --ring: 120 100% 9%;
-            --radius: 0.5rem;
-            --leaf-green: 120 100% 9%;
-        }
-        
-        @keyframes fadeInUp {
-            from {
-                opacity: 0;
-                transform: translateY(20px);
-            }
-            to {
-                opacity: 1;
-                transform: translateY(0);
-            }
-        }
-        
-        @keyframes glow-pulse {
-            0%, 100% {
-                box-shadow: 0 0 20px rgba(0, 48, 2, 0.15);
-            }
-            50% {
-                box-shadow: 0 0 30px rgba(0, 48, 2, 0.25);
-            }
-        }
-        
-        @keyframes shimmer {
-            0% {
-                background-position: -1000px 0;
-            }
-            100% {
-                background-position: 1000px 0;
-            }
-        }
-        
-        body {
-            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen', 'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue', sans-serif;
-            background: hsl(var(--background));
-            color: hsl(var(--foreground));
-            line-height: 1.6;
-            -webkit-font-smoothing: antialiased;
-            -moz-osx-font-smoothing: grayscale;
-            font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11';
-        }
-        
-        .container {
-            width: 100%;
-            margin-left: auto;
-            margin-right: auto;
-            padding-left: 1.5rem;
-            padding-right: 1.5rem;
-        }
-        
-        @media (min-width: 640px) {
-            .container { max-width: 640px; }
-        }
-        
-        @media (min-width: 768px) {
-            .container { max-width: 768px; padding-left: 2rem; padding-right: 2rem; }
-        }
-        
-        @media (min-width: 1024px) {
-            .container { max-width: 1024px; }
-        }
-        
-        @media (min-width: 1280px) {
-            .container { max-width: 1280px; }
-        }
-        
-        @media (min-width: 1536px) {
-            .container { max-width: 1536px; }
-        }
-        
-        header {
-            border-bottom: 1px solid hsl(var(--border));
-            background: linear-gradient(to bottom, hsl(var(--leaf-green)), hsl(var(--leaf-green) / 0.98));
-            position: sticky;
-            top: 0;
-            z-index: 50;
-            backdrop-filter: blur(12px);
-            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
-        }
-        
-        .header-content {
-            display: flex;
-            height: 4rem;
-            align-items: center;
-            justify-content: space-between;
-        }
-        
-        .logo {
-            display: flex;
-            align-items: center;
-            gap: 0.75rem;
-            font-weight: 600;
-            font-size: 1.125rem;
-            color: white;
-        }
-        
-        .logo img {
-            height: 2rem;
-            width: auto;
-        }
-        
-        nav {
-            display: flex;
-            align-items: center;
-            gap: 1.5rem;
-        }
-        
-        .nav-link {
-            color: rgba(255, 255, 255, 0.9);
-            text-decoration: none;
-            font-weight: 500;
-            font-size: 0.875rem;
-            transition: color 0.2s ease;
-            position: relative;
-        }
-        
-        .nav-link:hover {
-            color: white;
-        }
-        
-        .nav-link::after {
-            content: '';
-            position: absolute;
-            bottom: -0.5rem;
-            left: 0;
-            width: 0;
-            height: 2px;
-            background-color: white;
-            transition: width 0.2s ease;
-        }
-        
-        .nav-link:hover::after {
-            width: 100%;
-        }
-        
-        .btn {
-            display: inline-flex;
-            align-items: center;
-            justify-content: center;
-            border-radius: calc(var(--radius) - 2px);
-            font-size: 0.875rem;
-            font-weight: 500;
-            transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
-            cursor: pointer;
-            border: none;
-            padding: 0.5rem 1rem;
-            text-decoration: none;
-            white-space: nowrap;
-            font-family: inherit;
-        }
-        
-        .btn:focus-visible {
-            outline: 2px solid hsl(var(--ring));
-            outline-offset: 2px;
-        }
-        
-        .btn-primary {
-            background: linear-gradient(135deg, hsl(var(--primary)), hsl(var(--primary) / 0.9));
-            color: hsl(var(--primary-foreground));
-            box-shadow: 0 2px 8px rgba(0, 48, 2, 0.2), 0 0 0 1px rgba(0, 48, 2, 0.1);
-            animation: glow-pulse 3s ease-in-out infinite;
-        }
-        
-        .btn-primary:hover {
-            background: linear-gradient(135deg, hsl(var(--primary) / 0.95), hsl(var(--primary) / 0.85));
-            box-shadow: 0 4px 12px rgba(0, 48, 2, 0.3), 0 0 0 1px rgba(0, 48, 2, 0.2);
-            transform: translateY(-1px);
-        }
-        
-        .btn-secondary {
-            background-color: hsl(var(--secondary));
-            color: hsl(var(--secondary-foreground));
-        }
-        
-        .btn-secondary:hover {
-            background-color: hsl(var(--secondary) / 0.8);
-        }
-        
-        .btn-ghost {
-            background-color: transparent;
-            color: white;
-        }
-        
-        .btn-ghost:hover {
-            background-color: rgba(255, 255, 255, 0.1);
-        }
-        
-        .hero {
-            padding: 6rem 0;
-            border-bottom: 1px solid hsl(var(--border));
-            background: hsl(var(--background));
-            position: relative;
-            overflow: hidden;
-        }
-        
-        .hero::before {
-            content: '';
-            position: absolute;
-            top: 0;
-            left: 0;
-            right: 0;
-            bottom: 0;
-            background: radial-gradient(circle at 20% 50%, rgba(0, 48, 2, 0.05) 0%, transparent 50%),
-                        radial-gradient(circle at 80% 80%, rgba(0, 48, 2, 0.03) 0%, transparent 50%);
-            pointer-events: none;
-        }
-        
-        .hero-content {
-            position: relative;
-            z-index: 1;
-        }
-        
-        .hero-text > * {
-            animation: fadeInUp 0.6s ease-out backwards;
-        }
-        
-        .hero-text > *:nth-child(1) { animation-delay: 0.1s; }
-        .hero-text > *:nth-child(2) { animation-delay: 0.2s; }
-        .hero-text > *:nth-child(3) { animation-delay: 0.3s; }
-        .hero-text > *:nth-child(4) { animation-delay: 0.4s; }
-        
-        .hero-visual {
-            animation: fadeInUp 0.8s ease-out 0.3s backwards;
-        }
-        
-        .hero-content {
-            display: grid;
-            gap: 3rem;
-        }
-        
-        @media (min-width: 1024px) {
-            .hero-content {
-                grid-template-columns: 1fr 1fr;
-                align-items: center;
-                gap: 4rem;
-            }
-        }
-        
-        .hero-text {
-            display: flex;
-            flex-direction: column;
-            gap: 1.5rem;
-        }
-        
-        .badge {
-            display: inline-flex;
-            align-items: center;
-            border-radius: 9999px;
-            border: 1px solid hsl(var(--border));
-            background: linear-gradient(135deg, hsl(var(--secondary)), hsl(var(--secondary) / 0.9));
-            padding: 0.25rem 0.75rem;
-            font-size: 0.75rem;
-            font-weight: 600;
-            width: fit-content;
-            color: hsl(215.4 16.3% 30%);
-            text-transform: uppercase;
-            letter-spacing: 0.05em;
-            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
-        }
-        
-        .hero-title {
-            font-size: 2.5rem;
-            font-weight: 800;
-            line-height: 1.1;
-            letter-spacing: -0.025em;
-            color: hsl(var(--foreground));
-        }
-        
-        @media (min-width: 768px) {
-            .hero-title {
-                font-size: 3.75rem;
-            }
-        }
-        
-        @media (min-width: 1024px) {
-            .hero-title {
-                font-size: 4.5rem;
-            }
-        }
-        
-        .hero-description {
-            font-size: 1.125rem;
-            color: hsl(215.4 16.3% 30%);
-            max-width: 42rem;
-            line-height: 1.75;
-        }
-        
-        .hero-actions {
-            display: flex;
-            gap: 1rem;
-            flex-wrap: wrap;
-        }
-        
-        .hero-visual {
-            display: flex;
-            flex-direction: column;
-            gap: 1rem;
-        }
-        
-        .card {
-            border-radius: calc(var(--radius) + 4px);
-            border: 1px solid hsl(var(--border));
-            background: linear-gradient(135deg, hsl(var(--card)) 0%, hsl(var(--card) / 0.98) 100%);
-            color: hsl(var(--card-foreground));
-            padding: 1.5rem;
-            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08), 0 1px 2px rgba(0, 0, 0, 0.04);
-            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-            position: relative;
-            overflow: hidden;
-        }
-        
-        .card::before {
-            content: '';
-            position: absolute;
-            top: 0;
-            left: -100%;
-            width: 100%;
-            height: 100%;
-            background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.3), transparent);
-            transition: left 0.5s;
-        }
-        
-        .card:hover::before {
-            left: 100%;
-        }
-        
-        .card:hover {
-            box-shadow: 0 8px 16px rgba(0, 0, 0, 0.12), 0 4px 8px rgba(0, 0, 0, 0.08), 0 0 0 1px rgba(0, 48, 2, 0.1);
-            transform: translateY(-2px);
-        }
-        
-        .hero-visual .card {
-            box-shadow: 0 4px 16px rgba(0, 48, 2, 0.15), 0 2px 8px rgba(0, 0, 0, 0.1);
-            animation: glow-pulse 4s ease-in-out infinite;
-        }
-        
-        .card-header {
-            display: flex;
-            flex-direction: column;
-            gap: 0.5rem;
-            margin-bottom: 1.5rem;
-        }
-        
-        .card-title {
-            font-size: 1.25rem;
-            font-weight: 600;
-            line-height: 1.2;
-            color: hsl(var(--foreground));
-        }
-        
-        .card-description {
-            font-size: 0.875rem;
-            color: hsl(215.4 16.3% 30%);
-        }
-        
-        .metrics {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-            gap: 1rem;
-            margin-bottom: 1.5rem;
-        }
-        
-        .metric {
-            display: flex;
-            flex-direction: column;
-            gap: 0.25rem;
-        }
-        
-        .metric-value {
-            font-size: 1.5rem;
-            font-weight: 700;
-            color: hsl(var(--foreground));
-            line-height: 1.2;
-        }
-        
-        .metric-label {
-            font-size: 0.875rem;
-            color: hsl(215.4 16.3% 30%);
-            line-height: 1.4;
-        }
-        
-        .list {
-            display: flex;
-            flex-direction: column;
-            gap: 0.75rem;
-        }
-        
-        .list-item {
-            display: flex;
-            align-items: flex-start;
-            gap: 0.75rem;
-            font-size: 0.875rem;
-            color: hsl(215.4 16.3% 30%);
-            line-height: 1.5;
-        }
-        
-        .list-item::before {
-            content: '';
-            width: 0.375rem;
-            height: 0.375rem;
-            border-radius: 50%;
-            background-color: hsl(var(--leaf-green));
-            margin-top: 0.5rem;
-            flex-shrink: 0;
-        }
-        
-        .section {
-            padding: 6rem 0;
-            border-bottom: 1px solid hsl(var(--border));
-            position: relative;
-        }
-        
-        .section > * {
-            animation: fadeInUp 0.6s ease-out backwards;
-        }
-        
-        .section-header {
-            animation-delay: 0.1s;
-        }
-        
-        .grid > * {
-            animation: fadeInUp 0.6s ease-out backwards;
-        }
-        
-        .grid > *:nth-child(1) { animation-delay: 0.2s; }
-        .grid > *:nth-child(2) { animation-delay: 0.3s; }
-        .grid > *:nth-child(3) { animation-delay: 0.4s; }
-        
-        .section-header {
-            display: flex;
-            flex-direction: column;
-            gap: 0.75rem;
-            margin-bottom: 3rem;
-            text-align: center;
-        }
-        
-        @media (min-width: 768px) {
-            .section-header {
-                text-align: left;
-            }
-        }
-        
-        .section-title {
-            font-size: 2.25rem;
-            font-weight: 700;
-            line-height: 1.2;
-            letter-spacing: -0.025em;
-            color: hsl(var(--foreground));
-        }
-        
-        @media (min-width: 768px) {
-            .section-title {
-                font-size: 3rem;
-            }
-        }
-        
-        .section-description {
-            font-size: 1.125rem;
-            color: hsl(215.4 16.3% 30%);
-            max-width: 42rem;
-            line-height: 1.75;
-        }
-        
-        .grid {
-            display: grid;
-            gap: 1.5rem;
-            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-        }
-        
-        @media (min-width: 768px) {
-            .grid {
-                grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
-            }
-        }
-        
-        .feature-card {
-            display: flex;
-            flex-direction: column;
-            gap: 0.75rem;
-        }
-        
-        .feature-icon {
-            display: none;
-        }
-        
-        .feature-title {
-            font-size: 1.125rem;
-            font-weight: 600;
-            color: hsl(var(--foreground));
-            line-height: 1.3;
-        }
-        
-        .feature-description {
-            font-size: 0.875rem;
-            color: hsl(215.4 16.3% 30%);
-            line-height: 1.6;
-        }
-        
-        .cta-section {
-            background: linear-gradient(135deg, hsl(var(--leaf-green) / 0.1) 0%, hsl(var(--leaf-green) / 0.05) 100%);
-            border-radius: calc(var(--radius) + 4px);
-            padding: 3rem;
-            text-align: center;
-            border: 1px solid hsl(var(--border));
-            box-shadow: 0 4px 16px rgba(0, 48, 2, 0.1), 0 2px 8px rgba(0, 0, 0, 0.05);
-            position: relative;
-            overflow: hidden;
-        }
-        
-        .cta-section::before {
-            content: '';
-            position: absolute;
-            top: -50%;
-            left: -50%;
-            width: 200%;
-            height: 200%;
-            background: radial-gradient(circle, rgba(0, 48, 2, 0.1) 0%, transparent 70%);
-            animation: shimmer 8s linear infinite;
-        }
-        
-        .cta-section > * {
-            position: relative;
-            z-index: 1;
-        }
-        
-        .cta-title {
-            font-size: 2rem;
-            font-weight: 700;
-            margin-bottom: 1rem;
-            color: hsl(var(--foreground));
-            line-height: 1.2;
-        }
-        
-        @media (min-width: 768px) {
-            .cta-title {
-                font-size: 2.5rem;
-            }
-        }
-        
-        .cta-description {
-            font-size: 1.125rem;
-            color: hsl(215.4 16.3% 30%);
-            margin-bottom: 2rem;
-            line-height: 1.75;
-        }
-        
-        footer {
-            padding: 3rem 0;
-            border-top: 1px solid hsl(var(--border));
-            text-align: center;
-            color: hsl(var(--muted-foreground));
-            font-size: 0.875rem;
-        }
-        
-        @media (max-width: 768px) {
-            .hero {
-                padding: 4rem 0;
-            }
-            
-            .hero-title {
-                font-size: 2.25rem;
-            }
-            
-            .section {
-                padding: 4rem 0;
-            }
-            
-            .section-title {
-                font-size: 1.875rem;
-            }
-            
-            nav {
-                gap: 0.75rem;
-            }
-            
-            .nav-link {
-                font-size: 0.8125rem;
-            }
-        }
-        
-        @media (max-width: 640px) {
-            nav {
-                display: none;
-            }
-        }
-    </style>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Leaf — O app que respeita quem dirige. E quem paga.</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,700;0,900;1,400;1,700;1,900&family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;1,9..40,300&display=swap" rel="stylesheet">
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+
+:root{
+  --ink:    #1A330E;
+  --ink-80: rgba(26,51,14,0.8);
+  --ink-40: rgba(26,51,14,0.4);
+  --ink-15: rgba(26,51,14,0.15);
+  --ink-06: rgba(26,51,14,0.06);
+  --paper:  #F7F4EE;
+  --paper2: #EFEBE2;
+  --white:  #FFFFFF;
+  --accent: #D4E84A;
+  --serif:  'Playfair Display', Georgia, serif;
+  --sans:   'DM Sans', sans-serif;
+}
+
+html{scroll-behavior:smooth}
+body{font-family:var(--sans);background:var(--paper);color:var(--ink);overflow-x:hidden;cursor:none}
+
+/* ── CURSOR ── */
+.cursor{position:fixed;width:10px;height:10px;background:var(--ink);border-radius:50%;pointer-events:none;z-index:9999;transform:translate(-50%,-50%);transition:width .2s,height .2s,background .2s;mix-blend-mode:multiply}
+.cursor.big{width:48px;height:48px;background:var(--accent);mix-blend-mode:multiply}
+
+/* ── NAV ── */
+nav{position:fixed;top:0;left:0;right:0;z-index:100;display:grid;grid-template-columns:1fr auto 1fr;align-items:center;padding:20px 40px;border-bottom:1px solid var(--ink-15);background:rgba(247,244,238,0.94);backdrop-filter:blur(16px)}
+.nav-left{display:flex;align-items:center;gap:32px}
+.nav-left a{text-decoration:none;font-size:11px;font-weight:500;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-40);transition:color .2s}
+.nav-left a:hover{color:var(--ink)}
+.nav-logo{text-decoration:none;text-align:center;display:flex;align-items:center;justify-content:center;justify-self:center;width:max-content}
+.nav-logo img{height:24px;width:auto;display:block}
+.nav-right{display:flex;align-items:center;justify-content:flex-end;gap:20px}
+.nav-pill{background:var(--ink);color:var(--paper);font-size:11px;font-weight:500;letter-spacing:.08em;text-transform:uppercase;padding:9px 20px;border-radius:100px;text-decoration:none;transition:background .2s}
+.nav-pill:hover{background:#2a5018}
+
+/* ── HERO ── */
+.hero{min-height:100vh;padding:120px 40px 0;display:grid;grid-template-rows:auto 1fr;position:relative;overflow:hidden}
+.hero-eyebrow{display:flex;align-items:center;justify-content:space-between;padding-bottom:24px;border-bottom:1px solid var(--ink-15);margin-bottom:40px}
+.eyebrow-tag{display:flex;align-items:center;gap:10px;font-size:11px;font-weight:500;letter-spacing:.12em;text-transform:uppercase;color:var(--ink-40)}
+.live-dot{width:7px;height:7px;background:var(--ink);border-radius:50%;animation:blink 2s ease-in-out infinite}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:.2}}
+.eyebrow-right{font-size:11px;font-weight:300;letter-spacing:.06em;color:var(--ink-40);font-style:italic}
+.hero-headline{display:grid;grid-template-columns:1fr 1fr;gap:0;align-items:end}
+.h-left{position:relative}
+.overline{font-size:11px;font-weight:500;letter-spacing:.16em;text-transform:uppercase;color:var(--ink-40);margin-bottom:20px}
+
+h1{font-family:var(--serif);font-size:clamp(68px,8.5vw,124px);font-weight:900;line-height:.92;letter-spacing:-.03em;color:var(--ink)}
+h1 .italic{font-style:italic;font-weight:400}
+
+.h1-sub{margin-top:32px;font-size:15px;font-weight:300;line-height:1.75;color:var(--ink-80);max-width:480px;border-left:2px solid var(--ink);padding-left:20px}
+.hero-cta-row{margin-top:48px;display:flex;align-items:center;gap:24px}
+.btn-solid{background:var(--ink);color:var(--paper);font-family:var(--sans);font-size:13px;font-weight:500;letter-spacing:.04em;padding:14px 32px;border-radius:2px;text-decoration:none;transition:background .2s;display:inline-flex;align-items:center;gap:12px}
+.btn-solid:hover{background:#2a5018}
+.btn-solid .arr{transition:transform .2s}
+.btn-solid:hover .arr{transform:translateX(5px)}
+.btn-line{font-size:12px;font-weight:500;letter-spacing:.08em;text-transform:uppercase;color:var(--ink);text-decoration:none;border-bottom:1px solid var(--ink-40);padding-bottom:2px;transition:border-color .2s}
+.btn-line:hover{border-color:var(--ink)}
+
+/* hero right card */
+.h-right{display:flex;flex-direction:column;align-items:flex-end;justify-content:flex-end;position:relative}
+.hero-issue{font-size:11px;font-weight:500;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-40);margin-bottom:16px;align-self:flex-end}
+.hero-card{background:var(--ink);width:300px;border-radius:4px 4px 0 0;padding:32px 28px;position:relative}
+.hc-label{font-size:10px;font-weight:500;letter-spacing:.14em;text-transform:uppercase;color:rgba(255,255,255,.35);margin-bottom:20px}
+
+/* comparison inside card */
+.hc-compare{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:20px}
+.hc-col{background:rgba(255,255,255,.05);border-radius:4px;padding:16px 14px}
+.hc-col.highlighted{background:rgba(212,232,74,.12);border:1px solid rgba(212,232,74,.25)}
+.hc-col-label{font-size:9px;font-weight:500;letter-spacing:.1em;text-transform:uppercase;color:rgba(255,255,255,.3);margin-bottom:8px}
+.hc-col.highlighted .hc-col-label{color:rgba(212,232,74,.6)}
+.hc-col-val{font-family:var(--serif);font-size:28px;font-weight:900;letter-spacing:-.02em;color:rgba(255,255,255,.5);line-height:1}
+.hc-col.highlighted .hc-col-val{color:var(--accent)}
+.hc-col-note{font-size:10px;font-weight:300;color:rgba(255,255,255,.3);margin-top:4px}
+.hc-col.highlighted .hc-col-note{color:rgba(212,232,74,.5)}
+
+.hc-divider{height:1px;background:rgba(255,255,255,.08);margin:16px 0}
+
+.hc-pix-row{display:flex;align-items:center;gap:8px;margin-bottom:16px}
+.hc-pix-badge{background:rgba(212,232,74,.15);border:1px solid rgba(212,232,74,.25);border-radius:100px;padding:5px 12px;font-size:10px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--accent);display:flex;align-items:center;gap:6px}
+.hc-pix-note{font-size:11px;font-weight:300;color:rgba(255,255,255,.3)}
+
+.hc-driver{display:flex;align-items:center;gap:12px;padding:14px 0 0;border-top:1px solid rgba(255,255,255,.08)}
+.hc-av{width:32px;height:32px;border-radius:50%;background:var(--accent);display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;color:var(--ink);flex-shrink:0}
+.hc-name{font-size:12px;font-weight:500;color:rgba(255,255,255,.8)}
+.hc-eta{font-size:11px;font-weight:300;color:rgba(255,255,255,.35);margin-top:2px}
+.hc-badge{position:absolute;top:20px;right:-16px;background:var(--accent);color:var(--ink);font-size:10px;font-weight:700;letter-spacing:.06em;padding:7px 13px;border-radius:2px;white-space:nowrap}
+
+/* hero stats */
+.hero-stats{grid-column:1/-1;display:grid;grid-template-columns:repeat(4,1fr);border-top:1px solid var(--ink-15);margin-top:60px}
+.stat-item{padding:28px 0;border-right:1px solid var(--ink-15);text-align:center}
+.stat-item:last-child{border-right:none}
+.s-num{font-family:var(--serif);font-size:36px;font-weight:900;letter-spacing:-.02em;color:var(--ink);line-height:1}
+.s-label{font-size:11px;font-weight:300;color:var(--ink-40);margin-top:6px;letter-spacing:.04em}
+
+/* ── MARQUEE ── */
+
+/* ── MANIFESTO ── */
+.manifesto{background:var(--ink);padding:80px 40px;display:grid;grid-template-columns:1fr 2fr;gap:80px;align-items:center}
+.manifesto-label{font-size:11px;font-weight:500;letter-spacing:.14em;text-transform:uppercase;color:rgba(255,255,255,.3)}
+.manifesto-quote{font-family:var(--serif);font-size:clamp(26px,3.2vw,44px);font-weight:400;font-style:italic;line-height:1.3;color:var(--white);letter-spacing:-.01em}
+.manifesto-quote strong{font-style:normal;font-weight:900;color:var(--accent)}
+
+/* ── SECTIONS ── */
+section{padding:100px 40px}
+.s-header{display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:64px;padding-bottom:32px;border-bottom:1px solid var(--ink-15)}
+.s-num-big{font-family:var(--serif);font-size:13px;font-weight:400;color:var(--ink-40);letter-spacing:.04em}
+.s-title{font-family:var(--serif);font-size:clamp(40px,5vw,68px);font-weight:900;line-height:.95;letter-spacing:-.03em;color:var(--ink)}
+.s-title em{font-style:italic;font-weight:400}
+.s-caption{max-width:280px;font-size:13px;font-weight:300;line-height:1.7;color:var(--ink-40);text-align:right}
+
+/* ── MODELO / COMO FUNCIONA O DINHEIRO ── */
+.model-section{background:var(--white)}
+
+.model-split{display:grid;grid-template-columns:1fr 1fr;gap:1px;background:var(--ink-15);border:1px solid var(--ink-15)}
+
+.model-col{background:var(--white);padding:52px 48px}
+.model-col.dark{background:var(--ink)}
+
+.model-col-label{font-size:10px;font-weight:500;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-40);margin-bottom:24px}
+.model-col.dark .model-col-label{color:rgba(255,255,255,.3)}
+
+.model-col h3{font-family:var(--serif);font-size:clamp(28px,3vw,40px);font-weight:900;letter-spacing:-.03em;line-height:1.05;color:var(--ink);margin-bottom:16px}
+.model-col.dark h3{color:var(--white)}
+
+.model-col p{font-size:14px;font-weight:300;line-height:1.75;color:var(--ink-80);margin-bottom:28px;max-width:380px}
+.model-col.dark p{color:rgba(255,255,255,.55)}
+
+/* taxa table */
+.taxa-table{width:100%;border-collapse:collapse;margin-top:8px}
+.taxa-table thead tr{border-bottom:1px solid var(--ink-15)}
+.taxa-table th{font-size:10px;font-weight:500;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-40);padding:0 0 12px;text-align:left}
+.taxa-table td{font-size:13px;font-weight:300;color:var(--ink-80);padding:12px 0;border-bottom:1px solid var(--ink-06)}
+.taxa-table td:first-child{font-weight:500;color:var(--ink)}
+.taxa-table td strong{font-weight:700;color:var(--ink)}
+.taxa-note{font-size:11px;font-weight:300;color:var(--ink-40);margin-top:16px;font-style:italic;line-height:1.6}
+
+/* motorista recebe */
+.receive-bar{margin:24px 0 8px}
+.rb-label{font-size:11px;font-weight:500;letter-spacing:.06em;text-transform:uppercase;color:rgba(255,255,255,.35);margin-bottom:12px}
+.rb-track{height:10px;background:rgba(255,255,255,.08);border-radius:100px;overflow:hidden;margin-bottom:6px}
+.rb-fill{height:100%;border-radius:100px;background:var(--accent)}
+.rb-nums{display:flex;justify-content:space-between;font-size:11px;font-weight:300;color:rgba(255,255,255,.3)}
+.rb-nums span{color:var(--accent);font-weight:600}
+
+.competitors-compare{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-top:8px}
+.cc-item{background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.08);border-radius:4px;padding:16px;text-align:center}
+.cc-item.leaf{background:rgba(212,232,74,.1);border-color:rgba(212,232,74,.25)}
+.cc-app{font-size:10px;font-weight:500;letter-spacing:.1em;text-transform:uppercase;color:rgba(255,255,255,.3);margin-bottom:8px}
+.cc-item.leaf .cc-app{color:rgba(212,232,74,.6)}
+.cc-pct{font-family:var(--serif);font-size:32px;font-weight:900;letter-spacing:-.02em;color:rgba(255,255,255,.35)}
+.cc-item.leaf .cc-pct{color:var(--accent)}
+.cc-sub{font-size:10px;font-weight:300;color:rgba(255,255,255,.25);margin-top:3px}
+.cc-item.leaf .cc-sub{color:rgba(212,232,74,.5)}
+
+/* ── FEATURES ── */
+.feat-grid{display:grid;grid-template-columns:1fr 1fr 1fr;grid-template-rows:auto auto;gap:1px;background:var(--ink-15);border:1px solid var(--ink-15)}
+.feat{background:var(--paper);padding:44px 36px;position:relative;overflow:hidden;transition:background .25s;cursor:default}
+.feat:hover{background:var(--white)}
+.feat.big{grid-column:1/3;display:grid;grid-template-columns:1fr 1fr;gap:48px;align-items:end;background:var(--ink);color:var(--white);padding:60px 52px}
+.feat.big:hover{background:#22401a}
+.feat.accent{background:var(--accent)}
+.feat.accent:hover{background:#c6da38}
+.feat-n{font-family:var(--serif);font-size:80px;font-weight:900;line-height:1;letter-spacing:-.04em;color:var(--ink-06);margin-bottom:20px;transition:color .25s}
+.feat:hover .feat-n{color:var(--ink-15)}
+.feat.big .feat-n{color:rgba(255,255,255,.06)}
+.feat.big:hover .feat-n{color:rgba(255,255,255,.1)}
+.feat.accent .feat-n{color:rgba(26,51,14,.07)}
+.feat-title{font-family:var(--serif);font-size:22px;font-weight:700;line-height:1.1;letter-spacing:-.02em;margin-bottom:12px;color:var(--ink)}
+.feat.big .feat-title{color:var(--white);font-size:28px}
+.feat.accent .feat-title{color:var(--ink)}
+.feat-body{font-size:13px;font-weight:300;line-height:1.75;color:var(--ink-80)}
+.feat.big .feat-body{color:rgba(255,255,255,.6);font-size:14px}
+.feat.accent .feat-body{color:var(--ink-80)}
+.feat-tag{position:absolute;bottom:28px;right:28px;font-size:10px;font-weight:500;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-40)}
+.feat.big .feat-tag{color:rgba(255,255,255,.25)}
+.feat.accent .feat-tag{color:rgba(26,51,14,.4)}
+
+/* ── PIX SECTION ── */
+.pix-section{background:var(--paper2);padding:100px 40px}
+
+.pix-grid{display:grid;grid-template-columns:1fr 1fr;gap:1px;background:var(--ink-15);border:1px solid var(--ink-15)}
+
+.pix-col{padding:52px 48px;background:var(--paper2)}
+.pix-col.dark{background:var(--ink)}
+
+.pix-col h3{font-family:var(--serif);font-size:clamp(30px,3vw,42px);font-weight:900;letter-spacing:-.03em;line-height:1.05;color:var(--ink);margin-bottom:16px}
+.pix-col.dark h3{color:var(--white)}
+.pix-col p{font-size:14px;font-weight:300;line-height:1.75;color:var(--ink-80);max-width:380px}
+.pix-col.dark p{color:rgba(255,255,255,.5)}
+
+.pix-steps{margin-top:32px;display:flex;flex-direction:column;gap:0;border-top:1px solid var(--ink-15)}
+.pix-step{display:flex;gap:20px;padding:20px 0;border-bottom:1px solid var(--ink-15);align-items:flex-start}
+.ps-num{font-family:var(--serif);font-size:20px;font-weight:900;color:var(--ink-40);flex-shrink:0;line-height:1;width:28px}
+.ps-title{font-size:13px;font-weight:600;color:var(--ink);margin-bottom:4px}
+.ps-body{font-size:12px;font-weight:300;color:var(--ink-40);line-height:1.6}
+
+.pix-why{margin-top:36px;display:flex;flex-direction:column;gap:0;border:1px solid rgba(255,255,255,.08);border-radius:4px;overflow:hidden}
+.pw-item{display:flex;gap:16px;align-items:flex-start;padding:18px 20px;border-bottom:1px solid rgba(255,255,255,.06)}
+.pw-item:last-child{border-bottom:none}
+.pw-icon{width:32px;height:32px;border-radius:50%;background:rgba(212,232,74,.12);display:flex;align-items:center;justify-content:center;flex-shrink:0}
+.pw-title{font-size:13px;font-weight:500;color:var(--white);margin-bottom:3px}
+.pw-body{font-size:12px;font-weight:300;color:rgba(255,255,255,.4);line-height:1.55}
+
+/* ── SEGURANÇA ── */
+.security-section{background:var(--paper);padding:100px 40px}
+
+.security-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:1px;background:var(--ink-15);border:1px solid var(--ink-15)}
+.sec-card{background:var(--paper);padding:44px 36px;transition:background .2s}
+.sec-card:hover{background:var(--white)}
+.sec-icon{width:44px;height:44px;border-radius:4px;background:var(--ink);display:flex;align-items:center;justify-content:center;margin-bottom:24px}
+.sec-title{font-family:var(--serif);font-size:20px;font-weight:700;letter-spacing:-.02em;color:var(--ink);margin-bottom:10px}
+.sec-body{font-size:13px;font-weight:300;line-height:1.75;color:var(--ink-80)}
+
+/* ── HOW IT WORKS ── */
+.how-section{background:var(--white)}
+.steps-list{display:grid;grid-template-columns:repeat(4,1fr);gap:1px;background:var(--ink-15);border:1px solid var(--ink-15)}
+.step{background:var(--white);padding:40px 32px;position:relative}
+.step-index{font-family:var(--serif);font-size:96px;font-weight:900;line-height:.85;letter-spacing:-.05em;color:var(--ink-06);margin-bottom:24px}
+.step-title{font-family:var(--serif);font-size:18px;font-weight:700;letter-spacing:-.02em;color:var(--ink);margin-bottom:10px}
+.step-body{font-size:13px;font-weight:300;line-height:1.7;color:var(--ink-40)}
+
+/* ── REVIEWS ── */
+.reviews-section{background:var(--paper)}
+.reviews-grid{display:grid;grid-template-columns:2fr 1fr 1fr;gap:1px;background:var(--ink-15);border:1px solid var(--ink-15)}
+.review{background:var(--paper);padding:44px 36px;transition:background .2s}
+.review:hover{background:var(--white)}
+.review.big{padding:52px 48px;background:var(--ink);display:flex;flex-direction:column;justify-content:space-between}
+.review.big:hover{background:#22401a}
+.stars{display:flex;gap:4px;margin-bottom:24px}
+.star{width:12px;height:12px;clip-path:polygon(50% 0%,61% 35%,98% 35%,68% 57%,79% 91%,50% 70%,21% 91%,32% 57%,2% 35%,39% 35%)}
+.review .star{background:var(--ink)}
+.review.big .star{background:var(--accent)}
+.review-q{font-family:var(--serif);font-size:15px;font-weight:400;font-style:italic;line-height:1.65;color:var(--ink);margin-bottom:28px}
+.review.big .review-q{font-size:20px;color:var(--white);margin-bottom:auto;padding-bottom:32px}
+.review-author{display:flex;align-items:center;gap:12px}
+.r-av{width:32px;height:32px;border-radius:50%;background:var(--ink-15);display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;color:var(--ink);flex-shrink:0}
+.review.big .r-av{background:rgba(255,255,255,.1);color:var(--white)}
+.r-name{font-size:12px;font-weight:500;color:var(--ink)}
+.r-city{font-size:11px;font-weight:300;color:var(--ink-40);margin-top:1px}
+.review.big .r-name{color:var(--white)}
+.review.big .r-city{color:rgba(255,255,255,.4)}
+
+/* ── MOTORISTAS ── */
+.drivers-section{background:var(--paper2);display:grid;grid-template-columns:1fr 1fr;gap:0;padding:0;min-height:520px}
+.drivers-left{padding:80px 60px;display:flex;flex-direction:column;justify-content:center}
+.drivers-right{background:var(--ink);padding:80px 60px;display:flex;flex-direction:column;justify-content:center}
+.drivers-left .s-title{font-size:clamp(36px,4vw,56px);margin-bottom:24px}
+.drivers-left p{font-size:14px;font-weight:300;line-height:1.75;color:var(--ink-80);max-width:380px;margin-bottom:28px}
+.checklist{list-style:none;display:flex;flex-direction:column;gap:12px}
+.checklist li{display:flex;align-items:flex-start;gap:12px;font-size:13px;font-weight:400;color:var(--ink);line-height:1.55}
+.checklist li::before{content:'';width:18px;height:18px;border:1px solid var(--ink-15);border-radius:50%;flex-shrink:0;margin-top:1px;background:url("data:image/svg+xml,%3Csvg viewBox='0 0 12 12' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M2 6l3 3 5-5' stroke='%231A330E' stroke-width='1.5' fill='none' stroke-linecap='round'/%3E%3C/svg%3E") center/10px no-repeat}
+
+.drivers-right .overline{color:rgba(255,255,255,.3);margin-bottom:16px}
+.drivers-right .s-title{color:var(--white);font-size:clamp(36px,4vw,56px);margin-bottom:20px}
+.drivers-right .s-title em{color:var(--accent)}
+.drivers-right p{font-size:14px;font-weight:300;line-height:1.75;color:rgba(255,255,255,.5);max-width:360px;margin-bottom:32px}
+
+.earnings-row{display:flex;gap:40px;margin-bottom:32px}
+.earn-item .earn-num{font-family:var(--serif);font-size:42px;font-weight:900;letter-spacing:-.03em;color:var(--accent)}
+.earn-item .earn-label{font-size:11px;font-weight:300;color:rgba(255,255,255,.35);margin-top:4px;line-height:1.5}
+
+.btn-outline-white{display:inline-flex;align-items:center;gap:10px;border:1px solid rgba(255,255,255,.3);color:var(--white);font-size:12px;font-weight:500;letter-spacing:.06em;text-transform:uppercase;padding:13px 26px;border-radius:2px;text-decoration:none;transition:border-color .2s,background .2s;width:fit-content}
+.btn-outline-white:hover{border-color:rgba(255,255,255,.7);background:rgba(255,255,255,.05)}
+
+/* ── CTA FINAL ── */
+.cta-final{padding:80px 40px;background:var(--paper);text-align:center}
+.cta-inner{max-width:800px;margin:0 auto;border:1px solid var(--ink-15);padding:80px 60px;position:relative;background:var(--white)}
+.cta-inner::before,.cta-inner::after{content:'';position:absolute;width:40px;height:40px;border-color:var(--ink);border-style:solid}
+.cta-inner::before{top:-1px;left:-1px;border-width:2px 0 0 2px}
+.cta-inner::after{bottom:-1px;right:-1px;border-width:0 2px 2px 0}
+.cta-label{font-size:10px;font-weight:500;letter-spacing:.16em;text-transform:uppercase;color:var(--ink-40);margin-bottom:24px}
+.cta-h{font-family:var(--serif);font-size:clamp(44px,6vw,80px);font-weight:900;line-height:.95;letter-spacing:-.03em;color:var(--ink);margin-bottom:16px}
+.cta-h em{font-style:italic;font-weight:400}
+.cta-sub{font-size:15px;font-weight:300;color:var(--ink-40);margin-bottom:48px;font-style:italic}
+.store-row{display:flex;align-items:center;justify-content:center;gap:14px;flex-wrap:wrap}
+.store-btn{display:inline-flex;align-items:center;gap:10px;border:1px solid var(--ink-15);color:var(--ink);font-size:12px;font-weight:500;letter-spacing:.04em;padding:14px 28px;border-radius:2px;text-decoration:none;transition:border-color .2s,background .2s}
+.store-btn:hover{border-color:var(--ink);background:var(--ink-06)}
+.store-btn.primary{background:var(--ink);color:var(--paper);border-color:var(--ink)}
+.store-btn.primary:hover{background:#2a5018}
+
+/* ── FOOTER ── */
+footer{padding:40px 40px 28px;border-top:1px solid var(--ink-15);background:var(--paper)}
+.footer-grid{display:grid;grid-template-columns:1.5fr 1fr 1fr 1fr;gap:40px;margin-bottom:40px;padding-bottom:40px;border-bottom:1px solid var(--ink-15)}
+.footer-logo{text-decoration:none;display:block;margin-bottom:16px}
+.footer-tagline{font-size:12px;font-weight:300;color:var(--ink-40);line-height:1.6;max-width:220px;font-style:italic}
+.footer-col h5{font-size:10px;font-weight:500;letter-spacing:.12em;text-transform:uppercase;color:var(--ink-40);margin-bottom:16px}
+.footer-col ul{list-style:none;display:flex;flex-direction:column;gap:10px}
+.footer-col a{text-decoration:none;font-size:13px;font-weight:300;color:var(--ink-80);transition:color .2s}
+.footer-col a:hover{color:var(--ink)}
+.footer-bottom{display:flex;align-items:center;justify-content:space-between}
+.footer-bottom p{font-size:11px;font-weight:300;color:var(--ink-40)}
+
+/* ── ANIMATIONS ── */
+.reveal{opacity:0;transform:translateY(20px);transition:opacity .7s ease,transform .7s ease}
+.reveal.in{opacity:1;transform:none}
+.d1{transition-delay:.08s}.d2{transition-delay:.16s}.d3{transition-delay:.24s}.d4{transition-delay:.32s}
+
+@media(max-width:900px){
+  nav{grid-template-columns:1fr 1fr;padding:16px 20px}
+  .nav-left{display:none}
+  .hero{padding:100px 20px 0}
+  .hero-headline{grid-template-columns:1fr}
+  .h-right{display:none}
+  section,.pix-section,.security-section,.how-section,.reviews-section{padding:60px 20px}
+  .manifesto{grid-template-columns:1fr;gap:24px}
+  .feat-grid,.security-grid,.steps-list,.reviews-grid{grid-template-columns:1fr}
+  .feat.big{grid-column:1;grid-template-columns:1fr}
+  .hero-stats,.model-split,.pix-grid{grid-template-columns:1fr 1fr}
+  .drivers-section{grid-template-columns:1fr}
+  .footer-grid{grid-template-columns:1fr 1fr}
+  .s-header{flex-direction:column;gap:16px}
+  .s-caption{text-align:left}
+  .competitors-compare{grid-template-columns:repeat(3,1fr)}
+}
+
+/* ── IPHONE MOCK ── */
+.iphone-wrap{position:relative;display:flex;align-items:center;justify-content:center;padding:64px 46px 18px;isolation:isolate}
+.iphone-wrap::before{content:'';position:absolute;inset:18% -8% 2% 2%;background:radial-gradient(circle at 50% 50%,rgba(26,51,14,.28),transparent 66%);filter:blur(32px);z-index:-1}
+.iphone{width:min(393px,calc(100vw - 96px));aspect-ratio:393/852;background:linear-gradient(145deg,#0a1806,#142b0c 44%,#091604);border-radius:58px;border:10px solid #0a1806;box-shadow:0 58px 110px rgba(0,0,0,0.36),0 18px 36px rgba(26,51,14,.22),inset 0 0 0 1px rgba(255,255,255,0.08),inset 0 -18px 40px rgba(0,0,0,.2);position:relative;overflow:visible;display:flex;flex-direction:column}
+.iphone::before{content:'';position:absolute;inset:10px;border-radius:46px;border:1px solid rgba(255,255,255,.08);pointer-events:none;z-index:3}
+.iphone::after{content:'';position:absolute;right:-14px;top:150px;width:4px;height:86px;border-radius:0 4px 4px 0;background:#081504;box-shadow:0 122px 0 #081504}
+.iphone-notch{width:126px;height:36px;background:#050d02;border-radius:100px;margin:0;position:absolute;top:18px;left:50%;transform:translateX(-50%);z-index:5;box-shadow:inset 0 -1px 0 rgba(255,255,255,.06),0 2px 8px rgba(0,0,0,.18)}
+.iphone-screen{flex:1;padding:72px 22px 28px;display:flex;flex-direction:column;justify-content:space-between;gap:13px;position:relative;overflow:hidden;border-radius:48px;background:radial-gradient(circle at 100% 0%,rgba(212,232,74,.12),transparent 34%),linear-gradient(180deg,rgba(255,255,255,.025),transparent 42%)}
+.iphone-screen::before{content:'';position:absolute;inset:auto 16px 10px;height:4px;border-radius:100px;background:rgba(255,255,255,.12)}
+
+.ips-header{display:flex;align-items:center;justify-content:space-between}
+.ips-logo{font-family:var(--serif);font-size:21px;font-weight:900;color:var(--white);letter-spacing:.04em}
+.ips-logo span{color:var(--accent)}
+.ips-pix-tag{display:flex;align-items:center;gap:5px;background:rgba(212,232,74,.15);border:1px solid rgba(212,232,74,.25);border-radius:100px;padding:5px 10px;font-size:10px;font-weight:600;color:var(--accent);letter-spacing:.06em}
+
+.ips-ride-label{font-size:10px;font-weight:300;color:rgba(255,255,255,.36);letter-spacing:.04em;line-height:1.4}
+.ips-map{height:118px;border:1px solid rgba(255,255,255,.08);border-radius:18px;background:linear-gradient(135deg,rgba(255,255,255,.05),rgba(255,255,255,.02)),radial-gradient(circle at 20% 25%,rgba(212,232,74,.18),transparent 24%),radial-gradient(circle at 78% 70%,rgba(255,255,255,.08),transparent 26%);position:relative;overflow:hidden}
+.ips-map::before{content:'';position:absolute;inset:0;background:linear-gradient(90deg,transparent 0 32%,rgba(255,255,255,.04) 32% 33%,transparent 33% 66%,rgba(255,255,255,.035) 66% 67%,transparent 67%),linear-gradient(0deg,transparent 0 30%,rgba(255,255,255,.035) 30% 31%,transparent 31% 62%,rgba(255,255,255,.03) 62% 63%,transparent 63%);opacity:.8}
+.ips-route{position:absolute;left:26px;right:26px;top:48%;height:2px;background:linear-gradient(90deg,var(--accent),rgba(212,232,74,.55));transform:rotate(-10deg);transform-origin:center;border-radius:100px;box-shadow:0 0 18px rgba(212,232,74,.34)}
+.ips-route::before,.ips-route::after{content:'';position:absolute;top:50%;width:11px;height:11px;border-radius:50%;transform:translateY(-50%);background:var(--accent);box-shadow:0 0 0 5px rgba(212,232,74,.15)}
+.ips-route::before{left:-2px}
+.ips-route::after{right:-2px;background:var(--white);box-shadow:0 0 0 5px rgba(255,255,255,.12)}
+.ips-car{position:absolute;left:58%;top:38%;width:34px;height:24px;border-radius:11px;background:var(--accent);display:flex;align-items:center;justify-content:center;color:var(--ink);box-shadow:0 10px 22px rgba(0,0,0,.28)}
+
+.ips-block{background:rgba(255,255,255,.055);border-radius:18px;padding:17px 18px;border:1px solid rgba(255,255,255,.08);box-shadow:inset 0 1px 0 rgba(255,255,255,.05)}
+.ips-block.driver{background:linear-gradient(135deg,rgba(212,232,74,.16),rgba(212,232,74,.06));border-color:rgba(212,232,74,.28)}
+.ips-block-label{font-size:10px;font-weight:500;letter-spacing:.1em;text-transform:uppercase;color:rgba(255,255,255,.35);margin-bottom:5px}
+.ips-block.driver .ips-block-label{color:rgba(212,232,74,.6)}
+.ips-block-value{font-family:var(--serif);font-size:50px;font-weight:900;letter-spacing:-.03em;color:rgba(255,255,255,.64);line-height:.95}
+.ips-block-value.accent{color:var(--accent)}
+.ips-cents{font-size:24px;font-weight:400}
+.ips-cents.accent{color:var(--accent)}
+.ips-block-sub{font-size:10px;font-weight:300;color:rgba(255,255,255,.28);margin-top:7px}
+.ips-block.driver .ips-block-sub{color:rgba(212,232,74,.4)}
+
+.ips-arrow-row{display:flex;align-items:center;gap:10px;padding:0 6px}
+.ips-arrow-line{flex:1;height:1px;background:rgba(255,255,255,.08)}
+.ips-arrow-icon{color:rgba(255,255,255,.28)}
+
+.ips-compare{display:grid;grid-template-columns:1fr auto 1fr;gap:12px;align-items:center;background:rgba(255,255,255,.035);border-radius:16px;padding:14px 16px;border:1px solid rgba(255,255,255,.07)}
+.ips-compare-col{display:flex;flex-direction:column;gap:3px}
+.ips-compare-col:last-child{align-items:flex-end}
+.ips-compare-label{font-size:9px;font-weight:500;letter-spacing:.08em;text-transform:uppercase;color:rgba(255,255,255,.3)}
+.ips-compare-label.leaf{color:rgba(212,232,74,.7)}
+.ips-compare-val{font-family:var(--serif);font-size:17px;font-weight:700;color:rgba(255,255,255,.4)}
+.ips-compare-val:not(.muted){color:var(--accent)}
+.ips-compare-pct{font-size:10px;font-weight:300;color:rgba(255,255,255,.2)}
+.ips-compare-pct:not(.muted){color:rgba(212,232,74,.5)}
+.ips-compare-divider{width:1px;height:44px;background:rgba(255,255,255,.08)}
+
+.ips-driver{display:flex;align-items:center;gap:10px;padding:12px 0 4px;border-top:1px solid rgba(255,255,255,.07)}
+.ips-av{width:34px;height:34px;border-radius:50%;background:var(--accent);display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:800;color:var(--ink);flex-shrink:0}
+.ips-dname{font-size:12px;font-weight:500;color:rgba(255,255,255,.76)}
+.ips-deta{font-size:10px;font-weight:300;color:rgba(255,255,255,.34);margin-top:2px}
+
+.float-tag{position:absolute;background:var(--paper);color:var(--ink);font-size:11px;font-weight:600;padding:10px 16px;border-radius:10px;box-shadow:0 14px 34px rgba(0,0,0,0.2);white-space:nowrap;letter-spacing:.01em}
+.float-tag.left{bottom:88px;left:-154px}
+.float-tag.right{top:82px;right:-6px}
+.float-tag.accent-tag{background:var(--accent);color:var(--ink)}
+</style>
 </head>
 <body>
-    <header>
-        <div class="container">
-            <div class="header-content">
-                <div class="logo">
-                    <img src="assets/logo-leaf.jpg" alt="Leaf">
-                </div>
-                <nav>
-                    <a href="#drivers" class="nav-link">Para motoristas</a>
-                    <a href="#experience" class="nav-link">Experiência</a>
-                    <a href="https://leaf.app.br/app" class="btn btn-ghost" target="_blank" rel="noopener">Em breve</a>
-                </nav>
+
+<div class="cursor" id="cursor"></div>
+
+<!-- NAV -->
+<nav>
+  <div class="nav-left">
+    <a href="#modelo">O modelo</a>
+    <a href="#seguranca">Segurança</a>
+    <a href="#motoristas">Motoristas</a>
+  </div>
+  <a class="nav-logo" href="#" aria-label="Leaf"><img src="assets/leaf-logo-ink.png" alt="Leaf"></a>
+  <div class="nav-right">
+    <a class="nav-pill" href="#">Baixar app</a>
+  </div>
+</nav>
+
+<!-- ══════════ HERO ══════════ -->
+<section class="hero">
+
+  <div class="hero-headline">
+    <div class="h-left">
+      <h1>
+        Da partida<br>
+        ao destino,<br>
+        sem deixar<br>
+        <span class="italic">quase metade<br>
+        do valor</span><br>
+        no caminho.
+      </h1>
+      <p class="h1-sub">
+        O primeiro e único app de mobilidade que conecta motoristas e passageiros sem cobrar 20 a 40% do valor da corrida. Aqui o seu dinheiro vale uma experiência de conforto e segurança, com até 96% do valor repassado diretamente ao motorista. Vem pra LEAF.
+      </p>
+      <div class="hero-cta-row">
+        <a href="#" class="btn-solid">
+          Baixar grátis
+          <svg class="arr" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 8h10M9 4l4 4-4 4"/></svg>
+        </a>
+        <a href="#modelo" class="btn-line">Como funciona</a>
+      </div>
+    </div>
+
+    <div class="h-right">
+      <!-- iPhone mockup -->
+      <div class="iphone-wrap">
+        <div class="iphone">
+          <div class="iphone-notch"></div>
+          <div class="iphone-screen">
+
+            <!-- app header -->
+            <div class="ips-header">
+              <div class="ips-logo">Leaf<span>.</span></div>
+              <div class="ips-pix-tag">
+                <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M5 12l5 5L20 7"/></svg>
+                Pix confirmado
+              </div>
             </div>
+
+            <!-- corrida label -->
+            <div class="ips-ride-label">Corrida · Vila Madalena → Congonhas</div>
+
+            <div class="ips-map">
+              <div class="ips-route"></div>
+              <div class="ips-car">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M7 17h10"/><path d="M5 17V9l2-4h10l2 4v8"/><circle cx="7.5" cy="17" r="1.5"/><circle cx="16.5" cy="17" r="1.5"/></svg>
+              </div>
+            </div>
+
+            <!-- valor pago passageiro -->
+            <div class="ips-block passenger">
+              <div class="ips-block-label">Você pagou</div>
+              <div class="ips-block-value">R$&thinsp;42<span class="ips-cents">,00</span></div>
+              <div class="ips-block-sub">Tarifa padrão de mercado</div>
+            </div>
+
+            <!-- divider com seta -->
+            <div class="ips-arrow-row">
+              <div class="ips-arrow-line"></div>
+              <div class="ips-arrow-icon">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12l7 7 7-7"/></svg>
+              </div>
+              <div class="ips-arrow-line"></div>
+            </div>
+
+            <!-- valor recebido motorista -->
+            <div class="ips-block driver">
+              <div class="ips-block-label">Motorista recebeu</div>
+              <div class="ips-block-value accent">R$&thinsp;40<span class="ips-cents accent">,51</span></div>
+              <div class="ips-block-sub">Taxa operacional: R$&thinsp;1,49</div>
+            </div>
+
+            <!-- comparação -->
+            <div class="ips-compare">
+              <div class="ips-compare-col">
+                <div class="ips-compare-label">Apps tradicionais</div>
+                <div class="ips-compare-val muted">~R$&thinsp;23</div>
+                <div class="ips-compare-pct muted">≈ 55%</div>
+              </div>
+              <div class="ips-compare-divider"></div>
+              <div class="ips-compare-col">
+                <div class="ips-compare-label leaf">Leaf</div>
+                <div class="ips-compare-val">R$&thinsp;40,51</div>
+                <div class="ips-compare-pct">≈ 96%</div>
+              </div>
+            </div>
+
+            <!-- driver row -->
+            <div class="ips-driver">
+              <div class="ips-av">MC</div>
+              <div>
+                <div class="ips-dname">Marcos Costa · ★ 4.97</div>
+                <div class="ips-deta">Toyota Corolla · 4 min</div>
+              </div>
+            </div>
+
+          </div>
         </div>
-    </header>
+        <!-- floating tags -->
+        <div class="float-tag right accent-tag">Motorista ganha quase tudo</div>
+      </div>
+    </div>
+  </div>
 
-    <main>
-        <section class="hero">
-            <div class="container">
-                <div class="hero-content">
-                    <div class="hero-text">
-                        <span class="badge">Mobilidade de alta qualidade</span>
-                        <h1 class="hero-title">As melhores taxas pra quem dirige, conforto e segurança pra quem viaja</h1>
-                        <p class="hero-description">
-                            Um único app para quem dirige e para quem viaja. Simples, seguro e com a menor taxa do mercado.
-                        </p>
-                        <div class="hero-actions">
-                            <a href="https://leaf.app.br/app" class="btn btn-primary" target="_blank" rel="noopener">Quero dirigir</a>
-                            <a href="https://leaf.app.br/app" class="btn btn-secondary" target="_blank" rel="noopener">Sou passageiro</a>
-                        </div>
-                    </div>
-                    <div class="hero-visual">
-                        <div class="card">
-                            <div class="card-header">
-                                <h2 class="card-title">Para quem dirige</h2>
-                            </div>
-                            <div class="metrics">
-                                <div class="metric">
-                                    <div class="metric-value">R$ 0,79 a R$ 1,49</div>
-                                    <div class="metric-label">Taxa fixa por corrida</div>
-                                </div>
-                                <div class="metric">
-                                    <div class="metric-value">R$ 49,90 / semana</div>
-                                    <div class="metric-label">Limite máximo de taxa</div>
-                                </div>
-                            </div>
-                            <div class="list">
-                                <div class="list-item">O que passar do limite semanal é 100% do parceiro</div>
-                                <div class="list-item">Simples, seguro e prático</div>
-                                <div class="list-item">Vem pra LEAF</div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </section>
+  <div class="hero-stats">
+    <div class="stat-item">
+      <div class="s-num">Até 96%</div>
+      <div class="s-label">da corrida vai pro motorista</div>
+    </div>
+    <div class="stat-item">
+      <div class="s-num">Taxa fixa</div>
+      <div class="s-label">A plataforma nunca ganha mais que o operacional</div>
+    </div>
+    <div class="stat-item">
+      <div class="s-num">100%</div>
+      <div class="s-label">Pix · sem cartão · sem dinheiro</div>
+    </div>
+    <div class="stat-item">
+      <div class="s-num">4.9★</div>
+      <div class="s-label">Avaliação média dos motoristas</div>
+    </div>
+  </div>
+</section>
 
-        <section class="section" id="drivers">
-            <div class="container">
-                <div class="section-header">
-                    <span class="badge">Para quem dirige</span>
-                    <h2 class="section-title">Ganhe mais com a menor taxa do mercado.</h2>
-                    <p class="section-description">
-                        Taxa fixa por corrida + limite semanal. Transparência total e zero surpresa.
-                    </p>
-                </div>
-                <div class="grid">
-                    <div class="card feature-card">
-                        <h3 class="feature-title">R$ 0,79 a R$ 1,49 por corrida</h3>
-                        <p class="feature-description">
-                            Estrutura simples e previsível para você reter mais do seu ganho.
-                        </p>
-                    </div>
-                    <div class="card feature-card">
-                        <h3 class="feature-title">Máximo de R$ 49,90</h3>
-                        <p class="feature-description">
-                            Passou disso, é 100% do parceiro. Mais dinheiro no seu bolso.
-                        </p>
-                    </div>
-                    <div class="card feature-card">
-                        <h3 class="feature-title">Simples, seguro e prático</h3>
-                        <p class="feature-description">
-                            Experiência minimalista, suporte rápido e transparência real.
-                        </p>
-                    </div>
-                </div>
-                <div class="hero-actions" style="margin-top: 2rem; justify-content: center;">
-                    <a href="https://leaf.app.br/app" class="btn btn-primary" target="_blank" rel="noopener">Quero ser motorista</a>
-                    <a href="https://leaf.app.br/app" class="btn btn-secondary" target="_blank" rel="noopener">Em breve</a>
-                </div>
-            </div>
-        </section>
 
-        <section class="section" id="experience">
-            <div class="container">
-                <div class="section-header">
-                    <span class="badge">Experiência premium</span>
-                    <h2 class="section-title">Minimalista, moderna e 100% responsiva.</h2>
-                    <p class="section-description">
-                        Interface inspirada em referências modernas e construída para entregar qualidade em qualquer tela.
-                    </p>
-                </div>
-                <div class="grid">
-                    <div class="card feature-card">
-                        <h3 class="feature-title">Pix first</h3>
-                        <p class="feature-description">
-                            Primeira plataforma baseada 100% em pagamento via Pix.
-                        </p>
-                    </div>
-                    <div class="card feature-card">
-                        <h3 class="feature-title">Corridas 100% seguras</h3>
-                        <p class="feature-description">
-                            Protocolos de segurança para passageiros e motoristas em cada viagem.
-                        </p>
-                    </div>
-                    <div class="card feature-card">
-                        <h3 class="feature-title">Acessibilidade e clareza</h3>
-                        <p class="feature-description">
-                            Contraste alto, botões grandes e navegação simples.
-                        </p>
-                    </div>
-                </div>
-            </div>
-        </section>
+<!-- MANIFESTO -->
+<div class="manifesto">
+  <div class="manifesto-label" style="font-size:14px;font-weight:700;color:var(--accent);letter-spacing:.06em;text-transform:uppercase">Por que usar a Leaf?</div>
+  <div class="manifesto-quote">
+    "Os grandes apps de mobilidade ficam com até <strong>45% de cada corrida</strong>. O motorista trabalha mais. O passageiro paga mais. A plataforma fica com quase tudo. A Leaf existe para acabar com isso."
+  </div>
+</div>
 
-        <section class="section">
-            <div class="container">
-                <div class="cta-section">
-                    <h3 class="cta-title">Vem pra LEAF</h3>
-                    <p class="cta-description">
-                        Baixe o app, ative o modo motorista ou passageiro e comece a rodar com a taxa mais justa.
-                    </p>
-                    <div class="hero-actions" style="justify-content: center;">
-                        <a href="https://leaf.app.br/app" class="btn btn-primary" target="_blank" rel="noopener">Em breve</a>
-                        <a href="https://leaf.app.br/app" class="btn btn-secondary" target="_blank" rel="noopener">Falar com a Leaf</a>
-                    </div>
-                </div>
-            </div>
-        </section>
-    </main>
+<!-- MODELO ══════════ -->
+<section class="model-section" id="modelo">
+  <div class="s-header">
+    <div>
+      <div class="s-num-big">01 — O modelo</div>
+      <div class="s-title">Taxas que fazem<br><em>sentido.</em></div>
+    </div>
+    <div class="s-caption"></div>
+  </div>
 
-    <footer>
-        <div class="container">
-            <p>Leaf Mobilidade • Todos os direitos reservados</p>
+  <div class="model-split">
+    <div class="model-col">
+      <div class="model-col-label">Para passageiros</div>
+      <h3>O preço que você já paga. O serviço que você nunca teve.</h3>
+      <p>A Leaf usa o mesmo cálculo de tarifa dos apps tradicionais. Você não paga a mais. Mas como o motorista ganha muito mais por corrida, ele pode se dar ao luxo de oferecer um serviço de verdade — porque trabalhar na Leaf vale a pena.</p>
+
+      <table class="taxa-table">
+        <thead>
+          <tr>
+            <th>Valor da corrida</th>
+            <th>Taxa operacional</th>
+            <th>Taxa Pix (0,8%)</th>
+            <th>Motorista recebe</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Até R$ 20</td>
+            <td>R$&thinsp;<strong>0,99</strong></td>
+            <td>R$ 0,50*</td>
+            <td><strong>≈ 92%</strong></td>
+          </tr>
+          <tr>
+            <td>R$ 20 – R$ 50</td>
+            <td>R$&thinsp;<strong>1,49</strong></td>
+            <td>0,8%</td>
+            <td><strong>≈ 94%</strong></td>
+          </tr>
+          <tr>
+            <td>Acima de R$ 50</td>
+            <td><strong>3%</strong> do valor</td>
+            <td>0,8%</td>
+            <td><strong>≈ 96%</strong></td>
+          </tr>
+        </tbody>
+      </table>
+      <p class="taxa-note" style="margin-top:20px;border-top:1px solid var(--ink-06);padding-top:12px">* Taxa mínima de R$&thinsp;0,50 por transação Pix. Valores públicos, fixos e imutáveis durante a viagem.</p>
+    </div>
+
+    <div class="model-col dark">
+      <div class="model-col-label">Para motoristas</div>
+      <h3 style="color:var(--white)">Nos apps tradicionais, você fica com 55%. Na Leaf, você fica com quase tudo.</h3>
+      <p style="color:rgba(255,255,255,.5);margin-bottom:24px">Numa corrida de R$&thinsp;42,00 nas plataformas tradicionais, o motorista recebe cerca de R$&thinsp;23. Na Leaf, recebe R$&thinsp;40. Na mesma corrida. Com o mesmo passageiro. Fazendo a mesma rota.</p>
+
+      <div class="rb-label">Distribuição por plataforma — corrida de R$ 42</div>
+      <div class="receive-bar">
+        <div class="rb-label" style="margin-bottom:6px">Apps tradicionais</div>
+        <div class="rb-track"><div class="rb-fill" style="width:55%;background:rgba(255,255,255,.2)"></div></div>
+        <div class="rb-nums"><span style="color:rgba(255,255,255,.4)">~R$ 23,00</span><span style="color:rgba(255,255,255,.2)">55%</span></div>
+      </div>
+      <div class="receive-bar">
+        <div class="rb-label" style="margin-bottom:6px">Leaf</div>
+        <div class="rb-track"><div class="rb-fill" style="width:96%" title="Até 96%"></div></div>
+        <div class="rb-nums"><span>~R$ 40,00</span><span>96%</span></div>
+      </div>
+
+      <div class="competitors-compare" style="margin-top:28px">
+        <div class="cc-item">
+          <div class="cc-app">App A</div>
+          <div class="cc-pct">~55%</div>
+          <div class="cc-sub">pro motorista</div>
         </div>
-    </footer>
+        <div class="cc-item">
+          <div class="cc-app">App B</div>
+          <div class="cc-pct">~68%</div>
+          <div class="cc-sub">pro motorista</div>
+        </div>
+        <div class="cc-item leaf">
+          <div class="cc-app">Leaf</div>
+          <div class="cc-pct">Até 96%</div>
+          <div class="cc-sub">pro motorista</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- FEATURES ══════════ -->
+<section style="padding:0 40px 100px">
+  <div class="feat-grid">
+    <div class="feat big reveal">
+      <div>
+        <div class="feat-n">01</div>
+        <div class="feat-title">Mesmo preço.<br>Serviço melhor.</div>
+      </div>
+      <div>
+        <div class="feat-body">Quando um motorista recebe até 96% da corrida, ele tem motivo real para caprichar. Carro limpo, pontualidade, atenção. Você tem a experiência de uma categoria superior — sem pagar nada a mais por isso.</div>
+        <div class="feat-tag">A lógica Leaf</div>
+      </div>
+    </div>
+
+    <div class="feat accent reveal d1">
+      <div class="feat-n">02</div>
+      <div class="feat-title">Taxa fixa.<br>Sem percentual absurdo.</div>
+      <div class="feat-body">R$&thinsp;0,99 por corridas até R$&thinsp;20. R$&thinsp;1,49 até R$&thinsp;50. Apenas 3% acima disso. É o suficiente pra manter a plataforma. Sem ganância.</div>
+      <div class="feat-tag">Modelo justo</div>
+    </div>
+
+    <div class="feat reveal d2">
+      <div class="feat-n">03</div>
+      <div class="feat-title">Motoristas<br>selecionados.</div>
+      <div class="feat-body">Avaliação mínima 4.8. Veículos revisados. Motoristas que ficam na plataforma porque ela respeita o trabalho deles — e atendem bem porque isso faz sentido pra eles também.</div>
+      <div class="feat-tag">Qualidade</div>
+    </div>
+
+    <div class="feat reveal">
+      <div class="feat-n">04</div>
+      <div class="feat-title">Rastreamento<br>em tempo real.</div>
+      <div class="feat-body">Envie sua rota ao vivo para qualquer pessoa. Compartilhe sua viagem com um clique. Porque segurança não pode ser feature opcional.</div>
+      <div class="feat-tag">Segurança</div>
+    </div>
+
+    <div class="feat reveal d1">
+      <div class="feat-n">05</div>
+      <div class="feat-title">Suporte humano.<br>Sem robô.</div>
+      <div class="feat-body">Fala com uma pessoa. Sem chatbot, sem formulário de 8 campos. Problemas resolvidos no chat, direto, em minutos.</div>
+      <div class="feat-tag">Atendimento</div>
+    </div>
+
+    <div class="feat reveal d2">
+      <div class="feat-n">06</div>
+      <div class="feat-title">Pagamento<br>antecipado.</div>
+      <div class="feat-body">O Pix é confirmado antes da corrida começar. Sem calote, sem "pago na próxima", sem constrangimento. Motorista protegido. Passageiro tranquilo.</div>
+      <div class="feat-tag">100% Pix</div>
+    </div>
+  </div>
+</section>
+
+<!-- PIX ══════════ -->
+<section class="pix-section" id="pix">
+  <div class="s-header">
+    <div>
+      <div class="s-num-big">02 — Pagamento</div>
+      <div class="s-title">100% Pix.<br><em>Sem exceção.</em></div>
+    </div>
+    <div class="s-caption"></div>
+  </div>
+
+  <div class="pix-grid">
+    <div class="pix-col">
+      <div class="overline" style="margin-bottom:16px">Como funciona o pagamento</div>
+      <h3>Simples. Rápido. Antes de sair do lugar.</h3>
+      <p>Antes da corrida começar, você faz o Pix. O motorista confirma o recebimento. Aí o carro se move. Sem cartão, sem dinheiro, sem risco pra ninguém.</p>
+
+      <div class="pix-steps">
+        <div class="pix-step">
+          <div class="ps-num">01</div>
+          <div>
+            <div class="ps-title">Solicite a corrida</div>
+            <div class="ps-body">Informe o destino e veja o valor final. Calculado pelos mesmos critérios dos apps tradicionais.</div>
+          </div>
+        </div>
+        <div class="pix-step">
+          <div class="ps-num">02</div>
+          <div>
+            <div class="ps-title">Pague via Pix</div>
+            <div class="ps-body">Valor total debitado antes do motorista aceitar. Antecipado, rápido, confirmado.</div>
+          </div>
+        </div>
+        <div class="pix-step">
+          <div class="ps-num">03</div>
+          <div>
+            <div class="ps-title">Motorista confirma</div>
+            <div class="ps-body">Com o Pix confirmado, o motorista aceita e parte. Sem atrito, sem desconfiança.</div>
+          </div>
+        </div>
+        <div class="pix-step">
+          <div class="ps-num">04</div>
+          <div>
+            <div class="ps-title">Corrida finalizada</div>
+            <div class="ps-body">O valor é repassado automaticamente. Motorista não espera. Sem intermediários.</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="pix-col dark">
+      <div class="overline" style="color:rgba(255,255,255,.3);margin-bottom:16px">Por que só Pix</div>
+      <h3 style="color:var(--white)">Não é limitação. É posicionamento.</h3>
+      <p style="color:rgba(255,255,255,.5)">Cartão de crédito tem chargeback. Dinheiro vivo tem risco. Pix antecipado resolve os dois. É a única forma de pagamento que respeita o motorista sem prejudicar o passageiro.</p>
+
+      <div class="pix-why">
+        <div class="pw-item">
+          <div class="pw-icon">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+          </div>
+          <div>
+            <div class="pw-title">Zero risco de calote</div>
+            <div class="pw-body">Pagamento confirmado antes da corrida. Motorista nunca sai no prejuízo.</div>
+          </div>
+        </div>
+        <div class="pw-item">
+          <div class="pw-icon">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 8v4l3 3"/></svg>
+          </div>
+          <div>
+            <div class="pw-title">Repasse imediato</div>
+            <div class="pw-body">Sem ciclos de pagamento semanais. O dinheiro cai na hora.</div>
+          </div>
+        </div>
+        <div class="pw-item">
+          <div class="pw-icon">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 12l2 2 4-4"/><path d="M21 12c0 4.97-4.03 9-9 9S3 16.97 3 12 7.03 3 12 3s9 4.03 9 9z"/></svg>
+          </div>
+          <div>
+            <div class="pw-title">Sem fraude de cartão</div>
+            <div class="pw-body">Chargeback é o pesadelo do motorista. Na Leaf, não existe.</div>
+          </div>
+        </div>
+        <div class="pw-item">
+          <div class="pw-icon">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg>
+          </div>
+          <div>
+            <div class="pw-title">Transação rastreável</div>
+            <div class="pw-body">Comprovante automático. Histórico completo para passageiro e motorista.</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- SEGURANÇA ══════════ -->
+<section class="security-section" id="seguranca">
+  <div class="s-header">
+    <div>
+      <div class="s-num-big">03 — Segurança</div>
+      <div class="s-title">Protegido<br><em>de ponta a ponta.</em></div>
+    </div>
+    <div class="s-caption">Para passageiro e motorista. Porque plataforma segura não escolhe um lado.</div>
+  </div>
+
+  <div class="security-grid">
+    <div class="sec-card reveal">
+      <div class="sec-icon">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+      </div>
+      <div class="sec-title">Rastreamento ao vivo</div>
+      <div class="sec-body">Sua rota é monitorada em tempo real durante toda a corrida. Compartilhe com quem quiser — família, amigos, qualquer pessoa — com um clique.</div>
+    </div>
+
+    <div class="sec-card reveal d1">
+      <div class="sec-icon">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/></svg>
+      </div>
+      <div class="sec-title">Motoristas verificados</div>
+      <div class="sec-body">Documentação, CNH, antecedentes e veículo verificados antes de qualquer corrida. Nenhum motorista entra na plataforma sem passar por essa etapa.</div>
+    </div>
+
+    <div class="sec-card reveal d2">
+      <div class="sec-icon">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+      </div>
+      <div class="sec-title">Botão de emergência</div>
+      <div class="sec-body">Acionamento com um toque. Alerta imediato para contatos de confiança e, se necessário, para as autoridades. Discreto, mas sempre acessível.</div>
+    </div>
+
+    <div class="sec-card reveal">
+      <div class="sec-icon">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg>
+      </div>
+      <div class="sec-title">Pagamento antecipado</div>
+      <div class="sec-body">O Pix é confirmado antes da corrida. Sem "deixa pagar na próxima". Sem constrangimento. Proteção total para o motorista — e tranquilidade para o passageiro.</div>
+    </div>
+
+    <div class="sec-card reveal d1">
+      <div class="sec-icon">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg>
+      </div>
+      <div class="sec-title">Suporte humano 24h</div>
+      <div class="sec-body">Um incidente não espera horário comercial. Nossa equipe atende a qualquer hora, sem robôs no caminho, com capacidade de agir quando necessário.</div>
+    </div>
+
+    <div class="sec-card reveal d2">
+      <div class="sec-icon">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 12l2 2 4-4"/><path d="M21 12c0 4.97-4.03 9-9 9S3 16.97 3 12 7.03 3 12 3s9 4.03 9 9z"/></svg>
+      </div>
+      <div class="sec-title">Histórico completo</div>
+      <div class="sec-body">Registro de cada corrida: rota, horário, valor, motorista. Comprovante automático via Pix. Tudo documentado, tudo rastreável, tudo seu.</div>
+    </div>
+  </div>
+</section>
+
+<!-- HOW IT WORKS ══════════ -->
+<section class="how-section">
+  <div class="s-header">
+    <div>
+      <div class="s-num-big">04 — Processo</div>
+      <div class="s-title">De 0 a bordo<br><em>em minutos.</em></div>
+    </div>
+    <div class="s-caption">Direto ao ponto. Sem etapas desnecessárias, sem dúvidas no caminho.</div>
+  </div>
+
+  <div class="steps-list">
+    <div class="step reveal">
+      <div class="step-index">01</div>
+      <div class="step-title">Informe o destino</div>
+      <div class="step-body">Digite ou fale para onde quer ir. Veja o valor da corrida calculado pelos mesmos critérios dos apps tradicionais.</div>
+    </div>
+    <div class="step reveal d1">
+      <div class="step-index">02</div>
+      <div class="step-title">Pague via Pix</div>
+      <div class="step-body">Antecipado, rápido, rastreável. Confirmação automática. Motorista recebe o sinal e parte em sua direção.</div>
+    </div>
+    <div class="step reveal d2">
+      <div class="step-index">03</div>
+      <div class="step-title">Acompanhe ao vivo</div>
+      <div class="step-body">Rota em tempo real, ETA preciso, compartilhamento com um toque. Segurança visível em cada quilômetro.</div>
+    </div>
+    <div class="step reveal d3">
+      <div class="step-index">04</div>
+      <div class="step-title">Chegue bem</div>
+      <div class="step-body">Avalie o motorista. Acompanhe o comprovante no histórico. Nada a mais pra fazer — já foi tudo resolvido antes.</div>
+    </div>
+  </div>
+</section>
+
+<!-- REVIEWS ══════════ -->
+<section class="reviews-section">
+  <div class="s-header">
+    <div>
+      <div class="s-num-big">05 — Depoimentos</div>
+      <div class="s-title">Quem viajou.<br><em>Voltou.</em></div>
+    </div>
+    <div class="s-caption">Passageiros e motoristas. Porque a Leaf só funciona se os dois lados saem ganhando.</div>
+  </div>
+
+  <div class="reviews-grid">
+    <div class="review big reveal">
+      <div class="stars">
+        <div class="star"></div><div class="star"></div><div class="star"></div><div class="star"></div><div class="star"></div>
+      </div>
+      <p class="review-q">"Motorista de app há quatro anos. Na Leaf, faço a mesma corrida de R$&thinsp;42 e recebo R$&thinsp;40. Nas plataformas tradicionais recebia R$&thinsp;23. Na mesma corrida, na mesma rota. É matematicamente impossível não migrar."</p>
+      <div class="review-author">
+        <div class="r-av">JO</div>
+        <div>
+          <div class="r-name">João Oliveira</div>
+          <div class="r-city">Motorista Leaf · São Paulo, SP</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="review reveal d1">
+      <div class="stars">
+        <div class="star"></div><div class="star"></div><div class="star"></div><div class="star"></div><div class="star"></div>
+      </div>
+      <p class="review-q">"Paguei a mesma tarifa de sempre. Carro limpo, motorista atencioso, chegou antes do estimado. Não é coincidência — ele estava motivado."</p>
+      <div class="review-author">
+        <div class="r-av">AC</div>
+        <div>
+          <div class="r-name">Ana Carvalho</div>
+          <div class="r-city">Passageira · São Paulo, SP</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="review reveal d2">
+      <div class="stars">
+        <div class="star"></div><div class="star"></div><div class="star"></div><div class="star"></div><div class="star"></div>
+      </div>
+      <p class="review-q">"O Pix antes parecia estranho. Hoje é o que me dá segurança. Sem calote, sem constrangimento, sem desculpa de 'não tenho troco'."</p>
+      <div class="review-author">
+        <div class="r-av">RF</div>
+        <div>
+          <div class="r-name">Rodrigo Freitas</div>
+          <div class="r-city">Motorista Leaf · RJ</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- MOTORISTAS ══════════ -->
+<div class="drivers-section" id="motoristas">
+  <div class="drivers-left reveal">
+    <div class="overline" style="margin-bottom:16px">Para passageiros</div>
+    <div class="s-title">Você paga<br>igual.<br><em>Recebe mais.</em></div>
+    <p>A Leaf usa a mesma fórmula de preço dos apps tradicionais. Você não paga a mais — mas a experiência é outra. Motorista bem remunerado tem razão concreta pra caprichar: carro limpo, pontualidade, atenção. Conforto de categoria superior sem custar categoria superior.</p>
+    <ul class="checklist">
+      <li>Mesma tarifa dos apps tradicionais</li>
+      <li>Motoristas com avaliação mínima 4.8</li>
+      <li>Conforto de categoria superior sem pagar a mais</li>
+      <li>Rastreamento ao vivo compartilhável</li>
+      <li>Pagamento antecipado · sem surpresas</li>
+      <li>Suporte humano disponível 24h</li>
+    </ul>
+  </div>
+
+  <div class="drivers-right reveal d1">
+    <div class="overline">Para motoristas</div>
+    <div class="s-title">Trabalhe<br>mais.<br><em>Guarde mais.</em></div>
+    <div class="earnings-row">
+      <div class="earn-item">
+        <div class="earn-num">96%</div>
+        <div class="earn-label">da corrida<br>fica com você</div>
+      </div>
+      <div class="earn-item">
+        <div class="earn-num">R$&thinsp;0</div>
+        <div class="earn-label">Taxa de<br>cadastro</div>
+      </div>
+    </div>
+    <p>Sem percentual de 25%, 30%, 45%. Só uma taxa fixa pequena e o custo do Pix. O resto é seu. Todo mês, toda semana, toda corrida.</p>
+    <a href="#" class="btn-outline-white">
+      Quero dirigir na Leaf
+      <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M2 7h10M8 3l4 4-4 4"/></svg>
+    </a>
+  </div>
+</div>
+
+<!-- CTA FINAL ══════════ -->
+<section class="cta-final">
+  <div class="cta-inner reveal">
+    <div class="cta-label">Chega de ficar no meio</div>
+    <div class="cta-h">
+      Baixe o Leaf.<br>
+      <em>Escolha um lado.</em>
+    </div>
+    <p class="cta-sub">O lado de quem não aceita que plataforma fique com 45% do trabalho de outra pessoa.</p>
+    <div class="store-row">
+      <a href="#" class="store-btn primary">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a10 10 0 110 20A10 10 0 0112 2z"/><path d="M8 14s1.5 2 4 2 4-2 4-2"/><line x1="9" y1="9" x2="9.01" y2="9"/><line x1="15" y1="9" x2="15.01" y2="9"/></svg>
+        App Store
+      </a>
+      <a href="#" class="store-btn">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="2" width="14" height="20" rx="2"/><line x1="12" y1="18" x2="12.01" y2="18"/></svg>
+        Google Play
+      </a>
+    </div>
+  </div>
+</section>
+
+<!-- FOOTER -->
+<footer>
+  <div class="footer-grid">
+    <div>
+      <a class="footer-logo" href="#"><img src="data:image/png;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/4gHYSUNDX1BST0ZJTEUAAQEAAAHIAAAAAAQwAABtbnRyUkdCIFhZWiAH4AABAAEAAAAAAABhY3NwAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAQAA9tYAAQAAAADTLQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAlkZXNjAAAA8AAAACRyWFlaAAABFAAAABRnWFlaAAABKAAAABRiWFlaAAABPAAAABR3dHB0AAABUAAAABRyVFJDAAABZAAAAChnVFJDAAABZAAAAChiVFJDAAABZAAAAChjcHJ0AAABjAAAADxtbHVjAAAAAAAAAAEAAAAMZW5VUwAAAAgAAAAcAHMAUgBHAEJYWVogAAAAAAAAb6IAADj1AAADkFhZWiAAAAAAAABimQAAt4UAABjaWFlaIAAAAAAAACSgAAAPhAAAts9YWVogAAAAAAAA9tYAAQAAAADTLXBhcmEAAAAAAAQAAAACZmYAAPKnAAANWQAAE9AAAApbAAAAAAAAAABtbHVjAAAAAAAAAAEAAAAMZW5VUwAAACAAAAAcAEcAbwBvAGcAbABlACAASQBuAGMALgAgADIAMAAxADb/2wBDAAUDBAQEAwUEBAQFBQUGBwwIBwcHBw8LCwkMEQ8SEhEPERETFhwXExQaFRERGCEYGh0dHx8fExciJCIeJBweHx7/2wBDAQUFBQcGBw4ICA4eFBEUHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh7/wAARCAXcBdwDASIAAhEBAxEB/8QAHQABAAMAAwEBAQAAAAAAAAAAAAcICQMFBgQCAf/EAF4QAQABAwICAggNDgwEBQMFAAABAgMEBQYHEQghCRITGDFBUdMUIlNWYXF0dZKTlLGyFTI1Njc4QlRygZGh0dIXIzNSVVdic4KVorMWwcLDJCVDY7Q0g6NERWSFpP/EABQBAQAAAAAAAAAAAAAAAAAAAAD/xAAUEQEAAAAAAAAAAAAAAAAAAAAA/9oADAMBAAIRAxEAPwCmQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA+3StI1XVqrlOl6Zm59VqIm5GNYquTRE+Dn2sTyff/AMH7t9a2uf5fd/dB0Y7z/g/dvrW1z/L7v7p/wfu31ra5/l9390HRjvP+D92+tbXP8vu/un/B+7fWtrn+X3f3QdGO8/4P3b61tc/y+7+6f8H7t9a2uf5fd/dB0Y5czGycPJuYuXj3ce/bq7W5au0TTXRPkmJ64lxAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD1myeGu/d610xtfaeq6lbq6u727E02Y9u5Vyoj88px2f0L+IWpRTd3FrWjaDbnw26aqsq9H5qeVH+sFYhfrbHQt4eYPa167r2u6xcjw00VUY1ufzRE1f6kk6D0deDGjUURj7D0/Jqp8NebXcyZq9uLlUx+oGXj7cHSdUzuXoLTc3K5+DuNiqv5oa3aVszZ+kxEaXtTQsGI8HofT7Vvl8GmHeU000UxTTTFNMeCIjlEAyMxtg77yY54+ytyXo/wDb0u9V81L7KeFvE6qOdPDnd9UexomT+41oAZMTwr4nx4eHG8Y9vRMn9x8uRw84gY0c8jY257Mf+5pN+n56WuIDHbP0bWMCJnO0rOxYjw92x66Pnh8DZeqIqiaaoiYnwxLotX2Xs/WKaqdW2poWfFXh9E6fauc/hUyDIUafbh6N/BfWqau7bIw8OufBXg3bmPNPtRRVFP6YRjuvoUbKzIrr23unWdJuTHVRlUUZVuJ/N2lXL88goeLGb16HvFLRYuXtEuaVuOxTHOIx7/cb0/4LnKP0VSg7dm0d0bSzPQe5tv6lpF7nyiMvHqtxV+TMxyqj2Y5g6QAAAAAAAAAAAAAAAAAAAAAAfZo+lanrOdRgaRp2XqGXc+ssYtmq7cq9qmmJlM2y+irxh3HTRdyNGxtAx6pj+M1TIi3Vy/u6Iqrj88QCDRdPa/Qgw6aKa90b7v3KvwrOnYcURHtV1zPPx/gwk7b/AETODGlzTVk6NqOr1U+PN1C51+3FvtI/UDN5/aYmqYimJmZ8UNXNF4N8KdHmJwOHu3Kao8Fd3Aou1R+euJl6zTtF0bToiNP0nAw4jwRYxqLfzQDIrE27uDMiJxNC1TIifBNrEuVc/wBEOzs8PN/34ibOxtz3YnwdppN+fmpa4gMl44WcTp8HDneE+1omT+4/s8KuKEeHhvvGP/6TJ/cazgMk7vDPiPa/leH+7KPytHyI/wCh8ORszeGNz9EbU12zy8PdNOu0/PS16AY35WDm4k8srDyLE/8AuW5p+eHztlrtu3domi7bprpnwxVHOJdLqOzdoalExqO1dCzInwxf0+1c5/ppBkGNT9W4DcHdU7b0Vw80OjtvD6Gszj/7c0vE650Q+DmodvOJhaxpM1dcehNQqqiPzXYrBnMLq7k6D+DVRVXtzfuTaq8VvPwqa4n/AB0VU8vgon3h0SeL2hU3LuBhabuCzT188DLiK+X5FyKJn2o5ggIdxufa25Nr5foTceg6lpN/nyijMxq7Xbe120df5nTgAAAAAAAAAAA/dFq7cjnRarqjyxTMg/A5fQ2R6hd+BJ6GyPULvwJBxDl9DZHqF34EnobI9Qu/AkHEOX0NkeoXfgSehsj1C78CQcQ5fQ2R6hd+BJ6GyPULvwJBxDl9DZHqF34EnobI9Qu/AkHEOX0NkeoXfgSehsj1C78CQcQ5fQ2R6hd+BJ6GyPULvwJBxDl9DZHqF34EnobI9Qu/AkHEOX0NkeoXfgSehsj1C78CQcQ5fQ2R6hd+BJ6GyPULvwJBxDl9DZHqF34EnobI9Qu/AkHEOX0NkeoXfgSehsj1C78CQcQ5fQ2R6hd+BJ6GyPULvwJBxDl9DZHqF34EvzctXbcRNy3XRz8HbUzAPwAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAC33Y0pn/iDesc55ehcTq/x3V2lJOxpfbDvX3JifTuLtgAAAAAAyx6UczPSE3tzn/wDdK/mhGqSulH98Jvb30ufNCNQAAAAAAAAAAAAAAAAAAAAAAAAAAAAHNh4uTm5VrEw8e9k5F2qKbdq1RNdddU+CIiOuZTzwO6Le9t/Rj6tr8V7Y0C5EV03si3zyb9P/ALdqeUxE/wA6rlHjiKl2+E/B/YXDLDijbGi26c2ae1u6jkcruVd8vOuY9LE/zaYpj2AUz4U9EXiBuiLOduq7a2np1fKrtL9PdMuqPYtRMRR/jmJjyStTw26NvCjZMWr9rQKda1CiIn0Zq0xfq5+WKJjudP5qefsphAfm1botW6bdqimiimOVNNMcoiPJEP0AAAAAAAAAAAAAD5tT0/A1TCuYWp4ONnYtyOVdjItU3LdXt01RMS+kBX3iZ0S+GO6ouZOh2r+1M+rrivB9PjzPs2ap5RHsUTSqjxa6NPEzYEXcynTY3BpFHOfRumUzcminy12vr6fZnlNMeVpgAxnGm/Gbo68POJNF7MuYMaHrlfOY1LAoimqury3aPrbntzyq/tQo3xs4E774V5Fd/VcL6oaLNURb1bDpmqzPPwRXHht1exV1T4pkEWAAAAAAAAAAAAAAD6NOwszUc6xgafi38vLyK4t2bFm3NddyqeqKaaY65mfJC5HR+6IVumjG3DxVnt65iLlrQ7NzlFP9/XHh/Ipn26p64BWThdws3zxJ1D0NtPQ7+VZpq7W9mXP4vGs/lXJ6uf8AZjnVPiiVuuFnQz2tpMWs3f2rXtfy45TOHizVYxaZ8k1fylft86PaWf0jTdO0fTbGm6Vg42BhY9PaWcfHtRbt26fJFMdUPqB0+1drbb2pp9On7b0PT9Jxojl2mJYpt9t7NUxHOqfZnnLuAAAAAAAAAAAAAAAAAB82p6fgaphV4Wp4ONnYtzqrs5Fqm5RV7dNUTEoM4kdE/hZuqm5f0nDv7Wz6uuLmnVfxMz/as1el5exT2qfAGbHFnov8S9i03s3DwqdzaRb51eitNpmq5RT5a7P10ePn2vbRHlQfVE0zMTExMdUxPibLog419HnYHE21ey72FTouvV85p1TBtxTXVV/7tHVTcj2+VXkqgGYwkTjVwc3nwo1WMfcGFF7Tr1c04mp4/OrHv+SOf4FfL8GrlPh5c460dgAAAAAAL+djnoor4L6x21FNXLX7vXNMeoWFA1/uxyfcX1j3/u/7FgFl+42fUqPgwdxs+pUfBh+wH47jZ9So+DB3Gz6lR8GH7AfjuNn1Kj4MHcbPqVHwYfsB+O42fUqPgwdxs+pUfBh+wH47jZ9So+DB3Gz6lR8GH7AfjuNn1Kj4MHcbPqVHwYfsB+O42fUqPgwdxs+pUfBh+wH47jZ9So+DB3Gz6lR8GH7AfjuNn1Kj4MHcbPqVHwYfsB+O42fUqPgwdxs+pUfBh+wH47jZ9So+DB3Gz6lR8GH7AfjuNn1Kj4MHcbPqVHwYfsB+O42fUqPgwdxs+pUfBh+wH47jZ9So+DConZK6KKNvbL7Wimnnl5fgjl+BbW+VC7Jb9r2yvdeX9C2CkgAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAALe9jS+2HevuTE+ncXbUk7Gl9sO9fcmJ9O4u2AAAAAADLHpR/fCb299LnzQjVJXSj++E3t76XPmhGoAAAAAAAAAAAAAAAAAAAAAAAAAJV6PfBLcvFzXO1xKatP0DGriM7VLlHOmjx9pbj8O5MeLwR4ZmOccw8bw82Ruff+4rWg7V0q9qGZXymuaY5W7NHPlNdyqeqimPLPtRznqX26P/AEYtp8O4x9Z3DFjce5qPTReuW+eNiz/7VufDMfz6uvxxFKVeF/D3avDfbdGg7U06nFsRyqvXqvTXsmv+fcr/AAqv1R4IiI6nqgAAAAAAAAAAAAAAAAAAAAAAHFl4+Pl4t3Fy7FrIx7tE0XLV2iKqK6Z6piYnqmJ8jlAU/wCkT0SMbKoydy8K7dGPkRE3L2h1VcrdyfDPcKp+tn+xPV5JjqiaXahh5en517Bz8W9i5Viubd6zeomiu3VE8ppqpnriY8ktkULdJLgBt/ixp9epYnctK3XZt8sfPin0t+Ijqt34jrqp8UVfXU+LnHpZDNAdzvXa+u7N3Ll7d3Jp13A1LEr7W5ar8ceKqmY6qqZjriqOqYdMAAAAAAAAA7jZm2dc3huXD27tzT7ufqWZX2lq1RH6aqp8FNMR1zVPVERzfHoumahrWrYmk6ViXczOzLtNnHsWqedVyuqeURH52lnRg4Kabwk2nFeTTZyt0ahbidSzIjnFEeGLFufFRTPhn8KY5z+DFIcHRu4A7e4TabRqGT3LVN1X7fLJ1CafS2YmOu3YifrafFNX11Xj5RypiZwAAAAAAAAAAAAAAAAAAAAAAAAB8G4tF0ncWi5Wja5p+PqGn5VE0X8e/RFVFcf8p8cTHXE9cdbPjpS9HXUeGWRd3JtuL+o7Ru3OuqfTXdPqmeqi55aOfVTX7UT18pq0WcGoYeJqGDfwM/GtZWJkW6rV6zdoiqi5RVHKaaonqmJieXIGNwnLpacD7/Crc9OqaNbu3dp6pdn0HXMzVOLc65nHrn2uc0zPXMRPhmmZQaAAAAAv92OT7i+se/8Ad/2LCgK/3Y5PuL6x7/3f9iwCzQAAAAAAAAAAAAAAAAAAAAAAAAACoXZLfte2V7ry/oW1vVQuyW/a9sr3Xl/QtgpIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAC3vY0vth3r7kxPp3F21JOxpfbDvX3JifTuLtgAAAAAAyx6Uf3wm9vfS580I1SV0o/vhN7e+lz5oRqAAAAAAAAAAAAAAAAAAAAAAACS+jvwk1bi5vejScabmLpOJ2t3VM6I/kLUz1U08+qblXKYpj2JnwRIO+6L/ArU+LevTm503sHamDciM3MpjlVeq8PcbXPw1THLnPgpiec9cxE6PbZ0LSNtaFiaFoOn2NP03DtxbsY9mnlTTHzzM+GZnrmZmZ5y/G0tvaPtTbmDt7QMG3habg2otWLNEeCPHMz4ZqmeczM9czMzPXLtAAAAAAAAAAAAJmIiZmYiI8MyAOsy9xbfw55Zeu6Zj8vVcu3T88uvr35saieVe89uUz7OqWY/wCoHox0Fjeuzb88rG7dAuz5KNRsz81Tt8PPwcyOeHmY+RHltXaa/mkH0AAAAAAAAAAAAi3pE8GdC4u7XnGyIt4WvYlEzpupRT1258Pc6+XXVbmfDHi8MdfhzS3rtjW9nbnztt7iwa8LUsK52l23V4J8cVUz4KqZjlMTHVMTEtf0J9K3gjicV9q+jtLt2rG7NMtVTg3p5U+iaPDOPXPkmefazP1tU+KJq5hmmObOxcnBzb+FmWLuPk49yq1es3KZprt10zyqpqieuJiYmJhwgAAAAAlroq8LquKPFPFwMy1VOhabEZmq1eKq3E+ltc/LXV6Xy9r20x4AWR6B/BmnQ9Ft8TtxYn/muo2pjSLVynrx8aqOu97FVyPBPio8fp5ha1+bVu3atUWrVFNu3RTFNNNMcopiPBER4ofoAAAAAAAAAAAcWRk4+PT22RftWafLXXFMfrdZkbp2xjzMZG49Hs8vD2+bbp+eQdwPO1782NRPKvee3KeXl1OzH/U/kb+2LPg3ptufa1Sz+8D0Y6O1vLaF2eVrdWhXJn+bqFqf+p9+Nq+k5MxGNqmFe5+Dud+mr5pB9oRMTHOOuAAAAAAAAAAAHQcQtpaNvrZ2o7W17H7tg59qaKpj663V4ablM+KqmrlVE+WGVXE3Zuq7A3zqm0tZpj0VgXpoi5THKm9bnrouU/2aqZifY58p64lroql2Q7h1Rqm0cDiLp9iPRmkVU4mfNMddeNXV6SqfyLk8vauT5AUUAAAAX+7HJ9xfWPf+7/sWFAV/uxyfcX1j3/u/7FgFmgAAAAAAAAAAAAAAAAAAAAAAAAAFQuyW/a9sr3Xl/Qtreqhdkt+17ZXuvL+hbBSQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFvexpfbDvX3JifTuLtqSdjS+2HevuTE+ncXbAAAAAABlj0o/vhN7e+lz5oRqkrpR/fCb299LnzQjUAAAAAAAAAAAAAAAAAAAAAAHcbL21q+8N1adtnQcWcnUdQvRas0eKPHNVU+KmmImqZ8URMtSuCnDjRuF2wsPbGkUxcuUx3XNy5p5VZV+Yjtrk+SOrlEeKmIjr8KGOghwija20f4QdcxeWta3Zj0FRXT6bGw564n2KrnVV+TFPg5zCzoAAAAAAAABMxETMzERHXMyh/jt0g9k8LLdzAvXvqzuHtOdvS8WuOdE+Kb1fXFuPYnnV5KeXWo3xf4+cReJV27Y1PVqtO0iufS6ZgTNqz2vkrnn21z/FMx5IgF5+JPSN4UbGruY2XuCNW1C3zicPSqYyK4nyTVExbpn2JqifYV63t02dw5NVyzs7aOBp9vwU39Ru1ZFz2+0p7WmmfbmpUkBK+5ukXxl1+ur0RvjPw7c+C3p9NGLER7duIq/TMo91Xcu49WqmrVdf1XPmfDOTmXLv0pl1QAAA5Me/fx7kXMe9ctVx+FRVNM/phxgPY7f4pcSNAqidI3zuHFpjl6SM+5VR1f2apmmf0JP2j0uuL2i1W6NSy9L3BZp6ppzcOKK5j8q12nX7M81fwF79hdNPaGozbx947d1DQ7s9VWRi1RlWOflmOVNcR7ERUsNsffezt74c5e09x6dq1uI5102Lsd0t/lUTyqp/PEMin1aVqOoaTn2s/S87JwcuzPbW7+Pdqt3KJ8sVUzEwDY4UE4P9MDeG3qrOn77xf+JtNjlT6Ko7W3m248vPqpue1Vymf5y53DLiPs7iPo31U2lrNnNop/lrE+kv2J8ldueun2/BPimQetAAAAAAABTrp68GKbtivirtrE5XbcU0a7Yt0/X0+CnJiPLHVTX7Ha1eKqZpY2SzcXGzsK/hZli3kY2RbqtXrVyntqblFUcqqZifDExMxyZd9Jfhff4VcTsvRbVFyrR8qPRWlXquvtrFUz6SZ8dVE86Z8c8on8KARiAAAA0w6HXDmnh9wdwa8ux3PWdbinUM+Zj01MVR/FWp8fpaJjnHiqqrUc6MOxP4QuNGh6Jfs900+xc9HahExzjuFqYqmmfYqq7Wj/G1LAAAAAAABBfSd6QukcKcSrRNIosapu29b7ajGqnnaw6ZjquXuXXznwxRHKZjrnlExMhLO8t27a2bpFWrbp1vC0nDp6ouZFyKZrnyU0+GufYpiZVm4idNXb+DcuYuxttZOr1xPKMzPr9D2Z9mmiOddUe32kqdb63jubfGvXdc3Tq+TqebcmeVV2r0tuP5tFMelop9imIh0AJz3V0rOMuuVVxj65iaJZqn+S07Dop5f4q+2r/WjnWuJnETWq5q1TfO48qJ/Br1K72vwYq5R+h5IBzZWXlZVU15OTev1T187lc1T+twgAAA/sTMTziZiY8cP4A7PT9w6/p0xOn65qeJMeCbGXXRy/RL12icbOLWjRTGDxC3B2tPgpv5dV+mPzXO2hHwCxW1umHxY0uuiNWjRtetR1VeiMTuVcx7FVqaYifbiU0bE6aWytSqt2N3bf1LQLk9VV/HqjLsRPlnlFNcfmpqUNAa97L3ltbeem/VHauvYGr43V21WNdiqqj2K6frqZ9iqIl3rHrbG4Nc2xq9rV9varmaXn2Z9Jfxrs0Ve1PLwx5YnqleTovdKDH3pl4uz9/VY+FuC7MW8PPoiKLGdV4qKo8FF2fFy9LVPVHKeUSFoQAAAAAHUb00DD3TtHVtt6hTE4up4d3FudXPtYrpmO2j2Y5849mHbgMcta07K0jWc3Sc2jueVhZFzHv0/wA2uiqaao/TEvkTH0ztAp2/0idyU26O1s6hVb1C31cuc3aImufjIrQ4AAAv92OT7i+se/8Ad/2LCgK/3Y5PuL6x7/3f9iwCzQAAAAAD451bSonlOpYXx9P7X2Sxw1OIjUsqI6oi9X9KQbBfVbSv6Twvj6f2n1W0r+k8L4+n9rHQBsX9VtK/pPC+Pp/afVbSv6Twvj6f2sdAGxf1W0r+k8L4+n9p9VtK/pPC+Pp/ax0AbF/VbSv6Twvj6f2n1W0r+k8L4+n9rHQBsX9VtK/pPC+Pp/afVbSv6Twvj6f2sdAGxf1W0r+k8L4+n9p9VtK/pPC+Pp/ax0AbF/VbSv6Twvj6f2n1W0r+k8L4+n9rHQBsX9VtK/pPC+Pp/afVbSv6Twvj6f2sdAGxf1W0r+k8L4+n9p9VtK/pPC+Pp/ax0AbF/VbSv6Twvj6f2qk9kky8TK29sz0NlWL/AGuXlc+53Iq5ekt+RSoAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABb3saX2w719yYn07i7aknY0vth3r7kxPp3F2wAAAAAAZY9KP74Te3vpc+aEapK6Uf3wm9vfS580I1AAAAAAAAAAAAAAAAAAAAASv0V+GVXE/ivhabl2aqtE0+IzdUq8VVqmY5Wuflrq5U+Xl20x4EUNJOhNw8p2PwbxdRy7HaavuLtdQyZmOVVNqY/iLftRRPbcp8E3KoBOduii3bpt26aaKKYiKaaY5RER4IiH9AAAAAAACqYpiZmYiI65mfEpx0oulRVj3snZ/C3Np7emZtZuuW+vlPgmjHn/ufB8VTqOmf0hrmp5GZw32LnzTp9uZs6xqNmrryavBVYt1R/wCnHgqqj66eqPSxPbVFByZF69kZFzIyLtd69dqmu5crqmqquqZ5zMzPXMzPjcYAAAAAAAAAAAAAO22nuTXdp65Y1zbeq5Wl6jYn+Lv49fa1cvHE+KqmfHTPOJ8cOpAaGdGTpM6XxErx9r7tpsaTumYiizXE9rj6hP8AY5/WXP7E+H8H+bFjGNNuuu3cpuW66qK6JiqmqmeUxMeCYlfToc9Iad5WbGwt7ZkTuKzRywM65P2Qopj62ufVYiPD+HEc/DEzUFogAAAAAENdL7hlHEjhNlegcfumu6LFWbp00xzqr5R/GWY/Lpjqjx1U0JlAYziZumJw7jh/xlz6cKx3LSNZidRwYpjlTR28z3S3Hijta+25R4qZpQyAD+xEzMRETMz4IgF5exybNjC2jru+cm1yvalkRg4szHXFm111zHsVV1RH/wBtbJ47gntWnZPCfbW2O59pdwsC3GRHLl/H1R292fh1VPYgAAAAAAizpN8V8bhNw6u6nZ7nd1zOmcbScevriq7y67lUeOiiJ5z5ZmmOrtubMXWdSz9Z1XK1XVcu9mZ2XdqvZF+7V21dyuqec1TKWemFxCr3/wAZ9S9D35r0nRap07ApifSzFEz3S5Hintq+2nn46Yp8iGwAAAAAAAAAAAAAAH9oqqoriuiqaaqZ5xMTymJfwBpj0PeJmTxJ4S2bur35va5pF30DnXKp9Ne5RE27s+zVTPKZ8dVNUpnUV7G5rdWPxA3Nt6q5MW87TKMqKfFNVm5FPzXpXqAAAAAABRDskWm0WOJe29WppiJy9ImzVPlm3dqn5rkKrLndkwxae57FzY+u551qfa/iJj/mpiAAAv8Adjk+4vrHv/d/2LCgK/3Y5PuL6x7/AN3/AGLALNAAAAAASxw1T7J5X99X9KWx8scNU+yeV/fV/SkHzAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAt72NL7Yd6+5MT6dxdtSTsaX2w719yYn07i7YAAAAAAMselH98Jvb30ufNCNUldKP74Te3vpc+aEagAAAAAAAAAAAAAAAAAAAA93wB2VVxB4u7f2xXRNWJfyYu5vLxY9uO3udfi500zTHszDVy3RRbt027dNNFFMRFNNMcoiI8UKX9jb2lTXlbn3xftc+500aXi1THjnlcu/n5Ra/TK6IAAAAAACtPTe4017J23Gx9t5c0bh1ixM5N63VyqwsWeqZiY8FdfXEeOIiqeqe1lOvEnd2l7E2Nq27NYq/wDCadjzcmiJ5VXa/BRbp/tVVTTTHsyyi3zubVd5bu1PdGt3+7Z+o35vXZ6+VPipop5+CmmmIpiPFERAOlAAAAAAAAAAAAAAAAAAc2DlZODm2M3CyLuPlY9ym7ZvW6pprt10zzpqpmOuJiYiYlwgNOuivxds8WOH1ORm12qNx6Z2tjVbNPKO2mY9JepjxU1xEzy8VUVR4IjnLzKvo8cSMrhdxP07cVNdyrTq6vQ2qWaevuuNXMdt1eOqnlFcezTEeCZan4eTj5mJZy8W9Rex79um5auUTzproqjnFUT44mJ5g5QAAAAAV96eGxY3VwZua9i2e31Hbd30ZRMRzqnHq5U3qfaiO1rn+7Z0tkNUwcXU9MytNzrNN7Fy7Ndi/bq8FdFdM01RPtxMwyO4ibaydnb71va2XNVV3TM27jdvMcu3ppqnta/aqp5VfnB0D3/R123G7eN+0tErtzcs3NRovX6eXhtWud2uJ9iaaJj87wCzvY6NBjP4tavr1yjtqNK0qaaJ5fW3L1cUxPwabgL9gAAAAAPD8e92zsbg9ubctu53PJxsKqjFq5+C/cmLdqfzV10z+Z7hVfsj24pwuHG39tW7na16pqNWRciJ66rdijwe1212ifzAohMzVMzMzMz1zMv4AAAAAAAAAAAAAAAAALA9AK7Vb6QuNRTM8rmmZVNXtcqZ+eIaLs6+x/WarvSCt1xE8rWk5Nc+16Sn/qaKAAAAAAAqB2S6P/Itkz//ACcz6NpSZdrsl32B2T7qy/o2lJQAAF/uxyfcX1j3/u/7FhQFf7scn3F9Y9/7v+xYBZoAAAAACWOGqfZPK/vq/pS2Pljhqn2Tyv76v6Ug+YAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFvexpfbDvX3JifTuLtqSdjS+2HevuTE+ncXbAAAAAABlj0o/vhN7e+lz5oRqkrpR/fCb299LnzQjUAAAAAAAAAAAAAAAAAAAHYba0q/rm49M0TG5931DLtYtvlH4VyuKY/XINLOh/tiNr9H3bViu12mRqFmdSv845TVN6e2omf/ALfc4/Mlxwabh2NP07GwMWjtMfGtUWbVPkppiIiP0Q5wAAAAAAUj7IpxDqyta0vhrp9+e4YVNOfqcUz9deqiYtUT+TRM1cvBPdKfIqGt5v7omcVN4701jdGo7n2t6J1PLuZFVPdsie0iqfS0R/FeCmnlTHsRDpO8n4jeubavxt/zQKvC0PeT8RvXNtX42/5o7yfiN65tq/G3/NAq8LQ95PxG9c21fjb/AJo7yfiN65tq/G3/ADQKvC0PeT8RvXNtX42/5o7yfiN65tq/G3/NAq8LQ95PxG9c21fjb/mjvJ+I3rm2r8bf80CrwtD3k/Eb1zbV+Nv+aO8n4jeubavxt/zQKvC0PeT8RvXNtX42/wCaO8n4jeubavxt/wA0CrwtD3k/Eb1zbV+Nv+aO8n4jeubavxt/zQKvC0PeT8RvXNtX42/5o7yfiN65tq/G3/NAq8LQ95PxG9c21fjb/mjvJ+I3rm2r8bf80CrwtD3k/Eb1zbV+Nv8AmjvJ+I3rm2r8bf8ANAq80N6BG/6t1cJa9s51+bmo7auRjx2085qxa+c2Z/w8q6PYiinyoT7yfiN65tq/G3/NJS6MfR84h8JOJH1ezdd2/l6VlYlzFzrGNdvTcqpnlVRVTFVuI5xXTT4Z8E1eUFpQAAAAAFAeyH7UjSOLWn7nsW+1s69gR3Srl4b9jlRV/om0v8rj2QfbUavwSs65bt872h6jbvVVRHgtXf4qqPhVW5/MDPV67h9xK3xsC3mW9n7gv6RTnTRVkxat26u6TR23a8+2pnwdtV+l5EBK/fG8bPX/AJ/xFn9w743jZ6/8/wCIs/uIoASv3xvGz1/5/wARZ/cO+N42ev8Az/iLP7iKAEr98bxs9f8An/EWf3DvjeNnr/z/AIiz+4igBK/fG8bPX/n/ABFn9x5DiBxB3lv/ACMS/vDXsjVrmHRVRjzdpop7nFUxNXKKYiOvlH6IeXAAc2Ji5OXeiziY93Iu1eCi1RNVU/mgHCPa6Lwm4nazEVabsDcl6ifBXOnXaKJ/xVREfret0voycbs/lNOybuPTP4WRm49vl+aa+f6gQ6LA4nRC4yX+XdcPRcb+91GJ+jEu5wehZxOuz/4vXdq40exkXq5/VaBWUW0xOhBuerl6L31o9ry9yxLlfzzS7vA6DduI55/EeufYs6Ty/XN0FMBejD6EO0qeXoze2uXvL3LHtW/n7Z3eD0L+FlmmPROrbpyqvLOVZpj9VoGfg0cw+iNwYscu66Zq2V/e6lXH0e1d3gdGTgjiU8o2TbvT5b2dkV/PcBmQNUMTgRwexoiLfDvQauXquP3T6Uy7zB4ZcOMGmIxNhbXs8vBNOlWOf6e1Bkm+rF07UMqYjGwcq/M+Dudqqr5oa9Ym3NvYfL0JoWl4/LwdyxLdPzQ7K3RRbpim3RTRTHgimOUAyO0/h/vzUaqYwNlbjyu28HctMvVRP6KXtNt9HHjNrt6iizsjNwqKvDd1CujGppjyzFcxV+iJlp+AgXopcAP4I7ebret6hY1DceoWYsVTjxPccW1ziqaKZmImqZqimZqmI+tiIjwzM9AAAAAAACoPZLvsDsn3Vl/RtKSrtdku+wOyfdWX9G0pKAAAv92OT7i+se/93/YsKAr/AHY5PuL6x7/3f9iwCzQAAAAAEscNU+yeV/fV/Slsey7zuAnGO7nZF2nh7rPa13aqo9JT4Jmf7QIrEm/wAcZf6vdZ+BT+0/gA4y/1e6z8Cn9oIyEm/wAAHGX+r3WfgU/tP4AOMv8AV7rPwKf2gjISb/ABxl/q91n4FP7T+ADjL/V7rPwKf2gjISb/AAAcZf6vdZ+BT+0/gA4y/wBXus/Ap/aCMhJv8AHGX+r3WfgU/tP4AOMv9Xus/Ap/aCMhJv8AABxl/q91n4FP7T+ADjL/AFe6z8Cn9oIyEm/wAcZf6vdZ+BT+0/gA4y/1e6z8Cn9oIyEm/wAAHGX+r3WfgU/tP4AOMv8AV7rPwKf2gjISb/ABxl/q91n4FP7T+ADjL/V7rPwKf2gjIeg3vsvdWyM+xg7r0TK0jJyLXdrVvIiImujnMc45T5YmHnwAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAW97Gl9sO9fcmJ9O4u2pJ2NL7Yd6+5MT6dxdsAAAAAAGWPSj++E3t76XPmhGqSulH98Jvb30ufNCNQAAAAAAAAAAAAAAAAAAEtdD/Rfq50i9p2KqYm3i5FebXM+LuNuq5T/qppRKsv2OrTIy+NOpahXHOMHRbs0+xVXdt0x+rtgaAgAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAPH8a9Ajc/CPdWhdr21eXpd+m1HLn/GRRNVH+qKXsCYiYmJiJifDEgxnHoOJGjzt7iFuLQu07SNP1TIxqaf7NFyqmP1RDz4AAAPccLOFG+uJWd6H2pod7IsU1drezbv8XjWfyrk9XP8Asxzq9gHh3Zbd0DXNx6hTp+gaPn6rl1cuVnEx6rtXX45imJ5R7K8XCvobbQ0aizm781K9uLOjlVViY9VVjEpnyTMenr9vnTHsLI7b2/oW2tOp07b+j4GlYdPgs4lim1T7cxTHXPsyDP8A2L0ROKuvxbv6xb07bWNV1z6Mv90vcvYt2+fX7FU0pr2h0Kdl4UUXNz7n1jV7sRE1W8WijFtTPk/DqmPD44WoARftno+8HNvxROHsTS8i5R/6mfFWXMz5eV2ao/RCRNK0nS9Js9w0vTcPAtfzMaxTbp/RTEPsAAAAAAAAAAAAAAAAAAAAAAAAAVB7Jd9gdk+6sv6NpSVdrsl32B2T7qy/o2lJQAAF/uxyfcX1j3/u/wCxYUBX+7HJ9xfWPf8Au/7FgFmgAAAAAAAAAAAAAAAAAAAAAAAAAUO7JH91HbfvL/37irC0/ZI/uo7b95f+/cVYAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABb3saX2w719yYn07i7aknY0vth3r7kxPp3F2wAAAAAAZY9KP74Te3vpc+aEapK6Uf3wm9vfS580I1AAAAAAAAAAAAAAAAAAAW97GljRVuLeuXy67eJi2+f5Vdyf+hUJcvsZ9NPbb7q/C5YMfm/jwXNAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABmN0yNL+pPSP3XbinlRkXbWVT7PdLNFU/6pqRAsh2Q/T5xOOuJlxHpc3RLFzn5ZpuXaJ/VTCt4D6dK0/O1XUcfTdMw7+bm5NcW7Fixbmu5cqnwRTTHXMvv2XtjXN47mwtubdwLmdqWZc7S1ao/XVVPgppiOczM9URHNo50cOAm3eE2l0Zt6LWqbpv2+WVqM09VuJ8NuzE/W0eKZ+uq8fKOVMBEHR/6IWPZt424OKk92vTEXLeh2bnpKPH/H10/XT/Ypnl5ZnrhbnSdO0/SdOsabpeFjYOFj09pZx8e3Fu3bp8lNMdUQ+oAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABUHsl32B2T7qy/o2lJV2uyXfYHZPurL+jaUlAAAX+7HJ9xfWPf8Au/7FhQFf7scn3F9Y9/7v+xYBZoAAAAAAAAAAAAAAAAAAAAAAAAAFDuyR/dR237y/9+4qwtP2SP7qO2/eX/v3FWAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAW97Gl9sO9fcmJ9O4u2pJ2NL7Yd6+5MT6dxdsAAAAAAGWPSj++E3t76XPmhGqSulH98Jvb30ufNCNQAAAAAAAAAAAAAAAAAAFxOxn3eWpb5sTP11nCriPaqvRPzwp2td2NnLijiHunB5/y2k0XeXl7S7TH/WC9QAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAKN9kpxe03ptHN5fyunXrXP8AIuRP/WqnpuFl6lqONp2n413KzMq7TZsWbVM1V3K6p5U00xHhmZmIXF7Jjjx2uxMuI6+edbmfiJj/AJuToA8IKKMeeK2v40VXK+3s6HauU/Wx103Mj2566KfY7efHTIJi6LPBTB4TbS7vnUWcndWo24q1HKjlMWo8MWLc/wAymfDP4VXX4IpiJlAAAAAAAAAAAAAAAAAAAAHBlZmJi09tk5VixHluXIp+cHOOiy957PxImcrdmg4/Lw911G1Ty/TU6PO4w8KcKZjI4i7WiY8MUanarn/TVIPciKs7pF8FcKJm7v8A06vl6javXfoUS8xqXS54MYnPuGp6tn8vxfTq45/GdqCfBVLXOm3s2x28aLs7Xc6Yn0s5V21jxPwZrn9SfOC2873EHhjou8b+n0afc1K3crnGouzci32t2uiI7aYjn1U8/B4wexAAAAABUHsl32B2T7qy/o2lJV2uyXfYHZPurL+jaUlAAAX+7HJ9xfWPf+7/ALFhQFf7scn3F9Y9/wC7/sWAWaAAAAAAAAAAAAAAAAAAAAAAAAABQ7skf3Udt+8v/fuKsLT9kj+6jtv3l/79xVgAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFvexpfbDvX3JifTuLtqSdjS+2HevuTE+ncXbAAAAAABlj0o/vhN7e+lz5oRqkrpR/fCb299LnzQjUAAAAAAAAAAAAAAAAAABYPoAaj6C6QdnFmrl6P0vJx+Xl5RTd/wC2r4kboy6zToPH3ZmoV19pROqW8aurxRTe52Z5+xyuA1SAAAAAAeL4wcSdA4W7Zsbh3Jj6ldwb2VTi88KxFyqiuqmqqJqiao5R6SY5+WY8r2iL+lXterdvAPdOnWrXdMnHxfR2PEeHt7Exc5R7M001U/4geD78nhH+K7n+Q2/OHfk8I/xXc/yG35xnmA0M78nhH+K7n+Q2/OHfk8I/xXc/yG35xnmA0M78nhH+K7n+Q2/OHfk8I/xXc/yG35xnmA0M78nhH+K7n+Q2/OHfk8I/xXc/yG35xnmA0M78nhH+K7n+Q2/OHfk8I/xXc/yG35xnmA0M78nhH+K7n+Q2/OHfk8I/xXc/yG35xnmA0M78nhH+K7n+Q2/OHfk8I/xXc/yG35xnmA0M78nhH+K7n+Q2/OHfk8I/xXc/yG35xnmA0M78nhH+K7n+Q2/OHfk8I/xXc/yG35xnmA0M78nhH+K7n+Q2/OHfk8I/xXc/yG35xnmA0M78nhH+K7n+Q2/OHfk8I/xXc/yG35xnmA0M78nhH+K7n+Q2/OHfk8I/xXc/yG35xnmA0M78nhH+K7n+Q2/OHfk8I/xXc/yG35xnmA0M78nhH+K7n+Q2/OHfk8I/xXc/yG35xnmA0M78nhH+K7n+Q2/OHfk8I/xXc/yG35xnmA0M78nhH+K7n+Q2/OHfk8I/xXc/yG35xnmAtvxu31tjpMbx2BsrZVvV7N+NQvRl3MrGpo7nYqpomuunlVVz7Wi3XPL2F1dE0zB0XRsLR9Mx6MbBwbFGPj2qfBRbopimmI9qIhSzsb20qcrcm497ZFqJjBsUYGLMx+Hcntrkx7MU0Ux7VcrvgAAAAAAA4szKxsLEu5mZkWcbGs0Tcu3rtcUUW6YjnNVVU9UREeOQcoqhxk6Y+h6Pev6Vw502jXMqiZonUsvtqMWmf7FMcqrkezzpjyc4Vc37xv4pb1ruRrW8NRpxq5/+kw6/Q1iI8k0W+Xbf4ucg0t3PxA2Ptjto3Bu7RNNrp8NvIzbdNz4HPtp/QjbXelTwV0uuqi3uXI1KuPFh4F2qPhVU00/rZrVTNVU1VTMzM85mfG/gL86t01eHViuadO25uXN5fhV27Nqmf9cz+p5zP6cen0xMYHDvKuT4pvapTR+qLcqUgLdZnTh16qJ9CbA02z/e6hXc+ail0ud01+I1ymYw9t7Xx58U12r9yf8AchV8BYTM6YPGK/z7le0HF/utP58vh1VOlz+lLxvyo5U7voxo8lnTcaP1zbmUKgJOzOkBxlyufdeIWsU8/Uqqbf0aYdJn8V+J+d/9VxD3VcifF9Vr0R+iKuTxgDuMzdO58zn6L3HrGRz8Pdc25Xz/AEy6q7duXa+3u3K7lU+OqrnL8AAAAADT7od/e2bO9z3v/kXWYLT7oexNPRt2dExy/wDDXp//ANF0EtAAAAAAqD2S77A7J91Zf0bSkq7XZLvsDsn3Vl/RtKSgAAL/AHY5PuL6x7/3f9iwoCv92OT7i+se/wDd/wBiwCzQAAAAACKa+kbwUprmmrf2BzpnlP8AEX/3ErSxw1T7J5X99X9KQacd8dwT9f2D8nv/ALh3x3BP1/YPye/+4y+Aag98dwT9f2D8nv8A7h3x3BP1/YPye/8AuMvgGoPfHcE/X9g/J7/7h3x3BP1/YPye/wDuMvgGoPfHcE/X9g/J7/7h3x3BP1/YPye/+4y+Aag98dwT9f2D8nv/ALh3x3BP1/YPye/+4y+Aag98dwT9f2D8nv8A7h3x3BP1/YPye/8AuMvgGoPfHcE/X9g/J7/7h3x3BP1/YPye/wDuMvgGoPfHcE/X9g/J7/7h3x3BP1/YPye/+4y+Aag98dwT9f2D8nv/ALh3x3BP1/YPye/+4y+AWD6cu+tp793/AKHqO0das6ri4+ldwvXLdFdMUV91rq5emiPFMK+AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAC3vY0vth3r7kxPp3F21JOxpfbDvX3JifTuLtgAAAAAAyx6Uf3wm9vfS580I1SV0o/vhN7e+lz5oRqAAAAAAAAAAAAAAAAAAA58DKvYOdj5uNX2l/Hu03bdXkqpmJif0w4AGw21dXsbg2xpWu4sxNjUcOzl2+U847W5RFUfO7JBnQb3TG5OAGmYly7FeVol+7p13r6+1pnt7f5u0rpj/DKcwAAAAH5uUUXbdVu5RTXRXE01U1RziYnwxL9AMnOOOzLuwOK24NrVUVU2MTLqqxJn8LHr9Pann4/SVUxPsxLxS8nZDuG9Wpbe0/iTpljtsjS4jD1PtY66seqr+Lrn8muqY/+5HihRsAAAAAAAAAAAAAAAAAAAAB2G29E1Xceu4ehaJhXM3Uc27FrHsW+UTXVPi5zyiPbnqh165XY9eFszdyuKmr48xTTFeHosVx4Z+tvXo/XbifZueSAQf3tvG71hZnyrH84d7bxu9YWZ8qx/ONPgGYPe28bvWFmfKsfzh3tvG71hZnyrH840+AZg97bxu9YWZ8qx/OHe28bvWFmfKsfzjT4BmD3tvG71hZnyrH84+PXOBHE3bei5mvbq25d0XR8K1NzIy72RZqinxUUxTTXMzNVc00xEeOryNSlNuyN795WtE4c4N/rqn6pajFM+KOdNmif9dUx7FEglHoIaFGj9HnTcubcUXdWzMjNr6uufT9yp/02on86eHhOj1p/wBS+BmycPtYpmNExrlUf2q7cVz+uqXuwAAAAAAfm7XRat1XLldNFFETVVVVPKKYjwzMs6Olpx7z+JGv5G29vZdzH2fhXZpoiiZpnUK6Z/la/wCxz+tpnxcqp6+qmzvTp3xf2jwUvaZg3ptZ24b/ANT6aqZ5VU2O1mq9P56Yiif7xnGAAAAAAAAAAAAAAAAAAA1V6Nem3NJ4CbKw7tE0V/UizeqpnwxNyO6f9bMTYu3svdm89H2zgxM5Gp5trGpmI59r29URNU+xEc5n2Ia76diWNP0/GwMWjuePjWqbNqn+bTTEREfogHOAAAAACoPZLvsDsn3Vl/RtKSrtdku+wOyfdWX9G0pKAAAv92OT7i+se/8Ad/2LCgK/3Y5PuL6x7/3f9iwCzQAAAAAEscNU+yeV/fV/SlsfLHDVPsnlf31f0pB8wAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAALe9jS+2HevuTE+ncXbUk7Gl9sO9fcmJ9O4u2AAAAAADLHpR/fCb299LnzQjVJXSj++E3t76XPmhGoAAAAAAAAAAAAAAAAAAAALS9jr3lGlcRdW2bk3e1sa5i92x6Zn/9RY5zyj27dVcz+RC+bIHYm483aG8tI3Pp0/8AitMy7eTRHPlFfa1c5pn2Ko5xPsTLW7bWs4G4tu6dr2l3e64WoY1vJsV+WiumKo5+SeU9cA7AAAAAAHya1pmBrWj5mkapjUZWDm2K8fIs1/W3LdcTTVTPtxMssePnDTUuFfEXN23lxcu4NU9203Kqj/6jHmfSz+VH1tUeWJ8UxM6so06RPCXS+Lmxq9IyKreLq2JNV7S82qP5G7MddNXLr7nVyiKo9iJ8NMAyyHabr0DV9rbizdv69g3cHUsG7Nq/ZuR10z5YnwTExymJjqmJiY6pdWAAAAAAAAAAAAAAAAAD6dLwczVNSxtN07Gu5WZlXabNixap7au5XVPKmmI8czMxAPZcCuG+p8UuImDtjB7e1jTPdtQyqY5xjY9Mx29ft9cU0x46qo8XOWp23tH07b+hYOh6Ri0YuBg2KMfHs0eCiimOUR7M+z4Z8KNujDwiw+E2waMS/Tau7h1CKb2rZNPX6fl6W1TP8yjnMR5ZmqfHyiWAAAAAAAfHrep4Oi6Nm6xqeRTj4ODj15GRdq8FFuimaqqp9qIlk1xV3hmb+4h63u7O7am5qOVVct26p59ytR6W3b/w0RTT+ZcnshHEmnRdm4nDvTcjln63yyM7tZ67eJRV6WmfJ29dP6LdUT4VDwa8cNKItcONs248FGkYlMfms0vQPOcLrkXuGe1r1M84r0bEqifbs0S9GAAAAAACkvZLM27Vr2y9O7ae5W8XKv8Aa+LtqqrdPP8ARQqCuH2S3T7lOp7K1WKZm1XZy8eZ8k01W6oj/VP6FPAAAAAAAAAAAAAAAAAASR0feE2s8Wt7W9HwouY2l4803NUz+15049rn4I8U3KuUxTT7c+CJmAnPsefDK7l61l8T9Ux5jFw4rw9J7ePr71Ucrt2PYppmaInwTNdXjpXddbtbQtK2xt3A2/omJRiadgWabOPZo/Bpjyz45nwzM9czMzPXLsgAAAAAAVB7Jd9gdk+6sv6NpSVdrsl32B2T7qy/o2lJQAAF/uxyfcX1j3/u/wCxYUBX+7HJ9xfWPf8Au/7FgFmgAAAAAJY4ap9k8r++r+lLY+WOGqfZPK/vq/pSD5gAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAW97Gl9sO9fcmJ9O4u2pJ2NL7Yd6+5MT6dxdsAAAAAAGWPSj++E3t76XPmhGqSulH98Jvb30ufNCNQAAAAAAAAAAAAAAAAAAAAF6ux5cRo1XaWdw51G/wA8zR5nK0+Kp668Wur09MfkXKuftXIjxKKvUcKd6alw94gaRu7S+dV3AvxVctc+UXrU+luW59iqmZjn4uqfEDXAdZtPXtM3RtrTtxaLkRkafqGPTkY9yPDNNUc+Ux4qo8Ex4piYdmAAAAAACHOkvwJ0bi5osZViq1p26MO3NOFnzT6W5T4e43uXXNHOZ5T4aZnnHOJmJzk3rtbX9mbkytvbl029p+o41XKu1cjqmPFVTPgqpnxVR1S1+eE4x8KdocU9B+pu5cH/AMTapn0Hn2eVORi1T46avHHlpnnE+TnymAyiEvccej9vnhdkXcu/i1axt+Jnueq4duZopj/3aOubU+3zp8lUohAAAAAAAAAAAAAB3Wzdq7i3jrlrRNsaRlapn3frbVijn2sfzqpnqpp/tTMRAOmppqqqimmJqqmeUREdcyvp0L+ANW0MWzxA3lh9ruHJt/8Al2Hdp68C1VHKa6onwXaonly/Bpnl4ZmI7Xo09GLSOH13G3Pu+rH1jc9MRXZtxHbY2BV5aOf19yP589Ufgx1dtNjgAAAAAAHX7m1rTtube1DXtXyKcfA0/HryMi5P4NFMc55eWfFEeOeUOwUt7IJxZi9etcKtDyedu3NGTrddE9U1dVVqxPtdVdXs9p5JgFZOLe9tQ4h8Q9X3dqXOivOvTNmzM84sWafS27cfk0xEezPOfG8oANWOjfn/AFT4DbJyufbTGjY9qZ9m3RFuf10pAQJ0C9cp1bo9YOFNzt7mk52Th1RM9cRNfdY/Vdj9CewAAAAAAQP05tk3t28D8rPwrM3c3b9+NRpppjnVVaiJpvR7UUVdvP5DN9stdt0XbVVq7RTXbriaaqao5xVE+GJjxwzo6WnATP4a69f3Jt7FuX9n5t3trc0RNU6fXVP8lX/Y5/W1T7FM9fXUEAAAAAAAAAAAAAAADt9p7Y3DuzVqNJ21o2bq2bX4LWLamuYjyzy6qY9meULc8EehxFq7j6zxTzKLnazFcaLh3edM+xeux4fyaPheIEAcA+CW6uLWtU0YFqvA0KzXyzNVvW57nbjx00R/6lzl+DHg6ucxDSDhjsTbfDraWPtrbGFGPiWvTXLlXXdyLkxHbXLlX4VU8o9iIiIiIiIiO80bTNO0bS8fStJwcfBwcaiLdjHsW4ot26Y8URHVD6wAAAAAAAAVB7Jd9gdk+6sv6NpSVdrsl32B2T7qy/o2lJQAAF/uxyfcX1j3/u/7FhQFf/sc1NdPBbVqqqKqYq167NMzExFUdws+DygsyAAAAABLHDVPsnlf31f0pbHyxw1T7J5X99X9KQfMAAAAAAAAAAAAAAAAAAAAAAAAL28DOjZwn3Zwi2zuPWdIzruoahg03siujULlEVVzM85iInlD2nel8Ff6E1H/ADK7+0Gbw0h70vgr/Qmo/wCZXf2nel8Ff6E1H/Mrv7QZvDSHvS+Cv9Caj/mV39p3pfBX+hNR/wAyu/tBm8NF9X6KXBjF0nMybeiaj29qxXXT/wCZXfDFMzHjZ0AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAt72NL7Yd6+5MT6dxdtSTsaX2w719yYn07i7YAAAAAAKYcY+ijv/efFHcW6dO1rblnD1PNqv2aL969FymmeXVVEW5jn7Uy8n3lXEv1w7U+Pv8Aml+wFBO8q4l+uHanx9/zR3lXEv1w7U+Pv+aX7AUE7yriX64dqfH3/NHeVcS/XDtT4+/5pfsBQTvKuJfrh2p8ff8ANHeVcS/XDtT4+/5pfsBQTvKuJfrh2p8ff80d5VxL9cO1Pj7/AJpfsBQTvKuJfrh2p8ff80d5VxL9cO1Pj7/ml+wFBO8q4l+uHanx9/zR3lXEv1w7U+Pv+aX7AUE7yriX64dqfH3/ADR3lXEv1w7U+Pv+aX7AUE7yriX64dqfH3/NHeVcS/XDtT4+/wCaX7AUE7yriX64dqfH3/NHeVcS/XDtT4+/5pfsBQTvKuJfrh2p8ff80d5VxL9cO1Pj7/ml+wFBO8q4l+uHanx9/wA0gXiXtDUdhb51PaOq5GLkZunV00XbmNVM26pqoprjlMxE+CqPDDXVmD0wvvkt4+6bP/x7QJZ6A/GCnRtXnhfuDK7XA1G7NzR7ldXVayJ+us858EXPDT/b5x1zWvKxqs3bti9Res3K7d23VFVFdFUxVTVE84mJjwS0h6IvGyxxQ2jGkazfpp3ZpNmmMymeUTl246oyKY9nqiqI8FU8+qKogE6AAAAAAAA/lyii5bqt3Kaa6KomKqao5xMT4pQJxa6KvDjety9n6Rar2rqtyZqm7gUROPXV5arM8qfgTT+dPgDNziL0VuK+1K7t7A0y1ubAo64vaXV21zl7NmeVfP2KYq9tCep6fn6XmV4epYWThZNH19nItVW66fbpqiJhse6vcW3Nv7jxZxdwaHpurWOUx3PMxaL1Me1FUTyBj2NL9zdF3gxrlU3KdsV6XdmPr9Py7lqPgTM0f6Ud610I9nXqqp0feWuYUTPVGTZtZER8GKAUUFvtQ6D2sU1VegOIOBdp/B7vp1dufz8q6nUXuhLv2J/id2bZrj+3N+n5qJBVgWhjoT8Ru25TubavLy91yPNOex0JN91T/H7u23RH9iL1Xz0QCq4uDp3Qd1OqumdR4h4lqn8KLGmVVz+aZuUvYaH0JtjY9dNWsbr1/UIjw02KbWPE/pprn9YKHO+2bs3de8c+MLa239R1e9z5VehrE1U0flVfW0x7MzENHtqdG3g1t2qi5Z2bjahepnn3TUrteTz/AMFc9p/pSpp+DhadiUYen4ePh41uOVFmxbi3RT7VMdUApZwn6GGp5Nyzn8SdaowLHOKp03TqouXqvYruz6Wn/DFXtwtzsHY+1Nh6NGk7T0TF0vF6pr7lTzruzH4Vdc86q59mqZeiAAAAAAAAdZuvX9J2ttzP3DrmZRh6bgWZvZF6v8GmPFEeOZnlERHXMzER1yDw/SO4p4HCjh1k6zXVbu6vldtj6Ti1T/K35j66Y/mUfXVfmjnE1Qy81XUM3VdUytT1LJuZWbl3qr+ReuTzquXKpmaqpnyzMzL3PH/ijqvFjf8AkbgzIrx8C1E2NNwpq5xj2Inq5+Ka6vDVPjnq8ERER4AAC3fY3N1U4+4dzbMv3YiMzHt6hjUz/Otz2lyI9mYron2qF3WS/Bfed7h9xQ0Hdtrt5t4OVE5NFPhuWKomi7T7c0VVcvZ5NYsDLxs/Bx87Cv0X8XJtU3bN2iedNdFURNNUT5JiYkHMAAAAAA4c/Exc/CvYWdjWcrFv0TbvWb1EV0XKZjlNNVM9UxMeKXMAp5xy6HdrLyL+tcLcq1jV1zNdejZdzlb5z4rNyfrfya+r+1HgVK3rsnduy8+cLdW3tR0m9z5UzkWZiiv8iv62uPZpmWvD59QwsLUcSvD1DEx8vGuRyrs37cV0VR7NM9UgxvGne7OjZwa3FXVdvbOx9Pv1Tz7ppt2vG5f4KJ7T/SjnV+hRw/v3KqtM3PuPCifBTdqs3oj/AEUz+sFChdXM6DmDMTOJxGyaPJF3Sqav1xdh1V7oOapEz3LiJhVR4u20uqn/ALkgp+Lc94/r/P7ftM5e4K/3nNZ6DuqzMd24iYVEePtNLqq+e5AKgC7en9B3R6JidQ4g596PHFjTaLf65rqer0ToZ8K8PtatQ1Dcep1R4YuZVFuifzUURP6wZ8vs0nStT1fLjE0nTczUMifBaxbFV2ufzUxMtOdudHng1oXaTi7D03Iro6+3zprypmfLMXaqo/UkfSdK0zSMaMXStNw8CxHgtY1im1R+imIgGb2x+i9xg3PXRXd29ToOLVy539WuxZ5R/dxzuf6VheHHQw2jpdVrL3trmZr9+nrqxcaPQ2Pz8kzEzXVHsxNPtLUAOn2ltfbm0tLp0vbOi4Ok4dP/AKWLZiiKp8tUx11T7M85dwAAAAAAAAAAAKl9kpxpq2XtHL8VrUb1v4VuJ/6FHIiZmIiOcz4Ia28R+Hm0eImDhYO8NK+qWLhZHoizam/ct09v2s0857SqJnqmerwP1tPh3sTakUztzaGi6bcpnnF2zh0Rd/PXy7afzyDM3ZXBnihvCaKtC2Vq12xXMRGRfteh7Pt90udrTP5plO+w+hRuHL7nf3purC0y3PXVjafbm/d9qa6u1ppn2oqheMBDmwOjRwi2h3O9RtynWsyjlPonVq/RE848faTEW4+Cl/GsWMXHox8azbsWbcdrRbt0xTTTHkiI6ocgAAAAAABLHDVPsnlf31f0pbHyxw1T7J5X99X9KQfMAAAAAAAAAAAAAAAAAAAAAAADU7ot/e97K966PnlJSNei3973sr3ro+eUlAAAAA+Dcf2val7ku/Qljs2J3H9r2pe5Lv0JY7AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAt72NL7Yd6+5MT6dxdtSTsaX2w719yYn07i7YAAAAAAAAAAAAAAAAAAAAAAAAAAAADMHphffJbx902f/j2mnzMHphffJbx902f/j2gRK7rZO6Nb2ZunB3Lt7Nrw9Swbnb2rkeCfFNNUeOmYmYmPHEy6UBqd0feL2hcW9oU6lgzRi6tjRTRqenTVzrx7k/hR45t1cpmmr24nriYSUyJ4d7z3DsHdeLuXbOdViZ+PPKefXReon663cp/Conl1x7UxymImNJ+j9xn23xc276IwaqMLW8aiJ1DS66+ddqfB29H8+3M+Crxc+U8pBJ4AAAAAAAAAAAAAAAAAAAAAAAAAAOPKv2MXGu5OTet2LFmibl27cqimmimI5zVMz1RER185Ay8ixiYt3Kyr9uxj2aJuXbtyqKaKKYjnNVUz1RERHOZlnT0u+O17iduCdv7ev3Le0dOu/xXhpnOuxzju1UfzY8FFM+LnM9c8qe76XXSKu76v39lbLyrlra9qvtcrKp501ajVE/pi1E+CPwp658UKzAAAAAL8dAPijRuLZV3h7quTE6roVHb4Xbz13sOZ6ojyzbqntfyaqPJKg7v+Hu7dY2NvLTd1aFf7lnYF6LlMT9bcp8FVury01UzNM+xINeR5XhRvvROJGxsDdehXOdjJp7W9Zqqia8a9H19qv8AtRP6YmJjqmHqgAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAJY4ap9k8r++r+lLY+WOGqfZPK/vq/pSD5gAAAAAAAAAAAAAAAAAAAAAAAandFv73vZXvXR88pKRr0W/ve9le9dHzykoAAAAHwbj+17Uvcl36EsdmxO4/te1L3Jd+hLHYAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFvexpfbDvX3JifTuLtqSdjS+2HevuTE+ncXbAAAAAAAAAAAAAAAAAAAAAAAAAAAAAZg9ML75LePumz/APHtNPmYPTC++S3j7ps//HtAiUAB2e19f1nbGu4uubf1LI07UsWvt7ORYq5VUz448kxMdUxPOJjqmJh1gDQ3o39J3Qd/0Y23d3VY+ibomIoormrtcbOq/sTP1lc/zJ8P4Mz4IsWxnWR4A9Kvc2yqcfQ96U5G49Ao5UUXpq55mLRHVypqn+Upj+bVPPyVREcgaDjzPDvfu0uIGixq+0taxtSx45RdpontbtmqfwblE+mpn246/FzemAAAAAAAAAAAAAAAAAAAAABF3HDjlsjhTh129Vy/R+t1UdtY0nFqib1XPwTXPgt0+zV4fFFXgB7/AHNr2jbZ0PJ1vX9Sx9O07Fp7a9kX6+1ppjyezM+CIjrmeqGffSe6R2rcS71/be25v6XtGivlNMz2t7P5T1VXeXgo59cUe1M855RT4DjXxg3jxX1mMvcOXFrAsVzOHpuPM02MeJ8fL8Kvl4a56/JyjqR4AAAAAAAACU+jlxk1jhFu70ZapuZuhZs00anp8Vcu6Ux4LlHPqi5T18vFMc4nw840s2XujQt5baxNxbb1C1n6bl0dtbu0T4J8dNUeGmqJ6ppnriWQCSOBPGPdXCTXpzNGuRl6ZkVR6O0u9XMWciPLH8yuI8FcfniY6gaoDwnBzixs/inoUahtrPj0VboicvT70xTkYsz/ADqfHTz8FUc4ny8+cR7sAAAAAAAAAAAAAAAAAAAAAHHlZFjFxrmTlX7dixapmu5duVxTTRTHXMzM9UR7IOR02pbp29pu5dM21navi2NZ1WK5wsOqv+NvRRTNVUxEeCIimeueUTy5R1q08fel3pOjU39C4YxZ1bUfra9WuU88WzPj7nTP8rV7M+l8H1ynmDvvc9jiJib9ydVyc7XcbMozPROTcmuquqmrn2s/2Zj0vax1curwA1yHQ8Pd16VvfZelbq0W72+FqOPTdpjnzm3V4KrdX9qmqJpn2Yl3wAAAAAAAAAAAAAAAAEscNU+yeV/fV/SlsfLHDVPsnlf31f0pB8wAAAAAAAAAAAAAAAAAAAAAAANTui3973sr3ro+eUlI16Lf3veyveuj55SUAAAAD4Nx/a9qXuS79CWOzYncf2val7ku/QljsAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAC3vY0vth3r7kxPp3F22cnQ44ubT4T6ruPK3TTqNVGo2LFux6DsRcnnRVXNXPnVHL66Fke/H4Reo7l+QUecBYoV178fhF6juX5BR5w78fhF6juX5BR5wFihXXvx+EXqO5fkFHnDvx+EXqO5fkFHnAWKFde/H4Reo7l+QUecO/H4Reo7l+QUecBYoV178fhF6juX5BR5w78fhF6juX5BR5wFihXXvx+EXqO5fkFHnDvx+EXqO5fkFHnAWKFde/H4Reo7l+QUecO/H4Reo7l+QUecBYoV178fhF6juX5BR5w78fhF6juX5BR5wFihXXvx+EXqO5fkFHnDvx+EXqO5fkFHnAWKFde/H4Reo7l+QUecO/H4Reo7l+QUecBYoV178fhF6juX5BR5w78fhF6juX5BR5wFihXXvx+EXqO5fkFHnDvx+EXqO5fkFHnAWKFde/H4Reo7l+QUecO/H4Reo7l+QUecBYoV178fhF6juX5BR5w78fhF6juX5BR5wFihXXvx+EXqO5fkFHnDvx+EXqO5fkFHnAWKZg9ML75LePumz/wDHtLad+Pwi9R3L8go84pb0gd2aVvnjDuHdeiRkRp+oXrddmMi3FFzlTaopnnETPLrpnxg8GAAAAADtdrbj13a2sWtY25q2Zpefa+tv412aKuXknl4YnxxPOJWu4Q9M7KsU2dN4maROVTHKn6q6dRFNz27lnqpn26Jj8mVPAGuewt/bO35p/o7aW4cHVbcUxNdFq5yu2vy7c8qqPzxD0rHHS9R1DSs63naXnZWDl2p527+Ndqt3KJ9iqmYmE98OelxxP2zTbxtcqxN04VHVyzae55ER7F2jwz7NUVSDRMV12J0v+F2uxRZ16nUts5NU8p9E2u7WefsXLfOfzzTCb9rbv2rurHjI23uLStWtzHP/AMJlUXJj24iecfnB3YAAAAAAAAAAAA6zcO4dB27hzma/rWnaVjxEzNzMyaLVPV7NUwhTfvS04Ubbi5Z0rLzNy5dPVFGn2eVrn7NyvlHL2ae2BPzynEXiNsrh9p05u7dwYenRNM1W7FVXbX7v5FunnVV7cRyjxzCjvEvpecSNy03cTblGLtXBr6ueN/G5Mx7N2qOr26aaZ9lX3U9Qz9Uzrufqebk52Xdntrl/Iu1XLlc+WaqpmZBZ7jX0wdxa9F/SeHeLXt/T6udM6he5VZlyPLTHXTa5+x21XkmFXszKyc3Lu5eZkXcnIvVTXdu3a5rrrqnwzMz1zPsy4QAAAAAAAAAAAAHY7c1zWNuazj6xoOpZWm6hj1dtayMe5NFdP548MT44nqnxrg8FemTYrosaTxSwZtXIiKfqzg2udNXs3bMdce3Rz/JhS0BsHtbcegbp0q3qu3NYwtVwrngvYt6K6YnyTy8E+xPKYdqyA2juncm0dUjU9s63n6Tlx1Tcxb00dtHkqiOqqPYnnCyHDjpobt0uLWLvfQ8TX7EdVWVizGNkcvLMRE0Ve1EU+2C94hzYPSX4Q7ti3ap3JTomXXyj0Pq1HoeYmfF2/Obc/CS7g5eJnY1GVhZNnKsVxzou2bkV0VR7Ex1SDmAAAAAAAAAAAAHzalqGBpmLVlalnY2Fj0/XXci7Tboj25qmIRPvbpLcHtrdvbubpo1fJp5x3DSrc5MzMf245W/9QJhcOblYuDiXMvNybONj2qe2uXb1cUUUR5ZmeqIUm4g9NfWsqm5jbG2tjadRMcqcvUq+7Xfbi3Typpn25qhXHf8AxH3xvzKm/uzcuoanHbdtTZrudrYon+zap5UU/mgF5uLHS14d7UovYe2aq92apTziIxau0xaJ/tXpj00fkRVE+WFN+L/G3iBxPv10a/q02NM7bnb0zD528anr6udPPnXMeWqZnyckbAAALB9DvjnHDPX69t7kv1ztPVLsVV1+H0DfnlHdoj+ZMREVR7ETHgmKtEcXIsZeLaysW9bv2L1EXLV23VFVFdMxziqmY6piY64mGNac+jt0jtzcLe00bUbdzXdrzPVhV3OVzF5z1zZqnwR45on0s+LtZmZBpKI84Z8auG/EKxa/4f3JjU5tcden5lUWMmmfJ2lU+m9umao9lIYAAAAA+bUtQwNNxqsrUc3Gw7FP113Iu026I/PVMQi3eXSP4O7Yi5Rf3hjalkUTMdw0ymcqZnr/AAqfSeLx1QCWxTbe/Tctx29nZezKqp64pydVv8o9ie5W/wB92/AvpZaDd21n3uLGvxj6zXqFc41nE0u53O3jdpR2sRNETz9N2/10zPgBbIQb31/BH1y5n+V5H7h31/BH1y5n+V5H7gJyEG99fwR9cuZ/leR+4d9fwR9cuZ/leR+4CchBvfX8EfXLmf5XkfuHfX8EfXLmf5XkfuAnKWOGqfZPK/vq/pS0d76/gj65cz/K8j9xnBn3KLudkXbc86K7tVVM8vFMyDgAAAAAAAAAAAAAAAAAAAAAAABqd0W/ve9le9dHzykpUTgn0o+GWz+FG3Nsata16rO07CpsX5s4dNVHbRM8+UzXHOOvyPY9+Pwi9R3L8go84CxQrr34/CL1HcvyCjzh34/CL1HcvyCjzgLFCuvfj8IvUdy/IKPOHfj8IvUdy/IKPOAnvcf2val7ku/Qljs0E1bpgcJcvSsvFt2tyRXesV26eeDRy5zTMR/6jPsAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAByY1+/i36L+NeuWLtE86a7dU01Uz7Ex4HGAkfa3HTi5tqmijTN+axVaon0trLuxlUR7HK7FURCTdv8ATM4o4MxTqmn7e1ejxzXjV2q5/PRXFP8ApVrAXO0XpxW5iKdZ4eVRPjrxNT5/6arf/N6vTemtw4vcoz9ubnxJnwzRas3aY/8AyRP6lBgGiuN0wODt2I7pka7Y/vNP58vg1S+2jpZ8FKo69e1Cj29Mvf8AKlm6A0jq6WXBOPBr+fV7WmXv+dL5Mjpe8G7XPtMzWr35GnVRz+FMM5wF/tR6afDKxExhaFunLq8XPHs26f0zd5/qeX1jpxYFNExpHD3Ju1eKrK1Km3Efmpoq5/pUpAWd1/pp8RsuJo0jQdu6ZTP4VVu5frj881xT/pRtufpDcZNwxXRl751HGtV9Xc8CKMWIjyc7UUz+mUVgPp1HPztSyqsrUc3JzL9X112/dquVz7czMy+YAAAAAAAAAAAAAAAAAAAAAHcbb3RuXbWR6I29r+qaTd58+2w8uuzz9vtZjm6cBNm2ulNxo0WKaK9y2dVtU+CjUMO3c/TVTFNc/CSToXTe3NZ7SNc2PpGZH4U4eVcx5n2u2i4qUAvVpnTd2fc5fVLZeu43l9D3rV76U0PQYnTK4S3qIm7ibnx58cV4NueXwbks9QGjVnpd8Grn1+frFr8vTqv+Uy+mjpZcFKvDr+fT7emXv+VLNwBpDc6WnBWmOdOuajX7FOmXv+cQ+HJ6YXB61/J16/kf3enxH0qoZ2AL8ah01+HNqZjC23ujJmPBNdqxbif/AMkz+p5vVenFh001RpXDu/cq8VWTqkURH5qbc/OpWAs9r3TT4jZdM0aToG3dMpnwVVW7t+uPzzXFP+lHW5Okdxn13tqb++M3Dtz1RRgW7eNy/wAVumKv1omAffrGs6xrN/0RrGq5+o3vVMrIru1fpqmZfAAAAAAAAAAP7EzExMTymPBL2u1+LXEzbNum1om+ddxbNP1tmcuq5aj2qK+dP6niQE46d0reNuJRTRc3Li5kUxy/j9Nsc59uaaYl2EdL7jH2vL0Vokz5fqdHP51fgE7ZnSy4134mLWvYGLz8drTLM/Spl5TWePfGPVqKqMviDrVFNXhjGuU4/wDtRSjQB9ur6vq2r3/RGranm6he9Uyr9V2r9NUzL4gAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAB/9k=" alt="Leaf" style="height:36px;filter:brightness(0) saturate(1)"></a>
+      <p class="footer-tagline">Taxa justa para quem dirige. Serviço justo para quem paga. Sempre os dois.</p>
+    </div>
+    <div class="footer-col">
+      <h5>Produto</h5>
+      <ul>
+        <li><a href="#">O modelo</a></li>
+        <li><a href="#">Como funciona</a></li>
+        <li><a href="#">Segurança</a></li>
+        <li><a href="#">Para empresas</a></li>
+      </ul>
+    </div>
+    <div class="footer-col">
+      <h5>Motoristas</h5>
+      <ul>
+        <li><a href="#">Seja motorista</a></li>
+        <li><a href="#">Calculadora de ganhos</a></li>
+        <li><a href="#">Requisitos</a></li>
+      </ul>
+    </div>
+    <div class="footer-col">
+      <h5>Empresa</h5>
+      <ul>
+        <li><a href="#">Sobre o Leaf</a></li>
+        <li><a href="#">Blog</a></li>
+        <li><a href="#">Contato</a></li>
+        <li><a href="#">Privacidade</a></li>
+      </ul>
+    </div>
+  </div>
+  <div class="footer-bottom">
+    <p>© 2025 Leaf Mobilidade. Todos os direitos reservados.</p>
+    <p>Feito no Brasil.</p>
+  </div>
+</footer>
+
+<script>
+const cur = document.getElementById('cursor');
+document.addEventListener('mousemove', e => {
+  cur.style.left = e.clientX + 'px';
+  cur.style.top  = e.clientY + 'px';
+});
+document.querySelectorAll('a,button').forEach(el => {
+  el.addEventListener('mouseenter', () => cur.classList.add('big'));
+  el.addEventListener('mouseleave', () => cur.classList.remove('big'));
+});
+const io = new IntersectionObserver(entries => {
+  entries.forEach(e => { if(e.isIntersecting) e.target.classList.add('in') });
+}, { threshold: 0.1 });
+document.querySelectorAll('.reveal').forEach(el => io.observe(el));
+</script>
 </body>
 </html>
-
-
