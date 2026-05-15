@@ -39,7 +39,7 @@ async function testReserveFund() {
         console.error("❌ Falha ao cancelar:", result.error);
     }
 
-    // 4. Verificar se a métrica foi computada (R$ 30 * 0.0008 = 0.024 => Mínimo de R$ 0.50)
+    // 4. Verificar se a métrica foi computada (R$ 30 * 0.008 = 0.24 => Mínimo de R$ 0.50)
     const assumedLoss = await redis.hget('metrics:financial', 'assumed_cancellation_costs');
     console.log(`\n💰 PREJUÍZO ACUMULADO NO REDIS PARA O FUNDO DE RESERVA: R$ ${assumedLoss}`);
 
