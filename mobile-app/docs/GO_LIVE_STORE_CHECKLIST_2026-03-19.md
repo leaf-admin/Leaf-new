@@ -17,7 +17,7 @@ Objetivo: consolidar decisao operacional para subida de build e submissao em loj
 - [ ] URL de account deletion externa preenchida e validada
 
 URL de exclusao recomendada:
-- `https://api.147.182.204.181.sslip.io/account-deletion`
+- `https://api.leaf.app.br/account-deletion`
 
 ## 4) Decisao go-live
 - Build para testes internos: GO

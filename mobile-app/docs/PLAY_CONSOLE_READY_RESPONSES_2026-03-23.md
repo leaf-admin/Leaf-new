@@ -54,15 +54,15 @@ Notas:
 
 ## 3) App content > Account deletion
 - In-app deletion disponível: `Yes`
-- URL externa de exclusão: `https://api.62.169.31.231.sslip.io/account-deletion`
+- URL externa de exclusao: `https://api.leaf.app.br/account-deletion`
 
 ## 4) App content > App access (texto sugerido)
 
 `The app has two roles in a single binary: passenger and driver.
 Use the pre-provisioned review accounts below (no sign-up required):
-- Passenger account: +55 11 99999-9999 / password: teste123
-- Driver account: +55 11 88888-8888 / password: teste123
-At login, enter the phone number and tap "Ja tenho senha".
+- Passenger account: +55 21 10293-8475 / OTP code: 992111.
+- Driver account: +55 21 12345-6789 / OTP code: 992000.
+At login, enter the phone number, tap Continue, and enter the review OTP code above.
 To switch role, log out and log in with the other review account.
 If needed, use two devices or two sessions to validate both flows.`
 

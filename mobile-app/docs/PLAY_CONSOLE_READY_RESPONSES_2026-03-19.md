@@ -68,11 +68,10 @@ Roteiro curto sugerido:
 
 ## 3) App content > Account deletion
 - In-app deletion disponível: `Yes`
-- URL externa de exclusão: `https://api.147.182.204.181.sslip.io/account-deletion`
+- URL externa de exclusao: `https://api.leaf.app.br/account-deletion`
 
 ## 4) Checklist final de console (GO publicação)
 - Data Safety enviado e sem pendência.
 - Declaração de Background Location enviada com vídeo + disclosure.
 - URL externa de exclusão cadastrada.
 - Política de privacidade pública no listing.
-

@@ -4,8 +4,8 @@ Data: 2026-03-19
 Escopo: fechamento de metadata e App Privacy.
 
 ## 1) App Information / Privacy Policy URL
-- Privacy Policy URL: `https://api.147.182.204.181.sslip.io/privacy-policy`
-- Terms URL (campo adicional, se usado em marketing/support): `https://api.147.182.204.181.sslip.io/terms-of-service`
+- Privacy Policy URL: `https://api.leaf.app.br/privacy-policy`
+- Terms URL (campo adicional, se usado em marketing/support): `https://api.leaf.app.br/terms-of-service`
 
 ## 2) App Privacy (Nutrition Labels) - recomendação prática
 
@@ -31,9 +31,14 @@ Não marcar:
 
 ## 3) Account deletion in-app (Guideline 5.1.1(v))
 - Confirmar na revisão interna que o usuário consegue iniciar exclusão dentro do app (já implementado na tela de privacidade).
-- URL pública de apoio para exclusão: `https://api.147.182.204.181.sslip.io/account-deletion`
+- URL publica de apoio para exclusao: `https://api.leaf.app.br/account-deletion`
 
 ## 4) Texto para App Review Notes (sugestão)
 
-`Leaf is a ride-hailing app with passenger and driver modes. Driver background location is required only while the driver is online to receive ride requests and keep trip navigation active when the app is minimized. A prominent in-app disclosure is shown before runtime permission. Account deletion is available in-app and also documented publicly at https://api.147.182.204.181.sslip.io/account-deletion.`
-
+`Leaf is a ride-hailing app with passenger and driver modes.
+Use the pre-provisioned review accounts below (no sign-up required):
+- Passenger account: +55 21 10293-8475 / OTP code: 992111.
+- Driver account: +55 21 12345-6789 / OTP code: 992000.
+On the first screen, +55 is fixed in the UI. Enter the phone number, tap Continue, then enter the review OTP code shown above.
+Driver background location is required only while the driver is online to receive ride requests and keep trip navigation active when the app is minimized.
+Account deletion is available in-app and also documented publicly at https://api.leaf.app.br/account-deletion.`

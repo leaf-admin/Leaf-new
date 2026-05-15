@@ -7,6 +7,16 @@
 
 ## 🚧 BACKLOG IMEDIATO (2026-03-22)
 
+- [ ] **p0-mobile-remove-direct-google-fallback-build-required** - Remover fallback direto do app para Google Directions/Places quando backend falhar (depende de nova build iOS + Android)
+  - Status atual: **PENDENTE VISÍVEL** (manter na lista até resolver em release)
+  - Motivo: enquanto existir fallback client-side, qualquer erro/timeout backend pode voltar a gerar cobrança direta fora do budget guard do servidor
+  - Critério de aceite: app release consumindo rota/place somente via backend autoritativo no fluxo padrão
+
+- [ ] **security-safety-post-store-approval-gate** - Executar backlog de seguranca e safety somente apos aprovacao das lojas (Apple/Google)
+  - Documento de referencia: `docs/security/BACKLOG_SEGURANCA_SAFETY_POS_APROVACAO_LOJAS_2026-04-27.md`
+  - Regra: durante review, nao alterar runtime/producao para itens de seguranca que possam impactar aprovacao
+  - Critério de aceite: iniciar Wave 1 somente apos status "Approved" nas duas lojas
+
 - [ ] **woovi-driver-account-split-baas** - Integrar conta Woovi do motorista para split real e fluxo BaaS completo
   - Bloqueio atual: dependência de habilitação/definição com a Woovi
   - Critério de aceite: corrida liquidada com split real (passageiro -> plataforma + motorista), com conciliação e extrato no dashboard
