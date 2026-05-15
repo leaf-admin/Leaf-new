@@ -24,15 +24,23 @@ class PaymentService {
     // Criar instância do WooviDriverService
     this.wooviDriverService = new WooviDriverService();
     // Taxas operacionais por faixa de valor (regra vigente)
-    this.OPERATIONAL_FEE_UP_TO_20 = 99; // R$ 0,99 para corridas até R$ 20,00 (em centavos)
-    this.OPERATIONAL_FEE_20_TO_50 = 149; // R$ 1,49 para corridas acima de R$ 20,00 até R$ 50,00 (em centavos)
+    this.OPERATIONAL_FEE_UP_TO_10 = 79; // R$ 0,79 para corridas até R$ 10,00 (em centavos)
+    this.OPERATIONAL_FEE_10_TO_25 = 99; // R$ 0,99 para corridas acima de R$ 10,00 até R$ 25,00 (em centavos)
+    this.OPERATIONAL_FEE_25_TO_50 = 149; // R$ 1,49 para corridas acima de R$ 25,00 até R$ 50,00 (em centavos)
     this.OPERATIONAL_FEE_ABOVE_50_PERCENTAGE = 0.03; // 3% para corridas acima de R$ 50,00
-    this.THRESHOLD_20 = 2000; // R$ 20,00 em centavos
+    this.THRESHOLD_10 = 1000; // R$ 10,00 em centavos
+    this.THRESHOLD_25 = 2500; // R$ 25,00 em centavos
     this.THRESHOLD_50 = 5000; // R$ 50,00 em centavos
     this.WOOVI_FEE_PERCENTAGE = 0.008; // 0,8% da transação
     this.WOOVI_FEE_MINIMUM = 50; // R$ 0,50 mínimo (em centavos)
     this.WITHDRAW_FEE_THRESHOLD_CENTS = 50000; // R$ 500,00
     this.WITHDRAW_FEE_BELOW_THRESHOLD_CENTS = 100; // R$ 1,00
+    this.SUBSCRIPTION_DAILY_BILLING_ENABLED =
+      String(process.env.SUBSCRIPTION_DAILY_BILLING_ENABLED || 'false').toLowerCase() === 'true';
+    this.SUBSCRIPTION_DAILY_FEE_NOMINAL_CENTS = Math.max(
+      0,
+      Number.parseInt(process.env.SUBSCRIPTION_DAILY_FEE_CENTS || '990', 10) || 990
+    );
     this.SUBSCRIPTION_SETTLE_ON_WITHDRAW =
       String(process.env.SUBSCRIPTION_SETTLE_ON_WITHDRAW || 'true').toLowerCase() !== 'false';
     this.SUBSCRIPTION_SPLIT_RETENTION_ENABLED =
@@ -152,6 +160,129 @@ class PaymentService {
       error: lastError.message
     });
     throw lastError;
+  }
+
+  normalizePixKey(value) {
+    return String(value || '').trim();
+  }
+
+  isWooviSubaccountSplitEnabled() {
+    return String(process.env.WOOVI_SUBACCOUNT_SPLIT_ENABLED || 'true').toLowerCase() !== 'false';
+  }
+
+  shouldRequireWooviSplitForDriverPayment() {
+    return String(process.env.WOOVI_REQUIRE_SUBACCOUNT_SPLIT || 'false').toLowerCase() === 'true';
+  }
+
+  isWooviDirectTransferOnRideCompletionEnabled() {
+    return String(process.env.WOOVI_DIRECT_TRANSFER_ON_RIDE_COMPLETION || 'false').toLowerCase() === 'true';
+  }
+
+  async resolveDriverSplitTarget(paymentData = {}) {
+    const directPixKey = this.normalizePixKey(
+      paymentData.driverSubaccountPixKey ||
+      paymentData.wooviSubaccountPixKey ||
+      paymentData.subaccountPixKey ||
+      paymentData.driverPixKey
+    );
+
+    if (directPixKey) {
+      return {
+        success: true,
+        source: 'payment_payload',
+        driverId: paymentData.driverId || null,
+        pixKey: directPixKey
+      };
+    }
+
+    const driverId = this.normalizePixKey(paymentData.driverId);
+    if (!driverId) {
+      return {
+        success: false,
+        reason: 'driver_not_known'
+      };
+    }
+
+    try {
+      const DriverApprovalService = require('./driver-approval-service');
+      const driverApprovalService = new DriverApprovalService();
+      const accountData = await driverApprovalService.getDriverWooviAccountId(driverId);
+      const pixKey = this.normalizePixKey(
+        accountData?.wooviSubaccountPixKey ||
+        accountData?.subaccountPixKey ||
+        accountData?.pixKey ||
+        accountData?.driverPixKey
+      );
+
+      if (!pixKey) {
+        return {
+          success: false,
+          reason: 'driver_subaccount_pix_key_missing',
+          driverId
+        };
+      }
+
+      return {
+        success: true,
+        source: 'driver_account',
+        driverId,
+        pixKey,
+        accountData
+      };
+    } catch (error) {
+      logStructured('warn', 'Falha ao resolver subconta Woovi do motorista', {
+        service: 'PaymentService',
+        driverId,
+        error: error.message
+      });
+      return {
+        success: false,
+        reason: 'driver_account_lookup_failed',
+        driverId,
+        error: error.message
+      };
+    }
+  }
+
+  async buildWooviSubaccountSplitPlan(paymentData = {}, totalAmountCents = 0) {
+    if (!this.isWooviSubaccountSplitEnabled()) {
+      return {
+        success: false,
+        reason: 'split_disabled'
+      };
+    }
+
+    const target = await this.resolveDriverSplitTarget(paymentData);
+    if (!target.success) {
+      return target;
+    }
+
+    const tollFeeCents = Number.isFinite(Number(paymentData.tollFeeCents))
+      ? Math.max(0, Math.round(Number(paymentData.tollFeeCents)))
+      : this.toCents(paymentData.tollFee || paymentData.rideDetails?.tollFee || 0);
+    const calculation = this.calculateNetAmount(totalAmountCents, tollFeeCents);
+
+    if (!calculation.netAmount || calculation.netAmount <= 0) {
+      return {
+        success: false,
+        reason: 'driver_net_amount_not_positive',
+        driverId: target.driverId,
+        calculation
+      };
+    }
+
+    return {
+      success: true,
+      target,
+      calculation,
+      splits: [
+        {
+          pixKey: target.pixKey,
+          value: calculation.netAmount,
+          splitType: 'SPLIT_SUB_ACCOUNT'
+        }
+      ]
+    };
   }
 
   /**
@@ -388,12 +519,23 @@ class PaymentService {
           { key: 'passenger_id', value: paymentData.passengerId },
           { key: 'ride_id', value: paymentData.rideId },
           { key: 'payment_type', value: 'advance_payment' },
-          { key: 'service', value: 'ride_sharing' }
+          { key: 'service', value: 'ride_sharing' },
+          { key: 'settlement_model', value: 'post_ride_ledger' },
+          { key: 'driver_settlement', value: 'deferred_until_ride_completed' }
         ],
         customer: {
           name: paymentData.passengerName || 'Passageiro Leaf',
           email: paymentData.passengerEmail || 'passenger@leaf.com'
         }
+      };
+
+      // O pagamento da Leaf é antecipado: no momento da cobrança o motorista pode
+      // ainda não existir, pode trocar, cancelar ou ser reatribuído. Por isso a
+      // cobrança inicial nunca envia split Woovi. O direito financeiro do motorista
+      // nasce só na conclusão da corrida e é liquidado pelo worker de billing no ledger.
+      const splitPlan = {
+        success: false,
+        reason: 'driver_settlement_deferred_until_ride_completed'
       };
 
       logStructured('info', 'Enviando cobrança para Woovi', {
@@ -402,7 +544,9 @@ class PaymentService {
         comment: chargeData.comment,
         correlationID: chargeData.correlationID,
         customerName: chargeData.customer.name,
-        customerEmail: chargeData.customer.email
+        customerEmail: chargeData.customer.email,
+        splitEnabled: false,
+        splitReason: splitPlan.reason
       });
 
       const chargeResult = await this.wooviDriverService.createCharge(chargeData);
@@ -482,8 +626,8 @@ class PaymentService {
         };
       }
 
-      // ✅ SIMPLIFICADO: Apenas criar cobrança, sem holding
-      // Quando pagamento for confirmado, creditar saldo diretamente no motorista
+      // Apenas cria a cobrança. O webhook materializa o holding e o crédito do
+      // motorista acontece somente após ride.completed no worker de billing.
 
       return {
         success: true,
@@ -492,7 +636,12 @@ class PaymentService {
         qrCode,
         paymentLink,
         rideId: paymentData.rideId,
-        amount: paymentData.amount
+        amount: paymentData.amount,
+        splitApplied: false,
+        splitDeferred: true,
+        settlementPolicy: 'post_ride_ledger',
+        splitTarget: null,
+        splitCalculation: null
       };
 
     } catch (error) {
@@ -1077,14 +1226,18 @@ class PaymentService {
     let operationalFee;
     let operationalFeeType;
 
-    if (grossFare <= this.THRESHOLD_20) {
-      // Até R$ 20,00
-      operationalFee = this.OPERATIONAL_FEE_UP_TO_20;
-      operationalFeeType = 'up_to_20';
+    if (grossFare <= this.THRESHOLD_10) {
+      // Até R$ 10,00
+      operationalFee = this.OPERATIONAL_FEE_UP_TO_10;
+      operationalFeeType = 'up_to_10';
+    } else if (grossFare <= this.THRESHOLD_25) {
+      // Acima de R$ 10,00 até R$ 25,00
+      operationalFee = this.OPERATIONAL_FEE_10_TO_25;
+      operationalFeeType = '10_to_25';
     } else if (grossFare <= this.THRESHOLD_50) {
-      // Acima de R$ 20,00 até R$ 50,00
-      operationalFee = this.OPERATIONAL_FEE_20_TO_50;
-      operationalFeeType = '20_to_50';
+      // Acima de R$ 25,00 até R$ 50,00
+      operationalFee = this.OPERATIONAL_FEE_25_TO_50;
+      operationalFeeType = '25_to_50';
     } else {
       // Acima de R$ 50,00
       operationalFee = Math.round(grossFare * this.OPERATIONAL_FEE_ABOVE_50_PERCENTAGE);
@@ -1280,7 +1433,12 @@ class PaymentService {
 
       // Tentar transferência BaaS apenas se chaves Pix estiverem disponíveis
       // Se não estiver, usar apenas crédito no Firestore
-      if (driverPixKey && this.LEAF_PIX_KEY && this.LEAF_PIX_KEY !== 'test@leaf.app.br') {
+      if (
+        this.isWooviDirectTransferOnRideCompletionEnabled() &&
+        driverPixKey &&
+        this.LEAF_PIX_KEY &&
+        this.LEAF_PIX_KEY !== 'test@leaf.app.br'
+      ) {
         logStructured('info', 'Tentando transferência BaaS (se disponível)', { service: 'PaymentService' });
 
         // Transferência BaaS com circuit breaker
@@ -1317,7 +1475,11 @@ class PaymentService {
           logStructured('warn', 'Transferência BaaS não disponível, usando apenas crédito no Firestore', { service: 'PaymentService' });
         }
       } else {
-        logStructured('info', 'Usando sistema de saldo no Firestore (BaaS não configurado)', { service: 'PaymentService' });
+        logStructured('info', 'Usando sistema de saldo no Firestore/subconta Woovi sem Pix Out por corrida', {
+          service: 'PaymentService',
+          directTransferEnabled: this.isWooviDirectTransferOnRideCompletionEnabled(),
+          hasDriverPixKey: Boolean(driverPixKey)
+        });
       }
 
       // 3. ✅ NOVO: Creditar saldo diretamente no Firestore (substitui BaaS temporariamente)
@@ -1483,6 +1645,12 @@ class PaymentService {
     }
   }
 
+  buildDriverBalanceCreditId(driverId, rideId, amountInCents) {
+    const source = `${driverId || 'unknown-driver'}:${rideId || 'unknown-ride'}:${amountInCents || 0}`;
+    const hash = crypto.createHash('sha256').update(source).digest('hex').slice(0, 32);
+    return `ride_credit_${hash}`;
+  }
+
   /**
    * Credita saldo diretamente no Firestore vinculado ao ID do motorista
    * Substitui BaaS temporariamente até API MASTER estar disponível
@@ -1509,11 +1677,43 @@ class PaymentService {
         };
       }
 
+      if (!rideId) {
+        return {
+          success: false,
+          error: 'rideId obrigatório para crédito idempotente'
+        };
+      }
+
+      const amountInCents = Math.round(Number(amount));
+      if (!Number.isFinite(amountInCents) || amountInCents <= 0) {
+        return {
+          success: false,
+          error: 'Valor inválido para crédito'
+        };
+      }
+
       const balanceRef = firestore.collection('driver_balances').doc(driverId);
-      const amountInReais = amount / 100; // Converter centavos para reais
+      const amountInReais = amountInCents / 100; // Converter centavos para reais
+      const creditTransactionId = this.buildDriverBalanceCreditId(driverId, rideId, amountInCents);
+      const creditTransactionRef = balanceRef.collection('transactions').doc(creditTransactionId);
 
       // Usar transação para garantir consistência
       const result = await firestore.runTransaction(async (transaction) => {
+        const creditTransactionDoc = await transaction.get(creditTransactionRef);
+
+        if (creditTransactionDoc.exists) {
+          const creditData = creditTransactionDoc.data() || {};
+          return {
+            success: true,
+            duplicate: true,
+            previousBalance: creditData.previousBalance ?? null,
+            newBalance: creditData.newBalance ?? null,
+            creditAmount: amountInReais,
+            balanceId: driverId,
+            transactionId: creditTransactionId
+          };
+        }
+
         const balanceDoc = await transaction.get(balanceRef);
 
         let currentBalance = 0;
@@ -1538,41 +1738,44 @@ class PaymentService {
           lastCreditAmount: amountInReais
         }, { merge: true });
 
+        transaction.set(creditTransactionRef, {
+          type: 'credit',
+          amount: amountInReais,
+          amountInCents,
+          rideId,
+          previousBalance: currentBalance,
+          newBalance,
+          createdAt: admin.firestore.FieldValue.serverTimestamp(),
+          description: `Ganhos da corrida ${rideId}`,
+          idempotencyKey: creditTransactionId
+        });
+
         return {
           success: true,
           previousBalance: currentBalance,
           newBalance: newBalance,
           creditAmount: amountInReais,
-          balanceId: driverId
+          balanceId: driverId,
+          transactionId: creditTransactionId
         };
       });
 
-      // Salvar histórico da transação
       if (result.success) {
-        const historyRef = firestore
-          .collection('driver_balances')
-          .doc(driverId)
-          .collection('transactions')
-          .doc();
-
-        await historyRef.set({
-          type: 'credit',
-          amount: amountInReais,
-          amountInCents: amount,
-          rideId: rideId,
-          previousBalance: result.previousBalance,
-          newBalance: result.newBalance,
-          createdAt: admin.firestore.FieldValue.serverTimestamp(),
-          description: `Ganhos da corrida ${rideId}`
-        });
-
-        logStructured('info', 'Saldo creditado para motorista', {
+        logStructured('info', result.duplicate ? 'Crédito de saldo idempotente já aplicado' : 'Saldo creditado para motorista', {
           service: 'payment-service',
           driverId,
           rideId,
           amount: amountInReais.toFixed(2),
-          previousBalance: result.previousBalance.toFixed(2),
-          newBalance: result.newBalance.toFixed(2)
+          previousBalance:
+            typeof result.previousBalance === 'number'
+              ? result.previousBalance.toFixed(2)
+              : null,
+          newBalance:
+            typeof result.newBalance === 'number'
+              ? result.newBalance.toFixed(2)
+              : null,
+          duplicate: Boolean(result.duplicate),
+          transactionId: result.transactionId
         });
       }
 
@@ -1637,21 +1840,39 @@ class PaymentService {
       const balanceRef = firestore.collection('driver_balances').doc(driverId);
       const balanceDoc = await balanceRef.get();
       const subscriptionBilling = await this.getDriverSubscriptionBillingData(driverId);
+      const subscriptionDailyFeeSuspended = !this.SUBSCRIPTION_DAILY_BILLING_ENABLED;
+      const rawPendingFeeCents = Math.max(0, Number(subscriptionBilling.pendingFeeCents || 0));
+      const effectivePendingFeeCents = subscriptionDailyFeeSuspended
+        ? 0
+        : Math.max(0, rawPendingFeeCents);
+      const rawDailyFeeCents = Math.max(0, Number(subscriptionBilling.dailyFeeCents || 0));
+      const nominalDailyFeeCents = this.SUBSCRIPTION_DAILY_FEE_NOMINAL_CENTS;
+      const effectiveDailyFeeCents = subscriptionDailyFeeSuspended
+        ? 0
+        : Math.max(0, rawDailyFeeCents || nominalDailyFeeCents);
 
       if (!balanceDoc.exists) {
-        const availableAfterSubscriptionCents = Math.max(0, 0 - Number(subscriptionBilling.pendingFeeCents || 0));
+        const availableAfterSubscriptionCents = Math.max(0, 0 - effectivePendingFeeCents);
         return {
           success: true,
           balance: 0,
           balanceCents: 0,
           totalEarnings: 0,
-          subscriptionPendingFeeCents: Number(subscriptionBilling.pendingFeeCents || 0),
-          subscriptionPendingFee: this.toReais(subscriptionBilling.pendingFeeCents || 0),
+          subscriptionPendingFeeCents: effectivePendingFeeCents,
+          subscriptionPendingFee: this.toReais(effectivePendingFeeCents),
+          subscriptionPendingFeeRawCents: Math.max(0, rawPendingFeeCents),
+          subscriptionPendingFeeRaw: this.toReais(rawPendingFeeCents),
           subscriptionStatus: subscriptionBilling.subscriptionStatus || 'active',
           billingStatus: subscriptionBilling.billingStatus || 'active',
           subscriptionCollectionMode: subscriptionBilling.collectionMode || 'withdrawal',
-          subscriptionDailyFeeCents: Number(subscriptionBilling.dailyFeeCents || 0),
-          subscriptionDailyFee: this.toReais(subscriptionBilling.dailyFeeCents || 0),
+          subscriptionDailyFeeCents: effectiveDailyFeeCents,
+          subscriptionDailyFee: this.toReais(effectiveDailyFeeCents),
+          subscriptionDailyFeeNominalCents: nominalDailyFeeCents,
+          subscriptionDailyFeeNominal: this.toReais(nominalDailyFeeCents),
+          subscriptionDailyFeeEffectiveCents: effectiveDailyFeeCents,
+          subscriptionDailyFeeEffective: this.toReais(effectiveDailyFeeCents),
+          subscriptionDailyFeeSuspended,
+          subscriptionDailyBillingEnabled: this.SUBSCRIPTION_DAILY_BILLING_ENABLED,
           subscriptionWaveId: subscriptionBilling.waveId || null,
           availableAfterSubscriptionCents,
           availableAfterSubscription: this.toReais(availableAfterSubscriptionCents),
@@ -1661,7 +1882,7 @@ class PaymentService {
 
       const data = balanceDoc.data();
       const balanceCents = this.toCents(data.balance || 0);
-      const pendingFeeCents = Number(subscriptionBilling.pendingFeeCents || 0);
+      const pendingFeeCents = effectivePendingFeeCents;
       const availableAfterSubscriptionCents = Math.max(0, balanceCents - pendingFeeCents);
 
       return {
@@ -1673,11 +1894,19 @@ class PaymentService {
         lastRideId: data.lastRideId || null,
         subscriptionPendingFeeCents: pendingFeeCents,
         subscriptionPendingFee: this.toReais(pendingFeeCents),
+        subscriptionPendingFeeRawCents: Math.max(0, rawPendingFeeCents),
+        subscriptionPendingFeeRaw: this.toReais(rawPendingFeeCents),
         subscriptionStatus: subscriptionBilling.subscriptionStatus || 'active',
         billingStatus: subscriptionBilling.billingStatus || 'active',
         subscriptionCollectionMode: subscriptionBilling.collectionMode || 'withdrawal',
-        subscriptionDailyFeeCents: Number(subscriptionBilling.dailyFeeCents || 0),
-        subscriptionDailyFee: this.toReais(subscriptionBilling.dailyFeeCents || 0),
+        subscriptionDailyFeeCents: effectiveDailyFeeCents,
+        subscriptionDailyFee: this.toReais(effectiveDailyFeeCents),
+        subscriptionDailyFeeNominalCents: nominalDailyFeeCents,
+        subscriptionDailyFeeNominal: this.toReais(nominalDailyFeeCents),
+        subscriptionDailyFeeEffectiveCents: effectiveDailyFeeCents,
+        subscriptionDailyFeeEffective: this.toReais(effectiveDailyFeeCents),
+        subscriptionDailyFeeSuspended,
+        subscriptionDailyBillingEnabled: this.SUBSCRIPTION_DAILY_BILLING_ENABLED,
         subscriptionWaveId: subscriptionBilling.waveId || null,
         availableAfterSubscriptionCents,
         availableAfterSubscription: this.toReais(availableAfterSubscriptionCents)
@@ -1748,6 +1977,7 @@ class PaymentService {
 
     const subscriptionBilling = await this.getDriverSubscriptionBillingData(driverId);
     const shouldSettleSubscriptionNow =
+      this.SUBSCRIPTION_DAILY_BILLING_ENABLED &&
       this.SUBSCRIPTION_SETTLE_ON_WITHDRAW &&
       String(subscriptionBilling.collectionMode || 'withdrawal') === 'withdrawal';
 

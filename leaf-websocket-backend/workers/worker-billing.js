@@ -10,10 +10,39 @@
 const WorkerManager = require('./WorkerManager');
 const { logStructured } = require('../utils/logger');
 const PaymentService = require('../services/payment-service');
-const driverApprovalService = require('../services/driver-approval-service');
+const DriverApprovalService = require('../services/driver-approval-service');
 const idempotencyService = require('../services/idempotency-service');
 const { EVENT_TYPES } = require('../events');
 const { isMultiLegBillingEnabled } = require('../utils/ride-lifecycle-feature-flags');
+
+const driverApprovalService = typeof DriverApprovalService === 'function'
+    ? new DriverApprovalService()
+    : DriverApprovalService;
+
+function normalizeMoneyToCents(value) {
+    const numeric = Number(value);
+    if (!Number.isFinite(numeric) || numeric <= 0) {
+        return 0;
+    }
+    return Math.round(numeric * 100);
+}
+
+function buildRideBillingIdempotencyScope(bookingId, eventId = null) {
+    const normalizedBookingId = String(bookingId || '').trim();
+    if (normalizedBookingId) {
+        return normalizedBookingId;
+    }
+    return String(eventId || 'unknown_ride_completed').trim();
+}
+
+function buildCancellationBillingIdempotencyScope(bookingId, driverId, eventId = null) {
+    const normalizedBookingId = String(bookingId || '').trim();
+    const normalizedDriverId = String(driverId || '').trim();
+    if (normalizedBookingId && normalizedDriverId) {
+        return `${normalizedBookingId}:${normalizedDriverId}`;
+    }
+    return String(eventId || 'unknown_ride_canceled').trim();
+}
 
 // Criar WorkerManager focado em billing
 const workerManager = new WorkerManager({
@@ -41,7 +70,11 @@ workerManager.registerListener(EVENT_TYPES.RIDE_COMPLETED, async (event) => {
     // ✅ Risco 2 Resolvido: Proteção contra Duplo Faturamento (Idempotency)
     // Se a API crachar logo após a Woovi mas antes do ACK do Redis Stream, esse lock garante
     // que quando a task retornar ao Worker, ela seja descartada silenciosamente para não onerar em dobro.
-    const idempotencyKey = idempotencyService.generateKey(driverId, 'billing.ride.completed', eventId);
+    const idempotencyKey = idempotencyService.generateKey(
+        driverId,
+        'billing.ride.completed',
+        buildRideBillingIdempotencyScope(bookingId, eventId)
+    );
     // Utilizaremos um TTL longo (Duração de 7 dias) para garantir que faturamentos antigos que foram pra DLQ e voltaram não passem.
     const idempotencyCheck = await idempotencyService.checkAndSet(idempotencyKey, 604800);
 
@@ -60,6 +93,7 @@ workerManager.registerListener(EVENT_TYPES.RIDE_COMPLETED, async (event) => {
 
     if (rideLegSettlements.length > 1) {
         if (!isMultiLegBillingEnabled()) {
+            await idempotencyService.releaseInflight?.(idempotencyKey);
             throw new Error(
                 `Multi-leg billing desabilitado para booking ${bookingId}; habilite ENABLE_MULTI_LEG_BILLING=true antes do rollout`
             );
@@ -91,6 +125,7 @@ workerManager.registerListener(EVENT_TYPES.RIDE_COMPLETED, async (event) => {
             );
 
             if (!creditResult.success) {
+                await idempotencyService.releaseInflight?.(idempotencyKey);
                 throw new Error(
                     `Falha ao creditar saldo da perna ${leg?.legNumber || '?'} para ${legDriverId}: ${creditResult.error}`
                 );
@@ -161,27 +196,38 @@ workerManager.registerListener(EVENT_TYPES.RIDE_COMPLETED, async (event) => {
         };
     }
 
-    // Obter dados da conta Woovi do motorista
-    const accountData = await driverApprovalService.getDriverWooviAccount(driverId);
-
-    if (!accountData || !accountData.accountId) {
-        logStructured('warn', 'Motorista sem conta Woovi configurada. Faturamento ignorado.', {
+    // O modelo financeiro vigente é pagamento antecipado + ledger interno.
+    // A conta/subconta Woovi do motorista é útil para saque futuro, mas não pode
+    // bloquear o crédito da corrida concluída no saldo interno.
+    let accountData = null;
+    try {
+        accountData = await driverApprovalService.getDriverWooviAccount(driverId);
+        if (!accountData || !accountData.accountId) {
+            logStructured('warn', 'Motorista sem conta Woovi configurada; seguindo com crédito no ledger interno', {
+                bookingId,
+                driverId
+            });
+        }
+    } catch (accountError) {
+        logStructured('warn', 'Falha ao consultar conta Woovi do motorista; seguindo com crédito no ledger interno', {
             bookingId,
-            driverId
+            driverId,
+            error: accountError.message
         });
-        return { success: false, reason: 'Conta Woovi não encontrada' };
     }
 
     // Processar distribuição de valor líquido para o motorista
     const distributionResult = await paymentService.processNetDistribution({
         rideId: bookingId,
         driverId: driverId,
-        totalAmount: finalFare,
-        tollFee: tollFee || 0, // Passa o tollFee
-        wooviAccountId: accountData.accountId
+        totalAmount: normalizeMoneyToCents(finalFare),
+        tollFee: normalizeMoneyToCents(tollFee || 0),
+        wooviAccountId: accountData?.accountId || null,
+        driverPixKey: accountData?.wooviSubaccountPixKey || accountData?.driverPixKey || accountData?.pixKey || null
     });
 
     if (!distributionResult.success) {
+        await idempotencyService.releaseInflight?.(idempotencyKey);
         throw new Error(`Falha na distribuição de pagamento Woovi: ${distributionResult.error}`);
     }
 
@@ -214,7 +260,11 @@ workerManager.registerListener(EVENT_TYPES.RIDE_CANCELED, async (event) => {
         eventId
     });
 
-    const idempotencyKey = idempotencyService.generateKey(driverId, 'billing.ride.canceled', eventId);
+    const idempotencyKey = idempotencyService.generateKey(
+        driverId,
+        'billing.ride.canceled',
+        buildCancellationBillingIdempotencyScope(bookingId, driverId, eventId)
+    );
     const idempotencyCheck = await idempotencyService.checkAndSet(idempotencyKey, 604800);
 
     if (!idempotencyCheck.isNew) {
@@ -236,6 +286,7 @@ workerManager.registerListener(EVENT_TYPES.RIDE_CANCELED, async (event) => {
 
     if (!distributionResult.success) {
         // Fallback limpo: se falhar, retorna erro para tentar no DLQ
+        await idempotencyService.releaseInflight?.(idempotencyKey);
         throw new Error(`Falha na distribuição de multa de cancelamento: ${distributionResult.error}`);
     }
 
@@ -251,38 +302,47 @@ workerManager.registerListener(EVENT_TYPES.RIDE_CANCELED, async (event) => {
     return distributionResult;
 });
 
-// Tratamento de sinais para shutdown graceful
-process.on('SIGTERM', async () => {
-    logStructured('info', 'SIGTERM recebido, parando billing-worker', { service: 'billing-worker' });
-    await workerManager.stop();
-    process.exit(0);
-});
-
-process.on('SIGINT', async () => {
-    logStructured('info', 'SIGINT recebido, parando billing-worker', { service: 'billing-worker' });
-    await workerManager.stop();
-    process.exit(0);
-});
-
-// Iniciar worker
-logStructured('info', 'Inicializando billing-worker', {
-    service: 'billing-worker',
-    multiLegBillingEnabled: isMultiLegBillingEnabled()
-});
-
-workerManager.start().catch(error => {
-    logStructured('error', 'Erro fatal ao iniciar billing worker', {
-        service: 'billing-worker',
-        error: error.message
+if (require.main === module) {
+    // Tratamento de sinais para shutdown graceful
+    process.on('SIGTERM', async () => {
+        logStructured('info', 'SIGTERM recebido, parando billing-worker', { service: 'billing-worker' });
+        await workerManager.stop();
+        process.exit(0);
     });
-    process.exit(1);
-});
 
-// Log de estatísticas a cada 60 segundos
-setInterval(() => {
-    const stats = workerManager.getStats();
-    logStructured('info', 'Estatísticas do billing-worker', {
-        service: 'billing-worker',
-        ...stats
+    process.on('SIGINT', async () => {
+        logStructured('info', 'SIGINT recebido, parando billing-worker', { service: 'billing-worker' });
+        await workerManager.stop();
+        process.exit(0);
     });
-}, 60000);
+
+    // Iniciar worker
+    logStructured('info', 'Inicializando billing-worker', {
+        service: 'billing-worker',
+        multiLegBillingEnabled: isMultiLegBillingEnabled()
+    });
+
+    workerManager.start().catch(error => {
+        logStructured('error', 'Erro fatal ao iniciar billing worker', {
+            service: 'billing-worker',
+            error: error.message
+        });
+        process.exit(1);
+    });
+
+    // Log de estatísticas a cada 60 segundos
+    setInterval(() => {
+        const stats = workerManager.getStats();
+        logStructured('info', 'Estatísticas do billing-worker', {
+            service: 'billing-worker',
+            ...stats
+        });
+    }, 60000);
+}
+
+module.exports = {
+    workerManager,
+    normalizeMoneyToCents,
+    buildRideBillingIdempotencyScope,
+    buildCancellationBillingIdempotencyScope
+};

@@ -73,6 +73,10 @@ jest.mock('../../../services/trip-location-persistence-service', () => ({
   forceFinalizeTrip: jest.fn().mockResolvedValue(undefined)
 }));
 
+jest.mock('../../../services/heartbeat-service', () => ({
+  getAndResetOfflineTime: jest.fn().mockResolvedValue(0)
+}));
+
 jest.mock('../../../services/pricing-h3-read-model-service', () => ({
   clearBookingSnapshot: jest.fn().mockResolvedValue(undefined),
   applyDriverSnapshot: jest.fn().mockResolvedValue(undefined)
@@ -93,6 +97,7 @@ const { metrics } = require('../../../utils/prometheus-metrics');
 const traceContext = require('../../../utils/trace-context');
 const { getTracer } = require('../../../utils/tracer');
 const lifecycleService = require('../../../services/ride-lifecycle-service');
+const heartbeatService = require('../../../services/heartbeat-service');
 const CompleteTripCommand = require('../../../commands/CompleteTripCommand');
 
 describe('CompleteTripCommand', () => {
@@ -107,7 +112,9 @@ describe('CompleteTripCommand', () => {
         driverId: 'driver_1',
         customerId: 'customer_1',
         city: 'rio-de-janeiro',
-        carType: 'leaf_plus'
+        carType: 'leaf_plus',
+        estimatedFare: '42',
+        paymentAmountInCents: '4200'
       }),
       hset: jest.fn().mockResolvedValue(1),
       get: jest.fn().mockResolvedValue('booking_1'),
@@ -122,6 +129,7 @@ describe('CompleteTripCommand', () => {
     traceContext.runWithTraceId.mockImplementation(async (_traceId, fn) => fn());
     lifecycleService.resolveRideLegs.mockReturnValue([]);
     lifecycleService.resolveOperationalContinuation.mockReturnValue(null);
+    heartbeatService.getAndResetOfflineTime.mockResolvedValue(0);
     getTracer.mockReturnValue({
       startSpan: jest.fn(() => ({
         setStatus: jest.fn(),
@@ -163,6 +171,46 @@ describe('CompleteTripCommand', () => {
     expect(result.success).toBe(false);
     expect(result.error).toContain('estado atual');
     expect(RideStateManager.updateBookingState).not.toHaveBeenCalled();
+  });
+
+  it('returns an idempotent success without publishing a new event when already completed', async () => {
+    RideStateManager.getBookingState.mockResolvedValue('COMPLETED');
+    redis.hgetall.mockResolvedValue({
+      driverId: 'driver_1',
+      customerId: 'customer_1',
+      status: 'COMPLETED',
+      city: 'rio-de-janeiro',
+      carType: 'leaf_plus',
+      endLocation: JSON.stringify({ lat: -23.57, lng: -46.66 }),
+      finalFare: '42',
+      tollFee: '0',
+      distance: '12.4',
+      duration: '1320'
+    });
+
+    const command = new CompleteTripCommand({
+      driverId: 'driver_1',
+      bookingId: 'booking_1',
+      endLocation: { lat: -23.57, lng: -46.66 },
+      finalFare: 42,
+      distance: 12.4,
+      duration: 1320
+    });
+
+    const result = await command.execute();
+
+    expect(result.success).toBe(true);
+    expect(result.data).toMatchObject({
+      bookingId: 'booking_1',
+      driverId: 'driver_1',
+      idempotentReplay: true,
+      finalFare: 42
+    });
+    expect(RideStateManager.isValidTransition).not.toHaveBeenCalled();
+    expect(RideStateManager.updateBookingState).not.toHaveBeenCalled();
+    expect(redis.hset).not.toHaveBeenCalled();
+    expect(RideCompletedEvent).not.toHaveBeenCalled();
+    expect(metrics.recordCommand).toHaveBeenCalledWith('CompleteTrip', expect.any(Number), true);
   });
 
   it('completes the trip, clears active indexes and returns the canonical receipt event', async () => {
@@ -223,5 +271,79 @@ describe('CompleteTripCommand', () => {
       expect.objectContaining({ status: 'PENDING' })
     );
     expect(metrics.recordCommand).toHaveBeenCalledWith('CompleteTrip', expect.any(Number), true);
+  });
+
+  it('applies offline adjustment in reais and recalculates the financial snapshot', async () => {
+    RideStateManager.getBookingState.mockResolvedValue('IN_PROGRESS');
+    heartbeatService.getAndResetOfflineTime.mockResolvedValue(60000);
+
+    const command = new CompleteTripCommand({
+      driverId: 'driver_1',
+      bookingId: 'booking_1',
+      endLocation: { lat: -23.57, lng: -46.66 },
+      finalFare: 42,
+      distance: 12.4,
+      duration: 1320
+    });
+
+    const result = await command.execute();
+
+    expect(result.success).toBe(true);
+    expect(RideStateManager.updateBookingState).toHaveBeenCalledWith(
+      redis,
+      'booking_1',
+      'COMPLETED',
+      expect.objectContaining({
+        finalFare: 41.5,
+        duration: 1260,
+        driverNetAmount: 39.7
+      })
+    );
+    expect(redis.hset).toHaveBeenCalledWith(
+      'booking:booking_1',
+      expect.objectContaining({
+        finalFare: '41.5',
+        duration: '1260',
+        driverNetAmount: '39.7'
+      })
+    );
+    expect(RideCompletedEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        finalFare: 41.5,
+        duration: 1260
+      })
+    );
+  });
+
+  it('blocks trip completion when final fare diverges from paid amount', async () => {
+    RideStateManager.getBookingState.mockResolvedValue('IN_PROGRESS');
+    redis.hgetall.mockResolvedValue({
+      driverId: 'driver_1',
+      customerId: 'customer_1',
+      city: 'rio-de-janeiro',
+      carType: 'leaf_plus',
+      estimatedFare: '15.5',
+      paymentAmountInCents: '1550'
+    });
+
+    const command = new CompleteTripCommand({
+      driverId: 'driver_1',
+      bookingId: 'booking_1',
+      endLocation: { lat: -23.57, lng: -46.66 },
+      finalFare: 42,
+      distance: 12.4,
+      duration: 1320
+    });
+
+    const result = await command.execute();
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('diverge');
+    expect(RideStateManager.updateBookingState).not.toHaveBeenCalled();
+    expect(redis.hset).not.toHaveBeenCalledWith(
+      'booking:booking_1',
+      expect.objectContaining({ finalFare: '42' })
+    );
+    expect(metrics.recordCommand).toHaveBeenCalledWith('CompleteTrip', expect.any(Number), false);
   });
 });

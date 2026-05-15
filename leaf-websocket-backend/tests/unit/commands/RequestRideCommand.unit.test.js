@@ -250,6 +250,7 @@ describe('RequestRideCommand', () => {
         rideId: 'ride_123',
         amountInCents: 1840,
         paymentStatus: 'confirmed',
+        serverValidated: true,
         confirmedAt: '2026-04-07T23:59:00.000Z'
       }
     });
@@ -278,6 +279,122 @@ describe('RequestRideCommand', () => {
     }));
     expect(result.data.event).toEqual(expect.objectContaining({
       paymentStatus: 'confirmed'
+    }));
+  });
+
+  test('deve travar tarifa e repasse pelo valor confirmado do pagamento server-side', async () => {
+    fareEstimationService.estimateRideFare.mockResolvedValueOnce({
+      estimatedFare: 14.76,
+      routeMetrics: {
+        distanceKm: 3.98,
+        durationSecs: 512,
+        source: 'client_route_metrics'
+      },
+      tollFee: 0,
+      pricingPayload: {
+        final_price: 14.76,
+        operational_state: 'PRESSAO'
+      },
+      operationalState: 'PRESSAO',
+      scorePressao: 0.345,
+      scoreExcecao: 0.3,
+      pricingAudit: {}
+    });
+
+    const command = new RequestRideCommand({
+      customerId: 'customer_123',
+      pickupLocation: { lat: -22.9846, lng: -43.2041 },
+      destinationLocation: { lat: -22.96731, lng: -43.17933 },
+      estimatedFare: 14.22,
+      routeDistanceKm: 3.98,
+      routeDurationSecs: 512,
+      tollFee: 0,
+      carType: 'Leaf Plus',
+      paymentMethod: 'pix',
+      paymentStatus: 'in_holding',
+      paymentId: 'qa_bypass_123',
+      paymentData: {
+        chargeId: 'qa_bypass_123',
+        rideId: 'ride_123',
+        amountInCents: 1422,
+        paymentStatus: 'in_holding',
+        serverValidated: true,
+        confirmedAt: '2026-05-11T19:53:35.740Z'
+      }
+    });
+
+    const result = await command.execute();
+
+    expect(result.success).toBe(true);
+    expect(rideQueueManager.enqueueRide).toHaveBeenCalledWith(
+      expect.objectContaining({
+        estimatedFare: 14.22,
+        paymentAmountInCents: 1422,
+        estimatedOperationalFee: 0.99,
+        estimatedPaymentIntermediationFee: 0.5,
+        estimatedTotalFees: 1.49,
+        estimatedDriverNetAmount: 12.73,
+        pricingPayload: expect.objectContaining({
+          final_price: 14.22,
+          payment_amount_locked: true,
+          server_estimated_final_price: 14.76
+        })
+      }),
+      expect.objectContaining({
+        deferEventSourcing: true
+      })
+    );
+    expect(result.data.bookingData).toEqual(expect.objectContaining({
+      estimatedFare: 14.22,
+      estimatedDriverNetAmount: 12.73
+    }));
+    expect(result.data.event).toEqual(expect.objectContaining({
+      estimatedFare: 14.22,
+      estimatedDriverNetAmount: 12.73
+    }));
+  });
+
+  test('deve manter pagamento pendente quando cliente envia status pago sem validação server-side', async () => {
+    const command = new RequestRideCommand({
+      customerId: 'customer_123',
+      pickupLocation: { lat: -22.9, lng: -43.17 },
+      destinationLocation: { lat: -22.91, lng: -43.18 },
+      estimatedFare: 17,
+      routeDistanceKm: 5,
+      routeDurationSecs: 780,
+      tollFee: 0,
+      carType: 'Leaf Plus',
+      paymentMethod: 'pix',
+      paymentStatus: 'confirmed',
+      paymentId: 'charge_unsafe_client',
+      paymentData: {
+        chargeId: 'charge_unsafe_client',
+        rideId: 'ride_unsafe_client',
+        amountInCents: 1840,
+        paymentStatus: 'confirmed'
+      }
+    });
+
+    const result = await command.execute();
+
+    expect(result.success).toBe(true);
+    expect(rideQueueManager.enqueueRide).toHaveBeenCalledWith(
+      expect.objectContaining({
+        paymentStatus: 'pending_payment',
+        paymentChargeId: 'charge_unsafe_client',
+        paymentReferenceRideId: 'ride_unsafe_client',
+        paymentAmountInCents: 1840
+      }),
+      expect.objectContaining({
+        deferEventSourcing: true
+      })
+    );
+    expect(result.data.bookingData).toEqual(expect.objectContaining({
+      paymentStatus: 'pending_payment',
+      status: 'AWAITING_PAYMENT'
+    }));
+    expect(result.data.event).toEqual(expect.objectContaining({
+      paymentStatus: 'pending_payment'
     }));
   });
 });

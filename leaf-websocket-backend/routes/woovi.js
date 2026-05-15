@@ -1495,7 +1495,8 @@ async function processExtensionConfirmation(rideId, chargeId, amount, passengerI
 }
 
 /**
- * Processa confirmação de pagamento: busca driverId, credita saldo e notifica
+ * Processa confirmação de pagamento antecipado: materializa holding e notifica.
+ * O motorista só recebe crédito no ledger após ride.completed via billing-worker.
  * @param {string} chargeId - ID da cobrança na Woovi
  * @param {string} rideId - ID da corrida
  * @param {number} amount - Valor em centavos
@@ -1784,10 +1785,7 @@ async function processPaymentConfirmation(chargeId, rideId, amount, passengerId,
 
       const completedStatuses = ['COMPLETED', 'FINISHED', 'FINALIZED', 'DONE'];
       if (completedStatuses.includes(rideStatus)) {
-        const releaseResult = await paymentService.releasePaymentToDriver(resolvedBookingId, driverId);
-        if (releaseResult.success) {
-          emitPassengerStatus('PAYMENT_RELEASED', { driverId, amount });
-        }
+        emitPassengerStatus('AWAITING_LEDGER_SETTLEMENT', { driverId, amount });
       } else {
         emitPassengerStatus('AWAITING_TRIP_COMPLETION', { driverId });
       }

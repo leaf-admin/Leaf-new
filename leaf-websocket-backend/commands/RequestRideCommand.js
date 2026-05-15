@@ -30,6 +30,7 @@ const PaymentService = require('../services/payment-service');
 const { resolveEstimatedFareSnapshot } = require('../utils/fare-snapshot-utils');
 
 const paymentService = new PaymentService();
+const PAID_PAYMENT_STATUSES = new Set(['confirmed', 'paid', 'in_holding']);
 
 class RequestRideCommand extends Command {
     constructor(data) {
@@ -184,17 +185,24 @@ class RequestRideCommand extends Command {
 	                });
 	                recordStage('fare_estimation');
 	                const pricingSnapshotLockedAt = new Date().toISOString();
-                const estimatedFareSnapshot = resolveEstimatedFareSnapshot({
-                    paymentService,
-                    estimatedFare: fareEstimation.estimatedFare,
-                    tollFee: fareEstimation.tollFee
-                });
-                const normalizedPaymentStatus = String(
+                const requestedPaymentStatus = String(
                     this.paymentData?.paymentStatus ||
                     this.paymentStatus ||
                     'pending_payment'
                 ).trim().toLowerCase();
-                const hasConfirmedPayment = ['confirmed', 'paid', 'in_holding'].includes(normalizedPaymentStatus);
+                const paymentServerValidated = this.paymentData?.serverValidated === true;
+                if (!paymentServerValidated && PAID_PAYMENT_STATUSES.has(requestedPaymentStatus)) {
+                    logStructured('warn', 'RequestRideCommand recebeu pagamento confirmado sem validação server-side', {
+                        customerId: this.customerId,
+                        requestedPaymentStatus
+                    });
+                }
+                const hasConfirmedPayment =
+                    paymentServerValidated &&
+                    PAID_PAYMENT_STATUSES.has(requestedPaymentStatus);
+                const normalizedPaymentStatus = hasConfirmedPayment
+                    ? requestedPaymentStatus
+                    : 'pending_payment';
                 const initialRideState = hasConfirmedPayment
                     ? RideStateManager.STATES.PENDING
                     : RideStateManager.STATES.AWAITING_PAYMENT;
@@ -217,6 +225,33 @@ class RequestRideCommand extends Command {
                         ? parsedPaymentAmountInCents
                         : null;
                 const paymentConfirmedAt = this.paymentData?.confirmedAt || null;
+                const lockedEstimatedFareFromPayment =
+                    hasConfirmedPayment && paymentAmountInCents
+                        ? Number((paymentAmountInCents / 100).toFixed(2))
+                        : null;
+                const estimatedFareForBooking =
+                    lockedEstimatedFareFromPayment !== null
+                        ? lockedEstimatedFareFromPayment
+                        : fareEstimation.estimatedFare;
+                const pricingPayloadForBooking =
+                    fareEstimation.pricingPayload &&
+                    typeof fareEstimation.pricingPayload === 'object'
+                        ? {
+                            ...fareEstimation.pricingPayload,
+                            ...(lockedEstimatedFareFromPayment !== null
+                                ? {
+                                    final_price: estimatedFareForBooking,
+                                    payment_amount_locked: true,
+                                    server_estimated_final_price: fareEstimation.estimatedFare
+                                }
+                                : {})
+                        }
+                        : fareEstimation.pricingPayload;
+                const estimatedFareSnapshot = resolveEstimatedFareSnapshot({
+                    paymentService,
+                    estimatedFare: estimatedFareForBooking,
+                    tollFee: fareEstimation.tollFee
+                });
 
                 // Criar dados da corrida
                 beginStage('booking_payload');
@@ -225,12 +260,12 @@ class RequestRideCommand extends Command {
                     customerId: this.customerId,
                     pickupLocation: this.pickupLocation,
                     destinationLocation: this.destinationLocation,
-                    estimatedFare: fareEstimation.estimatedFare,
+                    estimatedFare: estimatedFareForBooking,
                     routeDistanceKm: fareEstimation.routeMetrics.distanceKm,
                     routeDurationSecs: fareEstimation.routeMetrics.durationSecs,
                     tollFee: fareEstimation.tollFee,
                     fareSource: fareEstimation.routeMetrics.source,
-                    pricingPayload: fareEstimation.pricingPayload,
+                    pricingPayload: pricingPayloadForBooking,
                     pricingAudit: fareEstimation.pricingAudit,
                     operationalState: fareEstimation.operationalState,
                     scorePressao: fareEstimation.scorePressao,
@@ -283,7 +318,7 @@ class RequestRideCommand extends Command {
                     customerId: this.customerId,
                     pickupLocation: this.pickupLocation,
                     destinationLocation: this.destinationLocation,
-                    estimatedFare: fareEstimation.estimatedFare,
+                    estimatedFare: estimatedFareForBooking,
                     carType: this.carType,
                     paymentMethod: this.paymentMethod,
                     paymentStatus: normalizedPaymentStatus,

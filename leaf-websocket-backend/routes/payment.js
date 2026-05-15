@@ -371,7 +371,21 @@ async function verifyWithdrawalAppPassword({ actor, driverId, password }) {
  */
 router.post('/payment/advance', authenticatePaymentActor, requirePassengerScope, async (req, res) => {
   try {
-    const { passengerId, amount, rideId, rideDetails, passengerName, passengerEmail } = req.body;
+    const {
+      passengerId,
+      amount,
+      rideId,
+      rideDetails,
+      passengerName,
+      passengerEmail,
+      driverId,
+      driverPixKey,
+      driverSubaccountPixKey,
+      wooviSubaccountPixKey,
+      subaccountPixKey,
+      tollFee,
+      tollFeeCents
+    } = req.body;
 
     // Validações básicas
     if (!passengerId || !amount || !rideId || !rideDetails) {
@@ -395,7 +409,14 @@ router.post('/payment/advance', authenticatePaymentActor, requirePassengerScope,
       rideId,
       rideDetails,
       passengerName,
-      passengerEmail
+      passengerEmail,
+      driverId,
+      driverPixKey,
+      driverSubaccountPixKey,
+      wooviSubaccountPixKey,
+      subaccountPixKey,
+      tollFee,
+      tollFeeCents
     };
 
     const result = await paymentService.processAdvancePayment(paymentData);
@@ -614,11 +635,19 @@ router.get('/payment/driver-balance/:driverId', authenticatePaymentActor, requir
         lastRideId: result.lastRideId,
         subscriptionPendingFeeCents: result.subscriptionPendingFeeCents || 0,
         subscriptionPendingFee: result.subscriptionPendingFee || 0,
+        subscriptionPendingFeeRawCents: result.subscriptionPendingFeeRawCents || 0,
+        subscriptionPendingFeeRaw: result.subscriptionPendingFeeRaw || 0,
         subscriptionStatus: result.subscriptionStatus || 'active',
         billingStatus: result.billingStatus || 'active',
         subscriptionCollectionMode: result.subscriptionCollectionMode || 'withdrawal',
         subscriptionDailyFeeCents: result.subscriptionDailyFeeCents || 0,
         subscriptionDailyFee: result.subscriptionDailyFee || 0,
+        subscriptionDailyFeeNominalCents: result.subscriptionDailyFeeNominalCents || 0,
+        subscriptionDailyFeeNominal: result.subscriptionDailyFeeNominal || 0,
+        subscriptionDailyFeeEffectiveCents: result.subscriptionDailyFeeEffectiveCents || 0,
+        subscriptionDailyFeeEffective: result.subscriptionDailyFeeEffective || 0,
+        subscriptionDailyFeeSuspended: result.subscriptionDailyFeeSuspended === true,
+        subscriptionDailyBillingEnabled: result.subscriptionDailyBillingEnabled === true,
         subscriptionWaveId: result.subscriptionWaveId || null,
         availableAfterSubscriptionCents: result.availableAfterSubscriptionCents || 0,
         availableAfterSubscription: result.availableAfterSubscription || 0,
@@ -796,7 +825,9 @@ router.post(
           challengeExpiresAt: stepUpPolicy.challenge?.expiresAt || null,
           signals: stepUpPolicy.signals || [],
           verificationMaxAgeHours:
-            kycPolicyService.getConfig().verificationMaxAgeHours
+            stepUpPolicy.verificationMaxAgeHours
+            || kycPolicyService.getConfig().verificationMaxAgeHours,
+          verificationWindowTier: stepUpPolicy.verificationWindowTier || null
         }
       });
     }

@@ -92,9 +92,11 @@ function registerSocketConfirmPaymentHandler({
                 // Guarda de negócio: só confirma pagamento se houver motorista elegível no momento.
                 let bookingPickupLocation = null;
                 let bookingCarType = null;
+                let bookingDataForPayment = {};
                 try {
                     const redis = redisPool.getConnection();
                     const bookingData = await redis.hgetall(`booking:${bookingId}`);
+                    bookingDataForPayment = bookingData || {};
                     bookingPickupLocation = parseBookingLocation(bookingData?.pickupLocation);
                     bookingCarType = bookingData?.carType || null;
                 } catch (bookingLookupError) {
@@ -202,6 +204,47 @@ function registerSocketConfirmPaymentHandler({
 
                     // Converter amount para centavos se necessário
                     const amountInCents = typeof amount === 'number' && amount < 1000 ? Math.round(amount * 100) : Math.round(amount);
+                    const fareLockValidationEnabled =
+                        data?.enforceFareLock === true ||
+                        String(
+                            process.env.ENFORCE_PAYMENT_FARE_LOCK ||
+                            (process.env.NODE_ENV === 'test' ? 'false' : 'true')
+                        ).toLowerCase() === 'true';
+                    const estimatedFareInCents = Math.round(Number(bookingDataForPayment?.estimatedFare || 0) * 100);
+                    const toleranceInCents = Math.max(
+                        0,
+                        Math.round(Number(process.env.PAYMENT_FARE_LOCK_TOLERANCE_REAIS || '0.01') * 100)
+                    );
+
+                    if (
+                        fareLockValidationEnabled &&
+                        Number.isFinite(estimatedFareInCents) &&
+                        estimatedFareInCents > 0 &&
+                        Math.abs(amountInCents - estimatedFareInCents) > toleranceInCents
+                    ) {
+                        await auditService.logPaymentAction(userId, 'confirmPayment', bookingId || null, paymentId || null, {
+                            error: 'Valor do pagamento diverge da tarifa travada',
+                            amountInCents,
+                            estimatedFareInCents,
+                            toleranceInCents
+                        }, false, 'Valor do pagamento divergente', metadata);
+
+                        socket.emit('paymentError', {
+                            error: 'Valor do pagamento divergente',
+                            message: 'O valor do pagamento não corresponde à tarifa calculada para esta corrida',
+                            code: 'PAYMENT_AMOUNT_MISMATCH',
+                            amountInCents,
+                            estimatedFareInCents
+                        });
+                        logStructured('warn', 'confirmPayment bloqueou divergencia entre pagamento e tarifa travada', {
+                            bookingId,
+                            eventType: 'confirmPayment',
+                            amountInCents,
+                            estimatedFareInCents,
+                            toleranceInCents
+                        });
+                        return;
+                    }
 
                     await Promise.race([
                         paymentService.savePaymentHolding(bookingId, {

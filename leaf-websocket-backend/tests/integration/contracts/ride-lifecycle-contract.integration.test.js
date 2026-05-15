@@ -23,6 +23,7 @@ describe('Ride lifecycle source contract audit', () => {
     const startTripHandler = read('leaf-websocket-backend/bootstrap/register-socket-start-trip-handler.js');
     const completeTripHandler = read('leaf-websocket-backend/bootstrap/register-socket-complete-trip-handler.js');
     const confirmPaymentHandler = read('leaf-websocket-backend/bootstrap/register-socket-confirm-payment-handler.js');
+    const updateTripLocationHandler = read('leaf-websocket-backend/bootstrap/register-socket-update-trip-location-handler.js');
 
     expect(createBookingHandler).toContain("socket.on('createBooking'");
     expect(createBookingHandler).toContain("socket.emit('bookingError'");
@@ -34,6 +35,9 @@ describe('Ride lifecycle source contract audit', () => {
     expect(completeTripHandler).toContain("emit('tripCompleted'");
     expect(confirmPaymentHandler).toContain("socket.on('confirmPayment'");
     expect(confirmPaymentHandler).toContain("socket.emit('paymentConfirmed'");
+    expect(updateTripLocationHandler).toContain("socket.on('updateTripLocation'");
+    expect(updateTripLocationHandler).toContain("io.to(`customer_${customerId}`).emit('tripLocationUpdated'");
+    expect(updateTripLocationHandler).not.toContain("io.emit('tripLocationUpdated'");
   });
 
   it('keeps the prototype runtime subscribed to the canonical ride lifecycle events', () => {

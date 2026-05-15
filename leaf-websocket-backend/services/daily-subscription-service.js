@@ -2,9 +2,10 @@
  * DAILY SUBSCRIPTION SERVICE
  *
  * Modelo vigente:
- * - Cobrança diária por plano/onda.
+ * - Cobrança diária de R$ 9,90.
  * - Valor acumula como pendência diária.
  * - Liquidação da pendência ocorre no saque (PaymentService).
+ * - Suspensa por padrão até estabilização regional.
  */
 
 const { logger } = require('../utils/logger');
@@ -16,16 +17,19 @@ class DailySubscriptionService {
     this.BILLING_CONFIG_PATH =
       String(process.env.SUBSCRIPTION_BILLING_CONFIG_PATH || 'subscription_billing/config').trim();
     this.COLLECTION_MODE = 'withdrawal';
+    this.DAILY_BILLING_ENABLED =
+      String(process.env.SUBSCRIPTION_DAILY_BILLING_ENABLED || 'false').toLowerCase() === 'true';
 
     this.DEFAULT_PLUS_WAVE_1_CENTS = this.parseCents(process.env.SUBSCRIPTION_PLUS_WAVE_1_DAILY_CENTS, 990);
-    this.DEFAULT_PLUS_WAVE_2_CENTS = this.parseCents(process.env.SUBSCRIPTION_PLUS_WAVE_2_DAILY_CENTS, 1290);
-    this.DEFAULT_PLUS_WAVE_3_CENTS = this.parseCents(process.env.SUBSCRIPTION_PLUS_WAVE_3_DAILY_CENTS, 1490);
-    this.DEFAULT_PLUS_DAILY_CENTS = this.parseCents(process.env.SUBSCRIPTION_PLUS_DAILY_CENTS, this.DEFAULT_PLUS_WAVE_3_CENTS);
+    this.DEFAULT_PLUS_WAVE_2_CENTS = this.parseCents(process.env.SUBSCRIPTION_PLUS_WAVE_2_DAILY_CENTS, 990);
+    this.DEFAULT_PLUS_WAVE_3_CENTS = this.parseCents(process.env.SUBSCRIPTION_PLUS_WAVE_3_DAILY_CENTS, 990);
+    this.DEFAULT_PLUS_DAILY_CENTS = this.parseCents(process.env.SUBSCRIPTION_PLUS_DAILY_CENTS, 990);
     this.DEFAULT_ELITE_DAILY_CENTS = this.parseCents(process.env.SUBSCRIPTION_ELITE_DAILY_CENTS, 0);
 
     logger.info('DailySubscriptionService inicializado', {
       billingConfigPath: this.BILLING_CONFIG_PATH,
       collectionMode: this.COLLECTION_MODE,
+      dailyBillingEnabled: this.DAILY_BILLING_ENABLED,
       defaults: {
         plusWave1Cents: this.DEFAULT_PLUS_WAVE_1_CENTS,
         plusWave2Cents: this.DEFAULT_PLUS_WAVE_2_CENTS,
@@ -385,6 +389,53 @@ class DailySubscriptionService {
         now
       });
 
+      if (!this.DAILY_BILLING_ENABLED) {
+        const updateResult = await this.updateRealtimeSubscriptionAndBilling(driverId, (state) => {
+          const pending = Number(state.pendingFeeCents || 0);
+          const existingStatus = String(state.status || '').toLowerCase();
+          const keepSuspended = ['blocked', 'cancelled', 'suspended'].includes(existingStatus);
+          const status = keepSuspended ? existingStatus : 'active';
+          const billingStatus = status === 'active'
+            ? (pending > 0 ? 'overdue' : 'active')
+            : 'suspended';
+
+          return {
+            planType: policy.planType,
+            waveId: policy.waveId || null,
+            weeklyFeeCents: policy.weeklyFeeCents,
+            dailyFeeCents: policy.dailyFeeCents,
+            collectionMode: policy.collectionMode,
+            status,
+            billingStatus,
+            dailyBillingEnabled: false,
+            subscriptionDailyBillingSuspended: true,
+            isInFreePeriod: false,
+            isInManualExemption: false,
+            lastChargeAt: nowIso,
+            lastChargeStatus: 'skipped_daily_billing_suspended',
+            lastChargeAmountCents: 0
+          };
+        });
+
+        if (!updateResult.success) {
+          return {
+            success: false,
+            error: updateResult.error || 'Falha ao atualizar assinatura'
+          };
+        }
+
+        return {
+          success: true,
+          skipped: true,
+          reason: 'daily_billing_suspended',
+          planType: policy.planType,
+          waveId: policy.waveId,
+          dailyFeeCents: policy.dailyFeeCents,
+          pendingFeeCents: 0,
+          rawPendingFeeCents: updateResult.subscription?.pendingFeeCents || 0
+        };
+      }
+
       const isFreePeriod = this.isInFreePeriod(driverData, now);
       if (isFreePeriod || policy.isExempt || policy.dailyFeeCents <= 0) {
         const skippedReason = isFreePeriod
@@ -516,6 +567,23 @@ class DailySubscriptionService {
 
   async processAllDailyCharges() {
     try {
+      if (!this.DAILY_BILLING_ENABLED) {
+        logger.info('Cobrança diária de assinatura suspensa por configuração', {
+          service: 'daily-subscription',
+          reason: 'SUBSCRIPTION_DAILY_BILLING_ENABLED=false'
+        });
+        return {
+          success: true,
+          total: 0,
+          processed: 0,
+          skipped: 0,
+          failed: 0,
+          overdue: 0,
+          reason: 'daily_billing_suspended',
+          details: []
+        };
+      }
+
       const db = firebaseConfig.getRealtimeDB();
       if (!db) {
         return { success: false, error: 'Realtime DB não disponível' };

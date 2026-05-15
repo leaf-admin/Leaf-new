@@ -7,6 +7,110 @@ class DriverApprovalService {
     // Criar instância do WooviDriverService
     this.wooviDriverService = new WooviDriverService();
   }
+
+  normalizePixKey(value) {
+    return String(value || '').trim();
+  }
+
+  buildDriverSubaccountPayload(driverData = {}) {
+    const pixKey = this.normalizePixKey(
+      driverData.wooviSubaccountPixKey ||
+      driverData.subaccountPixKey ||
+      driverData.driverPixKey ||
+      driverData.pixKey ||
+      driverData.bankAccount
+    );
+
+    if (!pixKey) {
+      return null;
+    }
+
+    return {
+      name: driverData.name,
+      email: driverData.email,
+      phone: driverData.phone,
+      taxID: driverData.cpf,
+      pixKey
+    };
+  }
+
+  async persistDriverWooviAccount(driverId, dataToSave) {
+    const firestore = firebaseConfig.getFirestore();
+    if (!firestore) {
+      logStructured('warn', 'Firestore não disponível, dados Woovi não foram salvos', {
+        service: 'driver-approval-service',
+        driverId
+      });
+      return false;
+    }
+
+    const sanitized = { ...dataToSave };
+    Object.keys(sanitized).forEach(key => {
+      if (sanitized[key] === undefined) {
+        delete sanitized[key];
+      }
+    });
+
+    await firestore.collection('users').doc(driverId).set(sanitized, { merge: true });
+    return true;
+  }
+
+  async tryCreateDriverSubaccount(driverData = {}) {
+    const subaccountPayload = this.buildDriverSubaccountPayload(driverData);
+    if (!subaccountPayload) {
+      return {
+        success: false,
+        reason: 'pix_key_missing'
+      };
+    }
+
+    const result = await this.wooviDriverService.createSubaccount(subaccountPayload);
+    if (!result.success) {
+      return {
+        success: false,
+        reason: 'woovi_subaccount_create_failed',
+        error: result.error,
+        details: result
+      };
+    }
+
+    const subaccountPixKey = result.pixKey || subaccountPayload.pixKey;
+    const subaccountId =
+      result.subaccount?.id ||
+      result.subaccount?.accountId ||
+      result.subaccount?.pixKey ||
+      subaccountPixKey;
+
+    const nowIso = new Date().toISOString();
+    const dataToSave = {
+      wooviAccountId: subaccountId,
+      wooviClientId: subaccountId,
+      wooviSubaccountId: subaccountId,
+      wooviSubaccountPixKey: subaccountPixKey,
+      pixKey: subaccountPixKey,
+      wooviAccountCreated: true,
+      wooviSubaccountCreated: true,
+      baasAccountCreated: true,
+      fallbackToCustomer: false,
+      baasUpgradePending: false,
+      wooviAccountCreatedAt: nowIso,
+      isApproved: true,
+      approvedAt: nowIso
+    };
+
+    await this.persistDriverWooviAccount(driverData.id, dataToSave);
+
+    return {
+      success: true,
+      wooviAccountId: subaccountId,
+      wooviClientId: subaccountId,
+      wooviSubaccountId: subaccountId,
+      wooviSubaccountPixKey: subaccountPixKey,
+      subaccount: result.subaccount,
+      dataToSave
+    };
+  }
+
   /**
    * Processa a aprovação de um motorista e cria conta na Woovi
    * @param {Object} driverData - Dados do motorista aprovado
@@ -20,9 +124,33 @@ class DriverApprovalService {
   async approveDriver(driverData) {
     try {
       logStructured('info', 'Processando aprovação do motorista', { service: 'driver-approval-service', driverId: driverData.id, driverName: driverData.name });
+
+      const subaccountResult = await this.tryCreateDriverSubaccount(driverData);
+      if (subaccountResult.success) {
+        return {
+          success: true,
+          message: 'Motorista aprovado com subconta Woovi para split',
+          driverData: {
+            ...driverData,
+            ...subaccountResult.dataToSave
+          },
+          wooviAccountId: subaccountResult.wooviAccountId,
+          wooviClientId: subaccountResult.wooviClientId,
+          wooviSubaccountPixKey: subaccountResult.wooviSubaccountPixKey
+        };
+      }
+
+      if (subaccountResult.reason !== 'pix_key_missing') {
+        logStructured('warn', 'Falha ao criar subconta Woovi; tentando fallback BaaS/customer', {
+          service: 'driver-approval-service',
+          driverId: driverData.id,
+          reason: subaccountResult.reason,
+          error: subaccountResult.error
+        });
+      }
       
-      // 1. Tentar criar subaccount BaaS na Woovi (conta real para o motorista gerenciar saldo)
-      // Se API MASTER não estiver configurada, usa fallback automaticamente
+      // 1. Fallback legado: tentar conta BaaS completa via account-register.
+      // O modelo preferencial atual é subconta + split; este caminho fica para compatibilidade.
       let baasResult = await this.wooviDriverService.createDriverBaaSAccount({
         name: driverData.name,
         email: driverData.email,
@@ -309,9 +437,13 @@ class DriverApprovalService {
       return {
         wooviAccountId: wooviAccountId,
         wooviClientId: driverData.wooviClientId || wooviAccountId,
-        pixKey: driverData.pixKey || driverData.wooviPixKey || null, // Chave Pix do motorista
+        wooviSubaccountId: driverData.wooviSubaccountId || null,
+        wooviSubaccountPixKey: driverData.wooviSubaccountPixKey || driverData.subaccountPixKey || null,
+        pixKey: driverData.pixKey || driverData.wooviPixKey || driverData.driverPixKey || null, // Chave Pix do motorista
+        driverPixKey: driverData.driverPixKey || driverData.pixKey || driverData.wooviPixKey || null,
         pixKeyType: driverData.pixKeyType || null,
         baasAccountCreated: driverData.baasAccountCreated || false,
+        wooviSubaccountCreated: driverData.wooviSubaccountCreated || false,
         fallbackToCustomer: driverData.fallbackToCustomer || false
       };
     } catch (error) {
@@ -347,7 +479,11 @@ class DriverApprovalService {
         hasAccount: true,
         wooviAccountId: wooviAccountId,
         wooviClientId: accountData.wooviClientId,
+        wooviSubaccountId: accountData.wooviSubaccountId,
+        wooviSubaccountPixKey: accountData.wooviSubaccountPixKey,
+        pixKey: accountData.pixKey,
         baasAccountCreated: accountData.baasAccountCreated,
+        wooviSubaccountCreated: accountData.wooviSubaccountCreated,
         fallbackToCustomer: accountData.fallbackToCustomer,
         message: 'Motorista possui conta na Woovi'
       };
@@ -379,6 +515,17 @@ class DriverApprovalService {
           success: true,
           message: 'Motorista já possui conta na Woovi',
           wooviClientId: accountCheck.wooviClientId
+        };
+      }
+
+      const subaccountResult = await this.tryCreateDriverSubaccount(driverData);
+      if (subaccountResult.success) {
+        return {
+          success: true,
+          message: 'Subconta Woovi criada com sucesso',
+          wooviClientId: subaccountResult.wooviClientId,
+          wooviAccountId: subaccountResult.wooviAccountId,
+          wooviSubaccountPixKey: subaccountResult.wooviSubaccountPixKey
         };
       }
 
@@ -445,6 +592,32 @@ class DriverApprovalService {
         details: error.message
       };
     }
+  }
+
+  async getDriverWooviAccount(driverId) {
+    const accountData = await this.getDriverWooviAccountId(driverId);
+    if (!accountData || !accountData.wooviAccountId) {
+      return null;
+    }
+
+    const accountId =
+      accountData.wooviSubaccountPixKey ||
+      accountData.wooviSubaccountId ||
+      accountData.wooviAccountId;
+
+    return {
+      accountId,
+      wooviAccountId: accountData.wooviAccountId,
+      wooviClientId: accountData.wooviClientId,
+      wooviSubaccountId: accountData.wooviSubaccountId,
+      wooviSubaccountPixKey: accountData.wooviSubaccountPixKey,
+      pixKey: accountData.pixKey,
+      driverPixKey: accountData.driverPixKey,
+      pixKeyType: accountData.pixKeyType,
+      baasAccountCreated: accountData.baasAccountCreated,
+      wooviSubaccountCreated: accountData.wooviSubaccountCreated,
+      fallbackToCustomer: accountData.fallbackToCustomer
+    };
   }
 }
 

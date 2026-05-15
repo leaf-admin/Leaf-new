@@ -35,6 +35,45 @@ const {
     buildContinuationRideLeg
 } = require('../services/ride-lifecycle-service');
 
+function toMoney(value) {
+    const parsed = Number(value);
+    if (!Number.isFinite(parsed)) return null;
+    return Math.round(parsed * 100) / 100;
+}
+
+function paymentAmountInCentsToReais(value) {
+    const parsed = Number.parseInt(String(value || ''), 10);
+    if (!Number.isFinite(parsed) || parsed <= 0) return null;
+    return Math.round(parsed) / 100;
+}
+
+function resolveLockedFareFromBooking(bookingData = {}) {
+    const paidAmount = paymentAmountInCentsToReais(bookingData.paymentAmountInCents || bookingData.amountInCents);
+    if (paidAmount !== null) return { value: toMoney(paidAmount), source: 'paymentAmountInCents' };
+
+    const estimatedFare = toMoney(bookingData.estimatedFare || bookingData.fare || bookingData.estimate);
+    if (estimatedFare !== null && estimatedFare > 0) {
+        return { value: estimatedFare, source: 'estimatedFare' };
+    }
+
+    return null;
+}
+
+function resolveFareToleranceReais() {
+    const parsed = Number(process.env.RIDE_FINAL_FARE_TOLERANCE_REAIS || '0.01');
+    return Number.isFinite(parsed) && parsed >= 0 ? parsed : 0.01;
+}
+
+function safeJsonParse(value, fallback = null) {
+    if (!value) return fallback;
+    if (typeof value === 'object') return value;
+    try {
+        return JSON.parse(value);
+    } catch (_error) {
+        return fallback;
+    }
+}
+
 class CompleteTripCommand extends Command {
     constructor(data) {
         super(data);
@@ -115,6 +154,35 @@ class CompleteTripCommand extends Command {
                 // Verificar estado atual
                 const currentState = await RideStateManager.getBookingState(redis, this.bookingId);
 
+                if (
+                    currentState === RideStateManager.STATES.COMPLETED ||
+                    String(bookingData.status || '').toUpperCase() === RideStateManager.STATES.COMPLETED
+                ) {
+                    logStructured('info', 'CompleteTripCommand idempotente: corrida ja finalizada', {
+                        bookingId: this.bookingId,
+                        driverId: this.driverId,
+                        command: 'CompleteTripCommand'
+                    });
+                    span.end();
+                    metrics.recordCommand('CompleteTrip', (Date.now() - startTime) / 1000, true);
+                    return CommandResult.success({
+                        bookingId: this.bookingId,
+                        driverId: this.driverId,
+                        customerId: bookingData.customerId || null,
+                        city: bookingData.city || bookingData.pickupCity || bookingData.destinationCity || 'unknown',
+                        serviceType: bookingData.carType || bookingData.serviceType || 'standard',
+                        endLocation: safeJsonParse(bookingData.endLocation, this.endLocation),
+                        finalFare: toMoney(bookingData.finalFare ?? this.finalFare),
+                        tollFee: toMoney(bookingData.tollFee ?? this.tollFee) || 0,
+                        distance: toMoney(bookingData.distance ?? bookingData.routeDistanceKm ?? this.distance) || 0,
+                        duration: Number.parseInt(String(bookingData.duration || bookingData.routeDurationSecs || this.duration || 0), 10) || 0,
+                        paymentDistribution: bookingData.paymentDistribution
+                            ? safeJsonParse(bookingData.paymentDistribution, { status: 'PENDING', message: 'Processamento assíncrono em andamento' })
+                            : { status: 'PENDING', message: 'Processamento assíncrono em andamento' },
+                        idempotentReplay: true
+                    });
+                }
+
                 // Validar transição de estado
                 if (!RideStateManager.isValidTransition(currentState, RideStateManager.STATES.COMPLETED)) {
                     span.setStatus({ code: SpanStatusCode.ERROR, message: 'Invalid state transition' });
@@ -128,7 +196,61 @@ class CompleteTripCommand extends Command {
                 const rideCity = bookingData.city || bookingData.pickupCity || bookingData.destinationCity || 'unknown';
                 const rideServiceType = bookingData.carType || bookingData.serviceType || 'standard';
                 const paymentService = new PaymentService();
-                const completedFareBreakdown = paymentService.calculateFareBreakdownFromReais(
+                const normalizedFinalFare = toMoney(this.finalFare);
+                if (normalizedFinalFare === null || normalizedFinalFare < 0) {
+                    span.setStatus({ code: SpanStatusCode.ERROR, message: 'Valor final inválido' });
+                    span.end();
+                    metrics.recordCommand('CompleteTrip', (Date.now() - startTime) / 1000, false);
+                    return CommandResult.failure('Valor final da corrida inválido');
+                }
+
+                const lockedFare = resolveLockedFareFromBooking(bookingData);
+                const fareTolerance = resolveFareToleranceReais();
+                if (lockedFare && lockedFare.value !== null && Math.abs(normalizedFinalFare - lockedFare.value) > fareTolerance) {
+                    logStructured('warn', 'CompleteTripCommand bloqueou divergencia de tarifa final', {
+                        bookingId: this.bookingId,
+                        driverId: this.driverId,
+                        command: 'CompleteTripCommand',
+                        finalFare: normalizedFinalFare,
+                        lockedFare: lockedFare.value,
+                        lockedFareSource: lockedFare.source,
+                        fareDiff: Math.round(Math.abs(normalizedFinalFare - lockedFare.value) * 100) / 100,
+                        tolerance: fareTolerance
+                    });
+                    span.setStatus({ code: SpanStatusCode.ERROR, message: 'Valor final diverge do valor travado' });
+                    span.end();
+                    metrics.recordCommand('CompleteTrip', (Date.now() - startTime) / 1000, false);
+                    return CommandResult.failure('Valor final da corrida diverge do valor pago/confirmado');
+                }
+                this.finalFare = normalizedFinalFare;
+
+                // ✅ CAOS SCENARIO: Descontar tempo offline do motorista para resiliência de faturamento
+                try {
+                    const heartbeatService = require('../services/heartbeat-service');
+                    const offlineTimeMs = await heartbeatService.getAndResetOfflineTime(this.driverId);
+                    const offlineSeconds = Math.floor(offlineTimeMs / 1000);
+
+                    if (offlineSeconds > 0) {
+                        const originalDuration = parseInt(this.duration || 0);
+                        const offlineMinutes = offlineSeconds / 60;
+                        const defaultMinuteRateCents = 50; // R$ 0,50 por minuto (taxa base dinâmica aproximação)
+
+                        // O motorista deve ser penalizado/faturamento deve ser corrigido retirando o tempo ocioso offline
+                        const discountAmountCents = Math.floor(offlineMinutes * defaultMinuteRateCents);
+                        const discountAmountReais = discountAmountCents / 100;
+
+                        this.duration = Math.max(0, originalDuration - offlineSeconds);
+                        this.finalFare = toMoney(Math.max(0, Number(this.finalFare || 0) - discountAmountReais));
+
+                        logger.info(`🔌 [CompleteTripCommand] Motorista esteve offline por ${offlineSeconds}s. Desconto aplicado: R$ ${discountAmountReais.toFixed(2)}. Duração corrigida para ${this.duration}s.`, {
+                            bookingId: this.bookingId, driverId: this.driverId
+                        });
+                    }
+                } catch (hbErr) {
+                    logger.warn(`⚠️ [CompleteTripCommand] Falha ao processar resiliência offline: ${hbErr.message}`);
+                }
+
+                let completedFareBreakdown = paymentService.calculateFareBreakdownFromReais(
                     Number(this.finalFare || 0),
                     Number(this.tollFee || 0)
                 );
@@ -184,31 +306,6 @@ class CompleteTripCommand extends Command {
                 if (lockStatus.isLocked && lockStatus.bookingId === this.bookingId) {
                     await driverLockManager.releaseLock(this.driverId);
                     logger.info(`🔓 [CompleteTripCommand] Lock de motorista ${this.driverId} liberado.`);
-                }
-
-                // ✅ CAOS SCENARIO: Descontar tempo offline do motorista para resiliência de faturamento
-                try {
-                    const heartbeatService = require('../services/heartbeat-service');
-                    const offlineTimeMs = await heartbeatService.getAndResetOfflineTime(this.driverId);
-                    const offlineSeconds = Math.floor(offlineTimeMs / 1000);
-
-                    if (offlineSeconds > 0) {
-                        const originalDuration = parseInt(this.duration || 0);
-                        const offlineMinutes = offlineSeconds / 60;
-                        const defaultMinuteRate = 50; // R$ 0,50 por minuto (taxa base dinâmica aproximação)
-
-                        // O motorista deve ser penalizado/faturamento deve ser corrigido retirando o tempo ocioso offline
-                        const discountAmount = Math.floor(offlineMinutes * defaultMinuteRate);
-
-                        this.duration = Math.max(0, originalDuration - offlineSeconds);
-                        this.finalFare = Math.max(0, parseInt(this.finalFare) - discountAmount);
-
-                        logger.info(`🔌 [CompleteTripCommand] Motorista esteve offline por ${offlineSeconds}s. Desconto aplicado: R$ ${(discountAmount / 100).toFixed(2)}. Duração corrigida para ${this.duration}s.`, {
-                            bookingId: this.bookingId, driverId: this.driverId
-                        });
-                    }
-                } catch (hbErr) {
-                    logger.warn(`⚠️ [CompleteTripCommand] Falha ao processar resiliência offline: ${hbErr.message}`);
                 }
 
                 // Atualizar estado da corrida
