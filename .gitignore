@@ -129,6 +129,10 @@ qa-*.png
 e2e-*.png
 ideal-*.png
 live-*.png
+/ios-*.png
+/android-*.png
+/*-screenshot*.png
+/*-evidence*.png
 01-*.png
 02-*.png
 03-*.png

@@ -16,7 +16,13 @@
     "test:mobile": "npm run test:unit --workspace mobile-app",
     "test:backend": "npm run test --workspace leaf-websocket-backend",
     "test:backend:all": "npm run test:all --workspace leaf-websocket-backend",
-    "test:all": "node scripts/tests/run-with-profile.cjs workspace-all \"npm run test:unit --workspace mobile-app && npm run test:all --workspace leaf-websocket-backend\""
+    "test:all": "node scripts/tests/run-with-profile.cjs workspace-all \"npm run test:unit --workspace mobile-app && npm run test:all --workspace leaf-websocket-backend\"",
+    "prelaunch:copy": "node scripts/prelaunch/assert-onboarding-copy.cjs",
+    "prelaunch:testids": "node scripts/prelaunch/assert-mobile-testids.cjs",
+    "prelaunch:audit": "node scripts/prelaunch/run-prelaunch-suite.cjs --mode audit --no-strict",
+    "prelaunch:full": "node scripts/prelaunch/run-prelaunch-suite.cjs --mode full",
+    "prelaunch:rides": "node scripts/prelaunch/run-prelaunch-suite.cjs --mode rides --rides 10",
+    "prelaunch:rides:concurrent": "node leaf-websocket-backend/scripts/tests/run-real-core-concurrent-rides.cjs"
   },
   "dependencies": {
     "axios": "^1.12.1",
