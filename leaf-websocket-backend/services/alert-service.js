@@ -11,6 +11,9 @@ const { logStructured, logError } = require('../utils/logger');
 class AlertService {
   constructor() {
     this.slackWebhookUrl = process.env.SLACK_WEBHOOK_URL || null;
+    this.discordWebhookUrl = process.env.DISCORD_ALERT_WEBHOOK_URL || process.env.DISCORD_WEBHOOK_URL || null;
+    this.discordCriticalWebhookUrl = process.env.DISCORD_CRITICAL_ALERT_WEBHOOK_URL || this.discordWebhookUrl;
+    this.discordMention = process.env.DISCORD_ALERT_MENTION || '';
     this.emailConfig = {
       enabled: process.env.EMAIL_ALERTS_ENABLED === 'true',
       smtp: {
@@ -59,6 +62,7 @@ class AlertService {
       // Enviar para todos os canais
       await Promise.allSettled([
         this.sendToSlack(alert),
+        this.sendToDiscord(alert),
         this.sendToEmail(alert),
         this.sendToDashboard(alert),
         this.logAlert(alert)
@@ -68,8 +72,9 @@ class AlertService {
         service: 'alert-service',
         metric: alert.metric,
         severity: alert.severity,
-        channels: ['slack', 'email', 'dashboard', 'log'].filter(ch => {
+        channels: ['slack', 'discord', 'email', 'dashboard', 'log'].filter(ch => {
           if (ch === 'slack') return this.slackWebhookUrl;
+          if (ch === 'discord') return this.discordWebhookUrl || this.discordCriticalWebhookUrl;
           if (ch === 'email') return this.emailConfig.enabled;
           return true;
         })
@@ -122,6 +127,80 @@ class AlertService {
       logError(error, 'Erro ao enviar alerta para Slack', {
         service: 'alert-service',
         channel: 'slack'
+      });
+    }
+  }
+
+  /**
+   * Enviar alerta para Discord.
+   */
+  async sendToDiscord(alert) {
+    const webhookUrl = alert.severity === 'critical'
+      ? this.discordCriticalWebhookUrl
+      : this.discordWebhookUrl;
+    if (!webhookUrl) {
+      return;
+    }
+
+    try {
+      const isCritical = alert.severity === 'critical';
+      const color = isCritical ? 0xd92d20 : 0xf79009;
+      const currentValue = alert.value !== undefined && alert.value !== null
+        ? `${alert.value}${alert.unit || ''}`
+        : '-';
+      const threshold = alert.threshold !== undefined && alert.threshold !== null
+        ? `${alert.threshold}${alert.unit || ''}`
+        : '-';
+      const title = `LEAF ${isCritical ? 'P1' : 'P2'} - ${String(alert.metric || 'alert')}`;
+      const dashboardUrl = process.env.LEAF_DASHBOARD_URL || process.env.DASHBOARD_URL || '';
+      const content = isCritical && this.discordMention
+        ? `${this.discordMention} incidente critico na Leaf`
+        : undefined;
+      const metadataFields = Object.entries(alert.metadata || {})
+        .filter(([, value]) => value !== undefined && value !== null && value !== '')
+        .slice(0, 8)
+        .map(([name, value]) => ({
+          name: String(name).slice(0, 240),
+          value: String(value).slice(0, 1000),
+          inline: true
+        }));
+
+      const payload = {
+        username: process.env.DISCORD_ALERT_USERNAME || 'Leaf Observability',
+        content,
+        allowed_mentions: {
+          parse: ['users', 'roles']
+        },
+        embeds: [
+          {
+            title,
+            description: alert.message || 'Alerta operacional disparado.',
+            color,
+            fields: [
+              { name: 'Servico', value: String(alert.service || 'leaf-backend'), inline: true },
+              { name: 'Severidade', value: String(alert.severity || 'warning').toUpperCase(), inline: true },
+              { name: 'Valor', value: currentValue, inline: true },
+              { name: 'Limite', value: threshold, inline: true },
+              { name: 'Ambiente', value: process.env.NODE_ENV || 'development', inline: true },
+              ...metadataFields,
+              { name: 'Dashboard', value: dashboardUrl || 'Nao configurado', inline: false }
+            ],
+            timestamp: new Date().toISOString(),
+            footer: {
+              text: 'Leaf Observability'
+            }
+          }
+        ]
+      };
+
+      await axios.post(webhookUrl, payload, {
+        headers: { 'Content-Type': 'application/json' },
+        timeout: 5000
+      });
+    } catch (error) {
+      logError(error, 'Erro ao enviar alerta para Discord', {
+        service: 'alert-service',
+        channel: 'discord'
       });
     }
   }
@@ -254,4 +333,3 @@ class AlertService {
 const alertService = new AlertService();
 
 module.exports = alertService;
-

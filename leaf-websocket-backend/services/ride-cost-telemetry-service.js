@@ -1,5 +1,7 @@
 const redisPool = require('../utils/redis-pool');
 const { logStructured } = require('../utils/logger');
+const rideCostAlertService = require('./ride-cost-alert-service');
+const dailyEarningsReportService = require('./daily-earnings-report-service');
 
 const RIDE_COST_TELEMETRY_PREFIX = 'ride_cost_telemetry';
 const RIDE_COST_TELEMETRY_RECENT_INDEX = `${RIDE_COST_TELEMETRY_PREFIX}:recent`;
@@ -790,6 +792,8 @@ class RideCostTelemetryService {
           exchangeRateUsdBrl: TELEMETRY_EXCHANGE_RATE_USD_BRL,
           budgetUsd: TELEMETRY_BUDGET_USD,
           budgetBrl: roundCurrency(TELEMETRY_BUDGET_USD * TELEMETRY_EXCHANGE_RATE_USD_BRL),
+          includedCostFamilies: ['google', 'backend', 'infrastructure'],
+          excludedCostProviders: ['woovi', 'payment_processor'],
           googleUsd: 0,
           backendUsd: 0,
           infrastructureUsd: 0,
@@ -1112,6 +1116,30 @@ class RideCostTelemetryService {
       totalBrl: report.totals?.cost?.totalBrl || 0,
       budgetStatus: report.totals?.cost?.budgetStatus || 'unknown',
     });
+
+    if (process.env.NODE_ENV !== 'test' && process.env.RIDE_COST_ALERTS_ENABLED !== 'false') {
+      setImmediate(() => {
+        rideCostAlertService.evaluateRecentRideCosts().catch((error) => {
+          logStructured('warn', 'Falha ao avaliar alertas de custo por corrida', {
+            service: 'ride-cost-telemetry-service',
+            bookingId: normalizedBookingId,
+            error: error.message,
+          });
+        });
+      });
+    }
+
+    if (process.env.NODE_ENV !== 'test' && process.env.DAILY_EARNINGS_REPORT_ENABLED !== 'false') {
+      setImmediate(() => {
+        dailyEarningsReportService.recordCompletedRideFromReport(report).catch((error) => {
+          logStructured('warn', 'Falha ao atualizar rollup diario de earnings', {
+            service: 'ride-cost-telemetry-service',
+            bookingId: normalizedBookingId,
+            error: error.message,
+          });
+        });
+      });
+    }
 
     return report;
   }

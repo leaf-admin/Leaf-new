@@ -257,7 +257,15 @@ class WorkerManager {
                     customerId: eventData.customerId || parsedData.customerId
                 };
                 
-                await handler(event);
+                const handlerResult = await handler(event);
+
+                if (handlerResult && handlerResult.success === false) {
+                    throw new Error(
+                        handlerResult.error ||
+                        handlerResult.details ||
+                        'Handler retornou falha'
+                    );
+                }
 
                 const duration = (Date.now() - startTime) / 1000;
                 metrics.recordListener(eventType, duration, true);
@@ -271,7 +279,7 @@ class WorkerManager {
                     duration
                 });
 
-                return { success: true };
+                return { success: true, data: handlerResult };
             } catch (error) {
                 const duration = (Date.now() - startTime) / 1000;
                 metrics.recordListener(eventType, duration, false);

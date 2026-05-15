@@ -94,6 +94,9 @@ describe('ride-cost-telemetry-service', () => {
             },
           },
         },
+        woovi: {
+          transferFeeUsd: 9,
+        },
       },
     });
 
@@ -109,6 +112,7 @@ describe('ride-cost-telemetry-service', () => {
     expect(report.totals.backend.totalLatencyMs).toBe(812);
     expect(report.totals.cost.totalUsd).toBeCloseTo(0.01, 6);
     expect(report.totals.cost.budgetStatus).toBe('within_budget');
+    expect(report.totals.cost.excludedCostProviders).toEqual(['woovi', 'payment_processor']);
     expect(redisHashes.get('booking:booking_123')).toEqual(
       expect.objectContaining({
         costTelemetryGoogleUsd: '0.01',

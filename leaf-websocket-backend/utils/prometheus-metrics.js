@@ -202,6 +202,13 @@ const activeWorkers = new promClient.Gauge({
     registers: [register]
 });
 
+const websocketConnectionsCurrent = new promClient.Gauge({
+    name: 'leaf_websocket_connections_current',
+    help: 'Número atual de conexões WebSocket por papel de runtime',
+    labelNames: ['runtime_role'],
+    registers: [register]
+});
+
 // ==================== HOTPATH / REALTIME ====================
 
 // Event loop lag (ms)
@@ -404,6 +411,34 @@ const rideHealthAlertsTotal = new promClient.Counter({
     registers: [register]
 });
 
+const rideCostRecentAverageBrl = new promClient.Gauge({
+    name: 'leaf_ride_cost_recent_average_brl',
+    help: 'Custo variavel medio por corrida concluida na janela recente, excluindo Woovi',
+    labelNames: ['window'],
+    registers: [register]
+});
+
+const rideCostRecentGoogleAverageBrl = new promClient.Gauge({
+    name: 'leaf_ride_cost_recent_google_average_brl',
+    help: 'Custo medio de Google APIs por corrida concluida na janela recente',
+    labelNames: ['window'],
+    registers: [register]
+});
+
+const rideCostRecentDirectionsPerRide = new promClient.Gauge({
+    name: 'leaf_ride_cost_recent_directions_per_ride',
+    help: 'Media de chamadas Directions por corrida concluida na janela recente',
+    labelNames: ['window'],
+    registers: [register]
+});
+
+const rideCostAlertsTotal = new promClient.Counter({
+    name: 'leaf_ride_cost_alert_total',
+    help: 'Total de alertas emitidos pelo monitor de custo por corrida',
+    labelNames: ['metric', 'severity'],
+    registers: [register]
+});
+
 // ==================== EXPORT ====================
 
 /**
@@ -511,6 +546,12 @@ const metrics = {
     // Workers ativos
     setActiveWorkers: (count, workerType = 'listener') => {
         activeWorkers.set({ worker_type: workerType }, count);
+    },
+
+    setWebSocketConnections: (count, runtimeRole = 'gateway') => {
+        websocketConnectionsCurrent.set({
+            runtime_role: sanitizeLabelValue(runtimeRole, 'gateway')
+        }, Number.isFinite(count) && count >= 0 ? count : 0);
     },
 
     // Event loop lag
@@ -705,6 +746,34 @@ const metrics = {
     recordRideHealthAlert: (alertType = 'unknown', severity = 'warning', count = 1) => {
         rideHealthAlertsTotal.inc({
             alert_type: sanitizeLabelValue(alertType, 'unknown'),
+            severity: sanitizeLabelValue(severity, 'warning')
+        }, Number.isFinite(count) && count > 0 ? count : 1);
+    },
+
+    setRideCostRecentSummary: ({
+        windowSize = 0,
+        averageBrl = 0,
+        googleAverageBrl = 0,
+        directionsPerRide = 0
+    } = {}) => {
+        const windowLabel = sanitizeLabelValue(`last_${Number.isFinite(windowSize) ? windowSize : 0}`, 'last_0');
+        rideCostRecentAverageBrl.set(
+            { window: windowLabel },
+            Number.isFinite(averageBrl) && averageBrl >= 0 ? averageBrl : 0
+        );
+        rideCostRecentGoogleAverageBrl.set(
+            { window: windowLabel },
+            Number.isFinite(googleAverageBrl) && googleAverageBrl >= 0 ? googleAverageBrl : 0
+        );
+        rideCostRecentDirectionsPerRide.set(
+            { window: windowLabel },
+            Number.isFinite(directionsPerRide) && directionsPerRide >= 0 ? directionsPerRide : 0
+        );
+    },
+
+    recordRideCostAlert: (metric = 'unknown', severity = 'warning', count = 1) => {
+        rideCostAlertsTotal.inc({
+            metric: sanitizeLabelValue(metric, 'unknown'),
             severity: sanitizeLabelValue(severity, 'warning')
         }, Number.isFinite(count) && count > 0 ? count : 1);
     }

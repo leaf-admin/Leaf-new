@@ -8,8 +8,10 @@ const express = require('express');
 const router = express.Router();
 const WorkerHealthMonitor = require('../workers/health-monitor');
 const { logStructured, logError } = require('../utils/logger');
+const { authenticateSupport, requireSupportRoles } = require('../middleware/support-auth');
 
 const healthMonitor = new WorkerHealthMonitor();
+const WORKER_READ_ROLES = ['admin', 'manager', 'super-admin', 'viewer', 'development'];
 
 // GET /api/workers/health - Health check dos workers
 router.get('/api/workers/health', async (req, res) => {
@@ -88,6 +90,29 @@ router.get('/api/workers/pending', async (req, res) => {
 });
 
 // GET /api/workers/dlq - Obter tamanho da DLQ
+router.get('/api/workers/dlq/events', authenticateSupport, requireSupportRoles(WORKER_READ_ROLES), async (req, res) => {
+    try {
+        const events = await healthMonitor.getDLQEvents({
+            limit: req.query.limit,
+            direction: req.query.direction,
+            eventType: req.query.eventType,
+            error: req.query.error
+        });
+        res.json({
+            success: true,
+            ...events
+        });
+    } catch (error) {
+        logError(error, 'Erro ao listar eventos da DLQ', {
+            service: 'worker-health-routes'
+        });
+        res.status(500).json({
+            success: false,
+            error: error.message
+        });
+    }
+});
+
 router.get('/api/workers/dlq', async (req, res) => {
     try {
         const dlqSize = await healthMonitor.getDLQSize();
@@ -107,4 +132,3 @@ router.get('/api/workers/dlq', async (req, res) => {
 });
 
 module.exports = router;
-

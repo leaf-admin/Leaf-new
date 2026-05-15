@@ -4,6 +4,7 @@
 
 - **Tempo**: Storage de traces (OpenTelemetry)
 - **Grafana**: Visualização de traces e métricas
+- **Alertmanager**: Roteamento de alertas para backend/Discord
 - **Prometheus**: Métricas (opcional, para depois)
 
 ## 🚀 Como Iniciar
@@ -17,9 +18,14 @@ docker-compose -f docker-compose.observability.yml up -d
 
 ### 2. Verificar serviços
 
-- **Grafana**: http://localhost:3000 (admin/admin)
+- **Grafana**: http://localhost:3002 (admin/admin)
 - **Tempo**: http://localhost:3200
 - **Prometheus**: http://localhost:9090
+- **Alertmanager**: http://localhost:9093
+
+Para a estrutura completa de operacao solo, custos e runbook, veja:
+
+- `docs/OBSERVABILITY_SOLO_OPERATIONS_STACK_2026-05-11.md`
 
 ### 3. Configurar backend
 
@@ -295,7 +301,6 @@ npm start
 - [Grafana Tempo Docs](https://grafana.com/docs/tempo/latest/)
 - [OpenTelemetry Node.js](https://opentelemetry.io/docs/instrumentation/js/)
 - [OTLP Protocol](https://opentelemetry.io/docs/specs/otlp/)
-
 
 
 

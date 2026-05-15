@@ -5,6 +5,9 @@ const request = require('supertest');
 
 const mockGetRecentReports = jest.fn();
 const mockGetReport = jest.fn();
+const mockCollectRecentCostSummary = jest.fn();
+const mockGetDailySummary = jest.fn();
+const mockSendDailyReport = jest.fn();
 
 jest.mock('../../../middleware/support-auth', () => ({
   authenticateSupport: (req, _res, next) => {
@@ -51,6 +54,15 @@ jest.mock('../../../services/ride-cost-telemetry-service', () => ({
   getReport: (...args) => mockGetReport(...args),
 }));
 
+jest.mock('../../../services/ride-cost-alert-service', () => ({
+  collectRecentCostSummary: (...args) => mockCollectRecentCostSummary(...args),
+}));
+
+jest.mock('../../../services/daily-earnings-report-service', () => ({
+  getDailySummary: (...args) => mockGetDailySummary(...args),
+  sendDailyReport: (...args) => mockSendDailyReport(...args),
+}));
+
 jest.mock('../../../utils/logger', () => ({
   logError: jest.fn(),
 }));
@@ -68,6 +80,9 @@ describe('ops ride cost telemetry routes', () => {
   beforeEach(() => {
     mockGetRecentReports.mockReset();
     mockGetReport.mockReset();
+    mockCollectRecentCostSummary.mockReset();
+    mockGetDailySummary.mockReset();
+    mockSendDailyReport.mockReset();
   });
 
   it('retorna relatórios recentes com limite normalizado', async () => {
@@ -104,6 +119,27 @@ describe('ops ride cost telemetry routes', () => {
     expect(mockGetReport).toHaveBeenCalledWith('booking-1');
   });
 
+  it('retorna resumo operacional de custo por corrida', async () => {
+    const app = createApp();
+    mockCollectRecentCostSummary.mockResolvedValue({
+      completedRides: 20,
+      averageBrl: 0.16,
+      directionsPerRide: 2,
+    });
+
+    const response = await request(app).get('/api/ops/ride-cost-telemetry/summary');
+
+    expect(response.status).toBe(200);
+    expect(response.body).toMatchObject({
+      success: true,
+      summary: {
+        completedRides: 20,
+        averageBrl: 0.16,
+      },
+    });
+    expect(mockCollectRecentCostSummary).toHaveBeenCalledTimes(1);
+  });
+
   it('retorna 404 quando booking não possui telemetria agregada', async () => {
     const app = createApp();
     mockGetReport.mockResolvedValue(null);
@@ -116,5 +152,47 @@ describe('ops ride cost telemetry routes', () => {
       bookingId: 'booking-missing',
       found: false,
     });
+  });
+
+  it('retorna resumo diario de earnings', async () => {
+    const app = createApp();
+    mockGetDailySummary.mockResolvedValue({
+      dateKey: '2026-05-13',
+      completedRides: 2,
+      platformNetTotalBrl: 1.66,
+    });
+
+    const response = await request(app).get('/api/ops/daily-earnings-report?date=2026-05-13');
+
+    expect(response.status).toBe(200);
+    expect(response.body).toMatchObject({
+      success: true,
+      summary: {
+        dateKey: '2026-05-13',
+        completedRides: 2,
+      },
+    });
+    expect(mockGetDailySummary).toHaveBeenCalledWith('2026-05-13');
+  });
+
+  it('envia resumo diario de earnings quando solicitado por ops', async () => {
+    const app = createApp();
+    mockSendDailyReport.mockResolvedValue({
+      sent: true,
+      summary: { dateKey: '2026-05-13' },
+    });
+
+    const response = await request(app)
+      .post('/api/ops/daily-earnings-report/send')
+      .send({ date: '2026-05-13', force: true });
+
+    expect(response.status).toBe(200);
+    expect(response.body).toMatchObject({
+      success: true,
+      result: {
+        sent: true,
+      },
+    });
+    expect(mockSendDailyReport).toHaveBeenCalledWith('2026-05-13', { force: true });
   });
 });

@@ -8,6 +8,90 @@ const express = require('express');
 const router = express.Router();
 const healthCheckService = require('../services/health-check-service');
 const { logStructured, logError } = require('../utils/logger');
+const TRUTHY_VALUES = new Set(['1', 'true', 'yes', 'on', 'sim']);
+const FALSY_VALUES = new Set(['0', 'false', 'no', 'off', 'nao', 'não']);
+
+function envBool(name, fallback = false) {
+  const rawValue = process.env[name];
+  if (rawValue == null || rawValue === '') {
+    return fallback;
+  }
+
+  const normalized = String(rawValue).trim().toLowerCase();
+  if (TRUTHY_VALUES.has(normalized)) return true;
+  if (FALSY_VALUES.has(normalized)) return false;
+  return fallback;
+}
+
+function classifyWooviBaseUrl(baseUrl) {
+  const normalized = String(baseUrl || '').trim().toLowerCase();
+  if (!normalized) return 'unknown';
+  if (normalized.includes('sandbox')) return 'sandbox';
+  if (normalized.includes('api.woovi.com')) return 'production';
+  return 'custom';
+}
+
+function buildRuntimeFlagsPayload() {
+  const appReview = envBool('APP_REVIEW', false);
+  const wooviEnvironment = String(process.env.WOOVI_ENVIRONMENT || '').trim().toLowerCase();
+  const wooviBaseUrl = String(process.env.WOOVI_BASE_URL || '').trim();
+  const wooviBaseUrlMode = classifyWooviBaseUrl(wooviBaseUrl);
+
+  const requirePaymentBeforeBooking = envBool('REQUIRE_PAYMENT_BEFORE_BOOKING', true);
+  const verifyPaymentBeforeBooking = envBool('VERIFY_PAYMENT_BEFORE_BOOKING', true);
+  const requirePaymentChargeRefBeforeBooking = envBool('REQUIRE_PAYMENT_CHARGE_REF_BEFORE_BOOKING', true);
+  const mockPaymentForTests = envBool('MOCK_PAYMENT_FOR_TESTS', false);
+  const allowReviewMockPaymentOnCreateBooking = appReview && envBool('ALLOW_REVIEW_MOCK_PAYMENT_ON_CREATE_BOOKING', false);
+  const paymentBypassOnWooviFailure = appReview || envBool('PAYMENT_BYPASS_ON_WOOVI_FAILURE', false);
+  const paymentForceBypass = appReview || envBool('PAYMENT_FORCE_BYPASS', false);
+  const authTestOtpBypassEnabled = envBool('AUTH_TEST_OTP_BYPASS_ENABLED', false);
+  const authReviewOtpBypassEnabled = appReview && envBool('AUTH_REVIEW_OTP_BYPASS_ENABLED', false);
+
+  const blockers = [];
+  if (wooviEnvironment !== 'sandbox') blockers.push('WOOVI_ENVIRONMENT != sandbox');
+  if (wooviBaseUrlMode !== 'sandbox') blockers.push('WOOVI_BASE_URL não aponta para sandbox');
+  if (!requirePaymentBeforeBooking) blockers.push('REQUIRE_PAYMENT_BEFORE_BOOKING=false');
+  if (!verifyPaymentBeforeBooking) blockers.push('VERIFY_PAYMENT_BEFORE_BOOKING=false');
+  if (!requirePaymentChargeRefBeforeBooking) blockers.push('REQUIRE_PAYMENT_CHARGE_REF_BEFORE_BOOKING=false');
+  if (appReview) blockers.push('APP_REVIEW=true');
+  if (mockPaymentForTests) blockers.push('MOCK_PAYMENT_FOR_TESTS=true');
+  if (allowReviewMockPaymentOnCreateBooking) blockers.push('ALLOW_REVIEW_MOCK_PAYMENT_ON_CREATE_BOOKING=true');
+  if (paymentBypassOnWooviFailure) blockers.push('PAYMENT_BYPASS_ON_WOOVI_FAILURE=true');
+  if (paymentForceBypass) blockers.push('PAYMENT_FORCE_BYPASS=true');
+  if (authTestOtpBypassEnabled) blockers.push('AUTH_TEST_OTP_BYPASS_ENABLED=true');
+  if (authReviewOtpBypassEnabled) blockers.push('AUTH_REVIEW_OTP_BYPASS_ENABLED=true');
+
+  return {
+    success: true,
+    timestamp: new Date().toISOString(),
+    runtime: {
+      nodeEnv: String(process.env.NODE_ENV || '').trim().toLowerCase() || 'unknown',
+      appEnv: String(process.env.APP_ENV || '').trim().toLowerCase() || null,
+      leafEnv: String(process.env.LEAF_ENV || '').trim().toLowerCase() || null
+    },
+    woovi: {
+      environment: wooviEnvironment || 'unknown',
+      baseUrlConfigured: Boolean(wooviBaseUrl),
+      baseUrlMode: wooviBaseUrlMode
+    },
+    guards: {
+      appReview,
+      requirePaymentBeforeBooking,
+      verifyPaymentBeforeBooking,
+      requirePaymentChargeRefBeforeBooking,
+      mockPaymentForTests,
+      allowReviewMockPaymentOnCreateBooking,
+      paymentBypassOnWooviFailure,
+      paymentForceBypass,
+      authTestOtpBypassEnabled,
+      authReviewOtpBypassEnabled
+    },
+    realSandbox: {
+      ready: blockers.length === 0,
+      blockers
+    }
+  };
+}
 
 /**
  * GET /health
@@ -103,6 +187,18 @@ router.get('/health/liveness', (req, res) => {
     status: 'alive',
     timestamp: new Date().toISOString()
   });
+});
+
+/**
+ * GET /health/runtime-flags
+ * Diagnóstico seguro de flags de runtime para execução de testes real-sandbox.
+ */
+router.get('/health/runtime-flags', (req, res) => {
+  res.status(200).json(buildRuntimeFlagsPayload());
+});
+
+router.get('/api/health/runtime-flags', (req, res) => {
+  res.status(200).json(buildRuntimeFlagsPayload());
 });
 
 module.exports = router;

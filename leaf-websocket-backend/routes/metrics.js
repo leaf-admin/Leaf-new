@@ -95,6 +95,59 @@ async function writeMetricsCache(cacheKey, payload, ttlSeconds = DASHBOARD_METRI
   }
 }
 
+function isPrivateNetworkAddress(ip) {
+  const normalized = String(ip || '')
+    .replace('::ffff:', '')
+    .replace(/^::1$/, '127.0.0.1')
+    .trim();
+
+  if (!normalized) return false;
+  if (normalized === '127.0.0.1' || normalized === 'localhost') return true;
+  if (normalized.startsWith('10.')) return true;
+  if (normalized.startsWith('192.168.')) return true;
+
+  const parts = normalized.split('.').map((part) => Number.parseInt(part, 10));
+  if (parts.length === 4 && parts.every((part) => Number.isFinite(part))) {
+    return parts[0] === 172 && parts[1] >= 16 && parts[1] <= 31;
+  }
+
+  return false;
+}
+
+function allowPrometheusScrape(req, res, next) {
+  const configuredToken = String(process.env.PROMETHEUS_BEARER_TOKEN || '').trim();
+  const providedToken = String(req.headers.authorization || '').replace(/^Bearer\s+/i, '').trim();
+
+  if (configuredToken && providedToken && providedToken === configuredToken) {
+    return next();
+  }
+
+  const allowPrivateScrape = String(process.env.PROMETHEUS_ALLOW_PRIVATE_SCRAPE || 'true').toLowerCase() !== 'false';
+  if (allowPrivateScrape && isPrivateNetworkAddress(req.ip)) {
+    return next();
+  }
+
+  return next('route');
+}
+
+async function prometheusMetricsHandler(req, res) {
+  try {
+    const { getMetrics } = require('../utils/prometheus-metrics');
+    const metricsText = await getMetrics();
+
+    res.set('Content-Type', 'text/plain; version=0.0.4; charset=utf-8');
+    res.send(metricsText);
+  } catch (error) {
+    logError(error, 'Erro ao obter métricas Prometheus', {
+      service: 'metrics-routes',
+      operation: 'prometheus'
+    });
+    res.status(500).send('# Erro ao obter métricas Prometheus\n');
+  }
+}
+
+router.get('/api/metrics/prometheus', allowPrometheusScrape, prometheusMetricsHandler);
+
 router.post('/api/metrics/calculator', async (req, res) => {
   try {
     const landingMetricsRef = getLandingMetricsRef();
@@ -2591,21 +2644,7 @@ function parsePrometheusMetrics(metricsText) {
 }
 
 // GET /api/metrics/prometheus - Endpoint para métricas Prometheus (formato texto)
-router.get('/api/metrics/prometheus', async (req, res) => {
-  try {
-    const { getMetrics } = require('../utils/prometheus-metrics');
-    const metricsText = await getMetrics();
-
-    res.set('Content-Type', 'text/plain; version=0.0.4; charset=utf-8');
-    res.send(metricsText);
-  } catch (error) {
-    logError(error, 'Erro ao obter métricas Prometheus', {
-      service: 'metrics-routes',
-      operation: 'prometheus'
-    });
-    res.status(500).send('# Erro ao obter métricas Prometheus\n');
-  }
-});
+router.get('/api/metrics/prometheus', prometheusMetricsHandler);
 
 // ==========================================
 // 📊 SIMULADOR FINANCEIRO (TOKENOMICS)
@@ -2683,7 +2722,7 @@ router.get('/api/metrics/simulation/run', async (req, res) => {
         let estimatedSubTotal = cat.base_fare + cat.fixed_fee + distCost + timeCost;
         if (estimatedSubTotal < cat.min_fare) estimatedSubTotal = cat.min_fare;
 
-        let assumedWooviFee = estimatedSubTotal * 0.0008;
+        let assumedWooviFee = estimatedSubTotal * 0.008;
         if (assumedWooviFee < 0.50) assumedWooviFee = 0.50;
 
         report.preAcceptanceCancellationCosts += assumedWooviFee;
@@ -2715,9 +2754,10 @@ router.get('/api/metrics/simulation/run', async (req, res) => {
       let opFee = 0;
       if (rawFare <= 10.00) opFee = 0.79;
       else if (rawFare <= 25.00) opFee = 0.99;
-      else opFee = 1.49;
+      else if (rawFare <= 50.00) opFee = 1.49;
+      else opFee = rawFare * 0.03;
 
-      let wooviFee = grandTotal * 0.0008;
+      let wooviFee = grandTotal * 0.008;
       if (wooviFee < 0.50) wooviFee = 0.50;
 
       let driverShare = grandTotal - opFee - wooviFee;

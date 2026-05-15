@@ -38,6 +38,7 @@
     "admin:create:profile": "node scripts/create-admin-profile-user.js",
     "admin:test": "node test-admin-auth.js",
     "config:validate": "node scripts/deploy/validate-runtime-config.js",
+    "config:validate:real-sandbox": "ENV_FILE=.env.production.sandbox node scripts/deploy/validate-runtime-config.js",
     "ngrok:start": "node scripts/utils/start-ngrok.js",
     "ngrok:auto": "node scripts/utils/start-ngrok-auto.js",
     "ngrok:url": "node scripts/utils/get-ngrok-url.js",

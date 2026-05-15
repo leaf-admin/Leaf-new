@@ -11,6 +11,8 @@ O sistema monitora as seguintes métricas:
 - **Conexões**: Número de conexões WebSocket ativas
 - **Latência**: Tempo de resposta P95
 - **Taxa de Erro**: Percentual de requisições com erro
+- **Custo médio por corrida**: média móvel por `bookingId`, excluindo Woovi
+- **Google Directions por corrida**: detecta reroute/loop/cache quebrado
 
 ## 🚨 Thresholds (Limites)
 
@@ -20,6 +22,8 @@ O sistema monitora as seguintes métricas:
 - Conexões > 7.000 (70% do máximo)
 - Latência P95 > 300ms
 - Taxa de Erro > 0.5%
+- Custo médio por corrida > R$ 0,20
+- Directions por corrida > 2,2
 
 ### Críticos (Critical)
 - CPU > 75%
@@ -27,6 +31,8 @@ O sistema monitora as seguintes métricas:
 - Conexões > 8.000 (80% do máximo)
 - Latência P95 > 500ms
 - Taxa de Erro > 1%
+- Custo médio por corrida > R$ 0,30
+- Directions por corrida > 3,0
 
 ## 📍 Onde os alertas aparecem
 
@@ -118,6 +124,82 @@ Alertas podem ser enviados para webhooks (Slack, Discord, etc).
 export WEBHOOK_ALERTS_ENABLED=true
 export WEBHOOK_URL=https://hooks.slack.com/services/SEU/WEBHOOK/URL
 export WEBHOOK_HEADERS='{"Content-Type": "application/json"}'
+```
+
+### 6. **Discord**
+O `alert-service` envia alertas diretamente para Discord quando os webhooks abaixo estão configurados:
+
+```bash
+export DISCORD_ALERT_WEBHOOK_URL=https://discord.com/api/webhooks/...
+export DISCORD_CRITICAL_ALERT_WEBHOOK_URL=https://discord.com/api/webhooks/...
+export DISCORD_ALERT_MENTION='<@&role_id>'
+```
+
+Para o canal diario de resultado financeiro (`leaf-earnings`), use um webhook separado:
+
+```bash
+export DISCORD_EARNINGS_WEBHOOK_URL=https://discord.com/api/webhooks/...
+export DISCORD_EARNINGS_USERNAME='Leaf Earnings'
+```
+
+## 💸 Monitor de custo por corrida
+
+O monitor usa a telemetria `ride_cost_telemetry:{bookingId}` e calcula uma média móvel apenas com corridas concluídas.
+Woovi não entra no custo, porque é taxa descontada do pagamento do passageiro.
+
+**Endpoint de resumo**:
+
+```bash
+curl https://api.leaf.app.br/api/ops/ride-cost-telemetry/summary
+```
+
+**Prometheus**:
+
+- `leaf_ride_cost_recent_average_brl`
+- `leaf_ride_cost_recent_google_average_brl`
+- `leaf_ride_cost_recent_directions_per_ride`
+- `leaf_ride_cost_alert_total`
+
+**Configuração**:
+
+```bash
+export RIDE_COST_ALERTS_ENABLED=true
+export RIDE_COST_ALERT_WINDOW_SIZE=20
+export RIDE_COST_ALERT_MIN_COMPLETED_RIDES=5
+export RIDE_COST_WARNING_BRL=0.20
+export RIDE_COST_CRITICAL_BRL=0.30
+export RIDE_COST_DIRECTIONS_WARNING_PER_RIDE=2.2
+export RIDE_COST_DIRECTIONS_CRITICAL_PER_RIDE=3
+```
+
+## Relatorio diario leaf-earnings
+
+O relatorio diario soma apenas corridas concluidas, usando rollup Redis por `bookingId`.
+Se a telemetria de uma corrida muda, o rollup remove o snapshot anterior e aplica o novo valor, evitando duplicidade.
+
+**Formula principal**:
+
+```txt
+ganho_liquido_leaf = taxa_operacional_total - custo_variavel_total
+```
+
+Woovi nao entra no custo porque e descontada do valor pago pelo passageiro.
+
+**Endpoints**:
+
+```bash
+curl https://api.leaf.app.br/api/ops/daily-earnings-report?date=2026-05-13
+curl -X POST https://api.leaf.app.br/api/ops/daily-earnings-report/send \
+  -H 'Content-Type: application/json' \
+  -d '{"date":"2026-05-13","force":true}'
+```
+
+**Agendamento padrao**:
+
+```bash
+export DAILY_EARNINGS_REPORT_ENABLED=true
+export DAILY_EARNINGS_REPORT_CRON='5 6 * * *'
+export LEAF_REPORT_TIME_ZONE=America/Sao_Paulo
 ```
 
 ## 🚀 Como usar
@@ -308,5 +390,3 @@ echo $SMTP_HOST
 - ✅ **Webhook**: Opcional, para integração com Slack/Discord
 
 O sistema está pronto para uso! Basta iniciar o monitoramento e os alertas começarão a aparecer automaticamente quando os limites forem atingidos.
-
-

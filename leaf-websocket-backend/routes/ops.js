@@ -6,6 +6,8 @@ const operationalAreaPolicyService = require('../services/operational-area-polic
 const disputeReviewService = require('../services/dispute-review-service');
 const opsOverviewService = require('../services/ops-overview-service');
 const rideCostTelemetryService = require('../services/ride-cost-telemetry-service');
+const rideCostAlertService = require('../services/ride-cost-alert-service');
+const dailyEarningsReportService = require('../services/daily-earnings-report-service');
 const { logError } = require('../utils/logger');
 
 const router = express.Router();
@@ -54,6 +56,19 @@ router.get('/ride-cost-telemetry', async (req, res) => {
   }
 });
 
+router.get('/ride-cost-telemetry/summary', async (req, res) => {
+  try {
+    const summary = await rideCostAlertService.collectRecentCostSummary();
+    return res.json({
+      success: true,
+      summary
+    });
+  } catch (error) {
+    logError(error, { service: 'ops-routes', operation: 'rideCostTelemetrySummary' });
+    return res.status(500).json({ success: false, error: 'Erro ao resumir telemetria de custo' });
+  }
+});
+
 router.get('/ride-cost-telemetry/:bookingId', async (req, res) => {
   try {
     const bookingId = String(req.params?.bookingId || '').trim();
@@ -78,6 +93,35 @@ router.get('/ride-cost-telemetry/:bookingId', async (req, res) => {
   } catch (error) {
     logError(error, { service: 'ops-routes', operation: 'getRideCostTelemetry' });
     return res.status(500).json({ success: false, error: 'Erro ao buscar telemetria da corrida' });
+  }
+});
+
+router.get('/daily-earnings-report', async (req, res) => {
+  try {
+    const dateKey = String(req.query?.date || '').trim() || undefined;
+    const summary = await dailyEarningsReportService.getDailySummary(dateKey);
+    return res.json({
+      success: true,
+      summary
+    });
+  } catch (error) {
+    logError(error, { service: 'ops-routes', operation: 'dailyEarningsReportSummary' });
+    return res.status(500).json({ success: false, error: 'Erro ao buscar relatorio diario de earnings' });
+  }
+});
+
+router.post('/daily-earnings-report/send', requireSupportRoles(MUTATION_ROLES), async (req, res) => {
+  try {
+    const dateKey = String(req.body?.date || req.query?.date || '').trim() || undefined;
+    const force = req.body?.force === true || req.query?.force === 'true';
+    const result = await dailyEarningsReportService.sendDailyReport(dateKey, { force });
+    return res.json({
+      success: true,
+      result
+    });
+  } catch (error) {
+    logError(error, { service: 'ops-routes', operation: 'sendDailyEarningsReport' });
+    return res.status(500).json({ success: false, error: 'Erro ao enviar relatorio diario de earnings' });
   }
 });
 
