@@ -1,5 +1,6 @@
 import React, { useCallback, useMemo, useState } from 'react';
-import { Alert, Linking, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { Alert, Linking, Platform, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { fonts } from '../../../theme/runtimeTokens';
 import { saveStepData } from '../../../utils/secureOnboardingStorage';
@@ -9,8 +10,10 @@ import { AppConfig } from '../../../../config/AppConfig';
 
 const { color, radius, spacing, elevation } = onboardingTheme;
 const EMAIL_REGEX = /\S+@\S+\.\S+/;
+const PASSWORD_REGEX = /(?=.*[A-Za-z])(?=.*\d)/;
 
 const ProfileDataStep = ({ onSubmitted, onBack, initialData = {} }) => {
+  const insets = useSafeAreaInsets();
 	  const [profileData, setProfileData] = useState({
 	    fullName: initialData.fullName || [initialData.firstName, initialData.lastName].filter(Boolean).join(' ').trim(),
 	    email: initialData?.documentData?.email || initialData?.email || '',
@@ -27,26 +30,34 @@ const ProfileDataStep = ({ onSubmitted, onBack, initialData = {} }) => {
 
   const validateFields = useCallback(() => {
     const nextErrors = {};
+    const normalizedEmail = String(profileData.email || '').trim();
+    const normalizedPassword = String(profileData.password || '');
+    const normalizedConfirmPassword = String(profileData.confirmPassword || '');
+
     if (!profileData.fullName?.trim()) {
       nextErrors.fullName = 'Nome completo é obrigatório';
     }
 
     if (!isDriver) {
-	      if (!profileData.email?.trim()) {
-	        nextErrors.email = 'E-mail é obrigatório';
-	      } else if (!EMAIL_REGEX.test(profileData.email.trim())) {
+	      if (!normalizedEmail) {
+	        nextErrors.email = 'E-mail é obrigatório.';
+	      } else if (!EMAIL_REGEX.test(normalizedEmail)) {
 	        nextErrors.email = 'E-mail inválido';
 	      }
 
-	      if (!profileData.password || profileData.password.length < 8) {
-	        nextErrors.password = 'A senha deve ter pelo menos 8 caracteres.';
-	      } else if (!/(?=.*[A-Za-z])(?=.*\d)/.test(profileData.password)) {
-	        nextErrors.password = 'A senha deve conter letras e números.';
-	      }
+      if (!normalizedPassword) {
+        nextErrors.password = 'Senha é obrigatória.';
+      } else if (normalizedPassword.length < 8) {
+        nextErrors.password = 'A senha deve ter pelo menos 8 caracteres.';
+      } else if (!PASSWORD_REGEX.test(normalizedPassword)) {
+        nextErrors.password = 'A senha deve conter letras e números.';
+      }
 
-	      if (profileData.password !== profileData.confirmPassword) {
-	        nextErrors.confirmPassword = 'As senhas não coincidem.';
-	      }
+      if (!normalizedConfirmPassword) {
+        nextErrors.confirmPassword = 'Confirme sua senha.';
+      } else if (normalizedPassword !== normalizedConfirmPassword) {
+        nextErrors.confirmPassword = 'As senhas não coincidem.';
+      }
 
       if (!profileData.acceptTerms) {
         nextErrors.acceptTerms = 'Você precisa aceitar os Termos de Uso.';
@@ -62,6 +73,10 @@ const ProfileDataStep = ({ onSubmitted, onBack, initialData = {} }) => {
 	  }, [isDriver, profileData.acceptPrivacy, profileData.acceptTerms, profileData.confirmPassword, profileData.email, profileData.fullName, profileData.password]);
 
   const isFormValid = useMemo(() => {
+    const normalizedEmail = String(profileData.email || '').trim();
+    const normalizedPassword = String(profileData.password || '');
+    const normalizedConfirmPassword = String(profileData.confirmPassword || '');
+
     if (!profileData.fullName?.trim()) {
       return false;
     }
@@ -71,14 +86,31 @@ const ProfileDataStep = ({ onSubmitted, onBack, initialData = {} }) => {
     }
 
 	    return (
-	      EMAIL_REGEX.test(profileData.email.trim()) &&
-	      profileData.password.length >= 8 &&
-	      /(?=.*[A-Za-z])(?=.*\d)/.test(profileData.password) &&
-	      profileData.password === profileData.confirmPassword &&
-	      profileData.acceptTerms &&
-	      profileData.acceptPrivacy
+	      Boolean(normalizedEmail) &&
+        EMAIL_REGEX.test(normalizedEmail) &&
+        normalizedPassword.length >= 8 &&
+        PASSWORD_REGEX.test(normalizedPassword) &&
+        normalizedPassword === normalizedConfirmPassword &&
+        profileData.acceptTerms &&
+        profileData.acceptPrivacy
 	    );
 	  }, [isDriver, profileData.acceptPrivacy, profileData.acceptTerms, profileData.confirmPassword, profileData.email, profileData.fullName, profileData.password]);
+
+  const passwordMatchState = useMemo(() => {
+    const normalizedPassword = String(profileData.password || '');
+    const normalizedConfirmPassword = String(profileData.confirmPassword || '');
+
+    if (!normalizedPassword || !normalizedConfirmPassword) {
+      return null;
+    }
+
+    const matches = normalizedPassword === normalizedConfirmPassword;
+    return {
+      matches,
+      icon: matches ? 'checkmark-circle' : 'alert-circle',
+      text: matches ? 'Senhas iguais' : 'As senhas não coincidem'
+    };
+  }, [profileData.confirmPassword, profileData.password]);
 
   const updateField = useCallback(
     async (field, value) => {
@@ -86,19 +118,27 @@ const ProfileDataStep = ({ onSubmitted, onBack, initialData = {} }) => {
       setProfileData(nextData);
       await saveStepData('profile_data', nextData);
 
-      if (errors[field]) {
-        setErrors(previous => ({ ...previous, [field]: '' }));
+      if (errors[field] || field === 'password' || field === 'confirmPassword') {
+        setErrors(previous => ({
+          ...previous,
+          [field]: '',
+          ...(field === 'password' || field === 'confirmPassword'
+            ? { password: '', confirmPassword: '' }
+            : {})
+        }));
       }
     },
     [errors, profileData]
   );
 
-  const toggleConsent = useCallback((field) => {
-    setProfileData(previous => ({ ...previous, [field]: !previous[field] }));
+  const toggleConsent = useCallback(async (field) => {
+    const nextData = { ...profileData, [field]: !profileData[field] };
+    setProfileData(nextData);
+    await saveStepData('profile_data', nextData);
     if (errors[field]) {
       setErrors(previous => ({ ...previous, [field]: '' }));
     }
-  }, [errors]);
+  }, [errors, profileData]);
 
   const openLegalLink = useCallback(async (url, label) => {
     try {
@@ -125,14 +165,18 @@ const ProfileDataStep = ({ onSubmitted, onBack, initialData = {} }) => {
       return;
     }
 
-    onSubmitted({
+    const normalizedEmail = String(profileData.email || '').trim().toLowerCase();
+    const normalizedPassword = String(profileData.password || '');
+    const normalizedConfirmPassword = String(profileData.confirmPassword || '');
+
+	    onSubmitted({
       fullName: profileData.fullName.trim(),
       ...(isDriver
         ? {}
         : {
-	            email: profileData.email.trim().toLowerCase(),
-	            password: profileData.password,
-	            confirmPassword: profileData.confirmPassword,
+	            email: normalizedEmail,
+	            password: normalizedPassword,
+	            confirmPassword: normalizedConfirmPassword,
 	            acceptTerms: profileData.acceptTerms,
 	            acceptPrivacy: profileData.acceptPrivacy
 	          })
@@ -140,23 +184,19 @@ const ProfileDataStep = ({ onSubmitted, onBack, initialData = {} }) => {
   };
 
   return (
-    <ScrollView
-      style={styles.container}
-      contentContainerStyle={styles.content}
-      showsVerticalScrollIndicator={false}
-      keyboardShouldPersistTaps="handled"
-    >
+    <View style={styles.container}>
       <View style={styles.header}>
         <TouchableOpacity style={styles.backButton} onPress={onBack}>
-          <Ionicons name="arrow-back" size={22} color={color.textPrimary} />
+          <Ionicons name="chevron-back" size={22} color={color.textPrimary} />
         </TouchableOpacity>
-        <Text style={styles.title}>Seus dados</Text>
       </View>
+
+      <Text style={styles.title}>{isDriver ? 'Seu pré-cadastro' : 'Seu perfil de passageiro'}</Text>
 
       <Text style={styles.subtitle}>
         {isDriver
           ? 'Informe seu nome para concluir o pré-cadastro de motorista.'
-          : 'Informe seus dados básicos e aceite os termos para criar sua conta de passageiro.'}
+          : 'Preencha os dados abaixo para completar o seu cadastro.'}
       </Text>
 
       <View style={styles.card}>
@@ -189,47 +229,71 @@ const ProfileDataStep = ({ onSubmitted, onBack, initialData = {} }) => {
                 keyboardType="email-address"
               />
               {errors.email ? <Text style={styles.errorText}>{errors.email}</Text> : null}
-	            </View>
+            </View>
 
-	            <View style={styles.fieldContainer}>
-	              <Text style={styles.label}>Senha *</Text>
-	              <View style={[styles.passwordContainer, errors.password && styles.inputError]}>
-	                <TextInput
-	                  style={styles.passwordInput}
-	                  value={profileData.password}
-	                  onChangeText={value => updateField('password', value)}
-	                  placeholder="Mínimo 8 caracteres"
-	                  placeholderTextColor={color.textMuted}
-	                  secureTextEntry={!showPassword}
-	                  autoCapitalize="none"
-	                  autoCorrect={false}
-	                />
-	                <TouchableOpacity style={styles.eyeButton} onPress={() => setShowPassword(previous => !previous)}>
-	                  <Ionicons name={showPassword ? 'eye-off' : 'eye'} size={20} color={color.textMuted} />
-	                </TouchableOpacity>
-	              </View>
-	              {errors.password ? <Text style={styles.errorText}>{errors.password}</Text> : null}
-	            </View>
+            <View style={styles.fieldContainer}>
+              <Text style={styles.label}>Senha *</Text>
+              <View style={[styles.passwordContainer, errors.password && styles.inputError]}>
+                <TextInput
+                  style={styles.passwordInput}
+                  value={profileData.password}
+                  onChangeText={value => updateField('password', value)}
+                  placeholder="Mín. 8 caracteres"
+                  placeholderTextColor={color.textMuted}
+                  secureTextEntry={!showPassword}
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                />
+                <TouchableOpacity style={styles.eyeButton} onPress={() => setShowPassword(previous => !previous)}>
+                  <Ionicons name={showPassword ? 'eye-off' : 'eye'} size={18} color={color.textMuted} />
+                </TouchableOpacity>
+              </View>
+              {errors.password ? <Text style={styles.errorText}>{errors.password}</Text> : null}
+            </View>
 
-	            <View style={styles.fieldContainer}>
-	              <Text style={styles.label}>Confirmar senha *</Text>
-	              <View style={[styles.passwordContainer, errors.confirmPassword && styles.inputError]}>
-	                <TextInput
-	                  style={styles.passwordInput}
-	                  value={profileData.confirmPassword}
-	                  onChangeText={value => updateField('confirmPassword', value)}
-	                  placeholder="Digite a senha novamente"
-	                  placeholderTextColor={color.textMuted}
-	                  secureTextEntry={!showConfirmPassword}
-	                  autoCapitalize="none"
-	                  autoCorrect={false}
-	                />
-	                <TouchableOpacity style={styles.eyeButton} onPress={() => setShowConfirmPassword(previous => !previous)}>
-	                  <Ionicons name={showConfirmPassword ? 'eye-off' : 'eye'} size={20} color={color.textMuted} />
-	                </TouchableOpacity>
-	              </View>
-	              {errors.confirmPassword ? <Text style={styles.errorText}>{errors.confirmPassword}</Text> : null}
-	            </View>
+            <View style={styles.fieldContainer}>
+              <Text style={styles.label}>Confirmar senha *</Text>
+              <View
+                style={[
+                  styles.passwordContainer,
+                  passwordMatchState?.matches && styles.inputSuccess,
+                  errors.confirmPassword && styles.inputError
+                ]}
+              >
+                <TextInput
+                  style={styles.passwordInput}
+                  value={profileData.confirmPassword}
+                  onChangeText={value => updateField('confirmPassword', value)}
+                  placeholder="Repita sua senha"
+                  placeholderTextColor={color.textMuted}
+                  secureTextEntry={!showConfirmPassword}
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                />
+                <TouchableOpacity style={styles.eyeButton} onPress={() => setShowConfirmPassword(previous => !previous)}>
+                  <Ionicons name={showConfirmPassword ? 'eye-off' : 'eye'} size={18} color={color.textMuted} />
+                </TouchableOpacity>
+              </View>
+              {passwordMatchState ? (
+                <View style={styles.passwordMatchRow}>
+                  <Ionicons
+                    name={passwordMatchState.icon}
+                    size={14}
+                    color={passwordMatchState.matches ? color.success : color.error}
+                  />
+                  <Text
+                    style={[
+                      styles.passwordMatchText,
+                      !passwordMatchState.matches && styles.passwordMatchTextError
+                    ]}
+                  >
+                    {passwordMatchState.text}
+                  </Text>
+                </View>
+              ) : null}
+              {errors.confirmPassword ? <Text style={styles.errorText}>{errors.confirmPassword}</Text> : null}
+            </View>
+            <Text style={styles.helperText}>Você continuará entrando pelo telefone. A senha ajuda nos próximos acessos e na recuperação da conta.</Text>
 
 	            <View style={styles.legalLinksRow}>
               <TouchableOpacity onPress={() => openLegalLink(AppConfig.terms_of_service_url, 'Termos de Uso')}>
@@ -259,8 +323,18 @@ const ProfileDataStep = ({ onSubmitted, onBack, initialData = {} }) => {
         ) : null}
       </View>
 
-      <ContinueButton onPress={handleSubmit} disabled={!isFormValid} text={isDriver ? 'Continuar' : 'Concluir cadastro'} />
-    </ScrollView>
+      <ContinueButton
+        onPress={handleSubmit}
+        disabled={!isFormValid}
+        text="Continuar"
+        style={{
+          marginBottom:
+            Platform.OS === 'android'
+              ? Math.max(spacing.xl, insets.bottom + spacing.lg)
+              : Math.max(spacing.md, insets.bottom + spacing.sm)
+        }}
+      />
+    </View>
   );
 };
 
@@ -278,61 +352,67 @@ function ConsentRow({ checked, label, onPress }) {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    paddingHorizontal: spacing.lg
-  },
-  content: {
-    paddingVertical: spacing.sm
+    paddingHorizontal: spacing.lg,
+    paddingTop: spacing.xl,
+    paddingBottom: spacing.md
   },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: spacing.sm
+    minHeight: 44,
+    marginBottom: spacing.md
   },
   backButton: {
-    padding: 6,
-    marginRight: 8
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    borderWidth: 1,
+    borderColor: color.border,
+    backgroundColor: color.panelSoft,
+    alignItems: 'center',
+    justifyContent: 'center'
   },
   title: {
-    fontSize: 22,
-    lineHeight: 28,
+    fontSize: 32,
+    lineHeight: 36,
     color: color.textPrimary,
     fontFamily: fonts.Bold,
-    textAlign: 'left'
+    textAlign: 'left',
+    letterSpacing: 0
   },
   subtitle: {
-    fontSize: 13,
-    lineHeight: 19,
+    fontSize: 15,
+    lineHeight: 21,
     color: color.textSecondary,
     fontFamily: fonts.Regular,
-    marginBottom: spacing.sm
+    marginTop: spacing.sm,
+    marginBottom: spacing.md
   },
   card: {
-    borderRadius: radius.lg,
+    borderRadius: radius.xl,
     borderWidth: 1,
     borderColor: color.glassStroke,
-    backgroundColor: color.panelSoft,
-    shadowColor: '#0E1522',
-    shadowOffset: { width: 0, height: 12 },
-    shadowOpacity: 0.16,
-    shadowRadius: 20,
-    elevation: 9,
-    padding: spacing.sm
+    backgroundColor: color.panel,
+    shadowColor: color.accent,
+    ...elevation.soft,
+    padding: spacing.sm,
+    marginBottom: spacing.md
   },
   fieldContainer: {
-    marginBottom: spacing.sm
+    marginBottom: spacing.xs
   },
   label: {
-    fontSize: 13,
+    fontSize: 12,
     color: color.textPrimary,
     fontFamily: fonts.SemiBold,
-    marginBottom: 6
+    marginBottom: 4
   },
 	  input: {
     borderWidth: 1,
     borderColor: color.border,
     borderRadius: radius.md,
     paddingHorizontal: 12,
-    paddingVertical: 11,
+    paddingVertical: 10,
     fontSize: 14,
     lineHeight: 18,
     fontFamily: fonts.Medium,
@@ -345,24 +425,28 @@ const styles = StyleSheet.create({
 	    borderWidth: 1,
 	    borderColor: color.border,
 	    borderRadius: radius.md,
-	    backgroundColor: color.surfaceMuted
+	    backgroundColor: color.surfaceMuted,
+      minHeight: 48
 	  },
 	  passwordInput: {
 	    flex: 1,
-	    paddingHorizontal: 12,
-	    paddingVertical: 11,
+	    paddingHorizontal: 10,
+	    paddingVertical: 9,
 	    fontSize: 14,
 	    lineHeight: 18,
 	    fontFamily: fonts.Medium,
 	    color: color.textPrimary
 	  },
 	  eyeButton: {
-	    paddingHorizontal: 12,
-	    paddingVertical: 10
+	    paddingHorizontal: 8,
+	    paddingVertical: 8
 	  },
 	  inputError: {
 	    borderColor: color.error
 	  },
+  inputSuccess: {
+    borderColor: color.success
+  },
   errorText: {
     color: color.error,
     fontSize: 12,
@@ -370,26 +454,49 @@ const styles = StyleSheet.create({
     marginTop: 4,
     fontFamily: fonts.Medium
   },
+  helperText: {
+    marginTop: 0,
+    marginBottom: spacing.sm,
+    color: color.textSecondary,
+    fontSize: 11,
+    lineHeight: 14,
+    fontFamily: fonts.Regular
+  },
+  passwordMatchRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    marginTop: 5
+  },
+  passwordMatchText: {
+    color: color.success,
+    fontSize: 11,
+    lineHeight: 14,
+    fontFamily: fonts.Medium
+  },
+  passwordMatchTextError: {
+    color: color.error
+  },
   legalLinksRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    marginTop: 2,
+    marginTop: spacing.xs,
     marginBottom: spacing.sm
   },
   legalLinkText: {
-    fontSize: 12,
-    lineHeight: 16,
+    fontSize: 11,
+    lineHeight: 14,
     color: color.accent,
     textDecorationLine: 'underline',
     fontFamily: fonts.Medium
   },
   consentsBlock: {
-    marginTop: spacing.xs
+    marginTop: 0
   },
   consentRow: {
     flexDirection: 'row',
     alignItems: 'flex-start',
-    marginBottom: spacing.xs
+    marginBottom: 5
   },
   checkbox: {
     width: 18,
@@ -409,8 +516,8 @@ const styles = StyleSheet.create({
   },
   consentLabel: {
     flex: 1,
-    fontSize: 13,
-    lineHeight: 18,
+    fontSize: 12,
+    lineHeight: 16,
     color: color.textPrimary,
     fontFamily: fonts.Medium
   }

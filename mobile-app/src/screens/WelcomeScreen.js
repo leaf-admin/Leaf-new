@@ -103,10 +103,17 @@ export default function WelcomeScreen({ navigation }) {
   return (
     <Animated.View style={[styles.container, { opacity: fadeInAnim }]}>
       <StatusBar backgroundColor={color.background} barStyle="dark-content" />
-      <View style={styles.backgroundBlobPrimary} />
-      <View style={styles.backgroundBlobSecondary} />
+      <View pointerEvents="none" style={styles.backgroundCanvas}>
+        <View style={[styles.routeLine, styles.routeLineTop]} />
+        <View style={[styles.routeLine, styles.routeLineMiddle]} />
+        <View style={[styles.routeLine, styles.routeLineBottom]} />
+        <View style={styles.routePin} />
+      </View>
 
-      <View style={styles.logoWrapper}>
+      <View style={styles.brandCluster}>
+        <View style={styles.leafMark}>
+          <View style={styles.leafMarkCore} />
+        </View>
         <Animated.Text style={[
           styles.welcomeText,
           { opacity: welcomeFadeAnim }
@@ -148,70 +155,111 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
     paddingHorizontal: spacing.xl,
-    paddingTop: spacing.xxl,
+    paddingTop: spacing.xxl + spacing.lg,
     paddingBottom: spacing.xxl
   },
-  backgroundBlobPrimary: {
+  backgroundCanvas: {
     position: 'absolute',
-    width: 280,
-    height: 280,
-    borderRadius: 140,
-    backgroundColor: 'rgba(16,22,34,0.08)',
-    top: -90,
-    right: -70
+    top: 0,
+    right: 0,
+    bottom: 0,
+    left: 0,
+    overflow: 'hidden'
   },
-  backgroundBlobSecondary: {
+  routeLine: {
     position: 'absolute',
-    width: 260,
-    height: 260,
-    borderRadius: 130,
-    backgroundColor: 'rgba(16,22,34,0.06)',
-    bottom: -80,
-    left: -60
+    height: 2,
+    borderRadius: 2,
+    backgroundColor: color.mapLine
   },
-  logoWrapper: {
+  routeLineTop: {
+    width: 310,
+    top: 118,
+    right: -104,
+    transform: [{ rotate: '-23deg' }]
+  },
+  routeLineMiddle: {
+    width: 420,
+    top: 292,
+    left: -126,
+    backgroundColor: color.skyLine,
+    transform: [{ rotate: '18deg' }]
+  },
+  routeLineBottom: {
+    width: 360,
+    bottom: 152,
+    right: -108,
+    transform: [{ rotate: '-17deg' }]
+  },
+  routePin: {
+    position: 'absolute',
+    top: 194,
+    left: 38,
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: color.accent,
+    opacity: 0.22
+  },
+  brandCluster: {
     justifyContent: 'center',
     alignItems: 'center',
     width: '100%',
     flexDirection: 'column',
-    backgroundColor: color.panel,
-    borderRadius: radius.xl,
+    paddingTop: spacing.lg,
+    paddingBottom: spacing.xxl
+  },
+  leafMark: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: color.panelSoft,
     borderWidth: 1,
-    borderColor: color.borderStrong,
-    paddingVertical: spacing.xxl,
-    shadowColor: '#0E1522',
-    ...elevation.panel
+    borderColor: color.glassStroke,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: spacing.lg,
+    shadowColor: color.accent,
+    ...elevation.soft
+  },
+  leafMarkCore: {
+    width: 18,
+    height: 24,
+    borderTopLeftRadius: 18,
+    borderTopRightRadius: 4,
+    borderBottomRightRadius: 18,
+    borderBottomLeftRadius: 4,
+    backgroundColor: color.accent,
+    transform: [{ rotate: '36deg' }]
   },
   welcomeText: {
     color: color.textPrimary,
-    fontSize: 24,
+    fontSize: 14,
     fontFamily: fonts.Bold,
     textAlign: 'center',
-    letterSpacing: 1.2,
+    letterSpacing: 1.4,
     width: '100%',
-    marginBottom: spacing.sm
+    marginBottom: spacing.md,
+    textTransform: 'uppercase'
   },
   logo: {
-    width: 190,
-    height: 190,
+    width: 212,
+    height: 212,
     alignSelf: 'center',
-    marginTop: spacing.xs
+    marginTop: -spacing.sm
   },
   startButton: {
     backgroundColor: color.accent,
-    borderRadius: radius.md,
+    borderRadius: radius.pill,
     borderWidth: 1,
-    borderColor: color.borderStrong,
-    minHeight: 52,
+    borderColor: color.accent,
+    minHeight: 58,
     width: '100%',
     maxWidth: 340,
     alignItems: 'center',
     justifyContent: 'center',
-    shadowColor: '#0E1522',
-    shadowOffset: { width: 0, height: 10 },
-    shadowOpacity: 0.2,
-    shadowRadius: 18,
-    elevation: 9
+    shadowColor: color.accent,
+    ...elevation.soft
   },
   startButtonText: {
     color: color.accentText,

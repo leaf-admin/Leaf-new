@@ -1,6 +1,7 @@
 import React, { useCallback, useState } from 'react';
 import { StatusBar, StyleSheet, Switch, Text, View, useWindowDimensions } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useSelector } from 'react-redux';
 import { Ionicons } from '@expo/vector-icons';
 import { fonts } from '../../theme/runtimeTokens';
 import PrototypeScreenTransition from '../../components/prototype/PrototypeScreenTransition';
@@ -14,6 +15,7 @@ import {
 import robotaxiPrototypeTokens from '../../components/design-system/robotaxiPrototypeTokens';
 import { usePrototypeMapOcclusion } from './prototypeMapOcclusion';
 import { usePrototypeRideRuntime } from './prototypeRideRuntime';
+import { resolvePrototypeProfileName } from './prototypeProfileIdentity';
 
 const { color, typography } = robotaxiPrototypeTokens;
 const SURFACE_TOP_PADDING = 16;
@@ -22,9 +24,22 @@ const BACKDROP_COLOR = 'transparent';
 const SWITCH_TRACK_COLORS = { false: '#D9DFE6', true: '#9BB38E' };
 const SWITCH_THUMB_COLOR = '#FFFFFF';
 
-function SettingRow({ icon, title, subtitle, value, onValueChange, last = false }) {
+function SettingRow({
+  icon,
+  title,
+  subtitle,
+  value,
+  onValueChange,
+  rowTestID,
+  switchTestID,
+  last = false
+}) {
   return (
-    <View style={[styles.settingRow, last && styles.settingRowLast]}>
+    <View
+      style={[styles.settingRow, last && styles.settingRowLast]}
+      testID={rowTestID}
+      accessibilityLabel={rowTestID}
+    >
       <View style={styles.settingCopyWrap}>
         <View style={styles.settingIconSlot}>
           <Ionicons name={icon} size={18} color={color.text.primary} />
@@ -42,19 +57,24 @@ function SettingRow({ icon, title, subtitle, value, onValueChange, last = false 
         thumbColor={SWITCH_THUMB_COLOR}
         ios_backgroundColor={SWITCH_TRACK_COLORS.false}
         style={styles.toggleSwitch}
+        testID={switchTestID}
       />
     </View>
   );
 }
 
 export default function RobotaxiSettingsScreen({ navigation, route }) {
+  const authProfile = useSelector(state => state?.auth?.profile);
   const insets = useSafeAreaInsets();
   const { height: windowHeight } = useWindowDimensions();
   const { riderProfile, activeRole, notificationsEnabled, trafficLayerEnabled, voiceGuidanceEnabled, updateSettings } =
     usePrototypeRideRuntime();
   const [panelHeight, setPanelHeight] = useState(windowHeight);
   const isDriverRole = activeRole === 'driver';
-  const profileName = riderProfile?.name || (isDriverRole ? 'Motorista Leaf' : 'Passageiro Leaf');
+  const profileName =
+    resolvePrototypeProfileName(authProfile) ||
+    resolvePrototypeProfileName(riderProfile) ||
+    (isDriverRole ? 'Motorista Leaf' : 'Passageiro Leaf');
 
   usePrototypeMapOcclusion({
     routeKey: route?.key,
@@ -75,7 +95,12 @@ export default function RobotaxiSettingsScreen({ navigation, route }) {
 
   return (
     <PrototypeScreenTransition>
-      <View style={styles.container} pointerEvents="box-none">
+      <View
+        style={styles.container}
+        pointerEvents="box-none"
+        testID="robotaxi-settings-screen"
+        accessibilityLabel="robotaxi-settings-screen"
+      >
         <StatusBar translucent backgroundColor="transparent" barStyle="dark-content" />
         <PrototypeDismissibleSheet
           onClose={handleDismiss}
@@ -97,7 +122,13 @@ export default function RobotaxiSettingsScreen({ navigation, route }) {
               paddingTop: insets.top + SURFACE_TOP_PADDING,
               paddingBottom: Math.max(insets.bottom, SURFACE_BOTTOM_PADDING),
             }}
-            headerAccessory={<PrototypeMenuCloseButton onPress={handleDismiss} />}
+            headerAccessory={(
+              <PrototypeMenuCloseButton
+                onPress={handleDismiss}
+                testID="robotaxi-settings-close-button"
+                accessibilityLabel="robotaxi-settings-close-button"
+              />
+            )}
           >
             <PrototypeMenuSection title="Preferencias">
               <SettingRow
@@ -110,6 +141,8 @@ export default function RobotaxiSettingsScreen({ navigation, route }) {
                 }
                 value={notificationsEnabled}
                 onValueChange={value => updateSettings({ notificationsEnabled: value })}
+                rowTestID="robotaxi-settings-row-notifications"
+                switchTestID="robotaxi-settings-switch-notifications"
               />
               <SettingRow
                 icon="map-outline"
@@ -117,6 +150,8 @@ export default function RobotaxiSettingsScreen({ navigation, route }) {
                 subtitle="Mostra trafego no mapa para facilitar leitura da rota."
                 value={trafficLayerEnabled}
                 onValueChange={value => updateSettings({ trafficLayerEnabled: value })}
+                rowTestID="robotaxi-settings-row-traffic"
+                switchTestID="robotaxi-settings-switch-traffic"
               />
               <SettingRow
                 icon="volume-high-outline"
@@ -124,6 +159,8 @@ export default function RobotaxiSettingsScreen({ navigation, route }) {
                 subtitle="Ativa orientacoes de audio durante deslocamento."
                 value={voiceGuidanceEnabled}
                 onValueChange={value => updateSettings({ voiceGuidanceEnabled: value })}
+                rowTestID="robotaxi-settings-row-voice"
+                switchTestID="robotaxi-settings-switch-voice"
                 last
               />
             </PrototypeMenuSection>
@@ -135,6 +172,8 @@ export default function RobotaxiSettingsScreen({ navigation, route }) {
                 subtitle="Abra o canal de ajuda sem sair do fluxo atual."
                 last
                 onPress={() => navigation.replace('RobotaxiPrototypeSupport')}
+                testID="robotaxi-settings-open-support"
+                accessibilityLabel="robotaxi-settings-open-support"
               />
             </PrototypeMenuSection>
           </PrototypeMenuSurface>

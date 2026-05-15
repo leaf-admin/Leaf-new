@@ -12,6 +12,33 @@ import { apiClient } from './httpClient';
 
 
 class UserAuthService {
+  static resolveNextActionFromPayload(data = {}) {
+    const rawNextAction = String(data?.nextAction || '').trim().toUpperCase();
+    const hasPasswordConfigured =
+      data?.hasPassword === true ||
+      String(data?.hasPassword || '').trim().toLowerCase() === 'true' ||
+      data?.passwordFallbackAvailable === true;
+
+    if (rawNextAction === 'PASSWORD_LOGIN') {
+      return hasPasswordConfigured ? 'PASSWORD_LOGIN' : 'OTP_REQUIRED';
+    }
+    if (rawNextAction === 'OTP_REQUIRED') {
+      return 'OTP_REQUIRED';
+    }
+
+    // Servidores legados podem responder `requiresPassword=true` sem senha configurada.
+    // Nessa situação forçamos OTP para evitar bloqueio indevido no login.
+    if (!hasPasswordConfigured) {
+      return 'OTP_REQUIRED';
+    }
+
+    // Compatibilidade com payload legado
+    if (Boolean(data?.requiresPassword)) {
+      return 'PASSWORD_LOGIN';
+    }
+    return 'OTP_REQUIRED';
+  }
+
   static normalizePhone(phoneNumber) {
     const digits = String(phoneNumber || '').replace(/\D/g, '');
     if (!digits) return '';
@@ -64,12 +91,21 @@ class UserAuthService {
       throw new Error(data.error || 'Não foi possível validar o telefone');
     }
 
+    const nextAction = this.resolveNextActionFromPayload(data);
+    const requiresPassword = nextAction === 'PASSWORD_LOGIN';
+    const passwordFallbackAvailable =
+      data.passwordFallbackAvailable === undefined
+        ? Boolean(data.hasPassword)
+        : Boolean(data.passwordFallbackAvailable);
+
     return {
       phoneNumber: normalizedPhone,
       exists: Boolean(data.exists),
       hasPassword: Boolean(data.hasPassword),
-      requiresPassword: Boolean(data.requiresPassword),
-      requiresOtp: Boolean(data.requiresOtp),
+      nextAction,
+      passwordFallbackAvailable,
+      requiresPassword,
+      requiresOtp: !requiresPassword,
       uid: data.uid || null,
       userType: data.userType || null,
       source: data.source || null

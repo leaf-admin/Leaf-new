@@ -88,7 +88,7 @@ describe('OTPStep', () => {
 
     const { getByTestId } = render(
       <OTPStep
-        phoneNumber="+5511999999999"
+        phoneNumber="+5521102938475"
         confirmation={confirmation}
         onVerified={jest.fn()}
         onBack={jest.fn()}
@@ -114,7 +114,7 @@ describe('OTPStep', () => {
 
     const { getByTestId } = render(
       <OTPStep
-        phoneNumber="+5511999999999"
+        phoneNumber="+5521102938475"
         confirmation={confirmation}
         onVerified={jest.fn()}
         onBack={jest.fn()}
@@ -140,7 +140,7 @@ describe('OTPStep', () => {
 
     const { getByTestId } = render(
       <OTPStep
-        phoneNumber="+5511999999999"
+        phoneNumber="+5521102938475"
         confirmation={confirmation}
         onVerified={jest.fn()}
         onBack={jest.fn()}

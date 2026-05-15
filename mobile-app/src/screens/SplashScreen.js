@@ -7,6 +7,7 @@ import { FETCH_USER_SUCCESS } from '../state/actionTypes';
 import { useOnboardingPersistence } from '../hooks/useOnboardingPersistence';
 import AuthFlow from '../components/auth/AuthFlow';
 import { restoreQaSeedProfile } from '../utils/qaSeedProfile';
+import { PROFILE_SELECTION_STEP_INDEX } from '../utils/onboardingSessionState';
 
 const AUTH_UID_STORAGE_KEY = '@auth_uid';
 const USER_DATA_STORAGE_KEY = '@user_data';
@@ -60,6 +61,23 @@ const buildOnboardingPayload = (progress = {}) => {
   };
 };
 
+const buildIncompleteProfileOnboardingPayload = (profile, progress = {}) => {
+  const payload = buildOnboardingPayload(progress);
+  const hasValidatedPhoneSession = Boolean(profile?.uid);
+
+  if (
+    hasValidatedPhoneSession &&
+    !payload.completed.includes('phone_validation')
+  ) {
+    return {
+      step: Math.max(payload.step, PROFILE_SELECTION_STEP_INDEX),
+      completed: [...payload.completed, 'phone_validation']
+    };
+  }
+
+  return payload;
+};
+
 export default function SplashScreen({ navigation }) {
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const scaleAnim = useRef(new Animated.Value(0.8)).current;
@@ -81,11 +99,20 @@ export default function SplashScreen({ navigation }) {
       return;
     }
 
+    let isCancelled = false;
+    let bootTimeoutId = null;
+    let onboardingLoadTimeoutId = null;
+
     const checkUserStatus = async () => {
       // ✅ Timeout de 5s para verificação de usuário (Item 1.3)
-      const timeoutId = setTimeout(() => {
+      bootTimeoutId = setTimeout(() => {
+        if (isCancelled) {
+          return;
+        }
+
         Logger.warn('SplashScreen - ⏰ Timeout na verificação de usuário, permitindo acesso ao app');
         // Permitir app abrir mesmo sem verificação completa
+        setOnboardingProgress({ step: 0, completed: [] });
         setShouldShowOnboarding(true);
         setIsChecking(false);
       }, 5000);
@@ -196,7 +223,10 @@ export default function SplashScreen({ navigation }) {
 
         // Se não está autenticado, mostrar onboarding
         if (!hasAnyAuthSession) {
-          clearTimeout(timeoutId);
+          clearTimeout(bootTimeoutId);
+          if (isCancelled) {
+            return;
+          }
           Logger.log('SplashScreen - 🔐 Usuário não autenticado, preparando onboarding');
           setShouldShowOnboarding(true);
           setOnboardingProgress({ step: 0, completed: [] });
@@ -208,10 +238,18 @@ export default function SplashScreen({ navigation }) {
         if (!isLoaded()) {
           Logger.log('SplashScreen - ⏳ Aguardando carregamento dos dados...');
           // Timeout de 1 segundo (reduzido)
-          setTimeout(() => {
+          onboardingLoadTimeoutId = setTimeout(() => {
+            if (isCancelled) {
+              return;
+            }
+
             if (!isLoaded()) {
-              clearTimeout(timeoutId);
+              clearTimeout(bootTimeoutId);
               Logger.log('SplashScreen - ⏰ Timeout no carregamento, preparando onboarding');
+              setOnboardingProgress(buildIncompleteProfileOnboardingPayload(
+                resolvedProfile,
+                onboarding.progress || {}
+              ));
               setShouldShowOnboarding(true);
               setIsChecking(false);
             }
@@ -226,7 +264,10 @@ export default function SplashScreen({ navigation }) {
         );
         Logger.log('SplashScreen - 📊 Perfil completo no Realtime Database?', !!hasCompleteProfile);
 
-        clearTimeout(timeoutId);
+        clearTimeout(bootTimeoutId);
+        if (isCancelled) {
+          return;
+        }
 
         if (hasCompleteProfile) {
           // ✅ SITUAÇÃO 1: Usuário completo - ir para NewMapScreen
@@ -247,13 +288,16 @@ export default function SplashScreen({ navigation }) {
                 }
               }, 1000);
             }
-          }, 1200);
+          }, 220);
           return;
         } else {
           // 🔄 SITUAÇÃO 2: Usuário autenticado mas incompleto - continuar onboarding
           Logger.log('SplashScreen - 🔄 Usuário autenticado mas incompleto, preparando onboarding');
 
-          const progressPayload = buildOnboardingPayload(onboarding.progress || {});
+          const progressPayload = buildIncompleteProfileOnboardingPayload(
+            resolvedProfile,
+            onboarding.progress || {}
+          );
           setOnboardingProgress(progressPayload);
           
           setShouldShowOnboarding(true);
@@ -261,9 +305,13 @@ export default function SplashScreen({ navigation }) {
           return;
         }
       } catch (error) {
-        clearTimeout(timeoutId);
+        clearTimeout(bootTimeoutId);
+        if (isCancelled) {
+          return;
+        }
         Logger.error('SplashScreen - ❌ Erro ao verificar status:', error);
         // Em caso de erro, mostrar onboarding (app sempre abre)
+        setOnboardingProgress({ step: 0, completed: [] });
         setShouldShowOnboarding(true);
         setIsChecking(false);
       }
@@ -271,7 +319,13 @@ export default function SplashScreen({ navigation }) {
 
     // Executar verificação imediatamente
     checkUserStatus();
-  }, [auth.profile, navigation, isChecking, dispatch]);
+
+    return () => {
+      isCancelled = true;
+      clearTimeout(bootTimeoutId);
+      clearTimeout(onboardingLoadTimeoutId);
+    };
+  }, [auth.profile, navigation, isChecking, dispatch, onboarding.isLoaded, onboarding.progress, isLoaded]);
 
   useEffect(() => {
     // Animação simples e rápida

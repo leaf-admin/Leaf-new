@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { Alert, Linking, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { Alert, Linking, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { fonts } from '../../../theme/runtimeTokens';
 import ContinueButton from '../common/ContinueButton';
@@ -85,17 +85,18 @@ const CredentialsStep = ({ onCreated, onBack, initialData = {} }) => {
   };
 
   return (
-    <ScrollView style={styles.container} showsVerticalScrollIndicator={false} contentContainerStyle={styles.content}>
+    <View style={styles.container}>
       <View style={styles.header}>
         <TouchableOpacity style={styles.backButton} onPress={onBack}>
-          <Ionicons name="arrow-back" size={22} color={color.textPrimary} />
+          <Ionicons name="chevron-back" size={22} color={color.textPrimary} />
         </TouchableOpacity>
-        <Text style={styles.title}>Finalizar cadastro</Text>
       </View>
+
+      <Text style={styles.title}>Confirmar permissões</Text>
 
       <Text style={styles.subtitle}>
         {isDriver
-          ? 'Revise e confirme os consentimentos obrigatórios para ativação do motorista.'
+          ? 'Consentimentos obrigatórios ficam separados das preferências opcionais.'
           : 'Revise e confirme os termos para finalizar sua conta de passageiro.'}
       </Text>
 
@@ -109,6 +110,7 @@ const CredentialsStep = ({ onCreated, onBack, initialData = {} }) => {
       </View>
 
       <View style={styles.block}>
+        <Text style={styles.sectionLabel}>Obrigatório</Text>
         <ConsentRow
           checked={consents.acceptTerms}
           label="Aceito os Termos de Uso *"
@@ -134,6 +136,7 @@ const CredentialsStep = ({ onCreated, onBack, initialData = {} }) => {
               <Text style={styles.errorText}>{errors.consentBackgroundCheck}</Text>
             ) : null}
 
+            <Text style={styles.sectionLabel}>Opcional</Text>
             <ConsentRow
               checked={consents.marketingOptIn}
               label="Aceito receber comunicações promocionais (opcional)"
@@ -144,7 +147,7 @@ const CredentialsStep = ({ onCreated, onBack, initialData = {} }) => {
       </View>
 
       <ContinueButton onPress={handleSubmit} disabled={!isFormValid} text="Concluir" />
-    </ScrollView>
+    </View>
   );
 };
 
@@ -163,32 +166,39 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     paddingHorizontal: spacing.lg,
-    paddingTop: spacing.xs
-  },
-  content: {
+    paddingTop: spacing.xl,
     paddingBottom: spacing.xs
   },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: spacing.sm
+    minHeight: 44,
+    marginBottom: spacing.md
   },
   backButton: {
-    padding: 6,
-    marginRight: 8
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    borderWidth: 1,
+    borderColor: color.border,
+    backgroundColor: color.panelSoft,
+    alignItems: 'center',
+    justifyContent: 'center'
   },
   title: {
-    fontSize: 22,
-    lineHeight: 28,
+    fontSize: 32,
+    lineHeight: 36,
     color: color.textPrimary,
-    fontFamily: fonts.Bold
+    fontFamily: fonts.Bold,
+    letterSpacing: 0
   },
   subtitle: {
-    fontSize: 13,
-    lineHeight: 19,
+    fontSize: 15,
+    lineHeight: 21,
     color: color.textSecondary,
     fontFamily: fonts.Regular,
-    marginBottom: spacing.sm
+    marginTop: spacing.sm,
+    marginBottom: spacing.lg
   },
   legalLinksRow: {
     flexDirection: 'row',
@@ -205,14 +215,22 @@ const styles = StyleSheet.create({
   block: {
     borderWidth: 1,
     borderColor: color.glassStroke,
-    borderRadius: radius.lg,
-    backgroundColor: color.panelSoft,
+    borderRadius: radius.xl,
+    backgroundColor: color.panel,
     padding: spacing.sm,
-    shadowColor: '#0E1522',
-    shadowOffset: { width: 0, height: 12 },
-    shadowOpacity: 0.16,
-    shadowRadius: 20,
-    elevation: 9
+    shadowColor: color.accent,
+    ...elevation.soft,
+    marginBottom: 'auto'
+  },
+  sectionLabel: {
+    marginTop: 2,
+    marginBottom: spacing.xs,
+    color: color.textSecondary,
+    fontSize: 11,
+    lineHeight: 14,
+    fontFamily: fonts.Bold,
+    textTransform: 'uppercase',
+    letterSpacing: 0.4
   },
   consentRow: {
     flexDirection: 'row',

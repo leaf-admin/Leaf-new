@@ -2,7 +2,7 @@ import React from 'react';
 import { Alert } from 'react-native';
 import { fireEvent, render, waitFor } from '@testing-library/react-native';
 
-import PhoneInputStep from '../src/components/auth/steps/PhoneInputStep';
+import PhoneInputStep, { normalizePhoneInputValue } from '../src/components/auth/steps/PhoneInputStep';
 
 const mockSignInWithPhoneNumber = jest.fn();
 const mockSignInWithCustomToken = jest.fn();
@@ -21,6 +21,10 @@ jest.mock('@react-native-firebase/auth', () => () => ({
   signInWithCustomToken: mockSignInWithCustomToken,
 }));
 
+jest.mock('react-native-safe-area-context', () => ({
+  useSafeAreaInsets: () => ({ top: 0, right: 0, bottom: 0, left: 0 }),
+}));
+
 jest.mock('../src/config/reviewAccounts', () => ({
   isReviewAccount: jest.fn(() => false),
   getReviewAccountInfo: jest.fn(() => null),
@@ -30,6 +34,8 @@ jest.mock('../src/config/runtimeAccessPolicy', () => ({
   allowCustomOtpFallback: jest.fn(() => false),
   allowQaOtpForceFlow: jest.fn(() => false),
   allowReviewAccess: jest.fn(() => false),
+  isE2ETestBuild: jest.fn(() => false),
+  isSimulatorBuild: jest.fn(() => false),
 }));
 
 jest.mock('../src/services/httpClient', () => ({
@@ -38,11 +44,13 @@ jest.mock('../src/services/httpClient', () => ({
 
 jest.mock('../src/services/UserAuthService', () => ({
   __esModule: true,
-  default: {
-    resolvePhoneAuthFlow: jest.fn(async () => ({
-      requiresPassword: false,
-      hasPassword: false,
-      source: 'test',
+    default: {
+      resolvePhoneAuthFlow: jest.fn(async () => ({
+        nextAction: 'OTP_REQUIRED',
+        passwordFallbackAvailable: false,
+        requiresPassword: false,
+        hasPassword: false,
+        source: 'test',
     })),
     loginWithPassword: jest.fn(),
   },
@@ -72,6 +80,38 @@ jest.mock('../src/components/auth/common/ContinueButton', () => {
 describe('PhoneInputStep', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+
+    mockSignInWithPhoneNumber.mockReset();
+    mockSignInWithCustomToken.mockReset();
+    mockSignInWithPhoneNumber.mockResolvedValue({ confirm: jest.fn() });
+    mockSignInWithCustomToken.mockResolvedValue({ user: null });
+
+    const apiClient = require('../src/services/httpClient');
+    apiClient.post.mockReset();
+
+    const runtimeAccessPolicy = require('../src/config/runtimeAccessPolicy');
+    runtimeAccessPolicy.allowQaOtpForceFlow.mockReset();
+    runtimeAccessPolicy.allowCustomOtpFallback.mockReset();
+    runtimeAccessPolicy.allowReviewAccess.mockReset();
+    runtimeAccessPolicy.isE2ETestBuild.mockReset();
+    runtimeAccessPolicy.isSimulatorBuild.mockReset();
+    runtimeAccessPolicy.allowQaOtpForceFlow.mockReturnValue(false);
+    runtimeAccessPolicy.allowCustomOtpFallback.mockReturnValue(false);
+    runtimeAccessPolicy.allowReviewAccess.mockReturnValue(false);
+    runtimeAccessPolicy.isE2ETestBuild.mockReturnValue(false);
+    runtimeAccessPolicy.isSimulatorBuild.mockReturnValue(false);
+
+    const UserAuthService = require('../src/services/UserAuthService').default;
+    UserAuthService.resolvePhoneAuthFlow.mockReset();
+    UserAuthService.loginWithPassword.mockReset();
+    UserAuthService.resolvePhoneAuthFlow.mockResolvedValue({
+      nextAction: 'OTP_REQUIRED',
+      passwordFallbackAvailable: false,
+      requiresPassword: false,
+      hasPassword: false,
+      source: 'test',
+    });
+
     jest.spyOn(Alert, 'alert').mockImplementation(() => {});
   });
 
@@ -127,14 +167,14 @@ describe('PhoneInputStep', () => {
       />,
     );
 
-    fireEvent.changeText(getByTestId('auth-phone-input'), '11999999999');
+    fireEvent.changeText(getByTestId('auth-phone-input'), '21102938475');
     fireEvent.press(getByTestId('auth-continue-btn'));
 
     await waitFor(() => {
       expect(mockSignInWithCustomToken).not.toHaveBeenCalled();
       expect(onVerificationSent).toHaveBeenCalledWith(
         expect.objectContaining({ isCustomOtp: true }),
-        '+5511999999999',
+        '+5521102938475',
         false,
       );
     });
@@ -148,7 +188,9 @@ describe('PhoneInputStep', () => {
     UserAuthService.resolvePhoneAuthFlow.mockResolvedValueOnce({
       exists: true,
       uid: 'firebase-user-123',
-      requiresPassword: true,
+      nextAction: 'OTP_REQUIRED',
+      passwordFallbackAvailable: false,
+      requiresPassword: false,
       hasPassword: false,
       source: 'firebase_auth',
     });
@@ -172,5 +214,78 @@ describe('PhoneInputStep', () => {
         true,
       );
     });
+  });
+
+  test('keeps OTP as default even when account has password configured', async () => {
+    const UserAuthService = require('../src/services/UserAuthService').default;
+    const onVerificationSent = jest.fn();
+    const firebaseConfirmation = { confirm: jest.fn() };
+
+    UserAuthService.resolvePhoneAuthFlow.mockResolvedValueOnce({
+      exists: true,
+      uid: 'customer-with-password',
+      nextAction: 'OTP_REQUIRED',
+      passwordFallbackAvailable: true,
+      requiresPassword: false,
+      hasPassword: true,
+      source: 'password_credentials',
+    });
+    mockSignInWithPhoneNumber.mockResolvedValueOnce(firebaseConfirmation);
+
+    const { getByTestId, queryByText } = render(
+      <PhoneInputStep
+        onSwitchToRegister={jest.fn()}
+        onVerificationSent={onVerificationSent}
+      />,
+    );
+
+    fireEvent.changeText(getByTestId('auth-phone-input'), '21102938475');
+    fireEvent.press(getByTestId('auth-continue-btn'));
+
+    await waitFor(() => {
+      expect(mockSignInWithPhoneNumber).toHaveBeenCalledWith('+5521102938475');
+      expect(onVerificationSent).toHaveBeenCalledWith(
+        firebaseConfirmation,
+        '+5521102938475',
+        true,
+      );
+      expect(queryByText('Informe seu telefone para confirmar sua conta com segurança.')).not.toBeNull();
+    });
+  });
+
+  test('enables explicit password fallback only when user chooses "Ja tenho senha"', async () => {
+    const UserAuthService = require('../src/services/UserAuthService').default;
+
+    UserAuthService.resolvePhoneAuthFlow.mockResolvedValueOnce({
+      exists: true,
+      uid: 'customer-with-password',
+      nextAction: 'OTP_REQUIRED',
+      passwordFallbackAvailable: true,
+      requiresPassword: false,
+      hasPassword: true,
+      source: 'password_credentials',
+    });
+
+    const { getByTestId, queryByText } = render(
+      <PhoneInputStep
+        onSwitchToRegister={jest.fn()}
+        onVerificationSent={jest.fn()}
+      />,
+    );
+
+    fireEvent.changeText(getByTestId('auth-phone-input'), '21102938475');
+    fireEvent.press(getByTestId('auth-password-fallback-btn'));
+
+    await waitFor(() => {
+      expect(queryByText('Informe seu telefone para confirmar sua conta com segurança.')).toBeNull();
+      expect(queryByText('Ja tenho senha')).toBeNull();
+      expect(queryByText('Entrar')).not.toBeNull();
+    });
+  });
+
+  test('normalizes pasted E.164 phone input into local 11-digit format', () => {
+    expect(normalizePhoneInputValue('+55 21 10293-8475')).toBe('21102938475');
+    expect(normalizePhoneInputValue('21102938475')).toBe('21102938475');
+    expect(normalizePhoneInputValue('+5521123456789')).toBe('21123456789');
   });
 });

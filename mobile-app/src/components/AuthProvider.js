@@ -10,6 +10,10 @@ import { ActivityIndicator, Platform, StyleSheet, Text, View } from 'react-nativ
 import { allowTestUserTools } from '../config/runtimeAccessPolicy';
 import mobileProfileService from '../services/MobileProfileService';
 import { restoreQaSeedProfile } from '../utils/qaSeedProfile';
+import {
+  buildIncompleteOnboardingProfile,
+  persistPhoneValidatedOnboardingSession,
+} from '../utils/onboardingSessionState';
 
 const AUTH_UID_STORAGE_KEY = '@auth_uid';
 const USER_DATA_STORAGE_KEY = '@user_data';
@@ -52,6 +56,8 @@ const resolveStoredProfileRole = (profile) =>
       profile?.profile?.userType ||
       profile?.profile?.role
   );
+
+const normalizePhoneDigits = (phone) => String(phone || '').replace(/\D/g, '');
 
 const buildCompleteUserDataFromProfile = (firebaseUser, profile) => {
   const normalizedProfile = normalizePersistedProfile(profile);
@@ -109,6 +115,42 @@ const AuthBootstrapShell = ({ syncing }) => (
     </View>
   </View>
 );
+
+const runPostLoginServicesInBackground = ({ updateFcmToken = false } = {}) => {
+  void (async () => {
+    try {
+      const results = await Promise.allSettled([
+        persistentRideNotificationService.initialize(),
+        interactiveNotificationService.initialize(),
+      ]);
+
+      const failed = results.find(result => result.status === 'rejected');
+      if (failed) {
+        Logger.warn('⚠️ Erro ao inicializar serviços de notificação:', failed.reason);
+      } else {
+        Logger.log('✅ Serviços de notificação inicializados');
+      }
+
+      if (updateFcmToken) {
+        const fcmToken = await AsyncStorage.getItem('fcmToken');
+        if (fcmToken) {
+          Logger.log('📱 Token FCM encontrado, atualizando perfil moderno:', fcmToken.substring(0, 20) + '...');
+
+          await mobileProfileService.upsertCurrentProfile({
+            fcmToken: fcmToken,
+            pushToken: fcmToken,
+            platform: Platform.OS,
+            lastSeen: new Date().toISOString()
+          });
+
+          Logger.log('✅ Token FCM salvo no backend moderno');
+        }
+      }
+    } catch (error) {
+      Logger.warn('⚠️ Tarefa pós-login em background falhou:', error?.message || error);
+    }
+  })();
+};
 
 
 const AuthProvider = ({ children }) => {
@@ -187,14 +229,7 @@ const AuthProvider = ({ children }) => {
           payload: testUserData
         });
 
-        // ✅ Inicializar serviços de notificação
-        try {
-          await persistentRideNotificationService.initialize();
-          await interactiveNotificationService.initialize();
-          Logger.log('✅ Serviços de notificação inicializados para usuário de teste');
-        } catch (notifError) {
-          Logger.warn('⚠️ Erro ao inicializar serviços de notificação:', notifError);
-        }
+        runPostLoginServicesInBackground();
 
         hasSynced.current = true;
         setIsSyncing(false);
@@ -240,6 +275,80 @@ const AuthProvider = ({ children }) => {
 
       const cachedProfileRole = resolveStoredProfileRole(cachedProfile);
       const firebaseUid = String(firebaseUser?.uid || '').trim();
+      const firebasePhoneDigits = normalizePhoneDigits(firebaseUser?.phoneNumber);
+      const cachedPhoneDigits = normalizePhoneDigits(
+        cachedProfile?.phone ||
+          cachedProfile?.mobile ||
+          cachedProfile?.phoneNumber ||
+          cachedProfile?.profile?.phone ||
+          cachedProfile?.profile?.mobile ||
+          cachedProfile?.profile?.phoneNumber
+      );
+      const cachedProfileMatchesFirebase =
+        cachedProfile?.uid &&
+        cachedProfileRole &&
+        firebaseUid &&
+        cachedProfile.uid === firebaseUid &&
+        (!firebasePhoneDigits || !cachedPhoneDigits || cachedPhoneDigits === firebasePhoneDigits);
+
+      const dispatchProfileUserData = async (profile, source) => {
+        const completeUserData = buildCompleteUserDataFromProfile(firebaseUser, profile);
+        if (!completeUserData) {
+          return null;
+        }
+
+        dispatch({
+          type: FETCH_USER_SUCCESS,
+          payload: completeUserData
+        });
+
+        await AsyncStorage.multiSet([
+          [AUTH_UID_STORAGE_KEY, completeUserData.uid],
+          [USER_DATA_STORAGE_KEY, JSON.stringify(completeUserData)]
+        ]);
+
+        Logger.log('✅ Usuário sincronizado no Redux via perfil:', {
+          source,
+          uid: completeUserData.uid,
+          usertype: completeUserData.usertype || completeUserData.userType || null
+        });
+
+        return completeUserData;
+      };
+
+      const refreshCachedProfileInBackground = () => {
+        void (async () => {
+          try {
+            const remoteProfile = await mobileProfileService.getCurrentProfile({ suppressErrors: true });
+            const normalizedRemoteProfile = normalizePersistedProfile(remoteProfile);
+            const remoteProfileRole = resolveStoredProfileRole(normalizedRemoteProfile);
+            const remotePhoneDigits = normalizePhoneDigits(
+              normalizedRemoteProfile?.phone ||
+                normalizedRemoteProfile?.mobile ||
+                normalizedRemoteProfile?.phoneNumber ||
+                normalizedRemoteProfile?.profile?.phone ||
+                normalizedRemoteProfile?.profile?.mobile ||
+                normalizedRemoteProfile?.profile?.phoneNumber
+            );
+            const remoteMatchesFirebase =
+              normalizedRemoteProfile?.uid &&
+              remoteProfileRole &&
+              normalizedRemoteProfile.uid === firebaseUid &&
+              (!firebasePhoneDigits || !remotePhoneDigits || remotePhoneDigits === firebasePhoneDigits);
+
+            if (remoteMatchesFirebase) {
+              await dispatchProfileUserData(normalizedRemoteProfile, 'remote-refresh');
+              Logger.log('✅ Perfil remoto atualizado em background após cache local');
+            }
+          } catch (remoteRefreshError) {
+            Logger.warn(
+              '⚠️ Atualização remota em background do perfil falhou:',
+              remoteRefreshError?.message || remoteRefreshError
+            );
+          }
+        })();
+      };
+
       if (
         testModeEnabled &&
         cachedProfile?.uid &&
@@ -269,6 +378,17 @@ const AuthProvider = ({ children }) => {
         }
       }
 
+      if (cachedProfileMatchesFirebase) {
+        const cachedUserData = await dispatchProfileUserData(cachedProfile, 'local-cache');
+        if (cachedUserData) {
+          hasSynced.current = true;
+          setIsSyncing(false);
+          runPostLoginServicesInBackground({ updateFcmToken: true });
+          refreshCachedProfileInBackground();
+          return;
+        }
+      }
+
       const remoteProfile = await mobileProfileService.getCurrentProfile({ suppressErrors: true });
       const normalizedRemoteProfile = normalizePersistedProfile(remoteProfile);
       const remoteProfileRole = resolveStoredProfileRole(normalizedRemoteProfile);
@@ -284,10 +404,12 @@ const AuthProvider = ({ children }) => {
         ? cachedProfile
         : normalizedRemoteProfile || cachedProfile;
 
-      if (userData?.uid) {
+      const userDataRole = resolveStoredProfileRole(userData);
+
+      if (userData?.uid && userDataRole) {
         Logger.log('✅ Dados encontrados na fonte moderna:', {
           uid: userData.uid,
-          usertype: userData.usertype || userData.userType || null
+          usertype: userDataRole
         });
 
         // Criar payload completo com dados do Firebase Auth + perfil moderno
@@ -299,7 +421,8 @@ const AuthProvider = ({ children }) => {
           // Dados do perfil moderno
           firstName: userData.firstName || '',
           lastName: userData.lastName || '',
-          usertype: userData.usertype || 'customer',
+          usertype: userDataRole,
+          userType: userDataRole,
           mobile: userData.mobile || firebaseUser.phoneNumber,
           profileImage: userData.profileImage || null,
           walletBalance: userData.walletBalance || 0,
@@ -312,7 +435,8 @@ const AuthProvider = ({ children }) => {
             phoneNumber: firebaseUser.phoneNumber || userData.mobile,
             firstName: userData.firstName || '',
             lastName: userData.lastName || '',
-            usertype: userData.usertype || 'customer',
+            usertype: userDataRole,
+            userType: userDataRole,
             mobile: userData.mobile || firebaseUser.phoneNumber,
             profileImage: userData.profileImage || null,
             walletBalance: userData.walletBalance || 0,
@@ -332,33 +456,7 @@ const AuthProvider = ({ children }) => {
 
         Logger.log('✅ Usuário sincronizado com sucesso no Redux');
 
-        // ✅ Inicializar serviços de notificação após login
-        try {
-          await persistentRideNotificationService.initialize();
-          await interactiveNotificationService.initialize();
-          Logger.log('✅ Serviços de notificação inicializados');
-        } catch (notifError) {
-          Logger.warn('⚠️ Erro ao inicializar serviços de notificação:', notifError);
-        }
-
-        // Salvar token FCM no Firebase se disponível
-        try {
-          const fcmToken = await AsyncStorage.getItem('fcmToken');
-          if (fcmToken) {
-            Logger.log('📱 Token FCM encontrado, atualizando perfil moderno:', fcmToken.substring(0, 20) + '...');
-
-            await mobileProfileService.upsertCurrentProfile({
-              fcmToken: fcmToken,
-              pushToken: fcmToken,
-              platform: Platform.OS,
-              lastSeen: new Date().toISOString()
-            });
-
-            Logger.log('✅ Token FCM salvo no backend moderno');
-          }
-        } catch (fcmError) {
-          Logger.error('❌ Erro ao salvar token FCM:', fcmError);
-        }
+        runPostLoginServicesInBackground({ updateFcmToken: true });
         hasSynced.current = true;
       } else {
         Logger.log('⚠️ Usuário não encontrado na fonte moderna - NÃO criando perfil básico');
@@ -369,10 +467,7 @@ const AuthProvider = ({ children }) => {
 
         // Dispatch de dados mínimos SEM usertype
         const minimalUserData = {
-          uid: firebaseUser.uid,
-          email: firebaseUser.email,
-          phoneNumber: firebaseUser.phoneNumber,
-          // NÃO definir usertype aqui
+          ...buildIncompleteOnboardingProfile(firebaseUser),
           profile: {
             uid: firebaseUser.uid,
             email: firebaseUser.email,
@@ -380,6 +475,8 @@ const AuthProvider = ({ children }) => {
             // NÃO definir usertype aqui
           }
         };
+
+        await persistPhoneValidatedOnboardingSession(minimalUserData);
 
         dispatch({
           type: FETCH_USER_SUCCESS,
@@ -395,10 +492,7 @@ const AuthProvider = ({ children }) => {
 
       // Em caso de erro, usar dados mínimos SEM usertype
       const fallbackUserData = {
-        uid: firebaseUser.uid,
-        email: firebaseUser.email,
-        phoneNumber: firebaseUser.phoneNumber,
-        // NÃO definir usertype aqui
+        ...buildIncompleteOnboardingProfile(firebaseUser),
         profile: {
           uid: firebaseUser.uid,
           email: firebaseUser.email,
@@ -406,6 +500,8 @@ const AuthProvider = ({ children }) => {
           // NÃO definir usertype aqui
         }
       };
+
+      await persistPhoneValidatedOnboardingSession(fallbackUserData);
 
       dispatch({
         type: FETCH_USER_SUCCESS,

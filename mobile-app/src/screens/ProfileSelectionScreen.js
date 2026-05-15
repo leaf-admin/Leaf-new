@@ -13,13 +13,13 @@ const options = [
   {
     key: 'passenger',
     title: 'Quero viajar',
-    subtitle: 'Encontre motoristas próximos e faça suas viagens',
-    icon: 'car-sport-outline'
+    subtitle: 'Solicite viagens, acompanhe preço e pagamento com calma.',
+    icon: 'car-outline'
   },
   {
     key: 'driver',
-    title: 'Quero ser parceiro',
-    subtitle: 'Dirija e ganhe dinheiro com suas viagens',
+    title: 'Quero dirigir',
+    subtitle: 'Envie documentos, receba corridas e acompanhe ganhos.',
     icon: 'navigate-outline'
   }
 ];
@@ -107,10 +107,7 @@ export default function ProfileSelectionScreen() {
             return (
               <Animated.View
                 key={opt.key}
-                style={[
-                  styles.optionContainer,
-                  { transform: [{ scale: isSelected ? 1.02 : 1 }] }
-                ]}
+                style={styles.optionContainer}
               >
                 <TouchableOpacity
                   style={[
@@ -127,22 +124,16 @@ export default function ProfileSelectionScreen() {
                     ]}>
                       <Ionicons
                         name={opt.icon}
-                        size={28}
-                        color={isSelected ? color.accentText : color.textPrimary}
+                        size={22}
+                        color={color.accent}
                       />
                     </View>
                     
                     <View style={styles.textContainer}>
-                      <Text style={[
-                        styles.optionTitle,
-                        { color: isSelected ? color.accentText : color.textPrimary }
-                      ]}>
+                      <Text style={styles.optionTitle}>
                         {opt.title}
                       </Text>
-                      <Text style={[
-                        styles.optionSubtitle,
-                        { color: isSelected ? 'rgba(255,255,255,0.86)' : color.textSecondary }
-                      ]}>
+                      <Text style={styles.optionSubtitle}>
                         {opt.subtitle}
                       </Text>
                     </View>
@@ -159,13 +150,6 @@ export default function ProfileSelectionScreen() {
           })}
         </View>
 
-        {selected && (
-          <Animated.View style={[styles.selectedInfo, { opacity: fadeAnim }]}>
-            <Text style={styles.selectedInfoText}>
-              Você selecionou: {options.find(opt => opt.key === selected)?.title}
-            </Text>
-          </Animated.View>
-        )}
       </Animated.View>
     </OnboardingLayout>
   );
@@ -175,57 +159,58 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     justifyContent: 'flex-start',
-    alignItems: 'center',
     width: '100%',
-    paddingTop: spacing.xs
+    paddingTop: spacing.lg
   },
   header: {
-    alignItems: 'center',
-    marginBottom: spacing.lg,
-    paddingHorizontal: spacing.sm
+    alignItems: 'flex-start',
+    marginBottom: spacing.xl
   },
   title: {
-    fontSize: 26,
+    fontSize: 32,
+    lineHeight: 36,
     fontFamily: fonts.Bold,
     color: color.textPrimary,
-    marginBottom: 12,
-    textAlign: 'center',
-    letterSpacing: 0.3
+    marginBottom: spacing.sm,
+    textAlign: 'left',
+    letterSpacing: 0
   },
   subtitle: {
-    fontSize: 16,
+    fontSize: 15,
     color: color.textSecondary,
-    textAlign: 'center',
-    lineHeight: 22
+    textAlign: 'left',
+    lineHeight: 21,
+    fontFamily: fonts.Regular
   },
   optionsWrapper: {
     flex: 1,
-    justifyContent: 'center',
+    justifyContent: 'flex-start',
     alignItems: 'center',
     width: '100%',
-    gap: spacing.md
+    gap: spacing.sm
   },
   optionContainer: {
     width: '100%',
-    shadowColor: '#0E1522',
-    ...elevation.soft
+    shadowColor: color.accent
   },
   optionButton: {
     alignItems: 'center',
     justifyContent: 'center',
     width: '100%',
-    paddingVertical: 24,
-    paddingHorizontal: 20,
+    minHeight: 92,
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.sm,
     borderRadius: radius.lg,
     borderWidth: 1,
-    borderColor: color.borderStrong,
-    backgroundColor: color.panel,
+    borderColor: color.border,
+    backgroundColor: color.panelSoft,
     position: 'relative',
     overflow: 'hidden'
   },
   optionButtonSelected: {
-    backgroundColor: color.accent,
-    borderColor: color.accent
+    backgroundColor: color.surface,
+    borderColor: color.borderStrong,
+    ...elevation.soft
   },
   optionContent: {
     flexDirection: 'row',
@@ -234,53 +219,48 @@ const styles = StyleSheet.create({
     zIndex: 1,
   },
   iconContainer: {
-    width: 60,
-    height: 60,
-    borderRadius: 30,
-    backgroundColor: color.surfaceMuted,
+    width: 48,
+    height: 48,
+    borderRadius: 17,
+    backgroundColor: color.accentSoft,
     alignItems: 'center',
     justifyContent: 'center',
-    marginRight: 16
+    marginRight: spacing.sm
   },
   iconContainerSelected: {
-    backgroundColor: 'rgba(255,255,255,0.18)'
+    backgroundColor: 'rgba(232,239,231,0.95)'
   },
   textContainer: {
     flex: 1
   },
   optionTitle: {
-    fontSize: 20,
+    color: color.textPrimary,
+    fontSize: 16,
+    lineHeight: 21,
     fontFamily: fonts.SemiBold,
-    marginBottom: 4,
-    letterSpacing: 0.2
+    marginBottom: 3,
+    letterSpacing: 0
   },
   optionSubtitle: {
-    fontSize: 14,
-    lineHeight: 20,
-    letterSpacing: 0.1
+    color: color.textSecondary,
+    fontSize: 12,
+    lineHeight: 16,
+    fontFamily: fonts.Regular,
+    letterSpacing: 0
   },
   checkmarkContainer: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: 'rgba(255,255,255,0.16)',
+    width: 26,
+    height: 26,
+    borderRadius: 13,
+    backgroundColor: color.accent,
     alignItems: 'center',
-    justifyContent: 'center'
+    justifyContent: 'center',
+    marginLeft: spacing.sm
   },
   checkmark: {
     color: color.accentText,
-    fontSize: 18,
+    fontSize: 16,
     fontWeight: 'bold'
-  },
-  selectedInfo: {
-    marginTop: spacing.sm,
-    paddingHorizontal: spacing.sm
-  },
-  selectedInfoText: {
-    fontSize: 14,
-    color: color.textSecondary,
-    textAlign: 'center',
-    fontFamily: fonts.Medium
   },
   progressBarContainer: {
     flexDirection: 'row',

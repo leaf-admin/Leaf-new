@@ -16,6 +16,11 @@ import {
 import robotaxiPrototypeTokens from '../../components/design-system/robotaxiPrototypeTokens';
 import { usePrototypeMapOcclusion } from './prototypeMapOcclusion';
 import { usePrototypeRideRuntime } from './prototypeRideRuntime';
+import {
+  resolvePrototypeProfileEmail,
+  resolvePrototypeProfileName,
+  resolvePrototypeProfilePhone,
+} from './prototypeProfileIdentity';
 
 const { color, typography } = robotaxiPrototypeTokens;
 const SURFACE_TOP_PADDING = 16;
@@ -41,13 +46,22 @@ export default function RobotaxiProfileScreen({ navigation, route }) {
   const { height: windowHeight } = useWindowDimensions();
   const [panelHeight, setPanelHeight] = useState(windowHeight);
   const isDriverRole = activeRole === 'driver';
-  const profileName = riderProfile?.name || authProfile?.name || authProfile?.firstName || 'Sua conta';
+  const profileName =
+    resolvePrototypeProfileName(authProfile) ||
+    resolvePrototypeProfileName(riderProfile) ||
+    'Sua conta';
   const parsedRating = Number(authProfile?.driverRating ?? authProfile?.rating);
   const profileRating = Number.isFinite(parsedRating) ? parsedRating : null;
   const profileInitial = String(profileName).trim().charAt(0).toUpperCase() || 'L';
   const actions = isDriverRole ? DRIVER_ACTIONS : PASSENGER_ACTIONS;
-  const phoneLabel = String(riderProfile?.phone || authProfile?.mobile || authProfile?.phone || '').trim() || 'Telefone nao informado';
-  const emailLabel = String(riderProfile?.email || authProfile?.email || '').trim() || 'Email nao informado';
+  const phoneLabel =
+    resolvePrototypeProfilePhone(authProfile) ||
+    resolvePrototypeProfilePhone(riderProfile) ||
+    'Telefone nao informado';
+  const emailLabel =
+    resolvePrototypeProfileEmail(authProfile) ||
+    resolvePrototypeProfileEmail(riderProfile) ||
+    'Email nao informado';
   const preferenceLabel = String(riderProfile?.preference || '').trim() || (isDriverRole ? 'Conta operacional pronta para atender' : 'Sem preferencia cadastrada');
   const accountStatus = isDriverRole ? (driverCanGoOnline ? 'Motorista habilitado' : 'Ativacao pendente') : 'Conta de passageiro';
 

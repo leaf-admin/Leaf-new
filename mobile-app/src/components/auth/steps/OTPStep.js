@@ -15,8 +15,16 @@ import apiClient from '../../../services/httpClient';
 import onboardingTheme from '../common/onboardingTheme';
 import { toUserFriendlyMessage } from '../../../utils/friendlyErrorMessages';
 
-const QA_OTP_FORCE_NUMBERS = new Set(['+5511999999999', '+5511888888888']);
-const QA_FIXED_OTP = '0'.repeat(6);
+const QA_FIXED_OTP_BY_PHONE = new Map([
+    ['+5521102938475', '992111'],
+    ['+5521123456789', '992000']
+]);
+const QA_OTP_FORCE_NUMBERS = new Set(QA_FIXED_OTP_BY_PHONE.keys());
+const QA_FIXED_OTP = '992111';
+
+function resolveQaFixedOtp(phoneNumber) {
+    return QA_FIXED_OTP_BY_PHONE.get(String(phoneNumber || '').trim()) || QA_FIXED_OTP;
+}
 
 const { color, radius, spacing, elevation } = onboardingTheme;
 
@@ -41,6 +49,7 @@ const OTPStep = ({ phoneNumber, confirmation, onVerified, onBack }) => {
     const [canResend, setCanResend] = useState(false);
     const [currentConfirmation, setCurrentConfirmation] = useState(confirmation);
     const inputRefs = useRef([]);
+    const verifyInFlightRef = useRef(false);
 
     useEffect(() => {
         setCurrentConfirmation(confirmation);
@@ -113,9 +122,10 @@ const OTPStep = ({ phoneNumber, confirmation, onVerified, onBack }) => {
         }
 
         // Evitar múltiplas verificações simultâneas
-        if (loading) {
+        if (loading || verifyInFlightRef.current) {
             return;
         }
+        verifyInFlightRef.current = true;
 
         // ✅ CRÍTICO: Guard para ambiente de produção - OTP sempre obrigatório
         // Apenas em ambiente de review (APP_REVIEW=true) o OTP pode ser pulado
@@ -129,7 +139,7 @@ const OTPStep = ({ phoneNumber, confirmation, onVerified, onBack }) => {
         // ✅ Validação adicional: Bloquear tentativas de bypass em produção
         if (currentConfirmation?.isReviewAccount && !allowReviewAccess()) {
             Logger.error('🚫 Tentativa de bypass bloqueada em produção');
-            Alert.alert('Erro', 'Bypass de OTP não permitido em produção');
+            Alert.alert('Erro', 'Não foi possível confirmar seu telefone neste ambiente.');
             setLoading(false);
             return;
         }
@@ -137,9 +147,10 @@ const OTPStep = ({ phoneNumber, confirmation, onVerified, onBack }) => {
         setLoading(true);
         try {
             const normalizedPhone = String(phoneNumber || '').trim();
+            const expectedQaFixedOtp = resolveQaFixedOtp(normalizedPhone);
             const shouldForceCustomOtpForQa =
                 allowQaOtpForceFlow() &&
-                otpString === QA_FIXED_OTP &&
+                otpString === expectedQaFixedOtp &&
                 QA_OTP_FORCE_NUMBERS.has(normalizedPhone) &&
                 !(currentConfirmation && currentConfirmation.isCustomOtp);
 
@@ -241,6 +252,7 @@ const OTPStep = ({ phoneNumber, confirmation, onVerified, onBack }) => {
 
             Alert.alert('Erro na Verificação', errorMessage);
         } finally {
+            verifyInFlightRef.current = false;
             setLoading(false);
         }
     }, [otp, currentConfirmation, onVerified, loading, verifyOtpWithFallback, phoneNumber]);
@@ -323,9 +335,9 @@ const OTPStep = ({ phoneNumber, confirmation, onVerified, onBack }) => {
         >
             <View style={styles.container}>
                 <View style={styles.header}>
-                    <Text style={styles.title}>Verificação</Text>
+                    <Text style={styles.title}>Digite o código</Text>
                     <Text style={styles.subtitle}>
-                        Digite o código de 6 dígitos enviado para {phoneNumber}
+                        Enviado para {phoneNumber}. Colar também funciona; verificamos ao completar 6 dígitos.
                     </Text>
                 </View>
 
@@ -349,6 +361,7 @@ const OTPStep = ({ phoneNumber, confirmation, onVerified, onBack }) => {
                             />
                         ))}
                     </View>
+                    {otp.every(Boolean) ? <Text style={styles.successTick}>✓</Text> : null}
 
                     {/* Botão de verificação */}
                     <View style={styles.buttonContainer}>
@@ -405,37 +418,37 @@ const styles = StyleSheet.create({
     container: {
         width: '100%',
         paddingHorizontal: spacing.lg,
-        paddingVertical: spacing.sm,
+        paddingTop: spacing.xl,
+        paddingBottom: spacing.sm,
         flex: 1,
         justifyContent: 'flex-start'
     },
     header: {
-        marginBottom: spacing.md
+        marginTop: spacing.xl,
+        marginBottom: spacing.lg
     },
     title: {
-        marginBottom: spacing.xs,
+        marginBottom: spacing.sm,
         color: color.textPrimary,
-        fontSize: 22,
-        lineHeight: 28,
-        fontFamily: fonts.Bold
+        fontSize: 34,
+        lineHeight: 38,
+        fontFamily: fonts.Bold,
+        letterSpacing: 0
     },
     subtitle: {
         color: color.textSecondary,
-        fontSize: 14,
-        lineHeight: 20,
+        fontSize: 15,
+        lineHeight: 21,
         fontFamily: fonts.Regular
     },
     card: {
-        backgroundColor: color.panelSoft,
+        backgroundColor: color.panel,
         borderWidth: 1,
         borderColor: color.glassStroke,
-        borderRadius: radius.lg,
+        borderRadius: radius.xl,
         padding: spacing.sm,
-        shadowColor: '#0E1522',
-        shadowOffset: { width: 0, height: 12 },
-        shadowOpacity: 0.16,
-        shadowRadius: 20,
-        elevation: 9
+        shadowColor: color.accent,
+        ...elevation.soft
     },
     otpContainer: {
         flexDirection: 'row',
@@ -445,16 +458,30 @@ const styles = StyleSheet.create({
     },
     otpInput: {
         flex: 1,
-        maxWidth: 40,
-        height: 44,
+        maxWidth: 44,
+        height: 52,
         borderWidth: 1,
-        borderColor: color.borderStrong,
-        borderRadius: radius.sm,
+        borderColor: color.border,
+        borderRadius: radius.md,
         textAlign: 'center',
-        fontSize: 16,
+        fontSize: 20,
         fontFamily: fonts.Bold,
         color: color.textPrimary,
         backgroundColor: color.surface
+    },
+    successTick: {
+        alignSelf: 'center',
+        width: 38,
+        height: 38,
+        borderRadius: 19,
+        overflow: 'hidden',
+        backgroundColor: color.success,
+        color: color.accentText,
+        fontSize: 22,
+        lineHeight: 38,
+        fontFamily: fonts.Bold,
+        textAlign: 'center',
+        marginBottom: spacing.xs
     },
     buttonContainer: {
         marginBottom: 0
@@ -463,7 +490,7 @@ const styles = StyleSheet.create({
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'center',
-        marginTop: spacing.md,
+        marginTop: spacing.lg,
         marginBottom: spacing.md
     },
     resendText: {
@@ -486,7 +513,8 @@ const styles = StyleSheet.create({
         fontFamily: fonts.Medium
     },
     footer: {
-        marginTop: spacing.xs
+        marginTop: 'auto',
+        paddingBottom: spacing.md
     },
     backButton: {
         marginTop: 4

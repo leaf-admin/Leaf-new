@@ -1,6 +1,6 @@
 import Logger from '../../utils/Logger';
 import React, { useState, useCallback } from 'react';
-import { StatusBar, View, StyleSheet, ImageBackground, Platform } from 'react-native';
+import { StatusBar, View, StyleSheet, Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { FETCH_USER_SUCCESS } from '../../state/actionTypes';
 import store from '../../state/appStore';
@@ -17,41 +17,15 @@ import {
   normalizeAuthFlowUserType,
   resolveAuthFlowInitialStep,
 } from './authFlowRecovery';
+import {
+  persistPhoneValidatedOnboardingSession,
+  sanitizeAuthUserForOnboarding,
+  PROFILE_SELECTION_STEP_INDEX
+} from '../../utils/onboardingSessionState';
 
-const { color, radius } = onboardingTheme;
-const onboardingBackground = require('../../../assets/images/onboarding-city-bg-auth.png');
+const { color } = onboardingTheme;
 const AUTH_UID_STORAGE_KEY = '@auth_uid';
 const USER_DATA_STORAGE_KEY = '@user_data';
-
-const ONBOARDING_AB_VARIANTS = {
-  A: {
-    backgroundTint: 'rgba(244,247,250,0.64)',
-    softMask: 'rgba(255,255,255,0.12)',
-    frameBorder: 'rgba(255,255,255,0.76)',
-    frameBackground: 'rgba(255,255,255,0.86)',
-    frameShadowOpacity: 0.22,
-    frameShadowRadius: 28,
-    frameElevation: 14
-  },
-  B: {
-    backgroundTint: 'rgba(214,224,236,0.34)',
-    softMask: 'rgba(255,255,255,0.04)',
-    frameBorder: 'rgba(255,255,255,0.86)',
-    frameBackground: 'rgba(255,255,255,0.76)',
-    frameShadowOpacity: 0.24,
-    frameShadowRadius: 28,
-    frameElevation: 14
-  },
-  ANDROID: {
-    backgroundTint: 'rgba(255,255,255,0.14)',
-    softMask: 'rgba(255,255,255,0.02)',
-    frameBorder: 'rgba(255,255,255,0.90)',
-    frameBackground: 'rgba(255,255,255,0.72)',
-    frameShadowOpacity: 0.16,
-    frameShadowRadius: 22,
-    frameElevation: 10
-  }
-};
 
 // Steps de autenticação
 import PhoneInputStep from './steps/PhoneInputStep';
@@ -61,11 +35,19 @@ import ProfileDataStep from './steps/ProfileDataStep';
 import DocumentStep from './steps/DocumentStep';
 import CredentialsStep from './steps/CredentialsStep';
 import DriverEmailStep from './steps/DriverEmailStep';
-import onboardingBackgroundDataUri from './common/onboardingBackgroundDataUri';
 
-const AuthFlow = ({ visible, onComplete, onClose, onboardingProgress }) => {
-  const [currentStep, setCurrentStep] = useState(0);
-  const [authData, setAuthData] = useState({});
+const AuthFlow = ({
+  visible,
+  onComplete,
+  onClose,
+  onboardingProgress,
+  screenshotStep = null,
+  screenshotAuthData = null
+}) => {
+  const [currentStep, setCurrentStep] = useState(() => (
+    Number.isInteger(screenshotStep) ? screenshotStep : 0
+  ));
+  const [authData, setAuthData] = useState(() => screenshotAuthData || {});
   const isReviewEnv = allowReviewAccess();
 
   const persistAuthenticatedProfile = useCallback(async (profile, fallbackUserType = null) => {
@@ -104,6 +86,12 @@ const AuthFlow = ({ visible, onComplete, onClose, onboardingProgress }) => {
 
   // 🔍 DETERMINAR STEP INICIAL BASEADO NO PROGRESSO E CARREGAR DADOS SALVOS
   React.useEffect(() => {
+    if (Number.isInteger(screenshotStep)) {
+      setCurrentStep(screenshotStep);
+      setAuthData(screenshotAuthData || {});
+      return undefined;
+    }
+
     let isMounted = true;
 
     const initializeStep = async () => {
@@ -183,7 +171,7 @@ const AuthFlow = ({ visible, onComplete, onClose, onboardingProgress }) => {
     return () => {
       isMounted = false;
     };
-  }, [onboardingProgress]);
+  }, [onboardingProgress, screenshotAuthData, screenshotStep]);
 
   // Função para obter o nome do step baseado no índice
   const getStepNameByIndex = useCallback((index) => {
@@ -345,7 +333,7 @@ const AuthFlow = ({ visible, onComplete, onClose, onboardingProgress }) => {
         let testUserData;
         if (isCustomer) {
           // Extrair apenas o número do telefone (sem +55)
-          const phoneNumberOnly = phoneNumber ? phoneNumber.replace('+55', '') : '11888888888';
+          const phoneNumberOnly = phoneNumber ? phoneNumber.replace('+55', '') : '21102938475';
           testUserData = await testUserService.createTestCustomer(phoneNumberOnly);
         } else {
           // Para drivers, usar createTestUser
@@ -444,10 +432,22 @@ const AuthFlow = ({ visible, onComplete, onClose, onboardingProgress }) => {
     }
 
     // Fluxo normal (não é usuário de teste nem review)
-    await saveStepDataLocal({ user });
+    const phoneNumber = authData.phoneNumber || user?.phoneNumber || null;
+    const sanitizedUser = sanitizeAuthUserForOnboarding({
+      ...user,
+      phoneNumber,
+    });
+    await persistPhoneValidatedOnboardingSession(sanitizedUser);
+    await saveStepDataLocal({
+      phoneNumber: sanitizedUser.phoneNumber,
+      phoneValidated: true,
+      isExistingUser: false,
+      user: sanitizedUser,
+    });
     await completeStep('phone_validation');
-    goToNextStep();
-  }, [authData, saveStepDataLocal, completeStep, goToNextStep, onComplete]);
+    setCurrentStep(PROFILE_SELECTION_STEP_INDEX);
+    await saveCurrentStep(PROFILE_SELECTION_STEP_INDEX);
+  }, [authData, saveStepDataLocal, completeStep, onComplete]);
 
   // Função para lidar com o envio do telefone
   const handlePhoneVerificationSent = useCallback(async (confirmation, phoneNumber, isExistingUser = false, skipOTP = false) => {
@@ -595,6 +595,7 @@ const AuthFlow = ({ visible, onComplete, onClose, onboardingProgress }) => {
     await completeStep('document_data');
     await completeStep('credentials');
     await finalizeOnboarding({
+      profileDataOverride: normalizedProfile,
       documentDataOverride: nextDocumentData,
       credentialsOverride: nextCredentials
     });
@@ -621,9 +622,9 @@ const AuthFlow = ({ visible, onComplete, onClose, onboardingProgress }) => {
     goToNextStep();
   }, [saveStepDataLocal, completeStep, goToNextStep, authData?.profileSelection?.userType, authData?.profileData]);
 
-  async function finalizeOnboarding({ credentialsOverride, documentDataOverride = {} } = {}) {
+  async function finalizeOnboarding({ credentialsOverride, documentDataOverride = {}, profileDataOverride = null } = {}) {
     const normalizedUserType = normalizeAuthFlowUserType(authData?.profileSelection?.userType);
-    const normalizedProfile = normalizeAuthFlowProfileData(authData?.profileData || {});
+    const normalizedProfile = normalizeAuthFlowProfileData(profileDataOverride || authData?.profileData || {});
     const normalizedSelection = {
       ...(authData?.profileSelection || {}),
       userType: normalizedUserType,
@@ -735,15 +736,6 @@ const AuthFlow = ({ visible, onComplete, onClose, onboardingProgress }) => {
     });
   }, [authData?.credentials, authData?.documentData, finalizeOnboarding, saveStepDataLocal]);
 
-  // Função para alternar para o fluxo de registro
-  const handleSwitchToRegister = useCallback((phoneNumber) => {
-    if (phoneNumber) {
-      saveStepDataLocal({ phoneNumber });
-    }
-    // Aqui você pode implementar a lógica para alternar para o fluxo de registro
-    // Por enquanto, vamos continuar com o fluxo de login
-  }, [saveStepDataLocal]);
-
   // Renderizar o step atual
   const renderCurrentStep = () => {
     // Fluxo normal de cadastro
@@ -752,7 +744,6 @@ const AuthFlow = ({ visible, onComplete, onClose, onboardingProgress }) => {
         return (
           <PhoneInputStep
             onVerificationSent={handlePhoneVerificationSent}
-            onSwitchToRegister={handleSwitchToRegister}
             onPasswordLoginSuccess={handlePasswordLoginSuccess}
           />
         );
@@ -831,40 +822,27 @@ const AuthFlow = ({ visible, onComplete, onClose, onboardingProgress }) => {
     return null;
   }
 
-  const variantTokens = Platform.OS === 'android' ? ONBOARDING_AB_VARIANTS.ANDROID : ONBOARDING_AB_VARIANTS.B;
-  const backgroundSource = Platform.OS === 'android'
-    ? { uri: onboardingBackgroundDataUri }
-    : onboardingBackground;
-
   return (
     <View style={styles.safeArea}>
-      <StatusBar translucent backgroundColor="transparent" barStyle="dark-content" />
-      <ImageBackground
-        source={backgroundSource}
-        style={styles.backgroundImage}
-        imageStyle={styles.backgroundImageAsset}
-        resizeMode="cover"
-        fadeDuration={0}
-      >
-        <View style={[styles.backgroundTint, { backgroundColor: variantTokens.backgroundTint }]} pointerEvents="none" />
-        <View style={[styles.backgroundSoftMask, { backgroundColor: variantTokens.softMask }]} pointerEvents="none" />
+      <StatusBar
+        translucent={false}
+        backgroundColor={color.background}
+        barStyle="dark-content"
+      />
+      <View style={styles.backgroundCanvas}>
+        <View style={styles.mapLineVerticalA} pointerEvents="none" />
+        <View style={styles.mapLineVerticalB} pointerEvents="none" />
+        <View style={styles.mapLineHorizontalA} pointerEvents="none" />
+        <View style={styles.mapLineHorizontalB} pointerEvents="none" />
+        <View style={styles.routeLineA} pointerEvents="none" />
+        <View style={styles.routeLineB} pointerEvents="none" />
+        <View style={styles.routeLineC} pointerEvents="none" />
         <View style={styles.contentHost}>
-          <View
-            style={[
-              styles.contentFrame,
-              {
-                borderColor: variantTokens.frameBorder,
-                backgroundColor: variantTokens.frameBackground,
-                shadowOpacity: variantTokens.frameShadowOpacity,
-                shadowRadius: variantTokens.frameShadowRadius,
-                elevation: variantTokens.frameElevation
-              }
-            ]}
-          >
+          <View style={styles.contentFrame}>
             {renderCurrentStep()}
           </View>
         </View>
-      </ImageBackground>
+      </View>
     </View>
   );
 };
@@ -874,43 +852,94 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: color.background
   },
-  backgroundImage: {
+  backgroundCanvas: {
     flex: 1,
-    backgroundColor: '#E7ECF1'
+    backgroundColor: color.background,
+    overflow: 'hidden'
   },
-  backgroundImageAsset: {
-    opacity: Platform.OS === 'android' ? 1 : 1
+  mapLineVerticalA: {
+    position: 'absolute',
+    top: -80,
+    bottom: -80,
+    left: '26%',
+    width: 5,
+    borderRadius: 999,
+    backgroundColor: 'rgba(17,23,25,0.035)'
   },
-  backgroundTint: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(244,247,250,0.64)'
+  mapLineVerticalB: {
+    position: 'absolute',
+    top: -100,
+    bottom: -100,
+    right: '30%',
+    width: 18,
+    borderRadius: 999,
+    backgroundColor: color.skyLine,
+    transform: [{ rotate: '14deg' }],
+    opacity: 0.45
   },
-  backgroundSoftMask: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(255,255,255,0.12)'
+  mapLineHorizontalA: {
+    position: 'absolute',
+    left: -80,
+    right: -80,
+    top: '46%',
+    height: 14,
+    borderRadius: 999,
+    backgroundColor: color.mapLine,
+    transform: [{ rotate: '-24deg' }],
+    opacity: 0.5
+  },
+  mapLineHorizontalB: {
+    position: 'absolute',
+    left: -60,
+    right: -60,
+    bottom: '18%',
+    height: 6,
+    borderRadius: 999,
+    backgroundColor: 'rgba(17,23,25,0.035)'
+  },
+  routeLineA: {
+    position: 'absolute',
+    width: 98,
+    height: 3,
+    left: 38,
+    bottom: '36%',
+    borderRadius: 999,
+    backgroundColor: 'rgba(126,161,107,0.55)',
+    transform: [{ rotate: '-42deg' }]
+  },
+  routeLineB: {
+    position: 'absolute',
+    width: 96,
+    height: 3,
+    left: 120,
+    bottom: '43%',
+    borderRadius: 999,
+    backgroundColor: 'rgba(126,161,107,0.42)',
+    transform: [{ rotate: '-22deg' }]
+  },
+  routeLineC: {
+    position: 'absolute',
+    width: 92,
+    height: 3,
+    left: 212,
+    bottom: '49%',
+    borderRadius: 999,
+    backgroundColor: 'rgba(126,161,107,0.50)',
+    transform: [{ rotate: '-48deg' }]
   },
   contentHost: {
     flex: 1,
     justifyContent: 'center',
     paddingHorizontal: Platform.OS === 'android' ? 18 : 14,
-    paddingVertical: Platform.OS === 'android' ? 22 : 14
+    paddingTop: Platform.OS === 'android' ? 28 : 18,
+    paddingBottom: Platform.OS === 'android' ? 18 : 12
   },
   contentFrame: {
     width: '100%',
-    maxWidth: Platform.OS === 'android' ? 404 : 392,
+    maxWidth: 392,
     alignSelf: 'center',
-    minHeight: Platform.OS === 'android' ? 388 : 360,
-    maxHeight: '86%',
-    borderRadius: radius.xl,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.76)',
-    backgroundColor: color.panel,
-    shadowColor: '#0E1522',
-    shadowOffset: { width: 0, height: 16 },
-    shadowOpacity: 0.22,
-    shadowRadius: 28,
-    elevation: 14,
-    overflow: 'hidden'
+    flex: 1,
+    maxHeight: 844
   }
 });
 

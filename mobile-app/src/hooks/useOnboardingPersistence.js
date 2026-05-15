@@ -39,23 +39,22 @@ export const useOnboardingPersistence = () => {
         AsyncStorage.getItem(ONBOARDING_PROGRESS_KEY)
       ]);
 
-      if (dataString || progressString) {
-        const data = dataString ? JSON.parse(dataString) : {};
-        const progress = progressString ? JSON.parse(progressString) : {};
-        
-        Logger.log('useOnboardingPersistence - 📥 Dados carregados:', { data, progress });
-        
-        // Carregar no Redux
-        dispatch(loadOnboardingFromStorage({
-          stepData: data,
-          progress: progress,
-          completedSteps: Object.keys(progress).filter(key => progress[key] === true)
-        }));
-        
-        return { data, progress };
-      }
-      
-      return { data: {}, progress: {} };
+      const data = dataString ? JSON.parse(dataString) : {};
+      const progress = progressString ? JSON.parse(progressString) : {};
+      const completedSteps = Object.keys(progress).filter(key => progress[key] === true);
+
+      Logger.log('useOnboardingPersistence - 📥 Dados carregados:', { data, progress });
+
+      // Mesmo quando não existe progresso salvo, marcar como carregado evita que a
+      // Splash fique presa esperando storage e reabra o cadastro no primeiro passo.
+      dispatch(loadOnboardingFromStorage({
+        currentStep: completedSteps.includes('phone_validation') ? 2 : 0,
+        stepData: data,
+        progress,
+        completedSteps
+      }));
+
+      return { data, progress };
     } catch (error) {
       Logger.error('useOnboardingPersistence - ❌ Erro ao carregar dados:', error);
       return { data: {}, progress: {} };

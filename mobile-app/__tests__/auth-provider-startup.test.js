@@ -1,7 +1,9 @@
 import React from 'react';
 import { Text } from 'react-native';
-import { render } from '@testing-library/react-native';
+import { render, waitFor } from '@testing-library/react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import AuthProvider from '../src/components/AuthProvider';
+import mobileProfileService from '../src/services/MobileProfileService';
 
 const mockUseAuth = jest.fn();
 const mockDispatch = jest.fn();
@@ -45,6 +47,8 @@ jest.mock('../src/utils/qaSeedProfile', () => ({
 describe('AuthProvider startup shell', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    AsyncStorage.multiGet.mockResolvedValue([]);
+    mobileProfileService.getCurrentProfile.mockResolvedValue(null);
   });
 
   it('shows a branded shell while auth is loading', () => {
@@ -59,7 +63,7 @@ describe('AuthProvider startup shell', () => {
       </AuthProvider>
     );
 
-    expect(getByText('Preparando sua experiência...')).toBeTruthy();
+    expect(getByText('Preparando o app...')).toBeTruthy();
     expect(queryByText('app-ready-child')).toBeNull();
   });
 
@@ -76,6 +80,61 @@ describe('AuthProvider startup shell', () => {
     );
 
     expect(getByText('app-ready-child')).toBeTruthy();
-    expect(queryByText('Preparando sua experiência...')).toBeNull();
+    expect(queryByText('Preparando o app...')).toBeNull();
+  });
+
+  it('releases the app from a matching cached profile while refreshing remotely in background', async () => {
+    const cachedProfile = {
+      uid: 'firebase-uid-1',
+      usertype: 'customer',
+      firstName: 'Izaak',
+      lastName: 'Dias',
+      phone: '+5521998991886',
+      email: 'izaak.dias@hotmail.com',
+    };
+
+    mockUseAuth.mockReturnValue({
+      user: {
+        uid: 'firebase-uid-1',
+        phoneNumber: '+5521998991886',
+        email: null,
+      },
+      loading: false,
+    });
+    AsyncStorage.multiGet.mockResolvedValueOnce([
+      ['@auth_uid', 'firebase-uid-1'],
+      ['@user_data', JSON.stringify(cachedProfile)],
+      ['@test_mode', 'false'],
+    ]);
+    mobileProfileService.getCurrentProfile.mockResolvedValueOnce({
+      ...cachedProfile,
+      firstName: 'Izaak',
+      lastName: 'Ribeiro Dias',
+    });
+
+    const { getByText, queryByText } = render(
+      <AuthProvider>
+        <Text>app-ready-child</Text>
+      </AuthProvider>
+    );
+
+    await waitFor(() => {
+      expect(mockDispatch).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: 'FETCH_USER_SUCCESS',
+          payload: expect.objectContaining({
+            uid: 'firebase-uid-1',
+            firstName: 'Izaak',
+            usertype: 'customer',
+          }),
+        })
+      );
+    });
+
+    await waitFor(() => {
+      expect(queryByText('Entrando na sua conta...')).toBeNull();
+      expect(getByText('app-ready-child')).toBeTruthy();
+    });
+    expect(mobileProfileService.getCurrentProfile).toHaveBeenCalledTimes(1);
   });
 });

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import {
     View,
     TouchableOpacity,
@@ -8,14 +8,18 @@ import {
     TextInput,
     ScrollView,
     KeyboardAvoidingView,
+    Keyboard,
     Platform
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import auth from '@react-native-firebase/auth';
 import { fonts } from '../../../theme/runtimeTokens';
 import { Ionicons } from '@expo/vector-icons';
 import {
     allowCustomOtpFallback,
-    allowQaOtpForceFlow
+    allowQaOtpForceFlow,
+    isE2ETestBuild,
+    isSimulatorBuild
 } from '../../../config/runtimeAccessPolicy';
 import apiClient from '../../../services/httpClient';
 import UserAuthService from '../../../services/UserAuthService';
@@ -39,6 +43,22 @@ const Alert = {
             options
         )
 };
+
+const QA_SMS_CODE_BY_PHONE = new Map([
+    ['+5521102938475', '992111'],
+    ['+5521123456789', '992000']
+]);
+
+export function normalizePhoneInputValue(rawValue) {
+    const digits = String(rawValue || '').replace(/\D/g, '');
+    if (!digits) return '';
+
+    if (digits.length > 11 && digits.startsWith('55')) {
+        return digits.slice(2, 13);
+    }
+
+    return digits.slice(0, 11);
+}
 
 function resolveAuthAlertTitle(error, friendlyMessage = '') {
     const normalizedCode = String(
@@ -91,6 +111,8 @@ function resolveAuthAlertTitle(error, friendlyMessage = '') {
 }
 
 const PhoneInputStep = ({ onVerificationSent, onPasswordLoginSuccess }) => {
+    const insets = useSafeAreaInsets();
+    const isAndroid = Platform.OS === 'android';
     const [phoneNumber, setPhoneNumber] = useState('');
     const [loading, setLoading] = useState(false);
     const [checking, setChecking] = useState(false);
@@ -106,10 +128,23 @@ const PhoneInputStep = ({ onVerificationSent, onPasswordLoginSuccess }) => {
     const [confirmNewPassword, setConfirmNewPassword] = useState('');
     const [showNewPassword, setShowNewPassword] = useState(false);
     const [showConfirmNewPassword, setShowConfirmNewPassword] = useState(false);
+    const continueInFlightRef = useRef(false);
 
     const enableCustomOtpFallback = allowCustomOtpFallback();
     const allowForcedQaOtpFlow = allowQaOtpForceFlow();
-    const FORCE_CUSTOM_OTP_NUMBERS = new Set(['11999999999', '11888888888']);
+    const shouldDisableFirebaseAppVerificationForE2E =
+        allowForcedQaOtpFlow ||
+        isE2ETestBuild() ||
+        isSimulatorBuild();
+    const containerPaddingBottom = isAndroid
+        ? (requiresPassword ? spacing.xxl + spacing.lg : spacing.lg) + insets.bottom
+        : spacing.lg;
+    const footerPaddingBottom = isAndroid
+        ? (requiresPassword
+            ? Math.max(spacing.md, insets.bottom + spacing.sm)
+            : Math.max(spacing.xs, insets.bottom + spacing.xs))
+        : null;
+    const FORCE_CUSTOM_OTP_NUMBERS = new Set(['21102938475', '21123456789']);
 
     const requestOtpWithFallback = async (fullPhoneNumber) => {
         const endpoints = [
@@ -150,7 +185,7 @@ const PhoneInputStep = ({ onVerificationSent, onPasswordLoginSuccess }) => {
     };
 
     const handlePhoneChanged = (value) => {
-        setPhoneNumber(value);
+        setPhoneNumber(normalizePhoneInputValue(value));
         resetInlinePasswordState();
     };
 
@@ -259,17 +294,67 @@ const PhoneInputStep = ({ onVerificationSent, onPasswordLoginSuccess }) => {
         }
     };
 
-    const handleContinue = async () => {
-        if (phoneNumber.length < 10) {
-            Alert.alert('Erro', 'Por favor, insira um número de telefone válido.');
+    const handlePasswordFallbackPressed = async () => {
+        const normalizedPhoneInput = normalizePhoneInputValue(phoneNumber);
+        if (normalizedPhoneInput.length < 10) {
+            Alert.alert('Erro', 'Informe um telefone válido para entrar com senha.');
             return;
         }
 
+        const fullPhoneNumber = `+55${normalizedPhoneInput}`;
         setLoading(true);
         setChecking(true);
 
         try {
-            const fullPhoneNumber = `+55${phoneNumber}`;
+            const phoneFlow = await UserAuthService.resolvePhoneAuthFlow(fullPhoneNumber);
+            const canUsePasswordFallback =
+                phoneFlow?.passwordFallbackAvailable === true &&
+                phoneFlow?.hasPassword === true;
+
+            if (!canUsePasswordFallback) {
+                Alert.alert(
+                    'Confirme seu telefone',
+                    'Para este telefone, continue com o código recebido por SMS.'
+                );
+                return;
+            }
+
+            setResolvedPhone(phoneFlow);
+            setRequiresPassword(true);
+            setForgotPasswordMode(false);
+            setPassword('');
+            setPasswordError('');
+        } catch (error) {
+            const friendlyError = toUserFriendlyError(error, {
+                context: 'auth',
+                fallbackMessage: 'Nao foi possivel validar esse telefone para login com senha.'
+            });
+            Alert.alert(resolveAuthAlertTitle(error, friendlyError.message), friendlyError.message);
+        } finally {
+            setLoading(false);
+            setChecking(false);
+        }
+    };
+
+    const handleContinue = async () => {
+        if (continueInFlightRef.current) {
+            Logger.warn('⚠️ Ignorando tentativa duplicada de continuar no fluxo de telefone.');
+            return;
+        }
+
+        const normalizedPhoneInput = normalizePhoneInputValue(phoneNumber);
+
+        if (normalizedPhoneInput.length < 10) {
+            Alert.alert('Erro', 'Por favor, insira um número de telefone válido.');
+            return;
+        }
+
+        continueInFlightRef.current = true;
+        setLoading(true);
+        setChecking(true);
+
+        try {
+            const fullPhoneNumber = `+55${normalizedPhoneInput}`;
 
             if (requiresPassword) {
                 setChecking(false);
@@ -282,19 +367,39 @@ const PhoneInputStep = ({ onVerificationSent, onPasswordLoginSuccess }) => {
             }
 
             const forceCustomOtpFlow =
-                allowForcedQaOtpFlow && FORCE_CUSTOM_OTP_NUMBERS.has(phoneNumber);
+                allowForcedQaOtpFlow && FORCE_CUSTOM_OTP_NUMBERS.has(normalizedPhoneInput);
 
-            const phoneFlow = await UserAuthService.resolvePhoneAuthFlow(fullPhoneNumber);
+            let phoneFlow = null;
+            let phoneFlowResolutionSource = 'password_resolver';
+            try {
+                phoneFlow = await UserAuthService.resolvePhoneAuthFlow(fullPhoneNumber);
+            } catch (resolveError) {
+                const resolveErrorMessage = resolveError?.message || String(resolveError);
+                Logger.warn('⚠️ Falha ao resolver estratégia de autenticação por telefone. Aplicando fallback para OTP.', {
+                    phoneNumber: fullPhoneNumber,
+                    error: resolveErrorMessage
+                });
+                phoneFlow = {
+                    exists: false,
+                    uid: null,
+                    hasPassword: false,
+                    nextAction: 'OTP_REQUIRED',
+                    passwordFallbackAvailable: false,
+                    source: 'resolve_phone_failed_fallback'
+                };
+                phoneFlowResolutionSource = 'fallback_otp_after_resolve_error';
+            }
             const isExistingUser = Boolean(phoneFlow?.exists || phoneFlow?.uid);
             const hasPasswordConfigured = phoneFlow?.hasPassword === true;
+            const nextAction = String(phoneFlow?.nextAction || 'OTP_REQUIRED').toUpperCase();
+            setResolvedPhone(phoneFlow);
 
-            if (phoneFlow.requiresPassword && hasPasswordConfigured) {
+            if (nextAction === 'PASSWORD_LOGIN' && hasPasswordConfigured) {
                 Logger.log('🔐 Telefone existente detectado: seguir para senha.', {
                     phoneNumber: fullPhoneNumber,
                     hasPassword: phoneFlow.hasPassword,
-                    source: phoneFlow.source
+                    source: phoneFlow.source || phoneFlowResolutionSource
                 });
-                setResolvedPhone(phoneFlow);
                 setRequiresPassword(true);
                 setForgotPasswordMode(false);
                 setPassword('');
@@ -302,10 +407,16 @@ const PhoneInputStep = ({ onVerificationSent, onPasswordLoginSuccess }) => {
                 return;
             }
 
-            if (phoneFlow.requiresPassword && !hasPasswordConfigured) {
+            if (hasPasswordConfigured) {
+                Logger.log('📱 Conta com senha detectada, mantendo OTP como fluxo principal.', {
+                    phoneNumber: fullPhoneNumber,
+                    nextAction,
+                    source: phoneFlow.source || phoneFlowResolutionSource
+                });
+            } else if (phoneFlow.exists) {
                 Logger.warn('⚠️ Conta existente sem senha: seguindo fluxo OTP para concluir autenticação.', {
                     phoneNumber: fullPhoneNumber,
-                    source: phoneFlow.source
+                    source: phoneFlow.source || phoneFlowResolutionSource
                 });
             }
 
@@ -329,6 +440,31 @@ const PhoneInputStep = ({ onVerificationSent, onPasswordLoginSuccess }) => {
             }
 
             Logger.log('📱 Enviando OTP via Firebase Auth...');
+            if (shouldDisableFirebaseAppVerificationForE2E) {
+                try {
+                    auth().settings.appVerificationDisabledForTesting = true;
+                    Logger.log('🧪 Firebase app verification desativado para ambiente controlado de QA/E2E.');
+                } catch (appVerificationError) {
+                    Logger.warn('⚠️ Não foi possível desativar app verification para testes:', appVerificationError?.message || appVerificationError);
+                }
+
+                if (Platform.OS === 'android') {
+                    const preconfiguredSmsCode = QA_SMS_CODE_BY_PHONE.get(fullPhoneNumber);
+                    if (preconfiguredSmsCode) {
+                        try {
+                            await auth().settings.setAutoRetrievedSmsCodeForPhoneNumber(
+                                fullPhoneNumber,
+                                preconfiguredSmsCode
+                            );
+                            Logger.log('🧪 SMS auto-retrieval configurado para Android QA/E2E.', {
+                                phoneNumber: fullPhoneNumber
+                            });
+                        } catch (autoSmsError) {
+                            Logger.warn('⚠️ Falha ao configurar auto SMS para Android:', autoSmsError?.message || autoSmsError);
+                        }
+                    }
+                }
+            }
             try {
                 const firebaseConfirmation = await auth().signInWithPhoneNumber(fullPhoneNumber);
                 if (onVerificationSent) {
@@ -369,6 +505,7 @@ const PhoneInputStep = ({ onVerificationSent, onPasswordLoginSuccess }) => {
                 friendlyError.message
             );
         } finally {
+            continueInFlightRef.current = false;
             setLoading(false);
             if (!requiresPassword) {
                 setChecking(false);
@@ -383,14 +520,25 @@ const PhoneInputStep = ({ onVerificationSent, onPasswordLoginSuccess }) => {
             keyboardVerticalOffset={Platform.OS === 'ios' ? 12 : 0}
         >
             <ScrollView
-                contentContainerStyle={styles.container}
+                style={styles.scrollView}
+                scrollEnabled={false}
+                contentContainerStyle={[
+                    styles.container,
+                    isAndroid && requiresPassword ? styles.containerWithExpandedForm : null,
+                    { paddingBottom: containerPaddingBottom }
+                ]}
                 keyboardShouldPersistTaps="handled"
+                keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'on-drag'}
                 showsVerticalScrollIndicator={false}
             >
                 <View style={styles.header}>
-                    <Text style={styles.title}>Bem-vindo(a) à Leaf</Text>
+                    <View style={styles.eyebrow}>
+                        <View style={styles.leafMark} />
+                        <Text style={styles.eyebrowText}>Configuração em 2 min</Text>
+                    </View>
+                    <Text style={styles.title}>Comece pelo telefone</Text>
                     <Text style={styles.subtitle}>
-                        Digite seu número de telefone para continuar
+                        Enviaremos códigos por SMS e avisos importantes da sua corrida.
                     </Text>
                 </View>
 
@@ -402,16 +550,19 @@ const PhoneInputStep = ({ onVerificationSent, onPasswordLoginSuccess }) => {
 
                         <TextInput
                             testID="auth-phone-input"
-                            placeholder="Número"
+                            placeholder="Celular"
                             placeholderTextColor={color.textMuted}
                             keyboardType="phone-pad"
                             value={phoneNumber}
                             onChangeText={handlePhoneChanged}
-                            maxLength={11}
+                            maxLength={16}
                             editable={!loading && !checking}
                             returnKeyType="done"
-                            onSubmitEditing={handleContinue}
-                            blurOnSubmit={false}
+                            onSubmitEditing={() => {
+                                Keyboard.dismiss();
+                                handleContinue();
+                            }}
+                            blurOnSubmit
                             style={styles.input}
                         />
                     </View>
@@ -432,8 +583,11 @@ const PhoneInputStep = ({ onVerificationSent, onPasswordLoginSuccess }) => {
                                         setPasswordError('');
                                     }}
                                     autoCapitalize="none"
+                                    autoCorrect={false}
                                     secureTextEntry={forgotPasswordMode ? !showNewPassword : !showPassword}
                                     editable={!loading}
+                                    testID={forgotPasswordMode ? 'auth-reset-new-password-input' : 'auth-password-input'}
+                                    accessibilityLabel={forgotPasswordMode ? 'auth-reset-new-password-input' : 'auth-password-input'}
                                     style={styles.passwordInput}
                                 />
                                 <TouchableOpacity
@@ -458,7 +612,7 @@ const PhoneInputStep = ({ onVerificationSent, onPasswordLoginSuccess }) => {
                             {forgotPasswordMode ? (
                                 <>
                                     <TextInput
-                                        placeholder="Código OTP (6 dígitos)"
+                                        placeholder="Código recebido por SMS"
                                         placeholderTextColor={color.textMuted}
                                         value={resetOtp}
                                         onChangeText={(value) => {
@@ -467,6 +621,8 @@ const PhoneInputStep = ({ onVerificationSent, onPasswordLoginSuccess }) => {
                                         }}
                                         keyboardType="number-pad"
                                         editable={!loading}
+                                        testID="auth-reset-otp-input"
+                                        accessibilityLabel="auth-reset-otp-input"
                                         style={styles.inlineTextInput}
                                     />
                                     <View style={styles.passwordInputContainer}>
@@ -479,8 +635,11 @@ const PhoneInputStep = ({ onVerificationSent, onPasswordLoginSuccess }) => {
                                                 setPasswordError('');
                                             }}
                                             autoCapitalize="none"
+                                            autoCorrect={false}
                                             secureTextEntry={!showConfirmNewPassword}
                                             editable={!loading}
+                                            testID="auth-reset-confirm-password-input"
+                                            accessibilityLabel="auth-reset-confirm-password-input"
                                             style={styles.passwordInput}
                                         />
                                         <TouchableOpacity
@@ -497,7 +656,7 @@ const PhoneInputStep = ({ onVerificationSent, onPasswordLoginSuccess }) => {
                                     </View>
                                     <TouchableOpacity
                                         activeOpacity={0.82}
-                                        onPress={() => handleForgotPasswordPressed(`+55${phoneNumber}`)}
+                                        onPress={() => handleForgotPasswordPressed(`+55${normalizePhoneInputValue(phoneNumber)}`)}
                                         disabled={loading}
                                         style={styles.inlineLinkButton}
                                     >
@@ -507,7 +666,7 @@ const PhoneInputStep = ({ onVerificationSent, onPasswordLoginSuccess }) => {
                             ) : (
                                 <TouchableOpacity
                                     activeOpacity={0.82}
-                                    onPress={() => handleForgotPasswordPressed(`+55${phoneNumber}`)}
+                                    onPress={() => handleForgotPasswordPressed(`+55${normalizePhoneInputValue(phoneNumber)}`)}
                                     disabled={loading}
                                     style={styles.inlineLinkButton}
                                 >
@@ -526,7 +685,13 @@ const PhoneInputStep = ({ onVerificationSent, onPasswordLoginSuccess }) => {
                     ) : null}
                 </View>
 
-                <View style={styles.footer}>
+                <View
+                    style={[
+                        styles.footer,
+                        isAndroid && requiresPassword ? styles.footerExpanded : null,
+                        isAndroid && footerPaddingBottom !== null ? { paddingBottom: footerPaddingBottom } : null
+                    ]}
+                >
                     <ContinueButton
                         testID="auth-continue-btn"
                         accessibilityLabel="auth-continue-btn"
@@ -540,9 +705,23 @@ const PhoneInputStep = ({ onVerificationSent, onPasswordLoginSuccess }) => {
                         style={styles.continueButton}
                     />
 
-                    <Text style={styles.firstAccessHint}>
-                        Primeiro acesso? Informe seu telefone e toque em Continuar.
-                    </Text>
+                    {!requiresPassword ? (
+                        <>
+                            <Text style={styles.firstAccessHint}>
+                                Informe seu telefone para confirmar sua conta com segurança.
+                            </Text>
+                            <TouchableOpacity
+                                activeOpacity={0.82}
+                                onPress={handlePasswordFallbackPressed}
+                                disabled={loading || checking || phoneNumber.length < 10}
+                                style={styles.passwordFallbackButton}
+                                testID="auth-password-fallback-btn"
+                                accessibilityLabel="auth-password-fallback-btn"
+                            >
+                                <Text style={styles.passwordFallbackText}>Já tenho senha</Text>
+                            </TouchableOpacity>
+                        </>
+                    ) : null}
                 </View>
             </ScrollView>
         </KeyboardAvoidingView>
@@ -553,37 +732,77 @@ const styles = StyleSheet.create({
     keyboardContainer: {
         flex: 1
     },
+    scrollView: {
+        flex: 1
+    },
     container: {
         flexGrow: 1,
         paddingHorizontal: spacing.lg,
-        paddingTop: spacing.lg,
+        paddingTop: spacing.xl,
         paddingBottom: spacing.lg,
         justifyContent: 'flex-start'
     },
+    containerWithExpandedForm: {
+        paddingBottom: spacing.xxl + spacing.lg
+    },
     header: {
-        marginTop: spacing.xs,
+        marginTop: spacing.xl,
+        marginBottom: spacing.lg
+    },
+    eyebrow: {
+        alignSelf: 'flex-start',
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 8,
+        borderRadius: radius.pill,
+        paddingHorizontal: 10,
+        paddingVertical: 8,
+        backgroundColor: color.accentSoft,
         marginBottom: spacing.md
     },
+    leafMark: {
+        width: 14,
+        height: 14,
+        borderTopLeftRadius: 10,
+        borderTopRightRadius: 10,
+        borderBottomRightRadius: 10,
+        borderBottomLeftRadius: 3,
+        backgroundColor: color.accent,
+        transform: [{ rotate: '-34deg' }]
+    },
+    eyebrowText: {
+        color: color.accent,
+        fontSize: 12,
+        lineHeight: 14,
+        fontFamily: fonts.Bold
+    },
     title: {
-        marginBottom: spacing.xs,
+        marginBottom: spacing.sm,
         color: color.textPrimary,
-        fontSize: 20,
-        lineHeight: 26,
-        fontFamily: fonts.SemiBold,
-        textAlign: 'center'
+        fontSize: 34,
+        lineHeight: 38,
+        fontFamily: fonts.Bold,
+        textAlign: 'left',
+        letterSpacing: 0
     },
     subtitle: {
         marginBottom: 0,
         color: color.textSecondary,
-        fontSize: 14,
-        lineHeight: 20,
+        fontSize: 15,
+        lineHeight: 21,
         fontFamily: fonts.Regular,
-        textAlign: 'center'
+        textAlign: 'left'
     },
     contentCard: {
-        paddingHorizontal: 2,
-        marginTop: spacing.md,
-        marginBottom: spacing.lg
+        borderRadius: radius.xl,
+        borderWidth: 1,
+        borderColor: color.glassStroke,
+        backgroundColor: color.panel,
+        padding: spacing.sm,
+        marginTop: 'auto',
+        marginBottom: spacing.sm,
+        shadowColor: color.accent,
+        ...onboardingTheme.elevation.soft
     },
     passwordInlineContainer: {
         marginTop: spacing.sm
@@ -591,9 +810,9 @@ const styles = StyleSheet.create({
     passwordInputContainer: {
         flexDirection: 'row',
         alignItems: 'center',
-        backgroundColor: 'rgba(255,255,255,0.84)',
+        backgroundColor: color.surfaceMuted,
         borderWidth: 1,
-        borderColor: 'rgba(255,255,255,0.92)',
+        borderColor: color.border,
         borderRadius: radius.md,
         minHeight: 52,
         marginTop: spacing.xs
@@ -611,9 +830,9 @@ const styles = StyleSheet.create({
         paddingVertical: spacing.xs
     },
     inlineTextInput: {
-        backgroundColor: 'rgba(255,255,255,0.84)',
+        backgroundColor: color.surfaceMuted,
         borderWidth: 1,
-        borderColor: 'rgba(255,255,255,0.92)',
+        borderColor: color.border,
         borderRadius: radius.md,
         minHeight: 52,
         marginTop: spacing.xs,
@@ -652,23 +871,18 @@ const styles = StyleSheet.create({
     inputContainer: {
         flexDirection: 'row',
         alignItems: 'center',
-        backgroundColor: 'rgba(255,255,255,0.84)',
+        backgroundColor: color.surfaceMuted,
         borderWidth: 1,
-        borderColor: 'rgba(255,255,255,0.92)',
-        borderRadius: radius.pill,
+        borderColor: color.border,
+        borderRadius: radius.md,
         paddingRight: spacing.sm,
-        minHeight: 58,
-        shadowColor: '#0E1522',
-        shadowOffset: { width: 0, height: 12 },
-        shadowOpacity: 0.12,
-        shadowRadius: 20,
-        elevation: 8
+        minHeight: 58
     },
     countrySelector: {
         paddingHorizontal: spacing.sm,
         justifyContent: 'center',
         borderRightWidth: 1,
-        borderRightColor: 'rgba(15,23,34,0.08)',
+        borderRightColor: color.border,
         height: 58
     },
     countryCode: {
@@ -689,8 +903,13 @@ const styles = StyleSheet.create({
         fontFamily: fonts.Medium
     },
     footer: {
-        marginTop: 'auto',
-        paddingTop: spacing.md
+        marginTop: 0,
+        paddingTop: spacing.xs,
+        paddingBottom: spacing.xs
+    },
+    footerExpanded: {
+        marginTop: spacing.sm,
+        paddingBottom: spacing.xl
     },
     continueButton: {
         marginBottom: spacing.xs
@@ -702,6 +921,19 @@ const styles = StyleSheet.create({
         fontSize: 13,
         lineHeight: 18,
         fontFamily: fonts.SemiBold
+    },
+    passwordFallbackButton: {
+        marginTop: spacing.xs,
+        alignSelf: 'center',
+        paddingHorizontal: spacing.sm,
+        paddingVertical: 4
+    },
+    passwordFallbackText: {
+        color: color.textSecondary,
+        fontSize: 13,
+        lineHeight: 18,
+        fontFamily: fonts.SemiBold,
+        textDecorationLine: 'underline'
     }
 });
 

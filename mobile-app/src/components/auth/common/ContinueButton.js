@@ -1,9 +1,10 @@
-import React from 'react';
-import { TouchableOpacity, Text, StyleSheet } from 'react-native';
+import React, { useRef } from 'react';
+import { Animated, Text, StyleSheet, Pressable, Platform } from 'react-native';
 import { fonts } from '../../../theme/runtimeTokens';
 import onboardingTheme from './onboardingTheme';
 
 const { color, radius, spacing } = onboardingTheme;
+const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
 
 const ContinueButton = ({
     onPress,
@@ -11,18 +12,35 @@ const ContinueButton = ({
     text = 'Continuar',
     style = {},
     textStyle = {},
+    accessibilityRole = 'button',
+    accessibilityState,
     ...props
 }) => {
+    const scaleAnim = useRef(new Animated.Value(1)).current;
+
+    const animateTo = (value) => {
+        Animated.timing(scaleAnim, {
+            toValue: value,
+            duration: 120,
+            useNativeDriver: true
+        }).start();
+    };
+
     return (
-        <TouchableOpacity
+        <AnimatedPressable
             style={[
                 styles.continueButton,
                 disabled && styles.continueButtonDisabled,
-                style
+                style,
+                { transform: [{ scale: scaleAnim }] }
             ]}
             onPress={onPress}
             disabled={disabled}
-            activeOpacity={0.8}
+            accessibilityRole={accessibilityRole}
+            accessibilityLabel={props.accessibilityLabel || text}
+            accessibilityState={{ ...(accessibilityState || {}), disabled }}
+            onPressIn={() => !disabled && animateTo(0.97)}
+            onPressOut={() => !disabled && animateTo(1)}
             {...props}
         >
             <Text style={[
@@ -32,7 +50,7 @@ const ContinueButton = ({
             ]}>
                 {text}
             </Text>
-        </TouchableOpacity>
+        </AnimatedPressable>
     );
 };
 
@@ -40,27 +58,26 @@ const styles = StyleSheet.create({
     continueButton: {
         backgroundColor: color.accent,
         borderRadius: radius.md,
-        borderWidth: 1,
-        borderColor: color.borderStrong,
-        paddingVertical: 12,
+        borderWidth: 0,
+        paddingVertical: 0,
         alignItems: 'center',
+        justifyContent: 'center',
         marginTop: spacing.sm,
-        marginBottom: spacing.md,
-        shadowColor: '#0E1522',
-        shadowOffset: { width: 0, height: 8 },
-        shadowOpacity: 0.14,
-        shadowRadius: 14,
-        elevation: 6,
-        minHeight: 46
+        marginBottom: Platform.OS === 'android' ? spacing.xl : spacing.md,
+        shadowColor: color.accent,
+        shadowOffset: { width: 0, height: 16 },
+        shadowOpacity: 0.20,
+        shadowRadius: 30,
+        elevation: 8,
+        minHeight: 58
     },
     continueButtonDisabled: {
         backgroundColor: color.accentSoft,
-        borderColor: color.border,
-        shadowOpacity: 0.06
+        shadowOpacity: 0.04
     },
     continueButtonText: {
         color: color.accentText,
-        fontSize: 15,
+        fontSize: 16,
         fontFamily: fonts.SemiBold,
         textAlign: 'center'
     },

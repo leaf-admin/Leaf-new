@@ -2,8 +2,8 @@ import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { Alert, View, Platform } from 'react-native';
 import { Provider } from 'react-redux';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
+import { SafeAreaProvider } from 'react-native-safe-area-context';
 import * as SplashScreen from 'expo-splash-screen';
-import * as DevClient from 'expo-dev-client';
 import { store } from './src/state/appStore';
 import AppNavigator from './src/navigation/AppNavigator';
 import AuthProvider from './src/components/AuthProvider';
@@ -19,6 +19,41 @@ import { toUserFriendlyMessage } from './src/utils/friendlyErrorMessages';
 import './src/i18n'; // Inicializar i18n
 import './src/utils/ReanimatedWrapper'; // Suprimir warnings do Reanimated
 
+const FRIENDLY_ALERT_PATCH_BYPASS_OPTION_KEY = '__skipFriendlyAlertPatch';
+
+function getDevClient() {
+  if (!__DEV__ || Platform.OS === 'web') {
+    return null;
+  }
+
+  try {
+    return require('expo-dev-client');
+  } catch (error) {
+    return null;
+  }
+}
+
+function hideDevelopmentClientMenu() {
+  const DevClient = getDevClient();
+  if (!DevClient) {
+    return;
+  }
+
+  try {
+    if (DevClient.setDevMenuVisible) {
+      DevClient.setDevMenuVisible(false);
+    }
+    if (DevClient.disableDevMenu) {
+      DevClient.disableDevMenu();
+    }
+    if (DevClient.hideDevMenu) {
+      DevClient.hideDevMenu();
+    }
+  } catch (error) {
+    // Dev client is development-only; failures here must never affect release startup.
+  }
+}
+
 function installGlobalFriendlyAlertPatch() {
   if (!Alert?.alert || global.__LEAF_ALERT_PATCHED__) {
     return;
@@ -28,13 +63,32 @@ function installGlobalFriendlyAlertPatch() {
   global.__LEAF_ALERT_PATCHED__ = true;
 
   Alert.alert = (title, message, buttons, options) => {
+    const shouldBypassFriendlyPatch =
+      Boolean(
+        options &&
+          typeof options === 'object' &&
+          options[FRIENDLY_ALERT_PATCH_BYPASS_OPTION_KEY] === true
+      );
+    const normalizedOptions =
+      options && typeof options === 'object'
+        ? Object.fromEntries(
+            Object.entries(options).filter(
+              ([key]) => key !== FRIENDLY_ALERT_PATCH_BYPASS_OPTION_KEY
+            )
+          )
+        : options;
+
+    if (shouldBypassFriendlyPatch) {
+      return originalAlert(title, message, buttons, normalizedOptions);
+    }
+
     // Alguns fluxos usam Alert.alert('mensagem-unica')
     if (typeof message === 'undefined') {
       const friendlySingleMessage = toUserFriendlyMessage(title, {
         context: 'api',
         fallbackMessage: 'Nao foi possivel concluir esta acao agora. Tente novamente.'
       });
-      return originalAlert('Atencao', friendlySingleMessage, buttons, options);
+      return originalAlert('Atencao', friendlySingleMessage, buttons, normalizedOptions);
     }
 
     const friendlyMessage = toUserFriendlyMessage(message, {
@@ -42,7 +96,12 @@ function installGlobalFriendlyAlertPatch() {
       fallbackMessage: 'Nao foi possivel concluir esta acao agora. Tente novamente.'
     });
 
-    return originalAlert(title || 'Atencao', friendlyMessage, buttons, options);
+    return originalAlert(
+      title || 'Atencao',
+      friendlyMessage,
+      buttons,
+      normalizedOptions
+    );
   };
 }
 
@@ -56,33 +115,29 @@ try {
   Logger.warn('⚠️ Erro ao manter splash screen:', e);
 }
 
-// ✅ Desabilitar DevMenu completamente (mesmo em development)
-// O DevMenu pode aparecer automaticamente e criar uma tela extra indesejada
-// IMPORTANTE: Isso é uma camada extra de segurança - o plugin nativo também desabilita
-if (Platform.OS !== 'web' && DevClient) {
-  try {
-    // Desabilitar DevMenu sempre (pode ser reativado manualmente se necessário)
-    if (DevClient.setDevMenuVisible) {
-      DevClient.setDevMenuVisible(false);
-    }
-    // Também tentar desabilitar via configuração
-    if (DevClient.disableDevMenu) {
-      DevClient.disableDevMenu();
-    }
-    // Tentar esconder o FAB (Floating Action Button) do DevMenu
-    if (DevClient.hideDevMenu) {
-      DevClient.hideDevMenu();
-    }
-  } catch (e) {
-    // Ignorar se não disponível
-  }
-}
+hideDevelopmentClientMenu();
 
 // ✅ Configurar interceptor axios para CORS
 setupAxiosInterceptor();
 installGlobalFriendlyAlertPatch();
 
 export default function App() {
+  if (process.env.EXPO_PUBLIC_LEAF_ONBOARDING_SCREENSHOT === '1') {
+    const AuthFlowScreenshotHarness = require('./src/components/auth/AuthFlowScreenshotHarness').default;
+
+    return (
+      <GestureHandlerRootView style={{ flex: 1 }}>
+        <SafeAreaProvider>
+          <Provider store={store}>
+            <LanguageProvider>
+              <AuthFlowScreenshotHarness />
+            </LanguageProvider>
+          </Provider>
+        </SafeAreaProvider>
+      </GestureHandlerRootView>
+    );
+  }
+
   const [appIsReady, setAppIsReady] = useState(false);
   const [isInitializationLocked, setIsInitializationLocked] = useState(false);
   const bootWatchdogRef = useRef(null);
@@ -119,15 +174,7 @@ export default function App() {
 
   // ✅ Desabilitar DevMenu também no useEffect para garantir (dentro do componente)
   useEffect(() => {
-    if (Platform.OS !== 'web' && DevClient) {
-      try {
-        if (DevClient.setDevMenuVisible) {
-          DevClient.setDevMenuVisible(false);
-        }
-      } catch (e) {
-        // Ignorar
-      }
-    }
+    hideDevelopmentClientMenu();
   }, []);
 
   // Inicializar FCM e notificações interativas quando o app iniciar
@@ -147,7 +194,11 @@ export default function App() {
         // Garantir que a splash screen está visível
         await withTimeout(SplashScreen.preventAutoHideAsync(), 2000, 'Splash preventAutoHide');
         
-        // 1. Conectar WebSocket primeiro (para que o FCM possa registrar o token depois)
+        // Libera a UI assim que a splash nativa estiver sob controle.
+        // Socket e notificações continuam inicializando em background para reduzir o tempo de abertura.
+        markAppReady('shell-ready');
+
+        // 1. Conectar WebSocket em background (para que o FCM possa registrar o token depois)
         // ✅ Timeout de 10s para conexão WebSocket (Item 1.3)
         try {
           const wsManager = WebSocketManager.getInstance();
@@ -170,10 +221,6 @@ export default function App() {
           // Continuar mesmo se o WebSocket falhar - ele tentará reconectar automaticamente
         }
         
-        // Libera a UI assim que a infraestrutura crítica mínima terminar.
-        // Serviços de notificação continuam no background para evitar boot travado.
-        markAppReady('core-ready');
-
         // 2. Inicializar FCM (agora o WebSocket já está conectado ou tentando conectar)
         await withTimeout(FCMNotificationService.initialize(), 8000, 'FCM initialize');
         

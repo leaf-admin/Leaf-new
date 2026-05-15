@@ -1,7 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import {
   ActivityIndicator,
-  ScrollView,
   StyleSheet,
   Text,
   TextInput,
@@ -329,6 +328,11 @@ const DocumentStep = ({ onSubmitted, onBack, initialData = {} }) => {
           <Text style={styles.uploadTitle}>{loading ? 'Processando PDF...' : description}</Text>
           {fileMeta?.name ? <Text style={styles.uploadFile}>{fileMeta.name}</Text> : null}
           {result ? <Text style={styles.uploadMeta}>{formatExtractionLabel(result)}</Text> : null}
+          {loading ? (
+            <View style={styles.uploadProgress}>
+              <View style={styles.uploadProgressFill} />
+            </View>
+          ) : null}
         </View>
         {loading ? <ActivityIndicator size="small" color={color.textPrimary} /> : <Ionicons name="chevron-forward" size={18} color={color.textMuted} />}
       </TouchableOpacity>
@@ -337,22 +341,18 @@ const DocumentStep = ({ onSubmitted, onBack, initialData = {} }) => {
   );
 
   return (
-    <ScrollView
-      style={styles.container}
-      contentContainerStyle={styles.content}
-      showsVerticalScrollIndicator={false}
-      keyboardShouldPersistTaps="handled"
-    >
+    <View style={styles.container}>
       <View style={styles.header}>
         <TouchableOpacity style={styles.backButton} onPress={onBack}>
-          <Ionicons name="arrow-back" size={22} color={color.textPrimary} />
+          <Ionicons name="chevron-back" size={22} color={color.textPrimary} />
         </TouchableOpacity>
-        <Text style={styles.title}>{isDriver ? 'Validação da CNH' : 'Cadastro de passageiro'}</Text>
       </View>
+
+      <Text style={styles.title}>{isDriver ? 'Validar sua CNH' : 'Cadastro de passageiro'}</Text>
 
       <Text style={styles.subtitle}>
         {isDriver
-          ? 'Envie a CNH Digital em PDF para seguir para os consentimentos. O documento do veículo pode ser enviado depois.'
+          ? 'Envie a CNH Digital em PDF. A Leaf lê os dados automaticamente e libera os próximos passos.'
           : 'Informe seu e-mail para recibos e recuperação de conta.'}
       </Text>
 
@@ -385,52 +385,54 @@ const DocumentStep = ({ onSubmitted, onBack, initialData = {} }) => {
               icon: 'document-text-outline'
             })}
 
-            <View style={styles.fieldContainer}>
-              <Text style={styles.label}>CPF (extraído automaticamente)</Text>
-              <TextInput
-                style={[styles.input, styles.readOnlyInput, errors.cpf && styles.inputError]}
-                value={documentData.cpf}
-                editable={false}
-                placeholder="Será preenchido após ler a CNH"
-                placeholderTextColor={color.textMuted}
-              />
-              {errors.cpf ? <Text style={styles.errorText}>{errors.cpf}</Text> : null}
-            </View>
+            <View style={styles.identityGrid}>
+              <View style={[styles.fieldContainer, styles.identityField]}>
+                <Text style={styles.label}>CPF</Text>
+                <TextInput
+                  style={[styles.input, styles.readOnlyInput, errors.cpf && styles.inputError]}
+                  value={documentData.cpf}
+                  editable={false}
+                  placeholder="Após ler CNH"
+                  placeholderTextColor={color.textMuted}
+                />
+                {errors.cpf ? <Text style={styles.errorText}>{errors.cpf}</Text> : null}
+              </View>
 
-            <View style={styles.fieldContainer}>
-              <Text style={styles.label}>Data de nascimento (extraída automaticamente)</Text>
-              <TextInput
-                style={[styles.input, styles.readOnlyInput, errors.birthDate && styles.inputError]}
-                value={documentData.birthDate}
-                editable={false}
-                placeholder="Será preenchida após ler a CNH"
-                placeholderTextColor={color.textMuted}
-              />
-              {errors.birthDate ? <Text style={styles.errorText}>{errors.birthDate}</Text> : null}
-            </View>
+              <View style={[styles.fieldContainer, styles.identityField]}>
+                <Text style={styles.label}>Nascimento</Text>
+                <TextInput
+                  style={[styles.input, styles.readOnlyInput, errors.birthDate && styles.inputError]}
+                  value={documentData.birthDate}
+                  editable={false}
+                  placeholder="Após ler CNH"
+                  placeholderTextColor={color.textMuted}
+                />
+                {errors.birthDate ? <Text style={styles.errorText}>{errors.birthDate}</Text> : null}
+              </View>
 
-            <View style={styles.fieldContainer}>
-              <Text style={styles.label}>Nome da mãe (extraído automaticamente)</Text>
-              <TextInput
-                style={[styles.input, styles.readOnlyInput, errors.motherName && styles.inputError]}
-                value={documentData.motherName}
-                editable={false}
-                placeholder="Será preenchido após ler a CNH"
-                placeholderTextColor={color.textMuted}
-              />
-              {errors.motherName ? <Text style={styles.errorText}>{errors.motherName}</Text> : null}
-            </View>
+              <View style={[styles.fieldContainer, styles.identityField]}>
+                <Text style={styles.label}>Nome da mãe</Text>
+                <TextInput
+                  style={[styles.input, styles.readOnlyInput, errors.motherName && styles.inputError]}
+                  value={documentData.motherName}
+                  editable={false}
+                  placeholder="Após ler CNH"
+                  placeholderTextColor={color.textMuted}
+                />
+                {errors.motherName ? <Text style={styles.errorText}>{errors.motherName}</Text> : null}
+              </View>
 
-            <View style={styles.fieldContainer}>
-              <Text style={styles.label}>Gênero (extraído automaticamente)</Text>
-              <TextInput
-                style={[styles.input, styles.readOnlyInput, errors.gender && styles.inputError]}
-                value={formatGenderLabel(documentData.gender)}
-                editable={false}
-                placeholder="Será preenchido após ler a CNH"
-                placeholderTextColor={color.textMuted}
-              />
-              {errors.gender ? <Text style={styles.errorText}>{errors.gender}</Text> : null}
+              <View style={[styles.fieldContainer, styles.identityField]}>
+                <Text style={styles.label}>Gênero</Text>
+                <TextInput
+                  style={[styles.input, styles.readOnlyInput, errors.gender && styles.inputError]}
+                  value={formatGenderLabel(documentData.gender)}
+                  editable={false}
+                  placeholder="Após ler CNH"
+                  placeholderTextColor={color.textMuted}
+                />
+                {errors.gender ? <Text style={styles.errorText}>{errors.gender}</Text> : null}
+              </View>
             </View>
 
             {renderUploadCard({
@@ -449,62 +451,65 @@ const DocumentStep = ({ onSubmitted, onBack, initialData = {} }) => {
       </View>
 
       <ContinueButton onPress={handleSubmit} disabled={!isFormValid || isExtracting.cnh || isExtracting.vehicle} text="Continuar" />
-    </ScrollView>
+    </View>
   );
 };
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    paddingHorizontal: spacing.lg
-  },
-  content: {
-    paddingTop: spacing.sm,
-    paddingBottom: spacing.sm
+    paddingHorizontal: spacing.lg,
+    paddingTop: spacing.xl,
+    paddingBottom: spacing.xs
   },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: spacing.sm
+    minHeight: 44,
+    marginBottom: spacing.md
   },
   backButton: {
-    marginRight: 8,
-    padding: 6
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    borderWidth: 1,
+    borderColor: color.border,
+    backgroundColor: color.panelSoft,
+    alignItems: 'center',
+    justifyContent: 'center'
   },
   title: {
-    flex: 1,
-    fontSize: 21,
-    lineHeight: 27,
+    fontSize: 32,
+    lineHeight: 36,
     color: color.textPrimary,
-    fontFamily: fonts.Bold
+    fontFamily: fonts.Bold,
+    letterSpacing: 0
   },
   subtitle: {
-    fontSize: 13,
-    lineHeight: 19,
+    fontSize: 15,
+    lineHeight: 21,
     color: color.textSecondary,
     fontFamily: fonts.Regular,
-    marginBottom: spacing.sm
+    marginTop: spacing.sm,
+    marginBottom: spacing.lg
   },
   card: {
-    borderRadius: radius.lg,
+    borderRadius: radius.xl,
     borderWidth: 1,
     borderColor: color.glassStroke,
-    backgroundColor: color.panelSoft,
-    shadowColor: '#0E1522',
-    shadowOffset: { width: 0, height: 12 },
-    shadowOpacity: 0.16,
-    shadowRadius: 20,
-    elevation: 9,
+    backgroundColor: color.panel,
+    shadowColor: color.accent,
+    ...onboardingTheme.elevation.soft,
     padding: spacing.sm
   },
   fieldContainer: {
-    marginBottom: spacing.sm
+    marginBottom: spacing.xs
   },
   label: {
-    fontSize: 13,
+    fontSize: 12,
     color: color.textPrimary,
     fontFamily: fonts.SemiBold,
-    marginBottom: 6
+    marginBottom: 4
   },
   optionalTag: {
     color: color.textMuted,
@@ -515,9 +520,9 @@ const styles = StyleSheet.create({
     borderColor: color.border,
     borderRadius: radius.md,
     paddingHorizontal: 12,
-    paddingVertical: 11,
-    fontSize: 14,
-    lineHeight: 18,
+    paddingVertical: 8,
+    fontSize: 13,
+    lineHeight: 17,
     fontFamily: fonts.Medium,
     color: color.textPrimary,
     backgroundColor: color.surfaceMuted
@@ -526,23 +531,23 @@ const styles = StyleSheet.create({
     opacity: 0.95
   },
   uploadContainer: {
-    marginBottom: spacing.sm
+    marginBottom: spacing.xs
   },
   uploadButton: {
     borderWidth: 1,
     borderColor: color.border,
     borderRadius: radius.md,
     backgroundColor: color.surfaceMuted,
-    paddingVertical: 11,
+    paddingVertical: 12,
     paddingHorizontal: 12,
     flexDirection: 'row',
-    alignItems: 'center'
+    alignItems: 'flex-start'
   },
   uploadIconWrap: {
-    width: 30,
-    height: 30,
+    width: 38,
+    height: 38,
     borderRadius: 15,
-    backgroundColor: 'rgba(255,255,255,0.72)',
+    backgroundColor: color.accentSoft,
     alignItems: 'center',
     justifyContent: 'center',
     marginRight: 10
@@ -551,24 +556,37 @@ const styles = StyleSheet.create({
     flex: 1
   },
   uploadTitle: {
-    fontSize: 13,
-    lineHeight: 17,
+    fontSize: 14,
+    lineHeight: 18,
     color: color.textPrimary,
     fontFamily: fonts.SemiBold
   },
   uploadFile: {
     marginTop: 2,
-    fontSize: 11,
-    lineHeight: 15,
+    fontSize: 10,
+    lineHeight: 13,
     color: color.textSecondary,
     fontFamily: fonts.Regular
   },
   uploadMeta: {
     marginTop: 2,
-    fontSize: 11,
-    lineHeight: 15,
+    fontSize: 10,
+    lineHeight: 13,
     color: color.textMuted,
     fontFamily: fonts.Medium
+  },
+  uploadProgress: {
+    height: 6,
+    borderRadius: 999,
+    overflow: 'hidden',
+    backgroundColor: 'rgba(17,23,25,0.08)',
+    marginTop: 8
+  },
+  uploadProgressFill: {
+    width: '72%',
+    height: '100%',
+    borderRadius: 999,
+    backgroundColor: color.accent
   },
   inputError: {
     borderColor: color.error
@@ -579,6 +597,15 @@ const styles = StyleSheet.create({
     fontSize: 12,
     lineHeight: 16,
     fontFamily: fonts.Medium
+  },
+  identityGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    columnGap: spacing.xs
+  },
+  identityField: {
+    flexBasis: '48%',
+    flexGrow: 1
   }
 });
 

@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { fonts } from '../../../theme/runtimeTokens';
 import ContinueButton from '../common/ContinueButton';
@@ -33,16 +33,17 @@ const DriverEmailStep = ({ onSubmitted, onBack, initialData = {} }) => {
   };
 
   return (
-    <ScrollView style={styles.container} contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+    <View style={styles.container}>
       <View style={styles.header}>
         <TouchableOpacity style={styles.backButton} onPress={onBack}>
-          <Ionicons name="arrow-back" size={22} color={color.textPrimary} />
+          <Ionicons name="chevron-back" size={22} color={color.textPrimary} />
         </TouchableOpacity>
-        <Text style={styles.title}>Contato por e-mail</Text>
       </View>
 
+      <Text style={styles.title}>Contato por e-mail</Text>
+
       <Text style={styles.subtitle}>
-        Adicione seu e-mail para recibos de saque, notificações do sistema e informe de rendimentos. Você pode pular e preencher depois.
+        Adicione para recibos, notificações do sistema e informe de rendimentos. Você pode pular e preencher depois.
       </Text>
 
       <View style={styles.card}>
@@ -81,53 +82,57 @@ const DriverEmailStep = ({ onSubmitted, onBack, initialData = {} }) => {
       >
         <Text style={styles.skipLabel}>Preencher depois</Text>
       </TouchableOpacity>
-    </ScrollView>
+    </View>
   );
 };
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    paddingHorizontal: spacing.lg
-  },
-  content: {
-    paddingTop: spacing.sm,
+    paddingHorizontal: spacing.lg,
+    paddingTop: spacing.xl,
     paddingBottom: spacing.sm
   },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: spacing.sm
+    minHeight: 44,
+    marginBottom: spacing.md
   },
   backButton: {
-    padding: 6,
-    marginRight: 8
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    borderWidth: 1,
+    borderColor: color.border,
+    backgroundColor: color.panelSoft,
+    alignItems: 'center',
+    justifyContent: 'center'
   },
   title: {
-    fontSize: 22,
-    lineHeight: 28,
+    fontSize: 32,
+    lineHeight: 36,
     color: color.textPrimary,
-    fontFamily: fonts.Bold
+    fontFamily: fonts.Bold,
+    letterSpacing: 0
   },
   subtitle: {
-    fontSize: 13,
-    lineHeight: 19,
+    fontSize: 15,
+    lineHeight: 21,
     color: color.textSecondary,
     fontFamily: fonts.Regular,
-    marginBottom: spacing.sm
+    marginTop: spacing.sm,
+    marginBottom: spacing.lg
   },
   card: {
-    borderRadius: radius.lg,
+    borderRadius: radius.xl,
     borderWidth: 1,
     borderColor: color.glassStroke,
-    backgroundColor: color.panelSoft,
-    shadowColor: '#0E1522',
-    shadowOffset: { width: 0, height: 12 },
-    shadowOpacity: 0.16,
-    shadowRadius: 20,
-    elevation: 9,
+    backgroundColor: color.panel,
+    shadowColor: color.accent,
+    ...onboardingTheme.elevation.soft,
     padding: spacing.sm,
-    marginBottom: spacing.sm
+    marginBottom: 'auto'
   },
   label: {
     fontSize: 13,
@@ -140,9 +145,9 @@ const styles = StyleSheet.create({
     borderColor: color.border,
     borderRadius: radius.md,
     paddingHorizontal: 12,
-    paddingVertical: 11,
-    fontSize: 14,
-    lineHeight: 18,
+    paddingVertical: 12,
+    fontSize: 15,
+    lineHeight: 19,
     fontFamily: fonts.Medium,
     color: color.textPrimary,
     backgroundColor: color.surfaceMuted
