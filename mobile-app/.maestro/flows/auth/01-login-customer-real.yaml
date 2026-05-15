@@ -2,8 +2,11 @@ appId: br.com.leaf.ride
 env:
   FIREBASE_TEST_PHONE: "21102938475"
   FIREBASE_TEST_OTP: "992111"
-  EXISTING_ACCOUNT_PASSWORD: "Leaf12345"
+  EXISTING_ACCOUNT_PASSWORD: "Leaf@Review2026!"
 ---
+- launchApp:
+    clearState: true
+
 - runFlow:
     when:
       visible: "Abrir"
@@ -18,9 +21,55 @@ env:
 
 - runFlow:
     when:
+      visible: "Sign in to view updates"
+    commands:
+      - tapOn: "Home"
+      - waitForAnimationToEnd
+
+- runFlow:
+    when:
       visible: "Continue"
     commands:
       - tapOn: "Continue"
+
+- runFlow:
+    when:
+      visible: "http://10.0.2.2:8081"
+    commands:
+      - tapOn: "http://10.0.2.2:8081"
+      - waitForAnimationToEnd
+
+- runFlow:
+    when:
+      notVisible:
+        id: "(auth-phone-input|auth-password-input|auth-otp-digit-0|passenger-home-destination-input)"
+    commands:
+      - extendedWaitUntil:
+          visible: "http://10.0.2.2:8081"
+          timeout: 45000
+      - tapOn: "http://10.0.2.2:8081"
+      - waitForAnimationToEnd
+      - runFlow:
+          when:
+            visible: "Go home"
+          commands:
+            - tapOn: "Go home"
+      - runFlow:
+          when:
+            visible: "Continue"
+          commands:
+            - tapOn: "Continue"
+      - runFlow:
+          when:
+            visible: "This is the developer menu"
+          commands:
+            - tapOn: "Continue"
+      - waitForAnimationToEnd
+
+- extendedWaitUntil:
+    visible:
+      id: "(auth-phone-input|auth-password-input|auth-otp-digit-0|passenger-home-destination-input)"
+    timeout: 90000
 
 - runFlow:
     when:
@@ -28,12 +77,51 @@ env:
         id: "auth-phone-input"
     commands:
       - waitForAnimationToEnd
-
       - tapOn:
           id: "auth-phone-input"
       - eraseText
       - inputText: ${FIREBASE_TEST_PHONE}
-      - pressKey: Enter
+
+      - runFlow:
+          when:
+            visible: "Ja tenho senha"
+          commands:
+            - tapOn: "Ja tenho senha"
+            - waitForAnimationToEnd
+
+      - runFlow:
+          when:
+            visible: "Já tenho senha"
+          commands:
+            - tapOn: "Já tenho senha"
+            - waitForAnimationToEnd
+
+      - runFlow:
+          when:
+            visible: "Código OTP obrigatório"
+          commands:
+            - tapOn: "OK"
+            - waitForAnimationToEnd
+
+      - runFlow:
+          when:
+            visible: "Codigo OTP obrigatorio"
+          commands:
+            - tapOn: "OK"
+            - waitForAnimationToEnd
+
+      - runFlow:
+          when:
+            visible:
+              id: "auth-password-input"
+          commands:
+            - tapOn:
+                id: "auth-password-input"
+            - eraseText
+            - inputText: ${EXISTING_ACCOUNT_PASSWORD}
+            - swipe:
+                start: "50%,82%"
+                end: "50%,34%"
 
       - runFlow:
           when:
@@ -42,6 +130,7 @@ env:
           commands:
             - tapOn:
                 id: "auth-continue-btn"
+
       - runFlow:
           when:
             notVisible:
@@ -53,65 +142,24 @@ env:
 
       - runFlow:
           when:
-            visible: "Use without an account"
+            visible:
+              id: "auth-otp-digit-0"
           commands:
-            - tapOn: "Use without an account"
-            - waitForAnimationToEnd
-
-      - runFlow:
-          when:
-            visible: "No thanks"
-          commands:
-            - tapOn: "No thanks"
-            - waitForAnimationToEnd
-
-      - runFlow:
-          when:
-            visible: "Add account to device"
-          commands:
-            - tapOn: "Use without an account"
-            - waitForAnimationToEnd
-
-      - runFlow:
-          when:
-            visible: "Welcome to Chrome"
-          commands:
-            - runFlow:
-                when:
-                  visible: "Use without an account"
-                commands:
-                  - tapOn: "Use without an account"
-            - launchApp
-            - waitForAnimationToEnd
-
-      - runFlow:
-          when:
-            visible: "Senha"
-          commands:
-            - assertVisible: "Entrar"
-            - takeScreenshot: "auth-password-branch-detected"
-            - tapOn: "Senha"
-            - inputText: ${EXISTING_ACCOUNT_PASSWORD}
-            - swipe:
-                start: "50%,82%"
-                end: "50%,34%"
-            - tapOn: "Entrar"
-            - waitForAnimationToEnd
-
-      - runFlow:
-          when:
-            visible: "Verificação"
-          commands:
+            - tapOn:
+                id: "auth-otp-digit-0"
             - inputText: ${FIREBASE_TEST_OTP}
             - runFlow:
                 when:
-                  visible: "Verificar código"
+                  visible:
+                    id: "auth-otp-verify-btn"
                 commands:
-                  - tapOn: "Verificar código"
+                  - tapOn:
+                      id: "auth-otp-verify-btn"
             - extendedWaitUntil:
-                notVisible: "Verificação"
-                timeout: 30000
-            - takeScreenshot: "auth-otp-branch"
+                notVisible:
+                  id: "auth-otp-digit-0"
+                timeout: 45000
+            - waitForAnimationToEnd
 
       - runFlow:
           when:
@@ -135,18 +183,6 @@ env:
             - tapOn: "CPF"
             - inputText: "12345678901"
             - tapOn: "Cadastrar"
-
-      - runFlow:
-          when:
-            visible: "This is the developer menu"
-          commands:
-            - tapOn: "Continue"
-
-      - runFlow:
-          when:
-            visible: "Continue"
-          commands:
-            - tapOn: "Continue"
 
       - runFlow:
           when:
@@ -174,32 +210,19 @@ env:
 
 - runFlow:
     when:
-      notVisible:
+      visible:
         id: "auth-phone-input"
     commands:
-      - takeScreenshot: "auth-session-already-active"
-      - runFlow:
-          when:
-            visible: "Avalie a viagem"
-          commands:
-            - pressKey: Back
-            - waitForAnimationToEnd
-      - runFlow:
-          when:
-            visible: "Suporte"
-          commands:
-            - pressKey: Back
-            - waitForAnimationToEnd
-      - runFlow:
-          when:
-            visible: "Menu"
-          commands:
-            - pressKey: Back
-            - waitForAnimationToEnd
+      - takeScreenshot: "auth-stuck-login-screen"
 
 - assertNotVisible:
     id: "auth-phone-input"
-- assertVisible: ".*(Confirme sua viagem|Avalie a viagem|Suporte|Menu|Origem|Destino|Categoria indisponível|Para onde).*"
+
+- extendedWaitUntil:
+    visible:
+      id: "(passenger-home-destination-input|passenger-rating-screen|robotaxi-support-screen)"
+    timeout: 90000
+
 - runFlow:
     when:
       visible:
@@ -207,19 +230,39 @@ env:
     commands:
       - assertVisible:
           id: "passenger-home-destination-input"
+
+- runFlow:
+    when:
+      visible:
+        id: "passenger-rating-screen"
+    commands:
+      - assertVisible:
+          id: "passenger-rating-screen"
+
+- runFlow:
+    when:
+      visible:
+        id: "robotaxi-support-screen"
+    commands:
+      - assertVisible:
+          id: "robotaxi-support-screen"
+
 - runFlow:
     when:
       visible: "Confirme sua viagem"
     commands:
       - assertVisible: "Confirme sua viagem"
+
 - runFlow:
     when:
       visible: "Avalie a viagem"
     commands:
       - assertVisible: "Avalie a viagem"
+
 - runFlow:
     when:
       visible: "Suporte"
     commands:
       - assertVisible: "Suporte"
+
 - takeScreenshot: "auth-firebase-sandbox-login-success"

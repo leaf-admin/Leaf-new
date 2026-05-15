@@ -11,7 +11,7 @@ env:
 # Aguardar tela de login aparecer e inserir o telefone de teste
 - assertVisible: "Telefone"
 - tapOn: "Telefone"
-- inputText: "11999999999"
+- inputText: "21102938475"
 
 # Se houver botão Continuar/Entrar, clicar nele
 - runFlow:
@@ -41,7 +41,7 @@ env:
     when:
       visible: "Código"
     commands:
-      - inputText: "123456"
+      - inputText: "992111"
       - tapOn: "Verificar"
 
 - waitForAnimationToEnd
@@ -60,7 +60,7 @@ env:
 - takeScreenshot: "03-login-success"
 
 # Verificar Painel de Passageiro (Default)
-- assertVisible: 
+- assertVisible:
     text: "Passageiro"
     optional: true
 
@@ -80,7 +80,7 @@ env:
 - takeScreenshot: "05-switched-to-driver"
 
 # Após confirmar, a interface deve exibir Motorista (e Ficar Online)
-- assertVisible: 
+- assertVisible:
     text: "Motorista"
     optional: true
 

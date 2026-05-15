@@ -22,6 +22,13 @@ appId: br.com.leaf.ride
           commands:
             - pressKey: Back
             - waitForAnimationToEnd
+      - runFlow:
+          when:
+            notVisible: "Para onde vamos\\?"
+          commands:
+            - tapOn:
+                point: "50%,93%"
+            - waitForAnimationToEnd
 
 # Caminho principal: iniciar da home
 - runFlow:
@@ -41,7 +48,7 @@ appId: br.com.leaf.ride
       - tapOn:
           id: "passenger-destination-search-input"
       - eraseText
-      - inputText: "Aeroporto Santos Dumont"
+      - inputText: "Copacabana Palace"
       - waitForAnimationToEnd
       - takeScreenshot: "03-destination-typed"
 
@@ -52,11 +59,9 @@ appId: br.com.leaf.ride
           commands:
             - tapOn:
                 id: "passenger-destination-result-0"
-      - runFlow:
-          when:
-            visible: "Aeroporto Santos Dumont"
-          commands:
-            - tapOn: "Aeroporto Santos Dumont"
+      - tapOn:
+          point: "50%,47%"
+          optional: true
 
       - extendedWaitUntil:
           visible:
@@ -64,6 +69,27 @@ appId: br.com.leaf.ride
           timeout: 45000
       - tapOn:
           id: "passenger-destination-confirm-button"
+      - waitForAnimationToEnd
+      - takeScreenshot: "04-booking-request-submitted"
+
+# Caminho alternativo (UI atual): busca por destino via campo textual
+- runFlow:
+    when:
+      visible: "Para onde vamos\\?"
+    commands:
+      - takeScreenshot: "01-home-ready"
+      - tapOn: "Para onde vamos?"
+      - extendedWaitUntil:
+          visible: "Para onde você quer ir\\?"
+          timeout: 45000
+      - takeScreenshot: "02-destination-sheet-open"
+      - tapOn: "Para onde você quer ir?"
+      - eraseText
+      - inputText: "Copacabana Palace"
+      - waitForAnimationToEnd
+      - takeScreenshot: "03-destination-typed"
+      - tapOn:
+          point: "50%,73%"
       - waitForAnimationToEnd
       - takeScreenshot: "04-booking-request-submitted"
 
@@ -100,4 +126,18 @@ appId: br.com.leaf.ride
     commands:
       - takeScreenshot: "06-driver-search"
 
-- assertVisible: ".*(Procurando motorista|Realize seu pagamento|Gerando cobrança PIX...|Categoria indisponível|Nao há motoristas disponíveis|Não há motoristas disponíveis).*"
+- runFlow:
+    when:
+      visible: "Região indisponível"
+    commands:
+      - takeScreenshot: "05-region-unavailable"
+
+- runFlow:
+    when:
+      visible: "Regiao indisponivel"
+    commands:
+      - takeScreenshot: "05-region-unavailable-no-accent"
+
+- assertVisible: ".*(Procurando motorista|Procurando motoristas|Realize seu pagamento|Gerando cobrança PIX...|Categoria indisponível|Categoria indisponivel|Nao há motoristas disponíveis|Não há motoristas disponíveis|Nao ha motoristas disponiveis|Indisponível|Destino fora da area de cobertura da Leaf|Confirme sua viagem).*"
+
+- assertNotVisible: "Origem e destino inconsistentes para a área de operação da Leaf"

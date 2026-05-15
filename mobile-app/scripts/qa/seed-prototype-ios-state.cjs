@@ -7,6 +7,9 @@ const { execFileSync } = require('child_process');
 
 const APP_ID = 'br.com.leaf.ride';
 const ROOT_DIR = path.resolve(__dirname, '../../..');
+const SIMCTL_BIN =
+  process.env.SIMCTL_BIN ||
+  '/Library/Developer/PrivateFrameworks/CoreSimulator.framework/Versions/A/Resources/bin/simctl';
 const DEVICE_MAP = {
   '17pro': '195D2C57-87DC-4953-ABF1-4FD351ADBBEF',
   '17promax': '2E44BC8E-9AA8-43BE-BD5E-D0B5A73E543C',
@@ -20,6 +23,7 @@ const CONFIRMED_DESTINATIONS_STORAGE_KEY = 'confirmedDestinations';
 const AUTH_UID_STORAGE_KEY = '@auth_uid';
 const USER_DATA_STORAGE_KEY = '@user_data';
 const TEST_MODE_STORAGE_KEY = '@test_mode';
+const DEFAULT_QA_FREEZE_MS = 600000;
 
 function readJsonIfExists(filePath, fallbackValue = {}) {
   try {
@@ -43,20 +47,85 @@ const DRIVER_UID = String(
   QA_PREFLIGHT_USERS?.driver?.uid || '8vg2kxxqi3TYKlpD6eBlWgYseIq2'
 ).trim();
 
+const REAL_PICKUP_ROUTE_POLYLINE =
+  "vjekC~`qfGoBaDe@w@wAiCe@TR`@jAxB`CbElC~DfArAdCvCxEpEn@f@Zc@e@c@m@g@m@k@cAaAgAkAyCsD";
+const REAL_DESTINATION_ROUTE_POLYLINE =
+  "joekCbgqfG_AoAkAgBwBmDe@w@wAiCe@TURaG~EgDlCeDnCE@lAzChBrEp@`Bn@`BpCxG\\x@vAdCnAtBpBlDr@hAh@d@t@f@d@T~EzA`A\\v@d@fBfAdFpBhBj@|Ad@hAf@pDbBb@VLN^j@Tl@XdAX~ALdADzA?p@CbAWhB_@zBIdAKjCEz@ET[d@[Te@Ls@De@KMGMQK[?_@J[RURKbAGdBGbACjACn@@fANf@RNJf@\\b@`@TXZx@XzAEHZ~AjArGb@xBh@lCl@rDDp@Jj@r@pDp@pDTpCBjBSlISfJE|DAxDInF@d@Kl@KXqB|EaC|Gc@vAAd@@NHVNPl@fFvAlLb@pDNZNIPIn@w@d@k@JNTV~B`C`Em@bAOdAOtHcAlAQ";
+
+function decodePolylinePoints(encoded) {
+  const value = String(encoded || '');
+  const coordinates = [];
+  let index = 0;
+  let latitude = 0;
+  let longitude = 0;
+
+  while (index < value.length) {
+    let byte = 0;
+    let shift = 0;
+    let result = 0;
+
+    do {
+      byte = value.charCodeAt(index) - 63;
+      index += 1;
+      result |= (byte & 0x1f) << shift;
+      shift += 5;
+    } while (byte >= 0x20 && index < value.length);
+
+    latitude += result & 1 ? ~(result >> 1) : result >> 1;
+    shift = 0;
+    result = 0;
+
+    do {
+      byte = value.charCodeAt(index) - 63;
+      index += 1;
+      result |= (byte & 0x1f) << shift;
+      shift += 5;
+    } while (byte >= 0x20 && index < value.length);
+
+    longitude += result & 1 ? ~(result >> 1) : result >> 1;
+    coordinates.push({
+      latitude: Number((latitude / 1e5).toFixed(6)),
+      longitude: Number((longitude / 1e5).toFixed(6)),
+    });
+  }
+
+  return coordinates;
+}
+
+const REAL_PICKUP_ROUTE_COORDINATES = decodePolylinePoints(REAL_PICKUP_ROUTE_POLYLINE);
+const REAL_DESTINATION_ROUTE_COORDINATES = decodePolylinePoints(REAL_DESTINATION_ROUTE_POLYLINE);
+
+function routeCoordinateAt(coordinates, index, fallback) {
+  const candidate = Array.isArray(coordinates) ? coordinates[index] : null;
+  if (Number.isFinite(candidate?.latitude) && Number.isFinite(candidate?.longitude)) {
+    return candidate;
+  }
+  return fallback;
+}
+
+function lastRouteCoordinate(coordinates, fallback) {
+  if (!Array.isArray(coordinates) || coordinates.length === 0) {
+    return fallback;
+  }
+  return routeCoordinateAt(coordinates, coordinates.length - 1, fallback);
+}
+
 const BASE_COORDS = {
-  pickup: { latitude: 37.779026, longitude: -122.419906 },
-  interruption: { latitude: 37.772516, longitude: -122.414233 },
-  destination: { latitude: 37.759703, longitude: -122.428093 },
-  driverHome: { latitude: 37.785834, longitude: -122.406417 },
-  passengerHome: { latitude: 37.77986, longitude: -122.41517 },
-  inTransit: { latitude: 37.76888, longitude: -122.42171 }
+  pickup: lastRouteCoordinate(REAL_PICKUP_ROUTE_COORDINATES, { latitude: -22.971964, longitude: -43.182543 }),
+  interruption: { latitude: -22.976794, longitude: -43.197329 },
+  destination: lastRouteCoordinate(REAL_DESTINATION_ROUTE_COORDINATES, { latitude: -22.984843, longitude: -43.221972 }),
+  driverHome: routeCoordinateAt(REAL_PICKUP_ROUTE_COORDINATES, 0, { latitude: -22.9708, longitude: -43.1819 }),
+  pickupManeuver: routeCoordinateAt(REAL_PICKUP_ROUTE_COORDINATES, 10, { latitude: -22.971382, longitude: -43.182156 }),
+  destinationManeuver: routeCoordinateAt(REAL_DESTINATION_ROUTE_COORDINATES, 32, { latitude: -22.976142, longitude: -43.19608 }),
+  passengerHome: lastRouteCoordinate(REAL_PICKUP_ROUTE_COORDINATES, { latitude: -22.971964, longitude: -43.182543 }),
+  inTransit: routeCoordinateAt(REAL_DESTINATION_ROUTE_COORDINATES, 80, { latitude: -22.980013, longitude: -43.207186 })
 };
 
 const LABELS = {
-  pickupAddress: '1280 Market Street, Civic Center, San Francisco, CA',
-  interruptionAddress: 'Mission Street & 8th Street, San Francisco, CA',
-  destinationAddress: 'Dolores Park, 19th & Dolores Street, Mission District, San Francisco, CA',
-  newDestinationAddress: 'Oracle Park, 24 Willie Mays Plaza, San Francisco, CA'
+  pickupAddress: 'Copacabana Palace, Rio de Janeiro, RJ',
+  interruptionAddress: 'Av. Vieira Souto, Ipanema, Rio de Janeiro, RJ',
+  destinationAddress: 'Leblon, Rio de Janeiro, RJ',
+  newDestinationAddress: 'Barra da Tijuca, Rio de Janeiro, RJ'
 };
 
 function arg(name, fallback = '') {
@@ -103,6 +172,17 @@ function buildDestinationOverride(nameArg, addressArg, latitudeArg, longitudeArg
     previewMode: 'local_only',
     skipGooglePreview: true
   };
+}
+
+function formatSimctlLocationCoordinate(coordinate) {
+  const latitude = Number(coordinate?.latitude ?? coordinate?.lat);
+  const longitude = Number(coordinate?.longitude ?? coordinate?.lng);
+
+  if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
+    return null;
+  }
+
+  return `${latitude.toFixed(6)},${longitude.toFixed(6)}`;
 }
 
 function sleep(ms) {
@@ -158,6 +238,18 @@ function runIgnoringFailure(command, args) {
   }
 }
 
+function runSimctl(args) {
+  return run(SIMCTL_BIN, args);
+}
+
+function runSimctlBestEffort(args) {
+  return runBestEffort(SIMCTL_BIN, args);
+}
+
+function runSimctlIgnoringFailure(args) {
+  return runIgnoringFailure(SIMCTL_BIN, args);
+}
+
 function latestCrashReport(appName = 'Leaf') {
   try {
     const reportsDir = path.join(
@@ -207,8 +299,7 @@ function copyCrashArtifacts(deviceId, artifactDir, crashReportPath) {
   }
 
   try {
-    runBestEffort('xcrun', [
-      'simctl',
+    runSimctlBestEffort([
       'io',
       deviceId,
       'screenshot',
@@ -340,18 +431,18 @@ function writeCrashMetadata(artifactDir, metadata) {
 }
 
 function recoverSimulatorRuntime(deviceId) {
-  runBestEffort('xcrun', ['simctl', 'terminate', deviceId, APP_ID]);
-  runIgnoringFailure('xcrun', ['simctl', 'shutdown', deviceId]);
+  runSimctlBestEffort(['terminate', deviceId, APP_ID]);
+  runSimctlIgnoringFailure(['shutdown', deviceId]);
   sleep(1000);
-  runIgnoringFailure('xcrun', ['simctl', 'boot', deviceId]);
-  runIgnoringFailure('xcrun', ['simctl', 'bootstatus', deviceId, '-b']);
+  runSimctlIgnoringFailure(['boot', deviceId]);
+  runSimctlIgnoringFailure(['bootstatus', deviceId, '-b']);
   runIgnoringFailure('open', ['-a', 'Simulator', '--args', '-CurrentDeviceUDID', deviceId]);
   sleep(1200);
 }
 
 function ensureSimulatorReady(deviceId) {
-  runIgnoringFailure('xcrun', ['simctl', 'boot', deviceId]);
-  runIgnoringFailure('xcrun', ['simctl', 'bootstatus', deviceId, '-b']);
+  runSimctlIgnoringFailure(['boot', deviceId]);
+  runSimctlIgnoringFailure(['bootstatus', deviceId, '-b']);
   runIgnoringFailure('open', ['-a', 'Simulator', '--args', '-CurrentDeviceUDID', deviceId]);
   sleep(1200);
 }
@@ -433,7 +524,7 @@ function acceptOpenPromptIfNeeded(deviceId) {
 }
 
 function getContainerData(deviceId) {
-  return run('xcrun', ['simctl', 'get_app_container', deviceId, APP_ID, 'data']);
+  return runSimctl(['get_app_container', deviceId, APP_ID, 'data']);
 }
 
 function getRuntimeFilePath(dataContainer, uid) {
@@ -527,7 +618,7 @@ function buildDriverReceipt() {
   return {
     id: 'trip-driver-proof-1',
     date: '28/03 23:12',
-    route: '1280 Market Street -> Dolores Park',
+    route: 'Copacabana Palace -> Leblon',
     value: 'R$ 12,50',
     fare: 12.5,
     grossAmount: 12.5,
@@ -556,7 +647,7 @@ function buildPassengerReceipt() {
   return {
     id: 'trip-passenger-proof-1',
     date: '28/03 23:15',
-    route: '1280 Market Street -> Dolores Park',
+    route: 'Copacabana Palace -> Leblon',
     value: 'R$ 27,50',
     fare: 27.5,
     grossAmount: 27.5,
@@ -635,11 +726,17 @@ function buildApprovedDriverActivation() {
 function buildSeedUserData(uid, isDriverScenario) {
   if (isDriverScenario) {
     const driverActivation = buildApprovedDriverActivation();
+    const driverSeed = QA_PREFLIGHT_USERS?.driver || {};
+    const fallbackPlate = `TES${String(uid || '').replace(/\W/g, '').slice(-4) || '6789'}`;
+    const vehicleId = String(driverSeed.vehicleId || `test_vehicle_${uid.slice(0, 12)}`).trim();
+    const userVehicleId = String(driverSeed.userVehicleId || `uv_${vehicleId}`).trim();
+    const carPlate = String(driverSeed.carPlate || fallbackPlate).trim().toUpperCase();
+    const carType = String(driverSeed.carType || 'Leaf Plus').trim();
     const baseProfile = {
       uid,
       id: uid,
-      phone: '+5511888888888',
-      phoneNumber: '+5511888888888',
+      phone: String(driverSeed.phone || '+5521123456789').trim(),
+      phoneNumber: String(driverSeed.phone || '+5521123456789').trim(),
       email: 'motorista.teste@leafapp.com',
       name: 'Motorista',
       firstName: 'Leaf',
@@ -650,6 +747,14 @@ function buildSeedUserData(uid, isDriverScenario) {
       approved: true,
       isApproved: true,
       canGoOnline: true,
+      vehicleId,
+      activeVehicleId: vehicleId,
+      userVehicleId,
+      carPlate,
+      vehiclePlate: carPlate,
+      vehicleNumber: carPlate,
+      carModel: driverSeed.carModel || 'Tesla Model 3',
+      carType,
       isTestUser: true,
     };
 
@@ -666,8 +771,8 @@ function buildSeedUserData(uid, isDriverScenario) {
   const baseProfile = {
     uid,
     id: uid,
-    phone: '+5511999999999',
-    phoneNumber: '+5511999999999',
+    phone: '+5521102938475',
+    phoneNumber: '+5521102938475',
     email: 'passageiro.teste@leafapp.com',
     name: 'Leaf Passageiro Teste',
     firstName: 'Leaf',
@@ -706,21 +811,93 @@ function buildDriverActiveRide(status) {
     fare: 12.5,
     driverNetAmount: 10.8,
     estimatedDriverNetAmount: 10.8,
-    distanceKm: 2.4
+    distanceKm: 6.7
+  };
+}
+
+function buildDriverRoutePlan() {
+  const pickupCoordinates =
+    REAL_PICKUP_ROUTE_COORDINATES.length >= 2
+      ? REAL_PICKUP_ROUTE_COORDINATES
+      : [
+          BASE_COORDS.driverHome,
+          BASE_COORDS.pickupManeuver,
+          BASE_COORDS.pickup,
+        ];
+  const destinationCoordinates =
+    REAL_DESTINATION_ROUTE_COORDINATES.length >= 2
+      ? REAL_DESTINATION_ROUTE_COORDINATES
+      : [
+          BASE_COORDS.pickup,
+          BASE_COORDS.destinationManeuver,
+          BASE_COORDS.inTransit,
+          BASE_COORDS.destination,
+        ];
+  const pickupManeuver = routeCoordinateAt(pickupCoordinates, 10, BASE_COORDS.pickupManeuver);
+  const destinationManeuver = routeCoordinateAt(destinationCoordinates, 32, BASE_COORDS.destinationManeuver);
+
+  return {
+    pickupCoordinates,
+    destinationCoordinates,
+    combinedCoordinates: [
+      ...pickupCoordinates,
+      ...destinationCoordinates.slice(1),
+    ],
+    pickupSteps: [
+      {
+        instruction: 'Vire à direita na Av. Atlântica',
+        startLocation: routeCoordinateAt(pickupCoordinates, 0, BASE_COORDS.driverHome),
+        endLocation: pickupManeuver,
+        distanceMeters: 760,
+        durationSeconds: 150,
+        polylinePoints: null,
+      },
+      {
+        instruction: 'Siga em frente até o local de embarque',
+        startLocation: pickupManeuver,
+        endLocation: lastRouteCoordinate(pickupCoordinates, BASE_COORDS.pickup),
+        distanceMeters: 549,
+        durationSeconds: 109,
+        polylinePoints: null,
+      },
+    ],
+    destinationSteps: [
+      {
+        instruction: 'Vire à esquerda na Rua Jardim Botânico',
+        startLocation: routeCoordinateAt(destinationCoordinates, 0, BASE_COORDS.pickup),
+        endLocation: destinationManeuver,
+        distanceMeters: 1830,
+        durationSeconds: 315,
+        polylinePoints: null,
+      },
+      {
+        instruction: 'Siga em frente até o destino',
+        startLocation: destinationManeuver,
+        endLocation: lastRouteCoordinate(destinationCoordinates, BASE_COORDS.destination),
+        distanceMeters: 4887,
+        durationSeconds: 840,
+        polylinePoints: null,
+      },
+    ],
+    pickupDistanceKm: 1.309,
+    pickupDurationMinutes: 5,
+    destinationDistanceKm: 6.717,
+    destinationDurationMinutes: 20,
   };
 }
 
 function buildDriverTripMeta(status) {
   return {
     leg: status === 'started' ? 'destination' : 'pickup',
-    initialMeters: status === 'started' ? 2400 : 850,
-    initialEtaMinutes: status === 'started' ? 8 : 4,
+    initialMeters: status === 'started' ? 6717 : 1309,
+    initialEtaMinutes: status === 'started' ? 20 : 5,
     pickupAddress: LABELS.pickupAddress,
     destinationAddress: LABELS.destinationAddress,
     pickupCoordinate: BASE_COORDS.pickup,
     destinationCoordinate: BASE_COORDS.destination,
     fare: 12.5,
-    fareLabel: 'R$ 12,50'
+    fareLabel: 'R$ 12,50',
+    routePlan: buildDriverRoutePlan()
   };
 }
 
@@ -747,7 +924,7 @@ function buildPassengerTripBase(status = 'started') {
   const normalizedStatus = String(status || 'started').trim().toLowerCase();
   const isAccepted = normalizedStatus === 'accepted';
   const driverCoordinate = isAccepted
-    ? { latitude: 37.78205, longitude: -122.41231 }
+    ? { latitude: -22.9746, longitude: -43.1903 }
     : BASE_COORDS.inTransit;
   const tripDistanceKm = isAccepted ? 1.2 : 5.1;
   const tripDurationMin = isAccepted ? 4 : 16;
@@ -766,7 +943,7 @@ function buildPassengerTripBase(status = 'started') {
       paymentMethod: 'pix'
     },
     selectedDestination: {
-      name: 'Dolores Park',
+      name: 'Leblon',
       address: LABELS.destinationAddress,
       coordinate: BASE_COORDS.destination
     },
@@ -822,9 +999,9 @@ function scenarioPatch(name) {
           newFare: 34.75,
           diffFare: 7.25,
           destination: {
-            name: 'Oracle Park',
+            name: 'Barra da Tijuca',
             address: LABELS.newDestinationAddress,
-            coordinate: { latitude: 37.778595, longitude: -122.38927 }
+            coordinate: { latitude: -23.00037, longitude: -43.365895 }
           },
           chargeId: 'charge-extension-proof-1',
           paymentLink: 'https://pix.leaf.local/extension-proof-1',
@@ -863,7 +1040,7 @@ function scenarioPatch(name) {
         activeBookingId: null,
         activeBooking: null,
         selectedDestination: {
-          name: 'Dolores Park',
+          name: 'Leblon',
           address: LABELS.destinationAddress,
           coordinate: BASE_COORDS.destination
         },
@@ -929,11 +1106,14 @@ function scenarioPatch(name) {
         bookingStatus: 'accepted',
         activeBookingId: 'booking-proof-driver-1',
         driverOnline: true,
+        driverActivation: buildApprovedDriverActivation(),
+        driverActivationResolved: true,
+        driverCanGoOnline: true,
         driverOffers: [],
         driverActiveRide: buildDriverActiveRide('accepted'),
         driverTripMeta: buildDriverTripMeta('accepted'),
-        currentCoordinate: { latitude: 37.78205, longitude: -122.41231 },
-        driverCoordinate: { latitude: 37.78205, longitude: -122.41231 },
+        currentCoordinate: BASE_COORDS.driverHome,
+        driverCoordinate: BASE_COORDS.driverHome,
         boardingRemainingSec: 0
       };
     case 'driver-arrived':
@@ -942,6 +1122,9 @@ function scenarioPatch(name) {
         bookingStatus: 'arrived',
         activeBookingId: 'booking-proof-driver-1',
         driverOnline: true,
+        driverActivation: buildApprovedDriverActivation(),
+        driverActivationResolved: true,
+        driverCanGoOnline: true,
         driverOffers: [],
         driverActiveRide: buildDriverActiveRide('arrived'),
         driverTripMeta: buildDriverTripMeta('arrived'),
@@ -955,11 +1138,14 @@ function scenarioPatch(name) {
         bookingStatus: 'started',
         activeBookingId: 'booking-proof-driver-1',
         driverOnline: true,
+        driverActivation: buildApprovedDriverActivation(),
+        driverActivationResolved: true,
+        driverCanGoOnline: true,
         driverOffers: [],
         driverActiveRide: buildDriverActiveRide('started'),
         driverTripMeta: buildDriverTripMeta('started'),
-        currentCoordinate: BASE_COORDS.inTransit,
-        driverCoordinate: BASE_COORDS.inTransit,
+        currentCoordinate: BASE_COORDS.pickup,
+        driverCoordinate: BASE_COORDS.pickup,
         boardingRemainingSec: 0
       };
     case 'driver-receipt':
@@ -1013,7 +1199,16 @@ function main() {
       screenshotPath ? path.dirname(path.resolve(screenshotPath)) : process.cwd()
     )
   );
-  const freezeMs = Math.max(0, Number(arg('--freeze-ms', '14000')) || 14000);
+  const rawFreezeMs = arg('--freeze-ms', String(DEFAULT_QA_FREEZE_MS));
+  const parsedFreezeMs = Number(rawFreezeMs);
+  const freezeMs = Math.max(
+    0,
+    Number.isFinite(parsedFreezeMs) ? parsedFreezeMs : DEFAULT_QA_FREEZE_MS
+  );
+  const postLaunchWaitMs = Math.max(
+    0,
+    Number(arg('--post-launch-wait-ms', '0')) || 0
+  );
   const deviceId = DEVICE_MAP[deviceKey] || deviceKey;
   const isDriverScenario = scenario.startsWith('driver-');
   const defaultUid = isDriverScenario ? DRIVER_UID : PASSENGER_UID;
@@ -1078,6 +1273,9 @@ function main() {
   let launchPid = null;
   if (!skipLaunch) {
     const maxLaunchAttempts = 2;
+    const simulatedLocation = formatSimctlLocationCoordinate(
+      nextSnapshot.driverCoordinate || nextSnapshot.currentCoordinate,
+    );
 
     for (let attempt = 1; attempt <= maxLaunchAttempts; attempt += 1) {
       const baselineCrash = latestCrashReport('Leaf');
@@ -1090,10 +1288,13 @@ function main() {
       }
 
       ensureSimulatorReady(deviceId);
-      runBestEffort('xcrun', ['simctl', 'terminate', deviceId, APP_ID]);
+      runSimctlBestEffort(['terminate', deviceId, APP_ID]);
+      if (simulatedLocation) {
+        runSimctlBestEffort(['location', deviceId, 'set', simulatedLocation]);
+      }
       let launchOutput = '';
       try {
-        launchOutput = run('xcrun', ['simctl', 'launch', deviceId, APP_ID]);
+        launchOutput = runSimctl(['launch', deviceId, APP_ID]);
       } catch (error) {
         const retryableLaunchFailure =
           isRetryableLaunchError(error) && attempt < maxLaunchAttempts;
@@ -1117,7 +1318,7 @@ function main() {
         });
 
         if (route) {
-          run('xcrun', ['simctl', 'openurl', deviceId, route]);
+          runSimctl(['openurl', deviceId, route]);
           sleep(1200);
           acceptOpenPromptIfNeeded(deviceId);
           waitForProcessOrCrash({
@@ -1149,8 +1350,11 @@ function main() {
   }
 
   if (screenshotPath) {
+    if (postLaunchWaitMs > 0) {
+      sleep(postLaunchWaitMs);
+    }
     fs.mkdirSync(path.dirname(path.resolve(screenshotPath)), { recursive: true });
-    run('xcrun', ['simctl', 'io', deviceId, 'screenshot', path.resolve(screenshotPath)]);
+    runSimctl(['io', deviceId, 'screenshot', path.resolve(screenshotPath)]);
   }
 
   process.stdout.write(

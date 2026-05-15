@@ -9,37 +9,24 @@ appId: br.com.leaf.ride
 - waitForAnimationToEnd
 - takeScreenshot: "02-map-loaded"
 
-# Procurar botão "Ficar Online" ou toggle
-- runFlow:
-    when:
-      visible: 
-        - "Ficar Online"
-        - "Ficar online"
-        - "Online"
-        - "Começar a Trabalhar"
-    commands:
-      - takeScreenshot: "03-online-button-visible"
-      - tapOn: 
-          text: 
-            - "Ficar Online"
-            - "Ficar online"
-            - "Online"
-            - "Começar a Trabalhar"
+# Procurar botão "Ficar online" por testID estável.
+- extendedWaitUntil:
+    visible:
+      id: "driver-home-toggle-online"
+    timeout: 60000
+- takeScreenshot: "03-online-button-visible"
+- tapOn:
+    id: "driver-home-toggle-online"
 
 # Aguardar mudança de estado
 - waitForAnimationToEnd
 - takeScreenshot: "04-driver-online"
 
 # Verificar se apareceu confirmação ou mudou o estado
-- assertVisible: 
-    text: 
-      - "Você está online"
-      - "Aguardando corridas"
-      - "Online"
-    timeout: 10000
-    optional: true
+- extendedWaitUntil:
+    visible: ".*(Você está online|Voce esta online|Aguardando corridas|Online|Ficar Offline|Ficar offline).*"
+    timeout: 30000
 - takeScreenshot: "05-online-confirmed"
-
 
 
 

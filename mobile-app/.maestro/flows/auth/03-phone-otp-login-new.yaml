@@ -1,7 +1,7 @@
 appId: br.com.leaf.ride
 env:
-  TEST_PHONE: "11999999999"
-  TEST_OTP: "000000"
+  TEST_PHONE: "21102938475"
+  TEST_OTP: "992111"
 ---
 - launchApp:
     clearState: true

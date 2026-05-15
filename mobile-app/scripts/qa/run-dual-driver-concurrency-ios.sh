@@ -23,17 +23,17 @@ APP_PATH="${APP_PATH:-}"
 DEBUG_APP_PATH="${MOBILE_DIR}/ios/build/Build/Products/Debug-iphonesimulator/Leaf.app"
 RELEASE_APP_PATH="${MOBILE_DIR}/ios/build/Build/Products/Release-iphonesimulator/Leaf.app"
 
-API_BASE_URL="${API_BASE_URL:-https://api.147.182.204.181.sslip.io}"
-WS_URL="${WS_URL:-https://socket.147.182.204.181.sslip.io}"
+API_BASE_URL="${API_BASE_URL:-https://api.leaf.app.br}"
+WS_URL="${WS_URL:-https://socket.leaf.app.br}"
 DO_HOST="${DO_HOST:-147.182.204.181}"
 DO_KEY="${DO_KEY:-${ROOT_DIR}/digitaloceankey}"
 
-PASSENGER_PHONE="${PASSENGER_PHONE:-11999999999}"
-PASSENGER_TWO_PHONE="${PASSENGER_TWO_PHONE:-11999999998}"
-PASSENGER_THREE_PHONE="${PASSENGER_THREE_PHONE:-11999999997}"
-PASSENGER_FOUR_PHONE="${PASSENGER_FOUR_PHONE:-11999999996}"
-DRIVER_ONE_PHONE="${DRIVER_ONE_PHONE:-11888888888}"
-DRIVER_TWO_PHONE="${DRIVER_TWO_PHONE:-11888888889}"
+PASSENGER_PHONE="${PASSENGER_PHONE:-21102938475}"
+PASSENGER_TWO_PHONE="${PASSENGER_TWO_PHONE:-21102938476}"
+PASSENGER_THREE_PHONE="${PASSENGER_THREE_PHONE:-21102938477}"
+PASSENGER_FOUR_PHONE="${PASSENGER_FOUR_PHONE:-21102938478}"
+DRIVER_ONE_PHONE="${DRIVER_ONE_PHONE:-21123456789}"
+DRIVER_TWO_PHONE="${DRIVER_TWO_PHONE:-21123456790}"
 
 STABILIZATION_SECONDS="${STABILIZATION_SECONDS:-8}"
 FLOW_SETTLE_SECONDS="${FLOW_SETTLE_SECONDS:-5}"
@@ -1089,14 +1089,14 @@ scenario_single_accept_clears_other() {
     "label": "single-offer",
     "fare": 24.9,
     "pickup": {
-      "lat": 37.7751,
-      "lng": -122.4191,
-      "address": "100 Market St, San Francisco, CA"
+      "lat": -22.971964,
+      "lng": -43.182543,
+      "address": "Copacabana Palace, Rio de Janeiro, RJ"
     },
     "destination": {
-      "lat": 37.7849,
-      "lng": -122.4094,
-      "address": "Salesforce Tower, San Francisco, CA"
+      "lat": -22.984926,
+      "lng": -43.20456,
+      "address": "Ipanema, Rio de Janeiro, RJ"
     }
   }
 ]
@@ -1150,14 +1150,14 @@ scenario_competitive_accept_notice() {
     "label": "competitive-offer",
     "fare": 31.4,
     "pickup": {
-      "lat": 37.7764,
-      "lng": -122.4181,
-      "address": "Civic Center Plaza, San Francisco, CA"
+      "lat": -22.951916,
+      "lng": -43.180753,
+      "address": "Botafogo, Rio de Janeiro, RJ"
     },
     "destination": {
-      "lat": 37.7936,
-      "lng": -122.3965,
-      "address": "Pier 39, San Francisco, CA"
+      "lat": -22.903539,
+      "lng": -43.209587,
+      "address": "Centro, Rio de Janeiro, RJ"
     }
   }
 ]
@@ -1224,14 +1224,14 @@ scenario_multi_offer_queue_probe() {
     "passengerKey": "passenger",
     "fare": 42.8,
     "pickup": {
-      "lat": 37.7948,
-      "lng": -122.3942,
-      "address": "Embarque distante 1, Embarcadero, San Francisco, CA"
+      "lat": -22.971964,
+      "lng": -43.182543,
+      "address": "Embarque distante 1, Copacabana Palace, Rio de Janeiro, RJ"
     },
     "destination": {
-      "lat": 37.8087,
-      "lng": -122.4098,
-      "address": "Fisherman's Wharf, San Francisco, CA"
+      "lat": -23.00037,
+      "lng": -43.365895,
+      "address": "Barra da Tijuca, Rio de Janeiro, RJ"
     }
   },
   {
@@ -1239,14 +1239,14 @@ scenario_multi_offer_queue_probe() {
     "passengerKey": "passengerTwo",
     "fare": 18.6,
     "pickup": {
-      "lat": 37.7752,
-      "lng": -122.4192,
-      "address": "Embarque próximo 2, Market Street, San Francisco, CA"
+      "lat": -22.984926,
+      "lng": -43.20456,
+      "address": "Embarque próximo 2, Ipanema, Rio de Janeiro, RJ"
     },
     "destination": {
-      "lat": 37.7844,
-      "lng": -122.4079,
-      "address": "Yerba Buena Center, San Francisco, CA"
+      "lat": -22.984843,
+      "lng": -43.221972,
+      "address": "Leblon, Rio de Janeiro, RJ"
     }
   },
   {
@@ -1254,14 +1254,14 @@ scenario_multi_offer_queue_probe() {
     "passengerKey": "passengerThree",
     "fare": 27.4,
     "pickup": {
-      "lat": 37.7817,
-      "lng": -122.4102,
-      "address": "Embarque intermediário 3, SoMa, San Francisco, CA"
+      "lat": -22.951916,
+      "lng": -43.180753,
+      "address": "Embarque intermediário 3, Botafogo, Rio de Janeiro, RJ"
     },
     "destination": {
-      "lat": 37.7605,
-      "lng": -122.4269,
-      "address": "Mission Dolores, San Francisco, CA"
+      "lat": -22.924932,
+      "lng": -43.232168,
+      "address": "Tijuca, Rio de Janeiro, RJ"
     }
   },
   {
@@ -1269,14 +1269,14 @@ scenario_multi_offer_queue_probe() {
     "passengerKey": "passengerFour",
     "fare": 22.1,
     "pickup": {
-      "lat": 37.7750,
-      "lng": -122.4195,
-      "address": "Embarque muito próximo 4, Powell Street, San Francisco, CA"
+      "lat": -22.929508,
+      "lng": -43.176044,
+      "address": "Embarque muito próximo 4, Flamengo, Rio de Janeiro, RJ"
     },
     "destination": {
-      "lat": 37.7897,
-      "lng": -122.4011,
-      "address": "Transamerica Pyramid, San Francisco, CA"
+      "lat": -22.903539,
+      "lng": -43.209587,
+      "address": "Centro, Rio de Janeiro, RJ"
     }
   }
 ]
@@ -1403,14 +1403,14 @@ scenario_dual_reject_stays_online() {
     "passengerKey": "passenger",
     "fare": 19.8,
     "pickup": {
-      "lat": 37.7761,
-      "lng": -122.4187,
-      "address": "Oferta inicial para recusa, San Francisco, CA"
+      "lat": -22.929508,
+      "lng": -43.176044,
+      "address": "Oferta inicial para recusa, Flamengo, Rio de Janeiro, RJ"
     },
     "destination": {
-      "lat": 37.7882,
-      "lng": -122.4006,
-      "address": "Destino inicial após recusa, San Francisco, CA"
+      "lat": -22.984843,
+      "lng": -43.221972,
+      "address": "Destino inicial após recusa, Leblon, Rio de Janeiro, RJ"
     }
   },
   {
@@ -1418,14 +1418,14 @@ scenario_dual_reject_stays_online() {
     "passengerKey": "passengerTwo",
     "fare": 23.4,
     "pickup": {
-      "lat": 37.7755,
-      "lng": -122.4190,
-      "address": "Nova oferta após recusa, San Francisco, CA"
+      "lat": -22.971964,
+      "lng": -43.182543,
+      "address": "Nova oferta após recusa, Copacabana, Rio de Janeiro, RJ"
     },
     "destination": {
-      "lat": 37.7927,
-      "lng": -122.3973,
-      "address": "Destino de follow-up, San Francisco, CA"
+      "lat": -23.00037,
+      "lng": -43.365895,
+      "address": "Destino de follow-up, Barra da Tijuca, Rio de Janeiro, RJ"
     }
   }
 ]
@@ -1498,14 +1498,14 @@ scenario_late_reaccept_blocked() {
     "label": "late-reaccept-offer",
     "fare": 28.7,
     "pickup": {
-      "lat": 37.7762,
-      "lng": -122.4178,
-      "address": "Oferta em disputa com retry tardio, San Francisco, CA"
+      "lat": -22.984926,
+      "lng": -43.20456,
+      "address": "Oferta em disputa com retry tardio, Ipanema, Rio de Janeiro, RJ"
     },
     "destination": {
-      "lat": 37.7909,
-      "lng": -122.3994,
-      "address": "Destino retry tardio, San Francisco, CA"
+      "lat": -22.924932,
+      "lng": -43.232168,
+      "address": "Destino retry tardio, Tijuca, Rio de Janeiro, RJ"
     }
   }
 ]
@@ -1568,14 +1568,14 @@ scenario_reconnect_mid_dispute() {
     "passengerKey": "passenger",
     "fare": 25.9,
     "pickup": {
-      "lat": 37.7759,
-      "lng": -122.4186,
-      "address": "Oferta compartilhada para reconnect, San Francisco, CA"
+      "lat": -22.951916,
+      "lng": -43.180753,
+      "address": "Oferta compartilhada para reconnect, Botafogo, Rio de Janeiro, RJ"
     },
     "destination": {
-      "lat": 37.7918,
-      "lng": -122.3991,
-      "address": "Destino da disputa reconnect, San Francisco, CA"
+      "lat": -22.984843,
+      "lng": -43.221972,
+      "address": "Destino da disputa reconnect, Leblon, Rio de Janeiro, RJ"
     }
   },
   {
@@ -1583,14 +1583,14 @@ scenario_reconnect_mid_dispute() {
     "passengerKey": "passengerTwo",
     "fare": 21.7,
     "pickup": {
-      "lat": 37.7753,
-      "lng": -122.4191,
-      "address": "Oferta nova após reconnect, San Francisco, CA"
+      "lat": -22.929508,
+      "lng": -43.176044,
+      "address": "Oferta nova após reconnect, Flamengo, Rio de Janeiro, RJ"
     },
     "destination": {
-      "lat": 37.7868,
-      "lng": -122.4040,
-      "address": "Destino da oferta nova pós-reconnect, San Francisco, CA"
+      "lat": -22.903539,
+      "lng": -43.209587,
+      "address": "Destino da oferta nova pós-reconnect, Centro, Rio de Janeiro, RJ"
     }
   }
 ]

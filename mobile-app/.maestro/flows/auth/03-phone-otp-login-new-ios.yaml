@@ -2,6 +2,8 @@ appId: br.com.leaf.ride
 env:
   TEST_PHONE: "21102938475"
   TEST_OTP: "992111"
+  TEST_PHONE_FALLBACK: "21123456789"
+  TEST_OTP_FALLBACK: "992000"
   EXISTING_ACCOUNT_PASSWORD: "Leaf12345"
 ---
 - launchApp:
@@ -95,7 +97,6 @@ env:
           id: "auth-phone-input"
       - eraseText
       - inputText: ${TEST_PHONE}
-      - pressKey: Enter
       - runFlow:
           when:
             visible:
@@ -110,15 +111,20 @@ env:
           commands:
             - pressKey: Enter
       - waitForAnimationToEnd
+      - extendedWaitUntil:
+          visible:
+            id: "(auth-password-input|auth-otp-digit-0|passenger-home-destination-input)"
+          timeout: 60000
       - runFlow:
           when:
-            visible: "Senha"
+            visible:
+              id: "auth-password-input"
           commands:
             - tapOn:
-                point: "50%,52%"
+                id: "auth-password-input"
             - inputText: ${EXISTING_ACCOUNT_PASSWORD}
             - swipe:
-                start: "50%,82%"
+                start: "50%,84%"
                 end: "50%,34%"
             - runFlow:
                 when:
@@ -129,11 +135,6 @@ env:
                       id: "auth-continue-btn"
             - runFlow:
                 when:
-                  visible: "Entrar"
-                commands:
-                  - tapOn: "Entrar"
-            - runFlow:
-                when:
                   notVisible:
                     id: "auth-continue-btn"
                 commands:
@@ -141,17 +142,86 @@ env:
             - waitForAnimationToEnd
       - runFlow:
           when:
-            visible: "Verificação"
+            visible:
+              id: "auth-otp-digit-0"
           commands:
-            - inputText: ${TEST_OTP}
+            - tapOn:
+                id: "auth-otp-digit-0"
+            - inputText: "9"
+            - tapOn:
+                id: "auth-otp-digit-1"
+            - inputText: "9"
+            - tapOn:
+                id: "auth-otp-digit-2"
+            - inputText: "2"
+            - tapOn:
+                id: "auth-otp-digit-3"
+            - inputText: "1"
+            - tapOn:
+                id: "auth-otp-digit-4"
+            - inputText: "1"
+            - tapOn:
+                id: "auth-otp-digit-5"
+            - inputText: "1"
+            - waitForAnimationToEnd
             - runFlow:
                 when:
-                  visible: "Verificar código"
+                  visible: "Erro.*"
                 commands:
-                  - tapOn: "Verificar código"
+                  - tapOn: "OK"
+                  - tapOn: "Voltar"
+                  - tapOn:
+                      id: "auth-phone-input"
+                  - eraseText
+                  - inputText: ${TEST_PHONE_FALLBACK}
+                  - runFlow:
+                      when:
+                        visible:
+                          id: "auth-continue-btn"
+                      commands:
+                        - tapOn:
+                            id: "auth-continue-btn"
+                  - runFlow:
+                      when:
+                        notVisible:
+                          id: "auth-continue-btn"
+                      commands:
+                        - pressKey: Enter
+                  - waitForAnimationToEnd
+                  - extendedWaitUntil:
+                      visible:
+                        id: "auth-otp-digit-0"
+                      timeout: 45000
+                  - tapOn:
+                      id: "auth-otp-digit-0"
+                  - inputText: "9"
+                  - tapOn:
+                      id: "auth-otp-digit-1"
+                  - inputText: "9"
+                  - tapOn:
+                      id: "auth-otp-digit-2"
+                  - inputText: "2"
+                  - tapOn:
+                      id: "auth-otp-digit-3"
+                  - inputText: "0"
+                  - tapOn:
+                      id: "auth-otp-digit-4"
+                  - inputText: "0"
+                  - tapOn:
+                      id: "auth-otp-digit-5"
+                  - inputText: "0"
+                  - waitForAnimationToEnd
+            - runFlow:
+                when:
+                  visible:
+                    id: "auth-otp-verify-btn"
+                commands:
+                  - tapOn:
+                      id: "auth-otp-verify-btn"
             - extendedWaitUntil:
-                notVisible: "Verificação"
-                timeout: 30000
+                notVisible:
+                  id: "auth-otp-digit-0"
+                timeout: 60000
       - runFlow:
           when:
             visible: "Como você quer usar a Leaf?"

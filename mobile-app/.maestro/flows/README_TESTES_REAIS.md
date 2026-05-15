@@ -5,8 +5,8 @@
 ### 🔐 Autenticação
 
 1. **`auth/01-login-customer-real.yaml`**
-   - Login completo como customer
-   - Trata usuário novo e existente
+   - Login com OTP real via Firebase Test Phone Numbers
+   - Valida fluxo de verificação de código (sem bypass)
    - Captura screenshots em cada etapa
 
 ### 🚗 Corridas
@@ -81,9 +81,6 @@ Depois use no teste:
 
 - `COMO_TESTAR_E_ANALISAR.md` - Guia completo
 - `GUIA_TESTES_E2E.md` - Documentação técnica
-
-
-
 
 
 

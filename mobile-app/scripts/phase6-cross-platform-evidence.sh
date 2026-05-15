@@ -8,7 +8,8 @@ PROJECT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 source "${SCRIPT_DIR}/source-local-build-env.sh"
 
 APP_PACKAGE="${APP_PACKAGE:-br.com.leaf.ride}"
-BACKEND_URL="${BACKEND_URL:-https://api.147.182.204.181.sslip.io}"
+BACKEND_URL="${BACKEND_URL:-https://api.leaf.app.br}"
+BACKEND_HEALTH_ENDPOINT="${BACKEND_HEALTH_ENDPOINT:-/api/health}"
 ADB_BIN="${ADB_BIN:-$(command -v adb || true)}"
 ANDROID_SERIAL="${ANDROID_SERIAL:-}"
 IOS_SIM_UDID="${IOS_SIM_UDID:-}"
@@ -16,6 +17,7 @@ SESSION_SECONDS="${SESSION_SECONDS:-0}"
 OPEN_APPS="${OPEN_APPS:-true}"
 RECORD_SCREEN="${RECORD_SCREEN:-true}"
 ANDROID_VIDEO_LIMIT="${ANDROID_VIDEO_LIMIT:-180}"
+BACKEND_HEALTH_URL="${BACKEND_URL%/}${BACKEND_HEALTH_ENDPOINT}"
 
 resolve_adb() {
   if [[ -n "${ADB_BIN}" && -x "${ADB_BIN}" ]]; then
@@ -145,7 +147,7 @@ cleanup() {
   "${ADB_BIN}" -s "${ANDROID_SERIAL}" shell getprop ro.build.version.release > "${ARTIFACTS_DIR}/android-version.txt" || true
   xcrun simctl getenv "${IOS_SIM_UDID}" SIMULATOR_DEVICE_NAME > "${ARTIFACTS_DIR}/ios-sim-device-name.txt" 2>/dev/null || true
   xcrun simctl spawn "${IOS_SIM_UDID}" defaults read /Library/Preferences/.GlobalPreferences AppleLocale > "${ARTIFACTS_DIR}/ios-sim-locale.txt" 2>/dev/null || true
-  curl -sS --max-time 12 "${BACKEND_URL}/health" > "${ARTIFACTS_DIR}/backend-health.json" || true
+  curl -sS --max-time 12 "${BACKEND_HEALTH_URL}" > "${ARTIFACTS_DIR}/backend-health.json" || true
 
   grep -Ei "FATAL EXCEPTION|AndroidRuntime|Fatal signal|ANR in ${APP_PACKAGE}|TypeError|ReferenceError|Unhandled promise rejection|SIGABRT" "${ANDROID_LOG}" > "${ANDROID_CRIT}" || true
   grep -Ei "terminating app due to uncaught exception|fatal error|uncaught exception|EXC_BAD_ACCESS|SIGABRT|TypeError|ReferenceError|RCTFatal" "${IOS_LOG}" | grep -Evi "ATS exception" > "${IOS_CRIT}" || true
@@ -172,7 +174,8 @@ EOF
 - Android serial: ${ANDROID_SERIAL}
 - iOS simulator: ${IOS_SIM_UDID}
 - Package: ${APP_PACKAGE}
-- Backend: ${BACKEND_URL}
+- Backend base: ${BACKEND_URL}
+- Backend health: ${BACKEND_HEALTH_URL}
 - Android critical log lines: ${android_crit}
 - iOS critical log lines: ${ios_crit}
 - Artifacts dir: ${ARTIFACTS_DIR}

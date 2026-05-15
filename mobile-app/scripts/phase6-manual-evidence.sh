@@ -8,13 +8,15 @@ PROJECT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 source "${SCRIPT_DIR}/source-local-build-env.sh"
 
 APP_PACKAGE="${APP_PACKAGE:-br.com.leaf.ride}"
-BACKEND_URL="${BACKEND_URL:-https://api.147.182.204.181.sslip.io}"
+BACKEND_URL="${BACKEND_URL:-https://api.leaf.app.br}"
+BACKEND_HEALTH_ENDPOINT="${BACKEND_HEALTH_ENDPOINT:-/api/health}"
 ADB_BIN="${ADB_BIN:-$(command -v adb || true)}"
 ANDROID_SERIAL="${ANDROID_SERIAL:-}"
 SESSION_SECONDS="${SESSION_SECONDS:-0}"
 OPEN_APP="${OPEN_APP:-true}"
 RECORD_SCREEN="${RECORD_SCREEN:-true}"
 SCREEN_TIME_LIMIT="${SCREEN_TIME_LIMIT:-180}"
+BACKEND_HEALTH_URL="${BACKEND_URL%/}${BACKEND_HEALTH_ENDPOINT}"
 
 resolve_adb() {
   if [[ -n "${ADB_BIN}" && -x "${ADB_BIN}" ]]; then
@@ -122,7 +124,7 @@ cleanup() {
   "${ADB_BIN}" -s "${ANDROID_SERIAL}" shell getprop ro.product.model > "${ARTIFACTS_DIR}/device-model.txt" || true
   "${ADB_BIN}" -s "${ANDROID_SERIAL}" shell getprop ro.build.version.release > "${ARTIFACTS_DIR}/android-version.txt" || true
   "${ADB_BIN}" -s "${ANDROID_SERIAL}" shell dumpsys package "${APP_PACKAGE}" > "${ARTIFACTS_DIR}/package-dump.txt" 2>&1 || true
-  curl -sS --max-time 12 "${BACKEND_URL}/health" > "${ARTIFACTS_DIR}/backend-health.json" || true
+  curl -sS --max-time 12 "${BACKEND_HEALTH_URL}" > "${ARTIFACTS_DIR}/backend-health.json" || true
 
   grep -E " [EF]/" "${LOGCAT_FILE}" | grep -Ei "FATAL EXCEPTION|ANR in|CRASH|Unhandled|TypeError|ReferenceError|SIGABRT|IllegalStateException" > "${CRITICAL_FILE}" || true
   local critical_count
@@ -147,7 +149,8 @@ EOF
 - Timestamp: ${TIMESTAMP}
 - Device serial: ${ANDROID_SERIAL}
 - Package: ${APP_PACKAGE}
-- Backend: ${BACKEND_URL}
+- Backend base: ${BACKEND_URL}
+- Backend health: ${BACKEND_HEALTH_URL}
 - Critical log lines: ${critical_count}
 - Artifacts dir: ${ARTIFACTS_DIR}
 - Screen recording: $( [[ -f "${LOCAL_VIDEO}" ]] && echo "captured" || echo "not captured" )

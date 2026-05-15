@@ -5,13 +5,13 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 BACKEND_DIR="${ROOT_DIR}/../leaf-websocket-backend"
 
-API_BASE_URL="${API_BASE_URL:-https://api.147.182.204.181.sslip.io}"
-WS_URL="${WS_URL:-https://socket.147.182.204.181.sslip.io}"
+API_BASE_URL="${API_BASE_URL:-https://api.leaf.app.br}"
+WS_URL="${WS_URL:-https://socket.leaf.app.br}"
 SOCKET_BASE_URL="${SOCKET_BASE_URL:-${WS_URL}}"
-DASHBOARD_URL="${DASHBOARD_URL:-https://dashboard.147.182.204.181.sslip.io}"
+DASHBOARD_URL="${DASHBOARD_URL:-https://dashboard.leaf.app.br}"
 
-PASSENGER_PHONE="${PASSENGER_PHONE:-11999999999}"
-DRIVER_PHONE="${DRIVER_PHONE:-11888888888}"
+PASSENGER_PHONE="${PASSENGER_PHONE:-21102938475}"
+DRIVER_PHONE="${DRIVER_PHONE:-21123456789}"
 PASSENGER_UID="${PASSENGER_UID:-OjML1wSzdNRaynjqMRlSW1Y0LVy2}"
 DRIVER_UID="${DRIVER_UID:-8vg2kxxqi3TYKlpD6eBlWgYseIq2}"
 
