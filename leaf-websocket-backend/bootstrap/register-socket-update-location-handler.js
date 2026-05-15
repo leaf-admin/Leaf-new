@@ -430,7 +430,7 @@ function registerSocketUpdateLocationHandler({
                         const bookingData = await redis.hgetall(`booking:${activeTripId}`);
                         const bookingDriverId = bookingData?.driverId;
                         const bookingStatus = String(bookingData?.status || '').toUpperCase();
-                        const validStatuses = new Set(['ACCEPTED', 'SEARCHING', 'STARTED', 'IN_PROGRESS']);
+                        const validStatuses = new Set(['ACCEPTED', 'ARRIVED', 'SEARCHING', 'STARTED', 'IN_PROGRESS']);
 
                         if (bookingDriverId === driverId && validStatuses.has(bookingStatus)) {
                             customerId = bookingData.customerId || bookingData.customer || indexedTrip.customerId || null;

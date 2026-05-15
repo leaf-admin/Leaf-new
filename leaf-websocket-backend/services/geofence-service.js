@@ -9,6 +9,13 @@ const { logger } = require('../utils/logger');
 const fs = require('fs');
 const path = require('path');
 
+const DEFAULT_RIO_DESTINATION_BOUNDS = Object.freeze({
+    south: -23.0823,
+    west: -43.7958,
+    north: -22.7423,
+    east: -43.0990
+});
+
 function coordinatesEqual(a, b) {
     return (
         Array.isArray(a) &&
@@ -60,10 +67,13 @@ function normalizeRegionCoordinates(region) {
 }
 
 const isGeofenceBypassEnabled = () => {
+    const reviewMode = String(process.env.APP_REVIEW || '').trim().toLowerCase() === 'true';
+    const reviewBypassEnabled = String(process.env.GEOFENCE_BYPASS_IN_REVIEW || '').trim().toLowerCase() === 'true';
+
     return (
         String(process.env.BYPASS_GEOFENCE || '').toLowerCase() === 'true' ||
         String(process.env.GEOFENCE_RADIUS_KM || '') === '9999' ||
-        String(process.env.APP_REVIEW || '').toLowerCase() === 'true'
+        (reviewMode && reviewBypassEnabled)
     );
 };
 
@@ -80,10 +90,13 @@ class GeofenceService {
         const envRegion = this.loadRegionFromEnv();
         this.allowedRegion = envRegion || this.defaultRegion;
         this.regionSource = envRegion ? 'env' : (this.defaultRegion ? 'default' : 'none');
+        this.destinationBounds =
+            this.loadDestinationBoundsFromEnv() || DEFAULT_RIO_DESTINATION_BOUNDS;
 
         logger.info('✅ GeofenceService inicializado', {
             regionPoints: Array.isArray(this.allowedRegion) ? this.allowedRegion.length : 0,
             regionSource: this.regionSource,
+            destinationBounds: this.destinationBounds,
             runtimeEnabled: this.runtimeEnabled,
             bypassEnabled: isGeofenceBypassEnabled()
         });
@@ -142,6 +155,50 @@ class GeofenceService {
         }
     }
 
+    loadDestinationBoundsFromEnv() {
+        const raw =
+            process.env.GEOFENCE_DESTINATION_BOUNDS ||
+            process.env.RIDE_DESTINATION_BOUNDS ||
+            '';
+        if (!raw) return null;
+
+        try {
+            const parsed = JSON.parse(raw);
+            const bounds = Array.isArray(parsed)
+                ? {
+                    south: Number(parsed[0]),
+                    west: Number(parsed[1]),
+                    north: Number(parsed[2]),
+                    east: Number(parsed[3])
+                }
+                : {
+                    south: Number(parsed.south),
+                    west: Number(parsed.west),
+                    north: Number(parsed.north),
+                    east: Number(parsed.east)
+                };
+
+            if (
+                Number.isFinite(bounds.south) &&
+                Number.isFinite(bounds.west) &&
+                Number.isFinite(bounds.north) &&
+                Number.isFinite(bounds.east) &&
+                bounds.south < bounds.north &&
+                bounds.west < bounds.east
+            ) {
+                return bounds;
+            }
+
+            logger.warn('⚠️ GEOFENCE_DESTINATION_BOUNDS inválido, usando área padrão do Rio');
+            return null;
+        } catch (error) {
+            logger.warn('⚠️ Erro ao carregar GEOFENCE_DESTINATION_BOUNDS, usando área padrão do Rio', {
+                error: error.message
+            });
+            return null;
+        }
+    }
+
     /**
      * Verificar se ponto está dentro do polígono (Ray Casting Algorithm)
      * @param {number} lat - Latitude do ponto
@@ -178,8 +235,25 @@ class GeofenceService {
         return inside;
     }
 
+    isPointInDestinationBounds(lat, lng, bounds = null) {
+        const resolvedBounds = bounds || this.destinationBounds || DEFAULT_RIO_DESTINATION_BOUNDS;
+        const normalizedLat = Number(lat);
+        const normalizedLng = Number(lng);
+
+        if (!Number.isFinite(normalizedLat) || !Number.isFinite(normalizedLng)) {
+            return false;
+        }
+
+        return (
+            normalizedLat >= resolvedBounds.south &&
+            normalizedLat <= resolvedBounds.north &&
+            normalizedLng >= resolvedBounds.west &&
+            normalizedLng <= resolvedBounds.east
+        );
+    }
+
     /**
-     * Validar se origem e destino estão dentro da região permitida
+     * Validar se a origem inicia na geofence operacional e se o destino está no Rio.
      * @param {Object} pickupLocation - { lat, lng }
      * @param {Object} destinationLocation - { lat, lng }
      * @returns {{valid: boolean, error?: string, details?: Object}}
@@ -217,8 +291,11 @@ class GeofenceService {
             pickupLocation.lng
         );
 
-        // Verificar se destino está dentro da região
-        const destinationInside = this.isPointInPolygon(
+        const destinationInsideOperationalRegion = this.isPointInPolygon(
+            destinationLocation.lat,
+            destinationLocation.lng
+        );
+        const destinationInsideServiceArea = this.isPointInDestinationBounds(
             destinationLocation.lat,
             destinationLocation.lng
         );
@@ -235,14 +312,15 @@ class GeofenceService {
             };
         }
 
-        if (!destinationInside) {
+        if (!destinationInsideServiceArea) {
             return {
                 valid: false,
-                error: 'Destino fora da região de operação permitida',
-                code: 'DESTINATION_OUTSIDE_REGION',
+                error: 'Destino fora da área de destino permitida',
+                code: 'DESTINATION_OUTSIDE_SERVICE_AREA',
                 details: {
                     destination: { lat: destinationLocation.lat, lng: destinationLocation.lng },
-                    inside: false
+                    insideOperationalRegion: destinationInsideOperationalRegion,
+                    insideDestinationArea: false
                 }
             };
         }
@@ -251,7 +329,10 @@ class GeofenceService {
             valid: true,
             details: {
                 pickup: { inside: true },
-                destination: { inside: true }
+                destination: {
+                    insideOperationalRegion: destinationInsideOperationalRegion,
+                    insideDestinationArea: true
+                }
             }
         };
     }

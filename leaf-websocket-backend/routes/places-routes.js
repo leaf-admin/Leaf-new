@@ -12,6 +12,25 @@ const rideCostTelemetryService = require('../services/ride-cost-telemetry-servic
 const { logger } = require('../utils/logger');
 
 const AUTOCOMPLETE_CACHE_MIN_QUERY_LEN = 8;
+const DIRECTIONS_FALLBACK_SPEED_KMH = Number.parseFloat(
+  process.env.PLACES_DIRECTIONS_FALLBACK_SPEED_KMH || '35',
+);
+const DIRECTIONS_FALLBACK_TRAFFIC_FACTOR = Number.parseFloat(
+  process.env.PLACES_DIRECTIONS_FALLBACK_TRAFFIC_FACTOR || '1.2',
+);
+const DIRECTIONS_MAX_REQUESTS_PER_BOOKING = Number.parseInt(
+  process.env.PLACES_DIRECTIONS_MAX_REQUESTS_PER_BOOKING ||
+  process.env.RIDE_COST_DIRECTIONS_MAX_REQUESTS_PER_BOOKING ||
+  '6',
+  10,
+);
+const DIRECTIONS_HARD_CAP_USD = Number.parseFloat(
+  process.env.PLACES_DIRECTIONS_HARD_CAP_USD ||
+  process.env.RIDE_COST_DIRECTIONS_HARD_CAP_USD ||
+  process.env.RIDE_COST_TELEMETRY_BUDGET_USD ||
+  '0',
+);
+const EARTH_RADIUS_KM = 6371;
 
 function normalizeText(value, fallback = '') {
   if (typeof value !== 'string') {
@@ -50,6 +69,268 @@ function normalizeLocation(location = null) {
     return null;
   }
   return { lat, lng };
+}
+
+function normalizeLatLng(value) {
+  const lat = Number(value?.lat ?? value?.latitude);
+  const lng = Number(value?.lng ?? value?.longitude);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+    return null;
+  }
+  return { lat, lng };
+}
+
+function parseCoordPair(rawValue) {
+  const [rawLat, rawLng] = String(rawValue || '').split(',');
+  const lat = Number(rawLat);
+  const lng = Number(rawLng);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+    return null;
+  }
+  return { lat, lng };
+}
+
+function normalizeWaypoints(waypointsInput) {
+  if (!waypointsInput) {
+    return [];
+  }
+
+  const rawWaypoints = Array.isArray(waypointsInput)
+    ? waypointsInput
+    : String(waypointsInput)
+      .split('|')
+      .map((item) => item.trim())
+      .filter(Boolean);
+
+  return rawWaypoints
+    .map((item) => (typeof item === 'string' ? parseCoordPair(item) : normalizeLatLng(item)))
+    .filter(Boolean);
+}
+
+function toRad(value) {
+  return (value * Math.PI) / 180;
+}
+
+function computeHaversineDistanceKm(startPoint, endPoint) {
+  const latDelta = toRad(endPoint.lat - startPoint.lat);
+  const lngDelta = toRad(endPoint.lng - startPoint.lng);
+  const startLatRad = toRad(startPoint.lat);
+  const endLatRad = toRad(endPoint.lat);
+  const a = Math.sin(latDelta / 2) ** 2 +
+    (Math.cos(startLatRad) * Math.cos(endLatRad) * Math.sin(lngDelta / 2) ** 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return EARTH_RADIUS_KM * c;
+}
+
+function encodePolylineCoordinate(value) {
+  let coordinate = Math.round(value * 1e5);
+  coordinate <<= 1;
+  if (value < 0) {
+    coordinate = ~coordinate;
+  }
+  let encoded = '';
+  while (coordinate >= 0x20) {
+    encoded += String.fromCharCode((0x20 | (coordinate & 0x1f)) + 63);
+    coordinate >>= 5;
+  }
+  encoded += String.fromCharCode(coordinate + 63);
+  return encoded;
+}
+
+function encodePolylinePath(points = []) {
+  let encoded = '';
+  let previousLat = 0;
+  let previousLng = 0;
+
+  points.forEach((point) => {
+    const latitude = Number(point?.lat);
+    const longitude = Number(point?.lng);
+    if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
+      return;
+    }
+    const scaledLat = Math.round(latitude * 1e5);
+    const scaledLng = Math.round(longitude * 1e5);
+    const deltaLat = (scaledLat - previousLat) / 1e5;
+    const deltaLng = (scaledLng - previousLng) / 1e5;
+    encoded += encodePolylineCoordinate(deltaLat);
+    encoded += encodePolylineCoordinate(deltaLng);
+    previousLat = scaledLat;
+    previousLng = scaledLng;
+  });
+
+  return encoded || null;
+}
+
+function sanitizePositiveInteger(value, fallback = 0) {
+  const numeric = Number.parseInt(value, 10);
+  return Number.isFinite(numeric) && numeric > 0 ? numeric : fallback;
+}
+
+function sanitizePositiveNumber(value, fallback = 0) {
+  const numeric = Number(value);
+  return Number.isFinite(numeric) && numeric > 0 ? numeric : fallback;
+}
+
+function buildApproximateDirectionsPayload({
+  startLoc,
+  destLoc,
+  waypoints = [],
+  trafficEnabled = false,
+}) {
+  const origin = parseCoordPair(startLoc);
+  const destination = parseCoordPair(destLoc);
+  if (!origin || !destination) {
+    return null;
+  }
+
+  const normalizedWaypoints = normalizeWaypoints(waypoints);
+  const path = [origin, ...normalizedWaypoints, destination];
+  if (path.length < 2) {
+    return null;
+  }
+
+  const configuredSpeed = sanitizePositiveNumber(DIRECTIONS_FALLBACK_SPEED_KMH, 35);
+  const trafficFactor = sanitizePositiveNumber(DIRECTIONS_FALLBACK_TRAFFIC_FACTOR, 1.2);
+  const effectiveSpeed = trafficEnabled
+    ? Math.max(8, configuredSpeed / Math.max(1, trafficFactor))
+    : Math.max(8, configuredSpeed);
+
+  const legs = [];
+  const steps = [];
+  let totalDistanceKm = 0;
+  let totalTimeSecs = 0;
+
+  for (let index = 0; index < path.length - 1; index += 1) {
+    const startPoint = path[index];
+    const endPoint = path[index + 1];
+    const distanceInKm = Number(computeHaversineDistanceKm(startPoint, endPoint).toFixed(3));
+    const timeInSecs = Math.max(60, Math.round((distanceInKm / effectiveSpeed) * 3600));
+    const step = {
+      instruction: index === path.length - 2 ? 'Siga até o destino' : 'Siga até o próximo ponto da rota',
+      startLocation: {
+        lat: Number(startPoint.lat),
+        lng: Number(startPoint.lng),
+      },
+      endLocation: {
+        lat: Number(endPoint.lat),
+        lng: Number(endPoint.lng),
+      },
+      distanceMeters: Math.round(distanceInKm * 1000),
+      durationSeconds: timeInSecs,
+      polylinePoints: encodePolylinePath([startPoint, endPoint]),
+    };
+
+    totalDistanceKm += distanceInKm;
+    totalTimeSecs += timeInSecs;
+    steps.push(step);
+    legs.push({
+      distance_in_km: distanceInKm,
+      time_in_secs: timeInSecs,
+      duration_in_traffic: trafficEnabled ? timeInSecs : null,
+      start_location: {
+        latitude: Number(startPoint.lat),
+        longitude: Number(startPoint.lng),
+      },
+      end_location: {
+        latitude: Number(endPoint.lat),
+        longitude: Number(endPoint.lng),
+      },
+      start_address: '',
+      end_address: '',
+      steps: [step],
+    });
+  }
+
+  return {
+    distance_in_km: Number(totalDistanceKm.toFixed(3)),
+    time_in_secs: totalTimeSecs,
+    duration_in_traffic: trafficEnabled ? totalTimeSecs : null,
+    polylinePoints: encodePolylinePath(path),
+    legs,
+    steps,
+  };
+}
+
+function readDirectionsCountersFromReport(report = null) {
+  const directionsTotals = report?.totals?.google?.directions || {};
+  const requestCount = Math.max(
+    0,
+    Number.parseInt(
+      directionsTotals?.requestCount ??
+      report?.totals?.google?.skus?.directionsLegacy?.requestCount ??
+      0,
+      10,
+    ) || 0,
+  );
+  const estimatedCostUsd = Math.max(
+    0,
+    Number(
+      directionsTotals?.estimatedCostUsd ??
+      report?.totals?.google?.skus?.directionsLegacy?.estimatedCostUsd ??
+      0,
+    ) || 0,
+  );
+
+  return {
+    requestCount,
+    estimatedCostUsd: Number(estimatedCostUsd.toFixed(6)),
+  };
+}
+
+async function resolveDirectionsBudgetGuard(bookingId) {
+  if (!bookingId) {
+    return {
+      enabled: false,
+      blocked: false,
+      reason: null,
+      requestCount: 0,
+      estimatedCostUsd: 0,
+      maxRequests: sanitizePositiveInteger(DIRECTIONS_MAX_REQUESTS_PER_BOOKING, 0),
+      hardCapUsd: sanitizePositiveNumber(DIRECTIONS_HARD_CAP_USD, 0),
+    };
+  }
+
+  const maxRequests = sanitizePositiveInteger(DIRECTIONS_MAX_REQUESTS_PER_BOOKING, 0);
+  const hardCapUsd = sanitizePositiveNumber(DIRECTIONS_HARD_CAP_USD, 0);
+  const hasAnyLimit = maxRequests > 0 || hardCapUsd > 0;
+  if (!hasAnyLimit) {
+    return {
+      enabled: false,
+      blocked: false,
+      reason: null,
+      requestCount: 0,
+      estimatedCostUsd: 0,
+      maxRequests,
+      hardCapUsd,
+    };
+  }
+
+  try {
+    const report = await rideCostTelemetryService.getReport(bookingId);
+    const counters = readDirectionsCountersFromReport(report);
+    const blockedByRequests = maxRequests > 0 && counters.requestCount >= maxRequests;
+    const blockedByUsd = hardCapUsd > 0 && counters.estimatedCostUsd >= hardCapUsd;
+    return {
+      enabled: true,
+      blocked: blockedByRequests || blockedByUsd,
+      reason: blockedByRequests ? 'request_cap_reached' : blockedByUsd ? 'cost_cap_reached' : null,
+      requestCount: counters.requestCount,
+      estimatedCostUsd: counters.estimatedCostUsd,
+      maxRequests,
+      hardCapUsd,
+    };
+  } catch (error) {
+    logger.warn(`⚠️ [PlacesRoute] Falha ao carregar telemetria para budget guard: ${error.message}`);
+    return {
+      enabled: true,
+      blocked: false,
+      reason: null,
+      requestCount: 0,
+      estimatedCostUsd: 0,
+      maxRequests,
+      hardCapUsd,
+    };
+  }
 }
 
 function normalizeBoolean(value, fallback = false) {
@@ -112,6 +393,44 @@ async function captureBookingGoogleTelemetry({
   }
 }
 
+async function captureBookingOperationalTelemetry({
+  bookingId,
+  sourceKey,
+  sourceMeta,
+  requestMeta,
+  backendCommand,
+  backend = {},
+  redis = {},
+  firebase = {},
+  database = {},
+}) {
+  if (!bookingId) {
+    return false;
+  }
+
+  try {
+    await rideCostTelemetryService.ingestOperationalUsage({
+      bookingId,
+      sourceKey,
+      sourceMeta,
+      backendCommand,
+      backend,
+      redis,
+      firebase,
+      database,
+      requestMeta: {
+        ...(requestMeta || {}),
+        source: 'api/places',
+        receivedAt: new Date().toISOString(),
+      },
+    });
+    return true;
+  } catch (telemetryError) {
+    logger.warn(`⚠️ [PlacesRoute] Falha ao gravar telemetria operacional: ${telemetryError.message}`);
+    return false;
+  }
+}
+
 /**
  * POST /api/places/search
  * Busca um lugar usando cache
@@ -136,10 +455,10 @@ async function captureBookingGoogleTelemetry({
  *   }
  * }
  * 
- * Ou se não encontrar no cache:
+ * Ou se não encontrar resultado:
  * {
  *   "status": "not_found",
- *   "message": "Lugar não encontrado no cache. Use Google Places diretamente."
+ *   "message": "Lugar não encontrado no backend."
  * }
  */
 router.post('/api/places/search', async (req, res) => {
@@ -167,12 +486,11 @@ router.post('/api/places/search', async (req, res) => {
       });
     }
 
-    // Não encontrado no cache
-    // Frontend deve usar Google Places diretamente (fallback)
+    // Não encontrado no backend (cache + providers autorizados no servidor)
     return res.status(404).json({
       status: 'not_found',
-      message: 'Lugar não encontrado no cache. Use Google Places diretamente.',
-      fallback: true
+      message: 'Lugar não encontrado no backend.',
+      fallback: 'backend_not_found'
     });
 
   } catch (error) {
@@ -181,8 +499,8 @@ router.post('/api/places/search', async (req, res) => {
     // Sempre retornar erro controlado (nunca quebrar)
     return res.status(500).json({
       status: 'error',
-      message: 'Erro ao buscar lugar. Use Google Places diretamente.',
-      fallback: true
+      message: 'Erro ao buscar lugar no backend.',
+      fallback: 'backend_error'
     });
   }
 });
@@ -355,6 +673,12 @@ router.post('/api/places/directions', async (req, res) => {
     const alternativesEnabled = normalizeBoolean(req.body?.alternativesEnabled, false);
     const routeScope = normalizeText(req.body?.routeScope, 'unknown');
     const telemetry = normalizeTelemetry(req.body?.telemetry || {});
+    const telemetrySourceKey = telemetry.sourceKey || 'backend:places:directions';
+    const telemetrySourceMeta = {
+      ...telemetry.sourceMeta,
+      surface: telemetry.sourceMeta?.surface || 'places_directions_backend',
+    };
+    const backendCommand = 'places_directions_route';
 
     if (!startLoc || !destLoc) {
       return res.status(400).json({
@@ -363,50 +687,150 @@ router.post('/api/places/directions', async (req, res) => {
       });
     }
 
-    const result = await placesCacheService.fetchDirectionsRoute({
-      startLoc,
-      destLoc,
-      waypoints,
-      trafficEnabled,
-      alternativesEnabled,
-    });
+    const budgetGuard = await resolveDirectionsBudgetGuard(telemetry.bookingId);
+    let result = null;
+    let budgetGuardFallbackUsed = false;
+
+    if (budgetGuard.blocked) {
+      const cacheOnlyResult = await placesCacheService.fetchDirectionsRoute({
+        startLoc,
+        destLoc,
+        waypoints,
+        trafficEnabled,
+        alternativesEnabled,
+        cacheOnly: true,
+      });
+
+      if (cacheOnlyResult?.data) {
+        result = cacheOnlyResult;
+      } else {
+        const approximateData = buildApproximateDirectionsPayload({
+          startLoc,
+          destLoc,
+          waypoints,
+          trafficEnabled,
+        });
+        if (approximateData) {
+          budgetGuardFallbackUsed = true;
+          const operationalTelemetryCaptured = await captureBookingOperationalTelemetry({
+            bookingId: telemetry.bookingId,
+            sourceKey: telemetrySourceKey,
+            sourceMeta: telemetrySourceMeta,
+            requestMeta: telemetry.requestMeta,
+            backendCommand,
+            backend: {
+              attempts: 1,
+              successes: 1,
+            },
+            redis: {
+              reads: Number(cacheOnlyResult?.stats?.redisReads || 0),
+              writes: Number(cacheOnlyResult?.stats?.redisWrites || 0),
+            },
+          });
+
+          return res.json({
+            status: 'success',
+            source: 'budget_guard_estimated',
+            cached: false,
+            telemetryCaptured: false,
+            operationalTelemetryCaptured,
+            budgetGuard: {
+              ...budgetGuard,
+              fallback: 'estimated_route',
+            },
+            routeCount: 1,
+            waypointsCount: normalizeWaypoints(waypoints).length,
+            data: approximateData,
+          });
+        }
+      }
+    }
+
+    if (!result) {
+      result = await placesCacheService.fetchDirectionsRoute({
+        startLoc,
+        destLoc,
+        waypoints,
+        trafficEnabled,
+        alternativesEnabled,
+      });
+    }
 
     if (!result || !result.data) {
+      await captureBookingOperationalTelemetry({
+        bookingId: telemetry.bookingId,
+        sourceKey: telemetrySourceKey,
+        sourceMeta: telemetrySourceMeta,
+        requestMeta: telemetry.requestMeta,
+        backendCommand,
+        backend: {
+          attempts: 1,
+          errors: 1,
+        },
+        redis: {
+          reads: Number(result?.stats?.redisReads || 0),
+          writes: Number(result?.stats?.redisWrites || 0),
+        },
+      });
       return res.status(404).json({
         status: 'not_found',
         message: 'Não foi possível obter rota para os pontos informados.',
       });
     }
 
-    const telemetryCaptured = result.cached !== true
+    const billedGoogleRequest = Number(result?.stats?.googleRequests || 0) > 0;
+    const telemetryCaptured = result.cached !== true && billedGoogleRequest
       ? await captureBookingGoogleTelemetry({
         bookingId: telemetry.bookingId,
-        sourceKey: telemetry.sourceKey || 'backend:places:directions',
-        sourceMeta: {
-          ...telemetry.sourceMeta,
-          surface: telemetry.sourceMeta?.surface || 'places_directions_backend',
-        },
+        sourceKey: telemetrySourceKey,
+        sourceMeta: telemetrySourceMeta,
         requestMeta: telemetry.requestMeta,
         skuKey: 'directionsLegacy',
         requestCount: 1,
         billableUnits: 1,
         metadata: {
-          telemetrySurface: telemetry.sourceMeta?.surface || 'places_directions_backend',
+          telemetrySurface: telemetrySourceMeta.surface,
           routeScope,
-          cacheMode: 'none',
+          cacheMode: result.cached ? 'cache' : 'none',
           trafficEnabled,
           alternativesEnabled,
           waypointsCount: result.waypointsCount || 0,
           routeCount: result.routeCount || 1,
+          budgetGuardActive: Boolean(budgetGuard.blocked),
+          budgetGuardReason: budgetGuard.reason || null,
+          budgetGuardFallbackUsed,
         },
       })
       : false;
+
+    const operationalTelemetryCaptured = await captureBookingOperationalTelemetry({
+      bookingId: telemetry.bookingId,
+      sourceKey: telemetrySourceKey,
+      sourceMeta: telemetrySourceMeta,
+      requestMeta: telemetry.requestMeta,
+      backendCommand,
+      backend: {
+        attempts: 1,
+        successes: 1,
+      },
+      redis: {
+        reads: Number(result?.stats?.redisReads || 0),
+        writes: Number(result?.stats?.redisWrites || 0),
+      },
+    });
 
     return res.json({
       status: 'success',
       source: result.cached ? 'cache' : 'google',
       cached: result.cached === true,
       telemetryCaptured,
+      operationalTelemetryCaptured,
+      budgetGuard: budgetGuard.enabled
+        ? {
+          ...budgetGuard,
+          fallback: budgetGuard.blocked ? 'cache_or_estimated' : null,
+        }
+        : null,
       routeCount: result.routeCount || 1,
       waypointsCount: result.waypointsCount || 0,
       data: result.data,
@@ -528,4 +952,3 @@ router.post('/api/places/metrics/reset', async (req, res) => {
 });
 
 module.exports = router;
-

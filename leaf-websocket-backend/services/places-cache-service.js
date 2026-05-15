@@ -14,7 +14,7 @@ const redisPool = require('../utils/redis-pool');
 const { normalizeQuery, isValidQuery } = require('../utils/places-normalizer');
 
 const DIRECTIONS_CACHE_TTL_SECONDS = Number.parseInt(
-  process.env.PLACES_DIRECTIONS_CACHE_TTL_SECONDS || process.env.DIRECTIONS_CACHE_TTL_SECONDS || '120',
+  process.env.PLACES_DIRECTIONS_CACHE_TTL_SECONDS || process.env.DIRECTIONS_CACHE_TTL_SECONDS || '900',
   10,
 );
 
@@ -68,6 +68,61 @@ function normalizeWaypointsInput(waypointsInput) {
       return { lat, lng };
     })
     .filter(Boolean);
+}
+
+function stripHtmlInstruction(value) {
+  return String(value || '')
+    .replace(/<[^>]*>/g, ' ')
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&amp;/g, '&')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function normalizeGoogleStep(step = {}) {
+  const startLat = Number(step?.start_location?.lat);
+  const startLng = Number(step?.start_location?.lng);
+  const endLat = Number(step?.end_location?.lat);
+  const endLng = Number(step?.end_location?.lng);
+
+  if (
+    !Number.isFinite(startLat) ||
+    !Number.isFinite(startLng) ||
+    !Number.isFinite(endLat) ||
+    !Number.isFinite(endLng)
+  ) {
+    return null;
+  }
+
+  const distanceMeters = Number(step?.distance?.value);
+  const durationSeconds = Number(step?.duration?.value);
+
+  return {
+    instruction: stripHtmlInstruction(step?.html_instructions) || 'Siga em frente',
+    startLocation: {
+      lat: startLat,
+      lng: startLng,
+    },
+    endLocation: {
+      lat: endLat,
+      lng: endLng,
+    },
+    distanceMeters: Number.isFinite(distanceMeters) && distanceMeters >= 0 ? distanceMeters : 0,
+    durationSeconds: Number.isFinite(durationSeconds) && durationSeconds >= 0 ? durationSeconds : 0,
+    polylinePoints: step?.polyline?.points || null,
+  };
+}
+
+function normalizeGoogleSteps(steps = []) {
+  if (!Array.isArray(steps)) {
+    return [];
+  }
+
+  return steps.map(normalizeGoogleStep).filter(Boolean);
 }
 
 class PlacesCacheService {
@@ -481,6 +536,12 @@ class PlacesCacheService {
       const waypoints = normalizeWaypointsInput(options?.waypoints);
       const trafficEnabled = options?.trafficEnabled === true;
       const alternativesEnabled = options?.alternativesEnabled === true;
+      const cacheOnly = options?.cacheOnly === true;
+      const stats = {
+        redisReads: 0,
+        redisWrites: 0,
+        googleRequests: 0,
+      };
       const cacheKey = this.buildDirectionsCacheKey({
         origin,
         destination,
@@ -491,6 +552,7 @@ class PlacesCacheService {
 
       if (this.isInitialized) {
         try {
+          stats.redisReads += 1;
           const cached = await this.redis.get(cacheKey);
           if (cached) {
             const parsed = JSON.parse(cached);
@@ -499,12 +561,26 @@ class PlacesCacheService {
                 ...parsed,
                 cached: true,
                 cacheKey,
+                stats,
               };
             }
           }
         } catch (cacheError) {
           logger.warn(`⚠️ [PlacesCache] Falha ao ler cache de directions: ${cacheError.message}`);
         }
+      }
+
+      if (cacheOnly) {
+        return {
+          cached: false,
+          cacheOnly: true,
+          routeCount: 0,
+          waypointsCount: waypoints.length,
+          cacheKey,
+          data: null,
+          status: 'cache_miss',
+          stats,
+        };
       }
 
       const originParam = serializeLatLngPair(origin);
@@ -526,12 +602,20 @@ class PlacesCacheService {
         }
       }
 
+      stats.googleRequests += 1;
       const response = await fetch(url);
       const json = await response.json();
 
       if (!response.ok) {
         logger.warn(`⚠️ [PlacesCache] HTTP ${response.status} em directions`);
-        return null;
+        return {
+          cached: false,
+          routeCount: 0,
+          waypointsCount: waypoints.length,
+          data: null,
+          status: `http_${response.status}`,
+          stats,
+        };
       }
 
       if (json.status !== 'OK' || !Array.isArray(json.routes) || json.routes.length === 0) {
@@ -541,6 +625,7 @@ class PlacesCacheService {
           routeCount: 0,
           data: null,
           status: json.status || 'unknown',
+          stats,
         };
       }
 
@@ -595,8 +680,12 @@ class PlacesCacheService {
               : null,
           start_address: leg?.start_address || '',
           end_address: leg?.end_address || '',
+          steps: normalizeGoogleSteps(leg?.steps),
         };
       });
+      const steps = normalizedLegs.flatMap((leg) => (
+        Array.isArray(leg.steps) ? leg.steps : []
+      ));
 
       const distance_in_km = normalizedLegs.reduce(
         (acc, leg) => acc + (Number.isFinite(leg.distance_in_km) ? leg.distance_in_km : 0),
@@ -617,6 +706,7 @@ class PlacesCacheService {
         polylinePoints: route?.overview_polyline?.points || null,
         duration_in_traffic,
         legs: normalizedLegs,
+        steps,
       };
 
       const payload = {
@@ -624,10 +714,12 @@ class PlacesCacheService {
         routeCount: json.routes.length,
         waypointsCount: waypoints.length,
         data,
+        stats,
       };
 
       if (this.isInitialized) {
         try {
+          stats.redisWrites += 1;
           await this.redis.setex(cacheKey, DIRECTIONS_CACHE_TTL_SECONDS, JSON.stringify(payload));
         } catch (cacheError) {
           logger.warn(`⚠️ [PlacesCache] Falha ao salvar cache de directions: ${cacheError.message}`);
@@ -637,7 +729,19 @@ class PlacesCacheService {
       return payload;
     } catch (error) {
       logger.error(`❌ [PlacesCache] Erro em directions Google: ${error.message}`);
-      return null;
+      return {
+        cached: false,
+        routeCount: 0,
+        waypointsCount: 0,
+        data: null,
+        status: 'error',
+        error: error.message,
+        stats: {
+          redisReads: 0,
+          redisWrites: 0,
+          googleRequests: 0,
+        },
+      };
     }
   }
 
