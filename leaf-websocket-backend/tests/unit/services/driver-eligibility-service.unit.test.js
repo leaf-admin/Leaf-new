@@ -169,4 +169,43 @@ describe('driver-eligibility-service', () => {
     expect(eligibility.code).toBe('VEHICLE_ASSIGNED_TO_ANOTHER_DRIVER');
     expect(eligibility.profile.assignmentConflict).toBe(true);
   });
+
+  it('falls back to user_vehicles plate when vehicles document is missing or incomplete', async () => {
+    firebaseConfig.getRealtimeDB.mockReturnValue(
+      createRealtimeDB({
+        'users/driver_4': {
+          approved: true,
+          carType: 'Leaf Plus'
+        },
+        'user_vehicles/driver_4': {
+          uv_1: {
+            vehicleId: 'vehicle_4',
+            isActive: true,
+            status: 'approved',
+            approved: true,
+            plate: 'TES4444'
+          }
+        },
+        'vehicles/vehicle_4': {
+          approved: true,
+          carType: 'Leaf Plus'
+        },
+        'vehicle_active_assignment/vehicle_4': {
+          driverId: 'driver_4',
+          userId: 'driver_4',
+          status: 'active'
+        }
+      })
+    );
+
+    const profile = await driverEligibilityService.resolveDriverProfile('driver_4', {
+      carType: 'Leaf Plus'
+    });
+
+    expect(profile.driverApproved).toBe(true);
+    expect(profile.vehicleApproved).toBe(true);
+    expect(profile.assignmentConflict).toBe(false);
+    expect(profile.activeVehicleId).toBe('vehicle_4');
+    expect(profile.vehiclePlate).toBe('TES4444');
+  });
 });

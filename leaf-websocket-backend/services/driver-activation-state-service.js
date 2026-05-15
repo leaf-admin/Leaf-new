@@ -25,6 +25,18 @@ const STATE_LABELS = Object.freeze({
   [DRIVER_ACTIVATION_STATES.REJECTED]: 'Rejeitado'
 });
 
+const KYC_BLOCKING_STATUSES = new Set([
+  'blocked',
+  'rejected',
+  'failed',
+  'denied',
+  'pending',
+  'pending_review',
+  'pending_reverify',
+  'in_review',
+  'review'
+]);
+
 function boolish(value) {
   if (typeof value === 'boolean') return value;
   const normalized = String(value || '').trim().toLowerCase();
@@ -46,6 +58,26 @@ function isApprovedStatus(status) {
 
 function isRejectedStatus(status) {
   return ['rejected', 'failed', 'denied', 'blocked'].includes(normalizeStatus(status));
+}
+
+function resolveKycApproval(userData = {}) {
+  const status = normalizeStatus(userData?.kycStatus || userData?.kyc_status || userData?.kyc?.status || '');
+  const blocked = boolish(userData?.kycBlocked) || boolish(userData?.kyc?.blocked) || boolish(userData?.kycReverifyRequired);
+  const approved = status === 'approved' || boolish(userData?.kyc?.approved);
+
+  if (blocked || KYC_BLOCKING_STATUSES.has(status)) {
+    return {
+      approved: false,
+      blocked: true,
+      status: status || 'blocked'
+    };
+  }
+
+  return {
+    approved,
+    blocked: false,
+    status: status || (approved ? 'approved' : 'missing')
+  };
 }
 
 function requiresMeiDocument() {
@@ -215,6 +247,7 @@ async function resolveDriverActivationState({
     effectiveCnhApproved &&
     effectiveMeiApproved &&
     effectiveBackgroundConsent;
+  const kycApproval = resolveKycApproval(resolvedUserData);
   const liveness = resolveLivenessEvidence(resolvedUserData);
 
   const meta = {
@@ -232,8 +265,18 @@ async function resolveDriverActivationState({
       vehicleRegistration: vehicle.approved
     },
     vehicle,
+    kyc: kycApproval,
     liveness
   };
+
+  if (kycApproval.blocked) {
+    return buildStatePayload(DRIVER_ACTIVATION_STATES.REJECTED, {
+      ...meta,
+      reason: kycApproval.status === 'rejected'
+        ? 'KYC do motorista reprovado.'
+        : 'KYC do motorista bloqueado ou aguardando revisao.'
+    });
+  }
 
   if (
     !resolvedActivationNode?.documents &&
@@ -297,6 +340,7 @@ function buildStatePayload(state, meta = {}) {
     checklist: meta.checklist || {},
     documents: meta.documents || {},
     vehicle: meta.vehicle || {},
+    kyc: meta.kyc || {},
     liveness: meta.liveness || {},
     updatedAt: new Date().toISOString()
   };

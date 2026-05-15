@@ -91,6 +91,14 @@ class AwsFaceLivenessService {
       || process.env.AWS_LIVENESS_STS_SESSION_NAME_PREFIX
       || 'leaf-liveness'
     ).trim();
+    this.estimatedUnitCostUsd = this.parseNumber(
+      process.env.KYC_AWS_LIVENESS_ESTIMATED_UNIT_COST_USD
+      || process.env.AWS_LIVENESS_ESTIMATED_UNIT_COST_USD
+      || '0',
+      0,
+      0,
+      100
+    );
 
     this.redisPrefix = 'kyc:aws:liveness:session:';
     this.redisCredentialsPrefix = 'kyc:aws:liveness:credentials:';
@@ -164,7 +172,8 @@ class AwsFaceLivenessService {
       auditImagesLimit: this.auditImagesLimit,
       hasOutputBucket: Boolean(this.outputBucket),
       credentialsEnabled: this.credentialsEnabled,
-      hasAssumeRoleArn: Boolean(this.assumeRoleArn)
+      hasAssumeRoleArn: Boolean(this.assumeRoleArn),
+      estimatedUnitCostUsd: this.estimatedUnitCostUsd
     };
   }
 

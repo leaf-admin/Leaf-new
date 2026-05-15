@@ -3,6 +3,7 @@ const multer = require('multer');
 const IntegratedKYCService = require('../services/IntegratedKYCService');
 const AwsFaceLivenessService = require('../services/aws-face-liveness-service');
 const kycPolicyService = require('../services/kyc-policy-service');
+const { requireFirebaseUser, requireFirebaseSelf } = require('../middleware/firebase-user-auth');
 const { logStructured, logError } = require('../utils/logger');
 let firebaseConfig = null;
 try {
@@ -10,6 +11,10 @@ try {
 } catch (e) {
   logStructured('warn', '⚠️ Firebase config não encontrado', { service: 'kyc-routes-routes' });
 }
+
+const bodyUserId = (req) => req.body?.userId;
+const paramUserId = (req) => req.params?.userId;
+const queryUserId = (req) => req.query?.userId;
 
 class KYCRoutes {
   constructor() {
@@ -52,7 +57,7 @@ class KYCRoutes {
       next();
     });
 
-    this.router.get('/liveness/provider', async (_req, res) => {
+    this.router.get('/liveness/provider', requireFirebaseUser, async (_req, res) => {
       try {
         return res.json({
           success: true,
@@ -69,7 +74,11 @@ class KYCRoutes {
       }
     });
 
-    this.router.post('/liveness/aws/session', async (req, res) => {
+    this.router.post(
+      '/liveness/aws/session',
+      requireFirebaseUser,
+      requireFirebaseSelf(bodyUserId),
+      async (req, res) => {
       try {
         const { userId, challengeId, requirement } = req.body || {};
         if (!userId || typeof userId !== 'string') {
@@ -100,9 +109,14 @@ class KYCRoutes {
           code: error.code || 'KYC_AWS_LIVENESS_SESSION_ERROR'
         });
       }
-    });
+      }
+    );
 
-    this.router.get('/liveness/aws/session/:sessionId', async (req, res) => {
+    this.router.get(
+      '/liveness/aws/session/:sessionId',
+      requireFirebaseUser,
+      requireFirebaseSelf(queryUserId),
+      async (req, res) => {
       try {
         const { sessionId } = req.params;
         const userId = typeof req.query.userId === 'string' ? req.query.userId : null;
@@ -131,9 +145,14 @@ class KYCRoutes {
           code
         });
       }
-    });
+      }
+    );
 
-    this.router.get('/liveness/aws/credentials', async (req, res) => {
+    this.router.get(
+      '/liveness/aws/credentials',
+      requireFirebaseUser,
+      requireFirebaseSelf(queryUserId),
+      async (req, res) => {
       try {
         const userId = typeof req.query.userId === 'string' ? req.query.userId : null;
         if (!userId) {
@@ -167,10 +186,16 @@ class KYCRoutes {
           code
         });
       }
-    });
+      }
+    );
 
     // Upload de imagem de perfil
-    this.router.post('/upload-profile', this.upload.single('image'), async (req, res) => {
+    this.router.post(
+      '/upload-profile',
+      requireFirebaseUser,
+      this.upload.single('image'),
+      requireFirebaseSelf(bodyUserId),
+      async (req, res) => {
       try {
         const { userId } = req.body;
         
@@ -213,10 +238,15 @@ class KYCRoutes {
           details: error.message
         });
       }
-    });
+      }
+    );
 
     // Verificação facial
-    this.router.post('/verify-driver/device', async (req, res) => {
+    this.router.post(
+      '/verify-driver/device',
+      requireFirebaseUser,
+      requireFirebaseSelf(bodyUserId),
+      async (req, res) => {
       try {
         const { userId, deviceKyc, challengeId, requirement } = req.body || {};
 
@@ -363,9 +393,15 @@ class KYCRoutes {
           details: error.message
         });
       }
-    });
+      }
+    );
 
-    this.router.post('/verify-driver', this.upload.single('currentImage'), async (req, res) => {
+    this.router.post(
+      '/verify-driver',
+      requireFirebaseUser,
+      this.upload.single('currentImage'),
+      requireFirebaseSelf(bodyUserId),
+      async (req, res) => {
       try {
         const { userId, forceRecheck, cacheValidityHours } = req.body;
         
@@ -549,10 +585,15 @@ class KYCRoutes {
           details: error.message
         });
       }
-    });
+      }
+    );
 
     // Obter assinatura âncora device-first (fallback quando app não tiver cache local)
-    this.router.get('/device-anchor/:userId', async (req, res) => {
+    this.router.get(
+      '/device-anchor/:userId',
+      requireFirebaseUser,
+      requireFirebaseSelf(paramUserId),
+      async (req, res) => {
       try {
         const { userId } = req.params;
         if (!userId || typeof userId !== 'string') {
@@ -580,10 +621,15 @@ class KYCRoutes {
           details: error.message
         });
       }
-    });
+      }
+    );
 
     // Consultar challenge KYC ativo (usado em step-up de saque)
-    this.router.get('/stepup-challenge/:userId', async (req, res) => {
+    this.router.get(
+      '/stepup-challenge/:userId',
+      requireFirebaseUser,
+      requireFirebaseSelf(paramUserId),
+      async (req, res) => {
       try {
         const { userId } = req.params;
         const challengeId = req.query.challengeId || null;
@@ -616,10 +662,15 @@ class KYCRoutes {
           details: error.message
         });
       }
-    });
+      }
+    );
 
     // Obter encoding facial
-    this.router.get('/encoding/:userId', async (req, res) => {
+    this.router.get(
+      '/encoding/:userId',
+      requireFirebaseUser,
+      requireFirebaseSelf(paramUserId),
+      async (req, res) => {
       try {
         const { userId } = req.params;
         
@@ -647,10 +698,15 @@ class KYCRoutes {
           details: error.message
         });
       }
-    });
+      }
+    );
 
     // Deletar encoding facial
-    this.router.delete('/encoding/:userId', async (req, res) => {
+    this.router.delete(
+      '/encoding/:userId',
+      requireFirebaseUser,
+      requireFirebaseSelf(paramUserId),
+      async (req, res) => {
       try {
         const { userId } = req.params;
 
@@ -678,7 +734,8 @@ class KYCRoutes {
           details: error.message
         });
       }
-    });
+      }
+    );
 
     // Estatísticas do serviço
     this.router.get('/stats', async (req, res) => {
@@ -712,7 +769,11 @@ class KYCRoutes {
     });
 
     // Verificar se motorista tem verificação válida (sem processar)
-    this.router.get('/verification-status/:userId', async (req, res) => {
+    this.router.get(
+      '/verification-status/:userId',
+      requireFirebaseUser,
+      requireFirebaseSelf(paramUserId),
+      async (req, res) => {
       try {
         const { userId } = req.params;
         const { maxAgeHours } = req.query;
@@ -757,10 +818,15 @@ class KYCRoutes {
           details: error.message
         });
       }
-    });
+      }
+    );
 
     // Invalidar cache de verificação (usado quando há report de violação)
-    this.router.post('/invalidate-cache/:userId', async (req, res) => {
+    this.router.post(
+      '/invalidate-cache/:userId',
+      requireFirebaseUser,
+      requireFirebaseSelf(paramUserId),
+      async (req, res) => {
       try {
         const { userId } = req.params;
 
@@ -783,7 +849,8 @@ class KYCRoutes {
           details: error.message
         });
       }
-    });
+      }
+    );
 
     // Middleware de tratamento de erros
     this.router.use((error, req, res, next) => {

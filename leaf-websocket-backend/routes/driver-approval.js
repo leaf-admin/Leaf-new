@@ -10,7 +10,7 @@ const ADMIN_ROUTE_MIDDLEWARE = [authenticateJWT, requireRole(DRIVER_APPROVAL_ADM
 // Aprovar motorista e criar conta Woovi
 router.post('/approve', ...ADMIN_ROUTE_MIDDLEWARE, async (req, res) => {
   try {
-    const { driverId, name, email, phone, cpf } = req.body;
+    const { driverId, name, email, phone, cpf, pixKey, driverPixKey, subaccountPixKey, wooviSubaccountPixKey } = req.body;
     
     if (!driverId || !name || !email || !phone || !cpf) {
       return res.status(400).json({
@@ -24,7 +24,11 @@ router.post('/approve', ...ADMIN_ROUTE_MIDDLEWARE, async (req, res) => {
       name,
       email,
       phone,
-      cpf
+      cpf,
+      pixKey: pixKey || driverPixKey || subaccountPixKey || wooviSubaccountPixKey,
+      driverPixKey,
+      subaccountPixKey,
+      wooviSubaccountPixKey
     });
 
     if (result.success) {
@@ -120,7 +124,7 @@ router.get('/check-account/:driverId', ...ADMIN_ROUTE_MIDDLEWARE, async (req, re
 // Criar conta Woovi para motorista existente
 router.post('/create-woovi-account', ...ADMIN_ROUTE_MIDDLEWARE, async (req, res) => {
   try {
-    const { driverId, name, email, phone, cpf } = req.body;
+    const { driverId, name, email, phone, cpf, pixKey, driverPixKey, subaccountPixKey, wooviSubaccountPixKey } = req.body;
     
     if (!driverId || !name || !email || !phone || !cpf) {
       return res.status(400).json({
@@ -134,7 +138,11 @@ router.post('/create-woovi-account', ...ADMIN_ROUTE_MIDDLEWARE, async (req, res)
       name,
       email,
       phone,
-      cpf
+      cpf,
+      pixKey: pixKey || driverPixKey || subaccountPixKey || wooviSubaccountPixKey,
+      driverPixKey,
+      subaccountPixKey,
+      wooviSubaccountPixKey
     });
 
     if (result.success) {
@@ -160,7 +168,6 @@ router.post('/create-woovi-account', ...ADMIN_ROUTE_MIDDLEWARE, async (req, res)
 });
 
 module.exports = router;
-
 
 
 

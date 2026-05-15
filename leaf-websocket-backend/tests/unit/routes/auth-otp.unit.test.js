@@ -66,7 +66,7 @@ describe('auth-otp routes', () => {
 
     const response = await request(app)
       .post('/api/custom-otp/request-otp')
-      .send({ phone: '+5511999999999' });
+      .send({ phone: '+5521102938475' });
 
     expect(response.status).toBe(200);
     expect(response.body.success).toBe(true);
@@ -98,9 +98,9 @@ describe('auth-otp routes', () => {
     const response = await request(app)
       .post('/api/custom-otp/verify-otp')
       .send({
-        phone: '+5511888888888',
+        phone: '+5521123456789',
         verificationId: 'vid_test',
-        otp: '000000'
+        otp: '992000'
       });
 
     expect(response.status).toBe(200);
@@ -118,8 +118,8 @@ describe('auth-otp routes', () => {
     const response = await request(app)
       .post('/api/custom-otp/verify-otp')
       .send({
-        phone: '+5511999999999',
-        otp: '000000'
+        phone: '+5521102938475',
+        otp: '992111'
       });
 
     expect(response.status).toBe(200);
@@ -139,7 +139,7 @@ describe('auth-otp routes', () => {
       .send({
         phone: '+5521999999999',
         verificationId: 'vid_non_test',
-        otp: '000000'
+        otp: '992111'
       });
 
     expect(response.status).toBe(400);

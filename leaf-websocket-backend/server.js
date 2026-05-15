@@ -122,6 +122,7 @@ const QueueWorker = require('./services/queue-worker');
 const metricsCollector = require('./services/metrics-collector');
 const queueMonitoringRoutes = require('./routes/queue-monitoring');
 const IntegratedKYCService = require('./services/IntegratedKYCService');
+const kycPolicyService = require('./services/kyc-policy-service');
 const { recordIngest, getStatus: getOtelIngestStatus } = require('./utils/otel-ingest-monitor');
 // ============================================================================================
 
@@ -575,6 +576,30 @@ async function enforceDailyKYCForOnline(driverId) {
             allowed: false,
             reason: 'driverId ausente',
             code: 'driverIdMissing'
+        };
+    }
+
+    try {
+        const approvalGate = await kycPolicyService.requireApprovedKyc(driverId);
+        if (!approvalGate.allowed) {
+            return {
+                allowed: false,
+                reason: approvalGate.reason,
+                code: approvalGate.code,
+                details: approvalGate
+            };
+        }
+    } catch (error) {
+        logStructured('warn', 'Falha no gate de status KYC para online (fail-closed)', {
+            service: 'server',
+            operation: 'enforceDailyKYCForOnline',
+            driverId,
+            error: error.message
+        });
+        return {
+            allowed: false,
+            reason: 'Nao foi possivel validar o status KYC agora.',
+            code: 'KYC_STATUS_CHECK_FAILED'
         };
     }
 
@@ -1076,6 +1101,7 @@ io.on('connection', async (socket) => {
     registerSocketUpdateTripLocationHandler({
         socket,
         io,
+        redisPool,
         logStructured
     });
 

@@ -32,8 +32,13 @@ describe('aws-face-liveness-service', () => {
 
     process.env.KYC_AWS_LIVENESS_ENABLED = 'true';
     process.env.AWS_REGION = 'us-east-1';
+    process.env.KYC_AWS_LIVENESS_ESTIMATED_UNIT_COST_USD = '0.015';
 
     AwsFaceLivenessService = require('../../../services/aws-face-liveness-service');
+  });
+
+  afterEach(() => {
+    delete process.env.KYC_AWS_LIVENESS_ESTIMATED_UNIT_COST_USD;
   });
 
   test('should create liveness session and persist metadata', async () => {
@@ -66,5 +71,15 @@ describe('aws-face-liveness-service', () => {
     expect(result.completed).toBe(true);
     expect(result.livenessPassed).toBe(true);
     expect(result.auditImagesCount).toBe(2);
+  });
+
+  test('should expose configurable estimated unit cost in config summary', () => {
+    const service = new AwsFaceLivenessService();
+
+    expect(service.getConfigSummary()).toEqual(
+      expect.objectContaining({
+        estimatedUnitCostUsd: 0.015
+      })
+    );
   });
 });

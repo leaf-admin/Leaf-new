@@ -10,6 +10,7 @@ jest.unmock('express');
 const express = require('express');
 const request = require('supertest');
 const crypto = require('crypto');
+const bcrypt = require('bcryptjs');
 
 const mockVerifyIdToken = jest.fn();
 const mockCreateCustomToken = jest.fn();
@@ -269,7 +270,7 @@ describe('auth-password routes', () => {
     });
   });
 
-  it('resolves existing phone with password credential to password flow', async () => {
+  it('resolves existing phone with password credential to OTP-first flow with password fallback', async () => {
     const app = createApp();
     const phoneDigits = '21998991886';
     const phoneHash = hashPhoneForTest(phoneDigits);
@@ -292,15 +293,17 @@ describe('auth-password routes', () => {
       success: true,
       exists: true,
       hasPassword: true,
-      requiresPassword: true,
-      requiresOtp: false,
+      nextAction: 'OTP_REQUIRED',
+      passwordFallbackAvailable: true,
+      requiresPassword: false,
+      requiresOtp: true,
       uid: 'customer_with_password',
       userType: 'customer',
       source: 'password_credentials'
     });
   });
 
-  it('resolves existing Firebase Auth phone without password credential to password flow', async () => {
+  it('resolves existing Firebase Auth phone without password credential to OTP flow', async () => {
     const app = createApp();
     mockGetUserByPhoneNumber.mockResolvedValue({
       uid: 'legacy_customer_no_password'
@@ -318,11 +321,45 @@ describe('auth-password routes', () => {
       success: true,
       exists: true,
       hasPassword: false,
-      requiresPassword: true,
-      requiresOtp: false,
+      nextAction: 'OTP_REQUIRED',
+      passwordFallbackAvailable: false,
+      requiresPassword: false,
+      requiresOtp: true,
       uid: 'legacy_customer_no_password',
       userType: 'customer',
       source: 'firebase_auth'
+    });
+  });
+
+  it('forces OTP flow when password credential document exists but has no passwordHash', async () => {
+    const app = createApp();
+    const phoneDigits = '21123456789';
+    const phoneHash = hashPhoneForTest(phoneDigits);
+
+    mockDocs.set(phoneHash, {
+      uid: 'legacy_customer_without_password_hash',
+      userType: 'customer'
+    });
+    mockRealtimeUsers.set('legacy_customer_without_password_hash', {
+      userType: 'customer'
+    });
+
+    const response = await request(app)
+      .post('/api/auth/password/resolve-phone')
+      .send({ phone: phoneDigits });
+
+    expect(response.status).toBe(200);
+    expect(response.body).toEqual({
+      success: true,
+      exists: true,
+      hasPassword: false,
+      nextAction: 'OTP_REQUIRED',
+      passwordFallbackAvailable: false,
+      requiresPassword: false,
+      requiresOtp: true,
+      uid: 'legacy_customer_without_password_hash',
+      userType: 'customer',
+      source: 'password_credentials'
     });
   });
 
@@ -338,6 +375,8 @@ describe('auth-password routes', () => {
       success: true,
       exists: false,
       hasPassword: false,
+      nextAction: 'OTP_REQUIRED',
+      passwordFallbackAvailable: false,
       requiresPassword: false,
       requiresOtp: true,
       uid: null,
@@ -372,7 +411,7 @@ describe('auth-password routes', () => {
 
   it('does not require Redis connection for reset request on test phones', async () => {
     const app = createApp();
-    const phoneDigits = '11999999999';
+    const phoneDigits = '21102938475';
     const phoneHash = hashPhoneForTest(phoneDigits);
 
     mockDocs.set(phoneHash, {
@@ -416,7 +455,7 @@ describe('auth-password routes', () => {
 
   it('accepts static reset OTP for configured test phones even when APP_REVIEW is false', async () => {
     const app = createApp();
-    const phoneDigits = '11999999999';
+    const phoneDigits = '21102938475';
     const phoneHash = hashPhoneForTest(phoneDigits);
 
     mockDocs.set(phoneHash, {
@@ -430,7 +469,7 @@ describe('auth-password routes', () => {
       .send({
         phone: phoneDigits,
         verificationId: 'pwd_test',
-        otp: '000000',
+        otp: '992111',
         password: 'Leaf5678',
         confirmPassword: 'Leaf5678'
       });
@@ -442,7 +481,7 @@ describe('auth-password routes', () => {
 
   it('accepts static reset OTP for test phones without verificationId', async () => {
     const app = createApp();
-    const phoneDigits = '11888888888';
+    const phoneDigits = '21123456789';
     const phoneHash = hashPhoneForTest(phoneDigits);
 
     mockDocs.set(phoneHash, {
@@ -455,7 +494,7 @@ describe('auth-password routes', () => {
       .post('/api/auth/password/reset/confirm')
       .send({
         phone: phoneDigits,
-        otp: '000000',
+        otp: '992000',
         password: 'Leaf5678',
         confirmPassword: 'Leaf5678'
       });
@@ -480,7 +519,7 @@ describe('auth-password routes', () => {
       .send({
         phone: phoneDigits,
         verificationId: 'pwd_non_test',
-        otp: '000000',
+        otp: '992111',
         password: 'Leaf5678',
         confirmPassword: 'Leaf5678'
       });
@@ -488,5 +527,64 @@ describe('auth-password routes', () => {
     expect(response.status).toBe(400);
     expect(response.body.success).toBe(false);
     expect(response.body.error).toBe('OTP inválido ou expirado');
+  });
+
+  it('does not enforce password lockout for configured review/test phones', async () => {
+    const app = createApp();
+    const phoneDigits = '21102938475';
+    const phoneHash = hashPhoneForTest(phoneDigits);
+    const passwordHash = await bcrypt.hash('Leaf1234', 4);
+    const oneHourAhead = new Date(Date.now() + 60 * 60 * 1000);
+
+    mockDocs.set(phoneHash, {
+      uid: 'review_passenger_uid',
+      userType: 'customer',
+      passwordHash,
+      failedAttempts: 9,
+      lockedUntil: {
+        toDate: () => oneHourAhead
+      }
+    });
+
+    const response = await request(app)
+      .post('/api/auth/password/login')
+      .send({ phone: '+5521102938475', password: 'Leaf1234' });
+
+    expect(response.status).toBe(200);
+    expect(response.body.success).toBe(true);
+    expect(response.body.uid).toBe('review_passenger_uid');
+  });
+
+  it('bypasses lockout for review credentials even when OTP bypass env flag is disabled', async () => {
+    const app = createApp();
+    const previousBypassFlag = process.env.AUTH_TEST_OTP_BYPASS_ENABLED;
+    process.env.AUTH_TEST_OTP_BYPASS_ENABLED = 'false';
+
+    try {
+      const phoneDigits = '21123456789';
+      const phoneHash = hashPhoneForTest(phoneDigits);
+      const passwordHash = await bcrypt.hash('Leaf1234', 4);
+      const oneHourAhead = new Date(Date.now() + 60 * 60 * 1000);
+
+      mockDocs.set(phoneHash, {
+        uid: 'review_driver_uid',
+        userType: 'driver',
+        passwordHash,
+        failedAttempts: 12,
+        lockedUntil: {
+          toDate: () => oneHourAhead
+        }
+      });
+
+      const response = await request(app)
+        .post('/api/auth/password/login')
+        .send({ phone: '+5521123456789', password: 'Leaf1234' });
+
+      expect(response.status).toBe(200);
+      expect(response.body.success).toBe(true);
+      expect(response.body.uid).toBe('review_driver_uid');
+    } finally {
+      process.env.AUTH_TEST_OTP_BYPASS_ENABLED = previousBypassFlag;
+    }
   });
 });

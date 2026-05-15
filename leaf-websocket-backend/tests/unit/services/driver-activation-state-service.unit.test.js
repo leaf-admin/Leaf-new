@@ -81,4 +81,41 @@ describe('driver-activation-state-service', () => {
     expect(result.state).toBe(DRIVER_ACTIVATION_STATES.DRIVER_DOCS_PENDING);
     expect(result.canGoOnline).toBe(false);
   });
+
+  it('bloqueia online quando KYC esta reprovado mesmo com documentos e veiculo aprovados', async () => {
+    const driverId = 'driver_kyc_rejected';
+    const db = createMockDb({
+      [`user_vehicles/${driverId}`]: {
+        vehicleA: {
+          id: 'vehicleA',
+          vehicleId: 'vehicleA',
+          approved: true,
+          status: 'approved',
+          isActive: true
+        }
+      }
+    });
+
+    const result = await resolveDriverActivationState({
+      driverId,
+      db,
+      activationNode: {},
+      userData: {
+        approved: true,
+        status: 'approved',
+        kycStatus: 'rejected',
+        kycFirstAccessVerifiedAt: '2026-05-14T10:00:00.000Z',
+        activeVehicleId: 'vehicleA'
+      }
+    });
+
+    expect(result.state).toBe(DRIVER_ACTIVATION_STATES.REJECTED);
+    expect(result.canGoOnline).toBe(false);
+    expect(result.kyc).toEqual(
+      expect.objectContaining({
+        blocked: true,
+        status: 'rejected'
+      })
+    );
+  });
 });

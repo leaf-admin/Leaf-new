@@ -313,7 +313,17 @@ class DriverEligibilityService {
             acceptsPlusWithElite,
             rating: Number.isFinite(rating) ? rating : 5,
             activeVehicleId: activeUserVehicle?.vehicleId || null,
-            vehiclePlate: vehicle?.plate || vehicle?.vehicleNumber || user?.carPlate || user?.vehicleNumber || null,
+            vehiclePlate:
+                vehicle?.plate ||
+                vehicle?.vehicleNumber ||
+                vehicle?.vehiclePlate ||
+                activeUserVehicle?.plate ||
+                activeUserVehicle?.vehicleNumber ||
+                activeUserVehicle?.vehiclePlate ||
+                user?.carPlate ||
+                user?.vehicleNumber ||
+                user?.vehiclePlate ||
+                null,
             assignmentConflict
         };
 

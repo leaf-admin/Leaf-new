@@ -5,7 +5,12 @@ const crypto = require('crypto');
 const redisPool = require('../utils/redis-pool');
 const firebaseConfig = require('../firebase-config');
 const { logStructured, logError } = require('../utils/logger');
-const { getBypassOtpCode, isOtpBypassPhone } = require('../utils/test-auth-bypass');
+const {
+  getBypassOtpCode,
+  isOtpBypassPhone,
+  isReviewOtpBypassEnabled,
+  isReviewCredentialPhone
+} = require('../utils/test-auth-bypass');
 
 const router = express.Router();
 const PASSWORD_COLLECTION = 'auth_password_credentials';
@@ -85,6 +90,38 @@ function normalizeUserType(rawValue, fallback = 'customer') {
   if (normalized === 'driver') return 'driver';
   if (normalized === 'customer' || normalized === 'passenger') return 'customer';
   return String(fallback || 'customer').toLowerCase() === 'driver' ? 'driver' : 'customer';
+}
+
+const AUTH_FLOW_NEXT_ACTION = Object.freeze({
+  OTP_REQUIRED: 'OTP_REQUIRED',
+  PASSWORD_LOGIN: 'PASSWORD_LOGIN'
+});
+
+const DEFAULT_PHONE_AUTH_STRATEGY = String(
+  process.env.AUTH_PHONE_DEFAULT_STRATEGY || 'otp_first'
+)
+  .trim()
+  .toLowerCase();
+
+function resolvePhoneNextAction({ exists, hasPassword }) {
+  const passwordEligible = Boolean(exists && hasPassword);
+  if (!passwordEligible) {
+    return AUTH_FLOW_NEXT_ACTION.OTP_REQUIRED;
+  }
+
+  if (DEFAULT_PHONE_AUTH_STRATEGY === 'password_first') {
+    return AUTH_FLOW_NEXT_ACTION.PASSWORD_LOGIN;
+  }
+
+  return AUTH_FLOW_NEXT_ACTION.OTP_REQUIRED;
+}
+
+function buildLegacyPhoneFlowFlags(nextAction) {
+  const requiresPassword = nextAction === AUTH_FLOW_NEXT_ACTION.PASSWORD_LOGIN;
+  return {
+    requiresPassword,
+    requiresOtp: !requiresPassword
+  };
 }
 
 async function requireFirebaseUser(req, res, next) {
@@ -239,7 +276,7 @@ function lockoutUntilFromData(data = {}) {
 async function generateResetOtp(phoneDigits) {
   const otpBypassEnabled = isOtpBypassPhone(phoneDigits);
   const otp = otpBypassEnabled
-    ? getBypassOtpCode()
+    ? getBypassOtpCode(phoneDigits)
     : Math.floor(100000 + Math.random() * 900000).toString();
   const verificationId = `pwd_${Date.now()}_${crypto.randomBytes(8).toString('hex')}`;
   if (!otpBypassEnabled) {
@@ -265,12 +302,12 @@ async function generateResetOtp(phoneDigits) {
 }
 
 async function verifyResetOtp({ phoneDigits, verificationId, otp }) {
-  const bypassOtpCode = getBypassOtpCode();
+  const bypassOtpCode = getBypassOtpCode(phoneDigits);
   if (otp === bypassOtpCode && isOtpBypassPhone(phoneDigits)) {
     return true;
   }
 
-  const appReviewOtpBypassEnabled = String(process.env.APP_REVIEW || 'false').toLowerCase() === 'true';
+  const appReviewOtpBypassEnabled = isReviewOtpBypassEnabled();
   if (otp === bypassOtpCode && appReviewOtpBypassEnabled) {
     return true;
   }
@@ -354,11 +391,29 @@ async function resolvePhoneAuthFlowHandler(req, res) {
       return res.status(400).json({ success: false, error: 'Telefone é obrigatório' });
     }
 
-    const { data: credentialData } = await getCredentialByPhone(phoneDigits);
+    let credentialData = null;
+    let credentialLookupFailed = false;
+    let credentialLookupFailureMessage = '';
+
+    try {
+      const credentialLookup = await getCredentialByPhone(phoneDigits);
+      credentialData = credentialLookup?.data || null;
+    } catch (credentialLookupError) {
+      credentialLookupFailed = true;
+      credentialLookupFailureMessage = credentialLookupError?.message || String(credentialLookupError);
+      logStructured('warn', 'Falha ao consultar credenciais de senha por telefone; aplicando fallback OTP', {
+        service: 'auth-password-routes',
+        phoneLast4: String(phoneDigits || '').slice(-4),
+        error: credentialLookupFailureMessage
+      });
+    }
+
     const hasPassword = Boolean(credentialData?.passwordHash);
     let uid = credentialData?.uid || null;
     let resolvedUserType = normalizeUserType(credentialData?.userType || credentialData?.usertype, null);
-    let source = credentialData?.uid ? 'password_credentials' : 'none';
+    let source = credentialData?.uid
+      ? 'password_credentials'
+      : (credentialLookupFailed ? 'password_credentials_unavailable' : 'none');
 
     if (!uid) {
       const authLookup = await lookupFirebaseAuthUserByPhone(phoneDigits);
@@ -377,15 +432,31 @@ async function resolvePhoneAuthFlowHandler(req, res) {
     }
 
     const exists = Boolean(uid);
-    const requiresPassword = exists;
-    const requiresOtp = !exists;
+    const hasPasswordConfigured = Boolean(exists && hasPassword);
+    const resolvedNextAction = resolvePhoneNextAction({ exists, hasPassword: hasPasswordConfigured });
+    const nextAction = hasPasswordConfigured
+      ? resolvedNextAction
+      : AUTH_FLOW_NEXT_ACTION.OTP_REQUIRED;
+    const legacyFlags = buildLegacyPhoneFlowFlags(nextAction);
+    const passwordFallbackAvailable = hasPasswordConfigured;
+
+    if (!hasPasswordConfigured && resolvedNextAction === AUTH_FLOW_NEXT_ACTION.PASSWORD_LOGIN) {
+      logStructured('warn', 'resolve-phone retornou PASSWORD_LOGIN sem senha configurada; corrigindo para OTP_REQUIRED', {
+        service: 'auth-password-routes',
+        uid: uid || null,
+        source,
+        hasPassword,
+        exists
+      });
+    }
 
     return res.status(200).json({
       success: true,
       exists,
-      hasPassword,
-      requiresPassword,
-      requiresOtp,
+      hasPassword: hasPasswordConfigured,
+      nextAction,
+      passwordFallbackAvailable,
+      ...legacyFlags,
       uid: uid || null,
       userType: exists ? (resolvedUserType || 'customer') : null,
       source
@@ -403,6 +474,7 @@ router.post('/login', async (req, res) => {
   try {
     const { phone, password } = req.body || {};
     const phoneDigits = normalizePhone(phone);
+    const bypassLockoutForReviewPhone = isReviewCredentialPhone(phoneDigits);
     if (!phoneDigits || !password) {
       return res.status(400).json({ success: false, error: 'Telefone e senha são obrigatórios' });
     }
@@ -414,7 +486,7 @@ router.post('/login', async (req, res) => {
     }
 
     const lockedUntil = lockoutUntilFromData(data);
-    if (lockedUntil && lockedUntil.getTime() > Date.now()) {
+    if (!bypassLockoutForReviewPhone && lockedUntil && lockedUntil.getTime() > Date.now()) {
       return res.status(423).json({
         success: false,
         error: 'Conta temporariamente bloqueada por tentativas inválidas',
@@ -424,8 +496,8 @@ router.post('/login', async (req, res) => {
 
     const passwordMatches = await bcrypt.compare(String(password), data.passwordHash);
     if (!passwordMatches) {
-      const failedAttempts = Number(data.failedAttempts || 0) + 1;
-      const shouldLock = failedAttempts >= PASSWORD_FAILED_ATTEMPTS_LIMIT;
+      const failedAttempts = bypassLockoutForReviewPhone ? 0 : Number(data.failedAttempts || 0) + 1;
+      const shouldLock = !bypassLockoutForReviewPhone && failedAttempts >= PASSWORD_FAILED_ATTEMPTS_LIMIT;
       await ref.set({
         failedAttempts,
         lockedUntil: shouldLock
@@ -541,9 +613,9 @@ router.post('/reset/confirm', async (req, res) => {
   try {
     const { phone, verificationId, otp, password, confirmPassword } = req.body || {};
     const phoneDigits = normalizePhone(phone);
-    const bypassOtpCode = getBypassOtpCode();
+    const bypassOtpCode = getBypassOtpCode(phoneDigits);
     const bypassAttempt = otp === bypassOtpCode;
-    const appReviewOtpBypassEnabled = String(process.env.APP_REVIEW || 'false').toLowerCase() === 'true';
+    const appReviewOtpBypassEnabled = isReviewOtpBypassEnabled();
     const bypassAllowedForRequest = bypassAttempt && (isOtpBypassPhone(phoneDigits) || appReviewOtpBypassEnabled);
 
     if (!phoneDigits || !otp || (!verificationId && !bypassAllowedForRequest)) {

@@ -9,6 +9,8 @@ const { logStructured, logError } = require('../utils/logger');
 const DEFAULTS = {
   challengeTtlSeconds: 20 * 60,
   verificationMaxAgeHours: 24,
+  lowRiskVerificationMaxAgeHours: 168,
+  mediumRiskVerificationMaxAgeHours: 72,
   burstWindowMinutes: 30,
   burstCountThreshold: 2,
   dailyWithdrawalLimitCents: 300000,
@@ -19,6 +21,31 @@ const DEFAULTS = {
   photoMismatchWindowDays: 30,
   enforceFirstAccessLiveness: true
 };
+
+const KYC_POLICY_FIELDS = [
+  'kycStatus',
+  'kyc_status',
+  'kycBlocked',
+  'kycReverifyRequired',
+  'kycReverifyReason',
+  'kycReverifySource',
+  'kycPhotoMismatchReportedAt',
+  'kycReverifyRequestedAt',
+  'kycFirstAccessVerifiedAt',
+  'kycLastVerificationAt'
+];
+
+const BLOCKING_KYC_STATUSES = new Set([
+  'blocked',
+  'rejected',
+  'failed',
+  'denied',
+  'pending',
+  'pending_review',
+  'pending_reverify',
+  'in_review',
+  'review'
+]);
 
 function getIntEnv(name, fallback) {
   const parsed = Number.parseInt(process.env[name], 10);
@@ -61,6 +88,37 @@ function normalizeText(value) {
     .trim();
 }
 
+function pickKycPolicyFields(source = {}) {
+  return KYC_POLICY_FIELDS.reduce((acc, field) => {
+    if (Object.prototype.hasOwnProperty.call(source, field)) {
+      acc[field] = source[field];
+    }
+    return acc;
+  }, {});
+}
+
+function normalizeKycStatus(value) {
+  return normalizeText(value).replace(/\s+/g, '_');
+}
+
+async function readRealtimeKycPolicyFields(driverId) {
+  const entries = await Promise.all(
+    KYC_POLICY_FIELDS.map(async (field) => {
+      const value = await firebaseConfig
+        .getFromRealtimeDB(`users/${driverId}/${field}`)
+        .catch(() => undefined);
+      return [field, value];
+    })
+  );
+
+  return entries.reduce((acc, [field, value]) => {
+    if (value !== undefined && value !== null) {
+      acc[field] = value;
+    }
+    return acc;
+  }, {});
+}
+
 class KYCPolicyService {
   constructor() {
     this.redis = redisPool.getConnection();
@@ -70,14 +128,28 @@ class KYCPolicyService {
   }
 
   getConfig() {
+    const verificationMaxAgeHours = getIntEnv(
+      'KYC_WITHDRAW_VERIFICATION_MAX_AGE_HOURS',
+      DEFAULTS.verificationMaxAgeHours
+    );
+
     return {
       challengeTtlSeconds: getIntEnv(
         'KYC_WITHDRAW_CHALLENGE_TTL_SECONDS',
         DEFAULTS.challengeTtlSeconds
       ),
-      verificationMaxAgeHours: getIntEnv(
-        'KYC_WITHDRAW_VERIFICATION_MAX_AGE_HOURS',
-        DEFAULTS.verificationMaxAgeHours
+      verificationMaxAgeHours,
+      lowRiskVerificationMaxAgeHours: getIntEnv(
+        'KYC_WITHDRAW_LOW_RISK_VERIFICATION_MAX_AGE_HOURS',
+        DEFAULTS.lowRiskVerificationMaxAgeHours
+      ),
+      mediumRiskVerificationMaxAgeHours: getIntEnv(
+        'KYC_WITHDRAW_MEDIUM_RISK_VERIFICATION_MAX_AGE_HOURS',
+        DEFAULTS.mediumRiskVerificationMaxAgeHours
+      ),
+      highRiskVerificationMaxAgeHours: getIntEnv(
+        'KYC_WITHDRAW_HIGH_RISK_VERIFICATION_MAX_AGE_HOURS',
+        verificationMaxAgeHours
       ),
       burstWindowMinutes: getIntEnv(
         'KYC_WITHDRAW_BURST_WINDOW_MINUTES',
@@ -144,9 +216,81 @@ class KYCPolicyService {
       driversDoc = driversSnap.exists ? driversSnap.data() : {};
     }
 
-    realtimeUser = (await firebaseConfig.getFromRealtimeDB(`users/${driverId}`)) || {};
+    realtimeUser = await readRealtimeKycPolicyFields(driverId);
 
-    return { usersDoc, driversDoc, realtimeUser };
+    return {
+      usersDoc: pickKycPolicyFields(usersDoc),
+      driversDoc: pickKycPolicyFields(driversDoc),
+      realtimeUser: pickKycPolicyFields(realtimeUser)
+    };
+  }
+
+  resolveKycApprovalGate(kycState = {}) {
+    const statusCandidates = [
+      kycState.usersDoc?.kycStatus,
+      kycState.usersDoc?.kyc_status,
+      kycState.driversDoc?.kycStatus,
+      kycState.driversDoc?.kyc_status,
+      kycState.realtimeUser?.kycStatus,
+      kycState.realtimeUser?.kyc_status
+    ].map(normalizeKycStatus).filter(Boolean);
+
+    const blocked = Boolean(
+      kycState.usersDoc?.kycBlocked
+      || kycState.driversDoc?.kycBlocked
+      || kycState.realtimeUser?.kycBlocked
+    );
+
+    const approved = statusCandidates.some((status) => status === 'approved');
+    const blockingStatus = statusCandidates.find((status) => BLOCKING_KYC_STATUSES.has(status));
+
+    if (blocked) {
+      return {
+        allowed: false,
+        code: 'KYC_BLOCKED',
+        reason: 'Motorista bloqueado para KYC ou revalidacao obrigatoria.',
+        status: blockingStatus || statusCandidates[0] || 'blocked'
+      };
+    }
+
+    if (!approved) {
+      return {
+        allowed: false,
+        code: blockingStatus === 'rejected' ? 'KYC_REJECTED' : 'KYC_NOT_APPROVED',
+        reason: blockingStatus === 'rejected'
+          ? 'KYC do motorista reprovado.'
+          : 'KYC aprovado e obrigatorio para esta acao.',
+        status: blockingStatus || statusCandidates[0] || 'missing'
+      };
+    }
+
+    return {
+      allowed: true,
+      code: 'KYC_APPROVED',
+      reason: 'KYC aprovado.',
+      status: 'approved'
+    };
+  }
+
+  async requireApprovedKyc(driverId) {
+    const kycState = await this.getDriverKycState(driverId);
+    const approvalGate = this.resolveKycApprovalGate(kycState);
+    const reverifyRequired = Boolean(
+      kycState.usersDoc?.kycReverifyRequired
+      || kycState.driversDoc?.kycReverifyRequired
+      || kycState.realtimeUser?.kycReverifyRequired
+    );
+
+    if (approvalGate.allowed && reverifyRequired) {
+      return {
+        allowed: false,
+        code: 'KYC_REVERIFY_REQUIRED',
+        reason: 'Revalidacao facial obrigatoria antes desta acao.',
+        status: 'pending_reverify'
+      };
+    }
+
+    return approvalGate;
   }
 
   getAmountSignals(amountCents, config) {
@@ -177,6 +321,36 @@ class KYCPolicyService {
     }
 
     return signals;
+  }
+
+  getWithdrawalVerificationWindow({ preKycRiskScore = 0, signals = [], reverifyRequired = false } = {}, config = this.getConfig()) {
+    const codes = new Set((signals || []).map((signal) => signal.code));
+    const highRisk =
+      reverifyRequired
+      || codes.has('PHOTO_MISMATCH_REPORTED')
+      || codes.has('WITHDRAW_AMOUNT_HIGH')
+      || codes.has('WITHDRAW_DAILY_LIMIT')
+      || codes.has('WITHDRAW_BURST_PATTERN')
+      || preKycRiskScore >= config.verifyScoreThreshold;
+
+    if (highRisk) {
+      return {
+        tier: 'high',
+        maxAgeHours: config.highRiskVerificationMaxAgeHours
+      };
+    }
+
+    if (preKycRiskScore > 0) {
+      return {
+        tier: 'medium',
+        maxAgeHours: config.mediumRiskVerificationMaxAgeHours
+      };
+    }
+
+    return {
+      tier: 'low',
+      maxAgeHours: config.lowRiskVerificationMaxAgeHours
+    };
   }
 
   async collectWithdrawalSignals(driverId, amountCents, config) {
@@ -500,6 +674,42 @@ class KYCPolicyService {
     signals.push(...withdrawalSignals.signals);
 
     const kycState = await this.getDriverKycState(driverId);
+    const approvalGate = this.resolveKycApprovalGate(kycState);
+    if (!approvalGate.allowed) {
+      signals.push({
+        code: approvalGate.code,
+        weight: 100,
+        message: approvalGate.reason,
+        details: {
+          status: approvalGate.status
+        }
+      });
+
+      return {
+        driverId,
+        amountCents,
+        requirement: 'KYC_APPROVAL_REQUIRED',
+        riskScore: 100,
+        preKycRiskScore: Math.min(
+          100,
+          signals.reduce((sum, current) => sum + Number(current.weight || 0), 0)
+        ),
+        verificationWindowTier: 'blocked',
+        verificationMaxAgeHours: 0,
+        signals,
+        challenge: null,
+        context: {
+          withdrawals24hCount: withdrawalSignals.withdrawals24hCount,
+          withdrawals24hCents: withdrawalSignals.withdrawals24hCents,
+          burstCount: withdrawalSignals.burstCount,
+          hasValidVerification: false,
+          verificationWindowTier: 'blocked',
+          verificationMaxAgeHours: 0,
+          approvalGate
+        }
+      };
+    }
+
     const reverifyRequired = Boolean(
       kycState.usersDoc?.kycReverifyRequired
       || kycState.driversDoc?.kycReverifyRequired
@@ -518,10 +728,20 @@ class KYCPolicyService {
       });
     }
 
+    const preKycRiskScore = Math.min(
+      100,
+      signals.reduce((sum, current) => sum + Number(current.weight || 0), 0)
+    );
+    const verificationWindow = this.getWithdrawalVerificationWindow({
+      preKycRiskScore,
+      signals,
+      reverifyRequired
+    }, config);
+
     await this.ensureKycInitialized().catch(() => null);
     const verification = await this.integratedKycService.hasValidVerification(
       driverId,
-      config.verificationMaxAgeHours
+      verificationWindow.maxAgeHours
     );
 
     if (!verification?.hasValid) {
@@ -530,7 +750,8 @@ class KYCPolicyService {
         weight: 26,
         message: verification?.reason || 'KYC valido nao encontrado na janela esperada',
         details: {
-          maxAgeHours: config.verificationMaxAgeHours
+          maxAgeHours: verificationWindow.maxAgeHours,
+          windowTier: verificationWindow.tier
         }
       });
     }
@@ -575,13 +796,18 @@ class KYCPolicyService {
       amountCents,
       requirement,
       riskScore,
+      preKycRiskScore,
+      verificationWindowTier: verificationWindow.tier,
+      verificationMaxAgeHours: verificationWindow.maxAgeHours,
       signals,
       challenge,
       context: {
         withdrawals24hCount: withdrawalSignals.withdrawals24hCount,
         withdrawals24hCents: withdrawalSignals.withdrawals24hCents,
         burstCount: withdrawalSignals.burstCount,
-        hasValidVerification: Boolean(verification?.hasValid)
+        hasValidVerification: Boolean(verification?.hasValid),
+        verificationWindowTier: verificationWindow.tier,
+        verificationMaxAgeHours: verificationWindow.maxAgeHours
       }
     };
   }

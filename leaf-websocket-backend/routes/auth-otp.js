@@ -3,7 +3,7 @@ const admin = require('firebase-admin');
 const redisPool = require('../utils/redis-pool');
 const { logger } = require('../utils/logger');
 const firebaseConfig = require('../firebase-config');
-const { getBypassOtpCode, isOtpBypassPhone } = require('../utils/test-auth-bypass');
+const { getBypassOtpCode, isOtpBypassPhone, isReviewOtpBypassEnabled } = require('../utils/test-auth-bypass');
 
 const router = express.Router();
 const OTP_TTL_SECONDS = 300;
@@ -121,7 +121,7 @@ router.post('/request-otp', async (req, res) => {
 
         const otpBypassEnabled = isOtpBypassPhone(normalizedPhone);
         const otp = otpBypassEnabled
-            ? getBypassOtpCode()
+            ? getBypassOtpCode(normalizedPhone)
             : Math.floor(100000 + Math.random() * 900000).toString();
         const verificationId = `vid_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
         let customToken = null;
@@ -199,11 +199,11 @@ router.post('/verify-otp', async (req, res) => {
             return res.status(400).json({ error: 'Invalid phone number' });
         }
 
-        const bypassOtpCode = getBypassOtpCode();
+        const bypassOtpCode = getBypassOtpCode(normalizedPhone);
         const testOtpBypassEnabled = isOtpBypassPhone(normalizedPhone);
 
         // Test credentials only for Review/App stores.
-        const appReviewOtpBypassEnabled = String(process.env.APP_REVIEW || 'false').toLowerCase() === 'true';
+        const appReviewOtpBypassEnabled = isReviewOtpBypassEnabled();
         const bypassAttempt = otp === bypassOtpCode;
         const bypassAllowedForRequest = bypassAttempt && (testOtpBypassEnabled || appReviewOtpBypassEnabled);
 

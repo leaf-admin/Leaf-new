@@ -248,12 +248,21 @@ function registerSocketAuthenticateHandler({
             // Verificar se usuário já está conectado em outro socket
             const existingSocket = io.connectedUsers.get(authUserId);
             if (existingSocket && existingSocket.id !== socket.id && SESSION_SIMULTANEA_BLOCKED) {
-                // Desconectar sessão anterior
+                // Avisar a sessão anterior antes de desconectar, para o app mostrar o modal de sessão encerrada.
                 existingSocket.emit('sessionTerminated', {
+                    code: 'SESSION_REPLACED',
                     reason: 'Nova sessão iniciada em outro dispositivo',
+                    userId: authUserId,
+                    newSocketId: socket.id,
+                    previousSocketId: existingSocket.id,
                     timestamp: new Date().toISOString()
                 });
-                existingSocket.disconnect();
+                const disconnectTimer = setTimeout(() => {
+                    existingSocket.disconnect();
+                }, 250);
+                if (typeof disconnectTimer.unref === 'function') {
+                    disconnectTimer.unref();
+                }
                 logStructured('info', 'Desconectando sessão anterior', {
                     service: 'websocket',
                     userId: authUserId,

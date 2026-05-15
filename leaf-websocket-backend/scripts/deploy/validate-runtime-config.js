@@ -174,8 +174,17 @@ function main() {
     if (boolEnv('ENABLE_DASHBOARD_MOCK_ENDPOINTS')) {
       blockers.push('ENABLE_DASHBOARD_MOCK_ENDPOINTS=true bloqueado em produção');
     }
-    if (boolEnv('ENABLE_PAYMENT_BYPASS_ON_WOOVI_FAILURE') || boolEnv('FORCE_PAYMENT_BYPASS')) {
+    if (boolEnv('PAYMENT_BYPASS_ON_WOOVI_FAILURE') || boolEnv('PAYMENT_FORCE_BYPASS')) {
       blockers.push('Bypass de pagamento ativado bloqueado em produção');
+    }
+    if (boolEnv('MOCK_PAYMENT_FOR_TESTS')) {
+      blockers.push('MOCK_PAYMENT_FOR_TESTS=true bloqueado em produção');
+    }
+    if (boolEnv('AUTH_TEST_OTP_BYPASS_ENABLED')) {
+      blockers.push('AUTH_TEST_OTP_BYPASS_ENABLED=true bloqueado em produção');
+    }
+    if (boolEnv('AUTH_REVIEW_OTP_BYPASS_ENABLED') && !boolEnv('APP_REVIEW')) {
+      blockers.push('AUTH_REVIEW_OTP_BYPASS_ENABLED=true sem APP_REVIEW não é permitido');
     }
     if (boolEnv('ALLOW_LOCAL_CORS')) {
       blockers.push('CORS local/expo habilitado bloqueado em produção');

@@ -14,20 +14,24 @@ const DEFAULT_REVIEW_PASSWORD = process.env.REVIEW_COMMON_PASSWORD || 'teste123'
 const REVIEW_ACCOUNTS = [
   {
     label: 'passenger',
-    phone: process.env.REVIEW_PASSENGER_PHONE || '+5511999999999',
+    phone: process.env.REVIEW_PASSENGER_PHONE || '+5521102938475',
     userType: 'customer',
     password: process.env.REVIEW_PASSENGER_PASSWORD || DEFAULT_REVIEW_PASSWORD
   },
   {
     label: 'driver',
-    phone: process.env.REVIEW_DRIVER_PHONE || '+5511888888888',
+    phone: process.env.REVIEW_DRIVER_PHONE || '+5521123456789',
     userType: 'driver',
     password: process.env.REVIEW_DRIVER_PASSWORD || DEFAULT_REVIEW_PASSWORD
   }
 ];
 
 function normalizePhone(phone) {
-  return String(phone || '').replace(/\D/g, '');
+  const digits = String(phone || '').replace(/\D/g, '');
+  if (digits.length === 13 && digits.startsWith('55')) {
+    return digits.slice(2);
+  }
+  return digits;
 }
 
 function normalizeUserType(rawValue, fallback = 'customer') {
@@ -40,6 +44,45 @@ function normalizeUserType(rawValue, fallback = 'customer') {
 function hashPhone(phoneDigits) {
   const pepper = process.env.AUTH_PASSWORD_PHONE_HASH_PEPPER || process.env.JWT_SECRET || 'leaf-phone-hash';
   return crypto.createHmac('sha256', pepper).update(String(phoneDigits || '')).digest('hex');
+}
+
+function buildPhoneLookupCandidates(phoneDigits, originalPhone) {
+  const digits = String(phoneDigits || '');
+  if (!digits) return [];
+
+  const candidates = new Set();
+  if (digits.startsWith('55')) {
+    candidates.add(`+${digits}`);
+    const localDigits = digits.slice(2);
+    if (localDigits) {
+      candidates.add(`+${localDigits}`);
+    }
+  } else {
+    candidates.add(`+55${digits}`);
+    candidates.add(`+${digits}`);
+  }
+
+  const rawPhone = String(originalPhone || '').trim();
+  if (rawPhone.startsWith('+')) {
+    candidates.add(rawPhone);
+  }
+
+  return Array.from(candidates);
+}
+
+async function resolveAuthUserByPhone(phoneDigits, originalPhone) {
+  const candidates = buildPhoneLookupCandidates(phoneDigits, originalPhone);
+  for (const candidate of candidates) {
+    try {
+      return await admin.auth().getUserByPhoneNumber(candidate);
+    } catch (error) {
+      if (error?.code === 'auth/user-not-found') {
+        continue;
+      }
+      throw error;
+    }
+  }
+  return null;
 }
 
 function maskPhone(phoneDigits) {
@@ -58,21 +101,43 @@ async function resolveProfileUserType(uid, fallback) {
 }
 
 async function upsertAccountCredential(firestore, account) {
-  const authUser = await admin.auth().getUserByPhoneNumber(account.phone);
-  const phoneDigits = normalizePhone(authUser.phoneNumber || account.phone);
+  const phoneDigits = normalizePhone(account.phone);
   if (!phoneDigits) {
     throw new Error(`phone_missing:${account.label}`);
   }
 
-  const resolvedUserType = await resolveProfileUserType(authUser.uid, account.userType);
-  const passwordHash = await bcrypt.hash(String(account.password), BCRYPT_ROUNDS);
   const phoneHash = hashPhone(phoneDigits);
   const ref = firestore.collection(PASSWORD_COLLECTION).doc(phoneHash);
   const snapshot = await ref.get();
+  const existingData = snapshot.exists ? snapshot.data() || {} : {};
+
+  let targetUid = existingData.uid || null;
+  if (targetUid) {
+    try {
+      await admin.auth().getUser(targetUid);
+    } catch (error) {
+      if (error?.code === 'auth/user-not-found') {
+        targetUid = null;
+      } else {
+        throw error;
+      }
+    }
+  }
+
+  if (!targetUid) {
+    const authUser = await resolveAuthUserByPhone(phoneDigits, account.phone);
+    if (!authUser?.uid) {
+      throw new Error(`auth_user_not_found:${account.label}`);
+    }
+    targetUid = authUser.uid;
+  }
+
+  const resolvedUserType = await resolveProfileUserType(targetUid, account.userType);
+  const passwordHash = await bcrypt.hash(String(account.password), BCRYPT_ROUNDS);
 
   await ref.set(
     {
-      uid: authUser.uid,
+      uid: targetUid,
       phoneHash,
       phoneLast4: phoneDigits.slice(-4),
       userType: resolvedUserType,
@@ -85,14 +150,14 @@ async function upsertAccountCredential(firestore, account) {
     { merge: true }
   );
 
-  await firebaseConfig.updateRealtimeDB(`users/${authUser.uid}`, {
+  await firebaseConfig.updateRealtimeDB(`users/${targetUid}`, {
     hasPassword: true,
     passwordLastUpdatedAt: new Date().toISOString()
   });
 
   return {
     label: account.label,
-    uid: authUser.uid,
+    uid: targetUid,
     phoneMasked: maskPhone(phoneDigits),
     userType: resolvedUserType,
     created: snapshot.exists !== true
@@ -130,4 +195,3 @@ main()
     console.error('[review-password][error]', error?.message || error);
     process.exit(1);
   });
-
