@@ -142,7 +142,10 @@ export default function PromotionsPage() {
     <ProtectedRoute>
       <main className="page-shell">
         <header className="header">
-          <h1>Promocoes</h1>
+          <div>
+            <h1>Promoções</h1>
+            <p>Benefícios, aplicações manuais e controle de campanhas ativas.</p>
+          </div>
           <div className="filters">
             <input
               placeholder="Buscar por id, nome, tipo ou status"
@@ -185,81 +188,116 @@ export default function PromotionsPage() {
             />
           </Panel>
 
-          <Panel title="Criar Promocao">
-            <div className="filters">
-              <input
-                placeholder="Nome da promocao"
-                value={form.name}
-                onChange={(e) => setForm((prev) => ({ ...prev, name: e.target.value }))}
-              />
-              <select
-                value={form.type}
-                onChange={(e) => setForm((prev) => ({ ...prev, type: e.target.value }))}
-              >
-                <option value="free_subscription">Assinatura gratis</option>
-                <option value="trial_extension">Extensao de trial</option>
-                <option value="discount">Desconto</option>
-              </select>
-              <select
-                value={form.criteria}
-                onChange={(e) => setForm((prev) => ({ ...prev, criteria: e.target.value }))}
-              >
-                <option value="all_drivers">Todos os motoristas</option>
-                <option value="first_n_drivers">Primeiros N motoristas</option>
-                <option value="specific_drivers">Lista especifica</option>
-              </select>
-              <input
-                type="number"
-                min="1"
-                max="365"
-                value={form.days}
-                onChange={(e) => setForm((prev) => ({ ...prev, days: e.target.value }))}
-                placeholder="Duracao (dias)"
-              />
-              <input
-                type="number"
-                min="1"
-                value={form.maxRedemptions}
-                onChange={(e) => setForm((prev) => ({ ...prev, maxRedemptions: e.target.value }))}
-                placeholder="Limite de resgates"
-              />
-              <input
-                type="datetime-local"
-                value={form.startDate}
-                onChange={(e) => setForm((prev) => ({ ...prev, startDate: e.target.value }))}
-              />
-              <input
-                type="datetime-local"
-                value={form.endDate}
-                onChange={(e) => setForm((prev) => ({ ...prev, endDate: e.target.value }))}
-              />
-              <button onClick={create} disabled={!canCreate}>
-                Criar promocao
-              </button>
-            </div>
+          <Panel title="Ações rápidas" subtitle="Criação e aplicação manual ficam recolhidas para não poluir a operação diária.">
+            <details className="technical-details">
+              <summary>Criar promoção</summary>
+              <div className="technical-details-inner">
+                <div className="form-grid">
+                  <label className="form-field">
+                    Nome
+                    <input
+                      placeholder="Nome da promoção"
+                      value={form.name}
+                      onChange={(e) => setForm((prev) => ({ ...prev, name: e.target.value }))}
+                    />
+                  </label>
+                  <label className="form-field">
+                    Tipo
+                    <select
+                      value={form.type}
+                      onChange={(e) => setForm((prev) => ({ ...prev, type: e.target.value }))}
+                    >
+                      <option value="free_subscription">Assinatura grátis</option>
+                      <option value="trial_extension">Extensão de trial</option>
+                      <option value="discount">Desconto</option>
+                    </select>
+                  </label>
+                  <label className="form-field">
+                    Critério
+                    <select
+                      value={form.criteria}
+                      onChange={(e) => setForm((prev) => ({ ...prev, criteria: e.target.value }))}
+                    >
+                      <option value="all_drivers">Todos os motoristas</option>
+                      <option value="first_n_drivers">Primeiros N motoristas</option>
+                      <option value="specific_drivers">Lista específica</option>
+                    </select>
+                  </label>
+                  <label className="form-field">
+                    Duração
+                    <input
+                      type="number"
+                      min="1"
+                      max="365"
+                      value={form.days}
+                      onChange={(e) => setForm((prev) => ({ ...prev, days: e.target.value }))}
+                      placeholder="Dias"
+                    />
+                  </label>
+                  <label className="form-field">
+                    Limite
+                    <input
+                      type="number"
+                      min="1"
+                      value={form.maxRedemptions}
+                      onChange={(e) => setForm((prev) => ({ ...prev, maxRedemptions: e.target.value }))}
+                      placeholder="Resgates"
+                    />
+                  </label>
+                  <label className="form-field">
+                    Início
+                    <input
+                      type="datetime-local"
+                      value={form.startDate}
+                      onChange={(e) => setForm((prev) => ({ ...prev, startDate: e.target.value }))}
+                    />
+                  </label>
+                  <label className="form-field">
+                    Fim
+                    <input
+                      type="datetime-local"
+                      value={form.endDate}
+                      onChange={(e) => setForm((prev) => ({ ...prev, endDate: e.target.value }))}
+                    />
+                  </label>
+                  <button onClick={create} disabled={!canCreate}>
+                    Criar promoção
+                  </button>
+                </div>
+              </div>
+            </details>
+
+            <details className="technical-details">
+              <summary>Aplicar manualmente e enviar push</summary>
+              <div className="technical-details-inner">
+                <div className="form-grid">
+                  <label className="form-field">
+                    Promoção
+                    <select value={selectedPromotion} onChange={(e) => setSelectedPromotion(e.target.value)}>
+                      <option value="">Selecione promoção</option>
+                      {filteredRows.map((promo) => (
+                        <option key={promo.id} value={promo.id}>
+                          {promo.name || promo.id}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="form-field">
+                    Motorista
+                    <input
+                      placeholder="driverId"
+                      value={driverId}
+                      onChange={(e) => setDriverId(e.target.value)}
+                    />
+                  </label>
+                  <button onClick={applyToDriver}>Aplicar e notificar</button>
+                </div>
+              </div>
+            </details>
           </Panel>
 
-          <Panel title="Aplicacao Manual + Push">
-            <div className="filters">
-              <select value={selectedPromotion} onChange={(e) => setSelectedPromotion(e.target.value)}>
-                <option value="">Selecione promocao</option>
-                {filteredRows.map((promo) => (
-                  <option key={promo.id} value={promo.id}>
-                    {promo.name || promo.id}
-                  </option>
-                ))}
-              </select>
-              <input
-                placeholder="driverId"
-                value={driverId}
-                onChange={(e) => setDriverId(e.target.value)}
-              />
-              <button onClick={applyToDriver}>Aplicar e notificar</button>
-            </div>
-          </Panel>
-
-          <Panel title="Operacao de Promocoes">
-            <div className="table-shell table-shell-tall">
+          <Panel className="panel-span-full" title="Operação de promoções">
+            <div className="table-shell">
               <table className="table table-compact">
                 <thead>
                   <tr>

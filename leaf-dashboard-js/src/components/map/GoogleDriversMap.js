@@ -8,6 +8,7 @@ const BASE_MAP_STYLE = {
   height: "520px",
   borderRadius: "10px",
 };
+const GOOGLE_MAP_LIBRARIES = [];
 
 function getCenter(drivers = [], h3Cells = []) {
   if (drivers.length) {
@@ -124,6 +125,7 @@ export default function GoogleDriversMap({
   h3Loading = false,
   h3Error = "",
   h3LastUpdatedAt = null,
+  showH3SyncLabel = true,
   onViewportChange,
   mapHeight = "520px",
   geofenceRegion = [],
@@ -145,6 +147,7 @@ export default function GoogleDriversMap({
       h3Loading={h3Loading}
       h3Error={h3Error}
       h3LastUpdatedAt={h3LastUpdatedAt}
+      showH3SyncLabel={showH3SyncLabel}
       onViewportChange={onViewportChange}
       mapHeight={mapHeight}
       geofenceRegion={geofenceRegion}
@@ -161,6 +164,7 @@ function GoogleDriversMapWithKey({
   h3Loading = false,
   h3Error = "",
   h3LastUpdatedAt = null,
+  showH3SyncLabel = true,
   onViewportChange,
   mapHeight = "520px",
   geofenceRegion = [],
@@ -179,6 +183,7 @@ function GoogleDriversMapWithKey({
   const { isLoaded, loadError } = useJsApiLoader({
     id: "leaf-google-maps",
     googleMapsApiKey: apiKey,
+    libraries: GOOGLE_MAP_LIBRARIES,
   });
 
   const mapContainerStyle = useMemo(
@@ -386,7 +391,7 @@ function GoogleDriversMapWithKey({
 
   return (
     <div className="google-map-wrap">
-      <div className="google-map-toolbar" style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 12 }}>
+      <div className="google-map-toolbar" style={{ marginBottom: 12 }}>
         <button
           type="button"
           className={mapMode === "drivers" ? "mode-btn mode-btn-active" : "mode-btn"}
@@ -408,11 +413,13 @@ function GoogleDriversMapWithKey({
         >
           Ambos
         </button>
-        {h3Loading && validCells.length === 0 ? (
+        {showH3SyncLabel && h3Loading && validCells.length === 0 ? (
           <span style={{ fontSize: 12, color: "#475569" }}>Carregando H3...</span>
         ) : null}
-        {h3LastSyncLabel ? <span style={{ fontSize: 12, color: "#475569" }}>H3 atualizado: {h3LastSyncLabel}</span> : null}
-        {h3Error ? <span style={{ fontSize: 12, color: "#b91c1c" }}>{h3Error}</span> : null}
+        {showH3SyncLabel && h3LastSyncLabel ? (
+          <span style={{ fontSize: 12, color: "#475569" }}>H3 atualizado: {h3LastSyncLabel}</span>
+        ) : null}
+        {showH3SyncLabel && h3Error ? <span style={{ fontSize: 12, color: "#b91c1c" }}>{h3Error}</span> : null}
         {geofenceEditable ? (
           <>
             <button

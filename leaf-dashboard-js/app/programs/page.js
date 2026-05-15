@@ -7,7 +7,7 @@ import Panel from "@/src/components/ui/Panel";
 import KpiCard from "@/src/components/ui/KpiCard";
 import { ErrorText, LoadingState } from "@/src/components/ui/PageFeedback";
 import { leafAPI } from "@/src/services/api";
-import { KeyValueGrid, TechnicalDetails } from "@/src/components/ui/DataViews";
+import { TechnicalDetails } from "@/src/components/ui/DataViews";
 
 const defaultCampaignForm = {
   name: "",
@@ -414,7 +414,11 @@ export default function ProgramsPage() {
             </div>
           </Panel>
 
-          <Panel title="Campanhas Cadastradas" subtitle="Controle de status e governança dos parâmetros ativos.">
+          <Panel
+            className="panel-span-full"
+            title="Campanhas Cadastradas"
+            subtitle="Controle de status e governança dos parâmetros ativos."
+          >
             <div className="filters">
               <input
                 placeholder="Filtrar por nome, id ou tipo"
@@ -481,26 +485,7 @@ export default function ProgramsPage() {
                 </tbody>
               </table>
             </div>
-          </Panel>
-
-          <Panel title="Resumo da operacao" subtitle="Indicadores consolidados dos programas de convites.">
-            <KeyValueGrid
-              data={{
-                campanhasAtivas: summaryCards.activeCampaigns,
-                convitesTotais: summaryCards.totalInvites,
-                convitesAceitos: summaryCards.acceptedInvites,
-                recompensasEntregues: summaryCards.rewardedInvites,
-                campanhasCadastradas: campaigns.length,
-              }}
-              labels={{
-                campanhasAtivas: "Campanhas ativas",
-                convitesTotais: "Convites totais",
-                convitesAceitos: "Convites aceitos",
-                recompensasEntregues: "Recompensas entregues",
-                campanhasCadastradas: "Campanhas cadastradas",
-              }}
-            />
-            <TechnicalDetails title="Ver payload técnico dos programas" data={summary || {}} />
+            <TechnicalDetails title="Ver payload técnico dos programas" data={{ summary, campaigns }} />
           </Panel>
         </section>
 

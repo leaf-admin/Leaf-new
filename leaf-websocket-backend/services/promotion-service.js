@@ -207,13 +207,11 @@ class PromotionService {
   async loadAllDriverProfiles() {
     const firestore = this.getFirestore();
     if (firestore) {
-      const snapshot = await firestore.collection('users').get();
-      const drivers = snapshot.docs
-        .map((doc) => ({ id: doc.id, ...doc.data() }))
-        .filter((user) => {
-          const type = String(user.usertype || user.userType || user.role || '').trim().toLowerCase();
-          return type === 'driver';
-        });
+      const snapshot = await firestore
+        .collection('users')
+        .where('usertype', '==', 'driver')
+        .get();
+      const drivers = snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
       if (drivers.length > 0) {
         return drivers;
       }

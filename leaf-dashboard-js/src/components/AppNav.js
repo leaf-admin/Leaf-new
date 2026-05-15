@@ -7,43 +7,43 @@ import { useAuth } from "@/src/contexts/AuthContext";
 
 const groups = [
   {
-    id: "settings",
-    section: "Settings",
-    label: "Your profile",
+    id: "overview",
+    section: "Operação",
+    label: "Monitoramento",
     href: "/dashboard",
     items: [
       { href: "/dashboard", label: "Dashboard" },
-      { href: "/observability", label: "Usage", blockedRoles: ["support"] },
-      { href: "/metrics", label: "Metrics", blockedRoles: ["support"] },
-      { href: "/metrics/history", label: "History", blockedRoles: ["support"] },
-      { href: "/metrics/marketplace", label: "Service health", blockedRoles: ["support"] },
+      { href: "/observability", label: "Observabilidade", blockedRoles: ["support"] },
+      { href: "/metrics", label: "Métricas", blockedRoles: ["support"] },
+      { href: "/metrics/history", label: "Histórico", blockedRoles: ["support"] },
+      { href: "/metrics/marketplace", label: "Marketplace", blockedRoles: ["support"] },
     ],
   },
   {
     id: "organization",
-    section: "Organization",
-    label: "General",
+    section: "Operação",
+    label: "Pessoas",
     href: "/drivers",
     items: [
-      { href: "/drivers", label: "Drivers" },
-      { href: "/drivers/review-queue", label: "Review queue" },
-      { href: "/users", label: "People" },
+      { href: "/drivers", label: "Motoristas" },
+      { href: "/drivers/review-queue", label: "Documentos" },
+      { href: "/users", label: "Usuários" },
       { href: "/maps", label: "Mapas" },
-      { href: "/subscriptions", label: "Billing", blockedRoles: ["support", "development"] },
-      { href: "/programs", label: "Limits" },
+      { href: "/subscriptions", label: "Assinaturas", blockedRoles: ["support", "development"] },
+      { href: "/programs", label: "Programas" },
     ],
   },
   {
     id: "project",
-    section: "Project",
-    label: "General",
+    section: "Growth",
+    label: "Ações",
     href: "/support",
     items: [
-      { href: "/support", label: "Support" },
-      { href: "/notifications", label: "Notifications" },
-      { href: "/reports", label: "Reports" },
-      { href: "/promotions", label: "Promotions" },
-      { href: "/financial-simulator", label: "Simulator", blockedRoles: ["support", "development"] },
+      { href: "/support", label: "Suporte" },
+      { href: "/notifications", label: "Notificações" },
+      { href: "/reports", label: "Relatórios" },
+      { href: "/promotions", label: "Promoções" },
+      { href: "/financial-simulator", label: "Simulador", blockedRoles: ["support", "development"] },
       { href: "/waitlist", label: "Waitlist" },
     ],
   },
@@ -154,7 +154,7 @@ export default function AppNav() {
             API Docs
           </Link>
           <Link href="/support" className="app-topbar-link">
-            Settings
+            Suporte
           </Link>
           <div className="app-topbar-avatar" title={user?.name || user?.email || "Admin"}>
             {userInitials}
@@ -208,7 +208,7 @@ export default function AppNav() {
         <div className="app-sidebar-foot">
           <div className="app-sidebar-card">
             <p className="app-sidebar-card-title">Live observability</p>
-            <p className="app-sidebar-card-text">Atualização contínua a cada 5s.</p>
+            <p className="app-sidebar-card-text">Console limpo para operação assistida.</p>
           </div>
           <div className="app-sidebar-user">
             <div className="app-sidebar-avatar">{userInitials}</div>

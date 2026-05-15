@@ -2,6 +2,13 @@ import config from "@/src/config";
 
 const API_BASE_URL = config.api.baseUrl;
 
+const getApiBaseUrl = () => {
+  if (typeof window !== "undefined" && window.location.hostname === "localhost") {
+    return "/api";
+  }
+  return API_BASE_URL;
+};
+
 class AuthService {
   constructor() {
     this.ACCESS_TOKEN_KEY = "leaf_admin_access_token";
@@ -11,8 +18,9 @@ class AuthService {
   }
 
   async login(email, password) {
-    const response = await fetch(`${API_BASE_URL}/admin/auth/login`, {
+    const response = await fetch(`${getApiBaseUrl()}/admin/auth/login`, {
       method: "POST",
+      credentials: "omit",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ email, password }),
     });
@@ -34,8 +42,9 @@ class AuthService {
     if (!refreshToken) return null;
 
     try {
-      const response = await fetch(`${API_BASE_URL}/admin/auth/refresh`, {
+      const response = await fetch(`${getApiBaseUrl()}/admin/auth/refresh`, {
         method: "POST",
+        credentials: "omit",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ refreshToken }),
       });
@@ -60,7 +69,8 @@ class AuthService {
     if (!token) return null;
 
     const doVerify = async (accessToken) => {
-      const response = await fetch(`${API_BASE_URL}/admin/auth/verify`, {
+      const response = await fetch(`${getApiBaseUrl()}/admin/auth/verify`, {
+        credentials: "omit",
         headers: { Authorization: `Bearer ${accessToken}` },
       });
       if (!response.ok) return null;
@@ -86,8 +96,9 @@ class AuthService {
     const token = this.getAccessToken();
     if (token) {
       try {
-        await fetch(`${API_BASE_URL}/admin/auth/logout`, {
+        await fetch(`${getApiBaseUrl()}/admin/auth/logout`, {
           method: "POST",
+          credentials: "omit",
           headers: { Authorization: `Bearer ${token}` },
         });
       } catch {}

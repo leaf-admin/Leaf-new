@@ -17,6 +17,7 @@ const statusTone = {
   analyzing: "status-warn",
   rejected: "status-bad",
 };
+const DRIVERS_REFRESH_MS = 120000;
 
 export default function DriversPage() {
   const [applications, setApplications] = useState([]);
@@ -46,10 +47,11 @@ export default function DriversPage() {
     let mounted = true;
     const run = async () => {
       if (!mounted) return;
+      if (typeof document !== "undefined" && document.hidden) return;
       await load();
     };
     run();
-    const timer = setInterval(run, 30000);
+    const timer = setInterval(run, DRIVERS_REFRESH_MS);
     return () => {
       mounted = false;
       clearInterval(timer);
@@ -151,7 +153,11 @@ export default function DriversPage() {
             <TechnicalDetails title="Ver detalhes técnicos da listagem" data={summary || {}} />
           </Panel>
 
-          <Panel title="Aplicações" subtitle="Ações de revisão com acesso direto à ficha documental.">
+          <Panel
+            className="panel-span-full"
+            title="Aplicações"
+            subtitle="Ações de revisão com acesso direto à ficha documental."
+          >
             <div className="table-shell">
               <table className="table table-compact">
                 <thead>

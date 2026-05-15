@@ -14,7 +14,7 @@ function get(obj, path, fallback = null) {
 }
 
 function formatValue(value, format) {
-  if (value === null || value === undefined || Number.isNaN(value)) return "N/D";
+  if (value === null || value === undefined || Number.isNaN(value)) return "-";
   if (format === "percent") return `${(Number(value) * 100).toFixed(1)}%`;
   if (format === "minutes") return `${Number(value).toFixed(1)} min`;
   if (format === "brl") {
@@ -88,6 +88,7 @@ export default function MarketplaceMetricsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [selectedId, setSelectedId] = useState("mlr");
+  const [selectedGroup, setSelectedGroup] = useState("Resumo Ideal");
   const [seriesFilter, setSeriesFilter] = useState("");
   const [driverFilter, setDriverFilter] = useState("");
 
@@ -139,6 +140,7 @@ export default function MarketplaceMetricsPage() {
     group,
     items: metrics.filter((m) => m.group === group),
   }));
+  const visibleGroup = byGroup.find((group) => group.group === selectedGroup) || byGroup[0];
   const series = useMemo(() => {
     if (!selected) return [];
     const timeline = Array.isArray(data?.timeline?.daily) ? data.timeline.daily : [];
@@ -192,7 +194,7 @@ export default function MarketplaceMetricsPage() {
         <AppNav />
         {loading ? <LoadingState message="Carregando marketplace health..." /> : null}
 
-        <Panel title="3 indicadores críticos (regra de ouro)">
+        <Panel title="Indicadores críticos" subtitle="A primeira leitura da saúde do marketplace.">
           <section className="grid grid-kpi">
             {critical.map((metric) => (
               <KpiCard
@@ -208,23 +210,33 @@ export default function MarketplaceMetricsPage() {
           </section>
         </Panel>
 
-        {byGroup.map(({ group, items }) => (
-          <Panel key={group} title={group}>
-            <section className="grid grid-kpi">
-              {items.map((metric) => (
-                <KpiCard
-                  key={metric.id}
-                  title={metric.title}
-                  value={metric.display}
-                  subtitle={metric.formula}
-                  tone={metric.tone}
-                  onClick={() => setSelectedId(metric.id)}
-                  selected={selected?.id === metric.id}
-                />
-              ))}
-            </section>
-          </Panel>
-        ))}
+        <Panel title="Indicadores por área" subtitle="Use as abas para trocar a leitura sem alongar a página.">
+          <div className="segmented-control">
+            {GROUP_ORDER.map((group) => (
+              <button
+                key={group}
+                type="button"
+                className={selectedGroup === group ? "segmented-control-active" : ""}
+                onClick={() => setSelectedGroup(group)}
+              >
+                {group}
+              </button>
+            ))}
+          </div>
+          <section className="grid grid-kpi">
+            {(visibleGroup?.items || []).map((metric) => (
+              <KpiCard
+                key={metric.id}
+                title={metric.title}
+                value={metric.display}
+                subtitle={metric.formula}
+                tone={metric.tone}
+                onClick={() => setSelectedId(metric.id)}
+                selected={selected?.id === metric.id}
+              />
+            ))}
+          </section>
+        </Panel>
 
         <Panel title={`Detalhe da métrica: ${selected?.title || "-"}`}>
           {selected ? (
@@ -268,12 +280,13 @@ export default function MarketplaceMetricsPage() {
           )}
         </Panel>
 
-        <Panel title="Evolução temporal (diária)">
+        <section className="grid">
+        <Panel title="Evolução temporal" subtitle={selected?.title || ""}>
           {series.length === 0 ? (
             <p className="text-muted">Sem série histórica para o período selecionado.</p>
           ) : (
-            <div className="bar-list">
-              {series.map((point) => {
+            <div className="bar-list compact-bars">
+              {series.slice(-14).map((point) => {
                 const numericValue = Number(point.value);
                 const valid = Number.isFinite(numericValue);
                 const pct = valid && seriesMax > 0 ? Math.min((numericValue / seriesMax) * 100, 100) : 0;
@@ -293,39 +306,7 @@ export default function MarketplaceMetricsPage() {
           )}
         </Panel>
 
-        <Panel title="Tabela de apoio (diária)">
-          <div className="filters">
-            <input
-              placeholder="Filtrar por data ou valor"
-              value={seriesFilter}
-              onChange={(e) => setSeriesFilter(e.target.value)}
-            />
-          </div>
-          {filteredSeries.length === 0 ? (
-            <p className="text-muted">Sem dados.</p>
-          ) : (
-            <div className="table-shell">
-              <table className="table table-compact">
-                <thead>
-                  <tr>
-                    <th>Data</th>
-                    <th>{selected?.title || "Métrica"}</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {filteredSeries.map((point) => (
-                    <tr key={`row-${point.date}`}>
-                      <td>{point.date}</td>
-                      <td>{formatValue(point.value, selected?.format)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </Panel>
-
-        <Panel title="Corridas por Motorista">
+        <Panel title="Corridas por motorista">
           <div className="filters">
             <input
               placeholder="Filtrar por motorista, telefone ou ID"
@@ -336,7 +317,7 @@ export default function MarketplaceMetricsPage() {
           {filteredDriverRows.length === 0 ? (
             <p className="text-muted">Sem motoristas ativos no período.</p>
           ) : (
-            <div className="table-shell table-shell-tall">
+            <div className="table-shell">
               <table className="table table-compact">
                 <thead>
                   <tr>
@@ -369,14 +350,47 @@ export default function MarketplaceMetricsPage() {
             </div>
           )}
         </Panel>
+        </section>
 
-        <Panel title="Notas de qualidade de dados">
-          <ul>
-            <li>Utilização de motorista está marcada como estimada quando não existe sessão online explícita.</li>
-            <li>Custo por corrida usa modelo estimado (infra + APIs + processamento) para dar referência operacional.</li>
-            <li>As métricas são recarregadas automaticamente a cada 60 segundos e usam cache curto no backend.</li>
-          </ul>
-        </Panel>
+        <details className="technical-details">
+          <summary>Tabela diária e notas técnicas</summary>
+          <div className="technical-details-inner">
+            <div className="filters">
+              <input
+                placeholder="Filtrar por data ou valor"
+                value={seriesFilter}
+                onChange={(e) => setSeriesFilter(e.target.value)}
+              />
+            </div>
+            {filteredSeries.length === 0 ? (
+              <p className="text-muted">Sem dados.</p>
+            ) : (
+              <div className="table-shell table-shell-tight">
+                <table className="table table-compact">
+                  <thead>
+                    <tr>
+                      <th>Data</th>
+                      <th>{selected?.title || "Métrica"}</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filteredSeries.map((point) => (
+                      <tr key={`row-${point.date}`}>
+                        <td>{point.date}</td>
+                        <td>{formatValue(point.value, selected?.format)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+            <ul>
+              <li>Utilização de motorista é estimada quando não existe sessão online explícita.</li>
+              <li>Custo por corrida usa modelo estimado para referência operacional.</li>
+              <li>As métricas recarregam a cada 60 segundos e usam cache curto no backend.</li>
+            </ul>
+          </div>
+        </details>
 
         <ErrorText message={error} />
       </main>

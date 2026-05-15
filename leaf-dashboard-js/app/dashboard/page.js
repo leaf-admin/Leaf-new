@@ -5,7 +5,6 @@ import ProtectedRoute from "@/src/components/ProtectedRoute";
 import AppNav from "@/src/components/AppNav";
 import { useAuth } from "@/src/contexts/AuthContext";
 import { leafAPI } from "@/src/services/api";
-import { wsService } from "@/src/services/websocket-service";
 import KpiCard from "@/src/components/ui/KpiCard";
 import Panel from "@/src/components/ui/Panel";
 import { ErrorText, LoadingState } from "@/src/components/ui/PageFeedback";
@@ -17,6 +16,7 @@ const periodMap = {
   week: "week",
   month: "month",
 };
+const DASHBOARD_REFRESH_MS = 120000;
 
 function brl(value) {
   return `R$ ${Number(value || 0).toLocaleString("pt-BR", { minimumFractionDigits: 2 })}`;
@@ -28,7 +28,6 @@ export default function DashboardPage() {
   const [activityFilter, setActivityFilter] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [wsStatus, setWsStatus] = useState("desconectado");
   const [model, setModel] = useState({
     newDrivers: 0,
     newCustomers: 0,
@@ -52,10 +51,9 @@ export default function DashboardPage() {
         }
 
         const apiPeriod = periodMap[period] || "today";
-        const [driversData, customersData, ridesData, feeData, subscriptionData, evolutionData, recentActivity] =
+        const [userStats, ridesData, feeData, subscriptionData, evolutionData, recentActivity] =
           await Promise.all([
-            leafAPI.getNewDrivers(period).catch(() => ({ users: [] })),
-            leafAPI.getNewCustomers(period).catch(() => ({ users: [] })),
+            leafAPI.getUserStats(period).catch(() => ({})),
             leafAPI.getRidesStats(apiPeriod).catch(() => ({})),
             leafAPI.getOperationalFeeStats(apiPeriod).catch(() => ({})),
             leafAPI.getSubscriptionRevenue("30d").catch(() => ({ revenue: { total: 0 } })),
@@ -66,8 +64,8 @@ export default function DashboardPage() {
         if (!mounted) return;
 
         setModel({
-          newDrivers: driversData?.users?.length || driversData?.count || 0,
-          newCustomers: customersData?.users?.length || customersData?.count || 0,
+          newDrivers: Number(userStats?.period?.newDrivers ?? userStats?.newDriversInPeriod ?? 0),
+          newCustomers: Number(userStats?.period?.newCustomers ?? userStats?.newCustomersInPeriod ?? 0),
           totalRides: ridesData?.totalRides || 0,
           ridesRevenue: ridesData?.totalValue || 0,
           operationalFee: feeData?.totalOperationalFee || 0,
@@ -84,29 +82,12 @@ export default function DashboardPage() {
     };
 
     load();
-    const timer = setInterval(load, 30000);
+    const timer = setInterval(load, DASHBOARD_REFRESH_MS);
     return () => {
       mounted = false;
       clearInterval(timer);
     };
   }, [period]);
-
-  useEffect(() => {
-    let active = true;
-    wsService
-      .connect()
-      .then(() => {
-        if (active) setWsStatus("conectado");
-      })
-      .catch(() => {
-        if (active) setWsStatus("erro");
-      });
-
-    return () => {
-      active = false;
-      wsService.disconnect();
-    };
-  }, []);
 
   const evolutionMax = useMemo(
     () =>
@@ -146,7 +127,6 @@ export default function DashboardPage() {
             <p>Usuario: {user?.email || "n/a"}</p>
           </div>
           <div className="filters">
-            <span className={wsStatus === "conectado" ? "status-ok" : "status-warn"}>WS: {wsStatus}</span>
             <select value={period} onChange={(e) => setPeriod(e.target.value)}>
               <option value="24h">Ultimas 24h</option>
               <option value="3d">Ultimos 3 dias</option>

@@ -88,50 +88,18 @@ class LeafApiService {
     };
   }
 
+  async getUserStats(period = "24h") {
+    return this.request(`/users/stats?period=${encodeURIComponent(period)}`);
+  }
+
   async getNewDrivers(period = "24h") {
-    try {
-      const data = await this.request(`/users?type=driver&page=1&limit=500`);
-      const users = Array.isArray(data?.users) ? data.users : [];
-      const now = Date.now();
-      const periodMs =
-        period === "24h" ? 24 * 60 * 60 * 1000 :
-        period === "3d" ? 3 * 24 * 60 * 60 * 1000 :
-        period === "week" ? 7 * 24 * 60 * 60 * 1000 :
-        30 * 24 * 60 * 60 * 1000;
-
-      const filtered = users.filter((u) => {
-        if (!u?.registrationDate) return false;
-        const ts = new Date(u.registrationDate).getTime();
-        return Number.isFinite(ts) && now - ts <= periodMs;
-      });
-
-      return { users: filtered, count: filtered.length };
-    } catch {
-      return this.request("/users/stats").then((stats) => ({ users: [], count: Number(stats?.newToday || 0) }));
-    }
+    const stats = await this.getUserStats(period);
+    return { users: [], count: Number(stats?.period?.newDrivers ?? stats?.newDriversInPeriod ?? 0) };
   }
 
   async getNewCustomers(period = "24h") {
-    try {
-      const data = await this.request(`/users?type=customer&page=1&limit=500`);
-      const users = Array.isArray(data?.users) ? data.users : [];
-      const now = Date.now();
-      const periodMs =
-        period === "24h" ? 24 * 60 * 60 * 1000 :
-        period === "3d" ? 3 * 24 * 60 * 60 * 1000 :
-        period === "week" ? 7 * 24 * 60 * 60 * 1000 :
-        30 * 24 * 60 * 60 * 1000;
-
-      const filtered = users.filter((u) => {
-        if (!u?.registrationDate) return false;
-        const ts = new Date(u.registrationDate).getTime();
-        return Number.isFinite(ts) && now - ts <= periodMs;
-      });
-
-      return { users: filtered, count: filtered.length };
-    } catch {
-      return this.request("/users/stats").then((stats) => ({ users: [], count: Number(stats?.newToday || 0) }));
-    }
+    const stats = await this.getUserStats(period);
+    return { users: [], count: Number(stats?.period?.newCustomers ?? stats?.newCustomersInPeriod ?? 0) };
   }
 
   async getRidesStats(period = "today") {
@@ -198,6 +166,49 @@ class LeafApiService {
 
   async getMonitoringHealth() {
     return this.request("/monitoring/health");
+  }
+
+  async getOpsOverview(hours = 1) {
+    return this.request(`/ops/overview?hours=${encodeURIComponent(hours)}`);
+  }
+
+  async getOpsAlerts(hours = 1) {
+    return this.request(`/ops/alerts?hours=${encodeURIComponent(hours)}`);
+  }
+
+  async getWorkerHealth() {
+    return this.request("/workers/health");
+  }
+
+  async getWorkerLag() {
+    return this.request("/workers/lag");
+  }
+
+  async getWorkerDLQ() {
+    return this.request("/workers/dlq");
+  }
+
+  async getWorkerDLQEvents(params = {}) {
+    const query = new URLSearchParams();
+    Object.entries(params).forEach(([key, value]) => {
+      if (value !== undefined && value !== null && value !== "") {
+        query.append(key, String(value));
+      }
+    });
+    const suffix = query.toString();
+    return this.request(`/workers/dlq/events${suffix ? `?${suffix}` : ""}`);
+  }
+
+  async getRuntimeFlags() {
+    return this.request("/health/runtime-flags");
+  }
+
+  async getAlerts(limit = 20) {
+    return this.request(`/alerts?limit=${encodeURIComponent(limit)}`);
+  }
+
+  async getAlertStats() {
+    return this.request("/alerts/stats");
   }
 
   async getDrivers(page = 1, limit = 20, status = "all", search = "") {

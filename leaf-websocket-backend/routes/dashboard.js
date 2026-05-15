@@ -142,6 +142,10 @@ function hardenDashboardApiRoutes() {
       continue;
     }
 
+    if (dashboardRouteHasMiddleware(layer, authenticateLegacyDashboardSupportJWTOrSkip, 'authenticateLegacyDashboardSupportJWTOrSkip')) {
+      continue;
+    }
+
     const methods = getDashboardRouteMethods(layer);
     const roles = resolveDashboardHardeningRoles(methods, routePath);
     const roleMiddleware = requireRole(roles);
@@ -459,7 +463,7 @@ function resolveDriverIdentityData(userData = {}, documents = {}) {
 router.get('/api/users/stats', async (req, res) => {
   try {
     const redis = redisPool.getConnection();
-    const stats = await getUserStats(redis);
+    const stats = await getUserStats(redis, req.query || {});
     res.json(stats);
   } catch (error) {
     logError(error, 'Erro ao buscar stats de usuários:', { service: 'dashboard-routes' });
@@ -3971,7 +3975,7 @@ router.get('/api/subscriptions/drivers', authenticateJWT, requireRole(DASHBOARD_
     const subscriptionsData = subscriptionsSnapshot.val() || {};
     const now = new Date();
 
-    const plusDefaultDailyCents = Number.parseInt(process.env.SUBSCRIPTION_PLUS_DAILY_CENTS || '1490', 10);
+    const plusDefaultDailyCents = Number.parseInt(process.env.SUBSCRIPTION_PLUS_DAILY_CENTS || '990', 10);
     const eliteDefaultDailyCents = Number.parseInt(process.env.SUBSCRIPTION_ELITE_DAILY_CENTS || '0', 10);
 
     let rows = Object.keys(users).map((driverId) => {

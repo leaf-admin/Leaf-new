@@ -1,10 +1,10 @@
 const isDev = process.env.NODE_ENV === "development";
 const defaultApiUrl = isDev
   ? "http://localhost:3001/api"
-  : "https://api.62.169.31.231.sslip.io/api";
+  : "https://api.leaf.app.br/api";
 const defaultWsUrl = isDev
   ? "http://localhost:3001"
-  : "https://socket.62.169.31.231.sslip.io";
+  : "https://socket.leaf.app.br";
 
 const rawApiUrl = process.env.NEXT_PUBLIC_API_URL || defaultApiUrl;
 const rawWsUrl = process.env.NEXT_PUBLIC_WS_URL || defaultWsUrl;

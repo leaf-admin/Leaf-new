@@ -4,7 +4,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import ProtectedRoute from "@/src/components/ProtectedRoute";
 import AppNav from "@/src/components/AppNav";
 import { leafAPI } from "@/src/services/api";
-import { wsService } from "@/src/services/websocket-service";
 import KpiCard from "@/src/components/ui/KpiCard";
 import Panel from "@/src/components/ui/Panel";
 import { ErrorText, LoadingState } from "@/src/components/ui/PageFeedback";
@@ -12,8 +11,6 @@ import GoogleDriversMap from "@/src/components/map/GoogleDriversMap";
 import { TechnicalDetails } from "@/src/components/ui/DataViews";
 
 const H3_VIEWPORT_DEBOUNCE_MS = 400;
-const H3_SOCKET_REFRESH_DEBOUNCE_MS = 1500;
-const H3_SOCKET_REFRESH_MIN_INTERVAL_MS = 12000;
 
 function formatRegionDraft(region) {
   if (!Array.isArray(region)) return "[]";
@@ -62,6 +59,21 @@ function parseRegionDraft(regionDraft) {
   return normalized;
 }
 
+function formatTimeLabel(isoDate) {
+  if (!isoDate) return null;
+  const date = new Date(isoDate);
+  if (Number.isNaN(date.getTime())) return null;
+  return date.toLocaleTimeString("pt-BR", { hour12: false });
+}
+
+function getH3StatusMeta({ loading, error, lastUpdatedAt }) {
+  if (error) return { className: "status-bad", label: "erro" };
+  if (loading) return { className: "status-warn", label: "atualizando" };
+  const timeLabel = formatTimeLabel(lastUpdatedAt);
+  if (!timeLabel) return { className: "status-warn", label: "aguardando" };
+  return { className: "status-ok", label: `ok (${timeLabel})` };
+}
+
 export default function MapsPage() {
   const [locations, setLocations] = useState(null);
   const [h3Cells, setH3Cells] = useState([]);
@@ -71,7 +83,6 @@ export default function MapsPage() {
   const [mapViewport, setMapViewport] = useState(null);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
-  const [wsStatus, setWsStatus] = useState("desconectado");
   const [geoLoading, setGeoLoading] = useState(true);
   const [geoError, setGeoError] = useState("");
   const [geoConfig, setGeoConfig] = useState(null);
@@ -80,15 +91,13 @@ export default function MapsPage() {
   const [cityBusyKey, setCityBusyKey] = useState("");
   const [newCityName, setNewCityName] = useState("");
   const [citySearch, setCitySearch] = useState("");
+  const [cityFilterMode, setCityFilterMode] = useState("all");
   const [cityCapDraft, setCityCapDraft] = useState({});
   const [cityWaitlistDraft, setCityWaitlistDraft] = useState({});
   const [geofenceBusy, setGeofenceBusy] = useState(false);
   const [geofenceEnabledDraft, setGeofenceEnabledDraft] = useState(true);
   const [geofenceRegionDraft, setGeofenceRegionDraft] = useState("[]");
   const h3ViewportRequestRef = useRef("");
-  const mapViewportRef = useRef(null);
-  const h3SocketRefreshTimerRef = useRef(null);
-  const h3SocketRefreshLastAtRef = useRef(0);
   const [h3RefreshNonce, setH3RefreshNonce] = useState(0);
 
   useEffect(() => {
@@ -133,32 +142,6 @@ export default function MapsPage() {
   }, []);
 
   useEffect(() => {
-    mapViewportRef.current = mapViewport;
-  }, [mapViewport]);
-
-  const scheduleH3Refresh = useCallback(() => {
-    const viewport = mapViewportRef.current;
-    if (!viewport?.bbox || !Number.isFinite(Number(viewport?.zoom))) {
-      return;
-    }
-
-    const now = Date.now();
-    if (now - h3SocketRefreshLastAtRef.current < H3_SOCKET_REFRESH_MIN_INTERVAL_MS) {
-      return;
-    }
-    h3SocketRefreshLastAtRef.current = now;
-
-    if (h3SocketRefreshTimerRef.current) {
-      clearTimeout(h3SocketRefreshTimerRef.current);
-    }
-
-    h3SocketRefreshTimerRef.current = setTimeout(() => {
-      setH3RefreshNonce((current) => current + 1);
-      h3SocketRefreshTimerRef.current = null;
-    }, H3_SOCKET_REFRESH_DEBOUNCE_MS);
-  }, []);
-
-  useEffect(() => {
     if (!mapViewport?.bbox || !Number.isFinite(Number(mapViewport?.zoom))) {
       return undefined;
     }
@@ -196,136 +179,6 @@ export default function MapsPage() {
       controller.abort();
     };
   }, [h3RefreshNonce, mapViewport]);
-
-  useEffect(() => {
-    return () => {
-      if (h3SocketRefreshTimerRef.current) {
-        clearTimeout(h3SocketRefreshTimerRef.current);
-      }
-    };
-  }, []);
-
-  useEffect(() => {
-    let active = true;
-    const onWsConnect = () => {
-      if (active) setWsStatus("conectado");
-    };
-    const onWsDisconnect = (reason) => {
-      if (!active) return;
-      if (reason === "io client disconnect") {
-        setWsStatus("desconectado");
-        return;
-      }
-      setWsStatus("reconectando");
-    };
-    const onLiveStats = (stats) => {
-      if (!stats) return;
-      setLocations((prev) => ({
-        ...(prev || {}),
-        summary: {
-          ...(prev?.summary || {}),
-          totalDrivers: Number(stats.driversOnline || prev?.summary?.totalDrivers || 0),
-          availableDrivers: Number(stats.driversAvailable || prev?.summary?.availableDrivers || 0),
-          busyDrivers: Number(stats.driversBusy || prev?.summary?.busyDrivers || 0),
-          activeBookings: Number(stats.activeTrips || prev?.summary?.activeBookings || 0),
-        },
-      }));
-    };
-
-    const onDrivers = (payload) => {
-      const drivers = Array.isArray(payload?.drivers) ? payload.drivers : [];
-      setLocations((prev) => ({
-        ...(prev || {}),
-        locations: {
-          ...(prev?.locations || {}),
-          drivers,
-          passengers: prev?.locations?.passengers || [],
-          activeBookings: prev?.locations?.activeBookings || [],
-        },
-      }));
-    };
-
-    const onTrips = (payload) => {
-      const trips = Array.isArray(payload?.trips) ? payload.trips : [];
-      setLocations((prev) => ({
-        ...(prev || {}),
-        locations: {
-          ...(prev?.locations || {}),
-          drivers: prev?.locations?.drivers || [],
-          passengers: prev?.locations?.passengers || [],
-          activeBookings: trips,
-        },
-        summary: {
-          ...(prev?.summary || {}),
-          activeBookings: trips.length || prev?.summary?.activeBookings || 0,
-        },
-      }));
-    };
-
-    const onH3Refresh = () => {
-      scheduleH3Refresh();
-    };
-
-    const onAuthError = () => {
-      if (active) setWsStatus("auth-erro");
-    };
-    const onLegacyAuthError = () => {
-      if (active) setWsStatus("auth-erro");
-    };
-    const onConnectError = () => {
-      if (active) setWsStatus("erro");
-    };
-    const onReconnectAttempt = () => {
-      if (active) setWsStatus("reconectando");
-    };
-    const onReconnectFailed = () => {
-      if (active) setWsStatus("erro");
-    };
-
-    wsService.on("live_stats", onLiveStats);
-    wsService.on("live_stats_update", onLiveStats);
-    wsService.on("driver_location_update", onDrivers);
-    wsService.on("trip_update", onTrips);
-    wsService.on("map_h3_refresh", onH3Refresh);
-    wsService.on("authentication_error", onAuthError);
-    wsService.on("auth_error", onLegacyAuthError);
-    wsService.on("connect_error", onConnectError);
-    wsService.on("reconnect_attempt", onReconnectAttempt);
-    wsService.on("reconnect_failed", onReconnectFailed);
-    wsService.on("connect", onWsConnect);
-    wsService.on("disconnect", onWsDisconnect);
-
-    setWsStatus("conectando");
-    wsService
-      .connect({ namespace: "/dashboard" })
-      .then(() => {
-        if (!active) return;
-        setWsStatus("conectado");
-        wsService.emit("request_live_data");
-      })
-      .catch((error) => {
-        if (!active) return;
-        setWsStatus(error?.message?.includes("token") ? "sem-token" : "erro");
-      });
-
-    return () => {
-      active = false;
-      wsService.off("live_stats", onLiveStats);
-      wsService.off("live_stats_update", onLiveStats);
-      wsService.off("driver_location_update", onDrivers);
-      wsService.off("trip_update", onTrips);
-      wsService.off("map_h3_refresh", onH3Refresh);
-      wsService.off("authentication_error", onAuthError);
-      wsService.off("auth_error", onLegacyAuthError);
-      wsService.off("connect_error", onConnectError);
-      wsService.off("reconnect_attempt", onReconnectAttempt);
-      wsService.off("reconnect_failed", onReconnectFailed);
-      wsService.off("connect", onWsConnect);
-      wsService.off("disconnect", onWsDisconnect);
-      wsService.disconnect();
-      setWsStatus("desconectado");
-    };
-  }, [scheduleH3Refresh]);
 
   const loadGeoConfig = useCallback(async () => {
     try {
@@ -412,11 +265,15 @@ export default function MapsPage() {
   const filteredCities = useMemo(() => {
     const term = citySearch.trim().toLowerCase();
     const cities = selectedState?.cities || [];
-    if (!term) return cities;
-    return cities.filter((city) =>
+    const withModeFilter =
+      cityFilterMode === "all"
+        ? cities
+        : cities.filter((city) => (cityFilterMode === "active" ? city?.active : !city?.active));
+    if (!term) return withModeFilter;
+    return withModeFilter.filter((city) =>
       `${city?.label || city?.name || ""} ${city?.value || city?.key || ""}`.toLowerCase().includes(term),
     );
-  }, [selectedState, citySearch]);
+  }, [cityFilterMode, selectedState, citySearch]);
 
   const geofenceDraftParsed = useMemo(() => parseRegionDraft(geofenceRegionDraft), [geofenceRegionDraft]);
   const geofenceRegionForMap = useMemo(() => {
@@ -429,6 +286,22 @@ export default function MapsPage() {
   const selectedStateCapacity = useMemo(
     () => (selectedState?.cities || []).reduce((sum, city) => sum + Number(city?.maxActiveDrivers || 0), 0),
     [selectedState],
+  );
+  const selectedStateTotalCities = Number(selectedState?.totalCities || selectedState?.cities?.length || 0);
+  const selectedStateActiveCities = Number(selectedState?.activeCities || 0);
+  const selectedStateInactiveCities = Math.max(selectedStateTotalCities - selectedStateActiveCities, 0);
+  const selectedStateWaitlistCities = useMemo(() => {
+    const cities = selectedState?.cities || [];
+    return cities.filter((city) => cityWaitlistDraft[city.key] ?? city.waitlistEnabled !== false).length;
+  }, [cityWaitlistDraft, selectedState]);
+  const h3StatusMeta = useMemo(
+    () =>
+      getH3StatusMeta({
+        loading: h3Loading,
+        error: h3Error,
+        lastUpdatedAt: h3LastUpdatedAt,
+      }),
+    [h3Error, h3LastUpdatedAt, h3Loading],
   );
 
   useEffect(() => {
@@ -447,8 +320,9 @@ export default function MapsPage() {
     try {
       setLoading(true);
       setError("");
-      const response = await leafAPI.getMapLocations("all");
+      const [response] = await Promise.all([leafAPI.getMapLocations("all"), loadGeoConfig()]);
       setLocations(response);
+      setH3RefreshNonce((current) => current + 1);
     } catch (err) {
       setError(err?.message || "Falha ao carregar mapas");
     } finally {
@@ -552,23 +426,24 @@ export default function MapsPage() {
           <Panel
             className="panel-span-full map-main-panel"
             title="Mapa Operacional e Geofence"
-            subtitle="Visual principal da operação com edição de geofence direto no mapa."
+            subtitle="Mapa principal com geofence editável, estado de runtime e controles condensados."
           >
             {geoLoading ? <p>Carregando configuração geográfica...</p> : null}
 
-            <div className="filters">
-              <span className={wsStatus === "conectado" ? "status-ok" : "status-warn"}>WS: {wsStatus}</span>
+            <div className="filters map-status-strip">
+              <span className="meta-badge">Atualização: API/polling</span>
+              <span className={h3StatusMeta.className}>H3: {h3StatusMeta.label}</span>
               <span className={geoConfig?.geofence?.active ? "status-ok" : "status-warn"}>
                 Geofence runtime: {geoConfig?.geofence?.active ? "ativo" : "inativo"}
               </span>
               <span className={geoConfig?.geofence?.enabled !== false ? "status-ok" : "status-warn"}>
                 Configuração: {geoConfig?.geofence?.enabled !== false ? "habilitada" : "desabilitada"}
               </span>
+              <span className="meta-badge">Pontos: {geoConfig?.geofence?.regionPoints || 0}</span>
+              <span className="meta-badge">Storage: {geoConfig?.geofenceStorage || "-"}</span>
               <span className={geoConfig?.geofence?.bypassEnabled ? "status-warn" : "status-ok"}>
                 Bypass: {geoConfig?.geofence?.bypassEnabled ? "ligado" : "desligado"}
               </span>
-              <span className="meta-badge">Pontos: {geoConfig?.geofence?.regionPoints || 0}</span>
-              <span className="meta-badge">Storage geofence: {geoConfig?.geofenceStorage || "-"}</span>
             </div>
 
             <div className="filters">
@@ -592,10 +467,11 @@ export default function MapsPage() {
               h3Error={h3Error}
               h3LastUpdatedAt={h3LastUpdatedAt}
               onViewportChange={handleMapViewportChange}
-              mapHeight="clamp(700px, 84vh, 1120px)"
+              mapHeight="clamp(460px, 58vh, 680px)"
               geofenceRegion={geofenceRegionForMap}
               geofenceEditable
               onGeofenceChange={handleGeofenceMapChange}
+              showH3SyncLabel={false}
             />
 
             <details className="technical-details">
@@ -633,123 +509,130 @@ export default function MapsPage() {
           <Panel
             className="panel-span-full"
             title="Controle Geografico (Geofence + Cidades)"
-            subtitle="Gestão condensada de estados e cidades para operação."
+            subtitle="Operação geográfica em visão compacta e acionável."
           >
-            <div className="filters">
+            <div className="filters map-status-strip">
               <span className="meta-badge">Estado: {selectedState?.stateCode || selectedStateCode}</span>
-              <span className="meta-badge">Cidades ativas: {selectedState?.activeCities || 0}</span>
-              <span className="meta-badge">Total cidades: {selectedState?.totalCities || 0}</span>
+              <span className="meta-badge">Ativas: {selectedStateActiveCities}</span>
+              <span className="meta-badge">Inativas: {selectedStateInactiveCities}</span>
+              <span className="meta-badge">Total: {selectedStateTotalCities}</span>
+              <span className="meta-badge">Waitlist ligado: {selectedStateWaitlistCities}</span>
               <span className="meta-badge">Capacidade estado: {selectedStateCapacity}</span>
               <span className="meta-badge">Storage cidades: {geoConfig?.storage || "-"}</span>
             </div>
 
-            <div className="filters">
-              <select
-                value={selectedState?.stateCode || selectedStateCode}
-                onChange={(event) => setSelectedStateCode(event.target.value)}
-                disabled={geographyStates.length === 0 || geoLoading}
-              >
-                {geographyStates.map((state) => (
-                  <option key={state.stateCode} value={state.stateCode}>
-                    {state.name} ({state.stateCode})
-                  </option>
-                ))}
-              </select>
-              <button onClick={toggleStateActivation} disabled={!selectedState || stateBusy}>
-                {selectedState?.enabled ? "Desativar estado" : "Ativar estado"}
-              </button>
-              <input
-                placeholder={`Nova cidade em ${selectedState?.stateCode || "UF"}`}
-                value={newCityName}
-                onChange={(event) => setNewCityName(event.target.value)}
-              />
-              <input
-                placeholder="Filtrar cidades por nome/slug"
-                value={citySearch}
-                onChange={(event) => setCitySearch(event.target.value)}
-              />
-              <button
-                onClick={createCity}
-                disabled={!selectedState || newCityName.trim().length < 2 || cityBusyKey === "create-city"}
-              >
-                Adicionar cidade
-              </button>
+            <div className="geo-toolbar-grid">
+              <label className="geo-toolbar-field">
+                <span>Estado</span>
+                <select
+                  value={selectedState?.stateCode || selectedStateCode}
+                  onChange={(event) => setSelectedStateCode(event.target.value)}
+                  disabled={geographyStates.length === 0 || geoLoading}
+                >
+                  {geographyStates.map((state) => (
+                    <option key={state.stateCode} value={state.stateCode}>
+                      {state.name} ({state.stateCode})
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <label className="geo-toolbar-field">
+                <span>Filtro</span>
+                <select value={cityFilterMode} onChange={(event) => setCityFilterMode(event.target.value)}>
+                  <option value="all">Todas</option>
+                  <option value="active">Apenas ativas</option>
+                  <option value="inactive">Apenas inativas</option>
+                </select>
+              </label>
+
+              <label className="geo-toolbar-field geo-toolbar-field-grow">
+                <span>Buscar cidade</span>
+                <input
+                  placeholder="Nome ou slug"
+                  value={citySearch}
+                  onChange={(event) => setCitySearch(event.target.value)}
+                />
+              </label>
+
+              <label className="geo-toolbar-field geo-toolbar-field-grow">
+                <span>Nova cidade</span>
+                <input
+                  placeholder={`Adicionar em ${selectedState?.stateCode || "UF"}`}
+                  value={newCityName}
+                  onChange={(event) => setNewCityName(event.target.value)}
+                />
+              </label>
+
+              <div className="geo-toolbar-actions">
+                <button
+                  onClick={createCity}
+                  disabled={!selectedState || newCityName.trim().length < 2 || cityBusyKey === "create-city"}
+                >
+                  Adicionar cidade
+                </button>
+                <button onClick={toggleStateActivation} disabled={!selectedState || stateBusy}>
+                  {selectedState?.enabled ? "Desativar estado" : "Ativar estado"}
+                </button>
+              </div>
             </div>
 
-            <div className="table-shell table-shell-tight" style={{ maxHeight: 300 }}>
-              <table className="table table-compact">
-                <thead>
-                  <tr>
-                    <th>Cidade</th>
-                    <th>Status</th>
-                    <th>Capacidade</th>
-                    <th>Waitlist</th>
-                    <th>Acoes</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {filteredCities.map((city) => (
-                    <tr key={city.key}>
-                      <td>
-                        {city.label || city.name || "-"}
-                        <span className="table-muted">{city.value || city.key || "-"}</span>
-                      </td>
-                      <td>
-                        <span className={city.active ? "status-ok" : "status-warn"}>
-                          {city.active ? "Ativa" : "Inativa"}
-                        </span>
-                      </td>
-                      <td>
-                        <input
-                          type="number"
-                          min="0"
-                          value={cityCapDraft[city.key] ?? city.maxActiveDrivers ?? 0}
-                          onChange={(event) =>
-                            setCityCapDraft((prev) => ({
-                              ...prev,
-                              [city.key]: event.target.value,
-                            }))
-                          }
-                          style={{ width: 100 }}
-                        />
-                      </td>
-                      <td>
-                        <input
-                          type="checkbox"
-                          checked={cityWaitlistDraft[city.key] ?? (city.waitlistEnabled !== false)}
-                          onChange={(event) =>
-                            setCityWaitlistDraft((prev) => ({
-                              ...prev,
-                              [city.key]: event.target.checked,
-                            }))
-                          }
-                        />
-                      </td>
-                      <td>
-                        <div className="actions-cell">
-                          <button
-                            disabled={cityBusyKey === `city-config-${city.key}`}
-                            onClick={() => saveCityCapacity(city)}
-                          >
-                            Salvar
-                          </button>
-                          <button
-                            disabled={cityBusyKey === city.key}
-                            onClick={() => toggleCityActivation(city)}
-                          >
-                            {city.active ? "Desativar" : "Ativar"}
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                  {!selectedState || filteredCities.length === 0 ? (
-                    <tr>
-                      <td colSpan={5}>Nenhuma cidade cadastrada para este estado.</td>
-                    </tr>
-                  ) : null}
-                </tbody>
-              </table>
+            <div className="city-list-shell">
+              {filteredCities.map((city) => (
+                <article key={city.key} className="city-list-row">
+                  <div className="city-row-main">
+                    <div>
+                      <strong>{city.label || city.name || "-"}</strong>
+                      <div className="table-muted">{city.value || city.key || "-"}</div>
+                    </div>
+                    <span className={city.active ? "status-ok" : "status-warn"}>
+                      {city.active ? "Ativa" : "Inativa"}
+                    </span>
+                  </div>
+
+                  <div className="city-row-controls">
+                    <label className="city-row-field">
+                      <span>Capacidade</span>
+                      <input
+                        type="number"
+                        min="0"
+                        value={cityCapDraft[city.key] ?? city.maxActiveDrivers ?? 0}
+                        onChange={(event) =>
+                          setCityCapDraft((prev) => ({
+                            ...prev,
+                            [city.key]: event.target.value,
+                          }))
+                        }
+                      />
+                    </label>
+                    <label className="city-row-field city-row-field-checkbox">
+                      <span>Waitlist</span>
+                      <input
+                        type="checkbox"
+                        checked={cityWaitlistDraft[city.key] ?? (city.waitlistEnabled !== false)}
+                        onChange={(event) =>
+                          setCityWaitlistDraft((prev) => ({
+                            ...prev,
+                            [city.key]: event.target.checked,
+                          }))
+                        }
+                      />
+                    </label>
+                  </div>
+
+                  <div className="city-row-actions">
+                    <button disabled={cityBusyKey === `city-config-${city.key}`} onClick={() => saveCityCapacity(city)}>
+                      Salvar
+                    </button>
+                    <button disabled={cityBusyKey === city.key} onClick={() => toggleCityActivation(city)}>
+                      {city.active ? "Desativar" : "Ativar"}
+                    </button>
+                  </div>
+                </article>
+              ))}
+              {!selectedState || filteredCities.length === 0 ? (
+                <div className="city-list-empty">Nenhuma cidade para os filtros atuais.</div>
+              ) : null}
             </div>
 
             <TechnicalDetails

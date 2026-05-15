@@ -13,6 +13,10 @@ try {
 
 const COMPLETED_STATUSES = new Set(['COMPLETE', 'COMPLETED', 'PAID', 'completed']);
 const CANCELLED_STATUSES = new Set(['CANCELLED', 'CANCELED', 'cancelled', 'canceled']);
+const USER_METRICS_RECENT_FALLBACK_LIMIT = Math.max(
+  100,
+  Number.parseInt(process.env.DASHBOARD_USER_METRICS_RECENT_FALLBACK_LIMIT || '1000', 10)
+);
 
 function getFirestore() {
   if (firebaseConfig && firebaseConfig.getFirestore) {
@@ -175,6 +179,59 @@ async function getReserveFundLosses() {
   }
 }
 
+async function runCountAggregate(query, fallback = 0) {
+  try {
+    const snapshot = await query.count().get();
+    return Number(snapshot?.data?.().count || 0);
+  } catch (error) {
+    console.warn('[modern-metrics-service] Firestore count aggregate failed:', error?.message || error);
+    return fallback;
+  }
+}
+
+async function countUsersByType(usersCollection, userType) {
+  const primary = await runCountAggregate(usersCollection.where('usertype', '==', userType), null);
+  if (primary !== null && primary > 0) return primary;
+
+  const secondary = await runCountAggregate(usersCollection.where('userType', '==', userType), null);
+  if (secondary !== null) {
+    return Math.max(Number(primary || 0), secondary);
+  }
+
+  return Math.max(Number(primary || 0), 0);
+}
+
+async function countRecentUsersByType(usersCollection, userType, startIso) {
+  const primary = await runCountAggregate(
+    usersCollection.where('usertype', '==', userType).where('createdAt', '>=', startIso),
+    null
+  );
+  if (primary !== null && primary > 0) return primary;
+
+  const secondary = await runCountAggregate(
+    usersCollection.where('userType', '==', userType).where('createdAt', '>=', startIso),
+    null
+  );
+  if (secondary !== null) {
+    return Math.max(Number(primary || 0), secondary);
+  }
+
+  try {
+    const snapshot = await usersCollection
+      .where('createdAt', '>=', startIso)
+      .limit(USER_METRICS_RECENT_FALLBACK_LIMIT)
+      .get();
+    return snapshot.docs.reduce((count, doc) => {
+      const raw = doc.data() || {};
+      const type = String(raw.usertype || raw.userType || raw.role || '').trim().toLowerCase();
+      return type === userType ? count + 1 : count;
+    }, 0);
+  } catch (error) {
+    console.warn('[modern-metrics-service] Firestore recent users fallback failed:', error?.message || error);
+    return Math.max(Number(primary || 0), 0);
+  }
+}
+
 class ModernMetricsService {
   async getRidesForWindow({ period = 'today', startDate, endDate } = {}) {
     const firestore = getFirestore();
@@ -265,10 +322,10 @@ class ModernMetricsService {
       };
     }
 
-    const usersSnapshot = await firestore.collection('users').get();
-    const users = usersSnapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
-    const customers = users.filter((user) => (user.userType || user.usertype) === 'customer');
-    const drivers = users.filter((user) => (user.userType || user.usertype) === 'driver');
+    const usersCollection = firestore.collection('users');
+    const todayStart = new Date();
+    todayStart.setHours(0, 0, 0, 0);
+    const todayIso = todayStart.toISOString();
 
     const redis = redisPool.getConnection();
     const [onlineUsersSet, onlineDriversSet] = await Promise.all([
@@ -278,33 +335,34 @@ class ModernMetricsService {
 
     const onlineUsers = new Set(onlineUsersSet || []);
     const onlineDrivers = new Set(onlineDriversSet || []);
-    const todayStart = new Date();
-    todayStart.setHours(0, 0, 0, 0);
+    const [
+      customersTotal,
+      driversTotal,
+      newCustomersToday,
+      newDriversToday
+    ] = await Promise.all([
+      countUsersByType(usersCollection, 'customer'),
+      countUsersByType(usersCollection, 'driver'),
+      countRecentUsersByType(usersCollection, 'customer', todayIso),
+      countRecentUsersByType(usersCollection, 'driver', todayIso)
+    ]);
 
-    const isOnlineCustomer = (user) => onlineUsers.has(user.id) || user.status === 'online';
-    const isOnlineDriver = (user) =>
-      onlineDrivers.has(user.id) || onlineUsers.has(user.id) || user.status === 'online' || user.driverActiveStatus === true;
-
-    const newCustomersToday = customers.filter((user) =>
-      inWindow(user.createdAt || user.registrationDate || user.updatedAt, todayStart, new Date())
-    ).length;
-    const newDriversToday = drivers.filter((user) =>
-      inWindow(user.createdAt || user.registrationDate || user.updatedAt, todayStart, new Date())
-    ).length;
-
-    const customersOnline = customers.filter(isOnlineCustomer).length;
-    const driversOnline = drivers.filter(isOnlineDriver).length;
+    const driversOnline = Math.min(driversTotal, onlineDrivers.size || 0);
+    const customersOnline = Math.min(
+      customersTotal,
+      Math.max(0, (onlineUsers.size || 0) - driversOnline)
+    );
 
     return {
       customers: {
-        total: customers.length,
+        total: customersTotal,
         online: customersOnline,
-        offline: Math.max(0, customers.length - customersOnline)
+        offline: Math.max(0, customersTotal - customersOnline)
       },
       drivers: {
-        total: drivers.length,
+        total: driversTotal,
         online: driversOnline,
-        offline: Math.max(0, drivers.length - driversOnline)
+        offline: Math.max(0, driversTotal - driversOnline)
       },
       newCustomersToday,
       newDriversToday

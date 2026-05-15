@@ -41,7 +41,7 @@ function toMoney(value, fallback = 0) {
 
 class DriverSubscriptionService {
   constructor() {
-    this.plusDefaultDailyCents = Number.parseInt(process.env.SUBSCRIPTION_PLUS_DAILY_CENTS || '1490', 10);
+    this.plusDefaultDailyCents = Number.parseInt(process.env.SUBSCRIPTION_PLUS_DAILY_CENTS || '990', 10);
     this.eliteDefaultDailyCents = Number.parseInt(process.env.SUBSCRIPTION_ELITE_DAILY_CENTS || '0', 10);
     this.readModelMaxAgeMs = Number.parseInt(process.env.SUBSCRIPTION_READMODEL_MAX_AGE_MS || '60000', 10);
   }

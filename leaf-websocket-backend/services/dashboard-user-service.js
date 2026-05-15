@@ -1,25 +1,23 @@
 const admin = require('firebase-admin');
 const { logError } = require('../utils/logger');
 
-const RAW_USERS_CACHE_TTL_MS = Math.max(
-  5000,
-  Number.parseInt(process.env.DASHBOARD_USERS_CACHE_TTL_MS || '30000', 10)
+const USER_STATS_CACHE_TTL_MS = Math.max(
+  15000,
+  Number.parseInt(process.env.DASHBOARD_USER_STATS_CACHE_TTL_MS || '60000', 10)
+);
+const USERS_LIST_MAX_LIMIT = Math.max(
+  20,
+  Number.parseInt(process.env.DASHBOARD_USERS_LIST_MAX_LIMIT || '100', 10)
+);
+const USER_STATS_RECENT_FALLBACK_LIMIT = Math.max(
+  100,
+  Number.parseInt(process.env.DASHBOARD_USER_STATS_RECENT_FALLBACK_LIMIT || '1000', 10)
 );
 
-let rawUsersCache = {
-  timestamp: 0,
-  users: null
-};
-
-function cacheIsValid() {
-  return Array.isArray(rawUsersCache.users) && (Date.now() - rawUsersCache.timestamp) < RAW_USERS_CACHE_TTL_MS;
-}
+let userStatsCache = new Map();
 
 function resetUsersCache() {
-  rawUsersCache = {
-    timestamp: 0,
-    users: null
-  };
+  userStatsCache = new Map();
 }
 
 function toIsoString(value) {
@@ -69,6 +67,84 @@ function normalizeUserType(raw = {}) {
   return String(raw.usertype || raw.userType || raw.role || 'customer').trim().toLowerCase();
 }
 
+function parsePositiveInt(value, fallback, max = Number.MAX_SAFE_INTEGER) {
+  const parsed = Number.parseInt(value, 10);
+  if (!Number.isFinite(parsed) || parsed < 1) return fallback;
+  return Math.min(parsed, max);
+}
+
+function normalizeUserTypeParam(value) {
+  const normalized = String(value || '').trim().toLowerCase();
+  if (!normalized || normalized === 'all') return null;
+  if (normalized === 'passenger' || normalized === 'rider' || normalized === 'cliente') return 'customer';
+  if (normalized === 'motorista') return 'driver';
+  return normalized;
+}
+
+function normalizeStatusParam(value) {
+  const normalized = String(value || '').trim().toLowerCase();
+  return normalized && normalized !== 'all' ? normalized : null;
+}
+
+function parseDateRange(dateRange) {
+  if (!dateRange) return {};
+  const [startRaw, endRaw] = String(dateRange).split(',');
+  const start = startRaw ? new Date(startRaw) : null;
+  const end = endRaw ? new Date(endRaw) : null;
+  return {
+    start: start && !Number.isNaN(start.getTime()) ? start : null,
+    end: end && !Number.isNaN(end.getTime()) ? end : null
+  };
+}
+
+function getPeriodStart(period = '24h') {
+  const now = Date.now();
+  if (period === '3d') return new Date(now - (3 * 24 * 60 * 60 * 1000));
+  if (period === 'week') return new Date(now - (7 * 24 * 60 * 60 * 1000));
+  if (period === 'month') return new Date(new Date().getFullYear(), new Date().getMonth(), 1);
+  return new Date(now - (24 * 60 * 60 * 1000));
+}
+
+function getTodayStart() {
+  const todayStart = new Date();
+  todayStart.setHours(0, 0, 0, 0);
+  return todayStart;
+}
+
+async function runCountAggregate(query, context = {}) {
+  try {
+    const snapshot = await query.count().get();
+    return Number(snapshot?.data?.().count || 0);
+  } catch (error) {
+    logError(error, 'Erro ao executar count agregado de usuarios do dashboard', {
+      service: 'dashboard-user-service',
+      ...context
+    });
+    return Object.prototype.hasOwnProperty.call(context, 'fallback') ? context.fallback : 0;
+  }
+}
+
+function buildBaseUsersQuery(params = {}) {
+  const firestore = admin.firestore();
+  let query = firestore.collection('users');
+  const safeType = normalizeUserTypeParam(params.type);
+  const { start, end } = parseDateRange(params.dateRange);
+
+  if (safeType) {
+    query = query.where('usertype', '==', safeType);
+  }
+
+  if (start) {
+    query = query.where('createdAt', '>=', start.toISOString());
+  }
+
+  if (end) {
+    query = query.where('createdAt', '<=', end.toISOString());
+  }
+
+  return query;
+}
+
 function normalizeUserRecord(doc) {
   const raw = doc.data() || {};
   const type = normalizeUserType(raw);
@@ -112,18 +188,55 @@ function normalizeUserRecord(doc) {
   };
 }
 
-async function loadRawUsersFromFirestore() {
-  if (cacheIsValid()) {
-    return rawUsersCache.users;
+async function searchUsersByExactFields(params = {}) {
+  const firestore = admin.firestore();
+  const collection = firestore.collection('users');
+  const safeLimit = parsePositiveInt(params.limit, 50, USERS_LIST_MAX_LIMIT);
+  const term = String(params.searchTerm || '').trim();
+  if (!term) {
+    return null;
   }
 
-  const snapshot = await admin.firestore().collection('users').get();
-  const users = snapshot.docs.map(normalizeUserRecord);
-  rawUsersCache = {
-    timestamp: Date.now(),
-    users
+  const byId = new Map();
+  const addSnapshotDocs = (snapshot) => {
+    if (!snapshot) return;
+    if (typeof snapshot.exists === 'boolean') {
+      if (snapshot.exists) byId.set(snapshot.id, normalizeUserRecord(snapshot));
+      return;
+    }
+    (snapshot.docs || []).forEach((doc) => {
+      if (byId.size < safeLimit) byId.set(doc.id, normalizeUserRecord(doc));
+    });
   };
-  return users;
+
+  const tasks = [
+    collection.doc(term).get(),
+    collection.where('email', '==', term).limit(safeLimit).get(),
+    collection.where('mobile', '==', term).limit(safeLimit).get(),
+    collection.where('phone', '==', term).limit(safeLimit).get(),
+    collection.where('phoneNumber', '==', term).limit(safeLimit).get()
+  ];
+
+  const results = await Promise.allSettled(tasks);
+  results.forEach((result) => {
+    if (result.status === 'fulfilled') addSnapshotDocs(result.value);
+  });
+
+  const rows = applyUserFilters(Array.from(byId.values()), {
+    ...params,
+    searchTerm: null
+  }).slice(0, safeLimit);
+
+  return {
+    users: rows,
+    pagination: {
+      page: 1,
+      limit: safeLimit,
+      total: rows.length,
+      pages: rows.length > 0 ? 1 : 0,
+      searchMode: 'exact'
+    }
+  };
 }
 
 function applyUserFilters(users, params = {}) {
@@ -203,46 +316,132 @@ async function listUsers(params = {}) {
     limit = 50
   } = params;
 
-  const users = await loadRawUsersFromFirestore();
-  const filtered = applyUserFilters(users, params);
-  const safePage = Math.max(1, Number.parseInt(page, 10) || 1);
-  const safeLimit = Math.max(1, Number.parseInt(limit, 10) || 50);
+  if (params.searchTerm) {
+    const exactSearch = await searchUsersByExactFields(params);
+    if (exactSearch) return exactSearch;
+  }
+
+  const safePage = parsePositiveInt(page, 1);
+  const safeLimit = parsePositiveInt(limit, 50, USERS_LIST_MAX_LIMIT);
   const start = (safePage - 1) * safeLimit;
-  const paginated = filtered.slice(start, start + safeLimit);
+  const safeStatus = normalizeStatusParam(params.status);
+  const queryBase = buildBaseUsersQuery(params);
+  let query = queryBase;
+
+  if (start > 0) {
+    query = query.offset(start);
+  }
+  query = query.limit(safeLimit);
+
+  const snapshot = await query.get();
+  let rows = snapshot.docs.map(normalizeUserRecord);
+
+  if (safeStatus) {
+    rows = rows.filter((user) => String(user.status || '').toLowerCase() === safeStatus);
+  }
+
+  const canUseAggregateTotal = !safeStatus;
+  const total = canUseAggregateTotal
+    ? await runCountAggregate(queryBase, { source: 'listUsers' })
+    : start + rows.length;
 
   return {
-    users: paginated,
+    users: rows,
     pagination: {
       page: safePage,
       limit: safeLimit,
-      total: filtered.length,
-      pages: Math.ceil(filtered.length / safeLimit)
+      total,
+      pages: Math.ceil(total / safeLimit),
+      maxLimit: USERS_LIST_MAX_LIMIT,
+      totalMode: canUseAggregateTotal ? 'aggregate' : 'page-estimate'
     }
   };
 }
 
-async function getUserStats(redis) {
-  const users = await loadRawUsersFromFirestore();
-  const now = Date.now();
-  const todayStart = new Date();
-  todayStart.setHours(0, 0, 0, 0);
-  const weekStart = now - (7 * 24 * 60 * 60 * 1000);
-  const monthStart = new Date(new Date().getFullYear(), new Date().getMonth(), 1).getTime();
+async function countUsersByType(collection, userType, context = {}) {
+  const primary = await runCountAggregate(
+    collection.where('usertype', '==', userType),
+    { ...context, field: 'usertype', userType }
+  );
+  if (primary > 0) return primary;
 
-  const customers = users.filter((user) => user.type === 'customer');
-  const drivers = users.filter((user) => user.type === 'driver');
-  const newToday = users.filter((user) => {
-    const ts = user.registrationDate ? new Date(user.registrationDate).getTime() : 0;
-    return Number.isFinite(ts) && ts >= todayStart.getTime();
-  }).length;
-  const newThisWeek = users.filter((user) => {
-    const ts = user.registrationDate ? new Date(user.registrationDate).getTime() : 0;
-    return Number.isFinite(ts) && ts >= weekStart;
-  }).length;
-  const newThisMonth = users.filter((user) => {
-    const ts = user.registrationDate ? new Date(user.registrationDate).getTime() : 0;
-    return Number.isFinite(ts) && ts >= monthStart;
-  }).length;
+  return runCountAggregate(
+    collection.where('userType', '==', userType),
+    { ...context, field: 'userType', userType }
+  );
+}
+
+async function countNewUsersByType(collection, userType, startIso, context = {}) {
+  const primary = await runCountAggregate(
+    collection.where('usertype', '==', userType).where('createdAt', '>=', startIso),
+    { ...context, field: 'usertype', userType, createdAt: 'gte', fallback: null }
+  );
+  if (primary !== null && primary > 0) return primary;
+
+  const secondary = await runCountAggregate(
+    collection.where('userType', '==', userType).where('createdAt', '>=', startIso),
+    { ...context, field: 'userType', userType, createdAt: 'gte', fallback: null }
+  );
+  if (secondary !== null) {
+    return Math.max(Number(primary || 0), secondary);
+  }
+
+  try {
+    const snapshot = await collection
+      .where('createdAt', '>=', startIso)
+      .limit(USER_STATS_RECENT_FALLBACK_LIMIT)
+      .get();
+    return snapshot.docs.reduce((count, doc) => {
+      const type = normalizeUserType(doc.data() || {});
+      return type === userType ? count + 1 : count;
+    }, 0);
+  } catch (error) {
+    logError(error, 'Erro no fallback limitado de usuarios recentes do dashboard', {
+      service: 'dashboard-user-service',
+      ...context,
+      userType,
+      limit: USER_STATS_RECENT_FALLBACK_LIMIT
+    });
+    return Math.max(Number(primary || 0), 0);
+  }
+}
+
+async function getUserStats(redis, options = {}) {
+  const period = String(options.period || '24h');
+  const cacheKey = `period:${period}`;
+  const cached = userStatsCache.get(cacheKey);
+  if (cached && (Date.now() - cached.timestamp) < USER_STATS_CACHE_TTL_MS) {
+    return cached.payload;
+  }
+
+  const firestore = admin.firestore();
+  const collection = firestore.collection('users');
+  const now = Date.now();
+  const todayStart = getTodayStart();
+  const weekStart = new Date(now - (7 * 24 * 60 * 60 * 1000));
+  const monthStart = new Date(new Date().getFullYear(), new Date().getMonth(), 1);
+  const periodStart = getPeriodStart(period);
+  const periodStartIso = periodStart.toISOString();
+
+  const [
+    total,
+    customers,
+    drivers,
+    newToday,
+    newThisWeek,
+    newThisMonth,
+    newDriversInPeriod,
+    newCustomersInPeriod
+  ] = await Promise.all([
+    runCountAggregate(collection, { source: 'getUserStats.total' }),
+    countUsersByType(collection, 'customer', { source: 'getUserStats.customers' }),
+    countUsersByType(collection, 'driver', { source: 'getUserStats.drivers' }),
+    runCountAggregate(collection.where('createdAt', '>=', todayStart.toISOString()), { source: 'getUserStats.newToday' }),
+    runCountAggregate(collection.where('createdAt', '>=', weekStart.toISOString()), { source: 'getUserStats.newThisWeek' }),
+    runCountAggregate(collection.where('createdAt', '>=', monthStart.toISOString()), { source: 'getUserStats.newThisMonth' }),
+    countNewUsersByType(collection, 'driver', periodStartIso, { source: 'getUserStats.newDriversInPeriod' }),
+    countNewUsersByType(collection, 'customer', periodStartIso, { source: 'getUserStats.newCustomersInPeriod' })
+  ]);
 
   let activeToday = 0;
   let conversionRate = 0;
@@ -260,27 +459,44 @@ async function getUserStats(redis) {
     }
   }
 
-  return {
-    total: users.length,
-    customers: customers.length,
-    drivers: drivers.length,
+  const payload = {
+    total,
+    customers,
+    drivers,
     newToday,
     newThisWeek,
     newThisMonth,
+    newDriversInPeriod,
+    newCustomersInPeriod,
+    period: {
+      value: period,
+      startDate: periodStart.toISOString(),
+      newDrivers: newDriversInPeriod,
+      newCustomers: newCustomersInPeriod
+    },
     activeToday,
     growthRate: newThisMonth > 0
-      ? Number(((newThisMonth / Math.max(users.length - newThisMonth, 1)) * 100).toFixed(1))
+      ? Number(((newThisMonth / Math.max(total - newThisMonth, 1)) * 100).toFixed(1))
       : 0,
-    conversionRate
+    conversionRate,
+    cacheTtlMs: USER_STATS_CACHE_TTL_MS,
+    countMode: 'firestore-aggregate'
   };
+
+  userStatsCache.set(cacheKey, {
+    timestamp: Date.now(),
+    payload
+  });
+
+  return payload;
 }
 
 async function getUserDetails(userId) {
   const safeUserId = String(userId || '').trim();
   if (!safeUserId) return null;
 
-  const users = await loadRawUsersFromFirestore();
-  return users.find((user) => user.id === safeUserId) || null;
+  const doc = await admin.firestore().collection('users').doc(safeUserId).get();
+  return doc.exists ? normalizeUserRecord(doc) : null;
 }
 
 async function updateUserProfile(userId, payload = {}, options = {}) {
@@ -353,6 +569,5 @@ module.exports = {
   getUserStats,
   getUserDetails,
   updateUserProfile,
-  resetUsersCache,
-  loadRawUsersFromFirestore
+  resetUsersCache
 };

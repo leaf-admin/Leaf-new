@@ -17,6 +17,7 @@ const statusTone = {
   blocked: "status-bad",
   rejected: "status-bad",
 };
+const USERS_REFRESH_MS = 120000;
 
 export default function UsersPage() {
   const [users, setUsers] = useState([]);
@@ -29,6 +30,10 @@ export default function UsersPage() {
   useEffect(() => {
     let mounted = true;
     const load = async () => {
+      if (typeof document !== "undefined" && document.hidden) {
+        return;
+      }
+
       try {
         if (mounted) {
           setLoading(true);
@@ -50,7 +55,7 @@ export default function UsersPage() {
     };
 
     load();
-    const timer = setInterval(load, 30000);
+    const timer = setInterval(load, USERS_REFRESH_MS);
     return () => {
       mounted = false;
       clearInterval(timer);

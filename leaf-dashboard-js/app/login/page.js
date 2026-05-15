@@ -31,24 +31,35 @@ export default function LoginPage() {
   };
 
   return (
-    <main className="page-center">
+    <main className="page-center auth-page">
       <form className="card auth-card" onSubmit={handleSubmit}>
-        <h1>Leaf Dashboard</h1>
-        <p>Acesso administrativo</p>
-        <input
-          type="email"
-          placeholder="email"
-          value={email}
-          onChange={(e) => setEmail(e.target.value)}
-          required
-        />
-        <input
-          type="password"
-          placeholder="senha"
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-          required
-        />
+        <div className="auth-brand">
+          <span>L</span>
+          <div>
+            <h1>Leaf Dashboard</h1>
+            <p>Acesso administrativo</p>
+          </div>
+        </div>
+        <label>
+          Email
+          <input
+            type="email"
+            placeholder="admin@leaf.com"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            required
+          />
+        </label>
+        <label>
+          Senha
+          <input
+            type="password"
+            placeholder="Sua senha"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            required
+          />
+        </label>
         {error ? <span className="error">{error}</span> : null}
         <button type="submit" disabled={loading}>
           {loading ? "Entrando..." : "Entrar"}

@@ -121,7 +121,10 @@ export default function NotificationsPage() {
     <ProtectedRoute>
       <main className="page-shell">
         <header className="header">
-          <h1>Notificacoes</h1>
+          <div>
+            <h1>Notificações</h1>
+            <p>Envio segmentado, saúde de entrega e canais configurados.</p>
+          </div>
         </header>
         <AppNav />
         {loading ? <LoadingState message="Carregando notificacoes..." /> : null}
@@ -138,77 +141,67 @@ export default function NotificationsPage() {
         </section>
 
         <section className="grid">
-          <Panel title="Enviar Notificação Segmentada">
-            <div className="filters">
-              <input
-                placeholder="Título"
-                value={title}
-                onChange={(e) => setTitle(e.target.value)}
-              />
-              <input
-                placeholder="Mensagem"
-                value={body}
-                onChange={(e) => setBody(e.target.value)}
-              />
-              <label>
+          <Panel title="Enviar notificação" subtitle="Mensagem curta com segmentação por perfil e janela de cadastro.">
+            <div className="form-grid">
+              <label className="form-field">
+                Título
+                <input
+                  placeholder="Título"
+                  value={title}
+                  onChange={(e) => setTitle(e.target.value)}
+                />
+              </label>
+              <label className="form-field">
+                Mensagem
+                <input
+                  placeholder="Mensagem"
+                  value={body}
+                  onChange={(e) => setBody(e.target.value)}
+                />
+              </label>
+              <label className="form-field form-field-checkbox">
                 Drivers
                 <input type="checkbox" checked={toDrivers} onChange={(e) => setToDrivers(e.target.checked)} />
               </label>
-              <label>
+              <label className="form-field form-field-checkbox">
                 Passageiros
                 <input type="checkbox" checked={toPassengers} onChange={(e) => setToPassengers(e.target.checked)} />
               </label>
-              <input
-                type="number"
-                min="1"
-                placeholder="Cadastrados últimas horas"
-                value={registeredWithinHours}
-                onChange={(e) => setRegisteredWithinHours(e.target.value)}
-              />
-              <input
-                type="number"
-                min="1"
-                placeholder="Cadastrados últimos dias"
-                value={registeredWithinDays}
-                onChange={(e) => setRegisteredWithinDays(e.target.value)}
-              />
-              <input
-                type="number"
-                min="1"
-                placeholder="Cadastrados há mais de X meses"
-                value={registeredMoreThanMonths}
-                onChange={(e) => setRegisteredMoreThanMonths(e.target.value)}
-              />
+              <label className="form-field">
+                Últimas horas
+                <input
+                  type="number"
+                  min="1"
+                  placeholder="Ex.: 24"
+                  value={registeredWithinHours}
+                  onChange={(e) => setRegisteredWithinHours(e.target.value)}
+                />
+              </label>
+              <label className="form-field">
+                Últimos dias
+                <input
+                  type="number"
+                  min="1"
+                  placeholder="Ex.: 7"
+                  value={registeredWithinDays}
+                  onChange={(e) => setRegisteredWithinDays(e.target.value)}
+                />
+              </label>
+              <label className="form-field">
+                Mais de X meses
+                <input
+                  type="number"
+                  min="1"
+                  placeholder="Ex.: 3"
+                  value={registeredMoreThanMonths}
+                  onChange={(e) => setRegisteredMoreThanMonths(e.target.value)}
+                />
+              </label>
               <button onClick={sendNotification} disabled={sending}>
                 {sending ? "Enviando..." : "Enviar"}
               </button>
             </div>
             {sendStatus ? <p className="status-ok">{sendStatus}</p> : null}
-          </Panel>
-
-          <Panel title="Estatisticas do servico">
-            <div className="table-shell table-shell-tight">
-              <table className="table table-compact">
-                <tbody>
-                  <tr>
-                    <td>Total enviadas</td>
-                    <td>{stats?.totalSent || 0}</td>
-                  </tr>
-                  <tr>
-                    <td>Sucesso</td>
-                    <td>{stats?.successful || 0}</td>
-                  </tr>
-                  <tr>
-                    <td>Falhas</td>
-                    <td>{stats?.failed || 0}</td>
-                  </tr>
-                  <tr>
-                    <td>Taxa de sucesso</td>
-                    <td>{successRate}%</td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
           </Panel>
 
           <Panel title="Endpoints disponiveis">
@@ -243,7 +236,7 @@ export default function NotificationsPage() {
             )}
           </Panel>
 
-          <Panel title="Saude de entregas">
+          <Panel title="Saúde de entregas">
             <KeyValueGrid
               data={{
                 totalSent: stats?.totalSent || 0,

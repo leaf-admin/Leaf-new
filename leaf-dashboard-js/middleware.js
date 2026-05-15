@@ -11,6 +11,10 @@ function unauthorized() {
 }
 
 export function middleware(request) {
+  if (request.nextUrl?.pathname?.startsWith("/api/")) {
+    return NextResponse.next();
+  }
+
   const enabled = String(process.env.DASHBOARD_BASIC_AUTH_ENABLED || "").toLowerCase() === "true";
   if (!enabled) {
     return NextResponse.next();

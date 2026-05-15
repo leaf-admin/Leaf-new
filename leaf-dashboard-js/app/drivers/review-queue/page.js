@@ -281,7 +281,11 @@ export default function DriversReviewQueuePage() {
             </div>
           </Panel>
 
-          <Panel title="Documentos" subtitle="Central de decisão para aprovação e solicitação de revisão.">
+          <Panel
+            className="panel-span-full"
+            title="Documentos"
+            subtitle="Central de decisão para aprovação e solicitação de revisão."
+          >
             <div className="table-shell">
               <table className="table table-compact">
                 <thead>

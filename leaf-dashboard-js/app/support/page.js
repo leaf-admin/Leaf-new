@@ -6,7 +6,6 @@ import AppNav from "@/src/components/AppNav";
 import Panel from "@/src/components/ui/Panel";
 import { ErrorText } from "@/src/components/ui/PageFeedback";
 import { leafAPI } from "@/src/services/api";
-import { wsService } from "@/src/services/websocket-service";
 
 export default function SupportPage() {
   const [tickets, setTickets] = useState([]);
@@ -19,7 +18,6 @@ export default function SupportPage() {
   const [ticketSearch, setTicketSearch] = useState("");
   const [messageSearch, setMessageSearch] = useState("");
   const [error, setError] = useState("");
-  const [wsStatus, setWsStatus] = useState("conectando");
   const [mode, setMode] = useState("ticket");
 
   const selectedUserId = selectedTicket?.userId || selectedTicket?.user?.id || null;
@@ -49,41 +47,6 @@ export default function SupportPage() {
       clearInterval(timer);
     };
   }, [statusFilter]);
-
-  useEffect(() => {
-    let active = true;
-    const onNewTicket = (payload) => {
-      const ticket = payload?.ticket;
-      if (!ticket) return;
-      setTickets((prev) => {
-        if (prev.some((t) => t.id === ticket.id)) return prev;
-        return [ticket, ...prev];
-      });
-    };
-    const onUpdateTicket = (payload) => {
-      const ticket = payload?.ticket;
-      if (!ticket) return;
-      setTickets((prev) => prev.map((t) => (t.id === ticket.id ? { ...t, ...ticket } : t)));
-    };
-
-    wsService
-      .connect()
-      .then(() => {
-        if (!active) return;
-        setWsStatus("conectado");
-        wsService.on("support:ticket:new", onNewTicket);
-        wsService.on("support:ticket:updated", onUpdateTicket);
-      })
-      .catch(() => {
-        if (active) setWsStatus("erro");
-      });
-
-    return () => {
-      active = false;
-      wsService.off("support:ticket:new", onNewTicket);
-      wsService.off("support:ticket:updated", onUpdateTicket);
-    };
-  }, []);
 
   useEffect(() => {
     if (!selectedTicket) return;
@@ -128,46 +91,6 @@ export default function SupportPage() {
     };
   }, [selectedUserId]);
 
-  useEffect(() => {
-    const onNewTicketMessage = (payload) => {
-      if (payload?.ticketId !== selectedTicket?.id) return;
-      const message = payload?.message;
-      if (!message) return;
-      setTicketMessages((prev) => {
-        const id = message.id || `${message.createdAt}-${message.message}`;
-        if (prev.some((item) => (item.id || `${item.createdAt}-${item.message}`) === id)) return prev;
-        return [...prev, message];
-      });
-    };
-
-    const onNewChatMessage = (payload) => {
-      const userId = payload?.userId;
-      if (!userId || userId !== selectedUserId) return;
-      const message = payload?.message;
-      if (!message) return;
-      setChatMessages((prev) => {
-        const id = message.id || `${message.timestamp || message.createdAt}-${message.message}`;
-        if (prev.some((item) => (item.id || `${item.createdAt}-${item.message}`) === id)) return prev;
-        return [
-          ...prev,
-          {
-            id,
-            senderType: message.senderType || "user",
-            message: message.message || "",
-            createdAt: message.timestamp || message.createdAt || new Date().toISOString(),
-          },
-        ];
-      });
-    };
-
-    wsService.on("support:message:new", onNewTicketMessage);
-    wsService.on("support:chat:new", onNewChatMessage);
-    return () => {
-      wsService.off("support:message:new", onNewTicketMessage);
-      wsService.off("support:chat:new", onNewChatMessage);
-    };
-  }, [selectedTicket, selectedUserId]);
-
   const currentMessages = useMemo(
     () => (mode === "ticket" ? ticketMessages : chatMessages),
     [mode, ticketMessages, chatMessages],
@@ -198,23 +121,10 @@ export default function SupportPage() {
     try {
       if (mode === "chat" && selectedUserId) {
         await leafAPI.sendChatMessage(selectedUserId, text);
-        if (wsService.isConnected()) {
-          wsService.emit("support:chat:message", {
-            userId: selectedUserId,
-            message: text,
-            senderType: "agent",
-          });
-        }
         const history = await leafAPI.getChatHistory(selectedUserId, 80);
         setChatMessages(history?.messages || []);
       } else {
         await leafAPI.sendSupportMessage(selectedTicket.id, text);
-        if (wsService.isConnected()) {
-          wsService.emit("support:message:send", {
-            ticketId: selectedTicket.id,
-            message: text,
-          });
-        }
         const response = await leafAPI.getSupportMessages(selectedTicket.id);
         setTicketMessages(response?.messages || []);
       }
@@ -240,9 +150,12 @@ export default function SupportPage() {
     <ProtectedRoute>
       <main className="page-shell">
         <header className="header">
-          <h1>Suporte</h1>
+          <div>
+            <h1>Suporte</h1>
+            <p>Atendimento por polling com atualização automática.</p>
+          </div>
           <div className="filters">
-            <span className={wsStatus === "conectado" ? "status-ok" : "status-warn"}>WS: {wsStatus}</span>
+            <span className="meta-badge">Polling: 30s</span>
             <input
               placeholder="Buscar ticket"
               value={ticketSearch}
