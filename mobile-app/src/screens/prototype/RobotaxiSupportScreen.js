@@ -27,9 +27,15 @@ const SUPPORT_OPTIONS = [
   { id: 's3', title: 'Objetos perdidos', subtitle: 'Abrir chamado rapido para itens esquecidos', icon: 'briefcase-outline' },
 ];
 
-function SupportOptionRow({ item, active, onPress, last = false }) {
+function SupportOptionRow({ item, active, onPress, rowTestID, last = false }) {
   return (
-    <TouchableOpacity style={[styles.optionRow, active && styles.optionRowActive, last && styles.optionRowLast]} activeOpacity={0.78} onPress={onPress}>
+    <TouchableOpacity
+      style={[styles.optionRow, active && styles.optionRowActive, last && styles.optionRowLast]}
+      activeOpacity={0.78}
+      onPress={onPress}
+      testID={rowTestID}
+      accessibilityLabel={rowTestID}
+    >
       <View style={styles.optionIconSlot}>
         <Ionicons name={item.icon} size={18} color={active ? color.accent.strong : color.text.primary} />
       </View>
@@ -95,7 +101,12 @@ export default function RobotaxiSupportScreen({ navigation, route }) {
 
   return (
     <PrototypeScreenTransition>
-      <View style={styles.container} pointerEvents="box-none">
+      <View
+        style={styles.container}
+        pointerEvents="box-none"
+        testID="robotaxi-support-screen"
+        accessibilityLabel="robotaxi-support-screen"
+      >
         <StatusBar translucent backgroundColor="transparent" barStyle="dark-content" />
         <PrototypeDismissibleSheet
           onClose={handleDismiss}
@@ -113,7 +124,13 @@ export default function RobotaxiSupportScreen({ navigation, route }) {
               paddingTop: insets.top + SURFACE_TOP_PADDING,
               paddingBottom: Math.max(insets.bottom, SURFACE_BOTTOM_PADDING),
             }}
-            headerAccessory={<PrototypeMenuCloseButton onPress={handleDismiss} />}
+            headerAccessory={(
+              <PrototypeMenuCloseButton
+                onPress={handleDismiss}
+                testID="robotaxi-support-close-button"
+                accessibilityLabel="robotaxi-support-close-button"
+              />
+            )}
           >
             <PrototypeMenuSection title="Assuntos">
               {SUPPORT_OPTIONS.map((item, index) => (
@@ -122,6 +139,7 @@ export default function RobotaxiSupportScreen({ navigation, route }) {
                   item={item}
                   active={item.id === selectedOptionId}
                   onPress={() => setSelectedOptionId(item.id)}
+                  rowTestID={`robotaxi-support-option-${item.id}`}
                   last={index === SUPPORT_OPTIONS.length - 1}
                 />
               ))}
@@ -133,6 +151,8 @@ export default function RobotaxiSupportScreen({ navigation, route }) {
                 title="Falar no chat"
                 subtitle="Abrir conversa em tempo real com motorista ou suporte."
                 onPress={() => navigation.replace('RobotaxiPrototypeChat')}
+                testID="robotaxi-support-open-chat"
+                accessibilityLabel="robotaxi-support-open-chat"
               />
               <PrototypeMenuRow
                 icon="warning-outline"
@@ -140,6 +160,8 @@ export default function RobotaxiSupportScreen({ navigation, route }) {
                 subtitle="Registrar um relato mais completo com evidências."
                 last
                 onPress={() => navigation.replace('RobotaxiPrototypeComplain')}
+                testID="robotaxi-support-open-complain"
+                accessibilityLabel="robotaxi-support-open-complain"
               />
             </PrototypeMenuSection>
 
@@ -149,12 +171,16 @@ export default function RobotaxiSupportScreen({ navigation, route }) {
                 icon="alert-circle-outline"
                 onPress={supportLoading ? undefined : handleReportIncident}
                 style={styles.primaryButton}
+                testID="robotaxi-support-report-incident"
+                accessibilityLabel="robotaxi-support-report-incident"
               />
               <PrototypePrimaryButton
                 label={supportLoading ? 'Enviando...' : 'Abrir ticket'}
                 icon="document-text-outline"
                 onPress={supportLoading ? undefined : handleCreateTicket}
                 style={styles.primaryButton}
+                testID="robotaxi-support-open-ticket"
+                accessibilityLabel="robotaxi-support-open-ticket"
               />
             </View>
 

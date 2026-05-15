@@ -1,15 +1,19 @@
 import Logger from '../utils/Logger';
-import React, { useEffect, useState } from 'react';
-import { NavigationContainer } from '@react-navigation/native';
+import React, { useEffect, useRef, useState } from 'react';
+import { CommonActions, NavigationContainer, createNavigationContainerRef } from '@react-navigation/native';
 import { TransitionPresets, createStackNavigator } from '@react-navigation/stack';
 import Constants from 'expo-constants';
 
-import { useSelector } from 'react-redux';
+import { useDispatch, useSelector } from 'react-redux';
 
-import { Platform, View, Text, ActivityIndicator } from 'react-native';
+import { Alert, Linking, Platform, View, Text, ActivityIndicator } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import firebaseAuth from '@react-native-firebase/auth';
 import featureFlagService from '../services/FeatureFlagService';
-import { isE2ETestBuild } from '../config/runtimeAccessPolicy';
+import WebSocketManager from '../services/WebSocketManager';
+import { isE2ETestBuild, isSimulatorBuild } from '../config/runtimeAccessPolicy';
 import { getPilotLaunchFeatureSnapshot } from '../config/pilotLaunchProfile';
+import { USER_SIGN_OUT } from '../common-local/types';
 
 // Telas de Autenticação
 import OTPScreen from '../screens/OTPScreen';
@@ -114,6 +118,107 @@ import RobotaxiDriverActivationScreen from '../screens/prototype/RobotaxiDriverA
 // LoadingScreen removido - não é mais necessário
 
 const Stack = createStackNavigator();
+const rootNavigationRef = createNavigationContainerRef();
+
+if (typeof globalThis !== 'undefined') {
+  globalThis.navigationRef = rootNavigationRef;
+}
+
+const SESSION_TERMINATED_ALERT_OPTIONS = {
+  cancelable: false,
+  __skipFriendlyAlertPatch: true,
+};
+
+const SESSION_TERMINATED_BASE_STORAGE_KEYS = [
+  '@user_data',
+  '@auth_uid',
+  '@auth_token',
+  '@qa_socket_id_token',
+  'fcmToken',
+];
+
+function getSessionTerminatedUserId(payload = {}) {
+  if (!payload || typeof payload !== 'object') {
+    return '';
+  }
+
+  return String(payload.userId || payload.uid || payload.previousUserId || '').trim();
+}
+
+function buildSessionTerminatedStorageKeys(userId) {
+  const keys = new Set(SESSION_TERMINATED_BASE_STORAGE_KEYS);
+  const safeUid = String(userId || '').trim();
+
+  if (safeUid) {
+    keys.add(`@prototype_runtime_session_${safeUid}`);
+    keys.add(`@prototype_runtime_qa_seed_${safeUid}`);
+  }
+
+  return Array.from(keys);
+}
+
+function resetToInitialAppScreen(navigationRef) {
+  const resetAction = CommonActions.reset({
+    index: 0,
+    routes: [{ name: 'Splash' }],
+  });
+
+  const dispatchReset = () => {
+    if (navigationRef?.isReady?.()) {
+      navigationRef.dispatch(resetAction);
+      return true;
+    }
+    return false;
+  };
+
+  if (!dispatchReset()) {
+    setTimeout(dispatchReset, 100);
+  }
+}
+
+async function clearLocalSessionAfterRemoteLogin({ dispatch, navigationRef, payload }) {
+  const payloadUserId = getSessionTerminatedUserId(payload);
+  let storageUserId = payloadUserId;
+
+  try {
+    if (!storageUserId) {
+      storageUserId = String(await AsyncStorage.getItem('@auth_uid') || '').trim();
+    }
+  } catch (error) {
+    Logger.warn('⚠️ [SessionTerminated] Falha ao ler UID local antes de limpar sessão:', error?.message || error);
+  }
+
+  try {
+    const webSocketManager = WebSocketManager.getInstance();
+    if (typeof webSocketManager.clearAuthenticationState === 'function') {
+      webSocketManager.clearAuthenticationState({ disconnect: true });
+    } else {
+      webSocketManager.disconnect();
+    }
+  } catch (error) {
+    Logger.warn('⚠️ [SessionTerminated] Falha ao encerrar socket local:', error?.message || error);
+  }
+
+  try {
+    await AsyncStorage.multiRemove(buildSessionTerminatedStorageKeys(storageUserId));
+  } catch (error) {
+    Logger.warn('⚠️ [SessionTerminated] Falha ao limpar cache local:', error?.message || error);
+  }
+
+  dispatch({ type: USER_SIGN_OUT, payload: null });
+
+  try {
+    if (firebaseAuth().currentUser) {
+      await firebaseAuth().signOut();
+    }
+  } catch (error) {
+    if (error?.code !== 'auth/no-current-user') {
+      Logger.warn('⚠️ [SessionTerminated] Falha ao sair do Firebase Auth:', error?.message || error);
+    }
+  }
+
+  resetToInitialAppScreen(navigationRef);
+}
 
 const verticalScreenOptions = {
   headerShown: false,
@@ -215,6 +320,38 @@ const appLinking = {
   }
 };
 
+function shouldRoutePrototypeReceiptUrl(url) {
+  const normalized = String(url || '').trim().toLowerCase();
+
+  if (!normalized) {
+    return false;
+  }
+
+  return (
+    normalized.includes('robotaxi/receipt') ||
+    normalized.includes('robotaxi%2freceipt') ||
+    (
+      normalized.includes('robotaxi/home') &&
+      normalized.includes('qapassengeraction=open_receipt')
+    )
+  );
+}
+
+function navigatePrototypeReceiptFromLink(navigationRef) {
+  const navigateReceipt = () => {
+    if (!navigationRef?.isReady?.()) {
+      return false;
+    }
+
+    navigationRef.navigate('RobotaxiPrototypeReceipt', { fromTrip: true });
+    return true;
+  };
+
+  if (!navigateReceipt()) {
+    setTimeout(navigateReceipt, 150);
+  }
+}
+
 function normalizeNavigatorRole(rawRole) {
   const normalized = String(rawRole || '')
     .trim()
@@ -251,7 +388,7 @@ function LegacyAuthRouteRedirectScreen({ navigation }) {
   );
 }
 
-function renderPublicScreens() {
+function renderPublicScreens(allowPrototypeQaScreens = false) {
   return (
     <>
       <Stack.Screen
@@ -259,6 +396,13 @@ function renderPublicScreens() {
         component={SplashScreen}
         options={{ headerShown: false }}
       />
+      {allowPrototypeQaScreens ? (
+        <Stack.Screen
+          name="RobotaxiPrototype"
+          component={RobotaxiPrototypeScreen}
+          options={{ keyboardHandlingEnabled: false }}
+        />
+      ) : null}
       <Stack.Screen name="AuthLoading" component={AuthLoadingScreen} options={{ headerShown: false }} />
       <Stack.Screen name="LoginScreen" component={LegacyAuthRouteRedirectScreen} options={{ headerShown: false }} />
       <Stack.Screen name="Registration" component={Registration} options={{ headerShown: false }} />
@@ -653,6 +797,66 @@ function renderSharedLegacyAliases(mapComponent) {
   );
 }
 
+function SessionTerminatedGuard({ navigationRef }) {
+  const dispatch = useDispatch();
+  const currentProfile = useSelector(state => state.auth?.profile);
+  const currentUidRef = useRef('');
+  const handlingSessionTerminationRef = useRef(false);
+
+  useEffect(() => {
+    currentUidRef.current = String(currentProfile?.uid || '').trim();
+  }, [currentProfile?.uid]);
+
+  useEffect(() => {
+    const webSocketManager = WebSocketManager.getInstance();
+
+    const handleSessionTerminated = (payload = {}) => {
+      const payloadUserId = getSessionTerminatedUserId(payload);
+      const currentUid = currentUidRef.current;
+
+      if (payloadUserId && currentUid && payloadUserId !== currentUid) {
+        return;
+      }
+
+      if (handlingSessionTerminationRef.current) {
+        return;
+      }
+
+      handlingSessionTerminationRef.current = true;
+      Logger.warn('🔐 [SessionTerminated] Sessão local encerrada por login em outro aparelho', {
+        userId: payloadUserId || currentUid || null,
+        previousSocketId: payload?.previousSocketId || null,
+        newSocketId: payload?.newSocketId || null,
+      });
+
+      Alert.alert(
+        'Sessão encerrada',
+        'Sua conta foi aberta em outro aparelho. Por segurança, encerramos esta sessão neste aparelho. Toque em Ok para voltar à tela inicial.',
+        [
+          {
+            text: 'Ok',
+            onPress: () => {
+              clearLocalSessionAfterRemoteLogin({ dispatch, navigationRef, payload })
+                .finally(() => {
+                  handlingSessionTerminationRef.current = false;
+                });
+            },
+          },
+        ],
+        SESSION_TERMINATED_ALERT_OPTIONS
+      );
+    };
+
+    webSocketManager.on('sessionTerminated', handleSessionTerminated);
+
+    return () => {
+      webSocketManager.off('sessionTerminated', handleSessionTerminated);
+    };
+  }, [dispatch, navigationRef]);
+
+  return null;
+}
+
 // Navegação principal do app
 function MainNavigator() {
   const auth = useSelector(state => state.auth);
@@ -716,6 +920,8 @@ function MainNavigator() {
 
   const allowPrototypePrivateScreens =
     !forceLegacyMapUi && (isReviewEnv || isE2ETestBuild() || prototypeUiEnabled);
+  const allowPublicPrototypeQaScreens =
+    !forceLegacyMapUi && (isReviewEnv || isE2ETestBuild() || isSimulatorBuild());
   const mapComponent = allowPrototypePrivateScreens ? RobotaxiPrototypeScreen : NewMapScreen;
 
   if (!flagsReady) {
@@ -742,7 +948,7 @@ function MainNavigator() {
         initialRouteName="Splash"
         screenOptions={verticalScreenOptions}
       >
-        {renderPublicScreens()}
+        {renderPublicScreens(allowPublicPrototypeQaScreens)}
       </Stack.Navigator>
     );
   }
@@ -803,10 +1009,55 @@ function MainNavigator() {
   );
 }
 
+function PrototypeReceiptDeepLinkGuard({ navigationRef }) {
+  const lastHandledUrlRef = useRef('');
+
+  useEffect(() => {
+    let mounted = true;
+
+    const handleReceiptUrl = (url) => {
+      if (!mounted || !shouldRoutePrototypeReceiptUrl(url)) {
+        return;
+      }
+
+      const normalized = String(url || '').trim();
+      if (lastHandledUrlRef.current === normalized) {
+        return;
+      }
+
+      lastHandledUrlRef.current = normalized;
+      navigatePrototypeReceiptFromLink(navigationRef);
+    };
+
+    Linking.getInitialURL()
+      .then(handleReceiptUrl)
+      .catch((error) => {
+        Logger.warn('⚠️ [PrototypeDeepLink] Falha ao ler URL inicial:', error?.message || error);
+      });
+
+    const subscription = Linking.addEventListener('url', ({ url }) => {
+      handleReceiptUrl(url);
+    });
+
+    return () => {
+      mounted = false;
+      if (typeof subscription?.remove === 'function') {
+        subscription.remove();
+      }
+    };
+  }, [navigationRef]);
+
+  return null;
+}
+
 export default function AppNavigator() {
   return (
-    <NavigationContainer linking={appLinking}>
-      <MainNavigator />
-    </NavigationContainer>
+    <>
+      <NavigationContainer ref={rootNavigationRef} linking={appLinking}>
+        <MainNavigator />
+      </NavigationContainer>
+      <PrototypeReceiptDeepLinkGuard navigationRef={rootNavigationRef} />
+      <SessionTerminatedGuard navigationRef={rootNavigationRef} />
+    </>
   );
 }

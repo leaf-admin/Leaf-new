@@ -66,7 +66,12 @@ export default function RobotaxiMenuScreen({ navigation, route }) {
 
   return (
     <PrototypeScreenTransition>
-      <View style={styles.container} pointerEvents="box-none">
+      <View
+        style={styles.container}
+        pointerEvents="box-none"
+        testID="robotaxi-menu-screen"
+        accessibilityLabel="robotaxi-menu-screen"
+      >
         <StatusBar translucent backgroundColor="transparent" barStyle="dark-content" />
         <PrototypeDismissibleSheet
           onClose={handleDismiss}
@@ -98,7 +103,13 @@ export default function RobotaxiMenuScreen({ navigation, route }) {
                 {isDriverRole ? 'Leaf motorista' : 'Leaf passageiro'}
               </Text>
             }
-            headerAccessory={<PrototypeMenuCloseButton onPress={handleDismiss} />}
+            headerAccessory={(
+              <PrototypeMenuCloseButton
+                onPress={handleDismiss}
+                testID="robotaxi-menu-close-button"
+                accessibilityLabel="robotaxi-menu-close-button"
+              />
+            )}
           >
             <ScrollView style={styles.scroll} showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
               {roleMenuSections.map(section => (
@@ -110,6 +121,8 @@ export default function RobotaxiMenuScreen({ navigation, route }) {
                       title={item.title}
                       last={index === section.items.length - 1}
                       onPress={() => handleOpenItem(item)}
+                      testID={`robotaxi-menu-item-${item.key}`}
+                      accessibilityLabel={`robotaxi-menu-item-${item.key}`}
                     />
                   ))}
                 </PrototypeMenuSection>

@@ -283,7 +283,11 @@ export default function MyVehiclesScreen({ navigation }) {
         const hasDocument = vehicle.documents && vehicle.documents.crlv;
         
         return (
-            <View style={[styles.vehicleCard, { backgroundColor: isDarkMode ? '#333' : '#f8f8f8' }]}> 
+            <View
+                style={[styles.vehicleCard, { backgroundColor: isDarkMode ? '#333' : '#f8f8f8' }]}
+                testID={`driver-vehicle-card-${vehicle.vehicleId}`}
+                accessibilityLabel={`driver-vehicle-card-${vehicle.vehicleId}`}
+            >
                 <View style={styles.vehicleHeader}>
                     <View style={styles.vehicleInfo}>
                         <Text style={[styles.vehicleTitle, { color: isDarkMode ? '#fff' : colors.BLACK }]}>
@@ -298,6 +302,8 @@ export default function MyVehiclesScreen({ navigation }) {
                             <TouchableOpacity
                                 style={{ marginRight: 8 }}
                                 onPress={() => selectActiveVehicle(vehicle.vehicleId)}
+                                testID={`driver-vehicle-select-${vehicle.vehicleId}`}
+                                accessibilityLabel={`driver-vehicle-select-${vehicle.vehicleId}`}
                             >
                                 <Ionicons
                                     name={vehicle.isActive ? 'radio-button-on' : 'radio-button-off'}
@@ -309,6 +315,8 @@ export default function MyVehiclesScreen({ navigation }) {
                         <TouchableOpacity
                             style={styles.removeButton}
                             onPress={() => removeVehicle(vehicle.vehicleId)}
+                            testID={`driver-vehicle-remove-${vehicle.vehicleId}`}
+                            accessibilityLabel={`driver-vehicle-remove-${vehicle.vehicleId}`}
                         >
                             <Ionicons name="trash" size={20} color="#F44336" />
                         </TouchableOpacity>
@@ -322,6 +330,8 @@ export default function MyVehiclesScreen({ navigation }) {
                     <TouchableOpacity
                         style={[styles.documentButton, { backgroundColor: isDarkMode ? '#2d2d2d' : '#e8e8e8' }]}
                         onPress={() => viewDocument(vehicle.documents.crlv)}
+                        testID={`driver-vehicle-crlv-${vehicle.vehicleId}`}
+                        accessibilityLabel={`driver-vehicle-crlv-${vehicle.vehicleId}`}
                     >
                         <Ionicons name="document-text" size={20} color={MAIN_COLOR} />
                         <Text style={[styles.documentButtonText, { color: isDarkMode ? '#fff' : colors.BLACK }]}>
@@ -386,7 +396,11 @@ export default function MyVehiclesScreen({ navigation }) {
     }, []);
 
     return (
-        <SafeAreaView style={[styles.container, { backgroundColor: isDarkMode ? '#1a1a1a' : '#fff', flex: 1 }]}> 
+        <SafeAreaView
+            style={[styles.container, { backgroundColor: isDarkMode ? '#1a1a1a' : '#fff', flex: 1 }]}
+            testID="driver-vehicles-screen"
+            accessibilityLabel="driver-vehicles-screen"
+        >
             <StatusBar barStyle={isDarkMode ? "light-content" : "dark-content"} backgroundColor={isDarkMode ? '#1a1a1a' : '#fff'} />
             
             {/* Header */}
@@ -398,6 +412,8 @@ export default function MyVehiclesScreen({ navigation }) {
                     <TouchableOpacity 
                         style={[styles.addButton, { backgroundColor: MAIN_COLOR }]}
                         onPress={() => navigation.navigate('AddVehicle')}
+                        testID="driver-vehicle-add-button"
+                        accessibilityLabel="driver-vehicle-add-button"
                     >
                         <Ionicons name="add" size={24} color="#fff" />
                         <Text style={styles.addButtonText}>Adicionar novo veículo</Text>
@@ -451,6 +467,8 @@ export default function MyVehiclesScreen({ navigation }) {
                         }}
                         disabled={!vehicles.some(v => v.isActive && v.status === 'active')}
                         onPress={confirmActiveVehicle}
+                        testID="driver-vehicle-confirm-active-button"
+                        accessibilityLabel="driver-vehicle-confirm-active-button"
                     >
                         <Text style={{ color: '#fff', fontFamily: fonts.Bold, fontSize: 18 }}>Confirmar</Text>
                     </TouchableOpacity>
@@ -677,4 +695,4 @@ const styles = StyleSheet.create({
         fontSize: 14,
         fontFamily: fonts.Medium,
     },
-}); 
+});

@@ -20,7 +20,7 @@ import { apiClient } from '../services/httpClient';
 
 
 const PrivacyPolicyScreen = ({ navigation, route }) => {
-  const [selectedSection, setSelectedSection] = useState('overview');
+  const [selectedSection, setSelectedSection] = useState(() => route?.params?.initialSection || 'overview');
   const [privacySettings, setPrivacySettings] = useState({
     locationSharing: true,
     dataAnalytics: true,
@@ -33,6 +33,7 @@ const PrivacyPolicyScreen = ({ navigation, route }) => {
   
   const authState = useSelector(state => state.auth);
   const currentUser = authState.profile;
+  const userIdentifier = String(currentUser?.id || currentUser?.uid || '').trim();
 
   const sections = [
     { id: 'overview', label: 'Visão Geral', icon: 'info' },
@@ -40,19 +41,25 @@ const PrivacyPolicyScreen = ({ navigation, route }) => {
     { id: 'data-usage', label: 'Uso dos Dados', icon: 'settings' },
     { id: 'data-sharing', label: 'Compartilhamento', icon: 'share' },
     { id: 'data-security', label: 'Segurança', icon: 'security' },
-    { id: 'user-rights', label: 'Seus Direitos', icon: 'person' },
+    { id: 'user-rights', label: 'Excluir Conta', icon: 'delete-forever' },
     { id: 'settings', label: 'Configurações', icon: 'tune' }
   ];
 
   useEffect(() => {
     loadPrivacySettings();
-  }, []);
+  }, [currentUser?.id, currentUser?.uid]);
 
   const loadPrivacySettings = async () => {
+    if (!userIdentifier) {
+      setIsLoading(false);
+      Logger.warn('⚠️ Identificador do usuário indisponível para carregar privacidade.');
+      return;
+    }
+
     try {
       setIsLoading(true);
       
-      const response = await apiClient.get(`/api/privacy/settings/${currentUser.id}`);
+      const response = await apiClient.get(`/api/privacy/settings/${userIdentifier}`);
       setPrivacySettings(response.data.settings || privacySettings);
       
     } catch (error) {
@@ -63,8 +70,13 @@ const PrivacyPolicyScreen = ({ navigation, route }) => {
   };
 
   const updatePrivacySetting = async (setting, value) => {
+    if (!userIdentifier) {
+      Alert.alert('Sessão indisponível', 'Faça login novamente para ajustar as configurações de privacidade.');
+      return;
+    }
+
     try {
-      await apiClient.put(`/api/privacy/settings/${currentUser.id}`, {
+      await apiClient.put(`/api/privacy/settings/${userIdentifier}`, {
         setting,
         value
       });
@@ -100,6 +112,11 @@ const PrivacyPolicyScreen = ({ navigation, route }) => {
   };
 
   const downloadUserData = async () => {
+    if (!userIdentifier) {
+      Alert.alert('Sessão indisponível', 'Faça login novamente para solicitar o download dos seus dados.');
+      return;
+    }
+
     try {
       Alert.alert(
         'Download de Dados',
@@ -107,7 +124,7 @@ const PrivacyPolicyScreen = ({ navigation, route }) => {
         [{ text: 'OK' }]
       );
       
-      await apiClient.post(`/api/privacy/download-data/${currentUser.id}`);
+      await apiClient.post(`/api/privacy/download-data/${userIdentifier}`);
       
     } catch (error) {
       Logger.error('Erro ao solicitar download:', error);
@@ -117,11 +134,11 @@ const PrivacyPolicyScreen = ({ navigation, route }) => {
 
   const deleteUserData = async () => {
     Alert.alert(
-      'Excluir Dados Pessoais',
-      'Esta ação é irreversível. Todos os seus dados pessoais serão permanentemente excluídos.',
+      'Excluir Conta',
+      'Esta ação é irreversível. Sua conta Leaf e todos os dados pessoais serão permanentemente excluídos.',
       [
         { text: 'Cancelar', style: 'cancel' },
-        { text: 'Excluir', style: 'destructive', onPress: confirmDeleteData }
+        { text: 'Excluir Conta', style: 'destructive', onPress: confirmDeleteData }
       ]
     );
   };
@@ -171,8 +188,8 @@ const PrivacyPolicyScreen = ({ navigation, route }) => {
       );
       
       Alert.alert(
-        'Dados Excluídos',
-        'Seus dados pessoais foram excluídos com sucesso.',
+        'Conta Excluída',
+        'Sua conta e dados pessoais foram excluídos com sucesso.',
         [{ text: 'OK', onPress: finalizeDeletionAndResetSession }]
       );
       
@@ -191,8 +208,8 @@ const PrivacyPolicyScreen = ({ navigation, route }) => {
           });
 
           Alert.alert(
-            'Dados Excluídos',
-            'Seus dados pessoais foram excluídos com sucesso.',
+            'Conta Excluída',
+            'Sua conta e dados pessoais foram excluídos com sucesso.',
             [{ text: 'OK', onPress: finalizeDeletionAndResetSession }]
           );
           return;
@@ -202,7 +219,7 @@ const PrivacyPolicyScreen = ({ navigation, route }) => {
       }
 
       Logger.error('Erro ao excluir dados:', error);
-      Alert.alert('Erro', 'Não foi possível excluir os dados. Tente novamente em instantes.');
+      Alert.alert('Erro', 'Não foi possível excluir a conta. Tente novamente em instantes.');
     }
   };
 
@@ -218,6 +235,17 @@ const PrivacyPolicyScreen = ({ navigation, route }) => {
           A Leaf respeita sua privacidade e está comprometido em proteger seus dados pessoais. 
           Esta política descreve como coletamos, usamos e protegemos suas informações.
         </Text>
+      </View>
+
+      <View style={styles.accountDeletionCard}>
+        <Text style={styles.accountDeletionTitle}>Precisa excluir sua conta?</Text>
+        <Text style={styles.accountDeletionDescription}>
+          Você pode solicitar a exclusão definitiva da conta a qualquer momento, sem falar com suporte.
+        </Text>
+        <TouchableOpacity style={styles.accountDeletionButton} onPress={deleteUserData}>
+          <Icon name="delete-forever" type="material" color="#fff" size={20} />
+          <Text style={styles.accountDeletionButtonText}>Excluir Conta</Text>
+        </TouchableOpacity>
       </View>
       
       <View style={styles.highlightsContainer}>
@@ -418,7 +446,7 @@ const PrivacyPolicyScreen = ({ navigation, route }) => {
 
   const renderUserRights = () => (
     <View style={styles.sectionContent}>
-      <Text style={styles.sectionTitle}>Seus Direitos</Text>
+      <Text style={styles.sectionTitle}>Exclusão de Conta e Direitos</Text>
       
       <View style={styles.rightsCard}>
         <Text style={styles.rightsTitle}>Você tem o direito de:</Text>
@@ -440,7 +468,7 @@ const PrivacyPolicyScreen = ({ navigation, route }) => {
         <View style={styles.rightsItem}>
           <Icon name="delete" type="material" color="#3498db" size={20} />
           <Text style={styles.rightsText}>
-            Solicitar exclusão de dados
+            Solicitar exclusão permanente da conta
           </Text>
         </View>
         
@@ -461,19 +489,19 @@ const PrivacyPolicyScreen = ({ navigation, route }) => {
       
       <View style={styles.actionsContainer}>
         <TouchableOpacity
+          style={[styles.actionButton, styles.deleteButton]}
+          onPress={deleteUserData}
+        >
+          <Icon name="delete-forever" type="material" color="#fff" size={20} />
+          <Text style={styles.actionButtonText}>Excluir Conta</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity
           style={styles.actionButton}
           onPress={downloadUserData}
         >
           <Icon name="file-download" type="material" color="#fff" size={20} />
           <Text style={styles.actionButtonText}>Baixar Meus Dados</Text>
-        </TouchableOpacity>
-        
-        <TouchableOpacity
-          style={[styles.actionButton, styles.deleteButton]}
-          onPress={deleteUserData}
-        >
-          <Icon name="delete-forever" type="material" color="#fff" size={20} />
-          <Text style={styles.actionButtonText}>Excluir Dados</Text>
         </TouchableOpacity>
       </View>
     </View>
@@ -653,7 +681,7 @@ const PrivacyPolicyScreen = ({ navigation, route }) => {
           <Icon name="arrow-back" type="material" color="#2c3e50" size={24} />
         </TouchableOpacity>
         
-        <Text style={styles.headerTitle}>Política de Privacidade</Text>
+        <Text style={styles.headerTitle}>Privacidade e Conta</Text>
         
         <TouchableOpacity
           style={styles.helpButton}
@@ -773,6 +801,40 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#2c3e50',
     lineHeight: 20,
+  },
+  accountDeletionCard: {
+    backgroundColor: '#fff5f5',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#f3b7b1',
+    padding: 16,
+    marginBottom: 20,
+  },
+  accountDeletionTitle: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#7a1f16',
+    marginBottom: 8,
+  },
+  accountDeletionDescription: {
+    fontSize: 13,
+    color: '#7a1f16',
+    lineHeight: 18,
+    marginBottom: 12,
+  },
+  accountDeletionButton: {
+    minHeight: 44,
+    borderRadius: 8,
+    backgroundColor: '#c0392b',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  accountDeletionButtonText: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: 'bold',
+    marginLeft: 8,
   },
   highlightsContainer: {
     backgroundColor: '#fff',

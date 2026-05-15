@@ -7,6 +7,15 @@ jest.mock('../src/config/ApiConfig', () => ({
   getSelfHostedApiUrl: (endpoint) => `https://api.test${endpoint}`
 }));
 
+const mockGetIdToken = jest.fn(async () => 'firebase-id-token');
+let mockAuthState = {
+  currentUser: {
+    getIdToken: mockGetIdToken
+  }
+};
+
+jest.mock('@react-native-firebase/auth', () => () => mockAuthState);
+
 jest.mock('../src/services/FaceDetectionService', () => ({
   __esModule: true,
   default: {
@@ -33,6 +42,13 @@ describe('KYCService liveness handling', () => {
 
   beforeEach(() => {
     jest.resetModules();
+    mockGetIdToken.mockReset();
+    mockGetIdToken.mockResolvedValue('firebase-id-token');
+    mockAuthState = {
+      currentUser: {
+        getIdToken: mockGetIdToken
+      }
+    };
     global.fetch = jest.fn();
     kycService = require('../src/services/KYCService').default;
   });
@@ -80,6 +96,36 @@ describe('KYCService liveness handling', () => {
     const result = await kycService.createAwsLivenessSession('driver-1');
     expect(result.success).toBe(false);
     expect(result.error).toContain('AWS disabled');
+    expect(global.fetch.mock.calls[0][1].headers.Authorization).toBe('Bearer firebase-id-token');
+  });
+
+  test('getAwsLivenessCredentials should request temporary credentials with auth', async () => {
+    global.fetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        success: true,
+        provider: 'aws_rekognition_face_liveness',
+        region: 'us-east-1',
+        credentials: {
+          accessKeyId: 'access-key',
+          secretAccessKey: 'secret-key',
+          sessionToken: 'session-token',
+          expiration: '2026-05-13T12:00:00.000Z'
+        }
+      })
+    });
+
+    const result = await kycService.getAwsLivenessCredentials('driver-1');
+    expect(result.success).toBe(true);
+    expect(global.fetch).toHaveBeenCalledWith(
+      'https://api.test/api/kyc/liveness/aws/credentials?userId=driver-1',
+      expect.objectContaining({
+        method: 'GET',
+        headers: expect.objectContaining({
+          Authorization: 'Bearer firebase-id-token'
+        })
+      })
+    );
   });
 
   test('getAwsLivenessSessionResult should return error on timeout/fetch failure', async () => {
@@ -88,6 +134,30 @@ describe('KYCService liveness handling', () => {
     const result = await kycService.getAwsLivenessSessionResult('driver-1', 'session-1');
     expect(result.success).toBe(false);
     expect(result.error).toContain('timeout');
+  });
+
+  test('processOnboarding should send device-first KYC with auth', async () => {
+    global.fetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        success: true,
+        data: {
+          approved: true,
+          needsReview: false,
+          mode: 'device_signature_v1'
+        }
+      })
+    });
+
+    const result = await kycService.processOnboarding('driver-1', 'file://cnh.jpg', 'file://selfie.jpg');
+    expect(result.success).toBe(true);
+    expect(global.fetch).toHaveBeenCalledTimes(1);
+    const [, options] = global.fetch.mock.calls[0];
+    expect(options.headers.Authorization).toBe('Bearer firebase-id-token');
+    expect(JSON.parse(options.body)).toMatchObject({
+      onboardingMode: 'device_signature_v1',
+      driverId: 'driver-1'
+    });
   });
 
   test('verifyDriver should support aws-session only payload', async () => {
@@ -109,6 +179,7 @@ describe('KYCService liveness handling', () => {
     expect(body.userId).toBe('driver-1');
     expect(body.deviceKyc.awsSessionId).toBe('sess-123');
     expect(body.deviceKyc.aws.sessionId).toBe('sess-123');
+    expect(options.headers.Authorization).toBe('Bearer firebase-id-token');
   });
 
   test('verifyDriver should return failure when backend rejects aws payload', async () => {

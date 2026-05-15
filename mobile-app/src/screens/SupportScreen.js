@@ -280,6 +280,8 @@ export default function SupportScreen({ navigation }) {
             style={[styles.tabButton, active && styles.tabButtonActive]}
             onPress={() => setSelectedTab(tab.id)}
             activeOpacity={0.86}
+            testID={`support-tab-${tab.id}`}
+            accessibilityLabel={`support-tab-${tab.id}`}
           >
             <Ionicons name={tab.icon} size={15} color={active ? '#FFFFFF' : color.text.secondary} />
             <Text style={[styles.tabText, active && styles.tabTextActive]}>{tab.label}</Text>
@@ -335,12 +337,16 @@ export default function SupportScreen({ navigation }) {
           style={styles.input}
           multiline
           maxLength={500}
+          testID="support-chat-message-input"
+          accessibilityLabel="support-chat-message-input"
         />
         <TouchableOpacity
           style={[styles.sendButton, !message.trim() && styles.sendButtonDisabled]}
           onPress={sendMessage}
           disabled={!message.trim()}
           activeOpacity={0.86}
+          testID="support-chat-send-button"
+          accessibilityLabel="support-chat-send-button"
         >
           <Ionicons name="send" size={14} color="#FFFFFF" />
         </TouchableOpacity>
@@ -367,6 +373,8 @@ export default function SupportScreen({ navigation }) {
               style={styles.ticketCard}
               activeOpacity={0.86}
               onPress={() => navigation.navigate('SupportTicket', { ticket })}
+              testID={`support-ticket-card-${index}`}
+              accessibilityLabel={`support-ticket-card-${index}`}
             >
               <View style={styles.ticketHeader}>
                 <Text style={styles.ticketTitle}>{title}</Text>
@@ -396,6 +404,8 @@ export default function SupportScreen({ navigation }) {
               style={styles.faqHeader}
               onPress={() => setExpandedFaq(expanded ? null : item.id)}
               activeOpacity={0.86}
+              testID={`support-faq-item-${index}`}
+              accessibilityLabel={`support-faq-item-${index}`}
             >
               <Text style={styles.faqQuestion}>{item.question}</Text>
               <Ionicons name={expanded ? 'chevron-up' : 'chevron-down'} size={15} color={color.text.secondary} />
@@ -408,7 +418,11 @@ export default function SupportScreen({ navigation }) {
   );
 
   return (
-    <View style={styles.container}>
+    <View
+      style={styles.container}
+      testID="support-screen"
+      accessibilityLabel="support-screen"
+    >
       <StatusBar
         barStyle="dark-content"
         backgroundColor="transparent"

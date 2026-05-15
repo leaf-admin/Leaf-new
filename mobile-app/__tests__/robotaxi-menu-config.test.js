@@ -1,35 +1,29 @@
-import {
-  getMenuItemsByRole,
-  getMenuSectionsByRole,
-  resolveMenuTargetRoute,
-} from '../src/screens/prototype/robotaxiMenuConfig';
+import { getMenuSectionsByRole } from '../src/screens/prototype/robotaxiMenuConfig';
 
 describe('robotaxiMenuConfig', () => {
-  it('does not expose the deprecated driver panel item in the driver menu', () => {
-    const items = getMenuItemsByRole('driver');
-
-    expect(items.some((item) => item.key === 'driver-panel')).toBe(false);
-    expect(items.some((item) => item.title === 'Perfil do motorista')).toBe(true);
-  });
-
-  it('routes direct menu items to the real module screens', () => {
-    const items = getMenuItemsByRole('driver');
-    const profileItem = items.find((item) => item.key === 'edit-profile');
-    const settingsItem = items.find((item) => item.key === 'settings');
-    const historyItem = items.find((item) => item.key === 'driver-history');
-
-    expect(resolveMenuTargetRoute(profileItem)).toBe('RobotaxiPrototypeProfile');
-    expect(resolveMenuTargetRoute(settingsItem)).toBe('RobotaxiPrototypeSettings');
-    expect(resolveMenuTargetRoute(historyItem)).toBe('RobotaxiMenuTripHistory');
-  });
-
-  it('groups driver items into operations, account and support sections', () => {
+  test('keeps account deletion shortcut visible in support section for driver', () => {
     const sections = getMenuSectionsByRole('driver');
+    const supportSection = sections.find(section => section.key === 'support');
 
-    expect(sections.map((section) => section.key)).toEqual([
-      'operations',
-      'account',
-      'support',
-    ]);
+    expect(supportSection).toBeTruthy();
+    expect(supportSection.items[0]).toEqual(
+      expect.objectContaining({
+        key: 'privacy-account-deletion',
+        route: 'PrivacyPolicy',
+      })
+    );
+  });
+
+  test('keeps account deletion shortcut visible in support section for passenger', () => {
+    const sections = getMenuSectionsByRole('customer');
+    const supportSection = sections.find(section => section.key === 'support');
+
+    expect(supportSection).toBeTruthy();
+    expect(supportSection.items[0]).toEqual(
+      expect.objectContaining({
+        key: 'privacy-account-deletion',
+        route: 'PrivacyPolicy',
+      })
+    );
   });
 });

@@ -20,6 +20,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as ImagePicker from 'expo-image-picker';
 import { logOut, updateProfileImage } from '../services/runtime/profileActionsBridge';
 import robotaxiPrototypeTokens from '../components/design-system/robotaxiPrototypeTokens';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 const { color, typography } = robotaxiPrototypeTokens;
 
@@ -35,6 +36,7 @@ function getInitials(firstName = '', lastName = '', fallback = '') {
 export default function SettingsScreen({ navigation }) {
   const dispatch = useDispatch();
   const auth = useSelector(state => state.auth);
+  const insets = useSafeAreaInsets();
   const [isDarkMode, setIsDarkMode] = useState(false);
   const [userData, setUserData] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -126,7 +128,14 @@ export default function SettingsScreen({ navigation }) {
         : [{ id: 'profile', title: 'Editar Perfil', icon: 'person-outline', screen: 'EditProfileScreen' }]),
       { id: 'trips', title: 'Histórico de Viagens', icon: 'time-outline', screen: 'Rides' },
       { id: 'messages', title: 'Mensagens', icon: 'chatbubbles-outline', screen: 'Chat' },
-      { id: 'privacy', title: 'Privacidade e Exclusão', icon: 'shield-checkmark-outline', screen: 'PrivacyPolicy' },
+      { id: 'privacy', title: 'Privacidade', icon: 'shield-checkmark-outline', screen: 'PrivacyPolicy' },
+      {
+        id: 'delete-account',
+        title: 'Excluir Conta',
+        icon: 'trash-outline',
+        screen: 'PrivacyPolicy',
+        params: { initialSection: 'user-rights' }
+      },
       { id: 'settings', title: 'Configurações', icon: 'settings-outline', screen: 'Settings' },
       { id: 'help', title: 'Ajuda', icon: 'help-circle-outline', screen: 'Help' },
       ...(__DEV__ ? [{ id: 'ride-flow-test', title: 'Testar Fluxo de Corrida', icon: 'car-sport-outline', screen: 'RideFlowTest' }] : [])
@@ -145,7 +154,7 @@ export default function SettingsScreen({ navigation }) {
     <View style={[styles.container, isDarkMode && styles.containerDark]}>
       <StatusBar barStyle={isDarkMode ? 'light-content' : 'dark-content'} backgroundColor="transparent" translucent />
 
-      <View style={[styles.header, isDarkMode && styles.headerDark]}>
+      <View style={[styles.header, { paddingTop: insets.top + 10 }, isDarkMode && styles.headerDark]}>
         <TouchableOpacity style={styles.headerButton} onPress={() => navigation.goBack()} activeOpacity={0.85}>
           <Ionicons name="arrow-back" color="#FFFFFF" size={20} />
         </TouchableOpacity>
@@ -158,7 +167,14 @@ export default function SettingsScreen({ navigation }) {
           <ActivityIndicator size="large" color={color.accent.primary} />
         </View>
       ) : (
-        <ScrollView style={styles.content} contentContainerStyle={styles.contentContainer} showsVerticalScrollIndicator={false}>
+        <ScrollView
+          style={styles.content}
+          contentContainerStyle={[
+            styles.contentContainer,
+            { paddingBottom: insets.bottom + 24 },
+          ]}
+          showsVerticalScrollIndicator={false}
+        >
           <View style={[styles.profileCard, isDarkMode && styles.cardDark]}>
             <View style={styles.profileTopRow}>
               <View style={styles.avatarWrap}>
@@ -215,22 +231,41 @@ export default function SettingsScreen({ navigation }) {
           </View>
 
           <View style={[styles.sectionCard, isDarkMode && styles.cardDark]}>
-            {menuItems.map(item => (
-              <TouchableOpacity
-                key={item.id}
-                style={styles.menuRow}
-                onPress={() => navigation.navigate(item.screen)}
-                activeOpacity={0.86}
-              >
-                <View style={styles.menuRowLeft}>
-                  <View style={styles.menuIconWrap}>
-                    <Ionicons name={item.icon} size={16} color={color.text.primary} />
+            {menuItems.map(item => {
+              const isDeleteAccountItem = item.id === 'delete-account';
+              return (
+                <TouchableOpacity
+                  key={item.id}
+                  style={styles.menuRow}
+                  onPress={() => navigation.navigate(item.screen, item.params)}
+                  activeOpacity={0.86}
+                >
+                  <View style={styles.menuRowLeft}>
+                    <View style={styles.menuIconWrap}>
+                      <Ionicons
+                        name={item.icon}
+                        size={16}
+                        color={isDeleteAccountItem ? '#C0392B' : color.text.primary}
+                      />
+                    </View>
+                    <Text
+                      style={[
+                        styles.menuRowText,
+                        isDarkMode && styles.textLight,
+                        isDeleteAccountItem && styles.deleteMenuText
+                      ]}
+                    >
+                      {item.title}
+                    </Text>
                   </View>
-                  <Text style={[styles.menuRowText, isDarkMode && styles.textLight]}>{item.title}</Text>
-                </View>
-                <Ionicons name="chevron-forward" size={16} color={isDarkMode ? '#A6B0BE' : color.text.secondary} />
-              </TouchableOpacity>
-            ))}
+                  <Ionicons
+                    name="chevron-forward"
+                    size={16}
+                    color={isDeleteAccountItem ? '#C0392B' : isDarkMode ? '#A6B0BE' : color.text.secondary}
+                  />
+                </TouchableOpacity>
+              );
+            })}
           </View>
 
           <TouchableOpacity style={styles.logoutButton} onPress={handleLogout} activeOpacity={0.88}>
@@ -465,6 +500,9 @@ const styles = StyleSheet.create({
     fontSize: typography.body.size,
     lineHeight: typography.body.lineHeight,
     color: color.text.primary
+  },
+  deleteMenuText: {
+    color: '#C0392B'
   },
   logoutButton: {
     minHeight: 46,

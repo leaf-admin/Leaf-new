@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Alert, ScrollView, StatusBar, StyleSheet, Switch, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useSelector } from 'react-redux';
 import { Ionicons } from '@expo/vector-icons';
 import { fonts } from '../../theme/runtimeTokens';
 import robotaxiPrototypeTokens from '../../components/design-system/robotaxiPrototypeTokens';
@@ -10,6 +11,11 @@ import { CardHandle, PrototypeCard, PrototypePrimaryButton } from '../../compone
 import { getMenuItemByRoute } from './robotaxiMenuConfig';
 import { usePrototypeMapOcclusion } from './prototypeMapOcclusion';
 import { usePrototypeRideRuntime } from './prototypeRideRuntime';
+import {
+  resolvePrototypeProfileEmail,
+  resolvePrototypeProfileName,
+  resolvePrototypeProfilePhone,
+} from './prototypeProfileIdentity';
 
 const { color, typography } = robotaxiPrototypeTokens;
 const SHEET_TOP_OFFSET = 56;
@@ -19,6 +25,7 @@ const SWITCH_TRACK_COLORS = { false: '#D9DFE6', true: '#9BB38E' };
 const SWITCH_THUMB_COLOR = '#FFFFFF';
 
 export default function RobotaxiMenuDetailScreen({ navigation, route }) {
+  const authProfile = useSelector(state => state?.auth?.profile);
   const insets = useSafeAreaInsets();
   const {
     riderProfile,
@@ -79,11 +86,11 @@ export default function RobotaxiMenuDetailScreen({ navigation, route }) {
   }, [tripHistory]);
 
   useEffect(() => {
-    setDraftName(riderProfile?.name || '');
-    setDraftPhone(riderProfile?.phone || '');
-    setDraftEmail(riderProfile?.email || '');
+    setDraftName(resolvePrototypeProfileName(authProfile) || resolvePrototypeProfileName(riderProfile));
+    setDraftPhone(resolvePrototypeProfilePhone(authProfile) || resolvePrototypeProfilePhone(riderProfile));
+    setDraftEmail(resolvePrototypeProfileEmail(authProfile) || resolvePrototypeProfileEmail(riderProfile));
     setDraftPreference(riderProfile?.preference || '');
-  }, [riderProfile?.email, riderProfile?.name, riderProfile?.phone, riderProfile?.preference]);
+  }, [authProfile, riderProfile]);
 
   useEffect(() => {
     if (isMessagesDetail) {

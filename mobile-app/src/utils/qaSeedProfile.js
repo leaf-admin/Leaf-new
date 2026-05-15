@@ -120,7 +120,7 @@ export const buildQaSeedProfile = ({ uid, driverActivation = null }) => {
     const baseProfile = buildBaseProfile({
       uid: normalizedUid,
       role: 'driver',
-      phone: '+5511888888888',
+      phone: '+5521123456789',
       email: 'motorista.teste@leafapp.com',
       name: 'Motorista',
       firstName: 'Leaf',
@@ -152,7 +152,7 @@ export const buildQaSeedProfile = ({ uid, driverActivation = null }) => {
     const baseProfile = buildBaseProfile({
       uid: normalizedUid,
       role: 'customer',
-      phone: '+5511999999999',
+      phone: '+5521102938475',
       email: 'passageiro.teste@leafapp.com',
       name: 'Leaf Passageiro Teste',
       firstName: 'Leaf',

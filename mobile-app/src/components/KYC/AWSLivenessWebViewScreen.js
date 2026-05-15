@@ -30,11 +30,19 @@ function escapeHtmlString(value) {
     .replace(/'/g, '&#39;');
 }
 
-function buildWebViewHtml({ apiBaseUrl, sessionId, userId, region }) {
-  const safeApiBaseUrl = escapeHtmlString(apiBaseUrl);
+function safeJsonScript(value) {
+  return JSON.stringify(value || {})
+    .replace(/</g, '\\u003c')
+    .replace(/>/g, '\\u003e')
+    .replace(/&/g, '\\u0026')
+    .replace(/\u2028/g, '\\u2028')
+    .replace(/\u2029/g, '\\u2029');
+}
+
+function buildWebViewHtml({ sessionId, region, credentials }) {
   const safeSessionId = escapeHtmlString(sessionId);
-  const safeUserId = escapeHtmlString(userId);
   const safeRegion = escapeHtmlString(region || 'us-east-1');
+  const credentialsJson = safeJsonScript(credentials);
 
   return `
 <!doctype html>
@@ -54,10 +62,9 @@ function buildWebViewHtml({ apiBaseUrl, sessionId, userId, region }) {
   </div>
 
   <script type="module">
-    const API_BASE_URL = '${safeApiBaseUrl}';
     const SESSION_ID = '${safeSessionId}';
-    const USER_ID = '${safeUserId}';
     const REGION = '${safeRegion}';
+    const TEMPORARY_CREDENTIALS = ${credentialsJson};
 
     const postMessage = (payload) => {
       try {
@@ -68,36 +75,20 @@ function buildWebViewHtml({ apiBaseUrl, sessionId, userId, region }) {
     };
 
     const getCredentialProvider = async () => {
-      const response = await fetch(
-        API_BASE_URL + '/api/kyc/liveness/aws/credentials?userId=' + encodeURIComponent(USER_ID),
-        { method: 'GET' }
-      );
-      const data = await response.json();
-      if (!response.ok || !data?.credentials) {
-        throw new Error(data?.error || 'Unable to get AWS temporary credentials');
+      if (!TEMPORARY_CREDENTIALS?.accessKeyId || !TEMPORARY_CREDENTIALS?.secretAccessKey) {
+        throw new Error('AWS temporary credentials are not available');
       }
       return {
-        accessKeyId: data.credentials.accessKeyId,
-        secretAccessKey: data.credentials.secretAccessKey,
-        sessionToken: data.credentials.sessionToken,
-        expiration: data.credentials.expiration,
+        accessKeyId: TEMPORARY_CREDENTIALS.accessKeyId,
+        secretAccessKey: TEMPORARY_CREDENTIALS.secretAccessKey,
+        sessionToken: TEMPORARY_CREDENTIALS.sessionToken,
+        expiration: TEMPORARY_CREDENTIALS.expiration,
       };
     };
 
     const handleAnalysisComplete = async () => {
-      const response = await fetch(
-        API_BASE_URL + '/api/kyc/liveness/aws/session/' + encodeURIComponent(SESSION_ID) + '?userId=' + encodeURIComponent(USER_ID),
-        { method: 'GET' }
-      );
-      const data = await response.json();
-
-      if (!response.ok) {
-        throw new Error(data?.error || 'Unable to fetch liveness result');
-      }
-
       postMessage({
-        type: 'analysis_complete',
-        payload: data,
+        type: 'analysis_complete'
       });
     };
 
@@ -161,6 +152,7 @@ export default function AWSLivenessWebViewScreen({
   const [status, setStatus] = useState(STATUS.CREATING_SESSION);
   const [errorMessage, setErrorMessage] = useState('');
   const [sessionData, setSessionData] = useState(null);
+  const [credentialsData, setCredentialsData] = useState(null);
   const webViewRef = useRef(null);
 
   const apiBaseUrl = useMemo(() => {
@@ -169,19 +161,19 @@ export default function AWSLivenessWebViewScreen({
   }, []);
 
   const webViewHtml = useMemo(() => {
-    if (!sessionData?.sessionId) return null;
+    if (!sessionData?.sessionId || !credentialsData?.credentials) return null;
     return buildWebViewHtml({
-      apiBaseUrl,
       sessionId: sessionData.sessionId,
-      userId: driverId,
-      region: sessionData.region || 'us-east-1',
+      region: sessionData.region || credentialsData.region || 'us-east-1',
+      credentials: credentialsData.credentials,
     });
-  }, [apiBaseUrl, driverId, sessionData]);
+  }, [credentialsData, sessionData]);
 
   const initializeSession = async () => {
     setStatus(STATUS.CREATING_SESSION);
     setErrorMessage('');
     setSessionData(null);
+    setCredentialsData(null);
 
     const createResult = await kycService.createAwsLivenessSession(driverId, {
       challengeId,
@@ -194,7 +186,15 @@ export default function AWSLivenessWebViewScreen({
       return;
     }
 
+    const credentialsResult = await kycService.getAwsLivenessCredentials(driverId);
+    if (!credentialsResult.success || !credentialsResult.data?.credentials) {
+      setStatus(STATUS.ERROR);
+      setErrorMessage(credentialsResult.error || 'Nao foi possivel preparar credenciais seguras de liveness');
+      return;
+    }
+
     setSessionData(createResult.data);
+    setCredentialsData(credentialsResult.data);
     setStatus(STATUS.READY);
   };
 
@@ -227,7 +227,14 @@ export default function AWSLivenessWebViewScreen({
       if (type === 'analysis_complete') {
         setStatus(STATUS.VERIFYING);
 
-        const livenessData = payload?.payload || {};
+        const resultResponse = await kycService.getAwsLivenessSessionResult(driverId, sessionData?.sessionId);
+        if (!resultResponse.success) {
+          setStatus(STATUS.ERROR);
+          setErrorMessage(resultResponse.error || 'Nao foi possivel validar o resultado de liveness');
+          return;
+        }
+
+        const livenessData = resultResponse.data || {};
         if (livenessData?.livenessPassed !== true) {
           setStatus(STATUS.ERROR);
           setErrorMessage('Liveness nao aprovado. Tente novamente com boa iluminacao e rosto centralizado.');

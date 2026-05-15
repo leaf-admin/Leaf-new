@@ -245,6 +245,8 @@ const SupportTicketScreen = ({ navigation, route }) => {
     <TouchableOpacity
       style={styles.ticketCard}
       onPress={() => openTicket(ticket)}
+      testID={`support-ticket-detail-card-${ticket.id}`}
+      accessibilityLabel={`support-ticket-detail-card-${ticket.id}`}
     >
       <View style={styles.ticketHeader}>
         <Text style={styles.ticketSubject} numberOfLines={1}>
@@ -283,7 +285,11 @@ const SupportTicketScreen = ({ navigation, route }) => {
     >
       <View style={styles.modalContainer}>
         <View style={styles.modalHeader}>
-          <TouchableOpacity onPress={() => setShowCreateModal(false)}>
+          <TouchableOpacity
+            onPress={() => setShowCreateModal(false)}
+            testID="support-ticket-create-close-button"
+            accessibilityLabel="support-ticket-create-close-button"
+          >
             <Icon name="close" size={24} color={color.text.primary} />
           </TouchableOpacity>
           <Text style={styles.modalTitle}>Novo Ticket</Text>
@@ -291,6 +297,8 @@ const SupportTicketScreen = ({ navigation, route }) => {
             onPress={createTicket}
             disabled={isCreatingTicket}
             style={styles.saveButton}
+            testID="support-ticket-create-submit-button"
+            accessibilityLabel="support-ticket-create-submit-button"
           >
             {isCreatingTicket ? (
               <ActivityIndicator size="small" color="#fff" />
@@ -309,6 +317,8 @@ const SupportTicketScreen = ({ navigation, route }) => {
               onChangeText={(text) => setNewTicket(prev => ({ ...prev, subject: text }))}
               placeholder="Descreva brevemente o problema"
               maxLength={100}
+              testID="support-ticket-subject-input"
+              accessibilityLabel="support-ticket-subject-input"
             />
           </View>
 
@@ -323,6 +333,8 @@ const SupportTicketScreen = ({ navigation, route }) => {
                     newTicket.category === category.id && styles.categoryButtonSelected
                   ]}
                   onPress={() => setNewTicket(prev => ({ ...prev, category: category.id }))}
+                  testID={`support-ticket-category-${category.id}`}
+                  accessibilityLabel={`support-ticket-category-${category.id}`}
                 >
                   <Icon name={category.icon} size={20} color={newTicket.category === category.id ? '#fff' : color.accent.primary} />
                   <Text style={[
@@ -348,6 +360,8 @@ const SupportTicketScreen = ({ navigation, route }) => {
                     newTicket.priority === priority.id && { backgroundColor: priority.color }
                   ]}
                   onPress={() => setNewTicket(prev => ({ ...prev, priority: priority.id }))}
+                  testID={`support-ticket-priority-${priority.id}`}
+                  accessibilityLabel={`support-ticket-priority-${priority.id}`}
                 >
                   <Text style={[
                     styles.priorityButtonText,
@@ -370,6 +384,8 @@ const SupportTicketScreen = ({ navigation, route }) => {
               multiline
               numberOfLines={6}
               textAlignVertical="top"
+              testID="support-ticket-description-input"
+              accessibilityLabel="support-ticket-description-input"
             />
           </View>
         </ScrollView>
@@ -385,7 +401,11 @@ const SupportTicketScreen = ({ navigation, route }) => {
     >
       <View style={styles.modalContainer}>
         <View style={styles.modalHeader}>
-          <TouchableOpacity onPress={() => setShowTicketModal(false)}>
+          <TouchableOpacity
+            onPress={() => setShowTicketModal(false)}
+            testID="support-ticket-chat-close-button"
+            accessibilityLabel="support-ticket-chat-close-button"
+          >
             <Icon name="close" size={24} color={color.text.primary} />
           </TouchableOpacity>
           <Text style={styles.modalTitle} numberOfLines={1}>
@@ -455,15 +475,29 @@ const SupportTicketScreen = ({ navigation, route }) => {
   }
 
   return (
-    <View style={styles.container}>
+    <View
+      style={styles.container}
+      testID="support-ticket-screen"
+      accessibilityLabel="support-ticket-screen"
+    >
       <StatusBar barStyle="dark-content" backgroundColor="transparent" translucent={Platform.OS === 'android'} />
       
       <View style={styles.header}>
-        <TouchableOpacity style={styles.headerButton} onPress={() => navigation.goBack()}>
+        <TouchableOpacity
+          style={styles.headerButton}
+          onPress={() => navigation.goBack()}
+          testID="support-ticket-back-button"
+          accessibilityLabel="support-ticket-back-button"
+        >
           <Icon name="arrow-back" size={18} color={color.text.primary} />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Suporte</Text>
-        <TouchableOpacity style={styles.headerButton} onPress={() => setShowCreateModal(true)}>
+        <TouchableOpacity
+          style={styles.headerButton}
+          onPress={() => setShowCreateModal(true)}
+          testID="support-ticket-open-create-button"
+          accessibilityLabel="support-ticket-open-create-button"
+        >
           <Icon name="add" size={18} color={color.text.primary} />
         </TouchableOpacity>
       </View>
@@ -489,6 +523,8 @@ const SupportTicketScreen = ({ navigation, route }) => {
           <TouchableOpacity
             style={styles.createButton}
             onPress={() => setShowCreateModal(true)}
+            testID="support-ticket-empty-create-button"
+            accessibilityLabel="support-ticket-empty-create-button"
           >
             <Text style={styles.createButtonText}>Criar Primeiro Ticket</Text>
           </TouchableOpacity>

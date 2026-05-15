@@ -13,44 +13,65 @@ const SHOULD_DISABLE_SIMULATOR_LOCAL_NOTIFICATIONS =
 class FCMNotificationService {
     constructor() {
         this.isInitialized = false;
+        this.initializationPromise = null;
         this.fcmToken = null;
         this.notificationHandlers = new Map();
         this.backgroundMessageHandler = null;
         this.pendingTokenRegistration = null; // Token pendente para registrar quando WebSocket conectar
         this.wsConnectListener = null; // Listener para quando WebSocket conectar
+        this.tokenRenewalInterval = null;
+        this.retryTokenUpdateTimeout = null;
+        this.backendTokenRegistrationPromise = null;
+        this.lastBackendTokenRegistrationKey = null;
     }
 
     // Inicializar o serviço FCM
     async initialize() {
-        try {
-            Logger.log('🚀 Inicializando FCM Notification Service...');
-
-            // Configurar handlers de notificação
-            this.setupNotificationHandlers();
-
-            // Obter token FCM (pode ser null - app funciona sem push)
-            await this.getFCMToken();
-
-            // Configurar handlers de background
-            this.setupBackgroundHandlers();
-
-            this.isInitialized = true;
-            Logger.log('✅ FCM Notification Service inicializado com sucesso');
-
-            // Configurar renovação periódica do token (apenas se token disponível)
-            if (this.fcmToken) {
-                this.setupTokenRenewal();
-            } else {
-                Logger.warn('⚠️ Token FCM não disponível. Renovação periódica não será configurada.');
-            }
-
-        } catch (error) {
-            // ✅ CRÍTICO: Erro ao inicializar FCM não deve quebrar o app
-            Logger.error('❌ Erro ao inicializar FCM:', error);
-            Logger.warn('⚠️ App continuará funcionando sem notificações push.');
-            this.isInitialized = false;
-            // Não lançar erro - app deve funcionar sem push
+        if (this.isInitialized) {
+            return true;
         }
+
+        if (this.initializationPromise) {
+            return this.initializationPromise;
+        }
+
+        this.initializationPromise = (async () => {
+            try {
+                Logger.log('🚀 Inicializando FCM Notification Service...');
+
+                // Configurar handlers de notificação
+                this.setupNotificationHandlers();
+
+                // Obter token FCM (pode ser null - app funciona sem push)
+                await this.getFCMToken();
+
+                // Configurar handlers de background
+                this.setupBackgroundHandlers();
+
+                this.isInitialized = true;
+                Logger.log('✅ FCM Notification Service inicializado com sucesso');
+
+                // Configurar renovação periódica do token (apenas se token disponível)
+                if (this.fcmToken) {
+                    this.setupTokenRenewal();
+                } else {
+                    Logger.warn('⚠️ Token FCM não disponível. Renovação periódica não será configurada.');
+                }
+
+                return true;
+            } catch (error) {
+                // ✅ CRÍTICO: Erro ao inicializar FCM não deve quebrar o app
+                Logger.error('❌ Erro ao inicializar FCM:', error);
+                Logger.warn('⚠️ App continuará funcionando sem notificações push.');
+                this.isInitialized = false;
+                // Não lançar erro - app deve funcionar sem push
+                return false;
+            } finally {
+                this.initializationPromise = null;
+            }
+        })();
+
+        return this.initializationPromise;
     }
 
     // Solicitar permissões de notificação
@@ -106,8 +127,8 @@ class FCMNotificationService {
                 await AsyncStorage.setItem('fcmToken', token);
                 Logger.log('🆕 Novo token FCM obtido:', token);
 
-                // Atualizar token no backend
-                await this.updateTokenOnBackend(token);
+                // Registrar no backend em background. Push não deve segurar o bootstrap do app.
+                this.scheduleTokenBackendUpdate(token);
             } else {
                 // ✅ CRÍTICO: Token null é aceitável - app funciona sem push
                 Logger.warn('⚠️ Token FCM não disponível. App continuará funcionando normalmente.');
@@ -125,6 +146,41 @@ class FCMNotificationService {
         }
     }
 
+    scheduleTokenBackendUpdate(token) {
+        if (!token) {
+            return null;
+        }
+
+        if (this.backendTokenRegistrationPromise) {
+            return this.backendTokenRegistrationPromise;
+        }
+
+        this.backendTokenRegistrationPromise = this.updateTokenOnBackend(token)
+            .catch((error) => {
+                Logger.warn('⚠️ Registro FCM em background falhou:', error?.message || error);
+                return false;
+            })
+            .finally(() => {
+                this.backendTokenRegistrationPromise = null;
+            });
+
+        return this.backendTokenRegistrationPromise;
+    }
+
+    ensureWebSocketConnectListener(wsManager) {
+        if (this.wsConnectListener) {
+            return;
+        }
+
+        this.wsConnectListener = () => {
+            if (this.pendingTokenRegistration) {
+                Logger.log('🔄 WebSocket conectado, registrando token FCM pendente...');
+                this.registerPendingToken();
+            }
+        };
+        wsManager.on('connect', this.wsConnectListener);
+    }
+
     // Atualizar token no backend
     async updateTokenOnBackend(token) {
         try {
@@ -135,9 +191,6 @@ class FCMNotificationService {
             }
 
             Logger.log('📤 Enviando token FCM para backend:', token);
-
-            // Aguardar um pouco para o store estar pronto
-            await new Promise(resolve => setTimeout(resolve, 2000));
 
             // Obter userId do Redux store ou TestUserService
             const userState = store.getState().auth;
@@ -158,52 +211,25 @@ class FCMNotificationService {
 
             Logger.log('👤 Estado do usuário para FCM:', { userId, userType });
 
+            const registrationKey = `${userId || 'anonymous'}:${userType}:${token}`;
+            if (registrationKey === this.lastBackendTokenRegistrationKey) {
+                Logger.log('ℹ️ Token FCM já registrado para o usuário atual; pulando duplicidade.');
+                return;
+            }
+
             // Registrar token via WebSocket (método correto)
             try {
                 const wsManager = WebSocketManager.getInstance();
 
                 // Se não estiver conectado, tentar conectar
                 if (!wsManager.isConnected()) {
-                    Logger.log('⏳ WebSocket não conectado, tentando conectar...');
-                    try {
-                        await wsManager.connect();
-                    } catch (connectError) {
-                        Logger.warn('⚠️ Erro ao conectar WebSocket:', connectError.message);
-                    }
-                }
-
-                // Aguardar conexão WebSocket se necessário (com timeout maior)
-                if (!wsManager.isConnected()) {
-                    Logger.log('⏳ Aguardando conexão WebSocket...');
-                    // Salvar token pendente para registrar quando conectar
+                    Logger.log('⏳ WebSocket não conectado, registrando token FCM quando conectar...');
                     this.pendingTokenRegistration = { token, userId, userType };
-
-                    // Configurar listener para quando WebSocket conectar (apenas uma vez)
-                    if (!this.wsConnectListener) {
-                        this.wsConnectListener = () => {
-                            if (this.pendingTokenRegistration) {
-                                Logger.log('🔄 WebSocket conectado, registrando token FCM pendente...');
-                                this.registerPendingToken();
-                            }
-                        };
-                        wsManager.on('connect', this.wsConnectListener);
-                    }
-
-                    // Aguardar até 15 segundos
-                    await new Promise((resolve) => {
-                        const checkConnection = setInterval(() => {
-                            if (wsManager.isConnected()) {
-                                clearInterval(checkConnection);
-                                resolve();
-                            }
-                        }, 500);
-
-                        // Timeout de 15 segundos
-                        setTimeout(() => {
-                            clearInterval(checkConnection);
-                            resolve();
-                        }, 15000);
+                    this.ensureWebSocketConnectListener(wsManager);
+                    void Promise.resolve(wsManager.connect()).catch((connectError) => {
+                        Logger.warn('⚠️ Erro ao conectar WebSocket para FCM:', connectError?.message || connectError);
                     });
+                    return;
                 }
 
                 if (wsManager.isConnected()) {
@@ -217,21 +243,12 @@ class FCMNotificationService {
 
                     Logger.log('✅ Token FCM registrado no backend via WebSocket');
                     this.pendingTokenRegistration = null; // Limpar pendência
+                    this.lastBackendTokenRegistrationKey = registrationKey;
                 } else {
                     Logger.warn('⚠️ WebSocket não conectado após espera, token FCM será registrado quando a conexão for estabelecida');
                     // Salvar token pendente
                     this.pendingTokenRegistration = { token, userId, userType };
-
-                    // Configurar listener se ainda não foi configurado
-                    if (!this.wsConnectListener) {
-                        this.wsConnectListener = () => {
-                            if (this.pendingTokenRegistration) {
-                                Logger.log('🔄 WebSocket conectado, registrando token FCM pendente...');
-                                this.registerPendingToken();
-                            }
-                        };
-                        wsManager.on('connect', this.wsConnectListener);
-                    }
+                    this.ensureWebSocketConnectListener(wsManager);
                 }
             } catch (wsError) {
                 Logger.error('❌ Erro ao registrar token FCM via WebSocket:', wsError);
@@ -246,7 +263,13 @@ class FCMNotificationService {
             // ✅ CRÍTICO: Não tentar novamente se token for null
             if (token) {
                 // Tentar novamente em 5 segundos apenas se token válido
-                setTimeout(() => this.updateTokenOnBackend(token), 5000);
+                if (this.retryTokenUpdateTimeout) {
+                    clearTimeout(this.retryTokenUpdateTimeout);
+                }
+                this.retryTokenUpdateTimeout = setTimeout(() => {
+                    this.retryTokenUpdateTimeout = null;
+                    this.updateTokenOnBackend(token);
+                }, 5000);
             }
         }
     }
@@ -254,6 +277,8 @@ class FCMNotificationService {
     // Configurar handlers de notificação
     setupNotificationHandlers() {
         try {
+            this.clearMessagingSubscriptions();
+
             // Handler para notificações em primeiro plano
             const unsubscribeForeground = messaging().onMessage(async remoteMessage => {
                 Logger.log('📱 Notificação recebida em primeiro plano:', remoteMessage);
@@ -286,6 +311,16 @@ class FCMNotificationService {
 
         } catch (error) {
             Logger.error('❌ Erro ao configurar handlers de notificação:', error);
+        }
+    }
+
+    clearMessagingSubscriptions() {
+        for (const type of ['foreground', 'opened']) {
+            const unsubscribe = this.notificationHandlers.get(type);
+            if (typeof unsubscribe === 'function') {
+                unsubscribe();
+            }
+            this.notificationHandlers.delete(type);
         }
     }
 
@@ -580,6 +615,11 @@ class FCMNotificationService {
     // Configurar renovação periódica do token
     setupTokenRenewal() {
         try {
+            if (this.tokenRenewalInterval) {
+                clearInterval(this.tokenRenewalInterval);
+                this.tokenRenewalInterval = null;
+            }
+
             // Renovar token a cada 30 minutos
             this.tokenRenewalInterval = setInterval(async () => {
                 try {
@@ -590,7 +630,7 @@ class FCMNotificationService {
                         Logger.log('🆕 Novo token FCM detectado:', newToken);
                         this.fcmToken = newToken;
                         await AsyncStorage.setItem('fcmToken', newToken);
-                        await this.updateTokenOnBackend(newToken);
+                        await this.scheduleTokenBackendUpdate(newToken);
                     }
                 } catch (error) {
                     Logger.error('❌ Erro ao renovar token FCM:', error);
@@ -624,6 +664,7 @@ class FCMNotificationService {
 
                 Logger.log('✅ Token FCM pendente registrado no backend via WebSocket');
                 this.pendingTokenRegistration = null;
+                this.lastBackendTokenRegistrationKey = `${userId || 'anonymous'}:${userType}:${token}`;
             }
         } catch (error) {
             Logger.error('❌ Erro ao registrar token FCM pendente:', error);
@@ -648,7 +689,14 @@ class FCMNotificationService {
                 this.tokenRenewalInterval = null;
             }
 
+            if (this.retryTokenUpdateTimeout) {
+                clearTimeout(this.retryTokenUpdateTimeout);
+                this.retryTokenUpdateTimeout = null;
+            }
+
             this.pendingTokenRegistration = null;
+            this.backendTokenRegistrationPromise = null;
+            this.lastBackendTokenRegistrationKey = null;
             this.isInitialized = false;
             Logger.log('✅ FCM Notification Service destruído');
         } catch (error) {

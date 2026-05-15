@@ -30,6 +30,10 @@ import AccessKey from '../other/AccessKey';
 import { getUserId, getUserData, saveUserId, saveUserData, clearAuthData } from '../utils/authUtils';
 import { configureAuthPersistence, checkPersistedAuth, saveAuthSession, clearAuthSession } from './authPersistence';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import {
+  buildIncompleteOnboardingProfile,
+  persistPhoneValidatedOnboardingSession
+} from '../../utils/onboardingSessionState';
 
 export const registerUser = (userData) => async (dispatch) => {
   const { auth, singleUserRef } = firebase;
@@ -413,13 +417,19 @@ export const fetchUser = () => async (dispatch) => {
         userLoaded = true;
         return;
       } else {
-        // Se não existe no banco, fazer logout e bloquear acesso
-        await auth.signOut();
-        await AsyncStorage.removeItem('@user_data');
+        // Auth existe, mas o perfil ainda não foi criado. Esse é o primeiro acesso
+        // pós-OTP e deve continuar no onboarding em vez de encerrar a sessão.
+        const onboardingProfile = buildIncompleteOnboardingProfile(currentUser);
+        await persistPhoneValidatedOnboardingSession(onboardingProfile);
+        await AsyncStorage.multiSet([
+          ['@auth_uid', currentUser.uid],
+          ['@user_data', JSON.stringify(onboardingProfile)]
+        ]);
         dispatch({
-          type: FETCH_USER_FAILED,
-          payload: { code: 'auth/user-not-in-db', message: 'Usuário não encontrado no banco de dados. Faça o cadastro novamente.' }
+          type: FETCH_USER_SUCCESS,
+          payload: onboardingProfile
         });
+        userLoaded = true;
         return;
       }
     } catch (error) {

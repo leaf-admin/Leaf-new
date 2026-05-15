@@ -29,6 +29,7 @@ import { SkeletonLoader, LoadingSpinner } from '../components/LoadingStates';
 import { useResponsiveLayout } from '../components/ResponsiveLayout';
 import { signOff } from '../services/runtime/profileActionsBridge';
 import robotaxiPrototypeTokens from '../components/design-system/robotaxiPrototypeTokens';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 const { color, typography } = robotaxiPrototypeTokens;
 
@@ -37,6 +38,7 @@ const { width, height } = Dimensions.get('window');
 export default function ProfileScreen({ navigation }) {
     const auth = useSelector(state => state.auth);
     const dispatch = useDispatch();
+    const insets = useSafeAreaInsets();
     const [isDarkMode, setIsDarkMode] = useState(false);
     
     // Loading states
@@ -364,7 +366,7 @@ export default function ProfileScreen({ navigation }) {
 
     // Header com botão voltar e título
     const Header = () => (
-        <View style={[styles.header, { backgroundColor: isDarkMode ? '#1a1a1a' : '#fff' }]}>
+        <View style={[styles.header, { paddingTop: insets.top + 10, backgroundColor: isDarkMode ? '#1a1a1a' : '#fff' }]}>
             <TouchableOpacity 
                 style={[
                     styles.headerButton, 
@@ -435,7 +437,11 @@ export default function ProfileScreen({ navigation }) {
                     <SkeletonLoader width="100%" height={80} style={styles.skeletonCard} />
                 </View>
             ) : (
-                <ScrollView style={[styles.content, { backgroundColor: isDarkMode ? '#1a1a1a' : '#fff' }]} showsVerticalScrollIndicator={false}>
+                <ScrollView
+                    style={[styles.content, { backgroundColor: isDarkMode ? '#1a1a1a' : '#fff' }]}
+                    contentContainerStyle={{ paddingBottom: insets.bottom + 24 }}
+                    showsVerticalScrollIndicator={false}
+                >
                     {/* Seção do perfil */}
                     <View style={styles.profileSection}>
                         <View style={styles.profileImageContainer}>
@@ -809,6 +815,20 @@ export default function ProfileScreen({ navigation }) {
                                 </Text>
                             </View>
 
+                            <View style={[styles.withdrawSubscriptionInfo, { backgroundColor: isDarkMode ? '#243126' : '#EEF8F0' }]}>
+                                <Text style={[cardTypography.subtitle, styles.withdrawSubscriptionLabel, { color: isDarkMode ? '#BFE6C7' : '#1F6B37' }]}>
+                                    Taxa diária
+                                </Text>
+                                <View style={styles.withdrawSubscriptionValues}>
+                                    <Text style={[styles.withdrawSubscriptionStruck, { color: isDarkMode ? '#9DB2A2' : '#6E7D72' }]}>
+                                        R$ 9,90
+                                    </Text>
+                                    <Text style={[styles.withdrawSubscriptionFree, { color: isDarkMode ? '#DDF7E4' : MAIN_COLOR }]}>
+                                        R$ 0,00 neste momento
+                                    </Text>
+                                </View>
+                            </View>
+
                             {/* Botão Continuar */}
                             <TouchableOpacity
                                 style={[
@@ -879,6 +899,20 @@ export default function ProfileScreen({ navigation }) {
                                         </Text>
                                     </View>
                                 )}
+
+                                <View style={styles.confirmRow}>
+                                    <Text style={[cardTypography.subtitle, styles.confirmRowLabel, { color: isDarkMode ? '#ccc' : colors.GRAY }]}>
+                                        Taxa diária:
+                                    </Text>
+                                    <View style={styles.confirmSubscriptionValues}>
+                                        <Text style={[styles.confirmSubscriptionStruck, { color: isDarkMode ? '#999' : colors.GRAY }]}>
+                                            R$ 9,90
+                                        </Text>
+                                        <Text style={[cardTypography.title, styles.confirmRowValue, { color: MAIN_COLOR }]}>
+                                            R$ 0,00
+                                        </Text>
+                                    </View>
+                                </View>
                                 
                                 <View style={[styles.confirmRow, styles.confirmRowTotal]}>
                                     <Text style={[cardTypography.subtitle, styles.confirmRowLabel, { color: isDarkMode ? '#ccc' : colors.GRAY }]}>
@@ -1382,6 +1416,30 @@ const styles = StyleSheet.create({
         marginLeft: 8,
         flex: 1,
     },
+    withdrawSubscriptionInfo: {
+        padding: 12,
+        borderRadius: 8,
+        marginBottom: 24,
+    },
+    withdrawSubscriptionLabel: {
+        fontSize: 12,
+        fontFamily: fonts.Medium,
+        marginBottom: 4,
+    },
+    withdrawSubscriptionValues: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 8,
+    },
+    withdrawSubscriptionStruck: {
+        fontSize: 13,
+        fontFamily: fonts.Medium,
+        textDecorationLine: 'line-through',
+    },
+    withdrawSubscriptionFree: {
+        fontSize: 14,
+        fontFamily: fonts.Bold,
+    },
     withdrawContinueButton: {
         backgroundColor: MAIN_COLOR,
         paddingVertical: 16,
@@ -1409,6 +1467,16 @@ const styles = StyleSheet.create({
         padding: 16,
         borderRadius: 12,
         marginBottom: 16,
+    },
+    confirmSubscriptionValues: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 8,
+    },
+    confirmSubscriptionStruck: {
+        fontSize: 13,
+        fontFamily: fonts.Medium,
+        textDecorationLine: 'line-through',
     },
     confirmRow: {
         flexDirection: 'row',

@@ -9,7 +9,53 @@ import Logger from '../utils/Logger';
 import faceDetectionService from './FaceDetectionService';
 import { getSelfHostedApiUrl } from '../config/ApiConfig';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import auth from '@react-native-firebase/auth';
 import * as ImageManipulator from 'expo-image-manipulator';
+
+const TEST_MODE_STORAGE_KEY = '@test_mode';
+const QA_SOCKET_ID_TOKEN_STORAGE_KEY = '@qa_socket_id_token';
+
+async function resolveKycAuthToken({ forceRefresh = false } = {}) {
+  try {
+    const currentUser = auth().currentUser;
+    if (currentUser) {
+      return await currentUser.getIdToken(Boolean(forceRefresh));
+    }
+  } catch (tokenError) {
+    Logger.warn('⚠️ [KYC] Falha ao obter token Firebase:', tokenError);
+  }
+
+  try {
+    const [testModeRaw, qaSocketIdTokenRaw] = await Promise.all([
+      AsyncStorage.getItem(TEST_MODE_STORAGE_KEY),
+      AsyncStorage.getItem(QA_SOCKET_ID_TOKEN_STORAGE_KEY)
+    ]);
+    const qaModeEnabled = String(testModeRaw || '').trim().toLowerCase() === 'true';
+    const qaSocketIdToken = String(qaSocketIdTokenRaw || '').trim();
+    if (qaModeEnabled && qaSocketIdToken) {
+      return qaSocketIdToken;
+    }
+  } catch (qaTokenError) {
+    Logger.warn('⚠️ [KYC] Falha ao recuperar token QA persistido:', qaTokenError);
+  }
+
+  return null;
+}
+
+async function buildKycAuthHeaders({ json = true } = {}) {
+  const headers = {
+    Accept: 'application/json'
+  };
+  if (json) {
+    headers['Content-Type'] = 'application/json';
+  }
+
+  const token = await resolveKycAuthToken();
+  if (token) {
+    headers.Authorization = `Bearer ${token}`;
+  }
+  return headers;
+}
 
 class KYCService {
   getAwsProviderName() {
@@ -19,7 +65,10 @@ class KYCService {
   async getLivenessProvider() {
     try {
       const backendUrl = getSelfHostedApiUrl('/api/kyc/liveness/provider');
-      const response = await fetch(backendUrl, { method: 'GET' });
+      const response = await fetch(backendUrl, {
+        method: 'GET',
+        headers: await buildKycAuthHeaders({ json: false })
+      });
       const result = await response.json().catch(() => ({}));
       if (!response.ok) {
         throw new Error(result.error || `Erro ${response.status}: ${response.statusText}`);
@@ -70,9 +119,7 @@ class KYCService {
       const backendUrl = getSelfHostedApiUrl('/api/kyc/liveness/aws/session');
       const response = await fetch(backendUrl, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers: await buildKycAuthHeaders(),
         body: JSON.stringify({
           userId: driverId,
           challengeId: options?.challengeId || null,
@@ -98,12 +145,43 @@ class KYCService {
     }
   }
 
+  async getAwsLivenessCredentials(driverId) {
+    try {
+      const backendUrl = getSelfHostedApiUrl(
+        `/api/kyc/liveness/aws/credentials?userId=${encodeURIComponent(driverId)}`
+      );
+      const response = await fetch(backendUrl, {
+        method: 'GET',
+        headers: await buildKycAuthHeaders({ json: false })
+      });
+      const result = await response.json().catch(() => ({}));
+
+      if (!response.ok) {
+        throw new Error(result.error || `Erro ${response.status}: ${response.statusText}`);
+      }
+
+      return {
+        success: true,
+        data: result
+      };
+    } catch (error) {
+      Logger.error('❌ Erro ao buscar credenciais AWS liveness:', error);
+      return {
+        success: false,
+        error: error.message
+      };
+    }
+  }
+
   async getAwsLivenessSessionResult(driverId, sessionId) {
     try {
       const backendUrl = getSelfHostedApiUrl(
         `/api/kyc/liveness/aws/session/${sessionId}?userId=${encodeURIComponent(driverId)}`
       );
-      const response = await fetch(backendUrl, { method: 'GET' });
+      const response = await fetch(backendUrl, {
+        method: 'GET',
+        headers: await buildKycAuthHeaders({ json: false })
+      });
       const result = await response.json().catch(() => ({}));
 
       if (!response.ok) {
@@ -200,7 +278,10 @@ class KYCService {
   async getVerificationStatus(driverId, maxAgeHours = 24) {
     try {
       const backendUrl = getSelfHostedApiUrl(`/api/kyc/verification-status/${driverId}?maxAgeHours=${maxAgeHours}`);
-      const response = await fetch(backendUrl, { method: 'GET' });
+      const response = await fetch(backendUrl, {
+        method: 'GET',
+        headers: await buildKycAuthHeaders({ json: false })
+      });
       const result = await response.json().catch(() => ({}));
 
       if (!response.ok) {
@@ -255,9 +336,7 @@ class KYCService {
       const backendUrl = getSelfHostedApiUrl('/api/drivers/kyc/onboarding');
       const response = await fetch(backendUrl, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers: await buildKycAuthHeaders(),
         body: JSON.stringify({
           onboardingMode: 'device_signature_v1',
           driverId,
@@ -328,7 +407,10 @@ class KYCService {
 
         if (!anchorSignature) {
           const anchorUrl = getSelfHostedApiUrl(`/api/kyc/device-anchor/${driverId}`);
-          const anchorResp = await fetch(anchorUrl, { method: 'GET' });
+          const anchorResp = await fetch(anchorUrl, {
+            method: 'GET',
+            headers: await buildKycAuthHeaders({ json: false })
+          });
           const anchorData = await anchorResp.json().catch(() => ({}));
           if (anchorResp.ok && anchorData?.anchorSignature) {
             anchorSignature = anchorData.anchorSignature;
@@ -351,9 +433,7 @@ class KYCService {
       const backendUrl = getSelfHostedApiUrl('/api/kyc/verify-driver/device');
       const response = await fetch(backendUrl, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers: await buildKycAuthHeaders(),
         body: JSON.stringify({
           userId: driverId,
           challengeId,

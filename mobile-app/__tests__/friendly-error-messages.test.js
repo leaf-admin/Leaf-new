@@ -17,6 +17,19 @@ describe('friendlyErrorMessages', () => {
     expect(msg).toBe('A conexao demorou mais que o esperado. Tente novamente.');
   });
 
+  test('does not classify server resync timeout as device internet outage', () => {
+    const msg = toUserFriendlyMessage(
+      'A conexao demorou mais que o esperado. Tente novamente.',
+      { context: 'websocket' }
+    );
+    expect(msg).toBe('A conexao demorou mais que o esperado. Tente novamente.');
+  });
+
+  test('maps websocket disconnection to realtime instability message', () => {
+    const msg = toUserFriendlyMessage('WebSocket nao conectado', { context: 'websocket' });
+    expect(msg).toBe('Estamos com instabilidade de conexao. Tente novamente em instantes.');
+  });
+
   test('uses document upload fallback on empty error state', () => {
     const msg = toUserFriendlyMessage(null, { context: 'document_upload' });
     expect(msg).toBe('Nao foi possivel processar o documento enviado. Tente novamente.');

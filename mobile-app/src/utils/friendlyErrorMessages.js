@@ -40,9 +40,9 @@ const CONTEXT_FALLBACKS = {
 };
 
 const PATTERN_RULES = [
-  [/network request failed|failed to fetch|network error|internet|conexao|connection/i, FRIENDLY_BY_CODE.NETWORK_ERROR],
-  [/timeout|timed out|tempo limite/i, FRIENDLY_BY_CODE.ECONNABORTED],
-  [/socket|websocket|not connected|nao conectado|desconectado/i, 'Estamos com instabilidade de conexao. Tente novamente em instantes.'],
+  [/timeout|timed out|tempo limite|demorou mais que o esperado/i, FRIENDLY_BY_CODE.ECONNABORTED],
+  [/socket|websocket|not connected|nao conectado|desconectado|io server disconnect|active.?ride.?sync|conexao com o servidor/i, 'Estamos com instabilidade de conexao. Tente novamente em instantes.'],
+  [/network request failed|failed to fetch|network error|internet|offline|sem conexao com a internet/i, FRIENDLY_BY_CODE.NETWORK_ERROR],
   [/failed|falha|erro interno|exception|unhandled/i, 'Nao foi possivel concluir esta acao agora. Tente novamente.'],
   [/booking_timeout|create booking timeout/i, FRIENDLY_BY_CODE.BOOKING_TIMEOUT],
   [/no[_\s-]?drivers|nenhum motorista disponivel/i, FRIENDLY_BY_CODE.NO_DRIVERS_AVAILABLE],
