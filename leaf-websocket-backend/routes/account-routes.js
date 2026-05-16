@@ -340,6 +340,15 @@ async function mirrorProfileToRealtimeDB(userId, profile) {
   }
 }
 
+async function removeRealtimeProfile(userId) {
+  try {
+    const db = admin.database();
+    await db.ref(`users/${userId}`).remove();
+  } catch (error) {
+    logger.warn(`Falha ao remover perfil legado do RTDB para ${userId}: ${error.message}`);
+  }
+}
+
 async function resolveAccountProfile(userId, tokenClaims) {
   const userRef = admin.firestore().collection('users').doc(userId);
   const userDoc = await userRef.get();
@@ -501,16 +510,20 @@ async function processAccountDeletion(req, res, options = {}) {
 
     const deletionReason = String(reason || DEFAULT_DELETION_REASON).trim() || DEFAULT_DELETION_REASON;
 
-    const userDoc = await admin.firestore().collection('users').doc(userId).get();
-
-    if (!userDoc.exists) {
-      return res.status(404).json({
-        success: false,
-        message: 'Usuário não encontrado.'
-      });
-    }
-
-    const userData = userDoc.data() || {};
+    const accountProfileResult = await resolveAccountProfile(userId, req.user);
+    const storedUserDoc = await admin.firestore().collection('users').doc(userId).get();
+    const storedUserData = storedUserDoc.exists ? storedUserDoc.data() || {} : {};
+    const resolvedUserData = accountProfileResult.profile || {};
+    const mergedUserData = {
+      ...resolvedUserData,
+      ...storedUserData
+    };
+    const userData = Object.keys(mergedUserData).length > 0 ? mergedUserData : {
+      uid: userId,
+      phone: req.user.phone_number || '',
+      phoneNumber: req.user.phone_number || '',
+      email: req.user.email || ''
+    };
 
     // Torna o endpoint compatível com autenticação por OTP (sem senha no app).
     // Se telefone for enviado, validamos contra o cadastro para evitar erro de identificação.
@@ -567,6 +580,7 @@ async function processAccountDeletion(req, res, options = {}) {
           }),
           { merge: true }
         );
+        await removeRealtimeProfile(userId);
 
         if (removeFirebaseAuthUserEnabled) {
           try {
@@ -595,13 +609,14 @@ async function processAccountDeletion(req, res, options = {}) {
         });
       }
 
-      await admin.firestore().collection('users').doc(userId).update({
+      await admin.firestore().collection('users').doc(userId).set({
         status: 'deletion_pending',
+        accountDisabled: true,
         deletionRequestedAt: admin.firestore.FieldValue.serverTimestamp(),
         deletionReason,
         deletionSource: source || 'mobile-app',
         deletionAdditionalInfo: additionalInfo || ''
-      });
+      }, { merge: true });
 
       await deletionLogRef.update({
         status: 'queued',
@@ -621,9 +636,9 @@ async function processAccountDeletion(req, res, options = {}) {
       logger.error(`Erro ao excluir conta do usuário ${userId}:`, deleteError);
 
       try {
-        await admin.firestore().collection('users').doc(userId).update({
+        await admin.firestore().collection('users').doc(userId).set({
           status: userData.status || 'active'
-        });
+        }, { merge: true });
       } catch (revertError) {
         logger.error(`Erro ao reverter status da conta ${userId}:`, revertError);
       }

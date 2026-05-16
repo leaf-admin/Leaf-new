@@ -1,5 +1,5 @@
 import React, { useCallback, useMemo, useState } from 'react';
-import { StatusBar, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';
+import { Alert, StatusBar, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useSelector } from 'react-redux';
 import { Ionicons } from '@expo/vector-icons';
@@ -16,6 +16,9 @@ import {
 import robotaxiPrototypeTokens from '../../components/design-system/robotaxiPrototypeTokens';
 import { usePrototypeMapOcclusion } from './prototypeMapOcclusion';
 import { usePrototypeRideRuntime } from './prototypeRideRuntime';
+import { useAccountDeletionFlow } from '../../hooks/useAccountDeletionFlow';
+import { useAccountSessionReset } from '../../hooks/useAccountSessionReset';
+import Logger from '../../utils/Logger';
 import {
   resolvePrototypeProfileEmail,
   resolvePrototypeProfileName,
@@ -38,6 +41,18 @@ const DRIVER_ACTIONS = Object.freeze([
   { id: 'earnings', label: 'Ganhos', icon: 'wallet-outline', route: 'EarningsReport' },
   { id: 'activation', label: 'Ativacao do motorista', icon: 'shield-checkmark-outline', route: 'RobotaxiPrototypeDriverActivation' },
 ]);
+
+const ACCOUNT_DELETION_ACTION = Object.freeze({
+  id: 'delete-account',
+  label: 'Excluir conta',
+  icon: 'trash-outline',
+});
+
+const ACCOUNT_LOGOUT_ACTION = Object.freeze({
+  id: 'logout',
+  label: 'Sair da conta',
+  icon: 'log-out-outline',
+});
 
 export default function RobotaxiProfileScreen({ navigation, route }) {
   const authProfile = useSelector(state => state?.auth?.profile);
@@ -64,6 +79,17 @@ export default function RobotaxiProfileScreen({ navigation, route }) {
     'Email nao informado';
   const preferenceLabel = String(riderProfile?.preference || '').trim() || (isDriverRole ? 'Conta operacional pronta para atender' : 'Sem preferencia cadastrada');
   const accountStatus = isDriverRole ? (driverCanGoOnline ? 'Motorista habilitado' : 'Ativacao pendente') : 'Conta de passageiro';
+  const deletionProfile = authProfile || riderProfile;
+  const { promptAccountDeletion } = useAccountDeletionFlow({
+    navigation,
+    profile: deletionProfile,
+    source: 'mobile-app-profile-screen',
+    additionalInfo: 'Solicitação enviada pela tela de perfil do app',
+  });
+  const { resetSessionToStart } = useAccountSessionReset({
+    navigation,
+    profile: deletionProfile,
+  });
 
   usePrototypeMapOcclusion({
     routeKey: route?.key,
@@ -97,8 +123,38 @@ export default function RobotaxiProfileScreen({ navigation, route }) {
     return baseRows;
   }, [accountStatus, emailLabel, isDriverRole, phoneLabel, preferenceLabel, profileName, profileRating]);
 
+  const promptLogout = useCallback(() => {
+    Alert.alert(
+      'Sair da conta',
+      'Tem certeza que deseja sair da sua conta Leaf?',
+      [
+        { text: 'Cancelar', style: 'cancel' },
+        {
+          text: 'Sair',
+          style: 'destructive',
+          onPress: () => {
+            resetSessionToStart().catch((error) => {
+              Logger.error('Erro ao sair da conta pelo perfil:', error);
+              Alert.alert('Não foi possível sair', 'Tente novamente em alguns instantes.');
+            });
+          },
+        },
+      ],
+    );
+  }, [resetSessionToStart]);
+
   const handleActionPress = useCallback(
     item => {
+      if (item?.id === ACCOUNT_LOGOUT_ACTION.id) {
+        promptLogout();
+        return;
+      }
+
+      if (item?.id === ACCOUNT_DELETION_ACTION.id) {
+        promptAccountDeletion();
+        return;
+      }
+
       if (!item?.route) {
         return;
       }
@@ -112,9 +168,9 @@ export default function RobotaxiProfileScreen({ navigation, route }) {
         return;
       }
 
-      navigation.replace(item.route);
+      navigation.replace(item.route, item.params);
     },
-    [navigation]
+    [navigation, promptAccountDeletion, promptLogout]
   );
 
   return (
@@ -152,14 +208,29 @@ export default function RobotaxiProfileScreen({ navigation, route }) {
             </View>
 
             <PrototypeMenuSection title="Conta">
-              {infoRows.map((row, index) => (
+              {infoRows.map((row) => (
                 <PrototypeMenuInfoRow
                   key={row.label}
                   label={row.label}
                   value={row.value}
-                  last={index === infoRows.length - 1}
+                  last={false}
                 />
               ))}
+              <PrototypeMenuRow
+                icon={ACCOUNT_LOGOUT_ACTION.icon}
+                title={ACCOUNT_LOGOUT_ACTION.label}
+                onPress={() => handleActionPress(ACCOUNT_LOGOUT_ACTION)}
+                testID="profile-logout-shortcut"
+                accessibilityLabel="Sair da conta"
+              />
+              <PrototypeMenuRow
+                icon={ACCOUNT_DELETION_ACTION.icon}
+                title={ACCOUNT_DELETION_ACTION.label}
+                last
+                onPress={() => handleActionPress(ACCOUNT_DELETION_ACTION)}
+                testID="profile-account-deletion-shortcut"
+                accessibilityLabel="Excluir conta"
+              />
             </PrototypeMenuSection>
 
             <PrototypeMenuSection title="Acessos rapidos" style={styles.shortcutsSection}>

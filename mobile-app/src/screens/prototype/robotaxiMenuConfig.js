@@ -1,13 +1,13 @@
 const COMMON_ITEMS = [
   {
     key: 'privacy-account-deletion',
-    title: 'Privacidade e exclusão da conta',
+    title: 'Privacidade',
     icon: 'shield-checkmark-outline',
     route: 'PrivacyPolicy',
     detailRoute: 'PrivacyPolicy',
     openDirect: true,
     section: 'support',
-    subtitle: 'Dados, privacidade e exclusão da conta'
+    subtitle: 'Dados e preferências da conta'
   },
   {
     key: 'messages',
