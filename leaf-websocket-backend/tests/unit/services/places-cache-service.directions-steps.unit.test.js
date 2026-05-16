@@ -19,10 +19,18 @@ jest.mock('../../../utils/logger', () => ({
 describe('places-cache-service directions steps', () => {
   const originalFetch = global.fetch;
   const originalApiKey = process.env.GOOGLE_MAPS_API_KEY;
+  const originalPlacesDirectionsTtl = process.env.PLACES_DIRECTIONS_CACHE_TTL_SECONDS;
+  const originalDirectionsTtl = process.env.DIRECTIONS_CACHE_TTL_SECONDS;
+  const originalPlacesDirectionsTrafficTtl = process.env.PLACES_DIRECTIONS_TRAFFIC_CACHE_TTL_SECONDS;
+  const originalDirectionsTrafficTtl = process.env.DIRECTIONS_TRAFFIC_CACHE_TTL_SECONDS;
 
   beforeEach(() => {
     jest.clearAllMocks();
     process.env.GOOGLE_MAPS_API_KEY = 'test-google-key';
+    delete process.env.PLACES_DIRECTIONS_CACHE_TTL_SECONDS;
+    delete process.env.DIRECTIONS_CACHE_TTL_SECONDS;
+    delete process.env.PLACES_DIRECTIONS_TRAFFIC_CACHE_TTL_SECONDS;
+    delete process.env.DIRECTIONS_TRAFFIC_CACHE_TTL_SECONDS;
     mockRedisConnection.get.mockResolvedValue(null);
     mockRedisConnection.setex.mockResolvedValue('OK');
     mockRedisConnection.ping.mockResolvedValue('PONG');
@@ -34,6 +42,26 @@ describe('places-cache-service directions steps', () => {
       delete process.env.GOOGLE_MAPS_API_KEY;
     } else {
       process.env.GOOGLE_MAPS_API_KEY = originalApiKey;
+    }
+    if (originalPlacesDirectionsTtl === undefined) {
+      delete process.env.PLACES_DIRECTIONS_CACHE_TTL_SECONDS;
+    } else {
+      process.env.PLACES_DIRECTIONS_CACHE_TTL_SECONDS = originalPlacesDirectionsTtl;
+    }
+    if (originalDirectionsTtl === undefined) {
+      delete process.env.DIRECTIONS_CACHE_TTL_SECONDS;
+    } else {
+      process.env.DIRECTIONS_CACHE_TTL_SECONDS = originalDirectionsTtl;
+    }
+    if (originalPlacesDirectionsTrafficTtl === undefined) {
+      delete process.env.PLACES_DIRECTIONS_TRAFFIC_CACHE_TTL_SECONDS;
+    } else {
+      process.env.PLACES_DIRECTIONS_TRAFFIC_CACHE_TTL_SECONDS = originalPlacesDirectionsTrafficTtl;
+    }
+    if (originalDirectionsTrafficTtl === undefined) {
+      delete process.env.DIRECTIONS_TRAFFIC_CACHE_TTL_SECONDS;
+    } else {
+      process.env.DIRECTIONS_TRAFFIC_CACHE_TTL_SECONDS = originalDirectionsTrafficTtl;
     }
   });
 
@@ -156,6 +184,71 @@ describe('places-cache-service directions steps', () => {
       }),
     );
     expect(global.fetch).not.toHaveBeenCalled();
+  });
+
+  it('bypasses directions cache when forceFresh is requested and stores with short traffic TTL', async () => {
+    const cachedPayload = {
+      cached: false,
+      routeCount: 1,
+      waypointsCount: 0,
+      data: {
+        distance_in_km: 1.4,
+        time_in_secs: 180,
+        polylinePoints: 'cached_overview',
+        legs: [],
+        steps: [],
+      },
+    };
+    const placesCacheService = loadService();
+    placesCacheService.googleApiKey = 'test-google-key';
+    placesCacheService.isInitialized = true;
+    mockRedisConnection.get.mockResolvedValue(JSON.stringify(cachedPayload));
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        status: 'OK',
+        routes: [
+          {
+            overview_polyline: { points: 'fresh_overview' },
+            legs: [
+              {
+                distance: { value: 2500 },
+                duration: { value: 420 },
+                duration_in_traffic: { value: 480 },
+                start_location: { lat: -22.9712, lng: -43.1822 },
+                end_location: { lat: -22.9673, lng: -43.179 },
+                start_address: 'Origem',
+                end_address: 'Destino',
+                steps: [],
+              },
+            ],
+          },
+        ],
+      }),
+    });
+
+    const result = await placesCacheService.fetchDirectionsRoute({
+      startLoc: '-22.9712,-43.1822',
+      destLoc: '-22.9673,-43.1790',
+      trafficEnabled: true,
+      forceFresh: true,
+    });
+
+    expect(result.cached).toBe(false);
+    expect(result.data.polylinePoints).toBe('fresh_overview');
+    expect(result.cachePolicy).toEqual({
+      forceFresh: true,
+      ttlSeconds: 90,
+    });
+    expect(result.stats.redisReads).toBe(0);
+    expect(result.stats.googleRequests).toBe(1);
+    expect(mockRedisConnection.get).not.toHaveBeenCalled();
+    expect(mockRedisConnection.setex).toHaveBeenCalledWith(
+      expect.stringContaining('maps:directions:'),
+      90,
+      expect.stringContaining('fresh_overview'),
+    );
   });
 
   it('returns cached place details by place_id without calling Google', async () => {

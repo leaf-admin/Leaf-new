@@ -14,9 +14,21 @@ const redisPool = require('../utils/redis-pool');
 const { normalizeQuery, isValidQuery } = require('../utils/places-normalizer');
 const GeoHashUtils = require('../utils/geohash-utils');
 
-const DIRECTIONS_CACHE_TTL_SECONDS = Number.parseInt(
-  process.env.PLACES_DIRECTIONS_CACHE_TTL_SECONDS || process.env.DIRECTIONS_CACHE_TTL_SECONDS || '900',
-  10,
+function parseCacheTtlSeconds(rawValue, fallbackSeconds) {
+  const parsed = Number.parseInt(rawValue, 10);
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    return fallbackSeconds;
+  }
+  return parsed;
+}
+
+const DIRECTIONS_CACHE_TTL_SECONDS = parseCacheTtlSeconds(
+  process.env.PLACES_DIRECTIONS_CACHE_TTL_SECONDS || process.env.DIRECTIONS_CACHE_TTL_SECONDS || '180',
+  180,
+);
+const DIRECTIONS_TRAFFIC_CACHE_TTL_SECONDS = parseCacheTtlSeconds(
+  process.env.PLACES_DIRECTIONS_TRAFFIC_CACHE_TTL_SECONDS || process.env.DIRECTIONS_TRAFFIC_CACHE_TTL_SECONDS || '90',
+  90,
 );
 const QUERY_CACHE_GEOHASH_PRECISION = Math.max(
   4,
@@ -118,6 +130,19 @@ function isCachedPlaceCompatibleWithLocation(cachedPlace, location = null) {
   }
 
   return haversineKm(normalizedLocation, cachedLocation) <= QUERY_CACHE_GLOBAL_FALLBACK_RADIUS_KM;
+}
+
+function resolveDirectionsCacheTtlSeconds({ trafficEnabled = false } = {}) {
+  if (DIRECTIONS_CACHE_TTL_SECONDS <= 0) {
+    return 0;
+  }
+  if (!trafficEnabled) {
+    return DIRECTIONS_CACHE_TTL_SECONDS;
+  }
+  if (DIRECTIONS_TRAFFIC_CACHE_TTL_SECONDS <= 0) {
+    return 0;
+  }
+  return Math.min(DIRECTIONS_CACHE_TTL_SECONDS, DIRECTIONS_TRAFFIC_CACHE_TTL_SECONDS);
 }
 
 function normalizePlaceCacheData(query, placeData = {}) {
@@ -735,10 +760,17 @@ class PlacesCacheService {
       const trafficEnabled = options?.trafficEnabled === true;
       const alternativesEnabled = options?.alternativesEnabled === true;
       const cacheOnly = options?.cacheOnly === true;
+      const forceFresh = options?.forceFresh === true && !cacheOnly;
+      const directionsCacheTtlSeconds = resolveDirectionsCacheTtlSeconds({ trafficEnabled });
+      const cachePolicy = {
+        forceFresh,
+        ttlSeconds: directionsCacheTtlSeconds,
+      };
       const stats = {
         redisReads: 0,
         redisWrites: 0,
         googleRequests: 0,
+        cacheBypasses: forceFresh ? 1 : 0,
       };
       const cacheKey = this.buildDirectionsCacheKey({
         origin,
@@ -748,7 +780,7 @@ class PlacesCacheService {
         alternativesEnabled,
       });
 
-      if (this.isInitialized) {
+      if (this.isInitialized && !forceFresh) {
         try {
           stats.redisReads += 1;
           const cached = await this.redis.get(cacheKey);
@@ -760,6 +792,10 @@ class PlacesCacheService {
                 cached: true,
                 cacheKey,
                 stats,
+                cachePolicy: parsed.cachePolicy || {
+                  forceFresh: false,
+                  ttlSeconds: directionsCacheTtlSeconds,
+                },
               };
             }
           }
@@ -778,6 +814,7 @@ class PlacesCacheService {
           data: null,
           status: 'cache_miss',
           stats,
+          cachePolicy,
         };
       }
 
@@ -913,12 +950,13 @@ class PlacesCacheService {
         waypointsCount: waypoints.length,
         data,
         stats,
+        cachePolicy,
       };
 
-      if (this.isInitialized) {
+      if (this.isInitialized && directionsCacheTtlSeconds > 0) {
         try {
           stats.redisWrites += 1;
-          await this.redis.setex(cacheKey, DIRECTIONS_CACHE_TTL_SECONDS, JSON.stringify(payload));
+          await this.redis.setex(cacheKey, directionsCacheTtlSeconds, JSON.stringify(payload));
         } catch (cacheError) {
           logger.warn(`⚠️ [PlacesCache] Falha ao salvar cache de directions: ${cacheError.message}`);
         }

@@ -228,6 +228,34 @@ const withInFlight = async (key, executor) => {
     MAPS_INFLIGHT.set(key, promise);
     return promise;
 };
+const shouldForceFreshDirectionsRoute = ({
+    normalizedCacheMode,
+    normalizedRouteScope,
+    normalizedSurface,
+    telemetryContext
+}) => {
+    if (telemetryContext?.forceFresh === true) {
+        return true;
+    }
+
+    if (normalizedCacheMode === 'force_fresh' || normalizedCacheMode === 'fresh_quote') {
+        return true;
+    }
+
+    const routeContext = [
+        normalizedRouteScope,
+        normalizedSurface
+    ].join('|').toLowerCase();
+
+    return [
+        'prebooking_quote',
+        'fare_quote',
+        'quote_refresh',
+        'quote_finalize',
+        'ride_request_quote',
+        'extension_quote'
+    ].some((marker) => routeContext.includes(marker));
+};
 const resolveDirectionsCachePolicy = ({
     originPoint,
     destinationPoint,
@@ -245,10 +273,17 @@ const resolveDirectionsCachePolicy = ({
         telemetryContext?.routeScope || telemetryContext?.routeFamily || ''
     ).trim();
     const normalizedCacheMode = String(telemetryContext?.cacheMode || '').trim().toLowerCase();
+    const forceFresh = shouldForceFreshDirectionsRoute({
+        normalizedCacheMode,
+        normalizedRouteScope,
+        normalizedSurface,
+        telemetryContext
+    });
 
     if (normalizedCacheMode === 'sticky_destination') {
         return {
             mode: normalizedCacheMode,
+            forceFresh,
             key: buildCacheKey(
                 'directions',
                 [
@@ -267,6 +302,7 @@ const resolveDirectionsCachePolicy = ({
 
     return {
         mode: 'exact',
+        forceFresh,
         key: buildCacheKey(
             'directions',
             `${normalizeCoord(originPoint.lat)},${normalizeCoord(originPoint.lng)}|${normalizeCoord(destinationPoint.lat)},${normalizeCoord(destinationPoint.lng)}|${normalizedWaypoints}|traffic:${trafficEnabled}|alt:${alternativesEnabled}`
@@ -996,7 +1032,9 @@ export const getDirectionsApi = (startLoc, destLoc, waypoints, telemetryContext 
             telemetryContext
         });
         const cacheKey = cachePolicy.key;
-        const cached = getCached(cacheKey, MAPS_CACHE_TTL_MS.directions);
+        const cached = cachePolicy.forceFresh
+            ? null
+            : getCached(cacheKey, MAPS_CACHE_TTL_MS.directions);
         if (cached) {
             rideCostTelemetryService.recordGoogleCache('directionsMemoryHit', {
                 metadata: buildRideTelemetryMetadata(telemetryContext, {
@@ -1004,6 +1042,7 @@ export const getDirectionsApi = (startLoc, destLoc, waypoints, telemetryContext 
                     trafficEnabled,
                     alternativesEnabled,
                     cacheMode: cachePolicy.mode,
+                    forceFresh: cachePolicy.forceFresh,
                     callerFrame
                 })
             }, telemetryContext);
@@ -1037,6 +1076,7 @@ export const getDirectionsApi = (startLoc, destLoc, waypoints, telemetryContext 
                         waypoints: waypoints || null,
                         trafficEnabled,
                         alternativesEnabled,
+                        forceFresh: cachePolicy.forceFresh,
                         routeScope:
                             telemetryContext?.routeScope ||
                             telemetryContext?.routeFamily ||
@@ -1057,6 +1097,7 @@ export const getDirectionsApi = (startLoc, destLoc, waypoints, telemetryContext 
                                     trafficEnabled,
                                     alternativesEnabled,
                                     cacheMode: 'backend_cache',
+                                    forceFresh: cachePolicy.forceFresh,
                                     callerFrame
                                 })
                             }, telemetryContext);
@@ -1104,6 +1145,7 @@ export const getDirectionsApi = (startLoc, destLoc, waypoints, telemetryContext 
                                 trafficEnabled,
                                 alternativesEnabled,
                                 cacheMode: cachePolicy.mode,
+                                forceFresh: cachePolicy.forceFresh,
                                 callerFrame
                             })
                         },
@@ -1225,6 +1267,10 @@ export const getDirectionsApi = (startLoc, destLoc, waypoints, telemetryContext 
             .finally(() => {
                 clearTimeout(timeoutId);
             });
+        }).then((result) => {
+            if (result) {
+                resolve(result);
+            }
         }).catch((error) => {
             reject(`getDirectionsApi Call Error: ${error.message || error}`);
         });

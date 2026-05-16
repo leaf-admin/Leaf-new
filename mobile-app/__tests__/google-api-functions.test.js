@@ -354,4 +354,87 @@ describe('GoogleAPIFunctions address search', () => {
       telemetryContext,
     );
   });
+
+  it('bypasses local directions cache when forceFresh is requested', async () => {
+    global.fetch
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          status: 'success',
+          cached: false,
+          data: {
+            distance_in_km: 1.2,
+            time_in_secs: 240,
+            polylinePoints: 'fresh_1',
+            legs: [],
+            steps: [],
+          },
+        }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          status: 'success',
+          cached: false,
+          data: {
+            distance_in_km: 1.3,
+            time_in_secs: 260,
+            polylinePoints: 'fresh_2',
+            legs: [],
+            steps: [],
+          },
+        }),
+      });
+
+    const telemetryContext = {
+      bookingId: 'booking-force-fresh-1',
+      sourceKey: 'customer:test-user:quote',
+      sourceMeta: {
+        userId: 'test-user',
+        userType: 'customer',
+        platform: 'ios',
+        flow: 'prototype',
+        scenario: 'robotaxi_prototype',
+        surface: 'destination_preview',
+      },
+      cacheMode: 'sticky_destination',
+      routeScope: 'prebooking_quote:-22.910:-43.410',
+      forceFresh: true,
+    };
+
+    const first = await getDirectionsApi(
+      '-22.9100,-43.4100',
+      '-22.9200,-43.4200',
+      null,
+      telemetryContext,
+    );
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const second = await getDirectionsApi(
+      '-22.9150,-43.4150',
+      '-22.9200,-43.4200',
+      null,
+      telemetryContext,
+    );
+
+    expect(first.polylinePoints).toBe('fresh_1');
+    expect(second.polylinePoints).toBe('fresh_2');
+    expect(global.fetch).toHaveBeenCalledTimes(2);
+    expect(JSON.parse(global.fetch.mock.calls[0][1].body)).toEqual(
+      expect.objectContaining({
+        forceFresh: true,
+      }),
+    );
+    expect(JSON.parse(global.fetch.mock.calls[1][1].body)).toEqual(
+      expect.objectContaining({
+        forceFresh: true,
+      }),
+    );
+    expect(rideCostTelemetryService.recordGoogleCache).not.toHaveBeenCalledWith(
+      'directionsMemoryHit',
+      expect.anything(),
+      telemetryContext,
+    );
+  });
 });

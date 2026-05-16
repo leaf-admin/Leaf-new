@@ -263,11 +263,16 @@ describe('places routes', () => {
           },
         },
         routeScope: 'driver_to_pickup',
+        forceFresh: true,
       });
 
     expect(response.status).toBe(200);
     expect(response.body.status).toBe('success');
     expect(response.body.cached).toBe(false);
+    expect(response.body.cachePolicy).toEqual({
+      forceFresh: true,
+      ttlSeconds: null,
+    });
     expect(response.body.telemetryCaptured).toBe(true);
     expect(response.body.data.steps).toEqual([
       expect.objectContaining({
@@ -286,6 +291,14 @@ describe('places routes', () => {
       expect.objectContaining({
         bookingId: 'booking_dir_1',
         skuKey: 'directionsLegacy',
+        metadata: expect.objectContaining({
+          forceFresh: true,
+        }),
+      }),
+    );
+    expect(mockFetchDirectionsRoute).toHaveBeenCalledWith(
+      expect.objectContaining({
+        forceFresh: true,
       }),
     );
     expect(mockIngestOperationalUsage).toHaveBeenCalledWith(

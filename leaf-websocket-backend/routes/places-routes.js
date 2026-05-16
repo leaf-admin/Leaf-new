@@ -675,6 +675,7 @@ router.post('/api/places/directions', async (req, res) => {
     const waypoints = req.body?.waypoints || null;
     const trafficEnabled = normalizeBoolean(req.body?.trafficEnabled, false);
     const alternativesEnabled = normalizeBoolean(req.body?.alternativesEnabled, false);
+    const forceFresh = normalizeBoolean(req.body?.forceFresh, false);
     const routeScope = normalizeText(req.body?.routeScope, 'unknown');
     const telemetry = normalizeTelemetry(req.body?.telemetry || {});
     const telemetrySourceKey = telemetry.sourceKey || 'backend:places:directions';
@@ -757,6 +758,7 @@ router.post('/api/places/directions', async (req, res) => {
         waypoints,
         trafficEnabled,
         alternativesEnabled,
+        forceFresh,
       });
     }
 
@@ -796,6 +798,7 @@ router.post('/api/places/directions', async (req, res) => {
           telemetrySurface: telemetrySourceMeta.surface,
           routeScope,
           cacheMode: result.cached ? 'cache' : 'none',
+          forceFresh: Boolean(result?.cachePolicy?.forceFresh || forceFresh),
           trafficEnabled,
           alternativesEnabled,
           waypointsCount: result.waypointsCount || 0,
@@ -837,6 +840,10 @@ router.post('/api/places/directions', async (req, res) => {
         : null,
       routeCount: result.routeCount || 1,
       waypointsCount: result.waypointsCount || 0,
+      cachePolicy: result.cachePolicy || {
+        forceFresh,
+        ttlSeconds: null,
+      },
       data: result.data,
     });
   } catch (error) {

@@ -723,12 +723,13 @@ function resolveRuntimeRideTelemetryContext(overrides = {}) {
   if (bookingId) {
     return {
       ...rideCostTelemetryService.ensureContext({
-      bookingId,
-      sourceMeta,
-      sourceKey,
-    }),
+        bookingId,
+        sourceMeta,
+        sourceKey,
+      }),
       ...(overrides.cacheMode ? { cacheMode: overrides.cacheMode } : {}),
       ...(overrides.routeScope ? { routeScope: overrides.routeScope } : {}),
+      ...(overrides.forceFresh === true ? { forceFresh: true } : {}),
       ...(overrides.surface ? { surface: overrides.surface } : {}),
     };
   }
@@ -742,12 +743,13 @@ function resolveRuntimeRideTelemetryContext(overrides = {}) {
 
   return {
     ...rideCostTelemetryService.ensureContext({
-    contextId: runtimeRideTelemetryDraftContextId,
-    sourceMeta,
-    sourceKey,
-  }),
+      contextId: runtimeRideTelemetryDraftContextId,
+      sourceMeta,
+      sourceKey,
+    }),
     ...(overrides.cacheMode ? { cacheMode: overrides.cacheMode } : {}),
     ...(overrides.routeScope ? { routeScope: overrides.routeScope } : {}),
+    ...(overrides.forceFresh === true ? { forceFresh: true } : {}),
     ...(overrides.surface ? { surface: overrides.surface } : {}),
   };
 }
@@ -9819,6 +9821,7 @@ async function previewDestinationOnMap(destination) {
       const telemetryContext = resolveRuntimeRideTelemetryContext({
         surface: "destination_preview",
         cacheMode: "sticky_destination",
+        forceFresh: true,
         routeScope: [
           "prebooking_quote",
           Number(origin.latitude).toFixed(3),

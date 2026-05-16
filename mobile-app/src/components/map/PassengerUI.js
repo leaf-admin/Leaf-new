@@ -5416,7 +5416,30 @@ function PassengerUI(props) {
         try {
             const originLabel = `${origin.lat},${origin.lng}`;
             const destinationLabel = `${newDestination.lat},${newDestination.lng}`;
-            const routeDetails = await getDirectionsApi(originLabel, destinationLabel);
+            const routeDetails = await getDirectionsApi(
+                originLabel,
+                destinationLabel,
+                null,
+                {
+                    bookingId: currentBooking?.bookingId || currentBooking?.id || tripdata?.bookingId || null,
+                    sourceKey: [
+                        auth?.profile?.usertype || 'customer',
+                        auth?.profile?.uid || 'anonymous',
+                        'extension_quote'
+                    ].join(':'),
+                    sourceMeta: {
+                        userId: auth?.profile?.uid || null,
+                        userType: auth?.profile?.usertype || 'customer',
+                        platform: Platform.OS,
+                        flow: 'legacy_mobile',
+                        scenario: 'ride_extension_change_destination',
+                        surface: 'passenger_extension_quote'
+                    },
+                    cacheMode: 'fresh_quote',
+                    routeScope: 'extension_quote',
+                    forceFresh: true
+                }
+            );
 
             const distanceKm = Number(routeDetails?.distance_in_km || routeDetails?.distance || 0);
             const timeInSecs = Number(routeDetails?.time_in_secs || routeDetails?.time || 0);
@@ -5450,9 +5473,13 @@ function PassengerUI(props) {
 
         return null;
     }, [
+        auth?.profile?.uid,
+        auth?.profile?.usertype,
         buildFallbackEstimate,
+        currentBooking?.bookingId,
         currentBooking?.carDetails,
         currentBooking?.carType,
+        currentBooking?.id,
         currentBooking?.currentLocation?.lat,
         currentBooking?.currentLocation?.lng,
         currentBooking?.pickup?.add,
@@ -5467,6 +5494,7 @@ function PassengerUI(props) {
         currentLocation?.lng,
         fixedCarTypes,
         selectedCarType?.name,
+        tripdata?.bookingId,
         tripdata?.carType
     ]);
 
