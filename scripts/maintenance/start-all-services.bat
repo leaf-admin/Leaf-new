@@ -8,27 +8,15 @@ docker-compose up -d redis
 
 echo.
 echo 🔌 Iniciando WebSocket Backend...
-cd leaf-websocket-backend
-start "LEAF WebSocket Backend" cmd /k "npm start"
-cd ..
+start "LEAF WebSocket Backend" cmd /k "npm run dev:backend"
 
 echo.
 echo 📊 Iniciando Dashboard...
-cd leaf-dashboard
-start "LEAF Dashboard" cmd /k "npm start"
-cd ..
-
-echo.
-echo 🌐 Iniciando Web App (desenvolvimento)...
-cd web-app
-start "LEAF Web App" cmd /k "npm start"
-cd ..
+start "LEAF Dashboard" cmd /k "npm run dev:dashboard"
 
 echo.
 echo 📱 Iniciando Mobile App (desenvolvimento)...
-cd mobile-app
-start "LEAF Mobile App" cmd /k "npm start"
-cd ..
+start "LEAF Mobile App" cmd /k "npm run dev:mobile -- --dev-client"
 
 echo.
 echo ⏳ Aguardando serviços iniciarem...
@@ -40,7 +28,6 @@ echo =================================
 echo.
 echo 🔗 URLs dos serviços:
 echo.
-echo 🌐 Web App: http://localhost:3000
 echo 🔌 WebSocket: http://localhost:3001
 echo 📊 Dashboard: http://localhost:3000
 echo 🔴 Redis Commander: http://localhost:8081
@@ -49,4 +36,4 @@ echo.
 echo 💰 Agora pode testar tudo! 💰
 echo.
 
-pause 
+pause

@@ -1,0 +1,19 @@
+appId: br.com.leaf.ride
+---
+- extendedWaitUntil:
+    visible:
+      id: "passenger-trip-operational-continue-button"
+    timeout: 120000
+
+- tapOn:
+    id: "passenger-trip-operational-continue-button"
+
+- extendedWaitUntil:
+    visible: "Continuar viagem"
+    timeout: 15000
+
+- tapOn: "Continuar viagem"
+
+- extendedWaitUntil:
+    visible: "Procurando outro motorista"
+    timeout: 60000

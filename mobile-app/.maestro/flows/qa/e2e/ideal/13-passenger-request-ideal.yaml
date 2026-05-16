@@ -1,0 +1,73 @@
+appId: br.com.leaf.ride
+---
+- launchApp
+
+- runFlow:
+    when:
+      visible: "This is the developer menu"
+    commands:
+      - tapOn: "Continue"
+
+- runFlow:
+    when:
+      visible: "Continue"
+    commands:
+      - tapOn: "Continue"
+
+- extendedWaitUntil:
+    visible:
+      id: "passenger-home-destination-input"
+    timeout: 90000
+
+- takeScreenshot: "ideal-passenger-02-home-before-request"
+
+- tapOn:
+    id: "passenger-home-destination-input"
+
+- extendedWaitUntil:
+    visible:
+      id: "passenger-destination-search-input"
+    timeout: 30000
+
+- tapOn:
+    id: "passenger-destination-search-input"
+- eraseText
+- inputText: "Copacabana Palace"
+
+- extendedWaitUntil:
+    visible: ".*(Copacabana|Av\\. Atlântica|Avenida Atlantica|Rio de Janeiro).*"
+    timeout: 45000
+
+- takeScreenshot: "ideal-passenger-03-destination-results"
+
+- tapOn:
+    id: "passenger-destination-result-0"
+
+- extendedWaitUntil:
+    visible:
+      id: "passenger-destination-confirm-button"
+    timeout: 30000
+
+- takeScreenshot: "ideal-passenger-04-quote"
+
+- tapOn:
+    id: "passenger-destination-confirm-button"
+
+- extendedWaitUntil:
+    visible: ".*(Realize seu pagamento|Gerando cobrança PIX...).*"
+    timeout: 45000
+
+- takeScreenshot: "ideal-passenger-05-pix-modal"
+
+- extendedWaitUntil:
+    visible:
+      id: "payment-modal-confirmed"
+    timeout: 120000
+
+- takeScreenshot: "ideal-passenger-06-payment-confirmed"
+
+- extendedWaitUntil:
+    visible: "Procurando motorista"
+    timeout: 60000
+
+- takeScreenshot: "ideal-passenger-07-searching-driver"

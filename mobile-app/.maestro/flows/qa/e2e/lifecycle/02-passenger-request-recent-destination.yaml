@@ -1,0 +1,46 @@
+appId: br.com.leaf.ride
+---
+- launchApp:
+    appId: br.com.leaf.ride
+    clearState: false
+    stopApp: false
+
+- tapOn:
+    point: "50%,82%"
+
+- extendedWaitUntil:
+    visible: "Use o microfone para ditar o destino."
+    timeout: 30000
+
+- tapOn:
+    point: "31%,84%"
+
+- extendedWaitUntil:
+    visible: ".*(Solicitar .*|Confirme sua viagem|Realize seu pagamento|Pagamento PIX|Gerando cobrança PIX...|Pagamento confirmado!|Procurando motorista|Corrida criada com sucesso|Continuar para busca).*"
+    timeout: 120000
+
+- runFlow:
+    when:
+      visible: "Solicitar .*"
+    commands:
+      - tapOn: "Solicitar .*"
+
+- runFlow:
+    when:
+      visible: "Confirme sua viagem"
+    commands:
+      - tapOn:
+          point: "50%,93%"
+
+- extendedWaitUntil:
+    visible: ".*(Realize seu pagamento|Pagamento PIX|Gerando cobrança PIX...|Pagamento confirmado!|Procurando motorista|Corrida criada com sucesso|Continuar para busca).*"
+    timeout: 240000
+
+- extendedWaitUntil:
+    visible:
+      id: "passenger-driver-search-elapsed"
+    timeout: 60000
+
+- extendedWaitUntil:
+    visible: "Procurando motorista(s)?"
+    timeout: 60000

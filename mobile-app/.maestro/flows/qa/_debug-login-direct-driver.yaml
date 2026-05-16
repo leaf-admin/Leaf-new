@@ -1,0 +1,20 @@
+appId: br.com.leaf.ride
+---
+- launchApp
+- runFlow:
+    when:
+      visible: "This is the developer menu"
+    commands:
+      - tapOn: "Continue"
+- runFlow:
+    when:
+      visible: "Connected to:"
+    commands:
+      - tapOn:
+          point: "88%,44%"
+- tapOn: "Número"
+- eraseText
+- inputText: "21123456789"
+- pressKey: Enter
+- waitForAnimationToEnd
+- takeScreenshot: "debug-driver-after-enter"

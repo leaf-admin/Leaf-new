@@ -1,0 +1,91 @@
+appId: br.com.leaf.ride
+env:
+  DRIVER_PHONE: "21123456789"
+  TEST_OTP: "992000"
+---
+- launchApp:
+    clearState: true
+
+- runFlow:
+    when:
+      visible: "http://localhost:8081"
+    commands:
+      - tapOn: "http://localhost:8081"
+      - runFlow:
+          when:
+            visible: "Abrir"
+          commands:
+            - tapOn: "Abrir"
+
+- runFlow:
+    when:
+      visible: "Abrir"
+    commands:
+      - tapOn: "Abrir"
+
+- runFlow:
+    when:
+      visible: "Connected to:"
+    commands:
+      - tapOn:
+          point: "88%,44%"
+
+- runFlow:
+    when:
+      visible: "This is the developer menu"
+    commands:
+      - tapOn: "Continue"
+
+- runFlow:
+    when:
+      visible: "Continue"
+    commands:
+      - tapOn: "Continue"
+
+- waitForAnimationToEnd
+
+- extendedWaitUntil:
+    visible:
+      id: "auth-phone-input"
+    timeout: 30000
+
+- tapOn:
+    id: "auth-phone-input"
+- eraseText
+- inputText: ${DRIVER_PHONE}
+- pressKey: Enter
+
+- runFlow:
+    when:
+      visible: "Verificação"
+    commands:
+      - inputText: ${TEST_OTP}
+      - extendedWaitUntil:
+          notVisible: "Verificação"
+          timeout: 30000
+
+- runFlow:
+    when:
+      visible: "This is the developer menu"
+    commands:
+      - tapOn: "Continue"
+
+- runFlow:
+    when:
+      visible: "Continue"
+    commands:
+      - tapOn: "Continue"
+
+- runFlow:
+    when:
+      visible: "Complete seu e-mail"
+    commands:
+      - tapOn: "Depois"
+      - waitForAnimationToEnd
+
+- extendedWaitUntil:
+    visible:
+      id: "driver-status-toggle"
+    timeout: 90000
+
+- takeScreenshot: "ios-driver-prototype-refine"

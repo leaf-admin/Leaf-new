@@ -1,0 +1,37 @@
+appId: br.com.leaf.ride
+---
+- launchApp
+
+- runFlow:
+    when:
+      visible: "This is the developer menu"
+    commands:
+      - tapOn: "Continue"
+
+- openLink: "br.com.leaf.ride://robotaxi/home"
+
+- waitForAnimationToEnd
+
+- runFlow:
+    when:
+      visible: ".*Abrir com.*Leaf.*"
+    commands:
+      - extendedWaitUntil:
+          visible: "Abrir"
+          timeout: 5000
+      - tapOn: "Abrir"
+
+- runFlow:
+    when:
+      visible: "This is the developer menu"
+    commands:
+      - tapOn: "Continue"
+
+- runFlow:
+    when:
+      visible: "Continue"
+    commands:
+      - tapOn: "Continue"
+
+- waitForAnimationToEnd
+- takeScreenshot: "qa-passenger-final-view"

@@ -1,0 +1,33 @@
+appId: br.com.leaf.ride
+---
+- runFlow:
+    when:
+      visible: "This is the developer menu"
+    commands:
+      - tapOn: "Continue"
+
+- runFlow:
+    when:
+      visible: "Continue"
+    commands:
+      - tapOn: "Continue"
+
+- openLink: "leafapp://robotaxi/rating"
+
+- runFlow:
+    when:
+      visible: "Abrir"
+    commands:
+      - tapOn: "Abrir"
+
+- extendedWaitUntil:
+    visible:
+      id: "passenger-rating-screen"
+    timeout: 30000
+
+- assertVisible: ".*Avalie a viagem.*"
+- assertVisible:
+    id: "passenger-rating-air-conditioning-yes"
+- assertVisible:
+    id: "passenger-rating-submit-button"
+- takeScreenshot: "qa-passenger-rating-screen"

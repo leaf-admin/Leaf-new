@@ -1,0 +1,53 @@
+appId: br.com.leaf.ride
+---
+- openLink: "leafapp://robotaxi/receipt"
+
+- extendedWaitUntil:
+    visible: ".*(Resumo da viagem|Corrida finalizada|PIX recebido|Corrida conclu[ií]da|Avalie o passageiro).*"
+    timeout: 180000
+
+- runFlow:
+    when:
+      visible:
+        id: "driver-receipt-rate-passenger-button"
+    commands:
+      - tapOn:
+          id: "driver-receipt-rate-passenger-button"
+
+- runFlow:
+    when:
+      visible: ".*(Avaliar|Avalie o passageiro).*"
+    commands:
+      - tapOn: "Avaliar"
+
+- extendedWaitUntil:
+    visible: ".*(Avalie o passageiro|Enviar avaliacao|Avaliação enviada|Avaliacao enviada|Avaliação já enviada|Avaliacao ja enviada).*"
+    timeout: 30000
+
+- runFlow:
+    when:
+      visible:
+        id: "passenger-rating-submit-button"
+    commands:
+      - tapOn:
+          id: "passenger-rating-submit-button"
+
+- runFlow:
+    when:
+      visible: "Enviar avaliacao"
+    commands:
+      - tapOn: "Enviar avaliacao"
+
+- extendedWaitUntil:
+    visible: ".*(Avaliação enviada|Avaliacao enviada|Avaliação já enviada|Avaliacao ja enviada|Resumo da viagem|Corrida finalizada).*"
+    timeout: 15000
+
+- runFlow:
+    when:
+      visible: "OK"
+    commands:
+      - tapOn: "OK"
+
+- extendedWaitUntil:
+    visible: ".*(Resumo da viagem|Corrida finalizada|Avaliação enviada|Avaliacao enviada|Reportar problema).*"
+    timeout: 60000

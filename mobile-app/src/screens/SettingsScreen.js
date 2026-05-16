@@ -137,8 +137,7 @@ export default function SettingsScreen({ navigation }) {
         params: { initialSection: 'user-rights' }
       },
       { id: 'settings', title: 'Configurações', icon: 'settings-outline', screen: 'Settings' },
-      { id: 'help', title: 'Ajuda', icon: 'help-circle-outline', screen: 'Help' },
-      ...(__DEV__ ? [{ id: 'ride-flow-test', title: 'Testar Fluxo de Corrida', icon: 'car-sport-outline', screen: 'RideFlowTest' }] : [])
+      { id: 'help', title: 'Ajuda', icon: 'help-circle-outline', screen: 'Help' }
     ],
     [isDriver]
   );

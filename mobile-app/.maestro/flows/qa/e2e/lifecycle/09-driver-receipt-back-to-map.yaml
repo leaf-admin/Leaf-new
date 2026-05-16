@@ -1,0 +1,74 @@
+appId: br.com.leaf.ride
+---
+- openLink: "leafapp://robotaxi/receipt"
+
+- extendedWaitUntil:
+    visible: ".*(Resumo da viagem|Corrida finalizada|PIX recebido|Corrida conclu[ií]da|Avalie o passageiro).*"
+    timeout: 60000
+
+- runFlow:
+    when:
+      visible:
+        id: "driver-rating-screen"
+    commands:
+      - tapOn:
+          id: "passenger-rating-submit-button"
+      - extendedWaitUntil:
+          visible: "Avaliação enviada"
+          timeout: 15000
+      - tapOn: "OK"
+      - extendedWaitUntil:
+          visible: ".*(Resumo da viagem|Corrida finalizada|Avaliação enviada|Avaliacao enviada).*"
+          timeout: 60000
+
+- runFlow:
+    when:
+      visible:
+        id: "driver-receipt-back-to-map-button"
+    commands:
+      - tapOn:
+          id: "driver-receipt-back-to-map-button"
+
+- runFlow:
+    when:
+      visible: "Voltar ao mapa"
+    commands:
+      - tapOn: "Voltar ao mapa"
+
+- runFlow:
+    when:
+      visible:
+        id: "driver-receipt-rate-passenger-button"
+    commands:
+      - tapOn:
+          id: "driver-receipt-rate-passenger-button"
+      - extendedWaitUntil:
+          visible: ".*(Avalie o passageiro|Enviar avaliacao|Avaliação enviada|Avaliacao enviada|Avaliação já enviada|Avaliacao ja enviada|OK).*"
+          timeout: 15000
+
+- runFlow:
+    when:
+      visible: "Avalie o passageiro"
+    commands:
+      - tapOn:
+          id: "passenger-rating-submit-button"
+      - extendedWaitUntil:
+          visible: ".*(Avaliação enviada|Avaliacao enviada|OK).*"
+          timeout: 15000
+      - runFlow:
+          when:
+            visible: "OK"
+          commands:
+            - tapOn: "OK"
+
+- runFlow:
+    when:
+      visible: ".*(Resumo da viagem|Corrida finalizada|Avaliação enviada|Avaliacao enviada|Avaliação já enviada|Avaliacao ja enviada|Reportar problema).*"
+    commands:
+      - tapOn:
+          point: "90%,10%"
+
+- extendedWaitUntil:
+    visible:
+      id: "driver-home-toggle-online"
+    timeout: 60000

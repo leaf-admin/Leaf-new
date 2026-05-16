@@ -1,4 +1,0 @@
-timestamp=20260316_204756
-backend_url=http://147.182.204.181:3001
-pass=0
-fail=2

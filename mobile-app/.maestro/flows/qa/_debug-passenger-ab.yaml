@@ -1,0 +1,14 @@
+appId: br.com.leaf.ride
+---
+- launchApp
+- runFlow:
+    when:
+      visible: "This is the developer menu"
+    commands:
+      - tapOn: "Continue"
+- tapOn: "A"
+- waitForAnimationToEnd
+- takeScreenshot: "debug-passenger-tap-a"
+- tapOn: "B"
+- waitForAnimationToEnd
+- takeScreenshot: "debug-passenger-tap-b"

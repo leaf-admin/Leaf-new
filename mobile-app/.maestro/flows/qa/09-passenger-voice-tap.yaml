@@ -1,0 +1,21 @@
+appId: br.com.leaf.ride
+---
+- launchApp
+- waitForAnimationToEnd
+- extendedWaitUntil:
+    visible: "Para onde vamos?"
+    timeout: 30000
+- tapOn:
+    point: "86%,81%"
+- runFlow:
+    when:
+      visible: "Permissão necessária"
+    commands:
+      - tapOn: "OK"
+- runFlow:
+    when:
+      visible: "Busca por voz"
+    commands:
+      - tapOn: "OK"
+- waitForAnimationToEnd
+- takeScreenshot: "ios-passenger-voice-tap"

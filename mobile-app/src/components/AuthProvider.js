@@ -460,9 +460,9 @@ const AuthProvider = ({ children }) => {
         hasSynced.current = true;
       } else {
         Logger.log('⚠️ Usuário não encontrado na fonte moderna - NÃO criando perfil básico');
-        Logger.log('⚠️ Deixando AppCommon controlar o fluxo de onboarding');
+        Logger.log('⚠️ Deixando Splash/AuthFlow controlar o fluxo de onboarding');
 
-        // NÃO criar perfil básico - deixar AppCommon controlar
+        // NÃO criar perfil básico - deixar Splash/AuthFlow controlar
         // hasSynced.current = false; // Manter como não sincronizado
 
         // Dispatch de dados mínimos SEM usertype

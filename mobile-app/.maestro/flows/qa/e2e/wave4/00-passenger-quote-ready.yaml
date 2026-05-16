@@ -1,0 +1,10 @@
+appId: br.com.leaf.ride
+---
+- openLink: "leafapp://robotaxi/destination?qaAutomation=1&qaAutoFlow=quote&qaPresetQuery=Ferry%20Building"
+
+- runFlow: ../../_accept-open-prompt.yaml
+
+- extendedWaitUntil:
+    visible:
+      id: "passenger-destination-confirm-button"
+    timeout: 120000

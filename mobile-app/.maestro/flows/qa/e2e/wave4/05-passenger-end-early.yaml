@@ -1,0 +1,20 @@
+appId: br.com.leaf.ride
+---
+- extendedWaitUntil:
+    visible:
+      id: "passenger-trip-end-early-button"
+    timeout: 60000
+
+- tapOn:
+    id: "passenger-trip-end-early-button"
+
+- extendedWaitUntil:
+    visible: "Encerrar agora"
+    timeout: 15000
+
+- tapOn: "Encerrar agora"
+
+- extendedWaitUntil:
+    visible:
+      id: "passenger-receipt-screen"
+    timeout: 120000

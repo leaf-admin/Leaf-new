@@ -80,10 +80,11 @@ mobile-app/reports/
 .tmp-*
 tmp/
 leaf-websocket-backend/coverage/
+leaf-websocket-backend/reports/
 leaf-websocket-backend/tmp/
 mobile-app/.tmp-*
 mobile-app/.tmp-qa-evidence/
-mobile-app/.maestro/
+mobile-app/.maestro/results/
 mobile-app/tmp/
 mobile-app/android/.gradle/
 mobile-app/android/app/.cxx/
@@ -117,7 +118,7 @@ mobile-app/02-*.png
 mobile-app/07-*.png
 
 # Workspace-level test artifacts
-reports/
+/reports/
 mobile-app/builds/
 book_20_imagens/
 _debug_grid.png

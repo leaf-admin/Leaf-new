@@ -7,7 +7,7 @@ echo "⏹️ Parando processos existentes..."
 pkill -f "firebase emulators"
 pkill -f "expo start"
 pkill -f "node.*server.js"
-pkill -f "npm start"
+pkill -f "npm run dev:"
 pkill -f "yarn start"
 
 # Aguardar um pouco
@@ -25,64 +25,46 @@ fi
 # Aguardar Redis inicializar
 sleep 3
 
-# Iniciar Firebase Functions
-echo "🔥 Iniciando Firebase Functions..."
-cd functions
-firebase emulators:start --only functions &
-FIREBASE_PID=$!
-cd ..
-
-# Aguardar Firebase Functions inicializar
-sleep 5
-
 # Iniciar WebSocket Backend
 echo "🌐 Iniciando WebSocket Backend..."
-cd leaf-websocket-backend
-node server.js &
+npm run dev:backend &
 WEBSOCKET_PID=$!
-cd ..
 
 # Aguardar WebSocket inicializar
 sleep 3
 
 # Iniciar Dashboard
 echo "📊 Iniciando Dashboard..."
-cd leaf-dashboard
-npm start &
+npm run dev:dashboard &
 DASHBOARD_PID=$!
-cd ..
 
 # Aguardar Dashboard inicializar
 sleep 5
 
 # Iniciar Mobile App
 echo "📱 Iniciando Mobile App..."
-cd mobile-app
-npx expo start --dev-client &
+npm run dev:mobile -- --dev-client &
 MOBILE_PID=$!
-cd ..
 
 echo "✅ Todos os serviços iniciados!"
 echo ""
 echo "📋 Status dos serviços:"
 echo "🔴 Redis: http://localhost:6379"
-echo "🔥 Firebase Functions: http://147.182.204.181:5001"
 echo "🌐 WebSocket Backend: http://localhost:3001"
 echo "📊 Dashboard: http://localhost:3000"
 echo "📱 Mobile App: http://localhost:8081"
 echo ""
-echo "🔄 Para parar todos os serviços: pkill -f 'firebase|expo|node.*server|npm start'"
+echo "🔄 Para parar todos os serviços: pkill -f 'expo|node.*server|npm run dev:'"
 echo ""
 
 # Função para limpeza ao sair
 cleanup() {
     echo ""
     echo "🛑 Parando todos os serviços..."
-    kill $FIREBASE_PID $WEBSOCKET_PID $DASHBOARD_PID $MOBILE_PID 2>/dev/null
-    pkill -f "firebase emulators"
+    kill $WEBSOCKET_PID $DASHBOARD_PID $MOBILE_PID 2>/dev/null
     pkill -f "expo start"
     pkill -f "node.*server.js"
-    pkill -f "npm start"
+    pkill -f "npm run dev:"
     echo "✅ Serviços parados"
     exit 0
 }
@@ -94,4 +76,4 @@ trap cleanup SIGINT
 echo "⏳ Pressione Ctrl+C para parar todos os serviços"
 while true; do
     sleep 1
-done 
+done

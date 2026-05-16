@@ -1,0 +1,10 @@
+appId: br.com.leaf.ride
+---
+- openLink: "leafapp://robotaxi/home?qaAutomation=1&qaNonce=lifecycle-driver-wait-offer"
+
+- runFlow: ../../_accept-open-prompt-no-launch.yaml
+
+- extendedWaitUntil:
+    visible:
+      id: "driver-live-offer-accept-button"
+    timeout: 240000

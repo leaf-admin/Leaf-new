@@ -1,0 +1,14 @@
+appId: br.com.leaf.ride
+---
+- extendedWaitUntil:
+    visible:
+      id: "driver-live-primary-action-start-button"
+    timeout: 60000
+
+- tapOn:
+    point: "82%,91%"
+
+- extendedWaitUntil:
+    visible:
+      id: "driver-live-primary-action-complete-button"
+    timeout: 60000

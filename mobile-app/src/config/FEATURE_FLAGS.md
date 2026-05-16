@@ -117,7 +117,7 @@ const minhaFlag = await featureFlagService.getFlag('MINHA_NOVA_FLAG', true);
 
 ## 🔄 Inicialização
 
-O FeatureFlagService é inicializado automaticamente no `AppCommon.js` quando o app inicia. Não é necessário inicializar manualmente.
+O `FeatureFlagService` é inicializado pelo fluxo de navegação principal antes de decidir entre a UI Robotaxi e o fallback legado. Não é necessário inicializar manualmente nos componentes.
 
 ## 💾 Cache
 

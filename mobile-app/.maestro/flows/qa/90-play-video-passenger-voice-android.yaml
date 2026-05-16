@@ -1,0 +1,74 @@
+appId: br.com.leaf.ride
+env:
+  PASSENGER_PHONE: "21102938475"
+  TEST_OTP: "992111"
+---
+- launchApp:
+    clearState: true
+
+- extendedWaitUntil:
+    visible: "Bem-vindo\\(a\\) à Leaf"
+    timeout: 90000
+
+- tapOn: "Número"
+- eraseText
+- inputText: ${PASSENGER_PHONE}
+- tapOn: "Continuar"
+
+- runFlow:
+    when:
+      visible: "Verificação"
+    commands:
+      - inputText: ${TEST_OTP}
+
+- runFlow:
+    when:
+      visible: "Código"
+    commands:
+      - inputText: ${TEST_OTP}
+
+- runFlow:
+    when:
+      visible: "Verificar"
+    commands:
+      - tapOn: "Verificar"
+
+- runFlow:
+    when:
+      visible: "Já tenho senha"
+    commands:
+      - tapOn: "Já tenho senha"
+
+- runFlow:
+    when:
+      visible: "Para onde vamos\\?"
+    commands:
+      - tapOn:
+          point: "86%,81%"
+
+- runFlow:
+    when:
+      visible: "Permissão necessária"
+    commands:
+      - tapOn: "OK"
+
+- runFlow:
+    when:
+      visible: "Busca por voz"
+    commands:
+      - tapOn: "OK"
+
+- runFlow:
+    when:
+      visible: "Permitir"
+    commands:
+      - tapOn: "Permitir"
+
+- runFlow:
+    when:
+      visible: "Ao usar o app"
+    commands:
+      - tapOn: "Ao usar o app"
+
+- waitForAnimationToEnd
+- takeScreenshot: "android-passenger-voice-final"

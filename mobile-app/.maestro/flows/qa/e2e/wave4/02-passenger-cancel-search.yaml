@@ -1,0 +1,9 @@
+appId: br.com.leaf.ride
+---
+- extendedWaitUntil:
+    visible:
+      id: "passenger-driver-search-cancel-button"
+    timeout: 120000
+
+- tapOn:
+    id: "passenger-driver-search-cancel-button"

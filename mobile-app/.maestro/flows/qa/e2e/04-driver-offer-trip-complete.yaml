@@ -1,0 +1,118 @@
+appId: br.com.leaf.ride
+---
+- launchApp
+
+- runFlow:
+    when:
+      visible: "This is the developer menu"
+    commands:
+      - tapOn: "Continue"
+
+- runFlow:
+    when:
+      visible: "Allow While Using App"
+    commands:
+      - tapOn: "Allow While Using App"
+
+- runFlow:
+    when:
+      visible: "Permitir Enquanto Usa o App"
+    commands:
+      - tapOn: "Permitir Enquanto Usa o App"
+
+- runFlow:
+    when:
+      visible: "Continue"
+    commands:
+      - tapOn: "Continue"
+
+- runFlow:
+    when:
+      visible: "This is the developer menu"
+    commands:
+      - tapOn: "Continue"
+
+- extendedWaitUntil:
+    visible: ".*(Ganhos do dia|META DIÁRIA|Ficar Offline|Ficar offline|Ficar Online|Ficar online|Ativação pendente).*"
+    timeout: 60000
+
+- takeScreenshot: "e2e-driver-03-home-before-offer"
+
+- tapOn:
+    point: "88%,11%"
+
+- extendedWaitUntil:
+    visible: "Painel do motorista"
+    timeout: 30000
+
+- tapOn: "Painel do motorista"
+
+- extendedWaitUntil:
+    visible: ".*(Abrir oferta selecionada|Aguardando nova oferta).*"
+    timeout: 45000
+
+- runFlow:
+    when:
+      visible: "Aguardando nova oferta"
+    commands:
+      - extendedWaitUntil:
+          visible: "Abrir oferta selecionada"
+          timeout: 180000
+
+- takeScreenshot: "e2e-driver-04-panel-with-offer"
+
+- tapOn: "Abrir oferta selecionada"
+
+- extendedWaitUntil:
+    visible: ".*(Detalhes da corrida|Aceitar corrida|Sem corrida no momento).*"
+    timeout: 45000
+
+- takeScreenshot: "e2e-driver-05-offer-card"
+
+- runFlow:
+    when:
+      visible: "Aceitar corrida"
+    commands:
+      - tapOn: "Aceitar corrida"
+
+- extendedWaitUntil:
+    visible: ".*(Cheguei ao embarque|A caminho do passageiro|Passageiro em embarque).*"
+    timeout: 60000
+
+- takeScreenshot: "e2e-driver-06-trip-accepted"
+
+- runFlow:
+    when:
+      visible: "Cheguei ao embarque"
+    commands:
+      - tapOn: "Cheguei ao embarque"
+
+- extendedWaitUntil:
+    visible: ".*(Iniciar viagem|Passageiro em embarque).*"
+    timeout: 45000
+
+- takeScreenshot: "e2e-driver-07-arrived"
+
+- runFlow:
+    when:
+      visible: "Iniciar viagem"
+    commands:
+      - tapOn: "Iniciar viagem"
+
+- extendedWaitUntil:
+    visible: ".*(Finalizar corrida|Viagem em andamento).*"
+    timeout: 45000
+
+- takeScreenshot: "e2e-driver-08-started"
+
+- runFlow:
+    when:
+      visible: "Finalizar corrida"
+    commands:
+      - tapOn: "Finalizar corrida"
+
+- extendedWaitUntil:
+    visible: ".*(Corrida concluída|Ganho líquido|Voltar para tela anterior).*"
+    timeout: 60000
+
+- takeScreenshot: "e2e-driver-09-completed-receipt"

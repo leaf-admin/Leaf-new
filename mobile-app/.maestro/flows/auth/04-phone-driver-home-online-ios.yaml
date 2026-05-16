@@ -1,0 +1,198 @@
+appId: br.com.leaf.ride
+env:
+  DRIVER_PHONE: "21123456789"
+  TEST_OTP: "992000"
+---
+- launchApp:
+    clearState: true
+
+- runFlow:
+    when:
+      visible: ".*Deseja Enviar Notificações.*"
+    commands:
+      - tapOn: "Não Permitir"
+
+- runFlow:
+    when:
+      visible: "Sign in to view updates"
+    commands:
+      - tapOn: "Home"
+
+- runFlow:
+    when:
+      visible: "http://.*:8081"
+    commands:
+      - tapOn: "http://.*:8081"
+
+- runFlow:
+    when:
+      visible: "http://.*:8081"
+    commands:
+      - tapOn: "http://.*:8081"
+      - runFlow:
+          when:
+            visible: "Abrir"
+          commands:
+            - tapOn: "Abrir"
+
+- runFlow:
+    when:
+      visible: "No development servers found"
+    commands:
+      - tapOn: "Enter URL manually"
+      - inputText: "http://localhost:8081"
+      - pressKey: Enter
+      - runFlow:
+          when:
+            visible: "Connect"
+          commands:
+            - tapOn: "Connect"
+      - runFlow:
+          when:
+            visible: "Abrir"
+          commands:
+            - tapOn: "Abrir"
+
+- runFlow:
+    when:
+      visible: "Abrir"
+    commands:
+      - tapOn: "Abrir"
+
+- runFlow:
+    when:
+      visible: "Connected to:"
+    commands:
+      - tapOn:
+          point: "88%,44%"
+
+- runFlow:
+    when:
+      visible: "This is the developer menu"
+    commands:
+      - tapOn: "Continue"
+
+- runFlow:
+    when:
+      visible: "Continue"
+    commands:
+      - tapOn: "Continue"
+
+- waitForAnimationToEnd
+
+- extendedWaitUntil:
+    visible:
+      id: "(auth-phone-input|driver-home-toggle-online)"
+    timeout: 30000
+
+- runFlow:
+    when:
+      visible:
+        id: "auth-phone-input"
+    commands:
+      - tapOn:
+          id: "auth-phone-input"
+      - eraseText
+      - inputText: ${DRIVER_PHONE}
+      - pressKey: Enter
+
+      - runFlow:
+          when:
+            visible:
+              id: "auth-otp-digit-0"
+          commands:
+            - tapOn:
+                id: "auth-otp-digit-0"
+            - inputText: "9"
+            - tapOn:
+                id: "auth-otp-digit-1"
+            - inputText: "9"
+            - tapOn:
+                id: "auth-otp-digit-2"
+            - inputText: "2"
+            - tapOn:
+                id: "auth-otp-digit-3"
+            - inputText: "0"
+            - tapOn:
+                id: "auth-otp-digit-4"
+            - inputText: "0"
+            - tapOn:
+                id: "auth-otp-digit-5"
+            - inputText: "0"
+            - extendedWaitUntil:
+                notVisible:
+                  id: "auth-otp-digit-0"
+                timeout: 30000
+
+- runFlow:
+    when:
+      visible: "This is the developer menu"
+    commands:
+      - tapOn: "Continue"
+
+- runFlow:
+    when:
+      visible: "Continue"
+    commands:
+      - tapOn: "Continue"
+
+- runFlow:
+    when:
+      visible: "Complete seu e-mail"
+    commands:
+      - tapOn: "Depois"
+      - waitForAnimationToEnd
+
+- extendedWaitUntil:
+    visible: ".*(Ficar Online|Ficar online|Ficar Offline|Ficar offline|Concluir ativação|Concluir ativacao|Online|Offline).*"
+    timeout: 90000
+
+- takeScreenshot: "ios-driver-home-after-login"
+
+- runFlow:
+    when:
+      visible: "Ficar online"
+    commands:
+      - tapOn: "Ficar online"
+      - waitForAnimationToEnd
+      - runFlow:
+          when:
+            visible: "This is the developer menu"
+          commands:
+            - tapOn: "Continue"
+      - runFlow:
+          when:
+            visible: "Continue"
+          commands:
+            - tapOn: "Continue"
+      - takeScreenshot: "ios-driver-after-online-tap"
+
+- runFlow:
+    when:
+      visible: "Ficar Online"
+    commands:
+      - tapOn: "Ficar Online"
+      - waitForAnimationToEnd
+      - runFlow:
+          when:
+            visible: "This is the developer menu"
+          commands:
+            - tapOn: "Continue"
+      - runFlow:
+          when:
+            visible: "Continue"
+          commands:
+            - tapOn: "Continue"
+      - takeScreenshot: "ios-driver-after-online-tap"
+
+- runFlow:
+    when:
+      visible: "Online"
+    commands:
+      - takeScreenshot: "ios-driver-online-confirmed"
+
+- runFlow:
+    when:
+      visible: ".*Concluir ativação.*"
+    commands:
+      - takeScreenshot: "ios-driver-not-ready-for-online"

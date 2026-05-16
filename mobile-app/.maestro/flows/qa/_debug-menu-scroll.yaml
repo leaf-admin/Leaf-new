@@ -1,0 +1,23 @@
+appId: br.com.leaf.ride
+---
+- launchApp
+- runFlow:
+    when:
+      visible: "This is the developer menu"
+    commands:
+      - tapOn: "Continue"
+- runFlow:
+    when:
+      visible: "Connected to:"
+    commands:
+      - tapOn:
+          point: "88%,44%"
+- tapOn:
+    point: "84%,10%"
+- waitForAnimationToEnd
+- takeScreenshot: "debug-menu-scroll-01-open"
+- swipe:
+    start: "50%,74%"
+    end: "50%,42%"
+- waitForAnimationToEnd
+- takeScreenshot: "debug-menu-scroll-02-after-swipe"

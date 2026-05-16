@@ -1,0 +1,17 @@
+appId: br.com.leaf.ride
+---
+- runFlow: 06-passenger-prototype-refine.yaml
+- tapOn:
+    point: "86%,81%"
+- runFlow:
+    when:
+      visible: "Permissão necessária"
+    commands:
+      - tapOn: "OK"
+- runFlow:
+    when:
+      visible: "Busca por voz"
+    commands:
+      - tapOn: "OK"
+- waitForAnimationToEnd
+- takeScreenshot: "ios-passenger-voice-after-login"

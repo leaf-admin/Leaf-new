@@ -1,0 +1,300 @@
+appId: br.com.leaf.ride
+env:
+  DRIVER_PHONE: "21123456789"
+---
+- launchApp:
+    clearState: true
+
+- runFlow:
+    when:
+      visible: "Abrir"
+    commands:
+      - tapOn: "Abrir"
+
+- runFlow:
+    when:
+      visible: "Open"
+    commands:
+      - tapOn: "Open"
+
+- runFlow:
+    when:
+      visible: "This is the developer menu"
+    commands:
+      - tapOn: "Continue"
+
+- runFlow:
+    when:
+      visible: "Continue"
+    commands:
+      - tapOn: "Continue"
+
+- runFlow:
+    when:
+      visible: "http://10.0.2.2:8081"
+    commands:
+      - tapOn: "http://10.0.2.2:8081"
+      - waitForAnimationToEnd
+
+- runFlow:
+    when:
+      visible: "No development servers found"
+    commands:
+      - tapOn: "Enter URL manually"
+      - inputText: "http://10.0.2.2:8081"
+      - pressKey: Enter
+      - runFlow:
+          when:
+            visible: "Connect"
+          commands:
+            - tapOn: "Connect"
+      - runFlow:
+          when:
+            visible: "Abrir"
+          commands:
+            - tapOn: "Abrir"
+      - runFlow:
+          when:
+            visible: "Open"
+          commands:
+            - tapOn: "Open"
+
+- extendedWaitUntil:
+    visible:
+      id: "auth-phone-input"
+    timeout: 120000
+
+- takeScreenshot: "01-driver-cadastro-phone-screen"
+
+- tapOn:
+    id: "auth-phone-input"
+- eraseText
+- inputText: ${DRIVER_PHONE}
+
+- takeScreenshot: "02-driver-cadastro-phone-filled"
+
+- tapOn:
+    id: "auth-continue-btn"
+
+- runFlow:
+    when:
+      visible: "Erro de Autenticacao"
+    commands:
+      - tapOn: "OK"
+      - waitForAnimationToEnd
+      - tapOn:
+          id: "auth-continue-btn"
+
+- runFlow:
+    when:
+      visible: "Erro de Conexao"
+    commands:
+      - tapOn: "OK"
+      - waitForAnimationToEnd
+      - tapOn:
+          id: "auth-continue-btn"
+
+- runFlow:
+    when:
+      visible: "Estamos com instabilidade no servidor.*"
+    commands:
+      - tapOn: "OK"
+      - waitForAnimationToEnd
+      - tapOn:
+          id: "auth-continue-btn"
+
+- runFlow:
+    when:
+      visible:
+        id: "auth-password-input"
+    commands:
+      - takeScreenshot: "03-driver-cadastro-blocked-password-screen"
+      - assertNotVisible:
+          id: "auth-password-input"
+
+- runFlow:
+    when:
+      visible:
+        id: "auth-otp-digit-0"
+    commands:
+      - takeScreenshot: "03-driver-cadastro-otp-screen"
+      - tapOn:
+          id: "auth-otp-digit-0"
+      - inputText: "0"
+      - tapOn:
+          id: "auth-otp-digit-1"
+      - inputText: "0"
+      - tapOn:
+          id: "auth-otp-digit-2"
+      - inputText: "0"
+      - tapOn:
+          id: "auth-otp-digit-3"
+      - inputText: "0"
+      - tapOn:
+          id: "auth-otp-digit-4"
+      - inputText: "0"
+      - tapOn:
+          id: "auth-otp-digit-5"
+      - inputText: "0"
+      - takeScreenshot: "04-driver-cadastro-otp-filled"
+      - runFlow:
+          when:
+            visible:
+              id: "auth-otp-verify-btn"
+          commands:
+            - tapOn:
+                id: "auth-otp-verify-btn"
+
+- runFlow:
+    when:
+      visible:
+        id: "auth-profile-selection-trigger"
+    commands:
+      - takeScreenshot: "05-driver-cadastro-profile-selection"
+      - tapOn:
+          id: "auth-profile-selection-trigger"
+      - tapOn:
+          id: "auth-profile-option-driver"
+      - takeScreenshot: "06-driver-cadastro-profile-driver-selected"
+      - tapOn:
+          id: "auth-profile-selection-continue-btn"
+
+- extendedWaitUntil:
+    visible: ".*(Validação da CNH|Toque para enviar o PDF da CNH).*"
+    timeout: 120000
+
+- takeScreenshot: "07-driver-cadastro-cnh-upload-screen"
+
+- tapOn: "Toque para enviar o PDF da CNH"
+
+- extendedWaitUntil:
+    visible: ".*(CNH\\.pdf|Downloads|Recent|Recents|Arquivos|Files).*"
+    timeout: 60000
+
+- takeScreenshot: "08-driver-cadastro-cnh-file-picker"
+
+- runFlow:
+    when:
+      visible: "Downloads"
+    commands:
+      - tapOn: "Downloads"
+
+- tapOn: ".*CNH\\.pdf.*"
+
+- extendedWaitUntil:
+    visible: ".*(Finalizar cadastro|Aceito os Termos de Uso|Autorizo checagem de antecedentes).*"
+    timeout: 120000
+
+- takeScreenshot: "09-driver-cadastro-after-cnh-extraction"
+
+- runFlow:
+    when:
+      visible: ".*Termos de Uso.*"
+    commands:
+      - tapOn: ".*Termos de Uso.*"
+
+- runFlow:
+    when:
+      visible: ".*Privacidade.*"
+    commands:
+      - tapOn: ".*Privacidade.*"
+
+- runFlow:
+    when:
+      visible: ".*checagem de antecedentes.*"
+    commands:
+      - tapOn: ".*checagem de antecedentes.*"
+
+- takeScreenshot: "10-driver-cadastro-terms-checked"
+
+- tapOn: "Concluir"
+
+- runFlow:
+    when:
+      visible:
+        id: "driver-email-input"
+    commands:
+      - takeScreenshot: "11-driver-cadastro-email-screen"
+      - tapOn:
+          id: "driver-email-input"
+      - eraseText
+      - inputText: "qa.driver.signup@leaf.local"
+      - takeScreenshot: "12-driver-cadastro-email-filled"
+      - tapOn:
+          id: "driver-email-continue-btn"
+
+- runFlow:
+    when:
+      visible: "Allow Leaf to access this device's location\\?"
+    commands:
+      - takeScreenshot: "13-driver-cadastro-location-permission-en"
+      - tapOn: "While using the app"
+
+- runFlow:
+    when:
+      visible: "Allow Leaf to access this device’s location\\?"
+    commands:
+      - takeScreenshot: "13-driver-cadastro-location-permission-en-alt"
+      - tapOn: "While using the app"
+
+- runFlow:
+    when:
+      visible: "Permitir que a Leaf acesse a localização deste dispositivo\\?"
+    commands:
+      - takeScreenshot: "13-driver-cadastro-location-permission-pt"
+      - tapOn: "Durante o uso do app"
+
+- extendedWaitUntil:
+    visible: ".*(Concluir ativação|Concluir ativacao|Ficar Online|Ficar online|driver-home-toggle-online).*"
+    timeout: 120000
+
+- takeScreenshot: "14-driver-cadastro-home-after-onboarding"
+
+- runFlow:
+    when:
+      visible: ".*Concluir ativação.*"
+    commands:
+      - tapOn: ".*Concluir ativação.*"
+
+- runFlow:
+    when:
+      visible: ".*Concluir ativacao.*"
+    commands:
+      - tapOn: ".*Concluir ativacao.*"
+
+- runFlow:
+    when:
+      visible: ".*Ativação dos dados do motorista.*"
+    commands:
+      - takeScreenshot: "15-driver-cadastro-activation-before-crlv"
+      - runFlow:
+          when:
+            visible: "Enviar CRLV"
+          commands:
+            - tapOn: "Enviar CRLV"
+            - extendedWaitUntil:
+                visible: ".*(CRLV\\.pdf|Downloads|Recent|Recents|Arquivos|Files).*"
+                timeout: 60000
+            - takeScreenshot: "16-driver-cadastro-crlv-file-picker"
+            - runFlow:
+                when:
+                  visible: "Downloads"
+                commands:
+                  - tapOn: "Downloads"
+            - tapOn: ".*CRLV\\.pdf.*"
+            - runFlow:
+                when:
+                  visible: "Documento enviado"
+                commands:
+                  - tapOn: "OK"
+      - runFlow:
+          when:
+            visible: "Aceitar termos"
+          commands:
+            - tapOn: "Aceitar termos"
+      - runFlow:
+          when:
+            visible: "Iniciar validação"
+          commands:
+            - tapOn: "Iniciar validação"
+      - takeScreenshot: "17-driver-cadastro-activation-after-crlv-upload"

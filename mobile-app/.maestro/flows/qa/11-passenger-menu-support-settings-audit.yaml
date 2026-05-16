@@ -1,0 +1,128 @@
+appId: br.com.leaf.ride
+---
+- runFlow:
+    when:
+      visible: "This is the developer menu"
+    commands:
+      - tapOn: "Continue"
+
+- runFlow:
+    when:
+      visible: "Continue"
+    commands:
+      - tapOn: "Continue"
+
+- openLink: "leafapp://robotaxi/menu"
+
+- runFlow:
+    when:
+      visible: "Abrir"
+    commands:
+      - tapOn: "Abrir"
+
+- runFlow:
+    when:
+      visible: "Triagem incompleta"
+    commands:
+      - tapOn: "OK"
+
+- extendedWaitUntil:
+    visible: "Menu"
+    timeout: 30000
+
+- assertVisible: "Menu"
+- takeScreenshot: "qa-menu-screen"
+
+- tapOn:
+    point: "26%,64%"
+
+- runFlow:
+    when:
+      visible: ".*(Configuracoes|Configurações).*"
+    commands:
+      - assertVisible: ".*(Configuracoes|Configurações).*"
+      - assertVisible: "Alertas de corrida"
+      - assertVisible: "Camada de transito"
+      - assertVisible: "Instrucoes por voz"
+      - assertVisible:
+          id: "robotaxi-settings-open-support"
+      - takeScreenshot: "qa-settings-screen"
+      - tapOn:
+          id: "robotaxi-settings-open-support"
+      - runFlow:
+          when:
+            visible: "Falar com suporte"
+          commands:
+            - tapOn: "Falar com suporte"
+
+- extendedWaitUntil:
+    visible: "Suporte"
+    timeout: 30000
+
+- assertVisible: "Suporte"
+- runFlow:
+    when:
+      visible:
+        id: "robotaxi-support-screen"
+    commands:
+      - assertVisible:
+          id: "robotaxi-support-open-chat"
+      - assertVisible:
+          id: "robotaxi-support-open-complain"
+      - assertVisible:
+          id: "robotaxi-support-report-incident"
+      - assertVisible:
+          id: "robotaxi-support-open-ticket"
+- runFlow:
+    when:
+      visible: "CANAIS"
+    commands:
+      - assertVisible: "CANAIS"
+- runFlow:
+    when:
+      visible: "Falar.*chat"
+    commands:
+      - assertVisible: "Falar.*chat"
+- runFlow:
+    when:
+      visible: "Abrir reclama.*"
+    commands:
+      - assertVisible: "Abrir reclama.*"
+- runFlow:
+    when:
+      visible: ".*(Registrar incidente|Abrir canal recomendado).*"
+    commands:
+      - assertVisible: ".*(Registrar incidente|Abrir canal recomendado).*"
+- runFlow:
+    when:
+      visible: "Abrir ticket"
+    commands:
+      - assertVisible: "Abrir ticket"
+- takeScreenshot: "qa-support-screen"
+
+- runFlow:
+    when:
+      visible:
+        id: "robotaxi-support-open-ticket"
+    commands:
+      - tapOn:
+          id: "robotaxi-support-open-ticket"
+- runFlow:
+    when:
+      visible: "Abrir ticket"
+    commands:
+      - tapOn: "Abrir ticket"
+- tapOn:
+    point: "50%,90%"
+    optional: true
+    retryTapIfNoChange: true
+- runFlow:
+    when:
+      visible: ".*(Ticket criado|Nao foi possivel abrir ticket|Não foi possível abrir ticket|Triagem incompleta).*"
+    commands:
+      - assertVisible: ".*(Ticket criado|Nao foi possivel abrir ticket|Não foi possível abrir ticket|Triagem incompleta).*"
+      - runFlow:
+          when:
+            visible: "OK"
+          commands:
+            - tapOn: "OK"

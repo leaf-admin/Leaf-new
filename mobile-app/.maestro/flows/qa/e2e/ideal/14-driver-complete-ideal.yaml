@@ -1,0 +1,59 @@
+appId: br.com.leaf.ride
+---
+- launchApp
+
+- runFlow:
+    when:
+      visible: "This is the developer menu"
+    commands:
+      - tapOn: "Continue"
+
+- runFlow:
+    when:
+      visible: "Continue"
+    commands:
+      - tapOn: "Continue"
+
+- extendedWaitUntil:
+    visible:
+      id: "driver-live-offer-accept-button"
+    timeout: 240000
+
+- takeScreenshot: "ideal-driver-03-offer-received"
+
+- tapOn:
+    id: "driver-live-offer-accept-button"
+
+- extendedWaitUntil:
+    visible: "Cheguei ao embarque"
+    timeout: 60000
+
+- takeScreenshot: "ideal-driver-04-accepted"
+
+- tapOn:
+    id: "driver-live-primary-action-button"
+
+- extendedWaitUntil:
+    visible: "Iniciar viagem"
+    timeout: 60000
+
+- takeScreenshot: "ideal-driver-05-arrived"
+
+- tapOn:
+    id: "driver-live-primary-action-button"
+
+- extendedWaitUntil:
+    visible: "Finalizar corrida"
+    timeout: 60000
+
+- takeScreenshot: "ideal-driver-06-started"
+
+- tapOn:
+    id: "driver-live-primary-action-button"
+
+- extendedWaitUntil:
+    visible:
+      id: "driver-receipt-screen"
+    timeout: 90000
+
+- takeScreenshot: "ideal-driver-07-receipt"

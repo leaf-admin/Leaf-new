@@ -1,0 +1,14 @@
+appId: br.com.leaf.ride
+---
+- extendedWaitUntil:
+    visible:
+      id: "passenger-receipt-back-to-map-button"
+    timeout: 60000
+
+- tapOn:
+    id: "passenger-receipt-back-to-map-button"
+
+- extendedWaitUntil:
+    visible:
+      id: "passenger-home-destination-input"
+    timeout: 60000
