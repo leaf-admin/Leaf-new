@@ -8,6 +8,7 @@ Este diretório agora separa documentação canônica de histórico.
 - [Plano de migração e limpeza](MIGRATION_CLEANUP_PLAN_2026-05-16.md)
 - [Manifesto de freeze e rollback](RELEASE_FREEZE_MANIFEST_2026-05-16.md)
 - [Perfil canônico de testes](TEST_EXECUTION_CANONICAL_PROFILE.md)
+- [Workflow de trabalho](workflow/README.md)
 
 ## Domínios vivos
 

@@ -22,7 +22,8 @@
     "prelaunch:audit": "node scripts/prelaunch/run-prelaunch-suite.cjs --mode audit --no-strict",
     "prelaunch:full": "node scripts/prelaunch/run-prelaunch-suite.cjs --mode full",
     "prelaunch:rides": "node scripts/prelaunch/run-prelaunch-suite.cjs --mode rides --rides 10",
-    "prelaunch:rides:concurrent": "node leaf-websocket-backend/scripts/tests/run-real-core-concurrent-rides.cjs"
+    "prelaunch:rides:concurrent": "node leaf-websocket-backend/scripts/tests/run-real-core-concurrent-rides.cjs",
+    "branch:task": "bash scripts/workflow/new-task-branch.sh"
   },
   "dependencies": {
     "axios": "^1.12.1",

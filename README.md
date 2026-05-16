@@ -25,6 +25,8 @@ npm run dev:mobile
 - [Plano de migração e limpeza](/Users/izaakdias/Documents/Leaf-new/docs/MIGRATION_CLEANUP_PLAN_2026-05-16.md)
 - [Manifesto de freeze e rollback](/Users/izaakdias/Documents/Leaf-new/docs/RELEASE_FREEZE_MANIFEST_2026-05-16.md)
 - [Perfil canônico de testes](/Users/izaakdias/Documents/Leaf-new/docs/TEST_EXECUTION_CANONICAL_PROFILE.md)
+- [Workflow de trabalho](/Users/izaakdias/Documents/Leaf-new/docs/workflow/README.md)
+- [Guia de contribuicao](/Users/izaakdias/Documents/Leaf-new/CONTRIBUTING.md)
 
 Docs históricos e relatórios gerados ficam em `docs/archive/`.
 
@@ -39,6 +41,7 @@ Docs históricos e relatórios gerados ficam em `docs/archive/`.
 - `npm run test:mobile`
 - `npm run test:backend`
 - `npm run test:all`
+- `npm run branch:task -- LIN-123 nome-curto`
 
 ## Decisão de produto
 
