@@ -130,6 +130,28 @@ sync_native_ios_version() {
   echo "✅ Info.plist iOS sincronizado: ${expected_version} (${expected_build_number})."
 }
 
+sync_native_ios_updates_config() {
+  local expo_plist_path="${PROJECT_DIR}/ios/Leaf/Supporting/Expo.plist"
+  local updates_channel="${EXPO_UPDATE_CHANNEL:-${EAS_UPDATE_CHANNEL:-${LEAF_UPDATES_CHANNEL:-}}}"
+
+  if [[ ! -f "${expo_plist_path}" ]]; then
+    echo "❌ Expo.plist nativo do iOS não encontrado: ${expo_plist_path}"
+    exit 1
+  fi
+
+  if [[ -z "${updates_channel}" ]]; then
+    echo "⚠️  Canal do Expo Updates não definido; Expo.plist iOS mantido sem request header."
+    return
+  fi
+
+  /usr/libexec/PlistBuddy -c "Print :EXUpdatesRequestHeaders" "${expo_plist_path}" >/dev/null 2>&1 \
+    || /usr/libexec/PlistBuddy -c "Add :EXUpdatesRequestHeaders dict" "${expo_plist_path}"
+  /usr/libexec/PlistBuddy -c "Set :EXUpdatesRequestHeaders:expo-channel-name ${updates_channel}" "${expo_plist_path}" >/dev/null 2>&1 \
+    || /usr/libexec/PlistBuddy -c "Add :EXUpdatesRequestHeaders:expo-channel-name string ${updates_channel}" "${expo_plist_path}"
+
+  echo "✅ Expo.plist iOS sincronizado: expo-channel-name=${updates_channel}."
+}
+
 count_signing_identities() {
   security find-identity -v -p codesigning 2>/dev/null \
     | awk '/valid identities found/{print $1; exit}' \
@@ -257,8 +279,21 @@ main() {
 
   command -v pod >/dev/null 2>&1 || { echo "❌ CocoaPods não encontrado. Rode npm run env:local:setup:mac"; exit 1; }
 
+  # Keep local iOS builds aligned with EAS: Expo config, constants and native
+  # manifests must be resolved from mobile-app, not from the monorepo root.
+  export PROJECT_ROOT="${PROJECT_DIR}"
+  export EAS_BUILD_PROFILE="${EAS_BUILD_PROFILE:-production}"
+  export LEAF_BUILD_PROFILE="${LEAF_BUILD_PROFILE:-${EAS_BUILD_PROFILE}}"
+  export EXPO_UPDATE_CHANNEL="${EXPO_UPDATE_CHANNEL:-production}"
+  if [[ -f "${PROJECT_DIR}/index.js" ]]; then
+    # Expo/Metro resolves the bundle entry relative to the workspace server root
+    # in this monorepo, while expo-constants must still use mobile-app as root.
+    export ENTRY_FILE="$(basename "${PROJECT_DIR}")/index.js"
+  fi
+
   ensure_ios_native
   sync_native_ios_version
+  sync_native_ios_updates_config
   ensure_pods
 
   local workspace
@@ -296,18 +331,6 @@ main() {
   if [[ "$(uname -m)" == "arm64" ]]; then
     sim_extra_args+=("EXCLUDED_ARCHS=x86_64")
   fi
-  # Keep local iOS builds aligned with EAS: Expo config, constants and native
-  # manifests must be resolved from mobile-app, not from the monorepo root.
-  export PROJECT_ROOT="${PROJECT_DIR}"
-  export EAS_BUILD_PROFILE="${EAS_BUILD_PROFILE:-production}"
-  export LEAF_BUILD_PROFILE="${LEAF_BUILD_PROFILE:-${EAS_BUILD_PROFILE}}"
-  export EXPO_UPDATE_CHANNEL="${EXPO_UPDATE_CHANNEL:-production}"
-  if [[ -f "${PROJECT_DIR}/index.js" ]]; then
-    # Expo/Metro resolves the bundle entry relative to the workspace server root
-    # in this monorepo, while expo-constants must still use mobile-app as root.
-    export ENTRY_FILE="$(basename "${PROJECT_DIR}")/index.js"
-  fi
-
   case "${MODE}" in
     simulator)
       export LEAF_DISABLE_UPDATES_FOR_SIMULATOR=1
