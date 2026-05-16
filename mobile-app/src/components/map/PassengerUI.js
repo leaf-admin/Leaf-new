@@ -5585,7 +5585,15 @@ function PassengerUI(props) {
                 Logger.log(`✅ Usando coordenadas do cache (${address.source}):`, coords);
             } else if (address.place_id) {
                 // Fallback para Google Places (mais caro, mas necessário)
-                coords = await fetchCoordsfromPlace(address.place_id, null, activeSessionToken);
+                coords = await fetchCoordsfromPlace(address.place_id, null, activeSessionToken, {
+                    query:
+                        address.description ||
+                        address.name ||
+                        address.structured_formatting?.main_text ||
+                        address.structured_formatting?.secondary_text ||
+                        null,
+                    location: currentLocation || pickupAddress || null,
+                });
                 Logger.log('🔄 Usando coordenadas do Google Places:', coords);
             } else {
                 throw new Error('Coordenadas não disponíveis');
@@ -5672,7 +5680,7 @@ function PassengerUI(props) {
         } finally {
             resetPlacesSessionToken();
         }
-    }, [dispatch, formatAddressSimplified, mapRef, saveToHistory, isChangingDestination, tripStatus, recalculateRideWithNewDestination, resetPlacesSessionToken, getPlacesSessionToken, emitFareDebug]);
+    }, [currentLocation, dispatch, formatAddressSimplified, mapRef, pickupAddress, saveToHistory, isChangingDestination, tripStatus, recalculateRideWithNewDestination, resetPlacesSessionToken, getPlacesSessionToken, emitFareDebug]);
 
     const saveToHistory = async (address) => {
         try {
@@ -6080,7 +6088,15 @@ function PassengerUI(props) {
                                                         let coords;
 
                                                         if (selectedResult.place_id) {
-                                                            coords = await fetchCoordsfromPlace(selectedResult.place_id);
+                                                            coords = await fetchCoordsfromPlace(
+                                                                selectedResult.place_id,
+                                                                null,
+                                                                null,
+                                                                {
+                                                                    query: fullAddress,
+                                                                    location: currentLocation ? { lat: currentLocation.lat, lng: currentLocation.lng } : null,
+                                                                }
+                                                            );
                                                         } else if (selectedResult.location) {
                                                             coords = {
                                                                 lat: selectedResult.location.lat,
@@ -6231,7 +6247,11 @@ function PassengerUI(props) {
                                                             coords = await fetchCoordsfromPlace(
                                                                 selectedResult.place_id,
                                                                 null,
-                                                                activeSessionToken
+                                                                activeSessionToken,
+                                                                {
+                                                                    query: typedAddress,
+                                                                    location: currentLocation ? { lat: currentLocation.lat, lng: currentLocation.lng } : null,
+                                                                }
                                                             );
                                                         } else if (selectedResult?.location?.lat && selectedResult?.location?.lng) {
                                                             coords = {

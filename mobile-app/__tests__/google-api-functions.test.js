@@ -2,6 +2,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import {
   fetchGeocodeAddress,
+  fetchCoordsfromPlace,
   fetchPlacesAutocomplete,
   getDirectionsApi,
 } from '../src/common-local/GoogleAPIFunctions';
@@ -133,6 +134,100 @@ describe('GoogleAPIFunctions address search', () => {
     expect(global.fetch).toHaveBeenCalledTimes(2);
     expect(global.fetch.mock.calls[0][0]).toContain('backend.leaf.test/api/places/autocomplete');
     expect(global.fetch.mock.calls[1][0]).toContain('maps.googleapis.com/maps/api/place/autocomplete/json');
+  });
+
+  it('does not store search bias as a cached place coordinate', async () => {
+    AsyncStorage.getItem.mockResolvedValue(null);
+    global.fetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        status: 'success',
+        cached: false,
+        predictions: [
+          {
+            place_id: 'ferry-building',
+            description: 'Ferry Building, São Francisco, CA, EUA',
+            structured_formatting: {
+              main_text: 'Ferry Building',
+              secondary_text: 'São Francisco, CA, EUA',
+            },
+          },
+        ],
+      }),
+    });
+
+    await fetchPlacesAutocomplete('Ferry Building', 'token-1', {
+      lat: 37.7955,
+      lng: -122.3937,
+    });
+
+    const savedPayload = JSON.parse(AsyncStorage.setItem.mock.calls[0][1]);
+    expect(savedPayload.place_id).toBe('ferry-building');
+    expect(savedPayload.location).toBeUndefined();
+    expect(savedPayload.locationSource).toBeUndefined();
+  });
+
+  it('ignores legacy local cache coordinates that were not marked as resolved place coordinates', async () => {
+    AsyncStorage.getItem.mockResolvedValue(JSON.stringify({
+      place_id: 'legacy-cache',
+      description: 'Legacy cached place',
+      location: {
+        lat: 37.7955,
+        lng: -122.3937,
+      },
+    }));
+
+    const result = await fetchPlacesAutocomplete('Legacy cached place', 'token-legacy', {
+      lat: 37.7955,
+      lng: -122.3937,
+    });
+
+    expect(result[0].place_id).toBe('legacy-cache');
+    expect(result[0].location).toBeUndefined();
+    expect(global.fetch).not.toHaveBeenCalled();
+  });
+
+  it('passes query and location context to backend Place Details', async () => {
+    global.fetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        status: 'success',
+        data: {
+          place_id: 'shopping-leblon',
+          name: 'Shopping Leblon',
+          address: 'Av. Afrânio de Melo Franco',
+          lat: -22.9837,
+          lng: -43.2179,
+        },
+      }),
+    });
+
+    const result = await fetchCoordsfromPlace(
+      'shopping-leblon',
+      null,
+      'session-token',
+      {
+        query: 'Shopping Leblon',
+        location: {
+          lat: -22.984,
+          lng: -43.218,
+        },
+      },
+    );
+
+    const requestBody = JSON.parse(global.fetch.mock.calls[0][1].body);
+    expect(result.lat).toBe(-22.9837);
+    expect(requestBody).toEqual(expect.objectContaining({
+      placeId: 'shopping-leblon',
+      sessionToken: 'session-token',
+      query: 'Shopping Leblon',
+      location: {
+        lat: -22.984,
+        lng: -43.218,
+      },
+    }));
   });
 
   it('does not apply Brazil geocode bias outside Brazil', async () => {

@@ -157,4 +157,128 @@ describe('places-cache-service directions steps', () => {
     );
     expect(global.fetch).not.toHaveBeenCalled();
   });
+
+  it('returns cached place details by place_id without calling Google', async () => {
+    const cachedPlace = {
+      place_id: 'place_cached_1',
+      name: 'Shopping Leblon',
+      address: 'Av. Afrânio de Melo Franco, Rio de Janeiro',
+      lat: -22.9837,
+      lng: -43.2179,
+    };
+    const placesCacheService = loadService();
+    placesCacheService.googleApiKey = 'test-google-key';
+    placesCacheService.isInitialized = true;
+    mockRedisConnection.get.mockResolvedValue(JSON.stringify(cachedPlace));
+    global.fetch = jest.fn();
+
+    const result = await placesCacheService.getPlaceDetails('place_cached_1');
+
+    expect(result).toEqual(expect.objectContaining({
+      place_id: 'place_cached_1',
+      lat: -22.9837,
+      lng: -43.2179,
+      cached: true,
+      source: 'place_id_cache',
+    }));
+    expect(mockRedisConnection.get).toHaveBeenCalledWith('place:id:place_cached_1');
+    expect(global.fetch).not.toHaveBeenCalled();
+  });
+
+  it('caches Google place details by place_id after lookup', async () => {
+    const placesCacheService = loadService();
+    placesCacheService.googleApiKey = 'test-google-key';
+    placesCacheService.isInitialized = true;
+    mockRedisConnection.get.mockResolvedValue(null);
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        status: 'OK',
+        result: {
+          place_id: 'place_google_1',
+          name: 'Copacabana Palace',
+          formatted_address: 'Av. Atlântica, 1702 - Copacabana',
+          geometry: {
+            location: {
+              lat: -22.967,
+              lng: -43.179,
+            },
+          },
+        },
+      }),
+    });
+
+    const result = await placesCacheService.getPlaceDetails('place_google_1');
+
+    expect(result).toEqual(expect.objectContaining({
+      place_id: 'place_google_1',
+      lat: -22.967,
+      lng: -43.179,
+      cached: false,
+      source: 'google_place_details',
+    }));
+    expect(mockRedisConnection.setex).toHaveBeenCalledWith(
+      'place:id:place_google_1',
+      placesCacheService.cacheTTL,
+      expect.stringContaining('Copacabana Palace'),
+    );
+  });
+
+  it('stores query cache in a geohash-scoped key when search location is provided', async () => {
+    const placesCacheService = loadService();
+    placesCacheService.isInitialized = true;
+
+    const saved = await placesCacheService.savePlace(
+      'Shopping Leblon',
+      {
+        place_id: 'place_geo_1',
+        name: 'Shopping Leblon',
+        address: 'Av. Afrânio de Melo Franco, Rio de Janeiro',
+        lat: -22.9837,
+        lng: -43.2179,
+      },
+      {
+        location: {
+          lat: -22.984,
+          lng: -43.218,
+        },
+      },
+    );
+
+    const cacheKeys = mockRedisConnection.setex.mock.calls.map((call) => call[0]);
+    expect(saved).toBe(true);
+    expect(cacheKeys).toEqual(expect.arrayContaining([
+      expect.stringMatching(/^place:v2:geo:[a-z0-9]+:shopping_leblon$/),
+      'place:id:place_geo_1',
+    ]));
+    expect(cacheKeys).not.toContain('place:shopping_leblon');
+  });
+
+  it('does not reuse a distant legacy query cache hit when search location is provided', async () => {
+    const placesCacheService = loadService();
+    placesCacheService.isInitialized = true;
+    mockRedisConnection.get.mockImplementation(async (key) => {
+      if (String(key).startsWith('place:v2:geo:')) {
+        return null;
+      }
+      if (key === 'place:centro') {
+        return JSON.stringify({
+          place_id: 'centro_sp',
+          name: 'Centro',
+          address: 'Centro, São Paulo',
+          lat: -23.5505,
+          lng: -46.6333,
+        });
+      }
+      return null;
+    });
+
+    const result = await placesCacheService.searchPlace('Centro', {
+      lat: -22.9068,
+      lng: -43.1729,
+    });
+
+    expect(result).toBeNull();
+  });
 });

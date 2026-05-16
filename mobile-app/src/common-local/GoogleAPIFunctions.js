@@ -62,6 +62,33 @@ const normalizeOptionalText = (value) => {
     return normalized.length > 0 ? normalized : null;
 };
 
+const normalizePlaceLocation = (value = null) => {
+    const lat = Number(value?.lat ?? value?.latitude);
+    const lng = Number(value?.lng ?? value?.longitude);
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+        return null;
+    }
+    return { lat, lng };
+};
+
+const sanitizeLocalPlaceCacheEntry = (entry = null) => {
+    if (!entry || typeof entry !== 'object') {
+        return null;
+    }
+
+    const sanitized = { ...entry };
+    const resolvedLocation = normalizePlaceLocation(entry.location);
+    if (entry.locationSource === 'place_coordinates' && resolvedLocation) {
+        sanitized.location = resolvedLocation;
+        sanitized.locationSource = 'place_coordinates';
+    } else {
+        delete sanitized.location;
+        delete sanitized.locationSource;
+    }
+
+    return sanitized;
+};
+
 const buildBackendRideTelemetryPayload = (telemetryContext = null, fallbackSurface = 'mobile_google_functions') => {
     if (!telemetryContext || typeof telemetryContext !== 'object') {
         return null;
@@ -92,7 +119,7 @@ const getFromLocalCache = async (query) => {
     try {
         const cacheKey = getLocalCacheKey(query);
         const cached = await AsyncStorage.getItem(cacheKey);
-        return cached ? JSON.parse(cached) : null;
+        return cached ? sanitizeLocalPlaceCacheEntry(JSON.parse(cached)) : null;
     } catch (error) {
         Logger.log('⚠️ [PlacesCache] Erro ao ler cache local:', error.message);
         return null;
@@ -102,10 +129,10 @@ const getFromLocalCache = async (query) => {
 const saveToLocalCache = async (query, placeData) => {
     try {
         const cacheKey = getLocalCacheKey(query);
-        await AsyncStorage.setItem(cacheKey, JSON.stringify({
+        await AsyncStorage.setItem(cacheKey, JSON.stringify(sanitizeLocalPlaceCacheEntry({
             ...placeData,
             cachedAt: Date.now()
-        }));
+        })));
         Logger.log('💾 [PlacesCache] Resultado salvo no cache local.');
     } catch (error) {
         Logger.log('⚠️ [PlacesCache] Erro ao salvar cache local:', error.message);
@@ -348,9 +375,16 @@ export const fetchPlacesAutocomplete = (searchKeyword, sessionToken, location = 
                         }
 
                         if (canUseAutocompleteCache) {
+                            const firstPrediction = backendResult.predictions[0];
+                            const resolvedLocation = normalizePlaceLocation(firstPrediction?.location);
                             await saveToLocalCache(searchKeyword, {
-                                ...backendResult.predictions[0],
-                                location: location || null,
+                                ...firstPrediction,
+                                ...(resolvedLocation
+                                    ? {
+                                        location: resolvedLocation,
+                                        locationSource: 'place_coordinates'
+                                    }
+                                    : {})
                             });
                         }
 
@@ -427,12 +461,18 @@ export const fetchPlacesAutocomplete = (searchKeyword, sessionToken, location = 
                 
                 // 3️⃣ Salvar no cache para próxima vez (assíncrono - não bloqueia)
                 if (searchResults.length > 0 && canUseAutocompleteCache) {
-                    saveToCache(searchKeyword, searchResults[0]).catch(error => {
+                    saveToCache(searchKeyword, searchResults[0], location).catch(error => {
                         Logger.warn('⚠️ [PlacesCache] Erro ao salvar no cache remoto:', error.message);
                     });
+                    const resolvedLocation = normalizePlaceLocation(searchResults[0]?.location);
                     await saveToLocalCache(searchKeyword, {
                         ...searchResults[0],
-                        location: location || null
+                        ...(resolvedLocation
+                            ? {
+                                location: resolvedLocation,
+                                locationSource: 'place_coordinates'
+                            }
+                            : {})
                     });
                 }
                 
@@ -457,7 +497,7 @@ export const fetchPlacesAutocomplete = (searchKeyword, sessionToken, location = 
  * @param {object} placeData - Dados do lugar
  * @param {object} location - Localização do usuário (opcional)
  */
-async function saveToCache(query, placeData) {
+async function saveToCache(query, placeData, location = null) {
     try {
         // Evitar Place Details implícito a cada autocomplete (custo alto).
         // Persistimos dados básicos e coordenadas apenas quando já disponíveis.
@@ -500,7 +540,8 @@ async function saveToCache(query, placeData) {
             },
             body: JSON.stringify({
                 query: query,
-                placeData: placeDetails
+                placeData: placeDetails,
+                location: normalizePlaceLocation(location)
             }),
             signal: controller.signal
         });
@@ -518,10 +559,17 @@ async function saveToCache(query, placeData) {
     }
 }
 
-export const fetchCoordsfromPlace = (place_id, telemetryContext = null, sessionTokenInput = null) => {
+export const fetchCoordsfromPlace = (place_id, telemetryContext = null, sessionTokenInput = null, options = {}) => {
     return new Promise(async (resolve,reject)=>{
         Logger.log('📍 fetchCoordsfromPlace chamado com place_id:', place_id);
         const sessionToken = typeof sessionTokenInput === 'string' ? sessionTokenInput.trim() : '';
+        const detailQuery = normalizeOptionalText(
+            options?.query ||
+            options?.description ||
+            options?.name ||
+            options?.address
+        );
+        const detailLocation = normalizePlaceLocation(options?.location);
 
         // 1️⃣ Tentar backend autoritativo primeiro
         try {
@@ -541,6 +589,8 @@ export const fetchCoordsfromPlace = (place_id, telemetryContext = null, sessionT
                 body: JSON.stringify({
                     placeId: place_id,
                     sessionToken: sessionToken || null,
+                    query: detailQuery,
+                    location: detailLocation,
                     telemetry: backendTelemetry,
                 }),
                 signal: controller.signal,
@@ -614,6 +664,18 @@ export const fetchCoordsfromPlace = (place_id, telemetryContext = null, sessionT
                         formatted_address: json.result.formatted_address,
                         name: json.result.name,
                     };
+
+                    if (detailQuery) {
+                        saveToCache(detailQuery, {
+                            place_id,
+                            name: coords.name,
+                            address: coords.formatted_address,
+                            lat: coords.lat,
+                            lng: coords.lng,
+                        }, detailLocation).catch((cacheError) => {
+                            Logger.warn('⚠️ [PlacesCache] Erro ao salvar Place Details no cache:', cacheError.message);
+                        });
+                    }
 
                     Logger.log('✅ Coordenadas obtidas:', coords);
                     resolve(coords);

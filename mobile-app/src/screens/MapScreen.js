@@ -2085,7 +2085,10 @@ export default function MapScreen(props) {
 
     const handleSelectAddress = useCallback(async (address) => {
         try {
-            const coords = await fetchCoordsfromPlace(address.place_id);
+            const coords = await fetchCoordsfromPlace(address.place_id, null, null, {
+                query: address.description,
+                location: region ? { lat: region.latitude, lng: region.longitude } : null,
+            });
             if (coords) {
                 const newAddress = {
                     lat: coords.lat,
@@ -2104,7 +2107,7 @@ export default function MapScreen(props) {
         } catch (error) {
             Logger.error('Erro ao selecionar endereço:', error);
         }
-    }, [activeField]);
+    }, [activeField, region]);
 
     useEffect(() => {
         const loadAddressHistory = async () => {

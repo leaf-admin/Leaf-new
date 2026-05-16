@@ -133,6 +133,10 @@ describe('places routes', () => {
       .send({
         placeId: 'place_2',
         query: 'copacabana palace',
+        location: {
+          lat: -22.971,
+          lng: -43.182,
+        },
         telemetry: {
           bookingId: 'booking_xyz',
           sourceMeta: {
@@ -155,6 +159,49 @@ describe('places routes', () => {
       'copacabana palace',
       expect.objectContaining({
         place_id: 'place_2',
+      }),
+      expect.objectContaining({
+        location: {
+          lat: -22.971,
+          lng: -43.182,
+        },
+      }),
+    );
+  });
+
+  it('returns cached place details without Google billing telemetry', async () => {
+    const app = createApp();
+    mockGetPlaceDetails.mockResolvedValue({
+      place_id: 'place_cached',
+      name: 'Shopping Leblon',
+      address: 'Av. Afrânio de Melo Franco',
+      lat: -22.9837,
+      lng: -43.2179,
+      cached: true,
+      source: 'place_id_cache',
+    });
+
+    const response = await request(app)
+      .post('/api/places/details')
+      .send({
+        placeId: 'place_cached',
+        query: 'shopping leblon',
+        telemetry: {
+          bookingId: 'booking_cached',
+        },
+      });
+
+    expect(response.status).toBe(200);
+    expect(response.body.status).toBe('success');
+    expect(response.body.telemetryCaptured).toBe(false);
+    expect(mockIngestGoogleSkuUsage).not.toHaveBeenCalled();
+    expect(mockSavePlace).toHaveBeenCalledWith(
+      'shopping leblon',
+      expect.objectContaining({
+        place_id: 'place_cached',
+      }),
+      expect.objectContaining({
+        location: null,
       }),
     );
   });

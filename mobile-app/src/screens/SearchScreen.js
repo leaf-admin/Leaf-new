@@ -155,7 +155,9 @@ export default function SearchScreen(props) {
     setSearchKeyword(checkSearchPhrase(data.description));
     setIsShowingResults(false);
     if (data.place_id) {
-      fetchCoordsfromPlace(data.place_id).then((res) => {
+      fetchCoordsfromPlace(data.place_id, null, null, {
+        query: data.description,
+      }).then((res) => {
         if (res && res.lat) {
           if (locationType == 'pickup') {
             dispatch(updateTripPickup({
@@ -293,7 +295,9 @@ export default function SearchScreen(props) {
     setLoading(true);
     if(item && saveNameValue && ((saveNameValue== t('other') && addressName) || saveNameValue!= t('other'))){
       let name = saveNameValue== t('other') ? addressName : saveNameValue
-      fetchCoordsfromPlace(item.place_id).then((res) => {
+      fetchCoordsfromPlace(item.place_id, null, null, {
+        query: item.description,
+      }).then((res) => {
         if (res && res.lat) {
           let dropObj = {
             lat: res.lat,

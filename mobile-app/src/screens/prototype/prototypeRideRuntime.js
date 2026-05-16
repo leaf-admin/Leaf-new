@@ -9714,6 +9714,10 @@ async function resolveDestinationCoordinate(destination) {
       destination.place_id,
       telemetryContext,
       sessionToken || null,
+      {
+        query: destination.name || destination.address || null,
+        location: destination.coordinate || null,
+      },
     );
     if (!Number.isFinite(details?.lat) || !Number.isFinite(details?.lng)) {
       return destination;

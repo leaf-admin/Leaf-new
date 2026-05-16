@@ -532,6 +532,7 @@ router.post('/api/places/autocomplete', async (req, res) => {
           predictions: [{
             place_id: cached.place_id || null,
             description: cached.address || cached.name || query,
+            source: cached.source || 'redis_cache',
             structured_formatting: {
               main_text: cached.name || cached.address || query,
               secondary_text: cached.address || cached.name || query,
@@ -542,6 +543,7 @@ router.post('/api/places/autocomplete', async (req, res) => {
               lat: cached.lat,
               lng: cached.lng,
             },
+            locationSource: 'place_coordinates',
           }],
           telemetryCaptured: false,
           cached: true,
@@ -603,6 +605,7 @@ router.post('/api/places/details', async (req, res) => {
     const placeId = normalizeText(req.body?.placeId || req.body?.place_id, '');
     const sessionToken = normalizeText(req.body?.sessionToken, null);
     const query = normalizeText(req.body?.query, null);
+    const location = normalizeLocation(req.body?.location);
     const telemetry = normalizeTelemetry(req.body?.telemetry || {});
 
     if (!placeId) {
@@ -620,7 +623,8 @@ router.post('/api/places/details', async (req, res) => {
       });
     }
 
-    const telemetryCaptured = await captureBookingGoogleTelemetry({
+    const servedFromCache = details.cached === true;
+    const telemetryCaptured = servedFromCache ? false : await captureBookingGoogleTelemetry({
       bookingId: telemetry.bookingId,
       sourceKey: telemetry.sourceKey || 'backend:places:details',
       sourceMeta: {
@@ -641,7 +645,7 @@ router.post('/api/places/details', async (req, res) => {
     });
 
     if (query) {
-      placesCacheService.savePlace(query, details).catch((cacheError) => {
+      placesCacheService.savePlace(query, details, { location }).catch((cacheError) => {
         logger.warn(`⚠️ [PlacesRoute] Não foi possível salvar details no cache: ${cacheError.message}`);
       });
     }
@@ -864,6 +868,7 @@ router.post('/api/places/directions', async (req, res) => {
 router.post('/api/places/save', async (req, res) => {
   try {
     const { query, placeData } = req.body;
+    const location = normalizeLocation(req.body?.location);
 
     if (!query || !placeData) {
       return res.status(400).json({
@@ -872,7 +877,7 @@ router.post('/api/places/save', async (req, res) => {
       });
     }
 
-    const saved = await placesCacheService.savePlace(query, placeData);
+    const saved = await placesCacheService.savePlace(query, placeData, { location });
 
     if (saved) {
       return res.json({
@@ -881,9 +886,9 @@ router.post('/api/places/save', async (req, res) => {
       });
     }
 
-    return res.status(500).json({
-      status: 'error',
-      message: 'Erro ao salvar no cache.'
+    return res.status(202).json({
+      status: 'skipped',
+      message: 'Lugar sem coordenadas resolvidas; cache não atualizado.'
     });
 
   } catch (error) {

@@ -12,11 +12,21 @@
 const { logger } = require('../utils/logger');
 const redisPool = require('../utils/redis-pool');
 const { normalizeQuery, isValidQuery } = require('../utils/places-normalizer');
+const GeoHashUtils = require('../utils/geohash-utils');
 
 const DIRECTIONS_CACHE_TTL_SECONDS = Number.parseInt(
   process.env.PLACES_DIRECTIONS_CACHE_TTL_SECONDS || process.env.DIRECTIONS_CACHE_TTL_SECONDS || '900',
   10,
 );
+const QUERY_CACHE_GEOHASH_PRECISION = Math.max(
+  4,
+  Math.min(7, Number.parseInt(process.env.PLACES_QUERY_CACHE_GEOHASH_PRECISION || '5', 10) || 5),
+);
+const QUERY_CACHE_GLOBAL_FALLBACK_RADIUS_KM = Math.max(
+  1,
+  Number.parseFloat(process.env.PLACES_QUERY_CACHE_GLOBAL_FALLBACK_RADIUS_KM || '50') || 50,
+);
+const EARTH_RADIUS_KM = 6371;
 
 function normalizeCoordinateNumber(value) {
   const parsed = Number(value);
@@ -41,6 +51,95 @@ function serializeLatLngPair(point) {
     return null;
   }
   return `${point.lat.toFixed(6)},${point.lng.toFixed(6)}`;
+}
+
+function normalizePlaceId(value) {
+  return String(value || '').trim();
+}
+
+function buildPlaceIdCacheKey(placeId) {
+  return `place:id:${normalizePlaceId(placeId)}`;
+}
+
+function normalizeCacheLocation(location = null) {
+  const lat = Number(location?.lat ?? location?.latitude);
+  const lng = Number(location?.lng ?? location?.longitude);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+    return null;
+  }
+  return { lat, lng };
+}
+
+function resolveQueryGeoScope(location = null) {
+  const normalized = normalizeCacheLocation(location);
+  if (!normalized) {
+    return null;
+  }
+
+  try {
+    return GeoHashUtils.getRegionHash(normalized.lat, normalized.lng, QUERY_CACHE_GEOHASH_PRECISION);
+  } catch (_error) {
+    return null;
+  }
+}
+
+function buildQueryCacheKey(alias, geoScope = null) {
+  return geoScope ? `place:v2:geo:${geoScope}:${alias}` : `place:${alias}`;
+}
+
+function haversineKm(origin, destination) {
+  const a = normalizeCacheLocation(origin);
+  const b = normalizeCacheLocation(destination);
+  if (!a || !b) {
+    return Infinity;
+  }
+
+  const toRad = (deg) => (deg * Math.PI) / 180;
+  const dLat = toRad(b.lat - a.lat);
+  const dLng = toRad(b.lng - a.lng);
+  const lat1 = toRad(a.lat);
+  const lat2 = toRad(b.lat);
+  const value =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLng / 2) ** 2;
+
+  return EARTH_RADIUS_KM * 2 * Math.atan2(Math.sqrt(value), Math.sqrt(1 - value));
+}
+
+function isCachedPlaceCompatibleWithLocation(cachedPlace, location = null) {
+  const normalizedLocation = normalizeCacheLocation(location);
+  if (!normalizedLocation) {
+    return true;
+  }
+
+  const cachedLocation = normalizeCacheLocation(cachedPlace);
+  if (!cachedLocation) {
+    return false;
+  }
+
+  return haversineKm(normalizedLocation, cachedLocation) <= QUERY_CACHE_GLOBAL_FALLBACK_RADIUS_KM;
+}
+
+function normalizePlaceCacheData(query, placeData = {}) {
+  const lat = Number(placeData.lat ?? placeData.geometry?.location?.lat ?? placeData.location?.lat);
+  const lng = Number(placeData.lng ?? placeData.geometry?.location?.lng ?? placeData.location?.lng);
+
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+    return null;
+  }
+
+  const placeId = normalizePlaceId(placeData.place_id || placeData.placeId);
+
+  return {
+    alias: query ? normalizeQuery(query) : null,
+    query: query || null,
+    place_id: placeId || null,
+    name: placeData.name || placeData.description || query || '',
+    address: placeData.address || placeData.formatted_address || placeData.description || query || '',
+    lat,
+    lng,
+    cached_at: new Date().toISOString(),
+  };
 }
 
 function normalizeWaypointsInput(waypointsInput) {
@@ -252,22 +351,41 @@ class PlacesCacheService {
       }
 
       const alias = normalizeQuery(query);
-      const cacheKey = `place:${alias}`;
+      const geoScope = resolveQueryGeoScope(location);
+      const scopedCacheKey = geoScope ? buildQueryCacheKey(alias, geoScope) : null;
+      const legacyCacheKey = buildQueryCacheKey(alias);
+      const cacheKeys = scopedCacheKey
+        ? [scopedCacheKey, legacyCacheKey]
+        : [legacyCacheKey];
 
-      logger.info(`🔍 [PlacesCache] Buscando: "${query}" → alias: "${alias}"`);
+      logger.info(`🔍 [PlacesCache] Buscando: "${query}" → alias: "${alias}"${geoScope ? ` geo:${geoScope}` : ''}`);
 
       // 1. Buscar no Redis (cache rápido)
       if (this.isInitialized) {
         try {
-          const cached = await this.redis.get(cacheKey);
-          if (cached) {
+          for (const cacheKey of cacheKeys) {
+            const cached = await this.redis.get(cacheKey);
+            if (!cached) {
+              continue;
+            }
+
             const result = JSON.parse(cached);
+            if (!isCachedPlaceCompatibleWithLocation(result, location)) {
+              logger.info(`↩️ [PlacesCache] Ignorando cache global distante: ${alias}`);
+              continue;
+            }
+
+            if (scopedCacheKey && cacheKey !== scopedCacheKey) {
+              this.redis.setex(scopedCacheKey, this.cacheTTL, JSON.stringify(result)).catch(() => {});
+            }
+
             logger.info(`✅ [PlacesCache] Cache HIT: ${alias}`);
             this.incrementHit(); // 📊 Incrementar hit
             return {
               ...result,
-              source: 'redis_cache',
-              cached: true
+              source: cacheKey === scopedCacheKey ? 'redis_geo_cache' : 'redis_cache',
+              cached: true,
+              geoScope: cacheKey === scopedCacheKey ? geoScope : result.geoScope || null,
             };
           }
         } catch (redisError) {
@@ -303,32 +421,42 @@ class PlacesCacheService {
    * @param {object} placeData - Dados do lugar do Google Places
    * @returns {Promise<boolean>} - true se salvou com sucesso
    */
-  async savePlace(query, placeData) {
+  async savePlace(query, placeData, options = {}) {
     try {
       if (!isValidQuery(query) || !placeData) {
         return false;
       }
 
       const alias = normalizeQuery(query);
-      const cacheKey = `place:${alias}`;
+      const geoScope = resolveQueryGeoScope(options?.location || options?.searchLocation || null);
+      const cacheKeys = geoScope
+        ? [buildQueryCacheKey(alias, geoScope)]
+        : [buildQueryCacheKey(alias)];
 
-      // Preparar dados para cache
-      const cacheData = {
-        alias,
-        query: query, // Query original
-        place_id: placeData.place_id,
-        name: placeData.name,
-        address: placeData.address || placeData.formatted_address,
-        lat: placeData.lat || placeData.geometry?.location?.lat,
-        lng: placeData.lng || placeData.geometry?.location?.lng,
-        cached_at: new Date().toISOString()
-      };
+      const cacheData = normalizePlaceCacheData(query, placeData);
+      if (!cacheData) {
+        logger.info(`ℹ️ [PlacesCache] Ignorando cache sem coordenadas resolvidas: ${alias}`);
+        return false;
+      }
 
       // Salvar no Redis
       if (this.isInitialized) {
         try {
-          await this.redis.setex(cacheKey, this.cacheTTL, JSON.stringify(cacheData));
-          logger.info(`💾 [PlacesCache] Place salvo no cache: ${alias}`);
+          const scopedCacheData = {
+            ...cacheData,
+            geoScope: geoScope || null,
+          };
+          await Promise.all(cacheKeys.map((cacheKey) => (
+            this.redis.setex(cacheKey, this.cacheTTL, JSON.stringify(scopedCacheData))
+          )));
+          if (cacheData.place_id) {
+            await this.redis.setex(
+              buildPlaceIdCacheKey(cacheData.place_id),
+              this.cacheTTL,
+              JSON.stringify(scopedCacheData),
+            );
+          }
+          logger.info(`💾 [PlacesCache] Place salvo no cache: ${alias}${geoScope ? ` geo:${geoScope}` : ''}`);
           this.incrementSave(); // 📊 Incrementar save
           
           // TODO: Salvar no PostgreSQL quando implementado
@@ -344,6 +472,67 @@ class PlacesCacheService {
       return false;
     } catch (error) {
       logger.error(`❌ [PlacesCache] Erro ao salvar place: ${error.message}`);
+      return false;
+    }
+  }
+
+  async getCachedPlaceDetails(placeId) {
+    try {
+      const normalizedPlaceId = normalizePlaceId(placeId);
+      if (!normalizedPlaceId || !this.isInitialized) {
+        return null;
+      }
+
+      const cached = await this.redis.get(buildPlaceIdCacheKey(normalizedPlaceId));
+      if (!cached) {
+        return null;
+      }
+
+      const parsed = JSON.parse(cached);
+      const cacheData = normalizePlaceCacheData(parsed.query || parsed.name || normalizedPlaceId, {
+        ...parsed,
+        place_id: parsed.place_id || normalizedPlaceId,
+      });
+      if (!cacheData) {
+        return null;
+      }
+
+      this.incrementHit();
+      return {
+        ...cacheData,
+        source: 'place_id_cache',
+        cached: true,
+      };
+    } catch (error) {
+      logger.warn(`⚠️ [PlacesCache] Erro ao buscar Place Details por place_id no cache: ${error.message}`);
+      return null;
+    }
+  }
+
+  async savePlaceDetailsById(placeId, placeData) {
+    try {
+      const normalizedPlaceId = normalizePlaceId(placeId || placeData?.place_id);
+      if (!normalizedPlaceId || !placeData || !this.isInitialized) {
+        return false;
+      }
+
+      const cacheData = normalizePlaceCacheData(placeData.query || placeData.name || normalizedPlaceId, {
+        ...placeData,
+        place_id: normalizedPlaceId,
+      });
+      if (!cacheData) {
+        return false;
+      }
+
+      await this.redis.setex(
+        buildPlaceIdCacheKey(normalizedPlaceId),
+        this.cacheTTL,
+        JSON.stringify(cacheData),
+      );
+      this.incrementSave();
+      return true;
+    } catch (error) {
+      logger.warn(`⚠️ [PlacesCache] Erro ao salvar Place Details por place_id: ${error.message}`);
       return false;
     }
   }
@@ -392,15 +581,20 @@ class PlacesCacheService {
    */
   async getPlaceDetails(placeId, options = {}) {
     try {
-      if (!this.googleApiKey) {
-        return null;
-      }
-
       const normalizedPlaceId = String(placeId || '').trim();
       if (!normalizedPlaceId) {
         return null;
       }
       const normalizedSessionToken = String(options?.sessionToken || '').trim();
+
+      const cachedDetails = await this.getCachedPlaceDetails(normalizedPlaceId);
+      if (cachedDetails) {
+        return cachedDetails;
+      }
+
+      if (!this.googleApiKey) {
+        return null;
+      }
 
       let url = `https://maps.googleapis.com/maps/api/place/details/json?place_id=${encodeURIComponent(normalizedPlaceId)}&key=${this.googleApiKey}&fields=geometry,formatted_address,name,place_id&language=pt-BR`;
       if (normalizedSessionToken) {
@@ -412,13 +606,17 @@ class PlacesCacheService {
 
       if (json.status === 'OK' && json.result) {
         const location = json.result.geometry.location;
-        return {
+        const details = {
           place_id: placeId,
           name: json.result.name,
           address: json.result.formatted_address,
           lat: location.lat,
-          lng: location.lng
+          lng: location.lng,
+          source: 'google_place_details',
+          cached: false,
         };
+        await this.savePlaceDetailsById(normalizedPlaceId, details);
+        return details;
       }
 
       return null;
