@@ -152,21 +152,17 @@ function main() {
     if (Number.isFinite(geofenceRadiusKm) && geofenceRadiusKm >= 100) {
       blockers.push(`GEOFENCE_RADIUS_KM=${geofenceRadiusKm} abre demais a operação em produção`);
     }
-    if (webhookRequireSignature && !hasWebhookVerifier) {
-      blockers.push('WOOVI_WEBHOOK_REQUIRE_SIGNATURE=true exige verificador de assinatura configurado');
-    }
     if (!hasWebhookVerifier) {
-      if (!webhookAllowUnsigned) {
-        blockers.push('Webhook sem assinatura em produção requer WOOVI_WEBHOOK_ALLOW_UNSIGNED=true');
-      }
-      if (!webhookProviderVerificationRequired) {
-        blockers.push(
-          'Webhook sem assinatura em produção requer WOOVI_WEBHOOK_PROVIDER_VERIFICATION_REQUIRED=true'
-        );
-      }
-      warnings.push(
-        'Webhook Woovi/OpenPix sem verificador criptográfico: confirmação autoritativa no provedor deve permanecer ativa'
-      );
+      blockers.push('Webhook Woovi/OpenPix em produção exige WOOVI_WEBHOOK_PUBLIC_KEY ou WOOVI_WEBHOOK_SIGNATURE_SECRET');
+    }
+    if (!webhookRequireSignature) {
+      blockers.push('WOOVI_WEBHOOK_REQUIRE_SIGNATURE=true obrigatório em produção');
+    }
+    if (webhookAllowUnsigned) {
+      blockers.push('WOOVI_WEBHOOK_ALLOW_UNSIGNED=false obrigatório em produção');
+    }
+    if (!webhookProviderVerificationRequired) {
+      warnings.push('WOOVI_WEBHOOK_PROVIDER_VERIFICATION_REQUIRED=false remove conferência complementar no provedor');
     }
     if (boolEnv('ENABLE_MANUAL_PAYMENT_CONFIRMATION')) {
       blockers.push('ENABLE_MANUAL_PAYMENT_CONFIRMATION=true bloqueado em produção');

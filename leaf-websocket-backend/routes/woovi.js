@@ -247,6 +247,8 @@ function verifyWooviWebhookSignature(req) {
   const verifiersConfigured = Boolean(publicKey || recommendedHmacSecret || deprecatedHmacSecret);
   const signaturePresent = Boolean(recommendedSignature || deprecatedHmacSignature);
   const webhookRequireSignature = readBooleanEnv('WOOVI_WEBHOOK_REQUIRE_SIGNATURE', verifiersConfigured);
+  const isProdRuntime = isProductionRuntime();
+  const signatureRequired = webhookRequireSignature || isProdRuntime;
   const allowUnsignedWebhook = readBooleanEnv(
     'WOOVI_WEBHOOK_ALLOW_UNSIGNED',
     !verifiersConfigured
@@ -313,12 +315,11 @@ function verifyWooviWebhookSignature(req) {
     };
   }
 
-  const isProdRuntime = isProductionRuntime();
   const allowUnsignedWithoutVerifier =
     !signaturePresent &&
     !verifiersConfigured &&
     allowUnsignedWebhook &&
-    (!webhookRequireSignature || !isProdRuntime) &&
+    !signatureRequired &&
     providerVerificationRequired;
 
   if (allowUnsignedWithoutVerifier) {
@@ -334,8 +335,10 @@ function verifyWooviWebhookSignature(req) {
 
   let reason = 'WEBHOOK_SIGNATURE_INVALID';
   if (!verifiersConfigured) {
-    if (webhookRequireSignature && isProdRuntime) {
+    if (signatureRequired && isProdRuntime) {
       reason = 'WEBHOOK_SIGNATURE_VERIFIER_NOT_CONFIGURED';
+    } else if (signatureRequired) {
+      reason = 'WEBHOOK_SIGNATURE_REQUIRED';
     } else if (!allowUnsignedWebhook) {
       reason = 'WEBHOOK_UNSIGNED_DISABLED';
     } else if (!providerVerificationRequired) {

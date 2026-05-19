@@ -132,7 +132,7 @@ describe('woovi webhook guards', () => {
     expect(result.method).toBe('unsigned_non_production');
   });
 
-  it('accepts unsigned webhook in production when provider verification is enforced', () => {
+  it('rejects unsigned webhook in production even when provider verification is enforced', () => {
     process.env.NODE_ENV = 'production';
     process.env.WOOVI_WEBHOOK_ALLOW_UNSIGNED = 'true';
     process.env.WOOVI_WEBHOOK_PROVIDER_VERIFICATION_REQUIRED = 'true';
@@ -142,9 +142,25 @@ describe('woovi webhook guards', () => {
       body: { event: 'CHARGE_COMPLETED' }
     }));
 
-    expect(result.valid).toBe(true);
-    expect(result.method).toBe('unsigned_provider_verification');
+    expect(result.valid).toBe(false);
+    expect(result.method).toBeNull();
+    expect(result.reason).toBe('WEBHOOK_SIGNATURE_VERIFIER_NOT_CONFIGURED');
     expect(result.providerVerificationRequired).toBe(true);
+  });
+
+  it('rejects unsigned webhook in production even when signature requirement flag is false', () => {
+    process.env.NODE_ENV = 'production';
+    process.env.WOOVI_WEBHOOK_SIGNATURE_SECRET = 'woovi-secret';
+    process.env.WOOVI_WEBHOOK_REQUIRE_SIGNATURE = 'false';
+    process.env.WOOVI_WEBHOOK_ALLOW_UNSIGNED = 'true';
+
+    const result = verifyWooviWebhookSignature(createReq({
+      rawBody: Buffer.from(JSON.stringify({ event: 'CHARGE_COMPLETED' })),
+      body: { event: 'CHARGE_COMPLETED' }
+    }));
+
+    expect(result.valid).toBe(false);
+    expect(result.reason).toBe('WEBHOOK_SIGNATURE_MISSING');
   });
 
   it('rejects unsigned webhook in production when provider verification is disabled', () => {
@@ -158,7 +174,7 @@ describe('woovi webhook guards', () => {
     }));
 
     expect(result.valid).toBe(false);
-    expect(result.reason).toBe('WEBHOOK_PROVIDER_VERIFICATION_DISABLED');
+    expect(result.reason).toBe('WEBHOOK_SIGNATURE_VERIFIER_NOT_CONFIGURED');
   });
 
   it('rejects webhook when authorization token is configured but missing', () => {

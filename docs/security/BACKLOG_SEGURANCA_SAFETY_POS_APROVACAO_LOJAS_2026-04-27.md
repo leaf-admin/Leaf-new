@@ -39,6 +39,10 @@ Registrar as correcoes de seguranca/safety ja identificadas, com prioridade e cr
   - tornar validacao obrigatoria no runtime de producao;
   - manter `validate-runtime-config` como gate bloqueante de deploy;
   - ajustar documentacao conforme modelo oficial da Woovi/OpenPix adotado no projeto.
+- Modelo adotado:
+  - em producao, o webhook deve chegar assinado e validado por `WOOVI_WEBHOOK_PUBLIC_KEY` ou `WOOVI_WEBHOOK_SIGNATURE_SECRET`;
+  - `WOOVI_WEBHOOK_REQUIRE_SIGNATURE=true` e `WOOVI_WEBHOOK_ALLOW_UNSIGNED=false` sao obrigatorios em deploy publico;
+  - webhook sem assinatura fica permitido apenas fora de producao, para sandbox/desenvolvimento controlado.
 - Aceite:
   - deploy bloqueia se variaveis/validacoes obrigatorias nao estiverem presentes;
   - webhook invalido e rejeitado com log auditavel;
