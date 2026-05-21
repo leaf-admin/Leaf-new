@@ -124,6 +124,18 @@ describe('FinancialReconciliationDashboardService', () => {
       ],
       checkedAtIso: '2026-05-21T11:00:00.000Z'
     });
+    firestore.docs.set('financial_reconciliation_reports/ride_e2e_hidden', {
+      rideId: 'ride_e2e_hidden',
+      ok: false,
+      issues: [
+        {
+          code: 'PAYMENT_WITHOUT_LEDGER_EVENT',
+          severity: 'high',
+          message: 'Massa de teste'
+        }
+      ],
+      checkedAtIso: '2026-05-21T12:00:00.000Z'
+    });
 
     const service = new FinancialReconciliationDashboardService();
     const result = await service.listReports({
@@ -152,6 +164,38 @@ describe('FinancialReconciliationDashboardService', () => {
           high: 1
         }
       }
+    });
+    expect(result.reports).toHaveLength(1);
+  });
+
+  it('can include smoke and e2e reports when explicitly requested', async () => {
+    const firestore = createInMemoryFirestore();
+    firebaseConfig.getFirestore.mockReturnValue(firestore);
+    firestore.docs.set('financial_reconciliation_reports/ride_e2e_visible', {
+      rideId: 'ride_e2e_visible',
+      ok: false,
+      issues: [
+        {
+          code: 'PAYMENT_WITHOUT_LEDGER_EVENT',
+          severity: 'high'
+        }
+      ],
+      checkedAtIso: '2026-05-21T12:00:00.000Z'
+    });
+
+    const service = new FinancialReconciliationDashboardService();
+    const result = await service.listReports({
+      includeTestData: 'true'
+    });
+
+    expect(result).toMatchObject({
+      success: true,
+      reports: [
+        expect.objectContaining({
+          rideId: 'ride_e2e_visible',
+          testData: true
+        })
+      ]
     });
   });
 

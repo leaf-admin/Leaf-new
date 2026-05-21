@@ -280,6 +280,12 @@ describe('FinancialLedgerService', () => {
       amount: 1800,
       status: 'CONFIRMED'
     });
+    firestore.docs.set('ride_payments/ride_e2e_123_smoke', {
+      rideId: 'ride_e2e_123_smoke',
+      chargeId: 'charge_test_1',
+      amount: 1800,
+      status: 'CONFIRMED'
+    });
     firestore.docs.set('payment_holdings/ride_batch_1', {
       rideId: 'ride_batch_1',
       amount: 1800,
@@ -293,7 +299,9 @@ describe('FinancialLedgerService', () => {
       scannedRideCount: 1,
       reconciledRideCount: 1,
       divergentRideCount: 1,
-      failedRideCount: 0
+      failedRideCount: 0,
+      skippedTestRideCount: 1,
+      includeTestData: false
     });
     expect(firestore.docs.get('financial_reconciliation_reports/ride_batch_1')).toMatchObject({
       rideId: 'ride_batch_1',
@@ -304,5 +312,6 @@ describe('FinancialLedgerService', () => {
         })
       ])
     });
+    expect(firestore.docs.has('financial_reconciliation_reports/ride_e2e_123_smoke')).toBe(false);
   });
 });

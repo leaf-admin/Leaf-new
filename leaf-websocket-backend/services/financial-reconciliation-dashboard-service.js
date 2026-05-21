@@ -8,6 +8,14 @@ class FinancialReconciliationDashboardService {
     return Math.min(parsed, max);
   }
 
+  normalizeBoolean(value) {
+    return ['true', '1', 'yes', 'sim'].includes(String(value || '').toLowerCase());
+  }
+
+  isTestRideId(rideId) {
+    return /(^|_)ride_e2e_|dispatch_smoke|_smoke$|(^|_)test(_|$)|(^|_)mock(_|$)/i.test(String(rideId || ''));
+  }
+
   getSnapshotDocs(snapshot) {
     if (!snapshot) return [];
     if (Array.isArray(snapshot.docs)) {
@@ -31,11 +39,13 @@ class FinancialReconciliationDashboardService {
 
   normalizeReport(id, data = {}) {
     const issues = Array.isArray(data.issues) ? data.issues : [];
+    const rideId = data.rideId || id;
     return {
       id,
-      rideId: data.rideId || id,
+      rideId,
       ok: Boolean(data.ok),
       status: data.ok ? 'ok' : 'divergent',
+      testData: Boolean(data.testData) || this.isTestRideId(rideId),
       severity: this.resolveHighestSeverity(issues),
       issueCodes: issues.map((issue) => issue.code).filter(Boolean),
       issues,
@@ -56,8 +66,10 @@ class FinancialReconciliationDashboardService {
     const severity = filters.severity ? String(filters.severity).toLowerCase() : null;
     const code = filters.code ? String(filters.code).toUpperCase() : null;
     const rideId = filters.rideId ? String(filters.rideId) : null;
+    const includeTestData = this.normalizeBoolean(filters.includeTestData);
 
     if (rideId && report.rideId !== rideId) return false;
+    if (!includeTestData && report.testData) return false;
     if (status === 'ok' && !report.ok) return false;
     if (status === 'divergent' && report.ok) return false;
     if (severity && report.severity !== severity) return false;

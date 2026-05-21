@@ -15,6 +15,14 @@ class FinancialLedgerService {
     return `${namespace}_${hash}`;
   }
 
+  isTestRideId(rideId) {
+    return /(^|_)ride_e2e_|dispatch_smoke|_smoke$|(^|_)test(_|$)|(^|_)mock(_|$)/i.test(String(rideId || ''));
+  }
+
+  normalizeBoolean(value) {
+    return ['true', '1', 'yes', 'sim'].includes(String(value || '').toLowerCase());
+  }
+
   normalizeLine(line = {}, index = 0) {
     const direction = String(line.direction || '').toLowerCase();
     const amountCents = this.toCents(line.amountCents);
@@ -560,6 +568,7 @@ class FinancialLedgerService {
       const report = {
         rideId,
         ok: issues.length === 0,
+        testData: this.isTestRideId(rideId),
         issues,
         totals: {
           paymentAmountCents: paymentAmount,
@@ -610,7 +619,7 @@ class FinancialLedgerService {
     return docs;
   }
 
-  async reconcileRecentRideFinancials({ rideId = null, limit = 100 } = {}) {
+  async reconcileRecentRideFinancials({ rideId = null, limit = 100, includeTestData = false } = {}) {
     const firestore = firebaseConfig.getFirestore();
     if (!firestore) {
       return {
@@ -620,21 +629,28 @@ class FinancialLedgerService {
     }
 
     const safeLimit = Math.min(Math.max(Number.parseInt(limit, 10) || 100, 1), 500);
+    const shouldIncludeTestData = this.normalizeBoolean(includeTestData);
 
     try {
       const rideIds = [];
+      let skippedTestRideCount = 0;
       if (rideId) {
         rideIds.push(String(rideId));
       } else {
         let query = firestore.collection('ride_payments');
         if (typeof query.limit === 'function') {
-          query = query.limit(safeLimit);
+          query = query.limit(shouldIncludeTestData ? safeLimit : Math.min(safeLimit * 5, 500));
         }
 
         const snapshot = await query.get();
         this.getSnapshotDocs(snapshot).forEach((doc) => {
           const resolvedRideId = doc.data?.rideId || doc.id;
-          if (resolvedRideId) rideIds.push(String(resolvedRideId));
+          if (!resolvedRideId) return;
+          if (!shouldIncludeTestData && this.isTestRideId(resolvedRideId)) {
+            skippedTestRideCount += 1;
+            return;
+          }
+          rideIds.push(String(resolvedRideId));
         });
       }
 
@@ -662,6 +678,8 @@ class FinancialLedgerService {
         reconciledRideCount: results.length - failed.length,
         divergentRideCount: divergent.length,
         failedRideCount: failed.length,
+        skippedTestRideCount,
+        includeTestData: shouldIncludeTestData,
         results
       };
     } catch (error) {

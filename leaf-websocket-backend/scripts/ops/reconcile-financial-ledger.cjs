@@ -20,11 +20,13 @@ function printHelp() {
 
 Opcional:
   --out <arquivo.json>   grava o resumo no caminho informado
+  --include-test-data    inclui corridas de smoke/e2e/teste na varredura
   --help                 mostra esta ajuda
 
 O script reconcilia documentos financeiros existentes contra o ledger e grava
 financial_reconciliation_reports/{rideId}. Ele nao cria eventos contabeis
-retroativos automaticamente.
+retroativos automaticamente. Por padrao, corridas de smoke/e2e/teste ficam fora
+da varredura para nao poluir o painel financeiro operacional.
 `);
 }
 
@@ -36,17 +38,20 @@ async function main() {
 
   const rideId = readArg('--ride-id');
   const limit = Number.parseInt(readArg('--limit') || process.env.FINANCIAL_RECONCILIATION_LIMIT || '100', 10);
+  const includeTestData = hasFlag('--include-test-data');
   const FinancialLedgerService = require('../../services/financial-ledger-service');
   const service = new FinancialLedgerService();
   const summary = await service.reconcileRecentRideFinancials({
     rideId,
-    limit
+    limit,
+    includeTestData
   });
 
   const output = {
     generatedAt: new Date().toISOString(),
     rideId: rideId || null,
     limit,
+    includeTestData,
     summary
   };
 

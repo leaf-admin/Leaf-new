@@ -1573,7 +1573,8 @@ router.get('/api/financial/reconciliation/reports', authenticateJWT, requireRole
     code: req.query.code,
     rideId: req.query.rideId,
     limit: req.query.limit,
-    cursor: req.query.cursor
+    cursor: req.query.cursor,
+    includeTestData: req.query.includeTestData
   });
 
   if (!result.success) {
@@ -1611,7 +1612,8 @@ router.post('/api/financial/reconciliation/run', authenticateJWT, requireRole(DA
   const ledgerService = new FinancialLedgerService();
   const result = await ledgerService.reconcileRecentRideFinancials({
     rideId: req.body?.rideId || req.query.rideId || null,
-    limit: req.body?.limit || req.query.limit || 100
+    limit: req.body?.limit || req.query.limit || 100,
+    includeTestData: req.body?.includeTestData || req.query.includeTestData || false
   });
 
   if (!result.success) {
