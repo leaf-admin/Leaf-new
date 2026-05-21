@@ -128,6 +128,11 @@ function registerHttpRoutes({ app, logStructured, io = null }) {
     app.use('/api/campaign-center', campaignCenterRoutes);
     logStructured('info', 'Rotas de Campaign Center registradas', { service: 'server' });
 
+    // Rotas operacionais de gestao de usuarios usadas pelo dashboard
+    const userManagementRoutes = require('../routes/user-management');
+    app.use('/', userManagementRoutes);
+    logStructured('info', 'Rotas de Gestao de Usuarios registradas', { service: 'server' });
+
     // Rotas Dashboard
     app.use('/', dashboardRoutes);
     logStructured('info', 'Rotas Dashboard registradas', { service: 'server' });

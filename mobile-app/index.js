@@ -1,6 +1,13 @@
 import 'react-native-gesture-handler';
 import { registerRootComponent } from 'expo';
 import * as SplashScreen from 'expo-splash-screen';
+import { registerFCMBackgroundMessageHandler } from './src/services/FCMBackgroundMessageHandler';
+
+try {
+  registerFCMBackgroundMessageHandler();
+} catch (error) {
+  console.warn('[Leaf] FCM background handler indisponível no bootstrap:', error?.message || error);
+}
 
 // ✅ CRÍTICO: Manter splash screen visível ANTES de registrar o componente
 // Isso garante que a splash apareça antes de qualquer JavaScript executar

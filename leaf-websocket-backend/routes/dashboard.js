@@ -21,6 +21,7 @@ const driverSubscriptionService = require('../services/driver-subscription-servi
 const subscriptionStateService = require('../services/subscription-state-service');
 const modernMetricsService = require('../services/modern-metrics-service');
 const h3MapService = require('../services/h3-map-service');
+const { resolveDriverReactivationState } = require('../services/dashboard-user-management-service');
 const {
   recomputeDriverActivationStatus
 } = require('../services/driver-document-analysis-queue');
@@ -751,7 +752,7 @@ function sanitizeFilename(value) {
     .replace(/_+/g, '_');
 }
 
-const REVIEWABLE_DOCUMENT_TYPES = ['cnh', 'crlv', 'antecedentes_criminais'];
+const REVIEWABLE_DOCUMENT_TYPES = ['cnh', 'crlv', 'antecedentes_criminais', 'mei'];
 const REVIEWABLE_DOCUMENT_STATUSES = ['pending', 'approved', 'rejected'];
 const REVIEWABLE_DOCUMENT_SORT_FIELDS = ['uploadedAt', 'updatedAt', 'reviewedAt'];
 
@@ -7566,8 +7567,13 @@ router.post('/api/drivers/:driverId/suspend', authenticateJWT, requireRole(DASHB
 
     const suspendData = {
       suspended: true,
+      accountSuspended: true,
+      operationalBlocked: true,
+      status: 'suspended',
+      accountStatus: 'suspended',
       suspendedAt: new Date().toISOString(),
-      suspendReason: reason || 'Suspensão manual via dashboard'
+      suspendReason: reason || 'Suspensão manual via dashboard',
+      updatedAt: new Date().toISOString()
     };
 
     if (duration) {
@@ -7609,9 +7615,20 @@ router.post('/api/drivers/:driverId/unsuspend', authenticateJWT, requireRole(DAS
 
     const db = firebaseConfig.getRealtimeDB();
 
+    const driverSnapshot = await db.ref(`users/${driverId}`).once('value');
+    const driverData = driverSnapshot.val() || {};
+    const reactivationState = resolveDriverReactivationState(driverData);
+
     await db.ref(`users/${driverId}`).update({
       suspended: false,
-      unsuspendedAt: new Date().toISOString()
+      accountSuspended: false,
+      operationalBlocked: false,
+      status: reactivationState.status,
+      accountStatus: reactivationState.accountStatus,
+      suspendReason: null,
+      suspendedUntil: null,
+      unsuspendedAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
     });
 
     logger.info(`✅ Motorista ${driverId} reativado`);

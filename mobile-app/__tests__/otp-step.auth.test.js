@@ -99,7 +99,7 @@ describe('OTPStep', () => {
 
     await waitFor(() => {
       expect(Alert.alert).toHaveBeenCalledWith(
-        'Erro na Verificação',
+        'Código não confirmado',
         'Código inválido. Verifique o código recebido por SMS e tente novamente.',
         undefined,
         undefined,
@@ -125,7 +125,7 @@ describe('OTPStep', () => {
 
     await waitFor(() => {
       expect(Alert.alert).toHaveBeenCalledWith(
-        'Erro na Verificação',
+        'Código não confirmado',
         'Código expirado. Solicite um novo código.',
         undefined,
         undefined,
@@ -151,7 +151,7 @@ describe('OTPStep', () => {
 
     await waitFor(() => {
       expect(Alert.alert).toHaveBeenCalledWith(
-        'Erro na Verificação',
+        'Código não confirmado',
         'Esse código já foi utilizado. Solicite um novo código.',
         undefined,
         undefined,

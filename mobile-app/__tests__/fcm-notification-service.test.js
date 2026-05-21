@@ -3,9 +3,37 @@ const mockOnNotificationOpenedApp = jest.fn(() => jest.fn());
 const mockGetInitialNotification = jest.fn(() => Promise.resolve(null));
 const mockSetBackgroundMessageHandler = jest.fn();
 const mockGetToken = jest.fn(() => Promise.resolve('mock_token'));
+const mockRequestPermission = jest.fn(() => Promise.resolve(1));
+const mockHasPermission = jest.fn(() => Promise.resolve(1));
+const mockPlatform = {
+  OS: 'android',
+  Version: 32,
+};
+const mockPermissionsAndroid = {
+  PERMISSIONS: {
+    POST_NOTIFICATIONS: 'android.permission.POST_NOTIFICATIONS',
+  },
+  RESULTS: {
+    GRANTED: 'granted',
+    DENIED: 'denied',
+  },
+  check: jest.fn(() => Promise.resolve(true)),
+  request: jest.fn(() => Promise.resolve('granted')),
+};
+let mockAppStateListener;
+const mockAppStateSubscriptionRemove = jest.fn();
+const mockAppState = {
+  currentState: 'active',
+  addEventListener: jest.fn((event, listener) => {
+    mockAppStateListener = listener;
+    return { remove: mockAppStateSubscriptionRemove };
+  }),
+};
 const mockDevice = {
   isDevice: false,
 };
+let mockAuthState = { uid: 'user_1', userType: 'customer' };
+let mockStoreListener;
 const mockWsManager = {
   isConnected: jest.fn(() => true),
   connect: jest.fn(),
@@ -13,13 +41,27 @@ const mockWsManager = {
   on: jest.fn(),
   off: jest.fn(),
 };
-
-jest.mock('@react-native-firebase/messaging', () => () => ({
+const mockMessaging = () => ({
   onMessage: mockOnMessage,
   onNotificationOpenedApp: mockOnNotificationOpenedApp,
   getInitialNotification: mockGetInitialNotification,
   setBackgroundMessageHandler: mockSetBackgroundMessageHandler,
   getToken: mockGetToken,
+  requestPermission: mockRequestPermission,
+  hasPermission: mockHasPermission,
+});
+mockMessaging.AuthorizationStatus = {
+  AUTHORIZED: 1,
+  PROVISIONAL: 2,
+  DENIED: 0,
+};
+
+jest.mock('@react-native-firebase/messaging', () => mockMessaging);
+
+jest.mock('react-native', () => ({
+  AppState: mockAppState,
+  Platform: mockPlatform,
+  PermissionsAndroid: mockPermissionsAndroid,
 }));
 
 jest.mock('expo-device', () => ({
@@ -42,7 +84,11 @@ jest.mock('../src/utils/Logger', () => ({
 
 jest.mock('../src/state/appStore', () => ({
   store: {
-    getState: jest.fn(() => ({ auth: { uid: 'user_1', userType: 'customer' } })),
+    getState: jest.fn(() => ({ auth: mockAuthState })),
+    subscribe: jest.fn((listener) => {
+      mockStoreListener = listener;
+      return jest.fn();
+    }),
   },
 }));
 
@@ -53,20 +99,42 @@ jest.mock('../src/services/WebSocketManager', () => ({
 jest.mock('../src/services/TestUserService', () => ({}));
 
 const FCMNotificationService = require('../src/services/FCMNotificationService').default;
+const {
+  resetFCMBackgroundMessageHandlerForTests,
+} = require('../src/services/FCMBackgroundMessageHandler');
+const AsyncStorage = require('@react-native-async-storage/async-storage');
 
 const flushMicrotasks = () => new Promise(resolve => setImmediate(resolve));
 
 describe('FCMNotificationService initialization', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    resetFCMBackgroundMessageHandlerForTests();
     FCMNotificationService.destroy();
+    resetFCMBackgroundMessageHandlerForTests();
     mockDevice.isDevice = false;
+    mockPlatform.OS = 'android';
+    mockPlatform.Version = 32;
+    mockAppState.currentState = 'active';
+    mockAppStateListener = null;
+    globalThis.navigationRef = undefined;
+    mockAuthState = { uid: 'user_1', userType: 'customer' };
+    mockStoreListener = null;
     mockGetToken.mockResolvedValue('mock_token');
+    mockHasPermission.mockResolvedValue(1);
+    mockRequestPermission.mockResolvedValue(1);
+    mockPermissionsAndroid.check.mockResolvedValue(true);
+    mockPermissionsAndroid.request.mockResolvedValue('granted');
+    AsyncStorage.getItem.mockResolvedValue(null);
+    AsyncStorage.setItem.mockResolvedValue();
+    AsyncStorage.removeItem.mockResolvedValue();
     mockWsManager.isConnected.mockReturnValue(true);
     mockWsManager.connect.mockResolvedValue();
+    mockWsManager.registerFCMToken.mockResolvedValue();
   });
 
   afterEach(() => {
+    jest.useRealTimers();
     FCMNotificationService.destroy();
   });
 
@@ -113,5 +181,293 @@ describe('FCMNotificationService initialization', () => {
 
     resolveRegistration();
     await first;
+  });
+
+  it('requests Android 13 POST_NOTIFICATIONS before getting an FCM token', async () => {
+    mockDevice.isDevice = true;
+    mockPlatform.Version = 33;
+    mockPermissionsAndroid.check.mockResolvedValue(false);
+    mockPermissionsAndroid.request.mockResolvedValue(mockPermissionsAndroid.RESULTS.GRANTED);
+
+    await FCMNotificationService.getFCMToken();
+
+    expect(mockPermissionsAndroid.check).toHaveBeenCalledWith('android.permission.POST_NOTIFICATIONS');
+    expect(mockPermissionsAndroid.request).toHaveBeenCalledWith('android.permission.POST_NOTIFICATIONS');
+    expect(mockGetToken).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not request an FCM token when Android notification permission is denied', async () => {
+    mockDevice.isDevice = true;
+    mockPlatform.Version = 33;
+    mockPermissionsAndroid.check.mockResolvedValue(false);
+    mockPermissionsAndroid.request.mockResolvedValue(mockPermissionsAndroid.RESULTS.DENIED);
+
+    const token = await FCMNotificationService.getFCMToken();
+
+    expect(token).toBeNull();
+    expect(mockGetToken).not.toHaveBeenCalled();
+  });
+
+  it('re-registers the current token when the authenticated user changes', async () => {
+    mockDevice.isDevice = true;
+    await FCMNotificationService.initialize();
+    await FCMNotificationService.backendTokenRegistrationPromise;
+
+    expect(mockWsManager.registerFCMToken).toHaveBeenCalledWith(
+      expect.objectContaining({ userId: 'user_1', fcmToken: 'mock_token' })
+    );
+
+    mockAuthState = { uid: 'user_2', userType: 'driver' };
+    mockStoreListener();
+    await FCMNotificationService.backendTokenRegistrationPromise;
+
+    expect(mockWsManager.registerFCMToken).toHaveBeenCalledWith(
+      expect.objectContaining({ userId: 'user_2', userType: 'driver', fcmToken: 'mock_token' })
+    );
+  });
+
+  it('does not duplicate background notifications already in the queue', async () => {
+    AsyncStorage.getItem.mockResolvedValue(JSON.stringify([
+      {
+        messageId: 'message_1',
+        backgroundQueueKey: 'message_1',
+        data: { type: 'trip_update' },
+        processed: false,
+      },
+    ]));
+
+    await FCMNotificationService.saveBackgroundNotification({
+      messageId: 'message_1',
+      data: { type: 'trip_update' },
+    });
+
+    expect(AsyncStorage.setItem).not.toHaveBeenCalled();
+  });
+
+  it('recovers the background notification queue when persisted JSON is corrupted', async () => {
+    AsyncStorage.getItem.mockResolvedValue('{broken-json');
+
+    await FCMNotificationService.saveBackgroundNotification({
+      messageId: 'message_after_corruption',
+      data: { type: 'trip_update' },
+    });
+
+    expect(AsyncStorage.removeItem).toHaveBeenCalledWith('backgroundNotifications');
+    expect(AsyncStorage.setItem).toHaveBeenCalledWith(
+      'backgroundNotifications',
+      expect.stringContaining('message_after_corruption')
+    );
+  });
+
+  it('processes queued background notifications without saving them again', async () => {
+    const queuedNotifications = [
+      {
+        messageId: 'message_2',
+        backgroundQueueKey: 'message_2',
+        data: { type: 'trip_update' },
+        processed: false,
+      },
+    ];
+    AsyncStorage.getItem.mockResolvedValue(JSON.stringify(queuedNotifications));
+    const tripHandler = jest
+      .spyOn(FCMNotificationService, 'handleTripUpdate')
+      .mockResolvedValue();
+
+    await FCMNotificationService.processPendingNotifications();
+
+    expect(tripHandler).toHaveBeenCalledTimes(1);
+    expect(AsyncStorage.setItem).toHaveBeenCalledTimes(1);
+    const [, persisted] = AsyncStorage.setItem.mock.calls[0];
+    expect(JSON.parse(persisted)).toEqual([
+      expect.objectContaining({ messageId: 'message_2', processed: true }),
+    ]);
+
+    tripHandler.mockRestore();
+  });
+
+  it('does not consume queued background notifications during initialization', async () => {
+    AsyncStorage.getItem.mockResolvedValue(JSON.stringify([
+      {
+        messageId: 'message_init',
+        backgroundQueueKey: 'message_init',
+        data: { type: 'trip_update' },
+        processed: false,
+      },
+    ]));
+    const tripHandler = jest
+      .spyOn(FCMNotificationService, 'handleTripUpdate')
+      .mockResolvedValue();
+
+    await FCMNotificationService.initialize();
+    await flushMicrotasks();
+
+    expect(tripHandler).not.toHaveBeenCalled();
+
+    tripHandler.mockRestore();
+  });
+
+  it('processes queued background notifications when the app returns to foreground', async () => {
+    AsyncStorage.getItem.mockResolvedValue(null);
+    await FCMNotificationService.initialize();
+    expect(mockAppState.addEventListener).toHaveBeenCalledWith('change', expect.any(Function));
+
+    const tripHandler = jest
+      .spyOn(FCMNotificationService, 'handleTripUpdate')
+      .mockResolvedValue();
+    AsyncStorage.getItem.mockResolvedValue(JSON.stringify([
+      {
+        messageId: 'message_resume',
+        backgroundQueueKey: 'message_resume',
+        data: { type: 'trip_update' },
+        processed: false,
+      },
+    ]));
+
+    mockAppStateListener('background');
+    mockAppStateListener('active');
+    await flushMicrotasks();
+
+    expect(tripHandler).toHaveBeenCalledWith(
+      expect.objectContaining({ messageId: 'message_resume' })
+    );
+
+    tripHandler.mockRestore();
+  });
+
+  it('processes queued background notifications with registered custom handlers', async () => {
+    const customHandler = jest.fn().mockResolvedValue();
+    FCMNotificationService.registerNotificationHandler('ride_status_update', customHandler);
+    AsyncStorage.getItem.mockResolvedValue(JSON.stringify([
+      {
+        messageId: 'message_custom',
+        backgroundQueueKey: 'message_custom',
+        data: { type: 'ride_status_update', bookingId: 'booking_1' },
+        processed: false,
+      },
+    ]));
+
+    await FCMNotificationService.processPendingNotifications();
+
+    expect(customHandler).toHaveBeenCalledWith(
+      expect.objectContaining({
+        messageId: 'message_custom',
+        data: expect.objectContaining({ bookingId: 'booking_1' }),
+      })
+    );
+    const [, persisted] = AsyncStorage.setItem.mock.calls[0];
+    expect(JSON.parse(persisted)).toEqual([
+      expect.objectContaining({ messageId: 'message_custom', processed: true }),
+    ]);
+  });
+
+  it('navigates trip push opens to the active passenger trip route', () => {
+    const navigationRef = {
+      isReady: jest.fn(() => true),
+      navigate: jest.fn(),
+    };
+    globalThis.navigationRef = navigationRef;
+
+    const target = FCMNotificationService.navigateToScreen({
+      data: {
+        type: 'trip_update',
+        bookingId: 'booking_1',
+        status: 'accepted',
+      },
+    });
+
+    expect(target).toEqual(
+      expect.objectContaining({
+        routeName: 'RobotaxiPrototypeTrip',
+        params: expect.objectContaining({
+          bookingId: 'booking_1',
+          status: 'accepted',
+          source: 'push',
+        }),
+      })
+    );
+    expect(navigationRef.navigate).toHaveBeenCalledWith(
+      'RobotaxiPrototypeTrip',
+      expect.objectContaining({ bookingId: 'booking_1' })
+    );
+  });
+
+  it('navigates driver document request pushes to the driver documents route', () => {
+    const navigationRef = {
+      isReady: jest.fn(() => true),
+      navigate: jest.fn(),
+    };
+    globalThis.navigationRef = navigationRef;
+
+    const target = FCMNotificationService.navigateToScreen({
+      data: {
+        type: 'driver_document_request',
+        documentType: 'cnh',
+        userType: 'driver',
+      },
+    });
+
+    expect(target).toEqual(
+      expect.objectContaining({
+        routeName: 'RobotaxiPrototypeDriverDocuments',
+        params: expect.objectContaining({
+          notificationType: 'driver_document_request',
+          userType: 'driver',
+          documentType: 'cnh',
+        }),
+      })
+    );
+    expect(navigationRef.navigate).toHaveBeenCalledWith(
+      'RobotaxiPrototypeDriverDocuments',
+      expect.objectContaining({ documentType: 'cnh' })
+    );
+  });
+
+  it('retries push navigation after the root navigation ref becomes ready', () => {
+    jest.useFakeTimers();
+    const navigationRef = {
+      isReady: jest.fn(() => true),
+      navigate: jest.fn(),
+    };
+    globalThis.navigationRef = { current: null };
+
+    const target = FCMNotificationService.navigateToScreen({
+      data: {
+        type: 'trip_update',
+        bookingId: 'booking_pending_ref',
+      },
+    });
+
+    expect(target.routeName).toBe('RobotaxiPrototypeTrip');
+    expect(navigationRef.navigate).not.toHaveBeenCalled();
+
+    globalThis.navigationRef.current = navigationRef;
+    jest.advanceTimersByTime(300);
+
+    expect(navigationRef.navigate).toHaveBeenCalledWith(
+      'RobotaxiPrototypeTrip',
+      expect.objectContaining({ bookingId: 'booking_pending_ref' })
+    );
+    jest.useRealTimers();
+  });
+
+  it('does not navigate to untrusted push route names', () => {
+    const navigationRef = {
+      isReady: jest.fn(() => true),
+      navigate: jest.fn(),
+    };
+    globalThis.navigationRef = navigationRef;
+
+    FCMNotificationService.navigateToScreen({
+      data: {
+        screen: 'DangerousInternalRoute',
+      },
+    });
+
+    expect(navigationRef.navigate).toHaveBeenCalledWith(
+      'Notifications',
+      expect.objectContaining({
+        originalScreen: 'DangerousInternalRoute',
+      })
+    );
   });
 });

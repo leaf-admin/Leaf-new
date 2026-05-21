@@ -3939,6 +3939,10 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
       return;
     }
 
+    if (!shouldSyncPassengerRoute) {
+      return;
+    }
+
     if (!passengerAutoRoute) {
       return;
     }

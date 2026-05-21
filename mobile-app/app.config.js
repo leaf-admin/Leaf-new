@@ -214,6 +214,7 @@ module.exports = {
             "CAMERA",
             "RECORD_AUDIO",
             "INTERNET",
+            "POST_NOTIFICATIONS",
             "VIBRATE"
         ],
         blockedPermissions: [
@@ -254,6 +255,7 @@ module.exports = {
         infoPlist: {
             ITSAppUsesNonExemptEncryption: false,
             NSAppTransportSecurity: iosTransportSecurity,
+            UIBackgroundModes: ["fetch", "location", "remote-notification"],
             NSMicrophoneUsageDescription: "A Leaf usa o microfone para capturar o destino por voz quando você tocar no ícone de microfone.",
             NSSpeechRecognitionUsageDescription: "A Leaf converte sua fala em texto para preencher o destino com mais rapidez."
         }

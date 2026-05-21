@@ -21,20 +21,29 @@ jest.mock('../../../utils/logger', () => ({
   logStructured: jest.fn()
 }));
 
+jest.mock('../../../services/circuit-breaker-service', () => ({
+  execute: jest.fn((name, fn) => fn())
+}));
+
 describe('fcm-service', () => {
   let FCMService;
   let fcmService;
   let mockRedis;
+  let admin;
 
   beforeEach(() => {
     jest.resetModules();
     FCMService = require('../../../services/fcm-service');
+    admin = require('firebase-admin');
     mockRedis = {
       hset: jest.fn().mockResolvedValue(1),
       hgetall: jest.fn().mockResolvedValue({}),
       hdel: jest.fn().mockResolvedValue(1),
       sadd: jest.fn().mockResolvedValue(1),
       srem: jest.fn().mockResolvedValue(1),
+      smembers: jest.fn().mockResolvedValue([]),
+      scard: jest.fn().mockResolvedValue(0),
+      scan: jest.fn().mockResolvedValue(['0', []]),
       expire: jest.fn().mockResolvedValue(1),
       disconnect: jest.fn()
     };
@@ -54,12 +63,63 @@ describe('fcm-service', () => {
     expect(ok).toBe(true);
     expect(mockRedis.hset).toHaveBeenCalled();
     expect(mockRedis.sadd).toHaveBeenCalledWith('active_fcm_tokens', 'token-1');
+    expect(mockRedis.sadd).toHaveBeenCalledWith('fcm_token_users:token-1', 'u1');
   });
 
   test('sendNotificationToUser should return unavailable when service is down', async () => {
     fcmService.isInitialized = false;
     const result = await fcmService.sendNotificationToUser('u1', { title: 'x', body: 'y' });
     expect(result).toHaveProperty('success', false);
+  });
+
+  test('sendRideStatusUpdate should fail when no token sends successfully', async () => {
+    admin.messaging.mockReturnValue({
+      send: jest.fn().mockRejectedValue(new Error('send failed'))
+    });
+    fcmService.resolveUserTokens = jest.fn().mockResolvedValue([{ fcmToken: 'token-1' }]);
+
+    const result = await fcmService.sendRideStatusUpdate('u1', {
+      bookingId: 'b1',
+      status: 'accepted'
+    });
+
+    expect(result).toEqual(expect.objectContaining({
+      success: false,
+      count: 0
+    }));
+  });
+
+  test('removeUserFCMToken keeps token active when another user still owns it', async () => {
+    mockRedis.smembers.mockResolvedValue(['real-user']);
+
+    const result = await fcmService.removeUserFCMToken('temp-user', 'token-1');
+
+    expect(result).toBe(true);
+    expect(mockRedis.hdel).toHaveBeenCalledWith('fcm_tokens:temp-user', 'token-1');
+    expect(mockRedis.srem).toHaveBeenCalledWith('fcm_token_users:token-1', 'temp-user');
+    expect(mockRedis.srem).not.toHaveBeenCalledWith('active_fcm_tokens', 'token-1');
+  });
+
+  test('removeUserFCMToken removes token from active set when no owners remain', async () => {
+    mockRedis.smembers.mockResolvedValue([]);
+
+    const result = await fcmService.removeUserFCMToken('only-user', 'token-2');
+
+    expect(result).toBe(true);
+    expect(mockRedis.srem).toHaveBeenCalledWith('active_fcm_tokens', 'token-2');
+  });
+
+  test('getServiceStats should count users with SCAN instead of KEYS', async () => {
+    mockRedis.scan
+      .mockResolvedValueOnce(['42', ['fcm_tokens:u1']])
+      .mockResolvedValueOnce(['0', ['fcm_tokens:u2']]);
+    mockRedis.keys = jest.fn();
+
+    const result = await fcmService.getServiceStats();
+
+    expect(result.totalUsers).toBe(2);
+    expect(mockRedis.scan).toHaveBeenCalled();
+    expect(mockRedis.keys).not.toHaveBeenCalled();
   });
 
   test('destroy should disconnect redis client', () => {

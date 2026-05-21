@@ -24,18 +24,18 @@ const DEFAULT_DAILY_GOAL = 200;
 const COMPETITOR_REFERENCE_TAKE_RATE = 0.3;
 const IS_TEST_ENV = typeof process !== "undefined" && process.env?.NODE_ENV === "test";
 const DRIVER_HOME_COLOR = {
-  sheet: "#FAFBF8",
-  sheetSoft: "#FAFBF8",
-  text: "#111611",
-  secondary: "#666B63",
-  muted: "#7A8077",
-  line: "#DDE3D9",
+  sheet: "#FFFFFF",
+  sheetSoft: "#FFFFFF",
+  text: "#171412",
+  secondary: "#756F68",
+  muted: "#827B73",
+  line: "#E9E2D8",
   leaf: "#1A330E",
-  leafLight: "#EEF4EA",
-  blue: "#EFF4F3",
-  blueText: "#40534A",
-  warning: "#F3F1EA",
-  warningText: "#6D5A32",
+  leafLight: "#F1F5EE",
+  blue: "#F2F4EF",
+  blueText: "#514B45",
+  warning: "#F8F6F1",
+  warningText: "#7A6337",
 };
 
 function parseMoneyLabel(value) {
@@ -821,8 +821,8 @@ export default memo(DriverHomeOverlay);
 const styles = StyleSheet.create({
   driverBottomCtaWrap: {
     position: "absolute",
-    left: 16,
-    right: 16,
+    left: 24,
+    right: 24,
     alignSelf: "center",
     zIndex: 16,
   },
@@ -837,7 +837,7 @@ const styles = StyleSheet.create({
     paddingBottom: 18,
     backgroundColor: DRIVER_HOME_COLOR.sheetSoft,
     borderWidth: 1,
-    borderColor: "rgba(207,216,205,0.9)",
+    borderColor: "#ECE5DC",
     shadowColor: "#000000",
     shadowOffset: { width: 0, height: 20 },
     shadowOpacity: 0.12,
@@ -859,7 +859,7 @@ const styles = StyleSheet.create({
   driverStatsVerticalDivider: {
     width: StyleSheet.hairlineWidth,
     alignSelf: "stretch",
-    backgroundColor: "rgba(183,196,181,0.72)",
+    backgroundColor: "#E9E2D8",
     marginLeft: 3,
     marginRight: 13,
   },
@@ -1000,8 +1000,8 @@ const styles = StyleSheet.create({
     height: 56,
     borderRadius: 28,
     borderWidth: 1,
-    borderColor: "#CFD8CD",
-    backgroundColor: "#F2F4EF",
+    borderColor: "#E2DAD0",
+    backgroundColor: "#F8F6F1",
     alignItems: "center",
     justifyContent: "center",
     overflow: "hidden",
@@ -1020,7 +1020,7 @@ const styles = StyleSheet.create({
     borderColor: "#D3DFDD",
   },
   driverBottomSliderText: {
-    color: "#44524A",
+    color: DRIVER_HOME_COLOR.text,
     fontFamily: fonts.SemiBold,
     fontSize: 13.5,
     lineHeight: 19,
@@ -1065,7 +1065,7 @@ const styles = StyleSheet.create({
     height: 56,
     borderRadius: 28,
     borderWidth: 1,
-    borderColor: "#CFD8CD",
+    borderColor: "#E2DAD0",
     backgroundColor: DRIVER_HOME_COLOR.sheet,
     alignItems: "center",
     justifyContent: "center",

@@ -342,6 +342,78 @@ const appLinking = {
   }
 };
 
+const PROTOTYPE_QA_DEEP_LINK_ROUTES = {
+  'robotaxi/trip': 'RobotaxiPrototypeTrip',
+  'robotaxi/driver/offer': 'RobotaxiPrototypeDriverOffer',
+  'robotaxi/driver/trip': 'RobotaxiPrototypeDriverTrip',
+};
+
+function parsePrototypeQaDeepLink(url) {
+  if (!(__DEV__ || isE2ETestBuild() || isSimulatorBuild())) {
+    return null;
+  }
+
+  const rawUrl = String(url || '').trim();
+  if (!rawUrl) {
+    return null;
+  }
+
+  let parsedUrl = null;
+  try {
+    parsedUrl = new URL(rawUrl);
+  } catch (_error) {
+    return null;
+  }
+
+  const normalizedPath = [
+    parsedUrl.hostname,
+    parsedUrl.pathname.replace(/^\/+/, ''),
+  ]
+    .filter(Boolean)
+    .join('/')
+    .replace(/\/+$/, '');
+  const routeName = PROTOTYPE_QA_DEEP_LINK_ROUTES[normalizedPath];
+  if (!routeName) {
+    return null;
+  }
+
+  const params = {};
+  parsedUrl.searchParams.forEach((value, key) => {
+    params[key] = value;
+  });
+
+  return { routeName, params };
+}
+
+function navigatePrototypeQaDeepLink(navigationRef, deepLink) {
+  if (!deepLink?.routeName) {
+    return false;
+  }
+
+  let attempts = 0;
+  const navigateTarget = () => {
+    attempts += 1;
+    if (!navigationRef?.isReady?.()) {
+      return false;
+    }
+
+    navigationRef.navigate(deepLink.routeName, deepLink.params || {});
+    return true;
+  };
+
+  if (!navigateTarget()) {
+    const retryNavigation = () => {
+      if (navigateTarget() || attempts >= 20) {
+        return;
+      }
+      setTimeout(retryNavigation, 150);
+    };
+    setTimeout(retryNavigation, 150);
+  }
+
+  return true;
+}
+
 function shouldRoutePrototypeReceiptUrl(url) {
   const normalized = String(url || '').trim().toLowerCase();
 
@@ -1118,12 +1190,55 @@ function PrototypeReceiptDeepLinkGuard({ navigationRef }) {
   return null;
 }
 
+function PrototypeQaDeepLinkGuard({ navigationRef }) {
+  useEffect(() => {
+    if (!(__DEV__ || isE2ETestBuild() || isSimulatorBuild())) {
+      return undefined;
+    }
+
+    let mounted = true;
+
+    const handleUrl = (url) => {
+      const deepLink = parsePrototypeQaDeepLink(url);
+      if (!deepLink) {
+        return;
+      }
+
+      navigatePrototypeQaDeepLink(navigationRef, deepLink);
+    };
+
+    Linking.getInitialURL()
+      .then(url => {
+        if (mounted) {
+          handleUrl(url);
+        }
+      })
+      .catch(error => {
+        Logger.warn('⚠️ [PrototypeQA] Falha ao ler deep link inicial:', error?.message || error);
+      });
+
+    const subscription = Linking.addEventListener('url', event => {
+      handleUrl(event?.url);
+    });
+
+    return () => {
+      mounted = false;
+      if (typeof subscription?.remove === 'function') {
+        subscription.remove();
+      }
+    };
+  }, [navigationRef]);
+
+  return null;
+}
+
 export default function AppNavigator() {
   return (
     <>
       <NavigationContainer ref={rootNavigationRef} linking={appLinking}>
         <MainNavigator />
       </NavigationContainer>
+      <PrototypeQaDeepLinkGuard navigationRef={rootNavigationRef} />
       <PrototypeReceiptDeepLinkGuard navigationRef={rootNavigationRef} />
       <SessionTerminatedGuard navigationRef={rootNavigationRef} />
     </>

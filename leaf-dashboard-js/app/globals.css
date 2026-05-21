@@ -1246,6 +1246,16 @@ label {
   border-color: var(--line-strong);
 }
 
+.button-danger {
+  background: var(--danger-bg);
+  color: var(--danger-text);
+  border-color: var(--danger-line);
+}
+
+.button-danger:hover {
+  background: #fee2e2;
+}
+
 .muted {
   color: var(--text-muted);
   font-size: 0.78rem;
@@ -1278,6 +1288,10 @@ label {
   grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
   gap: 10px;
   align-items: end;
+}
+
+.form-grid-tight {
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
 }
 
 .form-field {

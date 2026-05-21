@@ -239,7 +239,8 @@ export default function RobotaxiDriverOfferScreen({ navigation, route }) {
   const insets = useSafeAreaInsets();
   const [cardHeight, setCardHeight] = useState(FALLBACK_CARD_HEIGHT);
   const [busyAction, setBusyAction] = useState("");
-  const sheetBottom = insets.bottom + SHEET_BOTTOM_OFFSET;
+  const safeBottom = Math.max(0, Number(insets.bottom) || 0);
+  const sheetBottom = SHEET_BOTTOM_OFFSET;
   const mapRef = useRef(null);
   const routeRequest = useMemo(() => {
     const candidate = buildDriverOfferFromRouteParams(route?.params);
@@ -253,6 +254,9 @@ export default function RobotaxiDriverOfferScreen({ navigation, route }) {
   }, [route?.params]);
   const [allowRouteFallback, setAllowRouteFallback] = useState(
     Boolean(routeRequest),
+  );
+  const qaKeepRouteRequestVisible = Boolean(
+    route?.params?.qaKeepVisible || route?.params?.__qaKeepVisible,
   );
   const hadVisibleRequestRef = useRef(false);
 
@@ -430,7 +434,7 @@ export default function RobotaxiDriverOfferScreen({ navigation, route }) {
   }, [routeRequest]);
 
   useEffect(() => {
-    if (!routeRequest || liveRequest) {
+    if (!routeRequest || liveRequest || qaKeepRouteRequestVisible) {
       return undefined;
     }
 
@@ -439,7 +443,7 @@ export default function RobotaxiDriverOfferScreen({ navigation, route }) {
     }, 4000);
 
     return () => clearTimeout(timeoutId);
-  }, [liveRequest, routeRequest]);
+  }, [liveRequest, qaKeepRouteRequestVisible, routeRequest]);
 
   useEffect(() => {
     if (hasRequest) {
@@ -473,6 +477,10 @@ export default function RobotaxiDriverOfferScreen({ navigation, route }) {
     try {
       setBusyAction("accept");
       await acceptDriverOffer(request);
+      if (typeof navigation.replace === "function") {
+        navigation.replace("RobotaxiPrototypeDriverTrip", { request });
+        return;
+      }
       navigation.navigate("RobotaxiPrototypeDriverTrip", { request });
     } catch (error) {
       if (isCompetitiveAcceptLossMessage(error?.message || error)) {
@@ -542,7 +550,7 @@ export default function RobotaxiDriverOfferScreen({ navigation, route }) {
         >
           <LeafRideSheet
             onLayout={handleCardLayout}
-            style={styles.offerCard}
+            style={[styles.offerCard, { paddingBottom: 18 + safeBottom }]}
             testID="driver-offer-screen"
             accessibilityLabel="driver-offer-screen"
           >
@@ -551,11 +559,11 @@ export default function RobotaxiDriverOfferScreen({ navigation, route }) {
                 <View style={styles.sheetHandle} />
                 <View style={styles.offerHeader}>
                   <View style={styles.offerHeaderCopy}>
-                    <Text style={styles.offerTimer} numberOfLines={1}>
-                      {countdownLabel} para responder
-                    </Text>
                     <Text style={styles.offerTitle} numberOfLines={1}>
                       Nova corrida
+                    </Text>
+                    <Text style={styles.offerTimer} numberOfLines={1}>
+                      {countdownLabel} para responder
                     </Text>
                   </View>
                   <View
@@ -563,10 +571,7 @@ export default function RobotaxiDriverOfferScreen({ navigation, route }) {
                     accessibilityLabel={`Líquido ${fareLabel}`}
                   >
                     <Text style={styles.netPayoutValue} numberOfLines={1}>
-                      {fareLabel}
-                    </Text>
-                    <Text style={styles.netPayoutLabel} numberOfLines={1}>
-                      líquido
+                      {fareLabel} líquido
                     </Text>
                   </View>
                 </View>
@@ -591,30 +596,29 @@ export default function RobotaxiDriverOfferScreen({ navigation, route }) {
                   accessibilityLabel={`Resumo da corrida. Embarque em ${pickupEtaLabel}, ${pickupDistanceLabel}. Viagem de ${tripDurationLabel}, ${tripDistanceLabel}. Total ${grossFareLabel}.`}
                 >
                   <View style={styles.routeStep}>
-                    <View style={styles.routeTrack}>
-                      <View style={styles.routeDot} />
-                      <View style={styles.routeLine} />
+                    <View style={styles.routeIcon}>
+                      <Ionicons name="locate-outline" size={15} color={leafRideColors.text} />
                     </View>
                     <View style={styles.routeCopy}>
-                      <Text style={styles.routeMeta} numberOfLines={1}>
-                        {pickupEtaLabel} · {pickupDistanceLabel} até o embarque
-                      </Text>
                       <Text style={styles.routeAddress} numberOfLines={1}>
                         {pickupLabel}
+                      </Text>
+                      <Text style={styles.routeMeta} numberOfLines={1}>
+                        {pickupEtaLabel} · {pickupDistanceLabel} até o embarque
                       </Text>
                     </View>
                   </View>
 
                   <View style={styles.routeStep}>
-                    <View style={styles.routeTrack}>
-                      <View style={[styles.routeDot, styles.routeDotDestination]} />
+                    <View style={styles.routeIcon}>
+                      <Ionicons name="location-outline" size={15} color={leafRideColors.dangerText} />
                     </View>
                     <View style={styles.routeCopy}>
-                      <Text style={styles.routeMeta} numberOfLines={1}>
-                        {tripDurationLabel} · {tripDistanceLabel} de viagem
-                      </Text>
                       <Text style={styles.routeAddress} numberOfLines={1}>
                         {dropoffLabel}
+                      </Text>
+                      <Text style={styles.routeMeta} numberOfLines={1}>
+                        {tripDurationLabel} · {tripDistanceLabel} de viagem
                       </Text>
                     </View>
                   </View>
@@ -634,7 +638,7 @@ export default function RobotaxiDriverOfferScreen({ navigation, route }) {
                     testID="driver-offer-screen-preferences"
                     accessibilityLabel="Preferências do passageiro"
                   >
-                    <Text style={styles.preferenceTitle}>Preferências</Text>
+                    <Text style={styles.hiddenText}>Preferências</Text>
                     <View style={styles.preferenceRow}>
                       {ridePreferenceItems.map((item) => (
                         <View key={item.key} style={styles.preferenceChip}>
@@ -706,21 +710,21 @@ const styles = StyleSheet.create({
     right: 0,
   },
   offerCard: {
-    minHeight: 0,
-    borderTopLeftRadius: 30,
-    borderTopRightRadius: 30,
+    minHeight: 356,
+    borderTopLeftRadius: 32,
+    borderTopRightRadius: 32,
     borderBottomLeftRadius: 0,
     borderBottomRightRadius: 0,
     paddingTop: 14,
-    paddingBottom: 26,
+    paddingBottom: 18,
   },
   sheetHandle: {
     width: 50,
     height: 4,
     borderRadius: 3,
-    backgroundColor: "rgba(17,22,17,0.16)",
+    backgroundColor: "#D8D0C7",
     alignSelf: "center",
-    marginBottom: 22,
+    marginBottom: 24,
   },
   offerHeader: {
     flexDirection: "row",
@@ -735,46 +739,48 @@ const styles = StyleSheet.create({
   },
   offerTimer: {
     color: leafRideColors.secondary,
-    fontFamily: fonts.Medium,
-    fontSize: 12,
-    lineHeight: 16,
+    fontFamily: fonts.Regular,
+    fontSize: 10.5,
+    lineHeight: 14,
+    marginTop: 2,
   },
   offerTitle: {
     color: leafRideColors.text,
     fontFamily: fonts.SemiBold,
-    fontSize: 24,
-    lineHeight: 30,
-  },
-  netPayout: {
-    alignItems: "flex-end",
-    minWidth: 112,
-  },
-  netPayoutValue: {
-    color: leafRideColors.leaf,
-    fontFamily: fonts.SemiBold,
     fontSize: 22,
     lineHeight: 28,
   },
-  netPayoutLabel: {
-    marginTop: 1,
-    color: leafRideColors.secondary,
-    fontFamily: fonts.Regular,
-    fontSize: 11,
+  netPayout: {
+    minWidth: 126,
+    height: 28,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: "#D9E3D3",
+    backgroundColor: "#F1F5EE",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 12,
+    marginTop: 4,
+  },
+  netPayoutValue: {
+    color: leafRideColors.leaf,
+    fontFamily: fonts.Medium,
+    fontSize: 10.5,
     lineHeight: 14,
   },
   passengerRow: {
-    minHeight: 44,
+    minHeight: 48,
     flexDirection: "row",
     alignItems: "center",
-    marginBottom: 18,
+    marginBottom: 16,
   },
   passengerAvatar: {
     width: 44,
     height: 44,
     borderRadius: 22,
     borderWidth: 1,
-    borderColor: "rgba(26,51,14,0.12)",
-    backgroundColor: "rgba(26,51,14,0.08)",
+    borderColor: "#E5DCD2",
+    backgroundColor: "#EFEAE2",
     alignItems: "center",
     justifyContent: "center",
   },
@@ -792,8 +798,8 @@ const styles = StyleSheet.create({
   passengerName: {
     color: leafRideColors.text,
     fontFamily: fonts.SemiBold,
-    fontSize: 16,
-    lineHeight: 21,
+    fontSize: 15,
+    lineHeight: 20,
   },
   passengerMeta: {
     marginTop: 2,
@@ -805,34 +811,20 @@ const styles = StyleSheet.create({
   routeSummary: {
     borderTopWidth: 1,
     borderBottomWidth: 1,
-    borderColor: "rgba(17,22,17,0.08)",
-    paddingVertical: 14,
-    gap: 14,
+    borderColor: leafRideColors.line,
+    paddingVertical: 12,
+    gap: 12,
   },
   routeStep: {
     flexDirection: "row",
     alignItems: "flex-start",
   },
-  routeTrack: {
-    width: 18,
+  routeIcon: {
+    width: 24,
+    height: 24,
     alignItems: "center",
-    paddingTop: 5,
-    marginRight: 10,
-  },
-  routeDot: {
-    width: 7,
-    height: 7,
-    borderRadius: 4,
-    backgroundColor: leafRideColors.text,
-  },
-  routeDotDestination: {
-    backgroundColor: leafRideColors.leaf,
-  },
-  routeLine: {
-    width: 1,
-    height: 36,
-    backgroundColor: "rgba(17,22,17,0.16)",
-    marginTop: 6,
+    justifyContent: "center",
+    marginRight: 12,
   },
   routeCopy: {
     flex: 1,
@@ -841,15 +833,15 @@ const styles = StyleSheet.create({
   routeMeta: {
     color: leafRideColors.secondary,
     fontFamily: fonts.Regular,
-    fontSize: 12,
-    lineHeight: 16,
+    fontSize: 10.5,
+    lineHeight: 14,
+    marginTop: 2,
   },
   routeAddress: {
-    marginTop: 2,
     color: leafRideColors.text,
     fontFamily: fonts.SemiBold,
-    fontSize: 16,
-    lineHeight: 21,
+    fontSize: 14,
+    lineHeight: 18,
   },
   confirmedLine: {
     marginTop: 12,
@@ -874,12 +866,6 @@ const styles = StyleSheet.create({
     alignItems: "center",
     gap: 10,
   },
-  preferenceTitle: {
-    color: leafRideColors.secondary,
-    fontFamily: fonts.Medium,
-    fontSize: 12,
-    lineHeight: 16,
-  },
   preferenceRow: {
     flex: 1,
     flexDirection: "row",
@@ -889,31 +875,29 @@ const styles = StyleSheet.create({
   preferenceChip: {
     minHeight: 24,
     borderRadius: 12,
-    borderWidth: 1,
-    borderColor: "rgba(26,51,14,0.13)",
-    paddingHorizontal: 9,
+    paddingHorizontal: 0,
     justifyContent: "center",
   },
   preferenceChipText: {
     color: leafRideColors.secondary,
-    fontFamily: fonts.Medium,
-    fontSize: 11,
-    lineHeight: 15,
+    fontFamily: fonts.Regular,
+    fontSize: 12,
+    lineHeight: 16,
   },
   offerActionsRow: {
-    marginTop: 18,
+    marginTop: 16,
     flexDirection: "row",
     gap: 12,
   },
   rejectButton: {
-    width: 112,
-    height: 52,
-    borderRadius: 26,
+    width: 116,
+    height: 48,
+    borderRadius: 24,
   },
   acceptButton: {
     flex: 1,
-    height: 52,
-    borderRadius: 26,
+    height: 48,
+    borderRadius: 24,
   },
   emptyWrap: {
     paddingTop: 6,
@@ -934,6 +918,12 @@ const styles = StyleSheet.create({
   emptyButton: {
     marginTop: 18,
     alignSelf: "flex-start",
+  },
+  hiddenText: {
+    position: "absolute",
+    width: 1,
+    height: 1,
+    opacity: 0,
   },
   errorText: {
     marginTop: 10,

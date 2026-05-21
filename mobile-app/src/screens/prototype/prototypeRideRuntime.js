@@ -6441,7 +6441,6 @@ function attachSocketListeners() {
         Boolean(runtimeState.activeBookingId) &&
         normalizedLocalBookingStatus === "started" &&
         hasConfirmedPayment;
-
       if (shouldRecoverPassengerCompletedRide) {
         const receipt = buildReceiptFromSyncedSnapshot(
           {
@@ -6491,6 +6490,34 @@ function attachSocketListeners() {
           lastError: "",
         });
         pushTripHistoryItem(receipt);
+        return;
+      }
+
+      const shouldPreserveActiveRideOnIdleSync =
+        hasRuntimeActiveRideContext(runtimeState) &&
+        payload?.hasActiveRide !== false &&
+        !payload?.stale &&
+        !(
+          syncedBookingId &&
+          runtimeState.activeBookingId &&
+          syncedBookingId !== String(runtimeState.activeBookingId)
+        ) &&
+        !(
+          payload?.forceClear === true ||
+          payload?.authoritativeTerminal === true ||
+          payload?.terminal === true ||
+          payload?.reason === "terminal_sync" ||
+          payload?.reason === "cancelled" ||
+          payload?.reason === "completed"
+        );
+
+      if (shouldPreserveActiveRideOnIdleSync) {
+        writeRuntimeDebugProbe("event_active_ride_sync_preserved_active_ride", {
+          bookingId: runtimeState.activeBookingId || null,
+          localStatus: normalizedLocalBookingStatus,
+          source: payload?.source || null,
+          reason: "idle_sync_without_terminal_authority",
+        });
         return;
       }
 
@@ -7792,6 +7819,24 @@ function attachSocketListeners() {
       return;
     }
 
+    const activeBookingId = String(
+      runtimeState.activeBookingId ||
+        runtimeState.activeBooking?.bookingId ||
+        runtimeState.driverActiveRide?.bookingId ||
+        "",
+    ).trim();
+    const payloadBookingId = String(
+      payload?.bookingId || payload?.tripId || payload?.rideId || "",
+    ).trim();
+
+    if (payloadBookingId && activeBookingId && payloadBookingId !== activeBookingId) {
+      writeRuntimeDebugProbe("event_driver_location_ignored_stale_booking", {
+        activeBookingId,
+        payloadBookingId,
+      });
+      return;
+    }
+
     const liveDriverCoordinate = { latitude: lat, longitude: lng };
     setRuntimeState({
       ...(resolveRuntimeRole(runtimeState.profile) === "driver"
@@ -7806,14 +7851,6 @@ function attachSocketListeners() {
       const incomingRoutePlan = extractDriverRoutePlan({
         routePlan: payload?.routePlan,
       });
-      const activeBookingId = String(
-        runtimeState.activeBookingId ||
-          runtimeState.activeBooking?.bookingId ||
-          "",
-      ).trim();
-      const payloadBookingId = String(
-        payload?.bookingId || payload?.tripId || "",
-      ).trim();
       const pickupCoordinate =
         normalizeRuntimeCoordinate(payload?.pickupCoordinate) ||
         resolvePickupCoordinateFromRide(

@@ -374,14 +374,15 @@ function registerSocketAuthenticateHandler({
                         authenticated: true,
                         authenticatedAt: new Date().toISOString(),
                         userId: authUserId,
-                        userType: socket.userType
+                        userType: socket.userType,
+                        socketId: socket.id
                     });
 
                     if (await redis.exists(`user:${tempUserId}`) || await redis.exists(`driver:${tempUserId}`)) {
                         const tempTokens = await redis.hgetall(`fcm_tokens:${tempUserId}`);
-                        for (const token of Object.keys(tempTokens)) {
-                            await redis.hdel(`fcm_tokens:${tempUserId}`, token);
-                        }
+                        await Promise.all(Object.keys(tempTokens).map((token) =>
+                            fcmService.removeUserFCMToken(tempUserId, token)
+                        ));
                         await redis.del(`user:${tempUserId}`);
                         await redis.del(`driver:${tempUserId}`);
                     }

@@ -832,6 +832,28 @@ class WebSocketManager {
     );
   }
 
+  _isQaSocketBypassRejected(payload = null) {
+    if (!this.qaSocketBypassState?.enabled) {
+      return false;
+    }
+
+    const source =
+      payload?.payload && typeof payload.payload === "object"
+        ? payload.payload
+        : payload;
+    const message = String(
+      source?.message || source?.error || payload?.message || payload || "",
+    )
+      .trim()
+      .toLowerCase();
+
+    return (
+      message.includes("token de autenticação ausente") ||
+      message.includes("token de autenticacao ausente") ||
+      message.includes("token ausente")
+    );
+  }
+
   async _recoverAuthentication(payload = null) {
     if (this.authRecoveryPromise) {
       return this.authRecoveryPromise;
@@ -1341,12 +1363,18 @@ class WebSocketManager {
               this.isAuthenticated = false;
               this.isAuthenticating = false;
 
-              this._recoverAuthentication(data).catch((recoveryError) => {
+              if (this._isQaSocketBypassRejected(data)) {
                 Logger.warn(
-                  "⚠️ [WebSocketManager] Falha ao recuperar autenticacao apos erro do socket:",
-                  recoveryError?.message || recoveryError,
+                  "⚠️ [WebSocketManager] QA bypass sem token rejeitado pelo backend local. Ative AUTO_TEST_MODE=true ou use um idToken QA para testar socket.",
                 );
-              });
+              } else {
+                this._recoverAuthentication(data).catch((recoveryError) => {
+                  Logger.warn(
+                    "⚠️ [WebSocketManager] Falha ao recuperar autenticacao apos erro do socket:",
+                    recoveryError?.message || recoveryError,
+                  );
+                });
+              }
             }
 
             if (
@@ -1423,6 +1451,12 @@ class WebSocketManager {
             "⚠️ [WebSocketManager] Auto-reautenticação com ACK falhou, fallback para emissão simples:",
             authError?.message || authError,
           );
+          if (this._isQaSocketBypassRejected(authError)) {
+            Logger.warn(
+              "⚠️ [WebSocketManager] Backend local rejeitou QA bypass sem token; mantendo socket sem nova tentativa automática.",
+            );
+            return;
+          }
           this.authenticate(
             this.authCredentials.userId,
             this.authCredentials.userType,
@@ -2865,6 +2899,196 @@ class WebSocketManager {
     });
   }
 
+  async sendNotificationAction(action, bookingId, payload = {}) {
+    if (!this.socket?.connected) {
+      throw new Error("WebSocket não conectado");
+    }
+
+    const normalizedAction = String(action || "").trim();
+    const normalizedBookingId = String(
+      bookingId || payload?.bookingId || payload?.rideId || "",
+    ).trim();
+
+    if (!normalizedAction) {
+      throw new Error("Ação obrigatória para notificação");
+    }
+
+    if (!normalizedBookingId) {
+      throw new Error("bookingId obrigatório para ação de notificação");
+    }
+
+    const normalizedActionKey = normalizedAction.toLowerCase();
+    if (normalizedActionKey === "start_trip") {
+      const result = await this.startTrip(
+        normalizedBookingId,
+        payload?.startLocation || payload?.location || null,
+      );
+      return {
+        ...(result || {}),
+        success: result?.success !== false,
+        bookingId: normalizedBookingId,
+        action: normalizedAction,
+      };
+    }
+
+    if (normalizedActionKey === "end_trip") {
+      const result = await this.completeTrip(
+        normalizedBookingId,
+        payload?.endLocation || payload?.location || null,
+        payload?.distance,
+        payload?.fare,
+      );
+      return {
+        ...(result || {}),
+        success: result?.success !== false,
+        bookingId: normalizedBookingId,
+        action: normalizedAction,
+      };
+    }
+
+    if (normalizedActionKey === "cancel_ride") {
+      const result = await this.cancelRide(
+        normalizedBookingId,
+        payload?.reason || "Cancelado pela notificação",
+        payload?.cancellationFee || 0,
+      );
+      return {
+        ...(result || {}),
+        success: result?.success !== false,
+        bookingId: normalizedBookingId,
+        action: normalizedAction,
+      };
+    }
+
+    return new Promise((resolve, reject) => {
+      const telemetryContext = this._resolveRideTelemetryContext(
+        {},
+        normalizedBookingId,
+      );
+      const startedAt = Date.now();
+      let timeout;
+
+      const matchesResponse = (data) => {
+        const responseBookingId = String(
+          data?.bookingId || data?.rideId || "",
+        ).trim();
+        if (responseBookingId && responseBookingId !== normalizedBookingId) {
+          return false;
+        }
+
+        const responseAction = String(data?.action || "").trim().toLowerCase();
+        if (responseAction && responseAction !== normalizedActionKey) {
+          return false;
+        }
+
+        return Boolean(responseBookingId || responseAction);
+      };
+
+      const cleanup = () => {
+        clearTimeout(timeout);
+        this.off("notificationActionSuccess", onSuccess);
+        this.off("notificationActionError", onError);
+      };
+
+      const onSuccess = (data) => {
+        if (!matchesResponse(data)) {
+          return;
+        }
+
+        cleanup();
+        if (data?.success === false || data?.error) {
+          this._recordRideTelemetryCommand(
+            "notificationAction",
+            {
+              action: normalizedAction,
+              phase: "error",
+              latencyMs: Date.now() - startedAt,
+              errorCode: data?.code || null,
+            },
+            telemetryContext,
+            normalizedBookingId,
+          );
+          reject(new Error(data?.error || "Notification action failed"));
+          return;
+        }
+
+        this._recordRideTelemetryCommand(
+          "notificationAction",
+          {
+            action: normalizedAction,
+            phase: "success",
+            latencyMs: Date.now() - startedAt,
+          },
+          telemetryContext,
+          normalizedBookingId,
+        );
+        resolve({
+          success: true,
+          bookingId: normalizedBookingId,
+          action: normalizedAction,
+          ...data,
+        });
+      };
+
+      const onError = (error) => {
+        if (!matchesResponse(error)) {
+          return;
+        }
+
+        cleanup();
+        this._recordRideTelemetryCommand(
+          "notificationAction",
+          {
+            action: normalizedAction,
+            phase: "error",
+            latencyMs: Date.now() - startedAt,
+            errorCode: error?.code || null,
+          },
+          telemetryContext,
+          normalizedBookingId,
+        );
+        reject(
+          new Error(
+            error?.error || error?.message || "Notification action failed",
+          ),
+        );
+      };
+
+      timeout = setTimeout(() => {
+        cleanup();
+        this._recordRideTelemetryCommand(
+          "notificationAction",
+          {
+            action: normalizedAction,
+            phase: "error",
+            latencyMs: Date.now() - startedAt,
+            errorCode: "NOTIFICATION_ACTION_TIMEOUT",
+          },
+          telemetryContext,
+          normalizedBookingId,
+        );
+        reject(new Error("Notification action timeout"));
+      }, 10000);
+
+      this.on("notificationActionSuccess", onSuccess);
+      this.on("notificationActionError", onError);
+      this._recordRideTelemetryCommand(
+        "notificationAction",
+        {
+          action: normalizedAction,
+          phase: "attempt",
+        },
+        telemetryContext,
+        normalizedBookingId,
+      );
+      this.socket.emit("notificationAction", {
+        ...payload,
+        action: normalizedAction,
+        bookingId: normalizedBookingId,
+      });
+    });
+  }
+
   // Motorista chegou ao pickup
   async arriveAtPickup(rideId, location) {
     if (!this.socket?.connected) {
@@ -4062,6 +4286,7 @@ class WebSocketManager {
       const telemetryContext = this._resolveRideTelemetryContext({}, bookingId);
       const startedAt = Date.now();
       const timeout = setTimeout(() => {
+        cleanup();
         this._recordRideTelemetryCommand(
           "cancelRide",
           {
@@ -4075,17 +4300,13 @@ class WebSocketManager {
         reject(new Error("Cancel ride timeout"));
       }, 10000);
 
-      this._recordRideTelemetryCommand(
-        "cancelRide",
-        {
-          phase: "attempt",
-        },
-        telemetryContext,
-        bookingId,
-      );
-      this.socket.emit("cancelRide", { bookingId, reason, cancellationFee });
-      this.socket.once("rideCancelled", (data) => {
+      const cleanup = () => {
         clearTimeout(timeout);
+        this.socket.off?.("rideCancelled", onCancelled);
+      };
+
+      const onCancelled = (data) => {
+        cleanup();
         if (data.success) {
           this._recordRideTelemetryCommand(
             "cancelRide",
@@ -4110,7 +4331,18 @@ class WebSocketManager {
           );
           reject(new Error(data.error || "Cancel ride failed"));
         }
-      });
+      };
+
+      this._recordRideTelemetryCommand(
+        "cancelRide",
+        {
+          phase: "attempt",
+        },
+        telemetryContext,
+        bookingId,
+      );
+      this.socket.once("rideCancelled", onCancelled);
+      this.socket.emit("cancelRide", { bookingId, reason, cancellationFee });
     });
   }
 
@@ -4300,10 +4532,9 @@ class WebSocketManager {
 
     return new Promise((resolve, reject) => {
       const timeout = setTimeout(() => {
+        cleanup();
         reject(new Error("Register FCM token timeout"));
       }, 10000);
-
-      this.socket.emit("registerFCMToken", tokenData);
 
       const onRegistered = (data) => {
         cleanup();
@@ -4327,6 +4558,7 @@ class WebSocketManager {
 
       this.socket.once("fcmTokenRegistered", onRegistered);
       this.socket.once("fcmTokenError", onError);
+      this.socket.emit("registerFCMToken", tokenData);
     });
   }
 

@@ -312,6 +312,13 @@ class LeafApiService {
     return this.request(`/users/${userId}`);
   }
 
+  async updateUserOperationalStatus(userId, payload = {}) {
+    return this.request(`/users/${userId}/status`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  }
+
   async getDriverComplete(driverId) {
     return this.request(`/drivers/${driverId}/complete`);
   }
@@ -369,6 +376,13 @@ class LeafApiService {
     return this.request(`/drivers/${driverId}/documents/${documentType}/upload`, {
       method: "POST",
       body: formData,
+    });
+  }
+
+  async requestDriverDocument(driverId, documentType, payload = {}) {
+    return this.request(`/drivers/${driverId}/documents/${documentType}/request`, {
+      method: "POST",
+      body: JSON.stringify(payload),
     });
   }
 

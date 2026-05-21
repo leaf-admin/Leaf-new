@@ -6,10 +6,10 @@ import { leafRideColors } from "../../../components/prototype/LeafRideUI";
 
 const HOME_CARD_BOTTOM_OFFSET = 16;
 const LEAF_GREEN = "#1A330E";
-const CARD_SURFACE = "#FAFBF8";
-const CARD_BORDER = "#DCE4DA";
-const TEXT_PRIMARY = "#111611";
-const TEXT_MUTED = "#747B72";
+const CARD_SURFACE = "#FFFFFF";
+const CARD_BORDER = "#ECE5DC";
+const TEXT_PRIMARY = "#171412";
+const TEXT_MUTED = "#827B73";
 
 function PassengerHomeOverlay({
   insetsBottom = 0,
@@ -133,25 +133,22 @@ export default memo(PassengerHomeOverlay);
 const styles = StyleSheet.create({
   searchCard: {
     position: "absolute",
-    left: 16,
-    right: 16,
+    left: 24,
+    right: 24,
     zIndex: 16,
     height: 142,
-    borderTopLeftRadius: 32,
-    borderTopRightRadius: 32,
-    borderBottomLeftRadius: 32,
-    borderBottomRightRadius: 32,
+    borderRadius: 28,
     borderWidth: 1,
     borderColor: CARD_BORDER,
     backgroundColor: CARD_SURFACE,
-    paddingLeft: 28,
-    paddingRight: 28,
+    paddingLeft: 24,
+    paddingRight: 24,
     paddingTop: 22,
     paddingBottom: 18,
     flexDirection: "row",
     shadowColor: "#000000",
     shadowOffset: { width: 0, height: 20 },
-    shadowOpacity: 0.1,
+    shadowOpacity: 0.12,
     shadowRadius: 17,
     elevation: Platform.OS === "android" ? 0 : 12,
   },
@@ -172,7 +169,7 @@ const styles = StyleSheet.create({
     marginTop: 5,
     marginBottom: 7,
     borderRadius: 1,
-    backgroundColor: "#CAD3C8",
+    backgroundColor: "#E9E2D8",
   },
   destinationDot: {
     width: 10,
@@ -213,7 +210,7 @@ const styles = StyleSheet.create({
     height: StyleSheet.hairlineWidth,
     marginTop: 3,
     marginBottom: 8,
-    backgroundColor: "#DDE3D9",
+    backgroundColor: "#E9E2D8",
   },
   destinationInput: {
     minHeight: 45,

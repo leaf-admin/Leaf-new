@@ -256,9 +256,19 @@ function IconActionButton({
     >
       <Ionicons
         name={icon}
-        size={20}
+        size={16}
         color={isPrimary ? "#FFFFFF" : isDanger ? leafRideColors.dangerText : leafRideColors.leaf}
       />
+      <Text
+        style={[
+          styles.iconActionLabel,
+          isPrimary && styles.iconActionLabelPrimary,
+          isDanger && styles.iconActionLabelDanger,
+        ]}
+        numberOfLines={1}
+      >
+        {label}
+      </Text>
     </TouchableOpacity>
   );
 }
@@ -355,7 +365,13 @@ export default function RobotaxiDriverTripScreen({ navigation, route }) {
     ? ridePreferenceItems.map(item => item.label).join(" · ")
     : "Preferências padrão";
   const etaMin = Math.max(2, Number(tripDurationMin || request?.pickupEtaMin || 4));
-  const distanceLabel = formatDistanceLabel(tripDistanceKm);
+  const effectiveDistanceKm =
+    Number.isFinite(Number(tripDistanceKm)) && Number(tripDistanceKm) > 0
+      ? Number(tripDistanceKm)
+      : normalizedBookingStatus === "accepted" || normalizedBookingStatus === "arrived"
+        ? request?.pickupDistanceKm || request?.distanceKm || request?.tripDistanceKm
+        : request?.tripDistanceKm || request?.distanceKm;
+  const distanceLabel = formatDistanceLabel(effectiveDistanceKm);
   const routeTotalMinutes =
     request?.initialTripDurationMin ||
     request?.estimatedTotalDurationMin ||
@@ -766,17 +782,19 @@ export default function RobotaxiDriverTripScreen({ navigation, route }) {
             </View>
           </View>
 
-          <View style={styles.actionsRow}>
+          <View style={styles.secondaryActionsRow}>
             <IconActionButton
               icon="call-outline"
               label="Ligar"
               onPress={handleCallPassenger}
+              style={styles.secondaryActionButton}
               testID="driver-trip-call-button"
             />
             <IconActionButton
               icon="chatbubble-outline"
               label="Chat"
               onPress={() => navigation.navigate("RobotaxiPrototypeChat")}
+              style={styles.secondaryActionButton}
               testID="driver-trip-chat-button"
             />
             <IconActionButton
@@ -784,8 +802,11 @@ export default function RobotaxiDriverTripScreen({ navigation, route }) {
               label="No-show"
               tone="danger"
               onPress={handleNoShow}
+              style={styles.secondaryActionButton}
               testID="driver-trip-no-show-button"
             />
+          </View>
+          <View style={styles.primaryActionRow}>
             <LeafButton
               label={primaryLabel}
               tone="primary"
@@ -828,11 +849,12 @@ export default function RobotaxiDriverTripScreen({ navigation, route }) {
             testID="driver-trip-passenger-identity"
           />
 
-          <View style={styles.actionsRow}>
+          <View style={styles.secondaryActionsRow}>
             <IconActionButton
               icon="navigate-outline"
               label="Navegar"
               onPress={handleOpenNavigation}
+              style={styles.secondaryActionButton}
               testID="driver-trip-navigation-button"
             />
             <IconActionButton
@@ -840,8 +862,11 @@ export default function RobotaxiDriverTripScreen({ navigation, route }) {
               label="Reportar"
               tone="danger"
               onPress={() => navigation.navigate("RobotaxiPrototypeSupport")}
+              style={styles.secondaryActionButton}
               testID="driver-trip-report-button"
             />
+          </View>
+          <View style={styles.primaryActionRow}>
             <LeafButton
               label={primaryLabel}
               tone="primary"
@@ -901,17 +926,19 @@ export default function RobotaxiDriverTripScreen({ navigation, route }) {
           </View>
         </View>
 
-        <View style={styles.actionsRow}>
+        <View style={styles.secondaryActionsRow}>
           <IconActionButton
             icon="chatbubble-outline"
             label="Chat"
             onPress={() => navigation.navigate("RobotaxiPrototypeChat")}
+            style={styles.secondaryActionButton}
             testID="driver-trip-chat-button"
           />
           <IconActionButton
             icon="navigate-outline"
             label="Navegar"
             onPress={handleOpenNavigation}
+            style={styles.secondaryActionButton}
             testID="driver-trip-navigation-button"
           />
           <IconActionButton
@@ -919,8 +946,11 @@ export default function RobotaxiDriverTripScreen({ navigation, route }) {
             label="Cancelar"
             tone="danger"
             onPress={() => navigation.navigate("RobotaxiPrototypeCancellation", { source: "driver-trip" })}
+            style={styles.secondaryActionButton}
             testID="driver-trip-cancel-button"
           />
+        </View>
+        <View style={styles.primaryActionRow}>
           <LeafButton
             label={primaryLabel}
             tone="primary"
@@ -975,9 +1005,9 @@ const styles = StyleSheet.create({
     right: 0,
   },
   tripCard: {
-    minHeight: 0,
-    borderTopLeftRadius: 30,
-    borderTopRightRadius: 30,
+    minHeight: 332,
+    borderTopLeftRadius: 32,
+    borderTopRightRadius: 32,
     borderBottomLeftRadius: 0,
     borderBottomRightRadius: 0,
     paddingTop: 14,
@@ -986,9 +1016,9 @@ const styles = StyleSheet.create({
     width: 50,
     height: 4,
     borderRadius: 3,
-    backgroundColor: "rgba(17,22,17,0.16)",
+    backgroundColor: "#D8D0C7",
     alignSelf: "center",
-    marginBottom: 18,
+    marginBottom: 24,
   },
   cardStateHeader: {
     flexDirection: "row",
@@ -1003,8 +1033,8 @@ const styles = StyleSheet.create({
   cardStateTitle: {
     color: leafRideColors.text,
     fontFamily: fonts.SemiBold,
-    fontSize: 22,
-    lineHeight: 28,
+    fontSize: 21,
+    lineHeight: 27,
   },
   driverPayout: {
     minWidth: 82,
@@ -1014,8 +1044,8 @@ const styles = StyleSheet.create({
   driverPayoutValue: {
     color: leafRideColors.leaf,
     fontFamily: fonts.SemiBold,
-    fontSize: 18,
-    lineHeight: 23,
+    fontSize: 16,
+    lineHeight: 21,
     textAlign: "right",
   },
   driverPayoutLabel: {
@@ -1120,19 +1150,19 @@ const styles = StyleSheet.create({
     marginTop: 14,
     borderTopWidth: 1,
     borderBottomWidth: 1,
-    borderColor: "rgba(17,22,17,0.08)",
-    paddingVertical: 14,
-    gap: 14,
+    borderColor: leafRideColors.line,
+    paddingVertical: 12,
+    gap: 12,
   },
   driverRouteStep: {
     flexDirection: "row",
     alignItems: "flex-start",
   },
   driverRouteTrack: {
-    width: 18,
+    width: 24,
     alignItems: "center",
     paddingTop: 5,
-    marginRight: 10,
+    marginRight: 12,
   },
   driverRouteDot: {
     width: 7,
@@ -1156,15 +1186,15 @@ const styles = StyleSheet.create({
   driverRouteMeta: {
     color: leafRideColors.secondary,
     fontFamily: fonts.Regular,
-    fontSize: 12,
-    lineHeight: 16,
+    fontSize: 10.5,
+    lineHeight: 14,
   },
   driverRouteAddress: {
     marginTop: 2,
     color: leafRideColors.text,
     fontFamily: fonts.SemiBold,
-    fontSize: 16,
-    lineHeight: 21,
+    fontSize: 14,
+    lineHeight: 18,
   },
   driverRouteProgress: {
     marginTop: 0,
@@ -1195,21 +1225,31 @@ const styles = StyleSheet.create({
     marginTop: 12,
     marginBottom: 0,
   },
-  actionsRow: {
+  secondaryActionsRow: {
     marginTop: 18,
     flexDirection: "row",
     alignItems: "center",
     gap: 10,
   },
+  secondaryActionButton: {
+    flex: 1,
+    minWidth: 0,
+  },
+  primaryActionRow: {
+    marginTop: 10,
+  },
   iconActionButton: {
-    width: 52,
-    height: 52,
-    borderRadius: 26,
+    minWidth: 76,
+    height: 42,
+    borderRadius: 21,
     borderWidth: 1,
     borderColor: leafRideColors.line,
     backgroundColor: "#FFFFFF",
     alignItems: "center",
     justifyContent: "center",
+    flexDirection: "row",
+    gap: 5,
+    paddingHorizontal: 12,
   },
   iconActionButtonDanger: {
     backgroundColor: leafRideColors.danger,
@@ -1219,13 +1259,26 @@ const styles = StyleSheet.create({
     backgroundColor: leafRideColors.leaf,
     borderColor: leafRideColors.leaf,
   },
+  iconActionLabel: {
+    color: leafRideColors.text,
+    fontFamily: fonts.Medium,
+    fontSize: 11,
+    lineHeight: 16,
+  },
+  iconActionLabelPrimary: {
+    color: "#FFFFFF",
+  },
+  iconActionLabelDanger: {
+    color: leafRideColors.dangerText,
+  },
   iconActionButtonDisabled: {
     opacity: 0.52,
   },
   primaryAction: {
     flex: 1,
-    height: 52,
-    borderRadius: 26,
+    width: "100%",
+    height: 46,
+    borderRadius: 23,
   },
   emptyBackButton: {
     alignSelf: "flex-start",

@@ -147,6 +147,11 @@ function normalizeMapCoordinate(value) {
   return { latitude, longitude };
 }
 
+function toPositiveNumber(value) {
+  const numeric = Number(value);
+  return Number.isFinite(numeric) && numeric > 0 ? numeric : null;
+}
+
 function buildFallbackTripRegion(points = []) {
   const normalizedPoints = points
     .map(normalizeMapCoordinate)
@@ -199,6 +204,8 @@ function buildExtensionPaymentData(rideExtension, bookingId) {
 function IconActionButton({ icon, label, onPress, tone = 'ghost', testID, style }) {
   const isWarning = tone === 'warning';
   const isDanger = tone === 'danger';
+  const displayLabel =
+    label === 'Mensagem' ? 'Chat' : label === 'Cancelar corrida' ? 'Cancelar' : label;
   return (
     <TouchableOpacity
       activeOpacity={0.84}
@@ -215,7 +222,7 @@ function IconActionButton({ icon, label, onPress, tone = 'ghost', testID, style 
     >
       <Ionicons
         name={icon}
-        size={19}
+        size={16}
         color={
           isDanger
             ? leafRideColors.dangerText
@@ -224,7 +231,17 @@ function IconActionButton({ icon, label, onPress, tone = 'ghost', testID, style 
               : leafRideColors.leaf
         }
       />
-      <Text style={styles.hiddenText}>{label}</Text>
+      <Text
+        style={[
+          styles.iconActionLabel,
+          isDanger && styles.iconActionLabelDanger,
+          isWarning && styles.iconActionLabelWarning,
+        ]}
+        numberOfLines={1}
+      >
+        {displayLabel}
+      </Text>
+      {displayLabel !== label ? <Text style={styles.hiddenText}>{label}</Text> : null}
     </TouchableOpacity>
   );
 }
@@ -272,29 +289,22 @@ export default function RobotaxiTripScreen({ navigation, route }) {
     route?.params?.driverName || activeBooking?.driverName || driverActiveRide?.driverName || null;
   const fallbackVehicleModel = route?.params?.vehicleModel || vehicle;
   const fallbackVehiclePlate = route?.params?.vehiclePlate || '';
-  const resolvedTripDistanceKm = Number.isFinite(Number(tripDistanceKm))
-    ? Number(tripDistanceKm)
-    : Number.isFinite(Number(route?.params?.tripDistanceKm))
-      ? Number(route.params.tripDistanceKm)
-      : null;
-  const resolvedTripDurationMin = Number.isFinite(Number(tripDurationMin))
-    ? Number(tripDurationMin)
-    : Number.isFinite(Number(route?.params?.tripDurationMin))
-      ? Number(route.params.tripDurationMin)
-      : null;
+  const resolvedTripDistanceKm =
+    toPositiveNumber(tripDistanceKm) ??
+    toPositiveNumber(route?.params?.tripDistanceKm);
+  const resolvedTripDurationMin =
+    toPositiveNumber(tripDurationMin) ??
+    toPositiveNumber(route?.params?.tripDurationMin);
   const resolvedTripArrivalText =
     tripArrivalText ||
     route?.params?.tripArrivalText ||
     (Number.isFinite(resolvedTripDurationMin) && resolvedTripDurationMin > 0
       ? `Chegada estimada em ${resolvedTripDurationMin} min`
       : '');
-  const resolvedFare = Number.isFinite(Number(selectedFare))
-    ? Number(selectedFare)
-    : Number.isFinite(Number(route?.params?.selectedFare))
-      ? Number(route.params.selectedFare)
-      : Number.isFinite(Number(activeBooking?.estimatedFare))
-        ? Number(activeBooking.estimatedFare)
-        : null;
+  const resolvedFare =
+    toPositiveNumber(selectedFare) ??
+    toPositiveNumber(route?.params?.selectedFare) ??
+    toPositiveNumber(activeBooking?.estimatedFare);
   const driverName =
     String(driverInfo?.name || fallbackDriverName || 'Motorista Leaf').trim() || 'Motorista Leaf';
   const vehicleModel =
@@ -326,8 +336,10 @@ export default function RobotaxiTripScreen({ navigation, route }) {
     ).trim() || null;
   const distanceLabel = formatDistanceLabel(resolvedTripDistanceKm);
   const fareLabel = Number.isFinite(resolvedFare) ? formatCurrency(resolvedFare) : '--';
+  const routeQaStatus = String(route?.params?.qaStatus || '').trim();
   const normalizedStatus = String(
-    bookingStatus ||
+    routeQaStatus ||
+      bookingStatus ||
       driverActiveRide?.status ||
       activeBooking?.status ||
       route?.params?.status ||
@@ -718,16 +730,19 @@ export default function RobotaxiTripScreen({ navigation, route }) {
       </Text>
       <View style={styles.rideHeader}>
         <View style={styles.rideHeaderCopy}>
-          <Text style={styles.rideKicker} numberOfLines={1}>
-            {isStarted
-              ? arrivalClockLabel || resolvedTripArrivalText || compactEtaValue
-              : isArrived
-                ? 'Motorista no embarque'
-                : `${compactEtaValue} até chegar`}
-          </Text>
           <Text style={styles.rideTitle} numberOfLines={2}>
             {isStarted ? `A caminho de ${destination}` : passengerHeaderTitle}
           </Text>
+          {isStarted || isArrived ? (
+            <Text style={styles.rideKicker} numberOfLines={1}>
+              {isStarted
+                ? arrivalClockLabel || resolvedTripArrivalText || compactEtaValue
+                : 'Motorista no embarque'}
+            </Text>
+          ) : null}
+          {!isStarted && !isArrived ? (
+            <Text style={styles.hiddenText}>{`${compactEtaValue} até chegar`}</Text>
+          ) : null}
         </View>
         {isStarted ? (
           <View style={styles.rideRight}>
@@ -779,19 +794,23 @@ export default function RobotaxiTripScreen({ navigation, route }) {
           <Text style={styles.vehicleColorText} numberOfLines={1}>
             {vehicleColorLabel}
           </Text>
-          <View style={styles.leafActionsRow}>
+          <View style={styles.passengerSecondaryActionsRow}>
             <IconActionButton
               icon="shield-checkmark-outline"
               label="SOS"
               onPress={() => navigation.navigate('RobotaxiPrototypeSupport')}
+              style={styles.passengerSecondaryActionButton}
               testID="passenger-trip-support-button"
             />
             <IconActionButton
               icon="chatbubble-ellipses-outline"
               label="Mensagem"
               onPress={() => navigation.navigate('RobotaxiPrototypeChat')}
+              style={styles.passengerSecondaryActionButton}
               testID="passenger-trip-message-button"
             />
+          </View>
+          <View style={styles.passengerPrimaryActionRow}>
             <LeafButton
               label="Compartilhar"
               tone="primary"
@@ -830,19 +849,19 @@ export default function RobotaxiTripScreen({ navigation, route }) {
           <Text style={styles.vehicleColorText} numberOfLines={1}>
             {vehicleColorLabel}
           </Text>
-          <View style={styles.leafActionsRow}>
+          <View style={styles.passengerSecondaryActionsRow}>
             <IconActionButton
               icon="call-outline"
               label="Ligar"
               onPress={handleCallDriver}
-              style={styles.tripActionIcon}
+              style={styles.passengerSecondaryActionButton}
               testID="passenger-trip-call-button"
             />
             <IconActionButton
               icon="chatbubble-ellipses-outline"
               label="Mensagem"
               onPress={() => navigation.navigate('RobotaxiPrototypeChat')}
-              style={styles.tripActionIcon}
+              style={styles.passengerSecondaryActionButton}
               testID="passenger-trip-message-button"
             />
             <IconActionButton
@@ -850,9 +869,11 @@ export default function RobotaxiTripScreen({ navigation, route }) {
               label="Cancelar corrida"
               tone="danger"
               onPress={() => navigation.navigate('RobotaxiPrototypeCancellation', { source: 'trip' })}
-              style={styles.tripActionIcon}
+              style={styles.passengerSecondaryActionButton}
               testID="passenger-trip-cancel-button"
             />
+          </View>
+          <View style={styles.passengerPrimaryActionRow}>
             <LeafButton
               label="Estou indo"
               tone="primary"
@@ -908,19 +929,19 @@ export default function RobotaxiTripScreen({ navigation, route }) {
               </View>
             </View>
           </View>
-          <View style={styles.leafActionsRow}>
+          <View style={styles.passengerSecondaryActionsRow}>
             <IconActionButton
               icon="call-outline"
               label="Ligar"
               onPress={handleCallDriver}
-              style={styles.tripActionIcon}
+              style={styles.passengerSecondaryActionButton}
               testID="passenger-trip-call-button"
             />
             <IconActionButton
               icon="chatbubble-ellipses-outline"
               label="Mensagem"
               onPress={() => navigation.navigate('RobotaxiPrototypeChat')}
-              style={styles.tripActionIcon}
+              style={styles.passengerSecondaryActionButton}
               testID="passenger-trip-message-button"
             />
             <IconActionButton
@@ -928,9 +949,11 @@ export default function RobotaxiTripScreen({ navigation, route }) {
               label="Cancelar corrida"
               tone="danger"
               onPress={() => navigation.navigate('RobotaxiPrototypeCancellation', { source: 'trip' })}
-              style={styles.tripActionIcon}
+              style={styles.passengerSecondaryActionButton}
               testID="passenger-trip-cancel-button"
             />
+          </View>
+          <View style={styles.passengerPrimaryActionRow}>
             <LeafButton
               label="Compartilhar"
               tone="primary"
@@ -1271,7 +1294,7 @@ const styles = StyleSheet.create({
     right: 0
   },
   tripCard: {
-    minHeight: 286,
+    minHeight: 332,
     borderTopLeftRadius: 32,
     borderTopRightRadius: 32,
     borderBottomLeftRadius: 0,
@@ -1279,7 +1302,7 @@ const styles = StyleSheet.create({
     paddingTop: 16
   },
   compactCard: {
-    minHeight: 286
+    minHeight: 332
   },
   sheetHandle: {
     width: 50,
@@ -1287,7 +1310,7 @@ const styles = StyleSheet.create({
     borderRadius: 3,
     backgroundColor: '#D8D0C7',
     alignSelf: 'center',
-    marginBottom: 16
+    marginBottom: 24
   },
   hiddenText: {
     position: 'absolute',
@@ -1311,18 +1334,21 @@ const styles = StyleSheet.create({
     lineHeight: 25
   },
   iconActionButton: {
-    width: 52,
-    height: 52,
-    borderRadius: 26,
+    minWidth: 76,
+    height: 42,
+    borderRadius: 21,
     borderWidth: 1,
     borderColor: leafRideColors.line,
     backgroundColor: '#FFFFFF',
     alignItems: 'center',
-    justifyContent: 'center'
+    justifyContent: 'center',
+    flexDirection: 'row',
+    gap: 5,
+    paddingHorizontal: 12
   },
   tripActionIcon: {
-    width: 52,
-    height: 52
+    minWidth: 76,
+    height: 42
   },
   tripHeaderIconAction: {
     width: 66,
@@ -1334,7 +1360,19 @@ const styles = StyleSheet.create({
   },
   iconActionButtonDanger: {
     backgroundColor: leafRideColors.danger,
-    borderColor: 'rgba(159,36,36,0.12)'
+    borderColor: '#F5CBD2'
+  },
+  iconActionLabel: {
+    color: leafRideColors.text,
+    fontFamily: fonts.Medium,
+    fontSize: 11,
+    lineHeight: 16
+  },
+  iconActionLabelDanger: {
+    color: leafRideColors.dangerText
+  },
+  iconActionLabelWarning: {
+    color: leafRideColors.warningText
   },
   cardStateDivider: {
     marginTop: 14,
@@ -1367,32 +1405,42 @@ const styles = StyleSheet.create({
     minWidth: 0
   },
   rideKicker: {
+    marginTop: 2,
     color: leafRideColors.secondary,
-    fontFamily: fonts.Medium,
-    fontSize: 12,
-    lineHeight: 16
+    fontFamily: fonts.Regular,
+    fontSize: 11,
+    lineHeight: 15
   },
   rideTitle: {
-    marginTop: 2,
     color: leafRideColors.text,
     fontFamily: fonts.SemiBold,
-    fontSize: 22,
-    lineHeight: 28
+    fontSize: 21,
+    lineHeight: 27
   },
   rideRight: {
-    minWidth: 74,
+    minWidth: 58,
+    height: 28,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: leafRideColors.borderStrong,
+    backgroundColor: '#FFFFFF',
     alignItems: 'flex-end',
-    paddingTop: 2
+    justifyContent: 'center',
+    paddingHorizontal: 10,
+    marginTop: 2
   },
   rideRightValue: {
-    color: leafRideColors.leaf,
-    fontFamily: fonts.SemiBold,
-    fontSize: 18,
-    lineHeight: 23,
-    textAlign: 'right'
+    color: leafRideColors.text,
+    fontFamily: fonts.Medium,
+    fontSize: 11,
+    lineHeight: 16,
+    textAlign: 'center'
   },
   rideRightLabel: {
-    marginTop: 1,
+    position: 'absolute',
+    width: 1,
+    height: 1,
+    opacity: 0,
     color: leafRideColors.secondary,
     fontFamily: fonts.Regular,
     fontSize: 11,
@@ -1400,22 +1448,22 @@ const styles = StyleSheet.create({
     textAlign: 'right'
   },
   rideRouteTimeline: {
-    marginTop: 14,
+    marginTop: 16,
     borderTopWidth: 1,
     borderBottomWidth: 1,
     borderColor: 'rgba(17,22,17,0.08)',
-    paddingVertical: 14,
-    gap: 14
+    paddingVertical: 12,
+    gap: 12
   },
   rideRouteStep: {
     flexDirection: 'row',
     alignItems: 'flex-start'
   },
   rideRouteTrack: {
-    width: 18,
+    width: 24,
     alignItems: 'center',
     paddingTop: 5,
-    marginRight: 10
+    marginRight: 12
   },
   rideRouteDot: {
     width: 7,
@@ -1439,15 +1487,15 @@ const styles = StyleSheet.create({
   rideRouteMeta: {
     color: leafRideColors.secondary,
     fontFamily: fonts.Regular,
-    fontSize: 12,
-    lineHeight: 16
+    fontSize: 10.5,
+    lineHeight: 14
   },
   rideRouteAddress: {
     marginTop: 2,
     color: leafRideColors.text,
     fontFamily: fonts.SemiBold,
-    fontSize: 16,
-    lineHeight: 21
+    fontSize: 14,
+    lineHeight: 18
   },
   compactTitleRow: {
     minHeight: 42,
@@ -1565,11 +1613,18 @@ const styles = StyleSheet.create({
   startedShareRow: {
     marginTop: 22
   },
-  leafActionsRow: {
+  passengerSecondaryActionsRow: {
     marginTop: 18,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 10
+  },
+  passengerSecondaryActionButton: {
+    flex: 1,
+    minWidth: 0
+  },
+  passengerPrimaryActionRow: {
+    marginTop: 10
   },
   acceptedAction: {
     width: 94
@@ -1578,19 +1633,19 @@ const styles = StyleSheet.create({
     width: 78
   },
   acceptedPrimary: {
-    flex: 1,
-    height: 52,
-    borderRadius: 26
+    width: '100%',
+    height: 46,
+    borderRadius: 23
   },
   arrivedPrimary: {
-    flex: 1,
-    height: 52,
-    borderRadius: 26
+    width: '100%',
+    height: 46,
+    borderRadius: 23
   },
   startedShareButton: {
     flex: 1,
-    height: 52,
-    borderRadius: 26
+    height: 42,
+    borderRadius: 21
   },
   arrivedAction: {
     flex: 1
@@ -1627,8 +1682,8 @@ const styles = StyleSheet.create({
   boardingTimerValue: {
     color: leafRideColors.text,
     fontFamily: fonts.SemiBold,
-    fontSize: 34,
-    lineHeight: 40
+    fontSize: 40,
+    lineHeight: 46
   },
   boardingTimerMessage: {
     marginTop: 2,

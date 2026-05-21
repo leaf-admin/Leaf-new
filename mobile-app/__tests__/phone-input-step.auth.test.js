@@ -249,7 +249,7 @@ describe('PhoneInputStep', () => {
         '+5521102938475',
         true,
       );
-      expect(queryByText('Informe seu telefone para confirmar sua conta com segurança.')).not.toBeNull();
+      expect(queryByText('Esse passo ajuda a manter sua conta segura.')).not.toBeNull();
     });
   });
 
@@ -277,7 +277,7 @@ describe('PhoneInputStep', () => {
     fireEvent.press(getByTestId('auth-password-fallback-btn'));
 
     await waitFor(() => {
-      expect(queryByText('Informe seu telefone para confirmar sua conta com segurança.')).toBeNull();
+      expect(queryByText('Esse passo ajuda a manter sua conta segura.')).toBeNull();
       expect(queryByText('Ja tenho senha')).toBeNull();
       expect(queryByText('Entrar')).not.toBeNull();
     });

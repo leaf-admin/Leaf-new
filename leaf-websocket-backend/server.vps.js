@@ -47,6 +47,7 @@ const kycAnalyticsRoutes = require('./routes/kyc-analytics-routes');
 
 // Importar rotas Dashboard
 const dashboardRoutes = require('./routes/dashboard');
+const userManagementRoutes = require('./routes/user-management');
 const pricingRoutes = require('./routes/pricing');
 
 // Importar rotas de Métricas
@@ -1751,6 +1752,9 @@ try {
 }
 
 // Rotas Dashboard
+app.use('/', userManagementRoutes);
+logStructured('info', 'Rotas de Gestao de Usuarios registradas', { service: 'server' });
+
 app.use('/', dashboardRoutes);
 logStructured('info', 'Rotas Dashboard registradas', { service: 'server' });
 

@@ -413,4 +413,50 @@ describe('WebSocketManager auth QA bypass', () => {
       }),
     );
   });
+
+  it('does not loop auth recovery when local backend rejects QA bypass without token', () => {
+    const manager = WebSocketManager.getInstance();
+    manager.socket = {
+      connected: true,
+      id: 'socket-qa',
+      io: {
+        engine: {
+          transport: {
+            name: 'websocket',
+          },
+        },
+      },
+      on: jest.fn(),
+    };
+    manager.authCredentials = {
+      userId: 'OjML1wSzdNRaynjqMRlSW1Y0LVy2',
+      userType: 'customer',
+    };
+    manager.qaSocketBypassState = {
+      enabled: true,
+      uid: 'OjML1wSzdNRaynjqMRlSW1Y0LVy2',
+    };
+    const recoverSpy = jest
+      .spyOn(manager, '_recoverAuthentication')
+      .mockResolvedValue(true);
+    const listener = jest.fn();
+
+    manager.setupListeners();
+    manager.on('auth_error', listener);
+
+    const registration = manager.socket.on.mock.calls.find(
+      ([eventName]) => eventName === 'auth_error',
+    );
+    expect(registration).toBeTruthy();
+
+    registration[1]({ message: 'Token de autenticação ausente' });
+
+    expect(recoverSpy).not.toHaveBeenCalled();
+    expect(listener).toHaveBeenCalledWith(
+      expect.objectContaining({
+        message: 'Token de autenticação ausente',
+        __source: 'socket_event',
+      }),
+    );
+  });
 });

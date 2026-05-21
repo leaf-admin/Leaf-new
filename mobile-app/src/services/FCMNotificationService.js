@@ -1,14 +1,109 @@
 import Logger from '../utils/Logger';
 import messaging from '@react-native-firebase/messaging';
-import { Platform } from 'react-native';
+import { AppState, PermissionsAndroid, Platform } from 'react-native';
 import * as Device from 'expo-device';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { store } from '../state/appStore';
 import WebSocketManager from './WebSocketManager';
-import TestUserService from './TestUserService';
+import {
+    getBackgroundNotifications,
+    persistBackgroundNotifications,
+    saveBackgroundNotification
+} from './BackgroundNotificationQueue';
+import { registerFCMBackgroundMessageHandler } from './FCMBackgroundMessageHandler';
 
 const SHOULD_DISABLE_SIMULATOR_LOCAL_NOTIFICATIONS =
     Platform.OS === 'ios' && !Device.isDevice;
+const POST_NOTIFICATIONS_PERMISSION =
+    PermissionsAndroid?.PERMISSIONS?.POST_NOTIFICATIONS || 'android.permission.POST_NOTIFICATIONS';
+const ANDROID_13_API_LEVEL = 33;
+const ALLOWED_NOTIFICATION_ROUTES = new Set([
+    'Notifications',
+    'RobotaxiPrototype',
+    'RobotaxiPrototypeTrip',
+    'RobotaxiPrototypeDriverTrip',
+    'RobotaxiPrototypeDriverOffer',
+    'RobotaxiPrototypeDriverSearch',
+    'RobotaxiPrototypePayment',
+    'RobotaxiPrototypePaymentSuccess',
+    'RobotaxiPrototypePaymentFailed',
+    'RobotaxiPrototypeReceipt',
+    'RobotaxiPrototypeRating',
+    'RobotaxiPrototypeChat',
+    'RobotaxiPrototypeSupport',
+    'RobotaxiPrototypeSupportTicket',
+    'RobotaxiPrototypeShareTrip',
+    'RobotaxiPrototypePublicTracking',
+    'RobotaxiPrototypeDriverDocuments',
+    'RobotaxiPrototypeNoDrivers',
+    'RobotaxiPrototypeCancellation',
+    'RobotaxiPrototypeComplain',
+    'RobotaxiMenuTripHistory',
+]);
+const NOTIFICATION_SCREEN_ALIASES = {
+    home: 'RobotaxiPrototype',
+    trip: 'RobotaxiPrototypeTrip',
+    ride: 'RobotaxiPrototypeTrip',
+    ride_status: 'RobotaxiPrototypeTrip',
+    trip_update: 'RobotaxiPrototypeTrip',
+    driver_trip: 'RobotaxiPrototypeDriverTrip',
+    driver_offer: 'RobotaxiPrototypeDriverOffer',
+    new_ride_offer: 'RobotaxiPrototypeDriverOffer',
+    payment: 'RobotaxiPrototypePayment',
+    payment_confirmation: 'RobotaxiPrototypePaymentSuccess',
+    payment_success: 'RobotaxiPrototypePaymentSuccess',
+    payment_failed: 'RobotaxiPrototypePaymentFailed',
+    receipt: 'RobotaxiPrototypeReceipt',
+    rating: 'RobotaxiPrototypeRating',
+    rating_received: 'RobotaxiPrototypeReceipt',
+    chat: 'RobotaxiPrototypeChat',
+    support: 'RobotaxiPrototypeSupport',
+    support_ticket: 'RobotaxiPrototypeSupportTicket',
+    driver_document_request: 'RobotaxiPrototypeDriverDocuments',
+    driver_documents: 'RobotaxiPrototypeDriverDocuments',
+    documents: 'RobotaxiPrototypeDriverDocuments',
+    driverdocuments: 'RobotaxiPrototypeDriverDocuments',
+    share_trip: 'RobotaxiPrototypeShareTrip',
+    public_tracking: 'RobotaxiPrototypePublicTracking',
+    no_drivers: 'RobotaxiPrototypeNoDrivers',
+    cancellation: 'RobotaxiPrototypeCancellation',
+    complaint: 'RobotaxiPrototypeComplain',
+    complain: 'RobotaxiPrototypeComplain',
+    history: 'RobotaxiMenuTripHistory',
+};
+
+const getAndroidApiLevel = () => {
+    const version = Number(Platform.Version);
+    return Number.isFinite(version) ? version : 0;
+};
+
+const parseNotificationParams = (params) => {
+    if (!params) {
+        return {};
+    }
+
+    if (typeof params === 'string') {
+        try {
+            const parsed = JSON.parse(params);
+            return parsed && typeof parsed === 'object' ? parsed : {};
+        } catch (error) {
+            return {};
+        }
+    }
+
+    return typeof params === 'object' ? params : {};
+};
+
+const normalizeRouteKey = (value) =>
+    String(value || '')
+        .trim()
+        .replace(/[\s-]+/g, '_')
+        .toLowerCase();
+
+const getGlobalNavigationRef = () => {
+    const navigationContainerRef = globalThis?.navigationRef || global?.navigationRef || null;
+    return navigationContainerRef?.current || navigationContainerRef;
+};
 
 class FCMNotificationService {
     constructor() {
@@ -23,6 +118,13 @@ class FCMNotificationService {
         this.retryTokenUpdateTimeout = null;
         this.backendTokenRegistrationPromise = null;
         this.lastBackendTokenRegistrationKey = null;
+        this.pendingTokenRegistrationAfterInFlight = null;
+        this.authUnsubscribe = null;
+        this.lastAuthRegistrationIdentity = null;
+        this.appStateSubscription = null;
+        this.lastAppState = AppState?.currentState || 'active';
+        this.pendingNotificationsProcessPromise = null;
+        this.pendingNotificationsProcessTimeout = null;
     }
 
     // Inicializar o serviço FCM
@@ -47,6 +149,8 @@ class FCMNotificationService {
 
                 // Configurar handlers de background
                 this.setupBackgroundHandlers();
+                this.setupAuthChangeTokenRegistration();
+                this.setupPendingNotificationProcessing();
 
                 this.isInitialized = true;
                 Logger.log('✅ FCM Notification Service inicializado com sucesso');
@@ -90,15 +194,125 @@ class FCMNotificationService {
                 }
 
                 return enabled;
-            } else {
-                // Android não precisa de permissão explícita
-                Logger.log('✅ Permissões Android configuradas');
-                return true;
             }
+
+            if (Platform.OS === 'android') {
+                if (getAndroidApiLevel() < ANDROID_13_API_LEVEL) {
+                    Logger.log('✅ Permissões Android configuradas');
+                    return true;
+                }
+
+                const alreadyGranted = await PermissionsAndroid.check(POST_NOTIFICATIONS_PERMISSION);
+                if (alreadyGranted) {
+                    Logger.log('✅ Permissão POST_NOTIFICATIONS já concedida');
+                    return true;
+                }
+
+                const result = await PermissionsAndroid.request(POST_NOTIFICATIONS_PERMISSION);
+                const granted = result === PermissionsAndroid.RESULTS.GRANTED;
+                if (granted) {
+                    Logger.log('✅ Permissão POST_NOTIFICATIONS concedida');
+                } else {
+                    Logger.log('⚠️ Permissão POST_NOTIFICATIONS negada');
+                }
+                return granted;
+            }
+
+            return true;
         } catch (error) {
             Logger.error('❌ Erro ao solicitar permissões:', error);
             return false;
         }
+    }
+
+    async hasNotificationPermission() {
+        try {
+            if (Platform.OS === 'ios') {
+                const authStatus = await messaging().hasPermission();
+                return (
+                    authStatus === messaging.AuthorizationStatus.AUTHORIZED ||
+                    authStatus === messaging.AuthorizationStatus.PROVISIONAL
+                );
+            }
+
+            if (Platform.OS === 'android' && getAndroidApiLevel() >= ANDROID_13_API_LEVEL) {
+                return PermissionsAndroid.check(POST_NOTIFICATIONS_PERMISSION);
+            }
+
+            return true;
+        } catch (error) {
+            Logger.warn('⚠️ Erro ao verificar permissões de notificação:', error);
+            return false;
+        }
+    }
+
+    async ensureNotificationPermission() {
+        try {
+            const alreadyGranted = await this.hasNotificationPermission();
+            if (alreadyGranted) {
+                return true;
+            }
+
+            return this.requestUserPermission();
+        } catch (error) {
+            Logger.error('❌ Erro ao garantir permissões de notificação:', error);
+            return false;
+        }
+    }
+
+    getAuthRegistrationIdentity() {
+        try {
+            const userState = store.getState().auth;
+            const userId = userState?.uid || userState?.profile?.uid || 'anonymous';
+            const userType = userState?.userType || userState?.profile?.userType || 'customer';
+            return `${userId}:${userType}`;
+        } catch (error) {
+            return 'anonymous:customer';
+        }
+    }
+
+    setupAuthChangeTokenRegistration() {
+        if (this.authUnsubscribe || typeof store.subscribe !== 'function') {
+            return;
+        }
+
+        this.lastAuthRegistrationIdentity = this.getAuthRegistrationIdentity();
+        this.authUnsubscribe = store.subscribe(() => {
+            const nextIdentity = this.getAuthRegistrationIdentity();
+            if (nextIdentity === this.lastAuthRegistrationIdentity) {
+                return;
+            }
+
+            this.lastAuthRegistrationIdentity = nextIdentity;
+            if (this.fcmToken) {
+                Logger.log('🔄 Usuário mudou; re-registrando token FCM para o contexto atual.');
+                this.scheduleTokenBackendUpdate(this.fcmToken);
+            }
+        });
+    }
+
+    async ensurePermissionBeforeDisplay() {
+        try {
+            const permissionGranted = await this.ensureNotificationPermission();
+            if (!permissionGranted) {
+                Logger.warn('⚠️ Notificação local não exibida porque a permissão não foi concedida.');
+            }
+            return permissionGranted;
+        } catch (error) {
+            Logger.error('❌ Erro ao preparar exibição de notificação:', error);
+            return false;
+        }
+    }
+
+    async ensurePermissionBeforeToken() {
+        const permissionGranted = await this.ensureNotificationPermission();
+        if (!permissionGranted) {
+            Logger.warn('⚠️ Token FCM não será solicitado sem permissão de notificação.');
+            this.fcmToken = null;
+            return false;
+        }
+
+        return true;
     }
 
     // Obter token FCM
@@ -108,6 +322,11 @@ class FCMNotificationService {
             if (!Device.isDevice) {
                 Logger.log('ℹ️ [FCM] Simulador detectado. Token push será ignorado neste ambiente.');
                 this.fcmToken = null;
+                return null;
+            }
+
+            const permissionGranted = await this.ensurePermissionBeforeToken();
+            if (!permissionGranted) {
                 return null;
             }
 
@@ -152,6 +371,7 @@ class FCMNotificationService {
         }
 
         if (this.backendTokenRegistrationPromise) {
+            this.pendingTokenRegistrationAfterInFlight = token;
             return this.backendTokenRegistrationPromise;
         }
 
@@ -162,6 +382,11 @@ class FCMNotificationService {
             })
             .finally(() => {
                 this.backendTokenRegistrationPromise = null;
+                const tokenToRegister = this.pendingTokenRegistrationAfterInFlight;
+                this.pendingTokenRegistrationAfterInFlight = null;
+                if (tokenToRegister && tokenToRegister === this.fcmToken) {
+                    this.scheduleTokenBackendUpdate(tokenToRegister);
+                }
             });
 
         return this.backendTokenRegistrationPromise;
@@ -327,20 +552,51 @@ class FCMNotificationService {
     // Configurar handlers de background
     setupBackgroundHandlers() {
         try {
-            // Handler para mensagens em background
-            messaging().setBackgroundMessageHandler(async remoteMessage => {
-                Logger.log('📱 Mensagem recebida em background:', remoteMessage);
-
-                // Processar mensagem em background
-                await this.handleBackgroundMessage(remoteMessage);
-
-                // Retornar Promise para indicar que foi processada
-                return Promise.resolve();
-            });
-
+            registerFCMBackgroundMessageHandler();
         } catch (error) {
             Logger.error('❌ Erro ao configurar handlers de background:', error);
         }
+    }
+
+    setupPendingNotificationProcessing() {
+        if (this.appStateSubscription || typeof AppState?.addEventListener !== 'function') {
+            return;
+        }
+
+        this.lastAppState = AppState.currentState || 'active';
+        this.appStateSubscription = AppState.addEventListener('change', (nextAppState) => {
+            const previousAppState = this.lastAppState;
+            this.lastAppState = nextAppState;
+
+            if (
+                nextAppState === 'active' &&
+                ['background', 'inactive'].includes(previousAppState)
+            ) {
+                Logger.log('📱 App voltou ao foreground; processando notificações pendentes.');
+                this.schedulePendingNotificationsProcessing();
+            }
+        });
+    }
+
+    schedulePendingNotificationsProcessing(delayMs = 0) {
+        if (!this.isInitialized) {
+            return;
+        }
+
+        if (this.pendingNotificationsProcessTimeout) {
+            clearTimeout(this.pendingNotificationsProcessTimeout);
+        }
+
+        if (delayMs <= 0) {
+            this.pendingNotificationsProcessTimeout = null;
+            void this.processPendingNotifications();
+            return;
+        }
+
+        this.pendingNotificationsProcessTimeout = setTimeout(() => {
+            this.pendingNotificationsProcessTimeout = null;
+            void this.processPendingNotifications();
+        }, delayMs);
     }
 
     // Processar notificação em primeiro plano
@@ -387,6 +643,10 @@ class FCMNotificationService {
 
             // Processar baseado no tipo
             const notificationType = data?.type || 'general';
+            if (this.notificationHandlers.has(notificationType)) {
+                await this.notificationHandlers.get(notificationType)(remoteMessage);
+                return;
+            }
 
             switch (notificationType) {
                 case 'trip_update':
@@ -416,6 +676,11 @@ class FCMNotificationService {
 
             // Mostrar notificação local usando expo-notifications
             if (notification && !SHOULD_DISABLE_SIMULATOR_LOCAL_NOTIFICATIONS) {
+                const permissionGranted = await this.ensurePermissionBeforeDisplay();
+                if (!permissionGranted) {
+                    return;
+                }
+
                 const { scheduleNotificationAsync } = await import('expo-notifications');
 
                 await scheduleNotificationAsync({
@@ -478,39 +743,93 @@ class FCMNotificationService {
         }
     }
 
+    resolveNotificationNavigationTarget(remoteMessage) {
+        const data = remoteMessage?.data || {};
+        const explicitScreen = String(data.screen || data.routeName || '').trim();
+        const aliasedScreen =
+            NOTIFICATION_SCREEN_ALIASES[normalizeRouteKey(explicitScreen)] ||
+            NOTIFICATION_SCREEN_ALIASES[normalizeRouteKey(data.type)] ||
+            NOTIFICATION_SCREEN_ALIASES[normalizeRouteKey(data.notificationType)];
+        const routeName = ALLOWED_NOTIFICATION_ROUTES.has(explicitScreen)
+            ? explicitScreen
+            : aliasedScreen;
+        const hasUntrustedExplicitScreen = Boolean(explicitScreen) && !routeName;
+
+        const userType = String(data.userType || data.role || '').trim().toLowerCase();
+        const status = String(data.status || '').trim().toLowerCase();
+        const resolvedRouteName =
+            routeName ||
+            (userType === 'driver' && data.bookingId
+                ? 'RobotaxiPrototypeDriverTrip'
+                : data.bookingId
+                    ? 'RobotaxiPrototypeTrip'
+                    : 'Notifications');
+
+        if (!ALLOWED_NOTIFICATION_ROUTES.has(resolvedRouteName)) {
+            return {
+                routeName: 'Notifications',
+                params: { source: 'push', originalScreen: explicitScreen || null }
+            };
+        }
+
+        return {
+            routeName: resolvedRouteName,
+            params: {
+                ...parseNotificationParams(data.params),
+                source: 'push',
+                bookingId: data.bookingId || data.tripId || data.rideId || null,
+                status: status || null,
+                notificationType: data.type || data.notificationType || null,
+                userType: userType || null,
+                documentType: data.documentType || null,
+                ...(hasUntrustedExplicitScreen ? { originalScreen: explicitScreen } : {}),
+            }
+        };
+    }
+
     // Navegar para tela específica
     navigateToScreen(remoteMessage) {
         try {
-            const { data } = remoteMessage;
-            const screen = data?.screen || 'home';
+            const target = this.resolveNotificationNavigationTarget(remoteMessage);
 
-            Logger.log('🧭 Navegando para tela:', screen);
+            const attemptNavigation = () => {
+                const navigationRef = getGlobalNavigationRef();
+                if (!navigationRef?.isReady?.()) {
+                    return false;
+                }
 
-            // TODO: Implementar navegação usando React Navigation
-            // navigation.navigate(screen, data?.params);
+                navigationRef.navigate(target.routeName, target.params);
+                return true;
+            };
 
+            Logger.log('🧭 Navegando por push:', target);
+
+            if (!attemptNavigation()) {
+                let attempts = 0;
+                const retryNavigation = () => {
+                    attempts += 1;
+                    if (attemptNavigation() || attempts >= 20) {
+                        return;
+                    }
+                    setTimeout(retryNavigation, 300);
+                };
+                setTimeout(retryNavigation, 300);
+            }
+
+            return target;
         } catch (error) {
             Logger.error('❌ Erro ao navegar para tela:', error);
+            return null;
         }
     }
 
     // Salvar notificação de background
     async saveBackgroundNotification(remoteMessage) {
         try {
-            const notifications = await this.getBackgroundNotifications();
-            notifications.push({
-                ...remoteMessage,
-                timestamp: new Date().toISOString(),
-                processed: false
-            });
-
-            // Manter apenas as últimas 50 notificações
-            if (notifications.length > 50) {
-                notifications.splice(0, notifications.length - 50);
+            const result = await saveBackgroundNotification(remoteMessage, { logger: Logger });
+            if (result.saved) {
+                Logger.log('💾 Notificação de background salva');
             }
-
-            await AsyncStorage.setItem('backgroundNotifications', JSON.stringify(notifications));
-            Logger.log('💾 Notificação de background salva');
 
         } catch (error) {
             Logger.error('❌ Erro ao salvar notificação de background:', error);
@@ -520,8 +839,7 @@ class FCMNotificationService {
     // Obter notificações de background
     async getBackgroundNotifications() {
         try {
-            const notifications = await AsyncStorage.getItem('backgroundNotifications');
-            return notifications ? JSON.parse(notifications) : [];
+            return await getBackgroundNotifications();
         } catch (error) {
             Logger.error('❌ Erro ao obter notificações de background:', error);
             return [];
@@ -530,6 +848,19 @@ class FCMNotificationService {
 
     // Processar notificações de background pendentes
     async processPendingNotifications() {
+        if (this.pendingNotificationsProcessPromise) {
+            return this.pendingNotificationsProcessPromise;
+        }
+
+        this.pendingNotificationsProcessPromise = this.runPendingNotificationsProcessing();
+        try {
+            return await this.pendingNotificationsProcessPromise;
+        } finally {
+            this.pendingNotificationsProcessPromise = null;
+        }
+    }
+
+    async runPendingNotificationsProcessing() {
         try {
             const notifications = await this.getBackgroundNotifications();
             const pendingNotifications = notifications.filter(n => !n.processed);
@@ -538,15 +869,41 @@ class FCMNotificationService {
 
             for (const notification of pendingNotifications) {
                 try {
-                    await this.handleBackgroundMessage(notification);
-                    notification.processed = true;
+                    const notificationType = notification.data?.type || 'general';
+                    let handled = false;
+
+                    if (this.notificationHandlers.has(notificationType)) {
+                        await this.notificationHandlers.get(notificationType)(notification);
+                        notification.processed = true;
+                        continue;
+                    }
+
+                    switch (notificationType) {
+                        case 'trip_update':
+                            await this.handleTripUpdate(notification);
+                            handled = true;
+                            break;
+                        case 'payment_confirmation':
+                            await this.handlePaymentConfirmation(notification);
+                            handled = true;
+                            break;
+                        case 'rating_received':
+                            await this.handleRatingReceived(notification);
+                            handled = true;
+                            break;
+                        default:
+                            Logger.log('📱 Notificação pendente não processada:', notificationType);
+                    }
+                    if (handled) {
+                        notification.processed = true;
+                    }
                 } catch (error) {
                     Logger.error('❌ Erro ao processar notificação pendente:', error);
                 }
             }
 
             // Salvar estado atualizado
-            await AsyncStorage.setItem('backgroundNotifications', JSON.stringify(notifications));
+            await persistBackgroundNotifications(notifications);
 
         } catch (error) {
             Logger.error('❌ Erro ao processar notificações pendentes:', error);
@@ -558,6 +915,9 @@ class FCMNotificationService {
         try {
             this.notificationHandlers.set(type, handler);
             Logger.log(`✅ Handler registrado para tipo: ${type}`);
+            if (this.isInitialized && type !== 'foreground' && type !== 'opened') {
+                this.schedulePendingNotificationsProcessing(50);
+            }
         } catch (error) {
             Logger.error('❌ Erro ao registrar handler:', error);
         }
@@ -694,9 +1054,27 @@ class FCMNotificationService {
                 this.retryTokenUpdateTimeout = null;
             }
 
+            if (this.pendingNotificationsProcessTimeout) {
+                clearTimeout(this.pendingNotificationsProcessTimeout);
+                this.pendingNotificationsProcessTimeout = null;
+            }
+
+            if (this.authUnsubscribe) {
+                this.authUnsubscribe();
+                this.authUnsubscribe = null;
+            }
+
+            if (this.appStateSubscription?.remove) {
+                this.appStateSubscription.remove();
+                this.appStateSubscription = null;
+            }
+
             this.pendingTokenRegistration = null;
+            this.pendingTokenRegistrationAfterInFlight = null;
             this.backendTokenRegistrationPromise = null;
             this.lastBackendTokenRegistrationKey = null;
+            this.lastAuthRegistrationIdentity = null;
+            this.pendingNotificationsProcessPromise = null;
             this.isInitialized = false;
             Logger.log('✅ FCM Notification Service destruído');
         } catch (error) {

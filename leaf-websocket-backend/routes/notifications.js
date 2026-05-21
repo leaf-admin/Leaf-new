@@ -30,6 +30,8 @@ function bindRedisToFcmService() {
 
 // Middleware para verificar autenticação (obrigatório)
 const requireAuth = (req, res, next) => authenticateJWT(req, res, next);
+const requireAdminManager = (req, res, next) =>
+    authenticateJWT(req, res, () => requireRole(ADMIN_ROLES)(req, res, next));
 const requireSuperAdmin = (req, res, next) =>
     authenticateJWT(req, res, () => requireRole(['super-admin'])(req, res, next));
 
@@ -416,8 +418,8 @@ router.post('/send', requireSendAuth, async (req, res) => {
     }
 });
 
-// POST - Programar notificação recorrente
-router.post('/schedule', requireAuth, async (req, res) => {
+// POST - Programar notificação
+router.post('/schedule', requireAdminManager, async (req, res) => {
     try {
         const { 
             userIds, 
@@ -434,6 +436,15 @@ router.post('/schedule', requireAuth, async (req, res) => {
             return res.status(400).json({
                 success: false,
                 error: 'userIds, title, body e schedule são obrigatórios'
+            });
+        }
+
+        if (recurrence && recurrence !== 'none') {
+            return res.status(501).json({
+                success: false,
+                status: 'not_implemented',
+                code: 'RECURRING_NOTIFICATIONS_NOT_IMPLEMENTED',
+                error: 'Notificações recorrentes ainda não possuem worker/scheduler ativo'
             });
         }
 
@@ -468,11 +479,6 @@ router.post('/schedule', requireAuth, async (req, res) => {
             scheduledNotification
         );
 
-        // Se for recorrente, configurar cron job
-        if (recurrence !== 'none') {
-            await setupRecurringNotification(scheduledNotification);
-        }
-
         res.json({
             success: true,
             data: {
@@ -487,7 +493,7 @@ router.post('/schedule', requireAuth, async (req, res) => {
 });
 
 // GET - Listar notificações programadas
-router.get('/scheduled', requireAuth, async (req, res) => {
+router.get('/scheduled', requireAdminManager, async (req, res) => {
     try {
         const redis = redisPool.getConnection();
         if (redis.status !== 'ready' && redis.status !== 'connect') {
@@ -579,12 +585,5 @@ router.get('/stats', requireAuth, async (req, res) => {
         res.status(500).json({ success: false, error: error.message });
     }
 });
-
-// Função para configurar notificação recorrente
-async function setupRecurringNotification(notification) {
-    // Implementar lógica de cron job para notificações recorrentes
-    // Pode usar node-cron ou similar
-    logStructured('info', `🔔 Configurando notificação recorrente: ${notification.id}`, { service: 'notifications-routes' });
-}
 
 module.exports = router;

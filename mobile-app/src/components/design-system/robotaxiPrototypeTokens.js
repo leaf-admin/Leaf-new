@@ -1,24 +1,24 @@
 export const robotaxiPrototypeTokens = {
   color: {
     bg: {
-      app: '#F4F6F1',
-      map: '#EEF2EC',
-      panel: 'rgba(250,251,248,0.94)',
-      panelSoft: 'rgba(250,251,248,0.9)',
-      panelSolid: '#FAFBF8'
+      app: '#F8F6F1',
+      map: '#F2F4EF',
+      panel: 'rgba(255,255,255,0.96)',
+      panelSoft: 'rgba(255,255,255,0.92)',
+      panelSolid: '#FFFFFF'
     },
     surface: {
-      primary: 'rgba(250,251,248,0.92)',
-      secondary: 'rgba(244,246,241,0.9)',
-      tertiary: 'rgba(238,244,234,0.84)',
-      activeSoft: 'rgba(222,234,215,0.74)',
-      activeStrong: 'rgba(203,222,194,0.9)'
+      primary: '#FFFFFF',
+      secondary: '#F8F6F1',
+      tertiary: '#F2F4EF',
+      activeSoft: '#F1F5EE',
+      activeStrong: '#E7EFE1'
     },
     text: {
-      primary: '#111611',
-      secondary: '#556058',
-      muted: '#7A8077',
-      dark: '#0B120D'
+      primary: '#171412',
+      secondary: '#756F68',
+      muted: '#827B73',
+      dark: '#171412'
     },
     accent: {
       primary: '#1A330E',
@@ -28,16 +28,16 @@ export const robotaxiPrototypeTokens = {
     },
     feedback: {
       success: '#1A330E',
-      warning: '#5B5F69',
-      danger: '#8A2A2A'
+      warning: '#7A6337',
+      danger: '#D7153A'
     },
     border: {
-      subtle: 'rgba(17,22,17,0.1)',
-      strong: 'rgba(17,22,17,0.16)',
-      separator: 'rgba(17,22,17,0.14)'
+      subtle: '#E9E2D8',
+      strong: '#E2DAD0',
+      separator: '#E9E2D8'
     },
     shadow: {
-      base: '#0B120D',
+      base: '#171412',
       accent: '#1A330E'
     }
   },
@@ -45,7 +45,7 @@ export const robotaxiPrototypeTokens = {
     sm: 12,
     md: 18,
     lg: 24,
-    xl: 34,
+    xl: 32,
     pill: 999
   },
   spacing: {

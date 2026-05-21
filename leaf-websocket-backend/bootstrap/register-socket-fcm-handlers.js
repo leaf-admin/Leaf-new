@@ -3,9 +3,17 @@ function registerSocketFcmHandlers({ socket, redisPool, fcmService, logStructure
     // REGISTRAR IMEDIATAMENTE PARA NÃO PERDER EVENTOS DO CLIENTE
     socket.on('registerFCMToken', async (data) => {
         try {
-            logStructured('info', `Token FCM registrado`, { service: 'registerFCMToken', userId: data.userId, userType: data.userType, platform: data.platform });
+            const payload = data || {};
+            logStructured('info', `Token FCM registrado`, {
+                service: 'registerFCMToken',
+                socketId: socket.id,
+                authenticated: Boolean(socket.userId),
+                userId: socket.userId || null,
+                userType: socket.userType || null,
+                platform: payload.platform
+            });
 
-            const { userId, userType, fcmToken, platform, timestamp } = data;
+            const { fcmToken, platform } = payload;
 
             if (!fcmToken) {
                 logStructured('error', `Token FCM não fornecido`, { service: 'registerFCMToken' });
@@ -13,30 +21,22 @@ function registerSocketFcmHandlers({ socket, redisPool, fcmService, logStructure
                 return;
             }
 
-            const effectiveUserId = userId || `temp_${socket.id}`;
-            const effectiveUserType = userType || 'customer';
-
-            if (!userId) {
-                logStructured('warn', `Token FCM registrado sem userId, usando temporário`, { service: 'registerFCMToken', effectiveUserId });
-            }
+            const isAuthenticated = Boolean(socket.userId);
+            const effectiveUserId = isAuthenticated ? socket.userId : `temp_${socket.id}`;
+            const effectiveUserType = isAuthenticated ? (socket.userType || 'customer') : 'temporary';
+            const legacyKey = isAuthenticated && effectiveUserType === 'driver'
+                ? `driver:${effectiveUserId}`
+                : `user:${effectiveUserId}`;
 
             const redis = redisPool.getConnection();
 
-            if (effectiveUserType === 'driver') {
-                await redis.hset(`driver:${effectiveUserId}`, {
-                    fcmToken: fcmToken,
-                    fcmTokenUpdated: new Date().toISOString(),
-                    fcmPlatform: platform || 'unknown',
-                    isTemporary: (!userId).toString()
-                });
-            } else {
-                await redis.hset(`user:${effectiveUserId}`, {
-                    fcmToken: fcmToken,
-                    fcmTokenUpdated: new Date().toISOString(),
-                    fcmPlatform: platform || 'unknown',
-                    isTemporary: (!userId).toString()
-                });
-            }
+            await redis.hset(legacyKey, {
+                fcmToken: fcmToken,
+                fcmTokenUpdated: new Date().toISOString(),
+                fcmPlatform: platform || 'unknown',
+                isTemporary: (!isAuthenticated).toString(),
+                socketId: socket.id
+            });
 
             try {
                 if (!fcmService.isServiceAvailable()) {
@@ -45,10 +45,12 @@ function registerSocketFcmHandlers({ socket, redisPool, fcmService, logStructure
                     await fcmService.initialize();
                 }
 
-                const saved = await fcmService.saveUserFCMToken(effectiveUserId, effectiveUserType, fcmToken, {
+                await fcmService.saveUserFCMToken(effectiveUserId, effectiveUserType, fcmToken, {
                     platform,
-                    isTemporary: !userId,
-                    socketId: socket.id
+                    isTemporary: !isAuthenticated,
+                    socketId: socket.id,
+                    authenticated: isAuthenticated,
+                    authenticatedAt: isAuthenticated ? new Date().toISOString() : null
                 });
             } catch (fcmError) {
                 logStructured('error', 'Erro ao salvar token no FCMService', { service: 'websocket', operation: 'registerFCMToken', error: fcmError.message });
@@ -60,20 +62,26 @@ function registerSocketFcmHandlers({ socket, redisPool, fcmService, logStructure
                 message: 'Token FCM registrado com sucesso'
             });
         } catch (error) {
-            logError(error, 'Erro ao registrar token FCM', { service: 'registerFCMToken', userId: data.userId });
+            logError(error, 'Erro ao registrar token FCM', { service: 'registerFCMToken', userId: socket.userId || null });
             socket.emit('fcmTokenError', { error: 'Erro interno do servidor: ' + error.message });
         }
     });
 
     socket.on('unregisterFCMToken', async (data) => {
         try {
-            const { userId, fcmToken } = data;
-            if (!userId || !fcmToken) return;
-            const redis = redisPool.getConnection();
-            await fcmService.removeUserFCMToken(userId, fcmToken);
-            socket.emit('fcmTokenUnregistered', { success: true });
+            const payload = data || {};
+            const { fcmToken } = payload;
+            if (!fcmToken) {
+                socket.emit('fcmTokenError', { error: 'Token FCM não fornecido' });
+                return;
+            }
+
+            const effectiveUserId = socket.userId || `temp_${socket.id}`;
+            await fcmService.removeUserFCMToken(effectiveUserId, fcmToken);
+            socket.emit('fcmTokenUnregistered', { success: true, userId: effectiveUserId });
         } catch (error) {
             logError(error, 'Erro ao desregistrar token FCM', { service: 'unregisterFCMToken' });
+            socket.emit('fcmTokenError', { error: 'Erro interno do servidor: ' + error.message });
         }
     });
     // ==========================================================================

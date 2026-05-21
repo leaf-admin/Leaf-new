@@ -63,8 +63,28 @@ else
   MICROPHONE_VALUE="$(jq -r '.ios.infoPlist.NSMicrophoneUsageDescription // "<none>"' "${TMP_JSON}")"
   SPEECH_VALUE="$(jq -r '.ios.infoPlist.NSSpeechRecognitionUsageDescription // "<none>"' "${TMP_JSON}")"
   ANDROID_HAS_RECORD_AUDIO=0
+  ANDROID_HAS_POST_NOTIFICATIONS=0
   if jq -r '.android.permissions[]?' "${TMP_JSON}" | rg -q '^android.permission.RECORD_AUDIO$'; then
     ANDROID_HAS_RECORD_AUDIO=1
+  fi
+  if jq -r '.android.permissions[]?' "${TMP_JSON}" | rg -q '^android.permission.POST_NOTIFICATIONS$'; then
+    ANDROID_HAS_POST_NOTIFICATIONS=1
+  fi
+  IOS_HAS_REMOTE_NOTIFICATION=0
+  if jq -r '.ios.infoPlist.UIBackgroundModes[]?' "${TMP_JSON}" | rg -q '^remote-notification$'; then
+    IOS_HAS_REMOTE_NOTIFICATION=1
+  fi
+
+  if [[ "${ANDROID_HAS_POST_NOTIFICATIONS}" -eq 1 ]]; then
+    ok "Expo config final Android contém POST_NOTIFICATIONS"
+  else
+    fail "Expo config final Android sem POST_NOTIFICATIONS"
+  fi
+
+  if [[ "${IOS_HAS_REMOTE_NOTIFICATION}" -eq 1 ]]; then
+    ok "Expo config final iOS contém UIBackgroundModes remote-notification"
+  else
+    fail "Expo config final iOS sem UIBackgroundModes remote-notification"
   fi
 
   if [[ "${VOICE_PLUGIN_ENABLED}" -eq 1 ]]; then
