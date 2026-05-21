@@ -139,6 +139,7 @@ export default function SupportPage() {
   const [ticketSearch, setTicketSearch] = useState("");
   const [messageSearch, setMessageSearch] = useState("");
   const [error, setError] = useState("");
+  const [actionMessage, setActionMessage] = useState("");
   const [loading, setLoading] = useState(true);
   const [actionBusy, setActionBusy] = useState("");
   const [mode, setMode] = useState("ticket");
@@ -361,6 +362,9 @@ export default function SupportPage() {
     const text = newMessage.trim();
     setNewMessage("");
     try {
+      setActionBusy("message");
+      setError("");
+      setActionMessage("");
       if (mode === "chat" && selectedUserId) {
         await leafAPI.sendChatMessage(selectedUserId, text);
         const history = await leafAPI.getChatHistory(selectedUserId, 80);
@@ -370,10 +374,13 @@ export default function SupportPage() {
         const response = await leafAPI.getSupportMessages(selectedTicket.id);
         setTicketMessages(response?.messages || []);
       }
+      setActionMessage(mode === "chat" ? "Mensagem enviada no chat." : "Resposta enviada no ticket.");
       await loadTickets({ silent: true });
     } catch (err) {
       setError(err?.message || "Falha ao enviar mensagem");
       setNewMessage(text);
+    } finally {
+      setActionBusy("");
     }
   };
 
@@ -383,7 +390,10 @@ export default function SupportPage() {
     const agentName = user?.name || user?.email || agentId;
     try {
       setActionBusy("assign");
+      setError("");
+      setActionMessage("");
       await leafAPI.assignSupportTicket(selectedTicket.id, agentId, agentName);
+      setActionMessage("Ticket atribuído para você.");
       await loadTickets({ silent: true });
     } catch (err) {
       setError(err?.message || "Falha ao atribuir ticket");
@@ -398,7 +408,10 @@ export default function SupportPage() {
     if (!reason) return;
     try {
       setActionBusy("escalate");
+      setError("");
+      setActionMessage("");
       await leafAPI.escalateSupportTicket(selectedTicket.id, reason.trim());
+      setActionMessage("Ticket escalado com sucesso.");
       await loadTickets({ silent: true });
     } catch (err) {
       setError(err?.message || "Falha ao escalar ticket");
@@ -413,7 +426,10 @@ export default function SupportPage() {
     if (resolution === null) return;
     try {
       setActionBusy("resolve");
+      setError("");
+      setActionMessage("");
       await leafAPI.resolveSupportTicket(selectedTicket.id, resolution.trim());
+      setActionMessage("Ticket resolvido com sucesso.");
       await loadTickets({ silent: true });
     } catch (err) {
       setError(err?.message || "Falha ao resolver ticket");
@@ -426,11 +442,17 @@ export default function SupportPage() {
     if (!selectedUserId) return;
     if (!window.confirm("Encerrar chat deste usuario?")) return;
     try {
+      setActionBusy("close-chat");
+      setError("");
+      setActionMessage("");
       await leafAPI.closeChat(selectedUserId, "agent");
       const status = await leafAPI.getChatStatus(selectedUserId);
       setChatStatus(status?.status || null);
+      setActionMessage("Chat encerrado com sucesso.");
     } catch (err) {
       setError(err?.message || "Falha ao encerrar chat");
+    } finally {
+      setActionBusy("");
     }
   };
 
@@ -746,8 +768,8 @@ export default function SupportPage() {
                       if (event.key === "Enter") sendMessage();
                     }}
                   />
-                  <button type="button" onClick={sendMessage}>
-                    Enviar
+                  <button type="button" onClick={sendMessage} disabled={!!actionBusy || !newMessage.trim()}>
+                    {actionBusy === "message" ? "Enviando..." : "Enviar"}
                   </button>
                 </div>
 
@@ -758,6 +780,7 @@ export default function SupportPage() {
             )}
           </Panel>
         </section>
+        {actionMessage ? <p className="success-text">{actionMessage}</p> : null}
         <ErrorText message={error} />
       </main>
     </ProtectedRoute>

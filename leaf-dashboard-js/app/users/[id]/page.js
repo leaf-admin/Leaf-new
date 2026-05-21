@@ -12,9 +12,25 @@ const DOCUMENT_OPTIONS = [
   { value: "cnh", label: "CNH" },
   { value: "crlv", label: "CRLV" },
   { value: "antecedentes_criminais", label: "Antecedentes" },
-  { value: "mei", label: "MEI" },
 ];
 const PUSH_ALLOWED_ROLES = new Set(["admin", "super-admin", "manager", "development"]);
+const OPERATIONAL_DOCUMENT_TYPES = new Set(["cnh", "crlv", "antecedentes_criminais"]);
+
+function summarizeDirectPushResponse(response) {
+  const data = response?.data || response || {};
+  const summary = data?.summary || response?.summary || {};
+  const sent = Number(summary.success ?? data.sent ?? data.successful ?? response?.sent ?? response?.successful ?? 0);
+  const failed = Number(summary.failed ?? data.failed ?? response?.failed ?? 0);
+  const target = Number(data.sentTo ?? summary.total ?? data.total ?? response?.total ?? sent + failed);
+
+  return { sent, failed, target };
+}
+
+function formatDocumentRequestMessage(result) {
+  if (result?.push?.success) return "Documento solicitado e push enviado ao motorista.";
+  if (result?.push?.skipped) return "Documento solicitado sem envio de push.";
+  return "Documento solicitado. O backend não confirmou entrega de push.";
+}
 
 export default function UserDetailsPage({ params }) {
   const resolvedParams = use(params);
@@ -79,7 +95,18 @@ export default function UserDetailsPage({ params }) {
 
   const current = driverData || user;
   const isDriver = current?.type === "driver" || current?.usertype === "driver" || !!driverData;
-  const docsCount = documents?.documents ? Object.keys(documents.documents).length : 0;
+  const operationalDocuments = useMemo(() => {
+    const allDocs = documents?.documents?.all_documents;
+    const source = Array.isArray(allDocs)
+      ? allDocs
+      : Object.entries(documents?.documents || {}).map(([type, doc]) => ({ type, ...(doc || {}) }));
+
+    return source.filter((doc) => OPERATIONAL_DOCUMENT_TYPES.has(String(doc?.type || "").toLowerCase()));
+  }, [documents?.documents]);
+  const docsCount = operationalDocuments.length;
+  const requestedDocsCount = operationalDocuments.filter(
+    (doc) => String(doc?.requestStatus || "").toLowerCase() === "requested" || doc?.requiredUpdate === true,
+  ).length;
   const currentStatus = String(current?.status || user?.status || "").toLowerCase();
   const isSuspended = currentStatus === "suspended" || current?.suspended === true || user?.suspended === true;
   const isBlocked = currentStatus === "blocked" || current?.blocked === true || user?.blocked === true;
@@ -97,8 +124,8 @@ export default function UserDetailsPage({ params }) {
       setBusyAction(actionName);
       setActionError("");
       setActionMessage("");
-      await task();
-      setActionMessage(successText);
+      const result = await task();
+      setActionMessage(typeof successText === "function" ? successText(result) : successText);
       await loadUser({ silent: true });
     } catch (err) {
       setActionError(err?.message || "Não foi possível concluir a ação.");
@@ -129,7 +156,11 @@ export default function UserDetailsPage({ params }) {
         userId: id,
       },
     }),
-    "Push enviado para os dispositivos ativos do usuário."
+    (response) => {
+      const result = summarizeDirectPushResponse(response);
+      return `Push individual concluído: ${result.sent} enviados de ${result.target} alvo(s)` +
+        `${result.failed ? `, ${result.failed} falhas` : ""}.`;
+    }
   );
 
   const requestDocument = () => runAction(
@@ -138,7 +169,7 @@ export default function UserDetailsPage({ params }) {
       reason: documentReason,
       sendPush: true,
     }),
-    "Documento solicitado e push disparado quando houver token ativo."
+    formatDocumentRequestMessage
   );
 
   return (
@@ -251,6 +282,7 @@ export default function UserDetailsPage({ params }) {
                 <KeyValueGrid
                   data={{
                     documentosEnviados: docsCount,
+                    solicitacoesAbertas: requestedDocsCount,
                     statusKyc: documents?.kyc?.status || "not_started",
                     bloqueado: documents?.kyc?.blocked || false,
                     needsReview: documents?.kyc?.needsReview || false,
@@ -261,6 +293,7 @@ export default function UserDetailsPage({ params }) {
                   }}
                   labels={{
                     documentosEnviados: "Documentos enviados",
+                    solicitacoesAbertas: "Solicitações abertas",
                     statusKyc: "Status KYC",
                     bloqueado: "Bloqueado",
                     needsReview: "Precisa revisão",

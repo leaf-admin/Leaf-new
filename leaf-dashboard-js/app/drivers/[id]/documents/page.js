@@ -19,6 +19,27 @@ const DOCUMENT_REJECTION_REASON_OPTIONS = {
     "CRLV - marca/modelo do veículo não permitido",
     "CRLV - licenciamento pendente (verificar no campo Exercício se corresponde ao ano atual)",
   ],
+  antecedentes_criminais: [
+    "Certidão inválida - enviar certidão oficial em PDF",
+    "Certidão fora do prazo de validade",
+    "Certidão não corresponde ao CPF do motorista",
+  ],
+};
+
+const DOCUMENT_LABELS = {
+  cnh: "CNH",
+  crlv: "CRLV",
+  antecedentes_criminais: "Certidão de antecedentes",
+};
+
+const OPERATIONAL_DOCUMENT_TYPES = new Set(["cnh", "crlv", "antecedentes_criminais"]);
+
+const DOCUMENT_STATUS_LABELS = {
+  approved: "Aprovado",
+  pending: "Pendente",
+  rejected: "Rejeitado",
+  requested: "Solicitado",
+  missing: "Ausente",
 };
 
 function getReasonOptions(documentType) {
@@ -53,11 +74,46 @@ function formatDateTime(value) {
   return parsed.toLocaleString("pt-BR");
 }
 
+function normalizeDocumentType(value) {
+  return String(value || "").trim().toLowerCase();
+}
+
+function resolveDocumentLabel(value) {
+  const normalized = normalizeDocumentType(value);
+  return DOCUMENT_LABELS[normalized] || normalized.toUpperCase() || "Documento";
+}
+
+function isDocumentRequested(doc) {
+  return String(doc?.requestStatus || "").toLowerCase() === "requested" || doc?.requiredUpdate === true;
+}
+
+function resolveDocumentStatus(doc) {
+  const status = String(doc?.status || "").trim().toLowerCase();
+  if (status) return status;
+  return isDocumentRequested(doc) ? "requested" : "missing";
+}
+
+function formatDocumentStatus(doc) {
+  const status = resolveDocumentStatus(doc);
+  const label = DOCUMENT_STATUS_LABELS[status] || status || "-";
+  if (isDocumentRequested(doc) && status === "approved") return `${label} - atualização solicitada`;
+  if (isDocumentRequested(doc) && status !== "requested") return `${label} - solicitação aberta`;
+  return label;
+}
+
+function documentStatusTone(doc) {
+  const status = resolveDocumentStatus(doc);
+  if (status === "approved" && !isDocumentRequested(doc)) return "status-ok";
+  if (status === "rejected") return "status-bad";
+  return "status-warn";
+}
+
 export default function DriverDocumentsPage({ params }) {
   const resolvedParams = use(params);
   const id = String(resolvedParams?.id || "").trim();
   const [documents, setDocuments] = useState(null);
   const [error, setError] = useState("");
+  const [actionMessage, setActionMessage] = useState("");
   const [busy, setBusy] = useState(false);
   const [reviewingType, setReviewingType] = useState(null);
   const [vehicleBusy, setVehicleBusy] = useState(false);
@@ -122,7 +178,9 @@ export default function DriverDocumentsPage({ params }) {
     try {
       setBusy(true);
       setError("");
+      setActionMessage("");
       await leafAPI.approveDriverApplication(id);
+      setActionMessage("Motorista aprovado com sucesso.");
       await load();
     } catch (err) {
       setError(err?.message || "Falha ao aprovar motorista");
@@ -137,7 +195,9 @@ export default function DriverDocumentsPage({ params }) {
     try {
       setBusy(true);
       setError("");
+      setActionMessage("");
       await leafAPI.rejectDriverApplication(id, [reason]);
+      setActionMessage("Motorista rejeitado com sucesso.");
       await load();
     } catch (err) {
       setError(err?.message || "Falha ao rejeitar motorista");
@@ -172,8 +232,12 @@ export default function DriverDocumentsPage({ params }) {
 
     try {
       setError("");
+      setActionMessage("");
       setReviewingType(normalizedType);
       await leafAPI.reviewDriverDocument(id, normalizedType, action, reason || "");
+      setActionMessage(
+        `${resolveDocumentLabel(normalizedType)} ${action === "approve" ? "aprovado" : "rejeitado"} com sucesso.`,
+      );
       await load();
     } catch (err) {
       setError(err?.message || "Falha ao revisar documento");
@@ -191,6 +255,7 @@ export default function DriverDocumentsPage({ params }) {
     try {
       setVehicleBusy(true);
       setError("");
+      setActionMessage("");
       await leafAPI.updateDriverVehicleConfig(id, {
         userVehicleId: vehicleForm.userVehicleId,
         category: vehicleForm.category,
@@ -198,6 +263,7 @@ export default function DriverDocumentsPage({ params }) {
         setActive: vehicleForm.setActive,
         acceptPlusWithElite: vehicleForm.acceptPlusWithElite,
       });
+      setActionMessage("Configuração de veículo atualizada.");
       await load();
     } catch (err) {
       setError(err?.message || "Falha ao atualizar configuração de veículo");
@@ -215,8 +281,10 @@ export default function DriverDocumentsPage({ params }) {
     try {
       setUploadingBackgroundDoc(true);
       setError("");
+      setActionMessage("");
       await leafAPI.uploadDriverDocument(id, "antecedentes_criminais", backgroundDocFile);
       setBackgroundDocFile(null);
+      setActionMessage("Certidão de antecedentes anexada com sucesso.");
       await load();
     } catch (err) {
       setError(err?.message || "Falha ao anexar certidão de antecedentes");
@@ -226,16 +294,29 @@ export default function DriverDocumentsPage({ params }) {
   };
 
   const docsList = useMemo(
-    () => (documents?.documents ? Object.values(documents.documents) : []),
+    () => {
+      const allDocs = documents?.documents?.all_documents;
+      const source = Array.isArray(allDocs)
+        ? allDocs
+        : Object.entries(documents?.documents || {}).map(([type, doc]) => ({ type, ...(doc || {}) }));
+
+      return source.filter((doc) => {
+        const normalizedType = normalizeDocumentType(doc?.type);
+        return OPERATIONAL_DOCUMENT_TYPES.has(normalizedType);
+      });
+    },
     [documents?.documents],
   );
   const filteredDocsList = useMemo(() => {
     const term = docSearch.trim().toLowerCase();
     return docsList.filter((doc) => {
       const status = String(doc?.status || "").toLowerCase();
-      if (docStatusFilter !== "all" && status !== docStatusFilter) return false;
+      if (docStatusFilter === "requested" && !isDocumentRequested(doc)) return false;
+      if (docStatusFilter !== "all" && docStatusFilter !== "requested" && status !== docStatusFilter) return false;
       if (!term) return true;
-      return `${doc?.type || ""} ${doc?.fileName || ""} ${status}`.toLowerCase().includes(term);
+      return `${doc?.type || ""} ${doc?.fileName || ""} ${status} ${doc?.requestStatus || ""} ${doc?.requestReason || ""}`
+        .toLowerCase()
+        .includes(term);
     });
   }, [docsList, docSearch, docStatusFilter]);
 
@@ -358,8 +439,16 @@ export default function DriverDocumentsPage({ params }) {
           <h2>Certidão de antecedentes</h2>
           <div className="filters" style={{ display: "grid", gap: 6 }}>
             <p>
-              <strong>Status:</strong> {backgroundCheckDoc?.status || "missing"}
+              <strong>Status:</strong>{" "}
+              <span className={documentStatusTone(backgroundCheckDoc || {})}>
+                {formatDocumentStatus(backgroundCheckDoc || {})}
+              </span>
             </p>
+            {backgroundCheckDoc?.requestReason ? (
+              <p>
+                <strong>Solicitação:</strong> {backgroundCheckDoc.requestReason}
+              </p>
+            ) : null}
             {backgroundCheckDoc?.uploadedAt ? (
               <p>
                 <strong>Enviado em:</strong> {new Date(backgroundCheckDoc.uploadedAt).toLocaleString("pt-BR")}
@@ -517,9 +606,10 @@ export default function DriverDocumentsPage({ params }) {
                 onChange={(e) => setDocStatusFilter(e.target.value)}
               >
                 <option value="all">Todos os status</option>
-                <option value="pending">pending</option>
-                <option value="approved">approved</option>
-                <option value="rejected">rejected</option>
+                <option value="requested">Solicitado</option>
+                <option value="pending">Pendente</option>
+                <option value="approved">Aprovado</option>
+                <option value="rejected">Rejeitado</option>
               </select>
             </div>
           </article>
@@ -539,10 +629,14 @@ export default function DriverDocumentsPage({ params }) {
 
               return (
                 <article className="card" key={`${doc.type}-${idx}`}>
-                  <h2>{String(doc.type || "documento").toUpperCase()}</h2>
-                  <p>Status: {doc.status || "pending"}</p>
+                  <h2>{resolveDocumentLabel(doc.type)}</h2>
+                  <p>
+                    Status: <span className={documentStatusTone(doc)}>{formatDocumentStatus(doc)}</span>
+                  </p>
                   {doc.fileName ? <p>Arquivo: {doc.fileName}</p> : null}
                   {doc.uploadedAt ? <p>Enviado em: {new Date(doc.uploadedAt).toLocaleString("pt-BR")}</p> : null}
+                  {doc.requestedAt ? <p>Solicitado em: {formatDateTime(doc.requestedAt)}</p> : null}
+                  {doc.requestReason ? <p>Motivo da solicitação: {doc.requestReason}</p> : null}
                   {doc.rejectionReason ? <p className="error">{doc.rejectionReason}</p> : null}
 
                   {reasonOptions.length > 0 ? (
@@ -601,6 +695,7 @@ export default function DriverDocumentsPage({ params }) {
           )}
         </section>
 
+        {actionMessage ? <p className="success-text">{actionMessage}</p> : null}
         {error ? <p className="error">{error}</p> : null}
       </main>
     </ProtectedRoute>

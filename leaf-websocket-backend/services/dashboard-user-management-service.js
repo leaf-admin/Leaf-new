@@ -6,7 +6,7 @@ const passengerTrustService = require('./passenger-trust-service');
 const FCMService = require('./fcm-service');
 
 const OPERATIONAL_STATUSES = new Set(['active', 'blocked', 'suspended']);
-const DRIVER_DOCUMENT_TYPES = new Set(['cnh', 'crlv', 'antecedentes_criminais', 'mei']);
+const DRIVER_DOCUMENT_TYPES = new Set(['cnh', 'crlv', 'antecedentes_criminais']);
 const ELIGIBLE_DRIVER_GEO_KEY = process.env.ELIGIBLE_DRIVER_GEO_KEY || 'driver_locations_eligible';
 const DRIVER_NON_APPROVED_REACTIVATION_STATUS = 'pending_review';
 

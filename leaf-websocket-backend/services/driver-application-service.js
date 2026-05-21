@@ -630,7 +630,8 @@ class DriverApplicationService {
         if (!safeTypes.includes(type)) continue;
 
         const normalizedStatus = String(doc?.status || 'pending').trim().toLowerCase();
-        const effectiveStatus = REVIEWABLE_DOCUMENT_STATUSES.has(normalizedStatus) ? normalizedStatus : 'pending';
+        if (!REVIEWABLE_DOCUMENT_STATUSES.has(normalizedStatus)) continue;
+        const effectiveStatus = normalizedStatus;
         if (safeStatus !== 'all' && effectiveStatus !== safeStatus) continue;
 
         items.push({

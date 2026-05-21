@@ -9,6 +9,22 @@ import Panel from "@/src/components/ui/Panel";
 import { ErrorText, LoadingState } from "@/src/components/ui/PageFeedback";
 import { KeyValueGrid, TechnicalDetails } from "@/src/components/ui/DataViews";
 
+function summarizeSendResponse(response) {
+  const data = response?.data || response || {};
+  const summary = data?.summary || response?.summary || {};
+  const sent = Number(summary.success ?? data.sent ?? data.successful ?? response?.sent ?? response?.successful ?? 0);
+  const failed = Number(summary.failed ?? data.failed ?? response?.failed ?? 0);
+  const target = Number(data.sentTo ?? summary.total ?? data.total ?? response?.total ?? sent + failed);
+
+  return {
+    sent,
+    failed,
+    target,
+    filteredOutByType: Number(data.filteredOutByType || 0),
+    filteredOutByRule: Number(data.filteredOutByRule || 0),
+  };
+}
+
 export default function NotificationsPage() {
   const [notifications, setNotifications] = useState(null);
   const [stats, setStats] = useState(null);
@@ -73,6 +89,7 @@ export default function NotificationsPage() {
 
   const sendNotification = async () => {
     if (!title.trim() || !body.trim()) {
+      setSendStatus("");
       setError("Informe título e mensagem");
       return;
     }
@@ -81,6 +98,7 @@ export default function NotificationsPage() {
     if (toDrivers) userTypes.push("driver");
     if (toPassengers) userTypes.push("customer");
     if (userTypes.length === 0) {
+      setSendStatus("");
       setError("Selecione pelo menos um público");
       return;
     }
@@ -105,10 +123,14 @@ export default function NotificationsPage() {
           sentAt: new Date().toISOString(),
         },
       });
+      const result = summarizeSendResponse(response);
 
       setSendStatus(
-        `Envio concluído: ${response?.sent || response?.successful || 0} enviados` +
-        `${response?.failed ? `, ${response.failed} falhas` : ""}`
+        `Envio concluído: ${result.sent} enviados de ${result.target} alvo(s)` +
+        `${result.failed ? `, ${result.failed} falhas` : ""}` +
+        `${result.filteredOutByType || result.filteredOutByRule
+          ? `, ${result.filteredOutByType + result.filteredOutByRule} filtrados`
+          : ""}`
       );
     } catch (err) {
       setError(err?.message || "Falha ao enviar notificação");

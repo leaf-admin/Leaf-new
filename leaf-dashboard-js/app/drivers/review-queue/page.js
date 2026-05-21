@@ -96,6 +96,7 @@ export default function DriversReviewQueuePage() {
   const [pagination, setPagination] = useState({ page: 1, limit: 25, total: 0, pages: 0 });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [actionMessage, setActionMessage] = useState("");
   const [busyKey, setBusyKey] = useState("");
   const [filters, setFilters] = useState({
     documentType: "all",
@@ -170,7 +171,11 @@ export default function DriversReviewQueuePage() {
     try {
       setBusyKey(`${driverId}:${documentType}`);
       setError("");
+      setActionMessage("");
       await leafAPI.reviewDriverDocument(driverId, documentType, action, rejectionReason || "");
+      setActionMessage(
+        `${resolveDocumentLabel(documentType)} ${action === "approve" ? "aprovado" : "rejeitado"} com sucesso.`,
+      );
       await load({ silent: true });
     } catch (err) {
       setError(err?.message || "Falha ao revisar documento");
@@ -284,7 +289,7 @@ export default function DriversReviewQueuePage() {
           <Panel
             className="panel-span-full"
             title="Documentos"
-            subtitle="Central de decisão para aprovação e solicitação de revisão."
+            subtitle="Central de decisão para aprovação e rejeição de documentos enviados."
           >
             <div className="table-shell">
               <table className="table table-compact">
@@ -399,6 +404,7 @@ export default function DriversReviewQueuePage() {
         </section>
 
         <ErrorText message={error} />
+        {actionMessage ? <p className="success-text">{actionMessage}</p> : null}
       </main>
     </ProtectedRoute>
   );
