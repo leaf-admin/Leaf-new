@@ -175,7 +175,11 @@ class PaymentService {
   }
 
   isWooviDirectTransferOnRideCompletionEnabled() {
-    return String(process.env.WOOVI_DIRECT_TRANSFER_ON_RIDE_COMPLETION || 'false').toLowerCase() === 'true';
+    const requested =
+      String(process.env.WOOVI_DIRECT_TRANSFER_ON_RIDE_COMPLETION || 'false').toLowerCase() === 'true';
+    const legacyExplicitOptIn =
+      String(process.env.ENABLE_LEGACY_RIDE_COMPLETION_PIXOUT || 'false').toLowerCase() === 'true';
+    return requested && legacyExplicitOptIn;
   }
 
   async resolveDriverSplitTarget(paymentData = {}) {
@@ -1490,11 +1494,20 @@ class PaymentService {
       );
 
       if (!creditResult.success) {
-        logError(new Error(creditResult.error), 'Erro ao creditar saldo do motorista', { service: 'PaymentService' });
-        // Continuar mesmo se falhar (não bloquear distribuição)
-      } else {
-        logStructured('info', 'Saldo creditado com sucesso', { service: 'PaymentService', balance: creditResult.balance });
+        logError(new Error(creditResult.error), 'Erro ao creditar saldo do motorista', {
+          service: 'PaymentService',
+          rideId: rideData.rideId,
+          driverId: rideData.driverId
+        });
+        return {
+          success: false,
+          error: 'Falha ao creditar saldo do motorista',
+          details: creditResult.error || 'Crédito no ledger interno não confirmado',
+          retryable: true
+        };
       }
+
+      logStructured('info', 'Saldo creditado com sucesso', { service: 'PaymentService', balance: creditResult.balance });
 
       // 4. Atualizar status do holding para distribuído
       const distributionData = {
@@ -1649,6 +1662,20 @@ class PaymentService {
     const source = `${driverId || 'unknown-driver'}:${rideId || 'unknown-ride'}:${amountInCents || 0}`;
     const hash = crypto.createHash('sha256').update(source).digest('hex').slice(0, 32);
     return `ride_credit_${hash}`;
+  }
+
+  buildWithdrawalIdempotencyKey(driverId, requestId) {
+    return crypto
+      .createHash('sha256')
+      .update(`${driverId || 'unknown-driver'}:${requestId || 'unknown-request'}`)
+      .digest('hex');
+  }
+
+  buildWithdrawalPixKeyHash(pixKey) {
+    return crypto
+      .createHash('sha256')
+      .update(String(pixKey || '').trim().toLowerCase())
+      .digest('hex');
   }
 
   /**
@@ -1993,10 +2020,8 @@ class PaymentService {
 
     const balanceRef = firestore.collection('driver_balances').doc(driverId);
     const withdrawalRef = firestore.collection('driver_withdrawals').doc();
-    const idempotencyKey = crypto
-      .createHash('sha256')
-      .update(`${driverId}:${amountCents}:${requestId}`)
-      .digest('hex');
+    const pixKeyHash = this.buildWithdrawalPixKeyHash(pixKey);
+    const idempotencyKey = this.buildWithdrawalIdempotencyKey(driverId, requestId);
     const idempotencyRef = firestore.collection('driver_withdrawal_idempotency').doc(idempotencyKey);
 
     try {
@@ -2004,6 +2029,22 @@ class PaymentService {
         const idempotencyDoc = await transaction.get(idempotencyRef);
         if (idempotencyDoc.exists) {
           const existing = idempotencyDoc.data() || {};
+          const existingAmountCents = Number(existing.amountCents || 0);
+          const existingPixKeyHash = String(existing.pixKeyHash || '');
+          if (
+            existingAmountCents !== amountCents ||
+            (existingPixKeyHash && existingPixKeyHash !== pixKeyHash)
+          ) {
+            return {
+              idempotentReplay: true,
+              parameterConflict: true,
+              withdrawalId: existing.withdrawalId || null,
+              status: existing.status || 'pending',
+              existingAmountCents,
+              incomingAmountCents: amountCents
+            };
+          }
+
           return {
             idempotentReplay: true,
             withdrawalId: existing.withdrawalId || null,
@@ -2056,7 +2097,8 @@ class PaymentService {
           withdrawalId: withdrawalRef.id,
           requestId,
           idempotencyKey,
-          pixKey
+          pixKey,
+          pixKeyHash
         };
 
         const txCollection = balanceRef.collection('transactions');
@@ -2122,6 +2164,7 @@ class PaymentService {
           requestId,
           amountCents,
           pixKey,
+          pixKeyHash,
           withdrawalId: withdrawalRef.id,
           withdrawFeeCents,
           subscriptionSettlementCents,
@@ -2145,6 +2188,20 @@ class PaymentService {
       });
 
       if (transactionResult.idempotentReplay) {
+        if (transactionResult.parameterConflict) {
+          return {
+            success: false,
+            error: 'Esta solicitação de saque já foi usada com outros dados. Revise e tente novamente.',
+            code: 'WITHDRAWAL_IDEMPOTENCY_CONFLICT',
+            withdrawalId: transactionResult.withdrawalId || null,
+            status: transactionResult.status || null,
+            details: {
+              existingAmountCents: transactionResult.existingAmountCents,
+              incomingAmountCents: transactionResult.incomingAmountCents
+            }
+          };
+        }
+
         return {
           success: true,
           idempotentReplay: true,
@@ -2322,21 +2379,47 @@ class PaymentService {
     }
 
     const withdrawalRef = firestore.collection('driver_withdrawals').doc(withdrawalId);
-    const withdrawalDoc = await withdrawalRef.get();
-    if (!withdrawalDoc.exists) {
-      return { success: false, error: 'Saque não encontrado' };
-    }
+    const claimResult = await firestore.runTransaction(async (transaction) => {
+      const withdrawalDoc = await transaction.get(withdrawalRef);
+      if (!withdrawalDoc.exists) {
+        return { success: false, error: 'Saque não encontrado' };
+      }
 
-    const withdrawal = withdrawalDoc.data();
-    if (withdrawal.status !== 'pending') {
+      const withdrawal = withdrawalDoc.data() || {};
+      if (withdrawal.status !== 'pending') {
+        return {
+          success: true,
+          alreadyProcessed: true,
+          status: withdrawal.status
+        };
+      }
+
+      transaction.set(withdrawalRef, {
+        status: 'processing',
+        processingStartedAt: admin.firestore.FieldValue.serverTimestamp(),
+        processingBy: actorId,
+        updatedAt: admin.firestore.FieldValue.serverTimestamp()
+      }, { merge: true });
+
       return {
         success: true,
-        alreadyProcessed: true,
-        status: withdrawal.status
+        claimed: true,
+        withdrawal
       };
+    });
+
+    if (!claimResult.success || !claimResult.claimed) {
+      return claimResult;
     }
 
+    const withdrawal = claimResult.withdrawal;
+
     if (!this.LEAF_PIX_KEY || this.LEAF_PIX_KEY === 'test@leaf.app.br') {
+      await withdrawalRef.set({
+        status: 'pending',
+        lastError: 'LEAF_PIX_KEY não configurada para processamento automático',
+        updatedAt: admin.firestore.FieldValue.serverTimestamp()
+      }, { merge: true });
       return {
         success: false,
         error: 'LEAF_PIX_KEY não configurada para processamento automático'
@@ -2360,6 +2443,7 @@ class PaymentService {
 
     if (!transferResult.success) {
       await withdrawalRef.set({
+        status: 'pending',
         lastAttemptAt: admin.firestore.FieldValue.serverTimestamp(),
         attempts: admin.firestore.FieldValue.increment(1),
         lastError: transferResult.error || transferResult.details || 'Falha na transferência Woovi',

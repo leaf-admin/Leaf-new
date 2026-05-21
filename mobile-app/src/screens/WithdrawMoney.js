@@ -32,6 +32,7 @@ export default function WithdrawMoneyScreen(props) {
     pixKey: '',
     appPassword: ''
   });
+  const [withdrawRequestId, setWithdrawRequestId] = useState(null);
   const [loading,setLoading] = useState(false);
 
   const { t } = i18n;
@@ -60,7 +61,17 @@ export default function WithdrawMoneyScreen(props) {
       }
 
       setLoading(true);
-      const result = await DriverBalanceService.requestWithdrawal(driverId, amount, pixKey, appPassword);
+      const stableRequestId =
+        withdrawRequestId ||
+        DriverBalanceService.buildWithdrawalRequestId(driverId, amount, pixKey);
+      setWithdrawRequestId(stableRequestId);
+      const result = await DriverBalanceService.requestWithdrawal(
+        driverId,
+        amount,
+        pixKey,
+        appPassword,
+        { requestId: stableRequestId }
+      );
       setLoading(false);
 
       if (result?.success) {
@@ -71,6 +82,7 @@ export default function WithdrawMoneyScreen(props) {
           pixKey: '',
           appPassword: ''
         }));
+        setWithdrawRequestId(null);
         props.navigation.navigate('TabRoot', { screen: 'Wallet' });
         return;
       }
@@ -106,7 +118,12 @@ export default function WithdrawMoneyScreen(props) {
           style={[styles.inputTextStyle,{textAlign: isRTL ? 'right': 'left'}]}
           placeholder={t('amount') + " (" + settings?.symbol || '' + ")"}
           keyboardType={'number-pad'}
-          onChangeText={(text) => setState({ ...state,amount: text })}
+          onChangeText={(text) => {
+            setState({ ...state,amount: text });
+            if (!loading) {
+              setWithdrawRequestId(null);
+            }
+          }}
           value={state.amount}
           testID="driver-withdraw-amount-input"
           accessibilityLabel="driver-withdraw-amount-input"
@@ -116,7 +133,12 @@ export default function WithdrawMoneyScreen(props) {
           placeholder="Chave Pix"
           autoCapitalize="none"
           autoCorrect={false}
-          onChangeText={(text) => setState({ ...state,pixKey: text })}
+          onChangeText={(text) => {
+            setState({ ...state,pixKey: text });
+            if (!loading) {
+              setWithdrawRequestId(null);
+            }
+          }}
           value={state.pixKey}
           testID="driver-withdraw-pix-key-input"
           accessibilityLabel="driver-withdraw-pix-key-input"

@@ -5,7 +5,13 @@ const { logStructured, logError } = require('../utils/logger');
 const { metrics: runtimeMetrics } = require('../utils/prometheus-metrics');
 const driverActivationStateService = require('./driver-activation-state-service');
 
-const ALLOWED_DRIVER_DOCUMENT_TYPES = Object.freeze(['cnh', 'crlv', 'mei']);
+const MEI_DOCUMENTS_ENABLED =
+  String(process.env.ENABLE_DRIVER_MEI_DOCUMENTS || 'false').toLowerCase() === 'true';
+const ALLOWED_DRIVER_DOCUMENT_TYPES = Object.freeze([
+  'cnh',
+  'crlv',
+  ...(MEI_DOCUMENTS_ENABLED ? ['mei'] : [])
+]);
 const REVIEWABLE_INDEX_STATUSES = Object.freeze(['pending', 'approved', 'rejected']);
 
 function sanitizeDocumentType(value) {

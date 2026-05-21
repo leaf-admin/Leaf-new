@@ -26,7 +26,12 @@ class DriverBalanceService {
     };
   }
 
-  buildWithdrawalRequestId(driverId, amount, pixKey) {
+  buildWithdrawalRequestId(driverId, amount, pixKey, explicitRequestId = null) {
+    const provided = String(explicitRequestId || '').trim();
+    if (provided.length >= 8) {
+      return provided;
+    }
+
     const safeDriverId = String(driverId || 'driver').trim();
     const amountToken = String(amount || '0').replace(/[^0-9.]/g, '');
     const pixToken = String(pixKey || '').trim().slice(-12);
@@ -208,7 +213,7 @@ class DriverBalanceService {
    * @param {string} pixKey
    * @param {string} appPassword
    */
-  async requestWithdrawal(driverId, amount, pixKey, appPassword) {
+  async requestWithdrawal(driverId, amount, pixKey, appPassword, options = {}) {
     const controller = new AbortController();
     let timeoutId;
 
@@ -232,7 +237,12 @@ class DriverBalanceService {
       }
 
       const url = `${this.baseUrl}/driver-balance/${driverId}/withdraw`;
-      const requestId = this.buildWithdrawalRequestId(driverId, amount, pixKey);
+      const requestId = this.buildWithdrawalRequestId(
+        driverId,
+        amount,
+        pixKey,
+        options?.requestId || options?.idempotencyKey
+      );
       timeoutId = setTimeout(() => controller.abort(), 15000);
 
       const response = await fetch(url, {

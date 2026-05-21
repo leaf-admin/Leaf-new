@@ -89,7 +89,52 @@ describe('DriverBalanceService requestWithdrawal', () => {
     expect(JSON.parse(options.body)).toMatchObject({
       amount: 25,
       pixKey: 'pix-key',
-      appPassword: 'Leaf1234'
+      appPassword: 'Leaf1234',
+      requestId: expect.stringMatching(/^wd_/)
     });
+    expect(options.headers['Idempotency-Key']).toEqual(JSON.parse(options.body).requestId);
+    expect(options.headers['Idempotency-Key']).not.toContain('Leaf1234');
+    expect(JSON.stringify(options.headers)).not.toContain('Leaf1234');
+  });
+
+  it('reuses an explicit withdrawal request id for retries', async () => {
+    jest.doMock('expo-constants', () => ({
+      expoConfig: {
+        extra: {
+          launchProfile: 'pilot_full',
+          pilotControlled: false,
+          pilotFeatureFlags: {
+            driverWithdrawalsEnabled: true
+          }
+        }
+      }
+    }));
+    jest.doMock('@react-native-firebase/auth', () => () => ({
+      currentUser: {
+        getIdToken: jest.fn().mockResolvedValue('firebase-token')
+      }
+    }));
+
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      headers: {
+        get: jest.fn(() => 'application/json')
+      },
+      json: jest.fn().mockResolvedValue({ success: true, withdrawalId: 'wd-1' })
+    });
+
+    const service = require('../src/services/DriverBalanceService').default;
+    await service.requestWithdrawal('driver-1', 25, 'pix-key', 'Leaf1234', {
+      requestId: 'stable-withdraw-request'
+    });
+    await service.requestWithdrawal('driver-1', 25, 'pix-key', 'Leaf1234', {
+      requestId: 'stable-withdraw-request'
+    });
+
+    expect(global.fetch).toHaveBeenCalledTimes(2);
+    for (const [, options] of global.fetch.mock.calls) {
+      expect(options.headers['Idempotency-Key']).toBe('stable-withdraw-request');
+      expect(JSON.parse(options.body).requestId).toBe('stable-withdraw-request');
+    }
   });
 });

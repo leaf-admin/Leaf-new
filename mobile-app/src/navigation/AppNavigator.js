@@ -36,7 +36,6 @@ import SupportScreen from '../screens/SupportScreen';
 import SupportTicketScreen from '../screens/SupportTicketScreen';
 import SupportChatScreen from '../screens/SupportChatScreen';
 import WaitListScreen from '../screens/WaitListScreen';
-import WooviDriverBalanceScreen from '../screens/WooviDriverBalanceScreen';
 import HelpScreen from '../screens/HelpScreen';
 import AboutScreen from '../screens/AboutScreen';
 import LegalScreen from '../screens/LegalScreen';
@@ -258,7 +257,7 @@ const pilotLaunchFeatures = getPilotLaunchFeatureSnapshot();
 const referralEntryComponent = pilotLaunchFeatures.referralProgramsEnabled ? ReferralScreen : PilotFeatureUnavailableScreen;
 const prototypeInvitesEntryComponent = pilotLaunchFeatures.referralProgramsEnabled ? RobotaxiInvitesScreen : PilotFeatureUnavailableScreen;
 const withdrawalEntryComponent = pilotLaunchFeatures.driverWithdrawalsEnabled ? WithdrawMoney : PilotFeatureUnavailableScreen;
-const driverPayoutEntryComponent = pilotLaunchFeatures.driverWithdrawalsEnabled ? WooviDriverBalanceScreen : PilotFeatureUnavailableScreen;
+const driverPayoutEntryComponent = PilotFeatureUnavailableScreen;
 
 const referralScreenParams = {
   title: 'Convites fora do piloto',
@@ -278,8 +277,8 @@ const withdrawalScreenParams = {
 };
 
 const driverPayoutScreenParams = {
-  title: 'Repasse fora do piloto',
-  message: 'Conta Woovi e repasses avancados ficam bloqueados no app durante o piloto controlado.',
+  title: 'Repasse pelo saldo Leaf',
+  message: 'Conta BaaS nao faz parte do modelo atual. Use a tela de ganhos para consultar saldo e solicitar saque.',
   targetRoute: 'Map'
 };
 

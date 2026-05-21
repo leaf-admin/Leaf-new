@@ -752,7 +752,14 @@ function sanitizeFilename(value) {
     .replace(/_+/g, '_');
 }
 
-const REVIEWABLE_DOCUMENT_TYPES = ['cnh', 'crlv', 'antecedentes_criminais', 'mei'];
+const MEI_DOCUMENTS_ENABLED =
+  String(process.env.ENABLE_DRIVER_MEI_DOCUMENTS || 'false').toLowerCase() === 'true';
+const REVIEWABLE_DOCUMENT_TYPES = [
+  'cnh',
+  'crlv',
+  'antecedentes_criminais',
+  ...(MEI_DOCUMENTS_ENABLED ? ['mei'] : [])
+];
 const REVIEWABLE_DOCUMENT_STATUSES = ['pending', 'approved', 'rejected'];
 const REVIEWABLE_DOCUMENT_SORT_FIELDS = ['uploadedAt', 'updatedAt', 'reviewedAt'];
 

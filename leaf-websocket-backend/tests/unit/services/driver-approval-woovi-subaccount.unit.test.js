@@ -96,13 +96,13 @@ describe('DriverApprovalService Woovi subaccount integration', () => {
     expect(docs.get('users/driver_1')).toMatchObject({
       wooviSubaccountId: 'subaccount_1',
       wooviSubaccountPixKey: 'driver-pix-key',
-      baasAccountCreated: true,
+      baasAccountCreated: false,
       fallbackToCustomer: false,
       isApproved: true
     });
   });
 
-  it('falls back to legacy customer flow when driver pix key is missing', async () => {
+  it('falls back to customer flow without creating legacy BaaS when driver pix key is missing', async () => {
     const service = new DriverApprovalService();
 
     const result = await service.approveDriver({
@@ -118,7 +118,13 @@ describe('DriverApprovalService Woovi subaccount integration', () => {
       wooviClientId: 'customer_1'
     });
     expect(mockCreateSubaccount).not.toHaveBeenCalled();
-    expect(mockCreateDriverBaaSAccount).toHaveBeenCalled();
+    expect(mockCreateDriverBaaSAccount).not.toHaveBeenCalled();
     expect(mockCreateDriverClient).toHaveBeenCalled();
+    expect(docs.get('users/driver_2')).toMatchObject({
+      baasAccountCreated: false,
+      baasUpgradePending: false,
+      fallbackToCustomer: true,
+      isApproved: true
+    });
   });
 });

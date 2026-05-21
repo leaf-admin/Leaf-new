@@ -1,6 +1,7 @@
 const mockCacheStore = new Map();
 const mockCreateCharge = jest.fn();
 const mockCreateChargeWithSplit = jest.fn();
+const mockTransferDirectToDriver = jest.fn();
 
 jest.mock('../../../services/woovi-driver-service', () =>
   jest.fn().mockImplementation(() => ({
@@ -9,7 +10,8 @@ jest.mock('../../../services/woovi-driver-service', () =>
       error: 'not found'
     }),
     createCharge: mockCreateCharge,
-    createChargeWithSplit: mockCreateChargeWithSplit
+    createChargeWithSplit: mockCreateChargeWithSplit,
+    transferDirectToDriver: mockTransferDirectToDriver
   }))
 );
 
@@ -20,7 +22,8 @@ jest.mock('../../../firebase-config', () => ({
 jest.mock('firebase-admin', () => ({
   firestore: {
     FieldValue: {
-      serverTimestamp: jest.fn(() => '__SERVER_TIMESTAMP__')
+      serverTimestamp: jest.fn(() => '__SERVER_TIMESTAMP__'),
+      increment: jest.fn((value) => ({ __increment: value }))
     }
   }
 }));
@@ -107,10 +110,14 @@ const createInMemoryFirestore = () => {
 };
 
 describe('PaymentService payment status cache', () => {
+  const originalEnv = { ...process.env };
+
   beforeEach(() => {
+    process.env = { ...originalEnv };
     mockCacheStore.clear();
     mockCreateCharge.mockReset();
     mockCreateChargeWithSplit.mockReset();
+    mockTransferDirectToDriver.mockReset();
     mockCreateCharge.mockResolvedValue({
       success: true,
       charge: {
@@ -127,6 +134,10 @@ describe('PaymentService payment status cache', () => {
         paymentLinkUrl: 'https://pay.local/split'
       }
     });
+    mockTransferDirectToDriver.mockResolvedValue({
+      success: true,
+      transferId: 'transfer_1'
+    });
     firebaseConfig.getFirestore.mockReturnValue(null);
     subscriptionStateService.getBillingData.mockResolvedValue({
       pendingFeeCents: 0,
@@ -140,6 +151,20 @@ describe('PaymentService payment status cache', () => {
       settledCents: 0,
       remainingCents: 0
     });
+  });
+
+  afterAll(() => {
+    process.env = originalEnv;
+  });
+
+  it('keeps ride-completion Pix Out disabled unless the legacy opt-in flag is explicit', () => {
+    process.env.WOOVI_DIRECT_TRANSFER_ON_RIDE_COMPLETION = 'true';
+    delete process.env.ENABLE_LEGACY_RIDE_COMPLETION_PIXOUT;
+
+    expect(new PaymentService().isWooviDirectTransferOnRideCompletionEnabled()).toBe(false);
+
+    process.env.ENABLE_LEGACY_RIDE_COMPLETION_PIXOUT = 'true';
+    expect(new PaymentService().isWooviDirectTransferOnRideCompletionEnabled()).toBe(true);
   });
 
   it('reads confirmed payment status from redis cache before falling back to external providers', async () => {
@@ -355,6 +380,100 @@ describe('PaymentService financial rules', () => {
       newBalance: 16
     });
     expect(subscriptionStateService.settlePendingOnWithdrawal).not.toHaveBeenCalled();
+  });
+
+  it('rejects withdrawal idempotency replay when the same requestId changes parameters', async () => {
+    const firestore = createInMemoryFirestore();
+    firestore.docs.set('driver_balances/driver_1', {
+      driverId: 'driver_1',
+      balance: 42,
+      totalEarnings: 100
+    });
+    firebaseConfig.getFirestore.mockReturnValue(firestore);
+    const service = new PaymentService();
+
+    const first = await service.requestDriverWithdrawal({
+      driverId: 'driver_1',
+      amountCents: 2500,
+      pixKey: 'driver@pix.test',
+      requestId: 'withdraw_request_same'
+    });
+    const second = await service.requestDriverWithdrawal({
+      driverId: 'driver_1',
+      amountCents: 2500,
+      pixKey: 'other@pix.test',
+      requestId: 'withdraw_request_same'
+    });
+
+    expect(first.success).toBe(true);
+    expect(second).toMatchObject({
+      success: false,
+      code: 'WITHDRAWAL_IDEMPOTENCY_CONFLICT'
+    });
+    expect(firestore.docs.get('driver_balances/driver_1')).toMatchObject({
+      balance: 16
+    });
+  });
+
+  it('does not mark distribution as complete when internal ledger credit fails', async () => {
+    const firestore = createInMemoryFirestore();
+    firebaseConfig.getFirestore.mockReturnValue(firestore);
+    const service = new PaymentService();
+    service.creditDriverBalance = jest.fn().mockResolvedValue({
+      success: false,
+      error: 'ledger unavailable'
+    });
+
+    const result = await service.processNetDistribution({
+      rideId: 'booking_failed_credit',
+      driverId: 'driver_ledger',
+      totalAmount: 1506,
+      tollFee: 0
+    });
+
+    expect(result).toMatchObject({
+      success: false,
+      retryable: true,
+      details: 'ledger unavailable'
+    });
+    expect(firestore.docs.has('payment_distributions/booking_failed_credit')).toBe(false);
+  });
+
+  it('claims pending withdrawals before Pix Out processing and skips duplicate processing', async () => {
+    process.env.LEAF_PIX_KEY = 'leaf@pix.test';
+    const firestore = createInMemoryFirestore();
+    firestore.docs.set('driver_withdrawals/wd_1', {
+      driverId: 'driver_1',
+      pixKey: 'driver@pix.test',
+      amountCents: 2500,
+      status: 'pending'
+    });
+    firebaseConfig.getFirestore.mockReturnValue(firestore);
+    mockTransferDirectToDriver.mockResolvedValue({
+      success: true,
+      transferId: 'transfer_wd_1'
+    });
+    const service = new PaymentService();
+
+    const first = await service.processDriverWithdrawal('wd_1', 'admin_1');
+    const second = await service.processDriverWithdrawal('wd_1', 'admin_2');
+
+    expect(first).toMatchObject({
+      success: true,
+      withdrawalId: 'wd_1',
+      transferId: 'transfer_wd_1'
+    });
+    expect(second).toMatchObject({
+      success: true,
+      alreadyProcessed: true,
+      status: 'processed'
+    });
+    expect(mockTransferDirectToDriver).toHaveBeenCalledTimes(1);
+    expect(firestore.docs.get('driver_withdrawals/wd_1')).toMatchObject({
+      status: 'processed',
+      processedBy: 'admin_1',
+      transferId: 'transfer_wd_1'
+    });
   });
 
   it('settles completed ride into internal ledger without Woovi account or Pix key', async () => {

@@ -6,6 +6,8 @@ class DriverApprovalService {
   constructor() {
     // Criar instância do WooviDriverService
     this.wooviDriverService = new WooviDriverService();
+    this.LEGACY_DRIVER_BAAS_FALLBACK_ENABLED =
+      String(process.env.ENABLE_LEGACY_DRIVER_BAAS_FALLBACK || 'false').toLowerCase() === 'true';
   }
 
   normalizePixKey(value) {
@@ -90,7 +92,7 @@ class DriverApprovalService {
       pixKey: subaccountPixKey,
       wooviAccountCreated: true,
       wooviSubaccountCreated: true,
-      baasAccountCreated: true,
+      baasAccountCreated: false,
       fallbackToCustomer: false,
       baasUpgradePending: false,
       wooviAccountCreatedAt: nowIso,
@@ -149,22 +151,33 @@ class DriverApprovalService {
         });
       }
       
-      // 1. Fallback legado: tentar conta BaaS completa via account-register.
-      // O modelo preferencial atual é subconta + split; este caminho fica para compatibilidade.
-      let baasResult = await this.wooviDriverService.createDriverBaaSAccount({
-        name: driverData.name,
-        email: driverData.email,
-        phone: driverData.phone,
-        cpf: driverData.cpf,
-        driverId: driverData.id
-      });
+      // 1. Fallback legado: conta BaaS completa fica explicitamente desligada.
+      // O modelo atual é ledger interno + saque solicitado pelo motorista.
+      let baasResult = {
+        success: false,
+        useFallback: true,
+        legacyDisabled: true
+      };
+      if (this.LEGACY_DRIVER_BAAS_FALLBACK_ENABLED) {
+        baasResult = await this.wooviDriverService.createDriverBaaSAccount({
+          name: driverData.name,
+          email: driverData.email,
+          phone: driverData.phone,
+          cpf: driverData.cpf,
+          driverId: driverData.id
+        });
+      }
 
       // Se API MASTER não estiver configurada, usar fallback (customer)
       let useCustomerFallback = false;
       
       if (!baasResult || !baasResult.success) {
         if (baasResult && baasResult.useFallback) {
-          logStructured('warn', 'API MASTER não configurada ainda. Usando fallback (customer)', { service: 'driver-approval-service', driverId: driverData.id, note: 'Quando API MASTER estiver disponível, contas BaaS serão criadas automaticamente' });
+          logStructured('warn', 'BaaS legado desativado. Usando customer/subconta Woovi quando necessário.', {
+            service: 'driver-approval-service',
+            driverId: driverData.id,
+            legacyDisabled: baasResult.legacyDisabled === true
+          });
         } else {
           logError(new Error(baasResult?.error || 'Erro desconhecido'), 'Falha ao criar subaccount BaaS', { service: 'driver-approval-service', driverId: driverData.id });
           logStructured('warn', 'Tentando criar apenas customer como fallback', { service: 'driver-approval-service', driverId: driverData.id });
@@ -201,7 +214,7 @@ class DriverApprovalService {
           wooviAccountCreated: true,
           baasAccountCreated: false, // Indica que não é BaaS real ainda
           fallbackToCustomer: true,
-          baasUpgradePending: true // Flag para indicar que pode ser atualizado para BaaS depois
+          baasUpgradePending: false
         };
 
         // ✅ Salvar wooviAccountId no Firestore (mesmo sendo fallback)
@@ -216,7 +229,7 @@ class DriverApprovalService {
               wooviAccountCreated: true,
               baasAccountCreated: false,
               fallbackToCustomer: true,
-              baasUpgradePending: true, // Pode ser atualizado para BaaS quando API MASTER estiver disponível
+              baasUpgradePending: false,
               wooviAccountCreatedAt: new Date().toISOString(),
               isApproved: true,
               approvedAt: new Date().toISOString()
@@ -240,7 +253,7 @@ class DriverApprovalService {
 
         return {
           success: true,
-          message: 'Motorista aprovado (usando customer como fallback)',
+          message: 'Motorista aprovado com ledger interno e customer Woovi auxiliar',
           driverData: updatedDriverData,
           wooviAccountId: customerResult.wooviClientId,
           wooviClientId: customerResult.wooviClientId

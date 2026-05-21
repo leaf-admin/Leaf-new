@@ -345,6 +345,7 @@ export default function EarningsReportScreen({ navigation, route }) {
   const [pixKey, setPixKey] = useState('');
   const [withdrawPassword, setWithdrawPassword] = useState('');
   const [withdrawError, setWithdrawError] = useState('');
+  const [withdrawRequestId, setWithdrawRequestId] = useState(null);
   const [isProcessingWithdraw, setIsProcessingWithdraw] = useState(false);
   const [withdrawProcessingSummary, setWithdrawProcessingSummary] = useState(null);
 
@@ -564,6 +565,9 @@ export default function EarningsReportScreen({ navigation, route }) {
 
   function handleWithdrawValueChange(value) {
     setWithdrawValue(value);
+    if (!isProcessingWithdraw) {
+      setWithdrawRequestId(null);
+    }
     const amount = toNumber(String(value).replace(',', '.'), 0);
     const { totalDebit } = getWithdrawCostBreakdown(amount);
 
@@ -590,6 +594,7 @@ export default function EarningsReportScreen({ navigation, route }) {
     setPixKey('');
     setWithdrawPassword('');
     setWithdrawError('');
+    setWithdrawRequestId(null);
     setWithdrawKycReason('');
     setWithdrawStepUpChallenge(null);
     setPendingWithdrawalPayload(null);
@@ -660,7 +665,8 @@ export default function EarningsReportScreen({ navigation, route }) {
         auth.profile.uid,
         pendingWithdrawalPayload.amount,
         pendingWithdrawalPayload.pixKey,
-        pendingWithdrawalPayload.password
+        pendingWithdrawalPayload.password,
+        { requestId: pendingWithdrawalPayload.requestId }
       );
 
       if (!retryResult.success) {
@@ -716,7 +722,8 @@ export default function EarningsReportScreen({ navigation, route }) {
         auth.profile.uid,
         pendingWithdrawalPayload.amount,
         pendingWithdrawalPayload.pixKey,
-        pendingWithdrawalPayload.password
+        pendingWithdrawalPayload.password,
+        { requestId: pendingWithdrawalPayload.requestId }
       );
 
       if (!retryResult.success) {
@@ -784,7 +791,17 @@ export default function EarningsReportScreen({ navigation, route }) {
 
       setIsProcessingWithdraw(true);
       const normalizedPixKey = String(pixKey || '').trim();
-      const result = await DriverBalanceService.requestWithdrawal(auth.profile.uid, amount, normalizedPixKey, appPassword);
+      const stableRequestId =
+        withdrawRequestId ||
+        DriverBalanceService.buildWithdrawalRequestId(auth.profile.uid, amount, normalizedPixKey);
+      setWithdrawRequestId(stableRequestId);
+      const result = await DriverBalanceService.requestWithdrawal(
+        auth.profile.uid,
+        amount,
+        normalizedPixKey,
+        appPassword,
+        { requestId: stableRequestId }
+      );
 
       if (!result.success) {
         if (result.code === 'KYC_STEP_UP_REQUIRED' && result?.kyc?.challengeId) {
@@ -799,6 +816,7 @@ export default function EarningsReportScreen({ navigation, route }) {
             amount,
             pixKey: normalizedPixKey,
             password: appPassword,
+            requestId: stableRequestId,
             fee,
             subscriptionSettlement,
             totalDebit
@@ -1352,6 +1370,7 @@ export default function EarningsReportScreen({ navigation, route }) {
           setWithdrawModalVisible(false);
           setWithdrawPassword('');
           setWithdrawError('');
+          setWithdrawRequestId(null);
         }}
       >
         <KeyboardAvoidingView
@@ -1372,6 +1391,7 @@ export default function EarningsReportScreen({ navigation, route }) {
                   setWithdrawModalVisible(false);
                   setWithdrawPassword('');
                   setWithdrawError('');
+                  setWithdrawRequestId(null);
                 }}
               >
                 <Text style={styles.cleanBackText}>{'<'}</Text>
@@ -1424,7 +1444,12 @@ export default function EarningsReportScreen({ navigation, route }) {
                 placeholder="driver@leaf.app.br"
                 placeholderTextColor="#8C9C94"
                 value={pixKey}
-                onChangeText={setPixKey}
+                onChangeText={(value) => {
+                  setPixKey(value);
+                  if (!isProcessingWithdraw) {
+                    setWithdrawRequestId(null);
+                  }
+                }}
                 autoCapitalize="none"
                 testID="driver-earnings-withdraw-pix-key-input"
                 accessibilityLabel="driver-earnings-withdraw-pix-key-input"
