@@ -2757,6 +2757,33 @@ function buildDriverOffer({
   };
 }
 
+function resolvePassengerIdFromBookingId(bookingId = "") {
+  const normalized = String(bookingId || "").trim();
+  const match = normalized.match(/^booking_[^_]+_(.+)$/);
+  return sanitizeText(match?.[1], "");
+}
+
+function resolveReceiptPassengerName(rawName, previousState = runtimeState) {
+  const normalizedName = sanitizeText(rawName, "");
+  if (!normalizedName) {
+    return "";
+  }
+
+  const role =
+    normalizeRuntimeRole(previousState?.activeRole) ||
+    resolveRuntimeRole(previousState?.profile);
+  const driverName = sanitizeText(
+    previousState?.profileName || previousState?.driverInfo?.name,
+    "",
+  );
+
+  if (role === "driver" && driverName && normalizedName === driverName) {
+    return "Passageiro Leaf";
+  }
+
+  return normalizedName;
+}
+
 function cloneDefaultRideExtensionState(patch = {}) {
   return {
     ...DEFAULT_RIDE_EXTENSION_STATE,
@@ -4511,10 +4538,17 @@ function resolveReceiptParticipants(payload = {}, previousState = runtimeState) 
         activeBooking?.customerId ||
         activeBooking?.customer?.id ||
         activeBooking?.passengerId ||
-        previousReceipt?.passengerId,
+        previousReceipt?.passengerId ||
+        resolvePassengerIdFromBookingId(
+          payload?.bookingId ||
+            activeRide?.bookingId ||
+            activeBooking?.bookingId ||
+            activeBooking?.id ||
+            previousReceipt?.id,
+        ),
       "",
     ),
-    passengerName: sanitizeText(
+    passengerName: resolveReceiptPassengerName(
       payloadPassenger?.name ||
         payload?.passengerName ||
         payload?.customerName ||
@@ -4523,7 +4557,7 @@ function resolveReceiptParticipants(payload = {}, previousState = runtimeState) 
         activeBooking?.customer?.name ||
         activeBooking?.passengerName ||
         previousReceipt?.passengerName,
-      "",
+      previousState,
     ),
   };
 }
@@ -6891,7 +6925,12 @@ function attachSocketListeners() {
         payload?.pickupLocation?.add || runtimeState.currentAddress,
       pickupCoordinate: normalizeRuntimeCoordinate(payload?.pickupLocation),
       preferences: payload?.preferences || {},
-      passengerName: payload?.passengerName || runtimeState.profileName,
+      passengerName:
+        payload?.passengerName ||
+        payload?.customerName ||
+        (resolveRuntimeRole(runtimeState.profile) === "driver"
+          ? "Passageiro Leaf"
+          : runtimeState.profileName),
       passengerId:
         payload?.customerId ||
         payload?.passengerId ||
@@ -7132,7 +7171,19 @@ function attachSocketListeners() {
         pickupAddress: runtimeState.currentAddress,
         preferences:
           payload?.preferences || runtimeState.activeBooking?.preferences || {},
-        passengerName: runtimeState.profileName,
+        passengerName:
+          payload?.passengerName ||
+          payload?.customerName ||
+          matchedOffer?.passenger ||
+          (runtimeRole === "driver" ? "Passageiro Leaf" : runtimeState.profileName),
+        passengerId:
+          payload?.customerId ||
+          payload?.passengerId ||
+          payload?.customer?.id ||
+          payload?.passenger?.id ||
+          matchedOffer?.passengerId ||
+          runtimeState.activeBooking?.customerId ||
+          resolvePassengerIdFromBookingId(bookingId || runtimeState.activeBookingId),
       });
     const acceptedRide = mergeLockedDriverRideSnapshot(acceptedRideBase, {
       ...(estimatedFeeBreakdown || {}),

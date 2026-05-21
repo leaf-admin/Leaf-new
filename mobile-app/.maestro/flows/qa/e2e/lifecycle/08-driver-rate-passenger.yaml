@@ -14,14 +14,8 @@ appId: br.com.leaf.ride
       - tapOn:
           id: "driver-receipt-rate-passenger-button"
 
-- runFlow:
-    when:
-      visible: ".*(Avaliar|Avalie o passageiro).*"
-    commands:
-      - tapOn: "Avaliar"
-
 - extendedWaitUntil:
-    visible: ".*(Avalie o passageiro|Enviar avaliacao|Avaliação enviada|Avaliacao enviada|Avaliação já enviada|Avaliacao ja enviada).*"
+    visible: ".*(Avalie o passageiro|Enviar avaliacao|Avaliação enviada|Avaliacao enviada|Avaliação já enviada|Avaliacao ja enviada|Avaliado).*"
     timeout: 30000
 
 - runFlow:
@@ -39,7 +33,7 @@ appId: br.com.leaf.ride
       - tapOn: "Enviar avaliacao"
 
 - extendedWaitUntil:
-    visible: ".*(Avaliação enviada|Avaliacao enviada|Avaliação já enviada|Avaliacao ja enviada|Resumo da viagem|Corrida finalizada).*"
+    visible: ".*(Avaliação enviada|Avaliacao enviada|Avaliação já enviada|Avaliacao ja enviada|Avaliado|Resumo da viagem|Corrida finalizada).*"
     timeout: 15000
 
 - runFlow:
@@ -49,5 +43,5 @@ appId: br.com.leaf.ride
       - tapOn: "OK"
 
 - extendedWaitUntil:
-    visible: ".*(Resumo da viagem|Corrida finalizada|Avaliação enviada|Avaliacao enviada|Reportar problema).*"
+    visible: ".*(Resumo da viagem|Corrida finalizada|Avaliação enviada|Avaliacao enviada|Avaliado|Reportar problema).*"
     timeout: 60000

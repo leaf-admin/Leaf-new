@@ -70,6 +70,16 @@ function resolvePaymentMethod(value) {
   return normalized;
 }
 
+function resolveText(...values) {
+  for (const value of values) {
+    const normalized = String(value || '').trim();
+    if (normalized) {
+      return normalized;
+    }
+  }
+  return '';
+}
+
 function buildTripCompletedPayload({
   bookingId,
   message = 'Viagem finalizada com sucesso',
@@ -98,10 +108,29 @@ function buildTripCompletedPayload({
 
   const normalizedDistance = toFiniteNumber(distance);
   const normalizedDuration = toFiniteNumber(duration);
+  const customerId = resolveText(
+    bookingData.customerId,
+    bookingData.passengerId,
+    bookingData.customer
+  );
+  const driverId = resolveText(bookingData.driverId, bookingData.driver);
+  const passengerName = resolveText(
+    bookingData.passengerName,
+    bookingData.customerName,
+    bookingData.customerFullName
+  );
+  const driverName = resolveText(
+    bookingData.driverName,
+    bookingData.driverFullName
+  );
 
   return {
     success: true,
     bookingId,
+    ...(customerId ? { customerId, passengerId: customerId } : {}),
+    ...(driverId ? { driverId } : {}),
+    ...(passengerName ? { passengerName, customerName: passengerName } : {}),
+    ...(driverName ? { driverName } : {}),
     message,
     endLocation: resultEndLocation || endLocation,
     distance: normalizedDistance !== null ? normalizedDistance : 0,

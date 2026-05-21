@@ -138,10 +138,33 @@ seed_driver_daily_kyc() {
   local label="${2:-driver}"
   local response_file="${ARTIFACTS_DIR}/driver-status/kyc-seed-${label}.json"
   local http_code=""
+  local firebase_id_token=""
+
+  firebase_id_token="$("${NODE_BIN}" -e '
+    const path = require("path");
+    const rootDir = process.argv[1];
+    const uid = process.argv[2];
+    const { getIdTokenForUid } = require(path.join(
+      rootDir,
+      "leaf-websocket-backend",
+      "tests",
+      "e2e",
+      "backend",
+      "__helpers__",
+      "firebase-id-token.js"
+    ));
+    getIdTokenForUid(uid)
+      .then((token) => process.stdout.write(token))
+      .catch((error) => {
+        console.error(error?.stack || error?.message || String(error));
+        process.exit(1);
+      });
+  ' "${ROOT_DIR}" "${driver_uid}")"
 
   http_code="$(curl -sS -o "${response_file}" -w "%{http_code}" \
     -X POST "${API_BASE_URL}/api/kyc/verify-driver" \
     -H "Content-Type: application/json" \
+    -H "Authorization: Bearer ${firebase_id_token}" \
     -d "$(jq -nc --arg userId "${driver_uid}" '{
       userId: $userId,
       deviceKyc: {
@@ -860,6 +883,35 @@ wait_for_status() {
   done
 }
 
+wait_for_completed_or_idle_receipt() {
+  local udid="$1"
+  local timeout_seconds="${2:-180}"
+  local started_at
+  started_at="$(date +%s)"
+  while true; do
+    local snapshot
+    local booking_status
+    local active_booking_id
+    local last_receipt_id
+    snapshot="$(read_runtime_snapshot "${udid}")"
+    booking_status="$(printf '%s' "${snapshot}" | jq -r '.bookingStatus // empty' 2>/dev/null || true)"
+    active_booking_id="$(printf '%s' "${snapshot}" | jq -r '.activeBookingId // empty' 2>/dev/null || true)"
+    last_receipt_id="$(printf '%s' "${snapshot}" | jq -r '.lastReceipt.id // empty' 2>/dev/null || true)"
+
+    if [[ "${booking_status}" == "completed" ]]; then
+      return 0
+    fi
+    if [[ "${booking_status}" == "idle" && -z "${active_booking_id}" && -n "${last_receipt_id}" ]]; then
+      return 0
+    fi
+    if (( $(date +%s) - started_at >= timeout_seconds )); then
+      log "timed out waiting terminal receipt on ${udid}; status=${booking_status:-unknown} activeBookingId=${active_booking_id:-unknown} lastReceipt=${last_receipt_id:-none}"
+      return 1
+    fi
+    sleep 2
+  done
+}
+
 wait_for_idle() {
   local udid="$1"
   local timeout_seconds="${2:-180}"
@@ -1222,7 +1274,7 @@ append_timeline "trip_in_progress_evidence_captured"
 
 run_driver_action "${DRIVER_A_UDID}" complete_trip "lifecycle-driver-complete-trip" true
 wait_for_status "${PASSENGER_UDID}" completed 240
-wait_for_status "${DRIVER_A_UDID}" completed 240
+wait_for_completed_or_idle_receipt "${DRIVER_A_UDID}" 240
 append_timeline "trip_completed"
 capture_stage "09-trip-completed" false false
 
