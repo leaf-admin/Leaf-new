@@ -254,6 +254,21 @@ function buildIncidents({
     action: "Revisar flags antes de operação real.",
   });
 
+  const launchFlags = runtimeFlags?.launch || {};
+  [
+    ["adminMutationsEnabled", "Mutações administrativas", "Ações administrativas estão em modo somente leitura."],
+    ["referralProgramsEnabled", "Programas de convite", "Programas de convite estão bloqueados pelo backend."],
+    ["campaignCenterEnabled", "Campaign Center", "Campanhas in-app estão bloqueadas pelo backend."],
+  ].forEach(([flagKey, label, detail]) => {
+    add(runtimeFlags?.success && launchFlags[flagKey] === false, {
+      severity: "warning",
+      source: "Runtime flags",
+      title: `${label} desativado`,
+      detail,
+      action: "Manter a UI bloqueada até a flag ser habilitada no backend.",
+    });
+  });
+
   (opsAlerts || []).forEach((alert, index) => {
     add(true, {
       severity: alert.severity || "warning",
@@ -496,6 +511,18 @@ export default function ObservabilityPage() {
     { name: "Traces", href: grafanaBase ? `${grafanaBase.replace(/\/$/, "")}/explore` : null },
     { name: "Dashboards", href: grafanaBase ? `${grafanaBase.replace(/\/$/, "")}/dashboards` : null },
   ].filter((item) => item.href);
+  const runtimeLoaded = Boolean(runtimeFlags?.success);
+  const formatLaunchFlag = (value) => {
+    if (!runtimeLoaded) return "sem dado";
+    return value === false ? "bloqueado" : "habilitado";
+  };
+  const launchFlagRows = [
+    { label: "Perfil", value: runtimeFlags?.launch?.launchProfile || "sem dado" },
+    { label: "Pilot controlled", value: runtimeLoaded ? (runtimeFlags?.launch?.pilotControlled ? "sim" : "não") : "sem dado" },
+    { label: "Admin mutations", value: formatLaunchFlag(runtimeFlags?.launch?.adminMutationsEnabled) },
+    { label: "Programas", value: formatLaunchFlag(runtimeFlags?.launch?.referralProgramsEnabled) },
+    { label: "Campaign Center", value: formatLaunchFlag(runtimeFlags?.launch?.campaignCenterEnabled) },
+  ];
 
   const metricsPayload = {
     metrics,
@@ -818,6 +845,17 @@ export default function ObservabilityPage() {
               ) : (
                 <p className="text-muted">Sem falhas de integração no último polling.</p>
               )}
+            </Panel>
+
+            <Panel title="Flags runtime" subtitle="Estado que governa telas e mutações do dashboard.">
+              <CompactRows rows={launchFlagRows} />
+              {runtimeFlags?.realSandbox?.blockers?.length > 0 ? (
+                <div className="ops-chip-row">
+                  {runtimeFlags.realSandbox.blockers.slice(0, 4).map((blocker) => (
+                    <span key={blocker} className="status-warn">{blocker}</span>
+                  ))}
+                </div>
+              ) : null}
             </Panel>
 
             {quickLinks.length > 0 ? (

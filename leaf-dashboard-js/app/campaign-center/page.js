@@ -6,7 +6,16 @@ import AppNav from "@/src/components/AppNav";
 import Panel from "@/src/components/ui/Panel";
 import { ErrorText, LoadingState } from "@/src/components/ui/PageFeedback";
 import { KeyValueGrid, TechnicalDetails } from "@/src/components/ui/DataViews";
+import { useAuth } from "@/src/contexts/AuthContext";
 import { leafAPI } from "@/src/services/api";
+import {
+  hasAnyRole,
+  isAdminMutationEnabled,
+  isLaunchFeatureEnabled,
+  mutationBlockedMessage,
+  roleBlockedMessage,
+  runtimeFeatureMessage,
+} from "@/src/utils/dashboard-access";
 
 const defaultForm = {
   name: "",
@@ -64,11 +73,14 @@ function formatDate(value) {
 }
 
 export default function CampaignCenterPage() {
+  const { user } = useAuth();
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
   const [rows, setRows] = useState([]);
   const [stats, setStats] = useState(null);
+  const [runtimeFlags, setRuntimeFlags] = useState(null);
   const [statusFilter, setStatusFilter] = useState("all");
   const [roleFilter, setRoleFilter] = useState("all");
   const [surfaceFilter, setSurfaceFilter] = useState("");
@@ -76,11 +88,37 @@ export default function CampaignCenterPage() {
   const [form, setForm] = useState(defaultForm);
   const [previewResult, setPreviewResult] = useState(null);
   const [busyCampaignId, setBusyCampaignId] = useState("");
+  const allowedRoles = useMemo(() => ["admin", "super-admin", "manager", "development"], []);
+  const roleMessage = roleBlockedMessage(user, allowedRoles);
+  const featureMessage = runtimeFeatureMessage(runtimeFlags, "campaignCenterEnabled", "Campaign Center");
+  const mutationMessage = mutationBlockedMessage(runtimeFlags);
+  const canReadCampaignCenter = hasAnyRole(user, allowedRoles);
+  const canMutateCampaignCenter =
+    canReadCampaignCenter &&
+    isLaunchFeatureEnabled(runtimeFlags, "campaignCenterEnabled") &&
+    isAdminMutationEnabled(runtimeFlags);
+  const actionBlockedMessage = roleMessage || featureMessage || mutationMessage;
 
   const load = useCallback(async () => {
     setLoading(true);
     setError("");
+    setNotice("");
     try {
+      const flags = await leafAPI.getRuntimeFlags().catch(() => null);
+      setRuntimeFlags(flags);
+
+      if (!hasAnyRole(user, allowedRoles)) {
+        setRows([]);
+        setStats(null);
+        return;
+      }
+
+      if (flags && !isLaunchFeatureEnabled(flags, "campaignCenterEnabled")) {
+        setRows([]);
+        setStats(null);
+        return;
+      }
+
       const params = {
         status: statusFilter,
         role: roleFilter === "all" ? "" : roleFilter,
@@ -95,25 +133,30 @@ export default function CampaignCenterPage() {
     } finally {
       setLoading(false);
     }
-  }, [queryFilter, roleFilter, statusFilter, surfaceFilter]);
+  }, [allowedRoles, queryFilter, roleFilter, statusFilter, surfaceFilter, user]);
 
   useEffect(() => {
     load();
   }, [load]);
 
   const canCreate = useMemo(
-    () => form.name.trim().length > 2 && form.title.trim().length > 2 && form.body.trim().length > 2,
-    [form.body, form.name, form.title],
+    () =>
+      canMutateCampaignCenter &&
+      form.name.trim().length > 2 &&
+      form.title.trim().length > 2 &&
+      form.body.trim().length > 2,
+    [canMutateCampaignCenter, form.body, form.name, form.title],
   );
 
   const create = async () => {
     if (!canCreate) {
-      setError("Informe nome, titulo e texto da campanha.");
+      setError(actionBlockedMessage || "Informe nome, titulo e texto da campanha.");
       return;
     }
 
     setSaving(true);
     setError("");
+    setNotice("");
     try {
       await leafAPI.createInAppCampaign({
         name: form.name.trim(),
@@ -139,6 +182,7 @@ export default function CampaignCenterPage() {
       });
       setForm(defaultForm);
       await load();
+      setNotice("Campanha criada. Revise o status antes de publicar no app.");
     } catch (err) {
       setError(err?.message || "Falha ao criar campanha");
     } finally {
@@ -148,11 +192,17 @@ export default function CampaignCenterPage() {
 
   const updateStatus = async (campaignId, status) => {
     if (!campaignId || !status) return;
+    if (!canMutateCampaignCenter) {
+      setError(actionBlockedMessage || "Ação bloqueada para este perfil.");
+      return;
+    }
     setBusyCampaignId(campaignId);
     setError("");
+    setNotice("");
     try {
       await leafAPI.updateInAppCampaign(campaignId, { status });
       await load();
+      setNotice(`Campanha ${status === "active" ? "ativada" : "atualizada"} com sucesso.`);
     } catch (err) {
       setError(err?.message || "Falha ao atualizar campanha");
     } finally {
@@ -225,6 +275,10 @@ export default function CampaignCenterPage() {
 
         <AppNav />
         {loading ? <LoadingState message="Carregando campanhas in-app..." /> : null}
+        {roleMessage || featureMessage || mutationMessage ? (
+          <ErrorText message={actionBlockedMessage} />
+        ) : null}
+        {notice ? <p className="success-text">{notice}</p> : null}
 
         <section className="grid grid-kpi">
           <Panel title="Total">
@@ -246,7 +300,14 @@ export default function CampaignCenterPage() {
         </section>
 
         <section className="grid">
-          <Panel title="Criar campanha" subtitle="Seed do Figma entra pausado; ative somente quando quiser publicar no app.">
+          <Panel
+            title="Criar campanha"
+            subtitle={
+              canMutateCampaignCenter
+                ? "Seed do Figma entra pausado; ative somente quando quiser publicar no app."
+                : "Criação bloqueada por permissão ou feature flag do backend."
+            }
+          >
             <div className="form-grid">
               <label className="form-field">
                 Nome interno
@@ -364,7 +425,7 @@ export default function CampaignCenterPage() {
                   onChange={(event) => setForm((prev) => ({ ...prev, endAt: event.target.value }))}
                 />
               </label>
-              <button onClick={create} disabled={!canCreate || saving}>
+              <button onClick={create} disabled={!canCreate || saving} title={!canCreate ? actionBlockedMessage : undefined}>
                 {saving ? "Criando..." : "Criar campanha"}
               </button>
             </div>
@@ -436,10 +497,18 @@ export default function CampaignCenterPage() {
                           </td>
                           <td>
                             <div className="actions-cell">
-                              <button disabled={isBusy || campaign.status === "active"} onClick={() => updateStatus(campaign.id, "active")}>
+                              <button
+                                disabled={!canMutateCampaignCenter || isBusy || campaign.status === "active"}
+                                onClick={() => updateStatus(campaign.id, "active")}
+                                title={!canMutateCampaignCenter ? actionBlockedMessage : undefined}
+                              >
                                 Ativar
                               </button>
-                              <button disabled={isBusy || campaign.status === "paused"} onClick={() => updateStatus(campaign.id, "paused")}>
+                              <button
+                                disabled={!canMutateCampaignCenter || isBusy || campaign.status === "paused"}
+                                onClick={() => updateStatus(campaign.id, "paused")}
+                                title={!canMutateCampaignCenter ? actionBlockedMessage : undefined}
+                              >
                                 Pausar
                               </button>
                               <button disabled={isBusy} onClick={() => preview(campaign)}>

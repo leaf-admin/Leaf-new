@@ -4,6 +4,8 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useAuth } from "@/src/contexts/AuthContext";
+import { leafAPI } from "@/src/services/api";
+import { canAccessItem, isLaunchFeatureEnabled } from "@/src/utils/dashboard-access";
 
 const groups = [
   {
@@ -13,7 +15,7 @@ const groups = [
     href: "/dashboard",
     items: [
       { href: "/dashboard", label: "Dashboard" },
-      { href: "/observability", label: "Observabilidade", blockedRoles: ["support"] },
+      { href: "/observability", label: "Observabilidade", allowedRoles: ["admin", "super-admin", "manager", "development"] },
       { href: "/metrics", label: "Métricas", blockedRoles: ["support"] },
       { href: "/metrics/history", label: "Histórico", blockedRoles: ["support"] },
       { href: "/metrics/marketplace", label: "Marketplace", blockedRoles: ["support"] },
@@ -30,7 +32,7 @@ const groups = [
       { href: "/users", label: "Usuários" },
       { href: "/maps", label: "Mapas" },
       { href: "/subscriptions", label: "Assinaturas", blockedRoles: ["support", "development"] },
-      { href: "/programs", label: "Programas" },
+      { href: "/programs", label: "Programas", allowedRoles: ["admin", "super-admin", "manager", "development"], featureFlag: "referralProgramsEnabled" },
     ],
   },
   {
@@ -41,11 +43,11 @@ const groups = [
     items: [
       { href: "/support", label: "Suporte" },
       { href: "/notifications", label: "Notificações" },
-      { href: "/campaign-center", label: "Campanhas in-app", blockedRoles: ["support"] },
+      { href: "/campaign-center", label: "Campanhas in-app", allowedRoles: ["admin", "super-admin", "manager", "development"], featureFlag: "campaignCenterEnabled" },
       { href: "/reports", label: "Relatórios" },
       { href: "/promotions", label: "Promoções" },
       { href: "/financial-simulator", label: "Simulador", blockedRoles: ["support", "development"] },
-      { href: "/waitlist", label: "Waitlist", blockedRoles: ["support", "development"] },
+      { href: "/waitlist", label: "Waitlist", allowedRoles: ["admin", "super-admin", "manager"] },
     ],
   },
 ];
@@ -66,30 +68,44 @@ function resolveActiveItem(pathname, navGroups) {
   return matches.sort((a, b) => b.href.length - a.href.length)[0];
 }
 
-function canAccessItem(item, role) {
-  const blockedRoles = Array.isArray(item?.blockedRoles) ? item.blockedRoles : [];
-  if (!role) return true;
-  return !blockedRoles.includes(role);
-}
-
 export default function AppNav() {
   const pathname = usePathname();
   const router = useRouter();
   const { user, signOut } = useAuth();
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [runtimeFlags, setRuntimeFlags] = useState(null);
   const apiDocsHref = process.env.NEXT_PUBLIC_API_DOCS_URL || "/reports";
   const isApiDocsExternal = /^https?:\/\//i.test(apiDocsHref);
-  const userRole = String(user?.role || "").toLowerCase();
+
+  useEffect(() => {
+    let mounted = true;
+    leafAPI.getRuntimeFlags()
+      .then((payload) => {
+        if (mounted) setRuntimeFlags(payload || null);
+      })
+      .catch(() => {
+        if (mounted) setRuntimeFlags(null);
+      });
+    return () => {
+      mounted = false;
+    };
+  }, []);
 
   const visibleGroups = useMemo(
     () =>
       groups
         .map((group) => ({
           ...group,
-          items: group.items.filter((item) => canAccessItem(item, userRole)),
+          items: group.items.filter((item) => {
+            if (!canAccessItem(item, user)) return false;
+            if (item.featureFlag && runtimeFlags && !isLaunchFeatureEnabled(runtimeFlags, item.featureFlag)) {
+              return false;
+            }
+            return true;
+          }),
         }))
         .filter((group) => group.items.length > 0),
-    [userRole],
+    [runtimeFlags, user],
   );
 
   const activeItem = useMemo(() => resolveActiveItem(pathname, visibleGroups), [pathname, visibleGroups]);

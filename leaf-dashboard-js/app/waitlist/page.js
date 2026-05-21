@@ -8,11 +8,34 @@ import KpiCard from "@/src/components/ui/KpiCard";
 import Panel from "@/src/components/ui/Panel";
 import { ErrorText, LoadingState } from "@/src/components/ui/PageFeedback";
 import { KeyValueGrid, TechnicalDetails } from "@/src/components/ui/DataViews";
+import { useAuth } from "@/src/contexts/AuthContext";
+import {
+  hasAnyRole,
+  isAdminMutationEnabled,
+  mutationBlockedMessage,
+  roleBlockedMessage,
+} from "@/src/utils/dashboard-access";
+
+function waitlistStatusClass(status) {
+  if (status === "approved") return "status-ok";
+  if (status === "rejected") return "status-bad";
+  return "status-warn";
+}
+
+function cityOperationalState(city) {
+  if (!city) return { enabled: true, label: "sem dado", className: "meta-badge" };
+  if (city.stateEnabled === false) return { enabled: false, label: "UF bloqueada", className: "status-bad" };
+  if (city.cityActive === false) return { enabled: false, label: "cidade inativa", className: "status-bad" };
+  if (city.waitlistEnabled === false) return { enabled: false, label: "waitlist off", className: "status-warn" };
+  return { enabled: true, label: "ativa", className: "status-ok" };
+}
 
 export default function WaitlistPage() {
+  const { user } = useAuth();
   const [drivers, setDrivers] = useState([]);
   const [stats, setStats] = useState(null);
   const [pagination, setPagination] = useState(null);
+  const [runtimeFlags, setRuntimeFlags] = useState(null);
   const [status, setStatus] = useState("pending");
   const [cityFilter, setCityFilter] = useState("");
   const [driverSearch, setDriverSearch] = useState("");
@@ -21,6 +44,20 @@ export default function WaitlistPage() {
   const [notice, setNotice] = useState("");
   const [loading, setLoading] = useState(true);
   const [actionDriverId, setActionDriverId] = useState("");
+  const allowedRoles = useMemo(() => ["admin", "super-admin", "manager"], []);
+  const roleMessage = roleBlockedMessage(user, allowedRoles);
+  const mutationMessage = mutationBlockedMessage(runtimeFlags);
+  const canReadWaitlist = hasAnyRole(user, allowedRoles);
+  const globalWaitlistEnabled = stats?.config?.waitListEnabled !== false;
+  const canMutateWaitlist = canReadWaitlist && globalWaitlistEnabled && isAdminMutationEnabled(runtimeFlags);
+  const actionBlockedMessage =
+    roleMessage ||
+    mutationMessage ||
+    (!globalWaitlistEnabled ? "A waitlist está desabilitada na configuração do backend. Ações ficam bloqueadas." : "");
+  const cityStatusByKey = useMemo(() => {
+    const entries = (stats?.byCity || []).map((city) => [city.cityKey, cityOperationalState(city)]);
+    return new Map(entries);
+  }, [stats?.byCity]);
   const filteredDrivers = useMemo(() => {
     const term = driverSearch.trim().toLowerCase();
     if (!term) return drivers;
@@ -35,6 +72,18 @@ export default function WaitlistPage() {
     try {
       if (!silent) setLoading(true);
       setError("");
+      if (!silent) setNotice("");
+
+      const flags = await leafAPI.getRuntimeFlags().catch(() => null);
+      setRuntimeFlags(flags);
+
+      if (!hasAnyRole(user, allowedRoles)) {
+        setDrivers([]);
+        setPagination(null);
+        setStats(null);
+        return;
+      }
+
       const [listData, statsData] = await Promise.all([
         leafAPI.getWaitlist(page, 20, status, cityFilter),
         leafAPI.getWaitlistStats(),
@@ -47,7 +96,7 @@ export default function WaitlistPage() {
     } finally {
       if (!silent) setLoading(false);
     }
-  }, [cityFilter, page, status]);
+  }, [allowedRoles, cityFilter, page, status, user]);
 
   useEffect(() => {
     let mounted = true;
@@ -66,6 +115,10 @@ export default function WaitlistPage() {
   const runDriverAction = async (driverId, action) => {
     const safeDriverId = String(driverId || "").trim();
     if (!safeDriverId) return;
+    if (!canMutateWaitlist) {
+      setError(actionBlockedMessage || "Ação bloqueada para este perfil.");
+      return;
+    }
 
     try {
       setActionDriverId(safeDriverId);
@@ -122,8 +175,15 @@ export default function WaitlistPage() {
           <KpiCard title="Pendentes" value={stats?.stats?.pending || 0} />
           <KpiCard title="Aprovados" value={stats?.stats?.approved || 0} />
           <KpiCard title="Página atual" value={pagination?.page || page} />
-          <KpiCard title="Slots disponíveis" value={stats?.stats?.availableSlots || 0} />
+          <KpiCard
+            title="Slots disponíveis"
+            value={globalWaitlistEnabled ? (stats?.stats?.availableSlots || 0) : "bloqueado"}
+            tone={globalWaitlistEnabled ? "default" : "danger"}
+          />
         </section>
+        {roleMessage || mutationMessage || !globalWaitlistEnabled ? (
+          <ErrorText message={actionBlockedMessage} />
+        ) : null}
 
         <section className="grid">
           <Panel
@@ -138,6 +198,7 @@ export default function WaitlistPage() {
                 availableSlots: stats?.stats?.availableSlots || 0,
                 totalCities: (stats?.byCity || []).length,
                 currentPage: pagination?.page || page,
+                waitListEnabled: globalWaitlistEnabled ? "sim" : "não",
               }}
               labels={{
                 pending: "Pendentes",
@@ -146,6 +207,7 @@ export default function WaitlistPage() {
                 availableSlots: "Slots disponiveis",
                 totalCities: "Cidades monitoradas",
                 currentPage: "Pagina atual",
+                waitListEnabled: "Waitlist global",
               }}
             />
             <TechnicalDetails title="Ver payload técnico da waitlist" data={stats || {}} />
@@ -162,20 +224,25 @@ export default function WaitlistPage() {
                     <th>Rejeitados</th>
                     <th>Capacidade</th>
                     <th>Slots</th>
+                    <th>Status</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {(stats?.byCity || []).map((city) => (
-                    <tr key={city.cityKey}>
-                      <td>{city.cityLabel || city.cityKey}</td>
-                      <td>{city.stateCode || "-"}</td>
-                      <td>{city.pending || 0}</td>
-                      <td>{city.approved || 0}</td>
-                      <td>{city.rejected || 0}</td>
-                      <td>{city.maxActiveDrivers || 0}</td>
-                      <td>{city.availableSlots || 0}</td>
-                    </tr>
-                  ))}
+                  {(stats?.byCity || []).map((city) => {
+                    const cityState = cityOperationalState(city);
+                    return (
+                      <tr key={city.cityKey}>
+                        <td>{city.cityLabel || city.cityKey}</td>
+                        <td>{city.stateCode || "-"}</td>
+                        <td>{city.pending || 0}</td>
+                        <td>{city.approved || 0}</td>
+                        <td>{city.rejected || 0}</td>
+                        <td>{city.maxActiveDrivers || 0}</td>
+                        <td>{cityState.enabled ? (city.availableSlots || 0) : "bloqueado"}</td>
+                        <td><span className={cityState.className}>{cityState.label}</span></td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
@@ -216,7 +283,7 @@ export default function WaitlistPage() {
                         </td>
                         <td>{item?.driver?.email || "-"}</td>
                         <td>
-                          <span className={item.status === "approved" ? "status-ok" : "status-warn"}>
+                          <span className={waitlistStatusClass(item.status)}>
                             {item.status || "-"}
                           </span>
                         </td>
@@ -227,7 +294,12 @@ export default function WaitlistPage() {
                               <button
                                 type="button"
                                 onClick={() => runDriverAction(item.driverId || item.id, "approve")}
-                                disabled={actionDriverId === (item.driverId || item.id)}
+                                disabled={
+                                  !canMutateWaitlist ||
+                                  actionDriverId === (item.driverId || item.id) ||
+                                  cityStatusByKey.get(item.cityKey)?.enabled === false
+                                }
+                                title={!canMutateWaitlist ? actionBlockedMessage : cityStatusByKey.get(item.cityKey)?.label}
                               >
                                 Aprovar
                               </button>
@@ -235,7 +307,8 @@ export default function WaitlistPage() {
                                 type="button"
                                 className="button-secondary"
                                 onClick={() => runDriverAction(item.driverId || item.id, "reject")}
-                                disabled={actionDriverId === (item.driverId || item.id)}
+                                disabled={!canMutateWaitlist || actionDriverId === (item.driverId || item.id)}
+                                title={!canMutateWaitlist ? actionBlockedMessage : undefined}
                               >
                                 Rejeitar
                               </button>

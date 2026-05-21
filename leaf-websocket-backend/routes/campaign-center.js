@@ -11,6 +11,14 @@ const {
 const router = express.Router();
 const ADMIN_ROLES = ['admin', 'super-admin', 'manager', 'development'];
 
+function buildAuditOperator(user = {}) {
+  return {
+    id: user.id || user.uid || null,
+    email: user.email || null,
+    role: user.role || null
+  };
+}
+
 function requireCampaignCenterEnabled(req, res, next) {
   if (isLaunchFeatureEnabled('campaignCenterEnabled', true)) {
     return next();
@@ -32,6 +40,9 @@ function requireAdminMutationsEnabled(req, res, next) {
   logStructured('warn', 'Mutacao admin de Campaign Center bloqueada por feature flag', {
     service: 'campaign-center',
     operation: 'admin-mutation-guard',
+    action: 'campaign_center.admin_mutation.blocked',
+    entity: { type: 'campaign_center', id: null },
+    operator: buildAuditOperator(req.user || {}),
     path: req.originalUrl || req.url,
     adminUserId: req.user?.id || null,
     adminRole: req.user?.role || null
@@ -106,6 +117,9 @@ router.post(
       logStructured('info', 'Campanha in-app criada', {
         service: 'campaign-center',
         operation: 'create-campaign',
+        action: 'campaign_center.campaign.create',
+        entity: { type: 'campaign', id: campaign.id },
+        operator: buildAuditOperator(req.user || {}),
         campaignId: campaign.id,
         adminUserId: req.user?.id || null
       });
@@ -155,6 +169,9 @@ router.patch(
       logStructured('info', 'Campanha in-app atualizada', {
         service: 'campaign-center',
         operation: 'update-campaign',
+        action: 'campaign_center.campaign.update',
+        entity: { type: 'campaign', id: campaign.id },
+        operator: buildAuditOperator(req.user || {}),
         campaignId: campaign.id,
         adminUserId: req.user?.id || null
       });

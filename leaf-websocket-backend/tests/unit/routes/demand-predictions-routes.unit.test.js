@@ -86,6 +86,9 @@ describe('demand prediction routes', () => {
       expect.objectContaining({
         service: 'demand-predictions',
         operation: 'preview',
+        action: 'demand_prediction.preview.blocked',
+        entity: { type: 'demand_prediction', id: null },
+        operator: expect.objectContaining({ id: 'admin_1', role: 'admin' }),
         adminUserId: 'admin_1'
       })
     );
@@ -130,6 +133,9 @@ describe('demand prediction routes', () => {
       expect.objectContaining({
         service: 'demand-predictions',
         operation: 'preview',
+        action: 'demand_prediction.preview.generate',
+        entity: { type: 'demand_prediction', id: '89a8a0a' },
+        operator: expect.objectContaining({ id: 'admin_1', role: 'admin' }),
         adminUserId: 'admin_1',
         demandLevel: 'critical',
         smartPushAllowed: true

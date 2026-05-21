@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const admin = require('firebase-admin');
-const { logger } = require('../utils/logger');
+const { logger, logStructured } = require('../utils/logger');
 const rateLimit = require('express-rate-limit');
 const cityActivationStateService = require('../services/city-activation-state-service');
 const { authenticateSupport, requireSupportRoles } = require('../middleware/support-auth');
@@ -56,12 +56,33 @@ function isMissingFirestoreIndexError(error) {
   return message.includes('FAILED_PRECONDITION') && message.includes('requires an index');
 }
 
+function buildAuditOperator(user = {}) {
+  return {
+    id: user.id || user.uid || null,
+    email: user.email || null,
+    role: user.role || null
+  };
+}
+
+function logWaitlistAdminAudit(req, action, entity, metadata = {}) {
+  logStructured('info', 'Auditoria admin waitlist', {
+    service: 'waitlist',
+    action,
+    entity,
+    operator: buildAuditOperator(req.user || {}),
+    ...metadata
+  });
+}
+
 function requireAdminMutationsEnabled(req, res, next) {
   if (isLaunchFeatureEnabled('adminMutationsEnabled', true)) {
     return next();
   }
 
   logger.warn('Mutação admin da waitlist bloqueada por feature flag', {
+    action: 'waitlist.admin_mutation.blocked',
+    entity: { type: 'waitlist', id: null },
+    operator: buildAuditOperator(req.user || {}),
     path: req.originalUrl || req.url,
     adminUserId: req.user?.id || req.user?.uid || null,
     adminRole: req.user?.role || null
@@ -1032,6 +1053,13 @@ router.post('/api/waitlist/approve', authenticateSupport, requireSupportRoles(WA
     logger.info(`Motorista ${driverId} aprovado da wait list por admin ${adminId}`, {
       cityKey: resolvedCity.cityKey
     });
+    logWaitlistAdminAudit(req, 'waitlist.driver.approve', {
+      type: 'driver',
+      id: driverId
+    }, {
+      cityKey: resolvedCity.cityKey,
+      waitListEntryId: waitListDoc.id
+    });
 
     res.json({
       success: true,
@@ -1115,6 +1143,13 @@ router.post('/api/waitlist/reject', authenticateSupport, requireSupportRoles(WAI
 
     logger.info(`Motorista ${driverId} rejeitado da wait list por admin ${adminId}`, {
       cityKey
+    });
+    logWaitlistAdminAudit(req, 'waitlist.driver.reject', {
+      type: 'driver',
+      id: driverId
+    }, {
+      cityKey,
+      waitListEntryId: waitListDoc.id
     });
 
     res.json({
@@ -1229,6 +1264,15 @@ router.put('/api/waitlist/position', authenticateSupport, requireSupportRoles(WA
     await batch.commit();
 
     logger.info(`Posição do motorista ${driverId} ajustada para ${newPosition} por admin ${adminId}`);
+    logWaitlistAdminAudit(req, 'waitlist.driver.position.update', {
+      type: 'driver',
+      id: driverId
+    }, {
+      cityKey,
+      waitListEntryId: waitListDoc.id,
+      previousPosition: currentPosition,
+      newPosition
+    });
 
     res.json({
       success: true,
@@ -1492,6 +1536,12 @@ router.patch('/api/waitlist/landing/:id/status', authenticateSupport, requireSup
     });
 
     logger.info(`Status da waitlist atualizado: ${id} -> ${status}`);
+    logWaitlistAdminAudit(req, 'waitlist.landing.status.update', {
+      type: 'waitlist_landing',
+      id
+    }, {
+      status
+    });
 
     res.json({
       success: true,
@@ -1520,6 +1570,10 @@ router.delete('/api/waitlist/landing/:id', authenticateSupport, requireSupportRo
     await firestore.collection('waitlist_landing').doc(id).delete();
 
     logger.info(`Cadastro removido da waitlist: ${id}`);
+    logWaitlistAdminAudit(req, 'waitlist.landing.delete', {
+      type: 'waitlist_landing',
+      id
+    });
 
     res.json({
       success: true,

@@ -16,6 +16,14 @@ const {
 const router = express.Router();
 const DEMAND_ADMIN_ROLES = ['admin', 'super-admin', 'manager', 'development'];
 
+function buildAuditOperator(user = {}) {
+  return {
+    id: user.id || user.uid || null,
+    email: user.email || null,
+    role: user.role || null
+  };
+}
+
 function respondDemandPredictionDisabled(res) {
   return res.status(503).json(
     buildLaunchFeatureDisabledPayload(
@@ -129,6 +137,9 @@ router.post(
       logStructured('warn', 'Preview de demanda bloqueado por feature flag', {
         service: 'demand-predictions',
         operation: 'preview',
+        action: 'demand_prediction.preview.blocked',
+        entity: { type: 'demand_prediction', id: req.body?.h3 || req.body?.city || null },
+        operator: buildAuditOperator(req.user || {}),
         adminUserId: req.user?.id || null,
         adminRole: req.user?.role || null
       });
@@ -141,6 +152,9 @@ router.post(
       logStructured('info', 'Preview de demanda gerado', {
         service: 'demand-predictions',
         operation: 'preview',
+        action: 'demand_prediction.preview.generate',
+        entity: { type: 'demand_prediction', id: prediction.area?.h3 || prediction.area?.city || null },
+        operator: buildAuditOperator(req.user || {}),
         adminUserId: req.user?.id || null,
         adminRole: req.user?.role || null,
         areaH3: prediction.area?.h3 || null,

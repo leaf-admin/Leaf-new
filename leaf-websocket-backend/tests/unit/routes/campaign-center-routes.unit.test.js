@@ -13,6 +13,8 @@ const mockGetStats = jest.fn();
 const mockCreateCampaign = jest.fn();
 const mockResolveEligibleCampaigns = jest.fn();
 const mockRecordEvent = jest.fn();
+const mockLogStructured = jest.fn();
+const mockIsLaunchFeatureEnabled = jest.fn(() => true);
 
 jest.mock('../../../middleware/jwt-auth', () => ({
   authenticateJWT: mockAuthenticateJWT,
@@ -30,12 +32,12 @@ jest.mock('../../../services/campaign-center-service', () => ({
 }));
 
 jest.mock('../../../utils/logger', () => ({
-  logStructured: jest.fn(),
+  logStructured: mockLogStructured,
   logError: jest.fn()
 }));
 
 jest.mock('../../../utils/pilot-launch-flags', () => ({
-  isLaunchFeatureEnabled: jest.fn(() => true),
+  isLaunchFeatureEnabled: mockIsLaunchFeatureEnabled,
   buildLaunchFeatureDisabledPayload: jest.fn((feature, error) => ({
     success: false,
     feature,
@@ -65,6 +67,7 @@ describe('campaign-center routes', () => {
     ]);
     mockGetStats.mockResolvedValue({ total: 1, active: 1 });
     mockCreateCampaign.mockResolvedValue({ id: 'cmp_new', name: 'Nova' });
+    mockIsLaunchFeatureEnabled.mockReturnValue(true);
     mockResolveEligibleCampaigns.mockResolvedValue({
       campaigns: [{ id: 'cmp_1', content: { title: 'Teste' } }],
       evaluatedAt: '2026-05-20T12:00:00.000Z'
@@ -104,6 +107,39 @@ describe('campaign-center routes', () => {
     expect(mockCreateCampaign).toHaveBeenCalledWith(
       expect.objectContaining({ name: 'Nova' }),
       expect.objectContaining({ id: 'admin_1' })
+    );
+    expect(mockLogStructured).toHaveBeenCalledWith(
+      'info',
+      'Campanha in-app criada',
+      expect.objectContaining({
+        action: 'campaign_center.campaign.create',
+        entity: { type: 'campaign', id: 'cmp_new' },
+        operator: expect.objectContaining({ id: 'admin_1', role: 'admin' })
+      })
+    );
+  });
+
+  it('blocks campaign admin mutations behind the launch admin mutation flag', async () => {
+    mockIsLaunchFeatureEnabled.mockImplementation((feature) => feature !== 'adminMutationsEnabled');
+
+    const response = await request(createApp())
+      .post('/api/campaign-center/campaigns')
+      .send({ name: 'Bloqueada' });
+
+    expect(response.status).toBe(503);
+    expect(response.body).toMatchObject({
+      success: false,
+      feature: 'admin_mutations'
+    });
+    expect(mockCreateCampaign).not.toHaveBeenCalled();
+    expect(mockLogStructured).toHaveBeenCalledWith(
+      'warn',
+      'Mutacao admin de Campaign Center bloqueada por feature flag',
+      expect.objectContaining({
+        action: 'campaign_center.admin_mutation.blocked',
+        entity: { type: 'campaign_center', id: null },
+        operator: expect.objectContaining({ id: 'admin_1', role: 'admin' })
+      })
     );
   });
 

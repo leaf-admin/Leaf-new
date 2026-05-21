@@ -8,6 +8,15 @@ import KpiCard from "@/src/components/ui/KpiCard";
 import { ErrorText, LoadingState } from "@/src/components/ui/PageFeedback";
 import { leafAPI } from "@/src/services/api";
 import { TechnicalDetails } from "@/src/components/ui/DataViews";
+import { useAuth } from "@/src/contexts/AuthContext";
+import {
+  hasAnyRole,
+  isAdminMutationEnabled,
+  isLaunchFeatureEnabled,
+  mutationBlockedMessage,
+  roleBlockedMessage,
+  runtimeFeatureMessage,
+} from "@/src/utils/dashboard-access";
 
 const defaultCampaignForm = {
   name: "",
@@ -40,24 +49,69 @@ function summarizeCampaignParams(params) {
   return lines.length > 0 ? lines.join(" • ") : "-";
 }
 
+function scopeEnabledForCampaign(config, type) {
+  if (!config) return true;
+  if (type === "passenger_referral") return config?.passenger?.enabled !== false;
+  if (type === "founder_wave") return config?.founder?.enabled !== false;
+  return config?.driver?.enabled !== false;
+}
+
 export default function ProgramsPage() {
+  const { user } = useAuth();
   const [loading, setLoading] = useState(true);
   const [savingConfig, setSavingConfig] = useState(false);
   const [savingCampaign, setSavingCampaign] = useState(false);
   const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
 
   const [summary, setSummary] = useState(null);
   const [config, setConfig] = useState(null);
   const [campaigns, setCampaigns] = useState([]);
+  const [runtimeFlags, setRuntimeFlags] = useState(null);
   const [campaignSearch, setCampaignSearch] = useState("");
   const [campaignStatusFilter, setCampaignStatusFilter] = useState("all");
 
   const [campaignForm, setCampaignForm] = useState(defaultCampaignForm);
+  const allowedRoles = useMemo(() => ["admin", "super-admin", "manager", "development"], []);
+  const roleMessage = roleBlockedMessage(user, allowedRoles);
+  const featureMessage = runtimeFeatureMessage(runtimeFlags, "referralProgramsEnabled", "Programas de convite");
+  const mutationMessage = mutationBlockedMessage(runtimeFlags);
+  const canReadPrograms = hasAnyRole(user, allowedRoles);
+  const canMutatePrograms =
+    canReadPrograms &&
+    isLaunchFeatureEnabled(runtimeFlags, "referralProgramsEnabled") &&
+    isAdminMutationEnabled(runtimeFlags);
+  const selectedScopeEnabled = scopeEnabledForCampaign(config, campaignForm.type);
+  const actionBlockedMessage =
+    roleMessage ||
+    featureMessage ||
+    mutationMessage ||
+    (!selectedScopeEnabled && campaignForm.status === "active"
+      ? "Este tipo de programa está desabilitado na configuração global. Crie como pausado ou habilite a configuração antes."
+      : "");
 
   const load = useCallback(async () => {
     try {
       setLoading(true);
       setError("");
+      setNotice("");
+
+      const flags = await leafAPI.getRuntimeFlags().catch(() => null);
+      setRuntimeFlags(flags);
+
+      if (!hasAnyRole(user, allowedRoles)) {
+        setSummary(null);
+        setConfig(null);
+        setCampaigns([]);
+        return;
+      }
+
+      if (flags && !isLaunchFeatureEnabled(flags, "referralProgramsEnabled")) {
+        setSummary(null);
+        setConfig(null);
+        setCampaigns([]);
+        return;
+      }
 
       const [summaryData, configData, campaignsData] = await Promise.all([
         leafAPI.getReferralProgramsSummary(),
@@ -73,7 +127,7 @@ export default function ProgramsPage() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [allowedRoles, user]);
 
   useEffect(() => {
     load();
@@ -91,10 +145,15 @@ export default function ProgramsPage() {
 
   const saveConfig = async () => {
     if (!config) return;
+    if (!canMutatePrograms) {
+      setError(roleMessage || featureMessage || mutationMessage || "Configuração bloqueada para este perfil.");
+      return;
+    }
 
     try {
       setSavingConfig(true);
       setError("");
+      setNotice("");
       await leafAPI.updateReferralProgramsConfig({
         driver: {
           enabled: config?.driver?.enabled !== false,
@@ -117,6 +176,7 @@ export default function ProgramsPage() {
         },
       });
       await load();
+      setNotice("Configuração de programas salva com sucesso.");
     } catch (err) {
       setError(err?.message || "Falha ao salvar configuração");
     } finally {
@@ -129,10 +189,15 @@ export default function ProgramsPage() {
       setError("Informe um nome para a campanha");
       return;
     }
+    if (!canMutatePrograms || (campaignForm.status === "active" && !selectedScopeEnabled)) {
+      setError(actionBlockedMessage || "Campanha bloqueada por permissão ou configuração global.");
+      return;
+    }
 
     try {
       setSavingCampaign(true);
       setError("");
+      setNotice("");
 
       await leafAPI.createReferralCampaign({
         name: campaignForm.name.trim(),
@@ -152,6 +217,7 @@ export default function ProgramsPage() {
 
       setCampaignForm(defaultCampaignForm);
       await load();
+      setNotice("Campanha criada com sucesso.");
     } catch (err) {
       setError(err?.message || "Falha ao criar campanha");
     } finally {
@@ -160,10 +226,24 @@ export default function ProgramsPage() {
   };
 
   const updateCampaignStatus = async (campaignId, status) => {
+    const campaign = campaigns.find((item) => item.id === campaignId);
+    const campaignScopeEnabled = scopeEnabledForCampaign(config, campaign?.type);
+    if (!canMutatePrograms || (status === "active" && !campaignScopeEnabled)) {
+      setError(
+        roleMessage ||
+          featureMessage ||
+          mutationMessage ||
+          "Este tipo de programa está desabilitado na configuração global. Não é possível ativar a campanha.",
+      );
+      return;
+    }
+
     try {
       setError("");
+      setNotice("");
       await leafAPI.updateReferralCampaign(campaignId, { status });
       await load();
+      setNotice(`Campanha ${status === "active" ? "ativada" : "atualizada"} com sucesso.`);
     } catch (err) {
       setError(err?.message || "Falha ao atualizar status da campanha");
     }
@@ -196,7 +276,7 @@ export default function ProgramsPage() {
           <h1>Programas de Convite</h1>
           <div className="filters">
             <button onClick={load}>Atualizar</button>
-            <button onClick={saveConfig} disabled={savingConfig || !config}>
+            <button onClick={saveConfig} disabled={savingConfig || !config || !canMutatePrograms} title={!canMutatePrograms ? (roleMessage || featureMessage || mutationMessage) : undefined}>
               {savingConfig ? "Salvando..." : "Salvar configuração"}
             </button>
           </div>
@@ -204,6 +284,10 @@ export default function ProgramsPage() {
 
         <AppNav />
         {loading ? <LoadingState message="Carregando programas de convite..." /> : null}
+        {roleMessage || featureMessage || mutationMessage ? (
+          <ErrorText message={roleMessage || featureMessage || mutationMessage} />
+        ) : null}
+        {notice ? <p className="success-text">{notice}</p> : null}
 
         <section className="grid grid-kpi">
           <KpiCard title="Campanhas ativas" value={summaryCards.activeCampaigns} />
@@ -340,7 +424,14 @@ export default function ProgramsPage() {
             )}
           </Panel>
 
-          <Panel title="Nova Campanha" subtitle="Criação rápida para campanhas sazonais e testes de incentivo.">
+          <Panel
+            title="Nova Campanha"
+            subtitle={
+              canMutatePrograms
+                ? "Criação rápida para campanhas sazonais e testes de incentivo."
+                : "Criação bloqueada por permissão ou feature flag do backend."
+            }
+          >
             <div className="form-grid">
               <label className="form-field">
                 Nome
@@ -408,7 +499,10 @@ export default function ProgramsPage() {
                   onChange={(e) => setCampaignForm((prev) => ({ ...prev, discountPercent: e.target.value }))}
                 />
               </label>
-              <button onClick={createCampaign} disabled={savingCampaign}>
+              {!selectedScopeEnabled && campaignForm.status === "active" ? (
+                <p className="muted">Este tipo está desabilitado na configuração global; use status pausado.</p>
+              ) : null}
+              <button onClick={createCampaign} disabled={savingCampaign || !canMutatePrograms || (campaignForm.status === "active" && !selectedScopeEnabled)}>
                 {savingCampaign ? "Criando..." : "Criar campanha"}
               </button>
             </div>
@@ -449,7 +543,10 @@ export default function ProgramsPage() {
                       <td colSpan={5}>Nenhuma campanha cadastrada até o momento.</td>
                     </tr>
                   ) : (
-                    filteredCampaigns.map((campaign) => (
+                    filteredCampaigns.map((campaign) => {
+                      const campaignScopeEnabled = scopeEnabledForCampaign(config, campaign.type);
+                      const campaignBlocked = campaign.status === "active" && !campaignScopeEnabled;
+                      return (
                       <tr key={campaign.id}>
                         <td>
                           <strong>{campaign.name}</strong>
@@ -459,28 +556,37 @@ export default function ProgramsPage() {
                         <td>
                           <span
                             className={
-                              campaign.status === "active"
+                              campaignBlocked
+                                ? "status-bad"
+                                : campaign.status === "active"
                                 ? "status-ok"
                                 : campaign.status === "paused"
                                   ? "status-warn"
                                   : "status-bad"
                             }
                           >
-                            {campaign.status}
+                            {campaignBlocked ? "bloqueada" : campaign.status}
                           </span>
+                          {campaignBlocked ? <span className="table-muted">config global desabilitada</span> : null}
                         </td>
                         <td>
                           <span>{summarizeCampaignParams(campaign.params)}</span>
                         </td>
                         <td>
                           <div className="actions-cell">
-                            <button onClick={() => updateCampaignStatus(campaign.id, "active")}>Ativar</button>
-                            <button onClick={() => updateCampaignStatus(campaign.id, "paused")}>Pausar</button>
-                            <button onClick={() => updateCampaignStatus(campaign.id, "completed")}>Encerrar</button>
+                            <button
+                              onClick={() => updateCampaignStatus(campaign.id, "active")}
+                              disabled={!canMutatePrograms || !campaignScopeEnabled || campaign.status === "active"}
+                            >
+                              Ativar
+                            </button>
+                            <button onClick={() => updateCampaignStatus(campaign.id, "paused")} disabled={!canMutatePrograms || campaign.status === "paused"}>Pausar</button>
+                            <button onClick={() => updateCampaignStatus(campaign.id, "completed")} disabled={!canMutatePrograms || campaign.status === "completed"}>Encerrar</button>
                           </div>
                         </td>
                       </tr>
-                    ))
+                    );
+                    })
                   )}
                 </tbody>
               </table>

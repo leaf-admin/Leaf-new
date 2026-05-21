@@ -28,6 +28,24 @@ const DEFAULT_PASSENGER_DISCOUNT_PERCENT = Number.parseFloat(process.env.REFERRA
 const DEFAULT_PASSENGER_MAX_RIDES = Number.parseInt(process.env.REFERRAL_PASSENGER_MAX_RIDES || '3', 10);
 const DEFAULT_FOUNDER_MONTHS = Number.parseInt(process.env.FOUNDER_DEFAULT_FREE_MONTHS || '6', 10);
 
+function buildAuditOperator(user = {}) {
+  return {
+    id: user.id || user.uid || null,
+    email: user.email || null,
+    role: user.role || null
+  };
+}
+
+function logReferralAdminAudit(req, action, entity, metadata = {}) {
+  logStructured('info', 'Auditoria admin referral programs', {
+    service: 'referral-programs',
+    action,
+    entity,
+    operator: buildAuditOperator(req.user || {}),
+    ...metadata
+  });
+}
+
 function respondReferralProgramsDisabled(res) {
   return res.status(503).json(
     buildLaunchFeatureDisabledPayload(
@@ -45,6 +63,9 @@ function requireAdminMutationsEnabled(req, res, next) {
   logStructured('warn', 'Mutacao admin de referral bloqueada por feature flag', {
     service: 'referral-programs',
     operation: 'admin-mutation-guard',
+    action: 'referral_programs.admin_mutation.blocked',
+    entity: { type: 'referral_programs', id: null },
+    operator: buildAuditOperator(req.user || {}),
     path: req.originalUrl || req.url,
     adminUserId: req.user?.id || null,
     adminRole: req.user?.role || null
@@ -381,6 +402,10 @@ router.patch('/config', authenticateJWT, requireRole(ADMIN_ROLES), requireAdminM
     next.founder.freeMonths = toPositiveInt(next.founder.freeMonths, DEFAULT_FOUNDER_MONTHS);
 
     await referralProgramStateService.saveConfig(next, getDefaultProgramConfig());
+    logReferralAdminAudit(req, 'referral_programs.config.update', {
+      type: 'referral_config',
+      id: 'current'
+    });
 
     res.json({ success: true, config: next });
   } catch (error) {
@@ -438,6 +463,13 @@ router.post('/campaigns', authenticateJWT, requireRole(ADMIN_ROLES), requireAdmi
     };
 
     await referralProgramStateService.createCampaign(campaignPayload);
+    logReferralAdminAudit(req, 'referral_programs.campaign.create', {
+      type: 'referral_campaign',
+      id: campaignPayload.id
+    }, {
+      campaignType: campaignPayload.type,
+      status: campaignPayload.status
+    });
     res.json({ success: true, campaign: campaignPayload });
   } catch (error) {
     logError(error, 'Erro ao criar campanha de referral programs', { service: 'referral-programs' });
@@ -479,6 +511,13 @@ router.patch('/campaigns/:campaignId', authenticateJWT, requireRole(ADMIN_ROLES)
     merged.params.maxDiscountRides = toPositiveInt(merged.params.maxDiscountRides, DEFAULT_PASSENGER_MAX_RIDES);
 
     await referralProgramStateService.updateCampaign(campaignId, merged);
+    logReferralAdminAudit(req, 'referral_programs.campaign.update', {
+      type: 'referral_campaign',
+      id: campaignId
+    }, {
+      campaignType: merged.type,
+      status: merged.status
+    });
     res.json({ success: true, campaign: merged });
   } catch (error) {
     logError(error, 'Erro ao atualizar campanha de referral programs', { service: 'referral-programs' });
@@ -784,6 +823,15 @@ router.post('/invites/driver/evaluate', authenticateJWT, requireRole(ADMIN_ROLES
     }
 
     await referralProgramStateService.updateInvite(inviteId, patch);
+    logReferralAdminAudit(req, 'referral_programs.driver_invite.evaluate', {
+      type: 'referral_invite',
+      id: inviteId
+    }, {
+      qualified,
+      completedTrips,
+      requiredTrips,
+      rewardGranted: Boolean(reward)
+    });
 
     res.json({
       success: true,
@@ -799,7 +847,7 @@ router.post('/invites/driver/evaluate', authenticateJWT, requireRole(ADMIN_ROLES
   }
 });
 
-router.post('/founder/assign', authenticateJWT, requireRole(ADMIN_ROLES), async (req, res) => {
+router.post('/founder/assign', authenticateJWT, requireRole(ADMIN_ROLES), requireAdminMutationsEnabled, async (req, res) => {
   try {
     const driverId = normalizeIdentifier(req.body?.driverId);
     if (!driverId) {
@@ -827,6 +875,13 @@ router.post('/founder/assign', authenticateJWT, requireRole(ADMIN_ROLES), async 
         assignedBy: req.user?.id || req.user?.email || 'admin',
         freeUntil
       }
+    });
+    logReferralAdminAudit(req, 'referral_programs.founder.assign', {
+      type: 'driver',
+      id: driverId
+    }, {
+      freeMonths: months,
+      waveTag: req.body?.waveTag || config.founder.waveTag
     });
 
     res.json({
