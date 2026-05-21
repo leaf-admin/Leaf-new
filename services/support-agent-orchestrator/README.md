@@ -38,8 +38,8 @@ Fluxo recomendado para o dashboard ou sistema de tickets:
 
 1. Ao abrir um ticket, chamar `GET /v1/tickets/:ticketId/analysis`.
 2. Exibir categoria, prioridade, confianca, flags de risco e referencias do playbook.
-3. Se `needsHuman=true`, tratar a resposta como sugestao e exigir acao humana.
-4. Se `canAutoReply=true`, permitir envio automatico somente com macro aprovada.
+3. Tratar toda recomendacao como sugestao assistida e exigir acao humana.
+4. Respeitar `recommendation.execution.autoSend=false` e `autoResolve=false`.
 5. Ao rotear, responder ou escalar, registrar `run.id`, `playbookVersion` e `confidence` no ticket.
 
 Exemplo para chat em tempo real:
@@ -77,6 +77,8 @@ O servico nasce em modo copiloto. Ele nao executa acoes sensiveis nem responde a
 - o assunto envolve seguranca, fraude, emergencia, vazamento, pagamento sensivel ou documento/KYC;
 - o playbook nao cobre o caso;
 - `SUPPORT_AUTONOMOUS_MODE=false`.
+
+Mesmo com `SUPPORT_AUTONOMOUS_MODE=true`, o contrato atual continua em modo `guarded_copilot`: o orquestrador classifica, recomenda e audita, mas nao faz autosend nem autoresolve. Automacao futura deve exigir macro aprovada, nova revisao de contrato e testes dedicados.
 
 ## Fontes permitidas
 

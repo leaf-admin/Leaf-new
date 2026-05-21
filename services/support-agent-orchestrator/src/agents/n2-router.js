@@ -14,6 +14,9 @@ class N2Router {
     return {
       route: queueByCategory[classification.category] || "n2-support",
       action: "route_to_specialist",
+      requiresHumanApproval: true,
+      autoSend: false,
+      autoResolve: false,
       humanSummary:
         "Caso requer triagem especializada. Revisar contexto do usuario, evidencias coletadas, historico de tickets e status operacional antes de responder.",
     };

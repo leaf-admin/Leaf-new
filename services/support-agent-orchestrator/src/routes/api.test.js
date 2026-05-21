@@ -77,3 +77,25 @@ test("requires the configured orchestrator token", () => {
   assert.equal(response.statusCode, 401);
   assert.equal(response.payload.error, "orchestrator_unauthorized");
 });
+
+test("accepts bearer authorization with the configured orchestrator token", () => {
+  const middleware = requireToken({
+    security: {
+      dashboardToken: "server-secret",
+      allowMissingDashboardToken: false,
+    },
+  });
+  const response = createResponse();
+  let nextCalled = false;
+
+  middleware(
+    { get: (header) => (header.toLowerCase() === "authorization" ? "Bearer server-secret" : "") },
+    response,
+    () => {
+      nextCalled = true;
+    },
+  );
+
+  assert.equal(nextCalled, true);
+  assert.equal(response.statusCode, 200);
+});

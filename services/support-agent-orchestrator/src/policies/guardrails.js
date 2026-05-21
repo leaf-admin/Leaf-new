@@ -46,10 +46,11 @@ function supportTierFromFlags(flags) {
   return "N1";
 }
 
-function canAutoReply({ flags, confidence, minConfidence, autonomousMode, playbookMatches }) {
+function canAutoReply({ flags, confidence, minConfidence, autonomousMode, playbookMatches, approvedMacro }) {
   if (!autonomousMode) return false;
   if (confidence < minConfidence) return false;
   if (!playbookMatches?.length) return false;
+  if (!approvedMacro) return false;
   if (flags.some((flag) => ["emergency", "fraud", "payment", "kyc"].includes(flag))) return false;
   return true;
 }

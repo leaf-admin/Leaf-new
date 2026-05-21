@@ -1,5 +1,7 @@
 const logger = require("../utils/logger");
 
+const CONTRACT_VERSION = "support-orchestrator.v1";
+
 class SupportOrchestrator {
   constructor({
     config,
@@ -84,6 +86,7 @@ class SupportOrchestrator {
     const n1 = this.n1Agent.buildRecommendation({ classification, ticket, messages, chatMessages });
     const n2 = this.n2Router.recommend({ classification, ticket, messages, chatMessages });
     const n3 = this.n3Diagnostics.recommend({ classification, ticket, messages, chatMessages });
+    const execution = this.buildExecutionPolicy({ classification, n1, n2, n3 });
     const run = this.store.saveRun({
       source,
       ticketId: ticket.id || ticket.ticketId || null,
@@ -94,12 +97,18 @@ class SupportOrchestrator {
         n2,
         n3,
         nextAction: n3?.action || n2?.action || n1?.action || "review",
+        execution,
       },
       audit: {
+        contractVersion: CONTRACT_VERSION,
         playbookVersion: classification.playbookVersion,
         autonomousMode: this.config.automation.autonomousMode,
+        mode: execution.mode,
         minConfidence: this.config.automation.minConfidence,
         internetSearchUsed: false,
+        autoSend: false,
+        autoResolve: false,
+        requiresHumanApproval: true,
       },
     });
     logger.info("Support analysis completed", {
@@ -110,6 +119,24 @@ class SupportOrchestrator {
       confidence: classification.confidence,
     });
     return run;
+  }
+
+  buildExecutionPolicy({ classification, n1, n2, n3 }) {
+    const activeActions = [n1?.action, n2?.action, n3?.action].filter(Boolean);
+    return {
+      mode: this.config.automation.autonomousMode ? "guarded_copilot" : "copilot",
+      canAutoReply: classification.canAutoReply === true,
+      autoSend: false,
+      autoResolve: false,
+      requiresHumanApproval: true,
+      activeActions,
+      blockedActions: [
+        "auto_send",
+        "auto_resolve",
+        "close_ticket",
+        "external_mutation",
+      ],
+    };
   }
 
   async pollBacklogOnce() {

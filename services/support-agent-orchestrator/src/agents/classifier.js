@@ -53,6 +53,7 @@ class SupportClassifier {
       minConfidence: this.minConfidence,
       autonomousMode: this.autonomousMode,
       playbookMatches,
+      approvedMacro: false,
     });
 
     return {
@@ -72,7 +73,9 @@ class SupportClassifier {
       rationale: [
         hasClearPlaybook ? "Playbook encontrou cobertura relacionada." : "Sem cobertura forte no playbook.",
         flags.length ? `Sinais detectados: ${flags.join(", ")}.` : "Sem sinal de risco alto por palavra-chave.",
-        autoReplyAllowed ? "Resposta automatica permitida pelas politicas." : "Copiloto/handoff recomendado.",
+        autoReplyAllowed
+          ? "Resposta automatica permitida pelas politicas."
+          : "Copiloto/handoff recomendado; autosend e autoresolve bloqueados.",
       ],
     };
   }

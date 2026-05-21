@@ -52,10 +52,23 @@ async function authorizeDashboardRequest(request) {
     };
   }
 
-  const verifyResponse = await fetch(`${resolveDashboardApiTarget()}/admin/auth/verify`, {
-    headers: { Authorization: authorization },
-    cache: "no-store",
-  });
+  let verifyResponse;
+  try {
+    verifyResponse = await fetch(`${resolveDashboardApiTarget()}/admin/auth/verify`, {
+      headers: { Authorization: authorization },
+      cache: "no-store",
+    });
+  } catch {
+    return {
+      response: Response.json(
+        {
+          success: false,
+          error: "Falha de conexao ao validar sessao do dashboard. O suporte manual continua disponivel.",
+        },
+        { status: 502 },
+      ),
+    };
+  }
 
   if (!verifyResponse.ok) {
     return {
@@ -119,12 +132,23 @@ async function proxySupportOrchestrator(request, context) {
   });
   headers.set("X-Orchestrator-Token", token);
 
-  const response = await fetch(targetUrl, {
-    method,
-    headers,
-    body: method === "GET" || method === "HEAD" ? undefined : await request.arrayBuffer(),
-    cache: "no-store",
-  });
+  let response;
+  try {
+    response = await fetch(targetUrl, {
+      method,
+      headers,
+      body: method === "GET" || method === "HEAD" ? undefined : await request.arrayBuffer(),
+      cache: "no-store",
+    });
+  } catch {
+    return Response.json(
+      {
+        success: false,
+        error: "Copiloto de suporte indisponivel: falha de conexao com o orquestrador. O suporte manual continua disponivel.",
+      },
+      { status: 502 },
+    );
+  }
 
   return new Response(await response.arrayBuffer(), {
     status: response.status,

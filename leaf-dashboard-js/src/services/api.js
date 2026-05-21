@@ -130,6 +130,14 @@ class LeafApiService {
       }
 
       return payload;
+    } catch (err) {
+      if (err?.name === "AbortError") {
+        throw new Error("Copiloto de suporte indisponivel: tempo de conexao esgotado. O atendimento manual continua disponivel.");
+      }
+      if (err instanceof TypeError) {
+        throw new Error("Copiloto de suporte indisponivel: falha de conexao. O atendimento manual continua disponivel.");
+      }
+      throw err;
     } finally {
       clearTimeout(timeout);
     }

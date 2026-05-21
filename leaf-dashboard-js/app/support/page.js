@@ -77,6 +77,34 @@ function formatConfidence(confidence) {
   return `${Math.round(value * 100)}%`;
 }
 
+function getCopilotPriority(analysis) {
+  const value = String(
+    analysis?.classification?.priority ||
+      analysis?.classification?.supportTier ||
+      analysis?.recommendation?.priority ||
+      "N3",
+  ).toUpperCase();
+  return ["N1", "N2", "N3"].includes(value) ? value : "N3";
+}
+
+function getCopilotRationale(analysis) {
+  const rationale = analysis?.classification?.rationale || analysis?.recommendation?.rationale || [];
+  if (Array.isArray(rationale)) return rationale.filter(Boolean);
+  if (typeof rationale === "string" && rationale.trim()) return [rationale.trim()];
+  return [];
+}
+
+function getCopilotSuggestion(analysis) {
+  return (
+    analysis?.recommendation?.suggestedReply ||
+    analysis?.recommendation?.reply ||
+    analysis?.recommendation?.n1?.reply ||
+    analysis?.recommendation?.n2?.reply ||
+    analysis?.recommendation?.n3?.reply ||
+    ""
+  );
+}
+
 function queueHealthBadge(ticket) {
   if (ticket?.queue?.overdueFirstResponse) return { className: "status-bad", label: "1a resposta vencida" };
   if (ticket?.queue?.overdueAck) return { className: "status-bad", label: "ack vencido" };
@@ -337,6 +365,9 @@ export default function SupportPage() {
         .includes(term),
     );
   }, [currentMessages, messageSearch]);
+  const copilotPriority = useMemo(() => getCopilotPriority(orchestratorAnalysis), [orchestratorAnalysis]);
+  const copilotRationale = useMemo(() => getCopilotRationale(orchestratorAnalysis), [orchestratorAnalysis]);
+  const copilotSuggestion = useMemo(() => getCopilotSuggestion(orchestratorAnalysis), [orchestratorAnalysis]);
 
   const selectedTicketDetails = useMemo(() => {
     if (!selectedTicket) return {};
@@ -530,16 +561,16 @@ export default function SupportPage() {
 
         <section className="grid orchestrator-grid">
           <Panel
-            title="Orquestrador de agents"
+            title="Copiloto de suporte"
             subtitle={
               orchestratorEnabled
-                ? "Copiloto conectado ao playbook, tickets e contexto operacional."
+                ? "Sugestoes internas conectadas ao playbook, tickets e contexto operacional. Atendimento e envio seguem manuais."
                 : "Pronto para receber o servico externo quando NEXT_PUBLIC_SUPPORT_ORCHESTRATOR_URL estiver configurado."
             }
             actions={
               orchestratorEnabled ? (
                 <button type="button" onClick={loadOrchestratorOverview}>
-                  Atualizar agent
+                  Atualizar copiloto
                 </button>
               ) : null
             }
@@ -553,6 +584,7 @@ export default function SupportPage() {
               <span className="meta-badge">
                 polling: {orchestratorStatus?.polling?.enabled === false ? "off" : "on"}
               </span>
+              <span className="meta-badge">envio automatico: bloqueado</span>
               {orchestratorError ? <span className="status-bad">{orchestratorError}</span> : null}
             </div>
 
@@ -647,7 +679,7 @@ export default function SupportPage() {
                   </button>
                   {orchestratorEnabled ? (
                     <button type="button" disabled={orchestratorLoading} onClick={refreshOrchestratorAnalysis}>
-                      Rodar agent
+                      Gerar sugestao
                     </button>
                   ) : null}
                   {mode === "chat" ? (
@@ -690,13 +722,13 @@ export default function SupportPage() {
                 {orchestratorEnabled ? (
                   <div className="agent-recommendation">
                     <div className="ticket-meta-row">
-                      <strong>Copiloto agent</strong>
+                      <strong>Copiloto de suporte</strong>
                       {orchestratorLoading ? <span className="meta-badge">analisando</span> : null}
+                      <span className="meta-badge">sugestao interna</span>
+                      <span className="status-warn">humano obrigatorio</span>
                       {orchestratorAnalysis?.classification ? (
                         <>
-                          <span className={priorityBadge(orchestratorAnalysis.classification.priority)}>
-                            {orchestratorAnalysis.classification.priority}
-                          </span>
+                          <span className={priorityBadge(copilotPriority)}>{copilotPriority}</span>
                           <span className="meta-badge">{orchestratorAnalysis.classification.supportTier}</span>
                           <span className={confidenceBadge(orchestratorAnalysis.classification.confidence)}>
                             {formatConfidence(orchestratorAnalysis.classification.confidence)}
@@ -707,20 +739,22 @@ export default function SupportPage() {
 
                     {orchestratorAnalysis?.recommendation ? (
                       <>
-                        <p>{orchestratorAnalysis.recommendation.n1?.reply || "Sem sugestao de resposta."}</p>
+                        <p className="text-muted">
+                          Sugestao para triagem. Revise o contexto, ajuste o texto e envie manualmente pelo atendimento.
+                        </p>
+                        <p>{copilotSuggestion || "Sem rascunho sugerido para este ticket."}</p>
                         <div className="orchestrator-summary">
-                          <span className="meta-badge">acao: {orchestratorAnalysis.recommendation.nextAction}</span>
+                          <span className={priorityBadge(copilotPriority)}>prioridade: {copilotPriority}</span>
+                          <span className="meta-badge">acao sugerida: {orchestratorAnalysis.recommendation.nextAction || "-"}</span>
                           <span className="meta-badge">categoria: {orchestratorAnalysis.classification?.category || "-"}</span>
-                          <span className="meta-badge">
-                            humano: {orchestratorAnalysis.classification?.needsHuman ? "sim" : "nao"}
-                          </span>
+                          <span className="status-warn">humano obrigatorio: sim</span>
                           <span className="meta-badge">
                             web search: {orchestratorAnalysis.audit?.internetSearchUsed ? "sim" : "nao"}
                           </span>
                         </div>
-                        {orchestratorAnalysis.classification?.rationale?.length ? (
+                        {copilotRationale.length ? (
                           <ul className="agent-rationale">
-                            {orchestratorAnalysis.classification.rationale.map((item) => (
+                            {copilotRationale.map((item) => (
                               <li key={item}>{item}</li>
                             ))}
                           </ul>
@@ -728,7 +762,8 @@ export default function SupportPage() {
                       </>
                     ) : (
                       <p className="text-muted">
-                        {orchestratorError || "Selecione Rodar agent para gerar a analise do ticket."}
+                        {orchestratorError ||
+                          "Selecione Gerar sugestao para consultar o copiloto. O suporte manual continua disponivel."}
                       </p>
                     )}
                   </div>

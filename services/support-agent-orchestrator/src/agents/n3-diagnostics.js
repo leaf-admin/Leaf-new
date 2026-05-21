@@ -7,6 +7,9 @@ class N3Diagnostics {
     return {
       route: "n3-engineering-safety",
       action: "technical_or_risk_escalation",
+      requiresHumanApproval: true,
+      autoSend: false,
+      autoResolve: false,
       diagnosticChecklist: [
         "Correlacionar ticket com incidentes e alertas ativos.",
         "Buscar traceId, bookingId, userId, paymentId ou incidentId no contexto do ticket.",
