@@ -136,6 +136,18 @@ describe('FinancialReconciliationDashboardService', () => {
       ],
       checkedAtIso: '2026-05-21T12:00:00.000Z'
     });
+    firestore.docs.set('financial_reconciliation_reports/ride_normal_1777175584964', {
+      rideId: 'ride_normal_1777175584964',
+      ok: false,
+      issues: [
+        {
+          code: 'PAYMENT_WITHOUT_LEDGER_EVENT',
+          severity: 'high',
+          message: 'Smoke normal ride'
+        }
+      ],
+      checkedAtIso: '2026-05-21T12:30:00.000Z'
+    });
 
     const service = new FinancialReconciliationDashboardService();
     const result = await service.listReports({
@@ -197,6 +209,34 @@ describe('FinancialReconciliationDashboardService', () => {
         })
       ]
     });
+  });
+
+  it('classifies normal ride smoke reports as test data', async () => {
+    const firestore = createInMemoryFirestore();
+    firebaseConfig.getFirestore.mockReturnValue(firestore);
+    firestore.docs.set('financial_reconciliation_reports/ride_normal_1777175584964', {
+      rideId: 'ride_normal_1777175584964',
+      ok: false,
+      issues: [
+        {
+          code: 'PAYMENT_WITHOUT_LEDGER_EVENT',
+          severity: 'high'
+        }
+      ],
+      checkedAtIso: '2026-05-21T12:00:00.000Z'
+    });
+
+    const service = new FinancialReconciliationDashboardService();
+    const hidden = await service.listReports();
+    const visible = await service.listReports({ includeTestData: 'true' });
+
+    expect(hidden.reports).toHaveLength(0);
+    expect(visible.reports).toEqual([
+      expect.objectContaining({
+        rideId: 'ride_normal_1777175584964',
+        testData: true
+      })
+    ]);
   });
 
   it('returns ride report detail with ledger events and source documents', async () => {

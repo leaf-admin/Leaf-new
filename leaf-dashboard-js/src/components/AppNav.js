@@ -46,6 +46,7 @@ const groups = [
       { href: "/campaign-center", label: "Campanhas in-app", allowedRoles: ["admin", "super-admin", "manager", "development"], featureFlag: "campaignCenterEnabled" },
       { href: "/reports", label: "Relatórios" },
       { href: "/promotions", label: "Promoções" },
+      { href: "/financial-reconciliation", label: "Reconciliação", allowedRoles: ["admin", "super-admin", "manager"] },
       { href: "/financial-simulator", label: "Simulador", blockedRoles: ["support", "development"] },
       { href: "/waitlist", label: "Waitlist", allowedRoles: ["admin", "super-admin", "manager"] },
     ],

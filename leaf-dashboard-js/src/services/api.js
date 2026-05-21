@@ -672,6 +672,34 @@ class LeafApiService {
     return this.request(`/metrics/simulation/run?${params.toString()}`);
   }
 
+  async listFinancialReconciliationReports(params = {}) {
+    const query = new URLSearchParams();
+    Object.entries(params).forEach(([key, value]) => {
+      if (value !== undefined && value !== null && value !== "") {
+        query.append(key, String(value));
+      }
+    });
+    const suffix = query.toString();
+    return this.request(`/financial/reconciliation/reports${suffix ? `?${suffix}` : ""}`);
+  }
+
+  async getFinancialReconciliationRide(rideId) {
+    return this.request(`/financial/reconciliation/rides/${encodeURIComponent(rideId)}`);
+  }
+
+  async runFinancialReconciliation(payload = {}) {
+    return this.request("/financial/reconciliation/run", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async runFinancialReconciliationRide(rideId) {
+    return this.request(`/financial/reconciliation/rides/${encodeURIComponent(rideId)}/run`, {
+      method: "POST",
+    });
+  }
+
   async getSupportTickets(params = {}) {
     const query = new URLSearchParams();
     if (params.status) query.append("status", params.status);

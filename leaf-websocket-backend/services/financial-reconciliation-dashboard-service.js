@@ -13,7 +13,7 @@ class FinancialReconciliationDashboardService {
   }
 
   isTestRideId(rideId) {
-    return /(^|_)ride_e2e_|dispatch_smoke|_smoke$|(^|_)test(_|$)|(^|_)mock(_|$)/i.test(String(rideId || ''));
+    return /(^|_)ride_e2e_|^ride_normal_|dispatch_smoke|_smoke$|(^|_)test(_|$)|(^|_)mock(_|$)/i.test(String(rideId || ''));
   }
 
   getSnapshotDocs(snapshot) {
