@@ -100,9 +100,11 @@ jest.mock('../src/services/TestUserService', () => ({}));
 
 const FCMNotificationService = require('../src/services/FCMNotificationService').default;
 const {
+  registerFCMBackgroundMessageHandler,
   resetFCMBackgroundMessageHandlerForTests,
 } = require('../src/services/FCMBackgroundMessageHandler');
 const AsyncStorage = require('@react-native-async-storage/async-storage');
+const Logger = require('../src/utils/Logger');
 
 const flushMicrotasks = () => new Promise(resolve => setImmediate(resolve));
 
@@ -259,6 +261,37 @@ describe('FCMNotificationService initialization', () => {
     );
   });
 
+  it('does not throw when native background handler registration is unavailable', () => {
+    mockSetBackgroundMessageHandler.mockImplementationOnce(() => {
+      throw new Error('native module not ready');
+    });
+
+    expect(registerFCMBackgroundMessageHandler()).toBe(false);
+    expect(Logger.warn).toHaveBeenCalledWith(
+      '⚠️ Handler FCM background indisponível:',
+      'native module not ready'
+    );
+  });
+
+  it('catches failures while saving a top-level background FCM message', async () => {
+    let backgroundCallback;
+    mockSetBackgroundMessageHandler.mockImplementationOnce((callback) => {
+      backgroundCallback = callback;
+    });
+    AsyncStorage.setItem.mockRejectedValueOnce(new Error('storage unavailable'));
+
+    expect(registerFCMBackgroundMessageHandler()).toBe(true);
+    await backgroundCallback({
+      messageId: 'background_message_1',
+      data: { type: 'trip_update' },
+    });
+
+    expect(Logger.error).toHaveBeenCalledWith(
+      '❌ Erro ao salvar mensagem FCM em background:',
+      expect.any(Error)
+    );
+  });
+
   it('processes queued background notifications without saving them again', async () => {
     const queuedNotifications = [
       {
@@ -304,6 +337,34 @@ describe('FCMNotificationService initialization', () => {
     expect(tripHandler).not.toHaveBeenCalled();
 
     tripHandler.mockRestore();
+  });
+
+  it('processes queued background notifications after a matching handler is registered post-initialization', async () => {
+    jest.useFakeTimers();
+    const customHandler = jest.fn().mockResolvedValue();
+    AsyncStorage.getItem.mockResolvedValue(JSON.stringify([
+      {
+        messageId: 'message_late_handler',
+        backgroundQueueKey: 'message_late_handler',
+        data: { type: 'late_push_type', bookingId: 'booking_late' },
+        processed: false,
+      },
+    ]));
+
+    await FCMNotificationService.initialize();
+    FCMNotificationService.registerNotificationHandler('late_push_type', customHandler);
+    await jest.advanceTimersByTimeAsync(50);
+
+    expect(customHandler).toHaveBeenCalledWith(
+      expect.objectContaining({
+        messageId: 'message_late_handler',
+        data: expect.objectContaining({ bookingId: 'booking_late' }),
+      })
+    );
+    const [, persisted] = AsyncStorage.setItem.mock.calls[0];
+    expect(JSON.parse(persisted)).toEqual([
+      expect.objectContaining({ messageId: 'message_late_handler', processed: true }),
+    ]);
   });
 
   it('processes queued background notifications when the app returns to foreground', async () => {
@@ -448,6 +509,38 @@ describe('FCMNotificationService initialization', () => {
       expect.objectContaining({ bookingId: 'booking_pending_ref' })
     );
     jest.useRealTimers();
+  });
+
+  it('continues retrying cold-start push navigation beyond the first few readiness checks', async () => {
+    jest.useFakeTimers();
+    const navigate = jest.fn();
+    const isReady = jest.fn(() => isReady.mock.calls.length >= 20);
+    globalThis.navigationRef = {
+      current: {
+        isReady,
+        navigate,
+      },
+    };
+
+    const target = FCMNotificationService.navigateToScreen({
+      data: {
+        type: 'trip_update',
+        bookingId: 'booking_cold_start',
+      },
+    });
+
+    expect(target.routeName).toBe('RobotaxiPrototypeTrip');
+    expect(navigate).not.toHaveBeenCalled();
+
+    await jest.advanceTimersByTimeAsync(19 * 300);
+
+    expect(navigate).toHaveBeenCalledWith(
+      'RobotaxiPrototypeTrip',
+      expect.objectContaining({
+        bookingId: 'booking_cold_start',
+        source: 'push',
+      })
+    );
   });
 
   it('does not navigate to untrusted push route names', () => {

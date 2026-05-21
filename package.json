@@ -19,6 +19,7 @@
     "test:backend": "npm run test --workspace leaf-websocket-backend",
     "test:backend:all": "npm run test:all --workspace leaf-websocket-backend",
     "test:all": "node scripts/tests/run-with-profile.cjs workspace-all \"npm run test:unit --workspace mobile-app && npm run test:all --workspace leaf-websocket-backend\"",
+    "security:scan": "node scripts/maintenance/security/scan-secrets.cjs",
     "prelaunch:copy": "node scripts/prelaunch/assert-onboarding-copy.cjs",
     "prelaunch:testids": "node scripts/prelaunch/assert-mobile-testids.cjs",
     "prelaunch:audit": "node scripts/prelaunch/run-prelaunch-suite.cjs --mode audit --no-strict",
