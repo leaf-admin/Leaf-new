@@ -5,6 +5,7 @@ import { fonts } from '../theme/runtimeTokens';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import OnboardingLayout from '../components/OnboardingLayout';
 import onboardingTheme from '../components/auth/common/onboardingTheme';
+import SecurePaymentBadge from '../components/payment/SecurePaymentBadge';
 
 const { color, radius, spacing, elevation } = onboardingTheme;
 
@@ -262,6 +263,7 @@ export default function CompleteRegistrationScreen() {
                   placeholderTextColor={color.textMuted}
                   autoCapitalize="none"
                 />
+                <SecurePaymentBadge style={styles.securePaymentBadge} color={color.textMuted} />
               </View>
               </>
             )}
@@ -338,6 +340,10 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     paddingHorizontal: 14,
     backgroundColor: color.surfaceMuted
+  },
+  securePaymentBadge: {
+    marginTop: 7,
+    marginLeft: 2,
   },
   inputError: {
     borderColor: color.error

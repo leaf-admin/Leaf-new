@@ -27,6 +27,8 @@ import Icon from 'react-native-vector-icons/MaterialIcons';
 import ReceiptService from '../services/ReceiptService';
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
+import { fonts } from '../theme/runtimeTokens';
+import SecurePaymentBadge from '../components/payment/SecurePaymentBadge';
 
 
 const { width } = Dimensions.get('window');
@@ -93,7 +95,7 @@ const ReceiptScreen = ({ route, navigation }) => {
                     <head>
                         <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no" />
                         <style>
-                            body { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; padding: 20px; color: #333; }
+                            body { font-family: Poppins, Arial, sans-serif; padding: 20px; color: #333; }
                             .header { text-align: center; margin-bottom: 30px; }
                             h1 { color: #2c5530; margin-bottom: 5px; }
                             .receipt-id { color: #666; font-size: 14px; }
@@ -307,6 +309,7 @@ const ReceiptScreen = ({ route, navigation }) => {
                                 {receipt.payment.method}
                             </Text>
                         </View>
+                        <SecurePaymentBadge style={styles.securePaymentBadge} color="#6B7A70" />
                     </View>
                 </View>
 
@@ -483,7 +486,7 @@ const styles = StyleSheet.create({
         fontSize: 11,
         color: '#999',
         marginTop: 5,
-        fontFamily: 'monospace',
+        fontFamily: fonts.Regular,
     },
     section: {
         backgroundColor: 'white',
@@ -565,6 +568,9 @@ const styles = StyleSheet.create({
         fontSize: 16,
         fontWeight: '600',
         color: '#2c5530',
+    },
+    securePaymentBadge: {
+        marginTop: 8,
     },
     tripMetrics: {
         flexDirection: 'row',
@@ -733,7 +739,4 @@ const styles = StyleSheet.create({
 });
 
 export default ReceiptScreen;
-
-
-
 

@@ -1,0 +1,444 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8" />
+    <title>Fluxo de Suporte Leaf com Orquestrador de Agents</title>
+    <style>
+      @page {
+        size: A4 landscape;
+        margin: 10mm;
+      }
+
+      :root {
+        --text: #111827;
+        --muted: #475569;
+        --line: #cbd5e1;
+        --soft: #f8fafc;
+        --blue-bg: #eef2ff;
+        --blue-line: #a5b4fc;
+        --green-bg: #ecfdf5;
+        --green-line: #86efac;
+        --orange-bg: #fff7ed;
+        --orange-line: #fdba74;
+        --red-bg: #fef2f2;
+        --red-line: #fca5a5;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        color: var(--text);
+        font-family: Arial, Helvetica, sans-serif;
+        background: #ffffff;
+      }
+
+      .page {
+        width: 277mm;
+        min-height: 190mm;
+        page-break-after: always;
+        display: grid;
+        grid-template-rows: auto 1fr;
+        gap: 10px;
+      }
+
+      .page:last-child {
+        page-break-after: auto;
+      }
+
+      header {
+        border-bottom: 1px solid var(--line);
+        padding-bottom: 8px;
+      }
+
+      h1 {
+        margin: 0;
+        font-size: 22px;
+        line-height: 1.1;
+      }
+
+      h2 {
+        margin: 0;
+        font-size: 15px;
+      }
+
+      p {
+        margin: 0;
+      }
+
+      .subtitle {
+        margin-top: 5px;
+        color: var(--muted);
+        font-size: 10.5px;
+      }
+
+      .flow {
+        display: grid;
+        grid-template-columns: 1fr 22px 1.24fr 22px 1.05fr 22px 1.45fr 22px 1fr;
+        gap: 8px;
+        align-items: stretch;
+      }
+
+      .lane {
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        background: #ffffff;
+        padding: 10px;
+        display: grid;
+        grid-template-rows: auto 1fr;
+        gap: 8px;
+        min-height: 0;
+      }
+
+      .lane-title {
+        display: flex;
+        align-items: center;
+        gap: 7px;
+        padding-bottom: 7px;
+        border-bottom: 1px solid #e2e8f0;
+      }
+
+      .step {
+        width: 22px;
+        height: 22px;
+        border-radius: 999px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        background: #111827;
+        color: #ffffff;
+        font-size: 11px;
+        font-weight: 700;
+        flex: 0 0 auto;
+      }
+
+      .cards {
+        display: grid;
+        gap: 8px;
+        align-content: start;
+      }
+
+      .card {
+        border: 1px solid var(--line);
+        background: var(--soft);
+        border-radius: 8px;
+        padding: 8px;
+        min-height: 46px;
+      }
+
+      .card strong {
+        display: block;
+        font-size: 10.8px;
+        margin-bottom: 4px;
+      }
+
+      .card span,
+      .card li {
+        color: var(--muted);
+        font-size: 9.2px;
+        line-height: 1.28;
+      }
+
+      .card ul {
+        margin: 0;
+        padding-left: 14px;
+      }
+
+      .blue {
+        background: var(--blue-bg);
+        border-color: var(--blue-line);
+      }
+
+      .green {
+        background: var(--green-bg);
+        border-color: var(--green-line);
+      }
+
+      .orange {
+        background: var(--orange-bg);
+        border-color: var(--orange-line);
+      }
+
+      .red {
+        background: var(--red-bg);
+        border-color: var(--red-line);
+      }
+
+      .arrow {
+        align-self: center;
+        justify-self: center;
+        width: 22px;
+        height: 22px;
+        border-radius: 999px;
+        background: #111827;
+        color: #ffffff;
+        font-size: 12px;
+        font-weight: 700;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+
+      .decision-grid {
+        display: grid;
+        gap: 8px;
+      }
+
+      .decision {
+        border: 2px solid #111827;
+        border-radius: 10px;
+        padding: 9px;
+        background: #ffffff;
+        text-align: center;
+      }
+
+      .decision strong {
+        font-size: 11px;
+      }
+
+      .split {
+        display: grid;
+        grid-template-columns: 1fr;
+        gap: 8px;
+      }
+
+      .mini-label {
+        display: inline-flex;
+        width: fit-content;
+        border-radius: 999px;
+        padding: 3px 7px;
+        font-size: 8px;
+        font-weight: 700;
+        color: #111827;
+        background: #ffffff;
+        border: 1px solid currentColor;
+        margin-bottom: 5px;
+      }
+
+      .table-page {
+        display: grid;
+        gap: 10px;
+      }
+
+      table {
+        width: 100%;
+        border-collapse: separate;
+        border-spacing: 0;
+        overflow: hidden;
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        font-size: 10px;
+      }
+
+      th,
+      td {
+        padding: 9px;
+        vertical-align: top;
+        border-right: 1px solid var(--line);
+        border-bottom: 1px solid var(--line);
+        line-height: 1.32;
+      }
+
+      th:last-child,
+      td:last-child {
+        border-right: 0;
+      }
+
+      tr:last-child td {
+        border-bottom: 0;
+      }
+
+      th {
+        background: #f1f5f9;
+        text-align: left;
+        font-size: 10.5px;
+      }
+
+      td {
+        color: var(--muted);
+      }
+
+      .callout {
+        border: 1px solid var(--blue-line);
+        background: var(--blue-bg);
+        border-radius: 10px;
+        padding: 10px;
+        font-size: 10px;
+        line-height: 1.38;
+        color: #1e293b;
+      }
+    </style>
+  </head>
+  <body>
+    <section class="page">
+      <header>
+        <h1>Fluxo de Suporte Leaf com Orquestrador de Agents</h1>
+        <p class="subtitle">
+          Versão limpa para impressão: primeiro contato no chat in-app, playbook fechado, sem pesquisa livre na internet e handoff humano por camada.
+        </p>
+      </header>
+
+      <main class="flow">
+        <section class="lane">
+          <div class="lane-title"><span class="step">1</span><h2>Entrada</h2></div>
+          <div class="cards">
+            <div class="card">
+              <strong>Usuário no aplicativo</strong>
+              <span>Passageiro, motorista ou operação interna abre suporte.</span>
+            </div>
+            <div class="card">
+              <strong>Chat de suporte in-app</strong>
+              <span>Canal primário. Coleta mensagem, usuário, contexto e anexos.</span>
+            </div>
+            <div class="card">
+              <strong>Backend atual</strong>
+              <span>Mantém chat, tickets, fila, mensagens, SLA e dashboard.</span>
+            </div>
+          </div>
+        </section>
+
+        <div class="arrow">-&gt;</div>
+
+        <section class="lane">
+          <div class="lane-title"><span class="step">2</span><h2>Orquestrador</h2></div>
+          <div class="cards">
+            <div class="card blue">
+              <strong>Fontes permitidas</strong>
+              <ul>
+                <li>Playbook oficial e base aprovada</li>
+                <li>Contexto de usuário, corrida e pagamento</li>
+                <li>Histórico de chat e tickets</li>
+                <li>Logs, métricas, traces e alertas internos</li>
+              </ul>
+            </div>
+            <div class="card red">
+              <strong>Bloqueio explícito</strong>
+              <span>Sem web search livre. Se o playbook não cobre, o agent escala.</span>
+            </div>
+            <div class="card green">
+              <strong>Classificação</strong>
+              <span>Define categoria, prioridade, camada N1/N2/N3, risco e confiança.</span>
+            </div>
+          </div>
+        </section>
+
+        <div class="arrow">-&gt;</div>
+
+        <section class="lane">
+          <div class="lane-title"><span class="step">3</span><h2>Decisão</h2></div>
+          <div class="decision-grid">
+            <div class="decision">
+              <strong>Caso seguro, coberto pelo playbook e com alta confiança?</strong>
+            </div>
+            <div class="split">
+              <div class="card green">
+                <span class="mini-label">SIM</span>
+                <strong>Agent N1</strong>
+                <span>Responde, orienta, coleta dados simples ou atualiza ticket.</span>
+              </div>
+              <div class="card orange">
+                <span class="mini-label">NÃO</span>
+                <strong>Handoff</strong>
+                <span>Cria/atualiza ticket e envia para a camada correta.</span>
+              </div>
+            </div>
+            <div class="card red">
+              <strong>Escala sempre</strong>
+              <span>Segurança, fraude, emergência, KYC, pagamento sensível, baixa confiança ou regra ausente.</span>
+            </div>
+          </div>
+        </section>
+
+        <div class="arrow">-&gt;</div>
+
+        <section class="lane">
+          <div class="lane-title"><span class="step">4</span><h2>Execução</h2></div>
+          <div class="cards">
+            <div class="card green">
+              <strong>N1 - Atendimento</strong>
+              <span>FAQ, status, orientação, coleta de contexto e resolução por runbook.</span>
+            </div>
+            <div class="card orange">
+              <strong>N2 - Especializado</strong>
+              <span>Pagamento, conta, motorista, KYC, operação de corrida, safety e fraude.</span>
+            </div>
+            <div class="card red">
+              <strong>N3 - Técnico</strong>
+              <span>Engenharia, SRE, segurança, produto, financeiro técnico, bug, incidente e RCA.</span>
+            </div>
+          </div>
+        </section>
+
+        <div class="arrow">-&gt;</div>
+
+        <section class="lane">
+          <div class="lane-title"><span class="step">5</span><h2>Controle</h2></div>
+          <div class="cards">
+            <div class="card">
+              <strong>Dashboard</strong>
+              <span>Mostra sugestão, confiança, SLA, ownership e histórico.</span>
+            </div>
+            <div class="card">
+              <strong>Auditoria</strong>
+              <span>Registra playbook, fontes, decisão, confiança e se houve humano.</span>
+            </div>
+            <div class="card">
+              <strong>Métricas</strong>
+              <span>CSAT, SLA, handoff, reabertura, contenção e custo por corrida.</span>
+            </div>
+          </div>
+        </section>
+      </main>
+    </section>
+
+    <section class="page table-page">
+      <header>
+        <h1>Matriz de decisão para revisão operacional</h1>
+        <p class="subtitle">Esta página serve como checklist para validar limites de autonomia antes de ligar resposta automática.</p>
+      </header>
+
+      <table>
+        <thead>
+          <tr>
+            <th>Camada</th>
+            <th>O que pode fazer</th>
+            <th>Quando escalar</th>
+            <th>Dono final</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong>Agent N1</strong></td>
+            <td>Responder dúvidas simples, orientar uso do app, consultar status, coletar evidências e preparar ticket.</td>
+            <td>Baixa confiança, playbook ausente, usuário irritado, caso repetido, risco ou qualquer ação sensível.</td>
+            <td>N1 humano ou fila N2.</td>
+          </tr>
+          <tr>
+            <td><strong>N1 humano</strong></td>
+            <td>Acolher, confirmar contexto, executar runbook, responder ticket/chat e completar handoff.</td>
+            <td>Pagamento, KYC, conta, safety, fraude, bug, incidente ou exceção fora do runbook.</td>
+            <td>Supervisor N1 ou especialista N2.</td>
+          </tr>
+          <tr>
+            <td><strong>Agent N2</strong></td>
+            <td>Classificar, resumir, sugerir fila, buscar contexto e preparar resposta para especialista.</td>
+            <td>Decisão financeira, documento sensível, fraude, bloqueio, inconsistência de dados ou impacto amplo.</td>
+            <td>Especialista de suporte/operação.</td>
+          </tr>
+          <tr>
+            <td><strong>Agent N3</strong></td>
+            <td>Correlacionar logs, métricas, traces, alertas, incidentes e chaves técnicas do ticket.</td>
+            <td>SEV1/SEV2, vazamento, bug sistêmico, pagamento estrutural, outage, RCA ou hotfix.</td>
+            <td>Engenharia, SRE, segurança, produto ou financeiro técnico.</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <div class="callout">
+        Regra de ouro: se o playbook não cobre, o orquestrador não inventa. Ele registra a tentativa, gera resumo de handoff e encaminha para humano. O campo esperado para uso de internet permanece sempre "não".
+      </div>
+    </section>
+  </body>
+</html>

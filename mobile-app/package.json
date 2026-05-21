@@ -71,6 +71,7 @@
     "qa:production-guards": "bash scripts/production-guard-asserts.sh"
   },
   "dependencies": {
+    "@expo-google-fonts/inter": "^0.4.2",
     "@gorhom/bottom-sheet": "^5.2.8",
     "@mapbox/polyline": "1.1.1",
     "@react-native-async-storage/async-storage": "2.2.0",

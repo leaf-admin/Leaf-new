@@ -59,6 +59,14 @@ describe('health runtime flags route', () => {
     expect(response.status).toBe(200);
     expect(response.body.success).toBe(true);
     expect(response.body.woovi.environment).toBe('sandbox');
+    expect(response.body.launch).toEqual(
+      expect.objectContaining({
+        launchProfile: expect.any(String),
+        demandPredictionEnabled: expect.any(Boolean),
+        referralProgramsEnabled: expect.any(Boolean),
+        adminMutationsEnabled: expect.any(Boolean)
+      })
+    );
     expect(response.body.realSandbox.ready).toBe(true);
     expect(response.body.realSandbox.blockers).toEqual([]);
   });

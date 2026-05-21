@@ -80,6 +80,16 @@ function roundCoordinateForCache(value, precision = 4) {
   return numeric.toFixed(precision);
 }
 
+function stableAvailabilityPreferenceKey(preferences = {}) {
+  if (!preferences || typeof preferences !== "object") {
+    return "none";
+  }
+  const entries = Object.keys(preferences)
+    .sort()
+    .map((key) => [key, preferences[key]]);
+  return JSON.stringify(entries);
+}
+
 function cloneSocketPayload(payload) {
   if (!payload || typeof payload !== "object") {
     return payload;
@@ -333,6 +343,7 @@ class WebSocketManager {
       roundCoordinateForCache(pickup?.lng),
       roundCoordinateForCache(destination?.lat),
       roundCoordinateForCache(destination?.lng),
+      stableAvailabilityPreferenceKey(payload?.preferences),
     ].join("|");
   }
 
@@ -3656,6 +3667,10 @@ class WebSocketManager {
       status,
       isOnline,
     };
+
+    if (options?.destinationMode && typeof options.destinationMode === "object") {
+      payload.destinationMode = options.destinationMode;
+    }
 
     if (
       location &&

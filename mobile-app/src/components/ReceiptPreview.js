@@ -14,6 +14,8 @@ import {
     Dimensions
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { fonts } from '../theme/runtimeTokens';
+import SecurePaymentBadge from './payment/SecurePaymentBadge';
 
 const { width } = Dimensions.get('window');
 
@@ -153,6 +155,7 @@ const ReceiptPreview = ({ receiptData = null }) => {
                             {receipt.payment.method}
                         </Text>
                     </View>
+                    <SecurePaymentBadge style={styles.securePaymentBadge} color="#6B7A70" />
                 </View>
             </View>
 
@@ -287,7 +290,7 @@ const styles = StyleSheet.create({
         fontSize: 11,
         color: '#999',
         marginTop: 5,
-        fontFamily: 'monospace',
+        fontFamily: fonts.Regular,
     },
     section: {
         backgroundColor: 'white',
@@ -356,6 +359,9 @@ const styles = StyleSheet.create({
         fontSize: 16,
         fontWeight: '600',
         color: '#2c5530',
+    },
+    securePaymentBadge: {
+        marginTop: 8,
     },
     breakdownContainer: {
         marginTop: 10,

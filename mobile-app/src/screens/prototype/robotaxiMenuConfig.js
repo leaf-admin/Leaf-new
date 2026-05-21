@@ -71,6 +71,26 @@ const PASSENGER_ITEMS = [
     section: 'rides',
     subtitle: 'Últimas corridas e recibos'
   },
+  {
+    key: 'payment-methods',
+    title: 'Métodos de pagamento',
+    icon: 'card-outline',
+    route: 'RobotaxiPrototypePaymentMethods',
+    openDirect: true,
+    roles: ['customer'],
+    section: 'account',
+    subtitle: 'PIX, recibos e próximos métodos'
+  },
+  {
+    key: 'passenger-invites',
+    title: 'Convites',
+    icon: 'people-outline',
+    route: 'RobotaxiPrototypeInvites',
+    openDirect: true,
+    roles: ['customer'],
+    section: 'account',
+    subtitle: 'Links, códigos e pessoas convidadas'
+  },
   ...withRole(COMMON_ITEMS, 'customer')
 ];
 
@@ -105,6 +125,36 @@ const DRIVER_ITEMS = [
     roles: ['driver'],
     section: 'operations',
     subtitle: 'Documentos, validação e liberação online'
+  },
+  {
+    key: 'driver-documents',
+    title: 'Documentos',
+    icon: 'document-text-outline',
+    route: 'RobotaxiPrototypeDriverDocuments',
+    openDirect: true,
+    roles: ['driver'],
+    section: 'operations',
+    subtitle: 'CNH, CRLV, MEI e análise'
+  },
+  {
+    key: 'driver-vehicles',
+    title: 'Veículos',
+    icon: 'car-outline',
+    route: 'RobotaxiPrototypeVehicles',
+    openDirect: true,
+    roles: ['driver'],
+    section: 'operations',
+    subtitle: 'Carro autorizado para operar'
+  },
+  {
+    key: 'driver-waitlist-invites',
+    title: 'Waitlist e convites',
+    icon: 'people-outline',
+    route: 'RobotaxiPrototypeDriverWaitlist',
+    openDirect: true,
+    roles: ['driver'],
+    section: 'operations',
+    subtitle: 'Fila da cidade e convites de motoristas'
   },
   {
     key: 'edit-profile',

@@ -41,10 +41,11 @@ const groups = [
     items: [
       { href: "/support", label: "Suporte" },
       { href: "/notifications", label: "Notificações" },
+      { href: "/campaign-center", label: "Campanhas in-app", blockedRoles: ["support"] },
       { href: "/reports", label: "Relatórios" },
       { href: "/promotions", label: "Promoções" },
       { href: "/financial-simulator", label: "Simulador", blockedRoles: ["support", "development"] },
-      { href: "/waitlist", label: "Waitlist" },
+      { href: "/waitlist", label: "Waitlist", blockedRoles: ["support", "development"] },
     ],
   },
 ];

@@ -8,6 +8,10 @@ const defaultWsUrl = isDev
 
 const rawApiUrl = process.env.NEXT_PUBLIC_API_URL || defaultApiUrl;
 const rawWsUrl = process.env.NEXT_PUBLIC_WS_URL || defaultWsUrl;
+const rawSupportOrchestratorUrl = process.env.NEXT_PUBLIC_SUPPORT_ORCHESTRATOR_URL || "";
+const supportOrchestratorEnabled =
+  process.env.NEXT_PUBLIC_SUPPORT_ORCHESTRATOR_ENABLED === "true" ||
+  Boolean(rawSupportOrchestratorUrl);
 
 const ensureApiUrl = (url) => {
   if (!url) return defaultApiUrl;
@@ -18,6 +22,9 @@ const ensureSocketUrl = (url) => (url || "").replace(/\/$/, "");
 
 const apiBaseUrl = ensureApiUrl(rawApiUrl);
 const wsBaseUrl = ensureSocketUrl(rawWsUrl) || apiBaseUrl.replace(/\/api$/, "");
+const supportOrchestratorBaseUrl = supportOrchestratorEnabled
+  ? "/api/support-orchestrator"
+  : "";
 
 export const config = {
   api: {
@@ -26,6 +33,10 @@ export const config = {
   },
   ws: {
     baseUrl: wsBaseUrl,
+  },
+  supportOrchestrator: {
+    baseUrl: supportOrchestratorBaseUrl,
+    timeoutMs: 12000,
   },
   app: {
     name: "Leaf Dashboard",

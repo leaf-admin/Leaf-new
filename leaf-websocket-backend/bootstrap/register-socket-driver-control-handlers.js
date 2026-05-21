@@ -13,6 +13,68 @@ const DRIVER_BOARDING_WINDOW_SECONDS = Math.max(
     Number.parseInt(process.env.DRIVER_BOARDING_WINDOW_SECONDS || '120', 10) || 120
 );
 
+function normalizeBooleanFlag(value) {
+    return value === true || value === 'true' || value === '1' || value === 1;
+}
+
+function normalizeDriverDestinationModePayload(data = {}) {
+    const provided = Boolean(
+        data?.destinationMode && typeof data.destinationMode === 'object'
+    ) || Object.prototype.hasOwnProperty.call(data || {}, 'destinationModeActive');
+    const source = data?.destinationMode && typeof data.destinationMode === 'object'
+        ? data.destinationMode
+        : data;
+    const destination = source?.destination || source?.destinationLocation || {};
+    const coordinate = destination?.coordinate || destination || {};
+    const lat = Number(
+        source?.destinationModeLat ??
+        source?.lat ??
+        coordinate?.latitude ??
+        coordinate?.lat
+    );
+    const lng = Number(
+        source?.destinationModeLng ??
+        source?.lng ??
+        coordinate?.longitude ??
+        coordinate?.lng
+    );
+    const active = normalizeBooleanFlag(source?.active ?? source?.destinationModeActive);
+
+    if (!active || !Number.isFinite(lat) || !Number.isFinite(lng)) {
+        return {
+            provided,
+            active: false,
+            lat: '',
+            lng: '',
+            expiresAt: '',
+            minProgressKm: '',
+            arrivalRadiusKm: '',
+            label: '',
+            address: ''
+        };
+    }
+
+    return {
+        provided,
+        active: true,
+        lat: String(lat),
+        lng: String(lng),
+        expiresAt: String(source?.expiresAt || source?.destinationModeExpiresAt || ''),
+        minProgressKm: String(
+            Number.isFinite(Number(source?.minProgressKm ?? source?.destinationModeMinProgressKm))
+                ? Number(source?.minProgressKm ?? source?.destinationModeMinProgressKm)
+                : 1
+        ),
+        arrivalRadiusKm: String(
+            Number.isFinite(Number(source?.arrivalRadiusKm ?? source?.destinationModeArrivalRadiusKm))
+                ? Number(source?.arrivalRadiusKm ?? source?.destinationModeArrivalRadiusKm)
+                : 3
+        ),
+        label: String(source?.destinationName || destination?.name || source?.label || ''),
+        address: String(source?.destinationAddress || destination?.address || source?.address || '')
+    };
+}
+
 function registerSocketDriverControlHandlers({
     socket,
     io,
@@ -241,6 +303,8 @@ function registerSocketDriverControlHandlers({
             const driverKey = `driver:${driverId}`;
             const existingDriverState = await redis.hgetall(driverKey);
             const existingIsEligible = existingDriverState?.dispatchEligible === 'true';
+            const requestedDestinationMode = normalizeDriverDestinationModePayload(data);
+            const shouldWriteDestinationMode = !isOnline || requestedDestinationMode.provided;
 
             if (!isOnline) {
                 await redis.zrem(ELIGIBLE_DRIVER_GEO_KEY, driverId);
@@ -331,6 +395,19 @@ function registerSocketDriverControlHandlers({
                     ? (existingDriverState?.dispatchEligibilityCode || 'AWAITING_LOCATION_SYNC')
                     : 'OFFLINE',
                 dispatchEligibilityCheckedAt: new Date().toISOString(),
+                ...(shouldWriteDestinationMode
+                    ? {
+                        destinationModeActive: String(isOnline && requestedDestinationMode.active),
+                        driverDestinationModeActive: String(isOnline && requestedDestinationMode.active),
+                        destinationModeLat: isOnline ? requestedDestinationMode.lat : '',
+                        destinationModeLng: isOnline ? requestedDestinationMode.lng : '',
+                        destinationModeExpiresAt: isOnline ? requestedDestinationMode.expiresAt : '',
+                        destinationModeMinProgressKm: isOnline ? requestedDestinationMode.minProgressKm : '',
+                        destinationModeArrivalRadiusKm: isOnline ? requestedDestinationMode.arrivalRadiusKm : '',
+                        destinationModeLabel: isOnline ? requestedDestinationMode.label : '',
+                        destinationModeAddress: isOnline ? requestedDestinationMode.address : ''
+                    }
+                    : {}),
                 updatedAt: new Date().toISOString()
             });
 
@@ -357,6 +434,14 @@ function registerSocketDriverControlHandlers({
                 status,
                 isOnline,
                 dispatchEligible: isOnline && existingIsEligible,
+                destinationMode: shouldWriteDestinationMode
+                    ? {
+                        active: isOnline && requestedDestinationMode.active,
+                        label: isOnline ? requestedDestinationMode.label : '',
+                        address: isOnline ? requestedDestinationMode.address : '',
+                        expiresAt: isOnline ? requestedDestinationMode.expiresAt : ''
+                    }
+                    : undefined,
                 checkedAt: new Date().toISOString()
             });
             scheduleMapH3Refresh(io, {

@@ -242,7 +242,9 @@ function PrototypeMapLayer({
   originLabel = '',
   originAddress = '',
   onMapLayout,
+  onMapLoaded,
   onMapPanDrag,
+  onMapReady,
   onRegionChangeComplete,
   mapChildren,
   children,
@@ -383,6 +385,7 @@ function PrototypeMapLayer({
       searchingMode && hasSearchCenter && hasSearchPreviewRadius ? 'preview-radius' : 'no-preview-radius',
       searchingMode && hasSearchCenter && hasSearchRadius ? 'search-radius' : 'no-search-radius',
       `route:${routeLayerCount}`,
+      showTraffic ? 'traffic:on' : 'traffic:off',
       hasDestination ? 'destination' : 'no-destination',
       hasDisplayedDriverCoordinate ? 'driver' : 'no-driver',
       !useSimplifiedIosMap && searchingMode ? `nearby:${normalizedNearbyVehicles.length}` : 'nearby:0',
@@ -401,6 +404,7 @@ function PrototypeMapLayer({
     mapChildrenCount,
     normalizedNearbyVehicles.length,
     searchingMode,
+    showTraffic,
     shouldRenderExternalMapChildren,
     useSimplifiedIosMap,
   ]);
@@ -645,6 +649,8 @@ function PrototypeMapLayer({
           initialRegion={region}
           mapType="standard"
           customMapStyle={mapStyleAppleLike}
+          onMapLoaded={onMapLoaded}
+          onMapReady={onMapReady}
           scrollEnabled={interactionEnabled}
           zoomEnabled={interactionEnabled}
           rotateEnabled={interactionEnabled}
@@ -994,7 +1000,7 @@ const styles = StyleSheet.create({
     borderRadius: 19,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: 'rgba(255,255,255,0.94)',
+    backgroundColor: 'rgba(250,251,248,0.94)',
     borderWidth: 1,
     borderColor: color.border.strong,
     shadowColor: color.shadow.base,
@@ -1017,7 +1023,7 @@ const styles = StyleSheet.create({
     elevation: 8
   },
   tripAvatarMarkerDriver: {
-    backgroundColor: '#1A7F37',
+    backgroundColor: '#1A330E',
     borderColor: 'rgba(255,255,255,0.96)'
   },
   tripAvatarMarkerPassenger: {
@@ -1129,7 +1135,7 @@ const styles = StyleSheet.create({
     borderRadius: 14,
     paddingVertical: 7,
     paddingHorizontal: 10,
-    backgroundColor: 'rgba(255,255,255,0.92)',
+    backgroundColor: 'rgba(250,251,248,0.92)',
     borderWidth: 1,
     borderColor: color.border.strong,
     shadowColor: color.shadow.base,

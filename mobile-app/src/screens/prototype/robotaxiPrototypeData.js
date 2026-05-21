@@ -1,6 +1,6 @@
 export const PROTOTYPE_REGION = {
-  latitude: -22.9711,
-  longitude: -43.1822,
+  latitude: -22.984843,
+  longitude: -43.221972,
   latitudeDelta: 0.018,
   longitudeDelta: 0.018,
 };

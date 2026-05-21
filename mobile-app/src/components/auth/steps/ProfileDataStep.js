@@ -191,12 +191,10 @@ const ProfileDataStep = ({ onSubmitted, onBack, initialData = {} }) => {
         </TouchableOpacity>
       </View>
 
-      <Text style={styles.title}>{isDriver ? 'Seu pré-cadastro' : 'Seu perfil de passageiro'}</Text>
+      <Text style={styles.title}>Complete seu cadastro</Text>
 
       <Text style={styles.subtitle}>
-        {isDriver
-          ? 'Informe seu nome para concluir o pré-cadastro de motorista.'
-          : 'Preencha os dados abaixo para completar o seu cadastro.'}
+        Confirme seus dados antes de entrar.
       </Text>
 
       <View style={styles.card}>
@@ -326,13 +324,17 @@ const ProfileDataStep = ({ onSubmitted, onBack, initialData = {} }) => {
       <ContinueButton
         onPress={handleSubmit}
         disabled={!isFormValid}
-        text="Continuar"
-        style={{
-          marginBottom:
+        text="Salvar e entrar"
+        textStyle={styles.continueButtonText}
+        style={[
+          styles.continueButton,
+          {
+            marginBottom:
             Platform.OS === 'android'
               ? Math.max(spacing.xl, insets.bottom + spacing.lg)
               : Math.max(spacing.md, insets.bottom + spacing.sm)
-        }}
+          }
+        ]}
       />
     </View>
   );
@@ -352,15 +354,20 @@ function ConsentRow({ checked, label, onPress }) {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    paddingHorizontal: spacing.lg,
-    paddingTop: spacing.xl,
-    paddingBottom: spacing.md
+    paddingHorizontal: 32,
+    paddingTop: 66,
+    paddingBottom: spacing.md,
+    backgroundColor: '#F6FAF6'
   },
   header: {
+    position: 'absolute',
+    top: 14,
+    left: 12,
     flexDirection: 'row',
     alignItems: 'center',
     minHeight: 44,
-    marginBottom: spacing.md
+    marginBottom: 0,
+    opacity: 0
   },
   backButton: {
     width: 38,
@@ -373,60 +380,62 @@ const styles = StyleSheet.create({
     justifyContent: 'center'
   },
   title: {
-    fontSize: 32,
-    lineHeight: 36,
-    color: color.textPrimary,
-    fontFamily: fonts.Bold,
+    fontSize: 18,
+    lineHeight: 24,
+    color: '#102018',
+    fontFamily: fonts.Medium,
     textAlign: 'left',
     letterSpacing: 0
   },
   subtitle: {
-    fontSize: 15,
-    lineHeight: 21,
-    color: color.textSecondary,
+    fontSize: 13,
+    lineHeight: 18,
+    color: '#66756B',
     fontFamily: fonts.Regular,
-    marginTop: spacing.sm,
-    marginBottom: spacing.md
+    marginTop: 7,
+    marginBottom: 58
   },
   card: {
-    borderRadius: radius.xl,
-    borderWidth: 1,
-    borderColor: color.glassStroke,
-    backgroundColor: color.panel,
-    shadowColor: color.accent,
-    ...elevation.soft,
-    padding: spacing.sm,
+    borderRadius: 0,
+    borderWidth: 0,
+    borderColor: 'transparent',
+    backgroundColor: 'transparent',
+    shadowOpacity: 0,
+    elevation: 0,
+    padding: 0,
     marginBottom: spacing.md
   },
   fieldContainer: {
-    marginBottom: spacing.xs
+    marginBottom: 18
   },
   label: {
-    fontSize: 12,
-    color: color.textPrimary,
-    fontFamily: fonts.SemiBold,
-    marginBottom: 4
+    fontSize: 11,
+    lineHeight: 15,
+    color: '#5F6B62',
+    fontFamily: fonts.Medium,
+    marginBottom: 8
   },
 	  input: {
     borderWidth: 1,
-    borderColor: color.border,
-    borderRadius: radius.md,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
+    borderColor: '#DFE8E1',
+    borderRadius: 18,
+    paddingHorizontal: 20,
+    paddingVertical: 0,
+    minHeight: 52,
     fontSize: 14,
     lineHeight: 18,
-    fontFamily: fonts.Medium,
-    color: color.textPrimary,
-	    backgroundColor: color.surfaceMuted
+    fontFamily: fonts.Regular,
+    color: '#101C14',
+	    backgroundColor: '#FFFFFF'
 	  },
 	  passwordContainer: {
 	    flexDirection: 'row',
 	    alignItems: 'center',
 	    borderWidth: 1,
-	    borderColor: color.border,
-	    borderRadius: radius.md,
-	    backgroundColor: color.surfaceMuted,
-      minHeight: 48
+	    borderColor: '#DFE8E1',
+	    borderRadius: 18,
+	    backgroundColor: '#FFFFFF',
+      minHeight: 52
 	  },
 	  passwordInput: {
 	    flex: 1,
@@ -434,8 +443,8 @@ const styles = StyleSheet.create({
 	    paddingVertical: 9,
 	    fontSize: 14,
 	    lineHeight: 18,
-	    fontFamily: fonts.Medium,
-	    color: color.textPrimary
+	    fontFamily: fonts.Regular,
+	    color: '#101C14'
 	  },
 	  eyeButton: {
 	    paddingHorizontal: 8,
@@ -519,6 +528,18 @@ const styles = StyleSheet.create({
     fontSize: 12,
     lineHeight: 16,
     color: color.textPrimary,
+    fontFamily: fonts.Medium
+  },
+  continueButton: {
+    minHeight: 46,
+    borderRadius: 23,
+    marginTop: 'auto',
+    shadowOpacity: 0,
+    elevation: 0
+  },
+  continueButtonText: {
+    fontSize: 12,
+    lineHeight: 16,
     fontFamily: fonts.Medium
   }
 });

@@ -15,6 +15,7 @@ import QRCode from 'react-native-qrcode-svg';
 import { Ionicons } from '@expo/vector-icons';
 import { useTranslation } from './i18n/LanguageProvider';
 import { createPixCharge as createPixChargeRequest } from '../services/paymentService';
+import SecurePaymentBadge from './payment/SecurePaymentBadge';
 
 const { width } = Dimensions.get('window');
 
@@ -127,7 +128,10 @@ const PixPaymentModal = ({
                 <View style={styles.modalContainer}>
                     {/* Header */}
                     <View style={styles.header}>
-                        <Text style={styles.title}>Pagamento PIX</Text>
+                        <View>
+                            <Text style={styles.title}>Pagamento PIX</Text>
+                            <SecurePaymentBadge style={styles.securePaymentBadge} color="#666" />
+                        </View>
                         <TouchableOpacity onPress={onClose} style={styles.closeButton}>
                             <Ionicons name="close" size={24} color="#333" />
                         </TouchableOpacity>
@@ -240,6 +244,9 @@ const styles = StyleSheet.create({
         fontSize: 24,
         fontWeight: 'bold',
         color: '#333',
+    },
+    securePaymentBadge: {
+        marginTop: 2,
     },
     closeButton: {
         padding: 5,

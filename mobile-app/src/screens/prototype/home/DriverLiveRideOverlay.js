@@ -2,6 +2,7 @@ import React, { memo, useCallback, useEffect, useMemo, useState } from "react";
 import {
   Alert,
   Modal,
+  Platform,
   ScrollView,
   StyleSheet,
   Text,
@@ -15,6 +16,8 @@ import {
   PrototypeCard,
   PrototypePrimaryButton,
 } from "../../../components/prototype/PrototypeUI";
+import { LeafPersonIdentity } from "../../../components/prototype/LeafRideUI";
+import SecurePaymentBadge from "../../../components/payment/SecurePaymentBadge";
 import { fonts } from "../../../theme/runtimeTokens";
 import {
   getDriverOfferPayoutLabel,
@@ -147,6 +150,47 @@ function splitLocationLabel(label = "") {
   };
 }
 
+function resolveRidePreferenceItems(source = {}) {
+  const preferences =
+    source?.preferences ||
+    source?.ridePreferences ||
+    source?.comfortPreferences ||
+    {};
+  if (!preferences || typeof preferences !== "object") {
+    return [];
+  }
+
+  const temperatureLabel = String(
+    preferences.temperatureLabel ||
+      preferences.temperaturePreferenceLabel ||
+      preferences.comfort?.temperature?.label ||
+      "",
+  ).trim();
+  const soundLabel = String(
+    preferences.soundLabel ||
+      preferences.soundPreferenceLabel ||
+      preferences.comfort?.sound?.label ||
+      "",
+  ).trim();
+
+  return [
+    temperatureLabel
+      ? {
+          key: "temperature",
+          icon: "snow-outline",
+          label: temperatureLabel,
+        }
+      : null,
+    soundLabel
+      ? {
+          key: "sound",
+          icon: "volume-low-outline",
+          label: soundLabel,
+        }
+      : null,
+  ].filter(Boolean);
+}
+
 function resolveOffer(driverOffers = []) {
   return selectDisplayableDriverOffer(driverOffers);
 }
@@ -167,9 +211,9 @@ function resolveTripPhase(activeRide, bookingStatus) {
 
   if (normalizedStatus === "arrived") {
     return {
-      chip: "Aguardando",
-      title: "Passageiro em embarque",
-      subtitle: "Quando o passageiro entrar, inicie a corrida por aqui.",
+      chip: "No ponto",
+      title: "Passageiro embarcando",
+      subtitle: "Valide o código do passageiro e inicie a corrida por aqui.",
       primaryLabel: "Iniciar viagem",
     };
   }
@@ -186,7 +230,7 @@ function resolveTripPhase(activeRide, bookingStatus) {
   if (normalizedStatus === "operational_interrupted") {
     return {
       chip: "Interrompida",
-      title: "Aguardando decisão do passageiro",
+      title: "Passageiro decidindo",
       subtitle:
         "Mantivemos a corrida pausada enquanto o passageiro decide se quer continuar com outro parceiro.",
       primaryLabel: "",
@@ -274,6 +318,7 @@ function DriverLiveRideOverlay({
   const [isTripExpanded, setIsTripExpanded] = useState(false);
   const [showCancelPrompt, setShowCancelPrompt] = useState(false);
   const { height: windowHeight } = useWindowDimensions();
+  const safeBottom = Math.max(0, Number(insetsBottom) || 0);
   const activeRide = useMemo(() => {
     if (driverActiveRide?.bookingId || driverActiveRide?.id) {
       return driverActiveRide;
@@ -403,18 +448,48 @@ function DriverLiveRideOverlay({
       activeRide?.customer?.name ||
       "Passageiro Leaf",
   ).trim();
+  const passengerInitial = passengerLabel.trim().charAt(0).toUpperCase() || "P";
+  const passengerPhotoUri =
+    String(
+      offer?.passengerPhoto ||
+        offer?.passenger?.photo ||
+        offer?.customerPhoto ||
+        offer?.customer?.photo ||
+        offer?.customer?.profileImage ||
+        activeRide?.passengerPhoto ||
+        activeRide?.passenger?.photo ||
+        activeRide?.customerPhoto ||
+        activeRide?.customer?.photo ||
+        activeRide?.customer?.profileImage ||
+        "",
+    ).trim() || null;
   const etaLabel = String(offer?.eta || "").trim();
   const distanceLabel = formatDistanceKm(offer?.distanceKm ?? tripDistanceKm);
+  const offerPickupEtaLabel =
+    resolveFirstUsableLabel(
+      formatDurationMinutes(
+        offer?.pickupEtaMin || offer?.pickupDurationMin || offer?.etaMin,
+        "",
+      ),
+      etaLabel,
+    ) || "--";
+  const offerTripDurationLabel = formatDurationMinutes(
+    offer?.tripDurationMin || offer?.durationMin || offer?.durationMinutes,
+    "--",
+  );
   const activeDistanceLabel = formatDistanceKm(
     activeRide?.distanceKm ?? tripDistanceKm,
   );
   const pickupLocation = splitLocationLabel(pickupLabel);
   const dropoffLocation = splitLocationLabel(dropoffLabel);
   const paymentLabel = formatPaymentMethod(paymentMethod);
+  const isPixPayment =
+    String(paymentMethod || "").trim().toLowerCase() === "pix";
+  const ridePreferenceItems = resolveRidePreferenceItems(hasOffer ? offer : activeRide);
   const isContinuationOffer = Boolean(offer?.isOperationalContinuation);
   const maxCardHeight = Math.max(
     352,
-    windowHeight - insetsTop - insetsBottom - bottomOffset - 84,
+    windowHeight - insetsTop - bottomOffset - 84,
   );
   const normalizedActiveStatus = String(
     bookingStatus || activeRide?.status || "",
@@ -504,7 +579,7 @@ function DriverLiveRideOverlay({
         value: liveDistanceLabel,
         icon: "map-outline",
         toneStyle: styles.metricIconDistance,
-        iconColor: "#1A7A3E",
+        iconColor: "#1A330E",
       },
       {
         key: "net",
@@ -714,6 +789,16 @@ function DriverLiveRideOverlay({
           </View>
         </View>
 
+        <LeafPersonIdentity
+          compact
+          initial={passengerInitial}
+          photoUri={passengerPhotoUri}
+          name={passengerLabel}
+          meta={normalizedActiveStatus === "started" ? "A bordo" : "Local combinado"}
+          style={styles.compactPassengerIdentity}
+          testID="driver-live-passenger-identity"
+        />
+
         <View style={styles.compactMetricRow}>
           {compactTripMetrics.map((metric) => (
             <View key={metric.key} style={styles.compactMetricPill}>
@@ -806,9 +891,15 @@ function DriverLiveRideOverlay({
           <Text style={styles.expandedTripTitle} numberOfLines={2}>
             {activeTripTitle}
           </Text>
-          <Text style={styles.expandedTripPassenger} numberOfLines={1}>
-            {`Passageiro: ${passengerLabel}`}
-          </Text>
+          <LeafPersonIdentity
+            compact
+            initial={passengerInitial}
+            photoUri={passengerPhotoUri}
+            name={passengerLabel}
+            meta={normalizedActiveStatus === "started" ? "A bordo" : "Local combinado"}
+            style={styles.expandedTripPassengerIdentity}
+            testID="driver-live-passenger-identity"
+          />
         </View>
 
         <View style={styles.expandedTripSide}>
@@ -959,12 +1050,19 @@ function DriverLiveRideOverlay({
     </>
   );
 
+  const cardBottomPadding =
+    (shouldUseCompactTripCard
+      ? isTripExpanded
+        ? 14
+        : 12
+      : 16) + safeBottom;
+
   return (
     <>
       <View
         pointerEvents="box-none"
         onLayout={onCardLayout}
-        style={[styles.wrap, { bottom: insetsBottom + bottomOffset }]}
+        style={[styles.wrap, { bottom: bottomOffset }]}
       >
         <PrototypeCard
           style={[
@@ -973,7 +1071,8 @@ function DriverLiveRideOverlay({
               ? styles.compactCard
               : shouldUseCompactTripCard
                 ? styles.expandedTripCard
-              : { maxHeight: maxCardHeight },
+                : { maxHeight: maxCardHeight },
+            { paddingBottom: cardBottomPadding },
           ]}
         >
         {shouldUseCompactTripCard && !isTripExpanded ? (
@@ -998,7 +1097,15 @@ function DriverLiveRideOverlay({
                       ? "Retomar corrida"
                       : "Detalhes da corrida"}
                   </Text>
-                  <Text style={styles.passengerCaption}>{passengerLabel}</Text>
+                  <LeafPersonIdentity
+                    compact
+                    initial={passengerInitial}
+                    photoUri={passengerPhotoUri}
+                    name={passengerLabel}
+                    meta="Local combinado"
+                    style={styles.headerPassengerIdentity}
+                    testID="driver-live-passenger-identity"
+                  />
                 </View>
                 <View style={styles.fareBadge}>
                   <Text style={styles.fareBadgeLabel}>Líquido</Text>
@@ -1006,33 +1113,24 @@ function DriverLiveRideOverlay({
                 </View>
               </View>
 
-              <View style={styles.metricGrid}>
-                <View style={styles.metricCard}>
-                  <View
-                    style={[styles.metricIconWrap, styles.metricIconDistance]}
-                  >
-                    <Ionicons
-                      name="navigate-outline"
-                      size={18}
-                      color="#1A7A3E"
-                    />
-                  </View>
-                  <View style={styles.metricCopy}>
-                    <Text style={styles.metricLabel}>Distância</Text>
-                    <Text style={styles.metricValue}>{distanceLabel}</Text>
-                  </View>
+              <View style={styles.offerMetaStrip}>
+                <View style={styles.offerMetaItem}>
+                  <Text style={styles.offerMetaLabel}>Embarque</Text>
+                  <Text style={styles.offerMetaValue} numberOfLines={1}>
+                    {offerPickupEtaLabel}
+                  </Text>
                 </View>
-
-                <View style={styles.metricCard}>
-                  <View style={[styles.metricIconWrap, styles.metricIconEta]}>
-                    <Ionicons name="time-outline" size={18} color="#365A6D" />
-                  </View>
-                  <View style={styles.metricCopy}>
-                    <Text style={styles.metricLabel}>ETA</Text>
-                    <Text style={styles.metricValue}>
-                      {resolveFirstUsableLabel(etaLabel) || "--"}
-                    </Text>
-                  </View>
+                <View style={styles.offerMetaItem}>
+                  <Text style={styles.offerMetaLabel}>Distância</Text>
+                  <Text style={styles.offerMetaValue} numberOfLines={1}>
+                    {distanceLabel}
+                  </Text>
+                </View>
+                <View style={styles.offerMetaItem}>
+                  <Text style={styles.offerMetaLabel}>Viagem</Text>
+                  <Text style={styles.offerMetaValue} numberOfLines={1}>
+                    {offerTripDurationLabel}
+                  </Text>
                 </View>
               </View>
 
@@ -1100,13 +1198,40 @@ function DriverLiveRideOverlay({
                 </View>
               </View>
 
-              <View style={styles.statusPill}>
-                <Ionicons
-                  name="checkmark-circle-outline"
-                  size={16}
-                  color="#6C651B"
-                />
-                <Text style={styles.statusPillText}>{paymentLabel}</Text>
+              {ridePreferenceItems.length > 0 ? (
+                <View
+                  style={styles.preferencePanel}
+                  testID="driver-live-offer-preferences"
+                  accessibilityLabel="Preferências do passageiro"
+                >
+                  <Text style={styles.preferencePanelTitle}>
+                    Preferências do passageiro
+                  </Text>
+                  <View style={styles.preferenceChipRow}>
+                    {ridePreferenceItems.map((item) => (
+                      <View key={item.key} style={styles.preferenceChip}>
+                        <Ionicons name={item.icon} size={14} color="#174A2B" />
+                        <Text style={styles.preferenceChipText} numberOfLines={1}>
+                          {item.label}
+                        </Text>
+                      </View>
+                    ))}
+                  </View>
+                </View>
+              ) : null}
+
+              <View style={styles.paymentStatusBlock}>
+                <View style={styles.statusPill}>
+                  <Ionicons
+                    name="checkmark-circle-outline"
+                    size={16}
+                    color="#6C651B"
+                  />
+                  <Text style={styles.statusPillText}>{paymentLabel}</Text>
+                </View>
+                {isPixPayment ? (
+                  <SecurePaymentBadge style={styles.statusSecurePaymentBadge} color="#6E7D72" />
+                ) : null}
               </View>
 
               <PrototypePrimaryButton
@@ -1158,9 +1283,15 @@ function DriverLiveRideOverlay({
                 <View style={styles.headerCopy}>
                   <Text style={styles.eyebrow}>{tripPhase.chip}</Text>
                   <Text style={styles.title}>{activeTripTitle}</Text>
-                  <Text style={styles.passengerCaption}>
-                    {`Passageiro: ${passengerLabel}`}
-                  </Text>
+                  <LeafPersonIdentity
+                    compact
+                    initial={passengerInitial}
+                    photoUri={passengerPhotoUri}
+                    name={passengerLabel}
+                    meta={normalizedActiveStatus === "started" ? "A bordo" : "Local combinado"}
+                    style={styles.headerPassengerIdentity}
+                    testID="driver-live-passenger-identity"
+                  />
                 </View>
                 <View style={[styles.fareBadge, styles.fareBadgeSoft]}>
                   <Text style={styles.fareBadgeLabel}>Líquido</Text>
@@ -1187,7 +1318,7 @@ function DriverLiveRideOverlay({
                       size={16}
                       color={
                         normalizedExtensionStatus === "confirmed"
-                          ? "#1A7A3E"
+                          ? "#1A330E"
                           : color.text.primary
                       }
                     />
@@ -1195,7 +1326,7 @@ function DriverLiveRideOverlay({
                       {normalizedExtensionStatus === "driver_decision_pending"
                         ? "Passageiro pediu novo destino"
                         : normalizedExtensionStatus === "pending_payment"
-                          ? "Aguardando complemento Pix"
+                          ? "Complemento Pix pendente"
                           : normalizedExtensionStatus === "confirmed"
                             ? "Novo destino confirmado"
                             : normalizedExtensionStatus === "rejected"
@@ -1214,7 +1345,7 @@ function DriverLiveRideOverlay({
                     {normalizedExtensionStatus === "driver_decision_pending"
                       ? `Complemento do passageiro: ${formatCurrency(driverExtensionRequest?.diffFare)}`
                       : normalizedExtensionStatus === "pending_payment"
-                        ? "Você aprovou a alteração. Aguarde a confirmação do pagamento para mudar a rota."
+                        ? "Você aprovou a alteração. A rota muda quando o pagamento for confirmado."
                         : driverExtensionRequest?.message ||
                           "O novo destino já foi refletido na corrida."}
                   </Text>
@@ -1467,18 +1598,21 @@ export default memo(DriverLiveRideOverlay);
 const styles = StyleSheet.create({
   wrap: {
     position: "absolute",
-    width: "90%",
-    alignSelf: "center",
+    left: 0,
+    right: 0,
     zIndex: 18,
   },
   card: {
-    borderRadius: 34,
-    paddingHorizontal: 18,
+    borderTopLeftRadius: 32,
+    borderTopRightRadius: 32,
+    borderBottomLeftRadius: 0,
+    borderBottomRightRadius: 0,
+    paddingHorizontal: 28,
     paddingTop: 18,
     paddingBottom: 16,
-    backgroundColor: "rgba(249,250,247,0.97)",
-    borderColor: "rgba(255,255,255,0.72)",
-    shadowOpacity: 0.2,
+    backgroundColor: Platform.OS === "android" ? "#FAFBF8" : "rgba(250,251,248,0.94)",
+    borderColor: "rgba(207,216,205,0.64)",
+    shadowOpacity: 0.16,
   },
   scrollContent: {
     paddingBottom: 2,
@@ -1498,7 +1632,7 @@ const styles = StyleSheet.create({
     fontSize: 11,
     textTransform: "uppercase",
     letterSpacing: 1.8,
-    color: "#1A7A3E",
+    color: "#1A330E",
     marginBottom: 6,
   },
   title: {
@@ -1512,15 +1646,20 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: color.text.secondary,
   },
+  headerPassengerIdentity: {
+    marginTop: 10,
+  },
   fareBadge: {
     minWidth: 108,
     borderRadius: 20,
-    backgroundColor: "#F5EE9A",
+    backgroundColor: "rgba(238,244,234,0.94)",
     paddingHorizontal: 14,
     paddingVertical: 10,
     alignItems: "center",
     justifyContent: "center",
-    shadowColor: "#E3D86D",
+    borderWidth: 1,
+    borderColor: "rgba(26,51,14,0.14)",
+    shadowColor: "#C8D7BF",
     shadowOffset: { width: 0, height: 10 },
     shadowOpacity: 0.18,
     shadowRadius: 18,
@@ -1535,13 +1674,42 @@ const styles = StyleSheet.create({
     fontSize: 11,
     textTransform: "uppercase",
     letterSpacing: 1.2,
-    color: "#7A7340",
+    color: "#53634D",
     marginBottom: 4,
   },
   fareBadgeValue: {
     fontFamily: fonts.Bold,
     fontSize: 18,
-    color: "#4A4520",
+    color: "#1A330E",
+  },
+  offerMetaStrip: {
+    marginTop: 14,
+    minHeight: 58,
+    borderTopWidth: 1,
+    borderBottomWidth: 1,
+    borderColor: "rgba(91,105,86,0.13)",
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  offerMetaItem: {
+    flex: 1,
+    minWidth: 0,
+    paddingRight: 10,
+  },
+  offerMetaLabel: {
+    fontFamily: fonts.Medium,
+    fontSize: 10,
+    lineHeight: 14,
+    textTransform: "uppercase",
+    letterSpacing: 0.9,
+    color: "#6B7178",
+  },
+  offerMetaValue: {
+    marginTop: 3,
+    fontFamily: fonts.Bold,
+    fontSize: 15,
+    lineHeight: 20,
+    color: color.text.primary,
   },
   metricGrid: {
     marginTop: 14,
@@ -1557,7 +1725,7 @@ const styles = StyleSheet.create({
     borderRadius: 20,
     borderWidth: 1,
     borderColor: "rgba(68,85,93,0.06)",
-    backgroundColor: "rgba(255,255,255,0.72)",
+    backgroundColor: "rgba(250,251,248,0.78)",
     paddingHorizontal: 14,
     paddingVertical: 12,
     flexDirection: "row",
@@ -1604,7 +1772,7 @@ const styles = StyleSheet.create({
     borderRadius: 24,
     borderWidth: 1,
     borderColor: "rgba(68,85,93,0.06)",
-    backgroundColor: "rgba(255,255,255,0.74)",
+    backgroundColor: "rgba(250,251,248,0.78)",
     paddingHorizontal: 15,
     paddingVertical: 14,
     flexDirection: "row",
@@ -1639,7 +1807,7 @@ const styles = StyleSheet.create({
     marginVertical: 6,
   },
   pickupDot: {
-    backgroundColor: "#1A7A3E",
+    backgroundColor: "#1A330E",
   },
   dropoffDot: {
     backgroundColor: "#4D6575",
@@ -1656,7 +1824,7 @@ const styles = StyleSheet.create({
     fontSize: 11,
     textTransform: "uppercase",
     letterSpacing: 1.4,
-    color: "#1A7A3E",
+    color: "#1A330E",
     marginBottom: 4,
   },
   routeStopLabelDestination: {
@@ -1682,6 +1850,45 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(68,85,93,0.08)",
     marginVertical: 10,
   },
+  preferencePanel: {
+    marginTop: 14,
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: "rgba(39,74,54,0.1)",
+    backgroundColor: "rgba(244,249,245,0.82)",
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+  },
+  preferencePanelTitle: {
+    fontFamily: fonts.Bold,
+    fontSize: 12,
+    lineHeight: 16,
+    color: color.text.primary,
+  },
+  preferenceChipRow: {
+    marginTop: 9,
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
+  },
+  preferenceChip: {
+    minHeight: 30,
+    borderRadius: 15,
+    paddingHorizontal: 10,
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#FFFFFF",
+    borderWidth: 1,
+    borderColor: "rgba(39,74,54,0.1)",
+    gap: 6,
+  },
+  preferenceChipText: {
+    flexShrink: 1,
+    fontFamily: fonts.SemiBold,
+    fontSize: 11,
+    lineHeight: 15,
+    color: "#174A2B",
+  },
   statusPill: {
     marginTop: 14,
     alignSelf: "center",
@@ -1691,6 +1898,12 @@ const styles = StyleSheet.create({
     backgroundColor: "#F5EEB3",
     paddingHorizontal: 16,
     paddingVertical: 9,
+  },
+  paymentStatusBlock: {
+    alignItems: "center",
+  },
+  statusSecurePaymentBadge: {
+    marginTop: 4,
   },
   statusPillText: {
     marginLeft: 6,
@@ -1792,7 +2005,7 @@ const styles = StyleSheet.create({
     borderRadius: 14,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "#1A7A3E",
+    backgroundColor: "#1A330E",
   },
   extensionPrimaryActionText: {
     fontFamily: fonts.Bold,
@@ -1842,12 +2055,16 @@ const styles = StyleSheet.create({
   },
   compactCard: {
     borderRadius: 28,
+    borderBottomLeftRadius: 0,
+    borderBottomRightRadius: 0,
     paddingHorizontal: 16,
     paddingTop: 12,
     paddingBottom: 12,
   },
   expandedTripCard: {
     borderRadius: 30,
+    borderBottomLeftRadius: 0,
+    borderBottomRightRadius: 0,
     paddingHorizontal: 16,
     paddingTop: 14,
     paddingBottom: 14,
@@ -1873,6 +2090,9 @@ const styles = StyleSheet.create({
     fontSize: 12,
     lineHeight: 16,
     color: color.text.secondary,
+  },
+  expandedTripPassengerIdentity: {
+    marginTop: 10,
   },
   expandedTripSide: {
     width: 92,
@@ -1916,7 +2136,7 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     borderWidth: 1,
     borderColor: "rgba(68,85,93,0.06)",
-    backgroundColor: "rgba(255,255,255,0.78)",
+    backgroundColor: "rgba(250,251,248,0.82)",
     paddingHorizontal: 9,
     paddingVertical: 8,
   },
@@ -1949,7 +2169,7 @@ const styles = StyleSheet.create({
     borderRadius: 18,
     borderWidth: 1,
     borderColor: "rgba(68,85,93,0.06)",
-    backgroundColor: "rgba(255,255,255,0.74)",
+    backgroundColor: "rgba(250,251,248,0.8)",
     paddingHorizontal: 12,
     paddingVertical: 10,
     flexDirection: "row",
@@ -1966,7 +2186,7 @@ const styles = StyleSheet.create({
     lineHeight: 11,
     textTransform: "uppercase",
     letterSpacing: 0.8,
-    color: "#1A7A3E",
+    color: "#1A330E",
   },
   expandedRouteLabelDestination: {
     color: "#4D6575",
@@ -2006,6 +2226,9 @@ const styles = StyleSheet.create({
   },
   compactSummaryPressable: {
     gap: 9,
+  },
+  compactPassengerIdentity: {
+    marginTop: 12,
   },
   compactHeaderRow: {
     flexDirection: "row",
@@ -2048,7 +2271,7 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     borderWidth: 1,
     borderColor: "rgba(68,85,93,0.06)",
-    backgroundColor: "rgba(255,255,255,0.78)",
+    backgroundColor: "rgba(250,251,248,0.82)",
     paddingHorizontal: 10,
     paddingVertical: 10,
   },
@@ -2078,7 +2301,7 @@ const styles = StyleSheet.create({
     borderRadius: 15,
     borderWidth: 1,
     borderColor: "rgba(68,85,93,0.06)",
-    backgroundColor: "rgba(255,255,255,0.78)",
+    backgroundColor: "rgba(250,251,248,0.82)",
     paddingHorizontal: 9,
     paddingVertical: 8,
     flexDirection: "row",
@@ -2132,8 +2355,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: 8,
   },
   compactActionButtonPrimary: {
-    backgroundColor: "#1A7A3E",
-    borderColor: "#1A7A3E",
+    backgroundColor: "#1A330E",
+    borderColor: "#1A330E",
   },
   compactActionButtonDanger: {
     backgroundColor: "#FFF4F5",
@@ -2231,7 +2454,7 @@ const styles = StyleSheet.create({
     flex: 1.2,
     minHeight: 48,
     borderRadius: 16,
-    backgroundColor: "#1A7A3E",
+    backgroundColor: "#1A330E",
     alignItems: "center",
     justifyContent: "center",
   },

@@ -63,7 +63,7 @@ describe('AuthProvider startup shell', () => {
       </AuthProvider>
     );
 
-    expect(getByText('Preparando o app...')).toBeTruthy();
+    expect(getByText('Bem vindo(a)')).toBeTruthy();
     expect(queryByText('app-ready-child')).toBeNull();
   });
 
@@ -80,7 +80,7 @@ describe('AuthProvider startup shell', () => {
     );
 
     expect(getByText('app-ready-child')).toBeTruthy();
-    expect(queryByText('Preparando o app...')).toBeNull();
+    expect(queryByText('Bem vindo(a)')).toBeNull();
   });
 
   it('releases the app from a matching cached profile while refreshing remotely in background', async () => {
@@ -132,7 +132,7 @@ describe('AuthProvider startup shell', () => {
     });
 
     await waitFor(() => {
-      expect(queryByText('Entrando na sua conta...')).toBeNull();
+      expect(queryByText('Bem vindo(a)')).toBeNull();
       expect(getByText('app-ready-child')).toBeTruthy();
     });
     expect(mobileProfileService.getCurrentProfile).toHaveBeenCalledTimes(1);

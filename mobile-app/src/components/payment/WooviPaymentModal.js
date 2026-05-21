@@ -9,7 +9,8 @@ import {
     Alert,
     ActivityIndicator,
     Dimensions,
-    Image
+    Image,
+    Linking
 } from 'react-native';
 import * as Clipboard from 'expo-clipboard';
 import { Icon } from 'react-native-elements';
@@ -21,6 +22,7 @@ import { fonts } from '../../theme/runtimeTokens';
 import { allowForcedPaymentBypass } from '../../config/runtimeAccessPolicy';
 import robotaxiPrototypeTokens from '../design-system/robotaxiPrototypeTokens';
 import { formatCurrencyBRL } from '../../screens/prototype/tripFinancialSummary';
+import SecurePaymentBadge from './SecurePaymentBadge';
 
 
 const { width, height } = Dimensions.get('window');
@@ -29,6 +31,19 @@ const { color, typography, radius, spacing, elevation } = robotaxiPrototypeToken
 // Tempo de expiração: 5 minutos (300 segundos)
 const PAYMENT_TIMEOUT = 300;
 const CONFIRMED_PAYMENT_STATUSES = new Set(['completed', 'confirmed', 'paid', 'in_holding']);
+const PIX_SURFACE = {
+    bg: '#F8FBF9',
+    sheet: 'rgba(255,255,255,0.97)',
+    text: '#101C14',
+    secondary: '#66756B',
+    muted: '#5F6B62',
+    line: '#DFE8E1',
+    leaf: '#0F3B16',
+    leafLight: '#EAF6EE',
+    soft: '#F3F8F4',
+    danger: '#B5533E',
+    progress: '#1FA76F'
+};
 
 export default function WooviPaymentModal({ 
     visible, 
@@ -421,6 +436,39 @@ export default function WooviPaymentModal({
         const mins = Math.floor(seconds / 60);
         const secs = seconds % 60;
         return `${mins}:${secs.toString().padStart(2, '0')}`;
+    };
+
+    const getPixSnippet = () => {
+        const pixCode = String(paymentData?.qrCodeText || '').trim();
+        if (!pixCode) {
+            return 'Codigo PIX indisponivel';
+        }
+
+        if (pixCode.length <= 18) {
+            return pixCode;
+        }
+
+        return `${pixCode.slice(0, 8)}...${pixCode.slice(-4)}`;
+    };
+
+    const openPaymentLink = async () => {
+        const targetUrl = String(paymentData?.paymentLink || '').trim();
+        if (!targetUrl) {
+            Alert.alert('Abrir banco', 'Copie o código PIX e cole no app do seu banco.');
+            return;
+        }
+
+        try {
+            const canOpen = await Linking.canOpenURL(targetUrl);
+            if (canOpen) {
+                await Linking.openURL(targetUrl);
+                return;
+            }
+        } catch (error) {
+            Logger.warn('⚠️ [WooviPaymentModal] Falha ao abrir link de pagamento:', error?.message || error);
+        }
+
+        Alert.alert('Abrir banco', 'Não foi possível abrir o link automaticamente. Copie o código PIX e cole no app do banco.');
     };
 
     // Função para gerar pagamento via Woovi Sandbox
@@ -834,80 +882,114 @@ export default function WooviPaymentModal({
                 testID="payment-modal-content"
                 accessibilityLabel="payment-modal-content"
             >
-                {/* Header */}
                 <View style={styles.paymentHeader}>
-                    <Text style={[styles.paymentTitle, { color: color.text.primary }]}>
-                        {paymentTitle}
-                    </Text>
-                    <Text style={[styles.paymentAmount, { color: color.accent.primary }]}>
-                        {formatCurrencyBRL(paymentData.amount)}
-                    </Text>
+                    <View>
+                        <Text style={styles.paymentTitle}>
+                            Pague com PIX
+                        </Text>
+                        <SecurePaymentBadge style={styles.securePaymentBadge} color={PIX_SURFACE.muted} />
+                        <View style={styles.statusChip}>
+                            <Text style={styles.statusChipText}>
+                                {paymentStatus === 'confirmed'
+                                    ? 'PIX confirmado'
+                                    : paymentStatus === 'expired'
+                                        ? 'Tempo esgotado'
+                                        : 'Aguardando PIX'}
+                            </Text>
+                        </View>
+                    </View>
+                    <View style={styles.paymentRightColumn}>
+                        <Text style={styles.paymentAmount}>
+                            {formatCurrencyBRL(paymentData.amount)}
+                        </Text>
+                        <Text
+                            style={[
+                                styles.expiryText,
+                                countdown <= 60 && paymentStatus === 'pending' && styles.expiryTextDanger,
+                            ]}
+                        >
+                            {paymentStatus === 'pending'
+                                ? `Expira em ${formatTime(countdown)}`
+                                : paymentStatus === 'confirmed'
+                                    ? 'Confirmado'
+                                    : 'Expirado'}
+                        </Text>
+                    </View>
                 </View>
 
-                {/* QR Code */}
+                <View style={styles.timerRail}>
+                    <View
+                        style={[
+                            styles.timerFill,
+                            {
+                                width: `${Math.max(
+                                    6,
+                                    Math.min(100, (countdown / PAYMENT_TIMEOUT) * 100),
+                                )}%`,
+                            },
+                        ]}
+                    />
+                </View>
+
                 <View style={styles.qrContainer}>
                     {paymentData?.qrCodeImage ? (
-                        <Image 
-                            source={{ uri: paymentData.qrCodeImage }} 
+                        <Image
+                            source={{ uri: paymentData.qrCodeImage }}
                             style={styles.qrCodeImage}
                             resizeMode="contain"
                         />
                     ) : paymentData?.qrCodeText ? (
                         <QRCode
                             value={paymentData.qrCodeText}
-                            size={200}
+                            size={145}
                             backgroundColor="#FFFFFF"
-                            color="#000000"
+                            color="#080A09"
                         />
                     ) : (
-                        <View style={[styles.qrCode, { backgroundColor: '#FFFFFF' }]}>
+                        <View style={styles.qrCode}>
                             <Text style={styles.qrCodeText}>QR Code</Text>
-                            <Text style={styles.qrCodeSubtext}>200x200px</Text>
+                            <Text style={styles.qrCodeSubtext}>145px</Text>
                         </View>
                     )}
                 </View>
 
-                {/* Código PIX */}
-                <View style={styles.pixCodeContainer}>
-                    <Text style={[styles.pixCodeLabel, { color: color.text.secondary }]}>
-                        Código PIX:
+                <Text style={styles.qrInstruction}>
+                    Escaneie o QR Code ou copie o código PIX abaixo.
+                </Text>
+
+                <TouchableOpacity
+                    style={styles.pixCopyField}
+                    onPress={copyPixCode}
+                    activeOpacity={0.86}
+                    testID="payment-modal-copy-pix-button"
+                    accessibilityLabel="payment-modal-copy-pix-button"
+                >
+                    <Text style={styles.pixCodeText} numberOfLines={1}>
+                        {getPixSnippet()}
                     </Text>
+                    <Text style={styles.pixCopyText}>
+                        Copiar
+                    </Text>
+                </TouchableOpacity>
+
+                <View style={styles.actionButtons}>
                     <TouchableOpacity
-                        style={[styles.pixCodeButton, { backgroundColor: color.surface.secondary }]}
+                        style={styles.primaryAction}
                         onPress={copyPixCode}
-                        activeOpacity={0.8}
-                        testID="payment-modal-copy-pix-button"
-                        accessibilityLabel="payment-modal-copy-pix-button"
+                        activeOpacity={0.88}
                     >
-                        <Text style={[styles.pixCodeText, { color: color.text.primary }]}>
-                            {paymentData.qrCodeText}
-                        </Text>
-                        <Icon name="content-copy" type="material" color={color.text.secondary} size={20} />
+                        <Text style={styles.primaryActionText}>Copiar código</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                        style={styles.secondaryAction}
+                        onPress={openPaymentLink}
+                        activeOpacity={0.88}
+                    >
+                        <Text style={styles.secondaryActionText}>Abrir banco</Text>
                     </TouchableOpacity>
                 </View>
 
-                {/* Countdown */}
                 <View style={styles.countdownContainer}>
-                    {paymentStatus === 'pending' && (
-                        <>
-                            <Text style={[styles.countdownLabel, { color: color.text.secondary }]}>
-                                Expira em:
-                            </Text>
-                            <Text style={[
-                                styles.countdownText, 
-                                { 
-                                    color: countdown <= 60 ? color.feedback.danger : color.accent.primary 
-                                }
-                            ]}>
-                                {formatTime(countdown)}
-                            </Text>
-                        </>
-                    )}
-                    {paymentStatus === 'expired' && (
-                        <Text style={[styles.countdownLabel, { color: color.feedback.danger }]}>
-                            Tempo esgotado
-                        </Text>
-                    )}
                     {paymentStatus === 'confirmed' && (
                         <View
                             style={styles.confirmedContainer}
@@ -920,11 +1002,11 @@ export default function WooviPaymentModal({
                             </Text>
                         </View>
                     )}
-                </View>
-
-                {/* Botões */}
-                <View style={styles.actionButtons}>
-                    {/* ✅ Botão Cancelar removido - usuário pode fechar pelo X no header */}
+                    {paymentStatus !== 'confirmed' ? (
+                        <Text style={styles.automaticText}>
+                            A confirmação é automática.
+                        </Text>
+                    ) : null}
                 </View>
             </View>
         );
@@ -939,11 +1021,8 @@ export default function WooviPaymentModal({
         >
             <View style={styles.modalOverlay}>
                 <View style={styles.modalContent}>
-                    {/* Header do modal */}
+                    <View style={styles.handle} />
                     <View style={styles.modalHeader}>
-                        <Text style={[styles.modalHeaderTitle, { color: color.text.primary }]}>
-                            Realize seu pagamento
-                        </Text>
                         {qaAutoConfirmEnabled ? (
                             <Text
                                 style={[styles.qaDebugBadge, { color: color.feedback.success }]}
@@ -964,7 +1043,6 @@ export default function WooviPaymentModal({
                         </TouchableOpacity>
                     </View>
 
-                    {/* Conteúdo */}
                     {renderContent()}
                 </View>
             </View>
@@ -975,35 +1053,42 @@ export default function WooviPaymentModal({
 const styles = StyleSheet.create({
     modalOverlay: {
         flex: 1,
-        backgroundColor: 'rgba(17,26,39,0.26)',
-        justifyContent: 'center',
+        backgroundColor: 'rgba(248,251,249,0.42)',
+        justifyContent: 'flex-end',
         alignItems: 'center',
     },
     modalContent: {
-        width: width * 0.92,
-        maxHeight: height * 0.8,
-        borderRadius: radius.lg,
-        paddingHorizontal: spacing.md,
-        paddingVertical: spacing.md,
-        backgroundColor: color.bg.panel,
+        width: Math.min(width - 32, 358),
+        minHeight: 506,
+        maxHeight: Math.min(height - 64, 560),
+        borderRadius: 28,
+        paddingHorizontal: 27,
+        paddingTop: 17,
+        paddingBottom: 12,
+        marginBottom: 32,
+        backgroundColor: PIX_SURFACE.sheet,
         borderWidth: 1,
-        borderColor: color.border.subtle,
-        shadowColor: color.shadow.base,
-        shadowOffset: elevation.panel.shadowOffset,
-        shadowOpacity: elevation.panel.shadowOpacity,
-        shadowRadius: elevation.panel.shadowRadius,
-        elevation: elevation.panel.elevation,
+        borderColor: PIX_SURFACE.line,
+        shadowColor: '#12261A',
+        shadowOffset: { width: 0, height: 18 },
+        shadowOpacity: 0.1,
+        shadowRadius: 42,
+        elevation: 8,
     },
-    
-    // Header do modal
+    handle: {
+        width: 54,
+        height: 4,
+        borderRadius: 2,
+        backgroundColor: PIX_SURFACE.line,
+    },
     modalHeader: {
+        position: 'absolute',
+        top: 11,
+        right: 11,
         flexDirection: 'row',
-        justifyContent: 'space-between',
+        justifyContent: 'flex-end',
         alignItems: 'center',
-        marginBottom: spacing.md,
-        paddingBottom: spacing.sm,
-        borderBottomWidth: 1,
-        borderBottomColor: color.border.separator,
+        zIndex: 3,
     },
     modalHeaderTitle: {
         fontFamily: fonts.SemiBold,
@@ -1017,14 +1102,14 @@ const styles = StyleSheet.create({
         lineHeight: typography.micro.lineHeight,
     },
     closeButton: {
-        width: 38,
-        height: 38,
-        borderRadius: 19,
-        borderWidth: 1,
-        borderColor: color.border.subtle,
+        width: 30,
+        height: 30,
+        borderRadius: 15,
+        borderWidth: 0,
+        borderColor: 'transparent',
         alignItems: 'center',
         justifyContent: 'center',
-        backgroundColor: color.surface.primary
+        backgroundColor: 'transparent'
     },
 
     // Container de geração
@@ -1114,37 +1199,93 @@ const styles = StyleSheet.create({
 
     // Container de pagamento
     paymentContainer: {
-        alignItems: 'center',
+        alignItems: 'stretch',
     },
     paymentHeader: {
-        alignItems: 'center',
-        marginBottom: 20,
+        marginTop: 22,
+        minHeight: 66,
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'flex-start',
+        gap: 12,
     },
     paymentTitle: {
-        fontFamily: fonts.SemiBold,
-        fontSize: typography.subtitle.size,
-        lineHeight: typography.subtitle.lineHeight,
-        marginBottom: 5,
+        color: PIX_SURFACE.text,
+        fontFamily: fonts.Medium,
+        fontSize: 20,
+        lineHeight: 31,
+    },
+    securePaymentBadge: {
+        marginTop: 1,
+    },
+    statusChip: {
+        width: 150,
+        height: 28,
+        borderRadius: 14,
+        alignItems: 'center',
+        justifyContent: 'center',
+        marginTop: 6,
+        backgroundColor: PIX_SURFACE.leafLight,
+    },
+    statusChipText: {
+        color: PIX_SURFACE.leaf,
+        fontFamily: fonts.Medium,
+        fontSize: 10,
+        lineHeight: 15,
+        textAlign: 'center',
+    },
+    paymentRightColumn: {
+        alignItems: 'flex-end',
+        paddingRight: 2,
     },
     paymentAmount: {
-        fontFamily: fonts.Bold,
-        fontSize: 34,
-        lineHeight: 40
+        color: PIX_SURFACE.text,
+        fontFamily: fonts.Medium,
+        fontSize: 20,
+        lineHeight: 31,
+        textAlign: 'right',
+    },
+    expiryText: {
+        marginTop: 8,
+        color: PIX_SURFACE.danger,
+        fontFamily: fonts.Medium,
+        fontSize: 11,
+        lineHeight: 18,
+        textAlign: 'right',
+    },
+    expiryTextDanger: {
+        color: color.feedback.danger,
+    },
+    timerRail: {
+        width: '100%',
+        height: 5,
+        borderRadius: 2.5,
+        backgroundColor: PIX_SURFACE.line,
+        overflow: 'hidden',
+        marginTop: 10,
+    },
+    timerFill: {
+        height: 5,
+        borderRadius: 2.5,
+        backgroundColor: PIX_SURFACE.progress,
     },
 
-    // QR Code
     qrContainer: {
-        marginBottom: 20,
-        borderRadius: radius.md,
+        alignSelf: 'center',
+        width: 174,
+        height: 174,
+        borderRadius: 20,
         borderWidth: 1,
-        borderColor: color.border.subtle,
-        backgroundColor: color.surface.primary,
-        padding: 12
+        borderColor: PIX_SURFACE.line,
+        backgroundColor: '#FFFFFF',
+        alignItems: 'center',
+        justifyContent: 'center',
+        marginTop: 26,
     },
     qrCode: {
-        width: 200,
-        height: 200,
-        borderRadius: 12,
+        width: 145,
+        height: 145,
+        borderRadius: 8,
         justifyContent: 'center',
         alignItems: 'center',
         borderWidth: 2,
@@ -1152,8 +1293,8 @@ const styles = StyleSheet.create({
         borderStyle: 'dashed',
     },
     qrCodeText: {
-        fontSize: 18,
-        fontWeight: 'bold',
+        fontFamily: fonts.SemiBold,
+        fontSize: 15,
         color: '#666',
     },
     qrCodeSubtext: {
@@ -1162,48 +1303,51 @@ const styles = StyleSheet.create({
         marginTop: 5,
     },
 
-    // Código PIX
-    pixCodeContainer: {
-        width: '100%',
-        marginBottom: 20,
+    qrInstruction: {
+        alignSelf: 'center',
+        marginTop: 14,
+        width: 294,
+        color: PIX_SURFACE.secondary,
+        fontFamily: fonts.Regular,
+        fontSize: 12,
+        lineHeight: 18,
+        textAlign: 'center',
     },
-    pixCodeLabel: {
-        fontFamily: fonts.Medium,
-        fontSize: typography.caption.size,
-        lineHeight: typography.caption.lineHeight,
-        marginBottom: 8,
-        textAlign: 'left',
-    },
-    pixCodeButton: {
+    pixCopyField: {
+        height: 44,
+        borderRadius: 22,
+        borderWidth: 1,
+        borderColor: PIX_SURFACE.line,
+        backgroundColor: PIX_SURFACE.soft,
+        marginTop: 0,
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'space-between',
-        paddingHorizontal: 16,
-        paddingVertical: 12,
-        borderRadius: radius.md,
-        borderWidth: 1,
-        borderColor: color.border.subtle,
+        paddingHorizontal: 20,
     },
     pixCodeText: {
-        fontSize: typography.caption.size,
-        lineHeight: typography.caption.lineHeight,
-        fontFamily: 'monospace',
+        color: PIX_SURFACE.text,
+        fontFamily: fonts.Medium,
+        fontSize: 12,
+        lineHeight: 19,
         flex: 1,
-        marginRight: 10,
+        marginRight: 12,
+    },
+    pixCopyText: {
+        color: PIX_SURFACE.leaf,
+        fontFamily: fonts.Medium,
+        fontSize: 12,
+        lineHeight: 19,
+        textAlign: 'right',
     },
 
-    // Countdown
     countdownContainer: {
         alignItems: 'center',
-        marginBottom: 20,
+        marginTop: 8,
         width: '100%',
-        minHeight: 54,
-        borderRadius: radius.md,
-        borderWidth: 1,
-        borderColor: color.border.subtle,
-        backgroundColor: color.surface.primary,
+        minHeight: 18,
         justifyContent: 'center',
-        paddingVertical: 10,
+        paddingVertical: 0,
     },
     countdownLabel: {
         fontFamily: fonts.Medium,
@@ -1220,21 +1364,41 @@ const styles = StyleSheet.create({
     // Botões de ação
     actionButtons: {
         width: '100%',
+        marginTop: 18,
+        flexDirection: 'row',
+        gap: 14,
     },
-    actionButton: {
-        paddingVertical: 15,
-        borderRadius: 25,
+    primaryAction: {
+        flex: 1,
+        height: 46,
+        borderRadius: 23,
+        backgroundColor: PIX_SURFACE.leaf,
         alignItems: 'center',
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.2,
-        shadowRadius: 4,
-        elevation: 5,
+        justifyContent: 'center',
     },
-    actionButtonText: {
+    primaryActionText: {
         color: '#FFFFFF',
-        fontSize: 16,
-        fontWeight: 'bold',
+        fontFamily: fonts.Medium,
+        fontSize: 12,
+        lineHeight: 19,
+        textAlign: 'center',
+    },
+    secondaryAction: {
+        flex: 1,
+        height: 46,
+        borderRadius: 23,
+        borderWidth: 1,
+        borderColor: PIX_SURFACE.line,
+        backgroundColor: PIX_SURFACE.soft,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    secondaryActionText: {
+        color: PIX_SURFACE.leaf,
+        fontFamily: fonts.Medium,
+        fontSize: 12,
+        lineHeight: 19,
+        textAlign: 'center',
     },
 
     // Loading
@@ -1259,21 +1423,28 @@ const styles = StyleSheet.create({
     
     // QR Code Image
     qrCodeImage: {
-        width: 200,
-        height: 200,
-        borderRadius: radius.sm,
+        width: 145,
+        height: 145,
+        borderRadius: 8,
     },
     
     // Confirmed
     confirmedContainer: {
         alignItems: 'center',
-        marginTop: 10,
+        marginTop: 0,
     },
     confirmedText: {
         fontFamily: fonts.SemiBold,
         fontSize: typography.body.size,
         lineHeight: typography.body.lineHeight,
         marginTop: 8,
+    },
+    automaticText: {
+        color: PIX_SURFACE.muted,
+        fontFamily: fonts.Regular,
+        fontSize: 11,
+        lineHeight: 18,
+        textAlign: 'center',
     },
     searchingContainer: {
         marginTop: 12,

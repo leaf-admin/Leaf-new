@@ -6,6 +6,7 @@ import BottomSheetWrapper from './BottomSheetWrapper';
 import { createPixCharge, checkPaymentStatus } from '../services/paymentService';
 import { getFinalFareValue } from '../utils/minimumFareValidator';
 import { useTranslation } from './i18n/LanguageProvider';
+import SecurePaymentBadge from './payment/SecurePaymentBadge';
 
 
 const PixPaymentBottomSheet = ({ 
@@ -97,6 +98,7 @@ const PixPaymentBottomSheet = ({
     <View style={styles.container}>
       <View style={styles.header}>
         <Text style={styles.title}>Pagamento PIX</Text>
+        <SecurePaymentBadge style={styles.securePaymentBadge} color="#666" />
         <Text style={styles.subtitle}>Escaneie o QR Code para pagar</Text>
       </View>
 
@@ -179,6 +181,10 @@ const styles = StyleSheet.create({
     color: '#666',
     textAlign: 'center',
   },
+  securePaymentBadge: {
+    marginTop: -4,
+    marginBottom: 8,
+  },
   qrContainer: {
     padding: 20,
     backgroundColor: 'white',
@@ -236,4 +242,4 @@ const styles = StyleSheet.create({
   },
 });
 
-export default PixPaymentBottomSheet; 
+export default PixPaymentBottomSheet;

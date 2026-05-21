@@ -19,6 +19,8 @@ function resolveHasDrivers(availability) {
 async function performCreateBookingAvailabilityPrecheck({
     hasConfirmedPayment,
     pickupLocation,
+    destinationLocation,
+    preferences = {},
     requestedCarType,
     checkAvailability,
     logStructured = () => {},
@@ -39,6 +41,8 @@ async function performCreateBookingAvailabilityPrecheck({
 
     try {
         const availabilityPromise = checkAvailability(pickupLocation, {
+            destinationLocation,
+            preferences,
             carType: requestedCarType
         });
         const availability = Number.isFinite(timeoutMs) && timeoutMs > 0

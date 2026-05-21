@@ -18,7 +18,9 @@ export default function PrototypeScreenTransition({
 
   return (
     <Animated.View
-      entering={FadeIn.duration(motion.timing.quick).easing(enterEasing)}
+      entering={FadeIn.duration(motion.timing.quick)
+        .easing(enterEasing)
+        .withInitialValues({ opacity: 0.96 })}
       exiting={FadeOut.duration(motion.timing.quick).easing(exitEasing)}
       style={[styles.container, style]}
     >

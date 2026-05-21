@@ -45,6 +45,8 @@ function getPilotLaunchFlags() {
     pilotControlled: isPilotControlledLaunch(),
     driverWithdrawalsEnabled: resolvePilotFeature('ENABLE_DRIVER_WITHDRAWALS', false),
     referralProgramsEnabled: resolvePilotFeature('ENABLE_REFERRAL_PROGRAMS', true),
+    campaignCenterEnabled: resolvePilotFeature('ENABLE_CAMPAIGN_CENTER', true),
+    demandPredictionEnabled: resolvePilotFeature('ENABLE_DEMAND_PREDICTION', false),
     softBanEnforcementEnabled: resolvePilotFeature('ENABLE_SOFT_BAN_ENFORCEMENT', true),
     adminMutationsEnabled: resolvePilotFeature('ENABLE_ADMIN_MUTATIONS', true),
   };

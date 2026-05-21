@@ -18,6 +18,7 @@ import { createPixCharge, checkPaymentStatus } from '../services/paymentService'
 import { updateTripStatus } from '../actions/tripActions';
 import { formatMinimumFare, getFinalFareValue } from '../utils/minimumFareValidator';
 import { useTranslation } from './i18n/LanguageProvider';
+import SecurePaymentBadge from './payment/SecurePaymentBadge';
 
 
 const { width } = Dimensions.get('window');
@@ -179,6 +180,7 @@ const PixPaymentScreen = ({ route }) => {
       {/* Header */}
               <View style={styles.header}>
           <Text style={styles.title}>Pagamento PIX</Text>
+          <SecurePaymentBadge style={styles.securePaymentBadge} color="#666" />
           <Text style={styles.subtitle}>Escaneie o QR Code para pagar</Text>
           <Text style={styles.minimumFare}>Valor mínimo: {formatMinimumFare()}</Text>
           {(() => {
@@ -268,6 +270,10 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     color: '#333',
     marginBottom: 5,
+  },
+  securePaymentBadge: {
+    marginTop: -2,
+    marginBottom: 8,
   },
   subtitle: {
     fontSize: 16,
@@ -410,4 +416,4 @@ const styles = StyleSheet.create({
   },
 });
 
-export default PixPaymentScreen; 
+export default PixPaymentScreen;

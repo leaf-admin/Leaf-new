@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { ActivityIndicator, Alert, FlatList, StatusBar, StyleSheet, Text, TextInput, TouchableOpacity, View, useWindowDimensions } from 'react-native';
+import { ActivityIndicator, Alert, FlatList, KeyboardAvoidingView, Platform, StatusBar, StyleSheet, Text, TextInput, TouchableOpacity, View, useWindowDimensions } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { fonts } from '../../theme/runtimeTokens';
@@ -88,70 +88,76 @@ export default function RobotaxiChatScreen({ navigation, route }) {
           dragEnabled={false}
           sheetStyle={styles.sheetWrap}
         >
-          <PrototypeMenuSurface
-            onLayout={handlePanelLayout}
-            eyebrow="Canal direto"
-            title="Chat"
-            subtitle="Converse com motorista e suporte sem sair do contexto da viagem."
-            fullScreen
-            style={{
-              paddingTop: insets.top + SURFACE_TOP_PADDING,
-              paddingBottom: Math.max(insets.bottom, SURFACE_BOTTOM_PADDING),
-            }}
-            bodyStyle={styles.body}
-            headerAccessory={<PrototypeMenuCloseButton onPress={handleDismiss} />}
+          <KeyboardAvoidingView
+            behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+            keyboardVerticalOffset={Math.max(0, insets.top - 4)}
+            style={styles.keyboardAvoiding}
           >
-            <FlatList
-              data={messages}
-              keyExtractor={(item, index) => String(item?.id || item?.messageId || `chat-${index}`)}
-              style={styles.list}
-              contentContainerStyle={styles.listContent}
-              showsVerticalScrollIndicator={false}
-              renderItem={({ item }) => {
-                const fromYou = item.author === 'you';
-                return (
-                  <View style={[styles.messageRow, fromYou ? styles.messageRowRight : styles.messageRowLeft]}>
-                    <View style={[styles.bubble, fromYou ? styles.bubbleYou : styles.bubbleDriver]}>
-                      <Text style={styles.bubbleText}>{item.text}</Text>
-                      <Text style={styles.bubbleMeta}>{formatTimestamp(item.timestamp)}</Text>
-                    </View>
-                  </View>
-                );
+            <PrototypeMenuSurface
+              onLayout={handlePanelLayout}
+              eyebrow="Canal direto"
+              title="Chat"
+              subtitle="Converse com motorista e suporte sem sair do contexto da viagem."
+              fullScreen
+              style={{
+                paddingTop: insets.top + SURFACE_TOP_PADDING,
+                paddingBottom: Math.max(insets.bottom, SURFACE_BOTTOM_PADDING),
               }}
-              ListEmptyComponent={
-                <View style={styles.emptyWrap}>
-                  {chatLoading ? <ActivityIndicator size="small" color={color.accent.primary} /> : null}
-                  <Text style={styles.emptyText}>{chatLoading ? 'Carregando mensagens...' : 'Sem mensagens para esta corrida.'}</Text>
-                </View>
-              }
-            />
+              bodyStyle={styles.body}
+              headerAccessory={<PrototypeMenuCloseButton onPress={handleDismiss} />}
+            >
+              <FlatList
+                data={messages}
+                keyExtractor={(item, index) => String(item?.id || item?.messageId || `chat-${index}`)}
+                style={styles.list}
+                contentContainerStyle={styles.listContent}
+                showsVerticalScrollIndicator={false}
+                renderItem={({ item }) => {
+                  const fromYou = item.author === 'you';
+                  return (
+                    <View style={[styles.messageRow, fromYou ? styles.messageRowRight : styles.messageRowLeft]}>
+                      <View style={[styles.bubble, fromYou ? styles.bubbleYou : styles.bubbleDriver]}>
+                        <Text style={styles.bubbleText}>{item.text}</Text>
+                        <Text style={styles.bubbleMeta}>{formatTimestamp(item.timestamp)}</Text>
+                      </View>
+                    </View>
+                  );
+                }}
+                ListEmptyComponent={
+                  <View style={styles.emptyWrap}>
+                    {chatLoading ? <ActivityIndicator size="small" color={color.accent.primary} /> : null}
+                    <Text style={styles.emptyText}>{chatLoading ? 'Carregando mensagens...' : 'Sem mensagens para esta corrida.'}</Text>
+                  </View>
+                }
+              />
 
-            <View style={styles.inputRow}>
-              <View style={styles.inputWrap}>
-                <Ionicons name="chatbubble-ellipses-outline" size={16} color={color.text.muted} />
-                <TextInput
-                  style={styles.inputText}
-                  value={draft}
-                  onChangeText={setDraft}
-                  placeholder="Enviar mensagem..."
-                  placeholderTextColor={color.text.muted}
-                  editable={!chatSending}
-                  returnKeyType="send"
-                  onSubmitEditing={handleSend}
-                />
+              <View style={styles.inputRow}>
+                <View style={styles.inputWrap}>
+                  <Ionicons name="chatbubble-ellipses-outline" size={16} color={color.text.muted} />
+                  <TextInput
+                    style={styles.inputText}
+                    value={draft}
+                    onChangeText={setDraft}
+                    placeholder="Enviar mensagem..."
+                    placeholderTextColor={color.text.muted}
+                    editable={!chatSending}
+                    returnKeyType="send"
+                    onSubmitEditing={handleSend}
+                  />
+                </View>
+
+                <TouchableOpacity style={[styles.sendButton, chatSending && styles.sendButtonDisabled]} activeOpacity={0.82} onPress={handleSend} disabled={chatSending}>
+                  {chatSending ? (
+                    <ActivityIndicator size="small" color={color.accent.contrast} />
+                  ) : (
+                    <Ionicons name="send" size={16} color={color.accent.contrast} />
+                  )}
+                </TouchableOpacity>
               </View>
 
-              <TouchableOpacity style={[styles.sendButton, chatSending && styles.sendButtonDisabled]} activeOpacity={0.82} onPress={handleSend} disabled={chatSending}>
-                {chatSending ? (
-                  <ActivityIndicator size="small" color={color.accent.contrast} />
-                ) : (
-                  <Ionicons name="send" size={16} color={color.accent.contrast} />
-                )}
-              </TouchableOpacity>
-            </View>
-
-            {chatError ? <Text style={styles.errorText}>{chatError}</Text> : null}
-          </PrototypeMenuSurface>
+              {chatError ? <Text style={styles.errorText}>{chatError}</Text> : null}
+            </PrototypeMenuSurface>
+          </KeyboardAvoidingView>
         </PrototypeDismissibleSheet>
       </View>
     </PrototypeScreenTransition>
@@ -165,6 +171,9 @@ const styles = StyleSheet.create({
   },
   sheetWrap: {
     ...StyleSheet.absoluteFillObject,
+  },
+  keyboardAvoiding: {
+    flex: 1,
   },
   body: {
     flex: 1,

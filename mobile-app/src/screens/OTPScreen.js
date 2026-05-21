@@ -53,7 +53,7 @@ export default function OTPScreen({ navigation, route }) {
 
     const handleContinue = async () => {
         if (!otp || otp.replace(/\D/g, '').length !== 6) {
-            Alert.alert('Atenção', 'Digite o código de 6 dígitos recebido por SMS.');
+            Alert.alert('Atenção', 'Digite o código de 6 dígitos que enviamos por SMS.');
             return;
         }
 
@@ -99,7 +99,7 @@ export default function OTPScreen({ navigation, route }) {
             });
         } catch (error) {
             Logger.error('Erro na verificação do OTP:', error);
-            Alert.alert('Erro', 'Código inválido ou expirado. Tente novamente.');
+            Alert.alert('Código não confirmado', 'Não conseguimos confirmar esse código. Verifique e tente novamente.');
         }
     };
 
@@ -126,7 +126,7 @@ export default function OTPScreen({ navigation, route }) {
             }
         } catch (error) {
             Logger.error('Erro ao reenviar código:', error);
-            Alert.alert('Erro', 'Erro ao reenviar código. Tente novamente.');
+            Alert.alert('Erro', 'Não foi possível enviar um novo código. Tente novamente.');
             setCanResend(true);
         }
     };
@@ -157,19 +157,19 @@ export default function OTPScreen({ navigation, route }) {
         <OnboardingLayout
             progress={progressBar}
             onContinue={handleContinue}
-            continueLabel="Verificar código"
+            continueLabel="Confirmar"
             continueDisabled={!isOtpValid}
         >
             <View style={styles.container}>
                 <Text style={styles.title}>
-                    {userType === 'driver' ? 'Verificação de Parceiro' : 'Verificação de Passageiro'}
+                    Confira seu SMS
                 </Text>
                 <Text style={styles.subtitle}>
-                    Digite o código de 6 dígitos enviado para seu telefone
+                    Enviamos um código de 6 dígitos para confirmar seu celular.
                 </Text>
                 
                 <View style={styles.otpContainer}>
-                    <Text style={styles.otpLabel}>Código de verificação</Text>
+                    <Text style={styles.otpLabel}>Código recebido</Text>
                     <TextInputMask
                         type={'custom'}
                         options={{ mask: '9 9 9 9 9 9' }}
@@ -190,12 +190,12 @@ export default function OTPScreen({ navigation, route }) {
                     disabled={!canResend}
                 >
                     <Text style={styles.resendButtonText}>
-                        {canResend ? 'Reenviar código' : `Reenviar em ${timer}s`}
+                        {canResend ? 'Enviar novamente' : `Novo código em ${timer}s`}
                     </Text>
                 </TouchableOpacity>
                 
                 <Text style={styles.infoText}>
-                    Não recebeu o código? Verifique se o número está correto
+                    Se não chegou, confira o número ou tente enviar novamente.
                 </Text>
             </View>
         </OnboardingLayout>

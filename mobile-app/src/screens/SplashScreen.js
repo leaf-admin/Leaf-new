@@ -8,6 +8,7 @@ import { useOnboardingPersistence } from '../hooks/useOnboardingPersistence';
 import AuthFlow from '../components/auth/AuthFlow';
 import { restoreQaSeedProfile } from '../utils/qaSeedProfile';
 import { PROFILE_SELECTION_STEP_INDEX } from '../utils/onboardingSessionState';
+import { fonts } from '../theme/runtimeTokens';
 
 const AUTH_UID_STORAGE_KEY = '@auth_uid';
 const USER_DATA_STORAGE_KEY = '@user_data';
@@ -441,6 +442,6 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '500',
     marginTop: 12,
-    fontFamily: 'Roboto-Medium',
+    fontFamily: fonts.Medium,
   },
 }); 

@@ -1233,6 +1233,35 @@ label {
   max-width: 100%;
 }
 
+.row-actions {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+
+.button-secondary {
+  background: #ffffff;
+  color: var(--text-strong);
+  border-color: var(--line-strong);
+}
+
+.muted {
+  color: var(--text-muted);
+  font-size: 0.78rem;
+}
+
+.success-text {
+  color: var(--success-text);
+  background: var(--success-bg);
+  border: 1px solid var(--success-line);
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+  margin: 12px 0 0;
+  font-size: 0.86rem;
+  font-weight: 700;
+}
+
 .list-scroll {
   max-height: clamp(220px, 44vh, 560px);
   overflow: auto;
@@ -1490,6 +1519,13 @@ code {
   box-shadow: none;
 }
 
+.ticket-meta-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 5px;
+}
+
 .ticket-btn:hover {
   border-color: #c8d0da;
 }
@@ -1509,6 +1545,98 @@ code {
   display: grid;
   gap: 8px;
   background: #ffffff;
+}
+
+.support-message-row {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  padding: 8px 9px;
+  display: grid;
+  gap: 3px;
+  background: #f8fafc;
+}
+
+.support-message-row strong {
+  color: var(--text);
+  font-size: 0.76rem;
+}
+
+.support-message-row span {
+  color: var(--text-soft);
+  font-size: 0.82rem;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.support-message-row small {
+  color: var(--text-muted);
+  font-size: 0.7rem;
+}
+
+.support-message-agent {
+  background: #f2f6fb;
+  border-color: #d7e1ee;
+}
+
+.orchestrator-grid {
+  grid-template-columns: 1fr;
+}
+
+.orchestrator-summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 7px;
+}
+
+.run-list {
+  display: grid;
+  gap: 6px;
+}
+
+.run-row {
+  display: grid;
+  grid-template-columns: minmax(120px, 1fr) auto auto;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 0;
+  border-top: 1px solid var(--line);
+  color: var(--text-soft);
+  font-size: 0.78rem;
+}
+
+.run-row:first-child {
+  border-top: 0;
+}
+
+.run-row strong {
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+
+.agent-recommendation {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: #ffffff;
+  padding: 10px;
+  display: grid;
+  gap: 8px;
+}
+
+.agent-recommendation p {
+  margin: 0;
+  color: var(--text-soft);
+  font-size: 0.83rem;
+  line-height: 1.4;
+}
+
+.agent-rationale {
+  margin: 0;
+  padding-left: 17px;
+  color: var(--text-muted);
+  font-size: 0.76rem;
+  display: grid;
+  gap: 4px;
 }
 
 .mode-btn {

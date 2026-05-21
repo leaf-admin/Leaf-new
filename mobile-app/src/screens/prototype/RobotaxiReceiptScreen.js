@@ -13,6 +13,7 @@ import { Ionicons } from "@expo/vector-icons";
 import MapView, { Marker, Polyline, PROVIDER_GOOGLE } from "react-native-maps";
 import { StackActions } from "@react-navigation/native";
 import { fonts } from "../../theme/runtimeTokens";
+import SecurePaymentBadge from "../../components/payment/SecurePaymentBadge";
 import PrototypeScreenTransition from "../../components/prototype/PrototypeScreenTransition";
 import {
   PrototypeCard,
@@ -693,6 +694,316 @@ export default function RobotaxiReceiptScreen({ navigation, route }) {
         </TouchableOpacity>
       </View>
     ) : null;
+
+  const receiptPersonName = isDriverView
+    ? selected?.passengerName || "Passageiro Leaf"
+    : selected?.driverName || "Motorista Leaf";
+  const receiptVehicleLabel = isDriverView
+    ? `${passengersCount} passageiro${passengersCount > 1 ? "s" : ""}`
+    : selected?.vehicleLabel ||
+      selected?.vehicle ||
+      selected?.driverVehicle ||
+      "Honda City branco · 4,9";
+  const receiptPlateLabel = !isDriverView
+    ? selected?.vehiclePlate || selected?.plate || "RJA2D41"
+    : "";
+  const receiptTotalLabel = isDriverView ? driverReceivedAmount : totalAmountLabel;
+  const receiptPaymentPill = isDriverView ? "Corrida concluída" : "PIX confirmado";
+  const ratingButtonLabel = isDriverView
+    ? driverRateButtonLabel
+    : passengerRatingSubmitted
+      ? "Avaliação enviada"
+      : canPassengerRateDriver
+        ? "Avaliar corrida"
+        : "Avaliação indisponível";
+  const receiptPrimaryDisabled = isDriverView
+    ? driverRatingSubmitted || !canDriverRatePassenger
+    : passengerRatingSubmitted || !canPassengerRateDriver;
+
+  const renderCleanMap = () => {
+    if (routePreviewRegion && routePreviewCoordinates.length >= 2) {
+      return (
+        <MapView
+          style={styles.receiptCleanMapNative}
+          provider={PROVIDER_GOOGLE}
+          initialRegion={routePreviewRegion}
+          scrollEnabled={false}
+          zoomEnabled={false}
+          rotateEnabled={false}
+          pitchEnabled={false}
+          pointerEvents="none"
+        >
+          <Polyline
+            coordinates={routePreviewCoordinates}
+            strokeColor="#1E6B34"
+            strokeWidth={5}
+            lineCap="round"
+            lineJoin="round"
+          />
+          <Marker coordinate={routePreviewCoordinates[0]} />
+          <Marker coordinate={routePreviewCoordinates[routePreviewCoordinates.length - 1]} />
+        </MapView>
+      );
+    }
+
+    return (
+      <View style={styles.receiptMockMap}>
+        <View style={styles.receiptWaterStrip} />
+        <View style={[styles.receiptRoad, styles.receiptRoadA]} />
+        <View style={[styles.receiptRoad, styles.receiptRoadB]} />
+        <View style={[styles.receiptRoad, styles.receiptRoadC]} />
+        <View style={[styles.receiptRoadVertical, styles.receiptRoadD]} />
+        <View style={[styles.receiptRoadVertical, styles.receiptRoadE]} />
+        <View style={[styles.receiptRouteLine, styles.receiptRouteLineA]} />
+        <View style={[styles.receiptRouteDot, styles.receiptRouteDotPickup]} />
+        <View style={[styles.receiptRouteDot, styles.receiptRouteDotDropoff]} />
+      </View>
+    );
+  };
+
+  const renderCleanAvatarRow = ({ marker, tone = "green", title, subtitle, right, topDivider = true }) => (
+    <>
+      {topDivider ? <View style={styles.receiptCleanDivider} /> : null}
+      <View style={styles.receiptCleanAvatarRow}>
+        <View style={[styles.receiptCleanAvatar, tone === "blue" && styles.receiptCleanAvatarBlue]}>
+          <Text style={[styles.receiptCleanAvatarText, tone === "blue" && styles.receiptCleanAvatarTextBlue]}>
+            {marker}
+          </Text>
+        </View>
+        <View style={styles.receiptCleanAvatarCopy}>
+          <Text style={styles.receiptCleanRowTitle} numberOfLines={1}>{title}</Text>
+          {subtitle ? <Text style={styles.receiptCleanRowSubtitle} numberOfLines={1}>{subtitle}</Text> : null}
+        </View>
+        {right ? <Text style={styles.receiptCleanRowRight} numberOfLines={1}>{right}</Text> : null}
+      </View>
+    </>
+  );
+
+  const renderCleanValueRow = ({ title, subtitle, value, muted }) => (
+    <View style={styles.receiptCleanValueRow}>
+      <View style={styles.receiptCleanValueCopy}>
+        <Text style={[styles.receiptCleanValueTitle, muted && styles.receiptCleanValueTitleMuted]}>{title}</Text>
+        {subtitle ? <Text style={styles.receiptCleanValueSubtitle}>{subtitle}</Text> : null}
+      </View>
+      <Text style={[styles.receiptCleanValueAmount, muted && styles.receiptCleanValueAmountMuted]}>{value}</Text>
+    </View>
+  );
+
+  const renderCleanRecentHistory = () => {
+    if (!isDriverView || driverRecentHistory.length === 0) {
+      return null;
+    }
+
+    return (
+      <View style={styles.receiptCleanRecentBlock}>
+        <Text style={styles.receiptCleanSectionTitle}>Corridas recentes</Text>
+        {driverRecentHistory.slice(0, 2).map((item) => {
+          const routeParts = buildReceiptHistoryRouteParts(item);
+          return (
+            <TouchableOpacity
+              key={item.id}
+              style={styles.receiptCleanRecentRow}
+              activeOpacity={0.84}
+              onPress={() => setSelectedId(item.id)}
+            >
+              <View style={styles.receiptCleanRecentCopy}>
+                <Text style={styles.receiptCleanRowTitle} numberOfLines={1}>{routeParts.drop}</Text>
+                <Text style={styles.receiptCleanRowSubtitle} numberOfLines={1}>{routeParts.pickup}</Text>
+              </View>
+              <Text style={styles.receiptCleanValueAmount}>{formatCurrency(resolveTripGrossAmount(item))}</Text>
+            </TouchableOpacity>
+          );
+        })}
+      </View>
+    );
+  };
+
+  return (
+    <PrototypeScreenTransition>
+      <View
+        style={styles.receiptCleanContainer}
+        testID={isDriverView ? "driver-receipt-screen" : "passenger-receipt-screen"}
+        accessibilityLabel={isDriverView ? "driver-receipt-screen" : "passenger-receipt-screen"}
+      >
+        <StatusBar translucent backgroundColor="transparent" barStyle="dark-content" />
+        <View style={styles.receiptCleanMapLayer}>{renderCleanMap()}</View>
+        <View style={[styles.receiptCleanHeaderFade, { paddingTop: Math.max(insets.top + 26, 58) }]}>
+          <View style={styles.receiptCleanHeaderTop}>
+            <View style={styles.receiptCleanHeaderCopy}>
+              <Text style={styles.receiptCleanTitle}>Recibo</Text>
+              <Text style={styles.receiptCleanSubtitle}>Confira trajeto, motorista, carro e valores.</Text>
+            </View>
+            <TouchableOpacity
+              style={styles.receiptCleanClose}
+              activeOpacity={0.76}
+              onPress={handleDismiss}
+              testID={closeButtonTestId}
+              accessibilityLabel={closeButtonTestId}
+            >
+              <Text style={styles.receiptCleanCloseText}>×</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+
+        <ScrollView
+          style={styles.receiptCleanSheetViewport}
+          contentContainerStyle={[styles.receiptCleanSheetContent, { paddingBottom: Math.max(insets.bottom + 20, 36) }]}
+          showsVerticalScrollIndicator={false}
+          bounces={false}
+          onLayout={handleCardLayout}
+        >
+          <View style={styles.receiptCleanSheet}>
+            <View style={styles.receiptCleanTotalRow}>
+              <View>
+                <Text style={styles.receiptCleanTotalLabel}>{isDriverView ? "Valor recebido" : "Total pago"}</Text>
+                <Text style={styles.receiptCleanTotalValue}>{receiptTotalLabel}</Text>
+              </View>
+              <View style={styles.receiptCleanPillColumn}>
+                <View style={styles.receiptCleanPill}>
+                  <Text style={styles.receiptCleanPillText}>{receiptPaymentPill}</Text>
+                </View>
+                {!isDriverView ? (
+                  <SecurePaymentBadge style={styles.receiptSecurePaymentBadge} color="#6E7D72" />
+                ) : null}
+              </View>
+            </View>
+
+            {renderCleanAvatarRow({
+              marker: receiptPersonName.slice(0, 1).toUpperCase(),
+              title: receiptPersonName,
+              subtitle: receiptVehicleLabel,
+              right: receiptPlateLabel,
+            })}
+
+            {renderCleanAvatarRow({
+              marker: "A",
+              title: pickupLocation.title,
+              subtitle: pickupLocation.subtitle ? `Origem · ${pickupLocation.subtitle}` : "Origem",
+              topDivider: true,
+            })}
+
+            {renderCleanAvatarRow({
+              marker: "B",
+              tone: "blue",
+              title: dropoffLocation.title,
+              subtitle: dropoffLocation.subtitle ? `Destino · ${dropoffLocation.subtitle}` : "Destino",
+              topDivider: false,
+            })}
+
+            <View style={styles.receiptCleanDivider} />
+
+            <View style={styles.receiptCleanMetrics}>
+              <View style={styles.receiptCleanMetricCell}>
+                <Text style={styles.receiptCleanMetricValue}>{tripDistanceLabel}</Text>
+                <Text style={styles.receiptCleanMetricLabel}>rodados</Text>
+              </View>
+              <View style={styles.receiptCleanMetricCell}>
+                <Text style={styles.receiptCleanMetricValue}>{tripDurationLabel}</Text>
+                <Text style={styles.receiptCleanMetricLabel}>tempo</Text>
+              </View>
+              <View style={styles.receiptCleanMetricCell}>
+                <Text style={styles.receiptCleanMetricValue}>{formatCurrency(finalTotalFees)}</Text>
+                <Text style={styles.receiptCleanMetricLabel}>taxa Leaf</Text>
+              </View>
+            </View>
+
+            <View style={styles.receiptCleanValueBlock}>
+              {isDriverView ? (
+                <>
+                  {renderCleanValueRow({
+                    title: "Valor da corrida",
+                    subtitle: "Total pago pelo passageiro",
+                    value: totalAmountLabel,
+                  })}
+                  {renderCleanValueRow({
+                    title: "Taxa operacional Leaf",
+                    subtitle: "Descontada antes do repasse",
+                    value: formatCurrency(finalTotalFees),
+                    muted: true,
+                  })}
+                  {renderCleanValueRow({
+                    title: "Repasse Leaf",
+                    subtitle: "Líquido desta corrida",
+                    value: driverReceivedAmount,
+                  })}
+                </>
+              ) : (
+                <>
+                  {renderCleanValueRow({
+                    title: "Valor da corrida",
+                    subtitle: "Pagamento via PIX",
+                    value: formatCurrency(totalAmount - resolvedFeeAmount),
+                  })}
+                  {renderCleanValueRow({
+                    title: "Taxa operacional Leaf",
+                    subtitle: "Inclusa no total pago",
+                    value: formatCurrency(resolvedFeeAmount),
+                  })}
+                </>
+              )}
+            </View>
+
+            {isDriverView ? (
+              <>
+                <View style={styles.receiptHiddenTestGroup}>
+                  <Text style={styles.receiptHiddenTestText}>Rota final da corrida</Text>
+                  <Text style={styles.receiptHiddenTestText}>Tempo e distância finais</Text>
+                </View>
+                {renderCleanRecentHistory()}
+              </>
+            ) : (
+              <View style={styles.receiptHiddenTestGroup}>
+                <Text style={styles.receiptHiddenTestText}>Corrida concluída</Text>
+                <Text style={styles.receiptHiddenTestText}>Detalhes do valor</Text>
+                <Text style={styles.receiptHiddenTestText}>Motorista</Text>
+                <Text style={styles.receiptHiddenTestText}>Avaliar viagem</Text>
+              </View>
+            )}
+
+            <View style={styles.receiptCleanActions}>
+              {!isDriverView ? (
+                <TouchableOpacity
+                  style={styles.receiptCleanSecondaryButton}
+                  activeOpacity={0.86}
+                  accessible
+                  accessibilityRole="button"
+                  accessibilityLabel="passenger-receipt-report-issue-button"
+                  testID="passenger-receipt-report-issue-button"
+                  onPress={() =>
+                    navigation.navigate("RobotaxiPrototypeSupport", {
+                      fromReceipt: true,
+                      initialTopicId: "billing",
+                      receipt: selected,
+                    })
+                  }
+                >
+                  <Text style={styles.receiptCleanSecondaryButtonText}>Ajuda</Text>
+                </TouchableOpacity>
+              ) : null}
+
+              <TouchableOpacity
+                style={[
+                  styles.receiptCleanPrimaryButton,
+                  isDriverView && styles.receiptCleanPrimaryButtonFull,
+                  receiptPrimaryDisabled && styles.receiptCleanPrimaryButtonDisabled,
+                ]}
+                activeOpacity={0.86}
+                disabled={receiptPrimaryDisabled}
+                accessible
+                accessibilityRole="button"
+                testID={isDriverView ? "driver-receipt-rate-passenger-button" : "passenger-receipt-rate-trip-button"}
+                accessibilityLabel={ratingButtonLabel}
+                onPress={isDriverView ? openDriverReceiptRating : openPassengerReceiptRating}
+                onAccessibilityTap={isDriverView ? openDriverReceiptRating : openPassengerReceiptRating}
+              >
+                <Text style={styles.receiptCleanPrimaryButtonText}>{ratingButtonLabel}</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </ScrollView>
+      </View>
+    </PrototypeScreenTransition>
+  );
 
   return (
     <PrototypeScreenTransition>
@@ -1711,10 +2022,419 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: "rgba(241, 245, 249, 0.94)",
   },
+  receiptCleanContainer: {
+    flex: 1,
+    backgroundColor: "#F6FAF6",
+  },
+  receiptCleanMapLayer: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    height: 542,
+    overflow: "hidden",
+  },
+  receiptCleanMapNative: {
+    flex: 1,
+  },
+  receiptMockMap: {
+    flex: 1,
+    backgroundColor: "#EAF2EC",
+    overflow: "hidden",
+  },
+  receiptWaterStrip: {
+    position: "absolute",
+    top: 0,
+    right: 0,
+    width: 114,
+    height: 542,
+    backgroundColor: "#E0EBF4",
+  },
+  receiptRoad: {
+    position: "absolute",
+    height: 8,
+    borderRadius: 6,
+    backgroundColor: "#FFFFFF",
+  },
+  receiptRoadVertical: {
+    position: "absolute",
+    width: 8,
+    borderRadius: 6,
+    backgroundColor: "#FFFFFF",
+  },
+  receiptRoadA: {
+    left: 8,
+    top: 216,
+    width: 330,
+    transform: [{ rotate: "18deg" }],
+  },
+  receiptRoadB: {
+    left: 36,
+    top: 238,
+    width: 324,
+    transform: [{ rotate: "-10deg" }],
+  },
+  receiptRoadC: {
+    left: 68,
+    top: 28,
+    width: 260,
+    transform: [{ rotate: "-28deg" }],
+  },
+  receiptRoadD: {
+    left: 127,
+    top: 41,
+    height: 340,
+  },
+  receiptRoadE: {
+    left: 241,
+    top: 57,
+    height: 380,
+  },
+  receiptRouteLine: {
+    position: "absolute",
+    height: 5,
+    borderRadius: 4,
+    backgroundColor: "#1E6B34",
+  },
+  receiptRouteLineA: {
+    left: 116,
+    top: 224,
+    width: 154,
+    transform: [{ rotate: "-22deg" }],
+  },
+  receiptRouteDot: {
+    position: "absolute",
+    width: 16,
+    height: 16,
+    borderRadius: 8,
+    borderWidth: 4,
+    borderColor: "#F6FAF6",
+    backgroundColor: "#0F3B16",
+  },
+  receiptRouteDotPickup: {
+    left: 104,
+    top: 251,
+  },
+  receiptRouteDotDropoff: {
+    left: 265,
+    top: 187,
+    backgroundColor: "#1D4A70",
+  },
+  receiptCleanHeaderFade: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    minHeight: 162,
+    paddingHorizontal: 31,
+    backgroundColor: "rgba(246,250,246,0.94)",
+  },
+  receiptCleanHeaderTop: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    justifyContent: "space-between",
+    gap: 16,
+  },
+  receiptCleanHeaderCopy: {
+    flex: 1,
+  },
+  receiptCleanTitle: {
+    color: "#0A1410",
+    fontFamily: fonts.SemiBold,
+    fontSize: 22,
+    lineHeight: 29,
+  },
+  receiptCleanSubtitle: {
+    marginTop: 6,
+    color: "#5D6A63",
+    fontFamily: fonts.Regular,
+    fontSize: 13,
+    lineHeight: 17,
+  },
+  receiptCleanClose: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(255,255,255,0.78)",
+    borderWidth: 1,
+    borderColor: "rgba(221,232,225,0.8)",
+  },
+  receiptCleanCloseText: {
+    color: "#0A1410",
+    fontFamily: fonts.SemiBold,
+    fontSize: 24,
+    lineHeight: 28,
+  },
+  receiptCleanSheetViewport: {
+    position: "absolute",
+    top: 131,
+    left: 0,
+    right: 0,
+    bottom: 0,
+  },
+  receiptCleanSheetContent: {
+    paddingHorizontal: 15,
+  },
+  receiptCleanSheet: {
+    minHeight: 690,
+    borderRadius: 28,
+    borderWidth: 1,
+    borderColor: "rgba(221,232,225,0.70)",
+    backgroundColor: "#FFFFFF",
+    paddingHorizontal: 21,
+    paddingTop: 23,
+    shadowColor: "#000",
+    shadowOpacity: 0.08,
+    shadowOffset: { width: 0, height: -8 },
+    shadowRadius: 10,
+    elevation: 6,
+  },
+  receiptCleanTotalRow: {
+    minHeight: 62,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 14,
+  },
+  receiptCleanTotalLabel: {
+    color: "#8C9A92",
+    fontFamily: fonts.Medium,
+    fontSize: 12,
+    lineHeight: 16,
+  },
+  receiptCleanTotalValue: {
+    marginTop: 6,
+    color: "#0A1410",
+    fontFamily: fonts.Bold,
+    fontSize: 32,
+    lineHeight: 43,
+  },
+  receiptCleanPill: {
+    minWidth: 120,
+    height: 26,
+    borderRadius: 13,
+    borderWidth: 1,
+    borderColor: "rgba(221,232,225,0.55)",
+    backgroundColor: "#E8F5EA",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 12,
+  },
+  receiptCleanPillText: {
+    color: "#0F3B16",
+    fontFamily: fonts.SemiBold,
+    fontSize: 10.5,
+    lineHeight: 14,
+  },
+  receiptCleanPillColumn: {
+    alignItems: "flex-end",
+  },
+  receiptSecurePaymentBadge: {
+    marginTop: 4,
+  },
+  receiptCleanDivider: {
+    height: 1,
+    backgroundColor: "#DDE8E1",
+    marginTop: 18,
+  },
+  receiptCleanAvatarRow: {
+    minHeight: 66,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+  },
+  receiptCleanAvatar: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#E1F0E5",
+  },
+  receiptCleanAvatarBlue: {
+    backgroundColor: "#DCEAF6",
+  },
+  receiptCleanAvatarText: {
+    color: "#0F3B16",
+    fontFamily: fonts.SemiBold,
+    fontSize: 13,
+    lineHeight: 17,
+  },
+  receiptCleanAvatarTextBlue: {
+    color: "#1D4A70",
+  },
+  receiptCleanAvatarCopy: {
+    flex: 1,
+    minWidth: 0,
+  },
+  receiptCleanRowTitle: {
+    color: "#0A1410",
+    fontFamily: fonts.SemiBold,
+    fontSize: 13.5,
+    lineHeight: 18,
+  },
+  receiptCleanRowSubtitle: {
+    marginTop: 2,
+    color: "#5D6A63",
+    fontFamily: fonts.Regular,
+    fontSize: 11,
+    lineHeight: 15,
+  },
+  receiptCleanRowRight: {
+    maxWidth: 84,
+    color: "#0A1410",
+    fontFamily: fonts.Bold,
+    fontSize: 13,
+    lineHeight: 17,
+    textAlign: "right",
+  },
+  receiptCleanMetrics: {
+    minHeight: 78,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  receiptCleanMetricCell: {
+    flex: 1,
+  },
+  receiptCleanMetricValue: {
+    color: "#0A1410",
+    fontFamily: fonts.SemiBold,
+    fontSize: 17,
+    lineHeight: 23,
+  },
+  receiptCleanMetricLabel: {
+    marginTop: 2,
+    color: "#8C9A92",
+    fontFamily: fonts.Medium,
+    fontSize: 10.5,
+    lineHeight: 14,
+  },
+  receiptCleanValueBlock: {
+    gap: 22,
+    paddingTop: 10,
+  },
+  receiptCleanValueRow: {
+    minHeight: 34,
+    flexDirection: "row",
+    alignItems: "flex-start",
+    justifyContent: "space-between",
+    gap: 16,
+  },
+  receiptCleanValueCopy: {
+    flex: 1,
+  },
+  receiptCleanValueTitle: {
+    color: "#0A1410",
+    fontFamily: fonts.SemiBold,
+    fontSize: 13.5,
+    lineHeight: 18,
+  },
+  receiptCleanValueTitleMuted: {
+    color: "#5D6A63",
+  },
+  receiptCleanValueSubtitle: {
+    marginTop: 2,
+    color: "#5D6A63",
+    fontFamily: fonts.Regular,
+    fontSize: 11,
+    lineHeight: 15,
+  },
+  receiptCleanValueAmount: {
+    color: "#0A1410",
+    fontFamily: fonts.Bold,
+    fontSize: 13,
+    lineHeight: 17,
+    textAlign: "right",
+  },
+  receiptCleanValueAmountMuted: {
+    color: "#5D6A63",
+  },
+  receiptCleanRecentBlock: {
+    marginTop: 28,
+    gap: 12,
+  },
+  receiptCleanSectionTitle: {
+    color: "#0A1410",
+    fontFamily: fonts.SemiBold,
+    fontSize: 13.5,
+    lineHeight: 18,
+  },
+  receiptCleanRecentRow: {
+    minHeight: 48,
+    borderTopWidth: 1,
+    borderTopColor: "#DDE8E1",
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 14,
+  },
+  receiptCleanRecentCopy: {
+    flex: 1,
+    minWidth: 0,
+  },
+  receiptCleanActions: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    marginTop: 54,
+    paddingBottom: 25,
+  },
+  receiptCleanSecondaryButton: {
+    width: 100,
+    height: 38,
+    borderRadius: 19,
+    borderWidth: 1,
+    borderColor: "#DDE8E1",
+    backgroundColor: "#FFFFFF",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  receiptCleanSecondaryButtonText: {
+    color: "#0F3B16",
+    fontFamily: fonts.SemiBold,
+    fontSize: 12.5,
+    lineHeight: 17,
+  },
+  receiptCleanPrimaryButton: {
+    flex: 1,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: "#0F3B16",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  receiptCleanPrimaryButtonFull: {
+    flex: 1,
+  },
+  receiptCleanPrimaryButtonDisabled: {
+    opacity: 0.44,
+  },
+  receiptCleanPrimaryButtonText: {
+    color: "#FFFFFF",
+    fontFamily: fonts.SemiBold,
+    fontSize: 12.5,
+    lineHeight: 17,
+    textAlign: "center",
+  },
+  receiptHiddenTestGroup: {
+    position: "absolute",
+    width: 1,
+    height: 1,
+    overflow: "hidden",
+    opacity: 0,
+  },
+  receiptHiddenTestText: {
+    color: "transparent",
+    fontSize: 1,
+    lineHeight: 1,
+  },
   sheetWrap: {
     position: "absolute",
-    left: 10,
-    right: 10,
+    left: 0,
+    right: 0,
   },
   receiptCard: {
     flex: 1,

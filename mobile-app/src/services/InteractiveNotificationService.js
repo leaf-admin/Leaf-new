@@ -180,12 +180,7 @@ class InteractiveNotificationService {
                 options: [],
             });
 
-            // Categoria para chegada ao destino (sem ações, apenas informativa)
-            await Notifications.setNotificationCategoryAsync('ARRIVED_AT_DESTINATION', [], {
-                intentIdentifiers: [],
-                hiddenPreviewsBodyPlaceholder: '',
-                options: [],
-            });
+            // Chegada ao destino é informativa; Expo SDK rejeita categorias sem ações.
 
             await Notifications.setNotificationCategoryAsync('DRIVER_PICKUP_READY', getCompactCategoryActions('DRIVER_PICKUP_READY'), {
                 intentIdentifiers: [],

@@ -1,3 +1,18 @@
+function parseBookingPreferences(value) {
+    if (!value) {
+        return {};
+    }
+    if (typeof value === 'object') {
+        return { ...value };
+    }
+    try {
+        const parsed = JSON.parse(String(value));
+        return parsed && typeof parsed === 'object' ? parsed : {};
+    } catch (_error) {
+        return {};
+    }
+}
+
 function registerSocketConfirmPaymentHandler({
     socket,
     io,
@@ -91,6 +106,8 @@ function registerSocketConfirmPaymentHandler({
 
                 // Guarda de negócio: só confirma pagamento se houver motorista elegível no momento.
                 let bookingPickupLocation = null;
+                let bookingDestinationLocation = null;
+                let bookingPreferences = {};
                 let bookingCarType = null;
                 let bookingDataForPayment = {};
                 try {
@@ -98,6 +115,8 @@ function registerSocketConfirmPaymentHandler({
                     const bookingData = await redis.hgetall(`booking:${bookingId}`);
                     bookingDataForPayment = bookingData || {};
                     bookingPickupLocation = parseBookingLocation(bookingData?.pickupLocation);
+                    bookingDestinationLocation = parseBookingLocation(bookingData?.destinationLocation);
+                    bookingPreferences = parseBookingPreferences(bookingData?.preferences);
                     bookingCarType = bookingData?.carType || null;
                 } catch (bookingLookupError) {
                     logStructured('warn', 'confirmPayment: erro ao buscar booking para validação de disponibilidade', {
@@ -121,7 +140,9 @@ function registerSocketConfirmPaymentHandler({
                         );
                         const availability = await Promise.race([
                             findAvailableDriversForPickup(pickupLocationToValidate, {
-                                carType: bookingCarType
+                                carType: bookingCarType,
+                                destinationLocation: bookingDestinationLocation,
+                                preferences: bookingPreferences
                             }),
                             new Promise((_, reject) => setTimeout(() => reject(new Error('availability_check_timeout')), availabilityTimeoutMs))
                         ]);

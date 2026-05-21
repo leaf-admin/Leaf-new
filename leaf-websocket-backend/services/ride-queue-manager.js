@@ -12,6 +12,13 @@ const eventSourcing = require('./event-sourcing');
 const { logger } = require('../utils/logger');
 const { getVisibleBookingKey, BOOKING_VISIBILITY_TTL_SEC } = require('./booking-visibility-service');
 
+function serializeJSONField(value, fallback = {}) {
+    if (typeof value === 'string') {
+        return value;
+    }
+    return JSON.stringify(value || fallback);
+}
+
 function buildSerializedBookingSnapshot(bookingData, regionHash, timestamp) {
     const initialState = bookingData.state || RideStateManager.STATES.PENDING;
     const initialStatus = bookingData.status || (
@@ -32,7 +39,9 @@ function buildSerializedBookingSnapshot(bookingData, regionHash, timestamp) {
         routeDurationSecs: String(bookingData.routeDurationSecs || 0),
         tollFee: String(bookingData.tollFee || 0),
         fareSource: bookingData.fareSource || '',
-        pricingPayload: JSON.stringify(bookingData.pricingPayload || {}),
+        pricingPayload: serializeJSONField(bookingData.pricingPayload),
+        preferences: serializeJSONField(bookingData.preferences),
+        femaleDriverOnly: bookingData.femaleDriverOnly ? 'true' : 'false',
         operationalState: bookingData.operationalState || '',
         scorePressao: String(bookingData.scorePressao || 0),
         scoreExcecao: String(bookingData.scoreExcecao || 0),

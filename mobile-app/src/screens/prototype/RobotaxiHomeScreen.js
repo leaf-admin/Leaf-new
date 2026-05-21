@@ -1,9 +1,11 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, Linking, Platform, StatusBar, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
+import { ActivityIndicator, Alert, Linking, Platform, StatusBar, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useIsFocused, useNavigationState } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Polygon } from 'react-native-maps';
+import { Ionicons } from '@expo/vector-icons';
+import { fonts } from '../../theme/runtimeTokens';
 import robotaxiPrototypeTokens from '../../components/design-system/robotaxiPrototypeTokens';
 import PrototypeScreenTransition from '../../components/prototype/PrototypeScreenTransition';
 import PrototypeMapLayer from '../../components/prototype/PrototypeMapLayer';
@@ -18,7 +20,11 @@ import DriverTransientStateCard from './home/DriverTransientStateCard';
 import RobotaxiReceiptScreen from './RobotaxiReceiptScreen';
 import { PROTOTYPE_REGION } from './robotaxiPrototypeData';
 import { subscribePrototypeMapOcclusion, usePrototypeMapOcclusion } from './prototypeMapOcclusion';
-import { clearPrototypeMapRoute, subscribePrototypeMapRoute } from './prototypeMapRoute';
+import {
+  clearPrototypeMapRoute,
+  publishPrototypeMapCamera,
+  subscribePrototypeMapRoute,
+} from './prototypeMapRoute';
 import { usePrototypeRideRuntime } from './prototypeRideRuntime';
 import { resolvePassengerAutoRoute, shouldAutoSyncPassengerRoute } from './passengerFlowRouting';
 import { getSearchPresentation } from './searchPresentation';
@@ -26,6 +32,7 @@ import useSearchElapsedClock from './useSearchElapsedClock';
 import { openDriverExternalNavigation } from '../../services/DriverExternalNavigationService';
 import { fetchH3CellsForRegion } from '../../services/runtime/h3MapService';
 import WebSocketManager from '../../services/WebSocketManager';
+import { getSelfHostedApiUrl } from '../../config/ApiConfig';
 import { resolveMeaningfulAddress } from './addressLabelUtils';
 import { selectDisplayableDriverOffer } from './driverOfferPricingSnapshot';
 import {
@@ -55,13 +62,20 @@ import {
 } from './prototypeConnectionStatus';
 
 const { color } = robotaxiPrototypeTokens;
-const HOME_CARD_BOTTOM_OFFSET = 102;
-const HOME_CARD_FALLBACK_HEIGHT = 96;
-const DRIVER_BOTTOM_CTA_OFFSET = 112;
-const DRIVER_BOTTOM_CTA_FALLBACK_HEIGHT = 56;
+const HOME_CARD_BOTTOM_OFFSET = 16;
+const HOME_CARD_FALLBACK_HEIGHT = 142;
+const HOME_PICKUP_PICKER_BOTTOM_OFFSET = 26;
+const HOME_PICKUP_PICKER_FALLBACK_HEIGHT = 122;
+const DRIVER_BOTTOM_CTA_OFFSET = 16;
+const DRIVER_BOTTOM_CTA_FALLBACK_HEIGHT = 236;
 const MAP_MIN_VISIBLE_HEIGHT = 180;
 const OVERLAY_ZOOM_OUT_GAIN = 0.42;
 const MAX_OVERLAY_ZOOM_OUT_RATIO = 0.62;
+const IS_TEST_ENV = typeof process !== 'undefined' && process.env?.NODE_ENV === 'test';
+const HOME_MAP_READY_FALLBACK_MS = Platform.OS === 'android' ? 4500 : 3500;
+const HOME_MAP_READY_WARMUP_MS = Platform.OS === 'android' ? 700 : 180;
+const SHOULD_BLOCK_HOME_FIRST_PAINT_FOR_MAP = Platform.OS !== 'android';
+const PLACES_CACHE_LOOKUP_TIMEOUT_MS = 2500;
 const DEFAULT_USER_COORDINATE = {
   latitude: PROTOTYPE_REGION.latitude,
   longitude: PROTOTYPE_REGION.longitude
@@ -462,6 +476,143 @@ function compactPlaceLabel(value, fallback = '') {
   return sanitizeRouteText(firstChunk) || normalized || fallback;
 }
 
+function normalizePickupAddressText(value = '') {
+  return String(value || '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function normalizeLocalPlacesCacheQuery(value = '') {
+  return normalizePickupAddressText(value).toLowerCase();
+}
+
+function normalizePickupCompareText(value = '') {
+  return normalizePickupAddressText(value)
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase();
+}
+
+function isGenericPickupAddress(value = '') {
+  const normalized = normalizePickupCompareText(value);
+  return (
+    !normalized ||
+    normalized === 'minha localizacao' ||
+    normalized === 'sua localizacao atual' ||
+    normalized === 'localizacao atual' ||
+    normalized === 'origem atual'
+  );
+}
+
+function hasStreetNumber(value = '') {
+  return /\b\d{1,6}[a-zA-Z]?\b/.test(String(value || ''));
+}
+
+function formatPickupStreetNumberLabel(value = '', fallback = 'Local atual') {
+  const normalized = normalizePickupAddressText(value);
+  if (!normalized || isGenericPickupAddress(normalized)) {
+    return fallback;
+  }
+
+  const parts = normalized
+    .split(',')
+    .map(part => normalizePickupAddressText(part))
+    .filter(Boolean);
+  const [firstPart, secondPart] = parts;
+
+  if (/^\d{1,6}[a-zA-Z]?$/.test(firstPart) && secondPart) {
+    return `${secondPart}, ${firstPart}`;
+  }
+
+  if (firstPart && secondPart && hasStreetNumber(secondPart)) {
+    return `${firstPart}, ${secondPart}`;
+  }
+
+  if (firstPart && hasStreetNumber(firstPart)) {
+    return firstPart;
+  }
+
+  return firstPart || normalized || fallback;
+}
+
+function resolvePickupAddressCandidate(...values) {
+  for (const value of values) {
+    const normalized = normalizePickupAddressText(value);
+    if (normalized && !isGenericPickupAddress(normalized)) {
+      return normalized;
+    }
+  }
+
+  return '';
+}
+
+function resolveCachedPickupAddress(place = null) {
+  if (!place || typeof place !== 'object') {
+    return '';
+  }
+
+  return resolvePickupAddressCandidate(
+    place.address,
+    place.formatted_address,
+    place.description,
+    place.structured_formatting?.secondary_text,
+    place.name,
+  );
+}
+
+async function fetchCachedPickupPlaceOnly(query, location = null) {
+  const normalizedQuery = normalizeLocalPlacesCacheQuery(query);
+  if (normalizedQuery.length < 3) {
+    return null;
+  }
+
+  try {
+    const localCached = await AsyncStorage.getItem(`@places_cache:${normalizedQuery}`);
+    if (localCached) {
+      return JSON.parse(localCached);
+    }
+  } catch (_error) {
+    // Cache lookup is opportunistic; never block the home surface on it.
+  }
+
+  if (typeof fetch !== 'function') {
+    return null;
+  }
+
+  try {
+    const canAbort = typeof AbortController !== 'undefined';
+    const controller = canAbort ? new AbortController() : null;
+    const timeoutId = controller
+      ? setTimeout(() => controller.abort(), PLACES_CACHE_LOOKUP_TIMEOUT_MS)
+      : null;
+
+    try {
+      const response = await fetch(getSelfHostedApiUrl('/api/places/search'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          query,
+          location,
+        }),
+        ...(controller ? { signal: controller.signal } : {}),
+      });
+
+      if (!response?.ok) {
+        return null;
+      }
+
+      const payload = await response.json();
+      return payload?.data || null;
+    } finally {
+      if (timeoutId) {
+        clearTimeout(timeoutId);
+      }
+    }
+  } catch (_error) {
+    return null;
+  }
+}
+
 function resolveProfileInitial(profile = {}) {
   const nameCandidate =
     profile?.name ||
@@ -469,6 +620,18 @@ function resolveProfileInitial(profile = {}) {
     [profile?.firstName, profile?.lastName].filter(Boolean).join(' ').trim() ||
     '';
   return String(nameCandidate || 'L').trim().charAt(0).toUpperCase() || 'L';
+}
+
+function resolveProfileFirstName(profile = {}) {
+  const nameCandidate =
+    profile?.firstName ||
+    profile?.name ||
+    profile?.fullName ||
+    profile?.displayName ||
+    [profile?.firstName, profile?.lastName].filter(Boolean).join(' ').trim() ||
+    '';
+  const [firstName] = String(nameCandidate || '').trim().split(/\s+/);
+  return String(firstName || '').trim();
 }
 
 function hexToRgba(hexColor, opacity = 1) {
@@ -520,10 +683,14 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
     driverOnlinePending,
     driverCanGoOnline,
     driverActivationResolved,
+    driverDestinationMode,
     paymentMethod,
     driverInfo,
+    loadDestinationSuggestions,
+    resolveDestinationInput,
     requestRide,
     setDriverOnline,
+    setDriverDestinationMode,
     tripHistory,
     lastReceipt,
     driverOffers,
@@ -588,6 +755,13 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
   const connectionAutomationExecutionRef = useRef('');
   const connectionAutomationTimersRef = useRef([]);
   const [homeCardHeight, setHomeCardHeight] = useState(HOME_CARD_FALLBACK_HEIGHT);
+  const [homePickupPickerVisible, setHomePickupPickerVisible] = useState(false);
+  const [homePickupCoordinate, setHomePickupCoordinate] = useState(null);
+  const [homePickupAddress, setHomePickupAddress] = useState('');
+  const [cachedHomePickupAddress, setCachedHomePickupAddress] = useState('');
+  const [homePickupAdjustedOnMap, setHomePickupAdjustedOnMap] = useState(false);
+  const homePickupDraftBeforePickerRef = useRef(null);
+  const [homePickupPickerCardHeight, setHomePickupPickerCardHeight] = useState(HOME_PICKUP_PICKER_FALLBACK_HEIGHT);
   const [driverBottomCtaHeight, setDriverBottomCtaHeight] = useState(DRIVER_BOTTOM_CTA_FALLBACK_HEIGHT);
   const [driverLiveRideHeight, setDriverLiveRideHeight] = useState(0);
   const [mapHeight, setMapHeight] = useState(windowHeight);
@@ -596,12 +770,16 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
   const [nearbyDriverCoordinates, setNearbyDriverCoordinates] = useState([]);
   const [mapFollowingUser, setMapFollowingUser] = useState(true);
   const [visibleMapRegion, setVisibleMapRegion] = useState(PROTOTYPE_REGION);
+  const [homeMapReady, setHomeMapReady] = useState(IS_TEST_ENV);
+  const [homeSurfaceHydrated, setHomeSurfaceHydrated] = useState(false);
   const [driverH3Cells, setDriverH3Cells] = useState([]);
   const [driverH3RefreshNonce, setDriverH3RefreshNonce] = useState(0);
   const [showRecoveredConnectionHint, setShowRecoveredConnectionHint] = useState(false);
   const [qaConnectionVisualState, setQaConnectionVisualState] = useState(null);
   const [displayedConnectionIndicatorModel, setDisplayedConnectionIndicatorModel] = useState(null);
   const driverH3RefreshTimerRef = useRef(null);
+  const homeMapReadyFallbackTimerRef = useRef(null);
+  const homeMapReadyWarmupTimerRef = useRef(null);
   const connectionIndicatorStableTimerRef = useRef(null);
   const displayedConnectionIndicatorKeyRef = useRef('none');
   const [destination] = useState('Para onde vamos?');
@@ -631,6 +809,104 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
       ''
   ).trim();
   const profileInitial = useMemo(() => resolveProfileInitial(profile), [profile]);
+  const profileFirstName = useMemo(() => resolveProfileFirstName(profile), [profile]);
+  const effectiveHomePickupCoordinate = useMemo(() => {
+    if (isFiniteCoordinate(homePickupCoordinate)) {
+      return homePickupCoordinate;
+    }
+
+    if (isFiniteCoordinate(currentCoordinate)) {
+      return currentCoordinate;
+    }
+
+    return DEFAULT_USER_COORDINATE;
+  }, [currentCoordinate, homePickupCoordinate]);
+  const currentPickupAddressCandidate = useMemo(
+    () => resolvePickupAddressCandidate(cachedHomePickupAddress, currentAddress),
+    [cachedHomePickupAddress, currentAddress],
+  );
+  const effectiveHomePickupAddress = useMemo(() => {
+    if (homePickupAdjustedOnMap && homePickupAddress) {
+      return homePickupAddress;
+    }
+
+    return currentPickupAddressCandidate || 'Local atual';
+  }, [
+    currentPickupAddressCandidate,
+    homePickupAddress,
+    homePickupAdjustedOnMap,
+  ]);
+  const homePickupDisplayLabel = useMemo(() => {
+    if (homePickupAdjustedOnMap) {
+      return formatPickupStreetNumberLabel(homePickupAddress, 'Ponto ajustado');
+    }
+
+    return formatPickupStreetNumberLabel(effectiveHomePickupAddress, 'Local atual');
+  }, [effectiveHomePickupAddress, homePickupAddress, homePickupAdjustedOnMap]);
+  const homePickupDisplayAddress = useMemo(() => {
+    if (homePickupAdjustedOnMap) {
+      return homePickupAddress || 'Ponto definido no mapa';
+    }
+
+    return effectiveHomePickupAddress;
+  }, [effectiveHomePickupAddress, homePickupAddress, homePickupAdjustedOnMap]);
+  const destinationRoutePickupParams = useMemo(
+    () => ({
+      initialPickupCoordinate: effectiveHomePickupCoordinate,
+      initialPickupAddress: effectiveHomePickupAddress,
+      initialPickupLabel: homePickupDisplayLabel,
+      initialPickupAdjustedOnMap: homePickupAdjustedOnMap,
+    }),
+    [
+      effectiveHomePickupAddress,
+      effectiveHomePickupCoordinate,
+      homePickupAdjustedOnMap,
+      homePickupDisplayLabel,
+    ]
+  );
+
+  useEffect(() => {
+    const query = resolvePickupAddressCandidate(currentAddress);
+    const currentLabel = formatPickupStreetNumberLabel(query, '');
+    if (!query || hasStreetNumber(currentLabel)) {
+      setCachedHomePickupAddress(previous => (previous ? '' : previous));
+      return undefined;
+    }
+
+    let cancelled = false;
+    const location = isFiniteCoordinate(currentCoordinate)
+      ? {
+          lat: currentCoordinate.latitude,
+          lng: currentCoordinate.longitude,
+        }
+      : null;
+
+    fetchCachedPickupPlaceOnly(query, location)
+      .then(place => {
+        if (cancelled) {
+          return;
+        }
+
+        const cachedAddress = resolveCachedPickupAddress(place);
+        const cachedLabel = formatPickupStreetNumberLabel(cachedAddress, '');
+        setCachedHomePickupAddress(
+          cachedAddress && hasStreetNumber(cachedLabel) ? cachedAddress : ''
+        );
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setCachedHomePickupAddress('');
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    currentAddress,
+    currentCoordinate?.latitude,
+    currentCoordinate?.longitude,
+  ]);
 
   const isHomeRoute =
     currentRouteName === 'RobotaxiPrototype' ||
@@ -656,7 +932,7 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
   const isDriverOfferRoute = currentRouteName === 'RobotaxiPrototypeDriverOffer';
   const isDestinationRoute = currentRouteName === 'RobotaxiPrototypeDestination';
   const shouldSyncPassengerRoute = shouldAutoSyncPassengerRoute(currentRouteName);
-  const freezeBackgroundMapCamera = isDestinationRoute || isDriverOfferRoute;
+  const freezeBackgroundMapCamera = isDriverOfferRoute;
   const showHomeChrome = Boolean(isScreenFocused && isHomeRoute);
   const hasMenuTopAction = isDriverRole || isHomeRoute || isDriverRoute;
   const isSearchingMode = bookingStatus === 'searching' || bookingStatus === 'requesting';
@@ -1744,6 +2020,7 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
     runtimeVisualStateReady &&
       showHomeChrome &&
       !isDriverRole &&
+      !homePickupPickerVisible &&
       !activeBookingId &&
       (!normalizedBookingStatus || normalizedBookingStatus === 'idle') &&
       !passengerAutoRoute
@@ -1769,6 +2046,22 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
     : '';
   const isLiveTripMapActive = ['accepted', 'arrived', 'started'].includes(
     normalizedBookingStatus
+  );
+  const hasTrafficEligibleRoute =
+    hasActiveRoute && (!isHomeRoute || normalizedBookingStatus !== 'idle');
+  const shouldShowTrafficLayer = Boolean(
+    trafficLayerEnabled &&
+      shouldRenderRuntimeMapState &&
+      (
+        presentedSearchingMode ||
+        hasTrafficEligibleRoute ||
+        isLiveTripMapActive ||
+        [
+          'operational_interrupted',
+          'searching_replacement',
+          'searching_replacement_driver',
+        ].includes(normalizedBookingStatus)
+      )
   );
   const driverTripAssistNativeNavigation = driverTripAssist?.nativeNavigation || null;
   const isPickupPhase =
@@ -1820,7 +2113,7 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
       : 'place';
   const routeAnimate = !(shouldRenderRuntimeMapState && isLiveTripMapActive);
   const routeMainColor =
-    shouldRenderRuntimeMapState && isLiveTripMapActive ? '#1A7F37' : null;
+    shouldRenderRuntimeMapState && isLiveTripMapActive ? '#1A330E' : null;
   const routeShadowColor =
     shouldRenderRuntimeMapState && isLiveTripMapActive
       ? 'rgba(26,127,55,0.20)'
@@ -1834,7 +2127,8 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
     driverLiveOffer?.bookingId || driverLiveOffer?.id
   );
   const canRenderDriverRideChrome = Boolean(
-    driverActivationResolved || hasDriverActiveRideContext
+    driverActivationResolved ||
+      hasDriverActiveRideContext
   );
   const hasDriverLiveRideOverlay = Boolean(
     runtimeVisualStateReady &&
@@ -1862,14 +2156,103 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
     runtimeVisualStateReady &&
       isDriverRole &&
       isHomeRoute &&
-      driverActivationResolved &&
+      canRenderDriverRideChrome &&
       !hasDriverLiveRideOverlay
   );
+  const homeSurfaceReadyForFirstPaint = Boolean(
+    (!SHOULD_BLOCK_HOME_FIRST_PAINT_FOR_MAP || homeMapReady) &&
+      runtimeVisualStateReady &&
+      (!isDriverRole || !isHomeRoute || canRenderDriverRideChrome)
+  );
+  const homeSurfaceLoadingVisible = Boolean(
+    showHomeChrome &&
+      !homeSurfaceHydrated &&
+      (
+        !homeSurfaceReadyForFirstPaint
+      )
+  );
+  const homeLoadingTitle = profileFirstName
+    ? `Bem vindo(a), ${profileFirstName}`
+    : 'Bem vindo(a)';
+
+  const clearHomeMapReadyTimers = useCallback(() => {
+    if (homeMapReadyFallbackTimerRef.current) {
+      clearTimeout(homeMapReadyFallbackTimerRef.current);
+      homeMapReadyFallbackTimerRef.current = null;
+    }
+    if (homeMapReadyWarmupTimerRef.current) {
+      clearTimeout(homeMapReadyWarmupTimerRef.current);
+      homeMapReadyWarmupTimerRef.current = null;
+    }
+  }, []);
+
+  const scheduleHomeMapReady = useCallback((delayMs = HOME_MAP_READY_WARMUP_MS) => {
+    if (IS_TEST_ENV) {
+      return;
+    }
+
+    if (homeMapReadyWarmupTimerRef.current) {
+      clearTimeout(homeMapReadyWarmupTimerRef.current);
+    }
+
+    homeMapReadyWarmupTimerRef.current = setTimeout(() => {
+      homeMapReadyWarmupTimerRef.current = null;
+      if (homeMapReadyFallbackTimerRef.current) {
+        clearTimeout(homeMapReadyFallbackTimerRef.current);
+        homeMapReadyFallbackTimerRef.current = null;
+      }
+      setHomeMapReady(true);
+    }, delayMs);
+  }, []);
+
+  const handleHomeMapReady = useCallback(() => {
+    if (Platform.OS !== 'android') {
+      scheduleHomeMapReady();
+    }
+  }, [scheduleHomeMapReady]);
+
+  const handleHomeMapLoaded = useCallback(() => {
+    scheduleHomeMapReady();
+  }, [scheduleHomeMapReady]);
+
+  useEffect(() => {
+    if (IS_TEST_ENV) {
+      return undefined;
+    }
+
+    clearHomeMapReadyTimers();
+
+    if (!showHomeChrome) {
+      if (homeSurfaceHydrated) {
+        return undefined;
+      }
+
+      setHomeMapReady(false);
+      return undefined;
+    }
+
+    if (!homeSurfaceHydrated) {
+      setHomeMapReady(false);
+      homeMapReadyFallbackTimerRef.current = setTimeout(() => {
+        homeMapReadyFallbackTimerRef.current = null;
+        setHomeMapReady(true);
+      }, HOME_MAP_READY_FALLBACK_MS);
+    }
+
+    return clearHomeMapReadyTimers;
+  }, [clearHomeMapReadyTimers, homeSurfaceHydrated, isDriverRole, showHomeChrome]);
+
+  useEffect(() => {
+    if (showHomeChrome && !homeSurfaceHydrated && homeSurfaceReadyForFirstPaint) {
+      setHomeSurfaceHydrated(true);
+    }
+  }, [homeSurfaceHydrated, homeSurfaceReadyForFirstPaint, showHomeChrome]);
+
   const showDriverH3Overlay = Boolean(
     isDriverRole && isHomeRoute && showDriverHomeOverlay
   );
-  const driverLiveRideBottomOffset = hasDriverLiveRideOverlay ? 18 : DRIVER_BOTTOM_CTA_OFFSET + driverBottomCtaHeight + 12;
-  const driverLiveRideOccludedBottom = insets.bottom + driverLiveRideBottomOffset + driverLiveRideHeight;
+  const driverLiveRideBottomOffset = hasDriverLiveRideOverlay ? 0 : DRIVER_BOTTOM_CTA_OFFSET + driverBottomCtaHeight + 12;
+  const driverLiveRideOccludedBottom = driverLiveRideBottomOffset + driverLiveRideHeight;
   const qaConnectionAutomationConfig = useMemo(
     () =>
       resolvePrototypeConnectionAutomationConfig(effectiveRouteParams, {
@@ -1964,6 +2347,7 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
     qaConnectionVisualState?.mode,
     resolvedRole,
   ]);
+
   const connectionIndicatorTopOffset = useMemo(
     () => insets.top + (showHomeChrome ? 66 : 14),
     [insets.top, showHomeChrome]
@@ -1988,9 +2372,32 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
   const homeOccludedBottom = isHomeRoute
     ? (isDriverRole
         ? Math.max(showDriverHomeOverlay ? driverOccludedBottom : 0, hasDriverLiveRideOverlay ? driverLiveRideOccludedBottom : 0)
-        : passengerOccludedBottom)
+        : homePickupPickerVisible
+          ? insets.bottom + HOME_PICKUP_PICKER_BOTTOM_OFFSET + homePickupPickerCardHeight
+          : passengerOccludedBottom)
     : 0;
-  const baselineOccludedBottom = isDriverRole ? driverOccludedBottom : passengerOccludedBottom;
+  const baselineOccludedBottom = isDriverRole
+    ? driverOccludedBottom
+    : homePickupPickerVisible
+      ? insets.bottom + HOME_PICKUP_PICKER_BOTTOM_OFFSET + homePickupPickerCardHeight
+      : passengerOccludedBottom;
+  const homeOccludedTop = homePickupPickerVisible ? insets.top + 122 : 0;
+  const homePickupMarkerTop = useMemo(() => {
+    const bottomInset = homePickupPickerVisible
+      ? insets.bottom + HOME_PICKUP_PICKER_BOTTOM_OFFSET + homePickupPickerCardHeight
+      : 0;
+    const visibleHeight = Math.max(
+      220,
+      windowHeight - homeOccludedTop - bottomInset
+    );
+    return homeOccludedTop + visibleHeight / 2 - 48;
+  }, [
+    homeOccludedTop,
+    homePickupPickerCardHeight,
+    homePickupPickerVisible,
+    insets.bottom,
+    windowHeight
+  ]);
   const driverFinancialHistory = useMemo(() => {
     const mergedHistory = [lastReceipt, ...(Array.isArray(tripHistory) ? tripHistory : [])]
       .filter(Boolean);
@@ -2086,11 +2493,14 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
       showHomeChrome &&
       !isDriverRole &&
       !isDriverRoute &&
+      !homePickupPickerVisible &&
+      !canShowPassengerHomeOverlay &&
       normalizedBookingStatus === 'idle'
   );
   usePrototypeMapOcclusion({
     routeKey: route?.key,
     layerId: route?.key || 'prototype-home',
+    occludedTop: homeOccludedTop,
     occludedBottom: homeOccludedBottom
   });
 
@@ -2111,7 +2521,9 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
   }, []);
 
   const targetRegion = useMemo(() => {
-    const baseCoordinate = currentCoordinate || DEFAULT_USER_COORDINATE;
+    const baseCoordinate = homePickupPickerVisible
+      ? effectiveHomePickupCoordinate
+      : currentCoordinate || DEFAULT_USER_COORDINATE;
     const effectiveHeight = Math.max(1, mapHeight || windowHeight);
     const maxTop = Math.max(0, effectiveHeight - MAP_MIN_VISIBLE_HEIGHT);
     const topInset = Math.min(Math.max(0, activeOcclusion.top || 0), maxTop);
@@ -2135,7 +2547,45 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
       latitudeDelta,
       longitudeDelta
     };
-  }, [activeOcclusion.bottom, activeOcclusion.top, baselineOccludedBottom, currentCoordinate, mapHeight, windowHeight]);
+  }, [
+    activeOcclusion.bottom,
+    activeOcclusion.top,
+    baselineOccludedBottom,
+    currentCoordinate,
+    effectiveHomePickupCoordinate,
+    homePickupPickerVisible,
+    mapHeight,
+    windowHeight
+  ]);
+
+  const resolveVisibleMapCenterCoordinate = useCallback((nextRegion) => {
+    const latitude = Number(nextRegion?.latitude);
+    const longitude = Number(nextRegion?.longitude);
+    const latitudeDelta = Number(nextRegion?.latitudeDelta);
+    if (
+      !Number.isFinite(latitude) ||
+      !Number.isFinite(longitude) ||
+      !Number.isFinite(latitudeDelta)
+    ) {
+      return null;
+    }
+
+    const effectiveHeight = Math.max(1, mapHeight || windowHeight);
+    const maxTop = Math.max(0, effectiveHeight - MAP_MIN_VISIBLE_HEIGHT);
+    const topInset = Math.min(Math.max(0, activeOcclusion.top || 0), maxTop);
+    const maxBottom = Math.max(0, effectiveHeight - MAP_MIN_VISIBLE_HEIGHT - topInset);
+    const bottomInset = Math.min(Math.max(0, activeOcclusion.bottom || 0), maxBottom);
+    const availableHeight = Math.max(MAP_MIN_VISIBLE_HEIGHT, effectiveHeight - topInset - bottomInset);
+    const desiredMarkerY = topInset + availableHeight / 2;
+    const baseCenterY = effectiveHeight / 2;
+    const pixelOffsetY = desiredMarkerY - baseCenterY;
+    const latitudeOffset = (latitudeDelta * pixelOffsetY) / effectiveHeight;
+
+    return {
+      latitude: latitude - latitudeOffset,
+      longitude
+    };
+  }, [activeOcclusion.bottom, activeOcclusion.top, mapHeight, windowHeight]);
 
   useEffect(() => {
     if (!showDriverH3Overlay) {
@@ -2686,11 +3136,35 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
   ]);
 
   const handleMapRegionChangeComplete = useCallback((nextRegion) => {
-    if (!showDriverH3Overlay || !nextRegion) {
+    if (!nextRegion) {
       return;
     }
+
+    const now = Date.now();
+    const source =
+      now - Number(lastManualMapPanAtRef.current || 0) < 4500
+        ? 'gesture'
+        : 'camera';
+    const visibleCenterCoordinate = resolveVisibleMapCenterCoordinate(nextRegion);
+    publishPrototypeMapCamera({
+      ...nextRegion,
+      visibleCenterCoordinate,
+      source,
+      updatedAt: now,
+    });
+
+    if (homePickupPickerVisible && source === 'gesture' && isFiniteCoordinate(visibleCenterCoordinate)) {
+      setHomePickupCoordinate(visibleCenterCoordinate);
+      setHomePickupAddress('Ponto ajustado no mapa');
+      setHomePickupAdjustedOnMap(true);
+    }
+
+    if (!showDriverH3Overlay) {
+      return;
+    }
+
     setVisibleMapRegion(nextRegion);
-  }, [showDriverH3Overlay]);
+  }, [homePickupPickerVisible, resolveVisibleMapCenterCoordinate, showDriverH3Overlay]);
 
   const handleMapLayout = useCallback(event => {
     const nextHeight = event?.nativeEvent?.layout?.height;
@@ -2705,6 +3179,92 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
       setHomeCardHeight(previous => (previous === nextHeight ? previous : nextHeight));
     }
   }, []);
+
+  const handleHomePickupPickerCardLayout = useCallback(event => {
+    const nextHeight = event?.nativeEvent?.layout?.height;
+    if (Number.isFinite(nextHeight) && nextHeight > 0) {
+      setHomePickupPickerCardHeight(previous => (previous === nextHeight ? previous : nextHeight));
+    }
+  }, []);
+
+  const focusHomePickupCoordinate = useCallback((coordinate = effectiveHomePickupCoordinate) => {
+    if (!mapRef.current || !isFiniteCoordinate(coordinate)) {
+      return;
+    }
+
+    mapRef.current.animateCamera(
+      {
+        center: coordinate,
+        zoom: Platform.OS === 'ios' ? 16 : 17,
+        pitch: 0,
+        heading: 0,
+      },
+      { duration: 520 }
+    );
+  }, [effectiveHomePickupCoordinate]);
+
+  const handleOpenHomePickupPicker = useCallback(() => {
+    const nextCoordinate = isFiniteCoordinate(homePickupCoordinate)
+      ? homePickupCoordinate
+      : effectiveHomePickupCoordinate;
+    homePickupDraftBeforePickerRef.current = {
+      coordinate: homePickupCoordinate,
+      address: homePickupAddress,
+      adjustedOnMap: homePickupAdjustedOnMap,
+    };
+    setHomePickupCoordinate(nextCoordinate);
+    setHomePickupAddress(effectiveHomePickupAddress);
+    setHomePickupPickerVisible(true);
+    setMapFollowingUser(false);
+    requestAnimationFrame(() => focusHomePickupCoordinate(nextCoordinate));
+  }, [
+    effectiveHomePickupAddress,
+    effectiveHomePickupCoordinate,
+    focusHomePickupCoordinate,
+    homePickupAddress,
+    homePickupAdjustedOnMap,
+    homePickupCoordinate
+  ]);
+
+  const handleUseCurrentHomePickup = useCallback(() => {
+    const nextCoordinate = isFiniteCoordinate(currentCoordinate)
+      ? currentCoordinate
+      : DEFAULT_USER_COORDINATE;
+    setHomePickupCoordinate(nextCoordinate);
+    setHomePickupAddress(effectiveHomePickupAddress);
+    setHomePickupAdjustedOnMap(false);
+    focusHomePickupCoordinate(nextCoordinate);
+  }, [
+    currentCoordinate,
+    effectiveHomePickupAddress,
+    focusHomePickupCoordinate,
+  ]);
+
+  const handleConfirmHomePickup = useCallback(() => {
+    homePickupDraftBeforePickerRef.current = null;
+    setHomePickupPickerVisible(false);
+  }, []);
+
+  const handleCancelHomePickupPicker = useCallback(() => {
+    const previous = homePickupDraftBeforePickerRef.current;
+    if (previous) {
+      setHomePickupCoordinate(previous.coordinate);
+      setHomePickupAddress(previous.address);
+      setHomePickupAdjustedOnMap(Boolean(previous.adjustedOnMap));
+    }
+    homePickupDraftBeforePickerRef.current = null;
+    setHomePickupPickerVisible(false);
+  }, []);
+
+  const handleOpenPassengerDestination = useCallback(
+    (extraParams = {}) => {
+      navigation.navigate('RobotaxiPrototypeDestination', {
+        ...destinationRoutePickupParams,
+        ...extraParams,
+      });
+    },
+    [destinationRoutePickupParams, navigation]
+  );
 
   const handleDriverCtaLayout = useCallback(event => {
     const nextHeight = event?.nativeEvent?.layout?.height;
@@ -2727,6 +3287,47 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
     driverOnline,
     driverOnlinePending,
     navigation
+  ]);
+
+  const handleSaveDriverDestinationMode = useCallback(async ({ enabled, query } = {}) => {
+    if (typeof setDriverDestinationMode !== 'function') {
+      throw new Error('Modo destino indisponível nesta versão.');
+    }
+
+    if (!enabled) {
+      await setDriverDestinationMode({ active: false });
+      return;
+    }
+
+    const normalizedQuery = String(query || '').trim();
+    if (normalizedQuery.length < 3) {
+      throw new Error('Informe um destino válido.');
+    }
+
+    if (
+      typeof loadDestinationSuggestions !== 'function' ||
+      typeof resolveDestinationInput !== 'function'
+    ) {
+      throw new Error('Busca de destino indisponível agora.');
+    }
+
+    const suggestions = await loadDestinationSuggestions(normalizedQuery);
+    const destination = Array.isArray(suggestions) && suggestions.length > 0
+      ? suggestions[0]
+      : { name: normalizedQuery, address: normalizedQuery };
+    const resolvedDestination = await resolveDestinationInput(destination);
+    if (!resolvedDestination?.coordinate) {
+      throw new Error('Não foi possível confirmar esse destino agora.');
+    }
+
+    await setDriverDestinationMode({
+      active: true,
+      destination: resolvedDestination,
+    });
+  }, [
+    loadDestinationSuggestions,
+    resolveDestinationInput,
+    setDriverDestinationMode,
   ]);
 
     const handleDriverOnlineToggle = useCallback(async () => {
@@ -3488,7 +4089,7 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
           userAvatarUri={profileImage}
           userAvatarLetter={profileInitial}
           driverCoordinate={presentedDriverCoordinate}
-          showTraffic={trafficLayerEnabled}
+          showTraffic={shouldShowTrafficLayer}
           searchingMode={presentedSearchingMode}
           searchCenterCoordinate={presentedSearchingMode ? searchCenterCoordinate : null}
           searchRadiusKm={presentedSearchingMode ? searchRadiusKm : null}
@@ -3510,14 +4111,20 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
           destinationMarkerMode={destinationMarkerMode}
           destinationMarkerLetter={passengerMarkerLetter}
           onMapLayout={handleMapLayout}
+          onMapLoaded={handleHomeMapLoaded}
           onMapPanDrag={handleMapPanDrag}
+          onMapReady={handleHomeMapReady}
           onRegionChangeComplete={handleMapRegionChangeComplete}
           mapChildren={shouldRenderRuntimeMapState ? driverH3MapChildren : null}
           mapSafetyProfile={isDriverRole ? 'driver' : 'default'}
-          interactionEnabled={showHomeChrome && shouldRenderRuntimeMapState}
+          interactionEnabled={
+            (showHomeChrome || isDestinationRoute) &&
+            shouldRenderRuntimeMapState &&
+            !homeSurfaceLoadingVisible
+          }
         />
 
-        {showHomeChrome ? (
+        {showHomeChrome && !homeSurfaceLoadingVisible && !homePickupPickerVisible ? (
           <PrototypeTopControls
             insets={insets}
             leftIcon={isHomeRoute ? 'locate' : 'arrow-back'}
@@ -3526,6 +4133,83 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
             onPressLeft={handleTopLeftPress}
             onPressRight={handleTopRightPress}
           />
+        ) : null}
+
+        {homePickupPickerVisible ? (
+          <>
+            <View
+              pointerEvents="none"
+              style={[styles.homePickupMarker, { top: homePickupMarkerTop }]}
+              testID="passenger-home-pickup-map-marker"
+              accessibilityLabel="Marcador do local de partida"
+            >
+              <View style={styles.homePickupMarkerPin}>
+                <Ionicons name="location-sharp" size={30} color="#1A330E" />
+              </View>
+              <View style={styles.homePickupMarkerStem} />
+            </View>
+
+            <View pointerEvents="box-none" style={styles.homePickupPickerLayer}>
+              <View style={[styles.homePickupFloatingCard, { top: insets.top + 14 }]}>
+                <TouchableOpacity
+                  activeOpacity={0.84}
+                  onPress={handleCancelHomePickupPicker}
+                  style={styles.homePickupBackButton}
+                  testID="passenger-home-pickup-cancel-button"
+                  accessibilityLabel="Cancelar alteração de partida"
+                >
+                  <Ionicons name="chevron-back" size={20} color="#102018" />
+                </TouchableOpacity>
+                <View style={styles.homePickupFloatingCopy}>
+                  <Text style={styles.homePickupEyebrow}>Partida</Text>
+                  <Text style={styles.homePickupFloatingTitle}>
+                    {homePickupAdjustedOnMap ? 'Ponto ajustado no mapa' : homePickupDisplayLabel}
+                  </Text>
+                  <Text style={styles.homePickupFloatingAddress} numberOfLines={2}>
+                    {effectiveHomePickupAddress}
+                  </Text>
+                </View>
+              </View>
+
+              <View
+                onLayout={handleHomePickupPickerCardLayout}
+                style={[
+                  styles.homePickupBottomCard,
+                  { bottom: insets.bottom + HOME_PICKUP_PICKER_BOTTOM_OFFSET }
+                ]}
+                testID="passenger-home-pickup-picker"
+                accessibilityLabel="Selecionar local de partida no mapa"
+              >
+                <View style={styles.homePickupHandle} />
+                <Text style={styles.homePickupPickerTitle}>
+                  Mova o mapa para posicionar a partida
+                </Text>
+                <Text style={styles.homePickupPickerText}>
+                  O pin marca onde o motorista deve encontrar você.
+                </Text>
+                <View style={styles.homePickupPickerActions}>
+                  <TouchableOpacity
+                    activeOpacity={0.86}
+                    onPress={handleUseCurrentHomePickup}
+                    style={styles.homePickupSecondaryButton}
+                    testID="passenger-home-pickup-use-current-button"
+                    accessibilityLabel="Usar minha localização atual"
+                  >
+                    <Text style={styles.homePickupSecondaryButtonText}>Atual</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    activeOpacity={0.88}
+                    onPress={handleConfirmHomePickup}
+                    style={styles.homePickupPrimaryButton}
+                    testID="passenger-home-pickup-confirm-button"
+                    accessibilityLabel="Confirmar local de partida"
+                  >
+                    <Text style={styles.homePickupPrimaryButtonText}>Confirmar</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            </View>
+          </>
         ) : null}
 
         <PrototypeConnectionStatusPill
@@ -3577,11 +4261,15 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
         {canShowPassengerHomeOverlay ? (
           <PassengerHomeOverlay
             insetsBottom={insets.bottom}
+            userId={profile?.uid}
+            pickupLabel={homePickupDisplayLabel}
+            pickupAddress={homePickupDisplayAddress}
             destinationLabel={destination}
             onCardLayout={handleSearchCardLayout}
-            onDestinationPress={() => navigation.navigate('RobotaxiPrototypeDestination')}
+            onPickupPress={handleOpenHomePickupPicker}
+            onDestinationPress={() => handleOpenPassengerDestination()}
             onMicrophonePress={() =>
-              navigation.navigate('RobotaxiPrototypeDestination', {
+              handleOpenPassengerDestination({
                 autoStartVoice: true
               })
             }
@@ -3636,8 +4324,13 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
                 driverActivationResolved={driverActivationResolved}
                 ridesCount={todayTrips}
                 formattedDriverEarnings={formattedDriverEarnings}
+                driverGrossAmount={driverTripTotals.totalGross}
+                driverFeeAmount={driverTripTotals.totalFees}
+                driverFinancialHistory={driverFinancialHistory}
+                driverDestinationMode={driverDestinationMode}
                 onCtaLayout={handleDriverCtaLayout}
                 onToggleOnline={handleDriverOnlineToggle}
+                onSaveDestinationMode={handleSaveDriverDestinationMode}
                 onOpenEarnings={() =>
                   navigation.navigate('EarningsReport', {
                     source: 'driver-home',
@@ -3660,6 +4353,24 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
             onPressSettings={() => navigation.navigate('RobotaxiPrototypeSettings')}
           />
         ) : null}
+
+        {homeSurfaceLoadingVisible ? (
+          <View
+            style={styles.homeLoadingOverlay}
+            testID="prototype-home-loading"
+            accessibilityRole="progressbar"
+            accessibilityLabel={homeLoadingTitle}
+          >
+            <View style={styles.homeLoadingContent}>
+              <Text style={styles.homeLoadingTitle}>{homeLoadingTitle}</Text>
+              <ActivityIndicator
+                size="small"
+                color="#0F3B16"
+                style={styles.homeLoadingSpinner}
+              />
+            </View>
+          </View>
+        ) : null}
       </View>
     </PrototypeScreenTransition>
   );
@@ -3669,5 +4380,194 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: color.bg.map
+  },
+  homePickupMarker: {
+    position: 'absolute',
+    left: '50%',
+    marginLeft: -18,
+    zIndex: 34,
+    elevation: 34,
+    alignItems: 'center',
+  },
+  homePickupMarkerPin: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    backgroundColor: '#FAFBF8',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: '#CFD8CD',
+    shadowColor: '#111611',
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.14,
+    shadowRadius: 18,
+    elevation: Platform.OS === 'android' ? 0 : 8,
+  },
+  homePickupMarkerStem: {
+    width: 2,
+    height: 18,
+    borderRadius: 2,
+    backgroundColor: '#111611',
+    marginTop: -3,
+  },
+  homePickupPickerLayer: {
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 33,
+    elevation: 33,
+  },
+  homePickupFloatingCard: {
+    position: 'absolute',
+    left: 23,
+    right: 23,
+    minHeight: 86,
+    borderRadius: 28,
+    borderWidth: 1,
+    borderColor: '#DCE4DA',
+    backgroundColor: '#FAFBF8',
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    flexDirection: 'row',
+    alignItems: 'center',
+    shadowColor: '#111611',
+    shadowOffset: { width: 0, height: 14 },
+    shadowOpacity: 0.12,
+    shadowRadius: 26,
+    elevation: Platform.OS === 'android' ? 0 : 10,
+  },
+  homePickupBackButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: '#EEF4EA',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 12,
+  },
+  homePickupFloatingCopy: {
+    flex: 1,
+    minWidth: 0,
+  },
+  homePickupEyebrow: {
+    color: '#827B73',
+    fontFamily: fonts.Medium,
+    fontSize: 11,
+    lineHeight: 15,
+  },
+  homePickupFloatingTitle: {
+    marginTop: 2,
+    color: '#111611',
+    fontFamily: fonts.SemiBold,
+    fontSize: 17,
+    lineHeight: 23,
+  },
+  homePickupFloatingAddress: {
+    marginTop: 3,
+    color: '#756F68',
+    fontFamily: fonts.Regular,
+    fontSize: 12,
+    lineHeight: 17,
+  },
+  homePickupBottomCard: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    borderTopLeftRadius: 32,
+    borderTopRightRadius: 32,
+    borderBottomLeftRadius: 0,
+    borderBottomRightRadius: 0,
+    borderWidth: 1,
+    borderColor: '#CFD8CD',
+    backgroundColor: '#FAFBF8',
+    paddingHorizontal: 28,
+    paddingTop: 16,
+    paddingBottom: 18,
+    shadowColor: '#000000',
+    shadowOffset: { width: 0, height: -14 },
+    shadowOpacity: 0.08,
+    shadowRadius: 30,
+    elevation: Platform.OS === 'android' ? 0 : 12,
+  },
+  homePickupHandle: {
+    width: 50,
+    height: 4,
+    borderRadius: 3,
+    backgroundColor: '#CAD3C8',
+    alignSelf: 'center',
+    marginBottom: 18,
+  },
+  homePickupPickerTitle: {
+    color: '#111611',
+    fontFamily: fonts.SemiBold,
+    fontSize: 17,
+    lineHeight: 23,
+  },
+  homePickupPickerText: {
+    marginTop: 4,
+    color: '#756F68',
+    fontFamily: fonts.Regular,
+    fontSize: 12,
+    lineHeight: 17,
+  },
+  homePickupPickerActions: {
+    marginTop: 14,
+    flexDirection: 'row',
+    alignItems: 'center',
+    columnGap: 10,
+  },
+  homePickupSecondaryButton: {
+    minWidth: 112,
+    height: 48,
+    borderRadius: 24,
+    borderWidth: 1,
+    borderColor: '#CFD8CD',
+    backgroundColor: '#FAFBF8',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 16,
+  },
+  homePickupSecondaryButtonText: {
+    color: '#111611',
+    fontFamily: fonts.SemiBold,
+    fontSize: 13,
+    lineHeight: 18,
+  },
+  homePickupPrimaryButton: {
+    flex: 1,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: '#1A330E',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 18,
+  },
+  homePickupPrimaryButtonText: {
+    color: '#FFFFFF',
+    fontFamily: fonts.SemiBold,
+    fontSize: 14,
+    lineHeight: 19,
+  },
+  homeLoadingOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 120,
+    elevation: 120,
+    backgroundColor: '#F4F6F1',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 28,
+  },
+  homeLoadingContent: {
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  homeLoadingTitle: {
+    color: '#111611',
+    fontFamily: fonts.SemiBold,
+    fontSize: 22,
+    lineHeight: 29,
+    textAlign: 'center',
+  },
+  homeLoadingSpinner: {
+    marginTop: 18,
   }
 });

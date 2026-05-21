@@ -7,14 +7,11 @@ import {
     FlatList,
     TouchableOpacity,
     ActivityIndicator,
-    Dimensions,
-    Platform,
     StatusBar
 } from 'react-native';
-import { Icon } from 'react-native-elements';
-import { colors } from '../common/theme';
 import i18n from '../i18n';
 import { useSelector, useDispatch } from 'react-redux';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { getNotifications } from '../services/runtime/notificationsRuntimeBridge';
 import moment from 'moment/min/moment-with-locales';
 import { MAIN_COLOR } from '../common/sharedFunctions';
@@ -25,19 +22,9 @@ export default function Notifications(props) {
     const { t } = i18n;
     const dispatch = useDispatch();
     const auth = useSelector(state => state.auth);
+    const insets = useSafeAreaInsets();
     const [loading, setLoading] = useState(true);
     const [notifications, setNotifications] = useState([]);
-    const [isDarkMode, setIsDarkMode] = useState(false);
-
-    // Tema dinâmico baseado no modo escuro/claro
-    const theme = {
-        background: isDarkMode ? '#1A1A1A' : '#FFFFFF',
-        card: isDarkMode ? '#2A2A2A' : '#FFFFFF',
-        text: isDarkMode ? '#FFFFFF' : '#000000',
-        textSecondary: isDarkMode ? '#AAAAAA' : '#666666',
-        border: isDarkMode ? '#333333' : '#E0E0E0',
-        icon: isDarkMode ? '#FFFFFF' : '#000000',
-    };
 
     useEffect(() => {
         loadNotifications();
@@ -76,25 +63,21 @@ export default function Notifications(props) {
 
     const renderNotification = ({ item }) => (
         <TouchableOpacity 
-            style={[styles.notificationCard, { backgroundColor: theme.card }]}
+            style={styles.notificationRow}
+            activeOpacity={0.78}
             onPress={() => {
                 if (item.type === 'booking') {
                     props.navigation.navigate('RideDetails', { bookingId: item.bookingId });
                 }
             }}
         >
-            <View style={[styles.iconContainer, { backgroundColor: isDarkMode ? '#333333' : '#F5F5F5' }]}>
-                <Icon
-                    name={item.type === 'booking' ? 'directions-car' : 'notifications'}
-                    type="material"
-                    color={theme.icon}
-                    size={24}
-                />
-            </View>
+            <View style={styles.rowDot} />
             <View style={styles.notificationContent}>
-                <Text style={[styles.notificationTitle, { color: theme.text }]}>{item.title}</Text>
-                <Text style={[styles.notificationMessage, { color: theme.textSecondary }]}>{item.message}</Text>
-                <Text style={[styles.notificationTime, { color: theme.textSecondary }]}>
+                <Text style={styles.notificationTitle} numberOfLines={2}>{item.title}</Text>
+                {item.message ? (
+                    <Text style={styles.notificationMessage} numberOfLines={2}>{item.message}</Text>
+                ) : null}
+                <Text style={styles.notificationTime}>
                     {moment(item.createdAt).fromNow()}
                 </Text>
             </View>
@@ -102,32 +85,20 @@ export default function Notifications(props) {
     );
 
         return (
-        <View style={[styles.container, { backgroundColor: theme.background }]}>
-            <StatusBar hidden={true} />
-            
-            {/* Header */}
-            <View style={[styles.header, { backgroundColor: theme.card }]}>
+        <View style={styles.container}>
+            <StatusBar translucent backgroundColor="transparent" barStyle="dark-content" />
+
+            <View style={[styles.header, { paddingTop: Math.max(insets.top + 26, 58) }]}>
                 <TouchableOpacity 
-                    style={[styles.headerButton, { backgroundColor: theme.card }]}
+                    style={styles.headerButton}
                     onPress={() => props.navigation.goBack()}
                 >
-                    <Icon name="arrow-back" type="material" color={theme.icon} size={24} />
+                    <Text style={styles.headerButtonText}>{'<'}</Text>
                 </TouchableOpacity>
                 
-                <Text style={[styles.headerTitle, { color: theme.text }]}>Notificações</Text>
-                
-                <View style={styles.headerRightContainer}>
-                    <TouchableOpacity 
-                        style={[styles.headerButton, { backgroundColor: theme.card }]}
-                        onPress={() => setIsDarkMode(!isDarkMode)}
-                    >
-                            <Icon
-                            name={isDarkMode ? "light-mode" : "dark-mode"} 
-                            type="material" 
-                            color={theme.icon} 
-                            size={24} 
-                        />
-                    </TouchableOpacity>
+                <View style={styles.headerCopy}>
+                    <Text style={styles.headerTitle}>Notificações</Text>
+                    <Text style={styles.headerSubtitle}>Defina quais avisos você quer receber.</Text>
                 </View>
             </View>
 
@@ -141,18 +112,13 @@ export default function Notifications(props) {
                     renderItem={renderNotification}
                     keyExtractor={(item) => item.id}
                     contentContainerStyle={styles.listContainer}
+                    ItemSeparatorComponent={() => <View style={styles.divider} />}
                 />
             ) : (
                 <View style={styles.emptyContainer}>
-                    <Icon
-                        name="notifications-off"
-                        type="material"
-                        color={theme.textSecondary}
-                        size={64}
-            />
-                    <Text style={[styles.emptyText, { color: theme.textSecondary }]}>
-                        Nenhuma notificação
-                    </Text>
+                    <View style={styles.emptyDot} />
+                    <Text style={styles.emptyText}>Nenhuma notificação</Text>
+                    <Text style={styles.emptySubtitle}>Quando houver novidades da sua corrida, elas aparecem aqui.</Text>
                 </View>
             )}
         </View>
@@ -162,71 +128,88 @@ export default function Notifications(props) {
 const styles = StyleSheet.create({
     container: {
         flex: 1,
+        backgroundColor: '#F6FAF6',
     },
     header: {
         flexDirection: 'row',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        paddingHorizontal: 16,
-        paddingTop: Platform.OS === 'ios' ? 50 : 40,
-        paddingBottom: 16,
-        borderBottomWidth: 1,
-        borderBottomColor: '#E0E0E0',
+        alignItems: 'flex-start',
+        paddingHorizontal: 31,
+        gap: 10,
     },
     headerButton: {
-        width: 40,
-        height: 40,
-        borderRadius: 20,
+        width: 22,
+        height: 30,
         justifyContent: 'center',
-        alignItems: 'center',
+        alignItems: 'flex-start',
+        marginTop: -2,
+    },
+    headerButtonText: {
+        color: '#102018',
+        fontFamily: fonts.SemiBold,
+        fontSize: 22,
+        lineHeight: 28,
+    },
+    headerCopy: {
+        flex: 1,
     },
     headerTitle: {
-        fontSize: 20,
-        fontWeight: 'bold',
+        color: '#102018',
+        fontFamily: fonts.Medium,
+        fontSize: 19,
+        lineHeight: 25,
     },
-    headerRightContainer: {
-        flexDirection: 'row',
-        alignItems: 'center',
+    headerSubtitle: {
+        marginTop: 7,
+        color: '#66756B',
+        fontFamily: fonts.Regular,
+        fontSize: 13,
+        lineHeight: 18,
     },
     listContainer: {
-        padding: 16,
+        paddingHorizontal: 33,
+        paddingTop: 42,
+        paddingBottom: 34,
     },
-    notificationCard: {
+    notificationRow: {
         flexDirection: 'row',
-        padding: 16,
-        borderRadius: 12,
-        marginBottom: 12,
-        shadowColor: '#000',
-        shadowOffset: {
-            width: 0,
-            height: 2,
-        },
-        shadowOpacity: 0.1,
-        shadowRadius: 4,
-        elevation: 3,
+        minHeight: 68,
+        alignItems: 'flex-start',
+        paddingTop: 10,
+        gap: 12,
     },
-    iconContainer: {
-        width: 40,
-        height: 40,
-        borderRadius: 20,
-        justifyContent: 'center',
-        alignItems: 'center',
-        marginRight: 12,
+    rowDot: {
+        width: 8,
+        height: 8,
+        borderRadius: 4,
+        backgroundColor: '#28AD70',
+        marginTop: 6,
     },
     notificationContent: {
         flex: 1,
     },
     notificationTitle: {
-        fontSize: 16,
-        fontWeight: '600',
-        marginBottom: 4,
+        color: '#101C14',
+        fontFamily: fonts.Medium,
+        fontSize: 13,
+        lineHeight: 17,
     },
     notificationMessage: {
-        fontSize: 14,
-        marginBottom: 8,
+        marginTop: 2,
+        color: '#5F6B62',
+        fontFamily: fonts.Regular,
+        fontSize: 11,
+        lineHeight: 15,
     },
     notificationTime: {
-        fontSize: 12,
+        marginTop: 2,
+        color: '#5F6B62',
+        fontFamily: fonts.Regular,
+        fontSize: 10,
+        lineHeight: 14,
+    },
+    divider: {
+        height: 1,
+        backgroundColor: '#DDE8E1',
     },
     loadingContainer: {
         flex: 1,
@@ -237,9 +220,30 @@ const styles = StyleSheet.create({
         flex: 1,
         justifyContent: 'center',
         alignItems: 'center',
+        paddingHorizontal: 42,
         },
+    emptyDot: {
+        width: 34,
+        height: 34,
+        borderRadius: 17,
+        backgroundColor: '#E8F5EA',
+        borderWidth: 1,
+        borderColor: '#C9E5D1',
+        marginBottom: 14,
+    },
     emptyText: {
-        marginTop: 16,
-        fontSize: 16,
+        color: '#102018',
+        fontFamily: fonts.Medium,
+        fontSize: 17,
+        lineHeight: 23,
+        textAlign: 'center',
+    },
+    emptySubtitle: {
+        marginTop: 6,
+        color: '#66756B',
+        fontFamily: fonts.Regular,
+        fontSize: 13,
+        lineHeight: 18,
+        textAlign: 'center',
     },
 });

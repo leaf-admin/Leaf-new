@@ -1,12 +1,16 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Alert,
+  KeyboardAvoidingView,
+  Platform,
+  ScrollView,
   StatusBar,
   StyleSheet,
   Text,
   TextInput,
   TouchableOpacity,
   View,
+  useWindowDimensions,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
@@ -79,6 +83,7 @@ export default function RobotaxiRatingScreen({ navigation, route }) {
   const { activeRole, profile, driverInfo, lastReceipt, markTripRating } =
     usePrototypeRideRuntime();
   const insets = useSafeAreaInsets();
+  const { height: windowHeight } = useWindowDimensions();
   const [cardHeight, setCardHeight] = useState(FALLBACK_CARD_HEIGHT);
   const [rating, setRating] = useState(5);
   const [comment, setComment] = useState("");
@@ -110,6 +115,10 @@ export default function RobotaxiRatingScreen({ navigation, route }) {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const qaAutoSubmitStartedRef = useRef(false);
   const sheetBottom = insets.bottom + SHEET_BOTTOM_OFFSET;
+  const cardMaxHeight = Math.max(
+    340,
+    windowHeight - insets.top - insets.bottom - 86,
+  );
   const fromReceipt = Boolean(route?.params?.fromReceipt);
   const qaAutoSubmit = isTruthyRouteParam(
     route?.params?.qaAutoSubmit || route?.params?.autoSubmit,
@@ -338,10 +347,15 @@ export default function RobotaxiRatingScreen({ navigation, route }) {
           barStyle="dark-content"
         />
 
-        <View style={[styles.sheetWrap, { bottom: sheetBottom }]}>
+        <KeyboardAvoidingView
+          pointerEvents="box-none"
+          behavior={Platform.OS === "ios" ? "padding" : undefined}
+          keyboardVerticalOffset={Math.max(0, insets.top - 4)}
+          style={[styles.sheetWrap, { bottom: sheetBottom }]}
+        >
           <PrototypeCard
             onLayout={handleCardLayout}
-            style={styles.card}
+            style={[styles.card, { maxHeight: cardMaxHeight }]}
             testID={
               reviewerType === "driver"
                 ? "driver-rating-screen"
@@ -353,18 +367,23 @@ export default function RobotaxiRatingScreen({ navigation, route }) {
                 : "passenger-rating-screen"
             }
           >
-            <CardHandle />
+            <ScrollView
+              showsVerticalScrollIndicator={false}
+              keyboardShouldPersistTaps="handled"
+              contentContainerStyle={styles.cardScroll}
+            >
+              <CardHandle />
 
-            <Text style={styles.title}>
+              <Text style={styles.title}>
               {reviewerType === "driver"
                 ? "Avalie o passageiro"
                 : "Avalie a viagem"}
-            </Text>
-            <Text style={styles.subtitle}>
+              </Text>
+              <Text style={styles.subtitle}>
               {reviewerType === "driver"
                 ? `Seu feedback sobre ${targetName} ajuda a melhorar a comunidade Leaf.`
                 : "Sua opiniao ajuda a melhorar o pareamento no proximo trajeto."}
-            </Text>
+              </Text>
 
             <View style={styles.starsRow}>
               {[1, 2, 3, 4, 5].map((value) => {
@@ -485,8 +504,9 @@ export default function RobotaxiRatingScreen({ navigation, route }) {
               testID="passenger-rating-submit-button"
               accessibilityLabel="passenger-rating-submit-button"
             />
+            </ScrollView>
           </PrototypeCard>
-        </View>
+        </KeyboardAvoidingView>
       </View>
     </PrototypeScreenTransition>
   );
@@ -499,13 +519,20 @@ const styles = StyleSheet.create({
   },
   sheetWrap: {
     position: "absolute",
-    left: 10,
-    right: 10,
+    left: 0,
+    right: 0,
   },
   card: {
-    paddingHorizontal: 12,
-    paddingTop: 10,
-    paddingBottom: 12,
+    borderTopLeftRadius: 32,
+    borderTopRightRadius: 32,
+    borderBottomLeftRadius: 0,
+    borderBottomRightRadius: 0,
+    paddingHorizontal: 28,
+    paddingTop: 16,
+    paddingBottom: 16,
+  },
+  cardScroll: {
+    paddingBottom: 2,
   },
   title: {
     color: color.text.primary,

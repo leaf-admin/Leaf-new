@@ -70,6 +70,9 @@ venv/
 android-sdk/
 mobile-app/test-results/
 mobile-app/reports/
+mobile-app/qa-artifacts/
+.codex-artifacts/
+vehicle-image-bank/
 *.img
 *.iso
 *.qcow2

@@ -9,6 +9,7 @@ Este diretório agora separa documentação canônica de histórico.
 - [Manifesto de freeze e rollback](RELEASE_FREEZE_MANIFEST_2026-05-16.md)
 - [Perfil canônico de testes](TEST_EXECUTION_CANONICAL_PROFILE.md)
 - [Workflow de trabalho](workflow/README.md)
+- [Playbook de suporte Leaf](support/LEAF_SUPPORT_PLAYBOOK.md)
 
 ## Domínios vivos
 
@@ -17,6 +18,7 @@ Este diretório agora separa documentação canônica de histórico.
 - `security/`: segurança, regras e backlog de proteção.
 - `observability/`: operação e telemetria.
 - `ocr/`: OCR/KYC/documentos.
+- `support/`: playbooks e operacao de suporte.
 
 ## Histórico
 

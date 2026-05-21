@@ -73,13 +73,23 @@ const METRIC_CONFIG = [
 
   { id: "revenuePerRide", group: "Financeiro", title: "Receita por corrida", path: "metrics.financial.revenuePerRide", format: "brl", formula: "receita total / corridas concluídas" },
   { id: "revenuePerDriver", group: "Financeiro", title: "Receita por motorista", path: "metrics.financial.revenuePerDriver", format: "brl", formula: "receita total / motoristas ativos", targetType: "gte", target: 560 },
+  { id: "driverCpa", group: "Financeiro", title: "CPA motorista", path: "metrics.financial.driverAcquisitionCost", format: "brl", formula: "verba de aquisição configurada / novos motoristas no período", rawPath: "raw.numeratorDenominator.driverAcquisitionCost" },
 
   { id: "driverGrowth", group: "Crescimento", title: "Crescimento motoristas", path: "metrics.growth.driverGrowth", format: "percent", formula: "(novos - churn) / base anterior" },
   { id: "ridesGrowth", group: "Crescimento", title: "Crescimento corridas", path: "metrics.growth.ridesGrowth", format: "percent", formula: "corridas período atual / período anterior - 1", targetType: "range", targetMin: 0.1, targetMax: 0.15 },
   { id: "driverRetention", group: "Crescimento", title: "Retenção motoristas", path: "metrics.growth.driverRetention", format: "percent", formula: "ativos no período atual que também estavam no anterior", targetType: "gte", target: 0.85 },
+  { id: "driverRetentionD30", group: "Crescimento", title: "Retenção D30", path: "metrics.growth.driverRetentionD30", format: "percent", formula: "motoristas com atividade entre D30 e D37 após a primeira corrida", targetType: "gte", target: 0.65, critical: true, rawPath: "raw.numeratorDenominator.driverRetentionD30" },
+  { id: "driverRetentionD60", group: "Crescimento", title: "Retenção D60", path: "metrics.growth.driverRetentionD60", format: "percent", formula: "motoristas com atividade entre D60 e D67 após a primeira corrida", targetType: "gte", target: 0.55, critical: true, rawPath: "raw.numeratorDenominator.driverRetentionD60" },
+  { id: "driverActivation", group: "Crescimento", title: "Taxa de ativação", path: "metrics.growth.driverActivationRate", format: "percent", formula: "novos motoristas que receberam primeira corrida em até 7 dias", targetType: "gte", target: 0.7, critical: true, rawPath: "raw.numeratorDenominator.driverActivationRate" },
+  { id: "driverChurn", group: "Crescimento", title: "Churn motorista", path: "metrics.growth.driverChurnRate", format: "percent", formula: "motoristas ativos no período anterior que não aparecem no período atual", targetType: "lte", target: 0.15, critical: true, rawPath: "raw.numeratorDenominator.driverChurnRate" },
+
+  { id: "supportFirstResponse", group: "Suporte", title: "1ª resposta suporte", path: "metrics.support.averageFirstResponseMinutes", format: "minutes", formula: "média entre criação do ticket e primeira resposta pública", targetType: "lte", target: 30, critical: true, rawPath: "raw.support" },
+  { id: "supportMedianFirstResponse", group: "Suporte", title: "Mediana 1ª resposta", path: "metrics.support.medianFirstResponseMinutes", format: "minutes", formula: "mediana entre criação do ticket e primeira resposta pública", targetType: "lte", target: 30 },
+  { id: "supportOpenTickets", group: "Suporte", title: "Tickets abertos", path: "metrics.support.totalOpenTickets", format: "number", formula: "tickets ainda abertos, atribuídos, em progresso ou escalados" },
+  { id: "supportOverdue", group: "Suporte", title: "SLA vencido", path: "metrics.support.overdueFirstResponseCount", format: "number", formula: "tickets sem primeira resposta dentro do SLA" },
 ];
 
-const GROUP_ORDER = ["Resumo Ideal", "Atividade Motoristas", "Atividade Passageiros", "Financeiro", "Crescimento"];
+const GROUP_ORDER = ["Resumo Ideal", "Atividade Motoristas", "Atividade Passageiros", "Financeiro", "Crescimento", "Suporte"];
 const DASHBOARD_REFRESH_MS = 60000;
 
 export default function MarketplaceMetricsPage() {

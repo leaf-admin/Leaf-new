@@ -4,6 +4,7 @@ import { Provider } from 'react-redux';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import * as SplashScreen from 'expo-splash-screen';
+import * as Font from 'expo-font';
 import { store } from './src/state/appStore';
 import AppNavigator from './src/navigation/AppNavigator';
 import AuthProvider from './src/components/AuthProvider';
@@ -20,6 +21,13 @@ import './src/i18n'; // Inicializar i18n
 import './src/utils/ReanimatedWrapper'; // Suprimir warnings do Reanimated
 
 const FRIENDLY_ALERT_PATCH_BYPASS_OPTION_KEY = '__skipFriendlyAlertPatch';
+const CANONICAL_FONT_ASSETS = {
+  'Inter-Regular': require('@expo-google-fonts/inter/400Regular/Inter_400Regular.ttf'),
+  'Inter-Medium': require('@expo-google-fonts/inter/500Medium/Inter_500Medium.ttf'),
+  'Inter-SemiBold': require('@expo-google-fonts/inter/600SemiBold/Inter_600SemiBold.ttf'),
+  'Inter-Bold': require('@expo-google-fonts/inter/700Bold/Inter_700Bold.ttf'),
+  'Inter-Light': require('@expo-google-fonts/inter/300Light/Inter_300Light.ttf'),
+};
 
 function getDevClient() {
   if (!__DEV__ || Platform.OS === 'web') {
@@ -105,6 +113,10 @@ function installGlobalFriendlyAlertPatch() {
   };
 }
 
+async function loadCanonicalFonts() {
+  await Font.loadAsync(CANONICAL_FONT_ASSETS);
+}
+
 // ✅ CRÍTICO: Manter a splash screen nativa visível desde o início
 // Isso DEVE ser chamado antes de qualquer renderização
 // Usar try/catch para garantir que não quebra se já foi chamado
@@ -140,8 +152,8 @@ export default function App() {
 
   const [appIsReady, setAppIsReady] = useState(false);
   const [isInitializationLocked, setIsInitializationLocked] = useState(false);
-  const bootWatchdogRef = useRef(null);
   const hasMarkedReadyRef = useRef(false);
+  const hasLoadedCanonicalFontsRef = useRef(false);
 
   const withTimeout = useCallback(async (promise, timeoutMs, label) => {
     let timeoutId;
@@ -156,17 +168,20 @@ export default function App() {
     }
   }, []);
 
+  const initializeOptionalBootService = useCallback(async (label, promise, timeoutMs) => {
+    try {
+      await withTimeout(promise, timeoutMs, label);
+    } catch (error) {
+      Logger.warn(`⚠️ [App] ${label} não concluiu durante o boot; mantendo UI ativa:`, error?.message || error);
+    }
+  }, [withTimeout]);
+
   const markAppReady = useCallback((reason) => {
     if (hasMarkedReadyRef.current) {
       return;
     }
 
     hasMarkedReadyRef.current = true;
-
-    if (bootWatchdogRef.current) {
-      clearTimeout(bootWatchdogRef.current);
-      bootWatchdogRef.current = null;
-    }
 
     Logger.log(`✅ App liberado para renderização (${reason})`);
     setAppIsReady(true);
@@ -182,19 +197,16 @@ export default function App() {
     if (isInitializationLocked) return;
     setIsInitializationLocked(true);
 
-    bootWatchdogRef.current = setTimeout(() => {
-      Logger.warn('⚠️ [App] Watchdog de boot acionado; liberando UI antes do fim da inicialização');
-      markAppReady('watchdog');
-    }, 3500);
-
     const initializeApp = async () => {
       try {
         Logger.log('🚀 Inicializando app...');
         
         // Garantir que a splash screen está visível
         await withTimeout(SplashScreen.preventAutoHideAsync(), 2000, 'Splash preventAutoHide');
+        await loadCanonicalFonts();
+        hasLoadedCanonicalFontsRef.current = true;
         
-        // Libera a UI assim que a splash nativa estiver sob controle.
+        // Libera a UI assim que a splash nativa e a fonte canônica estiverem sob controle.
         // Socket e notificações continuam inicializando em background para reduzir o tempo de abertura.
         markAppReady('shell-ready');
 
@@ -224,11 +236,19 @@ export default function App() {
         // 2. Inicializar FCM (agora o WebSocket já está conectado ou tentando conectar)
         await withTimeout(FCMNotificationService.initialize(), 8000, 'FCM initialize');
         
-        // 3. Inicializar serviço de notificações interativas do sistema
-        await withTimeout(InteractiveNotificationService.initialize(), 5000, 'InteractiveNotification initialize');
+        // 3. Inicializar serviços de notificação em modo não-bloqueante.
+        // Eles podem demorar mais em simuladores/dev-client e não devem gerar erro visual no app.
+        await initializeOptionalBootService(
+          'InteractiveNotification initialize',
+          InteractiveNotificationService.initialize(),
+          8000
+        );
         
-        // 4. Inicializar serviço de notificações persistentes de corrida
-        await withTimeout(PersistentRideNotificationService.initialize(), 5000, 'PersistentRideNotification initialize');
+        await initializeOptionalBootService(
+          'PersistentRideNotification initialize',
+          PersistentRideNotificationService.initialize(),
+          8000
+        );
         
         // Registrar handlers específicos para tipos de notificação
         FCMNotificationService.registerNotificationHandler('trip_update', async (remoteMessage) => {
@@ -247,11 +267,17 @@ export default function App() {
         markAppReady('full-init');
       } catch (error) {
         Logger.error('❌ Erro ao inicializar app:', error);
-        markAppReady('init-error');
-      } finally {
-        if (bootWatchdogRef.current) {
-          clearTimeout(bootWatchdogRef.current);
-          bootWatchdogRef.current = null;
+        if (hasLoadedCanonicalFontsRef.current) {
+          markAppReady('init-error-after-fonts');
+        } else {
+          try {
+            await loadCanonicalFonts();
+            hasLoadedCanonicalFontsRef.current = true;
+          } catch (fontError) {
+            Logger.error('❌ CRITICAL: Inter não carregou; UI permanecerá na splash para evitar fallback visual:', fontError);
+            return;
+          }
+          markAppReady('font-recovery');
         }
       }
     };
@@ -260,13 +286,9 @@ export default function App() {
 
     // Cleanup quando o app for destruído
     return () => {
-      if (bootWatchdogRef.current) {
-        clearTimeout(bootWatchdogRef.current);
-        bootWatchdogRef.current = null;
-      }
       FCMNotificationService.destroy();
     };
-  }, [isInitializationLocked, markAppReady, withTimeout]);
+  }, [initializeOptionalBootService, isInitializationLocked, markAppReady, withTimeout]);
 
   // Esconder splash screen quando o app estiver pronto
   // IMPORTANTE: Só esconder DEPOIS que o componente estiver montado

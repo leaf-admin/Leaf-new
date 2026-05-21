@@ -141,6 +141,17 @@ function hasFlag(name) {
 }
 
 function parseCoordinateOverride(latitudeArg, longitudeArg) {
+  if (
+    latitudeArg === undefined ||
+    latitudeArg === null ||
+    longitudeArg === undefined ||
+    longitudeArg === null ||
+    String(latitudeArg).trim() === '' ||
+    String(longitudeArg).trim() === ''
+  ) {
+    return null;
+  }
+
   const latitude = Number(latitudeArg);
   const longitude = Number(longitudeArg);
 
@@ -626,7 +637,7 @@ function buildDriverReceipt() {
     durationMin: 11,
     paymentMethod: 'pix',
     driverId: DRIVER_UID,
-    driverName: 'Leaf Motorista Teste',
+    driverName: 'Carlos Motorista Teste',
     passengerId: PASSENGER_UID,
     passengerName: 'Leaf Passageiro Teste',
     baseFare: 7.4,
@@ -655,7 +666,7 @@ function buildPassengerReceipt() {
     durationMin: 16,
     paymentMethod: 'pix',
     driverId: DRIVER_UID,
-    driverName: 'Leaf Motorista Teste',
+    driverName: 'Carlos Motorista Teste',
     passengerId: PASSENGER_UID,
     passengerName: 'Leaf Passageiro Teste',
     operationalFee: 1.15,
@@ -809,8 +820,17 @@ function buildDriverActiveRide(status) {
     dropoffAddress: LABELS.destinationAddress,
     destinationCoordinate: BASE_COORDS.destination,
     fare: 12.5,
+    grossFare: 12.5,
+    payout: 'R$ 10,80',
     driverNetAmount: 10.8,
     estimatedDriverNetAmount: 10.8,
+    estimatedOperationalFee: 0.99,
+    estimatedPaymentIntermediationFee: 0.71,
+    estimatedTotalFees: 1.7,
+    pricingSnapshotLocked: true,
+    pricingSnapshotLockedAt: '2026-05-19T12:00:00.000Z',
+    pickupEtaMin: 5,
+    tripDurationMin: 20,
     distanceKm: 6.7
   };
 }
@@ -901,6 +921,45 @@ function buildDriverTripMeta(status) {
   };
 }
 
+function buildDriverRideContext(status) {
+  const normalizedStatus = String(status || 'accepted').trim().toLowerCase();
+  const isStarted = normalizedStatus === 'started';
+  const isArrived = normalizedStatus === 'arrived';
+  const currentCoordinate = isStarted
+    ? BASE_COORDS.pickup
+    : isArrived
+      ? BASE_COORDS.pickup
+      : BASE_COORDS.driverHome;
+  const tripDistanceKm = isStarted ? 6.7 : 1.3;
+  const tripDurationMin = isStarted ? 20 : isArrived ? 2 : 5;
+
+  return {
+    activeRole: 'driver',
+    connecting: false,
+    isSocketConnected: false,
+    isSocketAuthenticated: false,
+    socketError: null,
+    lastError: null,
+    selectedDestination: {
+      name: 'Leblon',
+      address: LABELS.destinationAddress,
+      coordinate: BASE_COORDS.destination
+    },
+    selectedVehicle: 'Leaf Plus',
+    selectedFare: 12.5,
+    tripDistanceKm,
+    tripDurationMin,
+    tripArrivalText: `Chegada estimada em ${tripDurationMin} min`,
+    paymentMethod: 'pix',
+    currentAddress: LABELS.pickupAddress,
+    currentCoordinate,
+    driverCoordinate: currentCoordinate,
+    driverActivation: buildApprovedDriverActivation(),
+    driverActivationResolved: true,
+    driverCanGoOnline: true
+  };
+}
+
 function buildDriverOffer() {
   return {
     bookingId: 'booking-proof-offer-1',
@@ -910,11 +969,28 @@ function buildDriverOffer() {
     passengerId: PASSENGER_UID,
     pickup: LABELS.pickupAddress,
     pickupAddress: LABELS.pickupAddress,
+    pickupCoordinate: BASE_COORDS.pickup,
     dropoff: LABELS.destinationAddress,
     dropoffAddress: LABELS.destinationAddress,
+    destinationCoordinate: BASE_COORDS.destination,
     fare: 12.5,
-    payout: 'R$ 12,50',
-    distanceKm: 2.4,
+    grossFare: 12.5,
+    totalAmount: 12.5,
+    amount: 12.5,
+    payout: 'R$ 10,80',
+    driverNetAmount: 10.8,
+    estimatedDriverNetAmount: 10.8,
+    estimatedOperationalFee: 0.99,
+    estimatedPaymentIntermediationFee: 0.71,
+    estimatedTotalFees: 1.7,
+    pricingSnapshotLocked: true,
+    pricingSnapshotLockedAt: '2026-05-19T12:00:00.000Z',
+    distanceKm: 1.3,
+    tripDistanceKm: 6.7,
+    pickupEtaMin: 5,
+    tripDurationMin: 20,
+    passengerRating: 4.9,
+    expiresInSec: 18,
     eta: '6 min',
     paymentMethod: 'pix'
   };
@@ -923,11 +999,13 @@ function buildDriverOffer() {
 function buildPassengerTripBase(status = 'started') {
   const normalizedStatus = String(status || 'started').trim().toLowerCase();
   const isAccepted = normalizedStatus === 'accepted';
-  const driverCoordinate = isAccepted
+  const isArrived = normalizedStatus === 'arrived';
+  const isPickupPhase = isAccepted || isArrived;
+  const driverCoordinate = isPickupPhase
     ? { latitude: -22.9746, longitude: -43.1903 }
     : BASE_COORDS.inTransit;
-  const tripDistanceKm = isAccepted ? 1.2 : 5.1;
-  const tripDurationMin = isAccepted ? 4 : 16;
+  const tripDistanceKm = isArrived ? 0.1 : isAccepted ? 1.2 : 5.1;
+  const tripDurationMin = isArrived ? 2 : isAccepted ? 4 : 16;
 
   return {
     bookingStatus: normalizedStatus,
@@ -936,11 +1014,12 @@ function buildPassengerTripBase(status = 'started') {
       bookingId: 'booking-proof-passenger-1',
       id: 'booking-proof-passenger-1',
       driverId: DRIVER_UID,
-      driverName: 'Leaf Motorista Teste',
+      driverName: 'Carlos Motorista Teste',
       pickupLocation: { ...BASE_COORDS.pickup, add: LABELS.pickupAddress },
       destinationLocation: { ...BASE_COORDS.destination, add: LABELS.destinationAddress },
       estimatedFare: 27.5,
-      paymentMethod: 'pix'
+      paymentMethod: 'pix',
+      boardingPin: '4821'
     },
     selectedDestination: {
       name: 'Leblon',
@@ -957,7 +1036,7 @@ function buildPassengerTripBase(status = 'started') {
     driverActiveRide: buildDriverActiveRide(normalizedStatus),
     driverInfo: {
       id: DRIVER_UID,
-      name: 'Leaf Motorista Teste',
+      name: 'Carlos Motorista Teste',
       plate: 'TES8888',
       model: 'Toyota Prius'
     },
@@ -986,6 +1065,8 @@ function scenarioPatch(name) {
         searchingElapsedSeconds: 0,
         rideExtension: { status: 'idle' },
         operationalContinuation: { status: 'idle' },
+        currentCoordinate: BASE_COORDS.destination,
+        currentAddress: LABELS.pickupAddress,
         tripHistory: [buildPassengerReceipt()],
         lastReceipt: buildPassengerReceipt()
       };
@@ -1054,6 +1135,12 @@ function scenarioPatch(name) {
         rideExtension: { status: 'idle' },
         operationalContinuation: { status: 'idle' }
       });
+    case 'passenger-arrived':
+      return deepMerge(buildPassengerTripBase('arrived'), {
+        boardingRemainingSec: 120,
+        rideExtension: { status: 'idle' },
+        operationalContinuation: { status: 'idle' }
+      });
     case 'passenger-started':
       return deepMerge(buildPassengerTripBase('started'), {
         rideExtension: { status: 'idle' },
@@ -1075,7 +1162,9 @@ function scenarioPatch(name) {
         driverOnlineMutationSource: '',
         driverOffers: [],
         driverActiveRide: null,
-        driverCoordinate: null,
+        currentCoordinate: BASE_COORDS.destination,
+        driverCoordinate: BASE_COORDS.destination,
+        currentAddress: LABELS.pickupAddress,
         driverTripMeta: {
           leg: null,
           initialMeters: null,
@@ -1091,63 +1180,55 @@ function scenarioPatch(name) {
         operationalContinuation: { status: 'idle' }
       };
     case 'driver-offer':
-      return {
+      return deepMerge(buildDriverRideContext('accepted'), {
         bookingStatus: 'searching',
         activeBookingId: 'booking-proof-offer-1',
-        driverOnline: true,
+        driverOnline: false,
+        driverOnlinePending: false,
+        driverOnlineMutationSource: 'qa_seed',
         driverOffers: [buildDriverOffer()],
         driverActiveRide: null,
+        driverTripMeta: buildDriverTripMeta('accepted'),
+        boardingRemainingSec: 0,
         rideExtension: { status: 'idle' },
         operationalContinuation: { status: 'idle' }
-      };
+      });
     case 'driver-accepted':
-      return {
-        activeRole: 'driver',
+      return deepMerge(buildDriverRideContext('accepted'), {
         bookingStatus: 'accepted',
         activeBookingId: 'booking-proof-driver-1',
-        driverOnline: true,
-        driverActivation: buildApprovedDriverActivation(),
-        driverActivationResolved: true,
-        driverCanGoOnline: true,
+        driverOnline: false,
+        driverOnlinePending: false,
+        driverOnlineMutationSource: 'qa_seed',
         driverOffers: [],
         driverActiveRide: buildDriverActiveRide('accepted'),
         driverTripMeta: buildDriverTripMeta('accepted'),
-        currentCoordinate: BASE_COORDS.driverHome,
-        driverCoordinate: BASE_COORDS.driverHome,
         boardingRemainingSec: 0
-      };
+      });
     case 'driver-arrived':
-      return {
-        activeRole: 'driver',
+      return deepMerge(buildDriverRideContext('arrived'), {
         bookingStatus: 'arrived',
         activeBookingId: 'booking-proof-driver-1',
-        driverOnline: true,
-        driverActivation: buildApprovedDriverActivation(),
-        driverActivationResolved: true,
-        driverCanGoOnline: true,
+        driverOnline: false,
+        driverOnlinePending: false,
+        driverOnlineMutationSource: 'qa_seed',
         driverOffers: [],
         driverActiveRide: buildDriverActiveRide('arrived'),
         driverTripMeta: buildDriverTripMeta('arrived'),
-        currentCoordinate: BASE_COORDS.pickup,
-        driverCoordinate: BASE_COORDS.pickup,
         boardingRemainingSec: 120
-      };
+      });
     case 'driver-started':
-      return {
-        activeRole: 'driver',
+      return deepMerge(buildDriverRideContext('started'), {
         bookingStatus: 'started',
         activeBookingId: 'booking-proof-driver-1',
-        driverOnline: true,
-        driverActivation: buildApprovedDriverActivation(),
-        driverActivationResolved: true,
-        driverCanGoOnline: true,
+        driverOnline: false,
+        driverOnlinePending: false,
+        driverOnlineMutationSource: 'qa_seed',
         driverOffers: [],
         driverActiveRide: buildDriverActiveRide('started'),
         driverTripMeta: buildDriverTripMeta('started'),
-        currentCoordinate: BASE_COORDS.pickup,
-        driverCoordinate: BASE_COORDS.pickup,
         boardingRemainingSec: 0
-      };
+      });
     case 'driver-receipt':
       return {
         bookingStatus: 'completed',
@@ -1165,11 +1246,52 @@ function scenarioPatch(name) {
 }
 
 function scenarioRoute(name) {
+  const driverTripParams = (status, bookingId = 'booking-proof-driver-1', extra = {}) => {
+    const request = {
+      bookingId,
+      id: bookingId,
+      status,
+      passengerName: 'Leaf Passageiro Teste',
+      passenger: 'Leaf Passageiro Teste',
+      pickupAddress: LABELS.pickupAddress,
+      pickup: LABELS.pickupAddress,
+      dropoffAddress: LABELS.destinationAddress,
+      dropoff: LABELS.destinationAddress,
+      fare: 12.5,
+      grossFare: 12.5,
+      driverNetAmount: 10.8,
+      estimatedDriverNetAmount: 10.8,
+      estimatedOperationalFee: 0.99,
+      estimatedPaymentIntermediationFee: 0.71,
+      estimatedTotalFees: 1.7,
+      distanceKm: 6.7,
+      pickupEtaMin: 5,
+      tripDurationMin: 20,
+      passengerRating: 4.9,
+      pricingSnapshotLocked: true,
+      ...extra
+    };
+    return `request=${encodeURIComponent(JSON.stringify(request))}`;
+  };
+
   if (name === 'passenger-home' || name === 'driver-home') {
     return 'leafapp://robotaxi/home';
   }
-  if (name === 'passenger-extension' || name === 'passenger-operational') {
+  if (
+    name === 'passenger-extension' ||
+    name === 'passenger-operational' ||
+    name === 'passenger-accepted' ||
+    name === 'passenger-arrived' ||
+    name === 'passenger-started'
+  ) {
     return 'leafapp://robotaxi/trip';
+  }
+  if (name === 'driver-offer') {
+    return `leafapp://robotaxi/driver/offer?${driverTripParams('searching', 'booking-proof-offer-1', { expiresInSec: 18 })}`;
+  }
+  if (name === 'driver-accepted' || name === 'driver-arrived' || name === 'driver-started') {
+    const status = name.replace('driver-', '');
+    return `leafapp://robotaxi/driver/trip?${driverTripParams(status)}`;
   }
   if (name === 'driver-receipt' || name === 'passenger-receipt') {
     return 'leafapp://robotaxi/receipt';
@@ -1214,6 +1336,10 @@ function main() {
   const defaultUid = isDriverScenario ? DRIVER_UID : PASSENGER_UID;
   const uid = String(arg('--uid', defaultUid)).trim() || defaultUid;
   const dataContainer = getContainerData(deviceId);
+  if (!skipLaunch) {
+    runSimctlBestEffort(['terminate', deviceId, APP_ID]);
+    sleep(500);
+  }
   const runtimeFilePath = getRuntimeFilePath(dataContainer, uid);
   const qaSeedFilePath = getQaSeedFilePath(dataContainer, uid);
   const driverActivationFilePath = getDriverActivationFilePath(dataContainer, uid);

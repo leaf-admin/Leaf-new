@@ -5,6 +5,7 @@ const redisPool = require('../utils/redis-pool');
 const { authenticateSupport, requireSupportRoles } = require('../middleware/support-auth');
 const modernMetricsService = require('../services/modern-metrics-service');
 const driverSubscriptionService = require('../services/driver-subscription-service');
+const supportQueueService = require('../services/support-queue-service');
 
 const router = express.Router();
 const METRICS_READ_ROLES = ['admin', 'manager', 'super-admin', 'viewer'];
@@ -1196,6 +1197,109 @@ function parseTs(value) {
   return Number.isFinite(ts) ? ts : null;
 }
 
+function parseCurrencyCents(value) {
+  if (value === null || value === undefined || value === '') return null;
+  const numeric = Number.parseFloat(value);
+  if (!Number.isFinite(numeric) || numeric < 0) return null;
+  return Math.round(numeric);
+}
+
+function parseCurrencyReaisToCents(value) {
+  if (value === null || value === undefined || value === '') return null;
+  const normalized = typeof value === 'string' && value.includes(',')
+    ? value.replace(/\./g, '').replace(',', '.')
+    : value;
+  const numeric = Number.parseFloat(normalized);
+  if (!Number.isFinite(numeric) || numeric < 0) return null;
+  return Math.round(numeric * 100);
+}
+
+function resolveAcquisitionSpendCents(query = {}) {
+  const cents = [
+    query.acquisitionSpendCents,
+    query.marketingSpendCents,
+    process.env.DRIVER_ACQUISITION_SPEND_CENTS,
+    process.env.MARKETING_ACQUISITION_SPEND_CENTS
+  ].map(parseCurrencyCents).find((value) => Number.isFinite(value));
+
+  if (Number.isFinite(cents)) return cents;
+
+  return [
+    query.acquisitionSpend,
+    query.marketingSpend,
+    process.env.DRIVER_ACQUISITION_SPEND_BRL,
+    process.env.MARKETING_ACQUISITION_SPEND_BRL
+  ].map(parseCurrencyReaisToCents).find((value) => Number.isFinite(value)) ?? null;
+}
+
+function mean(values = []) {
+  const valid = values.filter((value) => Number.isFinite(value));
+  if (valid.length === 0) return null;
+  return valid.reduce((sum, value) => sum + value, 0) / valid.length;
+}
+
+function buildDriverLifecycle({ drivers = [], bookings = [], nowMs = Date.now() }) {
+  const bookingsByDriver = new Map();
+  bookings.forEach((booking) => {
+    if (!booking.driverId || !Number.isFinite(booking.requestTs)) return;
+    if (!bookingsByDriver.has(booking.driverId)) bookingsByDriver.set(booking.driverId, []);
+    bookingsByDriver.get(booking.driverId).push(booking);
+  });
+
+  return drivers.map((driver) => {
+    const driverBookings = (bookingsByDriver.get(driver.id) || [])
+      .slice()
+      .sort((a, b) => a.requestTs - b.requestTs);
+    const createdTs = pickFirstTs(
+      driver.createdAt,
+      driver.created_at,
+      driver.registrationDate,
+      driver.registeredAt,
+      driver.signUpAt
+    );
+    const firstActivityTs = driverBookings.length > 0 ? driverBookings[0].requestTs : null;
+    const activatedWithin7d = Number.isFinite(createdTs) && Number.isFinite(firstActivityTs)
+      ? firstActivityTs >= createdTs && firstActivityTs <= createdTs + (7 * 24 * 60 * 60 * 1000)
+      : false;
+
+    return {
+      driverId: driver.id,
+      createdTs,
+      firstActivityTs,
+      activatedWithin7d,
+      bookings: driverBookings,
+      ageDays: Number.isFinite(createdTs)
+        ? (nowMs - createdTs) / (24 * 60 * 60 * 1000)
+        : null
+    };
+  });
+}
+
+function calculateDriverRetention(lifecycleRows = [], days, windowDays = 7, asOfMs = Date.now()) {
+  const dayMs = 24 * 60 * 60 * 1000;
+  const eligible = lifecycleRows.filter((row) =>
+    Number.isFinite(row.firstActivityTs) && asOfMs >= row.firstActivityTs + (days * dayMs)
+  );
+
+  const retained = eligible.filter((row) => {
+    const start = row.firstActivityTs + (days * dayMs);
+    const end = Math.min(start + (windowDays * dayMs), asOfMs);
+    return row.bookings.some((booking) =>
+      Number.isFinite(booking.requestTs) &&
+      booking.requestTs >= start &&
+      booking.requestTs <= end
+    );
+  });
+
+  return {
+    rate: eligible.length > 0 ? retained.length / eligible.length : null,
+    retained: retained.length,
+    cohort: eligible.length,
+    days,
+    windowDays
+  };
+}
+
 function getWindow(period, startDate, endDate) {
   const now = new Date();
   let start = new Date(now);
@@ -1303,10 +1407,12 @@ router.get('/api/metrics/marketplace', async (req, res) => {
       startDate,
       endDate
     } = req.query;
+    const acquisitionSpendCents = resolveAcquisitionSpendCents(req.query);
     const cacheKey = buildMetricsCacheKey('marketplace', {
       period,
       startDate: startDate || '',
-      endDate: endDate || ''
+      endDate: endDate || '',
+      acquisitionSpendCents: acquisitionSpendCents ?? ''
     });
     const cached = await readMetricsCache(cacheKey);
     if (cached) {
@@ -1321,7 +1427,11 @@ router.get('/api/metrics/marketplace', async (req, res) => {
       raw: {},
       assumptions: {
         driverUtilizationEstimated: true,
-        costPerRideEstimated: true
+        costPerRideEstimated: true,
+        driverActivityBasis: 'booking com motorista atribuido',
+        activationWindowDays: 7,
+        retentionWindowDays: 7,
+        acquisitionSpendSource: acquisitionSpendCents == null ? 'not_configured' : 'query_or_env'
       }
     };
 
@@ -1342,9 +1452,20 @@ router.get('/api/metrics/marketplace', async (req, res) => {
       }
     };
 
-    const [bookingsSnapshot, usersSnapshot] = await Promise.all([
+    const supportSummaryPromise = supportQueueService
+      .getQueueSummary({ autoEscalate: false })
+      .catch((error) => {
+        logStructured('warn', 'Falha ao carregar resumo de suporte para marketplace metrics', {
+          service: 'metrics-routes',
+          reason: error.message
+        });
+        return null;
+      });
+
+    const [bookingsSnapshot, usersSnapshot, supportSummary] = await Promise.all([
       db.ref('bookings').once('value'),
-      db.ref('users').once('value')
+      db.ref('users').once('value'),
+      supportSummaryPromise
     ]);
 
     const bookings = bookingsSnapshot.val() || {};
@@ -1520,13 +1641,44 @@ router.get('/api/metrics/marketplace', async (req, res) => {
       : null;
 
     const driversArray = Object.keys(users).map((id) => ({ id, ...(users[id] || {}) }))
-      .filter((u) => String(u.usertype || '').toLowerCase() === 'driver');
+      .filter((u) => String(u.usertype || u.userType || '').toLowerCase() === 'driver');
     const driverUsersById = new Map(driversArray.map((driver) => [driver.id, driver]));
     const newDriversCurrent = driversArray.filter((d) => isWithin(parseTs(d.createdAt), current)).length;
     const churnDrivers = [...previousActiveDrivers].filter((driverId) => !activeDriverSet.has(driverId)).length;
+    const churnRate = previousActiveDrivers.size > 0 ? churnDrivers / previousActiveDrivers.size : null;
     const driverGrowth = previousActiveDrivers.size > 0
       ? (newDriversCurrent - churnDrivers) / previousActiveDrivers.size
       : null;
+    const driverLifecycleRows = buildDriverLifecycle({
+      drivers: driversArray,
+      bookings: normalizedBookings,
+      nowMs: current.end.getTime()
+    });
+    const newDriverLifecycleRows = driverLifecycleRows.filter((row) => isWithin(row.createdTs, current));
+    const activatedDriversWithin7d = newDriverLifecycleRows.filter((row) => row.activatedWithin7d).length;
+    const driverActivationRate = newDriverLifecycleRows.length > 0
+      ? activatedDriversWithin7d / newDriverLifecycleRows.length
+      : null;
+    const retentionD30 = calculateDriverRetention(driverLifecycleRows, 30, 7, current.end.getTime());
+    const retentionD60 = calculateDriverRetention(driverLifecycleRows, 60, 7, current.end.getTime());
+    const acquisitionSpend = acquisitionSpendCents == null
+      ? null
+      : Number((acquisitionSpendCents / 100).toFixed(2));
+    const driverAcquisitionCost = acquisitionSpend != null && newDriversCurrent > 0
+      ? acquisitionSpend / newDriversCurrent
+      : null;
+    const supportTickets = Array.isArray(supportSummary?.tickets) ? supportSummary.tickets : [];
+    const supportFirstResponseMinutes = supportTickets
+      .map((ticket) => {
+        const createdAt = Date.parse(ticket.createdAt || '');
+        const firstResponseAt = Date.parse(ticket.queue?.firstResponseAt || '');
+        if (!Number.isFinite(createdAt) || !Number.isFinite(firstResponseAt) || firstResponseAt < createdAt) {
+          return null;
+        }
+        return (firstResponseAt - createdAt) / 60000;
+      })
+      .filter((value) => Number.isFinite(value));
+    const averageSupportFirstResponseMinutes = mean(supportFirstResponseMinutes);
 
     const driverBreakdownMap = new Map();
     currentBookings.forEach((b) => {
@@ -1622,12 +1774,26 @@ router.get('/api/metrics/marketplace', async (req, res) => {
         costPerRide,
         marginPerRide,
         revenuePerDriver,
-        totalRevenue: revenueTotal
+        totalRevenue: revenueTotal,
+        driverAcquisitionCost,
+        acquisitionSpend
       },
       growth: {
         driverGrowth,
         ridesGrowth,
-        driverRetention: retentionDrivers
+        driverRetention: retentionDrivers,
+        driverRetentionD30: retentionD30.rate,
+        driverRetentionD60: retentionD60.rate,
+        driverActivationRate,
+        driverChurnRate: churnRate
+      },
+      support: {
+        averageFirstResponseMinutes: averageSupportFirstResponseMinutes,
+        medianFirstResponseMinutes: supportSummary?.medianFirstResponseMinutes ?? null,
+        totalOpenTickets: supportSummary?.totalOpenTickets ?? null,
+        overdueAckCount: supportSummary?.overdueAckCount ?? null,
+        overdueFirstResponseCount: supportSummary?.overdueFirstResponseCount ?? null,
+        ticketsWithoutOwner: supportSummary?.ticketsWithoutOwner ?? null
       },
       summary: {
         ridesRequested: requested,
@@ -1781,7 +1947,12 @@ router.get('/api/metrics/marketplace', async (req, res) => {
         cancellation: { cancelled, requested },
         conversion: { completed, requested },
         ridesPerDriverPerDay: { rides: requested, activeDrivers, days: periodDays },
-        ridesPerPassengerMonth: { ridesMonth: monthRideCount, mau }
+        ridesPerPassengerMonth: { ridesMonth: monthRideCount, mau },
+        driverActivationRate: { activatedDriversWithin7d, newDrivers: newDriverLifecycleRows.length },
+        driverRetentionD30: { retained: retentionD30.retained, cohort: retentionD30.cohort, days: 30, windowDays: 7 },
+        driverRetentionD60: { retained: retentionD60.retained, cohort: retentionD60.cohort, days: 60, windowDays: 7 },
+        driverChurnRate: { churnDrivers, previousActiveDrivers: previousActiveDrivers.size },
+        driverAcquisitionCost: { acquisitionSpend, newDrivers: newDriversCurrent }
       },
       timingSamples: {
         waitCount: waitSamplesMin.length,
@@ -1793,7 +1964,16 @@ router.get('/api/metrics/marketplace', async (req, res) => {
         previousActiveDrivers: previousActiveDrivers.size,
         retainedDrivers: retainedDriversCount,
         newDriversCurrent,
-        churnDrivers
+        churnDrivers,
+        activatedDriversWithin7d,
+        driverRetentionD30: retentionD30,
+        driverRetentionD60: retentionD60
+      },
+      support: {
+        firstResponseSamples: supportFirstResponseMinutes.length,
+        openTickets: supportSummary?.totalOpenTickets ?? null,
+        overdueAckCount: supportSummary?.overdueAckCount ?? null,
+        overdueFirstResponseCount: supportSummary?.overdueFirstResponseCount ?? null
       },
       breakdowns: {
         activeDriverRows: driverBreakdown.length

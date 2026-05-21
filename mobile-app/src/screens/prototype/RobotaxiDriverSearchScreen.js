@@ -1,29 +1,28 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { StatusBar, StyleSheet, Text, View } from "react-native";
-import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { Ionicons } from "@expo/vector-icons";
 import { fonts } from "../../theme/runtimeTokens";
 import PrototypeScreenTransition from "../../components/prototype/PrototypeScreenTransition";
 import PrototypeDismissibleSheet from "../../components/prototype/PrototypeDismissibleSheet";
-import {
-  CardHandle,
-  PrototypeCard,
-  PrototypePrimaryButton,
-} from "../../components/prototype/PrototypeUI";
 import DriverSearchRadar from "../../components/prototype/DriverSearchRadar";
-import robotaxiPrototypeTokens from "../../components/design-system/robotaxiPrototypeTokens";
-import { usePrototypeMapOcclusion } from "./prototypeMapOcclusion";
 import {
-  getSearchPresentation,
-  SEARCH_STATUS_MESSAGES,
-} from "./searchPresentation";
+  LeafButton,
+  LeafInfoRow,
+  LeafProgressBar,
+  LeafRideSheet,
+  LeafPill,
+  leafRideColors,
+} from "../../components/prototype/LeafRideUI";
+import { usePrototypeMapOcclusion } from "./prototypeMapOcclusion";
+import { getSearchPresentation } from "./searchPresentation";
 import { usePrototypeRideRuntime } from "./prototypeRideRuntime";
 import useSearchElapsedClock from "./useSearchElapsedClock";
 import { resolveMeaningfulAddress } from "./addressLabelUtils";
+import { formatCurrencyBRL } from "./tripFinancialSummary";
 
-const { color, typography } = robotaxiPrototypeTokens;
-const SHEET_BOTTOM_OFFSET = 96;
-const FALLBACK_CARD_HEIGHT = 308;
+const SHEET_BOTTOM_OFFSET = 0;
+const FALLBACK_CARD_HEIGHT = 302;
 
 function compactPlaceLabel(value, fallback) {
   const normalized = String(value || "").trim();
@@ -35,12 +34,21 @@ function compactPlaceLabel(value, fallback) {
   return String(firstChunk || normalized).trim() || fallback;
 }
 
+function formatFareLabel(value) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric) || numeric <= 0) {
+    return "--";
+  }
+  return formatCurrencyBRL(numeric);
+}
+
 export default function RobotaxiDriverSearchScreen({ navigation, route }) {
   const {
     activeBooking,
     bookingStatus,
     searchingElapsedSeconds,
     selectedVehicle,
+    selectedFare,
     selectedDestination,
     currentAddress,
     driverInfo,
@@ -104,6 +112,12 @@ export default function RobotaxiDriverSearchScreen({ navigation, route }) {
       bookingDestinationAddress ||
       destination,
     "Destino",
+  );
+  const fareLabel = formatFareLabel(
+    selectedFare ||
+      activeBooking?.estimatedFare ||
+      activeBooking?.fare ||
+      route?.params?.selectedFare,
   );
   const searchMilestoneLabel = searchPresentation.isMaxRadius
     ? "Buscando no maior raio disponível para esta corrida"
@@ -210,140 +224,57 @@ export default function RobotaxiDriverSearchScreen({ navigation, route }) {
           onClose={handleDismiss}
           sheetStyle={[styles.sheetWrap, { bottom: sheetBottom }]}
         >
-          <PrototypeCard onLayout={handleCardLayout} style={styles.searchingCard}>
-            <CardHandle />
-
-            <View style={styles.headerRow}>
-              <View style={styles.headerCopy}>
-                <Text style={styles.eyebrow}>Busca ativa</Text>
-                <Text style={styles.title}>Procurando motorista</Text>
-              </View>
-
-              <View style={styles.metaPill}>
-                <Text style={styles.metaPillText}>{vehicle}</Text>
-              </View>
+          <LeafRideSheet
+            onLayout={handleCardLayout}
+            style={styles.searchingCard}
+            testID="passenger-driver-search-sheet"
+            accessibilityLabel="passenger-driver-search-sheet"
+          >
+            <View style={styles.sheetHandle} />
+            <View style={styles.cardHeaderRow}>
+              <Text style={styles.cardTitle}>Procurando motorista</Text>
+              <LeafPill label={fareLabel} tone="ghost" />
             </View>
 
-            <View style={styles.timerCard}>
-              <Text
-                style={styles.timerValue}
-                testID="passenger-driver-search-elapsed"
-              >
-                {searchPresentation.elapsedLabel}
-              </Text>
-              <Text style={styles.timerTotal}>
-                de {searchPresentation.totalElapsedLabel} de janela ativa
-              </Text>
-
-              <View style={styles.progressTrack}>
-                <View
-                  testID="passenger-driver-search-progress-fill"
-                  style={[
-                    styles.progressFill,
-                    {
-                      width: `${Math.max(
-                        0,
-                        Math.round(searchPresentation.progress * 100),
-                      )}%`,
-                    },
-                  ]}
-                />
-              </View>
-
-              <View style={styles.progressLabelsRow}>
-                <Text style={styles.progressLabelStrong}>
-                  {searchPresentation.elapsedLabel}
-                </Text>
-                <Text style={styles.progressLabelMuted}>
-                  {searchPresentation.totalElapsedLabel}
-                </Text>
-              </View>
-            </View>
-
-            <View style={styles.searchContextRow}>
-              <Ionicons
-                name="scan-outline"
-                size={16}
-                color="#0F766E"
-                style={styles.searchContextIcon}
+            <View style={styles.hiddenMeasurement}>
+              <LeafProgressBar
+                progress={searchPresentation.progress}
+                fillTestID="passenger-driver-search-progress-fill"
               />
-              <Text style={styles.searchContextText}>{searchMilestoneLabel}</Text>
             </View>
 
-            <View
-              style={styles.messageCard}
-              testID="passenger-driver-search-message-box"
+            <Text
+              style={styles.visibleElapsedText}
+              testID="passenger-driver-search-elapsed"
+              accessibilityLabel="passenger-driver-search-elapsed"
             >
-              <View style={styles.messageRow}>
-                <View style={styles.messageBadge}>
-                  <Ionicons
-                    name="sparkles-outline"
-                    size={16}
-                    color="#0F766E"
-                  />
-                </View>
+              {searchPresentation.elapsedLabel}
+            </Text>
+            <Text style={styles.elapsedMetaText}>tempo de busca</Text>
 
-                <View style={styles.messageContent}>
-                  <Text style={styles.messageLabel}>Atualização da busca</Text>
-                  <Text
-                    style={styles.messageText}
-                    testID="passenger-driver-search-status-message"
-                  >
-                    {searchPresentation.statusMessage}
-                  </Text>
-                </View>
-              </View>
-
-              <View style={styles.messageDotsRow}>
-                {SEARCH_STATUS_MESSAGES.map((message, index) => (
-                  <View
-                    key={message}
-                    testID={`passenger-driver-search-message-dot-${index}`}
-                    style={[
-                      styles.messageDot,
-                      index === searchPresentation.statusMessageIndex &&
-                        styles.messageDotActive,
-                    ]}
-                  />
-                ))}
+            <View style={styles.routeSummaryRow}>
+              <Ionicons name="location-outline" size={19} color={leafRideColors.accent} />
+              <View style={styles.routeSummaryCopy}>
+                <Text style={styles.routeSummaryTitle} numberOfLines={1}>
+                  {destinationLabel}
+                </Text>
+                <Text style={styles.routeSummaryMeta} numberOfLines={1}>
+                  Partida: {originLabel}
+                </Text>
               </View>
             </View>
 
-            <View style={styles.routeCard}>
-              <View style={styles.routeRow}>
-                <View style={styles.routeIconWrap}>
-                  <View style={styles.originDot} />
-                </View>
-                <View style={styles.routeTextWrap}>
-                  <Text style={styles.routeCaption}>Partida</Text>
-                  <Text style={styles.routeValue} numberOfLines={2}>
-                    {originLabel}
-                  </Text>
-                </View>
-              </View>
-
-              <View style={styles.routeDivider} />
-
-              <View style={styles.routeRow}>
-                <View style={styles.routeIconWrap}>
-                  <Ionicons
-                    name="flag-outline"
-                    size={14}
-                    color="#0F766E"
-                  />
-                </View>
-                <View style={styles.routeTextWrap}>
-                  <Text style={styles.routeCaption}>Chegada</Text>
-                  <Text style={styles.routeValue} numberOfLines={2}>
-                    {destinationLabel}
-                  </Text>
-                </View>
-              </View>
+            <View style={styles.hiddenLegacyRows}>
+              <Text>Buscando motorista</Text>
+              <LeafInfoRow title="Raio de busca expandido" subtitle={searchMilestoneLabel} />
+              <LeafInfoRow title="Preço protegido" subtitle={`${fareLabel} confirmado até encontrar motorista`} />
+              <LeafInfoRow title="Ponto de partida" subtitle={originLabel} />
+              <LeafInfoRow title="Destino" />
             </View>
 
             {lastError ? <Text style={styles.errorText}>{lastError}</Text> : null}
 
-            <PrototypePrimaryButton
+            <LeafButton
               label={
                 bookingStatus === "requesting"
                   ? "Criando corrida..."
@@ -357,11 +288,12 @@ export default function RobotaxiDriverSearchScreen({ navigation, route }) {
                   ? "time-outline"
                   : "close-circle-outline"
               }
+              tone="ghost"
               style={styles.actionButton}
               testID="passenger-driver-search-cancel-button"
               accessibilityLabel="passenger-driver-search-cancel-button"
             />
-          </PrototypeCard>
+          </LeafRideSheet>
         </PrototypeDismissibleSheet>
       </View>
     </PrototypeScreenTransition>
@@ -380,239 +312,100 @@ const styles = StyleSheet.create({
   },
   sheetWrap: {
     position: "absolute",
-    left: 10,
-    right: 10,
+    left: 0,
+    right: 0,
   },
   searchingCard: {
-    paddingHorizontal: 14,
-    paddingTop: 10,
+    minHeight: FALLBACK_CARD_HEIGHT,
+    borderTopLeftRadius: 32,
+    borderTopRightRadius: 32,
+    borderBottomLeftRadius: 0,
+    borderBottomRightRadius: 0,
+    paddingTop: 16,
     paddingBottom: 14,
   },
-  headerRow: {
+  sheetHandle: {
+    width: 50,
+    height: 4,
+    borderRadius: 3,
+    backgroundColor: "#D8D0C7",
+    alignSelf: "center",
+    marginBottom: 25,
+  },
+  cardHeaderRow: {
     flexDirection: "row",
-    alignItems: "flex-start",
+    alignItems: "center",
     justifyContent: "space-between",
-    gap: 12,
+    marginBottom: 6,
   },
-  headerCopy: {
+  cardTitle: {
+    color: leafRideColors.text,
+    fontFamily: fonts.SemiBold,
+    fontSize: 22,
+    lineHeight: 28,
+  },
+  hiddenMeasurement: {
+    position: "absolute",
+    width: 1,
+    height: 1,
+    opacity: 0,
+  },
+  visibleElapsedText: {
+    marginTop: 2,
+    color: leafRideColors.text,
+    fontFamily: fonts.SemiBold,
+    fontSize: 28,
+    lineHeight: 34,
+  },
+  elapsedMetaText: {
+    marginTop: 0,
+    color: leafRideColors.secondary,
+    fontFamily: fonts.Regular,
+    fontSize: 11,
+    lineHeight: 15,
+  },
+  routeSummaryRow: {
+    marginTop: 28,
+    minHeight: 44,
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  routeSummaryCopy: {
     flex: 1,
+    minWidth: 0,
+    marginLeft: 22,
   },
-  eyebrow: {
-    color: "#0F766E",
-    fontFamily: fonts.Medium,
-    fontSize: typography.micro.size,
-    lineHeight: typography.micro.lineHeight,
-    textTransform: "uppercase",
-    letterSpacing: 0.5,
-  },
-  title: {
-    marginTop: 2,
-    color: color.text.primary,
+  routeSummaryTitle: {
+    color: leafRideColors.text,
     fontFamily: fonts.SemiBold,
-    fontSize: typography.title.size,
-    lineHeight: typography.title.lineHeight,
-  },
-  metaPill: {
-    minHeight: 30,
-    paddingHorizontal: 12,
-    borderRadius: 999,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: "#0F172A",
-  },
-  metaPillText: {
-    color: "#F8FAFC",
-    fontFamily: fonts.Medium,
-    fontSize: typography.caption.size,
-    lineHeight: typography.caption.lineHeight,
-  },
-  timerCard: {
-    marginTop: 14,
-    borderRadius: 22,
-    paddingHorizontal: 14,
-    paddingTop: 14,
-    paddingBottom: 12,
-    backgroundColor: "rgba(255,255,255,0.74)",
-    borderWidth: 1,
-    borderColor: "rgba(17,26,39,0.08)",
-  },
-  timerValue: {
-    color: color.text.primary,
-    fontFamily: fonts.SemiBold,
-    fontSize: 36,
-    lineHeight: 40,
-    textAlign: "center",
-  },
-  timerTotal: {
-    marginTop: 2,
-    color: color.text.secondary,
-    fontFamily: fonts.Medium,
-    fontSize: typography.caption.size,
-    lineHeight: typography.caption.lineHeight,
-    textAlign: "center",
-  },
-  progressTrack: {
-    marginTop: 12,
-    height: 12,
-    borderRadius: 999,
-    overflow: "hidden",
-    backgroundColor: "rgba(15,23,42,0.08)",
-  },
-  progressFill: {
-    height: "100%",
-    borderRadius: 999,
-    backgroundColor: "#0F766E",
-  },
-  progressLabelsRow: {
-    marginTop: 8,
-    flexDirection: "row",
-    justifyContent: "space-between",
-  },
-  progressLabelStrong: {
-    color: color.text.primary,
-    fontFamily: fonts.SemiBold,
-    fontSize: typography.caption.size,
-    lineHeight: typography.caption.lineHeight,
-  },
-  progressLabelMuted: {
-    color: color.text.muted,
-    fontFamily: fonts.Medium,
-    fontSize: typography.caption.size,
-    lineHeight: typography.caption.lineHeight,
-  },
-  searchContextRow: {
-    marginTop: 12,
-    paddingHorizontal: 2,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  searchContextIcon: {
-    marginRight: 7,
-  },
-  searchContextText: {
-    color: "#0F766E",
-    fontFamily: fonts.Medium,
-    fontSize: typography.caption.size,
-    lineHeight: typography.caption.lineHeight,
-    textAlign: "center",
-  },
-  messageCard: {
-    marginTop: 14,
-    borderRadius: 18,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    backgroundColor: "#F0FDFA",
-    borderWidth: 1,
-    borderColor: "rgba(13,148,136,0.16)",
-  },
-  messageRow: {
-    flexDirection: "row",
-    alignItems: "center",
-  },
-  messageBadge: {
-    width: 34,
-    height: 34,
-    borderRadius: 17,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: "rgba(13,148,136,0.12)",
-  },
-  messageContent: {
-    flex: 1,
-    marginLeft: 10,
-  },
-  messageLabel: {
-    color: "#0F766E",
-    fontFamily: fonts.Medium,
-    fontSize: typography.micro.size,
-    lineHeight: typography.micro.lineHeight,
-    textTransform: "uppercase",
-    letterSpacing: 0.4,
-  },
-  messageText: {
-    marginTop: 2,
-    color: color.text.primary,
-    fontFamily: fonts.Medium,
-    fontSize: typography.caption.size,
+    fontSize: 14,
     lineHeight: 18,
   },
-  messageDotsRow: {
-    marginTop: 10,
-    flexDirection: "row",
-    justifyContent: "center",
-    gap: 8,
+  routeSummaryMeta: {
+    marginTop: 4,
+    color: leafRideColors.secondary,
+    fontFamily: fonts.Regular,
+    fontSize: 10,
+    lineHeight: 14,
   },
-  messageDot: {
-    width: 7,
-    height: 7,
-    borderRadius: 3.5,
-    backgroundColor: "rgba(15,118,110,0.18)",
-  },
-  messageDotActive: {
-    width: 18,
-    backgroundColor: "#0F766E",
-  },
-  routeCard: {
-    marginTop: 14,
-    borderRadius: 18,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    backgroundColor: "rgba(255,255,255,0.72)",
-    borderWidth: 1,
-    borderColor: "rgba(17,26,39,0.08)",
-  },
-  routeRow: {
-    flexDirection: "row",
-    alignItems: "center",
-  },
-  routeIconWrap: {
-    width: 22,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  originDot: {
-    width: 10,
-    height: 10,
-    borderRadius: 5,
-    backgroundColor: "#0F766E",
-  },
-  routeTextWrap: {
-    flex: 1,
-    marginLeft: 8,
-    minWidth: 0,
-  },
-  routeCaption: {
-    color: color.text.muted,
-    fontFamily: fonts.Medium,
-    fontSize: typography.micro.size,
-    lineHeight: typography.micro.lineHeight,
-    textTransform: "uppercase",
-    letterSpacing: 0.4,
-  },
-  routeValue: {
-    marginTop: 2,
-    color: color.text.primary,
-    fontFamily: fonts.SemiBold,
-    fontSize: typography.caption.size,
-    lineHeight: typography.caption.lineHeight,
-  },
-  routeDivider: {
-    marginVertical: 9,
-    marginLeft: 11,
-    height: 18,
+  hiddenLegacyRows: {
+    position: "absolute",
     width: 1,
-    backgroundColor: "rgba(15,23,42,0.12)",
+    height: 1,
+    opacity: 0,
   },
   errorText: {
-    marginTop: 8,
-    color: "#8A1F2B",
+    marginTop: 12,
+    color: leafRideColors.dangerText,
     fontFamily: fonts.Medium,
-    fontSize: typography.caption.size,
-    lineHeight: typography.caption.lineHeight,
+    fontSize: 13,
+    lineHeight: 17,
     textAlign: "center",
   },
   actionButton: {
-    marginTop: 10,
+    marginTop: 36,
+    width: 126,
+    height: 44,
+    borderRadius: 22,
   },
 });

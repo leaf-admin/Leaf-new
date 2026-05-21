@@ -175,13 +175,17 @@ const styles = StyleSheet.create({
   },
   sheetWrap: {
     position: "absolute",
-    left: 10,
-    right: 10,
+    left: 0,
+    right: 0,
   },
   sheet: {
-    paddingHorizontal: 12,
-    paddingTop: 10,
-    paddingBottom: 12,
+    borderTopLeftRadius: 32,
+    borderTopRightRadius: 32,
+    borderBottomLeftRadius: 0,
+    borderBottomRightRadius: 0,
+    paddingHorizontal: 28,
+    paddingTop: 16,
+    paddingBottom: 16,
   },
   sectionLabel: {
     color: color.text.secondary,

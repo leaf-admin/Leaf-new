@@ -1,20 +1,83 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, StatusBar, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { fonts } from '../../theme/runtimeTokens';
 import PrototypeScreenTransition from '../../components/prototype/PrototypeScreenTransition';
 import PrototypeDismissibleSheet from '../../components/prototype/PrototypeDismissibleSheet';
-import { CardHandle, PrototypeCard, PrototypePrimaryButton } from '../../components/prototype/PrototypeUI';
+import PrototypeMapLayer from '../../components/prototype/PrototypeMapLayer';
 import WooviPaymentModal from '../../components/payment/WooviPaymentModal';
+import SecurePaymentBadge from '../../components/payment/SecurePaymentBadge';
 import robotaxiPrototypeTokens from '../../components/design-system/robotaxiPrototypeTokens';
+import {
+  LeafButton,
+  LeafDivider,
+  LeafDriverIdentity,
+  LeafRideSheet,
+  LeafRouteProgress,
+  leafRideColors,
+} from '../../components/prototype/LeafRideUI';
 import { usePrototypeMapOcclusion } from './prototypeMapOcclusion';
 import { usePrototypeRideRuntime } from './prototypeRideRuntime';
+import { useLiveRouteTiming } from './liveRouteTiming';
 import { formatCurrencyBRL } from './tripFinancialSummary';
+import { PROTOTYPE_ORIGIN_COORDINATE, PROTOTYPE_REGION } from './robotaxiPrototypeData';
 
 const { color, typography } = robotaxiPrototypeTokens;
-const SHEET_BOTTOM_OFFSET = 100;
-const FALLBACK_CARD_HEIGHT = 300;
+const SHEET_BOTTOM_OFFSET = 0;
+const FALLBACK_CARD_HEIGHT = 292;
+
+export const PASSENGER_TRIP_RENDERED_CARD_FIELDS = Object.freeze({
+  accepted: Object.freeze([
+    'driver_name',
+    'driver_photo',
+    'driver_rating',
+    'vehicle_model',
+    'vehicle_color',
+    'vehicle_plate',
+    'pickup_eta',
+    'pickup_distance',
+    'pickup_address',
+    'destination_address',
+    'fare',
+    'vehicle_type',
+    'contact_actions',
+    'share_trip_action',
+    'safety_action',
+    'cancel_action',
+  ]),
+  arrived: Object.freeze([
+    'driver_name',
+    'driver_photo',
+    'vehicle_model',
+    'vehicle_color',
+    'vehicle_plate',
+    'boarding_timer',
+    'boarding_timer_message',
+    'pickup_address',
+    'contact_actions',
+    'safety_action',
+    'cancel_action',
+  ]),
+  started: Object.freeze([
+    'destination_address',
+    'eta_final',
+    'distance_remaining',
+    'route_progress',
+    'driver_name',
+    'driver_photo',
+    'vehicle_model',
+    'vehicle_color',
+    'vehicle_plate',
+    'fare',
+    'vehicle_type',
+    'share_trip_action',
+    'safety_action',
+    'support_action',
+    'change_destination_action',
+    'end_early_action',
+  ]),
+});
 
 function formatCurrency(value) {
   const amount = Number(value);
@@ -58,6 +121,58 @@ function formatStatusLabel(status) {
   return 'VIAGEM';
 }
 
+function formatBoardingTimer(seconds) {
+  const normalizedSeconds = Math.max(0, Math.round(Number(seconds) || 0));
+  return `${Math.floor(normalizedSeconds / 60)}:${String(normalizedSeconds % 60).padStart(2, '0')}`;
+}
+
+function getFirstName(value, fallback = 'Motorista') {
+  const firstName = String(value || '').trim().split(/\s+/).filter(Boolean)[0];
+  return firstName || fallback;
+}
+
+function resolveVehicleColorLabel(...values) {
+  const colorLabel = values
+    .map(value => String(value || '').trim())
+    .find(Boolean);
+  return colorLabel || 'Cor a confirmar';
+}
+
+function normalizeMapCoordinate(value) {
+  const latitude = Number(value?.latitude ?? value?.lat);
+  const longitude = Number(value?.longitude ?? value?.lng);
+  if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
+    return null;
+  }
+  return { latitude, longitude };
+}
+
+function buildFallbackTripRegion(points = []) {
+  const normalizedPoints = points
+    .map(normalizeMapCoordinate)
+    .filter(Boolean);
+
+  if (normalizedPoints.length === 0) {
+    return PROTOTYPE_REGION;
+  }
+
+  const latitudes = normalizedPoints.map(point => point.latitude);
+  const longitudes = normalizedPoints.map(point => point.longitude);
+  const minLatitude = Math.min(...latitudes);
+  const maxLatitude = Math.max(...latitudes);
+  const minLongitude = Math.min(...longitudes);
+  const maxLongitude = Math.max(...longitudes);
+  const latitudeDelta = Math.max(0.018, (maxLatitude - minLatitude) * 1.7);
+  const longitudeDelta = Math.max(0.018, (maxLongitude - minLongitude) * 1.7);
+
+  return {
+    latitude: (minLatitude + maxLatitude) / 2,
+    longitude: (minLongitude + maxLongitude) / 2,
+    latitudeDelta,
+    longitudeDelta,
+  };
+}
+
 function buildExtensionPaymentData(rideExtension, bookingId) {
   if (!rideExtension?.chargeId || !bookingId) {
     return null;
@@ -81,6 +196,39 @@ function buildExtensionPaymentData(rideExtension, bookingId) {
   };
 }
 
+function IconActionButton({ icon, label, onPress, tone = 'ghost', testID, style }) {
+  const isWarning = tone === 'warning';
+  const isDanger = tone === 'danger';
+  return (
+    <TouchableOpacity
+      activeOpacity={0.84}
+      accessibilityRole="button"
+      accessibilityLabel={label}
+      testID={testID}
+      onPress={onPress}
+      style={[
+        styles.iconActionButton,
+        isWarning && styles.iconActionButtonWarning,
+        isDanger && styles.iconActionButtonDanger,
+        style
+      ]}
+    >
+      <Ionicons
+        name={icon}
+        size={19}
+        color={
+          isDanger
+            ? leafRideColors.dangerText
+            : isWarning
+              ? leafRideColors.warningText
+              : leafRideColors.leaf
+        }
+      />
+      <Text style={styles.hiddenText}>{label}</Text>
+    </TouchableOpacity>
+  );
+}
+
 export default function RobotaxiTripScreen({ navigation, route }) {
   const {
     bookingStatus,
@@ -98,19 +246,24 @@ export default function RobotaxiTripScreen({ navigation, route }) {
     operationalContinuation,
     paymentMethod,
     activeBookingId,
+    currentCoordinate,
+    currentHeading,
     currentAddress,
+    driverCoordinate,
     profileUid,
     riderProfile,
     endTripEarlyFlow,
     respondOperationalContinuationFlow
   } = usePrototypeRideRuntime();
   const insets = useSafeAreaInsets();
+  const mapRef = useRef(null);
   const [cardHeight, setCardHeight] = useState(FALLBACK_CARD_HEIGHT);
   const [isBusy, setIsBusy] = useState(false);
   const [isExtensionPaymentVisible, setIsExtensionPaymentVisible] = useState(false);
   const [isTripExpanded, setIsTripExpanded] = useState(false);
   const qaAutoConfirmPix = true;
-  const sheetBottom = insets.bottom + SHEET_BOTTOM_OFFSET;
+  const safeBottom = Math.max(0, Number(insets.bottom) || 0);
+  const sheetBottom = SHEET_BOTTOM_OFFSET;
 
   const destination = route?.params?.destination || selectedDestination?.name || 'Destino';
   const destinationAddress = selectedDestination?.address || destination;
@@ -145,8 +298,32 @@ export default function RobotaxiTripScreen({ navigation, route }) {
   const driverName =
     String(driverInfo?.name || fallbackDriverName || 'Motorista Leaf').trim() || 'Motorista Leaf';
   const vehicleModel =
-    String(driverInfo?.model || fallbackVehicleModel || vehicle).trim() || 'Leaf Plus';
-  const vehiclePlate = String(driverInfo?.plate || fallbackVehiclePlate || '').trim();
+    String(driverInfo?.model || driverInfo?.vehicle?.model || fallbackVehicleModel || vehicle).trim() ||
+    'Leaf Plus';
+  const vehiclePlate =
+    String(driverInfo?.plate || driverInfo?.vehicle?.plate || fallbackVehiclePlate || '').trim();
+  const vehicleColorLabel = resolveVehicleColorLabel(
+    driverInfo?.color,
+    driverInfo?.vehicleColor,
+    driverInfo?.vehicle?.color,
+    activeBooking?.vehicleColor,
+    activeBooking?.vehicle?.color,
+    driverActiveRide?.vehicleColor,
+    driverActiveRide?.vehicle?.color,
+    route?.params?.vehicleColor,
+  );
+  const driverPhotoUri =
+    String(
+      driverInfo?.photo ||
+        driverInfo?.photoURL ||
+        driverInfo?.profileImage ||
+        driverInfo?.avatar ||
+        activeBooking?.driverPhoto ||
+        activeBooking?.driver?.photo ||
+        driverActiveRide?.driverPhoto ||
+        route?.params?.driverPhoto ||
+        '',
+    ).trim() || null;
   const distanceLabel = formatDistanceLabel(resolvedTripDistanceKm);
   const fareLabel = Number.isFinite(resolvedFare) ? formatCurrency(resolvedFare) : '--';
   const normalizedStatus = String(
@@ -161,52 +338,194 @@ export default function RobotaxiTripScreen({ navigation, route }) {
   const isAccepted = normalizedStatus === 'accepted' || normalizedStatus === 'arrived';
   const isArrived = normalizedStatus === 'arrived';
   const isStarted = normalizedStatus === 'started';
-  const boardingCountdownLabel =
-    Number.isFinite(boardingRemainingSec) && boardingRemainingSec > 0
-      ? `${Math.floor(boardingRemainingSec / 60)}:${String(boardingRemainingSec % 60).padStart(2, '0')}`
+  const extensionStatus = String(rideExtension?.status || 'idle').trim().toLowerCase();
+  const operationalStatus = String(operationalContinuation?.status || 'idle').trim().toLowerCase();
+  const isOperationalDecisionPending = operationalStatus === 'passenger_decision_pending';
+  const isOperationalSearching = operationalStatus === 'searching_replacement_driver';
+  const rawBoardingSeconds = Number(boardingRemainingSec);
+  const boardingTimerSeconds = Number.isFinite(rawBoardingSeconds)
+    ? Math.max(0, Math.round(rawBoardingSeconds))
+    : isArrived
+      ? 120
       : null;
+  const boardingCountdownLabel =
+    boardingTimerSeconds === null ? null : formatBoardingTimer(boardingTimerSeconds);
+  const boardingTimerMessage =
+    boardingTimerSeconds === null || boardingTimerSeconds > 30
+      ? 'Prossiga para o embarque'
+      : boardingTimerSeconds > 0
+        ? 'Embarque urgente'
+        : 'Uma taxa poderá ser aplicada';
+  const isBoardingTimerUrgent =
+    boardingTimerSeconds !== null && boardingTimerSeconds > 0 && boardingTimerSeconds <= 30;
+  const isBoardingTimerExpired = boardingTimerSeconds === 0;
+  const tripPickupCoordinate =
+    normalizeMapCoordinate(activeBooking?.pickupLocation) ||
+    normalizeMapCoordinate(driverActiveRide?.pickupCoordinate) ||
+    normalizeMapCoordinate(currentCoordinate) ||
+    PROTOTYPE_ORIGIN_COORDINATE;
+  const tripDestinationCoordinate =
+    normalizeMapCoordinate(selectedDestination?.coordinate) ||
+    normalizeMapCoordinate(activeBooking?.destinationLocation) ||
+    normalizeMapCoordinate(driverActiveRide?.destinationCoordinate) ||
+    normalizeMapCoordinate(driverActiveRide?.dropoffCoordinate) ||
+    null;
+  const tripDriverCoordinate =
+    normalizeMapCoordinate(driverCoordinate) ||
+    normalizeMapCoordinate(driverInfo?.coordinate) ||
+    null;
+  const tripRouteCoordinates = useMemo(() => {
+    const candidateRoute =
+      activeBooking?.routeCoordinates ||
+      activeBooking?.route ||
+      driverActiveRide?.routeCoordinates ||
+      driverActiveRide?.route;
+    const normalizedCandidate = Array.isArray(candidateRoute)
+      ? candidateRoute.map(normalizeMapCoordinate).filter(Boolean)
+      : [];
+    if (normalizedCandidate.length >= 2) {
+      return normalizedCandidate;
+    }
+
+    const routeStart =
+      isAccepted || isArrived
+        ? tripDriverCoordinate || tripPickupCoordinate
+        : normalizeMapCoordinate(currentCoordinate) || tripPickupCoordinate;
+    const routeEnd =
+      isAccepted || isArrived
+        ? tripPickupCoordinate
+        : tripDestinationCoordinate;
+
+    return [routeStart, routeEnd].filter(Boolean);
+  }, [
+    activeBooking?.route,
+    activeBooking?.routeCoordinates,
+    currentCoordinate,
+    driverActiveRide?.route,
+    driverActiveRide?.routeCoordinates,
+    isAccepted,
+    isArrived,
+    tripDestinationCoordinate,
+    tripDriverCoordinate,
+    tripPickupCoordinate,
+  ]);
+  const tripMapRegion = useMemo(
+    () =>
+      buildFallbackTripRegion([
+        currentCoordinate,
+        tripPickupCoordinate,
+        tripDestinationCoordinate,
+        tripDriverCoordinate,
+        ...tripRouteCoordinates,
+      ]),
+    [
+      currentCoordinate,
+      tripDestinationCoordinate,
+      tripDriverCoordinate,
+      tripPickupCoordinate,
+      tripRouteCoordinates,
+    ]
+  );
   const arrivalLabel =
     isOperationalDecisionPending
       ? 'Escolha como deseja seguir'
       : isOperationalSearching
         ? 'Procurando outro motorista'
       : isArrived
-      ? `Embarque em até ${boardingCountdownLabel || '2:00'}`
+      ? `Encontre seu motorista em ${boardingCountdownLabel || '2:00'}`
       : Number.isFinite(resolvedTripDurationMin) && resolvedTripDurationMin > 0
         ? `Chegada em ${resolvedTripDurationMin} min`
         : isAccepted
-          ? 'Aguardando início da viagem'
+          ? 'Pronto para iniciar a viagem'
           : 'Viagem em andamento';
-  const extensionStatus = String(rideExtension?.status || 'idle').trim().toLowerCase();
-  const operationalStatus = String(operationalContinuation?.status || 'idle').trim().toLowerCase();
-  const isOperationalDecisionPending = operationalStatus === 'passenger_decision_pending';
-  const isOperationalSearching = operationalStatus === 'searching_replacement_driver';
   const extensionPaymentData = useMemo(
     () => buildExtensionPaymentData(rideExtension, activeBookingId),
     [activeBookingId, rideExtension]
   );
+  const pickupLabel =
+    String(
+      activeBooking?.pickupLocation?.add ||
+        activeBooking?.pickupAddress ||
+        route?.params?.originAddress ||
+        currentAddress ||
+        '',
+    ).trim() || 'Local combinado';
+  const pickupPointLabel =
+    pickupLabel.split(',').slice(0, 2).join(',').trim() || pickupLabel;
+  const routeTotalMinutes =
+    activeBooking?.initialTripDurationMin ||
+    activeBooking?.estimatedTotalDurationMin ||
+    activeBooking?.totalDurationMin ||
+    route?.params?.initialTripDurationMin;
+  const routeStartedAt =
+    activeBooking?.startedAt ||
+    activeBooking?.tripStartedAt ||
+    route?.params?.startedAt;
+  const liveRouteKey = [
+    activeBookingId,
+    activeBooking?.bookingId,
+    activeBooking?.id,
+    driverActiveRide?.bookingId,
+    driverActiveRide?.id,
+    normalizedStatus,
+    routeStartedAt,
+    pickupPointLabel,
+    destination,
+  ]
+    .filter(Boolean)
+    .join(':');
+  const {
+    routeProgress,
+    arrivalClockLabel,
+    displayEtaMinutes,
+  } = useLiveRouteTiming({
+    routeKey: liveRouteKey || 'passenger-trip-route',
+    remainingMinutes: resolvedTripDurationMin,
+    totalMinutes: routeTotalMinutes,
+    startedAt: routeStartedAt,
+    active: isStarted,
+  });
+  const stableEtaValue =
+    Number.isFinite(displayEtaMinutes) && displayEtaMinutes > 0
+      ? `${displayEtaMinutes} min`
+      : null;
   const compactEtaValue =
     isArrived && boardingCountdownLabel
       ? boardingCountdownLabel
-      : Number.isFinite(resolvedTripDurationMin) && resolvedTripDurationMin > 0
-        ? `${resolvedTripDurationMin} min`
-        : '--';
-  const compactVehicleSummary = [vehicleModel, vehiclePlate].filter(Boolean).join(' • ');
-  const compactStatusSummary = isStarted
-    ? 'Corrida em andamento com suporte e status visiveis sem sair do mapa.'
-    : isArrived
-      ? 'Seu motorista chegou. Confira o veiculo antes de embarcar.'
-      : 'Acompanhe a aproximacao e prepare-se para embarcar com seguranca.';
+      : stableEtaValue ||
+        (Number.isFinite(resolvedTripDurationMin) && resolvedTripDurationMin > 0
+          ? `${resolvedTripDurationMin} min`
+          : '--');
+  const startedTripMeta = [
+    distanceLabel && distanceLabel !== '--' ? `${distanceLabel} restante` : null,
+    fareLabel ? `valor ${fareLabel}` : null,
+  ]
+    .filter(Boolean)
+    .join(' · ');
   const shouldUseCompactTripCard =
-    (isAccepted || isStarted) &&
+    (isAccepted || isArrived || isStarted) &&
     !isOperationalDecisionPending &&
     !isOperationalSearching &&
     !['driver_decision_pending', 'pending_payment', 'confirming', 'expired', 'rejected'].includes(extensionStatus);
-  const compactTitle = isStarted
+  const driverInitial = String(driverName || 'C').trim().charAt(0).toUpperCase() || 'C';
+  const driverRatingLabel = driverInfo?.rating
+    ? `${Number(driverInfo.rating).toFixed(1).replace('.', ',')} · parceiro Leaf`
+    : '4,9 · parceiro Leaf';
+  const plateLabel = vehiclePlate || 'Placa pendente';
+  const driverFirstName = getFirstName(driverName);
+  const passengerHeaderTitle = isStarted
     ? `A caminho de ${destination}`
     : isArrived
-      ? 'Motorista no local de embarque'
-      : 'Motorista a caminho do embarque';
+      ? `${driverFirstName} chegou`
+      : `${driverFirstName} está a caminho`;
+  const boardingPinLabel =
+    String(
+      activeBooking?.boardingPin ||
+        activeBooking?.boardingCode ||
+        activeBooking?.pin ||
+        route?.params?.boardingPin ||
+        '',
+    ).trim() || '----';
   const interruptionPickupLabel = useMemo(() => {
     const interruptionPickup =
       operationalContinuation?.pickupLocation?.add ||
@@ -344,124 +663,324 @@ export default function RobotaxiTripScreen({ navigation, route }) {
     );
   }, [isBusy, respondOperationalContinuationFlow]);
 
-  const renderCompactTripCard = () => (
+  const handleShareTrip = useCallback(() => {
+    navigation.navigate('RobotaxiPrototypeShareTrip', {
+      bookingId: activeBookingId,
+      destination,
+      driverName,
+      vehicleModel,
+      vehiclePlate,
+      tripArrivalText: resolvedTripArrivalText,
+    });
+  }, [activeBookingId, destination, driverName, navigation, resolvedTripArrivalText, vehicleModel, vehiclePlate]);
+
+  const handleCallDriver = useCallback(() => {
+    Alert.alert(
+      'Ligação pelo app',
+      'A chamada direta ainda depende do telefone mascarado do motorista. Use a mensagem ou o suporte por enquanto.',
+    );
+  }, []);
+
+  const handlePassengerOnWay = useCallback(() => {
+    Alert.alert('Aviso registrado', 'Avise o motorista pelo chat se precisar de mais alguns instantes.');
+  }, []);
+
+  const renderPassengerCardStateHeader = () => (
     <>
-      <TouchableOpacity
-        activeOpacity={0.9}
-        onPress={() => setIsTripExpanded(true)}
-        style={styles.compactSummaryPressable}
-        testID="passenger-trip-compact-summary"
-        accessibilityLabel="passenger-trip-compact-summary"
-      >
-        <View style={styles.statusRow}>
-          <View
-            style={styles.statusChip}
-            testID="passenger-trip-status-chip"
-            accessibilityLabel="passenger-trip-status-chip"
-          >
-            <Text style={styles.statusChipText}>{formatStatusLabel(normalizedStatus)}</Text>
-          </View>
-          <Text
-            style={styles.arrivalText}
-            testID="passenger-trip-arrival-label"
-            accessibilityLabel="passenger-trip-arrival-label"
-          >
-            {arrivalLabel}
-          </Text>
-        </View>
-
-        <Text style={styles.compactTitle}>{compactTitle}</Text>
-        <Text style={styles.compactSubtitle} numberOfLines={3}>
-          {compactStatusSummary}
+      <View style={styles.cardStateHeader}>
+        <Text style={styles.cardStateTitle} numberOfLines={2}>
+          {passengerHeaderTitle}
         </Text>
-
-        <View style={styles.compactMetaRow}>
-          <View style={styles.compactMetaChip}>
-            <Ionicons name="person-outline" size={14} color="#365A6D" />
-            <Text style={styles.compactMetaChipText} numberOfLines={1}>
-              {driverName}
-            </Text>
-          </View>
-
-          <View style={styles.compactMetaChip}>
-            <Ionicons name="car-sport-outline" size={14} color={color.text.primary} />
-            <Text style={styles.compactMetaChipText} numberOfLines={1}>
-              {compactVehicleSummary}
-            </Text>
-          </View>
-        </View>
-
-        <View style={styles.compactMetricRow}>
-          <View style={styles.compactMetricPill}>
-            <Ionicons name="time-outline" size={15} color="#365A6D" />
-            <View style={styles.compactMetricCopy}>
-              <Text style={styles.compactMetricLabel}>Tempo</Text>
-              <Text style={styles.compactMetricValue}>{compactEtaValue}</Text>
-            </View>
-          </View>
-
-          <View style={styles.compactMetricPill}>
-            <Ionicons name="speedometer-outline" size={15} color={color.text.primary} />
-            <View style={styles.compactMetricCopy}>
-              <Text style={styles.compactMetricLabel}>Distância</Text>
-              <Text style={styles.compactMetricValue}>{distanceLabel}</Text>
-            </View>
-          </View>
-
-          <View style={[styles.compactMetricPill, styles.compactMetricPillAccent]}>
-            <Ionicons name="wallet-outline" size={15} color="#7A5D16" />
-            <View style={styles.compactMetricCopy}>
-              <Text style={styles.compactMetricLabel}>Valor</Text>
-              <Text style={styles.compactMetricValue}>{fareLabel}</Text>
-            </View>
-          </View>
-        </View>
-      </TouchableOpacity>
-
-      <View style={styles.compactActionsRow}>
-        {isStarted ? (
-          <TouchableOpacity
-            style={styles.compactSecondaryAction}
-            activeOpacity={0.86}
-            onPress={() => navigation.navigate('RobotaxiPrototypeSupport')}
-            testID="passenger-trip-support-button"
-            accessibilityLabel="passenger-trip-support-button"
-          >
-            <Ionicons name="shield-checkmark-outline" size={15} color={color.text.primary} />
-            <Text style={styles.compactSecondaryActionText}>Ver suporte</Text>
-          </TouchableOpacity>
-        ) : (
-          <TouchableOpacity
-            style={[styles.compactSecondaryAction, styles.compactCancelAction]}
-            activeOpacity={0.86}
-            onPress={() => navigation.navigate('RobotaxiPrototypeCancellation', { source: 'trip' })}
-            testID="passenger-trip-cancel-button"
-            accessibilityLabel="passenger-trip-cancel-button"
-          >
-            <Ionicons name="close-circle-outline" size={15} color={color.text.primary} />
-            <Text style={styles.compactSecondaryActionText}>Cancelar corrida</Text>
-          </TouchableOpacity>
-        )}
+        <IconActionButton
+          icon="shield-checkmark-outline"
+          label="SOS"
+          tone="warning"
+          onPress={() => navigation.navigate('RobotaxiPrototypeSupport')}
+          testID="passenger-trip-sos-button"
+        />
       </View>
+      <LeafDivider style={styles.cardStateDivider} />
     </>
   );
 
+  const renderCompactTripCard = () => (
+    <View
+      testID="passenger-trip-compact-summary"
+      accessibilityLabel="passenger-trip-compact-summary"
+    >
+      <View style={styles.sheetHandle} />
+      <Text
+        style={styles.hiddenText}
+        testID="passenger-trip-arrival-label"
+        accessibilityLabel="passenger-trip-arrival-label"
+      >
+        {arrivalLabel}
+      </Text>
+      <View style={styles.rideHeader}>
+        <View style={styles.rideHeaderCopy}>
+          <Text style={styles.rideKicker} numberOfLines={1}>
+            {isStarted
+              ? arrivalClockLabel || resolvedTripArrivalText || compactEtaValue
+              : isArrived
+                ? 'Motorista no embarque'
+                : `${compactEtaValue} até chegar`}
+          </Text>
+          <Text style={styles.rideTitle} numberOfLines={2}>
+            {isStarted ? `A caminho de ${destination}` : passengerHeaderTitle}
+          </Text>
+        </View>
+        {isStarted ? (
+          <View style={styles.rideRight}>
+            <Text style={styles.rideRightValue} numberOfLines={1}>
+              {compactEtaValue}
+            </Text>
+            <Text style={styles.rideRightLabel} numberOfLines={1}>
+              ETA
+            </Text>
+          </View>
+        ) : isArrived ? null : (
+          <View style={styles.rideRight}>
+            <Text style={styles.rideRightValue} numberOfLines={1}>
+              {compactEtaValue}
+            </Text>
+            <Text style={styles.rideRightLabel} numberOfLines={1}>
+              chegada
+            </Text>
+          </View>
+        )}
+      </View>
+
+      {isStarted ? (
+        <>
+          <LeafRouteProgress
+            originLabel={pickupPointLabel}
+            destinationLabel={destination}
+            progress={routeProgress}
+            progressKey={liveRouteKey || 'passenger-trip-route'}
+            arrivalLabel={null}
+            style={styles.tripRouteProgressCompact}
+            testID="passenger-trip-route-progress"
+          />
+          {startedTripMeta ? (
+            <Text style={styles.tripRouteMeta} numberOfLines={1}>
+              {startedTripMeta}
+            </Text>
+          ) : null}
+          <LeafDriverIdentity
+            initial={driverInitial}
+            photoUri={driverPhotoUri}
+            name={driverName}
+            rating={driverRatingLabel}
+            vehicle={vehicleModel}
+            plate={plateLabel}
+            style={styles.startedIdentity}
+            testID="passenger-trip-driver-identity"
+          />
+          <Text style={styles.vehicleColorText} numberOfLines={1}>
+            {vehicleColorLabel}
+          </Text>
+          <View style={styles.leafActionsRow}>
+            <IconActionButton
+              icon="shield-checkmark-outline"
+              label="SOS"
+              onPress={() => navigation.navigate('RobotaxiPrototypeSupport')}
+              testID="passenger-trip-support-button"
+            />
+            <IconActionButton
+              icon="chatbubble-ellipses-outline"
+              label="Mensagem"
+              onPress={() => navigation.navigate('RobotaxiPrototypeChat')}
+              testID="passenger-trip-message-button"
+            />
+            <LeafButton
+              label="Compartilhar"
+              tone="primary"
+              onPress={handleShareTrip}
+              style={styles.startedShareButton}
+              testID="passenger-trip-share-button"
+              accessibilityLabel="passenger-trip-share-button"
+            />
+          </View>
+        </>
+      ) : isArrived ? (
+        <>
+          <View style={styles.boardingTimerCompactPanel}>
+            <Text style={styles.boardingTimerValue}>{boardingCountdownLabel || '0:00'}</Text>
+            <Text
+              style={[
+                styles.boardingTimerMessage,
+                isBoardingTimerUrgent && styles.boardingTimerMessageUrgent,
+                isBoardingTimerExpired && styles.boardingTimerMessageExpired,
+              ]}
+              numberOfLines={1}
+            >
+              {boardingTimerMessage}
+            </Text>
+          </View>
+          <LeafDriverIdentity
+            initial={driverInitial}
+            photoUri={driverPhotoUri}
+            name={driverName}
+            rating={`${vehicleModel}${vehiclePlate ? ` · ${vehiclePlate}` : ''}`}
+            vehicle={vehicleModel}
+            plate={plateLabel}
+            style={styles.arrivedIdentity}
+            testID="passenger-trip-driver-identity"
+          />
+          <Text style={styles.vehicleColorText} numberOfLines={1}>
+            {vehicleColorLabel}
+          </Text>
+          <View style={styles.leafActionsRow}>
+            <IconActionButton
+              icon="call-outline"
+              label="Ligar"
+              onPress={handleCallDriver}
+              style={styles.tripActionIcon}
+              testID="passenger-trip-call-button"
+            />
+            <IconActionButton
+              icon="chatbubble-ellipses-outline"
+              label="Mensagem"
+              onPress={() => navigation.navigate('RobotaxiPrototypeChat')}
+              style={styles.tripActionIcon}
+              testID="passenger-trip-message-button"
+            />
+            <IconActionButton
+              icon="close-outline"
+              label="Cancelar corrida"
+              tone="danger"
+              onPress={() => navigation.navigate('RobotaxiPrototypeCancellation', { source: 'trip' })}
+              style={styles.tripActionIcon}
+              testID="passenger-trip-cancel-button"
+            />
+            <LeafButton
+              label="Estou indo"
+              tone="primary"
+              onPress={handlePassengerOnWay}
+              style={styles.arrivedPrimary}
+            />
+          </View>
+        </>
+      ) : (
+        <>
+          <LeafDriverIdentity
+            initial={driverInitial}
+            photoUri={driverPhotoUri}
+            name={driverName}
+            rating={driverRatingLabel}
+            vehicle={vehicleModel}
+            plate={plateLabel}
+            style={styles.acceptedIdentity}
+            testID="passenger-trip-driver-identity"
+          />
+          <Text style={styles.vehicleColorText} numberOfLines={1}>
+            {vehicleColorLabel}
+          </Text>
+          <View
+            style={styles.rideRouteTimeline}
+            accessibilityLabel={`Embarque ${pickupPointLabel}. Destino ${destination}. Valor ${fareLabel}.`}
+          >
+            <View style={styles.rideRouteStep}>
+              <View style={styles.rideRouteTrack}>
+                <View style={styles.rideRouteDot} />
+                <View style={styles.rideRouteLine} />
+              </View>
+              <View style={styles.rideRouteCopy}>
+                <Text style={styles.rideRouteMeta} numberOfLines={1}>
+                  {distanceLabel} até o embarque
+                </Text>
+                <Text style={styles.rideRouteAddress} numberOfLines={1}>
+                  {pickupPointLabel}
+                </Text>
+              </View>
+            </View>
+            <View style={styles.rideRouteStep}>
+              <View style={styles.rideRouteTrack}>
+                <View style={[styles.rideRouteDot, styles.rideRouteDotDestination]} />
+              </View>
+              <View style={styles.rideRouteCopy}>
+                <Text style={styles.rideRouteMeta} numberOfLines={1}>
+                  {vehicle} · {fareLabel}
+                </Text>
+                <Text style={styles.rideRouteAddress} numberOfLines={1}>
+                  {destination}
+                </Text>
+              </View>
+            </View>
+          </View>
+          <View style={styles.leafActionsRow}>
+            <IconActionButton
+              icon="call-outline"
+              label="Ligar"
+              onPress={handleCallDriver}
+              style={styles.tripActionIcon}
+              testID="passenger-trip-call-button"
+            />
+            <IconActionButton
+              icon="chatbubble-ellipses-outline"
+              label="Mensagem"
+              onPress={() => navigation.navigate('RobotaxiPrototypeChat')}
+              style={styles.tripActionIcon}
+              testID="passenger-trip-message-button"
+            />
+            <IconActionButton
+              icon="close-outline"
+              label="Cancelar corrida"
+              tone="danger"
+              onPress={() => navigation.navigate('RobotaxiPrototypeCancellation', { source: 'trip' })}
+              style={styles.tripActionIcon}
+              testID="passenger-trip-cancel-button"
+            />
+            <LeafButton
+              label="Compartilhar"
+              tone="primary"
+              onPress={handleShareTrip}
+              style={styles.acceptedPrimary}
+              testID="passenger-trip-share-button"
+              accessibilityLabel="passenger-trip-share-button"
+            />
+          </View>
+        </>
+      )}
+    </View>
+  );
   return (
     <PrototypeScreenTransition>
       <View style={styles.container} pointerEvents="box-none">
         <StatusBar translucent backgroundColor="transparent" barStyle="dark-content" />
+        <PrototypeMapLayer
+          mapRef={mapRef}
+          region={tripMapRegion}
+          userCoordinate={normalizeMapCoordinate(currentCoordinate) || tripPickupCoordinate}
+          userHeading={currentHeading}
+          userAvatarLetter="L"
+          driverCoordinate={tripDriverCoordinate}
+          routeCoordinates={tripRouteCoordinates}
+          destinationCoordinate={tripDestinationCoordinate || tripPickupCoordinate}
+          destinationLabel={destination}
+          destinationAddress={destinationAddress}
+          originLabel="Partida"
+          originAddress={currentAddress || 'Sua localização atual'}
+          interactionEnabled={false}
+          animateRoute
+          driverMarkerMode="avatar"
+          driverMarkerLetter={getFirstName(driverName, 'M')}
+          destinationMarkerMode="place"
+        />
         <PrototypeDismissibleSheet
           onClose={handleDismiss}
           sheetStyle={[styles.sheetWrap, { bottom: sheetBottom }]}
         >
-          <PrototypeCard
+          <LeafRideSheet
             onLayout={handleCardLayout}
-            style={[styles.tripCard, shouldUseCompactTripCard && !isTripExpanded && styles.compactCard]}
+            style={[
+              styles.tripCard,
+              shouldUseCompactTripCard && !isTripExpanded && styles.compactCard,
+              { paddingBottom: 12 + safeBottom },
+            ]}
             testID="passenger-trip-screen"
             accessibilityLabel="passenger-trip-screen"
           >
-            <CardHandle />
-
             {shouldUseCompactTripCard && !isTripExpanded ? (
               renderCompactTripCard()
             ) : (
@@ -478,6 +997,8 @@ export default function RobotaxiTripScreen({ navigation, route }) {
                 <Text style={styles.collapseControlText}>Voltar ao resumo</Text>
               </TouchableOpacity>
             ) : null}
+
+            {renderPassengerCardStateHeader()}
 
             <View style={styles.statusRow}>
               <View
@@ -536,7 +1057,7 @@ export default function RobotaxiTripScreen({ navigation, route }) {
                   />
                   <Text style={styles.extensionTitle}>
                     {extensionStatus === 'driver_decision_pending'
-                      ? 'Aguardando motorista'
+                      ? 'Pedido enviado'
                       : extensionStatus === 'pending_payment' || extensionStatus === 'confirming'
                         ? 'Complemento pendente'
                         : extensionStatus === 'expired'
@@ -564,16 +1085,19 @@ export default function RobotaxiTripScreen({ navigation, route }) {
                             : 'Você pode solicitar um novo destino ou encerrar a corrida no ponto atual.'}
                 </Text>
                 {extensionStatus === 'pending_payment' && Number(rideExtension?.diffFare) > 0 ? (
-                  <TouchableOpacity
-                    style={styles.extensionPayAction}
-                    activeOpacity={0.86}
-                    onPress={() => setIsExtensionPaymentVisible(true)}
-                  >
-                    <Ionicons name="qr-code-outline" size={16} color="#1A7A3E" />
-                    <Text style={styles.extensionPayActionText}>
-                      Pagar complemento de {formatCurrency(rideExtension?.diffFare)}
-                    </Text>
-                  </TouchableOpacity>
+                  <>
+                    <TouchableOpacity
+                      style={styles.extensionPayAction}
+                      activeOpacity={0.86}
+                      onPress={() => setIsExtensionPaymentVisible(true)}
+                    >
+                      <Ionicons name="qr-code-outline" size={16} color="#1A7A3E" />
+                      <Text style={styles.extensionPayActionText}>
+                        Pagar complemento de {formatCurrency(rideExtension?.diffFare)}
+                      </Text>
+                    </TouchableOpacity>
+                    <SecurePaymentBadge style={styles.extensionSecurePaymentBadge} />
+                  </>
                 ) : null}
               </View>
             ) : null}
@@ -703,17 +1227,9 @@ export default function RobotaxiTripScreen({ navigation, route }) {
               </TouchableOpacity>
             )}
 
-            <PrototypePrimaryButton
-              label="Ver suporte da corrida"
-              icon="shield-checkmark-outline"
-              onPress={() => navigation.navigate('RobotaxiPrototypeSupport')}
-              style={styles.finishButton}
-              testID="passenger-trip-support-button"
-              accessibilityLabel="passenger-trip-support-button"
-            />
               </>
             )}
-          </PrototypeCard>
+          </LeafRideSheet>
         </PrototypeDismissibleSheet>
 
         <WooviPaymentModal
@@ -751,18 +1267,384 @@ const styles = StyleSheet.create({
   },
   sheetWrap: {
     position: 'absolute',
-    left: 10,
-    right: 10
+    left: 0,
+    right: 0
   },
   tripCard: {
-    paddingHorizontal: 12,
-    paddingTop: 10,
-    paddingBottom: 12
+    minHeight: 286,
+    borderTopLeftRadius: 32,
+    borderTopRightRadius: 32,
+    borderBottomLeftRadius: 0,
+    borderBottomRightRadius: 0,
+    paddingTop: 16
   },
   compactCard: {
-    paddingHorizontal: 14,
-    paddingTop: 10,
-    paddingBottom: 14
+    minHeight: 286
+  },
+  sheetHandle: {
+    width: 50,
+    height: 4,
+    borderRadius: 3,
+    backgroundColor: '#D8D0C7',
+    alignSelf: 'center',
+    marginBottom: 16
+  },
+  hiddenText: {
+    position: 'absolute',
+    width: 1,
+    height: 1,
+    opacity: 0
+  },
+  cardStateHeader: {
+    minHeight: 42,
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    gap: 12
+  },
+  cardStateTitle: {
+    flex: 1,
+    minWidth: 0,
+    color: leafRideColors.text,
+    fontFamily: fonts.SemiBold,
+    fontSize: 20,
+    lineHeight: 25
+  },
+  iconActionButton: {
+    width: 52,
+    height: 52,
+    borderRadius: 26,
+    borderWidth: 1,
+    borderColor: leafRideColors.line,
+    backgroundColor: '#FFFFFF',
+    alignItems: 'center',
+    justifyContent: 'center'
+  },
+  tripActionIcon: {
+    width: 52,
+    height: 52
+  },
+  tripHeaderIconAction: {
+    width: 66,
+    height: 40
+  },
+  iconActionButtonWarning: {
+    backgroundColor: leafRideColors.warning,
+    borderColor: 'rgba(139,74,18,0.12)'
+  },
+  iconActionButtonDanger: {
+    backgroundColor: leafRideColors.danger,
+    borderColor: 'rgba(159,36,36,0.12)'
+  },
+  cardStateDivider: {
+    marginTop: 14,
+    marginBottom: 16
+  },
+  leafSheetHeader: {
+    minHeight: 36,
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    gap: 12
+  },
+  leafSheetTitle: {
+    flex: 1,
+    minWidth: 0,
+    color: leafRideColors.text,
+    fontFamily: fonts.SemiBold,
+    fontSize: 18,
+    lineHeight: 24
+  },
+  rideHeader: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    gap: 14,
+    marginBottom: 14
+  },
+  rideHeaderCopy: {
+    flex: 1,
+    minWidth: 0
+  },
+  rideKicker: {
+    color: leafRideColors.secondary,
+    fontFamily: fonts.Medium,
+    fontSize: 12,
+    lineHeight: 16
+  },
+  rideTitle: {
+    marginTop: 2,
+    color: leafRideColors.text,
+    fontFamily: fonts.SemiBold,
+    fontSize: 22,
+    lineHeight: 28
+  },
+  rideRight: {
+    minWidth: 74,
+    alignItems: 'flex-end',
+    paddingTop: 2
+  },
+  rideRightValue: {
+    color: leafRideColors.leaf,
+    fontFamily: fonts.SemiBold,
+    fontSize: 18,
+    lineHeight: 23,
+    textAlign: 'right'
+  },
+  rideRightLabel: {
+    marginTop: 1,
+    color: leafRideColors.secondary,
+    fontFamily: fonts.Regular,
+    fontSize: 11,
+    lineHeight: 14,
+    textAlign: 'right'
+  },
+  rideRouteTimeline: {
+    marginTop: 14,
+    borderTopWidth: 1,
+    borderBottomWidth: 1,
+    borderColor: 'rgba(17,22,17,0.08)',
+    paddingVertical: 14,
+    gap: 14
+  },
+  rideRouteStep: {
+    flexDirection: 'row',
+    alignItems: 'flex-start'
+  },
+  rideRouteTrack: {
+    width: 18,
+    alignItems: 'center',
+    paddingTop: 5,
+    marginRight: 10
+  },
+  rideRouteDot: {
+    width: 7,
+    height: 7,
+    borderRadius: 4,
+    backgroundColor: leafRideColors.text
+  },
+  rideRouteDotDestination: {
+    backgroundColor: leafRideColors.leaf
+  },
+  rideRouteLine: {
+    width: 1,
+    height: 34,
+    backgroundColor: 'rgba(17,22,17,0.16)',
+    marginTop: 6
+  },
+  rideRouteCopy: {
+    flex: 1,
+    minWidth: 0
+  },
+  rideRouteMeta: {
+    color: leafRideColors.secondary,
+    fontFamily: fonts.Regular,
+    fontSize: 12,
+    lineHeight: 16
+  },
+  rideRouteAddress: {
+    marginTop: 2,
+    color: leafRideColors.text,
+    fontFamily: fonts.SemiBold,
+    fontSize: 16,
+    lineHeight: 21
+  },
+  compactTitleRow: {
+    minHeight: 42,
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    gap: 14
+  },
+  compactTitleRowStarted: {
+    flexDirection: 'column',
+    alignItems: 'stretch',
+    gap: 4
+  },
+  compactTitleCopy: {
+    flex: 1,
+    minWidth: 0
+  },
+  compactTitle: {
+    color: leafRideColors.text,
+    fontFamily: fonts.SemiBold,
+    fontSize: 20,
+    lineHeight: 25
+  },
+  compactSubtitleStrong: {
+    marginTop: 1,
+    color: leafRideColors.text,
+    fontFamily: fonts.SemiBold,
+    fontSize: 15,
+    lineHeight: 20
+  },
+  compactRightValue: {
+    minWidth: 62,
+    marginTop: 8,
+    color: leafRideColors.text,
+    fontFamily: fonts.SemiBold,
+    fontSize: 18,
+    lineHeight: 23,
+    textAlign: 'right'
+  },
+  compactRightValueStarted: {
+    marginTop: 0,
+    minWidth: 0,
+    textAlign: 'left'
+  },
+  sharePillButton: {
+    height: 26,
+    borderRadius: 13,
+    paddingHorizontal: 12,
+    borderColor: 'rgba(221,232,225,0.55)'
+  },
+  sharePillText: {
+    color: leafRideColors.blueText,
+    fontSize: 10.5,
+    lineHeight: 14
+  },
+  driverIdentity: {
+    marginTop: 0
+  },
+  acceptedIdentity: {
+    marginTop: 12
+  },
+  vehicleColorText: {
+    marginTop: 4,
+    color: leafRideColors.secondary,
+    fontFamily: fonts.Regular,
+    fontSize: 11,
+    lineHeight: 15
+  },
+  arrivedIdentity: {
+    marginTop: 18
+  },
+  startedIdentity: {
+    marginTop: 12
+  },
+  routeSummaryRow: {
+    marginTop: 14,
+    minHeight: 44,
+    flexDirection: 'row',
+    alignItems: 'center'
+  },
+  routeSummaryCopy: {
+    flex: 1,
+    minWidth: 0,
+    marginLeft: 22
+  },
+  routeSummaryTitle: {
+    color: leafRideColors.text,
+    fontFamily: fonts.SemiBold,
+    fontSize: 14,
+    lineHeight: 18
+  },
+  routeSummaryMeta: {
+    marginTop: 4,
+    color: leafRideColors.secondary,
+    fontFamily: fonts.Regular,
+    fontSize: 10,
+    lineHeight: 14
+  },
+  hiddenRouteProgress: {
+    position: 'absolute',
+    width: 1,
+    height: 1,
+    opacity: 0
+  },
+  firstLeafRow: {
+    marginTop: 0
+  },
+  leafDivider: {
+    marginTop: 20,
+    marginBottom: 20
+  },
+  pickupLeafRow: {
+    marginTop: 22
+  },
+  startedShareRow: {
+    marginTop: 22
+  },
+  leafActionsRow: {
+    marginTop: 18,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10
+  },
+  acceptedAction: {
+    width: 94
+  },
+  acceptedCall: {
+    width: 78
+  },
+  acceptedPrimary: {
+    flex: 1,
+    height: 52,
+    borderRadius: 26
+  },
+  arrivedPrimary: {
+    flex: 1,
+    height: 52,
+    borderRadius: 26
+  },
+  startedShareButton: {
+    flex: 1,
+    height: 52,
+    borderRadius: 26
+  },
+  arrivedAction: {
+    flex: 1
+  },
+  arrivedCancel: {
+    width: 82
+  },
+  startedAction: {
+    flex: 1,
+    height: 44,
+    borderRadius: 22
+  },
+  startedActionWide: {
+    flex: 1.2,
+    height: 44,
+    borderRadius: 22
+  },
+  startedActionSmall: {
+    width: 88,
+    height: 44,
+    borderRadius: 22
+  },
+  boardingTimerPanel: {
+    marginTop: 12,
+    alignItems: 'flex-start',
+    paddingVertical: 0
+  },
+  boardingTimerCompactPanel: {
+    marginTop: 2,
+    marginBottom: 12,
+    alignItems: 'center',
+    paddingVertical: 4
+  },
+  boardingTimerValue: {
+    color: leafRideColors.text,
+    fontFamily: fonts.SemiBold,
+    fontSize: 34,
+    lineHeight: 40
+  },
+  boardingTimerMessage: {
+    marginTop: 2,
+    color: leafRideColors.secondary,
+    fontFamily: fonts.Regular,
+    fontSize: 13,
+    lineHeight: 18
+  },
+  boardingTimerMessageUrgent: {
+    color: leafRideColors.warningText
+  },
+  boardingTimerMessageExpired: {
+    color: leafRideColors.dangerText
+  },
+  pinLeafRow: {
+    marginTop: 18
   },
   statusRow: {
     flexDirection: 'row',
@@ -806,21 +1688,19 @@ const styles = StyleSheet.create({
     lineHeight: typography.caption.lineHeight
   },
   metaRow: {
-    marginTop: 10,
+    marginTop: 12,
     flexDirection: 'row',
-    gap: 8
+    gap: 10,
+    paddingTop: 2,
+    paddingBottom: 2
   },
   metaBlock: {
     flex: 1,
-    minHeight: 42,
-    borderRadius: 12,
-    backgroundColor: color.surface.secondary,
-    borderWidth: 1,
-    borderColor: color.border.subtle,
+    minHeight: 30,
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
-    gap: 6
+    justifyContent: 'flex-start',
+    gap: 5
   },
   metaLabel: {
     color: color.text.primary,
@@ -872,6 +1752,10 @@ const styles = StyleSheet.create({
     fontSize: typography.caption.size,
     lineHeight: typography.caption.lineHeight
   },
+  extensionSecurePaymentBadge: {
+    marginTop: 6,
+    alignSelf: 'center',
+  },
   operationalNotice: {
     backgroundColor: '#FFF8F3',
     borderColor: 'rgba(138,31,43,0.12)'
@@ -896,15 +1780,16 @@ const styles = StyleSheet.create({
   actionsRow: {
     marginTop: 10,
     flexDirection: 'row',
-    gap: 8
+    gap: 8,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(91,105,86,0.1)',
+    paddingTop: 10
   },
   secondaryAction: {
     flex: 1,
-    minHeight: 44,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: color.border.subtle,
-    backgroundColor: color.surface.secondary,
+    minHeight: 38,
+    borderRadius: 19,
+    backgroundColor: 'transparent',
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
@@ -917,19 +1802,16 @@ const styles = StyleSheet.create({
     lineHeight: typography.caption.lineHeight
   },
   warningAction: {
-    borderColor: 'rgba(138,31,43,0.18)',
-    backgroundColor: '#FFF4F5'
+    backgroundColor: 'rgba(255,244,245,0.58)'
   },
   warningActionText: {
     color: '#8A1F2B'
   },
   cancelAction: {
-    marginTop: 8,
-    minHeight: 44,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: color.border.strong,
-    backgroundColor: color.surface.secondary,
+    marginTop: 6,
+    minHeight: 38,
+    borderRadius: 19,
+    backgroundColor: 'transparent',
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
@@ -948,11 +1830,110 @@ const styles = StyleSheet.create({
     gap: 10
   },
   compactTitle: {
-    marginTop: 2,
-    color: color.text.primary,
+    marginTop: 0,
+    color: leafRideColors.text,
     fontFamily: fonts.SemiBold,
-    fontSize: typography.subtitle.size,
-    lineHeight: typography.subtitle.lineHeight
+    fontSize: 20,
+    lineHeight: 25
+  },
+  tripCompactMetricRow: {
+    marginTop: 14
+  },
+  tripCompactDivider: {
+    marginTop: 12,
+    marginBottom: 0
+  },
+  tripCompactInfoRow: {
+    marginTop: 10
+  },
+  tripRouteProgress: {
+    marginTop: 10
+  },
+  tripRouteProgressCompact: {
+    marginTop: 4
+  },
+  tripRouteMeta: {
+    marginTop: 8,
+    color: leafRideColors.secondary,
+    fontFamily: fonts.Regular,
+    fontSize: 12,
+    lineHeight: 16
+  },
+  tripCompactHeader: {
+    minHeight: 42,
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    gap: 12
+  },
+  tripCompactTitleCopy: {
+    flex: 1,
+    minWidth: 0
+  },
+  tripCompactEyebrow: {
+    marginBottom: 2,
+    color: leafRideColors.muted,
+    fontFamily: fonts.SemiBold,
+    fontSize: 10,
+    lineHeight: 13,
+    textTransform: 'uppercase',
+    letterSpacing: 0.7
+  },
+  acceptedRoutePair: {
+    marginTop: 12,
+    minHeight: 52,
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: 'rgba(207,216,205,0.74)',
+    backgroundColor: 'rgba(242,244,239,0.62)',
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12
+  },
+  acceptedRouteStop: {
+    flex: 1,
+    minWidth: 0
+  },
+  acceptedRouteStopRight: {
+    alignItems: 'flex-end'
+  },
+  acceptedRouteDivider: {
+    width: StyleSheet.hairlineWidth,
+    alignSelf: 'stretch',
+    backgroundColor: 'rgba(102,107,99,0.18)'
+  },
+  acceptedRouteLabel: {
+    color: leafRideColors.muted,
+    fontFamily: fonts.SemiBold,
+    fontSize: 10,
+    lineHeight: 13,
+    textTransform: 'uppercase',
+    letterSpacing: 0.6
+  },
+  acceptedRouteValue: {
+    marginTop: 2,
+    color: leafRideColors.text,
+    fontFamily: fonts.SemiBold,
+    fontSize: 13,
+    lineHeight: 17
+  },
+  quietCancelAction: {
+    marginTop: 10,
+    minHeight: 30,
+    alignSelf: 'center',
+    paddingHorizontal: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 5
+  },
+  quietCancelText: {
+    color: leafRideColors.muted,
+    fontFamily: fonts.Medium,
+    fontSize: 12,
+    lineHeight: 16
   },
   compactSubtitle: {
     color: color.text.secondary,

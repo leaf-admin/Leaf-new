@@ -110,9 +110,17 @@ import RobotaxiReceiptScreen from '../screens/prototype/RobotaxiReceiptScreen';
 import RobotaxiCancellationScreen from '../screens/prototype/RobotaxiCancellationScreen';
 import RobotaxiRatingScreen from '../screens/prototype/RobotaxiRatingScreen';
 import RobotaxiComplainScreen from '../screens/prototype/RobotaxiComplainScreen';
+import RobotaxiShareTripScreen from '../screens/prototype/RobotaxiShareTripScreen';
+import RobotaxiPublicTripTrackingScreen from '../screens/prototype/RobotaxiPublicTripTrackingScreen';
+import RobotaxiInvitesScreen from '../screens/prototype/RobotaxiInvitesScreen';
+import RobotaxiPaymentMethodsScreen from '../screens/prototype/RobotaxiPaymentMethodsScreen';
+import RobotaxiSupportTicketScreen from '../screens/prototype/RobotaxiSupportTicketScreen';
+import RobotaxiDriverDocumentsScreen from '../screens/prototype/RobotaxiDriverDocumentsScreen';
+import RobotaxiVehiclesScreen from '../screens/prototype/RobotaxiVehiclesScreen';
 import RobotaxiDriverOfferScreen from '../screens/prototype/RobotaxiDriverOfferScreen';
 import RobotaxiDriverTripScreen from '../screens/prototype/RobotaxiDriverTripScreen';
 import RobotaxiDriverActivationScreen from '../screens/prototype/RobotaxiDriverActivationScreen';
+import RobotaxiDriverWaitlistScreen from '../screens/prototype/RobotaxiDriverWaitlistScreen';
 
 // Componentes
 // LoadingScreen removido - não é mais necessário
@@ -248,6 +256,7 @@ const prototypeInteractiveOverlayScreenOptions = {
 
 const pilotLaunchFeatures = getPilotLaunchFeatureSnapshot();
 const referralEntryComponent = pilotLaunchFeatures.referralProgramsEnabled ? ReferralScreen : PilotFeatureUnavailableScreen;
+const prototypeInvitesEntryComponent = pilotLaunchFeatures.referralProgramsEnabled ? RobotaxiInvitesScreen : PilotFeatureUnavailableScreen;
 const withdrawalEntryComponent = pilotLaunchFeatures.driverWithdrawalsEnabled ? WithdrawMoney : PilotFeatureUnavailableScreen;
 const driverPayoutEntryComponent = pilotLaunchFeatures.driverWithdrawalsEnabled ? WooviDriverBalanceScreen : PilotFeatureUnavailableScreen;
 
@@ -255,6 +264,11 @@ const referralScreenParams = {
   title: 'Convites fora do piloto',
   message: 'Convites e campanhas de growth ficam desativados durante o piloto controlado.',
   targetRoute: 'Map'
+};
+
+const prototypeReferralScreenParams = {
+  ...referralScreenParams,
+  targetRoute: 'RobotaxiPrototype'
 };
 
 const withdrawalScreenParams = {
@@ -299,12 +313,20 @@ const appLinking = {
       RobotaxiPrototypeNoDrivers: 'robotaxi/no-drivers',
       RobotaxiPrototypeChat: 'robotaxi/chat',
       RobotaxiPrototypeSupport: 'robotaxi/support',
+      RobotaxiPrototypeSupportTicket: 'robotaxi/support/ticket',
       RobotaxiPrototypeReceipt: 'robotaxi/receipt',
       RobotaxiPrototypeCancellation: 'robotaxi/cancellation',
       RobotaxiPrototypeRating: 'robotaxi/rating',
       RobotaxiPrototypeComplain: 'robotaxi/complain',
+      RobotaxiPrototypeShareTrip: 'robotaxi/trip/share',
+      RobotaxiPrototypePublicTracking: 'robotaxi/trip/public/:tripId',
+      RobotaxiPrototypeInvites: 'robotaxi/invites',
+      RobotaxiPrototypePaymentMethods: 'robotaxi/payment/methods',
       RobotaxiPrototypeDriverPanel: 'robotaxi/driver/panel',
       RobotaxiPrototypeDriverActivation: 'robotaxi/driver/activation',
+      RobotaxiPrototypeDriverDocuments: 'robotaxi/driver/documents',
+      RobotaxiPrototypeVehicles: 'robotaxi/driver/vehicles',
+      RobotaxiPrototypeDriverWaitlist: 'robotaxi/driver/waitlist',
       RobotaxiPrototypeDriverOffer: 'robotaxi/driver/offer',
       RobotaxiPrototypeDriverTrip: 'robotaxi/driver/trip',
       RobotaxiPrototypeProfile: 'robotaxi/profile',
@@ -432,6 +454,11 @@ function renderPublicScreens(allowPrototypeQaScreens = false) {
         name="ReferralScreen"
         component={referralEntryComponent}
         initialParams={referralScreenParams}
+        options={{ headerShown: false }}
+      />
+      <Stack.Screen
+        name="RobotaxiPrototypePublicTracking"
+        component={RobotaxiPublicTripTrackingScreen}
         options={{ headerShown: false }}
       />
       <Stack.Screen
@@ -650,6 +677,11 @@ function renderSharedPrototypeScreens() {
         options={prototypeTransparentOverlayScreenOptions}
       />
       <Stack.Screen
+        name="RobotaxiPrototypeSupportTicket"
+        component={RobotaxiSupportTicketScreen}
+        options={prototypeTransparentOverlayScreenOptions}
+      />
+      <Stack.Screen
         name="RobotaxiPrototypeReceipt"
         component={RobotaxiReceiptScreen}
         options={prototypeTransparentOverlayScreenOptions}
@@ -673,6 +705,27 @@ function renderSharedPrototypeScreens() {
         name="RobotaxiPrototypeMenu"
         component={RobotaxiMenuScreen}
         options={prototypeOverlayScreenOptions}
+      />
+      <Stack.Screen
+        name="RobotaxiPrototypeShareTrip"
+        component={RobotaxiShareTripScreen}
+        options={prototypeTransparentOverlayScreenOptions}
+      />
+      <Stack.Screen
+        name="RobotaxiPrototypePublicTracking"
+        component={RobotaxiPublicTripTrackingScreen}
+        options={prototypeTransparentOverlayScreenOptions}
+      />
+      <Stack.Screen
+        name="RobotaxiPrototypeInvites"
+        component={prototypeInvitesEntryComponent}
+        options={prototypeTransparentOverlayScreenOptions}
+        initialParams={prototypeReferralScreenParams}
+      />
+      <Stack.Screen
+        name="RobotaxiPrototypePaymentMethods"
+        component={RobotaxiPaymentMethodsScreen}
+        options={prototypeTransparentOverlayScreenOptions}
       />
       <Stack.Screen
         name="RobotaxiMenuEditProfile"
@@ -771,6 +824,21 @@ function renderDriverPrototypeScreens() {
       <Stack.Screen
         name="RobotaxiPrototypeDriverActivation"
         component={RobotaxiDriverActivationScreen}
+        options={prototypeTransparentOverlayScreenOptions}
+      />
+      <Stack.Screen
+        name="RobotaxiPrototypeDriverDocuments"
+        component={RobotaxiDriverDocumentsScreen}
+        options={prototypeTransparentOverlayScreenOptions}
+      />
+      <Stack.Screen
+        name="RobotaxiPrototypeVehicles"
+        component={RobotaxiVehiclesScreen}
+        options={prototypeTransparentOverlayScreenOptions}
+      />
+      <Stack.Screen
+        name="RobotaxiPrototypeDriverWaitlist"
+        component={RobotaxiDriverWaitlistScreen}
         options={prototypeTransparentOverlayScreenOptions}
       />
       <Stack.Screen

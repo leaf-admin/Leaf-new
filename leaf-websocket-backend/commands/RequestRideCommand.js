@@ -50,6 +50,10 @@ class RequestRideCommand extends Command {
             data.paymentData && typeof data.paymentData === 'object'
                 ? { ...data.paymentData }
                 : null;
+        this.preferences =
+            data.preferences && typeof data.preferences === 'object'
+                ? { ...data.preferences }
+                : {};
         this.pricingContext = data.pricingContext || data.operational || null;
         // ✅ VALIDAÇÃO: Garantir traceId válido
         this.traceId = validateAndEnsureTraceIdInCommand(data, 'RequestRide');
@@ -277,6 +281,10 @@ class RequestRideCommand extends Command {
                     paymentReferenceRideId,
                     paymentAmountInCents: paymentAmountInCents || '',
                     paymentConfirmedAt,
+                    preferences: { ...(this.preferences || {}) },
+                    femaleDriverOnly: this.preferences?.femaleDriverOnly === true ||
+                        this.preferences?.leafDelas === true ||
+                        this.preferences?.leafDelasEnabled === true,
                     regionHash,
                     state: initialRideState,
                     status: initialRideStatus,

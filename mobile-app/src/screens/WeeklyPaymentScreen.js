@@ -17,6 +17,7 @@ import QRCode from 'react-native-qrcode-svg';
 import { useSelector } from 'react-redux';
 import { apiClient } from '../services/httpClient';
 import { useTranslation } from '../components/i18n/LanguageProvider';
+import SecurePaymentBadge from '../components/payment/SecurePaymentBadge';
 
 
 const { width } = Dimensions.get('window');
@@ -205,12 +206,7 @@ const WeeklyPaymentScreen = ({ navigation, route }) => {
           </Text>
         </View>
         
-        <View style={styles.detailItem}>
-          <Icon name="security" type="material" color="#666" size={20} />
-          <Text style={styles.detailText}>
-            Pagamento seguro
-          </Text>
-        </View>
+        <SecurePaymentBadge style={styles.securePaymentBadge} color="#7f8c8d" />
       </View>
     </View>
   );
@@ -465,6 +461,10 @@ const styles = StyleSheet.create({
     color: '#2c3e50',
     marginLeft: 12,
   },
+  securePaymentBadge: {
+    marginTop: 2,
+    marginLeft: 2,
+  },
   statusContainer: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -662,4 +662,4 @@ const styles = StyleSheet.create({
   },
 });
 
-export default WeeklyPaymentScreen; 
+export default WeeklyPaymentScreen;

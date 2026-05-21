@@ -82,6 +82,10 @@ const vehicleLockManager = require('./services/vehicle-lock-manager');
 const driverLockManager = require('./services/driver-lock-manager');
 const FCMService = require('./services/fcm-service');
 const fcmService = new FCMService(); // Singleton local ao worker
+const {
+    driverMatchesRidePreferences
+} = require('./services/ride-dispatch-preference-service');
+const driverEligibilityService = require('./services/driver-eligibility-service');
 // =========================================================================================
 
 // ==================== IMPORTAÇÕES REFATORAÇÃO: COMMANDS E LISTENERS ====================
@@ -662,6 +666,12 @@ async function findAvailableDriversForPickup(pickupLocation, options = {}) {
 
     const radiusKm = Number.parseFloat(options.radiusKm || process.env.PAYMENT_AVAILABILITY_RADIUS_KM || '5');
     const limit = Number.parseInt(options.limit || process.env.PAYMENT_AVAILABILITY_LIMIT || '12', 10);
+    const rideRequirements = {
+        pickupLocation,
+        destinationLocation: options.destinationLocation || options.destination || null,
+        preferences: options.preferences || {},
+        carType: options.carType || options.requestedCarType || options.vehicleCategory || null
+    };
     const eligibleDriverGeoKey = process.env.ELIGIBLE_DRIVER_GEO_KEY || 'driver_locations_eligible';
     const georadiusCount = Math.max(limit * 3, limit);
     const nearbyDrivers = await redis.georadius(
@@ -709,6 +719,18 @@ async function findAvailableDriversForPickup(pickupLocation, options = {}) {
         const isAvailable = driverStatus === 'AVAILABLE' || driverStatus === 'ONLINE';
         if (!isOnline || !isAvailable) continue;
 
+        const preferenceMatch = driverMatchesRidePreferences(driverData, rideRequirements);
+        if (!preferenceMatch.ok) continue;
+
+        if (rideRequirements.carType) {
+            const eligibility = await driverEligibilityService.isDriverEligibleForRide(
+                driverId,
+                rideRequirements.carType,
+                driverData
+            );
+            if (!eligibility?.eligible) continue;
+        }
+
         eligibleDrivers.push({
             id: driverId,
             distanceKm,
@@ -719,7 +741,8 @@ async function findAvailableDriversForPickup(pickupLocation, options = {}) {
             },
             carType: driverData.carType || null,
             category: driverData.vehicleCategory || null,
-            rating: Number.parseFloat(driverData.rating || '5.0')
+            rating: Number.parseFloat(driverData.rating || '5.0'),
+            dispatchPreferenceMatch: preferenceMatch.reason
         });
 
         if (eligibleDrivers.length >= limit) {

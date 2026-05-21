@@ -1,12 +1,18 @@
 import React from 'react';
 import { fireEvent, render, waitFor } from '@testing-library/react-native';
 
-import RobotaxiDriverOfferScreen from '../src/screens/prototype/RobotaxiDriverOfferScreen';
+import RobotaxiDriverOfferScreen, {
+  DRIVER_OFFER_RENDERED_CARD_FIELDS,
+} from '../src/screens/prototype/RobotaxiDriverOfferScreen';
 import RobotaxiDriverSearchScreen from '../src/screens/prototype/RobotaxiDriverSearchScreen';
-import RobotaxiDriverTripScreen from '../src/screens/prototype/RobotaxiDriverTripScreen';
+import RobotaxiDriverTripScreen, {
+  DRIVER_TRIP_RENDERED_CARD_FIELDS,
+} from '../src/screens/prototype/RobotaxiDriverTripScreen';
 import RobotaxiNoDriversScreen from '../src/screens/prototype/RobotaxiNoDriversScreen';
 import RobotaxiPaymentSuccessScreen from '../src/screens/prototype/RobotaxiPaymentSuccessScreen';
-import RobotaxiTripScreen from '../src/screens/prototype/RobotaxiTripScreen';
+import RobotaxiTripScreen, {
+  PASSENGER_TRIP_RENDERED_CARD_FIELDS,
+} from '../src/screens/prototype/RobotaxiTripScreen';
 import RobotaxiReceiptScreen from '../src/screens/prototype/RobotaxiReceiptScreen';
 import RobotaxiRatingScreen from '../src/screens/prototype/RobotaxiRatingScreen';
 import RobotaxiTripHistoryScreen from '../src/screens/prototype/RobotaxiTripHistoryScreen';
@@ -17,6 +23,11 @@ import {
   allowForcedPaymentBypass,
   allowTestUserTools,
 } from '../src/config/runtimeAccessPolicy';
+import {
+  RIDE_CARD_ROLES,
+  RIDE_CARD_STATES,
+  validateRideCardRenderedFields,
+} from '../src/screens/prototype/rideCardContract';
 
 jest.mock('../src/screens/prototype/prototypeRideRuntime', () => ({
   usePrototypeRideRuntime: jest.fn(),
@@ -194,6 +205,58 @@ describe('prototype ride screens', () => {
     jest.useRealTimers();
   });
 
+  it('keeps implemented ride surfaces covered by the card contract', () => {
+    expect(
+      validateRideCardRenderedFields(
+        RIDE_CARD_ROLES.PASSENGER,
+        RIDE_CARD_STATES.PASSENGER_DRIVER_ACCEPTED,
+        PASSENGER_TRIP_RENDERED_CARD_FIELDS.accepted,
+      ).ok
+    ).toBe(true);
+    expect(
+      validateRideCardRenderedFields(
+        RIDE_CARD_ROLES.PASSENGER,
+        RIDE_CARD_STATES.PASSENGER_DRIVER_ARRIVED,
+        PASSENGER_TRIP_RENDERED_CARD_FIELDS.arrived,
+      ).ok
+    ).toBe(true);
+    expect(
+      validateRideCardRenderedFields(
+        RIDE_CARD_ROLES.PASSENGER,
+        RIDE_CARD_STATES.PASSENGER_IN_TRIP,
+        PASSENGER_TRIP_RENDERED_CARD_FIELDS.started,
+      ).ok
+    ).toBe(true);
+    expect(
+      validateRideCardRenderedFields(
+        RIDE_CARD_ROLES.DRIVER,
+        RIDE_CARD_STATES.DRIVER_NEW_OFFER,
+        DRIVER_OFFER_RENDERED_CARD_FIELDS,
+      ).ok
+    ).toBe(true);
+    expect(
+      validateRideCardRenderedFields(
+        RIDE_CARD_ROLES.DRIVER,
+        RIDE_CARD_STATES.DRIVER_TO_PICKUP,
+        DRIVER_TRIP_RENDERED_CARD_FIELDS.accepted,
+      ).ok
+    ).toBe(true);
+    expect(
+      validateRideCardRenderedFields(
+        RIDE_CARD_ROLES.DRIVER,
+        RIDE_CARD_STATES.DRIVER_AT_PICKUP,
+        DRIVER_TRIP_RENDERED_CARD_FIELDS.arrived,
+      ).ok
+    ).toBe(true);
+    expect(
+      validateRideCardRenderedFields(
+        RIDE_CARD_ROLES.DRIVER,
+        RIDE_CARD_STATES.DRIVER_IN_TRIP,
+        DRIVER_TRIP_RENDERED_CARD_FIELDS.started,
+      ).ok
+    ).toBe(true);
+  });
+
   it('drives the offer screen into the driver trip surface on acceptance', async () => {
     const acceptDriverOffer = jest.fn().mockResolvedValue(undefined);
     usePrototypeRideRuntime.mockReturnValue({
@@ -204,8 +267,16 @@ describe('prototype ride screens', () => {
           dropoffAddress: 'Aeroporto Santos Dumont',
           fare: 38.4,
           estimatedDriverNetAmount: 31.8,
+          distanceKm: 0.7,
+          tripDistanceKm: 8.2,
+          pickupEtaMin: 4,
+          tripDurationMin: 14,
           pricingSnapshotLocked: true,
           payout: 'R$ 31,80',
+          preferences: {
+            temperatureLabel: 'Ar-condicionado ligado',
+            soundLabel: 'Pouca conversa',
+          },
         },
       ],
       acceptDriverOffer,
@@ -217,6 +288,12 @@ describe('prototype ride screens', () => {
     const { getByText } = render(
       <RobotaxiDriverOfferScreen navigation={navigation} route={{ params: {} }} />
     );
+
+    expect(getByText('Preferências')).toBeTruthy();
+    expect(getByText('Ar-condicionado ligado')).toBeTruthy();
+    expect(getByText('Pouca conversa')).toBeTruthy();
+    expect(getByText('14 min · 8,2 km de viagem')).toBeTruthy();
+    expect(getByText('PIX confirmado')).toBeTruthy();
 
     fireEvent.press(getByText('Aceitar corrida'));
 
@@ -261,13 +338,13 @@ describe('prototype ride screens', () => {
       />
     );
 
-    expect(screen.getByText('Detalhes da corrida')).toBeTruthy();
+    expect(screen.getAllByText('Destino Teste').length).toBeGreaterThan(0);
 
     await waitFor(
       () => {
         expect(navigation.goBack).toHaveBeenCalled();
       },
-      { timeout: 2000 }
+      { timeout: 5500 }
     );
   });
 
@@ -279,7 +356,9 @@ describe('prototype ride screens', () => {
       <RobotaxiDriverTripScreen navigation={acceptedNavigation} route={{ params: {} }} />
     );
 
-    expect(acceptedScreen.getByText('Dirija até o local de embarque de Passageiro Leaf')).toBeTruthy();
+    expect(acceptedScreen.getByText('Indo buscar')).toBeTruthy();
+    expect(acceptedScreen.getByText(/Preferências padrão/)).toBeTruthy();
+    expect(acceptedScreen.getByLabelText('Cancelar')).toBeTruthy();
     fireEvent.press(
       acceptedScreen.getByLabelText('driver-live-primary-action-arrive-button')
     );
@@ -292,7 +371,9 @@ describe('prototype ride screens', () => {
       <RobotaxiDriverTripScreen navigation={arrivedNavigation} route={{ params: {} }} />
     );
 
-    expect(arrivedScreen.getByText('Passageiro em embarque')).toBeTruthy();
+    expect(arrivedScreen.getByText('Código da corrida')).toBeTruthy();
+    expect(arrivedScreen.queryByText(/Aguard/i)).toBeNull();
+    expect(arrivedScreen.getByLabelText('Chat')).toBeTruthy();
     fireEvent.press(
       arrivedScreen.getByLabelText('driver-live-primary-action-start-button')
     );
@@ -305,7 +386,7 @@ describe('prototype ride screens', () => {
       <RobotaxiDriverTripScreen navigation={startedNavigation} route={{ params: {} }} />
     );
 
-    expect(startedScreen.getByText('Viagem em andamento')).toBeTruthy();
+    expect(startedScreen.getByText('A caminho de Aeroporto Santos Dumont')).toBeTruthy();
     fireEvent.press(
       startedScreen.getByLabelText('driver-live-primary-action-complete-button')
     );
@@ -333,14 +414,41 @@ describe('prototype ride screens', () => {
     const screen = render(<RobotaxiTripScreen navigation={navigation} route={{ params: {} }} />);
 
     expect(screen.getByLabelText('passenger-trip-compact-summary')).toBeTruthy();
-    expect(screen.getByText('Motorista a caminho do embarque')).toBeTruthy();
-    expect(screen.getByText('Acompanhe a aproximacao e prepare-se para embarcar com seguranca.')).toBeTruthy();
+    expect(screen.getByText('14 min até chegar')).toBeTruthy();
+    expect(screen.getByText('Motorista está a caminho')).toBeTruthy();
     expect(screen.getByText('Motorista Leaf')).toBeTruthy();
-    expect(screen.getByText('Leaf Plus • LEF-2042')).toBeTruthy();
-    expect(screen.getByText('Tempo')).toBeTruthy();
-    expect(screen.getByText('Distância')).toBeTruthy();
-    expect(screen.getByText('Valor')).toBeTruthy();
+    expect(screen.getByText('LEF-2042')).toBeTruthy();
+    expect(screen.getByText('Leaf Plus')).toBeTruthy();
+    expect(screen.getByText('Cor a confirmar')).toBeTruthy();
+    expect(screen.getByText('8 km até o embarque')).toBeTruthy();
+    expect(screen.getByText('Rua A, 10')).toBeTruthy();
+    expect(screen.getByText('Aeroporto Santos Dumont')).toBeTruthy();
+    expect(screen.getByLabelText('Mensagem')).toBeTruthy();
+    expect(screen.getByLabelText('Ligar')).toBeTruthy();
+    expect(screen.getByText('Compartilhar')).toBeTruthy();
     expect(screen.getByText('Cancelar corrida')).toBeTruthy();
+  });
+
+  it('updates passenger boarding timer copy as pickup urgency changes', () => {
+    const navigation = { navigate: jest.fn(), canGoBack: jest.fn(() => false), goBack: jest.fn() };
+
+    usePrototypeRideRuntime.mockReturnValue(buildPassengerRuntime({ bookingStatus: 'arrived', boardingRemainingSec: 90 }));
+    const activeTimer = render(<RobotaxiTripScreen navigation={navigation} route={{ params: {} }} />);
+    expect(activeTimer.getByText('Motorista chegou')).toBeTruthy();
+    expect(activeTimer.getAllByText('1:30').length).toBeGreaterThan(0);
+    expect(activeTimer.getByText('Prossiga para o embarque')).toBeTruthy();
+    activeTimer.unmount();
+
+    usePrototypeRideRuntime.mockReturnValue(buildPassengerRuntime({ bookingStatus: 'arrived', boardingRemainingSec: 25 }));
+    const urgentTimer = render(<RobotaxiTripScreen navigation={navigation} route={{ params: {} }} />);
+    expect(urgentTimer.getAllByText('0:25').length).toBeGreaterThan(0);
+    expect(urgentTimer.getByText('Embarque urgente')).toBeTruthy();
+    urgentTimer.unmount();
+
+    usePrototypeRideRuntime.mockReturnValue(buildPassengerRuntime({ bookingStatus: 'arrived', boardingRemainingSec: 0 }));
+    const expiredTimer = render(<RobotaxiTripScreen navigation={navigation} route={{ params: {} }} />);
+    expect(expiredTimer.getAllByText('0:00').length).toBeGreaterThan(0);
+    expect(expiredTimer.getByText('Uma taxa poderá ser aplicada')).toBeTruthy();
   });
 
   it('opens rating from the passenger receipt with the real trip payload', async () => {
@@ -583,21 +691,11 @@ describe('prototype ride screens', () => {
     );
 
     expect(getByText('Procurando motorista')).toBeTruthy();
-    expect(getByText('Leaf Plus')).toBeTruthy();
-    expect(getByText('Busca ativa')).toBeTruthy();
     expect(getByTestId('passenger-driver-search-elapsed').props.children).toBe('00:12');
-    expect(getByText('de 03:00 de janela ativa')).toBeTruthy();
+    expect(getByText('Buscando motorista')).toBeTruthy();
     expect(getByText('Buscando em 6 km de diâmetro neste momento')).toBeTruthy();
-    expect(getByTestId('passenger-driver-search-status-message').props.children).toBe(
-      'Expandindo o raio de busca'
-    );
-    expect(getByTestId('passenger-driver-search-message-dot-2').props.style).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          width: 18,
-        }),
-      ])
-    );
+    expect(getByText('Raio de busca expandido')).toBeTruthy();
+    expect(getByText('Preço protegido')).toBeTruthy();
     expect(getByTestId('passenger-driver-search-progress-fill').props.style).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
@@ -605,8 +703,8 @@ describe('prototype ride screens', () => {
         }),
       ])
     );
-    expect(getByText('Partida')).toBeTruthy();
-    expect(getByText('Chegada')).toBeTruthy();
+    expect(getByText('Ponto de partida')).toBeTruthy();
+    expect(getByText('Destino')).toBeTruthy();
     expect(getByText('1540 Mission St')).toBeTruthy();
     expect(getByText('Ferry Building')).toBeTruthy();
   });

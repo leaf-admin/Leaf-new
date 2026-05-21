@@ -65,6 +65,16 @@ class RadiusExpansionManager {
         this.dispatcher = new DriverNotificationDispatcher(this.redis, io);
     }
 
+    safeJSONParse(data, defaultValue = {}) {
+        if (!data) return defaultValue;
+        if (typeof data === 'object') return data;
+        try {
+            return JSON.parse(data);
+        } catch (_error) {
+            return defaultValue;
+        }
+    }
+
     async isBookingEligibleForExpansion(bookingId, bookingData = null) {
         const snapshot = bookingData && Object.keys(bookingData).length > 0
             ? bookingData
@@ -279,7 +289,19 @@ class RadiusExpansionManager {
                 pickupLocation,
                 this.config.expandedMaxRadius,
                 this.config.driversPerWave,
-                bookingId
+                bookingId,
+                {
+                    pickupLocation,
+                    destinationLocation: this.safeJSONParse(
+                        bookingData.destinationLocation,
+                        {}
+                    ),
+                    preferences: this.safeJSONParse(
+                        bookingData.preferences,
+                        {}
+                    ),
+                    carType: bookingData.carType || null
+                }
             );
 
             if (driversIn5km.length === 0) {

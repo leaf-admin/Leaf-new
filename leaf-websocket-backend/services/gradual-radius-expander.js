@@ -354,7 +354,18 @@ class GradualRadiusExpander {
                 radius,
                 limit,
                 bookingId,
-                {}
+                {
+                    pickupLocation,
+                    destinationLocation: this.safeJSONParse(
+                        safeBookingData.destinationLocation,
+                        {}
+                    ),
+                    preferences: this.safeJSONParse(
+                        safeBookingData.preferences,
+                        {}
+                    ),
+                    carType: safeBookingData.carType || null
+                }
             );
 
             if (scoredDrivers.length === 0) {

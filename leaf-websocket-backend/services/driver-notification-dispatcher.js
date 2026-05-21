@@ -26,6 +26,11 @@ const {
     recordDispatchDirectNotification
 } = require('./dispatch-wave-trace-service');
 const { getDriverResponseTimeoutSeconds } = require('../utils/dispatch-config');
+const {
+    driverMatchesRidePreferences,
+    hasRideDispatchPreferences
+} = require('./ride-dispatch-preference-service');
+const driverEligibilityService = require('./driver-eligibility-service');
 
 const DISPATCHABLE_SEARCH_STATES = new Set([
     'PENDING',
@@ -475,6 +480,13 @@ class DriverNotificationDispatcher {
                 this.scoreWeights.rating === 0 &&
                 this.scoreWeights.acceptanceRate === 0 &&
                 this.scoreWeights.responseTime === 0;
+            const shouldApplyRidePreferences = hasRideDispatchPreferences(rideRequirements);
+            const requestedCategory =
+                rideRequirements.carType ||
+                rideRequirements.requestedCarType ||
+                rideRequirements.vehicleCategory ||
+                null;
+            const shouldApplyDriverEligibility = Boolean(requestedCategory);
 
             // 3. Buscar dados completos e calcular scores
             const scoredDrivers = [];
@@ -520,7 +532,7 @@ class DriverNotificationDispatcher {
                 let driverData = null;
                 let score = 0;
 
-                if (useDistanceOnlyScoring) {
+                if (useDistanceOnlyScoring && !shouldApplyRidePreferences && !shouldApplyDriverEligibility) {
                     // Em produção a ordenação é 100% por proximidade, então evitamos round-trips extras.
                     score = Math.max(0.01, (1 - (distance / (radius + 0.1))) * 100);
                     driverData = {
@@ -548,14 +560,39 @@ class DriverNotificationDispatcher {
                         continue; // Motorista offline ou não disponível
                     }
 
-                    // Calcular score completo (Passando radius para normalização correta)
-                    score = await this.calculateDriverScore(
-                        driverId,
-                        distance,
+                    if (shouldApplyDriverEligibility) {
+                        const eligibility = await driverEligibilityService.isDriverEligibleForRide(
+                            driverId,
+                            requestedCategory,
+                            driverData
+                        );
+                        if (!eligibility?.eligible) {
+                            logger.debug(`⏭️ [Dispatcher] Driver ${driverId} ignorado por categoria: ${eligibility?.code || 'NOT_ELIGIBLE'}`);
+                            continue;
+                        }
+                    }
+
+                    const preferenceMatch = driverMatchesRidePreferences(
                         driverData,
-                        bookingId,
-                        radius
+                        {
+                            ...rideRequirements,
+                            pickupLocation
+                        }
                     );
+                    if (!preferenceMatch.ok) {
+                        logger.debug(`⏭️ [Dispatcher] Driver ${driverId} ignorado por preferência: ${preferenceMatch.reason}`);
+                        continue;
+                    }
+
+                    score = useDistanceOnlyScoring
+                        ? Math.max(0.01, (1 - (distance / (radius + 0.1))) * 100)
+                        : await this.calculateDriverScore(
+                            driverId,
+                            distance,
+                            driverData,
+                            bookingId,
+                            radius
+                        );
                 }
 
                 if (score <= 0) {
@@ -574,7 +611,9 @@ class DriverNotificationDispatcher {
                     responseTime: driverData.avgResponseTime || 5.0,
                     totalTrips: driverData.totalTrips || 0,
                     carType: driverData.carType || null,
-                    category: driverData.vehicleCategory || null
+                    category: driverData.vehicleCategory || null,
+                    gender: driverData.gender || null,
+                    destinationModeActive: driverData.destinationModeActive === true
                 });
             }
 
@@ -632,6 +671,34 @@ class DriverNotificationDispatcher {
                     status: normalizedStatus,
                     carType: cached.carType || null,
                     vehicleCategory: cached.vehicleCategory || null,
+                    gender: cached.gender || cached.genero || cached.genderCode || cached.genderLabel || null,
+                    destinationModeActive:
+                        cached.destinationModeActive === 'true' ||
+                        cached.driverDestinationModeActive === 'true' ||
+                        cached.destinationFilterActive === 'true',
+                    destinationModeLat:
+                        cached.destinationModeLat ||
+                        cached.driverDestinationLat ||
+                        cached.destinationFilterLat ||
+                        null,
+                    destinationModeLng:
+                        cached.destinationModeLng ||
+                        cached.driverDestinationLng ||
+                        cached.destinationFilterLng ||
+                        null,
+                    destinationModeExpiresAt:
+                        cached.destinationModeExpiresAt ||
+                        cached.driverDestinationExpiresAt ||
+                        cached.destinationFilterExpiresAt ||
+                        null,
+                    destinationModeMinProgressKm:
+                        cached.destinationModeMinProgressKm ||
+                        cached.driverDestinationMinProgressKm ||
+                        null,
+                    destinationModeArrivalRadiusKm:
+                        cached.destinationModeArrivalRadiusKm ||
+                        cached.driverDestinationArrivalRadiusKm ||
+                        null,
                     acceptsPlusWithElite: cached.acceptsPlusWithElite === 'true' || cached.acceptsPlusWithElite === true,
                     driverApproved: cached.driverApproved === 'true' || cached.driverApproved === true,
                     vehicleApproved: cached.vehicleApproved === 'true' || cached.vehicleApproved === true,
@@ -651,6 +718,8 @@ class DriverNotificationDispatcher {
                 status: 'AVAILABLE',
                 carType: null,
                 vehicleCategory: null,
+                gender: null,
+                destinationModeActive: false,
                 acceptsPlusWithElite: true,
                 driverApproved: true,
                 vehicleApproved: true,

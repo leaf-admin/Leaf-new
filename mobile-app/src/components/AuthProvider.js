@@ -102,19 +102,34 @@ const buildCompleteUserDataFromProfile = (firebaseUser, profile) => {
   };
 };
 
-const AuthBootstrapShell = ({ syncing }) => (
-  <View style={styles.bootstrapContainer}>
-    <View style={styles.bootstrapContent}>
-      <ActivityIndicator size="large" color="#9FE870" />
-      <Text style={styles.bootstrapTitle}>
-        {syncing ? 'Entrando na sua conta...' : 'Preparando o app...'}
-      </Text>
-      <Text style={styles.bootstrapSubtitle}>
-        Isso leva apenas alguns segundos.
-      </Text>
+const resolveBootstrapFirstName = (user) => {
+  const nameCandidate =
+    user?.firstName ||
+    user?.displayName ||
+    user?.name ||
+    user?.fullName ||
+    '';
+  const [firstName] = String(nameCandidate || '').trim().split(/\s+/);
+  return String(firstName || '').trim();
+};
+
+const AuthBootstrapShell = ({ user }) => {
+  const firstName = resolveBootstrapFirstName(user);
+  const title = firstName ? `Bem vindo(a), ${firstName}` : 'Bem vindo(a)';
+
+  return (
+    <View style={styles.bootstrapContainer}>
+      <View style={styles.bootstrapContent}>
+        <Text style={styles.bootstrapTitle}>{title}</Text>
+        <ActivityIndicator
+          size="small"
+          color="#0F3B16"
+          style={styles.bootstrapSpinner}
+        />
+      </View>
     </View>
-  </View>
-);
+  );
+};
 
 const runPostLoginServicesInBackground = ({ updateFcmToken = false } = {}) => {
   void (async () => {
@@ -356,7 +371,7 @@ const AuthProvider = ({ children }) => {
         firebaseUid &&
         cachedProfile.uid !== firebaseUid
       ) {
-        Logger.warn('🧪 AuthProvider - sessão Firebase divergente do perfil QA semeado; priorizando cache local do simulador', {
+        Logger.log('🧪 AuthProvider - sessão Firebase divergente do perfil QA semeado; priorizando cache local do simulador', {
           firebaseUid,
           seededUid: cachedProfile.uid,
           seededRole: cachedProfileRole,
@@ -533,7 +548,7 @@ const AuthProvider = ({ children }) => {
   const shouldRenderBootstrapShell = loading || (Boolean(user) && isSyncing);
 
   if (shouldRenderBootstrapShell) {
-    return <AuthBootstrapShell syncing={Boolean(user) && isSyncing} />;
+    return <AuthBootstrapShell user={user} />;
   }
 
   return children;
@@ -542,7 +557,7 @@ const AuthProvider = ({ children }) => {
 const styles = StyleSheet.create({
   bootstrapContainer: {
     flex: 1,
-    backgroundColor: '#041007',
+    backgroundColor: '#F6FAF7',
   },
   bootstrapContent: {
     flex: 1,
@@ -551,18 +566,14 @@ const styles = StyleSheet.create({
     paddingHorizontal: 28,
   },
   bootstrapTitle: {
-    marginTop: 16,
-    color: '#F5F7F7',
-    fontSize: 17,
+    color: '#0A1410',
+    fontSize: 22,
+    lineHeight: 29,
     fontWeight: '700',
     textAlign: 'center',
   },
-  bootstrapSubtitle: {
-    marginTop: 6,
-    color: 'rgba(245, 247, 247, 0.82)',
-    fontSize: 13,
-    lineHeight: 18,
-    textAlign: 'center',
+  bootstrapSpinner: {
+    marginTop: 18,
   },
 });
 

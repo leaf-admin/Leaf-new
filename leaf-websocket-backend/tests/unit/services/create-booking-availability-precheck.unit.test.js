@@ -46,7 +46,11 @@ describe('create-booking-availability-precheck', () => {
     });
     expect(checkAvailability).toHaveBeenCalledWith(
       { lat: 1, lng: 2 },
-      { carType: 'leaf_plus' }
+      {
+        carType: 'leaf_plus',
+        destinationLocation: undefined,
+        preferences: {}
+      }
     );
     expect(logStructured).toHaveBeenCalledWith(
       'warn',
@@ -114,5 +118,36 @@ describe('create-booking-availability-precheck', () => {
       hasDrivers: true
     });
     expect(logStructured).not.toHaveBeenCalled();
+  });
+
+  it('passes ride preferences and destination to the availability checker', async () => {
+    const checkAvailability = jest.fn().mockResolvedValue({
+      success: true,
+      drivers: [{ id: 'driver_female_1' }]
+    });
+
+    const result = await performCreateBookingAvailabilityPrecheck({
+      hasConfirmedPayment: true,
+      pickupLocation: { lat: -22.97, lng: -43.18 },
+      destinationLocation: { lat: -22.91, lng: -43.16 },
+      preferences: { leafDelas: true },
+      requestedCarType: 'leaf_plus',
+      checkAvailability
+    });
+
+    expect(result).toMatchObject({
+      skipped: false,
+      success: true,
+      code: 'DRIVERS_AVAILABLE',
+      hasDrivers: true
+    });
+    expect(checkAvailability).toHaveBeenCalledWith(
+      { lat: -22.97, lng: -43.18 },
+      {
+        carType: 'leaf_plus',
+        destinationLocation: { lat: -22.91, lng: -43.16 },
+        preferences: { leafDelas: true }
+      }
+    );
   });
 });

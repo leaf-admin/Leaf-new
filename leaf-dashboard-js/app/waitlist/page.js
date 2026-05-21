@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import ProtectedRoute from "@/src/components/ProtectedRoute";
 import AppNav from "@/src/components/AppNav";
 import { leafAPI } from "@/src/services/api";
@@ -18,7 +18,9 @@ export default function WaitlistPage() {
   const [driverSearch, setDriverSearch] = useState("");
   const [page, setPage] = useState(1);
   const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
   const [loading, setLoading] = useState(true);
+  const [actionDriverId, setActionDriverId] = useState("");
   const filteredDrivers = useMemo(() => {
     const term = driverSearch.trim().toLowerCase();
     if (!term) return drivers;
@@ -29,24 +31,29 @@ export default function WaitlistPage() {
     );
   }, [drivers, driverSearch]);
 
+  const loadWaitlist = useCallback(async ({ silent = false } = {}) => {
+    try {
+      if (!silent) setLoading(true);
+      setError("");
+      const [listData, statsData] = await Promise.all([
+        leafAPI.getWaitlist(page, 20, status, cityFilter),
+        leafAPI.getWaitlistStats(),
+      ]);
+      setDrivers(listData?.drivers || []);
+      setPagination(listData?.pagination || null);
+      setStats(statsData);
+    } catch (err) {
+      setError(err?.message || "Falha ao carregar waitlist");
+    } finally {
+      if (!silent) setLoading(false);
+    }
+  }, [cityFilter, page, status]);
+
   useEffect(() => {
     let mounted = true;
     const load = async () => {
-      try {
-        if (mounted) setLoading(true);
-        const [listData, statsData] = await Promise.all([
-          leafAPI.getWaitlist(page, 20, status, cityFilter),
-          leafAPI.getWaitlistStats(),
-        ]);
-        if (!mounted) return;
-        setDrivers(listData?.drivers || []);
-        setPagination(listData?.pagination || null);
-        setStats(statsData);
-      } catch (err) {
-        if (mounted) setError(err?.message || "Falha ao carregar waitlist");
-      } finally {
-        if (mounted) setLoading(false);
-      }
+      if (!mounted) return;
+      await loadWaitlist();
     };
     load();
     const timer = setInterval(load, 30000);
@@ -54,7 +61,32 @@ export default function WaitlistPage() {
       mounted = false;
       clearInterval(timer);
     };
-  }, [page, status, cityFilter]);
+  }, [loadWaitlist]);
+
+  const runDriverAction = async (driverId, action) => {
+    const safeDriverId = String(driverId || "").trim();
+    if (!safeDriverId) return;
+
+    try {
+      setActionDriverId(safeDriverId);
+      setError("");
+      setNotice("");
+      if (action === "approve") {
+        await leafAPI.approveWaitlistDriver(safeDriverId, "Aprovado pelo dashboard Leaf");
+        setNotice("Motorista aprovado e liberado para ativação.");
+      } else if (action === "reject") {
+        const reason = window.prompt("Motivo da rejeição", "Perfil fora dos critérios atuais");
+        if (reason === null) return;
+        await leafAPI.rejectWaitlistDriver(safeDriverId, reason);
+        setNotice("Motorista rejeitado e removido da fila ativa.");
+      }
+      await loadWaitlist({ silent: true });
+    } catch (err) {
+      setError(err?.message || "Falha ao atualizar waitlist");
+    } finally {
+      setActionDriverId("");
+    }
+  };
 
   return (
     <ProtectedRoute>
@@ -166,12 +198,13 @@ export default function WaitlistPage() {
                     <th>Email</th>
                     <th>Status</th>
                     <th>Prioridade</th>
+                    <th>Ações</th>
                   </tr>
                 </thead>
                 <tbody>
                   {filteredDrivers.length === 0 ? (
                     <tr>
-                      <td colSpan={6}>Nenhum motorista na waitlist para este filtro.</td>
+                      <td colSpan={7}>Nenhum motorista na waitlist para este filtro.</td>
                     </tr>
                   ) : (
                     filteredDrivers.map((item) => (
@@ -188,6 +221,29 @@ export default function WaitlistPage() {
                           </span>
                         </td>
                         <td>{item.priority || "normal"}</td>
+                        <td>
+                          {item.status === "pending" ? (
+                            <div className="row-actions">
+                              <button
+                                type="button"
+                                onClick={() => runDriverAction(item.driverId || item.id, "approve")}
+                                disabled={actionDriverId === (item.driverId || item.id)}
+                              >
+                                Aprovar
+                              </button>
+                              <button
+                                type="button"
+                                className="button-secondary"
+                                onClick={() => runDriverAction(item.driverId || item.id, "reject")}
+                                disabled={actionDriverId === (item.driverId || item.id)}
+                              >
+                                Rejeitar
+                              </button>
+                            </div>
+                          ) : (
+                            <span className="muted">Sem ação</span>
+                          )}
+                        </td>
                       </tr>
                     ))
                   )}
@@ -201,6 +257,7 @@ export default function WaitlistPage() {
             </div>
           </Panel>
         </section>
+        {notice ? <p className="success-text">{notice}</p> : null}
         <ErrorText message={error} />
       </main>
     </ProtectedRoute>

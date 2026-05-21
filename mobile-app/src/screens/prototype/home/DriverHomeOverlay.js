@@ -4,6 +4,7 @@ import {
   Animated,
   Easing,
   Modal,
+  Platform,
   StyleSheet,
   Text,
   TextInput,
@@ -11,31 +12,167 @@ import {
   View,
 } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { Ionicons } from "@expo/vector-icons";
+import LeafCampaignSlot from "../../../components/campaigns/LeafCampaignSlot";
 import robotaxiPrototypeTokens from "../../../components/design-system/robotaxiPrototypeTokens";
 import { fonts } from "../../../theme/runtimeTokens";
-import { PrototypeCard } from "../../../components/prototype/PrototypeUI";
 
 const { color } = robotaxiPrototypeTokens;
-const DRIVER_BOTTOM_CTA_OFFSET = 56;
+const DRIVER_BOTTOM_CTA_OFFSET = 16;
 const DRIVER_GOAL_STORAGE_PREFIX = "@prototype_driver_daily_goal_";
 const DEFAULT_DAILY_GOAL = 200;
+const COMPETITOR_REFERENCE_TAKE_RATE = 0.3;
+const IS_TEST_ENV = typeof process !== "undefined" && process.env?.NODE_ENV === "test";
+const DRIVER_HOME_COLOR = {
+  sheet: "#FAFBF8",
+  sheetSoft: "#FAFBF8",
+  text: "#111611",
+  secondary: "#666B63",
+  muted: "#7A8077",
+  line: "#DDE3D9",
+  leaf: "#1A330E",
+  leafLight: "#EEF4EA",
+  blue: "#EFF4F3",
+  blueText: "#40534A",
+  warning: "#F3F1EA",
+  warningText: "#6D5A32",
+};
 
-function DriverSliderThumbGlyph({ online = false }) {
-  if (online) {
-    return (
-      <View style={styles.driverBottomThumbCheckWrap}>
-        <View style={styles.driverBottomThumbCheckStem} />
-        <View style={styles.driverBottomThumbCheckArm} />
-      </View>
-    );
+function parseMoneyLabel(value) {
+  const cleaned = String(value || "")
+    .replace(/[^\d,.-]/g, "")
+    .trim();
+  if (!cleaned) {
+    return 0;
+  }
+  const normalized = cleaned.includes(",")
+    ? cleaned.replace(/\./g, "").replace(",", ".")
+    : cleaned;
+  const parsed = Number(normalized);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
+}
+
+function formatCurrencyBR(value) {
+  const numeric = Number(value);
+  const safeValue = Number.isFinite(numeric) ? numeric : 0;
+  return `R$ ${safeValue.toFixed(2).replace(".", ",")}`;
+}
+
+function roundMoney(value) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) {
+    return 0;
+  }
+  return Number(numeric.toFixed(2));
+}
+
+function parseTripDate(value) {
+  if (value instanceof Date && !Number.isNaN(value.getTime())) {
+    return value;
   }
 
-  return (
-    <View style={styles.driverBottomThumbChevronWrap}>
-      <View style={styles.driverBottomThumbChevronTop} />
-      <View style={styles.driverBottomThumbChevronBottom} />
-    </View>
+  if (typeof value === "number") {
+    const parsed = new Date(value > 1000000000000 ? value : value * 1000);
+    return Number.isNaN(parsed.getTime()) ? null : parsed;
+  }
+
+  const text = String(value || "").trim();
+  if (!text) {
+    return null;
+  }
+
+  const directDate = new Date(text);
+  if (!Number.isNaN(directDate.getTime())) {
+    return directDate;
+  }
+
+  const match = text.match(/^(\d{2})\/(\d{2})(?:\/(\d{2,4}))?/);
+  if (!match) {
+    return null;
+  }
+
+  const [, dayText, monthText, yearText] = match;
+  const today = new Date();
+  const year = yearText
+    ? Number(yearText.length === 2 ? `20${yearText}` : yearText)
+    : today.getFullYear();
+  const parsed = new Date(year, Number(monthText) - 1, Number(dayText));
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
+function toDateKey(date) {
+  if (!(date instanceof Date) || Number.isNaN(date.getTime())) {
+    return "";
+  }
+
+  return [
+    date.getFullYear(),
+    String(date.getMonth() + 1).padStart(2, "0"),
+    String(date.getDate()).padStart(2, "0"),
+  ].join("-");
+}
+
+function resolveTripNetAmount(item = {}) {
+  const explicitNet = Number(item?.driverNetAmount ?? item?.netAmount);
+  if (Number.isFinite(explicitNet)) {
+    return Math.max(0, explicitNet);
+  }
+
+  const gross = Number(
+    item?.grossAmount ??
+      item?.finalFare ??
+      item?.fare ??
+      item?.amount ??
+      parseMoneyLabel(item?.value),
   );
+  const fees = Number(item?.totalFees ?? item?.feeAmount);
+  if (Number.isFinite(gross) && Number.isFinite(fees)) {
+    return Math.max(0, gross - fees);
+  }
+
+  return Number.isFinite(gross) ? Math.max(0, gross) : 0;
+}
+
+function resolveGoalStreakDays(history = [], dailyGoal = DEFAULT_DAILY_GOAL, todayNet = 0) {
+  const target = Number(dailyGoal) || DEFAULT_DAILY_GOAL;
+  if (!Number.isFinite(target) || target <= 0) {
+    return 0;
+  }
+
+  const buckets = new Map();
+  const today = new Date();
+  const todayKey = toDateKey(today);
+
+  buckets.set(todayKey, roundMoney(Number(todayNet) || 0));
+
+  (Array.isArray(history) ? history : []).forEach((item) => {
+    const parsedDate =
+      parseTripDate(item?.completedAt) ||
+      parseTripDate(item?.createdAt) ||
+      parseTripDate(item?.updatedAt) ||
+      parseTripDate(item?.date);
+    const key = toDateKey(parsedDate);
+    if (!key) {
+      return;
+    }
+    if (key === todayKey && Number(todayNet) > 0) {
+      return;
+    }
+    buckets.set(key, roundMoney((buckets.get(key) || 0) + resolveTripNetAmount(item)));
+  });
+
+  let streak = 0;
+  const cursor = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+  for (let index = 0; index < 60; index += 1) {
+    const key = toDateKey(cursor);
+    if ((buckets.get(key) || 0) < target) {
+      break;
+    }
+    streak += 1;
+    cursor.setDate(cursor.getDate() - 1);
+  }
+
+  return streak;
 }
 
 function parseGoalInput(value) {
@@ -59,14 +196,40 @@ function DriverHomeOverlay({
   driverActivationResolved = false,
   ridesCount = 0,
   formattedDriverEarnings = "R$ 0,00",
+  driverGrossAmount = 0,
+  driverFeeAmount = 0,
+  driverFinancialHistory = [],
+  driverDestinationMode = null,
   onToggleOnline,
   onOpenActivation,
+  onOpenEarnings,
+  onSaveDestinationMode,
   onCtaLayout,
 }) {
+  const safeBottom = Math.max(0, Number(insetsBottom) || 0);
   const [goalModalVisible, setGoalModalVisible] = useState(false);
   const [goalInput, setGoalInput] = useState("");
   const [dailyGoal, setDailyGoal] = useState(DEFAULT_DAILY_GOAL);
+  const [destinationInput, setDestinationInput] = useState("");
+  const [destinationModeEnabled, setDestinationModeEnabled] = useState(false);
+  const [savingPreferences, setSavingPreferences] = useState(false);
   const [sliderWidth, setSliderWidth] = useState(0);
+  const [daySummaryVisible, setDaySummaryVisible] = useState(false);
+  const [displayedEarningsAmount, setDisplayedEarningsAmount] = useState(
+    parseMoneyLabel(formattedDriverEarnings),
+  );
+  const [displayedGoalRatio, setDisplayedGoalRatio] = useState(
+    Math.min(1, parseMoneyLabel(formattedDriverEarnings) / DEFAULT_DAILY_GOAL),
+  );
+  const previousDriverOnlineRef = useRef(Boolean(driverOnline));
+  const earningsAnimation = useRef(
+    new Animated.Value(parseMoneyLabel(formattedDriverEarnings)),
+  ).current;
+  const goalProgressAnimation = useRef(
+    new Animated.Value(
+      Math.min(1, parseMoneyLabel(formattedDriverEarnings) / DEFAULT_DAILY_GOAL),
+    ),
+  ).current;
   const isActivationBlocked =
     driverActivationResolved && !driverCanGoOnline && !driverOnline;
   const pendingOfflineActivation = driverOnlinePending && !driverOnline;
@@ -81,7 +244,7 @@ function DriverHomeOverlay({
         ? "online"
         : "offline";
   const sliderLabel = isActivationBlocked
-    ? "Ativação pendente"
+    ? "Em análise"
     : pendingOfflineActivation
       ? "Ativando..."
     : driverOnline
@@ -92,15 +255,52 @@ function DriverHomeOverlay({
       `${DRIVER_GOAL_STORAGE_PREFIX}${String(driverId || "anonymous").trim() || "anonymous"}`,
     [driverId],
   );
-  const currentGoalProgressLabel =
-    String(formattedDriverEarnings || "--,--").trim() || "--,--";
+  const currentGoalAmount = parseMoneyLabel(formattedDriverEarnings);
+  const currentGoalProgressLabel = formatCurrencyBR(displayedEarningsAmount);
   const goalTargetLabel = String(
     Math.max(0, Math.round(Number(dailyGoal) || DEFAULT_DAILY_GOAL)),
   );
+  const goalProgressRatio = Math.min(
+    1,
+    Math.max(0, currentGoalAmount / (Number(dailyGoal) || DEFAULT_DAILY_GOAL)),
+  );
+  const goalProgressPercent = `${Math.round(displayedGoalRatio * 100)}%`;
+  const onlineDurationLabel = driverOnline ? "2h18" : "--";
+  const safeDriverGrossAmount =
+    Number.isFinite(Number(driverGrossAmount)) && Number(driverGrossAmount) > 0
+      ? Number(driverGrossAmount)
+      : currentGoalAmount + Math.max(0, Number(driverFeeAmount) || 0);
+  const safeDriverFeeAmount =
+    Number.isFinite(Number(driverFeeAmount)) && Number(driverFeeAmount) >= 0
+      ? Number(driverFeeAmount)
+      : Math.max(0, safeDriverGrossAmount - currentGoalAmount);
+  const competitorEstimatedNet = roundMoney(
+    safeDriverGrossAmount * (1 - COMPETITOR_REFERENCE_TAKE_RATE),
+  );
+  const leafAdvantage = roundMoney(currentGoalAmount - competitorEstimatedNet);
+  const goalStreakDays = resolveGoalStreakDays(
+    driverFinancialHistory,
+    dailyGoal,
+    currentGoalAmount,
+  );
+  const summaryHeadline =
+    currentGoalAmount >= Number(dailyGoal || DEFAULT_DAILY_GOAL)
+      ? "Meta batida hoje"
+      : "Dia salvo";
+  const destinationModeLabel =
+    String(
+      driverDestinationMode?.destinationName ||
+        driverDestinationMode?.destination?.name ||
+        driverDestinationMode?.destinationAddress ||
+        driverDestinationMode?.destination?.address ||
+        "",
+    ).trim();
+  const hasActiveDestinationMode =
+    driverDestinationMode?.active === true && Boolean(destinationModeLabel);
   const sliderProgress = useRef(
     new Animated.Value(driverOnline && !isActivationBlocked ? 1 : 0),
   ).current;
-  const sliderTravel = Math.max(0, sliderWidth - 66);
+  const sliderTravel = Math.max(0, sliderWidth - 58);
   const sliderThumbTranslateX = sliderProgress.interpolate({
     inputRange: [0, 1],
     outputRange: [0, sliderTravel],
@@ -133,121 +333,298 @@ function DriverHomeOverlay({
   }, [goalStorageKey]);
 
   useEffect(() => {
+    if (IS_TEST_ENV) {
+      sliderProgress.setValue(driverOnline && !isActivationBlocked ? 1 : 0);
+      return undefined;
+    }
+
     Animated.timing(sliderProgress, {
       toValue: driverOnline && !isActivationBlocked ? 1 : 0,
-      duration: 240,
+      duration: 260,
       easing: Easing.out(Easing.cubic),
       useNativeDriver: true,
     }).start();
   }, [driverOnline, isActivationBlocked, sliderProgress]);
 
+  useEffect(() => {
+    const animationId = earningsAnimation.addListener(({ value }) => {
+      setDisplayedEarningsAmount(roundMoney(value));
+    });
+
+    return () => {
+      earningsAnimation.removeListener(animationId);
+    };
+  }, [earningsAnimation]);
+
+  useEffect(() => {
+    const animationId = goalProgressAnimation.addListener(({ value }) => {
+      setDisplayedGoalRatio(Math.min(1, Math.max(0, Number(value) || 0)));
+    });
+
+    return () => {
+      goalProgressAnimation.removeListener(animationId);
+    };
+  }, [goalProgressAnimation]);
+
+  useEffect(() => {
+    if (IS_TEST_ENV) {
+      earningsAnimation.setValue(currentGoalAmount);
+      goalProgressAnimation.setValue(goalProgressRatio);
+      setDisplayedEarningsAmount(roundMoney(currentGoalAmount));
+      setDisplayedGoalRatio(goalProgressRatio);
+      return undefined;
+    }
+
+    Animated.parallel([
+      Animated.timing(earningsAnimation, {
+        toValue: currentGoalAmount,
+        duration: 520,
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: false,
+      }),
+      Animated.timing(goalProgressAnimation, {
+        toValue: goalProgressRatio,
+        duration: 620,
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: false,
+      }),
+    ]).start();
+  }, [
+    currentGoalAmount,
+    earningsAnimation,
+    goalProgressAnimation,
+    goalProgressRatio,
+  ]);
+
+  useEffect(() => {
+    const wasOnline = previousDriverOnlineRef.current;
+    previousDriverOnlineRef.current = Boolean(driverOnline);
+
+    if (wasOnline && !driverOnline && !driverOnlinePending) {
+      setDaySummaryVisible(true);
+    }
+  }, [driverOnline, driverOnlinePending]);
+
   const handleOpenGoalModal = () => {
     setGoalInput(
       String(Math.max(0, Math.round(Number(dailyGoal) || DEFAULT_DAILY_GOAL))),
     );
+    setDestinationInput(destinationModeLabel);
+    setDestinationModeEnabled(Boolean(hasActiveDestinationMode));
     setGoalModalVisible(true);
   };
 
-  const handleSaveGoal = async () => {
+  const handleSavePreferences = async () => {
     const parsed = parseGoalInput(goalInput);
     if (!parsed) {
       Alert.alert("Meta diária", "Digite um valor válido para a meta.");
       return;
     }
+    if (destinationModeEnabled && String(destinationInput || "").trim().length < 3) {
+      Alert.alert(
+        "Destino de caminho",
+        "Informe o destino para receber corridas no caminho.",
+      );
+      return;
+    }
 
-    setDailyGoal(parsed);
-    setGoalModalVisible(false);
+    setSavingPreferences(true);
     try {
       await AsyncStorage.setItem(goalStorageKey, String(parsed));
+      if (typeof onSaveDestinationMode === "function") {
+        await onSaveDestinationMode({
+          enabled: destinationModeEnabled,
+          query: destinationInput,
+        });
+      }
+      setDailyGoal(parsed);
+      setGoalModalVisible(false);
     } catch (_error) {
-      // no-op: meta local, não bloquear UX
+      Alert.alert(
+        "Preferências",
+        "Não foi possível salvar suas preferências agora.",
+      );
+    } finally {
+      setSavingPreferences(false);
+    }
+  };
+
+  const handleCloseDaySummary = () => {
+    setDaySummaryVisible(false);
+  };
+
+  const handleOpenEarningsFromSummary = () => {
+    setDaySummaryVisible(false);
+    if (typeof onOpenEarnings === "function") {
+      onOpenEarnings();
     }
   };
 
   return (
     <>
+      <LeafCampaignSlot
+        userId={driverId}
+        role="driver"
+        surface="driver_home"
+        placement="above_driver_card"
+        style={{ bottom: safeBottom + DRIVER_BOTTOM_CTA_OFFSET + 248 }}
+        testID="driver-home-campaign-slot"
+      />
       <View
         onLayout={onCtaLayout}
         style={[
           styles.driverBottomCtaWrap,
-          { bottom: insetsBottom + DRIVER_BOTTOM_CTA_OFFSET },
+          { bottom: safeBottom + DRIVER_BOTTOM_CTA_OFFSET },
         ]}
       >
-        <PrototypeCard style={styles.driverBottomCard}>
+        <View style={styles.driverBottomCard}>
           <View style={styles.driverBottomStatsRow}>
             <TouchableOpacity
               activeOpacity={0.86}
-              style={styles.driverBottomGoalStatItem}
-              onPress={handleOpenGoalModal}
+              style={styles.earningsBlock}
+              onPress={onOpenEarnings || handleOpenGoalModal}
             >
-              <Text style={styles.driverBottomStatLabel}>Meta diária</Text>
-              <View style={styles.driverBottomGoalValueRow}>
-                <Text style={styles.driverBottomStatValuePrimary}>
+              <View style={styles.driverGoalHeaderRow}>
+                <Text style={styles.driverBottomStatLabel}>Meta diária</Text>
+                <View style={styles.driverGoalPercentPill}>
+                  <Text style={styles.driverGoalPercentText}>
+                    {goalProgressPercent}
+                  </Text>
+                </View>
+              </View>
+              <View style={styles.driverGoalValueRow}>
+                <Text
+                  numberOfLines={1}
+                  adjustsFontSizeToFit
+                  minimumFontScale={0.82}
+                  style={styles.driverBottomStatValuePrimary}
+                >
                   {currentGoalProgressLabel}
                 </Text>
                 <Text style={styles.driverBottomStatValueSecondary}>
                   {" "}
-                  / {goalTargetLabel}
+                  / R$ {goalTargetLabel}
+                </Text>
+              </View>
+              <View style={styles.driverGoalProgressTrack}>
+                <View
+                  style={[
+                    styles.driverGoalProgressFill,
+                    { width: goalProgressPercent },
+                  ]}
+                />
+              </View>
+              <Text style={styles.driverGoalProgressCaption}>
+                Progresso da meta
+              </Text>
+              <View style={styles.driverStreakInline}>
+                <Ionicons
+                  name="flame-outline"
+                  size={13}
+                  color={DRIVER_HOME_COLOR.warningText}
+                />
+                <Text style={styles.driverStreakInlineText} numberOfLines={1}>
+                  {goalStreakDays > 0
+                    ? `${goalStreakDays} ${goalStreakDays === 1 ? "dia" : "dias"} batendo meta`
+                    : "Meta pronta para hoje"}
                 </Text>
               </View>
             </TouchableOpacity>
 
-            <View style={styles.driverBottomStatDivider} />
+            <View style={styles.driverStatsVerticalDivider} />
 
-            <View style={styles.driverBottomStatItem}>
-              <Text style={styles.driverBottomStatLabel}>Corridas</Text>
-              <Text style={styles.driverBottomTripsValue}>
-                {Math.max(0, Number(ridesCount) || 0)}
-              </Text>
+            <View style={styles.driverSideStats}>
+              <View style={styles.driverSideStatItem}>
+                <Text style={styles.driverSideStatValue}>
+                  {Math.max(0, Number(ridesCount) || 0)}
+                </Text>
+                <Text style={styles.driverSideStatLabel}>corridas</Text>
+              </View>
+              <View style={styles.driverSideStatItem}>
+                <Text style={styles.driverSideStatValue}>
+                  {onlineDurationLabel}
+                </Text>
+                <Text style={styles.driverSideStatLabel}>online</Text>
+              </View>
             </View>
           </View>
 
-          <TouchableOpacity
-            activeOpacity={0.88}
-            onPress={handleSliderPress}
-            testID="driver-home-toggle-online"
-            accessibilityLabel={`driver-home-toggle-online-${sliderStatus}`}
-            accessibilityValue={{ text: sliderStatus }}
-            onLayout={(event) => {
-              const nextWidth = event?.nativeEvent?.layout?.width;
-              if (Number.isFinite(nextWidth) && nextWidth > 0) {
-                setSliderWidth(nextWidth);
-              }
-            }}
-            style={[
-              styles.driverBottomSlider,
-              isActivationBlocked
-                ? styles.driverBottomSliderDisabled
-                : driverOnline
-                  ? styles.driverBottomSliderOnline
-                  : styles.driverBottomSliderOffline,
-            ]}
-          >
-            <Text
+          <View style={styles.driverBottomDivider} />
+
+          <View style={styles.driverBottomActions}>
+            <TouchableOpacity
+              activeOpacity={0.88}
+              onPress={handleSliderPress}
+              testID="driver-home-toggle-online"
+              accessibilityLabel={`driver-home-toggle-online-${sliderStatus}`}
+              accessibilityValue={{ text: sliderStatus }}
+              onLayout={(event) => {
+                const nextWidth = event?.nativeEvent?.layout?.width;
+                if (Number.isFinite(nextWidth) && nextWidth > 0) {
+                  setSliderWidth(nextWidth);
+                }
+              }}
               style={[
-                styles.driverBottomSliderText,
-                driverOnline && !isActivationBlocked
-                  ? styles.driverBottomSliderTextOnline
-                  : styles.driverBottomSliderTextOffline,
+                styles.driverBottomSlider,
+                sliderStatus === "online" && styles.driverBottomSliderOnline,
+                sliderStatus === "blocked" && styles.driverBottomSliderBlocked,
+                sliderStatus === "pending" && styles.driverBottomSliderPending,
               ]}
             >
-              {sliderLabel}
-            </Text>
-            <Animated.View
-              style={[
-                styles.driverBottomSliderThumb,
-                driverOnline && !isActivationBlocked
-                  ? styles.driverBottomSliderThumbOnline
-                  : styles.driverBottomSliderThumbOffline,
-                { transform: [{ translateX: sliderThumbTranslateX }] },
+              <Text
+                style={[
+                  styles.driverBottomSliderText,
+                  sliderStatus === "online" &&
+                    styles.driverBottomSliderTextOnline,
+                  sliderStatus === "blocked" &&
+                    styles.driverBottomSliderTextBlocked,
+                  sliderStatus === "pending" &&
+                    styles.driverBottomSliderTextPending,
                 ]}
+              >
+                {sliderLabel}
+              </Text>
+              <Animated.View
+                style={[
+                  styles.driverBottomSliderThumb,
+                  sliderStatus === "online" && styles.driverBottomSliderThumbOnline,
+                  sliderStatus === "blocked" && styles.driverBottomSliderThumbBlocked,
+                  sliderStatus === "pending" && styles.driverBottomSliderThumbPending,
+                  { transform: [{ translateX: sliderThumbTranslateX }] },
+                ]}
+              >
+                <Ionicons
+                  name={
+                    sliderStatus === "online"
+                      ? "checkmark"
+                      : sliderStatus === "blocked"
+                        ? "time-outline"
+                        : sliderStatus === "pending"
+                          ? "ellipsis-horizontal"
+                          : "chevron-forward"
+                  }
+                  size={21}
+                  color={
+                    sliderStatus === "online" ? DRIVER_HOME_COLOR.leaf : "#FFFFFF"
+                  }
+                />
+              </Animated.View>
+            </TouchableOpacity>
+            <TouchableOpacity
+              activeOpacity={0.88}
+              onPress={handleOpenGoalModal}
+              testID="driver-home-preferences-button"
+              accessibilityLabel="driver-home-preferences-button"
+              style={styles.driverPreferencesAction}
             >
-              <DriverSliderThumbGlyph
-                online={driverOnline && !isActivationBlocked}
+              <Ionicons
+                name="settings-outline"
+                size={21}
+                color={DRIVER_HOME_COLOR.leaf}
               />
-            </Animated.View>
-          </TouchableOpacity>
-        </PrototypeCard>
+            </TouchableOpacity>
+          </View>
+        </View>
       </View>
 
       <Modal
@@ -258,7 +635,8 @@ function DriverHomeOverlay({
       >
         <View style={styles.modalOverlay}>
           <View style={styles.modalCard}>
-            <Text style={styles.modalTitle}>Meta diária</Text>
+            <Text style={styles.modalTitle}>Preferências de trabalho</Text>
+            <Text style={styles.modalLabel}>Meta do dia</Text>
             <TextInput
               value={goalInput}
               onChangeText={setGoalInput}
@@ -267,20 +645,168 @@ function DriverHomeOverlay({
               style={styles.modalInput}
               placeholderTextColor="rgba(33,41,53,0.45)"
             />
+            <TouchableOpacity
+              activeOpacity={0.84}
+              style={styles.destinationModeRow}
+              onPress={() => setDestinationModeEnabled((current) => !current)}
+              testID="driver-destination-mode-toggle"
+              accessibilityRole="switch"
+              accessibilityState={{ checked: destinationModeEnabled }}
+            >
+              <View style={styles.destinationModeCopy}>
+                <Text style={styles.destinationModeTitle}>Destino de caminho</Text>
+                <Text style={styles.destinationModeSubtitle}>
+                  Receba corridas que avancem pelo menos 1 km e terminem perto do seu caminho.
+                </Text>
+              </View>
+              <View
+                style={[
+                  styles.destinationModeSwitch,
+                  destinationModeEnabled && styles.destinationModeSwitchActive,
+                ]}
+              >
+                <View
+                  style={[
+                    styles.destinationModeSwitchKnob,
+                    destinationModeEnabled && styles.destinationModeSwitchKnobActive,
+                  ]}
+                />
+              </View>
+            </TouchableOpacity>
+            <TextInput
+              value={destinationInput}
+              onChangeText={setDestinationInput}
+              placeholder="Ex: Shopping Leblon"
+              editable={destinationModeEnabled}
+              style={[
+                styles.modalInput,
+                !destinationModeEnabled && styles.modalInputDisabled,
+              ]}
+              placeholderTextColor="rgba(33,41,53,0.45)"
+              testID="driver-destination-mode-input"
+            />
+            {hasActiveDestinationMode ? (
+              <Text style={styles.destinationModeActiveHint} numberOfLines={2}>
+                Ativo para {destinationModeLabel}. A preferência expira automaticamente em até 4 horas.
+              </Text>
+            ) : null}
             <View style={styles.modalActions}>
               <TouchableOpacity
                 activeOpacity={0.86}
                 style={styles.modalGhostButton}
                 onPress={() => setGoalModalVisible(false)}
+                disabled={savingPreferences}
               >
                 <Text style={styles.modalGhostButtonText}>Cancelar</Text>
               </TouchableOpacity>
               <TouchableOpacity
                 activeOpacity={0.86}
                 style={styles.modalPrimaryButton}
-                onPress={handleSaveGoal}
+                onPress={handleSavePreferences}
+                disabled={savingPreferences}
+                testID="driver-preferences-save"
               >
-                <Text style={styles.modalPrimaryButtonText}>Salvar</Text>
+                <Text style={styles.modalPrimaryButtonText}>
+                  {savingPreferences ? "Salvando..." : "Salvar"}
+                </Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      <Modal
+        visible={daySummaryVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={handleCloseDaySummary}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.summaryCard}>
+            <View style={styles.summaryHero}>
+              <Text style={styles.summaryEyebrow}>Resumo do dia</Text>
+              <Text style={styles.summaryTitle}>{summaryHeadline}</Text>
+              <Text style={styles.summarySubtitle}>
+                Você ficou offline. Aqui está o fechamento até agora.
+              </Text>
+            </View>
+
+            <View style={styles.summaryMetricsRow}>
+              <View style={styles.summaryMetric}>
+                <Text style={styles.summaryMetricLabel}>Você recebeu</Text>
+                <Text style={styles.summaryMetricValue}>
+                  {formatCurrencyBR(currentGoalAmount)}
+                </Text>
+              </View>
+              <View style={styles.summaryMetric}>
+                <Text style={styles.summaryMetricLabel}>Taxas</Text>
+                <Text style={styles.summaryMetricValue}>
+                  {formatCurrencyBR(safeDriverFeeAmount)}
+                </Text>
+              </View>
+            </View>
+
+            <View style={styles.summaryComparison}>
+              <View style={styles.summaryComparisonIcon}>
+                <Ionicons
+                  name="swap-vertical-outline"
+                  size={18}
+                  color={DRIVER_HOME_COLOR.leaf}
+                />
+              </View>
+              <View style={styles.summaryComparisonCopy}>
+                <Text style={styles.summaryComparisonTitle}>
+                  Comparativo direto
+                </Text>
+                <Text style={styles.summaryComparisonText}>
+                  Em uma plataforma com 30% de comissão, a estimativa seria {formatCurrencyBR(competitorEstimatedNet)}.
+                </Text>
+                <Text
+                  style={[
+                    styles.summaryComparisonDelta,
+                    leafAdvantage < 0 && styles.summaryComparisonDeltaMuted,
+                  ]}
+                >
+                  {leafAdvantage >= 0
+                    ? `Você ficou com ${formatCurrencyBR(leafAdvantage)} a mais.`
+                    : `Diferença de ${formatCurrencyBR(Math.abs(leafAdvantage))} para revisar.`}
+                </Text>
+              </View>
+            </View>
+
+            <View style={styles.summaryStreakCard}>
+              <View style={styles.summaryStreakBadge}>
+                <Text style={styles.summaryStreakNumber}>
+                  {goalStreakDays}
+                </Text>
+              </View>
+              <View style={styles.summaryStreakCopy}>
+                <Text style={styles.summaryStreakTitle}>
+                  Sequência de meta
+                </Text>
+                <Text style={styles.summaryStreakText}>
+                  {goalStreakDays > 0
+                    ? "Continue nesse ritmo para manter sua sequência ativa."
+                    : "Bata a meta de hoje para iniciar sua sequência."}
+                </Text>
+              </View>
+            </View>
+
+            <View style={styles.modalActions}>
+              <TouchableOpacity
+                activeOpacity={0.86}
+                style={styles.modalGhostButton}
+                onPress={handleOpenEarningsFromSummary}
+              >
+                <Text style={styles.modalGhostButtonText}>Ver ganhos</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                activeOpacity={0.86}
+                style={styles.modalPrimaryButton}
+                onPress={handleCloseDaySummary}
+                testID="driver-day-summary-close"
+              >
+                <Text style={styles.modalPrimaryButtonText}>Fechar</Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -295,182 +821,254 @@ export default memo(DriverHomeOverlay);
 const styles = StyleSheet.create({
   driverBottomCtaWrap: {
     position: "absolute",
-    width: "84%",
+    left: 16,
+    right: 16,
     alignSelf: "center",
     zIndex: 16,
   },
   driverBottomCard: {
-    borderRadius: 32,
-    paddingHorizontal: 16,
-    paddingTop: 11,
-    paddingBottom: 10,
+    minHeight: 236,
+    borderTopLeftRadius: 32,
+    borderTopRightRadius: 32,
+    borderBottomLeftRadius: 32,
+    borderBottomRightRadius: 32,
+    paddingHorizontal: 28,
+    paddingTop: 21,
+    paddingBottom: 18,
+    backgroundColor: DRIVER_HOME_COLOR.sheetSoft,
+    borderWidth: 1,
+    borderColor: "rgba(207,216,205,0.9)",
+    shadowColor: "#000000",
+    shadowOffset: { width: 0, height: 20 },
+    shadowOpacity: 0.12,
+    shadowRadius: 17,
+    elevation: Platform.OS === "android" ? 0 : 12,
   },
   driverBottomStatsRow: {
     flexDirection: "row",
+    alignItems: "stretch",
+    minHeight: 122,
+  },
+  earningsBlock: {
+    flex: 1,
+    minHeight: 118,
+    justifyContent: "flex-start",
     alignItems: "flex-start",
-    marginBottom: 8,
+    paddingRight: 13,
   },
-  driverBottomStatItem: {
-    flex: 0.62,
-    minHeight: 48,
-    justifyContent: "flex-start",
-    alignItems: "center",
-  },
-  driverBottomGoalStatItem: {
-    flex: 1.52,
-    minHeight: 48,
-    justifyContent: "flex-start",
-    alignItems: "center",
-  },
-  driverBottomStatDivider: {
-    width: 1,
+  driverStatsVerticalDivider: {
+    width: StyleSheet.hairlineWidth,
     alignSelf: "stretch",
-    backgroundColor: "rgba(55,68,84,0.12)",
-    marginHorizontal: 8,
+    backgroundColor: "rgba(183,196,181,0.72)",
+    marginLeft: 3,
+    marginRight: 13,
+  },
+  driverSideStats: {
+    width: 82,
+    minHeight: 118,
+    justifyContent: "center",
+    alignItems: "stretch",
+    gap: 13,
+    paddingVertical: 4,
+  },
+  driverSideStatItem: {
+    minHeight: 39,
+    alignItems: "flex-start",
+    justifyContent: "center",
   },
   driverBottomStatLabel: {
-    color: color.text.secondary,
+    color: DRIVER_HOME_COLOR.muted,
     fontFamily: fonts.Medium,
-    fontSize: 10,
-    lineHeight: 12,
-    letterSpacing: 1.2,
-    textTransform: "uppercase",
-    textAlign: "center",
+    fontSize: 10.5,
+    lineHeight: 14,
   },
-  driverBottomGoalValueRow: {
-    marginTop: 0,
+  driverGoalHeaderRow: {
+    width: "100%",
+    minHeight: 20,
     flexDirection: "row",
-    alignItems: "flex-end",
-    justifyContent: "center",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 8,
   },
-  driverBottomStatValuePrimary: {
-    color: color.text.primary,
-    fontFamily: fonts.Bold,
-    fontSize: 28,
-    lineHeight: 32,
-    letterSpacing: -0.45,
-  },
-  driverBottomStatValueSecondary: {
-    color: color.text.secondary,
-    fontFamily: fonts.Medium,
-    fontSize: 15,
-    lineHeight: 19,
-    letterSpacing: -0.1,
-  },
-  driverBottomTripsValue: {
-    marginTop: 0,
-    color: color.text.primary,
-    fontFamily: fonts.Bold,
-    fontSize: 36,
-    lineHeight: 38,
-    letterSpacing: -0.6,
-  },
-  driverBottomSlider: {
-    minHeight: 68,
-    borderRadius: 28,
-    borderWidth: 1,
-    overflow: "hidden",
+  driverGoalPercentPill: {
+    minWidth: 42,
+    height: 20,
+    borderRadius: 999,
+    paddingHorizontal: 8,
     alignItems: "center",
     justifyContent: "center",
-    position: "relative",
-    paddingHorizontal: 72,
+    backgroundColor: DRIVER_HOME_COLOR.leafLight,
+    borderWidth: 1,
+    borderColor: DRIVER_HOME_COLOR.line,
   },
-  driverBottomSliderOffline: {
-    backgroundColor: "#D7DCE3",
-    borderColor: "#C8D0DA",
+  driverGoalPercentText: {
+    color: DRIVER_HOME_COLOR.leaf,
+    fontFamily: fonts.SemiBold,
+    fontSize: 10,
+    lineHeight: 13,
+  },
+  driverBottomStatValuePrimary: {
+    color: DRIVER_HOME_COLOR.text,
+    fontFamily: fonts.SemiBold,
+    fontSize: 26,
+    lineHeight: 32,
+    marginTop: 0,
+    maxWidth: 128,
+  },
+  driverBottomStatValueSecondary: {
+    color: DRIVER_HOME_COLOR.secondary,
+    fontFamily: fonts.Medium,
+    fontSize: 13,
+    lineHeight: 20,
+    flexShrink: 0,
+  },
+  driverGoalValueRow: {
+    marginTop: 2,
+    flexDirection: "row",
+    alignItems: "flex-end",
+    maxWidth: "100%",
+  },
+  driverGoalProgressTrack: {
+    width: "100%",
+    height: 5,
+    borderRadius: 999,
+    overflow: "hidden",
+    backgroundColor: DRIVER_HOME_COLOR.line,
+    marginTop: 8,
+  },
+  driverGoalProgressFill: {
+    height: "100%",
+    borderRadius: 999,
+    backgroundColor: DRIVER_HOME_COLOR.leaf,
+  },
+  driverGoalProgressCaption: {
+    marginTop: 5,
+    color: DRIVER_HOME_COLOR.secondary,
+    fontFamily: fonts.Medium,
+    fontSize: 10.5,
+    lineHeight: 14,
+  },
+  driverStreakInline: {
+    marginTop: 8,
+    minHeight: 22,
+    borderRadius: 999,
+    paddingHorizontal: 9,
+    paddingVertical: 4,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+    backgroundColor: "rgba(248,245,239,0.88)",
+    borderWidth: 1,
+    borderColor: "rgba(233,226,216,0.86)",
+  },
+  driverStreakInlineText: {
+    flexShrink: 1,
+    color: DRIVER_HOME_COLOR.warningText,
+    fontFamily: fonts.SemiBold,
+    fontSize: 10.5,
+    lineHeight: 13,
+  },
+  driverSideStatValue: {
+    marginTop: 0,
+    color: DRIVER_HOME_COLOR.text,
+    fontFamily: fonts.SemiBold,
+    fontSize: 18,
+    lineHeight: 23,
+    minWidth: 30,
+    textAlign: "left",
+  },
+  driverSideStatLabel: {
+    color: DRIVER_HOME_COLOR.muted,
+    fontFamily: fonts.Medium,
+    fontSize: 10.5,
+    lineHeight: 14,
+    textAlign: "left",
+  },
+  driverBottomDivider: {
+    height: StyleSheet.hairlineWidth,
+    backgroundColor: DRIVER_HOME_COLOR.line,
+    marginTop: 6,
+    marginBottom: 15,
+  },
+  driverBottomActions: {
+    marginTop: 0,
+    flexDirection: "row",
+    gap: 10,
+  },
+  driverBottomSlider: {
+    flex: 1,
+    height: 56,
+    borderRadius: 28,
+    borderWidth: 1,
+    borderColor: "#CFD8CD",
+    backgroundColor: "#F2F4EF",
+    alignItems: "center",
+    justifyContent: "center",
+    overflow: "hidden",
+    paddingHorizontal: 64,
   },
   driverBottomSliderOnline: {
-    backgroundColor: color.accent.primary,
-    borderColor: color.accent.primary,
+    backgroundColor: DRIVER_HOME_COLOR.leaf,
+    borderColor: DRIVER_HOME_COLOR.leaf,
   },
-  driverBottomSliderDisabled: {
-    backgroundColor: "#D7DCE3",
-    borderColor: "#C8D0DA",
+  driverBottomSliderBlocked: {
+    backgroundColor: "rgba(243,241,234,0.96)",
+    borderColor: "#DDD3BE",
+  },
+  driverBottomSliderPending: {
+    backgroundColor: "rgba(239,244,243,0.96)",
+    borderColor: "#D3DFDD",
   },
   driverBottomSliderText: {
+    color: "#44524A",
     fontFamily: fonts.SemiBold,
-    fontSize: 21,
-    lineHeight: 24,
-    letterSpacing: -0.15,
+    fontSize: 13.5,
+    lineHeight: 19,
+    textAlign: "center",
   },
   driverBottomSliderTextOnline: {
-    color: "rgba(255,255,255,0.96)",
+    color: "#FFFFFF",
   },
-  driverBottomSliderTextOffline: {
-    color: "#44505C",
+  driverBottomSliderTextBlocked: {
+    color: DRIVER_HOME_COLOR.warningText,
+  },
+  driverBottomSliderTextPending: {
+    color: DRIVER_HOME_COLOR.blueText,
   },
   driverBottomSliderThumb: {
     position: "absolute",
-    top: 6,
     left: 6,
-    width: 54,
-    height: 54,
-    borderRadius: 27,
+    top: 5,
+    width: 46,
+    height: 46,
+    borderRadius: 23,
     alignItems: "center",
     justifyContent: "center",
+    backgroundColor: DRIVER_HOME_COLOR.text,
     shadowColor: "#0F172A",
     shadowOpacity: 0.14,
-    shadowRadius: 10,
-    shadowOffset: { width: 0, height: 5 },
-    elevation: 5,
-  },
-  driverBottomSliderThumbOffline: {
-    backgroundColor: "#314052",
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 4,
   },
   driverBottomSliderThumbOnline: {
-    backgroundColor: "#134E1F",
+    backgroundColor: "#FFFFFF",
   },
-  driverBottomThumbChevronWrap: {
-    width: 16,
-    height: 16,
+  driverBottomSliderThumbBlocked: {
+    backgroundColor: DRIVER_HOME_COLOR.warningText,
+  },
+  driverBottomSliderThumbPending: {
+    backgroundColor: DRIVER_HOME_COLOR.blueText,
+  },
+  driverPreferencesAction: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    borderWidth: 1,
+    borderColor: "#CFD8CD",
+    backgroundColor: DRIVER_HOME_COLOR.sheet,
     alignItems: "center",
     justifyContent: "center",
-  },
-  driverBottomThumbChevronTop: {
-    position: "absolute",
-    width: 11,
-    height: 2.5,
-    borderRadius: 2,
-    backgroundColor: "rgba(255,255,255,0.96)",
-    transform: [{ rotate: "45deg" }],
-    top: 4,
-    left: 3,
-  },
-  driverBottomThumbChevronBottom: {
-    position: "absolute",
-    width: 11,
-    height: 2.5,
-    borderRadius: 2,
-    backgroundColor: "rgba(255,255,255,0.96)",
-    transform: [{ rotate: "-45deg" }],
-    bottom: 4,
-    left: 3,
-  },
-  driverBottomThumbCheckWrap: {
-    width: 18,
-    height: 18,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  driverBottomThumbCheckStem: {
-    position: "absolute",
-    width: 7,
-    height: 2.8,
-    borderRadius: 2,
-    backgroundColor: "rgba(255,255,255,0.96)",
-    transform: [{ rotate: "45deg" }],
-    left: 2,
-    top: 9,
-  },
-  driverBottomThumbCheckArm: {
-    position: "absolute",
-    width: 12,
-    height: 2.8,
-    borderRadius: 2,
-    backgroundColor: "rgba(255,255,255,0.96)",
-    transform: [{ rotate: "-45deg" }],
-    left: 6,
-    top: 7,
   },
   modalOverlay: {
     flex: 1,
@@ -488,14 +1086,181 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingVertical: 14,
   },
+  summaryCard: {
+    width: "100%",
+    maxWidth: 430,
+    borderRadius: 24,
+    borderWidth: 1,
+    borderColor: "rgba(207,216,205,0.92)",
+    backgroundColor: DRIVER_HOME_COLOR.sheet,
+    paddingHorizontal: 16,
+    paddingVertical: 16,
+    shadowColor: "#000000",
+    shadowOffset: { width: 0, height: 18 },
+    shadowOpacity: 0.16,
+    shadowRadius: 26,
+    elevation: Platform.OS === "android" ? 0 : 14,
+  },
+  summaryHero: {
+    paddingBottom: 12,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: DRIVER_HOME_COLOR.line,
+  },
+  summaryEyebrow: {
+    color: DRIVER_HOME_COLOR.muted,
+    fontFamily: fonts.SemiBold,
+    fontSize: 11,
+    lineHeight: 15,
+    textTransform: "uppercase",
+    letterSpacing: 0,
+  },
+  summaryTitle: {
+    marginTop: 4,
+    color: DRIVER_HOME_COLOR.text,
+    fontFamily: fonts.SemiBold,
+    fontSize: 24,
+    lineHeight: 30,
+  },
+  summarySubtitle: {
+    marginTop: 4,
+    color: DRIVER_HOME_COLOR.secondary,
+    fontFamily: fonts.Regular,
+    fontSize: 13,
+    lineHeight: 18,
+  },
+  summaryMetricsRow: {
+    marginTop: 14,
+    flexDirection: "row",
+    gap: 10,
+  },
+  summaryMetric: {
+    flex: 1,
+    minHeight: 76,
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: DRIVER_HOME_COLOR.line,
+    backgroundColor: DRIVER_HOME_COLOR.leafLight,
+    paddingHorizontal: 12,
+    paddingVertical: 11,
+    justifyContent: "space-between",
+  },
+  summaryMetricLabel: {
+    color: DRIVER_HOME_COLOR.muted,
+    fontFamily: fonts.Medium,
+    fontSize: 11,
+    lineHeight: 15,
+  },
+  summaryMetricValue: {
+    color: DRIVER_HOME_COLOR.text,
+    fontFamily: fonts.SemiBold,
+    fontSize: 20,
+    lineHeight: 25,
+  },
+  summaryComparison: {
+    marginTop: 12,
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: DRIVER_HOME_COLOR.line,
+    backgroundColor: DRIVER_HOME_COLOR.sheet,
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+    flexDirection: "row",
+    gap: 10,
+  },
+  summaryComparisonIcon: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: DRIVER_HOME_COLOR.leafLight,
+  },
+  summaryComparisonCopy: {
+    flex: 1,
+    minWidth: 0,
+  },
+  summaryComparisonTitle: {
+    color: DRIVER_HOME_COLOR.text,
+    fontFamily: fonts.SemiBold,
+    fontSize: 13,
+    lineHeight: 18,
+  },
+  summaryComparisonText: {
+    marginTop: 3,
+    color: DRIVER_HOME_COLOR.secondary,
+    fontFamily: fonts.Regular,
+    fontSize: 12,
+    lineHeight: 17,
+  },
+  summaryComparisonDelta: {
+    marginTop: 5,
+    color: DRIVER_HOME_COLOR.leaf,
+    fontFamily: fonts.SemiBold,
+    fontSize: 12,
+    lineHeight: 16,
+  },
+  summaryComparisonDeltaMuted: {
+    color: DRIVER_HOME_COLOR.warningText,
+  },
+  summaryStreakCard: {
+    marginTop: 12,
+    minHeight: 68,
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: "rgba(236,220,199,0.96)",
+    backgroundColor: "rgba(248,245,239,0.82)",
+    paddingHorizontal: 12,
+    paddingVertical: 11,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+  },
+  summaryStreakBadge: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: DRIVER_HOME_COLOR.text,
+  },
+  summaryStreakNumber: {
+    color: "#FFFFFF",
+    fontFamily: fonts.SemiBold,
+    fontSize: 18,
+    lineHeight: 23,
+  },
+  summaryStreakCopy: {
+    flex: 1,
+    minWidth: 0,
+  },
+  summaryStreakTitle: {
+    color: DRIVER_HOME_COLOR.text,
+    fontFamily: fonts.SemiBold,
+    fontSize: 13,
+    lineHeight: 18,
+  },
+  summaryStreakText: {
+    marginTop: 2,
+    color: DRIVER_HOME_COLOR.secondary,
+    fontFamily: fonts.Regular,
+    fontSize: 12,
+    lineHeight: 17,
+  },
   modalTitle: {
     color: color.text.primary,
     fontFamily: fonts.SemiBold,
     fontSize: 18,
     lineHeight: 22,
   },
+  modalLabel: {
+    marginTop: 14,
+    color: color.text.secondary,
+    fontFamily: fonts.Medium,
+    fontSize: 11,
+    lineHeight: 15,
+  },
   modalInput: {
-    marginTop: 10,
+    marginTop: 8,
     minHeight: 46,
     borderRadius: 12,
     borderWidth: 1,
@@ -505,6 +1270,63 @@ const styles = StyleSheet.create({
     color: color.text.primary,
     fontFamily: fonts.Medium,
     fontSize: 15,
+  },
+  modalInputDisabled: {
+    opacity: 0.54,
+  },
+  destinationModeRow: {
+    marginTop: 14,
+    paddingTop: 13,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: color.border.subtle,
+    minHeight: 58,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 12,
+  },
+  destinationModeCopy: {
+    flex: 1,
+    minWidth: 0,
+  },
+  destinationModeTitle: {
+    color: color.text.primary,
+    fontFamily: fonts.SemiBold,
+    fontSize: 13,
+    lineHeight: 18,
+  },
+  destinationModeSubtitle: {
+    marginTop: 2,
+    color: color.text.secondary,
+    fontFamily: fonts.Regular,
+    fontSize: 11,
+    lineHeight: 15,
+  },
+  destinationModeActiveHint: {
+    marginTop: 8,
+    color: DRIVER_HOME_COLOR.secondary,
+    fontFamily: fonts.Regular,
+    fontSize: 11,
+    lineHeight: 15,
+  },
+  destinationModeSwitch: {
+    width: 42,
+    height: 24,
+    borderRadius: 12,
+    padding: 3,
+    backgroundColor: "#DFE8E1",
+  },
+  destinationModeSwitchActive: {
+    backgroundColor: DRIVER_HOME_COLOR.leaf,
+  },
+  destinationModeSwitchKnob: {
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    backgroundColor: "#FFFFFF",
+  },
+  destinationModeSwitchKnobActive: {
+    transform: [{ translateX: 18 }],
   },
   modalActions: {
     marginTop: 12,

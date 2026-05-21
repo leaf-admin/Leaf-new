@@ -123,6 +123,11 @@ function registerHttpRoutes({ app, logStructured, io = null }) {
     app.use('/api/programs/referrals', referralProgramsRoutes);
     logStructured('info', 'Rotas de Programas de Convites registradas', { service: 'server' });
 
+    // Rotas Campaign Center (campanhas in-app controladas pelo dashboard)
+    const campaignCenterRoutes = require('../routes/campaign-center');
+    app.use('/api/campaign-center', campaignCenterRoutes);
+    logStructured('info', 'Rotas de Campaign Center registradas', { service: 'server' });
+
     // Rotas Dashboard
     app.use('/', dashboardRoutes);
     logStructured('info', 'Rotas Dashboard registradas', { service: 'server' });
@@ -130,6 +135,11 @@ function registerHttpRoutes({ app, logStructured, io = null }) {
     // Rotas de Pricing
     app.use('/api', pricingRoutes);
     logStructured('info', 'Rotas de Pricing registradas', { service: 'server' });
+
+    // Rotas de previsão de demanda e smart push
+    const demandPredictionRoutes = require('../routes/demand-predictions');
+    app.use('/api/demand', demandPredictionRoutes);
+    logStructured('info', 'Rotas de previsão de demanda registradas', { service: 'server' });
 
     // Rotas de Métricas
     app.use('/', metricsRoutes);

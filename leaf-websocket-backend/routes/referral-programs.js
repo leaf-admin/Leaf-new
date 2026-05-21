@@ -1,7 +1,7 @@
 const express = require('express');
 const admin = require('firebase-admin');
 const { authenticateJWT, requireRole } = require('../middleware/jwt-auth');
-const { logError } = require('../utils/logger');
+const { logError, logStructured } = require('../utils/logger');
 const referralProgramStateService = require('../services/referral-program-state-service');
 const {
   isLaunchFeatureEnabled,
@@ -33,6 +33,27 @@ function respondReferralProgramsDisabled(res) {
     buildLaunchFeatureDisabledPayload(
       'referral_programs',
       'Programa de convites esta desativado neste perfil de lancamento'
+    )
+  );
+}
+
+function requireAdminMutationsEnabled(req, res, next) {
+  if (isLaunchFeatureEnabled('adminMutationsEnabled', true)) {
+    return next();
+  }
+
+  logStructured('warn', 'Mutacao admin de referral bloqueada por feature flag', {
+    service: 'referral-programs',
+    operation: 'admin-mutation-guard',
+    path: req.originalUrl || req.url,
+    adminUserId: req.user?.id || null,
+    adminRole: req.user?.role || null
+  });
+
+  return res.status(503).json(
+    buildLaunchFeatureDisabledPayload(
+      'admin_mutations',
+      'Mutacoes administrativas estao desativadas neste perfil de lancamento'
     )
   );
 }
@@ -327,7 +348,7 @@ router.get('/config', authenticateJWT, requireRole(ADMIN_ROLES), async (req, res
   }
 });
 
-router.patch('/config', authenticateJWT, requireRole(ADMIN_ROLES), async (req, res) => {
+router.patch('/config', authenticateJWT, requireRole(ADMIN_ROLES), requireAdminMutationsEnabled, async (req, res) => {
   try {
     const current = await loadProgramConfig();
     const payload = req.body || {};
@@ -378,7 +399,7 @@ router.get('/campaigns', authenticateJWT, requireRole(ADMIN_ROLES), async (_req,
   }
 });
 
-router.post('/campaigns', authenticateJWT, requireRole(ADMIN_ROLES), async (req, res) => {
+router.post('/campaigns', authenticateJWT, requireRole(ADMIN_ROLES), requireAdminMutationsEnabled, async (req, res) => {
   try {
     const {
       name,
@@ -424,7 +445,7 @@ router.post('/campaigns', authenticateJWT, requireRole(ADMIN_ROLES), async (req,
   }
 });
 
-router.patch('/campaigns/:campaignId', authenticateJWT, requireRole(ADMIN_ROLES), async (req, res) => {
+router.patch('/campaigns/:campaignId', authenticateJWT, requireRole(ADMIN_ROLES), requireAdminMutationsEnabled, async (req, res) => {
   try {
     const campaignId = normalizeIdentifier(req.params.campaignId);
     if (!campaignId) {
@@ -692,7 +713,7 @@ router.post('/invites/accept', ensureUserFromFirebaseToken, async (req, res) => 
   }
 });
 
-router.post('/invites/driver/evaluate', authenticateJWT, requireRole(ADMIN_ROLES), async (req, res) => {
+router.post('/invites/driver/evaluate', authenticateJWT, requireRole(ADMIN_ROLES), requireAdminMutationsEnabled, async (req, res) => {
   try {
     const inviteId = normalizeIdentifier(req.body?.inviteId);
     if (!inviteId) {

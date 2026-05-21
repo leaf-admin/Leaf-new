@@ -30,6 +30,7 @@ import { useResponsiveLayout } from '../components/ResponsiveLayout';
 import { signOff } from '../services/runtime/profileActionsBridge';
 import robotaxiPrototypeTokens from '../components/design-system/robotaxiPrototypeTokens';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import SecurePaymentBadge from '../components/payment/SecurePaymentBadge';
 
 const { color, typography } = robotaxiPrototypeTokens;
 
@@ -768,6 +769,7 @@ export default function ProfileScreen({ navigation }) {
                                     autoCapitalize="none"
                                     autoCorrect={false}
                                 />
+                                <SecurePaymentBadge style={styles.withdrawSecurePaymentBadge} color={isDarkMode ? '#A9B8AD' : '#6E7D72'} />
                                 {/* Checkbox para salvar chave PIX */}
                                 <View style={styles.savePixKeyContainer}>
                                     <Switch
@@ -938,6 +940,7 @@ export default function ProfileScreen({ navigation }) {
                                         {pixKey}
                                     </Text>
                                 </View>
+                                <SecurePaymentBadge style={styles.confirmSecurePaymentBadge} color={isDarkMode ? '#A9B8AD' : '#6E7D72'} />
                             </View>
 
                             <TouchableOpacity
@@ -1546,6 +1549,14 @@ const styles = StyleSheet.create({
         fontFamily: fonts.Regular,
         color: '#FF9800',
         marginLeft: 6,
+    },
+    withdrawSecurePaymentBadge: {
+        marginTop: 7,
+        marginLeft: 2,
+    },
+    confirmSecurePaymentBadge: {
+        marginTop: 8,
+        alignSelf: 'flex-end',
     },
     savePixKeyContainer: {
         flexDirection: 'row',

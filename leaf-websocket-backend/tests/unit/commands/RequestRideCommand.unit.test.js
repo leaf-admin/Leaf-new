@@ -397,4 +397,48 @@ describe('RequestRideCommand', () => {
       paymentStatus: 'pending_payment'
     }));
   });
+
+  test('deve enviar preferencias da corrida como objeto para persistencia no Redis', async () => {
+    const command = new RequestRideCommand({
+      customerId: 'customer_123',
+      pickupLocation: { lat: -22.9, lng: -43.17 },
+      destinationLocation: { lat: -22.91, lng: -43.18 },
+      estimatedFare: 17,
+      routeDistanceKm: 5,
+      routeDurationSecs: 780,
+      tollFee: 0,
+      carType: 'Leaf Plus',
+      paymentMethod: 'pix',
+      preferences: {
+        leafDelas: true,
+        temperature: 'cool',
+        conversation: 'quiet'
+      }
+    });
+
+    const result = await command.execute();
+
+    expect(result.success).toBe(true);
+    expect(rideQueueManager.enqueueRide).toHaveBeenCalledWith(
+      expect.objectContaining({
+        preferences: {
+          leafDelas: true,
+          temperature: 'cool',
+          conversation: 'quiet'
+        },
+        femaleDriverOnly: true
+      }),
+      expect.objectContaining({
+        deferEventSourcing: true
+      })
+    );
+    expect(result.data.bookingData).toEqual(expect.objectContaining({
+      preferences: {
+        leafDelas: true,
+        temperature: 'cool',
+        conversation: 'quiet'
+      },
+      femaleDriverOnly: true
+    }));
+  });
 });

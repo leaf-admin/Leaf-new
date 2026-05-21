@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import ProtectedRoute from "@/src/components/ProtectedRoute";
 import AppNav from "@/src/components/AppNav";
@@ -8,7 +9,6 @@ import { leafAPI } from "@/src/services/api";
 import KpiCard from "@/src/components/ui/KpiCard";
 import Panel from "@/src/components/ui/Panel";
 import { ErrorText, LoadingState } from "@/src/components/ui/PageFeedback";
-import { KeyValueGrid, TechnicalDetails } from "@/src/components/ui/DataViews";
 
 const periodMap = {
   "24h": "today",
@@ -18,27 +18,179 @@ const periodMap = {
 };
 const DASHBOARD_REFRESH_MS = 120000;
 
+function get(obj, path, fallback = null) {
+  if (!obj || !path) return fallback;
+  return path.split(".").reduce((acc, key) => (acc && acc[key] !== undefined ? acc[key] : undefined), obj) ?? fallback;
+}
+
+function formatPercent(value) {
+  if (value === null || value === undefined || Number.isNaN(Number(value))) return "-";
+  return `${(Number(value) * 100).toFixed(1)}%`;
+}
+
+function formatMinutes(value) {
+  if (value === null || value === undefined || Number.isNaN(Number(value))) return "-";
+  return `${Number(value).toFixed(1)} min`;
+}
+
+function formatDecimal(value) {
+  if (value === null || value === undefined || Number.isNaN(Number(value))) return "-";
+  return Number(value).toFixed(2);
+}
+
 function brl(value) {
-  return `R$ ${Number(value || 0).toLocaleString("pt-BR", { minimumFractionDigits: 2 })}`;
+  if (value === null || value === undefined || Number.isNaN(Number(value))) return "-";
+  return `R$ ${Number(value).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
+
+function toneGte(value, target) {
+  if (value === null || value === undefined || Number.isNaN(Number(value))) return "warning";
+  return Number(value) >= target ? "positive" : "danger";
+}
+
+function toneLte(value, target) {
+  if (value === null || value === undefined || Number.isNaN(Number(value))) return "warning";
+  return Number(value) <= target ? "positive" : "danger";
+}
+
+function worstTone(...tones) {
+  if (tones.includes("danger")) return "danger";
+  if (tones.includes("warning")) return "warning";
+  if (tones.includes("positive")) return "positive";
+  return "default";
+}
+
+function buildMainSignals(data) {
+  const d30 = get(data, "metrics.growth.driverRetentionD30");
+  const d60 = get(data, "metrics.growth.driverRetentionD60");
+  const ridesPerDriver = get(data, "metrics.drivers.ridesPerDriverPerDay");
+  const cpa = get(data, "metrics.financial.driverAcquisitionCost");
+  const activation = get(data, "metrics.growth.driverActivationRate");
+  const supportResponse = get(data, "metrics.support.averageFirstResponseMinutes");
+  const churn = get(data, "metrics.growth.driverChurnRate");
+
+  return [
+    {
+      id: "retention",
+      title: "Retenção D30 / D60",
+      value: `${formatPercent(d30)} / ${formatPercent(d60)}`,
+      subtitle: "Meta: 65% / 55%",
+      tone: worstTone(toneGte(d30, 0.65), toneGte(d60, 0.55)),
+    },
+    {
+      id: "ridesPerDriver",
+      title: "Corridas por motorista",
+      value: formatDecimal(ridesPerDriver),
+      subtitle: "Meta: >= 10 por dia",
+      tone: toneGte(ridesPerDriver, 10),
+    },
+    {
+      id: "cpa",
+      title: "CPA motorista",
+      value: brl(cpa),
+      subtitle: "Verba / novos motoristas",
+      tone: cpa == null ? "warning" : "default",
+    },
+    {
+      id: "activation",
+      title: "Taxa de ativação",
+      value: formatPercent(activation),
+      subtitle: "Primeira corrida em até 7 dias",
+      tone: toneGte(activation, 0.7),
+    },
+    {
+      id: "support",
+      title: "1ª resposta suporte",
+      value: formatMinutes(supportResponse),
+      subtitle: "Meta: <= 30 min",
+      tone: toneLte(supportResponse, 30),
+    },
+    {
+      id: "churn",
+      title: "Churn motorista",
+      value: formatPercent(churn),
+      subtitle: "Meta: <= 15%",
+      tone: toneLte(churn, 0.15),
+    },
+  ];
+}
+
+function buildActionItems(data) {
+  const items = [];
+  const d30 = get(data, "metrics.growth.driverRetentionD30");
+  const d60 = get(data, "metrics.growth.driverRetentionD60");
+  const ridesPerDriver = get(data, "metrics.drivers.ridesPerDriverPerDay");
+  const cpa = get(data, "metrics.financial.driverAcquisitionCost");
+  const activation = get(data, "metrics.growth.driverActivationRate");
+  const supportResponse = get(data, "metrics.support.averageFirstResponseMinutes");
+  const supportOverdue = Number(get(data, "metrics.support.overdueFirstResponseCount", 0) || 0);
+  const churn = get(data, "metrics.growth.driverChurnRate");
+
+  if ((d30 != null && d30 < 0.65) || (d60 != null && d60 < 0.55)) {
+    items.push({
+      label: "Retenção",
+      text: "Acionar recuperação de motorista inativo e medir retorno por coorte.",
+      tone: "status-bad",
+    });
+  }
+
+  if (activation != null && activation < 0.7) {
+    items.push({
+      label: "Onboarding",
+      text: "Priorizar pendências de KYC/documentos e lembretes de primeira corrida.",
+      tone: "status-bad",
+    });
+  }
+
+  if (ridesPerDriver != null && ridesPerDriver < 10) {
+    items.push({
+      label: "Oferta",
+      text: "Revisar demanda por zona e disparar smart push somente onde houver pedido ativo.",
+      tone: "status-warn",
+    });
+  }
+
+  if ((supportResponse != null && supportResponse > 30) || supportOverdue > 0) {
+    items.push({
+      label: "Suporte",
+      text: "Destravar fila N1/N2 antes de aumentar volume de aquisição.",
+      tone: "status-bad",
+    });
+  }
+
+  if (churn != null && churn > 0.15) {
+    items.push({
+      label: "Churn",
+      text: "Segmentar motoristas sem corrida recente para campanha de winback.",
+      tone: "status-bad",
+    });
+  }
+
+  if (cpa == null) {
+    items.push({
+      label: "CPA",
+      text: "Configurar verba de aquisição para o painel deixar de mostrar custo desconhecido.",
+      tone: "status-warn",
+    });
+  }
+
+  if (items.length === 0) {
+    items.push({
+      label: "Operação",
+      text: "Sem desvio crítico nos sinais principais do período.",
+      tone: "status-ok",
+    });
+  }
+
+  return items.slice(0, 4);
 }
 
 export default function DashboardPage() {
   const { user, signOut } = useAuth();
   const [period, setPeriod] = useState("24h");
-  const [activityFilter, setActivityFilter] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [model, setModel] = useState({
-    newDrivers: 0,
-    newCustomers: 0,
-    totalRides: 0,
-    ridesRevenue: 0,
-    operationalFee: 0,
-    subscriptionRevenue: 0,
-    reserveFundLosses: 0,
-    revenueEvolution: [],
-    recentActivity: [],
-  });
+  const [marketplace, setMarketplace] = useState(null);
 
   useEffect(() => {
     let mounted = true;
@@ -51,29 +203,9 @@ export default function DashboardPage() {
         }
 
         const apiPeriod = periodMap[period] || "today";
-        const [userStats, ridesData, feeData, subscriptionData, evolutionData, recentActivity] =
-          await Promise.all([
-            leafAPI.getUserStats(period).catch(() => ({})),
-            leafAPI.getRidesStats(apiPeriod).catch(() => ({})),
-            leafAPI.getOperationalFeeStats(apiPeriod).catch(() => ({})),
-            leafAPI.getSubscriptionRevenue("30d").catch(() => ({ revenue: { total: 0 } })),
-            leafAPI.getRevenueEvolution(30).catch(() => []),
-            leafAPI.getRecentActivity().catch(() => ({ activities: [] })),
-          ]);
+        const payload = await leafAPI.getMarketplaceMetrics(apiPeriod);
 
-        if (!mounted) return;
-
-        setModel({
-          newDrivers: Number(userStats?.period?.newDrivers ?? userStats?.newDriversInPeriod ?? 0),
-          newCustomers: Number(userStats?.period?.newCustomers ?? userStats?.newCustomersInPeriod ?? 0),
-          totalRides: ridesData?.totalRides || 0,
-          ridesRevenue: ridesData?.totalValue || 0,
-          operationalFee: feeData?.totalOperationalFee || 0,
-          subscriptionRevenue: subscriptionData?.revenue?.total || subscriptionData?.total || 0,
-          reserveFundLosses: ridesData?.reserveFundLosses || 0,
-          revenueEvolution: Array.isArray(evolutionData) ? evolutionData : evolutionData?.data || [],
-          recentActivity: recentActivity?.activities || recentActivity?.data || [],
-        });
+        if (mounted) setMarketplace(payload);
       } catch (err) {
         if (mounted) setError(err?.message || "Falha ao carregar dashboard");
       } finally {
@@ -89,45 +221,24 @@ export default function DashboardPage() {
     };
   }, [period]);
 
-  const evolutionMax = useMemo(
-    () =>
-      Math.max(
-        1,
-        ...model.revenueEvolution.map((item) =>
-          Number(item?.ridesRevenue || 0) + Number(item?.operationalFee || 0) + Number(item?.subscriptionRevenue || 0),
-        ),
-      ),
-    [model.revenueEvolution],
-  );
-
-  const filteredActivity = useMemo(() => {
-    const term = activityFilter.trim().toLowerCase();
-    const source = Array.isArray(model.recentActivity) ? model.recentActivity : [];
-    if (!term) return source;
-    return source.filter((event) => {
-      const haystack = [
-        event?.timestamp,
-        event?.type,
-        event?.event,
-        event?.description,
-        event?.message,
-      ]
-        .map((item) => String(item || "").toLowerCase())
-        .join(" ");
-      return haystack.includes(term);
-    });
-  }, [model.recentActivity, activityFilter]);
+  const signals = useMemo(() => buildMainSignals(marketplace), [marketplace]);
+  const actions = useMemo(() => buildActionItems(marketplace), [marketplace]);
+  const dangerCount = signals.filter((signal) => signal.tone === "danger").length;
+  const warningCount = signals.filter((signal) => signal.tone === "warning").length;
+  const operationTone = dangerCount > 0 ? "status-bad" : warningCount > 0 ? "status-warn" : "status-ok";
+  const operationLabel = dangerCount > 0 ? "Atenção agora" : warningCount > 0 ? "Monitorar" : "Operação estável";
 
   return (
     <ProtectedRoute>
       <main className="page-shell">
         <header className="header">
           <div>
-            <h1>Dashboard Leaf</h1>
+            <h1>Painel principal</h1>
             <p>Usuario: {user?.email || "n/a"}</p>
           </div>
           <div className="filters">
-            <select value={period} onChange={(e) => setPeriod(e.target.value)}>
+            <span className={operationTone}>{operationLabel}</span>
+            <select value={period} onChange={(event) => setPeriod(event.target.value)}>
               <option value="24h">Ultimas 24h</option>
               <option value="3d">Ultimos 3 dias</option>
               <option value="week">Ultima semana</option>
@@ -145,108 +256,67 @@ export default function DashboardPage() {
         </header>
 
         <AppNav />
-        {loading ? <LoadingState message="Carregando dashboard..." /> : null}
+        {loading ? <LoadingState message="Carregando painel principal..." /> : null}
 
         <section className="grid grid-kpi">
-          <KpiCard title="Novos motoristas" value={model.newDrivers} tone="positive" />
-          <KpiCard title="Novos clientes" value={model.newCustomers} />
-          <KpiCard title="Corridas" value={model.totalRides} />
-          <KpiCard title="Receita corridas" value={brl(model.ridesRevenue)} tone="positive" />
-          <KpiCard title="Taxa operacional" value={brl(model.operationalFee)} />
-          <KpiCard title="Assinaturas" value={brl(model.subscriptionRevenue)} tone="positive" />
-          <KpiCard title="Perdas reserva" value={brl(model.reserveFundLosses)} tone="danger" />
+          {signals.map((signal) => (
+            <KpiCard
+              key={signal.id}
+              title={signal.title}
+              value={signal.value}
+              subtitle={signal.subtitle}
+              tone={signal.tone}
+            />
+          ))}
         </section>
 
         <section className="grid">
-          <Panel title="Evolucao de receita (30 dias)">
-            {model.revenueEvolution.length === 0 ? (
-              <p className="text-muted">Sem dados de evolucao.</p>
-            ) : (
-              <div className="bar-list">
-                {model.revenueEvolution.slice(-10).map((item, idx) => {
-                  const total =
-                    Number(item?.ridesRevenue || 0) +
-                    Number(item?.operationalFee || 0) +
-                    Number(item?.subscriptionRevenue || 0);
-                  const pct = Math.max(0, Math.min((total / evolutionMax) * 100, 100));
-                  return (
-                    <div key={`${item?.date || "d"}-${idx}`} className="bar-item">
-                      <div className="bar-label">
-                        <span>{item?.date || `dia ${idx + 1}`}</span>
-                        <strong>{brl(total)}</strong>
-                      </div>
-                      <div className="bar-track">
-                        <div className="bar-fill bar-default" style={{ width: `${pct}%` }} />
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </Panel>
-
-          <Panel title="Atividade recente" subtitle="Eventos operacionais mais recentes do backend.">
-            <div className="filters">
-              <input
-                placeholder="Filtrar por tipo, descrição ou horário"
-                value={activityFilter}
-                onChange={(e) => setActivityFilter(e.target.value)}
-              />
+          <Panel title="Prioridade operacional">
+            <div className="metric-list">
+              {actions.map((item) => (
+                <div className="row" key={`${item.label}-${item.text}`}>
+                  <div className="label">
+                    <span className={item.tone}>{item.label}</span>
+                  </div>
+                  <div className="value">{item.text}</div>
+                </div>
+              ))}
             </div>
-            {filteredActivity.length === 0 ? (
-              <p className="text-muted">Sem eventos recentes.</p>
-            ) : (
-              <div className="table-shell">
-                <table className="table table-compact">
-                  <thead>
-                    <tr>
-                      <th>Horario</th>
-                      <th>Tipo</th>
-                      <th>Descricao</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {filteredActivity.slice(0, 60).map((event, idx) => (
-                      <tr key={event.id || `${event.timestamp}-${idx}`}>
-                        <td>{event.timestamp ? new Date(event.timestamp).toLocaleString("pt-BR") : "-"}</td>
-                        <td>{event.type || event.event || "-"}</td>
-                        <td>{event.description || event.message || JSON.stringify(event)}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
           </Panel>
 
-          <Panel title="Resumo consolidado">
-            <KeyValueGrid
-              data={{
-                novosMotoristas: model.newDrivers,
-                novosClientes: model.newCustomers,
-                totalCorridas: model.totalRides,
-                receitaCorridas: brl(model.ridesRevenue),
-                taxaOperacional: brl(model.operationalFee),
-                receitaAssinaturas: brl(model.subscriptionRevenue),
-                perdasFundoReserva: brl(model.reserveFundLosses),
-                eventosRecentes: model.recentActivity.length,
-                pontosHistoricoReceita: model.revenueEvolution.length,
-              }}
-              labels={{
-                novosMotoristas: "Novos motoristas",
-                novosClientes: "Novos clientes",
-                totalCorridas: "Total de corridas",
-                receitaCorridas: "Receita de corridas",
-                taxaOperacional: "Taxa operacional",
-                receitaAssinaturas: "Receita de assinaturas",
-                perdasFundoReserva: "Perdas do fundo de reserva",
-                eventosRecentes: "Eventos recentes",
-                pontosHistoricoReceita: "Pontos no histórico",
-              }}
-            />
-            <TechnicalDetails title="Ver payload técnico do dashboard" data={model} />
+          <Panel title="Contexto mínimo">
+            <div className="metric-list">
+              <div className="row">
+                <div className="label">Corridas no período</div>
+                <div className="value">{Number(get(marketplace, "metrics.summary.ridesRequested", 0)).toLocaleString("pt-BR")}</div>
+              </div>
+              <div className="row">
+                <div className="label">Motoristas ativos</div>
+                <div className="value">{Number(get(marketplace, "metrics.drivers.activeDrivers", 0)).toLocaleString("pt-BR")}</div>
+              </div>
+              <div className="row">
+                <div className="label">Receita total</div>
+                <div className="value">{brl(get(marketplace, "metrics.financial.totalRevenue"))}</div>
+              </div>
+              <div className="row">
+                <div className="label">Tickets abertos</div>
+                <div className="value">{Number(get(marketplace, "metrics.support.totalOpenTickets", 0)).toLocaleString("pt-BR")}</div>
+              </div>
+            </div>
           </Panel>
         </section>
+
+        <Panel
+          title="Drill-down"
+          actions={<span className="meta-badge">Dados completos fora da home</span>}
+        >
+          <div className="filters">
+            <Link href="/metrics/marketplace">Marketplace Health</Link>
+            <Link href="/support">Suporte</Link>
+            <Link href="/subscriptions">Cobrança</Link>
+            <Link href="/notifications">Comunicação</Link>
+          </div>
+        </Panel>
 
         <ErrorText message={error} />
       </main>

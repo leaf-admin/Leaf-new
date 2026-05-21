@@ -27,7 +27,7 @@ const normalizePaymentMethods = (rawValue) => {
   }));
 };
 
-export const getPaymentMethods = async (uid) => {
+export const getPaymentMethods = async (uid, options = {}) => {
   try {
     const snapshot = await getPaymentMethodsRef(uid).once('value');
     return normalizePaymentMethods(snapshot.val()).sort((a, b) => {
@@ -36,7 +36,9 @@ export const getPaymentMethods = async (uid) => {
       return bTime - aTime;
     });
   } catch (error) {
-    Logger.error('Erro ao carregar métodos de pagamento:', error);
+    if (!options?.suppressErrorLog) {
+      Logger.error('Erro ao carregar métodos de pagamento:', error);
+    }
     throw error;
   }
 };
@@ -70,4 +72,3 @@ export const removePaymentMethod = async (uid, methodId) => {
     throw error;
   }
 };
-

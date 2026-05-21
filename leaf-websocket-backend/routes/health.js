@@ -8,6 +8,7 @@ const express = require('express');
 const router = express.Router();
 const healthCheckService = require('../services/health-check-service');
 const { logStructured, logError } = require('../utils/logger');
+const { getPilotLaunchFlags } = require('../utils/pilot-launch-flags');
 const TRUTHY_VALUES = new Set(['1', 'true', 'yes', 'on', 'sim']);
 const FALSY_VALUES = new Set(['0', 'false', 'no', 'off', 'nao', 'não']);
 
@@ -86,6 +87,7 @@ function buildRuntimeFlagsPayload() {
       authTestOtpBypassEnabled,
       authReviewOtpBypassEnabled
     },
+    launch: getPilotLaunchFlags(),
     realSandbox: {
       ready: blockers.length === 0,
       blockers

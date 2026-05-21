@@ -464,7 +464,7 @@ const styles = StyleSheet.create({
       buttonTitle: {
         color: colors.WHITE,
         fontSize: 18,
-        fontFamily:'Roboto-Bold'
+        fontFamily: fonts.Bold
       },
       quickMoneyContainer: {
         marginHorizontal: 10,

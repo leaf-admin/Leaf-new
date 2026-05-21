@@ -1,6 +1,7 @@
 import React from "react";
 import {
   ActivityIndicator,
+  Platform,
   StyleSheet,
   Text,
   TextInput,
@@ -49,16 +50,8 @@ export function DestinationInput({
   rightIconAccessibilityLabel,
 }) {
   const handlePress = React.useCallback(() => {
-    if (__DEV__) {
-      console.log("[DestinationInput] press", {
-        testID,
-        accessibilityLabel,
-        value,
-        placeholder,
-      });
-    }
     onPress?.();
-  }, [accessibilityLabel, onPress, placeholder, testID, value]);
+  }, [onPress]);
 
   const trailingIcon = (
     <View
@@ -186,7 +179,7 @@ export function CardHandle() {
 
 const styles = StyleSheet.create({
   card: {
-    backgroundColor: color.bg.panel,
+    backgroundColor: Platform.OS === "android" ? color.bg.panelSolid : color.bg.panel,
     borderRadius: 22,
     borderWidth: 1,
     borderColor: color.border.strong,
@@ -194,7 +187,7 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 18 },
     shadowOpacity: 0.22,
     shadowRadius: 30,
-    elevation: 15,
+    elevation: Platform.OS === "android" ? 0 : 15,
   },
   handle: {
     width: 46,
@@ -281,6 +274,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 18,
     borderWidth: 1,
     borderColor: color.border.strong,
+    minWidth: 0,
   },
   primaryButtonDisabled: {
     opacity: 0.56,
@@ -290,5 +284,6 @@ const styles = StyleSheet.create({
     fontFamily: fonts.SemiBold,
     fontSize: typography.body.size,
     lineHeight: typography.body.lineHeight,
+    flexShrink: 1,
   },
 });

@@ -8,9 +8,15 @@ const DEFAULT_ROUTE = Object.freeze({
 
 let currentRoute = DEFAULT_ROUTE;
 const listeners = new Set();
+let currentCamera = null;
+const cameraListeners = new Set();
 
 function notify() {
   listeners.forEach(listener => listener(currentRoute));
+}
+
+function notifyCamera() {
+  cameraListeners.forEach(listener => listener(currentCamera));
 }
 
 function isCoordinateValid(value) {
@@ -145,5 +151,38 @@ export function subscribePrototypeMapRoute(listener) {
 
   return () => {
     listeners.delete(listener);
+  };
+}
+
+export function publishPrototypeMapCamera(payload) {
+  if (!payload || typeof payload !== 'object') {
+    return;
+  }
+
+  currentCamera = {
+    latitude: Number(payload.latitude),
+    longitude: Number(payload.longitude),
+    latitudeDelta: Number(payload.latitudeDelta),
+    longitudeDelta: Number(payload.longitudeDelta),
+    visibleCenterCoordinate: isCoordinateValid(payload.visibleCenterCoordinate)
+      ? payload.visibleCenterCoordinate
+      : null,
+    source: payload.source || 'camera',
+    updatedAt: payload.updatedAt || Date.now()
+  };
+
+  notifyCamera();
+}
+
+export function subscribePrototypeMapCamera(listener) {
+  if (typeof listener !== 'function') {
+    return () => {};
+  }
+
+  cameraListeners.add(listener);
+  listener(currentCamera);
+
+  return () => {
+    cameraListeners.delete(listener);
   };
 }

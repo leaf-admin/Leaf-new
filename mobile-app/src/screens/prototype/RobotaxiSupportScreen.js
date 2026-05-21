@@ -1,5 +1,5 @@
 import React, { useCallback, useMemo, useState } from 'react';
-import { ActivityIndicator, Alert, StatusBar, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';
+import { ActivityIndicator, Alert, ScrollView, StatusBar, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { fonts } from '../../theme/runtimeTokens';
@@ -49,7 +49,7 @@ function SupportOptionRow({ item, active, onPress, rowTestID, last = false }) {
 }
 
 export default function RobotaxiSupportScreen({ navigation, route }) {
-  const { openSupportTicket, reportIncident, supportLoading, supportError, supportLastTicket, supportLastIncident } =
+  const { reportIncident, supportLoading, supportError, supportLastTicket, supportLastIncident } =
     usePrototypeRideRuntime();
   const insets = useSafeAreaInsets();
   const { height: windowHeight } = useWindowDimensions();
@@ -74,18 +74,13 @@ export default function RobotaxiSupportScreen({ navigation, route }) {
     }
   }, []);
 
-  const handleCreateTicket = useCallback(async () => {
-    try {
-      await openSupportTicket({
-        type: selectedOption.id,
-        priority: 'N3',
-        description: selectedOption.title + ': ' + selectedOption.subtitle,
-      });
-      Alert.alert('Ticket criado', 'Sua solicitacao foi enviada para o suporte.');
-    } catch (error) {
-      Alert.alert('Nao foi possivel abrir ticket', error?.message || 'Tente novamente em instantes.');
-    }
-  }, [openSupportTicket, selectedOption.id, selectedOption.subtitle, selectedOption.title]);
+  const handleCreateTicket = useCallback(() => {
+    navigation.navigate('RobotaxiPrototypeSupportTicket', {
+      type: selectedOption.id,
+      subject: selectedOption.title,
+      description: selectedOption.subtitle,
+    });
+  }, [navigation, selectedOption.id, selectedOption.subtitle, selectedOption.title]);
 
   const handleReportIncident = useCallback(async () => {
     try {
@@ -124,6 +119,7 @@ export default function RobotaxiSupportScreen({ navigation, route }) {
               paddingTop: insets.top + SURFACE_TOP_PADDING,
               paddingBottom: Math.max(insets.bottom, SURFACE_BOTTOM_PADDING),
             }}
+            bodyStyle={styles.body}
             headerAccessory={(
               <PrototypeMenuCloseButton
                 onPress={handleDismiss}
@@ -132,67 +128,73 @@ export default function RobotaxiSupportScreen({ navigation, route }) {
               />
             )}
           >
-            <PrototypeMenuSection title="Assuntos">
-              {SUPPORT_OPTIONS.map((item, index) => (
-                <SupportOptionRow
-                  key={item.id}
-                  item={item}
-                  active={item.id === selectedOptionId}
-                  onPress={() => setSelectedOptionId(item.id)}
-                  rowTestID={`robotaxi-support-option-${item.id}`}
-                  last={index === SUPPORT_OPTIONS.length - 1}
+            <ScrollView
+              showsVerticalScrollIndicator={false}
+              keyboardShouldPersistTaps="handled"
+              contentContainerStyle={styles.content}
+            >
+              <PrototypeMenuSection title="Assuntos">
+                {SUPPORT_OPTIONS.map((item, index) => (
+                  <SupportOptionRow
+                    key={item.id}
+                    item={item}
+                    active={item.id === selectedOptionId}
+                    onPress={() => setSelectedOptionId(item.id)}
+                    rowTestID={`robotaxi-support-option-${item.id}`}
+                    last={index === SUPPORT_OPTIONS.length - 1}
+                  />
+                ))}
+              </PrototypeMenuSection>
+
+              <PrototypeMenuSection title="Canais">
+                <PrototypeMenuRow
+                  icon="chatbubble-ellipses-outline"
+                  title="Falar no chat"
+                  subtitle="Abrir conversa em tempo real com motorista ou suporte."
+                  onPress={() => navigation.replace('RobotaxiPrototypeChat')}
+                  testID="robotaxi-support-open-chat"
+                  accessibilityLabel="robotaxi-support-open-chat"
                 />
-              ))}
-            </PrototypeMenuSection>
+                <PrototypeMenuRow
+                  icon="warning-outline"
+                  title="Abrir reclamacao"
+                  subtitle="Registrar um relato mais completo com evidências."
+                  last
+                  onPress={() => navigation.replace('RobotaxiPrototypeComplain')}
+                  testID="robotaxi-support-open-complain"
+                  accessibilityLabel="robotaxi-support-open-complain"
+                />
+              </PrototypeMenuSection>
 
-            <PrototypeMenuSection title="Canais">
-              <PrototypeMenuRow
-                icon="chatbubble-ellipses-outline"
-                title="Falar no chat"
-                subtitle="Abrir conversa em tempo real com motorista ou suporte."
-                onPress={() => navigation.replace('RobotaxiPrototypeChat')}
-                testID="robotaxi-support-open-chat"
-                accessibilityLabel="robotaxi-support-open-chat"
-              />
-              <PrototypeMenuRow
-                icon="warning-outline"
-                title="Abrir reclamacao"
-                subtitle="Registrar um relato mais completo com evidências."
-                last
-                onPress={() => navigation.replace('RobotaxiPrototypeComplain')}
-                testID="robotaxi-support-open-complain"
-                accessibilityLabel="robotaxi-support-open-complain"
-              />
-            </PrototypeMenuSection>
-
-            <View style={styles.actionsBlock}>
-              <PrototypePrimaryButton
-                label={supportLoading ? 'Enviando...' : 'Registrar incidente'}
-                icon="alert-circle-outline"
-                onPress={supportLoading ? undefined : handleReportIncident}
-                style={styles.primaryButton}
-                testID="robotaxi-support-report-incident"
-                accessibilityLabel="robotaxi-support-report-incident"
-              />
-              <PrototypePrimaryButton
-                label={supportLoading ? 'Enviando...' : 'Abrir ticket'}
-                icon="document-text-outline"
-                onPress={supportLoading ? undefined : handleCreateTicket}
-                style={styles.primaryButton}
-                testID="robotaxi-support-open-ticket"
-                accessibilityLabel="robotaxi-support-open-ticket"
-              />
-            </View>
-
-            {supportLoading ? (
-              <View style={styles.feedbackRow}>
-                <ActivityIndicator size="small" color={color.accent.primary} />
-                <Text style={styles.feedbackText}>Sincronizando com suporte...</Text>
+              <View style={styles.actionsBlock}>
+                <PrototypePrimaryButton
+                  label={supportLoading ? 'Enviando...' : 'Registrar incidente'}
+                  icon="alert-circle-outline"
+                  onPress={supportLoading ? undefined : handleReportIncident}
+                  style={styles.primaryButton}
+                  testID="robotaxi-support-report-incident"
+                  accessibilityLabel="robotaxi-support-report-incident"
+                />
+                <PrototypePrimaryButton
+                  label={supportLoading ? 'Enviando...' : 'Abrir ticket'}
+                  icon="document-text-outline"
+                  onPress={supportLoading ? undefined : handleCreateTicket}
+                  style={styles.primaryButton}
+                  testID="robotaxi-support-open-ticket"
+                  accessibilityLabel="robotaxi-support-open-ticket"
+                />
               </View>
-            ) : null}
-            {supportLastTicket?.id ? <Text style={styles.feedbackText}>Ticket recente: #{supportLastTicket.id}</Text> : null}
-            {supportLastIncident?.id ? <Text style={styles.feedbackText}>Incidente recente: #{supportLastIncident.id}</Text> : null}
-            {supportError ? <Text style={styles.errorText}>{supportError}</Text> : null}
+
+              {supportLoading ? (
+                <View style={styles.feedbackRow}>
+                  <ActivityIndicator size="small" color={color.accent.primary} />
+                  <Text style={styles.feedbackText}>Sincronizando com suporte...</Text>
+                </View>
+              ) : null}
+              {supportLastTicket?.id ? <Text style={styles.feedbackText}>Ticket recente: #{supportLastTicket.id}</Text> : null}
+              {supportLastIncident?.id ? <Text style={styles.feedbackText}>Incidente recente: #{supportLastIncident.id}</Text> : null}
+              {supportError ? <Text style={styles.errorText}>{supportError}</Text> : null}
+            </ScrollView>
           </PrototypeMenuSurface>
         </PrototypeDismissibleSheet>
       </View>
@@ -207,6 +209,14 @@ const styles = StyleSheet.create({
   },
   sheetWrap: {
     ...StyleSheet.absoluteFillObject,
+  },
+  body: {
+    flex: 1,
+  },
+  content: {
+    paddingTop: 18,
+    paddingBottom: 34,
+    gap: 18,
   },
   optionRow: {
     minHeight: 58,

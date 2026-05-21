@@ -280,6 +280,10 @@ function registerSocketCreateBookingHandler({
                         paymentMethod
                     } = validation.sanitized;
                     const customerId = authCustomerId || sanitizedCustomerId;
+                    const ridePreferences =
+                        data?.preferences && typeof data.preferences === 'object'
+                            ? { ...data.preferences }
+                            : {};
                     const customerActiveBookingKey = customerId
                         ? `customer_active_booking:${customerId}`
                         : null;
@@ -827,6 +831,8 @@ function registerSocketCreateBookingHandler({
                     scheduleCreateBookingAvailabilityPrecheck({
                         hasConfirmedPayment,
                         pickupLocation,
+                        destinationLocation,
+                        preferences: ridePreferences,
                         requestedCarType,
                         checkAvailability: findAvailableDriversForPickup,
                         logStructured,
@@ -888,6 +894,7 @@ function registerSocketCreateBookingHandler({
                             paymentStatus: normalizedPaymentStatus,
                             paymentId: paymentChargeId || data?.paymentId || null,
                             paymentData: commandPaymentData,
+                            preferences: ridePreferences,
                             pricingContext: data.pricingContext || data.operational || null,
                             traceId, // ✅ Passar traceId para o command
                             correlationId // ✅ Passar correlationId para o command

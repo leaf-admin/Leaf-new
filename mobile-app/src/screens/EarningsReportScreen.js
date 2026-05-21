@@ -27,6 +27,7 @@ import { LoadingSpinner } from '../components/LoadingStates';
 import robotaxiPrototypeTokens from '../components/design-system/robotaxiPrototypeTokens';
 import PrototypeDismissibleSheet from '../components/prototype/PrototypeDismissibleSheet';
 import PrototypeScreenTransition from '../components/prototype/PrototypeScreenTransition';
+import SecurePaymentBadge from '../components/payment/SecurePaymentBadge';
 import {
   PrototypeMenuCloseButton,
   PrototypeMenuInfoRow,
@@ -345,6 +346,7 @@ export default function EarningsReportScreen({ navigation, route }) {
   const [withdrawPassword, setWithdrawPassword] = useState('');
   const [withdrawError, setWithdrawError] = useState('');
   const [isProcessingWithdraw, setIsProcessingWithdraw] = useState(false);
+  const [withdrawProcessingSummary, setWithdrawProcessingSummary] = useState(null);
 
   const [showWithdrawKYCModal, setShowWithdrawKYCModal] = useState(false);
   const [withdrawKycReason, setWithdrawKycReason] = useState('');
@@ -578,6 +580,10 @@ export default function EarningsReportScreen({ navigation, route }) {
   }
 
   function finalizeWithdrawalSuccess(result, amount, fee, totalDebit) {
+    const settlementToShow = toNumber(result.subscriptionSettlementInReais, 0);
+    const totalToShow = toNumber(result.totalDebitInReais, totalDebit);
+    const pixKeyToShow = String(pendingWithdrawalPayload?.pixKey || pixKey || result?.pixKey || '').trim();
+
     setWithdrawModalVisible(false);
     setShowWithdrawKYCModal(false);
     setWithdrawValue('');
@@ -603,15 +609,13 @@ export default function EarningsReportScreen({ navigation, route }) {
       };
     });
 
-    const settlementToShow = toNumber(result.subscriptionSettlementInReais, 0);
-    const totalToShow = toNumber(result.totalDebitInReais, totalDebit);
-
-    Alert.alert(
-      'Saque solicitado',
-      `Valor: R$ ${formatCurrency(amount)}\nTaxa: R$ ${formatCurrency(fee)}${
-        settlementToShow > 0 ? `\nAssinatura pendente: R$ ${formatCurrency(settlementToShow)}` : ''
-      }\nDébito total: R$ ${formatCurrency(totalToShow)}`
-    );
+    setWithdrawProcessingSummary({
+      amount,
+      fee,
+      totalDebit: totalToShow,
+      subscriptionSettlement: settlementToShow,
+      pixKey: pixKeyToShow || 'PIX cadastrado'
+    });
   }
 
   function mapKycRequirementMessage(requirement) {
@@ -930,6 +934,8 @@ export default function EarningsReportScreen({ navigation, route }) {
   }, [barSeries, chartInnerHeight, chartInnerWidth]);
 
   const withdrawDisabled = !withdrawValue || !pixKey || !withdrawPassword || !!withdrawError || isProcessingWithdraw;
+  const currentWithdrawAmount = toNumber(String(withdrawValue).replace(',', '.'), 0);
+  const currentWithdrawBreakdown = getWithdrawCostBreakdown(currentWithdrawAmount);
   const screenBackground = isDarkMode ? '#0C131F' : '#E7EAEA';
   const cardSurface = isDarkMode ? 'rgba(21,31,46,0.9)' : 'rgba(240,243,242,0.92)';
   const cardBorder = isDarkMode ? 'rgba(151,171,198,0.22)' : 'rgba(129,140,145,0.18)';
@@ -1040,295 +1046,463 @@ export default function EarningsReportScreen({ navigation, route }) {
     setActiveFilterKey('d30');
   }
 
+  if (withdrawProcessingSummary) {
+    return (
+      <PrototypeScreenTransition>
+        <View
+          style={[styles.cleanScreen, { paddingTop: Math.max(insets.top + 26, 58), paddingBottom: Math.max(insets.bottom, 18) }]}
+          onLayout={handlePanelLayout}
+          testID="driver-earnings-withdraw-processing"
+          accessibilityLabel="driver-earnings-withdraw-processing"
+        >
+          <StatusBar translucent backgroundColor="transparent" barStyle="dark-content" />
+
+          <View style={styles.cleanHeaderRow}>
+            <TouchableOpacity
+              style={styles.cleanBackHit}
+              activeOpacity={0.76}
+              onPress={() => setWithdrawProcessingSummary(null)}
+              testID="driver-earnings-withdraw-back-button"
+              accessibilityLabel="driver-earnings-withdraw-back-button"
+            >
+              <Text style={styles.cleanBackText}>{'<'}</Text>
+            </TouchableOpacity>
+            <Text style={styles.cleanHeaderTitle}>Saque em processamento</Text>
+          </View>
+          <Text style={styles.cleanHeaderSubtitle}>Estamos preparando o envio via PIX.</Text>
+
+          <View style={styles.processingPulse}>
+            <View style={styles.processingPulseInner}>
+              <View style={[styles.processingDot, styles.processingDotStrong]} />
+              <View style={styles.processingDot} />
+              <View style={styles.processingDotMuted} />
+            </View>
+          </View>
+
+          <Text style={styles.processingTitle}>Solicitação enviada</Text>
+          <Text style={styles.processingSubtitle}>
+            Seu saque entrou na fila. Avisaremos quando o PIX for concluído.
+          </Text>
+
+          <View style={styles.cleanSection}>
+            <Text style={styles.cleanSectionTitle}>Detalhes</Text>
+            <View style={styles.cleanDivider} />
+            <View style={styles.cleanSummaryRow}>
+              <Text style={styles.cleanSummaryLabel}>Valor do saque</Text>
+              <Text style={styles.cleanSummaryValue}>R$ {formatCurrency(withdrawProcessingSummary.amount)}</Text>
+            </View>
+            <View style={styles.cleanHairline} />
+            <View style={styles.cleanSummaryRow}>
+              <Text style={styles.cleanSummaryMuted}>Tarifa</Text>
+              <Text style={styles.cleanSummaryMutedValue}>R$ {formatCurrency(withdrawProcessingSummary.fee)}</Text>
+            </View>
+            {withdrawProcessingSummary.subscriptionSettlement > 0 ? (
+              <>
+                <View style={styles.cleanHairline} />
+                <View style={styles.cleanSummaryRow}>
+                  <Text style={styles.cleanSummaryMuted}>Assinatura pendente</Text>
+                  <Text style={styles.cleanSummaryMutedValue}>
+                    R$ {formatCurrency(withdrawProcessingSummary.subscriptionSettlement)}
+                  </Text>
+                </View>
+              </>
+            ) : null}
+            <View style={styles.cleanHairline} />
+            <View style={styles.cleanSummaryRow}>
+              <Text style={styles.cleanSummaryLabel}>Chave PIX</Text>
+              <Text style={styles.cleanSummaryValue} numberOfLines={1}>
+                {withdrawProcessingSummary.pixKey}
+              </Text>
+            </View>
+            <View style={styles.cleanHairline} />
+            <View style={styles.cleanSummaryRow}>
+              <Text style={styles.cleanSummaryMuted}>Status</Text>
+              <Text style={styles.cleanSummaryAccent}>Em processamento</Text>
+            </View>
+          </View>
+
+          <View style={styles.processingNote}>
+            <Text style={styles.processingNoteText}>O status ficará disponível no extrato de ganhos.</Text>
+          </View>
+
+          <TouchableOpacity
+            style={styles.cleanPrimaryButton}
+            activeOpacity={0.88}
+            onPress={() => setWithdrawProcessingSummary(null)}
+          >
+            <Text style={styles.cleanPrimaryButtonText}>Voltar para ganhos</Text>
+          </TouchableOpacity>
+        </View>
+      </PrototypeScreenTransition>
+    );
+  }
+
   return (
     <PrototypeScreenTransition>
       <View style={styles.container} pointerEvents="box-none">
         <StatusBar translucent backgroundColor="transparent" barStyle="dark-content" />
 
-        <PrototypeDismissibleSheet
-          onClose={handleBackPress}
-          backdropColor="transparent"
-          dragEnabled={false}
-          sheetStyle={styles.sheetWrap}
+        <ScrollView
+          style={styles.earningsScreen}
+          contentContainerStyle={[
+            styles.earningsPage,
+            { paddingTop: Math.max(insets.top + 26, 58), paddingBottom: Math.max(insets.bottom + 20, 34) }
+          ]}
+          showsVerticalScrollIndicator={false}
+          bounces={false}
+          keyboardShouldPersistTaps="handled"
+          onLayout={handlePanelLayout}
+          testID="driver-earnings-screen"
+          accessibilityLabel="driver-earnings-screen"
         >
-          <PrototypeMenuSurface
-            onLayout={handlePanelLayout}
-            eyebrow="Operação financeira"
-            title="Ganhos"
-            subtitle={
-              withdrawalsEnabled
-                ? 'Saldo, saques e leitura clara da operação sem ruído visual.'
-                : 'Saldo e leitura clara da operação. Repasses do piloto seguem em operação assistida.'
-            }
-            fullScreen
-            style={{
-              paddingTop: insets.top + 16,
-              paddingBottom: Math.max(insets.bottom, 18),
-            }}
-            bodyStyle={styles.earningsBody}
-            headerAccessory={<PrototypeMenuCloseButton onPress={handleBackPress} />}
-          >
-            {isLoadingEarnings ? (
-              <View style={styles.loadingWrap}>
-                <LoadingSpinner message="Carregando seus ganhos..." color={MAIN_COLOR} />
-              </View>
-            ) : (
-              <ScrollView
-                contentContainerStyle={styles.earningsScrollContent}
-                showsVerticalScrollIndicator={false}
-                keyboardShouldPersistTaps="handled"
-                bounces={false}
-              >
-                <PrototypeMenuStatRow
-                  items={[
-                    { key: 'balance', label: 'Saldo', value: `R$ ${formatCurrency(summaryTotalNet)}` },
-                    { key: 'rides', label: 'Corridas', value: String(safeTotalRides) },
-                    { key: 'fee', label: 'Taxa média', value: `${summaryEffectiveRate.toFixed(2).replace('.', ',')}%` },
-                  ]}
-                />
+          <Text style={styles.earningsTitle}>Ganhos</Text>
+          <Text style={styles.earningsSubtitle}>
+            {withdrawalsEnabled
+              ? 'Saldo, corridas e saques em um só lugar.'
+              : 'Saldo e corridas em um só lugar. Repasses do piloto seguem em operação assistida.'}
+          </Text>
 
-                <View style={styles.earningsHint}>
-                  <Text style={styles.earningsHintText}>
-                    {`${profileName} • Nota ${ratingLabel} • ${tierLabel} • Desde ${partnerSinceLabel}`}
-                  </Text>
-                  <Text
-                    style={[
-                      styles.earningsDeltaText,
-                      { color: hasPositiveDelta ? '#1A7F37' : '#B42318' },
-                    ]}
-                  >
-                    {`${hasPositiveDelta ? '↗' : '↘'} ${deltaPrefix}R$ ${deltaAmountLabel} vs ontem`}
-                  </Text>
+          {isLoadingEarnings ? (
+            <View style={styles.loadingWrap}>
+              <LoadingSpinner message="Carregando seus ganhos..." color={MAIN_COLOR} />
+            </View>
+          ) : (
+            <>
+              <View style={styles.balanceRow}>
+                <View style={styles.balanceCopy}>
+                  <Text style={styles.balanceLabel}>Disponível para saque</Text>
+                  <Text style={styles.balanceValue}>R$ {formatCurrency(saldoDisponivel)}</Text>
                 </View>
 
                 {withdrawalsEnabled ? (
                   <TouchableOpacity
-                    style={styles.primaryActionButton}
+                    style={styles.withdrawPillButton}
                     activeOpacity={0.86}
                     onPress={() => setWithdrawModalVisible(true)}
+                    testID="driver-earnings-withdraw-button"
+                    accessibilityLabel="driver-earnings-withdraw-button"
                   >
-                    <Ionicons name="wallet-outline" size={17} color="#FFFFFF" />
-                    <Text style={styles.primaryActionButtonText}>Realizar saque</Text>
+                    <Text style={styles.withdrawPillButtonText}>Realizar saque</Text>
                   </TouchableOpacity>
                 ) : (
-                  <View style={styles.pilotInfoBanner}>
-                    <Ionicons name="information-circle-outline" size={18} color="#1A330E" />
-                    <Text style={styles.pilotInfoBannerText}>
-                      Saque e repasse ficam fora do app neste piloto e serao conduzidos pela operacao assistida.
-                    </Text>
+                  <View style={styles.withdrawDisabledPill}>
+                    <Text style={styles.withdrawDisabledPillText}>Piloto assistido</Text>
                   </View>
                 )}
+              </View>
 
-                <PrototypeMenuSection title="Conta">
-                  <PrototypeMenuInfoRow label="Motorista" value={profileName} />
-                  <PrototypeMenuInfoRow label="Avaliação" value={ratingLabel} />
-                  <PrototypeMenuInfoRow label="Categoria" value={tierLabel} />
-                  <PrototypeMenuInfoRow label="Taxa diária" value={subscriptionDailyFeeLabel} last />
-                </PrototypeMenuSection>
+              <Text style={styles.pixHint}>PIX cadastrado para recebimento</Text>
+              <SecurePaymentBadge style={styles.pixSecurePaymentBadge} color="#8C9C94" />
+              <View style={styles.cleanDivider} />
 
-                <PrototypeMenuSection title="Período">
-                  {FILTER_PRESETS.map((preset, index) => (
-                    <PrototypeMenuRow
-                      key={preset.key}
-                      icon="calendar-outline"
-                      title={preset.label}
-                      subtitle={preset.mode === 'today' ? 'Somente hoje' : preset.mode === 'yesterday' ? 'Fechamento de ontem' : `Janela móvel de ${preset.days} dias`}
-                      onPress={() => setActiveFilterKey(preset.key)}
-                      active={activeFilterKey === preset.key}
-                      trailing={
-                        activeFilterKey === preset.key ? <Ionicons name="checkmark" size={18} color={tokenColor.accent.strong} /> : null
-                      }
-                    />
-                  ))}
-                  <PrototypeMenuRow
-                    icon="options-outline"
-                    title="Personalizar período"
-                    subtitle={activeFilterKey === 'custom_range' ? periodLabel : 'Escolha uma data inicial e final'}
-                    onPress={openCustomFilterModal}
-                    active={activeFilterKey === 'custom_range'}
-                    trailing={
-                      activeFilterKey === 'custom_range' ? <Ionicons name="checkmark" size={18} color={tokenColor.accent.strong} /> : <Ionicons name="calendar-outline" size={16} color={tokenColor.text.muted} />
-                    }
-                    last
-                  />
-                </PrototypeMenuSection>
+              {!withdrawalsEnabled ? (
+                <View style={styles.pilotInfoBanner}>
+                  <Ionicons name="information-circle-outline" size={18} color="#1A330E" />
+                  <Text style={styles.pilotInfoBannerText}>
+                    Saque e repasse ficam fora do app neste piloto e serao conduzidos pela operacao assistida.
+                  </Text>
+                </View>
+              ) : null}
 
-                <PrototypeMenuSection title="Movimento do período">
-                  <View style={styles.chartHeader}>
-                    <Text style={styles.chartTitle}>{activeFilterTitle}</Text>
-                    <Text style={styles.chartRange}>{periodLabel}</Text>
+              <View style={styles.periodTabs}>
+                {[
+                  { key: 'daily', label: 'Hoje' },
+                  { key: 'weekly', label: 'Semana' },
+                  { key: 'monthly', label: 'Mês' }
+                ].map(segment => {
+                  const active = activeSegment === segment.key;
+                  return (
+                    <TouchableOpacity
+                      key={segment.key}
+                      style={styles.periodTab}
+                      activeOpacity={0.82}
+                      onPress={() => handleSegmentPress(segment.key)}
+                    >
+                      <Text style={[styles.periodTabText, active && styles.periodTabTextActive]}>
+                        {segment.label}
+                      </Text>
+                      <View style={[styles.periodTabUnderline, active && styles.periodTabUnderlineActive]} />
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+
+              <View style={styles.chartSection}>
+                <View style={styles.chartHeader}>
+                  <Text style={styles.chartTitle}>
+                    {activeSegment === 'daily' ? 'Resumo de hoje' : activeSegment === 'weekly' ? 'Resumo da semana' : 'Resumo do mês'}
+                  </Text>
+                  <View style={styles.chartTrendBadge}>
+                    <Text style={styles.chartTrendBadgeText}>
+                      {`${hasPositiveDelta ? '+' : '-'}R$ ${deltaAmountLabel} vs ontem`}
+                    </Text>
                   </View>
+                </View>
 
-                  <View style={styles.chartWrap} onLayout={event => setChartWidth(event.nativeEvent.layout.width)}>
-                    {bars.length === 0 ? (
-                      <View style={styles.emptyChartWrap}>
-                        <Text style={styles.emptyChartText}>Sem dados para o período</Text>
-                      </View>
-                    ) : (
-                      <Svg width={chartInnerWidth} height={chartHeight}>
-                        <Line x1={0} y1={chartHeight - chartBottom} x2={chartInnerWidth} y2={chartHeight - chartBottom} stroke="rgba(17,26,39,0.10)" strokeWidth={1} />
-                        <Line x1={0} y1={(chartTop + chartHeight - chartBottom) / 2} x2={chartInnerWidth} y2={(chartTop + chartHeight - chartBottom) / 2} stroke="rgba(17,26,39,0.08)" strokeWidth={1} />
+                <View style={styles.chartWrap} onLayout={event => setChartWidth(event.nativeEvent.layout.width)}>
+                  {bars.length === 0 ? (
+                    <View style={styles.emptyChartWrap}>
+                      <Text style={styles.emptyChartText}>Sem dados para o período</Text>
+                    </View>
+                  ) : (
+                    <Svg width={chartInnerWidth} height={chartHeight}>
+                      <Line x1={0} y1={chartHeight - chartBottom} x2={chartInnerWidth} y2={chartHeight - chartBottom} stroke="rgba(17,26,39,0.10)" strokeWidth={1} />
+                      <Line x1={0} y1={(chartTop + chartHeight - chartBottom) / 2} x2={chartInnerWidth} y2={(chartTop + chartHeight - chartBottom) / 2} stroke="rgba(17,26,39,0.08)" strokeWidth={1} />
 
-                        {bars.map(bar => (
-                          <React.Fragment key={bar.key}>
-                            <Rect
-                              x={bar.x}
-                              y={bar.y}
-                              width={bar.width}
-                              height={bar.height}
-                              rx={8}
-                              ry={8}
-                              fill={bar.isPeak ? '#234E1C' : 'rgba(42,77,29,0.20)'}
-                            />
-                            <SvgText
-                              x={bar.x + (bar.width / 2)}
-                              y={bar.y - 8}
-                              fontSize="10"
-                              fill="#435061"
-                              textAnchor="middle"
-                              fontWeight="600"
-                            >
-                              {formatCurrencyCompact(bar.value)}
-                            </SvgText>
-                            <SvgText
-                              x={bar.x + (bar.width / 2)}
-                              y={chartHeight - 8}
-                              fontSize="10"
-                              fill="#6B7889"
-                              textAnchor="middle"
-                            >
-                              {bar.label}
-                            </SvgText>
-                          </React.Fragment>
-                        ))}
-                      </Svg>
-                    )}
+                      {bars.map(bar => (
+                        <React.Fragment key={bar.key}>
+                          <Rect
+                            x={bar.x}
+                            y={bar.y}
+                            width={bar.width}
+                            height={bar.height}
+                            rx={7}
+                            ry={7}
+                            fill={bar.isPeak ? '#054414' : '#BAE5C7'}
+                          />
+                          <SvgText
+                            x={bar.x + (bar.width / 2)}
+                            y={chartHeight - 8}
+                            fontSize="10"
+                            fill="#8C9C94"
+                            textAnchor="middle"
+                            fontWeight="500"
+                          >
+                            {bar.label.slice(0, 1)}
+                          </SvgText>
+                        </React.Fragment>
+                      ))}
+                    </Svg>
+                  )}
+                </View>
+              </View>
+
+              <View style={styles.cleanDivider} />
+              <View style={styles.metricsRow}>
+                <View style={styles.metricCellLeft}>
+                  <Text style={styles.metricValue}>{safeTotalRides}</Text>
+                  <Text style={styles.metricLabel}>Corridas</Text>
+                </View>
+                <View style={styles.metricCellCenter}>
+                  <Text style={styles.metricValue}>R$ {formatCurrency(summaryTotalGross)}</Text>
+                  <Text style={styles.metricLabel}>Bruto</Text>
+                </View>
+                <View style={styles.metricCellRight}>
+                  <Text style={styles.metricValue}>R$ {formatCurrency(summaryTotalNet)}</Text>
+                  <Text style={styles.metricLabel}>Líquido</Text>
+                </View>
+              </View>
+              <View style={styles.cleanDivider} />
+
+              <View style={styles.detailHeaderRow}>
+                <Text style={styles.cleanSectionTitle}>Detalhamento de hoje</Text>
+                <TouchableOpacity activeOpacity={0.75} onPress={openCustomFilterModal}>
+                  <Text style={styles.detailHeaderAction}>Ver tudo</Text>
+                </TouchableOpacity>
+              </View>
+
+              <View style={styles.cleanList}>
+                <View style={styles.cleanListRow}>
+                  <View>
+                    <Text style={styles.cleanListTitle}>Corridas finalizadas</Text>
+                    <Text style={styles.cleanListSubtitle}>{safeTotalRides} viagens concluídas</Text>
                   </View>
-                </PrototypeMenuSection>
+                  <Text style={styles.cleanListValue}>R$ {formatCurrency(summaryTotalNet)}</Text>
+                </View>
+                <View style={styles.cleanHairline} />
+                <View style={styles.cleanListRow}>
+                  <View>
+                    <Text style={styles.cleanListTitle}>Taxas e ajustes</Text>
+                    <Text style={styles.cleanListSubtitle}>Taxa média {summaryEffectiveRate.toFixed(2).replace('.', ',')}%</Text>
+                  </View>
+                  <Text style={styles.cleanListMuted}>-R$ {formatCurrency(summaryTotalFee)}</Text>
+                </View>
+                <View style={styles.cleanHairline} />
+                <View style={styles.cleanListRow}>
+                  <View>
+                    <Text style={styles.cleanListTitle}>Assinatura pendente</Text>
+                    <Text style={styles.cleanListSubtitle}>Taxa diária {subscriptionDailyFeeLabel}</Text>
+                  </View>
+                  <Text style={styles.cleanListMuted}>
+                    {assinaturaPendente > 0 ? `-R$ ${formatCurrency(assinaturaPendente)}` : 'R$ 0,00'}
+                  </Text>
+                </View>
+                <View style={styles.cleanHairline} />
+                <View style={styles.cleanListRow}>
+                  <View>
+                    <Text style={styles.cleanListAccent}>Total disponível</Text>
+                    <Text style={styles.cleanListSubtitle}>Pronto para saque via PIX</Text>
+                  </View>
+                  <Text style={styles.cleanListAccent}>R$ {formatCurrency(saldoDisponivel)}</Text>
+                </View>
+              </View>
 
-                <PrototypeMenuSection title={hasRuntimeHistory ? 'Resumo acumulado' : 'Resumo financeiro'}>
-                  <PrototypeMenuInfoRow
-                    label={hasRuntimeHistory ? 'Líquido acumulado' : 'Líquido no período'}
-                    value={`R$ ${formatCurrency(summaryTotalNet)}`}
-                  />
-                  <PrototypeMenuInfoRow
-                    label={hasRuntimeHistory ? 'Bruto acumulado' : 'Bruto no período'}
-                    value={`R$ ${formatCurrency(summaryTotalGross)}`}
-                  />
-                  <PrototypeMenuInfoRow
-                    label="Taxas da plataforma"
-                    value={`R$ ${formatCurrency(summaryTotalFee)}`}
-                  />
-                  <PrototypeMenuInfoRow label="Corridas canceladas" value={String(safeTotalCancellations)} />
-                  <PrototypeMenuInfoRow
-                    label="Assinatura pendente"
-                    value={assinaturaPendente > 0 ? `R$ ${formatCurrency(assinaturaPendente)}` : 'Sem pendência'}
-                    last
-                  />
-                </PrototypeMenuSection>
-              </ScrollView>
-            )}
-          </PrototypeMenuSurface>
-        </PrototypeDismissibleSheet>
+              <Text style={styles.driverContextText}>
+                {`${profileName} · Nota ${ratingLabel} · ${tierLabel} · Desde ${partnerSinceLabel}`}
+              </Text>
+            </>
+          )}
+        </ScrollView>
 
       <Modal
         visible={withdrawalsEnabled && withdrawModalVisible}
         animationType="slide"
-        transparent
+        transparent={false}
         onRequestClose={() => {
           setWithdrawModalVisible(false);
           setWithdrawPassword('');
           setWithdrawError('');
         }}
       >
-        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
-            <Text style={styles.modalTitle}>Realizar saque</Text>
-
-            <Text style={styles.modalLabel}>Saldo disponível</Text>
-            <Text style={styles.modalBalance}>R$ {formatCurrency(saldoDisponivel)}</Text>
-            <Text style={styles.modalLabel}>Taxa diária da assinatura</Text>
-            <View style={styles.modalSubscriptionFeeRow}>
-              {subscriptionDailyFeeSuspended ? (
-                <Text style={styles.modalSubscriptionDailyFeeStruck}>
-                  {subscriptionDailyFeeNominalLabel}
-                </Text>
-              ) : null}
-              <Text style={styles.modalSubscriptionDailyFee}>{subscriptionDailyFeeLabel}</Text>
-            </View>
-            {subscriptionDailyFeeSuspended ? (
-              <Text style={styles.modalSubscriptionFeeNote}>
-                Suspensa durante a estabilização do app.
-              </Text>
-            ) : null}
-
-            <Text style={styles.modalLabel}>Valor</Text>
-            <TextInput
-              style={styles.modalInput}
-              placeholder="Ex: 150,00"
-              keyboardType="numeric"
-              value={withdrawValue}
-              onChangeText={handleWithdrawValueChange}
-            />
-
-            <Text style={styles.modalLabel}>Chave Pix</Text>
-            <TextInput
-              style={styles.modalInput}
-              placeholder="Informe sua chave"
-              value={pixKey}
-              onChangeText={setPixKey}
-            />
-
-            <Text style={styles.modalLabel}>Senha do app</Text>
-            <TextInput
-              style={styles.modalInput}
-              placeholder="Digite sua senha"
-              value={withdrawPassword}
-              onChangeText={setWithdrawPassword}
-              secureTextEntry
-              autoCapitalize="none"
-              autoCorrect={false}
-              textContentType="password"
-            />
-
-            {withdrawError ? <Text style={styles.modalError}>{withdrawError}</Text> : null}
-
-            <Text style={styles.modalBreakdown}>
-              {(() => {
-                const amount = toNumber(String(withdrawValue).replace(',', '.'), 0);
-                const { fee, subscriptionSettlement, totalDebit } = getWithdrawCostBreakdown(amount);
-                const dailyFeeText = subscriptionDailyFeeSuspended
-                  ? `${subscriptionDailyFeeLabel} (${subscriptionDailyFeeNominalLabel} suspensa)`
-                  : subscriptionDailyFeeLabel;
-                return `Taxa de saque: R$ ${formatCurrency(fee)} • Taxa diária: ${dailyFeeText}${
-                  subscriptionSettlement > 0 ? ` • Assinatura: R$ ${formatCurrency(subscriptionSettlement)}` : ''
-                } • Débito total: R$ ${formatCurrency(totalDebit)}`;
-              })()}
-            </Text>
-
-            <View style={styles.modalActions}>
+        <KeyboardAvoidingView
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          style={[styles.withdrawScreen, { paddingTop: Math.max(insets.top + 26, 58), paddingBottom: Math.max(insets.bottom, 16) }]}
+        >
+          <ScrollView
+            bounces={false}
+            keyboardShouldPersistTaps="handled"
+            showsVerticalScrollIndicator={false}
+            contentContainerStyle={styles.withdrawScrollContent}
+          >
+            <View style={styles.cleanHeaderRow}>
               <TouchableOpacity
-                style={styles.modalCancelButton}
-                activeOpacity={0.86}
+                style={styles.cleanBackHit}
+                activeOpacity={0.76}
                 onPress={() => {
                   setWithdrawModalVisible(false);
                   setWithdrawPassword('');
                   setWithdrawError('');
                 }}
               >
-                <Text style={styles.modalCancelText}>Cancelar</Text>
+                <Text style={styles.cleanBackText}>{'<'}</Text>
               </TouchableOpacity>
-
-              <TouchableOpacity
-                style={[styles.modalConfirmButton, withdrawDisabled && styles.modalConfirmButtonDisabled]}
-                activeOpacity={0.86}
-                disabled={withdrawDisabled}
-                onPress={handleConfirmWithdraw}
-              >
-                <Text style={styles.modalConfirmText}>{isProcessingWithdraw ? 'Processando...' : 'Confirmar'}</Text>
-              </TouchableOpacity>
+              <Text style={styles.cleanHeaderTitle}>Realizar saque</Text>
             </View>
-          </View>
+            <Text style={styles.cleanHeaderSubtitle}>Informe o valor e confirme com sua senha.</Text>
+
+            <View style={styles.withdrawBalanceTop}>
+              <View>
+                <Text style={styles.balanceLabel}>Saldo disponível</Text>
+                <Text style={styles.withdrawBalanceValue}>R$ {formatCurrency(saldoDisponivel)}</Text>
+              </View>
+              <View style={styles.pixSavedBadge}>
+                <Text style={styles.pixSavedBadgeText}>{pixKey ? 'PIX salvo' : 'PIX manual'}</Text>
+              </View>
+            </View>
+
+            <View style={styles.cleanDivider} />
+
+            <View style={styles.withdrawField}>
+              <View style={styles.withdrawFieldHeader}>
+                <Text style={styles.withdrawFieldLabel}>Valor do saque</Text>
+                <Text style={styles.withdrawFieldMeta}>Saldo R$ {formatCurrency(saldoDisponivel)}</Text>
+              </View>
+              <View style={styles.withdrawAmountInputRow}>
+                <Text style={styles.withdrawAmountPrefix}>R$</Text>
+                <TextInput
+                  style={styles.withdrawAmountInput}
+                  placeholder="0,00"
+                  placeholderTextColor="#8C9C94"
+                  keyboardType="numeric"
+                  value={withdrawValue}
+                  onChangeText={handleWithdrawValueChange}
+                  testID="driver-earnings-withdraw-amount-input"
+                  accessibilityLabel="driver-earnings-withdraw-amount-input"
+                />
+              </View>
+            </View>
+
+            <View style={styles.cleanHairline} />
+
+            <View style={styles.withdrawField}>
+              <View style={styles.withdrawFieldHeader}>
+                <Text style={styles.withdrawFieldLabel}>Chave PIX</Text>
+                <Text style={styles.withdrawFieldMeta}>Alterar</Text>
+              </View>
+              <TextInput
+                style={styles.withdrawTextInput}
+                placeholder="driver@leaf.app.br"
+                placeholderTextColor="#8C9C94"
+                value={pixKey}
+                onChangeText={setPixKey}
+                autoCapitalize="none"
+                testID="driver-earnings-withdraw-pix-key-input"
+                accessibilityLabel="driver-earnings-withdraw-pix-key-input"
+              />
+              <SecurePaymentBadge style={styles.withdrawSecurePaymentBadge} color="#8C9C94" />
+            </View>
+
+            <View style={styles.cleanHairline} />
+
+            <View style={styles.withdrawField}>
+              <View style={styles.withdrawFieldHeader}>
+                <Text style={styles.withdrawFieldLabel}>Senha do app</Text>
+                <Text style={styles.withdrawFieldMeta}>Obrigatório</Text>
+              </View>
+              <TextInput
+                style={styles.withdrawTextInput}
+                placeholder="Digite sua senha"
+                placeholderTextColor="#8C9C94"
+                value={withdrawPassword}
+                onChangeText={setWithdrawPassword}
+                secureTextEntry
+                autoCapitalize="none"
+                autoCorrect={false}
+                textContentType="password"
+                testID="driver-earnings-withdraw-password-input"
+                accessibilityLabel="driver-earnings-withdraw-password-input"
+              />
+            </View>
+
+            <View style={styles.cleanHairline} />
+
+            <View style={styles.withdrawFeeNote}>
+              <Text style={styles.withdrawFeeNoteText}>
+                Saques abaixo de R$ 500,00 possuem tarifa de R$ 1,00.
+              </Text>
+            </View>
+
+            {withdrawError ? <Text style={styles.modalError}>{withdrawError}</Text> : null}
+
+            <View style={styles.cleanSection}>
+              <Text style={styles.cleanSectionTitle}>Resumo</Text>
+              <View style={styles.cleanDivider} />
+              <View style={styles.cleanSummaryRow}>
+                <Text style={styles.cleanSummaryLabel}>Valor solicitado</Text>
+                <Text style={styles.cleanSummaryValue}>R$ {formatCurrency(currentWithdrawAmount)}</Text>
+              </View>
+              <View style={styles.cleanSummaryRow}>
+                <Text style={styles.cleanSummaryMuted}>Tarifa</Text>
+                <Text style={styles.cleanSummaryMutedValue}>R$ {formatCurrency(currentWithdrawBreakdown.fee)}</Text>
+              </View>
+              {!subscriptionDailyFeeSuspended && currentWithdrawBreakdown.subscriptionSettlement > 0 ? (
+                <View style={styles.cleanSummaryRow}>
+                  <Text style={styles.cleanSummaryMuted}>Assinatura pendente</Text>
+                  <Text style={styles.cleanSummaryMutedValue}>
+                    R$ {formatCurrency(currentWithdrawBreakdown.subscriptionSettlement)}
+                  </Text>
+                </View>
+              ) : null}
+              <View style={styles.cleanHairline} />
+              <View style={styles.cleanSummaryRow}>
+                <Text style={styles.cleanSummaryAccent}>Débito total</Text>
+                <Text style={styles.cleanSummaryAccent}>R$ {formatCurrency(currentWithdrawBreakdown.totalDebit)}</Text>
+              </View>
+            </View>
+
+            <TouchableOpacity
+              style={[styles.cleanPrimaryButton, withdrawDisabled && styles.cleanPrimaryButtonDisabled]}
+              activeOpacity={0.88}
+              disabled={withdrawDisabled}
+              onPress={handleConfirmWithdraw}
+              testID="driver-earnings-withdraw-confirm-button"
+              accessibilityLabel="driver-earnings-withdraw-confirm-button"
+            >
+              <Text style={styles.cleanPrimaryButtonText}>
+                {isProcessingWithdraw ? 'Confirmando...' : 'Confirmar saque'}
+              </Text>
+            </TouchableOpacity>
+          </ScrollView>
         </KeyboardAvoidingView>
       </Modal>
 
@@ -1428,8 +1602,521 @@ const styles = StyleSheet.create({
   sheetWrap: {
     ...StyleSheet.absoluteFillObject,
   },
-  loadingWrap: {
+  cleanScreen: {
     flex: 1,
+    backgroundColor: '#F8FBF9',
+    paddingHorizontal: 32,
+  },
+  earningsScreen: {
+    flex: 1,
+    backgroundColor: '#F8FBF9',
+  },
+  earningsPage: {
+    paddingHorizontal: 31,
+  },
+  earningsTitle: {
+    color: '#0E1716',
+    fontFamily: fonts.SemiBold,
+    fontSize: 21,
+    lineHeight: 29,
+  },
+  earningsSubtitle: {
+    marginTop: 6,
+    color: '#5C6B63',
+    fontFamily: fonts.Regular,
+    fontSize: 13,
+    lineHeight: 19,
+  },
+  balanceRow: {
+    marginTop: 38,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 18,
+  },
+  balanceCopy: {
+    flex: 1,
+  },
+  balanceLabel: {
+    color: '#5C6B63',
+    fontFamily: fonts.Medium,
+    fontSize: 11,
+    lineHeight: 15,
+  },
+  balanceValue: {
+    marginTop: 8,
+    color: '#0E1716',
+    fontFamily: fonts.SemiBold,
+    fontSize: 30,
+    lineHeight: 38,
+  },
+  withdrawPillButton: {
+    width: 134,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: '#054414',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  withdrawPillButtonText: {
+    color: '#FFFFFF',
+    fontFamily: fonts.SemiBold,
+    fontSize: 11,
+    lineHeight: 16,
+  },
+  withdrawDisabledPill: {
+    minWidth: 126,
+    height: 32,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: '#C9E5D1',
+    backgroundColor: '#ECF8EF',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 14,
+  },
+  withdrawDisabledPillText: {
+    color: '#054414',
+    fontFamily: fonts.SemiBold,
+    fontSize: 10,
+    lineHeight: 15,
+  },
+  pixHint: {
+    marginTop: 8,
+    color: '#8C9C94',
+    fontFamily: fonts.Regular,
+    fontSize: 11,
+    lineHeight: 15,
+  },
+  pixSecurePaymentBadge: {
+    marginTop: 3,
+  },
+  cleanDivider: {
+    height: 1,
+    backgroundColor: '#DDE8E1',
+    marginTop: 26,
+  },
+  periodTabs: {
+    height: 57,
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    justifyContent: 'space-between',
+  },
+  periodTab: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+  },
+  periodTabText: {
+    color: '#5C6B63',
+    fontFamily: fonts.Medium,
+    fontSize: 12,
+    lineHeight: 17,
+  },
+  periodTabTextActive: {
+    color: '#054414',
+    fontFamily: fonts.SemiBold,
+  },
+  periodTabUnderline: {
+    marginTop: 10,
+    width: '100%',
+    height: 1,
+    backgroundColor: '#DDE8E1',
+  },
+  periodTabUnderlineActive: {
+    width: 42,
+    height: 3,
+    borderRadius: 2,
+    backgroundColor: '#054414',
+  },
+  chartSection: {
+    paddingTop: 28,
+  },
+  chartTrendBadge: {
+    minWidth: 110,
+    height: 26,
+    borderRadius: 13,
+    borderWidth: 1,
+    borderColor: '#C9E5D1',
+    backgroundColor: '#ECF8EF',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 10,
+  },
+  chartTrendBadgeText: {
+    color: '#054414',
+    fontFamily: fonts.SemiBold,
+    fontSize: 10,
+    lineHeight: 15,
+  },
+  metricsRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    paddingTop: 22,
+    paddingBottom: 8,
+  },
+  metricCellLeft: {
+    flex: 1,
+    alignItems: 'flex-start',
+  },
+  metricCellCenter: {
+    flex: 1.25,
+    alignItems: 'center',
+  },
+  metricCellRight: {
+    flex: 1.15,
+    alignItems: 'flex-end',
+  },
+  metricValue: {
+    color: '#0E1716',
+    fontFamily: fonts.SemiBold,
+    fontSize: 16,
+    lineHeight: 22,
+  },
+  metricLabel: {
+    marginTop: 2,
+    color: '#8C9C94',
+    fontFamily: fonts.Regular,
+    fontSize: 10,
+    lineHeight: 14,
+  },
+  detailHeaderRow: {
+    marginTop: 26,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  detailHeaderAction: {
+    color: '#054414',
+    fontFamily: fonts.SemiBold,
+    fontSize: 10,
+    lineHeight: 14,
+  },
+  cleanSection: {
+    marginTop: 28,
+  },
+  cleanSectionTitle: {
+    color: '#0E1716',
+    fontFamily: fonts.SemiBold,
+    fontSize: 13,
+    lineHeight: 18,
+  },
+  cleanList: {
+    marginTop: 16,
+  },
+  cleanListRow: {
+    minHeight: 48,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 16,
+  },
+  cleanListTitle: {
+    color: '#0E1716',
+    fontFamily: fonts.Medium,
+    fontSize: 12,
+    lineHeight: 17,
+  },
+  cleanListSubtitle: {
+    marginTop: 2,
+    color: '#8C9C94',
+    fontFamily: fonts.Regular,
+    fontSize: 10,
+    lineHeight: 14,
+  },
+  cleanListValue: {
+    color: '#0E1716',
+    fontFamily: fonts.Medium,
+    fontSize: 12,
+    lineHeight: 17,
+    textAlign: 'right',
+  },
+  cleanListMuted: {
+    color: '#5C6B63',
+    fontFamily: fonts.Medium,
+    fontSize: 12,
+    lineHeight: 17,
+    textAlign: 'right',
+  },
+  cleanListAccent: {
+    color: '#054414',
+    fontFamily: fonts.SemiBold,
+    fontSize: 12,
+    lineHeight: 17,
+    textAlign: 'right',
+  },
+  cleanHairline: {
+    height: 1,
+    backgroundColor: '#DDE8E1',
+  },
+  driverContextText: {
+    marginTop: 20,
+    color: '#8C9C94',
+    fontFamily: fonts.Medium,
+    fontSize: 11,
+    lineHeight: 16,
+  },
+  cleanHeaderRow: {
+    minHeight: 32,
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  cleanBackHit: {
+    width: 30,
+    height: 32,
+    alignItems: 'flex-start',
+    justifyContent: 'center',
+  },
+  cleanBackText: {
+    color: '#0E1716',
+    fontFamily: fonts.SemiBold,
+    fontSize: 22,
+    lineHeight: 28,
+  },
+  cleanHeaderTitle: {
+    flex: 1,
+    color: '#0E1716',
+    fontFamily: fonts.SemiBold,
+    fontSize: 21,
+    lineHeight: 29,
+  },
+  cleanHeaderSubtitle: {
+    marginTop: 10,
+    color: '#5C6B63',
+    fontFamily: fonts.Regular,
+    fontSize: 13,
+    lineHeight: 19,
+  },
+  withdrawScreen: {
+    flex: 1,
+    backgroundColor: '#F8FBF9',
+    paddingHorizontal: 32,
+  },
+  withdrawScrollContent: {
+    paddingBottom: 18,
+  },
+  withdrawBalanceTop: {
+    marginTop: 34,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 16,
+  },
+  withdrawBalanceValue: {
+    marginTop: 8,
+    color: '#0E1716',
+    fontFamily: fonts.SemiBold,
+    fontSize: 24,
+    lineHeight: 31,
+  },
+  pixSavedBadge: {
+    width: 98,
+    height: 28,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: '#C9E5D1',
+    backgroundColor: '#ECF8EF',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  pixSavedBadgeText: {
+    color: '#054414',
+    fontFamily: fonts.SemiBold,
+    fontSize: 10,
+    lineHeight: 15,
+  },
+  withdrawSecurePaymentBadge: {
+    marginTop: 8,
+  },
+  withdrawField: {
+    paddingTop: 20,
+    paddingBottom: 16,
+  },
+  withdrawFieldHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+  },
+  withdrawFieldLabel: {
+    color: '#5C6B63',
+    fontFamily: fonts.Medium,
+    fontSize: 11,
+    lineHeight: 15,
+  },
+  withdrawFieldMeta: {
+    color: '#8C9C94',
+    fontFamily: fonts.Medium,
+    fontSize: 10,
+    lineHeight: 14,
+    textAlign: 'right',
+  },
+  withdrawAmountInputRow: {
+    marginTop: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  withdrawAmountPrefix: {
+    color: '#0E1716',
+    fontFamily: fonts.SemiBold,
+    fontSize: 26,
+    lineHeight: 32,
+    marginRight: 7,
+  },
+  withdrawAmountInput: {
+    flex: 1,
+    minHeight: 40,
+    padding: 0,
+    color: '#0E1716',
+    fontFamily: fonts.SemiBold,
+    fontSize: 26,
+    lineHeight: 32,
+  },
+  withdrawTextInput: {
+    marginTop: 8,
+    minHeight: 34,
+    padding: 0,
+    color: '#0E1716',
+    fontFamily: fonts.SemiBold,
+    fontSize: 16,
+    lineHeight: 22,
+  },
+  withdrawFeeNote: {
+    minHeight: 58,
+    borderRadius: 18,
+    backgroundColor: '#FDF8EC',
+    marginTop: 24,
+    paddingHorizontal: 20,
+    paddingVertical: 17,
+    justifyContent: 'center',
+  },
+  withdrawFeeNoteText: {
+    color: '#7A5714',
+    fontFamily: fonts.Medium,
+    fontSize: 11,
+    lineHeight: 16,
+  },
+  cleanSummaryRow: {
+    minHeight: 30,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 16,
+  },
+  cleanSummaryLabel: {
+    color: '#0E1716',
+    fontFamily: fonts.Medium,
+    fontSize: 12,
+    lineHeight: 17,
+  },
+  cleanSummaryValue: {
+    flexShrink: 1,
+    color: '#0E1716',
+    fontFamily: fonts.Medium,
+    fontSize: 12,
+    lineHeight: 17,
+    textAlign: 'right',
+  },
+  cleanSummaryMuted: {
+    color: '#5C6B63',
+    fontFamily: fonts.Medium,
+    fontSize: 12,
+    lineHeight: 17,
+  },
+  cleanSummaryMutedValue: {
+    color: '#5C6B63',
+    fontFamily: fonts.Medium,
+    fontSize: 12,
+    lineHeight: 17,
+    textAlign: 'right',
+  },
+  cleanSummaryAccent: {
+    color: '#054414',
+    fontFamily: fonts.SemiBold,
+    fontSize: 12,
+    lineHeight: 17,
+    textAlign: 'right',
+  },
+  cleanPrimaryButton: {
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: '#054414',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 18,
+  },
+  cleanPrimaryButtonDisabled: {
+    backgroundColor: '#9BBEA5',
+  },
+  cleanPrimaryButtonText: {
+    color: '#FFFFFF',
+    fontFamily: fonts.SemiBold,
+    fontSize: 12,
+    lineHeight: 18,
+  },
+  processingPulse: {
+    alignSelf: 'center',
+    width: 86,
+    height: 86,
+    borderRadius: 43,
+    borderWidth: 1,
+    borderColor: '#C9E5D1',
+    backgroundColor: '#ECF8EF',
+    marginTop: 52,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  processingPulseInner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  processingDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    backgroundColor: '#63C291',
+  },
+  processingDotStrong: {
+    backgroundColor: '#06AD62',
+  },
+  processingDotMuted: {
+    backgroundColor: '#A6DDB8',
+  },
+  processingTitle: {
+    marginTop: 34,
+    color: '#0E1716',
+    fontFamily: fonts.SemiBold,
+    fontSize: 19,
+    lineHeight: 26,
+    textAlign: 'center',
+  },
+  processingSubtitle: {
+    alignSelf: 'center',
+    marginTop: 10,
+    maxWidth: 286,
+    color: '#5C6B63',
+    fontFamily: fonts.Regular,
+    fontSize: 13,
+    lineHeight: 20,
+    textAlign: 'center',
+  },
+  processingNote: {
+    minHeight: 56,
+    borderRadius: 18,
+    backgroundColor: '#ECF8EF',
+    marginTop: 34,
+    paddingHorizontal: 20,
+    justifyContent: 'center',
+  },
+  processingNoteText: {
+    color: '#054414',
+    fontFamily: fonts.Medium,
+    fontSize: 11,
+    lineHeight: 16,
+  },
+  loadingWrap: {
+    minHeight: 360,
     justifyContent: 'center',
     paddingHorizontal: 20,
   },
@@ -1493,12 +2180,16 @@ const styles = StyleSheet.create({
   },
   chartHeader: {
     marginBottom: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 10,
   },
   chartTitle: {
-    color: tokenColor.text.primary,
+    color: '#0E1716',
     fontFamily: fonts.SemiBold,
-    fontSize: 16,
-    lineHeight: 22,
+    fontSize: 13,
+    lineHeight: 18,
   },
   chartRange: {
     marginTop: 2,
@@ -1509,10 +2200,11 @@ const styles = StyleSheet.create({
   },
   chartWrap: {
     paddingTop: 6,
-    minHeight: 176,
+    minHeight: 136,
+    alignItems: 'center',
   },
   emptyChartWrap: {
-    minHeight: 172,
+    minHeight: 132,
     alignItems: 'center',
     justifyContent: 'center',
   },

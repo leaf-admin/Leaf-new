@@ -16,6 +16,8 @@ describe('pilot-launch-flags', () => {
     expect(snapshot.pilotControlled).toBe(true);
     expect(snapshot.driverWithdrawalsEnabled).toBe(false);
     expect(snapshot.referralProgramsEnabled).toBe(false);
+    expect(snapshot.campaignCenterEnabled).toBe(false);
+    expect(snapshot.demandPredictionEnabled).toBe(false);
     expect(isLaunchFeatureEnabled('softBanEnforcementEnabled', true)).toBe(false);
   });
 
@@ -28,5 +30,6 @@ describe('pilot-launch-flags', () => {
 
     expect(snapshot.driverWithdrawalsEnabled).toBe(true);
     expect(snapshot.referralProgramsEnabled).toBe(false);
+    expect(snapshot.campaignCenterEnabled).toBe(false);
   });
 });

@@ -938,7 +938,7 @@ const styles = StyleSheet.create({
         ]
     },
     signInTextStyle: {
-        fontFamily: 'Roboto-Bold',
+        fontFamily: fonts.Bold,
         fontWeight: "700",
         color: colors.WHITE
     },

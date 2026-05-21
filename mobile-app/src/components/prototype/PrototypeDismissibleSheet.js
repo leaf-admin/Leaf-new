@@ -8,7 +8,7 @@ const { motion } = robotaxiPrototypeTokens;
 const CLOSE_DISTANCE = 116;
 const CLOSE_VELOCITY = 960;
 const CLOSE_TRANSLATE_Y = 640;
-const OPEN_TRANSLATE_Y = 18;
+const OPEN_TRANSLATE_Y = 8;
 const MAX_PULL_UP = 16;
 const closeEasing = Easing.bezier(...motion.bezier.smoothIn);
 const openEasing = Easing.bezier(...motion.bezier.smoothOut);
@@ -25,7 +25,7 @@ export default function PrototypeDismissibleSheet({
 }) {
   const translateY = useSharedValue(OPEN_TRANSLATE_Y);
   const backdropOpacity = useSharedValue(0);
-  const surfaceOpacity = useSharedValue(0);
+  const surfaceOpacity = useSharedValue(0.96);
 
   useEffect(() => {
     translateY.value = withSpring(0, motion.spring.sheet);
@@ -34,7 +34,7 @@ export default function PrototypeDismissibleSheet({
       easing: openEasing
     });
     surfaceOpacity.value = withTiming(1, {
-      duration: motion.timing.standard,
+      duration: motion.timing.quick,
       easing: openEasing
     });
   }, [backdropOpacity, surfaceOpacity, translateY]);

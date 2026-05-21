@@ -66,6 +66,13 @@ const productionAutolinkingExcludes = includeDevClient
         'expo-dev-menu',
         'expo-dev-menu-interface'
     ];
+const canonicalInterFonts = [
+    '../node_modules/@expo-google-fonts/inter/400Regular/Inter_400Regular.ttf',
+    '../node_modules/@expo-google-fonts/inter/500Medium/Inter_500Medium.ttf',
+    '../node_modules/@expo-google-fonts/inter/600SemiBold/Inter_600SemiBold.ttf',
+    '../node_modules/@expo-google-fonts/inter/700Bold/Inter_700Bold.ttf',
+    '../node_modules/@expo-google-fonts/inter/300Light/Inter_300Light.ttf'
+];
 const expoUpdatesConfig = disableUpdatesForLocalSimulator || !otaUpdatesEnabled
     ? {
         enabled: false,
@@ -264,7 +271,12 @@ module.exports = {
                 }
             }
         ],
-        "expo-font",
+        [
+            "expo-font",
+            {
+                fonts: canonicalInterFonts
+            }
+        ],
         [
             "expo-audio",
             {

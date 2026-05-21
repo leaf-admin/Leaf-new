@@ -52,6 +52,8 @@ function registerSocketSearchDriversHandler({
 
             const radiusFromPreferences = Number.parseFloat(preferences?.radiusKm || preferences?.searchRadiusKm || process.env.PAYMENT_AVAILABILITY_RADIUS_KM || '5');
             const availability = await findAvailableDriversForPickup(pickupLocation, {
+                destinationLocation,
+                preferences,
                 carType: carType || preferences?.carType || null,
                 radiusKm: Number.isFinite(radiusFromPreferences) ? radiusFromPreferences : 5,
                 limit: Number.parseInt(preferences?.limit || '10', 10)

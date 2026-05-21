@@ -44,6 +44,30 @@ sync_native_android_version() {
   echo "✅ build.gradle Android sincronizado: versionCode ${expected_version_code}."
 }
 
+sync_android_inter_fonts() {
+  local source_dir="${PROJECT_DIR}/../node_modules/@expo-google-fonts/inter"
+  local target_dir="${PROJECT_DIR}/android/app/src/main/assets/fonts"
+  local -a font_files=(
+    "400Regular/Inter_400Regular.ttf"
+    "500Medium/Inter_500Medium.ttf"
+    "600SemiBold/Inter_600SemiBold.ttf"
+    "700Bold/Inter_700Bold.ttf"
+    "300Light/Inter_300Light.ttf"
+  )
+
+  mkdir -p "${target_dir}"
+
+  for font_file in "${font_files[@]}"; do
+    if [[ ! -f "${source_dir}/${font_file}" ]]; then
+      echo "❌ Fonte canônica ausente: ${source_dir}/${font_file}"
+      exit 1
+    fi
+    cp "${source_dir}/${font_file}" "${target_dir}/$(basename "${font_file}")"
+  done
+
+  echo "✅ Fontes Inter sincronizadas no Android nativo."
+}
+
 run_gradle() {
   local task="$1"
   local -a tasks=("generateCodegenArtifactsFromSchema" "${task}")
@@ -75,6 +99,7 @@ main() {
   ensure_android_native
   ensure_local_properties
   sync_native_android_version
+  sync_android_inter_fonts
 
   case "${MODE}" in
     debug) run_gradle "assembleDebug" ;;

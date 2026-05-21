@@ -1,6 +1,6 @@
 import React from 'react';
 import { Alert, Linking, Text, TouchableOpacity, View } from 'react-native';
-import { fireEvent, render, waitFor } from '@testing-library/react-native';
+import { act, fireEvent, render, waitFor } from '@testing-library/react-native';
 
 import RobotaxiHomeScreen from '../src/screens/prototype/RobotaxiHomeScreen';
 import { usePrototypeRideRuntime } from '../src/screens/prototype/prototypeRideRuntime';
@@ -71,8 +71,13 @@ jest.mock('../src/components/prototype/PrototypeScaffold', () => {
 
 jest.mock('../src/screens/prototype/home/PassengerHomeOverlay', () => {
   const React = require('react');
-  const { View } = require('react-native');
-  return () => <View />;
+  const { Text, View } = require('react-native');
+  return ({ pickupLabel, pickupAddress }) => (
+    <View testID="passenger-home-overlay">
+      <Text>{pickupLabel}</Text>
+      <Text>{pickupAddress}</Text>
+    </View>
+  );
 });
 
 jest.mock('../src/screens/prototype/home/DriverHomeOverlay', () => {
@@ -246,6 +251,109 @@ describe('driver online toggle', () => {
     Alert.alert.mockRestore();
   });
 
+  it('covers the map with a welcome loader until the home UI is ready', () => {
+    usePrototypeRideRuntime.mockReturnValue(
+      buildPassengerRuntime({
+        ready: false,
+        initializing: true,
+        profile: {
+          uid: 'customer_1',
+          userType: 'customer',
+          usertype: 'customer',
+          name: 'Izaak Dias',
+        },
+      })
+    );
+
+    const navigation = {
+      navigate: jest.fn(),
+      canGoBack: jest.fn(() => false),
+      goBack: jest.fn(),
+    };
+
+    const { getByTestId, getByText, queryByTestId } = render(
+      <RobotaxiHomeScreen navigation={navigation} route={{ params: {} }} />
+    );
+
+    expect(getByTestId('prototype-home-loading')).toBeTruthy();
+    expect(getByText('Bem vindo(a), Izaak')).toBeTruthy();
+    expect(queryByTestId('prototype-top-controls')).toBeNull();
+    expect(mockPrototypeMapLayer).toHaveBeenCalledWith(
+      expect.objectContaining({
+        interactionEnabled: false,
+      }),
+      undefined
+    );
+  });
+
+  it('does not show the welcome loader again after the home surface has hydrated', async () => {
+    usePrototypeRideRuntime.mockReturnValue(
+      buildPassengerRuntime({
+        ready: true,
+        initializing: false,
+        presentationSyncing: false,
+        profile: {
+          uid: 'customer_1',
+          userType: 'customer',
+          usertype: 'customer',
+          name: 'Izaak Dias',
+        },
+      })
+    );
+
+    const navigation = {
+      navigate: jest.fn(),
+      canGoBack: jest.fn(() => false),
+      goBack: jest.fn(),
+    };
+
+    const { queryByTestId, rerender } = render(
+      <RobotaxiHomeScreen navigation={navigation} route={{ params: {} }} />
+    );
+
+    await act(async () => {});
+
+    expect(queryByTestId('prototype-home-loading')).toBeNull();
+
+    usePrototypeRideRuntime.mockReturnValue(
+      buildPassengerRuntime({
+        ready: false,
+        initializing: true,
+        profile: {
+          uid: 'customer_1',
+          userType: 'customer',
+          usertype: 'customer',
+          name: 'Izaak Dias',
+        },
+      })
+    );
+
+    rerender(<RobotaxiHomeScreen navigation={navigation} route={{ params: {} }} />);
+
+    expect(queryByTestId('prototype-home-loading')).toBeNull();
+  });
+
+  it('shows the passenger pickup street and number instead of a generic location label', () => {
+    usePrototypeRideRuntime.mockReturnValue(
+      buildPassengerRuntime({
+        currentAddress: 'Rua das Pastorinhas, 12, Rio de Janeiro',
+      })
+    );
+
+    const navigation = {
+      navigate: jest.fn(),
+      canGoBack: jest.fn(() => false),
+      goBack: jest.fn(),
+    };
+
+    const { getByText, queryByText } = render(
+      <RobotaxiHomeScreen navigation={navigation} route={{ params: {} }} />
+    );
+
+    expect(getByText('Rua das Pastorinhas, 12')).toBeTruthy();
+    expect(queryByText('Minha localização')).toBeNull();
+  });
+
   it('surfaces a failed online toggle result to the driver', async () => {
     const setDriverOnline = jest.fn().mockResolvedValue({
       success: false,
@@ -377,6 +485,78 @@ describe('driver online toggle', () => {
     expect(latestMapProps.routeCoordinates).toEqual([]);
     expect(latestMapProps.searchingMode).toBe(false);
     expect(latestMapProps.destinationCoordinate).toBeNull();
+  });
+
+  it('keeps the traffic layer off on the idle home map even when the setting is enabled', async () => {
+    usePrototypeRideRuntime.mockReturnValue(
+      buildPassengerRuntime({
+        trafficLayerEnabled: true,
+        bookingStatus: 'idle',
+      })
+    );
+
+    const navigation = { navigate: jest.fn(), replace: jest.fn(), canGoBack: jest.fn(() => false), goBack: jest.fn() };
+    render(<RobotaxiHomeScreen navigation={navigation} route={{ params: {} }} />);
+
+    await waitFor(() => {
+      expect(mockPrototypeMapLayer).toHaveBeenCalled();
+    });
+
+    const latestMapProps = mockPrototypeMapLayer.mock.calls.at(-1)?.[0] || {};
+    expect(latestMapProps.showTraffic).toBe(false);
+  });
+
+  it('keeps the traffic layer off on idle home while a stale route preview is being cleared', async () => {
+    const { subscribePrototypeMapRoute } = require('../src/screens/prototype/prototypeMapRoute');
+    subscribePrototypeMapRoute.mockImplementation((callback) => {
+      callback({
+        coordinates: [
+          { latitude: -23.55, longitude: -46.63 },
+          { latitude: -23.56, longitude: -46.64 },
+        ],
+        destination: { latitude: -23.56, longitude: -46.64 },
+        destinationLabel: 'Destino stale',
+        destinationAddress: 'Rua stale, 123',
+      });
+      return jest.fn();
+    });
+
+    usePrototypeRideRuntime.mockReturnValue(
+      buildPassengerRuntime({
+        trafficLayerEnabled: true,
+        bookingStatus: 'idle',
+      })
+    );
+
+    const navigation = { navigate: jest.fn(), replace: jest.fn(), canGoBack: jest.fn(() => false), goBack: jest.fn() };
+    render(<RobotaxiHomeScreen navigation={navigation} route={{ params: {} }} />);
+
+    await waitFor(() => {
+      expect(mockPrototypeMapLayer).toHaveBeenCalled();
+    });
+
+    const latestMapProps = mockPrototypeMapLayer.mock.calls.at(-1)?.[0] || {};
+    expect(latestMapProps.routeCoordinates).toHaveLength(2);
+    expect(latestMapProps.showTraffic).toBe(false);
+  });
+
+  it('enables the traffic layer once the passenger has an active ride search', async () => {
+    usePrototypeRideRuntime.mockReturnValue(
+      buildPassengerRuntime({
+        trafficLayerEnabled: true,
+        bookingStatus: 'searching',
+      })
+    );
+
+    const navigation = { navigate: jest.fn(), replace: jest.fn(), canGoBack: jest.fn(() => false), goBack: jest.fn() };
+    render(<RobotaxiHomeScreen navigation={navigation} route={{ params: {} }} />);
+
+    await waitFor(() => {
+      expect(mockPrototypeMapLayer).toHaveBeenCalled();
+    });
+
+    const latestMapProps = mockPrototypeMapLayer.mock.calls.at(-1)?.[0] || {};
+    expect(latestMapProps.showTraffic).toBe(true);
   });
 
   it('does not render driver home surfaces before activation state resolves on boot', () => {

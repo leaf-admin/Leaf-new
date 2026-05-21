@@ -1,19 +1,10 @@
 import React, { useCallback, useMemo, useState } from 'react';
-import { Alert, StatusBar, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';
+import { Alert, ScrollView, StatusBar, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useSelector } from 'react-redux';
-import { Ionicons } from '@expo/vector-icons';
 import { fonts } from '../../theme/runtimeTokens';
 import PrototypeScreenTransition from '../../components/prototype/PrototypeScreenTransition';
 import PrototypeDismissibleSheet from '../../components/prototype/PrototypeDismissibleSheet';
-import {
-  PrototypeMenuCloseButton,
-  PrototypeMenuInfoRow,
-  PrototypeMenuRow,
-  PrototypeMenuSection,
-  PrototypeMenuSurface,
-} from '../../components/prototype/PrototypeMenuSurface';
-import robotaxiPrototypeTokens from '../../components/design-system/robotaxiPrototypeTokens';
 import { usePrototypeMapOcclusion } from './prototypeMapOcclusion';
 import { usePrototypeRideRuntime } from './prototypeRideRuntime';
 import { useAccountDeletionFlow } from '../../hooks/useAccountDeletionFlow';
@@ -25,14 +16,25 @@ import {
   resolvePrototypeProfilePhone,
 } from './prototypeProfileIdentity';
 
-const { color, typography } = robotaxiPrototypeTokens;
 const SURFACE_TOP_PADDING = 16;
 const SURFACE_BOTTOM_PADDING = 18;
 const BACKDROP_COLOR = 'transparent';
+const PROFILE_COLOR = {
+  bg: '#F6FAF6',
+  text: '#101C14',
+  title: '#102018',
+  secondary: '#66756B',
+  muted: '#5F6B62',
+  line: '#DFE8E1',
+  leaf: '#0F3B16',
+  dot: '#26A66A',
+  avatar: '#EAF6EE',
+  danger: '#9F2424',
+};
 
 const PASSENGER_ACTIONS = Object.freeze([
   { id: 'history', label: 'Historico de viagens', icon: 'time-outline', route: 'RobotaxiMenuTripHistory' },
-  { id: 'payment', label: 'Pagamento via PIX', icon: 'card-outline', route: 'RobotaxiPrototypePayment' },
+  { id: 'payment', label: 'Métodos de pagamento', icon: 'card-outline', route: 'RobotaxiPrototypePaymentMethods' },
   { id: 'support', label: 'Seguranca e suporte', icon: 'shield-checkmark-outline', route: 'RobotaxiPrototypeSupport' },
 ]);
 
@@ -40,6 +42,8 @@ const DRIVER_ACTIONS = Object.freeze([
   { id: 'history', label: 'Corridas concluidas', icon: 'time-outline', route: 'RobotaxiMenuTripHistory' },
   { id: 'earnings', label: 'Ganhos', icon: 'wallet-outline', route: 'EarningsReport' },
   { id: 'activation', label: 'Ativacao do motorista', icon: 'shield-checkmark-outline', route: 'RobotaxiPrototypeDriverActivation' },
+  { id: 'documents', label: 'Documentos', icon: 'document-text-outline', route: 'RobotaxiPrototypeDriverDocuments' },
+  { id: 'vehicles', label: 'Veiculos', icon: 'car-outline', route: 'RobotaxiPrototypeVehicles' },
 ]);
 
 const ACCOUNT_DELETION_ACTION = Object.freeze({
@@ -53,6 +57,37 @@ const ACCOUNT_LOGOUT_ACTION = Object.freeze({
   label: 'Sair da conta',
   icon: 'log-out-outline',
 });
+
+function ProfileRow({
+  title,
+  subtitle,
+  onPress,
+  testID,
+  accessibilityLabel,
+  tone = 'default',
+  last = false,
+}) {
+  return (
+    <TouchableOpacity
+      activeOpacity={0.78}
+      onPress={onPress}
+      style={[styles.profileRow, last && styles.profileRowLast]}
+      testID={testID}
+      accessibilityLabel={accessibilityLabel}
+    >
+      <View style={[styles.rowDot, tone === 'danger' && styles.rowDotDanger]} />
+      <View style={styles.rowCopy}>
+        <Text style={[styles.rowTitle, tone === 'danger' && styles.rowTitleDanger]}>
+          {title}
+        </Text>
+        {subtitle ? <Text style={styles.rowSubtitle}>{subtitle}</Text> : null}
+      </View>
+      <Text style={[styles.rowChevron, tone === 'danger' && styles.rowTitleDanger]}>
+        ›
+      </Text>
+    </TouchableOpacity>
+  );
+}
 
 export default function RobotaxiProfileScreen({ navigation, route }) {
   const authProfile = useSelector(state => state?.auth?.profile);
@@ -173,6 +208,66 @@ export default function RobotaxiProfileScreen({ navigation, route }) {
     [navigation, promptAccountDeletion, promptLogout]
   );
 
+  const profileRows = useMemo(() => {
+    const rows = [
+      {
+        id: 'personal-data',
+        title: 'Dados pessoais',
+        subtitle: 'Nome, email e telefone',
+        onPress: () => {
+          Alert.alert(
+            'Dados pessoais',
+            infoRows
+              .map((row) => `${row.label}: ${row.value}`)
+              .join('\n'),
+          );
+        },
+      },
+      ...actions.map((item) => ({
+        id: item.id,
+        title: item.label,
+        subtitle:
+          item.id === 'history'
+            ? 'Recibos e detalhes'
+            : item.id === 'payment'
+              ? 'Metodo principal'
+              : item.id === 'support'
+                ? 'Ajuda e chamados'
+                : item.id === 'earnings'
+                  ? 'Saldo e relatorio'
+                  : item.id === 'vehicles'
+                    ? 'Carro autorizado'
+                    : 'Documentos e liberacao',
+        onPress: () => handleActionPress(item),
+      })),
+      {
+        id: 'settings',
+        title: 'Configuracoes',
+        subtitle: 'Conta e privacidade',
+        onPress: () => navigation.replace('RobotaxiPrototypeSettings'),
+      },
+      {
+        id: ACCOUNT_LOGOUT_ACTION.id,
+        title: ACCOUNT_LOGOUT_ACTION.label,
+        subtitle: 'Voltar para entrada por telefone',
+        onPress: () => handleActionPress(ACCOUNT_LOGOUT_ACTION),
+        testID: 'profile-logout-shortcut',
+        accessibilityLabel: 'Sair da conta',
+      },
+      {
+        id: ACCOUNT_DELETION_ACTION.id,
+        title: ACCOUNT_DELETION_ACTION.label,
+        subtitle: 'Remover sua conta e dados associados',
+        onPress: () => handleActionPress(ACCOUNT_DELETION_ACTION),
+        testID: 'profile-account-deletion-shortcut',
+        accessibilityLabel: 'Excluir conta',
+        tone: 'danger',
+      },
+    ];
+
+    return rows;
+  }, [actions, handleActionPress, infoRows, navigation]);
+
   return (
     <PrototypeScreenTransition>
       <View style={styles.container} pointerEvents="box-none">
@@ -183,68 +278,68 @@ export default function RobotaxiProfileScreen({ navigation, route }) {
           dragEnabled={false}
           sheetStyle={styles.sheetWrap}
         >
-          <PrototypeMenuSurface
+          <View
             onLayout={handlePanelLayout}
-            eyebrow={isDriverRole ? 'Perfil do motorista' : 'Perfil do passageiro'}
-            title="Perfil"
-            subtitle={isDriverRole ? 'Seus dados, status da conta e atalhos operacionais.' : 'Seus dados, preferencias e atalhos principais.'}
-            fullScreen
-            style={{
+            style={[
+              styles.surface,
+              {
               paddingTop: insets.top + SURFACE_TOP_PADDING,
               paddingBottom: Math.max(insets.bottom, SURFACE_BOTTOM_PADDING),
-            }}
-            headerAccessory={<PrototypeMenuCloseButton onPress={handleDismiss} />}
+              },
+            ]}
           >
+            <View style={styles.statusRow}>
+              <Text style={styles.statusText}>9:41</Text>
+              <Text style={styles.statusText}>100%</Text>
+            </View>
+
+            <TouchableOpacity
+              style={styles.closeHit}
+              onPress={handleDismiss}
+              activeOpacity={0.78}
+              accessibilityRole="button"
+              accessibilityLabel="Fechar perfil"
+            />
+
+            <Text style={styles.screenTitle}>Perfil</Text>
+            <Text style={styles.screenSubtitle}>
+              Gerencie seus dados, atalhos e segurança.
+            </Text>
+
             <View style={styles.identityRow}>
               <View style={styles.avatarWrap}>
                 <Text style={styles.avatarLetter}>{profileInitial}</Text>
               </View>
               <View style={styles.identityCopy}>
-                <Text style={styles.identityName}>{profileName}</Text>
-                <Text style={styles.identityMeta}>
+                <Text style={styles.identityName} numberOfLines={1}>
+                  {profileName}
+                </Text>
+                <Text style={styles.identityMeta} numberOfLines={1}>
                   {isDriverRole ? accountStatus : preferenceLabel}
                 </Text>
               </View>
             </View>
 
-            <PrototypeMenuSection title="Conta">
-              {infoRows.map((row) => (
-                <PrototypeMenuInfoRow
-                  key={row.label}
-                  label={row.label}
-                  value={row.value}
-                  last={false}
-                />
-              ))}
-              <PrototypeMenuRow
-                icon={ACCOUNT_LOGOUT_ACTION.icon}
-                title={ACCOUNT_LOGOUT_ACTION.label}
-                onPress={() => handleActionPress(ACCOUNT_LOGOUT_ACTION)}
-                testID="profile-logout-shortcut"
-                accessibilityLabel="Sair da conta"
-              />
-              <PrototypeMenuRow
-                icon={ACCOUNT_DELETION_ACTION.icon}
-                title={ACCOUNT_DELETION_ACTION.label}
-                last
-                onPress={() => handleActionPress(ACCOUNT_DELETION_ACTION)}
-                testID="profile-account-deletion-shortcut"
-                accessibilityLabel="Excluir conta"
-              />
-            </PrototypeMenuSection>
+            <View style={styles.divider} />
 
-            <PrototypeMenuSection title="Acessos rapidos" style={styles.shortcutsSection}>
-              {actions.map((item, index) => (
-                <PrototypeMenuRow
+            <ScrollView
+              showsVerticalScrollIndicator={false}
+              contentContainerStyle={styles.rowsContent}
+            >
+              {profileRows.map((item, index) => (
+                <ProfileRow
                   key={item.id}
-                  icon={item.icon}
-                  title={item.label}
-                  last={index === actions.length - 1}
-                  onPress={() => handleActionPress(item)}
+                  title={item.title}
+                  subtitle={item.subtitle}
+                  onPress={item.onPress}
+                  testID={item.testID}
+                  accessibilityLabel={item.accessibilityLabel}
+                  tone={item.tone}
+                  last={index === profileRows.length - 1}
                 />
               ))}
-            </PrototypeMenuSection>
-          </PrototypeMenuSurface>
+            </ScrollView>
+          </View>
         </PrototypeDismissibleSheet>
       </View>
     </PrototypeScreenTransition>
@@ -259,45 +354,137 @@ const styles = StyleSheet.create({
   sheetWrap: {
     ...StyleSheet.absoluteFillObject,
   },
+  surface: {
+    flex: 1,
+    backgroundColor: PROFILE_COLOR.bg,
+    paddingHorizontal: 31,
+  },
+  statusRow: {
+    minHeight: 18,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  statusText: {
+    color: PROFILE_COLOR.text,
+    fontFamily: fonts.Medium,
+    fontSize: 11,
+    lineHeight: 15,
+  },
+  closeHit: {
+    position: 'absolute',
+    top: 0,
+    right: 0,
+    width: 72,
+    height: 88,
+  },
+  screenTitle: {
+    marginTop: 28,
+    color: PROFILE_COLOR.title,
+    fontFamily: fonts.Medium,
+    fontSize: 19,
+    lineHeight: 25,
+  },
+  screenSubtitle: {
+    marginTop: 8,
+    color: PROFILE_COLOR.secondary,
+    fontFamily: fonts.Regular,
+    fontSize: 13,
+    lineHeight: 18,
+  },
   avatarWrap: {
-    width: 46,
-    height: 46,
-    borderRadius: 23,
+    width: 68,
+    height: 68,
+    borderRadius: 34,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: 'rgba(230,237,244,0.92)',
-    borderWidth: 1,
-    borderColor: 'rgba(17,26,39,0.08)',
+    backgroundColor: PROFILE_COLOR.avatar,
   },
   avatarLetter: {
-    color: color.text.primary,
-    fontFamily: fonts.Bold,
-    fontSize: typography.subtitle.size,
-    lineHeight: typography.subtitle.lineHeight,
+    color: PROFILE_COLOR.leaf,
+    fontFamily: fonts.Medium,
+    fontSize: 22,
+    lineHeight: 29,
   },
   identityRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 12,
-    paddingBottom: 18,
+    marginTop: 38,
   },
   identityCopy: {
     flex: 1,
+    minWidth: 0,
+    marginLeft: 18,
   },
   identityName: {
-    color: color.text.primary,
-    fontFamily: fonts.Bold,
-    fontSize: typography.title.size,
-    lineHeight: typography.title.lineHeight,
+    color: PROFILE_COLOR.text,
+    fontFamily: fonts.Medium,
+    fontSize: 22,
+    lineHeight: 29,
   },
   identityMeta: {
-    marginTop: 4,
-    color: color.text.secondary,
+    marginTop: 2,
+    color: PROFILE_COLOR.muted,
     fontFamily: fonts.Regular,
-    fontSize: typography.caption.size,
-    lineHeight: typography.caption.lineHeight,
+    fontSize: 13,
+    lineHeight: 17,
   },
-  shortcutsSection: {
-    marginTop: 4,
+  divider: {
+    height: StyleSheet.hairlineWidth,
+    backgroundColor: PROFILE_COLOR.line,
+    marginTop: 28,
+  },
+  rowsContent: {
+    paddingTop: 18,
+    paddingBottom: 28,
+  },
+  profileRow: {
+    minHeight: 70,
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: PROFILE_COLOR.line,
+  },
+  profileRowLast: {
+    borderBottomWidth: 0,
+  },
+  rowDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: PROFILE_COLOR.dot,
+    marginRight: 12,
+  },
+  rowDotDanger: {
+    backgroundColor: PROFILE_COLOR.danger,
+  },
+  rowCopy: {
+    flex: 1,
+    minWidth: 0,
+    paddingRight: 12,
+  },
+  rowTitle: {
+    color: PROFILE_COLOR.text,
+    fontFamily: fonts.Medium,
+    fontSize: 13,
+    lineHeight: 17,
+  },
+  rowTitleDanger: {
+    color: PROFILE_COLOR.danger,
+  },
+  rowSubtitle: {
+    marginTop: 3,
+    color: PROFILE_COLOR.muted,
+    fontFamily: fonts.Regular,
+    fontSize: 10,
+    lineHeight: 13,
+  },
+  rowChevron: {
+    width: 18,
+    color: PROFILE_COLOR.text,
+    fontFamily: fonts.Medium,
+    fontSize: 14,
+    lineHeight: 18,
+    textAlign: 'right',
   },
 });

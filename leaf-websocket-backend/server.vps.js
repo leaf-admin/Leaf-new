@@ -134,6 +134,11 @@ const { assessDriverArrivalAtPickup } = require('./utils/pickup-arrival-policy')
 const { buildTripCompletedPayload } = require('./utils/trip-completion-payload');
 const { normalizeOperationalCarType } = require('./utils/operational-car-type');
 const { performCreateBookingAvailabilityPrecheck } = require('./services/create-booking-availability-precheck');
+const {
+    driverMatchesRidePreferences,
+    hasRideDispatchPreferences
+} = require('./services/ride-dispatch-preference-service');
+const driverEligibilityService = require('./services/driver-eligibility-service');
 const fcmService = new FCMService(); // Singleton local ao worker
 // =========================================================================================
 
@@ -510,6 +515,68 @@ function resolveVehicleLockIdentifier({ plate, vehicleId }) {
     }
 
     return `VEHID${normalizedVehicleId}`;
+}
+
+function normalizeDriverDestinationModeFlag(value) {
+    return value === true || value === 'true' || value === '1' || value === 1;
+}
+
+function normalizeDriverDestinationModePayload(data = {}) {
+    const provided = Boolean(
+        data?.destinationMode && typeof data.destinationMode === 'object'
+    ) || Object.prototype.hasOwnProperty.call(data || {}, 'destinationModeActive');
+    const source = data?.destinationMode && typeof data.destinationMode === 'object'
+        ? data.destinationMode
+        : data;
+    const destination = source?.destination || source?.destinationLocation || {};
+    const coordinate = destination?.coordinate || destination || {};
+    const lat = Number(
+        source?.destinationModeLat ??
+        source?.lat ??
+        coordinate?.latitude ??
+        coordinate?.lat
+    );
+    const lng = Number(
+        source?.destinationModeLng ??
+        source?.lng ??
+        coordinate?.longitude ??
+        coordinate?.lng
+    );
+    const active = normalizeDriverDestinationModeFlag(source?.active ?? source?.destinationModeActive);
+
+    if (!active || !Number.isFinite(lat) || !Number.isFinite(lng)) {
+        return {
+            provided,
+            active: false,
+            lat: '',
+            lng: '',
+            expiresAt: '',
+            minProgressKm: '',
+            arrivalRadiusKm: '',
+            label: '',
+            address: ''
+        };
+    }
+
+    return {
+        provided,
+        active: true,
+        lat: String(lat),
+        lng: String(lng),
+        expiresAt: String(source?.expiresAt || source?.destinationModeExpiresAt || ''),
+        minProgressKm: String(
+            Number.isFinite(Number(source?.minProgressKm ?? source?.destinationModeMinProgressKm))
+                ? Number(source?.minProgressKm ?? source?.destinationModeMinProgressKm)
+                : 1
+        ),
+        arrivalRadiusKm: String(
+            Number.isFinite(Number(source?.arrivalRadiusKm ?? source?.destinationModeArrivalRadiusKm))
+                ? Number(source?.arrivalRadiusKm ?? source?.destinationModeArrivalRadiusKm)
+                : 3
+        ),
+        label: String(source?.destinationName || destination?.name || source?.label || ''),
+        address: String(source?.destinationAddress || destination?.address || source?.address || '')
+    };
 }
 
 function haversineDistanceMeters(lat1, lng1, lat2, lng2) {
@@ -2342,6 +2409,17 @@ function parseBookingLocation(rawValue) {
     return null;
 }
 
+function parseBookingPreferences(rawValue) {
+    if (!rawValue) return {};
+    if (typeof rawValue === 'object') return { ...rawValue };
+    try {
+        const parsed = JSON.parse(String(rawValue));
+        return parsed && typeof parsed === 'object' ? parsed : {};
+    } catch (_) {
+        return {};
+    }
+}
+
 const BOOKING_PARTY_CACHE_TTL_MS = 30 * 1000;
 const bookingPartyCache = new Map();
 const BOOKING_PARTY_CACHE_MAX = 5000;
@@ -2579,6 +2657,13 @@ async function hasEligibleDriversForPickupFast(pickupLocation, options = {}) {
 
     const radiusKm = Number.parseFloat(options.radiusKm || process.env.PAYMENT_AVAILABILITY_RADIUS_KM || '5');
     const requestedCarType = normalizeCarType(options.carType);
+    const rideRequirements = {
+        pickupLocation,
+        destinationLocation: options.destinationLocation || options.destination || null,
+        preferences: options.preferences || {},
+        carType: requestedCarType || options.carType || null
+    };
+    const shouldCheckDispatchPreferences = hasRideDispatchPreferences(rideRequirements);
     const eligibleGeoKey = process.env.ELIGIBLE_DRIVER_GEO_KEY || 'driver_locations_eligible';
 
     const nearbyDrivers = await redis.georadius(
@@ -2599,7 +2684,7 @@ async function hasEligibleDriversForPickupFast(pickupLocation, options = {}) {
         };
     }
 
-    if (!requestedCarType) {
+    if (!requestedCarType && !shouldCheckDispatchPreferences) {
         return {
             success: true,
             hasDrivers: true,
@@ -2623,11 +2708,28 @@ async function hasEligibleDriversForPickupFast(pickupLocation, options = {}) {
         const dispatchEligible = driverData.dispatchEligible === true || driverData.dispatchEligible === 'true';
         const driverStatus = (driverData.status || '').toUpperCase();
         const isAvailable = driverStatus === 'AVAILABLE' || driverStatus === 'ONLINE';
-        const driverCarType = normalizeCarType(
-            driverData.vehicleCategory || driverData.carType
-        );
 
-        if (isOnline && dispatchEligible && isAvailable && driverCarType === requestedCarType) {
+        if (!isOnline || !dispatchEligible || !isAvailable) {
+            continue;
+        }
+
+        const preferenceMatch = driverMatchesRidePreferences(driverData, rideRequirements);
+        if (!preferenceMatch.ok) {
+            continue;
+        }
+
+        if (requestedCarType) {
+            const eligibility = await driverEligibilityService.isDriverEligibleForRide(
+                driverId,
+                requestedCarType,
+                driverData
+            );
+            if (!eligibility?.eligible) {
+                continue;
+            }
+        }
+
+        if (isOnline && dispatchEligible && isAvailable) {
             return {
                 success: true,
                 hasDrivers: true,
@@ -2660,6 +2762,12 @@ async function findAvailableDriversForPickup(pickupLocation, options = {}) {
     const radiusKm = Number.parseFloat(options.radiusKm || process.env.PAYMENT_AVAILABILITY_RADIUS_KM || '5');
     const limit = Number.parseInt(options.limit || process.env.PAYMENT_AVAILABILITY_LIMIT || '12', 10);
     const requestedCarType = normalizeCarType(options.carType);
+    const rideRequirements = {
+        pickupLocation,
+        destinationLocation: options.destinationLocation || options.destination || null,
+        preferences: options.preferences || {},
+        carType: requestedCarType || options.carType || null
+    };
     const georadiusCount = Math.max(limit * 3, limit);
     const nearbyDrivers = await redis.georadius(
         'driver_locations',
@@ -2706,11 +2814,16 @@ async function findAvailableDriversForPickup(pickupLocation, options = {}) {
         const isAvailable = driverStatus === 'AVAILABLE' || driverStatus === 'ONLINE';
         if (!isOnline || !isAvailable) continue;
 
-        const driverCarType = normalizeCarType(
-            driverData.vehicleCategory || driverData.carType
-        );
-        if (requestedCarType && driverCarType && driverCarType !== requestedCarType) {
-            continue;
+        const preferenceMatch = driverMatchesRidePreferences(driverData, rideRequirements);
+        if (!preferenceMatch.ok) continue;
+
+        if (requestedCarType) {
+            const eligibility = await driverEligibilityService.isDriverEligibleForRide(
+                driverId,
+                requestedCarType,
+                driverData
+            );
+            if (!eligibility?.eligible) continue;
         }
 
         eligibleDrivers.push({
@@ -2722,7 +2835,9 @@ async function findAvailableDriversForPickup(pickupLocation, options = {}) {
                 lng
             },
             carType: driverData.carType || null,
-            rating: Number.parseFloat(driverData.rating || '5.0')
+            category: driverData.vehicleCategory || null,
+            rating: Number.parseFloat(driverData.rating || '5.0'),
+            dispatchPreferenceMatch: preferenceMatch.reason
         });
 
         if (eligibleDrivers.length >= limit) {
@@ -4410,6 +4525,8 @@ io.on('connection', async (socket) => {
 
             const availability = await hasEligibleDriversForPickupFast(pickupLocation, {
                 carType: requestedCarType,
+                destinationLocation: data?.destinationLocation || data?.destination || null,
+                preferences: data?.preferences || {},
                 radiusKm: requestedRadiusKm
             });
 
@@ -4745,6 +4862,10 @@ io.on('connection', async (socket) => {
                     }
                     markPerfStage('afterActiveGuard');
 
+                    const ridePreferences =
+                        data?.preferences && typeof data.preferences === 'object'
+                            ? { ...data.preferences }
+                            : {};
                     let normalizedPaymentStatus = (data?.paymentStatus || 'pending_payment').toString().toLowerCase();
                     let hasConfirmedPayment = PAID_PAYMENT_STATUSES.has(normalizedPaymentStatus);
                     let paymentServerValidated = false;
@@ -5209,6 +5330,8 @@ io.on('connection', async (socket) => {
                     const createBookingAvailability = await performCreateBookingAvailabilityPrecheck({
                         hasConfirmedPayment,
                         pickupLocation,
+                        destinationLocation,
+                        preferences: ridePreferences,
                         requestedCarType,
                         checkAvailability: hasEligibleDriversForPickupFast,
                         logStructured,
@@ -5277,17 +5400,18 @@ io.on('connection', async (socket) => {
                             paymentMethod: paymentMethod || 'pix',
                             paymentStatus: normalizedPaymentStatus,
                             paymentId: paymentChargeId || null,
-                            paymentData: {
-                                chargeId: paymentChargeId || '',
+	                            paymentData: {
+	                                chargeId: paymentChargeId || '',
                                 rideId: paymentReferenceRideId || '',
                                 amountInCents: Number.isFinite(resolvedPaymentAmountInCents)
                                     ? Math.round(resolvedPaymentAmountInCents)
                                     : '',
                                 paymentStatus: normalizedPaymentStatus,
-                                serverValidated: paymentServerValidated,
-                                confirmedAt: hasConfirmedPayment ? new Date().toISOString() : null
-                            },
-                            pricingContext: data.pricingContext || data.operational || null,
+	                                serverValidated: paymentServerValidated,
+	                                confirmedAt: hasConfirmedPayment ? new Date().toISOString() : null
+	                            },
+                            preferences: ridePreferences,
+	                            pricingContext: data.pricingContext || data.operational || null,
                             traceId, // ✅ Passar traceId para o command
                             correlationId // ✅ Passar correlationId para o command
                         });
@@ -6083,18 +6207,29 @@ io.on('connection', async (socket) => {
                 // Guarda de negócio:
                 // A elegibilidade já é garantida no pool ativo de dispatch; aqui só validamos em modo best-effort.
                 let bookingPickupLocation = null;
+                let bookingDestinationLocation = null;
+                let bookingPreferences = {};
                 let bookingCarType = null;
                 const payloadPickupLocation = parseBookingLocation(data?.pickupLocation);
                 const shouldLoadBookingContext = !payloadPickupLocation || !skipAvailabilityCheck;
                 try {
                     if (shouldLoadBookingContext) {
                         const redis = redisPool.getConnection();
-                        const [bookingPickupRaw, bookingCarTypeRaw] = await redis.hmget(
+                        const [
+                            bookingPickupRaw,
+                            bookingDestinationRaw,
+                            bookingPreferencesRaw,
+                            bookingCarTypeRaw
+                        ] = await redis.hmget(
                             `booking:${bookingId}`,
                             'pickupLocation',
+                            'destinationLocation',
+                            'preferences',
                             'carType'
                         );
                         bookingPickupLocation = parseBookingLocation(bookingPickupRaw);
+                        bookingDestinationLocation = parseBookingLocation(bookingDestinationRaw);
+                        bookingPreferences = parseBookingPreferences(bookingPreferencesRaw);
                         bookingCarType = bookingCarTypeRaw || null;
                     }
                 } catch (bookingLookupError) {
@@ -6114,7 +6249,11 @@ io.on('connection', async (socket) => {
                             10
                         );
                         const availability = await Promise.race([
-                            findAvailableDriversForPickup(pickupLocationToValidate, { carType: bookingCarType }),
+                            findAvailableDriversForPickup(pickupLocationToValidate, {
+                                carType: bookingCarType,
+                                destinationLocation: bookingDestinationLocation,
+                                preferences: bookingPreferences
+                            }),
                             new Promise((_, reject) => setTimeout(() => reject(new Error('availability_check_timeout')), availabilityTimeoutMs))
                         ]);
 
@@ -9882,6 +10021,8 @@ io.on('connection', async (socket) => {
 
             const driverData = await redis.hgetall(`driver:${driverId}`);
             const resolvedIsOnline = isOnline !== undefined ? isOnline : (status === 'online' || status === 'available');
+            const requestedDestinationMode = normalizeDriverDestinationModePayload(data || {});
+            const shouldWriteDestinationMode = !resolvedIsOnline || requestedDestinationMode.provided;
 
             if (resolvedIsOnline) {
                 clearPendingDriverDisconnectCleanup(driverId, 'set_driver_status_online');
@@ -10026,6 +10167,19 @@ io.on('connection', async (socket) => {
                     vehiclePlate: persistedVehiclePlate,
                     vehicleLockValidated: hasValidatedLock ? 'true' : 'false',
                     vehicleLockValidatedAt: nowIso,
+                    ...(shouldWriteDestinationMode
+                        ? {
+                            destinationModeActive: String(resolvedIsOnline && requestedDestinationMode.active),
+                            driverDestinationModeActive: String(resolvedIsOnline && requestedDestinationMode.active),
+                            destinationModeLat: resolvedIsOnline ? requestedDestinationMode.lat : '',
+                            destinationModeLng: resolvedIsOnline ? requestedDestinationMode.lng : '',
+                            destinationModeExpiresAt: resolvedIsOnline ? requestedDestinationMode.expiresAt : '',
+                            destinationModeMinProgressKm: resolvedIsOnline ? requestedDestinationMode.minProgressKm : '',
+                            destinationModeArrivalRadiusKm: resolvedIsOnline ? requestedDestinationMode.arrivalRadiusKm : '',
+                            destinationModeLabel: resolvedIsOnline ? requestedDestinationMode.label : '',
+                            destinationModeAddress: resolvedIsOnline ? requestedDestinationMode.address : ''
+                        }
+                        : {}),
                     updatedAt: nowIso
                 });
                 setCachedDriverState(driverId, {
@@ -10033,6 +10187,19 @@ io.on('connection', async (socket) => {
                     vehiclePlate: persistedVehiclePlate,
                     vehicleLockValidated: hasValidatedLock ? 'true' : 'false',
                     vehicleLockValidatedAt: nowIso,
+                    ...(shouldWriteDestinationMode
+                        ? {
+                            destinationModeActive: String(resolvedIsOnline && requestedDestinationMode.active),
+                            driverDestinationModeActive: String(resolvedIsOnline && requestedDestinationMode.active),
+                            destinationModeLat: resolvedIsOnline ? requestedDestinationMode.lat : '',
+                            destinationModeLng: resolvedIsOnline ? requestedDestinationMode.lng : '',
+                            destinationModeExpiresAt: resolvedIsOnline ? requestedDestinationMode.expiresAt : '',
+                            destinationModeMinProgressKm: resolvedIsOnline ? requestedDestinationMode.minProgressKm : '',
+                            destinationModeArrivalRadiusKm: resolvedIsOnline ? requestedDestinationMode.arrivalRadiusKm : '',
+                            destinationModeLabel: resolvedIsOnline ? requestedDestinationMode.label : '',
+                            destinationModeAddress: resolvedIsOnline ? requestedDestinationMode.address : ''
+                        }
+                        : {}),
                     updatedAt: nowIso
                 });
             } catch (driverLockStateError) {
@@ -10052,6 +10219,14 @@ io.on('connection', async (socket) => {
                 isOnline: resolvedIsOnline,
                 ready: true,
                 onlineRedis: resolvedIsOnline ? true : false,
+                destinationMode: shouldWriteDestinationMode
+                    ? {
+                        active: resolvedIsOnline && requestedDestinationMode.active,
+                        label: resolvedIsOnline ? requestedDestinationMode.label : '',
+                        address: resolvedIsOnline ? requestedDestinationMode.address : '',
+                        expiresAt: resolvedIsOnline ? requestedDestinationMode.expiresAt : ''
+                    }
+                    : undefined,
                 message: 'Status atualizado com sucesso'
             });
             recordRealtimeMetricSafe('set_driver_status', resolvedIsOnline ? 'success_online' : 'success_offline');

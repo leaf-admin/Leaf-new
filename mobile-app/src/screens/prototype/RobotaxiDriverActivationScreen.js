@@ -1,18 +1,11 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, ScrollView, StatusBar, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as DocumentPicker from 'expo-document-picker';
 import { fonts } from '../../theme/runtimeTokens';
 import robotaxiPrototypeTokens from '../../components/design-system/robotaxiPrototypeTokens';
 import PrototypeScreenTransition from '../../components/prototype/PrototypeScreenTransition';
 import PrototypeDismissibleSheet from '../../components/prototype/PrototypeDismissibleSheet';
-import {
-  PrototypeMenuCloseButton,
-  PrototypeMenuSection,
-  PrototypeMenuStatRow,
-  PrototypeMenuSurface,
-} from '../../components/prototype/PrototypeMenuSurface';
 import { usePrototypeMapOcclusion } from './prototypeMapOcclusion';
 import { usePrototypeRideRuntime } from './prototypeRideRuntime';
 import { DRIVER_ONBOARDING_STAGE_KEYS } from '../../services/DriverOnboardingService';
@@ -23,6 +16,16 @@ const SURFACE_TOP_PADDING = 16;
 const SURFACE_BOTTOM_PADDING = 18;
 const FALLBACK_CARD_HEIGHT = 330;
 const DOC_ANALYSIS_SLA_TEXT = 'Até 48 horas';
+const ACTIVATION_COLOR = {
+  bg: '#F6FAF6',
+  text: '#101C14',
+  title: '#102018',
+  secondary: '#66756B',
+  muted: '#5F6B62',
+  line: '#DFE8E1',
+  leaf: '#0F3B16',
+  dot: '#26A66A',
+};
 
 const FIELD_STATUS = {
   PENDING: 'pending',
@@ -90,7 +93,7 @@ const STAGE_META = {
         key: 'crlv',
         label: 'CRLV validado pela plataforma',
         helper: 'Após envio, o documento entra em análise automatizada com IA.',
-        actionLabel: 'Aguardando envio',
+        actionLabel: 'Envio pendente',
         kind: 'readonly'
       }
     ]
@@ -118,6 +121,27 @@ function mapFieldStatusLabel(status) {
   if (status === FIELD_STATUS.IN_REVIEW) return 'Em análise';
   if (status === FIELD_STATUS.FAILED) return 'Falha';
   return 'Pendente';
+}
+
+function resolveActivationRowTitle(field) {
+  if (field?.validator === 'cnh') return 'CNH';
+  if (field?.validator === 'crlv') return 'CRLV';
+  if (field?.validator === 'mei') return 'MEI';
+  if (field?.kind === 'consent') return 'Termos';
+  if (field?.kind === 'task') return 'Validação facial';
+  if (field?.kind === 'readonly') return 'Veículo';
+  return field?.label || 'Etapa';
+}
+
+function resolveActivationRowSubtitle(field, fieldState) {
+  const status = fieldState?.status || FIELD_STATUS.PENDING;
+  if (fieldState?.fileName) {
+    return fieldState.fileName;
+  }
+  if (field?.kind === 'readonly') {
+    return status === FIELD_STATUS.APPROVED ? 'Honda City branco' : 'Atualizado após CRLV';
+  }
+  return mapFieldStatusLabel(status);
 }
 
 function waitMs(delay) {
@@ -516,6 +540,65 @@ export default function RobotaxiDriverActivationScreen({ navigation, route }) {
     ]
   );
 
+  const activationRows = useMemo(() => {
+    return visibleStageKeys.flatMap(stageKey => {
+      const meta = STAGE_META[stageKey];
+      const stage = stages?.[stageKey] || { status: 'locked', checklist: {} };
+      const isLocked = stage.status === 'locked';
+
+      return (meta?.fields || []).map(field => {
+        const fieldState = getFieldState(stageKey, field.key);
+        const fieldStatus = fieldState?.status || FIELD_STATUS.PENDING;
+        const isReadonly = field.kind === 'readonly';
+        const stageBlocked = isLocked && !isReadonly;
+        const stateKey = toFieldKey(stageKey, field.key);
+        const actionLabel =
+          stageBlocked
+            ? 'Bloqueado'
+            : fieldStatus === FIELD_STATUS.APPROVED
+              ? 'OK'
+              : fieldStatus === FIELD_STATUS.IN_REVIEW
+                ? 'Em análise'
+                : fieldStatus === FIELD_STATUS.FAILED
+                  ? 'Reenviar'
+                  : isReadonly
+                    ? 'Automático'
+                    : field.actionLabel || 'Enviar';
+
+        return {
+          field,
+          fieldState,
+          stageKey,
+          stateKey,
+          stageBlocked,
+          isReadonly,
+          title: resolveActivationRowTitle(field),
+          subtitle: resolveActivationRowSubtitle(field, fieldState),
+          actionLabel,
+        };
+      });
+    });
+  }, [getFieldState, stages, visibleStageKeys]);
+
+  const firstActionableRow = activationRows.find(row => {
+    const status = row.fieldState?.status || FIELD_STATUS.PENDING;
+    return !row.stageBlocked && !row.isReadonly && status !== FIELD_STATUS.APPROVED && status !== FIELD_STATUS.IN_REVIEW;
+  });
+
+  const handleContinueUpload = useCallback(() => {
+    if (firstActionableRow) {
+      handleFieldAction(firstActionableRow.stageKey, firstActionableRow.field);
+      return;
+    }
+
+    if (driverCanGoOnline) {
+      Alert.alert('Ativação concluída', 'Você já pode ficar online para receber corridas.');
+      return;
+    }
+
+    Alert.alert('Em análise', `Suas informações estão em análise. Prazo: ${DOC_ANALYSIS_SLA_TEXT}.`);
+  }, [driverCanGoOnline, firstActionableRow, handleFieldAction]);
+
   return (
     <PrototypeScreenTransition>
       <View style={styles.container} pointerEvents="box-none">
@@ -527,146 +610,87 @@ export default function RobotaxiDriverActivationScreen({ navigation, route }) {
           dragEnabled={false}
           sheetStyle={styles.sheetWrap}
         >
-          <PrototypeMenuSurface
+          <View
             onLayout={handleCardLayout}
-            eyebrow="Ativação do motorista"
-            title="Ativação"
-            subtitle="Checklist objetivo para liberar o online, com leitura clara por etapa."
-            fullScreen
-            style={{
+            style={[
+              styles.activationSurface,
+              {
               paddingTop: insets.top + SURFACE_TOP_PADDING,
               paddingBottom: Math.max(insets.bottom, SURFACE_BOTTOM_PADDING),
-            }}
-            bodyStyle={styles.body}
-            headerAccessory={<PrototypeMenuCloseButton onPress={handleDismiss} />}
+              },
+            ]}
           >
+            <View style={styles.activationStatusRow}>
+              <Text style={styles.activationStatusText}>9:41</Text>
+              <Text style={styles.activationStatusText}>100%</Text>
+            </View>
+            <TouchableOpacity
+              style={styles.activationCloseHit}
+              onPress={handleDismiss}
+              activeOpacity={0.78}
+              accessibilityRole="button"
+              accessibilityLabel="Fechar ativação"
+            />
+            <Text style={styles.activationTitle}>Ativação do motorista</Text>
+            <Text style={styles.activationSubtitle}>
+              Envie o necessário para ficar online.
+            </Text>
+
             <ScrollView
               bounces={false}
               showsVerticalScrollIndicator={false}
-              contentContainerStyle={styles.scrollContent}
+              contentContainerStyle={styles.activationScrollContent}
             >
-              <PrototypeMenuStatRow
-                items={[
-                  { key: 'progress', label: 'Etapas', value: progressLabel },
-                  {
-                    key: 'status',
-                    label: 'Status',
-                    value: driverCanGoOnline ? 'Liberado' : 'Em análise',
-                  },
-                ]}
-              />
+              {activationRows.map((row, index) => {
+                const isBusy = busyFieldKey === row.stateKey;
+                const isDisabled = isBusy || row.isReadonly || row.stageBlocked;
+                return (
+                  <TouchableOpacity
+                    key={`${row.stageKey}:${row.field.key}`}
+                    activeOpacity={0.78}
+                    disabled={isDisabled}
+                    onPress={() => handleFieldAction(row.stageKey, row.field)}
+                    style={[
+                      styles.activationRow,
+                      index === activationRows.length - 1 && styles.activationRowLast,
+                    ]}
+                  >
+                    <View style={styles.activationDot} />
+                    <View style={styles.activationRowCopy}>
+                      <Text style={styles.activationRowTitle}>{row.title}</Text>
+                      <Text style={styles.activationRowSubtitle} numberOfLines={1}>
+                        {row.subtitle}
+                      </Text>
+                      {row.fieldState?.status === FIELD_STATUS.FAILED && row.fieldState?.reason ? (
+                        <Text style={styles.activationRowError} numberOfLines={1}>
+                          {row.fieldState.reason}
+                        </Text>
+                      ) : null}
+                    </View>
+                    {isBusy ? (
+                      <ActivityIndicator size="small" color={ACTIVATION_COLOR.leaf} />
+                    ) : (
+                      <Text style={styles.activationRowAction}>{row.actionLabel}</Text>
+                    )}
+                  </TouchableOpacity>
+                );
+              })}
 
-              <View style={styles.progressHint}>
-                <Text style={styles.progressHintText}>
-                  {driverCanGoOnline
-                    ? 'Online liberado para operação.'
-                    : `Pendências em análise (${DOC_ANALYSIS_SLA_TEXT}).`}
+              {hiddenLockedStageCount > 0 ? (
+                <Text style={styles.activationHint}>
+                  Próximas etapas liberam após aprovação dos documentos.
                 </Text>
-              </View>
-
-              <View style={styles.sectionStack}>
-                {visibleStageKeys.map(stageKey => {
-                  const meta = STAGE_META[stageKey];
-                  const stage = stages?.[stageKey] || { status: 'locked', checklist: {} };
-                  const isLocked = stage.status === 'locked';
-                  const isApproved = stage.status === 'approved';
-
-                  return (
-                    <PrototypeMenuSection key={stageKey} title={meta.title}>
-                      <View style={[styles.stageSummaryRow, isLocked && styles.stageSummaryRowLocked]}>
-                        <Text style={styles.stageDescription}>{meta.description}</Text>
-                        <View
-                          style={[
-                            styles.statusBadge,
-                            isApproved && styles.statusBadgeApproved,
-                            stage.status === 'needs_attention' && styles.statusBadgeAlert,
-                          ]}
-                        >
-                          <Text style={styles.statusBadgeText}>{mapStatusLabel(stage.status)}</Text>
-                        </View>
-                      </View>
-
-                      {meta.fields.map((field, index) => {
-                        const fieldState = getFieldState(stageKey, field.key);
-                        const fieldStatus = fieldState?.status || FIELD_STATUS.PENDING;
-                        const stateKey = toFieldKey(stageKey, field.key);
-                        const isBusy = busyFieldKey === stateKey;
-                        const isReadonly = field.kind === 'readonly';
-                        const stageBlocked = isLocked && !isReadonly;
-                        const actionLabel =
-                          stageBlocked
-                            ? 'Bloqueado'
-                            : fieldStatus === FIELD_STATUS.APPROVED
-                              ? 'Aprovado'
-                              : fieldStatus === FIELD_STATUS.IN_REVIEW
-                                ? 'Em análise'
-                                : fieldStatus === FIELD_STATUS.FAILED
-                                  ? 'Reenviar'
-                                  : isReadonly
-                                    ? 'Automático'
-                                    : field.actionLabel || 'Enviar';
-
-                        return (
-                          <View
-                            key={field.key}
-                            style={[
-                              styles.fieldRow,
-                              index === meta.fields.length - 1 && styles.fieldRowLast,
-                            ]}
-                          >
-                            <View style={styles.fieldCopyWrap}>
-                              <View style={styles.fieldTitleRow}>
-                                <Text style={styles.fieldLabel}>{field.label}</Text>
-                                <View style={styles.inlineStatusBadge}>
-                                  <Text style={styles.inlineStatusBadgeText}>
-                                    {stageBlocked ? 'Bloqueado' : mapFieldStatusLabel(fieldStatus)}
-                                  </Text>
-                                </View>
-                              </View>
-                              <Text style={styles.fieldHelper}>{field.helper}</Text>
-                              {fieldState?.fileName ? (
-                                <Text style={styles.fieldMeta}>{fieldState.fileName}</Text>
-                              ) : null}
-                              {fieldStatus === FIELD_STATUS.FAILED && fieldState?.reason ? (
-                                <TouchableOpacity
-                                  activeOpacity={0.85}
-                                  style={styles.moreInfoButton}
-                                  onPress={() => Alert.alert('Motivo da rejeição', fieldState.reason)}
-                                >
-                                  <Text style={styles.moreInfoText}>Saiba mais</Text>
-                                </TouchableOpacity>
-                              ) : null}
-                            </View>
-
-                            <TouchableOpacity
-                              activeOpacity={0.86}
-                              style={[
-                                styles.fieldActionButton,
-                                fieldStatus === FIELD_STATUS.APPROVED && styles.fieldActionButtonApproved,
-                                fieldStatus === FIELD_STATUS.FAILED && styles.fieldActionButtonFailed,
-                                (isBusy || isReadonly || stageBlocked) && styles.fieldActionButtonDisabled,
-                              ]}
-                              disabled={isBusy || isReadonly || stageBlocked}
-                              onPress={() => handleFieldAction(stageKey, field)}
-                            >
-                              {isBusy ? <ActivityIndicator size="small" color="#FFFFFF" /> : null}
-                              <Text style={styles.fieldActionButtonText}>{actionLabel}</Text>
-                            </TouchableOpacity>
-                          </View>
-                        );
-                      })}
-                    </PrototypeMenuSection>
-                  );
-                })}
-
-                {hiddenLockedStageCount > 0 ? (
-                  <View style={styles.nextStepsHintWrap}>
-                    <Text style={styles.nextStepsHintText}>Próximas etapas liberam após aprovação dos documentos.</Text>
-                  </View>
-                ) : null}
-              </View>
+              ) : null}
             </ScrollView>
-          </PrototypeMenuSurface>
+
+            <TouchableOpacity
+              activeOpacity={0.88}
+              style={styles.activationButton}
+              onPress={handleContinueUpload}
+            >
+              <Text style={styles.activationButtonText}>Continuar envio</Text>
+            </TouchableOpacity>
+          </View>
         </PrototypeDismissibleSheet>
       </View>
     </PrototypeScreenTransition>
@@ -680,6 +704,123 @@ const styles = StyleSheet.create({
   },
   sheetWrap: {
     ...StyleSheet.absoluteFillObject,
+  },
+  activationSurface: {
+    flex: 1,
+    backgroundColor: ACTIVATION_COLOR.bg,
+    paddingHorizontal: 31,
+  },
+  activationStatusRow: {
+    minHeight: 18,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  activationStatusText: {
+    color: ACTIVATION_COLOR.text,
+    fontFamily: fonts.Medium,
+    fontSize: 11,
+    lineHeight: 15,
+  },
+  activationCloseHit: {
+    position: 'absolute',
+    top: 0,
+    right: 0,
+    width: 72,
+    height: 88,
+  },
+  activationTitle: {
+    marginTop: 28,
+    color: ACTIVATION_COLOR.title,
+    fontFamily: fonts.Medium,
+    fontSize: 19,
+    lineHeight: 25,
+  },
+  activationSubtitle: {
+    marginTop: 8,
+    color: ACTIVATION_COLOR.secondary,
+    fontFamily: fonts.Regular,
+    fontSize: 13,
+    lineHeight: 18,
+  },
+  activationScrollContent: {
+    paddingTop: 38,
+    paddingBottom: 118,
+  },
+  activationRow: {
+    minHeight: 78,
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: ACTIVATION_COLOR.line,
+  },
+  activationRowLast: {
+    borderBottomWidth: 0,
+  },
+  activationDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: ACTIVATION_COLOR.dot,
+    marginRight: 12,
+  },
+  activationRowCopy: {
+    flex: 1,
+    minWidth: 0,
+    paddingRight: 12,
+  },
+  activationRowTitle: {
+    color: ACTIVATION_COLOR.text,
+    fontFamily: fonts.Medium,
+    fontSize: 13,
+    lineHeight: 17,
+  },
+  activationRowSubtitle: {
+    marginTop: 3,
+    color: ACTIVATION_COLOR.secondary,
+    fontFamily: fonts.Regular,
+    fontSize: 10,
+    lineHeight: 13,
+  },
+  activationRowError: {
+    marginTop: 3,
+    color: '#9F2424',
+    fontFamily: fonts.Regular,
+    fontSize: 10,
+    lineHeight: 13,
+  },
+  activationRowAction: {
+    width: 84,
+    color: ACTIVATION_COLOR.text,
+    fontFamily: fonts.Medium,
+    fontSize: 11,
+    lineHeight: 15,
+    textAlign: 'right',
+  },
+  activationHint: {
+    marginTop: 16,
+    color: ACTIVATION_COLOR.secondary,
+    fontFamily: fonts.Regular,
+    fontSize: 11,
+    lineHeight: 15,
+  },
+  activationButton: {
+    position: 'absolute',
+    left: 31,
+    right: 31,
+    bottom: 72,
+    height: 46,
+    borderRadius: 23,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: ACTIVATION_COLOR.leaf,
+  },
+  activationButtonText: {
+    color: '#FFFFFF',
+    fontFamily: fonts.Medium,
+    fontSize: 12,
+    lineHeight: 16,
+    textAlign: 'center',
   },
   body: {
     flex: 1,

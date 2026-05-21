@@ -5,6 +5,8 @@ class LeafApiService {
   constructor() {
     this.baseURL = config.api.baseUrl;
     this.timeoutMs = config.api.timeoutMs;
+    this.supportOrchestratorBaseURL = config.supportOrchestrator?.baseUrl || "";
+    this.supportOrchestratorTimeoutMs = config.supportOrchestrator?.timeoutMs || this.timeoutMs;
   }
 
   async request(endpoint, options = {}) {
@@ -72,6 +74,81 @@ class LeafApiService {
       }
       clearTimeout(timeout);
     }
+  }
+
+  isSupportOrchestratorEnabled() {
+    return Boolean(this.supportOrchestratorBaseURL);
+  }
+
+  async requestSupportOrchestrator(endpoint, options = {}) {
+    if (!this.supportOrchestratorBaseURL) {
+      throw new Error("Orquestrador de suporte nao configurado");
+    }
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), this.supportOrchestratorTimeoutMs);
+    const headers = {
+      "Content-Type": "application/json",
+      ...(options.headers || {}),
+    };
+    const token = authService.getAccessToken();
+    if (token) headers.Authorization = `Bearer ${token}`;
+
+    try {
+      let response = await fetch(`${this.supportOrchestratorBaseURL}${endpoint}`, {
+        ...options,
+        headers,
+        signal: controller.signal,
+      });
+
+      if (response.status === 401 && token) {
+        const renewed = await authService.refreshToken();
+        if (renewed) {
+          headers.Authorization = `Bearer ${renewed}`;
+          response = await fetch(`${this.supportOrchestratorBaseURL}${endpoint}`, {
+            ...options,
+            headers,
+            signal: controller.signal,
+          });
+        }
+      }
+
+      const contentType = response.headers.get("content-type") || "";
+      const payload = contentType.includes("application/json")
+        ? await response.json().catch(() => null)
+        : await response.text().catch(() => "");
+
+      if (!response.ok) {
+        const apiMessage =
+          (payload && typeof payload === "object" && (payload.error || payload.message)) ||
+          (typeof payload === "string" ? payload : "") ||
+          `Support Orchestrator Error ${response.status}`;
+        const err = new Error(apiMessage);
+        err.status = response.status;
+        err.payload = payload;
+        throw err;
+      }
+
+      return payload;
+    } finally {
+      clearTimeout(timeout);
+    }
+  }
+
+  async getSupportOrchestratorStatus() {
+    return this.requestSupportOrchestrator("/v1/status");
+  }
+
+  async getSupportOrchestratorRuns(limit = 8) {
+    return this.requestSupportOrchestrator(`/v1/runs?limit=${Number(limit) || 8}`);
+  }
+
+  async getSupportOrchestratorTicketAnalysis(ticketId, { force = false } = {}) {
+    const encoded = encodeURIComponent(ticketId);
+    if (force) {
+      return this.requestSupportOrchestrator(`/v1/tickets/${encoded}/analyze`, { method: "POST" });
+    }
+    return this.requestSupportOrchestrator(`/v1/tickets/${encoded}/analysis`);
   }
 
   async getDashboardSnapshot() {
@@ -406,6 +483,49 @@ class LeafApiService {
     });
   }
 
+  async listInAppCampaigns(params = {}) {
+    const query = new URLSearchParams();
+    Object.entries(params).forEach(([key, value]) => {
+      if (value !== undefined && value !== null && value !== "") {
+        query.append(key, String(value));
+      }
+    });
+    const suffix = query.toString();
+    return this.request(`/campaign-center/campaigns${suffix ? `?${suffix}` : ""}`);
+  }
+
+  async createInAppCampaign(payload = {}) {
+    return this.request("/campaign-center/campaigns", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async updateInAppCampaign(campaignId, payload = {}) {
+    return this.request(`/campaign-center/campaigns/${encodeURIComponent(campaignId)}`, {
+      method: "PATCH",
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async previewInAppCampaign(campaignId, payload = {}) {
+    return this.request(`/campaign-center/campaigns/${encodeURIComponent(campaignId)}/preview-eligibility`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async getInAppCampaignStats(params = {}) {
+    const query = new URLSearchParams();
+    Object.entries(params).forEach(([key, value]) => {
+      if (value !== undefined && value !== null && value !== "") {
+        query.append(key, String(value));
+      }
+    });
+    const suffix = query.toString();
+    return this.request(`/campaign-center/stats${suffix ? `?${suffix}` : ""}`);
+  }
+
   async createGeofenceCity(payload = {}) {
     return this.request("/geofence/admin/cities", {
       method: "POST",
@@ -501,6 +621,27 @@ class LeafApiService {
     return this.request("/waitlist/stats");
   }
 
+  async approveWaitlistDriver(driverId, notes = "") {
+    return this.request("/waitlist/approve", {
+      method: "POST",
+      body: JSON.stringify({ driverId, notes }),
+    });
+  }
+
+  async rejectWaitlistDriver(driverId, reason = "") {
+    return this.request("/waitlist/reject", {
+      method: "POST",
+      body: JSON.stringify({ driverId, reason }),
+    });
+  }
+
+  async updateWaitlistPosition(driverId, newPosition) {
+    return this.request("/waitlist/position", {
+      method: "PUT",
+      body: JSON.stringify({ driverId, newPosition }),
+    });
+  }
+
   async runFinancialSimulation(drivers = 250, hours = 1) {
     const params = new URLSearchParams({
       drivers: String(drivers),
@@ -529,6 +670,42 @@ class LeafApiService {
     } catch {
       return this.request(`/support/tickets?${query.toString()}`);
     }
+  }
+
+  async getSupportQueueSummary() {
+    return this.request("/support/queue/summary");
+  }
+
+  async getSupportQueueBacklog(params = {}) {
+    const query = new URLSearchParams();
+    Object.entries(params).forEach(([key, value]) => {
+      if (value !== undefined && value !== null && value !== "") {
+        query.append(key, String(value));
+      }
+    });
+    const suffix = query.toString();
+    return this.request(`/support/queue/backlog${suffix ? `?${suffix}` : ""}`);
+  }
+
+  async assignSupportTicket(ticketId, agentId, agentName) {
+    return this.request(`/support/admin/tickets/${ticketId}/assign`, {
+      method: "POST",
+      body: JSON.stringify({ agentId, agentName }),
+    });
+  }
+
+  async escalateSupportTicket(ticketId, reason) {
+    return this.request(`/support/admin/tickets/${ticketId}/escalate`, {
+      method: "POST",
+      body: JSON.stringify({ reason }),
+    });
+  }
+
+  async resolveSupportTicket(ticketId, resolution = "") {
+    return this.request(`/support/admin/tickets/${ticketId}/resolve`, {
+      method: "POST",
+      body: JSON.stringify({ resolution }),
+    });
   }
 
   async getSupportMessages(ticketId) {

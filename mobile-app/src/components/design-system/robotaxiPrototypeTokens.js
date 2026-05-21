@@ -1,24 +1,24 @@
 export const robotaxiPrototypeTokens = {
   color: {
     bg: {
-      app: '#F8FAFC',
-      map: '#EDF2F6',
-      panel: 'rgba(255,255,255,0.92)',
-      panelSoft: 'rgba(255,255,255,0.88)',
-      panelSolid: '#F5F8FB'
+      app: '#F4F6F1',
+      map: '#EEF2EC',
+      panel: 'rgba(250,251,248,0.94)',
+      panelSoft: 'rgba(250,251,248,0.9)',
+      panelSolid: '#FAFBF8'
     },
     surface: {
-      primary: 'rgba(255,255,255,0.9)',
-      secondary: 'rgba(255,255,255,0.84)',
-      tertiary: 'rgba(255,255,255,0.78)',
-      activeSoft: 'rgba(218,232,210,0.74)',
-      activeStrong: 'rgba(205,224,195,0.9)'
+      primary: 'rgba(250,251,248,0.92)',
+      secondary: 'rgba(244,246,241,0.9)',
+      tertiary: 'rgba(238,244,234,0.84)',
+      activeSoft: 'rgba(222,234,215,0.74)',
+      activeStrong: 'rgba(203,222,194,0.9)'
     },
     text: {
-      primary: '#111A27',
-      secondary: '#4E5A6B',
-      muted: '#8A96A6',
-      dark: '#0E1522'
+      primary: '#111611',
+      secondary: '#556058',
+      muted: '#7A8077',
+      dark: '#0B120D'
     },
     accent: {
       primary: '#1A330E',
@@ -32,12 +32,12 @@ export const robotaxiPrototypeTokens = {
       danger: '#8A2A2A'
     },
     border: {
-      subtle: 'rgba(18,26,38,0.1)',
-      strong: 'rgba(18,26,38,0.16)',
-      separator: 'rgba(18,26,38,0.14)'
+      subtle: 'rgba(17,22,17,0.1)',
+      strong: 'rgba(17,22,17,0.16)',
+      separator: 'rgba(17,22,17,0.14)'
     },
     shadow: {
-      base: '#0E1522',
+      base: '#0B120D',
       accent: '#1A330E'
     }
   },

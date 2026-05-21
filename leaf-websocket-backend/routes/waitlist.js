@@ -6,6 +6,10 @@ const rateLimit = require('express-rate-limit');
 const cityActivationStateService = require('../services/city-activation-state-service');
 const { authenticateSupport, requireSupportRoles } = require('../middleware/support-auth');
 const {
+  isLaunchFeatureEnabled,
+  buildLaunchFeatureDisabledPayload
+} = require('../utils/pilot-launch-flags');
+const {
   parseEnvList,
   resolveRuntimeCorsHosts,
   buildRuntimeSslipOrigins
@@ -50,6 +54,25 @@ function isMissingFirestoreIndexError(error) {
   if (Number(error.code) === 9) return true;
   const message = String(error.message || '');
   return message.includes('FAILED_PRECONDITION') && message.includes('requires an index');
+}
+
+function requireAdminMutationsEnabled(req, res, next) {
+  if (isLaunchFeatureEnabled('adminMutationsEnabled', true)) {
+    return next();
+  }
+
+  logger.warn('Mutação admin da waitlist bloqueada por feature flag', {
+    path: req.originalUrl || req.url,
+    adminUserId: req.user?.id || req.user?.uid || null,
+    adminRole: req.user?.role || null
+  });
+
+  return res.status(503).json(
+    buildLaunchFeatureDisabledPayload(
+      'admin_mutations',
+      'Mutacoes administrativas estao desativadas neste perfil de lancamento'
+    )
+  );
 }
 
 const getLandingMetricsRef = () => {
@@ -907,7 +930,7 @@ router.get('/api/waitlist/drivers', authenticateSupport, requireSupportRoles(WAI
 });
 
 // POST /api/waitlist/approve - Aprovar motorista da wait list (admin)
-router.post('/api/waitlist/approve', authenticateSupport, requireSupportRoles(WAITLIST_ADMIN_ROLES), async (req, res) => {
+router.post('/api/waitlist/approve', authenticateSupport, requireSupportRoles(WAITLIST_ADMIN_ROLES), requireAdminMutationsEnabled, async (req, res) => {
   try {
     const { driverId, notes = '' } = req.body;
     const adminId = req.user.uid;
@@ -1028,7 +1051,7 @@ router.post('/api/waitlist/approve', authenticateSupport, requireSupportRoles(WA
 });
 
 // POST /api/waitlist/reject - Rejeitar motorista da wait list (admin)
-router.post('/api/waitlist/reject', authenticateSupport, requireSupportRoles(WAITLIST_ADMIN_ROLES), async (req, res) => {
+router.post('/api/waitlist/reject', authenticateSupport, requireSupportRoles(WAITLIST_ADMIN_ROLES), requireAdminMutationsEnabled, async (req, res) => {
   try {
     const { driverId, reason = '' } = req.body;
     const adminId = req.user.uid;
@@ -1106,7 +1129,7 @@ router.post('/api/waitlist/reject', authenticateSupport, requireSupportRoles(WAI
 });
 
 // PUT /api/waitlist/position - Ajustar posição na wait list (admin)
-router.put('/api/waitlist/position', authenticateSupport, requireSupportRoles(WAITLIST_ADMIN_ROLES), async (req, res) => {
+router.put('/api/waitlist/position', authenticateSupport, requireSupportRoles(WAITLIST_ADMIN_ROLES), requireAdminMutationsEnabled, async (req, res) => {
   try {
     const { driverId, newPosition } = req.body;
     const adminId = req.user.uid;
@@ -1453,7 +1476,7 @@ router.get('/api/waitlist/landing/list', authenticateSupport, requireSupportRole
  * PATCH /api/waitlist/landing/:id/status - Atualizar status de um cadastro
  * Body: { status: 'pending' | 'contacted' | 'converted' }
  */
-router.patch('/api/waitlist/landing/:id/status', authenticateSupport, requireSupportRoles(WAITLIST_ADMIN_ROLES), async (req, res) => {
+router.patch('/api/waitlist/landing/:id/status', authenticateSupport, requireSupportRoles(WAITLIST_ADMIN_ROLES), requireAdminMutationsEnabled, async (req, res) => {
   try {
     const { id } = req.params;
     const { status } = req.body;
@@ -1489,7 +1512,7 @@ router.patch('/api/waitlist/landing/:id/status', authenticateSupport, requireSup
 /**
  * DELETE /api/waitlist/landing/:id - Remover cadastro da waitlist
  */
-router.delete('/api/waitlist/landing/:id', authenticateSupport, requireSupportRoles(WAITLIST_ADMIN_ROLES), async (req, res) => {
+router.delete('/api/waitlist/landing/:id', authenticateSupport, requireSupportRoles(WAITLIST_ADMIN_ROLES), requireAdminMutationsEnabled, async (req, res) => {
   try {
     const { id } = req.params;
     const firestore = admin.firestore();

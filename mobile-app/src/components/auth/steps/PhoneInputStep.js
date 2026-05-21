@@ -532,13 +532,9 @@ const PhoneInputStep = ({ onVerificationSent, onPasswordLoginSuccess }) => {
                 showsVerticalScrollIndicator={false}
             >
                 <View style={styles.header}>
-                    <View style={styles.eyebrow}>
-                        <View style={styles.leafMark} />
-                        <Text style={styles.eyebrowText}>Configuração em 2 min</Text>
-                    </View>
-                    <Text style={styles.title}>Comece pelo telefone</Text>
+                    <Text style={styles.title}>Bem-vindo à Leaf</Text>
                     <Text style={styles.subtitle}>
-                        Enviaremos códigos por SMS e avisos importantes da sua corrida.
+                        Digite seu celular para entrar ou criar sua conta. Vamos enviar um código por SMS.
                     </Text>
                 </View>
 
@@ -550,7 +546,7 @@ const PhoneInputStep = ({ onVerificationSent, onPasswordLoginSuccess }) => {
 
                         <TextInput
                             testID="auth-phone-input"
-                            placeholder="Celular"
+                            placeholder="Seu celular"
                             placeholderTextColor={color.textMuted}
                             keyboardType="phone-pad"
                             value={phoneNumber}
@@ -703,12 +699,16 @@ const PhoneInputStep = ({ onVerificationSent, onPasswordLoginSuccess }) => {
                                 : 'Continuar'}
                         disabled={phoneNumber.length < 10}
                         style={styles.continueButton}
+                        textStyle={styles.continueButtonText}
                     />
 
                     {!requiresPassword ? (
                         <>
                             <Text style={styles.firstAccessHint}>
-                                Informe seu telefone para confirmar sua conta com segurança.
+                                Esse passo ajuda a manter sua conta segura.
+                            </Text>
+                            <Text style={styles.hiddenText}>
+                                Informe seu celular para confirmar sua conta com segurança.
                             </Text>
                             <TouchableOpacity
                                 activeOpacity={0.82}
@@ -730,15 +730,16 @@ const PhoneInputStep = ({ onVerificationSent, onPasswordLoginSuccess }) => {
 
 const styles = StyleSheet.create({
     keyboardContainer: {
-        flex: 1
+        flex: 1,
+        backgroundColor: '#F6FAF6'
     },
     scrollView: {
         flex: 1
     },
     container: {
         flexGrow: 1,
-        paddingHorizontal: spacing.lg,
-        paddingTop: spacing.xl,
+        paddingHorizontal: 32,
+        paddingTop: 66,
         paddingBottom: spacing.lg,
         justifyContent: 'flex-start'
     },
@@ -746,63 +747,31 @@ const styles = StyleSheet.create({
         paddingBottom: spacing.xxl + spacing.lg
     },
     header: {
-        marginTop: spacing.xl,
-        marginBottom: spacing.lg
-    },
-    eyebrow: {
-        alignSelf: 'flex-start',
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: 8,
-        borderRadius: radius.pill,
-        paddingHorizontal: 10,
-        paddingVertical: 8,
-        backgroundColor: color.accentSoft,
-        marginBottom: spacing.md
-    },
-    leafMark: {
-        width: 14,
-        height: 14,
-        borderTopLeftRadius: 10,
-        borderTopRightRadius: 10,
-        borderBottomRightRadius: 10,
-        borderBottomLeftRadius: 3,
-        backgroundColor: color.accent,
-        transform: [{ rotate: '-34deg' }]
-    },
-    eyebrowText: {
-        color: color.accent,
-        fontSize: 12,
-        lineHeight: 14,
-        fontFamily: fonts.Bold
+        marginBottom: 94
     },
     title: {
-        marginBottom: spacing.sm,
-        color: color.textPrimary,
-        fontSize: 34,
-        lineHeight: 38,
-        fontFamily: fonts.Bold,
+        color: '#102018',
+        fontSize: 19,
+        lineHeight: 25,
+        fontFamily: fonts.Medium,
         textAlign: 'left',
         letterSpacing: 0
     },
     subtitle: {
-        marginBottom: 0,
-        color: color.textSecondary,
-        fontSize: 15,
-        lineHeight: 21,
+        marginTop: 8,
+        color: '#66756B',
+        fontSize: 13,
+        lineHeight: 18,
         fontFamily: fonts.Regular,
         textAlign: 'left'
     },
     contentCard: {
-        borderRadius: radius.xl,
-        borderWidth: 1,
-        borderColor: color.glassStroke,
-        backgroundColor: color.panel,
-        padding: spacing.sm,
-        marginTop: 'auto',
-        marginBottom: spacing.sm,
-        shadowColor: color.accent,
-        ...onboardingTheme.elevation.soft
+        borderRadius: 0,
+        borderWidth: 0,
+        backgroundColor: 'transparent',
+        padding: 0,
+        marginTop: 0,
+        marginBottom: spacing.sm
     },
     passwordInlineContainer: {
         marginTop: spacing.sm
@@ -871,56 +840,75 @@ const styles = StyleSheet.create({
     inputContainer: {
         flexDirection: 'row',
         alignItems: 'center',
-        backgroundColor: color.surfaceMuted,
+        backgroundColor: '#FFFFFF',
         borderWidth: 1,
-        borderColor: color.border,
-        borderRadius: radius.md,
-        paddingRight: spacing.sm,
+        borderColor: '#DFE8E1',
+        borderRadius: 20,
+        paddingRight: 18,
         minHeight: 58
     },
     countrySelector: {
-        paddingHorizontal: spacing.sm,
+        width: 64,
+        paddingHorizontal: 0,
         justifyContent: 'center',
         borderRightWidth: 1,
-        borderRightColor: color.border,
+        borderRightColor: '#DFE8E1',
         height: 58
     },
     countryCode: {
         marginTop: 1,
-        color: color.textPrimary,
+        color: '#101C14',
         fontSize: 16,
-        lineHeight: 20,
-        fontFamily: fonts.SemiBold
+        lineHeight: 21,
+        fontFamily: fonts.Medium,
+        textAlign: 'center'
     },
     input: {
         flex: 1,
         height: 58,
-        paddingHorizontal: spacing.sm,
-        fontSize: 15,
-        lineHeight: 20,
-        letterSpacing: 0.2,
-        color: color.textPrimary,
-        fontFamily: fonts.Medium
+        paddingHorizontal: 18,
+        fontSize: 16,
+        lineHeight: 21,
+        letterSpacing: 0,
+        color: '#101C14',
+        fontFamily: fonts.Regular
     },
     footer: {
-        marginTop: 0,
+        marginTop: 'auto',
         paddingTop: spacing.xs,
-        paddingBottom: spacing.xs
+        paddingBottom: 22
     },
     footerExpanded: {
         marginTop: spacing.sm,
         paddingBottom: spacing.xl
     },
     continueButton: {
-        marginBottom: spacing.xs
+        minHeight: 46,
+        borderRadius: 23,
+        marginTop: 0,
+        marginBottom: 22,
+        shadowOpacity: 0,
+        elevation: 0
+    },
+    continueButtonText: {
+        fontSize: 12,
+        lineHeight: 16,
+        fontFamily: fonts.Medium
     },
     firstAccessHint: {
-        marginTop: spacing.xs,
+        marginTop: 0,
         textAlign: 'center',
-        color: color.textSecondary,
-        fontSize: 13,
-        lineHeight: 18,
-        fontFamily: fonts.SemiBold
+        color: '#A5B0A8',
+        fontSize: 11,
+        lineHeight: 15,
+        fontFamily: fonts.Regular,
+        paddingHorizontal: 14
+    },
+    hiddenText: {
+        position: 'absolute',
+        width: 1,
+        height: 1,
+        opacity: 0
     },
     passwordFallbackButton: {
         marginTop: spacing.xs,

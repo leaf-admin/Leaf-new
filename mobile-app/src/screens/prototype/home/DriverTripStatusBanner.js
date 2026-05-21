@@ -118,7 +118,7 @@ const styles = StyleSheet.create({
     fontSize: 12,
     textTransform: 'uppercase',
     letterSpacing: 1.4,
-    color: '#1A7A3E'
+    color: '#1A330E'
   },
   subtitle: {
     marginTop: 4,
@@ -151,7 +151,7 @@ const styles = StyleSheet.create({
   progressFill: {
     height: '100%',
     borderRadius: 999,
-    backgroundColor: '#1A7A3E'
+    backgroundColor: '#1A330E'
   },
   infoRow: {
     marginTop: 10,

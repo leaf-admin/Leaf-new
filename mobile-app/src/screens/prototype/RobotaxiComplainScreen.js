@@ -1,5 +1,17 @@
 import React, { useCallback, useMemo, useState } from 'react';
-import { Alert, StatusBar, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import {
+  Alert,
+  KeyboardAvoidingView,
+  Platform,
+  ScrollView,
+  StatusBar,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
+  useWindowDimensions,
+} from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { fonts } from '../../theme/runtimeTokens';
@@ -22,12 +34,14 @@ const ISSUE_TYPES = [
 export default function RobotaxiComplainScreen({ navigation, route }) {
   const { openSupportTicket, supportLoading, supportError, supportLastTicket, lastReceipt } = usePrototypeRideRuntime();
   const insets = useSafeAreaInsets();
+  const { height: windowHeight } = useWindowDimensions();
   const [cardHeight, setCardHeight] = useState(FALLBACK_CARD_HEIGHT);
   const [selectedTypeId, setSelectedTypeId] = useState(ISSUE_TYPES[0].id);
   const [subject, setSubject] = useState(route?.params?.subject || 'Relato sobre esta corrida');
   const [description, setDescription] = useState('');
   const [localHistory, setLocalHistory] = useState([]);
   const sheetBottom = insets.bottom + SHEET_BOTTOM_OFFSET;
+  const cardMaxHeight = Math.max(390, windowHeight - insets.top - insets.bottom - 82);
   const receipt = route?.params?.receipt || lastReceipt || null;
 
   usePrototypeMapOcclusion({
@@ -105,73 +119,86 @@ export default function RobotaxiComplainScreen({ navigation, route }) {
         <StatusBar translucent backgroundColor="transparent" barStyle="dark-content" />
 
         <PrototypeDismissibleSheet onClose={handleDismiss} sheetStyle={[styles.sheetWrap, { bottom: sheetBottom }]}>
-          <PrototypeCard onLayout={handleCardLayout} style={styles.card}>
-            <CardHandle />
+          <KeyboardAvoidingView
+            pointerEvents="box-none"
+            behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+            keyboardVerticalOffset={Math.max(0, insets.top - 4)}
+            style={styles.keyboardAvoiding}
+          >
+            <PrototypeCard onLayout={handleCardLayout} style={[styles.card, { maxHeight: cardMaxHeight }]}>
+              <ScrollView
+                showsVerticalScrollIndicator={false}
+                keyboardShouldPersistTaps="handled"
+                contentContainerStyle={styles.cardScroll}
+              >
+                <CardHandle />
 
-            <Text style={styles.title}>Relatar problema</Text>
-            <Text style={styles.subtitle}>Abra uma reclamacao com o contexto da viagem.</Text>
+                <Text style={styles.title}>Relatar problema</Text>
+                <Text style={styles.subtitle}>Abra uma reclamacao com o contexto da viagem.</Text>
 
-            <View style={styles.typeRow}>
-              {ISSUE_TYPES.map(item => {
-                const active = item.id === selectedTypeId;
-                return (
-                  <TouchableOpacity
-                    key={item.id}
-                    activeOpacity={0.86}
-                    style={[styles.typeChip, active && styles.typeChipActive]}
-                    onPress={() => setSelectedTypeId(item.id)}
-                  >
-                    <Ionicons name={item.icon} size={14} color={color.text.primary} />
-                    <Text style={styles.typeChipText}>{item.label}</Text>
-                  </TouchableOpacity>
-                );
-              })}
-            </View>
+                <View style={styles.typeRow}>
+                  {ISSUE_TYPES.map(item => {
+                    const active = item.id === selectedTypeId;
+                    return (
+                      <TouchableOpacity
+                        key={item.id}
+                        activeOpacity={0.86}
+                        style={[styles.typeChip, active && styles.typeChipActive]}
+                        onPress={() => setSelectedTypeId(item.id)}
+                      >
+                        <Ionicons name={item.icon} size={14} color={color.text.primary} />
+                        <Text style={styles.typeChipText}>{item.label}</Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
 
-            <View style={styles.inputBlock}>
-              <Text style={styles.inputLabel}>Assunto</Text>
-              <TextInput
-                value={subject}
-                onChangeText={setSubject}
-                placeholder="Descreva o tema principal"
-                placeholderTextColor={color.text.muted}
-                style={styles.input}
-              />
-            </View>
+                <View style={styles.inputBlock}>
+                  <Text style={styles.inputLabel}>Assunto</Text>
+                  <TextInput
+                    value={subject}
+                    onChangeText={setSubject}
+                    placeholder="Descreva o tema principal"
+                    placeholderTextColor={color.text.muted}
+                    style={styles.input}
+                  />
+                </View>
 
-            <View style={[styles.inputBlock, styles.inputBlockLast]}>
-              <Text style={styles.inputLabel}>Descricao</Text>
-              <TextInput
-                value={description}
-                onChangeText={setDescription}
-                placeholder={`Detalhe o ocorrido (${selectedType.label.toLowerCase()})`}
-                placeholderTextColor={color.text.muted}
-                style={[styles.input, styles.textarea]}
-                multiline
-                textAlignVertical="top"
-              />
-            </View>
+                <View style={[styles.inputBlock, styles.inputBlockLast]}>
+                  <Text style={styles.inputLabel}>Descricao</Text>
+                  <TextInput
+                    value={description}
+                    onChangeText={setDescription}
+                    placeholder={`Detalhe o ocorrido (${selectedType.label.toLowerCase()})`}
+                    placeholderTextColor={color.text.muted}
+                    style={[styles.input, styles.textarea]}
+                    multiline
+                    textAlignVertical="top"
+                  />
+                </View>
 
-            <PrototypePrimaryButton
-              label={supportLoading ? 'Enviando...' : 'Enviar reclamacao'}
-              icon="document-text-outline"
-              onPress={supportLoading ? undefined : handleSubmit}
-              style={styles.submitButton}
-            />
+                <PrototypePrimaryButton
+                  label={supportLoading ? 'Enviando...' : 'Enviar reclamacao'}
+                  icon="document-text-outline"
+                  onPress={supportLoading ? undefined : handleSubmit}
+                  style={styles.submitButton}
+                />
 
-            {ticketRows.length > 0 ? (
-              <View style={styles.historyWrap}>
-                {ticketRows.map(item => (
-                  <View key={item.id} style={styles.historyRow}>
-                    <Text style={styles.historyId}>#{item.id}</Text>
-                    <Text style={styles.historyStatus}>{item.status}</Text>
+                {ticketRows.length > 0 ? (
+                  <View style={styles.historyWrap}>
+                    {ticketRows.map(item => (
+                      <View key={item.id} style={styles.historyRow}>
+                        <Text style={styles.historyId}>#{item.id}</Text>
+                        <Text style={styles.historyStatus}>{item.status}</Text>
+                      </View>
+                    ))}
                   </View>
-                ))}
-              </View>
-            ) : null}
+                ) : null}
 
-            {supportError ? <Text style={styles.errorText}>{supportError}</Text> : null}
-          </PrototypeCard>
+                {supportError ? <Text style={styles.errorText}>{supportError}</Text> : null}
+              </ScrollView>
+            </PrototypeCard>
+          </KeyboardAvoidingView>
         </PrototypeDismissibleSheet>
       </View>
     </PrototypeScreenTransition>
@@ -185,13 +212,23 @@ const styles = StyleSheet.create({
   },
   sheetWrap: {
     position: 'absolute',
-    left: 10,
-    right: 10
+    left: 0,
+    right: 0
+  },
+  keyboardAvoiding: {
+    width: '100%'
   },
   card: {
-    paddingHorizontal: 12,
-    paddingTop: 10,
-    paddingBottom: 12
+    borderTopLeftRadius: 32,
+    borderTopRightRadius: 32,
+    borderBottomLeftRadius: 0,
+    borderBottomRightRadius: 0,
+    paddingHorizontal: 28,
+    paddingTop: 16,
+    paddingBottom: 16
+  },
+  cardScroll: {
+    paddingBottom: 2
   },
   title: {
     color: color.text.primary,

@@ -5,19 +5,39 @@ import { fonts } from "../../theme/runtimeTokens";
 import PrototypeScreenTransition from "../../components/prototype/PrototypeScreenTransition";
 import PrototypeDismissibleSheet from "../../components/prototype/PrototypeDismissibleSheet";
 import {
-  CardHandle,
-  PrototypeCard,
-  PrototypePrimaryButton,
-} from "../../components/prototype/PrototypeUI";
+  LeafButton,
+  LeafDivider,
+  LeafInfoRow,
+  LeafMetricRow,
+  LeafRideSheet,
+  LeafStateHeader,
+  leafRideColors,
+} from "../../components/prototype/LeafRideUI";
 import WooviPaymentModal from "../../components/payment/WooviPaymentModal";
-import robotaxiPrototypeTokens from "../../components/design-system/robotaxiPrototypeTokens";
+import SecurePaymentBadge from "../../components/payment/SecurePaymentBadge";
 import { usePrototypeMapOcclusion } from "./prototypeMapOcclusion";
 import { usePrototypeRideRuntime } from "./prototypeRideRuntime";
 import { resolveMeaningfulAddress } from "./addressLabelUtils";
 
-const { color, typography } = robotaxiPrototypeTokens;
-const SHEET_BOTTOM_OFFSET = 98;
-const FALLBACK_CARD_HEIGHT = 284;
+const SHEET_BOTTOM_OFFSET = 16;
+const FALLBACK_CARD_HEIGHT = 356;
+
+function formatCurrency(value) {
+  return `R$ ${Number(value || 0)
+    .toFixed(2)
+    .replace(".", ",")}`;
+}
+
+function resolveLeafFee(fare) {
+  const numeric = Number(fare);
+  if (!Number.isFinite(numeric) || numeric <= 0) {
+    return null;
+  }
+  if (numeric > 50) {
+    return numeric * 0.03;
+  }
+  return numeric > 25 ? 1.49 : 0.99;
+}
 
 export default function RobotaxiPaymentScreen({ navigation, route }) {
   const {
@@ -57,8 +77,7 @@ export default function RobotaxiPaymentScreen({ navigation, route }) {
     Number.isFinite(destinationCoordinate?.latitude) &&
     Number.isFinite(destinationCoordinate?.longitude),
   );
-  // The prototype payment screen should always auto-confirm PIX in QA/dev so
-  // the UI can exercise the real ride lifecycle without waiting on manual PIX.
+  const leafFee = resolveLeafFee(fare);
   const qaAutoConfirmPix = true;
 
   usePrototypeMapOcclusion({
@@ -246,64 +265,77 @@ export default function RobotaxiPaymentScreen({ navigation, route }) {
           backgroundColor="transparent"
           barStyle="dark-content"
         />
+        <LeafStateHeader
+          insetsTop={insets.top}
+          title="Confirmar corrida"
+          subtitle="Revise valor, tempo e pagamento antes de pedir."
+        />
 
         <PrototypeDismissibleSheet
           onClose={handleDismiss}
           sheetStyle={[styles.sheetWrap, { bottom: sheetBottom }]}
         >
-          <PrototypeCard onLayout={handleCardLayout} style={styles.paymentCard}>
-            <CardHandle />
-
-            <Text style={styles.title}>Pagamento PIX</Text>
-            <Text style={styles.subtitle}>
-              PIX é o único método disponível neste fluxo
-            </Text>
-
-            <View style={styles.summaryBox}>
-              <View style={styles.summaryRow}>
-                <Text style={styles.summaryLabel}>Destino</Text>
-                <Text style={styles.summaryValue}>{destination}</Text>
-              </View>
-              <View style={styles.summaryRow}>
-                <Text style={styles.summaryLabel}>Categoria</Text>
-                <Text style={styles.summaryValue}>{vehicle}</Text>
-              </View>
-              <View style={[styles.summaryRow, styles.summaryRowLast]}>
-                <Text style={styles.summaryLabelStrong}>Total</Text>
-                <Text style={styles.summaryValueStrong}>
-                  R$ {Number(fare).toFixed(2)}
-                </Text>
-              </View>
+          <LeafRideSheet onLayout={handleCardLayout} style={styles.paymentCard}>
+            <View style={styles.headerRow}>
+              <Text style={styles.title}>Sua corrida</Text>
+              <Text style={styles.price}>{formatCurrency(fare)}</Text>
             </View>
 
-            <Text style={styles.pixHint}>
-              A cobrança será gerada em QR Code PIX para confirmação imediata.
-            </Text>
+            <LeafDivider style={styles.divider} />
 
-            <PrototypePrimaryButton
-              label={
-                submitting
-                  ? "Enviando solicitação..."
-                  : checkingAvailability
-                    ? "Verificando motoristas..."
-                    : canRequestRide
-                      ? "Pagar com PIX"
-                      : "Selecione um destino"
-              }
-              icon="shield-checkmark-outline"
-              testID="passenger-payment-pay-pix-button"
-              accessibilityLabel="passenger-payment-pay-pix-button"
-              onPress={
-                submitting || checkingAvailability
-                  ? undefined
-                  : handleOpenPixModal
-              }
-              style={styles.ctaButton}
+            <LeafMetricRow
+              metrics={[
+                { value: "4 min", label: "buscar" },
+                { value: "2,8 km", label: "distancia" },
+                {
+                  value: leafFee == null ? "--" : formatCurrency(leafFee),
+                  label: "taxa Leaf",
+                },
+              ]}
             />
+
+            <LeafDivider style={styles.dividerLarge} />
+
+            <LeafInfoRow
+              marker="$"
+              title="Pagamento via PIX"
+              subtitle="QR Code no próximo passo"
+              style={styles.paymentRow}
+            />
+            <SecurePaymentBadge style={styles.securePaymentBadge} />
+
+            <Text style={styles.hiddenText}>{destination}</Text>
+            <Text style={styles.hiddenText}>{vehicle}</Text>
+
+            <View style={styles.actionsRow}>
+              <LeafButton
+                label="Editar"
+                tone="ghost"
+                onPress={handleDismiss}
+                style={styles.editButton}
+              />
+              <LeafButton
+                label={
+                  submitting
+                    ? "Enviando..."
+                    : checkingAvailability
+                      ? "Verificando..."
+                      : canRequestRide
+                        ? "Confirmar"
+                        : "Sem destino"
+                }
+                tone="primary"
+                testID="passenger-payment-pay-pix-button"
+                accessibilityLabel="passenger-payment-pay-pix-button"
+                disabled={submitting || checkingAvailability}
+                onPress={handleOpenPixModal}
+                style={styles.ctaButton}
+              />
+            </View>
 
             {!canRequestRide ? (
               <Text style={styles.pendingText}>
-                Abra “Para onde?” e escolha o destino antes de pagar.
+                Abra Para onde? e escolha o destino antes de pagar.
               </Text>
             ) : null}
             {availabilityNotice ? (
@@ -315,7 +347,7 @@ export default function RobotaxiPaymentScreen({ navigation, route }) {
                 Pagamento pendente de confirmação: {paymentState.error}
               </Text>
             ) : null}
-          </PrototypeCard>
+          </LeafRideSheet>
         </PrototypeDismissibleSheet>
 
         <WooviPaymentModal
@@ -354,86 +386,77 @@ const styles = StyleSheet.create({
   },
   sheetWrap: {
     position: "absolute",
-    left: 10,
-    right: 10,
+    left: 0,
+    right: 0,
   },
   paymentCard: {
-    paddingHorizontal: 12,
-    paddingTop: 10,
-    paddingBottom: 12,
+    minHeight: 356,
+    borderTopLeftRadius: 32,
+    borderTopRightRadius: 32,
+    borderBottomLeftRadius: 0,
+    borderBottomRightRadius: 0,
+    paddingHorizontal: 28,
+    paddingTop: 16,
   },
-  title: {
-    color: color.text.primary,
-    fontFamily: fonts.SemiBold,
-    fontSize: typography.subtitle.size,
-    lineHeight: typography.subtitle.lineHeight,
-  },
-  subtitle: {
-    marginTop: 1,
-    color: color.text.secondary,
-    fontFamily: fonts.Regular,
-    fontSize: typography.caption.size,
-    lineHeight: typography.caption.lineHeight,
-  },
-  summaryBox: {
-    marginTop: 10,
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: color.border.subtle,
-    backgroundColor: color.surface.secondary,
-    overflow: "hidden",
-  },
-  summaryRow: {
-    minHeight: 42,
-    paddingHorizontal: 10,
+  headerRow: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: color.border.separator,
+    gap: 12,
   },
-  summaryRowLast: {
-    borderBottomWidth: 0,
-  },
-  summaryLabel: {
-    color: color.text.secondary,
+  title: {
+    color: leafRideColors.text,
     fontFamily: fonts.Medium,
-    fontSize: typography.caption.size,
-    lineHeight: typography.caption.lineHeight,
+    fontSize: 20,
+    lineHeight: 26,
   },
-  summaryValue: {
-    color: color.text.primary,
+  price: {
+    color: leafRideColors.text,
     fontFamily: fonts.Medium,
-    fontSize: typography.caption.size,
-    lineHeight: typography.caption.lineHeight,
+    fontSize: 22,
+    lineHeight: 29,
   },
-  summaryLabelStrong: {
-    color: color.text.primary,
-    fontFamily: fonts.SemiBold,
-    fontSize: typography.body.size,
-    lineHeight: typography.body.lineHeight,
+  divider: {
+    marginTop: 16,
+    marginBottom: 22,
   },
-  summaryValueStrong: {
-    color: color.accent.primary,
-    fontFamily: fonts.SemiBold,
-    fontSize: typography.body.size,
-    lineHeight: typography.body.lineHeight,
+  dividerLarge: {
+    marginTop: 28,
+    marginBottom: 20,
   },
-  pixHint: {
-    marginTop: 10,
-    color: color.text.secondary,
-    fontFamily: fonts.Regular,
-    fontSize: typography.caption.size,
-    lineHeight: typography.caption.lineHeight,
+  paymentRow: {
+    minHeight: 44,
+  },
+  securePaymentBadge: {
+    marginTop: 4,
+  },
+  actionsRow: {
+    marginTop: 22,
+    flexDirection: "row",
+    gap: 16,
+  },
+  editButton: {
+    flex: 1,
+    height: 46,
+    borderRadius: 23,
   },
   ctaButton: {
-    marginTop: 10,
+    flex: 1.08,
+    height: 46,
+    borderRadius: 23,
   },
   pendingText: {
-    marginTop: 8,
-    color: color.text.secondary,
+    marginTop: 10,
+    color: leafRideColors.dangerText,
     fontFamily: fonts.Regular,
-    fontSize: typography.caption.size,
-    lineHeight: typography.caption.lineHeight,
+    fontSize: 11,
+    lineHeight: 15,
+    textAlign: "center",
+  },
+  hiddenText: {
+    position: "absolute",
+    width: 1,
+    height: 1,
+    opacity: 0,
   },
 });

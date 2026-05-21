@@ -250,7 +250,7 @@ const OTPStep = ({ phoneNumber, confirmation, onVerified, onBack }) => {
                 }
             }
 
-            Alert.alert('Erro na Verificação', errorMessage);
+            Alert.alert('Código não confirmado', errorMessage);
         } finally {
             verifyInFlightRef.current = false;
             setLoading(false);
@@ -318,7 +318,7 @@ const OTPStep = ({ phoneNumber, confirmation, onVerified, onBack }) => {
             setTimer(30);
             setCanResend(false);
             setOtp(['', '', '', '', '', '']);
-            Alert.alert('Sucesso', 'Novo código enviado!');
+            Alert.alert('Código enviado', 'Enviamos um novo código por SMS.');
         } catch (error) {
             Logger.error('Erro ao reenviar código:', error);
             Alert.alert('Erro', 'Não foi possível reenviar o código. Tente novamente.');
@@ -335,9 +335,9 @@ const OTPStep = ({ phoneNumber, confirmation, onVerified, onBack }) => {
         >
             <View style={styles.container}>
                 <View style={styles.header}>
-                    <Text style={styles.title}>Digite o código</Text>
+                    <Text style={styles.title}>Confira seu SMS</Text>
                     <Text style={styles.subtitle}>
-                        Enviado para {phoneNumber}. Colar também funciona; verificamos ao completar 6 dígitos.
+                        Enviamos um código de 6 dígitos para confirmar seu celular.
                     </Text>
                 </View>
 
@@ -368,9 +368,11 @@ const OTPStep = ({ phoneNumber, confirmation, onVerified, onBack }) => {
                         <ContinueButton
                             onPress={handleVerifyOTP}
                             disabled={!otp.every(digit => digit) || loading}
-                            text={loading ? 'Verificando...' : 'Verificar'}
+                            text={loading ? 'Confirmando...' : 'Confirmar'}
                             testID="auth-otp-verify-btn"
                             accessibilityLabel="auth-otp-verify-btn"
+                            style={styles.verifyButton}
+                            textStyle={styles.verifyButtonText}
                         />
                     </View>
                 </View>
@@ -378,7 +380,6 @@ const OTPStep = ({ phoneNumber, confirmation, onVerified, onBack }) => {
                 {/* Reenvio do código */}
                 <View style={styles.resendContainer}>
                     <Text style={styles.resendText}>
-                        Não recebeu o código?{' '}
                     </Text>
                     {canResend ? (
                         <TouchableOpacity
@@ -387,10 +388,10 @@ const OTPStep = ({ phoneNumber, confirmation, onVerified, onBack }) => {
                             testID="auth-otp-resend-btn"
                             accessibilityLabel="auth-otp-resend-btn"
                         >
-                            <Text style={styles.resendLink}>Reenviar</Text>
+                            <Text style={styles.resendLink}>Enviar novamente</Text>
                         </TouchableOpacity>
                     ) : (
-                        <Text style={styles.resendTimer}>Reenviar em {timer}s</Text>
+                        <Text style={styles.resendTimer}>Novo código em 00:{String(timer).padStart(2, '0')}</Text>
                     )}
                 </View>
 
@@ -413,61 +414,60 @@ const OTPStep = ({ phoneNumber, confirmation, onVerified, onBack }) => {
 const styles = StyleSheet.create({
     keyboardView: {
         flex: 1,
-        width: '100%'
+        width: '100%',
+        backgroundColor: '#F6FAF6'
     },
     container: {
         width: '100%',
-        paddingHorizontal: spacing.lg,
-        paddingTop: spacing.xl,
+        paddingHorizontal: 32,
+        paddingTop: 66,
         paddingBottom: spacing.sm,
         flex: 1,
         justifyContent: 'flex-start'
     },
     header: {
-        marginTop: spacing.xl,
-        marginBottom: spacing.lg
+        marginBottom: 98
     },
     title: {
-        marginBottom: spacing.sm,
-        color: color.textPrimary,
-        fontSize: 34,
-        lineHeight: 38,
-        fontFamily: fonts.Bold,
+        color: '#102018',
+        fontSize: 19,
+        lineHeight: 25,
+        fontFamily: fonts.Medium,
         letterSpacing: 0
     },
     subtitle: {
-        color: color.textSecondary,
-        fontSize: 15,
-        lineHeight: 21,
+        marginTop: 8,
+        color: '#66756B',
+        fontSize: 13,
+        lineHeight: 18,
         fontFamily: fonts.Regular
     },
     card: {
-        backgroundColor: color.panel,
-        borderWidth: 1,
-        borderColor: color.glassStroke,
-        borderRadius: radius.xl,
-        padding: spacing.sm,
-        shadowColor: color.accent,
-        ...elevation.soft
+        backgroundColor: 'transparent',
+        borderWidth: 0,
+        borderRadius: 0,
+        padding: 0,
+        shadowOpacity: 0,
+        elevation: 0
     },
     otpContainer: {
         flexDirection: 'row',
         justifyContent: 'space-between',
-        marginBottom: spacing.sm,
-        gap: 6
+        marginBottom: 0,
+        gap: 10
     },
     otpInput: {
-        flex: 1,
-        maxWidth: 44,
-        height: 52,
+        width: 44,
+        height: 54,
         borderWidth: 1,
-        borderColor: color.border,
-        borderRadius: radius.md,
+        borderColor: '#DFE8E1',
+        borderRadius: 17,
         textAlign: 'center',
-        fontSize: 20,
-        fontFamily: fonts.Bold,
-        color: color.textPrimary,
-        backgroundColor: color.surface
+        fontSize: 18,
+        lineHeight: 24,
+        fontFamily: fonts.Medium,
+        color: '#101C14',
+        backgroundColor: '#FFFFFF'
     },
     successTick: {
         alignSelf: 'center',
@@ -484,37 +484,54 @@ const styles = StyleSheet.create({
         marginBottom: spacing.xs
     },
     buttonContainer: {
-        marginBottom: 0
+        position: 'absolute',
+        left: 0,
+        right: 0,
+        top: 482
+    },
+    verifyButton: {
+        minHeight: 46,
+        borderRadius: 23,
+        marginTop: 0,
+        marginBottom: 0,
+        shadowOpacity: 0,
+        elevation: 0
+    },
+    verifyButtonText: {
+        fontSize: 12,
+        lineHeight: 16,
+        fontFamily: fonts.Medium
     },
     resendContainer: {
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'center',
-        marginTop: spacing.lg,
+        marginTop: 28,
         marginBottom: spacing.md
     },
     resendText: {
-        fontSize: 13,
-        lineHeight: 18,
-        color: color.textSecondary,
+        fontSize: 12,
+        lineHeight: 16,
+        color: '#5F6B62',
         fontFamily: fonts.Medium
     },
     resendLink: {
         textDecorationLine: 'underline',
-        fontSize: 13,
-        lineHeight: 18,
-        color: color.accent,
+        fontSize: 12,
+        lineHeight: 16,
+        color: '#0F3B16',
         fontFamily: fonts.Medium
     },
     resendTimer: {
-        fontSize: 13,
-        lineHeight: 18,
-        color: color.textMuted,
+        fontSize: 12,
+        lineHeight: 16,
+        color: '#5F6B62',
         fontFamily: fonts.Medium
     },
     footer: {
         marginTop: 'auto',
-        paddingBottom: spacing.md
+        paddingBottom: spacing.md,
+        opacity: 0
     },
     backButton: {
         marginTop: 4

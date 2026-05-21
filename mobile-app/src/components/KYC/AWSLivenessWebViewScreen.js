@@ -53,7 +53,7 @@ function buildWebViewHtml({ sessionId, region, credentials }) {
   <title>AWS Liveness</title>
   <style>
     html, body, #root { margin: 0; padding: 0; width: 100%; height: 100%; background: #0f0f0f; color: #ffffff; }
-    .fallback { display: flex; align-items: center; justify-content: center; height: 100%; font-family: -apple-system, BlinkMacSystemFont, sans-serif; }
+    .fallback { display: flex; align-items: center; justify-content: center; height: 100%; font-family: Inter, Arial, sans-serif; }
   </style>
 </head>
 <body>

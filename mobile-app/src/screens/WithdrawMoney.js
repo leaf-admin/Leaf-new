@@ -13,6 +13,7 @@ import { useSelector } from 'react-redux';
 import { MAIN_COLOR } from '../common/sharedFunctions';
 import { fonts } from '../common/font';
 import DriverBalanceService from '../services/DriverBalanceService';
+import SecurePaymentBadge from '../components/payment/SecurePaymentBadge';
 
 export default function WithdrawMoneyScreen(props) {
   const settings = useSelector(state => state.settingsdata.settings) || {};
@@ -120,6 +121,7 @@ export default function WithdrawMoneyScreen(props) {
           testID="driver-withdraw-pix-key-input"
           accessibilityLabel="driver-withdraw-pix-key-input"
         />
+        <SecurePaymentBadge style={styles.securePaymentBadge} color="#6E7D72" />
         <TextInput
           style={[styles.inputTextStyle,{textAlign: isRTL ? 'right': 'left'}]}
           placeholder="Senha do app"
@@ -197,6 +199,10 @@ const styles = StyleSheet.create({
     backgroundColor: '#EEF8F0',
     flexDirection: 'row',
     alignItems: 'center',
+  },
+  securePaymentBadge: {
+    marginTop: 6,
+    marginLeft: 2,
   },
   dailyFeeLabel: {
     fontSize: 14,

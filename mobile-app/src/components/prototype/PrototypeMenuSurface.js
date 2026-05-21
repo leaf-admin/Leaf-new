@@ -1,10 +1,30 @@
 import React from 'react';
 import { StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import Animated, { Easing, FadeInUp } from 'react-native-reanimated';
 import { fonts } from '../../theme/runtimeTokens';
 import robotaxiPrototypeTokens from '../design-system/robotaxiPrototypeTokens';
 
-const { color, typography, elevation } = robotaxiPrototypeTokens;
+const { color, typography, elevation, motion } = robotaxiPrototypeTokens;
+const contentEnterEasing = Easing.bezier(...motion.bezier.smoothOut);
+
+function isLoadingValue(value) {
+  return value === null || value === undefined || String(value).trim() === '';
+}
+
+function PrototypeMenuSkeletonLine({ width = 48 }) {
+  return (
+    <View
+      style={[
+        styles.skeletonLine,
+        {
+          width,
+        },
+      ]}
+      accessibilityLabel="Carregando"
+    />
+  );
+}
 
 export function PrototypeMenuSurface({
   eyebrow,
@@ -33,7 +53,8 @@ export function PrototypeMenuSurface({
     >
       <View style={styles.headerRow}>
         <View style={styles.headerCopyWrap}>
-          {eyebrow ? <Text style={styles.eyebrow}>{eyebrow}</Text> : null}
+          {eyebrow && !fullScreen ? <Text style={styles.eyebrow}>{eyebrow}</Text> : null}
+          {eyebrow && fullScreen ? <Text style={styles.hiddenText}>{eyebrow}</Text> : null}
           <Text style={styles.title}>{title}</Text>
           {subtitle ? <Text style={styles.subtitle}>{subtitle}</Text> : null}
         </View>
@@ -48,7 +69,14 @@ export function PrototypeMenuSurface({
       </View>
 
       <View style={styles.headerDivider} />
-      <View style={[styles.body, fullScreen && styles.bodyFullScreen, bodyStyle]}>{children}</View>
+      <Animated.View
+        entering={FadeInUp.duration(motion.timing.quick)
+          .easing(contentEnterEasing)
+          .withInitialValues({ opacity: 0.98, transform: [{ translateY: 5 }] })}
+        style={[styles.body, fullScreen && styles.bodyFullScreen, bodyStyle]}
+      >
+        {children}
+      </Animated.View>
 
       {footer ? (
         <>
@@ -93,7 +121,7 @@ export function PrototypeMenuRow({
       accessibilityLabel={accessibilityLabel}
     >
       <View style={styles.rowIconSlot}>
-        {icon ? <Ionicons name={icon} size={18} color={active ? color.accent.strong : color.text.primary} /> : null}
+        {icon ? <View style={[styles.rowDot, active && styles.rowDotActive]} /> : null}
       </View>
 
       <View style={styles.rowCopyWrap}>
@@ -107,11 +135,17 @@ export function PrototypeMenuRow({
   );
 }
 
-export function PrototypeMenuInfoRow({ label, value, last = false }) {
+export function PrototypeMenuInfoRow({ label, value, last = false, loading = false }) {
+  const showLoading = loading || isLoadingValue(value);
+
   return (
     <View style={[styles.infoRow, last && styles.infoRowLast]}>
       <Text style={styles.infoLabel}>{label}</Text>
-      <Text style={styles.infoValue}>{value}</Text>
+      {showLoading ? (
+        <PrototypeMenuSkeletonLine width={72} />
+      ) : (
+        <Text style={styles.infoValue}>{value}</Text>
+      )}
     </View>
   );
 }
@@ -122,8 +156,14 @@ export function PrototypeMenuStatRow({ items }) {
       {items.map((item, index) => (
         <React.Fragment key={item.key || item.label}>
           <View style={styles.statBlock}>
-            <Text style={styles.statLabel}>{item.label}</Text>
-            <Text style={styles.statValue}>{item.value}</Text>
+            <Text style={styles.statLabel} numberOfLines={1}>{item.label}</Text>
+            {item.loading || isLoadingValue(item.value) ? (
+              <PrototypeMenuSkeletonLine width={item.skeletonWidth || 44} />
+            ) : (
+              <Text style={styles.statValue} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.78}>
+                {item.value}
+              </Text>
+            )}
           </View>
           {index < items.length - 1 ? <View style={styles.statDivider} /> : null}
         </React.Fragment>
@@ -169,10 +209,10 @@ const styles = StyleSheet.create({
     flex: 1,
     width: '100%',
     borderRadius: 0,
-    paddingHorizontal: 22,
+    paddingHorizontal: 31,
     paddingTop: 18,
     paddingBottom: 18,
-    backgroundColor: 'rgba(247,250,247,0.985)',
+    backgroundColor: '#F6FAF6',
     borderWidth: 0,
     shadowOpacity: 0,
     elevation: 0,
@@ -200,17 +240,17 @@ const styles = StyleSheet.create({
     letterSpacing: 1.4,
   },
   title: {
-    color: '#0A1320',
-    fontFamily: fonts.Bold,
-    fontSize: 32,
-    lineHeight: 36,
+    color: '#102018',
+    fontFamily: fonts.Medium,
+    fontSize: 19,
+    lineHeight: 25,
   },
   subtitle: {
-    marginTop: 4,
-    color: '#445062',
+    marginTop: 8,
+    color: '#66756B',
     fontFamily: fonts.Regular,
-    fontSize: typography.caption.size,
-    lineHeight: typography.caption.lineHeight,
+    fontSize: 13,
+    lineHeight: 18,
   },
   badgePill: {
     minHeight: 28,
@@ -229,12 +269,12 @@ const styles = StyleSheet.create({
     lineHeight: typography.micro.lineHeight,
   },
   headerDivider: {
-    height: 1,
-    backgroundColor: 'rgba(17,26,39,0.11)',
-    marginTop: 14,
+    height: StyleSheet.hairlineWidth,
+    backgroundColor: '#DFE8E1',
+    marginTop: 28,
   },
   body: {
-    paddingTop: 10,
+    paddingTop: 18,
   },
   bodyFullScreen: {
     flex: 1,
@@ -251,58 +291,67 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   sectionTitle: {
-    color: color.text.muted,
+    color: '#8C9A92',
     fontFamily: fonts.Medium,
-    fontSize: typography.micro.size,
-    lineHeight: typography.micro.lineHeight,
+    fontSize: 11,
+    lineHeight: 15,
     textTransform: 'uppercase',
-    letterSpacing: 1.2,
+    letterSpacing: 1.1,
     marginBottom: 8,
   },
   sectionDivider: {
-    height: 1,
-    backgroundColor: 'rgba(17,26,39,0.08)',
+    height: StyleSheet.hairlineWidth,
+    backgroundColor: '#DFE8E1',
     marginBottom: 2,
   },
   row: {
-    minHeight: 54,
+    minHeight: 70,
     flexDirection: 'row',
     alignItems: 'center',
     paddingVertical: 10,
-    borderBottomWidth: 1,
-    borderBottomColor: 'rgba(17,26,39,0.08)',
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: '#DFE8E1',
   },
   rowActive: {
-    backgroundColor: 'rgba(42,77,29,0.05)',
+    backgroundColor: 'transparent',
   },
   rowLast: {
     borderBottomWidth: 0,
     paddingBottom: 4,
   },
   rowIconSlot: {
-    width: 28,
+    width: 20,
     alignItems: 'flex-start',
     justifyContent: 'center',
+  },
+  rowDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: '#26A66A',
+  },
+  rowDotActive: {
+    backgroundColor: '#0F3B16',
   },
   rowCopyWrap: {
     flex: 1,
     paddingRight: 8,
   },
   rowTitle: {
-    color: color.text.primary,
-    fontFamily: fonts.SemiBold,
-    fontSize: 16,
-    lineHeight: 22,
+    color: '#101C14',
+    fontFamily: fonts.Medium,
+    fontSize: 13,
+    lineHeight: 17,
   },
   rowTitleActive: {
     color: color.accent.strong,
   },
   rowSubtitle: {
-    marginTop: 1,
-    color: color.text.secondary,
+    marginTop: 3,
+    color: '#5F6B62',
     fontFamily: fonts.Regular,
-    fontSize: typography.micro.size,
-    lineHeight: typography.micro.lineHeight,
+    fontSize: 10,
+    lineHeight: 13,
   },
   inlineBadge: {
     minWidth: 24,
@@ -373,14 +422,26 @@ const styles = StyleSheet.create({
     fontSize: typography.subtitle.size,
     lineHeight: typography.subtitle.lineHeight,
   },
+  skeletonLine: {
+    marginTop: 7,
+    height: 11,
+    borderRadius: 999,
+    backgroundColor: 'rgba(102,117,107,0.16)',
+  },
   closeButton: {
-    width: 34,
-    height: 34,
-    borderRadius: 17,
+    width: 32,
+    height: 32,
+    borderRadius: 16,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: 'rgba(230,237,244,0.9)',
-    borderWidth: 1,
-    borderColor: 'rgba(17,26,39,0.08)',
+    backgroundColor: '#EAF6EE',
+    borderWidth: 0,
+    borderColor: 'transparent',
+  },
+  hiddenText: {
+    position: 'absolute',
+    width: 1,
+    height: 1,
+    opacity: 0,
   },
 });
