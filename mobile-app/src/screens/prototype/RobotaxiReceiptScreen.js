@@ -28,6 +28,7 @@ import {
   resolveTripFeeAmount,
   resolveTripGrossAmount,
   resolveTripNetAmount,
+  resolveTripTollAmount,
 } from "./tripFinancialSummary";
 
 const { color } = robotaxiPrototypeTokens;
@@ -310,6 +311,7 @@ export default function RobotaxiReceiptScreen({ navigation, route }) {
   const rawBaseFare = toNumber(selected?.baseFare, NaN);
   const rawVariableFare = toNumber(selected?.variableFare, NaN);
   const totalAmount = Math.max(0, resolveTripGrossAmount(selected));
+  const tollAmount = resolveTripTollAmount(selected);
   const hasExplicitBreakdown =
     Number.isFinite(rawBaseFare) &&
     Number.isFinite(rawVariableFare) &&
@@ -329,6 +331,12 @@ export default function RobotaxiReceiptScreen({ navigation, route }) {
   const resolvedFeeAmount = resolveTripFeeAmount(selected);
   const finalTotalFees = toNumber(resolvedFeeAmount, NaN);
   const finalDriverNetAmount = toNumber(resolveTripNetAmount(selected), NaN);
+  const safeFeeAmount = Number.isFinite(finalTotalFees) ? finalTotalFees : 0;
+  const safeTollAmount = Number.isFinite(tollAmount) ? tollAmount : 0;
+  const passengerRideSubtotal = Math.max(
+    0,
+    Number((totalAmount - safeFeeAmount - safeTollAmount).toFixed(2)),
+  );
   const hasFinalFeeBreakdown =
     Number.isFinite(finalOperationalFee) ||
     Number.isFinite(finalIntermediationFee) ||
@@ -708,7 +716,7 @@ export default function RobotaxiReceiptScreen({ navigation, route }) {
     ? selected?.vehiclePlate || selected?.plate || "RJA2D41"
     : "";
   const receiptTotalLabel = isDriverView ? driverReceivedAmount : totalAmountLabel;
-  const receiptPaymentPill = isDriverView ? "Corrida concluída" : "PIX confirmado";
+  const receiptPaymentPill = isDriverView ? "Concluída" : "PIX seguro";
   const ratingButtonLabel = isDriverView
     ? driverRateButtonLabel
     : passengerRatingSubmitted
@@ -779,6 +787,21 @@ export default function RobotaxiReceiptScreen({ navigation, route }) {
     </>
   );
 
+  const renderCleanRouteRow = ({ label, title, subtitle, topDivider = true }) => (
+    <>
+      {topDivider ? <View style={styles.receiptCleanDivider} /> : null}
+      <View style={styles.receiptCleanRouteRow}>
+        <View style={styles.receiptCleanRouteLabelColumn}>
+          <Text style={styles.receiptCleanRouteLabel}>{label}</Text>
+        </View>
+        <View style={styles.receiptCleanRouteCopy}>
+          <Text style={styles.receiptCleanRowTitle} numberOfLines={1}>{title}</Text>
+          {subtitle ? <Text style={styles.receiptCleanRowSubtitle} numberOfLines={1}>{subtitle}</Text> : null}
+        </View>
+      </View>
+    </>
+  );
+
   const renderCleanValueRow = ({ title, subtitle, value, muted }) => (
     <View style={styles.receiptCleanValueRow}>
       <View style={styles.receiptCleanValueCopy}>
@@ -827,23 +850,6 @@ export default function RobotaxiReceiptScreen({ navigation, route }) {
       >
         <StatusBar translucent backgroundColor="transparent" barStyle="dark-content" />
         <View style={styles.receiptCleanMapLayer}>{renderCleanMap()}</View>
-        <View style={[styles.receiptCleanHeaderFade, { paddingTop: Math.max(insets.top + 26, 58) }]}>
-          <View style={styles.receiptCleanHeaderTop}>
-            <View style={styles.receiptCleanHeaderCopy}>
-              <Text style={styles.receiptCleanTitle}>Recibo</Text>
-              <Text style={styles.receiptCleanSubtitle}>Confira trajeto, motorista, carro e valores.</Text>
-            </View>
-            <TouchableOpacity
-              style={styles.receiptCleanClose}
-              activeOpacity={0.76}
-              onPress={handleDismiss}
-              testID={closeButtonTestId}
-              accessibilityLabel={closeButtonTestId}
-            >
-              <Text style={styles.receiptCleanCloseText}>×</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
 
         <ScrollView
           style={styles.receiptCleanSheetViewport}
@@ -859,6 +865,15 @@ export default function RobotaxiReceiptScreen({ navigation, route }) {
                 <Text style={styles.receiptCleanTotalValue}>{receiptTotalLabel}</Text>
               </View>
               <View style={styles.receiptCleanPillColumn}>
+                <TouchableOpacity
+                  style={styles.receiptCleanClose}
+                  activeOpacity={0.76}
+                  onPress={handleDismiss}
+                  testID={closeButtonTestId}
+                  accessibilityLabel={closeButtonTestId}
+                >
+                  <Text style={styles.receiptCleanCloseText}>×</Text>
+                </TouchableOpacity>
                 <View style={styles.receiptCleanPill}>
                   <Text style={styles.receiptCleanPillText}>{receiptPaymentPill}</Text>
                 </View>
@@ -875,18 +890,17 @@ export default function RobotaxiReceiptScreen({ navigation, route }) {
               right: receiptPlateLabel,
             })}
 
-            {renderCleanAvatarRow({
-              marker: "A",
+            {renderCleanRouteRow({
+              label: "Origem",
               title: pickupLocation.title,
-              subtitle: pickupLocation.subtitle ? `Origem · ${pickupLocation.subtitle}` : "Origem",
+              subtitle: pickupLocation.subtitle,
               topDivider: true,
             })}
 
-            {renderCleanAvatarRow({
-              marker: "B",
-              tone: "blue",
+            {renderCleanRouteRow({
+              label: "Destino",
               title: dropoffLocation.title,
-              subtitle: dropoffLocation.subtitle ? `Destino · ${dropoffLocation.subtitle}` : "Destino",
+              subtitle: dropoffLocation.subtitle,
               topDivider: false,
             })}
 
@@ -902,8 +916,12 @@ export default function RobotaxiReceiptScreen({ navigation, route }) {
                 <Text style={styles.receiptCleanMetricLabel}>tempo</Text>
               </View>
               <View style={styles.receiptCleanMetricCell}>
-                <Text style={styles.receiptCleanMetricValue}>{formatCurrency(finalTotalFees)}</Text>
-                <Text style={styles.receiptCleanMetricLabel}>taxa Leaf</Text>
+                <Text style={styles.receiptCleanMetricValue}>
+                  {formatCurrency(safeTollAmount > 0 ? safeTollAmount : safeFeeAmount)}
+                </Text>
+                <Text style={styles.receiptCleanMetricLabel}>
+                  {safeTollAmount > 0 ? "pedágio" : "taxa Leaf"}
+                </Text>
               </View>
             </View>
 
@@ -915,10 +933,15 @@ export default function RobotaxiReceiptScreen({ navigation, route }) {
                     subtitle: "Total pago pelo passageiro",
                     value: totalAmountLabel,
                   })}
+                  {safeTollAmount > 0 ? renderCleanValueRow({
+                    title: "Pedágio",
+                    subtitle: "Repassado integralmente",
+                    value: formatCurrency(safeTollAmount),
+                  }) : null}
                   {renderCleanValueRow({
                     title: "Taxa operacional Leaf",
                     subtitle: "Descontada antes do repasse",
-                    value: formatCurrency(finalTotalFees),
+                    value: formatCurrency(safeFeeAmount),
                     muted: true,
                   })}
                   {renderCleanValueRow({
@@ -930,14 +953,19 @@ export default function RobotaxiReceiptScreen({ navigation, route }) {
               ) : (
                 <>
                   {renderCleanValueRow({
-                    title: "Valor da corrida",
-                    subtitle: "Pagamento via PIX",
-                    value: formatCurrency(totalAmount - resolvedFeeAmount),
+                    title: "Corrida",
+                    subtitle: "Trajeto e serviço",
+                    value: formatCurrency(passengerRideSubtotal),
                   })}
+                  {safeTollAmount > 0 ? renderCleanValueRow({
+                    title: "Pedágio",
+                    subtitle: "Incluso no total pago",
+                    value: formatCurrency(safeTollAmount),
+                  }) : null}
                   {renderCleanValueRow({
-                    title: "Taxa operacional Leaf",
+                    title: "Taxa Leaf",
                     subtitle: "Inclusa no total pago",
-                    value: formatCurrency(resolvedFeeAmount),
+                    value: formatCurrency(safeFeeAmount),
                   })}
                 </>
               )}
@@ -949,7 +977,6 @@ export default function RobotaxiReceiptScreen({ navigation, route }) {
                   <Text style={styles.receiptHiddenTestText}>Rota final da corrida</Text>
                   <Text style={styles.receiptHiddenTestText}>Tempo e distância finais</Text>
                 </View>
-                {renderCleanRecentHistory()}
               </>
             ) : (
               <View style={styles.receiptHiddenTestGroup}>
@@ -2160,6 +2187,7 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(255,255,255,0.78)",
     borderWidth: 1,
     borderColor: "rgba(221,232,225,0.8)",
+    marginBottom: 8,
   },
   receiptCleanCloseText: {
     color: "#0A1410",
@@ -2290,6 +2318,26 @@ const styles = StyleSheet.create({
     lineHeight: 17,
     textAlign: "right",
   },
+  receiptCleanRouteRow: {
+    minHeight: 52,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 13,
+  },
+  receiptCleanRouteLabelColumn: {
+    width: 58,
+  },
+  receiptCleanRouteLabel: {
+    color: "#8C9A92",
+    fontFamily: fonts.SemiBold,
+    fontSize: 10,
+    lineHeight: 13,
+    textTransform: "uppercase",
+  },
+  receiptCleanRouteCopy: {
+    flex: 1,
+    minWidth: 0,
+  },
   receiptCleanMetrics: {
     minHeight: 78,
     flexDirection: "row",
@@ -2313,8 +2361,8 @@ const styles = StyleSheet.create({
     lineHeight: 14,
   },
   receiptCleanValueBlock: {
-    gap: 22,
-    paddingTop: 10,
+    gap: 13,
+    paddingTop: 8,
   },
   receiptCleanValueRow: {
     minHeight: 34,

@@ -1656,9 +1656,11 @@ class PaymentService {
     const paymentIntermediationFee = this.toReais(calculation.wooviFee);
     const totalFees = this.toReais(calculation.operationalFee + calculation.wooviFee);
     const driverNetAmount = this.toReais(calculation.netAmount);
+    const tollFee = this.toReais(calculation.tollFee);
 
     return {
       totalFare: this.toReais(totalAmountCents),
+      tollFee,
       operationalFee,
       paymentIntermediationFee,
       totalFees,

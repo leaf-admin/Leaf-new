@@ -34,6 +34,37 @@ function parseCurrencyText(value) {
   return toFiniteMoney(sanitized, null);
 }
 
+function pickMoney(...values) {
+  for (const value of values) {
+    const parsed =
+      typeof value === 'string' ? parseCurrencyText(value) : toFiniteMoney(value, null);
+    if (parsed !== null && parsed > 0) {
+      return roundMoney(parsed);
+    }
+  }
+
+  for (const value of values) {
+    const parsed =
+      typeof value === 'string' ? parseCurrencyText(value) : toFiniteMoney(value, null);
+    if (parsed !== null) {
+      return roundMoney(Math.max(0, parsed));
+    }
+  }
+
+  return null;
+}
+
+function pickCentsAsMoney(...values) {
+  for (const value of values) {
+    const parsed = toFiniteMoney(value, null);
+    if (parsed !== null && parsed > 0) {
+      return roundMoney(parsed / 100);
+    }
+  }
+
+  return null;
+}
+
 export function formatCurrencyBRL(value) {
   const numeric = toFiniteMoney(value, 0);
   const absolute = Math.abs(roundMoney(numeric)).toFixed(2);
@@ -43,15 +74,59 @@ export function formatCurrencyBRL(value) {
   return `R$ ${signal}${groupedInteger},${decimalPart}`;
 }
 
+export function resolveTripTollAmount(item = {}) {
+  const direct = pickMoney(
+    item?.tollFee,
+    item?.tollAmount,
+    item?.tollFeeReais,
+    item?.pedagio,
+    item?.['pedágio'],
+    item?.fareBreakdown?.tollFee,
+    item?.paymentBreakdown?.tollFee,
+    item?.financialBreakdown?.tollFee,
+    item?.calculation?.breakdown?.tollFee,
+    item?.fareBreakdown?.calculation?.breakdown?.tollFee,
+  );
+
+  if (direct !== null && direct > 0) {
+    return direct;
+  }
+
+  const cents = pickCentsAsMoney(
+    item?.tollFeeCents,
+    item?.calculation?.tollFee,
+    item?.fareBreakdown?.calculation?.tollFee,
+    item?.paymentBreakdown?.calculation?.tollFee,
+    item?.financialBreakdown?.calculation?.tollFee,
+  );
+
+  return cents ?? direct ?? 0;
+}
+
+export function resolveTripPassengerPaidAmount(item = {}) {
+  return roundMoney(
+    pickMoney(
+      item?.grossAmount,
+      item?.grossFare,
+      item?.totalPaid,
+      item?.totalAmount,
+      item?.totalFare,
+      item?.paymentAmount,
+      item?.chargedAmount,
+      item?.amountPaid,
+      item?.customerPaid,
+      item?.customer_paid,
+      item?.fare,
+      item?.finalFare,
+      item?.amount,
+      parseCurrencyText(item?.value),
+    ) ?? 0,
+  );
+}
+
 export function resolveTripGrossAmount(item = {}) {
   return roundMoney(
-    toFiniteMoney(item?.grossAmount, null) ??
-      toFiniteMoney(item?.totalAmount, null) ??
-      toFiniteMoney(item?.fare, null) ??
-      toFiniteMoney(item?.finalFare, null) ??
-      toFiniteMoney(item?.amount, null) ??
-      parseCurrencyText(item?.value) ??
-      0,
+    resolveTripPassengerPaidAmount(item),
   );
 }
 
@@ -228,4 +303,3 @@ export function buildRuntimeHistorySeries(history = []) {
     String(left.date || '').localeCompare(String(right.date || '')),
   );
 }
-

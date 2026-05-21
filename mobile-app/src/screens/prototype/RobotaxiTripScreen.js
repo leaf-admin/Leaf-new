@@ -152,6 +152,87 @@ function toPositiveNumber(value) {
   return Number.isFinite(numeric) && numeric > 0 ? numeric : null;
 }
 
+function pickPassengerPaidAmountFromSource(source = {}, { includeFareFallback = false } = {}) {
+  if (!source || typeof source !== 'object') {
+    return null;
+  }
+
+  const nestedPayment =
+    source.payment ||
+    source.paymentState ||
+    source.paymentData ||
+    source.paymentBreakdown ||
+    {};
+  const candidates = [
+    source.passengerPaidAmount,
+    source.totalPaid,
+    source.totalAmount,
+    source.totalFare,
+    source.paymentAmount,
+    source.chargedAmount,
+    source.amountPaid,
+    source.customerPaid,
+    source.customer_paid,
+    source.grossAmount,
+    source.grossFare,
+    nestedPayment.passengerPaidAmount,
+    nestedPayment.totalPaid,
+    nestedPayment.totalAmount,
+    nestedPayment.totalFare,
+    nestedPayment.paymentAmount,
+    nestedPayment.chargedAmount,
+    nestedPayment.amountPaid,
+    nestedPayment.customerPaid,
+    nestedPayment.amount,
+    ...(includeFareFallback
+      ? [
+          source.selectedFare,
+          source.estimatedFare,
+          source.fare,
+          source.finalFare,
+          source.amount,
+        ]
+      : []),
+  ];
+
+  for (const candidate of candidates) {
+    const amount = toPositiveNumber(candidate);
+    if (amount !== null) {
+      return amount;
+    }
+  }
+
+  const cents = [
+    source.paymentAmountCents,
+    source.amountPaidCents,
+    source.totalAmountCents,
+    nestedPayment.paymentAmountCents,
+    nestedPayment.amountPaidCents,
+    nestedPayment.totalAmountCents,
+  ]
+    .map(value => Number(value))
+    .find(value => Number.isFinite(value) && value > 0);
+
+  return Number.isFinite(cents) ? Number((cents / 100).toFixed(2)) : null;
+}
+
+function resolvePassengerTripPaidAmount({
+  routeParams,
+  activeBooking,
+  paymentState,
+  selectedFare,
+} = {}) {
+  return (
+    pickPassengerPaidAmountFromSource(routeParams) ??
+    pickPassengerPaidAmountFromSource(paymentState) ??
+    pickPassengerPaidAmountFromSource(activeBooking) ??
+    pickPassengerPaidAmountFromSource(routeParams, { includeFareFallback: true }) ??
+    toPositiveNumber(selectedFare) ??
+    pickPassengerPaidAmountFromSource(activeBooking, { includeFareFallback: true }) ??
+    null
+  );
+}
+
 function buildFallbackTripRegion(points = []) {
   const normalizedPoints = points
     .map(normalizeMapCoordinate)
@@ -262,6 +343,7 @@ export default function RobotaxiTripScreen({ navigation, route }) {
     rideExtension,
     operationalContinuation,
     paymentMethod,
+    paymentState,
     activeBookingId,
     currentCoordinate,
     currentHeading,
@@ -301,10 +383,12 @@ export default function RobotaxiTripScreen({ navigation, route }) {
     (Number.isFinite(resolvedTripDurationMin) && resolvedTripDurationMin > 0
       ? `Chegada estimada em ${resolvedTripDurationMin} min`
       : '');
-  const resolvedFare =
-    toPositiveNumber(selectedFare) ??
-    toPositiveNumber(route?.params?.selectedFare) ??
-    toPositiveNumber(activeBooking?.estimatedFare);
+  const resolvedFare = resolvePassengerTripPaidAmount({
+    routeParams: route?.params,
+    activeBooking,
+    paymentState,
+    selectedFare,
+  });
   const driverName =
     String(driverInfo?.name || fallbackDriverName || 'Motorista Leaf').trim() || 'Motorista Leaf';
   const vehicleModel =

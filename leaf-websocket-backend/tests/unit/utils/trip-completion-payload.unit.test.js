@@ -62,4 +62,38 @@ describe('trip-completion-payload', () => {
       })
     );
   });
+
+  test('inclui total pago, liquido do motorista e pedagio no contrato financeiro', () => {
+    const payload = buildTripCompletedPayload({
+      bookingId: 'booking_3',
+      bookingData: {},
+      endLocation: { lat: -22.9, lng: -43.1 },
+      distance: 8,
+      duration: 900,
+      fareBreakdown: {
+        totalFare: 27.5,
+        tollFee: 4.9,
+        operationalFee: 0.99,
+        paymentIntermediationFee: 0.5,
+        totalFees: 1.49,
+        driverNetAmount: 26.01
+      }
+    });
+
+    expect(payload).toEqual(
+      expect.objectContaining({
+        fare: 27.5,
+        totalFare: 27.5,
+        totalPaid: 27.5,
+        grossAmount: 27.5,
+        tollFee: 4.9,
+        totalFees: 1.49,
+        driverNetAmount: 26.01,
+        fareBreakdown: expect.objectContaining({
+          tollFee: 4.9,
+          driverNetAmount: 26.01
+        })
+      })
+    );
+  });
 });

@@ -56,7 +56,7 @@ import {
   mergeDriverOffers as mergeDriverOffersWithLockedPricing,
 } from "./driverOfferPricingSnapshot";
 import { dismissDriverOfferRuntimeState } from "./driverOfferState";
-import { formatCurrencyBRL } from "./tripFinancialSummary";
+import { formatCurrencyBRL, resolveTripTollAmount } from "./tripFinancialSummary";
 import { SEARCH_TOTAL_DURATION_SECONDS } from "./searchPresentation";
 import {
   advanceCoordinateAlongPath,
@@ -4575,14 +4575,17 @@ function extractPayloadFeeBreakdown(payload = {}, { estimated = false } = {}) {
     : "paymentIntermediationFee";
   const totalKey = estimated ? "estimatedTotalFees" : "totalFees";
   const netKey = estimated ? "estimatedDriverNetAmount" : "driverNetAmount";
+  const tollKey = estimated ? "estimatedTollFee" : "tollFee";
 
   const operationalFee = pickPreferredRuntimeMoney(
     payload?.[operationalKey],
+    payload?.fareBreakdown?.[operationalKey],
     payload?.paymentBreakdown?.[operationalKey],
     payload?.financialBreakdown?.[operationalKey],
   );
   const paymentIntermediationFee = pickPreferredRuntimeMoney(
     payload?.[intermediationKey],
+    payload?.fareBreakdown?.[intermediationKey],
     payload?.paymentBreakdown?.[intermediationKey],
     payload?.financialBreakdown?.[intermediationKey],
   );
@@ -4590,6 +4593,7 @@ function extractPayloadFeeBreakdown(payload = {}, { estimated = false } = {}) {
     payload?.[totalKey],
     payload?.retainedFeesInReais,
     payload?.retainedFees,
+    payload?.fareBreakdown?.[totalKey],
     payload?.paymentBreakdown?.[totalKey],
     payload?.paymentBreakdown?.retainedFeesInReais,
     payload?.paymentDistribution?.retainedFeesInReais,
@@ -4600,22 +4604,35 @@ function extractPayloadFeeBreakdown(payload = {}, { estimated = false } = {}) {
     payload?.netAmount,
     payload?.netAmountInReais,
     payload?.driver_share,
+    payload?.fareBreakdown?.[netKey],
+    payload?.fareBreakdown?.driverNetAmount,
     payload?.paymentBreakdown?.[netKey],
     payload?.paymentBreakdown?.driverNetAmount,
     payload?.paymentDistribution?.netAmountInReais,
     payload?.financialBreakdown?.netAmount,
+  );
+  const tollFee = pickPreferredRuntimeMoney(
+    payload?.[tollKey],
+    payload?.fareBreakdown?.[tollKey],
+    payload?.fareBreakdown?.tollFee,
+    payload?.paymentBreakdown?.[tollKey],
+    payload?.paymentBreakdown?.tollFee,
+    payload?.financialBreakdown?.[tollKey],
+    payload?.financialBreakdown?.tollFee,
   );
 
   const hasOperational = operationalFee !== null;
   const hasIntermediation = paymentIntermediationFee !== null;
   const hasTotal = totalFees !== null;
   const hasNet = driverNetAmount !== null;
+  const hasToll = tollFee !== null;
 
-  if (!hasOperational && !hasIntermediation && !hasTotal && !hasNet) {
+  if (!hasOperational && !hasIntermediation && !hasTotal && !hasNet && !hasToll) {
     return null;
   }
 
   return {
+    ...(hasToll ? { tollFee: tollFee } : {}),
     ...(hasOperational ? { operationalFee: operationalFee } : {}),
     ...(hasIntermediation
       ? { paymentIntermediationFee: paymentIntermediationFee }
@@ -4938,6 +4955,11 @@ export function resolveCompletedTripFinancialSnapshot(
       : driverNetAmount !== null
         ? roundCurrencyValue(Math.max(0, finalFare - driverNetAmount))
         : null;
+  const tollFee =
+    resolveTripTollAmount(payload) ||
+    resolveTripTollAmount(payloadFeeBreakdown) ||
+    resolveTripTollAmount(lockedRideSnapshot) ||
+    resolveTripTollAmount(lockedFeeBreakdown);
   const baseFare = roundCurrencyValue(finalFare * 0.55);
   const variableFare = roundCurrencyValue(Math.max(0, finalFare - baseFare));
   const hasPayloadSnapshot =
@@ -4951,6 +4973,7 @@ export function resolveCompletedTripFinancialSnapshot(
     ...(paymentIntermediationFee !== null
       ? { paymentIntermediationFee }
       : {}),
+    ...(tollFee > 0 ? { tollFee } : {}),
     ...(totalFees !== null ? { totalFees } : {}),
     ...(driverNetAmount !== null ? { driverNetAmount } : {}),
     financialSnapshotSource: hasPayloadSnapshot
@@ -5397,6 +5420,13 @@ function buildRuntimeReceiptFromRecoveredReceipt(
     totals?.driverReceived,
     receipt?.driverNetAmount,
   );
+  const tollFee = pickPreferredRuntimeMoney(
+    breakdown?.tollFee?.amount,
+    breakdown?.toll?.amount,
+    financial?.tollFee?.amount,
+    totals?.tollFee,
+    receipt?.tollFee,
+  );
   const totalFees =
     operationalFee !== null || paymentIntermediationFee !== null
       ? roundCurrencyValue(
@@ -5456,6 +5486,7 @@ function buildRuntimeReceiptFromRecoveredReceipt(
       : {}),
     ...(operationalFee !== null ? { operationalFee } : {}),
     ...(paymentIntermediationFee !== null ? { paymentIntermediationFee } : {}),
+    ...(tollFee !== null ? { tollFee } : {}),
     ...(totalFees !== null ? { totalFees } : {}),
     ...(driverNetAmount !== null ? { driverNetAmount } : {}),
     paymentStatus: receipt?.payment?.status || "paid",
@@ -5870,6 +5901,12 @@ export function mergeCompletedReceiptForHistory(existingReceipt, incomingReceipt
     incomingReceipt?.estimatedPaymentIntermediationFee,
     existingReceipt?.estimatedPaymentIntermediationFee,
   );
+  const tollFee = pickPreferredRuntimeMoney(
+    incomingReceipt?.tollFee,
+    existingReceipt?.tollFee,
+    incomingReceipt?.estimatedTollFee,
+    existingReceipt?.estimatedTollFee,
+  );
   const totalFees =
     pickPreferredRuntimeMoney(
       incomingReceipt?.totalFees,
@@ -5972,6 +6009,9 @@ export function mergeCompletedReceiptForHistory(existingReceipt, incomingReceipt
   }
   if (paymentIntermediationFee !== null) {
     mergedReceipt.paymentIntermediationFee = paymentIntermediationFee;
+  }
+  if (tollFee !== null) {
+    mergedReceipt.tollFee = tollFee;
   }
   if (totalFees !== null) {
     mergedReceipt.totalFees = totalFees;

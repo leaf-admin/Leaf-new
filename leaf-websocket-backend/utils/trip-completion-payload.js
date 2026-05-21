@@ -70,6 +70,11 @@ function resolvePaymentMethod(value) {
   return normalized;
 }
 
+function toMoney(value, fallback = 0) {
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? Number(numeric.toFixed(2)) : fallback;
+}
+
 function resolveText(...values) {
   for (const value of values) {
     const normalized = String(value || '').trim();
@@ -136,6 +141,10 @@ function buildTripCompletedPayload({
     distance: normalizedDistance !== null ? normalizedDistance : 0,
     duration: normalizedDuration !== null ? normalizedDuration : 0,
     fare: fareBreakdown.totalFare,
+    totalFare: fareBreakdown.totalFare,
+    totalPaid: fareBreakdown.totalFare,
+    grossAmount: fareBreakdown.totalFare,
+    tollFee: toMoney(fareBreakdown.tollFee, 0),
     operationalFee: fareBreakdown.operationalFee,
     paymentIntermediationFee: fareBreakdown.paymentIntermediationFee,
     totalFees: fareBreakdown.totalFees,
@@ -149,6 +158,7 @@ function buildTripCompletedPayload({
     drop: drop.label || null,
     ...(pickup.coordinate ? { pickupCoordinate: pickup.coordinate } : {}),
     ...(drop.coordinate ? { destinationCoordinate: drop.coordinate } : {}),
+    fareBreakdown,
     paymentDistribution,
     completionType,
     ...(settlement ? { settlement } : {}),

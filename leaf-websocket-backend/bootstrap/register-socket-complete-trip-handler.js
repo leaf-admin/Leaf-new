@@ -275,11 +275,13 @@ function registerSocketCompleteTripHandler({
                     try {
                         const finalRideSnapshot = {
                             fare: finalFare || fare,
+                            tollFee: tollFeeReais,
                             netFare: null,
                             distance: resultDistance || distance,
                             duration: resultDuration || duration || null,
                             endLocation: resultEndLocation || endLocation,
                             driverEarnings: null,
+                            fareBreakdown,
                             financialBreakdown: paymentDistribution || null
                         };
 
