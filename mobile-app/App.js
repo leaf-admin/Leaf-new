@@ -203,7 +203,7 @@ export default function App() {
         
         // Garantir que a splash screen está visível
         await withTimeout(SplashScreen.preventAutoHideAsync(), 2000, 'Splash preventAutoHide');
-        await loadCanonicalFonts();
+        await withTimeout(loadCanonicalFonts(), 5000, 'Inter font load');
         hasLoadedCanonicalFontsRef.current = true;
         
         // Libera a UI assim que a splash nativa e a fonte canônica estiverem sob controle.
@@ -271,11 +271,10 @@ export default function App() {
           markAppReady('init-error-after-fonts');
         } else {
           try {
-            await loadCanonicalFonts();
+            await withTimeout(loadCanonicalFonts(), 5000, 'Inter font recovery');
             hasLoadedCanonicalFontsRef.current = true;
           } catch (fontError) {
-            Logger.error('❌ CRITICAL: Inter não carregou; UI permanecerá na splash para evitar fallback visual:', fontError);
-            return;
+            Logger.error('❌ Inter não carregou durante o boot; liberando UI para evitar splash infinita:', fontError);
           }
           markAppReady('font-recovery');
         }
@@ -289,6 +288,18 @@ export default function App() {
       FCMNotificationService.destroy();
     };
   }, [initializeOptionalBootService, isInitializationLocked, markAppReady, withTimeout]);
+
+  // Failsafe de release: a splash nativa nunca pode ficar presa se algum serviço de boot pendurar.
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      if (!hasMarkedReadyRef.current) {
+        Logger.warn('⚠️ [App] Boot excedeu o limite; liberando UI por failsafe.');
+        markAppReady('startup-watchdog');
+      }
+    }, Platform.OS === 'android' ? 7000 : 9000);
+
+    return () => clearTimeout(timer);
+  }, [markAppReady]);
 
   // Esconder splash screen quando o app estiver pronto
   // IMPORTANTE: Só esconder DEPOIS que o componente estiver montado
