@@ -159,6 +159,14 @@ class LeafApiService {
     return this.requestSupportOrchestrator(`/v1/tickets/${encoded}/analysis`);
   }
 
+  async applySupportOrchestratorAction(runId, payload = {}) {
+    const encoded = encodeURIComponent(runId);
+    return this.requestSupportOrchestrator(`/v1/runs/${encoded}/actions`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  }
+
   async getDashboardSnapshot() {
     const [drivers, users, rides] = await Promise.all([
       this.request("/drivers/applications?page=1&limit=5").catch(() => ({ drivers: [] })),
@@ -661,6 +669,30 @@ class LeafApiService {
     return this.request("/waitlist/position", {
       method: "PUT",
       body: JSON.stringify({ driverId, newPosition }),
+    });
+  }
+
+  async getLandingWaitlist(params = {}) {
+    const query = new URLSearchParams();
+    Object.entries(params).forEach(([key, value]) => {
+      if (value !== undefined && value !== null && value !== "") {
+        query.append(key, String(value));
+      }
+    });
+    const suffix = query.toString();
+    return this.request(`/waitlist/landing/list${suffix ? `?${suffix}` : ""}`);
+  }
+
+  async updateLandingWaitlistStatus(leadId, status, notes = "") {
+    return this.request(`/waitlist/landing/${encodeURIComponent(leadId)}/status`, {
+      method: "PATCH",
+      body: JSON.stringify({ status, notes }),
+    });
+  }
+
+  async deleteLandingWaitlistLead(leadId) {
+    return this.request(`/waitlist/landing/${encodeURIComponent(leadId)}`, {
+      method: "DELETE",
     });
   }
 

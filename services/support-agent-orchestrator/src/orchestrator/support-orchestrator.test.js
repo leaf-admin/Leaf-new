@@ -262,3 +262,85 @@ test("reuses cached ticket analysis unless force is requested", async () => {
   assert.notEqual(forced.id, first.id);
   assert.equal(ticketFetches, 2);
 });
+
+test("executes only human-approved internal notes with idempotency", async () => {
+  const calls = [];
+  const orchestrator = createOrchestrator({
+    leafApiClient: {
+      async sendTicketMessage(ticketId, message, messageType) {
+        calls.push({ ticketId, message, messageType });
+        return { ok: true, id: "message_1" };
+      },
+      async escalateTicket() {
+        throw new Error("should_not_escalate");
+      },
+    },
+  });
+  const run = orchestrator.analyzeChat({
+    userId: "customer_6",
+    ticket: {
+      id: "ticket_note_1",
+      subject: "Ajuda com recibo",
+      category: "general",
+    },
+    messages: [{ senderType: "customer", message: "preciso do recibo" }],
+  });
+
+  const first = await orchestrator.applyApprovedAction({
+    runId: run.id,
+    action: "internal_note",
+    approvedBy: "agent_1",
+    message: "Cliente pediu recibo. Validar corrida e enviar orientacao aprovada.",
+    idempotencyKey: "ticket_note_1:note:agent_1",
+  });
+  const second = await orchestrator.applyApprovedAction({
+    runId: run.id,
+    action: "internal_note",
+    approvedBy: "agent_1",
+    message: "Cliente pediu recibo. Validar corrida e enviar orientacao aprovada.",
+    idempotencyKey: "ticket_note_1:note:agent_1",
+  });
+
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].ticketId, "ticket_note_1");
+  assert.equal(calls[0].messageType, "internal_note");
+  assert.equal(first.action.status, "succeeded");
+  assert.equal(second.idempotent, true);
+  assert.equal(second.action.id, first.action.id);
+  assert.equal(orchestrator.store.getRun(run.id).actions[0].type, "internal_note");
+  assert.equal(orchestrator.store.getRun(run.id).actions[0].guardrails.autoSend, false);
+});
+
+test("rejects unsupported approved actions before touching Leaf API", async () => {
+  let touchedApi = false;
+  const orchestrator = createOrchestrator({
+    leafApiClient: {
+      async sendTicketMessage() {
+        touchedApi = true;
+      },
+      async escalateTicket() {
+        touchedApi = true;
+      },
+    },
+  });
+  const run = orchestrator.analyzeChat({
+    userId: "customer_7",
+    ticket: {
+      id: "ticket_reject_1",
+      subject: "Encerrar ticket",
+      category: "general",
+    },
+    messages: [{ senderType: "agent", message: "resolver" }],
+  });
+
+  await assert.rejects(
+    () => orchestrator.applyApprovedAction({
+      runId: run.id,
+      action: "close_ticket",
+      approvedBy: "agent_2",
+      message: "Pode fechar.",
+    }),
+    /approved_action_not_allowed/,
+  );
+  assert.equal(touchedApi, false);
+});

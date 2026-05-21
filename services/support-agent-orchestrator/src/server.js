@@ -3,7 +3,7 @@ const cors = require("cors");
 const helmet = require("helmet");
 const config = require("./config");
 const logger = require("./utils/logger");
-const InMemoryStore = require("./storage/in-memory-store");
+const JsonFileStore = require("./storage/json-file-store");
 const LeafApiClient = require("./clients/leaf-api-client");
 const RedisSubscriber = require("./clients/redis-subscriber");
 const SocketListener = require("./clients/socket-listener");
@@ -17,7 +17,7 @@ const createApiRouter = require("./routes/api");
 
 function createApp() {
   const app = express();
-  const store = new InMemoryStore();
+  const store = new JsonFileStore({ filePath: config.storage.path });
   const playbookStore = new PlaybookStore({ filePath: config.playbook.path }).load();
   const leafApiClient = new LeafApiClient({
     baseUrl: config.leaf.apiBaseUrl,

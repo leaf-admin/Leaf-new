@@ -33,6 +33,8 @@ function cityOperationalState(city) {
 export default function WaitlistPage() {
   const { user } = useAuth();
   const [drivers, setDrivers] = useState([]);
+  const [landingLeads, setLandingLeads] = useState([]);
+  const [landingStats, setLandingStats] = useState(null);
   const [stats, setStats] = useState(null);
   const [pagination, setPagination] = useState(null);
   const [runtimeFlags, setRuntimeFlags] = useState(null);
@@ -79,16 +81,21 @@ export default function WaitlistPage() {
 
       if (!hasAnyRole(user, allowedRoles)) {
         setDrivers([]);
+        setLandingLeads([]);
+        setLandingStats(null);
         setPagination(null);
         setStats(null);
         return;
       }
 
-      const [listData, statsData] = await Promise.all([
+      const [listData, statsData, landingData] = await Promise.all([
         leafAPI.getWaitlist(page, 20, status, cityFilter),
         leafAPI.getWaitlistStats(),
+        leafAPI.getLandingWaitlist({ page: 1, limit: 50, status: "all" }).catch(() => ({ waitlist: [], stats: null })),
       ]);
       setDrivers(listData?.drivers || []);
+      setLandingLeads(landingData?.waitlist || []);
+      setLandingStats(landingData?.stats || null);
       setPagination(listData?.pagination || null);
       setStats(statsData);
     } catch (err) {
@@ -141,6 +148,25 @@ export default function WaitlistPage() {
     }
   };
 
+  const updateLandingLead = async (leadId, nextStatus) => {
+    if (!canMutateWaitlist) {
+      setError(actionBlockedMessage || "Ação bloqueada para este perfil.");
+      return;
+    }
+    try {
+      setActionDriverId(`landing:${leadId}`);
+      setError("");
+      setNotice("");
+      await leafAPI.updateLandingWaitlistStatus(leadId, nextStatus);
+      setNotice("Lead da landing atualizado com sucesso.");
+      await loadWaitlist({ silent: true });
+    } catch (err) {
+      setError(err?.message || "Falha ao atualizar lead da landing");
+    } finally {
+      setActionDriverId("");
+    }
+  };
+
   return (
     <ProtectedRoute>
       <main className="page-shell">
@@ -174,6 +200,7 @@ export default function WaitlistPage() {
         <section className="grid grid-kpi">
           <KpiCard title="Pendentes" value={stats?.stats?.pending || 0} />
           <KpiCard title="Aprovados" value={stats?.stats?.approved || 0} />
+          <KpiCard title="Leads landing" value={landingStats?.total || 0} />
           <KpiCard title="Página atual" value={pagination?.page || page} />
           <KpiCard
             title="Slots disponíveis"
@@ -327,6 +354,75 @@ export default function WaitlistPage() {
               <button onClick={() => setPage((p) => Math.max(1, p - 1))}>Anterior</button>
               <span>Página {pagination?.page || page}</span>
               <button onClick={() => setPage((p) => p + 1)}>Próxima</button>
+            </div>
+          </Panel>
+          <Panel title="Leads da landing" subtitle="Cadastros captados fora do app para contato e conversão.">
+            <KeyValueGrid
+              data={{
+                total: landingStats?.total || 0,
+                pending: landingStats?.pending || 0,
+                contacted: landingStats?.contacted || 0,
+                converted: landingStats?.converted || 0,
+                today: landingStats?.today || 0,
+              }}
+              labels={{
+                total: "Total",
+                pending: "Pendentes",
+                contacted: "Contatados",
+                converted: "Convertidos",
+                today: "Hoje",
+              }}
+              maxItems={5}
+            />
+            <div className="table-shell">
+              <table className="table table-compact">
+                <thead>
+                  <tr>
+                    <th>Nome</th>
+                    <th>Telefone</th>
+                    <th>Cidade</th>
+                    <th>Status</th>
+                    <th>Origem</th>
+                    <th>Ações</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {landingLeads.length === 0 ? (
+                    <tr>
+                      <td colSpan={6}>Nenhum lead da landing encontrado.</td>
+                    </tr>
+                  ) : (
+                    landingLeads.slice(0, 20).map((lead) => (
+                      <tr key={lead.id}>
+                        <td>{`${lead.nome || ""} ${lead.sobrenome || ""}`.trim() || "-"}</td>
+                        <td>{lead.celular || "-"}</td>
+                        <td>{lead.cidade || "-"}</td>
+                        <td><span className={waitlistStatusClass(lead.status)}>{lead.status || "pending"}</span></td>
+                        <td>{lead.origem || "landing"}</td>
+                        <td>
+                          <div className="row-actions">
+                            <button
+                              type="button"
+                              disabled={!canMutateWaitlist || actionDriverId === `landing:${lead.id}`}
+                              onClick={() => updateLandingLead(lead.id, "contacted")}
+                            >
+                              Contatado
+                            </button>
+                            <button
+                              type="button"
+                              className="button-secondary"
+                              disabled={!canMutateWaitlist || actionDriverId === `landing:${lead.id}`}
+                              onClick={() => updateLandingLead(lead.id, "converted")}
+                            >
+                              Convertido
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
             </div>
           </Panel>
         </section>

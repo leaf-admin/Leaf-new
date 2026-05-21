@@ -98,6 +98,10 @@ const resolvePilotFeature = (publicKey, privateKey, enabledOutsidePilot = true) 
 const pilotFeatureFlags = {
     driverWithdrawalsEnabled: resolvePilotFeature('EXPO_PUBLIC_ENABLE_DRIVER_WITHDRAWALS', 'LEAF_ENABLE_DRIVER_WITHDRAWALS', false),
     referralProgramsEnabled: resolvePilotFeature('EXPO_PUBLIC_ENABLE_REFERRAL_PROGRAMS', 'LEAF_ENABLE_REFERRAL_PROGRAMS', true),
+    leafDelasEnabled: resolvePilotFeature('EXPO_PUBLIC_ENABLE_LEAF_DELAS', 'LEAF_ENABLE_LEAF_DELAS', true),
+    driverDestinationModeEnabled: resolvePilotFeature('EXPO_PUBLIC_ENABLE_DRIVER_DESTINATION_MODE', 'LEAF_ENABLE_DRIVER_DESTINATION_MODE', true),
+    dynamicPricingEnabled: resolvePilotFeature('EXPO_PUBLIC_ENABLE_DYNAMIC_PRICING', 'LEAF_ENABLE_DYNAMIC_PRICING', true),
+    smartPushEnabled: resolvePilotFeature('EXPO_PUBLIC_ENABLE_SMART_PUSH', 'LEAF_ENABLE_SMART_PUSH', false),
     softBanEnforcementEnabled: resolvePilotFeature('EXPO_PUBLIC_ENABLE_SOFT_BAN_ENFORCEMENT', 'LEAF_ENABLE_SOFT_BAN_ENFORCEMENT', true),
     adminMutationsEnabled: resolvePilotFeature('EXPO_PUBLIC_ENABLE_ADMIN_MUTATIONS', 'LEAF_ENABLE_ADMIN_MUTATIONS', true),
 };

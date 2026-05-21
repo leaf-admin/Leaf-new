@@ -26,8 +26,12 @@ Por padrao o servico sobe em `http://localhost:3015`.
 - `GET /health`: healthcheck simples.
 - `GET /v1/status`: status operacional do orquestrador.
 - `GET /v1/runs`: ultimas execucoes de analise.
+- `GET /v1/runs/:runId/actions`: acoes aprovadas/auditadas de uma execucao.
+- `POST /v1/runs/:runId/actions`: executa acao segura apos aprovacao humana.
 - `GET /v1/tickets/:ticketId/analysis`: retorna analise existente ou cria uma analise sob demanda.
 - `POST /v1/tickets/:ticketId/analyze`: força nova analise de um ticket.
+- `GET /v1/tickets/:ticketId/actions`: acoes aprovadas/auditadas de um ticket.
+- `POST /v1/tickets/:ticketId/actions`: executa acao segura a partir da ultima analise do ticket.
 - `POST /v1/chat/analyze`: analisa uma conversa enviada pelo caller.
 
 ## Contrato de integracao
@@ -40,7 +44,8 @@ Fluxo recomendado para o dashboard ou sistema de tickets:
 2. Exibir categoria, prioridade, confianca, flags de risco e referencias do playbook.
 3. Tratar toda recomendacao como sugestao assistida e exigir acao humana.
 4. Respeitar `recommendation.execution.autoSend=false` e `autoResolve=false`.
-5. Ao rotear, responder ou escalar, registrar `run.id`, `playbookVersion` e `confidence` no ticket.
+5. Para aplicar uma sugestao, chamar `POST /v1/runs/:runId/actions` com `approvedBy`, `action` e `idempotencyKey`.
+6. Ao rotear, responder ou escalar, registrar `run.id`, `playbookVersion` e `confidence` no ticket.
 
 Exemplo para chat em tempo real:
 
@@ -78,7 +83,30 @@ O servico nasce em modo copiloto. Ele nao executa acoes sensiveis nem responde a
 - o playbook nao cobre o caso;
 - `SUPPORT_AUTONOMOUS_MODE=false`.
 
-Mesmo com `SUPPORT_AUTONOMOUS_MODE=true`, o contrato atual continua em modo `guarded_copilot`: o orquestrador classifica, recomenda e audita, mas nao faz autosend nem autoresolve. Automacao futura deve exigir macro aprovada, nova revisao de contrato e testes dedicados.
+Mesmo com `SUPPORT_AUTONOMOUS_MODE=true`, o contrato atual continua em modo `guarded_copilot`: o orquestrador classifica, recomenda, audita e executa somente acoes seguras aprovadas por humano. Nao ha autosend para cliente nem autoresolve.
+
+## Acoes aprovadas
+
+A execucao real fica restrita a duas acoes:
+
+- `internal_note`: registra uma nota interna no ticket usando `messageType=internal_note`.
+- `escalate_ticket`: escala o ticket com motivo revisado por humano.
+
+Payload minimo:
+
+```bash
+curl -X POST http://localhost:3015/v1/runs/run_123/actions \
+  -H "Content-Type: application/json" \
+  -H "x-orchestrator-token: $SUPPORT_ORCHESTRATOR_TOKEN" \
+  -d '{
+    "action": "internal_note",
+    "approvedBy": "agent@leaf.app.br",
+    "message": "Cliente reportou PIX pendente. Validar paymentId no PSP antes da resposta.",
+    "idempotencyKey": "SUP-123:internal-note:payment-check-v1"
+  }'
+```
+
+O `idempotencyKey` evita execucao duplicada quando o dashboard repetir a chamada por timeout, reload ou retry.
 
 ## Fontes permitidas
 

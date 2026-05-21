@@ -64,6 +64,10 @@ describe('health runtime flags route', () => {
         launchProfile: expect.any(String),
         demandPredictionEnabled: expect.any(Boolean),
         referralProgramsEnabled: expect.any(Boolean),
+        leafDelasEnabled: expect.any(Boolean),
+        driverDestinationModeEnabled: expect.any(Boolean),
+        dynamicPricingEnabled: expect.any(Boolean),
+        smartPushEnabled: expect.any(Boolean),
         adminMutationsEnabled: expect.any(Boolean)
       })
     );

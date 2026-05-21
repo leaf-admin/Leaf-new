@@ -1,6 +1,28 @@
 const logger = require("../utils/logger");
 
 const CONTRACT_VERSION = "support-orchestrator.v1";
+const ALLOWED_APPROVED_ACTIONS = new Set(["internal_note", "escalate_ticket"]);
+
+function normalizeApprovedAction(action) {
+  const normalized = String(action || "").trim().toLowerCase();
+  if (["note", "internal-note", "internal_note", "add_internal_note"].includes(normalized)) {
+    return "internal_note";
+  }
+  if (["escalate", "escalate-ticket", "escalate_ticket", "route_to_specialist"].includes(normalized)) {
+    return "escalate_ticket";
+  }
+  return normalized;
+}
+
+function requireText(value, field) {
+  const text = String(value || "").trim();
+  if (!text) {
+    const error = new Error(`${field}_required`);
+    error.status = 400;
+    throw error;
+  }
+  return text;
+}
 
 class SupportOrchestrator {
   constructor({
@@ -42,6 +64,16 @@ class SupportOrchestrator {
         leafApiBaseUrl: this.config.leaf.apiBaseUrl,
         redisSubscriber: this.config.redis.enabled,
         socketListener: this.config.socket.enabled,
+      },
+      storage: {
+        durable: Boolean(this.config.storage?.path),
+        pathConfigured: Boolean(this.config.storage?.path),
+      },
+      execution: {
+        allowedApprovedActions: [...ALLOWED_APPROVED_ACTIONS],
+        autoSend: false,
+        autoResolve: false,
+        requiresHumanApproval: true,
       },
     };
   }
@@ -137,6 +169,101 @@ class SupportOrchestrator {
         "external_mutation",
       ],
     };
+  }
+
+  async applyApprovedAction({
+    runId,
+    ticketId,
+    action,
+    approvedBy,
+    message,
+    reason,
+    idempotencyKey,
+  } = {}) {
+    const approvedByText = requireText(approvedBy, "approvedBy");
+    const normalizedAction = normalizeApprovedAction(action);
+    if (!ALLOWED_APPROVED_ACTIONS.has(normalizedAction)) {
+      const error = new Error("approved_action_not_allowed");
+      error.status = 400;
+      error.details = {
+        allowedActions: [...ALLOWED_APPROVED_ACTIONS],
+      };
+      throw error;
+    }
+
+    const run =
+      (runId ? this.store.getRun(runId) : null) ||
+      (ticketId ? this.store.getLatestForTicket(ticketId) : null);
+    if (!run) {
+      const error = new Error("orchestrator_run_not_found");
+      error.status = 404;
+      throw error;
+    }
+
+    const resolvedTicketId = run.ticketId || ticketId;
+    if (!resolvedTicketId) {
+      const error = new Error("ticketId_required");
+      error.status = 400;
+      throw error;
+    }
+
+    const key = idempotencyKey || `${run.id}:${normalizedAction}:${approvedByText}`;
+    const existing = this.store.getActionByIdempotencyKey(key);
+    if (existing && ["executing", "succeeded"].includes(existing.status)) {
+      return { action: existing, idempotent: true };
+    }
+
+    const actionRecord = this.store.saveAction({
+      runId: run.id,
+      ticketId: resolvedTicketId,
+      type: normalizedAction,
+      status: "executing",
+      approvedBy: approvedByText,
+      idempotencyKey: key,
+      contractVersion: CONTRACT_VERSION,
+      playbookVersion: run.classification?.playbookVersion || run.audit?.playbookVersion || null,
+      input: {
+        message: message ? String(message).trim() : "",
+        reason: reason ? String(reason).trim() : "",
+      },
+      guardrails: {
+        humanApproved: true,
+        autoSend: false,
+        autoResolve: false,
+        externalCustomerMessage: false,
+      },
+    });
+
+    try {
+      let result;
+      if (normalizedAction === "internal_note") {
+        const note = requireText(message, "message");
+        result = await this.leafApiClient.sendTicketMessage(resolvedTicketId, note, "internal_note");
+      } else if (normalizedAction === "escalate_ticket") {
+        const escalationReason = requireText(reason || message, "reason");
+        result = await this.leafApiClient.escalateTicket(resolvedTicketId, escalationReason);
+      }
+
+      const updated = this.store.updateAction(actionRecord.id, {
+        status: "succeeded",
+        completedAt: new Date().toISOString(),
+        result,
+      });
+      logger.info("Approved support action executed", {
+        runId: run.id,
+        ticketId: resolvedTicketId,
+        action: normalizedAction,
+        approvedBy: approvedByText,
+      });
+      return { action: updated, idempotent: false };
+    } catch (error) {
+      this.store.updateAction(actionRecord.id, {
+        status: "failed",
+        failedAt: new Date().toISOString(),
+        error: error.message,
+      });
+      throw error;
+    }
   }
 
   async pollBacklogOnce() {

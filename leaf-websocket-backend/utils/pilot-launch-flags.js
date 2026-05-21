@@ -46,7 +46,11 @@ function getPilotLaunchFlags() {
     driverWithdrawalsEnabled: resolvePilotFeature('ENABLE_DRIVER_WITHDRAWALS', false),
     referralProgramsEnabled: resolvePilotFeature('ENABLE_REFERRAL_PROGRAMS', true),
     campaignCenterEnabled: resolvePilotFeature('ENABLE_CAMPAIGN_CENTER', true),
+    leafDelasEnabled: resolvePilotFeature('ENABLE_LEAF_DELAS', true),
+    driverDestinationModeEnabled: resolvePilotFeature('ENABLE_DRIVER_DESTINATION_MODE', true),
+    dynamicPricingEnabled: resolvePilotFeature('ENABLE_DYNAMIC_PRICING', true),
     demandPredictionEnabled: resolvePilotFeature('ENABLE_DEMAND_PREDICTION', false),
+    smartPushEnabled: resolvePilotFeature('ENABLE_SMART_PUSH', false),
     softBanEnforcementEnabled: resolvePilotFeature('ENABLE_SOFT_BAN_ENFORCEMENT', true),
     adminMutationsEnabled: resolvePilotFeature('ENABLE_ADMIN_MUTATIONS', true),
   };

@@ -85,6 +85,7 @@ tmp/
 leaf-websocket-backend/coverage/
 leaf-websocket-backend/reports/
 leaf-websocket-backend/tmp/
+services/support-agent-orchestrator/.data/
 mobile-app/.tmp-*
 mobile-app/.tmp-qa-evidence/
 mobile-app/.maestro/results/

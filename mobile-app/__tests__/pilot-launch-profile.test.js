@@ -25,6 +25,10 @@ describe('pilotLaunchProfile', () => {
     expect(snapshot.pilotControlled).toBe(true);
     expect(snapshot.driverWithdrawalsEnabled).toBe(false);
     expect(snapshot.referralProgramsEnabled).toBe(false);
+    expect(snapshot.leafDelasEnabled).toBe(false);
+    expect(snapshot.driverDestinationModeEnabled).toBe(false);
+    expect(snapshot.dynamicPricingEnabled).toBe(false);
+    expect(snapshot.smartPushEnabled).toBe(false);
     expect(snapshot.softBanEnforcementEnabled).toBe(false);
   });
 
@@ -35,7 +39,9 @@ describe('pilotLaunchProfile', () => {
           launchProfile: 'pilot_controlled',
           pilotControlled: true,
           pilotFeatureFlags: {
-            driverWithdrawalsEnabled: true
+            driverWithdrawalsEnabled: true,
+            leafDelasEnabled: true,
+            dynamicPricingEnabled: true
           }
         }
       }
@@ -45,6 +51,8 @@ describe('pilotLaunchProfile', () => {
     const snapshot = getPilotLaunchFeatureSnapshot();
 
     expect(snapshot.driverWithdrawalsEnabled).toBe(true);
+    expect(snapshot.leafDelasEnabled).toBe(true);
+    expect(snapshot.dynamicPricingEnabled).toBe(true);
     expect(snapshot.referralProgramsEnabled).toBe(false);
   });
 });

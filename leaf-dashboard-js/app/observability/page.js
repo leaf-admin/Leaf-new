@@ -259,6 +259,10 @@ function buildIncidents({
     ["adminMutationsEnabled", "Mutações administrativas", "Ações administrativas estão em modo somente leitura."],
     ["referralProgramsEnabled", "Programas de convite", "Programas de convite estão bloqueados pelo backend."],
     ["campaignCenterEnabled", "Campaign Center", "Campanhas in-app estão bloqueadas pelo backend."],
+    ["leafDelasEnabled", "Leaf Delas", "Preferência Leaf Delas está bloqueada pelo backend."],
+    ["driverDestinationModeEnabled", "Destino do motorista", "Destino do motorista está bloqueado pelo backend."],
+    ["dynamicPricingEnabled", "Tarifa dinâmica", "Tarifa dinâmica está bloqueada pelo backend."],
+    ["smartPushEnabled", "Smart push", "Smart push está bloqueado pelo backend."],
   ].forEach(([flagKey, label, detail]) => {
     add(runtimeFlags?.success && launchFlags[flagKey] === false, {
       severity: "warning",
@@ -522,6 +526,10 @@ export default function ObservabilityPage() {
     { label: "Admin mutations", value: formatLaunchFlag(runtimeFlags?.launch?.adminMutationsEnabled) },
     { label: "Programas", value: formatLaunchFlag(runtimeFlags?.launch?.referralProgramsEnabled) },
     { label: "Campaign Center", value: formatLaunchFlag(runtimeFlags?.launch?.campaignCenterEnabled) },
+    { label: "Leaf Delas", value: formatLaunchFlag(runtimeFlags?.launch?.leafDelasEnabled) },
+    { label: "Destino motorista", value: formatLaunchFlag(runtimeFlags?.launch?.driverDestinationModeEnabled) },
+    { label: "Tarifa dinâmica", value: formatLaunchFlag(runtimeFlags?.launch?.dynamicPricingEnabled) },
+    { label: "Smart push", value: formatLaunchFlag(runtimeFlags?.launch?.smartPushEnabled) },
   ];
 
   const metricsPayload = {

@@ -124,10 +124,18 @@ function resolveLaunchFeatureKey(value = '') {
     campaigncenterenabled: 'campaignCenterEnabled',
     demand_prediction_enabled: 'demandPredictionEnabled',
     demandpredictionenabled: 'demandPredictionEnabled',
+    driver_destination_mode_enabled: 'driverDestinationModeEnabled',
+    driverdestinationmodeenabled: 'driverDestinationModeEnabled',
     driver_withdrawals_enabled: 'driverWithdrawalsEnabled',
     driverwithdrawalsenabled: 'driverWithdrawalsEnabled',
+    dynamic_pricing_enabled: 'dynamicPricingEnabled',
+    dynamicpricingenabled: 'dynamicPricingEnabled',
+    leaf_delas_enabled: 'leafDelasEnabled',
+    leafdelasenabled: 'leafDelasEnabled',
     referral_programs_enabled: 'referralProgramsEnabled',
     referralprogramsenabled: 'referralProgramsEnabled',
+    smart_push_enabled: 'smartPushEnabled',
+    smartpushenabled: 'smartPushEnabled',
     soft_ban_enforcement_enabled: 'softBanEnforcementEnabled',
     softbanenforcementenabled: 'softBanEnforcementEnabled'
   };

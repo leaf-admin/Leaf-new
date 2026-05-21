@@ -26,6 +26,26 @@ function createApiRouter({ config, orchestrator, store }) {
     res.json({ success: true, runs: store.listRuns(limit) });
   });
 
+  router.get("/runs/:runId/actions", auth, (req, res) => {
+    const limit = Number(req.query.limit || 50);
+    res.json({
+      success: true,
+      actions: store.listActions({ runId: req.params.runId, limit }),
+    });
+  });
+
+  router.post("/runs/:runId/actions", auth, async (req, res, next) => {
+    try {
+      const result = await orchestrator.applyApprovedAction({
+        ...(req.body || {}),
+        runId: req.params.runId,
+      });
+      res.json({ success: true, ...result });
+    } catch (error) {
+      next(error);
+    }
+  });
+
   router.get("/tickets/:ticketId/analysis", auth, async (req, res, next) => {
     try {
       const run = await orchestrator.analyzeTicket(req.params.ticketId, { force: false });
@@ -39,6 +59,26 @@ function createApiRouter({ config, orchestrator, store }) {
     try {
       const run = await orchestrator.analyzeTicket(req.params.ticketId, { force: true });
       res.json({ success: true, analysis: run });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  router.get("/tickets/:ticketId/actions", auth, (req, res) => {
+    const limit = Number(req.query.limit || 50);
+    res.json({
+      success: true,
+      actions: store.listActions({ ticketId: req.params.ticketId, limit }),
+    });
+  });
+
+  router.post("/tickets/:ticketId/actions", auth, async (req, res, next) => {
+    try {
+      const result = await orchestrator.applyApprovedAction({
+        ...(req.body || {}),
+        ticketId: req.params.ticketId,
+      });
+      res.json({ success: true, ...result });
     } catch (error) {
       next(error);
     }

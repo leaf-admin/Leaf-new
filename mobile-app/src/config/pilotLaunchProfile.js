@@ -62,6 +62,10 @@ export function getPilotLaunchFeatureSnapshot() {
     pilotControlled: isPilotControlledLaunch(),
     driverWithdrawalsEnabled: resolvePilotFeature('EXPO_PUBLIC_ENABLE_DRIVER_WITHDRAWALS', 'driverWithdrawalsEnabled', false),
     referralProgramsEnabled: resolvePilotFeature('EXPO_PUBLIC_ENABLE_REFERRAL_PROGRAMS', 'referralProgramsEnabled', true),
+    leafDelasEnabled: resolvePilotFeature('EXPO_PUBLIC_ENABLE_LEAF_DELAS', 'leafDelasEnabled', true),
+    driverDestinationModeEnabled: resolvePilotFeature('EXPO_PUBLIC_ENABLE_DRIVER_DESTINATION_MODE', 'driverDestinationModeEnabled', true),
+    dynamicPricingEnabled: resolvePilotFeature('EXPO_PUBLIC_ENABLE_DYNAMIC_PRICING', 'dynamicPricingEnabled', true),
+    smartPushEnabled: resolvePilotFeature('EXPO_PUBLIC_ENABLE_SMART_PUSH', 'smartPushEnabled', false),
     softBanEnforcementEnabled: resolvePilotFeature('EXPO_PUBLIC_ENABLE_SOFT_BAN_ENFORCEMENT', 'softBanEnforcementEnabled', true),
     adminMutationsEnabled: resolvePilotFeature('EXPO_PUBLIC_ENABLE_ADMIN_MUTATIONS', 'adminMutationsEnabled', true),
   };
@@ -81,6 +85,10 @@ export function getPilotFeatureFlagDefaults() {
     PILOT_CONTROLLED_LAUNCH: snapshot.pilotControlled,
     PILOT_DRIVER_WITHDRAWALS_ENABLED: snapshot.driverWithdrawalsEnabled,
     PILOT_REFERRAL_PROGRAMS_ENABLED: snapshot.referralProgramsEnabled,
+    PILOT_LEAF_DELAS_ENABLED: snapshot.leafDelasEnabled,
+    PILOT_DRIVER_DESTINATION_MODE_ENABLED: snapshot.driverDestinationModeEnabled,
+    PILOT_DYNAMIC_PRICING_ENABLED: snapshot.dynamicPricingEnabled,
+    PILOT_SMART_PUSH_ENABLED: snapshot.smartPushEnabled,
     PILOT_SOFT_BAN_ENFORCEMENT_ENABLED: snapshot.softBanEnforcementEnabled,
     PILOT_ADMIN_MUTATIONS_ENABLED: snapshot.adminMutationsEnabled,
   };

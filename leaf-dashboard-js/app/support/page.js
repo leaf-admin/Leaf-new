@@ -502,6 +502,60 @@ export default function SupportPage() {
     }
   };
 
+  const applyCopilotInternalNote = async () => {
+    if (!orchestratorAnalysis?.id || !selectedTicket?.id || !orchestratorEnabled) return;
+    const suggested = copilotSuggestion || "Registrar triagem do copiloto para revisao humana.";
+    const message = window.prompt("Nota interna para registrar no ticket:", suggested);
+    if (message === null) return;
+    try {
+      setActionBusy("copilot-note");
+      setError("");
+      setActionMessage("");
+      await leafAPI.applySupportOrchestratorAction(orchestratorAnalysis.id, {
+        action: "internal_note",
+        approvedBy: user?.email || user?.id || user?.name || "dashboard-agent",
+        message: message.trim(),
+        idempotencyKey: `${orchestratorAnalysis.id}:internal_note:${selectedTicket.id}:${message.trim()}`,
+      });
+      const response = await leafAPI.getSupportOrchestratorTicketAnalysis(selectedTicket.id);
+      setOrchestratorAnalysis(response?.analysis || null);
+      await Promise.all([
+        loadOrchestratorOverview(),
+        leafAPI.getSupportMessages(selectedTicket.id).then((data) => setTicketMessages(data?.messages || [])).catch(() => null),
+      ]);
+      setActionMessage("Nota interna aplicada pelo orquestrador com aprovacao humana.");
+    } catch (err) {
+      setError(err?.message || "Falha ao aplicar nota interna do copiloto");
+    } finally {
+      setActionBusy("");
+    }
+  };
+
+  const applyCopilotEscalation = async () => {
+    if (!orchestratorAnalysis?.id || !selectedTicket?.id || !orchestratorEnabled) return;
+    const reason = window.prompt("Motivo da escalacao:", copilotRationale[0] || "Escalado apos revisao humana do copiloto.");
+    if (reason === null) return;
+    try {
+      setActionBusy("copilot-escalate");
+      setError("");
+      setActionMessage("");
+      await leafAPI.applySupportOrchestratorAction(orchestratorAnalysis.id, {
+        action: "escalate_ticket",
+        approvedBy: user?.email || user?.id || user?.name || "dashboard-agent",
+        reason: reason.trim(),
+        idempotencyKey: `${orchestratorAnalysis.id}:escalate:${selectedTicket.id}:${reason.trim()}`,
+      });
+      const response = await leafAPI.getSupportOrchestratorTicketAnalysis(selectedTicket.id);
+      setOrchestratorAnalysis(response?.analysis || null);
+      await Promise.all([loadTickets({ silent: true }), loadOrchestratorOverview()]);
+      setActionMessage("Ticket escalado pelo orquestrador com aprovacao humana.");
+    } catch (err) {
+      setError(err?.message || "Falha ao escalar com copiloto");
+    } finally {
+      setActionBusy("");
+    }
+  };
+
   return (
     <ProtectedRoute>
       <main className="page-shell">
@@ -758,6 +812,31 @@ export default function SupportPage() {
                               <li key={item}>{item}</li>
                             ))}
                           </ul>
+                        ) : null}
+                        <div className="filters">
+                          <button
+                            type="button"
+                            disabled={actionBusy === "copilot-note" || !orchestratorAnalysis?.id}
+                            onClick={applyCopilotInternalNote}
+                          >
+                            {actionBusy === "copilot-note" ? "Aplicando..." : "Registrar nota interna"}
+                          </button>
+                          <button
+                            type="button"
+                            disabled={actionBusy === "copilot-escalate" || !orchestratorAnalysis?.id}
+                            onClick={applyCopilotEscalation}
+                          >
+                            {actionBusy === "copilot-escalate" ? "Escalando..." : "Escalar com aprovacao"}
+                          </button>
+                        </div>
+                        {Array.isArray(orchestratorAnalysis.actions) && orchestratorAnalysis.actions.length ? (
+                          <div className="orchestrator-summary">
+                            {orchestratorAnalysis.actions.slice(0, 3).map((action) => (
+                              <span key={action.id} className={action.status === "succeeded" ? "status-ok" : "status-warn"}>
+                                {action.type}: {action.status}
+                              </span>
+                            ))}
+                          </div>
                         ) : null}
                       </>
                     ) : (

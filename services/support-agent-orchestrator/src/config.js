@@ -54,6 +54,9 @@ const config = {
     autonomousMode: asBool(process.env.SUPPORT_AUTONOMOUS_MODE, false),
     minConfidence: asNumber(process.env.SUPPORT_MIN_CONFIDENCE, 0.72),
   },
+  storage: {
+    path: resolveFromService(process.env.SUPPORT_STORE_PATH || process.env.SUPPORT_ORCHESTRATOR_STORE_PATH || ".data/support-orchestrator-store.json"),
+  },
   polling: {
     enabled: asBool(process.env.ENABLE_SUPPORT_POLLING, true),
     intervalMs: asNumber(process.env.SUPPORT_POLL_INTERVAL_MS, 30000),
